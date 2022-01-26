@@ -12,13 +12,13 @@ void DispatchKeyExtractor::setOperatorHasFallthroughForKey(DispatchKey k, bool h
     nonFallthroughKeys_ = nonFallthroughKeys_.add(k);
   }
   // (2) update nonFallthroughKeysPerBackend_
-  if (k != DispatchKey::Undefined && isPerBackendFunctionalityKey(toFunctionalityKey(k))) {
+  if (isPerBackendFunctionalityKey(toFunctionalityKey(k))) {
     // This is a per-backend functionality key.
-    // We need to figure out what the currenty backend is,
+    // We need to figure out what the current backend is,
     // and only update the bitset for that backend.
     // subtracting 1 because the first backend should have index 0 (CPU),
-    // But the enum starts with BackendBit::InvalidBit.
-    auto backend_idx = static_cast<uint8_t>(toBackendBit(k)) - 1;
+    // But the enum starts with BackendComponent::InvalidBit.
+    auto backend_idx = static_cast<uint8_t>(toBackendComponent(k)) - 1;
     if (has_fallthrough) {
       nonFallthroughKeysPerBackend_[backend_idx] = nonFallthroughKeysPerBackend_[backend_idx].remove(k);
     } else {
@@ -26,7 +26,7 @@ void DispatchKeyExtractor::setOperatorHasFallthroughForKey(DispatchKey k, bool h
     }
 
     // Set requiresBitsetPerBackend_ accordingly
-    for (size_t i = 0; i < num_backends; ++i)   {
+    for (const auto i : c10::irange(num_backends - 1)) {
       if (nonFallthroughKeysPerBackend_[i] != nonFallthroughKeysPerBackend_[i+1]) {
         requiresBitsetPerBackend_ = true;
         return;
@@ -34,17 +34,20 @@ void DispatchKeyExtractor::setOperatorHasFallthroughForKey(DispatchKey k, bool h
     }
     requiresBitsetPerBackend_ = false;
     return;
-  }
-  // Otherwise, if a fallthrough is set for a functionality that isn't per backend,
-  // Then we update the fallthrough bitset for EVERY backend.
-  // TODO: we could probably optimize this by only lazily updating these values
-  // the first time that we see requiresBitsetPerBackend_ = true
-  // (which should almost never happen)
-  for (size_t i = 0; i <= num_backends; ++i) {
+  } else {
+    // Otherwise, if a fallthrough is set for a functionality that isn't per backend,
+    // Then we update the fallthrough bitset for EVERY backend.
+    // TODO: we could probably optimize this by only lazily updating these values
+    // the first time that we see requiresBitsetPerBackend_ = true
+    // (which should almost never happen)
     if (has_fallthrough) {
-      nonFallthroughKeysPerBackend_[i] = nonFallthroughKeysPerBackend_[i].remove(k);
+      for (size_t i = 0; i <= num_backends; ++i) {
+        nonFallthroughKeysPerBackend_[i] = nonFallthroughKeysPerBackend_[i].remove(k);
+      }
     } else {
-      nonFallthroughKeysPerBackend_[i] = nonFallthroughKeysPerBackend_[i].add(k);
+      for (size_t i = 0; i <= num_backends; ++i) {
+        nonFallthroughKeysPerBackend_[i] = nonFallthroughKeysPerBackend_[i].add(k);
+      }
     }
   }
 }

@@ -267,7 +267,7 @@ void Dispatcher::cleanup(const OperatorHandle& op, const OperatorName& op_name) 
 RegistrationHandleRAII Dispatcher::registerFallback(DispatchKey dispatchKey, KernelFunction kernel, std::string debug) {
   std::lock_guard<std::mutex> lock(mutex_);
 
-  auto idx = DispatchKeySet(dispatchKey).getDispatchTableIndexForDispatchKeySet();
+  auto idx = getDispatchTableIndexForDispatchKey(dispatchKey);
   TORCH_CHECK(
     !backendFallbackKernels_[idx].kernel.isValid(),
     "Tried to register multiple backend fallbacks for the same dispatch key ", dispatchKey, "; previous registration ",
@@ -289,7 +289,7 @@ RegistrationHandleRAII Dispatcher::registerFallback(DispatchKey dispatchKey, Ker
 void Dispatcher::deregisterFallback_(DispatchKey dispatchKey) {
   std::lock_guard<std::mutex> lock(mutex_);
 
-  auto idx = DispatchKeySet(dispatchKey).getDispatchTableIndexForDispatchKeySet();
+  auto idx = getDispatchTableIndexForDispatchKey(dispatchKey);
   backendFallbackKernels_[idx] = {};
 
   for (auto& op : operators_) {

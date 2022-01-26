@@ -76,8 +76,6 @@ DispatchKeySet getBackendKeySetFromAutograd(DispatchKey t) {
       return DispatchKeySet(DispatchKey::MLC);
     case DispatchKey::AutogradHPU:
       return DispatchKeySet(DispatchKey::HPU);
-    case DispatchKey::AutogradNestedTensor:
-      return DispatchKeySet(DispatchKey::NestedTensor);
     case DispatchKey::AutogradXPU:
       return DispatchKeySet(DispatchKey::XPU);
     case DispatchKey::AutogradPrivateUse1:
@@ -145,7 +143,7 @@ DispatchKeySet::iterator& DispatchKeySet::iterator::operator++() {
         return *this;
       }
 
-      // The +1 is because of DispatchKey::Undefined and BackendBit::InvalidBit
+      // The +1 is because of DispatchKey::Undefined and BackendComponent::InvalidBit
       auto new_functionality_mask = first_functionality_idx + 1;
       auto new_backend_idx = first_backend_idx + 1;
       // and the -num_backends is because the first <num_backends> bits in the keyste are not Dispatch Keys.
@@ -192,7 +190,7 @@ std::array<FunctionalityOffsetAndMask, num_functionality_keys>
 initializeFunctionalityOffsetsAndMasks() {
     std::array<FunctionalityOffsetAndMask, num_functionality_keys>
     offsets_and_masks;
-    // manual set the first entry, which corresponds to Undefined.
+    // manualy set the first entry, which corresponds to Undefined.
     offsets_and_masks[0] = FunctionalityOffsetAndMask(0, 0);
     // loop through every functionality key (aside from Undefined).
     for (const auto functionality_idx : c10::irange(1, num_functionality_keys)) {
@@ -222,11 +220,12 @@ initializeFunctionalityOffsetsAndMasks() {
           case DispatchKey::AutogradCPU:
             offset = 7;
           default:
-            // All other keys which are unsupported on mobile will get sent t
+            // All other keys which are unsupported on mobile will get sent
             // to the undefined kernel, causing them to error.
             offset = 0;
         }
         offsets_and_masks[functionality_idx] = FunctionalityOffsetAndMask(offset, 0);
+    }
 #else
         // If the previous functionality was not per-backend, then we can just increment the previous offset.
         // Otherwise, the next offset = previous_offset + num_backends.

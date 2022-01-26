@@ -5,33 +5,33 @@
 
 namespace c10 {
 
-const char* toString(BackendBit t) {
+const char* toString(BackendComponent t) {
   switch (t) {
-    case BackendBit::CPUBit:
+    case BackendComponent::CPUBit:
       return "CPUBit";
-    case BackendBit::CUDABit:
+    case BackendComponent::CUDABit:
       return "CUDABit";
-    case BackendBit::HIPBit:
+    case BackendComponent::HIPBit:
       return "HIPBit";
-    case BackendBit::XLABit:
+    case BackendComponent::XLABit:
       return "XLABit";
-    case BackendBit::LazyBit:
+    case BackendComponent::LazyBit:
       return "LazyBit";
-    case BackendBit::XPUBit:
+    case BackendComponent::XPUBit:
       return "XPUBit";
-    case BackendBit::MLCBit:
+    case BackendComponent::MLCBit:
       return "MLCBit";
-    case BackendBit::HPUBit:
+    case BackendComponent::HPUBit:
       return "HPUBit";
-    case BackendBit::VEBit:
+    case BackendComponent::VEBit:
       return "VEBit";
-    case BackendBit::PrivateUse1Bit:
+    case BackendComponent::PrivateUse1Bit:
       return "PrivateUse1Bit";
-    case BackendBit::PrivateUse2Bit:
+    case BackendComponent::PrivateUse2Bit:
       return "PrivateUse2Bit";
-    case BackendBit::PrivateUse3Bit:
+    case BackendComponent::PrivateUse3Bit:
       return "PrivateUse3Bit";
-    case BackendBit::InvalidBit:
+    case BackendComponent::InvalidBit:
       return "InvalidBit";
     default:
       return "UNKNOWN_BACKEND_BIT";
@@ -218,24 +218,24 @@ const char* toString(DispatchKey t) {
 std::ostream& operator<<(std::ostream& str, DispatchKey rhs) {
   return str << toString(rhs);
 }
-std::ostream& operator<<(std::ostream& str, BackendBit rhs) {
+std::ostream& operator<<(std::ostream& str, BackendComponent rhs) {
   return str << toString(rhs);
 }
 
-// for a given backend key, return the associated autograd key.
-// for non-backend keys, return AutogradOther as a default.
-// Or, for non-backends that do override autograd, handle them specially.
-// See Note [Non-Backends that Override Autograd]
-DispatchKey getAutogradKeyFromBackend(DispatchKey k) {
+DispatchKey getAutogradKeyFromBackend(BackendComponent k) {
   // We want this to return an autograd key. We're relying on the fact that
   // getAutogradRelatedKeySetFromBackend returns an autograd key + ADInplaceOrView,
   // and autograd has higher precedence.
-  return getAutogradRelatedKeySetFromBackend(toBackendBit(k), DispatchKeySet(k)).highestPriorityTypeId();
+  // The core mapping from backend -> autograd key lives in
+  // `getAutogradRelatedKeySetFromBackend` instead of here for performance.
+  // `getAutogradRelatedKeySetFromBackend` is a hotpath function, and
+  // we want to make sure that it doesn't have to construct any DispatchKeySets
+  // at runtime.
+  return getAutogradRelatedKeySetFromBackend(k).highestPriorityTypeId();
 }
 
 c10::DispatchKey parseDispatchKey(const std::string& k) {
   static std::unordered_map<std::string, c10::DispatchKey> key_map = {
-      {"XPU", c10::DispatchKey::XPU},
       {"Undefined", c10::DispatchKey::Undefined},
       {"Dense", c10::DispatchKey::Dense},
       {"FPGA", c10::DispatchKey::FPGA},

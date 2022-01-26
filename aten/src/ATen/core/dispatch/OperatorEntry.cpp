@@ -283,7 +283,7 @@ std::pair<const AnnotatedKernel&, const char*> OperatorEntry::computeDispatchTab
   }
 
   // 3. Backend fallback
-  auto dispatch_ix = DispatchKeySet(dispatch_key).getDispatchTableIndexForDispatchKeySet();
+  auto dispatch_ix = getDispatchTableIndexForDispatchKey(dispatch_key);
   if (dispatcher.backendFallbackKernels_[dispatch_ix].kernel.isValid()) {
     return {dispatcher.backendFallbackKernels_[dispatch_ix], "backend fallback"};
   }
@@ -299,7 +299,7 @@ std::pair<const AnnotatedKernel&, const char*> OperatorEntry::computeDispatchTab
 // or alias keys and their associated keysets).
 // This function should be considered a private helper for updateDispatchTable_()
 void OperatorEntry::updateDispatchTableEntry_(const c10::Dispatcher& dispatcher, DispatchKey dispatch_key) {
-  const auto dispatch_ix = c10::DispatchKeySet(dispatch_key).getDispatchTableIndexForDispatchKeySet();
+  const auto dispatch_ix = getDispatchTableIndexForDispatchKey(dispatch_key);
   dispatchTable_[dispatch_ix] = computeDispatchTableEntry(dispatcher, dispatch_key);
   dispatchKeyExtractor_.setOperatorHasFallthroughForKey(dispatch_key, dispatchTable_[dispatch_ix].isFallthrough());
 }
@@ -327,11 +327,11 @@ void OperatorEntry::updateDispatchTable_(const c10::Dispatcher& dispatcher, Disp
   // Note [Refresh Runtime Autograd entries in dispatchTable_]
   // Registering to backend key might affect computed entry at its Autograd backend key due to (2.1) & (2.3).
   // In theory, we should only have to check if the given runtime key has "dense" functionality,
-  // e.g. DispatchKey::CPU (which is composed of DispatchKey::Dense and BackendBit::CPUBit).
+  // e.g. DispatchKey::CPU (which is composed of DispatchKey::Dense and BackendComponent::CPUBit).
   // However, there are some backends that should be included in this set that don't have the dense key set.
   // E.g. DispatchKey::Meta, DispatchKey::ORT.
   if (c10::isBackendDispatchKey(dispatch_key)) {
-    DispatchKey autograd_key = getAutogradKeyFromBackend(dispatch_key);
+    DispatchKey autograd_key = getAutogradKeyFromBackend(toBackendComponent(dispatch_key));
     updateDispatchTableEntry_(dispatcher, autograd_key);
   }
 }
@@ -375,7 +375,7 @@ void OperatorEntry::checkInvariants() const {
   }
   for (auto k : DispatchKeySet(DispatchKeySet::FULL)) {
     auto expected_k = computeDispatchTableEntry(c10::Dispatcher::singleton(), k);
-    auto idx = DispatchKeySet(k).getDispatchTableIndexForDispatchKeySet();
+    auto idx = getDispatchTableIndexForDispatchKey(k);
     TORCH_INTERNAL_ASSERT(expected_k._equalsBoxedAndUnboxed(dispatchTable_[idx]),
       "Canonical state\n~~~~~~~~~~~\n", dumpState(), "\n\n"
       "Computed table:\n~~~~~~~~~~~\n", dumpComputedTable());
@@ -388,7 +388,7 @@ std::string OperatorEntry::listAllDispatchKeys() const {
 
   bool has_kernels = false;
   for (auto k : DispatchKeySet(DispatchKeySet::FULL)) {
-    auto iter = DispatchKeySet(k).getDispatchTableIndexForDispatchKeySet();
+    auto iter = getDispatchTableIndexForDispatchKey(k);
     if (!dispatchTable_[iter].isValid()) {
       continue;
     }
