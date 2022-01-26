@@ -103,7 +103,8 @@ class TestOp(JitLlgaTestCase):
         m = nn.BatchNorm2d(32).eval()
         x = torch.rand(1, 32, 28, 28)
         _, graph = self.checkTrace(m, [x])
-        self.assertGraphContainsExactly(graph, LLGA_FUSION_GROUP, 1)
+        # single-op partition shouldn't be created for softmax
+        self.assertGraphContainsExactly(graph, LLGA_FUSION_GROUP, 0)
 
     @llga_test_env
     def test_eltwise(self):
@@ -120,7 +121,8 @@ class TestOp(JitLlgaTestCase):
             m = M(eltwise_fn)
             x = torch.rand(1, 32, 28, 28)
             _, graph = self.checkTrace(m, [x])
-            self.assertGraphContainsExactly(graph, LLGA_FUSION_GROUP, 1)
+            # single-op partition shouldn't be created.
+            self.assertGraphContainsExactly(graph, LLGA_FUSION_GROUP, 0)
 
     @llga_test_env
     def test_max_pool2d(self):
@@ -185,7 +187,8 @@ class TestOp(JitLlgaTestCase):
             m = nn.Softmax(dim=dim)
             x = torch.rand(8, 12, 12, 12)
             _, graph = self.checkTrace(m, [x])
-            self.assertGraphContainsExactly(graph, LLGA_FUSION_GROUP, 1)
+            # single-op partition shouldn't be created for softmax
+            self.assertGraphContainsExactly(graph, LLGA_FUSION_GROUP, 0)
 
     @llga_test_env
     def test_linear(self):
@@ -215,7 +218,8 @@ class TestOp(JitLlgaTestCase):
 
         for x, y in self._gen_binary_inputs():
             _, graph = self.checkTrace(forward_add, [x, y])
-            self.assertGraphContainsExactly(graph, LLGA_FUSION_GROUP, 2)
+            # single-op partitions shouldn't be created
+            self.assertGraphContainsExactly(graph, LLGA_FUSION_GROUP, 0)
 
     @llga_test_env
     def test_add_scalar(self):
@@ -224,7 +228,8 @@ class TestOp(JitLlgaTestCase):
 
         x = torch.rand(32, 32)
         _, graph = self.checkTrace(add_scalar, [x])
-        self.assertGraphContainsExactly(graph, LLGA_FUSION_GROUP, 2)
+        # single-op partitions shouldn't be created.
+        self.assertGraphContainsExactly(graph, LLGA_FUSION_GROUP, 0)
 
     @llga_test_env
     def test_mul(self):
@@ -233,7 +238,8 @@ class TestOp(JitLlgaTestCase):
 
         for x, y in self._gen_binary_inputs():
             _, graph = self.checkTrace(forward_mul, [x, y])
-            self.assertGraphContainsExactly(graph, LLGA_FUSION_GROUP, 2)
+            # single-op partitions shouldn't be created
+            self.assertGraphContainsExactly(graph, LLGA_FUSION_GROUP, 0)
 
     @llga_test_env
     def test_identity_binary(self):
@@ -243,17 +249,6 @@ class TestOp(JitLlgaTestCase):
         x = torch.rand(32)
         _, graph = self.checkTrace(forward, [x])
         self.assertFused(graph, ['aten::add', 'aten::mul'])
-
-    @llga_test_env
-    def test_matmul(self):
-        def forward_matmul(x, y):
-            return x.matmul(y)
-
-        # TODO: support all shapes combination
-        x = torch.randn(8, 128, 768)
-        y = torch.randn(768, 3072)
-        _, graph = self.checkTrace(forward_matmul, [x, y])
-        self.assertGraphContainsExactly(graph, LLGA_FUSION_GROUP, 1)
 
     @llga_test_env
     def test_layer_norm(self):
@@ -473,8 +468,9 @@ class TestFusionPattern(JitLlgaTestCase):
         m = M()
         x = torch.rand(1, 32, 28, 28)
         _, graph = self.checkTrace(m, [x])
-        self.assertGraphContainsExactly(graph, LLGA_FUSION_GROUP, 2)
-        self.assertFused(graph, ['aten::_convolution', 'aten::relu'])
+        # conv can exist in a single-op oneDNN Graph partition but not relu
+        self.assertGraphContainsExactly(graph, LLGA_FUSION_GROUP, 1)
+        self.assertFused(graph, ['aten::_convolution'])
 
 
 @unittest.skipIf(LLGA_NOT_ENABLED, "MKL-DNN build is disabled")

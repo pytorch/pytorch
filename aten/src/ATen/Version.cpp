@@ -6,7 +6,8 @@
 #endif
 
 #if AT_MKLDNN_ENABLED()
-#include <mkldnn.hpp>
+#include <oneapi/dnnl/dnnl_graph.hpp>
+#include <dnnl.hpp>
 #include <ideep.hpp>
 #endif
 
@@ -42,12 +43,30 @@ std::string get_mkldnn_version() {
     // Apparently no way to get ideep version?
     // https://github.com/intel/ideep/issues/29
     {
-      const mkldnn_version_t* ver = mkldnn_version();
+      const dnnl_version_t* ver = dnnl_version();
       ss << "Intel(R) MKL-DNN v" << ver->major << "." << ver->minor << "." << ver->patch
          << " (Git Hash " << ver->hash << ")";
     }
   #else
     ss << "MKLDNN not found";
+  #endif
+  return ss.str();
+}
+
+std::string get_dnnl_graph_version() {
+  std::ostringstream ss;
+  #if AT_MKLDNN_ENABLED()
+    // Cribbed from mkl-dnn/src/common/verbose.cpp
+    // Too bad: can't get ISA info conveniently :(
+    // Apparently no way to get ideep version?
+    // https://github.com/intel/ideep/issues/29
+    {
+      const dnnl_graph_version_t* ver = dnnl_graph_version();
+      ss << "Intel(R) oneDNN Graph v" << ver->major << "." << ver->minor << "." << ver->patch
+         << " (Git Hash " << ver->hash << ")";
+    }
+  #else
+    ss << "oneDNN Graph not found";
   #endif
   return ss.str();
 }
@@ -164,6 +183,7 @@ std::string show_config() {
 #endif
 
 #if AT_MKLDNN_ENABLED()
+  ss << "  -  " << get_dnnl_graph_version() << "\n";
   ss << "  - " << get_mkldnn_version() << "\n";
 #endif
 
