@@ -1,7 +1,7 @@
 #include <ATen/ATen.h>
 #include <ATen/CPUGeneratorImpl.h>
-#include <ATen/Utils.h>
 #include <ATen/Dispatch.h>
+#include <ATen/EmptyTensor.h>
 #include <ATen/Parallel.h>
 #include <ATen/MapAllocator.h>
 #include <ATen/NativeFunctions.h>
@@ -201,10 +201,7 @@ Tensor empty(
 
 Tensor empty_strided_cpu(IntArrayRef size, IntArrayRef stride, c10::optional<ScalarType> dtype_opt,
                          c10::optional<Layout> layout_opt, c10::optional<Device> device_opt, c10::optional<bool> pin_memory_opt) {
-  check_size_nonnegative(size);
-  auto t = at::native::empty_cpu({0}, dtype_opt, layout_opt, device_opt, pin_memory_opt);
-  at::native::resize_impl_cpu_(t.unsafeGetTensorImpl(), size, stride);
-  return t;
+  return at::detail::empty_strided_cpu(size, stride, dtype_opt, layout_opt, device_opt, pin_memory_opt);
 }
 
 Tensor& empty_out(IntArrayRef size,
@@ -265,12 +262,6 @@ Tensor empty_like(
       !(options.layout() != kStrided &&
           optional_memory_format.has_value()),
       "memory format option is only supported by strided tensors");
-  if (options.layout() == kSparse && self.is_sparse()) {
-    auto result = at::empty({0}, options); // to be resized
-    result.sparse_resize_and_clear_(
-        self.sizes(), self.sparse_dim(), self.dense_dim());
-    return result;
-  }
 
   auto memory_format = options.memory_format_opt().value_or(MemoryFormat::Preserve);
 
@@ -435,27 +426,6 @@ Tensor& eye_out_cpu(int64_t n, int64_t m, Tensor& result) {
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ full ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 namespace {
-
-// The ZeroTensor allocator ignores whatever allocation is requested and always
-// gives you nullptr
-struct ZeroTensorAllocator final : public at::Allocator {
-  ZeroTensorAllocator(at::Device device) : device_(device) {};
-  ~ZeroTensorAllocator() override = default;
-  static void deleter(void* const pointer) {
-    TORCH_INTERNAL_ASSERT(!pointer);
-  }
-  DataPtr allocate(const size_t nbytes) const override {
-    return {nullptr, nullptr, &deleter, device_};
-  }
-  DeleterFnPtr raw_deleter() const override {
-    return deleter;
-  }
-  at::Device device_;
-};
-
-at::Allocator* GetZeroTensorAllocator(ZeroTensorAllocator& zt) {
-  return &zt;
-}
 
 // Performs dtype inference for full
 TensorOptions infer_full_options(
@@ -1085,10 +1055,11 @@ Tensor _efficientzerotensor(IntArrayRef size,
     c10::optional<Device> device,
     c10::optional<bool> pin_memory) {
     auto device_ = device_or_default(device);
-    auto allocator = ZeroTensorAllocator(device_);
+    auto allocator = at::native::ZeroTensorAllocator(device_);
     auto dtype_ = dtype_or_default(dtype);
-    auto r = at::detail::empty_generic(size, GetZeroTensorAllocator(allocator), at::DispatchKey::ZeroTensor, dtype_, device_, c10::nullopt);
-    return r;
+    auto zero_ks = at::DispatchKeySet(c10::DispatchKey::CPU) | at::DispatchKeySet(c10::DispatchKey::ZeroTensor);
+    auto out = at::detail::empty_generic(size, &allocator, zero_ks, dtype_, c10::nullopt);
+    return out;
 }
 
 Tensor& zeros_out(IntArrayRef size, Tensor& result) {
