@@ -798,21 +798,6 @@ if IS_WINDOWS:
 # Dict of torch dtype -> NumPy dtype
 torch_to_numpy_dtype_dict = {value : key for (key, value) in numpy_to_torch_dtype_dict.items()}
 
-ALL_TENSORTYPES = [torch.float,
-                   torch.double,
-                   torch.half]
-
-# bfloat16 bringup is currently only available on ROCm
-# ALL_TENSORTYPES2 will eventually be unified with ALL_TENSORTYPES
-# when bfloat16 bringup is complete on all platforms
-if TEST_WITH_ROCM:
-    ALL_TENSORTYPES2 = [torch.float,
-                        torch.double,
-                        torch.half,
-                        torch.bfloat16]
-else:
-    ALL_TENSORTYPES2 = ALL_TENSORTYPES
-
 def skipIfRocm(fn):
     @wraps(fn)
     def wrapper(*args, **kwargs):
