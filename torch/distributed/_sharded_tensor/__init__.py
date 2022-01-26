@@ -1,8 +1,10 @@
 # Keep old package for BC purposes, this file should be removed once
 # everything moves to the `torch.distributed.shard` package.
 import sys
-from torch.distributed.shard.sharded_tensor import *
+import torch
 import warnings
+
+from torch.distributed.shard.sharded_tensor import *
 warnings.warn(
     "torch.distributed._sharded_tensor will be deprecated, use torch.distributed.shard.sharded_tensor instead",
     DeprecationWarning
