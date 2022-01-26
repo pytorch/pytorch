@@ -39,6 +39,7 @@ def add_auto_observation(
     example_inputs: Tuple[Any],
     input_dtypes: Any = (torch.float,),  # must be same structure as model inputs
     output_dtypes: Any = (torch.float,),  # must be same structure as model outputs
+    prepare_custom_config_dict: Dict[str, Any] = None,
 ) -> torch.nn.Module:
     def convert_to_interception_proxy(x):
         if isinstance(x, torch.Tensor):
@@ -113,6 +114,11 @@ def add_auto_observation(
             kwargs = kwargs if kwargs else {}
             hook_type = get_torch_function_hook_type(parent_module, func)
 
+            if first_call and hook_type is not HookType.OP_HOOKS:
+                qstate = getattr(parent_module, '_auto_quant_state', None)
+                if qstate:
+                    qstate.add_seen_op_type_without_op_hooks(func)
+
             if hook_type is HookType.OP_HOOKS:
                 qstate = parent_module._auto_quant_state  # type: ignore[attr-defined]
                 fqn = module_id_to_fqn[id(parent_module)] if parent_module else None
@@ -125,8 +131,7 @@ def add_auto_observation(
                 output = super().__torch_function__(func, types, args, kwargs)
                 # run "after" hook
                 output = qstate.op_prepare_after_hook(
-                    func, output, args, first_call, qtensor_id, parent_module,
-                    global_op_idx)
+                    func, output, args, first_call, qtensor_id, global_op_idx)
                 qstate.mark_cur_op_complete(func)
             else:
                 output = super().__torch_function__(func, types, args, kwargs)
@@ -200,6 +205,14 @@ def add_auto_observation(
 
                     hook_type = get_module_hook_type(parent_module, cur_module)
 
+                    if first_call and hook_type is not HookType.OP_HOOKS and \
+                            parent_module is not None:
+                        parent_qstate_fc = getattr(
+                            parent_module, '_auto_quant_state', None)
+                        if parent_qstate_fc:
+                            parent_qstate_fc.add_seen_op_type_without_op_hooks(
+                                type(cur_module))
+
                     if hook_type is HookType.OP_HOOKS:
                         parent_qstate: AutoQuantizationState = \
                             parent_module._auto_quant_state  # type: ignore[union-attr, assignment]
@@ -229,10 +242,9 @@ def add_auto_observation(
                             old_global_disable_torch_function_override
 
                         # after hooks
-                        # TODO is it correct to call_cur_module twice here?
                         output = parent_qstate.op_prepare_after_hook(
                             cur_module, output, args, first_call, qtensor_id,
-                            cur_module, global_op_idx)
+                            global_op_idx)
                         parent_qstate.mark_cur_op_complete(cur_module)
 
                     elif hook_type is HookType.MODULE_IO_HOOKS:
@@ -276,6 +288,14 @@ def add_auto_observation(
                     # Create a list before iterating because we are adding new
                     # named modules inside the loop.
                     named_modules = list(self.named_modules())
+
+                    # Record module instances which are leaves or children of leaves
+                    leaves = set()
+                    for fqn, child in named_modules:
+                        if is_leaf(child, prepare_custom_config_dict):
+                            for _, child_child in child.named_modules():
+                                leaves.add(child_child)
+
                     for fqn, v in named_modules:
 
                         # fqn is the global FQN, i.e. 'foo.bar.baz'
@@ -286,7 +306,7 @@ def add_auto_observation(
                         # for functions, this is the parent module FQN
                         module_id_to_fqn[id(v)] = fqn
 
-                        if is_leaf(v):
+                        if v in leaves:
                             continue
 
                         if v is self:
@@ -303,6 +323,12 @@ def add_auto_observation(
                 global_op_idx[0] = 0
 
                 output = super().__call__(*new_args, **new_kwargs)
+
+                if first_call:
+                    for _, v in self.named_modules():
+                        if hasattr(v, '_auto_quant_state'):
+                            v._auto_quant_state.insert_observers(v)
+
                 return output
             finally:
                 torch.nn.Module.__call__ = orig_module_call
@@ -316,7 +342,6 @@ def add_auto_observation(
     return model
 
 
-# TODO(future PR): add serialization support
 def add_auto_convert(module : torch.nn.Module) -> torch.nn.Module:
     def convert_to_dispatch_proxy(x):
         if isinstance(x, torch.Tensor):

@@ -93,8 +93,7 @@ def _fuse_modules(model, modules_to_fuse, is_qat, inplace=False, fuser_func=fuse
             _fuse_modules_helper(model, module_list, is_qat, fuser_func, fuse_custom_config_dict)
     return model
 
-def fuse_modules(
-    model, modules_to_fuse, inplace=False, fuser_func=fuse_known_modules, fuse_custom_config_dict=None):
+def fuse_modules(model, modules_to_fuse, inplace=False, fuser_func=fuse_known_modules, fuse_custom_config_dict=None):
     r"""Fuses a list of modules into a single module
 
     Fuses only the following sequence of modules:
@@ -156,8 +155,7 @@ def fuse_modules(
         fuser_func=fuse_known_modules,
         fuse_custom_config_dict=None)
 
-def fuse_modules_qat(
-    model, modules_to_fuse, inplace=False, fuser_func=fuse_known_modules, fuse_custom_config_dict=None):
+def fuse_modules_qat(model, modules_to_fuse, inplace=False, fuser_func=fuse_known_modules, fuse_custom_config_dict=None):
     """ QAT version for `fuse_modules`
     """
     return _fuse_modules(
