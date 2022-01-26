@@ -148,7 +148,7 @@ class TestTensorCreation(TestCase):
                 exact_dtype=False)
 
     def test_cat_all_dtypes_and_devices(self, device):
-        for dt in list(all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16)):
+        for dt in all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16):
             x = torch.tensor([[1, 2], [3, 4]], dtype=dt, device=device)
 
             expected1 = torch.tensor([[1, 2], [3, 4], [1, 2], [3, 4]], dtype=dt, device=device)
@@ -158,7 +158,7 @@ class TestTensorCreation(TestCase):
             self.assertEqual(torch.cat((x, x), 1), expected2)
 
     def test_fill_all_dtypes_and_devices(self, device):
-        for dt in list(all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16)):
+        for dt in all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16):
             for x in [torch.tensor((10, 10), dtype=dt, device=device),
                       torch.empty(10000, dtype=dt, device=device)]:  # large tensor
                 numel = x.numel()
@@ -312,8 +312,7 @@ class TestTensorCreation(TestCase):
                   (3, 1), (5, 3, 1), (7, 5, 3, 1),  # very fat matrices
                   (1, 3), (5, 1, 3), (7, 5, 1, 3),  # very thin matrices
                   (1, 3, 3, 3), (3, 1, 3, 3, 3)]    # unsqueezed batch dimensions
-        dtypes = [dtype for dtype in list(all_types_and_complex_and(
-                                          torch.half, torch.bool, torch.bfloat16)] if dtype != torch.bfloat16)
+        dtypes = all_types_and_complex_and(torch.half, torch.bool)
         for s, d, dtype in product(shapes, diagonals, dtypes):
             run_test(s, device, d, dtype)
 
@@ -1153,10 +1152,7 @@ class TestTensorCreation(TestCase):
         SIZE1 = 6500
         SIZE2 = 4500
         concat_list = []
-        ea
-
-
-        oncat_list.append(torch.ones((SIZE1, 1024 * 512), dtype=torch.uint8, device=device))
+        concat_list.append(torch.ones((SIZE1, 1024 * 512), dtype=torch.uint8, device=device))
         concat_list.append(torch.ones((SIZE2, 1024 * 512), dtype=torch.uint8, device=device))
         result = torch.cat(concat_list)
         self.assertEqual(result.size(0), SIZE1 + SIZE2)
@@ -2654,7 +2650,7 @@ class TestTensorCreation(TestCase):
             self.assertEqual(x.stride(), y.stride())
 
     def test_eye(self, device):
-        for dtype in list(all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16)):
+        for dtype in all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16):
             if dtype == torch.bfloat16:
                 continue
             # Test the RuntimeError is raised when either m or n is a negative number
@@ -2835,7 +2831,7 @@ class TestTensorCreation(TestCase):
         shapes = [(5, 0, 1), (0,), (0, 0, 1, 0, 2, 0, 0)]
 
         for shape in shapes:
-            for dt in list(all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16)):
+            for dt in all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16):
 
                 self.assertEqual(shape, torch.zeros(shape, device=device, dtype=dt).shape)
                 self.assertEqual(shape, torch.zeros_like(torch.zeros(shape, device=device, dtype=dt)).shape)
@@ -3924,7 +3920,7 @@ class TestAsArray(TestCase):
 
         # Copy is forced because of different dtype
         if not only_with_dtype:
-            for other in list(all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16)):
+            for other in all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16):
                 if dtype != other:
                     check(same_dtype=False, dtype=other)
                     check(same_dtype=False, dtype=other, copy=True)
