@@ -259,17 +259,17 @@ class GitHubPR:
         return f"https://github.com/{self.org}/{self.project}/pull/{self.pr_num}"
 
     def get_comment_body(self, num: int = -1) -> str:
-        return self.info["comments"]["nodes"][num]["bodyText"]
+        return cast(str, self.info["comments"]["nodes"][num]["bodyText"])
 
     def get_comment_author_login(self, num: int = -1) -> str:
-        return self.info["comments"]["nodes"][num]["author"]["login"]
+        return cast(str, self.info["comments"]["nodes"][num]["author"]["login"])
 
     def get_comment_editor_login(self, num: int = -1) -> Optional[str]:
         rc = self.info["comments"]["nodes"][num]["editor"]
         return rc["login"] if rc is not None else None
 
     def get_comment_author_association(self, num: int = -1) -> str:
-        return self.info["comments"]["nodes"][num]["authorAssociation"]
+        return cast(str, self.info["comments"]["nodes"][num]["authorAssociation"])
 
     def merge_ghstack_into(self, repo: GitRepo) -> None:
         assert self.is_ghstack_pr()
@@ -375,8 +375,8 @@ def try_revert(repo: GitRepo, pr: GitHubPR, dry_run: bool = False) -> None:
     author_association = pr.get_comment_author_association()
     author_login = pr.get_comment_author_login()
     # For some reason, one can not be a member of private repo, only CONTRIBUTOR
-    expected_association = "MEMBER" if pr.is_base_repo_private() else "CONTRIBUTOR"
-    if author_association != expected_association:
+    expected_association = "CONTRIBUTOR" if pr.is_base_repo_private() else "MEMBER"
+    if author_association != expected_association and author_association != "OWNER":
         return post_comment(f"Will not revert as @{author_login} is not a {expected_association}, but {author_association}")
 
     # Raises exception if matching rule is not found
