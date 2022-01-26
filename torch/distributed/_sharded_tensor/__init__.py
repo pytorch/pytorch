@@ -4,7 +4,7 @@ import sys
 import torch
 import warnings
 
-from torch.distributed.shard.sharded_tensor import *
+from torch.distributed.shard.sharded_tensor import *  # noqa: F403
 warnings.warn(
     "torch.distributed._sharded_tensor will be deprecated, use torch.distributed.shard.sharded_tensor instead",
     DeprecationWarning
