@@ -4028,11 +4028,17 @@ class TestAsArray(TestCase):
 
     @onlyCPU
     def test_astensor_consistency(self, device):
+        # See issue: https://github.com/pytorch/pytorch/pull/71757
+
         examples = [
             # Scalars
             True,
             42,
             1.0,
+            # Homogeneous Lists
+            [True, True, False],
+            [1, 2, 3, 42],
+            [0.0, 1.0, 2.0, 3.0],
             # Mixed Lists
             [True, False, 0],
             [0.0, True, False],
