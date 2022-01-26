@@ -2163,6 +2163,8 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::gather(
       std::vector<int64_t>(),   // inSplitSizes
       std::vector<int64_t>());  // outSplitSize
 
+  std::vector<at::Tensor> outputs;
+
   if (getRank() == opts.rootRank) {
     if (outputTensors.size() != 1) {
       std::stringstream ss;
@@ -2180,30 +2182,30 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::gather(
     const auto& options = inputTensors[0].options();
     const auto& sizes = inputTensors[0].sizes();
     assertTypeAndSizesMatch(invalidArgument, outputTensors[0], options, sizes);
+    outputs = outputTensors[0];
   } else {
-    // if not in the root rank, initialize outputFlattened as empty place holder
+    // if not in the root rank, initialize outputs as empty list
     if (outputTensors.size() != 0) {
       invalidArgument("requires empty output on non-root");
     }
-    outputTensors.emplace_back();
-
+    outputs = {};
   }
 
   return collective(
       inputTensors,
-      outputTensors[0],
+      outputs,
       [&](at::Tensor& /* unused */,
           at::Tensor& /* unused */,
           ncclComm_t comm,
           at::cuda::CUDAStream& stream) {
         const auto root = opts.rootRank;
         if (getRank() == root) {
-          for(auto output: outputTensors[0]) {
+          for(auto output: outputs) {
             c10::cuda::CUDACachingAllocator::recordStream(
                 output.storage().data_ptr(), stream);
           }
         }
-        torch::cuda::nccl::gather(inputTensors[0], outputTensors[0], comm, stream, root);
+        torch::cuda::nccl::gather(inputTensors[0], outputs, comm, stream, root);
         return ncclSuccess;
       },
       OpType::GATHER,
