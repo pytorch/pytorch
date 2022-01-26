@@ -113,8 +113,7 @@ def convert_arguments(args: List[Argument]) -> Tuple[List[Expr], List[str]]:
 
 
 # Take an argument in JIT type format, returns the C++ code to convert an ivalue from stack to corresponding C++ type.
-def argumenttype_ivalue_convert(t: Type, ival: str, arg_name: ArgName, *, mutable: bool = False) -> Tuple[
-    Expr, List[str]]:
+def argumenttype_ivalue_convert(t: Type, ival: str, arg_name: str, *, mutable: bool = False) -> Tuple[Expr, List[str]]:
     nctype = argumenttype_type(t=t, mutable=mutable, binds=arg_name)
     ctype = nctype.cpp_type(strip_ref=True)
     if isinstance(t, BaseType):
