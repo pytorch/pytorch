@@ -134,7 +134,8 @@ class TestTEFuser(JitTestCase):
         torch._C._jit_set_texpr_fuser_enabled(self.texpr_fuser_state)
         torch._C._jit_set_te_must_use_llvm_cpu(self.old_te_must_use_llvm_cpu)
 
-    def assertAllFused(self, graph, except_for={}):
+    def assertAllFused(self, graph, except_for=None):
+        except_for = except_for if except_for is not None else set()
         # TODO - upstream
         guards = "prim::TypeCheck", "prim::RequiresGradCheck", "prim::TensorExprDynamicGuard"
         guard_found = False
