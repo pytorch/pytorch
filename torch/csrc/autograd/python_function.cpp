@@ -23,6 +23,7 @@
 #include <torch/csrc/utils/python_strings.h>
 #include <torch/csrc/DynamicTypes.h>
 #include <torch/csrc/Exceptions.h>
+#include <ATen/FuncTorchTLS.h>
 
 #include <exception>
 #include <functional>
@@ -680,6 +681,11 @@ PyObject *THPFunction_apply(PyObject *cls, PyObject *inputs)
   THPObjectPtr ctx_obj(PyObject_CallFunctionObjArgs(backward_cls, nullptr));
   if (!ctx_obj) return nullptr;
   THPFunction* ctx = (THPFunction*)ctx_obj.get();
+
+  const auto& functorch_tls = at::functorch::functorchTLSAccessor();
+  if (functorch_tls) {
+    functorch_tls->checkSupportsAutogradFunction();
+  }
 
   auto cdata = std::shared_ptr<PyNode>(new PyNode(std::move(ctx_obj)), deleteNode);
   ctx->cdata = cdata;
