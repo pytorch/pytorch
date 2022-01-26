@@ -753,9 +753,9 @@ void initJITBindings(PyObject* module) {
       .def(
           "_jit_set_bailout_depth",
           [](size_t depth) {
-            TORCH_WARN("Use _jit_set_fusion_strategy, bailout depth is deprecated. Setting to (Dynamic, ", depth, ")");
+            TORCH_WARN("Use _jit_set_fusion_strategy, bailout depth is deprecated. Setting to (STATIC, ", depth, ")");
             size_t old_depth = getBailoutDepth();
-            FusionStrategy strat = {{FusionBehavior::DYNAMIC, depth}};
+            FusionStrategy strat = {{FusionBehavior::STATIC, depth}};
             setFusionStrategy(strat);
             return old_depth;
           })

@@ -80,7 +80,10 @@ if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
   rocminfo | grep -E 'Name:.*\sgfx|Marketing'
 
   # Manually set NUM_TEST_SHARDS since Jenkins doesn't do it
-  export NUM_TEST_SHARDS=2
+  # TODO: Can remove this once ROCm migration from Jenkins to GHA is complete.
+  if [[ -z "${GITHUB_ACTIONS}" ]]; then
+    export NUM_TEST_SHARDS=2
+  fi
 fi
 
 # --user breaks ppc64le builds and these packages are already in ppc64le docker
@@ -458,6 +461,12 @@ test_bazel() {
   set -e
 
   get_bazel
+
+   # Test //c10/... without Google flags and logging libraries. The
+   # :all_tests target in the subsequent Bazel invocation tests
+   # //c10/... with the Google libraries.
+  tools/bazel test --test_timeout=480 --test_output=all --test_tag_filters=-gpu-required --test_filter=-*CUDA \
+              --no//c10:use_gflags --no//c10:use_glog //c10/...
 
   tools/bazel test --test_timeout=480 --test_output=all --test_tag_filters=-gpu-required --test_filter=-*CUDA :all_tests
 }
