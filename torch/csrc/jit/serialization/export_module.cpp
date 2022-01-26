@@ -108,7 +108,11 @@ std::pair<IValue, IValue> getFunctionTuple(
   static const std::string torch_prefix("__torch__");
   static const std::string class_prefix("__torch__.torch.classes");
 
-  for (const TypePtr& t : mobile_code.types_) {
+  for (const TypePtr& ty : mobile_code.types_) {
+    auto t = ty;
+    if (auto dyn = t->castRaw<c10::DynamicType>()) {
+      t = dyn->fallback();
+    }
     std::string type_str = t->annotation_str();
     if (t->kind() == TypeKind::TupleType) {
       TORCH_CHECK(
@@ -216,9 +220,13 @@ std::pair<IValue, IValue> getFunctionTuple(
         arg.type()->annotation_str(type_printer) => mangled unique name of the
         module/submodule
       */
+      auto arg_type = arg.type();
+      if (auto dyn = arg_type->castRaw<c10::DynamicType>()) {
+        arg_type = dyn->fallback();
+      }
       argTables.emplace_back(Table({
           {"name", arg.name()},
-          {"type", arg.type()->annotation_str(type_printer)},
+          {"type", arg_type->annotation_str(type_printer)},
           {"default_value", arg.default_value()},
       }));
     }
