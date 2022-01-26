@@ -1,7 +1,6 @@
 #include <gtest/gtest.h>
 
 #include <test/cpp/tensorexpr/test_base.h>
-#include <torch/csrc/jit/frontend/code_template.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/ir/irparser.h>
 #include <torch/csrc/jit/passes/symbolic_shape_runtime_fusion.h>
@@ -318,7 +317,6 @@ TEST(DynamicShapes, GraphWithPartiallySymbolicOutput) {
   symbolic_strides[y_inp] = input_desc;
   symbolic_strides[graph->outputs().at(0)] = input_desc;
 
-
   TensorExprKernel kernel(
       graph, {}, symbolic_shape_inputs, false, symbolic_strides);
 
@@ -442,7 +440,6 @@ TEST(DynamicShapes, GraphWithCatAndBroadcast) {
   symbolic_strides[y_inp] = input_desc;
   symbolic_strides[z_inp] = input_desc;
   symbolic_strides[graph->outputs().at(0)] = input_desc;
-
 
   TensorExprKernel kernel(
       graph, {}, symbolic_shape_inputs, false, symbolic_strides);
