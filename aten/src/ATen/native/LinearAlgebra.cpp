@@ -27,6 +27,8 @@
 #include <string>
 #include <tuple>
 
+#include <iostream>
+
 namespace at {
 namespace meta {
 TORCH_META_FUNC(addmm)(const Tensor& self, const Tensor& mat1, const Tensor& mat2, const Scalar& beta, const Scalar& alpha) {
@@ -1737,6 +1739,11 @@ Tensor& linalg_matmul_out(const Tensor & tensor1, const Tensor & tensor2, Tensor
   return at::native::matmul_out(tensor1, tensor2, result);
 }
 
+// torch.linalg.diagonal, alias for torch.diagonal with dim1=-2, dim2=-1 as defaults
+Tensor linalg_diagonal(const Tensor& A, int64_t offset, int64_t dim1, int64_t dim2) {
+  return A.diagonal(offset, dim1, dim2);
+}
+
 // helper methods for matrix_exp
 namespace {
 
@@ -2303,7 +2310,10 @@ Tensor &frobenius_norm_out(const Tensor& self,
     if (self.is_complex()){
       result_ = at::sqrt(at::sum(at::real(self.conj() * self), dim_, keepdim));
     } else {
-      result_ = at::sqrt(at::sum((self * self), dim_, keepdim));
+      auto inter_sum = at::sum((self * self), dim_, keepdim);
+      std::cout << "INTER SUM SIZES: " << inter_sum.sizes()
+                << " DIMS: " << inter_sum.dim() << std::endl;
+      result_ = at::sqrt(inter_sum);
     }
   }
   // NOTE: It would be better to avoid resize and copy by using norm_out and sqrt_out above.
@@ -2311,6 +2321,9 @@ Tensor &frobenius_norm_out(const Tensor& self,
   //    More details here: https://github.com/pytorch/pytorch/pull/44095#discussion_r486673947
   at::native::resize_output(result, result_.sizes());
   result.copy_(result_);
+  std::cout << "RESULT: " << result << std::endl;
+  std::cout << "RESULT SIZE: " << result.sizes()
+            << " RESULT DIM: " << result.dim() << std::endl;
   return result;
 }
 
