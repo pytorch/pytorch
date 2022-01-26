@@ -35,6 +35,7 @@ from ._stdlib import is_stdlib_module
 from .find_file_dependencies import find_files_source_depends_on
 from .glob_group import GlobGroup, GlobPattern
 from .importer import Importer, OrderedImporter, sys_importer
+import inspect
 
 _gate_torchscript_serialization = True
 
@@ -199,6 +200,11 @@ class PackageExporter:
 
         self.zip_file = torch._C.PyTorchFileWriter(f)
         self.zip_file.set_min_version(6)
+        #TODO: export to an actual registry somewhere else later in the stack
+        self.external_registry = {}
+        #TODO: export to an actual registry somewhere else later in the stack
+        self.closing_functions = {}
+
         self._written_files: Set[str] = set()
 
         self.serialized_reduces: Dict[int, Any] = {}
@@ -209,8 +215,6 @@ class PackageExporter:
         # - Each directed edge (u, v) means u depends on v.
         # - Nodes may contain metadata that describe how to write the thing to the zipfile.
         self.dependency_graph = DiGraph()
-        self.script_module_serializer = torch._C.ScriptModuleSerializer(self.zip_file)
-        self.storage_context = self.script_module_serializer.storage_context()
 
         # These are OrderedDicts for compatibility with RemovableHandle.
         # Generic OrderedDict type annotations are not present until 3.7.
@@ -218,7 +222,7 @@ class PackageExporter:
         self._extern_hooks: OrderedDict = OrderedDict()
         self._mock_hooks: OrderedDict = OrderedDict()
         self._intern_hooks: OrderedDict = OrderedDict()
-
+        self.external_registry = {}
         if isinstance(importer, Importer):
             self.importer = importer
         else:
@@ -849,38 +853,7 @@ class PackageExporter:
         )
 
     def _persistent_id(self, obj):
-        if torch.is_storage(obj) or isinstance(obj, torch.storage.TypedStorage):
-            if isinstance(obj, torch.storage.TypedStorage):
-                # TODO: Once we decide to break serialization FC, we can
-                # remove this case
-                storage = obj._storage
-                storage_type_str = obj.pickle_storage_type()
-                storage_type = getattr(torch, storage_type_str)
-                dtype = obj.dtype
-                storage_numel = obj.size()
-
-            else:
-                storage = obj
-                storage_type = normalize_storage_type(type(storage))
-                dtype = torch.uint8
-                storage_numel = storage.nbytes()
-
-            storage = cast(Storage, storage)
-            location = location_tag(storage)
-
-            # serialize storage if not already written
-            storage_present = self.storage_context.has_storage(storage)
-            storage_id = self.storage_context.get_or_add_storage(storage)
-            if not storage_present:
-                if storage.device.type != "cpu":
-                    storage = storage.cpu()
-                num_bytes = storage.nbytes()
-                self.zip_file.write_record(
-                    f".data/{storage_id}.storage", storage.data_ptr(), num_bytes
-                )
-            return ("storage", storage_type, storage_id, location, storage_numel)
-
-        if hasattr(obj, "__reduce_package__"):
+        if hasattr(obj, "__reduce_package__") and not inspect.isclass(obj):
             if _gate_torchscript_serialization and isinstance(
                 obj, torch.jit.RecursiveScriptModule
             ):
@@ -1014,7 +987,8 @@ class PackageExporter:
         """
         self._execute_dependency_graph()
 
-        self.script_module_serializer.write_files()
+        for _, fn in self.closing_functions.items():
+            fn(self)
         self._finalize_zip()
 
     def _finalize_zip(self):

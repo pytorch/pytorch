@@ -64,6 +64,38 @@ class _StorageBase(object):
         torch.save(self, b, _use_new_zipfile_serialization=False)
         return (_load_from_bytes, (b.getvalue(),))
 
+    def __reduce_package__(self, exporter):
+        if 'script_module_serializer' not in exporter.external_registry:
+            exporter.external_registry['script_module_serializer'] = torch._C.ScriptModuleSerializer(exporter.zip_file)
+        if 'write_torchscript_files' not in exporter.closing_functions:
+            exporter.closing_functions['write_torchscript_files'] = lambda exporter: exporter.external_registry['script_module_serializer'].write_files()
+        storage_context = exporter.external_registry['script_module_serializer'].storage_context()
+
+        storage_type = normalize_storage_type(type(self))
+        dtype = torch.uint8
+        size = self.nbytes()
+
+        storage = cast(Storage, self)
+        if type(storage).__module__ == 'torch':
+            location = 'cpu'
+        else:
+            location = 'cuda:' + str(storage.get_device())
+
+
+        storage_present = storage_context.has_storage(storage)
+        storage_id = storage_context.get_or_add_storage(storage)
+
+        if not storage_present:
+            if storage.device.type != "cpu":
+                storage = storage.cpu()
+        num_bytes = storage.nbytes()
+        exporter.zip_file.write_record(
+            f".data/{storage_id}.storage", storage.data_ptr(), num_bytes
+        )
+
+        return unpackage_storage, (storage_type, storage_id, location, size)
+
+
     def __sizeof__(self):
         return super(_StorageBase, self).__sizeof__() + self.size()
 
@@ -183,6 +215,43 @@ def _load_from_bytes(b):
 _StorageBase.type = _type  # type: ignore[assignment]
 _StorageBase.cuda = _cuda  # type: ignore[assignment]
 
+def _get_restore_location(map_location):
+    if map_location is None:
+        restore_location = default_restore_location
+    elif isinstance(map_location, dict):
+        def restore_location(storage, location):
+            location = map_location.get(location, location)
+            return default_restore_location(storage, location)
+    elif isinstance(map_location, _string_classes):
+        def restore_location(storage, location):
+            return default_restore_location(storage, map_location)
+    elif isinstance(map_location, torch.device):
+        def restore_location(storage, location):
+            return default_restore_location(storage, str(map_location))
+    else:
+        def restore_location(storage, location):
+            result = map_location(storage, location)
+            if result is None:
+                result = default_restore_location(storage, location)
+            return result
+    return restore_location
+
+def unpackage_storage(importer, storage_type, key, location, size):
+    if 'loaded_storages' not in importer.external_registry:
+        importer.external_registry['loaded_storages'] = {}
+    if 'storage_context' not in importer.external_registry:
+        importer.external_registry['storage_context'] = torch._C.DeserializationStorageContext()
+    storage_context = importer.external_registry['storage_context']
+    loaded_storages = importer.external_registry['loaded_storages']
+    dtype = storage_type.dtype
+    if key not in loaded_storages:
+        loaded_storages[key] = importer.load_tensor(dtype, size, key, location, storage_context)
+    storage = loaded_storages[key]
+    # TODO: Once we decide to break serialization FC, we can
+    # stop wrapping with TypedStorage
+    return TypedStorage(
+        wrap_storage=storage._untyped(), dtype=dtype
+    )
 
 @lru_cache(maxsize=None)
 def _dtype_to_storage_type_map():
@@ -507,6 +576,37 @@ class TypedStorage:
         b = io.BytesIO()
         torch.save(self, b, _use_new_zipfile_serialization=False)
         return (_load_from_bytes, (b.getvalue(),))
+
+    def __reduce_package__(self, exporter):
+        if 'script_module_serializer' not in exporter.external_registry:
+            exporter.external_registry['script_module_serializer'] = torch._C.ScriptModuleSerializer(exporter.zip_file)
+        if 'write_torchscript_files' not in exporter.closing_functions:
+            exporter.closing_functions['write_torchscript_files'] = lambda exporter: exporter.external_registry['script_module_serializer'].write_files()
+        storage_context = exporter.external_registry['script_module_serializer'].storage_context()
+
+        storage = self._storage
+        storage_type_str = self.pickle_storage_type()
+        storage_type = getattr(torch, storage_type_str)
+        dtype = self.dtype
+        size = self.size()
+
+        storage = cast(Storage, storage)
+        if type(storage).__module__ == 'torch':
+            location = 'cpu'
+        else:
+            location = 'cuda:' + str(storage.get_device())
+
+        storage_present = storage_context.has_storage(storage)
+        storage_id = storage_context.get_or_add_storage(storage)
+
+        if not storage_present:
+            if storage.device.type != "cpu":
+                storage = storage.cpu()
+            num_bytes = storage.nbytes()
+            exporter.zip_file.write_record(
+                f".data/{storage_id}.storage", storage.data_ptr(), num_bytes
+            )
+        return unpackage_storage, (storage_type, storage_id, location, size)
 
     def data_ptr(self):
         return self._storage.data_ptr()
