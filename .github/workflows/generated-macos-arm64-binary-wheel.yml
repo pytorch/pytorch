@@ -81,7 +81,7 @@ jobs:
   wheel-py3_7-cpu-upload:  # Uploading
     runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: wheel-py3_7-cpu-test
+    needs: wheel-py3_7-cpu-build
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       BUILDER_ROOT: ${{ github.workspace }}/builder
@@ -237,7 +237,7 @@ jobs:
   wheel-py3_8-cpu-upload:  # Uploading
     runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: wheel-py3_8-cpu-test
+    needs: wheel-py3_8-cpu-build
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       BUILDER_ROOT: ${{ github.workspace }}/builder
@@ -393,7 +393,7 @@ jobs:
   wheel-py3_9-cpu-upload:  # Uploading
     runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: wheel-py3_9-cpu-test
+    needs: wheel-py3_9-cpu-build
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       BUILDER_ROOT: ${{ github.workspace }}/builder
@@ -549,7 +549,7 @@ jobs:
   wheel-py3_10-cpu-upload:  # Uploading
     runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: wheel-py3_10-cpu-test
+    needs: wheel-py3_10-cpu-build
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       BUILDER_ROOT: ${{ github.workspace }}/builder
