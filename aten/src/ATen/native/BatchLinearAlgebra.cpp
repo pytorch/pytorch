@@ -4257,7 +4257,8 @@ TORCH_IMPL_FUNC(linalg_ldl_factor_ex_out)
   auto pivots_ = pivots.expect_contiguous();
   auto info_ = info.expect_contiguous();
 
-  auto factors_ = at::native::borrow_else_clone(factors.mT().is_contiguous(), factors, self, /*row_major=*/false);
+  auto factors_ = at::native::borrow_else_clone(
+      factors.mT().is_contiguous(), factors, self, /*row_major=*/false);
   if (factors.mT().is_contiguous()) {
     factors_->copy_(self);
   }
@@ -4307,8 +4308,10 @@ TORCH_IMPL_FUNC(linalg_ldl_solve_out)
 
   auto pivots_ = pivots.expect_contiguous();
 
-  auto factors_ = at::native::borrow_else_clone(result.mT().is_contiguous(), factors, factors, /*row_major=*/false);
-  auto result_ = at::native::borrow_else_clone(result.mT().is_contiguous(), result, B, /*row_major=*/false);
+  auto factors_ = at::native::borrow_else_clone(
+      result.mT().is_contiguous(), factors, factors, /*row_major=*/false);
+  auto result_ = at::native::borrow_else_clone(
+      result.mT().is_contiguous(), result, B, /*row_major=*/false);
   if (result.mT().is_contiguous()) {
     result_->copy_(B_broadcast);
   }
