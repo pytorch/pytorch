@@ -31,8 +31,6 @@ from torch.distributed.algorithms.ddp_comm_hooks import (
     quantization as quantization_hooks,
 )
 
-from torch.distributed.algorithms._optimizer_overlap import _as_overlapped_optim
-
 from torch.distributed.distributed_c10d import (
     get_world_size,
     _get_default_group,
@@ -3941,11 +3939,13 @@ class DistributedTest:
                         )
                     )
 
-                    # Register hook that runs allreduce + functional optimizer
-                    # step.
-                    allreduce_hook = default.allreduce_hook
-                    overlapped_optimizer = _as_overlapped_optim(optim_cls, *functional_optim_args, **functional_optim_kwargs)
-                    overlapped_optimizer.register_ddp(ddp_model_with_optimizer_hook)
+                    # Register a fused optimizer that will run optimizer in step
+                    # with allreduce.
+                    ddp_model_with_optimizer_hook._register_fused_optim(
+                        optim_cls,
+                        *functional_optim_args,
+                        **functional_optim_kwargs,
+                    )
                     # Create DDP model with no hook that does optimizer after
                     # backward.
                     ddp_model_with_no_hook = torch.nn.parallel.DistributedDataParallel(
