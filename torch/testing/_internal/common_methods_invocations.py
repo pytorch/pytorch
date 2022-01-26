@@ -6008,11 +6008,13 @@ def sample_inputs_diagonal_diag_embed(op_info, device, dtype, requires_grad, **k
     # Shapes for 3D Tensors
     shapes_3d = ((M, M, M),)
 
-    args_2d = ((), (2,), (-2,), (1,))
-    args_3d = ((1, 1, 2), (2, 0, 1), (-2, 0, 1))
+    kwargs_2d = (dict(), dict(offset=2), dict(offset=2), dict(offset=1))
+    kwargs_3d = (dict(offset=1, dim1=1, dim2=2),
+                 dict(offset=2, dim1=0, dim2=1),
+                 dict(offset=-2, dim1=0, dim2=1))
 
-    for shape, arg in chain(product(shapes_2d, args_2d), product(shapes_3d, args_3d)):
-        yield SampleInput(make_arg(shape), args=arg)
+    for shape, kwarg in chain(product(shapes_2d, kwargs_2d), product(shapes_3d, kwargs_3d)):
+        yield SampleInput(make_arg(shape), kwargs=kwarg)
 
 
 def sample_inputs_diagonal_scatter(op_info, device, dtype, requires_grad, **kwargs):
@@ -9300,6 +9302,9 @@ op_db: List[OpInfo] = [
            supports_fwgrad_bwgrad=True,
            sample_inputs_func=sample_inputs_diagonal_diag_embed),
     OpInfo('diagonal',
+           # They are not strictly aliases as they have diverging defaults, but we can see them as aliases for testing purposes
+           # If we add tests that test the function against the alias, make linalg.diagonal into its own OpInfo
+           aliases=('linalg.diagonal',),
            dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
            supports_out=False,
            supports_forward_ad=True,
@@ -11067,7 +11072,9 @@ op_db: List[OpInfo] = [
            decorators=[
                # RuntimeError: Cannot insert a Tensor that requires grad as a constant.
                # Consider making it a parameter or input, or detaching the gradient
-               DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit', dtypes=(torch.float32,))
+               DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit', dtypes=(torch.float32,)),
+               # TODO(@anjali411): fix this
+               DecorateInfo(unittest.skip('Skipped!'), 'TestGradients', "test_forward_mode_AD"),
            ],
            skips=(
                DecorateInfo(unittest.skip("We don't want to differentiate wrt running mean / std"),
@@ -11752,10 +11759,13 @@ op_db: List[OpInfo] = [
            dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
            supports_out=False,
            supports_forward_ad=True,
+           sample_inputs_func=sample_inputs_batch_norm,
            skips=(
+               # TODO(@anjali411): fix this
+               DecorateInfo(unittest.skip('Skipped!'), 'TestGradients', "test_forward_mode_AD"),
                DecorateInfo(unittest.skip("We don't want to differentiate wrt running mean / std"),
-                            "TestCommon", "test_floating_inputs_are_differentiable"),),
-           sample_inputs_func=sample_inputs_batch_norm),
+                            "TestCommon", "test_floating_inputs_are_differentiable"),)
+           ),
     # This variant tests batch_norm with cuDNN disabled only on CUDA devices
     OpInfo('nn.functional.batch_norm',
            variant_test_name='without_cudnn',
@@ -12058,7 +12068,7 @@ op_db: List[OpInfo] = [
                    safe_casts_outputs=True),
     UnaryUfuncInfo('real',
                    ref=np.real,
-                   dtypes=complex_types(),
+                   dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.half),
                    supports_out=False,
                    supports_forward_ad=True,
                    supports_fwgrad_bwgrad=True,
@@ -13193,12 +13203,6 @@ op_db: List[OpInfo] = [
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            sample_inputs_func=sample_inputs_flatten,
-           skips=(
-               # File "pytorch/torch/testing/_internal/common_jit.py", line 306, in test_type
-               # self.assertTrue(actual_type.isSubtypeOf(out_type))
-               # AssertionError: False is not true
-               DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
-           )
            ),
     OpInfo('column_stack',
            dtypes=floating_and_complex_types_and(torch.float16, torch.bfloat16),
@@ -14601,9 +14605,9 @@ op_db: List[OpInfo] = [
             # On CUDA, the op is dispatched (and a few more conditions) to
             # _fused_dropout, which doesn't support forward AD
             DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', 'test_forward_mode_AD', device_type='cuda'),
-            # (ROCm) NotImplementedError: Trying to use forward AD with native_dropout that does not support it
+            # NotImplementedError: Trying to use forward AD with native_dropout that does not support it
             DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', 'test_fn_fwgrad_bwgrad',
-                         device_type='cuda', dtypes=[torch.float64], active_if=TEST_WITH_ROCM),),
+                         device_type='cuda', dtypes=[torch.float64]),),
         gradcheck_wrapper=wrapper_set_seed,
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
