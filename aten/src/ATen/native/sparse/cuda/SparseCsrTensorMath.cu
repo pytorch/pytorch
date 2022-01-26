@@ -114,6 +114,12 @@ void _apply_sparse_csr_linear_solve(
   const Tensor& other,
   const Tensor& result,
   int &_singularity) {
+#ifdef USE_ROCM
+  TORCH_CHECK(
+      false,
+      "Calling torch.linalg.solve with sparse tensors requires compiling ",
+      "PyTorch with CUDA and not supported in ROCm build.");
+#else
   using value_t = typename c10::scalar_value_type<scalar_t>::type;
   auto values = input.values();
   const scalar_t *values_data_ptr = values.data_ptr<scalar_t>();
@@ -139,6 +145,7 @@ void _apply_sparse_csr_linear_solve(
 
   cusolver_func(handle, n, nnzA, descrA.descriptor(), values_data_ptr,
     crow_indices_data_ptr, col_indices_data_ptr, b, tol, reorder, x, &_singularity);
+#endif
 }
 
 } // namespace

@@ -1284,14 +1284,15 @@ class TestSparseCSR(TestCase):
 
             self.assertEqual(coo_sparse.to_sparse_csr().to_sparse_coo(), coo_sparse)
 
+    @unittest.skipIf(TEST_WITH_ROCM, "The test doesn't support ROCM")
     @dtypes(*floating_and_complex_types())
     def test_linalg_solve_sparse_csr_cusolver(self, device, dtype):
         from torch.testing._internal.common_methods_invocations import sample_inputs_linalg_solve
 
-        samples = sample_inputs_linalg_solve(None, device, dtype)
-
         if (device == 'meta') or (device == 'cpu' and not torch.cuda.is_available()):
             self.skipTest("Skipped!")
+
+        samples = sample_inputs_linalg_solve(None, device, dtype)
 
         for sample in samples:
             if sample.input.ndim != 2:
