@@ -6,7 +6,7 @@ import re
 from dataclasses import dataclass
 from urllib.request import urlopen, Request
 from urllib.error import HTTPError
-from typing import cast, Any, Callable, Dict, List, Optional, Tuple
+from typing import cast, Any, Callable, Dict, List, Optional, Tuple, Union
 from gitutils import get_git_remote_name, get_git_repo_dir, patterns_to_regex, GitRepo
 
 
@@ -28,9 +28,13 @@ query ($owner: String!, $name: String!, $number: Int!) {
       baseRefName
       baseRepository {
         nameWithOwner
+        isPrivate
         defaultBranchRef {
           name
         }
+      }
+      mergeCommit {
+        oid
       }
       commits(first: 100) {
         nodes {
@@ -70,6 +74,18 @@ query ($owner: String!, $name: String!, $number: Int!) {
         }
         totalCount
       }
+      comments(last: 1) {
+        nodes {
+          bodyText
+          author {
+            login
+          }
+          authorAssociation
+          editor {
+            login
+          }
+        }
+      }
     }
   }
 }
@@ -82,6 +98,8 @@ RE_PULL_REQUEST_RESOLVED = re.compile(
     r'https://github.com/(?P<owner>[^/]+)/(?P<repo>[^/]+)/pull/(?P<number>[0-9]+)',
     re.MULTILINE
 )
+RE_REVERT_CMD = re.compile(r"@pytorch(merge|)bot\s+revert\s+this")
+RE_DIFF_REV = re.compile(r'^Differential Revision:.+?(D[0-9]+)', re.MULTILINE)
 
 
 def _fetch_url(url: str, *,
@@ -121,6 +139,11 @@ def gh_post_comment(org: str, project: str, pr_num: int, comment: str, dry_run: 
                       data={"body": comment})
 
 
+def gh_add_labels(org: str, project: str, pr_num: int, labels: Union[str, List[str]]) -> None:
+    fetch_json(f'https://api.github.com/repos/{org}/{project}/issues/{pr_num}/labels',
+               data={"labels": labels})
+
+
 def gh_graphql(query: str, **kwargs: Any) -> Dict[str, Any]:
     rc = _fetch_url("https://api.github.com/graphql", data={"query": query, "variables": kwargs}, reader=json.load)
     if "errors" in rc:
@@ -137,6 +160,7 @@ def parse_args() -> Any:
     from argparse import ArgumentParser
     parser = ArgumentParser("Merge PR into default branch")
     parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument("--revert", action="store_true")
     parser.add_argument("pr_num", type=int)
     return parser.parse_args()
 
@@ -166,6 +190,9 @@ class GitHubPR:
 
     def is_ghstack_pr(self) -> bool:
         return RE_GHSTACK_HEAD_REF.match(self.head_ref()) is not None
+
+    def is_base_repo_private(self) -> bool:
+        return bool(self.info["baseRepository"]["isPrivate"])
 
     def get_changed_files_count(self) -> int:
         return int(self.info["changedFiles"])
@@ -224,8 +251,25 @@ class GitHubPR:
     def get_body(self) -> str:
         return cast(str, self.info["body"])
 
+    def get_merge_commit(self) -> Optional[str]:
+        mc = self.info["mergeCommit"]
+        return mc["oid"] if mc is not None else None
+
     def get_pr_url(self) -> str:
         return f"https://github.com/{self.org}/{self.project}/pull/{self.pr_num}"
+
+    def get_comment_body(self, num: int = -1) -> str:
+        return cast(str, self.info["comments"]["nodes"][num]["bodyText"])
+
+    def get_comment_author_login(self, num: int = -1) -> str:
+        return cast(str, self.info["comments"]["nodes"][num]["author"]["login"])
+
+    def get_comment_editor_login(self, num: int = -1) -> Optional[str]:
+        rc = self.info["comments"]["nodes"][num]["editor"]
+        return rc["login"] if rc is not None else None
+
+    def get_comment_author_association(self, num: int = -1) -> str:
+        return cast(str, self.info["comments"]["nodes"][num]["authorAssociation"])
 
     def merge_ghstack_into(self, repo: GitRepo) -> None:
         assert self.is_ghstack_pr()
@@ -245,12 +289,15 @@ class GitHubPR:
                 if pr.is_closed():
                     print(f"Skipping {idx+1} of {len(rev_list)} PR (#{pr_num}) as its already been merged")
                     continue
-                check_if_should_be_merged(pr, repo)
+                # Raises exception if matching rule is not found
+                find_matching_merge_rule(pr, repo)
+
             repo.cherry_pick(rev)
             repo.amend_commit_message(re.sub(RE_GHSTACK_SOURCE_ID, "", msg))
 
     def merge_into(self, repo: GitRepo, dry_run: bool = False) -> None:
-        check_if_should_be_merged(self, repo)
+        # Raises exception if matching rule is not found
+        find_matching_merge_rule(self, repo)
         if repo.current_branch() != self.default_branch():
             repo.checkout(self.default_branch())
         if not self.is_ghstack_pr():
@@ -283,7 +330,9 @@ def read_merge_rules(repo: GitRepo) -> List[MergeRule]:
     return cast(List[MergeRule], rc)
 
 
-def check_if_should_be_merged(pr: GitHubPR, repo: GitRepo) -> None:
+
+def find_matching_merge_rule(pr: GitHubPR, repo: GitRepo) -> MergeRule:
+    """Returns merge rule matching to this pr or raises an exception"""
     changed_files = pr.get_changed_files()
     approved_by = set(pr.get_approved_by())
     rules = read_merge_rules(repo)
@@ -310,9 +359,47 @@ def check_if_should_be_merged(pr: GitHubPR, repo: GitRepo) -> None:
             print(f"Skipping rule {rule_name} due to non-matching files: {non_matching_files}")
             continue
         print(f"Matched rule {rule_name} for {pr.pr_num}")
-        return
+        return rule
     raise RuntimeError(f"PR {pr.pr_num} does not match merge rules")
 
+
+def try_revert(repo: GitRepo, pr: GitHubPR, dry_run: bool = False) -> None:
+    def post_comment(msg: str) -> None:
+        gh_post_comment(pr.org, pr.project, pr.pr_num, msg, dry_run=dry_run)
+    if not pr.is_closed():
+        return post_comment(f"Can't revert open PR #{pr.pr_num}")
+    if not RE_REVERT_CMD.match(pr.get_comment_body()):
+        raise RuntimeError(f"Comment {pr.get_comment_body()} does not seem to be a valid revert command")
+    if pr.get_comment_editor_login() is not None:
+        return post_comment("Don't want to revert based on edited command")
+    author_association = pr.get_comment_author_association()
+    author_login = pr.get_comment_author_login()
+    # For some reason, one can not be a member of private repo, only CONTRIBUTOR
+    expected_association = "CONTRIBUTOR" if pr.is_base_repo_private() else "MEMBER"
+    if author_association != expected_association and author_association != "OWNER":
+        return post_comment(f"Will not revert as @{author_login} is not a {expected_association}, but {author_association}")
+
+    # Raises exception if matching rule is not found
+    find_matching_merge_rule(pr, repo)
+    commit_sha = pr.get_merge_commit()
+    if commit_sha is None:
+        commits = repo.commits_resolving_gh_pr(pr.pr_num)
+        if len(commits) == 0:
+            raise RuntimeError("Can't find any commits resolving PR")
+        commit_sha = commits[0]
+    msg = repo.commit_message(commit_sha)
+    rc = RE_DIFF_REV.search(msg)
+    if rc is not None:
+        raise RuntimeError(f"Can't revert PR that was landed via phabricator as {rc.group(1)}")
+    repo.checkout(pr.default_branch())
+    repo.revert(commit_sha)
+    msg = repo.commit_message("HEAD")
+    msg = re.sub(RE_PULL_REQUEST_RESOLVED, "", msg)
+    msg += f"\nReverted {pr.get_pr_url()} on behalf of @{author_login}\n"
+    repo.amend_commit_message(msg)
+    repo.push(pr.default_branch(), dry_run)
+    if not dry_run:
+        gh_add_labels(pr.org, pr.project, pr.pr_num, ["reverted"])
 
 def main() -> None:
     args = parse_args()
@@ -320,6 +407,13 @@ def main() -> None:
     org, project = repo.gh_owner_and_name()
 
     pr = GitHubPR(org, project, args.pr_num)
+    if args.revert:
+        try:
+            try_revert(repo, pr, dry_run=args.dry_run)
+        except Exception as e:
+            gh_post_comment(org, project, args.pr_num, f"Reverting PR {args.pr_num} failed due to {e}", dry_run=args.dry_run)
+        return
+
     if pr.is_closed():
         gh_post_comment(org, project, args.pr_num, f"Can't merge closed PR #{args.pr_num}", dry_run=args.dry_run)
         return
