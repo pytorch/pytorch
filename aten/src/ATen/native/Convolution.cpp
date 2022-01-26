@@ -176,6 +176,11 @@ auto ConvParams::needs_64bit_indexing_no_split(const at::Tensor& input, const at
 }
 
 auto ConvParams::use_cudnn(const at::Tensor& input, const at::Tensor& weight) const -> bool {
+
+// Note [Mobile check segfaults]
+// cudnn and miopen are guaranteed not to be on mobile, and T102591915 / T110194934 suggest
+// that maybe the compiledWithCuDNN() check sometimes segfaults (though I can't imagine how)
+#if !defined(C10_MOBILE)
   if (needs_64bit_indexing_no_split(input, weight)) {
     return false;
   }
@@ -199,6 +204,9 @@ auto ConvParams::use_cudnn(const at::Tensor& input, const at::Tensor& weight) co
     }
   }
   return !is_output_padding_big();
+#else
+  return false;
+#endif
 }
 
 auto ConvParams::use_miopen(const at::Tensor& input, const at::Tensor& weight, bool bias_defined) const -> bool {
@@ -1074,9 +1082,7 @@ static inline at::MemoryFormat determine_backend_memory_format(
   at::MemoryFormat backend_memory_format = at::MemoryFormat::Contiguous;
   auto k = weight.ndimension();
 #if !defined(C10_MOBILE)
-  // cudnn and miopen are guaranteed not to be on mobile, and T102591915
-  // suggests that maybe the cudnn condition sometimes segfaults (though
-  // I can't imagine how)
+  // See Note [Mobile check segfaults]
   if (detail::getCUDAHooks().compiledWithCuDNN()) {
     backend_memory_format = cudnn_conv_suggest_memory_format(input, weight);
   }
@@ -1621,7 +1627,7 @@ std::tuple<Tensor, Tensor, Tensor> convolution_backward(
     {
       std::array<bool, 2> input_weight_output_mask = {output_mask[0], output_mask[1]};
       std::tie(backend_grad_input, backend_grad_weight) =
-        conv_depthwise2d_backward_stub(input.device().type(), grad_output.contiguous(), input.contiguous(),
+        conv_depthwise2d_backward_stub(input.device().type(), grad_output, input,
           weight, kernel_size, params.stride, params.padding, params.dilation, input_weight_output_mask);
       break;
     }
@@ -1629,7 +1635,7 @@ std::tuple<Tensor, Tensor, Tensor> convolution_backward(
       TORCH_CHECK(input.ndimension() == 5);
       std::tie(backend_grad_input, backend_grad_weight, backend_grad_bias) =
         conv_depthwise3d_backward_stub(
-          input.device().type(), grad_output.contiguous(), input.contiguous(), weight, kernel_size, params.stride,
+          input.device().type(), grad_output, input, weight, kernel_size, params.stride,
           params.padding, params.dilation, output_mask);
       break;
     case ConvBackend::Cudnn:
@@ -1638,7 +1644,9 @@ std::tuple<Tensor, Tensor, Tensor> convolution_backward(
       std::array<bool, 2> input_weight_output_mask = {output_mask[0], output_mask[1]};
       std::tie(backend_grad_input, backend_grad_weight) = cudnn_convolution_backward_stub(
           input.device().type(),
-          input.contiguous(backend_memory_format), grad_output, weight, params.padding, params.stride,
+          // Only make input contiguous when it is necessary for the backwards computation
+          output_mask[1] ? input.contiguous(backend_memory_format) : input,
+          grad_output, weight, params.padding, params.stride,
           params.dilation, params.groups, params.benchmark, params.deterministic, params.allow_tf32,
           input_weight_output_mask);
       break;
@@ -1649,7 +1657,9 @@ std::tuple<Tensor, Tensor, Tensor> convolution_backward(
       std::array<bool, 2> input_weight_output_mask = {output_mask[0], output_mask[1]};
       std::tie(backend_grad_input, backend_grad_weight) = cudnn_convolution_transpose_backward_stub(
         input.device().type(),
-        input.contiguous(backend_memory_format), grad_output, weight, params.padding, params.output_padding,
+        // Only make input contiguous when it is necessary for the backwards computation
+        output_mask[1] ? input.contiguous(backend_memory_format) : input,
+        grad_output, weight, params.padding, params.output_padding,
         params.stride, params.dilation, params.groups, params.benchmark, params.deterministic, params.allow_tf32,
         input_weight_output_mask);
       break;
