@@ -612,7 +612,7 @@ class TestOptim(TestCase):
     # ROCm precision is too low to pass this test
     @skipIfRocm
     def test_adadelta(self):
-        #Handles https://github.com/pytorch/pytorch/issues/69698
+        # Handles https://github.com/pytorch/pytorch/issues/69698
         self.rel_tol = 4e-3
         for optimizer in [optim.Adadelta, optim_mt.Adadelta]:
             self._test_basic_cases(
@@ -635,7 +635,7 @@ class TestOptim(TestCase):
                 optimizer(None, lr=1e-2, rho=1.1)
 
     def test_adadelta_complex(self):
-        #Handles https://github.com/pytorch/pytorch/issues/69698
+        # Handles https://github.com/pytorch/pytorch/issues/69698
         self.rel_tol = 2e-2
         for optimizer in [optim.Adadelta]:
             self._test_complex_optimizer(
