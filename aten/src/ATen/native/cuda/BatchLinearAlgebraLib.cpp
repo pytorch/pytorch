@@ -256,30 +256,30 @@ void apply_ldl_solve(
 } // anonymous namespace
 
 void ldl_factor_cusolver(
-    const Tensor& factors,
+    const Tensor& LD,
     const Tensor& pivots,
     const Tensor& info,
     bool upper,
     bool hermitian) {
-  if (factors.is_complex()) {
+  if (LD.is_complex()) {
     TORCH_CHECK(
         !hermitian,
         "torch.linalg.ldl_factor: complex tensors with hermitian=True flag are not supported.");
   }
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(
-      factors.scalar_type(), "ldl_factor_looped_cusolver", [&] {
-        apply_ldl_factor<scalar_t>(factors, pivots, info, upper);
+      LD.scalar_type(), "ldl_factor_looped_cusolver", [&] {
+        apply_ldl_factor<scalar_t>(LD, pivots, info, upper);
       });
 }
 
 void ldl_solve_cusolver(
-    const Tensor& factors,
+    const Tensor& LD,
     const Tensor& pivots,
     const Tensor& B,
     bool upper) {
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(
-      factors.scalar_type(), "ldl_solve_looped_cusolver", [&] {
-        apply_ldl_solve<scalar_t>(factors, pivots, B, upper);
+      LD.scalar_type(), "ldl_solve_looped_cusolver", [&] {
+        apply_ldl_solve<scalar_t>(LD, pivots, B, upper);
       });
 }
 

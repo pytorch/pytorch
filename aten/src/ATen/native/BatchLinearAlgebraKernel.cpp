@@ -887,14 +887,14 @@ void apply_ldl_factor(
 }
 
 void ldl_factor_kernel(
-    const Tensor& factors,
+    const Tensor& LD,
     const Tensor& pivots,
     const Tensor& info,
     bool upper,
     bool hermitian) {
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(
-      factors.scalar_type(), "ldl_factor_kernel_cpu", [&] {
-        apply_ldl_factor<scalar_t>(factors, pivots, info, upper, hermitian);
+      LD.scalar_type(), "ldl_factor_kernel_cpu", [&] {
+        apply_ldl_factor<scalar_t>(LD, pivots, info, upper, hermitian);
       });
 }
 
@@ -953,14 +953,14 @@ void apply_ldl_solve(
 }
 
 void ldl_solve_kernel(
-    const Tensor& factors,
+    const Tensor& LD,
     const Tensor& pivots,
     const Tensor& result,
     bool upper,
     bool hermitian) {
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(
-      factors.scalar_type(), "ldl_solve_kernel_cpu", [&] {
-        apply_ldl_solve<scalar_t>(factors, pivots, result, upper, hermitian);
+      LD.scalar_type(), "ldl_solve_kernel_cpu", [&] {
+        apply_ldl_solve<scalar_t>(LD, pivots, result, upper, hermitian);
       });
 }
 

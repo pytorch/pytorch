@@ -513,7 +513,7 @@ inline std::tuple<Tensor, Tensor, Tensor> ldl_factor_ex(
 }
 
 inline std::tuple<Tensor&, Tensor&, Tensor&> ldl_factor_ex_out(
-    Tensor& factors,
+    Tensor& LD,
     Tensor& pivots,
     Tensor& info,
     const Tensor& input,
@@ -521,30 +521,30 @@ inline std::tuple<Tensor&, Tensor&, Tensor&> ldl_factor_ex_out(
     bool hermitian,
     bool check_errors) {
   return torch::linalg_ldl_factor_ex_out(
-      factors, pivots, info, input, upper, hermitian, check_errors);
+      LD, pivots, info, input, upper, hermitian, check_errors);
 }
 
 /// Solve a system of linear equations using the LDL decomposition
 ///
 /// See https://pytorch.org/docs/master/linalg.html#torch.linalg.ldl_solve
 inline Tensor ldl_solve(
-    const Tensor& factors,
+    const Tensor& LD,
     const Tensor& pivots,
     const Tensor& B,
     bool upper,
     bool hermitian) {
-  return torch::linalg_ldl_solve(factors, pivots, B, upper, hermitian);
+  return torch::linalg_ldl_solve(LD, pivots, B, upper, hermitian);
 }
 
 inline Tensor& ldl_solve_out(
     Tensor& result,
-    const Tensor& factors,
+    const Tensor& LD,
     const Tensor& pivots,
     const Tensor& B,
     bool upper,
     bool hermitian) {
   return torch::linalg_ldl_solve_out(
-      result, factors, pivots, B, upper, hermitian);
+      result, LD, pivots, B, upper, hermitian);
 }
 
 /// Computes a tensor `x` such that `matmul(input, x) = other`.

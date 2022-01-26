@@ -1371,24 +1371,24 @@ void apply_ldl_factor(
 }
 
 void ldl_factor_magma(
-    const Tensor& factors,
+    const Tensor& LD,
     const Tensor& pivots,
     const Tensor& info,
     bool upper,
     bool hermitian) {
-  if (factors.is_complex()) {
+  if (LD.is_complex()) {
     TORCH_CHECK(
         hermitian,
         "torch.linalg.ldl_factor: complex tensors with hermitian=False flag are not supported.");
   }
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(
-      factors.scalar_type(), "ldl_factor_magma", [&] {
-        apply_ldl_factor<scalar_t>(factors, pivots, info, upper);
+      LD.scalar_type(), "ldl_factor_magma", [&] {
+        apply_ldl_factor<scalar_t>(LD, pivots, info, upper);
       });
 }
 
 void ldl_factor_kernel(
-    const Tensor& factors,
+    const Tensor& LD,
     const Tensor& pivots,
     const Tensor& info,
     bool upper,
@@ -1397,43 +1397,43 @@ void ldl_factor_kernel(
   switch (preferred_backend) {
     case at::LinalgBackend::Cusolver:
       return ldl_factor_cusolver(
-          factors, pivots, info, upper, hermitian);
+          LD, pivots, info, upper, hermitian);
     case at::LinalgBackend::Magma:
-      return ldl_factor_magma(factors, pivots, info, upper, hermitian);
+      return ldl_factor_magma(LD, pivots, info, upper, hermitian);
     default:
     // By default use cusolver if available and magma otherwise.
     // If cusolver and magma 2.5.4+ are both available and hermitian=true,
     // call magma for complex inputs
 #ifdef USE_CUSOLVER
 #if AT_MAGMA_ENABLED() && (MAGMA_VERSION_MAJOR >= 2 && MAGMA_VERSION_MINOR >= 5 && MAGMA_VERSION_MICRO >= 4)
-      if (factors.is_complex() && hermitian) {
+      if (LD.is_complex() && hermitian) {
         return ldl_factor_magma(
-            factors, pivots, info, upper, hermitian);
+            LD, pivots, info, upper, hermitian);
       }
 #endif
       return ldl_factor_cusolver(
-          factors, pivots, info, upper, hermitian);
+          LD, pivots, info, upper, hermitian);
 #else
-      return ldl_factor_magma(factors, pivots, info, upper, hermitian);
+      return ldl_factor_magma(LD, pivots, info, upper, hermitian);
 #endif
   }
 }
 
 void ldl_solve_kernel(
-    const Tensor& factors,
+    const Tensor& LD,
     const Tensor& pivots,
     const Tensor& B,
     bool upper,
     bool hermitian) {
   // TODO: It should be possible to add the MAGMA backend for this function when using MAGMA 2.6.0
   // https://bitbucket.org/icl/magma/src/c703d112dcf19eb8c73676cef10888aa2ef73457/ReleaseNotes#lines-48
-  if (factors.is_complex()) {
+  if (LD.is_complex()) {
     TORCH_CHECK(
         !hermitian,
         "torch.linalg.ldl_solve: complex tensors with hermitian=True flag are not supported on CUDA.");
   }
 
-  ldl_solve_cusolver(factors, pivots, B, upper);
+  ldl_solve_cusolver(LD, pivots, B, upper);
 }
 
 } // anonymous namespace

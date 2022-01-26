@@ -825,7 +825,7 @@ or symmetric (:attr:`hermitian`\ `= False`).
 :math:`L D L^T` (:attr:`upper`\ `= False`) or :math:`U D U^T` (:attr:`upper`\ `= True`).
 If :attr:`hermitian` is `True` then transpose operation is the conjugate transpose.
 
-:math:`L` (or :math:`U`) and :math:`D` are stored in compact form in ``factors``.
+:math:`L` (or :math:`U`) and :math:`D` are stored in compact form in ``LD``.
 This format is used by :func:`torch.linalg.ldl_solve` for solving linear systems.
 
 ``info`` stores integer error codes from the backend library (see `sytrf` function from LAPACK).
@@ -856,7 +856,7 @@ Keyword args:
     out (tuple, optional): tuple of three tensors to write the output to. Ignored if `None`. Default: `None`.
 
 Returns:
-    A named tuple `(factors, pivots, info)`.
+    A named tuple `(LD, pivots, info)`.
 
 Examples::
 
@@ -866,8 +866,8 @@ Examples::
     tensor([[7.2079, 4.2414, 1.9428],
             [4.2414, 3.4554, 0.3264],
             [1.9428, 0.3264, 1.3823]])
-    >>> factors, pivots, info = torch.linalg.ldl_factor_ex(A)
-    >>> factors
+    >>> LD, pivots, info = torch.linalg.ldl_factor_ex(A)
+    >>> LD
     tensor([[ 7.2079,  0.0000,  0.0000],
             [ 0.5884,  0.9595,  0.0000],
             [ 0.2695, -0.8513,  0.1633]])
@@ -878,11 +878,11 @@ Examples::
 """)
 
 ldl_solve = _add_docstr(_linalg.linalg_ldl_solve, r"""
-linalg.ldl_solve(factors, pivots, B, *, upper=False, hermitian=False, out=None) -> Tensor
+linalg.ldl_solve(LD, pivots, B, *, upper=False, hermitian=False, out=None) -> Tensor
 
 Computes the solution of a system of linear equations using the LDL factorization.
 
-:attr:`factors` and :attr:`pivots` are the compact representation of the LDL factorization and
+:attr:`LD` and :attr:`pivots` are the compact representation of the LDL factorization and
 are expected to be computed by :func:`torch.linalg.ldl_factor_ex`.
 
 :attr:`upper` is a boolean value that controls whether the form of the decomposition is
@@ -900,9 +900,9 @@ the output has the same batch dimensions.
 """ + r"""
 
 Args:
-    factors (Tensor): the `n \times n` matrix or the batch of such matrices of size
+    LD (Tensor): the `n \times n` matrix or the batch of such matrices of size
                       `(*, n, n)` where `*` is one or more batch dimensions.
-    pivots (Tensor): the pivots corresponding to the LDL factorization of :attr:`factors`.
+    pivots (Tensor): the pivots corresponding to the LDL factorization of :attr:`LD`.
     B (Tensor): right-hand side tensor of shape `(*, n, k)`.
 
 Keyword args:
@@ -916,9 +916,9 @@ Examples::
 
     >>> A = torch.randn(2, 3, 3)
     >>> A = A @ A.mT # make symmetric
-    >>> factors, pivots, info = torch.linalg.ldl_factor_ex(A)
+    >>> LD, pivots, info = torch.linalg.ldl_factor_ex(A)
     >>> B = torch.randn(2, 3, 4)
-    >>> X = torch.linalg.ldl_solve(factors, pivots, B)
+    >>> X = torch.linalg.ldl_solve(LD, pivots, B)
     >>> torch.linalg.norm(A @ X - B)
     >>> tensor(0.0001)
 """)

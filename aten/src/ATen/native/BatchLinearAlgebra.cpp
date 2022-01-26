@@ -336,8 +336,8 @@ TORCH_META_FUNC(linalg_ldl_factor_ex)
   auto ndim = self.dim();
 
   // prefer column major strides
-  auto ldu_strides = at::native::contiguous_strides(self.sizes(), /*column_major=*/true);
-  set_output(0, self.sizes(), ldu_strides, self.options(), {}); // factors
+  auto ld_strides = at::native::contiguous_strides(self.sizes(), /*column_major=*/true);
+  set_output(0, self.sizes(), ld_strides, self.options(), {}); // LD
 
   auto pivots_shape =
       IntArrayRef(self.sizes().data(), ndim - 1); // self.shape[:-1]
@@ -351,14 +351,14 @@ TORCH_META_FUNC(linalg_ldl_factor_ex)
 }
 
 TORCH_META_FUNC(linalg_ldl_solve)
-(const Tensor& factors,
+(const Tensor& LD,
  const Tensor& pivots,
  const Tensor& B,
  bool upper,
  bool hermitian) {
-  at::native::squareCheckInputs(factors, "torch.linalg.ldl_solve");
-  at::native::checkFloatingOrComplex(factors, "torch.linalg.ldl_solve");
-  at::native::linearSolveCheckInputs(B, factors, "torch.linalg.ldl_solve");
+  at::native::squareCheckInputs(LD, "torch.linalg.ldl_solve");
+  at::native::checkFloatingOrComplex(LD, "torch.linalg.ldl_solve");
+  at::native::linearSolveCheckInputs(B, LD, "torch.linalg.ldl_solve");
   TORCH_CHECK(
       B.dim() >= 2,
       "torch.linalg.ldl_solve: Expected B to have at least 2 dimensions, but it has ",
@@ -371,15 +371,15 @@ TORCH_META_FUNC(linalg_ldl_solve)
       "torch.linalg.ldl_solve: Expected pivots to be integers. Got ",
       pivots.scalar_type());
   TORCH_CHECK(
-      factors.scalar_type() == B.scalar_type(),
+      LD.scalar_type() == B.scalar_type(),
       "torch.linalg.ldl_solve: ",
-      "factors dtype",
-      factors.scalar_type(),
+      "LD dtype",
+      LD.scalar_type(),
       " does not match b dtype ",
       B.scalar_type());
 
     std::vector<int64_t> B_broadcast_size;
-    std::tie(B_broadcast_size, std::ignore) = at::native::_linalg_broadcast_batch_dims(B, factors);
+    std::tie(B_broadcast_size, std::ignore) = at::native::_linalg_broadcast_batch_dims(B, LD);
 
   // prefer column major strides
   auto result_strides = at::native::contiguous_strides(B_broadcast_size, /*column_major=*/true);
@@ -4245,7 +4245,7 @@ TORCH_IMPL_FUNC(linalg_ldl_factor_ex_out)
  bool upper,
  bool hermitian,
  bool check_errors,
- const Tensor& factors,
+ const Tensor& LD,
  const Tensor& pivots,
  const Tensor& info) {
   // LAPACK workspace query segfalts if the input has 0 in batch dimensions.
@@ -4257,24 +4257,24 @@ TORCH_IMPL_FUNC(linalg_ldl_factor_ex_out)
   auto pivots_ = pivots.expect_contiguous();
   auto info_ = info.expect_contiguous();
 
-  auto factors_ = at::native::borrow_else_clone(
-      factors.mT().is_contiguous(), factors, self, /*row_major=*/false);
-  if (factors.mT().is_contiguous()) {
-    factors_->copy_(self);
+  auto LD_ = at::native::borrow_else_clone(
+      LD.mT().is_contiguous(), LD, self, /*row_major=*/false);
+  if (LD.mT().is_contiguous()) {
+    LD_->copy_(self);
   }
 
   if (upper) {
-    factors_->triu_();
+    LD_->triu_();
   } else {
-    factors_->tril_();
+    LD_->tril_();
   }
 
   // call ldl_factor_stub that fills the result tensors
   ldl_factor_stub(
-      self.device().type(), *factors_, *pivots_, *info_, upper, hermitian);
+      self.device().type(), *LD_, *pivots_, *info_, upper, hermitian);
 
-  if (!factors.is_same(*factors_)) {
-    factors.copy_(*factors_);
+  if (!LD.is_same(*LD_)) {
+    LD.copy_(*LD_);
   }
   if (!info.is_same(*info_)) {
     info.copy_(*info_);
@@ -4292,24 +4292,24 @@ TORCH_IMPL_FUNC(linalg_ldl_factor_ex_out)
 DEFINE_DISPATCH(ldl_solve_stub);
 
 TORCH_IMPL_FUNC(linalg_ldl_solve_out)
-(const Tensor& factors,
+(const Tensor& LD,
  const Tensor& pivots,
  const Tensor& B,
  bool upper,
  bool hermitian,
  const Tensor& result) {
-  if (factors.numel() == 0 || pivots.numel() == 0) {
+  if (LD.numel() == 0 || pivots.numel() == 0) {
     return;
   }
 
   Tensor B_broadcast;
   std::tie(B_broadcast, std::ignore) =
-      _linalg_broadcast_batch_dims(B, factors, /*don't check errors*/ nullptr);
+      _linalg_broadcast_batch_dims(B, LD, /*don't check errors*/ nullptr);
 
   auto pivots_ = pivots.expect_contiguous();
 
-  auto factors_ = at::native::borrow_else_clone(
-      result.mT().is_contiguous(), factors, factors, /*row_major=*/false);
+  auto LD_ = at::native::borrow_else_clone(
+      result.mT().is_contiguous(), LD, LD, /*row_major=*/false);
   auto result_ = at::native::borrow_else_clone(
       result.mT().is_contiguous(), result, B, /*row_major=*/false);
   if (result.mT().is_contiguous()) {
@@ -4317,7 +4317,7 @@ TORCH_IMPL_FUNC(linalg_ldl_solve_out)
   }
 
   ldl_solve_stub(
-      B.device().type(), *factors_, *pivots_, *result_, upper, hermitian);
+      B.device().type(), *LD_, *pivots_, *result_, upper, hermitian);
 
   if (!result.is_same(*result_)) {
     result.copy_(*result_);
