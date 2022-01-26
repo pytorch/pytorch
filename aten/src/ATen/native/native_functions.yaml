@@ -6014,6 +6014,7 @@
   variants: function, method
   dispatch:
     CPU: scatter_reduce_two_cpu
+    CUDA: scatter_reduce_two_cuda
 
 - func: eq_.Scalar(Tensor(a!) self, Scalar other) -> Tensor(a!)
   structured_delegate: eq.Scalar_out
