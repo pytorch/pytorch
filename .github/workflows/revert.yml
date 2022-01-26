@@ -1,11 +1,11 @@
-name: Validate and merge PR
+name: Revert merged PR
 
 on:
   repository_dispatch:
-    types: [try-merge]
+    types: [try-revert]
 
 jobs:
-  do_merge:
+  do_revert:
     runs-on: ubuntu-20.04
     steps:
       - name: Setup Python
@@ -23,9 +23,9 @@ jobs:
         run: |
           git config --global user.email "pytorchmergebot@users.noreply.github.com"
           git config --global user.name "PyTorch MergeBot"
-      - name: Merge PR
+      - name: Revert PR
         env:
           GITHUB_TOKEN: ${{ secrets.MERGEBOT_TOKEN }}
           PR_NUM: ${{ github.event.client_payload.pr_num }}
         run: |
-          python3 .github/scripts/trymerge.py "${PR_NUM}"
+          python3 .github/scripts/trymerge.py --revert "${PR_NUM}"
