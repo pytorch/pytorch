@@ -31,16 +31,6 @@ def get_processor_arch_name(gpu_version):
     )
 
 CONFIG_TREE_DATA = OrderedDict(
-    macos_arm64=([None], OrderedDict(
-        wheel=[
-            "3.8",
-            "3.9",
-        ],
-        conda=[
-            "3.8",
-            "3.9",
-        ],
-    )),
     windows=(
         # Stop building Win+CU102, see https://github.com/pytorch/pytorch/issues/65648
         [v for v in dimensions.GPU_VERSIONS if v not in dimensions.ROCM_VERSION_LABELS and v != "cuda102"],

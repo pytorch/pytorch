@@ -293,13 +293,15 @@ class BinaryBuildWorkflow:
     abi_version: str = ''
     ciflow_config: CIFlowConfig = field(default_factory=CIFlowConfig)
     is_scheduled: str = ''
+    # Mainly for macos
+    cross_compile_arm64: bool = False
+    xcode_version: str = ''
 
     def __post_init__(self) -> None:
         if self.abi_version:
             self.build_environment = f"{self.os}-binary-{self.package_type}-{self.abi_version}"
         else:
             self.build_environment = f"{self.os}-binary-{self.package_type}"
-
 
     def generate_workflow_file(self, workflow_template: jinja2.Template) -> None:
         output_file_path = GITHUB_DIR / f"workflows/generated-{self.build_environment}.yml"
@@ -845,6 +847,7 @@ class OperatingSystem:
     LINUX = "linux"
     WINDOWS = "windows"
     MACOS = "macos"
+    MACOS_ARM64 = "macos-arm64"
 
 LINUX_BINARY_BUILD_WORFKLOWS = [
     BinaryBuildWorkflow(
@@ -978,6 +981,26 @@ MACOS_BINARY_BUILD_WORKFLOWS = [
         ),
         ciflow_config=CIFlowConfig(
             labels={LABEL_CIFLOW_DEFAULT, LABEL_CIFLOW_BINARIES, LABEL_CIFLOW_BINARIES_LIBTORCH},
+            isolated_workflow=True,
+        ),
+    ),
+    BinaryBuildWorkflow(
+        os=OperatingSystem.MACOS_ARM64,
+        package_type="wheel",
+        build_configs=generate_binary_build_matrix.generate_wheels_matrix(OperatingSystem.MACOS),
+        cross_compile_arm64=True,
+        ciflow_config=CIFlowConfig(
+            labels={LABEL_CIFLOW_DEFAULT, LABEL_CIFLOW_BINARIES, LABEL_CIFLOW_BINARIES_WHEEL},
+            isolated_workflow=True,
+        ),
+    ),
+    BinaryBuildWorkflow(
+        os=OperatingSystem.MACOS_ARM64,
+        package_type="conda",
+        cross_compile_arm64=True,
+        build_configs=generate_binary_build_matrix.generate_conda_matrix(OperatingSystem.MACOS_ARM64),
+        ciflow_config=CIFlowConfig(
+            labels={LABEL_CIFLOW_DEFAULT, LABEL_CIFLOW_BINARIES, LABEL_CIFLOW_BINARIES_CONDA},
             isolated_workflow=True,
         ),
     ),

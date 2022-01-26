@@ -79,12 +79,15 @@ def list_without(in_list: List[str], without: List[str]) -> List[str]:
 def generate_conda_matrix(os: str) -> List[Dict[str, str]]:
     ret: List[Dict[str, str]] = []
     arches = ["cpu"]
+    python_versions = FULL_PYTHON_VERSIONS
     if os == "linux":
         arches += CUDA_ARCHES
     elif os == "windows":
         # We don't build CUDA 10.2 for window see https://github.com/pytorch/pytorch/issues/65648
         arches += list_without(CUDA_ARCHES, ["10.2"])
-    for python_version in FULL_PYTHON_VERSIONS:
+    elif os == "macos-arm64":
+        python_versions = list_without(python_versions, ["3.7"])
+    for python_version in python_versions:
         # We don't currently build conda packages for rocm
         for arch_version in arches:
             gpu_arch_type = arch_type(arch_version)
@@ -153,6 +156,7 @@ def generate_libtorch_matrix(os: str, abi_version: str) -> List[Dict[str, str]]:
 def generate_wheels_matrix(os: str) -> List[Dict[str, str]]:
     arches = ["cpu"]
     package_type = "wheel"
+    python_versions = FULL_PYTHON_VERSIONS
     if os == "linux":
         arches += CUDA_ARCHES + ROCM_ARCHES
         # NOTE: We only build manywheel packages for linux
@@ -160,8 +164,10 @@ def generate_wheels_matrix(os: str) -> List[Dict[str, str]]:
     elif os == "windows":
         # We don't build CUDA 10.2 for window see https://github.com/pytorch/pytorch/issues/65648
         arches += list_without(CUDA_ARCHES, ["10.2"])
+    elif os == "macos-arm64":
+        python_versions = list_without(python_versions, ["3.7"])
     ret: List[Dict[str, str]] = []
-    for python_version in FULL_PYTHON_VERSIONS:
+    for python_version in python_versions:
         for arch_version in arches:
             gpu_arch_type = arch_type(arch_version)
             gpu_arch_version = "" if arch_version == "cpu" else arch_version
@@ -181,14 +187,3 @@ def generate_wheels_matrix(os: str) -> List[Dict[str, str]]:
                 }
             )
     return ret
-
-
-def generate_binary_build_matrix(os: str) -> List[Dict[str, str]]:
-    return {
-        "linux": [
-            *generate_conda_matrix(os),
-            *generate_libtorch_matrix(os, abi_version=PRE_CXX11_ABI),
-            *generate_libtorch_matrix(os, abi_version=CXX11_ABI),
-            *generate_wheels_matrix(os),
-        ]
-    }[os]

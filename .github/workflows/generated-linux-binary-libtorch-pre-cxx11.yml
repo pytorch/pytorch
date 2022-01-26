@@ -4,12 +4,6 @@
 name: linux-binary-libtorch-pre-cxx11
 
 on:
-  pull_request:
-    # NOTE: This workflow should only trigger when changes are made to binary builds
-    # Should catch most of the binary build / test scripts
-    paths:
-      - '.github/workflows/generated-linux-binary-*.yml'
-      - '.circleci/scripts/binary_*.sh'
   push:
     # NOTE: Meta Employees can trigger new nightlies using: https://fburl.com/trigger_pytorch_nightly_build
     branches:
