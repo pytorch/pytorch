@@ -386,7 +386,7 @@ def try_revert(repo: GitRepo, pr: GitHubPR, dry_run: bool = False) -> None:
         commits = repo.commits_resolving_gh_pr(pr.pr_num)
         if len(commits) == 0:
             raise RuntimeError("Can't find any commits resolving PR")
-        commit_sha = commits[-1]
+        commit_sha = commits[0]
     msg = repo.commit_message(commit_sha)
     rc = RE_DIFF_REV.search(msg)
     if rc is not None:
@@ -395,7 +395,7 @@ def try_revert(repo: GitRepo, pr: GitHubPR, dry_run: bool = False) -> None:
     repo.revert(commit_sha)
     msg = repo.commit_message("HEAD")
     msg = re.sub(RE_PULL_REQUEST_RESOLVED, "", msg)
-    msg += f"\nReverted on behalf of @{author_login}\n"
+    msg += f"\nReverted {pr.get_pr_url()} on behalf of @{author_login}\n"
     repo.amend_commit_message(msg)
     repo.push(pr.default_branch(), dry_run)
     if not dry_run:
