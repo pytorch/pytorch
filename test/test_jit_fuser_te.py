@@ -2074,8 +2074,7 @@ class TestTEFuser(JitTestCase):
 
             funcs = [foo, fi, fum]
             with inline_fusion_groups():
-                # TODO: cuda ir eval error
-                for device in ['cpu']:
+                for device in self.devices:
                     I = partial(torch.randint, 0, 100, device=device)
                     R = partial(torch.randn, device=device)
 
@@ -2228,7 +2227,7 @@ works_list = [
 ]
 
 known_failures = [
-    '__rmatmul__'
+    '__rmatmul__',
     'frac',
     'matmul',
 ]

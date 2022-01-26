@@ -68,21 +68,19 @@ static std::atomic<bool> executor_mode{true};
 static std::atomic<bool> profiling_mode{true};
 #endif
 
-std::mutex fusion_strategy_lock;
+static std::mutex fusion_strategy_lock;
 static FusionStrategy fusion_strategy = {{FusionBehavior::STATIC, 20}};
 
 FusionStrategy getFusionStrategy() {
-  fusion_strategy_lock.lock();
+  std::lock_guard<std::mutex> guard(fusion_strategy_lock);
   FusionStrategy strategy = fusion_strategy;
-  fusion_strategy_lock.unlock();
   return strategy;
 }
 
 FusionStrategy setFusionStrategy(FusionStrategy& strategy) {
-  fusion_strategy_lock.lock();
+  std::lock_guard<std::mutex> guard(fusion_strategy_lock);
   auto old_strategy = fusion_strategy;
   fusion_strategy = strategy;
-  fusion_strategy_lock.unlock();
   return old_strategy;
 }
 
@@ -372,7 +370,7 @@ FusionBehavior getCurrentBehavior(size_t remaining_depth) {
   }
   // should never get here
   TORCH_WARN("Stratgy changed mid-invocation, NYI");
-  return FusionBehavior::DYNAMIC;
+  return FusionBehavior::STATIC;
 }
 
 void runNoGradOptimizations(std::shared_ptr<Graph>& graph, size_t remaining_bailout_depth) {
