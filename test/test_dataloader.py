@@ -2349,7 +2349,6 @@ except RuntimeError as e:
                 # and can cache values safely
                 dataset.start = i
 
-    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
     def test_early_exit(self):
         import subprocess
         proc = subprocess.run([sys.executable, '-c', """\
