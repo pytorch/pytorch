@@ -7,7 +7,7 @@ import torch.jit as jit
 import torch.nn as nn
 from torch import Tensor
 from torch.distributed.rpc import RRef
-from torch.distributed.optim import functional_optim_map
+from .utils import functional_optim_map
 import torch.distributed.autograd as dist_autograd
 
 
