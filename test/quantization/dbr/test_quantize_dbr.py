@@ -119,6 +119,7 @@ class TestQuantizeDBRIndividualOps(QuantizeDBRTestCase):
     """
     def test_conv(self):
         convs = {1: nn.Conv1d, 2: nn.Conv2d, 3: nn.Conv3d}
+
         class M(torch.nn.Module):
             def __init__(self, dim):
                 super().__init__()
@@ -135,6 +136,7 @@ class TestQuantizeDBRIndividualOps(QuantizeDBRTestCase):
 
     def test_conv_functional(self):
         convs = {1: F.conv1d, 2: F.conv2d, 3: F.conv3d}
+
         class M(torch.nn.Module):
             def __init__(self, dim, weight):
                 super().__init__()
