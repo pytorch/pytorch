@@ -137,6 +137,7 @@ libtorch_profiler_sources = [
     "torch/csrc/autograd/profiler_kineto.cpp",
     "torch/csrc/profiler/api.cpp",
     "torch/csrc/profiler/kineto_shim.cpp",
+    "torch/csrc/profiler/nvtx_observer.cpp",
     "torch/csrc/monitor/counters.cpp",
     "torch/csrc/monitor/events.cpp",
 ]
