@@ -65,7 +65,7 @@ bool LlgaTensorImpl::has_storage() const {
 }
 
 at::Tensor empty_llga(const LlgaTensorDesc& desc, const c10::TensorOptions& options) {
-  const auto sizes = desc.sizes();
+  const auto& sizes = desc.sizes();
   auto nbytes = desc.storage_size();
 
   auto allocator = at::GetCPUAllocator();
