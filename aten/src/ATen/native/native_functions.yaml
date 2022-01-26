@@ -1610,6 +1610,10 @@
   dispatch:
     CompositeExplicitAutograd: diagonal
 
+- func: linalg_diagonal(Tensor(a) A, *, int offset=0, int dim1=-2, int dim2=-1) -> Tensor(a)
+  python_module: linalg
+  variants: function
+
 - func: diagonal.Dimname(Tensor(a) self, *, Dimname outdim, Dimname dim1, Dimname dim2, int offset=0) -> Tensor(a)
   variants: function, method
 

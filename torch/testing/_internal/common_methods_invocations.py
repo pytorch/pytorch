@@ -6022,11 +6022,13 @@ def sample_inputs_diagonal_diag_embed(op_info, device, dtype, requires_grad, **k
     # Shapes for 3D Tensors
     shapes_3d = ((M, M, M),)
 
-    args_2d = ((), (2,), (-2,), (1,))
-    args_3d = ((1, 1, 2), (2, 0, 1), (-2, 0, 1))
+    kwargs_2d = (dict(), dict(offset=2), dict(offset=2), dict(offset=1))
+    kwargs_3d = (dict(offset=1, dim1=1, dim2=2),
+                 dict(offset=2, dim1=0, dim2=1),
+                 dict(offset=-2, dim1=0, dim2=1))
 
-    for shape, arg in chain(product(shapes_2d, args_2d), product(shapes_3d, args_3d)):
-        yield SampleInput(make_arg(shape), args=arg)
+    for shape, kwarg in chain(product(shapes_2d, kwargs_2d), product(shapes_3d, kwargs_3d)):
+        yield SampleInput(make_arg(shape), kwargs=kwarg)
 
 
 def sample_inputs_diagonal_scatter(op_info, device, dtype, requires_grad, **kwargs):
@@ -9309,6 +9311,9 @@ op_db: List[OpInfo] = [
            supports_fwgrad_bwgrad=True,
            sample_inputs_func=sample_inputs_diagonal_diag_embed),
     OpInfo('diagonal',
+           # They are not strictly aliases as they have diverging defaults, but we can see them as aliases for testing purposes
+           # If we add tests that test the function against the alias, make linalg.diagonal into its own OpInfo
+           aliases=('linalg.diagonal',),
            dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
            supports_out=False,
            supports_forward_ad=True,
