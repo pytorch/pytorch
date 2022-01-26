@@ -170,7 +170,7 @@ bool BlobsQueue::canWrite() {
   // writer is always within [reader, reader + size)
   // we can write if reader is within [reader, reader + size)
   CAFFE_ENFORCE_LE(reader_, writer_);
-  CAFFE_ENFORCE_LE(writer_, reader_ + queue_.size());
+  CAFFE_ENFORCE_LE(writer_, static_cast<int64_t>(reader_ + queue_.size()));
   // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
   return writer_ != reader_ + queue_.size();
 }
