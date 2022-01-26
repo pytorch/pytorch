@@ -1370,7 +1370,7 @@ void apply_ldl_factor(
 #endif
 }
 
-void ldl_factor_looped_magma(
+void ldl_factor_magma(
     const Tensor& factors,
     const Tensor& pivots,
     const Tensor& info,
@@ -1396,10 +1396,10 @@ void ldl_factor_kernel(
   auto preferred_backend = at::globalContext().linalgPreferredBackend();
   switch (preferred_backend) {
     case at::LinalgBackend::Cusolver:
-      return ldl_factor_looped_cusolver(
+      return ldl_factor_cusolver(
           factors, pivots, info, upper, hermitian);
     case at::LinalgBackend::Magma:
-      return ldl_factor_looped_magma(factors, pivots, info, upper, hermitian);
+      return ldl_factor_magma(factors, pivots, info, upper, hermitian);
     default:
     // By default use cusolver if available and magma otherwise.
     // If cusolver and magma 2.5.4+ are both available and hermitian=true,
@@ -1407,14 +1407,14 @@ void ldl_factor_kernel(
 #ifdef USE_CUSOLVER
 #if AT_MAGMA_ENABLED() && (MAGMA_VERSION_MAJOR >= 2 && MAGMA_VERSION_MINOR >= 5 && MAGMA_VERSION_MICRO >= 4)
       if (factors.is_complex() && hermitian) {
-        return ldl_factor_looped_magma(
+        return ldl_factor_magma(
             factors, pivots, info, upper, hermitian);
       }
 #endif
-      return ldl_factor_looped_cusolver(
+      return ldl_factor_cusolver(
           factors, pivots, info, upper, hermitian);
 #else
-      return ldl_factor_looped_magma(factors, pivots, info, upper, hermitian);
+      return ldl_factor_magma(factors, pivots, info, upper, hermitian);
 #endif
   }
 }
@@ -1433,7 +1433,7 @@ void ldl_solve_kernel(
         "torch.linalg.ldl_solve: complex tensors with hermitian=True flag are not supported.");
   }
 
-  ldl_solve_looped_cusolver(factors, pivots, B, upper);
+  ldl_solve_cusolver(factors, pivots, B, upper);
 }
 
 } // anonymous namespace

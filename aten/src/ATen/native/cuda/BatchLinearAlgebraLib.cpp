@@ -255,7 +255,7 @@ void apply_ldl_solve(
 
 } // anonymous namespace
 
-void ldl_factor_looped_cusolver(
+void ldl_factor_cusolver(
     const Tensor& factors,
     const Tensor& pivots,
     const Tensor& info,
@@ -272,7 +272,7 @@ void ldl_factor_looped_cusolver(
       });
 }
 
-void ldl_solve_looped_cusolver(
+void ldl_solve_cusolver(
     const Tensor& factors,
     const Tensor& pivots,
     const Tensor& B,
