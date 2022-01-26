@@ -2,7 +2,6 @@ from typing import Any, Callable
 
 import torch
 import torch.distributed as dist
-from torch.distributed.optim import create_functional_optim
 
 _FUNCTIONAL_OPTIM_STEP_METHOD_NAME = "step_param"
 
@@ -14,31 +13,10 @@ class _OptimizerHookState(object):
 
     __slots__ = ["functional_optimizer", "params_to_optimize"]
 
-    def __init__(
-        self, functional_optim_cls, *functional_optim_args, params=None, **functional_optim_kwargs
-    ):
-        self.functional_optimizer = create_functional_optim(
-            functional_optim_cls,
-            *functional_optim_args,
-            **functional_optim_kwargs,
-        )
+    def __init__(self, functional_optim, params=None):
+        self.functional_optimizer = functional_optim
         self._check_valid_functional_optim()
         self._set_params_to_optimize(params)
-
-    @classmethod
-    def from_functional_optim(cls, functional_optim, params=None):
-        r"""
-        Create a `_OptimizerHookState`, which simply
-        holds a functional optimizer, directly from a
-        functional optimizer given by `functional_optim`.
-        Note that the `functional_optim` must implement
-        `step_param` to support per-parameter optimization.
-        """
-        opt_hook_state_inst = cls.__new__(cls)  # Does not call __init__
-        opt_hook_state_inst.functional_optimizer = functional_optim
-        opt_hook_state_inst._check_valid_functional_optim()
-        opt_hook_state_inst._set_params_to_optimize(params)
-        return opt_hook_state_inst
 
     def _set_params_to_optimize(self, params):
         if params is not None:

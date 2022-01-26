@@ -59,7 +59,7 @@ class _OverlappedStandardOptimizer(OverlappedOptimizer):
     def __init__(self, optim_cls: Type, params, *optim_args, **optim_kwargs) -> None:
         super().__init__(optim_cls)
         f_optim = as_functional_optim(self.optim_cls, *optim_args, **optim_kwargs)
-        self._opt_hook_state = _OptimizerHookState.from_functional_optim(f_optim, params)
+        self._opt_hook_state = _OptimizerHookState(f_optim, params)
 
     def register_ddp(self, ddp_inst: DistributedDataParallel):
         # NOTE: using a custom communication hook and fused optimizer is not
