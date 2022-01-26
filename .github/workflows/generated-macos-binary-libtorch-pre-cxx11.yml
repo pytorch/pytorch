@@ -85,7 +85,7 @@ jobs:
   libtorch-cpu-shared-with-deps-pre-cxx11-upload:  # Uploading
     runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: libtorch-cpu-shared-with-deps-pre-cxx11-test
+    needs: libtorch-cpu-shared-with-deps-pre-cxx11-build
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       BUILDER_ROOT: ${{ github.workspace }}/builder
@@ -249,7 +249,7 @@ jobs:
   libtorch-cpu-shared-without-deps-pre-cxx11-upload:  # Uploading
     runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: libtorch-cpu-shared-without-deps-pre-cxx11-test
+    needs: libtorch-cpu-shared-without-deps-pre-cxx11-build
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       BUILDER_ROOT: ${{ github.workspace }}/builder
@@ -413,7 +413,7 @@ jobs:
   libtorch-cpu-static-with-deps-pre-cxx11-upload:  # Uploading
     runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: libtorch-cpu-static-with-deps-pre-cxx11-test
+    needs: libtorch-cpu-static-with-deps-pre-cxx11-build
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       BUILDER_ROOT: ${{ github.workspace }}/builder
@@ -577,7 +577,7 @@ jobs:
   libtorch-cpu-static-without-deps-pre-cxx11-upload:  # Uploading
     runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: libtorch-cpu-static-without-deps-pre-cxx11-test
+    needs: libtorch-cpu-static-without-deps-pre-cxx11-build
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       BUILDER_ROOT: ${{ github.workspace }}/builder
@@ -741,7 +741,7 @@ jobs:
   libtorch-cuda10_2-shared-with-deps-pre-cxx11-upload:  # Uploading
     runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: libtorch-cuda10_2-shared-with-deps-pre-cxx11-test
+    needs: libtorch-cuda10_2-shared-with-deps-pre-cxx11-build
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       BUILDER_ROOT: ${{ github.workspace }}/builder
@@ -905,7 +905,7 @@ jobs:
   libtorch-cuda10_2-shared-without-deps-pre-cxx11-upload:  # Uploading
     runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: libtorch-cuda10_2-shared-without-deps-pre-cxx11-test
+    needs: libtorch-cuda10_2-shared-without-deps-pre-cxx11-build
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       BUILDER_ROOT: ${{ github.workspace }}/builder
@@ -1069,7 +1069,7 @@ jobs:
   libtorch-cuda10_2-static-with-deps-pre-cxx11-upload:  # Uploading
     runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: libtorch-cuda10_2-static-with-deps-pre-cxx11-test
+    needs: libtorch-cuda10_2-static-with-deps-pre-cxx11-build
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       BUILDER_ROOT: ${{ github.workspace }}/builder
@@ -1233,7 +1233,7 @@ jobs:
   libtorch-cuda10_2-static-without-deps-pre-cxx11-upload:  # Uploading
     runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: libtorch-cuda10_2-static-without-deps-pre-cxx11-test
+    needs: libtorch-cuda10_2-static-without-deps-pre-cxx11-build
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       BUILDER_ROOT: ${{ github.workspace }}/builder
@@ -1397,7 +1397,7 @@ jobs:
   libtorch-cuda11_1-shared-with-deps-pre-cxx11-upload:  # Uploading
     runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: libtorch-cuda11_1-shared-with-deps-pre-cxx11-test
+    needs: libtorch-cuda11_1-shared-with-deps-pre-cxx11-build
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       BUILDER_ROOT: ${{ github.workspace }}/builder
@@ -1561,7 +1561,7 @@ jobs:
   libtorch-cuda11_1-shared-without-deps-pre-cxx11-upload:  # Uploading
     runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: libtorch-cuda11_1-shared-without-deps-pre-cxx11-test
+    needs: libtorch-cuda11_1-shared-without-deps-pre-cxx11-build
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       BUILDER_ROOT: ${{ github.workspace }}/builder
@@ -1725,7 +1725,7 @@ jobs:
   libtorch-cuda11_1-static-with-deps-pre-cxx11-upload:  # Uploading
     runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: libtorch-cuda11_1-static-with-deps-pre-cxx11-test
+    needs: libtorch-cuda11_1-static-with-deps-pre-cxx11-build
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       BUILDER_ROOT: ${{ github.workspace }}/builder
@@ -1889,7 +1889,7 @@ jobs:
   libtorch-cuda11_1-static-without-deps-pre-cxx11-upload:  # Uploading
     runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: libtorch-cuda11_1-static-without-deps-pre-cxx11-test
+    needs: libtorch-cuda11_1-static-without-deps-pre-cxx11-build
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       BUILDER_ROOT: ${{ github.workspace }}/builder
@@ -2053,7 +2053,7 @@ jobs:
   libtorch-cuda11_3-shared-with-deps-pre-cxx11-upload:  # Uploading
     runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: libtorch-cuda11_3-shared-with-deps-pre-cxx11-test
+    needs: libtorch-cuda11_3-shared-with-deps-pre-cxx11-build
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       BUILDER_ROOT: ${{ github.workspace }}/builder
@@ -2217,7 +2217,7 @@ jobs:
   libtorch-cuda11_3-shared-without-deps-pre-cxx11-upload:  # Uploading
     runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: libtorch-cuda11_3-shared-without-deps-pre-cxx11-test
+    needs: libtorch-cuda11_3-shared-without-deps-pre-cxx11-build
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       BUILDER_ROOT: ${{ github.workspace }}/builder
@@ -2381,7 +2381,7 @@ jobs:
   libtorch-cuda11_3-static-with-deps-pre-cxx11-upload:  # Uploading
     runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: libtorch-cuda11_3-static-with-deps-pre-cxx11-test
+    needs: libtorch-cuda11_3-static-with-deps-pre-cxx11-build
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       BUILDER_ROOT: ${{ github.workspace }}/builder
@@ -2545,7 +2545,7 @@ jobs:
   libtorch-cuda11_3-static-without-deps-pre-cxx11-upload:  # Uploading
     runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: libtorch-cuda11_3-static-without-deps-pre-cxx11-test
+    needs: libtorch-cuda11_3-static-without-deps-pre-cxx11-build
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       BUILDER_ROOT: ${{ github.workspace }}/builder
@@ -2709,7 +2709,7 @@ jobs:
   libtorch-cuda11_5-shared-with-deps-pre-cxx11-upload:  # Uploading
     runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: libtorch-cuda11_5-shared-with-deps-pre-cxx11-test
+    needs: libtorch-cuda11_5-shared-with-deps-pre-cxx11-build
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       BUILDER_ROOT: ${{ github.workspace }}/builder
@@ -2873,7 +2873,7 @@ jobs:
   libtorch-cuda11_5-shared-without-deps-pre-cxx11-upload:  # Uploading
     runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: libtorch-cuda11_5-shared-without-deps-pre-cxx11-test
+    needs: libtorch-cuda11_5-shared-without-deps-pre-cxx11-build
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       BUILDER_ROOT: ${{ github.workspace }}/builder
@@ -3037,7 +3037,7 @@ jobs:
   libtorch-cuda11_5-static-with-deps-pre-cxx11-upload:  # Uploading
     runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: libtorch-cuda11_5-static-with-deps-pre-cxx11-test
+    needs: libtorch-cuda11_5-static-with-deps-pre-cxx11-build
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       BUILDER_ROOT: ${{ github.workspace }}/builder
@@ -3201,7 +3201,7 @@ jobs:
   libtorch-cuda11_5-static-without-deps-pre-cxx11-upload:  # Uploading
     runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: libtorch-cuda11_5-static-without-deps-pre-cxx11-test
+    needs: libtorch-cuda11_5-static-without-deps-pre-cxx11-build
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       BUILDER_ROOT: ${{ github.workspace }}/builder
