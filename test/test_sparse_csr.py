@@ -12,7 +12,7 @@ from torch.testing._internal.common_device_type import \
     (ops, instantiate_device_type_tests, dtypes, dtypesIfCUDA, onlyCPU, onlyCUDA, skipCUDAIfNoCusparseGeneric,
      precisionOverride, skipMeta, skipCUDAIf, skipCUDAIfRocm, skipCPUIfNoMklSparse)
 from torch.testing._internal.common_methods_invocations import \
-    (op_db, UnaryUfuncInfo, sparse_csr_funcs, sparse_csr_unary_ufuncs, )
+    (op_db, UnaryUfuncInfo, sparse_csr_funcs, )
 from torch.testing._internal.common_cuda import _get_torch_cuda_version
 from torch.testing._internal.common_dtype import floating_types, get_all_dtypes
 from test_sparse import CUSPARSE_SPMM_COMPLEX128_SUPPORTED
@@ -1212,8 +1212,12 @@ class TestSparseCSR(TestCase):
             expected = op(sample.input, *sample.args, **sample.kwargs)
             sample.input = sample.input.to_sparse_csr()
 
-            # TODO: @krshrimali, enable support for complex inputs for square
-            if sample.input.is_complex() and op.name == "square":
+            # pow(Tensor, Tensor) is not supported yet for Sparse inputs
+            if op.name == "pow" and torch.is_tensor(sample.args[0]):
+                continue
+
+            # TODO: @krshrimali, enable support for complex inputs for pow and square
+            if sample.input.is_complex() and (op.name == "square" or op.name == "pow"):
                 with self.assertRaisesRegex(RuntimeError, "not supported"):
                     expect = op(sample.input, *sample.args, **sample.kwargs)
                 continue
