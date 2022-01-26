@@ -749,26 +749,9 @@ class TestQuantizeFxTRTOps(QuantizationTestCase):
         self.checkGraphModuleNodes(m.standalone, expected_node_occurrence=standalone_node_occurrence)
 
     def test_repro(self):
-        merge = torch.load("/home/jerryzh/local/tmp/_run_on_acc_1.pt")
-        merge_inputs_cuda = torch.load("/home/jerryzh/local/tmp/_run_on_acc_1_input.pt")
-
-        # qconfig = torch.ao.quantization.QConfig(
-        #     activation=torch.ao.quantization.observer.HistogramObserver.with_args(
-        #         qscheme=torch.per_tensor_symmetric, dtype=torch.qint8
-        #     ),
-        #     weight=torch.ao.quantization.default_weight_observer
-        #     # uncomment to check per channel quant works
-        #     # weight=torch.quantization.default_per_channel_weight_observer
-        # )
-        # merge = prepare_fx(merge,
-        #                    {"object_type": [
-        #                        (torch.nn.Linear, qconfig),
-        #                        (torch.nn.ReLU, qconfig)],
-        #                     })
-        # merge = _convert_fx_do_not_use(merge, is_reference=True)
-        # merge.cpu()
-        # print("after convert:", merge)
-        merge_inputs_cuda = [i.cpu() for i in merge_inputs_cuda]
+        model = torch.load("/home/jerryzh/local/tmp/_run_on_acc_1.pt")
+        model_inputs_cuda = torch.load("/home/jerryzh/local/tmp/_run_on_acc_1_input.pt")
+        model_inputs_cuda = [i.cpu() for i in model_inputs_cuda]
         batch_size = 2048
         fp16_mode = False
         int8_mode = True
@@ -780,14 +763,14 @@ class TestQuantizeFxTRTOps(QuantizationTestCase):
             int8_mode=int8_mode,
             strict_type_constraints=True,
         )
-        print("merge:", merge)
+        print("model:", model)
         trt_interpreter = LowerTrtInterpreter.create(lower_setting)
-        merge = acc_tracer.trace(merge, merge_inputs_cuda)
+        model = acc_tracer.trace(model, model_inputs_cuda)
         interp_res = trt_interpreter(
-            merge, merge_inputs_cuda, "split_module"
+            model, model_inputs_cuda, "split_module"
         )
 
-        merge_trt_mod = TRTModule(
+        model_trt_mod = TRTModule(
             engine=interp_res.engine,
             input_names=interp_res.input_names,
             output_names=interp_res.output_names,
@@ -796,13 +779,13 @@ class TestQuantizeFxTRTOps(QuantizationTestCase):
 
         # feed_lower = Lowerer.create(lower_setting)
         # pyre-fixme[6]: Incompatible parameter type [6]
-        # merge_trt_mod = feed_lower(merge, merge_inputs_cuda)
+        # model_trt_mod = feed_lower(model, model_inputs_cuda)
 
-        merge_inputs_cuda = [i.cuda() for i in merge_inputs_cuda]
-        merge = cast(torch.nn.Module, merge)
-        merge.cuda()
-        merge(*merge_inputs_cuda)
-        merge_trt_mod(*merge_inputs_cuda)
+        model_inputs_cuda = [i.cuda() for i in model_inputs_cuda]
+        model = cast(torch.nn.Module, model)
+        model.cuda()
+        model(*model_inputs_cuda)
+        model_trt_mod(*model_inputs_cuda)
 
 if __name__ == "__main__":
     run_tests()
