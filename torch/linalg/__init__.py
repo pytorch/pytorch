@@ -816,7 +816,7 @@ Examples::
 ldl_factor_ex = _add_docstr(_linalg.linalg_ldl_factor_ex, r"""
 linalg.ldl_factor_ex(A, *, upper=False, hermitian=False, check_errors=False, out=None) -> (Tensor, Tensor, Tensor)
 
-Computes the LDL decomposition of a Hermitian/symmetric indefinite matrix.
+Computes a compact representation of the LDL decomposition of a Hermitian or symmetric indefinite matrix.
 
 When :attr:`A` is complex valued it can be Hermitian (:attr:`hermitian` = `True`)
 or symmetric (:attr:`hermitian` = `False`).
@@ -854,6 +854,9 @@ Keyword args:
                                 For real-valued matrices, this switch has no effect. Default: `False`.
     check_errors (bool, optional): controls whether to check the content of ``info``. Default: `False`.
     out (tuple, optional): tuple of three tensors to write the output to. Ignored if `None`. Default: `None`.
+
+Returns:
+    A named tuple `(factors, pivots, info)`.
 
 Examples::
 
