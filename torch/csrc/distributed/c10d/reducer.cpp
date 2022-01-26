@@ -400,7 +400,10 @@ void Reducer::mark_variable_ready_dense(size_t variable_index) {
         REDUCER_CHECK(
             local_used_map_[variable_index].item<int>() == 0,
             logger_,
-            "Encountered gradient which is undefined, but still allreduced by DDP reducer. This indicates a bug in DDP implementation, please report a bug with a repro to PyTorch.");
+            "Encountered gradient which is undefined, but still allreduced by "
+            "DDP reducer. This indicates a bug in DDP implementation, please "
+            "report a bug with a repro to PyTorch."
+        );
       }
       bucket_view.zero_();
     }
