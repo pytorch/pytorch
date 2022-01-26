@@ -334,12 +334,9 @@ TORCH_META_FUNC(linalg_ldl_factor_ex)
   at::native::checkFloatingOrComplex(self, "torch.linalg.ldl_factor_ex");
 
   auto ndim = self.dim();
-  auto n = self.size(-2);
 
   // prefer column major strides
-  auto ldu_strides = at::detail::defaultStrides(self.sizes());
-  ldu_strides[ndim - 2] = 1;
-  ldu_strides[ndim - 1] = std::max<int64_t>(1, n);
+  auto ldu_strides = at::native::contiguous_strides(self.sizes(), /*column_major=*/true);
   set_output(0, self.sizes(), ldu_strides, self.options(), {}); // factors
 
   auto pivots_shape =
@@ -379,13 +376,8 @@ TORCH_META_FUNC(linalg_ldl_solve)
       " does not match b dtype ",
       B.scalar_type());
 
-  auto ndim = B.dim();
-  auto n = B.size(-2);
-
   // prefer column major strides
-  auto result_strides = at::detail::defaultStrides(B.sizes());
-  result_strides[ndim - 2] = 1;
-  result_strides[ndim - 1] = std::max<int64_t>(1, n);
+  auto result_strides = at::native::contiguous_strides(B.sizes(), /*column_major=*/true);
   set_output(0, B.sizes(), result_strides, B.options(), {});
 }
 
