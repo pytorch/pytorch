@@ -82,14 +82,15 @@ jobs:
         run: |
           # Install dependencies
           brew install libtool
-      - name: Install conda dependencies
+      - name: Install conda and dependencies
         run: |
-          # Creates a conda environment in temporary folder
-          conda \
-            create \
-            -y \
-            -p "${RUNNER_TEMP}/build" \
-            "python=${PYTHON_VERSION}" \
+          # Install conda, setup-miniconda messes with the path that messes with the ruby stuff we do later on
+          curl --retry 3 -o "${RUNNER_TEMP}/conda.sh" https://repo.anaconda.com/miniconda/Miniconda3-latest-MacOSX-x86_64.sh
+          chmod +x "${RUNNER_TEMP}/conda.sh"
+          /bin/bash "${RUNNER_TEMP}/conda.sh" -b -p "${RUNNER_TEMP}/anaconda"
+          echo "${RUNNER_TEMP}/anaconda/bin" >> "${GITHUB_PATH}"
+          source "${RUNNER_TEMP}/anaconda/bin/activate"
+          conda install -y \
             cffi \
             cmake \
             mkl \
@@ -100,8 +101,6 @@ jobs:
             requests \
             setuptools \
             typing_extensions
-          # Sets conda environment using CONDA_PREFIX env variable, should persist through the rest of the steps
-          echo "CONDA_PREFIX=${RUNNER_TEMP}/build" >> "${GITHUB_ENV}"
       - name: Run Fastlane
         run: |
           set -x
@@ -124,6 +123,7 @@ jobs:
           rm cert.txt
       - name: Build
         run: |
+          source "${RUNNER_TEMP}/anaconda/bin/activate"
           export TCLLIBPATH="/usr/local/lib"
           python -VV
           export CMAKE_PREFIX_PATH=${CONDA_PREFIX:-"$(dirname "$(which conda)")/../"}
@@ -143,6 +143,7 @@ jobs:
           fi
       - name: Run Simulator Tests
         run: |
+          source "${RUNNER_TEMP}/anaconda/bin/activate"
           pip3 install --pre torch torchvision torchaudio -f https://download.pytorch.org/whl/nightly/cpu/torch_nightly.html
           # generate models for differnet backends
           cd "${GITHUB_WORKSPACE}/ios/TestApp/benchmark"
