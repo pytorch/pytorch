@@ -308,26 +308,6 @@ C10_API bool LogAPIUsageFakeReturn(const std::string& context);
 // Initializes the c10 logger.
 C10_API void initLogging();
 
-// The log levels for the c10 logger.
-enum class C10_API LogLevel {
-  Fatal   = 3,
-  Error   = 2,
-  Warning = 1,
-  Info    = 0
-};
-
-// Sets the threshold for the c10 logger to `level`.
-inline C10_API void setLogLevel(LogLevel level) noexcept {
-  FLAGS_caffe2_log_level = static_cast<int>(level);
-
-  UpdateLoggingLevelsFromFlags();
-}
-
-// Gets the threshold for the c10 logger.
-inline C10_API LogLevel getLogLevel() noexcept {
-  return static_cast<LogLevel>(FLAGS_caffe2_log_level);
-}
-
 } // namespace c10
 
 #endif // C10_UTIL_LOGGING_H_

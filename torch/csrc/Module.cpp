@@ -780,6 +780,9 @@ TORCH_API PyObject* initModule();
 // separate decl and defn for msvc error C2491
 PyObject* initModule() {
   HANDLE_TH_ERRORS
+
+  c10::initLogging();
+
   at::internal::lazy_init_num_threads();
 
   C10_LOG_API_USAGE_ONCE("torch.python.import");
@@ -907,32 +910,6 @@ PyObject* initModule() {
   auto py_module = py::reinterpret_borrow<py::module>(module);
   py_module.def("_demangle", &c10::demangle);
   py_module.def("_log_api_usage_once", &LogAPIUsageOnceFromPython);
-
-  py::enum_<c10::LogLevel>(py_module, "LogLevel")
-        .value("FATAL",   c10::LogLevel::Fatal)
-        .value("ERROR",   c10::LogLevel::Error)
-        .value("WARNING", c10::LogLevel::Warning)
-        .value("INFO",    c10::LogLevel::Info);
-
-  py_module.def(
-    "set_c10_log_level",
-    c10::setLogLevel,
-    R"(
-set_c10_log_level(level: LogLevel) -> None
-
-Sets the threshold for the c10 logger to `level`.
-)");
-
-  py_module.def(
-    "get_c10_log_level",
-    c10::getLogLevel,
-    R"(
-get_c10_log_level() -> LogLevel
-
-Gets the threshold for the c10 logger.
-)");
-
-  c10::initLogging();
 
   py_module.def("vitals_enabled", &at::vitals::torchVitalEnabled);
   py_module.def("set_vital", [](const std::string &vital, const std::string &attr, const std::string value){

@@ -9,6 +9,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <iostream>
+#include <mutex>
 #include <numeric>
 
 // Common code that we use regardless of whether we use glog or not.
@@ -145,8 +146,13 @@ bool LogAPIUsageFakeReturn(const std::string& event) try {
   // static destructor race
   return true;
 }
-} // namespace detail
 
+namespace {
+
+void setLogLevelFlagFromEnv();
+
+} // namespace
+} // namespace detail
 } // namespace c10
 
 #if defined(C10_USE_GFLAGS) && defined(C10_USE_GLOG)
@@ -214,8 +220,6 @@ void initGoogleLogging(char const* name) {
 #endif
 #endif
   }
-
-  UpdateLoggingLevelsFromFlags();
 }
 
 } // namespace
@@ -224,7 +228,11 @@ void initLogging() {
   // Unlike caffe2 torch always writes to stderr.
   FLAGS_logtostderr = 1;
 
-  initGoogleLogging("c10");
+  initGoogleLogging("torch-cpp");
+
+  detail::setLogLevelFlagFromEnv();
+
+  UpdateLoggingLevelsFromFlags();
 }
 
 bool InitCaffeLogging(int* argc, char** argv) {
@@ -233,6 +241,8 @@ bool InitCaffeLogging(int* argc, char** argv) {
   }
 
   initGoogleLogging(argv[0]);
+
+  UpdateLoggingLevelsFromFlags();
 
   return true;
 }
@@ -274,7 +284,9 @@ C10_DEFINE_int(
 
 namespace c10 {
 
-void initLogging() {}
+void initLogging() {
+  detail::setLogLevelFlagFromEnv();
+}
 
 bool InitCaffeLogging(int* argc, char** argv) {
   // When doing InitCaffeLogging, we will assume that caffe's flag parser has
@@ -378,3 +390,56 @@ MessageLogger::~MessageLogger() {
 } // namespace c10
 
 #endif // !C10_USE_GLOG
+
+namespace c10 {
+namespace detail {
+namespace {
+
+void unsafeSetLogLevelFlagFromEnv() {
+  const char* level_str = std::getenv("TORCH_CPP_MIN_LOG_LEVEL");
+
+  // Not set, fallback to the default level (i.e. WARNING).
+  if (level_str == nullptr) {
+    return;
+  }
+
+  std::string level{level_str};
+  if (level.empty()) {
+    return;
+  }
+
+  if (level == "0" || level == "INFO" || level == "info") {
+    FLAGS_caffe2_log_level = 0;
+
+    return;
+  }
+  if (level == "1" || level == "WARNING" || level == "warning") {
+    FLAGS_caffe2_log_level = 1;
+
+    return;
+  }
+  if (level == "2" || level == "ERROR" || level == "error") {
+    FLAGS_caffe2_log_level = 2;
+
+    return;
+  }
+  if (level == "3" || level == "FATAL" || level == "fatal") {
+    FLAGS_caffe2_log_level = 3;
+
+    return;
+  }
+
+  std::cerr << "`TORCH_CPP_MIN_LOG_LEVEL` environment variable cannot be parsed. Valid values are "
+               "`INFO`, `WARNING`, `ERROR`, and `FATAL` or their numerical equivalents `0`, `1`, "
+               "`2`, and `3`." << std::endl;
+}
+
+void setLogLevelFlagFromEnv() {
+  static std::once_flag f{};
+
+  std::call_once(f, unsafeSetLogLevelFlagFromEnv);
+}
+
+} // namespace
+} // namespace detail
+} // namespace c10
