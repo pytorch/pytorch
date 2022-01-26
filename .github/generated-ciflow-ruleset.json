@@ -60,14 +60,12 @@
       "linux-binary-libtorch-cxx11-abi",
       "linux-binary-libtorch-pre-cxx11",
       "linux-binary-manywheel",
-      "windows-binary-conda",
       "windows-binary-libtorch-cxx11-abi",
       "windows-binary-libtorch-pre-cxx11",
       "windows-binary-wheel"
     ],
     "ciflow/binaries_conda": [
-      "linux-binary-conda",
-      "windows-binary-conda"
+      "linux-binary-conda"
     ],
     "ciflow/binaries_libtorch": [
       "linux-binary-libtorch-cxx11-abi",
@@ -133,7 +131,6 @@
       "pytorch-linux-xenial-py3-clang5-android-ndk-r19c-gradle-custom-build-single-full-jit",
       "win-vs2019-cpu-py3",
       "win-vs2019-cuda11.3-py3",
-      "windows-binary-conda",
       "windows-binary-libtorch-cxx11-abi",
       "windows-binary-libtorch-pre-cxx11",
       "windows-binary-wheel"
