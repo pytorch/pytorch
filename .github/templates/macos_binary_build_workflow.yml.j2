@@ -97,51 +97,13 @@ jobs:
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_macos_build.sh"
-      - uses: !{{ common.upload_artifact_s3_action }}
+      - uses: actions/upload-artifact@v2
         if: always()
         with:
           name: !{{ config["build_name"] }}
           retention-days: 14
           if-no-files-found: error
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
-      !{{ common.wait_and_kill_ssh_windows('pytorch') }}
-  !{{ config["build_name"] }}-test:  # Testing
-    if: ${{ github.repository_owner == 'pytorch' }}
-    needs: !{{ config["build_name"] }}-build
-{%- if config["gpu_arch_type"] == "cuda" %}
-    runs-on: windows.8xlarge.nvidia.gpu
-{%- else %}
-    runs-on: windows.4xlarge
-{%- endif %}
-    timeout-minutes: !{{ common.timeout_minutes }}
-    !{{ binary_env(config) }}
-    steps:
-      !{{ common.setup_ec2_windows() }}
-      !{{ set_runner_specific_vars() }}
-      - uses: seemethere/download-artifact-s3@0504774707cbc8603d7dca922e8026eb8bf3b47b
-        name: Download Build Artifacts
-        with:
-          name: !{{ config["build_name"] }}
-          path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
-      - name: Clone pytorch/pytorch
-        uses: actions/checkout@v2
-        with:
-          path: ${{ env.PYTORCH_ROOT }}
-          submodules: recursive
-      - name: Clone pytorch/builder
-        uses: actions/checkout@v2
-        with:
-          repository: pytorch/builder
-          path: ${{ env.BUILDER_ROOT }}
-      - name: Populate binary env
-        shell: bash
-        run: |
-          "${PYTORCH_ROOT}/.circleci/scripts/binary_populate_env.sh"
-      - name: Test PyTorch binary
-        shell: bash
-        run: |
-          "${PYTORCH_ROOT}/.circleci/scripts/binary_macos_test.sh"
-      !{{ common.wait_and_kill_ssh_windows('pytorch') }}
   !{{ config["build_name"] }}-upload:  # Uploading
     runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -151,7 +113,7 @@ jobs:
       !{{ common.setup_ec2_linux() }}
       - name: Clone pytorch/pytorch
         uses: actions/checkout@v2
-      - uses: seemethere/download-artifact-s3@0504774707cbc8603d7dca922e8026eb8bf3b47b
+      - uses: actions/download-artifact@v2
         name: Download Build Artifacts
         with:
           name: !{{ config["build_name"] }}

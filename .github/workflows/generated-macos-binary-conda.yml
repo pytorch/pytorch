@@ -71,100 +71,13 @@ jobs:
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_macos_build.sh"
-      - uses: seemethere/upload-artifact-s3@v3
+      - uses: actions/upload-artifact@v2
         if: always()
         with:
           name: conda-py3_7-cpu
           retention-days: 14
           if-no-files-found: error
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
-      - name: Wait until all sessions have drained
-        shell: powershell
-        working-directory: pytorch
-        if: always()
-        timeout-minutes: 120
-        run: |
-          .github\scripts\wait_for_ssh_to_drain.ps1
-      - name: Kill active ssh sessions if still around (Useful if workflow was cancelled)
-        shell: powershell
-        working-directory: pytorch
-        if: always()
-        run: |
-          .github\scripts\kill_active_ssh_sessions.ps1
-  conda-py3_7-cpu-test:  # Testing
-    if: ${{ github.repository_owner == 'pytorch' }}
-    needs: conda-py3_7-cpu-build
-    runs-on: windows.4xlarge
-    timeout-minutes: 240
-    env:
-      PYTORCH_ROOT: ${{ github.workspace }}/pytorch
-      BUILDER_ROOT: ${{ github.workspace }}/builder
-      PACKAGE_TYPE: conda
-      SKIP_ALL_TESTS: 1
-      DESIRED_PYTHON: "3.7"
-    steps:
-      - name: Display EC2 information
-        shell: bash
-        run: |
-          set -euo pipefail
-          function get_ec2_metadata() {
-            # Pulled from instance metadata endpoint for EC2
-            # see https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/instancedata-data-retrieval.html
-            category=$1
-            curl -fsSL "http://169.254.169.254/latest/meta-data/${category}"
-          }
-          echo "ami-id: $(get_ec2_metadata ami-id)"
-          echo "instance-id: $(get_ec2_metadata instance-id)"
-          echo "instance-type: $(get_ec2_metadata instance-type)"
-      - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
-        uses: seemethere/add-github-ssh-key@v1
-        with:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      # NOTE: These environment variables are put here so that they can be applied on every job equally
-      #       They are also here because setting them at a workflow level doesn't give us access to the
-      #       runner.temp variable, which we need.
-      - name: Populate binary env
-        shell: bash
-        run: |
-          echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
-          echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
-          echo "MAC_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
-      - uses: seemethere/download-artifact-s3@0504774707cbc8603d7dca922e8026eb8bf3b47b
-        name: Download Build Artifacts
-        with:
-          name: conda-py3_7-cpu
-          path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
-      - name: Clone pytorch/pytorch
-        uses: actions/checkout@v2
-        with:
-          path: ${{ env.PYTORCH_ROOT }}
-          submodules: recursive
-      - name: Clone pytorch/builder
-        uses: actions/checkout@v2
-        with:
-          repository: pytorch/builder
-          path: ${{ env.BUILDER_ROOT }}
-      - name: Populate binary env
-        shell: bash
-        run: |
-          "${PYTORCH_ROOT}/.circleci/scripts/binary_populate_env.sh"
-      - name: Test PyTorch binary
-        shell: bash
-        run: |
-          "${PYTORCH_ROOT}/.circleci/scripts/binary_macos_test.sh"
-      - name: Wait until all sessions have drained
-        shell: powershell
-        working-directory: pytorch
-        if: always()
-        timeout-minutes: 120
-        run: |
-          .github\scripts\wait_for_ssh_to_drain.ps1
-      - name: Kill active ssh sessions if still around (Useful if workflow was cancelled)
-        shell: powershell
-        working-directory: pytorch
-        if: always()
-        run: |
-          .github\scripts\kill_active_ssh_sessions.ps1
   conda-py3_7-cpu-upload:  # Uploading
     runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -221,7 +134,7 @@ jobs:
           env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
       - name: Clone pytorch/pytorch
         uses: actions/checkout@v2
-      - uses: seemethere/download-artifact-s3@0504774707cbc8603d7dca922e8026eb8bf3b47b
+      - uses: actions/download-artifact@v2
         name: Download Build Artifacts
         with:
           name: conda-py3_7-cpu
@@ -314,100 +227,13 @@ jobs:
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_macos_build.sh"
-      - uses: seemethere/upload-artifact-s3@v3
+      - uses: actions/upload-artifact@v2
         if: always()
         with:
           name: conda-py3_8-cpu
           retention-days: 14
           if-no-files-found: error
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
-      - name: Wait until all sessions have drained
-        shell: powershell
-        working-directory: pytorch
-        if: always()
-        timeout-minutes: 120
-        run: |
-          .github\scripts\wait_for_ssh_to_drain.ps1
-      - name: Kill active ssh sessions if still around (Useful if workflow was cancelled)
-        shell: powershell
-        working-directory: pytorch
-        if: always()
-        run: |
-          .github\scripts\kill_active_ssh_sessions.ps1
-  conda-py3_8-cpu-test:  # Testing
-    if: ${{ github.repository_owner == 'pytorch' }}
-    needs: conda-py3_8-cpu-build
-    runs-on: windows.4xlarge
-    timeout-minutes: 240
-    env:
-      PYTORCH_ROOT: ${{ github.workspace }}/pytorch
-      BUILDER_ROOT: ${{ github.workspace }}/builder
-      PACKAGE_TYPE: conda
-      SKIP_ALL_TESTS: 1
-      DESIRED_PYTHON: "3.8"
-    steps:
-      - name: Display EC2 information
-        shell: bash
-        run: |
-          set -euo pipefail
-          function get_ec2_metadata() {
-            # Pulled from instance metadata endpoint for EC2
-            # see https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/instancedata-data-retrieval.html
-            category=$1
-            curl -fsSL "http://169.254.169.254/latest/meta-data/${category}"
-          }
-          echo "ami-id: $(get_ec2_metadata ami-id)"
-          echo "instance-id: $(get_ec2_metadata instance-id)"
-          echo "instance-type: $(get_ec2_metadata instance-type)"
-      - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
-        uses: seemethere/add-github-ssh-key@v1
-        with:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      # NOTE: These environment variables are put here so that they can be applied on every job equally
-      #       They are also here because setting them at a workflow level doesn't give us access to the
-      #       runner.temp variable, which we need.
-      - name: Populate binary env
-        shell: bash
-        run: |
-          echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
-          echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
-          echo "MAC_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
-      - uses: seemethere/download-artifact-s3@0504774707cbc8603d7dca922e8026eb8bf3b47b
-        name: Download Build Artifacts
-        with:
-          name: conda-py3_8-cpu
-          path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
-      - name: Clone pytorch/pytorch
-        uses: actions/checkout@v2
-        with:
-          path: ${{ env.PYTORCH_ROOT }}
-          submodules: recursive
-      - name: Clone pytorch/builder
-        uses: actions/checkout@v2
-        with:
-          repository: pytorch/builder
-          path: ${{ env.BUILDER_ROOT }}
-      - name: Populate binary env
-        shell: bash
-        run: |
-          "${PYTORCH_ROOT}/.circleci/scripts/binary_populate_env.sh"
-      - name: Test PyTorch binary
-        shell: bash
-        run: |
-          "${PYTORCH_ROOT}/.circleci/scripts/binary_macos_test.sh"
-      - name: Wait until all sessions have drained
-        shell: powershell
-        working-directory: pytorch
-        if: always()
-        timeout-minutes: 120
-        run: |
-          .github\scripts\wait_for_ssh_to_drain.ps1
-      - name: Kill active ssh sessions if still around (Useful if workflow was cancelled)
-        shell: powershell
-        working-directory: pytorch
-        if: always()
-        run: |
-          .github\scripts\kill_active_ssh_sessions.ps1
   conda-py3_8-cpu-upload:  # Uploading
     runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -464,7 +290,7 @@ jobs:
           env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
       - name: Clone pytorch/pytorch
         uses: actions/checkout@v2
-      - uses: seemethere/download-artifact-s3@0504774707cbc8603d7dca922e8026eb8bf3b47b
+      - uses: actions/download-artifact@v2
         name: Download Build Artifacts
         with:
           name: conda-py3_8-cpu
@@ -557,100 +383,13 @@ jobs:
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_macos_build.sh"
-      - uses: seemethere/upload-artifact-s3@v3
+      - uses: actions/upload-artifact@v2
         if: always()
         with:
           name: conda-py3_9-cpu
           retention-days: 14
           if-no-files-found: error
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
-      - name: Wait until all sessions have drained
-        shell: powershell
-        working-directory: pytorch
-        if: always()
-        timeout-minutes: 120
-        run: |
-          .github\scripts\wait_for_ssh_to_drain.ps1
-      - name: Kill active ssh sessions if still around (Useful if workflow was cancelled)
-        shell: powershell
-        working-directory: pytorch
-        if: always()
-        run: |
-          .github\scripts\kill_active_ssh_sessions.ps1
-  conda-py3_9-cpu-test:  # Testing
-    if: ${{ github.repository_owner == 'pytorch' }}
-    needs: conda-py3_9-cpu-build
-    runs-on: windows.4xlarge
-    timeout-minutes: 240
-    env:
-      PYTORCH_ROOT: ${{ github.workspace }}/pytorch
-      BUILDER_ROOT: ${{ github.workspace }}/builder
-      PACKAGE_TYPE: conda
-      SKIP_ALL_TESTS: 1
-      DESIRED_PYTHON: "3.9"
-    steps:
-      - name: Display EC2 information
-        shell: bash
-        run: |
-          set -euo pipefail
-          function get_ec2_metadata() {
-            # Pulled from instance metadata endpoint for EC2
-            # see https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/instancedata-data-retrieval.html
-            category=$1
-            curl -fsSL "http://169.254.169.254/latest/meta-data/${category}"
-          }
-          echo "ami-id: $(get_ec2_metadata ami-id)"
-          echo "instance-id: $(get_ec2_metadata instance-id)"
-          echo "instance-type: $(get_ec2_metadata instance-type)"
-      - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
-        uses: seemethere/add-github-ssh-key@v1
-        with:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      # NOTE: These environment variables are put here so that they can be applied on every job equally
-      #       They are also here because setting them at a workflow level doesn't give us access to the
-      #       runner.temp variable, which we need.
-      - name: Populate binary env
-        shell: bash
-        run: |
-          echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
-          echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
-          echo "MAC_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
-      - uses: seemethere/download-artifact-s3@0504774707cbc8603d7dca922e8026eb8bf3b47b
-        name: Download Build Artifacts
-        with:
-          name: conda-py3_9-cpu
-          path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
-      - name: Clone pytorch/pytorch
-        uses: actions/checkout@v2
-        with:
-          path: ${{ env.PYTORCH_ROOT }}
-          submodules: recursive
-      - name: Clone pytorch/builder
-        uses: actions/checkout@v2
-        with:
-          repository: pytorch/builder
-          path: ${{ env.BUILDER_ROOT }}
-      - name: Populate binary env
-        shell: bash
-        run: |
-          "${PYTORCH_ROOT}/.circleci/scripts/binary_populate_env.sh"
-      - name: Test PyTorch binary
-        shell: bash
-        run: |
-          "${PYTORCH_ROOT}/.circleci/scripts/binary_macos_test.sh"
-      - name: Wait until all sessions have drained
-        shell: powershell
-        working-directory: pytorch
-        if: always()
-        timeout-minutes: 120
-        run: |
-          .github\scripts\wait_for_ssh_to_drain.ps1
-      - name: Kill active ssh sessions if still around (Useful if workflow was cancelled)
-        shell: powershell
-        working-directory: pytorch
-        if: always()
-        run: |
-          .github\scripts\kill_active_ssh_sessions.ps1
   conda-py3_9-cpu-upload:  # Uploading
     runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -707,7 +446,7 @@ jobs:
           env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
       - name: Clone pytorch/pytorch
         uses: actions/checkout@v2
-      - uses: seemethere/download-artifact-s3@0504774707cbc8603d7dca922e8026eb8bf3b47b
+      - uses: actions/download-artifact@v2
         name: Download Build Artifacts
         with:
           name: conda-py3_9-cpu
@@ -800,100 +539,13 @@ jobs:
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_macos_build.sh"
-      - uses: seemethere/upload-artifact-s3@v3
+      - uses: actions/upload-artifact@v2
         if: always()
         with:
           name: conda-py3_10-cpu
           retention-days: 14
           if-no-files-found: error
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
-      - name: Wait until all sessions have drained
-        shell: powershell
-        working-directory: pytorch
-        if: always()
-        timeout-minutes: 120
-        run: |
-          .github\scripts\wait_for_ssh_to_drain.ps1
-      - name: Kill active ssh sessions if still around (Useful if workflow was cancelled)
-        shell: powershell
-        working-directory: pytorch
-        if: always()
-        run: |
-          .github\scripts\kill_active_ssh_sessions.ps1
-  conda-py3_10-cpu-test:  # Testing
-    if: ${{ github.repository_owner == 'pytorch' }}
-    needs: conda-py3_10-cpu-build
-    runs-on: windows.4xlarge
-    timeout-minutes: 240
-    env:
-      PYTORCH_ROOT: ${{ github.workspace }}/pytorch
-      BUILDER_ROOT: ${{ github.workspace }}/builder
-      PACKAGE_TYPE: conda
-      SKIP_ALL_TESTS: 1
-      DESIRED_PYTHON: "3.10"
-    steps:
-      - name: Display EC2 information
-        shell: bash
-        run: |
-          set -euo pipefail
-          function get_ec2_metadata() {
-            # Pulled from instance metadata endpoint for EC2
-            # see https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/instancedata-data-retrieval.html
-            category=$1
-            curl -fsSL "http://169.254.169.254/latest/meta-data/${category}"
-          }
-          echo "ami-id: $(get_ec2_metadata ami-id)"
-          echo "instance-id: $(get_ec2_metadata instance-id)"
-          echo "instance-type: $(get_ec2_metadata instance-type)"
-      - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
-        uses: seemethere/add-github-ssh-key@v1
-        with:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      # NOTE: These environment variables are put here so that they can be applied on every job equally
-      #       They are also here because setting them at a workflow level doesn't give us access to the
-      #       runner.temp variable, which we need.
-      - name: Populate binary env
-        shell: bash
-        run: |
-          echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
-          echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
-          echo "MAC_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
-      - uses: seemethere/download-artifact-s3@0504774707cbc8603d7dca922e8026eb8bf3b47b
-        name: Download Build Artifacts
-        with:
-          name: conda-py3_10-cpu
-          path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
-      - name: Clone pytorch/pytorch
-        uses: actions/checkout@v2
-        with:
-          path: ${{ env.PYTORCH_ROOT }}
-          submodules: recursive
-      - name: Clone pytorch/builder
-        uses: actions/checkout@v2
-        with:
-          repository: pytorch/builder
-          path: ${{ env.BUILDER_ROOT }}
-      - name: Populate binary env
-        shell: bash
-        run: |
-          "${PYTORCH_ROOT}/.circleci/scripts/binary_populate_env.sh"
-      - name: Test PyTorch binary
-        shell: bash
-        run: |
-          "${PYTORCH_ROOT}/.circleci/scripts/binary_macos_test.sh"
-      - name: Wait until all sessions have drained
-        shell: powershell
-        working-directory: pytorch
-        if: always()
-        timeout-minutes: 120
-        run: |
-          .github\scripts\wait_for_ssh_to_drain.ps1
-      - name: Kill active ssh sessions if still around (Useful if workflow was cancelled)
-        shell: powershell
-        working-directory: pytorch
-        if: always()
-        run: |
-          .github\scripts\kill_active_ssh_sessions.ps1
   conda-py3_10-cpu-upload:  # Uploading
     runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -950,7 +602,7 @@ jobs:
           env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
       - name: Clone pytorch/pytorch
         uses: actions/checkout@v2
-      - uses: seemethere/download-artifact-s3@0504774707cbc8603d7dca922e8026eb8bf3b47b
+      - uses: actions/download-artifact@v2
         name: Download Build Artifacts
         with:
           name: conda-py3_10-cpu
