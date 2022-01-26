@@ -2470,7 +2470,12 @@ static Tensor& linalg_norm_out_impl(Tensor& result, const Tensor& self, const op
     check_str_ord_valid(str_ord, opt_dim, ndim);
     Tensor self_ = opt_dtype.has_value() ? self.to(opt_dtype.value()) : self;
     if (str_ord == "fro") {
-      result = at::frobenius_norm(self_, opt_dim.value_or(IntArrayRef({0, 1})), keepdim);
+      // Do not use frobenius_norm_out here since doing so results in nans in the backward
+      // as a result of using the backward of sqrt() if the input contains zeros. frobenius_norm_out
+      // here does not support implicit autograd.
+      Tensor result_ = at::frobenius_norm(self_, opt_dim.value_or(IntArrayRef({0, 1})), keepdim);
+      at::native::resize_output(result, result_.sizes());
+      result.copy_(result_);
     } else if (str_ord == "nuc") {
       if (opt_dim.has_value()) {
         at::nuclear_norm_out(result, self_, opt_dim.value(), keepdim);
