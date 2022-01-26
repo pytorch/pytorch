@@ -3,7 +3,7 @@ from typing import List, Tuple
 from tools.codegen.api import cpp
 from tools.codegen.api.cpp import argumenttype_type
 from tools.codegen.api.translate import translate
-from tools.codegen.api.types import BaseCType, tensorOptionsT, CppSignature, CType, voidT, Expr, ArgName
+from tools.codegen.api.types import BaseCType, tensorOptionsT, CppSignature, CType, voidT, Expr
 from tools.codegen.model import (
     Argument,
     Type,
