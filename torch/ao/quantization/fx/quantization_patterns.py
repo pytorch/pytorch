@@ -22,7 +22,6 @@ from ..utils import (
     get_qconfig_dtypes,
     activation_dtype,
     get_qparam_dict,
-    check_node,
 )
 
 from torch.ao.quantization.quantize import (
@@ -47,6 +46,7 @@ from .utils import (
 )
 
 from ..qconfig import QConfigAny
+from .node_check_utils import chech_qnode_func
 
 from abc import ABC
 import operator
@@ -1617,7 +1617,7 @@ class CopyNodeQuantizeHandler(QuantizeHandler):
                 is_reference: bool = False,
                 convert_custom_config_dict: Dict[str, Any] = None) -> Node:
 
-        is_call_function, is_call_method, is_call_module = check_node(node, modules)
+        is_call_function, is_call_method, is_call_module = chech_qnode_func(node, modules)
         if is_reference or (is_call_function or is_call_method or is_call_module):
             # when activation dtype is torch.float, the node does not require
             # observation
