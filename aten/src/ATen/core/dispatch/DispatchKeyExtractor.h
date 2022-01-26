@@ -157,7 +157,7 @@ public:
     });
     // Keys that are fallthrough should be skipped
     if (requiresBitsetPerBackend_) {
-      auto backend_idx = (ks & DispatchKeySet(DispatchKeySet::RAW, full_backend_mask)).indexOfHighestBit() - 1;
+      auto backend_idx = ks.getBackendIndex();
       return impl::computeDispatchKeySet(ks, nonFallthroughKeysPerBackend_[backend_idx]);
     } else {
       return impl::computeDispatchKeySet(ks, nonFallthroughKeys_);
@@ -169,7 +169,7 @@ public:
     auto ks = detail::multi_dispatch_key_set(args...);
     // Keys that are fallthrough should be skipped
     if (requiresBitsetPerBackend_) {
-      auto backend_idx = (ks & DispatchKeySet(DispatchKeySet::RAW, full_backend_mask)).indexOfHighestBit() - 1;
+      auto backend_idx = ks.getBackendIndex();
       return impl::computeDispatchKeySet(ks, nonFallthroughKeysPerBackend_[backend_idx]);
     } else {
       return impl::computeDispatchKeySet(ks, nonFallthroughKeys_);
