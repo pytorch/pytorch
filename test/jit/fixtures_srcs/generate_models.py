@@ -64,7 +64,7 @@ is working as expected. In `test/jit/fixtures_srcs/generate_models.py`, add the 
 it's corresponding changed operator like following
 ```
 ALL_MODULES = {
-    TestVersionedDivTensorExampleV4(): "aten::div.Tensor",
+    TestVersionedDivTensorExampleV7(): "aten::div.Tensor",
 }
 ```
 This module should includes the changed operator. If the operator isn't covered in the model,
@@ -89,7 +89,7 @@ key: test module
 value: changed operator
 """
 ALL_MODULES = {
-    TestVersionedDivTensorExampleV4(): "aten::div.Tensor",
+    TestVersionedDivTensorExampleV7(): "aten::div.Tensor",
 }
 
 """
@@ -157,9 +157,9 @@ def generate_models(model_directory_path: Path):
     for a_module, expect_operator in ALL_MODULES.items():
         print(a_module, expect_operator)
         script_module = torch.jit.script(a_module)
-        model_version = get_output_model_version(script_module)
+        actual_model_version = get_output_model_version(script_module)
 
-        # For example: TestVersionedDivTensorExampleV4
+        # For example: TestVersionedDivTensorExampleV7
         torch_module_name = type(a_module).__name__
 
         # The corresponding model name is: test_versioned_div_tensor_example_v4
@@ -172,12 +172,11 @@ def generate_models(model_directory_path: Path):
             logger.info(f"Model {model_name} already exists, skipping")
             continue
 
-        actual_model_version = "v" + str(model_version)
-        expect_model_version = model_name.split("_")[-1]
-        if actual_model_version != expect_model_version:
+        current_operator_version = torch._C._get_operator_version()
+        if actual_model_version >= current_operator_version + 1:
             logger.error(
                 f"Actual model version {actual_model_version} "
-                f"doesn't match the expect model version {expect_model_version}. "
+                f"is smaller or larger than {expect_model_version}. "
                 f"Please run the script before the commit to change operator.")
             continue
 
