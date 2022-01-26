@@ -71,32 +71,12 @@
 
 ${static_dispatch_extra_headers}
 
+#include <ATen/ops/from_blob.h>
+#include <ATen/ops/tensor.h>
+
 ${Functions_includes}
 
 namespace at {
-
-// These functions are defined in ATen/Utils.cpp.
-#define TENSOR(T, S)                                                          \
-  TORCH_API Tensor tensor(ArrayRef<T> values, const TensorOptions& options); \
-  inline Tensor tensor(                                                       \
-      std::initializer_list<T> values, const TensorOptions& options) {        \
-    return at::tensor(ArrayRef<T>(values), options);                          \
-  }                                                                           \
-  inline Tensor tensor(T value, const TensorOptions& options) {               \
-    return at::tensor(ArrayRef<T>(value), options);                           \
-  }                                                                           \
-  inline Tensor tensor(ArrayRef<T> values) {                                  \
-    return at::tensor(std::move(values), at::dtype(k##S));                    \
-  }                                                                           \
-  inline Tensor tensor(std::initializer_list<T> values) {                     \
-    return at::tensor(ArrayRef<T>(values));                                   \
-  }                                                                           \
-  inline Tensor tensor(T value) {                                             \
-    return at::tensor(ArrayRef<T>(value));                                    \
-  }
-AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, TENSOR)
-AT_FORALL_COMPLEX_TYPES(TENSOR)
-#undef TENSOR
 
 ${Functions_declarations}
 
@@ -114,138 +94,6 @@ TORCH_API inline Tensor std(const Tensor& self, int dim) {
 }
 TORCH_API inline std::tuple<Tensor, Tensor> std_mean(const Tensor& self, int dim) {
   return at::std_mean(self, IntArrayRef{dim});
-}
-
-namespace detail {
-
-TORCH_API inline void noopDelete(void*) {}
-
-} // namespace detail
-
-/// Provides a fluent API to construct tensors from external data.
-///
-/// The fluent API can be used instead of `from_blob` functions in case the
-/// required set of parameters does not align with the existing overloads.
-///
-///     at::Tensor tensor = at::for_blob(data, sizes)
-///             .strides(strides)
-///             .context(context, [](void *ctx) { delete static_cast<Ctx*>(ctx); })
-///             .options(...)
-///             .make_tensor();
-///
-class TORCH_API TensorMaker {
-  friend TensorMaker for_blob(void* data, IntArrayRef sizes) noexcept;
-
- public:
-  using ContextDeleter = DeleterFnPtr;
-
-  TensorMaker& strides(optional<IntArrayRef> value) noexcept {
-    strides_ = value;
-
-    return *this;
-  }
-
-  TensorMaker& storage_offset(optional<int64_t> value) noexcept {
-    storage_offset_ = value;
-
-    return *this;
-  }
-
-  TensorMaker& deleter(std::function<void(void*)> value) noexcept {
-    deleter_ = std::move(value);
-
-    return *this;
-  }
-
-  TensorMaker& context(void* value, ContextDeleter deleter = nullptr) noexcept {
-    ctx_ = std::unique_ptr<void, ContextDeleter>{
-        value, deleter != nullptr ? deleter : detail::noopDelete};
-
-    return *this;
-  }
-
-  TensorMaker& target_device(optional<Device> value) noexcept {
-    device_ = value;
-
-    return *this;
-  }
-
-  TensorMaker& options(TensorOptions value) noexcept {
-    opts_ = value;
-
-    return *this;
-  }
-
-  Tensor make_tensor();
-
- private:
-  explicit TensorMaker(void* data, IntArrayRef sizes) noexcept
-      : data_{data}, sizes_{sizes} {}
-
-  std::size_t computeStorageSize() const noexcept;
-
-  DataPtr makeDataPtrFromDeleter() const;
-
-  DataPtr makeDataPtrFromContext() noexcept;
-
-  IntArrayRef makeTempSizes() const noexcept;
-
-  void* data_;
-  IntArrayRef sizes_;
-  optional<IntArrayRef> strides_{};
-  optional<int64_t> storage_offset_{};
-  std::function<void(void*)> deleter_{};
-  std::unique_ptr<void, ContextDeleter> ctx_{nullptr, detail::noopDelete};
-  optional<Device> device_{};
-  TensorOptions opts_{};
-};
-
-inline TensorMaker for_blob(void* data, IntArrayRef sizes) noexcept {
-  return TensorMaker{data, sizes};
-}
-
-inline Tensor from_blob(
-    void* data,
-    IntArrayRef sizes,
-    IntArrayRef strides,
-    const std::function<void(void*)>& deleter,
-    const TensorOptions& options = {},
-    const c10::optional<Device> target_device = c10::nullopt) {
-  return for_blob(data, sizes)
-      .strides(strides)
-      .deleter(deleter)
-      .options(options)
-      .target_device(target_device)
-      .make_tensor();
-}
-
-inline Tensor from_blob(
-    void* data,
-    IntArrayRef sizes,
-    const std::function<void(void*)>& deleter,
-    const TensorOptions& options = {}) {
-  return for_blob(data, sizes)
-      .deleter(deleter)
-      .options(options)
-      .make_tensor();
-}
-
-inline Tensor from_blob(
-    void* data,
-    IntArrayRef sizes,
-    IntArrayRef strides,
-    const TensorOptions& options = {}) {
-  return for_blob(data, sizes)
-      .strides(strides)
-      .options(options)
-      .make_tensor();
-}
-
-inline Tensor from_blob(
-    void* data,
-    IntArrayRef sizes,
-    const TensorOptions& options = {}) {
-  return for_blob(data, sizes).options(options).make_tensor();
 }
 
 inline int64_t numel(const Tensor& tensor) {

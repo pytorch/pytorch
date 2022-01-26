@@ -188,6 +188,14 @@ bool mayContainAlias(AliasDb& db, const Value* a, const Value* b) {
 
 bool mayContainAlias(
     AliasDb& db,
+    const Value* a,
+    const FastSet<const Value*>& b) {
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
+  return db.mayContainAlias(const_cast<Value*>(a), valueVecFromFastSet(b));
+}
+
+bool mayContainAlias(
+    AliasDb& db,
     const FastSet<const Value*>& a,
     const FastSet<const Value*>& b) {
   return db.mayContainAlias(valueVecFromFastSet(a), valueVecFromFastSet(b));
@@ -206,8 +214,7 @@ std::pair<std::shared_ptr<Graph>, c10::optional<Module>> PrepareForStaticModule(
     bool is_frozen,
     const StaticModuleOptions& opts,
     std::vector<IValue> sample_inputs) {
-  LOG(INFO) << "StaticModuleOptions: cleanup_activations "
-            << opts.cleanup_activations << ", enable_out_variant "
+  LOG(INFO) << "StaticModuleOptions: enable_out_variant "
             << opts.enable_out_variant << ", optimize_memory "
             << opts.optimize_memory << ", manage_output_tensors "
             << opts.manage_output_tensors << ", use_maybe_copy_variants "
@@ -246,7 +253,7 @@ void ValueGroup::init(
     AliasDb& db) {
   external_aliases_.clear();
   output_aliases_.clear();
-  // Build `input_or_constant_aliases` as we look through nodes forwardly from
+  // Build `external_aliases` as we look through nodes forwardly from
   // the graph's inputs and add aliases of the inputs being created by the
   // nodes.
   external_aliases_.insert(graph->inputs().begin(), graph->inputs().end());
@@ -259,11 +266,11 @@ void ValueGroup::init(
   }
   for (const auto* node : graph->nodes()) {
     if (node->kind() == prim::Constant) {
-      // Constants are already in `input_or_constant_aliases`.
+      // Constants are already in `external_aliases`.
       continue;
     }
     for (const auto* v : node->outputs()) {
-      if (mayContainAlias(db, {v}, external_aliases_)) {
+      if (mayContainAlias(db, v, external_aliases_)) {
         external_aliases_.insert(v);
       }
     }
@@ -281,11 +288,11 @@ void ValueGroup::init(
       // Add values that can aliase input/constant values. Note some output
       // aliases may end up in this category via collection objects (e.g.,
       // Tuple).
-      if (mayContainAlias(db, {v}, external_aliases_)) {
+      if (mayContainAlias(db, v, external_aliases_)) {
         external_aliases_.insert(v);
         continue;
       }
-      if (mayContainAlias(db, {v}, output_aliases_)) {
+      if (mayContainAlias(db, v, output_aliases_)) {
         output_aliases_.insert(v);
       }
     }
@@ -1019,22 +1026,13 @@ c10::IValue StaticRuntime::move_outputs_to_tuple(uint32_t num_outputs) {
 /// buffer) fails. There is still a corner case that fails with the added flag.
 /// If a resize is triggered at the same time as the op creating an alias at the
 /// same time, the current checks would fail to detect the alias.
-///
-/// There is another case of failure that step 2 can prevent. With
-/// StaticModule::opts().cleanup_activations = false, the returned Static
-/// Runtime instance in the instance pool can be re-entered while an unintended
-/// output tensor's alias is still being used by the client (in the
-/// multi-threaded setting). This can only be prevented by delaying the
-/// deallocation and returning the Static Runtime instance after the client is
-/// done with the outputs.
-
 void StaticRuntime::verify_and_correct_memory_overlap(ProcessedNode& n) {
   // The slow check can be removed once the internal/output buffers are merged
   if (C10_UNLIKELY(n.check_outputs_for_memory_overlap())) {
-    if (C10_UNLIKELY(!planner_ && static_module_.opts().cleanup_activations)) {
-      // slow check, for first iter only with cleanup_activations = true
+    if (C10_UNLIKELY(!planner_)) {
+      // slow check, for first iter only
       n.verify_and_correct_memory_overlap();
-    } else if (planner_) {
+    } else {
       bool overlap_detected_with_fast_check = false;
       for (size_t i = 0; i < n.outputs().size(); i++) {
         auto& output = n.Output(i);
@@ -1083,26 +1081,24 @@ StaticRuntime::Deallocator::~Deallocator() {
 }
 
 void StaticRuntime::Deallocator::cleanupImpl() {
-  if (runtime_.static_module_.opts().cleanup_activations) {
-    // MemoryPlanner is created after the first invocation of `run()`. This
-    // is done intentionally because MemoryPlanner uses `Tensor` sizes of
-    // the previous `run()` for memory planning of subsequent runs
-    if (C10_LIKELY(finished_)) {
-      runtime_.create_memory_planner();
-    }
+  // MemoryPlanner is created after the first invocation of `run()`. This
+  // is done intentionally because MemoryPlanner uses `Tensor` sizes of
+  // the previous `run()` for memory planning of subsequent runs
+  if (C10_LIKELY(finished_)) {
+    runtime_.create_memory_planner();
+  }
 
-    if (C10_LIKELY(runtime_.planner_)) {
-      runtime_.planner_->deallocate();
-    } else {
-      // This is the first run, and it didn't finish, so we can't use a
-      // `MemoryPlanner` to deallocate stuff. Just reset everything mannually.
-      runtime_.resetMemory();
-    }
-    // clean up owning refs of input tensors
-    runtime_.clean_up_input_ivalues();
-    if (C10_UNLIKELY(!finished_)) {
-      runtime_.deallocateOutputTensors();
-    }
+  if (C10_LIKELY(runtime_.planner_)) {
+    runtime_.planner_->deallocate();
+  } else {
+    // This is the first run, and it didn't finish, so we can't use a
+    // `MemoryPlanner` to deallocate stuff. Just reset everything mannually.
+    runtime_.resetMemory();
+  }
+  // clean up owning refs of input tensors
+  runtime_.clean_up_input_ivalues();
+  if (C10_UNLIKELY(!finished_)) {
+    runtime_.deallocateOutputTensors();
   }
 }
 
@@ -1485,12 +1481,10 @@ StaticRuntime::IndividualMetrics StaticRuntime::benchmark_individual_ops(
         verify_and_correct_memory_overlap(nodes_[k]);
       }
       timer.Start();
-      if (static_module_.opts().cleanup_activations) {
-        create_memory_planner();
-        planner_->deallocate();
-        // clean up owning refs of input tensors
-        clean_up_input_ivalues();
-      }
+      create_memory_planner();
+      planner_->deallocate();
+      // clean up owning refs of input tensors
+      clean_up_input_ivalues();
       if (manage_output_tensors) {
         deallocateOutputTensors();
       }
@@ -1544,10 +1538,6 @@ StaticRuntime::IndividualMetrics StaticRuntime::benchmark_individual_ops(
 }
 
 bool StaticRuntime::check_for_memory_leak(bool output_returned) {
-  if (!static_module_.opts().cleanup_activations) {
-    return true;
-  }
-
   // check for inputs
   for (const auto i : c10::irange(static_module_.num_inputs())) {
     TORCH_CHECK(values_[i].isNone(), "Input ", i, " was not cleaned up");

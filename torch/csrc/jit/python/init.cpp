@@ -23,6 +23,7 @@
 #include <torch/csrc/jit/passes/cuda_graph_fuser.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
 #include <torch/csrc/jit/passes/decompose_ops.h>
+#include <torch/csrc/jit/passes/device_type_analysis.h>
 #include <torch/csrc/jit/passes/dtype_analysis.h>
 #include <torch/csrc/jit/passes/erase_number_types.h>
 #include <torch/csrc/jit/passes/fold_conv_bn.h>
@@ -453,6 +454,7 @@ void initJITBindings(PyObject* module) {
       .def("_jit_pass_constant_pooling", ConstantPooling)
       // RemoveInplaceOps is used by CoreML so it must be removed with care.
       .def("_jit_pass_propagate_dtype", DtypePropagation)
+      .def("_jit_pass_propagate_device", DeviceTypePropagation)
       .def(
           "_jit_pass_remove_inplace_ops",
           [](const std::shared_ptr<Graph>& g) { return RemoveInplaceOps(g); })
@@ -1295,50 +1297,6 @@ void initJITBindings(PyObject* module) {
       .def("has_storage", &DeserializationStorageContext::hasStorage);
 
   m.def(
-      "_get_schema",
-      [](const std::string& op_name, const std::string& overload_name) {
-        try {
-          auto symbol = Symbol::fromQualString(op_name);
-          auto operations = getAllOperatorsFor(symbol);
-          for (const auto& op : operations) {
-            if (op->schema().overload_name() == overload_name) {
-              return op->schema();
-            }
-          }
-          throw std::runtime_error("Found no matching schema");
-        } catch (const c10::Error& e) {
-          auto msg = torch::get_cpp_stacktraces_enabled()
-              ? e.what()
-              : e.what_without_backtrace();
-          throw std::runtime_error(msg);
-        }
-      });
-
-  m.def(
-      "_get_operation_overload",
-      [](const std::string& op_name, const std::string& overload_name) {
-        try {
-          auto symbol = Symbol::fromQualString(op_name);
-          auto operations = getAllOperatorsFor(symbol);
-          for (const auto& op : operations) {
-            if (op->schema().overload_name() == overload_name) {
-              auto func =
-                  py::cpp_function([op](py::args args, py::kwargs kwargs) {
-                    return invokeOperatorFromPython({op}, args, kwargs);
-                  });
-              return func;
-            }
-          }
-          throw std::runtime_error("Found no matching operator overload");
-        } catch (const c10::Error& e) {
-          auto msg = torch::get_cpp_stacktraces_enabled()
-              ? e.what()
-              : e.what_without_backtrace();
-          throw std::runtime_error(msg);
-        }
-      });
-
-  m.def(
       "_jit_get_operation",
       [](const std::string& op_name) {
         try {
@@ -1413,11 +1371,8 @@ void initJITBindings(PyObject* module) {
               py::name(symbol.toUnqualString()),
               py::doc(docstring.str().c_str()));
           return func;
-        } catch (const c10::Error& e) {
-          auto msg = torch::get_cpp_stacktraces_enabled()
-              ? e.what()
-              : e.what_without_backtrace();
-          throw std::runtime_error(msg);
+        } catch (const c10::Error& error) {
+          throw std::runtime_error(error.what_without_backtrace());
         }
       },
       py::arg("qualified_name"));
