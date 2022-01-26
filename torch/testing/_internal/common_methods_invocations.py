@@ -8632,7 +8632,10 @@ op_db: List[OpInfo] = [
            supports_inplace_autograd=False,
            skips=(
                # TODO: update sample inputs with for_inplace_variant kwarg to support this test
-               DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_variant_consistency_eager'),),
+               DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_variant_consistency_eager'),
+               # https://github.com/pytorch/pytorch/issues/71849
+               DecorateInfo(unittest.skip("Skipped!"), 'TestNNCOpInfo', 'test_nnc_correctness',
+                            active_if=TEST_WITH_ASAN, device_type='cpu'),),
            sample_inputs_func=sample_inputs_addcmul_addcdiv),
     OpInfo('addcdiv',
            dtypes=floating_and_complex_types_and(torch.bfloat16),
@@ -8644,7 +8647,10 @@ op_db: List[OpInfo] = [
                # TODO: update sample inputs with for_inplace_variant kwarg to support this test
                DecorateInfo(unittest.skip("Skipped!"),
                             'TestCommon',
-                            'test_variant_consistency_eager'),),
+                            'test_variant_consistency_eager'),
+               # https://github.com/pytorch/pytorch/issues/71849
+               DecorateInfo(unittest.skip("Skipped!"), 'TestNNCOpInfo', 'test_nnc_correctness',
+                            active_if=TEST_WITH_ASAN, device_type='cpu'),),
            sample_inputs_func=sample_inputs_addcmul_addcdiv),
     UnaryUfuncInfo('asin',
                    aliases=('arcsin', ),
@@ -9043,6 +9049,8 @@ op_db: List[OpInfo] = [
            skips=(
                # RuntimeError: Tensor must have a last dimension with stride 1
                DecorateInfo(unittest.expectedFailure, "TestCommon", "test_noncontiguous_samples"),
+               # RuntimeError: "eq_cpu" not implemented for 'ComplexHalf'
+               DecorateInfo(unittest.skip("Skipped!"), 'TestNNCOpInfo', 'test_nnc_correctness', dtypes=(torch.half,)),
            )),
     BinaryUfuncInfo('complex',
                     dtypes=floating_types(),
@@ -11401,7 +11409,11 @@ op_db: List[OpInfo] = [
            dtypes=floating_types(),
            dtypesIfCPU=floating_types_and(torch.bfloat16),
            dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
-           sample_inputs_func=sample_inputs_max_pool),
+           sample_inputs_func=sample_inputs_max_pool,
+           skips=(
+               # RuntimeError: "max_pool1d_impl" not implemented for 'BFloat16'
+               DecorateInfo(unittest.skip("Skipped!"), 'TestNNCOpInfo', 'test_nnc_correctness', dtypes=(torch.bfloat16,)),
+           )),
     OpInfo('nn.functional.max_pool2d',
            aten_name='max_pool2d',
            supports_autograd=True,
