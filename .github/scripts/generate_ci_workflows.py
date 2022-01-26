@@ -218,7 +218,8 @@ class CIWorkflow:
         if self.arch == 'windows':
             assert self.test_runner_type in WINDOWS_RUNNERS, err_message
 
-        assert LABEL_CIFLOW_ALL in self.ciflow_config.labels
+        if not self.ciflow_config.isolated_workflow:
+            assert LABEL_CIFLOW_ALL in self.ciflow_config.labels
         if self.arch == 'linux':
             assert LABEL_CIFLOW_LINUX in self.ciflow_config.labels
         if self.arch == 'windows':
@@ -582,6 +583,7 @@ LINUX_WORKFLOWS = [
         only_on_pr=True,
         ciflow_config=CIFlowConfig(
             labels=set([LABEL_CIFLOW_LINUX, LABEL_CIFLOW_ROCM]),
+            isolated_workflow=True,
         ),
     ),
     CIWorkflow(
