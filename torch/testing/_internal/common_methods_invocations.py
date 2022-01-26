@@ -6391,6 +6391,8 @@ def sample_inputs_mvlgamma(op_info, device, dtype, requires_grad, **kwargs):
         if not dtype.is_floating_point:
             # Round-up minimum value for integral dtypes
             min_val += 1
+        else:
+            min_val += 2 * torch.finfo(dtype).eps
         yield SampleInput(make_arg(shape, low=min_val), args=(n,))
 
 
@@ -6407,8 +6409,6 @@ def skips_mvlgamma(skip_redundant=False):
         skips = skips + (  # type: ignore[assignment]
             DecorateInfo(unittest.skip("Skipped!"), 'TestGradients'),
             DecorateInfo(unittest.skip("Skipped!"), 'TestJit'),
-            # TODO: float16 fails due to tensor not satisfying > (p-1)/2
-            DecorateInfo(unittest.skip("Skipped!"), 'TestNNCOpInfo'),
             DecorateInfo(unittest.skip("Skipped!"), 'TestCommon'),
         )
     return skips
