@@ -30,6 +30,9 @@ import torch.nn.functional as F
 import torch.nn as nn
 import torch.nn.quantized._reference as nnqr
 
+from torch.fx.experimental.fx2trt import LowerSetting
+from torch.fx.experimental.fx2trt import Lowerer
+
 from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.common_quantization import NodeSpec as ns
@@ -742,6 +745,45 @@ class TestQuantizeFxTRTOps(QuantizationTestCase):
             ns.call_method("dequantize"): 3,
         }
         self.checkGraphModuleNodes(m.standalone, expected_node_occurrence=standalone_node_occurrence)
+
+    def test_repro(self):
+        merge = torch.load("/home/jerryzh/local/tmp/_run_on_acc_1.pt")
+        merge_inputs_cuda = torch.load("/home/jerryzh/local/tmp/_run_on_acc_1_input.pt")
+
+        # qconfig = torch.ao.quantization.QConfig(
+        #     activation=torch.ao.quantization.observer.HistogramObserver.with_args(
+        #         qscheme=torch.per_tensor_symmetric, dtype=torch.qint8
+        #     ),
+        #     weight=torch.ao.quantization.default_weight_observer
+        #     # uncomment to check per channel quant works
+        #     # weight=torch.quantization.default_per_channel_weight_observer
+        # )
+        # merge = prepare_fx(merge,
+        #                    {"object_type": [
+        #                        (torch.nn.Linear, qconfig),
+        #                        (torch.nn.ReLU, qconfig)],
+        #                     })
+        # merge = _convert_fx_do_not_use(merge, is_reference=True)
+        # merge.cpu()
+        # print("after convert:", merge)
+        merge_inputs_cuda = [i.cpu() for i in merge_inputs_cuda]
+        batch_size = 2048
+        fp16_mode = False
+        int8_mode = True
+        lower_setting = LowerSetting(
+            max_batch_size=batch_size,
+            explicit_batch_dimension=True,
+            explicit_precision=True,
+            fp16_mode=fp16_mode, int8_mode=int8_mode)
+        feed_lower = Lowerer.create(lower_setting)
+        # pyre-fixme[6]: Incompatible parameter type [6]
+        merge_trt_mod = feed_lower(merge, merge_inputs_cuda)
+
+        merge_inputs_cuda = [i.cuda() for i in merge_inputs_cuda]
+        merge = cast(torch.nn.Module, merge)
+        merge.cuda()
+        merge(*merge_inputs_cuda)
+        merge_trt_mod(*merge_inputs_cuda)
 
 if __name__ == "__main__":
     run_tests()

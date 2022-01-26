@@ -1,4 +1,4 @@
-from typing import Dict, Iterable, Tuple
+from typing import Dict, Iterable, Tuple, Mapping
 
 import torch
 import torch.fx.passes.splitter_base as splitter_base
@@ -13,7 +13,24 @@ from torch.fx.experimental.fx2trt import (
 )
 import torch.fx.passes.operator_support as ops
 from torch.fx.passes.tools_common import Tensors
+import torch.fx.experimental.fx_acc.acc_ops as acc_ops
 
+
+class SkipOp:
+    @classmethod
+    def skip_op(cls, opsb: ops.OperatorSupportBase) -> ops.OperatorSupportBase:
+        def _skip_op(
+            submodules: Mapping[str, torch.nn.Module],
+            node: torch.fx.Node,
+        ) -> bool:
+            skipped_ops = [
+                ("call_function", acc_ops.quantize_per_tensor)
+            ]
+            for op, target in skipped_ops:
+                if node.op == op and node.target == target:
+                    return True
+            return opsb.is_node_supported(submodules, node)
+        return ops.create_op_support(_skip_op)
 
 def create_trt_operator_support(use_implicit_batch_dim=True) -> ops.OperatorSupportBase:
     """Creates an `OperatorSupportBase` instance used for TRT splitting purpose.
@@ -31,12 +48,13 @@ def create_trt_operator_support(use_implicit_batch_dim=True) -> ops.OperatorSupp
         support_dict=support_dict
     )
 
-    return ops.chain(
+    supported = ops.chain(
         # 1. Node is not supported if it has args with int64 dtype:
-        ops.OpSupports.decline_if_input_dtype(torch.int64),
+        SkipOp.skip_op(ops.OpSupports.decline_if_input_dtype(torch.int64)),
         # 2. Node is supported if it has TRT converter:
         supported_if_converter_registered,
     )
+    return supported
 
 
 class TRTSplitter(splitter_base._SplitterBase):
