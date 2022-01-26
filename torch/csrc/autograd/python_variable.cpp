@@ -1061,9 +1061,13 @@ int THPVariable_set_real(THPVariable *self, THPVariable *real, void *unused)
 {
   HANDLE_TH_ERRORS
   auto& self_ = THPVariable_Unpack(self);
-  auto self_real = at::real(self_);
-  self_real.copy_(THPVariable_Unpack(real));
-  return 0;
+  auto& real_ = THPVariable_Unpack(real);
+  {
+    pybind11::gil_scoped_release no_gil;
+    auto self_real = at::real(self_);
+    self_real.copy_(real_);
+    return 0;
+  }
   END_HANDLE_TH_ERRORS_RET(-1)
 }
 
@@ -1071,9 +1075,13 @@ int THPVariable_set_imag(THPVariable* self, THPVariable *imag, void *unused)
 {
   HANDLE_TH_ERRORS
   auto& self_ = THPVariable_Unpack(self);
-  auto self_imag = at::imag(self_);
-  self_imag.copy_(THPVariable_Unpack(imag));
-  return 0;
+  auto& imag_ = THPVariable_Unpack(imag);
+  {
+    pybind11::gil_scoped_release no_gil;
+    auto self_imag = at::imag(self_);
+    self_imag.copy_(imag_);
+    return 0;
+  }
   END_HANDLE_TH_ERRORS_RET(-1)
 }
 
