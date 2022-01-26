@@ -818,11 +818,11 @@ linalg.ldl_factor_ex(A, *, upper=False, hermitian=False, check_errors=False, out
 
 Computes a compact representation of the LDL decomposition of a Hermitian or symmetric indefinite matrix.
 
-When :attr:`A` is complex valued it can be Hermitian (:attr:`hermitian` = `True`)
-or symmetric (:attr:`hermitian` = `False`).
+When :attr:`A` is complex valued it can be Hermitian (:attr:`hermitian`\ `= True`)
+or symmetric (:attr:`hermitian`\ `= False`).
 
 :attr:`upper` is a boolean value that controls whether the form of the decomposition is
-:math:`L D L^T` (:attr:`upper` = `False`) or :math:`U D U^T` (:attr:`upper` = `True`).
+:math:`L D L^T` (:attr:`upper`\ `= False`) or :math:`U D U^T` (:attr:`upper`\ `= True`).
 If :attr:`hermitian` is `True` then transpose operation is the conjugate transpose.
 
 :math:`L` (or :math:`U`) and :math:`D` are stored in compact form in ``factors``.
@@ -883,7 +883,7 @@ linalg.ldl_solve(factors, pivots, B, *, upper=False, hermitian=False, out=None) 
 Computes the solution of a system of linear equations using the LDL factorization.
 
 :attr:`upper` is a boolean value that controls whether the form of the decomposition is
-:math:`L D L^T` (:attr:`upper` = `False`) or :math:`U D U^T` (:attr:`upper` = `True`).
+:math:`L D L^T` (:attr:`upper`\ `= False`) or :math:`U D U^T` (:attr:`upper`\ `= True`).
 If :attr:`hermitian` is `True` then transpose operation is the conjugate transpose.
 
 Supports input of float, double, cfloat and cdouble dtypes.
