@@ -868,7 +868,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   bool is_cpu() const {
     // NB: This method is not virtual and avoid dispatches for performance
     // reasons.
-    constexpr auto cpu_bits_ks = DispatchKeySet(BackendBit::CPUBit)
+    constexpr auto cpu_bits_ks = DispatchKeySet(BackendComponent::CPUBit)
       | DispatchKeySet({
           DispatchKey::SparseCsrCPU,
           DispatchKey::MkldnnCPU
@@ -880,7 +880,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     // NB: This method is not virtual and avoid dispatches for performance
     // reasons.
     constexpr auto cuda_bits_ks =
-      DispatchKeySet(BackendBit::CUDABit) |
+      DispatchKeySet(BackendComponent::CUDABit) |
       DispatchKeySet(DispatchKey::SparseCsrCUDA);
     return key_set_.has_any(cuda_bits_ks);
   }
@@ -888,36 +888,36 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   bool is_xpu() const {
     // NB: This method is not virtual and avoid dispatches for performance
     // reasons.
-    constexpr auto xpu_ks = DispatchKeySet(BackendBit::XPUBit);
+    constexpr auto xpu_ks = DispatchKeySet(BackendComponent::XPUBit);
     return key_set_.has_all(xpu_ks);
   }
 
   bool is_xla() const {
-    constexpr auto xla_ks = DispatchKeySet(BackendBit::XLABit);
+    constexpr auto xla_ks = DispatchKeySet(BackendComponent::XLABit);
     return key_set_.has_all(xla_ks);
   }
 
   bool is_hpu() const {
-    constexpr auto hpu_ks = DispatchKeySet(BackendBit::HPUBit);
+    constexpr auto hpu_ks = DispatchKeySet(BackendComponent::HPUBit);
     return key_set_.has_all(hpu_ks);
   }
 
   bool is_lazy() const {
-    constexpr auto lazy_ks = DispatchKeySet(BackendBit::LazyBit);
+    constexpr auto lazy_ks = DispatchKeySet(BackendComponent::LazyBit);
     return key_set_.has_all(lazy_ks);
   }
 
   bool is_hip() const {
     // NB: This method is not virtual and avoid dispatches for performance
     // reasons.
-    constexpr auto hip_ks = DispatchKeySet(BackendBit::HIPBit);
+    constexpr auto hip_ks = DispatchKeySet(BackendComponent::HIPBit);
     return key_set_.has_all(hip_ks);
   }
 
   bool is_ve() const {
     // NB: This method is not virtual and avoid dispatches for performance
     // reasons.
-    constexpr auto ve_ks = DispatchKeySet(BackendBit::VEBit);
+    constexpr auto ve_ks = DispatchKeySet(BackendComponent::VEBit);
     return key_set_.has_all(ve_ks);
   }
 
@@ -1574,20 +1574,20 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   inline bool has_compatible_shallow_copy_type(DispatchKeySet from) {
     auto is_dense = [](DispatchKeySet ts) {
       constexpr auto dense_backends = DispatchKeySet({
-        BackendBit::CPUBit,
-        BackendBit::CUDABit,
-        BackendBit::HIPBit,
-        BackendBit::XPUBit
+        BackendComponent::CPUBit,
+        BackendComponent::CUDABit,
+        BackendComponent::HIPBit,
+        BackendComponent::XPUBit
       });
       constexpr auto dense_k = DispatchKeySet(DispatchKey::Dense);
       return ts.has_any(dense_k) && ts.has_any(dense_backends);
     };
     auto is_sparse = [](DispatchKeySet ts) {
       constexpr auto sparse_backends = DispatchKeySet({
-        BackendBit::CPUBit,
-        BackendBit::CUDABit,
-        BackendBit::HIPBit,
-        BackendBit::XPUBit
+        BackendComponent::CPUBit,
+        BackendComponent::CUDABit,
+        BackendComponent::HIPBit,
+        BackendComponent::XPUBit
       });
       constexpr auto sparse_k = DispatchKeySet(DispatchKey::Sparse);
       return ts.has_any(sparse_k) && ts.has_any(sparse_backends);
@@ -1596,6 +1596,13 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
         (is_sparse(key_set_) && is_sparse(from));
   }
 
+ private:
+  template <typename VariableVersion>
+  c10::intrusive_ptr<TensorImpl> shallow_copy_and_detach_core(
+      VariableVersion&& version_counter,
+      bool allow_tensor_metadata_change) const;
+
+ public:
   /**
    * Return a TensorImpl that is a shallow-copy of this TensorImpl.
    *

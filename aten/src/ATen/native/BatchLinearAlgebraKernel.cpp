@@ -908,8 +908,8 @@ void apply_lu_solve(const Tensor& b, const Tensor& lu, const Tensor& pivots, Tra
   const auto trans = to_blas(transpose);
   auto pivots_data = pivots.data_ptr<int>();
   auto b_stride = matrixStride(b);
-  auto lu_stride = lu.dim() > 2 ? lu.stride(-3) : 0;
-  auto pivots_stride = pivots.dim() > 1 ? pivots.stride(-2) : 0;
+  auto lu_stride = matrixStride(lu);
+  auto pivots_stride = pivots.size(-1);
   auto batch_size = batchCount(b);
 
   auto n = lu.size(-2);

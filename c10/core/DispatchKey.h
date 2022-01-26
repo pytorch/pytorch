@@ -9,22 +9,20 @@
 
 namespace c10 {
 
-// Semantically, a dispatch key identifies a possible "level" in our
-// dispatch, for which a handler may be registered.  Traditional
-// backends like CPU and CUDA get dispatch keys; however, so do
-// "wrapping" layers like Variable (for autograd handling).
-//
-// In implementation terms, the dispatch key identifies a specific "bit" in a
-// DispatchKeySet.  Higher bit indexes get handled by dispatching first (because
-// we "count leading zeros" when we extract the highest priority dispatch
-// key.)
-//
-//
+// Semantically, each value of BackendComponent identifies a "backend" for our dispatch.
+// Some functionalities that we may dispatch to are allowed to register different
+// handlers for each backend. The BackendComponent is then used to figure out
+// which backend implementation to dispatch to.
 
-// NOTE: Keep the list in sync with `DispatchKey` in tools/codegen/model.py
-enum class BackendBit : uint8_t {
+// In implementation terms, the backend component identifies a specific "bit" in a
+// DispatchKeySet. The bits in the DispatchKeySet are split between the bottom ~12
+// "BackendComponent" bits, while the remaining upper bits are assigned to functionalities.
+// When we encounter a functionality bit that is known to be customizeable per-backend,
+// then we also look at the lower BackendComponent bits and take the highest bit
+// to determine which backend's implementation to use.
 
-  // ~~~~~~~~~~~~~~~~~~~~~~~~~~ BACKENDS ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ //
+enum class BackendComponent : uint8_t {
+
   // A "backend" is colloquially used to refer to handlers for dispatch
   // which actually implement the numerics of an operation in question.
   //
@@ -41,8 +39,8 @@ enum class BackendBit : uint8_t {
   // - sparse kernels (e.g. DispatchKey::SparseCPU)
   // - quantized kernels (e.g. DispatchKey::QuantizedCPU)
   // - autograd kernels (e.g. DispatchKey::AutogradCPU)
-  // We reserve space in the runtime operator table for this full cross product of [backends] x [functionality]
-  // [For backends in this list] x [keys below that are explicitly marked as having per-backend functionality]
+  // We reserve space in the runtime operator table for this full cross product of
+  // [backends in this enum] x [keys below that are explicitly marked as having per-backend functionality]
 
   InvalidBit = 0,
   CPUBit,
@@ -57,17 +55,46 @@ enum class BackendBit : uint8_t {
   PrivateUse1Bit,
   PrivateUse2Bit,
   PrivateUse3Bit,
-  // Define an alias key to represent end of backend dispatch keys.
+  // Define an alias to represent end of backend dispatch keys.
   // If you add new backend keys after PrivateUse3, please also update it here.
   // (But you shouldn't: private use keys should have higher precedence than
   // all built-in keys)
   EndOfBackendKeys = PrivateUse3Bit,
 };
 
+
+// Semantically, a dispatch key identifies a possible "level" in our
+// dispatch, for which a handler may be registered. Each handler corresponds
+// to a type of functionality.
+//
+// In implementation terms, the dispatch key identifies a specific "bit" in a
+// DispatchKeySet.  Higher bit indexes get handled by dispatching first (because
+// we "count leading zeros" when we extract the highest priority dispatch
+// key.)
+//
+// Note [DispatchKey Classification]
+// This enum actually contains several types of keys, which are explained
+// in more detail further down:
+// (1) non-customizable backends (e.g. FPGA)
+// (2) non-customizable functionalities (e.g. Functionalize)
+// (3) functionalized that are customizable per backend (e.g. Dense, Sparse, AutogradFunctionality)
+// (4) per-backend instances of customizable functionalities (e.g. CPU, SparseCPU, AutogradCPU)
+// (5) alias keys (e.g. CompositeImplicitAutograd)
+//
+// Of the categories above, it's important to note:
+// (a) which keys are assigned individual bits in a DispatchKeySet
+// (b) which keys are assigned individual slots in the runtime operator table ("Runtime keys")
+//
+// (1), (2) and (3) all get their own dedicated bits in the DispatchKeySet.
+// (1), (2) and (4) all get their own dedicated slots in the runtime operator table.
+
+// See Note [DispatchKeySet Internal Representation] for more details.
+//
+// NOTE: Keep the list in sync with `DispatchKey` in tools/codegen/model.py
 enum class DispatchKey : uint16_t {
 
   // ~~~~~~~~~~~~~~~~~~~~~~~~~~ UNDEFINED ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ //
-  // This is not a "real" tensor id, but it exists to give us a "nullopt"
+  // This is not a "real" functionality, but it exists to give us a "nullopt"
   // element we can return for cases when a DispatchKeySet contains no elements.
   // You can think a more semantically accurate definition of DispatchKey is:
   //
@@ -84,9 +111,16 @@ enum class DispatchKey : uint16_t {
   CatchAll = Undefined,
 
   // ~~~~~~~~~~~~~~~~~~~~~~~~~~ Functionality Keys ~~~~~~~~~~~~~~~~~~~~~~ //
-  // [Note: Functionality Dispatch Keys]
-  // TODO: fill this in.
-  // See [Note: Per-Backend Functionality Dispatch Keys]
+  // Every value in the enum (up to EndOfFunctionalityKeys)
+  // corresponds to an individual "functionality" that can be dispatched to.
+  // This is represented in the DispatchKeySet by assigning each of these enum values
+  // to each of the remaining (64 - len(BackendComponent)) bits.
+  //
+  // Most of these functionalities have a single handler assigned to them, making them "runtime keys".
+  // That map to a single slot in the runtime operator table.
+  //
+  // A few functionalities are allowed to be customizable per backend.
+  // See [Note: Per-Backend Functionality Dispatch Keys] for details.
 
   // See [Note: Per-Backend Functionality Dispatch Keys]
   Dense,
@@ -143,6 +177,20 @@ enum class DispatchKey : uint16_t {
 
   SparseCsrCPU,
   SparseCsrCUDA,
+
+  // Note [Non-Customizable Backend Keys]
+  // Every key above here is considered a "non-customizable backend".
+  // These are backends that will work correctly with autograd, but
+  // but currently don't require separate implementations
+  // for autograd sparse or quantized kernels.
+  // Any new backends that don't need to be customized should go above here.
+  // If an existing backend needs to e.g. override autograd, then we can
+  // consider promoting it into the "BackendComponent" enum
+  //
+  // For all intents and purposes from the perspective of DispatchKeySet,
+  // "non-customizable backend" keys are treated the same way
+  // as other functionality keys
+  EndOfNonCustomizableBackends = SparseCsrCUDA,
 
   NestedTensor, // lives out of tree at https://github.com/pytorch/nestedtensor
 
@@ -252,17 +300,14 @@ enum class DispatchKey : uint16_t {
   // See [Note: Per-Backend Functionality Dispatch Keys]
   AutogradFunctionality,
 
-  // Note [Non-Backends that Override Autograd]
   // NestedTensor is an example of something that isn't a "real backend"
   // (because it mostly consists of redispatching kernels)
-  // but it would like to override autograd functionality.
-  // We have to hack that functionality in by adding key for AutogradNestedTensor,
-  // and adding an explicit mapping between it and DispatchKey::NestedTensor
-  // in a few places.
-  // Maybe we should enforce in the future that "non-backend" features that want
-  // to override autograd should do it in python?
-  AutogradNestedTensor, // lives out of tree at
+  // but it would like to override autograd functionality in C++.
+  // We can handle cases like this by adding an extra functionality key
+  // exclusively for handling autograd for NestedTensor.
+  // lives out of tree at
   // https://github.com/pytorch/nestedtensor
+  AutogradNestedTensor,
 
   Tracer,
 
@@ -321,6 +366,7 @@ enum class DispatchKey : uint16_t {
   // Here are backends which you think of as traditionally specifying
   // how to implement operations on some device.
 
+  // See Note [The Ordering of Per-Backend Dispatch Keys Matters!]
   StartOfDenseBackends,
   CPU, // registered at build/aten/src/ATen/RegisterCPU.cpp
   CUDA, // registered at build/aten/src/ATen/RegisterCUDA.cpp
@@ -344,6 +390,7 @@ enum class DispatchKey : uint16_t {
   // keys starting with an _ are not currently used,
   // but are needed to ensure that every backend is indexed correctly.
 
+  // See Note [The Ordering of Per-Backend Dispatch Keys Matters!]
   StartOfQuantizedBackends,
   QuantizedCPU, // registered at build/aten/src/ATen/RegisterQuantizedCPU.cpp
   QuantizedCUDA, // registered at build/aten/src/ATen/RegisterQuantizedCUDA.cpp
@@ -363,6 +410,7 @@ enum class DispatchKey : uint16_t {
   // keys starting with an _ are not currently used,
   // but are needed to ensure that every backend is indexed correctly.
 
+  // See Note [The Ordering of Per-Backend Dispatch Keys Matters!]
   StartOfSparseBackends,
   SparseCPU, // registered at build/aten/src/ATen/RegisterSparseCPU.cpp
   SparseCUDA, // registered at build/aten/src/ATen/RegisterSparseCUDA.cpp
@@ -383,6 +431,7 @@ enum class DispatchKey : uint16_t {
   // keys starting with an _ are not currently used,
   // but are needed to ensure that every backend is indexed correctly.
 
+  // See Note [The Ordering of Per-Backend Dispatch Keys Matters!]
   StartOfAutogradBackends,
   AutogradCPU,
   AutogradCUDA,
@@ -399,6 +448,9 @@ enum class DispatchKey : uint16_t {
   AutogradPrivateUse2,
   AutogradPrivateUse3,
   EndOfAutogradBackends = AutogradPrivateUse3,
+  // If we add a new per-backend functionality key that has higher priority
+  // than Autograd, then this key should be updated.
+  EndOfRuntimeBackendKeys = EndOfAutogradBackends,
 
   // ~~~~~~~~~~~~~~~~~~~~~~ Alias Dispatch Keys ~~~~~~~~~~~~~~~~~~~~~~~~~~ //
   // Note [Alias Dispatch Keys]
@@ -461,18 +513,28 @@ enum class DispatchKey : uint16_t {
 // built-in autograd formulas for operators are not appropriate.
 
 static_assert(
-    (static_cast<uint8_t>(BackendBit::EndOfBackendKeys) +
+    (static_cast<uint8_t>(BackendComponent::EndOfBackendKeys) +
     static_cast<uint8_t>(DispatchKey::EndOfFunctionalityKeys)) <= 64,
-    "DispatchKey is used as index into 64-bit bitmask; you must have less than 64 entries");
+    "The BackendComponent and DispatchKey enums (below EndOfFunctionalityKeys)"
+    " both map to backend and functionality bits"
+    " into a 64-bit bitmask; you must have less than 64 total entries between them");
 
 // Check if a DispatchKey is an alias mapping to other runtime keys.
 constexpr bool isAliasDispatchKey(DispatchKey k) {
   return k >= DispatchKey::StartOfAliasKeys && k <= DispatchKey::EndOfAliasKeys;
 }
 
-// Check if a DispatchKey is a per-backend functionality key
 // [Note: Per-Backend Functionality Dispatch Keys]
-// TODO: fill this in.
+// Check if a DispatchKey is a per-backend functionality key
+// Any functionalities that can be customized per-backend should be added here.
+// These keys correspond to functionalities that can be customized indivually per backend.
+// While they only take up one bit in the `DispatchKeySet` bitset,
+// they map to (# backends) slots in the operator table.
+// Each of these keys also has a separate set of "runtime keys" in the dispatch key enum,
+// per backend, which *do* map to the individual operator table slots.
+// For example, the "Sparse" key maps to an individual bit in the DispatchKeySet,
+// while `SparseCPU`, `SparseCUDA`, etc all map to individual slots in the runtime operator table.
+
 constexpr bool isPerBackendFunctionalityKey(DispatchKey k) {
   if (k == DispatchKey::Dense ||
       k == DispatchKey::Quantized ||
@@ -491,37 +553,43 @@ constexpr bool isPerBackendFunctionalityKey(DispatchKey k) {
 constexpr uint8_t num_functionality_keys =
     static_cast<uint8_t>(DispatchKey::EndOfFunctionalityKeys);
 
-// it would be nice if we could cast EndOfBackendKeys to a 4-bit unsigned integer.
-// That way we'd automatically get warnings if EndOfBackendKeys happened to grow > 16.
-// Sadly, uint4_t is not a C++ type.
-constexpr uint8_t num_backends = static_cast<uint8_t>(BackendBit::EndOfBackendKeys);
+// Note [No More Than 16 Backends]
+// Search for this note to find places in the code where the "no more than 16 backends"
+// invariant is baked in.
+static_assert(
+    static_cast<uint8_t>(BackendComponent::EndOfBackendKeys) <= 16,
+    "BackendComponent currently only supports <= 16 backends. If we really need to extend this, \
+there are a few places where this invariant is baked in");
 
 constexpr uint8_t numPerBackendFunctionalityKeys() {
   uint8_t count = 0;
-  for (uint8_t k = 0; k < static_cast<uint8_t>(DispatchKey::EndOfFunctionalityKeys); ++k) {
+  for (uint8_t k = 0; k <= num_functionality_keys; ++k) {
     if (isPerBackendFunctionalityKey(static_cast<DispatchKey>(k))) ++count;
   }
   return count;
 }
 
-constexpr uint16_t full_backend_mask = (static_cast<uint16_t>(1) << num_backends) - 1;
-
 
 #if defined(C10_MOBILE_TRIM_DISPATCH_KEYS)
 // See [Note: Trimmed Mobile Dispatch Keys]
+constexpr uint8_t num_backends = 1; // Only CPU
 constexpr uint16_t num_runtime_entries = 8;
 #else
+constexpr uint8_t num_backends = static_cast<uint8_t>(BackendComponent::EndOfBackendKeys);
 constexpr uint16_t num_runtime_entries =
     num_functionality_keys
   + (numPerBackendFunctionalityKeys() * (num_backends - 1));
 #endif
 
-C10_API const char* toString(DispatchKey);
-C10_API const char* toString(BackendBit);
-C10_API std::ostream& operator<<(std::ostream&, DispatchKey);
-C10_API std::ostream& operator<<(std::ostream&, BackendBit);
+// See Note [No More Than 16 Backends]
+constexpr uint16_t full_backend_mask = (static_cast<uint16_t>(1) << num_backends) - 1;
 
-C10_API DispatchKey getAutogradKeyFromBackend(DispatchKey k);
+C10_API const char* toString(DispatchKey);
+C10_API const char* toString(BackendComponent);
+C10_API std::ostream& operator<<(std::ostream&, DispatchKey);
+C10_API std::ostream& operator<<(std::ostream&, BackendComponent);
+
+C10_API DispatchKey getAutogradKeyFromBackend(BackendComponent k);
 
 // Parses a string into a dispatch key.
 // If the string cannot be correctly parsed, throws an exception.
@@ -534,21 +602,21 @@ C10_API c10::DispatchKey parseDispatchKey(const std::string& k);
 // torch::dispatch(torch::kCPU, ...) is also valid.
 constexpr DispatchKey kAutograd = DispatchKey::Autograd;
 
+// See Note [The Ordering of Per-Backend Dispatch Keys Matters!]
 // This function relies on the invariant that the dispatch keys between
-// StartOfDenseBackends and EndOfAutogradBackends are ordered by backend
-// in the same order as `BackendBit`.
-// TODO: statically assert this invariant.
-constexpr BackendBit toBackendBit(DispatchKey k) {
+// StartOfDenseBackends and EndOfRuntimeBackendKeys are ordered by backend
+// in the same order as `BackendComponent`.
+constexpr BackendComponent toBackendComponent(DispatchKey k) {
   if (k >= DispatchKey::StartOfDenseBackends && k <= DispatchKey::EndOfDenseBackends) {
-    return static_cast<BackendBit>(static_cast<uint8_t>(k) - static_cast<uint8_t>(DispatchKey::StartOfDenseBackends));
+    return static_cast<BackendComponent>(static_cast<uint8_t>(k) - static_cast<uint8_t>(DispatchKey::StartOfDenseBackends));
   } else if (k >= DispatchKey::StartOfQuantizedBackends && k <= DispatchKey::EndOfQuantizedBackends) {
-    return static_cast<BackendBit>(static_cast<uint8_t>(k) - static_cast<uint8_t>(DispatchKey::StartOfQuantizedBackends));
+    return static_cast<BackendComponent>(static_cast<uint8_t>(k) - static_cast<uint8_t>(DispatchKey::StartOfQuantizedBackends));
   } else if (k >= DispatchKey::StartOfSparseBackends && k <= DispatchKey::EndOfSparseBackends) {
-    return static_cast<BackendBit>(static_cast<uint8_t>(k) - static_cast<uint8_t>(DispatchKey::StartOfSparseBackends));
+    return static_cast<BackendComponent>(static_cast<uint8_t>(k) - static_cast<uint8_t>(DispatchKey::StartOfSparseBackends));
   } else if (k >= DispatchKey::StartOfAutogradBackends && k <= DispatchKey::EndOfAutogradBackends) {
-    return static_cast<BackendBit>(static_cast<uint8_t>(k) - static_cast<uint8_t>(DispatchKey::StartOfAutogradBackends));
+    return static_cast<BackendComponent>(static_cast<uint8_t>(k) - static_cast<uint8_t>(DispatchKey::StartOfAutogradBackends));
   } else {
-    return BackendBit::InvalidBit;
+    return BackendComponent::InvalidBit;
   }
 }
 
@@ -569,11 +637,11 @@ constexpr DispatchKey toFunctionalityKey(DispatchKey k) {
 }
 
 // Given (DispatchKey::Dense, DispatchKey::CUDABit), returns DispatchKey::CUDA
+// See Note [The Ordering of Per-Backend Dispatch Keys Matters!]
 // This function relies on the invariant that the dispatch keys between
-// StartOfDenseBackends and EndOfAutogradBackends are ordered by backend
-// in the same order as `BackendBit`.
-// TODO: statically assert this invariant.
-constexpr DispatchKey toRuntimePerBackendFunctionalityKey(DispatchKey functionality_k, BackendBit backend_k) {
+// StartOfDenseBackends and EndOfRuntimeBackendKeys are ordered by backend
+// in the same order as `BackendComponent`.
+constexpr DispatchKey toRuntimePerBackendFunctionalityKey(DispatchKey functionality_k, BackendComponent backend_k) {
   if (functionality_k == DispatchKey::Dense) {
     return static_cast<DispatchKey>(
       static_cast<uint8_t>(DispatchKey::StartOfDenseBackends) + static_cast<uint8_t>(backend_k));
