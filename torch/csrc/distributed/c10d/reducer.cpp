@@ -8,6 +8,7 @@
 #include <c10/core/DeviceGuard.h>
 #include <c10/core/StreamGuard.h>
 #include <c10/util/Exception.h>
+#include <c10/util/Logging.h>
 #include <c10/util/hash.h>
 #include <c10/util/irange.h>
 #include <c10d/comm.hpp>
