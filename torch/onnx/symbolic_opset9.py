@@ -1603,7 +1603,7 @@ def _clamp_common_types(g, self, min_f=None, max_f=None):
 
     if not is_fp_clamp:
         warnings.warn(
-            "ONNX opset < 11 does not support clamp/clip to non-float types. Using cast-clip-cast instead.")
+            "ONNX opset 6 does not support clamp/clip to non-float types. Using cast-clip-cast instead.")
         self = g.op("Cast", self, to_i=sym_help.cast_pytorch_to_onnx["Float"])
 
     self = g.op("Clip", self, min_f=min_f, max_f=max_f)

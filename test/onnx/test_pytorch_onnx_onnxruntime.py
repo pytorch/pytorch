@@ -3422,16 +3422,16 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(MyReluModule(), x)
 
     @skipIfUnsupportedMinOpsetVersion(9)
-    def test_clip9(self):
-        class MyClip9(torch.nn.Module):
+    def test_clip6(self):
+        class MyClip6(torch.nn.Module):
             def forward(self, x):
                 return torch.clamp(x, 0, 1)
 
         x = torch.randn(3, 3)
-        self.run_test(MyClip9(), x)
-        self.run_test(MyClip9(), x.to(torch.int32))
+        self.run_test(MyClip6(), x)
+        self.run_test(MyClip6(), x.to(torch.int32))
         if self.opset_version >= 12:  # awaiting bugfix in ORT to remove this constraint.
-            self.run_test(MyClip9(), x.to(torch.double))
+            self.run_test(MyClip6(), x.to(torch.double))
 
     @skipIfUnsupportedOpsetVersion([7])
     def test_normalize(self):

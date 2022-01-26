@@ -18,7 +18,7 @@ from torch.onnx.utils import _add_block, _add_input_to_block, _add_output_to_blo
 # This file exports ONNX ops for opset 11
 
 def _clamp_common_types(g, self, min, max):
-    # clip-6 is only available to float, double, and float16.
+    # clip-11 is only available to float, double, and float16.
     # for other types, we first cast to float, then do clip and cast back.
     origin_dtype = self.type().scalarType()
     is_fp_clamp = self.type().scalarType(
@@ -26,7 +26,7 @@ def _clamp_common_types(g, self, min, max):
 
     if not is_fp_clamp:
         warnings.warn(
-            "ONNX opset < 11 does not support clamp/clip to non-float types. Using cast-clip-cast instead.")
+            "ONNX opset 11 does not support clamp/clip to non-float types. Using cast-clip-cast instead.")
         self = g.op("Cast", self, to_i=sym_help.cast_pytorch_to_onnx["Float"])
         if min.type().scalarType() != "Float":
             min = g.op("Cast", min, to_i=sym_help.cast_pytorch_to_onnx["Float"])
