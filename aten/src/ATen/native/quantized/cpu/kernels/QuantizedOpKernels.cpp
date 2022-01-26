@@ -2759,7 +2759,7 @@ void qmean_inner_dim_kernel(
       self.q_zero_point(),
       c10::nullopt);
 
-  AT_DISPATCH_QINT_TYPES(self.scalar_type(), "quantized_layer_norm_kernel_impl_cpu", [&]() {
+  AT_DISPATCH_QINT_TYPES(self.scalar_type(), "quantized_mean_kernel_impl_cpu", [&]() {
     scalar_t* X_data = self.data_ptr<scalar_t>();
     scalar_t* Y_data = result.data_ptr<scalar_t>();
 
@@ -2770,7 +2770,8 @@ void qmean_inner_dim_kernel(
         scalar_t::underlying* X_ptr_underlying = reinterpret_cast<scalar_t::underlying*>(X_ptr);
         scalar_t::underlying* Y_ptr_underlying = reinterpret_cast<scalar_t::underlying*>(Y_ptr);
         auto x_sum = hsum(X_ptr_underlying, N);
-        *Y_ptr_underlying = x_sum / N;
+        float y_float = static_cast<float>(x_sum) / N;
+        *Y_ptr_underlying = std::nearbyint(y_float);
       }
     });
   });
@@ -2814,7 +2815,7 @@ void qstd_inner_dim_kernel(
       x_zp,
       c10::nullopt);
 
-  AT_DISPATCH_QINT_TYPES(self.scalar_type(), "quantized_layer_norm_kernel_impl_cpu", [&]() {
+  AT_DISPATCH_QINT_TYPES(self.scalar_type(), "quantized_std_kernel_impl_cpu", [&]() {
     scalar_t* X_data = self.data_ptr<scalar_t>();
     scalar_t* Y_data = result.data_ptr<scalar_t>();
 
@@ -2826,15 +2827,19 @@ void qstd_inner_dim_kernel(
         scalar_t::underlying* Y_ptr_underlying = reinterpret_cast<scalar_t::underlying*>(Y_ptr);
         auto x_sum_shifted = hsum(X_ptr_underlying, N);
         auto x_sum_sq_shifted = hsum_sq(X_ptr_underlying, N);
+        // Use double for intermediate variables to avoid accuracy issue
         // Mean with zero point
-        float x_mean_shifted_div_scale_x = static_cast<float>(x_sum_shifted) / N;
-        float x_mean_unbiased_shifted_div_scale_x = static_cast<float>(x_sum_shifted) / den;
+        double x_mean_shifted_div_scale_x = static_cast<double>(x_sum_shifted) / N;
+        double x_mean_unbiased_shifted_div_scale_x = static_cast<double>(x_sum_shifted) / den;
         // variance / x_scale^2
-        float x_var_div_scale_x_sq =
-            std::max(static_cast<float>(x_sum_sq_shifted) / den -
+        double x_var_div_scale_x_sq =
+            std::max(static_cast<double>(x_sum_sq_shifted) / den -
                 2 * x_mean_shifted_div_scale_x * x_mean_unbiased_shifted_div_scale_x +
-                x_mean_shifted_div_scale_x * x_mean_shifted_div_scale_x * N / den, 0.0f);
-        *Y_ptr_underlying = std::sqrt(x_var_div_scale_x_sq) * x_scale;
+                x_mean_shifted_div_scale_x * x_mean_shifted_div_scale_x * N / den, (double)0.0);
+        double y_float = std::sqrt(x_var_div_scale_x_sq) * x_scale;
+        *Y_ptr_underlying = at::native::quantize_val<scalar_t>(
+                            x_scale, x_zp, y_float)
+                            .val_;
       }
     });
   });
