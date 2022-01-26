@@ -383,7 +383,7 @@ class TestViewOps(TestCase):
 
     @onlyNativeDeviceTypes
     @dtypes(*(integral_types() + floating_types_and(torch.half, torch.bfloat16)))
-    def test_real_imag_noncomplex(self, device, dtype):
+    def test_imag_noncomplex(self, device, dtype):
         t = torch.ones((5, 5), dtype=dtype, device=device)
 
         with self.assertRaises(RuntimeError):

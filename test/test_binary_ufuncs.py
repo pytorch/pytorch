@@ -1876,7 +1876,7 @@ class TestBinaryUfuncs(TestCase):
                         self.assertEqual(expected, torch_op(first, second))
 
     @dtypes(*product(all_types_and(torch.half, torch.bfloat16, torch.bool),
-                                   all_types_and(torch.half, torch.bfloat16, torch.bool)))
+                     all_types_and(torch.half, torch.bfloat16, torch.bool)))
     def test_maximum_minimum_type_promotion(self, device, dtypes):
         a = torch.tensor((0, 1), device=device, dtype=dtypes[0])
         b = torch.tensor((1, 0), device=device, dtype=dtypes[1])

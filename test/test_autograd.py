@@ -40,7 +40,7 @@ from torch.testing._internal.common_methods_invocations import mask_not_all_zero
 from torch.testing._internal.common_device_type import (instantiate_device_type_tests, skipCUDAIfRocm,
                                                         onlyCPU, onlyCUDA, dtypes, dtypesIfCUDA,
                                                         deviceCountAtLeast, skipMeta)
-from torch.testing._internal.common_dtype import all_types_and_complex_and, floating_types_and
+from torch.testing._internal.common_dtype import floating_types_and
 from torch.testing._internal.logging_tensor import no_dispatch
 
 import pickle

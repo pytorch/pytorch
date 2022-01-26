@@ -21,7 +21,7 @@ from torch.testing._internal.common_device_type import (
     OpDTypes)
 from torch.testing import make_tensor
 from torch.testing._internal.common_dtype import (
-    floating_types_and, all_types_and_complex_and, floating_and_complex_types_and, integral_types,
+    floating_types_and, all_types_and_complex_and, floating_and_complex_types_and,
     integral_types_and, get_all_math_dtypes, complex_types
 )
 
