@@ -816,12 +816,12 @@ Examples::
 ldl_factor_ex = _add_docstr(_linalg.linalg_ldl_factor_ex, r"""
 linalg.ldl_factor_ex(A, *, upper=False, hermitian=False, check_errors=False, out=None) -> (Tensor, Tensor, Tensor)
 
-Computes a compact representation of the LDL decomposition of a Hermitian or symmetric indefinite matrix.
+Computes a compact representation of the LDL factorization of a Hermitian or symmetric indefinite matrix.
 
 When :attr:`A` is complex valued it can be Hermitian (:attr:`hermitian`\ `= True`)
 or symmetric (:attr:`hermitian`\ `= False`).
 
-:attr:`upper` is a boolean value that controls whether the form of the decomposition is
+:attr:`upper` is a boolean value that controls whether the form of the factorization is
 :math:`L D L^T` (:attr:`upper`\ `= False`) or :math:`U D U^T` (:attr:`upper`\ `= True`).
 If :attr:`hermitian` is `True` then transpose operation is the conjugate transpose.
 
@@ -831,7 +831,7 @@ This format is used by :func:`torch.linalg.ldl_solve` for solving linear systems
 ``info`` stores integer error codes from the backend library (see `sytrf` function from LAPACK).
 The positive integer indicates the diagonal element of :math:`D` that is zero.
 Division by 0 will occur if the result is used for solving a system of linear equations.
-``info`` filled with zeros indicates that the decomposition was successful.
+``info`` filled with zeros indicates that the factorization was successful.
 If ``check_errors=True`` and ``info`` contains positive integers, then a RuntimeError is thrown.
 
 Supports input of float, double, cfloat and cdouble dtypes.
@@ -849,7 +849,7 @@ Args:
                     `(*, n, n)` where `*` is one or more batch dimensions.
 
 Keyword args:
-    upper (bool, optional): whether to compute LDL or UDU decomposition. Default: `False`.
+    upper (bool, optional): whether to compute LDL or UDU factorization. Default: `False`.
     hermitian (bool, optional): whether to consider the input to be Hermitian or symmetric.
                                 For real-valued matrices, this switch has no effect. Default: `False`.
     check_errors (bool, optional): controls whether to check the content of ``info``. Default: `False`.
@@ -882,9 +882,14 @@ linalg.ldl_solve(factors, pivots, B, *, upper=False, hermitian=False, out=None) 
 
 Computes the solution of a system of linear equations using the LDL factorization.
 
+:attr:`factors` and :attr:`pivots` are the compact representation of the LDL factorization and
+are expected to be computed by :func:`torch.linalg.ldl_factor_ex`.
+
 :attr:`upper` is a boolean value that controls whether the form of the decomposition is
 :math:`L D L^T` (:attr:`upper`\ `= False`) or :math:`U D U^T` (:attr:`upper`\ `= True`).
 If :attr:`hermitian` is `True` then transpose operation is the conjugate transpose.
+:attr:`upper` and :attr:`hermitian` arguments to this function should be the same
+as the corresponding arguments in :func:`torch.linalg.ldl_factor_ex`.
 
 Supports input of float, double, cfloat and cdouble dtypes.
 Also supports batches of matrices, and if :attr:`A` is a batch of matrices then
