@@ -83,10 +83,6 @@ cmake/Dependencies.cmake
 # enable oneDNN graph fusion globally
 torch.jit.enable_onednn_fusion(True)
 
-# By default, oneDNN Graph will cache weights.
-# This setting can be disabled/enabled at runtime.
-torch.jit.enable_onednn_graph_weight_cache(True)
-
 # define the model
 def MyModel(torch.nn.Module):
     ...

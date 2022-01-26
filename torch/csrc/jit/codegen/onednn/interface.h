@@ -1,5 +1,5 @@
 #pragma once
-
+#include <ATen/Config.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/passes/pass_manager.h>
 
@@ -16,16 +16,15 @@ std::atomic<bool>& getLlgaEnabled() {
 
 TORCH_API void fuseGraph(std::shared_ptr<Graph>& g);
 
-void setLlgaWeightCacheEnabled(bool enabled);
-
-bool getLlgaWeightCacheEnabled();
-
 } // namespace onednn
 } // namespace fuser
 
 struct C10_EXPORT RegisterLlgaFuseGraph
     : public PassManager<RegisterLlgaFuseGraph> {
   static bool setEnabled(bool enabled) {
+    TORCH_CHECK(
+        AT_MKLDNN_ENABLED(),
+        "Running oneDNN Graph fuser is only supported with MKLDNN builds.");
     bool oldState = fuser::onednn::getLlgaEnabled();
     fuser::onednn::getLlgaEnabled() = enabled;
     if (enabled) {

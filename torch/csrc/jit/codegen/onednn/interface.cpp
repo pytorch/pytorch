@@ -71,14 +71,6 @@ void fuseGraph(std::shared_ptr<Graph>& g) {
   }
 }
 
-TORCH_API void setLlgaWeightCacheEnabled(bool enabled) {
-  dnnl::graph::set_constant_cache(enabled);
-}
-
-TORCH_API bool getLlgaWeightCacheEnabled() {
-  return dnnl::graph::get_constant_cache();
-}
-
 } // namespace onednn
 } // namespace fuser
 

@@ -724,10 +724,6 @@ void initJITBindings(PyObject* module) {
       .def("_jit_nvfuser_enabled", &RegisterCudaFuseGraph::isRegistered)
       .def("_jit_set_llga_enabled", &RegisterLlgaFuseGraph::setEnabled)
       .def("_jit_llga_enabled", &RegisterLlgaFuseGraph::isEnabled)
-      .def("_jit_set_llga_weight_cache_enabled",
-           &torch::jit::fuser::onednn::setLlgaWeightCacheEnabled)
-      .def("_jit_llga_weight_cache_enabled",
-           &torch::jit::fuser::onednn::getLlgaWeightCacheEnabled)
       .def(
           "_jit_set_profiling_mode",
           [](bool profiling_flag) {
