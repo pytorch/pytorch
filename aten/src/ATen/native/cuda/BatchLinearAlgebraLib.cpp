@@ -175,11 +175,9 @@ void apply_ldl_solve(
       "Calling torch.linalg.ldl_solve on a CUDA tensor requires compiling ",
       "PyTorch with cuSOLVER. Please use PyTorch built with cuSOLVER 11.1.2+ (CUDA 11.3.1+) support.");
 #else
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(batchCount(A) > 0);
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(batchCount(pivots.unsqueeze(-1)) > 0);
   auto batch_size = batchCount(B);
-  if (batchCount(B) == 0 || batchCount(A) == 0 ||
-      batchCount(pivots.unsqueeze(-1)) == 0) {
-    return;
-  }
   auto n = A.size(-2);
   auto nrhs = B.size(-1);
   auto lda = A.stride(-1);

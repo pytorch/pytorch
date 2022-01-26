@@ -846,10 +846,8 @@ void apply_ldl_factor(
       "Calling torch.linalg.ldl_factor on a CPU tensor requires compiling ",
       "PyTorch with LAPACK. Please use PyTorch built with LAPACK support.");
 #else
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(batchCount(A) > 0);
   auto batch_size = batchCount(A);
-  if (batch_size == 0) {
-    return;
-  }
   auto n = A.size(-2);
   auto leading_dim = A.stride(-1);
   auto uplo = upper ? 'U' : 'L';
@@ -913,11 +911,9 @@ void apply_ldl_solve(
       "Calling torch.linalg.ldl_factor on a CPU tensor requires compiling ",
       "PyTorch with LAPACK. Please use PyTorch built with LAPACK support.");
 #else
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(batchCount(A) > 0);
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(batchCount(pivots.unsqueeze(-1)) > 0);
   auto batch_size = batchCount(B);
-  if (batchCount(B) == 0 || batchCount(A) == 0 ||
-      batchCount(pivots.unsqueeze(-1)) == 0) {
-    return;
-  }
   auto n = A.size(-2);
   auto nrhs = B.size(-1);
   auto lda = A.stride(-1);

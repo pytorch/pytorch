@@ -4270,9 +4270,14 @@ TORCH_IMPL_FUNC(linalg_ldl_factor_ex_out)
       " dtype, but got info with dtype ",
       info.scalar_type());
 
-  auto info_ = info.expect_contiguous();
-  info_->zero_();
+  // LAPACK workspace query segfalts if the input has 0 in batch dimensions.
+  if (self.numel() == 0) {
+    info.zero_();
+    return;
+  }
+
   auto pivots_ = pivots.expect_contiguous();
+  auto info_ = info.expect_contiguous();
 
   auto factors_ = at::native::borrow_else_clone(factors.mT().is_contiguous(), factors, self, /*row_major=*/false);
   if (factors.mT().is_contiguous()) {
@@ -4321,6 +4326,10 @@ TORCH_IMPL_FUNC(linalg_ldl_solve_out)
       factors.scalar_type(),
       " dtype, but got result with dtype ",
       result.scalar_type());
+
+  if (factors.numel() == 0 || pivots.numel() == 0) {
+    return;
+  }
 
   Tensor B_broadcast;
   std::tie(B_broadcast, std::ignore) =
