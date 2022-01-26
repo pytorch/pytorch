@@ -434,7 +434,7 @@ test_xla() {
   SITE_PACKAGES="$(python -c 'from distutils.sysconfig import get_python_lib; print(get_python_lib())')"
   CMAKE_PREFIX_PATH="${SITE_PACKAGES}/torch:${CMAKE_PREFIX_PATH}" run_torch_xla_tests "$(pwd)" "$(pwd)/xla"
   XLA_ARTIFACT_PATH="${CUSTOM_TEST_ARTIFACT_BUILD_DIR}"
-  cp -a "$XLA_ARTIFACT_PATH" $(pwd)/xla/tmp/pytorch_py_test.log
+  cp -a "$XLA_ARTIFACT_PATH" "$(pwd)/xla/tmp/pytorch_py_test.log"
   assert_git_not_dirty
 }
 
