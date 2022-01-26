@@ -1463,7 +1463,7 @@ class TestReductions(TestCase):
 
     def _test_sum_reduction_vs_numpy(self, torch_fn, np_fn, device, dtype, with_keepdim=False, with_extremal=False):
         def is_integral(dtype):
-            return dtype in list(integral_types())
+            return dtype in integral_types()
 
         # On Windows CI, the current version of `numpy` promotes all lower integers
         # dtypes to int32 while `torch` promotes them to int64. Hence we skip on checking
@@ -1512,7 +1512,7 @@ class TestReductions(TestCase):
             torch.nansum(x)
 
     def test_nansum_out_dtype(self, device):
-        dtypes = list(all_types_and(torch.half))
+        dtypes = all_types_and(torch.half)
         for inp_dtype, out_dtype in combinations(dtypes, 2):
             shape = _rand_shape(random.randint(2, 5), min_size=5, max_size=10)
             x = _generate_input(shape, inp_dtype, device, with_extremal=False)
@@ -1529,7 +1529,7 @@ class TestReductions(TestCase):
         self.compare_with_numpy(torch.argmin, np.argmin, t)
 
         # Case: With single `nan` present.
-        if dtype in list(floating_types_and(torch.half, torch.bfloat16)):
+        if dtype in floating_types_and(torch.half, torch.bfloat16):
             t[2, 2] = float('nan')
             self.compare_with_numpy(torch.argmax, np.argmax, t)
             self.compare_with_numpy(torch.argmin, np.argmin, t)
@@ -3216,7 +3216,7 @@ as the input tensor excluding its innermost dimension'):
         shape = (2, 0, 4)
         x = torch.randn(shape, device=device)
 
-        for dtype in list(all_types_and_complex_and(torch.half, torch.bool)):
+        for dtype in all_types_and_complex_and(torch.half, torch.bool):
             # Refer: [all, any uint8 compatibility]
             if dtype == torch.uint8:
                 out_dtype = torch.uint8

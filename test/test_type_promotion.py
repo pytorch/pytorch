@@ -184,7 +184,7 @@ class TestTypePromotion(TestCase):
             self.assertEqual(bf + scalar, scalar + bf)
 
         # with tensor
-        for dtype in list(all_types_and_complex_and(torch.half, torch.bfloat16, torch.bool)):
+        for dtype in all_types_and_complex_and(torch.half, torch.bfloat16, torch.bool):
             t = torch.tensor(1, dtype=dtype, device=device)
             self.assertEqual(bf + t, t + bf)
             if dtype in (torch.float16, torch.float32, torch.float64, torch.cfloat, torch.cdouble):
@@ -559,7 +559,7 @@ class TestTypePromotion(TestCase):
 
     @float_double_default_dtype
     def test_promote_self(self, device):
-        for dtype in list(all_types_and_complex_and(torch.half, torch.bfloat16, torch.bool)):
+        for dtype in all_types_and_complex_and(torch.half, torch.bfloat16, torch.bool):
             self.assertEqual(torch.promote_types(dtype, dtype), dtype)
 
     @expectedFailureMeta
@@ -877,7 +877,7 @@ class TestTypePromotion(TestCase):
 
     @onlyNativeDeviceTypes
     def test_cat_different_dtypes(self, device):
-        dtypes = list(all_types_and_complex_and(torch.half, torch.bool))
+        dtypes = all_types_and_complex_and(torch.half, torch.bool)
         for x_dtype, y_dtype in itertools.product(dtypes, dtypes):
             x_vals, y_vals = [1, 2, 3], [4, 5, 6]
 
@@ -972,10 +972,10 @@ class TestTypePromotion(TestCase):
         default_float = torch.get_default_dtype()
 
         def is_int(dtype):
-            return dtype in list(integral_types_and(torch.bool))
+            return dtype in integral_types_and(torch.bool)
 
         def is_float(dtype):
-            return dtype in list(floating_types_and(torch.half))
+            return dtype in floating_types_and(torch.half)
 
         def get_binary_float_result_type(x, y):
             dtype1 = x.dtype

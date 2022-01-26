@@ -791,7 +791,7 @@ class TestLinalg(TestCase):
         check(m_scalar, a, b, beta, alpha)
 
         # test nans and infs are not propagated to the output when beta == 0
-        float_and_complex_dtypes = list(floating_and_complex_types_and(torch.half, torch.bfloat16))
+        float_and_complex_dtypes = floating_and_complex_types_and(torch.half, torch.bfloat16)
         if beta == 0 and dtype in float_and_complex_dtypes:
             m[0][10] = m[10][10] = m[20][20] = float('inf')
             m[1][10] = m[11][10] = m[21][20] = float('nan')
@@ -838,7 +838,7 @@ class TestLinalg(TestCase):
         self._test_addr_vs_numpy(device, dtype, beta=0., alpha=2)
         # when beta is not zero
         self._test_addr_vs_numpy(device, dtype, beta=0.5, alpha=2)
-        if dtype in list(complex_types()):
+        if dtype in complex_types():
             self._test_addr_vs_numpy(device, dtype, beta=(0 + 0.1j), alpha=(0.2 - 0.2j))
 
     @dtypes(*itertools.product(all_types_and_complex_and(torch.half, torch.bfloat16, torch.bool),
@@ -5612,9 +5612,9 @@ class TestLinalg(TestCase):
     @dtypesIfCUDA(torch.cfloat, torch.cdouble,
                   *floating_types_and(
                       *((torch.half, ) if not CUDA9 else ()),
-                      *((torch.bfloat16, ) if not (CUDA11OrLater and SM53OrLater) else ()))
+                      *((torch.bfloat16, ) if (CUDA11OrLater and SM53OrLater) else ()))
                   )
-    @dtypes(*(set(all_types_and_complex_and(torch.half, torch.bfloat16, torch.bool)) - {torch.half, torch.bool}))
+    @dtypes(*all_types_and_complex_and(torch.bfloat16))
     def test_blas_alpha_beta_empty(self, device, dtype):
         # This test is disabled on CUDA 9 due to:
         # See: https://github.com/pytorch/pytorch/issues/31006

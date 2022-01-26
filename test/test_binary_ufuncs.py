@@ -2171,7 +2171,7 @@ class TestBinaryUfuncs(TestCase):
             for case in cases:
                 _test_copysign_numpy(torch.tensor([case], device=device, dtype=dtypes[0]), b)
 
-        if dtypes[1] in list(floating_types_and(torch.half, torch.bfloat16)):
+        if dtypes[1] in floating_types_and(torch.half, torch.bfloat16):
             a = make_tensor((10, 10), device=device, dtype=dtypes[0], low=-9, high=9)
             for case in cases:
                 _test_copysign_numpy(a, torch.tensor([case], device=device, dtype=dtypes[1]))
@@ -2391,7 +2391,7 @@ class TestBinaryUfuncs(TestCase):
         # Mods: Integer, Float, Tensor, Non-contiguous Tensor
         mods = [3, 2.3, mod, mod.t()]
         # mod with floating-point dtype
-        if dtype in list(integral_types()):
+        if dtype in integral_types():
             mod_float = make_tensor((10, 10), device=device, dtype=torch.float, low=-9, high=9)
             mod[mod == 0] = 1
             mods.append(mod_float)

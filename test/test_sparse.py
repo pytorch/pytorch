@@ -1957,7 +1957,7 @@ class TestSparse(TestCase):
 
     def _test_log1p_tensor(self, sparse_tensor, coalesced):
         def is_integral(dtype):
-            return dtype in list(integral_types())
+            return dtype in integral_types()
 
         dense_tensor = sparse_tensor.to_dense()
         expected_output = dense_tensor.log1p()
@@ -2096,7 +2096,7 @@ class TestSparse(TestCase):
 
     def _test_asin_arcsin(self, sparse_tensor, coalesced):
         def is_integral(dtype):
-            return dtype in list(integral_types())
+            return dtype in integral_types()
         is_integral_dtype = is_integral(sparse_tensor.dtype)
 
         dense_tensor = sparse_tensor.to_dense()
@@ -2618,14 +2618,14 @@ class TestSparse(TestCase):
 
     @onlyCPU  # not really, but we only really want to run this once
     def test_dtypes(self, device):
-        all_sparse_dtypes = list(all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
+        all_sparse_dtypes = all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16)
         do_test_dtypes(self, all_sparse_dtypes, torch.sparse_coo, torch.device('cpu'))
         if torch.cuda.is_available():
             do_test_dtypes(self, all_sparse_dtypes, torch.sparse_coo, torch.device('cuda:0'))
 
     @onlyCPU  # not really, but we only really want to run this once
     def test_empty_full(self, device):
-        all_sparse_dtypes = list(all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
+        all_sparse_dtypes = all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16)
         do_test_empty_full(self, all_sparse_dtypes, torch.sparse_coo, torch.device('cpu'))
         if torch.cuda.device_count() > 0:
             do_test_empty_full(self, all_sparse_dtypes, torch.sparse_coo, None)

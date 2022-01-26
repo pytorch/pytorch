@@ -15,7 +15,7 @@ from torch.testing._internal.common_utils import (
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests, onlyCPU, onlyCUDA, dtypes, onlyNativeDeviceTypes,
     dtypesIfCUDA, largeTensorTest)
-from torch.testing._internal.common_dtype import all_types_and_complex_and, all_types_and
+from torch.testing._internal.common_dtype import all_types_and_complex_and, all_types, all_types_and
 
 # TODO: replace with make_tensor
 def _generate_input(shape, dtype, device, with_extremal):
@@ -227,7 +227,7 @@ class TestShapeOps(TestCase):
         self.assertEqual(expected, result)
 
     @onlyNativeDeviceTypes
-    @dtypes(*all_types_and())
+    @dtypes(*all_types())
     @dtypesIfCUDA(*all_types_and(torch.half))
     def test_trace(self, device, dtype):
         def test(shape):

@@ -1702,20 +1702,20 @@ class TestOldViewOps(TestCase):
 
     def test_resize_all_dtypes_and_devices(self, device):
         shape = (2, 2)
-        for dt in list(all_types_and_complex_and(torch.half, torch.bfloat16, torch.bool)):
+        for dt in all_types_and_complex_and(torch.half, torch.bfloat16, torch.bool):
             x = torch.tensor([[1, 2], [3, 4], [5, 6]], dtype=dt, device=device)
             x.resize_(shape)
             self.assertEqual(shape, x.shape)
 
     def test_resize_as_all_dtypes_and_devices(self, device):
-        for dt in list(all_types_and_complex_and(torch.half, torch.bfloat16, torch.bool)):
+        for dt in all_types_and_complex_and(torch.half, torch.bfloat16, torch.bool):
             x = torch.tensor([[1, 2], [3, 4], [5, 6]], dtype=dt, device=device)
             y = torch.tensor([[1, 2, 3], [4, 5, 6]], dtype=dt, device=device)
             x.resize_as_(y)
             self.assertEqual(y.shape, x.shape)
 
     def test_view_all_dtypes_and_devices(self, device):
-        for dt in list(all_types_and_complex_and(torch.half, torch.bfloat16, torch.bool)):
+        for dt in all_types_and_complex_and(torch.half, torch.bfloat16, torch.bool):
             x = torch.tensor([[1, 2], [3, 4], [5, 6]], dtype=dt, device=device)
             self.assertEqual(x.view(6).shape, [6])
 

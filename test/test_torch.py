@@ -243,7 +243,7 @@ class TestTorchDeviceType(TestCase):
         c = torch.tensor(a_s._untyped(), device=device, dtype=dtype).reshape(a.size())
         self.assertEqual(a, c)
 
-        for error_dtype in list(all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16)):
+        for error_dtype in all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16):
             if error_dtype == dtype:
                 continue
             with self.assertRaisesRegex(RuntimeError, r'Expected a Storage of type'):
@@ -260,7 +260,7 @@ class TestTorchDeviceType(TestCase):
         c = torch.tensor([], device=device, dtype=dtype).set_(a_s._untyped()).reshape(a.size())
         self.assertEqual(a, c)
 
-        for error_dtype in list(all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16)):
+        for error_dtype in all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16):
             if error_dtype == dtype:
                 continue
             with self.assertRaisesRegex(RuntimeError, r'Expected a Storage of type'):
@@ -1667,7 +1667,7 @@ else:
         t.bernoulli_(0.5)
         self.assertTrue(isBinary(t))
 
-        for p_dtype in list(floating_types_and(*((torch.half, ) if device.startswith('cuda') else ()))):
+        for p_dtype in floating_types_and(*((torch.half, ) if device.startswith('cuda') else ())):
             p = torch.rand(10, dtype=p_dtype, device=device).expand(10, 10)
             t.fill_(2)
             t.bernoulli_(p)
@@ -2649,7 +2649,7 @@ else:
 
     # FIXME: move to shape ops test suite
     def test_unfold_all_devices_and_dtypes(self, device):
-        for dt in list(all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16)):
+        for dt in all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16):
 
             if dt == torch.bool:
                 x = torch.empty((0, 1, 3, 0), dtype=dt, device=device)
@@ -2671,7 +2671,7 @@ else:
     # FIXME: move to data movement test suite
     def test_copy_all_dtypes_and_devices(self, device):
         from copy import copy
-        for dt in list(all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16)):
+        for dt in all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16):
             x = torch.tensor([1, 2, 3, 4], dtype=dt, device=device)
             x_clone = x.clone()
             y = copy(x)
@@ -2740,7 +2740,7 @@ else:
             self.assertEqual(dst, src.conj_physical())
 
     def test_clone_all_dtypes_and_devices(self, device):
-        for dt in list(all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16)):
+        for dt in all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16):
             x = torch.tensor((1, 1), dtype=dt, device=device)
             y = x.clone()
             self.assertEqual(x, y)
@@ -7331,12 +7331,12 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
 
     # Verifies that (deep)copies of dtypes are the same objects
     def test_copy_dtypes(self):
-        for dtype in get_all_dtypes():
+        for dtype in all_types_and_complex_and(torch.half, torch.bfloat16, torch.bool):
             copied_dtype = copy.deepcopy(dtype)
             self.assertIs(dtype, copied_dtype)
 
     def test_dtype_is_signed(self):
-        for dtype in get_all_dtypes():
+        for dtype in all_types_and_complex_and(torch.half, torch.bfloat16, torch.half):
             self.assertEqual(dtype.is_signed, torch.is_signed(torch.tensor(0, dtype=dtype)))
 
         self.assertRaisesRegex(RuntimeError, 'not supported for quantized', lambda: torch.quint8.is_signed)

@@ -139,7 +139,7 @@ class TestForeach(TestCase):
         self._binary_test(dtype, inplace_op, inplace_ref, inputs, is_fastpath, is_inplace=True)
         if opinfo.supports_alpha_param:
             alpha = None
-            if dtype in list(integral_types()):
+            if dtype in integral_types():
                 alpha = 3
             elif dtype.is_complex:
                 alpha = complex(3, 3)
@@ -208,7 +208,7 @@ class TestForeach(TestCase):
                 if op.ref in (torch.add, torch.mul):
                     disable_fastpath = False
             if isinstance(scalar, complex):
-                disable_fastpath |= dtype not in list(complex_types())
+                disable_fastpath |= dtype not in complex_types()
             self._test_binary_op_scalar(device, dtype, op, N, scalar, True, disable_fastpath)
 
     @ops(foreach_binary_op_db)
@@ -245,9 +245,9 @@ class TestForeach(TestCase):
                 if type_str == "float":
                     disable_fastpath |= dtype in list(integral_types()) + [torch.bool]
                 if type_str == "complex":
-                    disable_fastpath |= dtype not in list(complex_types())
+                    disable_fastpath |= dtype not in complex_types()
                 if type_str == "mixed":
-                    disable_fastpath |= True and dtype not in list(complex_types())
+                    disable_fastpath |= True and dtype not in complex_types()
                 self._test_binary_op_scalarlist(device, dtype, op, N, scalarlist, True, disable_fastpath)
 
     @ops(foreach_binary_op_db)
@@ -362,7 +362,7 @@ class TestForeach(TestCase):
         op, ref, inplace_op, inplace_ref = self._get_funcs(opinfo, 1)
         inputs = opinfo.sample_inputs(device, dtype, N, noncontiguous=not is_fastpath),
         # note(mkozuki): Complex inputs for `_foreach_abs` go through slowpath.
-        if opinfo.name == "_foreach_abs" and dtype in list(complex_types()):
+        if opinfo.name == "_foreach_abs" and dtype in complex_types():
             is_fastpath = False
         self._regular_unary_test(dtype, op, ref, inputs, is_fastpath)
         self._inplace_unary_test(dtype, inplace_op, inplace_ref, inputs, is_fastpath)

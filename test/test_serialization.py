@@ -583,11 +583,11 @@ class SerializationMixin(object):
             self.assertEqual(a, a_loaded)
             self.assertEqual(b, b_loaded)
 
-        for device, dtype in product(devices, list(all_types_and_complex_and(torch.half,
-                                                                                    torch.bfloat16, torch.bool))):
+        for device, dtype in product(devices, all_types_and_complex_and(torch.half,
+                                                                        torch.bfloat16, torch.bool)):
             a = torch.tensor([], dtype=dtype, device=device)
 
-            for other_dtype in list(all_types_and_complex_and(torch.half, torch.bfloat16, torch.bool)):
+            for other_dtype in all_types_and_complex_and(torch.half, torch.bfloat16, torch.bool):
                 s = torch.TypedStorage(
                     wrap_storage=a.storage()._untyped(),
                     dtype=other_dtype)
