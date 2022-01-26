@@ -1231,13 +1231,21 @@ def block_diag(*tensors):
     return torch._C._VariableFunctions.block_diag(tensors)  # type: ignore[attr-defined]
 
 
-def block(nested_tensor_list: Union[List[Tensor], List[List[Tensor]]]) -> Tensor:
+if TYPE_CHECKING:
+    _type_nested_list = Union[List[Tensor], List['_type_nested_list']]  # type: ignore[misc]
+    _type_tenlist_idx = Tuple[Union[torch.Tensor, _type_nested_list], List[int]]  # type: ignore[misc]
+else:
+    _type_nested_list = List[Union[Tensor, List]]
+    _type_tenlist_idx = Tuple[Any]
+
+
+def block(nested_tensor_list: _type_nested_list) -> Tensor:
     """Assemble an tensor from nested lists of tensors.
-    Tensors in the innermost lists are concatenated along the last dimension (-1), 
+    Tensors in the innermost lists are concatenated along the last dimension (-1),
     then these are concatenated along the second-last dimension (-2), and so on until the outermost list is reached.
-    Tensors can be of any dimension, and in the case of non-uniform dimensionality across inputs tensors, 
-    leading axes of size 1 are inserted, to make tensor.ndim the same for all input tensors. 
-    
+    Tensors can be of any dimension, and in the case of non-uniform dimensionality across inputs tensors,
+     leading axes of size 1 are inserted, to make tensor.ndim the same for all input tensors.
+
     Args:
         nested_tensor_list: list of tensor or nested tensor list, scalar are also allowed in the list.
 
@@ -1264,27 +1272,28 @@ def block(nested_tensor_list: Union[List[Tensor], List[List[Tensor]]]) -> Tensor
                 [1, 1],
                 [2, 2]])
     """
-    tensors = []
-    indices = []
+    tensors: List[torch.Tensor] = []
+    indices: List[List[int]] = []
     list_dim = 0
     ten_dim = 0
-    
-    que = [(nested_tensor_list, [])]
-    while que:
-        list_or_ten, idx = que.pop(0)
+
+    queue: List[_type_tenlist_idx] = [(nested_tensor_list, [])]
+    while queue:
+        list_or_ten, idx = queue.pop(0)
         if isinstance(list_or_ten, torch.Tensor):
             tensors.append(list_or_ten)
             indices.append(idx)
             list_dim = max(len(idx), list_dim)
             ten_dim = max(list_or_ten.ndim, ten_dim)
         elif isinstance(list_or_ten, list):
-            que += [(e, idx + [i]) for i, e in enumerate(list_or_ten)]
+            queue += [(e, idx + [i]) for i, e in enumerate(list_or_ten)]
         else:
             raise ValueError(f"nested_tensor_list only accept List or Tensor, but recived: {type(list_or_ten)}")
-    
+
     flat_idx = []
     for idx in indices:
-        assert len(idx) == list_dim, f"{idx}"
+        assert len(idx) == list_dim, \
+            f"Expect uniform depth of {list_dim} in nested_tensor_list, but getting {len(idx)} instead at index: {idx}"
         flat_idx += idx
 
     if has_torch_function(tensors):

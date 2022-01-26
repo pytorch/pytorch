@@ -374,7 +374,7 @@ class TestTensorCreation(TestCase):
                 else:
                     raise TypeError(f"Unexpected object type: {type(np_block[0])}")
             return results
-        
+
         # Base case
         A = np.random.normal(size=[3, 2]).astype(np.float32)
         B = np.random.normal(size=[3, 4]).astype(np.float32)
@@ -385,7 +385,7 @@ class TestTensorCreation(TestCase):
         result_check = np.block(block_np)
         result = torch.block(to_tensor_list(block_np, device=device))
         self.assertEqual(result, result_check)
-        
+
         # test non aligned tensor size along 1-axis
         A = np.random.normal(size=[3, 2]).astype(np.float32)
         B = np.random.normal(size=[3, 4]).astype(np.float32)
@@ -396,7 +396,7 @@ class TestTensorCreation(TestCase):
         result_check = np.block(block_np)
         result = torch.block(to_tensor_list(block_np, device=device))
         self.assertEqual(result, result_check)
-        
+
         # testing list dpeth(dim) > max tensor dim
         A = np.random.normal(size=[3, 2]).astype(np.float32)
         B = np.random.normal(size=[3, 4]).astype(np.float32)
@@ -411,14 +411,14 @@ class TestTensorCreation(TestCase):
         result_check = np.block(block_np)
         result = torch.block(to_tensor_list(block_np, device=device))
         self.assertEqual(result, result_check)
-        
+
         # test scalar(ndim == 0) tensors
         A = np.array(1, dtype=np.float32)
         block_np = [A]
         result_check = np.block(block_np)
         result = torch.block(to_tensor_list(block_np, device=device))
         self.assertEqual(result, result_check)
-        
+
         A = np.array(1, dtype=np.float32)
         block_np = [
             [A, A],
@@ -437,21 +437,21 @@ class TestTensorCreation(TestCase):
         ]
         self.assertRaises(ValueError, lambda: np.block(block_np))
         self.assertRaises(RuntimeError, lambda: torch.block(to_tensor_list(block_np, device=device)))
-        
+
         A = np.ones([4], dtype=np.float32)
         B = np.ones([1, 4], dtype=np.float32)
-        
+
         # testing leading axis auto unsequeeze: A (4,) -> (1, 4)
         block_np = [[A], [B]]
         result_check = np.block(block_np)
         result = torch.block(to_tensor_list(block_np, device=device))
         self.assertEqual(result, result_check)
-        
+
         # testing non uniform list depth
         block_np = [[A], B]
         self.assertRaises(ValueError, lambda: np.block(block_np))
         self.assertRaises(AssertionError, lambda: torch.block(to_tensor_list(block_np, device=device)))
-        
+
         block_np = [[A], [[A]]]
         self.assertRaises(ValueError, lambda: np.block(block_np))
         self.assertRaises(AssertionError, lambda: torch.block(to_tensor_list(block_np, device=device)))
@@ -489,7 +489,7 @@ class TestTensorCreation(TestCase):
                     ], dim=1),
                 ], dim=0)
                 self.assertEqual(result, result_check)
-    
+
     def test_block_diag(self, device):
         def block_diag_workaround(*arrs):
             arrs_expanded = []
