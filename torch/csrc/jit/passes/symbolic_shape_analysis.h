@@ -7,15 +7,12 @@
 namespace torch {
 namespace jit {
 
-// CAUTION NOT TO BE USED, STILL A WIP, NOT STABLE
-
 TORCH_API void PropagateShapesOnGraph(std::shared_ptr<Graph>& graph);
 
 // CAUTION NOT TO BE USED, STILL A WIP, NOT STABLE
 // From [beg, end) attempt to propagate shapes and
 // build up a graph that will compute all remaining symbolic
 // shapes in [beg, end) that can be executed before beg
-
 struct ShapeComputeGraphMapping {
   ShapeComputeGraphMapping(
       std::shared_ptr<Graph> partial_eval_shape_graph,

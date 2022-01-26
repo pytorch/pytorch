@@ -10,7 +10,9 @@
 #include <torch/csrc/jit/passes/inliner.h>
 #include <torch/csrc/jit/passes/lower_tuples.h>
 #include <torch/csrc/jit/passes/remove_mutation.h>
+#include <torch/csrc/jit/passes/symbolic_shape_analysis.h>
 #include <torch/csrc/jit/runtime/graph_executor_impl.h>
+
 
 #include <stack>
 
@@ -78,7 +80,9 @@ class AttributePropagator {
   void optimizeSubGraphs(
       std::shared_ptr<Graph>& graph,
       const std::function<void(std::shared_ptr<Graph>&)>& func) {
+
     func(graph);
+
     std::stack<Block*> blocks({graph->block()});
     while (!blocks.empty()) {
       Block* block = blocks.top();
@@ -100,15 +104,6 @@ class AttributePropagator {
       Inline(*subgraph);
       ClearProfilingInformation(subgraph);
     };
-    auto applyOptimizations = [](std::shared_ptr<Graph>& subgraph) {
-      runOptimization(
-          subgraph,
-          /* unroll_non_constant_loops? */ false,
-          /* const_prop_user_classes? */ false);
-      EliminateNoOps(subgraph);
-      LowerSimpleTuples(subgraph);
-    };
-
     for (auto function : preservedMethods_) {
       GRAPH_DEBUG("Analyzing function: " + function->name());
       auto graph = toGraphFunction(*function).graph();
@@ -121,6 +116,16 @@ class AttributePropagator {
       recordMutableAttrs(graph);
     }
 
+    auto applyOptimizations = [](std::shared_ptr<Graph>& subgraph) {
+      PropagateShapesOnGraph(subgraph);
+      runOptimization(
+          subgraph,
+          /* unroll_non_constant_loops? */ false,
+          /* const_prop_user_classes? */ false);
+      EliminateNoOps(subgraph);
+      LowerSimpleTuples(subgraph);
+      // TODO: Clear SSA information here
+    };
     for (auto function : preservedMethods_) {
       GRAPH_DEBUG("Propagating function: " + function->name());
       auto graph = toGraphFunction(*function).graph();
