@@ -28,6 +28,7 @@ query ($owner: String!, $name: String!, $number: Int!) {
       baseRefName
       baseRepository {
         nameWithOwner
+        isPrivate
         defaultBranchRef {
           name
         }
@@ -190,6 +191,9 @@ class GitHubPR:
     def is_ghstack_pr(self) -> bool:
         return RE_GHSTACK_HEAD_REF.match(self.head_ref()) is not None
 
+    def is_base_repo_private(self) -> bool:
+        return bool(self.info["baseRepository"]["isPrivate"])
+
     def get_changed_files_count(self) -> int:
         return int(self.info["changedFiles"])
 
@@ -285,12 +289,14 @@ class GitHubPR:
                 if pr.is_closed():
                     print(f"Skipping {idx+1} of {len(rev_list)} PR (#{pr_num}) as its already been merged")
                     continue
+                # Raises exception if matching rule is not found
                 find_matching_merge_rule(pr, repo)
 
             repo.cherry_pick(rev)
             repo.amend_commit_message(re.sub(RE_GHSTACK_SOURCE_ID, "", msg))
 
     def merge_into(self, repo: GitRepo, dry_run: bool = False) -> None:
+        # Raises exception if matching rule is not found
         find_matching_merge_rule(self, repo)
         if repo.current_branch() != self.default_branch():
             repo.checkout(self.default_branch())
@@ -368,9 +374,12 @@ def try_revert(repo: GitRepo, pr: GitHubPR, dry_run: bool = False) -> None:
         return post_comment("Don't want to revert based on edited command")
     author_association = pr.get_comment_author_association()
     author_login = pr.get_comment_author_login()
-    if author_association != "MEMBER":
-        return post_comment(f"Will not revert as @{author_login} is not a member, but {author_association}")
+    # For some reason, one can not be a member of private repo, only CONTRIBUTOR
+    expected_association = "MEMBER" if pr.is_base_repo_private() else "CONTRIBUTOR"
+    if author_association != expected_association:
+        return post_comment(f"Will not revert as @{author_login} is not a {expected_association}, but {author_association}")
 
+    # Raises exception if matching rule is not found
     find_matching_merge_rule(pr, repo)
     commit_sha = pr.get_merge_commit()
     if commit_sha is None:
