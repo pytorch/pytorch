@@ -29,17 +29,9 @@ from torch.distributed.algorithms.ddp_comm_hooks import (
     powerSGD_hook as powerSGD,
     default_hooks as default,
     quantization as quantization_hooks,
-    optimizer_overlap as optimizer_overlap_hooks
 )
 
-from torch.distributed.algorithms.ddp_comm_hooks.optimizer_overlap_hooks import (
-    _OptimizerHookState
-)
-
-from torch.distributed.optim import (
-    as_functional_optim,
-    functional_optim_map,
-)
+from torch.distributed.algorithms._optimizer_overlap import _as_overlapped_optim
 
 from torch.distributed.distributed_c10d import (
     get_world_size,
@@ -80,10 +72,6 @@ from torch.testing._internal.common_utils import (
     sandcastle_skip,
     sandcastle_skip_if,
 )
-
-from torch.distributed.optim.functional_sgd import _FunctionalSGD
-from torch.distributed.optim.functional_adam import _FunctionalAdam
-from torch.distributed.optim.functional_adamw import _FunctionalAdamW
 
 import torch.distributed.optim.post_localSGD_optimizer as post_localSGD_optimizer
 
@@ -3925,9 +3913,8 @@ class DistributedTest:
             self.assertEqual(ddp_logging_data.get("comm_hook", ""), "")
 
         def _test_ddp_hook_with_optimizer_parity(
-            self, grad_as_bucket_view, static_graph, functional_optim_cls,
-            construct_from_functional, *functional_optim_args,
-            **functional_optim_kwargs
+            self, grad_as_bucket_view, static_graph, optim_cls,
+            *functional_optim_args, **functional_optim_kwargs
         ):
             rank = self.rank
             torch.cuda.set_device(rank)
@@ -3957,27 +3944,8 @@ class DistributedTest:
                     # Register hook that runs allreduce + functional optimizer
                     # step.
                     allreduce_hook = default.allreduce_hook
-                    mapping = {v: k for k, v in functional_optim_map.items()}
-                    if construct_from_functional:
-                        opt_cls = mapping[functional_optim_cls]
-                        f_opt = as_functional_optim(
-                            opt_cls,
-                            *functional_optim_args,
-                            **functional_optim_kwargs,
-                        )
-                        opt_hook_state = _OptimizerHookState.from_functional_optim(
-                            f_opt
-                        )
-                    else:
-                        opt_hook_state = _OptimizerHookState(
-                            functional_optim_cls,
-                            *functional_optim_args,
-                            **functional_optim_kwargs,
-                        )
-                    ddp_model_with_optimizer_hook.register_comm_hook(
-                        None,
-                        optimizer_overlap_hooks._hook_then_optimizer(allreduce_hook, opt_hook_state),
-                    )
+                    overlapped_optimizer = _as_overlapped_optim(optim_cls, *functional_optim_args, **functional_optim_kwargs)
+                    overlapped_optimizer.register_ddp(ddp_model_with_optimizer_hook)
                     # Create DDP model with no hook that does optimizer after
                     # backward.
                     ddp_model_with_no_hook = torch.nn.parallel.DistributedDataParallel(
@@ -3986,8 +3954,7 @@ class DistributedTest:
                         gradient_as_bucket_view=grad_as_bucket_view,
                         static_graph=static_graph,
                     )
-
-                    optimizer_no_hook = mapping.get(functional_optim_cls)(
+                    optimizer_no_hook = optim_cls(
                         ddp_model_with_no_hook.parameters(),
                         *functional_optim_args,
                         **functional_optim_kwargs,
@@ -4047,12 +4014,10 @@ class DistributedTest:
         @skip_if_rocm
         @parametrize("grad_as_bucket_view", [True, False])
         @parametrize("static_graph", [True, False])
-        @parametrize("construct_from_functional", [True, False])
         def test_ddp_hook_with_optimizer_parity_adamw(
             self,
             grad_as_bucket_view,
             static_graph,
-            construct_from_functional,
         ):
             adamw_lr = 1e-2
             adamw_betas = (0.9, 0.99)
@@ -4060,8 +4025,7 @@ class DistributedTest:
             self._test_ddp_hook_with_optimizer_parity(
                 grad_as_bucket_view,
                 static_graph,
-                _FunctionalAdamW,
-                construct_from_functional,
+                torch.optim.AdamW,
                 adamw_lr,
                 betas=adamw_betas,
                 eps=adamw_eps,
@@ -4073,16 +4037,14 @@ class DistributedTest:
         )
         @skip_if_lt_x_gpu(2)
         @skip_if_rocm
-        @parametrize("construct_from_functional", [True, False])
-        def test_ddp_hook_with_optimizer_parity_adam(self, construct_from_functional):
+        def test_ddp_hook_with_optimizer_parity_adam(self):
             adam_lr = 1e-2
             adam_betas = (0.9, 0.99)
             adam_eps = 1e-6
             self._test_ddp_hook_with_optimizer_parity(
                 True,  # grad as bucket view
                 False,  # static graph
-                _FunctionalAdam,
-                construct_from_functional,
+                torch.optim.Adam,
                 adam_lr,
                 betas=adam_betas,
                 eps=adam_eps,
@@ -4094,8 +4056,7 @@ class DistributedTest:
         )
         @skip_if_lt_x_gpu(2)
         @skip_if_rocm
-        @parametrize("construct_from_functional", [True, False])
-        def test_ddp_hook_with_optimizer_parity_sgd(self, construct_from_functional):
+        def test_ddp_hook_with_optimizer_parity_sgd(self):
             sgd_lr = 1e-2
             sgd_momentum = 0.9
             sgd_weight_decay = 0.01
@@ -4104,8 +4065,7 @@ class DistributedTest:
             self._test_ddp_hook_with_optimizer_parity(
                 True,  # grad as bucket view
                 False,  # static_graph
-                _FunctionalSGD,
-                construct_from_functional,
+                torch.optim.SGD,
                 sgd_lr,
                 momentum=sgd_momentum,
                 weight_decay=sgd_weight_decay,
