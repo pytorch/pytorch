@@ -329,7 +329,7 @@ namespace at {
 namespace meta {
 
 TORCH_META_FUNC(linalg_ldl_factor_ex)
-(const Tensor& self, bool upper, bool hermitian, bool check_errors) {
+(const Tensor& self, bool hermitian, bool check_errors) {
   at::native::squareCheckInputs(self, "torch.linalg.ldl_factor_ex");
   at::native::checkFloatingOrComplex(self, "torch.linalg.ldl_factor_ex");
 
@@ -354,7 +354,6 @@ TORCH_META_FUNC(linalg_ldl_solve)
 (const Tensor& LD,
  const Tensor& pivots,
  const Tensor& B,
- bool upper,
  bool hermitian) {
   at::native::squareCheckInputs(LD, "torch.linalg.ldl_solve");
   at::native::checkFloatingOrComplex(LD, "torch.linalg.ldl_solve");
@@ -4242,7 +4241,6 @@ DEFINE_DISPATCH(ldl_factor_stub);
 
 TORCH_IMPL_FUNC(linalg_ldl_factor_ex_out)
 (const Tensor& self,
- bool upper,
  bool hermitian,
  bool check_errors,
  const Tensor& LD,
@@ -4263,6 +4261,11 @@ TORCH_IMPL_FUNC(linalg_ldl_factor_ex_out)
     LD_->copy_(self);
   }
 
+  // We decided not to include upper flag in the API.
+  // https://github.com/pytorch/pytorch/pull/69828#issuecomment-1015143819
+  // We can revisit this decision later and remove upper completely
+  // also from low level functions or add it to the public API.
+  bool upper = false;
   if (upper) {
     LD_->triu_();
   } else {
@@ -4295,7 +4298,6 @@ TORCH_IMPL_FUNC(linalg_ldl_solve_out)
 (const Tensor& LD,
  const Tensor& pivots,
  const Tensor& B,
- bool upper,
  bool hermitian,
  const Tensor& result) {
   if (LD.numel() == 0 || pivots.numel() == 0) {
@@ -4317,7 +4319,7 @@ TORCH_IMPL_FUNC(linalg_ldl_solve_out)
   }
 
   ldl_solve_stub(
-      B.device().type(), *LD_, *pivots_, *result_, upper, hermitian);
+      B.device().type(), *LD_, *pivots_, *result_, false, hermitian);
 
   if (!result.is_same(*result_)) {
     result.copy_(*result_);

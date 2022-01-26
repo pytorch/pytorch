@@ -5126,7 +5126,7 @@ def sample_inputs_linalg_ldl_solve(op_info, device, dtype, requires_grad=False):
             B = make_tensor((*B_batch_shape, factors.shape[-1], S), device=device, dtype=dtype, requires_grad=requires_grad)
             yield SampleInput(factors, args=(pivots, B), kwargs=dict(hermitian=False))
             clone_factors = factors.detach().clone().requires_grad_(requires_grad)
-            yield SampleInput(clone_factors, args=(pivots, B), kwargs=dict(hermitian=False, upper=True))
+            yield SampleInput(clone_factors, args=(pivots, B), kwargs=dict(hermitian=False))
 
     # Hermitian case
     for test_case in test_cases2:
@@ -5136,7 +5136,7 @@ def sample_inputs_linalg_ldl_solve(op_info, device, dtype, requires_grad=False):
             B = make_tensor((*B_batch_shape, factors.shape[-1], S), device=device, dtype=dtype, requires_grad=requires_grad)
             yield SampleInput(factors, args=(pivots, B), kwargs=dict(hermitian=True))
             clone_factors = factors.detach().clone().requires_grad_(requires_grad)
-            yield SampleInput(clone_factors, args=(pivots, B), kwargs=dict(hermitian=True, upper=True))
+            yield SampleInput(clone_factors, args=(pivots, B), kwargs=dict(hermitian=True))
 
 def sample_inputs_linalg_lstsq(op_info, device, dtype, requires_grad=False, **kwargs):
     from torch.testing._internal.common_utils import random_well_conditioned_matrix

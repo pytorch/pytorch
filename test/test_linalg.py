@@ -8352,12 +8352,10 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         from torch.testing._internal.common_utils import random_hermitian_pd_matrix
         from scipy.linalg import ldl as scipy_ldl
 
-        def run_test(shape, batch, hermitian, upper):
+        def run_test(shape, batch, hermitian):
             A = random_hermitian_pd_matrix(shape, *batch, dtype=dtype, device=device)
-            actual_factors, actual_pivots, info = torch.linalg.ldl_factor_ex(A, hermitian=hermitian, upper=upper)
-            tri = torch.triu if upper else torch.tril
-            diag = 1 if upper else -1
-            actual_L = tri(actual_factors, diagonal=diag)
+            actual_factors, actual_pivots, info = torch.linalg.ldl_factor_ex(A, hermitian=hermitian)
+            actual_L = torch.tril(actual_factors, diagonal=-1)
             actual_L.diagonal(0, -2, -1).fill_(1.0)
 
             # This test is designed only for inputs with 1x1 block diagonal matrix D.
@@ -8374,10 +8372,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
             A_reconstructed = actual_L @ actual_D @ T(actual_L)
 
             def symmetric(A):
-                if upper:
-                    return A.triu() + A.triu(1).mT
-                else:
-                    return A.tril() + A.tril(-1).mT
+                return A.tril() + A.tril(-1).mT
 
             self.assertEqual(symmetric(A) if not hermitian else A, A_reconstructed)
 
@@ -8386,7 +8381,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
                 A_np = A.cpu().numpy()
                 np_dtype = A_np.dtype
                 scipy_ldl_batched = np.vectorize(
-                    lambda x: scipy_ldl(x, hermitian=hermitian, lower=not upper),
+                    lambda x: scipy_ldl(x, hermitian=hermitian, lower=True),
                     otypes=[np_dtype, np_dtype, np.dtype('int64')],
                     signature='(m,m)->(m,m),(m,m),(m)')
 
@@ -8412,8 +8407,8 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
 
         shapes = (5,)
         batches = ((), (4,),)
-        for shape, batch, hermitian, upper in itertools.product(shapes, batches, hermitians, (True, False)):
-            run_test(shape, batch, hermitian, upper)
+        for shape, batch, hermitian in itertools.product(shapes, batches, hermitians):
+            run_test(shape, batch, hermitian)
 
     @skipCUDAIfNoCusolver
     @skipCUDAIfNoMagma
@@ -8424,17 +8419,14 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
     def test_ldl_solve(self, device, dtype):
         from torch.testing._internal.common_utils import random_hermitian_pd_matrix
 
-        def run_test(shape, batch, nrhs, hermitian, upper):
+        def run_test(shape, batch, nrhs, hermitian):
             A = random_hermitian_pd_matrix(shape, *batch, dtype=dtype, device=device)
             B = make_tensor((*A.shape[:-1], nrhs), dtype=dtype, device=device)
-            factors, pivots, info = torch.linalg.ldl_factor_ex(A, hermitian=hermitian, upper=upper)
-            X = torch.linalg.ldl_solve(factors, pivots, B, hermitian=hermitian, upper=upper)
+            factors, pivots, info = torch.linalg.ldl_factor_ex(A, hermitian=hermitian)
+            X = torch.linalg.ldl_solve(factors, pivots, B, hermitian=hermitian)
 
             def symmetric(A):
-                if upper:
-                    return A.triu() + A.triu(1).mT
-                else:
-                    return A.tril() + A.tril(-1).mT
+                return A.tril() + A.tril(-1).mT
 
             # verify A @ X == B
             expected_B = symmetric(A) @ X if not hermitian else A @ X
@@ -8446,8 +8438,8 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         shapes = (5,)
         batches = ((), (4,), (2, 2))
         nrhss = (1, 7)
-        for shape, batch, nrhs, hermitian, upper in itertools.product(shapes, batches, nrhss, hermitians, (True, False)):
-            run_test(shape, batch, nrhs, hermitian, upper)
+        for shape, batch, nrhs, hermitian in itertools.product(shapes, batches, nrhss, hermitians):
+            run_test(shape, batch, nrhs, hermitian)
 
     @onlyCUDA
     @skipCUDAIfNoMagma
