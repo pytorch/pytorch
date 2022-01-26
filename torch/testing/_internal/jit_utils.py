@@ -854,7 +854,7 @@ def get_traced_sample_variant_pairs(device, dtype, op):
                 and len(sample.args) > 0
                 and isinstance(sample.args[0], bool)
             ):
-                arr = [arg for arg in sample.args]
+                arr = list(sample.args)
                 arr[0] = int(arr[0])
                 sample.args = tuple(arr)
 
