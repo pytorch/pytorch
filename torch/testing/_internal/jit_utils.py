@@ -827,14 +827,35 @@ def get_traced_sample_variant_pairs(device, dtype, op):
     # JIT they can only take (Tensor, Scalar), and bool is not a
     # scalar in the JIT type system. So to test these in JIT, the bool
     # is converted to an int for the test.
-    ops_with_unsupported_second_arg_bool = [
-        "div_floor_rounding",
-        "div_no_rounding",
-        "div_trunc_rounding",
-        "full_like",
-        "index_fill",
-        "mul_cpu",
-        "new_full",
+    ops_with_unsupported_bool_args = [
+        {
+            "name": "div_floor_rounding",
+            "arg_idx": [0],
+        },
+        {
+            "name": "div_no_rounding_mode",
+            "arg_idx": [0],
+        },
+        {
+            "name": "div_trunc_rounding",
+            "arg_idx": [0],
+        },
+        {
+            "name": "index_fill",
+            "arg_idx": [2],
+        },
+        {
+            "name": "full_like",
+            "arg_idx": [0],
+        },
+        {
+            "name": "mul",
+            "arg_idx": [0],
+        },
+        {
+            "name": "new_full",
+            "arg_idx": [1],
+        },
     ]
 
     # doesn't support tracing
@@ -849,14 +870,13 @@ def get_traced_sample_variant_pairs(device, dtype, op):
             if is_lambda(variant):
                 continue
 
-            if (
-                op.formatted_name in ops_with_unsupported_second_arg_bool
-                and len(sample.args) > 0
-                and isinstance(sample.args[0], bool)
-            ):
-                arr = list(sample.args)
-                arr[0] = int(arr[0])
-                sample.args = tuple(arr)
+            matching_ops = filter(lambda x: op.formatted_name == x["name"], ops_with_unsupported_bool_args)
+            for op_data in matching_ops:
+                for idx in op_data["arg_idx"]:
+                    args = list(sample.args)
+                    if len(sample.args) > idx and isinstance(sample.args[idx], bool):
+                        args[idx] = int(args[idx])
+                    sample.args = tuple(args)
 
             outputs.append((variant, sample))
 
