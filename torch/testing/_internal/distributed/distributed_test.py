@@ -15,8 +15,6 @@ from typing import Union, NamedTuple, Callable, Any
 import torch
 import torch.cuda
 import torch.distributed as dist
-import torch.distributed.algorithms.ddp_comm_hooks.post_localSGD_hook as post_localSGD
-import torch.distributed.algorithms.ddp_comm_hooks.powerSGD_hook as powerSGD
 import torch.distributed.algorithms.model_averaging.averagers as averagers
 import torch.distributed.algorithms.model_averaging.utils as model_averaging_utils
 import torch.nn as nn
@@ -25,10 +23,14 @@ import torch.nn.utils._stateless as _stateless
 from torch._utils_internal import TEST_MASTER_ADDR as MASTER_ADDR
 from torch._utils_internal import TEST_MASTER_PORT as MASTER_PORT
 from torch.cuda.amp import GradScaler, autocast
-from torch.distributed.algorithms.ddp_comm_hooks import default_hooks as default
+
 from torch.distributed.algorithms.ddp_comm_hooks import (
+    post_localSGD_hook as post_localSGD,
+    powerSGD_hook as powerSGD,
+    default_hooks as default,
     quantization as quantization_hooks,
 )
+
 from torch.distributed.distributed_c10d import (
     get_world_size,
     _get_default_group,
@@ -58,20 +60,16 @@ from torch.testing._internal.common_distributed import (
     DistTestCases
 )
 from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
     IS_MACOS,
     IS_WINDOWS,
     FILE_SCHEMA,
     IS_FBCODE,
     NO_MULTIPROCESSING_SPAWN,
+    parametrize,
     sandcastle_skip,
     sandcastle_skip_if,
 )
-
-from torch.distributed.optim import functional_optim_map
-
-from torch.distributed.optim.functional_sgd import _FunctionalSGD
-from torch.distributed.optim.functional_adam import _FunctionalAdam
-from torch.distributed.optim.functional_adamw import _FunctionalAdamW
 
 import torch.distributed.optim.post_localSGD_optimizer as post_localSGD_optimizer
 
@@ -3676,6 +3674,7 @@ class DistributedTest:
             output_device=None,
             gradient_as_bucket_view=False,
             static_graph=False,
+            set_static_graph_twice=False,
         ):
             # Run a simple end to end DDP model, use result of single node model
             # as baseline
@@ -3694,8 +3693,10 @@ class DistributedTest:
                 model_DDP,
                 device_ids=gpu_subset,
                 gradient_as_bucket_view=gradient_as_bucket_view,
+                static_graph=static_graph,
             )
-            if static_graph:
+
+            if set_static_graph_twice:
                 model_DDP._set_static_graph()
 
             # test serializable/unserializable
@@ -3910,7 +3911,7 @@ class DistributedTest:
             self.assertEqual(ddp_logging_data.get("comm_hook", ""), "")
 
         def _test_ddp_hook_with_optimizer_parity(
-            self, grad_as_bucket_view, static_graph, functional_optim_cls,
+            self, grad_as_bucket_view, static_graph, optim_cls,
             *functional_optim_args, **functional_optim_kwargs
         ):
             rank = self.rank
@@ -3924,8 +3925,8 @@ class DistributedTest:
                 models_to_test.append(
                     (torchvision.models.resnet50(), torch.randn(1, 3, 3, 1000).cuda())
                 )
-            # Enable determinism in cudnn operators
             for (model, inp) in models_to_test:
+                # Enable determinism in cudnn operators
                 with torch.backends.cudnn.flags(
                     enabled=True, deterministic=True, benchmark=False
                 ):
@@ -3934,22 +3935,16 @@ class DistributedTest:
                             copy.deepcopy(model).cuda(),
                             device_ids=[self.rank],
                             gradient_as_bucket_view=grad_as_bucket_view,
+                            static_graph=static_graph,
                         )
                     )
-                    if static_graph:
-                        ddp_model_with_optimizer_hook._set_static_graph()
 
-                    # Register hook that runs allreduce + functional optimizer
-                    # step.
-                    allreduce_hook = default.allreduce_hook
-                    opt_hook_state = default._OptimizerHookState(
-                        functional_optim_cls,
+                    # Register a fused optimizer that will run optimizer in step
+                    # with allreduce.
+                    ddp_model_with_optimizer_hook._register_fused_optim(
+                        optim_cls,
                         *functional_optim_args,
                         **functional_optim_kwargs,
-                    )
-                    ddp_model_with_optimizer_hook.register_comm_hook(
-                        None,
-                        default._hook_then_optimizer(allreduce_hook, opt_hook_state),
                     )
                     # Create DDP model with no hook that does optimizer after
                     # backward.
@@ -3957,12 +3952,9 @@ class DistributedTest:
                         copy.deepcopy(model).cuda(),
                         device_ids=[self.rank],
                         gradient_as_bucket_view=grad_as_bucket_view,
+                        static_graph=static_graph,
                     )
-                    if static_graph:
-                        ddp_model_with_no_hook._set_static_graph()
-
-                    mapping = {v: k for k, v in functional_optim_map.items()}
-                    optimizer_no_hook = mapping.get(functional_optim_cls)(
+                    optimizer_no_hook = optim_cls(
                         ddp_model_with_no_hook.parameters(),
                         *functional_optim_args,
                         **functional_optim_kwargs,
@@ -4020,21 +4012,24 @@ class DistributedTest:
         )
         @skip_if_lt_x_gpu(2)
         @skip_if_rocm
-        def test_ddp_hook_with_optimizer_parity_adamw(self):
-            for grad_as_bucket_view, static_graph in itertools.product(
-                [True, False], [True, False]
-            ):
-                adamw_lr = 1e-2
-                adamw_betas = (0.9, 0.99)
-                adamw_eps = 1e-6
-                self._test_ddp_hook_with_optimizer_parity(
-                    grad_as_bucket_view,
-                    static_graph,
-                    _FunctionalAdamW,
-                    adamw_lr,
-                    betas=adamw_betas,
-                    eps=adamw_eps,
-                )
+        @parametrize("grad_as_bucket_view", [True, False])
+        @parametrize("static_graph", [True, False])
+        def test_ddp_hook_with_optimizer_parity_adamw(
+            self,
+            grad_as_bucket_view,
+            static_graph,
+        ):
+            adamw_lr = 1e-2
+            adamw_betas = (0.9, 0.99)
+            adamw_eps = 1e-6
+            self._test_ddp_hook_with_optimizer_parity(
+                grad_as_bucket_view,
+                static_graph,
+                torch.optim.AdamW,
+                adamw_lr,
+                betas=adamw_betas,
+                eps=adamw_eps,
+            )
 
         @sandcastle_skip_if(
             BACKEND not in DistTestCases.backend_feature["ddp"],
@@ -4043,20 +4038,17 @@ class DistributedTest:
         @skip_if_lt_x_gpu(2)
         @skip_if_rocm
         def test_ddp_hook_with_optimizer_parity_adam(self):
-            for grad_as_bucket_view, static_graph in itertools.product(
-                [True, False], [True, False]
-            ):
-                adam_lr = 1e-2
-                adam_betas = (0.9, 0.99)
-                adam_eps = 1e-6
-                self._test_ddp_hook_with_optimizer_parity(
-                    grad_as_bucket_view,
-                    static_graph,
-                    _FunctionalAdam,
-                    adam_lr,
-                    betas=adam_betas,
-                    eps=adam_eps,
-                )
+            adam_lr = 1e-2
+            adam_betas = (0.9, 0.99)
+            adam_eps = 1e-6
+            self._test_ddp_hook_with_optimizer_parity(
+                True,  # grad as bucket view
+                False,  # static graph
+                torch.optim.Adam,
+                adam_lr,
+                betas=adam_betas,
+                eps=adam_eps,
+            )
 
         @sandcastle_skip_if(
             BACKEND not in DistTestCases.backend_feature["ddp"],
@@ -4065,19 +4057,19 @@ class DistributedTest:
         @skip_if_lt_x_gpu(2)
         @skip_if_rocm
         def test_ddp_hook_with_optimizer_parity_sgd(self):
-            for grad_as_bucket_view, static_graph in itertools.product(
-                [True, False], [True, False]
-            ):
-                sgd_lr = 1e-2
-                sgd_momentum = 0.9
-                sgd_weight_decay = 0.01
-                self._test_ddp_hook_with_optimizer_parity(
-                    grad_as_bucket_view, static_graph,
-                    _FunctionalSGD,
-                    sgd_lr,
-                    momentum=sgd_momentum,
-                    weight_decay=sgd_weight_decay,
-                )
+            sgd_lr = 1e-2
+            sgd_momentum = 0.9
+            sgd_weight_decay = 0.01
+            # Not testing grad_as_bucket_view and static_graph as they are
+            # tested in AdamW test above.
+            self._test_ddp_hook_with_optimizer_parity(
+                True,  # grad as bucket view
+                False,  # static_graph
+                torch.optim.SGD,
+                sgd_lr,
+                momentum=sgd_momentum,
+                weight_decay=sgd_weight_decay,
+            )
 
         def _test_ddp_hook_parity(self, state, hook):
             rank = self.rank
@@ -4466,6 +4458,15 @@ class DistributedTest:
                     rank=rank,
                     gradient_as_bucket_view=use_bucket_view,
                     static_graph=static_graph,
+                )
+
+                # test set static graph twice
+                self._test_DistributedDataParallel(
+                    gpu_subset=gpus,
+                    rank=rank,
+                    gradient_as_bucket_view=use_bucket_view,
+                    static_graph=static_graph,
+                    set_static_graph_twice=True,
                 )
 
                 # test output_device
@@ -5216,10 +5217,6 @@ class DistributedTest:
         @sandcastle_skip_if(BACKEND == "nccl", "nccl does not support DDP on CPU models")
         def test_static_graph_api_cpu(self):
             model_DDP = nn.parallel.DistributedDataParallel(DDP_NET)
-            model_DDP._set_static_graph()
-            self.assertEqual(
-                model_DDP._get_ddp_logging_data().get("static_graph"), True
-            )
             expected_err = "should be called before training loop starts"
             with self.assertRaisesRegex(RuntimeError, expected_err):
                 local_bs = 2
@@ -6393,9 +6390,8 @@ class DistributedTest:
                     device_ids=[device_id],
                     find_unused_parameters=find_unused,
                     broadcast_buffers=broadcast_buffers,
+                    static_graph=static_graph,
                 )
-                if static_graph:
-                    ddp._set_static_graph()
                 # Materialize new params. These are not registered in DDP and thus
                 # don't have autograd hooks installed on them.
                 ddp.module.fc2 = nn.Linear(1, 1, bias=False).to(device_id)
@@ -6513,10 +6509,11 @@ class DistributedTest:
             model = ToyModel().to(torch.cuda.current_device())
             for static in [True, False]:
                 ddp_model = torch.nn.parallel.DistributedDataParallel(
-                    copy.deepcopy(model), device_ids=[self.rank], find_unused_parameters=True
+                    copy.deepcopy(model),
+                    device_ids=[self.rank],
+                    find_unused_parameters=True,
+                    static_graph=static,
                 )
-                if static:
-                    ddp_model._set_static_graph()
                 inp = torch.randn(20, 10, device=self.rank)
                 for i in range(6):
                     loss = ddp_model(inp)
@@ -6758,8 +6755,8 @@ class DistributedTest:
             model = torch.nn.parallel.DistributedDataParallel(
                 ControlFlowToyModel().cuda(self.rank),
                 device_ids=[self.rank],
+                static_graph=True,
             )
-            model._set_static_graph()
             random_input = torch.randn(20, 10, device=self.rank)
             ones_input = torch.ones(20, 10, device=self.rank)
             # unused parameter in the first iteration got used
@@ -7286,9 +7283,8 @@ class DistributedTest:
                 device_ids=[self.rank],
                 find_unused_parameters=find_unused_parameters,
                 gradient_as_bucket_view=True,
+                static_graph=static_graph,
             )
-            if static_graph:
-                ddp_model._set_static_graph()
             random_input = torch.randn(20, 10, device=self.rank)
             for i in range(10):
                 out = ddp_model(random_input)
@@ -7906,8 +7902,8 @@ class DistributedTest:
             model_static_graph = torch.nn.parallel.DistributedDataParallel(
                 model,
                 device_ids=[rank],
+                static_graph=True,
             )
-            model_static_graph._set_static_graph()
             inp = torch.randn(10, 100)
             type_mapping = {
                 "list": list,
@@ -7959,10 +7955,9 @@ class DistributedTest:
                     model,
                     device_ids=[self.rank],
                     output_device=self.rank,
-                    find_unused_parameters=find_unused
+                    find_unused_parameters=find_unused,
+                    static_graph=static_graph,
                 )
-                if static_graph:
-                    ddp._set_static_graph()
                 for i in range(6):
                     out = ddp(inp)
                     self.assertFalse(out[0].requires_grad)
@@ -8053,10 +8048,8 @@ class DistributedTest:
                     output_device=self.rank,
                     broadcast_buffers=False,
                     find_unused_parameters=find_unused,
+                    static_graph=static_graph,
                 )
-
-                if static_graph:
-                    ddp._set_static_graph()
 
                 opt = [None for _ in range(3)]
                 for i in range(2):
@@ -8384,3 +8377,5 @@ class DistributedTest:
             self.assertIsNone(module.module.l1.weight.grad)
             self.assertIsNone(module.module.l1.bias.grad)
             self.assertIsNone(module.module.buffer.grad)
+
+instantiate_parametrized_tests(DistributedTest._DistTestBase)
