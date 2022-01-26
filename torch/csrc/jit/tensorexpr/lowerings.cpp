@@ -80,6 +80,22 @@ int nnc_lowerings_lazy_registration() {
             });
       });
 
+  RegisterNNCLoweringsFunction aten_mul_int(
+      {"aten::mul.int(int a, int b) -> (int)"},
+      [](const std::vector<ArgValue>& inputs,
+         const std::vector<ExprHandle>& outputShape,
+         const c10::optional<ScalarType>& outputType,
+         at::Device device) {
+        return computeScalar(
+            "aten_mul",
+            inputs,
+            outputShape,
+            outputType,
+            [](const ExprHandle& lhs, const ExprHandle& rhs) {
+              return lhs * rhs;
+            });
+      });
+
   RegisterNNCLoweringsFunction aten_div(
       {"aten::div.Scalar(Tensor self, Scalar other) -> (Tensor)",
        "aten::div.Tensor(Tensor self, Tensor other) -> (Tensor)"},
