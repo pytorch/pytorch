@@ -32,6 +32,8 @@ import torch.nn.quantized._reference as nnqr
 
 from torch.fx.experimental.fx2trt import LowerSetting
 from torch.fx.experimental.fx2trt import Lowerer
+from torch.fx.experimental.fx2trt.lower import LowerTrtInterpreter
+import torch.fx.experimental.fx_acc.acc_tracer as acc_tracer
 
 from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_utils import run_tests
@@ -774,10 +776,27 @@ class TestQuantizeFxTRTOps(QuantizationTestCase):
             max_batch_size=batch_size,
             explicit_batch_dimension=True,
             explicit_precision=True,
-            fp16_mode=fp16_mode, int8_mode=int8_mode)
-        feed_lower = Lowerer.create(lower_setting)
+            fp16_mode=fp16_mode,
+            int8_mode=int8_mode,
+            strict_type_constraints=True,
+        )
+        print("merge:", merge)
+        trt_interpreter = LowerTrtInterpreter.create(lower_setting)
+        merge = acc_tracer.trace(merge, merge_inputs_cuda)
+        interp_res = trt_interpreter(
+            merge, merge_inputs_cuda, "split_module"
+        )
+
+        merge_trt_mod = TRTModule(
+            engine=interp_res.engine,
+            input_names=interp_res.input_names,
+            output_names=interp_res.output_names,
+            cuda_graph_batch_size=batch_size,
+        )
+
+        # feed_lower = Lowerer.create(lower_setting)
         # pyre-fixme[6]: Incompatible parameter type [6]
-        merge_trt_mod = feed_lower(merge, merge_inputs_cuda)
+        # merge_trt_mod = feed_lower(merge, merge_inputs_cuda)
 
         merge_inputs_cuda = [i.cuda() for i in merge_inputs_cuda]
         merge = cast(torch.nn.Module, merge)
