@@ -838,9 +838,11 @@ Supports input of float, double, cfloat and cdouble dtypes.
 Also supports batches of matrices, and if :attr:`A` is a batch of matrices then
 the output has the same batch dimensions.
 
-.. note:: If :attr:`A` is on a CUDA device, this function may synchronize that device with the CPU.
+""" + fr"""
+.. note:: {common_notes["sync_note_ex"]}
 
-.. warning:: This function is "experimental" and it may change in a future PyTorch release.
+.. warning:: {common_notes["experimental_warning"]}
+""" + r"""
 
 Args:
     A (Tensor): the Hermitian/symmetric `n \times n` matrix or the batch of such matrices of size
@@ -885,7 +887,9 @@ Supports input of float, double, cfloat and cdouble dtypes.
 Also supports batches of matrices, and if :attr:`A` is a batch of matrices then
 the output has the same batch dimensions.
 
-.. warning:: This function is "experimental" and it may change in a future PyTorch release.
+""" + fr"""
+.. warning:: {common_notes["experimental_warning"]}
+""" + r"""
 
 Args:
     factors (Tensor): the `n \times n` matrix or the batch of such matrices of size
