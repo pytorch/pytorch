@@ -1281,18 +1281,22 @@ class TestLinalg(TestCase):
         with self.assertRaisesRegex(RuntimeError, "can't be cast to the desired output type"):
             torch.kron(a, b, out=out)
 
-    def test_matrix_norm_backward_zero(self, device):
+    def test_matrix_norm_backward_zero_scalar(self, device):
         a = torch.zeros(3, 3, requires_grad=True, device=device)
         torch.linalg.matrix_norm(a).backward()
         self.assertEqual(a.grad, torch.zeros(3, 3, device=device))
 
+    def test_matrix_norm_backward_zero_tensor(self, device):
         a = torch.ones(2, 3, 3, device=device)
         a[0] = 0
         b = a.clone()
         b.requires_grad = True
         norm = torch.linalg.matrix_norm(b)
         norm.backward(torch.ones_like(norm))
-        self.assertEqual(b.grad, torch.zeros(2, 3, 3, device=device))
+
+        answer = torch.zeros(2, 3, 3, device=device)
+        answer[1] = 0.33333
+        self.assertEqual(b.grad, answer, rtol=1e-3, atol=1e-3)
 
     def test_fro_norm_backward_zero(self, device):
         a = torch.zeros(3, 3, requires_grad=True, device=device)
