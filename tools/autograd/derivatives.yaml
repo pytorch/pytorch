@@ -1285,6 +1285,10 @@
   self: zeros_like(grad)
   result: auto_element_wise
 
+- name: round.decimals(Tensor self, *, int decimals) -> Tensor
+  self: zeros_like(grad)
+  result: auto_element_wise
+
 - name: rsqrt(Tensor self) -> Tensor
   self: -0.5 * grad * result.pow(3).conj()
   result: auto_element_wise
