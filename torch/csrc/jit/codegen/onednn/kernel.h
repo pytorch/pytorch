@@ -47,6 +47,8 @@ class LlgaKernel {
   dnnl::graph::compiled_partition compile(
       const dnnl::graph::partition& partition);
 
+  std::map<size_t, int64_t> initializeTensorIdToOccurence() const;
+
   std::tuple<RunArgs, RunArgs> prepareRunArgs(
       const TensorArgs& inputs,
       TensorArgs& outputs) const;
@@ -66,6 +68,7 @@ class LlgaKernel {
   int64_t nGraphInputs_ = 0; // number of inputs to graph_ on the IR
   int64_t nOutputs_ = 0;
   std::map<size_t, Value*> tensorIdToValue_;
+  std::vector<int64_t> runArgsIdx_;
   dnnl::graph::partition partition_;
   // nPartitionInputs_ is the actual number of inputs to partition_ of graph_
   // needed by the backend.

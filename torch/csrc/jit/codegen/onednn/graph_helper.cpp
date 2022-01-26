@@ -295,7 +295,13 @@ LlgaGraphHelper::LlgaGraphHelper(
   // TODO: select nodes in top-level block for now
   for (auto* node : graph->block()->nodes()) {
     auto op = createLlgaOp(node);
-    g.add_op(op);
+    try {
+      g.add_op(op);
+    } catch (std::exception& e) {
+      GRAPH_DEBUG(
+          "The backend failed to add node ", node->kind().toQualString());
+      g.add_op(makeWildcardOp(node).llgaOp());
+    }
     GRAPH_DEBUG("  Added node ", node->kind().toQualString());
 
     for (Value* input : node->inputs()) {
