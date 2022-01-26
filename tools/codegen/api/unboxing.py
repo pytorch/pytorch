@@ -1,9 +1,9 @@
-from dataclasses import dataclass
-from typing import Dict, List
+from typing import List, Tuple
 
 from tools.codegen.api import cpp
 from tools.codegen.api.cpp import argumenttype_type
-from tools.codegen.api.types import BaseCType, tensorOptionsT, CppSignature, CType, voidT
+from tools.codegen.api.translate import translate
+from tools.codegen.api.types import BaseCType, tensorOptionsT, CppSignature, CType, voidT, Expr, ArgName
 from tools.codegen.model import (
     Argument,
     Type,
@@ -98,87 +98,70 @@ from tools.codegen.model import (
 #       pack(stack, std::move(result_));
 #   ```
 
-
-@dataclass(frozen=True)
-class ArgumentCppCode:
-    val_name: str
-    code: List[str]
-    ctype: str
-
-
 # Convert all the arguments in a NativeFunction to C++ code, including TensorOptions.
-def convert_arguments(args: List[Argument]) -> Dict[str, ArgumentCppCode]:
+def convert_arguments(args: List[Argument]) -> Tuple[List[Expr], List[str]]:
     argument_str = "(std::move(peek(stack, {pos}, {args_num})))"
-    arguments: Dict[str, ArgumentCppCode] = {}
+    expr_list = []
+    code_list = []
     for i, arg in enumerate(args):
         ivalue_str = argument_str.format(pos=i, args_num=len(args))
-        res = argumenttype_ivalue_convert(arg.type, ivalue_str, arg.name)
-        arguments[arg.name] = res
+        expr, code = argumenttype_ivalue_convert(arg.type, ivalue_str, arg.name, mutable=arg.is_write)
+        expr_list.append(expr)
+        code_list.extend(code)
 
-    return arguments
+    return expr_list, code_list
 
 
 # Take an argument in JIT type format, returns the C++ code to convert an ivalue from stack to corresponding C++ type.
-def argumenttype_ivalue_convert(t: Type, ival: str, arg_name: str) -> ArgumentCppCode:
+def argumenttype_ivalue_convert(t: Type, ival: str, arg_name: ArgName, *, mutable: bool = False) -> Tuple[
+    Expr, List[str]]:
+    nctype = argumenttype_type(t=t, mutable=mutable, binds=arg_name)
+    ctype = nctype.cpp_type(strip_ref=True)
     if isinstance(t, BaseType):
-        ctype = argumenttype_type(t=t, mutable=True, binds=arg_name).cpp_type(
-            strip_ref=True
-        )
-        return ArgumentCppCode(
-            code=[f"{ctype} {arg_name}_base = {ival}.to<{ctype}>();"],
-            val_name=f"{arg_name}_base",
-            ctype=ctype,
-        )
+        out_name = f"{arg_name}_base"
+        code = [f"{ctype} {arg_name}_base = {ival}.to<{ctype}>();"]
     elif isinstance(t, OptionalType):
         in_name = arg_name + "_opt_in"
         out_name = arg_name + "_opt_out"
         connector = "\n\t"
-        res = argumenttype_ivalue_convert(t.elem, in_name, arg_name)
-        ctype = f"c10::optional<{res.ctype}>"
+        res_expr, res_code = argumenttype_ivalue_convert(t.elem, in_name, arg_name)
         code = f"""
 c10::optional<c10::IValue> {arg_name + "_opt"} = {ival}.toOptional<c10::IValue>();
 {ctype} {out_name};
 if ({arg_name + "_opt"}.has_value()) {{
     const c10::IValue {in_name} = {arg_name + "_opt"}.value();
-    {connector.join(res.code)}
-    {out_name} = {ctype}({res.val_name});
+    {connector.join(res_code)}
+    {out_name} = {ctype}({res_expr.expr});
 }} else {{
     {out_name} = {ctype}();
 }}
         """.split(
             "\n"
         )
-        return ArgumentCppCode(
-            code=code,
-            val_name=out_name,
-            ctype=ctype,
-        )
     elif isinstance(t, ListType):
         in_name = arg_name + "_list_in"
         out_name = arg_name + "_list_out"
         elem_name = arg_name + "_elem"
         code = [f"const c10::List<c10::IValue> {in_name} = {ival}.toList();"]
-        res = argumenttype_ivalue_convert(t.elem, elem_name, arg_name)
+        res_expr, res_code = argumenttype_ivalue_convert(t.elem, elem_name, arg_name)
         connector = "\n\t"
         # handle list type with size, e.g., bool[4]
         if isinstance(t.elem, BaseType) and t.elem.name == BaseTy.bool and t.size:
-            ctype = f"std::array<{res.ctype}, {t.size}>"
             code.extend(
                 f"""
-{ctype} {out_name} = as_array<{res.ctype}, {t.size}>({in_name});
+{ctype} {out_name} = as_array<{res_expr.type.cpp_type(strip_ref=True)}, {t.size}>({in_name});
             """.split(
                     "\n"
                 )
             )
         # we have to use c10::List for optional element. e.g., Tensor?[] -> c10::List<c10::optional<at::Tensor>>
         elif isinstance(t.elem, OptionalType):
-            ctype = f"c10::List<{res.ctype}>"
             code.extend(
                 f"""
 {ctype} {out_name};
 for (c10::IValue {elem_name}: {in_name}) {{
-    {connector.join(res.code)}
-    {out_name}.push_back({res.val_name});
+    {connector.join(res_code)}
+    {out_name}.push_back({res_expr.expr});
 }}
             """.split(
                     "\n"
@@ -186,38 +169,33 @@ for (c10::IValue {elem_name}: {in_name}) {{
             )
         else:
             # use ArrayRef as default.
-            ctype = f"at::ArrayRef<{res.ctype}>"
             vec_name = arg_name + "_vec"
             code.extend(
                 f"""
-std::vector<{res.ctype}> {vec_name};
+std::vector<{res_expr.type.cpp_type(strip_ref=True)}> {vec_name};
 for (c10::IValue {elem_name}: {in_name}) {{
-    {connector.join(res.code)}
-    {vec_name}.push_back({res.val_name});
+    {connector.join(res_code)}
+    {vec_name}.push_back({res_expr.expr});
 }}
 {ctype} {out_name}({vec_name});
             """.split(
                     "\n"
                 )
             )
-        return ArgumentCppCode(
-            code=code,
-            val_name=out_name,
-            ctype=ctype,
-        )
     else:
         raise Exception(f"Cannot handle type {t}. ival: {ival}, arg_name: {arg_name}")
+    expr = Expr(expr=out_name, type=nctype)
+    return expr, code
 
 
 # Generate code to call C++ unboxed kernel with argument variable names
 def generate_unboxed_kernel_call(
-    f: NativeFunction, sig: CppSignature, arguments: Dict[str, ArgumentCppCode]
+        f: NativeFunction, sig: CppSignature, arguments: List[Expr]
 ) -> List[str]:
     use_tensor_options = any(
         isinstance(a.nctype.type, BaseCType) and a.nctype.type.type == tensorOptionsT
         for a in sig.arguments()
     )
-    arg_connector = ",\n\t"
     # find dispatch native function namespace
     if use_tensor_options:
         namespace = "torch"
@@ -233,27 +211,14 @@ def generate_unboxed_kernel_call(
         push_str = """
 pack(stack, std::move(result_));
         """
+    arg_connector = ",\n\t"
+    expr_list: List[Expr] = translate(arguments, sig.arguments(), method=(Variant.method in f.variants))
+    arg_list = f"\n\t{arg_connector.join(e.expr for e in expr_list)}\n"
     if Variant.method in f.variants:
-        self_arg = f.func.arguments.self_arg
-        assert self_arg is not None, "No self argument"
-        arg_list = arg_connector.join(
-            [
-                arguments[a.name].val_name
-                for a in sig.arguments()
-                if a.name != self_arg.argument.name
-            ]
-        )
-        if arg_list:
-            arg_list = f"\n\t{arg_list}\n"
         function_call = f"""
-{ret_str}{arguments[self_arg.argument.name].val_name}.{sig.name()}({arg_list});
+{ret_str}self_base.{sig.name()}({arg_list});
     """
     else:
-        arg_list = arg_connector.join(
-            [arguments[a.name].val_name for a in sig.arguments()]
-        )
-        if arg_list:
-            arg_list = f"\n\t{arg_list}\n"
         function_call = f"""
 {ret_str}{namespace}::{sig.name()}({arg_list});
     """
