@@ -140,10 +140,10 @@ class GitRepo:
         rc = _check_output(['sh', '-c', f'git -C {self.repo_dir} show {ref}|git patch-id --stable']).strip()
         return [cast(Tuple[str, str], x.split(" ", 1)) for x in rc.split("\n")]
 
-    def commits_resolving_gh_pr(self, pr_num: int) -> GitCommit:
+    def commits_resolving_gh_pr(self, pr_num: int) -> List[str]:
         owner, name = self.gh_owner_and_name()
         msg = f"Pull Request resolved: https://github.com/{owner}/{name}/pull/{pr_num}"
-        rc=self._run_git('log', '--format=%H', '--grep', msg).strip()
+        rc = self._run_git('log', '--format=%H', '--grep', msg).strip()
         return rc.split("\n") if len(rc) > 0 else []
 
     def get_commit(self, ref: str) -> GitCommit:
@@ -152,7 +152,7 @@ class GitRepo:
     def cherry_pick(self, ref: str) -> None:
         self._run_git('cherry-pick', '-x', ref)
 
-    def revert(self, ref:str) -> None:
+    def revert(self, ref: str) -> None:
         self._run_git("revert", "--no-edit", ref)
 
     def compute_branch_diffs(self, from_branch: str, to_branch: str) -> Tuple[List[str], List[str]]:

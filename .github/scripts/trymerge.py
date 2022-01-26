@@ -140,7 +140,7 @@ def gh_post_comment(org: str, project: str, pr_num: int, comment: str, dry_run: 
 
 def gh_add_labels(org: str, project: str, pr_num: int, labels: Union[str, List[str]]) -> None:
     fetch_json(f'https://api.github.com/repos/{org}/{project}/issues/{pr_num}/labels',
-                      data={"labels": labels})
+               data={"labels": labels})
 
 
 def gh_graphql(query: str, **kwargs: Any) -> Dict[str, Any]:
@@ -291,7 +291,7 @@ class GitHubPR:
             repo.amend_commit_message(re.sub(RE_GHSTACK_SOURCE_ID, "", msg))
 
     def merge_into(self, repo: GitRepo, dry_run: bool = False) -> None:
-        check_if_should_be_merged(self, repo)
+        find_matching_merge_rule(self, repo)
         if repo.current_branch() != self.default_branch():
             repo.checkout(self.default_branch())
         if not self.is_ghstack_pr():
@@ -365,7 +365,7 @@ def try_revert(repo: GitRepo, pr: GitHubPR, dry_run: bool = False) -> None:
     if not RE_REVERT_CMD.match(pr.get_comment_body()):
         raise RuntimeError(f"Comment {pr.get_comment_body()} does not seem to be a valid revert command")
     if pr.get_comment_editor_login() is not None:
-        return post_comment(f"Don't want to revert based on edited command")
+        return post_comment("Don't want to revert based on edited command")
     author_association = pr.get_comment_author_association()
     author_login = pr.get_comment_author_login()
     if author_association != "MEMBER":
@@ -379,7 +379,7 @@ def try_revert(repo: GitRepo, pr: GitHubPR, dry_run: bool = False) -> None:
             raise RuntimeError("Can't find any commits resolving PR")
         commit_sha = commits[-1]
     msg = repo.commit_message(commit_sha)
-    rc=RE_DIFF_REV.search(msg)
+    rc = RE_DIFF_REV.search(msg)
     if rc is not None:
         raise RuntimeError(f"Can't revert PR that was landed via phabricator as {rc.group(1)}")
     repo.checkout(pr.default_branch())
