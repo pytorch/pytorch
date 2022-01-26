@@ -11,7 +11,7 @@ class _MultiDeviceReplicator(object):
     Lazily serves copies of a tensor to requested devices.  Copies are cached per-device.
     """
     def __init__(self, master_tensor: torch.Tensor) -> None:
-        assert master_tensor.is_cuda or master_tensor.device.type == 'xla'
+        assert master_tensor.is_cuda or master_tensor.device.type == 'xla' or master_tensor.device.type == 'lazy'
         self.master = master_tensor
         self._per_device_tensors: Dict[torch.device, torch.Tensor] = {}
 
@@ -158,7 +158,7 @@ class GradScaler(object):
 
         # Short-circuit for the common case.
         if isinstance(outputs, torch.Tensor):
-            assert outputs.is_cuda or outputs.device.type == 'xla'
+            assert outputs.is_cuda or outputs.device.type == 'xla' or outputs.device.type == 'lazy'
             if self._scale is None:
                 self._lazy_init_scale_growth_tracker(outputs.device)
             assert self._scale is not None
@@ -169,7 +169,7 @@ class GradScaler(object):
 
         def apply_scale(val):
             if isinstance(val, torch.Tensor):
-                assert val.is_cuda or val.device.type == 'xla'
+                assert val.is_cuda or val.device.type == 'xla' or val.device.type == 'lazy'
                 if len(stash) == 0:
                     if self._scale is None:
                         self._lazy_init_scale_growth_tracker(val.device)
