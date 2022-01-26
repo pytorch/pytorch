@@ -10,6 +10,7 @@ from .mappings import (
 from .utils import (
     _raise_obs_not_found_error,
     _raise_obs_op_mismatch,
+    _conv_ops,
     op_needs_quantization,
     SeenOpInfo,
     QTensorInfo,
@@ -431,7 +432,7 @@ class AutoQuantizationState(torch.nn.Module):
         # potentially extend kwargs with scale and zero_point
         # TODO move op-specific logic out of here
         if len(additional_kwargs):
-            if orig_op not in (F.conv2d, F.linear):
+            if orig_op not in _conv_ops and orig_op != F.linear:
                 kwargs.update(**additional_kwargs)
             else:
                 seen_op_info = self._get_cur_seen_op_info()
