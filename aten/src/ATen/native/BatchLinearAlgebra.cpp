@@ -4300,11 +4300,8 @@ TORCH_IMPL_FUNC(linalg_ldl_factor_ex_out)
   }
 
   if (check_errors) {
-    if (self.dim() > 2) {
-      batchCheckErrors(info, "torch.linalg.ldl_factor_ex");
-    } else {
-      singleCheckErrors(info.item().toInt(), "torch.linalg.ldl_factor_ex");
-    }
+    at::_linalg_check_errors(
+        info, "torch.linalg.ldl_factor_ex", self.dim() == 2);
   }
 }
 
