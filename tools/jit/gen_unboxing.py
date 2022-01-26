@@ -4,14 +4,16 @@ import argparse
 import json
 import os
 from dataclasses import dataclass
+from typing import Union, Sequence
+
+from typing_extensions import Literal
+
 from tools.codegen.api import unboxing
 from tools.codegen.api.types import CppSignatureGroup
 from tools.codegen.context import method_with_native_function
 from tools.codegen.gen import parse_native_yaml
 from tools.codegen.model import NativeFunction, NativeFunctionsGroup
 from tools.codegen.utils import Target, FileManager, mapMaybe, make_file_manager
-from typing import Union, Sequence
-from typing_extensions import Literal
 
 
 # Generates CodegenFunctions.h & CodegenFunctions.cpp.
@@ -49,18 +51,14 @@ TORCH_API void {f.func.name.unambiguous_name()}(Stack & stack);
             )
 
             # parse arguments into C++ code
-            arguments = unboxing.convert_arguments(args)
+            expr_list, code_list = unboxing.convert_arguments(args)
 
             # for each C++ argument, generate the conversion code
             code_connector = "\n\t"
-            code_list = []
-            for arg in arguments:
-                code_list.extend(arguments[arg].code)
             code = code_connector.join(code_list)
-
             # function call and push back to stack
             func_call_and_push = code_connector.join(
-                unboxing.generate_unboxed_kernel_call(f, sig, arguments)
+                unboxing.generate_unboxed_kernel_call(f, sig, expr_list)
             )
 
             return f"""
