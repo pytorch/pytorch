@@ -707,6 +707,35 @@ class AccTracerTest(unittest.TestCase):
 
         self.assertTrue(torch.equal(m(input), traced(input)))
 
+    def test_no_rewrite_leaf_module(self):
+        """
+        Test that when we supply a leaf module, we don't rewrite it
+        """
+
+        class TestChildModule(nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, a: torch.Tensor) -> torch.Tensor:
+                return a.relu()
+
+        class TestModule(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.child = TestChildModule()
+
+            def forward(self, a: torch.Tensor) -> torch.Tensor:
+                return self.child(a) + self.child(a)
+
+        m = TestModule()
+        input = torch.randn(10)
+        traced = acc_tracer.trace(m, [input], leaf_module_list={TestChildModule})
+        # trace it again just in case
+        traced = acc_tracer.trace(traced, [input], leaf_module_list={TestChildModule})
+
+        for _, m in traced.named_children():
+            self.assertFalse("__AccRewrittenModule" in str(type(m)), str(type(m)))
+
     def test_sequential(self):
         """
         Test that the tracer works for torch.nn.Sequential.
