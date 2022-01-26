@@ -102,16 +102,27 @@ jobs:
       - name: Preserve github env variables for use in docker
         run: |
           env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
-      - name: Clone pytorch/pytorch
-        uses: actions/checkout@v2
+      - name: Checkout PyTorch
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
-          path: pytorch
           submodules: recursive
-      - name: Clone pytorch/builder
-        uses: actions/checkout@v2
+          path: pytorch
+      - name: Clean PyTorch checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: pytorch
+      - name: Checkout pytorch/builder
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
+          submodules: recursive
           repository: pytorch/builder
           path: builder
+      - name: Clean pytorch/builder checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: builder
       - name: Pull Docker image
         run: |
           retry () {
@@ -373,7 +384,7 @@ jobs:
           name: manywheel-py3_7-cpu
           path: "${{ runner.temp }}/artifacts/"
       - name: Set DRY_RUN (only for tagged pushes)
-        if: ${{ github.event_name == 'push' && startsWith(github.event.ref, 'refs/tags/')}}
+        if: ${{ github.event_name == 'push' && (github.event.ref == 'refs/heads/nightly' || startsWith(github.event.ref, 'refs/tags/'))}}
         run: |
           echo "DRY_RUN=disabled" >> "$GITHUB_ENV"
       - name: Set UPLOAD_CHANNEL (only for tagged pushes)
@@ -481,16 +492,27 @@ jobs:
       - name: Preserve github env variables for use in docker
         run: |
           env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
-      - name: Clone pytorch/pytorch
-        uses: actions/checkout@v2
+      - name: Checkout PyTorch
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
-          path: pytorch
           submodules: recursive
-      - name: Clone pytorch/builder
-        uses: actions/checkout@v2
+          path: pytorch
+      - name: Clean PyTorch checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: pytorch
+      - name: Checkout pytorch/builder
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
+          submodules: recursive
           repository: pytorch/builder
           path: builder
+      - name: Clean pytorch/builder checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: builder
       - name: Pull Docker image
         run: |
           retry () {
@@ -759,7 +781,7 @@ jobs:
           name: manywheel-py3_7-cuda10_2
           path: "${{ runner.temp }}/artifacts/"
       - name: Set DRY_RUN (only for tagged pushes)
-        if: ${{ github.event_name == 'push' && startsWith(github.event.ref, 'refs/tags/')}}
+        if: ${{ github.event_name == 'push' && (github.event.ref == 'refs/heads/nightly' || startsWith(github.event.ref, 'refs/tags/'))}}
         run: |
           echo "DRY_RUN=disabled" >> "$GITHUB_ENV"
       - name: Set UPLOAD_CHANNEL (only for tagged pushes)
@@ -867,16 +889,27 @@ jobs:
       - name: Preserve github env variables for use in docker
         run: |
           env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
-      - name: Clone pytorch/pytorch
-        uses: actions/checkout@v2
+      - name: Checkout PyTorch
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
-          path: pytorch
           submodules: recursive
-      - name: Clone pytorch/builder
-        uses: actions/checkout@v2
+          path: pytorch
+      - name: Clean PyTorch checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: pytorch
+      - name: Checkout pytorch/builder
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
+          submodules: recursive
           repository: pytorch/builder
           path: builder
+      - name: Clean pytorch/builder checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: builder
       - name: Set BUILD_SPLIT_CUDA
         run: |
           echo "BUILD_SPLIT_CUDA='ON'" >> "$GITHUB_ENV"
@@ -1148,7 +1181,7 @@ jobs:
           name: manywheel-py3_7-cuda11_1
           path: "${{ runner.temp }}/artifacts/"
       - name: Set DRY_RUN (only for tagged pushes)
-        if: ${{ github.event_name == 'push' && startsWith(github.event.ref, 'refs/tags/')}}
+        if: ${{ github.event_name == 'push' && (github.event.ref == 'refs/heads/nightly' || startsWith(github.event.ref, 'refs/tags/'))}}
         run: |
           echo "DRY_RUN=disabled" >> "$GITHUB_ENV"
       - name: Set UPLOAD_CHANNEL (only for tagged pushes)
@@ -1256,16 +1289,27 @@ jobs:
       - name: Preserve github env variables for use in docker
         run: |
           env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
-      - name: Clone pytorch/pytorch
-        uses: actions/checkout@v2
+      - name: Checkout PyTorch
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
-          path: pytorch
           submodules: recursive
-      - name: Clone pytorch/builder
-        uses: actions/checkout@v2
+          path: pytorch
+      - name: Clean PyTorch checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: pytorch
+      - name: Checkout pytorch/builder
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
+          submodules: recursive
           repository: pytorch/builder
           path: builder
+      - name: Clean pytorch/builder checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: builder
       - name: Set BUILD_SPLIT_CUDA
         run: |
           echo "BUILD_SPLIT_CUDA='ON'" >> "$GITHUB_ENV"
@@ -1537,7 +1581,7 @@ jobs:
           name: manywheel-py3_7-cuda11_3
           path: "${{ runner.temp }}/artifacts/"
       - name: Set DRY_RUN (only for tagged pushes)
-        if: ${{ github.event_name == 'push' && startsWith(github.event.ref, 'refs/tags/')}}
+        if: ${{ github.event_name == 'push' && (github.event.ref == 'refs/heads/nightly' || startsWith(github.event.ref, 'refs/tags/'))}}
         run: |
           echo "DRY_RUN=disabled" >> "$GITHUB_ENV"
       - name: Set UPLOAD_CHANNEL (only for tagged pushes)
@@ -1645,16 +1689,27 @@ jobs:
       - name: Preserve github env variables for use in docker
         run: |
           env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
-      - name: Clone pytorch/pytorch
-        uses: actions/checkout@v2
+      - name: Checkout PyTorch
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
-          path: pytorch
           submodules: recursive
-      - name: Clone pytorch/builder
-        uses: actions/checkout@v2
+          path: pytorch
+      - name: Clean PyTorch checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: pytorch
+      - name: Checkout pytorch/builder
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
+          submodules: recursive
           repository: pytorch/builder
           path: builder
+      - name: Clean pytorch/builder checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: builder
       - name: Set BUILD_SPLIT_CUDA
         run: |
           echo "BUILD_SPLIT_CUDA='ON'" >> "$GITHUB_ENV"
@@ -1926,7 +1981,7 @@ jobs:
           name: manywheel-py3_7-cuda11_5
           path: "${{ runner.temp }}/artifacts/"
       - name: Set DRY_RUN (only for tagged pushes)
-        if: ${{ github.event_name == 'push' && startsWith(github.event.ref, 'refs/tags/')}}
+        if: ${{ github.event_name == 'push' && (github.event.ref == 'refs/heads/nightly' || startsWith(github.event.ref, 'refs/tags/'))}}
         run: |
           echo "DRY_RUN=disabled" >> "$GITHUB_ENV"
       - name: Set UPLOAD_CHANNEL (only for tagged pushes)
@@ -2034,16 +2089,27 @@ jobs:
       - name: Preserve github env variables for use in docker
         run: |
           env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
-      - name: Clone pytorch/pytorch
-        uses: actions/checkout@v2
+      - name: Checkout PyTorch
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
-          path: pytorch
           submodules: recursive
-      - name: Clone pytorch/builder
-        uses: actions/checkout@v2
+          path: pytorch
+      - name: Clean PyTorch checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: pytorch
+      - name: Checkout pytorch/builder
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
+          submodules: recursive
           repository: pytorch/builder
           path: builder
+      - name: Clean pytorch/builder checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: builder
       - name: Pull Docker image
         run: |
           retry () {
@@ -2307,7 +2373,7 @@ jobs:
           name: manywheel-py3_7-rocm4_3_1
           path: "${{ runner.temp }}/artifacts/"
       - name: Set DRY_RUN (only for tagged pushes)
-        if: ${{ github.event_name == 'push' && startsWith(github.event.ref, 'refs/tags/')}}
+        if: ${{ github.event_name == 'push' && (github.event.ref == 'refs/heads/nightly' || startsWith(github.event.ref, 'refs/tags/'))}}
         run: |
           echo "DRY_RUN=disabled" >> "$GITHUB_ENV"
       - name: Set UPLOAD_CHANNEL (only for tagged pushes)
@@ -2415,16 +2481,27 @@ jobs:
       - name: Preserve github env variables for use in docker
         run: |
           env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
-      - name: Clone pytorch/pytorch
-        uses: actions/checkout@v2
+      - name: Checkout PyTorch
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
-          path: pytorch
           submodules: recursive
-      - name: Clone pytorch/builder
-        uses: actions/checkout@v2
+          path: pytorch
+      - name: Clean PyTorch checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: pytorch
+      - name: Checkout pytorch/builder
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
+          submodules: recursive
           repository: pytorch/builder
           path: builder
+      - name: Clean pytorch/builder checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: builder
       - name: Pull Docker image
         run: |
           retry () {
@@ -2688,7 +2765,7 @@ jobs:
           name: manywheel-py3_7-rocm4_5_2
           path: "${{ runner.temp }}/artifacts/"
       - name: Set DRY_RUN (only for tagged pushes)
-        if: ${{ github.event_name == 'push' && startsWith(github.event.ref, 'refs/tags/')}}
+        if: ${{ github.event_name == 'push' && (github.event.ref == 'refs/heads/nightly' || startsWith(github.event.ref, 'refs/tags/'))}}
         run: |
           echo "DRY_RUN=disabled" >> "$GITHUB_ENV"
       - name: Set UPLOAD_CHANNEL (only for tagged pushes)
@@ -2795,16 +2872,27 @@ jobs:
       - name: Preserve github env variables for use in docker
         run: |
           env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
-      - name: Clone pytorch/pytorch
-        uses: actions/checkout@v2
+      - name: Checkout PyTorch
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
-          path: pytorch
           submodules: recursive
-      - name: Clone pytorch/builder
-        uses: actions/checkout@v2
+          path: pytorch
+      - name: Clean PyTorch checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: pytorch
+      - name: Checkout pytorch/builder
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
+          submodules: recursive
           repository: pytorch/builder
           path: builder
+      - name: Clean pytorch/builder checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: builder
       - name: Pull Docker image
         run: |
           retry () {
@@ -3066,7 +3154,7 @@ jobs:
           name: manywheel-py3_8-cpu
           path: "${{ runner.temp }}/artifacts/"
       - name: Set DRY_RUN (only for tagged pushes)
-        if: ${{ github.event_name == 'push' && startsWith(github.event.ref, 'refs/tags/')}}
+        if: ${{ github.event_name == 'push' && (github.event.ref == 'refs/heads/nightly' || startsWith(github.event.ref, 'refs/tags/'))}}
         run: |
           echo "DRY_RUN=disabled" >> "$GITHUB_ENV"
       - name: Set UPLOAD_CHANNEL (only for tagged pushes)
@@ -3174,16 +3262,27 @@ jobs:
       - name: Preserve github env variables for use in docker
         run: |
           env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
-      - name: Clone pytorch/pytorch
-        uses: actions/checkout@v2
+      - name: Checkout PyTorch
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
-          path: pytorch
           submodules: recursive
-      - name: Clone pytorch/builder
-        uses: actions/checkout@v2
+          path: pytorch
+      - name: Clean PyTorch checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: pytorch
+      - name: Checkout pytorch/builder
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
+          submodules: recursive
           repository: pytorch/builder
           path: builder
+      - name: Clean pytorch/builder checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: builder
       - name: Pull Docker image
         run: |
           retry () {
@@ -3452,7 +3551,7 @@ jobs:
           name: manywheel-py3_8-cuda10_2
           path: "${{ runner.temp }}/artifacts/"
       - name: Set DRY_RUN (only for tagged pushes)
-        if: ${{ github.event_name == 'push' && startsWith(github.event.ref, 'refs/tags/')}}
+        if: ${{ github.event_name == 'push' && (github.event.ref == 'refs/heads/nightly' || startsWith(github.event.ref, 'refs/tags/'))}}
         run: |
           echo "DRY_RUN=disabled" >> "$GITHUB_ENV"
       - name: Set UPLOAD_CHANNEL (only for tagged pushes)
@@ -3560,16 +3659,27 @@ jobs:
       - name: Preserve github env variables for use in docker
         run: |
           env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
-      - name: Clone pytorch/pytorch
-        uses: actions/checkout@v2
+      - name: Checkout PyTorch
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
-          path: pytorch
           submodules: recursive
-      - name: Clone pytorch/builder
-        uses: actions/checkout@v2
+          path: pytorch
+      - name: Clean PyTorch checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: pytorch
+      - name: Checkout pytorch/builder
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
+          submodules: recursive
           repository: pytorch/builder
           path: builder
+      - name: Clean pytorch/builder checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: builder
       - name: Set BUILD_SPLIT_CUDA
         run: |
           echo "BUILD_SPLIT_CUDA='ON'" >> "$GITHUB_ENV"
@@ -3841,7 +3951,7 @@ jobs:
           name: manywheel-py3_8-cuda11_1
           path: "${{ runner.temp }}/artifacts/"
       - name: Set DRY_RUN (only for tagged pushes)
-        if: ${{ github.event_name == 'push' && startsWith(github.event.ref, 'refs/tags/')}}
+        if: ${{ github.event_name == 'push' && (github.event.ref == 'refs/heads/nightly' || startsWith(github.event.ref, 'refs/tags/'))}}
         run: |
           echo "DRY_RUN=disabled" >> "$GITHUB_ENV"
       - name: Set UPLOAD_CHANNEL (only for tagged pushes)
@@ -3949,16 +4059,27 @@ jobs:
       - name: Preserve github env variables for use in docker
         run: |
           env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
-      - name: Clone pytorch/pytorch
-        uses: actions/checkout@v2
+      - name: Checkout PyTorch
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
-          path: pytorch
           submodules: recursive
-      - name: Clone pytorch/builder
-        uses: actions/checkout@v2
+          path: pytorch
+      - name: Clean PyTorch checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: pytorch
+      - name: Checkout pytorch/builder
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
+          submodules: recursive
           repository: pytorch/builder
           path: builder
+      - name: Clean pytorch/builder checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: builder
       - name: Set BUILD_SPLIT_CUDA
         run: |
           echo "BUILD_SPLIT_CUDA='ON'" >> "$GITHUB_ENV"
@@ -4230,7 +4351,7 @@ jobs:
           name: manywheel-py3_8-cuda11_3
           path: "${{ runner.temp }}/artifacts/"
       - name: Set DRY_RUN (only for tagged pushes)
-        if: ${{ github.event_name == 'push' && startsWith(github.event.ref, 'refs/tags/')}}
+        if: ${{ github.event_name == 'push' && (github.event.ref == 'refs/heads/nightly' || startsWith(github.event.ref, 'refs/tags/'))}}
         run: |
           echo "DRY_RUN=disabled" >> "$GITHUB_ENV"
       - name: Set UPLOAD_CHANNEL (only for tagged pushes)
@@ -4338,16 +4459,27 @@ jobs:
       - name: Preserve github env variables for use in docker
         run: |
           env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
-      - name: Clone pytorch/pytorch
-        uses: actions/checkout@v2
+      - name: Checkout PyTorch
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
-          path: pytorch
           submodules: recursive
-      - name: Clone pytorch/builder
-        uses: actions/checkout@v2
+          path: pytorch
+      - name: Clean PyTorch checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: pytorch
+      - name: Checkout pytorch/builder
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
+          submodules: recursive
           repository: pytorch/builder
           path: builder
+      - name: Clean pytorch/builder checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: builder
       - name: Set BUILD_SPLIT_CUDA
         run: |
           echo "BUILD_SPLIT_CUDA='ON'" >> "$GITHUB_ENV"
@@ -4619,7 +4751,7 @@ jobs:
           name: manywheel-py3_8-cuda11_5
           path: "${{ runner.temp }}/artifacts/"
       - name: Set DRY_RUN (only for tagged pushes)
-        if: ${{ github.event_name == 'push' && startsWith(github.event.ref, 'refs/tags/')}}
+        if: ${{ github.event_name == 'push' && (github.event.ref == 'refs/heads/nightly' || startsWith(github.event.ref, 'refs/tags/'))}}
         run: |
           echo "DRY_RUN=disabled" >> "$GITHUB_ENV"
       - name: Set UPLOAD_CHANNEL (only for tagged pushes)
@@ -4727,16 +4859,27 @@ jobs:
       - name: Preserve github env variables for use in docker
         run: |
           env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
-      - name: Clone pytorch/pytorch
-        uses: actions/checkout@v2
+      - name: Checkout PyTorch
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
-          path: pytorch
           submodules: recursive
-      - name: Clone pytorch/builder
-        uses: actions/checkout@v2
+          path: pytorch
+      - name: Clean PyTorch checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: pytorch
+      - name: Checkout pytorch/builder
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
+          submodules: recursive
           repository: pytorch/builder
           path: builder
+      - name: Clean pytorch/builder checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: builder
       - name: Pull Docker image
         run: |
           retry () {
@@ -5000,7 +5143,7 @@ jobs:
           name: manywheel-py3_8-rocm4_3_1
           path: "${{ runner.temp }}/artifacts/"
       - name: Set DRY_RUN (only for tagged pushes)
-        if: ${{ github.event_name == 'push' && startsWith(github.event.ref, 'refs/tags/')}}
+        if: ${{ github.event_name == 'push' && (github.event.ref == 'refs/heads/nightly' || startsWith(github.event.ref, 'refs/tags/'))}}
         run: |
           echo "DRY_RUN=disabled" >> "$GITHUB_ENV"
       - name: Set UPLOAD_CHANNEL (only for tagged pushes)
@@ -5108,16 +5251,27 @@ jobs:
       - name: Preserve github env variables for use in docker
         run: |
           env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
-      - name: Clone pytorch/pytorch
-        uses: actions/checkout@v2
+      - name: Checkout PyTorch
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
-          path: pytorch
           submodules: recursive
-      - name: Clone pytorch/builder
-        uses: actions/checkout@v2
+          path: pytorch
+      - name: Clean PyTorch checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: pytorch
+      - name: Checkout pytorch/builder
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
+          submodules: recursive
           repository: pytorch/builder
           path: builder
+      - name: Clean pytorch/builder checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: builder
       - name: Pull Docker image
         run: |
           retry () {
@@ -5381,7 +5535,7 @@ jobs:
           name: manywheel-py3_8-rocm4_5_2
           path: "${{ runner.temp }}/artifacts/"
       - name: Set DRY_RUN (only for tagged pushes)
-        if: ${{ github.event_name == 'push' && startsWith(github.event.ref, 'refs/tags/')}}
+        if: ${{ github.event_name == 'push' && (github.event.ref == 'refs/heads/nightly' || startsWith(github.event.ref, 'refs/tags/'))}}
         run: |
           echo "DRY_RUN=disabled" >> "$GITHUB_ENV"
       - name: Set UPLOAD_CHANNEL (only for tagged pushes)
@@ -5488,16 +5642,27 @@ jobs:
       - name: Preserve github env variables for use in docker
         run: |
           env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
-      - name: Clone pytorch/pytorch
-        uses: actions/checkout@v2
+      - name: Checkout PyTorch
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
-          path: pytorch
           submodules: recursive
-      - name: Clone pytorch/builder
-        uses: actions/checkout@v2
+          path: pytorch
+      - name: Clean PyTorch checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: pytorch
+      - name: Checkout pytorch/builder
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
+          submodules: recursive
           repository: pytorch/builder
           path: builder
+      - name: Clean pytorch/builder checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: builder
       - name: Pull Docker image
         run: |
           retry () {
@@ -5759,7 +5924,7 @@ jobs:
           name: manywheel-py3_9-cpu
           path: "${{ runner.temp }}/artifacts/"
       - name: Set DRY_RUN (only for tagged pushes)
-        if: ${{ github.event_name == 'push' && startsWith(github.event.ref, 'refs/tags/')}}
+        if: ${{ github.event_name == 'push' && (github.event.ref == 'refs/heads/nightly' || startsWith(github.event.ref, 'refs/tags/'))}}
         run: |
           echo "DRY_RUN=disabled" >> "$GITHUB_ENV"
       - name: Set UPLOAD_CHANNEL (only for tagged pushes)
@@ -5867,16 +6032,27 @@ jobs:
       - name: Preserve github env variables for use in docker
         run: |
           env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
-      - name: Clone pytorch/pytorch
-        uses: actions/checkout@v2
+      - name: Checkout PyTorch
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
-          path: pytorch
           submodules: recursive
-      - name: Clone pytorch/builder
-        uses: actions/checkout@v2
+          path: pytorch
+      - name: Clean PyTorch checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: pytorch
+      - name: Checkout pytorch/builder
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
+          submodules: recursive
           repository: pytorch/builder
           path: builder
+      - name: Clean pytorch/builder checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: builder
       - name: Pull Docker image
         run: |
           retry () {
@@ -6145,7 +6321,7 @@ jobs:
           name: manywheel-py3_9-cuda10_2
           path: "${{ runner.temp }}/artifacts/"
       - name: Set DRY_RUN (only for tagged pushes)
-        if: ${{ github.event_name == 'push' && startsWith(github.event.ref, 'refs/tags/')}}
+        if: ${{ github.event_name == 'push' && (github.event.ref == 'refs/heads/nightly' || startsWith(github.event.ref, 'refs/tags/'))}}
         run: |
           echo "DRY_RUN=disabled" >> "$GITHUB_ENV"
       - name: Set UPLOAD_CHANNEL (only for tagged pushes)
@@ -6253,16 +6429,27 @@ jobs:
       - name: Preserve github env variables for use in docker
         run: |
           env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
-      - name: Clone pytorch/pytorch
-        uses: actions/checkout@v2
+      - name: Checkout PyTorch
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
-          path: pytorch
           submodules: recursive
-      - name: Clone pytorch/builder
-        uses: actions/checkout@v2
+          path: pytorch
+      - name: Clean PyTorch checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: pytorch
+      - name: Checkout pytorch/builder
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
+          submodules: recursive
           repository: pytorch/builder
           path: builder
+      - name: Clean pytorch/builder checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: builder
       - name: Set BUILD_SPLIT_CUDA
         run: |
           echo "BUILD_SPLIT_CUDA='ON'" >> "$GITHUB_ENV"
@@ -6534,7 +6721,7 @@ jobs:
           name: manywheel-py3_9-cuda11_1
           path: "${{ runner.temp }}/artifacts/"
       - name: Set DRY_RUN (only for tagged pushes)
-        if: ${{ github.event_name == 'push' && startsWith(github.event.ref, 'refs/tags/')}}
+        if: ${{ github.event_name == 'push' && (github.event.ref == 'refs/heads/nightly' || startsWith(github.event.ref, 'refs/tags/'))}}
         run: |
           echo "DRY_RUN=disabled" >> "$GITHUB_ENV"
       - name: Set UPLOAD_CHANNEL (only for tagged pushes)
@@ -6642,16 +6829,27 @@ jobs:
       - name: Preserve github env variables for use in docker
         run: |
           env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
-      - name: Clone pytorch/pytorch
-        uses: actions/checkout@v2
+      - name: Checkout PyTorch
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
-          path: pytorch
           submodules: recursive
-      - name: Clone pytorch/builder
-        uses: actions/checkout@v2
+          path: pytorch
+      - name: Clean PyTorch checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: pytorch
+      - name: Checkout pytorch/builder
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
+          submodules: recursive
           repository: pytorch/builder
           path: builder
+      - name: Clean pytorch/builder checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: builder
       - name: Set BUILD_SPLIT_CUDA
         run: |
           echo "BUILD_SPLIT_CUDA='ON'" >> "$GITHUB_ENV"
@@ -6923,7 +7121,7 @@ jobs:
           name: manywheel-py3_9-cuda11_3
           path: "${{ runner.temp }}/artifacts/"
       - name: Set DRY_RUN (only for tagged pushes)
-        if: ${{ github.event_name == 'push' && startsWith(github.event.ref, 'refs/tags/')}}
+        if: ${{ github.event_name == 'push' && (github.event.ref == 'refs/heads/nightly' || startsWith(github.event.ref, 'refs/tags/'))}}
         run: |
           echo "DRY_RUN=disabled" >> "$GITHUB_ENV"
       - name: Set UPLOAD_CHANNEL (only for tagged pushes)
@@ -7031,16 +7229,27 @@ jobs:
       - name: Preserve github env variables for use in docker
         run: |
           env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
-      - name: Clone pytorch/pytorch
-        uses: actions/checkout@v2
+      - name: Checkout PyTorch
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
-          path: pytorch
           submodules: recursive
-      - name: Clone pytorch/builder
-        uses: actions/checkout@v2
+          path: pytorch
+      - name: Clean PyTorch checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: pytorch
+      - name: Checkout pytorch/builder
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
+          submodules: recursive
           repository: pytorch/builder
           path: builder
+      - name: Clean pytorch/builder checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: builder
       - name: Set BUILD_SPLIT_CUDA
         run: |
           echo "BUILD_SPLIT_CUDA='ON'" >> "$GITHUB_ENV"
@@ -7312,7 +7521,7 @@ jobs:
           name: manywheel-py3_9-cuda11_5
           path: "${{ runner.temp }}/artifacts/"
       - name: Set DRY_RUN (only for tagged pushes)
-        if: ${{ github.event_name == 'push' && startsWith(github.event.ref, 'refs/tags/')}}
+        if: ${{ github.event_name == 'push' && (github.event.ref == 'refs/heads/nightly' || startsWith(github.event.ref, 'refs/tags/'))}}
         run: |
           echo "DRY_RUN=disabled" >> "$GITHUB_ENV"
       - name: Set UPLOAD_CHANNEL (only for tagged pushes)
@@ -7420,16 +7629,27 @@ jobs:
       - name: Preserve github env variables for use in docker
         run: |
           env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
-      - name: Clone pytorch/pytorch
-        uses: actions/checkout@v2
+      - name: Checkout PyTorch
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
-          path: pytorch
           submodules: recursive
-      - name: Clone pytorch/builder
-        uses: actions/checkout@v2
+          path: pytorch
+      - name: Clean PyTorch checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: pytorch
+      - name: Checkout pytorch/builder
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
+          submodules: recursive
           repository: pytorch/builder
           path: builder
+      - name: Clean pytorch/builder checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: builder
       - name: Pull Docker image
         run: |
           retry () {
@@ -7693,7 +7913,7 @@ jobs:
           name: manywheel-py3_9-rocm4_3_1
           path: "${{ runner.temp }}/artifacts/"
       - name: Set DRY_RUN (only for tagged pushes)
-        if: ${{ github.event_name == 'push' && startsWith(github.event.ref, 'refs/tags/')}}
+        if: ${{ github.event_name == 'push' && (github.event.ref == 'refs/heads/nightly' || startsWith(github.event.ref, 'refs/tags/'))}}
         run: |
           echo "DRY_RUN=disabled" >> "$GITHUB_ENV"
       - name: Set UPLOAD_CHANNEL (only for tagged pushes)
@@ -7801,16 +8021,27 @@ jobs:
       - name: Preserve github env variables for use in docker
         run: |
           env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
-      - name: Clone pytorch/pytorch
-        uses: actions/checkout@v2
+      - name: Checkout PyTorch
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
-          path: pytorch
           submodules: recursive
-      - name: Clone pytorch/builder
-        uses: actions/checkout@v2
+          path: pytorch
+      - name: Clean PyTorch checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: pytorch
+      - name: Checkout pytorch/builder
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
+          submodules: recursive
           repository: pytorch/builder
           path: builder
+      - name: Clean pytorch/builder checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: builder
       - name: Pull Docker image
         run: |
           retry () {
@@ -8074,7 +8305,7 @@ jobs:
           name: manywheel-py3_9-rocm4_5_2
           path: "${{ runner.temp }}/artifacts/"
       - name: Set DRY_RUN (only for tagged pushes)
-        if: ${{ github.event_name == 'push' && startsWith(github.event.ref, 'refs/tags/')}}
+        if: ${{ github.event_name == 'push' && (github.event.ref == 'refs/heads/nightly' || startsWith(github.event.ref, 'refs/tags/'))}}
         run: |
           echo "DRY_RUN=disabled" >> "$GITHUB_ENV"
       - name: Set UPLOAD_CHANNEL (only for tagged pushes)
@@ -8181,16 +8412,27 @@ jobs:
       - name: Preserve github env variables for use in docker
         run: |
           env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
-      - name: Clone pytorch/pytorch
-        uses: actions/checkout@v2
+      - name: Checkout PyTorch
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
-          path: pytorch
           submodules: recursive
-      - name: Clone pytorch/builder
-        uses: actions/checkout@v2
+          path: pytorch
+      - name: Clean PyTorch checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: pytorch
+      - name: Checkout pytorch/builder
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
+          submodules: recursive
           repository: pytorch/builder
           path: builder
+      - name: Clean pytorch/builder checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: builder
       - name: Pull Docker image
         run: |
           retry () {
@@ -8452,7 +8694,7 @@ jobs:
           name: manywheel-py3_10-cpu
           path: "${{ runner.temp }}/artifacts/"
       - name: Set DRY_RUN (only for tagged pushes)
-        if: ${{ github.event_name == 'push' && startsWith(github.event.ref, 'refs/tags/')}}
+        if: ${{ github.event_name == 'push' && (github.event.ref == 'refs/heads/nightly' || startsWith(github.event.ref, 'refs/tags/'))}}
         run: |
           echo "DRY_RUN=disabled" >> "$GITHUB_ENV"
       - name: Set UPLOAD_CHANNEL (only for tagged pushes)
@@ -8560,16 +8802,27 @@ jobs:
       - name: Preserve github env variables for use in docker
         run: |
           env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
-      - name: Clone pytorch/pytorch
-        uses: actions/checkout@v2
+      - name: Checkout PyTorch
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
-          path: pytorch
           submodules: recursive
-      - name: Clone pytorch/builder
-        uses: actions/checkout@v2
+          path: pytorch
+      - name: Clean PyTorch checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: pytorch
+      - name: Checkout pytorch/builder
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
+          submodules: recursive
           repository: pytorch/builder
           path: builder
+      - name: Clean pytorch/builder checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: builder
       - name: Pull Docker image
         run: |
           retry () {
@@ -8838,7 +9091,7 @@ jobs:
           name: manywheel-py3_10-cuda10_2
           path: "${{ runner.temp }}/artifacts/"
       - name: Set DRY_RUN (only for tagged pushes)
-        if: ${{ github.event_name == 'push' && startsWith(github.event.ref, 'refs/tags/')}}
+        if: ${{ github.event_name == 'push' && (github.event.ref == 'refs/heads/nightly' || startsWith(github.event.ref, 'refs/tags/'))}}
         run: |
           echo "DRY_RUN=disabled" >> "$GITHUB_ENV"
       - name: Set UPLOAD_CHANNEL (only for tagged pushes)
@@ -8946,16 +9199,27 @@ jobs:
       - name: Preserve github env variables for use in docker
         run: |
           env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
-      - name: Clone pytorch/pytorch
-        uses: actions/checkout@v2
+      - name: Checkout PyTorch
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
-          path: pytorch
           submodules: recursive
-      - name: Clone pytorch/builder
-        uses: actions/checkout@v2
+          path: pytorch
+      - name: Clean PyTorch checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: pytorch
+      - name: Checkout pytorch/builder
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
+          submodules: recursive
           repository: pytorch/builder
           path: builder
+      - name: Clean pytorch/builder checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: builder
       - name: Set BUILD_SPLIT_CUDA
         run: |
           echo "BUILD_SPLIT_CUDA='ON'" >> "$GITHUB_ENV"
@@ -9227,7 +9491,7 @@ jobs:
           name: manywheel-py3_10-cuda11_1
           path: "${{ runner.temp }}/artifacts/"
       - name: Set DRY_RUN (only for tagged pushes)
-        if: ${{ github.event_name == 'push' && startsWith(github.event.ref, 'refs/tags/')}}
+        if: ${{ github.event_name == 'push' && (github.event.ref == 'refs/heads/nightly' || startsWith(github.event.ref, 'refs/tags/'))}}
         run: |
           echo "DRY_RUN=disabled" >> "$GITHUB_ENV"
       - name: Set UPLOAD_CHANNEL (only for tagged pushes)
@@ -9335,16 +9599,27 @@ jobs:
       - name: Preserve github env variables for use in docker
         run: |
           env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
-      - name: Clone pytorch/pytorch
-        uses: actions/checkout@v2
+      - name: Checkout PyTorch
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
-          path: pytorch
           submodules: recursive
-      - name: Clone pytorch/builder
-        uses: actions/checkout@v2
+          path: pytorch
+      - name: Clean PyTorch checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: pytorch
+      - name: Checkout pytorch/builder
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
+          submodules: recursive
           repository: pytorch/builder
           path: builder
+      - name: Clean pytorch/builder checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: builder
       - name: Set BUILD_SPLIT_CUDA
         run: |
           echo "BUILD_SPLIT_CUDA='ON'" >> "$GITHUB_ENV"
@@ -9616,7 +9891,7 @@ jobs:
           name: manywheel-py3_10-cuda11_3
           path: "${{ runner.temp }}/artifacts/"
       - name: Set DRY_RUN (only for tagged pushes)
-        if: ${{ github.event_name == 'push' && startsWith(github.event.ref, 'refs/tags/')}}
+        if: ${{ github.event_name == 'push' && (github.event.ref == 'refs/heads/nightly' || startsWith(github.event.ref, 'refs/tags/'))}}
         run: |
           echo "DRY_RUN=disabled" >> "$GITHUB_ENV"
       - name: Set UPLOAD_CHANNEL (only for tagged pushes)
@@ -9724,16 +9999,27 @@ jobs:
       - name: Preserve github env variables for use in docker
         run: |
           env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
-      - name: Clone pytorch/pytorch
-        uses: actions/checkout@v2
+      - name: Checkout PyTorch
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
-          path: pytorch
           submodules: recursive
-      - name: Clone pytorch/builder
-        uses: actions/checkout@v2
+          path: pytorch
+      - name: Clean PyTorch checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: pytorch
+      - name: Checkout pytorch/builder
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
+          submodules: recursive
           repository: pytorch/builder
           path: builder
+      - name: Clean pytorch/builder checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: builder
       - name: Set BUILD_SPLIT_CUDA
         run: |
           echo "BUILD_SPLIT_CUDA='ON'" >> "$GITHUB_ENV"
@@ -10005,7 +10291,7 @@ jobs:
           name: manywheel-py3_10-cuda11_5
           path: "${{ runner.temp }}/artifacts/"
       - name: Set DRY_RUN (only for tagged pushes)
-        if: ${{ github.event_name == 'push' && startsWith(github.event.ref, 'refs/tags/')}}
+        if: ${{ github.event_name == 'push' && (github.event.ref == 'refs/heads/nightly' || startsWith(github.event.ref, 'refs/tags/'))}}
         run: |
           echo "DRY_RUN=disabled" >> "$GITHUB_ENV"
       - name: Set UPLOAD_CHANNEL (only for tagged pushes)
@@ -10113,16 +10399,27 @@ jobs:
       - name: Preserve github env variables for use in docker
         run: |
           env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
-      - name: Clone pytorch/pytorch
-        uses: actions/checkout@v2
+      - name: Checkout PyTorch
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
-          path: pytorch
           submodules: recursive
-      - name: Clone pytorch/builder
-        uses: actions/checkout@v2
+          path: pytorch
+      - name: Clean PyTorch checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: pytorch
+      - name: Checkout pytorch/builder
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
+          submodules: recursive
           repository: pytorch/builder
           path: builder
+      - name: Clean pytorch/builder checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: builder
       - name: Pull Docker image
         run: |
           retry () {
@@ -10386,7 +10683,7 @@ jobs:
           name: manywheel-py3_10-rocm4_3_1
           path: "${{ runner.temp }}/artifacts/"
       - name: Set DRY_RUN (only for tagged pushes)
-        if: ${{ github.event_name == 'push' && startsWith(github.event.ref, 'refs/tags/')}}
+        if: ${{ github.event_name == 'push' && (github.event.ref == 'refs/heads/nightly' || startsWith(github.event.ref, 'refs/tags/'))}}
         run: |
           echo "DRY_RUN=disabled" >> "$GITHUB_ENV"
       - name: Set UPLOAD_CHANNEL (only for tagged pushes)
@@ -10494,16 +10791,27 @@ jobs:
       - name: Preserve github env variables for use in docker
         run: |
           env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
-      - name: Clone pytorch/pytorch
-        uses: actions/checkout@v2
+      - name: Checkout PyTorch
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
-          path: pytorch
           submodules: recursive
-      - name: Clone pytorch/builder
-        uses: actions/checkout@v2
+          path: pytorch
+      - name: Clean PyTorch checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: pytorch
+      - name: Checkout pytorch/builder
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
+          submodules: recursive
           repository: pytorch/builder
           path: builder
+      - name: Clean pytorch/builder checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: builder
       - name: Pull Docker image
         run: |
           retry () {
@@ -10767,7 +11075,7 @@ jobs:
           name: manywheel-py3_10-rocm4_5_2
           path: "${{ runner.temp }}/artifacts/"
       - name: Set DRY_RUN (only for tagged pushes)
-        if: ${{ github.event_name == 'push' && startsWith(github.event.ref, 'refs/tags/')}}
+        if: ${{ github.event_name == 'push' && (github.event.ref == 'refs/heads/nightly' || startsWith(github.event.ref, 'refs/tags/'))}}
         run: |
           echo "DRY_RUN=disabled" >> "$GITHUB_ENV"
       - name: Set UPLOAD_CHANNEL (only for tagged pushes)
