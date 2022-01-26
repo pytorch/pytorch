@@ -61,8 +61,8 @@ class Distribution(object):
                     )
         super(Distribution, self).__init__()
 
-    def __init_subclass__(cls, *args, **kwargs):
-        super().__init_subclass__(*args, **kwargs) # type: ignore
+    def __init_subclass__(cls):
+        super().__init_subclass__()
 
         # Automatically decorate icdf methods to apply sample validation if necessary
         def icdf_decorator(func):
