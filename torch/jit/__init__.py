@@ -211,5 +211,17 @@ def onednn_fusion_enabled():
     """
     return torch._C._jit_llga_enabled()
 
+def enable_onednn_graph_weight_cache(enabled: bool):
+    """
+    Enables or disables oneDNN Graph weight cache based on the parameter `enabled`.
+    """
+    torch._C._jit_set_llga_weight_cache_enabled(enabled)
+
+def is_onednn_graph_weight_cache_enabled():
+    """
+    Returns whether oneDNN Graph weight cache is enabled.
+    """
+    return torch._C._jit_llga_weight_cache_enabled()
+
 if not torch._C._jit_init():
     raise RuntimeError("JIT initialization failed")

@@ -5,6 +5,7 @@
 #include <torch/csrc/jit/backends/backend_init.h>
 #include <torch/csrc/jit/codegen/cuda/interface.h>
 #include <torch/csrc/jit/codegen/fuser/interface.h>
+#include <torch/csrc/jit/codegen/onednn/interface.h>
 #include <torch/csrc/jit/codegen/fuser/kernel_cache.h>
 #include <torch/csrc/jit/frontend/ir_emitter.h>
 #include <torch/csrc/jit/frontend/tracer.h>
@@ -45,7 +46,6 @@
 #include <torch/csrc/jit/passes/lower_tuples.h>
 #include <torch/csrc/jit/passes/metal_rewrite.h>
 #include <torch/csrc/jit/passes/normalize_ops.h>
-#include <torch/csrc/jit/passes/onednn_graph_fuser.h>
 #include <torch/csrc/jit/passes/onnx.h>
 #include <torch/csrc/jit/passes/onnx/cast_all_constant_to_floating.h>
 #include <torch/csrc/jit/passes/onnx/constant_fold.h>
@@ -724,6 +724,10 @@ void initJITBindings(PyObject* module) {
       .def("_jit_nvfuser_enabled", &RegisterCudaFuseGraph::isRegistered)
       .def("_jit_set_llga_enabled", &RegisterLlgaFuseGraph::setEnabled)
       .def("_jit_llga_enabled", &RegisterLlgaFuseGraph::isEnabled)
+      .def("_jit_set_llga_weight_cache_enabled",
+           &torch::jit::fuser::onednn::setLlgaWeightCacheEnabled)
+      .def("_jit_llga_weight_cache_enabled",
+           &torch::jit::fuser::onednn::getLlgaWeightCacheEnabled)
       .def(
           "_jit_set_profiling_mode",
           [](bool profiling_flag) {
