@@ -379,6 +379,30 @@ def no_batch_dim_reference_rnn_gru(m, p, *args, **kwargs):
         return (output[0].squeeze(batch_dim), output[1].squeeze(1))
 
 
+def no_batch_dim_reference_lstm(m, p, *args, **kwargs):
+    """Reference function for LSTM supporting no batch dimensions.
+
+    Unbatched inputs are unsqueezed to form a
+    single batch input before passing them to the module.
+    The output is squeezed to compare with the
+    output of unbatched input to the module.
+    """
+    if len(args) == 1:
+        inp, = args
+        h = None
+    elif len(args) == 2:
+        inp, h = args
+        h = (h[0].unsqueeze(1), h[1].unsqueeze(1))
+
+    batch_dim = 0 if kwargs['batch_first'] else 1
+    kwargs.pop('batch_first')
+    inp = inp.unsqueeze(batch_dim)
+    single_batch_input_args = (inp, h)
+    with freeze_rng_state():
+        output = m(*single_batch_input_args, **kwargs)
+        return (output[0].squeeze(batch_dim), (output[1][0].squeeze(1), output[1][1].squeeze(1)))
+
+
 def no_batch_dim_reference_lstmcell(m, p, *args, **kwargs):
     """Reference function for LSTMCell supporting no batch dimensions.
 
@@ -901,6 +925,72 @@ def module_inputs_torch_nn_RNN_GRU(module_info, device, dtype, requires_grad, **
     return samples
 
 
+def module_inputs_torch_nn_LSTM(module_info, device, dtype, requires_grad, **kwargs):
+    # Currently all samples below are for validating the no-batch-dim support.
+    make_input = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+    bias = (False, True)
+    batch_first = (False, True)
+    bidirectional = (False, True)
+    proj_sizes = (0, 2)
+
+    samples = []
+    prod_gen = product(bias, batch_first, bidirectional, proj_sizes)
+
+    for args in prod_gen:
+        b, b_f, bidir, proj_size = args
+        hidden_size = 3
+        cons_args = {'input_size': 2, 'hidden_size': hidden_size, 'num_layers': 2, 'proj_size': proj_size,
+                     'batch_first': b_f, 'bias': b, 'bidirectional': bidir}
+        cons_args_hidden = {'input_size': 2, 'hidden_size': hidden_size, 'num_layers': 2, 'proj_size': proj_size,
+                            'batch_first': b_f, 'bias': b, 'bidirectional': bidir}
+
+        samples.append(
+            ModuleInput(
+                constructor_input=FunctionInput(**cons_args),
+                forward_input=FunctionInput(make_input((2, 2))),
+                reference_fn=partial(no_batch_dim_reference_lstm, batch_first=b_f),
+            )
+        )
+
+        h_out = proj_size if proj_size > 0 else hidden_size
+        hx = (make_input((4 if bidir else 2, h_out)), make_input((4 if bidir else 2, hidden_size)))
+        samples.append(
+            ModuleInput(
+                constructor_input=FunctionInput(**cons_args_hidden),
+                forward_input=FunctionInput(make_input((3, 2)), hx),
+                reference_fn=partial(no_batch_dim_reference_lstm, batch_first=b_f),
+            )
+        )
+
+    return samples
+
+
+# All these operators share similar issues on cuDNN and MIOpen
+rnn_gru_lstm_module_info_decorators = (
+    # RuntimeError: Batching rule not implemented for aten::_cudnn_rnn_backward.
+    # We could not generate a fallback
+    DecorateInfo(
+        unittest.expectedFailure, "TestModule", "test_grad",
+        active_if=(TEST_CUDNN and not TEST_WITH_ROCM), device_type='cuda'
+    ),
+    # NotImplementedError: the derivative for '_cudnn_rnn_backward' is not implemented.
+    # Double backwards is not supported for CuDNN RNNs due to limitations in the CuDNN API
+    DecorateInfo(
+        unittest.expectedFailure, "TestModule", "test_gradgrad",
+        active_if=(TEST_CUDNN and not TEST_WITH_ROCM), device_type='cuda'
+    ),
+    # CUDNN GRU doesn't accept non-contiguous hx
+    DecorateInfo(
+        unittest.expectedFailure, "TestModule", "test_non_contiguous_tensors",
+        active_if=(TEST_CUDNN and not TEST_WITH_ROCM), device_type='cuda'
+    ),
+    # MIOPEN GRU doesn't accept non-contiguous hx (this is dispatched to miopen only for float).
+    DecorateInfo(
+        unittest.expectedFailure, "TestModule", "test_non_contiguous_tensors",
+        active_if=(TEST_CUDNN and TEST_WITH_ROCM), dtypes=(torch.float,), device_type='cuda'
+    ),
+)
+
 # Database of ModuleInfo entries in alphabetical order.
 module_db: List[ModuleInfo] = [
     ModuleInfo(torch.nn.AdaptiveAvgPool2d,
@@ -1192,55 +1282,12 @@ module_db: List[ModuleInfo] = [
                module_inputs_func=module_inputs_torch_nn_Sigmoid),
     ModuleInfo(torch.nn.RNN,
                module_inputs_func=partial(module_inputs_torch_nn_RNN_GRU, is_rnn=True),
-               decorators=(
-                   # RuntimeError: Batching rule not implemented for aten::_cudnn_rnn_backward.
-                   # We could not generate a fallback
-                   DecorateInfo(
-                       unittest.expectedFailure, "TestModule", "test_grad",
-                       active_if=(TEST_CUDNN and not TEST_WITH_ROCM), device_type='cuda'
-                   ),
-                   # NotImplementedError: the derivative for '_cudnn_rnn_backward' is not implemented.
-                   # Double backwards is not supported for CuDNN RNNs due to limitations in the CuDNN API
-                   DecorateInfo(
-                       unittest.expectedFailure, "TestModule", "test_gradgrad",
-                       active_if=(TEST_CUDNN and not TEST_WITH_ROCM), device_type='cuda'
-                   ),
-                   # CUDNN RNN doesn't accept non-contiguous hx
-                   DecorateInfo(
-                       unittest.expectedFailure, "TestModule", "test_non_contiguous_tensors",
-                       active_if=(TEST_CUDNN and not TEST_WITH_ROCM), device_type='cuda'
-                   ),
-                   # MIOPEN RNN doesn't accept non-contiguous hx (this is dispatched to miopen only for float).
-                   DecorateInfo(
-                       unittest.expectedFailure, "TestModule", "test_non_contiguous_tensors",
-                       active_if=(TEST_CUDNN and TEST_WITH_ROCM), dtypes=(torch.float,), device_type='cuda'
-                   ),
-               )
+               decorators=rnn_gru_lstm_module_info_decorators
                ),
     ModuleInfo(torch.nn.GRU,
                module_inputs_func=partial(module_inputs_torch_nn_RNN_GRU, is_rnn=False),
-               decorators=(
-                   # RuntimeError: Batching rule not implemented for aten::_cudnn_rnn_backward.
-                   # We could not generate a fallback
-                   DecorateInfo(
-                       unittest.expectedFailure, "TestModule", "test_grad",
-                       active_if=(TEST_CUDNN and not TEST_WITH_ROCM), device_type='cuda'
-                   ),
-                   # NotImplementedError: the derivative for '_cudnn_rnn_backward' is not implemented.
-                   # Double backwards is not supported for CuDNN RNNs due to limitations in the CuDNN API
-                   DecorateInfo(
-                       unittest.expectedFailure, "TestModule", "test_gradgrad",
-                       active_if=(TEST_CUDNN and not TEST_WITH_ROCM), device_type='cuda'
-                   ),
-                   # CUDNN GRU doesn't accept non-contiguous hx
-                   DecorateInfo(
-                       unittest.expectedFailure, "TestModule", "test_non_contiguous_tensors",
-                       active_if=(TEST_CUDNN and not TEST_WITH_ROCM), device_type='cuda'
-                   ),
-                   # MIOPEN GRU doesn't accept non-contiguous hx (this is dispatched to miopen only for float).
-                   DecorateInfo(
-                       unittest.expectedFailure, "TestModule", "test_non_contiguous_tensors",
-                       active_if=(TEST_CUDNN and TEST_WITH_ROCM), dtypes=(torch.float,), device_type='cuda'
-                   ),
-               ))
+               decorators=rnn_gru_lstm_module_info_decorators),
+    ModuleInfo(torch.nn.LSTM,
+               module_inputs_func=module_inputs_torch_nn_LSTM,
+               decorators=rnn_gru_lstm_module_info_decorators)
 ]
