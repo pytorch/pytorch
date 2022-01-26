@@ -836,10 +836,13 @@ grid_sampler_2d_backward_cuda(const Tensor& grad_output, const Tensor& input,
   // is always computed.)
   auto input_requires_grad = output_mask[0];
 
-  Tensor grad_input;
-  if (input_requires_grad) {
-    grad_input = at::zeros_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
-  }
+  Tensor grad_input = ([&]() {
+    if (input_requires_grad) {
+      return at::zeros_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+    } else {
+      return Tensor();
+    }
+  })();
   auto grad_grid = at::empty_like(grid, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   int64_t count = N * H * W;
   if (count > 0) {
@@ -896,10 +899,13 @@ grid_sampler_3d_backward_cuda(const Tensor& grad_output, const Tensor& input,
   auto W = grid.size(3);
 
   auto input_requires_grad = output_mask[0];
-  Tensor grad_input;
-  if (input_requires_grad) {
-    grad_input = at::zeros_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
-  }
+  Tensor grad_input = ([&]() {
+    if (input_requires_grad) {
+      return at::zeros_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+    } else {
+      return Tensor();
+    }
+  })();
   auto grad_grid = at::empty_like(grid, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   int64_t count = N * D * H * W;
   if (count > 0) {
