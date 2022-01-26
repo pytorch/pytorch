@@ -23,7 +23,6 @@ static C10_UNUSED at::Tensor to_dispatch(
     c10::optional<at::ScalarType> scalarType,
     bool non_blocking,
     bool copy) {
-  std::cout << "to_dispatch" << std::endl;
   if (device && device->is_cuda()) {
     at::globalContext().lazyInitCUDA();
   }

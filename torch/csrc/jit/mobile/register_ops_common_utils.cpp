@@ -6,7 +6,6 @@ namespace torch {
 namespace jit {
 
 int64_t normalizeIndex(int64_t idx, int64_t list_size) {
-  std::cout << "normalizeIndex" << std::endl;
   if (idx < 0) {
     // Handle negative indexing
     idx = list_size + idx;
@@ -24,7 +23,6 @@ IValue tensorToListRecursive(
     at::IntArrayRef strides,
     size_t element_size) {
   // If ty is a ListType, get the element type.
-  std::cout << "tensorToListRecursive" << std::endl;
   if (auto list_type = ty->cast<at::ListType>()) {
     ty = list_type->getElementType();
   } else {
