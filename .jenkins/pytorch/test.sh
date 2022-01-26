@@ -435,9 +435,9 @@ test_xla() {
   CMAKE_PREFIX_PATH="${SITE_PACKAGES}/torch:${CMAKE_PREFIX_PATH}" run_torch_xla_tests "$(pwd)" "$(pwd)/xla" || true
   XLA_ARTIFACT_PATH="${CUSTOM_TEST_ARTIFACT_BUILD_DIR}" || true
   cp -a "$(pwd)/xla/tmp/pytorch_py_test.log" "$XLA_ARTIFACT_PATH" || true
-  cp -a "$(pwd)/xla/tmp/pytorch_py_test.log" "$XLA_ATRIFACT_PATH/custom-backend-build" || true
-  cp -a "$(pwd)/xla/tmp/pytorch_py_test.log" "$XLA_ATRIFACT_PATH/custom-op-build" || true
-  cp -a "$(pwd)/xla/tmp/pytorch_py_test.log" "$XLA_ATRIFACT_PATH/jit-hook-build" || true
+  cp -a "$(pwd)/xla/tmp/pytorch_py_test.log" "$XLA_ARTIFACT_PATH/custom-backend-build" || true
+  cp -a "$(pwd)/xla/tmp/pytorch_py_test.log" "$XLA_ARTIFACT_PATH/custom-op-build" || true
+  cp -a "$(pwd)/xla/tmp/pytorch_py_test.log" "$XLA_ARTIFACT_PATH/jit-hook-build" || true
   cat "$(pwd)/xla/tmp/pytorch_py_test.log" || true
   assert_git_not_dirty
 }
