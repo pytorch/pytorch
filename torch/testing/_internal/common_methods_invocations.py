@@ -8518,8 +8518,8 @@ op_db: List[OpInfo] = [
            sample_inputs_func=partial(sample_inputs_addmm, alpha=1, beta=1),
            skips=(
                # https://github.com/pytorch/pytorch/issues/71784
-               DecorateInfo(unittest.skip('Skipped!'), 'TestNNCOpInfo','test_nnc_correctness',
-                            device_type='cpu',dtypes=(torch.float16,)),
+               DecorateInfo(unittest.skip('Skipped!'), 'TestNNCOpInfo', 'test_nnc_correctness',
+                            device_type='cpu', dtypes=(torch.float16,)),
            )),
     OpInfo('addmv',
            dtypes=all_types_and_complex_and(torch.bfloat16),
@@ -10064,8 +10064,8 @@ op_db: List[OpInfo] = [
                # AssertionError: False is not true : Tensors failed to compare as equal!
                DecorateInfo(unittest.expectedFailure, 'TestOpInfo', device_type='xla', dtypes=(torch.long,)),
                # https://github.com/pytorch/pytorch/issues/71774
-               DecorateInfo(unittest.skip('Skipped!'), 'TestNNCOpInfo','test_nnc_correctness',
-                            device_type='cpu',dtypes=(torch.long,)),
+               DecorateInfo(unittest.skip('Skipped!'), 'TestNNCOpInfo', 'test_nnc_correctness',
+                            device_type='cpu', dtypes=(torch.long,)),
            )),
     OpInfo('linalg.norm',
            op=torch.linalg.norm,
@@ -10386,8 +10386,8 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.expectedFailure, 'TestOpInfo',
                             device_type='xla', dtypes=(torch.long,)),
                # https://github.com/pytorch/pytorch/issues/71774
-               DecorateInfo(unittest.skip('Skipped!'), 'TestNNCOpInfo','test_nnc_correctness',
-                            device_type='cpu',dtypes=(torch.long,)),
+               DecorateInfo(unittest.skip('Skipped!'), 'TestNNCOpInfo', 'test_nnc_correctness',
+                            device_type='cpu', dtypes=(torch.long,)),
            )),
     OpInfo('max',
            variant_test_name='reduction_with_dim',
@@ -12319,8 +12319,8 @@ op_db: List[OpInfo] = [
                # AssertionError: False is not true : Tensors failed to compare as equal
                DecorateInfo(unittest.expectedFailure, 'TestOpInfo', device_type='xla', dtypes=(torch.long,)),
                # https://github.com/pytorch/pytorch/issues/71774
-               DecorateInfo(unittest.skip('Skipped!'), 'TestNNCOpInfo','test_nnc_correctness',
-                            device_type='cpu',dtypes=(torch.long,)),
+               DecorateInfo(unittest.skip('Skipped!'), 'TestNNCOpInfo', 'test_nnc_correctness',
+                            device_type='cpu', dtypes=(torch.long,)),
            ),
            skips=(
                # RuntimeError:
