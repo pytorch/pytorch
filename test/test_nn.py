@@ -10399,17 +10399,13 @@ class TestNN(NNTestCase):
                     W = random.randint(2, 8)
                     input = torch.randn(N, C, H, W, requires_grad=True)
                     grid = torch.randn(N, H, W, 2, requires_grad=True)
-                    self.assertTrue(gradcheck(
-                        lambda inp, grid: F.grid_sample(inp, grid, mode=mode, padding_mode=padding_mode,
-                                                        align_corners=align_corners),
-                        (input, grid)))
-                    input = input.requires_grad_(False)
-                    self.assertTrue(gradcheck(
-                        lambda grid: F.grid_sample(input, grid, mode=mode, padding_mode=padding_mode,
-                                                   align_corners=align_corners),
-                        (grid,)))
 
                     for input_requires_grad in [False, True]:
+                        input.requires_grad_(input_requires_grad)
+                        self.assertTrue(gradcheck(
+                            lambda inp, grd: F.grid_sample(inp, grd, mode=mode, padding_mode=padding_mode,
+                                                           align_corners=align_corners),
+                            (input, grid)))
                         test(N, C, H, W, mode, padding_mode, align_corners, input_requires_grad)
                         if TEST_CUDNN:
                             with cudnn.flags(enabled=False):
