@@ -6,7 +6,7 @@ from typing import Any, Dict, List
 
 import torch
 from tools.codegen.code_template import CodeTemplate
-from torch.jit.operator_upgraders import generate_bytecode
+from torch.jit.generate_bytecode import generate_bytecode
 
 class ByteCode(Enum):
     instructions = 1
@@ -101,13 +101,11 @@ UPGRADER_CPP_SRC = CodeTemplate("""/**
  * cd ~/pytorch && python torch/csrc/jit/mobile/upgrader_mobile.cpp
  */
 
-#include <caffe2/serialize/versions.h>
 #include <torch/csrc/jit/mobile/upgrader_mobile.h>
-#include <ATen/core/ivalue.h>
 
-namespace c10 {
-TypePtr parseType(const std::string& pythonStr);
-} // namespace c10
+#include <ATen/core/ivalue.h>
+#include <caffe2/serialize/versions.h>
+#include <torch/csrc/jit/mobile/type_parser.h>
 
 namespace torch {
 namespace jit {
