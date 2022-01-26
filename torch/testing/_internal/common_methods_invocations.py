@@ -14569,7 +14569,6 @@ op_db: List[OpInfo] = [
                          device_type='cuda', dtypes=[torch.float64],),
             # Op implemented with a lambda, see similar issue: https://github.com/pytorch/pytorch/issues/64997
             DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),),
-                         device_type='cuda', dtypes=[torch.float64]),),
         gradcheck_wrapper=wrapper_set_seed,
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
