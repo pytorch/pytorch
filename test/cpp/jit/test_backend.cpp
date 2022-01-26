@@ -187,6 +187,27 @@ TEST(BackendTest, TestComposite) {
   AT_ASSERT(res_jit.toTensor().equal(res_mobile.toTensor()));
 }
 
+TEST(BackendTest, TestPrimDtype) {
+  Module c("name");
+  c.define(R"(
+    def forward(self, x, y):
+      c = y.dtype
+      return c
+  )");
+
+  std::vector<IValue> inputs;
+  inputs.emplace_back(3.0 * torch::ones({}));
+  inputs.emplace_back(1.0 * torch::ones({}));
+  auto res_jit = c.forward(inputs);
+
+  std::stringstream ss;
+  c._save_for_mobile(ss);
+  auto mc = _load_for_mobile(ss);
+  auto res_mobile = mc.forward(inputs);
+
+  ASSERT_EQ(res_jit.toInt(), res_mobile.toInt());
+}
+
 Module getCompositeModuleWithSameNameSubModules() {
   // Two submodules with same module name but different forward and other
   // functions should be serialized and loaded correctly.
