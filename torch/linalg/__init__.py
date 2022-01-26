@@ -817,6 +817,7 @@ ldl_factor_ex = _add_docstr(_linalg.linalg_ldl_factor_ex, r"""
 linalg.ldl_factor_ex(A, *, upper=False, hermitian=False, check_errors=False, out=None) -> (Tensor, Tensor, Tensor)
 
 Computes the LDL decomposition of a Hermitian/symmetric indefinite matrix.
+
 When :attr:`A` is complex valued it can be Hermitian (:attr:`hermitian` = `True`)
 or symmetric (:attr:`hermitian` = `False`).
 
