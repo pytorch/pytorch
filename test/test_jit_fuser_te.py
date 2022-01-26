@@ -2110,7 +2110,7 @@ class TestTEFuser(JitTestCase):
             lambda n: R(n, n + 1, n + 2, n + 3).to(memory_format=torch.channels_last),
         )
 
-        with texpr_dynamic_enabled():
+        with texpr_enable_strategy([("DYNAMIC", 20)]):
             def foo(x, y, z):
                 return torch.sigmoid(torch.tanh(x))
 
