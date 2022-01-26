@@ -36,7 +36,6 @@ env:
   IS_GHA: 1
   IOS_PLATFORM: !{{ ios_platform }}
   IOS_ARCH: !{{ ios_arch }}
-  PYTHON_VERSION: 3.8
 !{{ common.set_xcode_version(xcode_version) }}
 
 jobs:
@@ -57,12 +56,6 @@ jobs:
       - name: print labels
         run: echo "${PR_LABELS}"
       !{{ common.checkout() }}
-      - name: Setup ruby
-        uses: ruby/setup-ruby@v1
-        with:
-          ruby-version: 2.6
-          bundler-cache: true
-          working-directory: ios/TestApp/
       - name: Populate CI build options
         run: |
           # Most builds use the lite interpreter, if certain builds shouldn't
@@ -112,7 +105,7 @@ jobs:
           set -x
           cd ios/TestApp
           # install fastlane
-          gem install bundler && bundle install
+          sudo gem install bundler && bundle install
           # install certificates
           echo "${IOS_CERT_KEY_2022}" >> cert.txt
           base64 --decode cert.txt -o Certificates.p12

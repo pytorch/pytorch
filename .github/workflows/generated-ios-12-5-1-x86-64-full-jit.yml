@@ -21,7 +21,6 @@ env:
   IS_GHA: 1
   IOS_PLATFORM: SIMULATOR
   IOS_ARCH: x86_64
-  PYTHON_VERSION: 3.8
 
 
 jobs:
@@ -51,12 +50,6 @@ jobs:
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
-      - name: Setup ruby
-        uses: ruby/setup-ruby@v1
-        with:
-          ruby-version: 2.6
-          bundler-cache: true
-          working-directory: ios/TestApp/
       - name: Populate CI build options
         run: |
           # Most builds use the lite interpreter, if certain builds shouldn't
@@ -106,7 +99,7 @@ jobs:
           set -x
           cd ios/TestApp
           # install fastlane
-          gem install bundler && bundle install
+          sudo gem install bundler && bundle install
           # install certificates
           echo "${IOS_CERT_KEY_2022}" >> cert.txt
           base64 --decode cert.txt -o Certificates.p12
