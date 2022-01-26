@@ -540,11 +540,11 @@ namespace {
     index_t gOut_sH = grad_output.strides[3];
     index_t gOut_sW = grad_output.strides[4];
     // gInp_* (and NC_offset below) are not really needed if input_requires_grad is false.
-    index_t gInp_sN;
-    index_t gInp_sC;
-    index_t gInp_sD;
-    index_t gInp_sH;
-    index_t gInp_sW;
+    int64_t gInp_sN = 0;
+    int64_t gInp_sC = 0;
+    int64_t gInp_sD = 0;
+    int64_t gInp_sH = 0;
+    int64_t gInp_sW = 0;
     if (input_requires_grad) {
       gInp_sN = grad_input.strides[0];
       gInp_sC = grad_input.strides[1];
@@ -626,7 +626,7 @@ namespace {
         }
         scalar_t *inp_ptr_NC = input.data + n * inp_sN;
         // calculate bilinear weighted pixel value and set output pixel
-        for (index_t c = 0; c < C; ++c, gOut_ptr_NCDHW += gOut_sC, NC_offset += input_requires_grad ? gInp_sC : 0, inp_ptr_NC += inp_sC) {
+        for (index_t c = 0; c < C; ++c, gOut_ptr_NCDHW += gOut_sC, NC_offset += gInp_sC, inp_ptr_NC += inp_sC) {
           scalar_t gOut = *gOut_ptr_NCDHW;
 
           // calculate and set grad_input. See Note [Passing pointer and offset to fastAtomicAdd].
