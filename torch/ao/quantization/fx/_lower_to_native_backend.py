@@ -89,7 +89,8 @@ def special_pattern_replacement(model: QuantizedGraphModule) -> QuantizedGraphMo
             # get output scale/zero_point/dtype from the quantize node
             ref_node, scale_node, zero_point_node, dtype = q_node.args
 
-            is_supported_call_function, is_supported_call_method, is_supported_call_module = is_flow_supported_ops(ref_node, modules)
+            is_supported_call_function, is_supported_call_method, \
+                is_supported_call_module = is_flow_supported_ops(ref_node, modules)
             if is_supported_call_function or is_supported_call_method or is_supported_call_module:
                 dq_node = ref_node.args[0]
                 if dq_node.target == 'dequantize':
