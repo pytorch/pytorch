@@ -51,6 +51,7 @@ requirements = [
 extras = {}
 extras["aot"] = ["networkx", ]
 
+
 class clean(distutils.command.clean.clean):
     def run(self):
         with open(".gitignore", "r") as f:
