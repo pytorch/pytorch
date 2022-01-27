@@ -1,5 +1,4 @@
-# Generates CodegenUnboxingWrappers.cpp.
-# This generates static unboxing wrapper for ATen ops.
+# Generates RegisterCodegenUnboxedKernels.cpp, UnboxingFunctions.h and UnboxingFunctions.cpp.
 import argparse
 import json
 import os
@@ -17,7 +16,7 @@ from tools.codegen.model import NativeFunction, NativeFunctionsGroup, Variant
 from tools.codegen.utils import Target, FileManager, mapMaybe, make_file_manager
 
 
-# Generates CodegenFunctions.h & CodegenFunctions.cpp.
+# Generates UnboxingFunctions.h & UnboxingFunctions.cpp.
 @dataclass(frozen=True)
 class ComputeUnboxingFunctions:
     target: Union[Literal[Target.DECLARATION], Literal[Target.DEFINITION]]
@@ -83,9 +82,9 @@ TORCH_API void {f.func.name.unambiguous_name()}(Stack & stack) {{
 }}
 """
 
-
+# Generates RegisterCodegenUnboxedKernels.cpp.
 @dataclass(frozen=True)
-class ComputeUnboxingWrapper:
+class ComputeCodegenUnboxedKernels:
     @method_with_native_function
     def __call__(self, f: NativeFunction) -> str:
         # We unconditionally generate function wrappers,
@@ -140,7 +139,7 @@ def gen_unboxing(
         "RegisterCodegenUnboxedKernels.cpp",
         native_functions,
         key_fn=key_func,
-        env_callable=lambda fn: {"unboxed_ops": [ComputeUnboxingWrapper()(fn)]},
+        env_callable=lambda fn: {"unboxed_ops": [ComputeCodegenUnboxedKernels()(fn)]},
         num_shards=5,
         sharded_keys={"unboxed_ops"},
     )
