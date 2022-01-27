@@ -70,6 +70,27 @@ class TestVulkanRewritePass(TestCase):
                 source_range = node.sourceRange()
         return source_range
 
+    def validate_rewrite(
+        self, 
+        scripted_model: torch.ScriptModule, 
+        pattern_count_map: Dict[str, int],
+    ) -> None:
+        buffer = io.BytesIO()
+        torch.jit.save(scripted_model, buffer)
+        buffer.seek(0)
+        deserialized_scripted_model = torch.jit.load(buffer)
+        for pattern, v in pattern_count_map.items():
+            FileCheck().check_count(pattern, v, exactly=True).run(deserialized_scripted_model.graph)
+
+    def evaluate_model(
+        self, 
+        scripted_model: torch.ScriptModule,
+        data_shape: Tuple[int, int, int, int],
+    ) -> None:
+        scripted_model.eval()
+        input_data = torch.normal(1, 20, size=data_shape)
+        ref_result = scripted_model(input_data)
+
     def validate_transformed_module(
             self,
             model: torch.nn.Module,
@@ -87,10 +108,10 @@ class TestVulkanRewritePass(TestCase):
             new_source_ranges = len(new_node_kinds) * [None]
             for i in range(len(old_node_kinds)):
                 old_source_ranges[i] = self.get_source_range(scripted_model, old_node_kinds[i])
+
         # evaluate non-rewritten model
-        scripted_model.eval()
-        input_data = torch.normal(1, 20, size=data_shape)
-        ref_result = scripted_model(input_data)
+        self.evaluate_model(scripted_model, data_shape)
+
         # rewrite model
         torch._C._jit_pass_vulkan_insert_prepacked_ops(scripted_model._c)
         if fuse_clamping_ops or prepack_removal:
@@ -99,21 +120,17 @@ class TestVulkanRewritePass(TestCase):
             torch._C._jit_pass_vulkan_fuse_clamp_w_prepacked_conv(scripted_model._c)
         if prepack_removal:
             torch._C._jit_pass_vulkan_fold_prepacking_ops(scripted_model._c)
+
         # validate source ranges
         if old_node_kinds or new_node_kinds:
             for i in range(len(old_node_kinds)):
                 new_source_ranges[i] = self.get_source_range(scripted_model, new_node_kinds[i])
             for i in range(len(old_node_kinds)):
                 self.assertTrue(old_source_ranges[i] == new_source_ranges[i])
-        # validate rewrite
-        buffer = io.BytesIO()
-        torch.jit.save(scripted_model, buffer)
-        buffer.seek(0)
-        deserialized_scripted_model = torch.jit.load(buffer)
-        for pattern, v in pattern_count_map.items():
-            FileCheck().check_count(pattern, v, exactly=True).run(deserialized_scripted_model.graph)
+        self.validate_rewrite(scripted_model, pattern_count_map)
 
-        # TODO: evaluate rewritten model
+        # evaluate rewritten model
+        self.evaluate_model(scripted_model, data_shape)
 
     def test_conv2d_rewrite(self) -> None:
         model = ExampleConv2D()
