@@ -68,24 +68,24 @@ class PackageImporter(Importer):
         self.zip_reader: Any
         self.directory_name = 'archive'
         if isinstance(file_or_buffer, torch._C.PyTorchFileReader):
-            print("isinstance(file_or_buffer, torch._C.PyTorchFileReader)")
+            # print("isinstance(file_or_buffer, torch._C.PyTorchFileReader)")
             self.filename = "<pytorch_file_reader>"
             self.zip_reader = file_or_buffer
         elif isinstance(file_or_buffer, (Path, str)):
-            print("isinstance(file_or_buffer, (Path, str))")
+            # print("isinstance(file_or_buffer, (Path, str))")
             self.filename = str(file_or_buffer)
             if not os.path.isdir(self.filename):
-                print("      and a zip file")
+                # print("      and a zip file")
                 self.zip_reader = zipfile.ZipFile(self.filename, 'r')
             else:
-                print("      and a directory")
+                # print("      and a directory")
                 self.zip_reader = DirectoryReader(self.filename, 'r')
         else:
-            print(f"else - {file_or_buffer}")
+            # print(f"else - {file_or_buffer}")
             self.filename = "<binary>"
             self.zip_reader = zipfile.ZipFile(file_or_buffer)
-        print(self.zip_reader.namelist())
-        print(self.zip_reader.filename)
+        # print(self.zip_reader.namelist())
+        # print(self.zip_reader.filename)
         self.root = _PackageNode(None)
         self.modules = {}
         self.extern_modules = self._read_extern()
@@ -349,10 +349,7 @@ class PackageImporter(Importer):
 
     def _load_module(self, name: str, parent: str):
         cur: _PathNode = self.root
-        print(name)
         for atom in name.split("."):
-            print(atom)
-            print(cur.children)
             if not isinstance(cur, _PackageNode) or atom not in cur.children:
                 raise ModuleNotFoundError(
                     f'No module named "{name}" in self-contained archive "{self.filename}"'
@@ -553,7 +550,6 @@ class PackageImporter(Importer):
         self, atoms: List[str]
     ) -> "Union[_PackageNode, _ExternNode]":
         cur = self.root
-        print('atoms in get or create package - ', atoms)
         for i, atom in enumerate(atoms):
             node = cur.children.get(atom, None)
             if node is None:
@@ -592,7 +588,6 @@ class PackageImporter(Importer):
 
     def _add_extern(self, extern_name: str):
         *prefix, last = extern_name.split(".")
-        print('extern prefix - ', prefix)
         package = self._get_or_create_package(prefix)
         if isinstance(package, _ExternNode):
             return  # the shorter extern covers this extern case
