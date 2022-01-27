@@ -56,14 +56,29 @@ def gen_create_out_helper(backend_index: BackendIndex) -> List[str]:
         dispatch = str(backend_index.dispatch_key).lower()
         empty_impl = f"at::detail::empty_{dispatch}"
         empty_strided_impl = f"at::detail::empty_strided_{dispatch}"
+        runtime_quantized_check = ""
     elif backend_index.dispatch_key == DispatchKey.CompositeExplicitAutograd:
         empty_impl = "at::empty"
         empty_strided_impl = "at::empty_strided"
+        runtime_quantized_check = """\
+  if (isQIntType(typeMetaToScalarType(options.dtype()))) {{
+    // This dynamic check is mainly to improve error messages for structured operators
+    // that do not have a quantized kernel implementation.
+    // If the tensor is quantized then we can't call at::empty(), because quantized
+    // kernels have their own dedicated operator, and the empty call will fail.
+    // Instead, we'll create an undefined tensor and call the out= operator.
+    // If the out-of-place op doesn't have a quantized kernel (which is why we ended up here),
+    // then the out= variant of the op typically won't either, so we'll error out with
+    // a nicer error message, complaining that the out= operator doesn't have a quantized implementation.
+    return at::Tensor();
+  }}
+"""
     else:
         return []
 
     return [f"""
 Tensor create_out(IntArrayRef sizes, IntArrayRef strides, const TensorOptions &options) {{
+  {runtime_quantized_check}
   if (strides.empty()) {{
       return {empty_impl}(sizes, {empty_options});
   }} else {{
