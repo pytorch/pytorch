@@ -224,12 +224,13 @@ class TestAutoWrap(TestCase):
                 super().__init__()
                 self.lin = wrap(nn.Linear(5, 5), process_group=pg)
 
-        model = MyModel().cuda()
+        model = MyModel()
         with enable_wrap(wrapper_cls=FSDP, process_group=pg):
             model = wrap(model)
 
         self.assertTrue(isinstance(model, FSDP))
         self.assertFalse(isinstance(model.lin, FSDP))
+        self.assertTrue(isinstance(model.lin, nn.Linear))
 
     def test_wrap_override_defaults(self):
         new_process_group = DummyProcessGroup(rank=0, size=2)
