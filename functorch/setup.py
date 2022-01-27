@@ -54,6 +54,7 @@ extras["aot"] = ["networkx", ]
 
 class clean(distutils.command.clean.clean):
     def run(self):
+
         with open(".gitignore", "r") as f:
             ignores = f.read()
             for wildcard in filter(None, ignores.split("\n")):
