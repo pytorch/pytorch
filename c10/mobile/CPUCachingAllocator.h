@@ -5,7 +5,6 @@
 #include <memory>
 #include <mutex>
 
-#include <c10/core/CPUAllocator.h>
 #include <c10/util/Exception.h>
 #include <c10/util/SmallVector.h>
 #include <c10/util/flat_hash_map.h>
