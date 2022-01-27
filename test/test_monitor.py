@@ -5,6 +5,7 @@ from torch.testing._internal.common_utils import (
 )
 
 from datetime import timedelta, datetime
+import tempfile
 import time
 
 from torch.monitor import (
@@ -16,6 +17,7 @@ from torch.monitor import (
     register_event_handler,
     unregister_event_handler,
     Stat,
+    TensorboardEventHandler,
 )
 
 class TestMonitor(TestCase):
@@ -97,6 +99,60 @@ class TestMonitor(TestCase):
         unregister_event_handler(handle)
         log_event(e)
         self.assertEqual(len(events), 2)
+
+class TestMonitorTensorboard(TestCase):
+    def setUp(self):
+        global SummaryWriter, event_multiplexer
+        try:
+            from torch.utils.tensorboard import SummaryWriter
+            from tensorboard.backend.event_processing import (
+                plugin_event_multiplexer as event_multiplexer,
+            )
+        except ImportError:
+            return self.skipTest("Skip the test since TensorBoard is not installed")
+        self.temp_dirs = []
+
+    def create_summary_writer(self):
+        temp_dir = tempfile.TemporaryDirectory()  # noqa: P201
+        self.temp_dirs.append(temp_dir)
+        return SummaryWriter(temp_dir.name)
+
+    def tearDown(self):
+        # Remove directories created by SummaryWriter
+        for temp_dir in self.temp_dirs:
+            temp_dir.cleanup()
+
+    def test_event_handler(self):
+        with self.create_summary_writer() as w:
+            handle = register_event_handler(TensorboardEventHandler(w))
+
+            s = FixedCountStat(
+                "asdf",
+                (Aggregation.SUM, Aggregation.COUNT),
+                2,
+            )
+            for i in range(10):
+                s.add(i)
+            self.assertEqual(s.count, 0)
+
+            unregister_event_handler(handle)
+
+        mul = event_multiplexer.EventMultiplexer()
+        mul.AddRunsFromDirectory(self.temp_dirs[-1].name)
+        mul.Reload()
+        scalar_dict = mul.PluginRunToTagToContent("scalars")
+        raw_result = {
+            tag: mul.Tensors(run, tag)
+            for run, run_dict in scalar_dict.items()
+            for tag in run_dict
+        }
+        scalars = {
+            tag: [e.tensor_proto.float_val[0] for e in events] for tag, events in raw_result.items()
+        }
+        self.assertEqual(scalars, {
+            "asdf.sum": [1, 5, 9, 13, 17],
+            "asdf.count": [2, 2, 2, 2, 2],
+        })
 
 
 if __name__ == '__main__':
