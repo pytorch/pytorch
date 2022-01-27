@@ -1,7 +1,9 @@
+#include <ATen/core/class_type.h>
+
 #include <ATen/core/Dict.h>
 #include <ATen/core/Tensor.h>
 #include <ATen/core/function_schema.h>
-#include <ATen/core/jit_type.h>
+#include <ATen/core/ivalue.h>
 #include <c10/macros/Macros.h>
 #include <c10/util/irange.h>
 #include <ATen/core/grad_mode.h>
@@ -658,6 +660,33 @@ c10::optional<ClassType::Property> ClassType::getProperty(const std::string& nam
 void ClassType::addProperty(const std::string& name, torch::jit::Function* getter, torch::jit::Function* setter) {
   TORCH_INTERNAL_ASSERT(!getProperty(name), "Property named ", name, " already exists!");
   properties_.push_back({name, getter, setter});
+}
+
+c10::optional<size_t> ClassType::findConstantSlot(const std::string& name) const {
+  TORCH_CHECK(constantNames_.size() == constantValues_.size());
+  size_t slot = 0;
+  for (const auto& constant : constantNames_) {
+    if (name == constant) {
+      return slot;
+    }
+    slot++;
+  }
+  return c10::nullopt;
+}
+
+const std::string& ClassType::getConstantName(size_t slot) const {
+  TORCH_CHECK(constantNames_.size() == constantValues_.size());
+  TORCH_CHECK(slot < constantNames_.size());
+  return constantNames_[slot];
+}
+
+size_t ClassType::numConstants() const {
+  TORCH_INTERNAL_ASSERT(constantNames_.size() == constantValues_.size());
+  return constantNames_.size();
+}
+
+at::ArrayRef<IValue> ClassType::constantValues() const {
+  return constantValues_;
 }
 
 } // namespace c10

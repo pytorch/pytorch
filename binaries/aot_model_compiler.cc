@@ -100,7 +100,9 @@ int main(int argc, char** argv) {
   CAFFE_ENFORCE(!FLAGS_model_name.empty(), c10::UsageMessage());
   CAFFE_ENFORCE(!FLAGS_model_version.empty(), c10::UsageMessage());
   CAFFE_ENFORCE(!FLAGS_input_dims.empty(), c10::UsageMessage());
-  CAFFE_ENFORCE(split(';', FLAGS_input_dims).size() == split(';', FLAGS_input_types).size(),
+  CAFFE_ENFORCE(
+      split(';', FLAGS_input_dims).size() ==
+          split(';', FLAGS_input_types).size(),
       "Number of input_dims and input_types should be the same");
 
   std::string output_model_name = FLAGS_output_model;
