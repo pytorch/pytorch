@@ -112,6 +112,7 @@ namespace torch {
 namespace jit {
 
 // clang-format off
+
 // From operator_versions_map
 ${operator_version_map}
 
@@ -138,7 +139,6 @@ const std::vector<ByteCodeFunctionWithOperator>& getUpgraderBytecodeList() {
 
 } // namespace jit
 } // namespace torch
-
 """)
 
 UPGRADER_MOBILE_FILE_NAME = "upgrader_mobile.cpp"
