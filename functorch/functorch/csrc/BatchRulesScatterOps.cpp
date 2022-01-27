@@ -120,7 +120,7 @@ void index_put__batch_rule(
     optional<int64_t> values_bdim,
     bool accumulate) {
   if (!self_bdim.has_value()) {
-    vmapIncompatibleInplaceError("index_put");
+    vmapIncompatibleInplaceError("index_put_");
   }
   auto self_ = moveBatchDimToFront(self, self_bdim);
   auto values_ = moveBatchDimToFront(values, values_bdim);
