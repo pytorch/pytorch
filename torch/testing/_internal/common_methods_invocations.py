@@ -26,7 +26,8 @@ from torch.testing._internal.common_device_type import \
     (onlyCUDA, onlyNativeDeviceTypes, disablecuDNN, skipCUDAIf, skipCUDAIfNoMagma, skipCUDAIfNoMagmaAndNoCusolver,
      skipCUDAIfNoCusolver, skipCPUIfNoLapack, skipCPUIfNoFFT, skipCUDAIfRocm, precisionOverride,
      toleranceOverride, tol, has_cusolver)
-from torch.testing._internal.common_cuda import CUDA11OrLater, SM53OrLater, SM60OrLater, _get_torch_cuda_version
+from torch.testing._internal.common_cuda import \
+    (CUDA11OrLater, SM53OrLater, SM60OrLater, _get_torch_cuda_version, _get_magma_version)
 from torch.testing._internal.common_utils import \
     (is_iterable_of_tensors,
      random_symmetric_matrix, random_symmetric_psd_matrix,
@@ -5126,7 +5127,9 @@ def sample_inputs_linalg_ldl_factor(op_info, device, dtype, requires_grad=False)
     )  # zero batch of matrices
 
     # Hermitian inputs
-    if dtype.is_complex and (device.type == "cpu" or torch.cuda.has_magma):
+    # hermitian=True for complex inputs on CUDA is supported only with MAGMA 2.5.4+
+    magma_254_available = device.type == 'cuda' and _get_magma_version() >= (2, 5, 4)
+    if dtype.is_complex and (device.type == 'cpu' or magma_254_available):
         yield SampleInput(
             random_hermitian_pd_matrix(S, dtype=dtype, device=device),
             kwargs=dict(hermitian=True),
