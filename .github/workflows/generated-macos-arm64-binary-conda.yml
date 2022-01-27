@@ -53,7 +53,7 @@ jobs:
         run: |
           echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
           echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
-          echo "MAC_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
+          echo "MAC_PACKAGE_WORK_DIR=${RUNNER_TEMP}" >> "${GITHUB_ENV}"
       - name: Clone pytorch/pytorch
         uses: actions/checkout@v2
         with:
@@ -200,6 +200,7 @@ jobs:
       BUILDER_ROOT: ${{ github.workspace }}/builder
       PACKAGE_TYPE: conda
       SKIP_ALL_TESTS: 1
+      DESIRED_CUDA: cpu
       DESIRED_PYTHON: "3.9"
     steps:
       # NOTE: These environment variables are put here so that they can be applied on every job equally
@@ -210,7 +211,7 @@ jobs:
         run: |
           echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
           echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
-          echo "MAC_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
+          echo "MAC_PACKAGE_WORK_DIR=${RUNNER_TEMP}" >> "${GITHUB_ENV}"
       - name: Clone pytorch/pytorch
         uses: actions/checkout@v2
         with:
@@ -245,6 +246,7 @@ jobs:
       BUILDER_ROOT: ${{ github.workspace }}/builder
       PACKAGE_TYPE: conda
       SKIP_ALL_TESTS: 1
+      DESIRED_CUDA: cpu
       DESIRED_PYTHON: "3.9"
     steps:
       - name: Display EC2 information
@@ -356,6 +358,7 @@ jobs:
       BUILDER_ROOT: ${{ github.workspace }}/builder
       PACKAGE_TYPE: conda
       SKIP_ALL_TESTS: 1
+      DESIRED_CUDA: cpu
       DESIRED_PYTHON: "3.10"
     steps:
       # NOTE: These environment variables are put here so that they can be applied on every job equally
@@ -366,7 +369,7 @@ jobs:
         run: |
           echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
           echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
-          echo "MAC_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
+          echo "MAC_PACKAGE_WORK_DIR=${RUNNER_TEMP}" >> "${GITHUB_ENV}"
       - name: Clone pytorch/pytorch
         uses: actions/checkout@v2
         with:
@@ -401,6 +404,7 @@ jobs:
       BUILDER_ROOT: ${{ github.workspace }}/builder
       PACKAGE_TYPE: conda
       SKIP_ALL_TESTS: 1
+      DESIRED_CUDA: cpu
       DESIRED_PYTHON: "3.10"
     steps:
       - name: Display EC2 information
