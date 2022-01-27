@@ -1329,8 +1329,7 @@ Tensor scatter_reduce_two_cpu(const Tensor& self,
     auto index_cont = index.contiguous();
     auto self_data = self_cont.data_ptr<scalar_t>();
     auto index_data = index_cont.data_ptr<int64_t>();
-    bool out_is_contiguous = out.is_contiguous();
-    auto out_cont = out.contiguous();
+    auto out_cont = out;
     auto out_cont_data = out_cont.data_ptr<scalar_t>();
 
     auto counts = at::zeros_like(out_cont);
@@ -1359,7 +1358,7 @@ Tensor scatter_reduce_two_cpu(const Tensor& self,
             out_cont_data[ind] *= value;
           } else if (reduce == "mean") {
             auto n = counts_data[ind];
-            out_cont_data[ind] = (out_cont_data[ind] * n + value) / (n + 1);
+            out_cont_data[ind] = out_cont_data[ind] + value;
             counts_data[ind] += 1;
           } else if (reduce == "amax") {
             out_cont_data[ind] = std::max(out_cont_data[ind], value);
@@ -1375,8 +1374,13 @@ Tensor scatter_reduce_two_cpu(const Tensor& self,
       out_cont.masked_fill_(out_cont == val, (scalar_t)0);
     }
 
-    if (!out_is_contiguous) {
-      out.copy_(out_cont);
+    if (reduce == "mean") {
+      counts.masked_fill_(counts == 0, (scalar_t)1);
+      if (out.is_floating_point()) {
+        out.div_(counts);
+      } else {
+        out.div_(counts, "floor");
+      }
     }
 
   });

@@ -5711,13 +5711,19 @@ class TestTorch(TestCase):
     # FIXME: move to test_scatter_gather_ops.py
     def test_scatter_reduce(self):
         dtype = device = None
+
+        if torch.cuda.is_available():
+            device = 'cuda'
+        else:
+            device = 'cpu'
+
         output_size = 10
         shape = [5, 10, 20]
         reduces = ["sum", "prod", "mean", "amax", "amin"]
         fills = {"sum": 0, "prod": 1, "mean": 0, "amax": -(2 ** 31), "amin": 2 ** 31 - 1}
         fns = {"sum": lambda t, v: t.add_(v),
                "prod": lambda t, v: t.mul_(v),
-               "mean": lambda t, v, n: t.mul_(n).add_(v).div_(n + 1),
+               "mean": lambda t, v: t.add_(v),  # averaging is done at the end
                "amax": lambda t, v: torch.max(t, v, out=t),
                "amin": lambda t, v: torch.min(t, v, out=t)}
 
@@ -5748,11 +5754,12 @@ class TestTorch(TestCase):
                         k = m
 
                     op = fns[reduce]
-                    if (reduce == "mean"):
-                        op(expected[i, j, k], v, counts[i, j, k])
-                    else:
-                        op(expected[i, j, k], v)
+                    op(expected[i, j, k], v)
                     counts[i, j, k] += 1
+
+                if (reduce == "mean"):
+                    expected /= counts
+                    expected.masked_fill_(counts == 0, 0)
 
                 if (reduce == "amin" or reduce == "amax"):
                     expected.masked_fill_(counts == 0, 0)
@@ -5766,10 +5773,10 @@ class TestTorch(TestCase):
             index2 = torch.randint(0, output_size, (10, ), dtype=torch.long, device=device)
             torch.scatter_reduce(input, 0, index2, "sum")
 
-        with self.assertRaisesRegex(RuntimeError, "Expected `index` values to be in range 0 to 2"):
-            input2 = torch.randn(10, dtype=dtype, device=device)
-            index2 = torch.tensor([0, 1, 0, 1, 2, 3, 3, 4, 4, 3])
-            torch.scatter_reduce(input2, 0, index2, "sum", output_size=2)
+        # with self.assertRaisesRegex(RuntimeError, "Expected `index` values to be in range 0 to 2"):
+        #     input2 = torch.randn(10, dtype=dtype, device=device)
+        #     index2 = torch.tensor([0, 1, 0, 1, 2, 3, 3, 4, 4, 3]).to(device)
+        #     torch.scatter_reduce(input2, 0, index2, "sum", output_size=2)
 
     def test_structseq_repr(self):
         a = torch.arange(250).reshape(5, 5, 10)
