@@ -5,6 +5,7 @@
 #include <ATen/core/TensorBody.h>
 #include <ATen/core/functional.h>
 #include <ATen/core/symbol.h>
+#include <ATen/core/type_factory.h>
 #include <ATen/core/qualified_name.h>
 #include <c10/util/TypeList.h>
 #include <c10/util/Optional.h>
@@ -649,7 +650,6 @@ struct TORCH_API TensorType : public SharedType {
     return copy;
   }
 
-
   TensorTypePtr withDim(c10::optional<size_t> d) {
     auto copy = clone();
     // withDim is only used by the legacy executor
@@ -686,7 +686,7 @@ struct TORCH_API TensorType : public SharedType {
         sizes, contiguousStridesOf(sizes));
   }
 
-  TensorTypePtr withDevice(at::Device device) const {
+  TensorTypePtr withDevice(const c10::optional<at::Device> device) const {
     auto copy = clone();
     copy->device_ = device;
     return copy;
@@ -1731,7 +1731,8 @@ struct getTypePtr_<c10::QScheme> final {
 template <>
 struct getTypePtr_<at::Generator> final {
   static decltype(auto) call() {
-    return OptionalType::create(GeneratorType::get());
+    return TypeFactory::create<OptionalType>(
+        TypeFactory::get<GeneratorType>());
   }
 };
 template <>
@@ -1799,7 +1800,8 @@ struct getTypePtr_<c10::Dict<K, V>> final {
 template <class T>
 struct getTypePtr_<at::optional<T>> final {
   static const auto& call() {
-    static auto type = OptionalType::create(getTypePtr_<T>::call());
+    static auto type = TypeFactory::create<OptionalType>(
+        getTypePtr_<T>::call());
     return type;
   }
 };
