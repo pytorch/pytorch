@@ -1304,7 +1304,7 @@ class TestSparseCSR(TestCase):
                     torch.linalg.solve(sample.input.to_sparse_csr(), *sample.args, **sample.kwargs, out=out)
                 break
 
-            if sample.args[0].ndim != 1:
+            if sample.args[0].ndim != 1 and sample.args[0].size(-1) != 1:
                 with self.assertRaisesRegex(RuntimeError, "not implemented yet"):
                     torch.linalg.solve(sample.input.to_sparse_csr(), *sample.args, **sample.kwargs, out=out)
                 break
