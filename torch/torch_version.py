@@ -19,7 +19,7 @@ class _LazyImport:
 
     def get_cls(self):
         try:
-            import packaging.version
+            import packaging.version  # type: ignore[import]
         except ImportError:
             # If packaging isn't installed, try and use the vendored copy
             # in pkg_resources
