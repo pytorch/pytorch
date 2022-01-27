@@ -42,10 +42,10 @@ def exit_dual_level(*, level=None):
 
 def make_dual(tensor, tangent, *, level=None):
     r"""Associates a tensor value with a forward gradient, the tangent, to create a
-    "dual tensor", which is used used to compute forward AD gradients. The forward gradient,
-    :attr:`tangent`, must have the same storage layout as the tensor value, :attr:`tensor`.
+    "dual tensor", which is used to compute forward AD gradients.
     The result is a new tensor aliased to :attr:`tensor` with :attr:`tangent` embedded
-    as an attribute as-is. The tangent attribute can be recovered with :func:`unpack_dual`.
+    as an attribute as-is if it has the same storage layout or copied otherwise.
+    The tangent attribute can be recovered with :func:`unpack_dual`.
 
     This function is backward differentiable.
 
