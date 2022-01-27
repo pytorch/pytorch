@@ -15997,6 +15997,8 @@ class TestNNDeviceType(NNTestCase):
             if (self.device_type == "cuda"):
                 input = input.cuda()
                 mask = mask.cuda()
+            if self.device_type == "meta":
+                return
             mask = mask.reshape(B, 1, 1, L).expand(B, num_heads, L, L).bool()
             gradcheck(torch._masked_softmax, (input, dim, mask))
 

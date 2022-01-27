@@ -501,24 +501,24 @@ Tensor masked_softmax_cpu(const Tensor& input, int64_t dim, const Tensor& mask) 
 }
 
 Tensor masked_softmax_backward_cpu(
-    const Tensor& grad,
-    const Tensor& output,
-    int64_t dim,
-    const Tensor& mask) {
+    const Tensor& grad_,
+    const Tensor& output_,
+    int64_t dim_,
+    const Tensor& mask_) {
   TORCH_CHECK(
-      grad.sizes() == mask.sizes(), "Mask shape should match grad shape");
+      grad_.sizes() == mask_.sizes(), "Mask shape should match grad shape");
   TORCH_CHECK(
-      mask.scalar_type() == ScalarType::Bool,
+      mask_.scalar_type() == ScalarType::Bool,
       "Mask should be a boolean tensor");
 
-  int64_t dim_ = maybe_wrap_dim(dim, grad.dim());
-  auto grad_ = grad.is_contiguous() ? grad : grad.contiguous();
-  auto mask_ = mask.is_contiguous() ? mask : mask.contiguous();
-  auto output_ = output.is_contiguous() ? output : output.contiguous();
+  int64_t dim = maybe_wrap_dim(dim_, grad_.dim());
+  auto grad = grad_.is_contiguous() ? grad_ : grad_.contiguous();
+  auto output = output_.is_contiguous() ? output_ : output_.contiguous();
+  auto mask = mask_.is_contiguous() ? mask_ : mask_.contiguous();
 
-  grad_ = grad_.dim() == 0 ? grad_.view(1) : grad_;
-  mask_ = mask_.dim() == 0 ? mask_.view(1) : mask_;
-  output_ = output_.dim() == 0 ? output_.view(1) : output_;
+  grad = grad.dim() == 0 ? grad.view(1) : grad;
+  output = output.dim() == 0 ? output.view(1) : output;
+  mask = mask.dim() == 0 ? mask.view(1) : mask;
 
   Tensor grad_input = at::empty_like(grad, grad.options());
   AT_DISPATCH_FLOATING_TYPES_AND(
@@ -526,7 +526,7 @@ Tensor masked_softmax_backward_cpu(
         host_softmax_backward<
             scalar_t,
             false /* LogSoftMax */,
-            true /* MaskedSoftmax */>(grad_input, grad_, output_, dim_, mask_.data_ptr<bool>());
+            true /* MaskedSoftmax */>(grad_input, grad, output, dim, mask.data_ptr<bool>());
       });
   return grad_input;
 }
