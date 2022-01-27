@@ -78,7 +78,7 @@ class PackageImporter(Importer):
         else:
             self.filename = "<binary>"
             self.zip_reader = torch._C.PyTorchFileReader(file_or_buffer)
-
+        self.external_registry = {}
         self.root = _PackageNode(None)
         self.modules = {}
         self.extern_modules = self._read_extern()
@@ -107,7 +107,6 @@ class PackageImporter(Importer):
 
         # used for torch.serialization._load
         self.Unpickler = lambda *args, **kwargs: PackageUnpickler(self, *args, **kwargs)
-        self.external_registry = {}
 
     def import_module(self, name: str, package=None):
         """Load a module from the package if it hasn't already been loaded, and then return
@@ -166,7 +165,6 @@ class PackageImporter(Importer):
         """
         data = self.load_binary(package, resource)
         return data.decode(encoding, errors)
-
     def load_tensor(self, dtype, size, key, location, storage_context):
         name = f"{key}.storage"
 
@@ -180,7 +178,6 @@ class PackageImporter(Importer):
                 storage_context.add_storage(name, tensor)
             storage = tensor.storage()
         return self.restore_location(storage, location)
-
     def load_pickle(self, package: str, resource: str, map_location=None) -> Any:
         """Unpickles the resource from the package, loading any modules that are needed to construct the objects
         using :meth:`import_module`.
@@ -194,18 +191,50 @@ class PackageImporter(Importer):
             Any: The unpickled object.
         """
         pickle_file = self._zipfile_path(package, resource)
+        restore_location = _get_restore_location(map_location)
         self.restore_location = _get_restore_location(map_location)
+        loaded_storages = {}
         loaded_reduces = {}
         storage_context = torch._C.DeserializationStorageContext()
-        self.external_registry = {}
 
+        def load_tensor(dtype, size, key, location, restore_location):
+            name = f"{key}.storage"
+
+            if storage_context.has_storage(name):
+                storage = storage_context.get_storage(name, dtype).storage()
+            else:
+                tensor = self.zip_reader.get_storage_from_record(
+                    ".data/" + name, size, dtype
+                )
+                if isinstance(self.zip_reader, torch._C.PyTorchFileReader):
+                    storage_context.add_storage(name, tensor)
+                storage = tensor.storage()
+            loaded_storages[key] = restore_location(storage, location)
 
         def persistent_load(saved_id):
             assert isinstance(saved_id, tuple)
             typename = _maybe_decode_ascii(saved_id[0])
             data = saved_id[1:]
 
-            if typename == "reduce_package":
+            if typename == "storage":
+                storage_type, key, location, size = data
+                dtype = storage_type.dtype
+
+                if key not in loaded_storages:
+                    load_tensor(
+                        dtype,
+                        size,
+                        key,
+                        _maybe_decode_ascii(location),
+                        restore_location,
+                    )
+                storage = loaded_storages[key]
+                # TODO: Once we decide to break serialization FC, we can
+                # stop wrapping with TypedStorage
+                return torch.storage.TypedStorage(
+                    wrap_storage=storage._untyped(), dtype=dtype
+                )
+            elif typename == "reduce_package":
                 # to fix BC breaking change, objects on this load path
                 # will be loaded multiple times erroneously
                 if len(data) == 2:
