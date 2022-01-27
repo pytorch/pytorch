@@ -96,6 +96,12 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
   // preflights a check to try to avoid actually needing to call
   // expand().
   TORCH_CHECK(mat1.dim() == 2 && mat2.dim() == 2, "tensors must be 2-D");
+  if (dtype_opt.has_value()) {
+    TORCH_CHECK((self.dtype() == at::kHalf && dtype_opt.value() == at::kFloat) || (self.dtype() == dtype_opt.value()),
+      "addmm_out_cuda: You specified kwarg `dtype=`. However, this feature is only supported when all input matrices are CUDA half precision "
+      "and `dtype=torch.float` is set. With that, the output matrix is in float precision."
+    );
+  }
 
   TensorArg args[]{{result, "out", 0}, {self, "self", 1}, {mat1, "mat1", 2}, {mat2, "mat2", 3}};
   checkAllSameGPU(__func__, args);
