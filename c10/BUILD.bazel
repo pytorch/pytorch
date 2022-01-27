@@ -40,11 +40,11 @@ cc_library(
     name = "headers",
     hdrs = [
         "//c10/core:headers",
+        "//c10/mobile:headers",
         "//c10/util:headers",
     ] + glob([
         "cuda/*.h",
         "cuda/impl/*.h",
-        "mobile/*.h",
     ]),
     deps = [
         ":cuda_cmake_macros_h",
@@ -64,9 +64,7 @@ cc_library(
     name = "c10",
     srcs = [
         "//c10/core:sources",
-    ] + glob([
-        "mobile/*.cpp",
-    ]) + if_cuda(
+    ] + if_cuda(
         glob([
             "cuda/*.cpp",
             "cuda/impl/*.cpp",
@@ -79,6 +77,8 @@ cc_library(
         "//c10/core:ScalarType",
         "//c10/core:alloc_cpu",
         "//c10/core:base",
+        "//c10/mobile:CPUCachingAllocator",
+        "//c10/mobile:CPUProfilingAllocator",
         "//c10/util:TypeCast",
         "//c10/util:base",
         "//c10/util:typeid",
