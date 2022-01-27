@@ -6413,6 +6413,8 @@ def skips_mvlgamma(skip_redundant=False):
         skips = skips + (  # type: ignore[assignment]
             DecorateInfo(unittest.skip("Skipped!"), 'TestGradients'),
             DecorateInfo(unittest.skip("Skipped!"), 'TestJit'),
+            # TODO: float16 fails due to tensor not satisfying > (p-1)/2
+            DecorateInfo(unittest.skip("Skipped!"), 'TestNNCOpInfo'),
             DecorateInfo(unittest.skip("Skipped!"), 'TestCommon'),
         )
     return skips
