@@ -968,7 +968,7 @@ Tensor masked_softmax_cuda(const Tensor& input_, int64_t dim, const Tensor& mask
           "masked_softmax",
           [&] {
             Tensor mask_not = mask.logical_not();
-            output = at::softmax(input.masked_fill(mask_not, -std::numeric_limits<scalar_t>::infinity()), -1);
+            output = at::softmax(input.masked_fill(mask_not, -std::numeric_limits<scalar_t>::infinity()), dim);
           });
         return output;
     }
@@ -1018,44 +1018,67 @@ Tensor masked_softmax_cuda(const Tensor& input_, int64_t dim, const Tensor& mask
 }
 
 Tensor masked_softmax_backward_cuda(
-    const Tensor& grad,
-    const Tensor& output,
-    int64_t dim,
-    const Tensor& mask) {
-  auto grad_ = grad.contiguous();
-  auto output_ = output.contiguous();
-  auto mask_ = mask.is_contiguous() ? mask : mask.contiguous();
+    const Tensor& grad_,
+    const Tensor& output_,
+    int64_t dim_,
+    const Tensor& mask_) {
+  auto grad = grad_.contiguous();
+  auto output = output_.contiguous();
+  auto mask = mask_.is_contiguous() ? mask_ : mask_.contiguous();
 
-  grad_ = grad_.dim() == 0 ? grad_.view(1) : grad_;
-  mask_ = mask_.dim() == 0 ? mask_.view(1) : mask_;
-  output_ = output_.dim() == 0 ? output_.view(1) : output_;
+  grad = grad.dim() == 0 ? grad.view(1) : grad;
+  mask = mask.dim() == 0 ? mask.view(1) : mask;
+  output = output.dim() == 0 ? output.view(1) : output;
+  grad = grad * output;
+  int64_t dim = maybe_wrap_dim(dim_, grad.dim());
 
-  TORCH_CHECK(grad_.sizes() == mask_.sizes(), "Mask shape should match grad shape");
-  TORCH_CHECK(mask_.scalar_type() == ScalarType::Bool, "Mask should be a boolean tensor");
+  TORCH_CHECK(dim >=0 && dim < grad.dim(), "dim must be non-negative and less than input dimensions");
+  TORCH_CHECK(grad.sizes() == mask.sizes(), "Mask shape should match grad shape");
+  TORCH_CHECK(mask.scalar_type() == ScalarType::Bool, "Mask should be a boolean tensor");
 
-  auto grad_input = at::empty_like(grad, grad.options());
+  Tensor grad_input = at::empty_like(grad, grad.options());
 
-  // host_softmax_backward<LogSoftMaxBackwardEpilogue, false, true>(grad_, output_, dim, false, grad_input, mask_);
+  if (output.numel() == 0) {
+    return grad_input;
+  }
 
-  int softmax_elements = grad_input.size(dim);
-  int batch_count = grad.numel() / softmax_elements;
-  AT_DISPATCH_FLOATING_TYPES_AND2(
-    ScalarType::Half,
-    ScalarType::BFloat16,
-    grad_input.scalar_type(),
-    "masked_softmax_backward",
-    [&] {
-      using accscalar_t = acc_type<scalar_t, true>;
-      dispatch_softmax_backward<scalar_t, scalar_t, accscalar_t, false, true /* masked_softmax */>(
-        grad_input.data_ptr<scalar_t>(),  // gI_ptr
-        grad_.data_ptr<scalar_t>(),  // grad_ptr
-        output_.data_ptr<scalar_t>(),  // output_ptr
-        softmax_elements,  // softmax_elements
-        softmax_elements,   // softmax_elements_stride
-        batch_count,  // batch_count
-        mask.data_ptr<bool>()  /* not masked */
-      );
-    });
+  int softmax_elements = output.size(dim);
+  int64_t batch_count = grad.numel() / softmax_elements;
+
+  if (softmax_elements > 1024) {
+    AT_DISPATCH_FLOATING_TYPES_AND2(
+      ScalarType::Half,
+      ScalarType::BFloat16,
+      grad_input.scalar_type(),
+      "masked_softmax",
+      [&] {
+        Tensor mask_not = mask.logical_not();
+        grad_input = at::_softmax_backward_data(
+          grad.masked_fill(mask_not, -std::numeric_limits<scalar_t>::infinity()),
+          output,
+          dim,
+          grad_input.scalar_type()
+        );
+      });
+  } else {
+    AT_DISPATCH_FLOATING_TYPES_AND2(
+      ScalarType::Half,
+      ScalarType::BFloat16,
+      grad_input.scalar_type(),
+      "masked_softmax_backward",
+      [&] {
+        using accscalar_t = acc_type<scalar_t, true>;
+        dispatch_softmax_backward<scalar_t, scalar_t, accscalar_t, false, true /* masked_softmax */>(
+          grad_input.data_ptr<scalar_t>(),  // gI_ptr
+          grad.data_ptr<scalar_t>(),  // grad_ptr
+          output.data_ptr<scalar_t>(),  // output_ptr
+          softmax_elements,  // softmax_elements
+          softmax_elements,   // softmax_elements_stride
+          batch_count,  // batch_count
+          mask.data_ptr<bool>()  /* not masked */
+        );
+      });
+  }
 
   return grad_input;
 }

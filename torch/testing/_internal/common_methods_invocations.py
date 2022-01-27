@@ -14990,7 +14990,7 @@ op_db: List[OpInfo] = [
             DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
             DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_noncontiguous_samples'),
             # torch.autograd.gradcheck.GradcheckError: Jacobian mismatch for output 0 with respect to input 0
-            DecorateInfo(unittest.expectedFailure, "TestGradients", "test_fn_grad", dtypes=(torch.float64,)),
+            DecorateInfo(unittest.expectedFailure, "TestGradients", "test_fn_grad", device_type='cpu', dtypes=(torch.float64,)),
         ),
         supports_out=False),
     # OpInfo(
