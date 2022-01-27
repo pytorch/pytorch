@@ -7,7 +7,6 @@ import numpy as np
 import tensorrt as trt
 import torch
 import torch.fx.experimental.fx_acc.acc_ops as acc_ops
-import torch.fx.experimental.fx_acc.acc_utils as acc_utils
 from torch.fx.experimental.fx2trt.converter_registry import tensorrt_converter
 from torch.fx.experimental.fx2trt.types import *  # noqa: F403
 from torch.fx.experimental.fx2trt.utils import (
@@ -16,6 +15,7 @@ from torch.fx.experimental.fx2trt.utils import (
 )
 from torch.fx.immutable_collections import immutable_list
 from torch.fx.node import Target, Argument
+from torch.fx.passes.shape_prop import TensorMetadata
 
 from .converter_utils import *  # noqa: F403
 
@@ -1376,7 +1376,7 @@ def acc_ops_reshape(
             "of the TensorRT region!"
         )
 
-    shape = acc_utils.get_field_from_acc_out_ty(kwargs["acc_out_ty"], "shape")  # type: ignore[arg-type]
+    shape = TensorMetadata(*kwargs["acc_out_ty"]).shape  # type: ignore[misc]
     if network.has_implicit_batch_dimension:
         shape = shape[1:]
 
@@ -1806,6 +1806,25 @@ def acc_ops_matmul(
     return layer.get_output(0)
 
 
+@tensorrt_converter(acc_ops.hardsigmoid)
+def acc_ops_hard_sigmoid(
+    network: TRTNetwork,
+    target: Target,
+    args: Tuple[Argument, ...],
+    kwargs: Dict[str, Argument],
+    name: str,
+) -> Union[TRTTensor, Sequence[TRTTensor]]:
+    input_val = kwargs["input"]
+
+    if not isinstance(input_val, TRTTensor):
+        raise RuntimeError(
+            f"Hard sigmoid received input {input_val} that is not part "
+            "of the TensorRT region!"
+        )
+
+    return add_activation_layer(network, input_val, trt.ActivationType.HARD_SIGMOID, target, name, alpha=1 / 6, beta=0.5)
+
+
 @tensorrt_converter(acc_ops.sigmoid)
 def acc_ops_sigmoid(
     network: TRTNetwork,
@@ -1868,10 +1887,10 @@ def acc_ops_quantize_per_tensor(
         raise RuntimeError(f"{name} received input {input_val} that is not part "
                            "of the TensorRT region!")
 
-    qparams = acc_utils.get_field_from_acc_out_ty(kwargs["acc_out_ty"], "qparams")  # type: ignore[arg-type]
+    qparams = TensorMetadata(*kwargs["acc_out_ty"]).qparams  # type: ignore[misc]
     q_scale = qparams["scale"]
     q_zero_point = qparams["zero_point"]
-    dtype = acc_utils.get_field_from_acc_out_ty(kwargs["acc_out_ty"], "dtype")  # type: ignore[arg-type]
+    dtype = TensorMetadata(*kwargs["acc_out_ty"]).dtype  # type: ignore[misc]
     if dtype not in (torch.quint8, torch.qint8, torch.qint32):
         raise RuntimeError("Only support (torch.quint8, torch.qint8, torch.qint32) "
                            f"quantized type in quantize_per_tensor, get {dtype}.")
@@ -1904,11 +1923,11 @@ def acc_ops_quantize_per_channel(
         raise RuntimeError(f"{name} received input {input_val} that is not part "
                            "of the TensorRT region!")
 
-    qparams = acc_utils.get_field_from_acc_out_ty(kwargs["acc_out_ty"], "qparams")  # type: ignore[arg-type]
+    qparams = TensorMetadata(*kwargs["acc_out_ty"]).qparams  # type: ignore[misc]
     q_per_channel_scales = qparams["scale"]
     q_per_channel_zero_points = qparams["zero_point"]
     q_per_channel_axis = qparams["axis"]
-    dtype = acc_utils.get_field_from_acc_out_ty(kwargs["acc_out_ty"], "dtype")  # type: ignore[arg-type]
+    dtype = TensorMetadata(*kwargs["acc_out_ty"]).dtype  # type: ignore[misc]
     if dtype not in (torch.quint8, torch.qint8, torch.qint32):
         raise RuntimeError("Only support (torch.quint8, torch.qint8, torch.qint32) "
                            f"quantized type in quantize_per_tensor, get {dtype}.")
@@ -1951,7 +1970,7 @@ def acc_ops_dequantize(
         raise RuntimeError(f"{name} received input {input_val} that is not part "
                            "of the TensorRT region!")
 
-    qparams = acc_utils.get_field_from_acc_out_ty(input_val_tensor_meta, "qparams")  # type: ignore[arg-type]
+    qparams = TensorMetadata(*input_val_tensor_meta).qparams  # type: ignore[misc]
     qscheme = qparams["qscheme"]
     if qscheme == torch.per_tensor_affine:
         q_scale = qparams["scale"]
@@ -1971,7 +1990,7 @@ def acc_ops_dequantize(
     else:
         raise RuntimeError("Unsupported qscheme in dequantize: {qscheme}")
 
-    dtype = acc_utils.get_field_from_acc_out_ty(input_val_tensor_meta, "dtype")  # type: ignore[arg-type]
+    dtype = TensorMetadata(*input_val_tensor_meta).dtype  # type: ignore[misc]
 
     if dtype not in (torch.quint8, torch.qint8, torch.qint32):
         raise RuntimeError("Only support (torch.quint8, torch.qint8, torch.qint32) "
