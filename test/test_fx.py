@@ -2016,11 +2016,11 @@ class TestFX(JitTestCase):
 
         # zed = z + z + z -> zed = z + z + x
         zed.node.args = (zed.node.args[0], x.node)
-        self.assertEqual(x.node.users.keys(), [z.node, zed.node])
+        self.assertEqual(list(x.node.users.keys()), [z.node, zed.node])
 
         # z = x + y -> z = y + y
         z.node.args = (y.node, y.node)
-        self.assertEqual(x.node.users.keys(), [zed.node])
+        self.assertEqual(list(x.node.users.keys()), [zed.node])
 
     def test_trace_function(self):
         def foo(x, y):
@@ -2535,7 +2535,9 @@ class TestFX(JitTestCase):
             if node.op == 'call_function':
                 found_targets.setdefault(node.target)
         self.assertEqual(
-            found_targets.keys(), [torch.ops.profiler._record_function_enter, torch.ops.profiler._record_function_exit])
+            list(found_targets.keys()),
+            [torch.ops.profiler._record_function_enter, torch.ops.profiler._record_function_exit]
+        )
 
         g.eliminate_dead_code()
         found_targets = {}
@@ -2543,7 +2545,9 @@ class TestFX(JitTestCase):
             if node.op == 'call_function':
                 found_targets.setdefault(node.target)
         self.assertEqual(
-            found_targets.keys(), [torch.ops.profiler._record_function_enter, torch.ops.profiler._record_function_exit])
+            list(found_targets.keys()),
+            [torch.ops.profiler._record_function_enter, torch.ops.profiler._record_function_exit]
+        )
 
     def test_ast_rewriter_wrapped_via_decorator(self):
         class F(torch.nn.Module):

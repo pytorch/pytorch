@@ -591,7 +591,7 @@ def _reshard_output(
         A :class:`torch.nn.Module` object with collection API hooked.
     """
     def hook_func(_module, _input, output):
-        if isinstance(output, ShardedTensor):
+        if isinstance(output, ShardedTensor) or isinstance(output, _PartialTensor):
             return output.reshard(resharding_spec)
         return output
     module.register_forward_hook(hook_func)

@@ -640,7 +640,7 @@ class ShardedTensor(object):
             else:
                 local_shards, shards_metadata = reshuffle_local_shard(
                     self.local_tensor(),
-                    self.size(),
+                    self.size(),  # type: ignore[arg-type]
                     self._sharding_spec,
                     resharding_spec,
                     self._process_group,
@@ -648,7 +648,7 @@ class ShardedTensor(object):
         else:
             local_shards, shards_metadata = reshard_local_shard(
                 self.local_tensor(),
-                self.size(),
+                self.size(),  # type: ignore[arg-type]
                 self._sharding_spec,
                 resharding_spec,
                 self._process_group,

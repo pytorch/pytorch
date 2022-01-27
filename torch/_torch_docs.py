@@ -9417,7 +9417,7 @@ always be real-valued, even if :attr:`input` is complex.
 
     .. code:: python
 
-        S = torch.svdvals(A)
+        S = torch.linalg.svdvals(A)
 
 .. note:: Differences with :func:`torch.linalg.svd`:
 
@@ -10811,7 +10811,7 @@ Calculates log determinant of a square matrix or batches of square matrices.
     Backward through :meth:`logdet` internally uses SVD results when :attr:`input`
     is not invertible. In this case, double backward through :meth:`logdet` will
     be unstable in when :attr:`input` doesn't have distinct singular values. See
-    :meth:`~torch.svd` for details.
+    :func:`torch.linalg.svd` for details.
 
 Arguments:
     input (Tensor): the input tensor of size ``(*, n, n)`` where ``*`` is zero or more

@@ -1,4 +1,5 @@
 import copy
+from typing import List, Tuple
 
 import torch
 import torch.distributed as dist
@@ -21,7 +22,7 @@ from torch.distributed.nn.functional import (
 from .shard import Shard
 
 
-def get_idx_from_placements(placements, current_rank):
+def get_idx_from_placements(placements, current_rank) -> int:
     """
     Return the position of the current rank in the given placements.
 
@@ -48,7 +49,7 @@ def build_reshard_metadata(
     st_size: torch.Size,
     sharding_spec: ShardingSpec,
     world_size: int,
-):
+) -> Tuple[List[Shard], List[int]]:
     """
     Based the given sharding spec, we calculate the offset and local shard size.
     We then build a ShardMetadata on top of the calculation result.
@@ -65,7 +66,7 @@ def build_reshard_metadata(
                 offsets, lengths and device placement.
             A List[int] which contains the ranks in the order of placement.
     """
-    shard_dim = int(sharding_spec.dim)
+    shard_dim = int(sharding_spec.dim)  # type: ignore[attr-defined]
     shards_metadata = [None] * world_size
     ranks = []
     offsets = [0] * len(st_size)
@@ -75,7 +76,7 @@ def build_reshard_metadata(
         sharded_dim_size = get_chunked_dim_size(st_size[shard_dim], split_size, idx)
         local_tensor_size = list(st_size)
         local_tensor_size[shard_dim] = sharded_dim_size
-        shards_metadata[placement.rank()] = ShardMetadata(
+        shards_metadata[placement.rank()] = ShardMetadata(  # type: ignore[call-overload]
             shard_offsets=copy.deepcopy(offsets),
             shard_sizes=local_tensor_size,
             placement=placement,
@@ -90,7 +91,7 @@ def reshuffle_local_shard(
     sharding_spec: ShardingSpec,
     resharding_spec: ShardingSpec,
     pg: ProcessGroup,
-) -> torch.Tensor:
+) -> Tuple[List[Shard], List[ShardMetadata]]:
     """
     Reshuffle the local shard directly when the reshard dim is same as the original
     sharding dim. Logically we do this in two step:
@@ -122,11 +123,11 @@ def reshuffle_local_shard(
         st_size, resharding_spec, world_size
     )
     # Get input split size for all2all.
-    reshard_dim = int(resharding_spec.dim)
+    reshard_dim = int(resharding_spec.dim)  # type: ignore[attr-defined]
     split_size = get_split_size(st_size[reshard_dim], world_size)
     input_split_sizes = [0] * world_size
-    idx = get_idx_from_placements(sharding_spec.placements, current_rank)
-    new_rank = resharding_spec.placements[idx].rank()  # type: ignore[union-attr]
+    idx = get_idx_from_placements(sharding_spec.placements, current_rank)  # type: ignore[attr-defined]
+    new_rank = resharding_spec.placements[idx].rank()  # type: ignore[union-attr, attr-defined]
     input_split_sizes[new_rank] = local_shard.size(reshard_dim)
     # Get output split size for all2all.
     output_split_sizes = [0] * world_size
@@ -157,7 +158,7 @@ def reshard_local_shard(
     sharding_spec: ShardingSpec,
     resharding_spec: ShardingSpec,
     pg: ProcessGroup,
-) -> torch.Tensor:
+) -> Tuple[List[Shard], List[ShardMetadata]]:
     """
     Reshard a sharded tensor given the ``resharding_spec``. When the reshard dim is
     different from the original sharding dim, we need to do two steps logically:
@@ -200,7 +201,7 @@ def reshard_local_shard(
 
     if rearrange_input:
         # Need to re-arrange reshard_dim of local_tensor before all2all.
-        indices = []
+        indices: List[int] = []
         for metadata in shards_metadata:
             offset_start_idx = metadata.shard_offsets[reshard_dim]
             split_size = metadata.shard_sizes[reshard_dim]
@@ -215,7 +216,7 @@ def reshard_local_shard(
     split_size = get_split_size(st_size[current_sharding_dim], world_size)
     rearrange_output_list = False
     indices = []
-    for idx, placement in enumerate(sharding_spec.placements):
+    for idx, placement in enumerate(sharding_spec.placements):  # type: ignore[attr-defined]
         sharded_dim_size = get_chunked_dim_size(
             st_size[current_sharding_dim], split_size, idx
         )
