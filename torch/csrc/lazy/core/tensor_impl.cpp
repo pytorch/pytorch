@@ -139,11 +139,7 @@ void LTCTensorImpl::setup_size_properties() {
     // implementation uses in its APIs.
     auto shape = tensor_.shape();
     // We can't call refresh_numel() given we override sizes() too.
-    // TODO(alanwaketan): Replace the following with Shape.numel().
-    numel_ = 1;
-    for (auto dim : shape.Get().sizes()) {
-      numel_ *= dim;
-    }
+    numel_ = shape.Get().numel();
     sizes_and_strides_.set_sizes(shape.Get().sizes());
     // We can't call empty_tensor_restride(c10::MemoryFormat::Contiguous) given we override sizes() too.
     std::vector<int64_t> updated_strides;
@@ -191,8 +187,7 @@ bool LTCTensorImpl::is_contiguous(c10::MemoryFormat _unused) const {
 }
 
 const at::Storage& LTCTensorImpl::storage() const {
-  TORCH_CHECK("Lazy tensors do not have storage");
-  return storage_;
+  TORCH_CHECK(false, "Lazy tensors do not have storage");
 }
 
 #endif  // C10_DISABLE_TENSORIMPL_EXTENSIBILITY
