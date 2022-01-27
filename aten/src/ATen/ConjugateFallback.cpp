@@ -51,6 +51,8 @@ TORCH_LIBRARY_IMPL(aten, Conjugate, m) {
   m.impl("baddbmm", torch::CppFunction::makeFallthrough());
   m.impl("baddbmm_", torch::CppFunction::makeFallthrough());
   m.impl("baddbmm.out", torch::CppFunction::makeFallthrough());
+  m.impl("linalg_svd", torch::CppFunction::makeFallthrough());
+  m.impl("linalg_svd.U", torch::CppFunction::makeFallthrough());
 
   TORCH_VIEW_FNS(m)
   TENSOR_UTILITIES_AND_CONSTRUCTORS(m)
