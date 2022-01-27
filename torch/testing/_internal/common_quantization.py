@@ -1195,7 +1195,11 @@ class AnnotatedConvBnReLUModel(torch.nn.Module):
         return x
 
     def fuse_model(self):
-        torch.quantization.fuse_modules(self, [['conv', 'bn', 'relu']], inplace=True)
+        # TODO: remove this check and define two fuse_modules function on this module
+        if self.training:
+            torch.quantization.fuse_modules_qat(self, [['conv', 'bn', 'relu']], inplace=True)
+        else:
+            torch.quantization.fuse_modules(self, [['conv', 'bn', 'relu']], inplace=True)
 
 class TwoLayerConvModel(torch.nn.Module):
     def __init__(self):
@@ -1464,7 +1468,11 @@ class InnerModule(torch.nn.Module):
                 if isinstance(named_children[idx + 1][1], torch.nn.ReLU):
                     fusable_layers.append([current_name,
                                            named_children[idx + 1][0]])
-        torch.quantization.fuse_modules(self, fusable_layers, inplace=True)
+        # TODO: remove this check and define two fuse_modules function on this module
+        if self.training:
+            torch.ao.quantization.fuse_modules_qat(self, fusable_layers, inplace=True)
+        else:
+            torch.ao.quantization.fuse_modules(self, fusable_layers, inplace=True)
 
 class FunctionalLinear(torch.nn.Module):
     def __init__(self):
@@ -1955,7 +1963,11 @@ class ResNetBase(torch.nn.Module):
         return out
 
     def fuse_model(self):
-        torch.quantization.fuse_modules(self, [['conv1', 'bn1', 'relu1']], inplace=True)
+        # TODO: remove this check and define two fuse_model function on this module
+        if self.training:
+            torch.ao.quantization.fuse_modules_qat(self, [['conv1', 'bn1', 'relu1']], inplace=True)
+        else:
+            torch.ao.quantization.fuse_modules(self, [['conv1', 'bn1', 'relu1']], inplace=True)
 
 class ModelMultipleOps(torch.nn.Module):
     def __init__(self):
