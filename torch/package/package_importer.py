@@ -26,7 +26,7 @@ from ._package_unpickler import PackageUnpickler
 from .file_structure_representation import Directory, _create_directory_from_file_list
 from .glob_group import GlobPattern
 from .importer import Importer
-
+import zipfile
 
 class PackageImporter(Importer):
     """Importers allow you to load code written to packages by :class:`PackageExporter`.
@@ -66,18 +66,26 @@ class PackageImporter(Importer):
             ImportError: If the package will use a disallowed module.
         """
         self.zip_reader: Any
+        self.directory_name = 'archive'
         if isinstance(file_or_buffer, torch._C.PyTorchFileReader):
+            print("isinstance(file_or_buffer, torch._C.PyTorchFileReader)")
             self.filename = "<pytorch_file_reader>"
             self.zip_reader = file_or_buffer
         elif isinstance(file_or_buffer, (Path, str)):
+            print("isinstance(file_or_buffer, (Path, str))")
             self.filename = str(file_or_buffer)
             if not os.path.isdir(self.filename):
-                self.zip_reader = torch._C.PyTorchFileReader(self.filename)
+                print("      and a zip file")
+                self.zip_reader = zipfile.ZipFile(self.filename, 'r')
             else:
-                self.zip_reader = DirectoryReader(self.filename)
+                print("      and a directory")
+                self.zip_reader = DirectoryReader(self.filename, 'r')
         else:
+            print(f"else - {file_or_buffer}")
             self.filename = "<binary>"
-            self.zip_reader = torch._C.PyTorchFileReader(file_or_buffer)
+            self.zip_reader = zipfile.ZipFile(file_or_buffer)
+        print(self.zip_reader.namelist())
+        print(self.zip_reader.filename)
         self.root = _PackageNode(None)
         self.modules = {}
         self.extern_modules = self._read_extern()
@@ -90,7 +98,7 @@ class PackageImporter(Importer):
                 )
             self._add_extern(extern_module)
 
-        for fname in self.zip_reader.get_all_records():
+        for fname in self.zip_reader.namelist():
             self._add_file(fname)
 
         self.patched_builtins = builtins.__dict__.copy()
@@ -142,7 +150,7 @@ class PackageImporter(Importer):
         """
 
         path = self._zipfile_path(package, resource)
-        return self.zip_reader.get_record(path)
+        return self.zip_reader.read(f'{path}')
 
     def load_text(
         self,
@@ -235,7 +243,7 @@ class PackageImporter(Importer):
                 f"Unknown typename for persistent_load, expected 'storage' or 'reduce_package' but got '{typename}'"
 
         # Load the data (which may in turn use `persistent_load` to load tensors)
-        data_file = io.BytesIO(self.zip_reader.get_record(pickle_file))
+        data_file = io.BytesIO(self.zip_reader.read(f'{pickle_file}'))
         unpickler = self.Unpickler(data_file)
         unpickler.persistent_load = persistent_load
         # TODO: it might make sense to have a seperate packager in torch which uses the OSS pacakge but saves state
@@ -288,12 +296,12 @@ class PackageImporter(Importer):
             :class:`Directory`
         """
         return _create_directory_from_file_list(
-            self.filename, self.zip_reader.get_all_records(), include, exclude
+            self.filename, self.zip_reader.namelist(), include, exclude
         )
 
     def _read_extern(self):
         return (
-            self.zip_reader.get_record(".data/extern_modules")
+            self.zip_reader.read(f".data/extern_modules")
             .decode("utf-8")
             .splitlines(keepends=False)
         )
@@ -341,7 +349,10 @@ class PackageImporter(Importer):
 
     def _load_module(self, name: str, parent: str):
         cur: _PathNode = self.root
+        print(name)
         for atom in name.split("."):
+            print(atom)
+            print(cur.children)
             if not isinstance(cur, _PackageNode) or atom not in cur.children:
                 raise ModuleNotFoundError(
                     f'No module named "{name}" in self-contained archive "{self.filename}"'
@@ -355,7 +366,7 @@ class PackageImporter(Importer):
         return self._make_module(name, cur.source_file, isinstance(cur, _PackageNode), parent)  # type: ignore[attr-defined]
 
     def _compile_source(self, fullpath: str, mangled_filename: str):
-        source = self.zip_reader.get_record(fullpath)
+        source = self.zip_reader.read(fullpath)
         source = _normalize_line_endings(source)
         return compile(source, mangled_filename, "exec", dont_inherit=True)
 
@@ -364,7 +375,7 @@ class PackageImporter(Importer):
     def get_source(self, module_name) -> str:
         # linecache calls `get_source` with the `module.__name__` as the argument, so we must demangle it here.
         module = self.import_module(demangle(module_name))
-        return self.zip_reader.get_record(demangle(module.__file__)).decode("utf-8")
+        return self.zip_reader.read(f'{demangle(module.__file__)}').decode("utf-8")
 
     # note: named `get_resource_reader` so that importlib.resources can find it.
     # This is otherwise considered an internal method.
@@ -542,6 +553,7 @@ class PackageImporter(Importer):
         self, atoms: List[str]
     ) -> "Union[_PackageNode, _ExternNode]":
         cur = self.root
+        print('atoms in get or create package - ', atoms)
         for i, atom in enumerate(atoms):
             node = cur.children.get(atom, None)
             if node is None:
@@ -580,6 +592,7 @@ class PackageImporter(Importer):
 
     def _add_extern(self, extern_name: str):
         *prefix, last = extern_name.split(".")
+        print('extern prefix - ', prefix)
         package = self._get_or_create_package(prefix)
         if isinstance(package, _ExternNode):
             return  # the shorter extern covers this extern case

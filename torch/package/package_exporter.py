@@ -36,6 +36,7 @@ from .find_file_dependencies import find_files_source_depends_on
 from .glob_group import GlobGroup, GlobPattern
 from .importer import Importer, OrderedImporter, sys_importer
 import inspect
+import zipfile
 
 _gate_torchscript_serialization = True
 
@@ -198,8 +199,9 @@ class PackageExporter:
         else:  # is a byte buffer
             self.buffer = f
 
-        self.zip_file = torch._C.PyTorchFileWriter(f)
-        self.zip_file.set_min_version(6)
+        # self.zip_file = torch._C.PyTorchFileWriter(f)
+        self.zip_file = zipfile.ZipFile(f, 'w')
+        # self.zip_file.set_min_version(6)
         #TODO: export to an actual registry somewhere else later in the stack
         self.external_registry = {}
         #TODO: export to an actual registry somewhere else later in the stack
@@ -902,7 +904,7 @@ class PackageExporter:
             )
         if isinstance(str_or_bytes, str):
             str_or_bytes = str_or_bytes.encode("utf-8")
-        self.zip_file.write_record(filename, str_or_bytes, len(str_or_bytes))
+        self.zip_file.writestr(filename, str_or_bytes)
 
     def _validate_dependency_graph(self):
         # 1. Check the graph for any errors inserted during dependency analysis.
