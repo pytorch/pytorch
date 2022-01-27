@@ -260,7 +260,7 @@ Tensor& pow_sparse_csr_scalar_(Tensor& self, const Scalar& exponent) {
   TORCH_CHECK(!exponent.isComplex() && !self.is_complex(), "Complex Exponent is not supported for Sparse CSR Layout.");
   TORCH_CHECK(!(exponent.isBoolean() && exponent.equal(false)), "Exponent as False is not supported for Sparse CSR Layout.");
   TORCH_CHECK(exponent.to<double>() > 0.0, "Exponent must be greater than 0 for Sparse CSR Layout.");
-  return unary_op_out<Tensor& (*)(const Tensor&, const Scalar&, Tensor&)>(&at::pow_outf, self, self, exponent);
+  return unary_op_inplace(self, &Tensor::pow_, exponent);
 }
 
 template <typename scalar_t>
