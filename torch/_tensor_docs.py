@@ -3374,10 +3374,10 @@ Example::
 
 """.format(**reproducibility_notes))
 
-add_docstr_all('_scatter_reduce', r"""
-_scatter_reduce(dim, index, reduce, *, output_size=None, out=None) -> Tensor
+add_docstr_all('scatter_reduce', r"""
+scatter_reduce(dim, index, reduce, *, output_size=None, out=None) -> Tensor
 
-See :func:`torch._scatter_reduce`
+See :func:`torch.scatter_reduce`
 """)
 
 add_docstr_all('select',
