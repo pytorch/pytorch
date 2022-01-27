@@ -45,15 +45,13 @@ using at::areAnyTensorSubclassLike;
 
 const char* kCudnnDoubleBackwardMsg = "Double backwards is not supported for CuDNN RNNs due to limitations in the CuDNN API. To run double backwards, please disable the CuDNN backend temporarily while running the forward pass of your RNN. For example: \nwith torch.backends.cudnn.flags(enabled=False):\n    output = model(inputs)";
 
-namespace {
-  static inline at::Tensor apply_loss_reduction(const at::Tensor& unreduced, int64_t reduction) {
-    if (reduction == at::Reduction::Mean) {
-      return unreduced.mean();
-    } else if (reduction == at::Reduction::Sum) {
-      return unreduced.sum();
-    }
-    return unreduced;
+Tensor apply_loss_reduction(const Tensor& unreduced, int64_t reduction) {
+  if (reduction == at::Reduction::Mean) {
+    return unreduced.mean();
+  } else if (reduction == at::Reduction::Sum) {
+    return unreduced.sum();
   }
+  return unreduced;
 }
 
 bool isDefined(const c10::optional<Tensor>& t) {
@@ -1394,14 +1392,26 @@ Tensor kl_div_double_backward_grad_output(const Tensor & grad, const Tensor & in
 Tensor kl_div_target_backward(Tensor grad_output, Tensor self, Tensor target, int64_t reduction, bool log_target) {
   Tensor grad_target;
   if (!log_target) {
-    grad_target = grad_output.mul(target.log().add_(1).sub_(self)).masked_fill_(target == 0, 0.);
+    if (!areAnyTensorSubclassLike({self, target}) && !grad_output._is_zerotensor()) {
+      grad_target = grad_output.mul(target.log().add_(1).sub_(self)).masked_fill_(target == 0, 0.);
+    } else {
+      grad_target = grad_output.mul(target.log().add(1).sub(self)).masked_fill(target == 0, 0.);
+    }
   }
   else {
-    grad_target = grad_output.mul(target.add(1).sub_(self).mul_(target.exp()));
+    if (!areAnyTensorSubclassLike({self, target})) {
+      grad_target = grad_output.mul(target.add(1).sub_(self).mul_(target.exp()));
+    } else {
+      grad_target = grad_output.mul(target.add(1).sub(self).mul_(target.exp()));
+    }
   }
 
   if (reduction == at::Reduction::Mean) {
-    grad_target.div_(target.numel());
+    if (!grad_target._is_zerotensor()) {
+      grad_target.div_(target.numel());
+    } else {
+      grad_target.div(target.numel());
+    }
   }
 
   return grad_target;
@@ -4957,6 +4967,45 @@ std::tuple<Tensor, Tensor> _cudnn_convolution_backward(
   std::tuple<Tensor, Tensor> result = std::make_tuple(std::get<0>(grad_inputs), std::get<1>(grad_inputs));
   return result;
 }
+
+Tensor scatter_reduce_backward(const Tensor & grad,
+                               const Tensor& input,
+                               int dim,
+                               const Tensor & index,
+                               c10::string_view reduce,
+                               const Tensor & result){
+  Tensor grad_input;
+
+
+  // TODO: gather doesn't support broadcasting of input and index
+  // currently this works because scatter_reduce doesn't support broadcasting yet but
+  // this needs to be fixed when scatter_reduce is upgraded to support broadcasting
+  // by broadcasting index here too.
+
+  if (reduce == "sum") {
+    grad_input = grad.gather(dim, index);
+  } else if (reduce == "prod") {
+    grad_input = (grad * result).gather(dim, index) / input;
+    // handle nans in above computation when input = 0, we know result = 0 (0 / 0 -> nan)
+    // so just replace with 0
+    grad_input.masked_fill_(input == 0, 0);
+  } else if (reduce == "mean") {
+    Tensor N = zeros_like(grad);
+    N.scatter_add_(dim, index, ones_like(input));
+    Tensor N_input = N.gather(dim, index);
+    grad_input = grad.gather(dim, index) / N_input;
+    grad_input.masked_fill_(N_input == 0, 0);
+  } else if (reduce == "amax" || reduce == "amin") {
+    Tensor value = result.gather(dim, index);
+    grad_input = (input == value) * grad.gather(dim, index);
+  } else {
+    AT_ERROR("Expected 'reduce' to be one of 'sum', 'prod', 'mean', 'amax', 'amin' but got ", reduce, ".");
+  }
+
+  return grad_input;
+
+}
+
 
 } // namespace details
 } // namespace generated
