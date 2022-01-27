@@ -71,8 +71,8 @@ class TestVulkanRewritePass(TestCase):
         return source_range
 
     def validate_rewrite(
-        self, 
-        scripted_model: torch.ScriptModule, 
+        self,
+        scripted_model: torch.ScriptModule,
         pattern_count_map: Dict[str, int],
     ) -> None:
         buffer = io.BytesIO()
@@ -83,7 +83,7 @@ class TestVulkanRewritePass(TestCase):
             FileCheck().check_count(pattern, v, exactly=True).run(deserialized_scripted_model.graph)
 
     def evaluate_model(
-        self, 
+        self,
         scripted_model: torch.ScriptModule,
         data_shape: Tuple[int, int, int, int],
     ) -> None:
