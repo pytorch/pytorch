@@ -266,6 +266,9 @@ class TestCommon(TestCase):
             if not test_grad:
                 continue
 
+            expected = sample_input.output_process_fn_grad(expected)
+            actual = sample_input.output_process_fn_grad(actual)
+
             if isinstance(expected, torch.Tensor):
                 expected_backward_tensor = expected
                 actual_backward_tensor = actual

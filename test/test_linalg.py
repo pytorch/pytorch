@@ -2817,6 +2817,27 @@ class TestLinalg(TestCase):
                 S_s = torch.svd(A, compute_uv=False).S
                 self.assertEqual(S_s, S)
 
+    @skipCUDAIfNoMagmaAndNoCusolver
+    @skipCPUIfNoLapack
+    @dtypes(torch.complex128)
+    def test_invariance_error_spectral_decompositions(self, device, dtype):
+        make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=True)
+        A = make_arg((3, 3))
+        with self.assertRaisesRegex(RuntimeError, "ill-defined"):
+            U, _, Vh = torch.linalg.svd(A, full_matrices=False)
+            (U + Vh).sum().backward()
+
+        A = make_arg((3, 3))
+        with self.assertRaisesRegex(RuntimeError, "ill-defined"):
+            V = torch.linalg.eig(A).eigenvectors
+            V.sum().backward()
+
+        A = make_arg((3, 3))
+        A = A + A.mH
+        with self.assertRaisesRegex(RuntimeError, "ill-defined"):
+            Q = torch.linalg.eigh(A).eigenvectors
+            Q.sum().backward()
+
     @skipCUDAIfNoCusolver  # MAGMA backend doesn't work in this case
     @skipCUDAIfRocm
     @precisionOverride({torch.float: 1e-4, torch.cfloat: 1e-4})
