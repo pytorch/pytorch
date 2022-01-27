@@ -1388,8 +1388,9 @@ const std::vector<std::string> functions = {
                   mat2,
                   *,
                   beta: number,
-                  alpha: number):
-            result = torch.addmm(self, mat1, mat2, beta=beta, alpha=alpha)
+                  alpha: number,
+                  dtype: Optional[int]):
+            result = torch.addmm(self, mat1, mat2, beta=beta, alpha=alpha, dtype=dtype)
             self_size = torch._size_if_not_equal(self.size(), result.size())
             def backward(grad_output):
                 self_grad = (grad_output * beta)._grad_sum_to_size(self_size)
