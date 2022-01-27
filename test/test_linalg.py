@@ -2886,9 +2886,6 @@ class TestLinalg(TestCase):
     @skipCPUIfNoLapack
     @dtypes(*floating_and_complex_types())
     def test_svd_errors_and_warnings(self, device, dtype):
-        if torch.device(device).type == 'cpu':
-            self.skipTest("Test broken on cpu (see gh-71645)")
-
         for svd in [torch.svd, torch.linalg.svd]:
             # if non-empty out tensor with wrong shape is passed a warning is given
             a = torch.randn(3, 3, dtype=dtype, device=device)
