@@ -225,6 +225,16 @@ using namespace c10::hip;
 #define C10_ALWAYS_INLINE inline
 #endif
 
+#if defined(_MSC_VER)
+#define C10_ATTR_VISIBILITY_HIDDEN
+#elif defined(__GNUC__)
+#define C10_ATTR_VISIBILITY_HIDDEN __attribute__((__visibility__("hidden")))
+#else
+#define C10_ATTR_VISIBILITY_HIDDEN
+#endif
+
+#define C10_ERASE C10_ALWAYS_INLINE C10_ATTR_VISIBILITY_HIDDEN
+
 // C10_FALLTHROUGH - Annotate fallthrough to the next case in a switch.
 #if C10_HAS_CPP_ATTRIBUTE(fallthrough)
 #define C10_FALLTHROUGH [[fallthrough]]
@@ -484,12 +494,13 @@ __host__ __device__
 #endif // HAS_DEMANGLE
 
 #ifdef __clang__
-#define _C10_PRAGMA__(string) _Pragma( #string )
-#define _C10_PRAGMA_(string) _C10_PRAGMA__( string )
+#define _C10_PRAGMA__(string) _Pragma(#string)
+#define _C10_PRAGMA_(string) _C10_PRAGMA__(string)
 #define C10_CLANG_DIAGNOSTIC_PUSH() _Pragma("clang diagnostic push")
 #define C10_CLANG_DIAGNOSTIC_POP() _Pragma("clang diagnostic pop")
-#define C10_CLANG_DIAGNOSTIC_IGNORE(flag) _C10_PRAGMA_(clang diagnostic ignored flag)
-#define C10_CLANG_HAS_WARNING(flag) __has_warning( flag )
+#define C10_CLANG_DIAGNOSTIC_IGNORE(flag) \
+  _C10_PRAGMA_(clang diagnostic ignored flag)
+#define C10_CLANG_HAS_WARNING(flag) __has_warning(flag)
 #else
 #define C10_CLANG_DIAGNOSTIC_PUSH()
 #define C10_CLANG_DIAGNOSTIC_POP()
