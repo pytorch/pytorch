@@ -59,7 +59,13 @@ class CheckpointFunction(torch.autograd.Function):
         check_backward_validity(args)
         ctx.run_function = run_function
         ctx.preserve_rng_state = preserve_rng_state
-        ctx.had_autocast_in_fwd = torch.is_autocast_enabled()
+        # Accommodates the (remote) possibility that autocast is enabled for cpu AND gpu.
+        ctx.gpu_autocast_kwargs = {"enabled": torch.is_autocast_enabled(),
+                                   "dtype": torch.get_autocast_gpu_dtype(),
+                                   "cache_enabled": torch.is_autocast_cache_enabled()}
+        ctx.cpu_autocast_kwargs = {"enabled": torch.is_autocast_cpu_enabled(),
+                                   "dtype": torch.get_autocast_cpu_dtype(),
+                                   "cache_enabled": torch.is_autocast_cache_enabled()}
         if preserve_rng_state:
             ctx.fwd_cpu_state = torch.get_rng_state()
             # Don't eagerly initialize the cuda context by accident.
@@ -118,7 +124,9 @@ class CheckpointFunction(torch.autograd.Function):
                 if ctx.had_cuda_in_fwd:
                     set_device_states(ctx.fwd_gpu_devices, ctx.fwd_gpu_states)
             detached_inputs = detach_variable(tuple(inputs))
-            with torch.enable_grad(), torch.cuda.amp.autocast(ctx.had_autocast_in_fwd):
+            with torch.enable_grad(), \
+                 torch.cuda.amp.autocast(**ctx.gpu_autocast_kwargs), \
+                 torch.cpu.amp.autocast(**ctx.cpu_autocast_kwargs):
                 outputs = ctx.run_function(*detached_inputs)
 
         if isinstance(outputs, torch.Tensor):
