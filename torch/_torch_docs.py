@@ -8548,7 +8548,7 @@ corresponding value in :attr:`index` for ``dimension = dim``.
 The applied reduction for non-unique indices is defined via the :attr:`reduce`
 argument (:obj:`"sum"`, :obj:`"prod"`, :obj:`"mean"`, :obj:`"amax"`, :obj:`"amin"`).
 For non-existing indices, the output will be filled with the identity of the
-applied reduction (1 for :obj:`"prod"` and 0 otherwise).  
+applied reduction (1 for :obj:`"prod"` and 0 otherwise).
 
 It is also required that ``index.size(d) == input.size(d)`` for all dimensions ``d``.
 Moreover, if :attr:`output_size` is defined the the values of :attr:`index` must be
