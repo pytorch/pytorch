@@ -157,8 +157,6 @@ Tensor embedding_bag_backward_cuda_sum_avg(
                                    int64_t padding_idx) {
   auto indices = indices_.contiguous();
 
-  auto grad_weight = at::zeros({num_weights, grad.size(1)}, grad.options());
-
   ptrdiff_t num_indices = indices.numel();
 
   if (num_indices == 0) {
