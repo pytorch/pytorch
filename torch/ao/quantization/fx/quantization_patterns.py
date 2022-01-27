@@ -22,6 +22,7 @@ from ..utils import (
     get_qconfig_dtypes,
     activation_dtype,
     get_qparam_dict,
+    check_node,
 )
 
 from torch.ao.quantization.quantize import (
@@ -1615,9 +1616,9 @@ class CopyNodeQuantizeHandler(QuantizeHandler):
                 load_arg: Callable,
                 is_reference: bool = False,
                 convert_custom_config_dict: Dict[str, Any] = None) -> Node:
-        # always produce reference pattern for relu
-        is_relu = node.op == "call_function" and node.target == torch.nn.functional.relu
-        if is_reference or is_relu:
+
+        is_call_function, is_call_method, is_call_module = check_node(node, modules)
+        if is_reference or (is_call_function or is_call_method or is_call_module):
             # when activation dtype is torch.float, the node does not require
             # observation
             # e.g. dynamic quantization or weight_only quantization
