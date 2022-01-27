@@ -3664,6 +3664,24 @@
     SparseCPU, SparseCUDA: round_sparse_out
     SparseCsrCPU, SparseCsrCUDA: round_sparse_csr_out
 
+- func: round.decimals(Tensor self, *, int decimals) -> Tensor
+  device_check: NoCheck   # TensorIterator
+  structured_delegate: round.decimals_out
+  variants: function, method
+
+- func: round_.decimals(Tensor(a!) self, *, int decimals) -> Tensor(a!)
+  device_check: NoCheck   # TensorIterator
+  structured_delegate: round.decimals_out
+  variants: function, method
+
+- func: round.decimals_out(Tensor self, *, int decimals, Tensor(a!) out) -> Tensor(a!)
+  device_check: NoCheck   # TensorIterator
+  structured: True
+  structured_inherits: TensorIteratorBase
+  dispatch:
+    CPU: round_decimals_out
+    CUDA: round_decimals_out
+
 - func: rrelu(Tensor self, Scalar lower=0.125, Scalar upper=0.3333333333333333, bool training=False, Generator? generator=None) -> Tensor
   device_check: NoCheck   # TensorIterator
 
@@ -4787,8 +4805,7 @@
 
 - func: _efficientzerotensor(int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   dispatch:
-    CPU: _efficientzerotensor
-    CUDA: _efficientzerotensor_cuda
+    CompositeExplicitAutograd: _efficientzerotensor
 
 - func: zeros(int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
 
@@ -6015,15 +6032,10 @@
 - func: scatter_add.dimname(Tensor self, Dimname dim, Tensor index, Tensor src) -> Tensor
   variants: function, method
 
-- func: _scatter_reduce(Tensor self, int dim, Tensor index, str reduce, *, int? output_size=None) -> Tensor
-  structured_delegate: _scatter_reduce.out
+- func: scatter_reduce.two(Tensor self, int dim, Tensor index, str reduce, *, int? output_size=None) -> Tensor
   variants: function, method
-
-- func: _scatter_reduce.out(Tensor self, int dim, Tensor index, str reduce, *, int? output_size=None, Tensor(a!) out) -> Tensor(a!)
-  structured: True
-  variants: function
   dispatch:
-    CPU: _scatter_reduce_structured_cpu
+    CPU: scatter_reduce_two_cpu
 
 - func: eq_.Scalar(Tensor(a!) self, Scalar other) -> Tensor(a!)
   structured_delegate: eq.Scalar_out
@@ -6995,12 +7007,6 @@
 
 - func: svd(Tensor self, bool some=True, bool compute_uv=True) -> (Tensor U, Tensor S, Tensor V)
   variants: method, function
-
-- func: _svd_helper(Tensor self, bool some, bool compute_uv) -> (Tensor U, Tensor S, Tensor V)
-  variants: function
-  dispatch:
-    CPU: _svd_helper_cpu
-    CUDA: _svd_helper_cuda
 
 # swapaxes, alias for transpose
 - func: swapaxes(Tensor(a) self, int axis0, int axis1) -> Tensor(a)
@@ -10485,11 +10491,11 @@
   python_module: special
   variants: function
 
-- func: special_round(Tensor self) -> Tensor
+- func: special_round(Tensor self, *, int decimals=0) -> Tensor
   python_module: special
   variants: function
 
-- func: special_round.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+- func: special_round.out(Tensor self, *, int decimals=0, Tensor(a!) out) -> Tensor(a!)
   python_module: special
   variants: function
 
@@ -10969,18 +10975,30 @@
 - func: linalg_matrix_norm.str_ord_out(Tensor self, str ord='fro', int[] dim=[-2,-1], bool keepdim=False, *, ScalarType? dtype=None, Tensor(a!) out) -> Tensor(a!)
   python_module: linalg
 
-- func: linalg_svd.U(Tensor self, bool full_matrices=True, *, Tensor(a!) U, Tensor(b!) S, Tensor(c!) Vh) -> (Tensor(a!) U, Tensor(b!) S, Tensor(c!) Vh)
-  python_module: linalg
+# This function is exposes the `compute_uv` flag, which is then used to implement `linalg.svd` and
+# `linalg.svdvals` as composite functions that call this one
+- func: _linalg_svd(Tensor A, bool full_matrices=False, bool compute_uv=True) -> (Tensor U, Tensor S, Tensor Vh)
+  variants: function
+  structured_delegate: _linalg_svd.U
 
-- func: linalg_svd(Tensor self, bool full_matrices=True) -> (Tensor U, Tensor S, Tensor Vh)
+- func: _linalg_svd.U(Tensor A, bool full_matrices=False, bool compute_uv=True, *, Tensor(a!) U, Tensor(b!) S, Tensor(c!) Vh) -> (Tensor(a!) U, Tensor(b!) S, Tensor(c!) Vh)
+  structured: True
+  dispatch:
+    CPU, CUDA: _linalg_svd_out
+
+- func: linalg_svd(Tensor A, bool full_matrices=True) -> (Tensor U, Tensor S, Tensor Vh)
   python_module: linalg
   variants: function
 
-- func: linalg_svdvals(Tensor input) -> Tensor
+- func: linalg_svd.U(Tensor A, bool full_matrices=True, *, Tensor(a!) U, Tensor(b!) S, Tensor(c!) Vh) -> (Tensor(a!) U, Tensor(b!) S, Tensor(c!) Vh)
   python_module: linalg
   variants: function
 
-- func: linalg_svdvals.out(Tensor input, *, Tensor(a!) out) -> Tensor(a!)
+- func: linalg_svdvals(Tensor A) -> Tensor
+  python_module: linalg
+  variants: function
+
+- func: linalg_svdvals.out(Tensor A, *, Tensor(a!) out) -> Tensor(a!)
   python_module: linalg
   variants: function
 
