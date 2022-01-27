@@ -7,14 +7,7 @@
 #include <torch/csrc/jit/backends/backend_detail.h>
 #include <torch/csrc/jit/backends/backend_preprocess.h>
 #include <torch/csrc/jit/mobile/nnc/aot_compiler.h>
-#include <torch/csrc/jit/passes/constant_propagation.h>
-#include <torch/csrc/jit/passes/dead_code_elimination.h>
 #include <torch/csrc/jit/passes/freeze_module.h>
-#include <torch/csrc/jit/passes/frozen_graph_optimizations.h>
-#include <torch/csrc/jit/passes/peephole.h>
-#include <torch/csrc/jit/passes/remove_mutation.h>
-#include <torch/csrc/jit/passes/shape_analysis.h>
-#include <torch/csrc/jit/passes/symbolic_shape_analysis.h>
 #include <torch/csrc/jit/serialization/export.h>
 #include <torch/csrc/jit/serialization/import.h>
 #include <torch/csrc/jit/tensorexpr/graph_opt.h>
