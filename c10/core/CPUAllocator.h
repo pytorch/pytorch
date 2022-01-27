@@ -4,6 +4,7 @@
 #include <unordered_map>
 
 #include <c10/core/Allocator.h>
+#include <c10/core/alignment.h> // legacy, update dependents to include this directly
 #include <c10/util/Logging.h>
 #include <c10/util/numa.h>
 
@@ -13,16 +14,6 @@ C10_DECLARE_bool(caffe2_cpu_allocator_do_zero_fill);
 C10_DECLARE_bool(caffe2_cpu_allocator_do_junk_fill);
 
 namespace c10 {
-
-#ifdef C10_MOBILE
-// Use 16-byte alignment on mobile
-// - ARM NEON AArch32 and AArch64
-// - x86[-64] < AVX
-constexpr size_t gAlignment = 16;
-#else
-// Use 64-byte alignment should be enough for computation up to AVX512.
-constexpr size_t gAlignment = 64;
-#endif
 
 using MemoryDeleter = void (*)(void*);
 

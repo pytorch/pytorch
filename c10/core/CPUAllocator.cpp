@@ -1,5 +1,6 @@
 #include <c10/core/CPUAllocator.h>
 #include <c10/core/DeviceType.h>
+#include <c10/core/alignment.h>
 #include <c10/mobile/CPUCachingAllocator.h>
 #include <c10/mobile/CPUProfilingAllocator.h>
 #include <c10/util/irange.h>
