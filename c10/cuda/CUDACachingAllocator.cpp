@@ -6,6 +6,7 @@
 #include <c10/cuda/CUDAGuard.h>
 #include <c10/util/UniqueVoidPtr.h>
 #include <c10/util/irange.h>
+#include <c10/util/flat_hash_map.h>
 
 #include <cuda_runtime_api.h>
 #include <algorithm>
@@ -17,8 +18,6 @@
 #include <mutex>
 #include <regex>
 #include <set>
-#include <unordered_map>
-#include <unordered_set>
 #include <vector>
 
 namespace c10 {
@@ -93,7 +92,7 @@ namespace CUDACachingAllocator {
 
 namespace {
 
-using stream_set = std::unordered_set<cuda::CUDAStream>;
+using stream_set = ska::flat_hash_set<cuda::CUDAStream>;
 
 constexpr size_t kMinBlockSize =
     512; // all sizes are rounded to at least 512 bytes
@@ -395,7 +394,7 @@ class DeviceCachingAllocator {
 
   // allocated or in use by a stream. Holds all active allocations,
   // whether they came from graph_pools or one of the BlockPools above.
-  std::unordered_set<Block*> active_blocks;
+  ska::flat_hash_set<Block*> active_blocks;
 
   // captures_underway tracks if a capture might be underway on any stream.
   // Most of the time it's zero, in which case malloc can avoid calling
@@ -404,7 +403,7 @@ class DeviceCachingAllocator {
   // See free() for this thing's purpose
   std::vector<Block*> needs_events_deferred_until_no_capture;
   // outstanding cuda events
-  std::unordered_map<cuda::CUDAStream, std::deque<std::pair<cudaEvent_t, Block*>>> cuda_events;
+  ska::flat_hash_map<cuda::CUDAStream, std::deque<std::pair<cudaEvent_t, Block*>>> cuda_events;
 
   // record used memory.
   size_t total_allocated_memory = 0;
@@ -416,18 +415,18 @@ class DeviceCachingAllocator {
   // Members specific to CUDA graphs
 
   // Private pools for CUDA graphs
-  std::unordered_map<MempoolId_t, std::unique_ptr<PrivatePool>, MempoolIdHash>
+  ska::flat_hash_map<MempoolId_t, std::unique_ptr<PrivatePool>, MempoolIdHash>
       graph_pools;
   // Pools no longer referenced by any graph. Their BlockPools are eligible for
   // free_blocks. Can't be a vector or deque because we might erase entries in
   // any order. Could be an std::list, but we don't care much, access and
   // insert/erase are rare.
-  std::unordered_map<MempoolId_t, PrivatePool*, MempoolIdHash>
+  ska::flat_hash_map<MempoolId_t, PrivatePool*, MempoolIdHash>
       graph_pools_freeable;
 
   // Maps a capturing stream to its assigned private pool,
   // in case we want multiple captures to share the same pool
-  std::unordered_map<CaptureId_t, MempoolId_t> capture_to_pool_map;
+  ska::flat_hash_map<CaptureId_t, MempoolId_t> capture_to_pool_map;
 
  public:
   DeviceCachingAllocator()
@@ -1332,7 +1331,7 @@ class THCCachingAllocator {
   std::mutex mutex;
 
   // allocated blocks by device pointer
-  std::unordered_map<void*, Block*> allocated_blocks;
+  ska::flat_hash_map<void*, Block*> allocated_blocks;
 
   // lock around calls to cudaFree (to prevent deadlocks with NCCL)
   mutable std::mutex cuda_free_mutex;
@@ -1607,7 +1606,7 @@ void notifyCaptureDestroy(int device, MempoolId_t mempool_id) {
 //
 namespace {
 std::mutex IpcMutex;
-std::unordered_map<std::string, std::weak_ptr<void>> ipcMemHandle_to_devptr;
+ska::flat_hash_map<std::string, std::weak_ptr<void>> ipcMemHandle_to_devptr;
 } // namespace
 
 std::shared_ptr<void> getIpcDevPtr(std::string handle) {
