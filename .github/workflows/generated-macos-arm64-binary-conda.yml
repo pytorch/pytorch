@@ -42,6 +42,7 @@ jobs:
       BUILDER_ROOT: ${{ github.workspace }}/builder
       PACKAGE_TYPE: conda
       SKIP_ALL_TESTS: 1
+      DESIRED_CUDA: cpu
       DESIRED_PYTHON: "3.8"
     steps:
       # NOTE: These environment variables are put here so that they can be applied on every job equally
@@ -87,6 +88,7 @@ jobs:
       BUILDER_ROOT: ${{ github.workspace }}/builder
       PACKAGE_TYPE: conda
       SKIP_ALL_TESTS: 1
+      DESIRED_CUDA: cpu
       DESIRED_PYTHON: "3.8"
     steps:
       - name: Display EC2 information
