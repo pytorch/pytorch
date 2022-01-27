@@ -3912,7 +3912,7 @@ class DistributedTest:
 
         def _test_ddp_hook_with_optimizer_parity(
             self, grad_as_bucket_view, static_graph, optim_cls,
-            *functional_optim_args, **functional_optim_kwargs
+            optimize_subset, *functional_optim_args, **functional_optim_kwargs
         ):
             rank = self.rank
             torch.cuda.set_device(rank)
@@ -3930,6 +3930,7 @@ class DistributedTest:
                 with torch.backends.cudnn.flags(
                     enabled=True, deterministic=True, benchmark=False
                 ):
+                    # Create DDP model that runs optimizer in fused fashion.
                     ddp_model_with_optimizer_hook = (
                         torch.nn.parallel.DistributedDataParallel(
                             copy.deepcopy(model).cuda(),
@@ -3939,13 +3940,6 @@ class DistributedTest:
                         )
                     )
 
-                    # Register a fused optimizer that will run optimizer in step
-                    # with allreduce.
-                    ddp_model_with_optimizer_hook._register_fused_optim(
-                        optim_cls,
-                        *functional_optim_args,
-                        **functional_optim_kwargs,
-                    )
                     # Create DDP model with no hook that does optimizer after
                     # backward.
                     ddp_model_with_no_hook = torch.nn.parallel.DistributedDataParallel(
@@ -3954,8 +3948,36 @@ class DistributedTest:
                         gradient_as_bucket_view=grad_as_bucket_view,
                         static_graph=static_graph,
                     )
+                    hook_params = ddp_model_with_optimizer_hook.parameters()
+                    no_hook_params = ddp_model_with_no_hook.parameters()
+                    if optimize_subset:
+                        hook_params = list(hook_params)
+                        no_hook_params = list(no_hook_params)
+                        self.assertGreater(len(hook_params), 0)
+                        hook_params = [hook_params[0]]
+                        no_hook_params = [no_hook_params[0]]
+
+                    # Register a fused optimizer that will run optimizer in step
+                    # with allreduce.
+
+                    if optimize_subset:
+                        # API where optim_params is specified.
+                        ddp_model_with_optimizer_hook._register_fused_optim(
+                            optim_cls,
+                            *functional_optim_args,
+                            optim_params=hook_params,
+                            **functional_optim_kwargs,
+                        )
+                    else:
+                        # API where optim_params is omitted
+                        ddp_model_with_optimizer_hook._register_fused_optim(
+                            optim_cls,
+                            *functional_optim_args,
+                            **functional_optim_kwargs,
+                        )
+
                     optimizer_no_hook = optim_cls(
-                        ddp_model_with_no_hook.parameters(),
+                        no_hook_params,
                         *functional_optim_args,
                         **functional_optim_kwargs,
                     )
@@ -3998,12 +4020,23 @@ class DistributedTest:
                     ):
                         self.assertEqual(hook_param, allreduce_param)
 
-                    # Verify optimizer modified parameters, otherwise they would
-                    # be trivially equal above.
-                    self.assertNotEqual(
-                        opt_hook_init_params,
-                        list(ddp_model_with_optimizer_hook.parameters()),
-                    )
+                    # Verify optimizer modified appropriate parameter set,
+                    # otherwise they'd be trivially equal above.
+                    if optimize_subset:
+                        self.assertNotEqual(
+                            opt_hook_init_params[0],
+                            list(ddp_model_with_optimizer_hook.parameters())[0]
+                        )
+                        # Untouched params should be equal
+                        self.assertEqual(
+                            opt_hook_init_params[1:],
+                            list(ddp_model_with_optimizer_hook.parameters())[1:]
+                        )
+                    else:
+                        self.assertNotEqual(
+                            opt_hook_init_params,
+                            list(ddp_model_with_optimizer_hook.parameters()),
+                        )
                     dist.barrier()
 
         @sandcastle_skip_if(
@@ -4014,10 +4047,12 @@ class DistributedTest:
         @skip_if_rocm
         @parametrize("grad_as_bucket_view", [True, False])
         @parametrize("static_graph", [True, False])
+        @parametrize("optimize_subset", [True, False])
         def test_ddp_hook_with_optimizer_parity_adamw(
             self,
             grad_as_bucket_view,
             static_graph,
+            optimize_subset,
         ):
             adamw_lr = 1e-2
             adamw_betas = (0.9, 0.99)
@@ -4026,6 +4061,7 @@ class DistributedTest:
                 grad_as_bucket_view,
                 static_graph,
                 torch.optim.AdamW,
+                optimize_subset,
                 adamw_lr,
                 betas=adamw_betas,
                 eps=adamw_eps,
@@ -4037,7 +4073,8 @@ class DistributedTest:
         )
         @skip_if_lt_x_gpu(2)
         @skip_if_rocm
-        def test_ddp_hook_with_optimizer_parity_adam(self):
+        @parametrize("optimize_subset", [True, False])
+        def test_ddp_hook_with_optimizer_parity_adam(self, optimize_subset):
             adam_lr = 1e-2
             adam_betas = (0.9, 0.99)
             adam_eps = 1e-6
@@ -4045,6 +4082,7 @@ class DistributedTest:
                 True,  # grad as bucket view
                 False,  # static graph
                 torch.optim.Adam,
+                optimize_subset,
                 adam_lr,
                 betas=adam_betas,
                 eps=adam_eps,
@@ -4056,7 +4094,8 @@ class DistributedTest:
         )
         @skip_if_lt_x_gpu(2)
         @skip_if_rocm
-        def test_ddp_hook_with_optimizer_parity_sgd(self):
+        @parametrize("optimize_subset", [True, False])
+        def test_ddp_hook_with_optimizer_parity_sgd(self, optimize_subset):
             sgd_lr = 1e-2
             sgd_momentum = 0.9
             sgd_weight_decay = 0.01
@@ -4066,6 +4105,7 @@ class DistributedTest:
                 True,  # grad as bucket view
                 False,  # static_graph
                 torch.optim.SGD,
+                optimize_subset,
                 sgd_lr,
                 momentum=sgd_momentum,
                 weight_decay=sgd_weight_decay,
