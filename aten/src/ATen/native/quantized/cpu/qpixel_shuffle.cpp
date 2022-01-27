@@ -50,14 +50,6 @@ Tensor quantized_pixel_shuffle_impl(
       self_nhwc.q_zero_point(),
       MemoryFormat::ChannelsLast);
 
-  // input strides
-  int64_t stride_n = height * width * channels;
-  int64_t stride_h = width * channels;
-  int64_t stride_w = channels;
-  int64_t stride_c = S * S;
-  int64_t stride_s1 = S;
-  int64_t stride_s2 = 1;
-
   auto qx_data = self_nhwc.data_ptr<c10::quint8>();
   auto qy_data = qy.data_ptr<c10::quint8>();
 
@@ -73,7 +65,7 @@ Tensor quantized_pixel_shuffle_impl(
       int64_t n = i / height;
       int64_t h = i % height;
       for (const auto w : c10::irange(width)) {
-        auto qx_ptr = qx_data + n * stride_n + h * stride_h + w * stride_w;
+        auto qx_ptr = qx_data + n * height * width * channels + h * width * channels + w * channels;
 
         // step 1: transpose each channel lane
         //   src: input channel view as [oc, s1*s2]
