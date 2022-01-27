@@ -35,6 +35,7 @@ Tensor toNonOptFwGrad(const c10::optional<Tensor>& t);
 Tensor toNonOptPrimal(const c10::optional<Tensor>& t);
 Tensor toNonOptTensor(const c10::optional<Tensor>& t);
 
+Tensor apply_loss_reduction(const Tensor& unreduced, int64_t reduction);
 bool any_variable_defined(const variable_list& variables);
 void copy_range(variable_list& out, IndexRange range, const at::Tensor & t);
 void copy_range(variable_list& out, IndexRange range, at::ArrayRef<at::Tensor> t);
@@ -459,6 +460,16 @@ std::tuple<Tensor, Tensor> _cudnn_convolution_backward(
     const at::Tensor & self, const at::Tensor & grad_output, const at::Tensor & weight, at::IntArrayRef padding,
     at::IntArrayRef output_padding, at::IntArrayRef stride, at::IntArrayRef dilation, bool transposed, int64_t groups,
     ::std::array<bool,2> output_mask);
+
+Tensor scatter_reduce_backward(
+  const Tensor& grad,
+  const Tensor& input,
+  int dim,
+  const Tensor& index,
+  c10::string_view reduce,
+  const Tensor& result
+);
+
 
 } // namespace details
 } // namespace generated

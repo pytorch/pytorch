@@ -12,7 +12,8 @@ namespace jit {
 
 TORCH_API void populate_upgraders_graph_map();
 
-TORCH_API std::unordered_map<std::string, std::shared_ptr<Graph>> generate_upgraders_graph();
+TORCH_API std::unordered_map<std::string, std::shared_ptr<Graph>>
+generate_upgraders_graph();
 
 std::shared_ptr<Graph> create_upgrader_graph(
     const std::string& upgrader_name,

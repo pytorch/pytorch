@@ -68,7 +68,8 @@ std::shared_ptr<Graph> create_upgrader_graph(
   return graphFunction.graph();
 }
 
-std::unordered_map<std::string, std::shared_ptr<Graph>> generate_upgraders_graph() {
+std::unordered_map<std::string, std::shared_ptr<Graph>>
+generate_upgraders_graph() {
   std::unordered_map<std::string, std::shared_ptr<Graph>> populate_content;
   for (const auto& entry : kUpgradersEntryMap) {
     auto upgrader_graph = create_upgrader_graph(entry.first, entry.second);
