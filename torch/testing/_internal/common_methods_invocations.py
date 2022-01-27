@@ -341,6 +341,11 @@ NumericsFilter = collections.namedtuple('NumericsFilter', ['condition', 'safe_va
 #   "output_process_fn_grad" function, the "broadcasts_input" bool and a
 #   "name".
 #
+#   All the "sample_inputs" functions are invoked within a `torch.no_grad()`
+#   environment for efficiency and correctness. As such remember to set the the
+#   "requires_grad" flag on the inputs **after** performing any transformations
+#   on them.
+#
 # The "input" is the first argument to the operator, or the tensor that
 #   the method or inplace variants of the operator should be called on, and
 #   should be on the requested device, of the requested dtype, and its
@@ -680,7 +685,8 @@ class OpInfo(object):
 
         self.decorators = (*decorators, *skips)
 
-        self.sample_inputs_func = sample_inputs_func
+        # We run the sampling functions without tracking the gradiends of the creation of inputs
+        self.sample_inputs_func = torch.no_grad()(sample_inputs_func)
         self.error_inputs_func = error_inputs_func
 
         self.assert_autodiffed = assert_autodiffed
@@ -814,8 +820,7 @@ class OpInfo(object):
 
         def conjugate(tensor):
             _requires_grad = tensor.requires_grad
-            with torch.no_grad():
-                tensor = tensor.conj()
+            tensor = tensor.conj()
             return tensor.requires_grad_(_requires_grad)
 
         for i, sample in enumerate(samples):
@@ -824,8 +829,7 @@ class OpInfo(object):
             if isinstance(sample.input, torch.Tensor):
                 sample.input = conjugate(sample.input)
             else:
-                with torch.no_grad():
-                    sample.input[0] = conjugate(sample.input[0])
+                sample.input[0] = conjugate(sample.input[0])
 
         return tuple(conj_samples)
 
@@ -922,7 +926,7 @@ class OpInfo(object):
         return '{}{}'.format(self.name.replace('.', '_'), variant)
 
 
-def _generate_reduction_inputs(device, dtype, requires_grad):
+def _generate_reduction_inputs(device, dtype, requires_grad, **kwargs):
     """Generates input tensors for testing reduction operators"""
     yield make_tensor([], device, dtype, requires_grad=requires_grad)
     yield make_tensor([2], device, dtype, requires_grad=requires_grad)
@@ -976,7 +980,7 @@ def sample_inputs_reduction(op_info, device, dtype, requires_grad, **kwargs):
             for args, kwargs in generate_args_kwargs(t, **reduction_kwargs):
                 kwargs.update(reduction_kwargs)
                 inputs.append(SampleInput(
-                    t.detach().clone().requires_grad_(requires_grad),
+                    t.clone().requires_grad_(requires_grad),
                     args=args,
                     kwargs=kwargs))
 
@@ -1015,7 +1019,7 @@ def sample_inputs_masked_reduction(op_info, device, dtype, requires_grad, **kwar
     for sample_input in sample_inputs_reduction(op_info, device, dtype, requires_grad, **kwargs):
         for mask in _generate_masked_op_mask(sample_input.input.shape, device, **kwargs):
             sample_input_args, sample_input_kwargs = sample_input.args, dict(mask=mask, **sample_input.kwargs)
-            inputs.append(SampleInput(sample_input.input.detach().clone().requires_grad_(requires_grad),
+            inputs.append(SampleInput(sample_input.input.clone().requires_grad_(requires_grad),
                                       args=sample_input_args, kwargs=sample_input_kwargs))
             if(not requires_grad and dtype.is_floating_point and
                sample_input.input.ndim == 2 and mask is not None and
@@ -1037,7 +1041,7 @@ def sample_inputs_masked_norm(op_info, device, dtype, requires_grad, **kwargs):
     for ord in [2.0, 1, float('inf'), float('-inf'), 0]:
         for sample_input in sample_inputs_masked_reduction(op_info, device, dtype, requires_grad, **kwargs):
             sample_input_args, sample_input_kwargs = (ord,) + sample_input.args, sample_input.kwargs.copy()
-            inputs.append(SampleInput(sample_input.input.detach().clone().requires_grad_(requires_grad),
+            inputs.append(SampleInput(sample_input.input.clone().requires_grad_(requires_grad),
                                       args=sample_input_args, kwargs=sample_input_kwargs))
     return inputs
 
@@ -1066,7 +1070,7 @@ def sample_inputs_masked_var(op_info, device, dtype, requires_grad, **kwargs):
                     # autograd output that test_grad_fn cannot handle
                     # correctly.
                     continue
-            inputs.append(SampleInput(sample_input.input.detach().clone().requires_grad_(requires_grad),
+            inputs.append(SampleInput(sample_input.input.clone().requires_grad_(requires_grad),
                                       args=sample_input_args, kwargs=sample_input_kwargs))
     return inputs
 
@@ -1317,21 +1321,18 @@ def sample_inputs_linalg_det_singular(op_info, device, dtype, requires_grad, **k
         assert size[-1] == size[-2]
         assert rank > 0 and rank < size[-1]
 
-        with torch.no_grad():
-            n = size[-1]
-            a = make_arg(size[:-2] + (n, rank)) / 10
-            b = make_arg(size[:-2] + (rank, n)) / 10
-
-            x = a @ b
-            lu, pivs, _ = torch.linalg.lu_factor_ex(x)
-            p, l, u = torch.lu_unpack(lu, pivs)
-            u_diag_abs = u.diagonal(0, -2, -1).abs()
-            u_diag_abs_largest = u_diag_abs.max(dim=-1, keepdim=True).values
-            u_diag_abs_smallest_idxs = torch.topk(u_diag_abs, k=(n - rank), largest=False).indices
-            u[..., u_diag_abs_smallest_idxs] = torch.finfo(dtype).eps
-
-
-            matrix = p @ l @ u
+        n = size[-1]
+        a = make_arg(size[:-2] + (n, rank)) / 10
+        b = make_arg(size[:-2] + (rank, n)) / 10
+        x = a @ b
+        lu, pivs, _ = torch.linalg.lu_factor_ex(x)
+        p, l, u = torch.lu_unpack(lu, pivs)
+        u_diag_abs = u.diagonal(0, -2, -1).abs()
+        u_diag_abs_largest = u_diag_abs.max(dim=-1, keepdim=True).values
+        u_diag_abs_smallest_idxs = torch.topk(u_diag_abs, k=(n - rank), largest=False).indices
+        u.diagonal(0, -2, -1).div_(u_diag_abs_largest)
+        u[..., u_diag_abs_smallest_idxs] = torch.finfo(dtype).eps
+        matrix = p @ l @ u
 
         matrix.requires_grad_(requires_grad)
         return matrix
@@ -1345,7 +1346,7 @@ def sample_inputs_linalg_det_singular(op_info, device, dtype, requires_grad, **k
     return [SampleInput(t) for t in sample_generator()]
 
 
-def sample_inputs_linalg_matrix_power(op_info, device, dtype, requires_grad):
+def sample_inputs_linalg_matrix_power(op_info, device, dtype, requires_grad, **kwargs):
     make_fullrank = make_fullrank_matrices_with_distinct_singular_values
     make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
     make_arg_fullrank = partial(make_fullrank, dtype=dtype, device=device, requires_grad=requires_grad)
@@ -1356,17 +1357,14 @@ def sample_inputs_linalg_matrix_power(op_info, device, dtype, requires_grad):
         (2, (2,)),
     ]
 
-    def generate_inputs():
-        for matrix_size, batch_sizes in test_sizes:
-            size = batch_sizes + (matrix_size, matrix_size)
-            for n in (0, 3, 5):
-                yield SampleInput(make_arg(size), args=(n,))
-            for n in [-4, -2, -1]:
-                yield SampleInput(make_arg_fullrank(*size), args=(n,))
+    for matrix_size, batch_sizes in test_sizes:
+        size = batch_sizes + (matrix_size, matrix_size)
+        for n in (0, 3, 5):
+            yield SampleInput(make_arg(size), args=(n,))
+        for n in [-4, -2, -1]:
+            yield SampleInput(make_arg_fullrank(*size), args=(n,))
 
-    return list(generate_inputs())
-
-def sample_inputs_hsplit(op_info, device, dtype, requires_grad):
+def sample_inputs_hsplit(op_info, device, dtype, requires_grad, **kwargs):
     return (SampleInput(make_tensor((6,), device, dtype,
                                     low=None, high=None,
                                     requires_grad=requires_grad),
@@ -1376,7 +1374,7 @@ def sample_inputs_hsplit(op_info, device, dtype, requires_grad):
                                     requires_grad=requires_grad),
                         args=([1, 2, 3],),),)
 
-def sample_inputs_vsplit(op_info, device, dtype, requires_grad):
+def sample_inputs_vsplit(op_info, device, dtype, requires_grad, **kwargs):
     return (SampleInput(make_tensor((6, S), device, dtype,
                                     low=None, high=None,
                                     requires_grad=requires_grad),
@@ -1386,7 +1384,7 @@ def sample_inputs_vsplit(op_info, device, dtype, requires_grad):
                                     requires_grad=requires_grad),
                         args=([1, 2, 3],),),)
 
-def sample_inputs_dsplit(op_info, device, dtype, requires_grad):
+def sample_inputs_dsplit(op_info, device, dtype, requires_grad, **kwargs):
     return (SampleInput(make_tensor((S, S, S), device, dtype,
                                     low=None, high=None,
                                     requires_grad=requires_grad),
@@ -1447,7 +1445,7 @@ def error_inputs_dsplit(op_info, device, **kwargs):
     return (ErrorInput(si1, error_type=RuntimeError, error_regex=err_msg1),
             ErrorInput(si2, error_type=RuntimeError, error_regex=err_msg2),)
 
-def sample_inputs_linalg_multi_dot(op_info, device, dtype, requires_grad):
+def sample_inputs_linalg_multi_dot(op_info, device, dtype, requires_grad, **kwargs):
     # Each test case consists of the sizes in the chain of multiplications
     # e.g. [2, 3, 4, 5] generates matrices (2, 3) @ (3, 4) @ (4, 5)
     test_cases = [
@@ -1482,7 +1480,7 @@ def sample_inputs_linalg_matrix_norm(op_info, device, dtype, requires_grad, **kw
 
     return inputs
 
-def sample_inputs_linalg_norm(op_info, device, dtype, requires_grad):
+def sample_inputs_linalg_norm(op_info, device, dtype, requires_grad, **kwargs):
     test_sizes = [
         (S,),
         (0,),
@@ -2064,26 +2062,18 @@ def sample_inputs_t(op_info, device, dtype, requires_grad, **kwargs):
 
 
 def sample_inputs_mm(op_info, device, dtype, requires_grad, **kwargs):
-    make_arg = partial(make_tensor, device=device, dtype=dtype)
+    make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+
+    def make_arg_conj(size):
+        return make_arg(size).conj().requires_grad_(requires_grad)
 
     first_shape, second_shape = (S, M), (M, S)
-    sample_inputs = []
 
-    sample_inputs.append(
-        SampleInput(make_arg(first_shape, requires_grad=requires_grad),
-                    args=(make_arg(second_shape, requires_grad=requires_grad),)))
+    yield SampleInput(make_arg(first_shape), args=(make_arg(second_shape),))
 
     if dtype.is_complex:
-        sample_inputs.append(
-            SampleInput(make_arg(first_shape, requires_grad=requires_grad),
-                        args=(make_arg(second_shape).conj().requires_grad_(requires_grad),)))
+        yield SampleInput(make_arg(first_shape), args=(make_arg_conj(second_shape),))
 
-        sample_inputs.append(
-            SampleInput(
-                make_arg(first_shape).transpose(0, 1).requires_grad_(requires_grad),
-                args=(make_arg(second_shape).transpose(0, 1).conj().requires_grad_(requires_grad),)))
-
-    return sample_inputs
 
 def sample_inputs_addmm(op_info, device, dtype, requires_grad, **kwargs):
     alpha_val = kwargs.get('alpha', 2 + 3j if dtype.is_complex else 0.6)
@@ -2116,8 +2106,7 @@ def sample_inputs_addmm(op_info, device, dtype, requires_grad, **kwargs):
         sample_inputs.append(
             SampleInput(make_tensor(shape, device, dtype, requires_grad=requires_grad),
                         args=(
-                            make_tensor(shape, device, dtype,
-                                        requires_grad=requires_grad).t().conj(),
+                            make_tensor(shape, device, dtype).mH.requires_grad_(requires_grad),
                             make_tensor(shape, device, dtype,
                                         requires_grad=requires_grad)),
                         kwargs={'alpha': alpha_val, 'beta': beta_val},))
@@ -2126,8 +2115,7 @@ def sample_inputs_addmm(op_info, device, dtype, requires_grad, **kwargs):
                         args=(
                             make_tensor(shape, device, dtype,
                                         requires_grad=requires_grad),
-                            make_tensor(shape, device, dtype,
-                                        requires_grad=requires_grad).t().conj()),
+                            make_tensor(shape, device, dtype).mH.requires_grad_(requires_grad)),
                         kwargs={'alpha': alpha_val, 'beta': beta_val},))
     return sample_inputs
 
@@ -2152,23 +2140,18 @@ def sample_inputs_bmm(self, device, dtype, requires_grad, **kwargs):
     )
 
 def sample_inputs_dot_vdot(self, device, dtype, requires_grad, **kwargs):
+    make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+
+    def make_arg_conj(size):
+        return make_arg(size).conj().requires_grad_(requires_grad)
+
     sample_inputs = []
-    sample_inputs.append(SampleInput(
-        make_tensor((S, ), device, dtype, low=None, high=None, requires_grad=requires_grad),
-        args=(
-            make_tensor((S, ), device, dtype, low=None, high=None, requires_grad=requires_grad),
-        )
-    ))
+    sample_inputs.append(SampleInput(make_arg((S, )), args=(make_arg((S, )),)))
     if dtype.is_complex:
         # dot/vdot for (conj(input), conj(arg_tensor)) and (conj(input), arg_tensor)
         # is tested in test_conj_view (which tests operations with only conjugated input tensor
         # -- not conjugated arg tensors)
-        sample_inputs.append(SampleInput(
-            make_tensor((S, ), device, dtype, low=None, high=None, requires_grad=requires_grad),
-            args=(
-                torch.conj(make_tensor((S, ), device, dtype, low=None, high=None, requires_grad=requires_grad)),
-            )
-        ))
+        sample_inputs.append(SampleInput(make_arg((S, )), args=(make_arg_conj((S, )),)))
     return sample_inputs
 
 def sample_inputs_addmv(op_info, device, dtype, requires_grad, **kwargs):
@@ -2262,9 +2245,9 @@ def sample_inputs_baddbmm(op_info, device, dtype, requires_grad, **kwargs):
                              kwargs=dict(beta=beta, alpha=alpha), broadcasts_input=broadcasts_input))
         if dtype.is_complex:
             sample_inputs.append(SampleInput(
-                args[0].detach().clone().requires_grad_(requires_grad),
-                args=(args[1].detach().clone().requires_grad_(requires_grad),
-                      args[2].detach().clone().requires_grad_(requires_grad)),
+                args[0].clone().requires_grad_(requires_grad),
+                args=(args[1].clone().requires_grad_(requires_grad),
+                      args[2].clone().requires_grad_(requires_grad)),
                 kwargs=dict(beta=beta * (1 + 2j), alpha=alpha * (2 + 3j)),
                 broadcasts_input=broadcasts_input))
 
@@ -2281,9 +2264,9 @@ def sample_inputs_baddbmm(op_info, device, dtype, requires_grad, **kwargs):
                             requires_grad=requires_grad))
         sample_inputs.append(
             SampleInput(
-                args[0].transpose(-1, 1).detach().requires_grad_(requires_grad),
-                args=(args[1].transpose(-1, 1).conj().detach().requires_grad_(requires_grad),
-                      args[2].transpose(-1, 1).conj().detach().requires_grad_(requires_grad)),
+                args[0].transpose_(-1, 1),
+                args=(args[1].transpose(-1, 1).conj().requires_grad_(requires_grad),
+                      args[2].transpose(-1, 1).conj().requires_grad_(requires_grad)),
                 kwargs=dict(beta=beta * (1 + 2j), alpha=alpha * (2 + 3j)),))
 
     return tuple(sample_inputs)
@@ -2337,7 +2320,7 @@ def sample_inputs_xlogy(self, device, dtype, requires_grad, **kwargs):
     )
 
 
-def sample_inputs_xlog1py(self, device, dtype, requires_grad):
+def sample_inputs_xlog1py(self, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
 
     # same shape
@@ -2345,16 +2328,14 @@ def sample_inputs_xlog1py(self, device, dtype, requires_grad):
     # rhs broadcast
     yield SampleInput(make_arg((S, S)), args=(make_arg((S,), low=-1),))
     # all zero `x`
-    with torch.no_grad():
-        x = make_arg((S, S))
-        x.fill_(0)
+    x = make_arg((S, S))
+    x.fill_(0)
     yield SampleInput(x, args=(make_arg((S, S), low=-1),))
 
     # randomly zero-masked `x`
     x = make_arg((S, S))
     y = make_arg((S, S), low=-1)
-    with torch.no_grad():
-        x[torch.rand(x.shape) > 0.5] = 0
+    x[torch.rand(x.shape) > 0.5] = 0
     yield SampleInput(x, args=(y,))
 
     # Scalar x
@@ -2375,7 +2356,7 @@ def sample_inputs_zero_(op_info, device, dtype, requires_grad, **kwargs):
         yield(SampleInput(make_arg(shape)))
 
 
-def sample_inputs_logsumexp(self, device, dtype, requires_grad):
+def sample_inputs_logsumexp(self, device, dtype, requires_grad, **kwargs):
     inputs = (
         ((), (0,), True),
         ((S, S), (1,), True),
@@ -2416,7 +2397,7 @@ def sample_inputs_like_fns(self, device, dtype, requires_grad, **kwargs):
     return tuple(samples)
 
 def get_independent_tensor(tensor):
-    return tensor.detach().clone().requires_grad_(tensor.requires_grad)
+    return tensor.clone().requires_grad_(tensor.requires_grad)
 
 def sample_inputs_randint_like(self, device, dtype, requires_grad, **kwargs):
     samples = []
@@ -2567,7 +2548,7 @@ def sample_inputs_bernoulli(self, device, dtype, requires_grad, **kwargs):
         samples.append(SampleInput(t))
     return tuple(samples)
 
-def sample_inputs_logcumsumexp(self, device, dtype, requires_grad):
+def sample_inputs_logcumsumexp(self, device, dtype, requires_grad, **kwargs):
     inputs = (
         ((S, S, S), 0),
         ((S, S, S), 1),
@@ -2582,8 +2563,7 @@ def sample_inputs_logcumsumexp(self, device, dtype, requires_grad):
                             requires_grad=requires_grad)
 
             if large_number and t.dim() > 0:
-                with torch.no_grad():
-                    t[0] = 10000
+                t[0] = 10000
             samples.append(SampleInput(t, args=(dim,)))
 
     return tuple(samples)
@@ -2653,11 +2633,8 @@ def sample_inputs_linalg_invertible(op_info, device, dtype, requires_grad=False,
     batches = [(), (0, ), (2, ), (1, 1)]
     ns = [5, 0]
 
-    def generate_samples():
-        for batch, n in product(batches, ns):
-            yield SampleInput(make_arg(*batch, n, n))
-
-    return list(generate_samples())
+    for batch, n in product(batches, ns):
+        yield SampleInput(make_arg(*batch, n, n))
 
 def sample_inputs_linalg_pinv_singular(op_info, device, dtype, requires_grad=False, **kwargs):
     """
@@ -2689,26 +2666,23 @@ def sample_inputs_singular_matrix_factors(op_info, device, dtype, requires_grad=
     batches = [(), (0, ), (2, ), (1, 1)]
     size = [1, 5, 10]
 
-    def generator():
-        for batch, m, n in product(batches, size, size):
-            for k in range(min(3, min(m, n))):
-                a = make_tensor((*batch, m, k), device, dtype, requires_grad=requires_grad)
-                b = make_tensor((*batch, n, k), device, dtype, requires_grad=requires_grad)
-                yield SampleInput(a, args=(b,), kwargs=kwargs)
-
-    return list(generator())
+    for batch, m, n in product(batches, size, size):
+        for k in range(min(3, min(m, n))):
+            a = make_tensor((*batch, m, k), device, dtype, requires_grad=requires_grad)
+            b = make_tensor((*batch, n, k), device, dtype, requires_grad=requires_grad)
+            yield SampleInput(a, args=(b,), kwargs=kwargs)
 
 
 def clone_sample(sample, **kwargs):
     """
     Given a SampleInput, this function analyzes its input, args and kwargs,
     and produces a copy with each non-Tensor entry being copied by reference,
-    and with each Tensor entry cloned with `t.detach().clone().requires_grad_(t.requires_grad)`
+    and with each Tensor entry cloned with `t.clone().requires_grad_(t.requires_grad)`
     """
 
     def clone_tensor(t):
         if isinstance(t, torch.Tensor):
-            return t.detach().clone().requires_grad_(t.requires_grad)
+            return t.clone().requires_grad_(t.requires_grad)
         else:
             return t
 
@@ -2969,7 +2943,7 @@ def sample_inputs_hstack_dstack_vstack(op_info, device, dtype, requires_grad, **
 
     return (SampleInput(tensors),)
 
-def sample_inputs_hypot(op_info, device, dtype, requires_grad):
+def sample_inputs_hypot(op_info, device, dtype, requires_grad, **kwargs):
     input = make_tensor((S, S), device, dtype, requires_grad=requires_grad)
     args = make_tensor((S, S), device, dtype, requires_grad=requires_grad)
 
@@ -3176,7 +3150,7 @@ def sample_inputs_diff(op_info, device, dtype, requires_grad, **kwargs):
 
     return sample_inputs
 
-def sample_inputs_histogram(op_info, device, dtype, requires_grad):
+def sample_inputs_histogram(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
 
     sizes = ((), (S,), (S, S), (S, S, S), (S, 1, S), (S, 0, S))
@@ -3195,7 +3169,7 @@ def sample_inputs_histogram(op_info, device, dtype, requires_grad):
 
     return sample_inputs
 
-def sample_inputs_histogramdd(op_info, device, dtype, requires_grad):
+def sample_inputs_histogramdd(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
 
     sizes = ((S, S), (S, S, S), (S, 1, S), (S, 0, S))
@@ -3216,7 +3190,7 @@ def sample_inputs_histogramdd(op_info, device, dtype, requires_grad):
 
     return sample_inputs
 
-def sample_inputs_histc(op_info, device, dtype, requires_grad):
+def sample_inputs_histc(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
 
     sizes = ((), (S,), (S, S), (S, S, S), (S, 1, S), (S, 0, S))
@@ -3234,7 +3208,7 @@ def sample_inputs_histc(op_info, device, dtype, requires_grad):
 
     return sample_inputs
 
-def sample_inputs_bincount(op_info, device, dtype, requires_grad):
+def sample_inputs_bincount(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
 
     sample_inputs = []
@@ -3251,7 +3225,7 @@ def sample_inputs_bincount(op_info, device, dtype, requires_grad):
 
     return sample_inputs
 
-def sample_inputs_bucketize(op_info, device, dtype, requires_grad):
+def sample_inputs_bucketize(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
 
     sizes = ((), (S,), (S, S), (S, S, S), (S, 1, S), (S, 0, S))
@@ -3267,7 +3241,7 @@ def sample_inputs_bucketize(op_info, device, dtype, requires_grad):
 
     return sample_inputs
 
-def sample_inputs_searchsorted(op_info, device, dtype, requires_grad):
+def sample_inputs_searchsorted(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
 
     sizes = ((0,), (M,), (0, 0), (M, M), (0, 0, 0), (M, M, M))
@@ -3291,7 +3265,7 @@ def sample_inputs_searchsorted(op_info, device, dtype, requires_grad):
             SampleInput(unsorted_tensor, args=(input_tensor,), kwargs=dict(out_int32=out_int32, side=side, sorter=sorter)))
     return inputs
 
-def sample_inputs_gradient(op_info, device, dtype, requires_grad):
+def sample_inputs_gradient(op_info, device, dtype, requires_grad, **kwargs):
     sample_inputs = []
     test_cases_float = (
         ((S,), None, None, 1),
@@ -3693,14 +3667,12 @@ def sample_inputs_conv_transpose1d(op_info, device, dtype, requires_grad, **kwar
          {})
     )
 
-    def generator():
-        for input_shape, weight, bias, kwargs in cases:
-            yield SampleInput(make_arg(input_shape), args=(
-                make_arg(weight),
-                make_arg(bias) if bias is not None else bias
-            ), kwargs=kwargs)
+    for input_shape, weight, bias, kwargs in cases:
+        yield SampleInput(make_arg(input_shape), args=(
+            make_arg(weight),
+            make_arg(bias) if bias is not None else bias
+        ), kwargs=kwargs)
 
-    return list(generator())
 
 def sample_inputs_conv_transpose2d(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
@@ -3744,14 +3716,11 @@ def sample_inputs_conv_transpose3d(op_info, device, dtype, requires_grad, **kwar
          {})
     )
 
-    def generator():
-        for input_shape, weight, bias, kwargs in cases:
-            yield SampleInput(make_arg(input_shape), args=(
-                make_arg(weight),
-                make_arg(bias) if bias is not None else bias
-            ), kwargs=kwargs)
-
-    return list(generator())
+    for input_shape, weight, bias, kwargs in cases:
+        yield SampleInput(make_arg(input_shape), args=(
+            make_arg(weight),
+            make_arg(bias) if bias is not None else bias
+        ), kwargs=kwargs)
 
 
 def sample_inputs_conv1d(op_info, device, dtype, requires_grad, **kwargs):
@@ -3957,14 +3926,14 @@ def sample_inputs_local_response_norm(opinfo, device, dtype, requires_grad, **kw
         yield SampleInput(make_arg(input_shape), args=(size,), kwargs=kwargs)
 
 
-def sample_inputs_hardswish(self, device, dtype, requires_grad):
+def sample_inputs_hardswish(self, device, dtype, requires_grad, **kwargs):
     N = 5
     # make sure we are testing -3 -> 3 range. default is -10 -> 10 so maybe unnecessary ?
     tensors = [SampleInput(make_tensor((N * 2, N * 2), device=device, dtype=dtype,
                requires_grad=requires_grad, low=-5, high=5)) for _ in range(1, N)]
     return tensors
 
-def sample_inputs_linear(self, device, dtype, requires_grad):
+def sample_inputs_linear(self, device, dtype, requires_grad, **kwargs):
     features_options = [[3, 4], [8, 8]]
     batch_options: List[List[int]] = [
         [],  # no batch
@@ -3988,7 +3957,7 @@ def sample_inputs_linear(self, device, dtype, requires_grad):
         sample_inputs.append(SampleInput(input_tensor, args=(weight, bias)))
     return sample_inputs
 
-def sample_inputs_bilinear(self, device, dtype, requires_grad):
+def sample_inputs_bilinear(self, device, dtype, requires_grad, **kwargs):
     features_options = [[3, 4, 5], [8, 8, 8]]
     batch_options: List[List[int]] = [
         [],  # no batch
@@ -4013,7 +3982,7 @@ def sample_inputs_bilinear(self, device, dtype, requires_grad):
 
     return sample_inputs
 
-def sample_inputs_glu(self, device, dtype, requires_grad):
+def sample_inputs_glu(self, device, dtype, requires_grad, **kwargs):
     features_options = [[2], [2, 4], [8, 8], [3, 6, 8], [1, 4, 6, 7]]
     batch_options: List[List[int]] = [
         [],  # no batch
@@ -4035,7 +4004,7 @@ def sample_inputs_glu(self, device, dtype, requires_grad):
 
     return sample_inputs
 
-def sample_inputs_interpolate(mode, self, device, dtype, requires_grad):
+def sample_inputs_interpolate(mode, self, device, dtype, requires_grad, **kwargs):
     N, C = 2, 3
     D = 4
     S = 3
@@ -4077,7 +4046,7 @@ def sample_inputs_interpolate(mode, self, device, dtype, requires_grad):
 
     return sample_inputs
 
-def sample_inputs_upsample(mode, self, device, dtype, requires_grad):
+def sample_inputs_upsample(mode, self, device, dtype, requires_grad, **kwargs):
     N, C = 2, 3
     D = 4
     S = 3
@@ -4111,7 +4080,7 @@ def sample_inputs_upsample(mode, self, device, dtype, requires_grad):
 
     return sample_inputs
 
-def sample_inputs_gelu(self, device, dtype, requires_grad):
+def sample_inputs_gelu(self, device, dtype, requires_grad, **kwargs):
     N = 5
     tensors = [SampleInput(make_tensor((N * 2, N * 2), device=device, dtype=dtype,
                requires_grad=requires_grad, low=-3, high=3)) for _ in range(1, N)]
@@ -4142,7 +4111,7 @@ def sample_inputs_max_min_reduction_no_dim(op_info, device, dtype, requires_grad
                                           requires_grad=requires_grad),))
     return inputs
 
-def _generate_nan_reduction_inputs(device, dtype, requires_grad):
+def _generate_nan_reduction_inputs(device, dtype, requires_grad, **kwargs):
     yield from _generate_reduction_inputs(device, dtype, requires_grad)
     yield torch.tensor([2, torch.nan, -1], device=device, dtype=dtype, requires_grad=requires_grad)
     yield torch.tensor([[torch.nan, 2], [0, 1]], device=device, dtype=dtype, requires_grad=requires_grad)
@@ -4156,16 +4125,16 @@ def sample_inputs_nan_reduction(supports_multiple_dims):
 
         for t in _generate_nan_reduction_inputs(device, dtype, requires_grad):
             # Add case without dim and keepdim kwargs
-            inputs.append(SampleInput(t.detach().clone().requires_grad_(requires_grad)))
+            inputs.append(SampleInput(t.clone().requires_grad_(requires_grad)))
             for kwargs in _generate_reduction_kwargs(t.ndim, supports_multiple_dims):
-                inputs.append(SampleInput(t.detach().clone().requires_grad_(requires_grad),
+                inputs.append(SampleInput(t.clone().requires_grad_(requires_grad),
                                           kwargs=kwargs))
 
         return inputs
 
     return fn
 
-def sample_inputs_reduction_quantile(op_info, device, dtype, requires_grad):
+def sample_inputs_reduction_quantile(op_info, device, dtype, requires_grad, **kwargs):
     test_quantiles = (0.5, make_tensor((2,), device, dtype, low=0, high=1, requires_grad=requires_grad))
     test_interpolations = ['linear', 'midpoint']
 
@@ -4173,7 +4142,7 @@ def sample_inputs_reduction_quantile(op_info, device, dtype, requires_grad):
     for quantiles in test_quantiles:
         for t in _generate_reduction_inputs(device, dtype, requires_grad):
             # Add case without dim and keepdim kwargs
-            inputs.append(SampleInput(t.detach().clone().requires_grad_(requires_grad),
+            inputs.append(SampleInput(t.clone().requires_grad_(requires_grad),
                                       args=(quantiles,)))
             for kwargs in _generate_reduction_kwargs(t.ndim, supports_multiple_dims=False):
                 # Interpolation kwarg for now is only supported when providing both dim and keepdim
@@ -4181,7 +4150,7 @@ def sample_inputs_reduction_quantile(op_info, device, dtype, requires_grad):
                 kwargs.setdefault('keepdim', False)
                 for interpolation in test_interpolations:
                     kwargs['interpolation'] = interpolation
-                    inputs.append(SampleInput(t.detach().clone().requires_grad_(requires_grad),
+                    inputs.append(SampleInput(t.clone().requires_grad_(requires_grad),
                                               args=(quantiles,), kwargs=kwargs))
 
     return inputs
@@ -4194,7 +4163,7 @@ def sample_inputs_reduction_count_nonzero(*args, **kwargs):
         sample.kwargs.pop('keepdim', None)
     return samples
 
-def sample_inputs_leaky_relu(op_info, device, dtype, requires_grad):
+def sample_inputs_leaky_relu(op_info, device, dtype, requires_grad, **kwargs):
     N = 10
     tensors = [SampleInput(make_tensor((N, N), device=device, dtype=dtype,
                requires_grad=requires_grad)) for _ in range(1, N)]
@@ -4382,7 +4351,7 @@ def sample_inputs_igamma_igammac(op_info, device, dtype, requires_grad, **kwargs
                           broadcasts_input=broadcasts_input)
 
 
-def sample_inputs_dist(op_info, device, dtype, requires_grad):
+def sample_inputs_dist(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
     sizes = ((S, S, S), (S,), (S, 1, S), (), (S, S))
     ps = (2, 4)
@@ -4412,35 +4381,32 @@ def sample_inputs_index(op_info, device, dtype, requires_grad, **kwargs):
     # extra parameter for add
     alphas = (-1, 0, 2) if add else (None,)
 
-    def generate_inputs():
-        for shape, alpha in product(shapes, alphas):
-            t = make_arg(shape)
-            args = []
+    for shape, alpha in product(shapes, alphas):
+        t = make_arg(shape)
+        args = []
 
-            # dim. We handle the scalar case
-            dim = 1 if t.ndim == 2 else 0
-            args.append(dim)
+        # dim. We handle the scalar case
+        dim = 1 if t.ndim == 2 else 0
+        args.append(dim)
 
-            # idx They need to be different for copy and add to be deterministic
-            make_idx_fn = make_permutation if copy or add else make_idx
-            idx = make_idx_fn(t.shape[dim] if t.ndim != 0 else 1)
-            args.append(idx)
+        # idx They need to be different for copy and add to be deterministic
+        make_idx_fn = make_permutation if copy or add else make_idx
+        idx = make_idx_fn(t.shape[dim] if t.ndim != 0 else 1)
+        args.append(idx)
 
-            # source
-            if copy or add:
-                args.append(make_arg(shape))
-            elif fill:
-                # A weird number to catch errors
-                args.append(make_arg((1,)).item())
+        # source
+        if copy or add:
+            args.append(make_arg(shape))
+        elif fill:
+            # A weird number to catch errors
+            args.append(make_arg((1,)).item())
 
-            args = tuple(args)
-            kwargs = {} if alpha is None else {"alpha": alpha}
+        args = tuple(args)
+        kwargs = {} if alpha is None else {"alpha": alpha}
 
-            yield SampleInput(t, args=args, kwargs=kwargs)
+        yield SampleInput(t, args=args, kwargs=kwargs)
 
-    return list(generate_inputs())
-
-def sample_inputs_mode(op_info, device, dtype, requires_grad):
+def sample_inputs_mode(op_info, device, dtype, requires_grad, **kwargs):
     inputs = []
     args = (
         ((S, S, S), (),),
@@ -4459,7 +4425,7 @@ def sample_inputs_mode(op_info, device, dtype, requires_grad):
 
 # Missing to test the nondeterminism of the operation
 # https://github.com/pytorch/pytorch/issues/53352
-def sample_inputs_put(op_info, device, dtype, requires_grad):
+def sample_inputs_put(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
     make_idx = partial(make_tensor, low=0, dtype=torch.int64, device=device, requires_grad=False)
 
@@ -4470,7 +4436,7 @@ def sample_inputs_put(op_info, device, dtype, requires_grad):
     idx_list = [idx, -idx - 1]
     for idx, acc in product(idx_list, (True, False)):
         yield SampleInput(input=make_arg((S, S)),
-                          args=(idx.detach().clone(),
+                          args=(idx.clone(),
                                 make_arg((S,)),
                                 acc))
 
@@ -4480,9 +4446,9 @@ def sample_inputs_put(op_info, device, dtype, requires_grad):
     idx_gen = (make_idx(size, high=1) for size in scalar_sizes)
     src_gen = (make_arg(size) for size in scalar_sizes)
     for tgt, idx, src, acc in product(tgt_gen, idx_gen, src_gen, (True, False)):
-        yield SampleInput(input=tgt.detach().clone().requires_grad_(requires_grad),
-                          args=(idx.detach().clone(),
-                                src.detach().clone().requires_grad_(requires_grad),
+        yield SampleInput(input=tgt.clone().requires_grad_(requires_grad),
+                          args=(idx.clone(),
+                                src.clone().requires_grad_(requires_grad),
                                 acc))
 
     # Empty cases
@@ -4491,12 +4457,12 @@ def sample_inputs_put(op_info, device, dtype, requires_grad):
     idx = make_idx((0,), high=1)
     src = make_arg((0,))
     for tgt, acc in product(tgt, (True, False)):
-        yield SampleInput(input=tgt.detach().clone().requires_grad_(requires_grad),
-                          args=(idx.detach().clone(),
-                                src.detach().clone().requires_grad_(requires_grad),
+        yield SampleInput(input=tgt.clone().requires_grad_(requires_grad),
+                          args=(idx.clone(),
+                                src.clone().requires_grad_(requires_grad),
                                 acc))
 
-def sample_inputs_take(op_info, device, dtype, requires_grad):
+def sample_inputs_take(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
     make_idx = partial(make_tensor, low=0, dtype=torch.int64, device=device, requires_grad=False)
 
@@ -4512,8 +4478,8 @@ def sample_inputs_take(op_info, device, dtype, requires_grad):
     src_gen = (make_arg(size) for size in scalar_sizes)
     idx_gen = (make_idx(size, high=1) for size in scalar_sizes)
     for src, idx in product(src_gen, idx_gen):
-        yield SampleInput(input=src.detach().clone().requires_grad_(requires_grad),
-                          args=(idx.detach().clone(),))
+        yield SampleInput(input=src.clone().requires_grad_(requires_grad),
+                          args=(idx.clone(),))
 
     # Empty cases
     src_sizes = [(0,), (), (1,), (3, 2)]
@@ -4521,10 +4487,10 @@ def sample_inputs_take(op_info, device, dtype, requires_grad):
 
     idx = make_idx((0,), high=1)
     for src in src_gen:
-        yield SampleInput(input=src.detach().clone().requires_grad_(requires_grad),
-                          args=(idx.detach().clone(),))
+        yield SampleInput(input=src.clone().requires_grad_(requires_grad),
+                          args=(idx.clone(),))
 
-def sample_movedim_moveaxis(op_info, device, dtype, requires_grad):
+def sample_movedim_moveaxis(op_info, device, dtype, requires_grad, **kwargs):
     return (
         SampleInput(
             make_tensor((4, 3, 2, 1), device, dtype, low=None, high=None, requires_grad=requires_grad),
@@ -4780,8 +4746,6 @@ def sample_inputs_logdet(op_info, device, dtype, requires_grad, **kwargs):
                         A[list(cond[i])][0, :].neg_()
         return A
 
-    samples = []
-
     # cases constructed using make_tensor()
     tensor_shapes = (
         (S, S),
@@ -4793,7 +4757,7 @@ def sample_inputs_logdet(op_info, device, dtype, requires_grad, **kwargs):
     for shape in tensor_shapes:
         t = make_tensor(shape, device=device, dtype=dtype)
         d = make_nonzero_det(t).requires_grad_(requires_grad)
-        samples.append(SampleInput(d))
+        yield SampleInput(d)
 
     # cases constructed using:
     #  1) make_symmetric_matrices
@@ -4808,14 +4772,13 @@ def sample_inputs_logdet(op_info, device, dtype, requires_grad, **kwargs):
     def _helper(constructor, *shape, **kwargs):
         t = constructor(*shape, device=device, dtype=dtype)
         d = make_nonzero_det(t, **kwargs).requires_grad_(requires_grad)
-        samples.append(SampleInput(d))
+        yield SampleInput(d)
 
     for shape in symmetric_shapes:
         _helper(make_symmetric_matrices, *shape)
         _helper(make_symmetric_pd_matrices, *shape)
         _helper(make_fullrank_matrices_with_distinct_singular_values, *shape, min_singular_value=0)
 
-    return tuple(samples)
 
 def np_unary_ufunc_integer_promotion_wrapper(fn):
     # Wrapper that passes PyTorch's default scalar
@@ -5060,7 +5023,7 @@ class ForeachFuncInfo(OpInfo):
             self.ref = torch.linalg.vector_norm
 
 
-def sample_inputs_linalg_cholesky_inverse(op_info, device, dtype, requires_grad=False):
+def sample_inputs_linalg_cholesky_inverse(op_info, device, dtype, requires_grad=False, **kwargs):
     # Generate Cholesky factors of positive-definite (non-singular) Hermitian (symmetric) matrices
     from torch.testing._internal.common_utils import random_hermitian_pd_matrix
     inputs = (
@@ -5074,7 +5037,7 @@ def sample_inputs_linalg_cholesky_inverse(op_info, device, dtype, requires_grad=
     for a in test_cases:
         a.requires_grad = requires_grad
         out.append(SampleInput(a))
-        out.append(SampleInput(a.detach().clone().requires_grad_(requires_grad), kwargs=dict(upper=True)))
+        out.append(SampleInput(a.clone().requires_grad_(requires_grad), kwargs=dict(upper=True)))
     return out
 
 def sample_inputs_linalg_lstsq(op_info, device, dtype, requires_grad=False, **kwargs):
@@ -5145,7 +5108,7 @@ def sample_inputs_householder_product(op_info, device, dtype, requires_grad, **k
 
     return samples
 
-def sample_inputs_ormqr(op_info, device, dtype, requires_grad):
+def sample_inputs_ormqr(op_info, device, dtype, requires_grad, **kwargs):
     # create a helper function wrapping `make_tensor`
     make_input = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
 
@@ -5188,7 +5151,7 @@ def sample_inputs_linalg_cholesky(op_info, device, dtype, requires_grad=False, *
         out.append(SampleInput(a, kwargs={"upper": upper}))
     return out
 
-def sample_inputs_symeig(op_info, device, dtype, requires_grad=False):
+def sample_inputs_symeig(op_info, device, dtype, requires_grad=False, **kwargs):
     out = sample_inputs_linalg_invertible(op_info, device, dtype, requires_grad)
 
     for o in out:
@@ -5196,9 +5159,9 @@ def sample_inputs_symeig(op_info, device, dtype, requires_grad=False):
                     "eigenvectors": True}
         # A gauge-invariant function
         o.output_process_fn_grad = lambda output: (output[0], abs(output[1]))
-    return out
+        yield o
 
-def sample_inputs_linalg_eig(op_info, device, dtype, requires_grad=False):
+def sample_inputs_linalg_eig(op_info, device, dtype, requires_grad=False, **kwargs):
     """
     This function generates input for torch.linalg.eig
     """
@@ -5208,8 +5171,7 @@ def sample_inputs_linalg_eig(op_info, device, dtype, requires_grad=False):
     samples = sample_inputs_linalg_invertible(op_info, device, dtype, requires_grad)
     for sample in samples:
         sample.output_process_fn_grad = out_fn
-
-    return samples
+        yield sample
 
 def sample_inputs_linalg_eigh(op_info, device, dtype, requires_grad=False, **kwargs):
     """
@@ -5228,42 +5190,39 @@ def sample_inputs_linalg_eigh(op_info, device, dtype, requires_grad=False, **kwa
     for sample in samples:
         sample.kwargs = {"UPLO": np.random.choice(["L", "U"])}
         sample.output_process_fn_grad = out_fn
+        yield sample
 
-    return samples
 
-
-def sample_inputs_linalg_slogdet(op_info, device, dtype, requires_grad=False):
+def sample_inputs_linalg_slogdet(op_info, device, dtype, requires_grad=False, **kwargs):
     def out_fn(output):
         return output[1]
 
     samples = sample_inputs_linalg_invertible(op_info, device, dtype, requires_grad)
     for sample in samples:
         sample.output_process_fn_grad = out_fn
-
-    return samples
+        yield sample
 
 
 def sample_inputs_linalg_pinv(op_info, device, dtype, requires_grad=False, **kwargs):
     """
-    This function generates input for torch.linalg.pinv with hermitian=True keyword argument.
+    This function generates input for torch.linalg.pinv with hermitian=False keyword argument.
     """
-    out = sample_inputs_linalg_invertible(op_info, device, dtype, requires_grad, **kwargs)
-    real_dtype = out[0].input.real.dtype if dtype.is_complex else dtype
-    for o in out:
-        # requires_grad path for rcond tensor is not implemented
-        for rcond in (None, 1.0, torch.tensor(1.0, dtype=real_dtype, device=device)):
-            o.kwargs = {"rcond": rcond}
-    return out
+    for o in sample_inputs_linalg_invertible(op_info, device, dtype, requires_grad, **kwargs):
+        real_dtype = o.input.real.dtype if dtype.is_complex else dtype
+        # requires_grad path for rtol tensor is not implemented
+        for rtol in (None, 1.0, torch.tensor(1.0, dtype=real_dtype, device=device)):
+            o = clone_sample(o)
+            o.kwargs = {"rtol": rtol}
+            yield o
 
 
 def sample_inputs_linalg_pinv_hermitian(op_info, device, dtype, requires_grad=False, **kwargs):
     """
     This function generates input for torch.linalg.pinv with hermitian=True keyword argument.
     """
-    out = sample_inputs_linalg_invertible(op_info, device, dtype, requires_grad, **kwargs)
-    for o in out:
+    for o in sample_inputs_linalg_invertible(op_info, device, dtype, requires_grad, **kwargs):
         o.kwargs = {"hermitian": True}
-    return out
+        yield o
 
 def sample_inputs_linalg_solve(op_info, device, dtype, requires_grad=False, vector_rhs_allowed=True, **kwargs):
     """
@@ -5299,11 +5258,9 @@ def sample_inputs_linalg_solve(op_info, device, dtype, requires_grad=False, vect
     else:
         nrhs = [(1,), (3,)]
 
-    def generate_samples():
-        for n, batch, rhs in product(ns, batches, nrhs):
-            yield SampleInput(make_a(*batch, n, n), args=(make_b((batch + (n,) + rhs)),))
+    for n, batch, rhs in product(ns, batches, nrhs):
+        yield SampleInput(make_a(*batch, n, n), args=(make_b((batch + (n,) + rhs)),))
 
-    return list(generate_samples())
 
 def sample_inputs_linalg_solve_triangular(op_info, device, dtype, requires_grad=False, **kwargs):
     make_arg = partial(make_tensor, dtype=dtype, device=device)
@@ -5357,8 +5314,7 @@ def sample_inputs_legacy_solve(op_info, device, dtype, requires_grad=False, **kw
     # Reverses tensor order
     for sample in out:
         sample.input, sample.args = sample.args[0], (sample.input,)
-
-    return out
+        yield sample
 
 
 def sample_inputs_cholesky_solve(op_info, device, dtype, requires_grad=False, **kwargs):
@@ -5391,18 +5347,16 @@ def sample_inputs_linalg_lu_factor(op_info, device, dtype, requires_grad=False, 
     make_arg = partial(make_fn, dtype=dtype, device=device, requires_grad=requires_grad)
 
     # not needed once OpInfo tests support Iterables
-    def generate_samples():
-        batch_shapes = ((), (3,), (3, 3))
-        # pivot=False only supported in CUDA
-        pivots = (True, False) if torch.device(device).type == "cuda" else (True,)
-        deltas = (-2, -1, 0, +1, +2)
-        for batch_shape, pivot, delta in product(batch_shapes, pivots, deltas):
-            shape = batch_shape + (S + delta, S)
-            # Insanely annoying that make_fullrank_blablabla accepts a *shape and not a tuple!
-            A = make_arg(shape) if "ex" in op_info.name else make_arg(*shape)
-            yield SampleInput(A, kwargs={"pivot": pivot})
+    batch_shapes = ((), (3,), (3, 3))
+    # pivot=False only supported in CUDA
+    pivots = (True, False) if torch.device(device).type == "cuda" else (True,)
+    deltas = (-2, -1, 0, +1, +2)
+    for batch_shape, pivot, delta in product(batch_shapes, pivots, deltas):
+        shape = batch_shape + (S + delta, S)
+        # Insanely annoying that make_fullrank_blablabla accepts a *shape and not a tuple!
+        A = make_arg(shape) if "ex" in op_info.name else make_arg(*shape)
+        yield SampleInput(A, kwargs={"pivot": pivot})
 
-    return list(generate_samples())
 
 def sample_inputs_lu_solve(op_info, device, dtype, requires_grad=False, **kwargs):
     make_fn = make_fullrank_matrices_with_distinct_singular_values
@@ -5414,14 +5368,13 @@ def sample_inputs_lu_solve(op_info, device, dtype, requires_grad=False, **kwargs
     nrhs = (0, 1, 6)
 
     for n, batch, rhs in product(ns, batches, nrhs):
-        with torch.no_grad():
-            shape_a = batch + (n, n)
-            a = make_a(*shape_a)
-            lu, pivs = a.lu()
-            lu = lu.contiguous()
+        shape_a = batch + (n, n)
+        a = make_a(*shape_a)
+        lu, pivs = a.lu()
+        lu = lu.contiguous()
 
-            shape_b = batch + (n, rhs)
-            b = make_b(shape_b)
+        shape_b = batch + (n, rhs)
+        b = make_b(shape_b)
 
         grads = (False,) if not requires_grad else (True, False)
         # we try all possible combinations of requires_grad for each input
@@ -5430,32 +5383,17 @@ def sample_inputs_lu_solve(op_info, device, dtype, requires_grad=False, **kwargs
             if requires_grad and not lu_grad and not b_grad:
                 continue
 
-            lu_ = lu.detach().clone()
+            lu_ = lu.clone()
             lu_.requires_grad_(lu_grad)
-            b_ = b.detach().clone()
+            b_ = b.clone()
             b_.requires_grad_(b_grad)
             yield SampleInput(b_, args=(lu_, pivs))
 
 def sample_inputs_lu_unpack(op_info, device, dtype, requires_grad=False, **kwargs):
-    # not needed once OpInfo tests support Iterables
     for lu_sample in sample_inputs_lu(op_info, device, dtype, requires_grad, **kwargs):
-        lu_data, pivots = lu_sample.input.lu()
+        lu_data, pivots = torch.linalg.lu_factor(lu_sample.input)
+        lu_data.requires_grad_(requires_grad)
         yield SampleInput(lu_data, args=(pivots,))
-
-        # generate rectangular inputs
-        lu_data_shape = lu_data.shape
-        batch_shape = lu_data_shape[:-2]
-        n = lu_data_shape[-2]
-
-        for shape_inc in ((1, 0), (0, 1)):
-            lu_data, pivots = make_tensor(
-                batch_shape + (n + shape_inc[0], n + shape_inc[1]),
-                device, dtype,
-                requires_grad=False,
-                low=None, high=None
-            ).lu()
-            lu_data.requires_grad_(requires_grad)
-            yield SampleInput(lu_data, args=(pivots,))
 
 
 def sample_inputs_roll(op_info, device, dtype, requires_grad=False, **kwargs):
@@ -5497,7 +5435,7 @@ def sample_inputs_std_var(op_info, device, dtype, requires_grad, **kwargs):
     ]
 
 
-def _generate_correlation_inputs(device, dtype, requires_grad):
+def _generate_correlation_inputs(device, dtype, requires_grad, **kwargs):
     shapes = [(2,), (1, 2), (3, 2), (2, 3)]
     for shape in shapes:
         yield make_tensor(shape, device, dtype, requires_grad=requires_grad)
@@ -5515,7 +5453,7 @@ def sample_inputs_cov(op_info, device, dtype, requires_grad, **kwargs):
         fweights = make_tensor((num_observations,), device, torch.int, low=1, high=10)
         aweights = make_tensor((num_observations,), device, torch.float, low=0, high=1, requires_grad=requires_grad)
         for correction, fw, aw in product(range(num_observations), [None, fweights], [None, aweights]):
-            inputs.append(SampleInput(t.detach().clone().requires_grad_(requires_grad),
+            inputs.append(SampleInput(t.clone().requires_grad_(requires_grad),
                                       kwargs={'correction': correction, 'fweights': fw, 'aweights': aw}))
     return inputs
 
@@ -5687,7 +5625,7 @@ def sample_inputs_eig(op_info, device, dtype, requires_grad=False, **kwargs):
 
 def sample_inputs_einsum(op_info, device, dtype, requires_grad=False, **kwargs):
     def c(t):
-        return t.detach().clone().requires_grad_(requires_grad)
+        return t.clone().requires_grad_(requires_grad)
 
     x = make_tensor((3,), device, dtype, requires_grad=requires_grad)
     y = make_tensor((4,), device, dtype, requires_grad=requires_grad)
@@ -5725,32 +5663,19 @@ def sample_inputs_einsum(op_info, device, dtype, requires_grad=False, **kwargs):
     return inputs
 
 
-def sample_inputs_linalg_qr(op_info, device, dtype, requires_grad=False, **kwargs):
-    """
-    This function generates input for torch.linalg.qr
-    The input is generated as the itertools.product of 'batches' and 'ns'.
-    """
+def sample_inputs_linalg_qr_geqrf(op_info, device, dtype, requires_grad=False, **kwargs):
+    # QR is just well defined when the matrix is full rank
+    make_fullrank = make_fullrank_matrices_with_distinct_singular_values
+    make_arg = partial(make_fullrank, dtype=dtype, device=device, requires_grad=requires_grad)
+
     batches = [(), (0,), (2, ), (1, 1)]
     ns = [5, 2, 0]
-    out = []
-    for batch, (m, n) in product(batches, product(ns, ns)):
-        a = torch.randn(*batch, m, n, dtype=dtype, device=device, requires_grad=requires_grad)
-        out.append(SampleInput(a))
-    return out
 
-def sample_inputs_geqrf(op_info, device, dtype, requires_grad=False):
-    batches = [(), (0, ), (2, ), (1, 1)]
-    ns = [5, 2, 0]
-    samples = []
     for batch, (m, n) in product(batches, product(ns, ns)):
-        # TODO: CUDA path doesn't work with batched or empty inputs
-        if torch.device(device).type == 'cuda' and (batch != () or m == 0 or n == 0):
-            continue
-        a = make_tensor((*batch, m, n), device, dtype, low=None, high=None, requires_grad=requires_grad)
-        samples.append(SampleInput(a))
-    return samples
+        shape = batch + (m, n)
+        yield SampleInput(make_arg(*shape))
 
-def sample_inputs_flip(op_info, device, dtype, requires_grad):
+def sample_inputs_flip(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
     sizes = ((S, M, S), (S, 0, M))
     all_dims = ((0, 1, 2), (0,), (0, 2), (-1,), ())
@@ -5818,7 +5743,7 @@ def sample_inputs_clamp(op_info, device, dtype, requires_grad, **kwargs):
         SampleInput(detach(x), args=(detach(lb[:, :1]),)),
     ]
 
-def sample_inputs_clamp_scalar(op_info, device, dtype, requires_grad):
+def sample_inputs_clamp_scalar(op_info, device, dtype, requires_grad, **kwargs):
     tensors = (
         make_tensor((2, 3, 2), device, dtype, low=None, high=None, requires_grad=requires_grad),
         make_tensor((2, 0, 3), device, dtype, low=None, high=None, requires_grad=requires_grad),
@@ -5830,12 +5755,12 @@ def sample_inputs_clamp_scalar(op_info, device, dtype, requires_grad):
         min_max_vals = ((0, 1), (-1, 1))
 
     output = [SampleInput(
-        tensor.detach().clone().requires_grad_(requires_grad),
+        tensor.clone().requires_grad_(requires_grad),
         args=vals) for tensor, vals in product(tensors, min_max_vals)]
     output += [
-        SampleInput(tensors[0].detach().clone().requires_grad_(requires_grad),
+        SampleInput(tensors[0].clone().requires_grad_(requires_grad),
                     args=(0.5, None)),
-        SampleInput(tensors[0].detach().clone().requires_grad_(requires_grad),
+        SampleInput(tensors[0].clone().requires_grad_(requires_grad),
                     args=(None, 0.5))]
     empty_tensor = make_tensor((), device=device, dtype=dtype, low=None, high=None, requires_grad=requires_grad)
     output.append(SampleInput(empty_tensor, args=(0.0, 1.0)))
@@ -5870,10 +5795,9 @@ def sample_inputs_cumprod(op_info, device, dtype, requires_grad, **kwargs):
     def prod_zeros(dim_select):
         assert len(dim_select) == 2
         result = make_arg(3 * (S,))
-        with torch.no_grad():
-            result.narrow(dim_select[0], 0, 1).narrow(dim_select[1], 1, 1).zero_()
-            result.narrow(dim_select[0], 2, 1).narrow(dim_select[1], 3, 1).zero_()
-            result.narrow(dim_select[0], 4, 1).narrow(dim_select[1], 3, 1).zero_()
+        result.narrow(dim_select[0], 0, 1).narrow(dim_select[1], 1, 1).zero_()
+        result.narrow(dim_select[0], 2, 1).narrow(dim_select[1], 3, 1).zero_()
+        result.narrow(dim_select[0], 4, 1).narrow(dim_select[1], 3, 1).zero_()
         return result
 
     for dim in range(3):
@@ -5931,20 +5855,19 @@ def sample_inputs_copysign(op_info, device, dtype, requires_grad, **kwargs):
 
         yield SampleInput(_make_tensor(*input_shape), args=(arg, ), broadcasts_input=broadcasts_input)
 
-def sample_inputs_prod(op_info, device, dtype, requires_grad):
+def sample_inputs_prod(op_info, device, dtype, requires_grad, **kwargs):
     def make_arg(shape):
         # shrink values to be in the interval [-1, +1] for better precision in gradgradcheck
         return make_tensor(shape, device, dtype, low=-1, high=+1, requires_grad=requires_grad)
 
     def prod_single_zero():
         result = make_arg(2 * (S,))
-        with torch.no_grad():
-            result[0, 1] = 0
+        result[0, 1] = 0
         return result
 
     for sample in sample_inputs_cumprod(op_info, device, dtype, requires_grad):
         # only Tensor, ignore other inputs
-        yield SampleInput(sample.input.detach().clone().requires_grad_(requires_grad))
+        yield SampleInput(sample.input.clone().requires_grad_(requires_grad))
         yield sample
 
     # Generates samples with keepdim = True
@@ -5958,11 +5881,10 @@ def sample_inputs_prod(op_info, device, dtype, requires_grad):
 
     # test zero scalar tensor
     zero = make_arg(())
-    with torch.no_grad():
-        zero.zero_()
-    yield SampleInput(zero.detach().clone().requires_grad_(requires_grad))
-    yield SampleInput(zero.detach().clone().requires_grad_(requires_grad), args=(0,))
-    yield SampleInput(zero.detach().clone().requires_grad_(requires_grad),
+    zero.zero_()
+    yield SampleInput(zero.clone().requires_grad_(requires_grad))
+    yield SampleInput(zero.clone().requires_grad_(requires_grad), args=(0,))
+    yield SampleInput(zero.clone().requires_grad_(requires_grad),
                       args=(0,),
                       kwargs={'keepdim': True})
 
@@ -5999,7 +5921,7 @@ def sample_inputs_diag(op_info, device, dtype, requires_grad, **kwargs):
 
     samples = []
     for tensor, arg in product(tensors, args):
-        samples.append(SampleInput(tensor.detach().clone().requires_grad_(requires_grad), args=arg))
+        samples.append(SampleInput(tensor.clone().requires_grad_(requires_grad), args=arg))
 
     return samples + [vec_sample]
 
@@ -6144,7 +6066,7 @@ def sample_inputs_masked_softmax(op_info, device, dtype, requires_grad, with_dty
     for sample_input in sample_inputs_softmax_variant(op_info, device, dtype, requires_grad, with_dtype=with_dtype, **kwargs):
         for mask in _generate_masked_op_mask(sample_input.input.shape, device, **kwargs):
             sample_input_args, sample_input_kwargs = sample_input.args, dict(mask=mask, **sample_input.kwargs)
-            inputs.append(SampleInput(sample_input.input.detach().clone().requires_grad_(requires_grad),
+            inputs.append(SampleInput(sample_input.input.clone().requires_grad_(requires_grad),
                                       args=sample_input_args, kwargs=sample_input_kwargs))
     return inputs
 
@@ -6156,7 +6078,7 @@ def sample_inputs_masked_normalize(op_info, device, dtype, requires_grad, **kwar
     for ord in [2.0, 1, float('inf'), float('-inf'), 0]:
         for sample_input in sample_inputs_softmax_variant(op_info, device, dtype, requires_grad, **kwargs):
             sample_input_args, sample_input_kwargs = (ord,) + sample_input.args, sample_input.kwargs.copy()
-            inputs.append(SampleInput(sample_input.input.detach().clone().requires_grad_(requires_grad),
+            inputs.append(SampleInput(sample_input.input.clone().requires_grad_(requires_grad),
                                       args=sample_input_args, kwargs=sample_input_kwargs))
     return inputs
 
@@ -6182,55 +6104,42 @@ def sample_inputs_logit(op_info, device, dtype, requires_grad, **kwargs):
 
     return samples
 
-def sample_inputs_isin(op_info, device, dtype, requires_grad):
+def sample_inputs_isin(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
     # isin has two paths based on the size of elements and test_elements.
     # if elements.numel() < 10 * pow(test_elements.numel(), 0.145):
-    #   # Path 1
+    yield SampleInput(make_arg((L,)), args=(make_arg((S,)),))
     # else:
-    #   # Path 2
-    return [
-        # Sample for Path 1
-        SampleInput(make_arg((L,)), args=(make_arg((S,)),)),
-        # Sample for Path 2
-        SampleInput(make_arg((S,)), args=(make_arg((L,)),))
-    ]
+    yield SampleInput(make_arg((S,)), args=(make_arg((L,)),))
 
 def sample_inputs_masked_scatter(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
 
-    def samples_generator():
-        yield SampleInput(make_arg((S, S)), args=(torch.randn(S, S, device=device) > 0, make_arg((S, S))))
-        yield SampleInput(make_arg((S, S)), args=(torch.randn((S,), device=device) > 0, make_arg((S, S))))
-        yield SampleInput(make_arg((S, S)), args=(bernoulli_scalar().to(device), make_arg((S, S))))
-        yield SampleInput(make_arg((S,)),
-                          args=(torch.randn(S, S, device=device) > 0, make_arg((S, S))),
-                          broadcasts_input=True)
-
-    samples = tuple(samples_generator())
-    return samples
+    yield SampleInput(make_arg((S, S)), args=(torch.randn(S, S, device=device) > 0, make_arg((S, S))))
+    yield SampleInput(make_arg((S, S)), args=(torch.randn((S,), device=device) > 0, make_arg((S, S))))
+    yield SampleInput(make_arg((S, S)), args=(bernoulli_scalar().to(device), make_arg((S, S))))
+    yield SampleInput(make_arg((S,)),
+                      args=(torch.randn(S, S, device=device) > 0, make_arg((S, S))),
+                      broadcasts_input=True)
 
 
 def sample_inputs_masked_fill(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
 
-    def sample_generator():
-        yield SampleInput(make_arg((S, S)), args=(torch.randn(S, S, device=device) > 0, 10))
-        yield SampleInput(make_arg((S, S)), args=(torch.randn(S, S, device=device) > 0, make_arg(())))
-        yield SampleInput(make_arg((S, S)), args=(torch.randn(S, device=device) > 0, 10))
-        yield SampleInput(make_arg(()), args=(torch.randn((), device=device) > 0, 10))
-        yield SampleInput(make_arg(()), args=(torch.randn((), device=device) > 0, make_arg(())))
-        yield SampleInput(make_arg((S, S)), args=(torch.randn((), device=device) > 0, 10))
+    yield SampleInput(make_arg((S, S)), args=(torch.randn(S, S, device=device) > 0, 10))
+    yield SampleInput(make_arg((S, S)), args=(torch.randn(S, S, device=device) > 0, make_arg(())))
+    yield SampleInput(make_arg((S, S)), args=(torch.randn(S, device=device) > 0, 10))
+    yield SampleInput(make_arg(()), args=(torch.randn((), device=device) > 0, 10))
+    yield SampleInput(make_arg(()), args=(torch.randn((), device=device) > 0, make_arg(())))
+    yield SampleInput(make_arg((S, S)), args=(torch.randn((), device=device) > 0, 10))
 
-        yield SampleInput(make_arg((S,)),
-                          args=(torch.randn(S, S, device=device) > 0, make_arg(())),
-                          broadcasts_input=True)
-        yield SampleInput(make_arg((S,)),
-                          args=(torch.randn(S, S, device=device) > 0, 10),
-                          broadcasts_input=True)
+    yield SampleInput(make_arg((S,)),
+                      args=(torch.randn(S, S, device=device) > 0, make_arg(())),
+                      broadcasts_input=True)
+    yield SampleInput(make_arg((S,)),
+                      args=(torch.randn(S, S, device=device) > 0, 10),
+                      broadcasts_input=True)
 
-    samples = tuple(sample_generator())
-    return samples
 
 def sample_inputs_masked_select(op_info, device, dtype, requires_grad, **kwargs):
     samples = (
@@ -6266,7 +6175,7 @@ def sample_inputs_matrix_exp(op_info, device, dtype, requires_grad, **kwargs):
 
     return samples
 
-def sample_inputs_matmul(op_info, device, dtype, requires_grad):
+def sample_inputs_matmul(op_info, device, dtype, requires_grad, **kwargs):
     test_cases = (((L,), (L,)),
                   ((S, M), (M,)),
                   ((M,), (M, S)),
@@ -6468,103 +6377,47 @@ def sample_inputs_i0_i1(op_info, device, dtype, requires_grad, **kwargs):
         # NOTE: `i0e`'s first-order gradient is not continous
         # at `0`, hence we don't test `i0e` with any input being `0`.
         # TODO: Remove this when `make_tensor` supports excluding `0`.
-        with torch.no_grad():
-            for sample in samples:
-                t = sample.input
-                t[t == 0] = torch.finfo(dtype).eps  # type: ignore[index]
+        for sample in samples:
+            t = sample.input
+            t[t == 0] = torch.finfo(dtype).eps  # type: ignore[index]
     elif requires_grad and op_info.op != torch.special.i0e:
         # Special Case for gradient
         # Sample with `0` in the input
         t = make_tensor((S,), device, dtype,
                         requires_grad=requires_grad)
-
-        with torch.no_grad():
-            t[0] = 0
+        t[0] = 0
 
         samples += (SampleInput(t),)  # type: ignore[assignment]
 
     return samples
 
 
-def sample_inputs_rsub(op_info, device, dtype, requires_grad, variant='tensor', **kwargs):
-    def _make_tensor_helper(shape, low=None, high=None):
-        return make_tensor(shape, device, dtype, low=low, high=high, requires_grad=requires_grad)
+def sample_inputs_rsub(op_info, device, dtype, requires_grad, other_scalar, **kwargs):
+    make_arg = partial(make_tensor, device=device)
 
-    def _samples_with_alpha_helper(args, alphas, filter_fn=lambda arg_alpha: True):
-        filtered_product = filter(filter_fn, product(args, alphas))  # type: ignore[var-annotated]
-        return (SampleInput(input.detach().clone().requires_grad_(requires_grad),
-                            args=(arg,), kwargs=dict(alpha=alpha))
-                for (input, arg), alpha in filtered_product)
-
-    int_alpha, float_alpha, complex_alpha = 2, 0.1, 1 + 0.6j
-
-    if variant == 'tensor':
-        samples = (
-            SampleInput(_make_tensor_helper((S, S)), args=(_make_tensor_helper((S, S)),)),
-            SampleInput(_make_tensor_helper((S, S)), args=(_make_tensor_helper((S,)),)),
-            SampleInput(_make_tensor_helper((S,)), args=(_make_tensor_helper((S, S)),)),
-            SampleInput(_make_tensor_helper(()), args=(_make_tensor_helper(()),)),
-            SampleInput(_make_tensor_helper(()), args=(_make_tensor_helper((S,)),)),
-            SampleInput(_make_tensor_helper((S,)), args=(_make_tensor_helper(()),)),
-        )
-
-        if dtype.is_complex:
-            alphas = [int_alpha, float_alpha, complex_alpha]
-        elif dtype.is_floating_point:
-            alphas = [int_alpha, float_alpha]
-        else:
-            alphas = [int_alpha]
-
-        args = ((_make_tensor_helper((S, S)), _make_tensor_helper((S, S))),
-                (_make_tensor_helper((S, S)), _make_tensor_helper((S,))),
-                (_make_tensor_helper(()), _make_tensor_helper(())))
-        samples += tuple(_samples_with_alpha_helper(args, alphas))  # type: ignore[assignment]
-    elif variant == 'scalar':
-        # Scalar Other
-        samples = (SampleInput(_make_tensor_helper((S, S)), args=(0.5,)),
-                   SampleInput(_make_tensor_helper(()), args=(0.5,)),
-                   SampleInput(_make_tensor_helper((S, S)), args=(1.5j,)),
-                   SampleInput(_make_tensor_helper(()), args=(1.5j,)),
-                   SampleInput(_make_tensor_helper((S, S)), args=(0.4 + 1.2j,)),
-                   SampleInput(_make_tensor_helper(()), args=(1.2 + 1.76j,)))
-
-        scalar_args = [(_make_tensor_helper((S, S)), 0.5), (_make_tensor_helper(()), 0.5),
-                       (_make_tensor_helper((S, S)), 2.7j), (_make_tensor_helper(()), 2.7j),
-                       (_make_tensor_helper((S, S)), 1 - 2.7j), (_make_tensor_helper(()), 1 + 2.7j)]
-
-        alphas = [int_alpha, float_alpha, complex_alpha]
-
-        def filter_fn(arg_alpha):
-            arg, alpha = arg_alpha
-            if isinstance(alpha, complex):
-                if dtype.is_complex or isinstance(arg[1], complex):
-                    return True
-                else:
-                    # complex alpha is valid only if either `self` or `other` is complex
-                    return False
-
-            # Non-Complex Alpha
-            return True
-
-        # Samples with alpha (scalar version) covers the following cases
-        # self    | other   | alpha
-        # -----------------------------------------
-        # real    | real    | real (int and float)
-        # real    | complex | real and complex
-        # complex | real    | real and complex
-        # complex | complex | real and complex
-        #
-        # It does not cover
-        # real    | real    | complex
-        # x = torch.randn(2, requires_grad=True, dtype=torch.float64)
-        # torch.rsub(x, 1, alpha=1. + 1.6j)
-        # RuntimeError: value cannot be converted to type double without overflow: (-1,-1.6)
-
-        samples += tuple(_samples_with_alpha_helper(scalar_args, alphas, filter_fn=filter_fn))  # type: ignore[assignment]
+    shapes = ((S, S), (S,), ()) if not other_scalar else ((),)
+    # We are doing y - a*x, where y may be a scalar or a tensor
+    # If y is a scalar, y may be of any dtype that can be cast to the dtype of x
+    # a may always be of any dtype that can be cast to the dtype of x
+    if dtype.is_complex:
+        dtypes_a = (torch.int32, torch.float32, dtype)
+    elif dtype.is_floating_point:
+        dtypes_a = (torch.int32, dtype)
     else:
-        raise Exception("Invalid variant!")
+        dtypes_a = (dtype, )
+    dtypes_y = dtypes_a if other_scalar else (dtype,)
 
-    return samples
+    for shape_x, shape_y, dtype_y, dtype_a in product(shapes, shapes, dtypes_y, dtypes_a):
+        requires_grad_y = (requires_grad and
+                           not other_scalar and
+                           (dtype_y.is_floating_point or dtype_y.is_complex))
+
+        x = make_arg(shape_x, dtype=dtype, requires_grad=requires_grad)
+        y = make_arg(shape_y, dtype=dtype_y, requires_grad=requires_grad_y)
+        if other_scalar:
+            y = y.item()
+        a = make_arg((), dtype=dtype_a).item()
+        yield SampleInput(x, args=(y,), kwargs={"alpha": a})
 
 def sample_inputs_cumulative_ops(op_info, device, dtype, requires_grad, supports_dtype_kwargs=True, **kwargs):
     def _make_tensor_helper(shape, low=None, high=None):
@@ -6666,7 +6519,7 @@ def sample_inputs_split_with_sizes(op_info, device, dtype, requires_grad, **kwar
         yield SampleInput(make_arg(shape), args=args)
 
 
-def sample_inputs_msort(op_info, device, dtype, requires_grad):
+def sample_inputs_msort(op_info, device, dtype, requires_grad, **kwargs):
     def apply_grad(t):
         if dtype in floating_types_and(torch.float16, torch.bfloat16):
             t.requires_grad_(requires_grad)
@@ -6754,7 +6607,7 @@ def sample_inputs_tensordot(self, device, dtype, requires_grad, **kwargs):
                        kwargs=dict(dims=dims,)))
     return tuple(samples)
 
-def sample_inputs_kron(op_info, device, dtype, requires_grad):
+def sample_inputs_kron(op_info, device, dtype, requires_grad, **kwargs):
     test_cases = (
         ((S, S), (M, L)),
     )
@@ -6783,7 +6636,7 @@ def sample_inputs_inner(self, device, dtype, requires_grad, **kwargs):
         ),
     )
 
-def sample_inputs_scatter(op_info, device, dtype, requires_grad):
+def sample_inputs_scatter(op_info, device, dtype, requires_grad, **kwargs):
     def _tensor(shape, dtype=dtype, low=None, high=None):
         return make_tensor(shape, device, dtype, low=low, high=high, requires_grad=requires_grad)
 
@@ -6820,7 +6673,7 @@ def sample_inputs_scatter(op_info, device, dtype, requires_grad):
 
     return samples
 
-def sample_inputs_scatter_add(op_info, device, dtype, requires_grad):
+def sample_inputs_scatter_add(op_info, device, dtype, requires_grad, **kwargs):
     def _tensor(shape, dtype=dtype, low=None, high=None):
         return make_tensor(shape, device, dtype, low=low, high=high, requires_grad=requires_grad)
 
@@ -6960,7 +6813,7 @@ def sample_inputs_view_reshape(op_info, device, dtype, requires_grad, **kwargs):
 
         if op_info.name != "view" and len(shape) >= 2:
             yield(SampleInput(
-                inp.detach().clone().transpose(0, 1).requires_grad_(requires_grad),
+                inp.clone().transpose(0, 1).requires_grad_(requires_grad),
                 args=(args, )))
 
 def sample_inputs_view_as_reshape_as(op_info, device, dtype, requires_grad, **kwargs):
@@ -6978,7 +6831,7 @@ def sample_inputs_view_as_reshape_as(op_info, device, dtype, requires_grad, **kw
 
         if op_info.name != "view_as" and len(shape) >= 2:
             yield(SampleInput(
-                inp.detach().clone().transpose(0, 1).requires_grad_(requires_grad),
+                inp.clone().transpose(0, 1).requires_grad_(requires_grad),
                 args=(make_arg(shape_other, requires_grad=False),)))
 
 def sample_inputs_atleast1d2d3d(op_info, device, dtype, requires_grad, **kwargs):
@@ -7185,7 +7038,7 @@ def sample_inputs_nonzero(op_info, device, dtype, requires_grad, **kwargs):
         inputs.append(mixed)
 
     for input_t, as_tuple in product(inputs, [False, True]):
-        yield(SampleInput(input_t.detach().clone().requires_grad_(requires_grad),
+        yield(SampleInput(input_t.clone().requires_grad_(requires_grad),
                           kwargs=dict(as_tuple=as_tuple)))
 
 def sample_inputs_chunk(op_info, device, dtype, requires_grad, **kwargs):
@@ -7247,12 +7100,10 @@ def sample_inputs_dropout(op_info, device, dtype, requires_grad, *,
     # supported dtypes depending on `train` parameter
     training_vals = [train] if train is not None else [True, False]
 
-    def generator():
-        for case, p, training in product(cases, p_vals, training_vals):
-            yield SampleInput(make_arg(case), kwargs=dict(p=p, training=training))
-        yield SampleInput(make_arg(case), kwargs=dict())
+    for case, p, training in product(cases, p_vals, training_vals):
+        yield SampleInput(make_arg(case), kwargs=dict(p=p, training=training))
+    yield SampleInput(make_arg(case), kwargs=dict())
 
-    return list(generator())
 
 def sample_inputs_embedding_bag(op_info, device, dtype, requires_grad, **kwargs):
     def make_input(shape):
@@ -7269,126 +7120,123 @@ def sample_inputs_embedding_bag(op_info, device, dtype, requires_grad, **kwargs)
             return make_input(idx.shape)
         return None
 
-    def generator():
-        offsets = torch.tensor([0, 3], device=device, dtype=torch.long)
-        for generate_per_sample_weight in (True, False):
-            for mode in ('sum', 'mean', 'max'):
-                # per_sample_weights is only supported for mode='sum' (got mode='****')
-                if generate_per_sample_weight and mode in ('mean', 'max'):
-                    continue
+    offsets = torch.tensor([0, 3], device=device, dtype=torch.long)
+    for generate_per_sample_weight in (True, False):
+        for mode in ('sum', 'mean', 'max'):
+            # per_sample_weights is only supported for mode='sum' (got mode='****')
+            if generate_per_sample_weight and mode in ('mean', 'max'):
+                continue
 
-                # 1-D index tensor
-                idx = make_long_input((S,), low=0, high=M)
-                per_sample_weights = make_per_sample_weight(generate_per_sample_weight, idx)
-                yield SampleInput(make_input((M, S)), args=(idx,),
-                                  kwargs={'offsets': offsets, 'mode': mode,
-                                          'per_sample_weights': per_sample_weights})
+            # 1-D index tensor
+            idx = make_long_input((S,), low=0, high=M)
+            per_sample_weights = make_per_sample_weight(generate_per_sample_weight, idx)
+            yield SampleInput(make_input((M, S)), args=(idx,),
+                              kwargs={'offsets': offsets, 'mode': mode,
+                                      'per_sample_weights': per_sample_weights})
 
-                idx = make_long_input((S,), low=0, high=M, noncontiguous=True)
-                per_sample_weights = make_per_sample_weight(generate_per_sample_weight, idx)
-                yield SampleInput(make_input((M, S)), args=(idx,),
-                                  kwargs={'offsets': offsets, 'mode': mode,
-                                          'per_sample_weights': per_sample_weights})
+            idx = make_long_input((S,), low=0, high=M, noncontiguous=True)
+            per_sample_weights = make_per_sample_weight(generate_per_sample_weight, idx)
+            yield SampleInput(make_input((M, S)), args=(idx,),
+                              kwargs={'offsets': offsets, 'mode': mode,
+                                      'per_sample_weights': per_sample_weights})
 
-                # bag with zero length
-                idx = make_long_input((S,), low=0, high=M, noncontiguous=True)
-                per_sample_weights = make_per_sample_weight(generate_per_sample_weight, idx)
-                yield SampleInput(make_input((M, S)), args=(idx,),
-                                  kwargs={'offsets': torch.tensor([0, 0, 3], device=device, dtype=torch.long),
-                                          'mode': mode,
-                                          'per_sample_weights': per_sample_weights})
+            # bag with zero length
+            idx = make_long_input((S,), low=0, high=M, noncontiguous=True)
+            per_sample_weights = make_per_sample_weight(generate_per_sample_weight, idx)
+            yield SampleInput(make_input((M, S)), args=(idx,),
+                              kwargs={'offsets': torch.tensor([0, 0, 3], device=device, dtype=torch.long),
+                                      'mode': mode,
+                                      'per_sample_weights': per_sample_weights})
 
-                # 2-D index tensor
-                idx = make_long_input((S, S), low=0, high=M)
-                per_sample_weights = make_per_sample_weight(generate_per_sample_weight, idx)
-                yield SampleInput(make_input((M, S)), args=(idx,),
-                                  kwargs={'mode': mode, 'per_sample_weights': per_sample_weights})
+            # 2-D index tensor
+            idx = make_long_input((S, S), low=0, high=M)
+            per_sample_weights = make_per_sample_weight(generate_per_sample_weight, idx)
+            yield SampleInput(make_input((M, S)), args=(idx,),
+                              kwargs={'mode': mode, 'per_sample_weights': per_sample_weights})
 
-                idx = make_long_input((S, S), low=0, high=M, noncontiguous=True)
-                per_sample_weights = make_per_sample_weight(generate_per_sample_weight, idx)
-                yield SampleInput(make_input((M, S)), args=(idx,),
-                                  kwargs={'mode': mode, 'per_sample_weights': per_sample_weights})
+            idx = make_long_input((S, S), low=0, high=M, noncontiguous=True)
+            per_sample_weights = make_per_sample_weight(generate_per_sample_weight, idx)
+            yield SampleInput(make_input((M, S)), args=(idx,),
+                              kwargs={'mode': mode, 'per_sample_weights': per_sample_weights})
 
-                # The gradient vector at `padding_idx` is not updated.
-                # Negative padding_idx
-                idx = make_long_input((6,), low=0, high=S)
-                idx[0] = 4
-                idx[4] = 4
-                per_sample_weights = make_per_sample_weight(generate_per_sample_weight, idx)
-                yield SampleInput(make_input((S, S)), args=(idx,),
-                                  kwargs={'padding_idx': -1, 'offsets': offsets,
-                                          'mode': mode, 'per_sample_weights': per_sample_weights},)
+            # The gradient vector at `padding_idx` is not updated.
+            # Negative padding_idx
+            idx = make_long_input((6,), low=0, high=S)
+            idx[0] = 4
+            idx[4] = 4
+            per_sample_weights = make_per_sample_weight(generate_per_sample_weight, idx)
+            yield SampleInput(make_input((S, S)), args=(idx,),
+                              kwargs={'padding_idx': -1, 'offsets': offsets,
+                                      'mode': mode, 'per_sample_weights': per_sample_weights},)
 
-                idx = make_long_input((3, 3), low=0, high=S)
-                # Positive padding_idx
-                idx[0, 0] = 2
-                idx[1, 1] = 2
+            idx = make_long_input((3, 3), low=0, high=S)
+            # Positive padding_idx
+            idx[0, 0] = 2
+            idx[1, 1] = 2
+            per_sample_weights = make_per_sample_weight(generate_per_sample_weight, idx)
+            yield SampleInput(make_input((S, S)), args=(idx,),
+                              kwargs={'padding_idx': 2, 'mode': mode,
+                                      'per_sample_weights': per_sample_weights},)
+
+            idx = make_long_input((6, ), low=0, high=S)
+            weights = make_input((S, S))
+            offsets_ = torch.tensor([0, 3, 6], device=device, dtype=torch.long)
+            per_sample_weights = make_per_sample_weight(generate_per_sample_weight, idx)
+            yield SampleInput(weights, args=(idx,),
+                              kwargs={'mode': mode, 'offsets': offsets_, 'include_last_offset': True},)
+
+            if not requires_grad:
+                # Following inputs return different gradient from the numerical gradient.
+                # This is expected and relevant tests are present in `test_nn.py`.
+
+                # Due to inplace renorming of weight, the numerical gradient doesn't match the
+                # analytical gradient.
+                idx = make_long_input((2, 2), low=0, high=S)
+                weights = make_input((S, S)) * 2
                 per_sample_weights = make_per_sample_weight(generate_per_sample_weight, idx)
-                yield SampleInput(make_input((S, S)), args=(idx,),
-                                  kwargs={'padding_idx': 2, 'mode': mode,
+                yield SampleInput(weights, args=(idx,),
+                                  kwargs={'max_norm': 1., 'mode': mode,
                                           'per_sample_weights': per_sample_weights},)
 
                 idx = make_long_input((6, ), low=0, high=S)
-                weights = make_input((S, S))
-                offsets_ = torch.tensor([0, 3, 6], device=device, dtype=torch.long)
+                weights = make_input((S, S)) * 2
                 per_sample_weights = make_per_sample_weight(generate_per_sample_weight, idx)
                 yield SampleInput(weights, args=(idx,),
-                                  kwargs={'mode': mode, 'offsets': offsets_, 'include_last_offset': True},)
+                                  kwargs={'max_norm': 1., 'norm_type': 1.0,
+                                          'mode': mode, 'offsets': offsets,
+                                          'per_sample_weights': per_sample_weights},)
 
-                if not requires_grad:
-                    # Following inputs return different gradient from the numerical gradient.
-                    # This is expected and relevant tests are present in `test_nn.py`.
-
-                    # Due to inplace renorming of weight, the numerical gradient doesn't match the
-                    # analytical gradient.
+                if mode != 'max':
+                    # Scale the gradient based on the inverse frequency of a particular index.
+                    # Note : smax mode does not support sparse weights
                     idx = make_long_input((2, 2), low=0, high=S)
-                    weights = make_input((S, S)) * 2
+                    idx[0, 0] = 1
+                    idx[0, 1] = 1
+                    weights = make_input((S, S))
                     per_sample_weights = make_per_sample_weight(generate_per_sample_weight, idx)
                     yield SampleInput(weights, args=(idx,),
-                                      kwargs={'max_norm': 1., 'mode': mode,
+                                      kwargs={'scale_grad_by_freq': True, 'mode': mode,
                                               'per_sample_weights': per_sample_weights},)
+
+                    # gradcheck not implemented for sparse tensors.
+                    # Note : max mode does not support sparse weights
+                    idx = make_long_input((6, ), low=0, high=S)
+                    weights = make_input((S, S))
+                    per_sample_weights = make_per_sample_weight(generate_per_sample_weight, idx)
+                    yield SampleInput(weights, args=(idx,),
+                                      kwargs={'sparse': True, 'offsets': offsets,
+                                              'mode': mode, 'per_sample_weights': per_sample_weights})
 
                     idx = make_long_input((6, ), low=0, high=S)
+                    idx[0] = 1  # freq more than 1
+                    idx[1] = 1  # freq more than 1
+                    idx[3] = 0  # padding_idx
                     weights = make_input((S, S)) * 2
                     per_sample_weights = make_per_sample_weight(generate_per_sample_weight, idx)
                     yield SampleInput(weights, args=(idx,),
-                                      kwargs={'max_norm': 1., 'norm_type': 1.0,
-                                              'mode': mode, 'offsets': offsets,
-                                              'per_sample_weights': per_sample_weights},)
-
-                    if mode != 'max':
-                        # Scale the gradient based on the inverse frequency of a particular index.
-                        # Note : smax mode does not support sparse weights
-                        idx = make_long_input((2, 2), low=0, high=S)
-                        idx[0, 0] = 1
-                        idx[0, 1] = 1
-                        weights = make_input((S, S))
-                        per_sample_weights = make_per_sample_weight(generate_per_sample_weight, idx)
-                        yield SampleInput(weights, args=(idx,),
-                                          kwargs={'scale_grad_by_freq': True, 'mode': mode,
-                                                  'per_sample_weights': per_sample_weights},)
-
-                        # gradcheck not implemented for sparse tensors.
-                        # Note : max mode does not support sparse weights
-                        idx = make_long_input((6, ), low=0, high=S)
-                        weights = make_input((S, S))
-                        per_sample_weights = make_per_sample_weight(generate_per_sample_weight, idx)
-                        yield SampleInput(weights, args=(idx,),
-                                          kwargs={'sparse': True, 'offsets': offsets,
-                                                  'mode': mode, 'per_sample_weights': per_sample_weights})
-
-                        idx = make_long_input((6, ), low=0, high=S)
-                        idx[0] = 1  # freq more than 1
-                        idx[1] = 1  # freq more than 1
-                        idx[3] = 0  # padding_idx
-                        weights = make_input((S, S)) * 2
-                        per_sample_weights = make_per_sample_weight(generate_per_sample_weight, idx)
-                        yield SampleInput(weights, args=(idx,),
-                                          kwargs={'sparse': True, 'scale_grad_by_freq': True, 'padding_idx': 0,
-                                                  'max_norm': 1., 'offsets': offsets,
-                                                  'mode': mode, 'per_sample_weights': per_sample_weights})
-
-    return list(generator())
+                                      kwargs={'sparse': True, 'scale_grad_by_freq': True, 'padding_idx': 0,
+                                              'max_norm': 1., 'offsets': offsets,
+                                              'mode': mode, 'per_sample_weights': per_sample_weights})
 
 
 def sample_inputs_embedding(op_info, device, dtype, requires_grad, **kwargs):
@@ -7649,20 +7497,17 @@ def sample_inputs_nll_loss(op_info, device, dtype, requires_grad, **kwargs):
 
 def sample_inputs_argwhere(op_info, device, dtype, requires_grad, **kwargs):
     yield SampleInput(torch.tensor([1, 0, 2, 0], dtype=dtype, device=device, requires_grad=requires_grad))
-
     mask = torch.tensor([[0, 1, 0, 1, 0],
                          [1, 1, 1, 1, 0],
                          [0, 0, 0, 1, 0],
                          [1, 0, 1, 1, 0],
                          [1, 0, 0, 1, 0]], dtype=torch.bool, device=device)
     t = make_tensor((S, S), dtype=dtype, device=device, requires_grad=requires_grad)
-    with torch.no_grad():
-        t[mask] = 0
+    t[mask] = 0
     yield SampleInput(t)
 
     t = make_tensor((S, S), dtype=dtype, device=device, requires_grad=requires_grad, noncontiguous=True)
-    with torch.no_grad():
-        t[mask] = 0
+    t[mask] = 0
     yield SampleInput(t)
 
     t = make_tensor((S, 0), dtype=dtype, device=device, requires_grad=requires_grad)
@@ -9811,7 +9656,7 @@ op_db: List[OpInfo] = [
     OpInfo('geqrf',
            dtypes=floating_and_complex_types(),
            supports_autograd=False,
-           sample_inputs_func=sample_inputs_geqrf,
+           sample_inputs_func=sample_inputs_linalg_qr_geqrf,
            decorators=[skipCUDAIfNoMagma, skipCUDAIfRocm, skipCPUIfNoLapack],),
     BinaryUfuncInfo('gt',
                     aliases=('greater',),
@@ -10121,7 +9966,7 @@ op_db: List[OpInfo] = [
            supports_fwgrad_bwgrad=True,
            # See https://github.com/pytorch/pytorch/issues/66357
            check_batched_forward_grad=False,
-           sample_inputs_func=sample_inputs_linalg_qr,
+           sample_inputs_func=sample_inputs_linalg_qr_geqrf,
            decorators=[skipCUDAIfNoMagma, skipCUDAIfRocm, skipCPUIfNoLapack]),
     OpInfo('linalg.slogdet',
            aten_name='linalg_slogdet',
@@ -12059,7 +11904,7 @@ op_db: List[OpInfo] = [
     OpInfo('qr',
            op=torch.qr,
            dtypes=floating_and_complex_types(),
-           sample_inputs_func=sample_inputs_linalg_qr,
+           sample_inputs_func=sample_inputs_linalg_qr_geqrf,
            # batched gradients do not work for empty inputs
            # https://github.com/pytorch/pytorch/issues/50743#issuecomment-767376085
            check_batched_gradgrad=False,
@@ -12479,13 +12324,13 @@ op_db: List[OpInfo] = [
                     variant_test_name='rsub_tensor',
                     supports_out=False,
                     supports_inplace_autograd=False,
-                    sample_inputs_func=partial(sample_inputs_rsub, variant='tensor'),),
+                    sample_inputs_func=partial(sample_inputs_rsub, other_scalar=False),),
     BinaryUfuncInfo('rsub',
                     dtypes=all_types_and_complex_and(torch.bfloat16, torch.half),
                     variant_test_name='rsub_scalar',
                     supports_out=False,
                     supports_inplace_autograd=False,
-                    sample_inputs_func=partial(sample_inputs_rsub, variant='scalar'),
+                    sample_inputs_func=partial(sample_inputs_rsub, other_scalar=True),
                     assert_autodiffed=True,),
     OpInfo('select',
            dtypes=all_types_and_complex_and(torch.bfloat16, torch.half, torch.bool),
@@ -13364,16 +13209,16 @@ op_db: List[OpInfo] = [
     OpInfo('__getitem__',
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
            supports_out=False,
-           supports_inplace_autograd=False,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
+           supports_inplace_autograd=False,
            supports_scripting=False,
            op=torch.Tensor.__getitem__,
            skips=(
                # AssertionError: False is not true : Scalars failed to compare as equal! 0 != 104448
                DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit', device_type='cuda'),),
            assert_jit_shape_analysis=False,  # TODO: support index.Tensor()
-           sample_inputs_func=sample_inputs_getitem,),
+           sample_inputs_func=sample_inputs_getitem),
     OpInfo('index_put',
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
            supports_out=False,
@@ -15008,8 +14853,6 @@ op_db: List[OpInfo] = [
             DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_dim_none'),
             DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_dim_none_keepdim'),
             # FIXME: improve precision
-            DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_noncontiguous_all',
-                         dtypes=[torch.float16]),
             DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_ref_small_input',
                          dtypes=[torch.float16]),
             DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_ref_extremal_values',
@@ -15032,8 +14875,6 @@ op_db: List[OpInfo] = [
             DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_dim_empty'),
             DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_dim_empty_keepdim'),
             # FIXME: improve precision
-            DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_noncontiguous_all',
-                         dtypes=[torch.float16]),
             DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_ref_small_input',
                          dtypes=[torch.float16]),
             DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_ref_duplicate_values',
@@ -15155,8 +14996,6 @@ op_db: List[OpInfo] = [
             DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_dim_none'),
             DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_dim_none_keepdim'),
             # FIXME: improve precision
-            DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_noncontiguous_all',
-                         dtypes=[torch.float16]),
             DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_ref_small_input',
                          dtypes=[torch.float16]),
             DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_ref_duplicate_values',
@@ -15181,8 +15020,6 @@ op_db: List[OpInfo] = [
             DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_dim_none'),
             DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_dim_none_keepdim'),
             # FIXME: improve precision
-            DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_noncontiguous_all',
-                         dtypes=[torch.float16]),
             DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_ref_small_input',
                          dtypes=[torch.float16]),
             DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_ref_duplicate_values',
