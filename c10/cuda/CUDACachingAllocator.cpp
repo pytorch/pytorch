@@ -1303,13 +1303,10 @@ class DeviceCachingAllocator {
         it->second.pop_front();
       }
 
-      // Copy the iterator and advance off because we may erase it if
-      // we cleared all the events for this stream.
-      auto candidate = it;
-      it++;
-
-      if (candidate->second.empty()) {
-        cuda_events.erase(candidate);
+      if (it->second.empty()) {
+        it = cuda_events.erase(it);
+      } else {
+        it++;
       }
     }
   }
