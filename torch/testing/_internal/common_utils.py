@@ -61,6 +61,7 @@ from enum import Enum
 from statistics import mean
 import functools
 from .composite_compliance import no_dispatch
+from torch.testing._internal.common_dtype import get_all_dtypes
 
 torch.backends.disable_global_flags()
 
@@ -523,20 +524,6 @@ def shell(command, cwd=None, env=None):
     return wait_for_process(p)
 
 
-# Used to run the same test with different tensor types
-def repeat_test_for_types(dtypes):
-    def repeat_helper(f):
-        @wraps(f)
-        def call_helper(self, *args):
-            for dtype in dtypes:
-                with TestCase.subTest(self, dtype=dtype):
-                    f(self, *args, dtype=dtype)
-
-        return call_helper
-    return repeat_helper
-
-
-
 def discover_test_cases_recursively(suite_or_case):
     if isinstance(suite_or_case, unittest.TestCase):
         return [suite_or_case]
@@ -737,6 +724,7 @@ def _check_module_exists(name: str) -> bool:
 TEST_NUMPY = _check_module_exists('numpy')
 TEST_SCIPY = _check_module_exists('scipy')
 TEST_MKL = torch.backends.mkl.is_available()
+TEST_CUDA = torch.cuda.is_available()
 TEST_NUMBA = _check_module_exists('numba')
 
 TEST_DILL = _check_module_exists('dill')
@@ -809,21 +797,6 @@ if IS_WINDOWS:
 
 # Dict of torch dtype -> NumPy dtype
 torch_to_numpy_dtype_dict = {value : key for (key, value) in numpy_to_torch_dtype_dict.items()}
-
-ALL_TENSORTYPES = [torch.float,
-                   torch.double,
-                   torch.half]
-
-# bfloat16 bringup is currently only available on ROCm
-# ALL_TENSORTYPES2 will eventually be unified with ALL_TENSORTYPES
-# when bfloat16 bringup is complete on all platforms
-if TEST_WITH_ROCM:
-    ALL_TENSORTYPES2 = [torch.float,
-                        torch.double,
-                        torch.half,
-                        torch.bfloat16]
-else:
-    ALL_TENSORTYPES2 = ALL_TENSORTYPES
 
 def skipIfRocm(fn):
     @wraps(fn)
@@ -1383,31 +1356,57 @@ try:
 except ImportError:
     print('Fail to import hypothesis in common_utils, tests are not derandomized')
 
+# Used in check_if_enable to see if a test method should be disabled by an issue,
+# sanitizes a test method name from appended suffixes by @dtypes parametrization.
+# e.g., an issue with title "DISABLED test_bitwise_ops (__main__.TestBinaryUfuncs)" should
+# disabled ALL parametrized test_bitwise_ops tests, such test_bitwise_ops_cuda_int32
+def remove_device_and_dtype_suffixes(test_name: str) -> str:
+    # import statement is localized to avoid circular dependency issues with common_device_type.py
+    from torch.testing._internal.common_device_type import get_device_type_test_bases
+    device_suffixes = [x.device_type for x in get_device_type_test_bases()]
+    dtype_suffixes = [str(dt)[len("torch."):] for dt in get_all_dtypes()]
+
+    test_name_chunks = test_name.split("_")
+    if len(test_name_chunks) > 0 and test_name_chunks[-1] in dtype_suffixes:
+        if len(test_name_chunks) > 1 and test_name_chunks[-2] in device_suffixes:
+            return "_".join(test_name_chunks[0:-2])
+        return "_".join(test_name_chunks[0:-1])
+    return test_name
+
+
 def check_if_enable(test: unittest.TestCase):
     test_suite = str(test.__class__).split('\'')[1]
-    test_name = f'{test._testMethodName} ({test_suite})'
-    if slow_tests_dict is not None and test_name in slow_tests_dict:
+    raw_test_name = f'{test._testMethodName} ({test_suite})'
+    if slow_tests_dict is not None and raw_test_name in slow_tests_dict:
         getattr(test, test._testMethodName).__dict__['slow_test'] = True
         if not TEST_WITH_SLOW:
             raise unittest.SkipTest("test is slow; run with PYTORCH_TEST_WITH_SLOW to enable test")
+    sanitized_test_method_name = remove_device_and_dtype_suffixes(test._testMethodName)
     if not IS_SANDCASTLE and disabled_tests_dict is not None:
-        if test_name in disabled_tests_dict:
-            issue_url, platforms = disabled_tests_dict[test_name]
-            platform_to_conditional: Dict = {
-                "mac": IS_MACOS,
-                "macos": IS_MACOS,
-                "win": IS_WINDOWS,
-                "windows": IS_WINDOWS,
-                "linux": IS_LINUX,
-                "rocm": TEST_WITH_ROCM,
-                "asan": TEST_WITH_ASAN
-            }
-            if platforms == [] or any([platform_to_conditional[platform] for platform in platforms]):
-                raise unittest.SkipTest(
-                    f"Test is disabled because an issue exists disabling it: {issue_url}" +
-                    f" for {'all' if platforms == [] else ''}platform(s) {', '.join(platforms)}. " +
-                    "If you're seeing this on your local machine and would like to enable this test, " +
-                    "please make sure IN_CI is not set and you are not using the flag --import-disabled-tests.")
+        for disabled_test, (issue_url, platforms) in disabled_tests_dict.items():
+            disable_test_parts = disabled_test.split()
+            if len(disable_test_parts) > 1:
+                disabled_test_name = disable_test_parts[0]
+                disabled_test_suite = disable_test_parts[1][1:-1]
+                # if test method name or its sanitized version exactly matches the disabled test method name
+                # AND allow non-parametrized suite names to disable parametrized ones (TestSuite disables TestSuiteCPU)
+                if (test._testMethodName == disabled_test_name or sanitized_test_method_name == disabled_test_name) \
+                   and disabled_test_suite in test_suite:
+                    platform_to_conditional: Dict = {
+                        "mac": IS_MACOS,
+                        "macos": IS_MACOS,
+                        "win": IS_WINDOWS,
+                        "windows": IS_WINDOWS,
+                        "linux": IS_LINUX,
+                        "rocm": TEST_WITH_ROCM,
+                        "asan": TEST_WITH_ASAN
+                    }
+                    if platforms == [] or any([platform_to_conditional[platform] for platform in platforms]):
+                        skip_msg = f"Test is disabled because an issue exists disabling it: {issue_url}" \
+                            f" for {'all' if platforms == [] else ''}platform(s) {', '.join(platforms)}. " \
+                            "If you're seeing this on your local machine and would like to enable this test, " \
+                            "please make sure IN_CI is not set and you are not using the flag --import-disabled-tests."
+                        raise unittest.SkipTest(skip_msg)
     if TEST_SKIP_FAST:
         if not getattr(test, test._testMethodName).__dict__.get('slow_test', False):
             raise unittest.SkipTest("test is fast; we disabled it with PYTORCH_TEST_SKIP_FAST")
@@ -1995,7 +1994,8 @@ class TestCase(expecttest.TestCase):
         debug_msg: Optional[str] = None
 
         if x is None or y is None:
-            self.assertTrue(x is None and y is None)
+            self.assertTrue(x is None, "left arg is not None while right arg is None")
+            self.assertTrue(y is None, "left arg is None while right arg not is None")
         # Tensor x Number and Number x Tensor comparisons
         elif isinstance(x, torch.Tensor) and isinstance(y, Number):
             self.assertEqual(x.item(), y, atol=atol, rtol=rtol, msg=msg,
@@ -2496,6 +2496,8 @@ def retry(ExceptionToCheck, tries=3, delay=3, skip_after_retries=False):
     return deco_retry
 
 
+# FIXME: modernize these to be consistent with make_tensor
+#   and review including them in torch.testing
 # Methods for matrix generation
 
 def random_square_matrix_of_rank(l, rank, dtype=torch.double, device='cpu'):
@@ -2788,7 +2790,7 @@ def random_sparse_pd_matrix(matrix_size, density=0.01, **kwargs):
     indices_tensor = torch.tensor([icoords, jcoords])
     return torch.sparse_coo_tensor(indices_tensor, values, (matrix_size, matrix_size), dtype=dtype, device=device)
 
-
+# FIXME: remove this by updating test suites using it
 def do_test_dtypes(self, dtypes, layout, device):
     for dtype in dtypes:
         if dtype != torch.float16:
@@ -2797,7 +2799,7 @@ def do_test_dtypes(self, dtypes, layout, device):
             self.assertIs(layout, out.layout)
             self.assertEqual(device, out.device)
 
-
+# FIXME: remove this by updating test suites using it
 def do_test_empty_full(self, dtypes, layout, device):
     shape = torch.Size([2, 3])
 
@@ -2851,43 +2853,8 @@ def do_test_empty_full(self, dtypes, layout, device):
                                             dtype=int64_dtype, layout=layout, device=device, requires_grad=False),
                             int64_dtype, layout, device, fv + 5, False)
 
-# this helper method is to recursively
-# clone the tensor-type input of operators tested by OpInfo
-def clone_input_helper(input):
-    if isinstance(input, torch.Tensor):
-        return torch.clone(input)
-
-    if isinstance(input, Sequence):
-        return tuple(map(clone_input_helper, input))
-
-    return input
-
-THESE_TAKE_WAY_TOO_LONG = {
-    'test_Conv3d_groups',
-    'test_conv_double_backward',
-    'test_conv_double_backward_groups',
-    'test_Conv3d_dilated',
-    'test_Conv3d_stride_padding',
-    'test_Conv3d_dilated_strided',
-    'test_Conv3d',
-    'test_Conv2d_dilated',
-    'test_ConvTranspose3d_dilated',
-    'test_ConvTranspose2d_dilated',
-    'test_snli',
-    'test_Conv2d',
-    'test_Conv2d_padding',
-    'test_ConvTranspose2d_no_bias',
-    'test_ConvTranspose2d',
-    'test_ConvTranspose3d',
-    'test_Conv2d_no_bias',
-    'test_matmul_4d_4d',
-    'test_multinomial_invalid_probs',
-}
-
-
+# FIXME: improve load_tests() documentation here
 running_script_path = None
-
-
 def set_running_script_path():
     global running_script_path
     try:
@@ -2897,7 +2864,6 @@ def set_running_script_path():
     except Exception:
         pass
 
-
 def check_test_defined_in_running_script(test_case):
     if running_script_path is None:
         return
@@ -2906,7 +2872,6 @@ def check_test_defined_in_running_script(test_case):
         "is not defined in the running script \"{}\", but in \"{}\". Did you " \
         "accidentally import a unittest.TestCase from another file?".format(
             test_case.id(), running_script_path, test_case_class_file)
-
 
 def load_tests(loader, tests, pattern):
     set_running_script_path()
@@ -2918,6 +2883,7 @@ def load_tests(loader, tests, pattern):
     return test_suite
 
 
+# FIXME: document this and move it to test_serialization
 class BytesIOContext(io.BytesIO):
     def __enter__(self):
         return self
@@ -2992,22 +2958,15 @@ def set_cwd(path: str) -> Iterator[None]:
         os.chdir(old_cwd)
 
 
-# Using @precisionOverride specific to your test is the recommended way
+# FIXME: delete this
+# Using @toleranceOverride specific to your test is the recommended way
 # of doing this. These are just some values that worked for test_nn.
 dtype2prec_DONTUSE = {torch.float: 1e-5,
                       torch.double: 1e-5,
                       torch.half: 1e-2,
                       torch.bfloat16: 1e-1}
 
-
-def _wrap_warn_once(regex):
-    def decorator(fn):
-        def inner(self, *args, **kwargs):
-            with self.assertWarnsOnceRegex(UserWarning, regex):
-                fn(self, *args, **kwargs)
-        return inner
-    return decorator
-
+# FIXME: move to test_sparse or sparse utils
 # This is a wrapper that wraps a test to run this test twice, one with
 # coalesced=True, another with coalesced=False for coalesced/uncoalesced sparse tensors.
 def coalescedonoff(f):
@@ -3212,6 +3171,8 @@ def get_cycles_per_ms() -> float:
     return mean(vals[2 : num - 2])
 
 
+# OpInfo utils
+
 T = TypeVar('T')
 def first_sample(self: unittest.TestCase, samples: Iterable[T]) -> T:
     """
@@ -3222,3 +3183,14 @@ def first_sample(self: unittest.TestCase, samples: Iterable[T]) -> T:
         return next(iter(samples))
     except StopIteration:
         raise unittest.SkipTest('Skipped! Need at least 1 sample input')
+
+# this helper method is to recursively
+# clone the tensor-type input of operators tested by OpInfo
+def clone_input_helper(input):
+    if isinstance(input, torch.Tensor):
+        return torch.clone(input)
+
+    if isinstance(input, Sequence):
+        return tuple(map(clone_input_helper, input))
+
+    return input

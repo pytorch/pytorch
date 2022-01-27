@@ -117,6 +117,21 @@ class TestUpgraders(JitTestCase):
         self.assertEqual(loaded_model.code, loaded_model_twice.code)
 
     @unittest.skipIf(not _is_upgraders_enabled(), "Skipping because upgraders are not enabled")
+    def test_aten_div_other_variants(self):
+        def test_func():
+            a = torch.ones((4, 5, 6), dtype=torch.int64)
+            b = 4
+            return a // b
+
+        traced_func = torch.jit.trace(test_func, ())
+        buffer = io.BytesIO()
+        torch.jit.save(traced_func, buffer)
+        buffer.seek(0)
+        loaded_func = torch.jit.load(buffer)
+        version = self._load_model_version(loaded_func)
+        self.assertTrue(version == 4)
+
+    @unittest.skipIf(not _is_upgraders_enabled(), "Skipping because upgraders are not enabled")
     def test_aten_test_serialization(self):
         model_path = pytorch_test_dir + "/jit/fixtures/_test_serialization_subcmul_v2.pt"
 
