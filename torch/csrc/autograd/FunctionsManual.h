@@ -403,17 +403,6 @@ Tensor batch_norm_jvp(
   double eps
 );
 
-Tensor batch_norm_jvp_saved_var(
-  const Tensor& input_p, const Tensor& input_t,
-  const Tensor& weight_p, const Tensor& weight_t,
-  const Tensor& bias_p, const Tensor& bias_t,
-  const c10::optional<Tensor>& running_mean,
-  const c10::optional<Tensor>& running_var,
-  const Tensor& saved_mean, const Tensor& saved_var,
-  bool train,
-  double eps
-);
-
 Tensor layer_norm_jvp(
   const Tensor& input_p, const Tensor& input_t,
   const Tensor& weight_p, const Tensor& weight_t,
