@@ -7,6 +7,7 @@ from torch.utils.data import (
 )
 from torch.utils.data.datapipes.dataframe import dataframe_wrapper as df_wrapper
 
+
 @functional_datapipe('_dataframes_as_tuples')
 class DataFramesAsTuplesPipe(IterDataPipe):
     def __init__(self, source_datapipe):

@@ -1,7 +1,12 @@
-from typing import Callable, Iterator, Sized, TypeVar
+from typing import Callable, Iterator, Sized, TypeVar, Optional, Union, Any, Dict
 
 from torch.utils.data import IterDataPipe, _utils, functional_datapipe
 from torch.utils.data.datapipes.utils.common import DILL_AVAILABLE, check_lambda_fn
+
+import functools
+from collections import namedtuple
+
+from torch.utils.data.datapipes.dataframe import dataframe_wrapper as df_wrapper
 
 if DILL_AVAILABLE:
     import dill
@@ -131,6 +136,29 @@ class MapperIterDataPipe(IterDataPipe[T_co]):
             self.fn = dill_function  # type: ignore[assignment]
 
 
+def _collate_helper(conversion, item):
+    # TODO(VitalyFedyunin): Verify that item is any sort of batch
+    if len(item.items) > 1:
+        print(item.items)
+        # TODO(VitalyFedyunin): Compact all batch dataframes into the one
+        raise Exception("Only supports one DataFrame per batch")
+    df = item[0]
+    columns_name = df_wrapper.get_columns(df)
+    tuple_names = []
+    tuple_values = []
+    for name in columns_name:
+        if name in conversion:
+            if not isinstance(conversion[name], Callable):
+                raise Exception('Collate (DF)DataPipe requires callable as dict values')
+            tuple_names.append(name)
+            value = conversion[name](getattr(df, name))
+            tuple_values.append(value)
+
+    tpl_cls = namedtuple("CollateResult", tuple_names)
+    tuple = tpl_cls(*tuple_values)
+    return tuple
+
+
 @functional_datapipe("collate")
 class CollatorIterDataPipe(MapperIterDataPipe):
     r""":class:`CollatorIterDataPipe`.
@@ -176,6 +204,18 @@ class CollatorIterDataPipe(MapperIterDataPipe):
     def __init__(
         self,
         datapipe: IterDataPipe,
-        collate_fn: Callable = _utils.collate.default_collate,
+        conversion: Optional[
+            Union[
+            Callable[[Any], Any],
+            # TODO(VitalyFedyunin): Replace with `Callable[[IColumn], Any]`
+            Dict[Union[str, Any], Union[Callable, Any]],
+            # TODO(VitalyFedyunin): Replace with `Dict[Union[str, IColumn], Union[Callable, Enum]]`
+            ]
+        ] = _utils.collate.default_collate,
     ) -> None:
-        super().__init__(datapipe, fn=collate_fn)
+        if isinstance(conversion, Callable):
+            super().__init__(datapipe, fn=conversion)
+        else:
+            # TODO(VitalyFedyunin): Validate passed dictionary
+            collate_fn = functools.partial(_collate_helper, conversion)
+            super().__init__(datapipe, fn=collate_fn)

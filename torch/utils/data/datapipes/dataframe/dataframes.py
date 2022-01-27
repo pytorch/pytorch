@@ -285,6 +285,9 @@ class CaptureDataFrameWithDataPipeOps(CaptureDataFrame):
     def filter(self, *args, **kwargs):
         return self._dataframes_filter(*args, **kwargs)
 
+    def collate(self, *args, **kwargs):
+        raise Exception("Can't collate unbatched DataFrames stream")
+
     def __getattr__(self, attrname):  # ?
         if attrname in DATAPIPES_OPS:
             return (self.as_datapipe()).__getattr__(attrname)
