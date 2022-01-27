@@ -658,7 +658,7 @@ BAD_EXAMPLES = [
     Example(InverseWishart, [
         {
             'covariance_matrix': torch.tensor([[1.0, 0.0], [0.0, -2.0]], requires_grad=True),
-            'df': torch.tensor([5.5], requires_grad=True),
+            'df': torch.tensor([7], requires_grad=True),
         },
         {
             'covariance_matrix': torch.tensor([[1.0, 1.0], [1.0, -2.0]], requires_grad=True),
@@ -668,6 +668,7 @@ BAD_EXAMPLES = [
             'covariance_matrix': torch.tensor([[1.0, 1.0], [1.0, -2.0]], requires_grad=True),
             'df': 6.,
         },
+        """
         {
             'covariance_matrix': torch.tensor([[1.0, 0.0], [0.0, 1.0]], requires_grad=True),
             'df': 1.,
@@ -676,6 +677,7 @@ BAD_EXAMPLES = [
             'covariance_matrix': torch.tensor([[1.0, 0.0], [0.0, 1.0]], requires_grad=True),
             'df': torch.tensor([1.], requires_grad=True),
         },
+        """
     ]),
     Example(LKJCholesky, [
         {
