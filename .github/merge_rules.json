@@ -13,7 +13,7 @@
    },
    {
     "name": "OSS CI",
-    "patterns": [".github/**", ".circleci/**", ".jenkins/**"],
+    "patterns": [".github/**", ".circleci/**", ".jenkins/**", "scripts/**"],
     "approved_by": ["seemethere", "malfet", "suo"],
     "mandatory_app_id": 12274
    }
