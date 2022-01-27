@@ -41,10 +41,10 @@ std::vector<mobile::nnc::InputSpec> toInputSpecs(
     const std::shared_ptr<Graph>& g) {
   std::vector<mobile::nnc::InputSpec> specs;
   for (auto v : g->inputs()) {
-    auto t = v->type();
+    const auto& t = v->type();
     mobile::nnc::InputSpec spec;
     TORCH_CHECK(t->kind() == TypeKind::TensorType, "Unsupported input type");
-    auto tt = t->cast<TensorType>();
+    const auto& tt = t->cast<TensorType>();
     spec.sizes_ = {};
     auto sizes_vec = *tt->sizes().sizes();
     for (auto s : sizes_vec) {
