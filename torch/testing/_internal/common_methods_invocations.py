@@ -488,8 +488,8 @@ NumericsFilter = collections.namedtuple('NumericsFilter', ['condition', 'safe_va
 # If you see a confusing error message while developing an OpInfo then please
 #   file an issue describing what happened.
 #
-# This trial-and-error approach can be frustrating to writing an OpInfo can
-#   be frustrating, but it's probably necessary as long as OpInfos don't require
+# This trial-and-error approach to writing an OpInfo can be frustrating,
+#   but it's probably necessary as long as OpInfos don't require
 #   learning about all the systems that consume them. One thing that can help
 #   is the get_supported_dtypes() function defined in opinfo_helper.py. This
 #   function can be used to programmatically specify the dtypes an operator
@@ -1939,6 +1939,8 @@ def sample_inputs_binary_pwise(
     rhs_make_tensor_kwargs=None,
     **kwargs,
 ):
+    make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+
     op_kwargs, lhs_make_tensor_kwargs, rhs_make_tensor_kwargs = _resolve_binary_pwise_kwargs(
         op_info,
         op_kwargs=op_kwargs,
@@ -1946,7 +1948,7 @@ def sample_inputs_binary_pwise(
         rhs_make_tensor_kwargs=rhs_make_tensor_kwargs,
     )
 
-    scalar = make_tensor((), device=device, dtype=dtype, **rhs_make_tensor_kwargs)
+    scalar = make_arg((), **rhs_make_tensor_kwargs)
     if python_scalars:
         scalar = scalar.item()  # type: ignore[assignment]
 
@@ -1963,22 +1965,10 @@ def sample_inputs_binary_pwise(
     ]
 
     for shape_lhs, shape_rhs_or_scalar in shapes:
-        lhs = make_tensor(
-            shape_lhs,
-            device=device,
-            dtype=dtype,
-            requires_grad=requires_grad,
-            **lhs_make_tensor_kwargs,
-        )
+        lhs = make_arg(shape_lhs, **lhs_make_tensor_kwargs)
         if isinstance(shape_rhs_or_scalar, tuple):
             # shape
-            rhs = make_tensor(
-                shape_rhs_or_scalar,
-                device=device,
-                dtype=dtype,
-                requires_grad=requires_grad,
-                **rhs_make_tensor_kwargs,
-            )
+            rhs = make_arg(shape_rhs_or_scalar, **rhs_make_tensor_kwargs)
             broadcasts_input = torch.broadcast_shapes(shape_lhs, shape_rhs_or_scalar) != shape_lhs
         else:
             # scalar
@@ -2893,9 +2883,7 @@ def sample_inputs_fill_(op_info, device, dtype, requires_grad, **kwargs):
 
     cases = (((S, S, S), (1,)),
              ((), (1,)),
-             # For requires_grad=False below,
-             # check https://github.com/pytorch/pytorch/issues/59137
-             ((S, S, S), (make_arg((), requires_grad=False),)))
+             ((S, S, S), (make_arg(()),)))
 
     for shape, args in cases:
         yield SampleInput(make_arg(shape), args=args)
@@ -3335,6 +3323,7 @@ def sample_inputs_gradient(op_info, device, dtype, requires_grad):
     return tuple(sample_inputs)
 
 def sample_inputs_getitem(op_info, device, dtype, requires_grad, **kwargs):
+    make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
     test_args = [
         ([1, 2],),
         (slice(0, 3),),
@@ -3353,29 +3342,25 @@ def sample_inputs_getitem(op_info, device, dtype, requires_grad, **kwargs):
         (mask_not_all_zeros((S,)),),
     ]
 
-    return tuple(SampleInput(
-        make_tensor((S, S, S), device, dtype, low=None, high=None, requires_grad=requires_grad),
-        args=args)
-        for args in test_args)
+    for args in test_args:
+        yield SampleInput(make_arg((S, S, S)), args=args)
 
 def sample_inputs_index_put(op_info, device, dtype, requires_grad, **kwargs):
+    make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
+
     inputs = []
     for accumulate in [False, True]:
         # Test with indices arg
         inputs.append(SampleInput(
-            make_tensor((S, S,), device, dtype, low=None, high=None, requires_grad=requires_grad),
-            args=(
-                (index_variable(2, S, device=device), ),
-                make_tensor((2, S), device, dtype, low=None, high=None)),
+            make_arg((S, S,)),
+            args=((index_variable(2, S, device=device),), make_arg((2, S))),
             kwargs=dict(accumulate=accumulate)))
 
         # Test with mask arg
         mask = torch.zeros(S, dtype=torch.bool) if accumulate else mask_not_all_zeros((S,))
         inputs.append(SampleInput(
-            make_tensor((S, S), device, dtype, low=None, high=None, requires_grad=requires_grad),
-            args=(
-                (mask, ),
-                make_tensor((S,), device, dtype, low=None, high=None),),
+            make_arg((S, S)),
+            args=((mask, ), make_arg((S,))),
             kwargs=dict(accumulate=accumulate)))
 
     return inputs
@@ -4181,7 +4166,7 @@ def sample_inputs_nan_reduction(supports_multiple_dims):
     return fn
 
 def sample_inputs_reduction_quantile(op_info, device, dtype, requires_grad):
-    test_quantiles = (0.5, make_tensor((2,), device, dtype, low=0, high=1))
+    test_quantiles = (0.5, make_tensor((2,), device, dtype, low=0, high=1, requires_grad=requires_grad))
     test_interpolations = ['linear', 'midpoint']
 
     inputs = []
@@ -4949,7 +4934,7 @@ class SpectralFuncInfo(OpInfo):
         self.ndimensional = ndimensional
 
 
-def sample_inputs_stft(op_info, device, dtype, requires_grad):
+def sample_inputs_stft(op_info, device, dtype, requires_grad, **kwargs):
     def mt(shape, **kwargs):
         return make_tensor(shape, device=device, dtype=dtype,
                            requires_grad=requires_grad, **kwargs)
@@ -4959,7 +4944,7 @@ def sample_inputs_stft(op_info, device, dtype, requires_grad):
         yield SampleInput(mt(10), kwargs=dict(n_fft=7, center=center))
         yield SampleInput(mt((10, 100)), kwargs=dict(n_fft=16, hop_length=4, center=center))
 
-    window = make_tensor(16, low=.5, high=2.0, dtype=dtype, device=device)
+    window = make_tensor(16, low=.5, high=2.0, dtype=dtype, device=device, requires_grad=requires_grad)
     yield SampleInput(
         mt((2, 100)), kwargs=dict(n_fft=16, window=window, return_complex=True, center=center))
     yield SampleInput(
@@ -4969,7 +4954,7 @@ def sample_inputs_stft(op_info, device, dtype, requires_grad):
             mt((10, 100)), kwargs=dict(n_fft=16, window=window, onesided=False))
 
 
-def sample_inputs_istft(op_info, device, dtype, requires_grad):
+def sample_inputs_istft(op_info, device, dtype, requires_grad, **kwargs):
     def mt(shape, **kwargs):
         real_shape = shape if dtype.is_complex else shape + (2,)
         return make_tensor(real_shape, device=device, dtype=dtype,
@@ -4983,7 +4968,7 @@ def sample_inputs_istft(op_info, device, dtype, requires_grad):
         yield SampleInput(mt((10, 10, 6)), kwargs=dict(n_fft=10, center=center))
         yield SampleInput(mt((1, 9, 10)), kwargs=dict(n_fft=16, hop_length=4, center=center))
 
-    window = make_tensor(10, low=.5, high=2.0, dtype=dtype, device=device)
+    window = make_tensor(10, low=.5, high=2.0, dtype=dtype, device=device, requires_grad=requires_grad)
     yield SampleInput(mt((10, 10, 6)), kwargs=dict(
         n_fft=10, window=window, center=center, return_complex=dtype.is_complex))
     yield SampleInput(mt((10, 10, 10)), kwargs=dict(
@@ -4993,7 +4978,7 @@ def sample_inputs_istft(op_info, device, dtype, requires_grad):
     yield SampleInput(mt((10, 5, 6)), kwargs=dict(n_fft=8, window=real_window[:8], center=center))
 
 
-def sample_inputs_fftshift(op_info, device, dtype, requires_grad):
+def sample_inputs_fftshift(op_info, device, dtype, requires_grad, **kwargs):
     def mt(shape, **kwargs):
         return make_tensor(shape, device=device, dtype=dtype,
                            requires_grad=requires_grad, **kwargs)
@@ -5599,8 +5584,8 @@ def sample_inputs_pow(op_info, device, dtype, requires_grad, **kwargs):
         test_cases = (
             ((2, 2), 0, 5, 1e-3, requires_grad, (2, 2), 0, 1, 0.1, requires_grad, False),
             ((2, 2), 0, 5, 1e-3, requires_grad, (1,), 0, 1, 0.1, requires_grad, False),
-            ((), 1e-3, 1e-3 + 1, 0, requires_grad, (), 0.1, 1.1, 0, False, False),
-            ((2, 2), 0, 5, 1e-3, requires_grad, (), 0.1, 1.1, 1, False, False),
+            ((), 1e-3, 1e-3 + 1, 0, requires_grad, (), 0.1, 1.1, 0, requires_grad, False),
+            ((2, 2), 0, 5, 1e-3, requires_grad, (), 0.1, 1.1, 1, requires_grad, False),
         )
         tests_require_resizing = (
             ((1,), 0, 5, 1e-3, requires_grad, (2, 2), 0, 1, 0.1, requires_grad, requires_grad),
@@ -5796,8 +5781,9 @@ def sample_inputs_fmod_remainder(op_info, device, dtype, requires_grad, *, autod
         )
 
         # Sample inputs with scalars as torch tensors
+        # FIXME It does not work for mak make_arg((1,), exclude_zero=True)
         cases_with_tensor_scalar = (
-            ((), torch.tensor(1, dtype=dtype, device=device, requires_grad=False), False),
+            ((), make_arg((), exclude_zero=True), False),
         )
 
         # Sample inputs with broadcasting
@@ -5811,7 +5797,7 @@ def sample_inputs_fmod_remainder(op_info, device, dtype, requires_grad, *, autod
 
     for shape, arg_other, broadcasts_input in samples:
         if isinstance(arg_other, tuple):
-            arg = make_arg(arg_other, requires_grad=False, exclude_zero=True)
+            arg = make_arg(arg_other, exclude_zero=True)
         else:
             # shape_other is scalar or torch.tensor
             arg = arg_other
@@ -7586,7 +7572,7 @@ def sample_inputs_cosine_embedding_loss(op_info, device, dtype, requires_grad, *
         t = torch.randint(0, 2, shape, device=device, dtype=torch.long)
         # Label with -1 or 1
         t = t * 2 - 1
-        target = t.to(dtype=dtype).detach()
+        target = t.to(dtype=dtype).detach_().requires_grad_(requires_grad)
         return target
 
     shapes = ((S, S), (S,))
@@ -7623,7 +7609,8 @@ def sample_inputs_nll_loss(op_info, device, dtype, requires_grad, **kwargs):
     shape = (2, 3)
     num_classes = shape[1]
     make_input = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
-    make_weight = partial(make_tensor, shape=(num_classes,), device=device, dtype=dtype)
+    # FIXME: Derivative wrt. weight not implemented
+    make_weight = partial(make_tensor, shape=(num_classes,), device=device, dtype=dtype, requires_grad=False)
 
     def make_target(shape, zeros=False):
         s = (shape[0], *shape[2:]) if len(shape) > 1 else ()
@@ -9326,7 +9313,11 @@ op_db: List[OpInfo] = [
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            sample_inputs_func=sample_inputs_expand_as,
-           supports_out=False),
+           supports_out=False,
+           skips=(
+               DecorateInfo(unittest.skip("Second argument does not need gradient"),
+                            "TestCommon", "test_floating_inputs_are_differentiable"),),
+           ),
     OpInfo('diag',
            dtypes=all_types_and_complex_and(torch.bool),
            dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
@@ -10226,6 +10217,7 @@ op_db: List[OpInfo] = [
                         DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_variant_consistency_eager'),
                         DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_conj_view'),
                         DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_view'),
+                        DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_conj_view'),
                         # FIXME: ldexp does not accept scalar inputs
                         DecorateInfo(unittest.expectedFailure, 'TestBinaryUfuncs', 'test_broadcast_python_scalar'),
                     ),
@@ -10333,7 +10325,9 @@ op_db: List[OpInfo] = [
            skips=(
                # RuntimeError: lu_unpack: LU_pivots is expected to be a contiguous tensor of torch.int32 dtype
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_noncontiguous_samples'),  # noqa: B950
-           )),
+               DecorateInfo(unittest.skip("Tests different backward implementations"),
+                            "TestCommon", "test_floating_inputs_are_differentiable"),),
+           ),
     OpInfo('lu_unpack',
            op=torch.lu_unpack,
            dtypes=floating_and_complex_types(),
@@ -10799,6 +10793,9 @@ op_db: List[OpInfo] = [
                 "test_variant_consistency_jit",
                 device_type="cpu",
             ),
+            # FIXME Derivative wrt weights is not implemented
+            DecorateInfo(unittest.expectedFailure, "TestCommon",
+                         "test_floating_inputs_are_differentiable")
         ),
         skips=(
             # AssertionError: False is not true : Scalars failed to compare as equal! 0 != 1536
@@ -11100,6 +11097,9 @@ op_db: List[OpInfo] = [
                # Consider making it a parameter or input, or detaching the gradient
                DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit', dtypes=(torch.float32,))
            ],
+           skips=(
+               DecorateInfo(unittest.skip("We don't want to differentiate wrt running mean / std"),
+                            "TestCommon", "test_floating_inputs_are_differentiable"),),
            sample_inputs_func=sample_inputs_instance_norm,),
     OpInfo('nn.functional.layer_norm',
            aten_name='layer_norm',
@@ -11780,7 +11780,11 @@ op_db: List[OpInfo] = [
            dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
            supports_out=False,
            supports_forward_ad=True,
-           sample_inputs_func=sample_inputs_batch_norm),
+           sample_inputs_func=sample_inputs_batch_norm,
+           skips=(
+               DecorateInfo(unittest.skip("We don't want to differentiate wrt running mean / std"),
+                            "TestCommon", "test_floating_inputs_are_differentiable"),)
+           ),
     # This variant tests batch_norm with cuDNN disabled only on CUDA devices
     OpInfo('nn.functional.batch_norm',
            variant_test_name='without_cudnn',
@@ -11790,6 +11794,9 @@ op_db: List[OpInfo] = [
            supports_out=False,
            supports_forward_ad=True,
            decorators=[onlyCUDA, disablecuDNN],
+           skips=(
+               DecorateInfo(unittest.skip("We don't want to differentiate wrt running mean / std"),
+                            "TestCommon", "test_floating_inputs_are_differentiable"),),
            sample_inputs_func=sample_inputs_batch_norm),
     # We have to add 2 OpInfo entry for `igamma` and `igammac`.First is the
     # standard entry, second is to run gradcheck tests on the second argument.
@@ -11816,6 +11823,11 @@ op_db: List[OpInfo] = [
                     dtypesIfCUDA=floating_types(),
                     backward_dtypesIfCUDA=floating_types(),
                     supports_inplace_autograd=False,
+                    decorators=[
+                        # Derivative wrt first tensor not implemented
+                        DecorateInfo(unittest.expectedFailure, "TestCommon",
+                                     "test_floating_inputs_are_differentiable")
+                    ],
                     skips=(
                         # test does not work with passing lambda for op
                         # AssertionError: False is not true : Tensors failed to compare as equal!
@@ -11850,6 +11862,11 @@ op_db: List[OpInfo] = [
                     dtypesIfCUDA=floating_types(),
                     backward_dtypesIfCUDA=floating_types(),
                     supports_inplace_autograd=False,
+                    decorators=[
+                        # Derivative wrt first tensor not implemented
+                        DecorateInfo(unittest.expectedFailure, "TestCommon",
+                                     "test_floating_inputs_are_differentiable"),
+                    ],
                     skips=(
                         # test does not work with passing lambda for op
                         # AssertionError: False is not true : Tensors failed to compare as equal!
@@ -12850,7 +12867,11 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_linalg_solve_triangular,
            supports_fwgrad_bwgrad=True,
            # linalg.solve_triangular cannot be batched over because of a call to out.copy_(result);
-           supports_forward_ad=True),
+           supports_forward_ad=True,
+           skips=(
+               DecorateInfo(unittest.skip("Tests different backward implementations"),
+                            "TestCommon", "test_floating_inputs_are_differentiable"),),
+           ),
     OpInfo('linalg.matrix_rank',
            aten_name='linalg_matrix_rank',
            dtypes=floating_and_complex_types(),
@@ -12883,11 +12904,14 @@ op_db: List[OpInfo] = [
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            sample_inputs_func=sample_inputs_linalg_pinv,
-           decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCPUIfNoLapack],
+           decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCPUIfNoLapack,
+                       # Derivative wrt rcond tensor not implemented
+                       DecorateInfo(unittest.expectedFailure,
+                                    "TestCommon", "test_floating_inputs_are_differentiable")],
            skips=(
                # errors with "leaked XXXX bytes CUDA memory on device 0"
-               DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit', device_type='cuda'),
-           )),
+               DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit', device_type='cuda'),)
+           ),
     OpInfo('linalg.pinv',
            aten_name='linalg_pinv',
            variant_test_name='singular',
@@ -13194,6 +13218,9 @@ op_db: List[OpInfo] = [
            supports_out=False,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
+           skips=(
+               DecorateInfo(unittest.skip("Second argument does not need gradient"),
+                            "TestCommon", "test_floating_inputs_are_differentiable"),),
            ),
     OpInfo('view',
            op=lambda x, shape: x.view(shape),
@@ -13211,6 +13238,9 @@ op_db: List[OpInfo] = [
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            sample_inputs_func=sample_inputs_view_as_reshape_as,
+           skips=(
+               DecorateInfo(unittest.skip("Second argument does not need gradient"),
+                            "TestCommon", "test_floating_inputs_are_differentiable"),),
            ),
     OpInfo('atleast_1d',
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
@@ -13335,12 +13365,13 @@ op_db: List[OpInfo] = [
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
            supports_out=False,
            supports_inplace_autograd=False,
+           supports_forward_ad=True,
+           supports_fwgrad_bwgrad=True,
            supports_scripting=False,
            op=torch.Tensor.__getitem__,
            skips=(
                # AssertionError: False is not true : Scalars failed to compare as equal! 0 != 104448
-               DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit', device_type='cuda'),
-           ),
+               DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit', device_type='cuda'),),
            assert_jit_shape_analysis=False,  # TODO: support index.Tensor()
            sample_inputs_func=sample_inputs_getitem,),
     OpInfo('index_put',
@@ -14062,6 +14093,10 @@ op_db: List[OpInfo] = [
                # JIT has issue when op is passed as lambda
                # AssertionError: JIT Test does not execute any logic
                DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
+               # Fails due to a limitation of gradgradcheck
+               # https://github.com/pytorch/pytorch/issues/59137
+               DecorateInfo(unittest.expectedFailure, 'TestGradients', 'test_fn_gradgrad'),
+               DecorateInfo(unittest.expectedFailure, 'TestGradients', 'test_inplace_gradgrad'),
            ),
            sample_inputs_func=sample_inputs_fill_),
     OpInfo('resize_',
@@ -14215,6 +14250,11 @@ op_db: List[OpInfo] = [
                     promotes_int_to_float=True,
                     supports_autograd=True,
                     safe_casts_outputs=True,
+                    decorators=[
+                        # Derivative wrt first tensor not implemented
+                        DecorateInfo(unittest.expectedFailure, "TestCommon",
+                                     "test_floating_inputs_are_differentiable")
+                    ],
                     skips=(
                         # Lambda doesn't work in JIT test
                         # AssertionError: JIT Test does not execute any logic
@@ -15419,6 +15459,10 @@ op_db: List[OpInfo] = [
         dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
         supports_out=False,
         sample_inputs_func=sample_inputs_nll_loss,
+        decorators=[
+            # FIXME: Derivative wrt. weight not implemented
+            DecorateInfo(unittest.expectedFailure, "TestCommon",
+                         "test_floating_inputs_are_differentiable")],
         skips=(
             # RuntimeError:
             # undefined value tensor:
