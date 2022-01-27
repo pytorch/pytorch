@@ -232,10 +232,10 @@ class AccRewritingTracer(Tracer):
         ast_rewriter_allow_list: Optional[Set] = None,
         leaf_module_list: Optional[Set] = None,
     ) -> Tuple[Graph, nn.Module]:
-        rewritten = _rewrite(root, ast_rewriter_allow_list)
         self.leaf_module_list = self.DEFAULT_LEAF_MODULE_LIST
         if leaf_module_list:
             self.leaf_module_list.update(leaf_module_list)
+        rewritten = _rewrite(root, ast_rewriter_allow_list, self.leaf_module_list)
         return super().trace(rewritten, concrete_args), rewritten
 
 
@@ -247,11 +247,14 @@ DEFAULT_REWRITE_ALLOW_LIST = {
 }
 
 
-def _rewrite(mod_to_rewrite: nn.Module, allow_list: Optional[Set] = None) -> nn.Module:
+def _rewrite(mod_to_rewrite: nn.Module, allow_list: Optional[Set] = None, leaf_module_list: Optional[Set] = None) -> nn.Module:
     if allow_list is None:
         allow_list = DEFAULT_REWRITE_ALLOW_LIST
     else:
-        allow_list.union(DEFAULT_REWRITE_ALLOW_LIST)
+        allow_list = allow_list.union(DEFAULT_REWRITE_ALLOW_LIST)
+
+    if not leaf_module_list:
+        leaf_module_list = set()
 
     # Rewrite this module's functions as well as all recursive modules'
     # functions that are attrs of this moodule. Return the new, rewritten module
@@ -264,7 +267,8 @@ def _rewrite(mod_to_rewrite: nn.Module, allow_list: Optional[Set] = None) -> nn.
             # enough. And even if we init it we can't do much with it.
             return m
 
-        base_class : Type[nn.Module] = type(m)
+        # If m is an already-rewritten RewrittenModule, then use the original base class.
+        base_class : Type[nn.Module] = getattr(m, "_base_class_origin", type(m))
 
         # Keep track of all the ConditionalExceptionWrappers that the
         # Acc_Rewriter calls into in this module so we can add them in init
@@ -319,7 +323,11 @@ def _rewrite(mod_to_rewrite: nn.Module, allow_list: Optional[Set] = None) -> nn.
                 for k, v in orig.__dict__.items():
                     if k == "_modules":
                         for mod_k, mod_v in v.items():
-                            self._modules[mod_k] = rewrite_module(mod_v)
+                            if getattr(mod_v, "_base_class_origin", type(mod_v)) in leaf_module_list:  # type: ignore[operator]
+                                print(f"Skip rewriting leaf module {type(mod_v)}")
+                                self._modules[mod_k] = mod_v
+                            else:
+                                self._modules[mod_k] = rewrite_module(mod_v)
                     else:
                         self.__dict__[k] = v
 
