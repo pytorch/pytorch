@@ -363,6 +363,13 @@ TORCH_META_FUNC(linalg_ldl_solve)
       "torch.linalg.ldl_solve: Expected B to have at least 2 dimensions, but it has ",
       B.dim(),
       " dimensions instead");
+  auto expected_pivots_shape =
+      IntArrayRef(LD.sizes().data(), LD.dim() - 1); // LD.shape[:-1]
+  TORCH_CHECK(
+      expected_pivots_shape.equals(pivots.sizes()),
+      "torch.linalg.ldl_solve: Expected LD.shape[:-1] and pivots.shape to be the same, but got pivots with shape ",
+      pivots.sizes(),
+      " instead");
   // pivots is allowed to be any integer type
   // LAPACK we use is 32-bit interface while cuSOLVER uses 64-bit interface for integers
   TORCH_CHECK(
