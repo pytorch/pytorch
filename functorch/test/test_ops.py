@@ -540,6 +540,8 @@ class TestOperators(TestCase):
         xfail('linalg.matrix_power'),
         xfail('linalg.norm'),
         xfail('linalg.slogdet'),
+        # really annoying thing where it passes correctness check but not has_batch_rule
+        skip('linalg.svdvals'),
         xfail('logdet'),
         xfail('lu_unpack'),
         xfail('masked_fill'),
@@ -852,7 +854,6 @@ class TestOperators(TestCase):
         xfail('double', 'channels_last'),
         xfail('linalg.cross'),
         xfail('nn.functional.gaussian_nll_loss'),
-        xfail('nn.functional.hardsigmoid'),
         xfail('nn.functional.huber_loss'),
         xfail('nn.functional.instance_norm'),
         xfail('nn.functional.poisson_nll_loss'),
@@ -865,7 +866,6 @@ class TestOperators(TestCase):
         xfail('stft'),
         xfail('nn.functional.rrelu'),
         xfail('nn.functional.embedding_bag'),
-        xfail('nn.functional.softshrink'),
         xfail('nn.functional.max_pool3d'),
         xfail('istft'),
         xfail('nn.functional.fractional_max_pool2d'),
@@ -901,20 +901,12 @@ class TestOperators(TestCase):
     @ops(functorch_lagging_op_db + additional_op_db, allowed_dtypes=(torch.float,))
     @skipOps('TestOperators', 'test_vjpvmap', vjp_fail.union({
         # fallback path doesn't work
-        xfail('H'),
         # All of the following are bugs and need to be fixed
         xfail('__getitem__', ''),
         xfail('clamp', ''),
-        xfail('dsplit'),
         xfail('fill_'),
-        xfail('gradient'),
-        xfail('hsplit'),
-        xfail('vsplit'),
-        xfail('dstack'),
-        xfail('hstack'),
         xfail('index_put'),
-        xfail('linalg.multi_dot'),
-        xfail('vstack'),
+        xfail('linalg.svdvals'),
         xfail('lu_solve'),
         xfail('lu_unpack'),
         xfail('matrix_exp'),

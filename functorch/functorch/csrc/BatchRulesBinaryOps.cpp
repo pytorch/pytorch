@@ -327,15 +327,18 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   BINARY_SCALAR_3(xlogy, Tensor, Scalar_Other, Scalar_Self);
 
   POINTWISE_BOXED(elu_backward);
+  BINARY_POINTWISE(hardsigmoid_backward);
   BINARY_POINTWISE(hardtanh_backward);
   BINARY_POINTWISE(hardshrink_backward);
   BINARY_POINTWISE(hardswish_backward);
+  // BINARY_POINTWISE(infinitely_differentiable_gelu_backward);
   BINARY_POINTWISE(leaky_relu_backward);
   BINARY_POINTWISE(logit_backward);
   POINTWISE_BOXED(log_sigmoid_backward);
   BINARY_POINTWISE(gelu_backward);
   BINARY_POINTWISE(sigmoid_backward);
   POINTWISE_BOXED(softplus_backward);
+  BINARY_POINTWISE(softshrink_backward);
   BINARY_POINTWISE(tanh_backward);
   BINARY_POINTWISE(threshold_backward);
 
