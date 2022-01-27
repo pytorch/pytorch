@@ -2355,6 +2355,12 @@ def f({', '.join(param_names)}):
 
             self.assertEqual(ref, val)
 
+        # https://github.com/pytorch/pytorch/issues/35600
+        # each torch.jit.trace adds state to the _python_cu compilation unit
+        # since this test traces a lot of functions, out-of-memory can occur
+        # if the CU is not cleared.
+        torch.jit._state._python_cu.drop_all_functions()
+
 only_for = ("cpu", "cuda")
 instantiate_device_type_tests(TestNNCOpInfo, globals(), only_for=only_for)
 
