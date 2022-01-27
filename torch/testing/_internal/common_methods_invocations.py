@@ -5101,6 +5101,41 @@ def sample_inputs_linalg_cholesky_inverse(op_info, device, dtype, requires_grad=
         out.append(SampleInput(a.detach().clone().requires_grad_(requires_grad), kwargs=dict(upper=True)))
     return out
 
+def sample_inputs_linalg_ldl_factor(op_info, device, dtype, requires_grad=False):
+    from torch.testing._internal.common_utils import (
+        random_hermitian_pd_matrix,
+        random_symmetric_pd_matrix,
+    )
+
+    device = torch.device(device)
+
+    # Symmetric inputs
+    yield SampleInput(
+        random_symmetric_pd_matrix(S, dtype=dtype, device=device),
+        kwargs=dict(hermitian=False),
+    )  # single matrix
+    yield SampleInput(
+        random_symmetric_pd_matrix(S, 2, dtype=dtype, device=device),
+        kwargs=dict(hermitian=False),
+    )  # batch of matrices
+    yield SampleInput(
+        torch.zeros(0, 0, dtype=dtype, device=device), kwargs=dict(hermitian=False)
+    )  # 0x0 matrix
+    yield SampleInput(
+        torch.zeros(0, 2, 2, dtype=dtype, device=device), kwargs=dict(hermitian=False)
+    )  # zero batch of matrices
+
+    # Hermitian inputs
+    if dtype.is_complex and (device.type == "cpu" or torch.cuda.has_magma):
+        yield SampleInput(
+            random_hermitian_pd_matrix(S, dtype=dtype, device=device),
+            kwargs=dict(hermitian=True),
+        )  # single matrix
+        yield SampleInput(
+            random_hermitian_pd_matrix(S, 2, dtype=dtype, device=device),
+            kwargs=dict(hermitian=True),
+        )  # batch of matrices
+
 def sample_inputs_linalg_ldl_solve(op_info, device, dtype, requires_grad=False):
     # Generate LDL factors of symmetric (and Hermitian on CPU) matrices
     from torch.testing._internal.common_utils import random_hermitian_pd_matrix, random_symmetric_pd_matrix
@@ -10033,7 +10068,7 @@ op_db: List[OpInfo] = [
            aten_name='linalg_ldl_factor_ex',
            dtypes=floating_and_complex_types(),
            supports_autograd=False,
-           sample_inputs_func=sample_inputs_linalg_cholesky,
+           sample_inputs_func=sample_inputs_linalg_ldl_factor,
            decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCPUIfNoLapack],
            ),
     OpInfo('linalg.ldl_solve',
