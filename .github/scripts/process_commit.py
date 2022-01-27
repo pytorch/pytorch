@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """
-This script finds the user/pr creator responsible for labeling a PR by a commit SHA. It is used by the workflow in
+This script finds the merger responsible for labeling a PR by a commit SHA. It is used by the workflow in
 '.github/workflows/pr-labels.yml'. If there exists no PR associated with the commit or the PR is properly labeled,
 this script is a no-op.
 
-Note: we ping the author only, not the reviewers, as the reviewers can sometimes be external to pytorch
+Note: we ping the merger only, not the reviewers, as the reviewers can sometimes be external to pytorch
 with no labeling responsibility, so we don't want to bother them.
 This script is based on: https://github.com/pytorch/vision/blob/main/.github/process_commit.py
 """
@@ -15,7 +15,6 @@ from typing import Any, Set, Tuple
 import requests
 
 # For a PR to be properly labeled it should have release notes label and one topic label
-BOT_MERGER_NAME = "pytorchmergebot"
 PRIMARY_LEBEL_FILTER = "release notes:"
 SECONDARY_LEBELS = {
     "topic: bc_breaking",
@@ -42,32 +41,26 @@ def get_pr_number(commit_hash: str) -> Any:
     return data[0]["number"]
 
 
-def get_pr_author_and_labels(pr_number: int) -> Tuple[str, Set[str]]:
+def get_pr_merger_and_labels(pr_number: int) -> Tuple[str, Set[str]]:
     # See https://docs.github.com/en/rest/reference/pulls#get-a-pull-request
     data = query_pytroch(f"pulls/{pr_number}", accept="application/vnd.github.v3+json")
-    user = data["user"]["login"]
+    merger = data["merged_by"]["login"]
     labels = {label["name"] for label in data["labels"]}
-    return user, labels
+    return merger, labels
 
-def get_pr_closed_by_name(pr_number: int) -> Any:
-    data = query_pytroch(f"issues/{pr_number}", accept="application/vnd.github.v3+json")
-    if not data or (data["state"] != "closed"):
-        return None
-    return data["closed_by"]["login"]
 
 if __name__ == "__main__":
     commit_hash = sys.argv[1]
     pr_number = get_pr_number(commit_hash)
-    merger = get_pr_closed_by_name(pr_number)
 
-    if not pr_number or (merger != BOT_MERGER_NAME):
+    if not pr_number:
         sys.exit(0)
 
-    user, labels = get_pr_author_and_labels(pr_number)
+    merger, labels = get_pr_merger_and_labels(pr_number)
     response = query_pytroch("labels", accept="application/json")
     response_labels = list(map(lambda x: str(x["name"]), response.json()))
     primary_labels = set(filter(lambda x: x.startswith(PRIMARY_LEBEL_FILTER), response_labels))
     is_properly_labeled = bool(primary_labels.intersection(labels) and SECONDARY_LEBELS.intersection(labels))
 
     if not is_properly_labeled:
-        print(f"@{user}")
+        print(f"@{merger}")
