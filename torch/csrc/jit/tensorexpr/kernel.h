@@ -207,10 +207,6 @@ class TORCH_API TensorExprKernel {
   ArgValue toArg(const torch::jit::Value* v) const;
   ExprHandle constant(const torch::jit::Value* v);
 
-  ExprHandle tensorOrConstant(
-      const torch::jit::Value* v,
-      const std::vector<ExprHandle>& axes);
-
   Tensor computeValue(const torch::jit::Value* v);
 
   void bindConstant(const torch::jit::Value* v);
@@ -278,6 +274,7 @@ class TORCH_API TensorExprKernel {
   std::vector<std::vector<int64_t>> tensorOutputSizes_;
   std::vector<std::vector<int64_t>> tensorOutputStrides_;
   std::vector<torch::jit::StrideInput> tensorOutputStrideDesc_;
+  std::vector<bool> isOutputScalar_;
   std::vector<UnpackedTensorOptions> tensorOutputTensorOptions_;
   std::unordered_set<BufPtr> bufOutputs_;
   std::unordered_map<const torch::jit::Value*, BufPtr> bufs_;
