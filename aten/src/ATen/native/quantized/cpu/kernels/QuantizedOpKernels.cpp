@@ -115,7 +115,9 @@ Tensor qcat_nhwc_kernel(
 
   // all the inputs and output have the same scale and zero_point,
   // skip quant/dequant and directly do memcpy.
-  bool is_fast_path = all_inputs_sharing_scale_and_zero_point(qxs, scale, zero_point);
+  bool is_fast_path =
+      all_inputs_sharing_scale_and_zero_point(qxs, scale, zero_point) &&
+      !ReLUFused;
 
   // N, H, and W are explicitly captured here because there's a bug in GCC5
   // which causes an internal compiler error if they're not
