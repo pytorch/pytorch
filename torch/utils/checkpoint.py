@@ -151,19 +151,25 @@ def checkpoint(function, *args, use_reentrant: bool = True, **kwargs):
     and instead recomputes them in backward pass. It can be applied on any part
     of a model.
 
-    Specifically, in the forward pass, :attr:`function` will run in
+    Depending on the flag `use_reentrant`, one of two implementations will be
+    invoked. If `use_reentrant=True`, in the forward pass, :attr:`function` will run in
     :func:`torch.no_grad` manner, i.e., not storing the intermediate
     activations. Instead, the forward pass saves the inputs tuple and the
     :attr:`function` parameter. In the backwards pass, the saved inputs and
     :attr:`function` is retrieved, and the forward pass is computed on
     :attr:`function` again, now tracking the intermediate activations, and then
     the gradients are calculated using these activation values.
+    If `use_reentrant=False`, an implementation based on
+    :func:`torch.autograd.graph.saved_tensors_hooks` will be used, resulting in
+    references to intermediate activations not being saved in the forward pass
+    and being recomputed in the backwards pass.
 
     The output of :attr:`function` can contain non-Tensor values and gradient
-    recording is only performed for the Tensor values. Note that if the output
-    consists of nested structures (ex: custom objects, lists, dicts etc.)
-    consisting of Tensors, these Tensors nested in custom structures will not
-    be considered as part of autograd.
+    recording is only performed for the Tensor values. Note that if
+    ``use_reentrant=True`` and the output consists of nested structures
+    (ex: custom objects, lists, dicts etc.) consisting of Tensors, these
+    Tensors nested in custom structures will not be considered as part of
+    autograd. This is however supported by specifying ``use_reentrant=False``.
 
 
     .. warning::
@@ -206,18 +212,30 @@ def checkpoint(function, *args, use_reentrant: bool = True, **kwargs):
             first input as ``activation`` and the second input as ``hidden``
         preserve_rng_state(bool, optional, default=True):  Omit stashing and restoring
             the RNG state during each checkpoint.
-        use_reentrant(bool, optional, default=True): Use checkpointing
+        use_reentrant(bool default=True): Use checkpointing
             implementation that requires re-entrant autograd.
             If ``use_reentrant=False`` is specified, ``checkpoint`` will use an
             implementation that does not require re-entrant autograd. This
             allows ``checkpoint`` to support additional functionality, such as
-            working as expected with ``torch.autograd.grad``. Note that future
-            versions of PyTorch will default to ``use_reentrant=False``.
+            working as expected with ``torch.autograd.grad``. Default is
+            currently ``True`` for backwards compatibility, but note that
+            omitting the argument is deprecated and it should be explicitly
+            specified. Future versions of PyTorch will default to
+            ``use_reentrant=False``.
         args: tuple containing inputs to the :attr:`function`
 
     Returns:
         Output of running :attr:`function` on :attr:`*args`
     """
+
+    if use_reentrant:
+        # Warn that it will be deprecated in upcoming PT releases.
+        warnings.warn(
+            "Passing use_reentrant=True will be deprecated in upcoming PyTorch "
+            "release. Please consider explicitly passing use_reentrant=False."
+            "If this does not work for your use case, please ping "
+            "https://github.com/pytorch/pytorch/issues/65537"
+       )
     # Hack to mix *args with **kwargs in a python 2.7-compliant way
     preserve = kwargs.pop('preserve_rng_state', True)
     if kwargs:
