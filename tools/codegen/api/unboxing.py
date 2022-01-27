@@ -147,7 +147,7 @@ if ({arg_name + "_opt"}.has_value()) {{
         """.split("\n")
 
 
-def _gen_code_list_type(arg_name: str, out_name: str, t: ListType, ctype: CType) -> List[str]:
+def _gen_code_list_type(arg_name: str, out_name: str, t: ListType, ctype: str) -> List[str]:
     in_name = arg_name + "_list_in"
     elem_name = arg_name + "_elem"
     code = [f"const c10::List<c10::IValue> {in_name} = {arg_name}.toList();"]
