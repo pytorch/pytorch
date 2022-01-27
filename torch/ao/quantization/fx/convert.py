@@ -646,7 +646,8 @@ def convert(model: GraphModule, is_reference: bool = False,
     if not is_reference:
         model = duplicate_dequantize_node(model)
         model = fold_weight(model, node_name_to_scope)
-        model = lower_to_fbgemm(model)
+        modules = dict(model.named_modules(remove_duplicate=False))
+        model = lower_to_fbgemm(model, modules)
         model = remove_quant_dequant_pairs(model)
         model = remove_extra_dequantize(model)
     return model

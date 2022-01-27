@@ -16,7 +16,7 @@ LOWER_MODULE_MAP: Dict[Type[torch.nn.Module], Type[ReferenceableQuantizedModule]
     torch.nn.quantized._reference.Conv3d: torch.nn.quantized.Conv3d,
 }
 
-def _lower_weighted_ref_module(model: QuantizedGraphModule, ref_class: Type[torch.nn.Module]) -> QuantizedGraphModule:
+def _lower_weighted_ref_module(model: QuantizedGraphModule, ref_class: Type[torch.nn.Module], modules: Dict[str, torch.nn.Module]) -> QuantizedGraphModule:
     """
     Traverse the graph and find dequantize - ref module - quantize patterns
     and replace them with the quantized version of the ref module.
@@ -28,7 +28,6 @@ def _lower_weighted_ref_module(model: QuantizedGraphModule, ref_class: Type[torc
     pattern = (torch.quantize_per_tensor,
                (ref_class, "dequantize"),
                MatchAllNode, MatchAllNode, MatchAllNode)
-    modules = dict(model.named_modules(remove_duplicate=False))
     nodes = list(model.graph.nodes)
     # TODO: maybe orgnize this better (e.g. break down to more functions)
     # to make this function more readable
@@ -79,8 +78,7 @@ def _lower_weighted_ref_module(model: QuantizedGraphModule, ref_class: Type[torc
     return model
 
 
-def special_pattern_replacement(model: QuantizedGraphModule) -> QuantizedGraphModule:
-    modules = dict(model.named_modules(remove_duplicate=False))
+def special_pattern_replacement(model: QuantizedGraphModule, modules: Dict[str, torch.nn.Module]) -> QuantizedGraphModule:
     nodes = list(model.graph.nodes)
     for n in model.graph.nodes:
         q_node = n
@@ -117,19 +115,19 @@ def special_pattern_replacement(model: QuantizedGraphModule) -> QuantizedGraphMo
     model.recompile()
     return model
 
-def _lower_to_native_backend(model: QuantizedGraphModule) -> QuantizedGraphModule:
+def _lower_to_native_backend(model: QuantizedGraphModule, modules: Dict[str, torch.nn.Module]) -> QuantizedGraphModule:
     """ Lower a quantized reference model (with reference quantized operator patterns)
     to the native backend in PyTorch (fbgemm/qnnpack), both backends shares the same
     operator signature so they can be lowered with the same function
     """
     for ref_class in LOWER_MODULE_MAP.keys():
-        model = _lower_weighted_ref_module(model, ref_class)
+        model = _lower_weighted_ref_module(model, ref_class, modules)
     model.recompile()
 
     for pattern, replacement in get_fbgemm_patterns_and_replacements():
         subgraph_rewriter_FORKED_DO_NOT_USE.replace_pattern(model, pattern, replacement)
 
-    special_pattern_replacement(model)
+    special_pattern_replacement(model, modules)
 
     model.graph.lint()
     return model
