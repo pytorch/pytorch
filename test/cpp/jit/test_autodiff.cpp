@@ -341,15 +341,10 @@ graph(%inp.1 : Tensor,
 
   auto backward_graph = diff_graph_node->g(attr::ReverseSubgraph);
 
-  // "input" does not need gradient, so it shouldn't be in the backwards graph
-  testing::FileCheck()
-      .check_not("%grad_input")
-      ->check_not("%grad_inp")
-      ->run(*backward_graph);
-
-  // "bias" and "weight" need gradients
-  testing::FileCheck().check("%grad_bias")->run(*backward_graph);
-  testing::FileCheck().check("%grad_weight")->run(*backward_graph);
+  // we expect to compute grad_weight (which requires a matmul) but we don't
+  // expect to compute grad_input. So, we expect exactly 1 matmul.
+  // Note: this could change, e.g. if mm is used instead
+  testing::FileCheck().check_count("matmul", 1, true)->run(*backward_graph);
 }
 
 } // namespace jit

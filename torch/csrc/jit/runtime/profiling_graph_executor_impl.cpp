@@ -222,7 +222,11 @@ bool guardDifferentiableGraph(Node* dnode) {
         }
       }
 
-      bool requires_grad = dni->type()->expectRef<TensorType>().requires_grad();
+      // Propagate the requires_grad property to inputs
+      // A RequiresGrad check gets added (insertTypeGuard, below)
+      // so requires_grad is guaranteed to match for the inputs;
+      // but other properties are not guaranteed to match
+      auto requires_grad = dni->type()->expectRef<TensorType>().requiresGrad();
       gi[i]->setType(ty->withRequiresGrad(requires_grad));
 
       // we check if the optional is defined
