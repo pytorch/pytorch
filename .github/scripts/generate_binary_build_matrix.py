@@ -16,7 +16,7 @@ from typing import Dict, List, Tuple
 CUDA_ARCHES = ["10.2", "11.1", "11.3", "11.5"]
 
 
-ROCM_ARCHES = ["4.2", "4.3.1"]
+ROCM_ARCHES = ["4.3.1", "4.5.2"]
 
 
 def arch_type(arch_version: str) -> str:
@@ -61,11 +61,7 @@ LIBTORCH_CONTAINER_IMAGES: Dict[Tuple[str, str], str] = {
     ("cpu", CXX11_ABI): "pytorch/libtorch-cxx11-builder:cpu",
 }
 
-FULL_PYTHON_VERSIONS = [
-    "3.7",
-    "3.8",
-    "3.9",
-]
+FULL_PYTHON_VERSIONS = ["3.7", "3.8", "3.9", "3.10"]
 
 
 def translate_desired_cuda(gpu_arch_type: str, gpu_arch_version: str) -> str:
@@ -76,11 +72,21 @@ def translate_desired_cuda(gpu_arch_type: str, gpu_arch_version: str) -> str:
     }.get(gpu_arch_type, gpu_arch_version)
 
 
-def generate_conda_matrix() -> List[Dict[str, str]]:
+def list_without(in_list: List[str], without: List[str]) -> List[str]:
+    return [item for item in in_list if item not in without]
+
+
+def generate_conda_matrix(os: str) -> List[Dict[str, str]]:
     ret: List[Dict[str, str]] = []
+    arches = ["cpu"]
+    if os == "linux":
+        arches += CUDA_ARCHES
+    elif os == "windows":
+        # We don't build CUDA 10.2 for window see https://github.com/pytorch/pytorch/issues/65648
+        arches += list_without(CUDA_ARCHES, ["10.2"])
     for python_version in FULL_PYTHON_VERSIONS:
         # We don't currently build conda packages for rocm
-        for arch_version in ["cpu"] + CUDA_ARCHES:
+        for arch_version in arches:
             gpu_arch_type = arch_type(arch_version)
             gpu_arch_version = "" if arch_version == "cpu" else arch_version
             ret.append(
@@ -101,7 +107,7 @@ def generate_conda_matrix() -> List[Dict[str, str]]:
     return ret
 
 
-def generate_libtorch_matrix(abi_version: str) -> List[Dict[str, str]]:
+def generate_libtorch_matrix(os: str, abi_version: str) -> List[Dict[str, str]]:
     libtorch_variants = [
         "shared-with-deps",
         "shared-without-deps",
@@ -109,6 +115,12 @@ def generate_libtorch_matrix(abi_version: str) -> List[Dict[str, str]]:
         "static-without-deps",
     ]
     ret: List[Dict[str, str]] = []
+    arches = ["cpu"]
+    if os == "linux":
+        arches += CUDA_ARCHES
+    elif os == "windows":
+        # We don't build CUDA 10.2 for window see https://github.com/pytorch/pytorch/issues/65648
+        arches += list_without(CUDA_ARCHES, ["10.2"])
     for arch_version in ["cpu"] + CUDA_ARCHES:
         for libtorch_variant in libtorch_variants:
             # We don't currently build libtorch for rocm
@@ -138,8 +150,16 @@ def generate_libtorch_matrix(abi_version: str) -> List[Dict[str, str]]:
     return ret
 
 
-def generate_wheels_matrix() -> List[Dict[str, str]]:
-    arches = ["cpu"] + CUDA_ARCHES + ROCM_ARCHES
+def generate_wheels_matrix(os: str) -> List[Dict[str, str]]:
+    arches = ["cpu"]
+    package_type = "wheel"
+    if os == "linux":
+        arches += CUDA_ARCHES + ROCM_ARCHES
+        # NOTE: We only build manywheel packages for linux
+        package_type = "manywheel"
+    elif os == "windows":
+        # We don't build CUDA 10.2 for window see https://github.com/pytorch/pytorch/issues/65648
+        arches += list_without(CUDA_ARCHES, ["10.2"])
     ret: List[Dict[str, str]] = []
     for python_version in FULL_PYTHON_VERSIONS:
         for arch_version in arches:
@@ -154,8 +174,8 @@ def generate_wheels_matrix() -> List[Dict[str, str]]:
                         gpu_arch_type, gpu_arch_version
                     ),
                     "container_image": WHEEL_CONTAINER_IMAGES[arch_version],
-                    "package_type": "manywheel",
-                    "build_name": f"manywheel-py{python_version}-{gpu_arch_type}{gpu_arch_version}".replace(
+                    "package_type": package_type,
+                    "build_name": f"{package_type}-py{python_version}-{gpu_arch_type}{gpu_arch_version}".replace(
                         ".", "_"
                     ),
                 }
@@ -166,9 +186,9 @@ def generate_wheels_matrix() -> List[Dict[str, str]]:
 def generate_binary_build_matrix(os: str) -> List[Dict[str, str]]:
     return {
         "linux": [
-            *generate_conda_matrix(),
-            *generate_libtorch_matrix(abi_version=PRE_CXX11_ABI),
-            *generate_libtorch_matrix(abi_version=CXX11_ABI),
-            *generate_wheels_matrix(),
+            *generate_conda_matrix(os),
+            *generate_libtorch_matrix(os, abi_version=PRE_CXX11_ABI),
+            *generate_libtorch_matrix(os, abi_version=CXX11_ABI),
+            *generate_wheels_matrix(os),
         ]
     }[os]
