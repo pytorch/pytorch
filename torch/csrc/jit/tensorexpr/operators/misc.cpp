@@ -37,6 +37,12 @@ ExprHandle promoteToDtype(ExprHandle e, ScalarType dt) {
     break;
     AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, TYPE_CASE);
 #undef TYPE_CASE
+    case ScalarType::QUInt8:
+      e = cast<c10::quint8>(e);
+      break;
+    case ScalarType::QInt8:
+      e = cast<c10::qint8>(e);
+      break;
     default:
       throw unsupported_dtype();
   }
@@ -254,6 +260,13 @@ ExprHandle tensorOrConstant(
     const std::vector<ExprHandle>& axes) {
   if (auto b = c10::get_if<BufHandle>(&v)) {
     return broadcast(*b, axes);
+  }
+  return constant(v);
+}
+
+ExprHandle scalarOrConstant(const ArgValue& v) {
+  if (auto vh = c10::get_if<VarHandle>(&v)) {
+    return *vh;
   }
   return constant(v);
 }

@@ -1,4 +1,6 @@
-from typing import Optional, Tuple, List, Union
+# -*- coding: utf-8 -*-
+
+from typing import Optional, Tuple, List, Union, Any
 
 import torch
 from torch import Tensor
@@ -27,7 +29,7 @@ def _apply_docstring_templates(func):
     """
     docstring_templates = dict(
         reduction_signature='''\
-{function_name}(input, dim, *, keepdim=False, dtype=None, mask=None) -> Tensor''',
+{function_name}(input, {operation_args}, *, {operation_kwargs}) -> Tensor''',
         reduction_descr='''\
 Returns {operation name} of all the elements in the :attr:`input`
 tensor along the given dimension(s) :attr:`dim` while the :attr:`input`
@@ -64,19 +66,10 @@ tensor must not be greater than of the :attr:`input` tensor.
 
 Args:
     input (Tensor): the input tensor
-    dim (int or tuple of ints): the dimension or dimensions to reduce.
+    {args_declarations}
 
 Keyword args:
-    keepdim (bool, optional): whether the output tensor has
-      :attr:`dim` retained or not. Default: False.
-    dtype (:class:`torch.dtype`, optional): the desired data type
-      of returned tensor.  If specified, the input tensor is
-      casted to :attr:`dtype` before the operation is
-      performed. Default: None
-    mask (:class:`torch.Tensor`, optional): the boolean tensor
-      containing the binary mask of validity of input tensor
-      elements.
-      Default: ``torch.ones(input.shape, dtype=torch.bool)``.''',
+    {kwargs_declarations}''',
         reduction_example='''\
 Example::
 
@@ -86,7 +79,7 @@ Example::
     >>> mask = {example_mask}
     >>> mask
     {indent_example_mask}
-    >>> {full_function_name}(input, {example_dim}, mask=mask)
+    >>> {full_function_name}(input, {example_args}, mask=mask)
     {indent_example_output}
 ''',
         reduction_identity='''\
@@ -96,7 +89,7 @@ The identity value of {operation name} operation, which is used to start the
 reduction, depends on input dtype. For instance, for float32, uint8,
 and int32 dtypes, the identity values are ``{identity_float32}``, ``{identity_uint8}``, and ``{identity_int32}``, respectively.''',
         normalization_signature='''\
-{function_name}(input, dim, *, dtype=None, mask=None) -> Tensor''',
+{function_name}(input, {operation_args}, *, {operation_kwargs}) -> Tensor''',
         normalization_descr='''\
 Returns {operation name} of all the slices in the :attr:`input` tensor
 along :attr:`dim` while the :attr:`input` elements are masked out
@@ -114,7 +107,7 @@ value: it may or may not be set to zero or nan; the choice may correspond to
 the value that leads to the most efficient storage of :attr:`output`
 tensor.
 
-The mask of the output tensor can be computed as
+The mask of the {operation name} output tensor can be computed as
 ``torch.broadcast_to(mask, input.shape)``.
 
 The shapes of the :attr:`mask` tensor and the :attr:`input` tensor
@@ -124,17 +117,10 @@ tensor must not be greater than of the :attr:`input` tensor.
 
 Args:
     input (Tensor): the input tensor
-    dim (int): the dimension along which {operation name} is computed.
+    {args_declarations}
 
 Keyword args:
-    dtype (:class:`torch.dtype`, optional): the desired data type
-      of returned tensor.  If specified, the input tensor is
-      casted to :attr:`dtype` before the operation is
-      performed. Default: None
-    mask (:class:`torch.Tensor`, optional): the boolean tensor
-      containing the binary mask of validity of input tensor
-      elements.
-      Default: ``torch.ones(input.shape, dtype=torch.bool)``.''',
+    {kwargs_declarations}''',
         normalization_example='''\
 Example::
 
@@ -144,9 +130,56 @@ Example::
     >>> mask = {example_mask}
     >>> mask
     {indent_example_mask}
-    >>> {full_function_name}(input, {example_dim}, mask=mask)
+    >>> {full_function_name}(input, {example_args}, mask=mask)
     {indent_example_output}
 ''')
+
+    args_and_kwargs = dict(
+        # argument name sufficies separated by double underscore will
+        # be removed in the final documentation string.
+        sum=(('dim',), ('keepdim=False', 'dtype=None', 'mask=None')),
+        prod=(('dim',), ('keepdim=False', 'dtype=None', 'mask=None')),
+        amin=(('dim',), ('keepdim=False', 'dtype=None', 'mask=None')),
+        amax=(('dim',), ('keepdim=False', 'dtype=None', 'mask=None')),
+        mean=(('dim',), ('keepdim=False', 'dtype=None', 'mask=None')),
+        norm=(('ord', 'dim',), ('keepdim=False', 'dtype=None', 'mask=None')),
+        var=(('dim', 'unbiased'), ('keepdim=False', 'dtype=None', 'mask=None')),
+        softmax=(('dim__as_int',), ('dtype=None', 'mask=None')),
+        log_softmax=(('dim__as_int',), ('dtype=None', 'mask=None')),
+        softmin=(('dim__as_int',), ('dtype=None', 'mask=None')),
+        normalize=(('ord__required', 'dim__as_int',), ('eps=1e-12', 'dtype=None', 'mask=None')),
+    )
+
+    argument_declarations = dict(
+        dim='''\
+dim (int or tuple of ints, optional): the dimension or dimensions to reduce.
+  Default: None that is equivalent to ``tuple(range(input.ndim))``.''',
+        dim__as_int='''\
+dim (int): the dimension along which {operation name} is computed.''',
+        ord='''\
+ord (int, float, optional): the order of vector norm. Default: 2.
+  See :func:`torch.linalg.vector_norm` for a list of supported norms.''',
+        ord__required='''\
+ord (int, float): the order of vector norm. Default: 2.
+  See :func:`torch.linalg.vector_norm` for a list of supported norms.''',
+        unbiased='''\
+unbiased (bool): when True, use Bessel’s correction, otherwise, compute
+  the uncorrected sample variance.''',
+        eps='''\
+eps (float, optional): small value to avoid division by zero. Default: {default}.''',
+        keepdim='''\
+keepdim (bool, optional): whether the output tensor has
+  :attr:`dim` retained or not. Default: {default}.''',
+        dtype='''\
+dtype (:class:`torch.dtype`, optional): the desired data type
+  of returned tensor.  If specified, the input tensor is
+  casted to :attr:`dtype` before the operation is
+  performed. Default: {default}.''',
+        mask='''\
+mask (:class:`torch.Tensor`, optional): the boolean tensor
+  containing the binary mask of validity of input tensor
+  elements.
+  Default: None that is equivalent to ``torch.ones(input.shape, dtype=torch.bool)``.''')
 
     definitions = dict(
         softmax='''\
@@ -160,19 +193,26 @@ defined as ``log(exp(x[i])/sum(exp(x)))``.''',
         softmin='''\
 Let ``x`` be a sequence of unmasked elements of one-dimensional slice
 of the :attr:`input` tensor. Softmin of i-th element in ``x`` is
-defined as ``exp(-x[i])/sum(exp(-x))``.''')
+defined as ``exp(-x[i])/sum(exp(-x))``.''',
+        normalize='''\
+Let ``x`` be a sequence of unmasked elements of one-dimensional slice
+of the :attr:`input` tensor. Normalize of i-th element in ``x`` is
+defined as ``x[i]/max(norm(x, p), eps)``.''')
 
     reduction_names = dict(
         sum='sum',
         prod='product',
         amax='maximum',
         amin='minimum',
-        mean='mean')
+        mean='mean',
+        norm='norm',
+        var='variance')
 
     normalization_names = dict(
         softmax='softmax',
         log_softmax='log_softmax',
-        softmin='softmin')
+        softmin='softmin',
+        normalize='normalize')
 
     operation_names = dict()
     operation_names.update(reduction_names)
@@ -182,6 +222,29 @@ defined as ``exp(-x[i])/sum(exp(-x))``.''')
     example_dim = 1
     example_input = torch.tensor([[-3, -2, -1], [0, 1, 2]])
     example_mask = torch.tensor([[True, False, True], [False, False, False]])
+    example_args: Tuple[Any, ...]
+    if func.__name__ in {'norm', 'normalize'}:
+        example_args = (2.0, example_dim)
+        example_input = example_input.to(dtype=torch.float32)
+    elif func.__name__ in {'var'}:
+        example_args = (example_dim, False)
+    else:
+        example_args = (example_dim,)
+
+    operation_args: Tuple[str, ...]
+    operation_kwargs: Tuple[str, ...]
+    operation_args, operation_kwargs = args_and_kwargs[func.__name__]
+    arg_declarations = [
+        '\n    '.join(argument_declarations
+                      .get(a, f'{a.split("__", 1)[0]}: TBD.')
+                      .splitlines())
+        for a in operation_args]
+    kwarg_declarations = [
+        '\n    '.join(argument_declarations
+                      .get(a.split('=', 1)[0], f'{a.split("__", 1)[0]}: TBD.')
+                      .format(default=a.split('=', 1)[1])
+                      .splitlines())
+        for a in operation_kwargs]
 
     if func.__name__ in reduction_names:
         op_kind = 'reduction'
@@ -192,14 +255,16 @@ defined as ``exp(-x[i])/sum(exp(-x))``.''')
         example_input = example_input.to(dtype=torch.float32)
     else:
         assert 0  # add function name to operation names dictionaries
-    example_output = func(example_input, example_dim, mask=example_mask)
+    example_output = func(example_input, *example_args, mask=example_mask)
 
     template_data = {'function_name': func.__name__,
                      'full_function_name': func.__module__ + '.' + func.__name__,
                      'operation name': operation_names[func.__name__],
+                     'operation_args': ', '.join(a.split('__', 1)[0] for a in operation_args),
+                     'operation_kwargs': ', '.join(a.split('__', 1)[0] for a in operation_kwargs),
                      # one-line representation of a tensor:
                      'example_input': ' '.join(str(example_input).split()),
-                     'example_dim': str(example_dim),
+                     'example_args': ', '.join(map(str, example_args)),
                      'example_mask': ' '.join(str(example_mask).split()),
                      # multi-line representation of a tensor with indent
                      'indent_example_input': ('\n    ').join(str(example_input).splitlines()),
@@ -211,14 +276,21 @@ defined as ``exp(-x[i])/sum(exp(-x))``.''')
             identity_uint8=_reduction_identity(func.__name__, torch.tensor(0, dtype=torch.uint8)),
             identity_int32=_reduction_identity(func.__name__, torch.tensor(0, dtype=torch.int32)),
             identity_float32=_reduction_identity(func.__name__, torch.tensor(0, dtype=torch.float32)))
+        if func.__name__ == 'norm':
+            template_data.update(
+                identity_ord_ninf=_reduction_identity(
+                    func.__name__, torch.tensor(0, dtype=torch.float32), float('-inf')))
     elif func.__name__ in normalization_names:
         template_data.update(definition=definitions[func.__name__])
     else:
         assert 0  # add function name to operation names dictionaries
+    template_data.update(args_declarations=('\n    '.join(arg_declarations)).format_map(template_data))
+    template_data.update(kwargs_declarations=('\n    '.join(kwarg_declarations)).format_map(template_data))
 
     # Apply function name info to docstring templates:
     templates = dict((k, v.format_map(template_data))
                      for k, v in docstring_templates.items() if k.startswith(op_kind))
+    templates.update((k, v.format_map(template_data) if isinstance(v, str) else v) for k, v in template_data.items())
 
     # Apply docstring templates to function doctring:
     if func.__doc__ is None:
@@ -233,7 +305,7 @@ defined as ``exp(-x[i])/sum(exp(-x))``.''')
     return func
 
 
-def _reduction_identity(op_name: str, input: Tensor):
+def _reduction_identity(op_name: str, input: Tensor, *args):
     """Return identity value as scalar tensor of a reduction operation on
     given input, or None, if the identity value cannot be uniquely
     defined for the given input.
@@ -270,6 +342,14 @@ def _reduction_identity(op_name: str, input: Tensor):
         # the dim argument and it may be a non-scalar tensor, we
         # consider the identity value of the mean operation ambiguous.
         # Moreover, the mean value of empty input is undefined.
+        return None
+    elif op_name == 'norm':
+        ord = args[0] if args else 2
+        if ord == float('-inf'):
+            assert torch.is_floating_point(input), input.dtype
+            return torch.tensor(torch.inf, dtype=dtype, device=device)
+        return torch.tensor(0, dtype=dtype, device=device)
+    elif op_name == 'var':
         return None
     raise NotImplementedError(f'identity of {op_name} on {dtype} input')
 
@@ -310,13 +390,17 @@ def _input_mask(input: Tensor, *args, **kwargs) -> Tensor:
     return inmask
 
 
-def _output_mask(op, input: Tensor, dim: DimOrDims = None, *args, **kwargs) -> Tensor:
+def _output_mask(op, input: Tensor, *args, **kwargs) -> Tensor:
     """Return output mask of masked operation applied to given arguments.
     """
     if callable(op):
-        is_reduction = op.__name__ in {'sum', 'prod', 'amax', 'amin', 'mean'}
-        is_normalization = op.__name__ in {'softmax', 'log_softmax', 'softmin'}
+        is_reduction = op.__name__ in {'sum', 'prod', 'amax', 'amin', 'mean', 'norm', 'var'}
+        is_normalization = op.__name__ in {'softmax', 'log_softmax', 'softmin', 'normalize'}
         if is_reduction:
+            if op.__name__ == 'norm':
+                if args:
+                    args = args[1:]  # lstrip ord argument
+            dim = args[0] if args else kwargs.get('dim')
             outmask = _input_mask(input, *args, **kwargs)
             keepdim = kwargs.get('keepdim', False)
             dim_ = _canonical_dim(dim, input.ndim)
@@ -472,6 +556,84 @@ elements, have ``nan`` values.
 
 
 @_apply_docstring_templates
+def norm(input: Tensor,
+         ord: Optional[float] = 2.0,
+         dim: DimOrDims = None,
+         *,
+         keepdim: Optional[bool] = False,
+         dtype: Optional[DType] = None,
+         mask: Optional[Tensor] = None) -> Tensor:
+    """\
+{reduction_signature}
+
+{reduction_descr}
+
+The identity value of norm operation, which is used to start the
+reduction, is ``{identity_float32}``, except for ``ord=-inf`` it is
+``{identity_ord_ninf}``.
+
+{reduction_args}
+
+{reduction_example}"""
+    if dtype is None:
+        dtype = input.dtype
+    if input.layout == torch.strided:
+        identity = input.new_full([], _reduction_identity('norm', input, ord))
+        mask_input = input if mask is None else torch.where(mask, input, identity)
+        dim_ = _canonical_dim(dim, input.ndim)
+        return torch.linalg.vector_norm(mask_input, ord, dim_, bool(keepdim), dtype=dtype)
+    else:
+        raise ValueError(f'masked norm expects strided tensor (got {input.layout} tensor)')
+
+
+@_apply_docstring_templates
+def var(input: Tensor,
+        dim: DimOrDims = None,
+        unbiased: Optional[bool] = False,
+        *,
+        keepdim: Optional[bool] = False,
+        dtype: Optional[DType] = None,
+        mask: Optional[Tensor] = None) -> Tensor:
+    """\
+{reduction_signature}
+
+{reduction_descr}
+
+The identity value of sample variance operation is undefined.  The
+elements of output tensor with strided layout, that correspond to
+fully masked-out elements, have ``nan`` values.
+
+{reduction_args}
+
+{reduction_example}"""
+    if dtype is None:
+        dtype = input.dtype
+        if not (dtype.is_floating_point or dtype.is_complex):
+            dtype = torch.float32
+    compute_dtype = dtype
+    if not (compute_dtype.is_floating_point or compute_dtype.is_complex):
+        compute_dtype = torch.float32
+    if input.layout == torch.strided:
+        inmask = _input_mask(input, mask=mask)
+        count = sum(inmask.new_ones(input.shape, dtype=torch.int64), dim, keepdim=True, mask=inmask)
+        sample_total = sum(input, dim, keepdim=True, dtype=dtype, mask=inmask)
+        # TODO: replace torch.subtract/divide/square/maximum with
+        # masked subtract/divide/square/maximum when these will be
+        # available.
+        sample_mean = torch.divide(sample_total, count)
+        x = torch.subtract(input, sample_mean)
+        total = sum(x * x.conj(), dim, keepdim=keepdim, dtype=compute_dtype, mask=inmask)
+        if not keepdim:
+            count = count.reshape(total.shape)
+        if unbiased:
+            count = torch.subtract(count, 1)
+            count = torch.maximum(count, count.new_zeros([]))
+        return torch.divide(total, count).to(dtype=dtype)
+    else:
+        raise ValueError(f'masked var expects strided tensor (got {input.layout} tensor)')
+
+
+@_apply_docstring_templates
 def softmax(input: Tensor,
             dim: int,
             *,
@@ -523,3 +685,27 @@ def softmin(input: Tensor,
         return torch.nn.functional.softmin(mask_input, dim_, dtype=dtype)
     else:
         raise ValueError(f'masked softmin expects strided tensor (got {input.layout} tensor)')
+
+
+@_apply_docstring_templates
+def normalize(input: Tensor,
+              ord: float,
+              dim: int,
+              *,
+              eps: float = 1e-12,
+              dtype: Optional[DType] = None,
+              mask: Optional[Tensor] = None) -> Tensor:
+    if dtype is None:
+        dtype = input.dtype
+    dim_ = _canonical_dim(dim, input.ndim)[0]
+    if input.layout == torch.strided:
+        nrm_ = norm(input, ord, dim, keepdim=True, dtype=dtype, mask=mask)
+        # TODO: replace torch.maximum with masked maximum when available.
+        denom = torch.maximum(nrm_, nrm_.new_full([], eps))
+        # TODO: eliminate mask_input as unnecessary when using masked divide.
+        inmask = _input_mask(input, mask=mask)
+        mask_input = input if mask is None else torch.where(inmask, input, input.new_zeros([]))
+        # TODO: replace torch.divide with masked divide when available.
+        return torch.divide(mask_input, denom)
+    else:
+        raise ValueError(f'masked normalize expects strided tensor (got {input.layout} tensor)')

@@ -1,4 +1,4 @@
-#include <ATen/core/interned_strings.h>
+#include <ATen/core/symbol.h>
 #include <ATen/record_function.h>
 #include <c10/util/Exception.h>
 #include <c10/util/StringUtil.h>
@@ -435,7 +435,9 @@ void Module::train(bool on) {
     if (auto slot = m._ivalue()->type()->findAttributeSlot("training")) {
       m._ivalue()->setSlot(*slot, on);
     } else {
-      TORCH_INTERNAL_ASSERT("'training' attribute not found");
+      // FIXME[T110620981]: This assert was broken (never asserted), and once
+      // fixed it triggers test failures.  Fix me!
+      /* TORCH_INTERNAL_ASSERT(false, "'training' attribute not found"); */
     }
   }
 }
@@ -483,16 +485,27 @@ Module freeze(
   return out_mod;
 }
 
-Module optimize_for_inference(Module& module) {
-  // not frozen yet
+namespace {
+void optimize_for_inference(std::shared_ptr<Graph> graph) {
+  FuseFrozenConvAddRelu(graph);
+  ConvertFrozenOpsToMKLDNN(graph);
+  FrozenLinearTranspose(graph);
+}
+} // namespace
+
+Module optimize_for_inference(
+    Module& module,
+    const std::vector<std::string>& other_methods) {
+  // if not frozen yet
   if (module._ivalue()->type()->hasAttribute("training")) {
     auto mod = freeze(module, {}, true);
   }
 
-  auto graph = module.get_method("forward").graph();
-  FuseFrozenConvAddRelu(graph);
-  ConvertFrozenOpsToMKLDNN(graph);
-  FrozenLinearTranspose(graph);
+  optimize_for_inference(module.get_method("forward").graph());
+
+  for (const auto& method : other_methods) {
+    optimize_for_inference(module.get_method(method).graph());
+  }
   return module;
 }
 

@@ -633,6 +633,18 @@ class TestPeephole(JitTestCase):
         FileCheck().check("aten::len").run(foo.graph)
         self.assertEqual(3, foo(torch.rand([3, 1])))
 
+    def test_peephole_optional_refine(self):
+        @torch.jit.script
+        def foo(z: int, z2: int, cond: bool):
+            if cond:
+                return z
+            else:
+                return z2
+        out = next(foo.graph.findNode("prim::If").outputs())
+        out.setType(torch._C.OptionalType(torch._C.IntType.get()))
+        self.run_pass("peephole", foo.graph)
+        FileCheck().check_not("int?").run(foo.graph)
+
     def test_peephole_int(self):
         @torch.jit.script
         def foo(x):

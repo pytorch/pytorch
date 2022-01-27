@@ -18,7 +18,6 @@
 
 #ifdef USE_C10D_NCCL
 #include <c10d/ProcessGroupNCCL.hpp>
-#include <torch/csrc/distributed/c10d/quantization/quantization_gpu.h>
 #endif
 
 #ifdef USE_C10D_MPI
@@ -35,7 +34,6 @@
 
 #include <torch/csrc/Exceptions.h>
 #include <torch/csrc/distributed/c10d/python_comm_hook.h>
-#include <torch/csrc/distributed/c10d/quantization/quantization.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
 #include <torch/csrc/utils/object_ptr.h>
 #include <torch/csrc/utils/pybind.h>
@@ -1153,14 +1151,17 @@ Arguments:
               "reduce_scatter",
               [](::c10d::ProcessGroup& pg,
                  at::Tensor& output,
-                 std::vector<at::Tensor>& input) {
+                 std::vector<at::Tensor>& input,
+                 ::c10d::ReduceOp op) {
                 std::vector<at::Tensor> outputs = {output};
                 std::vector<std::vector<at::Tensor>> inputs = {input};
-                return pg.reduce_scatter(
-                    outputs, inputs, ::c10d::ReduceScatterOptions());
+                ::c10d::ReduceScatterOptions opts;
+                opts.reduceOp = op;
+                return pg.reduce_scatter(outputs, inputs, opts);
               },
               py::arg("output_tensors"),
               py::arg("input_tensor"),
+              py::arg("op") = ::c10d::ReduceOp::SUM,
               py::call_guard<py::gil_scoped_release>())
 
           .def(
@@ -1347,7 +1348,7 @@ options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
 
             // Use interfaces listed in "GLOO_SOCKET_IFNAME", if set.
             char* ifnameEnv = getenv(GLOO_SOCKET_IFNAME_ENV.c_str());
-            if (ifnameEnv) {
+            if (ifnameEnv && strlen(ifnameEnv) > 1) {
               for (const auto& iface : split(',', ifnameEnv)) {
                 options->devices.push_back(
                     ::c10d::ProcessGroupGloo::createDeviceForInterface(iface));
@@ -1693,27 +1694,6 @@ static PyMethodDef methods[] = { // NOLINT
 PyMethodDef* python_functions() {
   return methods;
 }
-
-namespace quantization {
-TORCH_LIBRARY(quantization, m) {
-    m.def("_Bfloat16QuantizedToFloat(Tensor input) -> Tensor");
-    m.def("_FloatToBfloat16Quantized(Tensor input) -> Tensor");
-}
-    TORCH_LIBRARY_IMPL(quantization, CPU, m) {
-        m.impl("_Bfloat16QuantizedToFloat", _bfloat16_to_float_cpu);
-        m.impl("_FloatToBfloat16Quantized", _float_to_bfloat16_cpu);
-    }
-
-#ifdef USE_C10D_NCCL
-    #define DISPATCH_TO_CUDA(name, function) \
-        m.impl(name, torch::dispatch(c10::DispatchKey::CUDA, TORCH_FN(function)))
-    TORCH_LIBRARY_IMPL(quantization, CUDA, m) {
-        DISPATCH_TO_CUDA("_Bfloat16QuantizedToFloat", _bfloat16_to_float_cuda);
-        DISPATCH_TO_CUDA("_FloatToBfloat16Quantized", _float_to_bfloat16_cuda);
-    }
-#endif
-
-} // namespace quantization
 
 } // namespace c10d
 } // namespace distributed

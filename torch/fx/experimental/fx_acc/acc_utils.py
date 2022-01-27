@@ -15,6 +15,34 @@ from torch.fx.passes import graph_drawer
 from torch.fx.passes.shape_prop import TensorMetadata
 
 
+def get_target_from_module(mod: torch.nn.Module, target: str):
+    """
+    Gets `target` from `mod` and returns it. If `target` is empty then returns `mod.`
+    """
+    if target == "":
+        return mod
+
+    target_atoms = target.split(".")
+    curr_obj = mod
+    for i, atom in enumerate(target_atoms):
+        if not hasattr(curr_obj, atom):
+            raise RuntimeError(
+                f"Node referenced nonexistent target '{'.'.join(target_atoms[:i])}'; "
+                f" original whole target: '{target}'"
+            )
+        curr_obj = getattr(curr_obj, atom)
+    return curr_obj
+
+
+def get_attr(node: torch.fx.Node) -> Any:
+    """
+    Returns the underlying attr for a given node which
+    must be of type get_attr.
+    """
+    assert node.op == "get_attr", "Expected a get_attr node"
+    return get_target_from_module(node.graph.owning_module, str(node.target))
+
+
 def is_acc_op(node_or_target: Union[Callable, torch.fx.Node]) -> bool:
     """
     Returns whether `node_or_target` is an acc_op. If it's a node, then checks whether
@@ -48,20 +76,6 @@ def is_acc_op_with_kwarg(
     )
     assert not isinstance(target, str)
     return kwarg in inspect.signature(inspect.unwrap(target)).parameters
-
-
-def get_field_from_acc_out_ty(
-    acc_out_ty_or_dict: Union[Tuple, Dict[str, Any]], field: str
-):
-    """
-    After tracing NamedTuple inputs are converted to standard tuples, so we cannot
-    access them by name directly. Use this helper instead.
-    """
-    if isinstance(acc_out_ty_or_dict, dict):
-        acc_out_ty = acc_out_ty_or_dict["acc_out_ty"]
-    else:
-        acc_out_ty = acc_out_ty_or_dict
-    return acc_out_ty[TensorMetadata._fields.index(field)]
 
 
 def serialize_module_json_to_file(fx_module: GraphModule, fname: str):
