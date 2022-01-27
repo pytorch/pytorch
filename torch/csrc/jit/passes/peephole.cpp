@@ -379,12 +379,14 @@ bool FuseAddMM(Block* block) {
             }
 
             auto* cOne = graph->insertConstant(1);
+            auto* cNone = graph->insertConstant(c10::nullopt);
             auto* addmm_node = graph->insertNode(graph->create(aten::addmm, 1));
             addmm_node->addInput(add_mat);
             addmm_node->addInput(mat1);
             addmm_node->addInput(mat2);
             addmm_node->addInput(cOne);
             addmm_node->addInput(cOne);
+            addmm_node->addInput(cNone);
             auto* addmm_value = addmm_node->output();
 
             // Copy shape information from output node

@@ -194,7 +194,7 @@ bool DecomposeOps(Block* block, CompilationUnit& decompose_funcs) {
 
 void DecomposeOps(std::shared_ptr<Graph>& graph) {
   static CompilationUnit decompose_funcs(R"SCRIPT(
-      def addmm(self: Tensor, mat1: Tensor, mat2: Tensor, beta: number = 1.0, alpha: number = 1.0):
+      def addmm(self: Tensor, mat1: Tensor, mat2: Tensor, beta: number = 1.0, alpha: number = 1.0, dtype: Optional[int] = None):
           return self + mat1.mm(mat2)
 
       def batch_norm(input : Tensor, running_mean : Optional[Tensor], running_var : Optional[Tensor], training : bool, momentum : float, eps : float) -> Tensor:

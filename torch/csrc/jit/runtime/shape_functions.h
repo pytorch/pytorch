@@ -239,7 +239,7 @@ def linear(input: List[int], weight: List[int], bias: Optional[List[int]]):
     return out
 
 
-def addmm(self: List[int], mat1: List[int], mat2: List[int], beta: Any, alpha: Any):
+def addmm(self: List[int], mat1: List[int], mat2: List[int], beta: Any, alpha: Any, dtype: Any):
     return broadcast(self, mm(mat1, mat2))
 
 

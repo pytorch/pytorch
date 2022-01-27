@@ -7,11 +7,11 @@ namespace jit {
 
 void FuseLinear(std::shared_ptr<Graph>& graph) {
   std::string addmm_pattern = R"IR(
-    graph(%input, %weight_t, %bias, %beta, %alpha):
-        %res = aten::addmm(%bias, %input, %weight_t, %beta, %alpha)
+    graph(%input, %weight_t, %bias, %beta, %alpha, %dtype):
+        %res = aten::addmm(%bias, %input, %weight_t, %beta, %alpha, %dtype)
         return (%res))IR";
   std::string fused_linear_addmm = R"IR(
-    graph(%input, %weight_t, %bias, %beta, %alpha):
+    graph(%input, %weight_t, %bias, %beta, %alpha, %dtype):
         %weight = aten::t(%weight_t)
         %res = aten::linear(%input, %weight, %bias)
         return (%res))IR";

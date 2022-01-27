@@ -246,8 +246,8 @@ def matmul(g, self, other):
     return g.op("MatMul", self, other)
 
 
-@parse_args("v", "v", "v", "t", "t")
-def addmm(g, self, mat1, mat2, beta, alpha):
+@parse_args("v", "v", "v", "t", "t", "v")
+def addmm(g, self, mat1, mat2, beta, alpha, cuda_dtype):
     dtype = None
     self_dtype = sym_help._try_get_scalar_type(self)
     mat1_dtype = sym_help._try_get_scalar_type(mat1)
@@ -3201,7 +3201,7 @@ def linear(g, input, weight, bias):
     if rank == 2 and not bias.node().mustBeNone():
         alpha = g.op("Constant", value_t=torch.tensor(1, dtype=torch.int64))
         beta = g.op("Constant", value_t=torch.tensor(1, dtype=torch.int64))
-        output = addmm(g, bias, input, weight, alpha, beta)
+        output = addmm(g, bias, input, weight, alpha, beta, None)
     else:
         output = matmul(g, input, weight)
         if not bias.node().mustBeNone():

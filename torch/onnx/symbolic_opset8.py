@@ -172,8 +172,8 @@ def mm(g, self, other):
         return g.op("Gemm", self, other, C, beta_f=0.0, alpha_f=1.0)
 
 
-@parse_args("v", "v", "v", "t", "t")
-def addmm(g, self, mat1, mat2, beta, alpha):
+@parse_args("v", "v", "v", "t", "t", "v")
+def addmm(g, self, mat1, mat2, beta, alpha, dtype):
     if _try_get_scalar_type(self):
         old_type, self, mat1, mat2 = _try_cast_integer_to_float(g, self, mat1, mat2)
         return _cast_to_type(

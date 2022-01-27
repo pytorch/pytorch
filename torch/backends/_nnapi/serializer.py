@@ -1622,9 +1622,9 @@ class _NnapiSerializer(object):
         self.add_operation(NNAPI_OperationCode.RESIZE_NEAREST_NEIGHBOR, inputs, outputs)
 
     def add_addmm(self, node):
-        assert node.inputsSize() == 5
+        assert node.inputsSize() == 6
         assert node.outputsSize() == 1
-        jit_bias, jit_input, jit_weight, jit_beta, jit_alpha = node.inputs()
+        jit_bias, jit_input, jit_weight, jit_beta, jit_alpha, jit_dtype = node.inputs()
 
         for jitval in (jit_beta, jit_alpha):
             scale_ctype, scale_value = self.get_constant_value(jitval)
