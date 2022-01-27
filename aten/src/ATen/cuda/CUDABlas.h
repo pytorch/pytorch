@@ -53,7 +53,7 @@ private:
 template <typename Dtype, typename C_Dtype = Dtype,
   typename std::enable_if<!CUDABLAS_GEMM_DTYPE_IS_HALF_AND_C_DTYPE_IS_HALF_OR_FLOAT, Dtype>::type* = nullptr>
 inline void gemm(CUDABLAS_GEMM_ARGTYPES_AND_C_DTYPE(Dtype, C_Dtype)) {
-  AT_ERROR("at::cuda::blas::gemm: not implemented for input type ", typeid(Dtype).name(), " and output type ", typeid(C_Dtype).name());
+  TORCH_CHECK(false, "at::cuda::blas::gemm: not implemented for input type ", typeid(Dtype).name(), " and output type ", typeid(C_Dtype).name());
 }
 
 template <typename Dtype, typename C_Dtype,
