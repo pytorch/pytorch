@@ -172,11 +172,11 @@ def generate_models(model_directory_path: Path):
             logger.info(f"Model {model_name} already exists, skipping")
             continue
 
-        current_operator_version = torch._C._get_operator_version()
+        current_operator_version = torch._C._get_max_operator_version()
         if actual_model_version >= current_operator_version + 1:
             logger.error(
                 f"Actual model version {actual_model_version} "
-                f"is smaller or larger than {expect_model_version}. "
+                f"is equal or larger than {current_operator_version} + 1. "
                 f"Please run the script before the commit to change operator.")
             continue
 
