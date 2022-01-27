@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 
 #include <torch/csrc/monitor/events.h>
+#include <torch/torch.h>
 
 using namespace torch::monitor;
 
@@ -20,6 +21,7 @@ TEST(EventsTest, EventHandler) {
   e.data["double"] = 1234.5678;
   e.data["int"] = 1234L;
   e.data["bool"] = true;
+  e.data["tensor"] = torch::ones(5);
 
   // log to nothing
   logEvent(e);

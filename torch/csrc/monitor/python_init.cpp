@@ -4,6 +4,7 @@
 #include <torch/csrc/utils/python_arg_parser.h>
 #include <torch/csrc/utils/python_numbers.h>
 #include <torch/csrc/utils/python_strings.h>
+#include <torch/csrc/autograd/python_variable.h>
 
 #include <pybind11/chrono.h>
 #include <pybind11/functional.h>
@@ -31,6 +32,8 @@ struct type_caster<torch::monitor::data_value_t> {
       this->value = THPUtils_unpackString(source);
     } else if (PyBool_Check(source)) {
       this->value = THPUtils_unpackBool(source);
+    } else if (THPVariable_Check(source)) {
+      this->value = THPVariable_Unpack(source);
     } else {
       return false;
     }
@@ -55,6 +58,8 @@ struct type_caster<torch::monitor::data_value_t> {
     } else if (c10::holds_alternative<std::string>(src)) {
       std::string str = c10::get<std::string>(src);
       return THPUtils_packString(str);
+    } else if (c10::holds_alternative<at::Tensor>(src)) {
+      return THPVariable_Wrap(c10::get<at::Tensor>(src));
     }
     throw std::runtime_error("unknown data_value_t type");
   }
@@ -269,7 +274,7 @@ void initMonitorBindings(PyObject* module) {
       m,
       "data_value_t",
       R"DOC(
-        data_value_t is one of of ``str``, ``float``, ``int``, ``bool``.
+        data_value_t is one of of ``str``, ``float``, ``int``, ``bool`` or ``torch.Tensor``.
       )DOC");
 
   py::implicitly_convertible<std::string, data_value_t>();

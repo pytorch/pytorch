@@ -238,11 +238,9 @@ TEST(MonitorTest, IntervalStatEvent) {
   Event e = guard.handler->events.at(0);
   ASSERT_EQ(e.name, "torch.monitor.Stat");
   ASSERT_NE(e.timestamp, std::chrono::system_clock::time_point{});
-  std::unordered_map<std::string, data_value_t> data{
-      {"a.sum", 3L},
-      {"a.count", 2L},
-  };
-  ASSERT_EQ(e.data, data);
+  ASSERT_EQ(e.data.size(), 2);
+  ASSERT_EQ(c10::get<int64_t>(e.data.at("a.sum")), 3L);
+  ASSERT_EQ(c10::get<int64_t>(e.data.at("a.count")), 2L);
 }
 
 TEST(MonitorTest, IntervalStatEventDestruction) {
@@ -263,11 +261,9 @@ TEST(MonitorTest, IntervalStatEventDestruction) {
   Event e = guard.handler->events.at(0);
   ASSERT_EQ(e.name, "torch.monitor.Stat");
   ASSERT_NE(e.timestamp, std::chrono::system_clock::time_point{});
-  std::unordered_map<std::string, data_value_t> data{
-      {"a.sum", 1L},
-      {"a.count", 1L},
-  };
-  ASSERT_EQ(e.data, data);
+  ASSERT_EQ(e.data.size(), 2);
+  ASSERT_EQ(c10::get<int64_t>(e.data.at("a.sum")), 1L);
+  ASSERT_EQ(c10::get<int64_t>(e.data.at("a.count")), 1L);
 }
 
 TEST(MonitorTest, FixedCountStatEvent) {
@@ -293,11 +289,9 @@ TEST(MonitorTest, FixedCountStatEvent) {
   Event e = guard.handler->events.at(0);
   ASSERT_EQ(e.name, "torch.monitor.Stat");
   ASSERT_NE(e.timestamp, std::chrono::system_clock::time_point{});
-  std::unordered_map<std::string, data_value_t> data{
-      {"a.sum", 4L},
-      {"a.count", 3L},
-  };
-  ASSERT_EQ(e.data, data);
+  ASSERT_EQ(e.data.size(), 2);
+  ASSERT_EQ(c10::get<int64_t>(e.data.at("a.sum")), 4L);
+  ASSERT_EQ(c10::get<int64_t>(e.data.at("a.count")), 3L);
 }
 
 TEST(MonitorTest, FixedCountStatEventDestruction) {
@@ -319,9 +313,7 @@ TEST(MonitorTest, FixedCountStatEventDestruction) {
   Event e = guard.handler->events.at(0);
   ASSERT_EQ(e.name, "torch.monitor.Stat");
   ASSERT_NE(e.timestamp, std::chrono::system_clock::time_point{});
-  std::unordered_map<std::string, data_value_t> data{
-      {"a.sum", 1L},
-      {"a.count", 1L},
-  };
-  ASSERT_EQ(e.data, data);
+  ASSERT_EQ(e.data.size(), 2);
+  ASSERT_EQ(c10::get<int64_t>(e.data.at("a.sum")), 1L);
+  ASSERT_EQ(c10::get<int64_t>(e.data.at("a.count")), 1L);
 }

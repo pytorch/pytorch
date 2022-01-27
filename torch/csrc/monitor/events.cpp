@@ -6,8 +6,55 @@
 #include <unordered_set>
 #include <vector>
 
+#include <ATen/Functions.h>
+
 namespace torch {
 namespace monitor {
+
+namespace {
+bool eventEqual(const data_value_t& lhs, const data_value_t& rhs) {
+  // check if same type
+  if (lhs.index() != rhs.index()) {
+    return false;
+  }
+  if (c10::holds_alternative<double>(lhs)) {
+    return c10::get<double>(lhs) == c10::get<double>(rhs);
+  } else if (c10::holds_alternative<int64_t>(lhs)) {
+    return c10::get<int64_t>(lhs) == c10::get<int64_t>(rhs);
+  } else if (c10::holds_alternative<bool>(lhs)) {
+    return c10::get<bool>(lhs) == c10::get<bool>(rhs);
+  } else if (c10::holds_alternative<std::string>(lhs)) {
+    return c10::get<std::string>(lhs) == c10::get<std::string>(rhs);
+  } else if (c10::holds_alternative<at::Tensor>(lhs)) {
+    return at::equal(c10::get<at::Tensor>(lhs), c10::get<at::Tensor>(rhs));
+  } else {
+    throw std::runtime_error("unknown data_value_t type");
+  }
+}
+bool eventEqual(
+    const std::unordered_map<std::string, data_value_t>& lhs,
+    const std::unordered_map<std::string, data_value_t>& rhs) {
+  if (lhs.size() != rhs.size()) {
+    return false;
+  }
+  for (auto& kv : lhs) {
+    auto it = rhs.find(kv.first);
+    if (it == rhs.end()) {
+      return false;
+    }
+    if (!eventEqual(kv.second, it->second)) {
+      return false;
+    }
+  }
+  return true;
+}
+
+} // namespace
+
+bool operator==(const Event& lhs, const Event& rhs) {
+  return lhs.name == rhs.name && lhs.timestamp == rhs.timestamp &&
+      eventEqual(lhs.data, rhs.data);
+}
 
 namespace {
 class EventHandlers {

@@ -1,5 +1,6 @@
 # Owner(s): ["oncall: r2p"]
 
+import torch
 from torch.testing._internal.common_utils import (
     TestCase, run_tests,
 )
@@ -71,12 +72,37 @@ class TestMonitor(TestCase):
                 "str": "a string",
                 "float": 1234.0,
                 "int": 1234,
+                "tensor": torch.tensor([1.0, 2.0, 3.0]),
             },
         )
         self.assertEqual(e.name, "torch.monitor.TestEvent")
         self.assertIsNotNone(e.timestamp)
         self.assertIsNotNone(e.data)
         log_event(e)
+
+    def test_event_tensor(self) -> None:
+        t = torch.tensor([1.0, 2.0, 3.0])
+        e = Event(
+            name="torch.monitor.TestEvent",
+            timestamp=datetime.now(),
+            data={
+                "tensor": t,
+            },
+        )
+        self.assertTrue(torch.equal(t, e.data["tensor"]))
+
+    def test_event_invalid_type(self) -> None:
+        class Foo:
+            pass
+
+        with self.assertRaisesRegex(TypeError, "incompatible constructor arguments"):
+            Event(
+                name="torch.monitor.TestEvent",
+                timestamp=datetime.now(),
+                data={
+                    "invalid": Foo(),
+                },
+            )
 
     def test_event_handler(self) -> None:
         events = []
