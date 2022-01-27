@@ -160,6 +160,7 @@ CuSparseSpMatCsrDescriptor::CuSparseSpMatCsrDescriptor(const Tensor& input) {
       value_type // data type of values
       ));
 
+#if defined(CUDA_VERSION) && CUDA_VERSION >= 11000
   if (ndim == 3) {
     int batch_count =
         at::native::cuda_int_cast(at::native::batchCount(input), "batch_count");
@@ -181,6 +182,9 @@ CuSparseSpMatCsrDescriptor::CuSparseSpMatCsrDescriptor(const Tensor& input) {
           cusparseCsrSetStridedBatch(raw_descriptor, batch_count, 0, 0));
     }
   }
+#else
+  TORCH_CHECK(ndim == 2, "Experimental support for batched CSR matrices is implemented only for CUDA 11+");
+#endif
 
   descriptor_.reset(raw_descriptor);
 }
