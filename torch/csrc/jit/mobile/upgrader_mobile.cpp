@@ -15,6 +15,7 @@ TypePtr parseType(const std::string& pythonStr);
 namespace torch {
 namespace jit {
 
+// clang-format off
 // From operator_versions_map
 
 const std::unordered_map<std::string, std::vector<Upgrader>>

@@ -111,6 +111,7 @@ TypePtr parseType(const std::string& pythonStr);
 namespace torch {
 namespace jit {
 
+// clang-format off
 // From operator_versions_map
 ${operator_version_map}
 
