@@ -3511,7 +3511,7 @@ class TestQuantizeFx(QuantizationTestCase):
                 expected_node_occurrence=node_occurrence,
                 expected_node_list=node_list)
 
-    def test_stack_trace_preserved(self):
+    def test_stack_trace_preserved_linear(self):
         class M(nn.Module):
             def __init__(self):
                 super().__init__()
@@ -3548,6 +3548,24 @@ class TestQuantizeFx(QuantizationTestCase):
                 found_stack_trace = n.stack_trace is not None
                 break
         self.assertTrue(found_stack_trace, f"stack trace not found, node: {n.format_node()}, is_reference: False")
+
+    def test_stack_trace_preserved_subgraph_rewriter(self):
+        # a functional relu is taking the subgraph rewriter code path
+        class M(nn.Module):
+            def forward(self, x):
+                x = F.relu(x)
+                return x
+
+        m = M().eval()
+        mp = prepare_fx(m, get_default_qconfig_dict())
+        mq = convert_fx(copy.deepcopy(mp), is_reference=False)
+        found_stack_trace = False
+        for n in mq.graph.nodes:
+            if n.op == 'call_function' and n.target == F.relu:
+                found_stack_trace = n.stack_trace is not None
+                break
+        self.assertTrue(found_stack_trace, f"stack trace not found, node: {n.format_node()}, is_reference: True")
+
 
 @skipIfNoFBGEMM
 class TestQuantizeFxOps(QuantizationTestCase):

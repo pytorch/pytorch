@@ -86,6 +86,10 @@ CREATE_UNARY_META_FUNC(frac)
 CREATE_UNARY_META_FUNC(round)
 CREATE_UNARY_META_FUNC(sgn)
 
+TORCH_META_FUNC2(round, decimals)(const Tensor& self, int64_t decimals){
+  build_unary_op(maybe_get_output(), self);
+}
+
 TORCH_META_FUNC(neg)(const Tensor& self) {
   TORCH_CHECK(self.scalar_type() != kBool,
               "Negation, the `-` operator, on a bool tensor is not supported. "
@@ -184,6 +188,15 @@ CREATE_UNARY_TORCH_IMPL_FUNC(sqrt_out, sqrt_stub)
 CREATE_UNARY_TORCH_IMPL_FUNC(tan_out, tan_stub)
 CREATE_UNARY_TORCH_IMPL_FUNC(tanh_out, tanh_stub)
 CREATE_UNARY_TORCH_IMPL_FUNC(trunc_out, trunc_stub)
+
+TORCH_IMPL_FUNC(round_decimals_out)
+(const Tensor& self, int64_t decimals, const Tensor& result) {
+  if (decimals != 0) {
+    round_decimals_stub(device_type(), *this, decimals);
+  } else {
+    round_stub(device_type(), *this);
+  }
+}
 
 TORCH_IMPL_FUNC(polygamma_out)
 (int64_t n, const Tensor& self, const Tensor& result) {
@@ -515,8 +528,8 @@ Tensor& special_log1p_out(const Tensor& self, Tensor& result) { return at::log1p
 Tensor special_log1p(const Tensor& self) { return self.log1p(); }
 
 // special_round, alias for round
-Tensor& special_round_out(const Tensor& self, Tensor& result) { return at::round_out(result, self); }
-Tensor special_round(const Tensor& self) { return self.round(); }
+Tensor& special_round_out(const Tensor& self, int64_t decimals, Tensor& result) { return at::round_out(result, self, decimals); }
+Tensor special_round(const Tensor& self, int64_t decimals) { return self.round(decimals); }
 
 // special_sinc, alias for sinc
 Tensor& special_sinc_out(const Tensor& self, Tensor& result) { return at::sinc_out(result, self); }
@@ -833,6 +846,7 @@ DEFINE_DISPATCH(nan_to_num_stub); // NOLINT(cppcoreguidelines-avoid-non-const-gl
 DEFINE_DISPATCH(polygamma_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(reciprocal_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(round_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
+DEFINE_DISPATCH(round_decimals_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(rsqrt_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(sigmoid_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(logit_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
