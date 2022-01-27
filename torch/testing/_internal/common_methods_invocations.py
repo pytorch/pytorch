@@ -6413,8 +6413,6 @@ def skips_mvlgamma(skip_redundant=False):
         skips = skips + (  # type: ignore[assignment]
             DecorateInfo(unittest.skip("Skipped!"), 'TestGradients'),
             DecorateInfo(unittest.skip("Skipped!"), 'TestJit'),
-            # TODO: float16 fails due to tensor not satisfying > (p-1)/2
-            DecorateInfo(unittest.skip("Skipped!"), 'TestNNCOpInfo'),
             DecorateInfo(unittest.skip("Skipped!"), 'TestCommon'),
         )
     return skips
@@ -8638,10 +8636,7 @@ op_db: List[OpInfo] = [
            supports_inplace_autograd=False,
            skips=(
                # TODO: update sample inputs with for_inplace_variant kwarg to support this test
-               DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_variant_consistency_eager'),
-               # https://github.com/pytorch/pytorch/issues/71849
-               DecorateInfo(unittest.skip("Skipped!"), 'TestNNCOpInfo', 'test_nnc_correctness',
-                            active_if=TEST_WITH_ASAN, device_type='cpu'),),
+               DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_variant_consistency_eager'),),
            sample_inputs_func=sample_inputs_addcmul_addcdiv),
     OpInfo('addcdiv',
            dtypes=floating_and_complex_types_and(torch.bfloat16),
@@ -8653,10 +8648,7 @@ op_db: List[OpInfo] = [
                # TODO: update sample inputs with for_inplace_variant kwarg to support this test
                DecorateInfo(unittest.skip("Skipped!"),
                             'TestCommon',
-                            'test_variant_consistency_eager'),
-               # https://github.com/pytorch/pytorch/issues/71849
-               DecorateInfo(unittest.skip("Skipped!"), 'TestNNCOpInfo', 'test_nnc_correctness',
-                            active_if=TEST_WITH_ASAN, device_type='cpu'),),
+                            'test_variant_consistency_eager'),),
            sample_inputs_func=sample_inputs_addcmul_addcdiv),
     UnaryUfuncInfo('asin',
                    aliases=('arcsin', ),
