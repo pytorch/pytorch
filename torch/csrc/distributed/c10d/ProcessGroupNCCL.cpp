@@ -2221,7 +2221,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::gather(
   };
 
   assertRootRank(invalidArgument, opts.rootRank, size_);
-  check_gpu_tensors(inputTensors);
+  check_gpu_tensors_different_devices(inputTensors);
   assertSingleElementInput(invalidArgument, inputTensors);
 
   // @lint-ignore CLANGTIDY
@@ -2295,7 +2295,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::scatter(
   };
 
   assertRootRank(invalidArgument, opts.rootRank, size_);
-  check_gpu_tensors(outputTensors);
+  check_gpu_tensors_different_devices(outputTensors);
   assertSingleElementInput(invalidArgument, outputTensors);
 
   // @lint-ignore CLANGTIDY
