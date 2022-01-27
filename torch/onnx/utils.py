@@ -661,6 +661,10 @@ def _export(model, args, f, export_params=True, verbose=False, training=None,
             fixed_batch_size=False, custom_opsets=None, add_node_names=True,
             onnx_shape_inference=True, export_modules_as_functions=False):
 
+    if export_modules_as_functions and opset_version < 15:
+        raise ValueError("`export_modules_as_functions` is not supported for `opset_version` < 15."
+                         "This is because `opset_version` < 15 implies IR version < 8, which means "
+                         "no local function support. ")
     export_modules_as_functions = _setup_trace_module_map(model, export_modules_as_functions)
 
     if isinstance(model, torch.nn.DataParallel):
