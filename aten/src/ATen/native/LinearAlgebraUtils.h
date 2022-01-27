@@ -323,13 +323,13 @@ static inline void singleCheckErrors(int64_t info, const c10::string_view name, 
     } else if (name.find("svd") != name.npos) {
       TORCH_CHECK_LINALG(false, name, batch_string,
           ": The algorithm failed to converge because the input matrix is ill-conditioned or has too many repeated singular values (error code: ", info, ").");
-    } else if (name.find("eig") || name.find("syevd")) {
+    } else if (name.find("eig") != name.npos || name.find("syevd") != name.npos) {
       TORCH_CHECK_LINALG(false, name, batch_string,
           ": The algorithm failed to converge because the input matrix is ill-conditioned or has too many repeated eigenvalues (error code: ", info, ").");
-    } else if (name.find("lstsq")) {
+    } else if (name.find("lstsq") != name.npos) {
       TORCH_CHECK_LINALG(false, name, batch_string,
           ": The least squares solution could not be computed because the input matrix does not have full rank (error code: ", info, ").");
-    } else if (name.find("lu_factor")) {
+    } else if (name.find("lu_factor") != name.npos) {
       TORCH_CHECK(false, name, batch_string,
           ": U[", info, ",", info, "] is zero and using it on lu_solve would result in a division by zero. "
           "If you still want to perform the factorization, consider calling linalg.lu(A, pivot) or "
