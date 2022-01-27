@@ -9,7 +9,7 @@
 #include <sstream>
 #include <forward_list>
 #include <tuple>
-#include <ATen/ATen.h>
+
 #include <torch/csrc/Export.h>
 #include <torch/csrc/profiler/util.h>
 #include <torch/csrc/profiler/api.h>
@@ -342,8 +342,6 @@ TORCH_API thread_event_lists disableProfilerLegacy(c10::optional<ProfilerDisable
 // adds profiledEvents to the current thread local recorded events. Each event
 // will be marked with node ID given by fromNodeId.
 TORCH_API void addEventList(std::vector<LegacyEvent>&& profiledEvents);
-// Retrieve the thread_local ProfilerConfig.
-TORCH_API torch::profiler::impl::ProfilerConfig getProfilerConfig();
 // Writes profiled events to a stream.
 TORCH_API void writeProfilerEventsToStream(std::ostream& out, const std::vector<LegacyEvent*>& events);
 
@@ -403,56 +401,4 @@ struct TORCH_API TLSLegacyProfilerGuard {
   const c10::optional<ProfilerDisableOptions> profilerDisableOptions_;
 };
 
-struct TORCH_API ProfilerLegacyThreadLocalState : public torch::profiler::impl::ProfilerThreadLocalStateBase {
-  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
-  explicit ProfilerLegacyThreadLocalState(const torch::profiler::impl::ProfilerConfig& config)
-      : ProfilerThreadLocalStateBase(config), remoteProfiledEvents_{c10::nullopt} {}
-  ~ProfilerLegacyThreadLocalState() override = default;
-
-  thread_event_lists consolidate();
-
-  void mark(std::string name, bool include_cuda = true);
-
-  void setOrAddRemoteProfiledEvents(
-      std::vector<LegacyEvent>&& remoteProfiledEvents);
-
-  void pushRange(
-      const at::RecordFunction& fn,
-      const bool record_cuda,
-      std::vector<std::vector<int64_t>>&& shapes = {});
-
-  void popRange(const at::RecordFunction& fn, const bool record_cuda);
-
-  void reportMemoryUsage(
-      void* /* unused */,
-      int64_t alloc_size,
-      int64_t /* total_allocated, unused for legacy */,
-      int64_t /* total_reserved, unused for legacy */,
-      c10::Device device) override;
-
- protected:
-  RangeEventList& getEventList(int64_t thread_id = -1);
-
-  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
-  std::mutex state_mutex_;
-  std::unordered_map<uint64_t, std::shared_ptr<RangeEventList>>
-      // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
-      event_lists_map_;
-
-  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
-  c10::optional<std::vector<std::vector<LegacyEvent>>> remoteProfiledEvents_;
-};
-
-
-} // namespace profiler
-}} // namespace torch::autograd
-
-// Mirror symbols in new namespace for transition.
-namespace torch {
-namespace profiler {
-namespace impl {
-using torch::autograd::profiler::ProfilerConfig;
-using torch::autograd::profiler::ProfilerState;
-} // impl
-} // profiler
-} // torch
+}}} // namespace torch::autograd::profiler

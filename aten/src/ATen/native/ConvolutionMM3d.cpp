@@ -4,6 +4,7 @@
 #include <ATen/TensorUtils.h>
 #include <ATen/core/grad_mode.h>
 #include <ATen/div_rtn.h>
+#include <ATen/native/ConvolutionMM3d.h>
 #include <ATen/native/CPUBlas.h>
 #include <ATen/native/Unfold3d.h>
 #include <c10/util/irange.h>

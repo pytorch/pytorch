@@ -210,7 +210,7 @@ static void imag_kernel(TensorIteratorBase& iter) {
 }
 
 // NB: Ignores the negative bit on tensors
-static void conj_kernel(TensorIteratorBase& iter) {
+void conj_kernel(TensorIteratorBase& iter) {
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(
       kBool, kBFloat16, kHalf, iter.common_dtype(), "conj_cpu", [&]() {
         cpu_kernel_vec(
@@ -412,7 +412,7 @@ static void polygamma_kernel(TensorIteratorBase& iter, int64_t n) {
   } else {
     AT_DISPATCH_FLOATING_TYPES_AND(kBFloat16, iter.dtype(), "polygamma", [&]() {
       cpu_kernel(
-          iter, [=](scalar_t a) -> scalar_t { return calc_polygamma(n, a); });
+          iter, [=](scalar_t a) -> scalar_t { return calc_polygamma(a, n); });
     });
   }
 }
@@ -537,6 +537,23 @@ static void erfcx_kernel(TensorIteratorBase& iter){
   });
 }
 
+void round_decimals_kernel(TensorIteratorBase& iter, int64_t decimals) {
+  AT_DISPATCH_FLOATING_TYPES_AND(
+      ScalarType::BFloat16, iter.dtype(), "round_cpu", [&]() {
+        bool neg_flag = false;
+        scalar_t ten_pow_decimals;
+        if (decimals < 0) {
+          decimals = -decimals;
+          neg_flag = true;
+        }
+        ten_pow_decimals = static_cast<scalar_t>(std::pow(10, decimals));
+        cpu_kernel(iter, [ten_pow_decimals, neg_flag](scalar_t a) -> scalar_t {
+          return neg_flag ? std::nearbyint(a / ten_pow_decimals) * ten_pow_decimals
+                          : std::nearbyint(a * ten_pow_decimals) / ten_pow_decimals;
+        });
+      });
+}
+
 // TODO: Disable cont. branch to test more risky code
 
 #define IMPLEMENT_ITERATOR_LAMBDA(op)                                         \
@@ -627,6 +644,7 @@ REGISTER_DISPATCH(special_ndtri_stub, &CPU_CAPABILITY::ndtri_kernel);
 REGISTER_DISPATCH(special_i1_stub, &CPU_CAPABILITY::i1_kernel);
 REGISTER_DISPATCH(special_i1e_stub, &CPU_CAPABILITY::i1e_kernel);
 REGISTER_DISPATCH(special_erfcx_stub, &CPU_CAPABILITY::erfcx_kernel);
+REGISTER_DISPATCH(round_decimals_stub, &CPU_CAPABILITY::round_decimals_kernel);
 
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables,modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
