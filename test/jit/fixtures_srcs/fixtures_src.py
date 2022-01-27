@@ -1,8 +1,8 @@
 import torch
 
-class TestVersionedDivTensorExampleV4(torch.nn.Module):
+class TestVersionedDivTensorExampleV7(torch.nn.Module):
     def __init__(self):
-        super(TestVersionedDivTensorExampleV4, self).__init__()
+        super(TestVersionedDivTensorExampleV7, self).__init__()
 
     def forward(self, a, b):
         result_0 = a / b
