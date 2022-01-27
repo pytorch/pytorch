@@ -2370,28 +2370,25 @@ Tensor slice_backward_wrapper(
 // https://j-towns.github.io/papers/svd-derivative.pdf
 //
 // This makes no assumption on the signs of sigma.
-Tensor svd_backward(const std::vector<torch::autograd::Variable> &grads, const Tensor& self,
-          bool some, bool compute_uv, const Tensor& raw_u, const Tensor& sigma, const Tensor& raw_v) {
-  TORCH_CHECK(compute_uv,
-           "svd_backward: Setting compute_uv to false in torch.svd doesn't compute singular matrices, ",
-           "and hence we cannot compute backward. Please use torch.svd(compute_uv=True)");
-
-  auto m = self.size(-2);
-  auto n = self.size(-1);
+Tensor svd_backward(const std::vector<torch::autograd::Variable> &grads,
+          bool full_matrices, const Tensor& U, const Tensor& sigma, const Tensor& Vh) {
+  auto m = U.size(-2);
+  auto n = Vh.size(-1);
   auto k = sigma.size(-1);
   auto gsigma = grads[1];
 
-  auto u = raw_u;
-  auto v = raw_v;
+  auto u = U;
+  auto v = Vh.mH();
   auto gu = grads[0];
-  auto gv = grads[2];
+  // grads[2] has the gradient wrt Vh
+  auto gv = grads[2].defined() ? grads[2].mH() : grads[2];
 
-  if (!some) {
+  if (full_matrices) {
     // We ignore the free subspace here because possible base vectors cancel
     // each other, e.g., both -v and +v are valid base for a dimension.
     // Don't assume behavior of any particular implementation of svd.
-    u = raw_u.narrow(-1, 0, k);
-    v = raw_v.narrow(-1, 0, k);
+    u = u.narrow(-1, 0, k);
+    v = v.narrow(-1, 0, k);
     if (gu.defined()) {
       gu = gu.narrow(-1, 0, k);
     }
@@ -2403,11 +2400,11 @@ Tensor svd_backward(const std::vector<torch::autograd::Variable> &grads, const T
 
   Tensor sigma_term;
   if (gsigma.defined()) {
-    gsigma = gsigma.to(self.dtype());
+    gsigma = gsigma.to(U.dtype());
     // computes u @ diag(gsigma) @ vh
     sigma_term = at::matmul(u * gsigma.unsqueeze(-2), vh);
   } else {
-    sigma_term = at::zeros_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+    sigma_term = at::zeros_like(m >= n ? u : vh, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   }
   // in case that there are no gu and gv, we can avoid the series of kernel
   // calls below
@@ -2438,7 +2435,7 @@ Tensor svd_backward(const std::vector<torch::autograd::Variable> &grads, const T
     }
     u_term = at::matmul(u_term, vh);
   } else {
-    u_term = at::zeros_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+    u_term = at::zeros_like(m >= n ? u : vh, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   }
 
   if (gv.defined()) {
@@ -2452,13 +2449,13 @@ Tensor svd_backward(const std::vector<torch::autograd::Variable> &grads, const T
     }
     v_term = at::matmul(u, v_term);
   } else {
-    v_term = at::zeros_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+    v_term = at::zeros_like(m >= n ? u : vh, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   }
 
   // for complex-valued input there is an additional term
   // https://giggleliu.github.io/2019/04/02/einsumbp.html
   // https://arxiv.org/abs/1909.02659
-  if (self.is_complex() && gu.defined()) {
+  if (U.is_complex() && gu.defined()) {
     Tensor L = at::matmul(uh, gu).diagonal(0, -2, -1);
     at::real(L).zero_();
     at::imag(L).mul_(sigma_inv);
@@ -3027,14 +3024,8 @@ Tensor det_backward(const Tensor & grad, const Tensor& self, const Tensor& det) 
 
     auto vh_det_grad = grad * (u_det * s_prod).conj();
     auto vh_grad = det_backward_nonsingular(vh_det_grad, vh, vh_det);
-    auto v = vh.mH();
-    auto v_grad = vh_grad.mH();
 
-    // svd_backward is written for a function
-    // svd: self -> (U, S, V), which is different
-    // from torch.linalg.svd which is a map self -> (U, S, Vh), where
-    // Vh = V.mH()
-    return svd_backward({u_grad, s_grad, v_grad}, self, true, true, u, s, v);
+    return svd_backward({u_grad, s_grad, vh_grad}, false, u, s, vh);
   };
 
   auto eps = at::native::_get_epsilon(c10::toValueType(self.scalar_type()));
@@ -3122,10 +3113,9 @@ Tensor logdet_backward(const Tensor & grad, const Tensor& self, const Tensor& lo
   auto singular_case_backward = [&](const Tensor& grad, const Tensor& self) -> Tensor {
     Tensor u, sigma, vh;
     std::tie(u, sigma, vh) = at::linalg_svd(self, false);
-    Tensor v = vh.mH();
     // logdet = \sum log(sigma)
     auto gsigma = grad.unsqueeze(-1).div(sigma);
-    return svd_backward({{}, gsigma, {}}, self, true, true, u, sigma, v);
+    return svd_backward({{}, gsigma, {}}, false, u, sigma, vh);
   };
 
   auto nonsingular_case_backward = [&](const Tensor& grad, const Tensor& self) -> Tensor {
@@ -3183,7 +3173,7 @@ Tensor slogdet_backward(const Tensor& grad_logabsdet,
     // so logabsdet = \sum log(abs(sigma))
     // but det = 0, so backward logabsdet = \sum log(sigma)
     auto gsigma = grad_logabsdet.unsqueeze(-1).div(sigma);
-    return svd_backward({{}, gsigma, {}}, self, true, true, u, sigma, v);
+    return svd_backward({{}, gsigma, {}}, false, u, sigma, vh);
   };
 
   auto nonsingular_case_backward = [&](const Tensor& grad_logabsdet, const Tensor& self) -> Tensor {

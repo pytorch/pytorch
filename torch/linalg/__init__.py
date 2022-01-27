@@ -1006,15 +1006,15 @@ If :attr:`rtol` is not specified and :attr:`atol` is specified to be larger than
 :attr:`rtol` is set to zero.
 
 If :attr:`atol` or :attr:`rtol` is a :class:`torch.Tensor`, its shape must be broadcastable to that
-of the singular values of :attr:`A` as returned by :func:`torch.svd`.
+of the singular values of :attr:`A` as returned by :func:`torch.linalg.svdvals`.
 
 .. note::
     This function has NumPy compatible variant `linalg.matrix_rank(A, tol, hermitian=False)`.
     However, use of the positional argument :attr:`tol` is deprecated in favor of :attr:`atol` and :attr:`rtol`.
 
 """ + fr"""
-.. note:: The matrix rank is computed using singular value decomposition
-          :func:`torch.linalg.svd` if :attr:`hermitian`\ `= False` (default) and the eigenvalue
+.. note:: The matrix rank is computed using a singular value decomposition
+          :func:`torch.linalg.svdvals` if :attr:`hermitian`\ `= False` (default) and the eigenvalue
           decomposition :func:`torch.linalg.eigvalsh` when :attr:`hermitian`\ `= True`.
           {common_notes["sync_note"]}
 """ + r"""
@@ -1647,7 +1647,7 @@ For :attr:`p` in `(2, -2)`, this function can be computed in terms of the singul
 
     \kappa_2(A) = \frac{\sigma_1}{\sigma_n}\qquad \kappa_{-2}(A) = \frac{\sigma_n}{\sigma_1}
 
-In these cases, it is computed using :func:`torch.linalg.svd`. For these norms, the matrix
+In these cases, it is computed using :func:`torch.linalg.svdvals`. For these norms, the matrix
 (or every matrix in the batch) :attr:`A` may have any shape.
 
 .. note :: When inputs are on a CUDA device, this function synchronizes that device with the CPU
@@ -1740,7 +1740,7 @@ If :attr:`rtol` is not specified and :attr:`atol` is specified to be larger than
 :attr:`rtol` is set to zero.
 
 If :attr:`atol` or :attr:`rtol` is a :class:`torch.Tensor`, its shape must be broadcastable to that
-of the singular values of :attr:`A` as returned by :func:`torch.svd`.
+of the singular values of :attr:`A` as returned by :func:`torch.linalg.svd`.
 
 .. note:: This function uses :func:`torch.linalg.svd` if :attr:`hermitian`\ `= False` and
           :func:`torch.linalg.eigh` if :attr:`hermitian`\ `= True`.
