@@ -55,7 +55,7 @@ query ($owner: String!, $name: String!, $number: Int!) {
         }
         totalCount
       }
-      changedFiles,
+      changedFiles
       files(last: 100) {
         nodes {
           path
@@ -65,9 +65,9 @@ query ($owner: String!, $name: String!, $number: Int!) {
         nodes {
           author {
             login
-          },
+          }
           state
-        },
+        }
         totalCount
       }
     }
@@ -261,8 +261,7 @@ class GitHubPR:
         else:
             self.merge_ghstack_into(repo)
 
-        if not dry_run:
-            repo.push(self.default_branch(), dry_run)
+        repo.push(self.default_branch(), dry_run)
 
 
 @dataclass
@@ -316,19 +315,18 @@ def check_if_should_be_merged(pr: GitHubPR, repo: GitRepo) -> None:
 
 
 def main() -> None:
-    import sys
     args = parse_args()
     repo = GitRepo(get_git_repo_dir(), get_git_remote_name())
     org, project = repo.gh_owner_and_name()
 
     pr = GitHubPR(org, project, args.pr_num)
     if pr.is_closed():
-        print(gh_post_comment(org, project, args.pr_num, f"Can't merge closed PR #{args.pr_num}", dry_run=args.dry_run))
-        sys.exit(-1)
+        gh_post_comment(org, project, args.pr_num, f"Can't merge closed PR #{args.pr_num}", dry_run=args.dry_run)
+        return
 
     if pr.is_cross_repo():
-        print(gh_post_comment(org, project, args.pr_num, "Cross-repo merges are not supported at the moment", dry_run=args.dry_run))
-        sys.exit(-1)
+        gh_post_comment(org, project, args.pr_num, "Cross-repo merges are not supported at the moment", dry_run=args.dry_run)
+        return
 
     try:
         pr.merge_into(repo, dry_run=args.dry_run)
