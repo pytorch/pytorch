@@ -9,7 +9,7 @@ from torch.testing._internal.common_cuda import SM53OrLater, SM80OrLater, TEST_C
 from torch.testing._internal.common_utils import \
     (TEST_WITH_ROCM, TEST_SCIPY, TestCase, run_tests, load_tests, coalescedonoff)
 from torch.testing._internal.common_device_type import \
-    (ops, instantiate_device_type_tests, dtypes, dtypesIfCUDA, onlyCPU, onlyCUDA, skipCUDAIfNoCusparseGeneric,
+    (ops, instantiate_device_type_tests, dtypes, OpDTypes, dtypesIfCUDA, onlyCPU, onlyCUDA, skipCUDAIfNoCusparseGeneric,
      precisionOverride, skipMeta, skipCUDAIf, skipCUDAIfRocm, skipCPUIfNoMklSparse)
 from torch.testing._internal.common_methods_invocations import \
     (op_db, sparse_csr_unary_ufuncs, )
@@ -1191,7 +1191,7 @@ class TestSparseCSR(TestCase):
 
     @ops(_sparse_csr_ops)
     def test_sparse_csr_consistency(self, device, dtype, op):
-        samples = op.sample_inputs(device, dtype)
+        samples = list(op.sample_inputs(device, dtype))
 
         # Fail early to prevent silent success with this test
         ndims_equals_2d = (s.input.ndim == 2 for s in samples)
@@ -1272,6 +1272,35 @@ class TestSparseCSR(TestCase):
             self.assertEqual(actual.crow_indices(), expect.crow_indices())
             self.assertEqual(actual.col_indices(), expect.col_indices())
             self.assertEqual(actual._nnz(), expect._nnz())
+
+
+    @unittest.expectedFailure
+    @ops(sparse_csr_unary_ufuncs, dtypes=OpDTypes.supported, allowed_dtypes=[torch.double, torch.cdouble])
+    def test_sparse_csr_unary_autograd(self, device, dtype, op):
+        samples = list(op.sample_inputs(device, dtype))
+
+        # Fail early to prevent silent success with this test
+        ndims_equals_2d = (s.input.ndim == 2 for s in samples)
+        if not any(ndims_equals_2d):
+            raise ValueError("Expected at least one 2D tensor in samples.")
+
+        for sample in samples:
+            sparse_input = sample.input.to_sparse_csr().requires_grad_(True)
+
+            def fn(input):
+                output = op.gradcheck_wrapper(op.get_op(), input, *sample.args, **sample.kwargs)
+                output = output.to_dense()
+                if sample.output_process_fn_grad is not None:
+                    return sample.output_process_fn_grad(output)
+                return output
+
+            # NotImplementedError inside gradcheck when computing numerical Jacobian
+            self.assertTrue(torch.autograd.gradcheck(fn, (sparse_input,), fast_mode=False, check_sparse_nnz=True))
+
+            # RuntimeError: Unsupported input layout: SparseCsr
+            output = fn(sparse_input)
+            output.backward(torch.ones_like(output))
+            assert torch.is_tensor(sparse_input.grad)
 
     @dtypes(*get_all_dtypes(include_bool=False, include_half=False, include_bfloat16=False))
     def test_direct_coo_csr_conversion(self, device, dtype):
