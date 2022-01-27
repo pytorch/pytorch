@@ -919,13 +919,13 @@ class LinearReLUQuantizeHandler(QuantizeHandler):
                 'please make sure to run fusion before prepare'
             # we'll always produce reference pattern for the following modules
             # will remove the else branch after we migrated all use cases
-            module_whitelist = [
+            module_allowlist = [
                 torch.nn.Linear,
                 torch.nn.qat.Linear,
                 torch.nn.intrinsic.modules.fused.LinearReLU,
                 torch.nn.intrinsic.qat.modules.linear_relu.LinearReLU
             ]
-            if is_reference or type(self.linear) in module_whitelist and dtypes in [(torch.quint8, torch.qint8, None)]:
+            if is_reference or type(self.linear) in module_allowlist and dtypes in [(torch.quint8, torch.qint8, None)]:
                 # produce dequant - float_op - quant pattern
                 dtype = torch.float
                 if activation_int8_quantized:
