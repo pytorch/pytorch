@@ -42,6 +42,7 @@ jobs:
       BUILDER_ROOT: ${{ github.workspace }}/builder
       PACKAGE_TYPE: libtorch
       SKIP_ALL_TESTS: 1
+      DESIRED_CUDA: cpu
       LIBTORCH_VARIANT: shared-with-deps
       DESIRED_DEVTOOLSET: cxx11-abi
       # This is a dummy value for libtorch to work correctly with our batch scripts
@@ -91,6 +92,7 @@ jobs:
       BUILDER_ROOT: ${{ github.workspace }}/builder
       PACKAGE_TYPE: libtorch
       SKIP_ALL_TESTS: 1
+      DESIRED_CUDA: cpu
       LIBTORCH_VARIANT: shared-with-deps
       DESIRED_DEVTOOLSET: cxx11-abi
       # This is a dummy value for libtorch to work correctly with our batch scripts
@@ -206,6 +208,7 @@ jobs:
       BUILDER_ROOT: ${{ github.workspace }}/builder
       PACKAGE_TYPE: libtorch
       SKIP_ALL_TESTS: 1
+      DESIRED_CUDA: cpu
       LIBTORCH_VARIANT: shared-without-deps
       DESIRED_DEVTOOLSET: cxx11-abi
       # This is a dummy value for libtorch to work correctly with our batch scripts
@@ -255,6 +258,7 @@ jobs:
       BUILDER_ROOT: ${{ github.workspace }}/builder
       PACKAGE_TYPE: libtorch
       SKIP_ALL_TESTS: 1
+      DESIRED_CUDA: cpu
       LIBTORCH_VARIANT: shared-without-deps
       DESIRED_DEVTOOLSET: cxx11-abi
       # This is a dummy value for libtorch to work correctly with our batch scripts
@@ -370,6 +374,7 @@ jobs:
       BUILDER_ROOT: ${{ github.workspace }}/builder
       PACKAGE_TYPE: libtorch
       SKIP_ALL_TESTS: 1
+      DESIRED_CUDA: cpu
       LIBTORCH_VARIANT: static-with-deps
       DESIRED_DEVTOOLSET: cxx11-abi
       # This is a dummy value for libtorch to work correctly with our batch scripts
@@ -419,6 +424,7 @@ jobs:
       BUILDER_ROOT: ${{ github.workspace }}/builder
       PACKAGE_TYPE: libtorch
       SKIP_ALL_TESTS: 1
+      DESIRED_CUDA: cpu
       LIBTORCH_VARIANT: static-with-deps
       DESIRED_DEVTOOLSET: cxx11-abi
       # This is a dummy value for libtorch to work correctly with our batch scripts
@@ -534,6 +540,7 @@ jobs:
       BUILDER_ROOT: ${{ github.workspace }}/builder
       PACKAGE_TYPE: libtorch
       SKIP_ALL_TESTS: 1
+      DESIRED_CUDA: cpu
       LIBTORCH_VARIANT: static-without-deps
       DESIRED_DEVTOOLSET: cxx11-abi
       # This is a dummy value for libtorch to work correctly with our batch scripts
@@ -583,6 +590,7 @@ jobs:
       BUILDER_ROOT: ${{ github.workspace }}/builder
       PACKAGE_TYPE: libtorch
       SKIP_ALL_TESTS: 1
+      DESIRED_CUDA: cpu
       LIBTORCH_VARIANT: static-without-deps
       DESIRED_DEVTOOLSET: cxx11-abi
       # This is a dummy value for libtorch to work correctly with our batch scripts
@@ -698,6 +706,7 @@ jobs:
       BUILDER_ROOT: ${{ github.workspace }}/builder
       PACKAGE_TYPE: libtorch
       SKIP_ALL_TESTS: 1
+      DESIRED_CUDA: cpu
       LIBTORCH_VARIANT: shared-with-deps
       DESIRED_DEVTOOLSET: cxx11-abi
       # This is a dummy value for libtorch to work correctly with our batch scripts
@@ -747,6 +756,7 @@ jobs:
       BUILDER_ROOT: ${{ github.workspace }}/builder
       PACKAGE_TYPE: libtorch
       SKIP_ALL_TESTS: 1
+      DESIRED_CUDA: cpu
       LIBTORCH_VARIANT: shared-with-deps
       DESIRED_DEVTOOLSET: cxx11-abi
       # This is a dummy value for libtorch to work correctly with our batch scripts
@@ -862,6 +872,7 @@ jobs:
       BUILDER_ROOT: ${{ github.workspace }}/builder
       PACKAGE_TYPE: libtorch
       SKIP_ALL_TESTS: 1
+      DESIRED_CUDA: cpu
       LIBTORCH_VARIANT: shared-without-deps
       DESIRED_DEVTOOLSET: cxx11-abi
       # This is a dummy value for libtorch to work correctly with our batch scripts
@@ -911,6 +922,7 @@ jobs:
       BUILDER_ROOT: ${{ github.workspace }}/builder
       PACKAGE_TYPE: libtorch
       SKIP_ALL_TESTS: 1
+      DESIRED_CUDA: cpu
       LIBTORCH_VARIANT: shared-without-deps
       DESIRED_DEVTOOLSET: cxx11-abi
       # This is a dummy value for libtorch to work correctly with our batch scripts
@@ -1026,6 +1038,7 @@ jobs:
       BUILDER_ROOT: ${{ github.workspace }}/builder
       PACKAGE_TYPE: libtorch
       SKIP_ALL_TESTS: 1
+      DESIRED_CUDA: cpu
       LIBTORCH_VARIANT: static-with-deps
       DESIRED_DEVTOOLSET: cxx11-abi
       # This is a dummy value for libtorch to work correctly with our batch scripts
@@ -1075,6 +1088,7 @@ jobs:
       BUILDER_ROOT: ${{ github.workspace }}/builder
       PACKAGE_TYPE: libtorch
       SKIP_ALL_TESTS: 1
+      DESIRED_CUDA: cpu
       LIBTORCH_VARIANT: static-with-deps
       DESIRED_DEVTOOLSET: cxx11-abi
       # This is a dummy value for libtorch to work correctly with our batch scripts
@@ -1190,6 +1204,7 @@ jobs:
       BUILDER_ROOT: ${{ github.workspace }}/builder
       PACKAGE_TYPE: libtorch
       SKIP_ALL_TESTS: 1
+      DESIRED_CUDA: cpu
       LIBTORCH_VARIANT: static-without-deps
       DESIRED_DEVTOOLSET: cxx11-abi
       # This is a dummy value for libtorch to work correctly with our batch scripts
@@ -1239,6 +1254,7 @@ jobs:
       BUILDER_ROOT: ${{ github.workspace }}/builder
       PACKAGE_TYPE: libtorch
       SKIP_ALL_TESTS: 1
+      DESIRED_CUDA: cpu
       LIBTORCH_VARIANT: static-without-deps
       DESIRED_DEVTOOLSET: cxx11-abi
       # This is a dummy value for libtorch to work correctly with our batch scripts
@@ -1354,6 +1370,7 @@ jobs:
       BUILDER_ROOT: ${{ github.workspace }}/builder
       PACKAGE_TYPE: libtorch
       SKIP_ALL_TESTS: 1
+      DESIRED_CUDA: cpu
       LIBTORCH_VARIANT: shared-with-deps
       DESIRED_DEVTOOLSET: cxx11-abi
       # This is a dummy value for libtorch to work correctly with our batch scripts
@@ -1403,6 +1420,7 @@ jobs:
       BUILDER_ROOT: ${{ github.workspace }}/builder
       PACKAGE_TYPE: libtorch
       SKIP_ALL_TESTS: 1
+      DESIRED_CUDA: cpu
       LIBTORCH_VARIANT: shared-with-deps
       DESIRED_DEVTOOLSET: cxx11-abi
       # This is a dummy value for libtorch to work correctly with our batch scripts
@@ -1518,6 +1536,7 @@ jobs:
       BUILDER_ROOT: ${{ github.workspace }}/builder
       PACKAGE_TYPE: libtorch
       SKIP_ALL_TESTS: 1
+      DESIRED_CUDA: cpu
       LIBTORCH_VARIANT: shared-without-deps
       DESIRED_DEVTOOLSET: cxx11-abi
       # This is a dummy value for libtorch to work correctly with our batch scripts
@@ -1567,6 +1586,7 @@ jobs:
       BUILDER_ROOT: ${{ github.workspace }}/builder
       PACKAGE_TYPE: libtorch
       SKIP_ALL_TESTS: 1
+      DESIRED_CUDA: cpu
       LIBTORCH_VARIANT: shared-without-deps
       DESIRED_DEVTOOLSET: cxx11-abi
       # This is a dummy value for libtorch to work correctly with our batch scripts
@@ -1682,6 +1702,7 @@ jobs:
       BUILDER_ROOT: ${{ github.workspace }}/builder
       PACKAGE_TYPE: libtorch
       SKIP_ALL_TESTS: 1
+      DESIRED_CUDA: cpu
       LIBTORCH_VARIANT: static-with-deps
       DESIRED_DEVTOOLSET: cxx11-abi
       # This is a dummy value for libtorch to work correctly with our batch scripts
@@ -1731,6 +1752,7 @@ jobs:
       BUILDER_ROOT: ${{ github.workspace }}/builder
       PACKAGE_TYPE: libtorch
       SKIP_ALL_TESTS: 1
+      DESIRED_CUDA: cpu
       LIBTORCH_VARIANT: static-with-deps
       DESIRED_DEVTOOLSET: cxx11-abi
       # This is a dummy value for libtorch to work correctly with our batch scripts
@@ -1846,6 +1868,7 @@ jobs:
       BUILDER_ROOT: ${{ github.workspace }}/builder
       PACKAGE_TYPE: libtorch
       SKIP_ALL_TESTS: 1
+      DESIRED_CUDA: cpu
       LIBTORCH_VARIANT: static-without-deps
       DESIRED_DEVTOOLSET: cxx11-abi
       # This is a dummy value for libtorch to work correctly with our batch scripts
@@ -1895,6 +1918,7 @@ jobs:
       BUILDER_ROOT: ${{ github.workspace }}/builder
       PACKAGE_TYPE: libtorch
       SKIP_ALL_TESTS: 1
+      DESIRED_CUDA: cpu
       LIBTORCH_VARIANT: static-without-deps
       DESIRED_DEVTOOLSET: cxx11-abi
       # This is a dummy value for libtorch to work correctly with our batch scripts
@@ -2010,6 +2034,7 @@ jobs:
       BUILDER_ROOT: ${{ github.workspace }}/builder
       PACKAGE_TYPE: libtorch
       SKIP_ALL_TESTS: 1
+      DESIRED_CUDA: cpu
       LIBTORCH_VARIANT: shared-with-deps
       DESIRED_DEVTOOLSET: cxx11-abi
       # This is a dummy value for libtorch to work correctly with our batch scripts
@@ -2059,6 +2084,7 @@ jobs:
       BUILDER_ROOT: ${{ github.workspace }}/builder
       PACKAGE_TYPE: libtorch
       SKIP_ALL_TESTS: 1
+      DESIRED_CUDA: cpu
       LIBTORCH_VARIANT: shared-with-deps
       DESIRED_DEVTOOLSET: cxx11-abi
       # This is a dummy value for libtorch to work correctly with our batch scripts
@@ -2174,6 +2200,7 @@ jobs:
       BUILDER_ROOT: ${{ github.workspace }}/builder
       PACKAGE_TYPE: libtorch
       SKIP_ALL_TESTS: 1
+      DESIRED_CUDA: cpu
       LIBTORCH_VARIANT: shared-without-deps
       DESIRED_DEVTOOLSET: cxx11-abi
       # This is a dummy value for libtorch to work correctly with our batch scripts
@@ -2223,6 +2250,7 @@ jobs:
       BUILDER_ROOT: ${{ github.workspace }}/builder
       PACKAGE_TYPE: libtorch
       SKIP_ALL_TESTS: 1
+      DESIRED_CUDA: cpu
       LIBTORCH_VARIANT: shared-without-deps
       DESIRED_DEVTOOLSET: cxx11-abi
       # This is a dummy value for libtorch to work correctly with our batch scripts
@@ -2338,6 +2366,7 @@ jobs:
       BUILDER_ROOT: ${{ github.workspace }}/builder
       PACKAGE_TYPE: libtorch
       SKIP_ALL_TESTS: 1
+      DESIRED_CUDA: cpu
       LIBTORCH_VARIANT: static-with-deps
       DESIRED_DEVTOOLSET: cxx11-abi
       # This is a dummy value for libtorch to work correctly with our batch scripts
@@ -2387,6 +2416,7 @@ jobs:
       BUILDER_ROOT: ${{ github.workspace }}/builder
       PACKAGE_TYPE: libtorch
       SKIP_ALL_TESTS: 1
+      DESIRED_CUDA: cpu
       LIBTORCH_VARIANT: static-with-deps
       DESIRED_DEVTOOLSET: cxx11-abi
       # This is a dummy value for libtorch to work correctly with our batch scripts
@@ -2502,6 +2532,7 @@ jobs:
       BUILDER_ROOT: ${{ github.workspace }}/builder
       PACKAGE_TYPE: libtorch
       SKIP_ALL_TESTS: 1
+      DESIRED_CUDA: cpu
       LIBTORCH_VARIANT: static-without-deps
       DESIRED_DEVTOOLSET: cxx11-abi
       # This is a dummy value for libtorch to work correctly with our batch scripts
@@ -2551,6 +2582,7 @@ jobs:
       BUILDER_ROOT: ${{ github.workspace }}/builder
       PACKAGE_TYPE: libtorch
       SKIP_ALL_TESTS: 1
+      DESIRED_CUDA: cpu
       LIBTORCH_VARIANT: static-without-deps
       DESIRED_DEVTOOLSET: cxx11-abi
       # This is a dummy value for libtorch to work correctly with our batch scripts
@@ -2666,6 +2698,7 @@ jobs:
       BUILDER_ROOT: ${{ github.workspace }}/builder
       PACKAGE_TYPE: libtorch
       SKIP_ALL_TESTS: 1
+      DESIRED_CUDA: cpu
       LIBTORCH_VARIANT: shared-with-deps
       DESIRED_DEVTOOLSET: cxx11-abi
       # This is a dummy value for libtorch to work correctly with our batch scripts
@@ -2715,6 +2748,7 @@ jobs:
       BUILDER_ROOT: ${{ github.workspace }}/builder
       PACKAGE_TYPE: libtorch
       SKIP_ALL_TESTS: 1
+      DESIRED_CUDA: cpu
       LIBTORCH_VARIANT: shared-with-deps
       DESIRED_DEVTOOLSET: cxx11-abi
       # This is a dummy value for libtorch to work correctly with our batch scripts
@@ -2830,6 +2864,7 @@ jobs:
       BUILDER_ROOT: ${{ github.workspace }}/builder
       PACKAGE_TYPE: libtorch
       SKIP_ALL_TESTS: 1
+      DESIRED_CUDA: cpu
       LIBTORCH_VARIANT: shared-without-deps
       DESIRED_DEVTOOLSET: cxx11-abi
       # This is a dummy value for libtorch to work correctly with our batch scripts
@@ -2879,6 +2914,7 @@ jobs:
       BUILDER_ROOT: ${{ github.workspace }}/builder
       PACKAGE_TYPE: libtorch
       SKIP_ALL_TESTS: 1
+      DESIRED_CUDA: cpu
       LIBTORCH_VARIANT: shared-without-deps
       DESIRED_DEVTOOLSET: cxx11-abi
       # This is a dummy value for libtorch to work correctly with our batch scripts
@@ -2994,6 +3030,7 @@ jobs:
       BUILDER_ROOT: ${{ github.workspace }}/builder
       PACKAGE_TYPE: libtorch
       SKIP_ALL_TESTS: 1
+      DESIRED_CUDA: cpu
       LIBTORCH_VARIANT: static-with-deps
       DESIRED_DEVTOOLSET: cxx11-abi
       # This is a dummy value for libtorch to work correctly with our batch scripts
@@ -3043,6 +3080,7 @@ jobs:
       BUILDER_ROOT: ${{ github.workspace }}/builder
       PACKAGE_TYPE: libtorch
       SKIP_ALL_TESTS: 1
+      DESIRED_CUDA: cpu
       LIBTORCH_VARIANT: static-with-deps
       DESIRED_DEVTOOLSET: cxx11-abi
       # This is a dummy value for libtorch to work correctly with our batch scripts
@@ -3158,6 +3196,7 @@ jobs:
       BUILDER_ROOT: ${{ github.workspace }}/builder
       PACKAGE_TYPE: libtorch
       SKIP_ALL_TESTS: 1
+      DESIRED_CUDA: cpu
       LIBTORCH_VARIANT: static-without-deps
       DESIRED_DEVTOOLSET: cxx11-abi
       # This is a dummy value for libtorch to work correctly with our batch scripts
@@ -3207,6 +3246,7 @@ jobs:
       BUILDER_ROOT: ${{ github.workspace }}/builder
       PACKAGE_TYPE: libtorch
       SKIP_ALL_TESTS: 1
+      DESIRED_CUDA: cpu
       LIBTORCH_VARIANT: static-without-deps
       DESIRED_DEVTOOLSET: cxx11-abi
       # This is a dummy value for libtorch to work correctly with our batch scripts
