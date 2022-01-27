@@ -451,7 +451,13 @@ the output has the same batch dimensions.
              by :math:`e^{i \phi}, \phi \in \mathbb{R}` produces another set of valid eigenvectors
              of the matrix.  For this reason, the loss function shall not depend on the phase of the
              eigenvectors, as this quantity is not well-defined.
-             This is checked when computing the gradients of this function.
+             This is checked when computing the gradients of this function. As such,
+             when inputs are on a CUDA device, this function synchronizes that device with the CPU
+             when computing the gradients.
+             This is checked when computing the gradients of this function. As such,
+             when inputs are on a CUDA device, the computation of the gradients
+             of this function synchronizes that device with the CPU.
+
 
 .. warning:: Gradients computed using the `eigenvectors` tensor will only be finite when
              :attr:`A` has distinct eigenvalues.
@@ -605,7 +611,9 @@ The eigenvalues are returned in ascending order.
              case produces another set of valid eigenvectors of the matrix.
              For this reason, the loss function shall not depend on the phase of the eigenvectors, as
              this quantity is not well-defined.
-             This is checked for complex inputs when computing the gradients of this function.
+             This is checked for complex inputs when computing the gradients of this function. As such,
+             when inputs are complex and are on a CUDA device, the computation of the gradients
+             of this function synchronizes that device with the CPU.
 
 .. warning:: Gradients computed using the `eigenvectors` tensor will only be finite when
              :attr:`A` has distinct eigenvalues.
@@ -1485,18 +1493,22 @@ Differences with `numpy.linalg.svd`:
              vectors :math:`u_k, v_k` by `-1` in the real case or by
              :math:`e^{i \phi}, \phi \in \mathbb{R}` in the complex case produces another two
              valid singular vectors of the matrix.
-             This non-uniqueness problem is even worse when the matrix has repeated singular values.
-             In this case, one may multiply the associated singular vectors of `U` and `V` spanning
-             the subspace by a rotation matrix and `the resulting vectors will span the same subspace`_.
+             For this reason, the loss function shall not depend on this :math:`e^{i \phi}` quantity,
+             as it is not well-defined.
+             This is checked for complex inputs when computing the gradients of this function. As such,
+             when inputs are complex and are on a CUDA device, the computation of the gradients
+             of this function synchronizes that device with the CPU.
 
 .. warning:: Gradients computed using `U` or `Vh` will only be finite when
-             :attr:`A` does not have zero as a singular value or repeated singular values.
+             :attr:`A` does not have repeated singular values. If :attr:`A` is rectangular,
+             additionally, zero must also not be one of its singular values.
              Furthermore, if the distance between any two singular values is close to zero,
              the gradient will be numerically unstable, as it depends on the singular values
              :math:`\sigma_i` through the computation of
              :math:`\frac{1}{\min_{i \neq j} \sigma_i^2 - \sigma_j^2}`.
-             The gradient will also be numerically unstable when :attr:`A` has small singular
-             values, as it also depends on the computaiton of :math:`\frac{1}{\sigma_i}`.
+             In the rectangular case, the gradient will also be numerically unstable when
+             :attr:`A` has small singular values, as it also depends on the computation of
+             :math:`\frac{1}{\sigma_i}`.
 
 .. seealso::
 
