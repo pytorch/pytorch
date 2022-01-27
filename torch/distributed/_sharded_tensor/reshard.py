@@ -43,13 +43,14 @@ def get_idx_from_placements(placements, current_rank) -> int:
     for idx, placement in enumerate(placements):  # type: ignore[attr-defined]
         if current_rank == placement.rank():  # type: ignore[union-attr]
             return idx
+    raise RuntimeError('current_rank not in the placement.')
 
 
 def build_reshard_metadata(
     st_size: torch.Size,
     sharding_spec: ShardingSpec,
     world_size: int,
-) -> Tuple[List[Shard], List[int]]:
+) -> Tuple[List[ShardMetadata], List[int]]:
     """
     Based the given sharding spec, we calculate the offset and local shard size.
     We then build a ShardMetadata on top of the calculation result.
@@ -82,7 +83,7 @@ def build_reshard_metadata(
             placement=placement,
         )
         offsets[shard_dim] += sharded_dim_size
-    return shards_metadata, ranks
+    return shards_metadata, ranks  # type: ignore[return-value]
 
 
 def reshuffle_local_shard(
@@ -186,7 +187,7 @@ def reshard_local_shard(
     current_rank = dist.get_rank(pg)
     world_size = dist.get_world_size(pg)
     current_sharding_dim = int(sharding_spec.dim)  # type: ignore[attr-defined]
-    reshard_dim = int(resharding_spec.dim)
+    reshard_dim = int(resharding_spec.dim)  # type: ignore[attr-defined]
 
     # Build shards_metadata first.
     shards_metadata, ranks = build_reshard_metadata(
