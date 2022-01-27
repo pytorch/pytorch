@@ -1,4 +1,4 @@
-from typing import Callable, Iterator, Sized, TypeVar, Optional, Union, Any, Dict
+from typing import Callable, Iterator, Sized, TypeVar, Optional, Union, Any, Dict, List
 
 from torch.utils.data import IterDataPipe, _utils, functional_datapipe
 from torch.utils.data.datapipes.utils.common import DILL_AVAILABLE, check_lambda_fn
@@ -144,17 +144,21 @@ def _collate_helper(conversion, item):
         raise Exception("Only supports one DataFrame per batch")
     df = item[0]
     columns_name = df_wrapper.get_columns(df)
-    tuple_names = []
-    tuple_values = []
+    tuple_names: List = []
+    tuple_values: List = []
     for name in columns_name:
         if name in conversion:
-            if not isinstance(conversion[name], Callable):
+            if not callable(conversion[name]):
                 raise Exception('Collate (DF)DataPipe requires callable as dict values')
-            tuple_names.append(name)
+            tuple_names.append(str(name))
             value = conversion[name](getattr(df, name))
             tuple_values.append(value)
 
-    tpl_cls = namedtuple("CollateResult", tuple_names)
+    if len(tuple_names) != len(conversion.keys()):
+        raise Exception("Conversion keys missmatch")
+
+    # TODO(VitalyFedyunin): We can dynamically extract types from the tuple_values here
+    tpl_cls = namedtuple("CollateResult", tuple_names)  # type: ignore
     tuple = tpl_cls(*tuple_values)
     return tuple
 
@@ -213,7 +217,7 @@ class CollatorIterDataPipe(MapperIterDataPipe):
             ]
         ] = _utils.collate.default_collate,
     ) -> None:
-        if isinstance(conversion, Callable):
+        if callable(conversion):
             super().__init__(datapipe, fn=conversion)
         else:
             # TODO(VitalyFedyunin): Validate passed dictionary
