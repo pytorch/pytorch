@@ -3,9 +3,26 @@
 #include <ATen/core/jit_type.h>
 #include <ATen/core/function_schema.h>
 #include <ATen/core/functional.h>
+#include <ATen/core/type_factory.h>
 
 #include <atomic>
 #include <unordered_map>
+
+namespace c10 {
+
+ska::flat_hash_map<std::type_index, c10::ClassTypePtr>& getCustomClassTypeMap() {
+  static ska::flat_hash_map<std::type_index, c10::ClassTypePtr> tmap;
+  return tmap;
+}
+
+std::unordered_map<std::string, std::function<PyObject*(void*)>>&
+getClassConverter() {
+  static std::unordered_map<std::string, std::function<PyObject*(void*)>>
+      classConverter;
+  return classConverter;
+}
+
+} // namespace c10
 
 namespace torch {
 
@@ -86,7 +103,7 @@ class_base::class_base(
 {
     detail::checkValidIdent(namespaceName, "Namespace name");
     detail::checkValidIdent(className, "Class name");
-    classTypePtr->addAttribute("capsule", at::CapsuleType::get());
+    classTypePtr->addAttribute("capsule", c10::TypeFactory::get<c10::CapsuleType>());
     c10::getCustomClassTypeMap().insert(
         {std::type_index(intrusivePtrClassTypeid), classTypePtr});
     c10::getCustomClassTypeMap().insert(
