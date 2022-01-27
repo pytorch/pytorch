@@ -38,17 +38,17 @@ header_template_rule(
 
 cc_library(
     name = "headers",
-    hdrs = glob([
-        "core/*.h",
-        "core/impl/*.h",
+    hdrs = [
+        "//c10/core:headers",
+        "//c10/mobile:headers",
+        "//c10/util:headers",
+    ] + glob([
         "cuda/*.h",
         "cuda/impl/*.h",
-        "mobile/*.h",
-        "util/*.h",
-        "util/*.hpp",
     ]),
     deps = [
         ":cuda_cmake_macros_h",
+        "//c10/core:alignment",
         "//c10/macros",
     ] + select({
         ":using_gflags": ["@com_github_gflags_gflags//:gflags"],
@@ -62,12 +62,7 @@ cc_library(
 
 cc_library(
     name = "c10",
-    srcs = glob([
-        "core/*.cpp",
-        "core/impl/*.cpp",
-        "mobile/*.cpp",
-        "util/*.cpp",
-    ]) + if_cuda(
+    srcs = if_cuda(
         glob([
             "cuda/*.cpp",
             "cuda/impl/*.cpp",
@@ -77,7 +72,15 @@ cc_library(
     local_defines = ["C10_BUILD_MAIN_LIB"],
     deps = [
         ":headers",
-        "@fmt",
+        "//c10/core:CPUAllocator",
+        "//c10/core:ScalarType",
+        "//c10/core:alloc_cpu",
+        "//c10/core:base",
+        "//c10/mobile:CPUCachingAllocator",
+        "//c10/mobile:CPUProfilingAllocator",
+        "//c10/util:TypeCast",
+        "//c10/util:base",
+        "//c10/util:typeid",
     ] + if_cuda(
         ["@cuda"],
         [],
