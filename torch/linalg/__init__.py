@@ -845,7 +845,7 @@ the output has the same batch dimensions.
 """ + r"""
 
 Args:
-    A (Tensor): the Hermitian/symmetric `n \times n` matrix or the batch of such matrices of size
+    A (Tensor): tensor of shape (*, n, n) where * is zero or more batch dimensions consisting of symmetric or Hermitian matrices.
                     `(*, n, n)` where `*` is one or more batch dimensions.
 
 Keyword args:
