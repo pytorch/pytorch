@@ -542,38 +542,38 @@ StaticModule::StaticModule(
   // Maps each Value* in the graph to its index in the values_ array that will
   // eventually be created by StaticRuntime.
   FastMap<const Value*, uint32_t> value_to_index;
-  prepareFunctionsAndConstants(*graph_->block(), alias_db, value_to_index);
+  prepareFunctionsAndConstants(graph_->block(), alias_db, value_to_index);
 
   const auto constants_index_offset = 0;
   const auto values_index_offset = constants_index_offset + constants().size();
   value_buffer_size_ = values_index_offset;
 
   value_buffer_size_ +=
-      prepareBlockInfo(*graph_->block(), values_index_offset, value_to_index);
+      prepareBlockInfo(graph_->block(), values_index_offset, value_to_index);
 
-  prepareProcessedNodes(*graph_->block(), value_to_index, alias_db);
+  prepareProcessedNodes(graph_->block(), value_to_index, alias_db);
 
-  for (auto& block : block_infos_) {
-    block.prepare_for_memory_planner(alias_db, opts);
+  for (auto& block_and_info : block_infos_) {
+    auto& block_info = block_and_info.second;
+    block_info.prepare_for_memory_planner(alias_db, opts);
   }
 }
 
 size_t StaticModule::prepareBlockInfo(
-    Block& block,
+    Block* block,
     const size_t start_idx,
     FastMap<const Value*, uint32_t>& value_to_index) {
-  const auto block_idx = block_infos_.size();
-  block_infos_.emplace_back(start_idx, block);
+  block_infos_.emplace(block, BlockInfo(start_idx, *block));
 
-  const auto num_inputs = block.inputs().size();
+  const auto num_inputs = block->inputs().size();
   for (const auto i : c10::irange(num_inputs)) {
-    value_to_index.emplace(block.inputs()[i], start_idx + i);
+    value_to_index.emplace(block->inputs()[i], start_idx + i);
   }
   auto cur_idx = start_idx + num_inputs;
 
-  for (auto* node : block.nodes()) {
+  for (auto* node : block->nodes()) {
     for (auto* sub_block : node->blocks()) {
-      cur_idx += prepareBlockInfo(*sub_block, cur_idx, value_to_index);
+      cur_idx += prepareBlockInfo(sub_block, cur_idx, value_to_index);
     }
 
     if (node->kind() == prim::Constant) {
@@ -594,8 +594,8 @@ size_t StaticModule::prepareBlockInfo(
   }
 
   std::vector<uint16_t> output_indices;
-  output_indices.reserve(block.outputs().size());
-  for (auto* output : block.outputs()) {
+  output_indices.reserve(block->outputs().size());
+  for (auto* output : block->outputs()) {
     const auto output_idx = value_to_index.at(output);
     TORCH_CHECK(
         output_idx < (1 << 16),
@@ -605,17 +605,17 @@ size_t StaticModule::prepareBlockInfo(
     output_indices.push_back(output_idx);
   }
 
-  block_infos_[block_idx].set_output_indices(std::move(output_indices));
+  block_infos_.at(block).set_output_indices(std::move(output_indices));
   return cur_idx - start_idx;
 }
 
 void StaticModule::prepareFunctionsAndConstants(
-    Block& block,
+    Block* block,
     const AliasDb& alias_db,
     FastMap<const Value*, uint32_t>& value_to_index) {
-  for (auto* node : block.nodes()) {
+  for (auto* node : block->nodes()) {
     for (auto* sub_block : node->blocks()) {
-      prepareFunctionsAndConstants(*sub_block, alias_db, value_to_index);
+      prepareFunctionsAndConstants(sub_block, alias_db, value_to_index);
     }
 
     if (node->kind() == prim::Constant) {
@@ -636,29 +636,25 @@ void StaticModule::prepareFunctionsAndConstants(
   }
 }
 
-std::pair<size_t, size_t> StaticModule::prepareProcessedNodes(
-    Block& block,
+size_t StaticModule::prepareProcessedNodes(
+    Block* block,
     const FastMap<const Value*, uint32_t>& value_to_index,
     const AliasDb& alias_db,
-    size_t node_idx,
-    size_t block_idx) {
-  const auto block_start = block_idx;
+    size_t node_idx) {
   const auto node_start = node_idx;
 
-  auto& block_info = block_infos_[block_idx++];
+  auto& block_info = block_infos_.at(block);
   std::vector<ProcessedNode> nodes;
   FastMap<Node*, bool> node_has_out_variant;
 
-  for (auto* node : block.nodes()) {
+  for (auto* node : block->nodes()) {
     if (node->kind() == prim::Constant) {
       continue;
     }
 
     for (auto* sub_block : node->blocks()) {
-      auto processed_count = prepareProcessedNodes(
-          *sub_block, value_to_index, alias_db, node_idx, block_idx);
-      node_idx += processed_count.first;
-      block_idx += processed_count.second;
+      node_idx +=
+          prepareProcessedNodes(sub_block, value_to_index, alias_db, node_idx);
     }
     ProcessedNodeInputs input_indices(node->inputs().size());
     for (const auto input_idx : c10::irange(node->inputs().size())) {
@@ -689,7 +685,7 @@ std::pair<size_t, size_t> StaticModule::prepareProcessedNodes(
   block_info.set_nodes(std::move(nodes), node_has_out_variant);
   block_info.init_value_group(alias_db);
 
-  return {node_idx - node_start, block_idx - block_start};
+  return node_idx - node_start;
 }
 
 void BlockInfo::set_nodes(
@@ -777,7 +773,8 @@ StaticRuntime& StaticModule::runtime() {
 }
 
 Node* StaticModule::findNodeWithKindForTesting(const std::string& kind) const {
-  for (auto& block_info : block_infos_) {
+  for (auto& block_and_info : block_infos_) {
+    auto& block_info = block_and_info.second;
     for (auto& pnode : block_info.nodes()) {
       if (pnode.node()->kind().toQualString() == kind) {
         return pnode.node();
@@ -802,10 +799,11 @@ c10::IValue StaticModule::operator()(
 BlockRunner::BlockRunner(
     const StaticModule& sm,
     std::vector<IValue>& values,
-    size_t block_idx)
+    Block* block,
+    bool is_root_block)
     : static_module_(sm),
-      block_info_(static_module_.block_info(block_idx)),
-      is_root_block_(block_idx == 0),
+      block_info_(static_module_.block_info(block)),
+      is_root_block_(is_root_block),
       first_input_is_self_(
           is_root_block_ && static_module_.first_input_is_self()),
       inputs_begin_(block_info_.block_inputs_idx()),
@@ -822,31 +820,22 @@ BlockRunner::BlockRunner(
     outputs_.emplace_back(&values_[index]);
   }
 
-  const auto block_idx_start = block_idx;
   for (auto& pnode : nodes_) {
     auto* node = pnode.node();
-    const auto num_blocks = node->blocks().size();
-    if (!num_blocks) {
+    auto blocks = node->blocks();
+    const auto num_blocks = blocks.size();
+    if (num_blocks == 0) {
       continue;
     }
+    DCHECK(node->kind() == prim::If || node->kind() == prim::Loop);
     auto block_runners = std::make_unique<std::vector<BlockRunner>>();
     block_runners->reserve(num_blocks);
 
-    for (const auto i : c10::irange(num_blocks)) {
-      (void)i; // Suppress unused variable warning
-      block_runners->emplace_back(sm, values, ++block_idx);
-      block_idx += block_runners->back().num_sub_blocks();
+    for (auto* block : blocks) {
+      block_runners->emplace_back(sm, values, block);
     }
     pnode.set_block_runners(std::move(block_runners));
   }
-  const auto num_sub_blocks = block_idx - block_idx_start;
-  TORCH_CHECK(
-      num_sub_blocks < (1 << 16),
-      "num_sub_blocks ",
-      num_sub_blocks,
-      " would overflow 2-byte storage");
-
-  num_sub_blocks_ = static_cast<uint16_t>(num_sub_blocks);
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
@@ -971,15 +960,21 @@ void destroyNodeOutputs(ProcessedNode& p_node) {
 } // namespace
 
 void BlockRunner::clean_up_intermediate_ivalues() noexcept {
-  for (auto& p_node : nodes_) {
-    destroyNodeOutputs(p_node);
+  // We have to iterate in reverse order here due to borrowed
+  // IValues - we don't want to destroy a value until all of its
+  // borrows are cleaned up!
+  for (auto it = nodes_.rbegin(); it != nodes_.rend(); ++it) {
+    destroyNodeOutputs(*it);
   }
 }
 
 void BlockRunner::resetMemory() noexcept {
   planner_.reset();
-  clean_up_input_ivalues();
+  // We must clean up intermediate values before inputs in case
+  // there are borrowed inputs and static runtime owns the only
+  // reference (e.g. the inputs were std::move'd into the runtime)
   clean_up_intermediate_ivalues();
+  clean_up_input_ivalues();
 }
 
 c10::IValue BlockRunner::move_outputs_to_tuple(uint32_t num_outputs) {
@@ -1975,7 +1970,9 @@ void ProcessedNode::verify_and_correct_memory_overlap() {
 StaticRuntime::StaticRuntime(const StaticModule& sm) {
   values_.resize(sm.value_buffer_size());
   std::copy(sm.constants().begin(), sm.constants().end(), values_.begin());
-  block_ = std::make_unique<BlockRunner>(sm, values_, 0);
+  block_ = std::make_unique<BlockRunner>(
+      sm, values_, sm.root_block(), /*is_root_block*/ true);
+  ;
 }
 
 c10::IValue StaticRuntime::operator()(

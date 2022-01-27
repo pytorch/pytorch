@@ -393,9 +393,12 @@ class TORCH_API StaticModule {
     return constants_;
   }
 
-  const BlockInfo& block_info(size_t block_idx) const {
-    DCHECK(block_idx < block_infos_.size());
-    return block_infos_[block_idx];
+  const BlockInfo& block_info(Block* block) const {
+    return block_infos_.at(block);
+  }
+
+  Block* root_block() const {
+    return graph_->block();
   }
 
  private:
@@ -408,7 +411,8 @@ class TORCH_API StaticModule {
         block_infos_.begin(),
         block_infos_.end(),
         0,
-        [](size_t sum, const BlockInfo& block_info) {
+        [](size_t sum, const auto& block_and_info) {
+          auto& block_info = block_and_info.second;
           return sum + block_info.num_nodes();
         });
   }
@@ -435,23 +439,22 @@ class TORCH_API StaticModule {
   // - Populates `value_to_index` with the indices of each intermediate value
   // - Returns the number of Value* processed, including sub-blocks.
   size_t prepareBlockInfo(
-      Block& block,
+      Block* block,
       const size_t start_idx,
       FastMap<const Value*, uint32_t>& value_to_index);
 
   void prepareFunctionsAndConstants(
-      Block& block,
+      Block* block,
       const AliasDb& alias_db,
       FastMap<const Value*, uint32_t>& value_to_index);
 
   // Recurses on sub-blocks and populates the array of ProcessedNodes
   // Returns (number of nodes processed, number of blocks processed)
-  std::pair<size_t, size_t> prepareProcessedNodes(
-      Block& block,
+  size_t prepareProcessedNodes(
+      Block* block,
       const FastMap<const Value*, uint32_t>& value_to_index,
       const AliasDb& alias_db,
-      size_t node_idx = 0,
-      size_t block_idx = 0);
+      size_t node_idx = 0);
 
   // Initialize various attributes that the memory planner will need.
   // To be called at the tail of the ctor.
@@ -481,7 +484,7 @@ class TORCH_API StaticModule {
   // includes it anyways to be consistent with the JIT interpreter.
   size_t num_inputs_;
   // See `BlockInfo` definition. The blocks are stored in depth-first order.
-  std::vector<BlockInfo> block_infos_;
+  FastMap<Block*, BlockInfo> block_infos_;
   size_t value_buffer_size_ = 0;
 };
 
@@ -497,10 +500,11 @@ class TORCH_API StaticModule {
 // constants, inputs, and intermediate tensors.
 class TORCH_API BlockRunner {
  public:
-  explicit BlockRunner(
+  BlockRunner(
       const StaticModule& sm,
       std::vector<IValue>& values,
-      size_t block_idx);
+      Block* block,
+      bool is_root_block = false);
   BlockRunner(BlockRunner&&) noexcept;
   BlockRunner& operator=(BlockRunner&&) = delete;
   ~BlockRunner();
@@ -616,10 +620,6 @@ class TORCH_API BlockRunner {
   // std::terminate.
   void resetMemory() noexcept;
 
-  uint16_t num_sub_blocks() const {
-    return num_sub_blocks_;
-  }
-
  private:
   // A helper object that invokes memory planner deallocation code
   // when destructed.
@@ -703,10 +703,6 @@ class TORCH_API BlockRunner {
   const bool first_input_is_self_;
   // Index of the start of this blocks inputs in the shared values_ array.
   const uint16_t inputs_begin_;
-  // How many sub-blocks does this one have? Includes *all* descendants, not
-  // just children of this block. For example, if we have 2 nested loops in this
-  // block, num_sub_blocks = 2, not 1.
-  uint16_t num_sub_blocks_ = 0;
 
   bool manage_output_tensors_enabled_ = false;
   std::unique_ptr<MemoryPlanner> planner_;
