@@ -16912,6 +16912,22 @@ class TestNNDeviceType(NNTestCase):
             output = Embed(input=x, offsets=torch.tensor([0, 0], device=device, dtype=dtypes[1]))
             self.assertEqual(output, torch.zeros_like(output))
 
+    @skipCUDAIf(True, "cuda assert is not recovarable.")
+    @dtypes(*itertools.product((torch.float, torch.double), (torch.int, torch.long)))
+    @parametrize_test("padding_idx", [None, 0])
+    @parametrize_test("mode", ["sum", "mean", "max"])
+    def test_embedding_bag_negative_idx(self, device, dtypes, padding_idx, mode):
+        padding_idx = 0
+        w_dtype, idx_dtype = dtypes
+        idx = torch.tensor([[-1, -2]], device=device, dtype=idx_dtype)
+        weight = torch.randn(10, 10, device=device, dtype=w_dtype)
+        per_sample_weight = torch.randn_like(idx, device=device, dtype=w_dtype)
+        for p_s_weights in (None, per_sample_weight):
+            with self.assertRaises(RuntimeError):
+                torch.nn.functional.embedding_bag(idx, weight,
+                                                  per_sample_weights=p_s_weights, padding_idx=padding_idx,
+                                                  mode=mode)
+
     @dtypes(*itertools.product((torch.int, torch.long), (torch.int, torch.long)))
     def test_EmbeddingBag_per_sample_weights_failures(self, device, dtypes):
         # Failure 1: mismatched embeddings / per_sample_weights dtype
