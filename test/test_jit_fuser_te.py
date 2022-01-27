@@ -2274,7 +2274,7 @@ class TestTEFuserStatic(TestTEFuser):
 # class TestTEFuserDynamic(TestTEFuser):
 #     dynamic_shapes = True
 
-# del TestTEFuser
+del TestTEFuser
 
 works_list = [
     '__radd__',
