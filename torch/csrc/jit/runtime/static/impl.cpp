@@ -925,15 +925,21 @@ void destroyNodeOutputs(ProcessedNode& p_node) {
 } // namespace
 
 void StaticRuntime::clean_up_intermediate_ivalues() noexcept {
-  for (auto& p_node : nodes_) {
-    destroyNodeOutputs(p_node);
+  // We have to iterate in reverse order here due to borrowed
+  // IValues - we don't want to destroy a value until all of its
+  // borrows are cleaned up!
+  for (auto it = nodes_.rbegin(); it != nodes_.rend(); ++it) {
+    destroyNodeOutputs(*it);
   }
 }
 
 void StaticRuntime::resetMemory() noexcept {
   planner_.reset();
-  clean_up_input_ivalues();
+  // We must clean up intermediate values before inputs in case
+  // there are borrowed inputs and static runtime owns the only
+  // reference (e.g. the inputs were std::move'd into the runtime)
   clean_up_intermediate_ivalues();
+  clean_up_input_ivalues();
 }
 
 c10::IValue StaticRuntime::move_outputs_to_tuple(uint32_t num_outputs) {
@@ -1149,7 +1155,7 @@ c10::IValue StaticRuntime::run_impl_record_functions(
   bool pre_sampled = false;
   if (C10_UNLIKELY(at::shouldRunRecordFunction(&pre_sampled))) {
     at::RecordFunction guard(
-        at::RecordScope::TORCHSCRIPT_FUNCTION, pre_sampled);
+        at::RecordScope::STATIC_RUNTIME_MODEL, pre_sampled);
     if (guard.isActive()) {
       if (guard.needsInputs()) {
         guard.before("forward", &args);
@@ -1753,7 +1759,7 @@ void ProcessedNode::run() {
 #ifndef PYTORCH_DISABLE_PER_OP_PROFILING
   bool pre_sampled = false;
   if (C10_UNLIKELY(at::shouldRunRecordFunction(&pre_sampled))) {
-    at::RecordFunction guard(at::RecordScope::FUNCTION, pre_sampled);
+    at::RecordFunction guard(at::RecordScope::STATIC_RUNTIME_OP, pre_sampled);
     if (guard.isActive()) {
       if (guard.needsInputs()) {
         guard.before(get_op_name(), inputs_ivalue_vec());
