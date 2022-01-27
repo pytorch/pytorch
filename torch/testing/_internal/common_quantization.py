@@ -402,6 +402,8 @@ class QuantizationTestCase(TestCase):
            type(module) not in float_to_observed_module_class_mapping.values() and \
            not isinstance(module, _FusedModule):
             for child in module.children():
+                if type(child) in [nn.Dropout]:
+                    continue
                 self.checkObservers(child, propagate_qconfig_list, prepare_custom_config_dict)
 
     def checkQuantDequant(self, mod):
@@ -1193,7 +1195,11 @@ class AnnotatedConvBnReLUModel(torch.nn.Module):
         return x
 
     def fuse_model(self):
-        torch.quantization.fuse_modules(self, [['conv', 'bn', 'relu']], inplace=True)
+        # TODO: remove this check and define two fuse_modules function on this module
+        if self.training:
+            torch.quantization.fuse_modules_qat(self, [['conv', 'bn', 'relu']], inplace=True)
+        else:
+            torch.quantization.fuse_modules(self, [['conv', 'bn', 'relu']], inplace=True)
 
 class TwoLayerConvModel(torch.nn.Module):
     def __init__(self):
@@ -1462,7 +1468,11 @@ class InnerModule(torch.nn.Module):
                 if isinstance(named_children[idx + 1][1], torch.nn.ReLU):
                     fusable_layers.append([current_name,
                                            named_children[idx + 1][0]])
-        torch.quantization.fuse_modules(self, fusable_layers, inplace=True)
+        # TODO: remove this check and define two fuse_modules function on this module
+        if self.training:
+            torch.ao.quantization.fuse_modules_qat(self, fusable_layers, inplace=True)
+        else:
+            torch.ao.quantization.fuse_modules(self, fusable_layers, inplace=True)
 
 class FunctionalLinear(torch.nn.Module):
     def __init__(self):
@@ -1641,14 +1651,29 @@ class ManualLinearQATModel(torch.nn.Module):
         self.quant = QuantStub()
         self.dequant = DeQuantStub()
         self.fc1 = torch.nn.Linear(5, 1).to(dtype=torch.float)
-        self.dropout = torch.nn.Dropout(0.5)
         self.fc2 = torch.nn.Linear(1, 10).to(dtype=torch.float)
 
     def forward(self, x):
         x = self.quant(x)
         x = self.fc1(x)
-        x = self.dropout(x)
         x = self.fc2(x)
+        return self.dequant(x)
+
+class ManualDropoutQATModel(torch.nn.Module):
+    r"""A Module with manually inserted `QuantStub` and `DeQuantStub`
+    """
+    def __init__(self, qengine):
+        super().__init__()
+        self.qconfig = torch.quantization.get_default_qat_qconfig(qengine)
+        self.quant = QuantStub()
+        self.dequant = DeQuantStub()
+        self.fc1 = torch.nn.Linear(5, 1).to(dtype=torch.float)
+        self.dropout = torch.nn.Dropout(0.5)
+
+    def forward(self, x):
+        x = self.quant(x)
+        x = self.fc1(x)
+        x = self.dropout(x)
         return self.dequant(x)
 
 class ManualLinearDynamicQATModel(torch.nn.Module):
@@ -1938,7 +1963,11 @@ class ResNetBase(torch.nn.Module):
         return out
 
     def fuse_model(self):
-        torch.quantization.fuse_modules(self, [['conv1', 'bn1', 'relu1']], inplace=True)
+        # TODO: remove this check and define two fuse_model function on this module
+        if self.training:
+            torch.ao.quantization.fuse_modules_qat(self, [['conv1', 'bn1', 'relu1']], inplace=True)
+        else:
+            torch.ao.quantization.fuse_modules(self, [['conv1', 'bn1', 'relu1']], inplace=True)
 
 class ModelMultipleOps(torch.nn.Module):
     def __init__(self):
