@@ -367,6 +367,35 @@ struct CodeImpl {
     return result;
   }
 
+  virtual void emitOperatorOrInstruction(
+      Node* node,
+      OpCode op,
+      int64_t X = 0,
+      uint64_t N = 0,
+      bool emit_inputs = true) {
+    if (emit_inputs) {
+      emitLoadInputs(node->inputs());
+    }
+    insertInstruction(op, X, N);
+  }
+
+  void emitFormat(Node* node) {
+    emitOperatorOrInstruction(node, FORMAT, node->inputs().size(), 0);
+  }
+
+  void checkNodeAndEmit(Node* node) {
+    // check if the node should be emitted as instruction or operator
+    const Operator& op = node->getOperator();
+    std::string unique_op_name = c10::toString(op.schema().operator_name());
+    if (unique_op_name.find("aten::__getitem__.Dict") == 0) {
+      // __get_item__ overloaded operator for Dict
+      // needs to be emitted an instruction
+      emitOperatorOrInstruction(node, DICT_INDEX);
+    } else {
+      emitOperator(node);
+    }
+  }
+
   void emitConstant(Node* node) {
     if (node->output()->type()->kind() == FunctionType::Kind) {
       return;
@@ -609,7 +638,14 @@ struct CodeImpl {
     switch (node->kind()) {
       default:
         // NOLINTNEXTLINE(clang-analyzer-optin.cplusplus.VirtualCall)
-        emitOperator(node);
+        checkNodeAndEmit(node);
+        // emitOperator(node);
+        break;
+      case prim::RaiseException:
+        emitOperatorOrInstruction(node, RAISE_EXCEPTION);
+        break;
+      case prim::TupleIndex:
+        emitOperatorOrInstruction(node, TUPLE_INDEX);
         break;
       case prim::Drop:
         emitDrop(node->inputs());
@@ -688,6 +724,36 @@ struct CodeImpl {
         break;
       case prim::Exit:
         emitExit(node);
+        break;
+      case prim::Uninitialized:
+        emitOperatorOrInstruction(node, UN_INITIALIZED, 0, 0, false);
+        break;
+      case prim::dtype:
+        emitOperatorOrInstruction(node, DTYPE);
+        break;
+      case prim::device:
+        emitOperatorOrInstruction(node, DEVICE);
+        break;
+      case aten::dim:
+        emitOperatorOrInstruction(node, DIM);
+        break;
+      case prim::is_cuda:
+        emitOperatorOrInstruction(node, IS_CUDA);
+        break;
+      case aten::__not__:
+        emitOperatorOrInstruction(node, __NOT__);
+        break;
+      case aten::format:
+        emitFormat(node);
+        break;
+      case aten::__is__:
+        emitOperatorOrInstruction(node, __IS__);
+        break;
+      case aten::__isnot__:
+        emitOperatorOrInstruction(node, __ISNOT__);
+        break;
+      case prim::NumToTensor:
+        emitOperatorOrInstruction(node, NUM_TO_TENSOR);
         break;
     }
   }
@@ -887,6 +953,20 @@ struct MobileCodeImpl : CodeImpl {
             op, node, unique_op_name, num_inputs, is_vararg);
         insertInstruction(OP, operation_index);
       }
+    }
+  }
+
+  void emitOperatorOrInstruction(
+      Node* node,
+      OpCode op,
+      int64_t X = 0,
+      uint64_t N = 0,
+      bool emit_inputs = true) override {
+    bool emit_promoted_ops_ = false;
+    if (emit_promoted_ops_) {
+      CodeImpl::emitOperatorOrInstruction(node, op, X, N, emit_inputs);
+    } else {
+      CodeImpl::emitOperator(node);
     }
   }
 
