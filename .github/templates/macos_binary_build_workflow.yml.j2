@@ -12,6 +12,7 @@ name: !{{ build_environment }}
       BUILDER_ROOT: ${{ github.workspace }}/builder
       PACKAGE_TYPE: !{{ config["package_type"] }}
       SKIP_ALL_TESTS: 1
+      DESIRED_CUDA: cpu
 {%- if config["package_type"] == "libtorch" %}
       LIBTORCH_VARIANT: !{{ config["libtorch_variant"] }}
       DESIRED_DEVTOOLSET: !{{ config["devtoolset"] }}
