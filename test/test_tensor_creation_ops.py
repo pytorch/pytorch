@@ -1208,6 +1208,16 @@ class TestTensorCreation(TestCase):
         d = torch.tensor((2, 3), device=device, dtype=torch.double)
         self.assertRaises(RuntimeError, lambda: torch.zeros((2, 3), device=device, dtype=torch.float32, out=d))
 
+    # FIXME: Create an OpInfo-based tensor creation method test that verifies this for all tensor
+    #   creation methods and verify all dtypes and layouts
+    @dtypes(torch.bool, torch.uint8, torch.int16, torch.int64, torch.float16, torch.float32, torch.complex64)
+    def test_zeros_dtype_layout_device_match(self, device, dtype):
+        layout = torch.strided
+        t = torch.zeros((2, 3), device=device, dtype=dtype, layout=layout)
+        self.assertIs(dtype, t.dtype)
+        self.assertIs(layout, t.layout)
+        self.assertEqual(torch.device(device), t.device)
+
     # TODO: update to work on CUDA, too
     @onlyCPU
     def test_trilu_indices(self, device):
