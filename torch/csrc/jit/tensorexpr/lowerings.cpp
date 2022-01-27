@@ -1500,7 +1500,7 @@ int nnc_lowerings_lazy_registration() {
       computeConv2d);
 
   RegisterNNCLoweringsFunction aten_addmm(
-      {"aten::addmm(Tensor self, Tensor mat1, Tensor mat2, *, Scalar beta=1, Scalar alpha=1) -> (Tensor)"},
+      {"aten::addmm(Tensor self, Tensor mat1, Tensor mat2, *, Scalar beta=1, Scalar alpha=1, ScalarType? dtype=None) -> (Tensor)"},
       computeAddMM);
 
   RegisterNNCLoweringsFunction aten_mean(

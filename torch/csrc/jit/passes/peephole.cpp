@@ -422,7 +422,7 @@ bool FuseAddMM(Block* block) {
 //   torch.addmm(a, b, c, out=a).
 // That's because addmm dispatches internally to gemm, which computes:
 //   C = beta * C + alpha * A @ B
-// but aten::addmm(a, b, c, 1, 1) is really:
+// but aten::addmm(a, b, c, 1, 1, None) is really:
 //   D = beta * C + alpha * A @ B
 // and because it works out of place on C, we're only trading off an
 // explicit add for a copy inside the addmm function. Note that it
