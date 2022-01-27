@@ -755,14 +755,6 @@ def process_intentional_test_runs(runs: List[TestCase]) -> Tuple[int, int]:
             num_pass += 1
 
     REPEAT_TEST_FOR_TYPES_TESTS = [
-        "test_Conv2d_deterministic_cudnn ",
-        "test_Conv2d_large_workspace",
-        "test_ConvTranspose2d_large_output_padding",
-        "test_Conv2d_depthwise_naive_groups_cuda",
-        "test_Conv3d_depthwise_naive_groups_cuda",
-        "test_noncontig_conv_grad_cuda",
-        "test_batchnorm_large_batch",
-        "test_conv_double_backward_cuda",
         "test_data_parallel_module",
         "test_data_parallel_module_kwargs_only",
         "test_data_parallel_module_kwargs_only_empty_list",
