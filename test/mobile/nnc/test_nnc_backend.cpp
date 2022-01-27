@@ -69,36 +69,6 @@ std::vector<mobile::nnc::OutputSpec> get_output_specs(
   return specs;
 }
 
-// A fake NNC preprocess method, which only produces the compiled model but
-// does not produce the assembly with the NNC compiler.
-c10::IValue preprocess(
-    const torch::jit::Module& /* mod */,
-    const c10::Dict<c10::IValue, c10::IValue>& method_compile_spec,
-    const torch::jit::BackendDebugHandleGenerator&) {
-  torch::jit::mobile::nnc::CompilationUnit cu;
-  for (const auto& entry : method_compile_spec) {
-    const std::string& method_name = entry.key().toStringRef();
-    auto compile_spec = entry.value().toGenericDict();
-
-    auto func = std::make_unique<mobile::nnc::Function>();
-    func->set_name(method_name);
-    func->set_nnc_kernel_id(compile_spec.at("nnc_kernel_id").toStringRef());
-    func->set_input_specs(get_input_specs(compile_spec));
-    func->set_output_specs(get_output_specs(compile_spec));
-
-    func->set_parameters(compile_spec.at("parameters").toList());
-
-    mobile::nnc::MemoryPlan plan;
-    plan.buffer_sizes_ = compile_spec.at("buffer_sizes").toIntVector();
-    func->set_memory_plan(plan);
-
-    cu.register_function(std::move(func));
-  }
-  return cu.serialize();
-}
-
-static auto reg = torch::jit::backend_preprocess_register("nnc", preprocess);
-
 struct FakeTensor : torch::CustomClassHolder {
   explicit FakeTensor(std::vector<int64_t> data) : data_(std::move(data)) {}
   int64_t get() {
