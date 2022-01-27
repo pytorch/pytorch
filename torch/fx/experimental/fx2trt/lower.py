@@ -35,7 +35,6 @@ from .tools.timing_cache_utils import (
 from .trt_module import (
     TRTModule,
 )
-from torch.fx.experimental.fx_acc import acc_normalizer
 
 
 logger = logging.getLogger(__name__)
@@ -346,8 +345,7 @@ class Lowerer(LowerFunc):
 
         const_split_mod = split_const_subgraphs(module, skip_folding_node_fn)
         const_split_mod.run_folding()
-
-        acc_normalizer.normalize(const_split_mod, expect_nodes_have_shapes=False)
+        const_split_mod = self.acc_trace(const_split_mod, input)  # type: ignore[misc]
 
         split_module, splits = self.split(const_split_mod, input)  # type: ignore[arg-type]
         split_module.eval()  # type: ignore[attr-defined]
