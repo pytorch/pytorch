@@ -825,7 +825,8 @@ The factorization is of the form the form :math:`A = L D L^T`.
 If :attr:`hermitian` is `True` then transpose operation is the conjugate transpose.
 
 :math:`L` (or :math:`U`) and :math:`D` are stored in compact form in ``LD``.
-This format is used by :func:`torch.linalg.ldl_solve` for solving linear systems.
+They follow the format specified by LAPACK's `sytrf' function.
+These tensors may be used in :func:`torch.linalg.ldl_solve` to solve linear systems.
 
 ``info`` stores integer error codes from the backend library (see `sytrf` function from LAPACK).
 The positive integer indicates the diagonal element of :math:`D` that is zero.
