@@ -26,6 +26,7 @@
 #include <numeric>
 #include <string>
 #include <tuple>
+#include <iostream>
 
 namespace at {
 namespace meta {
@@ -2305,7 +2306,9 @@ Tensor &frobenius_norm_out(const Tensor& self,
     auto dim_ = dim.vec();
     maybe_wrap_dims(dim_, self.dim());
     TORCH_CHECK(dim_[0] != dim_[1], "Expected dims to be different, got ", dim, " instead");
+    std::cout << "CALLING FROB NORM:\n";
     if (self.is_complex()){
+      std::cout << "COMPLEX FROB NORM INPUT CALL:\n";
       result_ = at::sqrt(at::sum(at::real(self.conj() * self), dim_, keepdim));
     } else {
       result_ = at::sqrt(at::sum((self * self), dim_, keepdim));
