@@ -19,6 +19,7 @@ Matrix Properties
     norm
     vector_norm
     matrix_norm
+    diagonal
     det
     slogdet
     cond
