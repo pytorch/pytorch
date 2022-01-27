@@ -3624,7 +3624,8 @@
   device_check: NoCheck
   device_guard: False
   dispatch:
-    CPU, CUDA, Meta, QuantizedCPU, QuantizedCUDA, ZeroTensor: _reshape_alias
+    CPU, CUDA, Meta, ZeroTensor: _reshape_alias
+    QuantizedCPU, QuantizedCUDA: _reshape_alias_quantized
     # We don't need to support mkldnn since this is handled explicitly by the reshape operator.
 
 - func: _mkldnn_reshape(Tensor self, int[] shape) -> Tensor
@@ -5873,6 +5874,7 @@
   device_guard: False
   dispatch:
     ZeroTensor, CPU, CUDA, Meta, QuantizedCPU, QuantizedCUDA: view
+    QuantizedCPU, QuantizedCUDA: view_quantized
     MkldnnCPU: mkldnn_view
 
 # Warning: If you want to change the name or overload name of this
@@ -7826,7 +7828,8 @@
 - func: alias(Tensor(a) self) -> Tensor(a)
   variants: method, function
   dispatch:
-    CompositeExplicitAutograd: alias
+    ZeroTensor, CPU, CUDA, Meta, QuantizedCPU, QuantizedCUDA: alias
+    QuantizedCPU, QuantizedCUDA: alias_quantized
 
 - func: _index_copy_(Tensor(a!) self, int dim, Tensor index, Tensor source) -> Tensor(a!)
   dispatch:

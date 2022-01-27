@@ -1092,15 +1092,25 @@ Tensor alias_with_sizes_and_strides(
     const Vec& sizes,
     const Vec& strides) {
   Tensor self_;
-  if (self.is_quantized()) {
-    self_ = at::detail::make_tensor<QTensorImpl>(
-      c10::TensorImpl::VIEW, Storage(self.storage()), self.key_set(), self.dtype(), get_qtensorimpl(self)->quantizer());
-    setStrided(self_, sizes, strides, self.storage_offset());
-  } else {
-    self_ = at::detail::make_tensor<TensorImpl>(
-      c10::TensorImpl::VIEW, Storage(self.storage()), self.key_set(), self.dtype());
-    setStrided(self_, sizes, strides, self.storage_offset());
-  }
+  self_ = at::detail::make_tensor<TensorImpl>(
+    c10::TensorImpl::VIEW, Storage(self.storage()), self.key_set(), self.dtype());
+  setStrided(self_, sizes, strides, self.storage_offset());
+  namedinference::propagate_names(self_, self);
+  return self_;
+}
+
+//
+// templated for ArrayRef<int64_t> and SmallVector<int64_t> use cases
+//
+template <typename Vec>
+Tensor alias_with_sizes_and_strides_quantized(
+    const Tensor& self,
+    const Vec& sizes,
+    const Vec& strides) {
+  Tensor self_;
+  self_ = at::detail::make_tensor<QTensorImpl>(
+    c10::TensorImpl::VIEW, Storage(self.storage()), self.key_set(), self.dtype(), get_qtensorimpl(self)->quantizer());
+  setStrided(self_, sizes, strides, self.storage_offset());
   namedinference::propagate_names(self_, self);
   return self_;
 }
@@ -1151,6 +1161,15 @@ Tensor _reshape_alias(const Tensor& self, IntArrayRef sizes, IntArrayRef strides
 
   return alias_with_sizes_and_strides(self, sizes, strides);
 }
+
+Tensor _reshape_alias_quantized(const Tensor& self, IntArrayRef sizes, IntArrayRef strides) {
+  // This is only used by `reshape` in cases where it would otherwise have dispatched
+  // to `view`. This removes the overhead of calling `view` which duplicates some of
+  // the work that's already been done (`infer_size_dv` and `computeStride`).
+
+  return alias_with_sizes_and_strides_quantized(self, sizes, strides);
+}
+
 
 Tensor reshape_as(const Tensor& self, const Tensor& other) {
   return self.reshape(other.sizes());
@@ -2393,8 +2412,26 @@ Tensor view(const Tensor& self,
   return alias_with_sizes_and_strides(self, inferred_size, stride_value);
 }
 
+Tensor view_quantized(const Tensor& self,
+            IntArrayRef size) {
+
+  at::DimVector inferred_size = at::infer_size_dv(size, self.numel());
+  auto stride = at::detail::computeStride(self.sizes(),
+                                        self.strides(),
+                                        inferred_size);
+  TORCH_CHECK(stride.has_value(), "view size is "
+    "not compatible with input tensor's size and stride (at least one dimension"
+    " spans across two contiguous subspaces). Use .reshape(...) instead.");
+  auto stride_value = *stride;
+  return alias_with_sizes_and_strides_quantized(self, inferred_size, stride_value);
+}
+
 Tensor alias(const Tensor& self) {
     return alias_with_sizes_and_strides(self, self.sizes(), self.strides());
+}
+
+Tensor alias_quantized(const Tensor& self) {
+    return alias_with_sizes_and_strides_quantized(self, self.sizes(), self.strides());
 }
 
 Tensor detach(const Tensor& self) {
