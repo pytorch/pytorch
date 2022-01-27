@@ -1,6 +1,14 @@
 def define_targets(rules):
-    rules.cc_test(
+    rules.test_suite(
         name = "tests",
+        tests = [
+            ":core_and_util_tests",
+        ],
+        visibility = ["//:__pkg__"],
+    )
+
+    rules.cc_test(
+        name = "core_and_util_tests",
         size = "small",
         srcs = [
             "core/CompileTimeFunctionPointer_test.cpp",
@@ -51,7 +59,6 @@ def define_targets(rules):
             "//c10/util:base",
             "//c10/util:typeid",
         ],
-        visibility = ["//:__pkg__"],
     )
 
     rules.cc_library(
