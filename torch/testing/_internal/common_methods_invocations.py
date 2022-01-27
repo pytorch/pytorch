@@ -1175,7 +1175,10 @@ class ReductionOpInfo(OpInfo):
         self.generate_args_kwargs = generate_args_kwargs
 
 
-def sample_inputs_unary(op_info, device, dtype, requires_grad, **kwargs):
+def sample_inputs_unary(op_info, device, dtype, requires_grad, op_kwargs=None, **kwargs):
+    if not op_kwargs:
+        op_kwargs = {}
+
     low, high = op_info.domain
     low = low if low is None else low + op_info._domain_eps
     high = high if high is None else high - op_info._domain_eps
@@ -1184,12 +1187,14 @@ def sample_inputs_unary(op_info, device, dtype, requires_grad, **kwargs):
         # Tensors with dim=2 for sparse CSR testing
         yield SampleInput(make_tensor((L, L), device=device, dtype=dtype,
                                       low=low, high=high,
-                                      requires_grad=requires_grad))
+                                      requires_grad=requires_grad), kwargs=op_kwargs)
     else:
-        for shape in ((L,), ()):
+        # Creates a 1D, empty, and scalar tensor
+        for shape in ((L,), (1, 0, 3), ()):
             yield SampleInput(make_tensor(shape, device=device, dtype=dtype,
                                           low=low, high=high,
-                                          requires_grad=requires_grad))
+                                          requires_grad=requires_grad), kwargs=op_kwargs)
+
 
 # Metadata class for unary "universal functions (ufuncs)" that accept a single
 # tensor and have common properties like:
@@ -1956,6 +1961,7 @@ def sample_inputs_binary_pwise(
         ((S, M, S), (S, M, S)),
         ((M, 1, S), (M, S)),
         ((M, 1, S), (1, M, S)),
+        ((0, 1, 3), (0, 10, 3))
     ]
 
     for shape_lhs, shape_rhs_or_scalar in shapes:
@@ -3016,6 +3022,101 @@ def sample_inputs_gather(op_info, device, dtype, requires_grad, **kwargs):
             args=(0, torch.tensor(0, dtype=torch.int64, device=device))),
     )
 
+def _fill_indices(idx, dim, dim_size, elems_per_row, m, n, o):
+    for i in range(1 if dim == 0 else m):
+        for j in range(1 if dim == 1 else n):
+            for k in range(1 if dim == 2 else o):
+                ii = [i, j, k]
+                ii[dim] = slice(0, idx.size(dim) + 1)
+                idx[tuple(ii)] = torch.randperm(dim_size)[0:elems_per_row]
+
+def error_inputs_gather(op_info, device, **kwargs):
+    # src is [1, 2]
+    #        [3, 4]
+    src = torch.tensor(((1, 2), (3, 4)), device=device, dtype=torch.float32)
+
+    # idx is [0, 0]
+    #        [1, 0]
+    idx = torch.tensor(((0, 0), (1, 0)), device=device, dtype=torch.long)
+
+    # Index should be smaller than self except on dimesion 1
+    bad_src = make_tensor((1, 1), device=device, dtype=torch.float32)
+    yield ErrorInput(SampleInput(bad_src, args=(1, idx,)), error_type=RuntimeError,
+                     error_regex="Size does not match at dimension 0")
+
+    # Index must have long dtype
+    bad_idx = idx.to(torch.int32)
+    yield ErrorInput(SampleInput(src, args=(1, bad_idx)), error_type=RuntimeError,
+                     error_regex="Expected dtype int64 for index")
+
+    # TODO: FIXME
+    # out.dtype must match src.dtype
+    # Creates new src & idx since SampleInputs can't share tensors
+    src = torch.tensor(((1, 2), (3, 4)), device=device, dtype=torch.float32)
+    idx = torch.tensor(((0, 0), (1, 0)), device=device, dtype=torch.long)
+    out = torch.empty((2, 2), device=device, dtype=torch.float64)
+    yield ErrorInput(SampleInput(src, args=(1, idx), kwargs={'out': out}), error_type=RuntimeError,
+                     error_regex="Expected out tensor to have dtype")
+
+    # src and index tensors must have the same # of dimensions
+    # idx too few dimensions
+    src = torch.tensor(((1, 2), (3, 4)), device=device, dtype=torch.float32)
+    idx = torch.tensor((0, 0), device=device, dtype=torch.long)
+    yield ErrorInput(SampleInput(src, args=(1, idx)), error_type=RuntimeError,
+                     error_regex="Index tensor must have the same number of dimensions")
+
+    # src too few dimensions
+    src = torch.tensor((1, 2), device=device, dtype=torch.float32)
+    idx = torch.tensor(((0, 0), (1, 0)), device=device, dtype=torch.long)
+    yield ErrorInput(SampleInput(src, args=(0, idx)), error_type=RuntimeError,
+                     error_regex="Index tensor must have the same number of dimensions")
+
+    # index out of bounds
+    # NOTE: this ErrorInput is guarded because bounds checking does not occur on CUDA devices
+    if torch.device(device).type == 'cpu':
+        src = torch.tensor(((1, 2), (3, 4)), device=device, dtype=torch.float32)
+        idx = torch.tensor(((0, 23), (1, 0)), device=device, dtype=torch.long)
+        yield ErrorInput(SampleInput(src, args=(1, idx,)), error_type=RuntimeError,
+                         error_regex="index 23 is out of bounds for dimension")
+
+# Error inputs for scatter
+def error_inputs_scatter_and_scatter_add(op_info, device, **kwargs):
+    # Error when self.dtype != src.dtype (and src is not a scalar)
+    src = make_tensor((2, 5), device=device, dtype=torch.float32)
+    idx = torch.tensor(((0, 1), (1, 2)), device=device, dtype=torch.long)
+    dst = torch.zeros((3, 5), device=device, dtype=torch.double)
+    yield ErrorInput(SampleInput(dst, args=(0, idx, src)), error_type=RuntimeError,
+                     error_regex="Expected self.dtype to be equal to src.dtype")
+
+    # Index dtype must be long
+    src = make_tensor((2, 5), device=device, dtype=torch.float32)
+    idx = torch.tensor(((0, 1), (1, 2)), device=device, dtype=torch.int32)
+    dst = torch.zeros((3, 5), device=device, dtype=torch.float32)
+    yield ErrorInput(SampleInput(dst, args=(0, idx, src)), error_type=RuntimeError,
+                     error_regex="Expected dtype int64 for index")
+
+    # Index and destination must have the same number of dimensions
+    src = make_tensor((2, 5), device=device, dtype=torch.float32)
+    idx = torch.tensor(((0, 1), (1, 2)), device=device, dtype=torch.long)
+    dst = torch.zeros((3, 5, 3), device=device, dtype=torch.float32)
+    yield ErrorInput(SampleInput(dst, args=(0, idx, src)), error_type=RuntimeError,
+                     error_regex="Index tensor must have the same number of dimensions as self tensor")
+
+    # Index and src must have the same number of dimensions when src is not a scalar
+    src = make_tensor((2, 5, 2), device=device, dtype=torch.float32)
+    idx = torch.tensor(((34, 1), (1, 2)), device=device, dtype=torch.long)
+    dst = torch.zeros((3, 5), device=device, dtype=torch.float32)
+    yield ErrorInput(SampleInput(dst, args=(0, idx, src)), error_type=RuntimeError,
+                     error_regex="Index tensor must have the same number of dimensions as src tensor")
+
+    # Index out of bounds
+    # NOTE: this ErrorInput is guarded because bounds checking does not occur on CUDA devices
+    if torch.device(device).type == 'cpu':
+        src = make_tensor((2, 5), device=device, dtype=torch.float32)
+        idx = torch.tensor(((34, 1), (1, 2)), device=device, dtype=torch.long)
+        dst = torch.zeros((3, 5), device=device, dtype=torch.float32)
+        yield ErrorInput(SampleInput(dst, args=(0, idx, src)), error_type=RuntimeError,
+                         error_regex="index 34 is out of bounds for dimension 0 with size 3")
 
 def sample_inputs_take_along_dim(op_info, device, dtype, requires_grad, **kwargs):
     return (SampleInput(make_tensor((S, S), device, dtype,
@@ -5925,11 +6026,13 @@ def sample_inputs_diagonal_diag_embed(op_info, device, dtype, requires_grad, **k
     # Shapes for 3D Tensors
     shapes_3d = ((M, M, M),)
 
-    args_2d = ((), (2,), (-2,), (1,))
-    args_3d = ((1, 1, 2), (2, 0, 1), (-2, 0, 1))
+    kwargs_2d = (dict(), dict(offset=2), dict(offset=2), dict(offset=1))
+    kwargs_3d = (dict(offset=1, dim1=1, dim2=2),
+                 dict(offset=2, dim1=0, dim2=1),
+                 dict(offset=-2, dim1=0, dim2=1))
 
-    for shape, arg in chain(product(shapes_2d, args_2d), product(shapes_3d, args_3d)):
-        yield SampleInput(make_arg(shape), args=arg)
+    for shape, kwarg in chain(product(shapes_2d, kwargs_2d), product(shapes_3d, kwargs_3d)):
+        yield SampleInput(make_arg(shape), kwargs=kwarg)
 
 
 def sample_inputs_diagonal_scatter(op_info, device, dtype, requires_grad, **kwargs):
@@ -9212,6 +9315,9 @@ op_db: List[OpInfo] = [
            supports_fwgrad_bwgrad=True,
            sample_inputs_func=sample_inputs_diagonal_diag_embed),
     OpInfo('diagonal',
+           # They are not strictly aliases as they have diverging defaults, but we can see them as aliases for testing purposes
+           # If we add tests that test the function against the alias, make linalg.diagonal into its own OpInfo
+           aliases=('linalg.diagonal',),
            dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
            supports_out=False,
            supports_forward_ad=True,
@@ -11941,7 +12047,7 @@ op_db: List[OpInfo] = [
                    safe_casts_outputs=True),
     UnaryUfuncInfo('real',
                    ref=np.real,
-                   dtypes=complex_types(),
+                   dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.half),
                    supports_out=False,
                    supports_forward_ad=True,
                    supports_fwgrad_bwgrad=True,
@@ -11964,6 +12070,8 @@ op_db: List[OpInfo] = [
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            sample_inputs_func=sample_inputs_rot90),
+    # To test reference numerics against multiple values of argument `decimals`,
+    # we make multiple OpInfo entries with each entry corresponding to different value of decimals.
     UnaryUfuncInfo('round',
                    ref=np.round,
                    aliases=('special.round',),
@@ -11974,6 +12082,56 @@ op_db: List[OpInfo] = [
                    supports_sparse=True,
                    supports_sparse_csr=True,
                    assert_autodiffed=True,),
+    UnaryUfuncInfo('round',
+                   ref=np.round,
+                   variant_test_name='decimals_0',
+                   aliases=('special.round',),
+                   dtypes=floating_types_and(torch.bfloat16),
+                   dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16),
+                   sample_kwargs=lambda device, dtype, input: ({'decimals': 0}, {'decimals': 0}),
+                   sample_inputs_func=partial(sample_inputs_unary, op_kwargs={'decimals': 0}),
+                   supports_forward_ad=True,
+                   supports_fwgrad_bwgrad=True,
+                   assert_autodiffed=False,
+                   supports_sparse_csr=False),
+    UnaryUfuncInfo('round',
+                   ref=np.round,
+                   variant_test_name='decimals_3',
+                   aliases=('special.round',),
+                   dtypes=floating_types_and(torch.bfloat16),
+                   dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16),
+                   sample_kwargs=lambda device, dtype, input: ({'decimals': 3}, {'decimals': 3}),
+                   sample_inputs_func=partial(sample_inputs_unary, op_kwargs={'decimals': 3}),
+                   skips=(
+                       # test_ops already tested for this overload with `decimals_0` opinfo entry
+                       DecorateInfo(unittest.skip("Skipped!"), 'TestCommon'),
+                       DecorateInfo(unittest.skip("Skipped!"), 'TestGradients'),
+                       DecorateInfo(unittest.skip("Skipped!"), 'TestJit'),
+                       DecorateInfo(unittest.skip("Skipped!"), 'TestMathBits'),
+                   ),
+                   supports_forward_ad=True,
+                   supports_fwgrad_bwgrad=True,
+                   assert_autodiffed=False,
+                   supports_sparse_csr=False),
+    UnaryUfuncInfo('round',
+                   ref=np.round,
+                   variant_test_name='decimals_neg_3',
+                   aliases=('special.round',),
+                   dtypes=floating_types_and(torch.bfloat16),
+                   dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16),
+                   sample_kwargs=lambda device, dtype, input: ({'decimals': -3}, {'decimals': -3}),
+                   sample_inputs_func=partial(sample_inputs_unary, op_kwargs={'decimals': -3}),
+                   skips=(
+                       # test_ops already tested for this overload with `decimals_0` opinfo entry
+                       DecorateInfo(unittest.skip("Skipped!"), 'TestCommon'),
+                       DecorateInfo(unittest.skip("Skipped!"), 'TestGradients'),
+                       DecorateInfo(unittest.skip("Skipped!"), 'TestJit'),
+                       DecorateInfo(unittest.skip("Skipped!"), 'TestMathBits'),
+                   ),
+                   supports_forward_ad=True,
+                   supports_fwgrad_bwgrad=True,
+                   assert_autodiffed=False,
+                   supports_sparse_csr=False),
     UnaryUfuncInfo('sin',
                    ref=np.sin,
                    dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16),
@@ -13063,12 +13221,6 @@ op_db: List[OpInfo] = [
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            sample_inputs_func=sample_inputs_flatten,
-           skips=(
-               # File "pytorch/torch/testing/_internal/common_jit.py", line 306, in test_type
-               # self.assertTrue(actual_type.isSubtypeOf(out_type))
-               # AssertionError: False is not true
-               DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
-           )
            ),
     OpInfo('column_stack',
            dtypes=floating_and_complex_types_and(torch.float16, torch.bfloat16),
@@ -13101,6 +13253,7 @@ op_db: List[OpInfo] = [
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
+           error_inputs_func=error_inputs_gather
            ),
     OpInfo('index_fill',
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
@@ -13224,7 +13377,8 @@ op_db: List[OpInfo] = [
            dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
-           sample_inputs_func=sample_inputs_scatter,),
+           sample_inputs_func=sample_inputs_scatter,
+           error_inputs_func=error_inputs_scatter_and_scatter_add),
     OpInfo('bfloat16',
            op=lambda x, *args, **kwargs: x.bfloat16(*args, **kwargs),
            dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
@@ -13656,6 +13810,7 @@ op_db: List[OpInfo] = [
     OpInfo('scatter_add',
            dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
            sample_inputs_func=sample_inputs_scatter_add,
+           error_inputs_func=error_inputs_scatter_and_scatter_add,
            supports_out=False,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
@@ -14347,6 +14502,7 @@ op_db: List[OpInfo] = [
            # If we pass `condition` first, none of the input which supports
            # autograd will be tested. Hence the following lambda.
            op=lambda self, condition, other: torch.where(condition, self, other),
+           ref=lambda self, condition, other: np.where(condition, self, other),
            sample_inputs_func=sample_inputs_where,
            supports_out=False,
            supports_forward_ad=True,
@@ -14612,6 +14768,7 @@ op_db: List[OpInfo] = [
         ref=reference_mse_loss,
         sample_inputs_func=sample_inputs_mse_loss,
         supports_out=False,
+        supports_forward_ad=True,
         dtypes=floating_types_and(torch.float16),
         backward_dtypesIfCPU=floating_types(),
         dtypesIfCUDA=floating_types_and(torch.bfloat16, torch.float16),
@@ -15261,6 +15418,7 @@ op_db: List[OpInfo] = [
         ref=_NOTHING,
         dtypes=floating_types_and(torch.float16, torch.bfloat16),
         supports_out=False,
+        supports_forward_ad=True,
         sample_inputs_func=sample_inputs_huber_loss,
         skips=(
             # JIT does not support variadic tensors.
@@ -15372,6 +15530,7 @@ op_db: List[OpInfo] = [
         backward_dtypesIfCUDA=floating_types_and(torch.float16, torch.int8, torch.int16, torch.int32, torch.int64),
         supports_out=False,
         check_batched_grad=False,
+        supports_forward_ad=True,
         skips=(
             # See https://github.com/pytorch/pytorch/issues/65466
             DecorateInfo(
@@ -15379,6 +15538,9 @@ op_db: List[OpInfo] = [
                 "TestGradients",
                 "test_fn_gradgrad",
             ),
+            # (ROCm) Memory access fault by GPU node-4 (Agent handle: 0x5642a3aa7b60) on address 0x5642bab40000
+            DecorateInfo(unittest.skip("Skipped! ROCm memory exception"), 'TestGradients', 'test_forward_mode_AD',
+                         device_type='cuda', dtypes=[torch.float64, torch.complex128], active_if=TEST_WITH_ROCM),
         ),
     ),
     OpInfo(
