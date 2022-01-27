@@ -678,7 +678,6 @@ class TestSortAndSelect(TestCase):
 
     @onlyCUDA
     @dtypes(torch.bfloat16)
-    @skipCUDAIfRocm
     def test_topk_bfloat16(self, device, dtype):
 
         small = 10
@@ -690,9 +689,6 @@ class TestSortAndSelect(TestCase):
     @dtypesIfCUDA(*get_all_fp_dtypes())
     @dtypes(torch.float, torch.double, torch.bfloat16)
     def test_topk_nonfinite(self, device, dtype):
-        if TEST_WITH_ROCM and dtype == torch.bfloat16:
-            return
-
         x = torch.tensor([float('nan'), float('inf'), 1e4, 0, -1e4, -float('inf')], device=device, dtype=dtype)
         val, idx = x.topk(4)
         expect = torch.tensor([float('nan'), float('inf'), 1e4, 0], device=device, dtype=dtype)
@@ -727,9 +723,6 @@ class TestSortAndSelect(TestCase):
                                    include_bfloat16=True)))
     @dtypes(*(get_all_dtypes(include_complex=False, include_bool=False, include_half=False, include_bfloat16=False)))
     def test_topk_zero(self, device, dtype):
-        if TEST_WITH_ROCM and dtype == torch.bfloat16:
-            return
-
         # https://github.com/pytorch/pytorch/issues/49205
         t = torch.rand(2, 2, device=device).to(dtype=dtype)
         val, idx = torch.topk(t, k=0, largest=False)
