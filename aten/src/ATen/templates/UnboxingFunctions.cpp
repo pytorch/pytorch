@@ -1,4 +1,4 @@
-#include <ATen/CodegenFunctions.h>
+#include <ATen/UnboxingFunctions.h>
 #include <ATen/Functions.h>
 
 #include <ATen/Tensor.h>
@@ -20,11 +20,6 @@
 #include <vector>
 namespace at {
 namespace unboxing {
-using at::Scalar;
-using at::ScalarType;
-using at::Tensor;
-using at::TensorOptions;
-using at::DeviceGuard;
 
 using ::c10::fmap;
 using ::c10::filter;

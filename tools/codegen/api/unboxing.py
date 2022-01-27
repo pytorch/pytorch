@@ -1,9 +1,7 @@
 from typing import List, Tuple
 
-from tools.codegen.api import cpp
 from tools.codegen.api.cpp import argumenttype_type
-from tools.codegen.api.translate import translate
-from tools.codegen.api.types import BaseCType, tensorOptionsT, CppSignature, CType, voidT, Expr
+from tools.codegen.api.types import CType, Expr
 from tools.codegen.model import (
     Argument,
     Type,
@@ -11,8 +9,6 @@ from tools.codegen.model import (
     OptionalType,
     ListType,
     BaseTy,
-    NativeFunction,
-    Variant,
 )
 
 
@@ -97,35 +93,49 @@ from tools.codegen.model import (
 #       drop(stack, 7);
 #       pack(stack, std::move(result_));
 #   ```
+connector = "\n\t"
+
 
 # Convert all the arguments in a NativeFunction to C++ code, including TensorOptions.
 def convert_arguments(args: List[Argument]) -> Tuple[List[Expr], List[str]]:
-    argument_str = "(std::move(peek(stack, {pos}, {args_num})))"
+    argument_str = "c10::IValue {arg_name} = std::move(peek(stack, {pos}, {args_num}));"
     expr_list = []
+    pop_ivalue = []
     code_list = []
     for i, arg in enumerate(args):
-        ivalue_str = argument_str.format(pos=i, args_num=len(args))
-        expr, code = argumenttype_ivalue_convert(arg.type, ivalue_str, arg.name, mutable=arg.is_write)
+        pop_ivalue.append(argument_str.format(arg_name=arg.name, pos=i, args_num=len(args)))
+        expr, code = argumenttype_ivalue_convert(arg.type, arg.name, mutable=arg.is_write)
         expr_list.append(expr)
         code_list.extend(code)
-
-    return expr_list, code_list
+    pop_ivalue.append("")
+    return expr_list, pop_ivalue + code_list
 
 
 # Take an argument in JIT type format, returns the C++ code to convert an ivalue from stack to corresponding C++ type.
-def argumenttype_ivalue_convert(t: Type, ival: str, arg_name: str, *, mutable: bool = False) -> Tuple[Expr, List[str]]:
+def argumenttype_ivalue_convert(t: Type, arg_name: str, *, mutable: bool = False) -> Tuple[Expr, List[str]]:
     nctype = argumenttype_type(t=t, mutable=mutable, binds=arg_name)
     ctype = nctype.cpp_type(strip_ref=True)
+
     if isinstance(t, BaseType):
         out_name = f"{arg_name}_base"
-        code = [f"{ctype} {arg_name}_base = {ival}.to<{ctype}>();"]
+        code = [f"{ctype} {arg_name}_base = {arg_name}.to<{ctype}>();"]
     elif isinstance(t, OptionalType):
-        in_name = arg_name + "_opt_in"
         out_name = arg_name + "_opt_out"
-        connector = "\n\t"
-        res_expr, res_code = argumenttype_ivalue_convert(t.elem, in_name, arg_name)
-        code = f"""
-c10::optional<c10::IValue> {arg_name + "_opt"} = {ival}.toOptional<c10::IValue>();
+        code = _gen_code_optional_type(arg_name=arg_name, out_name=out_name, t=t, ctype=ctype)
+    elif isinstance(t, ListType):
+        out_name = arg_name + "_list_out"
+        code = _gen_code_list_type(arg_name=arg_name, out_name=out_name, t=t, ctype=ctype)
+    else:
+        raise Exception(f"Cannot handle type {t}. arg_name: {arg_name}")
+    expr = Expr(expr=out_name, type=nctype)
+    return expr, code
+
+
+def _gen_code_optional_type(arg_name: str, out_name: str, t: OptionalType, ctype: CType) -> List[str]:
+    in_name = arg_name + "_opt_in"
+    res_expr, res_code = argumenttype_ivalue_convert(t.elem, in_name)
+    return f"""
+c10::optional<c10::IValue> {arg_name + "_opt"} = {arg_name}.toOptional<c10::IValue>();
 {ctype} {out_name};
 if ({arg_name + "_opt"}.has_value()) {{
     const c10::IValue {in_name} = {arg_name + "_opt"}.value();
@@ -134,43 +144,41 @@ if ({arg_name + "_opt"}.has_value()) {{
 }} else {{
     {out_name} = {ctype}();
 }}
-        """.split(
-            "\n"
-        )
-    elif isinstance(t, ListType):
-        in_name = arg_name + "_list_in"
-        out_name = arg_name + "_list_out"
-        elem_name = arg_name + "_elem"
-        code = [f"const c10::List<c10::IValue> {in_name} = {ival}.toList();"]
-        res_expr, res_code = argumenttype_ivalue_convert(t.elem, elem_name, arg_name)
-        connector = "\n\t"
-        # handle list type with size, e.g., bool[4]
-        if isinstance(t.elem, BaseType) and t.elem.name == BaseTy.bool and t.size:
-            code.extend(
-                f"""
+        """.split("\n")
+
+
+def _gen_code_list_type(arg_name: str, out_name: str, t: ListType, ctype: CType) -> List[str]:
+    in_name = arg_name + "_list_in"
+    elem_name = arg_name + "_elem"
+    code = [f"const c10::List<c10::IValue> {in_name} = {arg_name}.toList();"]
+    res_expr, res_code = argumenttype_ivalue_convert(t.elem, elem_name)
+    # handle list type with size, e.g., bool[4]
+    if isinstance(t.elem, BaseType) and t.elem.name == BaseTy.bool and t.size:
+        code.extend(
+            f"""
 {ctype} {out_name} = as_array<{res_expr.type.cpp_type(strip_ref=True)}, {t.size}>({in_name});
             """.split(
-                    "\n"
-                )
+                "\n"
             )
-        # we have to use c10::List for optional element. e.g., Tensor?[] -> c10::List<c10::optional<at::Tensor>>
-        elif isinstance(t.elem, OptionalType):
-            code.extend(
-                f"""
+        )
+    # we have to use c10::List for optional element. e.g., Tensor?[] -> c10::List<c10::optional<at::Tensor>>
+    elif isinstance(t.elem, OptionalType):
+        code.extend(
+            f"""
 {ctype} {out_name};
 for (c10::IValue {elem_name}: {in_name}) {{
     {connector.join(res_code)}
     {out_name}.push_back({res_expr.expr});
 }}
             """.split(
-                    "\n"
-                )
+                "\n"
             )
-        else:
-            # use ArrayRef as default.
-            vec_name = arg_name + "_vec"
-            code.extend(
-                f"""
+        )
+    else:
+        # use ArrayRef as default.
+        vec_name = arg_name + "_vec"
+        code.extend(
+            f"""
 std::vector<{res_expr.type.cpp_type(strip_ref=True)}> {vec_name};
 for (c10::IValue {elem_name}: {in_name}) {{
     {connector.join(res_code)}
@@ -178,47 +186,7 @@ for (c10::IValue {elem_name}: {in_name}) {{
 }}
 {ctype} {out_name}({vec_name});
             """.split(
-                    "\n"
-                )
+                "\n"
             )
-    else:
-        raise Exception(f"Cannot handle type {t}. ival: {ival}, arg_name: {arg_name}")
-    expr = Expr(expr=out_name, type=nctype)
-    return expr, code
-
-
-# Generate code to call C++ unboxed kernel with argument variable names
-def generate_unboxed_kernel_call(
-        f: NativeFunction, sig: CppSignature, arguments: List[Expr]
-) -> List[str]:
-    use_tensor_options = any(
-        isinstance(a.nctype.type, BaseCType) and a.nctype.type.type == tensorOptionsT
-        for a in sig.arguments()
-    )
-    # find dispatch native function namespace
-    if use_tensor_options:
-        namespace = "torch"
-    else:
-        namespace = "at"
-    # handle void return type
-    ret_type: CType = cpp.returns_type(f.func.returns)
-    if isinstance(ret_type, BaseCType) and ret_type.type == voidT:
-        ret_str = ""
-        push_str = ""
-    else:
-        ret_str = "auto result_ = "
-        push_str = """
-pack(stack, std::move(result_));
-        """
-    arg_connector = ",\n\t"
-    expr_list: List[Expr] = translate(arguments, sig.arguments(), method=(Variant.method in f.variants))
-    arg_list = f"\n\t{arg_connector.join(e.expr for e in expr_list)}\n"
-    if Variant.method in f.variants:
-        function_call = f"""
-{ret_str}self_base.{sig.name()}({arg_list});
-    """
-    else:
-        function_call = f"""
-{ret_str}{namespace}::{sig.name()}({arg_list});
-    """
-    return (function_call + push_str).split("\n")
+        )
+    return code
