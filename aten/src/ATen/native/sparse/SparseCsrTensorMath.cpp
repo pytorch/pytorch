@@ -297,6 +297,7 @@ Tensor& addmm_out_sparse_csr_cpu(
     c10::optional<ScalarType> dtype_opt,
     Tensor& result) {
   TORCH_INTERNAL_ASSERT(mat1.is_sparse_csr());
+  TORCH_CHECK(!dtype_opt.has_value(), "addmm_out_sparse_csr_cpu: kwarg dtype is not supported for this backend.");
 
   // TODO: remove this, there are no codegenerated checks for devices yet
   TORCH_CHECK(
@@ -393,6 +394,7 @@ Tensor addmm_sparse_csr_dense(
     const Scalar& beta,
     const Scalar& alpha,
     c10::optional<ScalarType> dtype_opt) {
+  TORCH_CHECK(!dtype_opt.has_value(), "addmm_sparse_csr_dense: kwarg dtype is not supported for this backend.");
   Tensor r = at::empty({0, 0}, self.options());
   at::addmm_out(r, self, sparse, dense, beta, alpha);
   return r;

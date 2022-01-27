@@ -1285,6 +1285,7 @@ Tensor addbmm(const Tensor& self, const Tensor& batch1, const Tensor& batch2, co
 
 TORCH_IMPL_FUNC(addmm_out_cpu)(const Tensor& self, const Tensor& mat1, const Tensor& mat2, const Scalar& beta, const Scalar& alpha,
     c10::optional<ScalarType> dtype_opt, const Tensor &result) {
+  TORCH_CHECK(!dtype_opt.has_value(), "addmm_out_cpu: kwarg dtype is not supported for this backend.");
   auto b_self = expand_size(self, {mat1.sizes()[0], mat2.sizes()[1]}, "addmm_out");
   {
     at::NoNamesGuard guard;

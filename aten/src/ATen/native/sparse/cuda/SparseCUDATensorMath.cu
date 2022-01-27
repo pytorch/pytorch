@@ -113,6 +113,7 @@ Tensor& addmm_out_sparse_dense_cuda(
     c10::optional<ScalarType> dtype_opt,
     Tensor& result
 ) {
+  TORCH_CHECK(!dtype_opt.has_value(), "addmm_out_sparse_dense_cuda: kwarg dtype is not supported for this backend.");
   c10::MaybeOwned<Tensor> b_self = expand_size(self, {mat1.size(0), mat2.size(1)}, "addmm_out");
   return s_addmm_out_sparse_dense_cuda(result, *b_self, mat1, mat2, beta, alpha);
 }
@@ -137,6 +138,7 @@ Tensor addmm_sparse_dense_cuda(
     const Scalar& alpha,
     c10::optional<ScalarType> dtype_opt
 ) {
+  TORCH_CHECK(!dtype_opt.has_value(), "addmm_sparse_dense_cuda: kwarg dtype is not supported for this backend.");
   c10::MaybeOwned<Tensor> b_self = expand_size(self, {mat1.size(0), mat2.size(1)}, "addmm_out");
   return s_addmm_sparse_dense_cuda(*b_self, mat1, mat2, beta, alpha);
 }
@@ -149,6 +151,7 @@ Tensor& s_addmm_sparse_dense_cuda_(
     const Scalar& alpha,
     c10::optional<ScalarType> dtype_opt
 ) {
+  TORCH_CHECK(!dtype_opt.has_value(), "s_addmm_sparse_dense_cuda_: kwarg dtype is not supported for this backend.");
   return s_addmm_out_sparse_dense_cuda(t, t, sparse, dense, beta, alpha);
 }
 

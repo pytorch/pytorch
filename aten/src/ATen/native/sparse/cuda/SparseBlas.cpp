@@ -97,6 +97,7 @@ Tensor& addmm_out_sparse_csr_cuda(
     c10::optional<ScalarType> dtype_opt,
     Tensor& result) {
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(mat1.is_sparse_csr());
+  TORCH_CHECK(!dtype_opt.has_value(), "addmm_out_sparse_csr_cuda: kwarg dtype is not supported for this backend.");
 
   // Same checks as in TORCH_META_FUNC(addmm) at
   // aten/src/ATen/native/LinearAlgebra.cpp
