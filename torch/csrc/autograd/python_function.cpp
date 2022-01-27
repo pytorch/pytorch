@@ -676,16 +676,17 @@ PyObject *THPFunction_apply(PyObject *cls, PyObject *inputs)
     std::vector<c10::IValue>(),
     at::sequence_number::peek());
 
+  // Temporary hack to improve functorch UX. We'll find a better solution.
+  const auto& functorch_tls = at::functorch::functorchTLSAccessor();
+  if (functorch_tls) {
+    functorch_tls->checkSupportsAutogradFunction();
+  }
+
   THPObjectPtr backward_cls(PyObject_GetAttrString(cls, "_backward_cls"));
   if (!backward_cls) return nullptr;
   THPObjectPtr ctx_obj(PyObject_CallFunctionObjArgs(backward_cls, nullptr));
   if (!ctx_obj) return nullptr;
   THPFunction* ctx = (THPFunction*)ctx_obj.get();
-
-  const auto& functorch_tls = at::functorch::functorchTLSAccessor();
-  if (functorch_tls) {
-    functorch_tls->checkSupportsAutogradFunction();
-  }
 
   auto cdata = std::shared_ptr<PyNode>(new PyNode(std::move(ctx_obj)), deleteNode);
   ctx->cdata = cdata;
