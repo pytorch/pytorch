@@ -329,7 +329,7 @@ In-place version of :meth:`~Tensor.addcmul`
 
 add_docstr_all('addmm',
                r"""
-addmm(mat1, mat2, *, beta=1, alpha=1) -> Tensor
+addmm(mat1, mat2, *, beta=1, alpha=1, dtype=None) -> Tensor
 
 See :func:`torch.addmm`
 """)

@@ -397,7 +397,7 @@ Example::
 
 add_docstr(torch.addmm,
            r"""
-addmm(input, mat1, mat2, *, beta=1, alpha=1, out=None) -> Tensor
+addmm(input, mat1, mat2, *, beta=1, alpha=1, dtype=None, out=None) -> Tensor
 
 Performs a matrix multiplication of the matrices :attr:`mat1` and :attr:`mat2`.
 The matrix :attr:`input` is added to the final result.
@@ -419,6 +419,10 @@ it will not be propagated.
 For inputs of type `FloatTensor` or `DoubleTensor`, arguments :attr:`beta` and
 :attr:`alpha` must be real numbers, otherwise they should be integers.
 
+Optional keyword argument :attr:`dtype` is only supported when all input matrices
+are half precision on CUDA devices and the argument is set to `dtype=torch.float`.
+This will give an output matrix of float type.
+
 {tf32_note}
 
 Args:
@@ -429,6 +433,7 @@ Args:
 Keyword args:
     beta (Number, optional): multiplier for :attr:`input` (:math:`\beta`)
     alpha (Number, optional): multiplier for :math:`mat1 @ mat2` (:math:`\alpha`)
+    {dtype}
     {out}
 
 Example::
@@ -439,7 +444,7 @@ Example::
     >>> torch.addmm(M, mat1, mat2)
     tensor([[-4.8716,  1.4671, -1.3746],
             [ 0.7573, -3.9555, -2.8681]])
-""".format(**common_args, **tf32_notes))
+""".format(**common_args, **tf32_notes, **factory_data_common_args))
 
 add_docstr(torch.adjoint,
            r"""
