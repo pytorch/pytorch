@@ -81,10 +81,10 @@ class TestVulkanRewritePass(TestCase):
             fuse_clamping_ops: bool = False) -> None:
         scripted_model = torch.jit.script(model)
         # store old source ranges
-        if old_node_kinds:
+        if old_node_kinds or new_node_kinds:
+            self.assertTrue(len(old_node_kinds) == len(new_node_kinds))
             old_source_ranges = len(old_node_kinds) * [None]
             new_source_ranges = len(new_node_kinds) * [None]
-            self.assertTrue(len(old_source_ranges) == len(new_source_ranges) == len(old_node_kinds) == len(new_node_kinds))
             for i in range(len(old_node_kinds)):
                 old_source_ranges[i] = self.get_source_range(scripted_model, old_node_kinds[i])
         # evaluate non-rewritten model
@@ -100,7 +100,7 @@ class TestVulkanRewritePass(TestCase):
         if prepack_removal:
             torch._C._jit_pass_vulkan_fold_prepacking_ops(scripted_model._c)
         # validate source ranges
-        if old_node_kinds:
+        if old_node_kinds or new_node_kinds:
             for i in range(len(old_node_kinds)):
                 new_source_ranges[i] = self.get_source_range(scripted_model, new_node_kinds[i])
             for i in range(len(old_node_kinds)):
