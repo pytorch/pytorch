@@ -813,8 +813,13 @@ class TestQuantizedTensor(TestCase):
                 [numel], scale=scale, zero_point=zero_point,
                 device=device, dtype=dtype)
             per_channel_quantized = torch._empty_per_channel_affine_quantized(
-                [numel], scales=torch.tensor([scale]), zero_points=torch.tensor([zero_point]), axis=0,
-                device=device, dtype=dtype)
+                [numel],
+                scales=torch.tensor([scale] * numel, device=device),
+                zero_points=torch.tensor([zero_point] * numel, device=device),
+                axis=0,
+                device=device,
+                dtype=dtype
+            )
             qtensors = [per_tensor_quantized, per_channel_quantized]
 
             for q in qtensors:
