@@ -734,6 +734,7 @@
 
 - name: index.Tensor(Tensor self, Tensor?[] indices) -> Tensor
   self: index_backward(grad.new_zeros(self.sizes(), self.options()), indices, grad)
+  result: auto_linear
 
   # To avoid perf regression, we have 2 separate derivate formulas for index_add and index_add_
   # See: https://github.com/pytorch/pytorch/pull/65993#discussion_r729912376 for the discussion
