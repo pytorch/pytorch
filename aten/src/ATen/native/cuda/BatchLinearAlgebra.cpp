@@ -2964,7 +2964,7 @@ namespace {
 c10::MaybeOwned<Tensor> maybe_expand_lu(const Tensor& b, const Tensor& lu) {
   if (batchCount(b) != batchCount(lu)) {
     IntArrayRef b_batch_size(b.sizes().data(), b.dim() - 2);
-    std::vector<int64_t> expand_size = b_batch_size.vec();
+    DimVector expand_size(b_batch_size);
     expand_size.insert(expand_size.end(), {lu.size(-2), lu.size(-1)});
     return c10::MaybeOwned<Tensor>::owned(
         cloneBatchedColumnMajor(lu.expand(expand_size)));
@@ -2976,7 +2976,7 @@ c10::MaybeOwned<Tensor> maybe_expand_lu(const Tensor& b, const Tensor& lu) {
 c10::MaybeOwned<Tensor> maybe_expand_pivots(const Tensor& b,const Tensor& pivots) {
   if (batchCount(b) != batchCount(pivots.unsqueeze(-1))) {
     IntArrayRef b_batch_size(b.sizes().data(), b.dim() - 2);
-    std::vector<int64_t> expand_size = b_batch_size.vec();
+    DimVector expand_size(b_batch_size);
     expand_size.insert(expand_size.end(), {pivots.size(-1)});
     return c10::MaybeOwned<Tensor>::owned(
         pivots.expand(expand_size).clone(at::MemoryFormat::Contiguous));
