@@ -370,11 +370,9 @@ def pre_load_state_dict_hook(module, state_dict, prefix, local_metadata, strict,
                 if isinstance(state_dict[key], ShardedTensor):
                     setattr(submodule, attr_name, state_dict[key])
 
-def shard_tensor(
-        tensor: torch.Tensor,
-        sharding_spec: ShardingSpec,
-        src_rank=0,
-        process_group=None):
+def _shard_tensor(
+    tensor: torch.Tensor, sharding_spec: ShardingSpec, src_rank=0, process_group=None
+):
     """
     Given a :class:`torch.Tensor`, it shards that tensor according to the provided
     ``sharding_spec``. ``src_rank`` denotes the source rank which would be
@@ -382,7 +380,7 @@ def shard_tensor(
     across the rest of the ranks.
 
     Args:
-        module (:class:`torch.nn.Module`): Module whose parameter needs to be sharded.
+        tensor (:class:`torch.Tensor`): Tensor needs to be sharded.
         sharding_spec (:class:`torch.distributed._sharding_spec.ShardingSpec`): The specification
             describing how to shard the Tensor.
 
@@ -395,10 +393,10 @@ def shard_tensor(
             the default process group will be used.
 
     Returns:
-        A :class:`ShardedTensor` shared from the given tensor.
+        A :class:`ShardedTensor` sharded from the given tensor.
 
     .. warning::
-        Only :class:`torch.distributed._sharding_spec.ShardingSpec` is
+        Only :class:`torch.distributed._sharding_spec.ChunkShardingSpec` is
         currently supported as the ``sharding_spec``.
     """
     if not isinstance(sharding_spec, ChunkShardingSpec):
@@ -509,13 +507,10 @@ def shard_parameter(
             the default process group will be used.
 
     .. warning::
-        Only :class:`torch.distributed._sharding_spec.ShardingSpec` is
+        Only :class:`torch.distributed._sharding_spec.ChunkShardingSpec` is
         currently supported as the ``sharding_spec``.
     """
     # Perform some validation first.
-    if not isinstance(sharding_spec, ChunkShardingSpec):
-        raise ValueError('Only ChunkShardingspec is supported.')
-
     if not hasattr(module, param_name):
         raise ValueError(f'module: {module} does not have parameter with name: {param_name}')
 
@@ -526,7 +521,7 @@ def shard_parameter(
     if not tensor.is_contiguous():
         raise ValueError(f'param: {param_name} is not a contiguous Tensor')
 
-    st = shard_tensor(tensor, sharding_spec, src_rank, process_group)
+    st = _shard_tensor(tensor, sharding_spec, src_rank, process_group)
 
     # Replace param with ShardedTensor.
 
@@ -596,7 +591,9 @@ def _reshard_output(
         A :class:`torch.nn.Module` object with collection API hooked.
     """
     def hook_func(_module, _input, output):
-        return output.reshard(resharding_spec)
+        if isinstance(output, ShardedTensor):
+            return output.reshard(resharding_spec)
+        return output
     module.register_forward_hook(hook_func)
     return module
 
@@ -613,6 +610,8 @@ def _collect_local_shard(module: torch.nn.Module) -> torch.nn.Module:
     """
 
     def hook_func(_module, _input, output):
-        return output.local_shard()
+        if isinstance(output, ShardedTensor):
+            return output.local_tensor()
+        return output
     module.register_forward_hook(hook_func)
     return module

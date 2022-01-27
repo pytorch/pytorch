@@ -47,6 +47,7 @@ def _swap_ff_with_fxff(model: torch.nn.Module) -> None:
 
 def _fuse_fx(
     graph_module: GraphModule,
+    is_qat: bool,
     fuse_custom_config_dict: Optional[Dict[str, Any]] = None,
     backend_config_dict: Optional[Dict[str, Any]] = None,
 ) -> GraphModule:
@@ -57,7 +58,8 @@ def _fuse_fx(
     """
     _check_is_graph_module(graph_module)
     fuser = Fuser()
-    return fuser.fuse(graph_module, fuse_custom_config_dict, backend_config_dict)
+    return fuser.fuse(
+        graph_module, is_qat, fuse_custom_config_dict, backend_config_dict)
 
 
 class Scope(object):
@@ -175,11 +177,11 @@ class QuantizationTracer(Tracer):
 def _prepare_fx(
     model: torch.nn.Module,
     qconfig_dict: Any,
+    is_qat: bool,
     prepare_custom_config_dict: Optional[Dict[str, Any]] = None,
     equalization_qconfig_dict: Optional[Dict[str, Any]] = None,
     backend_config_dict: Optional[Dict[str, Any]] = None,
     is_standalone_module: bool = False,
-    is_qat: bool = False,
 ) -> ObservedGraphModule:
     r""" Internal helper function for prepare_fx
     Args:
@@ -235,16 +237,20 @@ forward graph of the parent module,
     graph_module = GraphModule(model, tracer.trace(model))
     for attr_name in preserved_attributes:
         setattr(graph_module, attr_name, getattr(model, attr_name))
-    graph_module = _fuse_fx(graph_module, prepare_custom_config_dict, backend_config_dict)
+    graph_module = _fuse_fx(
+        graph_module,
+        is_qat,
+        prepare_custom_config_dict,
+        backend_config_dict)
     prepared = prepare(
         graph_module,
         qconfig_dict,
+        is_qat,
         tracer.node_name_to_scope,
         prepare_custom_config_dict=prepare_custom_config_dict,
         equalization_qconfig_dict=equalization_qconfig_dict,
         backend_config_dict=backend_config_dict,
         is_standalone_module=is_standalone_module,
-        is_qat=is_qat,
     )
 
     for attr_name in preserved_attributes:
@@ -255,9 +261,9 @@ forward graph of the parent module,
 def _prepare_standalone_module_fx(
     model: torch.nn.Module,
     qconfig_dict: Any,
+    is_qat: bool,
     prepare_custom_config_dict: Optional[Dict[str, Any]] = None,
     backend_config_dict: Optional[Dict[str, Any]] = None,
-    is_qat: bool = False,
 ) -> GraphModule:
     r""" [Internal use only] Prepare a standalone module, so that it can be used when quantizing the
     parent module.
@@ -284,10 +290,10 @@ def _prepare_standalone_module_fx(
     return _prepare_fx(
         model,
         qconfig_dict,
+        is_qat,
         prepare_custom_config_dict,
         backend_config_dict=backend_config_dict,
         is_standalone_module=True,
-        is_qat=is_qat,
     )
 
 
@@ -332,7 +338,7 @@ def fuse_fx(
         )
     for attr_name in preserved_attributes:
         setattr(graph_module, attr_name, getattr(model, attr_name))
-    return _fuse_fx(graph_module, fuse_custom_config_dict)
+    return _fuse_fx(graph_module, False, fuse_custom_config_dict)
 
 
 def prepare_fx(
@@ -509,10 +515,10 @@ def prepare_fx(
     return _prepare_fx(
         model,
         qconfig_dict,
+        False,  # is_qat
         prepare_custom_config_dict,
         equalization_qconfig_dict,
         backend_config_dict,
-        is_qat=False,
     )
 
 
@@ -558,9 +564,9 @@ def prepare_qat_fx(
     return _prepare_fx(
         model,
         qconfig_dict,
+        True,  # is_qat
         prepare_custom_config_dict,
         backend_config_dict=backend_config_dict,
-        is_qat=True,
     )
 
 
