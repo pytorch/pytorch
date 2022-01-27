@@ -20,10 +20,10 @@ Tensor& max_unpooling2d_forward_out_cpu(
       "There should be exactly two elements (height, width) in output_size, but got ", output_size.size(), " elements.");
   TORCH_CHECK(
       (self_.ndimension() == 3 || self_.ndimension() == 4),
-      "Input to max_unpooling2d should be a 3d or 4d Tensor, but got tensor with dimension: ", self_.ndimension());
+      "Input to max_unpooling2d should be a 3d or 4d Tensor, but got a tensor with ", self_.ndimension(), " dimensions.");
   TORCH_CHECK(
       self_.sizes() == indices_.sizes(),
-      "Expected shape of indices to be: ", self_.sizes(), " but got: ", indices_.sizes());
+      "Expected shape of indices to be same as that of the input tensor (", self_.sizes(), ") but got indices tensor with shape: ", indices_.sizes());
 
   for (int64_t i = 1; i < self_.ndimension(); ++i) {
     TORCH_CHECK(self_.size(i) > 0, "max_unpooling2d_forward_out_cpu(): ",
@@ -77,7 +77,7 @@ static void max_unpooling3d_shape_check(
       "elements in indices should be type int64");
   TORCH_CHECK(
       (input.ndimension() == 4 || input.ndimension() == 5),
-      "Input to max_unpooling3d should be a 4d or 5d Tensor, but got a tensor with dim ", input.ndimension());
+      "Input to max_unpooling3d should be a 4d or 5d Tensor, but got a tensor with ", input.ndimension(), " dimensions.");
   TORCH_CHECK(
       output_size.size() == 3,
       "There should be exactly three elements (depth, height, width) in output_size, but got ", output_size.size(), " elements.");
@@ -89,7 +89,7 @@ static void max_unpooling3d_shape_check(
       "There should be exactly three elements (depth, height, width) in padding, but got: ", padding.size(), " elements.");
   TORCH_CHECK(
       input.sizes() == indices.sizes(),
-      "Expected shape of indices to be: ", input.sizes(), " but got: ", indices.sizes());
+      "Expected shape of indices to be same as that of the input tensor (", input.sizes(), ") but got indices tensor with shape: ", indices.sizes());
 
   for (int64_t i = 1; i < input.ndimension(); ++i) {
     TORCH_CHECK(input.size(i) > 0, fn_name,
@@ -198,7 +198,7 @@ Tensor& max_unpooling2d_backward_out_cpu(const Tensor& grad_output_,
       indices_.scalar_type() == at::ScalarType::Long,
       "elements in indices should be type int64 but got type: ", indices_.scalar_type());
   TORCH_CHECK(
-      "Expected shape of indices to be: ", self.sizes(), " but got: ", indices_.sizes());
+      "Expected shape of indices to be same as that of the input tensor (", self.sizes(), ") but got indices tensor with shape: ", indices_.sizes());
   TORCH_CHECK(output_size.size() == 2, "Output size must be 2 but got: ", output_size.size());
 
   auto memory_format = self.suggest_memory_format();
