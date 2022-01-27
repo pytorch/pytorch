@@ -24,7 +24,6 @@ API Reference
 -------------
 
 .. automodule:: torch.monitor
-    :members:
 
 .. autoclass:: torch.monitor.Aggregation
     :members:
@@ -55,3 +54,7 @@ API Reference
 .. autofunction:: torch.monitor.register_event_handler
 
 .. autofunction:: torch.monitor.unregister_event_handler
+
+.. autoclass:: torch.monitor.TensorboardEventHandler
+    :members:
+    :special-members: __init__
