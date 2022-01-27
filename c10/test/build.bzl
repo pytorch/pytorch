@@ -2,13 +2,14 @@ def define_targets(rules):
     rules.test_suite(
         name = "tests",
         tests = [
-            ":core_and_util_tests",
+            ":core_and_typeid_tests",
+            ":util_base_tests",
         ],
         visibility = ["//:__pkg__"],
     )
 
     rules.cc_test(
-        name = "core_and_util_tests",
+        name = "core_and_typeid_tests",
         size = "small",
         srcs = [
             "core/CompileTimeFunctionPointer_test.cpp",
@@ -19,6 +20,20 @@ def define_targets(rules):
             "core/impl/InlineDeviceGuard_test.cpp",
             "core/impl/InlineStreamGuard_test.cpp",
             "core/impl/SizesAndStrides_test.cpp",
+            "util/typeid_test.cpp",
+        ],
+        copts = ["-Wno-deprecated-declarations"],
+        deps = [
+            "@com_google_googletest//:gtest_main",
+            "//c10/core:base",
+            "//c10/util:base",
+            "//c10/util:typeid",
+        ],
+    )
+
+    rules.cc_test(
+        name = "util_base_tests",
+        srcs = [
             "util/Array_test.cpp",
             "util/Bitset_test.cpp",
             "util/C++17_test.cpp",
@@ -46,7 +61,6 @@ def define_targets(rules):
             "util/registry_test.cpp",
             "util/string_view_test.cpp",
             "util/tempfile_test.cpp",
-            "util/typeid_test.cpp",
         ],
         copts = ["-Wno-deprecated-declarations"],
         deps = [
@@ -54,10 +68,8 @@ def define_targets(rules):
             ":complex_math_test_common",
             ":complex_test_common",
             "@com_google_googletest//:gtest_main",
-            "//c10/core:base",
             "//c10/macros",
             "//c10/util:base",
-            "//c10/util:typeid",
         ],
     )
 
