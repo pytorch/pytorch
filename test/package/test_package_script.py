@@ -611,7 +611,6 @@ class TestPackageScript(PackageTestCase):
         with PackageExporter(buffer_0) as e:
             e.intern("**")
             e.save_pickle("res", "mod1.pkl", mod1)
-            print(mod1.tensor.storage()._cdata)
 
         buffer_0.seek(0)
         importer_0 = PackageImporter(buffer_0)
@@ -621,12 +620,10 @@ class TestPackageScript(PackageTestCase):
         with PackageExporter(buffer_1, importer=importer_0) as e:
             e.intern("**")
             e.save_pickle("res", "mod1.pkl", loaded_mod_0)
-            print(loaded_mod_0.tensor.storage()._cdata)
 
         buffer_1.seek(0)
         importer = PackageImporter(buffer_1)
         loaded_mod_1 = importer.load_pickle("res", "mod1.pkl")
-
         self.assertEqual(
             loaded_mod_1.tensor.storage()._cdata,
             loaded_mod_1.sub_mod_0.tensor.storage()._cdata,

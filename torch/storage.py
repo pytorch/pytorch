@@ -66,9 +66,11 @@ class _StorageBase(object):
 
     def __reduce_package__(self, exporter):
         if 'script_module_serializer' not in exporter.external_registry:
+            print('adding nnew serializer')
             exporter.external_registry['script_module_serializer'] = torch._C.ScriptModuleSerializer(exporter.zip_file)
         if 'write_torchscript_files' not in exporter.closing_functions:
             exporter.closing_functions['write_torchscript_files'] = lambda exporter: exporter.external_registry['script_module_serializer'].write_files()
+        print('base_storage', self._cdata)
         storage_context = exporter.external_registry['script_module_serializer'].storage_context()
 
         storage_type = normalize_storage_type(type(self))
@@ -583,7 +585,6 @@ class TypedStorage:
         if 'write_torchscript_files' not in exporter.closing_functions:
             exporter.closing_functions['write_torchscript_files'] = lambda exporter: exporter.external_registry['script_module_serializer'].write_files()
         storage_context = exporter.external_registry['script_module_serializer'].storage_context()
-
         storage = self._storage
         storage_type_str = self.pickle_storage_type()
         storage_type = getattr(torch, storage_type_str)
@@ -606,6 +607,7 @@ class TypedStorage:
             exporter.zip_file.write_record(
                 f".data/{storage_id}.storage", storage.data_ptr(), num_bytes
             )
+
         return unpackage_storage, (storage_type, storage_id, location, size)
 
     def data_ptr(self):
