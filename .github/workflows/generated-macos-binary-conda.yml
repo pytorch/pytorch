@@ -53,7 +53,7 @@ jobs:
         run: |
           echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
           echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
-          echo "MAC_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
+          echo "MAC_PACKAGE_WORK_DIR=${RUNNER_TEMP}" >> "${GITHUB_ENV}"
       - name: Clone pytorch/pytorch
         uses: actions/checkout@v2
         with:
