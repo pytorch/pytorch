@@ -114,7 +114,7 @@ void lu_solve_batched_cublas(const Tensor& b, const Tensor& lu, const Tensor& pi
 namespace {
 
 template <typename scalar_t>
-void apply_ldl_factor(
+void apply_ldl_factor_cusolver(
     const Tensor& A,
     const Tensor& pivots,
     const Tensor& info,
@@ -163,7 +163,7 @@ void apply_ldl_factor(
 }
 
 template <typename scalar_t>
-void apply_ldl_solve(
+void apply_ldl_solve_cusolver(
     const Tensor& A,
     const Tensor& pivots,
     const Tensor& B,
@@ -268,7 +268,7 @@ void ldl_factor_cusolver(
   }
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(
       LD.scalar_type(), "ldl_factor_looped_cusolver", [&] {
-        apply_ldl_factor<scalar_t>(LD, pivots, info, upper);
+        apply_ldl_factor_cusolver<scalar_t>(LD, pivots, info, upper);
       });
 }
 
@@ -279,7 +279,7 @@ void ldl_solve_cusolver(
     bool upper) {
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(
       LD.scalar_type(), "ldl_solve_looped_cusolver", [&] {
-        apply_ldl_solve<scalar_t>(LD, pivots, B, upper);
+        apply_ldl_solve_cusolver<scalar_t>(LD, pivots, B, upper);
       });
 }
 

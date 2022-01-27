@@ -1326,7 +1326,7 @@ magma_trans_t to_magma(TransposeType trans) {
 namespace {
 
 template <typename scalar_t>
-void apply_ldl_factor(
+void apply_ldl_factor_magma(
     const Tensor& A,
     const Tensor& pivots,
     const Tensor& info,
@@ -1383,7 +1383,7 @@ void ldl_factor_magma(
   }
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(
       LD.scalar_type(), "ldl_factor_magma", [&] {
-        apply_ldl_factor<scalar_t>(LD, pivots, info, upper);
+        apply_ldl_factor_magma<scalar_t>(LD, pivots, info, upper);
       });
 }
 
