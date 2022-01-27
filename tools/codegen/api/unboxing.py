@@ -1,7 +1,7 @@
 from typing import List, Tuple
 
 from tools.codegen.api.cpp import argumenttype_type
-from tools.codegen.api.types import CType, Expr
+from tools.codegen.api.types import Expr
 from tools.codegen.model import (
     Argument,
     Type,
