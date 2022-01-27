@@ -2268,11 +2268,11 @@ class TestTEFuser(JitTestCase):
                     torch._C._jit_pass_dce(g)
                     FileCheck().check_count("TensorExprDynamicGuard", len(gen_tensor), exactly=True).run(g)
 
-# class TestTEFuserStatic(TestTEFuser):
-#     dynamic_shapes = False
+class TestTEFuserStatic(TestTEFuser):
+    dynamic_shapes = False
 
-class TestTEFuserDynamic(TestTEFuser):
-    dynamic_shapes = True
+# class TestTEFuserDynamic(TestTEFuser):
+#     dynamic_shapes = True
 
 # del TestTEFuser
 
