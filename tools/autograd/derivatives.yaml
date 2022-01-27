@@ -631,10 +631,12 @@
 
 - name: fmod.Scalar(Tensor self, Scalar other) -> Tensor
   self: grad
+  result: auto_element_wise
 
 - name: fmod.Tensor(Tensor self, Tensor other) -> Tensor
   self: grad
-  other: 'not_implemented("fmod: other")'
+  other: -grad * self.div(other, /*rounding_mode=*/"trunc")
+  result: self_t - other_t * self_p.div(other_p, /*rounding_mode=*/"trunc")
 
 - name: frac(Tensor self) -> Tensor
   self: grad
@@ -732,6 +734,7 @@
 
 - name: index.Tensor(Tensor self, Tensor?[] indices) -> Tensor
   self: index_backward(grad.new_zeros(self.sizes(), self.options()), indices, grad)
+  result: auto_linear
 
   # To avoid perf regression, we have 2 separate derivate formulas for index_add and index_add_
   # See: https://github.com/pytorch/pytorch/pull/65993#discussion_r729912376 for the discussion
@@ -1252,8 +1255,8 @@
 
 - name: remainder.Tensor(Tensor self, Tensor other) -> Tensor
   self: grad
-  # Use addition with zeros to get the proper broadcasting behavior
-  result: self_t.expand_as(result)
+  other: -grad * self.div(other, /*rounding_mode=*/"floor")
+  result: self_t - other_t * self_p.div(other_p, /*rounding_mode=*/"floor")
 
 - name: renorm(Tensor self, Scalar p, int dim, Scalar maxnorm) -> Tensor
   self: renorm_backward(grad, self, p, dim, maxnorm)
