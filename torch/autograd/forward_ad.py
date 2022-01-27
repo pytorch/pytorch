@@ -41,9 +41,10 @@ def exit_dual_level(*, level=None):
     _current_level = level - 1
 
 def make_dual(tensor, tangent, *, level=None):
-    r"""Associates :attr:`tensor` with a forward AD gradient, :attr:`tangent`, to create
-    a "dual tensor", which is used to compute forward AD gradients. The result is a new
-    tensor aliased with :attr:`tensor`. :attr:`tensor` is used as-is.
+    r"""Creates a "dual tensor", which is used to compute forward AD gradients.
+    ``make_dual`` associates :attr:`tensor` with :attr:`tangent` (a forward AD gradient),
+    returning a new tensor aliased with :attr:`tensor`. :attr:`tangent` is embedded as-is into the
+    dual tensor.
 
     This function is backward differentiable.
 
@@ -73,7 +74,7 @@ def make_dual(tensor, tangent, *, level=None):
 UnpackedDualTensor = namedtuple('UnpackedDualTensor', ['primal', 'tangent'])
 
 def unpack_dual(tensor, *, level=None):
-    r"""Unpacks a "dual tensor" to get both its Tensor value and its forward AD gradient, i.e. ``tangent``.
+    r"""Unpacks a "dual tensor" to get both its Tensor value and its forward AD gradient.
     The result is a namedtuple ``(primal, tangent)`` where ``primal`` is a view of
     :attr:`tensor`'s primal and ``tangent`` is :attr:`tensor`'s tangent as-is.
     Neither of these tensors can be dual tensor of level :attr:`level`.
