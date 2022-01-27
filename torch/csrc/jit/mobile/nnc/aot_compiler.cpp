@@ -42,7 +42,9 @@ std::vector<int64_t> getConstSizes(const BufPtr b) {
   return r;
 }
 
-std::vector<mobile::nnc::InputSpec> toInputSpecs(const std::shared_ptr<Graph>& g) {
+// Construct input-specs vector from the inputs of the original graph
+std::vector<mobile::nnc::InputSpec> toInputSpecs(
+    const std::shared_ptr<Graph>& g) {
   std::vector<mobile::nnc::InputSpec> specs;
   for (auto v : g->inputs()) {
     auto t = v->type();
@@ -59,6 +61,26 @@ std::vector<mobile::nnc::InputSpec> toInputSpecs(const std::shared_ptr<Graph>& g
   }
   return specs;
 }
+
+// Locate symbolic shapes in shapes of the inputs.
+//
+// For each symbolic shape we're trying to find the input from which it can be
+// extracted and the dimension index in that input.
+// For instance, if we have
+// graph(%x : Float(SS(-1), 10), %y : Long(20, SS(-2), %ss_1 : int, %ss_2 : int)
+// then we would need to find locations of two symbolic shapes: SS(-1) and
+// SS(-2). The first one corresponds to the first dimension of the first input,
+// the second one corresponds to the second dimension of the second input,
+// so we will return {{0, 0}, {1, 1}}.
+//
+// If a symbolic shape cannot be found among dimensions of inputs, we
+// will throw an error (this situation is possible when symbolic shape
+// corresponds to the size of an intermediate - we don't support this
+// case here yet).
+//
+// If a symbolic shape can be found in several different positions, we
+// return the first one we find (TODO: maybe we should return all and
+// verify that they all match at runtime).
 std::vector<SymbolicShapePosition> findSymbolicShapePositions(
     std::shared_ptr<tensorexpr::TensorExprKernel> kernel) {
   std::vector<SymbolicShapePosition> res;
@@ -86,7 +108,8 @@ std::vector<SymbolicShapePosition> findSymbolicShapePositions(
         break;
       }
     }
-    TORCH_CHECK(found, "Could not locate a symbolic shape among input tensor shapes");
+    TORCH_CHECK(
+        found, "Could not locate a symbolic shape among input tensor shapes");
   }
   return res;
 }
@@ -219,7 +242,8 @@ std::vector<std::string> split(
   return pieces;
 }
 
-std::vector<std::vector<int64_t>> parseInputShapes(const std::string& input_dims_s) {
+std::vector<std::vector<int64_t>> parseInputShapes(
+    const std::string& input_dims_s) {
   std::vector<std::string> input_dims_list = split(';', input_dims_s);
   std::vector<std::vector<int64_t>> inputs;
   for (const auto& input_dims_item : input_dims_list) {
@@ -234,7 +258,8 @@ std::vector<std::vector<int64_t>> parseInputShapes(const std::string& input_dims
   return inputs;
 }
 
-std::vector<at::ScalarType> parseInputTypes(const std::string& input_types_str) {
+std::vector<at::ScalarType> parseInputTypes(
+    const std::string& input_types_str) {
   std::vector<std::string> inputTypes = split(';', input_types_str);
   std::vector<at::ScalarType> scalarTypes;
   for (const auto& inputType : inputTypes) {

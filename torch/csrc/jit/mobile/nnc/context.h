@@ -91,6 +91,7 @@ struct TORCH_API MemoryPlan {
   std::vector<int64_t> buffer_sizes_;
 };
 
+// Location of a symbolic shape among dimensions of the inputs
 struct TORCH_API SymbolicShapePosition {
   SymbolicShapePosition() = default;
 
