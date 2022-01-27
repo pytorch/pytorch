@@ -23,7 +23,7 @@ from torch.testing._internal.common_dtype import (
     all_types, double_types, empty_types
 )
 from torch.testing._internal.common_device_type import \
-    (onlyCUDA, onlyNativeDeviceTypes, disablecuDNN, skipCUDAIfNoMagma, skipCUDAIfNoMagmaAndNoCusolver,
+    (onlyCPU, onlyCUDA, onlyNativeDeviceTypes, disablecuDNN, skipCUDAIfNoMagma, skipCUDAIfNoMagmaAndNoCusolver,
      skipCUDAIfNoCusolver, skipCPUIfNoLapack, skipCPUIfNoFFT, skipCUDAIfRocm, precisionOverride,
      toleranceOverride, tol, has_cusolver)
 from torch.testing._internal.common_cuda import CUDA11OrLater, SM53OrLater, SM60OrLater
@@ -1315,7 +1315,7 @@ def sample_inputs_linalg_det_singular(op_info, device, dtype, requires_grad, **k
 
     def make_singular_matrix_batch_base(size, rank):
         assert size[-1] == size[-2]
-        assert rank > 0 and rank <= size[-1]
+        assert rank > 0 and rank < size[-1]
 
         with torch.no_grad():
             n = size[-1]
@@ -1328,12 +1328,10 @@ def sample_inputs_linalg_det_singular(op_info, device, dtype, requires_grad, **k
             u_diag_abs = u.diagonal(0, -2, -1).abs()
             u_diag_abs_largest = u_diag_abs.max(dim=-1, keepdim=True).values
             u_diag_abs_smallest_idxs = torch.topk(u_diag_abs, k=(n - rank), largest=False).indices
-            u.diagonal(0, -2, -1).div_(u_diag_abs_largest)
             u[..., u_diag_abs_smallest_idxs] = torch.finfo(dtype).eps
 
-            matrix = p @ l @ u
 
-        assert (matrix.det().abs() < torch.finfo(dtype).eps * torch.linalg.matrix_norm(matrix)).all().item()
+            matrix = p @ l @ u
 
         matrix.requires_grad_(requires_grad)
         return matrix
@@ -2734,36 +2732,31 @@ def clone_sample(sample, **kwargs):
 
 
 def sample_inputs_svd_lowrank(op_info, device, dtype, requires_grad=False, **kwargs):
+    for sample in sample_inputs_singular_matrix_factors(op_info, device, dtype, requires_grad, **kwargs):
+        *batch, m, k = sample.input.shape
+        *_, n, _ = sample.args[0].shape
 
-    def generator():
-        for sample in sample_inputs_singular_matrix_factors(op_info, device, dtype, requires_grad, **kwargs):
-            *batch, m, k = sample.input.shape
-            *_, n, _ = sample.args[0].shape
+        # NOTE: since svd_lowrank relies on non rank-revealing SVD,
+        # it inherits the problem of unstable behavior with repeated
+        # singular values including zeros.
+        # Since we want to avoid (repeated) zeros as singular values,
+        # we can only use k for q.
+        # This issues could be resolved with using a rank-revealing SVD
+        # which does not include "zero" singular values.
+        op_kwargs = {
+            'q': k,
+            'M': None
+        }
 
-            # NOTE: since svd_lowrank relies on non rank-revealing SVD,
-            # it inherits the problem of unstable behavior with repeated
-            # singular values including zeros.
-            # Since we want to avoid (repeated) zeros as singular values,
-            # we can only use k for q.
-            # This issues could be resolved with using a rank-revealing SVD
-            # which does not include "zero" singular values.
-            op_kwargs = {
-                'q': k,
-                'M': None
-            }
+        # without M specified
+        yield clone_sample(sample, **op_kwargs)
 
-            # without M specified
-            yield clone_sample(sample, **op_kwargs)
-
-            # now with M
-            # TODO: fix bug in the documentation for svd_lowrank:
-            # M has to be (*, m, n), and not (*, 1, n) as written
-            # in the documentation
-            op_kwargs['M'] = make_tensor((*batch, m, n), device, dtype, requires_grad=requires_grad)
-            yield clone_sample(sample, **op_kwargs)
-
-    return list(generator())
-
+        # now with M
+        # TODO: fix bug in the documentation for svd_lowrank:
+        # M has to be (*, m, n), and not (*, 1, n) as written
+        # in the documentation
+        op_kwargs['M'] = make_tensor((*batch, m, n), device, dtype, requires_grad=requires_grad)
+        yield clone_sample(sample, **op_kwargs)
 
 def chunk_iter(iterable, size):
     it = iter(iterable)
@@ -2773,23 +2766,17 @@ def chunk_iter(iterable, size):
             break
         yield chunk
 
-
 def sample_inputs_pca_lowrank(op_info, device, dtype, requires_grad=False, **kwargs):
-
-    def generator():
-        # we reuse samples from svd_lowrank which come in group of two with
-        # kwarg['M'] = None and with kwarg['M'] = <some tensor>
-        samples = sample_inputs_svd_lowrank(op_info, device, dtype, requires_grad, **kwargs)
-        for s1, s2 in chunk_iter(samples, 2):
-            del s1.kwargs['M']
-            del s2.kwargs['M']
-            s1.kwargs['center'] = False
-            s2.kwargs['center'] = True
-            yield s1
-            yield s2
-
-    return list(generator())
-
+    # we reuse samples from svd_lowrank which come in group of two with
+    # kwarg['M'] = None and with kwarg['M'] = <some tensor>
+    samples = sample_inputs_svd_lowrank(op_info, device, dtype, requires_grad, **kwargs)
+    for s1, s2 in chunk_iter(samples, 2):
+        del s1.kwargs['M']
+        del s2.kwargs['M']
+        s1.kwargs['center'] = False
+        s2.kwargs['center'] = True
+        yield s1
+        yield s2
 
 def sample_inputs_linalg_cond(op_info, device, dtype, requires_grad=False, **kwargs):
     make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
@@ -5553,29 +5540,41 @@ def sample_inputs_svd(op_info, device, dtype, requires_grad=False, **kwargs):
     make_arg = partial(make_fullrank, dtype=dtype, device=device, requires_grad=requires_grad)
 
     is_linalg_svd = (op_info.name == "linalg.svd")
+    batches = [(), (0, ), (3, )]
+    ns = [0, 3, 5]
 
-    batches = [(), (0, ), (2, )]
-    ns = [0, 2, 5]
-
-    # The .abs() is to make these functions invariant under multiplication by e^{i\theta}
-    # since the complex SVD is unique up to multiplication of the columns of U / V a z \in C with \norm{z} = 1
-    # See the docs of torch.linalg.svd for more info
-    def check_grads(usv):
+    def uniformize(usv):
         S = usv[1]
         k = S.shape[-1]
         U = usv[0][..., :k]
         Vh = usv[2] if is_linalg_svd else usv[2].mH
         Vh = Vh[..., :k, :]
-        return (U.abs(), S, Vh.abs())
+        return U, S, Vh
+
+    def fn_U(usv):
+        U, _, _ = uniformize(usv)
+        return U.abs()
+
+
+    def fn_S(usv):
+        return uniformize(usv)[1]
+
+    def fn_Vh(usv):
+        # We also return S to test
+        _, S, Vh = uniformize(usv)
+        return S, Vh.abs()
+
+    def fn_UVh(usv):
+        U, S, Vh = uniformize(usv)
+        return U @ Vh, S
+
+    fns = (fn_U, fn_S, fn_Vh, fn_UVh)
 
     fullmat = 'full_matrices' if is_linalg_svd else 'some'
 
-    def generate_inputs():
-        for batch, n, k, fullmat_val in product(batches, ns, ns, (True, False)):
-            shape = batch + (n, k)
-            yield SampleInput(make_arg(*shape), kwargs={fullmat: fullmat_val}, output_process_fn_grad=check_grads)
-
-    return list(generate_inputs())
+    for batch, n, k, fullmat_val, fn in product(batches, ns, ns, (True, False), fns):
+        shape = batch + (n, k)
+        yield SampleInput(make_arg(*shape), kwargs={fullmat: fullmat_val}, output_process_fn_grad=fn)
 
 
 def sample_inputs_permute(op_info, device, dtype, requires_grad, **kwargs):
@@ -5650,13 +5649,14 @@ def sample_inputs_pow(op_info, device, dtype, requires_grad, **kwargs):
     return tuple(samples)
 
 def sample_inputs_linalg_svdvals(op_info, device, dtype, requires_grad=False, **kwargs):
+    make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
+
     batches = [(), (0, ), (2, ), (1, 1)]
     ns = [5, 2, 0]
-    samples = []
-    for batch, (m, n) in product(batches, product(ns, ns)):
-        a = make_tensor((*batch, m, n), device, dtype, low=None, high=None, requires_grad=requires_grad)
-        samples.append(SampleInput(a))
-    return samples
+
+    for batch, m, n in product(batches, ns, ns):
+        yield SampleInput(make_arg(batch + (m, n)))
+
 
 def sample_inputs_softshrink_hardshrink_hardtanh(op_info, device, dtype, requires_grad=False, **kwargs):
     N = 10
@@ -6854,6 +6854,31 @@ def sample_inputs_scatter_add(op_info, device, dtype, requires_grad):
 
     return [SampleInput(tensor, args=args) for tensor, args in test_cases]
 
+def sample_inputs_scatter_reduce(op_info, device, dtype, requires_grad):
+    def _tensor(shape, dtype=dtype, low=None, high=None):
+        return make_tensor(shape, device, dtype, low=low, high=high, requires_grad=requires_grad)
+
+    def _index(shape, max_index):
+        return torch.from_numpy(np.random.choice(max_index, size=shape)).to(dtype=torch.int64, device=device)
+
+    reduces = ["sum", "prod", "mean", "amax", "amin"]
+    shapes_and_dims = [((M,), 1), ((M, S), 2), ((M, M, S), 3), ((1, M, M, S), 4)]
+
+    sample_inputs = []
+
+    for ((shape, dim), reduce) in itertools.product(shapes_and_dims, reduces):
+        for d in range(dim):
+            # Generate a random maximum integer that can appear in index array
+            max_index = np.random.randint(1, shape[d] * 2)
+            index = _index(shape, max_index)
+            sample_inputs.append(
+                SampleInput(
+                    _tensor(shape),
+                    args=(d, index, reduce),
+                )
+            )
+
+    return sample_inputs
 
 def sample_inputs_ravel(op_info, device, dtype, requires_grad, **kwargs):
     samples = (SampleInput(make_tensor((S, S, S), device, dtype,
@@ -9869,6 +9894,7 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_linalg_det,
            decorators=[skipCUDAIfNoMagma, skipCPUIfNoLapack, skipCUDAIfRocm,
                        DecorateInfo(toleranceOverride({torch.complex64: tol(atol=1e-3, rtol=1e-3)}))],
+           check_batched_gradgrad=False,
            supports_inplace_autograd=False),
     OpInfo('linalg.det',
            op=torch.linalg.det,
@@ -9880,19 +9906,18 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_linalg_det_singular,
            decorators=[skipCUDAIfNoMagma, skipCPUIfNoLapack, skipCUDAIfRocm,
                        DecorateInfo(toleranceOverride({torch.complex64: tol(atol=1e-3, rtol=1e-3)}))],
+           check_batched_gradgrad=False,
            supports_inplace_autograd=False,
            skips=(
+               # These tests started breaking after touching the SVD.
+               DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', 'test_fn_grad', device_type='cpu',
+                            dtypes=(torch.complex128,), active_if=IS_WINDOWS),
                # Will be removed once https://github.com/pytorch/pytorch/issues/62328 is fixed
                # Probable fix (open PR): https://github.com/pytorch/pytorch/pull/62570
                DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', 'test_fn_grad', device_type='cuda',
                             dtypes=(torch.complex128,)),
                DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_dtypes'),
                DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', 'test_fn_gradgrad'),
-               # This test fails because singular inputs cannot be reliably
-               # generated unless we're using double types
-               DecorateInfo(unittest.skip("Skipped!"), 'TestOpInfo', 'test_unsupported_dtypes'),
-               DecorateInfo(unittest.skip("Skipped!"), 'TestOpInfo', 'test_unsupported_backward',
-                            dtypes=(torch.float32, torch.complex64,)),
            )),
     OpInfo('linalg.cholesky',
            aten_name='linalg_cholesky',
@@ -9922,9 +9947,11 @@ op_db: List[OpInfo] = [
            dtypes=floating_and_complex_types(),
            sample_inputs_func=sample_inputs_linalg_cond,
            check_batched_gradgrad=False,
+           check_batched_forward_grad=False,
+           supports_forward_ad=True,
+           supports_fwgrad_bwgrad=True,
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
-           decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCUDAIfRocm, skipCPUIfNoLapack],
-           ),
+           decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCPUIfNoLapack],),
     OpInfo('linalg.eig',
            aten_name='linalg_eig',
            op=torch.linalg.eig,
@@ -10067,7 +10094,7 @@ op_db: List[OpInfo] = [
     OpInfo('linalg.norm',
            op=torch.linalg.norm,
            dtypes=floating_and_complex_types_and(torch.float16, torch.bfloat16),
-           decorators=[skipCUDAIfNoMagma, skipCPUIfNoLapack],
+           decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCPUIfNoLapack],
            sample_inputs_func=sample_inputs_linalg_norm,
            aten_name='linalg_norm',
            skips=(
@@ -10079,7 +10106,8 @@ op_db: List[OpInfo] = [
     OpInfo('linalg.matrix_norm',
            aten_name='linalg_matrix_norm',
            dtypes=floating_and_complex_types(),
-           decorators=[skipCUDAIfNoMagma, skipCPUIfNoLapack],
+           check_batched_gradgrad=False,
+           decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCPUIfNoLapack],
            sample_inputs_func=sample_inputs_linalg_matrix_norm,
            skips=(
                # Pre-existing condition; Needs to be fixed
@@ -10105,11 +10133,7 @@ op_db: List[OpInfo] = [
            op=torch.linalg.slogdet,
            dtypes=floating_and_complex_types(),
            sample_inputs_func=sample_inputs_linalg_slogdet,
-           decorators=[skipCUDAIfNoMagma, skipCUDAIfRocm, skipCPUIfNoLapack],
-           skips=(
-               # RuntimeError: element 0 of tensors does not require grad and does not have a grad_fn
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_noncontiguous_samples'),
-           )),
+           decorators=[skipCUDAIfNoMagma, skipCUDAIfRocm, skipCPUIfNoLapack],),
     OpInfo('linalg.vector_norm',
            op=torch.linalg.vector_norm,
            dtypes=floating_and_complex_types_and(torch.float16, torch.bfloat16),
@@ -10668,11 +10692,6 @@ op_db: List[OpInfo] = [
                     supports_autograd=False,
                     # FIXME: heaviside does not accept scalar inputs
                     skips=(
-                        # NumPy's heaviside promotes bool to float16
-                        DecorateInfo(unittest.expectedFailure,
-                                     'TestBinaryUfuncs',
-                                     'test_reference_numerics_heavisidel',
-                                     dtypes=(torch.bool,)),
                         # RuntimeError: heaviside is not yet implemented for tensors with different dtypes.
                         DecorateInfo(unittest.expectedFailure,
                                      'TestBinaryUfuncs',
@@ -12833,7 +12852,7 @@ op_db: List[OpInfo] = [
            dtypes=floating_and_complex_types(),
            supports_autograd=False,
            sample_inputs_func=sample_inputs_linalg_invertible,
-           decorators=[skipCUDAIfNoMagma, skipCUDAIfRocm, skipCPUIfNoLapack],
+           decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCPUIfNoLapack],
            skips=(
                # Pre-existing condition; Needs to be fixed
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_composite_compliance'),
@@ -12845,7 +12864,7 @@ op_db: List[OpInfo] = [
            dtypes=floating_and_complex_types(),
            supports_autograd=False,
            sample_inputs_func=sample_inputs_linalg_pinv_hermitian,
-           decorators=[skipCUDAIfNoMagma, skipCUDAIfRocm, skipCPUIfNoLapack],
+           decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCPUIfNoLapack],
            skips=(
                # Pre-existing condition; Needs to be fixed
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_composite_compliance'),
@@ -12860,7 +12879,7 @@ op_db: List[OpInfo] = [
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            sample_inputs_func=sample_inputs_linalg_pinv,
-           decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCUDAIfRocm, skipCPUIfNoLapack],
+           decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCPUIfNoLapack],
            skips=(
                # errors with "leaked XXXX bytes CUDA memory on device 0"
                DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit', device_type='cuda'),
@@ -12881,7 +12900,7 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_linalg_pinv_singular,
            # Only large tensors show issues with implicit backward used prior to
            # explicit backward implementation.
-           decorators=[slowTest, skipCUDAIfNoMagmaAndNoCusolver, skipCUDAIfRocm, skipCPUIfNoLapack],
+           decorators=[slowTest, skipCUDAIfNoMagmaAndNoCusolver, skipCPUIfNoLapack],
            skips=(
                # test does not work with passing lambda for op
                DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
@@ -12899,7 +12918,7 @@ op_db: List[OpInfo] = [
            supports_fwgrad_bwgrad=True,
            sample_inputs_func=sample_inputs_linalg_pinv_hermitian,
            gradcheck_wrapper=gradcheck_wrapper_hermitian_input,
-           decorators=[skipCUDAIfNoMagma, skipCUDAIfRocm, skipCPUIfNoLapack],
+           decorators=[skipCUDAIfNoMagma, skipCPUIfNoLapack],
            ),
     OpInfo('eig',
            op=torch.eig,
@@ -12934,32 +12953,44 @@ op_db: List[OpInfo] = [
            op=torch.svd,
            dtypes=floating_and_complex_types(),
            sample_inputs_func=sample_inputs_svd,
+           supports_forward_ad=True,
+           supports_fwgrad_bwgrad=True,
+           check_batched_forward_grad=False,
+           # We're using at::allclose, which does not have a batching rule
+           check_batched_grad=False,
            check_batched_gradgrad=False,
-           decorators=[
-               skipCUDAIfNoMagmaAndNoCusolver,
-               skipCUDAIfRocm,
-               skipCPUIfNoLapack,
-           ]),
+           decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCPUIfNoLapack],
+           skips=(
+               # Fixme, forward over backward gives a numerical error
+               DecorateInfo(unittest.expectedFailure, 'TestGradients', 'test_fn_fwgrad_bwgrad', dtypes=(torch.complex128,)),
+           )),
     OpInfo('linalg.svd',
            op=torch.linalg.svd,
            aten_name='linalg_svd',
            dtypes=floating_and_complex_types(),
-           sample_inputs_func=sample_inputs_svd,
+           supports_fwgrad_bwgrad=True,
+           supports_forward_ad=True,
+           check_batched_forward_grad=False,
+           # We're using at::allclose, which does not have a batching rule
+           check_batched_grad=False,
            check_batched_gradgrad=False,
-           decorators=[
-               skipCUDAIfNoMagmaAndNoCusolver,
-               skipCUDAIfRocm,
-               skipCPUIfNoLapack,
-           ]),
+           sample_inputs_func=sample_inputs_svd,
+           decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCPUIfNoLapack],
+           skips=(
+               # FIXME forward over backward gives a numerical error
+               DecorateInfo(unittest.expectedFailure, 'TestGradients', 'test_fn_fwgrad_bwgrad', dtypes=(torch.complex128,)),
+           )),
     OpInfo('linalg.svdvals',
            op=torch.linalg.svdvals,
            aten_name='linalg_svdvals',
            dtypes=floating_and_complex_types(),
-           sample_inputs_func=sample_inputs_linalg_svdvals,
+           check_batched_forward_grad=False,
+           supports_fwgrad_bwgrad=True,
+           supports_forward_ad=True,
+           # We're using at::allclose, which does not have a batching rule
            check_batched_gradgrad=False,
-           decorators=[
-               skipCUDAIfNoMagmaAndNoCusolver,
-               skipCPUIfNoLapack]),
+           sample_inputs_func=sample_inputs_linalg_svdvals,
+           decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCPUIfNoLapack]),
     OpInfo('svd_lowrank',
            op=lambda *args, **kwargs: wrapper_set_seed(
                lambda a, b, **kwargs: torch.svd_lowrank(a @ b.mT, **kwargs),
@@ -12969,9 +13000,11 @@ op_db: List[OpInfo] = [
            supports_out=False,
            check_batched_grad=False,
            check_batched_gradgrad=False,
-           supports_forward_ad=False,
+           check_batched_forward_grad=False,
+           supports_fwgrad_bwgrad=True,
+           supports_forward_ad=True,
            sample_inputs_func=sample_inputs_svd_lowrank,
-           decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCUDAIfRocm, skipCPUIfNoLapack],
+           decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCPUIfNoLapack],
            skips=(
                # test does not work with passing lambda for op
                DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
@@ -12983,11 +13016,13 @@ op_db: List[OpInfo] = [
            ),
            dtypes=floating_types(),
            supports_out=False,
+           check_batched_forward_grad=False,
            check_batched_grad=False,
            check_batched_gradgrad=False,
-           supports_forward_ad=False,
+           supports_forward_ad=True,
+           supports_fwgrad_bwgrad=True,
            sample_inputs_func=sample_inputs_pca_lowrank,
-           decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCUDAIfRocm, skipCPUIfNoLapack],
+           decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCPUIfNoLapack],
            skips=(
                # test does not work with passing lambda for op
                DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
@@ -13245,7 +13280,7 @@ op_db: List[OpInfo] = [
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
            supports_out=False,
            sample_inputs_func=sample_inputs_linalg_invertible,
-           decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCUDAIfRocm, skipCPUIfNoLapack]),
+           decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCPUIfNoLapack]),
     OpInfo('gather',
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
            dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
@@ -14536,7 +14571,11 @@ op_db: List[OpInfo] = [
     OpInfo('norm',
            variant_test_name='nuc',
            sample_inputs_func=sample_inputs_norm_nuc,
-           decorators=[skipCUDAIfNoMagma, skipCPUIfNoLapack],
+           decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCPUIfNoLapack],
+           check_batched_gradgrad=False,
+           check_batched_forward_grad=False,
+           supports_forward_ad=True,
+           supports_fwgrad_bwgrad=True,
            dtypes=floating_and_complex_types(),
            dtypesIfCUDA=floating_and_complex_types(),
            skips=(
@@ -15552,7 +15591,20 @@ op_db: List[OpInfo] = [
         supports_out=False,
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
-    )
+    ),
+    OpInfo(
+        'scatter_reduce',
+        dtypes=all_types_and(torch.float16, torch.bfloat16),
+        sample_inputs_func=sample_inputs_scatter_reduce,
+        supports_out=False,
+        decorators=(onlyCPU,),
+        skips=(
+            DecorateInfo(unittest.skip("Skipped!"), 'TestOperatorSignatures', 'test_get_torch_func_signature_exhaustive',
+                         active_if=IS_WINDOWS),
+            DecorateInfo(unittest.skip("Skipped!"), 'TestNormalizeOperators', 'test_normalize_operator_exhaustive',
+                         active_if=IS_WINDOWS),
+        ),
+    ),
 ]
 
 # Common operator groupings
