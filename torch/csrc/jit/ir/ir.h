@@ -338,6 +338,12 @@ struct TORCH_API Node {
   topo_position_t topo_position_ = 0;
   // a managing wrapper for Python to allow invalidation
   std::shared_ptr<Wrap<Node>> wrap_;
+  // Stores the full schema name, if the operator is historic
+  // When the operator is deprecated or the name of the operator
+  // is changed, we need to rely on this name
+  // to retrieve old schemas to successfully apply upgraders
+  // for this operator.
+  c10::optional<std::string> historic_schema_name_ = c10::nullopt;
 
  protected:
   Node(Graph* graph_, NodeKind kind_); // defined after graph
@@ -360,6 +366,14 @@ struct TORCH_API Node {
       wrap_ = std::make_shared<Wrap<Node>>(this);
     }
     return wrap_;
+  }
+
+  const c10::optional<std::string> getHistoricSchemaName() {
+    return historic_schema_name_;
+  }
+
+  void setHistoricSchemaName(const std::string& name) {
+    historic_schema_name_ = name;
   }
 
   Node*& next() {
@@ -1471,6 +1485,9 @@ inline Value::Value(Node* node_, size_t offset_)
 
 inline Value* Value::setType(TypePtr type) {
   AT_ASSERT(type);
+  if (auto dyn = type->castRaw<c10::DynamicType>()) {
+    type = dyn->fallback();
+  }
   type_ = std::move(type);
   for (Use& use : uses_) {
     use.user->op_ = nullptr;
@@ -1589,6 +1606,11 @@ TORCH_API std::vector<Value*> inlineCallTo(
     Node* to_replace,
     GraphFunction* callee,
     bool use_graph = true);
+
+TORCH_API std::vector<Value*> inlineCallTo(
+    Node* to_replace,
+    GraphFunction* callee,
+    Graph* callee_graph);
 
 /** If there is only one value in \p OUTPUTS and its kind is Tuple, insert a
  * tuple unpack node and return the resulting values.

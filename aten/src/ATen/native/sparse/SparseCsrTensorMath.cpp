@@ -2,6 +2,7 @@
 #include <ATen/ExpandUtils.h>
 #include <ATen/InitialTensorOptions.h>
 #include <ATen/NativeFunctions.h>
+#include <ATen/Operators.h>
 #include <ATen/Parallel.h>
 #include <ATen/SparseCsrTensorImpl.h>
 #include <ATen/SparseCsrTensorUtils.h>
@@ -95,12 +96,12 @@ Tensor& unary_op_out(F op_out, const Tensor& self, Tensor& result) {
   return result;
 }
 
-template <typename F>
-Tensor& unary_op_inplace(Tensor& self, const F& op_inplace) {
+template <typename F, typename ...Args>
+Tensor& unary_op_inplace(Tensor& self, const F& op_inplace, Args&&... args) {
   TORCH_INTERNAL_ASSERT(self.is_sparse_csr());
 
   auto self_values = self.values();
-  op_inplace(self_values);
+  (self_values.*op_inplace)(std::forward<Args>(args)...);
   return self;
 }
 
@@ -175,6 +176,10 @@ bool is_square_or_vec(int64_t dim_i, int64_t dim_j, int64_t dim_k) {
   return (dim_i == dim_k  && dim_k == dim_j) || (dim_i == dim_j && dim_k == 1);
 }
 
+Tensor& normal_sparse_csr_(Tensor& self, double mean, double std, c10::optional<Generator> gen) {
+  return unary_op_inplace(self, &Tensor::normal_, mean, std, gen);
+}
+
 /* Implementation of Unary Ufuncs, those supported for Sparse CSR Layout
  * Only simple funcs, with 0->0 correspondence are currently supported. */
 
@@ -190,9 +195,7 @@ bool is_square_or_vec(int64_t dim_i, int64_t dim_j, int64_t dim_k) {
 
 #define CREATE_UNARY_UFUNC_INPLACE(op_name)                                \
   Tensor& op_name##_sparse_csr_(Tensor& self) {                            \
-    return unary_op_inplace(self, [](Tensor& t) {                          \
-      return t.op_name##_();                                               \
-    });                                                                    \
+    return unary_op_inplace(self, &Tensor::op_name##_);                    \
   }
 
 #define CREATE_UNARY_UFUNC(op_name)                                        \
@@ -218,7 +221,6 @@ CREATE_UNARY_UFUNC(floor);
 CREATE_UNARY_UFUNC(log1p);
 CREATE_UNARY_UFUNC(neg);
 CREATE_UNARY_UFUNC(rad2deg);
-CREATE_UNARY_UFUNC(round);
 CREATE_UNARY_UFUNC(sign);
 CREATE_UNARY_UFUNC(sin);
 CREATE_UNARY_UFUNC(sinh);
@@ -228,6 +230,22 @@ CREATE_UNARY_UFUNC(tan);
 CREATE_UNARY_UFUNC(tanh);
 CREATE_UNARY_UFUNC(trunc);
 CREATE_UNARY_UFUNC(conj_physical);
+
+// With addition of `round.decimals` overload, using CREATE_UNARY_UFUNC leads
+// to unresolved overload.
+Tensor& round_sparse_csr_out(const Tensor& self, Tensor& result) {
+  return unary_op_out(&ATEN_FN2(round, out), self, result);
+}
+
+Tensor round_sparse_csr(const Tensor& self) {
+  return get_result_tensor_for_unary_op(&ATEN_FN(round), self);
+}
+
+Tensor& round_sparse_csr_(Tensor& self) {
+  TORCH_INTERNAL_ASSERT(self.is_sparse_csr());
+  self.values().round_();
+  return self;
+}
 
 // angle, isneginf, isposinf and signbit currently don't have an inplace variant
 CREATE_UNARY_UFUNC_NO_INPLACE(angle);
