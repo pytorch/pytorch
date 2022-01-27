@@ -27,7 +27,7 @@ c10::MaybeOwned<Tensor> prepare_dense_matrix_for_mkl(
   if (tensor.is_non_overlapping_and_dense() ||
       is_blas_compatible_row_major_order(tensor) ||
       is_blas_compatible_column_major_order(tensor)) {
-    return c10::MaybeOwned<Tensor>::borrowed(tensor);
+    return at::native::expect_resolved_conj(tensor);
   } else {
     return c10::MaybeOwned<Tensor>::owned(
         tensor.clone(at::MemoryFormat::Contiguous));
@@ -45,7 +45,7 @@ c10::MaybeOwned<Tensor> prepare_dense_matrix_for_mkl(
     const Tensor& tensor,
     bool row_major) {
   if (is_blas_compatible_row_major_order(tensor) && row_major) {
-    return c10::MaybeOwned<Tensor>::borrowed(tensor);
+    return at::native::expect_resolved_conj(tensor);
   } else {
     if (row_major) {
       return c10::MaybeOwned<Tensor>::owned(
@@ -419,6 +419,8 @@ void triangular_solve_out_sparse_csr(
       "Please use PyTorch built with MKL on Linux.");
 #else
   if (B.numel() == 0 || X.numel() == 0 || A._nnz() == 0) {
+    // If A has no nnz, then A is singular and we can't solve.
+    X.fill_(NAN);
     return;
   }
 

@@ -236,6 +236,52 @@ void LoopNestGenerator::generate(const std::vector<Expr*>& exprs) {
     }
   }
 
+  // Fill out dependencies as IDs will have local dependency information, but
+  // it's still not guaranteed to be global.
+
+  // If loop structure is something like:
+  // T0 [I0]
+  // T1 [I0, I1]
+  // T2 [I1, I2]
+  //
+  // I0 will be marked as a dependency of I1
+  // I1 will be marked as a dependency of I2
+  //
+  // However, I0 will not be marked as a dep of I2, so we need to fill out the
+  // dependency analysis. This is done by iterating through IterDomains filling
+  // out all the dependencies of dependencies recursively.
+
+  std::deque<IterDomain*> to_visit;
+  std::unordered_set<IterDomain*> visited;
+
+  std::transform(
+      concrete_id_dependencies.begin(),
+      concrete_id_dependencies.end(),
+      std::back_inserter(to_visit),
+      [](const auto& concrete_dep_entry) { return concrete_dep_entry.first; });
+
+  while (!to_visit.empty()) {
+    auto id = to_visit.front();
+    to_visit.pop_front();
+
+    auto& dependencies = concrete_id_dependencies.at(id);
+    bool ready = std::all_of(
+        dependencies.begin(), dependencies.end(), [&visited](IterDomain* id) {
+          return visited.count(id);
+        });
+
+    if (!ready) {
+      to_visit.push_back(id);
+      continue;
+    }
+
+    for (auto dependency : dependencies) {
+      auto dep_of_dep = concrete_id_dependencies.at(dependency);
+      dependencies.insert(dep_of_dep.begin(), dep_of_dep.end());
+    }
+    visited.emplace(id);
+  }
+
   // Generate loop structure for each tensor view
   for (auto tv : ir_utils::allTvs(FusionGuard::getCurFusion())) {
     // Zero dim tensor support

@@ -1,4 +1,5 @@
 #include <ATen/core/interned_strings_class.h>
+#include <ATen/core/interned_strings.h>
 
 namespace c10 {
 

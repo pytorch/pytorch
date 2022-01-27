@@ -1901,7 +1901,8 @@ TEST(LoopNest, LoopNestComputeAt_1) {
   std::vector<ForPtr> loops = l.getAllLoopNestsWritingToBuf(B.buf()).at(0);
   LoopNest::computeAt(l.getLoopBodyFor(A), loops[0]);
   l.prepareForCodegen();
-  StmtPtr s = l.root_stmt();
+  SimpleIREvaluator cg(l.root_stmt(), {B, N});
+  StmtPtr s = cg.stmt();
 
   checkIR(s, R"IR(
 # CHECK: Allocate(temp); // dtype=int, dims=[1]
@@ -1913,7 +1914,6 @@ TEST(LoopNest, LoopNestComputeAt_1) {
 
   // Now check that the loop still produces the correct result.
   std::vector<int> b_data(100, 0);
-  SimpleIREvaluator cg(s, {B, N});
   cg.call({b_data, 100});
 
   std::vector<int> b_ref(100, 0);
@@ -1967,7 +1967,8 @@ TEST(LoopNest, LoopNestComputeAt_2) {
     std::vector<ForPtr> loops = l.getAllLoopNestsWritingToBuf(c.buf()).at(0);
     LoopNest::computeAt(l.getLoopBodyFor(p), loops[0]);
     l.prepareForCodegen();
-    StmtPtr s = l.root_stmt();
+    SimpleIREvaluator cg(l.root_stmt(), {c, W, H});
+    StmtPtr s = cg.stmt();
 
     // Check the IR we produced
     checkIR(s, R"IR(
@@ -1982,7 +1983,6 @@ TEST(LoopNest, LoopNestComputeAt_2) {
 
     // Now check that the loop still produces the correct result.
     std::vector<int> c_data(kW * kH, 0);
-    SimpleIREvaluator cg(s, {c, W, H});
     cg.call({c_data, kW, kH});
 
     assertAllEqual(c_data, c_ref);
@@ -1993,7 +1993,8 @@ TEST(LoopNest, LoopNestComputeAt_2) {
     std::vector<ForPtr> loops = l.getAllLoopNestsWritingToBuf(c.buf()).at(0);
     LoopNest::computeAt(l.getLoopBodyFor(p), loops[1]);
     l.prepareForCodegen();
-    StmtPtr s = l.root_stmt();
+    SimpleIREvaluator cg(l.root_stmt(), {c, W, H});
+    StmtPtr s = cg.stmt();
 
     // Check the IR we produced
     checkIR(s, R"IR(
@@ -2008,7 +2009,6 @@ TEST(LoopNest, LoopNestComputeAt_2) {
 
     // Now check that the loop still produces the correct result.
     std::vector<int> c_data(kW * kH, 0);
-    SimpleIREvaluator cg(s, {c, W, H});
     cg.call({c_data, kW, kH});
 
     assertAllEqual(c_data, c_ref);
@@ -2063,7 +2063,8 @@ TEST(LoopNest, LoopNestComputeAt_3) {
     std::vector<ForPtr> loops = l.getAllLoopNestsWritingToBuf(D.buf()).at(0);
     LoopNest::computeAt(l.getLoopBodyFor(A), loops[0]);
     l.prepareForCodegen();
-    StmtPtr s = l.root_stmt();
+    SimpleIREvaluator cg(l.root_stmt(), {D, W, H});
+    StmtPtr s = cg.stmt();
 
     // Check the IR we produced
     checkIR(s, R"IR(
@@ -2083,7 +2084,6 @@ TEST(LoopNest, LoopNestComputeAt_3) {
 
     // Now check that the loop still produces the correct result.
     std::vector<int> c_data(kW * kH, 0);
-    SimpleIREvaluator cg(s, {D, W, H});
     cg.call({c_data, kW, kH});
 
     assertAllEqual(c_data, c_ref);
@@ -2094,7 +2094,8 @@ TEST(LoopNest, LoopNestComputeAt_3) {
     std::vector<ForPtr> loops = l.getAllLoopNestsWritingToBuf(D.buf()).at(0);
     LoopNest::computeAt(l.getLoopBodyFor(A), loops[1]);
     l.prepareForCodegen();
-    StmtPtr s = l.root_stmt();
+    SimpleIREvaluator cg(l.root_stmt(), {D, W, H});
+    StmtPtr s = cg.stmt();
 
     // Check the IR we produced
     checkIR(s, R"IR(
@@ -2114,7 +2115,6 @@ TEST(LoopNest, LoopNestComputeAt_3) {
 
     // Now check that the loop still produces the correct result.
     std::vector<int> c_data(kW * kH, 0);
-    SimpleIREvaluator cg(s, {D, W, H});
     cg.call({c_data, kW, kH});
 
     assertAllEqual(c_data, c_ref);
@@ -2174,7 +2174,8 @@ TEST(LoopNest, Reduce2dComputeAt) {
     // l.simplify();
     l.eliminateDeadStores();
     l.prepareForCodegen();
-    checkIR(l.root_stmt(), R"IR(
+    SimpleIREvaluator cg(l.root_stmt(), {c, W, H});
+    checkIR(cg.stmt(), R"IR(
 # CHECK: Allocate(temp); // dtype=int, dims=[2, W + 1]
 # CHECK: for (int cy = 0; cy < H; cy++) {
 # CHECK:   for (int idx0 = 0; idx0 < 2; idx0++) {
@@ -2193,11 +2194,9 @@ TEST(LoopNest, Reduce2dComputeAt) {
 # CHECK: }
 # CHECK: Free(temp);
 )IR");
-    StmtPtr s = l.root_stmt();
 
     // Now check that the loop still produces the correct result.
     std::vector<int> c_data(kW * kH, 0);
-    SimpleIREvaluator cg(s, {c, W, H});
     cg.call({c_data, kW, kH});
     assertAllEqual(c_data, c_ref);
   }
@@ -2209,7 +2208,8 @@ TEST(LoopNest, Reduce2dComputeAt) {
     l.simplify();
     l.eliminateDeadStores();
     l.prepareForCodegen();
-    checkIR(l.root_stmt(), R"IR(
+    SimpleIREvaluator cg(l.root_stmt(), {c, W, H});
+    checkIR(cg.stmt(), R"IR(
 # CHECK: Allocate(temp); // dtype=int, dims=[2, 2]
 # CHECK: for (int cy = 0; cy < H; cy++) {
 # CHECK:   for (int cx = 0; cx < W; cx++) {
@@ -2228,11 +2228,9 @@ TEST(LoopNest, Reduce2dComputeAt) {
 # CHECK: }
 # CHECK: Free(temp);
 )IR");
-    StmtPtr s = l.root_stmt();
 
     // Now check that the loop still produces the correct result.
     std::vector<int> c_data(kW * kH, 0);
-    SimpleIREvaluator cg(s, {c, W, H});
     cg.call({c_data, kW, kH});
     assertAllEqual(c_data, c_ref);
   }
@@ -3737,11 +3735,13 @@ TEST(LoopNest, CacheReadsSimple) {
 
   l.prepareForCodegen();
   StmtPtr result = IRSimplifier::simplify(l.root_stmt());
+  SimpleIREvaluator cg(result, {B, C});
+  result = cg.stmt();
 
   // just this once: verify the whole thing.
   checkIR(result, R"IR(
-#CHECK: Allocate(A_local); // dtype=int, dims=[1, 10]
 #CHECK: Allocate(A); // dtype=int, dims=[64, 64]
+#CHECK: Allocate(A_local); // dtype=int, dims=[1, 10]
 #CHECK: for (int i
 #CHECK:  for (int j
 #CHECK:   A[
@@ -3760,13 +3760,12 @@ TEST(LoopNest, CacheReadsSimple) {
 #CHECK:   C[
 #CHECK:  }
 #CHECK: }
-#CHECK: Free(A);
 #CHECK: Free(A_local);
+#CHECK: Free(A);
       )IR");
 
   std::vector<int> b_data(200, 0);
   std::vector<int> c_data(200, 0);
-  SimpleIREvaluator cg(l.root_stmt(), {B, C});
   cg.call({b_data, c_data});
 
   std::vector<int> b_ref(200, 0);
@@ -3803,6 +3802,8 @@ TEST(LoopNest, CacheReadsOuter) {
 
   l.prepareForCodegen();
   StmtPtr result = IRSimplifier::simplify(l.root_stmt());
+  SimpleIREvaluator cg(result, {B, C});
+  result = cg.stmt();
 
   checkIR(result, R"IR(
 #CHECK: Allocate(A_local); // dtype=int, dims=[21, 11]
@@ -3812,7 +3813,6 @@ TEST(LoopNest, CacheReadsOuter) {
 
   std::vector<int> b_data(200, 0);
   std::vector<int> c_data(200, 0);
-  SimpleIREvaluator cg(l.root_stmt(), {B, C});
   cg.call({b_data, c_data});
 
   std::vector<int> b_ref(200, 0);
@@ -3848,6 +3848,8 @@ TEST(LoopNest, CacheReadsInternal) {
   LoopNest::cacheAccesses(A.buf(), "A_local", j_loop);
   l.prepareForCodegen();
   StmtPtr result = IRSimplifier::simplify(l.root_stmt());
+  SimpleIREvaluator cg(result, {B, C});
+  result = cg.stmt();
 
   checkIR(result, R"IR(
 #CHECK: Allocate(A_local); // dtype=int, dims=[2, 11]
@@ -3857,7 +3859,6 @@ TEST(LoopNest, CacheReadsInternal) {
 
   std::vector<int> b_data(200, 0);
   std::vector<int> c_data(200, 0);
-  SimpleIREvaluator cg(l.root_stmt(), {B, C});
   cg.call({b_data, c_data});
 
   std::vector<int> b_ref(200, 0);
@@ -3894,6 +3895,8 @@ TEST(LoopNest, CacheReadsInner) {
   LoopNest::cacheAccesses(A.buf(), "A_local", body);
   l.prepareForCodegen();
   StmtPtr result = IRSimplifier::simplify(l.root_stmt());
+  SimpleIREvaluator cg(result, {B, C});
+  result = cg.stmt();
 
   checkIR(result, R"IR(
 #CHECK: Allocate(A_local); // dtype=int, dims=[5, 2]
@@ -3903,7 +3906,6 @@ TEST(LoopNest, CacheReadsInner) {
 
   std::vector<int> b_data(200, 0);
   std::vector<int> c_data(200, 0);
-  SimpleIREvaluator cg(l.root_stmt(), {B, C});
   cg.call({b_data, c_data});
 
   std::vector<int> b_ref(200, 0);
@@ -3940,6 +3942,8 @@ TEST(LoopNest, CacheWritesSimple) {
 
   l.prepareForCodegen();
   StmtPtr result = IRSimplifier::simplify(l.root_stmt());
+  SimpleIREvaluator cg(result, {B, C});
+  result = cg.stmt();
 
   checkIR(result, R"IR(
 #CHECK: Allocate(A_local); // dtype=int, dims=[1, 64]
@@ -3953,7 +3957,6 @@ TEST(LoopNest, CacheWritesSimple) {
 
   std::vector<int> b_data(200, 0);
   std::vector<int> c_data(200, 0);
-  SimpleIREvaluator cg(l.root_stmt(), {B, C});
   cg.call({b_data, c_data});
 
   std::vector<int> b_ref(200, 0);
