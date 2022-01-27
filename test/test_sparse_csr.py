@@ -25,7 +25,11 @@ if TEST_SCIPY:
 load_tests = load_tests
 
 # Unary Ufuncs supported by Sparse CSR Layout
-sparse_csr_unary_ufuncs = [op for op in sparse_csr_funcs if isinstance(op, UnaryUfuncInfo)]
+# since square is pow with exponent as 2, and pow has special handling
+# hence, square is temporarily filtered from the list, see: https://github.com/pytorch/pytorch/pull/69603#discussion_r793300941
+sparse_csr_unary_ufuncs = [
+    op for op in sparse_csr_funcs if isinstance(op, UnaryUfuncInfo) and op.name != "square"
+]
 # A separate test is written for pow, since it errors out with exponent=0 for Sparse CSR
 sparse_csr_pow = [op for op in sparse_csr_funcs if op.name == 'pow']
 
@@ -47,7 +51,9 @@ def _check_cusparse_sddmm_available():
     min_supported_version = (11, 3)
     return version >= min_supported_version
 
-_sparse_csr_ops = list(filter(lambda op: op.supports_sparse_csr, op_db))
+# pow and square need special handling in tests, hence removed till complex and pow(Tensor, Tensor)
+# support is added. See: https://github.com/pytorch/pytorch/pull/69603#discussion_r793300941
+_sparse_csr_ops = list(filter(lambda op: op.supports_sparse_csr and op.name not in ["pow", "square"], op_db))
 
 # This should be just an import from test_linalg instead of code duplication
 # but https://github.com/pytorch/pytorch/pull/63511#discussion_r733989701
@@ -1210,20 +1216,9 @@ class TestSparseCSR(TestCase):
                 continue
 
             expected = op(sample.input, *sample.args, **sample.kwargs)
-            sample.input = sample.input.to_sparse_csr()
-
-            # pow(Tensor, Tensor) is not supported yet for Sparse inputs
-            if op.name == "pow" and torch.is_tensor(sample.args[0]):
-                continue
-
-            # TODO: @krshrimali, enable support for complex inputs for pow and square
-            if sample.input.is_complex() and (op.name == "square" or op.name == "pow"):
-                with self.assertRaisesRegex(RuntimeError, "not supported"):
-                    expect = op(sample.input, *sample.args, **sample.kwargs)
-                continue
 
             assert torch.is_tensor(expected)
-            output = op(sample.input, *sample.args, **sample.kwargs)
+            output = op(sample.input.to_sparse_csr(), *sample.args, **sample.kwargs)
             assert torch.is_tensor(output)
 
             self.assertEqual(output.to_dense(), expected)
@@ -1244,20 +1239,7 @@ class TestSparseCSR(TestCase):
 
             sample.input = sample.input.to_sparse_csr()
 
-            # TODO: @krshrimali, enable support for complex inputs for square
-            if sample.input.is_complex() and op.name == "square":
-                with self.assertRaisesRegex(RuntimeError, "not supported"):
-                    expect = op(sample.input, *sample.args, **sample.kwargs)
-
-                # Create an out Sparse CSR Tensor
-                out = self.genSparseCSRTensor(sample.input.size(), sample.input._nnz(),
-                                              device=sample.input.device, dtype=sample.input.dtype,
-                                              index_dtype=sample.input.crow_indices().dtype)
-                with self.assertRaisesRegex(RuntimeError, "not supported"):
-                    op(sample.input, *sample.args, **sample.kwargs, out=out)
-                continue
-            else:
-                expect = op(sample.input, *sample.args, **sample.kwargs)
+            expect = op(sample.input, *sample.args, **sample.kwargs)
 
             out = self.genSparseCSRTensor(sample.input.size(), sample.input._nnz(),
                                           device=sample.input.device, dtype=expect.dtype,
@@ -1285,14 +1267,9 @@ class TestSparseCSR(TestCase):
 
             sample.input = sample.input.to_sparse_csr()
 
-            # TODO: @krshrimali, enable support for complex inputs for square
-            if sample.input.is_complex() and op.name == "square":
-                with self.assertRaisesRegex(RuntimeError, "not supported"):
-                    expect = op(sample.input, *sample.args, **sample.kwargs)
-            else:
-                expect = op(sample.input, *sample.args, **sample.kwargs)
+            expect = op(sample.input, *sample.args, **sample.kwargs)
 
-            if sample.input.is_complex() and op.name in ["abs", "square"]:
+            if sample.input.is_complex() and op.name in ["abs"]:
                 with self.assertRaisesRegex(RuntimeError, "not supported"):
                     op.inplace_variant(sample.input, *sample.args, **sample.kwargs)
                 continue
