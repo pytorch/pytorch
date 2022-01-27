@@ -43,7 +43,7 @@ def _check_cusparse_sddmm_available():
     return version >= min_supported_version
 
 _sparse_csr_ops = list(filter(lambda op: op.supports_sparse_csr, op_db))
-binary_functions_with_dense_output = ['mm', 'mv',]
+binary_functions_with_dense_output = ['mm', 'mv', ]
 binary_ops_with_dense_output = list(filter(lambda op: op.name in binary_functions_with_dense_output, op_db))
 
 # This should be just an import from test_linalg instead of code duplication
@@ -1358,7 +1358,7 @@ class TestSparseCSR(TestCase):
             b = make_tensor(sample.args[1].shape, device=device, dtype=dtype, noncontiguous=True, requires_grad=True)
             self.assertTrue(torch.autograd.gradcheck(fn, [c, b], fast_mode=True))
 
-    @ops(binary_ops_with_dense_output, dtypes=OpDTypes.supported, allowed_dtypes=[torch.double,])
+    @ops(binary_ops_with_dense_output, dtypes=OpDTypes.supported, allowed_dtypes=[torch.double, ])
     def test_autograd_dense_output(self, device, dtype, op):
         samples = list(op.sample_inputs(device, dtype, requires_grad=True))
 
