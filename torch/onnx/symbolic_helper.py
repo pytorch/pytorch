@@ -500,10 +500,15 @@ def _squeeze_helper(g, input, axes_i):
     else:  # Tensor type
         if _export_onnx_opset_version >= 13:
             axes_t = axes_i[0]
-            if _get_tensor_sizes(axes_t) and _get_tensor_sizes(axes_t) == 1:
+            axes_rank = _get_tensor_rank(axes_t)
+            if axes_rank == 0:
+                # axes is a scalar. Unsqueeze it to a rank 1 tensor.
+                axes_t = _unsqueeze_helper(g, axes_t, [0])
+                return g.op("Squeeze", input, axes_t)
+            elif axes_rank == 1:
                 return g.op("Squeeze", input, axes_t)
             else:
-                raise ValueError("For squeeze axses as input, the dimension must be one in ONNX spec")
+                raise ValueError("For squeeze axses as input, the rank must be one in ONNX spec")
         else:
             raise ValueError("Unsupported Squeeze dynamic axes ONNX opset version: " + str(_export_onnx_opset_version))
 
