@@ -146,6 +146,7 @@ flatbuffers::Offset<jit::mobile::serialization::Schema> FlatbufferSerializer::
   return_vec.reserve(returns.size());
   for (const auto& arg : args) {
     int index = storeIValueAndGetIndex(fbb, arg.default_value());
+    TORCH_INTERNAL_ASSERT(arg.type()->kind() != c10::DynamicType::Kind);
     arg_vec.emplace_back(CreateArg(
         fbb,
         fbb.CreateSharedString(arg.name()),
@@ -155,6 +156,7 @@ flatbuffers::Offset<jit::mobile::serialization::Schema> FlatbufferSerializer::
 
   for (const auto& ret : returns) {
     int index = storeIValueAndGetIndex(fbb, ret.default_value());
+    TORCH_INTERNAL_ASSERT(ret.type()->kind() != c10::DynamicType::Kind);
     return_vec.emplace_back(CreateArg(
         fbb,
         fbb.CreateSharedString(ret.name()),
@@ -207,6 +209,7 @@ flatbuffers::Offset<mobile::serialization::Function> FlatbufferSerializer::
 
   for (const TypePtr& t : code.types_) {
     auto type_str = t->annotation_str();
+    TORCH_INTERNAL_ASSERT(t->kind() != c10::DynamicType::Kind);
     if (type_str.find(torch_prefix) == 0) {
       TORCH_CHECK(
           type_str.find(class_prefix) == 0,
@@ -351,7 +354,7 @@ flatbuffers::Offset<mobile::serialization::List> FlatbufferSerializer::listToFB(
   return CreateList(
       fbb,
       fbb.CreateVector(items),
-      fbb.CreateSharedString(list.type()->annotation_str()));
+      fbb.CreateSharedString(list.type<c10::Type>()->annotation_str()));
 }
 
 flatbuffers::Offset<mobile::serialization::Dict> FlatbufferSerializer::dictToFB(
@@ -372,7 +375,7 @@ flatbuffers::Offset<mobile::serialization::Dict> FlatbufferSerializer::dictToFB(
       fbb,
       fbb.CreateVector(keys),
       fbb.CreateVector(values),
-      fbb.CreateSharedString(ivalue.type()->annotation_str()));
+      fbb.CreateSharedString(ivalue.type<c10::Type>()->annotation_str()));
 }
 
 flatbuffers::Offset<mobile::serialization::ObjectType> FlatbufferSerializer::
