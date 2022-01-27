@@ -75,9 +75,9 @@ TORCH_API void {f.func.name.unambiguous_name()}(Stack & stack);
 // aten::{f.func}
 TORCH_API void {f.func.name.unambiguous_name()}(Stack & stack) {{
     {code_connector.join(code_list)}
-    
+
     drop(stack, {len(args)});
-    
+
     {ret_str}{prefix}{sig.name()}({args_str});
     {push_str}
 }}

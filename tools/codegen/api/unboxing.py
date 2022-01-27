@@ -131,7 +131,7 @@ def argumenttype_ivalue_convert(t: Type, arg_name: str, *, mutable: bool = False
     return expr, code
 
 
-def _gen_code_optional_type(arg_name: str, out_name: str, t: OptionalType, ctype: CType) -> List[str]:
+def _gen_code_optional_type(arg_name: str, out_name: str, t: OptionalType, ctype: str) -> List[str]:
     in_name = arg_name + "_opt_in"
     res_expr, res_code = argumenttype_ivalue_convert(t.elem, in_name)
     return f"""
