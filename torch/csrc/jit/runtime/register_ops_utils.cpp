@@ -196,7 +196,8 @@ IValue tensorToListRecursive(
     } else if (inner_result.isBool()) {
       result.emplace_back(inner_result.toBool());
     } else {
-      TORCH_INTERNAL_ASSERT("Unknown return type for tensorToListRecursive");
+      TORCH_INTERNAL_ASSERT(
+          false, "Unknown return type for tensorToListRecursive");
     }
 
     data += strides[cur_dim] * element_size;
@@ -384,8 +385,8 @@ void listAdd(Stack& stack) {
 }
 
 void listInplaceAdd(Stack& stack) {
-  c10::List<IValue> b = pop(stack).to<List<IValue>>();
-  c10::List<IValue> a = pop(stack).to<List<IValue>>();
+  c10::List<IValue> b = pop(stack).to<c10::List<IValue>>();
+  c10::List<IValue> a = pop(stack).to<c10::List<IValue>>();
   a.append(std::move(b));
   push(stack, std::move(a));
 }
