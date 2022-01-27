@@ -8403,7 +8403,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
 
         # hermitian=True for complex inputs on CUDA is supported only with MAGMA 2.5.4+
         magma_254_available = self.device_type == 'cuda' and _get_magma_version() >= (2, 5, 4)
-        hermitians = (True, False) if dtype.is_complex and magma_254_available else (False,)
+        hermitians = (True, False) if dtype.is_complex and (self.device_type == 'cpu' or magma_254_available) else (False,)
 
         shapes = (5,)
         batches = ((), (4,),)
