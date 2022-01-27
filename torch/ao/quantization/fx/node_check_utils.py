@@ -30,8 +30,8 @@ method_list = {
     'relu_',
 }
 
-def chech_qnode_func(node, modules):
-    is_call_function = node.op == "call_function" and node.target in func_list
-    is_call_method = node.op == "call_method" and node.target in method_list
-    is_call_module = node.op == "call_module" and type(modules[str(node.target)]) in module_type_list
-    return is_call_function, is_call_method, is_call_module
+def is_flow_supported_ops(node, modules):
+    is_supported_call_function = node.op == "call_function" and node.target in func_list
+    is_supported_call_method = node.op == "call_method" and node.target in method_list
+    is_supported_call_module = node.op == "call_module" and type(modules[str(node.target)]) in module_type_list
+    return is_supported_call_function, is_supported_call_method, is_supported_call_module
