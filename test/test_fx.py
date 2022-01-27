@@ -3119,7 +3119,16 @@ class TestFX(JitTestCase):
         nf = symbolic_trace(nf)
         self.assertEqual(nf(**val), f(**val))
 
-
+    def test_imul_code_print(self):
+        graph = torch.fx.Graph()
+        a = graph.placeholder("a")
+        b = graph.placeholder("b")
+        graph.call_function(operator.imul, (a, b), {})
+        graph.output(a)
+        gm = torch.fx.GraphModule({}, graph)
+        gm.recompile()
+        self.assertEqual(gm(2, 3), 6)
+        self.assertIn("a *= b", gm.code)
 
 
 def run_getitem_target():

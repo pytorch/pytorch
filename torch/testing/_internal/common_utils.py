@@ -2611,13 +2611,12 @@ def random_hermitian_pd_matrix(matrix_size, *batch_dims, dtype, device):
                     dtype=dtype, device=device)
     return A @ A.mH + torch.eye(matrix_size, dtype=dtype, device=device)
 
-# Creates a full rank matrix with distinct signular values or
+# Creates a full rank matrix with distinct singular values or
 #   a batch of such matrices
 def make_fullrank_matrices_with_distinct_singular_values(*shape, device, dtype, requires_grad=False):
     with torch.no_grad():
         t = make_tensor(shape, device=device, dtype=dtype)
         u, _, vh = torch.linalg.svd(t, full_matrices=False)
-        # TODO: improve the handling of complex tensors here
         real_dtype = t.real.dtype if t.dtype.is_complex else t.dtype
         k = min(shape[-1], shape[-2])
         # We choose the singular values to be "around one"
