@@ -7,4 +7,4 @@ sudo apt-get update
 # that could not be found:
 #   plm_rsh_agent: ssh : rsh
 sudo apt-get install -y ssh
-sudo apt-get update && apt-get install -y --no-install-recommends libcudnn8=8.2.0.53-1+cuda11.3 libcudnn8-dev=8.2.0.53-1+cuda11.3 && apt-mark hold libcudnn8
+sudo apt-get update && apt-get install -y --no-install-recommends libcudnn8=8.3.2.44-1+cuda11.5 libcudnn8-dev=8.3.2.44-1+cuda11.5 && apt-mark hold libcudnn8

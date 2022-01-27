@@ -222,8 +222,6 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
             "ProcessGroup ", getBackendName(), "does not support allreduce"));
   }
 
-  // This will be moved out of ProcessGroup, do not add dependencies on this
-  // function.
   virtual c10::intrusive_ptr<ProcessGroup::Work> allreduce_coalesced(
       std::vector<at::Tensor>& /* tensors */,
       const AllreduceCoalescedOptions& /* opts */ = AllreduceCoalescedOptions()) {
