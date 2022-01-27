@@ -206,21 +206,21 @@ class CudaSync:
     def __init__(self, sync_every_iter=False):
         self.sync_every_iter = sync_every_iter
 
-    def iter_sync(self, results):
+    def iter_sync(self):
         if self.sync_every_iter:
             torch.cuda.synchronize()
 
-    def final_sync(self, results):
+    def final_sync(self):
         torch.cuda.synchronize()
 
 class NoOpSync:
     def __init__(self, sync_every_iter=False):
         pass
 
-    def iter_sync(self, results):
+    def iter_sync(self):
         pass
 
-    def final_sync(self, results):
+    def final_sync(self):
         pass
 
 class LazySync:
@@ -228,39 +228,18 @@ class LazySync:
         self.sync_every_iter = sync_every_iter
         self.skip_final_sync = skip_final_sync
 
-    def iter_sync(self, results):
+    def iter_sync(self):
         ltm.mark_step()
         if self.sync_every_iter:
             ltm.wait_device_ops()
             if current_device == 'cuda':
                 torch.cuda.synchronize()
 
-    def final_sync(self, results):
+    def final_sync(self):
         ltm.mark_step()
         if self.skip_final_sync:
             return
         ltm.wait_device_ops()
-        if current_device == 'cuda':
-            torch.cuda.synchronize()
-
-class ToDeviceSync:
-    def __init__(self, device, sync_every_iter=False):
-        self.sync_every_iter = sync_every_iter
-        self.device = device
-
-    def iter_sync(self, results):
-        if self.sync_every_iter:
-            to_device(results[-1], self.device)
-            if current_device == 'cuda':
-                torch.cuda.synchronize()
-
-    def final_sync(self, results):
-        if len(results):
-            if self.sync_every_iter:
-                to_device(results[-1], self.device)
-            else:
-                to_device(results, self.device)
-
         if current_device == 'cuda':
             torch.cuda.synchronize()
 
@@ -271,8 +250,8 @@ def dump_lazy_metrics(reset=False):
     return met
 
 def timed(args, benchmark, sync, times=1):
-    results = []
-    sync.final_sync(results)
+    results = None
+    sync.final_sync()
     torch.manual_seed(1337)
     if args.test == 'eval':
         model, example_inputs = benchmark.get_module()
@@ -286,14 +265,14 @@ def timed(args, benchmark, sync, times=1):
     t0 = time.perf_counter()
     for i in range(times):
         if args.test == 'eval':
-            results.append(call_model_with(model, example_inputs))
+            results = call_model_with(model, example_inputs)
         elif args.test == 'train':
             benchmark.train(niter=1)
 
         # for the last i, let final_sync take care of it
         if i < times - 1:
             # may be just an async 'mark_step' for lazy, or no-op for cuda
-            sync.iter_sync(results)
+            sync.iter_sync()
 
     if current_device in ['lazy', 'cuda']:
         # don't assume torch.cuda present unless using cuda
@@ -301,10 +280,9 @@ def timed(args, benchmark, sync, times=1):
 
     # should be a hard sync for lazy and cuda
     # unless strictly measuring lazy trace overhead, then no-op
-    sync.final_sync(results)
+    sync.final_sync()
     t1 = time.perf_counter()
-    rc = results[-1] if args.test == 'eval' else None
-    return rc, t1 - t0
+    return results, t1 - t0
 
 def to_device(tensors, device):
     """Handles moving tensor or tensors (in various containers) to a new device.
@@ -386,14 +364,10 @@ def lazy_overhead_experiment(args, results, benchmark, lazy_benchmark):
               f"{pvalue:.4e},{args.warmup},{args.repeat},{warmup_time:.2f},{bench_time:.2f}")
     return (overhead, pvalue)
 
-def lazy_compute_experiment(args, experiment, results, benchmark, lazy_benchmark, sync_every_iter=False, to_dev_sync=None):
+def lazy_compute_experiment(args, experiment, results, benchmark, lazy_benchmark, sync_every_iter=False):
     timings = np.zeros((args.repeat, 2), np.float64)
-    if to_dev_sync is not None:
-        ref_sync = ToDeviceSync(to_dev_sync, sync_every_iter=sync_every_iter)
-        lazy_sync = ToDeviceSync(to_dev_sync, sync_every_iter=sync_every_iter)
-    else:
-        ref_sync = CudaSync(sync_every_iter=sync_every_iter) if current_device == 'cuda' else NoOpSync()
-        lazy_sync = LazySync(sync_every_iter=sync_every_iter)
+    ref_sync = CudaSync(sync_every_iter=sync_every_iter) if current_device == 'cuda' else NoOpSync()
+    lazy_sync = LazySync(sync_every_iter=sync_every_iter)
 
     # interleave the runs to handle frequency scaling and load changes
     warmup0 = time.perf_counter()
