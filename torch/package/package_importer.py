@@ -78,7 +78,6 @@ class PackageImporter(Importer):
         else:
             self.filename = "<binary>"
             self.zip_reader = torch._C.PyTorchFileReader(file_or_buffer)
-        self.external_registry = {}
         self.root = _PackageNode(None)
         self.modules = {}
         self.extern_modules = self._read_extern()
@@ -165,19 +164,7 @@ class PackageImporter(Importer):
         """
         data = self.load_binary(package, resource)
         return data.decode(encoding, errors)
-    def load_tensor(self, dtype, size, key, location, storage_context):
-        name = f"{key}.storage"
 
-        if storage_context.has_storage(name):
-            storage = storage_context.get_storage(name, dtype).storage()
-        else:
-            tensor = self.zip_reader.get_storage_from_record(
-                ".data/" + name, size, dtype
-            )
-            if isinstance(self.zip_reader, torch._C.PyTorchFileReader):
-                storage_context.add_storage(name, tensor)
-            storage = tensor.storage()
-        return self.restore_location(storage, location)
     def load_pickle(self, package: str, resource: str, map_location=None) -> Any:
         """Unpickles the resource from the package, loading any modules that are needed to construct the objects
         using :meth:`import_module`.
@@ -251,15 +238,17 @@ class PackageImporter(Importer):
         data_file = io.BytesIO(self.zip_reader.get_record(pickle_file))
         unpickler = self.Unpickler(data_file)
         unpickler.persistent_load = persistent_load
-
+        # TODO: it might make sense to have a seperate packager in torch which uses the OSS pacakge but saves state
         @contextmanager
         def set_deserialization_context():
             # to let reduce_package access deserializaiton context
+            self.external_registry = {}
             self.storage_context = storage_context
             self.last_map_location = map_location
             try:
                 yield
             finally:
+                self.external_registry = None
                 self.storage_context = None
                 self.last_map_location = None
 

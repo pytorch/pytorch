@@ -78,11 +78,6 @@ class _StorageBase(object):
         size = self.nbytes()
 
         storage = cast(Storage, self)
-        if type(storage).__module__ == 'torch':
-            location = 'cpu'
-        else:
-            location = 'cuda:' + str(storage.get_device())
-
 
         storage_present = storage_context.has_storage(storage)
         storage_id = storage_context.get_or_add_storage(storage)
@@ -95,7 +90,7 @@ class _StorageBase(object):
             f".data/{storage_id}.storage", storage.data_ptr(), num_bytes
         )
 
-        return unpackage_storage, (storage_type, storage_id, location, size)
+        return unpackage_storage, (storage_type, storage_id, _get_location(storage), size)
 
 
     def __sizeof__(self):
@@ -217,26 +212,25 @@ def _load_from_bytes(b):
 _StorageBase.type = _type  # type: ignore[assignment]
 _StorageBase.cuda = _cuda  # type: ignore[assignment]
 
-def _get_restore_location(map_location):
-    if map_location is None:
-        restore_location = default_restore_location
-    elif isinstance(map_location, dict):
-        def restore_location(storage, location):
-            location = map_location.get(location, location)
-            return default_restore_location(storage, location)
-    elif isinstance(map_location, _string_classes):
-        def restore_location(storage, location):
-            return default_restore_location(storage, map_location)
-    elif isinstance(map_location, torch.device):
-        def restore_location(storage, location):
-            return default_restore_location(storage, str(map_location))
+def _get_location(storage):
+    if type(storage).__module__ == 'torch':
+        return 'cpu'
     else:
-        def restore_location(storage, location):
-            result = map_location(storage, location)
-            if result is None:
-                result = default_restore_location(storage, location)
-            return result
-    return restore_location
+        return 'cuda:' + str(obj.get_device())
+
+def _default_deserialize(location, storage):
+    if location == 'cpu':
+        return storage
+    elif location.startswith('cuda'):
+        print('cuda func')
+        location = 'cuda:' + str(storage.get_device())
+        assert torch.cuda.is_available()
+        assert device < device_count == torch.cuda.device_count()
+        device = torch.cuda._utils._get_device_index(location, True)
+        return torage.cuda(device)
+
+#TODO: remove dependency on load tensor
+#TODO: localize storage_context and loaded_storages
 
 def unpackage_storage(importer, storage_type, key, location, size):
     if 'loaded_storages' not in importer.external_registry:
@@ -247,7 +241,17 @@ def unpackage_storage(importer, storage_type, key, location, size):
     loaded_storages = importer.external_registry['loaded_storages']
     dtype = storage_type.dtype
     if key not in loaded_storages:
-        loaded_storages[key] = importer.load_tensor(dtype, size, key, location, storage_context)
+        name = f"{key}.storage"
+        if storage_context.has_storage(name):
+            storage = storage_context.get_storage(name, dtype).storage()
+        else:
+            tensor = importer.zip_reader.get_storage_from_record(
+                ".data/" + name, size, dtype
+            )
+            if isinstance(importer.zip_reader, torch._C.PyTorchFileReader):
+                storage_context.add_storage(name, tensor)
+            storage = tensor.storage()
+        loaded_storages[key] = _default_deserialize(location, storage)
     storage = loaded_storages[key]
     # TODO: Once we decide to break serialization FC, we can
     # stop wrapping with TypedStorage
@@ -592,10 +596,6 @@ class TypedStorage:
         size = self.size()
 
         storage = cast(Storage, storage)
-        if type(storage).__module__ == 'torch':
-            location = 'cpu'
-        else:
-            location = 'cuda:' + str(storage.get_device())
 
         storage_present = storage_context.has_storage(storage)
         storage_id = storage_context.get_or_add_storage(storage)
@@ -608,7 +608,7 @@ class TypedStorage:
                 f".data/{storage_id}.storage", storage.data_ptr(), num_bytes
             )
 
-        return unpackage_storage, (storage_type, storage_id, location, size)
+        return unpackage_storage, (storage_type, storage_id, _get_location(storage), size)
 
     def data_ptr(self):
         return self._storage.data_ptr()
