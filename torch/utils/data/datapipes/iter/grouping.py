@@ -1,10 +1,12 @@
-import random
-
 from collections import defaultdict
 
 from torch.utils.data import IterDataPipe, functional_datapipe, DataChunk
-from torch.utils.data.datapipes.utils.common import deprecation_warning_torchdata
+from torch.utils.data.datapipes.utils.common import DILL_AVAILABLE, check_lambda_fn
 from typing import Any, Callable, DefaultDict, Iterator, List, Optional, Sized, TypeVar
+
+if DILL_AVAILABLE:
+    import dill
+    dill.extend(use_dill=False)
 
 T_co = TypeVar('T_co', covariant=True)
 
@@ -137,97 +139,6 @@ class UnBatcherIterDataPipe(IterDataPipe):
                 raise IndexError(f"unbatch_level {self.unbatch_level} exceeds the depth of the DataPipe")
 
 
-def _in_batch_shuffle_fn(data: DataChunk):
-    random.shuffle(data)
-    return data
-
-
-class BucketBatcherIterDataPipe(IterDataPipe[DataChunk[T_co]]):
-    r""":class:`BucketBatcherIterDataPipe`.
-
-    Iterable DataPipe to create mini-batches of data from sorted bucket. An outer
-    dimension will be added as `batch_size` if `drop_last` is set to `True`,
-    or `length % batch_size` for the last batch if `drop_last` is set to `False`.
-
-    Args:
-        datapipe: Iterable DataPipe being batched
-        batch_size: The size of each batch
-        drop_last: Option to drop the last batch if it's not full
-        batch_num: Number of batches to consist a bucket
-        bucket_num: Number of buckets to consist a pool for shuffling
-        sort_key: Callable to specify the comparison key for sorting within bucket
-        in_batch_shuffle: Option to do in-batch shuffle or buffer shuffle
-    """
-    datapipe: IterDataPipe[T_co]
-    batch_size: int
-    drop_last: bool
-    batch_num: int
-    bucket_num: int
-    sort_key: Optional[Callable]
-    in_batch_shuffle: bool
-    length: Optional[int]
-
-    def __init__(self,
-                 datapipe: IterDataPipe[T_co],
-                 batch_size: int,
-                 drop_last: bool = False,
-                 batch_num: int = 100,
-                 bucket_num: int = 1,
-                 sort_key: Optional[Callable] = None,
-                 in_batch_shuffle: bool = True
-                 ) -> None:
-        assert batch_size > 0, "Batch size is required to be larger than 0!"
-        assert batch_num > 0, "Number of batches is required to be larger than 0!"
-        assert bucket_num > 0, "Number of buckets is required to be larger than 0!"
-        deprecation_warning_torchdata(type(self).__name__)
-        super().__init__()
-
-        # TODO: Verify _datapippe is not going to be serialized twice
-        # and be able to reconstruct
-        self._datapipe = datapipe
-        self.batch_size = batch_size
-        self.drop_last = drop_last
-        self.batch_num = batch_num
-        self.bucket_num = bucket_num
-        self.sort_key = sort_key
-        self.in_batch_shuffle = in_batch_shuffle
-
-        self.bucket_size = batch_size * batch_num
-        self.pool_size = self.bucket_size * bucket_num
-
-        if bucket_num > 1 or sort_key is None:
-            if in_batch_shuffle:
-                datapipe = datapipe.batch(batch_size=self.pool_size, drop_last=False).map(fn=_in_batch_shuffle_fn).unbatch()
-            else:
-                datapipe = datapipe.shuffle(buffer_size=self.pool_size)
-        if sort_key is not None:
-            datapipe = datapipe.batch(self.bucket_size).map(fn=sort_key).unbatch()
-        datapipe = datapipe.batch(batch_size, drop_last=drop_last)
-        if sort_key is not None:
-            # In-batch shuffle each bucket seems not that useful
-            if in_batch_shuffle:
-                datapipe = datapipe.batch(batch_size=bucket_num, drop_last=False).map(fn=_in_batch_shuffle_fn).unbatch()
-            else:
-                datapipe = datapipe.shuffle(buffer_size=self.bucket_size)
-        self.datapipe = datapipe
-
-        self.length = None
-
-    def __iter__(self) -> Iterator:
-        yield from self.datapipe
-
-    def __len__(self) -> int:
-        if self.length is not None:
-            return self.length
-        if isinstance(self._datapipe, Sized):
-            if self.drop_last:
-                self.length = len(self._datapipe) // self.batch_size
-            else:
-                self.length = (len(self._datapipe) + self.batch_size - 1) // self.batch_size
-            return self.length
-        raise TypeError("{} instance doesn't have valid length".format(type(self).__name__))
-
-
 @functional_datapipe('groupby')
 class GrouperIterDataPipe(IterDataPipe[DataChunk]):
     r""":class:`GrouperIterDataPipe`.
@@ -251,6 +162,7 @@ class GrouperIterDataPipe(IterDataPipe[DataChunk]):
                  group_size: Optional[int] = None,
                  guaranteed_group_size: Optional[int] = None,
                  drop_remaining: bool = False):
+        check_lambda_fn(group_key_fn)
         self.datapipe = datapipe
         self.group_key_fn = group_key_fn
         self.buffer_size = buffer_size
@@ -308,3 +220,36 @@ class GrouperIterDataPipe(IterDataPipe[DataChunk]):
             res = buffer_elements.pop(key)
             buffer_size -= len(res)
             yield self.wrapper_class(res)
+
+    def __getstate__(self):
+        if IterDataPipe.getstate_hook is not None:
+            return IterDataPipe.getstate_hook(self)
+
+        if DILL_AVAILABLE:
+            dill_function = dill.dumps(self.group_key_fn)
+        else:
+            dill_function = self.group_key_fn
+        state = (
+            self.datapipe,
+            dill_function,
+            self.buffer_size,
+            self.group_size,
+            self.guaranteed_group_size,
+            self.drop_remaining,
+        )
+        return state
+
+    def __setstate__(self, state):
+        (
+            self.datapipe,
+            dill_function,
+            self.buffer_size,
+            self.group_size,
+            self.guaranteed_group_size,
+            self.drop_remaining,
+        ) = state
+        if DILL_AVAILABLE:
+            self.group_key_fn = dill.loads(dill_function)  # type: ignore[assignment]
+        else:
+            self.group_key_fn = dill_function  # type: ignore[assignment]
+        self.wrapper_class = DataChunk
