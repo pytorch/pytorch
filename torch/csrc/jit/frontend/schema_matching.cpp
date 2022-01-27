@@ -16,6 +16,9 @@ namespace torch {
 namespace jit {
 
 static inline TypePtr unwrapOptional(TypePtr opt_type) {
+  if (auto dyn = opt_type->castRaw<c10::DynamicType>()) {
+    return unwrapOptional(dyn->fallback());
+  }
   if (auto unwrap_list_type = opt_type->cast<OptionalType>()) {
     return unwrap_list_type->getElementType();
   }
@@ -282,12 +285,17 @@ static bool varargsCanBeUsedAsList(
   bool is_last_argument = arg_index + 1 == schema.arguments().size() ||
       schema.arguments()[arg_index + 1].kwarg_only();
 
+  auto arg_type = arg.type();
+  if (auto dyn = arg_type->castRaw<c10::DynamicType>()) {
+    arg_type = dyn->fallback();
+  }
+
   // The formal must be a list
-  bool argument_is_list = arg.type()->kind() == TypeKind::ListType;
+  bool argument_is_list = arg_type->kind() == TypeKind::ListType;
 
   // matching varargs of typevar list nyi
   bool typevar_list = argument_is_list &&
-      arg.type()->castRaw<ListType>()->getElementType()->cast<VarType>();
+      arg_type->castRaw<ListType>()->getElementType()->cast<VarType>();
 
   // it must not be a broadcasting list like int[3],
   // otherwise a single int is a valid input
@@ -615,6 +623,8 @@ static Value* emitBuiltinNode(
   if (!version.has_value() ||
       isOpSymbolCurrent(matched_schema.schema_name, version.value())) {
     n->getOperation();
+  } else {
+    n->setHistoricSchemaName(matched_schema.schema_name);
   }
 
   return packOutputs(graph, n->outputs(), matched_schema.return_field_names);
@@ -678,6 +688,18 @@ Value* emitBuiltinCall(
       schemas.push_back(&op->schema());
   }
 
+  // we might have seen old historic
+  // ops that are deprecated
+  if (variants.empty()) {
+    auto oldSchemas =
+        loadPossibleHistoricOps(name.toQualString(), graph_version);
+    upgrader_schemas.reserve(oldSchemas.size());
+    for (const auto& old_schema_entry : oldSchemas) {
+      FunctionSchema old_schema = parseSchema(old_schema_entry);
+      upgrader_schemas.emplace_back(old_schema);
+    }
+  }
+
   // TODO (tugsuu): make sure this is optimized later
   for (const auto& schema : upgrader_schemas) {
     schemas.push_back(&schema);
@@ -710,7 +732,7 @@ Value* emitBuiltinCall(
 
   auto matched = matchSchemas(schemas, loc, graph, args, kwargs, self);
 
-  if (matched.first < variants.size()) {
+  if (matched.first < variants.size() + upgrader_schemas.size()) {
     return emitBuiltinNode(matched.second, loc, graph, name, graph_version);
   } else {
     auto& fn = *builtin_functions[matched.first - variants.size()];

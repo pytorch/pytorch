@@ -98,6 +98,7 @@ DECLARE_DISPATCH(
         c10::optional<double>,
         c10::optional<double>),
     nan_to_num_stub);
+DECLARE_DISPATCH(void (*)(TensorIteratorBase&, int64_t), round_decimals_stub);
 
 // Missing unary functions
 // digamma
