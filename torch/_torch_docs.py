@@ -8539,7 +8539,7 @@ Out-of-place version of :meth:`torch.Tensor.scatter_add_`
 """)
 
 add_docstr(torch.scatter_reduce, r"""
-scatter_reduce(input, dim, index, reduce, *, output_size=None, out=None) -> Tensor
+scatter_reduce(input, dim, index, reduce, *, output_size=None) -> Tensor
 
 Reduces all values from the :attr:`input` tensor to the indices specified in
 the :attr:`index` tensor. For each value in :attr:`input`, its output index is
@@ -8548,7 +8548,7 @@ corresponding value in :attr:`index` for ``dimension = dim``.
 The applied reduction for non-unique indices is defined via the :attr:`reduce`
 argument (:obj:`"sum"`, `"prod"`, `"mean"`, `"amax"`, `"amin"`).
 For non-existing indices, the output will be filled with the identity of the
-applied reduction.
+applied reduction (1 for (:obj:`"prod"`) and 0 otherwise).
 
 For a 3-D tensor with :obj:`reduce="sum"`, the output is given as::
 
@@ -8576,7 +8576,6 @@ Args:
     output_size (int, optional): the size of the output at dimension :attr:`dim`.
         If set to :obj:`None`, will get automatically inferred according to
         :obj:`index.max() + 1`
-    out (Tensor, optional): the output tensor
 
 Example::
 
