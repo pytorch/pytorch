@@ -3352,7 +3352,6 @@ class TestQuantizedLinear(TestCase):
                 W_q.q_zero_point(), W_q_origin.q_zero_point())
 
 @unittest.skipIf(IS_MACOS, "Known test failure on Mac.")
-@unittest.skipIf(not BUILD_WITH_CAFFE2, "Test needs Caffe2")
 class TestQuantizedEmbeddingOps(TestCase):
     def _test_embedding_bag_unpack_fn(self, pack_fn, unpack_fn, num_embeddings, embedding_dim, bit_rate, optimized_qparams,
                                       num_batches, data_type=np.float32):
@@ -3439,6 +3438,7 @@ class TestQuantizedEmbeddingOps(TestCase):
         np.testing.assert_allclose(w_unpacked.numpy(), w_unpacked_c2.numpy(), atol=1e-6, rtol=1e-6)
 
     """ Tests the correctness of the embedding_bag_8bit pack/unpack op against C2 """
+    @unittest.skipIf(not BUILD_WITH_CAFFE2, "Test needs Caffe2")
     @given(num_embeddings=st.integers(10, 100),
            embedding_dim=st.integers(5, 50).filter(lambda x: x % 4 == 0),
            num_batches=st.integers(1, 5),
@@ -3451,6 +3451,7 @@ class TestQuantizedEmbeddingOps(TestCase):
             pack_fn, unpack_fn, num_embeddings, embedding_dim, 8, False, num_batches, data_type=data_type)
 
     """ Tests the correctness of the embedding_bag_4bit pack/unpack op against C2 """
+    @unittest.skipIf(not BUILD_WITH_CAFFE2, "Test needs Caffe2")
     @given(num_embeddings=st.integers(10, 100),
            embedding_dim=st.integers(5, 50).filter(lambda x: x % 4 == 0),
            optimized_qparams=st.booleans(),
@@ -3463,6 +3464,7 @@ class TestQuantizedEmbeddingOps(TestCase):
             pack_fn, unpack_fn, num_embeddings, embedding_dim, 4, optimized_qparams, 1, data_type=data_type)
 
     """ Tests the correctness of the embedding_bag_2bit pack/unpack op against C2 """
+    @unittest.skipIf(not BUILD_WITH_CAFFE2, "Test needs Caffe2")
     @given(num_embeddings=st.integers(10, 100),
            embedding_dim=st.integers(5, 50).filter(lambda x: x % 8 == 0),
            optimized_qparams=st.booleans(),
@@ -3683,6 +3685,7 @@ class TestQuantizedEmbeddingOps(TestCase):
     @given(num_embeddings=st.integers(10, 100),
            embedding_dim=st.integers(5, 50).filter(lambda x: x % 4 == 0))
     def test_embedding(self, num_embeddings, embedding_dim):
+        print("David test")
         dtypes = [torch.quint8, torch.quint4x2]
         quant_ops = [torch.ops.quantized.embedding_byte, torch.ops.quantized.embedding_4bit]
         atols = [0.005, 0.1]
