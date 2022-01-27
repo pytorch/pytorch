@@ -9387,6 +9387,8 @@ op_db: List[OpInfo] = [
                     ref=np.fmod,
                     dtypes=all_types_and(torch.float16),
                     rhs_make_tensor_kwargs={'exclude_zero': True},
+                    supports_forward_ad=True,
+                    supports_fwgrad_bwgrad=True,
                     sample_inputs_func=sample_inputs_fmod_remainder,
                     skips=(
                         DecorateInfo(unittest.skip("Skipped!"), 'TestBinaryUfuncs',
@@ -9397,6 +9399,8 @@ op_db: List[OpInfo] = [
                     variant_test_name='autodiffed',
                     dtypes=all_types_and(torch.float16, torch.bool),
                     assert_autodiffed=True,
+                    supports_forward_ad=True,
+                    supports_fwgrad_bwgrad=True,
                     rhs_make_tensor_kwargs={'exclude_zero': True},
                     sample_inputs_func=partial(sample_inputs_fmod_remainder, autodiffed=True),
                     skips=(
