@@ -3,6 +3,7 @@
 from enum import Enum, auto
 import functools
 import os
+import tempfile
 import unittest
 
 import torch
@@ -27,6 +28,7 @@ from torch.testing._internal.common_fsdp import (
     _maybe_cuda,
 )
 from torch.testing._internal.common_utils import (
+    FILE_SCHEMA,
     run_tests,
     find_free_port,
     TestCase,
@@ -332,7 +334,14 @@ class TestAutoWrap(TestCase):
         # Random port in case the next test run quickly, same port would cause conflict.
         os.environ["MASTER_ADDR"] = "localhost"
         os.environ["MASTER_PORT"] = str(find_free_port())
-        torch.distributed.init_process_group(backend="nccl", rank=0, world_size=1)
+
+        file_name = tempfile.NamedTemporaryFile(delete=False).name
+        torch.distributed.init_process_group(
+            backend="nccl",
+            init_method=f"{FILE_SCHEMA}_{file_name}",
+            rank=0,
+            world_size=1,
+        )
 
         # NOTE: We move model to CUDA after init with FSDP to simulate real use
         # cases where full model cannot be loaded onto GPU, but their shards can.
@@ -352,8 +361,12 @@ class TestAutoWrap(TestCase):
             loss.backward()
         finally:
             torch.distributed.destroy_process_group()
-            del os.environ["MASTER_ADDR"]
-            del os.environ["MASTER_PORT"]
+
+        try:
+            os.remove(file_name)
+        except FileNotFoundError:
+            pass
+
 
 
 instantiate_parametrized_tests(TestFSDPWrap)
