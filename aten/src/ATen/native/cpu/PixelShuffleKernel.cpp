@@ -33,7 +33,6 @@ void cpu_pixel_shuffle(
   int64_t stride_s1 = S * height * width;
   int64_t stride_s2 = height * width;
   int64_t stride_h = width;
-  int64_t stride_w = 1;
 
   // input tensor shape of [n, c, s1, s2, h, w]
   // output tensor shape of [n, c, h, s1, w, s2]
@@ -43,7 +42,7 @@ void cpu_pixel_shuffle(
 
     for (const auto i : c10::irange(begin, end)) {
       int64_t input_offset = n * stride_n + c * stride_c + s1 * stride_s1 +
-          s2 * stride_s2 + h * stride_h + w * stride_w;
+          s2 * stride_s2 + h * stride_h + w;
       output_data[i] = input_data[input_offset];
 
       data_index_step(n, nbatch, c, sub_channels, h, height, s1, S, w, width, s2, S);
@@ -69,14 +68,6 @@ void cpu_pixel_shuffle_channels_last(
   int64_t numel = input.numel();
   int64_t S = upscale_factor;
 
-  // input strides
-  int64_t stride_n = height * width * channels;
-  int64_t stride_h = width * channels;
-  int64_t stride_w = channels;
-  int64_t stride_c = S * S;
-  int64_t stride_s1 = S;
-  int64_t stride_s2 = 1;
-
   // input tensor shape of [n, h, w, c, s1, s2]
   // output tensor shape of [n, h, s1, w, s2, c]
   using Vec = vec::Vectorized<scalar_t>;
@@ -89,7 +80,7 @@ void cpu_pixel_shuffle_channels_last(
     data_index_init(begin, n, nbatch, h, height);
     for (const auto i : c10::irange(begin, end)) {
       for (const auto w : c10::irange(width)) {
-        scalar_t* input_ptr = input_data + n * stride_n + h * stride_h + w * stride_w;
+        scalar_t* input_ptr = input_data + n * height * width * channels + h * width * channels + w * channels;
 
         // step 1: transpose each channel lane
         //   from: [c, s1*s2]
