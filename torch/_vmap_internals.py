@@ -158,14 +158,15 @@ def vmap(func: Callable, in_dims: in_dims_t = 0, out_dims: out_dims_t = 0) -> Ca
     gradients when composed with autograd.
 
     .. note::
-        We have moved development of vmap to
-        `functorch. <https://github.com/pytorch/functorch>`_ functorch's
-        vmap is able to arbitrarily compose with gradient computation
-        and contains significant performance improvements.
-        Please give that a try if that is what you're looking for.
+        torch.vmap is no longer being maintained. Please use
+        `functorch <https://github.com/pytorch/functorch>`_ instead.
+        functorch's vmap is able to arbitrarily compose with gradient
+        computation and contains significant performance improvements.
+        The plan is to eventually upstream functorch's vmap and replace
+        torch.vmap with it.
 
         Furthermore, if you're interested in using vmap for your use case,
-        please `contact us! <https://github.com/pytorch/pytorch/issues/42368>`_
+        please `contact us! <https://github.com/pytorch/functorch>`_
         We're interested in gathering feedback from early adopters to inform
         the design.
 
@@ -248,11 +249,12 @@ def vmap(func: Callable, in_dims: in_dims_t = 0, out_dims: out_dims_t = 0) -> Ca
         sequences out of the box.
     """
     warnings.warn(
-        'Please use functorch.vmap instead of torch.vmap '
-        '(https://github.com/pytorch/functorch). '
-        'We\'ve moved development on torch.vmap over to functorch; '
-        'functorch\'s vmap has a multitude of significant performance and '
-        'functionality improvements.',
+        'torch.vmap is no longer being maintained. Please use '
+        'functorch.vmap instead. '
+        'functorch.vmap is able to arbitrarily compose with gradient '
+        'computation and contains significant performance improvements. '
+        'The plan is to eventually upstream functorch\'s vmap and replace '
+        'torch.vmap with it.',
         stacklevel=2)
     return _vmap(func, in_dims, out_dims)
 
