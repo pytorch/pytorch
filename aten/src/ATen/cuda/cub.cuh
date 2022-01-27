@@ -58,6 +58,8 @@
 namespace at_cuda_detail {
 #endif
 
+// backport https://github.com/NVIDIA/cub/pull/306 for c10::BFloat16
+
 template <>
 struct ROCM_HIPCUB(cub)::FpLimits<c10::BFloat16>
 {
