@@ -8546,9 +8546,14 @@ the :attr:`index` tensor. For each value in :attr:`input`, its output index is
 specified by its index in :attr:`input` for ``dimension != dim`` and by the
 corresponding value in :attr:`index` for ``dimension = dim``.
 The applied reduction for non-unique indices is defined via the :attr:`reduce`
-argument (:obj:`"sum"`, `"prod"`, `"mean"`, `"amax"`, `"amin"`).
+argument (:obj:`"sum"`, :obj:`"prod"`, :obj:`"mean"`, :obj:`"amax"`, :obj:`"amin"`).
 For non-existing indices, the output will be filled with the identity of the
-applied reduction (1 for (:obj:`"prod"`) and 0 otherwise).
+applied reduction (1 for :obj:`"prod"` and 0 otherwise).  
+
+It is also required that ``index.size(d) == input.size(d)`` for all dimensions ``d``.
+Moreover, if :attr:`output_size` is defined the the values of :attr:`index` must be
+between ``0`` and ``output_size - 1`` inclusive.
+
 
 For a 3-D tensor with :obj:`reduce="sum"`, the output is given as::
 
@@ -8572,7 +8577,7 @@ Args:
     index (LongTensor): the indices of elements to scatter and reduce.
     src (Tensor): the source elements to scatter and reduce
     reduce (str): the reduction operation to apply for non-unique indices
-        (:obj:`"sum"`, `"prod"`, `"mean"`, `"amax"`, `"amin"`)
+        (:obj:`"sum"`, :obj:`"prod"`, :obj:`"mean"`, :obj:`"amax"`, :obj:`"amin"`)
     output_size (int, optional): the size of the output at dimension :attr:`dim`.
         If set to :obj:`None`, will get automatically inferred according to
         :obj:`index.max() + 1`
