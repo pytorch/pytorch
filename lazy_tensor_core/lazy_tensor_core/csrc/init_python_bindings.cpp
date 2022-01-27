@@ -683,6 +683,63 @@ void InitLtcModuleBindings(py::module m) {
   m.def("_ltc_set_noop_execution_mode", [](bool enable_noop) {
     torch::lazy::LazyGraphExecutor::Get()->SetNoOpExecutionMode(enable_noop);
   });
+  m.def("_jit_function_call", [](py::args args, py::kwargs kwargs) {
+    HANDLE_TH_ERRORS
+
+    auto strongPtr = py::cast<torch::jit::StrongFunctionPtr>(args[0]);
+    torch::jit::Function& callee = *strongPtr.function_;
+
+    std::cerr << "function pointer = " << &callee << std::endl;
+
+    std::vector<c10::IValue> stack;
+    size_t tensor_args = 0;
+
+    std::cerr << "constructing arguments\n";
+    torch::lazy::BackendDevice device;
+    std::vector<torch::lazy::Value> tvals;
+
+    std::vector<c10::IValue> ivals;
+
+    // replace lazy tensors with meta tensors
+    // so we can do shape inference
+    for (auto i: c10::irange(args.size() - 1)) {
+      if (THPVariable_Check(args[i + 1].ptr())) {
+        auto& t = THPVariable_Unpack(args[i + 1].ptr());
+        auto lt = torch::lazy::GetLtcTensor(t);
+        device = lt.GetDevice();
+        tvals.push_back(lt.GetIrValue());
+        auto mt = at::empty_strided(t.sizes(), t.strides(), at::TensorOptions(at::kMeta).dtype(t.scalar_type()));
+        stack.push_back(mt);
+      } else {
+        ivals.push_back(torch::jit::toTypeInferredIValue(args[i+1]));
+      }
+      tensor_args++;
+    }
+
+    std::cerr << "about to run a jit func with meta tensors\n";
+    stack.insert(stack.end(), ivals.cbegin(), ivals.cend());
+    {
+      pybind11::gil_scoped_release no_gil_guard;
+      callee.run(stack);
+    }
+    auto rt = stack.back().toTensor();
+
+    torch::lazy::Shape rshape(rt.scalar_type(), rt.sizes());
+
+    std::cerr << "inferred shape w/ meta tensors " << c10::Join(",", rt.sizes()) << std::endl;
+
+
+    // TODO: add support for constants 
+    std::cerr << "before torch::lazy::FunctionCall: ivals.size() = " << ivals.size();
+    auto node = torch::lazy::MakeNode<torch::lazy::FunctionCall>(
+        tvals, ivals, strongPtr.function_,
+        std::vector<torch::lazy::Shape>{rshape});
+    std::cerr << "node created!\n";
+    auto rlt = torch::lazy::LazyTensor::Create(node, device);
+    return torch::lazy::CreateAtenFromLtcTensor(rlt);
+
+    END_HANDLE_TH_ERRORS_PYBIND
+  });
 }  // namespace
 
 }  // namespace
