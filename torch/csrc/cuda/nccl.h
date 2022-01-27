@@ -150,6 +150,13 @@ TORCH_CUDA_CPP_API void all_gather(
     const stream_list& streams = {},
     const comm_list& user_comms = {});
 
+TORCH_CUDA_CPP_API void gather(
+    const at::Tensor& inputs,
+    std::vector<at::Tensor>& outputs,
+    ncclComm_t comm,
+    at::cuda::CUDAStream& stream,
+    int32_t root = 0);
+
 TORCH_CUDA_CPP_API void all2all_single_equal_split(
     at::Tensor& input,
     at::Tensor& output,

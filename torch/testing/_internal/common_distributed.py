@@ -69,7 +69,6 @@ class DistTestCases:
     # Backends that do not support a specific collective
     skip_collective = {}
     skip_collective["allgather_coalesced"] = {"nccl", "mpi"}
-    skip_collective["gather"] = {"nccl"}
     skip_collective["scatter"] = {"nccl"}
     skip_collective["reduce"] = set()
     skip_collective["sendrecv anysource"] = {"nccl"}
