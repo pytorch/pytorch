@@ -1067,27 +1067,28 @@ class TestQuantizedOps(TestCase):
                          msg="torch.nn.functional.channel_shuffle results are off")
 
     """Tests pixel shuffle operation on quantized tensors."""
-    @given(X=hu.tensor(shapes=hu.array_shapes(min_dims=4, max_dims=4,
-                                              min_side=2, max_side=32, max_numel=10**5),
-                       qparams=hu.qparams(dtypes=[torch.quint8])),
-           upscale_factor=st.integers(2, 2))
-    def test_pixel_shuffle(self, X, upscale_factor):
-        X, (scale, zero_point, torch_type) = X
-        channels = X.shape[-3]
-        assume(channels % (upscale_factor * upscale_factor) == 0)
-        a = torch.from_numpy(X)
-        a = torch.rand(a.shape)
-        a_out = torch.nn.functional.pixel_shuffle(a, upscale_factor)
+    def test_pixel_shuffle(self):
+        upscales=(2, 3)
+        shapes = ((4, 4, 4, 4), (1, 17, 3, 4))
+        memory_formats = (torch.channels_last, torch.contiguous_format)
+        dtype = torch.quint8
+        test_cases = itertools.product(upscales, shapes, memory_formats)
+        for upscale, shape, memory_format in test_cases:
+            n, c, h, w = shape[0], shape[1] * upscale * upscale, shape[2], shape[3]
+            a, scale, zero_point, torch_type = \
+                torch.randn(n, c, h, w), 0.1, 0, dtype
+            a = a.to(memory_format=memory_format)
+            a_out = torch.nn.functional.pixel_shuffle(a, upscale)
 
-        a_ref = torch.quantize_per_tensor(a_out, scale=scale,
-                                          zero_point=zero_point, dtype=torch_type)
-        a_ref = a_ref.dequantize()
-        qa = torch.quantize_per_tensor(a, scale=scale, zero_point=zero_point,
-                                       dtype=torch_type)
+            a_ref = torch.quantize_per_tensor(a_out, scale=scale,
+                                              zero_point=zero_point, dtype=torch_type)
+            a_ref = a_ref.dequantize()
+            qa = torch.quantize_per_tensor(a, scale=scale, zero_point=zero_point,
+                                           dtype=dtype)
 
-        a_hat = torch.nn.functional.pixel_shuffle(qa, upscale_factor)
-        self.assertEqual(a_ref, a_hat.dequantize(),
-                         msg="torch.nn.functional.pixel_shuffle results are off")
+            a_hat = torch.nn.functional.pixel_shuffle(qa, upscale)
+            self.assertEqual(a_ref, a_hat.dequantize(),
+                             msg="torch.nn.functional.pixel_shuffle results are off")
 
     """Tests 1D max pool operation on quantized tensors."""
     @given(X=hu.tensor(shapes=hu.array_shapes(min_dims=2, max_dims=3,
