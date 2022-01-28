@@ -49,48 +49,18 @@ py_binary(
 
 aten_generation_srcs = ["aten/src/ATen/native/native_functions.yaml"] + glob(["aten/src/ATen/templates/**"])
 
-generated_lightweight_dispatch_cpp = [
-    "aten/src/ATen/RegisterFunctionalization_0.cpp",
-    "aten/src/ATen/RegisterFunctionalization_1.cpp",
-    "aten/src/ATen/RegisterFunctionalization_2.cpp",
-    "aten/src/ATen/RegisterFunctionalization_3.cpp",
-    "aten/src/ATen/RegisterCompositeImplicitAutograd.cpp",
-    "aten/src/ATen/RegisterCompositeExplicitAutograd.cpp",
-    "aten/src/ATen/RegisterMeta.cpp",
-    "aten/src/ATen/CPUFunctions.h",
-    "aten/src/ATen/CPUFunctions_inl.h",
-    "aten/src/ATen/CompositeExplicitAutogradFunctions.h",
-    "aten/src/ATen/CompositeExplicitAutogradFunctions_inl.h",
-    "aten/src/ATen/CompositeImplicitAutogradFunctions.h",
-    "aten/src/ATen/CompositeImplicitAutogradFunctions_inl.h",
-    "aten/src/ATen/FunctionalInverses.h",
-    "aten/src/ATen/Functions.h",
-    "aten/src/ATen/Functions.cpp",
-    "aten/src/ATen/RedispatchFunctions.h",
-    "aten/src/ATen/NativeFunctions.h",
-    "aten/src/ATen/MetaFunctions.h",
-    "aten/src/ATen/MetaFunctions_inl.h",
-    "aten/src/ATen/MethodOperators.h",
-    "aten/src/ATen/NativeMetaFunctions.h",
-    "aten/src/ATen/RegistrationDeclarations.h",
-    "aten/src/ATen/core/aten_interned_strings.h",
-    "aten/src/ATen/core/TensorBody.h",
-    "aten/src/ATen/core/TensorMethods.cpp",
-    "aten/src/ATen/core/ATenOpList.cpp",
-]
-
 generated_unboxing_cpp = [
-    "aten/src/ATen/CodegenFunctions.h",
-    "aten/src/ATen/CodegenFunctions_0.cpp",
-    "aten/src/ATen/CodegenFunctions_1.cpp",
-    "aten/src/ATen/CodegenFunctions_2.cpp",
-    "aten/src/ATen/CodegenFunctions_3.cpp",
-    "aten/src/ATen/CodegenFunctions_4.cpp",
-    "aten/src/ATen/CodegenUnboxingWrappers_0.cpp",
-    "aten/src/ATen/CodegenUnboxingWrappers_1.cpp",
-    "aten/src/ATen/CodegenUnboxingWrappers_2.cpp",
-    "aten/src/ATen/CodegenUnboxingWrappers_3.cpp",
-    "aten/src/ATen/CodegenUnboxingWrappers_4.cpp",
+    "aten/src/ATen/UnboxingFunctions.h",
+    "aten/src/ATen/UnboxingFunctions_0.cpp",
+    "aten/src/ATen/UnboxingFunctions_1.cpp",
+    "aten/src/ATen/UnboxingFunctions_2.cpp",
+    "aten/src/ATen/UnboxingFunctions_3.cpp",
+    "aten/src/ATen/UnboxingFunctions_4.cpp",
+    "aten/src/ATen/RegisterCodegenUnboxedKernels_0.cpp",
+    "aten/src/ATen/RegisterCodegenUnboxedKernels_1.cpp",
+    "aten/src/ATen/RegisterCodegenUnboxedKernels_2.cpp",
+    "aten/src/ATen/RegisterCodegenUnboxedKernels_3.cpp",
+    "aten/src/ATen/RegisterCodegenUnboxedKernels_4.cpp",
 ]
 
 generated_cpu_cpp = [
@@ -150,8 +120,20 @@ generated_cuda_cpp = [
 generate_aten(
     name = "generated_aten_cpp",
     srcs = aten_generation_srcs,
-    outs = generated_lightweight_dispatch_cpp,
+    outs = generated_cpu_cpp,
+    extra_config = if_lightweight_dispatch([
+        "--static_dispatch_backend",
+        "CPU",
+    ]),
     generator=":gen",
+)
+
+genrule(
+    name = "generated_aten_unboxing_cpp",
+    srcs = aten_generation_srcs,
+    outs = generated_unboxing_cpp,
+    cmd = "$(location :gen_unboxing) --source-path aten/src/ATen --install_dir `dirname $(location aten/src/ATen/Declarations.yaml)`",
+    tools = [":gen_unboxing"],
 )
 
 py_library(
@@ -410,7 +392,9 @@ cc_library(
     ) + [
         ":aten_src_ATen_config",
         ":generated_aten_cpp",
-    ],
+    ] + if_lightweight_dispatch([
+        ":generated_aten_unboxing_cpp",
+    )],
     includes = [
         "aten/src",
     ],
@@ -455,7 +439,7 @@ cc_library(
         ":aten_native_sparse_cpp",
         ":aten_native_xnnpack",
         ":aten_src_ATen_config",
-    ] + generated_cpu_cpp,
+    ] + generated_cpu_cpp + if_lightweight_dispatch(generated_unboxing_cpp),
     copts = ATEN_COPTS,
     data = if_cuda(
         [":libcaffe2_nvrtc.so"],
