@@ -1,4 +1,5 @@
 #include <ATen/ATen.h>
+#include <ATen/Parallel.h>
 #include <ATen/native/UpSample.h>
 #include <ATen/native/quantized/affine_quantizer.h>
 #include <ATen/native/quantized/cpu/quantized_ops.h>
@@ -12,6 +13,75 @@
 namespace at {
 namespace native {
 namespace {
+
+// pre calcuate interpolation params per feature map plane,
+// borrowed from caffe2/operators/roi_align_op.cc
+template <typename index_t>
+struct UpsampleBilinearParam {
+  index_t p00, p01, p10, p11;
+  float w00, w01, w10, w11;
+  UpsampleBilinearParam(
+      int64_t input_width,
+      int64_t h1,
+      int64_t h1p,
+      int64_t w1,
+      int64_t w1p,
+      float h0lambda,
+      float h1lambda,
+      float w0lambda,
+      float w1lambda) {
+    p00 = static_cast<index_t>(h1 * input_width + w1);
+    p01 = static_cast<index_t>(h1 * input_width + w1 + w1p);
+    p10 = static_cast<index_t>((h1 + h1p) * input_width + w1);
+    p11 = static_cast<index_t>((h1 + h1p) * input_width + w1 + w1p);
+    w00 = h0lambda * w0lambda;
+    w01 = h0lambda * w1lambda;
+    w10 = h1lambda * w0lambda;
+    w11 = h1lambda * w1lambda;
+  }
+};
+
+template <typename index_t>
+void MakeUpsampleBilinearParams(
+    std::vector<UpsampleBilinearParam<index_t>>& params,
+    int64_t input_height,
+    int64_t input_width,
+    int64_t output_height,
+    int64_t output_width,
+    bool align_corners,
+    c10::optional<double> scales_h,
+    c10::optional<double> scales_w) {
+
+  const auto rheight = area_pixel_compute_scale<float>(
+      input_height, output_height, align_corners, scales_h);
+
+  const auto rwidth = area_pixel_compute_scale<float>(
+      input_width, output_width, align_corners, scales_w);
+
+  for (const auto h2 : c10::irange(output_height)) {
+    const auto h1r = area_pixel_compute_source_index<float>(
+        rheight, h2, align_corners, /*cubic=*/false);
+
+    const int64_t h1 = h1r;
+    const int64_t h1p = (h1 < input_height - 1) ? 1 : 0;
+
+    const float h1lambda = h1r - h1;
+    const float h0lambda = static_cast<float>(1.) - h1lambda;
+
+    for (const auto w2 : c10::irange(output_width)) {
+      const auto w1r = area_pixel_compute_source_index<float>(
+          rwidth, w2, align_corners, /*cubic=*/false);
+
+      const int64_t w1 = w1r;
+      const int64_t w1p = (w1 < input_width - 1) ? 1 : 0;
+
+      const float w1lambda = w1r - w1;
+      const float w0lambda = static_cast<float>(1.) - w1lambda;
+
+      params.emplace_back(input_width, h1, h1p, w1, w1p, h0lambda, h1lambda, w0lambda, w1lambda);
+    }
+  }
+}
 
 // at::native functions for the native_functions.yaml
 template <typename scalar_t>
@@ -47,54 +117,48 @@ static void upsample_bilinear2d_out_frame(
     return;
   }
 
-  const auto rheight = area_pixel_compute_scale<float>(
-      input_height, output_height, align_corners, scales_h);
-
-  const auto rwidth =
-      area_pixel_compute_scale<float>(input_width, output_width, align_corners, scales_w);
   // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
   float output_scale = output.q_scale() / input.q_scale();
 
   const int64_t input_q_zero_point = input.q_zero_point();
   const int64_t output_q_zero_point = output.q_zero_point();
 
-  for (const auto h2 : c10::irange(output_height)) {
-    const auto h1r = area_pixel_compute_source_index<float>(
-        rheight, h2, align_corners, /*cubic=*/false);
+  // safe check for int32 indexing
+  TORCH_CHECK(input_height * input_width <= std::numeric_limits<int32_t>::max());
 
-    const int64_t h1 = h1r;
-    const int64_t h1p = (h1 < input_height - 1) ? 1 : 0;
+  std::vector<UpsampleBilinearParam<int32_t>> params;
+  params.reserve(output_height * output_width);
+  MakeUpsampleBilinearParams(
+      params,
+      input_height,
+      input_width,
+      output_height,
+      output_width,
+      align_corners,
+      scales_h,
+      scales_w);
 
-    const float h1lambda = h1r - h1;
-    const float h0lambda = static_cast<float>(1.) - h1lambda;
+  at::parallel_for(0, channels, 0, [&](int64_t begin, int64_t end) {
+    for (const auto c : c10::irange(begin, end)) {
+      const auto* pos1 = &i_p[c * input_height * input_width];
+      auto* pos2 = &o_p[c * output_height * output_width];
 
-    for (const auto w2 : c10::irange(output_width)) {
-      const auto w1r = area_pixel_compute_source_index<float>(
-          rwidth, w2, align_corners, /*cubic=*/false);
+      for (const auto i : c10::irange(output_height * output_width)) {
+        const auto& param = params[i];
+        float result =
+            param.w00 * pos1[param.p00] +
+            param.w01 * pos1[param.p01] +
+            param.w10 * pos1[param.p10] +
+            param.w11 * pos1[param.p11] -
+            input_q_zero_point;
 
-      const int64_t w1 = w1r;
-      const int64_t w1p = (w1 < input_width - 1) ? 1 : 0;
-
-      const float w1lambda = w1r - w1;
-      const float w0lambda = static_cast<float>(1.) - w1lambda;
-      const typename scalar_t::underlying* pos1 = i_p + h1 * input_width + w1;
-      typename scalar_t::underlying* pos2 = o_p + h2 * output_width + w2;
-
-      for (const auto c : c10::irange(channels)) {
-        (void)c; //Suppress unused variable warning
-        float result = h0lambda * (w0lambda * pos1[0] + w1lambda * pos1[w1p]) +
-            h1lambda *
-                (w0lambda * pos1[h1p * input_width] +
-                 w1lambda * pos1[h1p * input_width + w1p]) - input_q_zero_point;
         // requantization
-        pos2[0] = at::native::quantize_val<scalar_t>(
-                      output_scale, output_q_zero_point, result)
-                      .val_;
-        pos1 += input_width * input_height;
-        pos2 += output_width * output_height;
+        pos2[i] = at::native::quantize_val<scalar_t>(
+            output_scale, output_q_zero_point, result)
+            .val_;
       }
     }
-  }
+  });
 }
 
 } // namespace
