@@ -3204,14 +3204,14 @@ See :func:`torch.rot90`
 
 add_docstr_all('round',
                r"""
-round() -> Tensor
+round(decimals=0) -> Tensor
 
 See :func:`torch.round`
 """)
 
 add_docstr_all('round_',
                r"""
-round_() -> Tensor
+round_(decimals=0) -> Tensor
 
 In-place version of :meth:`~Tensor.round`
 """)
