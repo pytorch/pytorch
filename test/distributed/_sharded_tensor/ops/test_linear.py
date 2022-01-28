@@ -49,7 +49,7 @@ if TEST_WITH_DEV_DBG_ASAN:
 
 class TestShardedTensorOpsLinear(ShardedTensorTestBase):
     def _run_sharded_linear(
-        self, spec, input_size, linear_size, sharded_dim, unstack_output=False,
+        self, spec, input_size, linear_size, sharded_dim
     ):
         # Use same seed.
         torch.manual_seed(0)
@@ -72,8 +72,6 @@ class TestShardedTensorOpsLinear(ShardedTensorTestBase):
             _reshard_output(sharded_linear, reshard_spec)
         )
         sharded_output = sharded_linear(inp)
-        if unstack_output:
-            sharded_output = torch.cat(torch.unbind(sharded_output))
 
         # Run local computation
         local_output = local_linear(inp)
@@ -88,9 +86,7 @@ class TestShardedTensorOpsLinear(ShardedTensorTestBase):
         sharded_output = torch.nn.functional.linear(
             inp, sharded_linear.weight, sharded_linear.bias
         )
-        sharded_output = sharded_output.reshard(reshard_spec).local_shard()
-        if unstack_output:
-            sharded_output = torch.cat(torch.unbind(sharded_output))
+        sharded_output = sharded_output.reshard(reshard_spec).local_tensor()
         self.assertEqual(local_output, sharded_output)
 
         # Compute loss and run backward pass.
@@ -99,7 +95,7 @@ class TestShardedTensorOpsLinear(ShardedTensorTestBase):
         local_grad = local_linear.weight.grad
 
         # Verify that both weight and bias in the sharded linear has non-None grad.
-        sharded_weight = sharded_linear.weight.local_shards()[0].tensor
+        sharded_weight = sharded_linear.weight.local_tensor()
         self.assertNotEqual(sharded_linear.bias.grad, None)
         self.assertNotEqual(sharded_weight.grad, None)
 
@@ -129,7 +125,7 @@ class TestShardedTensorOpsLinear(ShardedTensorTestBase):
             lr=0.1,
         )
         sharded_optim.step()
-        sharded_weight = sharded_linear.weight.local_shards()[0].tensor
+        sharded_weight = sharded_linear.weight.local_tensor()
         local_weight_narrowed = local_linear.weight.narrow(
             sharded_dim, start_pos, chunk_size
         )
@@ -156,10 +152,10 @@ class TestShardedTensorOpsLinear(ShardedTensorTestBase):
             self._run_sharded_linear(spec, [100, 12, 4, 15], [15, 14], 0)
 
             # Test single input dim
-            self._run_sharded_linear(spec, [17], [17, 12], 0, True)
-            self._run_sharded_linear(spec, [21], [21, 11], 0, True)
-            self._run_sharded_linear(spec, [23], [23, 13], 0, True)
-            self._run_sharded_linear(spec, [15], [15, 14], 0, True)
+            self._run_sharded_linear(spec, [17], [17, 12], 0)
+            self._run_sharded_linear(spec, [21], [21, 11], 0)
+            self._run_sharded_linear(spec, [23], [23, 13], 0)
+            self._run_sharded_linear(spec, [15], [15, 14], 0)
 
     @with_comms(init_rpc=False)
     @skip_if_lt_x_gpu(TEST_GPU_NUM)

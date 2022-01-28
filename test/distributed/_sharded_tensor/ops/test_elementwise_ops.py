@@ -34,8 +34,8 @@ class TestShardedTensorElementWiseOps(ShardedTensorTestBase):
         torch.manual_seed(self.rank)
         st = _sharded_tensor.rand(spec, *input_size)
         new_st = op(st)
-        local_shard = st.collect_local_shard()
-        new_st_local_shard = new_st.collect_local_shard()
+        local_shard = st.local_tensor()
+        new_st_local_shard = new_st.local_tensor()
         self.assertEqual(
             op(local_shard),
             new_st_local_shard,
@@ -53,6 +53,19 @@ class TestShardedTensorElementWiseOps(ShardedTensorTestBase):
             self._run_sharded_elementwise_ops(spec, [18, 21], torch.nn.functional.gelu)
             self._run_sharded_elementwise_ops(spec, [17, 23], torch.nn.functional.gelu)
             self._run_sharded_elementwise_ops(spec, [14, 15], torch.nn.functional.gelu)
+
+    @with_comms(init_rpc=False)
+    @skip_if_lt_x_gpu(TEST_GPU_NUM)
+    @requires_nccl()
+    def test_sharded_relu(self):
+        specs = generate_chunk_sharding_specs_for_test(
+            0
+        ) + generate_chunk_sharding_specs_for_test(1)
+        for spec in specs:
+            self._run_sharded_elementwise_ops(spec, [12, 17], torch.nn.functional.relu)
+            self._run_sharded_elementwise_ops(spec, [18, 21], torch.nn.functional.relu)
+            self._run_sharded_elementwise_ops(spec, [17, 23], torch.nn.functional.relu)
+            self._run_sharded_elementwise_ops(spec, [14, 15], torch.nn.functional.relu)
 
 
 if __name__ == "__main__":

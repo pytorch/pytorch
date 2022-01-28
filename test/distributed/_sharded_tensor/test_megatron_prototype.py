@@ -80,8 +80,8 @@ class TestShardedTensorMegatronLinear(ShardedTensorTestBase):
 
         def _get_weight_local_shard(module):
             return (
-                module.fc1.weight.local_shards()[0].tensor,
-                module.fc2.weight.local_shards()[0].tensor,
+                module.fc1.weight.local_tensor(),
+                module.fc2.weight.local_tensor(),
             )
 
         # Use same seed.

@@ -101,7 +101,7 @@ def sharded_linear(types, args, kwargs, pg):
     weight = args[1]
     bias = kwargs["bias"]
 
-    local_shard = weight.local_shard()
+    local_shard = weight.local_tensor()
     local_shard_t = local_shard.t().contiguous()
     sharding_dim = weight._sharding_spec.dim
     world_size = dist.get_world_size(pg)
@@ -191,18 +191,14 @@ def _handle_col_wise_sharding(input, world_size, weight, rank, local_shard_t, bi
     local_bias = _BiasTensorNarrow.apply(
         world_size, start_pos, chunk_size, weight, pg, bias
     )
-    results = [torch.tensor(1)] * world_size
+    results = [None] * world_size
     indices = {}
     for idx, placement in enumerate(weight._sharding_spec.placements):
         indices[placement.rank()] = idx
     for i, inp in enumerate(gathered_inputs):
         results[indices[i]] = inp.matmul(local_shard_t) + local_bias
-    if len(input.size()) == 1:  # type: ignore[arg-type]
-        temp_results = torch.stack(results)
-    else:
-        temp_results = torch.cat(results)
     return _init_sharded_tensor_from_local_result(
-        weight, temp_results, 0, temp_results.dim() - 1, world_size, pg
+        weight, torch.cat(results), 0, -1, world_size, pg
     )
 
 
@@ -260,11 +256,15 @@ def _handle_row_wise_sharding_tensor(
             0, torch.tensor(indices_flatten, device=input_t.device)
         )
 
-    gathered_input_size = [input_split_sizes[rank] * world_size] + list(input_t_size[1:])
+    gathered_input_size = [input_split_sizes[rank] * world_size] + list(
+        input_t_size[1:]
+    )
     gathered_input = torch.empty(gathered_input_size, device=input_t.device)
 
     # Perform autograd enabled alltoall
-    all_to_all_single(gathered_input, input_t, input_split_sizes=input_split_sizes, group=pg)
+    all_to_all_single(
+        gathered_input, input_t, input_split_sizes=input_split_sizes, group=pg
+    )
     gathered_input = gathered_input.transpose(0, -1)
 
     # Perform local matmuls for all shards
@@ -348,12 +348,15 @@ def _init_sharded_tensor_from_local_result(
         A :class:`ShardedTensor` object which filled with local intermediate results.
     """
     sharded_weight_metadata = copy.deepcopy(sharded_tensor.local_shards()[0].metadata)
-    current_offsets = [0] * len(local_result.size())
-    current_offsets[result_shard_dim] = sharded_weight_metadata.shard_offsets[
-        tensor_shard_dim
-    ]
+    current_offsets = [0] * local_result.dim()
+    # When the tensor is sharded on the only dimension, the size and offset needs to
+    # be world_size times more.
+    factor = world_size if local_result.dim() == 1 else 1
+    current_offsets[result_shard_dim] = (
+        sharded_weight_metadata.shard_offsets[tensor_shard_dim] * factor
+    )
     global_size = list(local_result.size())
-    global_size[result_shard_dim] = sharded_tensor.size(tensor_shard_dim)
+    global_size[result_shard_dim] = sharded_tensor.size(tensor_shard_dim) * factor
     local_shard_metadata = ShardMetadata(
         shard_offsets=current_offsets,
         shard_sizes=list(local_result.size()),
@@ -376,6 +379,7 @@ class _BiasTensorNarrow(Function):
     need to narrow the bias term in the forward while doing backward, we need
     to gather all gradients of narrowed bias across all ranks.
     """
+
     @staticmethod
     def forward(ctx, world_size, start_pos, chunk_size, weight, pg, bias):
         ctx.weight = weight
@@ -401,6 +405,7 @@ class _BiasTensorPartial(Function):
     divide the bias term by the world size in the forward while doing backward,
     we need to skip this division op.
     """
+
     @staticmethod
     def forward(ctx, world_size, bias):
         ctx.world_size = world_size

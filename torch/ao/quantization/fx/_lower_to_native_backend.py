@@ -5,7 +5,7 @@ from .graph_module import QuantizedGraphModule
 from .quantized_fusion_patterns_and_replacements import get_fbgemm_patterns_and_replacements
 from .match_utils import is_match
 from .match_utils import MatchAllNode
-from ..utils import _parent_name
+from ..utils import _parent_name, check_node
 from typing import Dict, Type
 
 # Mapping from reference module class to the replacement quantized module class for lowering
@@ -78,6 +78,45 @@ def _lower_weighted_ref_module(model: QuantizedGraphModule, ref_class: Type[torc
     model.recompile()
     return model
 
+
+def special_pattern_replacement(model: QuantizedGraphModule) -> QuantizedGraphModule:
+    modules = dict(model.named_modules(remove_duplicate=False))
+    nodes = list(model.graph.nodes)
+    for n in model.graph.nodes:
+        q_node = n
+        if q_node.target == torch.quantize_per_tensor:
+            # get output scale/zero_point/dtype from the quantize node
+            ref_node, scale_node, zero_point_node, dtype = q_node.args
+
+            is_call_function, is_call_method, is_call_module = check_node(ref_node, modules)
+            if is_call_module or is_call_function or is_call_method:
+                dq_node = ref_node.args[0]
+                if dq_node.target == 'dequantize':
+                    if is_call_module:
+                        ref_module = modules[ref_node.target]
+                        # change this pattern to use the corresponding quantized module
+                        # replace reference module with quantized module
+                        parent_name, module_name = _parent_name(ref_node.target)
+                        setattr(modules[parent_name], module_name, ref_module)
+                    else:
+                        dq_node.target = ref_node
+
+                    # remove dq node:
+                    dq_node_input = dq_node.args[0]
+                    dq_node.replace_all_uses_with(dq_node_input)
+                    model.graph.erase_node(dq_node)
+
+                    # remove q node and args:
+                    q_node_input = q_node.args[0]
+                    q_node.replace_all_uses_with(q_node_input)
+                    model.graph.erase_node(q_node)
+                    model.graph.erase_node(scale_node)
+                    model.graph.erase_node(zero_point_node)
+
+
+    model.recompile()
+    return model
+
 def _lower_to_native_backend(model: QuantizedGraphModule) -> QuantizedGraphModule:
     """ Lower a quantized reference model (with reference quantized operator patterns)
     to the native backend in PyTorch (fbgemm/qnnpack), both backends shares the same
@@ -86,7 +125,11 @@ def _lower_to_native_backend(model: QuantizedGraphModule) -> QuantizedGraphModul
     for ref_class in LOWER_MODULE_MAP.keys():
         model = _lower_weighted_ref_module(model, ref_class)
     model.recompile()
+
     for pattern, replacement in get_fbgemm_patterns_and_replacements():
         subgraph_rewriter_FORKED_DO_NOT_USE.replace_pattern(model, pattern, replacement)
+
+    special_pattern_replacement(model)
+
     model.graph.lint()
     return model
