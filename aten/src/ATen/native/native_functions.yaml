@@ -4657,7 +4657,7 @@
   dispatch:
     SparseCPU, SparseCUDA: unsqueeze_sparse
     QuantizedCPU, QuantizedCUDA: unsqueeze_quantized
-    CompositeExplicitAutograd: unsqueeze
+    CPU, CUDA: unsqueeze
 
 - func: unsqueeze_(Tensor(a!) self, int dim) -> Tensor(a!)
   variants: method
