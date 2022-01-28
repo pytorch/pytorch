@@ -264,7 +264,7 @@ class Tensor(torch._C._TensorBase):
             else:
                 raise NotImplementedError(
                     'sparse csr tensor __reduce_ex__ for layout `%s`' % (self.layout))
-            return (torch._utils._rebuild_sparse_tensor, args_sparse)
+            return (torch._utils._rebuild_sparse_csr_tensor, args_sparse)
         else:
             # TODO: Once we decide to break serialization FC, no longer
             # need to wrap with TypedStorage
