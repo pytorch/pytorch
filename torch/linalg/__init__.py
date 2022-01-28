@@ -1353,6 +1353,12 @@ linalg.matmul(input, other, *, out=None) -> Tensor
 Alias for :func:`torch.matmul`
 """)
 
+diagonal = _add_docstr(_linalg.linalg_diagonal, r"""
+linalg.diagonal(A, *, offset=0, dim1=-2, dim2=-1) -> Tensor
+
+Alias for :func:`torch.diagonal` with defaults :attr:`dim1`\ `= -2`, :attr:`dim2`\ `= -1`.
+""")
+
 multi_dot = _add_docstr(_linalg.linalg_multi_dot, r"""
 linalg.multi_dot(tensors, *, out=None)
 
