@@ -4154,6 +4154,105 @@ class TestQuantizedConv(TestCase):
             device=torch.device("cuda"),
             input_dtype=torch.qint8, weight_dtype=torch.qint8, output_dtype=torch.qint8)
 
+    def test_benchmark(self):
+        import torch
+        import torch.utils.benchmark
+
+        setup_str = """
+        import torch
+        conv = torch.nn.Conv2d(16, 16, 1).cuda()
+        conv_op = torch.nn.functional.conv2d
+        input = torch.randn((10, 16, 10, 10), device='cuda')
+        weight = conv.weight.detach()
+        bias = None
+        stride = (1, 1)
+        padding = (0, 0)
+        dilation = (1, 1)
+        groups = 1
+        """
+
+        # t = torch.utils.benchmark.Timer(
+        #     stmt='conv_op(input, weight, bias, stride, padding, dilation, groups)',
+        #     setup=setup_str
+        # )
+
+        # result = t.timeit(number=1000)
+        # print("fp32:", result)
+
+        # result = t.collect_callgrind()
+        # print("fp32:", result)
+
+        import torch
+        conv = torch.nn.Conv2d(16, 16, 1).cuda()
+        input = torch.randn((2, 16, 5, 5), device='cuda')
+        weight = conv.weight.detach()
+        quantized_input = torch.quantize_per_tensor(input, 1, 0, torch.qint8).contiguous(memory_format=torch.channels_last)
+        quantized_weight = torch.quantize_per_tensor(weight, 1, 0, torch.qint8).contiguous(memory_format=torch.channels_last)
+        stride = (1, 1)
+        padding = (0, 0)
+        dilation = (1, 1)
+        groups = 1
+        scale = 1.0
+        zero_point = 0
+        import time
+        print("fp32:")
+        conv_op = torch.nn.functional.conv2d
+        # warmup
+        conv_op(input, weight, None, stride, padding, dilation, groups)
+        # for i in range(10):
+        #     start = time.time()
+        #     conv_op(input, weight, None, stride, padding, dilation, groups)
+        #     end = time.time()
+        #     print("iteration", i, " time:", end - start)
+
+        print("int8:")
+        conv_op = torch.ops.quantized.conv2d_cudnn
+
+        # profile
+        from torch.profiler import profile, record_function, ProfilerActivity
+        with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA]) as prof:
+            with record_function("model_inference"):
+                for i in range(3):
+                    conv_op(quantized_input, quantized_weight, None, stride, padding, dilation, groups, scale, zero_point)
+
+        # print(prof.key_averages(group_by_input_shape=True).table(sort_by="cuda_time_total", row_limit=10))
+        # print(prof.key_averages(group_by_input_shape=True).table(sort_by="cpu_time_total", row_limit=20))
+        print(prof.key_averages().table(sort_by="self_cpu_time_total", row_limit=10))
+
+        # for i in range(10):
+        #     start = time.time()
+        #     conv_op(quantized_input, quantized_weight, None, stride, padding, dilation, groups, scale, zero_point)
+        #     end = time.time()
+        #     print("iteration", i, " time:", end - start)
+
+        # cudnn only supports input/output channel being multiples of 16
+        qsetup_str = """
+        import torch
+        conv = torch.nn.Conv2d(16, 16, 1).cuda()
+        conv_op = torch.ops.quantized.conv2d_cudnn
+        input = torch.randn((10, 16, 10, 10), device='cuda')
+        weight = conv.weight.detach()
+        quantized_input = torch.quantize_per_tensor(input, 1, 0, torch.qint8)
+        quantized_weight = torch.quantize_per_tensor(weight, 1, 0, torch.qint8)
+        stride = (1, 1)
+        padding = (0, 0)
+        dilation = (1, 1)
+        groups = 1
+        scale = 1.0
+        zero_point = 0
+        """
+        return
+        t = torch.utils.benchmark.Timer(
+            stmt='conv_op(quantized_input, quantized_weight, None, stride, padding, dilation, groups, scale, zero_point)',
+            setup=qsetup_str
+        )
+        result = t.timeit(number=1000)
+        print("int8:", result)
+
+        result = t.collect_callgrind()
+        print("int8:", result)
+
+
     """Tests the correctness of quantized convolution op."""
     @given(batch_size=st.integers(1, 3),
            input_channels_per_group=st.sampled_from([2, 4, 5, 8, 16, 32]),

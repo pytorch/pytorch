@@ -118,6 +118,26 @@ get_execplan_from_heuristics_else_fall_back(cudnn_frontend::OperationGraph&& opG
   }
 }
 
+bool
+allowAll(cudnnBackendDescriptor_t engine_config) {
+    (void)engine_config;
+    return false;
+}
+
+// Method for engine config generator based on heuristics
+auto heurgen_method = [](cudnn_frontend::OperationGraph &opGraph) -> cudnn_frontend::EngineConfigList {
+    auto heuristics = cudnn_frontend::EngineHeuristicsBuilder()
+                          .setOperationGraph(opGraph)
+                          .setHeurMode(CUDNN_HEUR_MODE_INSTANT)
+                          .build();
+    std::cout << "Heuristic has " << heuristics.getEngineConfigCount() << " configurations " << std::endl;
+
+    auto &engine_configs = heuristics.getEngineConfig(heuristics.getEngineConfigCount());
+    cudnn_frontend::EngineConfigList filtered_configs;
+    cudnn_frontend::filter(engine_configs, filtered_configs, allowAll);
+    return filtered_configs;
+};
+
 struct CacheKey {
   ConvolutionParams params;
   uint8_t input_alignment;
@@ -126,7 +146,8 @@ struct CacheKey {
 };
 
 // FIXME: make this thread-safe by reusing the benchmark cache in Conv_v7.cpp
-std::unordered_map<CacheKey, cudnn_frontend::ManagedOpaqueDescriptor, ParamsHash<CacheKey>, ParamsEqual<CacheKey>> engine_cache;
+std::unordered_map<CacheKey, cudnnBackendDescriptor_t, ParamsHash<CacheKey>, ParamsEqual<CacheKey>> execution_plan_cache;
+//static cudnn_frontend::ExecutionPlanCache plan_cache("sample_cache");
 
 template <int kSpatialDim>
 at::SmallVector<int64_t, kSpatialDim + 2> MakeConvOutputShape(
@@ -174,9 +195,11 @@ void raw_cudnn_convolution_forward_out(
     return;
   }
 
+  std::cout << "before empty like" << std::endl;
   Tensor conv_output = at::empty_like(output);
   Tensor requantize_multiplier_tensor = at::empty_like(output);
   requantize_multiplier_tensor.fill_(requantize_multiplier);
+  std::cout << "after empty like" << std::endl;
   cudnnHandle_t handle = getCudnnHandle();
 
   CacheKey key;
@@ -188,28 +211,26 @@ void raw_cudnn_convolution_forward_out(
   key.output_alignment = getAlignment(conv_output);
   key.weight_alignment = getAlignment(weight);
 
-  auto run = [&](cudnn_frontend::ManagedOpaqueDescriptor cfg) {
-    auto plan = cudnn_frontend::ExecutionPlanBuilder()
-        .setHandle(handle)
-        .setEngineConfig(cfg)
-        .build();
-
-    auto workspace_size = plan.getWorkspaceSize();
+  auto run = [&](cudnnBackendDescriptor_t plan_desc) {
+    auto workspace_size = 100 * 1024 * 1024;
     auto workspace = at::empty({workspace_size}, input.options().dtype(kByte));
     void *data_ptrs[] = {reinterpret_cast<int8_t*>(input.data_ptr()), conv_output.data_ptr(), reinterpret_cast<int8_t*>(weight.data_ptr()), requantize_multiplier_tensor.data_ptr(), output.data_ptr()};
     // std::cout << plan.describe() << " requires workspace " << workspace_size << std::endl;
     int64_t uids[] = {'x', 'y', 'w', 's', 'r'};
+    std::cout << "variant pack builder" << std::endl;
     auto variantPack = cudnn_frontend::VariantPackBuilder()
-        .setWorkspacePointer(workspace.data_ptr())
-        .setDataPointers(5, data_ptrs)
-        .setUids(5, uids)
-        .build();
-    AT_CUDNN_CHECK(cudnnBackendExecute(handle, plan.get_raw_desc(), variantPack.get_raw_desc()));
+      .setWorkspacePointer(workspace.data_ptr())
+      .setDataPointers(5, data_ptrs)
+      .setUids(5, uids)
+      .build();
+    auto variant_pack_desc = variantPack.get_raw_desc();
+    AT_CUDNN_CHECK(cudnnBackendExecute(handle, plan_desc, variant_pack_desc));
   };
 
-  auto search = engine_cache.find(key);
-  if (search != engine_cache.end()) {
-    run(search->second);
+  auto search = execution_plan_cache.find(key);
+  if (search != execution_plan_cache.end()) {
+    cudnnBackendDescriptor_t plan_desc = search->second;
+    run(plan_desc);
     return;
   }
 
@@ -238,6 +259,43 @@ void raw_cudnn_convolution_forward_out(
       .build();
   // std::cout << "opGraph: " << opGraph.describe() << std::endl;
 
+  // const cudnn_frontend::ExecutionPlan *cached_plan;
+  // if (plan_cache.get_plan_from_cache(opGraph, cached_plan)) {
+  //   auto workspace_size = plan.getWorkspaceSize();
+  //   auto workspace = at::empty({workspace_size}, input.options().dtype(kByte));
+  //   void *data_ptrs[] = {reinterpret_cast<int8_t*>(input.data_ptr()), conv_output.data_ptr(), reinterpret_cast<int8_t*>(weight.data_ptr()), requantize_multiplier_tensor.data_ptr(), output.data_ptr()};
+  //   // std::cout << plan.describe() << " requires workspace " << workspace_size << std::endl;
+  //   int64_t uids[] = {'x', 'y', 'w', 's', 'r'};
+  //   std::cout << "variant pack builder" << std::endl;
+  //   auto variantPack = cudnn_frontend::VariantPackBuilder()
+  //     .setWorkspacePointer(workspace.data_ptr())
+  //     .setDataPointers(5, data_ptrs)
+  //     .setUids(5, uids)
+  //     .build();
+  //   auto plan_desc = plan.get_raw_desc();
+  //   auto variant_pack_desc = variantPack.get_raw_desc();
+  //   run(plan_desc, variant_pack_desc);
+  // } else {
+  //   std::array<cudnn_frontend::GeneratorSource const, 1> sources = {heurgen_method};
+  //   cudnn_frontend::EngineConfigGenerator generator(sources.size(), sources.data());
+  //   auto workspace_size = 100 * 1024 * 1024; // 100 MB
+  //   auto workspace = at::empty({workspace_size}, input.options().dtype(kByte));
+  //   void *data_ptrs[] = {reinterpret_cast<int8_t*>(input.data_ptr()), conv_output.data_ptr(), reinterpret_cast<int8_t*>(weight.data_ptr()), requantize_multiplier_tensor.data_ptr(), output.data_ptr()};
+  //   // std::cout << plan.describe() << " requires workspace " << workspace_size << std::endl;
+  //   int64_t uids[] = {'x', 'y', 'w', 's', 'r'};
+  //   std::cout << "variant pack builder" << std::endl;
+  //   auto variantPack = cudnn_frontend::VariantPackBuilder()
+  //     .setWorkspacePointer(workspace.data_ptr())
+  //     .setDataPointers(5, data_ptrs)
+  //     .setUids(5, uids)
+  //     .build();
+  //   auto variant_pack_desc = variantPack.get_raw_desc();
+  //   auto plan = generator.cudnnFindPlanAndCache<cudnn_frontend::CudnnFindSamplingTechnique::CUDNN_FIND_SAMPLE_MEDIAN_OF_THREE>(
+  //       handle, opGraph, variantPack, plan_cache);
+  //   auto plan_desc = plan.get_raw_desc();
+  //   run(plan_desc, variant_pack_desc);
+  // }
+
   auto heuristics = cudnn_frontend::EngineHeuristicsBuilder()
       .setOperationGraph(opGraph)
       .setHeurMode(CUDNN_HEUR_MODE_INSTANT)
@@ -256,8 +314,15 @@ void raw_cudnn_convolution_forward_out(
 
   for (auto &cfg : engine_configs) {
     try {
-      run(cfg);
-      engine_cache[key] = cfg;
+      std::cout << "running cfg" << std::endl;
+      auto plan = cudnn_frontend::ExecutionPlanBuilder()
+        .setHandle(handle)
+        .setEngineConfig(cfg)
+        .build();
+      auto plan_desc = plan.get_raw_desc();
+      run(plan_desc);
+      std::cout << "after running cfg" << std::endl;
+      execution_plan_cache[key] = plan_desc;
       return;
     } catch (cudnn_frontend::cudnnException &e) {std::cout << "cudnn error:" << e.what() << std::endl;} catch(CuDNNError &e) { std::cout << "other error" << e.what() << std::endl;}
   }
@@ -320,10 +385,11 @@ class QConvInt8 final {
       int64_t groups,
       double output_scale,
       int64_t output_zero_point) {
+    std::cout << "1" << std::endl;
     TORCH_CHECK(!kReluFused, "conv relu not supported yet");
     TORCH_CHECK(!bias.has_value(), "bias is not supported yet");
-    act = act.contiguous(c10::MemoryFormat::ChannelsLast);
-    weight = weight.contiguous(c10::MemoryFormat::ChannelsLast);
+    //act = act.contiguous(c10::MemoryFormat::ChannelsLast);
+    //weight = weight.contiguous(c10::MemoryFormat::ChannelsLast);
     // requantization
     // out_int8 = act_int8 * weight_int8 * act_scale * w_scale / output_scale
     auto act_scale = act.q_scale();
@@ -331,6 +397,7 @@ class QConvInt8 final {
     auto requantize_multiplier = act_scale * weight_scale / output_scale;
     //auto requantize_multiplier = output_scale / (act_scale * weight_scale);
     // TODO: check all zero_points are zero/all tensors are symmetrically quantized
+    std::cout << "2" << std::endl;
     Tensor output_fp32_requant = raw_cudnn_convolution_forward<kSpatialDim>(
         act.int_repr(), weight.int_repr(),
         IntArrayRef(padding.vec()), IntArrayRef(stride.vec()), IntArrayRef(dilation.vec()), groups,
@@ -339,13 +406,15 @@ class QConvInt8 final {
         false /* allow_tf32 */,
         requantize_multiplier
     );
+    std::cout << "3" << std::endl;
 
     // convert output fp32 Tensor to int8 by clamping
     // TODO: get the range based on target output dtype, for now
     // we hardcode this to the range for int8
-    Tensor clampped = output_fp32_requant.clamp(-128, 127);
-    Tensor quantized_output = at::_make_per_tensor_quantized_tensor(clampped.to(at::kChar), output_scale, output_zero_point);
-    return quantized_output;
+    //Tensor clampped = output_fp32_requant.clamp(-128, 127);
+    //Tensor quantized_output = at::_make_per_tensor_quantized_tensor(clampped.to(at::kChar), output_scale, output_zero_point);
+    //return quantized_output;
+    return output_fp32_requant;
   }
 };
 
