@@ -59,8 +59,6 @@ def generate_aten_impl(ctx):
             "--source-path",
             "aten/src/ATen",
             "--per-operator-headers",
-            "--static_dispatch_backend",
-            "CPU",
             "--install_dir",
             install_dir,
         ] + ctx.attr.extra_config,
