@@ -4147,7 +4147,7 @@
   device_check: NoCheck
   device_guard: False
   dispatch:
-    CUDA, CPU: squeeze
+    CompositeExplicitAutograd: squeeze
     QuantizedCPU, QuantizedCUDA: squeeze_quantized
 
 - func: squeeze.dim(Tensor(a) self, int dim) -> Tensor(a)
@@ -4155,7 +4155,7 @@
   device_check: NoCheck
   device_guard: False
   dispatch:
-    CUDA, CPU: squeeze
+    CompositeExplicitAutograd: squeeze
     QuantizedCPU, QuantizedCUDA: squeeze_quantized
 
 - func: squeeze.dimname(Tensor(a) self, Dimname dim) -> Tensor(a)
