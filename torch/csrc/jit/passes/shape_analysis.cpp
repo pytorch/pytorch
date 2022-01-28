@@ -1624,7 +1624,7 @@ class ShapePropagator : public PropertyPropBase {
       }
     } else if (
         node->matches(
-            "aten::baddbmm(Tensor self, Tensor batch1, Tensor batch2, *, Scalar beta, Scalar alpha) -> Tensor")) {
+            "aten::baddbmm(Tensor self, Tensor batch1, Tensor batch2, *, Scalar beta, Scalar alpha, ScalarType? dtype) -> Tensor")) {
       if (auto type = any_tensor_type(node)) {
         node->output()->setType(type->withDim(3));
         return true;

@@ -2978,7 +2978,7 @@ def multinomial(g, input, num_samples, replacement=False, generator=None):
                 sample_size_i=num_samples)
 
 
-def baddbmm(g, self, batch1, batch2, beta, alpha):
+def baddbmm(g, self, batch1, batch2, beta, alpha, cuda_dtype):
     dtype = self.type().scalarType()
     batch_mul = matmul(g, batch1, batch2)
     mul_a = mul(g, batch_mul, g.op("Cast", alpha, to_i=sym_help.cast_pytorch_to_onnx[dtype]))
