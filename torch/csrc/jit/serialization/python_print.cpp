@@ -934,8 +934,7 @@ struct PythonPrintImpl {
       if (v.isTuple() && type->expectRef<TupleType>().schema()) {
         // print the namedtuple constructor and let rest of tuple printing
         // continue
-        ss << type->expectRef<TupleType>().annotation_str(
-            type_printer_);
+        ss << type->expectRef<TupleType>().annotation_str(type_printer_);
       }
       return false;
     };
