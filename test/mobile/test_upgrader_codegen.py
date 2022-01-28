@@ -9,14 +9,14 @@ from tools.codegen.operator_versions.gen_mobile_upgraders import (
 from pathlib import Path
 import tempfile
 import os
-from torch.jit.generate_bytecode import generate_bytecode
+from torch.jit.generate_bytecode import generate_upgraders_bytecode
 
 pytorch_test_dir = Path(__file__).resolve().parents[1]
 
 class TestLiteScriptModule(TestCase):
 
     def test_generate_bytecode(self):
-        upgrader_list = generate_bytecode()
+        upgrader_list = generate_upgraders_bytecode()
         sorted_upgrader_list = sort_upgrader(upgrader_list)
 
         upgrader_mobile_cpp_path = pytorch_test_dir / "mobile" / "test_upgrader_bytecode_table_example.cpp"
