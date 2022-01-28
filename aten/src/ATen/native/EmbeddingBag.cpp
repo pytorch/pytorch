@@ -112,7 +112,10 @@ index_select_add(const Tensor &select_indices,
     // We can skip indices equal to padding_idx so they are not included in
     // the reduction
     auto idx = select_indices_data[i];
-    TORCH_CHECK(idx >= 0 && idx < vocab_size);
+    TORCH_CHECK(
+        idx >= 0 && idx < vocab_size,
+        "embedding_bag: Expected idx >= 0 && idx < num_embeddings but found idx to be ",
+        idx);
     if (idx != padding_idx) {
       at::native::cpublas::axpy<data_t>(ddim, 1,
               src_data + src_stride0 * idx, src_stride1,
@@ -255,7 +258,10 @@ index_select_add(const Tensor &select_indices,
       // We can skip indices equal to padding_idx so they are not included in
       // the reduction
       auto idx = select_indices_data[i];
-      TORCH_CHECK(idx >= 0 && idx < vocab_size);
+      TORCH_CHECK(
+          idx >= 0 && idx < vocab_size,
+          "embedding_bag: Expected idx >= 0 && idx < num_embeddings but found idx to be ",
+          idx);
       if (idx != padding_idx) {
         at::native::cpublas::axpy<float>(
             ddim,
@@ -313,8 +319,10 @@ index_select_scale_add(const Tensor &select_indices,
     // We can skip indices equal to padding_idx so they are not included in
     // the reduction
     auto idx = select_indices_data[i];
-    std::cout << "HERE0" << idx << "\n";
-    TORCH_CHECK(idx >= 0 && idx < vocab_size);
+    TORCH_CHECK(
+        idx >= 0 && idx < vocab_size,
+        "embedding_bag: Expected idx >= 0 && idx < num_embeddings but found idx to be ",
+        idx);
     if (idx != padding_idx) {
       auto* src_base = src_data + src_stride0 * idx;
       auto* output_base = output_data + output_stride0 * add_indices_data[i];
@@ -434,8 +442,10 @@ index_select_scale_add(const Tensor &select_indices,
       // We can skip indices equal to padding_idx so they are not included in
       // the reduction
       auto idx = select_indices_data[i];
-      std::cout << "HERE1" << idx << "\n";
-      TORCH_CHECK(idx >= 0 && idx < vocab_size);
+      TORCH_CHECK(
+          idx >= 0 && idx < vocab_size,
+          "embedding_bag: Expected idx >= 0 && idx < num_embeddings but found idx to be ",
+          idx);
       if (idx != padding_idx) {
         auto* src_base = src_data + src_stride0 * idx;
         auto* output_base = output_data + output_stride0 * add_indices_data[i];
@@ -667,7 +677,10 @@ void embedding_bag_cpu_max_out(
     for (const auto i : c10::irange(numIndices)) {
       auto bag = offset2bag_data[i];
       auto word_idx = indices_data[i];
-      TORCH_CHECK(word_idx >= 0 && word_idx < vocab_size);
+      TORCH_CHECK(
+          idx >= 0 && idx < vocab_size,
+          "embedding_bag: Expected idx >= 0 && idx < num_embeddings but found idx to be ",
+          idx);
       if (word_idx != static_cast<index_t>(padding_idx)) {
         bool is_first_for_bag = bag_empty[bag];
         for (const auto dim : c10::irange(featureSize)) {
