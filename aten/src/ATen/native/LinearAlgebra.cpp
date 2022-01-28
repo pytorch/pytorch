@@ -1737,6 +1737,11 @@ Tensor& linalg_matmul_out(const Tensor & tensor1, const Tensor & tensor2, Tensor
   return at::native::matmul_out(tensor1, tensor2, result);
 }
 
+// torch.linalg.diagonal, alias for torch.diagonal with dim1=-2, dim2=-1 as defaults
+Tensor linalg_diagonal(const Tensor& A, int64_t offset, int64_t dim1, int64_t dim2) {
+  return A.diagonal(offset, dim1, dim2);
+}
+
 // helper methods for matrix_exp
 namespace {
 
@@ -2828,7 +2833,7 @@ Tensor linalg_tensorinv(const Tensor& self, int64_t ind) {
   // If the reshaped self is not invertible catch this error
   Tensor result, info;
   std::tie(result, info) = at::linalg_inv_ex(self.reshape({prod_ind_end, prod_ind_end}), /*check_errors=*/false);
-  singleCheckErrors(info.item<int64_t>(), "inv");
+  at::_linalg_check_errors(info, "inv", /*is_matrix*/true);
 
   return result.reshape(shape_ind_end);
 }
