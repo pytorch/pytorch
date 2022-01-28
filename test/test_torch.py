@@ -2463,6 +2463,8 @@ else:
             ((4, 5, 3, 4, 3), (1, 2)),
             ((4, 3, 6, 5, 3), (2, 4)),
             ((4, 3, 3, 5, 3), (0, 1, 2, 3, 4)),
+            ((1, 3, 3), (1, 2)),
+            ((1, 5), (1,)),
         )
 
         for case, contig, edge_order, space_fn in product(test_cases, [True, False], [1, 2],
