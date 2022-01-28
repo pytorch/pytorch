@@ -60,6 +60,7 @@ void PrepareToExit() {
   torch::lazy::getBackend()->PrepareToExit();
   // TODO(whc) can I call this unconditionally?
   torch::lazy::LazyGraphExecutor::Get()->WaitDeviceOps({});
+  torch::lazy::getPythonPrinter() = nullptr;
 }
 
 std::string GetTensorsDump(
@@ -679,6 +680,17 @@ void InitLtcModuleBindings(py::module m) {
   // m.def("_ltc_memory_info", [](const std::string& device) -> py::object {
   //   return GetMemoryInfo(device);
   // });
+
+  m.def("_set_custom_printer", [](py::object pyobj) {
+    std::function<void()> printer = [pyobj]() {
+      py::gil_scoped_acquire acquire;
+      std::cerr << "========python==========\n";
+      pyobj();
+      std::cerr << "=========cpp=========\n";
+      std::cerr << c10::get_backtrace();
+    };
+    torch::lazy::getPythonPrinter() = printer;
+  });
   m.def("_ltc_init_ts_backend", []() { compiler::InitTorchScriptBackend(); });
   m.def("_ltc_set_noop_execution_mode", [](bool enable_noop) {
     torch::lazy::LazyGraphExecutor::Get()->SetNoOpExecutionMode(enable_noop);

@@ -9,6 +9,20 @@
 namespace torch {
 namespace lazy {
 
+
+
+/*
+we could use `disablePrinter()` to disable tracing on the regions
+we don't care about. For example,
+
+    torch::lazy::disablePrinter() = true;
+    // code that calls sizes
+    torch::lazy::disablePrinter() = false;
+*/
+TORCH_API bool& disablePrinter();
+
+TORCH_API std::function<void()>& getPythonPrinter();
+
 class TORCH_API LazyTensor {
  public:
   // This is the core lazy tensor data structure where all the tensor data is

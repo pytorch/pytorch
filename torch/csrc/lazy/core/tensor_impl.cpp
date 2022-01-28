@@ -133,6 +133,11 @@ int64_t LTCTensorImpl::stride(int64_t d) const {
 }
 
 void LTCTensorImpl::setup_size_properties() {
+
+  if (getPythonPrinter() && !disablePrinter()) {
+    getPythonPrinter()();
+  }
+
   size_t generation = tensor_.generation();
   if (generation != generation_) {
     // Fill up the basic dimension data members which the base class

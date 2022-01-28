@@ -14,6 +14,20 @@
 
 namespace torch {
 namespace lazy {
+
+namespace {
+  thread_local bool printer_ {false};
+}
+
+bool& disablePrinter() {
+  return printer_;
+}
+
+std::function<void()>& getPythonPrinter() {
+  static std::function<void()> fptr_;
+  return fptr_;
+}
+
 namespace {
 LazyTensor GetOrCreateLtcTensor(const at::Tensor& tensor,
                                 const BackendDevice& device) {
