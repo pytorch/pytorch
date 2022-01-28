@@ -437,7 +437,7 @@ test_xla() {
   cp -a "/tmp/pytorch_py_test.log" build || true
   OUTPUT=$(find / -name pytorch_py_test.log) || true
   echo "Output: ${OUTPUT}" || true
-  cat "/tmp/pytorch_py_test.log"  
+  cat "/tmp/pytorch_py_test.log"
   assert_git_not_dirty
 }
 
