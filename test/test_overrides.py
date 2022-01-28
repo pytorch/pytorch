@@ -847,6 +847,7 @@ class TestGradCheckOverride(TestCase):
                 'dtype',
                 'is_floating_point',
                 'is_sparse',
+                'is_sparse_csr',
                 'layout',
                 'new_zeros',
                 'numel',
