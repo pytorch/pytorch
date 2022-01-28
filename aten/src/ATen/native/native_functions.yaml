@@ -819,15 +819,15 @@
 - func: atleast_3d.Sequence(Tensor[] tensors) -> Tensor[]
   variants: function
 
-- func: baddbmm(Tensor self, Tensor batch1, Tensor batch2, *, Scalar beta=1, Scalar alpha=1) -> Tensor
+- func: baddbmm(Tensor self, Tensor batch1, Tensor batch2, *, Scalar beta=1, Scalar alpha=1, ScalarType? dtype=None) -> Tensor
   variants: function, method
   structured_delegate: baddbmm.out
 
-- func: baddbmm_(Tensor(a!) self, Tensor batch1, Tensor batch2, *, Scalar beta=1, Scalar alpha=1) -> Tensor(a!)
+- func: baddbmm_(Tensor(a!) self, Tensor batch1, Tensor batch2, *, Scalar beta=1, Scalar alpha=1, ScalarType? dtype=None) -> Tensor(a!)
   variants: method
   structured_delegate: baddbmm.out
 
-- func: baddbmm.out(Tensor self, Tensor batch1, Tensor batch2, *, Scalar beta=1, Scalar alpha=1, Tensor(a!) out) -> Tensor(a!)
+- func: baddbmm.out(Tensor self, Tensor batch1, Tensor batch2, *, Scalar beta=1, Scalar alpha=1, ScalarType? dtype=None, Tensor(a!) out) -> Tensor(a!)
   structured: True
   variants: function
   dispatch:

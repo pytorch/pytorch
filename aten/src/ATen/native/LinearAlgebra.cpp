@@ -57,7 +57,8 @@ TORCH_META_FUNC(mm)(const Tensor & self, const Tensor & mat2) {
 }
 
 template <typename Meta>
-void common_checks_baddbmm_bmm(Meta& meta, const Tensor& batch1, const Tensor& batch2, const Scalar& beta, const Scalar& alpha, bool is_bmm, const c10::optional<Tensor>& self_baddbmm = nullopt) {
+void common_checks_baddbmm_bmm(Meta& meta, const Tensor& batch1, const Tensor& batch2, const Scalar& beta, const Scalar& alpha,
+    bool is_bmm, const c10::optional<Tensor>& self_baddbmm = nullopt, c10::optional<ScalarType> dtype_opt = c10::nullopt) {
   TORCH_CHECK(batch1.dim() == 3, "batch1 must be a 3D tensor");
   TORCH_CHECK(batch2.dim() == 3, "batch2 must be a 3D tensor");
 
@@ -76,7 +77,11 @@ void common_checks_baddbmm_bmm(Meta& meta, const Tensor& batch1, const Tensor& b
 
   auto& result = meta.maybe_get_output(0);
   // 'set_output' does not resize for in-place calls
-  meta.set_output(output_size, batch1.options());
+  if (dtype_opt.has_value() && dtype_opt.value() == at::kFloat && batch1.dtype() == at::kHalf && batch1.is_cuda()) {
+    meta.set_output(output_size, batch1.options().dtype(at::kFloat));
+  } else {
+    meta.set_output(output_size, batch1.options());
+  }
   const auto result_sizes = result.sizes();
   // Error is raised if called from in-place overload with incorrect shape
   TORCH_CHECK(result_sizes == output_size,
@@ -107,9 +112,10 @@ TORCH_META_FUNC(bmm)(const Tensor& self, const Tensor& mat2) {
     common_checks_baddbmm_bmm(*this, self, mat2, Scalar(0.0), Scalar(1.0), true);
 }
 
-TORCH_META_FUNC(baddbmm)(const Tensor& self, const Tensor& batch1, const Tensor& batch2, const Scalar& beta, const Scalar& alpha) {
+TORCH_META_FUNC(baddbmm)(const Tensor& self, const Tensor& batch1, const Tensor& batch2, const Scalar& beta, const Scalar& alpha,
+    c10::optional<ScalarType> dtype_opt) {
   auto self_ = expand_size(self, {batch1.size(0), batch1.size(1), batch2.size(2)}, "baddbmm");
-  common_checks_baddbmm_bmm(*this, batch1, batch2, beta, alpha, false, *self_);
+  common_checks_baddbmm_bmm(*this, batch1, batch2, beta, alpha, false, *self_, dtype_opt);
 }
 
 } // namespace meta
@@ -1539,7 +1545,9 @@ void conjugate_mutable_input_if_needed(const Tensor& self, bool conjugate) {
 }
 
 TORCH_IMPL_FUNC(baddbmm_out_cpu)
-(const Tensor & self, const Tensor & batch1, const Tensor & batch2, const Scalar& beta, const Scalar& alpha, const Tensor& result) {
+(const Tensor & self, const Tensor & batch1, const Tensor & batch2, const Scalar& beta, const Scalar& alpha,
+  c10::optional<ScalarType> dtype_opt, const Tensor& result) {
+    TORCH_CHECK(!dtype_opt.has_value(), "baddbmm_out_cpu: kwarg dtype is not supported for this backend.");
     bool self_is_conj = result.is_conj();
     conjugate_mutable_input_if_needed(result, self_is_conj);
     bmm_out_or_baddbmm_(result, batch1.resolve_conj(), batch2.resolve_conj(), beta, alpha, false);

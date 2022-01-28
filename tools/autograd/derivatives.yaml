@@ -316,7 +316,7 @@
 - name: atan2(Tensor self, Tensor other) -> Tensor
   self, other: atan2_backward(grad, self, other, grad_input_mask)
 
-- name: baddbmm(Tensor self, Tensor batch1, Tensor batch2, *, Scalar beta=1, Scalar alpha=1) -> Tensor
+- name: baddbmm(Tensor self, Tensor batch1, Tensor batch2, *, Scalar beta=1, Scalar alpha=1, ScalarType? dtype=None) -> Tensor
   self: maybe_multiply(grad, beta.conj())
   batch1: maybe_multiply(grad.bmm(batch2.transpose(1, 2).conj()), alpha.conj())
   batch2: maybe_multiply(batch1.transpose(1, 2).conj().bmm(grad), alpha.conj())

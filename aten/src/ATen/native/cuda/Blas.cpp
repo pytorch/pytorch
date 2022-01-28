@@ -216,7 +216,15 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
   return result;
 }
 
-const Tensor& baddbmm_out_cuda_impl(const Tensor& result, const Tensor& self, const Tensor& batch1, const Tensor& batch2, const Scalar& beta, const Scalar& alpha) {
+const Tensor& baddbmm_out_cuda_impl(const Tensor& result, const Tensor& self, const Tensor& batch1, const Tensor& batch2, const Scalar& beta, const Scalar& alpha,
+    c10::optional<ScalarType> dtype_opt) {
+  if (dtype_opt.has_value()) {
+    TORCH_CHECK((self.dtype() == at::kHalf && dtype_opt.value() == at::kFloat) || (self.dtype() == dtype_opt.value()),
+      "baddbmm_out_cuda: You specified kwarg `dtype=`. However, this feature is only supported when all input matrices are CUDA half precision "
+      "and `dtype=torch.float` is set. With that, the output matrix is in float precision."
+    );
+  }
+
   IntArrayRef batch1_sizes = batch1.sizes();
 
   // handle pathological cases that blas may not like
@@ -268,18 +276,34 @@ const Tensor& baddbmm_out_cuda_impl(const Tensor& result, const Tensor& self, co
     opmath_t beta_val = beta.to<opmath_t>();
     scalar_t* batch1_ptr = batch1_->data_ptr<scalar_t>();
     scalar_t* batch2_ptr = batch2_->data_ptr<scalar_t>();
-    scalar_t* result_ptr = result_->data_ptr<scalar_t>();
-    at::cuda::blas::bgemm<scalar_t>(
-      transpose_batch1 ? batch1_->is_conj() ? 'c' : 't' : 'n',
-      transpose_batch2 ? batch2_->is_conj() ? 'c' : 't' : 'n',
-      m, n, k,
-      alpha_val,
-      batch1_ptr, lda, batch1_->strides()[0],
-      batch2_ptr, ldb, batch2_->strides()[0],
-      beta_val,
-      result_ptr, ldc, result_->strides()[0],
-      num_batches
-    );
+
+    if (std::is_same<at::Half, scalar_t>::value && result_->scalar_type() == at::kFloat) {
+      float* result_ptr = result_->data_ptr<float>();
+      at::cuda::blas::bgemm<scalar_t>(
+        transpose_batch1 ? batch1_->is_conj() ? 'c' : 't' : 'n',
+        transpose_batch2 ? batch2_->is_conj() ? 'c' : 't' : 'n',
+        m, n, k,
+        alpha_val,
+        batch1_ptr, lda, batch1_->strides()[0],
+        batch2_ptr, ldb, batch2_->strides()[0],
+        beta_val,
+        result_ptr, ldc, result_->strides()[0],
+        num_batches
+      );
+    } else {
+      scalar_t* result_ptr = result_->data_ptr<scalar_t>();
+      at::cuda::blas::bgemm<scalar_t>(
+        transpose_batch1 ? batch1_->is_conj() ? 'c' : 't' : 'n',
+        transpose_batch2 ? batch2_->is_conj() ? 'c' : 't' : 'n',
+        m, n, k,
+        alpha_val,
+        batch1_ptr, lda, batch1_->strides()[0],
+        batch2_ptr, ldb, batch2_->strides()[0],
+        beta_val,
+        result_ptr, ldc, result_->strides()[0],
+        num_batches
+      );
+    }
   });
   if (!result.is_same(*result_)) {
     result.copy_(*result_);
@@ -298,10 +322,11 @@ TORCH_IMPL_FUNC(mm_out_cuda)(const Tensor& self, const Tensor& mat2, const Tenso
   addmm_out_cuda_impl(const_cast<Tensor&>(result), result, self, mat2, 0, 1, c10::nullopt);
 }
 
-TORCH_IMPL_FUNC(baddbmm_out_cuda)(const Tensor& self, const Tensor& batch1, const Tensor& batch2, const Scalar& beta, const Scalar& alpha, const Tensor& result) {
+TORCH_IMPL_FUNC(baddbmm_out_cuda)(const Tensor& self, const Tensor& batch1, const Tensor& batch2, const Scalar& beta, const Scalar& alpha,
+  c10::optional<ScalarType> dtype_opt, const Tensor& result) {
   {
     at::NoNamesGuard guard;
-    baddbmm_out_cuda_impl(result, self, batch1, batch2, beta, alpha);
+    baddbmm_out_cuda_impl(result, self, batch1, batch2, beta, alpha, dtype_opt);
   }
 }
 
@@ -310,7 +335,7 @@ TORCH_IMPL_FUNC(bmm_out_cuda)(const Tensor& batch1, const Tensor& batch2, const 
   Scalar alpha(1.0);
   {
     NoNamesGuard guard;
-    baddbmm_out_cuda_impl(result, result, batch1, batch2, beta, alpha);
+    baddbmm_out_cuda_impl(result, result, batch1, batch2, beta, alpha, c10::nullopt);
   }
 }
 
