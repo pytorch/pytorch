@@ -1,5 +1,4 @@
 #define TORCH_ASSERT_NO_OPERATORS
-#include <ATen/native/cuda/JitLoops.cuh>
 #include <ATen/native/UnaryOps.h>
 
 #include <limits>
@@ -9,6 +8,7 @@
 #include <ATen/native/DispatchStub.h>
 #include <ATen/native/Math.h>
 #include <ATen/native/TensorIterator.h>
+#include <ATen/native/cuda/JitLoops.cuh>
 #include <ATen/native/cuda/Loops.cuh>
 #include <ATen/native/cuda/Math.cuh>
 #include <ATen/native/cuda/jit_utils.h>
