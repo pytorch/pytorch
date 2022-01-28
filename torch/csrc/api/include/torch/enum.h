@@ -3,7 +3,6 @@
 #include <string>
 
 #include <ATen/core/Reduction.h>
-#include <ATen/native/Activation.h>
 #include <c10/util/Exception.h>
 #include <c10/util/variant.h>
 #include <torch/csrc/Export.h>
@@ -80,11 +79,6 @@ std::string operator()(const enumtype::k##name& v) const { \
 //
 // Note that we also provide the default constructor `SomeOptions() {}`, so that
 // `SomeOptions options = {}` can work.
-#define TORCH_OPTIONS_CTOR_VARIANT_ARG2(OPTIONS_NAME, ARG_NAME, TYPE1, TYPE2) \
-OPTIONS_NAME() {} \
-OPTIONS_NAME(torch::enumtype::TYPE1 ARG_NAME) : ARG_NAME##_(torch::TYPE1) {} \
-OPTIONS_NAME(torch::enumtype::TYPE2 ARG_NAME) : ARG_NAME##_(torch::TYPE2) {}
-
 #define TORCH_OPTIONS_CTOR_VARIANT_ARG3(OPTIONS_NAME, ARG_NAME, TYPE1, TYPE2, TYPE3) \
 OPTIONS_NAME() {} \
 OPTIONS_NAME(torch::enumtype::TYPE1 ARG_NAME) : ARG_NAME##_(torch::TYPE1) {} \
@@ -203,20 +197,6 @@ at::Reduction::Reduction reduction_get_enum(V variant_enum) {
       false,
       get_enum_name(variant_enum), " is not a valid value for reduction");
     return at::Reduction::END;
-  }
-}
-
-template <typename V>
-at::Gelu::Gelu gelu_get_enum(V variant_enum) {
-  if (c10::get_if<enumtype::kNone>(&variant_enum)) {
-    return at::Gelu::None;
-  } else if (c10::get_if<enumtype::kTanh>(&variant_enum)) {
-    return at::Gelu::Tanh;
-  } else {
-    TORCH_CHECK(
-      false,
-      get_enum_name(variant_enum), " is not a valid value for gelu approximate");
-    return at::Gelu::END;
   }
 }
 
