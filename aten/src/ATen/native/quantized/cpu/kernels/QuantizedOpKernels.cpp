@@ -125,7 +125,7 @@ Tensor qcat_nhwc_kernel(
               reinterpret_cast<scalar_t::underlying*>(data_ptrs[tidx]) +
               i * curr_C;
 
-          if (is_fast_path[i] && !ReLUFused) {
+          if (is_fast_path[tidx] && !ReLUFused) {
             std::memcpy(optr, iptr, curr_C * sizeof(typename scalar_t::underlying));
             continue;
           }
