@@ -3,7 +3,7 @@ name: pr-labels
 on:
   push:
     branches:
-      - main
+      - master
 
 jobs:
   is-properly-labeled:

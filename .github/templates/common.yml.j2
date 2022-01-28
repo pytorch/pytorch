@@ -74,6 +74,14 @@ concurrency:
           docker run --rm -v "!{{ dir }}:/v" -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
 {%- endmacro -%}
 
+{%- macro setup_ec2_windows() -%}
+      !{{ display_ec2_information() }}
+      - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
+        uses: seemethere/add-github-ssh-key@v1
+        with:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+{%- endmacro -%}
+
 {%- macro setup_ec2_linux() -%}
       !{{ display_ec2_information() }}
       - name: Log in to ECR
@@ -359,4 +367,24 @@ concurrency:
   # Set xcode xcode version to !{{ xcode_version }}
   DEVELOPER_DIR: /Applications/Xcode_!{{ xcode_version }}.app/Contents/Developer
 {%- endif %}
+{%- endmacro -%}
+
+{%- macro wait_and_kill_ssh_windows(pytorch_directory="") -%}
+      - name: Wait until all sessions have drained
+        shell: powershell
+{%- if pytorch_directory %}
+        working-directory: !{{ pytorch_directory }}
+{%- endif %}
+        if: always()
+        timeout-minutes: 120
+        run: |
+          .github\scripts\wait_for_ssh_to_drain.ps1
+      - name: Kill active ssh sessions if still around (Useful if workflow was cancelled)
+        shell: powershell
+{%- if pytorch_directory %}
+        working-directory: !{{ pytorch_directory }}
+{%- endif %}
+        if: always()
+        run: |
+          .github\scripts\kill_active_ssh_sessions.ps1
 {%- endmacro -%}
