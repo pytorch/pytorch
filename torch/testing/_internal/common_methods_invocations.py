@@ -1061,8 +1061,8 @@ def sample_inputs_masked_var(op_info, device, dtype, requires_grad, **kwargs):
                 sample_input_args = sample_input.args
                 sample_input_kwargs = dict(sample_input.kwargs, unbiased=unbiased)
             if requires_grad:
-                inmask = torch._masked._input_mask(sample_input.input, *sample_input_args, **sample_input_kwargs)
-                orig_count = torch._masked.sum(inmask.new_ones(sample_input.input.shape, dtype=torch.int64),
+                inmask = torch.masked._input_mask(sample_input.input, *sample_input_args, **sample_input_kwargs)
+                orig_count = torch.masked.sum(inmask.new_ones(sample_input.input.shape, dtype=torch.int64),
                                                dim, keepdim=True, mask=inmask)
                 if orig_count.min() <= int(unbiased):
                     # Skip samples that lead to singularities in var
@@ -8093,7 +8093,7 @@ def gradcheck_wrapper_masked_operation(op, input, *args, **kwargs):
     output = op(input, *args, **kwargs)
     mask = kwargs.get('mask')
     if mask is not None:
-        output_mask = torch._masked._output_mask(op, input, *args, **kwargs)
+        output_mask = torch.masked._output_mask(op, input, *args, **kwargs)
         output = torch.where(output_mask, output, output.new_zeros([]))
     return output
 
@@ -15032,7 +15032,7 @@ op_db: List[OpInfo] = [
         ),
     ),
     ReductionOpInfo(
-        '_masked.sum',
+        'masked.sum',
         ref=reference_reduction_numpy(np.sum),
         method_variant=None,
         identity=0,
@@ -15060,7 +15060,7 @@ op_db: List[OpInfo] = [
         sample_inputs_func=sample_inputs_masked_reduction
     ),
     ReductionOpInfo(
-        '_masked.prod',
+        'masked.prod',
         ref=reference_reduction_numpy(np.prod),
         method_variant=None,
         identity=1,
@@ -15086,7 +15086,7 @@ op_db: List[OpInfo] = [
         sample_inputs_func=sample_inputs_masked_reduction
     ),
     ReductionOpInfo(
-        '_masked.amax',
+        'masked.amax',
         nan_policy='propagate',
         supports_out=False,
         dtypes=all_types_and(torch.float16, torch.bfloat16),
@@ -15102,7 +15102,7 @@ op_db: List[OpInfo] = [
         gradcheck_wrapper=gradcheck_wrapper_masked_operation
     ),
     ReductionOpInfo(
-        '_masked.amin',
+        'masked.amin',
         nan_policy='propagate',
         supports_out=False,
         dtypes=all_types_and(torch.float16, torch.bfloat16),
@@ -15118,7 +15118,7 @@ op_db: List[OpInfo] = [
         gradcheck_wrapper=gradcheck_wrapper_masked_operation
     ),
     ReductionOpInfo(
-        '_masked.mean',
+        'masked.mean',
         ref=reference_reduction_numpy(np.mean) if np.lib.NumpyVersion(np.__version__) >= '1.20.2' else None,
         method_variant=None,
         nan_policy='propagate',
@@ -15142,7 +15142,7 @@ op_db: List[OpInfo] = [
         gradcheck_wrapper=gradcheck_wrapper_masked_operation
     ),
     ReductionOpInfo(
-        '_masked.norm',
+        'masked.norm',
         identity=0,
         method_variant=None,
         nan_policy='propagate',
@@ -15162,7 +15162,7 @@ op_db: List[OpInfo] = [
         gradcheck_wrapper=gradcheck_wrapper_masked_operation
     ),
     ReductionOpInfo(
-        '_masked.var',
+        'masked.var',
         ref=reference_reduction_numpy(np.var) if np.lib.NumpyVersion(np.__version__) >= '1.20.2' else None,
         method_variant=None,
         nan_policy='propagate',
@@ -15190,7 +15190,7 @@ op_db: List[OpInfo] = [
         gradcheck_wrapper=gradcheck_wrapper_masked_operation
     ),
     OpInfo(
-        '_masked.softmax',
+        'masked.softmax',
         method_variant=None,
         dtypes=floating_types_and(torch.bfloat16),
         dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16),
@@ -15204,7 +15204,7 @@ op_db: List[OpInfo] = [
         gradcheck_wrapper=gradcheck_wrapper_masked_operation,
         supports_out=False),
     OpInfo(
-        '_masked.log_softmax',
+        'masked.log_softmax',
         method_variant=None,
         dtypes=floating_types_and(torch.bfloat16),
         dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16),
@@ -15222,7 +15222,7 @@ op_db: List[OpInfo] = [
         gradcheck_wrapper=gradcheck_wrapper_masked_operation,
         supports_out=False),
     OpInfo(
-        '_masked.softmin',
+        'masked.softmin',
         method_variant=None,
         dtypes=floating_types_and(torch.bfloat16),
         dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16),
@@ -15236,7 +15236,7 @@ op_db: List[OpInfo] = [
         gradcheck_wrapper=gradcheck_wrapper_masked_operation,
         supports_out=False),
     OpInfo(
-        '_masked.normalize',
+        'masked.normalize',
         method_variant=None,
         dtypes=floating_types_and(torch.half, torch.bfloat16),
         sample_inputs_func=sample_inputs_masked_normalize,
@@ -15506,7 +15506,7 @@ sparse_csr_unary_ufuncs = [op for op in op_db if isinstance(op, UnaryUfuncInfo) 
 shape_funcs = [op for op in op_db if isinstance(op, ShapeFuncInfo)]
 reduction_ops = [op for op in op_db if isinstance(op, ReductionOpInfo)]
 reference_filtered_ops = [op for op in reduction_ops if op.ref not in (_NOTHING, None)]
-reference_masked_ops = [op for op in reference_filtered_ops if op.name.startswith('_masked.')]
+reference_masked_ops = [op for op in reference_filtered_ops if op.name.startswith('masked.')]
 
 # TODO: review porting these to make_tensor
 def index_variable(shape, max_indices, device=torch.device('cpu')):

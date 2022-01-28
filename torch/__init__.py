@@ -869,7 +869,7 @@ from torch.utils.dlpack import from_dlpack, to_dlpack
 # Import experimental masked operations support. See
 # [RFC-0016](https://github.com/pytorch/rfcs/pull/27) for more
 # information.
-from . import _masked
+from . import masked
 
 
 def _register_device_module(device_type, module):
