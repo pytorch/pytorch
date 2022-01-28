@@ -6085,6 +6085,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
     def _test_addbmm_baddbmm(self, func, b1, b2, ref, out_tensor):
         should_test_half_to_float_gemm = (out_tensor.is_cuda and out_tensor.dtype == torch.half and func == 'baddbmm')
         torch_func = getattr(torch, func)
+
         def _test_wrapper(expected, *args, **kwargs):
             result = torch_func(*args, **kwargs)
             self.assertEqual(result, expected)
@@ -6102,7 +6103,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         self.assertEqual(out_tensor, ref)
         getattr(out_tensor, func + "_")(b1, b2, beta=2, alpha=.5)
 
-        _test_wrapper(ref*3, out_tensor, b1, b2, beta=1, alpha=.5)
+        _test_wrapper(ref * 3, out_tensor, b1, b2, beta=1, alpha=.5)
 
         nan = torch.full_like(out_tensor, math.nan)
         _test_wrapper(ref, nan, b1, b2, beta=0, alpha=1)
