@@ -394,7 +394,7 @@ cc_library(
         ":generated_aten_cpp",
     ] + if_lightweight_dispatch([
         ":generated_aten_unboxing_cpp",
-    )],
+    ]),
     includes = [
         "aten/src",
     ],
