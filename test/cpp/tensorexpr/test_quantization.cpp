@@ -189,7 +189,7 @@ TEST_F(Quantization, QuantAddDequantUInt8) {
   CHECK_EQ(check, 1);
 }
 
-TEST_F(Quantization, QuantUpsampleNearst2dDequantUInt8) {
+TEST_F(Quantization, QuantUpsampleNearest2dDequantUInt8) {
   const auto graph_string = R"IR(
       graph(%x : Float(1, 1, 4, 4, strides=[16, 16, 4, 1], device=cpu)):
         %2 : int = prim::Constant[value=13]()
