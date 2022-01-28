@@ -380,7 +380,9 @@ class TestCuda(TestCase):
     def test_out_of_memory(self):
         tensor = torch.zeros(1024, device='cuda')
 
-        with self.assertRaisesRegex(RuntimeError, "Tried to allocate 800000000.00 GiB"):
+        oom_regex = "would exceed allowed memory" if TEST_CUDAMALLOCASYNC else \
+                    "Tried to allocate 800000000.00 GiB"
+        with self.assertRaisesRegex(RuntimeError, oom_regex):
             torch.empty(1024 * 1024 * 1024 * 800000000, dtype=torch.int8, device='cuda')
 
         with self.assertRaisesRegex(RuntimeError, "Tried to allocate more than 1EB memory"):
@@ -1282,11 +1284,13 @@ class TestCuda(TestCase):
 
         self.assertEqual(result.tolist(), [1, 2, 3, 4])
 
-        # Check that the block will be re-used after the main stream finishes
-        torch.cuda.current_stream().synchronize()
-        with torch.cuda.stream(stream):
-            tmp3 = torch.cuda.FloatTensor(t.size())
-            self.assertEqual(tmp3.data_ptr(), ptr[0], msg='allocation not re-used')
+        if not TEST_CUDAMALLOCASYNC:
+            # In the native allocator, we expect "tmp"'s side-stream-tagged block will be reused
+            # in that side stream after result.copy_(tmp) in the main stream finishes.
+            torch.cuda.current_stream().synchronize()
+            with torch.cuda.stream(stream):
+                tmp3 = torch.cuda.FloatTensor(t.size())
+                self.assertEqual(tmp3.data_ptr(), ptr[0], msg='allocation not re-used')
 
     def test_record_stream_on_shifted_view(self):
         # See issue #27366

@@ -217,25 +217,6 @@ static bool BlockComparator(const Block* a, const Block* b) {
   return (uintptr_t)a->ptr < (uintptr_t)b->ptr;
 }
 
-static std::string format_size(uint64_t size) {
-  std::ostringstream os;
-  os.precision(2);
-  os << std::fixed;
-  if (size <= 1024) {
-    os << size << " bytes";
-  } else if (size <= 1048576) {
-    os << (size / 1024.0);
-    os << " KiB";
-  } else if (size <= 1073741824ULL) {
-    os << size / 1048576.0;
-    os << " MiB";
-  } else {
-    os << size / 1073741824.0;
-    os << " GiB";
-  }
-  return os.str();
-}
-
 struct AllocParams {
   AllocParams(
       int device,

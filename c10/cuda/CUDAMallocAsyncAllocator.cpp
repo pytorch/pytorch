@@ -312,16 +312,39 @@ void malloc(void** devPtr, int device, size_t size, cudaStream_t stream) {
 
   lazy_init_device(device);
 
-  TORCH_CHECK(pytorch_used_bytes[device] + size < pytorch_memory_limits[device],
-              "Allocation on device ", device, " would exceed allowed memory fraction.\n",
-              "Currently allocated: ", pytorch_used_bytes[device], " bytes\n",
-              "Requested          : ", size, " bytes\n",
-              "Limit              : ", pytorch_memory_limits[device], " bytes\n");
+  // Defensively checks for preexisting CUDA error state.
+  auto err = cudaGetLastError();
+  C10_CUDA_CHECK(err);
 
   // TODO: Could we avoid calling cudaMallocAsync while holding general_mutex,
   // perhaps by letting lazy_init_device use separate once_flags or an internal
   // static initializer?
-  C10_CUDA_CHECK(cudaMallocAsync(devPtr, size, stream));
+  if (pytorch_used_bytes[device] + size > pytorch_memory_limits[device]) {
+    err = cudaErrorMemoryAllocation;
+  } else {
+    err = cudaMallocAsync(devPtr, size, stream);
+  }
+
+  if (err == cudaErrorMemoryAllocation) {
+    // Clears CUDA's internal error state so the user, if desired, can catch the OOM
+    // exception, free some stuff on the script side, and retry the allocation.
+    // This aligns with the behavior of alloc_block in CUDACachingAllocator.cpp.
+    cudaGetLastError();
+    size_t device_free;
+    size_t device_total;
+    C10_CUDA_CHECK(cudaMemGetInfo(&device_free, &device_total));
+    TORCH_CHECK_WITH(CUDAOutOfMemoryError,
+                     false,
+                     "Allocation on device ", device, " would exceed allowed memory.",
+                     "\nCurrently allocated     : ", format_size(pytorch_used_bytes[device]),
+                     "\nRequested               : ", format_size(size),
+                     "\nDevice limit            : ", format_size(device_total),
+                     "\nFree (according to CUDA): ", format_size(device_free),
+                     "\nPytorch limit (set by user-supplied memory fraction)"
+                     "\n                        : ", format_size(pytorch_memory_limits[device]));
+  } else {
+    C10_CUDA_CHECK(err);
+  }
 
   auto inserted = ptr_info.emplace(*devPtr, PtrUsage(size, capture_underway));
   TORCH_INTERNAL_ASSERT(inserted.second,
