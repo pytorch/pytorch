@@ -92,11 +92,8 @@ getOperatorVersionMapForMobile() {
 
 
 UPGRADER_CPP_SRC = CodeTemplate(MOBILE_UPGRADERS_HEADER_DESCRIPTION + """
+#include <caffe2/serialize/versions.h>
 #include <torch/csrc/jit/mobile/upgrader_mobile.h>
-
-namespace c10 {
-TypePtr parseType(const std::string& pythonStr);
-} // namespace c10
 
 namespace c10 {
 TypePtr parseType(const std::string& pythonStr);
