@@ -51,7 +51,7 @@ TORCH_API void {f.func.name.unambiguous_name()}(Stack & stack);
             )
 
             # parse arguments into C++ code
-            expr_list, code_list = unboxing.convert_arguments(args)
+            binding_list, code_list = unboxing.convert_arguments(args)
 
             # for each C++ argument, generate the conversion code
             code_connector = "\n\t"
@@ -59,7 +59,7 @@ TORCH_API void {f.func.name.unambiguous_name()}(Stack & stack);
             # function call and push back to stack
             prefix = "self_base." if sig.method else "at::"
             args_str = "" if not expr_list else f"""
-        {arg_connector.join(e.expr for e in translate(expr_list, sig.arguments(), method=sig.method))}
+        {arg_connector.join(e.expr for e in translate(binding_list, sig.arguments(), method=sig.method))}
     """
             ret_type: CType = cpp.returns_type(f.func.returns)
             if isinstance(ret_type, BaseCType) and ret_type.type == voidT:

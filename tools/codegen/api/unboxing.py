@@ -1,7 +1,7 @@
 from typing import List, Tuple
 
 from tools.codegen.api.cpp import argumenttype_type
-from tools.codegen.api.types import Expr
+from tools.codegen.api.types import Binding
 from tools.codegen.model import (
     Argument,
     Type,
@@ -97,22 +97,22 @@ connector = "\n\t"
 
 
 # Convert all the arguments in a NativeFunction to C++ code, including TensorOptions.
-def convert_arguments(args: List[Argument]) -> Tuple[List[Expr], List[str]]:
+def convert_arguments(args: List[Argument]) -> Tuple[List[Binding], List[str]]:
     argument_str = "c10::IValue {arg_name} = std::move(peek(stack, {pos}, {args_num}));"
-    expr_list = []
     pop_ivalue = []
     code_list = []
+    binding_list = []
     for i, arg in enumerate(args):
         pop_ivalue.append(argument_str.format(arg_name=arg.name, pos=i, args_num=len(args)))
-        expr, code = argumenttype_ivalue_convert(arg.type, arg.name, mutable=arg.is_write)
-        expr_list.append(expr)
+        unboxed_name, code = argumenttype_ivalue_convert(arg.type, arg.name, mutable=arg.is_write)
         code_list.extend(code)
+        binding_list.append(arg.with_name(unboxed_name))
     pop_ivalue.append("")
-    return expr_list, pop_ivalue + code_list
+    return binding_list, pop_ivalue + code_list
 
 
 # Take an argument in JIT type format, returns the C++ code to convert an ivalue from stack to corresponding C++ type.
-def argumenttype_ivalue_convert(t: Type, arg_name: str, *, mutable: bool = False) -> Tuple[Expr, List[str]]:
+def argumenttype_ivalue_convert(t: Type, arg_name: str, *, mutable: bool = False) -> Tuple[str, List[str]]:
     nctype = argumenttype_type(t=t, mutable=mutable, binds=arg_name)
     ctype = nctype.cpp_type(strip_ref=True)
 
@@ -127,8 +127,7 @@ def argumenttype_ivalue_convert(t: Type, arg_name: str, *, mutable: bool = False
         code = _gen_code_list_type(arg_name=arg_name, out_name=out_name, t=t, ctype=ctype)
     else:
         raise Exception(f"Cannot handle type {t}. arg_name: {arg_name}")
-    expr = Expr(expr=out_name, type=nctype)
-    return expr, code
+    return out_name, code
 
 
 def _gen_code_optional_type(arg_name: str, out_name: str, t: OptionalType, ctype: str) -> List[str]:
