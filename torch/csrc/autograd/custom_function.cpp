@@ -150,6 +150,7 @@ optional_variable_list _process_forward_mode_AD(const variable_list &inputs,
         // If that Tensor didn't had gradients already, set the newly returned one
         // We could also use inputs[inp_idx] here as it is the same as out
         out._set_fw_grad(out_grad, level, /* is_inplace_op */ true);
+        processed_outputs.emplace_back(out);
         continue;
       }
     } else {
