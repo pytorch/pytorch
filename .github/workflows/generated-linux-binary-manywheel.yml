@@ -176,7 +176,7 @@ jobs:
         working-directory: pytorch/
         # Always hold for active ssh sessions
         if: always()
-        run: .github/scripts/wait_for_ssh_to_drain.sh
+        run: [[ -e .github/scripts/wait_for_ssh_to_drain.sh ]] && .github/scripts/wait_for_ssh_to_drain.sh
       - name: Chown workspace
         if: always()
         run: |
@@ -306,7 +306,7 @@ jobs:
         working-directory: pytorch/
         # Always hold for active ssh sessions
         if: always()
-        run: .github/scripts/wait_for_ssh_to_drain.sh
+        run: [[ -e .github/scripts/wait_for_ssh_to_drain.sh ]] && .github/scripts/wait_for_ssh_to_drain.sh
       - name: Chown workspace
         if: always()
         run: |
@@ -421,7 +421,7 @@ jobs:
       - name: Hold runner for 2 hours or until ssh sessions have drained
         # Always hold for active ssh sessions
         if: always()
-        run: .github/scripts/wait_for_ssh_to_drain.sh
+        run: [[ -e .github/scripts/wait_for_ssh_to_drain.sh ]] && .github/scripts/wait_for_ssh_to_drain.sh
       - name: Chown workspace
         if: always()
         run: |
@@ -567,7 +567,7 @@ jobs:
         working-directory: pytorch/
         # Always hold for active ssh sessions
         if: always()
-        run: .github/scripts/wait_for_ssh_to_drain.sh
+        run: [[ -e .github/scripts/wait_for_ssh_to_drain.sh ]] && .github/scripts/wait_for_ssh_to_drain.sh
       - name: Chown workspace
         if: always()
         run: |
@@ -703,7 +703,7 @@ jobs:
         working-directory: pytorch/
         # Always hold for active ssh sessions
         if: always()
-        run: .github/scripts/wait_for_ssh_to_drain.sh
+        run: [[ -e .github/scripts/wait_for_ssh_to_drain.sh ]] && .github/scripts/wait_for_ssh_to_drain.sh
       - name: Chown workspace
         if: always()
         run: |
@@ -819,7 +819,7 @@ jobs:
       - name: Hold runner for 2 hours or until ssh sessions have drained
         # Always hold for active ssh sessions
         if: always()
-        run: .github/scripts/wait_for_ssh_to_drain.sh
+        run: [[ -e .github/scripts/wait_for_ssh_to_drain.sh ]] && .github/scripts/wait_for_ssh_to_drain.sh
       - name: Chown workspace
         if: always()
         run: |
@@ -968,7 +968,7 @@ jobs:
         working-directory: pytorch/
         # Always hold for active ssh sessions
         if: always()
-        run: .github/scripts/wait_for_ssh_to_drain.sh
+        run: [[ -e .github/scripts/wait_for_ssh_to_drain.sh ]] && .github/scripts/wait_for_ssh_to_drain.sh
       - name: Chown workspace
         if: always()
         run: |
@@ -1104,7 +1104,7 @@ jobs:
         working-directory: pytorch/
         # Always hold for active ssh sessions
         if: always()
-        run: .github/scripts/wait_for_ssh_to_drain.sh
+        run: [[ -e .github/scripts/wait_for_ssh_to_drain.sh ]] && .github/scripts/wait_for_ssh_to_drain.sh
       - name: Chown workspace
         if: always()
         run: |
@@ -1220,7 +1220,7 @@ jobs:
       - name: Hold runner for 2 hours or until ssh sessions have drained
         # Always hold for active ssh sessions
         if: always()
-        run: .github/scripts/wait_for_ssh_to_drain.sh
+        run: [[ -e .github/scripts/wait_for_ssh_to_drain.sh ]] && .github/scripts/wait_for_ssh_to_drain.sh
       - name: Chown workspace
         if: always()
         run: |
@@ -1369,7 +1369,7 @@ jobs:
         working-directory: pytorch/
         # Always hold for active ssh sessions
         if: always()
-        run: .github/scripts/wait_for_ssh_to_drain.sh
+        run: [[ -e .github/scripts/wait_for_ssh_to_drain.sh ]] && .github/scripts/wait_for_ssh_to_drain.sh
       - name: Chown workspace
         if: always()
         run: |
@@ -1505,7 +1505,7 @@ jobs:
         working-directory: pytorch/
         # Always hold for active ssh sessions
         if: always()
-        run: .github/scripts/wait_for_ssh_to_drain.sh
+        run: [[ -e .github/scripts/wait_for_ssh_to_drain.sh ]] && .github/scripts/wait_for_ssh_to_drain.sh
       - name: Chown workspace
         if: always()
         run: |
@@ -1621,7 +1621,7 @@ jobs:
       - name: Hold runner for 2 hours or until ssh sessions have drained
         # Always hold for active ssh sessions
         if: always()
-        run: .github/scripts/wait_for_ssh_to_drain.sh
+        run: [[ -e .github/scripts/wait_for_ssh_to_drain.sh ]] && .github/scripts/wait_for_ssh_to_drain.sh
       - name: Chown workspace
         if: always()
         run: |
@@ -1770,7 +1770,7 @@ jobs:
         working-directory: pytorch/
         # Always hold for active ssh sessions
         if: always()
-        run: .github/scripts/wait_for_ssh_to_drain.sh
+        run: [[ -e .github/scripts/wait_for_ssh_to_drain.sh ]] && .github/scripts/wait_for_ssh_to_drain.sh
       - name: Chown workspace
         if: always()
         run: |
@@ -1906,7 +1906,7 @@ jobs:
         working-directory: pytorch/
         # Always hold for active ssh sessions
         if: always()
-        run: .github/scripts/wait_for_ssh_to_drain.sh
+        run: [[ -e .github/scripts/wait_for_ssh_to_drain.sh ]] && .github/scripts/wait_for_ssh_to_drain.sh
       - name: Chown workspace
         if: always()
         run: |
@@ -2022,7 +2022,7 @@ jobs:
       - name: Hold runner for 2 hours or until ssh sessions have drained
         # Always hold for active ssh sessions
         if: always()
-        run: .github/scripts/wait_for_ssh_to_drain.sh
+        run: [[ -e .github/scripts/wait_for_ssh_to_drain.sh ]] && .github/scripts/wait_for_ssh_to_drain.sh
       - name: Chown workspace
         if: always()
         run: |
@@ -2168,7 +2168,7 @@ jobs:
         working-directory: pytorch/
         # Always hold for active ssh sessions
         if: always()
-        run: .github/scripts/wait_for_ssh_to_drain.sh
+        run: [[ -e .github/scripts/wait_for_ssh_to_drain.sh ]] && .github/scripts/wait_for_ssh_to_drain.sh
       - name: Chown workspace
         if: always()
         run: |
@@ -2299,7 +2299,7 @@ jobs:
         working-directory: pytorch/
         # Always hold for active ssh sessions
         if: always()
-        run: .github/scripts/wait_for_ssh_to_drain.sh
+        run: [[ -e .github/scripts/wait_for_ssh_to_drain.sh ]] && .github/scripts/wait_for_ssh_to_drain.sh
       - name: Chown workspace
         if: always()
         run: |
@@ -2415,7 +2415,7 @@ jobs:
       - name: Hold runner for 2 hours or until ssh sessions have drained
         # Always hold for active ssh sessions
         if: always()
-        run: .github/scripts/wait_for_ssh_to_drain.sh
+        run: [[ -e .github/scripts/wait_for_ssh_to_drain.sh ]] && .github/scripts/wait_for_ssh_to_drain.sh
       - name: Chown workspace
         if: always()
         run: |
@@ -2561,7 +2561,7 @@ jobs:
         working-directory: pytorch/
         # Always hold for active ssh sessions
         if: always()
-        run: .github/scripts/wait_for_ssh_to_drain.sh
+        run: [[ -e .github/scripts/wait_for_ssh_to_drain.sh ]] && .github/scripts/wait_for_ssh_to_drain.sh
       - name: Chown workspace
         if: always()
         run: |
@@ -2692,7 +2692,7 @@ jobs:
         working-directory: pytorch/
         # Always hold for active ssh sessions
         if: always()
-        run: .github/scripts/wait_for_ssh_to_drain.sh
+        run: [[ -e .github/scripts/wait_for_ssh_to_drain.sh ]] && .github/scripts/wait_for_ssh_to_drain.sh
       - name: Chown workspace
         if: always()
         run: |
@@ -2808,7 +2808,7 @@ jobs:
       - name: Hold runner for 2 hours or until ssh sessions have drained
         # Always hold for active ssh sessions
         if: always()
-        run: .github/scripts/wait_for_ssh_to_drain.sh
+        run: [[ -e .github/scripts/wait_for_ssh_to_drain.sh ]] && .github/scripts/wait_for_ssh_to_drain.sh
       - name: Chown workspace
         if: always()
         run: |
@@ -2953,7 +2953,7 @@ jobs:
         working-directory: pytorch/
         # Always hold for active ssh sessions
         if: always()
-        run: .github/scripts/wait_for_ssh_to_drain.sh
+        run: [[ -e .github/scripts/wait_for_ssh_to_drain.sh ]] && .github/scripts/wait_for_ssh_to_drain.sh
       - name: Chown workspace
         if: always()
         run: |
@@ -3083,7 +3083,7 @@ jobs:
         working-directory: pytorch/
         # Always hold for active ssh sessions
         if: always()
-        run: .github/scripts/wait_for_ssh_to_drain.sh
+        run: [[ -e .github/scripts/wait_for_ssh_to_drain.sh ]] && .github/scripts/wait_for_ssh_to_drain.sh
       - name: Chown workspace
         if: always()
         run: |
@@ -3198,7 +3198,7 @@ jobs:
       - name: Hold runner for 2 hours or until ssh sessions have drained
         # Always hold for active ssh sessions
         if: always()
-        run: .github/scripts/wait_for_ssh_to_drain.sh
+        run: [[ -e .github/scripts/wait_for_ssh_to_drain.sh ]] && .github/scripts/wait_for_ssh_to_drain.sh
       - name: Chown workspace
         if: always()
         run: |
@@ -3344,7 +3344,7 @@ jobs:
         working-directory: pytorch/
         # Always hold for active ssh sessions
         if: always()
-        run: .github/scripts/wait_for_ssh_to_drain.sh
+        run: [[ -e .github/scripts/wait_for_ssh_to_drain.sh ]] && .github/scripts/wait_for_ssh_to_drain.sh
       - name: Chown workspace
         if: always()
         run: |
@@ -3480,7 +3480,7 @@ jobs:
         working-directory: pytorch/
         # Always hold for active ssh sessions
         if: always()
-        run: .github/scripts/wait_for_ssh_to_drain.sh
+        run: [[ -e .github/scripts/wait_for_ssh_to_drain.sh ]] && .github/scripts/wait_for_ssh_to_drain.sh
       - name: Chown workspace
         if: always()
         run: |
@@ -3596,7 +3596,7 @@ jobs:
       - name: Hold runner for 2 hours or until ssh sessions have drained
         # Always hold for active ssh sessions
         if: always()
-        run: .github/scripts/wait_for_ssh_to_drain.sh
+        run: [[ -e .github/scripts/wait_for_ssh_to_drain.sh ]] && .github/scripts/wait_for_ssh_to_drain.sh
       - name: Chown workspace
         if: always()
         run: |
@@ -3745,7 +3745,7 @@ jobs:
         working-directory: pytorch/
         # Always hold for active ssh sessions
         if: always()
-        run: .github/scripts/wait_for_ssh_to_drain.sh
+        run: [[ -e .github/scripts/wait_for_ssh_to_drain.sh ]] && .github/scripts/wait_for_ssh_to_drain.sh
       - name: Chown workspace
         if: always()
         run: |
@@ -3881,7 +3881,7 @@ jobs:
         working-directory: pytorch/
         # Always hold for active ssh sessions
         if: always()
-        run: .github/scripts/wait_for_ssh_to_drain.sh
+        run: [[ -e .github/scripts/wait_for_ssh_to_drain.sh ]] && .github/scripts/wait_for_ssh_to_drain.sh
       - name: Chown workspace
         if: always()
         run: |
@@ -3997,7 +3997,7 @@ jobs:
       - name: Hold runner for 2 hours or until ssh sessions have drained
         # Always hold for active ssh sessions
         if: always()
-        run: .github/scripts/wait_for_ssh_to_drain.sh
+        run: [[ -e .github/scripts/wait_for_ssh_to_drain.sh ]] && .github/scripts/wait_for_ssh_to_drain.sh
       - name: Chown workspace
         if: always()
         run: |
@@ -4146,7 +4146,7 @@ jobs:
         working-directory: pytorch/
         # Always hold for active ssh sessions
         if: always()
-        run: .github/scripts/wait_for_ssh_to_drain.sh
+        run: [[ -e .github/scripts/wait_for_ssh_to_drain.sh ]] && .github/scripts/wait_for_ssh_to_drain.sh
       - name: Chown workspace
         if: always()
         run: |
@@ -4282,7 +4282,7 @@ jobs:
         working-directory: pytorch/
         # Always hold for active ssh sessions
         if: always()
-        run: .github/scripts/wait_for_ssh_to_drain.sh
+        run: [[ -e .github/scripts/wait_for_ssh_to_drain.sh ]] && .github/scripts/wait_for_ssh_to_drain.sh
       - name: Chown workspace
         if: always()
         run: |
@@ -4398,7 +4398,7 @@ jobs:
       - name: Hold runner for 2 hours or until ssh sessions have drained
         # Always hold for active ssh sessions
         if: always()
-        run: .github/scripts/wait_for_ssh_to_drain.sh
+        run: [[ -e .github/scripts/wait_for_ssh_to_drain.sh ]] && .github/scripts/wait_for_ssh_to_drain.sh
       - name: Chown workspace
         if: always()
         run: |
@@ -4547,7 +4547,7 @@ jobs:
         working-directory: pytorch/
         # Always hold for active ssh sessions
         if: always()
-        run: .github/scripts/wait_for_ssh_to_drain.sh
+        run: [[ -e .github/scripts/wait_for_ssh_to_drain.sh ]] && .github/scripts/wait_for_ssh_to_drain.sh
       - name: Chown workspace
         if: always()
         run: |
@@ -4683,7 +4683,7 @@ jobs:
         working-directory: pytorch/
         # Always hold for active ssh sessions
         if: always()
-        run: .github/scripts/wait_for_ssh_to_drain.sh
+        run: [[ -e .github/scripts/wait_for_ssh_to_drain.sh ]] && .github/scripts/wait_for_ssh_to_drain.sh
       - name: Chown workspace
         if: always()
         run: |
@@ -4799,7 +4799,7 @@ jobs:
       - name: Hold runner for 2 hours or until ssh sessions have drained
         # Always hold for active ssh sessions
         if: always()
-        run: .github/scripts/wait_for_ssh_to_drain.sh
+        run: [[ -e .github/scripts/wait_for_ssh_to_drain.sh ]] && .github/scripts/wait_for_ssh_to_drain.sh
       - name: Chown workspace
         if: always()
         run: |
@@ -4945,7 +4945,7 @@ jobs:
         working-directory: pytorch/
         # Always hold for active ssh sessions
         if: always()
-        run: .github/scripts/wait_for_ssh_to_drain.sh
+        run: [[ -e .github/scripts/wait_for_ssh_to_drain.sh ]] && .github/scripts/wait_for_ssh_to_drain.sh
       - name: Chown workspace
         if: always()
         run: |
@@ -5076,7 +5076,7 @@ jobs:
         working-directory: pytorch/
         # Always hold for active ssh sessions
         if: always()
-        run: .github/scripts/wait_for_ssh_to_drain.sh
+        run: [[ -e .github/scripts/wait_for_ssh_to_drain.sh ]] && .github/scripts/wait_for_ssh_to_drain.sh
       - name: Chown workspace
         if: always()
         run: |
@@ -5192,7 +5192,7 @@ jobs:
       - name: Hold runner for 2 hours or until ssh sessions have drained
         # Always hold for active ssh sessions
         if: always()
-        run: .github/scripts/wait_for_ssh_to_drain.sh
+        run: [[ -e .github/scripts/wait_for_ssh_to_drain.sh ]] && .github/scripts/wait_for_ssh_to_drain.sh
       - name: Chown workspace
         if: always()
         run: |
@@ -5338,7 +5338,7 @@ jobs:
         working-directory: pytorch/
         # Always hold for active ssh sessions
         if: always()
-        run: .github/scripts/wait_for_ssh_to_drain.sh
+        run: [[ -e .github/scripts/wait_for_ssh_to_drain.sh ]] && .github/scripts/wait_for_ssh_to_drain.sh
       - name: Chown workspace
         if: always()
         run: |
@@ -5469,7 +5469,7 @@ jobs:
         working-directory: pytorch/
         # Always hold for active ssh sessions
         if: always()
-        run: .github/scripts/wait_for_ssh_to_drain.sh
+        run: [[ -e .github/scripts/wait_for_ssh_to_drain.sh ]] && .github/scripts/wait_for_ssh_to_drain.sh
       - name: Chown workspace
         if: always()
         run: |
@@ -5585,7 +5585,7 @@ jobs:
       - name: Hold runner for 2 hours or until ssh sessions have drained
         # Always hold for active ssh sessions
         if: always()
-        run: .github/scripts/wait_for_ssh_to_drain.sh
+        run: [[ -e .github/scripts/wait_for_ssh_to_drain.sh ]] && .github/scripts/wait_for_ssh_to_drain.sh
       - name: Chown workspace
         if: always()
         run: |
@@ -5730,7 +5730,7 @@ jobs:
         working-directory: pytorch/
         # Always hold for active ssh sessions
         if: always()
-        run: .github/scripts/wait_for_ssh_to_drain.sh
+        run: [[ -e .github/scripts/wait_for_ssh_to_drain.sh ]] && .github/scripts/wait_for_ssh_to_drain.sh
       - name: Chown workspace
         if: always()
         run: |
@@ -5860,7 +5860,7 @@ jobs:
         working-directory: pytorch/
         # Always hold for active ssh sessions
         if: always()
-        run: .github/scripts/wait_for_ssh_to_drain.sh
+        run: [[ -e .github/scripts/wait_for_ssh_to_drain.sh ]] && .github/scripts/wait_for_ssh_to_drain.sh
       - name: Chown workspace
         if: always()
         run: |
@@ -5975,7 +5975,7 @@ jobs:
       - name: Hold runner for 2 hours or until ssh sessions have drained
         # Always hold for active ssh sessions
         if: always()
-        run: .github/scripts/wait_for_ssh_to_drain.sh
+        run: [[ -e .github/scripts/wait_for_ssh_to_drain.sh ]] && .github/scripts/wait_for_ssh_to_drain.sh
       - name: Chown workspace
         if: always()
         run: |
@@ -6121,7 +6121,7 @@ jobs:
         working-directory: pytorch/
         # Always hold for active ssh sessions
         if: always()
-        run: .github/scripts/wait_for_ssh_to_drain.sh
+        run: [[ -e .github/scripts/wait_for_ssh_to_drain.sh ]] && .github/scripts/wait_for_ssh_to_drain.sh
       - name: Chown workspace
         if: always()
         run: |
@@ -6257,7 +6257,7 @@ jobs:
         working-directory: pytorch/
         # Always hold for active ssh sessions
         if: always()
-        run: .github/scripts/wait_for_ssh_to_drain.sh
+        run: [[ -e .github/scripts/wait_for_ssh_to_drain.sh ]] && .github/scripts/wait_for_ssh_to_drain.sh
       - name: Chown workspace
         if: always()
         run: |
@@ -6373,7 +6373,7 @@ jobs:
       - name: Hold runner for 2 hours or until ssh sessions have drained
         # Always hold for active ssh sessions
         if: always()
-        run: .github/scripts/wait_for_ssh_to_drain.sh
+        run: [[ -e .github/scripts/wait_for_ssh_to_drain.sh ]] && .github/scripts/wait_for_ssh_to_drain.sh
       - name: Chown workspace
         if: always()
         run: |
@@ -6522,7 +6522,7 @@ jobs:
         working-directory: pytorch/
         # Always hold for active ssh sessions
         if: always()
-        run: .github/scripts/wait_for_ssh_to_drain.sh
+        run: [[ -e .github/scripts/wait_for_ssh_to_drain.sh ]] && .github/scripts/wait_for_ssh_to_drain.sh
       - name: Chown workspace
         if: always()
         run: |
@@ -6658,7 +6658,7 @@ jobs:
         working-directory: pytorch/
         # Always hold for active ssh sessions
         if: always()
-        run: .github/scripts/wait_for_ssh_to_drain.sh
+        run: [[ -e .github/scripts/wait_for_ssh_to_drain.sh ]] && .github/scripts/wait_for_ssh_to_drain.sh
       - name: Chown workspace
         if: always()
         run: |
@@ -6774,7 +6774,7 @@ jobs:
       - name: Hold runner for 2 hours or until ssh sessions have drained
         # Always hold for active ssh sessions
         if: always()
-        run: .github/scripts/wait_for_ssh_to_drain.sh
+        run: [[ -e .github/scripts/wait_for_ssh_to_drain.sh ]] && .github/scripts/wait_for_ssh_to_drain.sh
       - name: Chown workspace
         if: always()
         run: |
@@ -6923,7 +6923,7 @@ jobs:
         working-directory: pytorch/
         # Always hold for active ssh sessions
         if: always()
-        run: .github/scripts/wait_for_ssh_to_drain.sh
+        run: [[ -e .github/scripts/wait_for_ssh_to_drain.sh ]] && .github/scripts/wait_for_ssh_to_drain.sh
       - name: Chown workspace
         if: always()
         run: |
@@ -7059,7 +7059,7 @@ jobs:
         working-directory: pytorch/
         # Always hold for active ssh sessions
         if: always()
-        run: .github/scripts/wait_for_ssh_to_drain.sh
+        run: [[ -e .github/scripts/wait_for_ssh_to_drain.sh ]] && .github/scripts/wait_for_ssh_to_drain.sh
       - name: Chown workspace
         if: always()
         run: |
@@ -7175,7 +7175,7 @@ jobs:
       - name: Hold runner for 2 hours or until ssh sessions have drained
         # Always hold for active ssh sessions
         if: always()
-        run: .github/scripts/wait_for_ssh_to_drain.sh
+        run: [[ -e .github/scripts/wait_for_ssh_to_drain.sh ]] && .github/scripts/wait_for_ssh_to_drain.sh
       - name: Chown workspace
         if: always()
         run: |
@@ -7324,7 +7324,7 @@ jobs:
         working-directory: pytorch/
         # Always hold for active ssh sessions
         if: always()
-        run: .github/scripts/wait_for_ssh_to_drain.sh
+        run: [[ -e .github/scripts/wait_for_ssh_to_drain.sh ]] && .github/scripts/wait_for_ssh_to_drain.sh
       - name: Chown workspace
         if: always()
         run: |
@@ -7460,7 +7460,7 @@ jobs:
         working-directory: pytorch/
         # Always hold for active ssh sessions
         if: always()
-        run: .github/scripts/wait_for_ssh_to_drain.sh
+        run: [[ -e .github/scripts/wait_for_ssh_to_drain.sh ]] && .github/scripts/wait_for_ssh_to_drain.sh
       - name: Chown workspace
         if: always()
         run: |
@@ -7576,7 +7576,7 @@ jobs:
       - name: Hold runner for 2 hours or until ssh sessions have drained
         # Always hold for active ssh sessions
         if: always()
-        run: .github/scripts/wait_for_ssh_to_drain.sh
+        run: [[ -e .github/scripts/wait_for_ssh_to_drain.sh ]] && .github/scripts/wait_for_ssh_to_drain.sh
       - name: Chown workspace
         if: always()
         run: |
@@ -7722,7 +7722,7 @@ jobs:
         working-directory: pytorch/
         # Always hold for active ssh sessions
         if: always()
-        run: .github/scripts/wait_for_ssh_to_drain.sh
+        run: [[ -e .github/scripts/wait_for_ssh_to_drain.sh ]] && .github/scripts/wait_for_ssh_to_drain.sh
       - name: Chown workspace
         if: always()
         run: |
@@ -7853,7 +7853,7 @@ jobs:
         working-directory: pytorch/
         # Always hold for active ssh sessions
         if: always()
-        run: .github/scripts/wait_for_ssh_to_drain.sh
+        run: [[ -e .github/scripts/wait_for_ssh_to_drain.sh ]] && .github/scripts/wait_for_ssh_to_drain.sh
       - name: Chown workspace
         if: always()
         run: |
@@ -7969,7 +7969,7 @@ jobs:
       - name: Hold runner for 2 hours or until ssh sessions have drained
         # Always hold for active ssh sessions
         if: always()
-        run: .github/scripts/wait_for_ssh_to_drain.sh
+        run: [[ -e .github/scripts/wait_for_ssh_to_drain.sh ]] && .github/scripts/wait_for_ssh_to_drain.sh
       - name: Chown workspace
         if: always()
         run: |
@@ -8115,7 +8115,7 @@ jobs:
         working-directory: pytorch/
         # Always hold for active ssh sessions
         if: always()
-        run: .github/scripts/wait_for_ssh_to_drain.sh
+        run: [[ -e .github/scripts/wait_for_ssh_to_drain.sh ]] && .github/scripts/wait_for_ssh_to_drain.sh
       - name: Chown workspace
         if: always()
         run: |
@@ -8246,7 +8246,7 @@ jobs:
         working-directory: pytorch/
         # Always hold for active ssh sessions
         if: always()
-        run: .github/scripts/wait_for_ssh_to_drain.sh
+        run: [[ -e .github/scripts/wait_for_ssh_to_drain.sh ]] && .github/scripts/wait_for_ssh_to_drain.sh
       - name: Chown workspace
         if: always()
         run: |
@@ -8362,7 +8362,7 @@ jobs:
       - name: Hold runner for 2 hours or until ssh sessions have drained
         # Always hold for active ssh sessions
         if: always()
-        run: .github/scripts/wait_for_ssh_to_drain.sh
+        run: [[ -e .github/scripts/wait_for_ssh_to_drain.sh ]] && .github/scripts/wait_for_ssh_to_drain.sh
       - name: Chown workspace
         if: always()
         run: |
@@ -8507,7 +8507,7 @@ jobs:
         working-directory: pytorch/
         # Always hold for active ssh sessions
         if: always()
-        run: .github/scripts/wait_for_ssh_to_drain.sh
+        run: [[ -e .github/scripts/wait_for_ssh_to_drain.sh ]] && .github/scripts/wait_for_ssh_to_drain.sh
       - name: Chown workspace
         if: always()
         run: |
@@ -8637,7 +8637,7 @@ jobs:
         working-directory: pytorch/
         # Always hold for active ssh sessions
         if: always()
-        run: .github/scripts/wait_for_ssh_to_drain.sh
+        run: [[ -e .github/scripts/wait_for_ssh_to_drain.sh ]] && .github/scripts/wait_for_ssh_to_drain.sh
       - name: Chown workspace
         if: always()
         run: |
@@ -8752,7 +8752,7 @@ jobs:
       - name: Hold runner for 2 hours or until ssh sessions have drained
         # Always hold for active ssh sessions
         if: always()
-        run: .github/scripts/wait_for_ssh_to_drain.sh
+        run: [[ -e .github/scripts/wait_for_ssh_to_drain.sh ]] && .github/scripts/wait_for_ssh_to_drain.sh
       - name: Chown workspace
         if: always()
         run: |
@@ -8898,7 +8898,7 @@ jobs:
         working-directory: pytorch/
         # Always hold for active ssh sessions
         if: always()
-        run: .github/scripts/wait_for_ssh_to_drain.sh
+        run: [[ -e .github/scripts/wait_for_ssh_to_drain.sh ]] && .github/scripts/wait_for_ssh_to_drain.sh
       - name: Chown workspace
         if: always()
         run: |
@@ -9034,7 +9034,7 @@ jobs:
         working-directory: pytorch/
         # Always hold for active ssh sessions
         if: always()
-        run: .github/scripts/wait_for_ssh_to_drain.sh
+        run: [[ -e .github/scripts/wait_for_ssh_to_drain.sh ]] && .github/scripts/wait_for_ssh_to_drain.sh
       - name: Chown workspace
         if: always()
         run: |
@@ -9150,7 +9150,7 @@ jobs:
       - name: Hold runner for 2 hours or until ssh sessions have drained
         # Always hold for active ssh sessions
         if: always()
-        run: .github/scripts/wait_for_ssh_to_drain.sh
+        run: [[ -e .github/scripts/wait_for_ssh_to_drain.sh ]] && .github/scripts/wait_for_ssh_to_drain.sh
       - name: Chown workspace
         if: always()
         run: |
@@ -9299,7 +9299,7 @@ jobs:
         working-directory: pytorch/
         # Always hold for active ssh sessions
         if: always()
-        run: .github/scripts/wait_for_ssh_to_drain.sh
+        run: [[ -e .github/scripts/wait_for_ssh_to_drain.sh ]] && .github/scripts/wait_for_ssh_to_drain.sh
       - name: Chown workspace
         if: always()
         run: |
@@ -9435,7 +9435,7 @@ jobs:
         working-directory: pytorch/
         # Always hold for active ssh sessions
         if: always()
-        run: .github/scripts/wait_for_ssh_to_drain.sh
+        run: [[ -e .github/scripts/wait_for_ssh_to_drain.sh ]] && .github/scripts/wait_for_ssh_to_drain.sh
       - name: Chown workspace
         if: always()
         run: |
@@ -9551,7 +9551,7 @@ jobs:
       - name: Hold runner for 2 hours or until ssh sessions have drained
         # Always hold for active ssh sessions
         if: always()
-        run: .github/scripts/wait_for_ssh_to_drain.sh
+        run: [[ -e .github/scripts/wait_for_ssh_to_drain.sh ]] && .github/scripts/wait_for_ssh_to_drain.sh
       - name: Chown workspace
         if: always()
         run: |
@@ -9700,7 +9700,7 @@ jobs:
         working-directory: pytorch/
         # Always hold for active ssh sessions
         if: always()
-        run: .github/scripts/wait_for_ssh_to_drain.sh
+        run: [[ -e .github/scripts/wait_for_ssh_to_drain.sh ]] && .github/scripts/wait_for_ssh_to_drain.sh
       - name: Chown workspace
         if: always()
         run: |
@@ -9836,7 +9836,7 @@ jobs:
         working-directory: pytorch/
         # Always hold for active ssh sessions
         if: always()
-        run: .github/scripts/wait_for_ssh_to_drain.sh
+        run: [[ -e .github/scripts/wait_for_ssh_to_drain.sh ]] && .github/scripts/wait_for_ssh_to_drain.sh
       - name: Chown workspace
         if: always()
         run: |
@@ -9952,7 +9952,7 @@ jobs:
       - name: Hold runner for 2 hours or until ssh sessions have drained
         # Always hold for active ssh sessions
         if: always()
-        run: .github/scripts/wait_for_ssh_to_drain.sh
+        run: [[ -e .github/scripts/wait_for_ssh_to_drain.sh ]] && .github/scripts/wait_for_ssh_to_drain.sh
       - name: Chown workspace
         if: always()
         run: |
@@ -10101,7 +10101,7 @@ jobs:
         working-directory: pytorch/
         # Always hold for active ssh sessions
         if: always()
-        run: .github/scripts/wait_for_ssh_to_drain.sh
+        run: [[ -e .github/scripts/wait_for_ssh_to_drain.sh ]] && .github/scripts/wait_for_ssh_to_drain.sh
       - name: Chown workspace
         if: always()
         run: |
@@ -10237,7 +10237,7 @@ jobs:
         working-directory: pytorch/
         # Always hold for active ssh sessions
         if: always()
-        run: .github/scripts/wait_for_ssh_to_drain.sh
+        run: [[ -e .github/scripts/wait_for_ssh_to_drain.sh ]] && .github/scripts/wait_for_ssh_to_drain.sh
       - name: Chown workspace
         if: always()
         run: |
@@ -10353,7 +10353,7 @@ jobs:
       - name: Hold runner for 2 hours or until ssh sessions have drained
         # Always hold for active ssh sessions
         if: always()
-        run: .github/scripts/wait_for_ssh_to_drain.sh
+        run: [[ -e .github/scripts/wait_for_ssh_to_drain.sh ]] && .github/scripts/wait_for_ssh_to_drain.sh
       - name: Chown workspace
         if: always()
         run: |
@@ -10499,7 +10499,7 @@ jobs:
         working-directory: pytorch/
         # Always hold for active ssh sessions
         if: always()
-        run: .github/scripts/wait_for_ssh_to_drain.sh
+        run: [[ -e .github/scripts/wait_for_ssh_to_drain.sh ]] && .github/scripts/wait_for_ssh_to_drain.sh
       - name: Chown workspace
         if: always()
         run: |
@@ -10630,7 +10630,7 @@ jobs:
         working-directory: pytorch/
         # Always hold for active ssh sessions
         if: always()
-        run: .github/scripts/wait_for_ssh_to_drain.sh
+        run: [[ -e .github/scripts/wait_for_ssh_to_drain.sh ]] && .github/scripts/wait_for_ssh_to_drain.sh
       - name: Chown workspace
         if: always()
         run: |
@@ -10746,7 +10746,7 @@ jobs:
       - name: Hold runner for 2 hours or until ssh sessions have drained
         # Always hold for active ssh sessions
         if: always()
-        run: .github/scripts/wait_for_ssh_to_drain.sh
+        run: [[ -e .github/scripts/wait_for_ssh_to_drain.sh ]] && .github/scripts/wait_for_ssh_to_drain.sh
       - name: Chown workspace
         if: always()
         run: |
@@ -10892,7 +10892,7 @@ jobs:
         working-directory: pytorch/
         # Always hold for active ssh sessions
         if: always()
-        run: .github/scripts/wait_for_ssh_to_drain.sh
+        run: [[ -e .github/scripts/wait_for_ssh_to_drain.sh ]] && .github/scripts/wait_for_ssh_to_drain.sh
       - name: Chown workspace
         if: always()
         run: |
@@ -11023,7 +11023,7 @@ jobs:
         working-directory: pytorch/
         # Always hold for active ssh sessions
         if: always()
-        run: .github/scripts/wait_for_ssh_to_drain.sh
+        run: [[ -e .github/scripts/wait_for_ssh_to_drain.sh ]] && .github/scripts/wait_for_ssh_to_drain.sh
       - name: Chown workspace
         if: always()
         run: |
@@ -11139,7 +11139,7 @@ jobs:
       - name: Hold runner for 2 hours or until ssh sessions have drained
         # Always hold for active ssh sessions
         if: always()
-        run: .github/scripts/wait_for_ssh_to_drain.sh
+        run: [[ -e .github/scripts/wait_for_ssh_to_drain.sh ]] && .github/scripts/wait_for_ssh_to_drain.sh
       - name: Chown workspace
         if: always()
         run: |
