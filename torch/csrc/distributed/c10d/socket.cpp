@@ -631,7 +631,7 @@ SocketConnectOp::ConnectResult SocketConnectOp::tryConnect(const ::addrinfo& add
 
     // Retry if the server is not yet listening or if its backlog is exhausted.
     if (err == std::errc::connection_refused || err == std::errc::connection_reset) {
-      C10D_WARNING("The server socket on {} is not yet listening {}.", addr, err);
+      C10D_WARNING("The server socket on {} is not yet listening {}, will retry.", addr, err);
 
       if (Clock::now() < deadline_ - delay_duration_) {
         // Wait a little to avoid choking the server.
