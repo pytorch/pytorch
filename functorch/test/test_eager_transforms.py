@@ -604,6 +604,48 @@ class TestGradTransform(TestCase):
         result, = vjp_fn((v1, (v2, v3)))
         self.assertEqual(result, v1 + v2 + v3)
 
+    def test_vjp_outputs_can_any_pytree(self, device):
+        x = torch.randn(2, 3, device=device)
+        t = torch.randn(2, 3, device=device)
+
+        for output in [None, ()]:
+            with self.assertRaisesRegex(
+                RuntimeError, r"vjp\(f, \*primals\): Expected f to be a function that has non-empty output"
+            ):
+                _, vjp_fn = vjp(lambda _: output, x)
+                vjp_fn(t)
+
+        for output in [1, True, 12.2, "abc"]:
+            with self.assertRaisesRegex(
+                RuntimeError, r"vjp\(f, \*primals\): expected f\(\*primals\) to return only tensors"
+            ):
+                _, vjp_fn = vjp(lambda _: output, x)
+                vjp_fn(t)
+
+        # Check list output
+        output, vjp_fn = vjp(lambda x: [x, x.sum()], x)
+        vjp_out, = vjp_fn([t, t.sum()])
+        assert isinstance(output, list) and len(output) == 2
+        assert isinstance(vjp_out, torch.Tensor)
+
+        # Check dict output
+        output, vjp_fn = vjp(lambda x: {"x": x, "xsum": x.sum()}, x)
+        vjp_out, = vjp_fn({"x": t, "xsum": t.sum()})
+        assert isinstance(output, dict) and len(output) == 2 and "xsum" in output
+        assert isinstance(vjp_out, torch.Tensor)
+
+        def composite_output(x):
+            out = x.sum()
+            return [
+                (out, {"a": x, "out": [x, out]}),
+            ]
+
+        output, vjp_fn = vjp(composite_output, x)
+        vjp_out, = vjp_fn([(t.sum(), {"a": t, "out": [t, t.sum()]}), ])
+        assert isinstance(output, list)
+        assert isinstance(output[0], tuple) and isinstance(output[0][1], dict)
+        assert isinstance(vjp_out, torch.Tensor)
+
     def test_vjp_pytree_error(self, device):
         def f(x):
             return x, (x, x)
@@ -617,11 +659,18 @@ class TestGradTransform(TestCase):
             result, = vjp_fn(((v1, (v2, v3)),))
 
     def test_vjp_aux_tensor(self, device):
-        def f(x):
-            y = x.sin()
-            return y, x.cos()
 
         x = torch.randn(3, device=device)
+
+        with self.assertRaisesRegex(RuntimeError, r'vjp\(f, \*primals\): output of function f should be a tuple'):
+            vjp(lambda t: [t, t], x, has_aux=True)
+
+        with self.assertRaisesRegex(RuntimeError, r'vjp\(f, \*primals\): output of function f should be a tuple'):
+            vjp(lambda t: (t, t + 2, t + 3), x, has_aux=True)
+
+        def f(t):
+            y = t.sin()
+            return y, t.cos()
 
         out, vjp_fn, aux = vjp(f, x, has_aux=True)
         self.assertEqual(aux, x.cos())
@@ -1198,20 +1247,62 @@ class TestJac(TestCase):
         self.assertEqual(result, torch.eye(3, 3, device=device))
         self.assertEqual(aux, x.cos())
 
-    @FIXME_jacrev_only
+    @jacrev_and_jacfwd
     def test_aux_pytree(self, device, jacapi):
         def f(x):
             y = x.clone()
             return y, {'a': y.cos(), 'b': [y.tan()]}
 
         x = torch.randn(3, device=device)
-        result, aux = jacapi(f, has_aux=True)(x)
 
-        self.assertEqual(result, torch.eye(3, 3, device=device))
-        expected_aux = {'a': x.cos(), 'b': [x.tan()]}
-        self.assertEqual(aux, expected_aux)
+        # TODO: Remove when https://github.com/pytorch/functorch/issues/392
+        # is fixed
+        if jacapi == jacrev:
+            result, aux = jacapi(f, has_aux=True)(x)
+            self.assertEqual(result, torch.eye(3, 3, device=device))
+            expected_aux = {'a': x.cos(), 'b': [x.tan()]}
+            self.assertEqual(aux, expected_aux)
+        else:
+            result, aux = jacapi(f)(x)
+            self.assertEqual(result, torch.eye(3, 3, device=device))
+            expected_aux = {'a': -torch.diag(x.sin()), 'b': [torch.diag(1.0 + x.tan() ** 2)]}
+            self.assertEqual(aux, expected_aux)
 
-    @FIXME_jacrev_only
+    @jacrev_and_jacfwd
+    def test_outputs_can_any_pytree(self, device, jacapi):
+        x = torch.randn(2, 3, device=device)
+
+        for output in [None, ()]:
+            with self.assertRaisesRegex(
+                RuntimeError, r"(vjp|jvp).+: Expected f to be a function that has non-empty output"
+            ):
+                jacapi(lambda _: output)(x)
+
+        for output in [1, True, 12.2, "abc"]:
+            with self.assertRaisesRegex(
+                RuntimeError, r"(vjp|jvp).+: expected f\(\*primals\) to return only tensors"
+            ):
+                jacapi(lambda _: output)(x)
+
+        # Check list output
+        out = jacapi(lambda x: [x, x.sum()])(x)
+        assert isinstance(out, list) and len(out) == 2
+
+        # Check dict output
+        out = jacapi(lambda x: {"x": x, "xsum": x.sum()})(x)
+        assert isinstance(out, dict) and len(out) == 2 and "xsum" in out
+
+        def composite_output(x):
+            out = x.sum()
+            return [
+                (out, {"a": x, "out": [x, out]}),
+            ]
+
+        out = jacapi(composite_output)(x)
+        assert isinstance(out, list)
+        assert isinstance(out[0], tuple) and isinstance(out[0][1], dict)
+
+    @jacrev_and_jacfwd
     def test_multiple_inputs_outputs_pytree(self, device, jacapi):
         def f(a, b, c):
             a0, a1 = a
@@ -1653,25 +1744,43 @@ class TestJvp(TestCase):
         with self.assertRaisesRegex(RuntimeError, 'only contain Tensors'):
             jvp(torch.sin, (x,), (1.,))
 
-    def test_outputs_should_be_tensor_or_tensors(self, device):
+    def test_jvp_outputs_can_any_pytree(self, device):
         x = torch.randn(2, 3, device=device)
         t = torch.randn(2, 3, device=device)
 
-        def f(x):
-            return
+        for output in [None, ()]:
+            with self.assertRaisesRegex(
+                RuntimeError, r"jvp\(f, primals, tangents\): Expected f to be a function that has non-empty output"
+            ):
+                jvp(lambda _: output, (x,), (t,))
 
-        def g(x):
-            return ()
+        for output in [1, True, 12.2, "abc"]:
+            with self.assertRaisesRegex(
+                RuntimeError, r"jvp\(f, primals, tangents\): expected f\(\*primals\) to return only tensors"
+            ):
+                jvp(lambda _: output, (x,), (t,))
 
-        def h(x):
-            return x, [x]
+        # Check list output
+        out = jvp(lambda x: [x, x.sum()], (x,), (t,))
+        for i in range(2):
+            assert isinstance(out[i], list) and len(out[i]) == 2
 
-        with self.assertRaisesRegex(RuntimeError, "a Tensor or Tensors"):
-            jvp(f, (x,), (t,))
-        with self.assertRaisesRegex(RuntimeError, "non-empty"):
-            jvp(g, (x,), (t,))
-        with self.assertRaisesRegex(RuntimeError, "a Tensor or Tensors"):
-            jvp(h, (x,), (t,))
+        # Check dict output
+        out = jvp(lambda x: {"x": x, "xsum": x.sum()}, (x,), (t,))
+        for i in range(2):
+            assert isinstance(out[i], dict) and len(out[i]) == 2 and "xsum" in out[i]
+
+        def composite_output(x):
+            out = x.sum()
+            return [
+                (out, {"a": x, "out": [x, out]}),
+            ]
+
+        out = jvp(composite_output, (x,), (t,))
+        for i in range(2):
+            assert isinstance(out[i], list)
+            assert isinstance(out[i][0], tuple) and \
+                isinstance(out[i][0][1], dict)
 
 
 class TestCustomFunction(TestCase):
