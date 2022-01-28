@@ -433,7 +433,6 @@ test_xla() {
   source "./xla/.circleci/common.sh"
   SITE_PACKAGES="$(python -c 'from distutils.sysconfig import get_python_lib; print(get_python_lib())')" || true
   CMAKE_PREFIX_PATH="${SITE_PACKAGES}/torch:${CMAKE_PREFIX_PATH}" run_torch_xla_tests "$(pwd)" "$(pwd)/xla" || true
-  XLA_ARTIFACT_PATH="${CUSTOM_TEST_ARTIFACT_BUILD_DIR}" || true
   cp -a "/tmp/pytorch_py_test.log" build || true
   OUTPUT=$(find / -name pytorch_py_test.log) || true
   echo "Output: ${OUTPUT}" || true
