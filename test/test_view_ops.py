@@ -931,14 +931,14 @@ class TestOldViewOps(TestCase):
         flat0 = zero_dim_tensor.ravel()
         one_dim_tensor = torch.tensor([123], device=device)
         flat1 = zero_dim_tensor.ravel()
-        ones_like_tensor = torch.ones(10, device=device)[::2]
-        flat2 = ones_like_tensor.ravel()
+        nc_ones_tensor = torch.ones(10, device=device)[::2]
+        flat2 = nc_ones_tensor.ravel()
 
         self.assertEqual(zero_dim_tensor.shape, torch.Size([]))
         self.assertEqual(flat0.shape, torch.Size([1]))
         self.assertEqual(one_dim_tensor.shape, torch.Size([1]))
         self.assertEqual(flat1.shape, torch.Size([1]))
-        self.assertEqual(ones_like_tensor.shape, torch.Size([5]))
+        self.assertEqual(nc_ones_tensor.shape, torch.Size([5]))
         self.assertEqual(flat2.shape, torch.Size([5]))
         self.assertEqual(flat0, one_dim_tensor)
         self.assertEqual(flat0, flat1)
