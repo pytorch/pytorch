@@ -1685,11 +1685,10 @@ class TestLinalg(TestCase):
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
     def test_norm_extreme_values(self, device):
-        if torch.device(device).type == 'cpu':
-            self.skipTest("Test broken on cpu (see gh-71645)")
-
         vector_ords = [0, 1, 2, 3, inf, -1, -2, -3, -inf]
-        matrix_ords = ['fro', 'nuc', 1, 2, inf, -1, -2, -inf]
+        # matrix_ords 'nuc', 2, -2 are skipped currently
+        # See issue https://github.com/pytorch/pytorch/issues/71911
+        matrix_ords = ['fro', 1, inf, -1, -inf]
         vectors = []
         matrices = []
         for pair in itertools.product([inf, -inf, 0.0, nan, 1.0], repeat=2):
@@ -1727,8 +1726,8 @@ class TestLinalg(TestCase):
                 if is_broken_matrix_norm_case(ord, x):
                     continue
                 else:
-                    result = torch.linalg.norm(x, ord=ord)
                     result_n = np.linalg.norm(x_n, ord=ord)
+                    result = torch.linalg.norm(x, ord=ord)
                     self.assertEqual(result, result_n, msg=msg)
 
     # Test degenerate shape results match numpy for linalg.norm vector norms
@@ -2613,6 +2612,25 @@ class TestLinalg(TestCase):
 
                 S_s = torch.svd(A, compute_uv=False).S
                 self.assertEqual(S_s, S)
+
+    @skipCUDAIfNoMagma
+    @skipCPUIfNoLapack
+    @dtypes(*floating_and_complex_types())
+    def test_svd_nan_error(self, device, dtype):
+        for svd in [torch.svd, torch.linalg.svd]:
+            # if input contains NaN then an error is triggered for svd
+            # When cuda < 11.5, cusolver raises CUSOLVER_STATUS_EXECUTION_FAILED when input contains nan.
+            # When cuda >= 11.5, cusolver normally finishes execution and sets info array indicating convergence issue.
+            error_msg = r'(CUSOLVER_STATUS_EXECUTION_FAILED|The algorithm failed to converge)'
+            a = torch.full((3, 3), float('nan'), dtype=dtype, device=device)
+            a[0] = float('nan')
+            with self.assertRaisesRegex(torch.linalg.LinAlgError, error_msg):
+                svd(a)
+            error_msg = r'(CUSOLVER_STATUS_EXECUTION_FAILED|\(Batch element 1\): The algorithm failed to converge)'
+            a = torch.randn(3, 33, 33, dtype=dtype, device=device)
+            a[1, 0, 0] = float('nan')
+            with self.assertRaisesRegex(torch.linalg.LinAlgError, error_msg):
+                svd(a)
 
     @skipCUDAIfNoMagmaAndNoCusolver
     @skipCPUIfNoLapack
