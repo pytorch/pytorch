@@ -293,7 +293,7 @@ class InverseWishart(ExponentialFamily):
     @property
     def _natural_params(self):
         return (
-            0.5 * self.df,
+            0.5 * (self.df + self._event_shape[-1] + 1),
             - 0.5 * self.covariance_matrix
         )
 
