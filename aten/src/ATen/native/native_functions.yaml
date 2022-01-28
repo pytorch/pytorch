@@ -4655,7 +4655,7 @@
   device_check: NoCheck
   device_guard: False
   dispatch:
-    CPU, CUDA: unsqueeze
+    CompositeExplicitAutograd: unsqueeze
     SparseCPU, SparseCUDA: unsqueeze_sparse
     QuantizedCPU, QuantizedCUDA: unsqueeze_quantized
 
