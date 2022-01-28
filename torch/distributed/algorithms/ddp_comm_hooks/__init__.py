@@ -9,6 +9,7 @@ from . import (
     default_hooks as default,
     powerSGD_hook as powerSGD,
     quantization_hooks as quantization,
+    optimizer_overlap_hooks as optimizer_overlap,
 )
 
 

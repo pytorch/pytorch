@@ -38,5 +38,7 @@ TORCH_API std::vector<std::string> loadPossibleHistoricOps(
     const std::string& name,
     c10::optional<size_t> version);
 
+TORCH_API uint64_t getMaxOperatorVersion();
+
 } // namespace jit
 } // namespace torch

@@ -548,55 +548,48 @@ TEST(StaticRuntime, CleanUpMemory) {
   const int num_features = 50;
   torch::jit::Module mod = getDeepAndWideSciptModel();
 
-  for (auto cleanup_activations : {true, false}) {
-    for (auto enable_out_variant : {true, false}) {
-      for (auto optimize_memory : {true, false}) {
-        for (auto manage_output_tensors : {true, false}) {
-          if (manage_output_tensors && !enable_out_variant) {
-            // when manage_output_tensors is enabled, enable_out_variant
-            // must be enabled too
-            continue;
-          }
-          if (optimize_memory && !enable_out_variant) {
-            // when optimize_memory is enabled, enable_out_variant must be
-            // enabled too
-            continue;
-          }
-          VLOG(1) << "cleanup_activations: " << cleanup_activations
-                  << ", enable_out_variant: " << enable_out_variant
-                  << ", optimize_memory: " << optimize_memory
-                  << ", manage_output_tensors: " << manage_output_tensors;
-          torch::jit::StaticModuleOptions opts{
-              cleanup_activations,
-              enable_out_variant,
-              optimize_memory,
-              manage_output_tensors};
-          torch::jit::StaticModule smod(mod, false, opts);
-          torch::jit::StaticRuntime runtime(smod);
+  for (auto enable_out_variant : {true, false}) {
+    for (auto optimize_memory : {true, false}) {
+      for (auto manage_output_tensors : {true, false}) {
+        if (manage_output_tensors && !enable_out_variant) {
+          // when manage_output_tensors is enabled, enable_out_variant
+          // must be enabled too
+          continue;
+        }
+        if (optimize_memory && !enable_out_variant) {
+          // when optimize_memory is enabled, enable_out_variant must be
+          // enabled too
+          continue;
+        }
+        VLOG(1) << "enable_out_variant: " << enable_out_variant
+                << ", optimize_memory: " << optimize_memory
+                << ", manage_output_tensors: " << manage_output_tensors;
+        torch::jit::StaticModuleOptions opts{
+            enable_out_variant, optimize_memory, manage_output_tensors};
+        torch::jit::StaticModule smod(mod, false, opts);
+        torch::jit::StaticRuntime runtime(smod);
 
-          for (int batch_size : {1, 8, 32}) {
-            for (int i = 0; i < 2; ++i) {
-              auto ad_emb_packed =
-                  torch::randn({batch_size, 1, embedding_size});
-              auto user_emb = torch::randn({batch_size, 1, embedding_size});
-              auto wide = torch::randn({batch_size, num_features});
+        for (int batch_size : {1, 8, 32}) {
+          for (int i = 0; i < 2; ++i) {
+            auto ad_emb_packed = torch::randn({batch_size, 1, embedding_size});
+            auto user_emb = torch::randn({batch_size, 1, embedding_size});
+            auto wide = torch::randn({batch_size, num_features});
 
-              // run jit graph executor
-              std::vector<at::IValue> inputs({ad_emb_packed, user_emb, wide});
-              auto output_1 = getTensor(mod.forward(inputs));
+            // run jit graph executor
+            std::vector<at::IValue> inputs({ad_emb_packed, user_emb, wide});
+            auto output_1 = getTensor(mod.forward(inputs));
 
-              // run static runtime
-              std::vector<c10::IValue> input_tensors(
-                  {ad_emb_packed, user_emb, wide});
-              auto outputs = runtime(input_tensors, {}).toTupleRef().elements();
-              ASSERT_TRUE(outputs.size() > 0);
-              auto output_2 = outputs[0].toTensor();
-              runtime.check_for_memory_leak();
-              EXPECT_TRUE(torch::allclose(output_1, output_2, 1e-6));
-              if (manage_output_tensors) {
-                runtime.deallocateOutputTensors();
-                runtime.checkOutputTensorMemoryLeaks();
-              }
+            // run static runtime
+            std::vector<c10::IValue> input_tensors(
+                {ad_emb_packed, user_emb, wide});
+            auto outputs = runtime(input_tensors, {}).toTupleRef().elements();
+            ASSERT_TRUE(outputs.size() > 0);
+            auto output_2 = outputs[0].toTensor();
+            runtime.check_for_memory_leak();
+            EXPECT_TRUE(torch::allclose(output_1, output_2, 1e-6));
+            if (manage_output_tensors) {
+              runtime.deallocateOutputTensors();
+              runtime.checkOutputTensorMemoryLeaks();
             }
           }
         }
@@ -636,7 +629,6 @@ TEST(
   auto g = std::make_shared<torch::jit::Graph>();
   torch::jit::parseIR(test_graph, g.get());
   torch::jit::StaticModuleOptions opts{
-      /*cleanup_activations=*/true,
       /*enable_out_variant=*/true,
       /*optimize_memory=*/true,
       /*manage_output_tensors=*/true};
@@ -684,7 +676,6 @@ TEST(StaticRuntime, ManageOutputTensorsWithDeallocateOutputTensors) {
   torch::jit::Module mod = getDeepAndWideSciptModel();
 
   torch::jit::StaticModuleOptions opts{
-      /*cleanup_activations=*/true,
       /*enable_out_variant=*/true,
       /*optimize_memory=*/true,
       /*manage_output_tensors=*/true};
@@ -709,7 +700,6 @@ TEST(StaticRuntime, ManageOutputTensorsWithoutDeallocateOutputTensors) {
   torch::jit::Module mod = getDeepAndWideSciptModel();
 
   torch::jit::StaticModuleOptions opts{
-      /*cleanup_activations=*/true,
       /*enable_out_variant=*/true,
       /*optimize_memory=*/true,
       /*manage_output_tensors=*/true};
@@ -747,7 +737,6 @@ TEST(StaticRuntime, DisableManageOutputTensors) {
   auto g = std::make_shared<torch::jit::Graph>();
   torch::jit::parseIR(test_graph, g.get());
   torch::jit::StaticModuleOptions opts{
-      /*cleanup_activations=*/true,
       /*enable_out_variant=*/true,
       /*optimize_memory=*/true,
       /*manage_output_tensors=*/true};
