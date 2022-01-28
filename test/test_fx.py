@@ -3025,6 +3025,21 @@ class TestFX(JitTestCase):
             .check("Tuple[str, Tuple[()]]")    \
             .run(scripted.code)
 
+    @unittest.skipIf(IS_WINDOWS, "Python Windows bug? https://bugs.python.org/issue45108")
+    def test_assert(self):
+        def f(x):
+            assert x > 1
+            return x + 1
+        try:
+            torch.fx.proxy.TracerBase.trace_asserts = True
+            traced = symbolic_trace(f)
+        finally:
+            torch.fx.proxy.TracerBase.trace_asserts = False
+
+        self.assertEqual(f(2), traced(2))
+        with self.assertRaises(AssertionError):
+            traced(0)
+
     def test_pytree(self):
         def f_sum(x):
             return sum(x)
@@ -3119,7 +3134,16 @@ class TestFX(JitTestCase):
         nf = symbolic_trace(nf)
         self.assertEqual(nf(**val), f(**val))
 
-
+    def test_imul_code_print(self):
+        graph = torch.fx.Graph()
+        a = graph.placeholder("a")
+        b = graph.placeholder("b")
+        graph.call_function(operator.imul, (a, b), {})
+        graph.output(a)
+        gm = torch.fx.GraphModule({}, graph)
+        gm.recompile()
+        self.assertEqual(gm(2, 3), 6)
+        self.assertIn("a *= b", gm.code)
 
 
 def run_getitem_target():
@@ -3492,6 +3516,7 @@ class TestFunctionalTracing(JitTestCase):
         "adaptive_max_pool1d_with_indices": ARG_TYPE_MISMATCH,
         "fractional_max_pool2d_with_indices": ARG_TYPE_MISMATCH,
         "fractional_max_pool3d_with_indices": ARG_TYPE_MISMATCH,
+        "gelu": CONTROL_FLOW,
         "hardshrink": ARG_TYPE_MISMATCH,
         "layer_norm": ARG_TYPE_MISMATCH,
         "lp_pool1d": ARG_TYPE_MISMATCH,
