@@ -659,7 +659,7 @@ class TestSparseCSR(TestCase):
                 c = make_tensor((m * block_size,), dtype=dtype, device=device, noncontiguous=noncontiguous)
                 self.run_test_block_addmm_addmv(torch.addmv, c, a, b, dtype=dtype, device=device)
 
-    @onlyCUDA
+    @skipCPUIfNoMklSparse
     @skipCUDAIfRocm
     @unittest.skipIf(not TEST_SCIPY, "SciPy not found")
     @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
@@ -1013,9 +1013,10 @@ class TestSparseCSR(TestCase):
                         torch.float64: 1e-8, torch.complex128: 1e-8})
     def test_sparse_triangular_solve(self, device, dtype):
 
-        def run_test(n, k, upper, unitriangular, transpose):
+        def run_test(n, k, upper, unitriangular, transpose, zero):
             triangle_function = torch.triu if upper else torch.tril
-            A = make_tensor((n, n), dtype=dtype, device=device)
+            make_A = torch.zeros if zero else make_tensor
+            A = make_A((n, n), dtype=dtype, device=device)
             A = triangle_function(A)
             A_sparse = A.to_sparse_csr()
             B = make_tensor((n, k), dtype=dtype, device=device)
@@ -1027,6 +1028,9 @@ class TestSparseCSR(TestCase):
             actual_X = actual.solution
             actual_A_clone = actual.cloned_coefficient
             self.assertTrue(actual_A_clone.numel() == 0)
+            if A_sparse._nnz() == 0:
+                self.assertTrue(actual_X.isnan().all())
+                return
             self.assertEqual(actual_X, expected_X)
 
             # test out with C contiguous strides
@@ -1061,9 +1065,9 @@ class TestSparseCSR(TestCase):
 
         ks = [0, 1, 3]
         ns = [5, 3, 0]
-        for (k, n), (upper, unitriangular, transpose) in itertools.product(itertools.product(ks, ns),
-                                                                           itertools.product([True, False], repeat=3)):
-            run_test(n, k, upper, unitriangular, transpose)
+        for (k, n), (upper, unitriangular, transpose, zero) in itertools.product(itertools.product(ks, ns),
+                                                                                 itertools.product([True, False], repeat=4)):
+            run_test(n, k, upper, unitriangular, transpose, zero)
 
     @skipCUDAIfRocm
     @onlyCUDA

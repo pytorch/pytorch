@@ -348,6 +348,10 @@ jobs:
       # ubuntu20.04-cuda11.2-py3.8-tidy11
       image: ghcr.io/pytorch/cilint-clang-tidy:d8f0c777964d0dd8a147360de80aed1a13eb613a
     steps:
+      - name: Clean workspace
+        run: |
+          rm -rf "${GITHUB_WORKSPACE}"
+          mkdir "${GITHUB_WORKSPACE}"
       - name: Checkout PyTorch
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
