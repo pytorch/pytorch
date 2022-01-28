@@ -23,6 +23,7 @@ __all__ = [
     'align_tensors',
     'broadcast_shapes',
     'broadcast_tensors',
+    'broadcast_arrays',
     'cartesian_prod',
     'block_diag',
     'cdist',
@@ -74,6 +75,11 @@ def broadcast_tensors(*tensors):
         return handle_torch_function(broadcast_tensors, tensors, *tensors)
     return _VF.broadcast_tensors(tensors)  # type: ignore[attr-defined]
 
+def broadcast_arrays(*tensors):
+    r"""broadcast_arrays(*tensors) -> List of Tensors
+    Alias of :func:`torch.broadcast_tensors`.
+    """
+    return broadcast_tensors(*tensors)
 
 def broadcast_shapes(*shapes):
     r"""broadcast_shapes(*shapes) -> Size

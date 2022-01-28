@@ -490,6 +490,7 @@ Other Operations
     bincount
     block_diag
     broadcast_tensors
+    broadcast_arrays
     broadcast_to
     broadcast_shapes
     bucketize

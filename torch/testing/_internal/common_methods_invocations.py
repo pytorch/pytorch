@@ -8647,6 +8647,7 @@ op_db: List[OpInfo] = [
            supports_fwgrad_bwgrad=True,
            sample_inputs_func=sample_inputs_broadcast_to),
     OpInfo('broadcast_tensors',
+           aliases=('broadcast_arrays', ),
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
            supports_out=False,
            supports_forward_ad=True,

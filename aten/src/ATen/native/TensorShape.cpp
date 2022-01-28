@@ -171,6 +171,10 @@ std::vector<Tensor> broadcast_tensors(TensorList tensors) {
   return expand_outplace(tensors);
 }
 
+std::vector<Tensor> broadcast_arrays(TensorList tensors) {
+  return at::broadcast_tensors(tensors);
+}
+
 static bool should_skip(const Tensor& t) {
   return t.numel() == 0 && t.dim() == 1;
 }
