@@ -187,58 +187,94 @@ Tensor& normal_impl_(Tensor& self, double mean, double std, c10::optional<Genera
 
 template<template<typename> class normal_kernel, typename RNG>
 Tensor& normal_out_impl(Tensor& output, const Tensor& mean, double std, c10::optional<Generator> gen) {
-  normal_impl_<normal_kernel, RNG>(output, 0, std, gen);
-  output.add_(mean);
+  CHECK_NORMAL_STD(std);
+  if (output.is_meta()) {
+    auto std_tensor = at::empty_like(output, c10::kMeta, MemoryFormat::Contiguous);
+    auto shape = at::infer_size(mean.sizes(), std_tensor.sizes());
+    at::native::resize_output(output, shape);
+  } else {
+    normal_impl_<normal_kernel, RNG>(output, 0, std, gen);
+    output.add_(mean);
+  }
   return output;
 }
 
 template<template<typename> class normal_kernel, typename RNG>
 Tensor& normal_out_impl(Tensor& output, double mean, const Tensor& std, c10::optional<Generator> gen) {
   CHECK_NORMAL_TENSOR_STD(std);
-  normal_impl_<normal_kernel, RNG>(output, 0, 1, gen);
-  auto mean_tensor = at::full({}, mean, output.options());
-  // CUDA NB: addcmul_out copies the tensor to be added into the output.
-  // Please look at aten/src/THC/generic/THCTensorMathPointwise.cu
-  // The previous function here was addcmul_out(output, mean_tensor, output, std, 1);
-  // The third argument is not a constant reference and hence the samples in output are overwritten.
-  // Consequently, the computation performed is mean_tensor + mean_tensor * std instead of mean_tensor + output * std
-  output.mul_(std).add_(mean_tensor);
+  if (output.is_meta()) {
+    auto mean_tensor = at::empty_like(output, c10::kMeta, MemoryFormat::Contiguous);
+    auto shape = at::infer_size(mean_tensor.sizes(), std.sizes());
+    at::native::resize_output(output, shape);
+  } else {
+    normal_impl_<normal_kernel, RNG>(output, 0, 1, gen);
+    auto mean_tensor = at::full({}, mean, output.options());
+    // CUDA NB: addcmul_out copies the tensor to be added into the output.
+    // Please look at aten/src/THC/generic/THCTensorMathPointwise.cu
+    // The previous function here was addcmul_out(output, mean_tensor, output, std, 1);
+    // The third argument is not a constant reference and hence the samples in output are overwritten.
+    // Consequently, the computation performed is mean_tensor + mean_tensor * std instead of mean_tensor + output * std
+    output.mul_(std).add_(mean_tensor);
+  }
   return output;
 }
 
 template<template<typename> class normal_kernel, typename RNG>
 Tensor& normal_out_impl(Tensor& output, const Tensor& mean, const Tensor& std, c10::optional<Generator> gen) {
   CHECK_NORMAL_TENSOR_STD(std);
-  auto shape = at::infer_size(mean.sizes(), std.sizes());
-  at::native::resize_output(output, shape);
-  normal_impl_<normal_kernel, RNG>(output, 0, 1, gen);
-  // CUDA NB: addcmul_out copies the tensor to be added into the output.
-  // Please look at aten/src/THC/generic/THCTensorMathPointwise.cu
-  // The previous function here was addcmul_out(output, mean, output, std, 1);
-  // The third argument is not a constant reference and hence the samples in output are overwritten.
-  // Consequently, the computation performed is mean + mean * std instead of mean + output * std
-  output.mul_(std).add_(mean);
+  if (output.is_meta()) {
+    auto shape = at::infer_size(mean.sizes(), std.sizes());
+    at::native::resize_output(output, shape);
+  } else {
+    normal_impl_<normal_kernel, RNG>(output, 0, 1, gen);
+    // CUDA NB: addcmul_out copies the tensor to be added into the output.
+    // Please look at aten/src/THC/generic/THCTensorMathPointwise.cu
+    // The previous function here was addcmul_out(output, mean, output, std, 1);
+    // The third argument is not a constant reference and hence the samples in output are overwritten.
+    // Consequently, the computation performed is mean + mean * std instead of mean + output * std
+    output.mul_(std).add_(mean);
+  }
   return output;
 }
 
 template<template<typename> class normal_kernel, typename RNG>
 Tensor normal_impl(const Tensor& mean, double std, c10::optional<Generator> gen) {
-  Tensor ret = at::empty_like(mean, MemoryFormat::Contiguous);
-  normal_out_impl<normal_kernel, RNG>(ret, mean, std, gen);
+  CHECK_NORMAL_STD(std);
+  Tensor ret;
+  if (mean.is_meta()) {
+    ret = at::empty_like(mean, c10::kMeta, MemoryFormat::Contiguous);
+  } else {
+    ret = at::empty_like(mean, MemoryFormat::Contiguous);
+    normal_out_impl<normal_kernel, RNG>(ret, mean, std, gen);
+  }
   return ret;
 }
 
 template<template<typename> class normal_kernel, typename RNG>
 Tensor normal_impl(double mean, const Tensor& std, c10::optional<Generator> gen) {
-  Tensor ret = at::empty_like(std, MemoryFormat::Contiguous);
-  normal_out_impl<normal_kernel, RNG>(ret, mean, std, gen);
+  CHECK_NORMAL_TENSOR_STD(std);
+  Tensor ret;
+  if (std.is_meta()) {
+    ret = at::empty_like(std, c10::kMeta, MemoryFormat::Contiguous);
+  } else {
+    ret = at::empty_like(std, MemoryFormat::Contiguous);
+    normal_out_impl<normal_kernel, RNG>(ret, mean, std, gen);
+  }
   return ret;
 }
 
 template<template<typename> class normal_kernel, typename RNG>
 Tensor normal_impl(const Tensor& mean, const Tensor& std, c10::optional<Generator> gen) {
-  Tensor ret = at::empty({0}, mean.options(), MemoryFormat::Contiguous);
-  normal_out_impl<normal_kernel, RNG>(ret, mean, std, gen);
+  CHECK_NORMAL_TENSOR_STD(std);
+  Tensor ret;
+  if (mean.is_meta()) {
+    ret = at::empty_like(mean, c10::kMeta, MemoryFormat::Contiguous);
+    auto shape = at::infer_size(mean.sizes(), std.sizes());
+    at::native::resize_output(ret, shape);
+  } else {
+    ret = at::empty({0}, mean.options(), MemoryFormat::Contiguous);
+    normal_out_impl<normal_kernel, RNG>(ret, mean, std, gen);
+  }
   return ret;
 }
 
