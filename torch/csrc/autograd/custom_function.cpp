@@ -40,7 +40,7 @@ Variable VariableInfo::zeros(at::OptionalDeviceGuard& device_guard) const {
 //    the output's base's forward grad must be the output's forward grad's base.
 //  - If an input was modified inplace (it must be an output as well) we make sure that its
 //    forward grad was also modified inplace and already present on the corresponding output.
-void _process_forward_mode_AD(const variable_list &inputs,
+optional_variable_list _process_forward_mode_AD(const variable_list &inputs,
   std::unordered_map<at::TensorImpl*, size_t> inputs_mapping,
   const at::ArrayRef<c10::optional<Variable>> raw_outputs,
   const optional_variable_list &outputs,
@@ -99,7 +99,7 @@ void _process_forward_mode_AD(const variable_list &inputs,
 
   // If no input has forward grad, nothing to do here
   if (!any_input_has_grad) {
-    return;
+    return outputs;
   }
 
   torch::autograd::variable_list forward_grads;
@@ -115,12 +115,16 @@ void _process_forward_mode_AD(const variable_list &inputs,
               "an invalid number of of forward gradients (expected ", num_outputs,
               " but got ", num_forward_grads, ")");
 
+  optional_variable_list processed_outputs;
+  processed_outputs.reserve(num_outputs);
+
   for (const auto i : c10::irange(num_outputs)) {
     at::Tensor out = outputs[i].has_value()? outputs[i].value() : at::Tensor();
     const auto& out_grad = forward_grads[i];
     if (!out.defined()) {
       TORCH_CHECK(!out_grad.defined(), "Function's jvp returned a gradient at position ", i, ", but "
                   " the corresponding forward output is not a differentiable Tensor");
+      processed_outputs.emplace_back(out);
       continue;
     }
 
@@ -146,15 +150,18 @@ void _process_forward_mode_AD(const variable_list &inputs,
         // If that Tensor didn't had gradients already, set the newly returned one
         // We could also use inputs[inp_idx] here as it is the same as out
         out._set_fw_grad(out_grad, level, /* is_inplace_op */ true);
+        continue;
       }
     } else {
       if (is_input) {
         // If the forward return an input as-is, backward may or may not have performed this view already
-        if (inputs_mapping.count(out.unsafeGetTensorImpl()) == 0) {
+        if (inputs_mapping.count(out.unsafeGetTensorImpl()) != 0) {
           // outputs[i] could still be one of the input when input does not require grad
           AutoGradMode grad_mode(false);
+          at::AutoFwGradMode fw_grad_mode(true);
           out = out.view_as(out);
         }
+        processed_outputs.emplace_back(out);
         continue;
       }
 
@@ -191,7 +198,8 @@ void _process_forward_mode_AD(const variable_list &inputs,
             // This case CANNOT happen in codegen as all view ops are mapping from one Tensor to one Tensor and so the output
             // of the view cannot have a forward grad if the base does not.
             out._set_fw_grad(out_grad, level, /* is_inplace_op */ true);
-            return;
+            processed_outputs.emplace_back(out);
+            continue;
           }
 
         }
@@ -199,7 +207,10 @@ void _process_forward_mode_AD(const variable_list &inputs,
 
       out._set_fw_grad(out_grad, level, /* is_inplace_op */ false);
     }
+
+    processed_outputs.emplace_back(out);
   }
+  return processed_outputs;
 }
 
 optional_variable_list _process_backward_mode_ad(
@@ -368,7 +379,7 @@ optional_variable_list _wrap_outputs(const variable_list &input_vars,
 
   // This must happen after the backward processing as we expect the computations happening here to track
   // backward mode gradients.
-  _process_forward_mode_AD(input_vars, inputs_mapping, raw_outputs, outputs, non_differentiable, dirty_inputs, jvp_user_function);
+  outputs = _process_forward_mode_AD(input_vars, inputs_mapping, raw_outputs, outputs, non_differentiable, dirty_inputs, jvp_user_function);
 
   return outputs;
 }

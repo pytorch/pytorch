@@ -5625,9 +5625,6 @@ for shape in [(1,), ()]:
             _, out2 = MyFn2.apply(x_dual, y)
             self.assertTrue(fwAD.unpack_dual(out2).tangent._base is t)
 
-        gradcheck(MyFn2.apply, (x, y), check_forward_ad=True)
-
-
     def test_custom_function_save_for_forward(self):
         class Func(torch.autograd.Function):
             @staticmethod
