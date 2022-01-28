@@ -194,7 +194,7 @@ void raw_cudnn_convolution_forward_out(
   key.weight_alignment = getAlignment(weight);
 
   auto run = [&](cudnn_frontend::ManagedOpaqueDescriptor plan_desc) {
-    auto workspace_size = 100 * 1024 * 1024;
+    auto workspace_size = 0;
     auto workspace = at::empty({workspace_size}, input.options().dtype(kByte));
     void *data_ptrs[] = {reinterpret_cast<int8_t*>(input.data_ptr()), conv_output.data_ptr(), reinterpret_cast<int8_t*>(weight.data_ptr()), requantize_multiplier_tensor.data_ptr(), output.data_ptr()};
     // std::cout << plan.describe() << " requires workspace " << workspace_size << std::endl;

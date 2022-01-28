@@ -4154,10 +4154,25 @@ class TestQuantizedConv(TestCase):
             device=torch.device("cuda"),
             input_dtype=torch.qint8, weight_dtype=torch.qint8, output_dtype=torch.qint8)
 
-    @unittest.skip("used for local benchmarking, uncomment when we want to run it")
+    # @unittest.skip("used for local benchmarking, uncomment when we want to run it")
     def test_benchmark(self):
-        conv = torch.nn.Conv2d(64, 32, 1).cuda()
-        input = torch.randn((2, 64, 100, 100), device='cuda')
+        batch_size = 10
+        in_channel = 64
+        out_channel = 64
+        kernel_size = 3
+        height = 200
+        width = 200
+        print(
+            "parameters:",
+            "batch_size:", batch_size,
+            "in_channel:", in_channel,
+            "out_channel:", out_channel,
+            "kernel_size:", kernel_size,
+            "height:", height,
+            "widht:", width
+        )
+        conv = torch.nn.Conv2d(in_channel, out_channel, kernel_size).cuda()
+        input = torch.randn((batch_size, in_channel, height, width), device='cuda')
         weight = conv.weight.detach()
         stride = (1, 1)
         padding = (0, 0)
@@ -4180,7 +4195,7 @@ class TestQuantizedConv(TestCase):
                 activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
                 schedule=my_schedule,
                 on_trace_ready=trace_handler) as prof:
-            for i in range(60):
+            for i in range(30):
                 conv_op(input, weight, None, stride, padding, dilation, groups)
                 prof.step()
 
@@ -4195,7 +4210,7 @@ class TestQuantizedConv(TestCase):
                 activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
                 schedule=my_schedule,
                 on_trace_ready=trace_handler) as prof:
-            for i in range(60):
+            for i in range(30):
                 conv_op(quantized_input, quantized_weight, None, stride, padding, dilation, groups, scale, zero_point)
                 prof.step()
 
