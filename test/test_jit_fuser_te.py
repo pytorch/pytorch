@@ -2263,7 +2263,6 @@ def get_name(op):
 class TestNNCOpInfo(JitCommonTestCase):
     def setUp(self):
         self.tensorexpr_options = TensorExprTestOptions()
-        torch._C._jit_set_te_must_use_llvm_cpu(True)
 
     def tearDown(self):
         self.tensorexpr_options.restore()
