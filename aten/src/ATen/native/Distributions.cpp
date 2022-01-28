@@ -275,7 +275,8 @@ Tensor& normal_out(const Tensor& mean, double std, c10::optional<Generator> gen,
 Tensor& normal_out_meta(const Tensor& mean, double std, c10::optional<Generator> gen, Tensor& output) {
   CHECK_NORMAL_STD(std);
   auto std_tensor = at::empty_like(output, MemoryFormat::Contiguous);
-  at::native::templates::resize_output_for_normal(output, mean, std_tensor);
+  auto shape = at::infer_size(mean.sizes(), std_tensor.sizes());
+  at::native::resize_output(output, shape);
   return output;
 }
 
@@ -287,7 +288,8 @@ Tensor& normal_out(double mean, const Tensor& std, c10::optional<Generator> gen,
 Tensor& normal_out_meta(double mean, const Tensor& std, c10::optional<Generator> gen, Tensor& output) {
   CHECK_NORMAL_TENSOR_STD(std);
   auto mean_tensor = at::empty_like(output, MemoryFormat::Contiguous);
-  at::native::templates::resize_output_for_normal(output, mean_tensor, std);
+  auto shape = at::infer_size(mean_tensor.sizes(), std.sizes());
+  at::native::resize_output(output, shape);
   return output;
 }
 
@@ -298,7 +300,8 @@ Tensor& normal_out(const Tensor& mean, const Tensor& std, c10::optional<Generato
 
 Tensor& normal_out_meta(const Tensor& mean, const Tensor& std, c10::optional<Generator> gen, Tensor& output) {
   CHECK_NORMAL_TENSOR_STD(std);
-  at::native::templates::resize_output_for_normal(output, mean, std);
+  auto shape = at::infer_size(mean.sizes(), std.sizes());
+  at::native::resize_output(output, shape);
   return output;
 }
 
@@ -332,7 +335,8 @@ Tensor normal(const Tensor& mean, const Tensor& std, c10::optional<Generator> ge
 Tensor normal_meta(const Tensor& mean, const Tensor& std, c10::optional<Generator> gen) {
   CHECK_NORMAL_TENSOR_STD(std);
   auto ret = at::empty_like(mean, MemoryFormat::Contiguous);
-  at::native::templates::resize_output_for_normal(ret, mean, std);
+  auto shape = at::infer_size(mean.sizes(), std.sizes());
+  at::native::resize_output(ret, shape);
   return ret;
 }
 

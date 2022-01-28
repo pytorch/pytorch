@@ -6,6 +6,7 @@
 #include <ATen/Tensor.h>
 #include <ATen/MemoryOverlap.h>
 #include <ATen/NamedTensorUtils.h>
+#include <ATen/native/Resize.h>
 #include <ATen/native/TensorIterator.h>
 #include <c10/util/Optional.h>
 #include <limits>
@@ -157,27 +158,6 @@ at::Tensor& random_from_to_impl(at::Tensor& self, int64_t from, c10::optional<in
 
 // ==================================================== Normal ========================================================
 
-// This function computes broadcasted size of mean and std, resize the output to the broadcasted size if it was empty
-// [Note] The following features will be deprecated in version 1.6 release and function signature will be changed after
-//   When mean and std are not broadcastable but have same number of elements:
-//     This function will resize the output to the size of mean if it was empty.
-//     This function will reshape the std to the shape of mean.
-//     This function will return true in deprecated case, false in broadcastable case and throw in all other cases before deprecation.
-//     This function will not return and throw if mean and std are not broadcastable after deprecation
-static bool resize_output_for_normal(at::Tensor& output, const at::Tensor& mean, const at::Tensor& std) {
-  bool expandable = at::are_expandable(mean.sizes(), std.sizes());
-  bool empty_output = output.numel() == 0;
-
-  auto shape = at::infer_size(mean.sizes(), std.sizes());
-  TORCH_CHECK(
-      empty_output || output.sizes().equals(shape),
-      "inconsistent tensor, output size (", output.sizes(), ") is not the same as broadcasted mean and std size (", shape, ")");
-  if (empty_output) {
-    at::native::resize_(output, shape);
-  }
-  return false;
-}
-
 #define CHECK_NORMAL_TENSOR_STD(std) \
   do { \
     TORCH_CHECK( \
@@ -229,19 +209,15 @@ Tensor& normal_out_impl(Tensor& output, double mean, const Tensor& std, c10::opt
 template<template<typename> class normal_kernel, typename RNG>
 Tensor& normal_out_impl(Tensor& output, const Tensor& mean, const Tensor& std, c10::optional<Generator> gen) {
   CHECK_NORMAL_TENSOR_STD(std);
-  bool is_deprecated_th_impl = resize_output_for_normal(output, mean, std);
+  auto shape = at::infer_size(mean.sizes(), std.sizes());
+  at::native::resize_output(output, shape);
   normal_impl_<normal_kernel, RNG>(output, 0, 1, gen);
   // CUDA NB: addcmul_out copies the tensor to be added into the output.
   // Please look at aten/src/THC/generic/THCTensorMathPointwise.cu
   // The previous function here was addcmul_out(output, mean, output, std, 1);
   // The third argument is not a constant reference and hence the samples in output are overwritten.
   // Consequently, the computation performed is mean + mean * std instead of mean + output * std
-  if (is_deprecated_th_impl) {
-    output.mul_(std.reshape(mean.sizes())).add_(mean);
-  }
-  else {
-    output.mul_(std).add_(mean);
-  }
+  output.mul_(std).add_(mean);
   return output;
 }
 
