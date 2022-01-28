@@ -198,7 +198,7 @@ def _handle_col_wise_sharding(input, world_size, weight, rank, local_shard_t, bi
     for i, inp in enumerate(gathered_inputs):
         results[indices[i]] = inp.matmul(local_shard_t) + local_bias
     return _init_sharded_tensor_from_local_result(
-        weight, torch.cat(results), 0, -1, world_size, pg
+        weight, torch.cat(results), 0, -1, world_size, pg  # type: ignore[arg-type]
     )
 
 

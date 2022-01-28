@@ -18,10 +18,8 @@ def register_elementwise_op(op):
         """
         input = args[0]
         # Validate types
-        if not isinstance(input, torch.Tensor) and not isinstance(input, ShardedTensor):
-            raise TypeError("input needs to be either torch.Tensor or ShardedTensor")
-        if isinstance(input, torch.Tensor):
-            return op(args[0])
+        if not isinstance(input, ShardedTensor):
+            raise TypeError("input needs to be a ShardedTensor")
         local_shards_new = []
         for local_shard in input.local_shards():
             local_shards_new.append(Shard(op(local_shard.tensor), local_shard.metadata))
