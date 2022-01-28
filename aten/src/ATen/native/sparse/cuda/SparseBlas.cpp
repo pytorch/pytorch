@@ -184,7 +184,9 @@ Tensor& baddbmm_out_sparse_csr_cuda(
     const Tensor& mat2,
     const Scalar& beta,
     const Scalar& alpha,
+    c10::optional<ScalarType> dtype_opt,
     Tensor& result) {
+  TORCH_CHECK(!dtype_opt.has_value(), "baddbmm_out_sparse_csr_cuda: kwarg dtype is not supported for this backend.");
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(mat1.is_sparse_csr());
 
   TORCH_CHECK(self.layout() == kStrided, "torch.baddbmm: Expected self to be strided, but got layout ", self.layout());
@@ -217,7 +219,7 @@ Tensor& bmm_out_sparse_csr_cuda(
     Tensor& result) {
   Scalar beta(0.0);
   Scalar alpha(1.0);
-  return at::native::baddbmm_out_sparse_csr_cuda(result, mat1, mat2, beta, alpha, result);
+  return at::native::baddbmm_out_sparse_csr_cuda(result, mat1, mat2, beta, alpha, c10::nullopt, result);
 }
 
 Tensor& addmv_out_sparse_csr_cuda(
