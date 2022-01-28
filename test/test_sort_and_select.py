@@ -679,7 +679,7 @@ class TestSortAndSelect(TestCase):
     def test_topk_integral(self, device, dtype):
         small = 10
         large = 4096
-        verylarge = 8192 # multi_block topk on cuda
+        verylarge = 8192  # multi_block topk on cuda
         for curr_size in (small, large, verylarge):
             self._test_topk_dtype(device, dtype, True, curr_size)
 
@@ -690,7 +690,7 @@ class TestSortAndSelect(TestCase):
 
         small = 10
         large = 4096
-        verylarge = 8192 # multi_block topk on cuda
+        verylarge = 8192  # multi_block topk on cuda
         for curr_size in (small, large, verylarge):
             self._test_topk_dtype(device, dtype, False, curr_size)
 
