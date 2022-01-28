@@ -126,7 +126,8 @@ TensorView::TensorView(const TensorView* src, IrCloner* ir_cloner)
       max_producer_pos_(src->max_producer_pos_),
       memory_type_(src->memory_type_),
       swizzle_type_(src->swizzle_type_),
-      is_double_buffered_(src->is_double_buffered_) {
+      is_double_buffered_(src->is_double_buffered_),
+      cpu_scalar_(src->cpu_scalar_) {
   for (const auto id : src->axesToSwizzle()) {
     axes_to_swizzle_.push_back(ir_cloner->clone(id));
   }
@@ -174,6 +175,18 @@ const std::vector<IterDomain*>& TensorView::getMaybeRFactorDomain() const {
 
 std::vector<IterDomain*>::size_type TensorView::nDims() const {
   return domain()->nDims();
+}
+
+// sets cpu_scalar_ value, which is special handling for CPU based zero-dim
+// tensors (i.e. CPU Tensors that only have one value). This is only used if
+// on an input value, otherwise ignored. This is important as special handling
+// because these "scalars" should be type promoted as a tensor, but we want to
+// avoid explicit copying of the data, so we want to pass the data value as a
+// standard kernel argument value.
+void TensorView::setCpuScalar(bool is_cpu_scalar) {
+  TORCH_INTERNAL_ASSERT(
+      nDims() == 0, "Only 0-dim tensors can be marked as a cpu scalar.");
+  cpu_scalar_ = is_cpu_scalar;
 }
 
 IterDomain* TensorView::axis(int pos) const {

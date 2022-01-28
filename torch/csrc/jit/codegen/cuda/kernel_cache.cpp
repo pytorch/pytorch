@@ -26,6 +26,10 @@ int getCommonDeviceCUDA(const at::ArrayRef<IValue>& inputs) {
       continue;
     }
     const auto& device = input.toTensor().device();
+    // skip cpu scalar tensor as they'll be promoted to scalar later
+    if (device.is_cpu() && is_cpu_scalar(input.toTensor())) {
+      continue;
+    }
     TORCH_CHECK(device.is_cuda(), "nvfuser only supports cuda device");
     auto cur_index = device.index();
     if (index != -1 && index != cur_index) {
@@ -203,9 +207,9 @@ FusionKernelRuntime* FusionExecutorCache::getKernelRuntimeFor(
   }
 
   // Access kernels associated with the common device id
-  auto dev_id = getCommonDeviceCUDA(inputs);
-  TORCH_INTERNAL_ASSERT(dev_id >= 0);
-  auto& kernel_runtimes = kernel_runtimes_[dev_id];
+  auto device_index = getCommonDeviceCUDA(inputs);
+  TORCH_CHECK(device_index >= 0, "device is not coherent for fusion inputs");
+  auto& kernel_runtimes = kernel_runtimes_[device_index];
 
   // Check for re-use hit case
   //  a kernel runtime is re-usable if all the compiled

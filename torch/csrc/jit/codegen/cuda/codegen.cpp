@@ -59,9 +59,14 @@ class CudaKernelGenerator : private OptOutConstDispatch {
     // Generate parameter declarations
     for (Val* val : params) {
       if (const auto tv = dynamic_cast<TensorView*>(val)) {
-        code_ << "Tensor<" << val->dtype() << ", "
+        if (tv->isCpuScalar()) {
+          code_ << " CpuScalarTensor<" << val->dtype() << "> " << varName(tv);
+        } else {
+          code_
+              << "Tensor<" << val->dtype() << ", "
               << TensorDomain::noReductions(tv->getMaybeRFactorDomain()).size()
               << "> " << varName(tv);
+        }
       } else {
         TORCH_INTERNAL_ASSERT(val->isScalar()); // NOLINT (LLVM bug 48525)
         TORCH_INTERNAL_ASSERT(val->definition() == nullptr);

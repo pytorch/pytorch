@@ -109,6 +109,16 @@ bool validateKernelArgTensor(
     return false;
   }
 
+  if (is_cpu_scalar(arg) && !param->as<TensorView>()->isCpuScalar()) {
+    msg << "Argument is CPU Scalar Tensor, but parameter is not.\n";
+    return false;
+  }
+
+  if (!is_cpu_scalar(arg) && !arg.is_cuda()) {
+    msg << "Argumnet is a CPU tensor which is not supported in fusions.\n";
+    return false;
+  }
+
   // Check the rank of the tensors.
   size_t arg_dim = arg.dim();
   // Note: This requires current Fusion to be active.
@@ -125,7 +135,7 @@ bool validateKernelArgTensor(
     return false;
   }
 
-  if (arg.device() != device) {
+  if (!is_cpu_scalar(arg) && arg.device() != device) {
     msg << "Argument is on device that is not compiled for."
         << "\n";
     return false;

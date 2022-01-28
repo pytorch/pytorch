@@ -229,6 +229,24 @@ class TORCH_CUDA_CU_API TensorView : public Val {
 
   size_t nDims() const;
 
+  // sets cpu_scalar_ value, which is special handling for CPU based zero-dim
+  // tensors (i.e. CPU Tensors that only have one value). This is only used if
+  // on an input value, otherwise ignored. This is important as special handling
+  // because these "scalars" should be type promoted as a tensor, but we want to
+  // avoid explicit copying of the data, so we want to pass the data value as a
+  // standard kernel argument value.
+  void setCpuScalar(bool is_cpu_scalar);
+
+  // returns cpu_scalar_ value, which is special handling for CPU based zero-dim
+  // tensors (i.e. CPU Tensors that only have one value). This is only used if
+  // on an input value, otherwise ignored. This is important as special handling
+  // because these "scalars" should be type promoted as a tensor, but we want to
+  // avoid explicit copying of the data, so we want to pass the data value as a
+  // standard kernel argument value.
+  bool isCpuScalar() const {
+    return cpu_scalar_;
+  }
+
   // Returns the position that this tensor is produced at relative to its axes.
   unsigned int getComputeAtPosition() const {
     return compute_at_pos_;
@@ -420,6 +438,13 @@ class TORCH_CUDA_CU_API TensorView : public Val {
   SwizzleType swizzle_type_ = SwizzleType::NoSwizzle;
   std::vector<IterDomain*> axes_to_swizzle_;
   bool is_double_buffered_ = false;
+  // special handling for CPU based zero-dim tensors (i.e. CPU Tensors that only
+  // have one value). This is only used if on an input value, otherwise ignored.
+  // This is important as special handling because these "scalars" should be
+  // type promoted as a tensor, but we want to avoid explicit copying of the
+  // data, so we want to pass the data value as a standard kernel argument
+  // value.
+  bool cpu_scalar_ = false;
 };
 
 //! A simple TensorView builder
