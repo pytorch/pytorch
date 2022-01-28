@@ -1091,7 +1091,7 @@ Example::
 
 add_docstr(torch.baddbmm,
            r"""
-baddbmm(input, batch1, batch2, *, beta=1, alpha=1, out=None) -> Tensor
+baddbmm(input, batch1, batch2, *, beta=1, alpha=1, dtype=None, out=None) -> Tensor
 
 Performs a batch matrix-matrix product of matrices in :attr:`batch1`
 and :attr:`batch2`.
@@ -1116,6 +1116,10 @@ it will not be propagated.
 For inputs of type `FloatTensor` or `DoubleTensor`, arguments :attr:`beta` and
 :attr:`alpha` must be real numbers, otherwise they should be integers.
 
+Optional keyword argument :attr:`dtype` is only supported when all input matrices
+are half precision on CUDA devices and the argument is set to `dtype=torch.float`.
+This will give an output matrix of float type.
+
 {tf32_note}
 
 Args:
@@ -1126,6 +1130,7 @@ Args:
 Keyword args:
     beta (Number, optional): multiplier for :attr:`input` (:math:`\beta`)
     alpha (Number, optional): multiplier for :math:`\text{{batch1}} \mathbin{{@}} \text{{batch2}}` (:math:`\alpha`)
+    {dtype}
     {out}
 
 Example::
@@ -1135,7 +1140,7 @@ Example::
     >>> batch2 = torch.randn(10, 4, 5)
     >>> torch.baddbmm(M, batch1, batch2).size()
     torch.Size([10, 3, 5])
-""".format(**common_args, **tf32_notes))
+""".format(**common_args, **tf32_notes, **factory_data_common_args))
 
 add_docstr(torch.bernoulli,
            r"""

@@ -601,7 +601,7 @@ In-place version of :meth:`~Tensor.arctanh`
 
 add_docstr_all('baddbmm',
                r"""
-baddbmm(batch1, batch2, *, beta=1, alpha=1) -> Tensor
+baddbmm(batch1, batch2, *, beta=1, alpha=1, dtype=None) -> Tensor
 
 See :func:`torch.baddbmm`
 """)
