@@ -344,6 +344,7 @@ def _str_intern(inp):
             values_str += ', size=' + str(tuple(values.shape))
         tensor_str = indices_prefix + indices_str + '),\n' + ' ' * indent + values_prefix + values_str + ')'
     elif self.is_sparse_csr:
+        print(self.values())
         suffixes.append('size=' + str(tuple(self.shape)))
         suffixes.append('nnz=' + str(self._nnz()))
         if not has_default_dtype:
