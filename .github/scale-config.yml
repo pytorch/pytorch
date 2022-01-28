@@ -57,6 +57,12 @@ runner_types:
     max_available: 10
     disk_size: 150
     is_ephemeral: false
+  linux.p4d24xlarge.nvidia.gpu:
+    instance_type: p4d.24xlarge
+    os: linux
+    max_available: 1
+    disk_size: 512
+    is_ephemeral: false
   windows.4xlarge:
     instance_type: c5d.4xlarge
     os: windows
