@@ -205,24 +205,38 @@ class GenLazyNativeFuncDefinition:
 
         # call the meta kernel if it exists, to compute output shape/dtype for our IR
         if func.structured or func.structured_delegate is not None:
-            meta_out = """std::vector<Shape> shapes{Shape(out_meta.scalar_type(), out_meta.sizes().vec())};"""
+            meta_out = """shapes = {Shape(out_meta.scalar_type(), out_meta.sizes().vec())};"""
             if returns_length > 1:
                 def this_shape(i: int) -> str:
                     return f"Shape(std::get<{i}>(out_meta).scalar_type(), std::get<{i}>(out_meta).sizes().vec())"
                 shapes_str = ','.join([this_shape(i) for i in range(returns_length)])
-                meta_out = "std::vector<Shape> shapes{" + shapes_str + "};"
+                meta_out = "shapes = {" + shapes_str + "};"
 
-            meta_str = f"""auto out_meta = at::meta::{schema.aten_name}({', '.join(str(t.name) for t in all_types)});
-        {meta_out}"""
+            meta_decl_str = "at::Tensor out_meta;" if returns_length == 1 else f"""std::tuple<{",".join(["at::Tensor"]*returns_length)}> out_meta;"""
+            meta_str = f"""std::vector<Shape> shapes;
+        {{
+            {meta_decl_str}
+            TORCH_LAZY_TIMED("{self.class_method_name}::{schema.aten_name}::Shape");
+            out_meta = at::meta::{schema.aten_name}({', '.join(str(t.name) for t in all_types)});
+            {meta_out}
+        }}"""
         else:
             shape_sig = ComputeShapeSignature(metadata.kernel, func)
-            meta_str = f"""
-        auto shapes = {shape_sig.shape_call};"""
+            meta_str = f"""std::vector<Shape> shapes;
+        {{
+        TORCH_LAZY_TIMED("{self.class_method_name}::{schema.aten_name}::Shape");
+        shapes = {shape_sig.shape_call};
+        }}"""
         meta_str += f"""
         TORCH_INTERNAL_ASSERT(shapes.size() == {returns_length});"""
 
-        node_str = f"""auto node = torch::lazy::MakeNode<ir::ops::{schema.node_name}>({node_ctor_input_str},
-                                                                                      std::move(shapes));"""
+        node_str = f"""torch::lazy::NodePtr node;
+        {{
+            TORCH_LAZY_TIMED("{self.class_method_name}::{schema.aten_name}::MakeNode");
+            node = torch::lazy::MakeNode<ir::ops::{schema.node_name}>({node_ctor_input_str},
+                            std::move(shapes));
+        }}"""
+
         first_tensor_name = value_types_names[0]
         bridge_str = f"""auto result = torch::lazy::CreateAtenFromLtcTensor(torch::lazy::LazyTensor::Create(std::move(node), *common_device));"""
         if returns_length > 1:
