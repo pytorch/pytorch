@@ -33,6 +33,7 @@
 #include <iostream>
 #include <mutex>
 
+#include <ATen/jit_macros.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/core/Array.h>
 #include <ATen/detail/FunctionTraits.h>
@@ -123,6 +124,8 @@ static inline void launch_vectorized_kernel(int64_t N, const func_t& f, array_t 
   }
 }
 
+// Jiterator functions are guarded behind this macro
+#ifdef USE_JITERATOR
 template<char const *name,
          typename result_type,
          typename f_inputs_type,
@@ -214,7 +217,9 @@ at::opmath_type<f_inputs_type> scalar_val) {
 
   if (!fn_ptr->function) {
     const std::lock_guard<std::mutex> lock{_jiterator_mutex};
-    if (!fn_ptr->function) {
+    if (!fn_ptr->function) { // cache miss!
+
+      // Generates program
       constexpr int nTensors = array_t::size();
       std::string string_name{name};
       std::string f_inputs_type_str = at::cuda::jit::typeName<f_inputs_type>();
@@ -226,6 +231,8 @@ at::opmath_type<f_inputs_type> scalar_val) {
                                                scalar_pos,
                                                vectorized, vec_size);
       std::string kernel_name = vectorized ? string_name + "_vectorized" + std::to_string(vec_size) : string_name;
+
+      // Acquires the program
       *fn_ptr = at::cuda::jit::jit_pwise_function(code, kernel_name);
     }
   }
@@ -262,18 +269,6 @@ at::opmath_type<f_inputs_type> scalar_val) {
     at::cuda::jit::launch_jitted_pwise_function(*fn_ptr, args, grid, num_threads());
     C10_CUDA_KERNEL_LAUNCH_CHECK();
   }
-
-}
-
-template<typename func_t, typename array_t, typename inp_calc_t, typename out_calc_t, typename loader_t, typename storer_t>
-static inline void launch_unrolled_kernel(int64_t N, const func_t& f, array_t data,
-                                          inp_calc_t ic, out_calc_t oc, loader_t l, storer_t s)
-{
-  TORCH_INTERNAL_ASSERT(N > 0 && N <= std::numeric_limits<int32_t>::max());
-  int64_t grid = (N + block_work_size() - 1) / block_work_size();
-  auto stream = at::cuda::getCurrentCUDAStream();
-  unrolled_elementwise_kernel<func_t, array_t><<<grid, num_threads(), 0, stream>>>(N, f, data, ic, oc, l, s);
-  C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 
 template <char const *name, typename result_type, typename compute_type, int arity,
@@ -348,6 +343,18 @@ void jitted_gpu_kernel_impl(TensorIteratorBase& iter, const std::string& f, cons
   launch_jitted_unrolled_kernel<name, result_type, compute_type, scalar_pos>(
     iter.device().index(), numel, f, data, input_offset_calculator,
     output_offset_calculator, loader, storer, contiguous, scalar_val);
+}
+#endif // USE_JITERATOR
+
+template<typename func_t, typename array_t, typename inp_calc_t, typename out_calc_t, typename loader_t, typename storer_t>
+static inline void launch_unrolled_kernel(int64_t N, const func_t& f, array_t data,
+                                          inp_calc_t ic, out_calc_t oc, loader_t l, storer_t s)
+{
+  TORCH_INTERNAL_ASSERT(N > 0 && N <= std::numeric_limits<int32_t>::max());
+  int64_t grid = (N + block_work_size() - 1) / block_work_size();
+  auto stream = at::cuda::getCurrentCUDAStream();
+  unrolled_elementwise_kernel<func_t, array_t><<<grid, num_threads(), 0, stream>>>(N, f, data, ic, oc, l, s);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 
 template <typename func_t>

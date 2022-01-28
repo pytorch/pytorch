@@ -38,6 +38,7 @@ DEFAULT_STATIC_QUANT_MODULE_MAPPINGS : Dict[Callable, Any] = {
     DeQuantStub: nnq.DeQuantize,
     nn.BatchNorm2d: nnq.BatchNorm2d,
     nn.BatchNorm3d: nnq.BatchNorm3d,
+    nn.Dropout: nnq.Dropout,
     nn.Conv1d: nnq.Conv1d,
     nn.Conv2d: nnq.Conv2d,
     nn.Conv3d: nnq.Conv3d,
@@ -57,6 +58,7 @@ DEFAULT_STATIC_QUANT_MODULE_MAPPINGS : Dict[Callable, Any] = {
     nn.modules.linear.NonDynamicallyQuantizableLinear: nnq.Linear,
     nn.Linear: nnq.Linear,
     nn.ReLU6: nnq.ReLU6,
+    nn.Dropout: nnq.Dropout,
     # Wrapper Modules:
     nnq.FloatFunctional: nnq.QFunctional,
     # Intrinsic modules:
@@ -86,6 +88,7 @@ DEFAULT_QAT_MODULE_MAPPINGS : Dict[Callable, Any] = {
     nn.Conv2d: nnqat.Conv2d,
     nn.Conv3d: nnqat.Conv3d,
     nn.Linear: nnqat.Linear,
+    nn.Dropout: nnq.Dropout,
     nn.modules.linear.NonDynamicallyQuantizableLinear: nnqat.Linear,
     # Intrinsic modules:
     nni.ConvBn1d: nniqat.ConvBn1d,
@@ -112,12 +115,14 @@ DEFAULT_DYNAMIC_QUANT_MODULE_MAPPINGS : Dict[Callable, Any] = {
     nni.LinearReLU: nniqd.LinearReLU,
     nn.EmbeddingBag: nnq.EmbeddingBag,
     nn.Embedding: nnq.Embedding,
-    nn.Conv1d: nnqd.Conv1d,
-    nn.Conv2d: nnqd.Conv2d,
-    nn.Conv3d: nnqd.Conv3d,
-    nn.ConvTranspose1d: nnqd.ConvTranspose1d,
-    nn.ConvTranspose2d: nnqd.ConvTranspose2d,
-    nn.ConvTranspose3d: nnqd.ConvTranspose3d,
+    # Don't want to enable these by default because the numerical
+    # accuracy is poor compared to other dynamic ops
+    # nn.Conv1d: nnqd.Conv1d,
+    # nn.Conv2d: nnqd.Conv2d,
+    # nn.Conv3d: nnqd.Conv3d,
+    # nn.ConvTranspose1d: nnqd.ConvTranspose1d,
+    # nn.ConvTranspose2d: nnqd.ConvTranspose2d,
+    # nn.ConvTranspose3d: nnqd.ConvTranspose3d,
 }
 
 # Allowlist for propagating the qconfig

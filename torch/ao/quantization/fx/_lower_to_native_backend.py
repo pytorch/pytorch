@@ -28,7 +28,7 @@ def _lower_weighted_ref_module(model: QuantizedGraphModule, ref_class: Type[torc
     pattern = (torch.quantize_per_tensor,
                (ref_class, "dequantize"),
                MatchAllNode, MatchAllNode, MatchAllNode)
-    modules = dict(model.named_modules())
+    modules = dict(model.named_modules(remove_duplicate=False))
     nodes = list(model.graph.nodes)
     # TODO: maybe orgnize this better (e.g. break down to more functions)
     # to make this function more readable

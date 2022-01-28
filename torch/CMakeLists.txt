@@ -70,6 +70,7 @@ set(TORCH_PYTHON_INCLUDE_DIRECTORIES
 
     ${TORCH_ROOT}/third_party/gloo
     ${TORCH_ROOT}/third_party/onnx
+    ${TORCH_ROOT}/third_party/flatbuffers/include
     ${pybind11_INCLUDE_DIRS}
 
     ${TORCH_SRC_DIR}/csrc
@@ -340,11 +341,14 @@ endif()
 
 
 add_library(torch_python SHARED ${TORCH_PYTHON_SRCS})
+list(APPEND TORCH_PYTHON_COMPILE_DEFINITIONS BUILD_CAFFE2)
 if(HAVE_SOVERSION)
   set_target_properties(torch_python PROPERTIES
       VERSION ${TORCH_VERSION} SOVERSION ${TORCH_SOVERSION})
 endif()
 add_dependencies(torch_python torch_python_stubs)
+add_dependencies(torch_python flatbuffers)
+
 
 if(USE_PRECOMPILED_HEADERS)
   target_precompile_headers(torch_python PRIVATE

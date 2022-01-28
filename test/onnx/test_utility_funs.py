@@ -13,6 +13,7 @@ from torch.onnx.symbolic_helper import (_set_opset_version,
                                         _set_operator_export_type,
                                         _set_onnx_shape_inference)
 import torch.utils.cpp_extension
+from autograd_helper import CustomFunction as CustomFunction2
 from test_pytorch_common import (skipIfUnsupportedMinOpsetVersion,
                                  skipIfUnsupportedMaxOpsetVersion)
 import caffe2.python.onnx.backend as backend
@@ -976,6 +977,36 @@ class TestUtilityFuns_opset9(_BaseTestCase):
         iter = graph.nodes()
         self.assertEqual(next(iter).kind(), "prim::PythonOp")
 
+    def test_autograd_module_name(self):
+        class CustomFunction(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, input):
+                ctx.save_for_backward(input)
+                return input.clamp(min=0)
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                input, = ctx.saved_tensors
+                grad_input = grad_output.clone()
+                grad_input[input < 0] = 0
+                return grad_input
+
+        class Custom(torch.nn.Module):
+            def forward(self, input):
+                return CustomFunction.apply(input) + CustomFunction2.apply(input)
+
+        model = Custom()
+        batch = torch.FloatTensor(1, 3)
+
+        graph, _, _ = self._model_to_graph(model, batch,
+                                           input_names=["batch"], dynamic_axes={"batch": [0, 1]})
+        iter = graph.nodes()
+        autograd1 = next(iter)
+        autograd2 = next(iter)
+        self.assertEqual(autograd1.kind(), "prim::PythonOp")
+        self.assertEqual(autograd2.kind(), "prim::PythonOp")
+        self.assertNotEqual(autograd1.s("module"), autograd2.s("module"))
+
     def test_unused_initializers(self):
         class Model(torch.nn.Module):
             def __init__(self):
@@ -1127,6 +1158,81 @@ class TestUtilityFuns_opset9(_BaseTestCase):
         self.assertEqual(graph.graph.input[1].name, "in_weight")
         self.assertEqual(graph.graph.input[2].name, "in_bias")
 
+    def test_onnx_intermediate_renaming(self):
+        class RenamedIntermediateModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self._module_1 = torch.nn.Linear(10, 10)
+                self._module_2 = torch.nn.Linear(10, 10)
+                self._module_3 = torch.nn.Linear(10, 10)
+                self._module_4 = torch.nn.Linear(10, 10)
+
+            def forward(self, x):
+                y = self._module_1(x)
+                z = self._module_2(y)
+                z = self._module_3(y * z)
+                z = self._module_4(y * z)
+                return z
+
+        module = RenamedIntermediateModule()
+
+        g, p, o = utils._model_to_graph(module, torch.ones(1, 10), output_names=['y'])
+        renamed_intermediate = 0
+        for n in g.nodes():
+            for v in n.inputs():
+                if v.debugName().startswith("onnx::Mul_"):
+                    renamed_intermediate += 1
+        self.assertEqual(renamed_intermediate, 2)
+
+    def _test_deduplicate_initializers(self, torchscript=False):
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.layer1 = torch.nn.Linear(3, 3)
+                self.layer2 = torch.nn.Linear(3, 3)
+
+                # Reusing layers.
+                self.layer3 = self.layer1
+
+                # Reusing parameters.
+                self.layer2.weight = self.layer1.weight
+                self.layer1.bias = self.layer2.bias
+
+                # Parameter with different tensors equal in value.
+                self.param1 = torch.nn.Parameter(torch.tensor([1., 2., 3.]))
+                self.param2 = torch.nn.Parameter(torch.tensor([1., 2., 3.]))
+
+            def forward(self, x):
+                return self.layer3(self.layer2(self.layer1(x))) + self.param1 + self.param2
+
+        model = torch.jit.script(MyModule()) if torchscript else MyModule()
+
+        x = torch.randn(3, 3)
+        param_name_set = set([k for k, _ in model.named_parameters()])
+
+        # Test training mode.
+        model.train()
+        f = io.BytesIO()
+        torch.onnx.export(model, (x,), f, training=TrainingMode.TRAINING,
+                          opset_version=self.opset_version)
+        graph = onnx.load(io.BytesIO(f.getvalue()))
+        self.assertSetEqual(set([i.name for i in graph.graph.initializer]), param_name_set)
+
+        # Test eval mode.
+        model.eval()
+        f = io.BytesIO()
+        torch.onnx.export(model, (x,), f,
+                          opset_version=self.opset_version)
+        graph = onnx.load(io.BytesIO(f.getvalue()))
+        param_name_set.remove("param2")
+        self.assertSetEqual(set([i.name for i in graph.graph.initializer]), param_name_set)
+
+    def test_deduplicate_initializers(self):
+        self._test_deduplicate_initializers(torchscript=False)
+
+    def test_deduplicate_initializers_torchscript(self):
+        self._test_deduplicate_initializers(torchscript=True)
+
     def test_duplicated_output_node(self):
         class DuplicatedOutputNet(torch.nn.Module):
             def __init__(self, input_size, num_classes):
@@ -1193,6 +1299,10 @@ class TestUtilityFuns_opset13(TestUtilityFuns_opset9):
 
 class TestUtilityFuns_opset14(TestUtilityFuns_opset9):
     opset_version = 14
+
+
+class TestUtilityFuns_opset15(TestUtilityFuns_opset9):
+    opset_version = 15
 
 
 if __name__ == "__main__":

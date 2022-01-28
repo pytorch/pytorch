@@ -97,12 +97,19 @@ std::string used_cpu_capability() {
   ss << "CPU capability usage: ";
   auto capability = native::get_cpu_capability();
   switch (capability) {
-#ifdef HAVE_VSX_CPU_DEFINITION
+#if defined(HAVE_VSX_CPU_DEFINITION)
     case native::CPUCapability::DEFAULT:
       ss << "DEFAULT";
       break;
     case native::CPUCapability::VSX:
       ss << "VSX";
+      break;
+#elif defined(HAVE_ZVECTOR_CPU_DEFINITION)
+    case native::CPUCapability::DEFAULT:
+      ss << "DEFAULT";
+      break;
+    case native::CPUCapability::ZVECTOR:
+      ss << "Z VECTOR";
       break;
 #else
     case native::CPUCapability::DEFAULT:

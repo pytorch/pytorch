@@ -10,8 +10,8 @@
 //
 // ConvPlaceholders.cpp contains placeholder implementation of cudnn
 // convolution when cudnn is not enabled. These operators only raises
-// errors, and do no real computation. This file also contains deprecated
-// operators. These operators are implemented using currnet operators.
+// errors, and do no real computation. These operators are implemented
+// using currnet operators.
 //
 // cuDNN v7 and v8 have different API. ConvShared.{cpp, h} contains
 // code shared by v7 and v8. Conv_v7.cpp contains implementation of

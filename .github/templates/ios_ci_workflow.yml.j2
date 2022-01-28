@@ -7,8 +7,9 @@ name: !{{ build_environment }}
 {%- endblock %}
 
 on:
+{%- if is_default %}
   pull_request:
-    types: [opened, synchronize, reopened, !{{ ciflow_config.trigger_action }}]
+{%- endif -%}
 
 {%- if is_scheduled %}
   schedule:
@@ -19,6 +20,14 @@ on:
       - master
       - release/*
 {%- endif %}
+{%- for label in ciflow_config.labels | sort %}
+  {%- if loop.first %}
+    tags:
+  {%- endif %}
+  {%- if label != "ciflow/default" %}
+      - '!{{ label }}/*'
+  {%- endif %}
+{%- endfor %}
   workflow_dispatch:
 
 # For setup-miniconda, see https://github.com/conda-incubator/setup-miniconda/issues/179
@@ -40,10 +49,7 @@ jobs:
       JOB_BASE_NAME: !{{ build_environment }}-build
       IOS_CERT_KEY_2022: ${{ secrets.IOS_CERT_KEY_2022 }}
       IOS_SIGN_KEY_2022: ${{ secrets.IOS_SIGN_KEY_2022 }}
-      IS_PROBOT_TRIGGER_EVENT: ${{ (github.event.action == '!{{ ciflow_config.trigger_action }}') && (github.event.assigneed.login == '!{{ ciflow_config.trigger_actor }}') }}
-      LABEL_CONDITIONS: ${{ !{{ ciflow_config.label_conditions }} }}
       PR_LABELS: ${{ toJson(github.event.pull_request.labels.*.name) }}
-    if: !{{ ciflow_config.root_job_condition }}
     steps:
       - name: print labels
         run: echo "${PR_LABELS}"

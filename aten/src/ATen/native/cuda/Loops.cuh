@@ -1,6 +1,7 @@
 
 #pragma once
 
+#include <ATen/jit_macros.h>
 #include <ATen/detail/FunctionTraits.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/TensorIteratorDynamicCasting.h>
@@ -79,23 +80,27 @@ __device__ inline void elementwise_kernel_helper(func_t f, policy_t policy) {
 // memory access introduce regression on ROCm.
 
 #if !defined(USE_ROCM)
-#include <ATen/native/cuda/CUDALoops.cuh>
-#define USE_JITERATOR
+  #include <ATen/native/cuda/CUDALoops.cuh>
 #else
-#include <ATen/native/cuda/ROCmLoops.cuh>
+  #include <ATen/native/cuda/ROCmLoops.cuh>
 #endif
 
 namespace at { namespace native {
-#ifdef USE_JITERATOR
 
+#ifdef USE_JITERATOR
 /* Note [Jiterator]
 The "jiterator" simply just-in-time compiles the same kernels that
 Loops.cuh (and CUDALoops.cuh) usually build. This reduces build time,
-build size, and CUDA context size.
+build size, and initial CUDA context size.
+
+By default on non-Windows systems, it also caches compiled kernels in ~/.cache/torch/kernels.
+This behavior is controlled with two environment variables:
+  - USE_PYTORCH_KERNEL_CACHE, if set to zero then this will disable all cache use
+  - PYTORCH_KERNEL_CACHE_PATH, if set specifies the folder to use for cached kernels
 
 The jiterator currently has some limitations, however. It cannot:
-  - handle float16, bfloat16, or complex datatypes
-  - handle scalar inputs
+  - handle math on complex datatypes
+  - handle kernels with scalar parameters
 
 These improvements will likely come soon.
 
@@ -207,7 +212,7 @@ void opmath_jitted_gpu_kernel_with_scalars(TensorIteratorBase& iter, const std::
     jitted_gpu_kernel<name, return_type, f_inputs_type, 2>(iter, f);
   }
 }
-#endif //USE_JITERATOR
+#endif // USE_JITERATOR
 
 template <typename func_t>
 void gpu_kernel(TensorIteratorBase& iter, const func_t& f) {

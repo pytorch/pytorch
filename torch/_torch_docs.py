@@ -1775,7 +1775,7 @@ depthwise according to :attr:`indices_or_sections`. Each split is a view of
 :attr:`input`.
 
 This is equivalent to calling torch.tensor_split(input, indices_or_sections, dim=2)
-(the split dimension is 1), except that if :attr:`indices_or_sections` is an integer
+(the split dimension is 2), except that if :attr:`indices_or_sections` is an integer
 it must evenly divide the split dimension or a runtime error will be thrown.
 
 This function is based on NumPy's :func:`numpy.dsplit`.
@@ -6306,16 +6306,20 @@ Example::
 """.format(**single_dim_common))
 
 add_docstr(torch.quantile, r"""
-quantile(input, q, dim=None, keepdim=False, *, out=None) -> Tensor
+quantile(input, q, dim=None, keepdim=False, *, interpolation='linear', out=None) -> Tensor
 
-Computes the q-th quantiles of each row of the :attr:`input` tensor
-along the dimension :attr:`dim`.
+Computes the q-th quantiles of each row of the :attr:`input` tensor along the dimension :attr:`dim`.
 
 To compute the quantile, we map q in [0, 1] to the range of indices [0, n] to find the location
 of the quantile in the sorted input. If the quantile lies between two data points ``a < b`` with
-indices ``i`` and ``j`` in the sorted order, result is computed using linear interpolation as follows:
+indices ``i`` and ``j`` in the sorted order, result is computed according to the given
+:attr:`interpolation` method as follows:
 
-``a + (b - a) * fraction``, where ``fraction`` is the fractional part of the computed quantile index.
+- ``linear``: ``a + (b - a) * fraction``, where ``fraction`` is the fractional part of the computed quantile index.
+- ``lower``: ``a``.
+- ``higher``: ``b``.
+- ``nearest``: ``a`` or ``b``, whichever's index is closer to the computed quantile index (rounding down for .5 fractions).
+- ``midpoint``: ``(a + b) / 2``.
 
 If :attr:`q` is a 1D tensor, the first dimension of the output represents the quantiles and has size
 equal to the size of :attr:`q`, the remaining dimensions are what remains from the reduction.
@@ -6330,6 +6334,9 @@ Args:
     {keepdim}
 
 Keyword arguments:
+    interpolation (string): interpolation method to use when the desired quantile lies between two data points.
+                            Can be ``linear``, ``lower``, ``higher``, ``midpoint`` and ``nearest``.
+                            Default is ``linear``.
     {out}
 
 Example::
@@ -6353,10 +6360,22 @@ Example::
     >>> a = torch.arange(4.)
     >>> a
     tensor([0., 1., 2., 3.])
+    >>> torch.quantile(a, 0.6, interpolation='linear')
+    tensor(1.8000)
+    >>> torch.quantile(a, 0.6, interpolation='lower')
+    tensor(1.)
+    >>> torch.quantile(a, 0.6, interpolation='higher')
+    tensor(2.)
+    >>> torch.quantile(a, 0.6, interpolation='midpoint')
+    tensor(1.5000)
+    >>> torch.quantile(a, 0.6, interpolation='nearest')
+    tensor(2.)
+    >>> torch.quantile(a, 0.4, interpolation='nearest')
+    tensor(1.)
 """.format(**single_dim_common))
 
 add_docstr(torch.nanquantile, r"""
-nanquantile(input, q, dim=None, keepdim=False, *, out=None) -> Tensor
+nanquantile(input, q, dim=None, keepdim=False, *, interpolation='linear', out=None) -> Tensor
 
 This is a variant of :func:`torch.quantile` that "ignores" ``NaN`` values,
 computing the quantiles :attr:`q` as if ``NaN`` values in :attr:`input` did
@@ -6370,6 +6389,9 @@ Args:
     {keepdim}
 
 Keyword arguments:
+    interpolation (string): interpolation method to use when the desired quantile lies between two data points.
+                            Can be ``linear``, ``lower``, ``higher``, ``midpoint`` and ``nearest``.
+                            Default is ``linear``.
     {out}
 
 Example::
@@ -8497,7 +8519,7 @@ Slices the :attr:`input` tensor along the selected dimension at the given index.
 This function returns a view of the original tensor with the given dimension removed.
 
 Args:
-    {input} (Tensor)
+    {input}
     dim (int): the dimension to slice
     index (int): the index to select with
 
@@ -8506,7 +8528,7 @@ Args:
     :meth:`select` is equivalent to slicing. For example,
     ``tensor.select(0, index)`` is equivalent to ``tensor[index]`` and
     ``tensor.select(2, index)`` is equivalent to ``tensor[:,:,index]``.
-""")
+""".format(**common_args))
 
 add_docstr(torch.select_scatter,
            r"""
@@ -8517,7 +8539,7 @@ This function returns a tensor with fresh storage; it does not create a view.
 
 
 Args:
-    {input} (Tensor)
+    {input}
     src (Tensor): The tensor to embed into :attr:`input`
     dim (int): the dimension to insert the slice into.
     index (int): the index to select with
@@ -8535,7 +8557,7 @@ Example::
     >>> a.select_scatter(b, 0, 0)
     tensor([[1., 1.],
             [0., 0.]])
-""")
+""".format(**common_args))
 
 add_docstr(torch.slice_scatter,
            r"""
@@ -8547,7 +8569,7 @@ This function returns a tensor with fresh storage; it does not create a view.
 
 
 Args:
-    {input} (Tensor)
+    {input}
     src (Tensor): The tensor to embed into :attr:`input`
     dim (int): the dimension to insert the slice into
     start (Optional[int]): the start index of where to insert the slice
@@ -8578,7 +8600,7 @@ Example::
             [0., 0., 1., 0., 1., 0., 0., 0.],
             [0., 0., 1., 0., 1., 0., 0., 0.],
             [0., 0., 1., 0., 1., 0., 0., 0.]])
-""")
+""".format(**common_args))
 
 add_docstr(torch.set_flush_denormal,
            r"""
@@ -9930,9 +9952,13 @@ transpose(input, dim0, dim1) -> Tensor
 Returns a tensor that is a transposed version of :attr:`input`.
 The given dimensions :attr:`dim0` and :attr:`dim1` are swapped.
 
-The resulting :attr:`out` tensor shares its underlying storage with the
-:attr:`input` tensor, so changing the content of one would change the content
-of the other.
+If :attr:`input` is a strided tensor then the resulting :attr:`out`
+tensor shares its underlying storage with the :attr:`input` tensor, so
+changing the content of one would change the content of the other.
+
+If :attr:`input` is a :ref:`sparse tensor <sparse-docs>` then the
+resulting :attr:`out` tensor *does not* share the underlying storage
+with the :attr:`input` tensor.
 
 Args:
     {input}

@@ -7,10 +7,10 @@ if exist %GFLAGS_EXE% (
     echo Some smoke tests
     %GFLAGS_EXE% /i python.exe +sls
     python %SCRIPT_HELPERS_DIR%\run_python_nn_smoketests.py
-    if ERRORLEVEL 1 exit /b 1
+    if ERRORLEVEL 1 goto fail
 
     %GFLAGS_EXE% /i python.exe -sls
-    if ERRORLEVEL 1 exit /b 1
+    if ERRORLEVEL 1 goto fail
 )
 
 echo Copying over test times file
@@ -21,12 +21,18 @@ echo Run nn tests
 if "%RUN_SMOKE_TESTS_ONLY%"=="1" (
     :: Download specified test cases to run
     curl --retry 3 -k https://raw.githubusercontent.com/pytorch/test-infra/main/stats/windows_smoke_tests.csv --output .pytorch_specified_test_cases.csv
-    if ERRORLEVEL 1 exit /b 1
+    if ERRORLEVEL 1 goto fail
 
     python run_test.py --exclude-jit-executor --shard 1 2 --verbose --run-specified-test-cases
 ) else (
     python run_test.py --exclude-jit-executor --shard 1 2 --verbose
 )
-if ERRORLEVEL 1 exit /b 1
+if ERRORLEVEL 1 goto fail
 
 popd
+
+:eof
+exit /b 0
+
+:fail
+exit /b 1

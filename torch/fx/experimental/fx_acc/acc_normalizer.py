@@ -2,9 +2,9 @@ import inspect
 import re
 from typing import NamedTuple, Optional, Callable, Dict, List, Tuple, Union, Any, Set
 
-import torch.fx.experimental.fx_acc.acc_utils as acc_utils
 import torch
 import torch.fx
+import torch.fx.experimental.fx_acc.acc_utils as acc_utils
 from torch.fx.node import _get_qualified_name
 
 # Need to keep up-to-date with https://fburl.com/codesearch/7r2hhh53
@@ -62,10 +62,11 @@ class NormalizationInfo(NamedTuple):
     # (tensor_meta_field_name, orginal_field_name)
     # when move_to_qparams is True, we'll move the field to qparams
     # dictionary, otherwise it will stay in TensorMeta itself
-    kwargs_to_move_to_acc_out_ty: Optional[List[Union[
-        Tuple[str, str, bool],
-        Tuple[str, str]]]]
+    kwargs_to_move_to_acc_out_ty: Optional[
+        List[Union[Tuple[str, str, bool], Tuple[str, str]]]
+    ]
     needs_shapes_for_normalization: bool
+
 
 # Dict from (op, target) to NormalizationInfo for that op.
 _normalization_dict: Dict[Tuple[str, Union[str, Callable]], NormalizationInfo] = {}
@@ -80,8 +81,8 @@ def _insert_fun(
     new_fn_target: Optional[Callable] = None,
     custom_mapping_fn: Optional[Callable] = None,
     kwargs_to_move_to_acc_out_ty: Optional[
-        List[Union[Tuple[str, str, bool],
-                   Tuple[str, str]]]] = None,
+        List[Union[Tuple[str, str, bool], Tuple[str, str]]]
+    ] = None,
     needs_shapes_for_normalization=False,
     allow_normalize_from_torch_package=False,
 ):
@@ -158,15 +159,20 @@ def register_acc_op(acc_op: Callable):
     _acc_ops.add(acc_op)
     return acc_op
 
+
 def register_acc_op_mapping(
     op_and_target: Tuple[str, Union[str, Callable]],
     arg_replacement_tuples: Optional[
-        List[Union[Tuple[Union[str, Tuple[str, ...]], str], Tuple[Union[str, Tuple[str, ...]], str, bool]]]
+        List[
+            Union[
+                Tuple[Union[str, Tuple[str, ...]], str],
+                Tuple[Union[str, Tuple[str, ...]], str, bool],
+            ]
+        ]
     ] = None,
-    kwargs_to_move_to_acc_out_ty:
-        Optional[List[Union[
-            Tuple[str, str, bool],
-            Tuple[str, str]]]] = None,
+    kwargs_to_move_to_acc_out_ty: Optional[
+        List[Union[Tuple[str, str, bool], Tuple[str, str]]]
+    ] = None,
 ):
     """
     Use this decorator to map a non-acc operator to an acc operator.
@@ -198,7 +204,12 @@ def register_acc_op_mapping(
 
 def register_custom_acc_mapper_fn(
     op_and_target: Tuple[str, Union[str, Callable]],
-    arg_replacement_tuples: List[Union[Tuple[Union[str, Tuple[str, ...]], str], Tuple[Union[str, Tuple[str, ...]], str, bool]]],
+    arg_replacement_tuples: List[
+        Union[
+            Tuple[Union[str, Tuple[str, ...]], str],
+            Tuple[Union[str, Tuple[str, ...]], str, bool],
+        ]
+    ],
     needs_shapes_for_normalization=False,
     allow_normalize_from_torch_package=False,
 ):
@@ -363,6 +374,10 @@ def normalize(mod: torch.fx.GraphModule, expect_nodes_have_shapes: bool = False)
         # Finally replace the original node with the normalized node.
         node.replace_all_uses_with(new_node)
         graph.erase_node(node)
+
+        # Don't wrap the acc_op node just because the original node was wrapped.
+        if "is_wrapped" in new_node.meta:
+            del new_node.meta["is_wrapped"]
 
     for node in graph.nodes:
         if node.op in {"placeholder", "get_attr", "output"}:

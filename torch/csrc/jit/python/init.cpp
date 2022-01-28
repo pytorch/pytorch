@@ -14,6 +14,7 @@
 #include <torch/csrc/jit/passes/batch_mm.h>
 #include <torch/csrc/jit/passes/canonicalize.h>
 #include <torch/csrc/jit/passes/canonicalize_graph_fuser_ops.h>
+#include <torch/csrc/jit/passes/common_expression_hoisting.h>
 #include <torch/csrc/jit/passes/common_subexpression_elimination.h>
 #include <torch/csrc/jit/passes/constant_pooling.h>
 #include <torch/csrc/jit/passes/constant_propagation.h>
@@ -22,6 +23,7 @@
 #include <torch/csrc/jit/passes/cuda_graph_fuser.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
 #include <torch/csrc/jit/passes/decompose_ops.h>
+#include <torch/csrc/jit/passes/device_type_analysis.h>
 #include <torch/csrc/jit/passes/dtype_analysis.h>
 #include <torch/csrc/jit/passes/erase_number_types.h>
 #include <torch/csrc/jit/passes/fold_conv_bn.h>
@@ -46,6 +48,7 @@
 #include <torch/csrc/jit/passes/onnx.h>
 #include <torch/csrc/jit/passes/onnx/cast_all_constant_to_floating.h>
 #include <torch/csrc/jit/passes/onnx/constant_fold.h>
+#include <torch/csrc/jit/passes/onnx/deduplicate_initializers.h>
 #include <torch/csrc/jit/passes/onnx/eliminate_unused_items.h>
 #include <torch/csrc/jit/passes/onnx/eval_peephole.h>
 #include <torch/csrc/jit/passes/onnx/fixup_onnx_controlflow.h>
@@ -218,6 +221,15 @@ void initJITBindings(PyObject* module) {
           })
       .def("_jit_pass_onnx_preprocess", PreprocessForONNX)
       .def(
+          "_jit_pass_onnx_deduplicate_initializers",
+          [](std::shared_ptr<Graph>& graph,
+             std::map<std::string, IValue> params_dict,
+             bool is_train) {
+            DeduplicateInitializers(graph, params_dict, is_train);
+            return params_dict;
+          },
+          pybind11::return_value_policy::move)
+      .def(
           "_jit_pass_onnx_eval_peephole",
           [](std::shared_ptr<Graph>& graph,
              std::map<std::string, IValue>& paramsDict) {
@@ -307,6 +319,11 @@ void initJITBindings(PyObject* module) {
           "_jit_pass_cse",
           [](std::shared_ptr<Graph>& g) {
             return EliminateCommonSubexpression(g); // overload resolution
+          })
+      .def(
+          "_jit_pass_common_expression_hoisting",
+          [](std::shared_ptr<Graph>& g) {
+            return HoistCommonExpression(g); // overload resolution
           })
       .def(
           "_jit_pass_fuse_quantized_add_relu",
@@ -446,6 +463,7 @@ void initJITBindings(PyObject* module) {
       .def("_jit_pass_constant_pooling", ConstantPooling)
       // RemoveInplaceOps is used by CoreML so it must be removed with care.
       .def("_jit_pass_propagate_dtype", DtypePropagation)
+      .def("_jit_pass_propagate_device", DeviceTypePropagation)
       .def(
           "_jit_pass_remove_inplace_ops",
           [](const std::shared_ptr<Graph>& g) { return RemoveInplaceOps(g); })
@@ -820,6 +838,12 @@ void initJITBindings(PyObject* module) {
       .def("_jit_texpr_fallback_allowed", &tensorexpr::fallbackAllowed)
       .def("_jit_texpr_set_fallback_allowed", &tensorexpr::setFallbackAllowed)
       .def("_jit_set_texpr_reductions_enabled", &setTexprReductionsEnabled)
+      .def(
+          "_jit_set_texpr_dynamic_shape_enabled",
+          &setTensorExprDynamicShapeFusionEnabled)
+      .def(
+          "_jit_texpr_dynamic_shape_enabled",
+          &tensorExprDynamicShapeFusionEnabled)
       .def("_jit_texpr_reductions_enabled", &texprReductionsEnabled)
       .def(
           "_jit_set_te_generate_block_code",
@@ -977,8 +1001,9 @@ void initJITBindings(PyObject* module) {
       .def(
           "_jit_pass_onnx_unpack_quantized_weights",
           [](std::shared_ptr<Graph>& graph,
-             std::map<std::string, IValue>& paramsDict) {
-            UnpackQuantizedWeights(graph, paramsDict);
+             std::map<std::string, IValue>& paramsDict,
+             bool caffe2) {
+            UnpackQuantizedWeights(graph, paramsDict, caffe2);
             return paramsDict;
           },
           pybind11::return_value_policy::move)
@@ -1389,6 +1414,13 @@ void initJITBindings(PyObject* module) {
           "is_backward_compatible_with",
           [](const FunctionSchema& self, const FunctionSchema& old_schema) {
             return self.isBackwardCompatibleWith(old_schema);
+          })
+      .def(
+          "check_forward_compatible_with",
+          [](const FunctionSchema& self, const FunctionSchema& old_schema) {
+            std::ostringstream out;
+            auto result = self.isForwardCompatibleWith(old_schema, out);
+            return std::make_pair(result, out.str());
           })
       .def(
           "__eq__",

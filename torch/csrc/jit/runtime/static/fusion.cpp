@@ -24,6 +24,7 @@ void createFusionGroups(Block* block, AliasDb* aliasDb, size_t min_size);
 void fuseStaticSubgraphs(std::shared_ptr<Graph> graph, size_t min_size) {
   Inline(*graph);
   ReplaceWithCopy(graph);
+  ReplaceWithMaybeCopy(graph);
   ConstantPropagation(graph);
   Canonicalize(graph);
   ConstantPropagation(graph);
@@ -329,7 +330,10 @@ void performTensorExprFusion(
   GRAPH_DEBUG("Graph before tracing: ", graph);
   auto traced_graph = TraceGraph(graph, sample_inputs);
   GRAPH_DEBUG("Graph after tracing: ", traced_graph);
-  FuseTensorExprs(traced_graph);
+  FuseTensorExprs(
+      traced_graph,
+      /*min_group_size*/ 2,
+      /*add_composed_op*/ true);
   graph->block()->clear();
   graph->block()->cloneFrom(traced_graph->block(), nullptr);
   GRAPH_DUMP("Graph after fusion: ", graph);

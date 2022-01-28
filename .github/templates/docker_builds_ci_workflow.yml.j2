@@ -44,7 +44,8 @@ jobs:
       !{{ common.calculate_docker_image(true) }}
       - name: Pull Docker image
         run: |
-          !{{ common.pull_docker("${DOCKER_IMAGE}") }}
+          !{{ common.add_retry_to_env() }}
+          retry docker pull "${DOCKER_IMAGE}"
       !{{ common.parse_ref() }}
       !{{ common.teardown_ec2_linux() }}
       - name: Hold runner for 2 hours or until ssh sessions have drained

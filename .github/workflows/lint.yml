@@ -49,7 +49,7 @@ jobs:
       - name: Ensure canonical include
         if: always()
         run: |
-          (! git --no-pager grep -In $'#include "' -- ./c10 ./aten ./torch/csrc ':(exclude)aten/src/ATen/native/quantized/cpu/qnnpack/**' || (echo "The above lines have include with quotes; please convert them to #include <xxxx>"; false))
+          (! git --no-pager grep -In $'#include "' -- ./c10 ./aten ./torch/csrc ':(exclude)aten/src/ATen/native/quantized/cpu/qnnpack/**' ':(exclude)torch/csrc/jit/serialization/mobile_bytecode_generated.h'|| (echo "The above lines have include with quotes; please convert them to #include <xxxx>"; false))
       - name: Ensure no versionless Python shebangs
         if: always()
         run: |

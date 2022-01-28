@@ -2,6 +2,7 @@ import torch
 from torch.fx.graph_module import GraphModule
 from typing import Callable, List, Dict, Any, Optional
 from torch.fx._compatibility import compatibility
+import inspect
 
 @compatibility(is_backward_compatible=True)
 class Partition:
@@ -224,7 +225,9 @@ def split_module(
     base_mod_attrs : Dict[str, torch.fx.graph_module.GraphModule] = {}
     for node in m.graph.nodes:
         if node.op == 'placeholder':
-            base_mod_env[node.name] = base_mod_graph.placeholder(node.name)
+            default_value = node.args[0] if len(node.args) > 0 else inspect.Signature.empty
+            base_mod_env[node.name] = base_mod_graph.placeholder(
+                node.name, type_expr=node.type, default_value=default_value)
             base_mod_env[node.name].meta = node.meta.copy()
         elif node.op == 'get_attr':
             base_mod_env[node.name] = base_mod_graph.get_attr(node.target)

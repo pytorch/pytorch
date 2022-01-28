@@ -193,15 +193,12 @@ Tensor sparse_csr_tensor(
     c10::optional<bool> pin_memory) {
   // See [Note: hacky wrapper removal for TensorOptions]
   TensorOptions options = TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory);
-  std::array<int64_t, 2> size;
+  std::array<int64_t, 2> size = {0, 0};
   if (col_indices.numel() > 0) {
     AT_DISPATCH_INDEX_TYPES(col_indices.scalar_type(), "csr_construct_check", [&] {
       size[0] = crow_indices.numel() - 1;
       size[1] = col_indices.max().item<index_t>() + 1;
     });
-  } else {
-    size[0] = 0;
-    size[1] = 0;
   }
 
   at::native::_validate_sparse_csr_tensor_args(crow_indices, col_indices, values, size);
@@ -320,6 +317,55 @@ const SparseCsrTensor& resize_as_sparse_csr_(
     get_sparse_csr_impl(self)->resize_as_sparse_csr_tensor_(src);
   }
   return self;
+}
+
+SparseCsrTensor clone_sparse_csr(
+    const SparseCsrTensor& self,
+    c10::optional<c10::MemoryFormat> optional_memory_format) {
+  TORCH_CHECK(
+      !optional_memory_format.has_value(),
+      "unsupported memory format option ",
+      optional_memory_format.value());
+  TensorOptions options = self.options();
+  return at::native::_sparse_csr_tensor_unsafe(
+                                               self.crow_indices().clone(),
+                                               self.col_indices().clone(),
+                                               self.values().clone(),
+                                               self.sizes(),
+                                               optTypeMetaToScalarType(options.dtype_opt()),
+                                               options.layout_opt(),
+                                               options.device_opt(),
+                                               options.pinned_memory_opt());
+}
+
+Tensor empty_like_sparse_csr(
+    const Tensor& self,
+    c10::optional<ScalarType> dtype,
+    c10::optional<Layout> layout,
+    c10::optional<Device> device,
+    c10::optional<bool> pin_memory,
+    c10::optional<c10::MemoryFormat> optional_memory_format) {
+  TensorOptions options_ = TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory);
+  TensorOptions options =
+      self.options()
+          .merge_in(options_)
+          .merge_memory_format(optional_memory_format);
+
+  if (options.layout() == kSparseCsr) {
+    auto result = at::native::_sparse_csr_tensor_unsafe(
+        self.crow_indices().clone(),
+        self.col_indices().clone(),
+        at::empty(self.values().sizes(), options.layout(kStrided)),
+        self.sizes(),
+        dtype,
+        self.layout(),
+        device);
+    return result;
+  } else if (options.layout() == kStrided) {
+    return at::native::empty_like(self, dtype, layout, device, pin_memory, optional_memory_format);
+  } else {
+    TORCH_CHECK(false, "Layout ", options.layout(), " is not supported");
+  }
 }
 
 } // namespace native

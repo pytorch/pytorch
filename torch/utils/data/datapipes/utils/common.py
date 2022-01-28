@@ -5,6 +5,27 @@ import warnings
 from io import IOBase
 from typing import Iterable, List, Tuple, Union
 
+try:
+    import dill
+
+    # XXX: By default, dill writes the Pickler dispatch table to inject its
+    # own logic there. This globally affects the behavior of the standard library
+    # pickler for any user who transitively depends on this module!
+    # Undo this extension to avoid altering the behavior of the pickler globally.
+    dill.extend(use_dill=False)
+    DILL_AVAILABLE = True
+except ImportError:
+    DILL_AVAILABLE = False
+
+
+def check_lambda_fn(fn):
+    # Partial object has no attribute '__name__', but can be pickled
+    if hasattr(fn, "__name__") and fn.__name__ == "<lambda>" and not DILL_AVAILABLE:
+        warnings.warn(
+            "Lambda function is not supported for pickle, please use "
+            "regular python function or functools.partial instead."
+        )
+
 
 def match_masks(name : str, masks : Union[str, List[str]]) -> bool:
     # empty mask matches any input name
@@ -54,6 +75,7 @@ def get_file_binaries_from_pathnames(pathnames: Iterable, mode: str):
                             .format(type(pathname)))
         yield pathname, StreamWrapper(open(pathname, mode))
 
+
 def validate_pathname_binary_tuple(data: Tuple[str, IOBase]):
     if not isinstance(data, tuple):
         raise TypeError(f"pathname binary data should be tuple type, but it is type {type(data)}")
@@ -67,11 +89,14 @@ def validate_pathname_binary_tuple(data: Tuple[str, IOBase]):
             f"its subclasses as type, but it is type {type(data[1])}"
         )
 
-# Warns user that the DataPipe has been moved to TorchData and will be removed from `torch`
-def deprecation_warning_torchdata(name):
-    warnings.warn(f"{name} and its functional API are deprecated and will be removed from the package `torch`. "
-                  f"Please import those features from the new package TorchData: https://github.com/pytorch/data",
-                  DeprecationWarning)
+
+def deprecation_warning(name, new_name: str = ""):
+    new_name_statement = ""
+    if new_name:
+        new_name_statement = f" Please use {new_name} instead."
+    warnings.warn(f"{name} and its functional API are deprecated and will be removed from the package `torch`." +
+                  new_name_statement, DeprecationWarning)
+
 
 class StreamWrapper:
     def __init__(self, file_obj):

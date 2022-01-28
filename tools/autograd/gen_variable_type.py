@@ -107,9 +107,9 @@ GRADIENT_IMPLEMENTED_FOR_COMPLEX = {
     'replication_pad1d_backward', 'replication_pad2d_backward', 'replication_pad3d_backward',
     'diag', 'masked_scatter', 'masked_select', 'index_add', 'index_fill', 'trace', 'polar', 'cumsum', 'rsub',
     'eig', 'lerp', 'linalg_vector_norm', 'cumprod', 'prod', 'index_copy', 'lu', 'unfold', 'unfold_backward',
-    'index', 'masked_fill', 'linalg_cross', 'lu_unpack', 'renorm', '_conj_physical',
+    'index', 'masked_fill', 'linalg_cross', 'lu_unpack', 'renorm', '_conj_physical', 'linalg_lu_factor_ex',
     'scatter', 'scatter_add', 'sigmoid', 'sigmoid_backward', 'trapezoid', 'cumulative_trapezoid',
-    'conj_physical_', '_neg_view', '_reshape_alias', '_det_lu_based_helper', 'lu_solve', '_lu_with_info',
+    'conj_physical_', '_neg_view', '_reshape_alias', '_det_lu_based_helper', 'lu_solve',
     'linalg_solve_triangular', 'linalg_pinv', 'linalg_lstsq', 'col2im', 'col2im_backward', 'im2col', 'im2col_backward',
 }
 

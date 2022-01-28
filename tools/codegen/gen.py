@@ -103,10 +103,20 @@ def parse_native_yaml(path: str) -> ParsedYaml:
         error_check_native_functions(rs)
         # Default dict is to prevent the codegen from barfing when we have a dispatch key that has no kernels yet.
         indices: Dict[DispatchKey, BackendIndex] = defaultdict(lambda: BackendIndex(
-            dispatch_key=DispatchKey.Undefined, use_out_as_primary=True, external=False, index={}))
+            dispatch_key=DispatchKey.Undefined,
+            use_out_as_primary=True,
+            external=False,
+            device_guard=False,
+            index={}))
         for k, v in bs.items():
             # All structured in-tree operators are implemented in terms of their out operator.
-            indices[k] = BackendIndex(dispatch_key=k, use_out_as_primary=True, external=False, index=v)
+            indices[k] = BackendIndex(
+                dispatch_key=k,
+                use_out_as_primary=True,
+                external=False,
+                # Only cuda-like devices in tree require device guards
+                device_guard=is_cuda_dispatch_key(k),
+                index=v)
         _GLOBAL_PARSE_NATIVE_YAML_CACHE[path] = ParsedYaml(rs, indices)
 
     return _GLOBAL_PARSE_NATIVE_YAML_CACHE[path]
@@ -1269,6 +1279,35 @@ def gen_headers(
     cpu_fm.write('FunctionalInverses.h', lambda: {
         'view_inverse_declarations': list(mapMaybe(gen_functionalization_view_inverse_declaration, native_functions))
     })
+
+
+    def gen_aten_interned_strings() -> Dict[str, str]:
+        attrs = set()  # All function argument names
+        names = set()  # All ATen function names
+        for func in native_functions:
+            names.add(str(func.func.name.name))
+            # Some operators don't have a functional variant but we still create a
+            # symbol without the underscore
+            names.add(func.func.name.name.base)
+
+            for arg in func.func.schema_order_arguments():
+                attrs.add(arg.name)
+
+        # These are keywords in C++, so aren't valid symbol names
+        # https://en.cppreference.com/w/cpp/language/operator_alternative
+        names -= set(['and', 'and_eq', 'bitand', 'bitor', 'compl', 'not',
+                      'not_eq', 'or', 'or_eq', 'xor', 'xor_eq'])
+
+        return {
+            'aten_symbols': ' \\\n'.join([
+                f"_(aten, {name})" for name in sorted(names)
+            ]),
+            'attr_symbols': ' \\\n'.join([
+                f"_(attr, {name})" for name in sorted(attrs)
+            ]),
+        }
+
+    core_fm.write('aten_interned_strings.h', gen_aten_interned_strings)
 
 def gen_source_files(
         *,

@@ -3424,7 +3424,8 @@ namespace detail {
   std::tuple<torch::Tensor, torch::Tensor> _scaled_dot_attn_ref(
     const torch::Tensor& Q, const torch::Tensor& K, const torch::Tensor& V,
     at::IntArrayRef dims, const torch::Tensor& unseen_mask = {},
-    const torch::Tensor& key_padding_mask = {}) {
+    const torch::Tensor& key_padding_mask = {},
+    bool average_attn_weights = true) {
     auto QKT = _batchmatmul(
       Q,
       K.permute({0, 1, 3, 2}) / std::sqrt(dims[3])
@@ -3451,8 +3452,10 @@ namespace detail {
     }
     auto reference = _softmax(QKT);
     auto ref_attn_weight = reference;
-    // NOLINTNEXTLINE(bugprone-argument-comment)
-    ref_attn_weight = torch::sum(ref_attn_weight, /*axis=*/1) / b2;
+    if (average_attn_weights) {
+      // NOLINTNEXTLINE(bugprone-argument-comment)
+      ref_attn_weight = torch::sum(ref_attn_weight, /*axis=*/1) / b2;
+    }
     reference = _batchmatmul(reference, V);
     return std::tie(reference, ref_attn_weight);
   }
@@ -3479,7 +3482,8 @@ namespace detail {
 
   void _multihead_attn_test_helper(bool add_key_padding_mask = false,
     bool add_bias_kv = false, bool add_zero_attn = false,
-    bool saved_kv = false, bool same_embed_dim = false) {
+    bool saved_kv = false, bool same_embed_dim = false,
+    bool average_attn_weights = true) {
     std::random_device device;
     std::mt19937 generator(device());
     std::uniform_int_distribution<int> d_2_10(2, 10);
@@ -3602,6 +3606,7 @@ namespace detail {
           .attn_mask(attn_mask_tensor)
           .static_k(saved_k_tensor)
           .static_v(saved_v_tensor)
+          .average_attn_weights(average_attn_weights)
         );
       } else {
         std::tie(result, result_weight) = F::multi_head_attention_forward(
@@ -3628,6 +3633,7 @@ namespace detail {
           .v_proj_weight(multihead_attn_module->v_proj_weight)
           .static_k(saved_k_tensor)
           .static_v(saved_v_tensor)
+          .average_attn_weights(average_attn_weights)
         );
       }
       result = result.squeeze(0).detach();
@@ -3698,7 +3704,8 @@ namespace detail {
           V_split,
           Q_split.sizes(),
           attn_mask,
-          key_padding_mask
+          key_padding_mask,
+          average_attn_weights
       );
       const auto combined_attn_heads = _combine_heads_ref(attn_heads, {batch_sz, 1}, nheads, d_head);
       auto reference = _fc(combined_attn_heads, multihead_attn_module->out_proj->weight, multihead_attn_module->out_proj->bias);
@@ -3720,83 +3727,93 @@ namespace detail {
 TEST_F(ModulesTest, MultiheadAttention) {
   using namespace ::detail;
 
-  // test_multihead_attn_add_zero_attn
-  _multihead_attn_test_helper(
-    /*add_key_padding_mask=*/false,
-    /*add_bias_kv=*/false,
-    /*add_zero_attn=*/true,
-    /*saved_kv=*/false,
-    /*same_embed_dim=*/false
-  );
+  for (auto average_attn_weights : {false, true}) {
+    // test_multihead_attn_add_zero_attn
+    _multihead_attn_test_helper(
+      /*add_key_padding_mask=*/false,
+      /*add_bias_kv=*/false,
+      /*add_zero_attn=*/true,
+      /*saved_kv=*/false,
+      /*same_embed_dim=*/false,
+      /*average_attn_weights=*/average_attn_weights
+    );
 
-  // test_multihead_attn_add_bias_kv
-  _multihead_attn_test_helper(
-    /*add_key_padding_mask=*/false,
-    /*add_bias_kv=*/true,
-    /*add_zero_attn=*/false,
-    /*saved_kv=*/false,
-    /*same_embed_dim=*/false
-  );
+    // test_multihead_attn_add_bias_kv
+    _multihead_attn_test_helper(
+      /*add_key_padding_mask=*/false,
+      /*add_bias_kv=*/true,
+      /*add_zero_attn=*/false,
+      /*saved_kv=*/false,
+      /*same_embed_dim=*/false,
+      /*average_attn_weights=*/average_attn_weights
+    );
 
-  // test_multihead_attn_no_masking():
-  _multihead_attn_test_helper();
+    // test_multihead_attn_no_masking():
+    _multihead_attn_test_helper();
 
-  // test_multihead_attn_key_padding_mask
-  _multihead_attn_test_helper(
-    /*add_key_padding_mask=*/true,
-    /*add_bias_kv=*/false,
-    /*add_zero_attn=*/false,
-    /*saved_kv=*/false,
-    /*same_embed_dim=*/false
-  );
+    // test_multihead_attn_key_padding_mask
+    _multihead_attn_test_helper(
+      /*add_key_padding_mask=*/true,
+      /*add_bias_kv=*/false,
+      /*add_zero_attn=*/false,
+      /*saved_kv=*/false,
+      /*same_embed_dim=*/false,
+      /*average_attn_weights=*/average_attn_weights
+    );
 
-  // test_multihead_attn_saved_kv
-  _multihead_attn_test_helper(
-    /*add_key_padding_mask=*/false,
-    /*add_bias_kv=*/false,
-    /*add_zero_attn=*/false,
-    /*saved_kv=*/true,
-    /*same_embed_dim=*/false
-  );
+    // test_multihead_attn_saved_kv
+    _multihead_attn_test_helper(
+      /*add_key_padding_mask=*/false,
+      /*add_bias_kv=*/false,
+      /*add_zero_attn=*/false,
+      /*saved_kv=*/true,
+      /*same_embed_dim=*/false,
+      /*average_attn_weights=*/average_attn_weights
+    );
 
-  // test_multihead_attn_add_bias_kv_zero_attn
-  _multihead_attn_test_helper(
-    /*add_key_padding_mask=*/true,
-    /*add_bias_kv=*/true,
-    /*add_zero_attn=*/true,
-    /*saved_kv=*/false,
-    /*same_embed_dim=*/false
-  );
-
-  // test_multihead_attn_all_arguments1
-  _multihead_attn_test_helper(
-    /*add_key_padding_mask=*/true,
-    /*add_bias_kv=*/false,
-    /*add_zero_attn=*/true,
-    /*saved_kv=*/true,
-    /*same_embed_dim=*/false
-  );
-
-  ASSERT_THROWS_WITH(
-    // test_multihead_attn_all_arguments2
+    // test_multihead_attn_add_bias_kv_zero_attn
     _multihead_attn_test_helper(
       /*add_key_padding_mask=*/true,
       /*add_bias_kv=*/true,
       /*add_zero_attn=*/true,
-      /*saved_kv=*/true,
-      /*same_embed_dim=*/false
-    ),
-    "bias cannot be added to static key"
-  );
+      /*saved_kv=*/false,
+      /*same_embed_dim=*/false,
+      /*average_attn_weights=*/average_attn_weights
+    );
 
-  // test_multihead_attn_all_arguments3
-  _multihead_attn_test_helper(
-    /*add_key_padding_mask=*/true,
-    /*add_bias_kv=*/false,
-    /*add_zero_attn=*/true,
-    /*saved_kv=*/true,
-    /*same_embed_dim=*/true
-  );
+    // test_multihead_attn_all_arguments1
+    _multihead_attn_test_helper(
+      /*add_key_padding_mask=*/true,
+      /*add_bias_kv=*/false,
+      /*add_zero_attn=*/true,
+      /*saved_kv=*/true,
+      /*same_embed_dim=*/false,
+      /*average_attn_weights=*/average_attn_weights
+    );
+
+    ASSERT_THROWS_WITH(
+      // test_multihead_attn_all_arguments2
+      _multihead_attn_test_helper(
+        /*add_key_padding_mask=*/true,
+        /*add_bias_kv=*/true,
+        /*add_zero_attn=*/true,
+        /*saved_kv=*/true,
+        /*same_embed_dim=*/false,
+        /*average_attn_weights=*/average_attn_weights
+      ),
+      "bias cannot be added to static key"
+    );
+
+    // test_multihead_attn_all_arguments3
+    _multihead_attn_test_helper(
+      /*add_key_padding_mask=*/true,
+      /*add_bias_kv=*/false,
+      /*add_zero_attn=*/true,
+      /*saved_kv=*/true,
+      /*same_embed_dim=*/true,
+      /*average_attn_weights=*/average_attn_weights
+    );
+  }
 }
 
 TEST_F(ModulesTest, PrettyPrintIdentity) {

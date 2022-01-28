@@ -1,11 +1,11 @@
 #include <torch/csrc/jit/backends/backend_detail.h>
 
+#include <ATen/code_template.h>
 #include <ATen/core/jit_type.h>
 #include <torch/csrc/jit/backends/backend.h>
 #include <torch/csrc/jit/backends/backend_debug_handler.h>
 #include <torch/csrc/jit/backends/backend_debug_info.h>
 #include <torch/csrc/jit/backends/backend_resolver.h>
-#include <torch/csrc/jit/frontend/code_template.h>
 
 #include <memory>
 #include <stack>
@@ -164,11 +164,11 @@ Module codegen_backend_module(
 
   // This is a helper function for creating a new instance of the
   // backend class.
-  static const auto create_backend_ct = CodeTemplate(R"(
+  static const auto create_backend_ct = at::jit::CodeTemplate(R"(
             def __create_backend(self):
                 self.__backend = $name()
             )");
-  TemplateEnv create_backend_te;
+  at::jit::TemplateEnv create_backend_te;
   create_backend_te.s("name", qual_backend_name.qualifiedName());
   loweredModule.define(
       create_backend_ct.format(create_backend_te), loweredModuleResolver());
@@ -209,11 +209,11 @@ Module codegen_backend_module(
       "__backend_debug_info",
       OptionalType::create(debug_info_cls),
       IValue::make_capsule(backend_debug_info_class));
-  static const auto create_backend_debug_info_ct = CodeTemplate(R"(
+  static const auto create_backend_debug_info_ct = at::jit::CodeTemplate(R"(
             def __create_backend_debug_info(self):
                 self.__backend_debug_info = $backend_debug_info()
             )");
-  TemplateEnv create_backend_debug_info_te;
+  at::jit::TemplateEnv create_backend_debug_info_te;
   create_backend_debug_info_te.s(
       "backend_debug_info", backend_debug_info_class_name.qualifiedName());
   loweredModule.define(
@@ -256,7 +256,7 @@ Module codegen_backend_module(
   // in method_compile_spec.
   for (auto& e : method_compile_spec) {
     std::string method_name = e.key().toStringRef();
-    static const auto method_ct = CodeTemplate(R"(
+    static const auto method_ct = at::jit::CodeTemplate(R"(
             def $method(self${,def_inputs}):
                 typed_inputs: List[Any] = [${fwd_inputs,}]
                 if self.__backend.is_available() :
@@ -267,7 +267,7 @@ Module codegen_backend_module(
                   raise Exception("Backend is not available.")
             )");
 
-    TemplateEnv method_te;
+    at::jit::TemplateEnv method_te;
     method_te.s("method", method_name);
     auto method = orig_module.get_method(method_name);
     auto& function = method.function();

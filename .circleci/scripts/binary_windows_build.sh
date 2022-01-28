@@ -10,8 +10,8 @@ export SCCACHE_BUCKET=ossci-compiler-cache-windows
 export NIGHTLIES_PYTORCH_ROOT="$PYTORCH_ROOT"
 export VC_YEAR=2019
 
-if [[ "${DESIRED_CUDA}" == "cu111" || "${DESIRED_CUDA}" == "cu113" ]]; then
-    export BUILD_SPLIT_CUDA="ON"
+if [[ "${DESIRED_CUDA}" == *"cu11"* ]]; then
+    export BUILD_SPLIT_CUDA=ON
 fi
 
 echo "Free Space for CUDA DEBUG BUILD"

@@ -377,6 +377,7 @@ def get_base_name_to_sets_of_related_ops() -> Dict[str, Set[NSNodeTargetType]]:
         set([
             nn.Dropout,
             F.dropout,
+            nnq.Dropout,
         ]),
     ]
 
@@ -524,6 +525,7 @@ def get_node_type_to_io_type_map() -> Dict[str, Set[NSNodeTargetType]]:
         nnqd.LSTM,
         nn.BatchNorm2d,
         nn.BatchNorm3d,
+        nn.Dropout,
         nn.ConvTranspose1d,
         nn.ConvTranspose2d,
         nn.ConvTranspose3d,
@@ -570,6 +572,7 @@ def get_node_type_to_io_type_map() -> Dict[str, Set[NSNodeTargetType]]:
         nnq.Conv3d,
         nnq.BatchNorm2d,
         nnq.BatchNorm3d,
+        nnq.Dropout,
         nnq.ConvTranspose1d,
         nnq.ConvTranspose2d,
         nnq.ConvTranspose3d,
@@ -584,6 +587,7 @@ def get_node_type_to_io_type_map() -> Dict[str, Set[NSNodeTargetType]]:
         nnq.ReLU6,
         nnq.Embedding,
         nnq.EmbeddingBag,
+        nnq.Dropout,
         nniq.BNReLU2d,
         nniq.BNReLU3d,
         nniq.ConvReLU1d,

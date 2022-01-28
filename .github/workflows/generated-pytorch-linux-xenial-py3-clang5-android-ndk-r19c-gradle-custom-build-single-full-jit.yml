@@ -5,12 +5,16 @@ name: pytorch-linux-xenial-py3-clang5-android-ndk-r19c-gradle-custom-build-singl
 
 on:
   pull_request:
-    types: [opened, synchronize, reopened, unassigned]
   push:
+    tags:
+      - 'ciflow/all/*'
+      - 'ciflow/android/*'
+      - 'ciflow/cpu/*'
+      - 'ciflow/linux/*'
+      - 'ciflow/trunk/*'
     branches:
       - master
       - release/*
-      - fbsync
   workflow_dispatch:
 
 env:
@@ -44,14 +48,6 @@ jobs:
     env:
       JOB_BASE_NAME: pytorch-linux-xenial-py3-clang5-android-ndk-r19c-gradle-custom-build-single-full-jit-build-and-test
       NUM_TEST_SHARDS: 1
-      IS_PROBOT_TRIGGER_EVENT: ${{ (github.event.action == 'unassigned') && (github.event.assigneed.login == 'pytorchbot') }}
-      LABEL_CONDITIONS: ${{ contains(github.event.pull_request.labels.*.name, 'ciflow/all') || contains(github.event.pull_request.labels.*.name, 'ciflow/android') || contains(github.event.pull_request.labels.*.name, 'ciflow/cpu') || contains(github.event.pull_request.labels.*.name, 'ciflow/default') || contains(github.event.pull_request.labels.*.name, 'ciflow/linux') || contains(github.event.pull_request.labels.*.name, 'ciflow/trunk') }}
-    if: ${{ (github.repository == 'pytorch/pytorch') && (
-            (github.event_name == 'push') ||
-            (github.event_name == 'schedule') ||
-            (contains(github.event.pull_request.labels.*.name, 'ciflow/all') || contains(github.event.pull_request.labels.*.name, 'ciflow/android') || contains(github.event.pull_request.labels.*.name, 'ciflow/cpu') || contains(github.event.pull_request.labels.*.name, 'ciflow/default') || contains(github.event.pull_request.labels.*.name, 'ciflow/linux') || contains(github.event.pull_request.labels.*.name, 'ciflow/trunk')) ||
-            ((github.event_name == 'pull_request' && github.event.action != 'unassigned') && !contains(join(github.event.pull_request.labels.*.name), 'ciflow/')))
-         }}
     steps:
       - name: print labels
         run: echo "${PR_LABELS}"
@@ -74,7 +70,10 @@ jobs:
           AWS_MAX_ATTEMPTS: 5
         run: |
           AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
-          aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
+          retry () {
+              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
+          }
+          retry aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
               --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
       - name: Chown workspace
         run: |
@@ -86,8 +85,8 @@ jobs:
           docker run --pull=never --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
       - name: Clean workspace
         run: |
-          rm -rf "${GITHUB_WORKSPACE:?}/*"
-          rm -f ~/.ssh/authorized_keys
+          rm -rf "${GITHUB_WORKSPACE}"
+          mkdir "${GITHUB_WORKSPACE}"
       - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
         uses: seemethere/add-github-ssh-key@v1
         with:
@@ -238,7 +237,7 @@ jobs:
           PR_NUMBER: ${{ github.event.pull_request.number }}
           SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
           TAG: ${{ steps.parse-ref.outputs.tag }}
-          WORKFLOW_ID: '${{ github.run_id }}_${{ github.run_number }}'
+          WORKFLOW_ID: '${{ github.run_id }}'
         run: |
           # The artifact file is created inside docker container, which contains the result binaries.
           # Now unpackage it into the project folder. The subsequent script will scan project folder

@@ -3,6 +3,7 @@
 #include <ATen/native/cuda/Loops.cuh>
 #include <ATen/native/BinaryOps.h>
 #include <ATen/native/Math.h>
+#include <ATen/native/cuda/Math.cuh>
 #include <ATen/native/cuda/jit_utils.h>
 
 namespace at { namespace native {
@@ -14,7 +15,6 @@ namespace {
  */
 // See note [Jiterator]
 const char zeta_name[] = "zeta";
-
 void zeta_kernel_cuda(TensorIteratorBase& iter) {
   #ifdef USE_JITERATOR
     AT_DISPATCH_FLOATING_TYPES(iter.common_dtype(), "zeta_cuda", [&]() {
