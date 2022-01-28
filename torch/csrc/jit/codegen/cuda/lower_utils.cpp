@@ -337,7 +337,8 @@ std::unordered_map<ParallelType, kir::IterDomain*, TypeHash> getParallelDomains(
   } else if (val->isA<kir::TensorIndex>()) {
     kir_tv = val->as<kir::TensorIndex>()->view();
   } else {
-    TORCH_INTERNAL_ASSERT("Provided val is not TensorIndex or TensorView.");
+    TORCH_INTERNAL_ASSERT(
+        false, "Provided val is not TensorIndex or TensorView.");
   }
 
   std::unordered_map<ParallelType, kir::IterDomain*, TypeHash> parallel_domains;
