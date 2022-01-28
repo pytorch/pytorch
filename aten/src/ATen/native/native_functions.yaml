@@ -4655,9 +4655,9 @@
   device_check: NoCheck
   device_guard: False
   dispatch:
+    CPU, CUDA: unsqueeze
     SparseCPU, SparseCUDA: unsqueeze_sparse
     QuantizedCPU, QuantizedCUDA: unsqueeze_quantized
-    CPU, CUDA: unsqueeze
 
 - func: unsqueeze_(Tensor(a!) self, int dim) -> Tensor(a!)
   variants: method
