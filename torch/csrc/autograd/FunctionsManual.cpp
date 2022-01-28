@@ -12,6 +12,7 @@
 #include <ATen/ExpandUtils.h>
 #include <ATen/native/IndexingUtils.h>
 #include <ATen/native/LinearAlgebraUtils.h>
+#include <ATen/native/Activation.h>
 #include <ATen/ScalarOps.h>
 #include <ATen/SparseTensorUtils.h>
 #include <ATen/Utils.h>
@@ -2338,6 +2339,46 @@ std::tuple<Tensor, Tensor, Tensor> prelu_double_backward(
   }
 }
 
+Tensor gelu_double_backward(
+                const Tensor & ggI,
+                const Tensor & gO,
+                const Tensor & input,
+                int64_t approximate) {
+  if (approximate == at::Gelu::Tanh) {
+    constexpr auto kBeta = M_SQRT2 * M_2_SQRTPI * 0.5;
+    constexpr auto kKappa = 0.044715;
+
+    auto inner = kBeta * (input + kKappa * pow(input, 3));
+    auto tanh_inner = tanh(inner);
+    auto sech_inner = 1 / cosh(inner);
+
+    auto f = 0.5 * input;
+    auto g = 1 - tanh_inner * tanh_inner;
+    auto h = kBeta * (1 + 3 * kKappa * input * input);
+
+    auto f_prime_gh = 0.5 * g * h;
+
+    auto g_prime = (2 * sech_inner) * (-sech_inner * tanh_inner) * h;
+    auto g_prime_fh = f * h * g_prime;
+
+    auto h_prime = 6 * kKappa * input * kBeta;
+    auto h_prime_fg = f * g * h_prime;
+
+    // left_derivative = f_prime_gh
+    // right_derivative = f_prime_gh + g_prime_fh + h_prime_fg
+    // dgrad_dX = left_derivative + right_derivative
+    auto gI = ggI * gO * (2 * f_prime_gh + g_prime_fh + h_prime_fg);
+    return gI;
+  } else {
+    constexpr auto kBeta = M_2_SQRTPI * M_SQRT1_2 * 0.5;
+    auto input_sq = input * input;
+    auto pdf = kBeta * at::exp(-0.5 * input_sq);
+    auto dgrad_dInput = 2 * pdf - input_sq * pdf;
+    auto gI = ggI * gO * dgrad_dInput;
+    return gI;
+  }
+}
+
 Tensor elu_double_backward(
     const Tensor& grad,
     const Tensor& grad_output,
@@ -4112,7 +4153,10 @@ Tensor embedding_dense_double_backward(const Tensor & grad, const Tensor & indic
 }
 
 Tensor index_backward(Tensor zeros_like_self, const torch::List<c10::optional<Tensor>>& indices, const Tensor& grad) {
-  return at::_index_put_impl_(zeros_like_self, indices, grad, true, true);
+  return (areAnyTensorSubclassLike({zeros_like_self, grad}) ||
+          areAnyOptionalTensorSubclassLike(indices))
+      ? zeros_like_self.index_put(indices, grad, true)
+      : at::_index_put_impl_(zeros_like_self, indices, grad, true, true);
 }
 
 Tensor _cudnn_ctc_loss_backward(const Tensor& grad_out, const Tensor& loss, const Tensor& raw_grad, bool zero_infinity) {
