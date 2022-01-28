@@ -348,7 +348,7 @@ class SerializationMixin(object):
             f.seek(0)
             with self.assertRaisesRegex(
                     RuntimeError,
-                    "0th value of crow_indices must be 0."):
+                    "rebuilding sparse tensor for layout torch.sparse_csr"):
                 y = torch.load(f)
 
     def test_serialize_device(self):
