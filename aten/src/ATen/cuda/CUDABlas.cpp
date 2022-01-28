@@ -262,8 +262,9 @@ void bgemm<c10::complex<float>>(CUDABLAS_BGEMM_ARGTYPES(c10::complex<float>)) {
       reinterpret_cast<cuComplex*>(c), ldc, stridec, num_batches));
 }
 
-template <>
-void bgemm<at::Half>(CUDABLAS_BGEMM_ARGTYPES(at::Half)) {
+template <typename Dtype, typename C_Dtype,
+  typename std::enable_if<CUDABLAS_GEMM_DTYPE_IS_HALF_AND_C_DTYPE_IS_HALF_OR_FLOAT, Dtype>::type* = nullptr>
+void bgemm(CUDABLAS_BGEMM_ARGTYPES_AND_C_DTYPE(Dtype, C_Dtype)) {
   // See Note [Writing Nondeterministic Operations]
   globalContext().alertCuBLASConfigNotDeterministic();
   cublasHandle_t handle = at::cuda::getCurrentCUDABlasHandle();
@@ -290,15 +291,16 @@ void bgemm<at::Half>(CUDABLAS_BGEMM_ARGTYPES(at::Half)) {
 
   cudaDeviceProp* prop = at::cuda::getCurrentDeviceProperties();
   if (prop->major >= 5){
+    constexpr auto c_dtype = std::is_same<C_Dtype, at::Half>::value ? CUDA_R_16F : CUDA_R_32F;
     TORCH_CUDABLAS_CHECK(cublasGemmStridedBatchedExFix(
       handle, opa, opb, m, n, k,
       (void*)(&falpha), a, CUDA_R_16F, lda, stridea,
       b, CUDA_R_16F, ldb, strideb, (void*)(&fbeta),
-      c, CUDA_R_16F, ldc, stridec,
+      c, c_dtype, ldc, stridec,
       num_batches, CUDA_R_32F, CUBLAS_GEMM_DEFAULT_TENSOR_OP));
   } else {
     for (const auto i : c10::irange(num_batches)) {
-      at::cuda::blas::gemm<at::Half>(
+      at::cuda::blas::gemm<Dtype, C_Dtype>(
         transa, transb,
         m, n, k,
         alpha, (a + i * stridea), lda,
@@ -313,6 +315,8 @@ void bgemm<at::Half>(CUDABLAS_BGEMM_ARGTYPES(at::Half)) {
   #endif  // defined(CUDA_VERSION) && CUDA_VERSION < 11000
 #endif // USE_ROCM
 }
+template void bgemm<at::Half, at::Half>(CUDABLAS_BGEMM_ARGTYPES_AND_C_DTYPE(at::Half, at::Half));
+template void bgemm<at::Half, float>(CUDABLAS_BGEMM_ARGTYPES_AND_C_DTYPE(at::Half, float));
 
 #if defined(USE_ROCM) || defined(CUDA_VERSION) && CUDA_VERSION >= 11000
 template <>

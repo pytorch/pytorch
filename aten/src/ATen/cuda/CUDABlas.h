@@ -40,15 +40,15 @@ private:
 
 /* LEVEL 3 BLAS FUNCTIONS */
 
+#define CUDABLAS_GEMM_DTYPE_IS_HALF_AND_C_DTYPE_IS_HALF_OR_FLOAT \
+    (std::is_same<Dtype, at::Half>::value && (std::is_same<C_Dtype, at::Half>::value || std::is_same<C_Dtype, float>::value))
+
 #define CUDABLAS_GEMM_ARGTYPES(Dtype) CUDABLAS_GEMM_ARGTYPES_AND_C_DTYPE(Dtype, Dtype)
 
 #define CUDABLAS_GEMM_ARGTYPES_AND_C_DTYPE(Dtype, C_Dtype)                                  \
   char transa, char transb, int64_t m, int64_t n, int64_t k, at::opmath_type<Dtype> alpha,  \
       const Dtype *a, int64_t lda, const Dtype *b, int64_t ldb, at::opmath_type<Dtype> beta,\
       C_Dtype *c, int64_t ldc
-
-#define CUDABLAS_GEMM_DTYPE_IS_HALF_AND_C_DTYPE_IS_HALF_OR_FLOAT \
-    (std::is_same<Dtype, at::Half>::value && (std::is_same<C_Dtype, at::Half>::value || std::is_same<C_Dtype, float>::value))
 
 template <typename Dtype, typename C_Dtype = Dtype,
   typename std::enable_if<!CUDABLAS_GEMM_DTYPE_IS_HALF_AND_C_DTYPE_IS_HALF_OR_FLOAT, Dtype>::type* = nullptr>
@@ -76,17 +76,23 @@ template <>
 void gemm<at::BFloat16>(CUDABLAS_GEMM_ARGTYPES(at::BFloat16));
 #endif
 
-#define CUDABLAS_BGEMM_ARGTYPES(Dtype)                                                        \
+#define CUDABLAS_BGEMM_ARGTYPES(Dtype) CUDABLAS_BGEMM_ARGTYPES_AND_C_DTYPE(Dtype, Dtype)
+
+#define CUDABLAS_BGEMM_ARGTYPES_AND_C_DTYPE(Dtype, C_Dtype)                                   \
   char transa, char transb, int64_t m, int64_t n, int64_t k, at::opmath_type<Dtype> alpha,    \
       const Dtype *a, int64_t lda, int64_t stridea,                                           \
       const Dtype *b, int64_t ldb, int64_t strideb,                                           \
-      at::opmath_type<Dtype> beta, Dtype *c, int64_t ldc, int64_t stridec, int64_t num_batches
+      at::opmath_type<Dtype> beta, C_Dtype *c, int64_t ldc, int64_t stridec, int64_t num_batches
 
-template <typename Dtype>
-inline void bgemm(CUDABLAS_BGEMM_ARGTYPES(Dtype)) {
-  AT_ERROR("at::cuda::blas::bgemm: not implemented for ", typeid(Dtype).name());
+template <typename Dtype, typename C_Dtype = Dtype,
+  typename std::enable_if<!CUDABLAS_GEMM_DTYPE_IS_HALF_AND_C_DTYPE_IS_HALF_OR_FLOAT, Dtype>::type* = nullptr>
+inline void bgemm(CUDABLAS_BGEMM_ARGTYPES_AND_C_DTYPE(Dtype, C_Dtype)) {
+  TORCH_CHECK(false, "at::cuda::blas::bgemm: not implemented for input type ", typeid(Dtype).name(), " and output type ", typeid(C_Dtype).name());
 }
 
+template <typename Dtype, typename C_Dtype,
+  typename std::enable_if<CUDABLAS_GEMM_DTYPE_IS_HALF_AND_C_DTYPE_IS_HALF_OR_FLOAT, Dtype>::type* = nullptr>
+void bgemm(CUDABLAS_BGEMM_ARGTYPES_AND_C_DTYPE(Dtype, C_Dtype));
 template <>
 void bgemm<double>(CUDABLAS_BGEMM_ARGTYPES(double));
 template <>
@@ -95,8 +101,6 @@ template <>
 void bgemm<c10::complex<double>>(CUDABLAS_BGEMM_ARGTYPES(c10::complex<double>));
 template <>
 void bgemm<c10::complex<float>>(CUDABLAS_BGEMM_ARGTYPES(c10::complex<float>));
-template <>
-void bgemm<at::Half>(CUDABLAS_BGEMM_ARGTYPES(at::Half));
 #if defined(USE_ROCM) || defined(CUDA_VERSION) && CUDA_VERSION >= 11000
 template <>
 void bgemm<at::BFloat16>(CUDABLAS_BGEMM_ARGTYPES(at::BFloat16));
