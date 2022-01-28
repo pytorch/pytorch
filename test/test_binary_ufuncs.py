@@ -480,7 +480,6 @@ class TestBinaryUfuncs(TestCase):
         for shape in shapes:
             lhs = make_tensor(shape, device, dtype, **op.lhs_make_tensor_kwargs)
             rhs = make_tensor(shape, device, dtype, **op.rhs_make_tensor_kwargs)
-
             lhs_non_contig = lhs.clone().expand(3, -1, -1)
             rhs_non_contig = rhs.clone().expand(3, -1, -1)
 
@@ -1121,6 +1120,7 @@ class TestBinaryUfuncs(TestCase):
         t -= 1
         t *= 1
         t /= 1
+        t **= 1
         with self.assertWarnsOnceRegex(UserWarning, 'floor_divide'):
             t //= 1
         t %= 1

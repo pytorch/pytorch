@@ -626,11 +626,13 @@ class Tensor(torch._C._TensorBase):
         if self.dim() == 0:
             return self.item().__format__(format_spec)
         return object.__format__(self, format_spec)
-
+    
+    @_wrap_type_error_to_not_implemented
     def __ipow__(self, other):  # type: ignore[misc]
         if has_torch_function_variadic(self, other):
             return handle_torch_function(Tensor.__ipow__, (self, other), self, other)
-        return NotImplemented
+        dtype = torch.result_type(self, other)
+        return torch.pow(self, other, out=self).to(dtype=dtype, device=self.device)
 
     @_wrap_type_error_to_not_implemented
     def __rpow__(self, other):
