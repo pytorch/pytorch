@@ -4,11 +4,10 @@
 #include <ATen/Parallel.h>
 #include <ATen/core/interned_strings.h>
 #include <ATen/core/ivalue.h>
+#include <test/cpp/jit/test_utils.h>
 #include <torch/csrc/jit/passes/remove_mutation.h>
 #include <torch/csrc/jit/passes/tensorexpr_fuser.h>
 #include <torch/csrc/jit/tensorexpr/kernel.h>
-
-#include <test/cpp/jit/test_utils.h>
 
 #include <torch/csrc/autograd/engine.h>
 #include <torch/csrc/autograd/generated/variable_factories.h>
@@ -17,7 +16,6 @@
 #include <torch/csrc/jit/api/function_impl.h>
 #include <torch/csrc/jit/api/module.h>
 #include <torch/csrc/jit/codegen/fuser/interface.h>
-#include <torch/csrc/jit/frontend/code_template.h>
 #include <torch/csrc/jit/frontend/ir_emitter.h>
 #include <torch/csrc/jit/frontend/tracer.h>
 #include <torch/csrc/jit/ir/alias_analysis.h>
@@ -2871,7 +2869,7 @@ TEST_F(Composed, ComposedOp) {
   bool fusable_on_device = torch::jit::tensorexpr::getTEMustUseLLVMOnCPU();
   torch::jit::tensorexpr::getTEMustUseLLVMOnCPU() = false;
   setTensorExprDynamicShapeFusionEnabled(true);
-  FuseTensorExprs(graph);
+  FuseTensorExprs(graph, /*min_group_size*/ 2, /*add_composed_op*/ true);
   Code code(graph, "");
   InterpreterState interpreter{code};
   std::vector<IValue> stack = {a, b};
@@ -2880,7 +2878,6 @@ TEST_F(Composed, ComposedOp) {
   at::Tensor out1 = pop(stack).toTensor();
   ASSERT_TRUE(at::allclose(ref1, out1));
   ASSERT_TRUE(at::allclose(ref2, out2));
-  graph->dump();
 
   auto inp_1 = at::ones({4, 4}, TensorOptions(kCPU).dtype(at::kFloat));
   auto inp_2 = at::ones({4, 4}, TensorOptions(kCPU).dtype(at::kFloat));

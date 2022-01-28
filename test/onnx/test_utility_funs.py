@@ -1127,6 +1127,32 @@ class TestUtilityFuns_opset9(_BaseTestCase):
         self.assertEqual(graph.graph.input[1].name, "in_weight")
         self.assertEqual(graph.graph.input[2].name, "in_bias")
 
+    def test_onnx_intermediate_renaming(self):
+        class RenamedIntermediateModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self._module_1 = torch.nn.Linear(10, 10)
+                self._module_2 = torch.nn.Linear(10, 10)
+                self._module_3 = torch.nn.Linear(10, 10)
+                self._module_4 = torch.nn.Linear(10, 10)
+
+            def forward(self, x):
+                y = self._module_1(x)
+                z = self._module_2(y)
+                z = self._module_3(y * z)
+                z = self._module_4(y * z)
+                return z
+
+        module = RenamedIntermediateModule()
+
+        g, p, o = utils._model_to_graph(module, torch.ones(1, 10), output_names=['y'])
+        renamed_intermediate = 0
+        for n in g.nodes():
+            for v in n.inputs():
+                if v.debugName().startswith("onnx::Mul_"):
+                    renamed_intermediate += 1
+        self.assertEqual(renamed_intermediate, 2)
+
     def test_duplicated_output_node(self):
         class DuplicatedOutputNet(torch.nn.Module):
             def __init__(self, input_size, num_classes):

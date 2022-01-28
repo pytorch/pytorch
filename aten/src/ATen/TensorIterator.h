@@ -13,6 +13,14 @@
 #include <array>
 #include <bitset>
 
+C10_CLANG_DIAGNOSTIC_PUSH()
+#if C10_CLANG_HAS_WARNING("-Wshorten-64-to-32")
+C10_CLANG_DIAGNOSTIC_IGNORE("-Wshorten-64-to-32")
+#endif
+#if C10_CLANG_HAS_WARNING("-Wdeprecated-copy-dtor")
+C10_CLANG_DIAGNOSTIC_IGNORE("-Wdeprecated-copy-dtor")
+#endif
+
 namespace at {
 class Tensor;
 class OptionalTensorRef;
@@ -427,9 +435,21 @@ public:
   void build_borrowing_binary_op(const TensorBase& out, const TensorBase& a, const TensorBase& b);
   TORCH_DISALLOW_TEMPORARIES(build_borrowing_binary_op)
   void build_unary_float_op(const TensorBase& out, const TensorBase& a);
+  void build_borrowing_unary_float_op(const TensorBase& out, const TensorBase& a);
+  TORCH_DISALLOW_TEMPORARIES(build_borrowing_unary_float_op)
   void build_unary_op(const TensorBase& out, const TensorBase& a);
-  void build_unary_force_boolean_op(const TensorBase& out, const TensorBase& a);
+  // Odd special case needed for pow. Has to borrow the output because
+  // it's a structured kernel, but the argument is potentially a copy.
+  void build_output_borrowing_argument_owning_unary_op(const TensorBase& out, const TensorBase& a);
+  void build_borrowing_unary_op(const TensorBase& out, const TensorBase& a);
+  TORCH_DISALLOW_TEMPORARIES(build_borrowing_unary_op)
+  void build_borrowing_unary_force_boolean_op(const TensorBase& out, const TensorBase& a);
+  TORCH_DISALLOW_TEMPORARIES(build_borrowing_unary_force_boolean_op)
   void build_comparison_op(const TensorBase& out, const TensorBase& a, const TensorBase& b);
+  void build_borrowing_comparison_op(const TensorBase& out, const TensorBase& a, const TensorBase& b);
+  TORCH_DISALLOW_TEMPORARIES(build_borrowing_comparison_op)
+  // Another special case: we need to own the second argument for comparison ops.
+  void build_borrowing_except_last_argument_comparison_op(const TensorBase& out, const TensorBase& a, const TensorBase& b);
   void build_ternary_op(const TensorBase& out, const TensorBase& a, const TensorBase& b, const TensorBase& c);
 
 #undef TORCH_DISALLOW_TEMPORARIES
@@ -563,7 +583,6 @@ struct TORCH_API TensorIterator final : public TensorIteratorBase {
   static TensorIterator unary_op(TensorBase& out, const TensorBase& a);
   static TensorIterator unary_float_op(TensorBase& out, const TensorBase& a);
   static TensorIterator nullary_op(TensorBase& out);
-  static TensorIterator unary_force_boolean_op(const TensorBase& out, const TensorBase& a);
   static TensorIterator borrowing_nullary_op(const TensorBase& out);
   static TensorIterator borrowing_nullary_op(TensorBase&& out) = delete;
   static TensorIterator reduce_op(TensorBase& out, const TensorBase& a);
@@ -795,3 +814,5 @@ private:
 };
 
 }  // namespace at
+
+C10_CLANG_DIAGNOSTIC_POP()
