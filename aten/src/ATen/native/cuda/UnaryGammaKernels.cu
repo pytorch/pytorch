@@ -1,4 +1,5 @@
 #define TORCH_ASSERT_NO_OPERATORS
+#include <ATen/native/cuda/JitLoops.cuh>
 #include <limits>
 #include <ATen/native/UnaryOps.h>
 #include <ATen/native/cuda/Loops.cuh>
