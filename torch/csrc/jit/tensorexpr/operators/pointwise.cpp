@@ -43,6 +43,31 @@ Tensor computeOneOperand(
       });
 }
 
+Tensor computeOneOperandWithCondition(
+    const std::string& name,
+    const std::vector<ArgValue>& inputValues,
+    const std::vector<ExprHandle>& outputShape,
+    const c10::optional<ScalarType>& outputType,
+    const std::function<ExprHandle(const ExprHandle&, const ExprHandle&)>&
+        innerExpr,
+    const int checkParamTypes) {
+  return Compute(
+      name,
+      c10::fmap<DimArg>(outputShape),
+      [inputValues, outputType, innerExpr, checkParamTypes](
+          const std::vector<VarHandle>& axes) {
+        std::vector<ExprHandle> indices(axes.begin(), axes.end());
+        std::vector<ExprHandle> inputs = {
+            tensorOrConstant(inputValues[0], indices)};
+
+        promoteInputs(inputs, checkParamTypes);
+        // Last expr is the condition, which we don't promote
+        inputs.emplace_back(tensorOrConstant(inputValues[1], indices));
+        ExprHandle compute = innerExpr(inputs[0], inputs[1]);
+        return demoteOutput(compute, outputType);
+      });
+}
+
 Tensor computeTwoOperand(
     const std::string& name,
     const std::vector<ArgValue>& inputValues,
@@ -183,6 +208,26 @@ Tensor computeNoop(
       "copy", inputValues, outputShape, outputType, [](const ExprHandle& a) {
         return a;
       });
+}
+
+Tensor computeScalar(
+    const std::string& name,
+    const std::vector<ArgValue>& inputValues,
+    const std::vector<ExprHandle>& outputShape,
+    const c10::optional<ScalarType>& outputType,
+    const std::function<ExprHandle(const ExprHandle&, const ExprHandle&)>&
+        innerExpr) {
+  auto dt = Dtype(*outputType);
+  VarPtr let_var = alloc<Var>(name + "_var", dt);
+  std::vector<ExprHandle> inputs = {
+      scalarOrConstant(inputValues[0]), scalarOrConstant(inputValues[1])};
+  promoteInputs(inputs);
+  ExprHandle compute = innerExpr(inputs[0], inputs[1]);
+  StmtPtr let_stmt =
+      Let::make(VarHandle(let_var), demoteOutput(compute, outputType));
+  std::vector<ExprPtr> dims;
+  BufPtr buf = alloc<Buf>(let_var, dims, dt);
+  return Tensor(buf, let_stmt);
 }
 
 } // namespace tensorexpr

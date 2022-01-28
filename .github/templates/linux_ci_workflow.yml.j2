@@ -7,17 +7,26 @@ name: !{{ build_environment }}
 {%- endblock %}
 
 on:
+{%- if is_default %}
   pull_request:
-    types: [opened, synchronize, reopened, !{{ ciflow_config.trigger_action }}]
-
-{%- if is_scheduled %}
-  schedule:
-    - cron: !{{ is_scheduled }}
-{%- else %}
+{%- endif %}
   push:
+{%- for label in ciflow_config.labels | sort %}
+  {%- if loop.first %}
+    tags:
+  {%- endif %}
+  {%- if label != "ciflow/default" %}
+      - '!{{ label }}/*'
+  {%- endif %}
+{%- endfor %}
+{%- if not is_scheduled and not only_on_pr %}
     branches:
       - master
       - release/*
+{%- endif %}
+{%- if is_scheduled and not only_on_pr %}
+  schedule:
+    - cron: !{{ is_scheduled }}
 {%- endif %}
   workflow_dispatch:
 
@@ -50,18 +59,15 @@ jobs:
   build:
     runs-on: linux.2xlarge
     timeout-minutes: !{{ common.timeout_minutes }}
-    if: !{{ ciflow_config.root_job_condition }}
     env:
       JOB_BASE_NAME: !{{ build_environment }}-build
-      IS_PROBOT_TRIGGER_EVENT: ${{ (github.event.action == '!{{ ciflow_config.trigger_action }}') && (github.event.assigneed.login == '!{{ ciflow_config.trigger_actor }}') }}
-      LABEL_CONDITIONS: ${{ !{{ ciflow_config.label_conditions }} }}
     outputs:
       docker_image: ${{ steps.calculate-tag.outputs.docker_image }}
     steps:
       - name: print labels
         run: echo "${PR_LABELS}"
       !{{ common.setup_ec2_linux() }}
-      !{{ common.checkout_pytorch("recursive") }}
+      !{{ common.checkout() }}
       !{{ common.calculate_docker_image(false) }}
       - name: Pull Docker image
         run: |
@@ -201,7 +207,7 @@ jobs:
 {%- else %}
       !{{ common.setup_ec2_linux() }}
 {%- endif %}
-      !{{ common.checkout_pytorch("recursive") }}
+      !{{ common.checkout() }}
       - name: Pull Docker image
         run: |
           !{{ common.add_retry_to_env() }}
@@ -361,7 +367,7 @@ jobs:
       WITH_PUSH: ${{ github.event_name == 'schedule' }}
     steps:
       !{{ common.setup_ec2_linux() }}
-      !{{ common.checkout_pytorch("recursive") }}
+      !{{ common.checkout() }}
       - name: Pull Docker image
         run: |
           !{{ common.add_retry_to_env() }}

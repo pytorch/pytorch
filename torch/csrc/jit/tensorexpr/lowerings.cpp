@@ -3,6 +3,8 @@
 #include <torch/csrc/jit/tensorexpr/lowerings.h>
 #include <torch/csrc/jit/tensorexpr/operators/operators.h>
 
+#include <ATen/native/Activation.h>
+
 namespace torch {
 namespace jit {
 namespace tensorexpr {
@@ -79,6 +81,116 @@ int nnc_lowerings_lazy_registration() {
               return boolToInteger(lhs) * boolToInteger(rhs);
             });
       });
+
+#define DEFINE_BINARY_SCALAR_OP_LOWERING(op_name, op)                     \
+  RegisterNNCLoweringsFunction aten_##op_name##_scalar(                   \
+      {"aten::" #op_name ".int(int a, int b) -> (int)",                   \
+       "aten::" #op_name ".int_float(int a, float b) -> (float)",         \
+       "aten::" #op_name ".float_int(float a, int b) -> (float)",         \
+       "aten::" #op_name ".float(float a, float b) -> (float)"},          \
+      [](const std::vector<ArgValue>& inputs,                             \
+         const std::vector<ExprHandle>& outputShape,                      \
+         const c10::optional<ScalarType>& outputType,                     \
+         at::Device device) {                                             \
+        return computeScalar(                                             \
+            "aten_#op_name",                                              \
+            inputs,                                                       \
+            outputShape,                                                  \
+            outputType,                                                   \
+            [](const ExprHandle& a, const ExprHandle& b) { return op; }); \
+      });
+  DEFINE_BINARY_SCALAR_OP_LOWERING(mul, a * b)
+  DEFINE_BINARY_SCALAR_OP_LOWERING(add, a + b)
+  DEFINE_BINARY_SCALAR_OP_LOWERING(sub, a - b)
+#undef DEFINE_BINARY_SCALAR_OP_LOWERING
+  RegisterNNCLoweringsFunction aten_div_scalar(
+      {"aten::div(Scalar a, Scalar b) -> (float)",
+       "aten::div.int(int a, int b) -> (float)",
+       "aten::div.int_float(int a, float b) -> (float)",
+       "aten::div.float_int(float a, int b) -> (float)",
+       "aten::div.float(float a, float b) -> (float)"},
+      [](const std::vector<ArgValue>& inputs,
+         const std::vector<ExprHandle>& outputShape,
+         const c10::optional<ScalarType>& outputType,
+         at::Device device) {
+        return computeScalar(
+            "aten_div",
+            inputs,
+            outputShape,
+            outputType,
+            [](const ExprHandle& a, const ExprHandle& b) {
+              return promoteIntegerToDefaultType(a) /
+                  promoteIntegerToDefaultType(b);
+            });
+      });
+
+#define DEFINE_COMPARISON_SCALAR_OP_LOWERING(op_name, op)                 \
+  RegisterNNCLoweringsFunction aten_##op_name##_scalar(                   \
+      {"aten::" #op_name ".bool(bool a, bool b) -> (bool)",               \
+       "aten::" #op_name ".int(int a, int b) -> (bool)",                  \
+       "aten::" #op_name ".int_float(int a, float b) -> (bool)",          \
+       "aten::" #op_name ".float_int(float a, int b) -> (bool)",          \
+       "aten::" #op_name ".float(float a, float b) -> (bool)"},           \
+      [](const std::vector<ArgValue>& inputs,                             \
+         const std::vector<ExprHandle>& outputShape,                      \
+         const c10::optional<ScalarType>& outputType,                     \
+         at::Device device) {                                             \
+        return computeScalar(                                             \
+            "aten_#op_name",                                              \
+            inputs,                                                       \
+            outputShape,                                                  \
+            outputType,                                                   \
+            [](const ExprHandle& a, const ExprHandle& b) { return op; }); \
+      });
+  DEFINE_COMPARISON_SCALAR_OP_LOWERING(lt, cast<bool>(a < b))
+  DEFINE_COMPARISON_SCALAR_OP_LOWERING(le, cast<bool>(a <= b))
+  DEFINE_COMPARISON_SCALAR_OP_LOWERING(eq, cast<bool>(a == b))
+  DEFINE_COMPARISON_SCALAR_OP_LOWERING(ne, cast<bool>(a != b))
+  DEFINE_COMPARISON_SCALAR_OP_LOWERING(gt, cast<bool>(a > b))
+  DEFINE_COMPARISON_SCALAR_OP_LOWERING(ge, cast<bool>(a >= b))
+#undef DEFINE_COMPARISON_SCALAR_OP_LOWERING
+
+#define DEFINE_BITWISE_SCALAR_OP_LOWERING(op_name, op)                    \
+  RegisterNNCLoweringsFunction aten_##op_name##_int_scalar(               \
+      {"aten::" #op_name ".int(int a, int b) -> (int)"},                  \
+      [](const std::vector<ArgValue>& inputs,                             \
+         const std::vector<ExprHandle>& outputShape,                      \
+         const c10::optional<ScalarType>& outputType,                     \
+         at::Device device) {                                             \
+        return computeScalar(                                             \
+            "aten_#op_name",                                              \
+            inputs,                                                       \
+            outputShape,                                                  \
+            outputType,                                                   \
+            [](const ExprHandle& a, const ExprHandle& b) { return op; }); \
+      });
+  DEFINE_BITWISE_SCALAR_OP_LOWERING(
+      __and__, boolToInteger(a) & boolToInteger(b))
+  DEFINE_BITWISE_SCALAR_OP_LOWERING(__or__, boolToInteger(a) | boolToInteger(b))
+  DEFINE_BITWISE_SCALAR_OP_LOWERING(
+      __xor__, boolToInteger(a) ^ boolToInteger(b))
+  DEFINE_BITWISE_SCALAR_OP_LOWERING(__lshift__, a << b)
+  DEFINE_BITWISE_SCALAR_OP_LOWERING(__rshift__, a >> b)
+#undef DEFINE_BITWISE_SCALAR_OP_LOWERING
+
+#define DEFINE_LOGICAL_SCALAR_OP_LOWERING(op_name, op)                    \
+  RegisterNNCLoweringsFunction aten_##op_name##_bool_scalar(              \
+      {"aten::" #op_name ".bool(bool a, bool b) -> (bool)"},              \
+      [](const std::vector<ArgValue>& inputs,                             \
+         const std::vector<ExprHandle>& outputShape,                      \
+         const c10::optional<ScalarType>& outputType,                     \
+         at::Device device) {                                             \
+        return computeScalar(                                             \
+            "aten_#op_name",                                              \
+            inputs,                                                       \
+            outputShape,                                                  \
+            outputType,                                                   \
+            [](const ExprHandle& a, const ExprHandle& b) { return op; }); \
+      });
+  DEFINE_LOGICAL_SCALAR_OP_LOWERING(__and__, a && b)
+  DEFINE_LOGICAL_SCALAR_OP_LOWERING(__or__, a || b)
+  DEFINE_LOGICAL_SCALAR_OP_LOWERING(__xor__, a != b)
+#undef DEFINE_LOGICAL_SCALAR_OP_LOWERING
 
   RegisterNNCLoweringsFunction aten_div(
       {"aten::div.Scalar(Tensor self, Scalar other) -> (Tensor)",
@@ -531,21 +643,35 @@ int nnc_lowerings_lazy_registration() {
       });
 
   RegisterNNCLoweringsFunction aten_gelu(
-      {"aten::gelu(Tensor self) -> (Tensor)"},
+      {"aten::gelu(Tensor self, int approximate=0) -> (Tensor)"},
       [](const std::vector<ArgValue>& inputs,
          const std::vector<ExprHandle>& outputShape,
          const c10::optional<ScalarType>& outputType,
          at::Device device) {
-        return computeOneOperand(
+        return computeOneOperandWithCondition(
             "aten_gelu",
             inputs,
             outputShape,
             outputType,
-            [](const ExprHandle& a) {
-              auto m_sqrt1_2 = Cast::make(a.dtype(), M_SQRT1_2);
+            [](const ExprHandle& a, const ExprHandle& approximate) {
               auto one = Cast::make(a.dtype(), 1.);
               auto point_five = Cast::make(a.dtype(), .5);
-              return a * point_five * (one + erf(a * m_sqrt1_2));
+              auto tanh_gelu_flag =
+                  Cast::make(approximate.dtype(), at::Gelu::Tanh);
+
+              // approximate == 'none'
+              auto m_sqrt1_2 = Cast::make(a.dtype(), M_SQRT1_2);
+              auto gelu_result = a * point_five * (one + erf(a * m_sqrt1_2));
+
+              // approximate == 'tanh'
+              auto beta = Cast::make(a.dtype(), M_SQRT2 * M_2_SQRTPI * 0.5);
+              auto kappa = Cast::make(a.dtype(), 0.044715);
+              auto a_cube = a * a * a;
+              auto inner = beta * (a + kappa * a_cube);
+              auto tanh_gelu_result = point_five * a * (one + tanh(inner));
+
+              auto cs = CompareSelect::make(approximate, tanh_gelu_flag, kEQ);
+              return ifThenElse(cs, tanh_gelu_result, gelu_result);
             });
       });
 
