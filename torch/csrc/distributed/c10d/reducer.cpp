@@ -8,6 +8,7 @@
 #include <c10/core/DeviceGuard.h>
 #include <c10/core/StreamGuard.h>
 #include <c10/util/Exception.h>
+#include <c10/util/Logging.h>
 #include <c10/util/hash.h>
 #include <c10/util/irange.h>
 #include <c10d/comm.hpp>
@@ -365,7 +366,7 @@ void Reducer::mark_variable_ready_dense(size_t variable_index) {
             // themselves in order to compute higher order derivatives. However,
             // DDP will not sync up these gradients currently (see
             // https://github.com/pytorch/pytorch/issues/63812).
-            LOG(WARNING)
+            C10_LOG_EVERY_N(WARNING, 1000)
                 << "Using DistributedDataParallel with create_graph=True "
                 << " is not well-supported. The higher-order gradient will "
                 << " not be synchronized across ranks, and backpropagation "
