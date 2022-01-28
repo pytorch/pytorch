@@ -274,7 +274,7 @@ Tensor& normal_out(const Tensor& mean, double std, c10::optional<Generator> gen,
 
 Tensor& normal_out_meta(const Tensor& mean, double std, c10::optional<Generator> gen, Tensor& output) {
   CHECK_NORMAL_STD(std);
-  auto std_tensor = at::empty_like(output, MemoryFormat::Contiguous);
+  auto std_tensor = at::empty_like(output, c10::kMeta, MemoryFormat::Contiguous);
   auto shape = at::infer_size(mean.sizes(), std_tensor.sizes());
   at::native::resize_output(output, shape);
   return output;
@@ -287,7 +287,7 @@ Tensor& normal_out(double mean, const Tensor& std, c10::optional<Generator> gen,
 
 Tensor& normal_out_meta(double mean, const Tensor& std, c10::optional<Generator> gen, Tensor& output) {
   CHECK_NORMAL_TENSOR_STD(std);
-  auto mean_tensor = at::empty_like(output, MemoryFormat::Contiguous);
+  auto mean_tensor = at::empty_like(output, c10::kMeta, MemoryFormat::Contiguous);
   auto shape = at::infer_size(mean_tensor.sizes(), std.sizes());
   at::native::resize_output(output, shape);
   return output;
@@ -312,7 +312,7 @@ Tensor normal(const Tensor& mean, double std, c10::optional<Generator> gen) {
 
 Tensor normal_meta(const Tensor& mean, double std, c10::optional<Generator> gen) {
   CHECK_NORMAL_STD(std);
-  auto ret = at::empty_like(mean, MemoryFormat::Contiguous);
+  auto ret = at::empty_like(mean, c10::kMeta, MemoryFormat::Contiguous);
   return ret;
 }
 
@@ -323,7 +323,7 @@ Tensor normal(double mean, const Tensor& std, c10::optional<Generator> gen) {
 
 Tensor normal_meta(double mean, const Tensor& std, c10::optional<Generator> gen) {
   CHECK_NORMAL_TENSOR_STD(std);
-  auto ret = at::empty_like(std, MemoryFormat::Contiguous);
+  auto ret = at::empty_like(std, c10::kMeta, MemoryFormat::Contiguous);
   return ret;
 }
 
@@ -334,7 +334,7 @@ Tensor normal(const Tensor& mean, const Tensor& std, c10::optional<Generator> ge
 
 Tensor normal_meta(const Tensor& mean, const Tensor& std, c10::optional<Generator> gen) {
   CHECK_NORMAL_TENSOR_STD(std);
-  auto ret = at::empty_like(mean, MemoryFormat::Contiguous);
+  auto ret = at::empty_like(mean, c10::kMeta, MemoryFormat::Contiguous);
   auto shape = at::infer_size(mean.sizes(), std.sizes());
   at::native::resize_output(ret, shape);
   return ret;
