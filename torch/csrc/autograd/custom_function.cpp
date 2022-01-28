@@ -215,6 +215,13 @@ optional_variable_list _process_backward_mode_ad(
                          bool is_differentiable) {
     if (!is_differentiable) {
       if (!var.requires_grad()) {
+        if (is_input) {
+          // We need this in case forward AD runs, since forward AD assumes that the output
+          // processed by backward ad can never be an input as-is.
+          // If forward AD does not run, we do some extra work here, but that is OK
+          AutoGradMode grad_mode(false);
+          var = var.view_as(var);
+        }
         return;
       }
       // Return detached aliases of inputs, instead of changing their requires_grad
