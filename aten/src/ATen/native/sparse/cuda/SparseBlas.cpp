@@ -176,6 +176,48 @@ Tensor& addmm_out_sparse_csr_cuda(
   return result;
 }
 
+Tensor& baddbmm_out_sparse_csr_cuda(
+    const Tensor& self,
+    const Tensor& mat1,
+    const Tensor& mat2,
+    const Scalar& beta,
+    const Scalar& alpha,
+    Tensor& result) {
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(mat1.is_sparse_csr());
+
+  TORCH_CHECK(self.layout() == kStrided, "torch.baddbmm: Expected self to be strided, but got layout ", self.layout());
+  TORCH_CHECK(mat2.layout() == kStrided, "torch.baddbmm: Expect mat2 to be strided, but got ", mat2.layout());
+  TORCH_CHECK(result.layout() == kStrided, "torch.baddbmm: Expect result to be strided, but got ", result.layout());
+
+  if (&result != &self) {
+    at::native::resize_output(result, self.sizes());
+    result.copy_(self);
+  }
+
+  if (mat1._nnz() == 0) {
+    // According to docs, when beta==0 values in self should be ignored
+    // nans and infs should not propagate
+    if (beta.toComplexDouble() == 0.) {
+      result.zero_();
+    } else {
+      result.mul_(beta);
+    }
+    return result;
+  }
+
+  sparse::impl::cuda::addmm_out_sparse_csr(mat1, mat2, beta, alpha, result);
+  return result;
+}
+
+Tensor& bmm_out_sparse_csr_cuda(
+    const Tensor& mat1,
+    const Tensor& mat2,
+    Tensor& result) {
+  Scalar beta(0.0);
+  Scalar alpha(1.0);
+  return at::native::baddbmm_out_sparse_csr_cuda(result, mat1, mat2, beta, alpha, result);
+}
+
 Tensor& addmv_out_sparse_csr_cuda(
     const Tensor& self,
     const Tensor& mat,
