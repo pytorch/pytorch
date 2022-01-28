@@ -110,8 +110,8 @@ core_sources_common = [
     "torch/csrc/jit/frontend/edit_distance.cpp",
     "torch/csrc/jit/mobile/compatibility/runtime_compatibility.cpp",
     "torch/csrc/jit/mobile/type_parser.cpp",
-    "torch/csrc/jit/operator_upgraders/version_map.cpp",
     "torch/csrc/jit/operator_upgraders/upgraders_guard.cpp",
+    "torch/csrc/jit/operator_upgraders/version_map.cpp",
     "torch/csrc/jit/runtime/instruction.cpp",
     "torch/csrc/jit/runtime/jit_exception.cpp",
     "torch/csrc/jit/runtime/operator.cpp",
@@ -171,15 +171,7 @@ core_trainer_sources = [
     "torch/csrc/jit/serialization/type_name_uniquer.cpp",
 ]
 
-mobile_sources_used_full_jit = [
-    "torch/csrc/jit/mobile/debug_info.cpp",
-    "torch/csrc/jit/mobile/function.cpp",
-    "torch/csrc/jit/mobile/interpreter.cpp",
-    "torch/csrc/jit/mobile/module.cpp",
-    "torch/csrc/jit/mobile/observer.cpp",
-]
-
-core_sources_mobile_no_backend_interface_without_mobile_files = [
+core_sources_full_mobile_no_backend_interface = [
     "torch/csrc/jit/api/function_impl.cpp",
     "torch/csrc/jit/api/module.cpp",
     "torch/csrc/jit/api/object.cpp",
@@ -323,8 +315,6 @@ core_sources_mobile_no_backend_interface_without_mobile_files = [
     "torch/csrc/jit/runtime/symbolic_shape_registry_util.cpp",
     "torch/csrc/jit/runtime/jit_trace.cpp",
     "torch/csrc/jit/serialization/callstack_debug_info_serialization.cpp",
-    "torch/csrc/jit/serialization/export_bytecode.cpp",
-    "torch/csrc/jit/serialization/export_module.cpp",
     "torch/csrc/jit/serialization/import.cpp",
     "torch/csrc/jit/serialization/import_export_helpers.cpp",
     "torch/csrc/jit/serialization/import_source.cpp",
@@ -375,8 +365,6 @@ core_sources_mobile_no_backend_interface_without_mobile_files = [
     "torch/csrc/utils/variadic.cpp",
 ]
 
-core_sources_full_mobile_no_backend_interface = mobile_sources_used_full_jit + core_sources_mobile_no_backend_interface_without_mobile_files
-
 core_sources_full_mobile = core_sources_full_mobile_no_backend_interface + [
     "torch/csrc/jit/backends/backend_debug_info.cpp",
     "torch/csrc/jit/backends/backend_interface.cpp",
@@ -424,6 +412,7 @@ lazy_tensor_core_sources = [
     "torch/csrc/lazy/core/view_ops/permute.cpp",
     "torch/csrc/lazy/core/view_ops/resize.cpp",
     "torch/csrc/lazy/core/view_ops/select.cpp",
+    "torch/csrc/lazy/core/view_ops/squeeze.cpp",
     "torch/csrc/lazy/core/view_ops/select_view_update.cpp",
     "torch/csrc/lazy/core/view_ops/view.cpp",
     "torch/csrc/lazy/ts_backend/config.cpp",
@@ -590,8 +579,13 @@ libtorch_extra_sources = libtorch_core_jit_sources + [
     "torch/csrc/jit/mobile/compatibility/model_compatibility.cpp",
     # To be included for eager symbolication in lite interpreter
     # when it is built in libtorch
+    "torch/csrc/jit/mobile/debug_info.cpp",
+    "torch/csrc/jit/mobile/function.cpp",
     "torch/csrc/jit/mobile/import.cpp",
     "torch/csrc/jit/mobile/import_data.cpp",
+    "torch/csrc/jit/mobile/interpreter.cpp",
+    "torch/csrc/jit/mobile/module.cpp",
+    "torch/csrc/jit/mobile/observer.cpp",
     "torch/csrc/jit/mobile/parse_bytecode.cpp",
     "torch/csrc/jit/mobile/parse_operators.cpp",
     "torch/csrc/jit/mobile/train/export_data.cpp",
@@ -601,6 +595,8 @@ libtorch_extra_sources = libtorch_core_jit_sources + [
     "torch/csrc/jit/mobile/upgrader_mobile.cpp",
     "torch/csrc/jit/serialization/onnx.cpp",
     "torch/csrc/jit/serialization/export.cpp",
+    "torch/csrc/jit/serialization/export_bytecode.cpp",
+    "torch/csrc/jit/serialization/export_module.cpp",
     "torch/csrc/jit/serialization/import_legacy.cpp",
     "torch/csrc/utils/byte_order.cpp",
     "torch/csrc/utils/out_types.cpp",
