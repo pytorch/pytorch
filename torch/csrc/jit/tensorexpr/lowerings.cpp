@@ -3,8 +3,6 @@
 #include <torch/csrc/jit/tensorexpr/lowerings.h>
 #include <torch/csrc/jit/tensorexpr/operators/operators.h>
 
-#include <ATen/native/Activation.h>
-
 namespace torch {
 namespace jit {
 namespace tensorexpr {
@@ -643,35 +641,21 @@ int nnc_lowerings_lazy_registration() {
       });
 
   RegisterNNCLoweringsFunction aten_gelu(
-      {"aten::gelu(Tensor self, int approximate=0) -> (Tensor)"},
+      {"aten::gelu(Tensor self) -> (Tensor)"},
       [](const std::vector<ArgValue>& inputs,
          const std::vector<ExprHandle>& outputShape,
          const c10::optional<ScalarType>& outputType,
          at::Device device) {
-        return computeOneOperandWithCondition(
+        return computeOneOperand(
             "aten_gelu",
             inputs,
             outputShape,
             outputType,
-            [](const ExprHandle& a, const ExprHandle& approximate) {
+            [](const ExprHandle& a) {
+              auto m_sqrt1_2 = Cast::make(a.dtype(), M_SQRT1_2);
               auto one = Cast::make(a.dtype(), 1.);
               auto point_five = Cast::make(a.dtype(), .5);
-              auto tanh_gelu_flag =
-                  Cast::make(approximate.dtype(), at::Gelu::Tanh);
-
-              // approximate == 'none'
-              auto m_sqrt1_2 = Cast::make(a.dtype(), M_SQRT1_2);
-              auto gelu_result = a * point_five * (one + erf(a * m_sqrt1_2));
-
-              // approximate == 'tanh'
-              auto beta = Cast::make(a.dtype(), M_SQRT2 * M_2_SQRTPI * 0.5);
-              auto kappa = Cast::make(a.dtype(), 0.044715);
-              auto a_cube = a * a * a;
-              auto inner = beta * (a + kappa * a_cube);
-              auto tanh_gelu_result = point_five * a * (one + tanh(inner));
-
-              auto cs = CompareSelect::make(approximate, tanh_gelu_flag, kEQ);
-              return ifThenElse(cs, tanh_gelu_result, gelu_result);
+              return a * point_five * (one + erf(a * m_sqrt1_2));
             });
       });
 
