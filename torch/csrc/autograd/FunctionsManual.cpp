@@ -45,15 +45,13 @@ using at::areAnyTensorSubclassLike;
 
 const char* kCudnnDoubleBackwardMsg = "Double backwards is not supported for CuDNN RNNs due to limitations in the CuDNN API. To run double backwards, please disable the CuDNN backend temporarily while running the forward pass of your RNN. For example: \nwith torch.backends.cudnn.flags(enabled=False):\n    output = model(inputs)";
 
-namespace {
-  static inline at::Tensor apply_loss_reduction(const at::Tensor& unreduced, int64_t reduction) {
-    if (reduction == at::Reduction::Mean) {
-      return unreduced.mean();
-    } else if (reduction == at::Reduction::Sum) {
-      return unreduced.sum();
-    }
-    return unreduced;
+Tensor apply_loss_reduction(const Tensor& unreduced, int64_t reduction) {
+  if (reduction == at::Reduction::Mean) {
+    return unreduced.mean();
+  } else if (reduction == at::Reduction::Sum) {
+    return unreduced.sum();
   }
+  return unreduced;
 }
 
 bool isDefined(const c10::optional<Tensor>& t) {
@@ -1394,14 +1392,26 @@ Tensor kl_div_double_backward_grad_output(const Tensor & grad, const Tensor & in
 Tensor kl_div_target_backward(Tensor grad_output, Tensor self, Tensor target, int64_t reduction, bool log_target) {
   Tensor grad_target;
   if (!log_target) {
-    grad_target = grad_output.mul(target.log().add_(1).sub_(self)).masked_fill_(target == 0, 0.);
+    if (!areAnyTensorSubclassLike({self, target}) && !grad_output._is_zerotensor()) {
+      grad_target = grad_output.mul(target.log().add_(1).sub_(self)).masked_fill_(target == 0, 0.);
+    } else {
+      grad_target = grad_output.mul(target.log().add(1).sub(self)).masked_fill(target == 0, 0.);
+    }
   }
   else {
-    grad_target = grad_output.mul(target.add(1).sub_(self).mul_(target.exp()));
+    if (!areAnyTensorSubclassLike({self, target})) {
+      grad_target = grad_output.mul(target.add(1).sub_(self).mul_(target.exp()));
+    } else {
+      grad_target = grad_output.mul(target.add(1).sub(self).mul_(target.exp()));
+    }
   }
 
   if (reduction == at::Reduction::Mean) {
-    grad_target.div_(target.numel());
+    if (!grad_target._is_zerotensor()) {
+      grad_target.div_(target.numel());
+    } else {
+      grad_target.div(target.numel());
+    }
   }
 
   return grad_target;

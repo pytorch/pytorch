@@ -739,14 +739,6 @@ void LayerNormBackwardKernelImplInternal(
   T* dX_data = dX->defined() ? dX->template data_ptr<T>() : nullptr;
   cudaStream_t cuda_stream = at::cuda::getCurrentCUDAStream();
   if (dX_data != nullptr) {
-    const auto kAccType =
-        (X.scalar_type() == kHalf || X.scalar_type() == kBFloat16)
-        ? kFloat
-        : X.scalar_type();
-    Tensor ds = at::empty({M}, X.options().dtype(kAccType));
-    Tensor db = at::empty({M}, X.options().dtype(kAccType));
-    Tensor scale = at::empty({M}, X.options().dtype(kAccType));
-    Tensor bias = at::empty({M}, X.options().dtype(kAccType));
     const int num_threads = 128;
     const dim3 blocks(M);
     int nshared = (num_threads/C10_WARP_SIZE) * sizeof(T_ACC);
