@@ -48,10 +48,6 @@ jobs:
           retry docker pull "${DOCKER_IMAGE}"
       !{{ common.parse_ref() }}
       !{{ common.teardown_ec2_linux() }}
-      - name: Hold runner for 2 hours or until ssh sessions have drained
-        # Always hold for active ssh sessions
-        if: always()
-        run: .github/scripts/wait_for_ssh_to_drain.sh
       - name: Clean up docker images
         if: always()
         run: |
