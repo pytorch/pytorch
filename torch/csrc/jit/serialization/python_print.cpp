@@ -7,7 +7,6 @@
 #include <c10/util/StringUtil.h>
 #include <c10/util/irange.h>
 #include <caffe2/serialize/versions.h>
-#include <cstdint>
 #include <torch/csrc/jit/api/function_impl.h>
 #include <torch/csrc/jit/api/module.h>
 #include <torch/csrc/jit/frontend/error_report.h>
