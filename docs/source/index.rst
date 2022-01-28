@@ -74,6 +74,7 @@ Features described in this documentation are classified by release status:
    torch.overrides
    torch.package <package>
    profiler
+   masked
    nn.init
    onnx
    optim
