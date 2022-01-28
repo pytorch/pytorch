@@ -462,6 +462,14 @@ void validateParallelizationOfTensor(TensorView* tv) {
       continue;
     }
 
+    // It doesn't matter if this axis is a non-concretized broadcast
+    // TODO: merging broadcast and non-broadcast
+    if (axis->isBroadcast() &&
+        !GpuLower::current()->concretizedBroadcastDomains().isConcretized(
+            axis)) {
+      continue;
+    }
+
     TORCH_INTERNAL_ASSERT(
         !pt_map.get(ptype),
         "Multiple use of ",
@@ -488,7 +496,7 @@ void validateParallelizationOfTensor(TensorView* tv) {
       ". The tensor is parallelized with ",
       predicated_parallel_types.toString(),
       ", but it's invalid to use the types as the tensor is also predicated with them.",
-      ", thread prd: ",
+      ", thread pred: ",
       thread_pred.limited_types.toString());
 }
 

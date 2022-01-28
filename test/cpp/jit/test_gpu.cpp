@@ -20268,6 +20268,179 @@ TEST_F(NVFuserTest, FusionIntermediateTensorVectorize_CUDA) {
   }
 }
 
+TEST_F(NVFuserTest, FusionBroadcastConcretization1_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeConcreteTensor({10, 1});
+  fusion.addInput(tv0);
+  auto tv1 = makeConcreteTensor({10, 20});
+  fusion.addInput(tv1);
+  auto tv2 = makeConcreteTensor({10, 10});
+  fusion.addInput(tv2);
+
+  // Not concretized
+  auto tv3 = sum(tv2, {1});
+  auto tv4 = broadcast(tv3, {false, true});
+  auto tv5 = add(tv0, tv4);
+  fusion.addOutput(tv5);
+
+  // Concretized
+  auto tv6 = sum(tv2, {1});
+  auto tv7 = broadcast(tv6, {false, true});
+  auto tv8 = add(tv1, tv7);
+  fusion.addOutput(tv8);
+
+  for (auto tv : {tv3, tv4, tv5, tv6, tv7, tv8}) {
+    tv->axis(1)->parallelize(ParallelType::TIDx);
+  }
+
+  GpuLower gpulw(&fusion);
+  TORCH_CHECK(!gpulw.concretizedBroadcastDomains().isConcretized(
+      loweredTv(tv4, gpulw)->axis(1)));
+  TORCH_CHECK(gpulw.concretizedBroadcastDomains().isConcretized(
+      loweredTv(tv7, gpulw)->axis(1)));
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::manual_seed(0);
+  auto t0 = at::randn({10, 1}, options);
+  auto t1 = at::randn({10, 20}, options);
+  auto t2 = at::randn({10, 10}, options);
+  std::vector<IValue> aten_inputs = {t0, t1, t2};
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion, aten_inputs);
+  auto outputs = fe.runFusion(aten_inputs);
+
+  auto t5 = t0 + t2.sum({1}).unsqueeze(-1);
+  auto t8 = t1 + t2.sum({1}).unsqueeze(-1);
+
+  testValidate(&fusion, outputs, aten_inputs, {t5, t8}, __LINE__, __FILE__);
+}
+
+TEST_F(NVFuserTest, FusionBroadcastConcretization2_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeSymbolicTensor(2);
+  fusion.addInput(tv0);
+
+  auto tv1 = sum(tv0, {0, 1});
+  auto tv2 = broadcast(tv1, {true});
+  auto tv3 = broadcast(tv2, {false, true});
+  fusion.addOutput(tv3);
+
+  // tv1 is thread-predicated with TIDx and TIDy
+  tv1->axis(0)->parallelize(ParallelType::TIDx);
+  tv1->axis(1)->parallelize(ParallelType::TIDy);
+  // tv2 broadcasts along TIDx
+  tv2->axis(0)->parallelize(ParallelType::TIDx);
+  // tv3 broadcasts along TIDy
+  tv3->axis(0)->parallelize(ParallelType::TIDx);
+  tv3->axis(1)->parallelize(ParallelType::TIDy);
+
+  // Both tv2 and tv3 broadcast along predicated TID dimensions, but
+  // since the broadcast domains are not concretized, there should be
+  // no actual parallel broadcast
+
+  GpuLower gpulw(&fusion);
+  TORCH_CHECK(
+      !gpulw.kernel()->summary().has_block_broadcasts &&
+          !gpulw.kernel()->summary().has_grid_broadcasts,
+      "There must be no parallel broadcast in this fusion");
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::manual_seed(0);
+  auto t0 = at::randn({10, 11}, options);
+  std::vector<IValue> aten_inputs = {t0};
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion, aten_inputs);
+  auto outputs = fe.runFusion(aten_inputs);
+
+  auto t3 = t0.sum().unsqueeze(-1).unsqueeze(-1);
+
+  testValidate(&fusion, outputs, aten_inputs, {t3}, __LINE__, __FILE__);
+}
+
+TEST_F(NVFuserTest, FusionBroadcastConcretization3_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  std::vector<int64_t> input_shape({10, 4, 8});
+  std::vector<int64_t> output_shape({8, 4, 1});
+
+  auto tv0 = makeConcreteTensor(input_shape);
+  fusion.addInput(tv0);
+
+  auto tv2 = sum(tv0, {0});
+  auto tv3 = set(tv2);
+  auto tv4 =
+      view(tv3, {input_shape.begin() + 1, input_shape.end()}, output_shape);
+  auto tv5 = add(tv4, IrBuilder::create<Double>(1));
+  fusion.addOutput(tv5);
+
+  tv2->axis(0)->parallelize(ParallelType::TIDx);
+  tv4->axis(-1)->parallelize(ParallelType::TIDx);
+  tv5->axis(-1)->parallelize(ParallelType::TIDx);
+
+  // The view op adds a broadcast domain in tv4, which is
+  // parallelized. Howver, it is never materialized, so there should
+  // be no parallel broadcast.
+
+  GpuLower gpulw(&fusion);
+  TORCH_CHECK(
+      !gpulw.kernel()->summary().has_block_broadcasts &&
+          !gpulw.kernel()->summary().has_grid_broadcasts,
+      "There must be no parallel broadcast in this fusion");
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::manual_seed(0);
+  auto t0 = at::randn(input_shape, options);
+  std::vector<IValue> aten_inputs = {t0};
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion, aten_inputs);
+  auto outputs = fe.runFusion(aten_inputs);
+
+  auto t5 = at::native::view(t0.sum(0), output_shape) + 1;
+
+  testValidate(&fusion, outputs, aten_inputs, {t5}, __LINE__, __FILE__);
+}
+
+// Merging non-broadcast and broadcast domains
+// TODO: Fix use case see issue https://github.com/csarofeen/pytorch/issues/1418
+// validateParallelize does not pass. Even if it's skipped,
+// generated code is invalid as blockBroadcast is not used.
+#if 0
+TEST_F(NVFuserTest, FusionBroadcastConcretization4_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeSymbolicTensor(2);
+  fusion.addInput(tv0);
+
+  auto tv1 = sum(tv0, {1});
+  auto tv2 = broadcast(tv1, {false, true});
+  auto tv3 = add(tv2, tv0);
+  fusion.addOutput(tv3);
+
+  tv1->axis(1)->parallelize(ParallelType::TIDx);
+
+  tv2->merge(0, 1);
+  tv2->axis(0)->parallelize(ParallelType::TIDx);
+  // TODO: When set to shared memory, this kernel should be correct, but fails
+  // validation and when skipped produces incorrect code
+  tv2->setMemoryType(MemoryType::Shared);
+
+  tv3->merge(0, 1);
+  tv3->axis(0)->parallelize(ParallelType::TIDx);
+
+  fusion.printMath();
+  fusion.printKernel();
+}
+#endif
+
 } // namespace jit
 } // namespace torch
 #endif // #if defined(USE_CUDA)

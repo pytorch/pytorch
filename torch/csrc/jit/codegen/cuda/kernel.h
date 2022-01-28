@@ -5,7 +5,6 @@
 #include <torch/csrc/jit/codegen/cuda/fusion.h>
 #include <torch/csrc/jit/codegen/cuda/ir_base_nodes.h>
 #include <torch/csrc/jit/codegen/cuda/ir_builder.h>
-#include <torch/csrc/jit/codegen/cuda/lower_thread_predicate.h>
 #include <torch/csrc/jit/codegen/cuda/lower_warp_reduce.h>
 #include <torch/csrc/jit/codegen/cuda/utils.h>
 
@@ -51,6 +50,9 @@ struct KernelSummary {
   //! Do we have any block broadcasts?
   bool has_block_broadcasts = false;
 
+  //! Do we have any grid broadcasts?
+  bool has_grid_broadcasts = false;
+
   //! Do we have any welford op?
   bool has_welford = false;
 
@@ -72,6 +74,10 @@ struct KernelSummary {
 
   //! ceilDiv extents that must be divisible
   std::vector<std::pair<const Val*, const Val*>> splits_to_validate;
+
+  //! Effective ParallelTypes of broadcast ops
+  std::unordered_map<const BroadcastOp*, ParallelTypeBitmap>
+      broadcast_parallel_types;
 };
 
 //! Container for a lowered Kernel IR
@@ -108,10 +114,6 @@ class TORCH_CUDA_CU_API Kernel final : public Fusion {
     return summary_;
   }
 
-  const ThreadPredicateMap& predicateMap() const {
-    return *predicate_map_;
-  }
-
   //! Checks if parallel type is padded
   bool isParallelTypePadded(ParallelType ptype) const {
     return ptype == ParallelType::TIDx &&
@@ -145,8 +147,6 @@ class TORCH_CUDA_CU_API Kernel final : public Fusion {
   // Summary of interesting kernel data
   KernelSummary summary_;
 
-  // Predicate map
-  std::unique_ptr<ThreadPredicateMap> predicate_map_;
   WarpPaddedParallelInfo warp_padded_parallel_info_;
 };
 

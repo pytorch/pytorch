@@ -674,39 +674,37 @@ class CudaKernelGenerator : private OptOutConstDispatch {
     TORCH_INTERNAL_ASSERT(stmt->out()->isA<kir::TensorIndex>());
     const auto tensor_index = stmt->out()->as<kir::TensorIndex>();
 
-    const ParallelTypeBitmap domains =
-        kernel_->predicateMap().getParallelBroadcastDomains(
-            tensor_index->view());
+    const ParallelTypeBitmap parallel_types =
+        kernel_->summary().broadcast_parallel_types.at(stmt);
 
-    const bool thread_x = domains.get(ParallelType::TIDx);
-    const bool thread_y = domains.get(ParallelType::TIDy);
-    const bool thread_z = domains.get(ParallelType::TIDz);
-    const bool block_x = domains.get(ParallelType::BIDx);
-    const bool block_y = domains.get(ParallelType::BIDy);
-    const bool block_z = domains.get(ParallelType::BIDz);
-
-    const bool grid_broadcast_needed = block_x || block_y || block_z;
-    const bool block_broadcast_needed = thread_x || thread_y || thread_z;
-
-    TORCH_INTERNAL_ASSERT(
-        !grid_broadcast_needed,
-        "Parallel broadcast across blocks not supported");
-
-    if (block_broadcast_needed) {
-      const auto data_type = stmt->out()->dtype();
-      indent() << "broadcast::blockBroadcast<" << (thread_x ? "true" : "false")
-               << ", " << (thread_y ? "true" : "false") << ", "
-               << (thread_z ? "true" : "false") << ">(\n";
-      indent() << kTab << gen(stmt->out()) << ",\n";
-      indent() << kTab << gen(stmt->in()) << ",\n";
-      indent() << kTab << "static_cast<" << data_type << "*>(shared_mem),\n";
-      TORCH_INTERNAL_ASSERT(
-          stmt->predicate() != nullptr && stmt->predicate()->hasValue());
-      indent() << kTab << genInline(stmt->predicate()) << ");\n";
-    } else {
+    if (parallel_types.none()) {
+      // Not parallelized
       indent() << gen(stmt->out()) << "\n";
       indent() << kTab << " = " << gen(stmt->in()) << ";\n";
+      return;
     }
+
+    TORCH_INTERNAL_ASSERT(
+        !parallel_types.hasBID(),
+        "Parallel broadcast across blocks should have been translated to a GridBroadcast IR node");
+
+    std::stringstream flags_str;
+    for (const ParallelType pt : kParallelTypeTIDs) {
+      const bool parallel_bcast = parallel_types.get(pt);
+      if (pt != kParallelTypeTIDs[0]) {
+        flags_str << ", ";
+      }
+      flags_str << (parallel_bcast ? "true" : "false");
+    }
+
+    const auto data_type = stmt->out()->dtype();
+    indent() << "broadcast::blockBroadcast<" << flags_str.str() << ">(\n";
+    indent() << kTab << gen(stmt->out()) << ",\n";
+    indent() << kTab << gen(stmt->in()) << ",\n";
+    indent() << kTab << "static_cast<" << data_type << "*>(shared_mem),\n";
+    TORCH_INTERNAL_ASSERT(
+        stmt->predicate() != nullptr && stmt->predicate()->hasValue());
+    indent() << kTab << genInline(stmt->predicate()) << ");\n";
   }
 
   void genWarpReductionOp(
@@ -1004,9 +1002,15 @@ class CudaKernelGenerator : private OptOutConstDispatch {
     const auto bop = grop->broadcast_op();
     TORCH_INTERNAL_ASSERT(bop->out()->isA<kir::TensorIndex>());
 
+    const ParallelTypeBitmap parallel_types =
+        kernel_->summary().broadcast_parallel_types.at(bop);
+
+    TORCH_INTERNAL_ASSERT(
+        parallel_types.hasBID(),
+        "GridBroadcast needs to be used with a broadcast op that is parallelized with the BID parallel types");
+
     const auto out = bop->out()->as<kir::TensorIndex>();
     const auto domain = out->view()->domain();
-    TORCH_INTERNAL_ASSERT(domain->hasGridBroadcast());
 
     const auto data_type = bop->out()->dtype();
 
@@ -1017,11 +1021,9 @@ class CudaKernelGenerator : private OptOutConstDispatch {
         grop->broadcast_buffer()->buffer()->as<TensorView>();
     const auto sync_buffer = grop->sync_buffer()->buffer()->as<TensorView>();
 
-    const auto par_domains = ir_utils::getParallelDomains(out);
     std::stringstream flags_str;
     for (const ParallelType pt : kParallelTypeThreads) {
-      const bool parallel_bcast = par_domains.find(pt) != par_domains.end() &&
-          par_domains.at(pt)->isBroadcast();
+      const bool parallel_bcast = parallel_types.get(pt);
       if (pt != kParallelTypeThreads[0]) {
         flags_str << ", ";
       }
@@ -1029,7 +1031,7 @@ class CudaKernelGenerator : private OptOutConstDispatch {
     }
 
     // Since block-level broadcast has not necessarily been performed before
-    // this function call, so grid broadcast may  be broadcasting across both
+    // this function call, so grid broadcast may be broadcasting across both
     // the grid and the block level.
     indent() << "grid_broadcast::broadcast<" << flags_str.str() << ">(\n";
     indent() << kTab << gen(bop->out()) << ",\n";

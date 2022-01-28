@@ -8,6 +8,8 @@ namespace jit {
 namespace fuser {
 namespace cuda {
 
+namespace {
+
 // Replace trivial reductions with unary ops.
 class TrivialReductionReplacement : private OptOutMutator {
  public:
@@ -97,6 +99,8 @@ class UnaryOpInserter : private kir::ExprMutator {
         vop, IrBuilder::create<UnaryOp>(container, UnaryOpType::Set, out, in));
   }
 };
+
+} // namespace
 
 void trivialReductionReplacement(
     Fusion* fusion,

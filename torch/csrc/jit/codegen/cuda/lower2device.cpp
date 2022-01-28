@@ -19,7 +19,6 @@
 #include <torch/csrc/jit/codegen/cuda/lower_predicate.h>
 #include <torch/csrc/jit/codegen/cuda/lower_replace_size.h>
 #include <torch/csrc/jit/codegen/cuda/lower_shift.h>
-#include <torch/csrc/jit/codegen/cuda/lower_thread_predicate.h>
 #include <torch/csrc/jit/codegen/cuda/lower_trivial_reductions.h>
 #include <torch/csrc/jit/codegen/cuda/lower_unroll.h>
 #include <torch/csrc/jit/codegen/cuda/lower_utils.h>
@@ -240,6 +239,8 @@ void GpuLower::lower(Fusion* fusion) {
     std::cout << parallel_dimension_map_.toString() << std::endl;
   }
 
+  concretized_broadcast_domains_.build(fusion_);
+
   // Compute thread predicates. Depends on parallel_dimension_map_
   thread_pred_map_.build(fusion_);
 
@@ -328,6 +329,8 @@ kir::Kernel* GpuLower::kernel() const {
 }
 
 GpuLower* GpuLower::current() {
+  TORCH_INTERNAL_ASSERT(
+      active_gpu_lower != nullptr, "No active GpuLower available");
   return active_gpu_lower;
 }
 
