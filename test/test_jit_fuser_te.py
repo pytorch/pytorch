@@ -1362,6 +1362,63 @@ class TestTEFuser(JitTestCase):
                     " ".join(["Failed:", str(dtype), op.__name__, device])
                 )
 
+    def test_binary_scalar_ops(self):
+        def apply(fn):
+            return lambda x, y: fn(x, y)
+        ir_template = """
+        graph(%x : {dtype_x}, %y : {dtype_y}):
+          %z = {op}(%x, %y)
+          return (%z)"""
+
+        binary_ops = [
+            "aten::mul",
+            "aten::add",
+            "aten::sub",
+            "aten::div",
+            "aten::lt",
+            "aten::le",
+            "aten::eq",
+            "aten::ne",
+            "aten::gt",
+            "aten::ge",
+            "aten::__or__",
+            "aten::__xor__",
+            "aten::__and__",
+            "aten::__lshift__",
+            "aten::__rshift__",
+        ]
+        dtypes = ['int', 'float', 'bool']
+        values = {'int' : [10, 3], 'float' : [12.34, 2.78], 'bool' : [True, False]}
+        devices = self.devices
+        for dtype_x, dtype_y, op, device in product(dtypes, dtypes, binary_ops, devices):
+            code = ir_template.format(**locals())
+
+            # Interpret the graph
+            try:
+                graph = torch._C.parse_ir(code)
+                for x, y in product(values[dtype_x], values[dtype_y]):
+                    ref = torch._C._jit_interpret_graph(graph, (x, y))
+            except Exception:
+                # If we can't interpret this IR, don't bother checking NNC.
+                continue
+
+            print(graph)
+
+            # Compile the graph
+            try:
+                k = torch._C._te.TensorExprKernel(graph)
+            except Exception as e:
+                raise RuntimeError(" ".join(["Compilation failed:", device, str(code)]))
+
+            # Run the graph
+            for x, y in product(values[dtype_x], values[dtype_y]):
+                ref = torch._C._jit_interpret_graph(graph, (x, y))
+                try:
+                    res = k.run((x, y))
+                    self.assertEqual(ref, res)
+                except Exception as e:
+                    raise RuntimeError(" ".join(["Failed at runtime:", device, str(x), str(y), str(code)]))
+
     def test_matmul(self):
         def fn(x, y):
             return torch.matmul(x, y)
@@ -2206,6 +2263,7 @@ def get_name(op):
 class TestNNCOpInfo(JitCommonTestCase):
     def setUp(self):
         self.tensorexpr_options = TensorExprTestOptions()
+        torch._C._jit_set_te_must_use_llvm_cpu(True)
 
     def tearDown(self):
         self.tensorexpr_options.restore()
@@ -2297,6 +2355,12 @@ def f({', '.join(param_names)}):
             val = trace(*clone_inputs((sample.input, *sample.args)), **sample.kwargs)
 
             self.assertEqual(ref, val)
+
+        # https://github.com/pytorch/pytorch/issues/35600
+        # each torch.jit.trace adds state to the _python_cu compilation unit
+        # since this test traces a lot of functions, out-of-memory can occur
+        # if the CU is not cleared.
+        torch.jit._state._python_cu.drop_all_functions()
 
 only_for = ("cpu", "cuda")
 instantiate_device_type_tests(TestNNCOpInfo, globals(), only_for=only_for)
