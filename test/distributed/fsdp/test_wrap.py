@@ -217,14 +217,27 @@ class TestAutoWrap(TestCase):
         self.assertEqual(layer.world_size, self.process_group.size())
 
     def test_wrap_disabled_outside_context(self):
-        layer = wrap(nn.Linear(5, 5))
-        self.assertTrue(isinstance(layer, nn.Linear))
+        pg = self.process_group
+
+        class MyModel(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.lin = wrap(nn.Linear(5, 5), process_group=pg)
+
+        model = MyModel()
+        with enable_wrap(wrapper_cls=FSDP, process_group=pg):
+            model = wrap(model)
+
+        self.assertTrue(isinstance(model, FSDP))
+        self.assertFalse(isinstance(model.lin, FSDP))
+        self.assertTrue(isinstance(model.lin, nn.Linear))
 
     def test_wrap_override_defaults(self):
         new_process_group = DummyProcessGroup(rank=0, size=2)
         with enable_wrap(wrapper_cls=FSDP, process_group=self.process_group):
             layer = wrap(nn.Linear(5, 5), process_group=new_process_group)
         self.assertTrue(isinstance(layer, FSDP))
+        self.assertTrue(layer.process_group is new_process_group)
         self.assertEqual(layer.rank, 0)
         self.assertEqual(layer.world_size, 2)
 
