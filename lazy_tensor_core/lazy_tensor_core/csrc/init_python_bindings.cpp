@@ -5,8 +5,10 @@
 #include <torch/csrc/lazy/core/helpers.h>
 #include <torch/csrc/lazy/core/ir_dump_util.h>
 #include <torch/csrc/lazy/core/ir_util.h>
+#include <torch/csrc/lazy/core/lazy_graph_executor.h>
 #include <torch/csrc/lazy/core/metrics.h>
 #include <torch/csrc/lazy/core/multi_wait.h>
+#include <torch/csrc/lazy/core/tensor_impl.h>
 #include <torch/csrc/lazy/core/tensor_util.h>
 #include <torch/csrc/lazy/core/thread_pool.h>
 #include <torch/csrc/lazy/core/util.h>
@@ -17,11 +19,9 @@
 #include <thread>
 #include <vector>
 
-#include <torch/csrc/lazy/core/lazy_graph_executor.h>
 #include "lazy_tensor_core/csrc/python_util.h"
 #include "lazy_tensor_core/csrc/tensor_aten_ops.h"
 #include "lazy_tensor_core/csrc/tensor_distributed.h"
-#include <torch/csrc/lazy/core/tensor_impl.h>
 #include "lazy_tensor_core/csrc/ts_backend/backend_impl.h"
 #include "lazy_tensor_core/csrc/version.h"
 #include "lazy_tensors/computation_client/metrics_analysis.h"
@@ -30,6 +30,7 @@
 #include "torch/csrc/autograd/utils/wrap_outputs.h"
 #include "torch/csrc/autograd/variable.h"
 #include "torch/csrc/jit/python/pybind.h"
+#include "torch/csrc/lazy/core/config.h"
 #include "torch/csrc/utils/cuda_lazy_init.h"
 
 namespace torch_lazy_tensors {
@@ -682,6 +683,9 @@ void InitLtcModuleBindings(py::module m) {
   m.def("_ltc_init_ts_backend", []() { compiler::InitTorchScriptBackend(); });
   m.def("_ltc_set_noop_execution_mode", [](bool enable_noop) {
     torch::lazy::LazyGraphExecutor::Get()->SetNoOpExecutionMode(enable_noop);
+  });
+  m.def("_ltc_enable_thread_pool", []() {
+    FLAGS_torch_lazy_use_thread_pool = true;
   });
 }  // namespace
 
