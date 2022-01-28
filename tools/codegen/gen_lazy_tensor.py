@@ -3,7 +3,8 @@ import argparse
 import os
 import yaml
 from collections import namedtuple
-from typing import List, Dict, Union, Sequence, Optional, Callable, Iterable, Iterator, Tuple
+from typing import List, Dict, Union, Sequence, Optional, Callable, Iterable, Iterator, Tuple, Type
+from tools.codegen.dest.lazy_ir import LazyIR, TSLazyIR
 from tools.codegen.gen import get_grouped_native_functions, parse_native_yaml
 from tools.codegen.model import (FunctionSchema,
                                  NativeFunction, NativeFunctionsGroup, OperatorName)
@@ -68,12 +69,12 @@ def main() -> None:
 
     run(options.source_yaml, options.output_dir, options.dry_run, options.impl_path,
         options.gen_ts_lowerings, options.node_base, options.node_base_hdr,
-        options.tensor_class, options.tensor_class_hdr)
+        options.tensor_class, options.tensor_class_hdr, TSLazyIR)
 
 
 def run(source_yaml: str, output_dir: str, dry_run: bool, impl_path: Optional[str],
         gen_ts_lowerings: bool, node_base: str, node_base_hdr: Optional[str],
-        tensor_class: str, tensor_class_hdr: str) -> None:
+        tensor_class: str, tensor_class_hdr: str, lazy_ir_cls: Type[LazyIR]) -> None:
 
     # Assumes that this file lives at PYTORCH_ROOT/tools/codegen/gen_backend_stubs.py
     pytorch_root = pathlib.Path(__file__).parent.parent.parent.absolute()
@@ -220,7 +221,7 @@ def run(source_yaml: str, output_dir: str, dry_run: bool, impl_path: Optional[st
         'DispatchKey': backend_key,
         'dispatch_namespace': backend_key.lower(),
         'ir_declarations': list(concat_map_codegen(
-            dest.LazyIR(backend_indices[backend_key], node_base),
+            lazy_ir_cls(backend_indices[backend_key], node_base),
             grouped_native_functions
         )),
     })
