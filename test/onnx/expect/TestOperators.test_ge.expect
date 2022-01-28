@@ -15,7 +15,7 @@ graph {
     name: "Not_1"
     op_type: "Not"
   }
-  name: "torch-jit-export"
+  name: "torch_jit"
   input {
     name: "onnx::Less_0"
     type {

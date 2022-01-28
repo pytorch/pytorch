@@ -87,7 +87,7 @@ graph {
     name: "Expand_7"
     op_type: "Expand"
   }
-  name: "torch-jit-export"
+  name: "torch_jit"
   initializer {
     dims: 1
     data_type: 7
