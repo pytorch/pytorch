@@ -59,7 +59,7 @@ Tensor quantized_pixel_shuffle_impl(
   // parallel on both n and h dimension, use two steps to do the transformation
   at::parallel_for(0, nbatch * height, 0, [&](int64_t begin, int64_t end) {
     // thread local temp buffer
-    std::unique_ptr<c10::quint8 []> buffer(new c10::quint8[channels]);
+    std::unique_ptr<uint8_t []> buffer(new uint8_t[channels]);
 
     for (const auto i : c10::irange(begin, end)) {
       int64_t n = i / height;
@@ -73,9 +73,9 @@ Tensor quantized_pixel_shuffle_impl(
         utils::transpose<uint8_t>(
             out_channels,
             S * S,
-            reinterpret_cast<uint8_t*>(qx_ptr),
+            (uint8_t*)qx_ptr,
             S * S, /* ld_src */
-            reinterpret_cast<uint8_t*>(buffer.get()),
+            (uint8_t*)buffer.get(),
             out_channels /* ld_dst */);
 
         // step 2: copy from temp buffer to output lane
@@ -86,7 +86,7 @@ Tensor quantized_pixel_shuffle_impl(
           std::memcpy(
               qy_data + i * width * channels + s1 * width * S * out_channels + w * S * out_channels,
               buffer.get() + s1 * S * out_channels,
-              S * out_channels * sizeof(typename c10::quint8::underlying));
+              S * out_channels * sizeof(uint8_t));
         }
       }
     }
@@ -97,7 +97,7 @@ Tensor quantized_pixel_shuffle_impl(
 
 } // namespace
 
-Tensor quantized_pixel_shuffle_cpu(
+Tensor pixel_shuffle_quantized_cpu(
     const Tensor& self,
     int64_t upscale_factor) {
   return quantized_pixel_shuffle_impl(self, upscale_factor);
