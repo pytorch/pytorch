@@ -108,7 +108,7 @@ def sharded_linear(types, args, kwargs, pg):
     if len(weight.local_shards()) != 1:
         raise ValueError("Only one local shard supported!")
 
-    local_shard = weight.local_shard()
+    local_shard = weight.local_tensor()
     local_shard_t = local_shard.t().contiguous()
     sharding_dim = weight._sharding_spec.dim
     world_size = dist.get_world_size(pg)
