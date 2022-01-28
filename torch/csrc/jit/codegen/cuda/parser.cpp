@@ -12,8 +12,6 @@
 #include <torch/csrc/jit/frontend/function_schema_parser.h>
 #include <torch/csrc/jit/ir/constants.h>
 
-#include <ATen/native/Activation.h>
-
 #include <unordered_map>
 #include <utility>
 
@@ -2275,8 +2273,7 @@ class IrParser {
     }
 
     {
-      auto ptr_op = getOperatorForLiteral(
-          "aten::gelu(Tensor self, int approximate=0) -> Tensor");
+      auto ptr_op = getOperatorForLiteral("aten::gelu(Tensor self) -> Tensor");
       REGISTER_PARSE_RULE(
           ptr_op,
           {
@@ -2286,20 +2283,7 @@ class IrParser {
                 c10::nullopt, value_map[node->inputs()[0]->unique()]);
             auto self = list_val.front();
             list_val.pop_front();
-
-            auto approximate = constant_as<int64_t>(node->input(1));
-            TORCH_INTERNAL_ASSERT(
-                approximate.has_value(),
-                "The approximate parameter is required.");
-            const bool kApproximate = approximate.value();
-
-            Val* out = nullptr;
-            if (kApproximate == at::Gelu::Tanh) {
-              out = fast_gelu(self);
-            } else {
-              out = unaryOp(UnaryOpType::Gelu, self);
-            }
-
+            auto out = gelu(self);
             value_map.emplace(
                 node->output()->unique(), ValueHolder(out, format));
           },
@@ -2309,7 +2293,7 @@ class IrParser {
 
     {
       auto ptr_op = getOperatorForLiteral(
-          "aten::gelu_backward(Tensor grad_output, Tensor self, int approximate=0) -> Tensor");
+          "aten::gelu_backward(Tensor grad, Tensor self) -> Tensor");
       REGISTER_PARSE_RULE(
           ptr_op,
           {
@@ -2324,19 +2308,7 @@ class IrParser {
             auto self = list_val.front();
             list_val.pop_front();
 
-            auto approximate = constant_as<int64_t>(node->input(2));
-            TORCH_INTERNAL_ASSERT(
-                approximate.has_value(),
-                "The approximate parameter is required.");
-            const bool kApproximate = approximate.value();
-
-            Val* grad_in = nullptr;
-            if (kApproximate == at::Gelu::Tanh) {
-              grad_in = fast_gelu_backward(grad_out, self);
-            } else {
-              grad_in = gelu_backward(grad_out, self);
-            }
-
+            auto grad_in = gelu_backward(grad_out, self);
             value_map.emplace(
                 node->output()->unique(), ValueHolder(grad_in, format));
           },
@@ -3041,38 +3013,6 @@ bool insertProfileIValue(ProfilingRecord* pr, Node* node, size_t offset) {
       default:
         return false;
     }
-  }
-
-  static auto gelu_schema =
-      getOperatorForLiteral(
-          "aten::gelu(Tensor self, int approximate=0) -> Tensor")
-          ->schema();
-  if (node->matches(gelu_schema)) {
-    switch (offset) {
-      // argument 1: approximate;
-      case 1:
-        profileInt(pr, node, offset);
-        break;
-      default:
-        return false;
-    }
-    return true;
-  }
-
-  static auto gelu_backward_schema =
-      getOperatorForLiteral(
-          "aten::gelu_backward(Tensor grad_output, Tensor self, int approximate=0) -> Tensor")
-          ->schema();
-  if (node->matches(gelu_backward_schema)) {
-    switch (offset) {
-      // argument 2: approximate;
-      case 2:
-        profileInt(pr, node, offset);
-        break;
-      default:
-        return false;
-    }
-    return true;
   }
 
   static auto softmax_backward_data_schema =

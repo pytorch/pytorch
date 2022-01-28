@@ -336,16 +336,8 @@ inline Tensor glu(const Tensor& input, const GLUFuncOptions& options = {}) {
 
 // ============================================================================
 
-#ifndef DOXYGEN_SHOULD_SKIP_THIS
-namespace detail {
-inline Tensor gelu(const Tensor& input, GELUFuncOptions::gelu_t approximate) {
-  return torch::gelu(input, enumtype::gelu_get_enum(approximate));
-}
-} // namespace detail
-#endif /* DOXYGEN_SHOULD_SKIP_THIS */
-
-inline Tensor gelu(const Tensor& input, const GELUFuncOptions& options = {}) {
-  return detail::gelu(input, options.approximate());
+inline Tensor gelu(const Tensor& input) {
+  return torch::gelu(input);
 }
 
 // ============================================================================
