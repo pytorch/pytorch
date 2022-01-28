@@ -18,13 +18,13 @@
 #include <cstdlib>
 #include <string>
 
-#if BUILD_JITERATOR_WITH_CACHE
+#if AT_BUILD_JITERATOR_WITH_CACHE()
   // Uses POSIX headers, which is why these are guarded behind BUILD_JITERATOR_WITH_CACHE
   // TODO: C++17 has the fileystem header, which may replace these
   #include <sys/types.h>
   #include <sys/stat.h> // mkdir
   #include <unistd.h>
-#endif // BUILD_JITERATOR_WITH_CACHE
+#endif // AT_BUILD_JITERATOR_WITH_CACHE()
 
 
 namespace at { namespace cuda { namespace jit {
@@ -800,7 +800,7 @@ std::string generate_code(
 }
 
 
-#if BUILD_JITERATOR_WITH_CACHE
+#if AT_BUILD_JITERATOR_WITH_CACHE()
 // Acquires (possibly creating) the kernel cache directory
 c10::optional<std::string> get_cache_dir() {
   // If the environment variable USE_TORCH_KERNEL_CACHE is set to "0" then no persistent cache is used
@@ -865,7 +865,7 @@ c10::optional<std::string> get_cache_dir() {
 
   return cache_dir;
 }
-#endif // BUILD_JITERATOR_WITH_CACHE
+#endif // AT_BUILD_JITERATOR_WITH_CACHE()
 
 // Compiles the kernel, or acquires if from the cache if caching
 NvrtcFunction jit_pwise_function(
@@ -886,7 +886,7 @@ NvrtcFunction jit_pwise_function(
   NvrtcFunction compiled_kernel_;
   std::string name = kernel_name + "_kernel";
 
-  #if BUILD_JITERATOR_WITH_CACHE
+  #if AT_BUILD_JITERATOR_WITH_CACHE()
     static const c10::optional<std::string> cache_dir = get_cache_dir();
 
     std::string file_path;
@@ -927,7 +927,7 @@ NvrtcFunction jit_pwise_function(
         return compiled_kernel_;
       }
     }
-  #endif // BUILD_JITERATOR_WITH_CACHE
+  #endif // AT_BUILD_JITERATOR_WITH_CACHE()
 
   // Just-in-time compiles the program
 
@@ -1000,7 +1000,7 @@ NvrtcFunction jit_pwise_function(
   // TODO: use guards to avoid leaking
   AT_CUDA_NVRTC_CHECK(nvrtc.nvrtcDestroyProgram(&program));
 
-  #if BUILD_JITERATOR_WITH_CACHE
+  #if AT_BUILD_JITERATOR_WITH_CACHE()
     if (cache_dir.has_value()) {
       // Writes the program to the cache if caching
       // NOTE: Actually writes to a per-process temporary file to avoid multi-process contention.
@@ -1029,7 +1029,7 @@ NvrtcFunction jit_pwise_function(
       }
       cubin.close();
     }
-  #endif // BUILD_JITERATOR_WITH_CACHE
+  #endif // AT_BUILD_JITERATOR_WITH_CACHE()
 
   return compiled_kernel_;
 }
