@@ -3398,7 +3398,7 @@
 - func: pixel_shuffle(Tensor self, int upscale_factor) -> Tensor
   dispatch:
     CompositeExplicitAutograd: pixel_shuffle
-    QuantizedCPU: quantized_pixel_shuffle_cpu
+    QuantizedCPU: pixel_shuffle_quantized_cpu
 
 - func: pixel_unshuffle(Tensor self, int downscale_factor) -> Tensor
   dispatch:
