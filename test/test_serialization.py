@@ -21,7 +21,7 @@ from torch._utils import _rebuild_tensor
 from torch.serialization import check_module_version_greater_or_equal
 
 from torch.testing._internal.common_utils import TestCase, IS_WINDOWS, \
-    TEST_DILL, run_tests, download_file, BytesIOContext, TemporaryFileName
+    TEST_DILL, run_tests, download_file, BytesIOContext, TemporaryFileName, parametrize
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_dtype import get_all_dtypes
 
@@ -280,14 +280,17 @@ class SerializationMixin(object):
         self.assertEqual(i, j)
 
     def test_serialization_sparse(self):
-        x = torch.zeros(3, 3)
-        x[1][1] = 1
-        x = x.to_sparse()
-        with tempfile.NamedTemporaryFile() as f:
-            torch.save({"tensor": x}, f)
-            f.seek(0)
-            y = torch.load(f)
-            self.assertEqual(x, y["tensor"])
+        def _test_serialization(conversion):
+            x = torch.zeros(3, 3)
+            x[1][1] = 1
+            x = conversion(x)
+            with tempfile.NamedTemporaryFile() as f:
+                torch.save({"tensor": x}, f)
+                f.seek(0)
+                y = torch.load(f)
+                self.assertEqual(x, y["tensor"])
+        _test_serialization(lambda x: x.to_sparse())
+        _test_serialization(lambda x: x.to_sparse_csr())
 
     def test_serialization_sparse_invalid(self):
         x = torch.zeros(3, 3)
@@ -316,6 +319,36 @@ class SerializationMixin(object):
             with self.assertRaisesRegex(
                     RuntimeError,
                     "size is inconsistent with indices"):
+                y = torch.load(f)
+
+    def test_serialization_sparse_csr_invalid(self):
+        x = torch.zeros(3, 3)
+        x[1][1] = 1
+        x = x.to_sparse_csr()
+
+        class TensorSerializationSpoofer(object):
+            def __init__(self, tensor):
+                self.tensor = tensor
+
+            def __reduce_ex__(self, proto):
+                invalid_crow_indices = self.tensor.crow_indices().clone()
+                invalid_crow_indices[0] = 3
+                return (
+                    torch._utils._rebuild_sparse_tensor,
+                    (
+                        self.tensor.layout,
+                        (
+                            invalid_crow_indices,
+                            self.tensor.col_indices(),
+                            self.tensor.values(),
+                            self.tensor.size())))
+
+        with tempfile.NamedTemporaryFile() as f:
+            torch.save({"spoofed": TensorSerializationSpoofer(x)}, f)
+            f.seek(0)
+            with self.assertRaisesRegex(
+                    RuntimeError,
+                    "0th value of crow_indices must be 0."):
                 y = torch.load(f)
 
     def test_serialize_device(self):
