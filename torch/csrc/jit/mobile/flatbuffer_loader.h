@@ -50,5 +50,61 @@ TORCH_API mobile::Module load_mobile_module_from_file(
     const std::string& filename,
     c10::optional<at::Device> device = c10::nullopt);
 
+class FlatbufferLoader {
+ public:
+  FlatbufferLoader();
+
+  typedef IValue (
+      *IValueParser)(FlatbufferLoader&, const mobile::serialization::IValue&);
+  void registerIValueParser(
+      mobile::serialization::IValueUnion ivalue_type,
+      IValueParser parser);
+  mobile::Module parseModule(mobile::serialization::Module* module);
+
+  IValue& getIValue(uint32_t pos) {
+    TORCH_CHECK(pos < all_ivalues_.size());
+    return all_ivalues_[pos];
+  }
+
+  mobile::Function* getFunction(uint32_t pos) {
+    return all_functions_[pos];
+  }
+
+  ClassTypePtr getType(uint32_t pos) {
+    TORCH_CHECK(pos < all_ivalues_.size());
+    return all_types_[pos];
+  }
+
+  c10::Storage getStorage(uint32_t index);
+  TypePtr getOrCreateTypeAnnotations(const flatbuffers::String* offset);
+  ClassTypePtr getOrCreateClassTypeForObject(
+      const mobile::serialization::Object* object);
+
+  const mobile::serialization::Module* getCurrentFlatbufferInput() {
+    return module_;
+  }
+
+  std::shared_ptr<mobile::CompilationUnit> mcu_;
+  std::shared_ptr<CompilationUnit> cu_;
+
+ private:
+  IValue parseIValue(const mobile::serialization::IValue* ivalue);
+  std::unique_ptr<mobile::Function> parseFunction(
+      const mobile::serialization::Function* method);
+
+  std::unordered_map<uint32_t, mobile::Function*> all_functions_;
+  std::vector<ClassTypePtr> all_types_;
+  std::unordered_set<uint32_t> initialized_types_;
+  std::unordered_map<const flatbuffers::String*, TypePtr> type_annotations_;
+  std::vector<bool> storage_loaded_;
+  std::vector<c10::Storage> storages_;
+  std::vector<IValue> all_ivalues_;
+  std::array<
+      IValueParser,
+      static_cast<uint8_t>(mobile::serialization::IValueUnion::MAX) + 1>
+      ivalue_parsers_;
+  mobile::serialization::Module* module_ = nullptr;
+};
+
 } // namespace jit
 } // namespace torch
