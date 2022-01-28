@@ -257,10 +257,10 @@ class Tensor(torch._C._TensorBase):
         elif self.is_sparse_csr:
             if self.layout == torch.sparse_csr:
                 args_sparse_csr = (self.layout,
-                               (self.crow_indices(),
-                                self.col_indices(),
-                                self.values(),
-                                self.size()))
+                                   (self.crow_indices(),
+                                    self.col_indices(),
+                                    self.values(),
+                                    self.size()))
             else:
                 raise NotImplementedError(
                     'sparse csr tensor __reduce_ex__ for layout `%s`' % (self.layout))
