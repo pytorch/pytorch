@@ -1091,7 +1091,7 @@ void CudaCodeGen::call_with_numel(void** args, int64_t numel) {
   }
 }
 
-void CudaCodeGen::call_raw(const std::vector<void*>& raw_args) {
+void CudaCodeGen::call_raw(const std::vector<void*>& raw_args, int64_t numel) {
   auto const& buffer_args = this->buffer_args();
 
   // TODO: move as much of this into the constructors.
@@ -1109,26 +1109,36 @@ void CudaCodeGen::call_raw(const std::vector<void*>& raw_args) {
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   std::vector<int> gpu_thread_extents_v(3, 1);
 
-  // evaluate all the block/thread extents into values
-  // TODO: eventually, codegen these calculations and make them part of the
-  // module.
-  for (size_t i = 0; i < gpu_block_extents.size(); i++) {
-    if (gpu_block_extents[i]->isConstant()) {
-      gpu_block_extents_v[i] = immediateAs<int64_t>(gpu_block_extents[i]);
-      continue;
+  if (numel > 0 && thread_block_size_ != -1) {
+    gpu_block_extents_v[0] =
+        (numel + thread_block_size_ - 1) / thread_block_size_;
+    gpu_block_extents_v[1] = 1;
+    gpu_block_extents_v[2] = 1;
+    gpu_thread_extents_v[0] = thread_block_size_;
+    gpu_thread_extents_v[1] = 1;
+    gpu_thread_extents_v[2] = 1;
+  } else {
+    // evaluate all the block/thread extents into values
+    // TODO: eventually, codegen these calculations and make them part of the
+    // module.
+    for (size_t i = 0; i < gpu_block_extents.size(); i++) {
+      if (gpu_block_extents[i]->isConstant()) {
+        gpu_block_extents_v[i] = immediateAs<int64_t>(gpu_block_extents[i]);
+        continue;
+      }
+      ExprEval<SimpleIREvaluator> eval(
+          ExprHandle(gpu_block_extents[i]), buffer_args);
+      gpu_block_extents_v[i] = eval.value<int64_t>(raw_args);
     }
-    ExprEval<SimpleIREvaluator> eval(
-        ExprHandle(gpu_block_extents[i]), buffer_args);
-    gpu_block_extents_v[i] = eval.value<int64_t>(raw_args);
-  }
-  for (size_t i = 0; i < gpu_thread_extents.size(); i++) {
-    if (gpu_thread_extents[i]->isConstant()) {
-      gpu_thread_extents_v[i] = immediateAs<int64_t>(gpu_thread_extents[i]);
-      continue;
+    for (size_t i = 0; i < gpu_thread_extents.size(); i++) {
+      if (gpu_thread_extents[i]->isConstant()) {
+        gpu_thread_extents_v[i] = immediateAs<int64_t>(gpu_thread_extents[i]);
+        continue;
+      }
+      ExprEval<SimpleIREvaluator> eval(
+          ExprHandle(gpu_thread_extents[i]), buffer_args);
+      gpu_thread_extents_v[i] = eval.value<int64_t>(raw_args);
     }
-    ExprEval<SimpleIREvaluator> eval(
-        ExprHandle(gpu_thread_extents[i]), buffer_args);
-    gpu_thread_extents_v[i] = eval.value<int64_t>(raw_args);
   }
 
   // Skip launching the kernel if there are no elements to process.
@@ -1201,7 +1211,7 @@ void CudaCodeGen::call_raw(const std::vector<void*>& raw_args) {
   }
 }
 
-void CudaCodeGen::call(const std::vector<CallArg>& args) {
+void CudaCodeGen::call(const std::vector<CallArg>& args, int64_t numel) {
   if (args.size() != buffer_args().size()) {
     throw malformed_input("cuda_codegen: wrong number of args in call");
   }
@@ -1214,7 +1224,7 @@ void CudaCodeGen::call(const std::vector<CallArg>& args) {
     auto const& callArg = args[i];
     raw_args[i] = argToPtr(bufferArg, callArg);
   }
-  call_raw(raw_args);
+  call_raw(raw_args, numel);
 }
 
 at::Tensor CudaCodeGen::empty_strided(

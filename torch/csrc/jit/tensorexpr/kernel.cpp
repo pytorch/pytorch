@@ -1556,8 +1556,8 @@ void TensorExprKernel::compile() {
     bufs_.erase(output);
   }
 
-  BackendType backendType = inferBackendTypeFromDevice(device_);
-  stmt_ = transformLoops(backendType, block);
+  backendType_ = inferBackendTypeFromDevice(device_);
+  stmt_ = transformLoops(backendType_, block);
 
   for (auto c : constants_) {
     bufferArgs_.emplace_back(BufHandle(c.buf));
@@ -1570,7 +1570,7 @@ void TensorExprKernel::compile() {
 
   // Generate code.
   codegen_ = CreateCodeGen(
-      getCodeGenName(backendType),
+      getCodeGenName(backendType_),
       stmt_,
       bufferArgs_,
       device_,
@@ -1732,8 +1732,17 @@ void TensorExprKernel::runKernel(Stack& stack) {
 
   std::vector<CodeGen::CallArg> runArgs = prepareRunArgs(inputs, outputs);
 
-  // Call the kernel.
-  codegen_->call(runArgs);
+  if (backendType_ == kCudaCodeGen && nOutputs_ == 1) {
+    TORCH_INTERNAL_ASSERT(tensorOutputSizes_.size() == 1);
+    int64_t numel = 1;
+    for (const auto& o : tensorOutputSizes_.front()) {
+      numel *= o;
+    }
+    codegen_->call(runArgs, numel);
+  } else {
+    // Call the kernel.
+    codegen_->call(runArgs);
+  }
 
   // Update the stack.
   drop(stack, nInputs_);

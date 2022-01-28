@@ -221,8 +221,8 @@ class TORCH_CUDA_CU_API CudaCodeGen : public CodeGen {
 
   ~CudaCodeGen() override;
 
-  void call(const std::vector<CallArg>& args) override;
-  void call_raw(const std::vector<void*>& args) override;
+  void call(const std::vector<CallArg>& args, int64_t numel = 0) override;
+  void call_raw(const std::vector<void*>& args, int64_t numel = 0) override;
   void call_with_numel(void** args, int64_t numel) override;
 
   template <typename... Ts>

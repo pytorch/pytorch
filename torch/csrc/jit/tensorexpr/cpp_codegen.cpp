@@ -389,13 +389,13 @@ void CppCodeGen::init() {
 
 CppCodeGen::~CppCodeGen() = default;
 
-void CppCodeGen::call(const std::vector<CallArg>& args) {
+void CppCodeGen::call(const std::vector<CallArg>& args, int64_t /* numel */) {
   // TODO: compile the generated C++ kernel into a library,
   // and call the library here.
   os() << "int main() {}" << std::endl;
 }
 
-void CppCodeGen::call_raw(const std::vector<void*>& args) {
+void CppCodeGen::call_raw(const std::vector<void*>& args, int64_t /* numel */) {
   // TODO: compile the generated C++ kernel into a library,
   // and call the library here.
   os() << "int main() {}" << std::endl;

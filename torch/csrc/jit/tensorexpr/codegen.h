@@ -74,12 +74,12 @@ class TORCH_API CodeGen {
 
   /// Call a function with a vector of CallArgs, which are tagged
   /// unions that properly type the arguments.
-  virtual void call(const std::vector<CallArg>& args) = 0;
+  virtual void call(const std::vector<CallArg>& args, int64_t numel = 0) = 0;
 
   /// Call a function faster than a regular `call` by assuming that
   /// the generated kernel already knows the type of the arguments, so
   /// they can be type-punned with `void*`s.
-  virtual void call_raw(const std::vector<void*>& args) = 0;
+  virtual void call_raw(const std::vector<void*>& args, int64_t numel = 0) = 0;
 
   /// Call a function even faster than a regular call, by assuming
   /// that the number of thread blocks can be derived from `numel` via

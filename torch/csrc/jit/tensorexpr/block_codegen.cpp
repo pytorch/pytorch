@@ -357,10 +357,12 @@ void BlockCodeGen::Initialize() {
   GRAPH_DEBUG("Generated Block code: ", oss_.str(), "\n");
 }
 
-void BlockCodeGen::call(const std::vector<CallArg>& args) {
+void BlockCodeGen::call(const std::vector<CallArg>& args, int64_t /* numel */) {
   throw std::runtime_error("BlockCodeGen: Cannot call Block code ");
 }
-void BlockCodeGen::call_raw(const std::vector<void*>& args) {
+void BlockCodeGen::call_raw(
+    const std::vector<void*>& args,
+    int64_t /* numel */) {
   throw std::runtime_error("BlockCodeGen: Cannot call Block code ");
 }
 

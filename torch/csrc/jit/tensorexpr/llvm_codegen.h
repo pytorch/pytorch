@@ -41,8 +41,10 @@ class TORCH_API LLVMCodeGen : public CodeGen {
   // users can continue to call this kernel using `call` and `call_raw`.
   void cleanup_memory();
 
-  TORCH_API void call(const std::vector<CallArg>& args) override;
-  TORCH_API void call_raw(const std::vector<void*>& args) override;
+  TORCH_API void call(const std::vector<CallArg>& args, int64_t numel = 0)
+      override;
+  TORCH_API void call_raw(const std::vector<void*>& args, int64_t numel = 0)
+      override;
   TORCH_API void call_with_numel(void** args, int64_t numel) override;
 
   at::Tensor empty_strided(

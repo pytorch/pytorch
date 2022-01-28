@@ -117,8 +117,8 @@ class TORCH_API BlockCodeGen : public CodeGen {
 
   ~BlockCodeGen() override;
 
-  void call(const std::vector<CallArg>& args) override;
-  void call_raw(const std::vector<void*>& args) override;
+  void call(const std::vector<CallArg>& args, int64_t numel = 0) override;
+  void call_raw(const std::vector<void*>& args, int64_t numel = 0) override;
 
   void Initialize();
 

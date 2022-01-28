@@ -1154,7 +1154,9 @@ SimpleIREvaluator::SimpleIREvaluator(
 
 SimpleIREvaluator::~SimpleIREvaluator() = default;
 
-void SimpleIREvaluator::call(const std::vector<CallArg>& args) {
+void SimpleIREvaluator::call(
+    const std::vector<CallArg>& args,
+    int64_t /* numel */) {
   std::vector<void*> raw_args(args.size());
   for (size_t i = 0; i < args.size(); i++) {
     auto const& bufferArg = buffer_args()[i];
@@ -1164,7 +1166,9 @@ void SimpleIREvaluator::call(const std::vector<CallArg>& args) {
   call_raw(raw_args);
 }
 
-void SimpleIREvaluator::call_raw(const std::vector<void*>& args) {
+void SimpleIREvaluator::call_raw(
+    const std::vector<void*>& args,
+    int64_t /* numel */) {
   if (args.size() != buffer_args().size()) {
     throw malformed_input("bad args in IREvaluator call");
   }

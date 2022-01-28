@@ -356,7 +356,9 @@ void LLVMCodeGen::cleanup_memory() {
   impl_.reset(nullptr);
 }
 
-void LLVMCodeGen::call_raw(const std::vector<void*>& args) {
+void LLVMCodeGen::call_raw(
+    const std::vector<void*>& args,
+    int64_t /* numel */) {
   value<float>(const_cast<void**>(args.data()));
 }
 
@@ -364,7 +366,7 @@ void LLVMCodeGen::call_with_numel(void** args, int64_t /* numel */) {
   value<float>(const_cast<void**>(args));
 }
 
-void LLVMCodeGen::call(const std::vector<CallArg>& args) {
+void LLVMCodeGen::call(const std::vector<CallArg>& args, int64_t /* numel */) {
   auto& buf_args = buffer_args();
   if (args.size() != buf_args.size()) {
     throw malformed_input("wrong number of args in call");
