@@ -168,34 +168,14 @@ static bool resize_output_for_normal(at::Tensor& output, const at::Tensor& mean,
   bool expandable = at::are_expandable(mean.sizes(), std.sizes());
   bool empty_output = output.numel() == 0;
 
-  if (expandable) {
-    auto shape = at::infer_size(mean.sizes(), std.sizes());
-    TORCH_CHECK(
-        empty_output || output.sizes().equals(shape),
-        "inconsistent tensor, output size (", output.sizes(), ") is not the same as broadcasted mean and std size (", shape, ")");
-    if (empty_output) {
-      at::native::resize_(output, shape);
-    }
-    return false;
+  auto shape = at::infer_size(mean.sizes(), std.sizes());
+  TORCH_CHECK(
+      empty_output || output.sizes().equals(shape),
+      "inconsistent tensor, output size (", output.sizes(), ") is not the same as broadcasted mean and std size (", shape, ")");
+  if (empty_output) {
+    at::native::resize_(output, shape);
   }
-  else {
-    TORCH_CHECK(
-        mean.numel() == std.numel(),
-        "inconsistent tensor, std and mean are not broadcastable and have different number of elements, "
-        "expected mean ", mean.sizes(), " and std ", std.sizes(), " to have same number of elements)");
-    TORCH_CHECK(
-        empty_output || output.sizes().equals(mean.sizes()),
-        "inconsistent tensor, std and mean are not broadcastable, output size (", output.sizes(), ") is not the same as mean size (", mean.sizes(), ")");
-    TORCH_WARN_ONCE(
-        "std and mean have the same number of elements, but are not broadcastable. This was previously a "
-        "supported mode of operation, but is now deprecated and the support will be removed in version 1.6 release. "
-        "Note that the current implementation reshapes std to the shape of mean, which may be incur data copies. "
-        "Please ensure that std and mean are broadcastable to avoid these issues.");
-    if (empty_output) {
-      at::native::resize_(output, mean.sizes());
-    }
-    return true;
-  }
+  return false;
 }
 
 #define CHECK_NORMAL_TENSOR_STD(std) \
