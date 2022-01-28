@@ -14,7 +14,7 @@
    {
     "name": "OSS CI",
     "patterns": [".github/**", ".circleci/**", ".jenkins/**"],
-    "approved_by": ["seemethere", "malfet"],
+    "approved_by": ["seemethere", "malfet", "suo"],
     "mandatory_app_id": 12274
    }
 ]
