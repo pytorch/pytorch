@@ -79,6 +79,7 @@ def aten_symbol(schema: LazyIrSchema) -> str:
 class LazyIR(ABC):
     backend_index: BackendIndex
     node_base: str
+    lowering_function_type: str
     lowering_context_type: str
     lowering_return_type: str
 
@@ -151,8 +152,8 @@ class {schema.node_name} : public {self.node_base} {{
     return ss.str();
   }}
 
-  {self.lowering_return_type} Lower(std::shared_ptr<torch::jit::GraphFunction> function,
-                   {self.lowering_context_type}* loctx) const override {{
+  {self.lowering_return_type} Lower({self.lowering_function_type} function,
+                   {self.lowering_context_type} loctx) const override {{
     {self.lowering_body(f)}
   }}
 
@@ -166,7 +167,8 @@ class {schema.node_name} : public {self.node_base} {{
 
 @dataclass(frozen=True)
 class TSLazyIR(LazyIR):
-    lowering_context_type: str = "torch::lazy::TSLoweringContext"
+    lowering_function_type: str = "std::shared_ptr<torch::jit::GraphFunction>"
+    lowering_context_type: str = "torch::lazy::TSLoweringContext*"
     lowering_return_type: str = "torch::lazy::TSOpVector"
 
     def lowering_body(self, f):
