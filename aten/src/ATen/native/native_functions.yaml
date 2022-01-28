@@ -5873,7 +5873,7 @@
   device_check: NoCheck
   device_guard: False
   dispatch:
-    ZeroTensor, CPU, CUDA, Meta, QuantizedCPU, QuantizedCUDA: view
+    ZeroTensor, CPU, CUDA, Meta: view
     QuantizedCPU, QuantizedCUDA: view_quantized
     MkldnnCPU: mkldnn_view
 
@@ -7828,7 +7828,7 @@
 - func: alias(Tensor(a) self) -> Tensor(a)
   variants: method, function
   dispatch:
-    ZeroTensor, CPU, CUDA, Meta, QuantizedCPU, QuantizedCUDA: alias
+    ZeroTensor, CPU, CUDA, Meta: alias
     QuantizedCPU, QuantizedCUDA: alias_quantized
 
 - func: _index_copy_(Tensor(a!) self, int dim, Tensor index, Tensor source) -> Tensor(a!)
