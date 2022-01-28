@@ -5618,6 +5618,7 @@ for shape in [(1,), ()]:
 
             gradcheck(MyFn.apply, (x, y), check_forward_ad=True)
 
+        # None of the inputs require grad
         class MyFn2(torch.autograd.Function):
             @staticmethod
             def forward(ctx, x, y):
@@ -5635,6 +5636,37 @@ for shape in [(1,), ()]:
             x_dual = fwAD.make_dual(x, t)
             _, out2 = MyFn2.apply(x_dual, y)
             self.assertTrue(fwAD.unpack_dual(out2).tangent._base is t)
+
+        # At least one input requires grad
+        class MyFn2(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x, y, z):
+                # When not differentiable, process backward AD performs a detach
+                # so the forward AD, we check later that the tangent is None
+                ctx.mark_non_differentiable(x)
+                return x, y, z, y + z
+
+            @staticmethod
+            def jvp(ctx, x_t, y_t, z_t):
+                # y is a non-differentiable type: int64
+                # y_t is not None, it is a zero-filled tensor even though it is
+                # a non-differentiable type (expected?)
+                assert y_t is not None
+                return x_t, None, z_t, y_t + z_t
+
+        x = torch.tensor(1., dtype=torch.double, requires_grad=True)
+        t = torch.tensor(1., dtype=torch.double)
+        y = torch.tensor(1., dtype=torch.int64)
+        z = torch.tensor(1., dtype=torch.double, requires_grad=True)
+        t2 = torch.tensor(1., dtype=torch.double)
+
+        with fwAD.dual_level():
+            x_dual = fwAD.make_dual(x, t)
+            z_dual = fwAD.make_dual(z, t2)
+            out1, _, out3, out4 = MyFn2.apply(x_dual, y, z_dual)
+            self.assertIsNone(fwAD.unpack_dual(out1).tangent)
+            self.assertTrue(fwAD.unpack_dual(out3).tangent._base is t2)
+            self.assertTrue(torch.allclose(t2, fwAD.unpack_dual(out4).tangent))
 
     def test_custom_function_save_for_forward(self):
         class Func(torch.autograd.Function):
