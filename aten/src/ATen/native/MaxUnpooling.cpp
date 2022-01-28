@@ -197,8 +197,11 @@ Tensor& max_unpooling2d_backward_out_cpu(const Tensor& grad_output_,
   TORCH_CHECK(
       indices_.scalar_type() == at::ScalarType::Long,
       "elements in indices should be type int64 but got type: ", indices_.scalar_type());
+  // FIXME[albandes] -- this is an impotent check and needs to be fixed since it will introduce a compiler `-Wstring-conversion` failure in the imminent future
+  /*
   TORCH_CHECK(
       "Expected shape of indices to be same as that of the input tensor (", self.sizes(), ") but got indices tensor with shape: ", indices_.sizes());
+  */
   TORCH_CHECK(output_size.size() == 2, "Output size must be 2 but got: ", output_size.size());
 
   auto memory_format = self.suggest_memory_format();

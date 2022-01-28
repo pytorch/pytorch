@@ -4821,21 +4821,6 @@ Tensor batch_norm_jvp(
       bias_t.defined() ? bias_t.view(view_size) : bias_t);
 }
 
-Tensor batch_norm_jvp_saved_var(
-    const Tensor& input_p, const Tensor& input_t,
-    const Tensor& weight_p, const Tensor& weight_t,
-    const Tensor& bias_p, const Tensor& bias_t,
-    const c10::optional<Tensor>& running_mean,
-    const c10::optional<Tensor>& running_var,
-    const Tensor& saved_mean, const Tensor& saved_var,
-    bool train,
-    double eps) {
-  auto saved_invstd = (1 / at::sqrt(saved_var + at::Scalar(eps)));
-  return batch_norm_jvp(
-      input_p, input_t, weight_p, weight_t, bias_p, bias_t, running_mean, running_var,
-      saved_mean, saved_invstd, train, eps);
-}
-
 Tensor layer_norm_jvp(
     const Tensor& input_p, const Tensor& input_t,
     const Tensor& weight_p, const Tensor& weight_t,

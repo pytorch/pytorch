@@ -631,10 +631,12 @@
 
 - name: fmod.Scalar(Tensor self, Scalar other) -> Tensor
   self: grad
+  result: auto_element_wise
 
 - name: fmod.Tensor(Tensor self, Tensor other) -> Tensor
   self: grad
-  other: 'not_implemented("fmod: other")'
+  other: -grad * self.div(other, /*rounding_mode=*/"trunc")
+  result: self_t - other_t * self_p.div(other_p, /*rounding_mode=*/"trunc")
 
 - name: frac(Tensor self) -> Tensor
   self: grad
@@ -732,6 +734,7 @@
 
 - name: index.Tensor(Tensor self, Tensor?[] indices) -> Tensor
   self: index_backward(grad.new_zeros(self.sizes(), self.options()), indices, grad)
+  result: auto_linear
 
   # To avoid perf regression, we have 2 separate derivate formulas for index_add and index_add_
   # See: https://github.com/pytorch/pytorch/pull/65993#discussion_r729912376 for the discussion
@@ -1252,8 +1255,8 @@
 
 - name: remainder.Tensor(Tensor self, Tensor other) -> Tensor
   self: grad
-  # Use addition with zeros to get the proper broadcasting behavior
-  result: self_t.expand_as(result)
+  other: -grad * self.div(other, /*rounding_mode=*/"floor")
+  result: self_t - other_t * self_p.div(other_p, /*rounding_mode=*/"floor")
 
 - name: renorm(Tensor self, Scalar p, int dim, Scalar maxnorm) -> Tensor
   self: renorm_backward(grad, self, p, dim, maxnorm)
@@ -2405,7 +2408,7 @@
 # NB2: The quotes around the gradient are needed to appease YAML parsing rules.
 - name: cudnn_batch_norm(Tensor input, Tensor weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool training, float exponential_average_factor, float epsilon) -> (Tensor, Tensor, Tensor, Tensor)
   input, weight, bias: "grad.defined() ? (training ? cudnn_batch_norm_backward(input, grad.contiguous(input.suggest_memory_format()), weight, running_mean, running_var, result1, result2, epsilon, retain_variables ? result3.clone() : result3) : native_batch_norm_backward(grad, input, weight, running_mean, running_var, result1, result2, training, epsilon, grad_input_mask)) : std::tuple<Tensor, Tensor, Tensor>()"
-  result0: batch_norm_jvp_saved_var(input_p, input_t, weight_p, weight_t, bias_p, bias_t, running_mean, running_var, result1, result2, training, epsilon)
+  result0: batch_norm_jvp(input_p, input_t, weight_p, weight_t, bias_p, bias_t, running_mean, running_var, result1, result2, training, epsilon)
 
 # HACK: save_mean and save_var are going to be passed in as
 # requires_grad variables (even though we'll never backprop through
@@ -2453,7 +2456,6 @@
 
 - name: miopen_batch_norm(Tensor input, Tensor weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool training, float exponential_average_factor, float epsilon) -> (Tensor, Tensor, Tensor)
   input, weight, bias: "grad.defined() ? (training ? miopen_batch_norm_backward(input, grad.contiguous(), weight, running_mean, running_var, result1, result2, epsilon) : native_batch_norm_backward(grad, input, weight, running_mean, running_var, result1, result2, training, epsilon, grad_input_mask)) : std::tuple<Tensor, Tensor, Tensor>()"
-  result0: batch_norm_jvp_saved_var(input_p, input_t, weight_p, weight_t, bias_p, bias_t, running_mean, running_var, result1, result2, training, epsilon)
 
 - name: miopen_batch_norm_backward(Tensor input, Tensor grad_output, Tensor weight, Tensor? running_mean, Tensor? running_var, Tensor? save_mean, Tensor? save_var, float epsilon) -> (Tensor, Tensor, Tensor)
   save_mean: not_implemented("miopen_batch_norm_backward save_mean")
