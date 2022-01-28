@@ -1666,6 +1666,7 @@ class TestCase(expecttest.TestCase):
             try:
                 torch.cuda.synchronize()
             except RuntimeError as rte:
+                print(f"torch cuda synchronize failed with: {rte}")
                 return True
             return False
         else:
@@ -1775,7 +1776,7 @@ class TestCase(expecttest.TestCase):
         # Early terminate test if necessary.
         if self._should_stop_test_suite():
             result.stop()
-            raise RuntimeError("Test suite had to be stopped! OH NO")
+            raise RuntimeError("Test suite had to be stopped as unrecoverable error occurred.")
 
         if not RETRY_TEST_CASES or not using_unittest:
             return
