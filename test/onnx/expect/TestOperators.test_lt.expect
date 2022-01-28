@@ -9,7 +9,7 @@ graph {
     name: "Less_0"
     op_type: "Less"
   }
-  name: "torch-jit-export"
+  name: "torch_jit"
   input {
     name: "onnx::Less_0"
     type {

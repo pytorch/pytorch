@@ -9,7 +9,7 @@ graph {
     name: "Equal_0"
     op_type: "Equal"
   }
-  name: "torch-jit-export"
+  name: "torch_jit"
   input {
     name: "onnx::Equal_0"
     type {

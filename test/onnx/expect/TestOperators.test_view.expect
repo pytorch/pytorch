@@ -23,7 +23,7 @@ graph {
     name: "Reshape_1"
     op_type: "Reshape"
   }
-  name: "torch-jit-export"
+  name: "torch_jit"
   input {
     name: "onnx::Reshape_0"
     type {
