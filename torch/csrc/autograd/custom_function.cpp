@@ -116,7 +116,7 @@ void _process_forward_mode_AD(const variable_list &inputs,
               " but got ", num_forward_grads, ")");
 
   for (const auto i : c10::irange(num_outputs)) {
-    const auto& out = outputs[i].has_value()? outputs[i].value() : at::Tensor();
+    at::Tensor out = outputs[i].has_value()? outputs[i].value() : at::Tensor();
     const auto& out_grad = forward_grads[i];
     if (!out.defined()) {
       TORCH_CHECK(!out_grad.defined(), "Function's jvp returned a gradient at position ", i, ", but "
@@ -148,11 +148,13 @@ void _process_forward_mode_AD(const variable_list &inputs,
         out._set_fw_grad(out_grad, level, /* is_inplace_op */ true);
       }
     } else {
-      // At this point, outputs[i] cannot be one of the input (raw_outputs[i] might be but was changed by the backward code)
-      TORCH_INTERNAL_ASSERT(inputs_mapping.count(out.unsafeGetTensorImpl()) == 0);
-      if (is_input && !is_modified) {
-        // If the forward return an input as-is, since backward code performed a view without the
-        // forward no-grad guard, we are done.
+      if (is_input) {
+        // If the forward return an input as-is, backward may or may not have performed this view already
+        if (inputs_mapping.count(out.unsafeGetTensorImpl()) == 0) {
+          // outputs[i] could still be one of the input when input does not require grad
+          AutoGradMode grad_mode(false);
+          out = out.view_as(out);
+        }
         continue;
       }
 

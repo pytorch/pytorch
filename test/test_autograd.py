@@ -5607,6 +5607,27 @@ for shape in [(1,), ()]:
 
             gradcheck(MyFn.apply, (x, y), check_forward_ad=True)
 
+        class MyFn2(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x, y):
+                return x + y, x
+
+            @staticmethod
+            def jvp(ctx, x_t, y_t):
+                return x_t + y_t, x_t
+
+        x = torch.tensor(1., dtype=torch.double)
+        t = torch.tensor(1., dtype=torch.double)
+        y = torch.tensor(1., dtype=torch.double)
+
+        with fwAD.dual_level():
+            x_dual = fwAD.make_dual(x, t)
+            _, out2 = MyFn2.apply(x_dual, y)
+            self.assertTrue(fwAD.unpack_dual(out2).tangent._base is t)
+
+        gradcheck(MyFn2.apply, (x, y), check_forward_ad=True)
+
+
     def test_custom_function_save_for_forward(self):
         class Func(torch.autograd.Function):
             @staticmethod
