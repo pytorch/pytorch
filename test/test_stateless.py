@@ -146,39 +146,11 @@ class TestStatelessFunctionalAPI(TestCase):
         parameters = {'l1.parametrizations.weight.original': torch.nn.Parameter(torch.tensor([[1.0]])),
                       'l1.bias': torch.tensor([0.0]),
                       'buffer': torch.tensor([0.0])}
-        res = torch.nn.utils._stateless.functional_call(module, parameters, x, apply_parametrizations=False)
+        res = torch.nn.utils._stateless.functional_call(module, parameters, x)
         self.assertEqual(x, res)
         # verify that the spectral normalization is still applied
         self.assertTrue('l1.parametrizations.weight.original' in dict(module.named_parameters()))
         self.assertEqual(orig_sn_weight, module.l1.weight)
-
-    def test_reparametrized_module(self):
-        # In an alternative design to the above one, we allow to keep the parametrizations as they are
-        # and applied them to the element matching in the state dict, so we do not directly overwrite them
-        class _ParamScaler(torch.nn.Module):
-            def forward(self, orig):
-                return orig * 10
-
-        module = MockModule()
-        torch.nn.utils.parametrize.register_parametrization(module.l1, 'weight', _ParamScaler())
-        self.assertTrue('l1.parametrizations.weight.original' in dict(module.named_parameters()))
-        orig_sn_weight = module.l1.weight.clone()
-        x = torch.rand((1, 1))
-        weight = torch.tensor([[1.0]])
-        bias = torch.tensor([0.0])
-        buffer = torch.tensor([0.0])
-        parameters = {'l1.weight': weight,
-                      'l1.bias': bias,
-                      'buffer': buffer}
-        res = torch.nn.utils._stateless.functional_call(module, parameters, x, apply_parametrizations=True)
-        self.assertEqual(x * 10, res)
-        # verify that the original reparametrization is still applied
-        self.assertTrue('l1.parametrizations.weight.original' in dict(module.named_parameters()))
-        self.assertEqual(orig_sn_weight, module.l1.weight)
-
-        # Parametrizations will be completely ignored and the provided value will be used instead
-        res = torch.nn.utils._stateless.functional_call(module, parameters, x, apply_parametrizations=False)
-        self.assertEqual(x, res)
 
 if __name__ == '__main__':
     run_tests()
