@@ -631,10 +631,12 @@
 
 - name: fmod.Scalar(Tensor self, Scalar other) -> Tensor
   self: grad
+  result: auto_element_wise
 
 - name: fmod.Tensor(Tensor self, Tensor other) -> Tensor
   self: grad
-  other: 'not_implemented("fmod: other")'
+  other: -grad * self.div(other, /*rounding_mode=*/"trunc")
+  result: self_t - other_t * self_p.div(other_p, /*rounding_mode=*/"trunc")
 
 - name: frac(Tensor self) -> Tensor
   self: grad
@@ -732,6 +734,7 @@
 
 - name: index.Tensor(Tensor self, Tensor?[] indices) -> Tensor
   self: index_backward(grad.new_zeros(self.sizes(), self.options()), indices, grad)
+  result: auto_linear
 
   # To avoid perf regression, we have 2 separate derivate formulas for index_add and index_add_
   # See: https://github.com/pytorch/pytorch/pull/65993#discussion_r729912376 for the discussion
@@ -1252,8 +1255,8 @@
 
 - name: remainder.Tensor(Tensor self, Tensor other) -> Tensor
   self: grad
-  # Use addition with zeros to get the proper broadcasting behavior
-  result: self_t.expand_as(result)
+  other: -grad * self.div(other, /*rounding_mode=*/"floor")
+  result: self_t - other_t * self_p.div(other_p, /*rounding_mode=*/"floor")
 
 - name: renorm(Tensor self, Scalar p, int dim, Scalar maxnorm) -> Tensor
   self: renorm_backward(grad, self, p, dim, maxnorm)
@@ -1469,8 +1472,17 @@
 - name: nansum.dim_IntList(Tensor self, int[1] dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor
   self: nansum_backward(grad.to(self.scalar_type()), self, dim, keepdim)
 
-- name: _svd_helper(Tensor self, bool some, bool compute_uv) -> (Tensor U, Tensor S, Tensor V)
-  self: svd_backward(grads, self, some, compute_uv, U, S, V)
+# We never call _linalg_svd with compute_uv=False in an autograd context, so we don't even consider it here
+- name: _linalg_svd(Tensor A, bool full_matrices=False, bool compute_uv=True) -> (Tensor U, Tensor S, Tensor Vh)
+  A: "svd_backward(full_matrices && grad_U.defined() ? grad_U.narrow(-1, 0, S.size(-1)) : grad_U,
+                   grad_S,
+                   full_matrices && grad_Vh.defined() ? grad_Vh.narrow(-2, 0, S.size(-1)) : grad_Vh,
+                   full_matrices ? U.narrow(-1, 0, S.size(-1)) : U,
+                   S,
+                   full_matrices ? Vh.narrow(-2, 0, S.size(-1)) : Vh)"
+  U: std::get<0>(linalg_svd_jvp(A_t, U, S, Vh, full_matrices))
+  S: std::get<1>(linalg_svd_jvp(A_t, U, S, Vh, full_matrices))
+  Vh: std::get<2>(linalg_svd_jvp(A_t, U, S, Vh, full_matrices))
 
 - name: symeig(Tensor self, bool eigenvectors=False, bool upper=True) -> (Tensor eigenvalues, Tensor eigenvectors)
   self: linalg_eig_backward(grads[0], grads[1], eigenvalues, eigenvectors_return, /*is_hermitian=*/true, /*symeig_eigenvector=*/eigenvectors)
@@ -2396,7 +2408,7 @@
 # NB2: The quotes around the gradient are needed to appease YAML parsing rules.
 - name: cudnn_batch_norm(Tensor input, Tensor weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool training, float exponential_average_factor, float epsilon) -> (Tensor, Tensor, Tensor, Tensor)
   input, weight, bias: "grad.defined() ? (training ? cudnn_batch_norm_backward(input, grad.contiguous(input.suggest_memory_format()), weight, running_mean, running_var, result1, result2, epsilon, retain_variables ? result3.clone() : result3) : native_batch_norm_backward(grad, input, weight, running_mean, running_var, result1, result2, training, epsilon, grad_input_mask)) : std::tuple<Tensor, Tensor, Tensor>()"
-  result0: batch_norm_jvp_saved_var(input_p, input_t, weight_p, weight_t, bias_p, bias_t, running_mean, running_var, result1, result2, training, epsilon)
+  result0: batch_norm_jvp(input_p, input_t, weight_p, weight_t, bias_p, bias_t, running_mean, running_var, result1, result2, training, epsilon)
 
 # HACK: save_mean and save_var are going to be passed in as
 # requires_grad variables (even though we'll never backprop through
@@ -2444,7 +2456,6 @@
 
 - name: miopen_batch_norm(Tensor input, Tensor weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool training, float exponential_average_factor, float epsilon) -> (Tensor, Tensor, Tensor)
   input, weight, bias: "grad.defined() ? (training ? miopen_batch_norm_backward(input, grad.contiguous(), weight, running_mean, running_var, result1, result2, epsilon) : native_batch_norm_backward(grad, input, weight, running_mean, running_var, result1, result2, training, epsilon, grad_input_mask)) : std::tuple<Tensor, Tensor, Tensor>()"
-  result0: batch_norm_jvp_saved_var(input_p, input_t, weight_p, weight_t, bias_p, bias_t, running_mean, running_var, result1, result2, training, epsilon)
 
 - name: miopen_batch_norm_backward(Tensor input, Tensor grad_output, Tensor weight, Tensor? running_mean, Tensor? running_var, Tensor? save_mean, Tensor? save_var, float epsilon) -> (Tensor, Tensor, Tensor)
   save_mean: not_implemented("miopen_batch_norm_backward save_mean")
@@ -2585,3 +2596,7 @@
 
 - name: _efficientzerotensor(int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   output_differentiability: [False]
+
+- name: scatter_reduce.two(Tensor self, int dim, Tensor index, str reduce, *, int? output_size=None) -> Tensor
+  self: scatter_reduce_backward(grad, self, dim, index, reduce, result)
+  index: non_differentiable
