@@ -3110,10 +3110,10 @@ class TestAutograd(TestCase):
 
         # real and imag are only implemented for complex tensors.
         y = torch.randn(10, 10, dtype=torch.cfloat)
-        for key in ['real', 'imag']:
-            self.assertRaises(RuntimeError, lambda: hasattr(x, key))
-            self.assertTrue(hasattr(y, key))
-            keys.remove(key)
+        imag_key = 'imag'
+        self.assertRaises(RuntimeError, lambda: hasattr(x, imag_key))
+        self.assertTrue(hasattr(y, imag_key))
+        keys.remove(imag_key)
 
         for key in keys:
             self.assertTrue(hasattr(x, key))
@@ -3502,13 +3502,6 @@ class TestAutograd(TestCase):
         w, v = torch.symeig(A, eigenvectors=False)
         with self.assertRaisesRegex(RuntimeError, 'is not differentiable'):
             torch.autograd.backward([w, v], [torch.ones_like(w), torch.ones_like(v)])
-
-    @skipIfNoLapack
-    def test_svd_no_singularvectors(self):
-        A = torch.randn(2, 2, dtype=torch.float32, requires_grad=True)
-        u, s, v = torch.svd(A, compute_uv=False)
-        with self.assertRaisesRegex(RuntimeError, 'cannot compute backward'):
-            torch.autograd.backward([u, s, v], [torch.ones_like(u), torch.ones_like(s), torch.ones_like(v)])
 
     def test_no_grad_copy(self):
         # create autograd function that saves grad pointer as class static
