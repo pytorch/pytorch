@@ -1,6 +1,7 @@
 #include <torch/csrc/jit/operator_upgraders/utils.h>
 
 #include <c10/util/Optional.h>
+#include <caffe2/serialize/versions.h>
 #include <torch/csrc/jit/operator_upgraders/version_map.h>
 #include <iostream>
 #include <regex>
@@ -71,6 +72,10 @@ std::vector<std::string> loadPossibleHistoricOps(
   }
 
   return possibleSchemas;
+}
+
+uint64_t getMaxOperatorVersion() {
+  return caffe2::serialize::kProducedFileFormatVersion;
 }
 
 } // namespace jit
