@@ -678,9 +678,9 @@ void embedding_bag_cpu_max_out(
       auto bag = offset2bag_data[i];
       auto word_idx = indices_data[i];
       TORCH_CHECK(
-          idx >= 0 && idx < vocab_size,
+          word_idx >= 0 && word_idx < vocab_size,
           "embedding_bag: Expected idx >= 0 && idx < num_embeddings but found idx to be ",
-          idx);
+          word_idx);
       if (word_idx != static_cast<index_t>(padding_idx)) {
         bool is_first_for_bag = bag_empty[bag];
         for (const auto dim : c10::irange(featureSize)) {

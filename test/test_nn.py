@@ -16921,9 +16921,15 @@ class TestNNDeviceType(NNTestCase):
         w_dtype, idx_dtype = dtypes
         idx = torch.tensor([[-1, -2]], device=device, dtype=idx_dtype)
         weight = torch.randn(10, 10, device=device, dtype=w_dtype)
-        per_sample_weight = torch.randn_like(idx, device=device, dtype=w_dtype)
-        for p_s_weights in (None, per_sample_weight):
-            with self.assertRaises(RuntimeError):
+        if mode == 'sum':
+            # Only `sum` supports per_sample_weight
+            per_sample_weights = (None, torch.randn_like(idx, device=device, dtype=w_dtype))
+        else:
+            per_sample_weights = (None,)
+
+        for p_s_weights in per_sample_weights:
+            msg = "Expected idx >= 0 && idx < num_embeddings"
+            with self.assertRaisesRegex(RuntimeError, msg):
                 torch.nn.functional.embedding_bag(idx, weight,
                                                   per_sample_weights=p_s_weights, padding_idx=padding_idx,
                                                   mode=mode)
