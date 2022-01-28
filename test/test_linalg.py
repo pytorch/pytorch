@@ -6065,46 +6065,37 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
                     self.assertRaises(RuntimeError, lambda: torch.bmm(b1, b2, out=res2.cpu()))
 
     def _test_addbmm_baddbmm(self, func, b1, b2, ref, out_tensor):
-        can_test_half_to_float_gemm = (out_tensor.is_cuda and out_tensor.dtype == torch.half and func == 'baddbmm')
+        should_test_half_to_float_gemm = (out_tensor.is_cuda and out_tensor.dtype == torch.half and func == 'baddbmm')
+        torch_func = getattr(torch, func)
+        def _test_wrapper(expected, *args, **kwargs):
+            result = torch_func(*args, **kwargs)
+            self.assertEqual(result, expected)
+            if should_test_half_to_float_gemm:
+                if 'out' in kwargs:
+                    result_float = torch.empty_like(result).float()
+                    kwargs['out'] = result_float
+                    torch_func(*args, **kwargs, dtype=torch.float)
+                else:
+                    result_float = torch_func(*args, **kwargs, dtype=torch.float)
+                self.assertEqual(result_float.dtype, torch.float)
+                self.assertEqual(result, result_float, exact_dtype=False)
 
         getattr(out_tensor, func + "_")(b1, b2)
         self.assertEqual(out_tensor, ref)
         getattr(out_tensor, func + "_")(b1, b2, beta=2, alpha=.5)
 
-        res4 = getattr(torch, func)(out_tensor, b1, b2, beta=1, alpha=.5)
-        self.assertEqual(res4, ref * 3)
-        if can_test_half_to_float_gemm:
-            res4_float = getattr(torch, func)(out_tensor, b1, b2, beta=1, alpha=.5, dtype=torch.float)
-            self.assertEqual(res4_float.dtype, torch.float)
-            self.assertEqual(res4, res4_float, exact_dtype=False)
+        _test_wrapper(ref*3, out_tensor, b1, b2, beta=1, alpha=.5)
 
         nan = torch.full_like(out_tensor, math.nan)
-        res5 = getattr(torch, func)(nan, b1, b2, beta=0, alpha=1)
-        self.assertEqual(res5, ref)
-        if can_test_half_to_float_gemm:
-            res5_float = getattr(torch, func)(nan, b1, b2, beta=0, alpha=1, dtype=torch.float)
-            self.assertEqual(res5_float.dtype, torch.float)
-            self.assertEqual(res5, res5_float, exact_dtype=False)
+        _test_wrapper(ref, nan, b1, b2, beta=0, alpha=1)
 
         if b1.is_complex():
-            res6 = getattr(torch, func)(out_tensor, b1, b2, beta=.1j, alpha=.5j)
-            self.assertEqual(res6, out_tensor * .1j + .5j * ref)
+            _test_wrapper(out_tensor * .1j + .5j * ref, out_tensor, b1, b2, beta=.1j, alpha=.5j)
         else:
-            res6 = getattr(torch, func)(out_tensor, b1, b2, beta=.1, alpha=.5)
-            self.assertEqual(res6, out_tensor * .1 + .5 * ref)
-            if can_test_half_to_float_gemm:
-                res6_float = getattr(torch, func)(out_tensor, b1, b2, beta=.1, alpha=.5, dtype=torch.float)
-                self.assertEqual(res6_float.dtype, torch.float)
-                self.assertEqual(res6, res6_float, exact_dtype=False)
+            _test_wrapper(out_tensor * .1 + .5 * ref, out_tensor, b1, b2, beta=.1, alpha=.5)
 
         res7 = torch.full_like(out_tensor, math.nan)
-        getattr(torch, func)(nan, b1, b2, beta=0, out=res7)
-        self.assertEqual(res7, ref)
-        if can_test_half_to_float_gemm:
-            res7_float = torch.full_like(out_tensor, math.nan).float()
-            getattr(torch, func)(nan, b1, b2, beta=0, dtype=torch.float, out=res7_float)
-            self.assertEqual(res7_float.dtype, torch.float)
-            self.assertEqual(res7, res7_float, exact_dtype=False)
+        _test_wrapper(ref, nan, b1, b2, beta=0, out=res7)
 
     @precisionOverride({torch.half: 0.05, torch.bfloat16: 0.05})
     @onlyNativeDeviceTypes
