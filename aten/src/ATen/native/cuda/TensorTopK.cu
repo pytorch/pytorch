@@ -372,6 +372,29 @@ __global__ void radixFindKthValues(
   }
 };
 
+int get_items_per_thread(uint64_t num_slices, uint64_t slice_size) {
+  // occupancy of this kernel is limited by registers per threads
+  constexpr int REGS_PER_THREAD = 40; // from nsight launch statistics
+  constexpr int REGS_PER_BLOCK = REGS_PER_THREAD * BLOCK_THREADS;
+  cudaDeviceProp* prop = at::cuda::getCurrentDeviceProperties();
+  int mpc = prop->multiProcessorCount;
+#if defined(USE_ROCM)
+  int regs_per_mp = prop->regsPerBlock;
+  int max_blocks_per_mp = 32;
+#else
+  int regs_per_mp = prop->regsPerMultiprocessor;
+#if defined(CUDA_VERSION) && CUDA_VERSION >= 11000
+  int max_blocks_per_mp = prop->maxBlocksPerMultiProcessor;
+#else
+  int max_blocks_per_mp = 32;
+#endif
+#endif
+  int blocks_per_mp = std::min(regs_per_mp / REGS_PER_BLOCK, max_blocks_per_mp);
+  int64_t items_per_thread = at::ceil_div((int64_t)(slice_size * num_slices), (int64_t)(mpc * blocks_per_mp * BLOCK_THREADS));
+  items_per_thread = std::max(4, std::min((int)items_per_thread, 64)); // clamp to (4, 64)
+  return items_per_thread;
+}
+
 template <typename T, typename IndexType, int Dim>
 void launch(
     at::cuda::detail::TensorInfo<T, IndexType> input,
@@ -389,20 +412,7 @@ void launch(
     IndexType indicesWithinSliceStride) {
 
   // configure items_per_thread based on device architecture and input size
-  // occupancy of this kernel is limited by registers per threads
-  constexpr int REGS_PER_THREAD = 40; // from nsight launch statistics
-  constexpr int REGS_PER_BLOCK = REGS_PER_THREAD * BLOCK_THREADS;
-  cudaDeviceProp* prop = at::cuda::getCurrentDeviceProperties();
-  int mpc = prop->multiProcessorCount;
-#if defined(USE_ROCM)
-  int regs_per_mp = prop->regsPerBlock;
-  int blocks_per_mp = regs_per_mp / REGS_PER_BLOCK;
-#else
-  int regs_per_mp = prop->regsPerMultiprocessor;
-  int blocks_per_mp = std::min(regs_per_mp / REGS_PER_BLOCK, prop->maxBlocksPerMultiProcessor);
-#endif
-  int64_t items_per_thread = at::ceil_div((int64_t)(inputSliceSize * numInputSlices), (int64_t)(mpc * blocks_per_mp * BLOCK_THREADS));
-  items_per_thread = std::max(4, std::min((int)items_per_thread, 64)); // clamp to (4, 64)
+  int items_per_thread = get_items_per_thread(numInputSlices, inputSliceSize);
   int items_per_block = items_per_thread * BLOCK_THREADS;
 
   using Bitwise = typename TopKTypeConfig<T>::RadixType;
@@ -483,9 +493,9 @@ void launch(
 
 bool should_use_multiblock(int64_t num_slices, int64_t slice_size) {
   // This heuristics is based on the experiment in https://github.com/pytorch/pytorch/pull/71081
-  return (num_slices < 200 && slice_size >= 5000) ||
-      (num_slices >= 200 && num_slices < 4000 && slice_size >= 400) ||
-      (num_slices >= 4000 && slice_size >= 200);
+  return (num_slices <= 400 && slice_size >= 5000) ||
+      (num_slices >= 400 && num_slices < 4000 && slice_size >= 1000) ||
+      (num_slices >= 4000 && slice_size >= 300);
 }
 
 void launch_gather_topk_kernel(
