@@ -94,7 +94,7 @@ def apply_masked_reduction_along_dim(op, input, *args, **kwargs):
         args0 = args
 
     # dimensions along which the reduction operation is applied:
-    dim_ = torch._masked._canonical_dim(dim, input.ndim)
+    dim_ = torch.masked._canonical_dim(dim, input.ndim)
     # slices in product(*ranges) define all elementary slices:
     ranges: List[Any] = []
     # shape of output for the keepdim=True case:
@@ -111,7 +111,7 @@ def apply_masked_reduction_along_dim(op, input, *args, **kwargs):
     output = input.new_full(shape, float('nan') if dtype.is_floating_point else 0, dtype=dtype)
 
     # apply op to all elementary slices:
-    inpmask = torch._masked._input_mask(input, mask=mask)
+    inpmask = torch.masked._input_mask(input, mask=mask)
     for s in itertools.product(*ranges):
         # data of an elementary slice is 1D sequence and has only
         # masked-in elements:
@@ -140,7 +140,7 @@ def apply_masked_normalization_along_dim(op, input, *args, **kwargs):
     dim = args[dim_pos]
     args0 = args[:dim_pos] + (0,) + args[dim_pos + 1:]
     output = torch.zeros_like(input, dtype=dtype)
-    inpmask = torch._masked._input_mask(input, mask=mask)
+    inpmask = torch.masked._input_mask(input, mask=mask)
     dim_ = dim % input.ndim
     left_ranges = tuple(map(range, input.shape[:dim_]))
     right_ranges = tuple(map(range, input.shape[dim_ + 1:]))
@@ -180,7 +180,7 @@ class TestMasked(TestCase):
                 continue
             actual = op.op(t_inp, *t_args, **t_kwargs)
             expected = ref_op(t_inp, *t_args, **t_kwargs)
-            outmask = torch._masked._output_mask(op.op, t_inp, *t_args, **t_kwargs)
+            outmask = torch.masked._output_mask(op.op, t_inp, *t_args, **t_kwargs)
             actual = torch.where(outmask, actual, actual.new_zeros([]))
             expected = torch.where(outmask, expected, expected.new_zeros([]))
             self.assertEqual(actual, expected, exact_device=False)
