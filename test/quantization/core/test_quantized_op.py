@@ -3685,7 +3685,6 @@ class TestQuantizedEmbeddingOps(TestCase):
     @given(num_embeddings=st.integers(10, 100),
            embedding_dim=st.integers(5, 50).filter(lambda x: x % 4 == 0))
     def test_embedding(self, num_embeddings, embedding_dim):
-        self.assertEquals(2, 4)
         dtypes = [torch.quint8, torch.quint4x2]
         quant_ops = [torch.ops.quantized.embedding_byte, torch.ops.quantized.embedding_4bit]
         atols = [0.005, 0.1]
