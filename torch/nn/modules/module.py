@@ -319,14 +319,10 @@ class Module:
                             "(torch Tensor or None required)"
                             .format(torch.typename(tensor), name))
         else:
-            print("0")
             self._buffers[name] = tensor
-            print("1")
             if persistent:
-                print("2")
                 self._non_persistent_buffers_set.discard(name)
             else:
-                print("3")
                 self._non_persistent_buffers_set.add(name)
 
     def register_parameter(self, name: str, param: Optional[Parameter]) -> None:
