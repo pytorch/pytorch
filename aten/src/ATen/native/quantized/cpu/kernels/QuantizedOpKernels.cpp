@@ -41,18 +41,6 @@ void check_tensor_memory_format(const Tensor& ref, const Tensor& other) {
 //
 // Please read the README.md in this directory before editing this file
 
-bool all_inputs_sharing_scale_and_zero_point(
-    const c10::List<Tensor>& qxs,
-    double scale,
-    int64_t zero_point) {
-  bool is_valid = true;
-  for (const auto i : c10::irange(qxs.size())) {
-    is_valid |= qxs[i].q_scale() == scale;
-    is_valid |= qxs[i].q_zero_point() == zero_point;
-  }
-  return is_valid;
-}
-
 template <bool ReLUFused = false>
 Tensor qcat_nhwc_kernel(
     const c10::List<Tensor>& qxs,
@@ -67,6 +55,7 @@ Tensor qcat_nhwc_kernel(
   std::vector<double> scales;
   std::vector<int64_t> zero_pts;
   std::vector<void*> data_ptrs;
+  std::vector<bool> is_fast_path;
 
   // NOLINTNEXTLINE(performance-implicit-conversion-in-loop)
   for (const at::Tensor& qx : qxs) {
@@ -98,6 +87,9 @@ Tensor qcat_nhwc_kernel(
     scales.push_back(qx.q_scale());
     zero_pts.push_back(qx.q_zero_point());
     data_ptrs.push_back(qx.data_ptr());
+    is_fast_path.push_back(
+        qx.q_scale() == scale &&
+        qx.q_zero_point() == zero_point);
   }
 
   const int64_t N = qx0.size(0);
@@ -112,12 +104,6 @@ Tensor qcat_nhwc_kernel(
       scale,
       zero_point,
       c10::nullopt);
-
-  // all the inputs and output have the same scale and zero_point,
-  // skip quant/dequant and directly do memcpy.
-  bool is_fast_path =
-      all_inputs_sharing_scale_and_zero_point(qxs, scale, zero_point) &&
-      !ReLUFused;
 
   // N, H, and W are explicitly captured here because there's a bug in GCC5
   // which causes an internal compiler error if they're not
@@ -139,7 +125,7 @@ Tensor qcat_nhwc_kernel(
               reinterpret_cast<scalar_t::underlying*>(data_ptrs[tidx]) +
               i * curr_C;
 
-          if (is_fast_path) {
+          if (is_fast_path[i] && !ReLUFused) {
             std::memcpy(optr, iptr, curr_C * sizeof(typename scalar_t::underlying));
             continue;
           }
