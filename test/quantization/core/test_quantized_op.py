@@ -1068,7 +1068,7 @@ class TestQuantizedOps(TestCase):
 
     """Tests pixel shuffle operation on quantized tensors."""
     def test_pixel_shuffle(self):
-        upscales= (2, 3)
+        upscales = (2, 3)
         shapes = ((4, 4, 4, 4), (1, 17, 3, 4))
         memory_formats = (torch.channels_last, torch.contiguous_format)
         dtype = torch.quint8
