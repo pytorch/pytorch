@@ -5618,8 +5618,11 @@ for shape in [(1,), ()]:
 
             gradcheck(MyFn.apply, (x, y), check_forward_ad=True)
 
-        # None of the inputs require grad
-        # The second output should be equivalent to case 1b below
+        # Below, we check when some outputs are "non-differentiable" in
+        # _process_backward_ad.
+
+        # Case 1: None of the inputs require grad
+        # The second output should be equivalent to case B below
         class MyFn2(torch.autograd.Function):
             @staticmethod
             def forward(ctx, x, y):
@@ -5636,9 +5639,12 @@ for shape in [(1,), ()]:
         with fwAD.dual_level():
             x_dual = fwAD.make_dual(x, t)
             _, out2 = MyFn2.apply(x_dual, y)
+            self.assertFalse(out2 is x)
+            self.assertTrue(out2._is_view())
+            self.assertTrue(out2._base is x)
             self.assertTrue(fwAD.unpack_dual(out2).tangent._base is t)
 
-        # At least one, but not all inputs requires grad
+        # Case 2: At least one, but not all inputs requires grad
         class MyFn2(torch.autograd.Function):
             @staticmethod
             def forward(ctx, x, y, z):
@@ -5664,9 +5670,8 @@ for shape in [(1,), ()]:
             z_dual = fwAD.make_dual(z, t3)
             out1, out2, out3, out4 = MyFn2.apply(x_dual, y_dual, z_dual)
 
-            # Case 1: not differentiable
-            # Case 1a: non-differentiable because marked not differentiable -> detach()
-            # out1 is not a view of x, but is aliased to x
+            # A) non-differentiable because marked not differentiable -> detach()
+            # expect: out1 is not a view of x, but is aliased to x
             self.assertFalse(out1 is x)
             x_clone = x.clone()
             out1 += 1
@@ -5674,22 +5679,23 @@ for shape in [(1,), ()]:
             self.assertFalse(out1._is_view())
             self.assertIsNone(fwAD.unpack_dual(out1).tangent)
 
-            # Case 1b: non-differentiable because input does not requires grad
+            # B) non-differentiable because input does not requires grad
             # (this is equivalent to the case where the tensor is a non-differentiable type)
-            # out2 is a view of y
+            # expect: out2 is a view of y and its tangent's base is y's tangent
             self.assertFalse(out2 is y)
             self.assertTrue(out2._is_view())
             self.assertTrue(out2._base is y)
             self.assertTrue(fwAD.unpack_dual(out2).tangent._base is t2)
 
-            # Case 2: differentiable
-            # perform a view, AND the tangent's base is z's tangent
+            # C) check the "differentiable" case still work even if there are
+            # other inputs that are non-differentiable (for _process_backward_ad)
+            # expect: out3 is a view of z and its tangent's base is z's tangent
             self.assertFalse(out3 is z)
             self.assertTrue(out3._is_view())
             self.assertTrue(out3._base is z)
             self.assertTrue(fwAD.unpack_dual(out3).tangent._base is t3)
 
-            # Case 3: differentiable, and not an input
+            # D) returning an output that is not an input behaves as expected
             self.assertTrue(torch.allclose(t2 + t3, fwAD.unpack_dual(out4).tangent))
 
     def test_custom_function_save_for_forward(self):
