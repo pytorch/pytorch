@@ -685,7 +685,7 @@ ReductionParams OuterPersistentHeuristic(
              max_input_dtype_size * 4 >
          scheduler_utils::register_file_size * 3) {
     if (bdimx == 1) {
-      TORCH_INTERNAL_ASSERT("Error generating persistent kernel.");
+      TORCH_INTERNAL_ASSERT(false, "Error generating persistent kernel.");
     }
     bdimx = ceilDiv(bdimx, 2);
   }
