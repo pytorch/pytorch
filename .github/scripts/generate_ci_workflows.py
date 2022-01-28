@@ -169,6 +169,8 @@ class CIWorkflow:
     timeout_after: int = 240
     xcode_version: str = ''
     only_on_pr: bool = False
+    ios_arch: str = ''
+    ios_platform: str = ''
 
     # The following variables will be set as environment variables,
     # so it's easier for both shell and Python scripts to consume it if false is represented as the empty string.
@@ -713,6 +715,8 @@ IOS_WORKFLOWS = [
     CIWorkflow(
         arch="macos",
         build_environment="ios-12-5-1-arm64",
+        ios_arch="arm64",
+        ios_platform="OS",
         test_runner_type=MACOS_TEST_RUNNER_10_15,
         exclude_test=True,
         ciflow_config=CIFlowConfig(
@@ -722,6 +726,8 @@ IOS_WORKFLOWS = [
     CIWorkflow(
         arch="macos",
         build_environment="ios-12-5-1-arm64-coreml",
+        ios_arch="arm64",
+        ios_platform="OS",
         test_runner_type=MACOS_TEST_RUNNER_10_15,
         exclude_test=True,
         ciflow_config=CIFlowConfig(
@@ -731,6 +737,8 @@ IOS_WORKFLOWS = [
     CIWorkflow(
         arch="macos",
         build_environment="ios-12-5-1-arm64-full-jit",
+        ios_arch="arm64",
+        ios_platform="OS",
         test_runner_type=MACOS_TEST_RUNNER_10_15,
         exclude_test=True,
         ciflow_config=CIFlowConfig(
@@ -740,6 +748,8 @@ IOS_WORKFLOWS = [
     CIWorkflow(
         arch="macos",
         build_environment="ios-12-5-1-arm64-custom-ops",
+        ios_arch="arm64",
+        ios_platform="OS",
         test_runner_type=MACOS_TEST_RUNNER_10_15,
         exclude_test=True,
         ciflow_config=CIFlowConfig(
@@ -749,6 +759,8 @@ IOS_WORKFLOWS = [
     CIWorkflow(
         arch="macos",
         build_environment="ios-12-5-1-arm64-metal",
+        ios_arch="arm64",
+        ios_platform="OS",
         test_runner_type=MACOS_TEST_RUNNER_10_15,
         exclude_test=True,
         ciflow_config=CIFlowConfig(
@@ -758,6 +770,8 @@ IOS_WORKFLOWS = [
     CIWorkflow(
         arch="macos",
         build_environment="ios-12-5-1-x86-64",
+        ios_arch="x86_64",
+        ios_platform="SIMULATOR",
         test_runner_type=MACOS_TEST_RUNNER_10_15,
         exclude_test=True,
         ciflow_config=CIFlowConfig(
@@ -767,6 +781,8 @@ IOS_WORKFLOWS = [
     CIWorkflow(
         arch="macos",
         build_environment="ios-12-5-1-x86-64-coreml",
+        ios_arch="x86_64",
+        ios_platform="SIMULATOR",
         test_runner_type=MACOS_TEST_RUNNER_10_15,
         exclude_test=True,
         ciflow_config=CIFlowConfig(
@@ -776,6 +792,8 @@ IOS_WORKFLOWS = [
     CIWorkflow(
         arch="macos",
         build_environment="ios-12-5-1-x86-64-full-jit",
+        ios_arch="x86_64",
+        ios_platform="SIMULATOR",
         test_runner_type=MACOS_TEST_RUNNER_10_15,
         exclude_test=True,
         ciflow_config=CIFlowConfig(
