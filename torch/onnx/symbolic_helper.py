@@ -488,7 +488,7 @@ def _unsqueeze_helper(g, input, axes_i):
             axes_t = axes_i[0]
             return g.op("Unsqueeze", input, axes_t)
         else:
-            raise ValueError("Unsupported Unsqueeze dynamic axes ONNX opset version: " + str(_export_onnx_opset_version))
+            raise ValueError("Opset version must be >= 13 for Unsqueeze with dynamic axes.")
 
 def _squeeze_helper(g, input, axes_i):
     if _is_constant(axes_i[0]):
@@ -508,9 +508,9 @@ def _squeeze_helper(g, input, axes_i):
             elif axes_rank == 1:
                 return g.op("Squeeze", input, axes_t)
             else:
-                raise ValueError("For squeeze axses as input, the rank must be one in ONNX spec")
+                raise ValueError("For Squeeze axses as input, the rank must be one in ONNX spec")
         else:
-            raise ValueError("Unsupported Squeeze dynamic axes ONNX opset version: " + str(_export_onnx_opset_version))
+            raise ValueError("Opset version must be >= 13 for Squeeze with dynamic axes.")
 
 def _reducesum_helper(g, input, axes_i=None, keepdims_i=1, noop_with_empty_axes_i=0):
     keepdims_i = _maybe_get_const(keepdims_i, "i")
