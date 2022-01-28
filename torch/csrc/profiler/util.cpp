@@ -373,8 +373,8 @@ uint64_t computeFlops(
       return 0;
     }
 
-    const std::vector<int64_t> input_sizes = input_sizes_ref.toIntVector();
-    const std::vector<int64_t> kernel_sizes = kernel_sizes_ref.toIntVector();
+    const auto input_sizes = input_sizes_ref.toDimVector();
+    const auto kernel_sizes = kernel_sizes_ref.toDimVector();
     const uint64_t groups = groups_ref.toInt();
     const std::vector<int64_t> padding = padding_ref.toIntVector();
     const std::vector<int64_t> stride = stride_ref.toIntVector();
@@ -437,8 +437,8 @@ uint64_t computeFlops(
       return 0;
     }
 
-    std::vector<int64_t> mat1_size = mat1_sizes_ref.toIntVector();
-    std::vector<int64_t> mat2_size = mat2_sizes_ref.toIntVector();
+    const auto mat1_size = mat1_sizes_ref.toDimVector();
+    const auto mat2_size = mat2_sizes_ref.toDimVector();
     if (mat1_size.size() == 0) {
       return 0;
     }
@@ -478,8 +478,8 @@ uint64_t computeFlops(
       return 0;
     }
 
-    std::vector<int64_t> mat1_size = mat1_sizes_ref.toIntVector();
-    std::vector<int64_t> mat2_size = mat2_sizes_ref.toIntVector();
+    const auto mat1_size = mat1_sizes_ref.toDimVector();
+    const auto mat2_size = mat2_sizes_ref.toDimVector();
     if (mat1_size.size() == 0) {
       return 0;
     }
@@ -519,7 +519,7 @@ uint64_t computeFlops(
       return 0;
     }
 
-    std::vector<int64_t> mat_size = mat_sizes.toIntVector();
+    const auto mat_size = mat_sizes.toDimVector();
     uint64_t flops = 1;
     for (int64_t dim : mat_size) {
       flops *= dim;
@@ -538,7 +538,7 @@ uint64_t computeFlops(
       return 0;
     }
 
-    std::vector<int64_t> mat_size = mat_sizes.toIntVector();
+    const auto mat_size = mat_sizes.toDimVector();
     uint64_t flops = 1;
     for (int64_t dim : mat_size) {
       flops *= dim;

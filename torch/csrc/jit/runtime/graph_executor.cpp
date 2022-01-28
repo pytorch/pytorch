@@ -792,7 +792,7 @@ void GraphExecutor::debugFlushCompilationCache() {
     ppImpl->debugFlushCompilationCache();
   } else {
     // we are deprecating legacy executor
-    TORCH_INTERNAL_ASSERT("Not Implemented for Legacy Executor");
+    TORCH_INTERNAL_ASSERT(false, "Not Implemented for Legacy Executor");
   }
 }
 
@@ -963,7 +963,7 @@ void runOptimization(
   HoistCommonExpression(graph);
   GRAPH_DEBUG("After HoistCommonExpression, before CheckInplace\n", *graph);
   CheckInplace(graph);
-  GRAPH_DEBUG("After CheckInplace (end of runOptimization)", *graph);
+  GRAPH_DEBUG("After CheckInplace (end of runOptimization)\n", *graph);
 }
 
 Node* replaceBlockWithFallbackGraph(Block* b, ArrayRef<Value*> inputs) {
