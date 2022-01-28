@@ -1260,6 +1260,37 @@ class TestTEFuser(JitTestCase):
                     " ".join(["Failed:", str(dtype), 'isnan', device])
                 )
 
+    def test_gelu(self):
+        def apply(fn):
+            return lambda x, approximate: fn(x, approximate)
+
+        unary_ops = [
+            F.gelu,
+        ]
+        sizes = [(1,), (2,), (4, 4)]
+        for dtype, op, device, size in product(self.dtypes, unary_ops, self.devices, sizes):
+            # TODO: Add back when https://github.com/pytorch/pytorch/issues/55905 is closed
+            if dtype in [torch.float16, torch.bfloat16] and device == "cpu":
+                continue
+            try:
+                x = self.data_for(dtype, device, size=size)
+                cond = self.data_for(torch.bool, device)
+                fn = apply(op)
+                ref = fn(x, cond)
+            except Exception:
+                # If eager mode doesn't support a dtype/op/device combo,
+                # neither does the fuser.  Catch everything to avoid needing to
+                # guess what errors might be thrown by eager.
+                continue
+            try:
+                t = torch.jit.trace(fn, (x, cond))
+                torch.testing.assert_close(ref, t(x, cond))
+                self.assertAllFused(t.graph_for(x, cond))
+            except Exception as e:
+                raise RuntimeError(
+                    " ".join(["Failed:", str(dtype), op.__name__, device, str(size)])
+                )
+
     def test_unary_ops(self):
         def apply(fn):
             return lambda x: fn(x)
@@ -1294,7 +1325,6 @@ class TestTEFuser(JitTestCase):
             F.softplus,
             torch.sqrt,
             torch.rsqrt,
-            F.gelu,
             torch.abs,
             torch.ceil,
             torch.floor,
@@ -1385,6 +1415,63 @@ class TestTEFuser(JitTestCase):
                 raise RuntimeError(
                     " ".join(["Failed:", str(dtype), op.__name__, device])
                 )
+
+    def test_binary_scalar_ops(self):
+        def apply(fn):
+            return lambda x, y: fn(x, y)
+        ir_template = """
+        graph(%x : {dtype_x}, %y : {dtype_y}):
+          %z = {op}(%x, %y)
+          return (%z)"""
+
+        binary_ops = [
+            "aten::mul",
+            "aten::add",
+            "aten::sub",
+            "aten::div",
+            "aten::lt",
+            "aten::le",
+            "aten::eq",
+            "aten::ne",
+            "aten::gt",
+            "aten::ge",
+            "aten::__or__",
+            "aten::__xor__",
+            "aten::__and__",
+            "aten::__lshift__",
+            "aten::__rshift__",
+        ]
+        dtypes = ['int', 'float', 'bool']
+        values = {'int' : [10, 3], 'float' : [12.34, 2.78], 'bool' : [True, False]}
+        devices = self.devices
+        for dtype_x, dtype_y, op, device in product(dtypes, dtypes, binary_ops, devices):
+            code = ir_template.format(**locals())
+
+            # Interpret the graph
+            try:
+                graph = torch._C.parse_ir(code)
+                for x, y in product(values[dtype_x], values[dtype_y]):
+                    ref = torch._C._jit_interpret_graph(graph, (x, y))
+            except Exception:
+                # If we can't interpret this IR, don't bother checking NNC.
+                continue
+
+            print(graph)
+
+            # Compile the graph
+            try:
+                k = torch._C._te.TensorExprKernel(graph)
+            except Exception as e:
+                raise RuntimeError(" ".join(["Compilation failed:", device, str(code)]))
+
+            # Run the graph
+            for x, y in product(values[dtype_x], values[dtype_y]):
+                ref = torch._C._jit_interpret_graph(graph, (x, y))
+                try:
+                    res = k.run((x, y))
+                    self.assertEqual(ref, res)
+                except Exception as e:
+                    raise RuntimeError(" ".join(["Failed at runtime:", device, str(x), str(y), str(code)]))
 
     def test_matmul(self):
         def fn(x, y):
@@ -2058,8 +2145,7 @@ class TestTEFuser(JitTestCase):
 
             funcs = [foo, fi, fum]
             with inline_fusion_groups():
-                # TODO: cuda ir eval error
-                for device in ['cpu']:
+                for device in self.devices:
                     I = partial(torch.randint, 0, 100, device=device)
                     R = partial(torch.randn, device=device)
 
@@ -2151,7 +2237,6 @@ works_list = [
     'mul',
     'ne',
     'neg',
-    'nn.functional.gelu',
     'nn.functional.hardshrink',
     'nn.functional.hardsigmoid',
     'nn.functional.hardswish',
@@ -2212,7 +2297,7 @@ works_list = [
 ]
 
 known_failures = [
-    '__rmatmul__'
+    '__rmatmul__',
     'frac',
     'matmul',
 ]

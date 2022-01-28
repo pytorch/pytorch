@@ -1104,6 +1104,27 @@ class TestShardedTensorChunked(ShardedTensorTestBase):
             state_dict_deser = torch.load(buffer)
         rpc.shutdown()
 
+    @with_comms
+    @skip_if_lt_x_gpu(4)
+    @requires_nccl()
+    def test_cleanup(self):
+
+        def create_tensors():
+            spec = ChunkShardingSpec(
+                dim=0,
+                placements=[
+                    "rank:0/cuda:0",
+                    "rank:1/cuda:1",
+                    "rank:2/cuda:2",
+                    "rank:3/cuda:3",
+                ],
+            )
+            st1 = _sharded_tensor.empty(spec, 10, 20, init_rrefs=True)
+            st2 = _sharded_tensor.empty(spec, 10, 20)
+
+        create_tensors()
+        self.assertEqual(0, len(_sharded_tensor.api._sharded_tensor_map))
+
 
 class TestShardedTensorEnumerable(ShardedTensorTestBase):
 
