@@ -134,7 +134,7 @@ genrule(
     name = "generated_aten_unboxing_cpp",
     srcs = aten_generation_srcs,
     outs = generated_unboxing_cpp,
-    cmd = "$(location :gen_unboxing) --source-path aten/src/ATen --install_dir `dirname $(location aten/src/ATen/Declarations.yaml)`",
+    cmd = "$(location :gen_unboxing) --source-path aten/src/ATen --install_dir aten/src/ATen",
     tools = [":gen_unboxing"],
 )
 
