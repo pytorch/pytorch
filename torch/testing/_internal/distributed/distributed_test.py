@@ -5561,9 +5561,20 @@ class DistributedTest:
         def _test_gather_object(self, pg=None):
             # Ensure stateful objects can be gathered
             gather_objects = COLLECTIVES_OBJECT_TEST_LIST.copy()
+            my_rank = dist.get_rank(pg)
+
+            backend = os.environ["BACKEND"]
+            if backend == "nccl":
+                # Case where rank != GPU device.
+                next_rank = (self.rank + 1) % int(self.world_size)
+                torch.cuda.set_device(next_rank)
+
+            # If GPU test, add object with GPU tensor
+            if backend == "nccl":
+                gather_objects.append(Foo(torch.randn(3, 3, device=my_rank)))
+
             output_gathered = [None for _ in range(dist.get_world_size(pg))]
             gather_on_rank = 0
-            my_rank = dist.get_rank(pg)
             dist.gather_object(
                 gather_objects[self.rank % len(gather_objects)],
                 object_gather_list=output_gathered
@@ -5594,14 +5605,12 @@ class DistributedTest:
                     group=pg
                 )
 
-        @require_backend({"gloo"})
-        @sandcastle_skip_if(BACKEND == "nccl", "NCCL does not support gather_object")
+        @require_backend(DistTestCases.backend_feature["gpu"])
         @with_dist_debug_levels(levels=["DETAIL", "OFF", "INFO"])
         def test_gather_object(self):
             return self._test_gather_object()
 
-        @require_backend({"gloo"})
-        @sandcastle_skip_if(BACKEND == "nccl", "NCCL does not support gather_object")
+        @require_backend(DistTestCases.backend_feature["gpu"])
         @with_dist_debug_levels(levels=["DETAIL", "OFF", "INFO"])
         def test_gather_object_subgroup(self):
             default = _get_default_group()

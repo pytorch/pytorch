@@ -626,8 +626,10 @@ def _collect_local_shard(module: torch.nn.Module) -> torch.nn.Module:
         if isinstance(output, ShardedTensor):
             local_tensor = output.local_tensor()
             # Squeeze the # of dimensions manually.
-            if local_tensor.size(output._sharding_spec.dim) == 1:
-                local_tensor = local_tensor.squeeze(output._sharding_spec.dim)
+            if local_tensor.size(output._sharding_spec.dim) == 1:  # type: ignore[attr-defined]
+                local_tensor = local_tensor.squeeze(
+                    output._sharding_spec.dim  # type: ignore[attr-defined]
+                )
             return local_tensor
         return output
 

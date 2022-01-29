@@ -4112,7 +4112,10 @@ Tensor embedding_dense_double_backward(const Tensor & grad, const Tensor & indic
 }
 
 Tensor index_backward(Tensor zeros_like_self, const torch::List<c10::optional<Tensor>>& indices, const Tensor& grad) {
-  return at::_index_put_impl_(zeros_like_self, indices, grad, true, true);
+  return (areAnyTensorSubclassLike({zeros_like_self, grad}) ||
+          areAnyOptionalTensorSubclassLike(indices))
+      ? zeros_like_self.index_put(indices, grad, true)
+      : at::_index_put_impl_(zeros_like_self, indices, grad, true, true);
 }
 
 Tensor _cudnn_ctc_loss_backward(const Tensor& grad_out, const Tensor& loss, const Tensor& raw_grad, bool zero_infinity) {
@@ -4819,21 +4822,6 @@ Tensor batch_norm_jvp(
       weight_p.defined() ? weight_p.view(view_size) : weight_p,
       weight_t.defined() ? weight_t.view(view_size) : weight_t,
       bias_t.defined() ? bias_t.view(view_size) : bias_t);
-}
-
-Tensor batch_norm_jvp_saved_var(
-    const Tensor& input_p, const Tensor& input_t,
-    const Tensor& weight_p, const Tensor& weight_t,
-    const Tensor& bias_p, const Tensor& bias_t,
-    const c10::optional<Tensor>& running_mean,
-    const c10::optional<Tensor>& running_var,
-    const Tensor& saved_mean, const Tensor& saved_var,
-    bool train,
-    double eps) {
-  auto saved_invstd = (1 / at::sqrt(saved_var + at::Scalar(eps)));
-  return batch_norm_jvp(
-      input_p, input_t, weight_p, weight_t, bias_p, bias_t, running_mean, running_var,
-      saved_mean, saved_invstd, train, eps);
 }
 
 Tensor layer_norm_jvp(

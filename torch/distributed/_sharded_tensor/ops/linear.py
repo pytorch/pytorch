@@ -213,10 +213,10 @@ def _handle_col_wise_sharding(input, world_size, weight, rank, local_shard_t, bi
         results[indices[i]] = inp.matmul(local_shard_t) + local_bias
     # When the local result only has one dimension, we need to make sure
     # it does not shard by dim 0. So reshard can work properly.
-    if results[0].dim() == 1:
-        result = torch.stack(results)
+    if results[0].dim() == 1:  # type: ignore[attr-defined]
+        result = torch.stack(results)  # type: ignore[arg-type]
     else:
-        result = torch.cat(results)
+        result = torch.cat(results)  # type: ignore[arg-type]
     return _init_sharded_tensor_from_local_result(
         weight, result, 0, -1, world_size, pg  # type: ignore[arg-type]
     )
