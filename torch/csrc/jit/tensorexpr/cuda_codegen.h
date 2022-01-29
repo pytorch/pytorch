@@ -278,8 +278,11 @@ class TORCH_CUDA_CU_API CudaCodeGen : public CodeGen {
   int thread_block_size_ = -1;
 
 #ifdef TORCH_ENABLE_LLVM
-  std::vector<ExprEval<LLVMCodeGen>> block_extents_compiled_;
-  std::vector<ExprEval<LLVMCodeGen>> thread_extents_compiled_;
+  std::vector<ExprEval<LLVMCodeGen>> block_extents_eval_;
+  std::vector<ExprEval<LLVMCodeGen>> thread_extents_eval_;
+#else
+  std::vector<ExprEval<SimpleIREvaluator>> block_extents_eval_;
+  std::vector<ExprEval<SimpleIREvaluator>> thread_extents_eval_;
 #endif
 
   std::string GetUniqueFuncName(const std::string& func_prefix);
