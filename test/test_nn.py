@@ -16916,18 +16916,21 @@ class TestNNDeviceType(NNTestCase):
     @dtypes(*itertools.product((torch.float, torch.double), (torch.int, torch.long)))
     @parametrize_test("padding_idx", [None, 0])
     @parametrize_test("mode", ["sum", "mean", "max"])
-    def test_embedding_bag_negative_idx(self, device, dtypes, padding_idx, mode):
+    def test_embedding_bag_out_of_bounds_idx(self, device, dtypes, padding_idx, mode):
         padding_idx = 0
         w_dtype, idx_dtype = dtypes
-        idx = torch.tensor([[-1, -2]], device=device, dtype=idx_dtype)
-        weight = torch.randn(10, 10, device=device, dtype=w_dtype)
+        # negative out-of-bound
+        idx1 = torch.tensor([[-1, 1]], device=device, dtype=idx_dtype)
+        # positive out-of-bound
+        idx2 = torch.tensor([[11, 8]], device=device, dtype=idx_dtype)
+        weight = torch.randn(10, 2, device=device, dtype=w_dtype)
         if mode == 'sum':
             # Only `sum` supports per_sample_weight
-            per_sample_weights = (None, torch.randn_like(idx, device=device, dtype=w_dtype))
+            per_sample_weights = (None, torch.randn_like(idx1, device=device, dtype=w_dtype))
         else:
             per_sample_weights = (None,)
 
-        for p_s_weights in per_sample_weights:
+        for p_s_weights, idx in itertools.product(per_sample_weights, (idx1, idx2)):
             msg = "Expected idx >= 0 && idx < num_embeddings"
             with self.assertRaisesRegex(RuntimeError, msg):
                 torch.nn.functional.embedding_bag(idx, weight,
