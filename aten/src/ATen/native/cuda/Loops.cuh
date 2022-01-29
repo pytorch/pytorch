@@ -143,12 +143,6 @@ void jitted_gpu_kernel(
     std::tuple<Args...> extra_args = std::make_tuple()) {
   // TODO: much of preamble is common to both jitted_gpu_kernel and gpu_kernel
   //   Maybe it could be refactored?
-  static_assert((!std::is_same<return_type, c10::complex<double>>::value &&
-  !std::is_same<return_type, c10::complex<float>>::value), "complex types are not supported \
-  in jiterator functors");
-  static_assert((!std::is_same<f_inputs_type, c10::complex<double>>::value &&
-  !std::is_same<return_type, c10::complex<float>>::value), "complex types are not supported \
-  in jiterator functors");
   for (int arg = 0; arg < iter.ntensors(); arg++) {
     TORCH_INTERNAL_ASSERT(
       iter.device(arg).is_cuda(),
@@ -189,10 +183,8 @@ void jitted_gpu_kernel(
     const auto dtypei = iter.dtype(i);
     if (dtypei != inputs_scalar_type) {
       needs_dynamic_casting = true;
-      // NOTE: can't short-circuit here yet because the dtype check below needs to run on every arg
+      break;
     }
-    TORCH_CHECK(dtypei != kComplexDouble && dtypei != kComplexFloat,
-                "Encountered an unsupported dtype ", dtypei, "!");
   }
   if (scalar_pos == at::cuda::jit::BinaryFuncVariant::NoScalar) {
     // NOTE: With `scalar_pos=NoScalar`,`scalar_val` is not used

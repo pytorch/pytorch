@@ -833,6 +833,7 @@
   dispatch:
     CPU: baddbmm_out_cpu
     CUDA: baddbmm_out_cuda
+    SparseCsrCUDA: baddbmm_out_sparse_csr_cuda
 
 - func: bartlett_window(int window_length, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
 
@@ -1062,6 +1063,7 @@
     CUDA: bmm_out_cuda
     SparseCPU: bmm_out_sparse_cpu
     SparseCUDA: bmm_out_sparse_cuda
+    SparseCsrCUDA: bmm_out_sparse_csr_cuda
 
 - func: broadcast_tensors(Tensor[] tensors) -> Tensor[]
   device_check: NoCheck
@@ -9694,20 +9696,18 @@
   structured: True
   dispatch:
     CPU: _upsample_bilinear2d_aa_out_cpu
-    # CUDA: upsample_bilinear2d_out_cuda
+    CUDA: _upsample_bilinear2d_aa_out_cuda
 
 - func: _upsample_bilinear2d_aa(Tensor self, int[2] output_size, bool align_corners, float? scales_h=None, float? scales_w=None) -> Tensor
   python_module: nn
   structured_delegate: _upsample_bilinear2d_aa.out
-  # dispatch:
-  #   QuantizedCPU: _upsample_bilinear2d_aa_quantized_cpu
 
 - func: _upsample_bilinear2d_aa_backward.grad_input(Tensor grad_output, int[2] output_size, int[4] input_size, bool align_corners, float? scales_h=None, float? scales_w=None, *, Tensor(a!) grad_input) -> Tensor(a!)
   python_module: nn
   structured: True
   dispatch:
     CPU: _upsample_bilinear2d_aa_backward_out_cpu
-    # CUDA: upsample_bilinear2d_backward_out_cuda
+    CUDA: _upsample_bilinear2d_aa_backward_out_cuda
 
 - func: _upsample_bilinear2d_aa_backward(Tensor grad_output, int[2] output_size, int[4] input_size, bool align_corners, float? scales_h=None, float? scales_w=None) -> Tensor
   python_module: nn
@@ -9740,6 +9740,7 @@
   structured: True
   dispatch:
     CPU: _upsample_bicubic2d_aa_out_cpu
+    CUDA: _upsample_bicubic2d_aa_out_cuda
 
 - func: _upsample_bicubic2d_aa(Tensor self, int[2] output_size, bool align_corners, float? scales_h=None, float? scales_w=None) -> Tensor
   python_module: nn
@@ -9750,6 +9751,7 @@
   structured: True
   dispatch:
     CPU: _upsample_bicubic2d_aa_backward_out_cpu
+    CUDA: _upsample_bicubic2d_aa_backward_out_cuda
 
 - func: _upsample_bicubic2d_aa_backward(Tensor grad_output, int[2] output_size, int[4] input_size, bool align_corners, float? scales_h=None, float? scales_w=None) -> Tensor
   python_module: nn
