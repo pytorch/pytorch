@@ -2015,6 +2015,7 @@ class TestTEFuser(JitTestCase):
         script = self.checkScript(eager, (x, y))
         self.assertAllFused(script.graph_for(x, y))
 
+    @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
     def test_channels_last_dims_dynamic(self):
         def eager(x, y):
             return x + (y + 0.0001)
