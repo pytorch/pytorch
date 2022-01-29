@@ -668,14 +668,14 @@ BAD_EXAMPLES = [
             'covariance_matrix': torch.tensor([[1.0, 1.0], [1.0, -2.0]], requires_grad=True),
             'df': 6.,
         },
-        # {
-        #     'covariance_matrix': torch.tensor([[1.0, 0.0], [0.0, 1.0]], requires_grad=True),
-        #     'df': 1.,
-        # },
-        # {
-        #     'covariance_matrix': torch.tensor([[1.0, 0.0], [0.0, 1.0]], requires_grad=True),
-        #     'df': torch.tensor([1.], requires_grad=True),
-        # },
+        {
+            'covariance_matrix': torch.tensor([[1.0, 0.0], [0.0, 1.0]], requires_grad=True),
+            'df': 1.,
+        },
+        {
+            'covariance_matrix': torch.tensor([[1.0, 0.0], [0.0, 1.0]], requires_grad=True),
+            'df': torch.tensor([1.], requires_grad=True),
+        },
     ]),
     Example(LKJCholesky, [
         {
@@ -3881,7 +3881,7 @@ class TestDistributionShapes(TestCase):
         self.assertEqual(wishart.log_prob(torch.ones(2, 1, 1)).size(), torch.Size((2,)))
 
     def test_inverse_wishart_shape_scalar_params(self):
-        inverse_wishart = InverseWishart(torch.tensor(1), torch.tensor([[1.]]))
+        inverse_wishart = InverseWishart(torch.tensor(10), torch.tensor([[1.]]))
         self.assertEqual(inverse_wishart._batch_shape, torch.Size())
         self.assertEqual(inverse_wishart._event_shape, torch.Size((1, 1)))
         self.assertEqual(inverse_wishart.sample().size(), torch.Size((1, 1)))
@@ -3889,7 +3889,7 @@ class TestDistributionShapes(TestCase):
         self.assertRaises(ValueError, inverse_wishart.log_prob, self.scalar_sample)
 
     def test_inverse_wishart_shape_tensor_params(self):
-        inverse_wishart = InverseWishart(torch.tensor([1., 1.]), torch.tensor([[[1.]], [[1.]]]))
+        inverse_wishart = InverseWishart(torch.tensor([10., 10.]), torch.tensor([[[1.]], [[1.]]]))
         self.assertEqual(inverse_wishart._batch_shape, torch.Size((2,)))
         self.assertEqual(inverse_wishart._event_shape, torch.Size((1, 1)))
         self.assertEqual(inverse_wishart.sample().size(), torch.Size((2, 1, 1)))
