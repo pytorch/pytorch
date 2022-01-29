@@ -193,15 +193,6 @@ def reshard_local_shard(
     shards_metadata, ranks = build_reshard_metadata(
         st_size, resharding_spec, world_size
     )
-    shards_metadata_global = shards_metadata
-    factor = 1
-    if local_tensor.dim() == 1:
-        # When the tensor is sharded on the only dimension, because the global size
-        # and offset is world_size times more, we need to adjust it back locally.
-        shards_metadata, ranks = build_reshard_metadata(
-            local_tensor.size(), resharding_spec, world_size
-        )
-        factor = world_size
 
     # Compute expected size
     input_split_sizes = []
@@ -223,12 +214,12 @@ def reshard_local_shard(
     # Because reshard_dim != original shard_dim. We need to compute the
     # size of tensor from each rank.
     output_tensor_list = [torch.tensor(1)] * world_size
-    split_size = get_split_size(st_size[current_sharding_dim] // factor, world_size)
+    split_size = get_split_size(st_size[current_sharding_dim], world_size)
     rearrange_output_list = False
     indices = []
     for idx, placement in enumerate(sharding_spec.placements):  # type: ignore[attr-defined]
         sharded_dim_size = get_chunked_dim_size(
-            st_size[current_sharding_dim] // factor, split_size, idx
+            st_size[current_sharding_dim], split_size, idx
         )
         output_tensor_size = list(st_size)
         output_tensor_size[reshard_dim] = input_split_sizes[current_rank]
@@ -255,5 +246,5 @@ def reshard_local_shard(
         # Need to re-arrange original shard_dim of output_tensor_list.
         output_tensor_list = [output_tensor_list[idx] for idx in indices]  # type: ignore[call-overload]
     local_tensor = torch.cat(output_tensor_list, dim=current_sharding_dim)
-    local_shards = [Shard(local_tensor, shards_metadata_global[current_rank])]
-    return local_shards, shards_metadata_global
+    local_shards = [Shard(local_tensor, shards_metadata[current_rank])]
+    return local_shards, shards_metadata

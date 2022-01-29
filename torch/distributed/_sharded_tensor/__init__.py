@@ -585,7 +585,7 @@ def _reshard_output(
     Args:
         module (:class:`torch.nn.Module`): Module whose output needs to be resharded.
         resharding_spec (:class:`torch.distributed._sharding_spec.ShardingSpec`): The
-            specification describing how the sharded tensor will be resharded.
+            specification describing how the output of the module will be resharded.
 
     Returns:
         A :class:`torch.nn.Module` object with collection API hooked.
@@ -602,6 +602,19 @@ def _collect_local_shard(module: torch.nn.Module) -> torch.nn.Module:
     """
     Hook a module with local shards collection in the forward pass.
 
+    When the local tensor only has one dimension, we increase one more dimension
+    for reshard. We then do squeeze here manually to reduce the dimension.
+
+    For example, in the case of sharded linear, if we have:
+    input: size[15]
+    weight: size[15, 16]
+    world_size: 4
+
+    In each rank, we will have 4 * [4] tensors. We then stack them into a [4, 4]
+    tensor and generate a sharded tenor sharded by dim 1. After resharding to
+    dim 0, we get a [1, 16] local tensor in each rank. We then need to convert
+    back to [16] as expected.
+
     Args:
         module (:class:`torch.nn.Module`): Module whose output needs to be resharded.
 
@@ -611,7 +624,12 @@ def _collect_local_shard(module: torch.nn.Module) -> torch.nn.Module:
 
     def hook_func(_module, _input, output):
         if isinstance(output, ShardedTensor):
-            return output.local_tensor()
+            local_tensor = output.local_tensor()
+            # Squeeze the # of dimensions manually.
+            if local_tensor.size(output._sharding_spec.dim) == 1:
+                local_tensor = local_tensor.squeeze(output._sharding_spec.dim)
+            return local_tensor
         return output
+
     module.register_forward_hook(hook_func)
     return module

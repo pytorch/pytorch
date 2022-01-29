@@ -655,6 +655,7 @@ class ShardedTensor(object):
             )
         self._local_shards = local_shards
         self._metadata.shards_metadata = shards_metadata
+        self._sharding_spec = resharding_spec
         return self
 
     def local_tensor(self) -> torch.Tensor:

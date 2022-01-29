@@ -171,6 +171,20 @@ def _handle_col_wise_sharding(input, world_size, weight, rank, local_shard_t, bi
     for Linear. (Detailed explanations of the logic can be found in the
     comment for sharded_linear.)
 
+    When the local tensor only has one dimension, we increase one more dimension
+    for reshard. We need to do squeeze manually to reduce the dimension later-on.
+
+    For example, if we have:
+    input: size[15]
+    weight: size[15, 16]
+    world_size: 4
+
+    In each rank, we will have 4 * [4] tensors. We then stack them into a [4, 4]
+    tensor and generate a sharded tenor sharded by dim 1.
+
+    For the rest situations, we just simply concatenate local tensors. No more actions
+    are needed afterward.
+
     Args:
         input: matrix to be multiplied with the sharded weight.
         world_size: number of ranks.
@@ -197,8 +211,14 @@ def _handle_col_wise_sharding(input, world_size, weight, rank, local_shard_t, bi
         indices[placement.rank()] = idx
     for i, inp in enumerate(gathered_inputs):
         results[indices[i]] = inp.matmul(local_shard_t) + local_bias
+    # When the local result only has one dimension, we need to make sure
+    # it does not shard by dim 0. So reshard can work properly.
+    if results[0].dim() == 1:
+        result = torch.stack(results)
+    else:
+        result = torch.cat(results)
     return _init_sharded_tensor_from_local_result(
-        weight, torch.cat(results), 0, -1, world_size, pg  # type: ignore[arg-type]
+        weight, result, 0, -1, world_size, pg  # type: ignore[arg-type]
     )
 
 
@@ -349,14 +369,11 @@ def _init_sharded_tensor_from_local_result(
     """
     sharded_weight_metadata = copy.deepcopy(sharded_tensor.local_shards()[0].metadata)
     current_offsets = [0] * local_result.dim()
-    # When the tensor is sharded on the only dimension, the size and offset needs to
-    # be world_size times more.
-    factor = world_size if local_result.dim() == 1 else 1
     current_offsets[result_shard_dim] = (
-        sharded_weight_metadata.shard_offsets[tensor_shard_dim] * factor
+        sharded_weight_metadata.shard_offsets[tensor_shard_dim]
     )
     global_size = list(local_result.size())
-    global_size[result_shard_dim] = sharded_tensor.size(tensor_shard_dim) * factor
+    global_size[result_shard_dim] = sharded_tensor.size(tensor_shard_dim)
     local_shard_metadata = ShardMetadata(
         shard_offsets=current_offsets,
         shard_sizes=list(local_result.size()),

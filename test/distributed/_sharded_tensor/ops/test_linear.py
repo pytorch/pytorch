@@ -87,6 +87,10 @@ class TestShardedTensorOpsLinear(ShardedTensorTestBase):
             inp, sharded_linear.weight, sharded_linear.bias
         )
         sharded_output = sharded_output.reshard(reshard_spec).local_tensor()
+        # When local tensor only has one dimension, we increase one more dimension
+        # for reshard. We need to squeeze the # of dimensions manually.
+        if inp.dim() == 1:
+            sharded_output = sharded_output.squeeze(reshard_spec.dim)
         self.assertEqual(local_output, sharded_output)
 
         # Compute loss and run backward pass.
