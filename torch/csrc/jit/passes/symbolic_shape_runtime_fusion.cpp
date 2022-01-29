@@ -163,7 +163,8 @@ StrideInput summarizeOutputStrides(const TensorType& tt) {
   // We only try to maintain output striding for channels last tensors,
   // otherwise we defer to contiguous
   // TODO: channels last 3d
-  if (c10::is_channels_last_strides_2d(sizes, strides)) {
+  // NNC Channels last permutation for outputs causes slowdown, disable
+  if (c10::is_channels_last_strides_2d(sizes, strides) && !tt.device()->is_cpu()) {
     return StrideInput::TENSOR_CONT_CHANNELS_LAST;
   }
   return StrideInput::TENSOR_CONT;
