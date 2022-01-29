@@ -184,30 +184,6 @@ std::pair<std::unique_ptr<Function>, const std::string> aotCompile(
   GRAPH_DEBUG("Method name ", method_name);
   GRAPH_DEBUG("Kernel func name ", kernel_func_name);
 
-  CAFFE_ENFORCE(
-      sizes.size() == types.size(),
-      "Number of input sizes and input types should be the same");
-
-  std::vector<at::IValue> example_values;
-  std::vector<c10::optional<at::Tensor>> example_inputs;
-  for (int i = 0; i < sizes.size(); ++i) {
-    auto example_input = at::rand(sizes[i]).to(at::dtype(types[i]));
-    example_values.emplace_back(example_input);
-    example_inputs.emplace_back(example_input);
-  }
-
-  GRAPH_DUMP("graph before compiler passes ", g);
-  tensorexpr::removeUnusedSelfArgument(g);
-  g = TraceGraph(g, example_values);
-  // TODO: Remove annotateInputShapes pass when TraceGraph can also capture
-  // input shapes
-  tensorexpr::annotateInputShapes(g, example_inputs);
-  RemoveListMutation(g);
-  RemoveTensorMutation(g);
-  EliminateDeadCode(g);
-  LowerAllTuples(g);
-  GRAPH_DUMP("graph after compiler passes ", g);
-
   std::shared_ptr<tensorexpr::TensorExprKernel> kernel =
       std::make_shared<tensorexpr::TensorExprKernel>(
           TensorExprKernel(g, kernel_func_name));
@@ -223,8 +199,8 @@ void writeOutputLlvmAssembly(
     const std::string& output_llvm_file_name) {
   std::ofstream output(output_llvm_file_name);
   output << asm_code;
-  std::cout << "The compiled llvm assembly code was saved to "
-            << output_llvm_file_name << std::endl;
+  GRAPH_DEBUG(
+      "The compiled llvm assembly code was saved to ", output_llvm_file_name);
 }
 
 std::vector<std::string> split(
@@ -298,6 +274,7 @@ std::string getNncKernelFuncName(
 std::shared_ptr<Graph> preprocessGraphPasses(
     std::shared_ptr<Graph>& graph,
     const std::vector<c10::optional<at::Tensor>>& example_inputs) {
+  GRAPH_DEBUG("Before preprocessing graph passes: ", *graph);
   torch::jit::RemoveTensorMutation(graph);
   torch::jit::EliminateDeadCode(graph->block());
   graph = torch::jit::tensorexpr::removeUnusedSelfArgument(graph);
@@ -310,6 +287,23 @@ std::shared_ptr<Graph> preprocessGraphPasses(
   torch::jit::PropagateShapesOnGraph(graph);
   torch::jit::PeepholeOptimize(graph, false);
   torch::jit::ConstantPropagation(graph);
+
+  tensorexpr::removeUnusedSelfArgument(graph);
+
+  std::vector<at::IValue> example_values;
+  for (auto example_input : example_inputs) {
+    example_values.emplace_back(*example_input);
+  }
+  graph = TraceGraph(graph, example_values);
+  tensorexpr::annotateInputShapes(graph, example_inputs);
+
+  // TODO: Remove annotateInputShapes pass when TraceGraph can also capture
+  // input shapes
+  RemoveListMutation(graph);
+  RemoveTensorMutation(graph);
+  EliminateDeadCode(graph);
+  LowerAllTuples(graph);
+  GRAPH_DEBUG("After preprocessing graph passes: ", *graph);
   return graph;
 }
 
@@ -331,19 +325,19 @@ c10::IValue preprocess(
     const torch::jit::BackendDebugHandleGenerator& generate_debug_handles) {
   torch::jit::mobile::nnc::CompilationUnit cu;
   for (const auto& kv : compile_spec) {
-    std::cout << "Key: " << kv.key() << "\n";
-    std::cout << "Value: " << kv.value() << "\n";
+    GRAPH_DEBUG("Key: ", kv.key());
+    GRAPH_DEBUG("Value: ", kv.value());
     std::string method_name = *(kv.key().toString());
-    std::cout << "Method name: " << method_name << "\n";
+    GRAPH_DEBUG("Method name: ", method_name);
     auto method_spec = kv.value().toGenericDict();
     std::string model_name = *method_spec.at("model_name").toString();
     std::string model_version = *method_spec.at("model_version").toString();
     std::string asmfile_name = *method_spec.at("asmfile").toString();
     std::string arch = *method_spec.at("arch").toString();
-    std::cout << "Model name: " << model_name << "\n";
-    std::cout << "Model version: " << model_version << "\n";
-    std::cout << "Asm file name: " << asmfile_name << "\n";
-    std::cout << "Arch: " << arch << "\n";
+    GRAPH_DEBUG("Model name: ", model_name);
+    GRAPH_DEBUG("Model version: ", model_version);
+    GRAPH_DEBUG("Asm file name: ", asmfile_name);
+    GRAPH_DEBUG("Arch: ", arch);
 
     if (arch == "x86-64") {
       LLVMTargetTriple() = "x86_64-unknown-unknown";
