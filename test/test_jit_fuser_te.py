@@ -2281,8 +2281,8 @@ class TestTEFuser(JitTestCase):
 class TestTEFuserStatic(TestTEFuser):
     dynamic_shapes = False
 
-# class TestTEFuserDynamic(TestTEFuser):
-#     dynamic_shapes = True
+class TestTEFuserDynamic(TestTEFuser):
+    dynamic_shapes = True
 
 del TestTEFuser
 
