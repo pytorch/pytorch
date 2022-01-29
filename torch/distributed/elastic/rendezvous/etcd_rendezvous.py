@@ -23,8 +23,8 @@ from torch.distributed.elastic.rendezvous import (
     RendezvousTimeoutError,
 )
 
-from .utils import parse_rendezvous_endpoint
 from .etcd_store import EtcdStore, cas_delay
+from .utils import parse_rendezvous_endpoint
 
 
 _log_fmt = logging.Formatter("%(levelname)s %(asctime)s %(message)s")
@@ -54,9 +54,6 @@ class EtcdRendezvousRetryImmediately(Exception):
 # Default timeout for the rendezvous.
 _DEFAULT_TIMEOUT: int = 600  # 10 minutes
 
-# Additional waiting time after reaching the minimum number of nodes
-# in case the rendezvous is elastic (min != max).
-_DEFAULT_LAST_CALL_TIMEOUT: int = 30  # 30 seconds
 
 # Various constants used internally in EtcdRendezvous
 CONST_ETCD_SETUP_TTL = 5
@@ -1061,13 +1058,24 @@ def create_rdzv_handler(params: RendezvousParameters) -> RendezvousHandler:
 
     etcd_prefix = params.get("etcd_prefix", "/torchelastic/p2p")
 
+    timeout = params.get_as_int("timeout", _DEFAULT_TIMEOUT)
+    # The default ``last_call_timeout`` should be set as double of ``timeout``.
+    # See https://github.com/pytorch/pytorch/issues/67616#issuecomment-960516271
+    # for more details.
+    if params.get("last_call_timeout") is not None:
+        log.warn(
+            "Setting `last_call_timeout` manually is deprecated."
+            "This parameter will be set automatically to `timeout*2`."
+        )
+    last_call_timeout = params.get_as_int("last_call_timeout", timeout * 2)
+
     rdzv = EtcdRendezvous(
         client=client,
         prefix=etcd_prefix,
         run_id=params.run_id,
         num_min_workers=params.min_nodes,
         num_max_workers=params.max_nodes,
-        timeout=params.get_as_int("timeout", _DEFAULT_TIMEOUT),
-        last_call_timeout=params.get_as_int("last_call_timeout", _DEFAULT_LAST_CALL_TIMEOUT),
+        timeout=timeout,
+        last_call_timeout=last_call_timeout,
     )
     return EtcdRendezvousHandler(rdzv_impl=rdzv)
