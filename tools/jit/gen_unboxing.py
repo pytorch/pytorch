@@ -2,18 +2,17 @@
 import argparse
 import json
 import os
-
 from dataclasses import dataclass
-from typing import Union, Sequence
-from typing_extensions import Literal
-
-from tools.codegen.api import unboxing, cpp
+from tools.codegen.api import cpp
 from tools.codegen.api.translate import translate
 from tools.codegen.api.types import CppSignatureGroup, CType, BaseCType, voidT
+from tools.codegen.api.unboxing import convert_arguments
 from tools.codegen.context import method_with_native_function
 from tools.codegen.gen import parse_native_yaml
 from tools.codegen.model import NativeFunction, NativeFunctionsGroup, Variant
 from tools.codegen.utils import Target, FileManager, mapMaybe, make_file_manager
+from typing import Union, Sequence
+from typing_extensions import Literal
 
 
 # Generates UnboxingFunctions.h & UnboxingFunctions.cpp.
@@ -51,14 +50,15 @@ TORCH_API void {f.func.name.unambiguous_name()}(Stack & stack);
             )
 
             # parse arguments into C++ code
-            binding_list, code_list = unboxing.convert_arguments(args)
+            binding_list, code_list = convert_arguments(args,
+                                                        has_tensor_options=f.func.arguments.tensor_options is not None)
 
             # for each C++ argument, generate the conversion code
             code_connector = "\n\t"
             arg_connector = ",\n\t\t"
             # function call and push back to stack
             prefix = "self_base." if sig.method else "at::"
-            args_str = "" if not expr_list else f"""
+            args_str = "" if not binding_list else f"""
         {arg_connector.join(e.expr for e in translate(binding_list, sig.arguments(), method=sig.method))}
     """
             ret_type: CType = cpp.returns_type(f.func.returns)
@@ -81,6 +81,7 @@ TORCH_API void {f.func.name.unambiguous_name()}(Stack & stack) {{
     {push_str}
 }}
 """
+
 
 # Generates RegisterCodegenUnboxedKernels.cpp.
 @dataclass(frozen=True)

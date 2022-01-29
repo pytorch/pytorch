@@ -1,7 +1,7 @@
 from typing import List, Tuple
 
-from tools.codegen.api.cpp import argumenttype_type
-from tools.codegen.api.types import Binding
+from tools.codegen.api.cpp import argumenttype_type, argument
+from tools.codegen.api.types import Binding, NamedCType
 from tools.codegen.model import (
     Argument,
     Type,
@@ -10,7 +10,6 @@ from tools.codegen.model import (
     ListType,
     BaseTy,
 )
-
 
 # This file generates the code for unboxing wrappers, i.e., the glue logic to unbox a boxed operator and convert the
 # ivalues from stack to correct arguments to the unboxed kernel, based on corresponding JIT schema. This codegen is
@@ -97,22 +96,25 @@ connector = "\n\t"
 
 
 # Convert all the arguments in a NativeFunction to C++ code, including TensorOptions.
-def convert_arguments(args: List[Argument]) -> Tuple[List[Binding], List[str]]:
-    argument_str = "c10::IValue {arg_name} = std::move(peek(stack, {pos}, {args_num}));"
-    pop_ivalue = []
-    code_list = []
+def convert_arguments(args: List[Argument], *, has_tensor_options: bool) -> Tuple[List[Binding], List[str]]:
+    code_list = [f"c10::IValue {args[i].name} = std::move(peek(stack, {i}, {len(args)}));" for i in
+                 range(len(args))] + [""]
     binding_list = []
     for i, arg in enumerate(args):
-        pop_ivalue.append(argument_str.format(arg_name=arg.name, pos=i, args_num=len(args)))
-        unboxed_name, code = argumenttype_ivalue_convert(arg.type, arg.name, mutable=arg.is_write)
+        unboxed_name, _, code = argumenttype_ivalue_convert(arg.type, arg.name, mutable=arg.is_write)
         code_list.extend(code)
-        binding_list.append(arg.with_name(unboxed_name))
-    pop_ivalue.append("")
-    return binding_list, pop_ivalue + code_list
+        # we need the 'self' argument so method needs to be False, also it doesn't matter if signature faithful or not
+        arg_binding = argument(arg, cpp_no_default_args=set(), method=False, faithful=False,
+                               has_tensor_options=has_tensor_options)
+        # since no TensorOptions here, we can safely assume there's only 1 element in arg_binding.
+        if not arg_binding:
+            raise Exception(f"Argument {arg} cannot be converted to Binding. has_tensor_options = {has_tensor_options}")
+        binding_list.append(arg_binding[0].with_name(unboxed_name))
+    return binding_list, code_list
 
 
 # Take an argument in JIT type format, returns the C++ code to convert an ivalue from stack to corresponding C++ type.
-def argumenttype_ivalue_convert(t: Type, arg_name: str, *, mutable: bool = False) -> Tuple[str, List[str]]:
+def argumenttype_ivalue_convert(t: Type, arg_name: str, *, mutable: bool = False) -> Tuple[str, NamedCType, List[str]]:
     nctype = argumenttype_type(t=t, mutable=mutable, binds=arg_name)
     ctype = nctype.cpp_type(strip_ref=True)
 
@@ -127,19 +129,19 @@ def argumenttype_ivalue_convert(t: Type, arg_name: str, *, mutable: bool = False
         code = _gen_code_list_type(arg_name=arg_name, out_name=out_name, t=t, ctype=ctype)
     else:
         raise Exception(f"Cannot handle type {t}. arg_name: {arg_name}")
-    return out_name, code
+    return out_name, nctype, code
 
 
 def _gen_code_optional_type(arg_name: str, out_name: str, t: OptionalType, ctype: str) -> List[str]:
     in_name = arg_name + "_opt_in"
-    res_expr, res_code = argumenttype_ivalue_convert(t.elem, in_name)
+    res_name, _, res_code = argumenttype_ivalue_convert(t.elem, in_name)
     return f"""
 c10::optional<c10::IValue> {arg_name + "_opt"} = {arg_name}.toOptional<c10::IValue>();
 {ctype} {out_name};
 if ({arg_name + "_opt"}.has_value()) {{
     const c10::IValue {in_name} = {arg_name + "_opt"}.value();
     {connector.join(res_code)}
-    {out_name} = {ctype}({res_expr.expr});
+    {out_name} = {ctype}({res_name});
 }} else {{
     {out_name} = {ctype}();
 }}
@@ -150,12 +152,12 @@ def _gen_code_list_type(arg_name: str, out_name: str, t: ListType, ctype: str) -
     in_name = arg_name + "_list_in"
     elem_name = arg_name + "_elem"
     code = [f"const c10::List<c10::IValue> {in_name} = {arg_name}.toList();"]
-    res_expr, res_code = argumenttype_ivalue_convert(t.elem, elem_name)
+    res_name, res_nctype, res_code = argumenttype_ivalue_convert(t.elem, elem_name)
     # handle list type with size, e.g., bool[4]
     if isinstance(t.elem, BaseType) and t.elem.name == BaseTy.bool and t.size:
         code.extend(
             f"""
-{ctype} {out_name} = as_array<{res_expr.type.cpp_type(strip_ref=True)}, {t.size}>({in_name});
+{ctype} {out_name} = as_array<{res_nctype.cpp_type(strip_ref=True)}, {t.size}>({in_name});
             """.split(
                 "\n"
             )
@@ -167,7 +169,7 @@ def _gen_code_list_type(arg_name: str, out_name: str, t: ListType, ctype: str) -
 {ctype} {out_name};
 for (c10::IValue {elem_name}: {in_name}) {{
     {connector.join(res_code)}
-    {out_name}.push_back({res_expr.expr});
+    {out_name}.push_back({res_name});
 }}
             """.split(
                 "\n"
@@ -178,10 +180,10 @@ for (c10::IValue {elem_name}: {in_name}) {{
         vec_name = arg_name + "_vec"
         code.extend(
             f"""
-std::vector<{res_expr.type.cpp_type(strip_ref=True)}> {vec_name};
+std::vector<{res_nctype.cpp_type(strip_ref=True)}> {vec_name};
 for (c10::IValue {elem_name}: {in_name}) {{
     {connector.join(res_code)}
-    {vec_name}.push_back({res_expr.expr});
+    {vec_name}.push_back({res_name});
 }}
 {ctype} {out_name}({vec_name});
             """.split(
