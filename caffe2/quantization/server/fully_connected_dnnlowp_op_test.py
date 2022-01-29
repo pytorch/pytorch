@@ -100,7 +100,7 @@ class DNNLowPFullyConnectedOpTest(hu.HypothesisTestCase):
 
         op_engine_list = [("FC", "")]
         if fuse_relu:
-            op_engine_list += [("Int8FCRelu", "DNNLOWP")]
+            op_engine_list += [("Int8FCRelu", "DNNLOWP"), ("Int8FC", "DNNLOWP")]
         else:
             op_engine_list += [
                 ("FC", "DNNLOWP"),
@@ -118,6 +118,11 @@ class DNNLowPFullyConnectedOpTest(hu.HypothesisTestCase):
                 engine == "DNNLOWP" and weight_quantized and len(outputs) > 0
             )
             do_prepack_weight = engine == "DNNLOWP" and prepack_weight
+
+            if fuse_relu and op_type == "Int8FC":
+                followed_by = "Relu"
+            else:
+                followed_by = ""
 
             if do_quantize:
                 quantize = core.CreateOperator(
@@ -184,6 +189,7 @@ class DNNLowPFullyConnectedOpTest(hu.HypothesisTestCase):
                     preserve_weight_sparsity=preserve_weight_sparsity,
                     engine=engine,
                     device_option=gc,
+                    followed_by=followed_by,
                 )
             else:
                 fc = core.CreateOperator(
@@ -201,6 +207,7 @@ class DNNLowPFullyConnectedOpTest(hu.HypothesisTestCase):
                     preserve_weight_sparsity=preserve_weight_sparsity,
                     engine=engine,
                     device_option=gc,
+                    followed_by=followed_by,
                 )
             if do_quantize_weight or do_prepack_weight:
                 # When quantized weight is provided, we can't rescale the

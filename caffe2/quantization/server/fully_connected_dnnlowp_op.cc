@@ -418,6 +418,11 @@ bool FullyConnectedDNNLowPOp<T, ReluFused>::RunOnDevice() {
               1); // num_threads
         }
       }
+      if (followed_by_ == "Relu") {
+        for (size_t i = 0; i < M * N; i++) {
+          Y_data[i] = std::max(Y_data[i], 0.0f);
+        }
+      }
     } // dequantize_output
   } else {
     // Quantize X
