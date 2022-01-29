@@ -414,7 +414,9 @@ class TestCuda(TestCase):
 
         application = int(total_memory * 0.5)
         # it will get OOM when try to allocate more than half memory.
-        with self.assertRaisesRegex(RuntimeError, "out of memory"):
+        oom_regex = "would exceed allowed memory" if TEST_CUDAMALLOCASYNC else \
+                    "out of memory"
+        with self.assertRaisesRegex(RuntimeError, oom_regex):
             torch.empty(application, dtype=torch.int8, device='cuda')
 
         # ensure out of memory error doesn't disturb subsequent kernel
