@@ -23,6 +23,7 @@
 #include <torch/csrc/utils/python_strings.h>
 #include <torch/csrc/DynamicTypes.h>
 #include <torch/csrc/Exceptions.h>
+#include <ATen/FuncTorchTLS.h>
 
 #include <exception>
 #include <functional>
@@ -674,6 +675,12 @@ PyObject *THPFunction_apply(PyObject *cls, PyObject *inputs)
     ((PyTypeObject*)cls)->tp_name,
     std::vector<c10::IValue>(),
     at::sequence_number::peek());
+
+  // Temporary hack to improve functorch UX. We'll find a better solution.
+  const auto& functorch_tls = at::functorch::functorchTLSAccessor();
+  if (functorch_tls) {
+    functorch_tls->checkSupportsAutogradFunction();
+  }
 
   THPObjectPtr backward_cls(PyObject_GetAttrString(cls, "_backward_cls"));
   if (!backward_cls) return nullptr;
