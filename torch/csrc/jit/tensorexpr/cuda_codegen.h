@@ -10,9 +10,11 @@
 #include <c10/cuda/CUDAGuard.h>
 #include <torch/csrc/jit/resource_guard.h>
 #include <torch/csrc/jit/tensorexpr/codegen.h>
+#include <torch/csrc/jit/tensorexpr/eval.h>
 #include <torch/csrc/jit/tensorexpr/ir.h>
 #include <torch/csrc/jit/tensorexpr/ir_printer.h>
 #include <torch/csrc/jit/tensorexpr/ir_visitor.h>
+#include <torch/csrc/jit/tensorexpr/llvm_codegen.h>
 #include <torch/csrc/jit/tensorexpr/unique_name_manager.h>
 
 namespace torch {
@@ -274,6 +276,11 @@ class TORCH_CUDA_CU_API CudaCodeGen : public CodeGen {
   CUfunction function_;
   bool has_random_ = false;
   int thread_block_size_ = -1;
+
+#ifdef TORCH_ENABLE_LLVM
+  std::vector<ExprEval<LLVMCodeGen>> block_extents_compiled_;
+  std::vector<ExprEval<LLVMCodeGen>> thread_extents_compiled_;
+#endif
 
   std::string GetUniqueFuncName(const std::string& func_prefix);
 };
