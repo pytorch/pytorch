@@ -1024,19 +1024,27 @@ void CudaCodeGen::Initialize() {
     thread_block_size_ = -1;
   }
 
-#ifdef TORCH_ENABLE_LLVM
   // Build an LLVM based eval expression for the extents
-  block_extents_compiled_.reserve(block_extents.size());
+  block_extents_eval_.reserve(block_extents.size());
   for (const auto& be : block_extents) {
-    block_extents_compiled_.emplace_back(
+#ifdef TORCH_ENABLE_LLVM
+    block_extents_eval_.emplace_back(
         ExprEval<LLVMCodeGen>(ExprHandle(be), buffer_args));
-  }
-  thread_extents_compiled_.reserve(thread_extents.size());
-  for (const auto& te : thread_extents) {
-    thread_extents_compiled_.emplace_back(
-        ExprEval<LLVMCodeGen>(ExprHandle(te), buffer_args));
-  }
+#else
+    block_extents_eval_.emplace_back(
+        ExprEval<SimpleIREvaluator>(ExprHandle(be), buffer_args));
 #endif
+  }
+  thread_extents_eval_.reserve(thread_extents.size());
+  for (const auto& te : thread_extents) {
+#ifdef TORCH_ENABLE_LLVM
+    thread_extents_eval_.emplace_back(
+        ExprEval<LLVMCodeGen>(ExprHandle(te), buffer_args));
+#else
+    thread_extents_eval_.emplace_back(
+        ExprEval<SimpleIREvaluator>(ExprHandle(te), buffer_args));
+#endif
+  }
 
   GRAPH_DEBUG(
       "Fused TE CUDA kernel:\n",
@@ -1131,28 +1139,14 @@ void CudaCodeGen::call_raw(const std::vector<void*>& raw_args) {
       gpu_block_extents_v[i] = immediateAs<int64_t>(gpu_block_extents[i]);
       continue;
     }
-#ifdef TORCH_ENABLE_LLVM
-    gpu_block_extents_v[i] =
-        block_extents_compiled_[i].value<int64_t>(raw_args);
-#else
-    ExprEval<SimpleIREvaluator> eval(
-        ExprHandle(gpu_block_extents[i]), buffer_args);
-    gpu_block_extents_v[i] = eval.value<int64_t>(raw_args);
-#endif
+    gpu_block_extents_v[i] = block_extents_eval_[i].value<int64_t>(raw_args);
   }
   for (size_t i = 0; i < gpu_thread_extents.size(); i++) {
     if (gpu_thread_extents[i]->isConstant()) {
       gpu_thread_extents_v[i] = immediateAs<int64_t>(gpu_thread_extents[i]);
       continue;
     }
-#ifdef TORCH_ENABLE_LLVM
-    gpu_thread_extents_v[i] =
-        thread_extents_compiled_[i].value<int64_t>(raw_args);
-#else
-    ExprEval<SimpleIREvaluator> eval(
-        ExprHandle(gpu_thread_extents[i]), buffer_args);
-    gpu_thread_extents_v[i] = eval.value<int64_t>(raw_args);
-#endif
+    gpu_thread_extents_v[i] = thread_extents_eval_[i].value<int64_t>(raw_args);
   }
 
   // Skip launching the kernel if there are no elements to process.
