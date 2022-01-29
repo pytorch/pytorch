@@ -585,7 +585,7 @@ def _reshard_output(
     Args:
         module (:class:`torch.nn.Module`): Module whose output needs to be resharded.
         resharding_spec (:class:`torch.distributed._sharding_spec.ShardingSpec`): The
-            specification describing how the sharded tensor will be resharded.
+            specification describing how the output of the module will be resharded.
 
     Returns:
         A :class:`torch.nn.Module` object with collection API hooked.
