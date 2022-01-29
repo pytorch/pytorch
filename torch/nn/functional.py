@@ -20,7 +20,6 @@ from ..overrides import (
     has_torch_function, has_torch_function_unary, has_torch_function_variadic,
     handle_torch_function)
 from . import _reduction as _Reduction
-from . import _gelu as _Gelu
 from . import grad  # noqa: F401
 from .modules import utils
 from .modules.utils import _single, _pair, _triple, _list_with_default
@@ -1652,31 +1651,19 @@ See :class:`~torch.nn.LogSigmoid` for more details.
 )
 
 
-def gelu(input: Tensor, approximate: str = 'none') -> Tensor:
-    r"""gelu(input, approximate = 'none') -> Tensor
+def gelu(input):
+    r"""gelu(input) -> Tensor
 
     Applies element-wise the function
     :math:`\text{GELU}(x) = x * \Phi(x)`
 
     where :math:`\Phi(x)` is the Cumulative Distribution Function for Gaussian Distribution.
 
-    When the approximate argument is 'tanh', Gelu is estimated with:
-        :math::  \text{GELU}(x) = 0.5 * x * (1 + \text{Tanh}(\sqrt(2 / \pi) * (x + 0.044715 * x^3)))
-
     See `Gaussian Error Linear Units (GELUs) <https://arxiv.org/abs/1606.08415>`_.
     """
     if has_torch_function_unary(input):
-        return handle_torch_function(gelu, (input,), input, approximate=approximate)
-
-    # Enforce that the full call with the new kwarg is not invoked when scripting.
-    # TODO: Remove this scripting logic once the 2-week FC window has passed.
-    if not torch.jit.is_scripting():
-        return torch._C._nn.gelu(input, _Gelu.get_enum(approximate))
-    # When scripting, make a simpler call as long as the kwarg is set to the default value.
-    elif approximate == 'none':
-        return torch._C._nn.gelu(input)
-    else:
-        raise RuntimeError("TorchScript currently does not support approximate in nn.Gelu")
+        return handle_torch_function(gelu, (input,), input)
+    return torch._C._nn.gelu(input)
 
 
 def hardshrink(input: Tensor, lambd: float = 0.5) -> Tensor:
@@ -3876,17 +3863,12 @@ def interpolate(input: Tensor, size: Optional[int] = None, scale_factor: Optiona
     if input.dim() == 5 and mode == "nearest":
         return torch._C._nn.upsample_nearest3d(input, output_size, scale_factors)
 
-    # TODO: Remove this scripting logic once the 2-week FC window has passed.
-    if mode == "nearest-exact":
-        if not torch.jit.is_scripting():
-            if input.dim() == 3 and mode == "nearest-exact":
-                return torch._C._nn._upsample_nearest_exact1d(input, output_size, scale_factors)
-            if input.dim() == 4 and mode == "nearest-exact":
-                return torch._C._nn._upsample_nearest_exact2d(input, output_size, scale_factors)
-            if input.dim() == 5 and mode == "nearest-exact":
-                return torch._C._nn._upsample_nearest_exact3d(input, output_size, scale_factors)
-        else:
-            raise RuntimeError("TorchScript currently does not support nearest-exact")
+    if input.dim() == 3 and mode == "nearest-exact":
+        return torch._C._nn._upsample_nearest_exact1d(input, output_size, scale_factors)
+    if input.dim() == 4 and mode == "nearest-exact":
+        return torch._C._nn._upsample_nearest_exact2d(input, output_size, scale_factors)
+    if input.dim() == 5 and mode == "nearest-exact":
+        return torch._C._nn._upsample_nearest_exact3d(input, output_size, scale_factors)
 
     if input.dim() == 3 and mode == "area":
         assert output_size is not None
@@ -3903,26 +3885,16 @@ def interpolate(input: Tensor, size: Optional[int] = None, scale_factor: Optiona
         return torch._C._nn.upsample_linear1d(input, output_size, align_corners, scale_factors)
     if input.dim() == 4 and mode == "bilinear":
         assert align_corners is not None
-        # Enforce that the full call with the new kwarg is not invoked when scripting.
-        # TODO: Remove this scripting logic once the 2-week FC window has passed.
         if antialias:
-            if not torch.jit.is_scripting():
-                return torch._C._nn._upsample_bilinear2d_aa(input, output_size, align_corners, scale_factors)
-            else:
-                raise RuntimeError("TorchScript currently does not support antialias in interpolate")
+            return torch._C._nn._upsample_bilinear2d_aa(input, output_size, align_corners, scale_factors)
         return torch._C._nn.upsample_bilinear2d(input, output_size, align_corners, scale_factors)
     if input.dim() == 5 and mode == "trilinear":
         assert align_corners is not None
         return torch._C._nn.upsample_trilinear3d(input, output_size, align_corners, scale_factors)
     if input.dim() == 4 and mode == "bicubic":
         assert align_corners is not None
-        # Enforce that the full call with the new kwarg is not invoked when scripting.
-        # TODO: Remove this scripting logic once the 2-week FC window has passed.
         if antialias:
-            if not torch.jit.is_scripting():
-                return torch._C._nn._upsample_bicubic2d_aa(input, output_size, align_corners, scale_factors)
-            else:
-                raise RuntimeError("TorchScript currently does not support antialias in interpolate")
+            return torch._C._nn._upsample_bicubic2d_aa(input, output_size, align_corners, scale_factors)
         return torch._C._nn.upsample_bicubic2d(input, output_size, align_corners, scale_factors)
 
     if input.dim() == 3 and mode == "bilinear":

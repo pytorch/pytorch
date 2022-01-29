@@ -3724,7 +3724,7 @@
     CPU: prelu_backward_cpu
     CUDA: prelu_backward_cuda
 
-- func: gelu.out(Tensor self, int approximate=0, *, Tensor(a!) out) -> Tensor(a!)
+- func: gelu.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   structured: True
   structured_inherits: TensorIteratorBase
   device_check: NoCheck   # TensorIterator
@@ -3733,7 +3733,7 @@
     CPU: gelu_out_cpu
     CUDA: gelu_out_cuda
 
-- func: gelu(Tensor self, int approximate=0) -> Tensor
+- func: gelu(Tensor self) -> Tensor
   structured_delegate: gelu.out
   device_check: NoCheck   # TensorIterator
   python_module: nn
@@ -3741,7 +3741,7 @@
     MkldnnCPU: mkldnn_gelu
     QuantizedCPU: gelu_quantized_cpu
 
-- func: gelu_backward.grad_input(Tensor grad_output, Tensor self, int approximate=0, *, Tensor(a!) grad_input) -> Tensor(a!)
+- func: gelu_backward.grad_input(Tensor grad, Tensor self, *, Tensor(a!) grad_input) -> Tensor(a!)
   structured: True
   structured_inherits: TensorIteratorBase
   python_module: nn
@@ -3749,7 +3749,7 @@
     CPU: gelu_backward_out_cpu
     CUDA: gelu_backward_out_cuda
 
-- func: gelu_backward(Tensor grad_output, Tensor self, int approximate=0) -> Tensor
+- func: gelu_backward(Tensor grad, Tensor self) -> Tensor
   structured_delegate: gelu_backward.grad_input
   python_module: nn
   dispatch:
