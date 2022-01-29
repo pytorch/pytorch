@@ -11635,7 +11635,7 @@ Returns:
 Example::
 
     >>> qx = torch.quantize_per_tensor(torch.rand(2, 2, 2, 2), 1.5, 3, torch.quint8)
-    >>> torch.quantized_max_pool2d(qx, [2,2])
+    >>> torch.max_pool2d(qx, [2,2])
     tensor([[[[1.5000]],
 
             [[1.5000]]],
