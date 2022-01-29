@@ -57,7 +57,7 @@ TORCH_API FusionStrategy getFusionStrategy();
 TORCH_API FusionStrategy setFusionStrategy(FusionStrategy& fusion_strategy);
 
 
-struct ProfilingGraphExecutorImpl : public GraphExecutorImplBase {
+struct TORCH_API ProfilingGraphExecutorImpl : public GraphExecutorImplBase {
   ProfilingGraphExecutorImpl(
       const std::shared_ptr<Graph>& graph,
       std::string function_name);

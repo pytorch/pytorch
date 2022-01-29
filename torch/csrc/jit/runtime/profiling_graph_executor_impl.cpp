@@ -69,7 +69,13 @@ static std::atomic<bool> profiling_mode{true};
 #endif
 
 static std::mutex fusion_strategy_lock;
+
+// TODO remove ifdef
+#ifdef FBCODE_CAFFE2
 static FusionStrategy fusion_strategy = {{FusionBehavior::STATIC, 20}};
+#else
+static FusionStrategy fusion_strategy = {{FusionBehavior::STATIC, 2}, {FusionBehavior::DYNAMIC, 10}};
+#endif
 
 FusionStrategy getFusionStrategy() {
   std::lock_guard<std::mutex> guard(fusion_strategy_lock);
@@ -237,6 +243,13 @@ bool guardDifferentiableGraph(Node* dnode) {
           dni->setType(o->node()->ty(attr::profiled_type));
         }
       }
+
+      // Propagate the requires_grad property to inputs
+      // A RequiresGrad check gets added (insertTypeGuard, below)
+      // so requires_grad is guaranteed to match for the inputs;
+      // but other properties are not guaranteed to match
+      auto requires_grad = dni->type()->expectRef<TensorType>().requiresGrad();
+      gi[i]->setType(ty->withRequiresGrad(requires_grad));
 
       // we check if the optional is defined
       all_inputs_seen &= (dni->type()->cast<TensorType>() != TensorType::get());
