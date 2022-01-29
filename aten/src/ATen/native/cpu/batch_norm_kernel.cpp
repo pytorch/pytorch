@@ -61,7 +61,7 @@ void batch_norm_cpu_collect_linear_and_constant_terms(
 
 /// A fast path for CPU inference and training forward when all tensors are contiguous.
 template<typename scalar_t>
-void batch_norm_cpu_contiguous_impl(Tensor& output, const Tensor& input,
+void batch_norm_cpu_contiguous_impl(const Tensor& output, const Tensor& input,
     const Tensor& weight, const Tensor& bias, const Tensor& save_mean, const Tensor& save_invstd,
     const Tensor& running_mean, const Tensor& running_var, bool train, double eps) {
 
@@ -137,7 +137,7 @@ void batch_norm_cpu_contiguous_impl(Tensor& output, const Tensor& input,
 }
 
 template <typename scalar_t>
-void batch_norm_cpu_channels_last_impl(Tensor& output, const Tensor& input,
+void batch_norm_cpu_channels_last_impl(const Tensor& output, const Tensor& input,
     const Tensor& weight, const Tensor& bias, const Tensor& save_mean, const Tensor& save_invstd,
     const Tensor& running_mean, const Tensor& runnning_var, bool train, double eps) {
 
@@ -187,7 +187,7 @@ void batch_norm_cpu_channels_last_impl(Tensor& output, const Tensor& input,
 
 template <typename scalar_t>
 void batch_norm_cpu_collect_stats_contiguous_impl(
-    Tensor& mean, Tensor& var_sum, const Tensor& input) {
+    const Tensor& mean, const Tensor& var_sum, const Tensor& input) {
 
   using accscalar_t = at::acc_type<scalar_t, false>;
   int64_t n_batch = input.size(0);
@@ -229,7 +229,7 @@ void batch_norm_cpu_collect_stats_contiguous_impl(
 
 template <typename scalar_t>
 void batch_norm_cpu_collect_stats_channels_last_impl(
-    Tensor& mean, Tensor& var_sum, const Tensor& input) {
+    const Tensor& mean, const Tensor& var_sum, const Tensor& input) {
 
   using Vec = Vectorized<scalar_t>;
   using accscalar_t = at::acc_type<scalar_t, false>;
@@ -609,7 +609,7 @@ void batch_norm_cpu_backward_channels_last_impl(Tensor& grad_input, Tensor& grad
   }
 }
 
-void batch_norm_cpu_kernel(Tensor& output, const Tensor& input,
+void batch_norm_cpu_kernel(const Tensor& output, const Tensor& input,
     const Tensor& weight, const Tensor& bias, const Tensor& save_mean,  const Tensor& save_invstd,
     const Tensor& running_mean, const Tensor& running_var, bool train, double eps) {
   if (input.is_contiguous()) {
@@ -628,7 +628,7 @@ void batch_norm_cpu_kernel(Tensor& output, const Tensor& input,
 }
 
 void batch_norm_cpu_collect_stats_kernel(
-    Tensor& mean, Tensor& var_sum, const Tensor& input) {
+    const Tensor& mean, const Tensor& var_sum, const Tensor& input) {
   int64_t image_size = input.numel() / input.size(0) / input.size(1);
   if (input.is_contiguous()) {
     AT_DISPATCH_FLOATING_TYPES(input.scalar_type(), "batch_norm_cpu_collect_stats_contiguous", [&] {

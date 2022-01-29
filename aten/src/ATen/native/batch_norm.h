@@ -7,9 +7,9 @@ namespace at {
 
 namespace native {
 
-using batch_norm_fn = void (*)(Tensor&, const Tensor&, const Tensor&,
+using batch_norm_fn = void (*)(const Tensor&, const Tensor&, const Tensor&,
     const Tensor&, const Tensor&, const Tensor&, const Tensor&, const Tensor&, bool, double);
-using batch_norm_collect_stats_fn = void (*)(Tensor&, Tensor&, const Tensor&);
+using batch_norm_collect_stats_fn = void (*)(const Tensor&, const Tensor&, const Tensor&);
 using batch_norm_backward_fn = void(*)(Tensor&, Tensor&, Tensor&, const Tensor&,
         const Tensor&, const Tensor&, const Tensor&, const Tensor&, const Tensor&, const Tensor&, bool, double);
 

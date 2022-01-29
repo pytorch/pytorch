@@ -87,14 +87,14 @@ class TestFuseEager(QuantizationTestCase):
             test_only_eval_fn(model, self.img_data_1d)
             self.checkNoQconfig(model)
 
-        with self.assertRaisesRegex(RuntimeError, "Could not run 'aten::native_batch_norm' with arguments from the 'QuantizedCPU'"):
+        with self.assertRaisesRegex(RuntimeError, "Could not run 'aten::native_batch_norm.out' with arguments from the 'QuantizedCPU'"):
             checkQuantized(model)
 
         model = ModelForFusion(default_qat_qconfig).train()
         model = fuse_modules(model, [['conv1', 'bn1', 'relu1'],
                              ['sub1.conv', 'sub1.bn']])
         model = quantize_qat(model, test_only_train_fn, [self.img_data_1d_train])
-        with self.assertRaisesRegex(RuntimeError, "Could not run 'aten::native_batch_norm' with arguments from the 'QuantizedCPU'"):
+        with self.assertRaisesRegex(RuntimeError, "Could not run 'aten::native_batch_norm.out' with arguments from the 'QuantizedCPU'"):
             checkQuantized(model)
 
 
