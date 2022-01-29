@@ -3730,10 +3730,15 @@ add_docstr(torch.fmod,
            r"""
 fmod(input, other, *, out=None) -> Tensor
 
-Applies C++'s `std::fmod <https://en.cppreference.com/w/cpp/numeric/math/fmod>`_
-for floating point tensors, and the modulus operation for integer tensors. The result
-has the same sign as the dividend :attr:`input` and its absolute value
+Applies C++'s `std::fmod <https://en.cppreference.com/w/cpp/numeric/math/fmod>`_ entrywise.
+The result has the same sign as the dividend :attr:`input` and its absolute value
 is less than that of :attr:`other`.
+
+This function may be defined in terms of :func:`torch.div` as
+
+.. code:: python
+
+    torch.fmod(a, b) == a - a.div(b, rounding_mode="trunc") * b
 
 Supports :ref:`broadcasting to a common shape <broadcasting-semantics>`,
 :ref:`type promotion <type-promotion-doc>`, and integer and float inputs.
@@ -3749,6 +3754,11 @@ Supports :ref:`broadcasting to a common shape <broadcasting-semantics>`,
    Complex inputs are not supported. In some cases, it is not mathematically
    possible to satisfy the definition of a modulo operation with complex numbers.
 
+.. seealso::
+
+    :func:`torch.remainder` which implements Python's modulus operator.
+    This one is defined using division rounding down the result.
+
 Args:
     input (Tensor): the dividend
     other (Tensor or Scalar): the divisor
@@ -3763,11 +3773,6 @@ Example::
     >>> torch.fmod(torch.tensor([1, 2, 3, 4, 5]), -1.5)
     tensor([1.0000, 0.5000, 0.0000, 1.0000, 0.5000])
 
-.. seealso::
-
-    :func:`torch.remainder` which is similar to :func:`torch.fmod` except that if the sign
-    of the modulus is different than the sign of the divisor :attr:`other` then the divisor
-    is added to the modulus.
 """.format(**common_args))
 
 add_docstr(torch.frac,
@@ -8315,10 +8320,16 @@ add_docstr(torch.remainder,
            r"""
 remainder(input, other, *, out=None) -> Tensor
 
-Like :func:`torch.fmod` this applies C++'s `std::fmod <https://en.cppreference.com/w/cpp/numeric/math/fmod>`_
-for floating point tensors and the modulus operation for integer tensors.
-Unlike :func:`torch.fmod`, however, if the sign of the modulus is different
-than the sign of the divisor :attr:`other` then the divisor is added to the modulus.
+Computes
+`Python's modulus operation <https://docs.python.org/3/reference/expressions.html#binary-arithmetic-operations>`_
+entrywise.  The result has the same sign as the divisor :attr:`other` and its absolute value
+is less than that of :attr:`other`.
+
+It may also be defined in terms of :func:`torch.div` as
+
+.. code:: python
+
+    torch.remainder(a, b) == a - a.div(b, rounding_mode="floor") * b
 
 Supports :ref:`broadcasting to a common shape <broadcasting-semantics>`,
 :ref:`type promotion <type-promotion-doc>`, and integer and float inputs.
@@ -8328,12 +8339,10 @@ Supports :ref:`broadcasting to a common shape <broadcasting-semantics>`,
     possible to satisfy the definition of a modulo operation with complex numbers.
     See :func:`torch.fmod` for how division by zero is handled.
 
-.. note::
-    This op, like NumPy's `remainder <https://numpy.org/doc/stable/reference/generated/numpy.remainder.html>`_,
-    is equivalent to Python's modulus operation, and different from Python's
-    `math.remainder <https://docs.python.org/dev/library/math.html#math.remainder>`_ and
-    C++'s `std::remainder <https://en.cppreference.com/w/cpp/numeric/math/remainder>`_ which implement
-    the IEEE remainder.
+.. seealso::
+
+    :func:`torch.fmod` which implements C++'s `std::fmod <https://en.cppreference.com/w/cpp/numeric/math/fmod>`_.
+    This one is defined in terms of division rounding towards zero.
 
 Args:
     input (Tensor or Scalar): the dividend
@@ -8348,12 +8357,6 @@ Example::
     tensor([ 1.,  0.,  1.,  1.,  0.,  1.])
     >>> torch.remainder(torch.tensor([1, 2, 3, 4, 5]), -1.5)
     tensor([ -0.5000, -1.0000,  0.0000, -0.5000, -1.0000 ])
-
-.. seealso::
-
-    :func:`torch.fmod` which just computes the modulus for integer inputs and
-    applies C++'s `std::fmod <https://en.cppreference.com/w/cpp/numeric/math/fmod>`_
-    for floating point inputs.
 """.format(**common_args))
 
 add_docstr(torch.renorm,
