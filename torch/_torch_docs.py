@@ -993,7 +993,7 @@ add_docstr(torch.asarray,
            r"""
 asarray(obj, *, dtype=None, device=None, copy=None, requires_grad=False) -> Tensor
 
-Converts :attr:`obj` in a tensor.
+Converts :attr:`obj` to a tensor.
 
 :attr:`obj` can be one of:
 
@@ -1001,7 +1001,7 @@ Converts :attr:`obj` in a tensor.
 2. a NumPy array
 3. a DLPack capsule
 4. an object that implements Python's buffer protocol
-5. a sequence
+5. a scalar
 6. a sequence of scalars
 
 When :attr:`obj` is a tensor, NumPy array, or DLPack capsule the returned tensor will,
@@ -1047,17 +1047,17 @@ Keyword args:
            Default: ``None``, which causes the datatype of the returned tensor to be
            inferred from :attr:`obj`.
     copy (bool, optional): controls whether the returned tensor shares memory with :attr:`obj`.
-           If ``None``, the default, then the returned tensor shares memory with :attr:`obj`
+           Default: ``None``, which causes the returned tensor to share memory with :attr:`obj`
            whenever possible. If ``True`` then the returned tensor does not share its memory.
            If ``False`` then the returned tensor shares its memory with :attr:`obj` and an
            error is thrown if it cannot.
     device (:class:`torch.device`, optional): the device of the returned tensor.
-           If ``None``, the default, then the device of :attr:`obj` is used.
+           Default: ``None``, which causes the device of :attr:`obj` to be used.
     requires_grad (bool, optional): whether the returned tensor requires grad.
-           If ``False``, the default, then the returned tensor does not require a gradient.
-           If :attr:`requires_grad` is ``True`` then the returned tensor will require a
-           gradient, and if :attr:`obj` is also a tensor with an autograd history then the
-           returned tensor will have the same history.
+           Default: ``False``, which causes the returned tensor not to require a gradient.
+           If ``True``, then the returned tensor will require a gradient, and if :attr:`obj`
+           is also a tensor with an autograd history then the returned tensor will have
+           the same history.
 
 Example::
 
