@@ -291,6 +291,7 @@ std::shared_ptr<Graph> preprocessGraphPasses(
   tensorexpr::removeUnusedSelfArgument(graph);
 
   std::vector<at::IValue> example_values;
+  example_values.reserve(example_inputs.size());
   for (auto example_input : example_inputs) {
     example_values.emplace_back(*example_input);
   }
