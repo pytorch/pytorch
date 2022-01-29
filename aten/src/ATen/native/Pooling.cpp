@@ -114,10 +114,6 @@ Tensor max_pool2d(
     IntArrayRef padding,
     IntArrayRef dilation,
     bool ceil_mode) {
-  if (self.is_quantized()) {
-    return at::quantized_max_pool2d(self, kernel_size, stride, padding,
-                                    dilation, ceil_mode);
-  }
   if (self.is_mkldnn()) {
     return at::mkldnn_max_pool2d(
         self, kernel_size, stride, padding, dilation, ceil_mode);

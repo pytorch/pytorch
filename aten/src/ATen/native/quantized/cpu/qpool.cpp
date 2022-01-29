@@ -417,7 +417,7 @@ Tensor quantized_max_pool1d(
   if (stride.empty()) {
     stride = kernel_size;
   }
-  auto qy = at::quantized_max_pool2d(
+  auto qy = at::max_pool2d(
     qx.unsqueeze(kSqueezeDim),
     {1, kernel_size[0]},
     {1, stride[0]},
@@ -444,7 +444,7 @@ class QMaxPool_arr_args final {
       return at::quantized_max_pool1d(qx, kernel_size, stride, padding,
                                       dilation, ceil_mode);
     } else if (kSpatialDim == 2) {
-      return at::quantized_max_pool2d(qx, kernel_size, stride, padding,
+      return at::max_pool2d(qx, kernel_size, stride, padding,
                                       dilation, ceil_mode);
     }
     TORCH_CHECK(false, "MaxPool", kSpatialDim, "D is not supported.");
