@@ -5,12 +5,6 @@ import torch
 import inspect
 import itertools
 
-#Utilities
-import os
-import psutil
-from concurrent import futures
-
-
 torch.set_num_threads(1)
 torch._C._debug_set_fusion_group_inlining(False)
 
@@ -171,23 +165,23 @@ def mish(a):
 
 
 SHAPES = [
-    # scalar,
-    # small,
-    # small_2d,
-    # small_broadcast,
-    # medium,
-    # medium2,
-    # medium3d,
-    # medium_sliced,
+    scalar,
+    small,
+    small_2d,
+    small_broadcast,
+    medium,
+    medium2,
+    medium3d,
+    medium_sliced,
     medium_transpose,
-    # medium_channels_last,
-    # medium_broadcast,
-    # medium_broadcast_channels_last,
-    # large,
-    # large_transpose,
-    # large_channels_last,
-    # broadcast_narrow_57611,
-    # large_broadcast_66816,
+    medium_channels_last,
+    medium_broadcast,
+    medium_broadcast_channels_last,
+    large,
+    large_transpose,
+    large_channels_last,
+    broadcast_narrow_57611,
+    large_broadcast_66816,
 ]
 
 OPERATORS = [
@@ -335,5 +329,4 @@ def run_benchmarks(operators, shapes):
 
 
 if __name__ == "__main__":
-    torch._C._jit_set_fusion_strategy([("DYNAMIC", 20)])
     run_benchmarks()
