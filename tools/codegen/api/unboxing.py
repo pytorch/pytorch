@@ -131,7 +131,7 @@ def argumenttype_ivalue_convert(t: Type, arg_name: str, *, mutable: bool = False
     return out_name, ctype, code
 
 
-def _gen_code_base_type(arg_name: str, out_name: str, ctype: CType):
+def _gen_code_base_type(arg_name: str, out_name: str, ctype: CType) -> List[str]:
     ctype_str = ctype.cpp_type(strip_ref=True)
     return [f"{ctype_str} {out_name} = {arg_name}.to<{ctype_str}>();"]
 
