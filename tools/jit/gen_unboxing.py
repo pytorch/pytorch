@@ -3,9 +3,8 @@ import argparse
 import json
 import os
 from dataclasses import dataclass
-from tools.codegen.api import cpp
 from tools.codegen.api.translate import translate
-from tools.codegen.api.types import CppSignatureGroup, CType, BaseCType, voidT
+from tools.codegen.api.types import CppSignatureGroup
 from tools.codegen.api.unboxing import convert_arguments
 from tools.codegen.context import method_with_native_function
 from tools.codegen.gen import parse_native_yaml
