@@ -53,7 +53,7 @@ class InverseWishart(ExponentialFamily):
         'scale_tril': constraints.lower_cholesky,
         'df': constraints.greater_than(0),
     }
-    support = constraints.positive_definite
+    support = constraints.positive_semidefinite
     has_rsample = True
     _mean_carrier_measure = 0
 
