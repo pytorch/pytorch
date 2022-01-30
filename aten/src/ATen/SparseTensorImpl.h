@@ -67,6 +67,9 @@ public:
     dense_dim_ = dense_dim;
     refresh_numel();
   }
+  void raw_resize_(int64_t sparse_dim, int64_t dense_dim, SizeValArrayRef size) {
+    raw_resize_(sparse_dim, dense_dim, size);
+  }
 
   // NOTE: This function preserves invariants of sparse_dim/dense_dim with respect to
   // indices and values.

@@ -217,7 +217,7 @@ TensorImpl::TensorImpl(
 }
 
 #ifndef C10_DISABLE_TENSORIMPL_EXTENSIBILITY
-IntArrayRef TensorImpl::sizes() const {
+SizeValArrayRef TensorImpl::sizes() const {
   return sizes_and_strides_.sizes_arrayref();
 }
 #endif

@@ -997,7 +997,7 @@ SparseTensor& hspmm_out_sparse_cpu(const SparseTensor& sparse_, const Tensor& de
   indices.resize_({1, outNnz});
   Tensor values = at::empty({outNnz, n}, dense.options());
 
-  std::vector<int64_t> new_size = get_sparse_impl(newSparse)->sizes().vec();
+  std::vector<c10::impl::SizeVal> new_size = get_sparse_impl(newSparse)->sizes().vec();
   new_size[0] = outNnz;
   get_sparse_impl(newSparse)->raw_resize_(get_sparse_impl(newSparse)->sparse_dim(), get_sparse_impl(newSparse)->dense_dim(), new_size);
 

@@ -6,15 +6,17 @@
 #include <c10/macros/Macros.h>
 #include <c10/util/ArrayRef.h>
 #include <c10/util/SmallVector.h>
+#include <c10/core/impl/SizeVal.h>
 
 #define C10_SIZES_AND_STRIDES_MAX_INLINE_SIZE 5
 
 namespace c10 {
 namespace impl {
 
+
 // Packed container for TensorImpl sizes and strides.
 // This design improves on the previous approach of using a pair of
-// c10::SmallVector<int64_t, 5> by specializing for the operations we
+// c10::SmallVector<SizeVal, 5> by specializing for the operations we
 // actually use and enforcing that the number of sizes is the same as
 // the number of strides. The memory layout is as follows:
 //
@@ -25,10 +27,10 @@ class C10_API SizesAndStrides {
  public:
   // TODO: different iterator types for sizes & strides to prevent
   // mixing the two accidentally.
-  using sizes_iterator = int64_t*;
-  using sizes_const_iterator = const int64_t*;
-  using strides_iterator = int64_t*;
-  using strides_const_iterator = const int64_t*;
+  using sizes_iterator = SizeVal*;
+  using sizes_const_iterator = const SizeVal*;
+  using strides_iterator = SizeVal*;
+  using strides_const_iterator = const SizeVal*;
 
   SizesAndStrides() : size_(1) {
     size_at_unchecked(0) = 0;
@@ -111,7 +113,7 @@ class C10_API SizesAndStrides {
     return size_;
   }
 
-  const int64_t* sizes_data() const noexcept {
+  const SizeVal* sizes_data() const noexcept {
     if (C10_LIKELY(isInline())) {
       return &inlineStorage_[0];
     } else {
@@ -119,7 +121,7 @@ class C10_API SizesAndStrides {
     }
   }
 
-  int64_t* sizes_data() noexcept {
+  SizeVal* sizes_data() noexcept {
     if (C10_LIKELY(isInline())) {
       return &inlineStorage_[0];
     } else {
@@ -143,8 +145,13 @@ class C10_API SizesAndStrides {
     return sizes_begin() + size();
   }
 
-  IntArrayRef sizes_arrayref() const noexcept {
-    return IntArrayRef{sizes_data(), size()};
+  SizeValArrayRef sizes_arrayref() const noexcept {
+    return SizeValArrayRef{sizes_data(), size()};
+  }
+
+  void set_sizes(SizeValArrayRef newSizes) {
+    resize(newSizes.size());
+    std::copy(newSizes.begin(), newSizes.end(), sizes_begin());
   }
 
   void set_sizes(IntArrayRef newSizes) {
@@ -152,7 +159,7 @@ class C10_API SizesAndStrides {
     std::copy(newSizes.begin(), newSizes.end(), sizes_begin());
   }
 
-  const int64_t* strides_data() const noexcept {
+  const SizeVal* strides_data() const noexcept {
     if (C10_LIKELY(isInline())) {
       return &inlineStorage_[C10_SIZES_AND_STRIDES_MAX_INLINE_SIZE];
     } else {
@@ -160,7 +167,7 @@ class C10_API SizesAndStrides {
     }
   }
 
-  int64_t* strides_data() noexcept {
+  SizeVal* strides_data() noexcept {
     if (C10_LIKELY(isInline())) {
       return &inlineStorage_[C10_SIZES_AND_STRIDES_MAX_INLINE_SIZE];
     } else {
@@ -197,40 +204,40 @@ class C10_API SizesAndStrides {
   }
 
   // Size accessors.
-  int64_t size_at(size_t idx) const noexcept {
+  SizeVal size_at(size_t idx) const noexcept {
     assert(idx < size());
     return sizes_data()[idx];
   }
 
-  int64_t& size_at(size_t idx) noexcept {
+  SizeVal& size_at(size_t idx) noexcept {
     assert(idx < size());
     return sizes_data()[idx];
   }
 
-  int64_t size_at_unchecked(size_t idx) const noexcept {
+  SizeVal size_at_unchecked(size_t idx) const noexcept {
     return sizes_data()[idx];
   }
 
-  int64_t& size_at_unchecked(size_t idx) noexcept {
+  SizeVal& size_at_unchecked(size_t idx) noexcept {
     return sizes_data()[idx];
   }
 
   // Size accessors.
-  int64_t stride_at(size_t idx) const noexcept {
+  SizeVal stride_at(size_t idx) const noexcept {
     assert(idx < size());
     return strides_data()[idx];
   }
 
-  int64_t& stride_at(size_t idx) noexcept {
+  SizeVal& stride_at(size_t idx) noexcept {
     assert(idx < size());
     return strides_data()[idx];
   }
 
-  int64_t stride_at_unchecked(size_t idx) const noexcept {
+  SizeVal stride_at_unchecked(size_t idx) const noexcept {
     return strides_data()[idx];
   }
 
-  int64_t& stride_at_unchecked(size_t idx) noexcept {
+  SizeVal& stride_at_unchecked(size_t idx) noexcept {
     return strides_data()[idx];
   }
 
@@ -269,11 +276,11 @@ class C10_API SizesAndStrides {
   }
 
   static size_t storageBytes(size_t size) noexcept {
-    return size * 2 * sizeof(int64_t);
+    return size * 2 * sizeof(SizeVal);
   }
 
   void allocateOutOfLineStorage(size_t size) {
-    outOfLineStorage_ = static_cast<int64_t*>(malloc(storageBytes(size)));
+    outOfLineStorage_ = static_cast<SizeVal*>(malloc(storageBytes(size)));
     TORCH_CHECK(
         outOfLineStorage_,
         "Could not allocate memory for Tensor SizesAndStrides!");
@@ -281,7 +288,7 @@ class C10_API SizesAndStrides {
 
   void resizeOutOfLineStorage(size_t newSize) {
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(!isInline());
-    outOfLineStorage_ = static_cast<int64_t*>(
+    outOfLineStorage_ = static_cast<SizeVal*>(
         realloc(outOfLineStorage_, storageBytes(newSize)));
     TORCH_CHECK(
         outOfLineStorage_,
@@ -294,8 +301,8 @@ class C10_API SizesAndStrides {
 
   size_t size_;
   union {
-    int64_t* outOfLineStorage_;
-    int64_t inlineStorage_[C10_SIZES_AND_STRIDES_MAX_INLINE_SIZE * 2]{};
+    SizeVal* outOfLineStorage_;
+    SizeVal inlineStorage_[C10_SIZES_AND_STRIDES_MAX_INLINE_SIZE * 2]{};
   };
 };
 

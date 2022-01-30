@@ -19,6 +19,7 @@
 #include <c10/util/Deprecated.h>
 #include <c10/util/Exception.h>
 #include <c10/util/SmallVector.h>
+#include <c10/core/impl/SizeVal.h>
 
 #include <array>
 #include <iterator>
@@ -251,6 +252,33 @@ class ArrayRef final {
   }
 
   /// @}
+
+  // Special handling for IntArrayRef and SizeValArrayRef conversions
+  template <class = typename std::enable_if< 
+    std::is_same<ArrayRef<T>, ArrayRef<int64_t>>::value>
+  > 
+  /// Construct an ArrayRef from a pointer and length.
+  C10_HOST_CONSTEXPR_EXCEPT_WIN_CUDA ArrayRef(const c10::impl::SizeVal* data, size_t length)
+      : Data((T*)data), Length(length) {
+
+    debugCheckNullptrInvariant();
+  }
+
+  template <class = typename std::enable_if< 
+    std::is_same<ArrayRef<T>, ArrayRef<c10::impl::SizeVal>>::value>
+  > 
+  /// Construct an ArrayRef from a pointer and length.
+  operator ArrayRef<int64_t>() {
+    return {*this};
+  }
+
+  template <class = typename std::enable_if< 
+    std::is_same<ArrayRef<T>, ArrayRef<c10::impl::SizeVal>>::value>
+  > 
+  /// Construct an ArrayRef from a pointer and length.
+  bool operator==(ArrayRef<int64_t> other) {
+    return other.equals(*this);
+  }
 };
 
 template <typename T>
@@ -364,6 +392,7 @@ bool operator!=(c10::ArrayRef<T> a1, const std::vector<T>& a2) {
 }
 
 using IntArrayRef = ArrayRef<int64_t>;
+using SizeValArrayRef = ArrayRef<c10::impl::SizeVal>;
 
 // This alias is deprecated because it doesn't make ownership
 // semantics obvious.  Use IntArrayRef instead!

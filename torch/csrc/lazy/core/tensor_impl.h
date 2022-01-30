@@ -37,7 +37,7 @@ class TORCH_API LTCTensorImpl final : public c10::TensorImpl {
   int64_t stride(int64_t d) const override;
 
 #ifndef C10_DISABLE_TENSORIMPL_EXTENSIBILITY
-  at::IntArrayRef sizes() const override;
+  at::SizeValArrayRef sizes() const override;
   at::IntArrayRef strides() const override;
   int64_t dim() const override;
   int64_t numel() const override;

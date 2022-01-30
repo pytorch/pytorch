@@ -699,7 +699,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * Return a reference to the sizes of this tensor.  This reference remains
    * valid as long as the tensor is live and not resized.
    */
-  TENSORIMPL_MAYBE_VIRTUAL IntArrayRef sizes() const
+  TENSORIMPL_MAYBE_VIRTUAL SizeValArrayRef sizes() const
 #ifdef C10_DISABLE_TENSORIMPL_EXTENSIBILITY
   {
     return sizes_and_strides_.sizes_arrayref();
@@ -2752,20 +2752,20 @@ class C10_TensorImpl_Size_Check_Dummy_Class : private TensorImpl {
   // were used and on which quantity
   template <size_t Actual, size_t Expected, FieldNameEnum FiledName>
   constexpr static bool are_equal() {
-    static_assert(
-        Actual == Expected,
-        "Actual and Expected sizes of a field did not match!");
-    return true;
+    // static_assert(
+    //     Actual == Expected,
+    //     "Actual and Expected sizes of a field did not match!");
+    return Actual == Expected;
   }
 
   // Provides compile-time <= check that reveals what numbers
   // were used and on which quantity
   template <size_t Actual, size_t Expected, FieldNameEnum FiledName>
   constexpr static bool is_le() {
-    static_assert(
-        Actual <= Expected,
-        "Actual and Expected sizes of a field did not match!");
-    return true;
+    // static_assert(
+    //     Actual <= Expected,
+    //     "Actual and Expected sizes of a field did not match!");
+    return Actual <= Expected;
   }
 
  public:
@@ -2810,15 +2810,15 @@ class C10_TensorImpl_Size_Check_Dummy_Class : private TensorImpl {
 #else
   // This is a 64-bit system
   static constexpr bool check_sizes() {
-    constexpr size_t tsize = 26 * sizeof(int64_t);
+    constexpr size_t tsize = 24 * sizeof(int64_t);
 
     // clang-format off
     static_assert(are_equal<sizeof(storage_),            8,  FieldNameEnum::storage_>(),           "Size of storage_ changed!");
     // On some systems involving NVCC the size of unique_ptr is 16 bytes. We haven't
     // figured out how to detect those via macro preprocessors yet, so we use <=
     // comparisons for the relevant fields.
-    static_assert(is_le<sizeof(autograd_meta_),         16,  FieldNameEnum::autograd_meta_>(),     "Size of autograd_meta_ changed!");
-    static_assert(is_le<sizeof(named_tensor_meta_),     16,  FieldNameEnum::named_tensor_meta_>(), "Size of named_tensor_meta_ changed!");
+    static_assert(are_equal<sizeof(autograd_meta_),         8,  FieldNameEnum::autograd_meta_>(),     "Size of autograd_meta_ changed!");
+    static_assert(are_equal<sizeof(named_tensor_meta_),     8,  FieldNameEnum::named_tensor_meta_>(), "Size of named_tensor_meta_ changed!");
     static_assert(are_equal<sizeof(version_counter_),    8,  FieldNameEnum::version_counter_>(),   "Size of version_counter_ changed!");
     static_assert(are_equal<sizeof(pyobj_interpreter_),  8,  FieldNameEnum::pyobj_interpreter_>(), "Size of pyobj_interpreter_ changed!");
     static_assert(are_equal<sizeof(pyobj_),              8,  FieldNameEnum::pyobj_>(),             "Size of pyobj_ changed!");
@@ -2828,7 +2828,7 @@ class C10_TensorImpl_Size_Check_Dummy_Class : private TensorImpl {
     static_assert(are_equal<sizeof(data_type_),          2,  FieldNameEnum::data_type_>(),         "Size of data_type_ changed!");
     static_assert(are_equal<sizeof(device_opt_),         3,  FieldNameEnum::device_opt_>(),        "Size of device_opt_ changed!");
     static_assert(are_equal<sizeof(key_set_),            8,  FieldNameEnum::key_set_>(),           "Size of key_set_ changed!");
-    static_assert(is_le<sizeof(TensorImpl),          tsize,  FieldNameEnum::TOTAL_SIZE>(),         "Total size changed!");
+    static_assert(are_equal<sizeof(TensorImpl),          tsize,  FieldNameEnum::TOTAL_SIZE>(),         "Total size changed!");
     // clang-format on
 
     return true;

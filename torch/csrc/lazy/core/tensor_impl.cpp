@@ -153,7 +153,7 @@ void LTCTensorImpl::setup_size_properties() {
 
 #ifndef C10_DISABLE_TENSORIMPL_EXTENSIBILITY
 
-at::IntArrayRef LTCTensorImpl::sizes() const {
+at::SizeValArrayRef LTCTensorImpl::sizes() const {
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
   const_cast<LTCTensorImpl*>(this)->setup_size_properties();
   return c10::TensorImpl::sizes();
