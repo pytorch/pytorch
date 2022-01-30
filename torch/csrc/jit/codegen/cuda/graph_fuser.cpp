@@ -775,9 +775,11 @@ struct CudaGraphFuser {
           // longer valid so we rescan the new FusionGroup for more fusions...
           return std::make_pair(fusion_group.value()->reverseIterator(), true);
         }
-        // horizontal fusion only applies on tensor inputs
+
+        // horizontal fusion only applies on non-scalar tensor inputs
         if (getHorizontalFusion() &&
-            producer->type()->isSubtypeOf(*TensorType::get())) {
+            producer->type()->isSubtypeOf(*TensorType::get()) &&
+            !is_cpu_scalar(*producer->type()->cast<TensorType>())) {
           // fusing nodes sharing inputs, this could save memory bandwidth by
           // reducing number of tensor read.
           for (const auto& u : producer->uses()) {

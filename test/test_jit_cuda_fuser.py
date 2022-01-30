@@ -3490,25 +3490,6 @@ class TestCudaFuser(JitTestCase):
     @unittest.skipIf(not RUN_CUDA, "requires CUDA")
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
                      "Requires fusion optimization pass to be effective")
-    def test_mismatch_device_check(self):
-        x = torch.randn(4, 2, device="cuda")
-        s = torch.tensor(1.5, device="cpu")
-
-        def t(x, s):
-            o = x + s
-            o = o.relu()
-            return o
-
-        t_jit = torch.jit.script(t)
-        for i in range(5):
-            t_jit(x, s)
-
-        # sibling fusion should be disabled with the flag
-        self.assertGraphContainsExactly(t_jit.graph_for(x, s), FUSION_GUARD, 0)
-
-    @unittest.skipIf(not RUN_CUDA, "requires CUDA")
-    @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
-                     "Requires fusion optimization pass to be effective")
     def test_singleton_fusion(self):
         x = torch.randn(4, 2, device="cuda")
 
@@ -3575,6 +3556,51 @@ class TestCudaFuser(JitTestCase):
 
             t_jit = torch.jit.script(t)
             self._run_helper(t_jit, t, x, y)
+
+    @unittest.skipIf(not RUN_CUDA, "requires CUDA")
+    @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
+                     "Requires fusion optimization pass to be effective")
+    def test_cpu_scalar(self):
+        x = torch.randn(4, 2, 3, device="cuda")
+        y = torch.tensor(1.0, device="cpu")
+        z = torch.tensor(2.0, device="cpu")
+
+        with nvfuser_singleton_fusion(True):
+            # testing cpu scalar tensor promotion
+            def t(x, y):
+                return x + y
+
+            t_jit = torch.jit.script(t)
+            self._run_helper(t_jit, t, x, y)
+
+            # scalar cpu tensor add should NOT be fused
+            @torch.jit.script
+            def t1(y, z):
+                return y * z
+            for _ in range(5):
+                t1(y, z)
+            self.assertGraphContainsExactly(t1.graph_for(y, z), FUSION_GUARD, 0)
+
+            # everything, including scalar cpu tensor add should be fused
+            @torch.jit.script
+            def t2(x, y, z):
+                tmp = y + z
+                return tmp + x
+            for _ in range(5):
+                t2(x, y, z)
+            self.assertGraphContainsExactly(t2.graph_for(x, y, z), 'aten::add', 0)
+            self.assertGraphContainsExactly(t2.graph_for(x, y, z), FUSION_GUARD, 1)
+
+            # 'cpu_tmp = y + z' shouldn't be fused.
+            @torch.jit.script
+            def t3(x, y, z):
+                cpu_tmp = y + z
+                out = x + y
+                return cpu_tmp, out
+            for _ in range(5):
+                t3(x, y, z)
+            self.assertGraphContainsExactly(t3.graph_for(x, y, z), FUSION_GUARD, 1)
+            self.assertGraphContainsExactly(t3.graph_for(x, y, z), 'aten::add', 1)
 
     @unittest.skipIf(not RUN_CUDA, "requires CUDA")
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,

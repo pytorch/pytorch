@@ -11,6 +11,9 @@ namespace cuda {
 
 void debugPrint(const c10::TensorTypePtr& type);
 
+bool is_cpu_scalar(const at::Tensor& tensor);
+bool is_cpu_scalar(const c10::TensorType& tensor_type);
+
 //! Types of debug print-outs
 //!
 //! These can be set through the `PYTORCH_NVFUSER_DUMP` environment variable

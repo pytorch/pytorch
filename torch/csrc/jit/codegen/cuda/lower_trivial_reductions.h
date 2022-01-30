@@ -13,8 +13,6 @@ namespace jit {
 namespace fuser {
 namespace cuda {
 
-class GpuLower;
-
 //! Detect almost all IterDomains that are derived from trivial
 //! reductons.
 class TORCH_CUDA_CU_API TrivialReductionInfo {

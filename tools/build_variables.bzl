@@ -652,6 +652,7 @@ libtorch_cuda_core_sources = [
     "torch/csrc/jit/codegen/cuda/lower_replace_size.cpp",
     "torch/csrc/jit/codegen/cuda/lower_shift.cpp",
     "torch/csrc/jit/codegen/cuda/lower_thread_predicate.cpp",
+    "torch/csrc/jit/codegen/cuda/lower_trivial_broadcast.cpp",
     "torch/csrc/jit/codegen/cuda/lower_trivial_reductions.cpp",
     "torch/csrc/jit/codegen/cuda/lower_unroll.cpp",
     "torch/csrc/jit/codegen/cuda/lower_utils.cpp",

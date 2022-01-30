@@ -521,6 +521,7 @@ void IrPrinter::handle(const kir::TensorIndex* ti) {
     }
   }
   os_ << "]";
+  os_ << " view( T" << varName(ti->view()) << " )";
 }
 
 void IrPrinter::handle(const kir::Allocate* node) {

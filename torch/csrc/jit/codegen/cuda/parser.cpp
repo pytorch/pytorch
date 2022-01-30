@@ -516,7 +516,6 @@ class IrParser {
           (opt_dtype.value() == DataType::Half ||
            opt_dtype.value() == DataType::BFloat16)) {
         Val* promoted_val = castOp(DataType::Float, operand);
-        // value_map_.emplace(val->unique(), ValueHolder(promoted_val, format));
         value_map_[val->unique()] = ValueHolder(promoted_val, format);
       }
     }
@@ -2626,6 +2625,9 @@ class IrParser {
       }
 
       cg_val = IrBuilder::create<TensorView>(tensor_type);
+      if (is_cpu_scalar(*tensor_type)) {
+        cg_val->as<TensorView>()->setCpuScalar(true);
+      }
       value_map_.emplace(val->unique(), ValueHolder(cg_val, format));
       return true;
     }

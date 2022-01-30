@@ -10,6 +10,8 @@
 #include <torch/csrc/jit/codegen/cuda/lower_double_buffer.h>
 #include <torch/csrc/jit/codegen/cuda/lower_predicate.h>
 #include <torch/csrc/jit/codegen/cuda/lower_shift.h>
+#include <torch/csrc/jit/codegen/cuda/lower_thread_predicate.h>
+#include <torch/csrc/jit/codegen/cuda/lower_trivial_broadcast.h>
 #include <torch/csrc/jit/codegen/cuda/lower_trivial_reductions.h>
 #include <torch/csrc/jit/codegen/cuda/lower_warp_reduce.h>
 #include <torch/csrc/jit/codegen/cuda/non_divisible_split.h>
@@ -46,6 +48,10 @@ class TORCH_CUDA_CU_API GpuLower : public NonCopyable {
   //! Returns the currently active lowering object
   //! (or nullptr if no lowering is in progress)
   static GpuLower* current();
+
+  ConcretizedBroadcastDomains& concretizedBroadcastDomains() {
+    return concretized_broadcast_domains_;
+  }
 
   const ThreadPredicateMap& threadPredMap() const {
     return thread_pred_map_;
@@ -132,6 +138,7 @@ class TORCH_CUDA_CU_API GpuLower : public NonCopyable {
   std::unique_ptr<kir::Kernel> kernel_;
 
   // Some stateful information during lowering
+  ConcretizedBroadcastDomains concretized_broadcast_domains_;
   ThreadPredicateMap thread_pred_map_;
   PredicateElimination pred_elimination_;
   ComputeAtMap ca_loop_map_;

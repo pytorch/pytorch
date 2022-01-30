@@ -92,10 +92,6 @@ class KernelIrScanner : private IrVisitor {
     summary_.has_block_reductions =
         summary_.has_block_reductions || domain->hasBlockReduction();
 
-    // Do we have block broadcasts?
-    summary_.has_block_broadcasts =
-        summary_.has_block_broadcasts || domain->hasBlockBroadcast();
-
     // Update the largest smem data type
     if (domain->hasBlockReduction() || domain->hasGridReduction() ||
         tv->getMemoryType() == MemoryType::Shared) {
@@ -134,8 +130,22 @@ class KernelIrScanner : private IrVisitor {
     updateGridReductionInLoop(dom);
   }
 
-  void handle(GridBroadcast*) final {
+  void handle(GridBroadcast* grid_broadcast) final {
     summary_.has_cooperative_grid_reduction = true;
+    handle(grid_broadcast->broadcast_op());
+  }
+
+  void handle(BroadcastOp* bop) final {
+    const ParallelTypeBitmap parallel_types =
+        GpuLower::current()->threadPredMap().getParallelBroadcastDomains(
+            bop->out()->as<TensorIndex>()->view());
+    summary_.broadcast_parallel_types.emplace(bop, parallel_types);
+    // Do we have block broadcasts?
+    summary_.has_block_broadcasts =
+        summary_.has_block_broadcasts || parallel_types.hasTID();
+    // Do we have grid broadcasts?
+    summary_.has_grid_broadcasts =
+        summary_.has_grid_broadcasts || parallel_types.hasBID();
   }
 
  private:
@@ -263,8 +273,6 @@ class ValidateAllocation : private OptOutConstDispatch {
 void Kernel::finalize(std::vector<Expr*> top_level_exprs) {
   TORCH_INTERNAL_ASSERT(top_level_exprs_.empty());
   top_level_exprs_ = std::move(top_level_exprs);
-  predicate_map_ = std::make_unique<ThreadPredicateMap>(
-      GpuLower::current()->threadPredMap());
   warp_padded_parallel_info_ = GpuLower::current()->getWarpPaddedParallelInfo();
   ValidateAllocation::validate(this);
   analyze();

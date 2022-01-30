@@ -143,6 +143,19 @@ void debugPrint(const c10::TensorTypePtr& type) {
 }
 #pragma clang diagnostic pop
 
+bool is_cpu_scalar(const at::Tensor& tensor) {
+  return tensor.device().is_cpu() && tensor.numel() == 1 && tensor.dim() == 0;
+}
+
+bool is_cpu_scalar(const c10::TensorType& tensor_type) {
+  auto opt_device = tensor_type.device();
+  auto opt_dim = tensor_type.dim();
+  auto opt_numel = tensor_type.numel();
+  return opt_device.has_value() && opt_device.value().is_cpu() &&
+      opt_dim.has_value() && opt_numel.has_value() && opt_dim.value() == 0 &&
+      opt_numel.value() == 1;
+}
+
 bool isDebugDumpEnabled(DebugDumpOption option) {
   const static auto dump_options = parseDebugDumpOptions();
   return dump_options.at(option);
