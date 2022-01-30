@@ -61,8 +61,7 @@ TORCH_API void {f.func.name.unambiguous_name()}(Stack & stack);
             args_str = "" if not binding_list else f"""
         {arg_connector.join(e.expr for e in translate(binding_list, sig.arguments(), method=sig.method))}
     """
-            ret_type: CType = cpp.returns_type(f.func.returns)
-            if isinstance(ret_type, BaseCType) and ret_type.type == voidT:
+            if len(f.func.returns) == 0:
                 ret_str = ""
                 push_str = ""
             else:
@@ -93,7 +92,7 @@ class ComputeCodegenUnboxedKernels:
             f, method=(Variant.method in f.variants), fallback_binding=f.manual_cpp_binding
         )
 
-        sig = sig_group.signature
+        sig = sig_group.most_faithful_signature()
 
         # escape double quote in schema, get rid of extra double quotes
         schema = json.dumps(sig.func.__str__())[1:-1]
