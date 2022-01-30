@@ -273,7 +273,7 @@ class InverseWishart(ExponentialFamily):
         return (
             - 0.5 * nu * p * _log_2
             + nu * self._unbroadcasted_scale_tril.diagonal(dim1=-2, dim2=-1).log().sum(-1)
-            + torch.mvlgamma(0.5 * nu, p=p)
+            - torch.mvlgamma(0.5 * nu, p=p)
             - 0.5 * (nu + p + 1) * torch.linalg.slogdet(value).logabsdet
             - 0.5 * torch.cholesky_solve(value, self._unbroadcasted_scale_tril).diagonal(dim1=-2, dim2=-1).reciprocal().sum(dim=-1)
         )
