@@ -2404,9 +2404,9 @@ class TestDistributions(TestCase):
         self.assertEqual(d.variance, empirical_var, atol=5, rtol=0)
 
     def test_inverse_wishart_shape(self):
-        df = (torch.rand(5, requires_grad=True) + 7) * 10
-        df_no_batch = (torch.rand([], requires_grad=True) + 7) * 10
-        df_multi_batch = (torch.rand(6, 5, requires_grad=True) + 7) * 10
+        df = (torch.rand(5, requires_grad=True) + 7) * 3
+        df_no_batch = (torch.rand([], requires_grad=True) + 7) * 3
+        df_multi_batch = (torch.rand(6, 5, requires_grad=True) + 7) * 3
 
         # construct PSD covariance
         tmp = torch.randn(3, 10)
@@ -2468,7 +2468,7 @@ class TestDistributions(TestCase):
 
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     def test_inverse_wishart_log_prob(self):
-        df = (torch.rand([], requires_grad=True) + 7) * 10
+        df = (torch.rand([], requires_grad=True) + 7) * 3
         tmp = torch.randn(3, 10)
         cov = (torch.matmul(tmp, tmp.t()) / tmp.size(-1)).requires_grad_()
         prec = cov.inverse().requires_grad_()
