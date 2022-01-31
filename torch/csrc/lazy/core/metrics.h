@@ -205,6 +205,7 @@ class TORCH_API Counter {
   } while (0)
 
 #define TORCH_LAZY_FN_COUNTER(ns) \
+  torch::lazy::OpNamePrinter opp(c10::str(ns, __FUNCTION__)); \
   TORCH_LAZY_COUNTER(c10::str(ns, __FUNCTION__), 1)
 
 #define TORCH_LAZY_VALUE_METRIC(name, value)                         \

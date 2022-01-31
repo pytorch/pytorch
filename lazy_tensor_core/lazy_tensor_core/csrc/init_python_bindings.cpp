@@ -31,7 +31,7 @@
 #include "torch/csrc/autograd/variable.h"
 #include "torch/csrc/jit/python/pybind.h"
 #include "torch/csrc/utils/cuda_lazy_init.h"
-
+#include <csignal>
 namespace torch_lazy_tensors {
 namespace {
 
@@ -684,13 +684,20 @@ void InitLtcModuleBindings(py::module m) {
   m.def("_set_custom_printer", [](py::object pyobj) {
     std::function<void()> printer = [pyobj]() {
       py::gil_scoped_acquire acquire;
-      std::cerr << "========python==========\n";
+      std::cerr << "========python BEGIN==========\n";
       pyobj();
-      std::cerr << "=========cpp=========\n";
+      std::cerr << "========python END==========\n";
+      std::cerr << "=========cpp BEGIN=========\n";
       std::cerr << c10::get_backtrace();
+      std::cerr << "=========cpp END=========\n";
+      std::cerr << "==========lower ops BEGIN=======\n";
+      std::cerr << torch::lazy::getPrinterOpName() << std::endl;
+      std::cerr << "==========lower ops END=======\n";
     };
     torch::lazy::getPythonPrinter() = printer;
   });
+  m.def("_print_text",
+        [](const std::string& s) { std::cerr << s << std::endl; });
   m.def("_ltc_init_ts_backend", []() { compiler::InitTorchScriptBackend(); });
   m.def("_ltc_set_noop_execution_mode", [](bool enable_noop) {
     torch::lazy::LazyGraphExecutor::Get()->SetNoOpExecutionMode(enable_noop);

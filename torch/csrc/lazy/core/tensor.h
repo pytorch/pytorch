@@ -9,6 +9,19 @@
 namespace torch {
 namespace lazy {
 
+TORCH_API std::string& getPrinterOpName();
+
+struct OpNamePrinter {
+
+  OpNamePrinter(std::string opname) {
+    getPrinterOpName() = opname;
+  }
+
+  ~OpNamePrinter() {
+    getPrinterOpName() = "UNSET!";
+  }
+
+};
 
 
 /*

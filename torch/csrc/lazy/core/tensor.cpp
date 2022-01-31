@@ -17,6 +17,11 @@ namespace lazy {
 
 namespace {
   thread_local bool printer_ {false};
+  thread_local std::string op_name_;
+}
+
+std::string& getPrinterOpName() {
+  return op_name_;
 }
 
 bool& disablePrinter() {

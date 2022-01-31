@@ -4,6 +4,7 @@
 #include <c10/core/impl/DeviceGuardImplInterface.h>
 #include <c10/macros/Macros.h>
 #include <torch/csrc/lazy/core/tensor_util.h>
+#include <csignal>
 
 namespace torch {
 namespace lazy {
@@ -136,6 +137,12 @@ void LTCTensorImpl::setup_size_properties() {
 
   if (getPythonPrinter() && !disablePrinter()) {
     getPythonPrinter()();
+  }
+  
+  static auto const LTC_BREAK_ON_SIZE = std::getenv("LTC_BREAK_ON_SIZE");
+
+  if (LTC_BREAK_ON_SIZE) {
+    raise(SIGINT);
   }
 
   size_t generation = tensor_.generation();
