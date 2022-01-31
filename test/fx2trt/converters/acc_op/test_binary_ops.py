@@ -1,4 +1,4 @@
-# Owner(s): ["oncall: fx"]
+# Owner(s): ["oncall: aiacc"]
 
 from typing import Callable
 

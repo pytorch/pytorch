@@ -147,11 +147,11 @@ void update_stat_array(
     StatArray& stat_array,
     int64_t amount,
     const StatTypes& stat_types) {
-  for_each_selected_stat_type(stat_types, [&stat_array, amount](size_t stat_type) {
-    update_stat(stat_array[stat_type], amount);
-  });
+  for_each_selected_stat_type(
+      stat_types, [&stat_array, amount](size_t stat_type) {
+        update_stat(stat_array[stat_type], amount);
+      });
 }
-
 
 struct Block;
 struct PrivatePool;
@@ -935,9 +935,10 @@ class DeviceCachingAllocator {
     stat_types[static_cast<size_t>(get_stat_type_for_pool(pool))] = true;
     for_each_selected_stat_type(stat_types, [&](size_t stat_type) {
       update_stat(
-        stats.inactive_split[stat_type], net_change_inactive_split_blocks);
+          stats.inactive_split[stat_type], net_change_inactive_split_blocks);
       update_stat(
-          stats.inactive_split_bytes[stat_type], net_change_inactive_split_size);
+          stats.inactive_split_bytes[stat_type],
+          net_change_inactive_split_size);
       update_stat(stats.active[stat_type], -1);
       update_stat(stats.active_bytes[stat_type], -original_block_size);
     });
