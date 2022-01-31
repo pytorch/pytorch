@@ -358,7 +358,7 @@ const std::string jit_code_template = R"ESCAPE(
     Array<${index_type}, NARGS> get(${index_type} linear_idx) const {
       Array<${index_type}, NARGS> offsets;
       #pragma unroll
-      for (int arg = 0; arg < NARGS; arg++) {
+      for (const auto arg : c10::irange(NARGS)) {
         offsets[arg] = linear_idx;
       }
       return offsets;
@@ -371,12 +371,12 @@ const std::string jit_code_template = R"ESCAPE(
   __device__ __forceinline__ Array<${index_type}, NARGS> get(${index_type} linear_idx) const {
       Array<${index_type}, NARGS> offsets;
       #pragma unroll
-      for (int arg = 0; arg < NARGS; ++arg) {
+      for (const auto arg : c10::irange(NARGS)) {
       offsets[arg] = 0;
       }
 
       #pragma unroll
-      for (int dim = 0; dim < 25; ++dim) {
+      for (const auto dim : c10::irange(25)) {
       if (dim == dims) {
           break;
       }
@@ -385,7 +385,7 @@ const std::string jit_code_template = R"ESCAPE(
       linear_idx = divmod.div;
 
       #pragma unroll
-      for (int arg = 0; arg < NARGS; ++arg) {
+      for (const auto arg : c10::irange(NARGS)) {
           offsets[arg] += divmod.mod * strides_[dim][arg];
       }
       //printf("offset calc thread dim size stride offset %d %d %d %d %d %d %d %d\n",
@@ -421,7 +421,7 @@ const std::string jit_code_template = R"ESCAPE(
     auto thread_idx = threadIdx.x;
 
     #pragma unroll
-    for (int j = 0; j < thread_work_size; j++){
+    for (const auto j : c10::irange(thread_work_size)) {
         if (thread_idx >= remaining) {
             break;
         }
@@ -435,7 +435,7 @@ const std::string jit_code_template = R"ESCAPE(
     }
 
     #pragma unroll
-    for (int j = 0; j < thread_work_size; j++) {
+    for (const auto j : c10::irange(thread_work_size)) {
       if ((threadIdx.x  + j*num_threads) < remaining) {
         out[j] = ${name}<${compute_type}>(${args}${extra_args});
       }
@@ -443,7 +443,7 @@ const std::string jit_code_template = R"ESCAPE(
 
     thread_idx = threadIdx.x;
     #pragma unroll
-    for (int j = 0; j < thread_work_size; j++){
+    for (const auto j : c10::irange(thread_work_size)) {
         if (thread_idx >= remaining) {
             break;
         }
@@ -496,7 +496,7 @@ const std::string jit_vectorized_code_template = R"ESCAPE(
 
       if (remaining < block_work_size) {
         #pragma unroll
-        for (int j = 0; j < thread_work_size; j++){
+        for (const auto j : c10::irange(thread_work_size)) {
           if (thread_idx >= remaining) {
             break;
           }
@@ -505,14 +505,14 @@ const std::string jit_vectorized_code_template = R"ESCAPE(
           thread_idx += num_threads;
         }
         #pragma unroll
-        for (int j = 0; j < thread_work_size; j++) {
+        for (const auto j : c10::irange(thread_work_size)) {
           if ((threadIdx.x  + j*num_threads) < remaining) {
             out[j] = ${name}<${compute_type}>(${args} ${extra_args});
           }
         }
         thread_idx = threadIdx.x;
         #pragma unroll
-        for (int j = 0; j < thread_work_size; j++) {
+        for (const auto j : c10::irange(thread_work_size)) {
           if (thread_idx >= remaining) {
               break;
           }
@@ -526,7 +526,7 @@ const std::string jit_vectorized_code_template = R"ESCAPE(
         using vec_t_input = aligned_vector<${scalar_type}, vec_size>;
         ${vector_pointers}
         #pragma unroll
-        for (int i = 0; i<loop_size; i++){
+        for (const auto i : c10::irange(loop_size)) {
           vec_t_input v;
           ${load_vectorized_inputs}
           thread_idx += num_threads;
@@ -534,17 +534,17 @@ const std::string jit_vectorized_code_template = R"ESCAPE(
 
 
         #pragma unroll
-        for (int j = 0; j < thread_work_size; j++) {
+        for (const auto j : c10::irange(thread_work_size)) {
           out[j] = ${name}<${compute_type}>(${args}${extra_args});
         }
         using vec_t_output = aligned_vector<${result_type}, vec_size>;
         vec_t_output * to_ = reinterpret_cast<vec_t_output *>(data[0]) + block_work_size / vec_size * idx;
         int thread_idx = threadIdx.x;
         #pragma unroll
-        for (int i = 0; i<loop_size; i++){
+        for (const auto i : c10::irange(loop_size)) {
           vec_t_output v;
           #pragma unroll
-          for (int j=0; j<vec_size; j++){
+          for (const auto j : c10::irange(vec_size)) {
             v.val[j] = out[vec_size * i + j];
           }
           to_[thread_idx] = v;
@@ -664,7 +664,7 @@ std::string generate_code(
   // (look at polygamma for example).
   std::string extra_params = "";
   std::string extra_args = "";
-  for (size_t i = 0; i < extra_args_typenames.size(); i++) {
+  for (const auto i : c10::irange(extra_args_typenames.size())) {
     auto type = std::string(extra_args_typenames[i]);
     auto name = "extra_arg_" + std::string(to_string(i));
     extra_params += "," + type + " " + name;
@@ -674,7 +674,7 @@ std::string generate_code(
   env.s("extra_args", extra_args);
 
   std::stringstream declare_load_arrays;
-  for (int i = 0; i < nInputs; i++) {
+  for (const auto i : c10::irange(nInputs)) {
     // TODO these arrays are potentially of the different types, use function
     // traits to determine the types
     declare_load_arrays << f_inputs_type << " arg" << std::to_string(i)
@@ -746,7 +746,7 @@ std::string generate_code(
     }
 
     std::stringstream load_inputs;
-    for (int i = 0; i < nInputs; i++) {
+    for (const auto i : c10::irange(nInputs)) {
       auto i_string = std::to_string(i);
       load_inputs << "arg" << i_string << "[j] = l.load<" << f_inputs_type
                   << ">(data[" << std::to_string(i + nOutputs)
@@ -781,7 +781,7 @@ std::string generate_code(
     auto i_string = std::to_string(i);
     load_vectorized_inputs << "v = vec" << i_string << "[thread_idx];\n";
     load_vectorized_inputs << "#pragma unroll\n";
-    load_vectorized_inputs << "for (int j=0; j < vec_size; j++){\n";
+    load_vectorized_inputs << "for (const auto j : c10::irange(vec_size)) {\n";
     load_vectorized_inputs << "  arg" << i_string << "[vec_size * i + j] = v.val[j];\n";
     load_vectorized_inputs << "}\n";
   }

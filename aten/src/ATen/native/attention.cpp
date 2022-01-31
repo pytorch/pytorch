@@ -6,6 +6,7 @@
 #include <ATen/NativeFunctions.h>
 #include <ATen/Parallel.h>
 #include <ATen/cpu/vec/vec256/vec256.h>
+#include <c10/util/irange.h>
 
 namespace at {
 
@@ -141,14 +142,14 @@ void masked_softmax_dropout(
                 }
 
                 auto hmax = std::numeric_limits<scalar_t>::lowest();
-                for (auto i = 0; i < V; ++i) {
+                for (const auto i : c10::irange(V)) {
                   hmax = std::max(max_input[i], hmax);
                 }
                 accscalar_t hsum = 0;
                 for (auto t = 0; t < T; t += V) {
                   auto v = Vec::loadu(&input_data[t]);
                   // TODO: vectorize in accscalar_t?
-                  for (auto i = 0; i < V; ++i) {
+                  for (const auto i : c10::irange(V)) {
                     hsum += std::exp(static_cast<accscalar_t>(v[i]) - hmax);
                   }
                 }
@@ -159,12 +160,12 @@ void masked_softmax_dropout(
                   // TODO: vectorize in accscalar_t?
                   // TODO this faster solution does not work on Android build
                   /*
-                  for (auto i = 0; i < V; ++i) {
+                  for (const auto i : c10::irange(V)) {
                     v[i] = static_cast<scalar_t>(std::exp(static_cast<accscalar_t>(v[i]) - hmax) * inv_denominator);
                   }
                   v.store(&input_data[t]);
                   */
-                  for (auto i = 0; i < V; ++i) {
+                  for (const auto i : c10::irange(V)) {
                     input_data[t + i] = static_cast<scalar_t>(std::exp(static_cast<accscalar_t>(v[i]) - hmax) * inv_denominator);
                   }
                 }
