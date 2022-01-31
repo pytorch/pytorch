@@ -3014,27 +3014,12 @@ def remainder(g, input, other):
     quo = g.op("Mul", div, other)
     return g.op("Sub", input, quo)
 
-@parse_args("v", "i")
-def gelu(g, self, approximate):
-    # none approximate : onnx::Constant[value={0}]
-    # tanh approximate : onnx::Constant[value={1}]
-    if approximate == 1:
-        kBeta = math.sqrt(2 / math.pi)
-        kKappa = 0.044715
 
-        beta = torch.tensor(kBeta, dtype=torch.double)
-        kappa = torch.tensor(kKappa, dtype=torch.double)
-        one = torch.tensor(1., dtype=torch.double)
-        half = torch.tensor(0.5, dtype=torch.double)
-
-        self_cube = mul(g, self, mul(g, self, self))
-        inner = mul(g, beta, add(g, self, mul(g, kappa, self_cube)))
-        return mul(g, half, mul(g, self, add(g, one, g.op("Tanh", inner))))
-    else:
-        _sqrt2 = 1.4142135623730951
-        erf = g.op("Erf", g.op("Div", self, torch.tensor(_sqrt2, dtype=torch.double)))
-        erf_plusone = add(g, erf, g.op("Constant", value_t=torch.tensor(1, dtype=torch.double)))
-        return mul(g, mul(g, self, erf_plusone), g.op("Constant", value_t=torch.tensor(0.5, dtype=torch.double)))
+def gelu(g, self):
+    _sqrt2 = 1.4142135623730951
+    erf = g.op("Erf", g.op("Div", self, torch.tensor(_sqrt2, dtype=torch.double)))
+    erf_plusone = add(g, erf, g.op("Constant", value_t=torch.tensor(1, dtype=torch.double)))
+    return mul(g, mul(g, self, erf_plusone), g.op("Constant", value_t=torch.tensor(0.5, dtype=torch.double)))
 
 @parse_args("v", "i", "v", "v", "f", "i")
 def group_norm(g, input, num_groups, weight, bias, eps, cudnn_enabled):

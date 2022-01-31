@@ -1260,37 +1260,6 @@ class TestTEFuser(JitTestCase):
                     " ".join(["Failed:", str(dtype), 'isnan', device])
                 )
 
-    def test_gelu(self):
-        def apply(fn):
-            return lambda x, approximate: fn(x, approximate)
-
-        unary_ops = [
-            F.gelu,
-        ]
-        sizes = [(1,), (2,), (4, 4)]
-        for dtype, op, device, size in product(self.dtypes, unary_ops, self.devices, sizes):
-            # TODO: Add back when https://github.com/pytorch/pytorch/issues/55905 is closed
-            if dtype in [torch.float16, torch.bfloat16] and device == "cpu":
-                continue
-            try:
-                x = self.data_for(dtype, device, size=size)
-                cond = self.data_for(torch.bool, device)
-                fn = apply(op)
-                ref = fn(x, cond)
-            except Exception:
-                # If eager mode doesn't support a dtype/op/device combo,
-                # neither does the fuser.  Catch everything to avoid needing to
-                # guess what errors might be thrown by eager.
-                continue
-            try:
-                t = torch.jit.trace(fn, (x, cond))
-                torch.testing.assert_close(ref, t(x, cond))
-                self.assertAllFused(t.graph_for(x, cond))
-            except Exception as e:
-                raise RuntimeError(
-                    " ".join(["Failed:", str(dtype), op.__name__, device, str(size)])
-                )
-
     def test_unary_ops(self):
         def apply(fn):
             return lambda x: fn(x)
@@ -1325,6 +1294,7 @@ class TestTEFuser(JitTestCase):
             F.softplus,
             torch.sqrt,
             torch.rsqrt,
+            F.gelu,
             torch.abs,
             torch.ceil,
             torch.floor,
@@ -2237,6 +2207,7 @@ works_list = [
     'mul',
     'ne',
     'neg',
+    'nn.functional.gelu',
     'nn.functional.hardshrink',
     'nn.functional.hardsigmoid',
     'nn.functional.hardswish',
