@@ -280,7 +280,6 @@ auto build_opgraph_fused(const cudnnHandle_t handle, const Tensor & x, const Ten
                            .setAlpha(alpha1)
                            .setAlpha2(alpha2)
                            .build();
-  // auto bias_ = b.view({1, b.numel(), 1, 1});
   auto add_bias_op = cudnn_frontend::OperationBuilder(CUDNN_BACKEND_OPERATION_POINTWISE_DESCRIPTOR)
                            .setxDesc(add_op.getOutputTensor())
                            .setbDesc(getTensorDescriptor(b, 'b', key.b_alignment))
