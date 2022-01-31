@@ -17,8 +17,8 @@ import requests
 
 # For a PR to be properly labeled it should have release notes label and one topic label
 PULL_REQUEST_EXP = "Pull Request resolved:.*pull/(.*)"
-PRIMARY_LEBEL_FILTER = "release notes:"
-SECONDARY_LEBELS = {
+PRIMARY_LABEL_FILTER = "release notes:"
+SECONDARY_LABELS = {
     "topic: bc_breaking",
     "topic: deprecation",
     "topic: new feature",
@@ -31,13 +31,13 @@ SECONDARY_LEBELS = {
 }
 PYTORCH_REPO = "https://api.github.com/repos/pytorch/pytorch"
 
-def query_pytroch(cmd: str, *, accept: str) -> Any:
+def query_pytorch(cmd: str, *, accept: str) -> Any:
     response = requests.get(f"{PYTORCH_REPO}/{cmd}", headers=dict(Accept=accept))
     return response.json()
 
 
 def get_pr_number(commit_hash: str) -> Any:
-    data = query_pytroch(f"commits/{commit_hash}", accept="application/vnd.github.v3+json")
+    data = query_pytorch(f"commits/{commit_hash}", accept="application/vnd.github.v3+json")
     if not data or (not data["commit"]["message"]):
         return None
     message = data["commit"]["message"]
@@ -48,18 +48,28 @@ def get_pr_number(commit_hash: str) -> Any:
     return result.group(1)
 
 
-def get_pr_user_and_labels(pr_number: int) -> Tuple[str, Set[str]]:
+def get_pr_author_and_labels(pr_number: int) -> Tuple[str, Set[str]]:
     # See https://docs.github.com/en/rest/reference/pulls#get-a-pull-request
-    data = query_pytroch(f"pulls/{pr_number}", accept="application/vnd.github.v3+json")
+    data = query_pytorch(f"pulls/{pr_number}", accept="application/vnd.github.v3+json")
     user = data["user"]["login"]
     labels = {label["name"] for label in data["labels"]}
     return user, labels
 
-def post_pytroch_comment(pr_number: int, merger: str) -> Any:
+def get_repo_labels() -> List[str]:
+    collected_labels: List[str] = list()
+    for page in range(0, 10):
+        response = query_pytorch(f"labels?per_page=100&page={page}", accept="application/json")
+        page_labels = list(map(lambda x: str(x["name"]), response))
+        if not page_labels:
+            break
+            collected_labels += page_labels
+    return collected_labels
+
+def post_pytorch_comment(pr_number: int, merger: str) -> Any:
     message = {'body' : f"Hey {merger}. \
     You merged this PR, but no release notes category and topic labels were added. \
     The list of valid release and topic labels is available \
-    https://github.com/pytorch/pytorch/labels?page=2&q=release+notes+or+topic"}
+    https://github.com/pytorch/pytorch/labels?q=release+notes+or+topic"}
 
     response = requests.post(
         f"{PYTORCH_REPO}/{pr_number}/comments",
@@ -74,17 +84,11 @@ if __name__ == "__main__":
     if not pr_number:
         sys.exit(0)
 
-    user, labels = get_pr_user_and_labels(pr_number)
-    collected_labels: List[str] = list()
-    for page in range(0, 10):
-        response = query_pytroch(f"labels?per_page=100&page={page}", accept="application/json")
-        page_labels = list(map(lambda x: str(x["name"]), response))
-        if not page_labels:
-            break
-            collected_labels += page_labels
+    user, labels = get_pr_author_and_labels(pr_number)
+    repo_labels = get_repo_labels()
 
-    primary_labels = set(filter(lambda x: x.startswith(PRIMARY_LEBEL_FILTER), collected_labels))
-    is_properly_labeled = bool(primary_labels.intersection(labels) and SECONDARY_LEBELS.intersection(labels))
+    primary_labels = set(filter(lambda x: x.startswith(PRIMARY_LABEL_FILTER), repo_labels))
+    is_properly_labeled = bool(primary_labels.intersection(labels) and SECONDARY_LABELS.intersection(labels))
 
     if not is_properly_labeled:
-        post_pytroch_comment(pr_number, user)
+        post_pytorch_comment(pr_number, user)
