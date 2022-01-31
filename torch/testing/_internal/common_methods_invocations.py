@@ -59,7 +59,6 @@ S = 5
 # Unique value to distinguish default from anything else
 _NOTHING = object()
 
-
 class DecorateInfo(object):
     """Describes which test, or type of tests, should be wrapped in the given
        decorators when testing an operator. Any test that matches all provided
@@ -12958,6 +12957,11 @@ op_db: List[OpInfo] = [
            aten_name='linalg_svd_rank_revealing',
            dtypes=floating_and_complex_types(),
            sample_inputs_func=sample_inputs_linalg_svd_rank_revealing,
+           supports_fwgrad_bwgrad=False,
+           supports_forward_ad=False,
+           check_batched_forward_grad=False,
+           # We're using at::allclose, which does not have a batching rule
+           check_batched_grad=False,
            check_batched_gradgrad=False,
            decorators=[
                slowTest,
