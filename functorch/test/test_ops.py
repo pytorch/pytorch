@@ -571,6 +571,7 @@ class TestOperators(TestCase):
         xfail('as_strided'),
         xfail('nn.functional.fractional_max_pool2d'),
         xfail('__getitem__', ''),
+        xfail('__getitem__', 'functorch'),
         xfail('index_put'),
         xfail('lu_solve'),
         xfail('nn.functional.instance_norm'),

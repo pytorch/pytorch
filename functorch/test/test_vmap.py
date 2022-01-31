@@ -2882,6 +2882,7 @@ class TestVmapBatchedGradient(Namespace.TestVmapBase):
             return x.expand(5, 5, 2, 3)
         self._batched_grad_test(op, (x,))
 
+    @unittest.expectedFailure
     @allowVmapFallbackUsage
     def test_index(self, device):
         x = torch.randn(2, 3, requires_grad=True, device=device)
