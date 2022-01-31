@@ -6,14 +6,14 @@ import re
 import shutil
 import sys
 import tempfile
+import torch
 import warnings
 import zipfile
 from pathlib import Path
 from urllib.error import HTTPError
-from urllib.parse import urlparse  # noqa: F401
 from urllib.request import urlopen, Request
+from urllib.parse import urlparse  # noqa: F401
 
-import torch
 
 PREDEFINED_TRUSTED = ["facebookresearch", "facebookincubator", "pytorch"]
 
@@ -82,8 +82,7 @@ def _import_module(name, path):
 
 
 def import_module(name, path):
-    warnings.warn('The use of torch.hub.import_module is deprecated in v0.11 and will be removed in v0.12',
-                  DeprecationWarning)
+    warnings.warn('The use of torch.hub.import_module is deprecated in v0.11 and will be removed in v0.12', DeprecationWarning)
     return _import_module(name, path)
 
 
@@ -183,6 +182,7 @@ def _get_cache_or_reload(github, force_reload, verbose=True, skip_validation=Fal
     # and inspect name from it.
     # To check if cached repo exists, we need to normalize folder names.
     repo_dir = os.path.join(hub_dir, '_'.join([repo_owner, repo_name, normalized_br]))
+    # Check that the repo is in the trusted list
     _check_repo('_'.join([repo_owner, repo_name, normalized_br]), trust_repo=trust_repo, calling_fn=calling_fn)
 
     use_cache = (not force_reload) and os.path.exists(repo_dir)
