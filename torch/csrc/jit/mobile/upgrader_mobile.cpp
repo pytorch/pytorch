@@ -5,11 +5,8 @@
  * cd ~/pytorch && python torch/csrc/jit/mobile/upgrader_mobile.cpp
  */
 
-#include <torch/csrc/jit/mobile/upgrader_mobile.h>
-
-#include <ATen/core/ivalue.h>
 #include <caffe2/serialize/versions.h>
-#include <torch/csrc/jit/mobile/type_parser.h>
+#include <torch/csrc/jit/mobile/upgrader_mobile.h>
 
 namespace c10 {
 TypePtr parseType(const std::string& pythonStr);
