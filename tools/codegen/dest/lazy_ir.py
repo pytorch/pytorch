@@ -9,7 +9,6 @@ import tools.codegen.api.dispatcher as dispatcher
 from tools.codegen.api.lazy import LazyIrSchema, isValueType
 from tools.codegen.dest.lazy_ts_lowering import ts_lowering_body
 
-
 def node_ctor_arg_rvalue_string(arg: NamedCType, schema: LazyIrSchema) -> str:
     """
     Given a NamedCType from a lazy IR schema,
@@ -174,7 +173,7 @@ def lazy_tensor_decls(value_types: List[NamedCType], tensor_class: str, schema: 
                 f"    {tensor_class} lazy_{t.name} = torch::lazy::TryGetLtcTensor({t.name}.value_or(at::Tensor()));")
         else:
             raise AssertionError("TODO not sure if there are other valid types to handle here")
-    return "\n    ".join(lazy_tensor_decls)
+    return ("\n        ").join(lazy_tensor_decls)
 
 @dataclass(frozen=True)
 class GenLazyNativeFuncDefinition:
@@ -212,19 +211,23 @@ class GenLazyNativeFuncDefinition:
                 shapes_str = ','.join([this_shape(i) for i in range(returns_length)])
                 meta_out = "std::vector<Shape> shapes{" + shapes_str + "};"
 
+            # TODO: INTEGRATION POINT HERE:
             meta_str = f"""auto out_meta = at::meta::{schema.aten_name}({', '.join(str(t.name) for t in all_types)});
         {meta_out}"""
         else:
             shape_sig = ComputeShapeSignature(metadata.kernel, func)
             meta_str = f"""
         auto shapes = {shape_sig.shape_call};"""
+
         meta_str += f"""
         TORCH_INTERNAL_ASSERT(shapes.size() == {returns_length});"""
 
         node_str = f"""auto node = torch::lazy::MakeNode<ir::ops::{schema.node_name}>({node_ctor_input_str},
                                                                                       std::move(shapes));"""
         first_tensor_name = value_types_names[0]
-        bridge_str = f"""auto result = torch::lazy::CreateAtenFromLtcTensor(torch::lazy::LazyTensor::Create(std::move(node), *common_device));"""
+        bridge_str = """auto result = torch::lazy::CreateAtenFromLtcTensor(
+                torch::lazy::LazyTensor::Create(std::move(node), *common_device));"""
+
         if returns_length > 1:
             bridge_str = f"""std::vector<{self.tensor_class}> lazy_tensors;
         for (int i = 0; i < {returns_length}; i++) {{
