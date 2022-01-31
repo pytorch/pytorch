@@ -1026,23 +1026,41 @@ void CudaCodeGen::Initialize() {
 
   // Build an LLVM based eval expression for the extents
   block_extents_eval_.reserve(block_extents.size());
+  std::vector<BufferArg> extents_buffer_args;
+  std::unordered_set<VarPtr> vars_in_extents;
+  for (const auto& be : block_extents) {
+    auto v = VarFinder::find(be);
+    vars_in_extents.insert(v.begin(), v.end());
+  }
+  for (const auto& te : thread_extents) {
+    auto v = VarFinder::find(te);
+    vars_in_extents.insert(v.begin(), v.end());
+  }
+  for (const size_t i : c10::irange(buffer_args.size())) {
+    if (vars_in_extents.count(buffer_args[i].var())) {
+      extents_buffer_args.push_back(buffer_args[i]);
+      arg_pos_in_extents_.push_back(true);
+    } else {
+      arg_pos_in_extents_.push_back(false);
+    }
+  }
   for (const auto& be : block_extents) {
 #ifdef TORCH_ENABLE_LLVM
     block_extents_eval_.emplace_back(
-        ExprEval<LLVMCodeGen>(ExprHandle(be), buffer_args));
+        ExprEval<LLVMCodeGen>(ExprHandle(be), extents_buffer_args));
 #else
     block_extents_eval_.emplace_back(
-        ExprEval<SimpleIREvaluator>(ExprHandle(be), buffer_args));
+        ExprEval<SimpleIREvaluator>(ExprHandle(be), extents_buffer_args));
 #endif
   }
   thread_extents_eval_.reserve(thread_extents.size());
   for (const auto& te : thread_extents) {
 #ifdef TORCH_ENABLE_LLVM
     thread_extents_eval_.emplace_back(
-        ExprEval<LLVMCodeGen>(ExprHandle(te), buffer_args));
+        ExprEval<LLVMCodeGen>(ExprHandle(te), extents_buffer_args));
 #else
     thread_extents_eval_.emplace_back(
-        ExprEval<SimpleIREvaluator>(ExprHandle(te), buffer_args));
+        ExprEval<SimpleIREvaluator>(ExprHandle(te), extents_buffer_args));
 #endif
   }
 
@@ -1134,19 +1152,27 @@ void CudaCodeGen::call_raw(const std::vector<void*>& raw_args) {
   // evaluate all the block/thread extents into values
   // TODO: eventually, codegen these calculations and make them part of the
   // module.
+  std::vector<void*> extent_args;
+  size_t raw_args_size = raw_args.size();
+  extent_args.reserve(raw_args_size);
+  for (size_t i = 0 ; i < raw_args_size; ++i) {
+    if (arg_pos_in_extents_[i]) {
+      extent_args.push_back(raw_args[i]);
+    }
+  }
   for (size_t i = 0; i < gpu_block_extents.size(); i++) {
     if (gpu_block_extents[i]->isConstant()) {
       gpu_block_extents_v[i] = immediateAs<int64_t>(gpu_block_extents[i]);
       continue;
     }
-    gpu_block_extents_v[i] = block_extents_eval_[i].value<int64_t>(raw_args);
+    gpu_block_extents_v[i] = block_extents_eval_[i].value<int64_t>(extent_args);
   }
   for (size_t i = 0; i < gpu_thread_extents.size(); i++) {
     if (gpu_thread_extents[i]->isConstant()) {
       gpu_thread_extents_v[i] = immediateAs<int64_t>(gpu_thread_extents[i]);
       continue;
     }
-    gpu_thread_extents_v[i] = thread_extents_eval_[i].value<int64_t>(raw_args);
+    gpu_thread_extents_v[i] = thread_extents_eval_[i].value<int64_t>(extent_args);
   }
 
   // Skip launching the kernel if there are no elements to process.
