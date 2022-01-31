@@ -810,7 +810,7 @@
   output_differentiability: [True, True, True, False, False]
 
 - name: linalg_svd_rank_revealing.tartol(Tensor input, *, Tensor? atol=None, Tensor? rtol=None, bool full_matrices=True) -> (Tensor U, Tensor S, Tensor Vh, Tensor rank)
-  input: "svd_backward({grads[0], grads[1], grads[2].defined() ? grads[2].mH() : Tensor()}, input, !full_matrices, true, U, S, Vh.mH())"
+  input: svd_backward(grads[0], grads[1], grads[2], U, S, Vh)
   atol: non_differentiable
   rtol: non_differentiable
   output_differentiability: [True, True, True, False]

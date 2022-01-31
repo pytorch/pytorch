@@ -2740,19 +2740,14 @@ Tensor _linalg_svd_rank_restricted_helper_backward(
     // It is equivalent to indexing at [rank == r, :, :]
     rank_r_indices.push_back(Slice());
     const auto input_rank_r = input.index(rank_r_indices);
-    const auto U_rank_r = U.index(rank_r_indices);
-    const auto Vh_rank_r = Vh.index(rank_r_indices);
-    const auto U_grad_rank_r = U_grad_defined ? U_grad.index(rank_r_indices) : Tensor();
-    const auto Vh_grad_rank_r = Vh_grad_defined ? Vh_grad.index(rank_r_indices) : Tensor();
+    const auto U_rank_r = U.index(rank_r_indices).narrow(-1, 0, r);
+    const auto Vh_rank_r = Vh.index(rank_r_indices).narrow(-2, 0, r);
+    const auto U_grad_rank_r = U_grad_defined ? U_grad.index(rank_r_indices).narrow(-1, 0, r) : Tensor();
+    const auto Vh_grad_rank_r = Vh_grad_defined ? Vh_grad.index(rank_r_indices).narrow(-2, 0, r) : Tensor();
 
     const auto grad_rank_r = svd_backward(
-        // No need to narrow grads for U, S and Vh as svd_backward
-        // handles this with `some=false`.
-        {U_grad_rank_r, S_grad_rank_r, Vh_grad_defined ? Vh_grad_rank_r.mH() : Tensor()},
-        input_rank_r,
-        /*some=*/false,
-        /*compute_uv=*/true,
-        U_rank_r, S_rank_r, Vh_rank_r.mH()
+        U_grad_rank_r, S_grad_rank_r, Vh_grad_rank_r,
+        U_rank_r, S_rank_r, Vh_rank_r
     );
     grad.index_put_(rank_r_indices, grad_rank_r);
   }
