@@ -3903,7 +3903,6 @@ def sample_inputs_layer_norm(opinfo, device, dtype, requires_grad, **kwargs):
     # With `None` weight and bias (tests failing for this, see the link above)
     # yield SampleInput(make_arg((1, 2)), args=((2,), None, make_arg((2,))))
 
-
 def sample_inputs_local_response_norm(opinfo, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
 
@@ -3924,7 +3923,6 @@ def sample_inputs_local_response_norm(opinfo, device, dtype, requires_grad, **kw
 
     for input_shape, size, kwargs in cases:
         yield SampleInput(make_arg(input_shape), args=(size,), kwargs=kwargs)
-
 
 def sample_inputs_hardswish(self, device, dtype, requires_grad, **kwargs):
     N = 5
@@ -4082,8 +4080,13 @@ def sample_inputs_upsample(mode, self, device, dtype, requires_grad, **kwargs):
 
 def sample_inputs_gelu(self, device, dtype, requires_grad, **kwargs):
     N = 5
-    tensors = [SampleInput(make_tensor((N * 2, N * 2), device=device, dtype=dtype,
-               requires_grad=requires_grad, low=-3, high=3)) for _ in range(1, N)]
+    tensors = []
+    for _ in range(1, N):
+        for approximate in ['none', 'tanh']:
+            tensors.append(SampleInput(
+                make_tensor((N * 2, N * 2), device=device, dtype=dtype,
+                            requires_grad=requires_grad, low=-3, high=3),
+                kwargs=dict(approximate=approximate)))
     return tensors
 
 def sample_inputs_max_min_reduction_with_dim(op_info, device, dtype, requires_grad, **kwargs):
@@ -11773,7 +11776,7 @@ op_db: List[OpInfo] = [
            supports_gradgrad=True,
            supports_out=False,
            supports_forward_ad=True,
-           supports_fwgrad_bwgrad=True,
+           supports_fwgrad_bwgrad=False,
            autodiff_nonfusible_nodes=["aten::gelu"]),
     OpInfo('nn.functional.relu6',
            aten_name="relu6",
