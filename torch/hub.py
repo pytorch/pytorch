@@ -212,7 +212,7 @@ def _get_cache_or_reload(github, force_reload, verbose=True, skip_validation=Fal
 
     return repo_dir
 
-def get_trusted_input(repo):
+def _get_trusted_input(repo):
     # separate function for testing
     response = input(
         f"The repository {repo} does not belong to the list of trusted repositories and as such cannot be downloaded. "
@@ -222,7 +222,7 @@ def get_trusted_input(repo):
 def _add_repo_to_trusted_list(repo, filepath, is_trusted=False, prompt=True):
     if prompt:
         # prompt
-        response = get_trusted_input(repo)
+        response = _get_trusted_input(repo)
     else:
         response = "y"
     if response.lower() in ("y", "yes"):
