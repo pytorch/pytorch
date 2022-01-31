@@ -2,7 +2,7 @@ from typing import Any, Callable, Dict, List
 import torch
 from torch.futures import Future
 from .metadata import ReadWriteRequest, Metadata
-from torch.distributed._sharded_tensor import (
+from torch.distributed.shard.sharded_tensor import (
     ShardedTensor,
 )
 from .storage_reader import StorageReader
@@ -72,14 +72,15 @@ def load_state_dict(
     futures = load_state_dict_async(
         state_dict=state_dict,
         storage_reader=storage_reader,
-        reshard_and_prepare_fn=reshard_and_prepare_fn)
+        reshard_and_prepare_fn=reshard_and_prepare_fn,
+    )
     torch.futures.wait_all(futures)
 
 
 def load_state_dict_async(
     state_dict: Dict[str, Any],
     storage_reader: StorageReader,
-    reshard_and_prepare: Callable = _reshard_and_prepare_read_request,
+    reshard_and_prepare_fn: Callable = _reshard_and_prepare_read_request,
 ) -> List[Future]:
     """
     Run the load request in parallel, and return a list of futures to wait on.

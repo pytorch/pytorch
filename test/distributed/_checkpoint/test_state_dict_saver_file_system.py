@@ -8,9 +8,9 @@ from torch.testing._internal.common_utils import (
 )
 from typing import Dict
 import torch
-import shutil
+import tempfile
 
-from torch.testing._internal.distributed._sharded_tensor import (
+from torch.testing._internal.distributed.shard.sharded_tensor import (
     ShardedTensorTestBase,
     with_comms,
 )
@@ -20,10 +20,10 @@ from torch.testing._internal.common_distributed import (
 )
 from torch.distributed import _sharded_tensor
 
-from torch.distributed._sharding_spec import (
+from torch.distributed.shard.sharding_spec import (
     ChunkShardingSpec,
 )
-from torch.distributed._sharded_tensor import (
+from torch.distributed.shard.sharded_tensor import (
     state_dict_hook,
     ShardedTensor,
 )
@@ -78,10 +78,9 @@ class MyShardedModel1(torch.nn.Module):
 class TestStateDictSaveLoad(TestCase):
     def test_read_write_only_tensor(self):
         state_dict_to_save = TestModule().state_dict()
-        base_dir = "/tmp/_test_state_dict_save_load_torch_tensor_"
-        shutil.rmtree(base_dir, ignore_errors=True)
+        path = tempfile.mkdtemp()
 
-        fs_writer = FileSystemWriter(base_folder_name=base_dir)
+        fs_writer = FileSystemWriter(base_folder_name=path)
         save_state_dict(state_dict=state_dict_to_save, storage_writer=fs_writer)
 
         # Genrate a new modle
@@ -92,7 +91,7 @@ class TestStateDictSaveLoad(TestCase):
             assert_state_dict_equal(self, state_dict_to_load_to, state_dict_to_save)
 
         # Load from file without any resharding
-        fs_reader = FileSystemReader(base_folder_name=base_dir)
+        fs_reader = FileSystemReader(base_folder_name=path)
         load_state_dict(state_dict=state_dict_to_load_to, storage_reader=fs_reader)
 
         assert_state_dict_equal(self, state_dict_to_load_to, state_dict_to_save)
@@ -106,8 +105,7 @@ class TestStateDictSaveLoadWithSharedTensor(ShardedTensorTestBase):
     @skip_if_lt_x_gpu(2)
     @requires_nccl()
     def test_read_write_shard_tenosr(self):
-        base_dir = "/tmp/_test_state_dict_save_load_shared_tensor_"
-        shutil.rmtree(base_dir, ignore_errors=True)
+        path = tempfile.mkdtemp()
 
         spec = ChunkShardingSpec(
             dim=0,
@@ -123,7 +121,7 @@ class TestStateDictSaveLoadWithSharedTensor(ShardedTensorTestBase):
         model_to_save._register_state_dict_hook(state_dict_hook)
         state_dict_to_save = model_to_save.state_dict()
 
-        fs_writer = FileSystemWriter(base_folder_name=base_dir)
+        fs_writer = FileSystemWriter(base_folder_name=path)
         save_state_dict(state_dict=state_dict_to_save, storage_writer=fs_writer)
 
         dist.barrier()
@@ -141,7 +139,7 @@ class TestStateDictSaveLoadWithSharedTensor(ShardedTensorTestBase):
             assert_state_dict_equal(self, state_dict_to_load_to, state_dict_to_save)
 
         # Test load.
-        fs_reader = FileSystemReader(base_folder_name=base_dir)
+        fs_reader = FileSystemReader(base_folder_name=path)
         load_state_dict(state_dict=state_dict_to_load_to, storage_reader=fs_reader)
 
         assert_state_dict_equal(self, state_dict_to_load_to, state_dict_to_save)

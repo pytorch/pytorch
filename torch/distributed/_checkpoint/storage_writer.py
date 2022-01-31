@@ -43,13 +43,13 @@ class StorageWriter(abc.ABC):
         pass
 
 class FileSystemWriter(StorageWriter):
-    def __init__(self, base_folder_name: str) -> None:
+    def __init__(self, path: str) -> None:
         super().__init__()
-        self.base_folder_name = base_folder_name
-        os.makedirs(self.base_folder_name, exist_ok=True)
+        self.path = path
+        os.makedirs(self.path, exist_ok=True)
 
     def write(self, req: ReadWriteRequest) -> Future:
-        with open(f"{self.base_folder_name}/{req.storage_key}", "a+b") as storage:
+        with open(os.path.join(self.path, req.storage_key), "a+b") as storage:
             storage.seek(req.offset)
             # The following couple lines are simple implementation to get things going.
             # They should be updated.

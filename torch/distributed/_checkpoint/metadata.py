@@ -2,7 +2,7 @@ from typing import Any, Dict, List, Union, Optional
 import torch
 from dataclasses import dataclass
 import pickle
-from torch.distributed._sharded_tensor import ShardedTensor, ShardedTensorMetadata, ShardMetadata
+from torch.distributed.shard.sharded_tensor import ShardedTensor, ShardedTensorMetadata, ShardMetadata
 
 TENSOR_TYPE = Union[torch.Tensor, ShardedTensor]
 
@@ -31,6 +31,8 @@ class Metadata:
         return serialized
 
     def __setstate__(self, state: Dict[str, Any]):
+        # TODO, use pickle for this quick hack, must replace it with something else e.g. flatbuffer
+        # before serious use case,
         self.state_dict_metadata = pickle.loads(state)
 
 @dataclass

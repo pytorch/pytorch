@@ -1,4 +1,5 @@
 import abc
+import os
 from .metadata import Metadata, ReadWriteRequest
 from torch.futures import Future
 import torch
@@ -26,16 +27,16 @@ class StorageReader(abc.ABC):
         pass
 
 class FileSystemReader(StorageReader):
-    def __init__(self, base_folder_name: str) -> None:
+    def __init__(self, path: str) -> None:
         super().__init__()
-        self.base_folder_name = base_folder_name
+        self.path = path
 
     def read(self, req: ReadWriteRequest) -> Future:
         """
-        Very basic implementation that write to file system.
+        Very basic implementation that read from file system.
         Note that the future is resolved before returning.
         """
-        with open(f"{self.base_folder_name}/{req.storage_key}", "rb") as storage:
+        with open(os.path.join(self.base_folder_name, req.storage_key), "rb") as storage:
             storage.seek(req.offset)
 
             # Read everything for the storage and write to the buffer

@@ -4,13 +4,13 @@
 #include <c10/core/ScalarType.h>
 #include <c10/util/Exception.h>
 #include <torch/csrc/autograd/grad_mode.h>
+#include <torch/csrc/jit/mobile/compatibility/runtime_compatibility.h>
 #include <torch/csrc/jit/mobile/model_tracer/KernelDTypeTracer.h>
 #include <torch/csrc/jit/mobile/model_tracer/MobileModelRunner.h>
 #include <torch/csrc/jit/mobile/model_tracer/OperatorCallTracer.h>
 #include <torch/csrc/jit/mobile/model_tracer/TensorUtils.h>
 #include <torch/csrc/jit/mobile/model_tracer/TracerRunner.h>
 #include <torch/csrc/jit/mobile/parse_operators.h>
-#include <torch/csrc/jit/mobile/runtime_compatibility.h>
 #include <torch/csrc/jit/runtime/operator.h>
 #include <torch/script.h>
 

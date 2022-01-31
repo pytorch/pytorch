@@ -4,7 +4,7 @@ from torch import Tensor
 from .metadata import Metadata, ReadWriteRequest, ExtendedTensorMetadata, StorageMetadata
 from .storage_writer import StorageWriter
 from torch.futures import Future
-from torch.distributed._sharded_tensor import (
+from torch.distributed.shard.sharded_tensor import (
     ShardedTensor,
     ShardedTensorMetadata,
     TensorProperties,
@@ -188,8 +188,8 @@ def save_state_dict(
         storage_writer=storage_writer,
         metadata_prepare_fn=metadata_prepare_fn,
     )
-    torch.futures.wait_all(futures)
 
+    torch.futures.wait_all(futures)
 
 def save_state_dict_async(
     state_dict: Dict[str, Any],
@@ -209,5 +209,6 @@ def save_state_dict_async(
     (metadata, storage_handles, write_requests) = metadata_prepare_fn(state_dict=state_dict)
     storage_writer.prepare_storage(storage_handles=storage_handles)
     storage_writer.write_metadata(metadata=metadata)
+
     futures = [storage_writer.write(wr) for wr in write_requests]
     return futures
