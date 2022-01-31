@@ -171,6 +171,9 @@ inline void handle_pointwise_ops(std::vector<std::pair<Tensor, optional<int64_t>
 #define POINTWISE_BOXED(op) \
   m.impl(#op, torch::CppFunction::makeFromBoxedFunction<boxed_tensor_inputs_batch_rule<decltype(&handle_pointwise_ops), &handle_pointwise_ops>>());
 
+#define POINTWISE_BOXED2(op, overload) \
+  m.impl(#op #overload, torch::CppFunction::makeFromBoxedFunction<boxed_tensor_inputs_batch_rule<decltype(&handle_pointwise_ops), &handle_pointwise_ops>>());
+
 inline void handle_variadic_bdims(std::vector<std::pair<Tensor, optional<int64_t>>> &tensor_inputs) {
   for (auto & tensor_input : tensor_inputs) {
     tensor_input.first = moveBatchDimToFront(tensor_input.first, tensor_input.second);

@@ -12,6 +12,9 @@ namespace at { namespace functorch {
 
 TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
 
+#define UNARY_POINTWISE_ALL2(op, overload) \
+  POINTWISE_BOXED2(op ## _, overload); \
+  VMAP_SUPPORT(#op "." #overload, BASIC_UNARY_BATCH_RULE(ATEN_FN2(op, overload)));
 #define UNARY_POINTWISE_ALL(op) \
   POINTWISE_BOXED(op ## _); \
   VMAP_SUPPORT(#op, BASIC_UNARY_BATCH_RULE(ATEN_FN(op)));
@@ -32,6 +35,7 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   UNARY_POINTWISE_ALL(cosh);
   UNARY_POINTWISE(_conj);
   UNARY_POINTWISE_ALL(deg2rad);
+  UNARY_POINTWISE(detach);
   UNARY_POINTWISE_ALL(digamma);
   UNARY_POINTWISE_ALL(erf);
   UNARY_POINTWISE_ALL(exp);
@@ -60,6 +64,7 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   UNARY_POINTWISE_ALL(rad2deg);
   UNARY_POINTWISE_ALL(reciprocal);
   UNARY_POINTWISE_ALL(round);
+  UNARY_POINTWISE_ALL2(round, decimals);
   UNARY_POINTWISE_ALL(rsqrt);
   UNARY_POINTWISE_ALL(sgn);
   UNARY_POINTWISE_ALL(sign);
