@@ -13811,7 +13811,7 @@ class TestNNDeviceType(NNTestCase):
         with self.assertRaisesRegex(AssertionError,
                                     r"Input should be 3-D \(unbatched\) or 4-D \(batched\) but received"):
             nn.Dropout2d(p=0.5)(torch.rand(1, 2, 2, 2, 2, device=device))
-        
+
         with self.assertWarnsRegex(UserWarning, "2-D input is being deprecated"):
             nn.Dropout2d(p=0.5)(torch.rand(1, 2, device=device))
 
@@ -13841,7 +13841,7 @@ class TestNNDeviceType(NNTestCase):
         with self.assertRaisesRegex(AssertionError,
                                     r"Input should be 4-D \(unbatched\) or 5-D \(batched\) but received"):
             nn.Dropout3d(p=0.5)(torch.rand(1, 2, 2, 2, 2, 2, device=device))
-        
+
         with self.assertWarnsRegex(UserWarning, "3-D input is being deprecated"):
             nn.Dropout3d(p=0.5)(torch.rand(1, 2, 2, device=device))
 
