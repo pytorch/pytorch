@@ -77,11 +77,9 @@ jobs:
           repository: pytorch/builder
           path: ${{ env.BUILDER_ROOT }}
       - name: Populate binary env
-        shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_populate_env.sh"
       - name: Build PyTorch binary
-        shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_macos_build.sh"
       - uses: actions/upload-artifact@v2
@@ -242,11 +240,9 @@ jobs:
           repository: pytorch/builder
           path: ${{ env.BUILDER_ROOT }}
       - name: Populate binary env
-        shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_populate_env.sh"
       - name: Build PyTorch binary
-        shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_macos_build.sh"
       - uses: actions/upload-artifact@v2
@@ -407,11 +403,9 @@ jobs:
           repository: pytorch/builder
           path: ${{ env.BUILDER_ROOT }}
       - name: Populate binary env
-        shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_populate_env.sh"
       - name: Build PyTorch binary
-        shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_macos_build.sh"
       - uses: actions/upload-artifact@v2
@@ -572,11 +566,9 @@ jobs:
           repository: pytorch/builder
           path: ${{ env.BUILDER_ROOT }}
       - name: Populate binary env
-        shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_populate_env.sh"
       - name: Build PyTorch binary
-        shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_macos_build.sh"
       - uses: actions/upload-artifact@v2
