@@ -38,7 +38,7 @@ concurrency:
 jobs:
   wheel-py3_7-cpu-build:
     runs-on: macos-10.15
-    timeout-minutes: 240
+    timeout-minutes: 480
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       BUILDER_ROOT: ${{ github.workspace }}/builder
@@ -208,7 +208,7 @@ jobs:
           docker system prune -af
   wheel-py3_8-cpu-build:
     runs-on: macos-10.15
-    timeout-minutes: 240
+    timeout-minutes: 480
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       BUILDER_ROOT: ${{ github.workspace }}/builder
@@ -378,7 +378,7 @@ jobs:
           docker system prune -af
   wheel-py3_9-cpu-build:
     runs-on: macos-10.15
-    timeout-minutes: 240
+    timeout-minutes: 480
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       BUILDER_ROOT: ${{ github.workspace }}/builder
@@ -548,7 +548,7 @@ jobs:
           docker system prune -af
   wheel-py3_10-cpu-build:
     runs-on: macos-10.15
-    timeout-minutes: 240
+    timeout-minutes: 480
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       BUILDER_ROOT: ${{ github.workspace }}/builder
