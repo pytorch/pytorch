@@ -14,10 +14,6 @@ from urllib.error import HTTPError
 from urllib.request import urlopen, Request
 from urllib.parse import urlparse  # noqa: F401
 
-
-_PREDEFINED_TRUSTED = ["facebookresearch", "facebookincubator", "pytorch", "fairinternal"]
-
-
 try:
     from tqdm.auto import tqdm  # automatically select proper tqdm submodule if available
 except ImportError:
@@ -60,6 +56,7 @@ except ImportError:
 # matches bfd8deac from resnet18-bfd8deac.pth
 HASH_REGEX = re.compile(r'-([a-f0-9]*)\.')
 
+_PREDEFINED_TRUSTED = ["facebookresearch", "facebookincubator", "pytorch", "fairinternal"]
 ENV_GITHUB_TOKEN = 'GITHUB_TOKEN'
 ENV_TORCH_HOME = 'TORCH_HOME'
 ENV_XDG_CACHE_HOME = 'XDG_CACHE_HOME'
@@ -217,11 +214,14 @@ def _get_cache_or_reload(github, force_reload, verbose=True, skip_validation=Fal
 
 
 
-def _add_repo_to_trusted_list(repo, filepath, is_trusted=False):
-    # prompt
-    response = input(
-        f"The repository {repo} does not belong to the list of trusted repositories and as such cannot be downloaded. "
-        "Do you trust this repository and wish to add it to the trusted list of repositories (Y/n)?")
+def _add_repo_to_trusted_list(repo, filepath, is_trusted=False, prompt=True):
+    if prompt:
+        # prompt
+        response = input(
+            f"The repository {repo} does not belong to the list of trusted repositories and as such cannot be downloaded. "
+            "Do you trust this repository and wish to add it to the trusted list of repositories (y/N)?")
+    else:
+        response = "y"
     if response.lower() in ("y", "yes"):
         if is_trusted:
             print("The repository is already trusted.")
@@ -230,7 +230,7 @@ def _add_repo_to_trusted_list(repo, filepath, is_trusted=False):
             with open(filepath, "a") as file:
                 file.write(repo + "\n")
 
-    elif response.lower() in ("n", "no"):
+    elif response.lower() in ("n", "no", ""):
         raise Exception("Untrusted repository.")
 
     else:
@@ -239,8 +239,6 @@ def _add_repo_to_trusted_list(repo, filepath, is_trusted=False):
 
 def _check_repo(repo, trust_repo=None, calling_fn="load"):
     hub_dir = get_dir()
-    if not os.path.exists(hub_dir):
-        os.makedirs(hub_dir)
     filepath = os.path.join(hub_dir, "trusted_list")
 
     if not os.path.exists(filepath):
@@ -253,12 +251,10 @@ def _check_repo(repo, trust_repo=None, calling_fn="load"):
                 file.write(_repo + "\n")
 
     # load list
-    is_trusted = any([repo.startswith(_predefined_trusted) for _predefined_trusted in PREDEFINED_TRUSTED])
+    trusted_repos = [trusted_repo for trusted_repo in _PREDEFINED_TRUSTED]
     with open(filepath, 'r') as file:
-        for _repo in file:
-            is_trusted = is_trusted or _repo.startswith(repo)
-            if is_trusted:
-                break
+        trusted_repos += file.readlines()
+    is_trusted = any(trusted_repo.startswith(repo) for trusted_repo in trusted_repos)
 
     # to be deprecated
     if trust_repo is None:
@@ -277,8 +273,7 @@ def _check_repo(repo, trust_repo=None, calling_fn="load"):
     elif trust_repo == "check" and not is_trusted:
         _add_repo_to_trusted_list(repo, filepath)
     elif trust_repo and not is_trusted:
-        with open(filepath, "a") as file:
-            file.write(repo + "\n")
+        _add_repo_to_trusted_list(repo, filepath, prompt=False)
 
 
 def _check_module_exists(name):
