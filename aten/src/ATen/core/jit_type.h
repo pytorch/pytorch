@@ -138,7 +138,7 @@ struct TORCH_API UnionType : public SharedType {
 
   bool equals(const Type& rhs) const override;
 
-  bool isUnionType() const {
+  bool isUnionType() const override {
     return true;
   }
 
@@ -221,7 +221,7 @@ struct TORCH_API OptionalType : public UnionType {
 
   bool isSubtypeOfExt(const Type& rhs, std::ostream* why_not) const override;
 
-  bool isUnionType() const {
+  bool isUnionType() const override {
     return true;
   }
 
