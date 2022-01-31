@@ -1284,15 +1284,25 @@ class TestSparseCSR(TestCase):
     # Note: here, we do this test only for unary operators
     @ops(sparse_csr_unary_ufuncs)
     def test_zero_to_zero_correspondence_unary(self, device, dtype, op):
-        # Zeros for the given dtype
         zero = torch.zeros((1, 2), dtype=dtype, device=device)
+        tensor_explicit_zeros = torch.sparse_csr_tensor([0, 1], [1], [0], dtype=dtype, device=device)
 
-        output = op(zero)
-        expected = zero.to(output.dtype)
-        self.assertEqual(output, expected, f"This operator ({op.name}) should not be supported for "
-                         + "Sparse CSR as it breaks 0->0 correspondence.")
-        self.assertEqual(op(zero.to_sparse_csr()).values().numel(), 0,
-                         f"0->0 correspondence is not satisfied for {op.name} or explicit zeros in CSR result values.")
+        output_zero = op(zero)
+        expected_zero = zero.to(output_zero.dtype)
+
+        output_explicit_zeros = op(tensor_explicit_zeros).to_dense()
+        expected_explicit_zeros = tensor_explicit_zeros.to_dense().to(output_explicit_zeros.dtype)
+
+        for (output, expected) in [
+                (output_zero, expected_zero),
+                (output_explicit_zeros, expected_explicit_zeros)
+        ]:
+            self.assertEqual(output, expected, f"This operator ({op.name}) should not be supported for "
+                             + "Sparse CSR as it breaks 0->0 correspondence.")
+
+        for (inp, expected_zero_count) in [(zero.to_sparse_csr(), 0), (tensor_explicit_zeros, 1)]:
+            self.assertEqual(op(inp).values().numel(), expected_zero_count,
+                             f"0->0 correspondence is not satisfied for {op.name} or explicit zeros in CSR result values.")
 
     @ops(sparse_csr_unary_ufuncs)
     def test_sparse_csr_unary_out(self, device, dtype, op):
