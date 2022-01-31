@@ -887,7 +887,7 @@ class TestONNXRuntime(unittest.TestCase):
     @skipScriptTest()
     def test_dict_str(self):
         class MyModel(torch.nn.Module):
-            def forward(self, x_in: Dict[str, Tensor]) -> Dict[str, Tensor]:
+            def forward(self, x_in):
                 x_out = {}
                 x_out["test_key_out"] = torch.add(x_in["test_key_in"], 2.)
                 return x_out
@@ -1125,7 +1125,7 @@ class TestONNXRuntime(unittest.TestCase):
                 return x + y
 
         x = 3
-        y = torch.ones(2, 3, 4)
+        y = torch.randint(10, (2, 3, 4))
         self.run_test(Model(), (x, y))
 
     def test_primitive_input_floating(self):
@@ -1800,6 +1800,8 @@ class TestONNXRuntime(unittest.TestCase):
 
     # In tracing, None outputs are removed. In scripting they're kept but
     # we don't know Optional.elem_type, so we can't construct a valid Optional.
+    # Tests for Optional outputs (control flow with None in one branch,
+    # not-None in another) are in test_pytorch_onnx_no_runtime.py.
     @skipScriptTest()
     def test_tuple_with_none_outputs(self):
         class TupleModel(torch.nn.Module):

@@ -5,6 +5,7 @@
 import io
 import unittest
 
+from google.protobuf import text_format
 import onnx
 import torch
 from torch.testing._internal.common_utils import instantiate_parametrized_tests, parametrize
@@ -56,21 +57,29 @@ class TestOptionalOutput(unittest.TestCase):
         model = torch.jit.script(module_class())
         f = io.BytesIO()
         x = torch.ones(x_size)
+        dynamic_axis_name = "condition"
         torch.onnx.export(
             model, (x,), f, opset_version=15,
             # Ensure condition is not constant
-            dynamic_axes={"x": {0: "condition"}}, input_names=["x"])
+            dynamic_axes={"x": {0: dynamic_axis_name}}, input_names=["x"])
         exported = onnx.load_from_string(f.getvalue())
-        output_0_type = exported.graph.output[0].type
-        self.assertTrue(output_0_type.HasField("optional_type"))
-        output_0_optional_type = output_0_type.optional_type
-        self.assertTrue(output_0_optional_type.elem_type.HasField("tensor_type"))
-        output_0_tensor_type = output_0_optional_type.elem_type.tensor_type
-        self.assertEqual(
-            output_0_tensor_type.elem_type,
-            symbolic_helper.scalar_type_to_onnx[
-                symbolic_helper.scalar_type_to_pytorch_type.index(x.dtype)])
-        self.assertEqual(len(output_0_tensor_type.shape.dim), len(x.shape))
+        expected_elem_type = symbolic_helper.scalar_type_to_onnx[
+            symbolic_helper.scalar_type_to_pytorch_type.index(x.dtype)].value
+        expected_output_type = text_format.Parse(
+            ("optional_type {\n"
+             "    elem_type {\n"
+             "        tensor_type {\n"
+             f"            elem_type: {expected_elem_type}\n"
+             "             shape {\n"
+             "               dim {\n"
+             f"                 dim_param: \"{dynamic_axis_name}\"\n"
+             "               }\n"
+             "             }\n"
+             "        }\n"
+             "    }\n"
+             "}\n"),
+            onnx.TypeProto())
+        self.assertEqual(expected_output_type, exported.graph.output[0].type)
 
 
 instantiate_parametrized_tests(TestOptionalOutput)
