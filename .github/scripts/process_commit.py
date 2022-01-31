@@ -72,7 +72,7 @@ def post_pytorch_comment(pr_number: int, merger: str) -> Any:
     https://github.com/pytorch/pytorch/labels?q=release+notes+or+topic"}
 
     response = requests.post(
-        f"{PYTORCH_REPO}/{pr_number}/comments",
+        f"{PYTORCH_REPO}/issues/{pr_number}/comments",
         json.dumps(message),
         headers=dict(Accept="application/vnd.github.v3+json"))
     return response.json()
