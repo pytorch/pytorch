@@ -397,7 +397,7 @@ struct DifferentiableGraphOp {
 
     detachVariables(stack);
     if (IsNewExecutorEnabled()) {
-      ExecutionPlan plan =
+      const ExecutionPlan& plan =
           f_ptr->getPlanFor(stack, GraphExecutor::getDefaultNumBailOuts());
       InterpreterState(plan.code).run(stack);
     } else {
