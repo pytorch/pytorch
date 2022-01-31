@@ -2603,6 +2603,17 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
 
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
+    def test_all_reduce_coalesced_nccl(self):
+        store = c10d.FileStore(self.file_name, self.world_size)
+        process_group = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
+        device = torch.device("cuda:%d" % self.rank)
+        tensors = [torch.full((60 + i,), self.rank + 1 + i, device=device, dtype=torch.float) for i in range(5)]
+        torch.distributed.all_reduce_coalesced(tensors, group=process_group)
+        for i, t in enumerate(tensors):
+            self.assertEqual(t, torch.full_like(t, self.world_size * (i + (self.world_size + 1.) / 2.)))
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
     def test_sequence_num_set_default_pg_nccl(self):
         torch.cuda.set_device(self.rank)
         self._test_sequence_num_set_default_pg(backend="nccl")
