@@ -48,7 +48,6 @@ from torch.ao.quantization import (
     get_default_qat_qconfig,
     get_default_qconfig_dict,
     fuse_modules,
-    fuse_modules_qat,
     prepare,
     prepare_qat,
     convert,
@@ -364,8 +363,6 @@ class TestFuseFx(QuantizationTestCase):
 
     @skipIfNoFBGEMM
     def test_qconfig_fused_module(self):
-        """ TODO: add test for all fused modules
-        """
         qconfig_dict = {
             "": None,
             "object_type": [(nn.Linear, default_qconfig),
@@ -893,20 +890,15 @@ class TestQuantizeFx(QuantizationTestCase):
                 m_eager.eval()
                 qconfig = get_default_qconfig(qengine)
                 prepare_fn = prepare
-                is_qat = False
             else:
                 m_eager.train()
                 qconfig = get_default_qat_qconfig(qengine)
                 prepare_fn = prepare_qat
-                is_qat = True
 
             fuse_list = ["conv", "bn"]
             if has_relu:
                 fuse_list.append("relu")
-            if is_qat:
-                fuse_modules_qat(m_eager, fuse_list, inplace=True)
-            else:
-                fuse_modules(m_eager, fuse_list, inplace=True)            
+            fuse_modules(m_eager, fuse_list, inplace=True)
             m_eager.qconfig = qconfig
             m_eager = prepare_fn(m_eager)
             m_eager(*self.img_data_dict[dim][0])
@@ -3519,7 +3511,7 @@ class TestQuantizeFx(QuantizationTestCase):
                 expected_node_occurrence=node_occurrence,
                 expected_node_list=node_list)
 
-    def test_stack_trace_preserved(self):
+    def test_stack_trace_preserved_linear(self):
         class M(nn.Module):
             def __init__(self):
                 super().__init__()
@@ -3556,6 +3548,24 @@ class TestQuantizeFx(QuantizationTestCase):
                 found_stack_trace = n.stack_trace is not None
                 break
         self.assertTrue(found_stack_trace, f"stack trace not found, node: {n.format_node()}, is_reference: False")
+
+    def test_stack_trace_preserved_subgraph_rewriter(self):
+        # a functional relu is taking the subgraph rewriter code path
+        class M(nn.Module):
+            def forward(self, x):
+                x = F.relu(x)
+                return x
+
+        m = M().eval()
+        mp = prepare_fx(m, get_default_qconfig_dict())
+        mq = convert_fx(copy.deepcopy(mp), is_reference=False)
+        found_stack_trace = False
+        for n in mq.graph.nodes:
+            if n.op == 'call_function' and n.target == F.relu:
+                found_stack_trace = n.stack_trace is not None
+                break
+        self.assertTrue(found_stack_trace, f"stack trace not found, node: {n.format_node()}, is_reference: True")
+
 
 @skipIfNoFBGEMM
 class TestQuantizeFxOps(QuantizationTestCase):
@@ -5837,7 +5847,6 @@ class TestQuantizeFxModels(QuantizationTestCase):
             graph.eval()
             calibrate_or_train = test_only_eval_fn
             data = self.img_data_2d
-            is_qat = False
         else:
             assert quant_type == QuantType.QAT
             qconfig = default_qat_qconfig
@@ -5847,7 +5856,6 @@ class TestQuantizeFxModels(QuantizationTestCase):
             graph.train()
             calibrate_or_train = test_only_train_fn
             data = self.img_data_2d_train
-            is_qat = True
 
         if hasattr(eager, "fuse_model"):
             eager.fuse_model()
