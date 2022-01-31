@@ -17,11 +17,6 @@ on:
       - 'ciflow/binaries_conda/*'
   workflow_dispatch:
 
-# For setup-miniconda, see https://github.com/conda-incubator/setup-miniconda/issues/179
-defaults:
-  run:
-    shell: bash -e -l {0}
-
 env:
   # Needed for conda builds
   ALPINE_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/alpine"
