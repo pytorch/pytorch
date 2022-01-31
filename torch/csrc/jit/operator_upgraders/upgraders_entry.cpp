@@ -7,6 +7,7 @@
 #include <torch/csrc/jit/frontend/ir_emitter.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/operator_upgraders/upgraders.h>
+#include <torch/csrc/jit/serialization/export_bytecode.h>
 #include <string>
 #include <unordered_map>
 
@@ -55,22 +56,40 @@ def full_0_4(size:List[int], fill_value:number, *, dtype:Optional[int]=None,
      {"full_out_0_4", R"SCRIPT(
 def full_out_0_4(size:List[int], fill_value:number, *, out:Tensor) -> Tensor:
   return torch.full(size, fill_value, out=out)
+)SCRIPT"},
+     {"gelu_0_8", R"SCRIPT(
+def gelu_0_8(self: Tensor) -> Tensor:
+  return torch._C._nn.gelu(self, 0)
+)SCRIPT"},
+     {"gelu_out_0_8", R"SCRIPT(
+def gelu_out_0_8(self: Tensor, *, out: Tensor) -> Tensor:
+  return torch._C._nn.gelu(self, 0, out=out)
 )SCRIPT"}});
 
-using UpgraderMap = std::unordered_map<std::string, std::shared_ptr<Graph>>;
+std::shared_ptr<Graph> create_upgrader_graph(
+    const std::string& upgrader_name,
+    const std::string& upgrader_body) {
+  auto cu = std::make_shared<CompilationUnit>();
+  cu->define(c10::nullopt, upgrader_body, nativeResolver(), nullptr);
+  Function& jitFunc = cu->get_function(upgrader_name);
+  GraphFunction& graphFunction = toGraphFunction(jitFunc);
+  return graphFunction.graph();
+}
+
+std::unordered_map<std::string, std::shared_ptr<Graph>>
+generate_upgraders_graph() {
+  std::unordered_map<std::string, std::shared_ptr<Graph>> populate_content;
+  for (const auto& entry : kUpgradersEntryMap) {
+    auto upgrader_graph = create_upgrader_graph(entry.first, entry.second);
+    populate_content.insert(std::make_pair(entry.first, upgrader_graph));
+  }
+  return populate_content;
+}
+
 void populate_upgraders_graph_map() {
   if (!is_upgraders_map_populated()) {
-    UpgraderMap populate_content;
-    for (const auto& entry : kUpgradersEntryMap) {
-      auto cu = std::make_shared<CompilationUnit>();
-      cu->define(c10::nullopt, entry.second, nativeResolver(), nullptr);
-      Function& jitFunc = cu->get_function(entry.first);
-      GraphFunction& graphFunction = toGraphFunction(jitFunc);
-      populate_content.insert(
-          std::make_pair(entry.first, graphFunction.graph()));
-    }
-
-    populate_upgraders_map(std::forward<UpgraderMap>(populate_content));
+    auto graphs = generate_upgraders_graph();
+    populate_upgraders_map(std::move(graphs));
   }
 }
 
