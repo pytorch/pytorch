@@ -151,6 +151,10 @@ at::LinalgBackend Context::linalgPreferredBackend() const {
 
 void Context::setLinalgPreferredBackend(at::LinalgBackend b) {
   linalg_preferred_backend = b;
+  TORCH_CHECK((b != at::LinalgBackend::Cusolver) || hasCuSOLVER(),
+      "Cannot set preferred backend to cuSOLVER if PyTorch has not been compiled with cuSOLVER.");
+  TORCH_CHECK((b != at::LinalgBackend::Magma) || hasMAGMA(),
+      "Cannot set preferred backend to MAGMA if PyTorch has not been compiled with MAGMA.");
   if (b != at::LinalgBackend::Default) {
     TORCH_WARN_ONCE(
       "torch.backends.cuda.preferred_linalg_library is an experimental feature. "
