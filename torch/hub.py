@@ -222,7 +222,7 @@ def _add_repo_to_trusted_list(repo, filepath, is_trusted=False):
     response = input(
         f"The repository {repo} does not belong to the list of trusted repositories and as such cannot be downloaded. "
         "Do you trust this repository and wish to add it to the trusted list of repositories (Y/n)?")
-    if response.lower() in {"y", 'yes'}:
+    if response.lower() in ("y", "yes"):
         if is_trusted:
             print("The repository is already trusted.")
             return
