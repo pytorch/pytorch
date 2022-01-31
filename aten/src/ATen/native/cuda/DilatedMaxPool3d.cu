@@ -132,7 +132,7 @@ __global__ static void max_pool3d_with_indices_backward_single_out_frame(
   int itime, int iheight, int iwidth,
   int dT, int dH, int dW,
   int pT, int pH, int pW,
-  int dilationT, int dilationH, int dilationW,
+  int dilationT, int dilationH,
   int offsetZ)
 {
   int oColumn = blockIdx.x * blockDim.x + threadIdx.x;
@@ -160,7 +160,7 @@ void max_pool3d_with_indices_backward_out_frame(
   int oheight, int owidth,
   int dT, int dH, int dW,
   int pT, int pH, int pW,
-  int dilationT, int dilationH, int dilationW)
+  int dilationT, int dilationH)
 {
   int offsetZ = 0;
   dim3 block(32, 8);
@@ -178,7 +178,7 @@ void max_pool3d_with_indices_backward_out_frame(
         itime, iheight, iwidth,
         dT, dH, dW,
         pT, pH, pW,
-        dilationT, dilationH, dilationW,
+        dilationT, dilationH,
         offsetZ);
     C10_CUDA_KERNEL_LAUNCH_CHECK();
 
@@ -405,7 +405,7 @@ void max_pool3d_with_indices_backward_out_cuda_template(
         oheight, owidth,
         dT, dH, dW,
         pT, pH, pW,
-        dilationT, dilationH, dilationW);
+        dilationT, dilationH);
     }
   );
 }
