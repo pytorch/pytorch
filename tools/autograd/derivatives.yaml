@@ -760,25 +760,25 @@
   index: non_differentiable
   result: self_t.index_add_(dim, index, maybe_multiply(source_t, alpha))
 
-- name: index_copy_(Tensor(a!) self, int dim, Tensor index, Tensor source) -> Tensor(a!)
-  self: grad.clone().index_fill_(dim, index, 0)
+- name: index_copy(Tensor self, int dim, Tensor index, Tensor source) -> Tensor
+  self: grad.index_fill(dim, index, 0)
   # The case source.dim() == 0  is necessary to support scalar tensors of the form
   # source.dim() == 0 and index.dim() == 1 and index.size() == (1,),
   # This is because source is not broadcastable to index, as source.dim() < index.dim()
   source: "source.dim() > 0 ? grad.index_select(dim, index).expand_as(source) : grad.index_select(dim, index.squeeze(0))"
   index: non_differentiable
-  result: self_t.index_copy_(dim, index, source_t)
+  result: self_t.index_copy(dim, index, source_t)
 
-- name: index_fill_.int_Scalar(Tensor(a!) self, int dim, Tensor index, Scalar value) -> Tensor(a!)
-  self: grad.clone().index_fill_(dim, index, 0)
+- name: index_fill.int_Scalar(Tensor self, int dim, Tensor index, Scalar value) -> Tensor
+  self: grad.index_fill(dim, index, 0)
   index: non_differentiable
-  result: self_t.index_fill_(dim, index, 0)
+  result: self_t.index_fill(dim, index, 0)
 
-- name: index_fill_.int_Tensor(Tensor(a!) self, int dim, Tensor index, Tensor value) -> Tensor(a!)
-  self: grad.clone().index_fill_(dim, index, 0)
+- name: index_fill.int_Tensor(Tensor self, int dim, Tensor index, Tensor value) -> Tensor
+  self: grad.index_fill(dim, index, 0)
   value: grad.index_select(dim, std::get<0>(at::_unique(index, /*sorted=*/false))).sum()
   index: non_differentiable
-  result: self_t.index_fill_(dim, index, value_t)
+  result: self_t.index_fill(dim, index, value_t)
 
 - name: index_put_(Tensor(a!) self, Tensor?[] indices, Tensor values, bool accumulate=False) -> Tensor(a!)
   self: "accumulate ? grad : grad.clone().index_put_(indices, zeros_like(values), false)"
@@ -953,22 +953,22 @@
   LU_data: lu_unpack_backward(grads, LU_data, unpack_data)
   LU_pivots: non_differentiable
 
-- name: masked_fill_.Scalar(Tensor(a!) self, Tensor mask, Scalar value) -> Tensor(a!)
-  self: grad.clone().masked_fill_(mask, 0)
+- name: masked_fill.Scalar(Tensor self, Tensor mask, Scalar value) -> Tensor
+  self: grad.masked_fill(mask, 0)
   mask: non_differentiable
-  result: self_t.masked_fill_(mask, 0)
+  result: self_t.masked_fill(mask, 0)
 
-- name: masked_fill_.Tensor(Tensor(a!) self, Tensor mask, Tensor value) -> Tensor(a!)
-  self: grad.clone().masked_fill_(mask, 0)
+- name: masked_fill.Tensor(Tensor self, Tensor mask, Tensor value) -> Tensor
+  self: grad.masked_fill(mask, 0)
   value: at::where(mask, grad, zeros_like(grad)).sum()
   mask: non_differentiable
-  result: self_t.masked_fill_(mask, value_t)
+  result: self_t.masked_fill(mask, value_t)
 
-- name: masked_scatter_(Tensor(a!) self, Tensor mask, Tensor source) -> Tensor(a!)
-  self: grad.clone().masked_fill_(mask, 0)
+- name: masked_scatter(Tensor self, Tensor mask, Tensor source) -> Tensor
+  self: grad.masked_fill(mask, 0)
   source: masked_scatter_backward(grad, mask, source.sizes())
   mask: non_differentiable
-  result: self_t.masked_scatter_(mask, source_t)
+  result: self_t.masked_scatter(mask, source_t)
 
 - name: masked_select(Tensor self, Tensor mask) -> Tensor
   self: masked_select_backward(grad, self, mask)
@@ -993,8 +993,8 @@
   result: other_t + at::where(self_p == other_p, 0.5, (self_p > other_p).to(result.scalar_type())) * (self_t - other_t)
 
 - name: fmax(Tensor self, Tensor other) -> Tensor
-  self: grad.clone().masked_fill_((self >= other).logical_or_(other.isnan()).logical_not_(), 0)
-  other: grad.clone().masked_fill_((self >= other).logical_or_(other.isnan()), 0)
+  self: grad.masked_fill((self >= other).logical_or_(other.isnan()).logical_not_(), 0)
+  other: grad.masked_fill((self >= other).logical_or_(other.isnan()), 0)
   result: other_t + (self_p > other_p).logical_or_(other_p.isnan()) * (self_t - other_t)
 
 - name: mean(Tensor self, *, ScalarType? dtype=None) -> Tensor
@@ -1049,8 +1049,8 @@
   result: other_t + at::where(self_p == other_p, 0.5, (self_p < other_p).to(result.scalar_type())) * (self_t - other_t)
 
 - name: fmin(Tensor self, Tensor other) -> Tensor
-  self: grad.clone().masked_fill_((self <= other).logical_or_(other.isnan()).logical_not_(), 0)
-  other: grad.clone().masked_fill_((self <= other).logical_or_(other.isnan()), 0)
+  self: grad.masked_fill((self <= other).logical_or_(other.isnan()).logical_not_(), 0)
+  other: grad.masked_fill((self <= other).logical_or_(other.isnan()), 0)
   result: other_t + (self_p <= other_p).logical_or_(other_p.isnan()) * (self_t - other_t)
 
 - name: amax(Tensor self, int[1] dim=[], bool keepdim=False) -> Tensor
