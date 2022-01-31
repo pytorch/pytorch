@@ -77,7 +77,7 @@ jobs:
 {%- for config in build_configs %}
   !{{ config["build_name"] }}-build:
     runs-on: macos-10.15
-    timeout-minutes: !{{ common.timeout_minutes }}
+    timeout-minutes: 480
     !{{ binary_env(config) }}
     steps:
       !{{ set_runner_specific_vars() }}
