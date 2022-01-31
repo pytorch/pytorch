@@ -2511,26 +2511,28 @@ def noncontiguous_like(t):
         return t
 
     # Special-cases 0-dim tensors
-    if t.ndim == 0:
-        result = t.detach().unsqueeze(0).repeat_interleave(2, dim=-1)
-        if t.dtype.is_floating_point or t.dtype.is_complex:
-            result[0] = math.nan
-        else:
-            result[0] = 0
-        result.set_(result.storage(), 1, t.size(), ())
-        result.requires_grad_(t.requires_grad)
-        return result
+    zero_dim = t.ndim == 0
+    if zero_dim:
+        t = t.unsqueeze(0)
 
-    # 1+ dim tensor case
     result = torch.repeat_interleave(t.detach(), 2, dim=-1)
-    if t.dtype.is_floating_point or t.dtype.is_complex:
-        result[..., 1::2] = math.nan
-    else:
-        result[..., 1::2] = 0
 
-    strides = list(result.stride())
-    strides[-1] = strides[-1] * 2
-    result.set_(result.storage(), result.storage_offset(), t.size(), stride=tuple(strides))
+    # Choose a "weird" value that won't be accessed
+    if t.dtype.is_floating_point or t.dtype.is_complex:
+        value = math.nan
+    elif t.dtype == torch.bool:
+        value = True
+    else:
+        value = 12
+
+    if zero_dim:
+        result[0] = value
+        result.set_(result.storage(), 1, (), ())
+    else:
+        result[..., 1::2] = value
+        strides = list(result.stride())
+        strides[-1] *= 2
+        result.set_(result.storage(), result.storage_offset(), t.size(), stride=tuple(strides))
     result.requires_grad_(t.requires_grad)
     return result
 
@@ -2611,13 +2613,12 @@ def random_hermitian_pd_matrix(matrix_size, *batch_dims, dtype, device):
                     dtype=dtype, device=device)
     return A @ A.mH + torch.eye(matrix_size, dtype=dtype, device=device)
 
-# Creates a full rank matrix with distinct signular values or
+# Creates a full rank matrix with distinct singular values or
 #   a batch of such matrices
 def make_fullrank_matrices_with_distinct_singular_values(*shape, device, dtype, requires_grad=False):
     with torch.no_grad():
         t = make_tensor(shape, device=device, dtype=dtype)
         u, _, vh = torch.linalg.svd(t, full_matrices=False)
-        # TODO: improve the handling of complex tensors here
         real_dtype = t.real.dtype if t.dtype.is_complex else t.dtype
         k = min(shape[-1], shape[-2])
         # We choose the singular values to be "around one"
