@@ -15,21 +15,22 @@ class FileListerIterDataPipe(IterDataPipe[str]):
     """
 
     def __init__(
-            self,
-            root: str = '.',
-            masks: Union[str, List[str]] = '',
-            *,
-            recursive: bool = False,
-            abspath: bool = False,
-            length: int = -1,
-            non_deterministic: bool = False):
+        self,
+        root: str = '.',
+        masks: Union[str, List[str]] = '',
+        *,
+        recursive: bool = False,
+        abspath: bool = False,
+        non_deterministic: bool = False,
+        length: int = -1
+    ) -> None:
         super().__init__()
         self.root: str = root
         self.masks: Union[str, List[str]] = masks
         self.recursive: bool = recursive
         self.abspath: bool = abspath
-        self.length: int = length
         self.non_deterministic: bool = non_deterministic
+        self.length: int = length
 
     def __iter__(self) -> Iterator[str] :
         yield from get_file_pathnames_from_root(self.root, self.masks, self.recursive, self.abspath,
