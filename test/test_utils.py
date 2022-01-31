@@ -11,6 +11,8 @@ import subprocess
 import tempfile
 import textwrap
 import unittest
+import warnings
+
 import torch
 import torch.nn as nn
 import torch.utils.data
@@ -19,6 +21,7 @@ import torch.cuda
 from torch.utils.checkpoint import checkpoint, checkpoint_sequential
 import torch.utils.cpp_extension
 import torch.hub as hub
+from unittest.mock import patch
 from torch.autograd._functions.utils import check_onnx_broadcast
 from torch.onnx.symbolic_opset9 import _prepare_onnx_paddings
 from torch.testing._internal.common_utils import has_breakpad, load_tests, retry, IS_SANDCASTLE, IS_WINDOWS, TEST_WITH_ASAN
@@ -729,6 +732,60 @@ class TestHub(TestCase):
                 ValueError,
                 'If it\'s a commit from a forked repo'):
             model = torch.hub.load('pytorch/vision:4e2c216', 'resnet18', force_reload=True, trust_repo=True)
+
+
+    @retry(Exception, tries=3)
+    @patch('torch.hub.get_trusted_input', return_value='')
+    def test_untrusted_repo(self, input):
+        with self.assertRaisesRegex(
+                Exception,
+                'Untrusted repository.'):
+            model = torch.hub.load(
+                'ailzhang/torchhub_example',
+                'mnist_zip_1_6',
+                force_reload=True,
+                trust_repo=False)
+
+    @retry(Exception, tries=3)
+    @patch('torch.hub.get_trusted_input', return_value='y')
+    def test_trusted_repo(self, input):
+        folder_path = os.path.join(torch.hub.get_dir(), 'ailzhang_torchhub_example_master')
+        if os.path.exists(folder_path):
+            shutil.rmtree(folder_path)
+        model = torch.hub.load(
+            'ailzhang/torchhub_example',
+            'mnist_zip_1_6',
+            force_reload=True,
+            trust_repo=False)
+
+    @retry(Exception, tries=3)
+    @patch('torch.hub.get_trusted_input', return_value='y')
+    def test_check_repo(self, input):
+        folder_path = os.path.join(torch.hub.get_dir(), 'ailzhang_torchhub_example_master')
+        if os.path.exists(folder_path):
+            shutil.rmtree(folder_path)
+        model = torch.hub.load(
+            'ailzhang/torchhub_example',
+            'mnist_zip_1_6',
+            force_reload=True,
+            trust_repo="check")
+
+    @retry(Exception, tries=3)
+    def test_none_repo(self):
+        folder_path = os.path.join(torch.hub.get_dir(), 'ailzhang_torchhub_example_master')
+        if os.path.exists(folder_path):
+            shutil.rmtree(folder_path)
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            model = torch.hub.load(
+                'ailzhang/torchhub_example',
+                'mnist_zip_1_6',
+                force_reload=True,
+                trust_repo=None)
+            assert len(w) == 1
+            assert issubclass(w[-1].category, UserWarning)
+            assert "You are about to download an untrusted repository." in str(w[-1].message)
+
 
 class TestHipify(TestCase):
     def test_import_hipify(self):
