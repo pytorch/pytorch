@@ -16,6 +16,7 @@
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
+#include <ATen/Operators.h>
 #else
 #include <ATen/ops/_conj_physical_native.h>
 #include <ATen/ops/_convert_indices_from_coo_to_csr_native.h>
@@ -71,6 +72,7 @@
 #include <ATen/ops/result_type.h>
 #include <ATen/ops/round.h>
 #include <ATen/ops/round_native.h>
+#include <ATen/ops/round_ops.h>
 #include <ATen/ops/sgn.h>
 #include <ATen/ops/sgn_native.h>
 #include <ATen/ops/sign.h>
@@ -297,7 +299,6 @@ CREATE_UNARY_UFUNC(floor);
 CREATE_UNARY_UFUNC(log1p);
 CREATE_UNARY_UFUNC(neg);
 CREATE_UNARY_UFUNC(rad2deg);
-CREATE_UNARY_UFUNC(round);
 CREATE_UNARY_UFUNC(sign);
 CREATE_UNARY_UFUNC(sin);
 CREATE_UNARY_UFUNC(sinh);
@@ -307,6 +308,22 @@ CREATE_UNARY_UFUNC(tan);
 CREATE_UNARY_UFUNC(tanh);
 CREATE_UNARY_UFUNC(trunc);
 CREATE_UNARY_UFUNC(conj_physical);
+
+// With addition of `round.decimals` overload, using CREATE_UNARY_UFUNC leads
+// to unresolved overload.
+Tensor& round_sparse_csr_out(const Tensor& self, Tensor& result) {
+  return unary_op_out(&at::_ops::round_out::call, self, result);
+}
+
+Tensor round_sparse_csr(const Tensor& self) {
+  return get_result_tensor_for_unary_op(&at::_ops::round::call, self);
+}
+
+Tensor& round_sparse_csr_(Tensor& self) {
+  TORCH_INTERNAL_ASSERT(self.is_sparse_csr());
+  self.values().round_();
+  return self;
+}
 
 // angle, isneginf, isposinf and signbit currently don't have an inplace variant
 CREATE_UNARY_UFUNC_NO_INPLACE(angle);
