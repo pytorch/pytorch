@@ -2349,9 +2349,11 @@ except RuntimeError as e:
                 # and can cache values safely
                 dataset.start = i
 
+    @unittest.skipIf(IS_SANDCASTLE, "subprocess doesn't work in FB internal CI")
+    @unittest.skipIf(IS_WINDOWS, "Needs fork")
     def test_early_exit(self):
         import subprocess
-        proc = subprocess.run([sys.executable, '-c', """\
+        proc = subprocess.check_output([sys.executable, '-c', """\
 import torch
 from torch.utils.data import DataLoader, IterableDataset
 
@@ -2377,12 +2379,12 @@ if __name__ == '__main__':
         num_workers=2,
         pin_memory=True,
         persistent_workers=True,
+        multiprocessing_context="fork",
     )
 
     for _ in dl:
         break
-"""], stderr=subprocess.PIPE)
-        self.assertTrue(proc.stderr == b'')
+"""])
 
 
 class NamedTupleDataset(Dataset):
