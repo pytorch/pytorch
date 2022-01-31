@@ -1313,6 +1313,7 @@ class TestTEFuser(JitTestCase):
                 )
 
     def test_isnan(self):
+        # Temp
         x = torch.rand([4])
         x[0] = float('nan')
         inputs = [
