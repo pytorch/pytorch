@@ -382,6 +382,9 @@ MatchTypeReturn matchTypeVariables(
     const TypePtr& actual,
     TypeEnv& type_env) {
   if (!formal->hasFreeVariables()) {
+    if (auto dyn = formal->castRaw<c10::DynamicType>()) {
+      return matchTypeVariables(dyn->fallback(), actual, type_env);
+    }
     return MatchTypeReturn::Success();
   }
 
@@ -512,6 +515,9 @@ MatchTypeReturn matchTypeVariables(
 // change return types like List[List[t]] into List[List[int]]
 TORCH_API TypePtr tryEvalTypeVariables(const TypePtr& type, std::unordered_map<std::string, TypePtr>& type_env) {
   if (!type->hasFreeVariables()) {
+    if (auto dyn = type->castRaw<c10::DynamicType>()) {
+      return tryEvalTypeVariables(dyn->fallback(), type_env);
+    }
     return type;
   }
 
@@ -596,13 +602,29 @@ TupleTypePtr TupleType::createNamed(
     const c10::optional<c10::QualifiedName>& qualName,
     const std::vector<std::string>& field_names,
     const std::vector<TypePtr>& field_types) {
-      std::vector<IValue> empty_defaults;
-      return TupleType::createNamed(qualName, field_names, field_types, empty_defaults);
-    }
+  std::vector<IValue> empty_defaults;
+  return TupleType::createNamed(qualName, field_names, field_types, empty_defaults);
+}
 
+TupleTypePtr TupleType::createNamed(
+    const c10::optional<c10::QualifiedName>& qualName,
+    const std::vector<c10::string_view>& field_names,
+    const std::vector<TypePtr>& field_types) {
+  std::vector<IValue> empty_defaults;
+  return createWithSpec(qualName, field_names, field_types, empty_defaults);
+}
 
-TupleTypePtr TupleType::createNamed(const c10::optional<c10::QualifiedName>& qualName,
+TupleTypePtr TupleType::createNamed(
+    const c10::optional<c10::QualifiedName>& qualName,
     const std::vector<std::string>& field_names,
+    const std::vector<TypePtr>& field_types,
+    std::vector<IValue>& field_defaults) {
+  return createWithSpec(qualName, field_names, field_types, field_defaults);
+}
+
+template <typename S>
+TupleTypePtr TupleType::createWithSpec(const c10::optional<c10::QualifiedName>& qualName,
+    const std::vector<S>& field_names,
     const std::vector<TypePtr>& field_types,
     std::vector<IValue>& field_defaults) {
   TORCH_INTERNAL_ASSERT(field_names.size() == field_types.size());
@@ -613,7 +635,7 @@ TupleTypePtr TupleType::createNamed(const c10::optional<c10::QualifiedName>& qua
   for (size_t i = 0; i < field_names.size(); ++i) {
     if (i < min_default_idx) {
       Argument arg{
-          /*name=*/field_names[i],
+          /*name=*/std::string{field_names[i]},
           /*type=*/field_types[i],
           /*N=*/i};
       arguments.emplace_back(std::move(arg));
@@ -625,7 +647,7 @@ TupleTypePtr TupleType::createNamed(const c10::optional<c10::QualifiedName>& qua
                   "mutability could lead to potential memory aliasing "
                   "problems");
       Argument arg{
-          /*name=*/field_names[i],
+          /*name=*/std::string{field_names[i]},
           /*type=*/field_types[i],
           /*N=*/i,
           /*default_value=*/field_defaults[j]};
