@@ -29,7 +29,6 @@ name: !{{ build_environment }}
       #       They are also here because setting them at a workflow level doesn't give us access to the
       #       runner.temp variable, which we need.
       - name: Populate binary env
-        shell: bash
         run: |
           echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
           echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
@@ -53,11 +52,6 @@ on:
 {%- endfor %}
   workflow_dispatch:
 
-# For setup-miniconda, see https://github.com/conda-incubator/setup-miniconda/issues/179
-defaults:
-  run:
-    shell: bash -e -l {0}
-
 env:
   # Needed for conda builds
   ALPINE_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/alpine"
@@ -74,6 +68,11 @@ env:
   CROSS_COMPILE_ARM64: 1
 {% endif %}
 !{{ common.concurrency(build_environment) }}
+
+# For setup-miniconda, see https://github.com/conda-incubator/setup-miniconda/issues/179
+defaults:
+  run:
+    shell: bash -e -l {0}
 
 jobs:
 {%- for config in build_configs %}
@@ -96,11 +95,9 @@ jobs:
           repository: pytorch/builder
           path: ${{ env.BUILDER_ROOT }}
       - name: Populate binary env
-        shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_populate_env.sh"
       - name: Build PyTorch binary
-        shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_macos_build.sh"
       - uses: actions/upload-artifact@v2

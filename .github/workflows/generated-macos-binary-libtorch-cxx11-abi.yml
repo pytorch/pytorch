@@ -17,11 +17,6 @@ on:
       - 'ciflow/binaries_libtorch/*'
   workflow_dispatch:
 
-# For setup-miniconda, see https://github.com/conda-incubator/setup-miniconda/issues/179
-defaults:
-  run:
-    shell: bash -e -l {0}
-
 env:
   # Needed for conda builds
   ALPINE_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/alpine"
@@ -37,6 +32,11 @@ env:
 concurrency:
   group: macos-binary-libtorch-cxx11-abi-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
   cancel-in-progress: true
+
+# For setup-miniconda, see https://github.com/conda-incubator/setup-miniconda/issues/179
+defaults:
+  run:
+    shell: bash -e -l {0}
 
 jobs:
   libtorch-cpu-shared-with-deps-cxx11-abi-build:
@@ -58,7 +58,6 @@ jobs:
       #       They are also here because setting them at a workflow level doesn't give us access to the
       #       runner.temp variable, which we need.
       - name: Populate binary env
-        shell: bash
         run: |
           echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
           echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
@@ -81,11 +80,9 @@ jobs:
           repository: pytorch/builder
           path: ${{ env.BUILDER_ROOT }}
       - name: Populate binary env
-        shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_populate_env.sh"
       - name: Build PyTorch binary
-        shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_macos_build.sh"
       - uses: actions/upload-artifact@v2
@@ -231,7 +228,6 @@ jobs:
       #       They are also here because setting them at a workflow level doesn't give us access to the
       #       runner.temp variable, which we need.
       - name: Populate binary env
-        shell: bash
         run: |
           echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
           echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
@@ -254,11 +250,9 @@ jobs:
           repository: pytorch/builder
           path: ${{ env.BUILDER_ROOT }}
       - name: Populate binary env
-        shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_populate_env.sh"
       - name: Build PyTorch binary
-        shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_macos_build.sh"
       - uses: actions/upload-artifact@v2
@@ -404,7 +398,6 @@ jobs:
       #       They are also here because setting them at a workflow level doesn't give us access to the
       #       runner.temp variable, which we need.
       - name: Populate binary env
-        shell: bash
         run: |
           echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
           echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
@@ -427,11 +420,9 @@ jobs:
           repository: pytorch/builder
           path: ${{ env.BUILDER_ROOT }}
       - name: Populate binary env
-        shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_populate_env.sh"
       - name: Build PyTorch binary
-        shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_macos_build.sh"
       - uses: actions/upload-artifact@v2
@@ -577,7 +568,6 @@ jobs:
       #       They are also here because setting them at a workflow level doesn't give us access to the
       #       runner.temp variable, which we need.
       - name: Populate binary env
-        shell: bash
         run: |
           echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
           echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
@@ -600,11 +590,9 @@ jobs:
           repository: pytorch/builder
           path: ${{ env.BUILDER_ROOT }}
       - name: Populate binary env
-        shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_populate_env.sh"
       - name: Build PyTorch binary
-        shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_macos_build.sh"
       - uses: actions/upload-artifact@v2
