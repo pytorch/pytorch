@@ -53,6 +53,10 @@ on:
 {%- endfor %}
   workflow_dispatch:
 
+# For setup-miniconda, see https://github.com/conda-incubator/setup-miniconda/issues/179
+defaults:
+  run:
+    shell: bash -e -l {0}
 env:
   # Needed for conda builds
   ALPINE_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/alpine"
@@ -78,13 +82,6 @@ jobs:
     !{{ binary_env(config) }}
     steps:
       !{{ set_runner_specific_vars() }}
-      - name: Install conda and dependencies
-        run: |
-          # Install conda, setup-miniconda messes with the path that messes with the ruby stuff we do later on
-          curl --retry 3 -o "${RUNNER_TEMP}/conda.sh" https://repo.anaconda.com/miniconda/Miniconda3-latest-MacOSX-x86_64.sh
-          chmod +x "${RUNNER_TEMP}/conda.sh"
-          /bin/bash "${RUNNER_TEMP}/conda.sh" -b -p "${RUNNER_TEMP}/anaconda"
-          echo "${RUNNER_TEMP}/anaconda/bin" >> "${GITHUB_PATH}"
       - name: Clone pytorch/pytorch
         uses: actions/checkout@v2
         with:
@@ -95,6 +92,7 @@ jobs:
         with:
           repository: pytorch/builder
           path: ${{ env.BUILDER_ROOT }}
+      !{{ common.setup_miniconda("3.8", False) }}
       - name: Populate binary env
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_populate_env.sh"
