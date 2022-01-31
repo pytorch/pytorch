@@ -56,7 +56,7 @@ except ImportError:
 # matches bfd8deac from resnet18-bfd8deac.pth
 HASH_REGEX = re.compile(r'-([a-f0-9]*)\.')
 
-_PREDEFINED_TRUSTED = ["facebookresearch", "facebookincubator", "pytorch", "fairinternal"]
+_PREDEFINED_TRUSTED = ("facebookresearch", "facebookincubator", "pytorch", "fairinternal")
 ENV_GITHUB_TOKEN = 'GITHUB_TOKEN'
 ENV_TORCH_HOME = 'TORCH_HOME'
 ENV_XDG_CACHE_HOME = 'XDG_CACHE_HOME'
