@@ -13,6 +13,7 @@ from torch.distributions.multivariate_normal import _precision_to_scale_tril
 _log_2 = math.log(2)
 
 
+@torch.jit.script
 def _mvdigamma(x: torch.Tensor, p: int) -> torch.Tensor:
     assert x.gt((p - 1) / 2).all(), "Wrong domain for multivariate digamma function."
     return torch.digamma(
@@ -20,6 +21,7 @@ def _mvdigamma(x: torch.Tensor, p: int) -> torch.Tensor:
         - torch.arange(p, dtype=x.dtype, device=x.device).div(2).expand(x.shape + (-1,))
     ).sum(-1)
 
+@torch.jit.script
 def _clamp_with_eps(x: torch.Tensor) -> torch.Tensor:
     # We assume positive input for this function
     return x.clamp(min=torch.finfo(x.dtype).eps)
