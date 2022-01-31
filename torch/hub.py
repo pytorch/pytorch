@@ -230,7 +230,7 @@ def _add_repo_to_trusted_list(repo, filepath, is_trusted=False):
             with open(filepath, "a") as file:
                 file.write(repo + "\n")
 
-    elif response.lower() in {"n", "no"}:
+    elif response.lower() in ("n", "no"):
         raise Exception("Untrusted repository.")
 
     else:
