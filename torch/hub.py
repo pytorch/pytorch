@@ -15,7 +15,7 @@ from urllib.request import urlopen, Request
 from urllib.parse import urlparse  # noqa: F401
 
 
-PREDEFINED_TRUSTED = ["facebookresearch", "facebookincubator", "pytorch"]
+_PREDEFINED_TRUSTED = ["facebookresearch", "facebookincubator", "pytorch", "fairinternal"]
 
 
 try:
