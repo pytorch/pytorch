@@ -3304,23 +3304,63 @@ class TestVmapOperatorsOpInfo(TestCase):
         test(self, op, (x, 4, weight, bias), in_dims=(0, None, 0, 0))
 
     def test_index_put(self, device):
-        # vfdev-5: Probably, we can remove this line. Flake8 reported as unused
-        # test = functools.partial(_vmap_test, check_propagates_grad=False)
-
-        x = torch.arange(3 * 4 * 5).reshape(3, 4, 5)
+        def test(f, t, idx, values):
+            base = f(t[0], idx[0], values[0])
+            self.assertEqual(vmap(f, in_dims=(0, 0, 0))(t, idx, values)[0], base)
+            self.assertEqual(vmap(f, in_dims=(0, None, None))(t, idx[0], values[0])[0], base)
+            self.assertEqual(vmap(f, in_dims=(0, None, 0))(t, idx[0], values)[0], base)
+            self.assertEqual(vmap(f, in_dims=(0, 0, None))(t, idx, values[0])[0], base)
 
         def f(x, y, z):
             x[y] = z
             return x
 
-        x = torch.randn(3, 4, 5)
-        y = torch.zeros((3, 2)).long()
-        z = torch.randn(3, 2, 5)
-        base = f(x[0], y[0], z[0])
-        self.assertEqual(vmap(f, in_dims=(0, 0, 0))(x, y, z)[0], base)
-        self.assertEqual(vmap(f, in_dims=(0, None, None))(x, y[0], z[0])[0], base)
-        self.assertEqual(vmap(f, in_dims=(0, None, 0))(x, y[0], z)[0], base)
-        self.assertEqual(vmap(f, in_dims=(0, 0, None))(x, y, z[0])[0], base)
+        x = torch.randn(3, 4, 5, device=device)
+        y = torch.zeros((3, 2), device=device).long()
+        z = torch.randn(3, 2, 5, device=device)
+        test(f, x, y, z)
+
+        # indexing innermost dim
+        def f(t, idx, values):
+            t[:, idx] = values
+            return t
+
+        t = torch.zeros((3, 2, 3))
+        values = torch.ones((3, 1, 2))
+        idx = torch.tensor([[1, 2]]).expand((3, 2))
+        test(f, t, idx, values)
+
+        # indexing middle dim
+        def f(t, idx, values):
+            t[:, idx, :] = values
+            return t
+
+        t = torch.zeros((3, 2, 3, 3))
+        values = torch.ones((3, 1, 2, 3))
+        idx = torch.tensor([[0, 2]]).expand((3, 2))
+        test(f, t, idx, values)
+
+        # indexing with slices
+        def f(t, values):
+            t[:, :2, :] = values
+            return t
+
+        base = f(t[0], values[0])
+        self.assertEqual(vmap(f, in_dims=(0, 0))(t, values)[0], base)
+        self.assertEqual(vmap(f, in_dims=(0, None))(t, values[0])[0], base)
+
+        # index_put_
+        tensor = torch.zeros(3, 3, 4)
+        value = torch.ones(3, 2)
+        idxs = (torch.tensor([[0], [1], [2]]), torch.tensor([[0]]), torch.tensor([1, 2]))
+        expected = torch.index_put_(tensor.clone(), idxs, value)
+
+        def f(t, idx, v):
+            torch.index_put_(t, idx, v)
+            return t
+
+        self.assertEqual(vmap(f, in_dims=(0, (None, None), 0))(tensor, idxs[1:], value), expected)
+        self.assertEqual(vmap(f, in_dims=(0, (None, None), None))(tensor, idxs[1:], value[0]), expected)
 
     @parametrize('training', [True, False])
     @parametrize('track_running_stats', [True, False])
