@@ -56,6 +56,14 @@ def full_0_4(size:List[int], fill_value:number, *, dtype:Optional[int]=None,
      {"full_out_0_4", R"SCRIPT(
 def full_out_0_4(size:List[int], fill_value:number, *, out:Tensor) -> Tensor:
   return torch.full(size, fill_value, out=out)
+)SCRIPT"},
+     {"gelu_0_8", R"SCRIPT(
+def gelu_0_8(self: Tensor) -> Tensor:
+  return torch._C._nn.gelu(self, 0)
+)SCRIPT"},
+     {"gelu_out_0_8", R"SCRIPT(
+def gelu_out_0_8(self: Tensor, *, out: Tensor) -> Tensor:
+  return torch._C._nn.gelu(self, 0, out=out)
 )SCRIPT"}});
 
 std::shared_ptr<Graph> create_upgrader_graph(
