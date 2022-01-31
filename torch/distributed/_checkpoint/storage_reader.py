@@ -36,7 +36,7 @@ class FileSystemReader(StorageReader):
         Very basic implementation that read from file system.
         Note that the future is resolved before returning.
         """
-        with open(os.path.join(self.base_folder_name, req.storage_key), "rb") as storage:
+        with open(os.path.join(self.path, req.storage_key), "rb") as storage:
             storage.seek(req.offset)
 
             # Read everything for the storage and write to the buffer
@@ -55,5 +55,5 @@ class FileSystemReader(StorageReader):
 
     # Implementating the abstract function in StorageReader
     def read_metadata(self) -> Metadata:
-        with open(f"{self.base_folder_name}/metadata", "rb") as metadata_file:
+        with open(os.path.join(self.path, ".metadata"), "rb") as metadata_file:
             return pickle.load(metadata_file)

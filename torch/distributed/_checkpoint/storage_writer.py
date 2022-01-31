@@ -68,5 +68,5 @@ class FileSystemWriter(StorageWriter):
         if dist.is_initialized() and dist.get_rank() != 0:
             return
 
-        with open(f"{self.base_folder_name}/metadata", "wb") as metadata_file:
+        with open(os.path.join(self.path, ".metadata"), "wb") as metadata_file:
             pickle.dump(metadata, metadata_file)

@@ -80,7 +80,7 @@ class TestStateDictSaveLoad(TestCase):
         state_dict_to_save = TestModule().state_dict()
         path = tempfile.mkdtemp()
 
-        fs_writer = FileSystemWriter(base_folder_name=path)
+        fs_writer = FileSystemWriter(path=path)
         save_state_dict(state_dict=state_dict_to_save, storage_writer=fs_writer)
 
         # Genrate a new modle
@@ -91,7 +91,7 @@ class TestStateDictSaveLoad(TestCase):
             assert_state_dict_equal(self, state_dict_to_load_to, state_dict_to_save)
 
         # Load from file without any resharding
-        fs_reader = FileSystemReader(base_folder_name=path)
+        fs_reader = FileSystemReader(path=path)
         load_state_dict(state_dict=state_dict_to_load_to, storage_reader=fs_reader)
 
         assert_state_dict_equal(self, state_dict_to_load_to, state_dict_to_save)
@@ -101,11 +101,14 @@ class TestStateDictSaveLoadWithSharedTensor(ShardedTensorTestBase):
     def world_size(self):
         return 2
 
-    @with_comms(init_rpc=False)
+    @with_comms(init_rpc=True)
     @skip_if_lt_x_gpu(2)
     @requires_nccl()
     def test_read_write_shard_tenosr(self):
-        path = tempfile.mkdtemp()
+        paths = [tempfile.mkdtemp()]
+        dist.broadcast_object_list(paths)
+
+        path = paths[0]
 
         spec = ChunkShardingSpec(
             dim=0,
@@ -121,7 +124,7 @@ class TestStateDictSaveLoadWithSharedTensor(ShardedTensorTestBase):
         model_to_save._register_state_dict_hook(state_dict_hook)
         state_dict_to_save = model_to_save.state_dict()
 
-        fs_writer = FileSystemWriter(base_folder_name=path)
+        fs_writer = FileSystemWriter(path=path)
         save_state_dict(state_dict=state_dict_to_save, storage_writer=fs_writer)
 
         dist.barrier()
@@ -139,7 +142,7 @@ class TestStateDictSaveLoadWithSharedTensor(ShardedTensorTestBase):
             assert_state_dict_equal(self, state_dict_to_load_to, state_dict_to_save)
 
         # Test load.
-        fs_reader = FileSystemReader(base_folder_name=path)
+        fs_reader = FileSystemReader(path=path)
         load_state_dict(state_dict=state_dict_to_load_to, storage_reader=fs_reader)
 
         assert_state_dict_equal(self, state_dict_to_load_to, state_dict_to_save)
