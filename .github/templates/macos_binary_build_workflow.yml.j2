@@ -83,8 +83,13 @@ jobs:
     !{{ binary_env(config) }}
     steps:
       !{{ set_runner_specific_vars() }}
-      # libtorch needs a default version of python to get miniconda setup
-      !{{ common.setup_miniconda(config.get("python_version", "3.7")) }}
+      - name: Install conda and dependencies
+        run: |
+          # Install conda, setup-miniconda messes with the path that messes with the ruby stuff we do later on
+          curl --retry 3 -o "${RUNNER_TEMP}/conda.sh" https://repo.anaconda.com/miniconda/Miniconda3-latest-MacOSX-x86_64.sh
+          chmod +x "${RUNNER_TEMP}/conda.sh"
+          /bin/bash "${RUNNER_TEMP}/conda.sh" -b -p "${RUNNER_TEMP}/anaconda"
+          echo "${RUNNER_TEMP}/anaconda/bin" >> "${GITHUB_PATH}"
       - name: Clone pytorch/pytorch
         uses: actions/checkout@v2
         with:
