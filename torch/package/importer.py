@@ -193,7 +193,10 @@ class OrderedImporter(Importer):
                     "All importers in OrderedImporter must inherit from Importer."
                 )
             try:
-                return importer.import_module(module_name)
+                module = importer.import_module(module_name)
+                if module.__dict__.get("__torch_package_dummy_module__", False):
+                    continue
+                return module
             except ModuleNotFoundError as err:
                 last_err = err
 
