@@ -277,6 +277,7 @@ class TORCH_CUDA_CU_API CudaCodeGen : public CodeGen {
   bool has_random_ = false;
   int thread_block_size_ = -1;
 
+  std::vector<bool> arg_pos_in_extents_;
 #ifdef TORCH_ENABLE_LLVM
   std::vector<ExprEval<LLVMCodeGen>> block_extents_eval_;
   std::vector<ExprEval<LLVMCodeGen>> thread_extents_eval_;
