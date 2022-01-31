@@ -183,7 +183,7 @@ class PackageImporter(Importer):
         loaded_storages = {}
         loaded_reduces = {}
         storage_context = torch._C.DeserializationStorageContext()
-
+        #TODO move out and add deprecration warning for this behavior
         def load_tensor(dtype, size, key, location, restore_location):
             name = f"{key}.storage"
 
