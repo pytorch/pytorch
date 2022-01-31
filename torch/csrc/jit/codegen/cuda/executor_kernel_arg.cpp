@@ -1,4 +1,4 @@
-#include <ATen/CUDAGeneratorImpl.h>
+#include <ATen/cuda/CUDAGeneratorImpl.h>
 #include <c10/util/irange.h>
 
 // Extract size and strides
