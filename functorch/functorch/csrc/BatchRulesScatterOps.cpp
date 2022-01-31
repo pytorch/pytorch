@@ -9,6 +9,9 @@
 #include <ATen/Operators.h>
 #include <functorch/csrc/PlumbingHelper.h>
 #include <functorch/csrc/BatchedFallback.h>
+#include <ATen/native/TensorAdvancedIndexing.h>
+#include <ATen/native/IndexKernel.h>
+#include <ATen/native/IndexingUtils.h>
 
 
 namespace at { namespace functorch {
@@ -111,6 +114,114 @@ Tensor index_plumbing(const Tensor & self, const List<optional<Tensor>> & indice
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
+namespace {
+  // Code is mostly duplicated from
+  // https://github.com/pytorch/pytorch/blob/fb0e27d38a8fdab4e1c14d6378c9e41cb30fd6a3
+  // /aten/src/ATen/native/TensorAdvancedIndexing.cpp#L294-L312
+  VmapDimVector compute_indexed_shape(const Tensor &src, TensorList indices_list)
+  {
+    int64_t dims_before = 0, dims_after = 0, dims_indexed = 0;
+    IntArrayRef replacement_shape;
+    for (const auto dim : c10::irange(indices_list.size())) {
+      if (!indices_list[dim].defined()) {
+        if (dims_indexed == 0) {
+          dims_before++;
+        } else {
+          dims_after++;
+        }
+      } else {
+        dims_indexed++;
+        replacement_shape = indices_list[dim].sizes();
+      }
+    }
+
+    // Replace indexed dimensions in src with stride 0 and the size of the result tensor.
+    // The offset in these dimensions is computed by the kernel using the index tensor's
+    // values and the stride of src. The new shape is not meaningful. It's used to make
+    // the shape compatible with the result tensor.
+    auto shape = VmapDimVector(src.sizes());
+    int64_t end = dims_before + dims_indexed;
+    shape.erase(shape.begin() + dims_before, shape.begin() + end);
+    shape.insert(shape.begin() + dims_before, replacement_shape.begin(), replacement_shape.end());
+    return shape;
+  }
+
+  // Code is mostly duplicated from
+  // https://github.com/pytorch/pytorch/blob/fb0e27d38a8fdab4e1c14d6378c9e41cb30fd6a3
+  // /aten/src/ATen/native/TensorAdvancedIndexing.cpp#L379-L405
+  VmapDimVector get_indexed_shape(Tensor self, const torch::List<c10::optional<at::Tensor>> &orig)
+  {
+    at::native::checkIndexTensorTypes(orig);
+    // first expand BoolTensor (masks) or ByteTensor (masks) into 1 or more LongTensors
+    auto indices = at::native::expandTensors(self, orig);
+    // next broadcast all index tensors together
+    try {
+      indices = at::expand_outplace(indices);
+    } catch (std::exception &e) {
+      TORCH_CHECK_INDEX(false, "shape mismatch: indexing tensors could not be broadcast together"
+                               " with shapes ");
+    }
+    // add missing null Tensors so that it matches self.dim()
+    while (indices.size() < static_cast<size_t>(self.dim())) {
+      indices.emplace_back();
+    }
+    // if the non-null indices are not all adjacent, transpose self and indices
+    // together so that they're adjacent at the front
+    if (!at::native::hasContiguousSubspace(indices)) {
+      std::tie(self, indices) = at::native::transposeToFront(self, indices);
+    }
+    return compute_indexed_shape(self, indices);
+  }
+
+  std::tuple<Tensor, std::vector<optional<Tensor>>, Tensor>
+  index_put_batch_rule_helper(const Tensor &self,
+                              optional<int64_t> self_bdim,
+                              ArrayRef<optional<Tensor>> indices,
+                              ArrayRef<optional<int64_t>> indices_bdims,
+                              const Tensor &values,
+                              optional<int64_t> values_bdim) {
+
+    auto self_logical_rank = rankWithoutBatchDim(self, self_bdim);
+    auto values_logical_rank = rankWithoutBatchDim(values, values_bdim);
+    Tensor self_ = moveBatchDimToFront(self, self_bdim);
+    Tensor values_ = moveBatchDimToFront(values, values_bdim);
+    const auto batch_size = self_.size(0);
+    values_ = ensure_has_bdim(values_, values_bdim.has_value(), batch_size);
+    TORCH_INTERNAL_ASSERT(indices.size() == indices_bdims.size());
+    std::vector<optional<Tensor>> indices_ = batchIndices(indices, indices_bdims, self_.size(0), self_bdim, values_bdim);
+
+    auto indexed_shape = get_indexed_shape(self_, List<optional<Tensor>>(indices_));
+
+    // handle broadcasting support for values
+    // Eg. Given `indexed_shape.size()` is 5 and
+    // shape of `values` is (N, 2, 3), then following block
+    // will reshape `values` to (N, 1, 1, 2, 3).
+    if (indexed_shape.size() > values_.dim()) {
+      auto values_sizes = values_.sizes();
+
+      // number of unit dims (for broadcasting value to indexed_shape)
+      auto n_unit_dims = indexed_shape.size() - values_sizes.size();
+      VmapDimVector new_values_shape(values_sizes.size() + n_unit_dims);
+
+      // add the batch-dim
+      new_values_shape[0] = batch_size;
+
+      // insert the unit dims for broadcasting.
+      for (const auto idx : c10::irange(n_unit_dims)) {
+        // since batch-dim is already be filled.
+        new_values_shape[idx + 1] = 1;
+      }
+      for (const auto idx: c10::irange(1, values_sizes.size())) {
+        // since batch and unit dims are already be filled.
+        new_values_shape[idx + n_unit_dims] = values_sizes[idx];
+      }
+      values_ = values_.view(new_values_shape);
+    }
+
+    return std::make_tuple(self_, indices_, values_);
+  }
+}  // namespace
+
 void index_put__batch_rule(
     Tensor& self,
     optional<int64_t> self_bdim,
@@ -122,10 +233,10 @@ void index_put__batch_rule(
   if (!self_bdim.has_value()) {
     vmapIncompatibleInplaceError("index_put_");
   }
-  auto self_ = moveBatchDimToFront(self, self_bdim);
-  auto values_ = moveBatchDimToFront(values, values_bdim);
-  TORCH_INTERNAL_ASSERT(indices.size() == indices_bdims.size());
-  std::vector<optional<Tensor>> indices_ = batchIndices(indices, indices_bdims, self_.size(0), self_bdim, values_bdim);
+  Tensor self_, values_;
+  std::vector<optional<Tensor>> indices_;
+  std::tie(self_, indices_, values_) = index_put_batch_rule_helper(
+      self, self_bdim, indices, indices_bdims, values, values_bdim);
   at::index_put_(self_, List<optional<Tensor>>(indices_), values_, accumulate);
 }
 
@@ -170,10 +281,10 @@ void _index_put_impl__batch_rule(
   if (!self_bdim.has_value()) {
     vmapIncompatibleInplaceError("_index_put_impl_");
   }
-  auto self_ = moveBatchDimToFront(self, self_bdim);
-  auto values_ = moveBatchDimToFront(values, values_bdim);
-  TORCH_INTERNAL_ASSERT(indices.size() == indices_bdims.size());
-  std::vector<optional<Tensor>> indices_ = batchIndices(indices, indices_bdims, self_.size(0), self_bdim, values_bdim);
+  Tensor self_, values_;
+  std::vector<optional<Tensor>> indices_;
+  std::tie(self_, indices_, values_) = index_put_batch_rule_helper(
+      self, self_bdim, indices, indices_bdims, values, values_bdim);
   at::_index_put_impl_(self_, List<optional<Tensor>>(indices_), values_, accumulate, unsafe);
 }
 
