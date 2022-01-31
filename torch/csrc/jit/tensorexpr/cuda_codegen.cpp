@@ -1027,6 +1027,11 @@ void CudaCodeGen::Initialize() {
   // Build an LLVM based eval expression for the extents
   block_extents_eval_.reserve(block_extents.size());
   std::vector<BufferArg> extents_buffer_args;
+
+  // We need to extract the args that are used in the thread and block extents
+  // from bufferArgs and only use those for the `ExprEval` below. Without this,
+  // bufferArgs might contain arbitrary types that are not handled by LLVM and
+  // hence would result in an error.
   std::unordered_set<VarPtr> vars_in_extents;
   for (const auto& be : block_extents) {
     auto v = VarFinder::find(be);
