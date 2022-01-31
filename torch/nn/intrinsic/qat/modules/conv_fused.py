@@ -188,7 +188,7 @@ class _ConvBnNd(nn.modules.conv._ConvNd, nni._FusedModule):
     def from_float(cls, mod):
         r"""Create a qat module from a float module or qparams_dict
 
-            Args: `mod` a float module, either produced by torch.quantization utilities
+            Args: `mod` a float module, either produced by torch.ao.quantization utilities
             or directly from user
         """
         # The ignore is because _FLOAT_MODULE is a TypeVar here where the bound

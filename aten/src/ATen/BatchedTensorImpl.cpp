@@ -29,6 +29,7 @@ BatchedTensorImpl::BatchedTensorImpl(Tensor value, BatchDims bdims)
     sizes_and_strides_.size_at_unchecked(dim) = value_sizes.at(actual_dim);
     sizes_and_strides_.stride_at_unchecked(dim) = value_strides.at(actual_dim);
   }
+  storage_offset_ = value_.storage_offset();
   refresh_numel();
   refresh_contiguous();
 }

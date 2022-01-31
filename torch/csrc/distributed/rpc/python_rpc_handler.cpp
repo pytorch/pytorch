@@ -32,7 +32,7 @@ constexpr auto kInternalModule = "torch.distributed.rpc.internal";
 struct PythonTypeResolver : public jit::Resolver {
   std::shared_ptr<jit::SugaredValue> resolveValue(
       const std::string& /* unused */,
-      torch::jit::Function& /* unused */,
+      torch::jit::GraphFunction& /* unused */,
       const jit::SourceRange& /* unused */) override {
     TORCH_INTERNAL_ASSERT(
         false, "RPC Type resolver does not need to resolve value");

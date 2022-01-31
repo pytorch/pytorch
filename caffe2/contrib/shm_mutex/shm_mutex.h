@@ -331,7 +331,7 @@ struct shm_traits<ShmTicketMutex<T>> {
   using header_t = T;
 };
 
-using TicketStruct = struct : ShmBaseHeader {
+struct TicketStruct : ShmBaseHeader {
   std::atomic<unsigned> ticket;
   std::atomic<unsigned> now;
 };

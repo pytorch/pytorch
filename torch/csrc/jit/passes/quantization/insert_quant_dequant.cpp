@@ -227,7 +227,8 @@ c10::optional<std::string> findObserverName(Value* v) {
 bool isPlaceholderObserver(Value* observer) {
   if (getModuleName(observer).has_value()) {
     auto name = getModuleName(observer).value();
-    if (name == "__torch__.torch.quantization.observer.PlaceholderObserver") {
+    // if PlaceholderObserver is (anywhere) in name
+    if (name.find("PlaceholderObserver") != std::string::npos) {
       return true;
     }
   }
@@ -324,6 +325,7 @@ Node* insertEmbeddingBagOps(Node* observer, const std::string& op_name) {
     quant_fn = "quantized::embedding_bag_byte_rowwise_offsets";
   } else {
     TORCH_INTERNAL_ASSERT(
+        false,
         "Graph Mode Quantization currently supports 4-bit and 8-bit embedding bag quantization.");
   }
 
@@ -724,15 +726,19 @@ class InsertQuantDeQuantHelper {
       Node* n);
   void checkQScheme(Graph* g, c10::QScheme qscheme) {
     if (qscheme_for_graph_.count(g)) {
+      // FIXME[T110786721]: This check was broken before nevery failing.
+      // Once fixed, this check triggers and fails tests.
+      // Fix the tests that enabling this check produce!
+      /*
       TORCH_CHECK(
-          qscheme_for_graph_.at(g) == qscheme ||
-
-              "Quantizing same graph with different types of "
-              "QSchemes is not supported.\n",
+          qscheme_for_graph_.at(g) == qscheme,
+          "Quantizing same graph with different types of "
+          "QSchemes is not supported.\n",
           " Expecting:",
           c10::toString(qscheme_for_graph_.at(g)),
           " Got:",
           c10::toString(qscheme));
+      */
     } else {
       qscheme_for_graph_[g] = toAffine(qscheme);
     }
@@ -930,7 +936,7 @@ std::unique_ptr<GraphFunction> SubGraphCloneHelper::buildGraphFromNodes(
     const std::vector<Node*>& nodes,
     const std::string& name) {
   auto observer_subgraph = std::make_shared<Graph>();
-  auto build_observer_graph = [&](Function& func) {
+  auto build_observer_graph = [&](GraphFunction& func) {
     buildObserverSubgraph(nodes, func.graph());
   };
   return torch::make_unique<GraphFunction>(
@@ -1023,7 +1029,7 @@ std::tuple<c10::QScheme, QParamVector> InsertQuantDeQuantHelper::
   // TODO: refactor findObserverName to take Node* as input
   Value* v = n->output();
   TORCH_INTERNAL_ASSERT(
-      v->type()->isSubtypeOf(TensorType::get()),
+      v->type()->isSubtypeOf(*TensorType::get()),
       "Expected output of observer node to be Tensor");
   auto observer_name = findObserverName(v);
   TORCH_INTERNAL_ASSERT(
@@ -1351,7 +1357,7 @@ void InsertQuantDeQuantHelper::runWeightObserver(
     blocks_to_visit.pop();
     for (auto n : b->nodes()) {
       for (Value* v : n->outputs()) {
-        if (!v->type()->isSubtypeOf(TensorType::get())) {
+        if (!v->type()->isSubtypeOf(*TensorType::get())) {
           continue;
         }
         auto observer_name = findObserverName(v);
@@ -1415,7 +1421,7 @@ void InsertQuantDeQuantHelper::run(
   std::vector<Value*> input_values;
   for (const auto idx : c10::irange(1, method.num_inputs())) {
     auto& v = graph->inputs()[idx];
-    if (v->type()->isSubtypeOf(TensorType::get())) {
+    if (v->type()->isSubtypeOf(*TensorType::get())) {
       input_values.push_back(v);
     }
   }
@@ -1428,7 +1434,7 @@ void InsertQuantDeQuantHelper::run(
     for (auto it = b->nodes().begin(), end = b->nodes().end(); it != end;) {
       Node* n = *it++;
       for (Value* v : n->outputs()) {
-        if (!v->type()->isSubtypeOf(TensorType::get())) {
+        if (!v->type()->isSubtypeOf(*TensorType::get())) {
           continue;
         }
         collectObserverNodesAndValueToQuantize(module, v);

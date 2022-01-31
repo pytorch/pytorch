@@ -5,22 +5,22 @@
 #include <torch/csrc/serialization.h>
 
 template <class io>
-ssize_t doPartialRead(io fildes, void* buf, size_t nbytes);
+Py_ssize_t doPartialRead(io fildes, void* buf, size_t nbytes);
 
 template <class io>
-ssize_t doPartialWrite(io fildes, void* buf, size_t nbytes);
+Py_ssize_t doPartialWrite(io fildes, void* buf, size_t nbytes);
 
-static ssize_t doPartialPythonReadBuffered(PyObject* fildes, void* buf, size_t nbytes);
-static ssize_t doPartialPythonReadInto(PyObject* fildes, void* buf, size_t nbytes);
-static ssize_t doPartialPythonWrite(PyObject* fildes, void* buf, size_t nbytes);
+static Py_ssize_t doPartialPythonReadBuffered(PyObject* fildes, void* buf, size_t nbytes);
+static Py_ssize_t doPartialPythonReadInto(PyObject* fildes, void* buf, size_t nbytes);
+static Py_ssize_t doPartialPythonWrite(PyObject* fildes, void* buf, size_t nbytes);
 
 template <>
-ssize_t doPartialRead<int>(int fildes, void* buf, size_t nbytes) {
+Py_ssize_t doPartialRead<int>(int fildes, void* buf, size_t nbytes) {
   return read(fildes, buf, nbytes);
 }
 
 template <>
-ssize_t doPartialRead<PyObject*>(PyObject* fildes, void* buf, size_t nbytes) {
+Py_ssize_t doPartialRead<PyObject*>(PyObject* fildes, void* buf, size_t nbytes) {
   // Try to use fildes.readinto() instead of fildes.read()
   // because it is more memory efficient.
   // TODO: Stop calling PyObject_HasAttrString() in a loop on our read loop
@@ -32,12 +32,12 @@ ssize_t doPartialRead<PyObject*>(PyObject* fildes, void* buf, size_t nbytes) {
 }
 
 template <>
-ssize_t doPartialWrite<int>(int fildes, void* buf, size_t nbytes) {
+Py_ssize_t doPartialWrite<int>(int fildes, void* buf, size_t nbytes) {
   return write(fildes, buf, nbytes);
 }
 
 template <>
-ssize_t doPartialWrite<PyObject*>(PyObject* fildes, void* buf, size_t nbytes) {
+Py_ssize_t doPartialWrite<PyObject*>(PyObject* fildes, void* buf, size_t nbytes) {
   return doPartialPythonWrite(fildes, buf, nbytes);
 }
 
@@ -50,7 +50,7 @@ static inline bool isUnsupportedOperation() {
 }
 
 // Call Python fildes.read(nbytes) and copy it to buf.
-static inline ssize_t doPartialPythonReadBuffered(PyObject* fildes, void* buf, size_t raw_nbytes) {
+static inline Py_ssize_t doPartialPythonReadBuffered(PyObject* fildes, void* buf, size_t raw_nbytes) {
   // If we request a large amount of data, f.read() will internally try to
   // allocate a buffer of that size.  This is counterproductive, because
   // it's not the buffer we ultimately want to write the data into.  Read
@@ -76,7 +76,7 @@ static inline ssize_t doPartialPythonReadBuffered(PyObject* fildes, void* buf, s
 }
 
 // Either does fildes.readinto(buf) or fildes.write(buf)
-static inline ssize_t doPartialPythonIO(PyObject* fildes, void* buf, size_t nbytes, bool is_read) {
+static inline Py_ssize_t doPartialPythonIO(PyObject* fildes, void* buf, size_t nbytes, bool is_read) {
   auto rw_flag = is_read ? PyBUF_WRITE : PyBUF_READ;
   THPObjectPtr memview(PyMemoryView_FromMemory(
       reinterpret_cast<char*>(buf), nbytes, rw_flag));
@@ -100,12 +100,12 @@ static inline ssize_t doPartialPythonIO(PyObject* fildes, void* buf, size_t nbyt
 }
 
 // Call Python fildes.readinto(buf)
-static ssize_t doPartialPythonReadInto(PyObject* fildes, void* buf, size_t nbytes) {
+static Py_ssize_t doPartialPythonReadInto(PyObject* fildes, void* buf, size_t nbytes) {
   return doPartialPythonIO(fildes, buf, nbytes, /* is_read */ true);
 }
 
 // Call Python fildes.write(buf)
-static ssize_t doPartialPythonWrite(PyObject* fildes, void* buf, size_t nbytes) {
+static Py_ssize_t doPartialPythonWrite(PyObject* fildes, void* buf, size_t nbytes) {
   return doPartialPythonIO(fildes, buf, nbytes, /* is_read */ false);
 }
 
@@ -117,7 +117,7 @@ void doRead(io fildes, void* raw_buf, size_t nbytes) {
     errno = 0; // doPartialRead may not set errno
     // we read in 1GB blocks to avoid bugs on Mac OS X Lion
     // see https://github.com/pytorch/pytorch/issues/1031 for more details
-    ssize_t r = doPartialRead(fildes, buf, std::min<size_t>(nbytes, 1073741824));
+    Py_ssize_t r = doPartialRead(fildes, buf, std::min<size_t>(nbytes, 1073741824));
     if (r < 0) {
       int err = errno;
       TORCH_INTERNAL_ASSERT(err != 0, "read(): impossible! r < 0, but no errno was set");
@@ -149,7 +149,7 @@ void doWrite(io fildes, void* raw_buf, size_t nbytes) {
     errno = 0; // doPartialWrite may not set errno
     // we write in 1GB blocks to avoid bugs on Mac OS X Lion
     // see https://github.com/pytorch/pytorch/issues/1031 for more details
-    ssize_t r = doPartialWrite(fildes, buf, std::min<size_t>(nbytes, 1073741824));
+    Py_ssize_t r = doPartialWrite(fildes, buf, std::min<size_t>(nbytes, 1073741824));
     if (r < 0) {
       int err = errno;
       TORCH_INTERNAL_ASSERT(err != 0, "write(): impossible! r < 0, but no errno was set");
@@ -169,24 +169,4 @@ void doWrite(io fildes, void* raw_buf, size_t nbytes) {
 
 // NOLINTNEXTLINE(bugprone-suspicious-include)
 #include <torch/csrc/generic/serialization.cpp>
-#include <TH/THGenerateAllTypes.h>
-
-// NOLINTNEXTLINE(bugprone-suspicious-include)
-#include <torch/csrc/generic/serialization.cpp>
-#include <TH/THGenerateComplexTypes.h>
-
-// NOLINTNEXTLINE(bugprone-suspicious-include)
-#include <torch/csrc/generic/serialization.cpp>
-#include <TH/THGenerateHalfType.h>
-
-// NOLINTNEXTLINE(bugprone-suspicious-include)
-#include <torch/csrc/generic/serialization.cpp>
-#include <TH/THGenerateBFloat16Type.h>
-
-// NOLINTNEXTLINE(bugprone-suspicious-include)
-#include <torch/csrc/generic/serialization.cpp>
-#include <TH/THGenerateBoolType.h>
-
-// NOLINTNEXTLINE(bugprone-suspicious-include)
-#include <torch/csrc/generic/serialization.cpp>
-#include <TH/THGenerateQTypes.h>
+#include <torch/csrc/THGenerateByteType.h>

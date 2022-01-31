@@ -50,3 +50,5 @@ class TORCH_API BackendRuntimeException : public c10::Error {
     e.pushDebugHandle(debug_handle);                     \
     throw;                                               \
   } while (false)
+
+#define DEBUG_HANDLE_UNKNOWN -1

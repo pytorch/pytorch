@@ -6,6 +6,14 @@
 
 #include <type_traits>
 
+C10_CLANG_DIAGNOSTIC_PUSH()
+#if C10_CLANG_HAS_WARNING("-Wimplicit-float-conversion")
+C10_CLANG_DIAGNOSTIC_IGNORE("-Wimplicit-float-conversion")
+#endif
+#if C10_CLANG_HAS_WARNING("-Wimplicit-int-float-conversion")
+C10_CLANG_DIAGNOSTIC_IGNORE("-Wimplicit-int-float-conversion")
+#endif
+
 namespace c10 {
 
 template <typename dest_t, typename src_t>
@@ -173,19 +181,20 @@ To convert(From f) {
   return static_cast_with_inter_type<To, From>::apply(f);
 }
 
+// Define separately to avoid being inlined and prevent code-size bloat
+C10_API void report_overflow(const char* name);
+
 template <typename To, typename From>
 To checked_convert(From f, const char* name) {
   // Converting to bool can't overflow so we exclude this case from checking.
   if (!std::is_same<To, bool>::value && overflows<To, From>(f)) {
-    std::ostringstream oss;
-    oss << "value cannot be converted to type " << name
-        << " without overflow: " << f;
-    throw std::runtime_error(
-        oss.str()); // rather than domain_error (issue 33562)
+    report_overflow(name);
   }
   return convert<To, From>(f);
 }
 
 } // namespace c10
+
+C10_CLANG_DIAGNOSTIC_POP()
 
 // Trigger tests for D25440771. TODO: Remove this line any time you want.

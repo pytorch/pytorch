@@ -1,7 +1,9 @@
+# Owner(s): ["oncall: quantization"]
+
 import torch
 import torch.nn as nn
 import torch.nn.quantized as nnq
-from torch.quantization import (
+from torch.ao.quantization import (
     DeQuantStub,
     QuantStub,
     convert,
@@ -21,6 +23,7 @@ from torch.ao.ns._numeric_suite import (
 from torch.testing._internal.common_quantization import (
     AnnotatedConvBnReLUModel,
     AnnotatedConvModel,
+    AnnotatedConvTransposeModel,
     AnnotatedSingleLayerLinearModel,
     LSTMwithHiddenDynamicModel,
     AnnotatedTwoLayerLinearModel,
@@ -85,7 +88,7 @@ class ModelWithFunctionals(torch.nn.Module):
         return w
 
 
-class TestEagerModeNumericSuite(QuantizationTestCase):
+class TestNumericSuiteEager(QuantizationTestCase):
     @override_qengines
     def test_compare_weights_conv_static(self):
         r"""Compare the weights of float and static quantized conv layer"""
@@ -192,8 +195,10 @@ class TestEagerModeNumericSuite(QuantizationTestCase):
                 for i, val in enumerate(v["quantized"]):
                     self.assertTrue(v["float"][i].shape == v["quantized"][i].shape)
 
-        model_list = [AnnotatedConvModel(qengine), AnnotatedConvBnReLUModel(qengine)]
-        module_swap_list = [nn.Conv2d, nn.intrinsic.modules.fused.ConvReLU2d]
+        model_list = [AnnotatedConvModel(qengine),
+                      AnnotatedConvTransposeModel("qnnpack"),  # ConvT cannot use per channel weights
+                      AnnotatedConvBnReLUModel(qengine)]
+        module_swap_list = [nn.Conv2d, nn.intrinsic.modules.fused.ConvReLU2d, nn.ConvTranspose2d]
         for model in model_list:
             model.eval()
             if hasattr(model, "fuse_model"):
@@ -277,7 +282,7 @@ class TestEagerModeNumericSuite(QuantizationTestCase):
         qengine = torch.backends.quantized.engine
 
         model = ModelWithFunctionals().eval()
-        model.qconfig = torch.quantization.get_default_qconfig("fbgemm")
+        model.qconfig = torch.ao.quantization.get_default_qconfig("fbgemm")
         q_model = prepare(model, inplace=False)
         q_model(self.img_data_2d[0][0])
         q_model = convert(q_model)
@@ -411,7 +416,7 @@ class TestEagerModeNumericSuite(QuantizationTestCase):
         qengine = torch.backends.quantized.engine
 
         model = ModelWithFunctionals().eval()
-        model.qconfig = torch.quantization.get_default_qconfig("fbgemm")
+        model.qconfig = torch.ao.quantization.get_default_qconfig("fbgemm")
         q_model = prepare(model, inplace=False)
         q_model(self.img_data_2d[0][0])
         q_model = convert(q_model)

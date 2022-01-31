@@ -193,8 +193,6 @@ bool CuDNNLRNGradientOp::DoRunWithType() {
 
 bool CuDNNLRNGradientOp::RunOnDevice() {
   // dispatch based on contents of tensor(s)
-  const auto& X = Input(0);
-  const auto& Y = Input(1);
   const auto& dY = Input(2);
   auto* dX = Output(0);
 

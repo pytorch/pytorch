@@ -3,9 +3,8 @@ import torch
 import torch.onnx.symbolic_helper as sym_help
 import torch.onnx.symbolic_opset9 as sym_opset9
 
-from torch.onnx.symbolic_helper import parse_args, _unimplemented, _block_list_in_opset, _try_get_scalar_type
+from torch.onnx.symbolic_helper import parse_args, _unimplemented, _block_list_in_opset, _try_get_scalar_type, ScalarType
 from torch.onnx.symbolic_opset9 import _cast_Float  # type: ignore[attr-defined]
-from torch.onnx.symbolic_opset7 import div  # noqa: F401
 
 import warnings
 
@@ -77,7 +76,7 @@ upsample_bilinear2d = _interpolate("upsample_bilinear2d", 4, "linear")
 upsample_trilinear3d = _interpolate("upsample_trilinear3d", 5, "linear")
 
 
-def __interpolate(g, input, size, scale_factor, mode, align_corners, recompute_scale_factor):
+def __interpolate(g, input, size, scale_factor, mode, align_corners, recompute_scale_factor, antialias):
     align_corners = sym_help._maybe_get_const(align_corners, "b")
     if not sym_help._is_none(align_corners) and align_corners:
         return _unimplemented("interpolate", "align_corners == True")
@@ -210,7 +209,7 @@ def flatten(g, input, start_dim, end_dim):
 
 def _constant_fill(g, sizes, dtype, const_value):
     if dtype is None:
-        dtype = 6  # float
+        dtype = ScalarType.FLOAT
     if not sym_help.scalar_type_to_pytorch_type[dtype].is_floating_point:
         result = g.op(
             "ConstantFill", sizes, dtype_i=sym_help.cast_pytorch_to_onnx["Float"], input_as_shape_i=1, value_f=const_value)

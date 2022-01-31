@@ -11,12 +11,12 @@ from typing import Tuple, Callable, Dict, Set, List, Optional, Union
 
 from torch.fx import GraphModule
 from torch.fx.graph import Node
-from torch.quantization import (
+from torch.ao.quantization import (
     ObserverBase,
     FakeQuantizeBase,
 )
-from torch.quantization.utils import getattr_from_fqn
-from torch.quantization.quantize import is_activation_post_process
+from torch.ao.quantization.utils import getattr_from_fqn
+from torch.ao.quantization.quantize import is_activation_post_process
 
 from .ns_types import NSNodeTargetType, NSResultsType
 
@@ -433,6 +433,16 @@ def maybe_dequantize_first_two_tensor_args_and_handle_tuples(f):
 
 @maybe_dequantize_first_two_tensor_args_and_handle_tuples
 def compute_sqnr(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+    """
+    Computes the SQNR between `x` and `y`.
+
+    Args:
+        x: Tensor or tuple of tensors
+        y: Tensor or tuple of tensors
+
+    Return:
+        float or tuple of floats
+    """
     Ps = torch.norm(x)
     Pn = torch.norm(x - y)
     return 20 * torch.log10(Ps / Pn)
@@ -440,11 +450,31 @@ def compute_sqnr(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
 
 @maybe_dequantize_first_two_tensor_args_and_handle_tuples
 def compute_normalized_l2_error(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+    """
+    Computes the normalized L2 error between `x` and `y`.
+
+    Args:
+        x: Tensor or tuple of tensors
+        y: Tensor or tuple of tensors
+
+    Return:
+        float or tuple of floats
+    """
     return torch.sqrt(((x - y) ** 2).sum() / (x ** 2).sum())
 
 
 @maybe_dequantize_first_two_tensor_args_and_handle_tuples
 def compute_cosine_similarity(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+    """
+    Computes the cosine similarity between `x` and `y`.
+
+    Args:
+        x: Tensor or tuple of tensors
+        y: Tensor or tuple of tensors
+
+    Return:
+        float or tuple of floats
+    """
     # For convolutions, the shape of the quantized weight has one additional
     # dimension compared to the shape of the fp32 weight. Match the shapes
     # to enable cosine similarity comparison.

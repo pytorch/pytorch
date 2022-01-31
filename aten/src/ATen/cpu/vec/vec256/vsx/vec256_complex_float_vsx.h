@@ -4,11 +4,12 @@
 #include <ATen/cpu/vec/vec_base.h>
 #include <ATen/cpu/vec/vec256/vsx/vsx_helpers.h>
 #include <c10/util/complex.h>
+#include <c10/util/irange.h>
 
 namespace at {
 namespace vec {
-// See Note [Acceptable use of anonymous namespace in header]
-namespace {
+// See Note [CPU_CAPABILITY namespace]
+inline namespace CPU_CAPABILITY {
 using ComplexFlt = c10::complex<float>;
 
 template <>
@@ -144,7 +145,6 @@ class Vectorized<ComplexFlt> {
     // convert std::complex<V> index mask to V index mask: xy -> xxyy
     auto mask_complex = Vectorized<ComplexFlt>(
         vec_mergeh(mask._vec0, mask._vec0), vec_mergeh(mask._vec1, mask._vec1));
-    // mask_complex.dump();
     return {
         vec_sel(a._vec0, b._vec0, mask_complex._vec0),
         vec_sel(a._vec1, b._vec1, mask_complex._vec1),
@@ -223,7 +223,7 @@ class Vectorized<ComplexFlt> {
   Vectorized<ComplexFlt> map(ComplexFlt (*const f)(ComplexFlt)) const {
     __at_align__ ComplexFlt tmp[size()];
     store(tmp);
-    for (int i = 0; i < size(); i++) {
+    for (const auto i : c10::irange(size())) {
       tmp[i] = f(tmp[i]);
     }
     return loadu(tmp);
@@ -232,7 +232,7 @@ class Vectorized<ComplexFlt> {
   Vectorized<ComplexFlt> map(ComplexFlt (*const f)(const ComplexFlt&)) const {
     __at_align__ ComplexFlt tmp[size()];
     store(tmp);
-    for (int i = 0; i < size(); i++) {
+    for (const auto i : c10::irange(size())) {
       tmp[i] = f(tmp[i]);
     }
     return loadu(tmp);
@@ -409,13 +409,6 @@ class Vectorized<ComplexFlt> {
     return {vec_sqrt(_vec0), vec_sqrt(_vec1)};
   }
 
-  void dump() const {
-    std::cout << _vec0[0] << "," << _vec0[1] << "," << _vec0[2] << ","
-              << _vec0[3] << ",";
-    std::cout << _vec1[0] << "," << _vec1[1] << "," << _vec1[2] << ","
-              << _vec1[3] << std::endl;
-  }
-
   Vectorized<ComplexFlt> sqrt() const {
     return map(std::sqrt);
   }
@@ -438,7 +431,7 @@ class Vectorized<ComplexFlt> {
     __at_align__ ComplexFlt y_tmp[size()];
     store(x_tmp);
     exp.store(y_tmp);
-    for (int i = 0; i < size(); i++) {
+    for (const auto i : c10::irange(size())) {
       x_tmp[i] = std::pow(x_tmp[i], y_tmp[i]);
     }
     return loadu(x_tmp);

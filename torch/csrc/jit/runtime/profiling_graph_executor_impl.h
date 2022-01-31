@@ -4,7 +4,7 @@
 namespace torch {
 namespace jit {
 
-struct ProfilingGraphExecutorImpl : public GraphExecutorImplBase {
+struct TORCH_API ProfilingGraphExecutorImpl : public GraphExecutorImplBase {
   ProfilingGraphExecutorImpl(
       const std::shared_ptr<Graph>& graph,
       std::string function_name);
@@ -23,6 +23,10 @@ struct ProfilingGraphExecutorImpl : public GraphExecutorImplBase {
     // prevent memory leaks
     fallback_functions_.clear();
     remaining_bailout_depth_.reset();
+  }
+
+  bool isOptimized() const override {
+    return optimized_plan_.has_value();
   }
 
  private:

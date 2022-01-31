@@ -90,6 +90,26 @@ void insertPrePackedConv2dOp(std::shared_ptr<Graph>& graph) {
   rewriter.RegisterRewritePattern(
       conv_2d_pattern, prepacked_ops_conv2d_pattern);
   rewriter.runOnGraph(graph);
+
+  std::string conv_2d_transpose_pattern = R"(
+      graph(%input, %weight, %bias, %stride:int[], %padding:int[], %dilation:int[],
+          %output_padding:int[], %groups:int):
+        %res = aten::conv_transpose2d(%input, %weight, %bias, %stride, %padding, %output_padding, %groups, %dilation)
+        return (%res) )";
+
+  std::string prepacked_ops_conv2d_transpose_pattern = R"(
+    graph(%input, %weight, %bias, %stride:int[], %padding:int[], %dilation:int[], %output_padding:int[], %groups:int):
+        %output_min_max : None = prim::Constant()
+        %packed_weight_bias = vulkan_prepack::conv2d_transpose_clamp_prepack(
+            %weight, %bias, %stride, %padding, %output_padding, %dilation, %groups,
+            %output_min_max, %output_min_max)
+        %res = vulkan_prepack::conv2d_transpose_clamp_run(%input, %packed_weight_bias)
+        return (%res) )";
+
+  SubgraphRewriter transpose_rewriter;
+  transpose_rewriter.RegisterRewritePattern(
+      conv_2d_transpose_pattern, prepacked_ops_conv2d_transpose_pattern);
+  transpose_rewriter.runOnGraph(graph);
 }
 
 void fuseHardtanhWithPackedOps(std::shared_ptr<Graph>& graph) {
@@ -204,7 +224,10 @@ void vulkanFoldPrePackingOps(script::Module& m) {
         (n->kind() ==
          Symbol::fromQualString("vulkan_prepack::conv2d_clamp_prepack")) ||
         (n->kind() ==
-         Symbol::fromQualString("vulkan_prepack::linear_prepack")));
+         Symbol::fromQualString("vulkan_prepack::linear_prepack")) ||
+        (n->kind() ==
+         Symbol::fromQualString(
+             "vulkan_prepack::conv2d_transpose_clamp_prepack")));
   };
   PrePackingOpsFolder(m, filter_fn, "prepack_folding");
 }

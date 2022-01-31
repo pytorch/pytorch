@@ -2,6 +2,7 @@
 
 #include <tensorpipe/common/cpu_buffer.h>
 #include <tensorpipe/core/message.h>
+#include <c10/util/irange.h>
 #include <torch/csrc/distributed/rpc/tensorpipe_utils.h>
 #include <torch/torch.h>
 
@@ -64,7 +65,7 @@ TEST(TensorpipeSerialize, Base) {
   // Mimic tensorpipe data transfer
   EXPECT_EQ(
       recvingTpAllocation.payloads.size(), sendingTpMessage.payloads.size());
-  for (int i = 0; i < recvingTpAllocation.payloads.size(); i++) {
+  for (const auto i : c10::irange(recvingTpAllocation.payloads.size())) {
     tensorpipe::Message::Payload& srcPayload = sendingTpMessage.payloads[i];
     tensorpipe::Allocation::Payload& dstPayload =
         recvingTpAllocation.payloads[i];
@@ -76,7 +77,7 @@ TEST(TensorpipeSerialize, Base) {
   }
   EXPECT_EQ(
       recvingTpAllocation.tensors.size(), sendingTpMessage.tensors.size());
-  for (int i = 0; i < recvingTpAllocation.tensors.size(); i++) {
+  for (const auto i : c10::irange(recvingTpAllocation.tensors.size())) {
     tensorpipe::Message::Tensor& srcTensor = sendingTpMessage.tensors[i];
     tensorpipe::Allocation::Tensor& dstTensor = recvingTpAllocation.tensors[i];
     memcpy(

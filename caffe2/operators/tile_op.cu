@@ -20,7 +20,7 @@ __global__ void TileCopyCUDAKernel(
   if (x < total_size) {
     const int r = x / inner_size / tiles;
     const int c = x % inner_size;
-#if __CUDA_ARCH__ >= 350 || defined(__HIP_PLATFORM_HCC__)
+#if __CUDA_ARCH__ >= 350 || defined(USE_ROCM)
     Y[x] = __ldg(X + r * inner_size + c);
 #else
     Y[x] = X[r * inner_size + c];

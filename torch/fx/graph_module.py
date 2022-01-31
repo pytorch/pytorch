@@ -390,12 +390,12 @@ class {module_name}(torch.nn.Module):
         for buffer_name, buffer in self._buffers.items():
             if buffer is None:
                 continue
-            model_str += f"{tab*2}self.register_buffer('{buffer_name}', torch.empty({list(buffer.shape)}))\n"
+            model_str += f"{tab*2}self.register_buffer('{buffer_name}', torch.empty({list(buffer.shape)}, dtype={buffer.dtype}))\n"
 
         for param_name, param in self._parameters.items():
             if param is None:
                 continue
-            model_str += f"{tab*2}self.{param_name} = torch.nn.Parameter(torch.empty({list(param.shape)}))\n"
+            model_str += f"{tab*2}self.{param_name} = torch.nn.Parameter(torch.empty({list(param.shape)}, dtype={param.dtype}))\n"
 
         model_str += f"{tab*2}self.load_state_dict(torch.load(r'{folder}/state_dict.pt'))\n"
         model_str += f"{_addindent(self.code, 4)}\n"
@@ -532,6 +532,20 @@ class {module_name}(torch.nn.Module):
                 # `foo.bar.baz` to the list.
                 for path in itertools.accumulate(fullpath, join_fn):
                     used.append(path)
+
+                # For a `call_module` node, also register all recursive submodules
+                # as used
+                if node.op == "call_module":
+                    try:
+                        submod = self.get_submodule(node.target)
+
+                        for submod_name, _ in submod.named_modules():
+                            if submod_name != '':
+                                used.append('.'.join([node.target, submod_name]))
+                    except AttributeError:
+                        # Node referenced nonexistent submodule, don't need to
+                        # worry about GCing anything
+                        pass
 
         to_delete = [name for name, _ in self.named_modules()
                      if name not in used]

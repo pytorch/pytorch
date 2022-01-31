@@ -6,7 +6,7 @@ copy /Y "%PYTORCH_FINAL_PACKAGE_DIR_WIN%\.pytorch-test-times.json" "%TEST_DIR_WI
 pushd test
 
 echo Run jit_profiling tests
-python run_test.py --include test_jit_legacy test_jit_fuser_legacy --verbose --determine-from="%1"
+python run_test.py --include test_jit_legacy test_jit_fuser_legacy --verbose
 if ERRORLEVEL 1 exit /b 1
 
 popd

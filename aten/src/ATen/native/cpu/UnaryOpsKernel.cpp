@@ -1,36 +1,33 @@
+#define TORCH_ASSERT_NO_OPERATORS
 #include <ATen/native/UnaryOps.h>
 
 #include <cmath>
 #include <limits>
 #include <type_traits>
 
-#include <ATen/CPUGeneratorImpl.h>
 #include <ATen/Config.h>
+#include <ATen/Context.h>
 #include <ATen/Dispatch.h>
-#include <ATen/Generator.h>
 #include <ATen/Parallel.h>
-#include <ATen/Utils.h>
-#include <ATen/core/DistributionsHelper.h>
 #include <ATen/cpu/vec/functional.h>
 #include <ATen/cpu/vec/vec.h>
 #include <ATen/cpu/vml.h>
-#include <ATen/native/Distributions.h>
-#include <ATen/native/TensorFactories.h>
 #include <ATen/native/TensorIterator.h>
-#include <ATen/native/cpu/DistributionTemplates.h>
 #include <ATen/native/cpu/Loops.h>
 #include <ATen/native/cpu/zmath.h>
+
 #include <c10/util/MathConstants.h>
+#include <c10/core/Scalar.h>
+#include <c10/util/irange.h>
 
 #if AT_MKL_ENABLED()
 #include <mkl.h>
-#include <cpuinfo.h>
 #endif
 
 namespace at {
 namespace native {
 
-namespace CPU_CAPABILITY {
+inline namespace CPU_CAPABILITY {
 
 using namespace vec;
 
@@ -107,7 +104,7 @@ void LogitMKLKernel(T eps, TensorIteratorBase* it) {
   T* Y_data = static_cast<T*>(it->data_ptr(0));
   if (eps < T(0)) {
     at::parallel_for(0, N, K, [=](int64_t begin, int64_t end) {
-      for (int64_t i = begin; i < end; ++i) {
+      for (const auto i : c10::irange(begin, end)) {
         Y_data[i] = X_data[i] == T(1) ? std::numeric_limits<T>::infinity()
                                       : X_data[i] / (T(1) - X_data[i]);
       }
@@ -117,7 +114,7 @@ void LogitMKLKernel(T eps, TensorIteratorBase* it) {
     const T lo = eps;
     const T hi = T(1) - eps;
     at::parallel_for(0, N, K, [=](int64_t begin, int64_t end) {
-      for (int64_t i = begin; i < end; ++i) {
+      for (const auto i : c10::irange(begin, end)) {
         const T x = X_data[i] < lo ? lo : (X_data[i] > hi ? hi : X_data[i]);
         Y_data[i] =
             x == T(1) ? std::numeric_limits<T>::infinity() : (x / (T(1) - x));
@@ -213,7 +210,7 @@ static void imag_kernel(TensorIteratorBase& iter) {
 }
 
 // NB: Ignores the negative bit on tensors
-static void conj_kernel(TensorIteratorBase& iter) {
+void conj_kernel(TensorIteratorBase& iter) {
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(
       kBool, kBFloat16, kHalf, iter.common_dtype(), "conj_cpu", [&]() {
         cpu_kernel_vec(
@@ -415,7 +412,7 @@ static void polygamma_kernel(TensorIteratorBase& iter, int64_t n) {
   } else {
     AT_DISPATCH_FLOATING_TYPES_AND(kBFloat16, iter.dtype(), "polygamma", [&]() {
       cpu_kernel(
-          iter, [=](scalar_t a) -> scalar_t { return calc_polygamma(n, a); });
+          iter, [=](scalar_t a) -> scalar_t { return calc_polygamma(a, n); });
     });
   }
 }
@@ -454,126 +451,6 @@ static void kaiser_window_kernel(TensorIteratorBase& iter, int64_t window_length
         return calc_i0(static_cast<scalar_t>(beta) * std::sqrt(1 - std::pow((a - alpha) / alpha, static_cast<scalar_t>(2.0)))) / calc_i0(static_cast<scalar_t>(beta));
     });
   });
-}
-
-static void cauchy_kernel(TensorIteratorBase& iter, double median, double sigma, c10::optional<Generator> gen) {
-  CPUGeneratorImpl* generator = get_generator_or_default<CPUGeneratorImpl>(gen, detail::getDefaultCPUGenerator());
-  templates::cpu::cauchy_kernel(iter, median, sigma, generator);
-}
-
-void bernoulli_tensor_kernel(Tensor& self, const Tensor& p_, c10::optional<Generator> gen) {
-  CPUGeneratorImpl* generator = get_generator_or_default<CPUGeneratorImpl>(gen, detail::getDefaultCPUGenerator());
-  templates::cpu::bernoulli_kernel(self, p_, generator);
-}
-
-void bernoulli_scalar_kernel_default(Tensor& self, double p, c10::optional<Generator> gen) {
-  CPUGeneratorImpl* generator = get_generator_or_default<CPUGeneratorImpl>(gen, detail::getDefaultCPUGenerator());
-  templates::cpu::bernoulli_kernel(self, p, generator);
-}
-
-#if !AT_MKL_ENABLED()
-void bernoulli_scalar_kernel(Tensor& self, double p, c10::optional<Generator> gen) {
-  bernoulli_scalar_kernel_default(self, p, gen);
-}
-#else
-void bernoulli_scalar_kernel(Tensor &self, double p, c10::optional<Generator> gen) {
-  if (cpuinfo_initialize() && cpuinfo_vendor_intel == cpuinfo_get_processor(0)->core->vendor) {
-    CPUGeneratorImpl* generator = get_generator_or_default<CPUGeneratorImpl>(gen, detail::getDefaultCPUGenerator());
-    int64_t seed;
-    {
-      // See Note [Acquire lock when using random generators]
-      std::lock_guard<std::mutex> lock(generator->mutex_);
-      seed = generator->random();
-    }
-    int64_t n = self.numel();
-    bool contig = self.is_contiguous();
-
-    AT_DISPATCH_ALL_TYPES_AND2(at::ScalarType::Bool, at::ScalarType::BFloat16, self.scalar_type(), "bernoulli_scalar_cpu_", [&] {
-      at::Tensor tmp_int_tensor;
-      if (std::is_same<scalar_t, int>::value && contig) {
-        tmp_int_tensor = self;
-      } else {
-        tmp_int_tensor = at::empty(self.sizes(), self.options().dtype(at::kInt));
-      }
-
-      scalar_t *self_ptr = self.data_ptr<scalar_t>();
-      int *sample_int_ptr = tmp_int_tensor.data_ptr<int>();
-
-      auto sample = [&](int64_t begin, int64_t end) {
-        int64_t len = end - begin;
-        if (len > 0) {
-          VSLStreamStatePtr stream;
-          vslNewStream(&stream, VSL_BRNG_MCG31, seed);
-          vslSkipAheadStream(stream, begin);
-          viRngBernoulli(VSL_RNG_METHOD_BERNOULLI_ICDF, stream, len,
-            sample_int_ptr + begin, p);
-          vslDeleteStream(&stream);
-
-          // vectorized copy if using buffer and contiguous, i.e., being non-int
-          // type and contiguous
-          if (!std::is_same<scalar_t, int>::value && contig) {
-            scalar_t *self_seg = self_ptr + begin;
-            int* tmp_seg = sample_int_ptr + begin;
-            at::vec::convert<int, scalar_t>(tmp_seg, self_seg, len);
-          }
-        }
-      };
-
-      parallel_for(0, n, /* grain_size= */ 800, sample);
-
-      // copy_ if using buffer and non contiguous
-      if (!contig) {
-        self.copy_(tmp_int_tensor);
-      }
-    });
-  } else {
-    // The situation of AMD, move to using the default version
-    bernoulli_scalar_kernel_default(self, p, gen);
-  }
-}
-#endif
-
-static void exponential_kernel(TensorIteratorBase& iter, double lambda, c10::optional<Generator> gen) {
-  CPUGeneratorImpl* generator = get_generator_or_default<CPUGeneratorImpl>(gen, detail::getDefaultCPUGenerator());
-  templates::cpu::exponential_kernel(iter, lambda, generator);
-}
-
-static void geometric_kernel(TensorIteratorBase& iter, double p, c10::optional<Generator> gen) {
-  CPUGeneratorImpl* generator = get_generator_or_default<CPUGeneratorImpl>(gen, detail::getDefaultCPUGenerator());
-  templates::cpu::geometric_kernel(iter, p, generator);
-}
-
-static void log_normal_kernel(TensorIteratorBase& iter, double mean, double std, c10::optional<Generator> gen) {
-  CPUGeneratorImpl* generator = get_generator_or_default<CPUGeneratorImpl>(gen, detail::getDefaultCPUGenerator());
-  templates::cpu::log_normal_kernel(iter, mean, std, generator);
-}
-
-void uniform_kernel(TensorIteratorBase& iter, double from, double to, c10::optional<Generator> gen) {
-  CPUGeneratorImpl* generator = get_generator_or_default<CPUGeneratorImpl>(gen, detail::getDefaultCPUGenerator());
-  templates::cpu::uniform_kernel(iter, from, to, generator);
-}
-
-void normal_kernel(Tensor& self, double mean, double std, c10::optional<Generator> gen) {
-  CPUGeneratorImpl* generator = get_generator_or_default<CPUGeneratorImpl>(gen, detail::getDefaultCPUGenerator());
-  templates::cpu::normal_kernel(self, mean, std, generator);
-}
-
-static void random_from_to_kernel(TensorIteratorBase& iter, uint64_t range, int64_t base, c10::optional<Generator> gen) {
-  CPUGeneratorImpl* generator = get_generator_or_default<CPUGeneratorImpl>(gen, detail::getDefaultCPUGenerator());
-  templates::cpu::random_from_to_kernel(iter, range, base, generator);
-}
-
-static void random_kernel(TensorIteratorBase& iter, c10::optional<Generator> gen) {
-  CPUGeneratorImpl* generator = get_generator_or_default<CPUGeneratorImpl>(gen, detail::getDefaultCPUGenerator());
-  templates::cpu::random_kernel(iter, generator);
-}
-
-// This is the special kernel to handle single specific case:
-// from(inclusive) = std::numeric_limits<int64_t>::lowest()
-// to(exclusive) = None (= std::numeric_limits<int64_t>::max() + 1)
-static void random_full_64_bits_range_kernel(TensorIteratorBase& iter, c10::optional<Generator> gen) {
-  CPUGeneratorImpl* generator = get_generator_or_default<CPUGeneratorImpl>(gen, detail::getDefaultCPUGenerator());
-  templates::cpu::random_full_64_bits_range_kernel(iter, generator);
 }
 
 void rsqrt_kernel(TensorIteratorBase& iter) {
@@ -660,6 +537,23 @@ static void erfcx_kernel(TensorIteratorBase& iter){
   });
 }
 
+void round_decimals_kernel(TensorIteratorBase& iter, int64_t decimals) {
+  AT_DISPATCH_FLOATING_TYPES_AND(
+      ScalarType::BFloat16, iter.dtype(), "round_cpu", [&]() {
+        bool neg_flag = false;
+        scalar_t ten_pow_decimals;
+        if (decimals < 0) {
+          decimals = -decimals;
+          neg_flag = true;
+        }
+        ten_pow_decimals = static_cast<scalar_t>(std::pow(10, decimals));
+        cpu_kernel(iter, [ten_pow_decimals, neg_flag](scalar_t a) -> scalar_t {
+          return neg_flag ? std::nearbyint(a / ten_pow_decimals) * ten_pow_decimals
+                          : std::nearbyint(a * ten_pow_decimals) / ten_pow_decimals;
+        });
+      });
+}
+
 // TODO: Disable cont. branch to test more risky code
 
 #define IMPLEMENT_ITERATOR_LAMBDA(op)                                         \
@@ -676,17 +570,17 @@ static void erfcx_kernel(TensorIteratorBase& iter){
                 scalar_t buffer[WIDTH];                                       \
                 int64_t width = WIDTH;                                        \
                 width = std::min(width, n - i);                               \
-                for (int64_t j = 0; j < width; j++)                           \
+                for (const auto j : c10::irange(width))\
                   buffer[j] = in_data[in_stride * (i + j)];                   \
                 vml::v##op(buffer, buffer, width);                            \
-                for (int64_t j = 0; j < width; j++)                           \
+                for (const auto j : c10::irange(width))\
                   out_data[out_stride * (i + j)] = buffer[j];                 \
               }                                                               \
             }                                                                 \
           }
 
 #define IMPLEMENT_FLOAT_KERNEL(op)                                                  \
-  namespace CPU_CAPABILITY {                                                        \
+  inline namespace CPU_CAPABILITY {                                                 \
   void op##_kernel(TensorIteratorBase& iter) {                                      \
     TORCH_INTERNAL_ASSERT(iter.ntensors() == 2);                                    \
     AT_DISPATCH_FLOATING_TYPES_AND(kBFloat16, iter.dtype(), #op "_vml_cpu", [&]() { \
@@ -700,7 +594,7 @@ static void erfcx_kernel(TensorIteratorBase& iter){
   REGISTER_DISPATCH(op##_stub, &CPU_CAPABILITY::op##_kernel)
 
 #define IMPLEMENT_COMPLEX_KERNEL(op)                                                             \
-  namespace CPU_CAPABILITY {                                                                     \
+  inline namespace CPU_CAPABILITY {                                                              \
   void op##_kernel(TensorIteratorBase& iter) {                                                   \
     TORCH_INTERNAL_ASSERT(iter.ntensors() == 2);                                                 \
     AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(kBFloat16, iter.dtype(), #op "_vml_cpu", [&]() { \
@@ -718,23 +612,6 @@ static void erfcx_kernel(TensorIteratorBase& iter){
 REGISTER_DISPATCH(rsqrt_stub, &CPU_CAPABILITY::rsqrt_kernel);
 REGISTER_DISPATCH(sigmoid_stub, &CPU_CAPABILITY::sigmoid_kernel);
 REGISTER_DISPATCH(logit_stub, &CPU_CAPABILITY::logit_kernel);
-REGISTER_DISPATCH(bernoulli_tensor_stub, &CPU_CAPABILITY::bernoulli_tensor_kernel);
-REGISTER_DISPATCH(bernoulli_scalar_stub, &CPU_CAPABILITY::bernoulli_scalar_kernel);
-REGISTER_DISPATCH(cauchy_stub, &CPU_CAPABILITY::cauchy_kernel);
-REGISTER_DISPATCH(exponential_stub, &CPU_CAPABILITY::exponential_kernel);
-REGISTER_DISPATCH(geometric_stub, &CPU_CAPABILITY::geometric_kernel);
-REGISTER_DISPATCH(log_normal_stub, &CPU_CAPABILITY::log_normal_kernel);
-#ifdef CPU_CAPABILITY_AVX512
-// normal_stub isn't being dispatched to AVX512 because it exposes
-// flakiness in test_sgd of test/test_optim.py
-REGISTER_NO_AVX512_DISPATCH(normal_stub, void(*)(Tensor&, const double, const double, c10::optional<Generator>));
-#else
-REGISTER_DISPATCH(normal_stub, &CPU_CAPABILITY::normal_kernel);
-#endif
-REGISTER_DISPATCH(uniform_stub, &CPU_CAPABILITY::uniform_kernel);
-REGISTER_DISPATCH(random_from_to_stub, &CPU_CAPABILITY::random_from_to_kernel);
-REGISTER_DISPATCH(random_full_64_bits_range_stub, &CPU_CAPABILITY::random_full_64_bits_range_kernel);
-REGISTER_DISPATCH(random_stub, &CPU_CAPABILITY::random_kernel);
 REGISTER_DISPATCH(abs_stub, &CPU_CAPABILITY::abs_kernel);
 REGISTER_DISPATCH(angle_stub, &CPU_CAPABILITY::angle_kernel);
 REGISTER_DISPATCH(real_stub, &CPU_CAPABILITY::real_kernel);
@@ -767,6 +644,7 @@ REGISTER_DISPATCH(special_ndtri_stub, &CPU_CAPABILITY::ndtri_kernel);
 REGISTER_DISPATCH(special_i1_stub, &CPU_CAPABILITY::i1_kernel);
 REGISTER_DISPATCH(special_i1e_stub, &CPU_CAPABILITY::i1e_kernel);
 REGISTER_DISPATCH(special_erfcx_stub, &CPU_CAPABILITY::erfcx_kernel);
+REGISTER_DISPATCH(round_decimals_stub, &CPU_CAPABILITY::round_decimals_kernel);
 
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables,modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)

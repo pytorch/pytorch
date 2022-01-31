@@ -76,11 +76,11 @@ class MultiheadAttention(nn.MultiheadAttention):
         self.q_scaling_product = nnq.FloatFunctional()
 
         # Quant/Dequant
-        self.quant_attn_output = torch.quantization.QuantStub()
-        self.quant_attn_output_weights = torch.quantization.QuantStub()
-        self.dequant_q = torch.quantization.DeQuantStub()
-        self.dequant_k = torch.quantization.DeQuantStub()
-        self.dequant_v = torch.quantization.DeQuantStub()
+        self.quant_attn_output = torch.ao.quantization.QuantStub()
+        self.quant_attn_output_weights = torch.ao.quantization.QuantStub()
+        self.dequant_q = torch.ao.quantization.DeQuantStub()
+        self.dequant_k = torch.ao.quantization.DeQuantStub()
+        self.dequant_v = torch.ao.quantization.DeQuantStub()
 
     def _get_name(self):
         return 'QuantizableMultiheadAttention'
@@ -146,7 +146,7 @@ class MultiheadAttention(nn.MultiheadAttention):
                 observed.linear_V.bias = nn.Parameter(other.in_proj_bias[(other.embed_dim * 2):])
         observed.eval()
         # Explicit prepare
-        observed = torch.quantization.prepare(observed, inplace=True)
+        observed = torch.ao.quantization.prepare(observed, inplace=True)
         return observed
 
     @torch.jit.unused
@@ -221,10 +221,10 @@ class MultiheadAttention(nn.MultiheadAttention):
 
     @classmethod
     def from_observed(cls, other):
-        converted = torch.quantization.convert(other, mapping=None,
-                                               inplace=False,
-                                               remove_qconfig=True,
-                                               convert_custom_config_dict=None)
+        converted = torch.ao.quantization.convert(other, mapping=None,
+                                                  inplace=False,
+                                                  remove_qconfig=True,
+                                                  convert_custom_config_dict=None)
         # Remove the parameters for the bias_k and bias_v to quantize them
         # TODO: This is a potential source of accuracy drop.
         #       quantized cat takes the scale and zp of the first
@@ -252,7 +252,8 @@ class MultiheadAttention(nn.MultiheadAttention):
                 value: Tensor,
                 key_padding_mask: Optional[Tensor] = None,
                 need_weights: bool = True,
-                attn_mask: Optional[Tensor] = None) -> Tuple[Tensor, Optional[Tensor]]:
+                attn_mask: Optional[Tensor] = None,
+                average_attn_weights: bool = True) -> Tuple[Tensor, Optional[Tensor]]:
         r"""
     Note::
         Please, refer to :func:`~torch.nn.MultiheadAttention.forward` for more
@@ -289,15 +290,20 @@ class MultiheadAttention(nn.MultiheadAttention):
           while the zero positions will be unchanged. If a BoolTensor is provided, positions with ``True``
           is not allowed to attend while ``False`` values will be unchanged. If a FloatTensor
           is provided, it will be added to the attention weight.
+        - average_attn_weights: If true, indicates that the returned ``attn_weights`` should be averaged across
+          heads. Otherwise, ``attn_weights`` are provided separately per head. Note that this flag only has an
+          effect when ``need_weights=True.``. Default: True (i.e. average weights across heads)
 
         - Outputs:
         - attn_output: :math:`(L, N, E)` where L is the target sequence length, N is the batch size,
           E is the embedding dimension. :math:`(N, L, E)` if ``batch_first`` is ``True``.
-        - attn_output_weights: :math:`(N, L, S)` where N is the batch size,
-          L is the target sequence length, S is the source sequence length.
+        - attn_output_weights: If ``average_attn_weights=True``, returns attention weights averaged
+          across heads of shape :math:`(N, L, S)`, where N is the batch size, L is the target sequence length,
+          S is the source sequence length. If ``average_weights=False``, returns attention weights per
+          head of shape :math:`(N, num_heads, L, S)`.
         """
         return self._forward_impl(query, key, value, key_padding_mask,
-                                  need_weights, attn_mask)
+                                  need_weights, attn_mask, average_attn_weights)
 
     def _forward_impl(self,
                       query: Tensor,
@@ -305,7 +311,8 @@ class MultiheadAttention(nn.MultiheadAttention):
                       value: Tensor,
                       key_padding_mask: Optional[Tensor] = None,
                       need_weights: bool = True,
-                      attn_mask: Optional[Tensor] = None) -> Tuple[Tensor, Optional[Tensor]]:
+                      attn_mask: Optional[Tensor] = None,
+                      average_attn_weights: bool = True) -> Tuple[Tensor, Optional[Tensor]]:
         # This version will not deal with the static key/value pairs.
         # Keeping it here for future changes.
         #
@@ -457,6 +464,8 @@ class MultiheadAttention(nn.MultiheadAttention):
         if need_weights:
             # average attention weights over heads
             attn_output_weights = attn_output_weights.view(bsz, self.num_heads, tgt_len, src_len)
-            return attn_output, attn_output_weights.mean(dim=1)
+            if average_attn_weights:
+                attn_output_weights = attn_output_weights.mean(dim=1)
+            return attn_output, attn_output_weights
         else:
             return attn_output, None

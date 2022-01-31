@@ -263,7 +263,7 @@ class ModuleCloneHelper {
       }
       return type_ptr;
     };
-    auto graph = method.graph()->copy();
+    auto graph = toGraphFunction(method).graph()->copy();
     remapTypes(graph.get(), source, target, module_qconfig_map, type_remap_fn);
     // remap self
     graph->inputs()[0]->setType(target.type());
@@ -1185,8 +1185,8 @@ bool InsertObserversHelper::valueNeedsToBeQuantized(
     Value* v,
     const QConfig& qconfig) {
   if (isBiasOfConvOrLinear(v) ||
-      !(v->type()->isSubtypeOf(TensorType::get()) ||
-        v->type()->isSubtypeOf(ListType::ofTensors())) ||
+      !(v->type()->isSubtypeOf(*TensorType::get()) ||
+        v->type()->isSubtypeOf(*ListType::ofTensors())) ||
       isEmbeddingBagNonInput(v)) {
     return false;
   }

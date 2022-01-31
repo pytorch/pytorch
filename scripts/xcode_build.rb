@@ -19,9 +19,6 @@ option_parser = OptionParser.new do |opts|
  opts.on('-t', '--team_id ', 'development team ID') { |value|
     options[:team_id] = value
  }
- opts.on('-f', '--framework ', 'system frameworks') { |value|
-    options[:framework] = value.split(',')
-}
 end.parse!
 puts options.inspect
 
@@ -63,7 +60,7 @@ for lib in libs do
     end
 end
 # link system frameworks
-frameworks = options[:framework]
+frameworks = ['CoreML', 'Metal', 'MetalPerformanceShaders', 'Accelerate', 'UIKit']
 if frameworks
     frameworks.each do |framework|
         path = "System/Library/Frameworks/#{framework}.framework"

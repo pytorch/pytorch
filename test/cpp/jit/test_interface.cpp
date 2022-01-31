@@ -18,12 +18,12 @@ def one(self, x: Tensor, y: Tensor) -> Tensor:
 def forward(self, x: Tensor) -> Tensor:
     return x
 )JIT"};
-static const auto parentForward = R"JIT(
+static const std::string parentForward = R"JIT(
 def forward(self, x: Tensor) -> Tensor:
     return self.subMod.forward(x)
 )JIT";
 
-static const auto moduleInterfaceSrc = R"JIT(
+static constexpr c10::string_view moduleInterfaceSrc = R"JIT(
 class OneForward(ModuleInterface):
     def one(self, x: Tensor, y: Tensor) -> Tensor:
         pass

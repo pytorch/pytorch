@@ -1,6 +1,6 @@
 #pragma once
 
-#include <ATen/ATen.h>
+#include <ATen/core/Tensor.h>
 
 
 namespace torch { namespace autograd {
@@ -95,12 +95,12 @@ struct TORCH_API ForwardADLevel {
   void erase(const std::shared_ptr<ForwardGrad>& grad) {
     std::lock_guard<std::mutex> lock(mutex_);
     grads_.erase(grad);
-    }
+  }
 
-    void insert(const std::shared_ptr<ForwardGrad>& grad) {
-        std::lock_guard<std::mutex> lock(mutex_);
-        grads_.insert(grad);
-    }
+  void insert(const std::shared_ptr<ForwardGrad>& grad) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    grads_.insert(grad);
+  }
 
 private:
     std::unordered_set<std::shared_ptr<ForwardGrad>> grads_;
@@ -141,42 +141,49 @@ struct TORCH_API ForwardGrad : std::enable_shared_from_this<ForwardGrad> {
         level->erase(shared_from_this());
       }
     }
-    }
+  }
 
-    void set_value(const at::Tensor& value, uint64_t level) {
-        // Owning reference to ensure the forward_level is not destroyed
-        // while we are updating our internal state
-        auto forward_level = ForwardADLevel::get_by_idx(level);
-        forward_level->insert(shared_from_this());
+  void set_value(const at::Tensor& value, uint64_t level) {
+      // Owning reference to ensure the forward_level is not destroyed
+      // while we are updating our internal state
+      auto forward_level = ForwardADLevel::get_by_idx(level);
+      forward_level->insert(shared_from_this());
 
-        std::lock_guard<std::mutex> lock(mutex_);
-        content_.insert({level, value});
-    }
+      std::lock_guard<std::mutex> lock(mutex_);
+      content_.insert({level, value});
+  }
 
-    // This function removes the tangent for a given level from this ForwardGrad
-    // Use the update_level flag to disable notifying the level about this reset
-    // This flag is most notably used by the ForwardADLevel destructor.
-    void reset(uint64_t level, bool update_level=true) {
-        if (update_level) {
-            ForwardADLevel::get_by_idx(level)->erase(shared_from_this());
-        }
+  // This function removes the tangent for a given level from this ForwardGrad
+  // Use the update_level flag to disable notifying the level about this reset
+  // This flag is most notably used by the ForwardADLevel destructor.
+  void reset(uint64_t level, bool update_level=true) {
+      if (update_level) {
+          ForwardADLevel::get_by_idx(level)->erase(shared_from_this());
+      }
 
-        std::lock_guard<std::mutex> lock(mutex_);
-        content_.erase(level);
-    }
+      std::unique_lock<std::mutex> lock(mutex_);
+      const auto& it = content_.find(level);
+      TORCH_INTERNAL_ASSERT(it != content_.end(), "Resetting a non-existent level.");
+      // Keep the Tensor alive until we have released the lock
+      // This is needed as we can be in a case where this function is called by
+      // ForwardADLevel destructor
+      auto t = (*it).second;
+      content_.erase(level);
+      lock.unlock();
+  }
 
-    const at::Tensor& value(uint64_t level) const;
+  const at::Tensor& value(uint64_t level) const;
 
-    bool contains(uint64_t level) {
-        std::lock_guard<std::mutex> lock(mutex_);
-        return content_.count(level) > 0;
-    }
+  bool contains(uint64_t level) {
+      std::lock_guard<std::mutex> lock(mutex_);
+      return content_.count(level) > 0;
+  }
 
-    bool empty() const {
-        return content_.empty();
-    }
+  bool empty() const {
+      return content_.empty();
+  }
 
-    static const at::Tensor& undef_grad();
+  static const at::Tensor& undef_grad();
 
 
 private:

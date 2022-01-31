@@ -322,6 +322,7 @@ void IndividualMetrics::PrintOperatorProfilingResults() {
                   << output_dealloc_time * normalizer[i] << " " << unit[i]
                   << std::endl;
       }
+      std::cout << "Number of operators: " << operators_.size() << std::endl;
     }
   }
 }

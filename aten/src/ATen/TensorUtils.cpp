@@ -2,6 +2,7 @@
 #include <ATen/Config.h>
 #include <ATen/TensorUtils.h>
 #include <c10/util/accumulate.h>
+#include <c10/util/irange.h>
 
 #include <ostream>
 #include <sstream>
@@ -314,22 +315,6 @@ std::vector<int64_t> defaultStrides(IntArrayRef sizes) {
     stride *= sizes[i-1];
   }
   return strides;
-}
-
-size_t computeStorageNbytes(
-    IntArrayRef sizes,
-    IntArrayRef strides,
-    size_t itemsize_bytes) {
-  // size of the underlying storage is 1 bigger than the offset
-  // of the last element according to stride
-  size_t size = 1;
-  for(size_t i = 0; i < sizes.size(); i++) {
-    if(sizes[i] == 0) {
-      return 0;
-    }
-    size += strides[i]*(sizes[i]-1);
-  }
-  return size * itemsize_bytes;
 }
 
 // On a high level,

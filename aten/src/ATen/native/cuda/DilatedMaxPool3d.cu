@@ -1,13 +1,14 @@
 #include <ATen/AccumulateType.h>
+#include <ATen/ceil_div.h>
 #include <ATen/NamedTensorUtils.h>
+#include <ATen/NumericUtils.h>
 #include <ATen/native/Pool.h>
+#include <ATen/cuda/Atomic.cuh>
 #include <ATen/cuda/CUDAContext.h>
-#include <ATen/cuda/CUDAApplyUtils.cuh>
+#include <ATen/cuda/NumericLimits.cuh>
 #include <ATen/cuda/detail/TensorInfo.cuh>
 #include <ATen/cuda/detail/IndexUtils.cuh>
 #include <ATen/cuda/detail/KernelUtils.h>
-#include <THC/THCAtomics.cuh>
-#include <THC/THCNumerics.cuh>
 #include <c10/macros/Macros.h>
 
 
@@ -67,7 +68,7 @@ __global__ static void max_pool3d_with_indices_single_out_frame(
           int index = t * iheight * iwidth + h * iwidth + w;
           scalar_t val = inputData[index];
 
-          if ((max < val) || THCNumerics<scalar_t>::isnan(val))
+          if ((max < val) || at::_isnan(val))
           {
             max = val;
             maxIndex = index;
@@ -98,8 +99,8 @@ void max_pool3d_with_indices_out_frame(
   dim3 block(32, 8);
 
   while (totalZ > 0) {
-    dim3 grid(cuda::ATenCeilDiv(owidth, static_cast<int>(block.x)),
-              cuda::ATenCeilDiv(oheight, static_cast<int>(block.y)),
+    dim3 grid(ceil_div(owidth, static_cast<int>(block.x)),
+              ceil_div(oheight, static_cast<int>(block.y)),
               totalZ > 65535 ? 65535 : totalZ);
 
     max_pool3d_with_indices_single_out_frame
@@ -130,7 +131,7 @@ __global__ static void max_pool3d_with_indices_backward_single_out_frame(
   int itime, int iheight, int iwidth,
   int dT, int dH, int dW,
   int pT, int pH, int pW,
-  int dilationT, int dilationH, int dilationW,
+  int dilationT, int dilationH,
   int offsetZ)
 {
   int oColumn = blockIdx.x * blockDim.x + threadIdx.x;
@@ -158,14 +159,14 @@ void max_pool3d_with_indices_backward_out_frame(
   int oheight, int owidth,
   int dT, int dH, int dW,
   int pT, int pH, int pW,
-  int dilationT, int dilationH, int dilationW)
+  int dilationT, int dilationH)
 {
   int offsetZ = 0;
   dim3 block(32, 8);
 
   while (totalZ > 0) {
-    dim3 grid(cuda::ATenCeilDiv(owidth, static_cast<int>(block.x)),
-              cuda::ATenCeilDiv(oheight, static_cast<int>(block.y)),
+    dim3 grid(ceil_div(owidth, static_cast<int>(block.x)),
+              ceil_div(oheight, static_cast<int>(block.y)),
               totalZ > 65535 ? 65535 : totalZ);
 
     max_pool3d_with_indices_backward_single_out_frame
@@ -176,7 +177,7 @@ void max_pool3d_with_indices_backward_out_frame(
         itime, iheight, iwidth,
         dT, dH, dW,
         pT, pH, pW,
-        dilationT, dilationH, dilationW,
+        dilationT, dilationH,
         offsetZ);
     C10_CUDA_KERNEL_LAUNCH_CHECK();
 
@@ -403,7 +404,7 @@ void max_pool3d_with_indices_backward_out_cuda_template(
         oheight, owidth,
         dT, dH, dW,
         pT, pH, pW,
-        dilationT, dilationH, dilationW);
+        dilationT, dilationH);
     }
   );
 }

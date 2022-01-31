@@ -80,8 +80,8 @@ Tensor hardswish(const at::Tensor& input) {
 }
 
 TORCH_LIBRARY_IMPL(aten, Metal, m) {
-  m.impl("hardswish_", TORCH_FN(hardswish_));
-  m.impl("hardswish", TORCH_FN(hardswish));
+  m.impl(TORCH_SELECTIVE_NAME("aten::hardswish_"), TORCH_FN(hardswish_));
+  m.impl(TORCH_SELECTIVE_NAME("aten::hardswish"), TORCH_FN(hardswish));
 };
 
 }

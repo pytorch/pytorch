@@ -5,6 +5,7 @@
 #include "caffe2/core/logging.h"
 #include "caffe2/core/operator.h"
 #include "caffe2/utils/math.h"
+#include "c10/util/irange.h"
 
 namespace caffe2 {
 
@@ -32,7 +33,7 @@ class EnforceFiniteOp final : public Operator<Context> {
     const T* input_data = input.template data<T>();
     auto size = input.numel();
 
-    for (auto i = 0; i < size; i++) {
+    for (const auto i : c10::irange(size)) {
       auto isfinite = std::isfinite(input_data[i]);
       if (!isfinite) {
         LogBlobFiniteness();

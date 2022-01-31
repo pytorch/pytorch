@@ -65,8 +65,6 @@ inline int getPrecedence(IRNodeType ty) {
   }
 }
 
-class Placeholder;
-
 class TORCH_API Cast : public ExprNode<Cast> {
  public:
   ExprPtr src_value() const {
@@ -912,7 +910,8 @@ TORCH_API std::vector<VarHandle> VarVectorToVarHandleVector(
     const std::vector<VarPtr>&);
 TORCH_API ExprPtr flatten_index(
     const std::vector<ExprPtr>& dims,
-    const std::vector<ExprPtr>& indices);
+    const std::vector<ExprPtr>& indices,
+    const std::vector<ExprPtr>& strides);
 
 } // namespace tensorexpr
 } // namespace jit

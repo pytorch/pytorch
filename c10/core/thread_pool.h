@@ -12,6 +12,11 @@
 #include <c10/util/numa.h>
 #include <c10/util/thread_name.h>
 
+C10_CLANG_DIAGNOSTIC_PUSH()
+#if C10_CLANG_HAS_WARNING("-Wshorten-64-to-32")
+C10_CLANG_DIAGNOSTIC_IGNORE("-Wshorten-64-to-32")
+#endif
+
 namespace c10 {
 
 // TODO: move this to C10 and make it C10_API
@@ -74,7 +79,7 @@ class C10_API ThreadPool : public c10::TaskThreadPoolBase {
       int numa_node_id = -1,
       std::function<void()> init_thread = nullptr);
 
-  ~ThreadPool();
+  ~ThreadPool() override;
 
   size_t size() const override;
 
@@ -120,3 +125,5 @@ C10_DECLARE_SHARED_REGISTRY(
     bool);
 
 } // namespace c10
+
+C10_CLANG_DIAGNOSTIC_POP()

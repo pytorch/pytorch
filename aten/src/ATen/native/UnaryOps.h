@@ -1,9 +1,14 @@
 #pragma once
 
-#include <ATen/ATen.h>
 #include <ATen/native/DispatchStub.h>
 #include <ATen/Generator.h>
 #include <stdexcept>
+
+namespace at {
+class Tensor;
+struct TensorIterator;
+struct TensorIteratorBase;
+}
 
 namespace at { namespace native {
 
@@ -93,6 +98,7 @@ DECLARE_DISPATCH(
         c10::optional<double>,
         c10::optional<double>),
     nan_to_num_stub);
+DECLARE_DISPATCH(void (*)(TensorIteratorBase&, int64_t), round_decimals_stub);
 
 // Missing unary functions
 // digamma

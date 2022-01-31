@@ -1,7 +1,10 @@
 #pragma once
 
-#include <ATen/ATen.h>
 #include <ATen/native/DispatchStub.h>
+
+namespace at {
+class Tensor;
+}
 
 namespace at { namespace native {
 

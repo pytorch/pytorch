@@ -64,6 +64,7 @@ def make_tensor(
             type. Default ``False``.
 
     Raises:
+        ValueError: if ``requires_grad=True`` is passed for integral `dtype`
         ValueError: If ``low > high``.
         ValueError: If either :attr:`low` or :attr:`high` is ``nan``.
         TypeError: If :attr:`dtype` isn't supported by this function.
@@ -105,6 +106,8 @@ def make_tensor(
     _integral_types = [torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64]
     _floating_types = [torch.float16, torch.bfloat16, torch.float32, torch.float64]
     _complex_types = [torch.cfloat, torch.cdouble]
+    if requires_grad and dtype not in _floating_types and dtype not in _complex_types:
+        raise ValueError("make_tensor: requires_grad must be False for integral dtype")
 
     if dtype is torch.bool:
         result = torch.randint(0, 2, shape, device=device, dtype=dtype)

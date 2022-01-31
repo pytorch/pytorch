@@ -27,6 +27,7 @@ from torch.testing._internal.distributed.rpc.dist_autograd_test import (
     DistAutogradTest,
     CudaDistAutogradTest,
     FaultyAgentDistAutogradTest,
+    TensorPipeAgentDistAutogradTest,
     TensorPipeCudaDistAutogradTest
 )
 from torch.testing._internal.distributed.rpc.dist_optimizer_test import (
@@ -126,6 +127,7 @@ GENERIC_CUDA_TESTS = [
 # list (not subclasses of those!).
 TENSORPIPE_TESTS = [
     TensorPipeAgentRpcTest,
+    TensorPipeAgentDistAutogradTest,
 ]
 TENSORPIPE_CUDA_TESTS = [
     TensorPipeAgentCudaRpcTest,

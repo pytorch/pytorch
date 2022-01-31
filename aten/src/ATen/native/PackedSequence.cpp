@@ -77,7 +77,7 @@ std::tuple<Tensor, Tensor> _pack_padded_sequence(const Tensor& _input, const Ten
   // more elements below in our column, we lower the counter (prev_l), and append the new
   // block to the output.
   int64_t prev_l = 0;
-  for (int64_t i = 0; i < batch_size; ++i) {
+  for (const auto i : c10::irange(batch_size)) {
     int64_t l = lengths[batch_size - 1 - i];
     if (l > prev_l) {
       auto current_batch_size = batch_size - i;
@@ -109,7 +109,7 @@ Tensor _pack_padded_sequence_backward(const Tensor& grad, at::IntArrayRef input_
   int64_t offset = 0;
   int64_t max_seq_len = batch_sizes_t.size(0);
   int64_t * batch_sizes = batch_sizes_t.data_ptr<int64_t>();
-  for (int64_t i = 0; i < max_seq_len; ++i) {
+  for (const auto i : c10::irange(max_seq_len)) {
     grad_input[i].slice(0, 0, batch_sizes[i]).copy_(grad.slice(0, offset, offset + batch_sizes[i]));
     offset += batch_sizes[i];
   }
@@ -170,7 +170,8 @@ std::tuple<Tensor, Tensor> _pad_packed_sequence(const Tensor& data, const Tensor
     }
     int64_t dec = prev_batch_size - batch_size;
     if (dec > 0) {
-      for (int64_t j = 0; j < dec; ++j) {
+      for (const auto j : c10::irange(dec)) {
+        (void)j; //Suppress unused variable warning
         (*lengths--) = i;
       }
     }
@@ -206,7 +207,7 @@ Tensor pad_sequence(TensorList sequences, bool batch_first, double padding_value
   out_dims.insert(out_dims.end(), trailing_dims.begin(), trailing_dims.end());
 
   Tensor out = at::full(out_dims, padding_value, sequences[0].options());
-  for (int64_t i = 0; i < sequences_size; i++) {
+  for (const auto i : c10::irange(sequences_size)) {
     const Tensor currseq = sequences[i];
     const int64_t length_i = currseq.size(0);
     // use index notation to prevent duplicate references to the tensor

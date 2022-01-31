@@ -1,21 +1,14 @@
-#include <ATen/NativeFunctions.h>
-#include <ATen/cuda/CUDAApplyUtils.cuh>
+#define TORCH_ASSERT_NO_OPERATORS
+#include <ATen/native/Lerp.h>
 #include <ATen/Dispatch.h>
-#include <ATen/ExpandUtils.h>
+#include <ATen/TensorIterator.h>
 #include <ATen/native/cuda/Loops.cuh>
-#include <ATen/native/TensorIterator.h>
 
+namespace at {
+namespace native {
 namespace {
 
-inline void lerp_cuda(at::Tensor& ret, const at::Tensor& self, const at::Tensor& end, const at::Tensor& weights) {
-  TORCH_CHECK(self.dtype() == end.dtype(), "expected dtype ", self.dtype(), " for `end` but got dtype ", end.dtype());
-  TORCH_CHECK(self.dtype() == weights.dtype(), "expected dtype ", self.dtype(), " for `weights` but got dtype ", weights.dtype());
-  at::TensorIterator iter = at::TensorIteratorConfig()
-      .add_output(ret)
-      .add_input(self)
-      .add_input(end)
-      .add_input(weights)
-      .build();
+void lerp_tensor_kernel(at::TensorIteratorBase& iter) {
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(
       at::ScalarType::Half, at::ScalarType::BFloat16,
       iter.common_dtype(), "lerp_cuda",
@@ -35,16 +28,10 @@ inline void lerp_cuda(at::Tensor& ret, const at::Tensor& self, const at::Tensor&
       });
 }
 
-inline void lerp_scalar_cuda(at::Tensor& ret, const at::Tensor& self, const at::Tensor& end, const c10::Scalar& weight) {
-  TORCH_CHECK(self.dtype() == end.dtype(), "expected dtype ", self.dtype(), " for `end` but got dtype ", end.dtype());
-  at::TensorIterator iter = at::TensorIteratorConfig()
-      .add_output(ret)
-      .add_input(self)
-      .add_input(end)
-      .build();
+void lerp_scalar_kernel(at::TensorIteratorBase& iter, const c10::Scalar& weight) {
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(
       at::ScalarType::Half, at::ScalarType::BFloat16,
-      self.scalar_type(), "lerp_cuda",
+      iter.common_dtype(), "lerp_cuda",
       [&]{
         auto weight_val = weight.to<scalar_t>();
         at::native::gpu_kernel(
@@ -58,60 +45,8 @@ inline void lerp_scalar_cuda(at::Tensor& ret, const at::Tensor& self, const at::
     }
 } // anonymous namespace
 
-namespace at {
-namespace native {
-
-Tensor& lerp_cuda_tensor_out(const Tensor& self,
-                            const Tensor& end, const Tensor& weight, Tensor& result) {
-  c10::MaybeOwned<Tensor> b_self, b_end, b_weight;
-  std::tie(b_self, b_end, b_weight) = expand_outplace(self, end, weight, "lerp_out_cuda");
-  lerp_cuda(result, *b_self, *b_end, *b_weight);
-  return result;
-}
-
-Tensor& lerp_cuda_scalar_out(const Tensor& self,
-                            const Tensor& end, const Scalar& weight, Tensor& result) {
-  c10::MaybeOwned<Tensor> b_self, b_end;
-  std::tie(b_self, b_end) = expand_outplace(self, end, "lerp_out_cuda");
-  lerp_scalar_cuda(result, *b_self, *b_end, weight);
-  return result;
-}
-
-Tensor& lerp_cuda_tensor_(Tensor& self, const Tensor& end, const Tensor& weight) {
-  c10::MaybeOwned<Tensor> b_self, b_end, b_weight;
-  std::tie(b_self, b_end, b_weight) = expand_outplace(self, end, weight, "lerp__cuda");
-  TORCH_CHECK(b_self->sizes() == self.sizes(),
-           "output with shape ", self.sizes(),
-           " doesn't match the broadcast shape ", b_self->sizes());
-  lerp_cuda(self, *b_self, *b_end, *b_weight);
-  return self;
-}
-
-Tensor& lerp_cuda_scalar_(Tensor& self, const Tensor& end, const Scalar& weight) {
-  c10::MaybeOwned<Tensor> b_self, b_end;
-  std::tie(b_self, b_end) = expand_outplace(self, end, "lerp__cuda");
-  TORCH_CHECK(b_self->sizes() == self.sizes(),
-           "output with shape ", self.sizes(),
-           " doesn't match the broadcast shape ", b_self->sizes());
-  lerp_scalar_cuda(self, *b_self, *b_end, weight);
-  return self;
-}
-
-Tensor lerp_cuda_tensor(const Tensor& self, const Tensor& end, const Tensor& weight) {
-  c10::MaybeOwned<Tensor> b_self, b_end, b_weight;
-  std::tie(b_self, b_end, b_weight) = expand_outplace(self, end, weight, "lerp_cuda");
-  Tensor result = at::empty_like(*b_self, b_self->suggest_memory_format());
-  lerp_cuda(result, *b_self, *b_end, *b_weight);
-  return result;
-}
-
-Tensor lerp_cuda_scalar(const Tensor& self, const Tensor& end, const Scalar& weight) {
-  c10::MaybeOwned<Tensor> b_self, b_end;
-  std::tie(b_self, b_end) = expand_outplace(self, end, "lerp_cuda");
-  Tensor result = at::empty_like(*b_self, b_self->suggest_memory_format());
-  lerp_scalar_cuda(result, *b_self, *b_end, weight);
-  return result;
-}
+REGISTER_DISPATCH(lerp_kernel_tensor_weight, &lerp_tensor_kernel);
+REGISTER_DISPATCH(lerp_kernel_scalar_weight, &lerp_scalar_kernel);
 
 } // namespace native
 } // namespace at

@@ -93,7 +93,9 @@ Tensor computeSoftmax(
     return new_indices;
   };
 
-  c10::optional<Dtype> dtype = ToDtype(ScalarType::Undefined);
+  auto inp_buf = c10::get<BufHandle>(inputs[0]);
+
+  auto dtype = inp_buf.dtype();
   if (auto d = c10::get_if<int64_t>(&inputs[2])) {
     dtype = ToDtype(static_cast<ScalarType>(*d));
   }
@@ -101,7 +103,7 @@ Tensor computeSoftmax(
   auto max = Reduce(
       "aten_softmax_max",
       non_softmax_dims,
-      Maximum(dtype.value()),
+      Maximum(dtype),
       [&](ParameterList& indices) {
         return tensorOrConstant(
             inputs[0], move_softmax_dim_index_to_pos(indices));

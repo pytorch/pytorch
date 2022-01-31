@@ -75,18 +75,13 @@ struct TORCH_API GraphExecutor {
   const ExecutionPlan& getPlanFor(
       Stack& inputs,
       size_t remaining_bailout_depth);
-  explicit operator bool() const {
-    return pImpl != nullptr;
-  }
-  void reset() {
-    pImpl.reset();
-  }
-  std::shared_ptr<Graph> graph() const;
   GraphExecutorState getDebugState();
 
   static size_t getDefaultNumBailOuts();
 
   void debugFlushCompilationCache();
+
+  bool isOptimized() const;
 
  private:
   std::shared_ptr<GraphExecutorImplBase> pImpl;

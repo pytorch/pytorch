@@ -1,15 +1,16 @@
 import operator
 import torch
 import tensorrt as trt
-from torch.fx.experimental.fx2trt.fx2trt import tensorrt_converter
+from torch.fx.experimental.fx2trt.converter_registry import tensorrt_converter
 
-from .helper_functions import get_dyn_range, mark_as_int8_layer
+from .converter_utils import get_dyn_range, mark_as_int8_layer
 
 @tensorrt_converter(operator.add)
 @tensorrt_converter(torch.add)
 def add(network, target, args, kwargs, layer_name):
+    len_kwargs = len([x for x in kwargs.keys() if x != "_itensor_to_tensor_meta"])
     # operator.add
-    if len(kwargs) == 0:
+    if len_kwargs == 0:
         lhs_val, rhs_val = args
     else:
         # torch.add

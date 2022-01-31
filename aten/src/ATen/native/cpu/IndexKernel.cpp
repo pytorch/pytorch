@@ -1,15 +1,18 @@
-#include <ATen/native/TensorAdvancedIndexing.h>
-#include <ATen/native/TensorTransformations.h> // flip
+#define TORCH_ASSERT_NO_OPERATORS
+#include <ATen/native/IndexKernel.h>
 
 #include <cmath>
 #include <iostream>
 
+#include <ATen/Context.h>
 #include <ATen/Dispatch.h>
 #include <ATen/Parallel.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/cpu/AtomicAddFloat.h>
 #include <ATen/native/cpu/Loops.h>
 #include <ATen/cpu/vec/vec.h>
+#include <c10/util/irange.h>
+#include <c10/core/Scalar.h>
 
 namespace at { namespace native {
 namespace {
@@ -36,7 +39,7 @@ struct Indexer {
 
   int64_t get(int64_t idx) {
     int64_t offset = 0;
-    for (int j = 0; j < num_indexers; j++) {
+    for (const auto j : c10::irange(num_indexers)) {
       int64_t value = *(int64_t*)&indexers[j][idx * indexer_strides[j]];
       int64_t size = original_sizes[j];
       TORCH_CHECK_INDEX(value >= -size && value < size,
@@ -52,7 +55,7 @@ struct Indexer {
 
 static bool is_constant_index(int ntensor, const int64_t* strides) {
   AT_ASSERT(ntensor >= 3);
-  for (int arg = 2; arg < ntensor; arg++) {
+  for (const auto arg : c10::irange(2, ntensor)) {
     if (strides[arg] != 0) {
       return false;
     }
@@ -77,16 +80,16 @@ void cpu_index_kernel(TensorIterator& iter, IntArrayRef index_size, IntArrayRef 
       // specialization for when every element uses the same index
       int64_t offset = indexer.get(0);
       if (strides[0] == sizeof(scalar_t) && strides[1] == sizeof(scalar_t)) {
-        for (int64_t i = 0; i < n; i++) {
+        for (const auto i : c10::irange(n)) {
           f(dst + strides[0] * i, src + strides[1] * i, offset);
         }
       } else {
-        for (int64_t i = 0; i < n; i++) {
+        for (const auto i : c10::irange(n)) {
           f(dst + strides[0] * i, src + strides[1] * i, offset);
         }
       }
     } else {
-      for (int64_t i = 0; i < n; i++) {
+      for (const auto i : c10::irange(n)) {
         int64_t offset = indexer.get(i);
         f(dst + strides[0] * i, src + strides[1] * i, offset);
       }
@@ -114,14 +117,14 @@ void index_kernel(TensorIterator& iter, IntArrayRef index_size, IntArrayRef inde
 struct IndexToOffset {
   const IntArrayRef sizes;
   const IntArrayRef strides;
-  const int ndim;
-  IndexToOffset(const Tensor & tensor) : sizes(tensor.sizes()),
-                                         strides(tensor.strides()),
-                                         ndim(tensor.dim()) {}
+  const int64_t ndim;
+  explicit IndexToOffset(const TensorBase & tensor) :
+      sizes(tensor.sizes()), strides(tensor.strides()), ndim(tensor.dim()) {
+  }
 
   int64_t get(int64_t linear_index) const {
     int64_t offset = 0;
-    for (int i = ndim - 1; i > 0; i--) {
+    for (int64_t i = ndim - 1; i > 0; i--) {
       offset += (linear_index % sizes[i]) * strides[i];
       linear_index /= sizes[i];
     }
@@ -132,7 +135,7 @@ struct IndexToOffset {
 template <typename scalar_t, typename func_t>
 void cpu_take_put_kernel(
     TensorIterator& iter,
-    const Tensor& indexed,
+    const TensorBase& indexed,
     const func_t& f,
     bool serial_execution=false) {
   // This kernel follows the same strategy as `cpu_index_kernel`
@@ -153,7 +156,8 @@ void cpu_take_put_kernel(
   auto loop = [&](char** data, const int64_t* strides, int64_t n) {
     auto* iterated_data_bytes = data[0];
     auto* index_data_bytes = data[1];
-    for (int64_t elem = 0; elem < n; ++elem) {
+    for (const auto elem : c10::irange(n)) {
+      (void)elem; //Suppress unused variable warning
       auto idx = *reinterpret_cast<int64_t*>(index_data_bytes);
       auto& iterated = *reinterpret_cast<scalar_t*>(iterated_data_bytes);
 
@@ -180,7 +184,7 @@ void cpu_take_put_kernel(
 
 void put_kernel(
   TensorIterator& iter,
-  const Tensor & self,
+  const TensorBase & self,
   const bool accumulate) {
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(ScalarType::Half, ScalarType::Bool, ScalarType::BFloat16,
     iter.dtype(), "take_put_cpu", [&] {
@@ -218,7 +222,7 @@ void put_kernel(
 
 void take_kernel(
   TensorIterator& iter,
-  const Tensor & input) {
+  const TensorBase & input) {
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(ScalarType::Half, ScalarType::Bool, ScalarType::BFloat16,
     iter.dtype(), "take_cpu", [&] {
       cpu_take_put_kernel<scalar_t>(iter, input,
@@ -270,7 +274,8 @@ void index_fill_kernel(
     auto handle_nonzero_idx_stride = [&](char** data, const int64_t* strides, int64_t n) {
       auto* self_data_bytes = data[0];
       auto* index_data_bytes = data[1];
-      for (int64_t elem = 0; elem < n; ++elem) {
+      for (const auto elem : c10::irange(n)) {
+        (void)elem; //Suppress unused variable warning
         auto* self_data = reinterpret_cast<scalar_t*>(self_data_bytes);
         auto idx = *reinterpret_cast<int64_t*>(index_data_bytes);
         TORCH_CHECK_INDEX(idx >= -self_dim_size && idx < self_dim_size,
@@ -296,7 +301,8 @@ void index_fill_kernel(
       if (idx < 0) {
         idx += self_dim_size;
       }
-      for (int64_t elem = 0; elem < n; ++elem) {
+      for (const auto elem : c10::irange(n)) {
+        (void)elem; //Suppress unused variable warning
         auto* self_data = reinterpret_cast<scalar_t*>(self_data_bytes);
 
         self_data[idx * self_dim_stride] = fill_val;
@@ -329,7 +335,8 @@ void index_copy_kernel(
       auto* self_data_bytes = data[0];
       auto* index_data_bytes = data[1];
       auto* source_data_bytes = data[2];
-      for (int64_t elem = 0; elem < n; ++elem) {
+      for (const auto elem : c10::irange(n)) {
+        (void)elem; //Suppress unused variable warning
         auto* self_data = reinterpret_cast<scalar_t*>(self_data_bytes);
         auto idx = *reinterpret_cast<int64_t*>(index_data_bytes);
         auto* source_data = reinterpret_cast<scalar_t*>(source_data_bytes);
@@ -352,7 +359,8 @@ void index_copy_kernel(
       TORCH_CHECK_INDEX(idx >= 0 && idx < self_dim_size,
             "index_copy_(): index ", idx, " is out of bounds for dimension ",
             dim, " with size ", self_dim_size);
-      for (int64_t elem = 0; elem < n; ++elem) {
+      for (const auto elem : c10::irange(n)) {
+        (void)elem; //Suppress unused variable warning
         auto* self_data = reinterpret_cast<scalar_t*>(self_data_bytes);
         auto* source_data = reinterpret_cast<scalar_t*>(source_data_bytes);
 
@@ -387,7 +395,7 @@ void cpu_masked_fill_kernel(TensorIterator& iter, scalar_t value) {
   auto loop = [&](char** data, const int64_t* strides, int64_t n) {
     char* dst = data[0];
     char* mask = data[1];
-    for (int64_t i = 0; i < n; i++) {
+    for (const auto i : c10::irange(n)) {
       mask_t mask_value = *(mask_t*)(mask + strides[1] * i);
       if (!is_mask_bool) {
         TORCH_CHECK(mask_value == 0 || mask_value == 1, "Mask tensor can take 0 and 1 values only");
@@ -414,7 +422,7 @@ void masked_fill_kernel(TensorIterator& iter, const Scalar& value) {
 }
 
 template <typename scalar_t, typename mask_t>
-void cpu_masked_scatter_kernel(TensorIterator& iter, const Tensor& source) {
+void cpu_masked_scatter_kernel(TensorIterator& iter, const TensorBase& source) {
   auto is_mask_bool = std::is_same<mask_t, bool>::value;
   std::ptrdiff_t source_cntr = 0;
   scalar_t* source_ptr = source.data_ptr<scalar_t>();
@@ -425,7 +433,7 @@ void cpu_masked_scatter_kernel(TensorIterator& iter, const Tensor& source) {
     const int64_t dst_stride = strides[0];
     char* mask = data[1];
     const int64_t mask_stride = strides[1];
-    for (int64_t i = 0; i < n; i++) {
+    for (const auto i : c10::irange(n)) {
       mask_t mask_value = *(mask_t*)(mask + mask_stride * i);
       if (!is_mask_bool) {
         TORCH_CHECK(mask_value <= static_cast<mask_t>(1), "Mask tensor can take 0 and 1 values only");
@@ -441,7 +449,7 @@ void cpu_masked_scatter_kernel(TensorIterator& iter, const Tensor& source) {
   iter.serial_for_each(loop, {0, iter.numel()});
 }
 
-void masked_scatter_kernel(TensorIterator& iter, const Tensor& source) {
+void masked_scatter_kernel(TensorIterator& iter, const TensorBase& source) {
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(
       ScalarType::Bool,
       ScalarType::BFloat16,
@@ -466,7 +474,7 @@ void cpu_masked_select_serial_kernel(TensorIterator& iter, const func_t& f) {
     char* dst = data[0];
     char* src = data[1];
     char* mask = data[2];
-    for (int64_t i = 0; i < n; i++) {
+    for (const auto i : c10::irange(n)) {
       mask_t mask_value = *(mask_t*)(mask + strides[2] * i);
       if (!is_mask_bool) {
         TORCH_CHECK(mask_value == 0 || mask_value == 1, "Mask tensor can take 0 and 1 values only");
@@ -505,7 +513,7 @@ void cpu_masked_select_kernel(TensorIterator& iter, const func_t& f) {
     char* src = data[1];
     char* mask = data[2];
     char* mask_prefix_sum = data[3];
-    for (int64_t i = 0; i < n; i++) {
+    for (const auto i : c10::irange(n)) {
       mask_t mask_value = *(mask_t*)(mask + strides[2] * i);
       if (!is_mask_bool) {
         TORCH_CHECK(mask_value == 0 || mask_value == 1, "Mask tensor can take 0 and 1 values only");

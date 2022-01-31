@@ -2,31 +2,26 @@
 # https://github.com/python/cpython/blob/master/Lib/typing.py
 
 import collections
+import functools
+import inspect
 import numbers
 import sys
 from typing import (Any, Dict, Iterator, Generic, List, Set, Tuple, TypeVar, Union,
                     get_type_hints)
 from typing import _eval_type, _tp_cache, _type_check, _type_repr  # type: ignore[attr-defined]
-
-try:  # Python > 3.6
-    from typing import ForwardRef  # type: ignore[attr-defined]
-except ImportError:  # Python 3.6
-    from typing import _ForwardRef as ForwardRef  # type: ignore[attr-defined]
+from typing import ForwardRef
 
 # TODO: Use TypeAlias when Python 3.6 is deprecated
 # Please check [Note: TypeMeta and TypeAlias]
-try:
-    from typing import GenericMeta  # Python 3.6
-    _GenericAlias = GenericMeta
-except ImportError:  # Python > 3.6
-    # In case of metaclass conflict due to ABCMeta or _ProtocolMeta
-    # For Python 3.9, only Protocol in typing uses metaclass
-    from abc import ABCMeta
-    from typing import _ProtocolMeta, _GenericAlias  # type: ignore[attr-defined, no-redef]
+# In case of metaclass conflict due to ABCMeta or _ProtocolMeta
+# For Python 3.9, only Protocol in typing uses metaclass
+from abc import ABCMeta
+from typing import _ProtocolMeta, _GenericAlias  # type: ignore[attr-defined, no-redef]
 
-    class GenericMeta(_ProtocolMeta, ABCMeta):  # type: ignore[no-redef]
-        pass
+class GenericMeta(_ProtocolMeta, ABCMeta):  # type: ignore[no-redef]
+    pass
 
+import torch
 
 class Integer(numbers.Integral):
     pass
@@ -258,6 +253,9 @@ class _DataPipeMeta(GenericMeta):
     type: _DataPipeType
 
     def __new__(cls, name, bases, namespace, **kwargs):
+        if '__iter__' in namespace:
+            hook_iterator(namespace, 'enumerate(DataPipe)#{}'.format(name))
+
         # For Python > 3.6
         cls.__origin__ = None
         # Need to add _is_protocol for Python 3.7 _ProtocolMeta
@@ -337,6 +335,59 @@ class _DataPipeMeta(GenericMeta):
     def __hash__(self):
         return hash((self.__name__, self.type))
 
+
+def hook_iterator(namespace, profile_name):
+
+    def context():
+        return torch.autograd.profiler.record_function(profile_name)
+
+    class IteratorDecorator:
+        '''Wrap the iterator return result by adding __next__'''
+        def __init__(self, iterator):
+            self.iterator = iterator
+
+        def __iter__(self):
+            return self
+
+        def __next__(self):
+            with context():
+                return next(self.iterator)
+
+    func = namespace['__iter__']
+
+    if inspect.isgeneratorfunction(func):
+        @functools.wraps(func)
+        def wrap_generator(*args, **kwargs):
+            gen = func(*args, **kwargs)
+            try:
+                with context():
+                    response = gen.send(None)
+                while True:
+                    request = yield response
+                    with context():
+                        response = gen.send(request)
+            except StopIteration as e:
+                return e.value
+
+        namespace['__iter__'] = wrap_generator
+    else:
+        if '__next__' in namespace:
+            next_func = namespace['__next__']
+
+            @functools.wraps(next_func)
+            def wrap_next(*args, **kwargs):
+                with context():
+                    return next_func(*args, **kwargs)
+
+            namespace['__next__'] = wrap_next
+        else:
+            # have the __iter__ but not __next__ like what _ChildDataPipe did.
+            @functools.wraps(func)
+            def wrap_iter(*args, **kwargs):
+                iter_ret = func(*args, **kwargs)
+                return IteratorDecorator(iter_ret)
+
+            namespace['__iter__'] = wrap_iter
 
 def _dp_init_subclass(sub_cls, *args, **kwargs):
     # Add function for datapipe instance to reinforce the type

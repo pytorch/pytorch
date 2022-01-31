@@ -72,7 +72,6 @@ class FloatToFusedNBitFakeRowwiseQuantizedOp final
       CAFFE_THROW("Unsupported data type");
     }
 
-    bool use_openmp = GREEDY;
 #ifdef _OPENMP
     vector<float> tmp_vec(input_columns * (GREEDY ? omp_get_max_threads() : 1));
 #else
@@ -119,7 +118,7 @@ class FloatToFusedNBitFakeRowwiseQuantizedOp final
       output_row_scale_bias[1] = minimum_element;
 
       // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
-      for (size_t col = 0; col < input_columns; ++col) {
+      for (const auto col : c10::irange(input_columns)) {
         output_row[col] = std::max(
             0,
             std::min<int>(

@@ -14,7 +14,7 @@ inline __device__ void gpu_atomic_add(T* address, const T val) {
 
 template <>
 inline __device__ void gpu_atomic_add(float* address, const float val) {
-#if defined(__HIP_PLATFORM_HCC__) && defined(__gfx908__)
+#if defined(USE_ROCM) && defined(__gfx908__)
   atomicAddNoRet(address, val);
 #else
   atomicAdd(address, val);

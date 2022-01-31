@@ -29,6 +29,7 @@ qinterpolate_short_configs = op_bench.config_list(
         [32, 32, 32, torch.quint8, 'bilinear', 0.5, True],  # Downsample
         [32, 32, 32, torch.quint8, 'nearest', 2.0, True],  # Upsample
         [32, 32, 32, torch.quint8, 'bilinear', 2.0, True],  # Upsample
+        [3, 720, 1280, torch.quint8, 'bilinear', 0.83333, True],  # Downsample
     ],
     tags=['short'],
 )

@@ -107,7 +107,7 @@ using void_t = typename make_void<Ts...>::type;
 
 #endif
 
-#ifdef __HIP_PLATFORM_HCC__
+#if defined(USE_ROCM)
 // rocm doesn't like the C10_HOST_DEVICE
 #define CUDA_HOST_DEVICE
 #else

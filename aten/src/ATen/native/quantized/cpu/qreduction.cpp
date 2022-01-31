@@ -106,12 +106,6 @@ Tensor& mean_out_quantized_cpu(
   return result;
 }
 
-Tensor mean_quantized_cpu(const Tensor& self, optional<ScalarType> dtype) {
-  Tensor result;
-  mean_out_quantized_cpu(self, IntArrayRef{}, false, dtype, result);
-  return result;
-}
-
 Tensor mean_quantized_cpu(
     const Tensor& self,
     IntArrayRef dim,
