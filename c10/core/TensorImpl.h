@@ -2754,7 +2754,7 @@ class C10_TensorImpl_Size_Check_Dummy_Class : private TensorImpl {
     // clang-format off
     static_assert(sizeof(storage_)            == 4, "Size of storage_ changed!");
     static_assert(sizeof(autograd_meta_)      == 4, "Size of autograd_meta_ changed!");
-    static_assert(sizeof(named_tensor_meta_)  == 4  "Size of named_tensor_meta_ changed!");
+    static_assert(sizeof(named_tensor_meta_)  == 4, "Size of named_tensor_meta_ changed!");
     static_assert(sizeof(version_counter_)    == 4, "Size of version_counter_ changed!");
     static_assert(sizeof(pyobj_interpreter_)  == 4, "Size of pyobj_interpreter_ changed!");
     static_assert(sizeof(pyobj_)              == 4, "Size of pyobj_ changed!");
@@ -2780,7 +2780,7 @@ class C10_TensorImpl_Size_Check_Dummy_Class : private TensorImpl {
     // figured out how to detect those via macro preprocessors yet, so we use <=
     // comparisons for the relevant fields.
     static_assert(sizeof(autograd_meta_)      <= 16,"Size of autograd_meta_ changed!");
-    static_assert(sizeof(named_tensor_meta_)  <= 16 "Size of named_tensor_meta_ changed!");
+    static_assert(sizeof(named_tensor_meta_)  <= 16,"Size of named_tensor_meta_ changed!");
     static_assert(sizeof(version_counter_)    == 8, "Size of version_counter_ changed!");
     static_assert(sizeof(pyobj_interpreter_)  == 8, "Size of pyobj_interpreter_ changed!");
     static_assert(sizeof(pyobj_)              == 8, "Size of pyobj_ changed!");
