@@ -1,18 +1,37 @@
-#include <sstream>
-
 #include <c10/core/ScalarType.h>
 #include <c10/util/irange.h>
+#include <c10/util/hash.h>
+#include <c10/util/Optional.h>
 #include <c10/cuda/CUDACachingAllocator.h>
+#include <ATen/jit_macros.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/detail/OffsetCalculator.cuh>
+#include <ATen/cuda/nvrtc_stub/ATenNVRTC.h>
 #include <ATen/code_template.h>
 #include <ATen/native/cuda/jit_utils.h>
+#include <ATen/cuda/llvm_jit_strings.h>
+
+#include <sstream>
+#include <fstream>
+#include <cstdio>
+#include <iterator> // istreambuf_iterator
+#include <cstdlib>
+#include <string>
+
+#if BUILD_JITERATOR_WITH_CACHE
+  // Uses POSIX headers, which is why these are guarded behind BUILD_JITERATOR_WITH_CACHE
+  // TODO: C++17 has the fileystem header, which may replace these
+  #include <sys/types.h>
+  #include <sys/stat.h> // mkdir
+  #include <unistd.h>
+#endif // BUILD_JITERATOR_WITH_CACHE
 
 
 namespace at { namespace cuda { namespace jit {
 
 const std::string jit_common_types = R"ESCAPE(
   #define POS_INFINITY __int_as_float(0x7f800000)
+  #define INFINITY POS_INFINITY
   #define NEG_INFINITY __int_as_float(0xff800000)
   #define NAN __int_as_float(0x7fffffff)
 
@@ -30,6 +49,8 @@ const std::string jit_common_types = R"ESCAPE(
   //TODO use _assert_fail, because assert is disabled in non-debug builds
   #define ERROR_UNSUPPORTED_CAST assert(false);
 
+  ${traits_string}
+  ${cmath_string}
 
   // NB: Order matters for this macro; it is relied upon in
   // _promoteTypesLookup and the serialization format.
@@ -43,28 +64,28 @@ const std::string jit_common_types = R"ESCAPE(
   _(at::Half, Half) /* 5 */                                  \
   _(float, Float) /* 6 */                                \
   _(double, Double) /* 7 */                              \
-  _(c10::complex<c10::Half>, ComplexHalf) /* 8 */        \
-  _(c10::complex<float>, ComplexFloat) /* 9 */                          \
-  _(c10::complex<double>, ComplexDouble) /* 10 */                         \
+  _(std::complex<at::Half>, ComplexHalf) /* 8 */        \
+  _(std::complex<float>, ComplexFloat) /* 9 */                          \
+  _(std::complex<double>, ComplexDouble) /* 10 */                         \
   _(bool, Bool) /* 11 */                                 \
   _(void, QInt8) /* 12 */                          \
   _(void, QUInt8) /* 13 */                        \
   _(void, QInt32) /* 14 */                        \
   _(at::BFloat16, BFloat16) /* 15 */                             \
 
-  #define AT_FORALL_SCALAR_TYPES(_) \
-  _(uint8_t, Byte)                \
-  _(int8_t, Char)                 \
-  _(int16_t, Short)               \
-  _(int, Int)                     \
-  _(int64_t, Long)                \
-  _(float, Float)                 \
-  _(at::Half, Half)               \
-  _(at::BFloat16, BFloat16)       \
-  _(double, Double)               \
-  _(bool, Bool)                   \
-  _(c10::complex<float>, ComplexFloat)   \
-  _(c10::complex<double>, ComplexDouble)
+  #define AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_EXCEPT_COMPLEX_HALF(_) \
+  _(uint8_t, Byte)                                                 \
+  _(int8_t, Char)                                                  \
+  _(int16_t, Short)                                                \
+  _(int, Int)                                                      \
+  _(int64_t, Long)                                                 \
+  _(at::Half, Half)                                                \
+  _(float, Float)                                                  \
+  _(double, Double)                                                \
+  _(std::complex<float>, ComplexFloat)                             \
+  _(std::complex<double>, ComplexDouble)                           \
+  _(bool, Bool)                                                    \
+  _(at::BFloat16, BFloat16)
 
 
   enum class ScalarType : int8_t {
@@ -92,7 +113,8 @@ const std::string jit_common_types = R"ESCAPE(
 
   ${half_string}
   ${bfloat16_string}
-  ${complex_string}
+  ${complex_body_string}
+  ${complex_math_string}
 
 
 )ESCAPE";
@@ -170,41 +192,62 @@ struct alignas(2) BFloat16 {
 }
 )ESCAPE";
 
-//copy-pasted from util/complex.h
-const std::string jiterator_complex_support_literal = R"ESCAPE(
-//a very limited complex class, the only thing it currently allows is implicit conversion
-//to complex, and complex -> real that is unused
-namespace c10 {
-  template<typename T>
-  struct alignas(sizeof(T) * 2) complex {
-    using value_type = T;
+// copy-pasted from c10/util/TypeCast.h
+const std::string dynamic_cast_support_literal = R"ESCAPE(
 
-    T real_ = T(0);
-    T imag_ = T(0);
-    constexpr complex() = default;
-    inline __host__ __device__ constexpr complex(const T& re, const T& im = T())
-      : real_(re), imag_(im) {}
+  template <typename T>
+  struct is_complex : public std::false_type {};
 
-    //FIXME I didn't find how complex -> real conversion is done in eager
-    //we are not going to use it, but it's needed for compilation
-    inline __host__ __device__ operator T() const{
-      return real_;
-    }
+  template <typename T>
+  struct is_complex<std::complex<T>> : public std::true_type {};
 
+  template <typename dest_t, typename src_t>
+  struct needs_real {
+    constexpr static bool value =
+        (is_complex<src_t>::value && !is_complex<dest_t>::value);
   };
-}
-)ESCAPE";
 
+  template <bool, typename src_t>
+  struct maybe_real {
+    static inline src_t apply(src_t src) {
+      return src;
+    }
+  };
 
-const std::string jit_code_template = R"ESCAPE(
+  template <typename src_t>
+  struct maybe_real<true, src_t> {
+    static inline decltype(auto) apply(src_t src) {
+      return src.real();
+    }
+  };
+
+  template <typename dest_t, typename src_t>
+  struct static_cast_with_inter_type {
+    static inline dest_t apply(
+        src_t src) {
+      constexpr bool real = needs_real<dest_t, src_t>::value;
+      return static_cast<dest_t>(maybe_real<real, src_t>::apply(src));
+    }
+  };
+
+  template <typename src_t>
+  struct static_cast_with_inter_type<uint8_t, src_t> {
+    static inline uint8_t apply(
+        src_t src) {
+      constexpr bool real = needs_real<uint8_t, src_t>::value;
+      return static_cast<uint8_t>(
+          static_cast<int64_t>(maybe_real<real, src_t>::apply(src)));
+    }
+  };
 
   // Fetch a value with dynamic type src_type from ptr, and cast it to static type dest_t.
-  // For now, simplified version that does not handle complex and special casting to uint8
-  #define FETCH_AND_CAST_CASE(type, scalartype) case ScalarType::scalartype: return static_cast<dest_t>(*(const type *)ptr);
+  #define FETCH_AND_CAST_CASE(type, scalartype) \
+    case ScalarType::scalartype:                \
+      return static_cast_with_inter_type<dest_t, type>::apply(*(const type*)ptr);
   template<typename dest_t>
   __device__ inline dest_t fetch_and_cast(const ScalarType src_type, const void *ptr) {
     switch (src_type) {
-        AT_FORALL_SCALAR_TYPES(FETCH_AND_CAST_CASE)
+        AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_EXCEPT_COMPLEX_HALF(FETCH_AND_CAST_CASE)
         default:
           ERROR_UNSUPPORTED_CAST
     }
@@ -212,22 +255,18 @@ const std::string jit_code_template = R"ESCAPE(
   }
 
   // Cast a value with static type src_t into dynamic dest_type, and store it to ptr.
-  #define CAST_AND_STORE_CASE(type, scalartype) case ScalarType::scalartype: *(type *)ptr = static_cast<type>(value); return;
+  #define CAST_AND_STORE_CASE(type, scalartype)                             \
+    case ScalarType::scalartype:                                            \
+      *(type*)ptr = static_cast_with_inter_type<type, src_t>::apply(value); \
+      return;
   template<typename src_t>
   __device__ inline void cast_and_store(const ScalarType dest_type, void *ptr, src_t value) {
   switch (dest_type) {
-      AT_FORALL_SCALAR_TYPES(CAST_AND_STORE_CASE)
+      AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_EXCEPT_COMPLEX_HALF(CAST_AND_STORE_CASE)
       default:;
   }
   ERROR_UNSUPPORTED_CAST
   }
-
-  struct LoadWithoutCast {
-  template <typename scalar_t>
-  __device__ scalar_t load(char* base_ptr, uint32_t offset, int arg=0) {
-      return *(reinterpret_cast<scalar_t*>(base_ptr) + offset);
-  }
-  };
 
   template <int N>
   struct LoadWithCast {
@@ -243,13 +282,6 @@ const std::string jit_code_template = R"ESCAPE(
   }
   };
 
-  struct StoreWithoutCast {
-  template<typename scalar_t>
-  __device__ void store(scalar_t value, char *base_ptr, uint32_t offset) {
-      *(reinterpret_cast<scalar_t *>(base_ptr) + offset) = value;
-  }
-  };
-
   struct StoreWithCast {
   ScalarType dtype;
   uint32_t element_size;
@@ -260,6 +292,30 @@ const std::string jit_code_template = R"ESCAPE(
       cast_and_store<scalar_t>(dtype, ptr, value);
   }
   };
+
+)ESCAPE";
+
+const std::string no_dynamic_cast_support_literal = R"ESCAPE(
+
+  struct LoadWithoutCast {
+  template <typename scalar_t>
+  __device__ scalar_t load(char* base_ptr, uint32_t offset, int arg=0) {
+    return *(reinterpret_cast<scalar_t*>(base_ptr) + offset);
+  }
+  };
+
+  struct StoreWithoutCast {
+  template<typename scalar_t>
+  __device__ void store(scalar_t value, char *base_ptr, uint32_t offset) {
+    *(reinterpret_cast<scalar_t *>(base_ptr) + offset) = value;
+  }
+  };
+
+)ESCAPE";
+
+const std::string jit_code_template = R"ESCAPE(
+
+  ${dynamic_casting_string}
 
   template <typename T>
   struct DivMod {
@@ -355,7 +411,7 @@ const std::string jit_code_template = R"ESCAPE(
       ${offset_calculator}<1> output_calculator,
       ${loader} l,
       ${storer} s,
-      ${compute_type} scalar_val) {
+      ${compute_type} scalar_val${extra_params}) {
     ${declare_load_arrays}
     ${declare_store_arrays}
 
@@ -381,7 +437,7 @@ const std::string jit_code_template = R"ESCAPE(
     #pragma unroll
     for (int j = 0; j < thread_work_size; j++) {
       if ((threadIdx.x  + j*num_threads) < remaining) {
-        out[j] = ${name}<${compute_type}>(${args});
+        out[j] = ${name}<${compute_type}>(${args}${extra_args});
       }
     }
 
@@ -429,7 +485,7 @@ const std::string jit_vectorized_code_template = R"ESCAPE(
   void ${name}_vectorized${vec_size}_kernel(
       const int N,
       Array<char*, ${nInputs}+1> data,
-      ${compute_type} scalar_val) //[${nInputs}+1],
+      ${compute_type} scalar_val${extra_params}) //[${nInputs}+1],
       {
       constexpr int vec_size = ${vec_size};
       int remaining = N - block_work_size * blockIdx.x;
@@ -451,7 +507,7 @@ const std::string jit_vectorized_code_template = R"ESCAPE(
         #pragma unroll
         for (int j = 0; j < thread_work_size; j++) {
           if ((threadIdx.x  + j*num_threads) < remaining) {
-            out[j] = ${name}<${compute_type}>(${args});
+            out[j] = ${name}<${compute_type}>(${args} ${extra_args});
           }
         }
         thread_idx = threadIdx.x;
@@ -479,7 +535,7 @@ const std::string jit_vectorized_code_template = R"ESCAPE(
 
         #pragma unroll
         for (int j = 0; j < thread_work_size; j++) {
-          out[j] = ${name}<${compute_type}>(${args});
+          out[j] = ${name}<${compute_type}>(${args}${extra_args});
         }
         using vec_t_output = aligned_vector<${result_type}, vec_size>;
         vec_t_output * to_ = reinterpret_cast<vec_t_output *>(data[0]) + block_work_size / vec_size * idx;
@@ -510,52 +566,58 @@ const at::cuda::NVRTC& nvrtc() {
 // TODO refactor so this function is usable both from jit and from aten
 void codegenOutputQuery(
     const cudaDeviceProp* const prop,
-    int& major,
-    int& minor,
+    int& cuda_major,
+    int& cuda_minor,
+    int& nvrtc_major,
+    int& nvrtc_minor,
     bool& compile_to_sass) {
-  using CudaVersion = std::pair<int, int>;
-  CudaVersion nvrtc_version;
-  AT_CUDA_NVRTC_CHECK(
-      nvrtc().nvrtcVersion(&nvrtc_version.first, &nvrtc_version.second));
 
+  AT_CUDA_NVRTC_CHECK(nvrtc().nvrtcVersion(&nvrtc_major, &nvrtc_minor));
   TORCH_CHECK(
-      nvrtc_version.first >= 6,
-      "NVRTC versions less than 6 are not supported. Is: ",
-      nvrtc_version.first);
+      nvrtc_major >= 6, "NVRTC versions less than 6 are not supported. Is: ", nvrtc_major);
 
   // Version supported by device
   // Usually any lower version works too but is less efficient
-  const CudaVersion dev_version = CudaVersion(prop->major, prop->minor);
+  using CUDAVersion = std::pair<int, int>;
+  const CUDAVersion nvrtc_version{nvrtc_major, nvrtc_minor};
+  const CUDAVersion dev_version{prop->major, prop->minor};
   // Maximum version supported by the driver, cap dev_version to this
-  CudaVersion max_dev_version;
-  if (nvrtc_version.first <= 7) { // 7 supports 2-5.x
-    max_dev_version = CudaVersion(5, 0);
-  } else if (nvrtc_version.first <= 8) { // 8 supports 2-6.x
-    max_dev_version = CudaVersion(6, 0);
-  } else if (nvrtc_version.first <= 9) { // 9 supports 3-7.2
-    max_dev_version = CudaVersion(7, 2);
-  } else if (nvrtc_version.first <= 10) { // 10 supports 3-7.5
-    max_dev_version = CudaVersion(7, 5);
-  } else if (nvrtc_version == CudaVersion(11, 0)) { // 11.0 supports 3-8.0
-    max_dev_version = CudaVersion(8, 0);
+  CUDAVersion max_dev_version;
+  if (nvrtc_major <= 7) { // 7 supports 2-5.x
+    max_dev_version = CUDAVersion(5, 0);
+  } else if (nvrtc_major <= 8) { // 8 supports 2-6.x
+    max_dev_version = CUDAVersion(6, 0);
+  } else if (nvrtc_major <= 9) { // 9 supports 3-7.2
+    max_dev_version = CUDAVersion(7, 2);
+  } else if (nvrtc_major <= 10) { // 10 supports 3-7.5
+    max_dev_version = CUDAVersion(7, 5);
+  } else if (nvrtc_version == CUDAVersion(11, 0)) { // 11.0 supports 3-8.0
+    max_dev_version = CUDAVersion(8, 0);
   } else {
     // If the driver version is unknown (i.e. newer than this code)
     // assume the driver supports this device
     max_dev_version = dev_version;
   }
+
   if (dev_version > max_dev_version) {
-    major = max_dev_version.first;
-    minor = max_dev_version.second;
+    cuda_major = max_dev_version.first;
+    cuda_minor = max_dev_version.second;
     // if we are clamping major/minor, sass is not compatible
     compile_to_sass = false;
   } else {
-    major = dev_version.first;
-    minor = dev_version.second;
+    cuda_major = dev_version.first;
+    cuda_minor = dev_version.second;
     compile_to_sass = true;
   }
+
+  #if defined(CUDA_VERSION) && CUDA_VERSION < 11010
+    // compile to sass is not allowed prior to CUDA 11.1
+    compile_to_sass = false;
+  #endif
 }
 
-//TODO another copy paste from jit, refactor so it's usable from both
+// TODO: another copy paste from jit, refactor so it's usable from both
+// TODO: try making the CUcontext thread local to see if that improves performance - why is this slow?
 void __inline__ initializeCudaContext() {
   // lazily construct context if non-existing yet;
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
@@ -582,9 +644,11 @@ std::string generate_code(
     bool contiguous,
     bool dynamic_casting,
     BinaryFuncVariant scalar_pos,
+    c10::SmallVector<std::string>& extra_args_typenames,
     bool vectorized,
     int vec_size) {
   at::jit::TemplateEnv env;
+
   env.s("index_type", "unsigned int");
   const int nInputs = nTensors - 1;
   env.s("nInputs", std::to_string(nInputs));
@@ -592,6 +656,23 @@ std::string generate_code(
   env.s("compute_type", compute_type);
   env.s("functor", func);
   env.s("name", name);
+  env.s("cmath_string", get_cmath_string());
+
+  // Generate `extra_params` for function signature
+  // and `extra_args` for computation call if
+  // extra arguments to capture runtime state are passed.
+  // (look at polygamma for example).
+  std::string extra_params = "";
+  std::string extra_args = "";
+  for (size_t i = 0; i < extra_args_typenames.size(); i++) {
+    auto type = std::string(extra_args_typenames[i]);
+    auto name = "extra_arg_" + std::string(to_string(i));
+    extra_params += "," + type + " " + name;
+    extra_args += ", " + name;
+  }
+  env.s("extra_params", extra_params);
+  env.s("extra_args", extra_args);
+
   std::stringstream declare_load_arrays;
   for (int i = 0; i < nInputs; i++) {
     // TODO these arrays are potentially of the different types, use function
@@ -629,26 +710,41 @@ std::string generate_code(
   } else {
     env.s("bfloat16_string", "");
   }
-  if (dynamic_casting) {
-    env.s("complex_string", jiterator_complex_support_literal);
+  // the definition of complex math functions is only needed when the compute type is complex
+  // but the definition of std::complex is needed for dynamic casting even if the compute type is not complex
+  if (f_inputs_type == "std::complex<float>" || result_type == "std::complex<float>" ||
+      f_inputs_type == "std::complex<double>" || result_type == "std::complex<double>") {
+    env.s("traits_string", get_traits_string());
+    env.s("complex_body_string", get_complex_body_string());
+    env.s("complex_math_string", get_complex_math_string());
+  } else if (dynamic_casting) {
+    env.s("traits_string", get_traits_string());
+    env.s("complex_body_string", get_complex_body_string());
+    env.s("complex_math_string", "");
   } else {
-    env.s("complex_string", "");
+    env.s("traits_string", "");
+    env.s("complex_body_string", "");
+    env.s("complex_math_string", "");
   }
 
   if (!vectorized) {
     if (!dynamic_casting) {
       env.s("loader", "LoadWithoutCast");
       env.s("storer", "StoreWithoutCast");
+      env.s("dynamic_casting_string", no_dynamic_cast_support_literal);
     } else {
       env.s(
           "loader", std::string("LoadWithCast<" + std::to_string(nInputs) + ">"));
       env.s("storer", "StoreWithCast");
+      env.s("dynamic_casting_string", dynamic_cast_support_literal);
     }
+
     if (contiguous) {
       env.s("offset_calculator", "TrivialOffsetCalculator");
     } else {
       env.s("offset_calculator", "OffsetCalculator");
     }
+
     std::stringstream load_inputs;
     for (int i = 0; i < nInputs; i++) {
       auto i_string = std::to_string(i);
@@ -663,8 +759,10 @@ std::string generate_code(
     store_outputs << "s.store<" << result_type
                   << ">(out[j], data[0], output_offsets[0]);\n";
     env.s("store_outputs", store_outputs.str());
+
     static auto cuda_template = at::jit::CodeTemplate(jit_common_types + jit_code_template);
-    return cuda_template.format(env);
+    const auto code = cuda_template.format(env);
+    return code;
   }
 
   // vectorized case
@@ -697,28 +795,148 @@ std::string generate_code(
   env.s("load_unrolled_inputs", load_unrolled_inputs.str());
 
   static auto cuda_template = at::jit::CodeTemplate(jit_common_types + jit_vectorized_code_template);
-  return cuda_template.format(env);
+  const auto code = cuda_template.format(env);
+  return code;
 }
 
-// Compiles the kernel
+
+#if BUILD_JITERATOR_WITH_CACHE
+// Acquires (possibly creating) the kernel cache directory
+c10::optional<std::string> get_cache_dir() {
+  // If the environment variable USE_TORCH_KERNEL_CACHE is set to "0" then no persistent cache is used
+  const char* uptkc = std::getenv("USE_PYTORCH_KERNEL_CACHE");
+  const bool use_kernel_cache = (uptkc == nullptr) ? true : std::strcmp(uptkc, "0");
+
+  if (!use_kernel_cache) {
+    return {};
+  }
+
+  // Cache path comes from PYTORCH_KERNEL_CACHE_PATH, then XDG_CACHE_HOME, then HOME environment variables
+  std::string cache_dir;
+  char* ptkcp = std::getenv("PYTORCH_KERNEL_CACHE_PATH");
+  if (ptkcp != nullptr) {
+    cache_dir = std::string(ptkcp);
+  } else {
+    // USES XDG_CACHE_HOME if it's set
+    ptkcp = std::getenv("XDG_CACHE_HOME");
+    if (ptkcp != nullptr) {
+      cache_dir = std::string(ptkcp) + "/torch/kernels";
+    } else {
+      // Falls back to HOME/.cache
+      ptkcp = std::getenv("HOME");
+      if (ptkcp == nullptr) {
+        TORCH_WARN_ONCE("No PYTORCH_KERNEL_CACHE_PATH or HOME environment variable set!",
+                        " This disables kernel caching.");
+        return {};
+      } else {
+        cache_dir = std::string(ptkcp) + "/.cache/torch/kernels";
+      }
+    }
+  }
+
+  // Creates the cache directory if it does not exist
+  const char* p_cache_dir = cache_dir.c_str();
+  const bool cache_dir_exists = (access(p_cache_dir, F_OK) == 0);
+  if (!cache_dir_exists) {
+    if (mkdir(p_cache_dir, S_IRWXU | S_IRWXG | S_IRWXO) != 0) {
+      TORCH_WARN_ONCE("Specified kernel cache directory could not be created! This disables kernel caching.",
+                      " Specified directory is ", cache_dir, ".",
+                      " This warning will appear only once per process.");
+      return {};
+    }
+  }
+
+  // Checks that the cache directory is readable and writable
+  const bool cache_dir_readable = (access(p_cache_dir, R_OK) == 0);
+  if (!cache_dir_readable) {
+    TORCH_WARN_ONCE("Specified kernel cache directory is not readable! This disables kernel caching.",
+                    " Specified directory is ", cache_dir, ".",
+                    " This warning will appear only once per process.");
+    return {};
+  }
+
+  const bool cache_dir_writable = (access(p_cache_dir, W_OK) == 0);
+  if (!cache_dir_writable) {
+    TORCH_WARN_ONCE("Specified kernel cache directory is not writable! This disables kernel caching.",
+                    " Specified directory is ", cache_dir, ".",
+                    " This warning will appear only once per process.");
+    return {};
+  }
+
+  return cache_dir;
+}
+#endif // BUILD_JITERATOR_WITH_CACHE
+
+// Compiles the kernel, or acquires if from the cache if caching
 NvrtcFunction jit_pwise_function(
     const std::string& code,
     const std::string& kernel_name) {
-  // Acquires device and NVRTC properties (for compile arch and occupancy calculations)
+
+  initializeCudaContext();
+
+  // Acquires CUDA and nvrtc versions and whether we're compiling to ptx or SASS
   const cudaDeviceProp* prop = at::cuda::getCurrentDeviceProperties();
-  int major = 0, minor = 0;
+  int cuda_major = 0, cuda_minor = 0, nvrtc_major = 0, nvrtc_minor = 0;
   bool compile_to_sass = false;
-  codegenOutputQuery(prop, major, minor, compile_to_sass);
+  at::cuda::jit::codegenOutputQuery(
+    prop, cuda_major, cuda_minor, nvrtc_major, nvrtc_minor, compile_to_sass);
+
+  // Objects used whether loading from the cache or jit compiling
+  const auto& nvrtc = at::globalContext().getNVRTC();
+  NvrtcFunction compiled_kernel_;
+  std::string name = kernel_name + "_kernel";
+
+  #if BUILD_JITERATOR_WITH_CACHE
+    static const c10::optional<std::string> cache_dir = get_cache_dir();
+
+    std::string file_path;
+    if (cache_dir.has_value()) {
+      // Attemps to read from the cache.
+      // Cubin name is <kernel name>_arch<major>.<minor>_nvrtc<major>.<minor>_<ptx or sass>_<program length>_<string hash>
+      // Note that the SHA1 hash used in the file name is NOT the SHA1 hash of the file's contents,
+      //   because we hash on the CUDA code, but we save the compiled ptx or sass
+
+      // Acquires SHA1 hash
+      c10::sha1 sha1_hash{code};
+      const auto hash_code = sha1_hash.str();
+
+      // Constructs file path by appending constructed cubin name to cache path
+      std::stringstream ss;
+      ss << *cache_dir << "/";
+      ss << kernel_name;
+      ss << "_arch" << cuda_major << "." << cuda_minor;
+      ss << "_nvrtc" << nvrtc_major << "." << nvrtc_minor;
+      ss << (compile_to_sass ? "_sass" : "_ptx");
+      ss << "_" << code.length();
+      ss << "_" << hash_code;
+      file_path = ss.str();
+
+      std::ifstream readin{file_path, std::ios::in | std::ifstream::binary};
+      if (readin.fail()) {
+        // NOTE: this does not warn because the file might not exist
+        // TODO: consider if this should explicilty check for the file's existence or not to throw
+        //   an informative warning
+        readin.close();
+      } else {
+        // TODO: try passing the "mapped" file directly to cuModuleLoadCall instead of using an intermediate buffer
+        std::vector<char> buffer(std::istreambuf_iterator<char>(readin), {});
+        AT_CUDA_DRIVER_CHECK(nvrtc.cuModuleLoadData(&(compiled_kernel_.module), buffer.data()));
+        AT_CUDA_DRIVER_CHECK(
+          nvrtc.cuModuleGetFunction(&(compiled_kernel_.function), compiled_kernel_.module, name.c_str()));
+        readin.close();
+        return compiled_kernel_;
+      }
+    }
+  #endif // BUILD_JITERATOR_WITH_CACHE
+
+  // Just-in-time compiles the program
+
   // Creates the NVRTC program
   nvrtcProgram program;
-  const auto& nvrtc = at::globalContext().getNVRTC();
   AT_CUDA_NVRTC_CHECK(nvrtc.nvrtcCreateProgram(
       &program, code.c_str(), nullptr, 0, nullptr, nullptr));
-  // constructs nvrtc build arguments
-#if defined(CUDA_VERSION) && CUDA_VERSION < 11010
-  // compile to sass is not allowed prior to CUDA 11.1
-  compile_to_sass = false;
-#endif
+
+  // Constructs nvrtc build arguments
   // CUDA 11.1 allows going directly to SASS (sm_) instead of PTX (compute_)
   // which gives better backwards compatibility to work on older driver,
   // (since older driver doesn't necessrily recognize PTX emitted by new
@@ -727,23 +945,24 @@ NvrtcFunction jit_pwise_function(
   // `unsupported_arch==True`), since SASS are not necessarily compatible,
   // we fallback to PTX instead.
   const std::string compute = std::string("--gpu-architecture=") +
-      (compile_to_sass ? "sm_" : "compute_") + std::to_string(major) +
-      std::to_string(minor);
+      (compile_to_sass ? "sm_" : "compute_") + std::to_string(cuda_major) +
+      std::to_string(cuda_minor);
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   std::vector<const char*> args = {
       "--std=c++14", compute.c_str(), "-default-device"};
 
-#ifndef NDEBUG
-  // Add line info to generated kernels
-  args.push_back("-lineinfo");
-#else
-  // Avoid excessive register usage from assertion
-  args.push_back("-DNDEBUG");
-#endif
-  // compiles and validates result
-  initializeCudaContext();
+  #ifndef NDEBUG
+    // Add line info to generated kernels
+    args.push_back("-lineinfo");
+  #else
+    // Avoid excessive register usage from assertion
+    args.push_back("-DNDEBUG");
+  #endif
+
   const auto compilation_result =
       nvrtc.nvrtcCompileProgram(program, args.size(), args.data());
+
+  // Throws an error on compilation failure
   if (compilation_result != NVRTC_SUCCESS) {
     size_t logsize;
     AT_CUDA_NVRTC_CHECK(nvrtc.nvrtcGetProgramLogSize(program, &logsize));
@@ -753,9 +972,10 @@ NvrtcFunction jit_pwise_function(
     cu << log.data();
     throw std::runtime_error(cu.str() + code);
   }
+
   size_t ptx_size = 0;
   std::vector<char> ptx;
-#if defined(CUDA_VERSION) && CUDA_VERSION >= 11010
+  #if defined(CUDA_VERSION) && CUDA_VERSION >= 11010
     // compile_to_sass determines whether we are generating SASS or PTX, hence
     // the different API.
     const auto getSize = compile_to_sass
@@ -764,29 +984,60 @@ NvrtcFunction jit_pwise_function(
     const auto getFunc = compile_to_sass
         ? at::globalContext().getNVRTC().nvrtcGetCUBIN
         : at::globalContext().getNVRTC().nvrtcGetPTX;
-#else
+  #else
     const auto getSize = at::globalContext().getNVRTC().nvrtcGetPTXSize;
     const auto getFunc = at::globalContext().getNVRTC().nvrtcGetPTX;
-#endif
-    AT_CUDA_NVRTC_CHECK(getSize(program, &ptx_size));
-    ptx.resize(ptx_size);
-    AT_CUDA_NVRTC_CHECK(getFunc(program, ptx.data()));
+  #endif
 
-    NvrtcFunction compiled_kernel_;
-    AT_CUDA_DRIVER_CHECK(nvrtc.cuModuleLoadData(&(compiled_kernel_.module), ptx.data()));
-    std::string name = kernel_name + "_kernel";
-    AT_CUDA_DRIVER_CHECK(
-        nvrtc.cuModuleGetFunction(&(compiled_kernel_.function), compiled_kernel_.module, name.c_str()));
-    // TODO: use guards to avoid leaking
-    AT_CUDA_NVRTC_CHECK(nvrtc.nvrtcDestroyProgram(&program));
+  AT_CUDA_NVRTC_CHECK(getSize(program, &ptx_size));
+  ptx.resize(ptx_size);
+  AT_CUDA_NVRTC_CHECK(getFunc(program, ptx.data()));
 
-    return compiled_kernel_;
+  AT_CUDA_DRIVER_CHECK(nvrtc.cuModuleLoadData(&(compiled_kernel_.module), ptx.data()));
+
+  AT_CUDA_DRIVER_CHECK(
+      nvrtc.cuModuleGetFunction(&(compiled_kernel_.function), compiled_kernel_.module, name.c_str()));
+  // TODO: use guards to avoid leaking
+  AT_CUDA_NVRTC_CHECK(nvrtc.nvrtcDestroyProgram(&program));
+
+  #if BUILD_JITERATOR_WITH_CACHE
+    if (cache_dir.has_value()) {
+      // Writes the program to the cache if caching
+      // NOTE: Actually writes to a per-process temporary file to avoid multi-process contention.
+      //   The temporary file is then renamed to the actual file.
+      //   If the actual file already exists then the rename may fail or replace the actual file,
+      //     the behavior is implementation-specific.
+      //   Files replaced through this process should remain extant if they are being read because
+      //     of UNIX filesystem properties, but this behavior is unverified and may require
+      //     additional review in the future.
+      // TODO: In C++17 we should be able to use the filesystem header.
+      const auto pid = getpid();
+      std::stringstream tmp_file_path_ss;
+      tmp_file_path_ss << file_path << "_tmp_" << pid;
+      const std::string tmp_file_path = tmp_file_path_ss.str();
+      std::ofstream cubin(tmp_file_path, std::ios::out | std::ofstream::binary);
+      if (cubin.fail()) {
+        TORCH_WARN_ONCE("Failed to write temporarily kernel cache file!",
+                        " File path was ", tmp_file_path, ".",
+                        " This warning will only appear once per process.");
+      } else {
+        std::copy(ptx.begin(), ptx.end(), std::ostreambuf_iterator<char>(cubin));
+        if (std::rename(tmp_file_path.c_str(), file_path.c_str()) != 0) {
+          // Removes tmp file if the rename failed
+          std::remove(tmp_file_path.c_str());
+        }
+      }
+      cubin.close();
+    }
+  #endif // BUILD_JITERATOR_WITH_CACHE
+
+  return compiled_kernel_;
 }
 
 // TODO: may need/want to initialize CUDA context here (refactor into nvrtc call)
 void launch_jitted_pwise_function(
     NvrtcFunction function,
-    std::array<void*, 7>& args,
+    void* args[],
     const int nBlocks,
     const int kBlockSize) {
   initializeCudaContext();
@@ -803,7 +1054,7 @@ void launch_jitted_pwise_function(
     1,
     0,
     stream,
-    args.data(),
+    args,
     nullptr));
 }
 
