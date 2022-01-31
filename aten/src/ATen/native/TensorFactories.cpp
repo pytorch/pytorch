@@ -1,7 +1,7 @@
 #include <ATen/ATen.h>
 #include <ATen/CPUGeneratorImpl.h>
-#include <ATen/Utils.h>
 #include <ATen/Dispatch.h>
+#include <ATen/EmptyTensor.h>
 #include <ATen/Parallel.h>
 #include <ATen/MapAllocator.h>
 #include <ATen/NativeFunctions.h>
@@ -201,10 +201,7 @@ Tensor empty(
 
 Tensor empty_strided_cpu(IntArrayRef size, IntArrayRef stride, c10::optional<ScalarType> dtype_opt,
                          c10::optional<Layout> layout_opt, c10::optional<Device> device_opt, c10::optional<bool> pin_memory_opt) {
-  check_size_nonnegative(size);
-  auto t = at::native::empty_cpu({0}, dtype_opt, layout_opt, device_opt, pin_memory_opt);
-  at::native::resize_impl_cpu_(t.unsafeGetTensorImpl(), size, stride);
-  return t;
+  return at::detail::empty_strided_cpu(size, stride, dtype_opt, layout_opt, device_opt, pin_memory_opt);
 }
 
 Tensor& empty_out(IntArrayRef size,
@@ -1081,8 +1078,9 @@ Tensor _efficientzerotensor(IntArrayRef size,
     auto device_ = device_or_default(device);
     auto allocator = ZeroTensorAllocator(device_);
     auto dtype_ = dtype_or_default(dtype);
+    constexpr auto zero_ks = at::DispatchKeySet(at::DispatchKey::ZeroTensor);
     return at::detail::empty_generic(
-        size, &allocator, at::DispatchKey::ZeroTensor, dtype_, c10::nullopt);
+        size, &allocator, zero_ks, dtype_, c10::nullopt);
 }
 
 Tensor& zeros_out(IntArrayRef size, Tensor& result) {
