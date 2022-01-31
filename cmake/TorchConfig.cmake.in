@@ -169,6 +169,8 @@ endif()
 # When we build libtorch with the old libstdc++ ABI, dependent libraries must too.
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
   set(TORCH_CXX_FLAGS "-D_GLIBCXX_USE_CXX11_ABI=@GLIBCXX_USE_CXX11_ABI@")
+else()
+  set(TORCH_CXX_FLAGS "-D_GLIBCXX_USE_CXX11_ABI=0")
 endif()
 
 find_library(TORCH_LIBRARY torch PATHS "${TORCH_INSTALL_PREFIX}/lib")
