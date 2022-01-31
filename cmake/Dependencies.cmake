@@ -247,6 +247,7 @@ endif()
 
 if(NOT INTERN_BUILD_MOBILE)
   set(AT_MKL_ENABLED 0)
+  set(AT_MKL_SEQUENTIAL 0)
   set(AT_MKL_MT 0)
   set(USE_BLAS 1)
   if(NOT (ATLAS_FOUND OR BLIS_FOUND OR GENERIC_BLAS_FOUND OR MKL_FOUND OR OpenBLAS_FOUND OR VECLIB_FOUND OR FlexiBLAS_FOUND))
@@ -258,9 +259,8 @@ if(NOT INTERN_BUILD_MOBILE)
   endif()
 
   if(MKL_FOUND)
-    add_definitions(-DTH_BLAS_MKL)
     if("${MKL_THREADING}" STREQUAL "SEQ")
-      add_definitions(-DTH_BLAS_MKL_SEQ=1)
+      set(AT_MKL_SEQUENTIAL 1)
     endif()
     if(MSVC AND MKL_LIBRARIES MATCHES ".*libiomp5md\\.lib.*")
       add_definitions(-D_OPENMP_NOFORCE_MANIFEST)
@@ -1047,7 +1047,7 @@ if(BUILD_PYTHON)
 
   # These should fill in the rest of the variables, like versions, but resepct
   # the variables we set above
-  set(Python_ADDITIONAL_VERSIONS ${PYTHON_VERSION} 3.8 3.7 3.6)
+  set(Python_ADDITIONAL_VERSIONS ${PYTHON_VERSION} 3.8 3.7)
   find_package(PythonInterp 3.0)
   find_package(PythonLibs 3.0)
 
@@ -1055,9 +1055,9 @@ if(BUILD_PYTHON)
     message(FATAL_ERROR
       "Found Python libraries version ${PYTHONLIBS_VERSION_STRING}. Python 2 has reached end-of-life and is no longer supported by PyTorch.")
   endif()
-  if(${PYTHONLIBS_VERSION_STRING} VERSION_LESS 3.6)
+  if(${PYTHONLIBS_VERSION_STRING} VERSION_LESS 3.7)
     message(FATAL_ERROR
-      "Found Python libraries version ${PYTHONLIBS_VERSION_STRING}. Python 3.5 is no longer supported by PyTorch.")
+      "Found Python libraries version ${PYTHONLIBS_VERSION_STRING}. Python 3.6 is no longer supported by PyTorch.")
   endif()
 
   # When building pytorch, we pass this in directly from setup.py, and
@@ -1745,6 +1745,7 @@ if(NOT INTERN_BUILD_MOBILE)
   endif()
 
   find_package(VSX) # checks VSX
+  find_package(ZVECTOR) # checks ZVECTOR
   # checks AVX and AVX2. Already called once in MiscCheck.cmake. Called again here for clarity --
   # cached results will be used so no extra overhead.
   find_package(AVX)
@@ -1995,3 +1996,6 @@ if(USE_KINETO)
     message(STATUS "Configured Kineto")
   endif()
 endif()
+
+# Include google/FlatBuffers
+include(${CMAKE_CURRENT_LIST_DIR}/FlatBuffers.cmake)

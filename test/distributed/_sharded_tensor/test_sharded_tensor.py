@@ -992,8 +992,8 @@ class TestShardedTensorChunked(ShardedTensorTestBase):
         module_load.load_state_dict(state_dict_deser, strict=False)
 
         # Verify after load.
-        self.assert_sharded_tensor_equal(m.sharded_tensor1, module_load.sharded_tensor1)
-        self.assert_sharded_tensor_equal(m.submodule.sharded_tensor2, module_load.submodule.sharded_tensor2)
+        self.assertTrue(torch.equal(m.sharded_tensor1, module_load.sharded_tensor1))
+        self.assertTrue(torch.equal(m.submodule.sharded_tensor2, module_load.submodule.sharded_tensor2))
 
     @with_comms
     @skip_if_lt_x_gpu(4)
@@ -1028,8 +1028,8 @@ class TestShardedTensorChunked(ShardedTensorTestBase):
             module_load.load_state_dict(state_dict_deser, strict=False)
 
         # Verify after load.
-        self.assert_sharded_tensor_equal(m.sharded_tensor1, module_load.sharded_tensor1)
-        self.assert_sharded_tensor_equal(m.submodule.sharded_tensor2, module_load.submodule.sharded_tensor2)
+        self.assertTrue(torch.equal(m.sharded_tensor1, module_load.sharded_tensor1))
+        self.assertTrue(torch.equal(m.submodule.sharded_tensor2, module_load.submodule.sharded_tensor2))
 
     @with_comms
     @skip_if_lt_x_gpu(4)
@@ -1102,6 +1102,28 @@ class TestShardedTensorChunked(ShardedTensorTestBase):
         buffer.seek(0)
         with self.assertRaisesRegex(RuntimeError, 'Need to initialize default process group'):
             state_dict_deser = torch.load(buffer)
+        rpc.shutdown()
+
+    @with_comms
+    @skip_if_lt_x_gpu(4)
+    @requires_nccl()
+    def test_cleanup(self):
+
+        def create_tensors():
+            spec = ChunkShardingSpec(
+                dim=0,
+                placements=[
+                    "rank:0/cuda:0",
+                    "rank:1/cuda:1",
+                    "rank:2/cuda:2",
+                    "rank:3/cuda:3",
+                ],
+            )
+            st1 = _sharded_tensor.empty(spec, 10, 20, init_rrefs=True)
+            st2 = _sharded_tensor.empty(spec, 10, 20)
+
+        create_tensors()
+        self.assertEqual(0, len(_sharded_tensor.api._sharded_tensor_map))
 
 
 class TestShardedTensorEnumerable(ShardedTensorTestBase):

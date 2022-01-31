@@ -1,3 +1,4 @@
+#include <ATen/native/cpu/MaxUnpoolKernel.h>
 #include <ATen/ATen.h>
 
 #include <ATen/Dispatch.h>

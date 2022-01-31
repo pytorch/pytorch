@@ -1063,6 +1063,11 @@ void triangular_solve_out_sparse_csr(
     bool upper,
     bool transpose,
     bool unitriangular) {
+  if (B.numel() == 0 || X.numel() == 0 || A._nnz() == 0) {
+    // If A has no nnz, then A is singular and we can't solve.
+    X.fill_(NAN);
+    return;
+  }
   if (A.values().dim() == 3 && A.values().size(-1) > 1) {
     if (B.size(-1) == 1) {
       return block_sparse_triangular_solve_vec(A, B, X, upper, transpose, unitriangular);
@@ -1077,10 +1082,6 @@ void triangular_solve_out_sparse_csr(
       "PyTorch with at least CUDA 11.3. ",
       "Please use PyTorch built with newer CUDA version.");
 #else
-  if (B.numel() == 0 || X.numel() == 0 || A._nnz() == 0) {
-    return;
-  }
-
   c10::MaybeOwned<Tensor> X_ = prepare_dense_matrix_for_cusparse(X);
   // It should be possible to use mixed memory format
   // but there is a bug in CUDA 11.3.1 version:

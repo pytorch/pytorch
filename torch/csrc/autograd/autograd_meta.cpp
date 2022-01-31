@@ -1,5 +1,14 @@
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <c10/util/irange.h>
 #include <torch/csrc/autograd/variable.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#else
+#include <ATen/ops/_has_same_storage_numel.h>
+#include <ATen/ops/_new_zeros_with_same_feature_meta.h>
+#include <ATen/ops/zeros.h>
+#endif
 
 namespace torch {
 namespace autograd {

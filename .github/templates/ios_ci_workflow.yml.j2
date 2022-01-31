@@ -7,8 +7,9 @@ name: !{{ build_environment }}
 {%- endblock %}
 
 on:
+{%- if is_default %}
   pull_request:
-    types: [opened, synchronize, reopened, !{{ ciflow_config.trigger_action }}]
+{%- endif -%}
 
 {%- if is_scheduled %}
   schedule:
@@ -19,6 +20,14 @@ on:
       - master
       - release/*
 {%- endif %}
+{%- for label in ciflow_config.labels | sort %}
+  {%- if loop.first %}
+    tags:
+  {%- endif %}
+  {%- if label != "ciflow/default" %}
+      - '!{{ label }}/*'
+  {%- endif %}
+{%- endfor %}
   workflow_dispatch:
 
 # For setup-miniconda, see https://github.com/conda-incubator/setup-miniconda/issues/179
@@ -32,18 +41,19 @@ env:
 !{{ common.set_xcode_version(xcode_version) }}
 
 jobs:
-!{{ common.ciflow_should_run_job(ciflow_config) }}
 {% block build +%}
   build:
     runs-on: macos-10.15
-    needs: [!{{ ciflow_config.root_job_name }}]
     timeout-minutes: !{{ common.timeout_minutes }}
     env:
       JOB_BASE_NAME: !{{ build_environment }}-build
       IOS_CERT_KEY_2022: ${{ secrets.IOS_CERT_KEY_2022 }}
       IOS_SIGN_KEY_2022: ${{ secrets.IOS_SIGN_KEY_2022 }}
+      PR_LABELS: ${{ toJson(github.event.pull_request.labels.*.name) }}
     steps:
-      !{{ common.checkout_pytorch("recursive") }}
+      - name: print labels
+        run: echo "${PR_LABELS}"
+      !{{ common.checkout() }}
       !{{ common.setup_miniconda("3.8") }}
       - name: Install ios / conda Dependencies
         run: |
