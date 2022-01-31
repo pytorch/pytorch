@@ -198,21 +198,6 @@ bool mayContainAlias(
   return db.mayContainAlias(const_cast<Value*>(a), valueVecFromFastSet(b));
 }
 
-bool mayContainAlias(
-    AliasDb& db,
-    const Value* a,
-    const FastSet<const Value*>& b) {
-  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
-  return db.mayContainAlias(const_cast<Value*>(a), valueVecFromFastSet(b));
-}
-
-bool mayContainAlias(
-    const AliasDb& db,
-    const FastSet<const Value*>& a,
-    const FastSet<const Value*>& b) {
-  return db.mayContainAlias(valueVecFromFastSet(a), valueVecFromFastSet(b));
-}
-
 void PrepareGraphForStaticModule(
     std::shared_ptr<torch::jit::Graph> graph,
     const StaticModuleOptions& opts,
@@ -830,8 +815,8 @@ BlockRunner::BlockRunner(
     auto block_runners = std::make_unique<std::vector<BlockRunner>>();
     block_runners->reserve(num_blocks);
 
-    for (auto* block : blocks) {
-      block_runners->emplace_back(sm, values, block);
+    for (auto* b : blocks) {
+      block_runners->emplace_back(sm, values, b);
     }
     pnode.set_block_runners(std::move(block_runners));
   }
