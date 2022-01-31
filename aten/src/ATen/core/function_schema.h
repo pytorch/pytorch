@@ -390,7 +390,7 @@ struct FunctionSchema {
 
   // Check that inputs have the correct types and appends any missing default
   // values.
-  template <typename T = c10::Type>
+  template <typename T = c10::PlatformType>
   void checkAndNormalizeInputs(
       std::vector<IValue>& inputs,
       const std::unordered_map<std::string, IValue>& kwargs =

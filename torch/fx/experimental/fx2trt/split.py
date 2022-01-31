@@ -7,9 +7,9 @@ import torch.fx as fx
 from .tools.trt_splitter import (
     create_trt_operator_support,
     TRTSplitter,
+    TRTSplitterSetting,
 )
 from torch.fx.passes.operator_support import OperatorSupportBase
-from torch.fx.passes.splitter_base import _SplitterSettingBase
 
 
 logger = logging.getLogger(__name__)
@@ -160,7 +160,7 @@ class Splitter(SplitFunc):
         return (match[1], int(match[2]))
 
     def _trt_split(self, graph: fx.GraphModule, input: Input) -> fx.GraphModule:
-        splitter_settings = _SplitterSettingBase()
+        splitter_settings = TRTSplitterSetting()
         splitter_settings.min_acc_module_size = self.min_acc_module_size
 
         splitter = TRTSplitter(
