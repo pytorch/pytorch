@@ -183,7 +183,7 @@ def _get_cache_or_reload(github, force_reload, verbose=True, skip_validation=Fal
     # To check if cached repo exists, we need to normalize folder names.
     repo_dir = os.path.join(hub_dir, '_'.join([repo_owner, repo_name, normalized_br]))
     # Check that the repo is in the trusted list
-    _check_repo('_'.join([repo_owner, repo_name, normalized_br]), trust_repo=trust_repo, calling_fn=calling_fn)
+    _check_repo('_'.join([repo_owner, repo_name]), trust_repo=trust_repo, calling_fn=calling_fn)
 
     use_cache = (not force_reload) and os.path.exists(repo_dir)
 
