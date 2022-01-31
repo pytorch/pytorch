@@ -135,10 +135,23 @@ $5 = torch._ops.aten.kl_div($0, $1, 2, log_target=True)''')
         self.assertRaisesRegexp(
             RuntimeError, "Unable to cast", lambda: A(torch.zeros(1)).neg(),
         )
-        self.assertExpectedRaisesInline(
-            RuntimeError, lambda: A(torch.zeros(1)).detach(),
-            """detach returned invalid type str, expected Tensor"""
+        self.assertRaisesRegexp(
+            RuntimeError, "Unable to cast", lambda: A(torch.zeros(1)).detach(),
         )
+
+    def test_detach_appears_twice_when_called_once(self) -> None:
+        with capture_logs() as logs:
+            x = LoggingTensor(torch.tensor([3.0], requires_grad=True))
+            log_input("x", x)
+            x.detach()
+        # FIXME: We actually want this to emit a single detach. However,
+        # it currently emits two, for reasons unclear to us. Leaving
+        # this test here to make sure we don't regress even further (it
+        # would be bad if calling .detach() once emits 3+ detaches).
+        self.assertExpectedInline('\n'.join(logs), '''\
+$0 = input('x')
+$1 = torch._ops.aten.detach($0)
+$2 = torch._ops.aten.detach($1)''')
 
     def test_metadata_change_not_allowed(self) -> None:
         x = LoggingTensor(torch.ones(1))
