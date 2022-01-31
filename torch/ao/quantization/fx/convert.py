@@ -255,7 +255,9 @@ def convert(model: GraphModule, is_reference: bool = False,
     # }
     # We use remove_duplicate=False here because torch.cat uses
     # the same activation_post_process module instance but different names
+    print("1 - before named_modules")
     modules = dict(model.named_modules(remove_duplicate=False))
+    print("2 - after named_modules")
 
     # TODO refactor this code once we update the prepare logic to have additional information on
     # which graph nodes have been observed and share that with convert to decide which observers to ignore.
@@ -287,6 +289,7 @@ def convert(model: GraphModule, is_reference: bool = False,
         model.graph, modules, patterns,
         qconfig_map,
         custom_module_classes=custom_module_classes)
+    print("3 - after find_matches")
 
     if model._equalization_qconfig_map is not None:
         # If we want to do equalization then do the following:
@@ -299,6 +302,7 @@ def convert(model: GraphModule, is_reference: bool = False,
     # for dynamic quant ops or weight only quant ops
     run_weight_observers(model)
 
+    print("4 - after run_weight_observers")
     quantized_graph = Graph()
     env: Dict[str, Dict[Optional[torch.dtype], Node]] = defaultdict(lambda: defaultdict(Node))  # type: ignore[arg-type]
 
@@ -618,6 +622,8 @@ def convert(model: GraphModule, is_reference: bool = False,
                 env[node.name][torch.float] = \
                     quantized_graph.node_copy(node, load_non_quantized)
 
+    print("5 - after for loop")
+
     # remove activation post process
     act_post_process_removed_graph = Graph()
     remove_env: Dict[str, Node] = {}
@@ -643,10 +649,14 @@ def convert(model: GraphModule, is_reference: bool = False,
         _remove_qconfig(model)
     preserved_attributes = set(convert_custom_config_dict.get("preserved_attributes", []))
     model = QuantizedGraphModule(model, act_post_process_removed_graph, preserved_attributes)
+    print("6 - after remove observers")
     if not is_reference:
         model = duplicate_dequantize_node(model)
         model = fold_weight(model, node_name_to_scope)
+        print("7 - after fold weight")
         model = lower_to_fbgemm(model)
+        print("8 - after lowering")
         model = remove_quant_dequant_pairs(model)
         model = remove_extra_dequantize(model)
+        print("9 - after remove duplicate qdq")
     return model
