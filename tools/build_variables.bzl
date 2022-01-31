@@ -413,6 +413,7 @@ lazy_tensor_core_sources = [
     "torch/csrc/lazy/core/view_ops/resize.cpp",
     "torch/csrc/lazy/core/view_ops/select.cpp",
     "torch/csrc/lazy/core/view_ops/squeeze.cpp",
+    "torch/csrc/lazy/core/view_ops/unsqueeze.cpp",
     "torch/csrc/lazy/core/view_ops/select_view_update.cpp",
     "torch/csrc/lazy/core/view_ops/view.cpp",
     "torch/csrc/lazy/ts_backend/config.cpp",
