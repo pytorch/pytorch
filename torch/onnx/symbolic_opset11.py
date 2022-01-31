@@ -8,7 +8,7 @@ import torch.onnx.symbolic_helper as sym_help
 import warnings
 
 from torch.onnx.symbolic_helper import parse_args, _unimplemented, _is_tensor_list, ScalarType
-from torch.onnx.symbolic_opset9 import expand, unused, mul
+from torch.onnx.symbolic_opset9 import expand, unused, mul, _compatible_float_cast
 from torch.nn.modules.utils import _single, _pair, _triple
 from torch.onnx.utils import _add_block, _add_input_to_block, _add_output_to_block
 
@@ -62,7 +62,7 @@ def clamp_min(g, self, min):
         max = unused(g)
         return g.op("Clip", self, min, max)
     else:
-        return g.op("Max", self, min)
+        return _compatible_float_cast(g, "Max", self, min)
 
 
 @parse_args("v", "v")
@@ -73,11 +73,11 @@ def clamp_max(g, self, max):
         min = unused(g)
         return g.op("Clip", self, min, max)
     else:
-        return g.op("Min", self, max)
+        return _compatible_float_cast(g, "Min", self, max)
 
 
 def relu6(g, input):
-    relu = g.op("Relu", input)
+    relu = _compatible_float_cast(g, "Relu", input)
     dtype = input.type().scalarType()
     if dtype is None:
         dtype = ScalarType.FLOAT
