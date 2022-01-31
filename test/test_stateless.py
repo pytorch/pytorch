@@ -58,9 +58,16 @@ class TestStatelessFunctionalAPI(TestCase):
         jit_module = torch.jit.script(module)
         with self.assertRaisesRegex(
             RuntimeError,
-            r'delete methods or parameters'
+            r'used with Jitted modules'
         ):
             self._run_call_with_mock_module(jit_module)
+        x = torch.rand((1, 1))
+        traced_module = torch.jit.trace(module, x)
+        with self.assertRaisesRegex(
+            RuntimeError,
+            r'used with Jitted modules'
+        ):
+            self._run_call_with_mock_module(traced_module)
 
     @unittest.skipIf(not TEST_MULTIGPU, 'multi-GPU not supported')
     def test_functional_call_with_data_parallel(self):
@@ -127,12 +134,15 @@ class TestStatelessFunctionalAPI(TestCase):
         self.assertEqual(cur_weight, prev_weight)
         self.assertEqual(cur_buffer, prev_buffer)
 
-    def test_reparametrized_module(self):
+    def test_reparametrized_module_change_parametrization_original(self):
         module = MockModule()
         torch.nn.utils.parametrizations.spectral_norm(module.l1)
         self.assertTrue('l1.parametrizations.weight.original' in dict(module.named_parameters()))
         orig_sn_weight = module.l1.weight.clone()
         x = torch.rand((1, 1))
+        # We substitute the parameter inside the parametrization
+        # the parametrization itself is not overwritten so it will be applied with a different
+        # value for the original tensor
         parameters = {'l1.parametrizations.weight.original': torch.nn.Parameter(torch.tensor([[1.0]])),
                       'l1.bias': torch.tensor([0.0]),
                       'buffer': torch.tensor([0.0])}
@@ -141,7 +151,6 @@ class TestStatelessFunctionalAPI(TestCase):
         # verify that the spectral normalization is still applied
         self.assertTrue('l1.parametrizations.weight.original' in dict(module.named_parameters()))
         self.assertEqual(orig_sn_weight, module.l1.weight)
-
 
 if __name__ == '__main__':
     run_tests()
