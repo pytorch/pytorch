@@ -1,4 +1,4 @@
-# Owner(s): ["oncall: fx"]
+# Owner(s): ["oncall: aiacc"]
 
 import torch
 import torch.fx.experimental.fx_acc.acc_ops as acc_ops

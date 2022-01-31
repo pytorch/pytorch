@@ -88,7 +88,6 @@ DEFAULT_QAT_MODULE_MAPPINGS : Dict[Callable, Any] = {
     nn.Conv2d: nnqat.Conv2d,
     nn.Conv3d: nnqat.Conv3d,
     nn.Linear: nnqat.Linear,
-    nn.Dropout: nnq.Dropout,
     nn.modules.linear.NonDynamicallyQuantizableLinear: nnqat.Linear,
     # Intrinsic modules:
     nni.ConvBn1d: nniqat.ConvBn1d,
@@ -138,6 +137,7 @@ DEFAULT_FLOAT_TO_QUANTIZED_OPERATOR_MAPPINGS : Dict[Union[Callable, str], Callab
     F.instance_norm: torch._ops.ops.quantized.instance_norm,
     F.layer_norm: torch._ops.ops.quantized.layer_norm,
     F.leaky_relu: torch._ops.ops.quantized.leaky_relu,
+    F.dropout: torch._ops.ops.quantized.dropout,
 }
 
 # mapping from module to output activation post process class

@@ -1,5 +1,6 @@
 # encoding: utf-8
 import operator
+import warnings
 
 import torch  # isort:skip
 from typing import Sequence, Optional, List, cast
@@ -15,7 +16,7 @@ from torch.fx.experimental.fx_acc.acc_op_properties import (
     AccOpProperty,
     register_acc_op_properties,
 )
-from torch.fx.passes.shape_prop import _extract_tensor_metadata
+from torch.fx.passes.shape_prop import _extract_tensor_metadata, TensorMetadata
 
 this_arg_is_optional = True
 move_to_qparams = True
@@ -32,7 +33,7 @@ def linear(*, input, weight, bias):
 @register_acc_op
 def quantized_linear(*, input, weight, bias, acc_out_ty=None):
     assert acc_out_ty is not None
-    qparams = acc_utils.get_field_from_acc_out_ty(acc_out_ty, "qparams")
+    qparams = TensorMetadata(*acc_out_ty).qparams
     return nn.quantized.functional.linear(
         input,
         weight,
@@ -462,6 +463,23 @@ def dropout_mapper(node: torch.fx.Node, mod: nn.Module):
     return node.kwargs["input"]
 
 
+try:
+    from torchvision.ops import stochastic_depth
+except Exception as e:
+    warnings.warn(f"Unable to import torchvision related libraries.: {e}")
+else:
+
+    @register_custom_acc_mapper_fn(
+        op_and_target=("call_function", stochastic_depth),
+        arg_replacement_tuples=[("input", "input")],
+    )
+    def stochastic_depth_mapper(node: torch.fx.Node, mod: nn.Module):
+        """
+        Remove dropout node and directly map its input to output.
+        """
+        return node.kwargs["input"]
+
+
 @register_acc_op_properties(AccOpProperty.pointwise, AccOpProperty.unary)
 @register_acc_op_mapping(
     op_and_target=("call_function", nn.functional.hardtanh),
@@ -487,9 +505,7 @@ def hardsigmoid(*, input):
 def silu(node: torch.fx.Node, _: nn.Module) -> torch.fx.Node:
     input_node = node.kwargs["input"]
     with node.graph.inserting_before(node):
-        sigmoid_node = node.graph.call_function(
-            sigmoid, kwargs={"input": input_node}
-        )
+        sigmoid_node = node.graph.call_function(sigmoid, kwargs={"input": input_node})
         sigmoid_node.meta = node.meta.copy()
         new_node = node.graph.call_function(
             mul, kwargs={"input": sigmoid_node, "other": input_node}
@@ -535,7 +551,7 @@ def hardswish_mapper(node: torch.fx.Node, _: nn.Module) -> torch.fx.Node:
 @register_acc_op
 def quantized_add(*, input, other, acc_out_ty=None):
     assert acc_out_ty is not None
-    qparams = acc_utils.get_field_from_acc_out_ty(acc_out_ty, "qparams")
+    qparams = TensorMetadata(*acc_out_ty).qparams
     return torch.ops.quantized.add(
         input,
         other,
@@ -561,7 +577,7 @@ def quantized_add(*, input, other, acc_out_ty=None):
 @register_acc_op
 def quantized_mul(*, input, other, acc_out_ty=None):
     assert acc_out_ty is not None
-    qparams = acc_utils.get_field_from_acc_out_ty(acc_out_ty, "qparams")
+    qparams = TensorMetadata(*acc_out_ty).qparams
     return torch.ops.quantized.mul(
         input,
         other,
@@ -589,8 +605,8 @@ def quantized_mul(*, input, other, acc_out_ty=None):
 @register_acc_op
 def quantize_per_tensor(*, input, acc_out_ty=None):
     assert acc_out_ty is not None
-    qparams = acc_utils.get_field_from_acc_out_ty(acc_out_ty, "qparams")
-    dtype = acc_utils.get_field_from_acc_out_ty(acc_out_ty, "dtype")
+    qparams = TensorMetadata(*acc_out_ty).qparams
+    dtype = TensorMetadata(*acc_out_ty).dtype
     return torch.quantize_per_tensor(
         input, qparams["scale"], qparams["zero_point"], dtype
     )
@@ -616,8 +632,8 @@ def quantize_per_tensor(*, input, acc_out_ty=None):
 @register_acc_op
 def quantize_per_channel(*, input, acc_out_ty=None):
     assert acc_out_ty is not None
-    qparams = acc_utils.get_field_from_acc_out_ty(acc_out_ty, "qparams")
-    dtype = acc_utils.get_field_from_acc_out_ty(acc_out_ty, "dtype")
+    qparams = TensorMetadata(*acc_out_ty).qparams
+    dtype = TensorMetadata(*acc_out_ty).dtype
     return torch.quantize_per_channel(
         input,
         torch.tensor(qparams["scale"]),
@@ -1137,7 +1153,7 @@ def quantized_conv2d(
     padding_mode,
     acc_out_ty,
 ):
-    qparams = acc_utils.get_field_from_acc_out_ty(acc_out_ty, "qparams")
+    qparams = TensorMetadata(*acc_out_ty).qparams
     return torch.nn.quantized.functional.conv2d(
         input=input,
         weight=weight,
@@ -1344,7 +1360,7 @@ def tuple_construct(*, tensors):
 def quantized_batch_norm2d(
     *, input, running_mean, running_var, weight, bias, eps, acc_out_ty
 ):
-    qparams = acc_utils.get_field_from_acc_out_ty(acc_out_ty, "qparams")
+    qparams = TensorMetadata(*acc_out_ty).qparams
     return torch.ops.quantized.batch_norm2d(
         input,
         weight,
@@ -1558,9 +1574,7 @@ def custom_narrow_mapper(node: torch.fx.Node, mod: nn.Module) -> torch.fx.Node:
 @register_acc_op
 def reshape(*, input, acc_out_ty=None):
     assert acc_out_ty is not None
-    return torch.reshape(
-        input, tuple(acc_utils.get_field_from_acc_out_ty(acc_out_ty, "shape"))
-    )
+    return input.reshape(TensorMetadata(*acc_out_ty).shape)
 
 
 @register_custom_acc_mapper_fn(
@@ -1600,7 +1614,7 @@ def custom_tensor_reshape_mapper(node: torch.fx.Node, _: nn.Module) -> torch.fx.
 @register_acc_op
 def to_dtype(input, acc_out_ty=None):
     assert acc_out_ty is not None
-    return input.to(dtype=acc_utils.get_field_from_acc_out_ty(acc_out_ty, "dtype"))
+    return input.to(dtype=TensorMetadata(*acc_out_ty).dtype)
 
 
 @register_custom_acc_mapper_fn(
