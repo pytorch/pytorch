@@ -735,7 +735,7 @@ class TestHub(TestCase):
 
 
     @retry(Exception, tries=3)
-    @patch('torch.hub.get_trusted_input', return_value='')
+    @patch('torch.hub._get_trusted_input', return_value='')
     def test_untrusted_repo(self, input):
         with self.assertRaisesRegex(
                 Exception,
@@ -747,7 +747,7 @@ class TestHub(TestCase):
                 trust_repo=False)
 
     @retry(Exception, tries=3)
-    @patch('torch.hub.get_trusted_input', return_value='y')
+    @patch('torch.hub._get_trusted_input', return_value='y')
     def test_trusted_repo(self, input):
         folder_path = os.path.join(torch.hub.get_dir(), 'ailzhang_torchhub_example_master')
         if os.path.exists(folder_path):
@@ -759,7 +759,7 @@ class TestHub(TestCase):
             trust_repo=False)
 
     @retry(Exception, tries=3)
-    @patch('torch.hub.get_trusted_input', return_value='y')
+    @patch('torch.hub._get_trusted_input', return_value='y')
     def test_check_repo(self, input):
         folder_path = os.path.join(torch.hub.get_dir(), 'ailzhang_torchhub_example_master')
         if os.path.exists(folder_path):
