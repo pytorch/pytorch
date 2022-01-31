@@ -4,7 +4,9 @@ import warnings
 import math
 import unittest
 import functools
+import itertools
 from copy import deepcopy
+
 import torch
 from torch._six import inf
 import torch.optim as optim
@@ -20,7 +22,6 @@ from torch.optim.lr_scheduler import LambdaLR, MultiplicativeLR, SequentialLR, S
 from torch.optim.swa_utils import AveragedModel, SWALR, update_bn
 from torch.testing._internal.common_utils import TestCase, run_tests, TEST_WITH_UBSAN, load_tests, \
     skipIfRocm
-from torch.testing._internal.common_device_type import toleranceOverride, tol
 # load_tests from common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
 load_tests = load_tests
@@ -609,10 +610,10 @@ class TestOptim(TestCase):
             optim.SparseAdam([{"params": [torch.zeros(3, layout=torch.sparse_coo)]}])
 
     # ROCm precision is too low to pass this test
-    # Tolerance Override Handles https://github.com/pytorch/pytorch/issues/69698
     @skipIfRocm
-    @toleranceOverride({torch.float32: tol(4e-3, 0)})
     def test_adadelta(self):
+        # Handles https://github.com/pytorch/pytorch/issues/69698
+        self.rel_tol = 4e-3
         for optimizer in [optim.Adadelta, optim_mt.Adadelta]:
             self._test_basic_cases(
                 lambda weight, bias: optimizer([weight, bias])
@@ -633,9 +634,9 @@ class TestOptim(TestCase):
             with self.assertRaisesRegex(ValueError, "Invalid rho value: 1.1"):
                 optimizer(None, lr=1e-2, rho=1.1)
 
-    # Tolerance Override Handles https://github.com/pytorch/pytorch/issues/69698
-    @toleranceOverride({torch.float32: tol(2e-2, 0)})
     def test_adadelta_complex(self):
+        # Handles https://github.com/pytorch/pytorch/issues/69698
+        self.rel_tol = 2e-2
         for optimizer in [optim.Adadelta]:
             self._test_complex_optimizer(
                 lambda weight: optimizer([weight])
@@ -2475,8 +2476,8 @@ class TestSWAUtils(TestCase):
         for p_avg, p_swa in zip(averaged_params, averaged_dnn.parameters()):
             self.assertEqual(p_avg, p_swa)
 
-    def test_averaged_model_exponential_use_state_dict(self):
-        # Test AveragedModel with EMA as avg_fn and use_state_dict as True.
+    def test_averaged_model_exponential_buffers(self):
+        # Test AveragedModel with EMA as avg_fn and use_buffers as True.
         dnn = torch.nn.Sequential(
             torch.nn.Conv2d(1, 5, kernel_size=3),
             torch.nn.BatchNorm2d(5, momentum=0.3),
@@ -2486,13 +2487,14 @@ class TestSWAUtils(TestCase):
 
         def avg_fn(p_avg, p, n_avg):
             return alpha * p_avg + (1 - alpha) * p
-        averaged_dnn = AveragedModel(dnn, avg_fn=avg_fn, mode='state_dict')
-        averaged_params = [torch.zeros_like(param) for param in dnn.state_dict().values()
+        averaged_dnn = AveragedModel(dnn, avg_fn=avg_fn, use_buffers=True)
+        dnn_params = itertools.chain(dnn.parameters(), dnn.buffers())
+        averaged_params = [torch.zeros_like(param) for param in dnn_params
                            if param.size() != torch.Size([])]
         n_updates = 10
         for i in range(n_updates):
             updated_averaged_params = []
-            for p, p_avg in zip(dnn.state_dict().values(), averaged_params):
+            for p, p_avg in zip(dnn_params, averaged_params):
                 if p.size() == torch.Size([]):
                     continue
                 p.detach().add_(torch.randn_like(p))
@@ -2504,7 +2506,8 @@ class TestSWAUtils(TestCase):
             averaged_dnn.update_parameters(dnn)
             averaged_params = updated_averaged_params
 
-        for p_avg, p_swa in zip(averaged_params, averaged_dnn.module.state_dict().values()):
+        for p_avg, p_swa in zip(
+                averaged_params, itertools.chain(averaged_dnn.module.parameters(), averaged_dnn.module.buffers())):
             self.assertEqual(p_avg, p_swa)
 
     def _test_update_bn(self, dnn, dl_x, dl_xy, cuda):
