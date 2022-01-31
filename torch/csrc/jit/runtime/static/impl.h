@@ -912,9 +912,6 @@ class TORCH_API ProcessedNode {
   // be executed by op implementations.
   std::unique_ptr<std::vector<BlockRunner>> block_runners_;
 };
-static_assert(
-    sizeof(ProcessedNode) == 56,
-    "ProcessedNode size has changed, please make sure this is intentional");
 
 // `StaticRuntime` is the owner of the array of IValues (used for constants,
 // inputs, and intermediate tensors) that all `BlockRunner`s share.
