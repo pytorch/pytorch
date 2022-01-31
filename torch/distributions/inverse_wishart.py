@@ -21,7 +21,7 @@ def _mvdigamma(x: torch.Tensor, p: int) -> torch.Tensor:
     ).sum(-1)
 
 def _clamped_reciprocal(x: torch.Tensor) -> torch.Tensor:
-    assert x.ge(0).all(), "Only only positive input is allowed for '_clamped_reciprocal()'." 
+    assert x.ge(0).all(), "Only positive input is allowed for '_clamped_reciprocal()'."
     return x.clamp(min=torch.finfo(x.dtype).eps)
 
 class InverseWishart(ExponentialFamily):
