@@ -229,6 +229,12 @@ class C10_API OnnxfiBackendSystemError : public Error {
   using Error::Error;
 };
 
+// Used for numerical errors from the linalg module. These
+// turn into LinAlgError when they cross into Python.
+class C10_API LinAlgError : public Error {
+  using Error::Error;
+};
+
 // A utility function to return an exception std::string by prepending its
 // exception type before its what() content
 C10_API std::string GetExceptionString(const std::exception& e);
@@ -485,6 +491,10 @@ namespace detail {
 
 // TODO: We're going to get a lot of similar looking string literals
 // this way; check if this actually affects binary size.
+
+// Like TORCH_CHECK, but raises LinAlgError instead of Error.
+#define TORCH_CHECK_LINALG(cond, ...) \
+  TORCH_CHECK_WITH_MSG(LinAlgError, cond, "LINALG", __VA_ARGS__)
 
 // Like TORCH_CHECK, but raises IndexErrors instead of Errors.
 #define TORCH_CHECK_INDEX(cond, ...) \

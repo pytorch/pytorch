@@ -2138,6 +2138,33 @@ TEST_F(FunctionalTest, Interpolate) {
         "align_corners option can only be set with the "
         "interpolating modes: linear | bilinear | bicubic | trilinear");
   }
+  {
+    auto tensor = torch::rand({2, 3, 32, 32});
+    std::vector<int64_t> osize = {8, 10};
+    auto expected = at::native::_upsample_nearest_exact2d(tensor, osize, torch::nullopt);
+
+    auto options = F::InterpolateFuncOptions()
+        .size(osize)
+        .mode(torch::kNearestExact)
+        .align_corners(false);
+    auto output = F::interpolate(tensor, options);
+
+    ASSERT_TRUE(output.allclose(expected));
+  }
+  {
+    auto tensor = torch::rand({2, 3, 32, 32});
+    std::vector<int64_t> osize = {8, 10};
+    auto expected = at::native::_upsample_bilinear2d_aa(tensor, osize, false, torch::nullopt);
+
+    auto options = F::InterpolateFuncOptions()
+        .size(osize)
+        .mode(torch::kBilinear)
+        .align_corners(false)
+        .antialias(true);
+    auto output = F::interpolate(tensor, options);
+    ASSERT_TRUE(output.allclose(expected));
+
+  }
 }
 
 TEST_F(FunctionalTest, Pad) {

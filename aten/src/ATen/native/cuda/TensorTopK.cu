@@ -40,6 +40,7 @@ __global__ void gatherTopK(at::cuda::detail::TensorInfo<T, IndexType> input,
 
                            at::cuda::detail::TensorInfo<int64_t, IndexType> indices,
                            IndexType indicesWithinSliceStride) {
+  (void)numTopKSlices; // Suppress unused variable warning
   // Indices are limited to integer fp precision, so counts can fit in
   // int32, regardless of IndexType
 #if defined(USE_ROCM)
