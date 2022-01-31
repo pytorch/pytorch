@@ -659,6 +659,28 @@ class TestAutocast(JitTestCase):
         # isn't enabled
         self.assertRaises(RuntimeError, lambda: scripted_thing1.forward(x, y))
 
+    @unittest.skipIf(not TEST_CUDA, "No cuda")
+    def test_caffe2_piecewise_linear_transform(self):
+        def f(x):
+            bounds = [-500.0, 0.0, 1.0, 2.0, 500.0]
+            slopes = [-1.0, 0.0, 1.0, 0.0]
+            intercepts = [0.0, 0.0, -1.0, 1.0]
+            return torch.ops._caffe2.PiecewiseLinearTransform(
+                x, bounds, slopes, intercepts, False
+            )
+
+        def g(x):
+            with torch.autocast("cuda", torch.float16):
+                return f(x)
+
+        scripted = torch.jit.script(g)
+
+        inp = torch.rand(5, 5)
+        ans = f(inp)
+
+        scripted_ans = g(input)
+        self.assertEqual(ans, scripted_ans)
+
 
 if __name__ == "__main__":
     run_tests()
