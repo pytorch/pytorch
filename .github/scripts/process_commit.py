@@ -31,7 +31,8 @@ SECONDARY_LABELS = {
     "topic: non-user visible",
 }
 PYTORCH_REPO = "https://api.github.com/repos/pytorch/pytorch"
-REQUEST_HEADERS = {'Accept': 'application/vnd.github.v3+json', 'Authorization': f'token {os.environ.get('GITHUB_TOKEN')}'}
+GITHUB_TOKEN = os.environ.get('GITHUB_TOKEN')
+REQUEST_HEADERS = {'Accept': 'application/vnd.github.v3+json', 'Authorization': f'token {GITHUB_TOKEN}'}
 
 
 def query_pytorch(cmd: str) -> Any:
