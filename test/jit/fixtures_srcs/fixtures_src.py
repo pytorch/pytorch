@@ -26,3 +26,12 @@ class TestVersionedLinspaceOutV7(torch.nn.Module):
 
     def forward(self, a: Union[int, float, complex], b: Union[int, float, complex], out: torch.Tensor):
         return torch.linspace(a, b, out=out)
+
+
+class TestVersionedSvdV7(torch.nn.Module):
+    def __init__(self):
+        super(TestVersionedSvdV7, self).__init__()
+
+    def forward(self, a):
+        u, s, v = torch.svd(a)
+        return u

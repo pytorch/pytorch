@@ -92,6 +92,7 @@ ALL_MODULES = {
     TestVersionedDivTensorExampleV7(): "aten::div.Tensor",
     TestVersionedLinspaceV7(): "aten::linspace",
     TestVersionedLinspaceOutV7(): "aten::linspace.out",
+    TestVersionedSvdV7(): "aten::svd",
 }
 
 """
