@@ -6,7 +6,7 @@ import numpy as np
 from .expanded_weights_utils import \
     grad_if_exists, grad_if_exists_for_input, unpack_expanded_weight_or_tensor
 
-THRESHOLD = 257
+THRESHOLD = 32
 
 def conv_picker(func, conv1dOpt, conv2dOpt, conv3dOpt):
     if func == F.conv1d:

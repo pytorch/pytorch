@@ -10,7 +10,10 @@ class EmbeddingPerSampleGrad(torch.autograd.Function):
     def forward(ctx, *expanded_args):
         if len(expanded_args[0].shape) == 1:
             raise RuntimeError(f"Expanded Weights needs an input with a batch size, got a 1D tensor, {expanded_args[0]}")
-        return forward_helper(F.embedding, ctx, expanded_args, 1)
+        output, expanded_args, aux_outputs = forward_helper(F.embedding, expanded_args, 1)
+        ctx.args = expanded_args
+        ctx.aux_outputs = aux_outputs
+        return output
 
     @staticmethod
     def backward(ctx, grad_output):

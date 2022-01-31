@@ -32,6 +32,9 @@ def call_for_per_sample_grads(module, batch_size, args, kwargs=None):
         >>> assert model.bias.grad_sample.shape == (5, 3)
         >>> assert model.bias.grad == None
 
+    Note::
+        Does not work with any `nn.RNN`, including `nn.GRU` or `nn.LSTM`. Please use custom
+        rewrites that wrap an `nn.Linear` module. See Opacus for an example
     """
     def maybe_build_expanded_weight(og_tensor):
         if og_tensor.requires_grad:

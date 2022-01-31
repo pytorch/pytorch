@@ -10,12 +10,16 @@ class InstanceNormPerSampleGrad(torch.autograd.Function):
     @staticmethod
     def forward(ctx, *expanded_args):
         instance_norm = partial(torch._instance_norm_all_outputs, cudnn_enabled=True)
-        return forward_helper(instance_norm, ctx, expanded_args, 1)
+        output, expanded_args, aux_outputs = forward_helper(instance_norm, expanded_args, 1)
+        ctx.args = expanded_args
+        ctx.aux_outputs = aux_outputs
+        return output
+
 
     @staticmethod
     def backward(ctx, grad_output):
         (input, running_mean, running_var, weight, bias, _, _, eps) = ctx.args
-        (_, mean, rstd, reserve, idx) = ctx.all_outputs
+        (mean, rstd, reserve, idx) = ctx.aux_outputs
 
         def input_grad():
             b = input.shape[0]

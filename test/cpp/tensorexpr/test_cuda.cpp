@@ -160,7 +160,7 @@ TEST(Cuda, TestVectorAdd01_CUDA) {
   testCudaTestVectorAdd01_impl<int64_t>();
 }
 
-static void testCudaTestVectorAdd02_impl(int N, int block_size) {
+static void testCudaTestVectorAdd02_impl(int64_t N, int64_t block_size) {
   BufHandle a_buf("a", {N}, kFloat);
   BufHandle b_buf("b", {N}, kFloat);
   Tensor c = Compute(
@@ -378,8 +378,8 @@ TEST(Cuda, TestRand01_CUDA) {
 }
 
 TEST(Cuda, DynamicShapeSplit_CUDA) {
-  constexpr int N = 4096;
-  VarHandle n("n", kInt);
+  constexpr int64_t N = 4096;
+  VarHandle n("n", kLong);
   BufHandle a("a", {n}, kFloat);
   Tensor b = Compute(
       "b", {{n, "n"}}, [&](const VarHandle& i) { return a.load(i) * 2.0f; });
@@ -1645,9 +1645,9 @@ TEST(Cuda, MaskMultiDim_CUDA) {
 // In this case both stores must be masked against the extent of the other loop,
 // incase it is larger.
 TEST(Cuda, MaskMultiDimSymbolic_CUDA) {
-  VarHandle OUTER_SIZE("OUTER_SIZE", kInt);
-  VarHandle A_SIZE("A_SIZE", kInt);
-  VarHandle B_SIZE("B_SIZE", kInt);
+  VarHandle OUTER_SIZE("OUTER_SIZE", kLong);
+  VarHandle A_SIZE("A_SIZE", kLong);
+  VarHandle B_SIZE("B_SIZE", kLong);
   BufHandle a_buf("a", {OUTER_SIZE, A_SIZE}, kFloat);
   BufHandle b_buf("b", {OUTER_SIZE, B_SIZE}, kFloat);
   Tensor c = Compute(
@@ -1682,10 +1682,10 @@ TEST(Cuda, MaskMultiDimSymbolic_CUDA) {
   const std::string& verification_pattern =
       R"IR(
 # CHECK: if (threadIdx.x<A_SIZE
-# CHECK:   C[A_SIZE * blockIdx.x + threadIdx.x] =
+# CHECK:   C[A_SIZE * int64_t(blockIdx.x) + int64_t(threadIdx.x)] =
 # CHECK: __syncthreads();
 # CHECK: if (threadIdx.x<B_SIZE
-# CHECK:   D[B_SIZE * blockIdx.x + threadIdx.x] =)IR";
+# CHECK:   D[B_SIZE * int64_t(blockIdx.x) + int64_t(threadIdx.x)] =)IR";
 
   torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
 
@@ -1695,9 +1695,9 @@ TEST(Cuda, MaskMultiDimSymbolic_CUDA) {
   ASSERT_TRUE(exprEquals(
       threadExtents[0], alloc<Max>(A_SIZE.node(), B_SIZE.node(), true)));
 
-  int OUTER_EXTENT = 10;
-  int A_EXTENT = 100;
-  int B_EXTENT = 50;
+  int64_t OUTER_EXTENT = 10;
+  int64_t A_EXTENT = 100;
+  int64_t B_EXTENT = 50;
 
   PaddedBuffer<float> a_v(OUTER_EXTENT, A_EXTENT);
   PaddedBuffer<float> b_v(OUTER_EXTENT, B_EXTENT);

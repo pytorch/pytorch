@@ -25,6 +25,11 @@ namespace at { namespace functorch {
 struct TORCH_API FuncTorchTLSBase {
   virtual ~FuncTorchTLSBase() = default;
   virtual std::unique_ptr<FuncTorchTLSBase> deepcopy() const = 0;
+
+  // functorch doesn't always work with autograd.Function.
+  // This is a hook to get into functorch -- functorch will determine
+  // if it should raise an error message
+  virtual int64_t checkSupportsAutogradFunction() const = 0;
 };
 
 // returns deepcopy of the functorch tls
