@@ -27,8 +27,9 @@ class Wishart(ExponentialFamily):
 
     Example:
         >>> m = Wishart(torch.eye(2), torch.Tensor([2]))
-        >>> m.sample()  #Wishart distributed with mean=`df * I` and
-                        #variance(x_ij)=`df` for i != j and variance(x_ij)=`2 * df` for i == j
+        >>> m.sample()  # Wishart distributed with mean=`df * I` and
+                        # variance(x_ij)=`df` for i != j and variance(x_ij)=`2 * df` for i == j
+
     Args:
         covariance_matrix (Tensor): positive-definite covariance matrix
         precision_matrix (Tensor): positive-definite precision matrix
@@ -56,6 +57,7 @@ class Wishart(ExponentialFamily):
     }
     support = constraints.positive_definite
     has_rsample = True
+    _mean_carrier_measure = 0
 
     def __init__(self,
                  df: Union[torch.Tensor, Number],
@@ -119,9 +121,8 @@ class Wishart(ExponentialFamily):
         new = self._get_checked_instance(Wishart, _instance)
         batch_shape = torch.Size(batch_shape)
         cov_shape = batch_shape + self.event_shape
-        df_shape = batch_shape
         new._unbroadcasted_scale_tril = self._unbroadcasted_scale_tril.expand(cov_shape)
-        new.df = self.df.expand(df_shape)
+        new.df = self.df.expand(batch_shape)
 
         new._batch_dims = [-(x + 1) for x in range(len(batch_shape))]
 
@@ -172,13 +173,13 @@ class Wishart(ExponentialFamily):
 
     @property
     def mean(self):
-        return self.df.view(self._batch_shape + (1, 1,)) * self.covariance_matrix
+        return self.df.view(self._batch_shape + (1, 1)) * self.covariance_matrix
 
     @property
     def variance(self):
         V = self.covariance_matrix  # has shape (batch_shape x event_shape)
         diag_V = V.diagonal(dim1=-2, dim2=-1)
-        return self.df.view(self._batch_shape + (1, 1,)) * (V.pow(2) + torch.einsum("...i,...j->...ij", diag_V, diag_V))
+        return self.df.view(self._batch_shape + (1, 1)) * (V.pow(2) + torch.einsum("...i,...j->...ij", diag_V, diag_V))
 
     def _bartlett_sampling(self, sample_shape=torch.Size()):
         p = self._event_shape[-1]  # has singleton shape
@@ -187,7 +188,7 @@ class Wishart(ExponentialFamily):
         noise = self._dist_chi2.rsample(sample_shape).sqrt().diag_embed(dim1=-2, dim2=-1)
         i, j = torch.tril_indices(p, p, offset=-1)
         noise[..., i, j] = torch.randn(
-            torch.Size(sample_shape) + self._batch_shape + (int(p * (p - 1) / 2),),
+            torch.Size(sample_shape) + self._batch_shape + (int(0.5 * p * (p - 1)),),
             dtype=noise.dtype,
             device=noise.device,
         )
@@ -250,11 +251,11 @@ class Wishart(ExponentialFamily):
         nu = self.df  # has shape (batch_shape)
         p = self._event_shape[-1]  # has singleton shape
         return (
-            - nu * p * _log_2 / 2
+            - 0.5 * nu * p * _log_2
             - nu * self._unbroadcasted_scale_tril.diagonal(dim1=-2, dim2=-1).log().sum(-1)
-            - torch.mvlgamma(nu / 2, p=p)
-            + (nu - p - 1) / 2 * torch.linalg.slogdet(value).logabsdet
-            - torch.cholesky_solve(value, self._unbroadcasted_scale_tril).diagonal(dim1=-2, dim2=-1).sum(dim=-1) / 2
+            - torch.mvlgamma(0.5 * nu, p=p)
+            + 0.5 * (nu - p - 1) * torch.linalg.slogdet(value).logabsdet
+            - 0.5 * torch.cholesky_solve(value, self._unbroadcasted_scale_tril).diagonal(dim1=-2, dim2=-1).sum(dim=-1)
         )
 
     def entropy(self):
@@ -263,10 +264,10 @@ class Wishart(ExponentialFamily):
         V = self.covariance_matrix  # has shape (batch_shape x event_shape)
         return (
             (p + 1) * self._unbroadcasted_scale_tril.diagonal(dim1=-2, dim2=-1).log().sum(-1)
-            + p * (p + 1) * _log_2 / 2
-            + torch.mvlgamma(nu / 2, p=p)
-            - (nu - p - 1) / 2 * _mvdigamma(nu / 2, p=p)
-            + nu * p / 2
+            + 0.5 * p * (p + 1) * _log_2
+            + torch.mvlgamma(0.5 * nu, p=p)
+            - 0.5 * (nu - p - 1) * _mvdigamma(0.5 * nu, p=p)
+            + 0.5 * nu * p
         )
 
     @property
