@@ -657,7 +657,7 @@ Tensor nll_loss_nd(
       TORCH_CHECK(
           false,
           "Expected target size ",
-          IntArrayRef(out_size),
+          (IntArrayRef)SizeValArrayRef(out_size),
           ", got ",
           target_.sizes());
     }
@@ -679,7 +679,7 @@ Tensor nll_loss_nd(
     } else {
       auto out =
           at::nll_loss2d(input_, target_, weight, reduction, ignore_index);
-      ret = out.view(out_size);
+      ret = out.view(c10::impl::size_val_vec_to_int(out_size));
     }
   }
   return ret;

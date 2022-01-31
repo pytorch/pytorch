@@ -376,7 +376,7 @@ inline std::vector<std::vector<int64_t>> getSizes(
     const std::vector<at::Tensor>& tensors) {
   std::vector<std::vector<int64_t>> sizes(tensors.size());
   for (const auto i : c10::irange(tensors.size())) {
-    sizes[i] = tensors[i].sizes().vec();
+    sizes[i] = c10::impl::size_val_vec_to_int(tensors[i].sizes().vec());
   }
   return sizes;
 }

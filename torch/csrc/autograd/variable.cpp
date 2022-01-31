@@ -70,7 +70,7 @@ ViewInfo ViewInfo::chain(const Variable & base, const Variable & tensor,
     } else {
       // current_view has a view_func and but it's parent doesn't have one
       if (base.unsafeGetTensorImpl()->support_as_strided()) {
-        auto size = base.sizes().vec();
+        auto size = c10::impl::size_val_vec_to_int(base.sizes().vec());
         auto stride = base.strides().vec();
         auto storage_offset = base.storage_offset();
         view_func = [=](const at::Tensor& root_base) {
@@ -97,7 +97,7 @@ ViewInfo ViewInfo::chain(const Variable & base, const Variable & tensor,
     // if current_view doesn't have a view_func but it's parent has one
     // Copy parent view function to gain ownership
     auto prev_view_fn = view_fn_;
-    auto size = tensor.sizes().vec();
+    auto size = c10::impl::size_val_vec_to_int(tensor.sizes().vec());
     auto stride = tensor.strides().vec();
     auto storage_offset = tensor.storage_offset();
     view_func = [=](const at::Tensor& root_base) {
@@ -580,7 +580,7 @@ const std::shared_ptr<torch::autograd::Node>& VariableHooks::grad_fn(const at::T
       } else {
         auto fn = std::make_shared<torch::autograd::generated::AsStridedBackward0>();
         fn->self_geometry = at::TensorGeometry(view_info.base_);
-        fn->size = self.sizes().vec();
+        fn->size = c10::impl::size_val_vec_to_int(self.sizes().vec());
         fn->stride = self.strides().vec();
         fn->storage_offset = self.storage_offset();
         fn->set_next_edges(torch::autograd::collect_next_edges(view_info.base_));

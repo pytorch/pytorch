@@ -202,7 +202,7 @@ TensorTypePtr TensorType::create(const at::Tensor& t) {
   VaryingShape<int64_t> strides;
   VaryingShape<int64_t> sizes;
   if (!t.is_mkldnn() && !t.is_sparse() && !t.is_sparse_csr()) {
-    sizes = VaryingShape<int64_t>{t.sizes().vec()};
+    sizes = VaryingShape<int64_t>{c10::impl::size_val_vec_to_int(t.sizes().vec())};
     strides = VaryingShape<int64_t>{t.strides().vec()};
     return TensorType::create(
         t.scalar_type(), t.device(), sizes, strides, t.requires_grad(), false, t.is_contiguous());

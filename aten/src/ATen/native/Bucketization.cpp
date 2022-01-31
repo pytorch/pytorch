@@ -80,7 +80,7 @@ void searchsorted_cpu_contiguous(Tensor& result, const Tensor& input, const Tens
   int64_t numel_in = input.numel();
   bool is_scalar_input = input.dim() == 0 && numel_in == 1;
   // inner most dim size of input and boundaries
-  int64_t idim_in = is_scalar_input ? 1 : input.sizes().back();
+  int64_t idim_in = is_scalar_input ? 1 : (int64_t)input.sizes().back();
   int64_t idim_bd = boundaries.sizes().back();
 
   const input_t *data_in = input.data_ptr<input_t>();

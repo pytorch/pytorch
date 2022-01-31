@@ -693,7 +693,10 @@ def emit_body(fn: NativeFunctionWithDifferentiabilityInfo) -> List[str]:
                 expr = f'make_saved_variable_list({name})'
                 name += '_'
             elif type == BaseCType(intArrayRefT):
-                expr = expr + ".vec()"
+                if expr.endswith("sizes()"):
+                    expr = "c10::impl::size_val_vec_to_int(" + expr + ".vec())"
+                else:
+                    expr = expr + ".vec()"
             elif type == BaseCType(stringT):
                 expr = f'std::string({expr})'
             elif type == OptionalCType(BaseCType(stringT)):

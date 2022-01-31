@@ -106,7 +106,7 @@ Tensor _segment_reduce_cpu_kernel(
   int64_t segment_count = lengths.numel();
   auto output_shape = data.sizes().vec();
   output_shape[axis] = segment_count;
-  auto output = at::empty(output_shape, data.options());
+  auto output = at::empty(c10::impl::size_val_vec_to_int(output_shape), data.options());
 
   AT_DISPATCH_INDEX_TYPES(lengths.scalar_type(), "_segment_reduce_cpu_kernel1", [&]() {
     const auto* lengths_data = lengths.data_ptr<index_t>();

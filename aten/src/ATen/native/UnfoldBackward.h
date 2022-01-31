@@ -45,7 +45,7 @@ static C10_UNUSED TensorIterator _make_unfold_backward_iter_over_grad_out(
 
   /* prepare grad_out for TensorIterator { */
   auto grad_out_strides = ensure_nonempty_vec(grad_out.strides().vec());
-  auto grad_out_sizes = ensure_nonempty_vec(grad_out.sizes().vec());
+  auto grad_out_sizes = ensure_nonempty_vec(c10::impl::size_val_vec_to_int(grad_out.sizes().vec()));
   grad_out_sizes[dim] = iter_dim_size;
   auto grad_out_restrided = grad_out.as_strided(
     grad_out_sizes, grad_out_strides
@@ -54,7 +54,7 @@ static C10_UNUSED TensorIterator _make_unfold_backward_iter_over_grad_out(
 
   /* prepare grad_in for TensorIterator { */
   auto grad_in_strides = ensure_nonempty_vec(grad_in.strides().vec());
-  auto grad_in_sizes = ensure_nonempty_vec(grad_in.sizes().vec());
+  auto grad_in_sizes = ensure_nonempty_vec(c10::impl::size_val_vec_to_int(grad_in.sizes().vec()));
 
   // set strides for dim to 0
   // and size to 1 because
@@ -121,7 +121,7 @@ static C10_UNUSED TensorIterator _make_unfold_backward_iter_over_grad_in(
   auto grad_out_restrided = grad_out.unsqueeze(-1);
 
   auto grad_out_strides = ensure_nonempty_vec(grad_out_restrided.strides().vec());
-  auto grad_out_sizes = ensure_nonempty_vec(grad_out_restrided.sizes().vec());
+  auto grad_out_sizes = ensure_nonempty_vec(c10::impl::size_val_vec_to_int(grad_out_restrided.sizes().vec()));
 
   grad_out_strides[dim] = 0;
   grad_out_strides[last_dim] = 0;

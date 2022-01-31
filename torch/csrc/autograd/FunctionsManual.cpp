@@ -427,7 +427,7 @@ Tensor prod_safe_zeros_backward(const Tensor &grad, const Tensor& inp, int64_t d
     return grad;
   }
 
-  auto ones_size = inp.sizes().vec();
+  auto ones_size = c10::impl::size_val_vec_to_int(inp.sizes().vec());
   ones_size[dim] = 1;
   Tensor ones = at::ones(ones_size, grad.options());
   Tensor exclusive_normal_nocp = at::cat({ones, inp.narrow(dim, 0, inp.size(dim) - 1)}, dim);
@@ -1308,7 +1308,7 @@ Tensor split_backward(const std::vector<torch::autograd::Variable> &grads,
 
 Tensor max_pool_double_backward(const Tensor & grad, const Tensor & indices, int dim) {
   AT_ASSERT(indices.dim() >= dim);
-  auto size = indices.sizes().slice(0, indices.dim() - dim).vec();
+  auto size = c10::impl::size_val_vec_to_int(indices.sizes().slice(0, indices.dim() - dim).vec());
   size.push_back(-1);
   auto indices_view = indices.view(size);
   const auto memory_format = indices.suggest_memory_format();
@@ -1336,7 +1336,7 @@ Tensor glu_double_backward(const Tensor & grad, const Tensor & grad_output, cons
 
 Tensor glu_double_backward_grad_output(const Tensor & grad, const Tensor & input, int64_t dim) {
   if (dim < 0) dim += input.dim();
-  auto sizes = input.sizes().vec();
+  auto sizes = c10::impl::size_val_vec_to_int(input.sizes().vec());
   sizes[dim] /= 2;
   auto tmp = grad * glu_backward(at::ones(sizes, input.options()), input, dim);
   return tmp.narrow(dim, 0, sizes[dim]) + tmp.narrow(dim, sizes[dim], sizes[dim]);
@@ -2440,7 +2440,7 @@ std::tuple<Tensor, Tensor, Tensor> linalg_svd_jvp(const Tensor& dA,
 
     // To "fix" the full_matrices case (the full_matrices case should not be differentiable...)
     if (full_matrices) {
-      auto shape = dU.sizes().vec();
+      auto shape = c10::impl::size_val_vec_to_int(dU.sizes().vec());
       shape.end()[-1] = m - n;
       dU = at::cat({dU, at::zeros(shape, dU.options())}, /*dim=*/-1);
     }
@@ -2462,7 +2462,7 @@ std::tuple<Tensor, Tensor, Tensor> linalg_svd_jvp(const Tensor& dA,
 
     // To "fix" the full_matrices case (the full_matrices case should not be differentiable...)
     if (full_matrices) {
-      auto shape = dVh.sizes().vec();
+      auto shape = c10::impl::size_val_vec_to_int(dVh.sizes().vec());
       shape.end()[-2] = n - m;
       dVh = at::cat({dVh, at::zeros(shape, dVh.options())}, /*dim=*/-2);
     }
@@ -3188,7 +3188,7 @@ Tensor differential_analytic_matrix_function(
   // Given an analytic matrix function, this computes the differential (forward AD)
   // or the adjoint of the differential (backward AD)
   auto A = adjoint ? self.transpose(-2, -1).conj() : self;
-  auto meta_grad_sizes = A.sizes().vec();
+  auto meta_grad_sizes = c10::impl::size_val_vec_to_int(A.sizes().vec());
   meta_grad_sizes[A.dim() - 2] *= 2;
   meta_grad_sizes[A.dim() - 1] *= 2;
 
@@ -4102,7 +4102,7 @@ Tensor embedding_dense_double_backward(const Tensor & grad, const Tensor & indic
   auto gg_weight = grad.index_select(0, indices.reshape(-1));
 
   // reshape gradient as per the shape of indices
-  auto size = indices.sizes().vec();
+  auto size = c10::impl::size_val_vec_to_int(indices.sizes().vec());
   size.push_back(-1);
 
   if (padding_idx >= 0) {
@@ -4790,7 +4790,7 @@ Tensor batch_norm_jvp(
     bool train,
     double eps) {
   auto dims = std::vector<int64_t>{};
-  auto view_size = input_t.sizes().vec();
+  auto view_size = c10::impl::size_val_vec_to_int(input_t.sizes().vec());
   int64_t numel = 1;
   for (const auto dim : c10::irange(view_size.size())) {
     if (dim != 1) {
@@ -4831,8 +4831,8 @@ Tensor layer_norm_jvp(
     const Tensor& saved_mean, const Tensor& saved_invstd,
     IntArrayRef normalized_shape) {
   auto dims = std::vector<int64_t>{};
-  auto view_size = input_t.sizes().vec();
-  auto view_size_affine = input_t.sizes().vec();
+  auto view_size = c10::impl::size_val_vec_to_int(input_t.sizes().vec());
+  auto view_size_affine = c10::impl::size_val_vec_to_int(input_t.sizes().vec());
 
   int64_t numel = 1;
   for (const auto i : c10::irange(view_size.size())) {

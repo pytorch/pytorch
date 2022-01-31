@@ -19,7 +19,7 @@ Tensor _compute_linear_combination(const Tensor& input, const Tensor& coefficien
   auto output_sizes = input.sizes().vec();
   output_sizes[0] = output_first_dim_size;
   auto output = at::zeros(
-    output_sizes,
+    c10::impl::size_val_vec_to_int(output_sizes),
     input.options().memory_format(at::MemoryFormat::Contiguous)
   );
 
@@ -52,7 +52,7 @@ Tensor& _compute_linear_combination_out(const Tensor& input, const Tensor& coeff
   output_restrided_sizes[1] = 1;
   output_restrided_strides[1] = 0;
   auto output_restrided = output.as_strided(
-    output_restrided_sizes,
+    c10::impl::size_val_vec_to_int(output_restrided_sizes),
     output_restrided_strides
   );
 
@@ -63,7 +63,7 @@ Tensor& _compute_linear_combination_out(const Tensor& input, const Tensor& coeff
   input_restrided_sizes[1] = 1;
   input_restrided_strides[1] = 0;
   auto input_restrided = input.as_strided(
-    input_restrided_sizes,
+   c10::impl::size_val_vec_to_int( input_restrided_sizes),
     input_restrided_strides
   );
 

@@ -509,7 +509,7 @@ at::Tensor& embedding_bag_byte_helper(
         !offsets_in.has_value(),
         "embedding_bag_byte operator: input is 2D, then offsets has to be None, as input is treated is a mini-batch of fixed length sequences.");
 
-    offsets = c10::MaybeOwned<at::Tensor>::owned(at::arange(0, indices.numel(), indices.sizes()[1], indices.scalar_type()));
+    offsets = c10::MaybeOwned<at::Tensor>::owned(at::arange(0, indices.numel(), (int64_t)indices.sizes()[1], indices.scalar_type()));
   } else {
     TORCH_CHECK(
         offsets_in.has_value(),
@@ -613,7 +613,7 @@ at::Tensor& _embedding_bag_nbit_helper(
         "embedding_bag_4bit/embedding_bag_2bit operator: input is 2D, then offsets has to be None, as input is treated is a mini-batch of fixed length sequences.");
 
     offsets = c10::MaybeOwned<at::Tensor>::owned(at::arange(
-        0, indices.numel(), indices.sizes()[1], indices.scalar_type()));
+        0, indices.numel(), (int64_t)indices.sizes()[1], indices.scalar_type()));
   } else {
     TORCH_CHECK(
         offsets_in.has_value(),

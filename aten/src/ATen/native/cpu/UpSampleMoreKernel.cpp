@@ -36,10 +36,10 @@ void cpu_upsample_linear_backward(
 
   // treat nbatch and channels as one dimension
   int64_t channels = input_sizes[0] * input_sizes[1];
-  int64_t input_depth = (ndim == 5) ? input_sizes[2] : 1;
-  int64_t output_depth = (ndim == 5) ? output_sizes[2] : 1;
-  int64_t input_height = (ndim >= 4) ? input_sizes[ndim - 2] : 1;
-  int64_t output_height = (ndim >= 4) ? output_sizes[ndim - 2] : 1;
+  int64_t input_depth = (ndim == 5) ? input_sizes[2] : c10::impl::SizeVal{1};
+  int64_t output_depth = (ndim == 5) ? output_sizes[2] : c10::impl::SizeVal{1};
+  int64_t input_height = (ndim >= 4) ? input_sizes[ndim - 2] : c10::impl::SizeVal{1};
+  int64_t output_height = (ndim >= 4) ? output_sizes[ndim - 2] : c10::impl::SizeVal{1};
   int64_t input_width = input_sizes[ndim - 1];
   int64_t output_width = output_sizes[ndim - 1];
 

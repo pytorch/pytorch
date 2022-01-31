@@ -78,6 +78,10 @@ static inline DimVector contiguous_strides(const IntArrayRef sizes, const bool f
   return contiguous_strides_template<DimVector>(sizes, f_contig);
 }
 
+static inline DimVector contiguous_strides(const SizeValArrayRef sizes, const bool f_contig=false) {
+  return contiguous_strides_template<DimVector>((IntArrayRef)sizes, f_contig);
+}
+
 static inline std::vector<int64_t> contiguous_strides_vec(const IntArrayRef sizes, const bool f_contig=false) {
   return contiguous_strides_template<std::vector<int64_t>>(sizes, f_contig);
 }
@@ -474,8 +478,8 @@ static inline std::tuple<std::vector<int64_t>,
     q_sizes[input.dim() - 1] = n;
     n_columns_q = std::min(m, n);
   }
-  auto q_strides = contiguous_strides_vec(q_sizes, /*f-contig*/true);
-  return std::make_tuple(q_sizes, q_strides, n_columns_q);
+  auto q_strides = contiguous_strides_vec(c10::impl::size_val_vec_to_int(q_sizes), /*f-contig*/true);
+  return std::make_tuple(c10::impl::size_val_vec_to_int(q_sizes), q_strides, n_columns_q);
 }
 
 static inline bool svd_uses_cusolver(const Tensor& A) {

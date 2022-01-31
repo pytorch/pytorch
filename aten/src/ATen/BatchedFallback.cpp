@@ -165,7 +165,7 @@ void batchedTensorInplaceForLoopFallback(const c10::OperatorHandle& op, torch::j
   // Compute the total number of batches
   auto num_batch_dims = input_physical_views.front().numBatchDims();
   auto first_physical_view_sizes = input_physical_views.front().tensor().sizes();
-  auto batch_sizes = ArrayRef<int64_t>(
+  auto batch_sizes = SizeValArrayRef(
       first_physical_view_sizes.begin(), first_physical_view_sizes.begin() + num_batch_dims);
   const auto num_batches = c10::multiply_integers(batch_sizes);
   // Without a shape-checking API, we're unable to compute the correct shape of

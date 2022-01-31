@@ -369,7 +369,7 @@ at::Tensor PackedLinearWeightsQnnp::apply_impl(
   // left hand dimensions of the input. Here are two examples:
   // 1. If the input tensor is {M, K}, the output tensor is {M, N}.
   // 2. If the input tensor is {b, M, K}, the output tensor is {b, M, N}.
-  std::vector<int64_t> out_sizes = input.sizes().vec();
+  std::vector<int64_t> out_sizes = c10::impl::size_val_vec_to_int(input.sizes().vec());
   out_sizes.back() = static_cast<long>(rows_w);
   at::Tensor output = at::_empty_affine_quantized(
       out_sizes,

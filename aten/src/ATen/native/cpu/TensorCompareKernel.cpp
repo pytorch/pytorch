@@ -27,7 +27,7 @@ static inline void compare_base_kernel_core(
     int64_t dim,
     bool keepdim,
     const loop1d_t& loop) {
-  auto self_sizes = ensure_nonempty_vec(self.sizes().vec());
+  auto self_sizes = ensure_nonempty_vec(c10::impl::size_val_vec_to_int(self.sizes().vec()));
   self_sizes[dim] = 1;
 
   // result1 and result2 may be a empty tensor, if not,

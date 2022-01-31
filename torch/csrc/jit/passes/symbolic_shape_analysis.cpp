@@ -1,6 +1,7 @@
 #include <ATen/core/symbol.h>
 #include <c10/util/Exception.h>
 #include <c10/util/irange.h>
+#include <c10/util/ArrayRef.h>
 #include <torch/csrc/jit/ir/alias_analysis.h>
 #include <torch/csrc/jit/ir/constants.h>
 #include <torch/csrc/jit/ir/ir.h>
@@ -366,7 +367,7 @@ struct SymbolicShapeNodeAnalyzer {
     }
     // TODO: remove, all constant tensors should have typed sizes
     if (toIValue(tensor_v)) {
-      auto size = constant_as<at::Tensor>(tensor_v)->sizes();
+      auto size = c10::IntArrayRef(constant_as<at::Tensor>(tensor_v)->sizes());
       if (!symbolic_shape_analysis_test_mode) {
         replaceWithIValue(
             shape_compute_graph_->inputs().at(shape_compute_graph_index), size);

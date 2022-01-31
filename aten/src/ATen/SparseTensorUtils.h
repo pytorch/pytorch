@@ -52,9 +52,9 @@ inline bool is_same_density(const SparseTensor& self, const SparseTensor& src) {
 // TODO: Expose this for real in ATen, some day?
 // NB: Doesn't preserve data.
 inline Tensor new_values_with_size_of(const Tensor& values, int64_t nnz) {
-  std::vector<int64_t> size = values.sizes().vec();
+  std::vector<c10::impl::SizeVal> size = values.sizes().vec();
   size[0] = nnz;
-  return at::empty(size, values.options());
+  return at::empty(c10::impl::size_val_vec_to_int(size), values.options());
 }
 
 // NOTE [ Flatten Sparse Indices ]

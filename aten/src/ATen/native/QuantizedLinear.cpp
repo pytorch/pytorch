@@ -106,7 +106,7 @@ Tensor fbgemm_linear_int8_weight_fp32_activation(
   const Tensor bias_contig = bias.contiguous();
 
   // Allocate output Tensor and a buffer for fbgemmPacked to use
-  std::vector<int64_t> output_size = input.sizes().vec();
+  std::vector<int64_t> output_size = c10::impl::size_val_vec_to_int(input.sizes().vec());
   output_size.back() = N;
   Tensor output = at::empty(output_size, input.options().dtype(at::kFloat), LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   Tensor buffer = at::empty(output_size, input.options().dtype(at::kInt), LEGACY_CONTIGUOUS_MEMORY_FORMAT);
@@ -420,7 +420,7 @@ Tensor fbgemm_linear_fp16_weight_fp32_activation(
   // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
   const int64_t M = size_to_dim_(input.dim() - 1, input.sizes());
   const int64_t N = packed_weight_fp16.numCols();
-  std::vector<int64_t> output_size = input.sizes().vec();
+  std::vector<int64_t> output_size = c10::impl::size_val_vec_to_int(input.sizes().vec());
   output_size.back() = N;
   Tensor output = at::empty(output_size, input.options().dtype(at::kFloat));
 

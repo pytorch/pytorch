@@ -18,7 +18,7 @@ PyObject * THPSize_New(const torch::autograd::Variable& var)
 {
   if (!torch::jit::tracer::isTracing()) {
     auto sizes = var.sizes();
-    return THPSize_NewFromSizes(var.dim(), sizes.data());
+    return THPSize_NewFromSizes(var.dim(), *sizes.data());
   }
   auto self = THPObjectPtr(THPSizeType.tp_alloc(&THPSizeType, var.dim()));
   if (!self) throw python_error();

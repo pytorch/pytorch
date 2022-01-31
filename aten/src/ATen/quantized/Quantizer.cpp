@@ -106,7 +106,7 @@ int64_t get_sub_byte_tensor_size(IntArrayRef sizes, size_t dtype_itemsize, at::S
   return c10::multiply_integers(IntArrayRef(sizes.data(), sizes.size() - 1)) * at::ceil_div(bytes_per_row, element_per_byte);
 }
 
-inline Tensor new_qtensor(
+Tensor new_qtensor(
     IntArrayRef sizes,
     const TensorOptions& options,
     QuantizerPtr quantizer) {

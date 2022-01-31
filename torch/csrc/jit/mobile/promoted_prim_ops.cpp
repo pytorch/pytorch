@@ -55,7 +55,7 @@ void aten_format(Stack& stack) {
 
 void size(Stack& stack) {
   auto t = std::move(pop(stack)).toTensor();
-  pack(stack, t.sizes().vec());
+  pack(stack, c10::impl::size_val_vec_to_int(t.sizes().vec()));
 }
 
 void device(Stack& stack) {

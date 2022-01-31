@@ -110,7 +110,7 @@ at::Tensor PackedLinearWeightQnnp::apply_dynamic_impl<false>(
   sparse_linear_op_->dynamic_conv_quantization_params.multipliers =
       requantization_scales_.data();
 
-  std::vector<int64_t> out_sizes = input.sizes().vec();
+  std::vector<int64_t> out_sizes = c10::impl::size_val_vec_to_int(input.sizes().vec());
   size_t rows_w = orig_weight_.size(0);
   out_sizes.back() = rows_w;
 

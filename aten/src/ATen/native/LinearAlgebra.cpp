@@ -1029,7 +1029,7 @@ Tensor& math_addr_out(const Tensor& self,
               "result type ", result_dtype,
               " can't be cast to the desired output type ", result.scalar_type());
 
-  at::native::resize_output(result, addr_result.sizes().vec());
+  at::native::resize_output(result, c10::impl::size_val_vec_to_int(addr_result.sizes().vec()));
   result.copy_(addr_result);
   return result;
 }
@@ -1139,11 +1139,11 @@ static void addmm_impl_cpu_(
 
   // Cast result as matrix a
   if (result_strides[0] == 1 &&
-      (result_sizes[1] == 1 || result_strides[1] >= std::max(int64_t{1}, result_sizes[0]))) {
+      (result_sizes[1] == 1 || result_strides[1] >= std::max(c10::impl::SizeVal(1), result_sizes[0]))) {
     transpose_c = false;
     c = result.resolve_conj();
   } else if (result_strides[1] == 1 &&
-             (result_sizes[0] == 1 || result_strides[0] >= std::max(int64_t{1}, result_sizes[1]))) {
+             (result_sizes[0] == 1 || result_strides[0] >= std::max(c10::impl::SizeVal(1), result_sizes[1]))) {
     std::swap(m1, m2);
     std::swap(m1_sizes, m2_sizes);
     std::swap(m1_strides, m2_strides);
@@ -1660,7 +1660,7 @@ Tensor matmul(
       return has_out ? out.set_(res) : res;
     }
     else {
-      std::vector<int64_t> shape = tensor2.sizes().slice(0, dim_tensor2 - 2).vec();
+      std::vector<int64_t> shape = c10::impl::size_val_vec_to_int(tensor2.sizes().slice(0, dim_tensor2 - 2).vec());
       shape.push_back(p);
 
       Tensor res = res_T.reshape(shape).contiguous();
@@ -1789,7 +1789,7 @@ void _fill_matrix_powers(Tensor& buffer, const Tensor& a, int num_matrices) {
   buffer.select(0, 0).copy_(
     at::diag_embed(
       at::ones({1}, buffer.options())
-        .expand(a_sizes_minus_last)
+        .expand(c10::impl::size_val_vec_to_int(a_sizes_minus_last))
     )
   );
 
@@ -2223,7 +2223,7 @@ Tensor backward_analytic_function_of_a_matrix(
     const func_t& function_of_a_matrix
   ) {
   auto self_transposed = self.mH();
-  auto self_transposed_sizes = self_transposed.sizes().vec();
+  auto self_transposed_sizes = c10::impl::size_val_vec_to_int(self_transposed.sizes().vec());
   self_transposed_sizes[self.dim() - 2] <<= 1;
   self_transposed_sizes[self.dim() - 1] <<= 1;
 
@@ -2814,9 +2814,9 @@ Tensor linalg_tensorinv(const Tensor& self, int64_t ind) {
   TORCH_CHECK(ind > 0, "Expected a strictly positive integer for 'ind', but got ", ind);
 
   // self[ind:]
-  std::vector<int64_t> shape_ind_end = self.sizes().slice(ind).vec();
+  std::vector<int64_t> shape_ind_end = c10::impl::size_val_vec_to_int(self.sizes().slice(ind).vec());
   // self[:ind]
-  std::vector<int64_t> shape_start_ind = self.sizes().slice(0, ind).vec();
+  std::vector<int64_t> shape_start_ind = c10::impl::size_val_vec_to_int(self.sizes().slice(0, ind).vec());
 
   int64_t prod_ind_end = c10::multiply_integers(shape_ind_end.cbegin(), shape_ind_end.cend());
   int64_t prod_start_ind = c10::multiply_integers(shape_start_ind.cbegin(), shape_start_ind.cend());
@@ -2870,7 +2870,7 @@ Tensor linalg_tensorsolve(const Tensor& self, const Tensor& other, optional<IntA
   }
 
   // result_shape is self_.sizes[-(an-other.dim):]
-  std::vector<int64_t> result_shape = self_.sizes().slice(other.dim(), ndim - other.dim()).vec();
+  std::vector<int64_t> result_shape = c10::impl::size_val_vec_to_int(self_.sizes().slice(other.dim(), ndim - other.dim()).vec());
 
   int64_t result_product = c10::multiply_integers(result_shape.begin(), result_shape.end());
   int64_t other_product = c10::multiply_integers(other.sizes().begin(), other.sizes().end());
@@ -2908,10 +2908,10 @@ struct KronImpl final {
       b_reshape = c10::SmallVector<int64_t, 10>(2 * maxdim);
       result_reshape = c10::SmallVector<int64_t, 10>(maxdim);
       for (const auto i : c10::irange(maxdim)) {
-        a_reshape[2 * i] = (i >= pad_self ? self.sizes()[i - pad_self] : 1);
+        a_reshape[2 * i] = (i >= pad_self ? self.sizes()[i - pad_self] : c10::impl::SizeVal(1));
         a_reshape[2 * i + 1] = 1;
         b_reshape[2 * i] = 1;
-        b_reshape[2 * i + 1] = (i >= pad_other ? other.sizes()[i - pad_other] : 1);
+        b_reshape[2 * i + 1] = (i >= pad_other ? other.sizes()[i - pad_other] : c10::impl::SizeVal(1));
         result_reshape[i] = a_reshape[2 * i] * b_reshape[2 * i + 1];
       }
       self_view = at::_unsafe_view(self, a_reshape);
@@ -2994,7 +2994,7 @@ std::tuple<Tensor, Tensor, Tensor> lu_unpack(
   auto unpacked_pivots_sizes = LU_pivots.sizes().vec();
   unpacked_pivots_sizes[LU_pivots.dim() - 1] = m;
   auto unpacked_pivots = at::empty(
-    unpacked_pivots_sizes,
+    c10::impl::size_val_vec_to_int(unpacked_pivots_sizes),
     LU_pivots.options().memory_format(at::MemoryFormat::Contiguous)
   );
 
@@ -3028,7 +3028,7 @@ std::tuple<Tensor, Tensor, Tensor> lu_unpack(
   // because `matmul` does not work with integer matrices.
   unpacked_pivots_sizes.push_back(m);
   auto permutation_matrix = at::zeros(
-    unpacked_pivots_sizes,
+    c10::impl::size_val_vec_to_int(unpacked_pivots_sizes),
     LU_data.options().memory_format(at::MemoryFormat::Contiguous)
   );
 

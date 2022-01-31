@@ -2133,7 +2133,7 @@ void qtopk_kernel(Tensor& values,
           k, sizes[dim], largest, sorted, data, strides, n);
     };
 
-    int64_t grain_size = internal::GRAIN_SIZE / std::max(int64_t{1}, sizes[dim]);
+    int64_t grain_size = internal::GRAIN_SIZE / std::max(c10::impl::SizeVal{1}, sizes[dim]);
     iter.for_each(loop, /*grain_size=*/grain_size);
   });
 }

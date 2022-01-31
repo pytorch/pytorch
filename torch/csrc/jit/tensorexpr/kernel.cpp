@@ -7,6 +7,7 @@
 #include <c10/core/ScalarTypeToTypeMeta.h>
 #include <c10/util/irange.h>
 #include <c10/util/string_utils.h>
+#include <c10/util/ArrayRef.h>
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/symbolic_shape_runtime_fusion.h>
 #include <torch/csrc/jit/tensorexpr/analysis.h>
@@ -1285,7 +1286,7 @@ void TensorExprKernel::bindConstant(const torch::jit::Value* v) {
   auto const_tensor = toIValue(v)->toTensor();
   auto scalar_type = c10::typeMetaToScalarType(const_tensor.options().dtype());
   const auto& tt = v->type()->expect<TensorType>();
-  auto sizes = const_tensor.sizes();
+  auto sizes = c10::IntArrayRef(const_tensor.sizes());
   std::vector<ExprHandle> te_sizes;
   te_sizes.reserve(sizes.size());
   for (auto s : sizes) {

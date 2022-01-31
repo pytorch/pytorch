@@ -349,7 +349,7 @@ void unpackQuantizedWeightsHelper(
     }
 
     // Permute weights
-    std::vector<int64_t> wt_sizes = unpacked_weight.sizes().vec();
+    std::vector<int64_t> wt_sizes = c10::impl::size_val_vec_to_int(unpacked_weight.sizes().vec());
     if (unpacked_weight.ndimension() == 4) {
       unpacked_weight.permute({0, 2, 3, 1});
       wt_sizes = {
@@ -415,7 +415,7 @@ void unpackQuantizedWeightsHelper(
     Node* c2_bias = CreateQuantizedBias(
         bias_values,
         graph,
-        q_bias.sizes().vec(),
+        c10::impl::size_val_vec_to_int(q_bias.sizes().vec()),
         q_bias.q_scale(),
         q_bias.q_zero_point());
     c2_bias->insertBefore(qlinear_node);

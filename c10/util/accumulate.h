@@ -42,9 +42,8 @@ inline int64_t sum_integers(Iter begin, Iter end) {
 /// Product of a list of integers; accumulates into the int64_t datatype
 template <
     typename C,
-    typename std::enable_if<
-        std::is_integral<typename C::value_type>::value,
-        int>::type = 0>
+    class = typename std::enable_if<
+        std::is_integral<typename C::value_type>::value || std::is_same<C, c10::impl::SizeVal>::value>>
 inline int64_t multiply_integers(const C& container) {
   // std::accumulate infers return type from `init` type, so if the `init` type
   // is not large enough to hold the result, computation can overflow. We use
@@ -60,10 +59,9 @@ inline int64_t multiply_integers(const C& container) {
 /// int64_t datatype
 template <
     typename Iter,
-    typename std::enable_if<
+    class = typename std::enable_if<
         std::is_integral<
-            typename std::iterator_traits<Iter>::value_type>::value,
-        int>::type = 0>
+            typename std::iterator_traits<Iter>::value_type>::value || std::is_same<Iter, SizeValArrayRef::iterator>::value>>
 inline int64_t multiply_integers(Iter begin, Iter end) {
   // std::accumulate infers return type from `init` type, so if the `init` type
   // is not large enough to hold the result, computation can overflow. We use

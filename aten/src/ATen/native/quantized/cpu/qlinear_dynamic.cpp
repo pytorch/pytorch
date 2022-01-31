@@ -101,7 +101,7 @@ at::Tensor PackedLinearWeight::apply_dynamic_impl(
   // left hand dimensions of the input. Here are two examples:
   // 1. If the input tensor is {M, K}, the output tensor is {M, N}.
   // 2. If the input tensor is {b, M, K}, the output tensor is {b, M, N}.
-  std::vector<int64_t> out_sizes = input.sizes().vec();
+  std::vector<int64_t> out_sizes = c10::impl::size_val_vec_to_int(input.sizes().vec());
   out_sizes.back() = N;
   // Allocate output Tensor and a buffer for fbgemmPacked to use
   auto output = at::empty(out_sizes, input.options().dtype(at::kFloat));
@@ -334,7 +334,7 @@ at::Tensor PackedLinearWeightsQnnp::apply_dynamic_impl(
   // left hand dimensions of the input. Here are two examples:
   // 1. If the input tensor is {M, K}, the output tensor is {M, N}.
   // 2. If the input tensor is {b, M, K}, the output tensor is {b, M, N}.
-  std::vector<int64_t> out_sizes = input.sizes().vec();
+  std::vector<int64_t> out_sizes = c10::impl::size_val_vec_to_int(input.sizes().vec());
   out_sizes.back() = rows_w;
 
   auto output = at::empty(out_sizes, input.options().dtype(at::kFloat));
@@ -403,7 +403,7 @@ at::Tensor& PackedLinearWeightFp16::apply_dynamic_impl(
   // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
   const int64_t M = size_to_dim_(input.dim() - 1, input.sizes());
   const int64_t N = packed_weight_fp16.numCols();
-  std::vector<int64_t> output_sizes = input.sizes().vec();
+  std::vector<int64_t> output_sizes = c10::impl::size_val_vec_to_int(input.sizes().vec());
   TORCH_CHECK(!output_sizes.empty())
   output_sizes.back() = N;
   // Resize output Tensor

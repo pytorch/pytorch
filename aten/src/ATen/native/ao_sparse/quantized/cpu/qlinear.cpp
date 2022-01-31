@@ -92,7 +92,7 @@ at::Tensor PackedLinearWeight::apply_impl(
   // {batch_size, out_channels}.
   // 2. If the input tensor is {x, batch_size, K}, the output tensor is {x,
   // batch_size, out_channels}.
-  std::vector<int64_t> out_sizes = input.sizes().vec();
+  std::vector<int64_t> out_sizes = c10::impl::size_val_vec_to_int(input.sizes().vec());
   out_sizes.back() = out_channels; // NOLINT
   // Allocate output Tensor and a buffer for fbgemmPacked to use
   auto output_tr = at::_empty_affine_quantized(

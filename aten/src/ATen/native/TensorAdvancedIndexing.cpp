@@ -718,7 +718,7 @@ Tensor & _index_copy_impl_(Tensor & self, int64_t dim, const Tensor & index, con
   auto self_strides = self_nonzero.strides().vec();
   self_sizes[dim] = index.numel();
   self_strides[dim] = 0;
-  auto self_restrided = self_nonzero.as_strided(self_sizes, self_strides);
+  auto self_restrided = self_nonzero.as_strided(c10::impl::size_val_vec_to_int(self_sizes), self_strides);
 
   auto iter = TensorIteratorConfig()
     // We do not check for overlap because `self` is restrided
@@ -909,7 +909,7 @@ Tensor & index_select_out_cpu_(const Tensor & self, int64_t dim, const Tensor & 
   at::assert_no_overlap(result, self);
   at::assert_no_overlap(result, index);
 
-  auto result_size = self.sizes().vec();
+  auto result_size = c10::impl::size_val_vec_to_int(self.sizes().vec());
   if (self.dim() > 0) {
     result_size[dim] = numel;
   }
@@ -1116,7 +1116,7 @@ Tensor & index_fill_(Tensor & self, int64_t dim, const Tensor & index, const Sca
   auto self_strides = self_nonzero_dim.strides().vec();
   self_sizes[dim] = index.numel();
   self_strides[dim] = 0;
-  auto self_restrided = self_nonzero_dim.as_strided(self_sizes, self_strides);
+  auto self_restrided = self_nonzero_dim.as_strided(c10::impl::size_val_vec_to_int(self_sizes), self_strides);
 
   auto iter = TensorIteratorConfig()
     // We do not check for overlap because `self` is restrided
@@ -1291,7 +1291,7 @@ Tensor scatter_reduce_two_cpu(const Tensor& self,
 
   dim = dim < 0 ? dim + self.dim() : dim;
 
-  auto sizes = self.sizes().vec();
+  auto sizes = c10::impl::size_val_vec_to_int(self.sizes().vec());
   if (output_size.has_value()) {
     sizes[dim] = output_size.value();
   } else {

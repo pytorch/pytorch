@@ -379,10 +379,10 @@ void cpu_upsample_nearest_channels_last(
 
   int64_t num_batches =  input_sizes[0];
   int64_t channels =  input_sizes[1];
-  int64_t input_depth = (ndim == 5) ? input_sizes[2] : 1;
-  int64_t output_depth = (ndim == 5) ? output_sizes[2] : 1;
-  int64_t input_height = (ndim >= 4) ? input_sizes[ndim - 2] : 1;
-  int64_t output_height = (ndim >= 4) ? output_sizes[ndim - 2] : 1;
+  int64_t input_depth = (ndim == 5) ? input_sizes[2] : c10::impl::SizeVal{1};
+  int64_t output_depth = (ndim == 5) ? output_sizes[2] : c10::impl::SizeVal{1};
+  int64_t input_height = (ndim >= 4) ? input_sizes[ndim - 2] : c10::impl::SizeVal{1};
+  int64_t output_height = (ndim >= 4) ? output_sizes[ndim - 2] : c10::impl::SizeVal{1};
   int64_t input_width = input_sizes[ndim - 1];
   int64_t output_width = output_sizes[ndim - 1];
   int64_t numel = output.numel();
@@ -475,10 +475,10 @@ void cpu_upsample_linear_channels_last(
 
   int64_t num_batches =  input_sizes[0];
   int64_t channels =  input_sizes[1];
-  int64_t input_depth = (ndim == 5) ? input_sizes[2] : 1;
-  int64_t output_depth = (ndim == 5) ? output_sizes[2] : 1;
-  int64_t input_height = (ndim >= 4) ? input_sizes[ndim - 2] : 1;
-  int64_t output_height = (ndim >= 4) ? output_sizes[ndim - 2] : 1;
+  int64_t input_depth = (ndim == 5) ? input_sizes[2] : c10::impl::SizeVal{1};
+  int64_t output_depth = (ndim == 5) ? output_sizes[2] : c10::impl::SizeVal{1};
+  int64_t input_height = (ndim >= 4) ? input_sizes[ndim - 2] : c10::impl::SizeVal{1};
+  int64_t output_height = (ndim >= 4) ? output_sizes[ndim - 2] : c10::impl::SizeVal{1};
   int64_t input_width = input_sizes[ndim - 1];
   int64_t output_width = output_sizes[ndim - 1];
 
@@ -1094,7 +1094,7 @@ void upsample_generic_Nd_kernel_impl(
     const scale_type& scales) {
 
   // input can be NCHW, NCL or NCKHW
-  auto shape = input.sizes().vec();
+  auto shape = c10::impl::size_val_vec_to_int(input.sizes().vec());
   auto strides = input.strides().vec();
   auto oshape = output.sizes();
 
@@ -1189,7 +1189,7 @@ void _separable_upsample_generic_Nd_kernel_impl_single_dim(
     const scale_type& scales) {
 
   // input can be NCHW, NCL or NCKHW
-  auto shape = input.sizes().vec();
+  auto shape = c10::impl::size_val_vec_to_int(input.sizes().vec());
   auto strides = input.strides().vec();
   auto oshape = output.sizes();
 
@@ -1254,7 +1254,7 @@ void separable_upsample_generic_Nd_kernel_impl(
     bool align_corners,
     const scale_type& scales) {
 
-  auto temp_oshape = input.sizes().vec();
+  auto temp_oshape = c10::impl::size_val_vec_to_int(input.sizes().vec());
   at::Tensor temp_output, temp_input = input;
   for (const auto i : c10::irange(out_ndims - 1)) {
     int interp_dim = 2 + out_ndims - 1 - i;
@@ -1446,10 +1446,10 @@ void cpu_upsample_nearest_backward(
 
   // treat nbatch and channels as one dimension
   int64_t channels = input_sizes[0] * input_sizes[1];
-  int64_t input_depth = (ndim == 5) ? input_sizes[2] : 1;
-  int64_t output_depth = (ndim == 5) ? output_sizes[2] : 1;
-  int64_t input_height = (ndim >= 4) ? input_sizes[ndim - 2] : 1;
-  int64_t output_height = (ndim >= 4) ? output_sizes[ndim - 2] : 1;
+  int64_t input_depth = (ndim == 5) ? input_sizes[2] : c10::impl::SizeVal{1};
+  int64_t output_depth = (ndim == 5) ? output_sizes[2] : c10::impl::SizeVal{1};
+  int64_t input_height = (ndim >= 4) ? input_sizes[ndim - 2] : c10::impl::SizeVal{1};
+  int64_t output_height = (ndim >= 4) ? output_sizes[ndim - 2] : c10::impl::SizeVal{1};
   int64_t input_width = input_sizes[ndim - 1];
   int64_t output_width = output_sizes[ndim - 1];
 
@@ -1600,9 +1600,9 @@ void cpu_upsample_genNd_backward_aa(
 
   // treat nbatch and channels as one dimension
   int64_t channels = input_sizes[0] * input_sizes[1];
-  int64_t output_depth = (ndim == 5) ? output_sizes[2] : 1;
-  int64_t input_height = (ndim >= 4) ? input_sizes[ndim - 2] : 1;
-  int64_t output_height = (ndim >= 4) ? output_sizes[ndim - 2] : 1;
+  int64_t output_depth = (ndim == 5) ? output_sizes[2] : c10::impl::SizeVal{1};
+  int64_t input_height = (ndim >= 4) ? input_sizes[ndim - 2] : c10::impl::SizeVal{1};
+  int64_t output_height = (ndim >= 4) ? output_sizes[ndim - 2] : c10::impl::SizeVal{1};
   int64_t input_width = input_sizes[ndim - 1];
   int64_t output_width = output_sizes[ndim - 1];
 

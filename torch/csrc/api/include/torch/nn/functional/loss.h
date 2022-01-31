@@ -68,7 +68,7 @@ inline Tensor kl_div(
   auto reduced = torch::kl_div(input, target, reduction_enum, log_target);
 
   if (c10::get_if<enumtype::kBatchMean>(&reduction) && input.dim() != 0) {
-    reduced = reduced / input.sizes()[0];
+    reduced = reduced / (int64_t)input.sizes()[0];
   }
 
   return reduced;

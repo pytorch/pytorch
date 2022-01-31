@@ -222,7 +222,7 @@ Tensor& qembeddingbag_byte_prepack_out(Tensor& output, const Tensor& weight) {
       weight.expect_contiguous(weight.suggest_memory_format());
 
   // Adjust output dimensions to account for FP32 scale and zero_points.
-  std::vector<int64_t> output_shape = weight_sizes.vec();
+  std::vector<int64_t> output_shape = c10::impl::size_val_vec_to_int(weight_sizes.vec());
   output_shape[cols_dim] = output_columns;
   at::native::resize_(output, output_shape, c10::nullopt);
   auto* output_data = output.data_ptr<uint8_t>();

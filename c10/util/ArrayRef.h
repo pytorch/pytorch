@@ -269,16 +269,78 @@ class ArrayRef final {
   > 
   /// Construct an ArrayRef from a pointer and length.
   operator ArrayRef<int64_t>() {
-    return {*this};
+    return ArrayRef<int64_t>{(int64_t*)Data, Length};
   }
 
   template <class = typename std::enable_if< 
     std::is_same<ArrayRef<T>, ArrayRef<c10::impl::SizeVal>>::value>
   > 
   /// Construct an ArrayRef from a pointer and length.
-  bool operator==(ArrayRef<int64_t> other) {
+  operator const ArrayRef<int64_t>() const {
+    return ArrayRef<int64_t>{(int64_t*)Data, Length};
+  }
+
+  template <class = typename std::enable_if< 
+    std::is_same<ArrayRef<T>, ArrayRef<int64_t>>::value>
+  > 
+  /// Construct an ArrayRef from a pointer and length.
+  operator ArrayRef<c10::impl::SizeVal>() {
+    return ArrayRef<c10::impl::SizeVal>{(c10::impl::SizeVal*)Data, Length};
+  }
+
+  template <class = typename std::enable_if< 
+    std::is_same<ArrayRef<T>, ArrayRef<int64_t>>::value>
+  > 
+  /// Construct an ArrayRef from a pointer and length.
+  operator const ArrayRef<c10::impl::SizeVal>() const {
+    return ArrayRef<c10::impl::SizeVal>{(c10::impl::SizeVal*)Data, Length};
+  }
+
+  template <class = typename std::enable_if< 
+    std::is_same<ArrayRef<T>, ArrayRef<c10::impl::SizeVal>>::value>
+  > 
+  /// Construct an ArrayRef from a pointer and length.
+  bool operator==(ArrayRef<int64_t> other) const {
     return other.equals(*this);
   }
+
+  template <class = typename std::enable_if< 
+    std::is_same<ArrayRef<T>, ArrayRef<c10::impl::SizeVal>>::value>
+  > 
+  bool operator==(std::vector<int64_t> other) const {
+    return ((ArrayRef<int64_t>)(*this)).equals(other);
+  }
+
+  template <class = typename std::enable_if< 
+    std::is_same<ArrayRef<T>, ArrayRef<c10::impl::SizeVal>>::value>
+  > 
+  bool operator!=(std::vector<int64_t> other) const {
+    return !((ArrayRef<int64_t>)(*this)).equals(other);
+  }
+
+  template <class = typename std::enable_if< 
+    std::is_same<ArrayRef<T>, ArrayRef<c10::impl::SizeVal>>::value>
+  > 
+  bool operator!=(ArrayRef<int64_t> other) const {
+    return !((ArrayRef<int64_t>)(*this)).equals(other);
+  }
+
+  template <class = typename std::enable_if< 
+    std::is_same<ArrayRef<T>, ArrayRef<c10::impl::SizeVal>>::value>
+  > 
+  /// Construct an ArrayRef from a pointer and length.
+  constexpr bool equals(const ArrayRef<int64_t> RHS) const {
+    return RHS.equals(*this);
+  }
+
+  template <class = typename std::enable_if< 
+    std::is_same<ArrayRef<T>, ArrayRef<int64_t>>::value>
+  > 
+  C10_HOST_CONSTEXPR_EXCEPT_WIN_CUDA ArrayRef(const c10::impl::SizeVal* begin, const c10::impl::SizeVal* end)
+      : Data((int64_t*)begin), Length(end - begin) {
+    debugCheckNullptrInvariant();
+  }
+
 };
 
 template <typename T>
@@ -376,9 +438,17 @@ bool operator==(const std::vector<T>& a1, c10::ArrayRef<T> a2) {
   return c10::ArrayRef<T>(a1).equals(a2);
 }
 
+inline bool operator==(const std::vector<int64_t>& a1, c10::ArrayRef<c10::impl::SizeVal> a2) {
+  return ArrayRef<int64_t>(a1).equals((ArrayRef<int64_t>)a2);
+}
+
 template <typename T>
 bool operator!=(const std::vector<T>& a1, c10::ArrayRef<T> a2) {
   return !c10::ArrayRef<T>(a1).equals(a2);
+}
+
+inline bool operator!=(const std::vector<int64_t>& a1, c10::ArrayRef<c10::impl::SizeVal> a2) {
+  return !ArrayRef<int64_t>(a1).equals((ArrayRef<int64_t>)a2);
 }
 
 template <typename T>

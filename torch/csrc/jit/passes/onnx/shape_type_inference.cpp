@@ -1318,7 +1318,7 @@ void ComputeConstant(Node* n, int opset_version) {
         const_fold_val.value().sizes(), const_fold_val.value().options());
     const_fold_val_copy.copy_(const_fold_val.value());
     ConstantValueMap::SetValue(n->output()->debugName(), const_fold_val_copy);
-    UpdateShapeFromVector(n->output(), const_fold_val_copy.sizes().vec());
+    UpdateShapeFromVector(n->output(), c10::impl::size_val_vec_to_int(const_fold_val_copy.sizes().vec()));
     return;
   }
 

@@ -528,7 +528,7 @@ REGISTER_NATIVE_OPERATOR_FUNCTOR(
         if (dim < 0 || dim >= ndim) {
           dim = c10::maybe_wrap_dim(dim, ndim);
         }
-        p_node->Output(0) = input.sizes()[dim];
+        p_node->Output(0) = (int64_t)input.sizes()[dim];
       };
     });
 

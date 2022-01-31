@@ -19,6 +19,7 @@
 #include <array>
 #include <algorithm>
 #include <cmath>
+#include <iostream>
 
 namespace at {
 
@@ -1232,7 +1233,7 @@ void TensorIteratorBase::compute_shape(const TensorIteratorConfig& config) {
 void TensorIteratorBase::compute_strides(const TensorIteratorConfig& config) {
   for (auto& op : operands_) {
     if (op.tensor_base().defined()) {
-      IntArrayRef original_shape = config.static_shape_ ? shape_ : op.tensor_base().sizes();
+      IntArrayRef original_shape = config.static_shape_ ? shape_ : (IntArrayRef)(op.tensor_base().sizes());
       auto original_stride = op.tensor_base().strides();
       auto element_size_in_bytes = op.tensor_base().element_size();
       auto offset = ndim() - original_shape.size();

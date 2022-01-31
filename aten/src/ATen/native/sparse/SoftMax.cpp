@@ -393,7 +393,7 @@ void cpu_sparse_coo_softmax_backward(const Tensor& grad_input, const Tensor& gra
       output.sparse_dim() == grad.sparse_dim()
   */
   auto sparse_dim = output.sparse_dim();
-  auto sizes = output.sizes().vec();
+  auto sizes = c10::impl::size_val_vec_to_int(output.sizes().vec());
   auto grad_indices = grad._indices().contiguous();
   auto grad_values = grad._values().contiguous();
   auto out_indices = output._indices().contiguous();

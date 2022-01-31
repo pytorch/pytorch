@@ -129,7 +129,7 @@ at::Tensor& flatten_copy_out(
   }
 
   if (start_dim == end_dim) {
-    auto shape = self.sizes().vec();
+    auto shape = c10::impl::size_val_vec_to_int(self.sizes().vec());
     return reshape_copy_out(out, self, shape, false);
   }
 
@@ -801,7 +801,7 @@ void varStackSerialOut(
     at::Tensor& result,
     int64_t dim,
     const VarStackNodeWrapper& inputs) {
-  auto result_sizes = inputs[0].sizes().vec();
+  auto result_sizes = c10::impl::size_val_vec_to_int(inputs[0].sizes().vec());
   result_sizes.insert(result_sizes.begin() + dim, inputs.size());
   at::native::resize_(result, result_sizes);
 

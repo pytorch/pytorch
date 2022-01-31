@@ -22,7 +22,7 @@ inline void _reduction_with_indices_allocate_or_resize_output(
     int64_t dim_,
     bool keepdim) {
   int64_t dim = maybe_wrap_dim(dim_, self.dim(), /*wrap_scalar=*/true);
-  auto result_sizes = self.sizes().vec();
+  auto result_sizes = c10::impl::size_val_vec_to_int(self.sizes().vec());
   if (result_sizes.size() > 0) {
     result_sizes[dim] = 1;
   }
@@ -62,7 +62,7 @@ inline void _allocate_or_resize_output_with_indices(
     int64_t dim_,
     int64_t k) {
   int64_t dim = maybe_wrap_dim(dim_, self.dim(), /*wrap_scalar=*/true);
-  auto result_sizes = self.sizes().vec();
+  auto result_sizes = c10::impl::size_val_vec_to_int(self.sizes().vec());
   if (result_sizes.size() > 0) {
     result_sizes[dim] = k;
   }

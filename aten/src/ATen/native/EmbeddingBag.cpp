@@ -502,7 +502,7 @@ void make_bag_size_out(
           offsets.slice(0, 0, num_bags - 1, 1);
     }
     if (num_bags > 0) {
-      bag_size_out[-1] = indices.sizes()[0] - offsets[num_bags - 1];
+      bag_size_out[-1] = (int64_t)(indices.sizes()[0]) - offsets[num_bags - 1];
     }
   } else {
     at::native::resize_(bag_size_out, offsets.sizes(), c10::nullopt);
@@ -728,8 +728,8 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> _embedding_bag_cpu_impl(
   check_arguments(weight, indices, offsets, mode, per_sample_weights, include_last_offset);
 
   Tensor output = at::empty(
-      {include_last_offset ? offsets.sizes()[0] - 1 : offsets.sizes()[0],
-       weight.sizes()[1]},
+      c10::impl::size_val_vec_to_int({include_last_offset ? offsets.sizes()[0] - 1 : offsets.sizes()[0],
+      weight.sizes()[1]}),
       weight.options());
 
   Tensor offset2bag = make_offset2bag(output, weight, indices, offsets, mode, per_sample_weights, padding_idx);

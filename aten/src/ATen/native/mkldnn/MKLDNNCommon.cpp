@@ -88,13 +88,13 @@ ideep::tensor itensor_view_from_dense(const Tensor& tensor) {
       "itensor_view_from_dense expects dense tensor input");
   TORCH_INTERNAL_ASSERT(at::impl::variable_excluded_from_dispatch());
   if (tensor.scalar_type() == ScalarType::Float) {
-    return {{tensor.sizes().vec(),
+    return {{c10::impl::size_val_vec_to_int(tensor.sizes().vec()),
             ideep::tensor::data_type::f32,
             tensor.strides().vec()},
             tensor.template data_ptr<float>()};
   }
   else if (tensor.scalar_type() == ScalarType::BFloat16) {
-    return {{tensor.sizes().vec(),
+    return {{c10::impl::size_val_vec_to_int(tensor.sizes().vec()),
             ideep::tensor::data_type::bf16,
             tensor.strides().vec()},
             tensor.template data_ptr<BFloat16>()};

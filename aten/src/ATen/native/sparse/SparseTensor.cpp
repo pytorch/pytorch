@@ -458,7 +458,7 @@ SparseTensor dense_to_sparse(const Tensor& self, int64_t sparse_dim) {
       sparse_dim <= dims,
       "sparse_dim must be less than or equal to self.dim()");
   at::TensorOptions sparse_options = self.options().layout(kSparse);
-  std::vector<int64_t> sizes = self.sizes().vec();
+  std::vector<int64_t> sizes = c10::impl::size_val_vec_to_int(self.sizes().vec());
 
   Tensor nz = self.nonzero().transpose(0, 1);
   if (nz.size(1) == 0) {
@@ -764,7 +764,7 @@ Tensor sparse_mask_helper_cpu(
 
   int64_t r_nnz = mask_indices.size(1);
   auto t_v = t._values();
-  auto vsize = t_v.sizes().vec();
+  auto vsize = c10::impl::size_val_vec_to_int(t_v.sizes().vec());
   vsize[0] = r_nnz;
 
   Tensor r_values = at::zeros(vsize, t_v.options());

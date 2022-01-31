@@ -195,7 +195,7 @@ std::tuple<Tensor, Tensor, Tensor> _unique_dim_cpu_template(
 
   // reshape tensor as [dim, -1]
   Tensor input_flat = self.transpose(dim, 0);
-  auto orig_sizes = input_flat.sizes().vec();
+  auto orig_sizes = c10::impl::size_val_vec_to_int(input_flat.sizes().vec());
   input_flat = input_flat.contiguous().view({input_flat.size(0), -1});
 
   std::vector<int64_t> indices(input_flat.size(0));

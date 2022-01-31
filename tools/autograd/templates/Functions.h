@@ -44,7 +44,7 @@ struct TypeAndSize {
   TypeAndSize() : options(at::TensorOptions()) {}
   /* implicit */
   TypeAndSize(const Tensor & t)
-    : sizes(t.sizes().vec())
+    : sizes(c10::impl::size_val_vec_to_int(t.sizes().vec()))
     , options(t.options()) {}
 
   Tensor zeros() { return at::zeros(sizes, options); }

@@ -105,7 +105,7 @@ struct cpu_scatter_gather_base_kernel {
     const Tensor& index, const Scalar& value,
     const std::string& method_name, func_t& kernel_func) {
 
-    auto index_sizes = ensure_nonempty_vec(index.sizes().vec());
+    auto index_sizes = ensure_nonempty_vec(c10::impl::size_val_vec_to_int(index.sizes().vec()));
     auto index_strides = ensure_nonempty_vec(index.strides().vec());
 
     // `dim` is traversed in the kernel,

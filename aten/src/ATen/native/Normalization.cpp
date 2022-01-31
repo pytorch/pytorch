@@ -594,7 +594,7 @@ Tensor instance_norm(
 
   TORCH_CHECK(use_input_stats || (running_mean.defined() && running_var.defined()),
            "Expected running_mean and running_var to be defined when use_input_stats is false");
-  std::vector<int64_t> shape = input.sizes().vec();
+  std::vector<int64_t> shape = c10::impl::size_val_vec_to_int(input.sizes().vec());
   int64_t b = input.size(0);
   int64_t c = input.size(1);
   shape[1] = b * c;

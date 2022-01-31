@@ -7,6 +7,7 @@
 #include <ATen/native/NonEmptyUtils.h>
 #include <ATen/WrapDimUtilsMulti.h>
 #include <c10/util/irange.h>
+#include <c10/core/impl/SizeVal.h>
 
 namespace at { namespace native {
 
@@ -263,7 +264,7 @@ static std::vector<int64_t> get_zero_numel_tensor_size(
     const char* fn_name) {
   TORCH_INTERNAL_ASSERT(self.numel() == 0,  fn_name, ": Expected self.numel() == 0.");
   zero_numel_check_dims(self, dim, fn_name);
-  std::vector<int64_t> sizes;
+  std::vector<c10::impl::SizeVal> sizes;
   if (keepdim) {
     sizes = self.sizes().vec();
     sizes[dim] = 1;
@@ -275,7 +276,7 @@ static std::vector<int64_t> get_zero_numel_tensor_size(
       }
     }
   }
-  return sizes;
+  return c10::impl::size_val_vec_to_int(sizes);
 }
 
 // Resize the result tensor and indices when result.numel() == 0 depending on values of

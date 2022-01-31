@@ -159,7 +159,7 @@ static Tensor sumproduct_pair(const Tensor& left_, const Tensor& right_, IntArra
         sizes.erase(sizes.begin() + i);
       }
     }
-    result = result.view(sizes);
+    result = result.view(c10::impl::size_val_vec_to_int(sizes));
   }
   return result;
 }

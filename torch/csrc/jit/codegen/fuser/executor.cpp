@@ -47,7 +47,7 @@ static c10::optional<std::vector<int64_t>> getMapSize(
         return c10::nullopt;
       }
     } else {
-      auto tensor_sizes = arg.sizes().vec();
+      auto tensor_sizes = c10::impl::size_val_vec_to_int(arg.sizes().vec());
       const auto num_chunks = chunk_desc.nSubTensors();
       const auto dim =
           at::maybe_wrap_dim(chunk_desc.dim(), tensor_sizes.size());

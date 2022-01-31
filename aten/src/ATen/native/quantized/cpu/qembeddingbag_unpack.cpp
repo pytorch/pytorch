@@ -116,7 +116,7 @@ Tensor qembeddingbag_byte_unpack(const Tensor& packed_weight) {
   const int32_t output_columns = input_columns - 2 * sizeof(float);
   const auto* input_data = packed_weight.data_ptr<uint8_t>();
 
-  std::vector<int64_t> output_shape = packed_weight_sizes.vec();
+  std::vector<int64_t> output_shape = c10::impl::size_val_vec_to_int(packed_weight_sizes.vec());
   output_shape[col_dim] = output_columns;
   at::Tensor output = at::empty(
       output_shape,

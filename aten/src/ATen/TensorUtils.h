@@ -143,7 +143,7 @@ TORCH_API void* maybe_data_ptr(const TensorArg& tensor);
 // allows checking if a particular geometry is contiguous without explicitly
 // constructing a tensor, e.g., when you want to choose a kernel strategy based
 // on whether a subgeometry is contiguous.
-TORCH_API bool geometry_is_contiguous(IntArrayRef sizes, IntArrayRef strides);
+TORCH_API bool geometry_is_contiguous(SizeValArrayRef sizes, IntArrayRef strides);
 
 TORCH_API void check_dim_size(
     const Tensor& tensor,

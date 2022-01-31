@@ -29,7 +29,7 @@ Tensor embedding(const Tensor & weight, const Tensor & indices,
     size.push_back(d);
   }
 
-  return weight.index_select(0, indices.reshape(-1)).view(size);
+  return weight.index_select(0, indices.reshape(-1)).view(c10::impl::size_val_vec_to_int(size));
 }
 
 Tensor embedding_backward(

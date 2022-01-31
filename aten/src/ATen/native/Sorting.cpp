@@ -167,7 +167,7 @@ std::vector<int64_t> quantile_output_shape(
   // Compute output shape: q_size + reduced_size
   std::vector<int64_t> out_shape;
   if (original_dim && self.dim() > 0) {
-    out_shape = self.sizes().vec();
+    out_shape = c10::impl::size_val_vec_to_int(self.sizes().vec());
     if (keepdim) {
       out_shape[wrapped_dim] = 1;
     } else {
@@ -373,10 +373,10 @@ std::tuple<Tensor&, Tensor&> kthvalue_out_impl_cpu(
       for (const auto i : c10::irange(n)) {
         TensorAccessor<scalar_t, 1> tmp_values(
             reinterpret_cast<scalar_t*>(data[0] + i * strides[0]),
-            &sizes[dim], &tmp_values_stride);
+            sizes[dim], &tmp_values_stride);
         TensorAccessor<int64_t, 1> tmp_indices(
             reinterpret_cast<int64_t*>(data[1] + i * strides[1]),
-            &sizes[dim], &tmp_indices_stride);
+            sizes[dim], &tmp_indices_stride);
         auto mode_value = reinterpret_cast<scalar_t*>(data[2] + i * strides[2]);
         auto mode_index = reinterpret_cast<int64_t*>(data[3] + i * strides[3]);
 
@@ -401,7 +401,7 @@ std::tuple<Tensor&, Tensor&> kthvalue_out_impl_cpu(
       }
     };
 
-    int64_t grain_size = internal::GRAIN_SIZE / std::max(int64_t{1}, sizes[dim]);
+    int64_t grain_size = internal::GRAIN_SIZE / std::max(c10::impl::SizeVal{1}, sizes[dim]);
     iter.for_each(loop, /*grain_size=*/grain_size);
   });
 
@@ -429,7 +429,7 @@ std::tuple<Tensor&, Tensor&> median_with_indices_impl(
   checkScalarType("median", {indices, "indices", 1}, kLong);
   checkSameType("median", {values, "values", 0}, {self, "self", 2});
 
-  std::vector<int64_t> out_shape = self.sizes().vec();
+  std::vector<int64_t> out_shape = c10::impl::size_val_vec_to_int(self.sizes().vec());
   if (self.dim() > 0) {
     if (keepdim) {
       out_shape[dim] = 1;
@@ -511,7 +511,7 @@ std::tuple<Tensor&, Tensor&> median_with_indices_impl(
         *indp = *nth;
       }
     };
-    int64_t grain_size = internal::GRAIN_SIZE / std::max(int64_t{1}, sizes[dim]);
+    int64_t grain_size = internal::GRAIN_SIZE / std::max(c10::impl::SizeVal{1}, sizes[dim]);
     iter.for_each(loop, /*grain_size=*/grain_size);
   });
 

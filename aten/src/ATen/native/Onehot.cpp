@@ -13,7 +13,7 @@ Tensor one_hot(const Tensor &self, int64_t num_classes) {
             AT_ERROR("Can not infer total number of classes from empty tensor.");
         } else {
             shape.push_back(num_classes);
-            return at::empty(shape, self.options());
+            return at::empty(c10::impl::size_val_vec_to_int(shape), self.options());
         }
     }
 
@@ -35,7 +35,7 @@ Tensor one_hot(const Tensor &self, int64_t num_classes) {
     }
 
     shape.push_back(num_classes);
-    Tensor ret = at::zeros(shape, self.options());
+    Tensor ret = at::zeros(c10::impl::size_val_vec_to_int(shape), self.options());
     ret.scatter_(-1, self.unsqueeze(-1), 1);
     return ret;
 }

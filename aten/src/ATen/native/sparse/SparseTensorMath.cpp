@@ -961,7 +961,7 @@ SparseTensor& hspmm_out_sparse_cpu(const SparseTensor& sparse_, const Tensor& de
   TORCH_CHECK(dense.size(0) == k,
       "hspmm: Argument #3: Expected dim 0 size ", k, ", got ", dense.size(0));
 
-  get_sparse_impl(r)->raw_resize_(1, 1, {m, n});
+  get_sparse_impl(r)->raw_resize_(1, 1, SizeValArrayRef{m, n});
 
   SparseTensor sparse = sparse_.coalesce();
 
@@ -1048,7 +1048,7 @@ SparseTensor& _sspaddmm_out_cpu(
 
   // NB: This has to occur before the checks, because r may alias t.
   // See test_saddmm
-  get_sparse_impl(r)->raw_resize_(2, 0, {dim_i, dim_k});
+  get_sparse_impl(r)->raw_resize_(2, 0, SizeValArrayRef{dim_i, dim_k});
 
   TORCH_CHECK(dense.size(0) == dim_j,
       "sspaddmm: Argument #3: Expected dim 0 size ", dim_j, ", got ", dense.size(0));
@@ -1328,7 +1328,7 @@ Tensor _sparse_sum_backward_cpu(const Tensor& grad_, const SparseTensor& input_,
   if (sum_all_sparse_dim) {
     TORCH_CHECK(!grad_.is_sparse(), "_sparse_sum_backward_cpu: expected grad_ Tensor to be dense since all sparse dims are summed");
     auto grad_input_values = grad_;
-    auto expand_size = input_values.sizes().vec();
+    auto expand_size = c10::impl::size_val_vec_to_int(input_values.sizes().vec());
     if (sum_dense_dim) {
       auto dense_expand_size = std::vector<int64_t>(expand_size);
       dense_expand_size.erase(dense_expand_size.begin());
@@ -1349,7 +1349,7 @@ Tensor _sparse_sum_backward_cpu(const Tensor& grad_, const SparseTensor& input_,
 
     Tensor grad_values_expand = grad_values;
     if (sum_dense_dim) {
-      auto expand_size = input_values.sizes().vec();
+      auto expand_size = c10::impl::size_val_vec_to_int(input_values.sizes().vec());
       if (sum_sparse_dim) expand_size[0] = grad_values.size(0);
       for (auto d : dense_dims_to_sum_v) grad_values_expand = grad_values_expand.unsqueeze(d);
       grad_values_expand = grad_values_expand.expand(expand_size).clone(at::MemoryFormat::Contiguous);

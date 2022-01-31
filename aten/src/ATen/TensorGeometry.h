@@ -8,7 +8,7 @@ namespace at {
 struct TORCH_API TensorGeometry {
   TensorGeometry() : storage_offset_(0) {}
 
-  explicit TensorGeometry(IntArrayRef sizes)
+  explicit TensorGeometry(SizeValArrayRef sizes)
     : sizes_(sizes.vec())
     , strides_(sizes.size())
     , storage_offset_(0) {
@@ -35,7 +35,7 @@ struct TORCH_API TensorGeometry {
     dim = maybe_wrap_dim(dim, this->dim());
     return sizes_.at(static_cast<size_t>(dim));
   }
-  IntArrayRef sizes() const { return IntArrayRef{ sizes_ }; }
+  SizeValArrayRef sizes() const { return SizeValArrayRef{ sizes_ }; }
   int64_t stride(int64_t dim) const {
     dim = maybe_wrap_dim(dim, this->dim());
     return strides_.at(static_cast<size_t>(dim));
@@ -53,7 +53,7 @@ struct TORCH_API TensorGeometry {
     return r;
   }
 
-  std::vector<int64_t> sizes_;
+  std::vector<c10::impl::SizeVal> sizes_;
   std::vector<int64_t> strides_;
   int64_t storage_offset_;
   int64_t numel_;

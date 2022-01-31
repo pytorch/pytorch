@@ -125,7 +125,7 @@ std::vector<std::vector<int64_t>> inputSizes(const at::RecordFunction& fn) {
     }
     const at::Tensor& tensor = input.toTensor();
     if (tensor.defined()) {
-      sizes.push_back(input.toTensor().sizes().vec());
+      sizes.push_back(c10::impl::size_val_vec_to_int(input.toTensor().sizes().vec()));
     } else {
       sizes.emplace_back();
     }
@@ -266,8 +266,8 @@ std::unordered_map<std::string, c10::IValue> saveExtraArgs(
           "Failed to compute flops for op aten::conv2d because it requires a 4D kernel tensor.");
       return map;
     }
-    map[kInputSize] = at::IValue(input.sizes());
-    map[kWeightSize] = at::IValue(weight.sizes());
+    map[kInputSize] = at::IValue(c10::IntArrayRef(input.sizes()));
+    map[kWeightSize] = at::IValue(c10::IntArrayRef(weight.sizes()));
     map[kStride] = inputs[kConv2dStride];
     map[kPadding] = inputs[kConv2dPadding];
     map[kDilation] = inputs[kConv2dDilation];
@@ -280,8 +280,8 @@ std::unordered_map<std::string, c10::IValue> saveExtraArgs(
 
     at::Tensor left = inputs[0].toTensor();
     at::Tensor right = inputs[1].toTensor();
-    map[kMat1Size] = at::IValue(left.sizes());
-    map[kMat2Size] = at::IValue(right.sizes());
+    map[kMat1Size] = at::IValue(c10::IntArrayRef(left.sizes()));
+    map[kMat2Size] = at::IValue(c10::IntArrayRef(right.sizes()));
   } else if (fname == kAddMMOp) {
     bool check = validateInput(fname, 3, inputs, {0, 1, 2});
     if (!check) {
@@ -294,8 +294,8 @@ std::unordered_map<std::string, c10::IValue> saveExtraArgs(
     // "Operations Count for the BLAS and LAPACK", Table 3, SGEMM)
     at::Tensor left = inputs[1].toTensor();
     at::Tensor right = inputs[2].toTensor();
-    map[kMat1Size] = at::IValue(left.sizes());
-    map[kMat2Size] = at::IValue(right.sizes());
+    map[kMat1Size] = at::IValue(c10::IntArrayRef(left.sizes()));
+    map[kMat2Size] = at::IValue(c10::IntArrayRef(right.sizes()));
   } else if (fname == kMulOp) {
     bool check = validateInput(fname, 1, inputs, {0});
     if (!check) {
@@ -303,7 +303,7 @@ std::unordered_map<std::string, c10::IValue> saveExtraArgs(
     }
 
     at::Tensor mat = inputs[0].toTensor();
-    map[kMatSize] = at::IValue(mat.sizes());
+    map[kMatSize] = at::IValue(c10::IntArrayRef(mat.sizes()));
   } else if (fname == kAddOp) {
     bool check = validateInput(fname, 1, inputs, {0});
     if (!check) {
@@ -311,7 +311,7 @@ std::unordered_map<std::string, c10::IValue> saveExtraArgs(
     }
 
     at::Tensor mat = inputs[0].toTensor();
-    map[kMatSize] = at::IValue(mat.sizes());
+    map[kMatSize] = at::IValue(c10::IntArrayRef(mat.sizes()));
   } else if (fname == kBMMOp) {
     bool check = validateInput(fname, 2, inputs, {0, 1});
     if (!check) {
@@ -320,8 +320,8 @@ std::unordered_map<std::string, c10::IValue> saveExtraArgs(
 
     at::Tensor left = inputs[0].toTensor();
     at::Tensor right = inputs[1].toTensor();
-    map[kMat1Size] = at::IValue(left.sizes());
-    map[kMat2Size] = at::IValue(right.sizes());
+    map[kMat1Size] = at::IValue(c10::IntArrayRef(left.sizes()));
+    map[kMat2Size] = at::IValue(c10::IntArrayRef(right.sizes()));
   } else if (fname == kBAddBMMOp) {
     bool check = validateInput(fname, 3, inputs, {0, 1, 2});
     if (!check) {
@@ -334,8 +334,8 @@ std::unordered_map<std::string, c10::IValue> saveExtraArgs(
     // "Operations Count for the BLAS and LAPACK", Table 3, SGEMM)
     at::Tensor left = inputs[1].toTensor();
     at::Tensor right = inputs[2].toTensor();
-    map[kMat1Size] = at::IValue(left.sizes());
-    map[kMat2Size] = at::IValue(right.sizes());
+    map[kMat1Size] = at::IValue(c10::IntArrayRef(left.sizes()));
+    map[kMat2Size] = at::IValue(c10::IntArrayRef(right.sizes()));
   }
 
   return map;

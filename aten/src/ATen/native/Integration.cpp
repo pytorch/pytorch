@@ -37,7 +37,7 @@ Tensor zeros_like_except(const Tensor& y, int64_t dim) {
     auto sizes = y.sizes().vec();
     dim = maybe_wrap_dim(dim, y.dim());
     sizes.erase(sizes.begin() + dim);
-    return at::zeros(sizes, y.options());
+    return at::zeros(c10::impl::size_val_vec_to_int(sizes), y.options());
 }
 
 Tensor do_cumulative_trapezoid(const Tensor& y, const Tensor& dx, int64_t dim) {

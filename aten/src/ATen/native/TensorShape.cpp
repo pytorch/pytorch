@@ -141,7 +141,7 @@ Tensor sparse_broadcast_to(const Tensor& self, IntArrayRef size) {
   }
 
   std::vector<int64_t> new_indices_size{sparse_ndim, nnz * nnz_factor};
-  std::vector<int64_t> new_values_size(values.sizes().vec());
+  std::vector<int64_t> new_values_size = c10::impl::size_val_vec_to_int(values.sizes().vec());
   new_values_size[0] = new_indices_size[1];
 
   Tensor new_values = values.expand(broadcast_dense_sizes).repeat_interleave(nnz_factor, 0);
@@ -249,7 +249,7 @@ Tensor & _cat_out_cpu(TensorList tensors, int64_t dim, Tensor& result) {
     }
   }
   // compute the size of the result
-  auto result_size = notSkippedTensor.sizes().vec();
+  auto result_size = c10::impl::size_val_vec_to_int(notSkippedTensor.sizes().vec());
   result_size[dim] = cat_dim_size;
 
   // skip resizing if size of result is same as expected
@@ -476,7 +476,7 @@ static Tensor cat_sparse(TensorList tensors, int64_t dim) {
     const int64_t total_size = std::accumulate(tensors.begin(), tensors.end(), static_cast<int64_t>(0), [values_dim](int64_t l, Tensor const &r) {
       return l + r._values().size(values_dim);
     });
-    auto zeros_sizes = tensors[0]._values().sizes().vec();
+    auto zeros_sizes = c10::impl::size_val_vec_to_int(tensors[0]._values().sizes().vec());
     int64_t cumulative_size = 0;
     std::vector<Tensor> vals_pieces;
     std::vector<Tensor> idxs_pieces;
@@ -788,7 +788,7 @@ Tensor diag_embed(const Tensor& self, int64_t offset, int64_t dim1_, int64_t dim
   int64_t dim2 = maybe_wrap_dim(dim2_, nDims);
   TORCH_CHECK(dim1 != dim2, "diagonal dimensions cannot be identical ", dim1_, ", ", dim2_);
   int64_t new_dim_len = std::abs(offset) + self.size(-1);
-  auto sizes = self.sizes().vec();
+  auto sizes = c10::impl::size_val_vec_to_int(self.sizes().vec());
   sizes.pop_back();
   sizes.insert(sizes.begin() + std::min(dim1, dim2), new_dim_len);
   sizes.insert(sizes.begin() + std::max(dim1, dim2), new_dim_len);
@@ -870,7 +870,7 @@ Tensor narrow_copy_sparse(const Tensor& self, int64_t dim, int64_t start, int64_
   Tensor indices = self._indices();
   int64_t sparse_dim = self.sparse_dim();
 
-  std::vector<int64_t> new_sizes = self.sizes().vec();
+  std::vector<int64_t> new_sizes = c10::impl::size_val_vec_to_int(self.sizes().vec());
   new_sizes[dim] = length;
 
   Tensor new_values;
@@ -928,7 +928,7 @@ Tensor& narrow_copy_dense_cpu_out(
   // resize output
   auto output_sizes = self_sizes.vec();
   output_sizes[dim] = length;
-  at::native::resize_(output, output_sizes);
+  at::native::resize_(output, c10::impl::size_val_vec_to_int(output_sizes));
 
   // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
   const int64_t unit = c10::size_from_dim_(dim + 1, self_sizes);
@@ -1163,7 +1163,7 @@ static Tensor select_sparse(const Tensor& self, int64_t dim, int64_t index) {
 
   auto indices = self._indices();
   auto values = self._values();
-  auto new_sizes = self.sizes().vec();
+  auto new_sizes = c10::impl::size_val_vec_to_int(self.sizes().vec());
   new_sizes.erase(new_sizes.begin() + dim);
 
   if (dim < sparse_dim) {
@@ -1275,7 +1275,7 @@ Tensor index_select_sparse(const Tensor& self, int64_t dim, const Tensor& index)
   auto indices = self._indices();
   auto values = self._values();
   auto nnz = values.size(0);
-  auto new_sizes = self.sizes().vec();
+  auto new_sizes = c10::impl::size_val_vec_to_int(self.sizes().vec());
   new_sizes[dim] = index.size(0);
 
   if (dim < sparse_dim) {
@@ -1314,7 +1314,7 @@ Tensor index_select_sparse(const Tensor& self, int64_t dim, const Tensor& index)
 
   } else {
 
-    auto vsize = values.sizes().vec();
+    auto vsize = c10::impl::size_val_vec_to_int(values.sizes().vec());
     vsize[dim + 1 - sparse_dim] = index.size(0);
     auto new_values = at::empty(vsize, values.options());
     for (const auto k : c10::irange(nnz)) {
@@ -1504,7 +1504,7 @@ bool inline maybe_native_stack(Tensor& result, TensorList tensors, int64_t dim) 
   dim = maybe_wrap_dim(dim, tensors[0].dim() + 1);
   if (detail::CanUseNativeSerialStack<TensorList, /*skip_overlap_check*/ false>::call(result, tensors, dim)) {
     // compute the size of the result
-    auto result_sizes = tensors[0].sizes().vec();
+    auto result_sizes = c10::impl::size_val_vec_to_int(tensors[0].sizes().vec());
     result_sizes.insert(result_sizes.begin() + dim, tensors.size());
 
     // skip resizing if size of result is same as expected
@@ -1550,7 +1550,7 @@ Tensor stack(TensorList tensors, int64_t dim) {
   auto wrapped_dim = maybe_wrap_dim(dim, tensors[0].ndimension()+1);
   if (wrapped_dim < tensors[0].ndimension() && !tensors[0].is_sparse()) {
     check_stack_inputs(tensors, wrapped_dim);
-    auto result_sizes = tensors[0].sizes().vec();
+    auto result_sizes = c10::impl::size_val_vec_to_int(tensors[0].sizes().vec());
     result_sizes.insert(result_sizes.begin() + wrapped_dim, tensors.size());
     auto out = at::cat(tensors, wrapped_dim);
     return out.view(result_sizes); // one can always split a dimension with view
@@ -1580,10 +1580,10 @@ Tensor& stack_out(TensorList tensors, int64_t dim, Tensor& result) {
   auto wrapped_dim = maybe_wrap_dim(dim, tensors[0].ndimension()+1);
   if (wrapped_dim < tensors[0].ndimension() && !tensors[0].is_sparse()) {
     check_stack_inputs(tensors, wrapped_dim);
-    auto result_sizes = tensors[0].sizes().vec();
+    auto result_sizes = c10::impl::size_val_vec_to_int(tensors[0].sizes().vec());
     result_sizes.insert(result_sizes.begin() + wrapped_dim, tensors.size());
     at::native::resize_output(result, result_sizes);
-    auto cat_sizes = tensors[0].sizes().vec();
+    auto cat_sizes = c10::impl::size_val_vec_to_int(tensors[0].sizes().vec());
     cat_sizes[wrapped_dim] *= tensors.size();
     auto strides = at::detail::computeStride(result.sizes(), result.strides(), cat_sizes);
     if (strides.has_value()) {
@@ -2029,7 +2029,7 @@ static Tensor unsqueeze_sparse(Tensor const &self, int64_t dim /* should already
   int64_t sparse_dim = self.sparse_dim();
   int64_t dense_dim = self.dense_dim();
   auto indices = self._indices();
-  auto sizes = self.sizes().vec();
+  auto sizes = c10::impl::size_val_vec_to_int(self.sizes().vec());
   sizes.insert(sizes.begin() + dim, 1);
   if (dim <= sparse_dim) {
     auto new_indices = native::cat(
@@ -2394,7 +2394,7 @@ Tensor view(const Tensor& self,
 }
 
 Tensor alias(const Tensor& self) {
-    return alias_with_sizes_and_strides(self, self.sizes(), self.strides());
+    return alias_with_sizes_and_strides(self, c10::impl::size_val_vec_to_int(self.sizes().vec()), self.strides().vec());
 }
 
 Tensor detach(const Tensor& self) {
@@ -2413,7 +2413,7 @@ Tensor unfold(const Tensor& self, int64_t dimension, int64_t size, int64_t step)
 
   const auto sizes = self.sizes();
   const auto strides = self.strides();
-  int64_t max_size = self.dim() == 0 ? 1 : sizes[dimension];
+  int64_t max_size = self.dim() == 0 ? c10::impl::SizeVal{1} : sizes[dimension];
   TORCH_CHECK(size <= max_size, "maximum size for tensor at dimension ", dimension,
                                 " is ", max_size, " but size is ", size);
   TORCH_CHECK(step > 0, "step is ", step, " but must be > 0");

@@ -3,6 +3,7 @@
 #pragma once
 
 #include <c10/util/Exception.h>
+#include <c10/core/impl/SizeVal.h>
 
 #include <algorithm>
 #include <iterator>
@@ -93,13 +94,16 @@ integer_range<Integer2> irange(Integer1 begin, Integer2 end) {
 /// If end<=begin, then the range is empty
 template <
     typename Integer,
-    typename std::enable_if<std::is_integral<Integer>::value, bool>::type =
-        true>
+    class = typename std::enable_if<std::is_integral<Integer>::value>>
 integer_range<Integer> irange(Integer end) {
   // If end<=begin then the range is empty; we can achieve this effect by
   // choosing the larger of {0, end} as the loop terminator
   // Handles the case where end<0. irange only works for ranges >=0
   return {Integer(), std::max(Integer(), end)};
+}
+
+inline integer_range<int64_t> irange(c10::impl::SizeVal end) {
+  return {int64_t(), std::max(int64_t(), (int64_t(end)))};
 }
 
 } // namespace c10

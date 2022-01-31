@@ -243,16 +243,16 @@ TORCH_META_FUNC(linalg_lu_factor_ex)(const Tensor& A, bool pivot, bool check_err
 
   // make column major strides for BLAS
   auto LU_strides = at::native::contiguous_strides(sizes, /*f-contig*=*/true);
-  set_output(0, sizes, LU_strides, A.options(), {});
+  set_output(0, SizeValArrayRef(sizes), LU_strides, A.options(), {});
 
   // Set sizes to the size of pivots
   sizes.pop_back();
   sizes.back() = std::min(m, n);
-  set_output(1, sizes, {}, A.options().dtype(kInt), {});
+  set_output(1, SizeValArrayRef(sizes), {}, A.options().dtype(kInt), {});
 
   // Set sizes to the size of info
   sizes.pop_back();
-  set_output(2, sizes, {}, A.options().dtype(kInt), {});
+  set_output(2, SizeValArrayRef(sizes), {}, A.options().dtype(kInt), {});
 }
 
 TORCH_META_FUNC(_linalg_svd)(const Tensor& A,
@@ -269,7 +269,7 @@ TORCH_META_FUNC(_linalg_svd)(const Tensor& A,
   if (compute_uv) {
     sizes.back() = full_matrices ? m : k;
     auto U_strides = at::native::contiguous_strides(sizes, /*f-contig*=*/true);
-    set_output(0, sizes, U_strides, A.options(), {});
+    set_output(0, SizeValArrayRef(sizes), U_strides, A.options(), {});
 
     // Prepare sizes for Vh
     sizes.end()[-2] = full_matrices ? n : k;
@@ -279,7 +279,7 @@ TORCH_META_FUNC(_linalg_svd)(const Tensor& A,
     // expect F-contig matrices, but they compute V rather than Vh
     const bool use_cusolver = at::native::svd_uses_cusolver(A);
     auto Vh_strides = at::native::contiguous_strides(sizes, /*f-contig*=*/!use_cusolver);
-    set_output(2, sizes, Vh_strides, A.options(), {});
+    set_output(2, SizeValArrayRef(sizes), Vh_strides, A.options(), {});
   } else {
     set_output(0, {0}, {}, A.options(), {});
     set_output(2, {0}, {}, A.options(), {});
@@ -288,7 +288,7 @@ TORCH_META_FUNC(_linalg_svd)(const Tensor& A,
   // Prepare sizes for S. S is always real, even when A is complex.
   sizes.pop_back();
   sizes.end()[-1] = k;
-  set_output(1, sizes, {}, A.options().dtype(c10::toValueType(A.scalar_type())), {});
+  set_output(1, SizeValArrayRef(sizes), {}, A.options().dtype(c10::toValueType(A.scalar_type())), {});
 }
 } // namespace meta
 
@@ -1872,7 +1872,7 @@ void linalg_qr_out_helper(const Tensor& input, const Tensor& Q, const Tensor& R,
   auto tau_shape = input.sizes().vec();
   tau_shape.pop_back();
   tau_shape.back() = mn;
-  Tensor tau = at::empty(tau_shape, input.options());
+  Tensor tau = at::empty(c10::impl::size_val_vec_to_int(tau_shape), input.options());
 
   // geqrf requires m x n workspace input that is modified in-place
   // if m > n and reduced==true we use Q tensor for storing the result of geqrf operation
@@ -1929,7 +1929,7 @@ std::tuple<Tensor, Tensor> _linalg_qr_helper_default(const Tensor& input, c10::s
     auto Qt_shape = input.sizes().vec();
     Qt_shape.end()[-2] = reduced_mode ? mn : m;
     Qt_shape.end()[-1] = m;
-    Q = at::empty(Qt_shape, input.options());
+    Q = at::empty(c10::impl::size_val_vec_to_int(Qt_shape), input.options());
     Q.transpose_(-2, -1); // make 'Q' with Fortran contiguous memory layout
   } else {
     Q = at::empty({0}, input.options());
@@ -1938,7 +1938,7 @@ std::tuple<Tensor, Tensor> _linalg_qr_helper_default(const Tensor& input, c10::s
   auto Rt_shape = input.sizes().vec();
   Rt_shape.end()[-2] = n;
   Rt_shape.end()[-1] = (reduced_mode || !compute_q) ? mn : m;
-  Tensor R = at::empty(Rt_shape, input.options());
+  Tensor R = at::empty(c10::impl::size_val_vec_to_int(Rt_shape), input.options());
   R.transpose_(-2, -1); // make 'R' with Fortran contiguous memory layout
 
   // Now fill Q, R tensors with the result
@@ -2484,7 +2484,7 @@ std::tuple<Tensor, Tensor> _symeig_helper_cpu(const Tensor& self, bool eigenvect
   auto self_sizes = self.sizes().vec();
   self_sizes.pop_back();
   ScalarType dtype = toValueType(typeMetaToScalarType(self.dtype()));
-  auto eigvals = at::empty(self_sizes, self.options().dtype(dtype));
+  auto eigvals = at::empty(c10::impl::size_val_vec_to_int(self_sizes), self.options().dtype(dtype));
 
   if (self.numel() == 0) {
     return std::tuple<Tensor, Tensor>(eigvals, at::empty_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT));
@@ -3092,12 +3092,12 @@ std::tuple<Tensor&, Tensor&, Tensor&> svd_out(const Tensor& self, bool some, boo
     auto sizes = self.sizes().vec();
 
     sizes.end()[-1] = m;
-    at::native::resize_output(U, sizes);
+    at::native::resize_output(U, c10::impl::size_val_vec_to_int(sizes));
     U.zero_();
 
     sizes.end()[-2] = n;
     sizes.end()[-1] = n;
-    at::native::resize_output(V, sizes);
+    at::native::resize_output(V, c10::impl::size_val_vec_to_int(sizes));
     V.zero_();
   }
 
@@ -3131,10 +3131,10 @@ std::tuple<Tensor, Tensor, Tensor> svd(const Tensor& self, bool some, bool compu
 
     auto sizes = self.sizes().vec();
     sizes.end()[-1] = m;
-    U = at::zeros(sizes, self.options());
+    U = at::zeros(c10::impl::size_val_vec_to_int(sizes), self.options());
     sizes.end()[-2] = n;
     sizes.end()[-1] = n;
-    Vh = at::zeros(sizes, self.options());
+    Vh = at::zeros(c10::impl::size_val_vec_to_int(sizes), self.options());
   }
   return std::make_tuple(std::move(U), std::move(S), Vh.mH());
 }
@@ -3716,7 +3716,7 @@ Tensor _det_lu_based_helper_backward_helper(
   auto det_expanded_sizes = det.sizes().vec();
   det_expanded_sizes.push_back(n);
   auto d_diag = det_grad * det.conj();
-  auto d = at::diag_embed(d_diag.unsqueeze(-1).expand(det_expanded_sizes));
+  auto d = at::diag_embed(d_diag.unsqueeze(-1).expand(c10::impl::size_val_vec_to_int(det_expanded_sizes)));
   // make sure that d is Fortran-contiguous. The transposition is sufficient as d is a diagonal square matrix
   d = d.mT();
 

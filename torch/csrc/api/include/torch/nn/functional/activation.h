@@ -783,14 +783,14 @@ inline std::tuple<Tensor, Tensor> multi_head_attention_forward(
   }
   if (add_zero_attn) {
     src_len += 1;
-    auto k_sizes = k.sizes().vec();
+    auto k_sizes = c10::impl::size_val_vec_to_int(k.sizes().vec());
     k_sizes[1] = 1;
     k = torch::cat(
       {
         k,
         torch::zeros(k_sizes, at::TensorOptions(k.dtype()).device(k.device()))
       }, /*dim=*/1);
-    auto v_sizes = v.sizes().vec();
+    auto v_sizes = c10::impl::size_val_vec_to_int(v.sizes().vec());
     v_sizes[1] = 1;
     v = torch::cat(
       {
