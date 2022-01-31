@@ -824,8 +824,6 @@ if(USE_FBGEMM)
 endif()
 
 if(USE_FBGEMM)
-  set(CAFFE2_THIRD_PARTY_ROOT "${PROJECT_SOURCE_DIR}/third_party")
-  include_directories(SYSTEM "${CAFFE2_THIRD_PARTY_ROOT}")
   caffe2_update_option(USE_FBGEMM ON)
 else()
   caffe2_update_option(USE_FBGEMM OFF)
@@ -1692,56 +1690,6 @@ if(NOT INTERN_BUILD_MOBILE)
   if(CORTEXA9_FOUND)
     message(STATUS "Cortex-A9 Found with compiler flag : -mcpu=cortex-a9")
     add_compile_options(-mcpu=cortex-a9)
-  endif()
-
-  CHECK_INCLUDE_FILE(cpuid.h HAVE_CPUID_H)
-  # Check for a cpuid intrinsic
-  if(HAVE_CPUID_H)
-      CHECK_C_SOURCE_COMPILES("#include <cpuid.h>
-          int main()
-          {
-              unsigned int eax, ebx, ecx, edx;
-              return __get_cpuid(0, &eax, &ebx, &ecx, &edx);
-          }" HAVE_GCC_GET_CPUID)
-  endif()
-  if(HAVE_GCC_GET_CPUID)
-    add_compile_options(-DHAVE_GCC_GET_CPUID)
-  endif()
-
-  CHECK_C_SOURCE_COMPILES("#include <stdint.h>
-      static inline void cpuid(uint32_t *eax, uint32_t *ebx,
-                               uint32_t *ecx, uint32_t *edx)
-      {
-        uint32_t a = *eax, b, c = *ecx, d;
-        asm volatile ( \"cpuid\" : \"+a\"(a), \"=b\"(b), \"+c\"(c), \"=d\"(d) );
-        *eax = a; *ebx = b; *ecx = c; *edx = d;
-      }
-      int main() {
-        uint32_t a,b,c,d;
-        cpuid(&a, &b, &c, &d);
-        return 0;
-      }" NO_GCC_EBX_FPIC_BUG)
-
-  if(NOT NO_GCC_EBX_FPIC_BUG)
-    add_compile_options(-DUSE_GCC_GET_CPUID)
-  endif()
-
-  find_package(VSX) # checks VSX
-  find_package(ZVECTOR) # checks ZVECTOR
-  # checks AVX and AVX2. Already called once in MiscCheck.cmake. Called again here for clarity --
-  # cached results will be used so no extra overhead.
-  find_package(AVX)
-
-  # we don't set -mavx and -mavx2 flags globally, but only for specific files
-  # however, we want to enable the AVX codepaths, so we still need to
-  # add USE_AVX and USE_AVX2 macro defines
-  if(C_AVX_FOUND)
-    message(STATUS "AVX compiler support found")
-    add_compile_options(-DUSE_AVX)
-  endif()
-  if(C_AVX2_FOUND)
-    message(STATUS "AVX2 compiler support found")
-    add_compile_options(-DUSE_AVX2)
   endif()
 
   if(WIN32 AND NOT CYGWIN)
