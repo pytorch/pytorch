@@ -1179,7 +1179,7 @@ endif()
   endif()
 
   # XXX This ABI check cannot be run with arm-linux-androideabi-g++
-  if("${CMAKE_CXX_COMPILER_ID}" STREQUAL "GNU")
+  if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     if(DEFINED GLIBCXX_USE_CXX11_ABI)
       message(STATUS "_GLIBCXX_USE_CXX11_ABI is already defined as a cmake variable")
     else()
