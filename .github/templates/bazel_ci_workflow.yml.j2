@@ -32,7 +32,7 @@ on:
       - name: print labels
         run: echo "${PR_LABELS}"
       !{{ common.setup_ec2_linux() }}
-      !{{ common.checkout_pytorch("recursive") }}
+      !{{ common.checkout() }}
       !{{ common.calculate_docker_image(false) }}
       - name: Pull Docker image
         run: |
