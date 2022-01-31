@@ -254,7 +254,7 @@ def _check_repo(repo, trust_repo=None, calling_fn="load"):
                 file.write(_repo + "\n")
 
     # load list
-    trusted_repos = [trusted_repo for trusted_repo in _PREDEFINED_TRUSTED]
+    trusted_repos = list(_PREDEFINED_TRUSTED)
     with open(filepath, 'r') as file:
         trusted_repos += file.readlines()
     is_trusted = any(trusted_repo == repo for trusted_repo in trusted_repos)
