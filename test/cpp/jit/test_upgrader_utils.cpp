@@ -4,6 +4,8 @@
 
 #include <test/cpp/jit/test_utils.h>
 
+#include <vector>
+
 namespace torch {
 namespace jit {
 
@@ -56,6 +58,41 @@ TEST(UpgraderUtils, FindIfOpIsCurrent) {
   EXPECT_FALSE(isOpSymbolCurrent("foo", 6));
   EXPECT_TRUE(isOpSymbolCurrent("foo", 8));
   test_only_remove_entry("foo");
+}
+
+TEST(UpgraderUtils, CanLoadHistoricOp) {
+  std::vector<UpgraderEntry> dummy_entry = {
+      {4, "foo__0_3", "foo.bar()"},
+      {8, "foo__4_7", "foo.foo()"},
+  };
+
+  std::vector<std::string> schemas = {"foo.bar()", "foo.foo()"};
+
+  // symbol based look up
+  test_only_add_entry("old_op_not_exist.first", dummy_entry[0]);
+  test_only_add_entry("old_op_not_exist.second", dummy_entry[1]);
+
+  auto oldSchemas = loadPossibleHistoricOps("old_op_not_exist", 2);
+  EXPECT_EQ(oldSchemas.size(), 2);
+  for (const auto& entry : oldSchemas) {
+    EXPECT_TRUE(
+        std::find(schemas.begin(), schemas.end(), entry) != schemas.end());
+  }
+
+  auto oldSchemasWithCurrentVersion =
+      loadPossibleHistoricOps("old_op_not_exist", 9);
+  EXPECT_EQ(oldSchemasWithCurrentVersion.size(), 0);
+
+  test_only_remove_entry("old_op_not_exist.first");
+  test_only_remove_entry("old_op_not_exist.first");
+
+  // it is ok to have old schemas without overload
+  test_only_add_entry("old_op_not_exist_no_overload", dummy_entry[0]);
+  auto oldSchemasNoOverload =
+      loadPossibleHistoricOps("old_op_not_exist_no_overload", 2);
+  EXPECT_EQ(oldSchemasNoOverload.size(), 1);
+  EXPECT_EQ(oldSchemasNoOverload[0], "foo.bar()");
+  test_only_remove_entry("old_op_not_exist_no_overload");
 }
 
 } // namespace jit

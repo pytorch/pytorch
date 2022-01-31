@@ -1,7 +1,7 @@
 import torch
 from .expanded_weights_impl import ExpandedWeight
 
-def forward_helper(func, ctx, expanded_args, num_true_outs):
+def forward_helper(func, expanded_args, num_true_outs):
     r'''Forward helper computes the forward pass for a function that has expanded weight(s)
     passed to it. It will run the forward pass where all ExpandedWeights are their original
     weight. It runs checks on the given arguments and detaches the outputs.
@@ -20,12 +20,12 @@ def forward_helper(func, ctx, expanded_args, num_true_outs):
         num_true_outs: The number of outputs seen by the user since some functions
           return auxillary data that is only used in the backward pass
     '''
-    unexpanded_args = _check_and_unexpand_args(func, ctx, expanded_args)
+    unexpanded_args = _check_and_unexpand_args(func, expanded_args)
     output = func(*unexpanded_args)
-    return _check_and_detach_output(ctx, output, num_true_outs)
+    output, aux_outputs = _check_and_detach_output(output, num_true_outs)
+    return (output, expanded_args, aux_outputs)
 
-def _check_and_unexpand_args(func, ctx, expanded_args):
-    ctx.args = expanded_args
+def _check_and_unexpand_args(func, expanded_args):
     # input must be the first argument passed
     input = expanded_args[0]
     if isinstance(input, ExpandedWeight):
@@ -48,14 +48,14 @@ def _check_and_unexpand_args(func, ctx, expanded_args):
     unexpanded_args = tuple(arg.orig_weight if isinstance(arg, ExpandedWeight) else arg for arg in expanded_args)
     return unexpanded_args
 
-def _check_and_detach_output(ctx, output, num_true_outs):
-    ctx.all_outputs = output
-
+def _check_and_detach_output(output, num_true_outs):
+    aux_outputs = None
     # separates differentiable outputs from outputs only needed for the backwards computation
     if isinstance(output, tuple):
         if len(output) < num_true_outs:
             raise RuntimeError(f"Got fewer outputs ({len(output)}) than expected ({num_true_outs}). "
                                "Issues in ExpandedWeights' autograd.Function")
+        aux_outputs = output[num_true_outs:]
         if num_true_outs == 1:
             output = output[0]
         else:
@@ -63,23 +63,18 @@ def _check_and_detach_output(ctx, output, num_true_outs):
     elif num_true_outs != 1:
         raise RuntimeError(f"Got single output but expected at least {num_true_outs} outputs. "
                            "Issues in ExpandedWeights' autograd.Function")
-    ctx.true_outputs = output
-
-    def check_and_detach(output):
-        if not isinstance(output, torch.Tensor):
-            raise RuntimeError("ExpandedWeights only works with tensor outputs")
-        return output.detach()
-
-    # NB: currently only works for differentiable, Tensor outputs
-    if isinstance(output, tuple):
-        return tuple(check_and_detach(o) for o in output)
-    else:
-        return check_and_detach(output)
+    return (output, aux_outputs)
 
 def grad_if_exists(maybe_expanded_weight, per_sample_grad_fn):
     unpacked = unpack_expanded_weight_or_tensor(maybe_expanded_weight)
     if isinstance(maybe_expanded_weight, ExpandedWeight):
-        unpacked.grad_sample = per_sample_grad_fn(unpacked)
+        if hasattr(unpacked, "grad_sample"):
+            if isinstance(unpacked.grad_sample, list):
+                unpacked.grad_sample.append(per_sample_grad_fn(unpacked))
+            else:
+                unpacked.grad_sample = [unpacked.grad_sample, per_sample_grad_fn(unpacked)]
+        else:
+            unpacked.grad_sample = per_sample_grad_fn(unpacked)
 
 def grad_if_exists_for_input(input, grad_fn):
     if isinstance(input, torch.Tensor) and input.requires_grad:

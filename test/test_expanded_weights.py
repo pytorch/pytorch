@@ -23,37 +23,30 @@ class TestExpandedWeightHelperFunction(TestCase):
         for (weight_batched, bias_batched) in product([True, False], [True, False]):
             maybe_batched_weight = ExpandedWeight(weight.clone().requires_grad_(), 3) if weight_batched else weight
             maybe_batched_bias = ExpandedWeight(bias.clone().requires_grad_(), 3) if bias_batched else bias
-            ctx = TestContext()
             args = (input, maybe_batched_weight, maybe_batched_bias)
-            res = forward_helper(nn.functional.linear, ctx, args, 1)
+            (res, ctx_args, aux_outputs) = forward_helper(nn.functional.linear, args, 1)
             expected = nn.functional.linear(input, weight, bias)
             self.assertEqual(res, expected)
 
-            self.assertTrue(hasattr(ctx, 'args'))
-            self.assertTrue(hasattr(ctx, 'all_outputs'))
-            self.assertTrue(hasattr(ctx, 'true_outputs'))
-
-            self.assertEqual(len(ctx.args), len(args))
-            for (helper_arg, orig_arg) in zip(ctx.args, args):
+            self.assertEqual(len(ctx_args), len(args))
+            for (helper_arg, orig_arg) in zip(ctx_args, args):
                 assert(helper_arg is orig_arg)  # avoids the many property checks in assertEquals
-            self.assertEqual(ctx.all_outputs, res)
-            self.assertEqual(ctx.true_outputs, res)
+            self.assertEqual(aux_outputs, None)
 
     def test_forward_helper_failure_args(self, device):
         weight = torch.randn(5, 4, device=device)
         bias = torch.randn(5, device=device)
-        ctx = TestContext()
         with self.assertRaisesRegex(RuntimeError, r"do not support inputs that are also ExpandedWeights."):
             input = ExpandedWeight(torch.randn(3, 4, requires_grad=True), 3)
-            forward_helper(nn.functional.linear, ctx, (input, weight, bias), 1)
+            forward_helper(nn.functional.linear, (input, weight, bias), 1)
         with self.assertRaisesRegex(RuntimeError, r"requires a Tensor as the first input"):
-            forward_helper(nn.functional.linear, ctx, (3, weight, bias), 1)
+            forward_helper(nn.functional.linear, (3, weight, bias), 1)
         with self.assertRaisesRegex(RuntimeError, r"requires a batch dimension but got an input of size 0"):
             input = torch.tensor(3)
-            forward_helper(nn.functional.linear, ctx, (input, weight, bias), 1)
+            forward_helper(nn.functional.linear, (input, weight, bias), 1)
         with self.assertRaisesRegex(RuntimeError, r"0 is not a valid batch size for Expanded Weights"):
             input = torch.randn(0, 1, 2)
-            forward_helper(nn.functional.linear, ctx, (input, weight, bias), 1)
+            forward_helper(nn.functional.linear, (input, weight, bias), 1)
         input = torch.randn(3, 4)
         for (weight_batched, bias_batched) in product([True, False], [True, False]):
             if not weight_batched and not bias_batched:
@@ -61,15 +54,14 @@ class TestExpandedWeightHelperFunction(TestCase):
             maybe_batched_weight = ExpandedWeight(weight.clone().requires_grad_(), 4) if weight_batched else weight
             maybe_batched_bias = ExpandedWeight(bias.clone().requires_grad_(), 4) if bias_batched else bias
             with self.assertRaisesRegex(RuntimeError, r"Expected ExpandedWeights to have batch size matching input"):
-                forward_helper(nn.functional.linear, ctx, (input, maybe_batched_weight, maybe_batched_bias), 1)
+                forward_helper(nn.functional.linear, (input, maybe_batched_weight, maybe_batched_bias), 1)
 
     def test_forward_helper_failure_outputs(self, device):
         input = torch.randn(3, 4, device=device)
         weight = torch.randn(5, 4, device=device)
         bias = torch.randn(5, device=device)
-        ctx = TestContext()
         with self.assertRaisesRegex(RuntimeError, r"Got single output but expected at least 4"):
-            forward_helper(nn.functional.linear, ctx, (input, weight, bias), 4)
+            forward_helper(nn.functional.linear, (input, weight, bias), 4)
 
     def test_grad_if_exists(self, device):
         def test_fn(_):
@@ -159,18 +151,59 @@ class TestExpandedWeightFunctional(TestCase):
 
             # get per sample grads with ExpandedWeights objects
             (ew_input, ew_args, ew_kwargs) = make_expanded_weight(sample_input, batch_size)
-            result = run_op(op, ew_input, *ew_args, **ew_kwargs)
             diff_input_list = (ew_input,) + tuple(ew_args) + tuple(ew_kwargs.values())
             diff_input_list = [i for i in diff_input_list if is_diff_tensor(i)]
             diff_input_list = [i.orig_weight if isinstance(i, ExpandedWeight) else i for i in diff_input_list]
             if not diff_input_list:
                 continue
+            result = run_op(op, ew_input, *ew_args, **ew_kwargs)
             result.sum().backward()  # grad doesn't work with ExpandedWeight because it calls __torch_function__
             expanded_weight_grad = tuple(i.grad_sample if hasattr(i, "grad_sample") else i.grad for i in diff_input_list)
 
             # get per sample grads with for loop
             func = partial(run_op, op)
             per_sample_grad = for_loop_per_sample_grad(batch_size, input, func, *args, **kwargs)
+
+            # check equality
+            self.assertEqual(len(per_sample_grad), len(expanded_weight_grad))
+            for (result_grad, expected_grad) in zip(expanded_weight_grad, per_sample_grad):
+                if result_grad is None:
+                    result_grad = torch.zeros_like(expected_grad)
+                assert torch.allclose(result_grad, expected_grad), f"Got {result_grad}, expected {expected_grad}"
+
+    @ops(filter(lambda op: op.supports_expanded_weight, op_db), dtypes=OpDTypes.supported, allowed_dtypes=(torch.double,))
+    def test_expanded_weight_per_sample_grad_multiple_calls(self, device, dtype, op):
+        sample_inputs = op.sample_inputs(device, dtype, requires_grad=True)
+        for sample_input in supported_inputs(op, sample_inputs):
+            if op.name == "nn.functional.embedding":  # embedding flips its argument order for autograd tests
+                sample_input = SampleInput(sample_input.args[0], args=(sample_input.input,), kwargs=sample_input.kwargs)
+            input = sample_input.input
+            args = sample_input.args
+            kwargs = sample_input.kwargs
+            batch_size = input.shape[0] if len(input.shape) > 1 else 1
+
+            # get per sample grads with ExpandedWeights objects
+            (ew_input, ew_args, ew_kwargs) = make_expanded_weight(sample_input, batch_size)
+            diff_input_list = (ew_input,) + tuple(ew_args) + tuple(ew_kwargs.values())
+            diff_input_list = [i for i in diff_input_list if is_diff_tensor(i)]
+            diff_input_list = [i.orig_weight if isinstance(i, ExpandedWeight) else i for i in diff_input_list]
+            if not diff_input_list:
+                continue
+
+            result = run_op(op, ew_input, *ew_args, **ew_kwargs)
+            result.sum().backward()  # grad doesn't work with ExpandedWeight because it calls __torch_function__
+            result = run_op(op, ew_input, *ew_args, **ew_kwargs)  # running it again makes a list for multiple batches
+            result.sum().backward()
+            expanded_weight_grad = tuple(i.grad_sample if hasattr(i, "grad_sample") else i.grad for i in diff_input_list)
+            expanded_weight_grad = tuple(torch.stack(i).flatten(end_dim=1) if isinstance(i, list) else i
+                                         for i in expanded_weight_grad)
+
+            # get per sample grads with for loop
+            func = partial(run_op, op)
+            repeated_input = input.unsqueeze(0).expand(2, *input.shape).reshape(2 * input.shape[0], *input.shape[1:])
+            per_sample_grad = for_loop_per_sample_grad(2 * batch_size, repeated_input, func, *args, **kwargs)
+            per_sample_input = per_sample_grad[0].reshape(2, *input.shape).sum(0)  # mimics the accumulation from running twice
+            per_sample_grad = (per_sample_input, *per_sample_grad[1:])
 
             # check equality
             self.assertEqual(len(per_sample_grad), len(expanded_weight_grad))
@@ -242,6 +275,30 @@ class TestExpandedWeightModule(TestCase):
         self.assertEqual(actual_res, expected_res)
         assert [torch.allclose(actual, expected) for (actual, expected) in zip(actual_grads, expected_grads)]
 
+    def _do_test_multi_input(self, module, input):
+        if sum(1 for _ in module.parameters()) == 0:  # for norms with affine=False
+            return
+        batch_size = input.shape[0]
+        with freeze_rng_state():
+            # get per sample grads with ExpandedWeights context manager, calling .backward() twice
+            actual_res = call_for_per_sample_grads(module, batch_size, input).sum()
+            actual_res.backward()
+            actual_res = call_for_per_sample_grads(module, batch_size, input).sum()
+            actual_res.backward()
+            actual_grads = []
+            for param in module.parameters():
+                assert isinstance(param.grad_sample, list)
+                actual_grads.append(torch.stack(param.grad_sample).flatten(end_dim=1))
+                del param.grad_sample
+
+            # get per sample grads with a for loop, running over the input twice
+            expected_grads = []
+            for i in range(2 * batch_size):
+                res = module(input[i % batch_size].unsqueeze(0)).sum()
+                expected_grads.append(torch.autograd.grad(res, module.parameters(), torch.ones_like(res)))
+            expected_grads = tuple(torch.stack(grad) for grad in zip(*expected_grads))
+        assert [torch.allclose(actual, expected) for (actual, expected) in zip(actual_grads, expected_grads)]
+
 class ContextManagerTests(TestBase):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -259,6 +316,15 @@ class ContextManagerTests(TestBase):
             return
         test_case._do_test(module, input)
 
+    def test_context_manager_multiple_inputs(self, test_case):
+        module = self.constructor(*self.constructor_args)
+        input = self._get_input()
+        if len(input.shape) == 0 or input.shape[0] == 0:
+            return
+        if self.constructor == torch.nn.Linear and len(input.shape) == 1:
+            return
+        test_case._do_test_multi_input(module, input)
+
 # TODO: Once all of these use ModuleInfo, replace with ModuleInfo tests
 supported_modules = ['Linear']
 supported_tests = [t for t in module_tests + new_module_tests if 'module_name' in t and t['module_name'] in supported_modules]
@@ -271,9 +337,14 @@ for test_param in supported_tests:
     test_name = test.get_name()
     if hasattr(TestExpandedWeightModule, test_name):
         raise RuntimeError('Found two tests with the same name: ' + test_name)
+    test_name_multi_input = test.get_name() + "_multiple_inputs"
+    if hasattr(TestExpandedWeightModule, test_name_multi_input):
+        raise RuntimeError('Found two tests with the same name: ' + test_name)
     if decorator is not None:
         fn = decorator(fn)
     setattr(TestExpandedWeightModule, test_name, lambda self, test=test: test.test_context_manager(self))
+    setattr(TestExpandedWeightModule, test_name_multi_input, 
+            lambda self, test=test: test.test_context_manager_multiple_inputs(self))
 
 # ------------- HELPER FUNCTIONS -----------------
 

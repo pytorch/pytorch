@@ -4,14 +4,8 @@
 #include <vector>
 
 #include <torch/csrc/profiler/api.h>
+#include <torch/csrc/profiler/kineto_shim.h>
 #include <torch/csrc/profiler/util.h>
-
-#ifdef USE_KINETO
-namespace libkineto {
-struct TraceActivity;
-class ActivityTraceInterface;
-}
-#endif
 
 namespace torch {
 namespace autograd {
@@ -299,14 +293,10 @@ struct TORCH_API KinetoEvent {
 // memory allocation events)
 struct TORCH_API ProfilerResult {
   ProfilerResult();
-#ifdef USE_KINETO
   ProfilerResult(
       uint64_t start_time,
       std::vector<KinetoEvent> events,
-      std::unique_ptr<libkineto::ActivityTraceInterface> trace);
-#else
-  ProfilerResult(std::vector<KinetoEvent> events);
-#endif // USE_KINETO
+      torch::profiler::impl::kineto::ActivityTraceWrapper trace);
   ~ProfilerResult();
 
   uint64_t trace_start_us() const {
@@ -317,17 +307,12 @@ struct TORCH_API ProfilerResult {
     return events_;
   }
 
-#ifdef USE_KINETO
   void save(const std::string& path);
-#endif // USE_KINETO
 
  private:
   uint64_t trace_start_us_ = 0;
   std::vector<KinetoEvent> events_;
-#ifdef USE_KINETO
-  std::unique_ptr<libkineto::ActivityTraceInterface> trace_;
-  bool saved_ = false;
-#endif // USE_KINETO
+  torch::profiler::impl::kineto::ActivityTraceWrapper trace_;
 };
 
 /*

@@ -608,6 +608,57 @@ class TestStaticQuantizedModule(QuantizationTestCase):
         # JIT Testing
         self.checkScriptable(pool_under_test, [[X]])
 
+    def test_dropout(self):
+        """Tests the correctness of the dropout module.
+        The correctness is defined against the functional implementation.
+        """
+        x = torch.randn((2, 4, 6, 8), dtype=torch.float)
+        float_mod = torch.nn.Dropout(p=0.5)
+        float_mod.training = False
+
+        y_ref = float_mod(x)
+        quant_ref = torch.quantize_per_tensor(y_ref, 1.0, 0, dtype=torch.quint8)
+
+        quant_mod = nnq.Dropout(p=0.5)
+        qx = torch.quantize_per_tensor(x, 1.0, 0, dtype=torch.quint8)
+        qy = quant_mod(qx)
+
+        self.assertEqual(quant_ref.int_repr().numpy(), qy.int_repr().numpy(),
+                         msg="Dropout module API failed")
+
+    def _test_dropout_serialization(self, get_model, data1, data2):
+        m1 = get_model()
+        m1.qconfig = torch.ao.quantization.default_qconfig
+        mp1 = torch.ao.quantization.prepare(m1)
+        mp1(data1)
+        mq1 = torch.ao.quantization.convert(mp1)
+        ref1 = mq1(data2)
+
+        m2 = get_model()
+        m2.qconfig = torch.quantization.default_qconfig
+        mp2 = torch.ao.quantization.prepare(m2)
+        mq2 = torch.ao.quantization.convert(mp2)
+
+        mq2.load_state_dict(mq1.state_dict())
+        ref2 = mq2(data2)
+
+        self.assertTrue(torch.allclose(ref1, ref2))
+
+    def test_dropout_serialization(self):
+        data1 = torch.randn(2, 4, 6, 8)
+        data2 = torch.randn(2, 4, 6, 8)
+
+        def _get_model():
+            return nn.Sequential(
+                torch.ao.quantization.QuantStub(),
+                nn.Dropout(p=0.5),
+                torch.ao.quantization.DeQuantStub()
+            ).eval()
+
+        self._test_dropout_serialization(_get_model, data1, data2)
+
+
+
     def test_batch_norm2d(self):
         """Tests the correctness of the batchnorm2d module.
         The correctness is defined against the functional implementation.
