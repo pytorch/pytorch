@@ -1652,7 +1652,7 @@ See :class:`~torch.nn.LogSigmoid` for more details.
 )
 
 
-def gelu(input: Tensor, approximate: str = 'none') -> Tensor:
+def gelu(input: Tensor, *, approximate: str = 'none') -> Tensor:
     r"""gelu(input, approximate = 'none') -> Tensor
 
     Applies element-wise the function
@@ -1667,7 +1667,6 @@ def gelu(input: Tensor, approximate: str = 'none') -> Tensor:
     """
     if has_torch_function_unary(input):
         return handle_torch_function(gelu, (input,), input, approximate=approximate)
-    return torch._C._nn.gelu(input, _Gelu.get_enum(approximate))
 
     # Enforce that the full call with the new kwarg is not invoked when scripting.
     # TODO: Remove this scripting logic once the 2-week FC window has passed.
