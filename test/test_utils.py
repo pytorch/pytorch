@@ -602,7 +602,8 @@ class TestHub(TestCase):
             'mnist',
             source='github',
             pretrained=True,
-            verbose=False)
+            verbose=False,
+            trust_repo=True)
         self.assertEqual(sum_of_state_dict(hub_model.state_dict()),
                          SUM_OF_HUB_EXAMPLE)
 
@@ -615,7 +616,8 @@ class TestHub(TestCase):
             'mnist',
             source='local',
             pretrained=True,
-            verbose=False)
+            verbose=False,
+            trust_repo=True)
         self.assertEqual(sum_of_state_dict(hub_model.state_dict()),
                          SUM_OF_HUB_EXAMPLE)
 
@@ -625,7 +627,8 @@ class TestHub(TestCase):
             'ailzhang/torchhub_example:ci/test_slash',
             'mnist',
             pretrained=True,
-            verbose=False)
+            verbose=False,
+            trust_repo=True)
         self.assertEqual(sum_of_state_dict(hub_model.state_dict()),
                          SUM_OF_HUB_EXAMPLE)
 
@@ -637,7 +640,8 @@ class TestHub(TestCase):
             'ailzhang/torchhub_example',
             'mnist',
             pretrained=True,
-            verbose=False)
+            verbose=False,
+            trust_repo=True)
         self.assertEqual(sum_of_state_dict(hub_model.state_dict()),
                          SUM_OF_HUB_EXAMPLE)
         assert os.path.exists(temp_dir + '/ailzhang_torchhub_example_master')
@@ -645,7 +649,7 @@ class TestHub(TestCase):
 
     @retry(Exception, tries=3)
     def test_list_entrypoints(self):
-        entry_lists = hub.list('ailzhang/torchhub_example', force_reload=True)
+        entry_lists = hub.list('ailzhang/torchhub_example', force_reload=True, trust_repo=True)
         self.assertObjectIn('mnist', entry_lists)
 
     @retry(Exception, tries=3)
@@ -668,7 +672,8 @@ class TestHub(TestCase):
             'ailzhang/torchhub_example',
             'mnist_zip',
             pretrained=True,
-            verbose=False)
+            verbose=False,
+            trust_repo=True)
         self.assertEqual(sum_of_state_dict(hub_model.state_dict()),
                          SUM_OF_HUB_EXAMPLE)
 
@@ -679,7 +684,8 @@ class TestHub(TestCase):
             'ailzhang/torchhub_example',
             'mnist_zip_1_6',
             pretrained=True,
-            verbose=False)
+            verbose=False,
+            trust_repo=True)
         self.assertEqual(sum_of_state_dict(hub_model.state_dict()),
                          SUM_OF_HUB_EXAMPLE)
 
@@ -722,7 +728,7 @@ class TestHub(TestCase):
         with self.assertRaisesRegex(
                 ValueError,
                 'If it\'s a commit from a forked repo'):
-            model = torch.hub.load('pytorch/vision:4e2c216', 'resnet18', force_reload=True)
+            model = torch.hub.load('pytorch/vision:4e2c216', 'resnet18', force_reload=True, trust_repo=True)
 
 class TestHipify(TestCase):
     def test_import_hipify(self):
