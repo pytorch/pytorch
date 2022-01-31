@@ -20,6 +20,10 @@ def _mvdigamma(x: torch.Tensor, p: int) -> torch.Tensor:
         - torch.arange(p, dtype=x.dtype, device=x.device).div(2).expand(x.shape + (-1,))
     ).sum(-1)
 
+def _clamp_with_eps(x: torch.Tensor) -> torch.Tensor:
+    # We assume positive input for this function
+    return x.clamp(min=torch.finfo(x.dtype).eps)
+
 class Wishart(ExponentialFamily):
     r"""
     Creates a Wishart distribution parameterized by a symmetric positive definite matrix :math:`\Sigma`,
@@ -185,7 +189,10 @@ class Wishart(ExponentialFamily):
         p = self._event_shape[-1]  # has singleton shape
 
         # Implemented Sampling using Bartlett decomposition
-        noise = self._dist_chi2.rsample(sample_shape).sqrt().diag_embed(dim1=-2, dim2=-1)
+        noise = _clamp_with_eps(
+            self._dist_chi2.rsample(sample_shape).sqrt()
+        ).diag_embed(dim1=-2, dim2=-1)
+
         i, j = torch.tril_indices(p, p, offset=-1)
         noise[..., i, j] = torch.randn(
             torch.Size(sample_shape) + self._batch_shape + (int(0.5 * p * (p - 1)),),
