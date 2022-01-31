@@ -312,15 +312,15 @@ class CudaKernelGenerator : private OptOutConstDispatch {
   }
 
   void handle(const IterDomain*) final {
-    TORCH_INTERNAL_ASSERT(!"Unreachable");
+    TORCH_INTERNAL_ASSERT(false, "Unreachable");
   }
 
   void handle(const TensorDomain*) final {
-    TORCH_INTERNAL_ASSERT(!"Unreachable");
+    TORCH_INTERNAL_ASSERT(false, "Unreachable");
   }
 
   void handle(const TensorView*) final {
-    TORCH_INTERNAL_ASSERT(!"Unreachable");
+    TORCH_INTERNAL_ASSERT(false, "Unreachable");
   }
 
   void handle(const UnaryOp* uop) final {

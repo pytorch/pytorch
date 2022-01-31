@@ -1,6 +1,7 @@
 #pragma once
 
 #include <ATen/DimVector.h>
+#include <ATen/EmptyTensor.h>
 #include <ATen/Tensor.h>
 #include <ATen/TensorGeometry.h>
 #include <ATen/Utils.h>
@@ -152,8 +153,6 @@ TORCH_API void check_dim_size(
 
 namespace detail {
 TORCH_API std::vector<int64_t> defaultStrides(IntArrayRef sizes);
-TORCH_API size_t
-computeStorageNbytes(IntArrayRef sizes, IntArrayRef strides, size_t itemsize);
 
 TORCH_API c10::optional<std::vector<int64_t>> computeStride(
     IntArrayRef oldshape,
