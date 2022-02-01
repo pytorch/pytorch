@@ -2333,6 +2333,31 @@ class IrParser {
 
     {
       auto ptr_op = getOperatorForLiteral(
+          "aten::tanh_backward(Tensor grad_output, Tensor output) -> Tensor");
+      REGISTER_PARSE_RULE(
+          ptr_op,
+          {
+            MemoryFormat format;
+            std::list<Val*> list_val;
+            std::tie(format, list_val) = getConsistentValues(
+                c10::nullopt,
+                value_map[node->inputs()[0]->unique()],
+                value_map[node->inputs()[1]->unique()]);
+            auto grad_out = list_val.front();
+            list_val.pop_front();
+            auto self = list_val.front();
+            list_val.pop_front();
+
+            auto grad_in = tanh_backward(grad_out, self);
+            value_map.emplace(
+                node->output()->unique(), ValueHolder(grad_in, format));
+          },
+          nullptr,
+          nullptr);
+    }
+
+    {
+      auto ptr_op = getOperatorForLiteral(
           "aten::amax(Tensor self, int[1] dim=[], bool keepdim=False) -> Tensor");
       REGISTER_PARSE_RULE(
           ptr_op,
