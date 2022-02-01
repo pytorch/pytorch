@@ -172,6 +172,20 @@ def _get_addr_and_port(
     return (master_addr, master_port)
 
 
+def _check_parameter_configuration(config: LaunchConfig) -> None:
+    if config.rdzv_backend != "etcd":
+        return
+    last_call_timeout = int(config.rdzv_configs.get("last_call_timeout", 30))
+    monitor_interval = config.monitor_interval
+    if last_call_timeout < monitor_interval * 2:
+        logger.warning(
+            "\n`last_call_timeout` should be at least `monitor_interval * 2`. "
+            "Set `last_call_timeout` to a value >= {monitor_interval*2} "
+            "or use rdzv_backend `etcd-v2`. "
+            "For details see: https://github.com/pytorch/pytorch/issues/67616.\n"
+        )
+
+
 def launch_agent(
     config: LaunchConfig,
     entrypoint: Union[Callable, str, None],
@@ -183,6 +197,7 @@ def launch_agent(
         config.run_id = run_id
 
     entrypoint_name = _get_entrypoint_name(entrypoint, args)
+    _check_parameter_configuration(config)
 
     logger.info(
         f"Starting elastic_operator with launch configs:\n"
