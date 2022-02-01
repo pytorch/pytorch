@@ -1,5 +1,6 @@
 #include <ATen/core/Tensor.h>
 #include <ATen/cuda/CUDAConfig.h>  // for the definition of AT_CUDNN_ENABLED
+#include <ATen/cuda/EmptyTensor.h>
 #include <ATen/native/ConvUtils.h>
 
 #if AT_CUDNN_ENABLED()
@@ -230,14 +231,10 @@ Tensor cudnn_convolution_forward(
   checkAllSameGPU(c, {input, weight});
 
   auto memory_format = cudnn_conv_suggest_memory_format(*input, *weight);
-  auto output_t = at::native::empty_cuda(
-                    conv_output_size(input->sizes(), weight->sizes(),
-                                     padding, stride, dilation),
-                    /*dtype=*/input->scalar_type(),
-                    /*layout=*/c10::nullopt,
-                    /*device=*/kCUDA,
-                    /*pin_memory=*/c10::nullopt,
-                    /*memory_format=*/memory_format);
+  Tensor output_t = at::detail::empty_cuda(
+      conv_output_size(input->sizes(), weight->sizes(),
+                       padding, stride, dilation),
+      input->options().memory_format(memory_format));
 
   if (output_t.numel() == 0) {
     return output_t;
@@ -312,13 +309,8 @@ Tensor cudnn_convolution_backward_input(
   checkAllSameGPU(c, {grad_output, weight});
 
   auto memory_format = cudnn_conv_suggest_memory_format(*grad_output, *weight);
-  auto grad_input_t = at::native::empty_cuda(
-                    input_size,
-                    /*dtype=*/grad_output->scalar_type(),
-                    /*layout=*/c10::nullopt,
-                    /*device=*/kCUDA,
-                    /*pin_memory=*/c10::nullopt,
-                    /*memory_format=*/memory_format);
+  Tensor grad_input_t = at::detail::empty_cuda(
+      input_size, grad_output->options().memory_format(memory_format));
 
   // Avoid "grad_input" when this is being used as transposed convolution
   TensorArg grad_input{ grad_input_t, "result", 0 };
@@ -493,14 +485,10 @@ Tensor cudnn_convolution_relu(
   const Tensor weight = weight_t.contiguous(memory_format);
 
   // FuseFrozenConvAddRelu performs some tensor shape checking
-  auto output_t = at::native::empty_cuda(
+  Tensor output_t = at::detail::empty_cuda(
       conv_output_size(
           input.sizes(), weight.sizes(), padding, stride, dilation),
-      /*dtype=*/input.scalar_type(),
-      /*layout=*/c10::nullopt,
-      /*device=*/kCUDA,
-      /*pin_memory=*/c10::nullopt,
-      /*memory_format=*/memory_format);
+      input.options().memory_format(memory_format));
   if (output_t.numel() == 0) {
     return output_t;
   }
@@ -568,14 +556,10 @@ Tensor cudnn_convolution_add_relu(
   const Tensor weight = weight_t.contiguous(memory_format);
 
   // FuseFrozenConvAddRelu performs some tensor shape checking
-  auto output_t = at::native::empty_cuda(
+  Tensor output_t = at::detail::empty_cuda(
       conv_output_size(
           input.sizes(), weight.sizes(), padding, stride, dilation),
-      /*dtype=*/input.scalar_type(),
-      /*layout=*/c10::nullopt,
-      /*device=*/kCUDA,
-      /*pin_memory=*/c10::nullopt,
-      /*memory_format=*/memory_format);
+      input.options().memory_format(memory_format));
   if (output_t.numel() == 0) {
     return output_t;
   }

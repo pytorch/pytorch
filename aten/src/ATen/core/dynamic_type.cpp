@@ -2,6 +2,7 @@
 
 #include <string>
 
+#include <ATen/core/class_type.h>
 #include <ATen/core/ivalue.h>
 #include <ATen/core/jit_type.h>
 #include <ATen/core/type_factory.h>
@@ -20,11 +21,15 @@ bool contains(DynamicType::Tag lhs, DynamicType::Tag rhs) {
   return contains(lhs, static_cast<DynamicTypeBits>(rhs));
 }
 
-C10_NOINLINE DynamicTypePtr makeBaseType(DynamicType::Tag tag) {
+} // namespace
+
+namespace detail {
+
+DynamicTypePtr makeBaseType(DynamicType::Tag tag) {
   return std::make_shared<DynamicType>(tag, DynamicType::Arguments{});
 }
 
-} // namespace
+} // namespace detail
 
 std::string DynamicType::str() const {
   if (name_) {
@@ -113,9 +118,9 @@ DynamicType::DynamicType(const Type& other) : SharedType(DynamicType::Kind) {
     return;
   }
   switch (kind) {
-#define CASE_TYPE(T, _) \
-  case T##Type::Kind:   \
-    tag_ = Tag::T;      \
+#define CASE_TYPE(T, _, __) \
+  case T##Type::Kind:       \
+    tag_ = Tag::T;          \
     break;
     FORALL_DYNAMIC_TYPES(CASE_TYPE)
 #undef CASE_TYPE
@@ -194,10 +199,15 @@ TypePtr DynamicType::containedType(size_t i) const {
   return arguments_.elems.at(i).ty;
 }
 
+size_t DynamicType::containedTypeSize() const {
+  TORCH_INTERNAL_ASSERT(tag_ != Tag::Class);
+  return arguments_.elems.size();
+}
+
 TypeKind DynamicType::dynamicKind() const {
   switch (tag_) {
-#define CASE_TYPE(T, _) \
-  case Tag::T:          \
+#define CASE_TYPE(T, _, __) \
+  case Tag::T:              \
     return TypeKind::T##Type;
     FORALL_DYNAMIC_TYPES(CASE_TYPE)
 #undef CASE_TYPE
@@ -267,6 +277,16 @@ TypePtr DynamicType::fallback() const {
       return VarType::create(*name_);
     case Tag::AnyClass:
       return AnyClassType::get();
+    case Tag::QScheme:
+      return QSchemeType::get();
+    case Tag::Quantizer:
+      return QuantizerType::get();
+    case Tag::AnyEnum:
+      return AnyEnumType::get();
+    case Tag::RRef:
+      return RRefType::create(arguments_.elems[0].ty->fallback());
+    case Tag::Future:
+      return FutureType::create(arguments_.elems[0].ty->fallback());
     case Tag::Any:
       return AnyType::get();
   }
@@ -358,11 +378,8 @@ ivalue::TupleTypeFactory<TupleType>::fallback(const Type& type) {
 #endif
 }
 
-#define DYNAMIC_TYPE_TAG_VALUE(NAME, _)                               \
-  const DynamicTypePtr& DynamicTypeTrait<NAME##Type>::getBaseType() { \
-    static auto type = makeBaseType(tagValue());                      \
-    return type;                                                      \
-  }
+#define DYNAMIC_TYPE_TAG_VALUE(NAME, _, __) \
+  constexpr bool DynamicTypeTrait<NAME##Type>::isBaseType;
 FORALL_DYNAMIC_TYPES(DYNAMIC_TYPE_TAG_VALUE)
 #undef DYNAMIC_TYPE_TAG_VALUE
 
