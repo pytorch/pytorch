@@ -156,17 +156,12 @@ void masked_softmax_dropout(
                 for (auto t = 0; t < T; t += V) {
                   Vec v = Vec::loadu(&input_data[t]);
 
-                  // TODO: vectorize in accscalar_t?
-                  // TODO this faster solution does not work on Android build
-                  /*
-                  for (auto i = 0; i < V; ++i) {
-                    v[i] = static_cast<scalar_t>(std::exp(static_cast<accscalar_t>(v[i]) - hmax) * inv_denominator);
-                  }
+                  using AccVec = vec::Vectorized<accscalar_t>;
+                  AccVec av = at::vec::cast<accscalar_t, scalar_t>(v);
+                  AccVec hmax_v = static_cast<accscalar_t>(hmax);
+                  av = (av - hmax_v).exp() * AccVec(inv_denominator);
+                  v = at::vec::cast<scalar_t, accscalar_t>(av);
                   v.store(&input_data[t]);
-                  */
-                  for (auto i = 0; i < V; ++i) {
-                    input_data[t + i] = static_cast<scalar_t>(std::exp(static_cast<accscalar_t>(v[i]) - hmax) * inv_denominator);
-                  }
                 }
               }
             });
