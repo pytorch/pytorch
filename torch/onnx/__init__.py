@@ -186,7 +186,7 @@ def export(model, args, f, export_params=True, verbose=False, training=TrainingM
         opset_version (int, default 9): The version of the
             `default (ai.onnx) opset <https://github.com/onnx/onnx/blob/master/docs/Operators.md>`_
             to target. Must be >= 7 and <= 15.
-        do_constant_folding (bool, default False): Apply the constant-folding optimization.
+        do_constant_folding (bool, default True): Apply the constant-folding optimization.
             Constant-folding will replace some of the ops that have all constant inputs
             with pre-computed constant nodes.
         dynamic_axes (dict<string, dict<int, string>> or dict<string, list(int)>, default empty dict):
@@ -287,9 +287,11 @@ def export(model, args, f, export_params=True, verbose=False, training=TrainingM
             the opset version is set to 1. Only custom opset domain name and version should be
             indicated through this argument.
 
-        export_modules_as_functions (bool or set of str, type or nn.Module, default False): Flag to enable
+        export_modules_as_functions (bool or set of type of nn.Module, default False): Flag to enable
             exporting all ``nn.Module`` forward calls as local functions in ONNX. Or a set to indicate the
-            particular modules to export as local functions in ONNX.
+            particular types of modules to export as local functions in ONNX.
+            This feature requires ``opset_version`` >= 15, otherwise the export will fail. This is because
+            ``opset_version`` < 15 implies IR version < 8, which means no local function support.
 
             * ``False``(default): export ``nn.Module`` forward calls as fine grained nodes.
             * ``True``: export all ``nn.Module`` forward calls as local function nodes.

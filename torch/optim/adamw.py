@@ -2,7 +2,7 @@ import math
 import torch
 from torch import Tensor
 from .optimizer import Optimizer
-from typing import List
+from typing import List, Optional
 
 
 class AdamW(Optimizer):
@@ -69,7 +69,8 @@ class AdamW(Optimizer):
     """
 
     def __init__(self, params, lr=1e-3, betas=(0.9, 0.999), eps=1e-8,
-                 weight_decay=1e-2, amsgrad=False, foreach=None, *, maximize: bool = False):
+                 weight_decay=1e-2, amsgrad=False, *, maximize: bool = False,
+                 foreach: Optional[bool] = None):
         if not 0.0 <= lr:
             raise ValueError("Invalid learning rate: {}".format(lr))
         if not 0.0 <= eps:
@@ -91,6 +92,11 @@ class AdamW(Optimizer):
             group.setdefault('amsgrad', False)
             group.setdefault('maximize', False)
             group.setdefault('foreach', None)
+        state_values = list(self.state.values())
+        step_is_tensor = (len(state_values) != 0) and torch.is_tensor(state_values[0]['step'])
+        if not step_is_tensor:
+            for s in state_values:
+                s['step'] = torch.tensor(float(s['step']))
 
     @torch.no_grad()
     def step(self, closure=None):

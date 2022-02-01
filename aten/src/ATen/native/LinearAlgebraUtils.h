@@ -14,6 +14,7 @@
 #include <cstring>
 #include <cctype>
 
+
 namespace at { namespace native {
 
 // Used as an interface between the different BLAS-like libraries
@@ -248,7 +249,6 @@ void batch_iterator_with_broadcasting(const Tensor& a, const Tensor& b, const fu
   iter.serial_for_each(loop, {0, batchCount(b)});
 }
 
-
 // Returns the epsilon value for floating types except half
 static inline double _get_epsilon(const ScalarType& sc_type) {
   switch (sc_type) {
@@ -300,7 +300,7 @@ static inline void checkFloatingOrComplex(const Tensor& t, const char* const f_n
  * Given a info int, obtained after a single operation, this function check if the computation
  * has been successful (info = 0) or not, and report in case of the latter.
  */
-static inline void singleCheckErrors(int64_t info, const char* name, int64_t batch_id=-1) {
+static inline void singleCheckErrors(int64_t info, const c10::string_view name, int64_t batch_id=-1) {
   std::string batch_string{""};
   if (batch_id >= 0) {
     batch_string = ": (Batch element " + std::to_string(batch_id) + ")";
@@ -309,27 +309,27 @@ static inline void singleCheckErrors(int64_t info, const char* name, int64_t bat
     TORCH_INTERNAL_ASSERT(false, name, batch_string,
         ": Argument ", -info, " has illegal value. Most certainly there is a bug in the implementation calling the backend library.");
   } else if (info > 0) {
-    if (strstr(name, "inv")) {
+    if (name.find("inv") != name.npos) {
       // inv, inverse, cholesky_inverse, etc.
       TORCH_CHECK_LINALG(false, name, batch_string,
           ": The diagonal element ", info, " is zero, the inversion could not be completed because the input matrix is singular.");
-    } else if (strstr(name, "solve")) {
+    } else if (name.find("solve") != name.npos) {
       // solve, linalg_solve, cholesky_solve, etc.
       TORCH_CHECK_LINALG(false, name, batch_string,
           ": The diagonal element ", info, " is zero, the solve could not be completed because the input matrix is singular.");
-    } else if (strstr(name, "cholesky")) {
+    } else if (name.find("cholesky") != name.npos) {
       TORCH_CHECK_LINALG(false, name, batch_string,
           ": The factorization could not be completed because the input is not positive-definite (the leading minor of order ", info, " is not positive-definite).");
-    } else if (strstr(name, "svd")) {
+    } else if (name.find("svd") != name.npos) {
       TORCH_CHECK_LINALG(false, name, batch_string,
           ": The algorithm failed to converge because the input matrix is ill-conditioned or has too many repeated singular values (error code: ", info, ").");
-    } else if (strstr(name, "eig") || strstr(name, "syevd")) {
+    } else if (name.find("eig") != name.npos || name.find("syevd") != name.npos) {
       TORCH_CHECK_LINALG(false, name, batch_string,
           ": The algorithm failed to converge because the input matrix is ill-conditioned or has too many repeated eigenvalues (error code: ", info, ").");
-    } else if (strstr(name, "lstsq")) {
+    } else if (name.find("lstsq") != name.npos) {
       TORCH_CHECK_LINALG(false, name, batch_string,
           ": The least squares solution could not be computed because the input matrix does not have full rank (error code: ", info, ").");
-    } else if (strstr(name, "lu_factor")) {
+    } else if (name.find("lu_factor") != name.npos) {
       TORCH_CHECK(false, name, batch_string,
           ": U[", info, ",", info, "] is zero and using it on lu_solve would result in a division by zero. "
           "If you still want to perform the factorization, consider calling linalg.lu(A, pivot) or "
@@ -345,7 +345,7 @@ static inline void singleCheckErrors(int64_t info, const char* name, int64_t bat
  * this function checks if the computation over all these batches has been
  * successful (info = 0) or not, and report in case of the latter.
  */
-static inline void batchCheckErrors(const std::vector<int64_t>& infos, const char* name) {
+static inline void batchCheckErrors(const std::vector<int64_t>& infos, const c10::string_view name) {
   for (size_t i = 0; i < infos.size(); i++) {
     auto info = infos[i];
     singleCheckErrors(info, name, i);
@@ -355,7 +355,7 @@ static inline void batchCheckErrors(const std::vector<int64_t>& infos, const cha
 /*
  * This is an overloaded case of the previous function for a tensor of infos.
  */
-static inline void batchCheckErrors(const Tensor& infos, const char* name) {
+static inline void batchCheckErrors(const Tensor& infos, const c10::string_view name) {
   auto infos_cpu = infos.to(at::kCPU);
   auto infos_data = infos_cpu.data_ptr<int>();
   for (int64_t i = 0; i < infos.numel(); i++) {
@@ -468,54 +468,13 @@ static inline std::tuple<std::vector<int64_t>,
   return std::make_tuple(q_sizes, q_strides, n_columns_q);
 }
 
-// Function to generate empty tensors of required size, strides and dtype for the SVD operation
-static inline std::tuple<Tensor, Tensor, Tensor> _create_U_S_VT(const Tensor& input, bool some, bool compute_uv,
-    const bool svd_use_cusolver=false) {
-
-  // U, S, VT are initialized as empty tensors.
-  // For CPU LAPACK and GPU MAGMA backend, the tensors are initialized on CPU.
-  // For GPU cuSOLVER backend, the tensors are initialized on GPU.
-  const auto usvt_device = svd_use_cusolver ? at::kCUDA : at::kCPU;
-
-  auto sizes = input.sizes().vec();
-  int64_t m = input.size(-2), n = input.size(-1);
-
-  sizes[input.dim() - 1] = some ? std::min(m, n) : m;
-  const auto u_strides = contiguous_strides(sizes, /*f-contig*/true);
-
-  // cuSOLVER's gesvdjBatched fails with illegal memory access and
-  // cuSOLVER's gesvdj fails with CUSOLVER_STATUS_EXECUTION_FAILED
-  // if matrices for U and VT are not allocated
-  // even though the result of computation is not used we need to allocate this memory
-
-  Tensor U_empty = (compute_uv || svd_use_cusolver)
-      ? at::empty_strided(sizes, u_strides, input.options().device(usvt_device))
-      : at::empty({0}, input.options().device(usvt_device));
-
-  // VT should be a column-major or a batch of column-major matrices
-  sizes[input.dim() - 2] = some ? std::min(m, n) : n;
-  sizes[input.dim() - 1] = n;
-  const auto vt_strides = contiguous_strides(sizes, /*f-contig*/!svd_use_cusolver);
-  Tensor VT_empty = (compute_uv || svd_use_cusolver)
-      ? at::empty_strided(sizes, vt_strides, input.options().device(usvt_device))
-      : at::empty({0}, input.options().device(usvt_device));
-
-  // U and VT might not get filled in this case
-  if (!some && compute_uv && input.numel() == 0) {
-    U_empty.zero_();
-    VT_empty.zero_();
-    // make U and VT an identity matrix, because they should be orthogonal
-    U_empty.diagonal(0, -2, -1).fill_(1);
-    VT_empty.diagonal(0, -2, -1).fill_(1);
-  }
-
-  sizes.pop_back();
-  sizes[input.dim() - 2] = std::min(m, n);
-  ScalarType dtype = toValueType(input.scalar_type());
-  Tensor S_empty = at::empty(sizes, input.options().dtype(dtype).device(usvt_device));
-
-  return std::tuple<Tensor, Tensor, Tensor>(U_empty, S_empty, VT_empty);
+static inline bool svd_uses_cusolver(const Tensor& A) {
+  // if cusolver is available, it is used unconditionally
+  return A.is_cuda()
+         && at::globalContext().hasCuSOLVER()
+         && at::globalContext().linalgPreferredBackend() != at::LinalgBackend::Magma;
 }
+
 
 // Function used instead of .to so that the original strides are retained
 // .to doesn't retain strides and make the output tensor contiguous
@@ -650,20 +609,36 @@ static inline bool is_blas_compatible_column_major_order(const Tensor& input) {
   IntArrayRef input_strides = input.strides();
   IntArrayRef input_sizes = input.sizes();
   auto ndim = input.dim();
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(ndim == 2);
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(ndim == 2 || ndim == 3);
   auto leading_dimension = input_strides[ndim - 1];
   auto rows = input_sizes[ndim - 2];
-  return (input_strides[ndim - 2] == 1) && (leading_dimension >= std::max<int64_t>(1, rows));
+  bool batch_stride_compatible = true;
+  if (ndim == 3) {
+    auto cols = input_sizes[ndim - 1];
+    batch_stride_compatible =
+        input_strides[ndim - 3] >= leading_dimension * cols;
+  }
+  return (input_strides[ndim - 2] == 1) &&
+      (leading_dimension >= std::max<int64_t>(1, rows)) &&
+      batch_stride_compatible;
 }
 
 static inline bool is_blas_compatible_row_major_order(const Tensor& input) {
   IntArrayRef input_strides = input.strides();
   IntArrayRef input_sizes = input.sizes();
   auto ndim = input.dim();
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(ndim == 2);
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(ndim == 2 || ndim == 3);
   auto leading_dimension = input_strides[ndim - 2];
   auto cols = input_sizes[ndim - 1];
-  return (input_strides[ndim - 1] == 1) && (leading_dimension >= std::max<int64_t>(1, cols));
+  bool batch_stride_compatible = true;
+  if (ndim == 3) {
+    auto rows = input_sizes[ndim - 2];
+    batch_stride_compatible =
+        input_strides[ndim - 3] >= leading_dimension * rows;
+  }
+  return (input_strides[ndim - 1] == 1) &&
+      (leading_dimension >= std::max<int64_t>(1, cols)) &&
+      batch_stride_compatible;
 }
 
 }}  // namespace at::native

@@ -90,8 +90,8 @@ def sharded_linear(types, args, kwargs, pg):
         raise TypeError("input and bias need to be torch.Tensor")
     if not isinstance(weight, ShardedTensor):
         raise TypeError("weight needs to be ShardedTensor")
-    if len(input.size()) < 2:
-        raise ValueError("Input needs to have at least 2 dims")
+    if len(input.size()) < 1:
+        raise ValueError("Input needs to have at least 1 dim")
     weight_size = cast(torch.Size, weight.size())
     if len(weight_size) != 2:
         raise ValueError("Weight needs to have exactly 2 dims")
@@ -100,7 +100,7 @@ def sharded_linear(types, args, kwargs, pg):
 
     if input.size()[-1] != weight_size[1]:
         raise ValueError(
-            f"Input dim: {input.size()[1]} does not match "
+            f"Input dim: {input.size()[-1]} does not match "
             f"appropriate weight dim: {weight_size[1]}"
         )
     if not isinstance(weight._sharding_spec, ChunkShardingSpec):
@@ -177,7 +177,7 @@ def _handle_row_wise_sharding(input, world_size, weight, rank, local_shard_t, bi
     Returns: final result of linear operation.
     """
     # alltoall to gather all the appropriate inputs.
-    input_t = input.t().contiguous()
+    input_t = input.transpose(0, -1).contiguous()
     input_t_size = input_t.size()
 
     # Compute expected size
@@ -210,17 +210,18 @@ def _handle_row_wise_sharding(input, world_size, weight, rank, local_shard_t, bi
             0, torch.tensor(indices_flatten, device=input_t.device)
         )
 
-    gathered_input = torch.empty(input_split_sizes[rank] * world_size, input_t_size[1], device=input_t.device)
+    gathered_input_size = [input_split_sizes[rank] * world_size] + list(input_t_size[1:])
+    gathered_input = torch.empty(gathered_input_size, device=input_t.device)
 
     # Perform autograd enabled alltoall
     all_to_all_single(gathered_input, input_t, input_split_sizes=input_split_sizes, group=pg)
-    gathered_input = gathered_input.t()
+    gathered_input = gathered_input.transpose(0, -1)
 
     # Perform local matmuls for all shards
     shard_size = local_shard_t.size()[0]
     results = []
     for r in range(world_size):
-        inp = torch.narrow(gathered_input, 1, r * shard_size, shard_size)
+        inp = torch.narrow(gathered_input, -1, r * shard_size, shard_size)
         results.append(inp.matmul(local_shard_t))
 
     # Gather all the results appropriately.
