@@ -5,7 +5,7 @@ from torch import Tensor
 from typing import List
 
 from .adadelta import adadelta  # type: ignore[attr-defined] # noqa: F401
-from .adagrad import adagrad  # type: ignore[attr-defined] # noqa: F401
+from .adagrad import adagrad, _make_sparse  # type: ignore[attr-defined] # noqa: F401
 from .adam import adam  # type: ignore[attr-defined] # noqa: F401
 from .adamax import adamax  # type: ignore[attr-defined] # noqa: F401
 from .asgd import asgd  # type: ignore[attr-defined] # noqa: F401

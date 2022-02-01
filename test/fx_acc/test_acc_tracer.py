@@ -37,6 +37,11 @@ class AccTracerTest(unittest.TestCase):
             torch.testing.assert_allclose(model(input), traced(input))
         else:
             self.assertTrue(torch.equal(model(input), traced(input)))
+        traced_again = acc_tracer.trace(traced, [input])
+        if enable_allclose:
+            torch.testing.assert_allclose(model(input), traced_again(input))
+        else:
+            self.assertTrue(torch.equal(model(input), traced_again(input)))
 
     def _make_acc_op_function_test(
         self,
@@ -63,7 +68,7 @@ class AccTracerTest(unittest.TestCase):
                 return self._torch_op(a, *self._args, **self._kwargs)
 
         m = TestModule(torch_op, args, kwargs)
-
+        m.eval()
         a = torch.randn(*input_shape)
         traced = acc_tracer.trace(m, [a])
         ph_a = acc_op_node = None
@@ -89,18 +94,31 @@ class AccTracerTest(unittest.TestCase):
 
         ref_outputs = m(a)
         outputs = traced(a)
+        traced_again = acc_tracer.trace(m, [a])
+        outputs_again = traced_again(a)
         if isinstance(ref_outputs, torch.Tensor):
             ref_outputs = [ref_outputs]
             outputs = [outputs]
+            outputs_again = [outputs_again]
 
-        for ref_output, output in zip(ref_outputs, outputs):
+        for ref_output, output, output_again in zip(
+            ref_outputs, outputs, outputs_again
+        ):
             if enable_allclose:
                 torch.testing.assert_allclose(
                     torch.nan_to_num(ref_output), torch.nan_to_num(output)
                 )
+                torch.testing.assert_allclose(
+                    torch.nan_to_num(ref_output), torch.nan_to_num(output_again)
+                )
             else:
                 self.assertTrue(
                     torch.equal(torch.nan_to_num(ref_output), torch.nan_to_num(output))
+                )
+                self.assertTrue(
+                    torch.equal(
+                        torch.nan_to_num(ref_output), torch.nan_to_num(output_again)
+                    )
                 )
 
     def test_sum(self):
@@ -109,10 +127,14 @@ class AccTracerTest(unittest.TestCase):
 
     def test_mean(self):
         self._make_acc_op_function_test(acc_ops.mean, torch.mean)
-        self._make_acc_op_function_test(acc_ops.mean, torch.mean, dim=(1,), keepdim=True)
+        self._make_acc_op_function_test(
+            acc_ops.mean, torch.mean, dim=(1,), keepdim=True
+        )
 
     def test_pad(self):
-        self._make_acc_op_function_test(acc_ops.pad, torch.nn.functional.pad, pad=(2, 0))
+        self._make_acc_op_function_test(
+            acc_ops.pad, torch.nn.functional.pad, pad=(2, 0)
+        )
 
     def test_max(self):
         def torch_max(x, *args, **kwargs):
@@ -504,7 +526,9 @@ class AccTracerTest(unittest.TestCase):
                 self.assertEqual(node.kwargs["running_mean"], bn_mean)
                 self.assertEqual(node.kwargs["running_var"], bn_var)
                 self.assertEqual(node.kwargs["acc_out_ty"][6]["scale"], bn_scale)
-                self.assertEqual(node.kwargs["acc_out_ty"][6]["zero_point"], bn_zero_point)
+                self.assertEqual(
+                    node.kwargs["acc_out_ty"][6]["zero_point"], bn_zero_point
+                )
                 bn = node
             elif node.op == "output":
                 self.assertEqual(bn, node.args[0])
@@ -682,6 +706,35 @@ class AccTracerTest(unittest.TestCase):
             self.assertFalse(node.op == "call_function")
 
         self.assertTrue(torch.equal(m(input), traced(input)))
+
+    def test_no_rewrite_leaf_module(self):
+        """
+        Test that when we supply a leaf module, we don't rewrite it
+        """
+
+        class TestChildModule(nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, a: torch.Tensor) -> torch.Tensor:
+                return a.relu()
+
+        class TestModule(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.child = TestChildModule()
+
+            def forward(self, a: torch.Tensor) -> torch.Tensor:
+                return self.child(a) + self.child(a)
+
+        m = TestModule()
+        input = torch.randn(10)
+        traced = acc_tracer.trace(m, [input], leaf_module_list={TestChildModule})
+        # trace it again just in case
+        traced = acc_tracer.trace(traced, [input], leaf_module_list={TestChildModule})
+
+        for _, m in traced.named_children():
+            self.assertFalse("__AccRewrittenModule" in str(type(m)), str(type(m)))
 
     def test_sequential(self):
         """
@@ -1227,6 +1280,18 @@ class AccTracerTest(unittest.TestCase):
             input_shape=(1, 2, 3),
         )
 
+    def test_stochastic_depth(self):
+        self._make_acc_op_function_test(
+            None,
+            lambda x, p, mode, training: torchvision.ops.stochastic_depth(
+                x, p=p, mode=mode, training=training
+            ),
+            input_shape=(1, 2, 3),
+            p=0.5,
+            mode="row",
+            training=False,
+        )
+
     def test_hardsigmoid(self):
         self._make_acc_op_function_test(
             acc_ops.hardsigmoid,
@@ -1377,7 +1442,9 @@ class AccTracerTest(unittest.TestCase):
         self._make_acc_op_function_test(acc_ops.relu, torch.relu)
 
     def test_leaky_relu(self):
-        self._make_acc_op_function_test(acc_ops.leaky_relu, torch.nn.functional.leaky_relu)
+        self._make_acc_op_function_test(
+            acc_ops.leaky_relu, torch.nn.functional.leaky_relu
+        )
 
     def test_elu(self):
         self._make_acc_op_function_test(acc_ops.elu, torch.nn.functional.elu)
@@ -1462,11 +1529,17 @@ class AccTracerTest(unittest.TestCase):
         self._make_acc_op_function_test(acc_ops.div, lambda x: x / 2)
 
     def test_floor_div(self):
-        self._make_acc_op_function_test(acc_ops.floor_div, lambda x: torch.div(x, 2, rounding_mode="floor"))
+        self._make_acc_op_function_test(
+            acc_ops.floor_div, lambda x: torch.div(x, 2, rounding_mode="floor")
+        )
 
     def test_trunc_div(self):
-        self._make_acc_op_function_test(acc_ops.trunc_div, lambda x: torch.div(x, 2, rounding_mode="trunc"))
-        self._make_acc_op_function_test(acc_ops.trunc_div, lambda x: torch.floor_divide(x, 2))
+        self._make_acc_op_function_test(
+            acc_ops.trunc_div, lambda x: torch.div(x, 2, rounding_mode="trunc")
+        )
+        self._make_acc_op_function_test(
+            acc_ops.trunc_div, lambda x: torch.floor_divide(x, 2)
+        )
 
     def test_view(self):
         """
@@ -1896,6 +1969,22 @@ class AccTracerTest(unittest.TestCase):
 
     def test_chunk(self):
         self._make_acc_op_function_test(acc_ops.chunk, torch.chunk, chunks=2, dim=0)
+
+    def test_retrace_reshape(self):
+        """
+        Retrace reshape to verify it's retraceable.
+        """
+
+        class TestModule(torch.nn.Module):
+            def forward(self, a: torch.Tensor) -> torch.Tensor:
+                return a.reshape(a.size()[0], 1, 2)
+
+        m = TestModule()
+        a = torch.randn(2, 2)
+        gm = acc_tracer.trace(m, [a])
+        self.assertTrue(torch.equal(m(a), gm(a)))
+        gm_retrace = acc_tracer.trace(gm, [a])
+        self.assertTrue(torch.equal(m(a), gm_retrace(a)))
 
     def test_all_acc_ops_registered(self):
         self.assertEqual(

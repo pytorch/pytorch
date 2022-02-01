@@ -4,13 +4,12 @@ import re
 import typing as t
 
 import torch.fx as fx
-from torch.fx.experimental.fx2trt.tools.trt_splitter import (
+from .tools.trt_splitter import (
     create_trt_operator_support,
     TRTSplitter,
+    TRTSplitterSetting,
 )
 from torch.fx.passes.operator_support import OperatorSupportBase
-from torch.fx.passes.splitter_base import _SplitterSettingBase
-from typing import Tuple
 
 
 logger = logging.getLogger(__name__)
@@ -25,7 +24,7 @@ class SplitFunc:
         self,
         module: fx.GraphModule,
         input: Input,
-    ) -> Tuple[fx.GraphModule, t.Sequence["SplitInfo"]]:
+    ) -> t.Tuple[fx.GraphModule, t.Sequence["SplitInfo"]]:
         """Splits a module into lowerable and non-lowerable subnets.
 
         This function splits a module into lowerable subnets that can be run
@@ -87,7 +86,7 @@ class Splitter(SplitFunc):
             operator_supported=create_trt_operator_support(use_implicit_batch_dim),
         )
 
-    def __call__(self, module, input) -> Tuple[fx.GraphModule, t.Sequence[SplitInfo]]:
+    def __call__(self, module, input) -> t.Tuple[fx.GraphModule, t.Sequence[SplitInfo]]:
         trt_split_result = self._trt_split(module, input)
 
         logger.debug(
@@ -161,7 +160,7 @@ class Splitter(SplitFunc):
         return (match[1], int(match[2]))
 
     def _trt_split(self, graph: fx.GraphModule, input: Input) -> fx.GraphModule:
-        splitter_settings = _SplitterSettingBase()
+        splitter_settings = TRTSplitterSetting()
         splitter_settings.min_acc_module_size = self.min_acc_module_size
 
         splitter = TRTSplitter(

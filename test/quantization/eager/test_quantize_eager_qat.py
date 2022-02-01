@@ -34,6 +34,7 @@ from torch.testing._internal.common_quantization import (
     QuantizationTestCase,
     QuantStubModel,
     ManualLinearQATModel,
+    ManualDropoutQATModel,
     ManualLinearDynamicQATModel,
     ManualConvLinearQATModel,
     ManualEmbeddingBagLinear,
@@ -272,6 +273,28 @@ class TestQuantizeEagerQAT(QuantizationTestCase):
                 checkQuantized(model)
 
                 model = quantize_qat(ManualLinearQATModel(qengine), test_only_train_fn,
+                                     [self.train_data])
+                checkQuantized(model)
+
+    def test_dropout(self):
+        for qengine in supported_qengines:
+            with override_quantized_engine(qengine):
+                model = ManualDropoutQATModel(qengine)
+                model = prepare_qat(model)
+                self.checkObservers(model)
+                test_only_train_fn(model, self.train_data)
+                model = convert(model)
+
+                def checkQuantized(model):
+                    self.assertEqual(type(model.fc1), nnq.Linear)
+                    self.assertEqual(type(model.dropout), nnq.Dropout)
+                    test_only_eval_fn(model, self.calib_data)
+                    self.checkScriptable(model, self.calib_data)
+                    self.checkNoQconfig(model)
+
+                checkQuantized(model)
+
+                model = quantize_qat(ManualDropoutQATModel(qengine), test_only_train_fn,
                                      [self.train_data])
                 checkQuantized(model)
 
