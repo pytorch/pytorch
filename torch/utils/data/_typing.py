@@ -330,9 +330,9 @@ class _DataPipeMeta(GenericMeta):
     def _eq_(self, other):
         if not isinstance(other, _DataPipeMeta):
             return NotImplemented
-        if self.__origin__ is None or other.__origin__ is None:
+        if self.__origin__ is None or other.__origin__ is None:  # type: ignore[has-type]
             return self is other
-        return (self.__origin__ == other.__origin__
+        return (self.__origin__ == other.__origin__  # type: ignore[has-type]
                 and self.type == other.type)
 
     # TODO: Fix isinstance bug
