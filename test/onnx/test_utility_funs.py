@@ -615,7 +615,7 @@ class TestUtilityFuns_opset9(_BaseTestCase):
         f = io.BytesIO()
         y = torch.randn(2, 4)
         torch.onnx.export(torch.jit.script(model), (x, y), f, opset_version=self.opset_version,
-            input_names=['x', 'y'], dynamic_axes={'y': [1]})
+                          input_names=['x', 'y'], dynamic_axes={'y': [1]})
         onnx_model = onnx.load(io.BytesIO(f.getvalue()))
         loop_output_value_info_proto = onnx_model.graph.output[0]
         ref_value_info_proto = onnx.helper.make_tensor_sequence_value_info(loop_output_value_info_proto.name, 1, [2, None])
