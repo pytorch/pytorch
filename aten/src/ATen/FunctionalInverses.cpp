@@ -3,6 +3,7 @@
 
 #include <ATen/ATen.h>
 #include <ATen/ExpandUtils.h>
+#include <c10/util/irange.h>
 namespace at {
 namespace functionalization {
 
@@ -155,7 +156,7 @@ Tensor FunctionalInverses::split_with_sizes_inverse(const Tensor& base, const Te
     dim = at::maybe_wrap_dim(dim, base.sizes().size());
     auto dim_size = base.size(dim);
     int64_t start = 0;
-    for (auto i = 0; i < mutated_view_idx; ++i) {
+    for (const auto i : c10::irange(mutated_view_idx)) {
         start += split_sizes[i];
     }
     auto end = start + split_sizes[mutated_view_idx];

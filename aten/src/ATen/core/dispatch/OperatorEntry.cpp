@@ -2,6 +2,7 @@
 #include <ATen/core/op_registration/infer_schema.h>
 #include <ATen/core/dispatch/Dispatcher.h>
 #include <ATen/core/dispatch/ObservedOperators.h>
+#include <c10/util/irange.h>
 
 namespace c10 {
 namespace impl {
@@ -443,7 +444,7 @@ void OperatorEntry::reportError(DispatchKey dispatchKey) const {
 // updateDispatchTableFull_ would update the dispatch table to be)
 std::string OperatorEntry::dumpComputedTable() const {
   std::ostringstream oss;
-  for (uint8_t i = 0; i < static_cast<uint8_t>(DispatchKey::NumDispatchKeys); i++) {
+  for (const auto i : c10::irange(static_cast<uint8_t>(DispatchKey::NumDispatchKeys))) {
     auto k = static_cast<DispatchKey>(i);
     auto kernel_prov = computeDispatchTableEntryWithDebug(c10::Dispatcher::singleton(), k);
     if (kernel_prov.first.kernel.isValid()) {
