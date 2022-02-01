@@ -10,8 +10,6 @@ import time
 
 from torch.monitor import (
     Aggregation,
-    FixedCountStat,
-    IntervalStat,
     Event,
     log_event,
     register_event_handler,
@@ -28,12 +26,11 @@ class TestMonitor(TestCase):
             events.append(event)
 
         handle = register_event_handler(handler)
-        s = IntervalStat(
+        s = Stat(
             "asdf",
             (Aggregation.SUM, Aggregation.COUNT),
             timedelta(milliseconds=1),
         )
-        self.assertIsInstance(s, Stat)
         self.assertEqual(s.name, "asdf")
 
         s.add(2)
@@ -48,12 +45,12 @@ class TestMonitor(TestCase):
         unregister_event_handler(handle)
 
     def test_fixed_count_stat(self) -> None:
-        s = FixedCountStat(
+        s = Stat(
             "asdf",
             (Aggregation.SUM, Aggregation.COUNT),
+            timedelta(hours=100),
             3,
         )
-        self.assertIsInstance(s, Stat)
         s.add(1)
         s.add(2)
         name = s.name
@@ -126,10 +123,11 @@ class TestMonitorTensorboard(TestCase):
         with self.create_summary_writer() as w:
             handle = register_event_handler(TensorboardEventHandler(w))
 
-            s = FixedCountStat(
+            s = Stat(
                 "asdf",
                 (Aggregation.SUM, Aggregation.COUNT),
-                2,
+                timedelta(hours=1),
+                5,
             )
             for i in range(10):
                 s.add(i)
@@ -150,8 +148,8 @@ class TestMonitorTensorboard(TestCase):
             tag: [e.tensor_proto.float_val[0] for e in events] for tag, events in raw_result.items()
         }
         self.assertEqual(scalars, {
-            "asdf.sum": [1, 5, 9, 13, 17],
-            "asdf.count": [2, 2, 2, 2, 2],
+            "asdf.sum": [10],
+            "asdf.count": [5],
         })
 
 
