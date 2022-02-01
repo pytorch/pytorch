@@ -219,27 +219,6 @@ def _get_trusted_input(repo):
         "Do you trust this repository and wish to add it to the trusted list of repositories (y/N)?")
     return response
 
-def _add_repo_to_trusted_list(repo, filepath, is_trusted=False, prompt=True):
-    if prompt:
-        # prompt
-        response = _get_trusted_input(repo)
-    else:
-        response = "y"
-    if response.lower() in ("y", "yes"):
-        if is_trusted:
-            print("The repository is already trusted.")
-            return
-        else:
-            with open(filepath, "a") as file:
-                file.write(repo + "\n")
-
-    elif response.lower() in ("n", "no", ""):
-        raise Exception("Untrusted repository.")
-
-    else:
-        raise ValueError(f"Unrecognized response {response}.")
-
-
 def _check_repo(repo, trust_repo=None, calling_fn="load"):
     hub_dir = get_dir()
     filepath = os.path.join(hub_dir, "trusted_list")
@@ -270,13 +249,23 @@ def _check_repo(repo, trust_repo=None, calling_fn="load"):
                 f"'yes'.")
         return
 
-    if not trust_repo:
-        _add_repo_to_trusted_list(repo, filepath, is_trusted)
+    if (trust_repo is False) or (trust_repo == "check" and not is_trusted):
+        response = input(
+            f"The repository {repo} does not belong to the list of trusted repositories and as such cannot be downloaded. "
+            "Do you trust this repository and wish to add it to the trusted list of repositories (y/N)?"
+        )
+        if response.lower() in ("y", "yes"):
+            if is_trusted:
+                print("The repository is already trusted.")
+        elif response.lower() in ("n", "no", ""):
+            raise Exception("Untrusted repository.")
+        else:
+            raise ValueError(f"Unrecognized response {response}.")
 
-    elif trust_repo == "check" and not is_trusted:
-        _add_repo_to_trusted_list(repo, filepath)
-    elif trust_repo and not is_trusted:
-        _add_repo_to_trusted_list(repo, filepath, prompt=False)
+    # At this point we're sure that the user trusts the repo
+    if not is_trusted:
+        with open(filepath, "a") as file:
+            file.write(repo + "\n")
 
 
 def _check_module_exists(name):
