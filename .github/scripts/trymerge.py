@@ -411,7 +411,11 @@ def main() -> None:
         try:
             try_revert(repo, pr, dry_run=args.dry_run)
         except Exception as e:
-            gh_post_comment(org, project, args.pr_num, f"Reverting PR {args.pr_num} failed due to {e}", dry_run=args.dry_run)
+            msg = f"Reverting PR {args.pr_num} failed due to {e}"
+            run_url = os.getenv("GH_RUN_URL")
+            if run_url is not None:
+                msg += f"\nRaised by {run_url}"
+            gh_post_comment(org, project, args.pr_num, msg, dry_run=args.dry_run)
         return
 
     if pr.is_closed():
@@ -425,7 +429,11 @@ def main() -> None:
     try:
         pr.merge_into(repo, dry_run=args.dry_run)
     except Exception as e:
-        gh_post_comment(org, project, args.pr_num, f"Merge failed due to {e}", dry_run=args.dry_run)
+        msg = f"Merge failed due to {e}"
+        run_url = os.getenv("GH_RUN_URL")
+        if run_url is not None:
+            msg += f"\nRaised by {run_url}"
+        gh_post_comment(org, project, args.pr_num, msg, dry_run=args.dry_run)
 
 
 if __name__ == "__main__":
