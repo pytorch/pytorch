@@ -258,7 +258,7 @@ class _DataPipeMeta(GenericMeta):
         return super().__new__(cls, name, bases, namespace, **kwargs)  # type: ignore[call-overload]
 
         # For Python > 3.6
-        #  cls.__origin__ = None
+        cls.__origin__ = None
         # Need to add _is_protocol for Python 3.7 _ProtocolMeta
         if '_is_protocol' not in namespace:
             namespace['_is_protocol'] = True
@@ -266,10 +266,10 @@ class _DataPipeMeta(GenericMeta):
             return super().__new__(cls, name, bases, namespace, **kwargs)  # type: ignore[call-overload]
 
         namespace['__type_class__'] = False
-        # For plain derived class without annotation
-        #  for base in bases:
-        #      if isinstance(base, _DataPipeMeta):
-        #          return super().__new__(cls, name, bases, namespace, **kwargs)  # type: ignore[call-overload]
+        #  For plain derived class without annotation
+        for base in bases:
+            if isinstance(base, _DataPipeMeta):
+                return super().__new__(cls, name, bases, namespace, **kwargs)  # type: ignore[call-overload]
 
         namespace.update({'type': _DEFAULT_TYPE,
                           '__init_subclass__': _dp_init_subclass})
@@ -326,13 +326,14 @@ class _DataPipeMeta(GenericMeta):
                                '__type_class__': True,
                                'type': t})
 
-    #  def __eq__(self, other):
-    #      if not isinstance(other, _DataPipeMeta):
-    #          return NotImplemented
-    #      if self.__origin__ is None or other.__origin__ is None:
-    #          return self is other
-    #      return (self.__origin__ == other.__origin__
-    #              and self.type == other.type)
+    # TODO: Fix isinstance bug
+    def _eq_(self, other):
+        if not isinstance(other, _DataPipeMeta):
+            return NotImplemented
+        if self.__origin__ is None or other.__origin__ is None:
+            return self is other
+        return (self.__origin__ == other.__origin__
+                and self.type == other.type)
 
     # TODO: Fix isinstance bug
     def _hash_(self):
