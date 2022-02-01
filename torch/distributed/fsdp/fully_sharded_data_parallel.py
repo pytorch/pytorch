@@ -93,7 +93,7 @@ class FullyShardedDataParallel(nn.Module):
     .. _DeepSpeed: https://www.deepspeed.ai/
     Example::
         import torch
-        from torch.distributed._fsdp import FullyShardedDataParallel as FSDP
+        from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
         torch.cuda.set_device(device_id)
         sharded_module = FSDP(my_module)
         optim = torch.optim.Adam(sharded_module.parameters(), lr=0.0001)
@@ -202,12 +202,12 @@ class FullyShardedDataParallel(nn.Module):
             if not hasattr(param, "_is_sharded"):
                 params.append(param)
 
-        self._fsdp_wrapped_module: nn.Module = FlattenParamsWrapper(
+        self.fsdp_wrapped_module: nn.Module = FlattenParamsWrapper(
             module, param_list=params
         )
         del module  # free original module in case it helps garbage collection
-        if self._fsdp_wrapped_module.flat_param is not None:
-            self.params = [self._fsdp_wrapped_module.flat_param]
+        if self.fsdp_wrapped_module.flat_param is not None:
+            self.params = [self.fsdp_wrapped_module.flat_param]
         else:
             self.params = []
 
@@ -242,8 +242,8 @@ class FullyShardedDataParallel(nn.Module):
     @property
     def module(self) -> FlattenParamsWrapper:
         """make model.module accessible, just like DDP."""
-        assert isinstance(self._fsdp_wrapped_module, FlattenParamsWrapper)
-        return self._fsdp_wrapped_module
+        assert isinstance(self.fsdp_wrapped_module, FlattenParamsWrapper)
+        return self.fsdp_wrapped_module
 
     # setting two factors 'self.gradient_predivide_factor'
     # and 'self.gradient_postdivide_factor' to avoid underflow and overflow
@@ -388,8 +388,8 @@ class FullyShardedDataParallel(nn.Module):
         """
         self._is_root: Optional[bool] = None
         self._streams: Dict[str, torch.cuda.Stream] = {}
-        self._fsdp_graph_order: List[nn.Module] = []
-        self._my_fsdp_idx_in_graph: Optional[int] = None
+        self.fsdp_graph_order: List[nn.Module] = []
+        self._myfsdp_idx_in_graph: Optional[int] = None
         for p in self.params:
             if hasattr(p, "_local_shard"):
                 # reset attributes that are added in _init_param_attributes, as
@@ -552,7 +552,7 @@ class FullyShardedDataParallel(nn.Module):
         for n, m in self.named_modules():
             if n != "" and isinstance(m, FullyShardedDataParallel):
                 m._streams = self._streams
-                m._fsdp_graph_order = self._fsdp_graph_order
+                m.fsdp_graph_order = self.fsdp_graph_order
 
     def _wait_for_previous_optim_step(self) -> None:
         """
@@ -567,9 +567,9 @@ class FullyShardedDataParallel(nn.Module):
     def _need_prefetch_pre_backward_hook(self) -> bool:
         if (
             self.backward_prefetch == BackwardPrefetch_.BACKWARD_PRE
-            and self._fsdp_graph_order is not None
-            and self._my_fsdp_idx_in_graph is not None and self._my_fsdp_idx_in_graph > 0
-            and self._fsdp_graph_order[self._my_fsdp_idx_in_graph - 1].training_state != TrainingState_.BACKWARD_POST
+            and self.fsdp_graph_order is not None
+            and self._myfsdp_idx_in_graph is not None and self._myfsdp_idx_in_graph > 0
+            and self.fsdp_graph_order[self._myfsdp_idx_in_graph - 1].training_state != TrainingState_.BACKWARD_POST
         ):
             return True
         else:
@@ -578,10 +578,10 @@ class FullyShardedDataParallel(nn.Module):
     def _need_prefetch_post_backward_hook(self) -> bool:
         if (
             self.backward_prefetch == BackwardPrefetch_.BACKWARD_POST
-            and self._fsdp_graph_order is not None
-            and self._my_fsdp_idx_in_graph is not None and self._my_fsdp_idx_in_graph > 0
-            and self._fsdp_graph_order[self._my_fsdp_idx_in_graph - 1].training_state != TrainingState_.BACKWARD_POST
-            and self._fsdp_graph_order[self._my_fsdp_idx_in_graph - 1]._need_rebuild_full_params
+            and self.fsdp_graph_order is not None
+            and self._myfsdp_idx_in_graph is not None and self._myfsdp_idx_in_graph > 0
+            and self.fsdp_graph_order[self._myfsdp_idx_in_graph - 1].training_state != TrainingState_.BACKWARD_POST
+            and self.fsdp_graph_order[self._myfsdp_idx_in_graph - 1]._need_rebuild_full_params
         ):
             return True
         else:
@@ -606,9 +606,9 @@ class FullyShardedDataParallel(nn.Module):
 
         outputs = self.module(*args, **kwargs)
 
-        if self not in self._fsdp_graph_order:
-            self._my_fsdp_idx_in_graph = len(self._fsdp_graph_order)
-            self._fsdp_graph_order.append(self)
+        if self not in self.fsdp_graph_order:
+            self._myfsdp_idx_in_graph = len(self.fsdp_graph_order)
+            self.fsdp_graph_order.append(self)
 
         if self.reshard_after_forward:
             self._free_full_params()
@@ -676,7 +676,7 @@ class FullyShardedDataParallel(nn.Module):
             # Prefetch next layer's full params in backward pass,
             # since it is prefetching, no need to wait for all_gather stream.
             if self._need_prefetch_pre_backward_hook():
-                self._fsdp_graph_order[self._my_fsdp_idx_in_graph - 1]._rebuild_full_params()  # type: ignore[operator]
+                self.fsdp_graph_order[self._myfsdp_idx_in_graph - 1]._rebuild_full_params()  # type: ignore[operator]
 
             self._pre_backward_hook_has_run = True
             # Prepare p.grad so that it is in the right shape, device, accumulated values, etc.
@@ -786,7 +786,7 @@ class FullyShardedDataParallel(nn.Module):
         # no need to prefetch the full params again.
         # Only prefetch full params if any of the next layer's outputs requires grad
         if self._need_prefetch_post_backward_hook():
-            self._fsdp_graph_order[self._my_fsdp_idx_in_graph - 1]._rebuild_full_params()  # type: ignore[operator]
+            self.fsdp_graph_order[self._myfsdp_idx_in_graph - 1]._rebuild_full_params()  # type: ignore[operator]
             # Next layer's computation will start right after this all_gather,
             # Wait for all_gather to finish before computation.
             torch.cuda.current_stream().wait_stream(self._streams["all_gather"])

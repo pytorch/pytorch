@@ -4,11 +4,11 @@ import sys
 
 import torch
 from torch import distributed as dist
-from torch.distributed._fsdp import FullyShardedDataParallel as FSDP
+from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.nn import Linear
 from torch.optim import SGD
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
-from torch.testing._internal.common_fsdp import (
+from torch.testing._internal.commonfsdp import (
     FSDPTest,
     get_full_params,
 )

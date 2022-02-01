@@ -2,7 +2,7 @@ from abc import ABC
 import inspect
 from typing import Dict, Type
 
-from torch.distributed._fsdp import FullyShardedDataParallel
+from torch.distributed.fsdp import FullyShardedDataParallel
 from torch.nn.parallel import DistributedDataParallel
 from torch.optim import Optimizer
 from torch.distributed.optim import as_functional_optim
@@ -45,7 +45,7 @@ class OverlappedOptimizer(ABC):
             f"{self.__class__.__name__} does not support overlapped DDP."
         )
 
-    def register_fsdp(self, fsdp: FullyShardedDataParallel) -> None:
+    def registerfsdp(self, fsdp: FullyShardedDataParallel) -> None:
         """Registers the overlapped optimizer with FSDP."""
         raise NotImplementedError(
             f"{self.__class__.__name__} does not support overlapped FSDP."
@@ -69,7 +69,7 @@ class _OverlappedStandardOptimizer(OverlappedOptimizer):
             _hook_then_optimizer(allreduce_hook, self._opt_hook_state)
         )
 
-    # TODO: register_fsdp once FSDP supports communication hook.
+    # TODO: registerfsdp once FSDP supports communication hook.
 
 
 def _as_overlapped_optim(optim_cls: Type, params, *args, **kwargs):

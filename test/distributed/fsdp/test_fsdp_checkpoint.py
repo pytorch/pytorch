@@ -6,7 +6,7 @@ from functools import partial
 
 import torch
 import torch.nn as nn
-from torch.distributed._fsdp.fully_sharded_data_parallel import (
+from torch.distributed.fsdp.fully_sharded_data_parallel import (
     FullyShardedDataParallel as FSDP,
     CPUOffload,
 )
@@ -16,9 +16,9 @@ from torch.distributed.algorithms._checkpoint._checkpoint_wrapper import (
 from torch.testing._internal.common_distributed import (
     skip_if_lt_x_gpu,
 )
-from torch.testing._internal.common_fsdp import (
+from torch.testing._internal.commonfsdp import (
     FSDPTest,
-    _maybe_wrap_fsdp,
+    _maybe_wrapfsdp,
 )
 from torch.testing._internal.common_utils import (
     run_tests,
@@ -34,7 +34,7 @@ class TestFSDPCheckpoint(FSDPTest):
             self,
             checkpoint_layer=False,
             offload_activations=False,
-            wrap_fsdp=False,
+            wrapfsdp=False,
             *fsdp_args,
             **fsdp_kwargs,
         ):
@@ -55,7 +55,7 @@ class TestFSDPCheckpoint(FSDPTest):
                 l3 = ckpt_wrapper(l3)
 
             fsdp_wrapper = partial(
-                _maybe_wrap_fsdp, wrap_fsdp=wrap_fsdp, *fsdp_args, **fsdp_kwargs
+                _maybe_wrapfsdp, wrapfsdp=wrapfsdp, *fsdp_args, **fsdp_kwargs
             )
             self.ffn = nn.Sequential(
                 fsdp_wrapper(l1),
@@ -89,11 +89,11 @@ class TestFSDPCheckpoint(FSDPTest):
         [CPUOffload(offload_params=True), CPUOffload(offload_params=False)],
     )
     @parametrize("offload_activations", [True, False])
-    def test_checkpoint_fsdp_wrapping(self, cpu_offload, offload_activations):
+    def test_checkpointfsdp_wrapping(self, cpu_offload, offload_activations):
         # Test checkpoint(FSDP(layer1), FSDP(layer2), ....)
-        ckpt_sequential_wrapped_fsdp = checkpoint_wrapper(
+        ckpt_sequential_wrappedfsdp = checkpoint_wrapper(
             TestFSDPCheckpoint.SequentialModule(
-                wrap_fsdp=True, cpu_offload=cpu_offload
+                wrapfsdp=True, cpu_offload=cpu_offload
             ),
             offload_to_cpu=offload_activations,
         )
@@ -101,19 +101,19 @@ class TestFSDPCheckpoint(FSDPTest):
         inner_ckpt = TestFSDPCheckpoint.SequentialModule(
             checkpoint_layer=True,
             offload_activations=offload_activations,
-            wrap_fsdp=True,
+            wrapfsdp=True,
             cpu_offload=cpu_offload,
         )
 
         baseline = TestFSDPCheckpoint.SequentialModule(
-            wrap_fsdp=True, cpu_offload=cpu_offload
+            wrapfsdp=True, cpu_offload=cpu_offload
         )
 
         # note that reentrant-based checkpointing requires inputs to have grad
         # flag set.
         inp = torch.randn(10, 3, device=torch.cuda.current_device(), requires_grad=True)
 
-        models = [ckpt_sequential_wrapped_fsdp, inner_ckpt, baseline]
+        models = [ckpt_sequential_wrappedfsdp, inner_ckpt, baseline]
 
         offload_to_cpu_event = "Memcpy DtoH"
 
@@ -154,7 +154,7 @@ class TestFSDPCheckpoint(FSDPTest):
         # Runs FSDP with no checkpointing
         fsdp_only_seq = FSDP(deepcopy(seq), cpu_offload=cpu_offload)
         # Runs checkpoint-wrapped FSDP
-        checkpointed_fsdp = checkpoint_wrapper(
+        checkpointedfsdp = checkpoint_wrapper(
             FSDP(deepcopy(seq), cpu_offload=cpu_offload),
             offload_to_cpu=offload_activations,
         )
@@ -172,7 +172,7 @@ class TestFSDPCheckpoint(FSDPTest):
 
         models = [
             fsdp_only_seq,
-            checkpointed_fsdp,
+            checkpointedfsdp,
             fsdp_wrapped_checkpoint,
             fsdp_call_checkpoint,
         ]

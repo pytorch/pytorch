@@ -4,12 +4,12 @@ import sys
 
 import torch
 from torch import distributed as dist
-from torch.distributed._fsdp import FullyShardedDataParallel as FSDP
+from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.nn import Linear, Module
 from torch.nn.parallel import DistributedDataParallel
 from torch.optim import SGD
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
-from torch.testing._internal.common_fsdp import (
+from torch.testing._internal.commonfsdp import (
     FSDPTest,
     get_full_params,
 )
@@ -29,12 +29,12 @@ if TEST_WITH_DEV_DBG_ASAN:
 
 
 class Model(Module):
-    def __init__(self, wrap_fsdp):
+    def __init__(self, wrapfsdp):
         super().__init__()
         # keep everything deterministic for model initialization
         torch.manual_seed(0)
         self.inner = Linear(4, 4)
-        if wrap_fsdp:
+        if wrapfsdp:
             self.inner = FSDP(self.inner)
         self.outer = Linear(4, 5)
 
@@ -46,12 +46,12 @@ class Model(Module):
 
 
 class TestMultiForward(FSDPTest):
-    def _dist_train(self, wrap_fsdp):
+    def _dist_train(self, wrapfsdp):
         # keep everything deterministic for input data
         torch.manual_seed(0)
 
-        model = Model(wrap_fsdp).cuda()
-        if wrap_fsdp:
+        model = Model(wrapfsdp).cuda()
+        if wrapfsdp:
             model = FSDP(model)
         else:
             model = DistributedDataParallel(model, device_ids=[self.rank])
@@ -65,7 +65,7 @@ class TestMultiForward(FSDPTest):
             optim.step()
             optim.zero_grad()
 
-        if wrap_fsdp:
+        if wrapfsdp:
             get_full_params(model)
 
         return list(model.parameters())
@@ -73,10 +73,10 @@ class TestMultiForward(FSDPTest):
     @skip_if_lt_x_gpu(2)
     def test_multi_forward(self):
         # DDP
-        ddp_state = self._dist_train(wrap_fsdp=False)
+        ddp_state = self._dist_train(wrapfsdp=False)
 
         # FSDP
-        fsdp_state = self._dist_train(wrap_fsdp=True)
+        fsdp_state = self._dist_train(wrapfsdp=True)
 
         self.assertEqual(ddp_state, fsdp_state)
 

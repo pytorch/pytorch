@@ -9,12 +9,12 @@ import unittest
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torch.distributed._fsdp.fully_sharded_data_parallel import (
+from torch.distributed.fsdp.fully_sharded_data_parallel import (
     FullyShardedDataParallel as FSDP,
     CPUOffload,
     BackwardPrefetch_,
 )
-from torch.distributed._fsdp.wrap import (
+from torch.distributed.fsdp.wrap import (
     default_auto_wrap_policy,
     enable_wrap,
     wrap,
@@ -22,7 +22,7 @@ from torch.distributed._fsdp.wrap import (
 from torch.testing._internal.common_distributed import (
     skip_if_lt_x_gpu,
 )
-from torch.testing._internal.common_fsdp import (
+from torch.testing._internal.commonfsdp import (
     DummyProcessGroup,
     FSDPTest,
     FSDPInitMode,
@@ -80,7 +80,7 @@ class TestFSDPWrap(FSDPTest):
     def _get_linear(self, fin, fout):
         return nn.Linear(fin, fout, bias=False)
 
-    def _get_already_wrapped_fsdp(
+    def _get_already_wrappedfsdp(
         self, fsdp_init_mode=FSDPInitMode.CUDA_BEFORE, nested=False
     ) -> FSDP:
         fn_self = self
@@ -118,12 +118,12 @@ class TestFSDPWrap(FSDPTest):
         Test that an error is raised if we attempt to wrap when submodules are
         already FSDP.
         """
-        wrapped_fsdp = self._get_already_wrapped_fsdp(nested=nested, fsdp_init_mode=fsdp_init_mode)
+        wrappedfsdp = self._get_already_wrappedfsdp(nested=nested, fsdp_init_mode=fsdp_init_mode)
         if fsdp_init_mode == FSDPInitMode.CUDA_AFTER:
-            wrapped_fsdp = wrapped_fsdp.cuda()
+            wrappedfsdp = wrappedfsdp.cuda()
 
         with self.assertRaisesRegex(ValueError, "to NOT be FullyShardedDataParallel"):
-            mod = FSDP(wrapped_fsdp, fsdp_auto_wrap_policy=default_auto_wrap_policy)
+            mod = FSDP(wrappedfsdp, fsdp_auto_wrap_policy=default_auto_wrap_policy)
 
     @skip_if_lt_x_gpu(2)
     @parametrize(
@@ -178,7 +178,7 @@ class TestFSDPWrap(FSDPTest):
         if fsdp_init_mode == FSDPInitMode.CUDA_AFTER:
             wrapped_model = wrapped_model.cuda()
 
-        modules_in_fsdp_graph_order = [
+        modules_infsdp_graph_order = [
             wrapped_model.module.lin1,
             wrapped_model.module.lin2,
             wrapped_model.module.lin3,
@@ -187,7 +187,7 @@ class TestFSDPWrap(FSDPTest):
             wrapped_model
         ]
 
-        for module in modules_in_fsdp_graph_order:
+        for module in modules_infsdp_graph_order:
             self.assertTrue(isinstance(module, FSDP))
             self._check_cpu_offload(module, cpu_offload)
             self._check_backward_prefetch(module, backward_prefetch)
@@ -203,10 +203,10 @@ class TestFSDPWrap(FSDPTest):
 
         # Since we ran with backward prefetch, verify backward prefetch related
         # data.
-        for i, module in enumerate(modules_in_fsdp_graph_order):
-            self.assertEqual(i, module._my_fsdp_idx_in_graph)
+        for i, module in enumerate(modules_infsdp_graph_order):
+            self.assertEqual(i, module._myfsdp_idx_in_graph)
             self.assertTrue(
-                module._fsdp_graph_order == modules_in_fsdp_graph_order
+                module.fsdp_graph_order == modules_infsdp_graph_order
             )
 
 

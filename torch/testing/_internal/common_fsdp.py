@@ -9,8 +9,8 @@ from unittest import mock
 import torch
 import torch.distributed as dist
 import torch.nn as nn
-from torch.distributed._fsdp import FullyShardedDataParallel, CPUOffload
-from torch.distributed._fsdp.fully_sharded_data_parallel import (
+from torch.distributed.fsdp import FullyShardedDataParallel, CPUOffload
+from torch.distributed.fsdp.fully_sharded_data_parallel import (
     TrainingState_,
 )
 from torch.testing._internal.common_distributed import (
@@ -51,9 +51,9 @@ def get_full_params(model, recurse=True):
 def _maybe_cuda(model, move_to_cuda):
     return model.cuda() if move_to_cuda else model
 
-def _maybe_wrap_fsdp(model, wrap_fsdp, *args, **kwargs):
+def _maybe_wrapfsdp(model, wrapfsdp, *args, **kwargs):
     return (
-        model if not wrap_fsdp
+        model if not wrapfsdp
         else FullyShardedDataParallel(model, *args, **kwargs)
     )
 
@@ -129,14 +129,14 @@ class TransformerWithSharedParams(nn.Module):
 
 
 class NestedWrappedModule(nn.Module):
-    def __init__(self, group, wrap_fsdp, *args, wrap_everything=False, fsdp_init_mode=FSDPInitMode.CUDA_AFTER, **kwargs):
+    def __init__(self, group, wrapfsdp, *args, wrap_everything=False, fsdp_init_mode=FSDPInitMode.CUDA_AFTER, **kwargs):
         super().__init__()
         self.rank = group.rank()
         self.world_size = group.size()
         move_to_cuda = fsdp_init_mode == FSDPInitMode.CUDA_BEFORE
 
         def _maybe_wrap(layer):
-            if wrap_fsdp:
+            if wrapfsdp:
                 return FullyShardedDataParallel(layer, group, *args, **kwargs)
             return layer
 
@@ -216,7 +216,7 @@ class NestedWrappedModuleWithDelay(ModuleWithDelay):
     def __init__(
         self,
         group,
-        wrap_fsdp,
+        wrapfsdp,
         fsdp_init_mode=FSDPInitMode.CUDA_AFTER,
         cpu_offload=None,
         backward_prefetch=None,
@@ -225,7 +225,7 @@ class NestedWrappedModuleWithDelay(ModuleWithDelay):
         super().__init__(
             NestedWrappedModule(
                 group,
-                wrap_fsdp,
+                wrapfsdp,
                 fsdp_init_mode=fsdp_init_mode,
                 cpu_offload=cpu_offload,
                 backward_prefetch=backward_prefetch,
@@ -244,11 +244,11 @@ class DummyDDP(nn.Module):
 
 
 class MixtureOfExperts(NestedWrappedModule):
-    def __init__(self, group, wrap_fsdp, *args, delay_before_free_ms=0, fsdp_init_mode=FSDPInitMode.CUDA_BEFORE, **kwargs):
-        super().__init__(group, wrap_fsdp)
+    def __init__(self, group, wrapfsdp, *args, delay_before_free_ms=0, fsdp_init_mode=FSDPInitMode.CUDA_BEFORE, **kwargs):
+        super().__init__(group, wrapfsdp)
         self.group = group
         self.delay_before_free_ms = delay_before_free_ms
-        self.wrap_fsdp = wrap_fsdp
+        self.wrapfsdp = wrapfsdp
         self.move_to_cuda = fsdp_init_mode == FSDPInitMode.CUDA_BEFORE
         # "expert" params are different on each rank
         torch.manual_seed(42 + group.rank())
@@ -266,7 +266,7 @@ class MixtureOfExperts(NestedWrappedModule):
 
         shared = _maybe_cuda(nn.Linear(d_shared, d_expert), self.move_to_cuda)
 
-        if wrap_fsdp:
+        if wrapfsdp:
             # we create a process group of size 1 for the expert params
             expert_group = torch.distributed.new_group(
                 [group.rank()]
@@ -308,7 +308,7 @@ class MixtureOfExperts(NestedWrappedModule):
         loss.backward()
 
         # manually reduce gradients if not wrapped in FullyShardedDataParallel
-        if not self.wrap_fsdp:
+        if not self.wrapfsdp:
             with torch.no_grad():
                 for p in self.parameters():
                     if hasattr(p, "expert"):
@@ -431,7 +431,7 @@ class FSDPTest(MultiProcessTestCase):
         group = dist.distributed_c10d._get_default_group()
         rank = group.rank()
         # Establish reference behavior with PyTorch DDP (+ optionally autocast).
-        model = model_init_fn(group=group, wrap_fsdp=False).cuda()
+        model = model_init_fn(group=group, wrapfsdp=False).cuda()
         if ref_ddp_fn is None:
             model = nn.parallel.DistributedDataParallel(
                 model, device_ids=[rank], output_device=rank
@@ -447,7 +447,7 @@ class FSDPTest(MultiProcessTestCase):
         try:
             model = model_init_fn(
                 group=group,
-                wrap_fsdp=True,
+                wrapfsdp=True,
                 fsdp_init_mode=fsdp_init_mode,
                 cpu_offload=cpu_offload,
                 backward_prefetch=backward_prefetch

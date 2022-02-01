@@ -78,7 +78,7 @@ class FlattenParamsWrapper(nn.Module):
 
     @property
     def module(self) -> Any:
-        """Support _fsdp_wrapped_module.module in case we are immitating DDP, which has .module
+        """Support fsdp_wrapped_module.module in case we are immitating DDP, which has .module
         property to the underlying module.
         """
         return self._fpw_module

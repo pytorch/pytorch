@@ -6,9 +6,9 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 from torch import distributed as dist
-from torch.distributed._fsdp import FullyShardedDataParallel as FSDP
+from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
-from torch.testing._internal.common_fsdp import (
+from torch.testing._internal.commonfsdp import (
     FSDPTest,
 )
 from torch.testing._internal.common_utils import (
@@ -38,9 +38,9 @@ def get_cur_mem(rank, result, prefix):
 
 
 class Model(nn.Module):
-    def __init__(self, hidden_dim, with_fsdp=False, with_checkpoint=False):
+    def __init__(self, hidden_dim, withfsdp=False, with_checkpoint=False):
         super().__init__()
-        if with_fsdp:
+        if withfsdp:
             self.stem = nn.Sequential(
                 nn.Conv2d(3, 64, kernel_size=3),
                 FSDP(nn.BatchNorm2d(64)),
@@ -52,7 +52,7 @@ class Model(nn.Module):
                 nn.BatchNorm2d(64),
                 nn.ReLU(inplace=True),
             )
-        if with_fsdp:
+        if withfsdp:
             self.blocks = nn.Sequential(
                 nn.Conv2d(64, hidden_dim, kernel_size=5, padding=2),
                 FSDP(nn.BatchNorm2d(hidden_dim)),
@@ -91,10 +91,10 @@ class Model(nn.Module):
             return self.head(self.blocks(self.stem(x)))
 
 
-def create_model(with_fsdp, with_checkpoint, model_hidden_dim):
+def create_model(withfsdp, with_checkpoint, model_hidden_dim):
     torch.manual_seed(0)
-    model = Model(model_hidden_dim, with_fsdp, with_checkpoint)
-    if with_fsdp:
+    model = Model(model_hidden_dim, withfsdp, with_checkpoint)
+    if withfsdp:
         model.stem = FSDP(model.stem)
         model.blocks = FSDP(model.blocks)
         model.head = FSDP(model.head)
@@ -114,7 +114,7 @@ class TestFSDPMemory(FSDPTest):
         batch = torch.randn(size=(2, 3, 224, 224)).cuda()
 
         model = create_model(
-            with_fsdp=True,
+            withfsdp=True,
             with_checkpoint=with_checkpoint,
             model_hidden_dim=model_hidden_dim,
         )
@@ -161,12 +161,12 @@ class TestFSDPMemory(FSDPTest):
 
     @skip_if_lt_x_gpu(2)
     @parametrize("ckpt", ["no_ckpt", "ckpt"])
-    def test_fsdp_memory(self, ckpt):
+    def testfsdp_memory(self, ckpt):
         # hidden_dim 128: model size ~4MB
         model_hidden_dim = 128
 
         model = create_model(
-            with_fsdp=False, with_checkpoint=False, model_hidden_dim=model_hidden_dim
+            withfsdp=False, with_checkpoint=False, model_hidden_dim=model_hidden_dim
         ).cuda()
         model_size_mb = round(torch.cuda.memory_allocated() / 1024 / 1024)
         del model

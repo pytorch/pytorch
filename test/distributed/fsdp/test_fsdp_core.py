@@ -10,7 +10,7 @@ import torch.nn as nn
 from torch.testing._internal.common_distributed import (
     skip_if_lt_x_gpu,
 )
-from torch.testing._internal.common_fsdp import (
+from torch.testing._internal.commonfsdp import (
     DummyDDP,
     FSDPInitMode,
     FSDPTest,
@@ -26,8 +26,8 @@ from torch.testing._internal.common_utils import (
     run_tests,
 )
 
-from torch.distributed._fsdp import CPUOffload
-from torch.distributed._fsdp.fully_sharded_data_parallel import BackwardPrefetch_
+from torch.distributed.fsdp import CPUOffload
+from torch.distributed.fsdp.fully_sharded_data_parallel import BackwardPrefetch_
 
 
 if not dist.is_available():
