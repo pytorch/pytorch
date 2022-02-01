@@ -750,8 +750,10 @@ class TestHub(TestCase):
     @patch('torch.hub._get_trusted_input', return_value='y')
     def test_trusted_repo(self, input):
         folder_path = os.path.join(torch.hub.get_dir(), 'ailzhang_torchhub_example_master')
+        file_path = os.path.join(torch.hub.get_dir(), 'trusted_list')
         if os.path.exists(folder_path):
             shutil.rmtree(folder_path)
+            shutil.rmtree(file_path)
         model = torch.hub.load(
             'ailzhang/torchhub_example',
             'mnist_zip_1_6',
@@ -762,8 +764,10 @@ class TestHub(TestCase):
     @patch('torch.hub._get_trusted_input', return_value='y')
     def test_check_repo(self, input):
         folder_path = os.path.join(torch.hub.get_dir(), 'ailzhang_torchhub_example_master')
+        file_path = os.path.join(torch.hub.get_dir(), 'trusted_list')
         if os.path.exists(folder_path):
             shutil.rmtree(folder_path)
+            shutil.rmtree(file_path)
         model = torch.hub.load(
             'ailzhang/torchhub_example',
             'mnist_zip_1_6',
@@ -773,8 +777,11 @@ class TestHub(TestCase):
     @retry(Exception, tries=3)
     def test_none_repo(self):
         folder_path = os.path.join(torch.hub.get_dir(), 'ailzhang_torchhub_example_master')
+        file_path = os.path.join(torch.hub.get_dir(), 'trusted_list')
         if os.path.exists(folder_path):
             shutil.rmtree(folder_path)
+            shutil.rmtree(file_path)
+
         with warnings.catch_warnings(record=True) as w:
             warnings.simplefilter("always")
             model = torch.hub.load(
