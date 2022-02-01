@@ -2386,6 +2386,10 @@ std::tuple<Tensor, Tensor, Tensor> linalg_svd_jvp(const Tensor& dA,
   //      dX = dP - dS
   //      E_{jk} = S_k^2 - S_j^2 if j != k
   //               1             otherwise
+
+  // Checks compute_uv=true
+  TORCH_INTERNAL_ASSERT(U_.dim() >= 2 && Vh_.dim() >= 2);
+
   const auto is_complex = dA.is_complex();
   const auto m = dA.size(-2);
   const auto n = dA.size(-1);
@@ -2588,6 +2592,9 @@ Tensor svd_backward(const Tensor& gU,
   //   gA = [term in m == n] + U S^{-1} (gV)^H (I_n - VV^H)
   // where we have used that Im(diag(U^H gU)) = - Im(diag(V^h gV)) to group the diagonal imaginary terms into one
   // that just depends on U^H gU.
+
+  // Checks compute_uv=true
+  TORCH_INTERNAL_ASSERT(U.dim() >= 2 && Vh.dim() >= 2);
 
   // Trivial case
   if (!gS.defined() && !gU.defined() && !gVh.defined()) {
