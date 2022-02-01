@@ -3710,7 +3710,7 @@ def interpolate(input: Tensor, size: Optional[int] = None, scale_factor: Optiona
             the interpolation. Note that when `scale_factor` is floating-point, it may differ
             from the recomputed `scale_factor` due to rounding and precision issues.
             If `recompute_scale_factor` is ``False``, then `size` or `scale_factor` will
-            be used directly for interpolation. Default: ``False``.
+            be used directly for interpolation. Default: ``None``.
         antialias (bool, optional): flag to apply anti-aliasing. Default: ``False``. Using anti-alias
             option together with ``align_corners=False``, interpolation result would match Pillow
             result for downsampling operation. Supported modes: ``'bilinear'``, ``'bicubic'``.
@@ -3794,7 +3794,7 @@ def interpolate(input: Tensor, size: Optional[int] = None, scale_factor: Optiona
     else:
         raise ValueError("either size or scale_factor should be defined")
 
-    if recompute_scale_factor and size is not None:
+    if recompute_scale_factor is not None and recompute_scale_factor and size is not None:
         raise ValueError("recompute_scale_factor is not meaningful with an explicit size.")
 
     # "area" mode always requires an explicit size rather than scale factor.
