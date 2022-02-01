@@ -397,7 +397,7 @@ struct DifferentiableGraphOp {
 
     detachVariables(stack);
     if (IsNewExecutorEnabled()) {
-      ExecutionPlan plan =
+      const ExecutionPlan& plan =
           f_ptr->getPlanFor(stack, GraphExecutor::getDefaultNumBailOuts());
       InterpreterState(plan.code).run(stack);
     } else {
@@ -773,7 +773,7 @@ c10::intrusive_ptr<Future> GraphExecutor::runAsync(
 }
 
 size_t GraphExecutor::getDefaultNumBailOuts() {
-  return getProfilingMode() ? getBailoutDepth().load() : 0;
+  return getProfilingMode() ? getBailoutDepth() : 0;
 }
 
 const ExecutionPlan& GraphExecutor::getPlanFor(
@@ -892,7 +892,9 @@ void runNondiffOptimization(
   GRAPH_DEBUG("After BatchMM, before Fusion\n", *graph);
   if (getProfilingMode()) {
     if (tensorExprFuserEnabled()) {
-      FuseTensorExprs(graph);
+      auto min_size = getFusionGroupInlining() ? 2 : 1;
+      auto dyn_shapes = tensorExprDynamicShapeFusionEnabled();
+      FuseTensorExprs(graph, min_size, /*composed_op*/false, dyn_shapes);
     }
   } else {
     FuseGraph(graph, strict_fuser_check);
