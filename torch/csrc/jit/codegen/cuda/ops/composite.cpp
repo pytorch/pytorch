@@ -161,6 +161,17 @@ Val* gelu_backward(Val* dy, Val* x) {
   return dx;
 }
 
+Val* tanh_backward(Val* dy, Val* tanh_x) {
+  TORCH_INTERNAL_ASSERT(dy != nullptr, "Grad Output is invalid.");
+  TORCH_INTERNAL_ASSERT(tanh_x != nullptr, "Input is invalid");
+
+  auto one = IrBuilder::create<Double>(tanh_x->container(), 1.);
+  auto tanh_sq = mul(tanh_x, tanh_x);
+  auto sub_tanh_sq = sub(one, tanh_sq);
+  auto dx = mul(dy, sub_tanh_sq);
+  return dx;
+}
+
 } // namespace cuda
 } // namespace fuser
 } // namespace jit

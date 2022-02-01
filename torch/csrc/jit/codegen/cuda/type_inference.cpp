@@ -141,6 +141,7 @@ class NaiveTypePropagator {
       }
       // binary operations that forward meta info and broadcast shape:
       case aten::gelu_backward:
+      case aten::tanh_backward:
       case aten::mul:
       case aten::div:
       case aten::min:

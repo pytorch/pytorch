@@ -48,6 +48,7 @@ TORCH_CUDA_CU_API LstmResult lstm(
 TORCH_CUDA_CU_API Val* fast_gelu(Val* x);
 TORCH_CUDA_CU_API Val* fast_gelu_backward(Val* dy, Val* x);
 TORCH_CUDA_CU_API Val* gelu_backward(Val* dy, Val* x);
+TORCH_CUDA_CU_API Val* tanh_backward(Val* dy, Val* tanh_x);
 
 } // namespace cuda
 } // namespace fuser
