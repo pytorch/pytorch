@@ -1312,7 +1312,7 @@ def dropout2d(input: Tensor, p: float = 0.5, training: bool = True, inplace: boo
         raise ValueError("dropout probability has to be between 0 and 1, " "but got {}".format(p))
     inp_dim = input.dim()
     if inp_dim not in (3, 4):
-        warn_msg = ("dropout2d: Received a 2D input to dropout2d, which is deprecated "
+        warn_msg = (f"dropout2d: Received a {inp_dim}-D input to dropout2d, which is deprecated "
                     "and will result in an error in a future release. To retain the behavior "
                     "and silence this warning, please use dropout instead. Note that dropout2d "
                     "exists to provide channel-wise dropout on inputs with 2 spatial dimensions, "
@@ -1352,7 +1352,7 @@ def dropout3d(input: Tensor, p: float = 0.5, training: bool = True, inplace: boo
         raise ValueError("dropout probability has to be between 0 and 1, " "but got {}".format(p))
     inp_dim = input.dim()
     if inp_dim not in (4, 5):
-        warn_msg = ("dropout3d: Received a 3D input to dropout3d, which is deprecated "
+        warn_msg = (f"dropout3d: Received a {inp_dim}-D input to dropout3d, which is deprecated "
                     "and will result in an error in a future release. To retain the behavior "
                     "and silence this warning, please use dropout instead. Note that dropout3d "
                     "exists to provide channel-wise dropout on inputs with 3 spatial dimensions, "

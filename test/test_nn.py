@@ -13808,10 +13808,10 @@ class TestNNDeviceType(NNTestCase):
         self._test_dropout_discontiguous(nn.Dropout2d, device)
         self._test_dropout_discontiguous(nn.Dropout2d, device, memory_format=torch.channels_last)
 
-        with self.assertWarnsRegex(UserWarning, "Received a 2D input to dropout2d"):
+        with self.assertWarnsRegex(UserWarning, "Received a 5-D input to dropout2d"):
             nn.Dropout2d(p=0.5)(torch.rand(1, 2, 2, 2, 2, device=device))
 
-        with self.assertWarnsRegex(UserWarning, "Received a 2D input to dropout2d"):
+        with self.assertWarnsRegex(UserWarning, "Received a 2-D input to dropout2d"):
             nn.Dropout2d(p=0.5)(torch.rand(1, 2, device=device))
 
         # no batch dims
@@ -13837,10 +13837,10 @@ class TestNNDeviceType(NNTestCase):
         self._test_dropout_discontiguous(nn.Dropout3d, device)
         self._test_dropout_discontiguous(nn.Dropout3d, device, memory_format=torch.channels_last)
 
-        with self.assertWarnsRegex(UserWarning, "Received a 3D input to dropout3d"):
+        with self.assertWarnsRegex(UserWarning, "Received a 6-D input to dropout3d"):
             nn.Dropout3d(p=0.5)(torch.rand(1, 2, 2, 2, 2, 2, device=device))
 
-        with self.assertWarnsRegex(UserWarning, "Received a 3D input to dropout3d"):
+        with self.assertWarnsRegex(UserWarning, "Received a 3-D input to dropout3d"):
             nn.Dropout3d(p=0.5)(torch.rand(1, 2, 2, device=device))
 
         # no batch dims
