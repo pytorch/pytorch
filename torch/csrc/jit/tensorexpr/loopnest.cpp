@@ -1133,36 +1133,6 @@ BlockPtr findLowestContainingBlock(const std::vector<BufLoadOrStoreUse>& uses) {
   return b;
 }
 
-StmtPtr LoopNest::insertAllocFree(
-    StmtPtr stmt,
-    const c10::optional<std::vector<BufPtr>>& interm_bufs /* = c10::nullopt*/) {
-  std::vector<BufPtr> intermediate_bufs;
-  if (interm_bufs) {
-    intermediate_bufs = *interm_bufs;
-  } else {
-    intermediate_bufs = getIntermediateBufs();
-  }
-
-  if (intermediate_bufs.size() == 0ULL) {
-    return stmt;
-  }
-
-  BlockPtr b = to<Block>(stmt);
-  if (!b) {
-    b = alloc<Block>(std::vector<StmtPtr>({stmt}));
-  }
-
-  std::unordered_map<BufPtr, std::vector<BufLoadOrStoreUse>> uses =
-      findLoadOrStoreUses(stmt);
-  // Insert allocations and frees for temporary buffers at global scope.
-  for (BufPtr buf : intermediate_bufs) {
-    b->prepend_stmt(alloc<Allocate>(buf));
-    b->append_stmt(alloc<Free>(buf));
-  }
-
-  return b;
-}
-
 class StmtDeleter : public IRMutator {
  public:
   StmtDeleter(const std::unordered_set<StmtPtr>& targets) : targets_(targets) {}
@@ -1219,16 +1189,12 @@ void LoopNest::eliminateDeadStores() {
   root_stmt_ = root_stmt_->accept_mutator(&deleter);
 }
 
-void LoopNest::prepareForCodegen(
-    const c10::optional<std::vector<BufPtr>>& interm_bufs /*= c10::nullopt*/) {
+void LoopNest::prepareForCodegen() {
   // Expand reduction ops.
   ReductionExpander reduceExpander;
   root_stmt_ = reduceExpander.expand(root_stmt_);
 
   root_stmt_ = FlattenIndexes(root_stmt_);
-
-  // Add allocs and frees for intermediate buffers at the global level.
-  root_stmt_ = insertAllocFree(root_stmt_, interm_bufs);
 }
 
 namespace {
@@ -2056,7 +2022,7 @@ bool LoopNest::fuseLoops(const std::vector<ForPtr>& loops, ForPtr* fused) {
   return unsafeFuseLoops(loops, fused);
 }
 
-ForPtr findOuterFor(ForPtr a, ForPtr b) {
+ForPtr LoopNest::findOuterFor(ForPtr a, ForPtr b) {
   StmtPtr s = b; // guess b is the latter.
   while (s != nullptr) {
     if (s == a) {

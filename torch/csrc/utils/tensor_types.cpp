@@ -6,6 +6,7 @@
 #include <torch/csrc/Exceptions.h>
 #include <torch/csrc/tensor/python_tensor.h>
 #include <ATen/Context.h>
+#include <ATen/Formatting.h>
 
 #include <sstream>
 #include <unordered_map>
@@ -24,6 +25,7 @@ static const char* backend_to_string(const at::Backend& backend) {
     case at::Backend::SparseCUDA: return "torch.cuda.sparse";
     case at::Backend::SparseXPU: return "torch.xpu.sparse";
     case at::Backend::QuantizedCPU: return "torch.quantized";
+    case at::Backend::HPU: return "torch.hpu";
     default: AT_ERROR("Unimplemented backend ", backend);
   }
 }

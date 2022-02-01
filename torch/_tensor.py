@@ -700,8 +700,6 @@ class Tensor(torch._C._TensorBase):
     def __dir__(self):
         if has_torch_function_unary(self):
             return handle_torch_function(Tensor.__dir__, (self,), self)
-        if self.is_quantized:
-            warnings.warn('Only a small subset of methods are supported for quantized tensors.')
         tensor_methods = dir(self.__class__)
         tensor_methods.remove('volatile')  # deprecated
         attrs = list(self.__dict__.keys())
@@ -1171,7 +1169,7 @@ class Tensor(torch._C._TensorBase):
             raise TypeError('stream must be ``int`` or ``none``')
         elif stream is not None and stream != -1:
             if self.device.type == 'cuda':
-                stream = torch.cuda.streams.ExternalStream(stream)
+                stream = torch.cuda.ExternalStream(stream)
                 # Only synchronize on different streams
                 if stream != torch.cuda.current_stream:
                     event = torch.cuda.Event()

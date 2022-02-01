@@ -12,12 +12,17 @@ class AdamW(Optimizer):
             &\textbf{input}      : \gamma \text{(lr)}, \: \beta_1, \beta_2
                 \text{(betas)}, \: \theta_0 \text{(params)}, \: f(\theta) \text{(objective)},
                 \: \epsilon \text{ (epsilon)}                                                    \\
-            &\hspace{13mm}      \lambda \text{(weight decay)}, \:  amsgrad                       \\
+            &\hspace{13mm}      \lambda \text{(weight decay)},  \: \textit{amsgrad},
+                \: \textit{maximize}                                                             \\
             &\textbf{initialize} : m_0 \leftarrow 0 \text{ (first moment)}, v_0 \leftarrow 0
                 \text{ ( second moment)}, \: \widehat{v_0}^{max}\leftarrow 0              \\[-1.ex]
             &\rule{110mm}{0.4pt}                                                                 \\
             &\textbf{for} \: t=1 \: \textbf{to} \: \ldots \: \textbf{do}                         \\
-            &\hspace{5mm}g_t           \leftarrow   \nabla_{\theta} f_t (\theta_{t-1})           \\
+
+            &\hspace{5mm}\textbf{if} \: \textit{maximize}:                                       \\
+            &\hspace{10mm}g_t           \leftarrow   -\nabla_{\theta} f_t (\theta_{t-1})          \\
+            &\hspace{5mm}\textbf{else}                                                           \\
+            &\hspace{10mm}g_t           \leftarrow   \nabla_{\theta} f_t (\theta_{t-1})           \\
             &\hspace{5mm} \theta_t \leftarrow \theta_{t-1} - \gamma \lambda \theta_{t-1}         \\
             &\hspace{5mm}m_t           \leftarrow   \beta_1 m_{t-1} + (1 - \beta_1) g_t          \\
             &\hspace{5mm}v_t           \leftarrow   \beta_2 v_{t-1} + (1-\beta_2) g^2_t          \\
@@ -26,10 +31,10 @@ class AdamW(Optimizer):
             &\hspace{5mm}\textbf{if} \: amsgrad                                                  \\
             &\hspace{10mm}\widehat{v_t}^{max} \leftarrow \mathrm{max}(\widehat{v_t}^{max},
                 \widehat{v_t})                                                                   \\
-            &\hspace{10mm}\theta_t \leftarrow \theta_{t-1} - \gamma \widehat{m_t}/
+            &\hspace{10mm}\theta_t \leftarrow \theta_t - \gamma \widehat{m_t}/
                 \big(\sqrt{\widehat{v_t}^{max}} + \epsilon \big)                                 \\
             &\hspace{5mm}\textbf{else}                                                           \\
-            &\hspace{10mm}\theta_t \leftarrow \theta_{t-1} - \gamma \widehat{m_t}/
+            &\hspace{10mm}\theta_t \leftarrow \theta_t - \gamma \widehat{m_t}/
                 \big(\sqrt{\widehat{v_t}} + \epsilon \big)                                       \\
             &\rule{110mm}{0.4pt}                                                          \\[-1.ex]
             &\bf{return} \:  \theta_t                                                     \\[-1.ex]
@@ -50,6 +55,8 @@ class AdamW(Optimizer):
         amsgrad (boolean, optional): whether to use the AMSGrad variant of this
             algorithm from the paper `On the Convergence of Adam and Beyond`_
             (default: False)
+        maximize (bool, optional): maximize the params based on the objective, instead of
+            minimizing (default: False)
 
     .. _Decoupled Weight Decay Regularization:
         https://arxiv.org/abs/1711.05101
@@ -58,7 +65,7 @@ class AdamW(Optimizer):
     """
 
     def __init__(self, params, lr=1e-3, betas=(0.9, 0.999), eps=1e-8,
-                 weight_decay=1e-2, amsgrad=False):
+                 weight_decay=1e-2, amsgrad=False, *, maximize: bool = False):
         if not 0.0 <= lr:
             raise ValueError("Invalid learning rate: {}".format(lr))
         if not 0.0 <= eps:
@@ -70,13 +77,14 @@ class AdamW(Optimizer):
         if not 0.0 <= weight_decay:
             raise ValueError("Invalid weight_decay value: {}".format(weight_decay))
         defaults = dict(lr=lr, betas=betas, eps=eps,
-                        weight_decay=weight_decay, amsgrad=amsgrad)
+                        weight_decay=weight_decay, amsgrad=amsgrad, maximize=maximize)
         super(AdamW, self).__init__(params, defaults)
 
     def __setstate__(self, state):
         super(AdamW, self).__setstate__(state)
         for group in self.param_groups:
             group.setdefault('amsgrad', False)
+            group.setdefault('maximize', False)
 
     @torch.no_grad()
     def step(self, closure=None):
@@ -145,6 +153,7 @@ class AdamW(Optimizer):
                     beta2=beta2,
                     lr=group['lr'],
                     weight_decay=group['weight_decay'],
-                    eps=group['eps'])
+                    eps=group['eps'],
+                    maximize=group['maximize'])
 
         return loss

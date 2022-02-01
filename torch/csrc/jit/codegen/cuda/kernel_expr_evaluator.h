@@ -2,7 +2,7 @@
 #pragma once
 
 #include <c10/macros/Export.h>
-#include <torch/csrc/WindowsTorchApiMacro.h>
+
 #include <torch/csrc/jit/codegen/cuda/dispatch.h>
 #include <torch/csrc/jit/codegen/cuda/evaluator_common.h>
 #include <torch/csrc/jit/codegen/cuda/kernel_ir.h>

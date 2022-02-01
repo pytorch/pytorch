@@ -14,9 +14,9 @@ install_protobuf_317() {
 
   curl -LO "https://github.com/protocolbuffers/protobuf/releases/download/v3.17.3/protobuf-all-3.17.3.tar.gz"
   tar -xvz -C "$pb_dir" --strip-components 1 -f protobuf-all-3.17.3.tar.gz
-  # -j2 to balance memory usage and speed.
+  # -j6 to balance memory usage and speed.
   # naked `-j` seems to use too much memory.
-  pushd "$pb_dir" && ./configure && make -j2 && make -j2 check && sudo make -j2 install && sudo ldconfig
+  pushd "$pb_dir" && ./configure && make -j6 && make -j6 check && sudo make -j6 install && sudo ldconfig
   popd
   rm -rf $pb_dir
 }

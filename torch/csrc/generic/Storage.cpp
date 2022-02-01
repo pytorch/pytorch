@@ -4,15 +4,13 @@
 
 PyObject *THPStorageClass = nullptr;
 
-PyObject * THPStorage_(New)(c10::StorageImpl *ptr)
+PyObject * THPStorage_(New)(c10::intrusive_ptr<c10::StorageImpl> ptr)
 {
   AT_ASSERT(ptr);
   PyTypeObject *type = (PyTypeObject *)THPStorageClass;
   PyObject *obj = type->tp_alloc(type, 0);
   if (obj) {
-    ((THPStorage *)obj)->cdata = ptr;
-  } else {
-    c10::raw::intrusive_ptr::decref(ptr);
+    ((THPStorage *)obj)->cdata = ptr.release();
   }
   return obj;
 }
@@ -171,7 +169,7 @@ static PyObject * THPStorage_(get)(THPStorage *self, PyObject *index)
 
     at::StorageImpl* old_storage = self->cdata;
     c10::raw::intrusive_ptr::incref(old_storage);
-    at::Storage new_storage(c10::make_intrusive<at::StorageImpl>(
+    auto new_storage = c10::make_intrusive<at::StorageImpl>(
         c10::StorageImpl::use_byte_size_t(),
 #ifdef THQUANTIZED
         slicelength * sizeof(quantized_t),
@@ -186,9 +184,9 @@ static PyObject * THPStorage_(get)(THPStorage *self, PyObject *index)
             },
             old_storage->device()),
         old_storage->allocator(),
-        /* resizable */ false));
+        /* resizable */ false);
 
-    PyObject *_ret = THPStorage_(New)(new_storage.unsafeReleaseStorageImpl());
+    PyObject *_ret = THPStorage_(New)(std::move(new_storage));
     return _ret;
   }
   PyErr_Format(PyExc_TypeError, "can't index a " THPStorageStr " with %s",

@@ -504,7 +504,7 @@ void OptInConstDispatch::unhandled(const Statement* stmt) {
     TORCH_INTERNAL_ASSERT(
         false, "Handle not overriden for ", stmt->getValType().value(), ".");
   } else {
-    TORCH_INTERNAL_ASSERT("Unrecognized statement type.");
+    TORCH_INTERNAL_ASSERT(false, "Unrecognized statement type.");
   }
 }
 
@@ -516,7 +516,7 @@ void OptInDispatch::unhandled(Statement* stmt) {
     TORCH_INTERNAL_ASSERT(
         false, "Handle not overriden for ", stmt->getValType().value(), ".");
   } else {
-    TORCH_INTERNAL_ASSERT("Unrecognized statement type.");
+    TORCH_INTERNAL_ASSERT(false, "Unrecognized statement type.");
   }
 }
 

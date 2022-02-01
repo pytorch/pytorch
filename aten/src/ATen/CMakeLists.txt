@@ -65,6 +65,7 @@ file(GLOB cuda_nvrtc_stub_cpp "cuda/nvrtc_stub/*.cpp")
 file(GLOB cuda_cu "cuda/*.cu" "cuda/detail/*.cu")
 file(GLOB cudnn_h "cudnn/*.h" "cudnn/*.cuh")
 file(GLOB cudnn_cpp "cudnn/*.cpp")
+file(GLOB ops_h "ops/*.h")
 
 file(GLOB hip_h "hip/*.h" "hip/detail/*.h" "hip/*.cuh" "hip/detail/*.cuh" "hip/impl/*.h")
 file(GLOB hip_cpp "hip/*.cpp" "hip/detail/*.cpp" "hip/impl/*.cpp")
@@ -149,7 +150,6 @@ if(BUILD_LITE_INTERPRETER)
   append_filelist("jit_core_sources" all_cpu_cpp)
   append_filelist("aten_cpu_source_non_codegen_list" all_cpu_cpp)
   append_filelist("aten_native_source_non_codegen_list" all_cpu_cpp)
-  list(APPEND all_cpu_cpp ${Aten_TH_AVX_extra_src})
 else()
   set(
     all_cpu_cpp ${base_cpp} ${ATen_CORE_SRCS} ${native_cpp}
@@ -489,6 +489,8 @@ foreach(HEADER ${core_generated_headers})
   install(FILES ${HEADER} DESTINATION ${AT_INSTALL_INCLUDE_DIR}/ATen/core)
 endforeach()
 
+install(FILES ${ops_h} ${ops_generated_headers}
+  DESTINATION ${AT_INSTALL_INCLUDE_DIR}/ATen/ops)
 install(FILES ${CMAKE_BINARY_DIR}/aten/src/ATen/Declarations.yaml
   DESTINATION ${AT_INSTALL_SHARE_DIR}/ATen)
 

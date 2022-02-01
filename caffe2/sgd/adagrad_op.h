@@ -39,7 +39,7 @@ void adagrad_update_output_effective_lr(
     const float* lr,
     Context* /*context*/,
     float weight_decay = 0.f) {
-  for (auto i = 0; i < N; ++i) {
+  for (const auto i : c10::irange(N)) {
     float grad = std::fma(weight_decay, paramIn[i], gradIn[i]);
     float moment = momentOut[i] = decay * momentIn[i] + grad * grad;
     float effective_lr = effectiveLROut[i] =
@@ -63,7 +63,7 @@ void adagrad_update_output_effective_lr_and_update(
     const float* lr,
     Context* /*context*/,
     float weight_decay = 0.f) {
-  for (auto i = 0; i < N; ++i) {
+  for (const auto i : c10::irange(N)) {
     float grad = std::fma(weight_decay, paramIn[i], gradIn[i]);
     float moment = momentOut[i] = decay * momentIn[i] + grad * grad;
     float effective_lr = effectiveLROut[i] =
@@ -300,7 +300,7 @@ class SparseAdagradOp final : public Operator<CPUContext> {
     const auto* momentIn = Input(MOMENT_1).template data<float>();
 
     std::vector<float> grad(block_size);
-    for (auto i = 0; i < n; ++i) {
+    for (const auto i : c10::irange(n)) {
       auto idx = indices[i];
       auto offsetI = i * block_size;
       auto offsetIdx = idx * block_size;
@@ -504,7 +504,7 @@ class RowWiseSparseAdagradOp final : public Operator<Context> {
 #else
     VLOG(1) << "using plain adagrad updates in RowWiseSparseAdagradOp";
 
-    for (auto i = 0; i < n; ++i) {
+    for (const auto i : c10::irange(n)) {
       auto idx = indices[i];
       float freq = (counter_halflife_ > 0 && count[idx] > 0)
           ? counter_halflife_ / count[idx]
@@ -542,13 +542,13 @@ class RowWiseSparseAdagradOp final : public Operator<Context> {
         const float* g = gradIn + offsetI;
         float* h = moment + idx;
         float hs = 0.;
-        for (auto j = 0; j < block_size; ++j) {
+        for (const auto j : c10::irange(block_size)) {
           float gj = std::fma(weight_decay_ * freq, w[j], g[j]);
           hs += gj * gj;
         }
         float hi = h[0] = h[0] + hs / block_size;
         float step = lr[0] / (std::sqrt(hi) + epsilon_);
-        for (auto j = 0; j < block_size; ++j) {
+        for (const auto j : c10::irange(block_size)) {
           float gj = std::fma(weight_decay_ * freq, w[j], g[j]);
           w[j] = w[j] + gj * step;
         }
