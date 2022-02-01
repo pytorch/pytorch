@@ -837,18 +837,13 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   bool is_sparse() const {
     // NB: This method is not virtual and avoid dispatches for performance
     // reasons.
-    constexpr auto sparse_ks = DispatchKeySet(DispatchKey::Sparse);
-    return key_set_.has_all(sparse_ks);
+    return key_set_.has_all(c10::sparse_ks);
   }
 
   // Whether a tensor is sparse COO or not. Use is_sparse_csr for checking CSR
   // format.
   bool is_sparse_csr() const {
-    constexpr auto sparse_csr_bits_ks = DispatchKeySet({
-      DispatchKey::SparseCsrCPU,
-      DispatchKey::SparseCsrCUDA
-    });
-    return key_set_.has_any(sparse_csr_bits_ks);
+    return key_set_.has_any(c10::sparse_csr_ks);
   }
 
   bool is_quantized() const {
@@ -922,8 +917,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   }
 
   bool is_mkldnn() const {
-    constexpr auto mkldnn_ks = DispatchKeySet(DispatchKey::MkldnnCPU);
-    return key_set_.has_all(mkldnn_ks);
+    return key_set_.has_all(c10::mkldnn_ks);
   }
 
   bool is_vulkan() const {
@@ -985,12 +979,8 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     // strided case first.
     // This keyset must also be kept in sync with the logic in
     // is_sparse() / is_sparse_csr() / is_mkldnn()
-    constexpr auto sparse_and_sparsecsr_and_mkldnn_ks = DispatchKeySet({
-      DispatchKey::Sparse,
-      DispatchKey::SparseCsrCPU,
-      DispatchKey::SparseCsrCUDA,
-      DispatchKey::MkldnnCPU
-    });
+    constexpr auto sparse_and_sparsecsr_and_mkldnn_ks =
+      c10::sparse_ks | c10::sparse_csr_ks | c10::mkldnn_ks;
     if (!key_set_.has_any(sparse_and_sparsecsr_and_mkldnn_ks)) {
       return kStrided;
     } else if (is_sparse()) {
@@ -1498,17 +1488,15 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   }
 
   void set_python_dispatch(bool k) {
-    constexpr auto python_ks = DispatchKeySet(DispatchKey::Python);
     if (k) {
-      key_set_ = key_set_.add(python_ks);
+      key_set_ = key_set_.add(c10::python_ks);
     } else {
-      key_set_ = key_set_ - python_ks;
+      key_set_ = key_set_ - c10::python_ks;
     }
   }
 
   bool is_python_dispatch() const {
-    constexpr auto python_ks = DispatchKeySet(DispatchKey::Python);
-    return key_set_.has_all(python_ks);
+    return key_set_.has_all(c10::python_ks);
   }
 
   /**

@@ -122,6 +122,12 @@ offsetsAndMasks() {
 //
 //
 // (3) "Alias" keys
+// See Note [Alias Dispatch Keys]
+//
+// Final note: for anyone making future changes to the Dispatcher + DispatchKeySet internals,
+// there's a closed PR with a basic python-implementation of the Dispatcher that
+// might be useful in quickly testing out and validating changes.
+// See it at https://github.com/pytorch/pytorch/pull/68743
 
 // An undefined tensor is one with an empty tensor type set.
 class DispatchKeySet final {
@@ -195,11 +201,12 @@ class DispatchKeySet final {
 
   }
 
-  explicit constexpr DispatchKeySet(std::initializer_list<DispatchKey> ks)
-      : repr_(0) {
+  constexpr uint64_t keys_to_repr(std::initializer_list<DispatchKey> ks) {
+    uint64_t repr = 0;
     for (auto k : ks) {
-      repr_ |= DispatchKeySet(k).repr_;
+      repr |= DispatchKeySet(k).repr_;
     }
+    return repr;
   }
 
   constexpr uint64_t backend_bits_to_repr(std::initializer_list<BackendComponent> ks) {
@@ -209,6 +216,9 @@ class DispatchKeySet final {
     }
     return repr;
   }
+
+  explicit constexpr DispatchKeySet(std::initializer_list<DispatchKey> ks)
+      : repr_(keys_to_repr(ks)) {}
 
   explicit constexpr DispatchKeySet(std::initializer_list<BackendComponent> ks)
       // Note: for some reason, putting this logic directly in the constructor
@@ -418,18 +428,18 @@ class DispatchKeySet final {
     // final key value should be the last DispatchKey
     static const uint8_t end_iter_key_val = num_functionality_keys;
 
-    // functionality_idx_ will iterate through all functionality bits.
-    // backend_idx_ will iterate through all backend bits.
+    // current_dispatchkey_idx_ will iterate through all functionality bits.
+    // current_backendcomponent_idx_ will iterate through all backend bits.
     explicit iterator(
             const uint64_t* data_ptr,
-            uint8_t functionality_mask = num_backends,
-            uint8_t backend_mask = 0)
+            uint8_t next_functionality = num_backends,
+            uint8_t next_backend = 0)
         : data_ptr_(data_ptr),
-          functionality_mask_(functionality_mask),
-          backend_mask_(backend_mask),
+          next_functionality_(next_functionality),
+          next_backend_(next_backend),
           // These are in an invalid state at construction time, and set by the first increment call
-          functionality_idx_(end_iter_key_val),
-          backend_idx_(end_iter_key_val) {
+          current_dispatchkey_idx_(end_iter_key_val),
+          current_backendcomponent_idx_(end_iter_key_val) {
       // Go to the first key in the set
       ++(*this);
     }
@@ -443,26 +453,26 @@ class DispatchKeySet final {
     }
 
     bool operator==(const self_type& rhs) const {
-      return functionality_mask_ == rhs.functionality_mask_ &&
-             functionality_idx_ == rhs.functionality_idx_ &&
-             backend_mask_ == rhs.backend_mask_ &&
-             backend_idx_ == rhs.backend_idx_;
+      return next_functionality_ == rhs.next_functionality_ &&
+             current_dispatchkey_idx_ == rhs.current_dispatchkey_idx_ &&
+             next_backend_ == rhs.next_backend_ &&
+             current_backendcomponent_idx_ == rhs.current_backendcomponent_idx_;
     }
     bool operator!=(const self_type& rhs) const {
-      return functionality_mask_ != rhs.functionality_mask_ ||
-             functionality_idx_ != rhs.functionality_idx_ ||
-             backend_mask_ != rhs.backend_mask_ ||
-             backend_idx_ != rhs.backend_idx_;
+      return next_functionality_ != rhs.next_functionality_ ||
+             current_dispatchkey_idx_ != rhs.current_dispatchkey_idx_ ||
+             next_backend_ != rhs.next_backend_ ||
+             current_backendcomponent_idx_ != rhs.current_backendcomponent_idx_;
     }
     DispatchKey operator*() const {
-      auto functionality_key = static_cast<DispatchKey>(functionality_idx_);
+      auto functionality_key = static_cast<DispatchKey>(current_dispatchkey_idx_);
       if (isPerBackendFunctionalityKey(functionality_key)) {
-         auto next_key = toRuntimePerBackendFunctionalityKey(functionality_key, static_cast<BackendComponent>(backend_idx_));
+         auto next_key = toRuntimePerBackendFunctionalityKey(functionality_key, static_cast<BackendComponent>(current_backendcomponent_idx_));
          // We expect all of the Dense, Sparse, Quantized, and Autograd keys to be ordered the same way
          // with respect to their backends
-         TORCH_INTERNAL_ASSERT(toBackendComponent(next_key) == static_cast<BackendComponent>(backend_idx_),
+         TORCH_INTERNAL_ASSERT(toBackendComponent(next_key) == static_cast<BackendComponent>(current_backendcomponent_idx_),
            "Tried to map functionality key ", toString(functionality_key), " and backend bit ",
-           toString(static_cast<BackendComponent>(backend_idx_)), " to a runtime key, but ended up with ", toString(next_key),
+           toString(static_cast<BackendComponent>(current_backendcomponent_idx_)), " to a runtime key, but ended up with ", toString(next_key),
            ". This can happen if the order of the backend dispatch keys in DispatchKey.h isn't consistent.",
            " Please double check that enum for inconsistencies.");
          return next_key;
@@ -473,10 +483,10 @@ class DispatchKeySet final {
 
    private:
     const uint64_t* data_ptr_;
-    uint8_t functionality_mask_;
-    uint8_t backend_mask_;
-    uint8_t functionality_idx_;
-    uint8_t backend_idx_;
+    uint8_t next_functionality_;
+    uint8_t next_backend_;
+    uint8_t current_dispatchkey_idx_;
+    uint8_t current_backendcomponent_idx_;
 
   };
 
@@ -538,6 +548,17 @@ constexpr DispatchKeySet default_excluded_set = DispatchKeySet({
 
 constexpr DispatchKeySet autograd_dispatch_keyset_with_ADInplaceOrView =
         autograd_dispatch_keyset | DispatchKeySet(DispatchKey::ADInplaceOrView);
+
+constexpr DispatchKeySet python_ks = DispatchKeySet(DispatchKey::Python);
+
+constexpr DispatchKeySet sparse_ks = DispatchKeySet(DispatchKey::Sparse);
+
+constexpr DispatchKeySet sparse_csr_ks = DispatchKeySet({
+      DispatchKey::SparseCsrCPU,
+      DispatchKey::SparseCsrCUDA
+    });
+
+constexpr DispatchKeySet mkldnn_ks = DispatchKeySet(DispatchKey::MkldnnCPU);
 
 // backend dispatch keys that map to DispatchKey::AutogradOther
 // NB: keys in this set also get associated with CompositeImplicitAutograd

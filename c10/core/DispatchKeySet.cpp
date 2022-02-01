@@ -120,68 +120,68 @@ std::ostream& operator<<(std::ostream& os, DispatchKeySet ts) {
 }
 
 DispatchKeySet::iterator& DispatchKeySet::iterator::operator++() {
-      TORCH_INTERNAL_ASSERT(functionality_mask_ >= num_backends);
-      TORCH_INTERNAL_ASSERT(functionality_mask_ <= iterator::end_iter_mask_val);
-      TORCH_INTERNAL_ASSERT(backend_mask_ <= num_backends);
+      TORCH_INTERNAL_ASSERT(next_functionality_ >= num_backends);
+      TORCH_INTERNAL_ASSERT(next_functionality_ <= iterator::end_iter_mask_val);
+      TORCH_INTERNAL_ASSERT(next_backend_ <= num_backends);
 
       // Create a masked version of the set representation to ignore previous
       // keys that we've iterated through.
-      uint64_t masked_functionality_bits = llvm::maskTrailingZeros<uint64_t>(functionality_mask_) & *data_ptr_;
-      uint64_t masked_backend_bits = llvm::maskTrailingZeros<uint64_t>(backend_mask_) & full_backend_mask & *data_ptr_;
+      uint64_t masked_functionality_bits = llvm::maskTrailingZeros<uint64_t>(next_functionality_) & *data_ptr_;
+      uint64_t masked_backend_bits = llvm::maskTrailingZeros<uint64_t>(next_backend_) & full_backend_mask & *data_ptr_;
 
       uint64_t first_functionality_idx = llvm::findFirstSet(masked_functionality_bits);
-      uint64_t first_backend_idx = llvm::findFirstSet(masked_backend_bits);
+      uint64_t first_backendcomponent_idx = llvm::findFirstSet(masked_backend_bits);
 
       // If there are no keys, set to end iterator value
       if (first_functionality_idx == std::numeric_limits<uint64_t>::max() ||
-          functionality_mask_ == iterator::end_iter_mask_val) {
+          next_functionality_ == iterator::end_iter_mask_val) {
         // Set up state to be the same as end()
-        functionality_mask_ = iterator::end_iter_mask_val;
-        functionality_idx_ = iterator::end_iter_key_val;
-        backend_mask_ = 0;
-        backend_idx_ = iterator::end_iter_key_val;
+        next_functionality_ = iterator::end_iter_mask_val;
+        current_dispatchkey_idx_ = iterator::end_iter_key_val;
+        next_backend_ = 0;
+        current_backendcomponent_idx_ = iterator::end_iter_key_val;
         return *this;
       }
 
       // The +1 is because of DispatchKey::Undefined and BackendComponent::InvalidBit
-      auto new_functionality_mask = first_functionality_idx + 1;
-      auto new_backend_idx = first_backend_idx + 1;
-      // and the -num_backends is because the first <num_backends> bits in the keyste are not Dispatch Keys.
-      auto new_functionality_idx = new_functionality_mask - num_backends;
+      auto new_next_functionality = first_functionality_idx + 1;
+      auto new_backendcomponent_idx = first_backendcomponent_idx + 1;
+      // and the -num_backends is because the first <num_backends> bits in the keyset are not Dispatch Keys.
+      auto next_dispatchkey_idx = new_next_functionality - num_backends;
 
       // If the current functionality bit is a per-backend bit, we need special handling
-      if (isPerBackendFunctionalityKey(static_cast<DispatchKey>(new_functionality_idx))) {
+      if (isPerBackendFunctionalityKey(static_cast<DispatchKey>(next_dispatchkey_idx))) {
         // case 1: if the current backend is undefined, then there is no valid backend instance
         // of this functionality key so we can skip it.
-        if (first_backend_idx == std::numeric_limits<uint64_t>::max()) {
+        if (first_backendcomponent_idx == std::numeric_limits<uint64_t>::max()) {
           // increment the functionality mask so we skip the current functionality bit on the next increment.
-          functionality_mask_ = new_functionality_mask;
+          next_functionality_ = new_next_functionality;
           ++(*this);
           return *this;
         }
 
         // Otherwise, at this point we know what the current backend and functionality bits are.
-        functionality_idx_ = new_functionality_idx;
-        backend_idx_ = new_backend_idx;
+        current_dispatchkey_idx_ = next_dispatchkey_idx;
+        current_backendcomponent_idx_ = new_backendcomponent_idx;
 
         // Next, we need to set up the masks for the next increment.
-        uint64_t next_backend_bits = llvm::maskTrailingZeros<uint64_t>(first_backend_idx + 1) & full_backend_mask & *data_ptr_;
-        uint64_t next_backend_idx = llvm::findFirstSet(next_backend_bits);
-        if (next_backend_idx == std::numeric_limits<uint64_t>::max()) {
+        uint64_t next_backendcomponent_bits = llvm::maskTrailingZeros<uint64_t>(first_backendcomponent_idx + 1) & full_backend_mask & *data_ptr_;
+        uint64_t next_backendcomponent_idx = llvm::findFirstSet(next_backendcomponent_bits);
+        if (next_backendcomponent_idx == std::numeric_limits<uint64_t>::max()) {
           // case 2: the current backend is valid, but there is not another backend in the keyset.
           // In this case, we need to bump the functionality mask and reset the backend mask for the next increment
-          functionality_mask_ = new_functionality_mask;
-          backend_mask_ = 0;
+          next_functionality_ = new_next_functionality;
+          next_backend_ = 0;
         } else {
           // case 3: we have another backend to iterate over. We want to iterate over the same functionality bit
           // next time, but a different backend bit.
-          backend_mask_ = first_backend_idx + 1;
+          next_backend_ = first_backendcomponent_idx + 1;
         }
       } else {
           // Functionality bits that aren't per backend are simpler to handle. We can ignore the backend bits.
-          TORCH_INTERNAL_ASSERT(backend_mask_ == 0);
-          functionality_idx_ = new_functionality_idx;
-          functionality_mask_ = new_functionality_mask;
+          TORCH_INTERNAL_ASSERT(next_backend_ == 0);
+          current_dispatchkey_idx_ = next_dispatchkey_idx;
+          next_functionality_ = new_next_functionality;
       }
       return *this;
     }
