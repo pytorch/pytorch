@@ -1,9 +1,10 @@
+import collections
 import enum
 import torch
 import warnings
 import inspect
 from sys import maxsize as maxsize
-from typing import Set
+from typing import Set, Union
 
 import torch.onnx
 # This import monkey-patches graph manipulation methods on Graph, used for the
@@ -314,27 +315,26 @@ def _slice_helper(g, input, axes, starts, ends, steps=None, dynamic_slice=False)
         from torch.onnx.symbolic_opset10 import _slice as _slice10
         return _slice10(g, input, axes, starts, ends, steps, dynamic_slice)
 
-_fp_tensor_types = set((torch.float16, torch.float32, torch.float64, torch.bfloat16))
-_fp_scalar_types = set(("Float", "Double", "Half", "BFloat16"))
-_bool_tensor_types = set((torch.bool,))
-_bool_scalar_types = set(("Bool",))
+_TypeGroup = collections.namedtuple("TypeGroup", ("tensor_types", "scalar_types"))
+_FPTypeGroup = _TypeGroup((torch.float16, torch.float32, torch.float64, torch.bfloat16), ("Float", "Double", "Half", "BFloat16"))
+_BoolTypeGroup = _TypeGroup((torch.bool,), ("Bool",))
 
-def _is_specific_type_group(value, tensor_types, scalar_types):
+def _is_in_type_group(value: Union[torch.Tensor, torch._C.Value], type_group: _TypeGroup) -> bool:
     if value is None:
         return False
     if isinstance(value, torch.Tensor):
-        return value.dtype in tensor_types
+        return value.dtype in type_group.tensor_types
     else:
         type = value.type().scalarType()
         if type is None:
             warnings.warn("Type cannot be inferred, which might cause exported graph to produce incorrect results.")
-        return type in scalar_types
+        return type in type_group.scalar_types
 
-def _is_fp(value):
-    return _is_specific_type_group(value, _fp_tensor_types, _fp_scalar_types)
+def _is_fp(value: Union[torch.Tensor, torch._C.Value]):
+    return _is_in_type_group(value, _FPTypeGroup)
 
-def _is_bool(value):
-    return _is_specific_type_group(value, _bool_tensor_types, _bool_scalar_types)
+def _is_bool(value: Union[torch.Tensor, torch._C.Value]):
+    return _is_in_type_group(value, _BoolTypeGroup)
 
 def _generate_wrapped_number(g, scalar):
     """
