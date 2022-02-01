@@ -56,7 +56,7 @@ except ImportError:
 # matches bfd8deac from resnet18-bfd8deac.pth
 HASH_REGEX = re.compile(r'-([a-f0-9]*)\.')
 
-_PREDEFINED_TRUSTED = ("facebookresearch", "facebookincubator", "pytorch", "fairinternal")
+_TRUSTED_REPO_PREFIXES = ("facebookresearch", "facebookincubator", "pytorch", "fairinternal")
 ENV_GITHUB_TOKEN = 'GITHUB_TOKEN'
 ENV_TORCH_HOME = 'TORCH_HOME'
 ENV_XDG_CACHE_HOME = 'XDG_CACHE_HOME'
@@ -236,7 +236,7 @@ def _check_repo(repo, trust_repo=None, calling_fn="load"):
     with open(filepath, 'r') as file:
         trusted_repos = tuple(line.strip() for line in file)
     is_trusted = any(repo == trusted_repo for trusted_repo in trusted_repos)
-    is_trusted = is_trusted or any(repo.startswith(trusted_repo) for trusted_repo in _PREDEFINED_TRUSTED)
+    is_trusted = is_trusted or any(repo.startswith(trusted_repo) for trusted_repo in _TRUSTED_REPO_PREFIXES)
 
     # to be deprecated
     if trust_repo is None:
