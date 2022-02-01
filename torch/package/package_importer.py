@@ -26,6 +26,8 @@ from ._package_unpickler import PackageUnpickler
 from .file_structure_representation import Directory, _create_directory_from_file_list
 from .glob_group import GlobPattern
 from .importer import Importer
+from ._zip_file import DefaultPackageZipFileReader, PackageZipFileReader
+from ._zip_file_torchscript import TorchScriptPackageZipFileReader
 
 
 class PackageImporter(Importer):
@@ -49,7 +51,7 @@ class PackageImporter(Importer):
 
     def __init__(
         self,
-        file_or_buffer: Union[str, torch._C.PyTorchFileReader, Path, BinaryIO],
+        file_or_buffer: Union[str, torch._C.PyTorchFileReader, PackageZipFileReader, Path, BinaryIO],
         module_allowed: Callable[[str], bool] = lambda module_name: True,
     ):
         """Open ``file_or_buffer`` for importing. This checks that the imported package only requires modules
@@ -67,17 +69,20 @@ class PackageImporter(Importer):
         """
         self.zip_reader: Any
         if isinstance(file_or_buffer, torch._C.PyTorchFileReader):
+            print("I am a PyTorchFileReader")
             self.filename = "<pytorch_file_reader>"
             self.zip_reader = file_or_buffer
         elif isinstance(file_or_buffer, (Path, str)):
+            print("I am a string/Path")
             self.filename = str(file_or_buffer)
             if not os.path.isdir(self.filename):
-                self.zip_reader = torch._C.PyTorchFileReader(self.filename)
+                self.zip_reader = TorchScriptPackageZipFileReader(self.filename)
             else:
                 self.zip_reader = DirectoryReader(self.filename)
         else:
+            print("I am a something wierd")
             self.filename = "<binary>"
-            self.zip_reader = torch._C.PyTorchFileReader(file_or_buffer)
+            self.zip_reader = TorchScriptPackageZipFileReader(file_or_buffer)
         self.root = _PackageNode(None)
         self.modules = {}
         self.extern_modules = self._read_extern()
