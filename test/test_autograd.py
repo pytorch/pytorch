@@ -4037,15 +4037,13 @@ class TestAutograd(TestCase):
 
         err_msg = "Jacobian computed with forward mode mismatch for output 0 with respect to input 1"
         for fast_mode, requires_grad in product([True, False], [True, False]):
-            print(f"fast_mode: {fast_mode}, requires_grad: {requires_grad}")
             # Test for all inputs and outputs being real
             x = torch.rand(2, dtype=torch.double, requires_grad=requires_grad)
             y = torch.rand(2, dtype=torch.double, requires_grad=requires_grad)
 
             kwargs = {"check_forward_ad": True, "fast_mode": fast_mode}
-            if not requires_grad:
-                kwargs["check_backward_ad"] = False
-                kwargs["check_batched_grad"] = False
+            kwargs["check_backward_ad"] = requires_grad
+            kwargs["check_batched_grad"] = requires_grad
 
             gradcheck(fn, (x, y), **kwargs)
             with self.assertRaisesRegex(RuntimeError, err_msg):
@@ -4097,7 +4095,7 @@ class TestAutograd(TestCase):
                 else:
                     return 2 * gI
 
-        for fast_mode, check_forward_ad, check_backward_ad, fwd_bad, bwd_bad, requires_grad in product(*([(True, False)]*6)):
+        for fast_mode, check_forward_ad, check_backward_ad, fwd_bad, bwd_bad, requires_grad in product(*([(True, False)] * 6)):
             if check_backward_ad and not requires_grad:
                 continue
 
@@ -4106,8 +4104,8 @@ class TestAutograd(TestCase):
 
             def run():
                 gradcheck(UserFn.apply, (x, fwd_bad, bwd_bad), check_forward_ad=check_forward_ad,
-                            check_backward_ad=check_backward_ad, check_undefined_grad=check_backward_ad,
-                            check_batched_grad=check_backward_ad, fast_mode=fast_mode)
+                          check_backward_ad=check_backward_ad, check_undefined_grad=True,
+                          check_batched_grad=check_backward_ad, fast_mode=fast_mode)
 
             x = torch.rand(2, dtype=torch.double, requires_grad=requires_grad)
 
