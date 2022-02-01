@@ -684,7 +684,6 @@ class OpInfo(object):
 
         self.supports_out = supports_out
         self.safe_casts_outputs = safe_casts_outputs
-
         self.decorators = (*decorators, *skips)
 
         # We run the sampling functions without tracking the gradiends of the creation of inputs
@@ -10756,17 +10755,9 @@ op_db: List[OpInfo] = [
            dtypes=floating_types(),
            dtypesIfCPU=floating_types_and(torch.bfloat16),
            dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16),
-           decorators=(
-               # RuntimeError:
-               # adaptive_max_pool2d(Tensor input, int[2] output_size) -> (Tensor):
-               # Expected a value of type 'List[int]' for argument 'output_size' but
-               # instead found type 'Tuple[NoneType, int]'. :
-               #   File "<string>", line 3
-               # def the_method(i0):
-               #     return torch.nn.functional.adaptive_max_pool2d(i0, (None, 7))
-               #            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ <--- HERE
-               DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
-           ),
+            # Expected a value of type 'List[int]' for argument 'output_size' but
+            # instead found type 'Tuple[NoneType, int]'. :
+           supports_scripting=False,
            supports_out=False,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
@@ -10777,19 +10768,9 @@ op_db: List[OpInfo] = [
     OpInfo('nn.functional.adaptive_max_pool3d',
            dtypes=floating_types(),
            dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16),
-           decorators=(
-               # RuntimeError:
-               # adaptive_max_pool3d(Tensor input, int[3] output_size) -> (Tensor):
-               # Expected a value of type 'List[int]' for argument 'output_size' but
-               # instead found type 'Tuple[NoneType, NoneType, NoneType]'. :
-               #   File "<string>", line 3
-               #
-               # def the_method(i0):
-               #     return torch.nn.functional.adaptive_max_pool3d(i0, (None, None, None))
-               #            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ <--- HERE
-               #
-               DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
-           ),
+           supports_scripting=False,
+            # Expected a value of type 'List[int]' for argument 'output_size' but
+            # instead found type 'Tuple[NoneType, NoneType, NoneType]'. :
            supports_out=False,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
@@ -12141,15 +12122,8 @@ op_db: List[OpInfo] = [
                     dtypes=all_types_and_complex_and(torch.bfloat16, torch.half, torch.bool),
                     sample_inputs_func=sample_inputs_rbinops,
                     supports_out=False,
-                    skips=(
-                        # RuntimeError:
-                        # object has no attribute __radd__:
-                        #   File "<string>", line 3
-                        # def the_method(i0):
-                        #     return torch.__radd__(i0, 3.14j)
-                        #            ~~~~~~~~~~~~~~ <--- HERE
-                        DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit',),
-                    ),
+                    supports_scripting = False,
+                    # object has no attribute __radd__:
                     assert_autodiffed=True,
                     supports_forward_ad=True,
                     supports_fwgrad_bwgrad=True,
@@ -12161,15 +12135,8 @@ op_db: List[OpInfo] = [
                     lhs_make_tensor_kwargs={'exclude_zero': True},
                     sample_inputs_func=sample_inputs_rbinops,
                     supports_out=False,
-                    skips=(
-                        # RuntimeError:
-                        # object has no attribute __rdiv__:
-                        #   File "<string>", line 3
-                        # def the_method(i0):
-                        #     return torch.__rdiv__(i0, 3.14j)
-                        #            ~~~~~~~~~~~~~~ <--- HERE
-                        DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit',),
-                    ),
+                    supports_scripting=False,
+                    # object has no attribute __rdiv__:
                     supports_forward_ad=True,
                     supports_fwgrad_bwgrad=True,
                     assert_autodiffed=True,
@@ -12179,15 +12146,8 @@ op_db: List[OpInfo] = [
                     dtypes=all_types_and_complex_and(torch.bfloat16, torch.half, torch.bool),
                     sample_inputs_func=sample_inputs_rbinops,
                     supports_out=False,
-                    skips=(
-                        # RuntimeError:
-                        # object has no attribute __rmul__:
-                        #   File "<string>", line 3
-                        # def the_method(i0):
-                        #     return torch.__rmul__(i0, 3.14j)
-                        #            ~~~~~~~~~~~~~~ <--- HERE
-                        DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit',),
-                    ),
+                    # object has no attribute __rmul__
+                    supports_scripting=False,
                     assert_autodiffed=True,
                     supports_forward_ad=True,
                     supports_fwgrad_bwgrad=True,
@@ -12240,32 +12200,21 @@ op_db: List[OpInfo] = [
                DecorateInfo(toleranceOverride({torch.float32: tol(atol=1e-05, rtol=1.2e-03)}),
                             'TestCommon', 'test_noncontiguous_samples',
                             device_type='cuda', active_if=TEST_WITH_ROCM)),
-           skips=(
-               # RuntimeError:
-               # object has no attribute __rmatmul__:
-               #   File "<string>", line 3
-               # def the_method(i0, i1):
-               #     return torch.__rmatmul__(i0, i1)
-               #            ~~~~~~~~~~~~~~ <--- HERE
-               DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit',),
-           )),
+           # object has no attribute __rmatmul__:
+           supports_scripting=False,
+           ),
     BinaryUfuncInfo('__rmod__',
                     op=torch.Tensor.__rmod__,
                     dtypes=floating_types_and(torch.bfloat16, torch.half,),
                     dtypesIfCUDA=all_types_and(torch.bfloat16, torch.half, torch.bool),
                     sample_inputs_func=sample_inputs_rbinops,
                     supports_out=False,
+                    # object has no attribute __rmod__:
+                    supports_scripting=False,
                     skips=(
-                        # RuntimeError:
-                        # object has no attribute __rmod__:
-                        #   File "<string>", line 3
-                        # def the_method(i0):
-                        #     return torch.__rmod__(i0, 3.14)
-                        #            ~~~~~~~~~~~~~~ <--- HERE
-                        DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit',),
                         # RuntimeError: "remainder_cuda" not implemented for 'Bool'
                         DecorateInfo(unittest.skip("Skipped!"), 'TestBinaryUfuncs',
-                                     dtypes=(torch.bool,))
+                                     dtypes=(torch.bool,)),
                     ),
                     # Support autograd after torch.remainder(Tensor, Tensor) supports
                     # autograd of the second argument.
@@ -12283,14 +12232,9 @@ op_db: List[OpInfo] = [
                     supports_out=False,
                     supports_forward_ad=True,
                     supports_fwgrad_bwgrad=True,
+                    # object has no attribute __rpow__:
+                    supports_scripting=False,
                     skips=(
-                        # RuntimeError:
-                        # object has no attribute __rpow__:
-                        #   File "<string>", line 3
-                        # def the_method(i0):
-                        #     return torch.__rpow__(i0, 3.14j)
-                        #            ~~~~~~~~~~~~~~ <--- HERE
-                        DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit',),
                         # RuntimeError: "pow_cuda" not implemented for 'Bool'
                         DecorateInfo(unittest.skip("Skipped!"), 'TestBinaryUfuncs',
                                      dtypes=(torch.bool,)),
@@ -12302,15 +12246,8 @@ op_db: List[OpInfo] = [
                     dtypes=all_types_and_complex_and(torch.bfloat16, torch.half),
                     sample_inputs_func=sample_inputs_rbinops,
                     supports_out=False,
-                    skips=(
-                        # RuntimeError:
-                        # object has no attribute __rsub__:
-                        #   File "<string>", line 3
-                        # def the_method(i0):
-                        #     return torch.__rsub__(i0, 3.14j)
-                        #            ~~~~~~~~~~~~~~ <--- HERE
-                        DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit',),
-                    ),
+                    # object has no attribute __rsub__:
+                    supports_scripting=False,
                     assert_autodiffed=True,
                     autodiff_nonfusible_nodes=['aten::rsub'],),
     BinaryUfuncInfo('rsub',
