@@ -61,7 +61,6 @@ Features described in this documentation are classified by release status:
    torch.distributed <distributed>
    torch.distributed.algorithms.join <distributed.algorithms.join>
    torch.distributed.elastic <distributed.elastic>
-   torch.distributed.fsdp <distributed.fsdp>
    torch.distributed.optim <distributed.optim>
    torch.distributions <distributions>
    torch.fft <fft>
@@ -80,6 +79,7 @@ Features described in this documentation are classified by release status:
    optim
    complex_numbers
    ddp_comm_hooks
+   fsdp
    pipeline
    quantization
    rpc
