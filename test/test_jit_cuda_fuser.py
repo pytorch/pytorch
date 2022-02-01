@@ -473,6 +473,7 @@ class TestCudaFuser(JitTestCase):
     def _unary_test_helper(self, operation, dtype, random_data):
         gradient_check = (dtype == torch.float64) and random_data
         shape = (8, 7)
+        torch.cuda.manual_seed_all(211)
 
         # need additional def of t for boolean ops
         def t(x: torch.Tensor, y: torch.Tensor):
@@ -502,7 +503,7 @@ class TestCudaFuser(JitTestCase):
         jit_o = t_jit(x, y)
         jit_o = t_jit(x, y)
         if gradient_check:
-            gradcheck(t_jit, [x, y])
+            gradcheck(t_jit, [x, y], nondet_tol=1e-5)
         elif dtype in self.support_tensor_dtypes:
             self.assertGraphContains(t_jit.graph_for(x, y), FUSION_GUARD)
         o = t(x, y)
