@@ -44,7 +44,7 @@ std::string opTypeToString(OpType opType) {
     case OpType::_REDUCE_SCATTER_BASE:
       return "_REDUCE_SCATTER_BASE";
     default:
-      TORCH_INTERNAL_ASSERT("Unknown op type!");
+      TORCH_INTERNAL_ASSERT(false, "Unknown op type!");
   }
   return "UNKNOWN";
 }
