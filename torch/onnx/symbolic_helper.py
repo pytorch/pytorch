@@ -314,16 +314,27 @@ def _slice_helper(g, input, axes, starts, ends, steps=None, dynamic_slice=False)
         from torch.onnx.symbolic_opset10 import _slice as _slice10
         return _slice10(g, input, axes, starts, ends, steps, dynamic_slice)
 
+_fp_tensor_types = set((torch.float16, torch.float32, torch.float64, torch.bfloat16))
+_fp_scalar_types = set(("Float", "Double", "Half", "BFloat16"))
+_bool_tensor_types = set((torch.bool))
+_bool_scalar_types = set(("Bool"))
+
+def _is_specific_type_group(value, tensor_types, scalar_types):
+    if value is None:
+      return False
+    if isinstance(value, torch.Tensor):
+        return value.dtype in tensor_types
+    else:
+        type = value.type().scalarType()
+        if type is None:
+            warnings.warn("Type cannot be inferred, which might cause exported graph to produce incorrect results.")
+        return type in scalar_types
+
 def _is_fp(value):
-    if value:
-        if isinstance(value, torch.Tensor):
-            return value.dtype in (torch.float16, torch.float32, torch.float64, torch.bfloat16)
-        else:
-            type = value.type().scalarType()
-            if type is None:
-                warnings.warn("Type cannot be inferred, which might cause exported graph to produce incorrect results.")
-            return type in ("Float", "Double", "Half", "BFloat16")
-    return False
+    return _is_specific_type_group(value, _fp_tensor_types, _fp_scalar_types)
+
+def _is_bool(value):
+    return _is_specific_type_group(value, _bool_tensor_types, _bool_scalar_types)
 
 def _generate_wrapped_number(g, scalar):
     """
