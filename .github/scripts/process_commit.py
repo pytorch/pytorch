@@ -77,7 +77,7 @@ def post_pytorch_comment(pr_number: int, merger: str) -> Any:
     represent the kind of PR it is (non-user visible, new feature, bug fix, perf improvement, etc).
     The list of valid labels can be found [here](https://github.com/pytorch/pytorch/labels?q=release+notes)
     for the 'release notes: ...' and [here](https://github.com/pytorch/pytorch/labels?q=topics) for the
-    'topics: ...'."""
+    'topics: ...'."""}
 
     response = requests.post(
         f"{PYTORCH_REPO}/issues/{pr_number}/comments",
