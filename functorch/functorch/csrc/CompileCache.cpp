@@ -182,8 +182,14 @@ public:
     for (int i = 0; i < numTensorArgs; ++i) {
       PyObject *arg = PyTuple_GET_ITEM(args, i);
       if (!THPVariable_Check(arg)) {
-        throw std::runtime_error("Encountered a non-tensor argument. Set up "
-                                 "static_argnums correctly.");
+        std::string dtype = Py_TYPE(arg)->tp_name;
+        std::string index = std::to_string(i);
+        throw std::runtime_error("Found an argument of type " + dtype +
+                                 " at index " + index +
+                                 ". Non-tensor arguments must be marked static."
+                                 " Please set the static_argnums correctly to "
+                                 "mark the argument at index " +
+                                 index + " static.");
       }
       tensorArgs[i] = THPVariable_Unpack(arg);
     }
