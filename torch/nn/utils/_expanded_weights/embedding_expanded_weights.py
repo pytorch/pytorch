@@ -1,7 +1,7 @@
 import torch
 import torch.nn.functional as F
 from .expanded_weights_impl import implements_per_sample_grads
-from .expanded_weights_utils import forward_helper, grad_if_exists, grad_if_exists_for_input
+from .expanded_weights_utils import forward_helper, set_grad_sample_if_exists, grad_if_exists_for_input
 from functools import partial
 
 @implements_per_sample_grads(F.embedding)
@@ -48,8 +48,9 @@ class EmbeddingPerSampleGrad(torch.autograd.Function):
 
         results = []
         results.append(grad_if_exists_for_input(input, partial(input_grad, padding_idx)))
-        results.append(grad_if_exists(weight, weight_per_sample_grad))
+        # weight doesn't compute batched gradients; no other arguments nor was_expanded are differentiable
+        results = results + [None] * (len(ctx.args) - 1)
 
-        # no other arguments nor was_expanded are differentiable
-        results = results + [None] * (len(ctx.args) - 2)
+        # set grad_sample field for weight with per sample gradients
+        set_grad_sample_if_exists(weight, weight_per_sample_grad)
         return tuple(results)

@@ -1,3 +1,5 @@
+# Owner(s): ["module: nn"]
+
 from functools import partial
 from itertools import product
 
@@ -9,7 +11,7 @@ from torch.testing._internal.common_nn import TestBase, module_tests, new_module
 from torch.testing._internal.common_utils import TestCase, freeze_rng_state, make_tensor, run_tests
 from torch.testing._internal.common_methods_invocations import SampleInput, op_db
 from torch.nn.utils._expanded_weights import ExpandedWeight
-from torch.nn.utils._expanded_weights.expanded_weights_utils import forward_helper, grad_if_exists, \
+from torch.nn.utils._expanded_weights.expanded_weights_utils import forward_helper, set_grad_sample_if_exists, \
     grad_if_exists_for_input, unpack_expanded_weight_or_tensor, sum_over_all_but_batch_and_last_n
 
 class TestContext:
@@ -63,31 +65,31 @@ class TestExpandedWeightHelperFunction(TestCase):
         with self.assertRaisesRegex(RuntimeError, r"Got single output but expected at least 4"):
             forward_helper(nn.functional.linear, (input, weight, bias), 4)
 
-    def test_grad_if_exists(self, device):
+    def test_set_grad_sample_if_exists(self, device):
         def test_fn(_):
             return True
 
         orig_weight = torch.randn(4, device=device, requires_grad=True)
         expanded_weight = ExpandedWeight(orig_weight, 3)
-        grad_if_exists(expanded_weight, test_fn)
+        set_grad_sample_if_exists(expanded_weight, test_fn)
         self.assertTrue(hasattr(orig_weight, 'grad_sample'))
         self.assertTrue(orig_weight.grad_sample)
 
         basic_tensor = torch.randn(4, device=device)
-        grad_if_exists(basic_tensor, test_fn)
+        set_grad_sample_if_exists(basic_tensor, test_fn)
         self.assertFalse(hasattr(basic_tensor, 'grad_sample'))
 
         non_tensor = 3
-        grad_if_exists(non_tensor, test_fn)
+        set_grad_sample_if_exists(non_tensor, test_fn)
         self.assertFalse(hasattr(non_tensor, 'grad_sample'))
 
-    def test_grad_if_exists_failure(self, device):
+    def test_set_grad_sample_if_exists_failure(self, device):
         def test_fn(_):
             return True
 
         grad_tensor = torch.randn(4, requires_grad=True, device=device)
         with self.assertRaisesRegex(RuntimeError, r"does not support a mixture of ExpandedWeight parameters and normal Parameters"):
-            grad_if_exists(grad_tensor, test_fn)
+            set_grad_sample_if_exists(grad_tensor, test_fn)
 
     def test_grad_if_exists_for_input(self, device):
         def test_fn():
@@ -252,7 +254,7 @@ class TestExpandedWeightFunctional(TestCase):
 
 
 class TestExpandedWeightModule(TestCase):
-    def _do_test(self, module, input):
+    def _do_test(self, module, input, atol=None):
         if sum(1 for _ in module.parameters()) == 0:  # for norms with affine=False
             return
         batch_size = input.shape[0]
@@ -274,9 +276,12 @@ class TestExpandedWeightModule(TestCase):
                 expected_res += res
             expected_grads = tuple(torch.stack(grad) for grad in zip(*expected_grads))
         self.assertEqual(actual_res, expected_res)
-        assert [torch.allclose(actual, expected) for (actual, expected) in zip(actual_grads, expected_grads)]
+        if atol is not None:
+            assert [torch.allclose(actual, expected, atol=atol) for (actual, expected) in zip(actual_grads, expected_grads)]
+        else:
+            assert [torch.allclose(actual, expected) for (actual, expected) in zip(actual_grads, expected_grads)]
 
-    def _do_test_multi_input(self, module, input):
+    def _do_test_multi_input(self, module, input, atol=None):
         if sum(1 for _ in module.parameters()) == 0:  # for norms with affine=False
             return
         batch_size = input.shape[0]
@@ -298,7 +303,10 @@ class TestExpandedWeightModule(TestCase):
                 res = module(input[i % batch_size].unsqueeze(0)).sum()
                 expected_grads.append(torch.autograd.grad(res, module.parameters(), torch.ones_like(res)))
             expected_grads = tuple(torch.stack(grad) for grad in zip(*expected_grads))
-        assert [torch.allclose(actual, expected) for (actual, expected) in zip(actual_grads, expected_grads)]
+        if atol is not None:
+            assert [torch.allclose(actual, expected, atol=atol) for (actual, expected) in zip(actual_grads, expected_grads)]
+        else:
+            assert [torch.allclose(actual, expected) for (actual, expected) in zip(actual_grads, expected_grads)]
 
 class ContextManagerTests(TestBase):
     def __init__(self, *args, **kwargs):
@@ -308,23 +316,23 @@ class ContextManagerTests(TestBase):
     def constructor_args(self):
         return self._get_arg('constructor_args', False)
 
-    def test_context_manager(self, test_case):
+    def test_context_manager(self, test_case, atol=None):
         module = self.constructor(*self.constructor_args)
         input = self._get_input()
         if len(input.shape) == 0 or input.shape[0] == 0:
             return
         if self.constructor == torch.nn.Linear and len(input.shape) == 1:
             return
-        test_case._do_test(module, input)
+        test_case._do_test(module, input, atol=atol)
 
-    def test_context_manager_multiple_inputs(self, test_case):
+    def test_context_manager_multiple_inputs(self, test_case, atol=None):
         module = self.constructor(*self.constructor_args)
         input = self._get_input()
         if len(input.shape) == 0 or input.shape[0] == 0:
             return
         if self.constructor == torch.nn.Linear and len(input.shape) == 1:
             return
-        test_case._do_test_multi_input(module, input)
+        test_case._do_test_multi_input(module, input, atol=atol)
 
 # TODO: Once all of these use ModuleInfo, replace with ModuleInfo tests
 supported_modules = ['Linear', 'Conv1d', 'Conv2d', 'Conv3d', 'GroupNorm', 'LayerNorm', 'InstanceNorm', 'Embedding']
@@ -343,9 +351,13 @@ for test_param in supported_tests:
         raise RuntimeError('Found two tests with the same name: ' + test_name)
     if decorator is not None:
         fn = decorator(fn)
-    setattr(TestExpandedWeightModule, test_name, lambda self, test=test: test.test_context_manager(self))
-    setattr(TestExpandedWeightModule, test_name_multi_input, 
-            lambda self, test=test: test.test_context_manager_multiple_inputs(self))
+
+    atol = None
+    if test_name == "GroupNorm_2d_affine_large_feature":
+        atol = 1e-05
+    setattr(TestExpandedWeightModule, test_name, lambda self, test=test, atol=atol: test.test_context_manager(self, atol=atol))
+    setattr(TestExpandedWeightModule, test_name_multi_input,
+            lambda self, test=test, atol=atol: test.test_context_manager_multiple_inputs(self, atol=atol))
 
 # ------------- HELPER FUNCTIONS -----------------
 

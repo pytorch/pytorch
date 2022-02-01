@@ -1,7 +1,8 @@
 import torch
 import torch.nn.functional as F
 from .expanded_weights_impl import implements_per_sample_grads
-from .expanded_weights_utils import forward_helper, grad_if_exists, grad_if_exists_for_input, unpack_expanded_weight_or_tensor
+from .expanded_weights_utils import \
+    forward_helper, set_grad_sample_if_exists, grad_if_exists_for_input, unpack_expanded_weight_or_tensor
 
 @implements_per_sample_grads(F.group_norm)
 class GroupNormPerSampleGrad(torch.autograd.Function):
@@ -10,7 +11,7 @@ class GroupNormPerSampleGrad(torch.autograd.Function):
         output, expanded_args, aux_outputs = forward_helper(torch._group_norm_all_outputs, expanded_args, 1)
         ctx.args = expanded_args
         ctx.aux_outputs = aux_outputs
-        return output
+        return output[0]  # original function returns a single element, forward_helper returns a tuple
 
     @staticmethod
     def backward(ctx, grad_output):
@@ -32,10 +33,11 @@ class GroupNormPerSampleGrad(torch.autograd.Function):
 
         results = []
         results.append(grad_if_exists_for_input(input, input_grad))
-        results.append(None)  # for num_groups
-        results.append(grad_if_exists(weight,
-                                      lambda _: torch.einsum("ni...->ni", F.group_norm(input, num_groups, eps=eps) * grad_output)))
-        results.append(grad_if_exists(bias, lambda _: torch.einsum("ni...->ni", grad_output)))
+        # weight and bias don't compute batched gradients; no other arguments are differentiable
+        results = results + [None] * (len(ctx.args) - 1)
 
-        results = results + [None] * (len(ctx.args) - 3)
+        # set grad_sample field for weight and bias with per sample gradients
+        set_grad_sample_if_exists(weight,
+                                  lambda _: torch.einsum("ni...->ni", F.group_norm(input, num_groups, eps=eps) * grad_output))
+        set_grad_sample_if_exists(bias, lambda _: torch.einsum("ni...->ni", grad_output))
         return tuple(results)

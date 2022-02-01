@@ -2,8 +2,8 @@
 import torch
 import torch.nn.functional as F
 from .expanded_weights_impl import implements_per_sample_grads
-from .expanded_weights_utils import \
-    forward_helper, grad_if_exists, grad_if_exists_for_input, sum_over_all_but_batch_and_last_n, unpack_expanded_weight_or_tensor
+from .expanded_weights_utils import forward_helper, set_grad_sample_if_exists, \
+    grad_if_exists_for_input, sum_over_all_but_batch_and_last_n, unpack_expanded_weight_or_tensor
 
 @implements_per_sample_grads(F.layer_norm)
 class LayerNormPerSampleGrad(torch.autograd.Function):
@@ -17,7 +17,7 @@ class LayerNormPerSampleGrad(torch.autograd.Function):
         output, expanded_args, aux_outputs = forward_helper(torch.native_layer_norm, expanded_args, 1)
         ctx.args = expanded_args
         ctx.aux_outputs = aux_outputs
-        return output
+        return output[0]  # original function returns a single element, forward_helper returns a tuple
 
 
     @staticmethod
@@ -36,8 +36,10 @@ class LayerNormPerSampleGrad(torch.autograd.Function):
 
         results = []
         results.append(grad_if_exists_for_input(input, input_grad))
-        results.append(None)  # for normalized_shape
-        results.append(grad_if_exists(weight, weight_per_sample_grad))
-        results.append(grad_if_exists(bias, lambda bias: sum_over_all_but_batch_and_last_n(grad_output, bias.dim())))
-        results.append(None)  # for eps
+        # weight and bias don't compute batched gradients; no other arguments are differentiable
+        results = results + [None] * (len(ctx.args) - 1)
+
+        # set grad_sample field for weight and bias with per sample gradients
+        results.append(set_grad_sample_if_exists(weight, weight_per_sample_grad))
+        results.append(set_grad_sample_if_exists(bias, lambda bias: sum_over_all_but_batch_and_last_n(grad_output, bias.dim())))
         return tuple(results)

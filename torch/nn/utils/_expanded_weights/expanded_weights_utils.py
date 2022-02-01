@@ -56,16 +56,13 @@ def _check_and_detach_output(output, num_true_outs):
             raise RuntimeError(f"Got fewer outputs ({len(output)}) than expected ({num_true_outs}). "
                                "Issues in ExpandedWeights' autograd.Function")
         aux_outputs = output[num_true_outs:]
-        if num_true_outs == 1:
-            output = output[0]
-        else:
-            output = output[:num_true_outs]
+        output = output[:num_true_outs]
     elif num_true_outs != 1:
         raise RuntimeError(f"Got single output but expected at least {num_true_outs} outputs. "
                            "Issues in ExpandedWeights' autograd.Function")
     return (output, aux_outputs)
 
-def grad_if_exists(maybe_expanded_weight, per_sample_grad_fn):
+def set_grad_sample_if_exists(maybe_expanded_weight, per_sample_grad_fn):
     unpacked = unpack_expanded_weight_or_tensor(maybe_expanded_weight)
     if isinstance(maybe_expanded_weight, ExpandedWeight):
         if hasattr(unpacked, "grad_sample"):

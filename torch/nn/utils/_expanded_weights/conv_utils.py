@@ -4,7 +4,7 @@ import torch.nn.functional as F
 import numpy as np
 
 from .expanded_weights_utils import \
-    grad_if_exists, grad_if_exists_for_input, unpack_expanded_weight_or_tensor
+    set_grad_sample_if_exists, grad_if_exists_for_input, unpack_expanded_weight_or_tensor
 
 THRESHOLD = 32
 
@@ -52,11 +52,12 @@ def conv_backward(func, ctx, grad_output):
     results = []
 
     results.append(grad_if_exists_for_input(input, compute_input_grad))
-    results.append(grad_if_exists(weight, weight_grad_sample))
-    results.append(grad_if_exists(bias, lambda _: grad_output.reshape(*grad_output.shape[:2], -1).sum(dim=2)))
+    # weight and bias don't compute batched gradients; no other arguments are differentiable
+    results = results + [None] * (len(ctx.args) - 1)
 
-    # no other arguments are differentiable
-    results = results + [None] * (len(ctx.args) - 3)
+    # set grad_sample field for weight and bias with per sample gradients
+    set_grad_sample_if_exists(weight, weight_grad_sample)
+    set_grad_sample_if_exists(bias, lambda _: grad_output.reshape(*grad_output.shape[:2], -1).sum(dim=2))
     return tuple(results)
 
 def conv_unfold_weight_grad_sample(input, grad_output, weight, kernel_size, stride, padding, dilation, groups, func):

@@ -65,14 +65,3 @@ class ExpandedWeight(torch.Tensor):
     @property
     def shape(self):
         return self.orig_weight.shape
-
-@implements_per_sample_grads(torch.allclose)
-class AllCloseHelper:
-    # This is needed for equality checking, but there's no per sample grad computation
-    @staticmethod
-    def apply(a, b, rtol, atol, equal_nan):
-        if isinstance(a, ExpandedWeight):
-            a = a.orig_weight
-        if isinstance(b, ExpandedWeight):
-            b = b.orig_weight
-        return torch.allclose(a, b, rtol, atol, equal_nan)
