@@ -294,7 +294,7 @@ void free(void* ptr) {
   free_impl(it);
 }
 
-// Symmetric with THCCachingAllocator::malloc for now,
+// Symmetric with NativeCachingAllocator::malloc for now,
 // although I don't think we absolutely need the symmetry.
 void malloc(void** devPtr, int device, size_t size, cudaStream_t stream) {
   TORCH_INTERNAL_ASSERT(

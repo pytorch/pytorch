@@ -25,7 +25,7 @@ C10_DEFINE_REGISTRY(FreeCudaMemoryCallbacksRegistry, FreeMemoryCallback);
 
 namespace cuda {
 namespace CUDACachingAllocator {
-namespace THC {
+namespace Native {
 
 //
 // Yet another caching allocator for CUDA device allocations.
@@ -1233,7 +1233,7 @@ class DeviceCachingAllocator {
   }
 };
 
-class THCCachingAllocator {
+class NativeCachingAllocator {
  private:
   std::mutex mutex;
 
@@ -1365,7 +1365,7 @@ class THCCachingAllocator {
   }
 };
 
-THCCachingAllocator caching_allocator;
+NativeCachingAllocator caching_allocator;
 
 // Returns whether to force all allocations to bypass the caching allocator and
 // go straight to cudaMalloc.  This setting is useful when debugging GPU memory
@@ -1380,7 +1380,7 @@ static void uncached_delete(void* ptr) {
   C10_CUDA_CHECK(cudaFree(ptr));
 }
 
-// NB: I decided not to fold this into THCCachingAllocator, because the latter
+// NB: I decided not to fold this into NativeCachingAllocator, because the latter
 // has a lot more methods and it wasn't altogether clear that they should
 // actually be publicly exposed
 struct CudaCachingAllocator : public Allocator {
@@ -1577,7 +1577,7 @@ std::shared_ptr<void> getIpcDevPtr(std::string handle) {
   return sp;
 }
 
-} // namespace THC
+} // namespace Native
 
 // Define config stuff here, rather than its own .cpp file,
 // because parseArgs needs to know kLargeBuffer.
@@ -1609,11 +1609,11 @@ void parseArgs() {
         if (kv[0].compare("max_split_size_mb") == 0) {
           size_t val2 = stoi(kv[1]);
           TORCH_CHECK(
-              val2 > THC::kLargeBuffer / (1024 * 1024),
+              val2 > Native::kLargeBuffer / (1024 * 1024),
               "CachingAllocator option max_split_size_mb too small, must be > ",
-              THC::kLargeBuffer / (1024 * 1024),
+              Native::kLargeBuffer / (1024 * 1024),
               "");
-          val2 = std::max(val2, THC::kLargeBuffer / (1024 * 1024));
+          val2 = std::max(val2, Native::kLargeBuffer / (1024 * 1024));
           val2 = std::min(
               val2, (std::numeric_limits<size_t>::max() / (1024 * 1024)));
           m_max_split_size = val2 * 1024 * 1024;

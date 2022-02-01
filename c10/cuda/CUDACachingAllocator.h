@@ -1,5 +1,5 @@
-#ifndef THC_DEVICE_ALLOCATOR_INC
-#define THC_DEVICE_ALLOCATOR_INC
+#ifndef NATIVE_DEVICE_ALLOCATOR_INC
+#define NATIVE_DEVICE_ALLOCATOR_INC
 #include <c10/core/Allocator.h>
 #include <c10/cuda/CUDAGraphsC10Utils.h>
 #include <c10/cuda/CUDAMacros.h>
@@ -166,7 +166,7 @@ C10_CUDA_API std::shared_ptr<void> getIpcDevPtr(std::string handle);
 
 // Not meant to be called directly by clients.
 // Maybe make "CUDACachingAllocator" a class or struct, and make these private members?
-namespace THC {
+namespace Native {
 CUDA_ALLOCATOR_BACKEND_INTERFACE
 }
 
@@ -195,7 +195,7 @@ inline void* raw_alloc(size_t nbytes) {
   //     }
   //   }();
   static auto f = (std::strcmp(allocatorBackend(), "native") == 0) ?
-    THC::raw_alloc : CudaMallocAsync::raw_alloc;
+    Native::raw_alloc : CudaMallocAsync::raw_alloc;
   return f(nbytes);
   // The downside of ^ is that it's not inlineable even with LTO.
   // If LTO is enabled and we think it's capable of inlining any allocator backend's calls at the
@@ -204,85 +204,85 @@ inline void* raw_alloc(size_t nbytes) {
   // if (useCudaMallocAsync) {
   //   return CudaMallocAsync(raw_alloc);
   // } else {
-  //   return THC::raw_alloc(nbytes);
+  //   return Native::raw_alloc(nbytes);
   // }
 }
 
 inline void* raw_alloc_with_stream(size_t nbytes, cudaStream_t stream) {
   static auto f = (std::strcmp(allocatorBackend(), "native") == 0) ?
-    THC::raw_alloc_with_stream : CudaMallocAsync::raw_alloc_with_stream;
+    Native::raw_alloc_with_stream : CudaMallocAsync::raw_alloc_with_stream;
   return f(nbytes, stream);
 }
 
 inline void raw_delete(void* ptr) {
   static auto f = (std::strcmp(allocatorBackend(), "native") == 0) ?
-    THC::raw_delete : CudaMallocAsync::raw_delete;
+    Native::raw_delete : CudaMallocAsync::raw_delete;
   return f(ptr);
 }
 
 inline Allocator* get() {
   static auto f = (std::strcmp(allocatorBackend(), "native") == 0) ?
-    THC::get : CudaMallocAsync::get;
+    Native::get : CudaMallocAsync::get;
   return f();
 }
 
 inline void init(int device_count) {
   static auto f = (std::strcmp(allocatorBackend(), "native") == 0) ?
-    THC::init : CudaMallocAsync::init;
+    Native::init : CudaMallocAsync::init;
   return f(device_count);
 }
 
 inline void setMemoryFraction(double fraction, int device) {
   static auto f = (std::strcmp(allocatorBackend(), "native") == 0) ?
-    THC::setMemoryFraction : CudaMallocAsync::setMemoryFraction;
+    Native::setMemoryFraction : CudaMallocAsync::setMemoryFraction;
   f(fraction, device);
 }
 
 inline void emptyCache() {
   static auto f = (std::strcmp(allocatorBackend(), "native") == 0) ?
-    THC::emptyCache : CudaMallocAsync::emptyCache;
+    Native::emptyCache : CudaMallocAsync::emptyCache;
   return f();
 }
 
 inline void cacheInfo(int dev_id, size_t* largestBlock) {
   static auto f = (std::strcmp(allocatorBackend(), "native") == 0) ?
-    THC::cacheInfo : CudaMallocAsync::cacheInfo;
+    Native::cacheInfo : CudaMallocAsync::cacheInfo;
   return f(dev_id, largestBlock);
 }
 
 inline void* getBaseAllocation(void* ptr, size_t* size) {
   static auto f = (std::strcmp(allocatorBackend(), "native") == 0) ?
-    THC::getBaseAllocation : CudaMallocAsync::getBaseAllocation;
+    Native::getBaseAllocation : CudaMallocAsync::getBaseAllocation;
   return f(ptr, size);
 }
 
 inline void recordStream(const DataPtr& dataPtr, CUDAStream stream) {
   static auto f = (std::strcmp(allocatorBackend(), "native") == 0) ?
-    THC::recordStream : CudaMallocAsync::recordStream;
+    Native::recordStream : CudaMallocAsync::recordStream;
   return f(dataPtr, stream);
 }
 
 inline DeviceStats getDeviceStats(int device) {
   static auto f = (std::strcmp(allocatorBackend(), "native") == 0) ?
-    THC::getDeviceStats : CudaMallocAsync::getDeviceStats;
+    Native::getDeviceStats : CudaMallocAsync::getDeviceStats;
   return f(device);
 }
 
 inline void resetAccumulatedStats(int device) {
   static auto f = (std::strcmp(allocatorBackend(), "native") == 0) ?
-    THC::resetAccumulatedStats : CudaMallocAsync::resetAccumulatedStats;
+    Native::resetAccumulatedStats : CudaMallocAsync::resetAccumulatedStats;
   return f(device);
 }
 
 inline void resetPeakStats(int device) {
   static auto f = (std::strcmp(allocatorBackend(), "native") == 0) ?
-    THC::resetPeakStats : CudaMallocAsync::resetPeakStats;
+    Native::resetPeakStats : CudaMallocAsync::resetPeakStats;
   return f(device);
 }
 
 inline std::vector<SegmentInfo> snapshot() {
   static auto f = (std::strcmp(allocatorBackend(), "native") == 0) ?
-    THC::snapshot : CudaMallocAsync::snapshot;
+    Native::snapshot : CudaMallocAsync::snapshot;
   return f();
 }
 
@@ -292,38 +292,38 @@ inline void notifyCaptureBegin(
     CaptureId_t graph_id,
     MempoolId_t mempool_id) {
   static auto f = (std::strcmp(allocatorBackend(), "native") == 0) ?
-    THC::notifyCaptureBegin : CudaMallocAsync::notifyCaptureBegin;
+    Native::notifyCaptureBegin : CudaMallocAsync::notifyCaptureBegin;
   return f(device, graph_id, mempool_id);
 }
 
 inline void notifyCaptureAboutToEnd(int device, CaptureId_t graph_id) {
   static auto f = (std::strcmp(allocatorBackend(), "native") == 0) ?
-    THC::notifyCaptureAboutToEnd : CudaMallocAsync::notifyCaptureAboutToEnd;
+    Native::notifyCaptureAboutToEnd : CudaMallocAsync::notifyCaptureAboutToEnd;
   return f(device, graph_id);
 }
 
 inline void notifyCaptureEnded(int device, CaptureId_t graph_id) {
   static auto f = (std::strcmp(allocatorBackend(), "native") == 0) ?
-    THC::notifyCaptureEnded : CudaMallocAsync::notifyCaptureEnded;
+    Native::notifyCaptureEnded : CudaMallocAsync::notifyCaptureEnded;
   return f(device, graph_id);
 }
 
 inline void notifyCaptureDestroy(int device, MempoolId_t mempool_id) {
   static auto f = (std::strcmp(allocatorBackend(), "native") == 0) ?
-    THC::notifyCaptureDestroy : CudaMallocAsync::notifyCaptureDestroy;
+    Native::notifyCaptureDestroy : CudaMallocAsync::notifyCaptureDestroy;
   return f(device, mempool_id);
 }
 
 inline std::mutex* getFreeMutex() {
   static auto f = (std::strcmp(allocatorBackend(), "native") == 0) ?
-    THC::getFreeMutex : CudaMallocAsync::getFreeMutex;
+    Native::getFreeMutex : CudaMallocAsync::getFreeMutex;
   return f();
 }
 
 // Not part of CUDA_ALLOCATOR_BACKEND_INTERFACE
 inline std::shared_ptr<void> getIpcDevPtr(std::string handle) {
   static auto f = (std::strcmp(allocatorBackend(), "native") == 0) ?
-    THC::getIpcDevPtr : CudaMallocAsync::getIpcDevPtr;
+    Native::getIpcDevPtr : CudaMallocAsync::getIpcDevPtr;
   return f(handle);
 
 }
