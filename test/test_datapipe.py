@@ -1557,9 +1557,9 @@ class TestTyping(TestCase):
 
     def test_protocol(self):
         try:
-            from typing import Protocol
-        except:
-            from typing import _Protocol
+            from typing import Protocol  # type: ignore[attr-defined]
+        except ImportError:
+            from typing import _Protocol  # type: ignore[attr-defined]
             Protocol = _Protocol
 
         class P(Protocol):
