@@ -1396,7 +1396,7 @@ const std::vector<std::string> functions = {
                 self_grad = (grad_output * beta)._grad_sum_to_size(self_size)
                 mat1_grad = grad_output.mm(mat2.t()) * alpha
                 mat2_grad = mat1.t().mm(grad_output) * alpha
-                return self_grad, mat1_grad, mat2_grad, None, None
+                return self_grad, mat1_grad, mat2_grad, None, None, None
             return result, backward
 
         # Comparison operators
