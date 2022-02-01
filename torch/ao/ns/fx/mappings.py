@@ -376,8 +376,12 @@ def get_base_name_to_sets_of_related_ops() -> Dict[str, Set[NSNodeTargetType]]:
         # dropout
         set([
             nn.Dropout,
-            F.dropout,
             nnq.Dropout,
+        ]),
+        # F.dropout
+        set([
+            F.dropout,
+            toq.dropout,
         ]),
     ]
 
@@ -434,6 +438,7 @@ def get_node_type_to_io_type_map() -> Dict[str, Set[NSNodeTargetType]]:
         F.instance_norm,
         F.layer_norm,
         F.leaky_relu,
+        F.dropout,
         F.silu,
         F.mish,
         # TODO(future PR): implement shadowing for binary ops and
@@ -460,6 +465,7 @@ def get_node_type_to_io_type_map() -> Dict[str, Set[NSNodeTargetType]]:
         toq.instance_norm,
         toq.layer_norm,
         toq.leaky_relu,
+        toq.dropout,
         # TODO(future PR): implement shadowing for binary ops and
         # uncomment below
         # toq.add,
