@@ -2613,8 +2613,10 @@ class TestLinalg(TestCase):
                 S_s = torch.svd(A, compute_uv=False).S
                 self.assertEqual(S_s, S)
 
+    # This test doesn't work with MAGMA backend https://github.com/pytorch/pytorch/issues/72106
     @skipMeta
-    @skipCUDAIfNoMagma
+    @skipCUDAIfRocm
+    @skipCUDAIfNoCusolver
     @skipCPUIfNoLapack
     @dtypes(*floating_and_complex_types())
     def test_svd_nan_error(self, device, dtype):
