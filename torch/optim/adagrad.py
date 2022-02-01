@@ -2,7 +2,7 @@ import torch
 from torch import Tensor
 
 from .optimizer import Optimizer
-from typing import List
+from typing import List, Optional
 
 
 class Adagrad(Optimizer):
@@ -47,7 +47,7 @@ class Adagrad(Optimizer):
     """
 
     def __init__(self, params, lr=1e-2, lr_decay=0, weight_decay=0, initial_accumulator_value=0,
-                 eps=1e-10, foreach=None):
+                 eps=1e-10, foreach: Optional[bool] = None):
         if not 0.0 <= lr:
             raise ValueError("Invalid learning rate: {}".format(lr))
         if not 0.0 <= lr_decay:
@@ -75,6 +75,11 @@ class Adagrad(Optimizer):
         super().__setstate__(state)
         for group in self.param_groups:
             group.setdefault('foreach', None)
+        state_values = list(self.state.values())
+        step_is_tensor = (len(state_values) != 0) and torch.is_tensor(state_values[0]['step'])
+        if not step_is_tensor:
+            for s in state_values:
+                s['step'] = torch.tensor(float(s['step']))
 
     def share_memory(self):
         for group in self.param_groups:
