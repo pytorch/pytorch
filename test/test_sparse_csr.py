@@ -1302,7 +1302,7 @@ class TestSparseCSR(TestCase):
 
         for inp in [zero.to_sparse_csr(), tensor_explicit_zeros]:
             self.assertEqual(op(inp).values().numel(), inp.values().numel(),
-                             f"0->0 correspondence is not satisfied for {op.name} or explicit zeros in CSR result values.")
+                             f"{op.name} fails to preserve sparsity pattern.")
 
     @ops(sparse_csr_unary_ufuncs)
     def test_sparse_csr_unary_out(self, device, dtype, op):
