@@ -10221,7 +10221,7 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(MyModel(), (x_t, y_t))
 
         for x_s, y_s in zip(x, y):
-          self.run_test(MyModel(), (x_s, y_s))
+            self.run_test(MyModel(), (x_s, y_s))
 
     def test_mul_float_bool(self):
         class MyModel(torch.nn.Module):
@@ -10235,7 +10235,7 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(MyModel(), (x_t, y_t))
 
         for x_s, y_s in zip(x, y):
-          self.run_test(MyModel(), (x_s, y_s))
+            self.run_test(MyModel(), (x_s, y_s))
 
 def make_test(name, base, layer, bidirectional, initial_state,
               variable_length, dropout, script_test_min_opset_version,
