@@ -2596,10 +2596,16 @@ Tensor svd_backward(const Tensor& gU,
 
   const auto m = U.size(-2);
   const auto n = Vh.size(-1);
+  const auto k = S.size(-1);
+  TORCH_INTERNAL_ASSERT(
+      k == U.size(-1) && k == Vh.size(-2),
+      "svd_backward: The number of singular values is not equal "
+      "to the number of columns in U and/or the number of rows in Vh.");
+  const auto mn = std::min(m, n);
 
   // Optimisation for svdvals: gA = U @ diag(gS) @ Vh
   if (!gU.defined() && !gVh.defined()) {
-    return m >= n ? at::matmul(U, gS.unsqueeze(-1) * Vh)
+    return m >= k ? at::matmul(U, gS.unsqueeze(-1) * Vh)
                   : at::matmul(U * gS.unsqueeze(-2), Vh);
   }
   // At this point, at least one of gU, gVh is defined
@@ -2667,22 +2673,49 @@ Tensor svd_backward(const Tensor& gU,
     return ret;
   }();
 
-  if (m > n && gU.defined()) {
-    // gA = [UgA + (I_m - UU^H)gU S^{-1}]V^H
-    gA  = at::matmul(U, gA);
+  const auto compute_gA_U_ortho = [&]() {
+    // res = [UgA + (I_m - UU^H)gU S^{-1}]V^H
+    auto res = at::matmul(U, gA);
     const auto gUSinv = gU / S.unsqueeze(-2);
-    gA = gA + gUSinv - at::matmul(U, at::matmul(U.mH(), gUSinv));
-    gA = at::matmul(gA, Vh);
-  } else if (m < n && gVh.defined()) {
-    //   gA = U[gA V^H + S^{-1} (gV)^H (I_n - VV^H)]
-    gA = at::matmul(gA, Vh);
+    res = res + gUSinv - at::matmul(U, at::matmul(U.mH(), gUSinv));
+    res = at::matmul(res, Vh);
+    return res;
+  };
+
+  const auto compute_gA_V_ortho = [&]() {
+    // res = U[gA V^H + S^{-1} (gV)^H (I_n - VV^H)]
+    auto res = at::matmul(gA, Vh);
     const auto SinvgVh = gVh / S.unsqueeze(-1);
-    gA = gA + SinvgVh - at::matmul(at::matmul(SinvgVh, Vh.mH()), Vh);
-    gA = at::matmul(U, gA);
+    res = res + SinvgVh - at::matmul(at::matmul(SinvgVh, Vh.mH()), Vh);
+    res = at::matmul(U, res);
+    return res;
+  };
+
+  const auto compute_gA_square = [&]() {
+    // res = U gA V^H
+    if (m >= n) {
+      return at::matmul(U, at::matmul(gA, Vh));
+    }
+    else {
+      return at::matmul(at::matmul(U, gA), Vh);
+    }
+  };
+
+  if (k < mn) {
+    if (gU.defined() && gVh.defined()) {
+      gA = compute_gA_U_ortho();
+      gA = gA + (U / S.unsqueeze(-2)).matmul(gVh - gVh.matmul(Vh.mH()).matmul(Vh));
+    } else if (gU.defined()) {
+      gA = compute_gA_U_ortho();
+    } else /* if (gVh.defined())*/ {
+      gA = compute_gA_V_ortho();
+    }
+  } else if (m > n && gU.defined()) {
+    gA = compute_gA_U_ortho();
+  } else if (m < n && gVh.defined()) {
+    gA = compute_gA_V_ortho();
   } else {
-    // gA = U gA V^H
-    gA = m >= n ? at::matmul(U, at::matmul(gA, Vh))
-                : at::matmul(at::matmul(U, gA), Vh);
+    gA = compute_gA_square();
   }
 
   return gA;
