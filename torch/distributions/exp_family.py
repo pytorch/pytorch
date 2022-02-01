@@ -56,5 +56,5 @@ class ExponentialFamily(Distribution):
         gradients = torch.autograd.grad(lg_normal.sum(), nparams, create_graph=True)
         result += lg_normal
         for np, g in zip(nparams, gradients):
-            result -= np * g
+            result -= (np * g).sum()
         return result
