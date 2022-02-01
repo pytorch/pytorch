@@ -4,12 +4,6 @@
 name: linux-binary-conda
 
 on:
-  pull_request:
-    # NOTE: This workflow should only trigger when changes are made to binary builds
-    # Should catch most of the binary build / test scripts
-    paths:
-      - '.github/workflows/generated-linux-binary-*.yml'
-      - '.circleci/scripts/binary_*.sh'
   push:
     # NOTE: Meta Employees can trigger new nightlies using: https://fburl.com/trigger_pytorch_nightly_build
     branches:
@@ -105,7 +99,6 @@ jobs:
       - name: Checkout PyTorch
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
-          ref: ${{ github.event_name == 'pull_request' && github.head_ref || github.sha }}
           submodules: recursive
           path: pytorch
       - name: Clean PyTorch checkout
@@ -496,7 +489,6 @@ jobs:
       - name: Checkout PyTorch
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
-          ref: ${{ github.event_name == 'pull_request' && github.head_ref || github.sha }}
           submodules: recursive
           path: pytorch
       - name: Clean PyTorch checkout
@@ -894,7 +886,6 @@ jobs:
       - name: Checkout PyTorch
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
-          ref: ${{ github.event_name == 'pull_request' && github.head_ref || github.sha }}
           submodules: recursive
           path: pytorch
       - name: Clean PyTorch checkout
@@ -1295,7 +1286,6 @@ jobs:
       - name: Checkout PyTorch
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
-          ref: ${{ github.event_name == 'pull_request' && github.head_ref || github.sha }}
           submodules: recursive
           path: pytorch
       - name: Clean PyTorch checkout
@@ -1696,7 +1686,6 @@ jobs:
       - name: Checkout PyTorch
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
-          ref: ${{ github.event_name == 'pull_request' && github.head_ref || github.sha }}
           submodules: recursive
           path: pytorch
       - name: Clean PyTorch checkout
@@ -2096,7 +2085,6 @@ jobs:
       - name: Checkout PyTorch
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
-          ref: ${{ github.event_name == 'pull_request' && github.head_ref || github.sha }}
           submodules: recursive
           path: pytorch
       - name: Clean PyTorch checkout
@@ -2487,7 +2475,6 @@ jobs:
       - name: Checkout PyTorch
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
-          ref: ${{ github.event_name == 'pull_request' && github.head_ref || github.sha }}
           submodules: recursive
           path: pytorch
       - name: Clean PyTorch checkout
@@ -2885,7 +2872,6 @@ jobs:
       - name: Checkout PyTorch
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
-          ref: ${{ github.event_name == 'pull_request' && github.head_ref || github.sha }}
           submodules: recursive
           path: pytorch
       - name: Clean PyTorch checkout
@@ -3286,7 +3272,6 @@ jobs:
       - name: Checkout PyTorch
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
-          ref: ${{ github.event_name == 'pull_request' && github.head_ref || github.sha }}
           submodules: recursive
           path: pytorch
       - name: Clean PyTorch checkout
@@ -3687,7 +3672,6 @@ jobs:
       - name: Checkout PyTorch
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
-          ref: ${{ github.event_name == 'pull_request' && github.head_ref || github.sha }}
           submodules: recursive
           path: pytorch
       - name: Clean PyTorch checkout
@@ -4087,7 +4071,6 @@ jobs:
       - name: Checkout PyTorch
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
-          ref: ${{ github.event_name == 'pull_request' && github.head_ref || github.sha }}
           submodules: recursive
           path: pytorch
       - name: Clean PyTorch checkout
@@ -4478,7 +4461,6 @@ jobs:
       - name: Checkout PyTorch
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
-          ref: ${{ github.event_name == 'pull_request' && github.head_ref || github.sha }}
           submodules: recursive
           path: pytorch
       - name: Clean PyTorch checkout
@@ -4876,7 +4858,6 @@ jobs:
       - name: Checkout PyTorch
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
-          ref: ${{ github.event_name == 'pull_request' && github.head_ref || github.sha }}
           submodules: recursive
           path: pytorch
       - name: Clean PyTorch checkout
@@ -5277,7 +5258,6 @@ jobs:
       - name: Checkout PyTorch
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
-          ref: ${{ github.event_name == 'pull_request' && github.head_ref || github.sha }}
           submodules: recursive
           path: pytorch
       - name: Clean PyTorch checkout
@@ -5678,7 +5658,6 @@ jobs:
       - name: Checkout PyTorch
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
-          ref: ${{ github.event_name == 'pull_request' && github.head_ref || github.sha }}
           submodules: recursive
           path: pytorch
       - name: Clean PyTorch checkout
@@ -6078,7 +6057,6 @@ jobs:
       - name: Checkout PyTorch
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
-          ref: ${{ github.event_name == 'pull_request' && github.head_ref || github.sha }}
           submodules: recursive
           path: pytorch
       - name: Clean PyTorch checkout
@@ -6469,7 +6447,6 @@ jobs:
       - name: Checkout PyTorch
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
-          ref: ${{ github.event_name == 'pull_request' && github.head_ref || github.sha }}
           submodules: recursive
           path: pytorch
       - name: Clean PyTorch checkout
@@ -6867,7 +6844,6 @@ jobs:
       - name: Checkout PyTorch
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
-          ref: ${{ github.event_name == 'pull_request' && github.head_ref || github.sha }}
           submodules: recursive
           path: pytorch
       - name: Clean PyTorch checkout
@@ -7268,7 +7244,6 @@ jobs:
       - name: Checkout PyTorch
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
-          ref: ${{ github.event_name == 'pull_request' && github.head_ref || github.sha }}
           submodules: recursive
           path: pytorch
       - name: Clean PyTorch checkout
@@ -7669,7 +7644,6 @@ jobs:
       - name: Checkout PyTorch
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
-          ref: ${{ github.event_name == 'pull_request' && github.head_ref || github.sha }}
           submodules: recursive
           path: pytorch
       - name: Clean PyTorch checkout
