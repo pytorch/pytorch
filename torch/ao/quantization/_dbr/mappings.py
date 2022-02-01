@@ -125,6 +125,15 @@ binary_related_ops = (
     (torch.Tensor.mul, torch.Tensor.mul_),
 )
 
+conv_ops = set([
+    F.conv1d,
+    F.conv2d,
+    F.conv3d,
+    F.conv_transpose1d,
+    F.conv_transpose2d,
+    F.conv_transpose3d
+])
+
 # TODO(future PR): reuse global mapping
 a_related_to_b = set()
 for a, b in binary_related_ops:

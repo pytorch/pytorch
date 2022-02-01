@@ -154,13 +154,37 @@ class TestQuantizeDBRIndividualOps(QuantizeDBRTestCase):
                 return x
 
         for dim in range(1, 4):
-            if dim == 1:
-                data = torch.randn(1, 3, 10)
-            else:
-                data = self.img_data_dict[dim][0][0]
-            model_fp32 = M(dim, data).eval()
+            data = {
+                1: torch.randn(1, 3, 10),
+                2: torch.randn(1, 3, 10, 10),
+                3: torch.randn(1, 3, 5, 5, 5)
+            }
+            model_fp32 = M(dim, data[dim]).eval()
             qconfig = torch.quantization.default_qconfig
-            self._test_auto_tracing(model_fp32, qconfig, (data,))
+            self._test_auto_tracing(model_fp32, qconfig, (data[dim],))
+
+    def test_conv_transpose_functional(self):
+        convs = {1: F.conv_transpose1d, 2: F.conv_transpose2d, 3: F.conv_transpose3d}
+
+        class M(torch.nn.Module):
+            def __init__(self, dim, weight):
+                super().__init__()
+                self.dim = dim
+                self.weight = torch.nn.Parameter(weight)
+
+            def forward(self, x):
+                x = convs[dim](x, self.weight)
+                return x
+
+        for dim in range(1, 4):
+            data = {
+                1: torch.randn(1, 3, 10),
+                2: torch.randn(1, 3, 10, 10),
+                3: torch.randn(1, 3, 5, 5, 5)
+            }
+            model_fp32 = M(dim, data[dim]).eval()
+            qconfig = torch.quantization.default_qconfig
+            self._test_auto_tracing(model_fp32, qconfig, (data[dim],))
 
     def test_linear_dynamic(self):
         class M(torch.nn.Module):
