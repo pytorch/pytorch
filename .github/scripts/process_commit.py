@@ -31,7 +31,7 @@ SECONDARY_LABELS = {
     "topic: not user facing",
 }
 # This secondary does not require a primary
-ALLOWED_ONLY_SECONDARY = "topic: not user facing"
+ALLOWED_ONLY_SECONDARY = {"topic: not user facing"}
 PYTORCH_REPO = "https://api.github.com/repos/pytorch/pytorch"
 GITHUB_TOKEN = os.environ.get('GITHUB_TOKEN')
 REQUEST_HEADERS = {'Accept': 'application/vnd.github.v3+json', 'Authorization': f'token {GITHUB_TOKEN}'}
