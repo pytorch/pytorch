@@ -10214,9 +10214,28 @@ class TestONNXRuntime(unittest.TestCase):
             def forward(self, x, y):
                 return torch.mul(x, y)
 
-        x = torch.tensor([True, False, True, False])
-        y = torch.tensor([True, True, False, False])
-        self.run_test(MyModel(), (x, y))
+        x = [True, False, True, False]
+        y = [True, True, False, False]
+        x_t = torch.tensor(x)
+        y_t = torch.tensor(y)
+        self.run_test(MyModel(), (x_t, y_t))
+
+        for x_s, y_s in zip(x, y):
+          self.run_test(MyModel(), (x_s, y_s))
+
+    def test_mul_float_bool(self):
+        class MyModel(torch.nn.Module):
+            def forward(self, x, y):
+                return torch.mul(x, y)
+
+        x = [True, False, True, False]
+        y = [1.0, 2.0, 3.0, 4.0]
+        x_t = torch.tensor(x)
+        y_t = torch.tensor(y)
+        self.run_test(MyModel(), (x_t, y_t))
+
+        for x_s, y_s in zip(x, y):
+          self.run_test(MyModel(), (x_s, y_s))
 
 def make_test(name, base, layer, bidirectional, initial_state,
               variable_length, dropout, script_test_min_opset_version,

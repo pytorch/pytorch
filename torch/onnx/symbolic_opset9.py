@@ -103,7 +103,7 @@ def rsub(g, self, other, alpha=None):
 
 
 def mul(g, self, other):
-    if sym_help._is_bool(self):
+    if sym_help._is_bool(self) and sym_help._is_bool(other):
         return g.op("And", self, other)
     else:
         return g.op("Mul", self, other)
