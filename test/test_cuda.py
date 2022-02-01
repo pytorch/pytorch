@@ -377,6 +377,17 @@ class TestCuda(TestCase):
         tensor.fill_(1)
         self.assertTrue((tensor == 1).all())
 
+    def test_out_of_memory_retry(self):
+        total_memory = torch.cuda.get_device_properties(0).total_memory
+        oom_regex = "would exceed allowed memory" if TEST_CUDAMALLOCASYNC else \
+                    "Tried to allocate"
+        size = int(total_memory * 0.5)
+        a = torch.empty(size , dtype=torch.int8, device='cuda')
+        with self.assertRaisesRegex(RuntimeError, oom_regex):
+            b = torch.empty(size, dtype=torch.int8, device='cuda')
+        del a
+        b = torch.empty(size, dtype=torch.int8, device='cuda')
+
     def test_set_per_process_memory_fraction(self):
         # test invalid fraction value.
         with self.assertRaisesRegex(TypeError, "Invalid type"):

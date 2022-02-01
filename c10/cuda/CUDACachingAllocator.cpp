@@ -370,7 +370,7 @@ class DeviceCachingAllocator {
       //
       // Q. Why skip process_events if a capture might be underway?
       // A. process_events involves cudaEventQueries, illegal during CUDA graph
-      // capture.
+      //    capture.
       //    Dumb simple solution: defer reclaiming these allocations until after
       //    capture. Cross-stream memory use is uncommon, so the deferral's
       //    effect on memory use during capture should be small.
