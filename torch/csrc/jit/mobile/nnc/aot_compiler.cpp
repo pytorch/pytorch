@@ -98,7 +98,7 @@ std::vector<SymbolicShapePosition> findSymbolicShapePositions(
       std::vector<at::ShapeSymbol> shape_vec = *tt->symbolic_sizes().sizes();
       for (int64_t dim_idx : c10::irange(shape_vec.size())) {
         if (shape_vec[dim_idx].value() == sym_idx) {
-          res.push_back({input_idx, dim_idx});
+          res.emplace_back(input_idx, dim_idx);
           found = true;
           break;
         }
