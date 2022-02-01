@@ -1300,8 +1300,8 @@ class TestSparseCSR(TestCase):
             self.assertEqual(output, expected, f"This operator ({op.name}) should not be supported for "
                              "Sparse CSR as it breaks 0->0 correspondence.")
 
-        for (inp, expected_zero_count) in [(zero.to_sparse_csr(), 0), (tensor_explicit_zeros, 1)]:
-            self.assertEqual(op(inp).values().numel(), expected_zero_count,
+        for inp in [zero.to_sparse_csr(), tensor_explicit_zeros]:
+            self.assertEqual(op(inp).values().numel(), inp.values().numel(),
                              f"0->0 correspondence is not satisfied for {op.name} or explicit zeros in CSR result values.")
 
     @ops(sparse_csr_unary_ufuncs)
