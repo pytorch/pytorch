@@ -607,20 +607,9 @@ ProcessGroupNCCL::ProcessGroupNCCL(
 
   if (uccLib_ != nullptr) {
     LOG(INFO) << "[Rank " << rank_  << "] torch_ucc.so loaded";
-    typedef void *fn(void *);
-    auto createProcessGroupUCCForNCCL = reinterpret_cast<fn*>(uccLib_->sym("_Z28createProcessGroupUCCForNCCLPv"));
-    struct args_t {
-      const c10::intrusive_ptr<Store>& store;
-      int rank = -1;
-      int size = -1;
-    };
-    args_t args {
-      .store = store,
-      .rank = rank,
-      .size = size
-    };
-    auto raw_ucc_pg = static_cast<ProcessGroup *>(createProcessGroupUCCForNCCL(&args));
-    uccPG_ = c10::intrusive_ptr<ProcessGroup>::unsafe_steal_from_new(raw_ucc_pg);
+    typedef c10::intrusive_ptr<ProcessGroup> fn(const c10::intrusive_ptr<Store>& store, int rank, int size);
+    auto createProcessGroupUCCForNCCL = reinterpret_cast<fn*>(uccLib_->sym("createProcessGroupUCCForNCCL"));
+    uccPG_ = createProcessGroupUCCForNCCL(store, rank, size);
     LOG(INFO) << "[Rank " << rank_  << "] ProcessGroupUCC created.";
   }
 #endif
