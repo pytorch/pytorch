@@ -11,7 +11,7 @@ class StorageWriter(abc.ABC):
     Interface to write to underlying storage system
     """
     @abc.abstractmethod
-    def write(self, req: ReadWriteRequest) -> Future:
+    def write(self, req: ReadWriteRequest) -> Future[None]:
         """
         Performs a write request and returns a Future to wait on.
         Args:
@@ -48,7 +48,7 @@ class FileSystemWriter(StorageWriter):
         self.path = path
         os.makedirs(self.path, exist_ok=True)
 
-    def write(self, req: ReadWriteRequest) -> Future:
+    def write(self, req: ReadWriteRequest) -> Future[None]:
         with open(os.path.join(self.path, req.storage_key), "a+b") as storage:
             storage.seek(req.offset)
             # The following couple lines are simple implementation to get things going.
@@ -58,7 +58,7 @@ class FileSystemWriter(StorageWriter):
             mv = memoryview(req.target_tensor.detach().cpu().numpy()).cast("c")
             storage.write(mv)
 
-        fut = Future()
+        fut: Future[None] = Future()
         fut.set_result(None)
         return fut
 

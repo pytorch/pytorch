@@ -26,11 +26,11 @@ class Metadata:
     # Metadata for the state dict.
     state_dict_metadata: Dict[str, ExtendedTensorMetadata]
 
-    def __getstate__(self) -> Dict[str, Any]:
+    def __getstate__(self) -> bytes:
         serialized = pickle.dumps(self.state_dict_metadata)
         return serialized
 
-    def __setstate__(self, state: Dict[str, Any]):
+    def __setstate__(self, state: bytes):
         # TODO, use pickle for this quick hack, must replace it with something else e.g. flatbuffer
         # before serious use case,
         self.state_dict_metadata = pickle.loads(state)

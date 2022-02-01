@@ -47,10 +47,9 @@ def _populate_inplace_with_a_tensor(
     shard_metadata = ShardMetadata(
         shard_offsets=[0] * len(tensor_size),
         shard_sizes=tensor_size,
-        # Not entirely sure how to deal with placement for regular tensor yet
-        # Since they are not shared, it makes sense to assume they are always replicated
-        #
-        placement=tensor.device,
+        # Not sure how to deal with placement for regular tensor yet.
+        # Since they are only keep the copy on rank0, let's hard code it for now.
+        placement=f"rank:0/{str(tensor.device)}",
     )
     stm = ShardedTensorMetadata(
         shards_metadata=[shard_metadata],
@@ -141,8 +140,8 @@ def _prepare(state_dict: Dict[str, Any]) -> Tuple[Metadata, Dict[str, int], List
     if the default does not meet its requirement.
     """
     metadata = Metadata(state_dict_metadata={})
-    storage_handles = {}
-    write_requests = []
+    storage_handles: Dict[str, int] = {}
+    write_requests: List[ReadWriteRequest] = []
 
     for fqn, tensor in state_dict.items():
         if isinstance(tensor, Tensor):

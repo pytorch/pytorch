@@ -31,7 +31,7 @@ class FileSystemReader(StorageReader):
         super().__init__()
         self.path = path
 
-    def read(self, req: ReadWriteRequest) -> Future:
+    def read(self, req: ReadWriteRequest) -> Future[None]:
         """
         Very basic implementation that read from file system.
         Note that the future is resolved before returning.
