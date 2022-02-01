@@ -463,7 +463,7 @@ struct TORCH_API Type {
     return kind_;
   }
 
-  bool isUnionType() const {
+  virtual bool isUnionType() const {
     return false;
   }
 
