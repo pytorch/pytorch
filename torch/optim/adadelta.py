@@ -2,7 +2,7 @@ import torch
 from torch import Tensor
 
 from .optimizer import Optimizer
-from typing import List
+from typing import List, Optional
 
 
 class Adadelta(Optimizer):
@@ -50,7 +50,7 @@ class Adadelta(Optimizer):
         https://arxiv.org/abs/1212.5701
     """
 
-    def __init__(self, params, lr=1.0, rho=0.9, eps=1e-6, weight_decay=0, foreach=None):
+    def __init__(self, params, lr=1.0, rho=0.9, eps=1e-6, weight_decay=0, foreach: Optional[bool] = None):
         if not 0.0 <= lr:
             raise ValueError("Invalid learning rate: {}".format(lr))
         if not 0.0 <= rho <= 1.0:
