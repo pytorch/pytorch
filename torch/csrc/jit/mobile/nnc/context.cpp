@@ -250,10 +250,11 @@ c10::impl::GenericList Function::run(
   }
   offset += inputs.size();
 
+  scalar_values.reserve(sym_shape_positions_.size());
   for (const auto i : c10::irange(sym_shape_positions_.size())) {
     const auto& sym_shape_pos = sym_shape_positions_[i];
-    const c10::IValue& input_tensor = inputs[sym_shape_pos.input_idx_];
-    auto dim = input_tensor.toTensor().size(sym_shape_pos.dim_idx_);
+    const c10::IValue& input = inputs[sym_shape_pos.input_idx_];
+    auto dim = input.toTensor().size(sym_shape_pos.dim_idx_);
     scalar_values.push_back(dim);
     args[i + offset] = &scalar_values[scalar_values.size() - 1];
   }

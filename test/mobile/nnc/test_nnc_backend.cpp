@@ -93,6 +93,7 @@ TEST(NNCBackendTest, AOTCompileThenExecute) {
   auto result = loaded_module.forward(inputs);
   EXPECT_TRUE(result.toTensor().equal(3.0 * torch::ones({4, 4})));
   EXPECT_TRUE(result.toTensor().equal(reference.toTensor()));
+  EXPECT_EQ(remove("fake_nnc_model.s"), 0);
 }
 
 } // namespace nnc
