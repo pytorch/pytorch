@@ -129,10 +129,10 @@ class CommitList:
                 category = 'fx'
                 break
             # torch/quantization, test/quantization, aten/src/ATen/native/quantized, torch/nn/{quantized, quantizable}
-            if CommitList.keywordInFile(file, ['torch/quantization', 'test/quantization', 'aten/src/ATen/native/quantized', 'torch/nn/quantiz']):
+            if CommitList.keywordInFile(file, ['torch/quantization', 'test/quantization', 'aten/src/ATen/native/quantized', 'torch/nn/quantiz', 'torch/ao/quantization']):
                 category = 'quantization'
                 break
-            if CommitList.keywordInFile(file, ['torch/package', 'test/package']):
+            if CommitList.keywordInFile(file, ['torch/package', 'test/package', 'torch/csrc/deploy']):
                 category = 'package'
                 break
             if CommitList.keywordInFile(file, ['torch/csrc/jit/mobile', 'aten/src/ATen/native/metal', 'test/mobile', 'torch/backends/_nnapi/', 'test/test_nnapi.py']):
@@ -141,15 +141,30 @@ class CommitList:
             if CommitList.keywordInFile(file, ['aten/src/ATen/native/LinearAlgebra.cpp', 'test/test_linalg.py', 'torch/linalg']):
                 category = 'linalg_frontend'
                 break
-            if CommitList.keywordInFile(file, ['torch/sparse']):
+            if CommitList.keywordInFile(file, ['torch/sparse', 'torch/ao/sparsity', 'test/ao/sparsity', 'aten/src/ATen/native/sparse', 'torch/_masked/__init__.py']):
                 category = 'sparse_frontend'
                 break
-            if CommitList.keywordInFile(file, ['test/test_nn.py', 'test/test_module.py', 'torch/nn/modules']):
+            if CommitList.keywordInFile(file, ['tools/autograd']):
+                category = 'autograd_frontend'
+                break
+            if CommitList.keywordInFile(file, ['test/test_nn.py', 'test/test_module.py', 'torch/nn/modules', 'torch/nn/functional.py']):
                 category = 'nn_frontend'
                 break
-            if CommitList.keywordInFile(file, ['torch/csrc/jit']):
+            if CommitList.keywordInFile(file, ['torch/csrc/jit', 'torch/jit']):
                 category = 'jit'
                 break
+        else:
+            if len(files_changed) > 0 and all([f_name.endswith('.cu') or f_name.endswith('.cuh') for f_name in files_changed]):
+                category = 'cuda'
+            elif '[PyTorch Edge]' in title:
+                category = 'mobile'
+            elif len(files_changed) == 1 and 'torch/testing/_internal/common_methods_invocations.py' in files_changed[0]:
+                # when this is the only file changed, it's almost always an OpInfo change.
+                category = 'python_frontend'
+            elif len(files_changed) == 1 and 'torch/_torch_docs.py' in files_changed[0]:
+                # individual torch_docs changes are usually for python ops
+                category = 'python_frontend'
+
 
         return Commit(commit_hash, category, topic, title)
 
@@ -197,6 +212,14 @@ def update_existing(path, new_version):
     commits = CommitList.from_existing(path)
     commits.update_to(new_version)
     commits.write_to_disk()
+
+def rerun_with_new_filters(path):
+    current_commits = CommitList.from_existing(path)
+    for i in range(len(current_commits.commits)):
+        c = current_commits.commits[i]
+        if 'Uncategorized' in str(c):
+            current_commits.commits[i] = CommitList.categorize(c.commit_hash, c.title)
+    current_commits.write_to_disk()
 
 def to_markdown(commit_list, category):
     def cleanup_title(commit):
@@ -252,6 +275,7 @@ def main():
     group = parser.add_mutually_exclusive_group(required=True)
     group.add_argument('--create_new', nargs=2)
     group.add_argument('--update_to')
+    group.add_argument('--rerun_with_new_filters', action='store_true')
     group.add_argument('--stat', action='store_true')
     group.add_argument('--export_markdown', action='store_true')
 
@@ -263,6 +287,9 @@ def main():
         return
     if args.update_to:
         update_existing(args.path, args.update_to)
+        return
+    if args.rerun_with_new_filters:
+        rerun_with_new_filters(args.path)
         return
     if args.stat:
         commits = CommitList.from_existing(args.path)
