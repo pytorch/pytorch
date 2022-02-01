@@ -19,6 +19,10 @@ def _is_float_or_complex_tensor(obj):
     return is_tensor_like(obj) and (obj.is_floating_point() or obj.is_complex())
 
 
+def _is_differentiable(obj, require_grad):
+    return _is_float_or_complex_tensor(obj) and (obj.requires_grad or not require_grad)
+
+
 def _allocate_jacobians_with_inputs(input_tensors: Tuple, numel_output) -> Tuple[torch.Tensor, ...]:
     # Makes zero-filled tensors from inputs. If `numel_output` is not None, for
     # each tensor in `input_tensors`, returns a new zero-filled tensor with height
@@ -27,7 +31,7 @@ def _allocate_jacobians_with_inputs(input_tensors: Tuple, numel_output) -> Tuple
     # the same dtype and device as those of the corresponding input.
     out: List[torch.Tensor] = []
     for t in input_tensors:
-        if _is_float_or_complex_tensor(t) and t.requires_grad:
+        if _is_differentiable(t, True):
             out.append(t.new_zeros((t.numel(), numel_output), layout=torch.strided))
     return tuple(out)
 
@@ -41,7 +45,7 @@ def _allocate_jacobians_with_outputs(output_tensors: Tuple, numel_input, dtype=N
     out: List[torch.Tensor] = []
     options = {"dtype": dtype, "device": device, "layout": torch.strided}
     for t in output_tensors:
-        if _is_float_or_complex_tensor(t):
+        if _is_differentiable(t, False):
             out.append(t.new_zeros((numel_input, t.numel()), **options))
     return tuple(out)
 
@@ -50,7 +54,7 @@ def _iter_tensors(x: Union[torch.Tensor, Iterable[torch.Tensor]],
                   only_requiring_grad: bool = False) -> Iterable[torch.Tensor]:
     if is_tensor_like(x):
         # mypy doesn't narrow type of `x` to torch.Tensor
-        if x.requires_grad or not only_requiring_grad:  # type: ignore[union-attr]
+        if _is_differentiable(x, only_requiring_grad):  # type: ignore[union-attr]
             yield x  # type: ignore[misc]
     elif isinstance(x, collections.abc.Iterable) and not isinstance(x, str):
         for elem in x:
@@ -280,7 +284,7 @@ def get_numerical_jacobian_wrt_specific_input(fn, input_idx, inputs, outputs, ep
     # is equivalent to a single col of the Jacobian matrix of fn.
     jacobian_cols: Dict[int, List[torch.Tensor]] = {}
     input = inputs[input_idx] if input is None else input
-    assert input.requires_grad or is_forward_ad
+    assert _is_differentiable(input, not is_forward_ad)
     for x, idx, d_idx in _iter_tensor(input):
         wrapped_fn = _with_prepare_inputs(fn, inputs, input_idx, x)
         input_to_perturb = x[idx]
@@ -663,7 +667,8 @@ def _check_inputs(tupled_inputs, check_sparse_nnz, check_forward_ad) -> bool:
             inp.retain_grad()
     if not any_input_requiring_grad and not check_forward_ad:
         raise ValueError(
-            'gradcheck expects at least one input tensor to require gradient, '
+            'gradcheck expects at least one input tensor to require gradient '
+            '(unless gradcheck is also evaluating forward AD), '
             'but none of the them have requires_grad=True.')
     return True
 
@@ -1160,8 +1165,7 @@ def _vec_from_tensor(x, generator, downcast_complex=False):
 
 
 def _get_inp_tensors(tupled_inputs, require_grad=True):
-    inp_idx_tup = [(i, t) for i, t in enumerate(tupled_inputs)
-                   if is_tensor_like(t) and (t.requires_grad or not require_grad)]
+    inp_idx_tup = [(i, t) for i, t in enumerate(tupled_inputs) if _is_differentiable(t, require_grad)]
     return [tup[0] for tup in inp_idx_tup], [tup[1] for tup in inp_idx_tup]
 
 
