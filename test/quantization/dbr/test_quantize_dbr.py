@@ -171,18 +171,26 @@ class TestQuantizeDBRIndividualOps(QuantizeDBRTestCase):
                 super().__init__()
                 self.dim = dim
                 self.weight = torch.nn.Parameter(weight)
+                self.stride = 1
+                self.padding = 0
+                self.output_padding = 0
+                self.groups = 1
+                self.dilation = 1
 
             def forward(self, x):
-                x = convs[dim](x, self.weight)
+                x = convs[dim](
+                    x, self.weight, None, self.stride, self.padding,
+                    self.output_padding, self.groups, self.dilation)
                 return x
 
         for dim in range(1, 4):
-            data = {
+            weights = {
                 1: torch.randn(1, 3, 10),
                 2: torch.randn(1, 3, 10, 10),
                 3: torch.randn(1, 3, 5, 5, 5)
             }
-            model_fp32 = M(dim, data[dim]).eval()
+            data = dict([(k, torch.transpose(v, 0, 1)) for k, v in weights.items()])
+            model_fp32 = M(dim, weights[dim]).eval()
             qconfig = torch.quantization.default_qconfig
             self._test_auto_tracing(model_fp32, qconfig, (data[dim],))
 
