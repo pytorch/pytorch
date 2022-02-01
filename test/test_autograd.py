@@ -2306,6 +2306,24 @@ class TestAutograd(TestCase):
         self.assertIsNotNone(view.grad_fn)
         self.assertIs(view._base, x)
 
+    def test_detach_then_inplace_raises_in_autograd(self):
+        x = torch.randn([], requires_grad=True)
+        orig_x = x.detach().clone()
+
+        y = x ** 2  # saves x
+        z = x.detach()
+        z.zero_()
+        with self.assertRaisesRegex(RuntimeError, "has been modified by an inplace"):
+            y.backward()
+
+    def test_detach_disallows_metadata_change(self):
+        x = torch.randn([], requires_grad=True)
+        detached = x.detach()
+
+        with self.assertRaisesRegex(
+                RuntimeError, "not allowed on a Tensor created from .data or .detach()"):
+            detached.resize_(3, 3)
+
     def _test_type_conversion_backward(self, t, ):
         fvar = Variable(t(torch.randn(5, 5).float()), requires_grad=True)
         fvar.double().sum().backward()
@@ -3502,13 +3520,6 @@ class TestAutograd(TestCase):
         w, v = torch.symeig(A, eigenvectors=False)
         with self.assertRaisesRegex(RuntimeError, 'is not differentiable'):
             torch.autograd.backward([w, v], [torch.ones_like(w), torch.ones_like(v)])
-
-    @skipIfNoLapack
-    def test_svd_no_singularvectors(self):
-        A = torch.randn(2, 2, dtype=torch.float32, requires_grad=True)
-        u, s, v = torch.svd(A, compute_uv=False)
-        with self.assertRaisesRegex(RuntimeError, 'cannot compute backward'):
-            torch.autograd.backward([u, s, v], [torch.ones_like(u), torch.ones_like(s), torch.ones_like(v)])
 
     def test_no_grad_copy(self):
         # create autograd function that saves grad pointer as class static
