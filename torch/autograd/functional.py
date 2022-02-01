@@ -328,7 +328,7 @@ def jvp(func, inputs, v=None, create_graph=False, strict=False):
         the backward (sometimes called the double backwards trick). This is not
         the most performant way of computing the jvp. Please consider using
         `functorch's jvp <https://github.com/pytorch/functorch#jvp>`_
-        or :ref:`the low-level forward-mode AD API<forward-mode-ad>` instead.
+        or the low-level forward-mode AD API instead.
 
     Example:
 
