@@ -4,6 +4,17 @@
 namespace torch {
 namespace jit {
 
+enum class FusionBehavior { STATIC, DYNAMIC };
+
+using FusionStrategy = std::vector<std::pair<FusionBehavior, size_t>>;
+// E.g. {(Static, 2), (Dynamic, 10)}
+// Fuse with static shapes twice then fallback to 10 dynamic fusions, then stop
+// // compiling new fusion groups
+TORCH_API FusionStrategy getFusionStrategy();
+// returns previous strategy
+TORCH_API FusionStrategy setFusionStrategy(FusionStrategy& fusion_strategy);
+
+
 struct TORCH_API ProfilingGraphExecutorImpl : public GraphExecutorImplBase {
   ProfilingGraphExecutorImpl(
       const std::shared_ptr<Graph>& graph,
@@ -22,7 +33,7 @@ struct TORCH_API ProfilingGraphExecutorImpl : public GraphExecutorImplBase {
     optimized_plan_.reset();
     // prevent memory leaks
     fallback_functions_.clear();
-    remaining_bailout_depth_.reset();
+  remaining_bailout_depth_.reset();
   }
 
   bool isOptimized() const override {
@@ -34,7 +45,7 @@ struct TORCH_API ProfilingGraphExecutorImpl : public GraphExecutorImplBase {
       Stack& stack,
       size_t remaining_bailout_depth);
   void runProfilingInsensitiveOptimizations(std::shared_ptr<Graph>& graph);
-  void runProfilingOptimizations(std::shared_ptr<Graph>& graph);
+  void runProfilingOptimizations(std::shared_ptr<Graph>& graph, size_t remaining_depth);
   void replaceFallbackGraphWithFallbackFunction(Block* b);
   std::unique_ptr<ProfilingRecord> pr_;
   c10::optional<ExecutionPlan>
