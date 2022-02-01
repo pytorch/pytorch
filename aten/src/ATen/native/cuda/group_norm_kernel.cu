@@ -568,7 +568,6 @@ void GroupNormKernelImplInternal(
   const int64_t G = group;
   const int64_t D = C / G;
   const T* X_data = X.data_ptr<T>();
-  T* Y_data = Y.data_ptr<T>();
   T* mean_data = mean.data_ptr<T>();
   T* rstd_data = rstd.data_ptr<T>();
 

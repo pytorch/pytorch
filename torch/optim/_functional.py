@@ -5,7 +5,7 @@ from torch import Tensor
 from typing import List, Optional
 
 from .adadelta import adadelta  # type: ignore[attr-defined] # noqa: F401
-from .adagrad import adagrad  # type: ignore[attr-defined] # noqa: F401
+from .adagrad import adagrad, _make_sparse  # type: ignore[attr-defined] # noqa: F401
 from .adamax import adamax  # type: ignore[attr-defined] # noqa: F401
 
 # TODO: use foreach API in optim._functional to do all the computation

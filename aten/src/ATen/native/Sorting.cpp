@@ -122,6 +122,8 @@ void quick_select_template(
   } while (true);
 }
 
+namespace {
+
 QUANTILE_INTERPOLATION_MODE get_quantile_interpolation_mode(
     const c10::string_view interpolation) {
   if (interpolation == "linear") {
@@ -142,16 +144,7 @@ QUANTILE_INTERPOLATION_MODE get_quantile_interpolation_mode(
   }
 }
 
-void quantile_impl(
-    Tensor& out,
-    const Tensor& self,
-    const Tensor& q,
-    const optional<int64_t> _dim,
-    const bool keepdim,
-    const QUANTILE_INTERPOLATION_MODE& interpolation,
-    const bool ignore_nan) {
-  int64_t dim = at::maybe_wrap_dim(_dim.value_or(0), self.dim());
-
+void quantile_checks(const Tensor& self, const Tensor& q) {
   TORCH_CHECK(self.numel() > 0, "quantile() input tensor must be non-empty");
   TORCH_CHECK(q.dim() <= 1, "quantile() q must be a scalar or 1D tensor");
   TORCH_CHECK(
@@ -161,23 +154,24 @@ void quantile_impl(
       self.scalar_type() == q.scalar_type(),
       "quantile() q tensor must be same dtype as the input tensor");
   TORCH_CHECK(
-      self.scalar_type() == out.scalar_type(),
-      "quantile() out tensor must be same dtype as the input tensor");
-  TORCH_CHECK(
       self.device() == q.device(),
       "quantile() q tensor must be on the same device as the input tensor");
-  TORCH_CHECK(
-      self.device() == out.device(),
-      "quantile() out tensor must be on the same device as the input tensor");
+}
 
+std::vector<int64_t> quantile_output_shape(
+    const optional<int64_t> original_dim,
+    const Tensor& self,
+    const Tensor& q,
+    const bool keepdim,
+    int64_t wrapped_dim) {
   // Compute output shape: q_size + reduced_size
   std::vector<int64_t> out_shape;
-  if (_dim && self.dim() > 0) {
+  if (original_dim && self.dim() > 0) {
     out_shape = self.sizes().vec();
     if (keepdim) {
-      out_shape[dim] = 1;
+      out_shape[wrapped_dim] = 1;
     } else {
-      out_shape.erase(out_shape.begin() + dim);
+      out_shape.erase(out_shape.begin() + wrapped_dim);
     }
   } else if (keepdim) {
     out_shape = std::vector<int64_t>(self.dim(), 1);
@@ -185,8 +179,19 @@ void quantile_impl(
   if (q.dim() > 0) {
     out_shape.insert(out_shape.begin(), q.numel());
   }
-  resize_output(out, out_shape);
 
+  return out_shape;
+}
+
+Tensor quantile_compute(
+    const Tensor& self,
+    const Tensor& q,
+    const optional<int64_t> orginal_dim,
+    const bool keepdim,
+    const QUANTILE_INTERPOLATION_MODE& interpolation,
+    const bool ignore_nan,
+    int64_t wrapped_dim,
+    std::vector<int64_t> out_shape) {
   // Checks that all q values are between 0 and 1, inclusive
   // NOTE: this check is only performed when running on the CPU to avoid
   // synchronizing an accelerator with the CPU
@@ -199,12 +204,12 @@ void quantile_impl(
   // Flatten input if no dim provided else move dim to reduce as last dimension.
   // Sort to efficiently query kth values.
   Tensor sorted;
-  if (!_dim) {
+  if (!orginal_dim) {
     sorted = std::get<0>(self.flatten().sort());
-  } else if (dim == self.dim() - 1) {
+  } else if (wrapped_dim == self.dim() - 1) {
     sorted = std::get<0>(self.sort());
   } else {
-    sorted = std::get<0>(self.unsqueeze(-1).transpose(dim, -1).sort());
+    sorted = std::get<0>(self.unsqueeze(-1).transpose(wrapped_dim, -1).sort());
   }
 
   // Treat q as a 1D tensor for the following computations
@@ -273,7 +278,52 @@ void quantile_impl(
     values_below.unsqueeze_(0).transpose_(0, -1).squeeze_(-1);
   }
 
-  out.copy_(values_below);
+  return values_below;
+}
+
+} // namespace
+
+void quantile_out_impl(
+    Tensor& out,
+    const Tensor& self,
+    const Tensor& q,
+    const optional<int64_t> original_dim,
+    const bool keepdim,
+    const QUANTILE_INTERPOLATION_MODE& interpolation,
+    const bool ignore_nan) {
+  quantile_checks(self, q);
+  TORCH_CHECK(
+      self.scalar_type() == out.scalar_type(),
+      "quantile() out tensor must be same dtype as the input tensor");
+  TORCH_CHECK(
+      self.device() == out.device(),
+      "quantile() out tensor must be on the same device as the input tensor");
+
+  int64_t wrapped_dim = at::maybe_wrap_dim(original_dim.value_or(0), self.dim());
+
+  auto out_shape = quantile_output_shape(original_dim, self, q, keepdim, wrapped_dim);
+  resize_output(out, out_shape);
+
+  auto quantile = quantile_compute(
+      self, q, original_dim, keepdim, interpolation, ignore_nan, wrapped_dim, out_shape);
+  out.copy_(quantile);
+}
+
+Tensor quantile_impl(
+    const Tensor& self,
+    const Tensor& q,
+    const optional<int64_t> original_dim,
+    const bool keepdim,
+    const QUANTILE_INTERPOLATION_MODE& interpolation,
+    const bool ignore_nan) {
+  quantile_checks(self, q);
+
+  int64_t wrapped_dim = at::maybe_wrap_dim(original_dim.value_or(0), self.dim());
+
+  auto out_shape = quantile_output_shape(original_dim, self, q, keepdim, wrapped_dim);
+
+  return quantile_compute(
+      self, q, original_dim, keepdim, interpolation, ignore_nan, wrapped_dim, out_shape);
 }
 
 std::tuple<Tensor&, Tensor&> kthvalue_out_impl_cpu(
@@ -522,7 +572,7 @@ Tensor& quantile_out(
     bool keepdim,
     const c10::string_view interpolation,
     Tensor& out) {
-  quantile_impl(
+  quantile_out_impl(
       out,
       self,
       q,
@@ -557,16 +607,13 @@ Tensor quantile(
     optional<int64_t> dim,
     bool keepdim,
     const c10::string_view interpolation) {
-  Tensor out = at::empty({0}, self.options());
-  quantile_impl(
-      out,
+  return quantile_impl(
       self,
       q,
       dim,
       keepdim,
       get_quantile_interpolation_mode(interpolation),
       /*ignore_nan=*/false);
-  return out;
 }
 
 Tensor quantile(
@@ -588,7 +635,7 @@ Tensor& nanquantile_out(
     bool keepdim,
     const c10::string_view interpolation,
     Tensor& out) {
-  quantile_impl(
+  quantile_out_impl(
       out,
       self,
       q,
@@ -623,16 +670,13 @@ Tensor nanquantile(
     optional<int64_t> dim,
     bool keepdim,
     const c10::string_view interpolation) {
-  Tensor out = at::empty({0}, self.options());
-  quantile_impl(
-      out,
+  return quantile_impl(
       self,
       q,
       dim,
       keepdim,
       get_quantile_interpolation_mode(interpolation),
       /*ignore_nan=*/true);
-  return out;
 }
 
 Tensor nanquantile(
