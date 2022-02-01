@@ -2654,22 +2654,14 @@ Tensor svd_backward(const Tensor& gU,
       }
     }();
     // Fill the diagonal
-    const auto diag = ret.diagonal(0, -2, -1);
+    if (gS.defined()) {
+      // We could do vector sum using add_
+      // due to functorch limitation we do a matrix sum
+      ret = ret + gS.diag_embed();
+    }
     if (is_complex && gU.defined() && gVh.defined()) {
-      if (gS.defined()) {
-        at::real(diag).copy_(gS);
-      } else {
-        // Not strictly necessary, but we do it for good measure
-        at::real(diag).zero_();
-      }
+      const auto diag = ret.diagonal(0, -2, -1);
       at::imag(diag).copy_(at::imag(UhgU.diagonal(0, -2, -1)) / S);
-    } else {
-      if (gS.defined()) {
-        diag.copy_(gS);
-      } else {
-        // Not strictly necessary, but we do it for good measure
-        diag.zero_();
-      }
     }
     return ret;
   }();
