@@ -5,6 +5,7 @@
 #include <c10/cuda/CUDAFunctions.h>
 #include <c10/cuda/CUDAGuard.h>
 #include <c10/util/UniqueVoidPtr.h>
+#include <c10/util/flat_hash_map.h>
 #include <c10/util/irange.h>
 
 #include <cuda_runtime_api.h>
@@ -395,7 +396,7 @@ class DeviceCachingAllocator {
 
   // allocated or in use by a stream. Holds all active allocations,
   // whether they came from graph_pools or one of the BlockPools above.
-  std::unordered_set<Block*> active_blocks;
+  ska::flat_hash_set<Block*> active_blocks;
 
   // captures_underway tracks if a capture might be underway on any stream.
   // Most of the time it's zero, in which case malloc can avoid calling
@@ -1318,7 +1319,7 @@ class THCCachingAllocator {
   std::mutex mutex;
 
   // allocated blocks by device pointer
-  std::unordered_map<void*, Block*> allocated_blocks;
+  ska::flat_hash_map<void*, Block*> allocated_blocks;
 
   // lock around calls to cudaFree (to prevent deadlocks with NCCL)
   mutable std::mutex cuda_free_mutex;
