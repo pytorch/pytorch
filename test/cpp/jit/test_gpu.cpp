@@ -3897,7 +3897,7 @@ TEST_F(NVFuserTest, FusionUnaryOps_CUDA) {
       OpTuple{at::expm1, UnaryOpType::Expm1, "expm1"},
       OpTuple{at::floor, UnaryOpType::Floor, "floor"},
       OpTuple{at::frac, UnaryOpType::Frac, "frac"},
-      // OpTuple{at::gelu, UnaryOpType::Gelu, "gelu"},
+      OpTuple{at::gelu, UnaryOpType::Gelu, "gelu"},
       OpTuple{at::lgamma, UnaryOpType::Lgamma, "lgamma"},
       OpTuple{at::log, UnaryOpType::Log, "log"},
       OpTuple{at::log10, UnaryOpType::Log10, "log10"},
@@ -14369,7 +14369,7 @@ void addViewGeluFusion(
 
     auto at_x_add_bias = at_x + at_bias;
     auto at_x_view = at::native::view(at_x_add_bias, output_shape);
-    auto at_y = at::gelu(at_x_view, false);
+    auto at_y = at::gelu(at_x_view);
 
     testValidate(&fusion, outputs, aten_inputs, {at_y}, __LINE__, __FILE__);
   }
@@ -14475,7 +14475,7 @@ void geluViewAddFusion(
     fe.compileFusion(&fusion, aten_inputs, lparams);
     auto outputs = fe.runFusion(aten_inputs, lparams);
 
-    auto at_x_gelu = at::gelu(at_x, false);
+    auto at_x_gelu = at::gelu(at_x);
     auto at_x_view = at::native::view(at_x_gelu, output_shape);
     auto at_y = at_x_view + at_bias;
 
@@ -14531,7 +14531,7 @@ void geluViewBinaryAddFusion(
     fe.compileFusion(&fusion, aten_inputs, lparams);
     auto outputs = fe.runFusion(aten_inputs, lparams);
 
-    auto at_x_gelu = at::gelu(at_x, false);
+    auto at_x_gelu = at::gelu(at_x);
     auto at_x_view = at::native::view(at_x_gelu, output_shape);
     auto at_bias_view = at::native::view(at_bias, output_shape);
     auto at_y = at_x_view + at_bias_view;
@@ -18044,7 +18044,7 @@ TEST_F(NVFuserTest, FusionPointwiseBroadcast_CUDA) {
 
   auto at_x_add_bias = at_x + at_bias;
   auto at_x_view = at::native::view(at_x_add_bias, output_shape);
-  auto aten_y = at::gelu(at_x_view, false);
+  auto aten_y = at::gelu(at_x_view);
 
   testValidate(&fusion, outputs, aten_inputs, {aten_y}, __LINE__, __FILE__);
 }

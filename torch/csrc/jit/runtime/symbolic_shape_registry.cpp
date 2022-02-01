@@ -66,7 +66,7 @@ static const OperatorMap<std::string>& get_schema_to_function_graph() {
       {"aten::rsub.Tensor(Tensor self, Scalar other, Scalar alpha=1) -> Tensor", "unary"},
       {"aten::dropout(Tensor input, float p, bool train) -> Tensor", "unary"},
       {"aten::adaptive_avg_pool2d(Tensor self, int[2] output_size) -> Tensor", "adaptive_avg_pool2d"},
-      {"aten::gelu(Tensor self, bool approximate) -> Tensor", "unary"},
+      {"aten::gelu(Tensor self) -> Tensor", "unary"},
       {"aten::tanh(Tensor self) -> Tensor", "unary"},
       {"aten::erf(Tensor self) -> (Tensor)", "unary"},
       {"prim::NumToTensor.Scalar(Scalar a) -> Tensor", "zero_dim_tensor"},

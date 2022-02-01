@@ -336,8 +336,8 @@ inline Tensor glu(const Tensor& input, const GLUFuncOptions& options = {}) {
 
 // ============================================================================
 
-inline Tensor gelu(const Tensor& input, bool approximate) {
-  return torch::gelu(input, approximate);
+inline Tensor gelu(const Tensor& input) {
+  return torch::gelu(input);
 }
 
 // ============================================================================
