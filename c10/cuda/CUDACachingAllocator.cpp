@@ -326,15 +326,13 @@ class CachingAllocatorConfig {
   }
 
  private:
-  static std::once_flag s_flag;
-  static CachingAllocatorConfig* s_instance;
   static CachingAllocatorConfig& instance() {
-    std::call_once(s_flag, &CachingAllocatorConfig::init);
+    static CachingAllocatorConfig* s_instance = ([]() {
+      auto inst = new CachingAllocatorConfig();
+      inst->parseArgs();
+      return inst;
+    })();
     return *s_instance;
-  }
-  static void init() {
-    s_instance = new CachingAllocatorConfig();
-    s_instance->parseArgs();
   }
 
   CachingAllocatorConfig()
@@ -377,8 +375,6 @@ class CachingAllocatorConfig {
     }
   }
 };
-CachingAllocatorConfig* CachingAllocatorConfig::s_instance;
-std::once_flag CachingAllocatorConfig::s_flag;
 
 class DeviceCachingAllocator {
  private:
