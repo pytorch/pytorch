@@ -341,20 +341,23 @@ def nan_to_num(g, input, nan, posinf, neginf):
     # return the original tensor
     if not sym_help._is_fp(input):
         return input
-    if nan is None: nan = 0.0
+    if nan is None:
+        nan = 0.0
     nan_cond = isnan(g, input)
     nan_result = g.op("Where", nan_cond,
                       g.op("Constant", value_t=torch.FloatTensor([nan])), input)
 
     # For None values of posinf, neginf we use the greatest/lowest finite
     # value representable by input’s dtype.
-    if posinf is None: posinf = 3.402823e+38
+    if posinf is None:
+        posinf = 3.402823e+38
     posinf_cond = logical_and(g, isinf(g, nan_result),
                               gt(g, nan_result, g.op("Constant", value_t=torch.LongTensor([0]))))
     nan_posinf_result = g.op("Where", posinf_cond,
                              g.op("Constant", value_t=torch.FloatTensor([posinf])), nan_result)
 
-    if neginf is None: neginf = -3.402823e+38
+    if neginf is None:
+        neginf = -3.402823e+38
     neginf_cond = logical_and(g, isinf(g, nan_posinf_result),
                               lt(g, nan_posinf_result, g.op("Constant", value_t=torch.LongTensor([0]))))
     return g.op("Where", neginf_cond,
