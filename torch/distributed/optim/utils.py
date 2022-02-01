@@ -30,9 +30,9 @@ def as_functional_optim(optim_cls: Type, *args, **kwargs):
     except KeyError:
         raise ValueError(f"Optimizer {optim_cls} does not have a functional counterpart!")
 
-    return create_functional_optim(functional_cls, *args, **kwargs)
+    return _create_functional_optim(functional_cls, *args, **kwargs)
 
-def create_functional_optim(functional_optim_cls: Type, *args, **kwargs):
+def _create_functional_optim(functional_optim_cls: Type, *args, **kwargs):
     return functional_optim_cls(
         [],
         *args,
