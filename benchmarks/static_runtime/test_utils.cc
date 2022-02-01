@@ -282,7 +282,6 @@ void testStaticRuntime(
       // 2nd run: exercise memory planner and resizing with args2
       // 3rd run: run with args again
       StaticModuleOptions opts{
-          .cleanup_activations = true,
           .enable_out_variant = enable_out_variant,
           .optimize_memory = enable_out_variant,
           .manage_output_tensors = manage_output_tensors};
