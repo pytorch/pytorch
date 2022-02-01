@@ -4154,7 +4154,7 @@ class TestQuantizedConv(TestCase):
             device=torch.device("cuda"),
             input_dtype=torch.qint8, weight_dtype=torch.qint8, output_dtype=torch.qint8)
 
-    # @unittest.skip("used for local benchmarking, uncomment when we want to run it")
+    @unittest.skip("used for local benchmarking, uncomment when we want to run it")
     def test_benchmark(self):
         batch_size = 10
         in_channel = 64
@@ -4180,7 +4180,7 @@ class TestQuantizedConv(TestCase):
         groups = 1
         conv_op = torch.nn.functional.conv2d
         # profile
-        from torch.profiler import profile, record_function, ProfilerActivity
+        from torch.profiler import profile, ProfilerActivity
 
         def trace_handler(p):
             output = p.key_averages().table(sort_by="self_cpu_time_total", row_limit=10)
