@@ -94,6 +94,8 @@ struct TORCH_API MemoryPlan {
 // Location of a symbolic shape among dimensions of the inputs
 struct TORCH_API SymbolicShapePosition {
   SymbolicShapePosition() = default;
+  SymbolicShapePosition(int64_t input_idx, int64_t dim_idx)
+      : input_idx_(input_idx), dim_idx_(dim_idx) {}
 
   int64_t input_idx_;
   int64_t dim_idx_;
