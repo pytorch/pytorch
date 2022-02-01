@@ -70,14 +70,14 @@ def get_repo_labels() -> List[str]:
     return collected_labels
 
 def post_pytorch_comment(pr_number: int, merger: str) -> Any:
-    message = {'body' : f"Hey {merger}. \
+    message = {'body' : f"""Hey {merger}. \
     You merged this PR, but no it does not have both a 'release notes: ...' and 'topics: ...' label. \
     Please add one of each to the PR. The 'release notes: ...' label should represent the part of \
     PyTorch that this PR changes (fx, autograd, distributed, etc) and the 'topics: ...' label should \
     represent the kind of PR it is (non-user visible, new feature, bug fix, perf improvement, etc). \
     The list of valid labels can be found [here](https://github.com/pytorch/pytorch/labels?q=release+notes) \
     for the 'release notes: ...' and [here](https://github.com/pytorch/pytorch/labels?q=topics) for the \
-    'topics: ...'."
+    'topics: ...'."""
 
     response = requests.post(
         f"{PYTORCH_REPO}/issues/{pr_number}/comments",
