@@ -199,7 +199,7 @@ Tensor& normal_out_impl(Tensor& output, const Tensor& mean, double std, c10::opt
 template<template<typename> class normal_kernel, typename RNG>
 Tensor& normal_out_impl(Tensor& output, double mean, const Tensor& std, c10::optional<Generator> gen) {
   CHECK_NORMAL_TENSOR_STD(std);
-  auto mean_tensor = at::empty_like(output, MemoryFormat::Contiguous);
+  auto mean_tensor = at::full({}, mean, output.options());
   auto shape = at::infer_size(mean_tensor.sizes(), std.sizes());
   at::native::resize_output(output, shape);
   normal_impl_<normal_kernel, RNG>(output, 0, 1, gen);
