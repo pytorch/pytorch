@@ -21,6 +21,14 @@ void FuseLinear(std::shared_ptr<Graph>& graph) {
     return is_int_constant(match, vmap, "beta", 1);
   };
 
+  auto dtype_is_none = [](const Match& match,
+                          const std::unordered_map<std::string, Value*>& vmap) {
+    const auto& match_vmap = match.values_map;
+    auto v = toIValue(match_vmap.at(vmap.at("dtype")));
+    auto is_none = v && v->isNone();
+    return is_none;
+  };
+
   // check %weight_t is produced by `aten::t` to make sure
   // we can transform the pattern to `aten::linear`
   auto weight_transposed =
@@ -38,7 +46,8 @@ void FuseLinear(std::shared_ptr<Graph>& graph) {
   addmm_to_linear.RegisterRewritePattern(
       addmm_pattern, fused_linear_addmm, value_mappings);
   addmm_to_linear.runOnGraph(
-      graph, {aten_add_alpha_is_one, beta_is_one, weight_transposed});
+      graph,
+      {aten_add_alpha_is_one, beta_is_one, dtype_is_none, weight_transposed});
 
   std::string matmul_add_pattern = R"IR(
     graph(%input, %weight_t, %bias, %alpha):

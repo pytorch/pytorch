@@ -59,3 +59,22 @@ class TestGraphRewritePasses(JitTestCase):
         FileCheck().check_not("aten::linear").run(model.graph)
         # make sure it runs
         model(x)
+
+    def test_fuse_addmm_to_linear(self):
+        def f(x, y, z):
+            t = z.t()
+            return torch.addmm(x, y, t)
+
+        scripted = torch.jit.script(f)
+        torch._C._jit_pass_fuse_linear(scripted.graph)
+        check_not = ["aten::matmul", "aten::addmm", "aten::add_", "aten::t("]
+        for cn in check_not:
+            FileCheck().check_not(cn).run(scripted.graph)
+
+        def g(x, y, z):
+            t = z.t()
+            return torch.addmm(x, y, t, dtype=torch.half)
+
+        scripted = torch.jit.script(g)
+        torch._C._jit_pass_fuse_linear(scripted.graph)
+        FileCheck().check("aten::addmm").run(scripted.graph)
