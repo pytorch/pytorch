@@ -4,13 +4,14 @@ from tools.codegen.api import cpp
 from tools.codegen.api.types import Binding, CType, CppSignatureGroup
 from tools.codegen.model import (
     NativeFunction,
-    Argument,
     Type,
     BaseType,
     OptionalType,
     ListType,
     BaseTy,
 )
+#debug
+from tools.codegen.model import Argument, TensorOptionsArguments, SelfArgument
 
 # This file generates the code for unboxing wrappers, i.e., the glue logic to unbox a boxed operator and convert the
 # ivalues from stack to correct arguments to the unboxed kernel, based on corresponding JIT schema. This codegen is
@@ -104,8 +105,12 @@ def convert_arguments(f: NativeFunction) -> Tuple[List[Binding], List[str]]:
                  range(len(args))] + [""]
     binding_list = []
     for i, arg in enumerate(args):
+        # expecting only Argument
+        if not isinstance(arg.argument, Argument):
+            raise Exception(f"Unexpected argument type, expecting `Argument` but got {arg}")
+        argument: Argument = arg.argument
         unboxed_name, _, code = argumenttype_ivalue_convert(
-            arg.argument.type, arg.argument.name, mutable=arg.argument.is_write
+            argument.type, argument.name, mutable=argument.is_write
         )
         code_list.extend(code)
         binding_list.append(arg.with_name(unboxed_name))
