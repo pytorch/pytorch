@@ -13725,16 +13725,6 @@ op_db: List[OpInfo] = [
            supports_out=True,
            sample_inputs_func=sample_inputs_normal_tensor_second,
            skips=(
-               # AssertionError: False is not true : Tensors failed to compare
-               # as equal!With rtol=1.3e-06 and atol=1e-05, found 4 element(s)
-               # (out of 12) whose difference(s) exceeded the margin of error
-               # (including 0 nan comparisons).
-               DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_noncontiguous_samples'),
-               # AssertionError: False is not true : Tensors failed to compare
-               # as equal!With rtol=1e-07 and atol=1e-07, found 10 element(s)
-               # (out of 12) whose difference(s) exceeded the margin of error
-               # (including 0 nan comparisons).
-               DecorateInfo(unittest.skip("Skipped!"), 'TestMathBits', 'test_neg_view'),
                # AssertionError: JIT Test does not execute any logic
                DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
                # Seems like a bug:
