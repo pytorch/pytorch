@@ -1220,7 +1220,6 @@ class TestTEFuser(JitTestCase):
             try:
                 t = torch.jit.trace(fn, (input_v, mask))
                 torch.testing.assert_close(ref, t(input_v, mask))
-                print(torch.jit.last_executed_optimized_graph())
                 self.assertLastGraphAllFused()
             except Exception as e:
                 raise RuntimeError(
@@ -1425,8 +1424,6 @@ class TestTEFuser(JitTestCase):
             except Exception:
                 # If we can't interpret this IR, don't bother checking NNC.
                 continue
-
-            print(graph)
 
             # Compile the graph
             try:

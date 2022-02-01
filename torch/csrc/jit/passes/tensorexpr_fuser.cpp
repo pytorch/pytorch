@@ -365,10 +365,12 @@ class TensorExprFuser {
   TensorExprFuser(
       std::shared_ptr<Graph> graph,
       size_t min_group_size,
-      bool add_composed_op)
+      bool add_composed_op,
+      bool fuse_to_dynamic_shapes)
       : graph_(std::move(graph)),
         min_group_size_(min_group_size),
-        add_composed_op_(add_composed_op) {
+        add_composed_op_(add_composed_op),
+        fuse_to_dynamic_shapes_(fuse_to_dynamic_shapes) {
     parseTENotFuseOption();
   }
 
@@ -506,7 +508,7 @@ class TensorExprFuser {
     // fusion is done.
     inlineSmallFusionGroups(graph_->block());
     GRAPH_DUMP("After inlining small fusion groups: ", graph_);
-    if (tensorExprDynamicShapeFusionEnabled()) {
+    if (fuse_to_dynamic_shapes_) {
       VLOG(1) << "TensorExpr fusion with dynamic shapes is enabled"
               << std::endl;
       generalizeFusionGroups(graph_->block());
@@ -837,7 +839,7 @@ class TensorExprFuser {
       "aten::__rshift__.Scalar(Tensor self, Scalar other) -> Tensor",
       "aten::__rshift__.Tensor(Tensor self, Tensor other) -> Tensor",
     };
-    static const OperatorSet cpu_only_operator_set{
+    static const OperatorSet cpu_compute_heavy_set{
       "aten::conv2d(Tensor input, Tensor weight, Tensor? bias=None, int[2] stride=1, int[2] padding=0, int[2] dilation=1, int groups=1) -> Tensor",
       "aten::matmul(Tensor self, Tensor other) -> Tensor",
     };
@@ -919,7 +921,11 @@ class TensorExprFuser {
     }
 
     // Operator is only supported on CPU.
-    if (node->isMemberOf(cpu_only_operator_set)) {
+    if (node->isMemberOf(cpu_compute_heavy_set)) {
+      if (fuse_to_dynamic_shapes_) {
+        return false;
+      }
+
       auto device = tensorexpr::pickDeviceType(node->inputs());
       if (!device) {
         device = tensorexpr::pickDeviceType(node->outputs());
@@ -1037,7 +1043,7 @@ class TensorExprFuser {
     // A hook to optimizations limitter to allow bisecting the pass
     REQ(JIT_OPT_ALLOWED);
 
-    if (tensorExprDynamicShapeFusionEnabled()) {
+    if (fuse_to_dynamic_shapes_) {
       // Allow only if the node has a shape function defined.
       // ListConstruct node is an exception since that is needed to fuse
       // aten::cat, though it does not have a shape function.
@@ -1210,12 +1216,15 @@ class TensorExprFuser {
   size_t min_group_size_;
   // compose Runtime Type Guard and Kernel in one op
   bool add_composed_op_;
+  // generalize static shapes to dynamic shapes
+  bool fuse_to_dynamic_shapes_;
 };
 
 void FuseTensorExprs(
     std::shared_ptr<Graph>& graph,
     size_t min_group_size,
-    bool add_composed_op) {
+    bool add_composed_op,
+    bool fuse_to_dynamic_shapes) {
   GRAPH_DUMP("Before TExprFuser: ", graph);
 
   // Temporary change for Block code generation.
@@ -1223,10 +1232,14 @@ void FuseTensorExprs(
     min_group_size = 1;
   }
 
+  if (add_composed_op) {
+    TORCH_INTERNAL_ASSERT(fuse_to_dynamic_shapes, "Fusing static shapes with composed op NYI");
+  }
+
   // Get rid of dead code so that we don't waste effort fusing it.
   EliminateDeadCode(graph);
 
-  TensorExprFuser fuser(graph, min_group_size, add_composed_op);
+  TensorExprFuser fuser(graph, min_group_size, add_composed_op, fuse_to_dynamic_shapes);
   fuser.run();
 
   EliminateCommonSubexpression(graph);
@@ -1236,7 +1249,8 @@ void FuseTensorExprs(
 }
 
 Operation createTensorExprOp(const Node* node) {
-  if (!tensorExprDynamicShapeFusionEnabled()) {
+  bool dynamic_shape_fusion_node = node->hasAttribute(attr::striding_inputs_desc);
+  if (!dynamic_shape_fusion_node) {
     auto kernel =
         std::make_shared<tensorexpr::TensorExprKernel>(node->g(attr::Subgraph));
     return [kernel](Stack& stack) {

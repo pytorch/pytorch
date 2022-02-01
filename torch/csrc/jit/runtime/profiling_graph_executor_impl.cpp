@@ -382,8 +382,9 @@ void runNoGradOptimizations(std::shared_ptr<Graph>& graph) {
       // Rewrite subgraphs with many MMs into expressions that batch them.
       BatchMM(graph);
       GRAPH_DEBUG("After BatchMM, before Fusion\n", *graph);
-
-      FuseTensorExprs(graph, getFusionGroupInlining() ? 2 : 1);
+      auto min_size = getFusionGroupInlining() ? 2 : 1;
+      auto dyn_shapes = tensorExprDynamicShapeFusionEnabled();
+      FuseTensorExprs(graph, min_size, /*composed_op*/false, dyn_shapes);
       GRAPH_DEBUG(
           "After Fusion, before RemoveTensorTypeSpecializations\n", *graph);
 
