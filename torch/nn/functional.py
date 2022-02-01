@@ -1311,9 +1311,7 @@ def dropout2d(input: Tensor, p: float = 0.5, training: bool = True, inplace: boo
     if p < 0.0 or p > 1.0:
         raise ValueError("dropout probability has to be between 0 and 1, " "but got {}".format(p))
     inp_dim = input.dim()
-    msg = f"dropout2d: Input should be 3-D (unbatched) or 4-D (batched) but received {inp_dim}-D tensor"
-    assert inp_dim in (2, 3, 4), msg
-    if inp_dim == 2:
+    if inp_dim not in (3, 4):
         warn_msg = ("dropout2d: Received a 2D input to dropout2d, which is deprecated "
                     "and will result in an error in a future release. To retain the behavior "
                     "and silence this warning, please use dropout instead. Note that dropout2d "
@@ -1353,9 +1351,7 @@ def dropout3d(input: Tensor, p: float = 0.5, training: bool = True, inplace: boo
     if p < 0.0 or p > 1.0:
         raise ValueError("dropout probability has to be between 0 and 1, " "but got {}".format(p))
     inp_dim = input.dim()
-    msg = f"dropout3d: Input should be 4-D (unbatched) or 5-D (batched) but received {inp_dim}-D tensor"
-    assert inp_dim in (3, 4, 5), msg
-    if inp_dim == 3:
+    if inp_dim not in (4, 5):
         warn_msg = ("dropout3d: Received a 3D input to dropout3d, which is deprecated "
                     "and will result in an error in a future release. To retain the behavior "
                     "and silence this warning, please use dropout instead. Note that dropout3d "

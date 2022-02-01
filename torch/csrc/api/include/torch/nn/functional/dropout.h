@@ -54,13 +54,6 @@ inline Tensor _dropoutNd_helper(Tensor input, double p, bool training, bool inpl
     p);
 
   auto inp_dim = input.dim();
-  // (inp_dim == unbatched_dim - 1) is for Backward Compatibility for
-  // incorrect usage. This should be removed once this is deprecated.
-  TORCH_CHECK(
-      (inp_dim == unbatched_dim - 1) || inp_dim == batched_dim || inp_dim == unbatched_dim,
-      fn_name, ": Input should be ", unbatched_dim, "-D (unbatched) or ", batched_dim, "-D (batched) but received ",
-      inp_dim,
-      "-D tensor");
   auto is_batched = inp_dim == batched_dim;
   if (!is_batched) {
     if (inplace) {
