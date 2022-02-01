@@ -1393,6 +1393,9 @@ def gradcheck(
         "Setting check_batched_grad=True requires check_backward_ad to be True")
     assert not (check_batched_forward_grad and not check_forward_ad), (
         "Setting check_batched_forward_grad=True requires check_forward_ad to be True")
+    if check_forward_ad:
+        assert torch.autograd.forward_ad._current_level < 0, (
+            "Gradcheck cannot be called inside a dual_level context.")
     args = locals().copy()
     args.pop("raise_exception")
     if not raise_exception:
