@@ -42,14 +42,11 @@ class PostLocalSGDOptimizer(torch.optim.Optimizer):
         >>>  # In the first 100 steps, DDP runs global gradient averaging at every step.
         >>>  # After 100 steps, DDP runs gradient averaging within each subgroup (intra-node by default),
         >>>  # and post-localSGD optimizer runs global model averaging every 4 steps after applying the local optimizer.
-        >>>  for step in range(0, 20):
+        >>>  for step in range(0, 200):
         >>>     opt.zero_grad()
         >>>     loss = loss_fn(output, labels)
         >>>     loss.backward()
         >>>     opt.step()
-
-    .. warning ::
-        `PostLocalSDGOptimizer` is experimental and subject to change.
     """
 
     def __init__(
