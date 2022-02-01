@@ -552,7 +552,7 @@ TensorOptions linspace_logspace_infer_options(
 Tensor linspace(
     const Scalar& start,
     const Scalar& end,
-    c10::optional<int64_t> steps,
+    int64_t steps,
     c10::optional<ScalarType> dtype,
     c10::optional<Layout> layout,
     c10::optional<Device> device,
@@ -560,10 +560,9 @@ Tensor linspace(
   // See [Note: hacky wrapper removal for TensorOptions]
   TensorOptions options = TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory);
 
-  const auto steps_ = steps.value_or(100);
-  TORCH_CHECK(steps_ >= 0, "number of steps must be non-negative");
+  TORCH_CHECK(steps >= 0, "number of steps must be non-negative");
   auto result_options = linspace_logspace_infer_options(start, end, options, "torch.linspace()");
-  Tensor result = at::empty({steps_}, result_options);
+  Tensor result = at::empty({steps}, result_options);
   return at::linspace_out(result, start, end, steps);
 }
 

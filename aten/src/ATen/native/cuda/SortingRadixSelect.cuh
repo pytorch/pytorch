@@ -293,10 +293,11 @@ __device__ scalar_t findPattern(
 }
 
 // Returns the top-Kth element found in the data using radix selection
-template <typename scalar_t, typename bitwise_t, typename index_t, bool Order>
+template <typename scalar_t, typename bitwise_t, typename index_t>
 __device__ void radixSelect(
     scalar_t* data,
     index_t k,
+    bool largest,
     index_t sliceSize,
     index_t withinSliceStride,
     int* smem,
@@ -318,7 +319,6 @@ __device__ void radixSelect(
 
   // We start at the most significant digit in our radix, scanning
   // through to the least significant digit
-#pragma unroll
   for (int digitPos = sizeof(scalar_t) * 8 - RADIX_BITS; digitPos >= 0;
        digitPos -= RADIX_BITS) {
     // Count radix distribution for the current position and reduce
@@ -385,7 +385,7 @@ __device__ void radixSelect(
 
     // All threads participate in the comparisons below to know the
     // final result
-    if (Order) {
+    if (largest) {
       // Process in descending order
 #pragma unroll
       for (int i = RADIX_SIZE - 1; i >= 0; --i) {
