@@ -427,6 +427,27 @@ Tensor& eye_out_cpu(int64_t n, int64_t m, Tensor& result) {
 
 namespace {
 
+// The ZeroTensor allocator ignores whatever allocation is requested and always
+// gives you nullptr
+struct ZeroTensorAllocator final : public at::Allocator {
+  ZeroTensorAllocator(at::Device device) : device_(device) {};
+  ~ZeroTensorAllocator() override = default;
+  static void deleter(void* const pointer) {
+    TORCH_INTERNAL_ASSERT(!pointer);
+  }
+  DataPtr allocate(const size_t nbytes) const override {
+    return {nullptr, nullptr, &deleter, device_};
+  }
+  DeleterFnPtr raw_deleter() const override {
+    return deleter;
+  }
+  at::Device device_;
+};
+
+at::Allocator* GetZeroTensorAllocator(ZeroTensorAllocator& zt) {
+  return &zt;
+}
+
 // Performs dtype inference for full
 TensorOptions infer_full_options(
   const Scalar& fill_value,
@@ -531,7 +552,7 @@ TensorOptions linspace_logspace_infer_options(
 Tensor linspace(
     const Scalar& start,
     const Scalar& end,
-    c10::optional<int64_t> steps,
+    int64_t steps,
     c10::optional<ScalarType> dtype,
     c10::optional<Layout> layout,
     c10::optional<Device> device,
@@ -539,10 +560,9 @@ Tensor linspace(
   // See [Note: hacky wrapper removal for TensorOptions]
   TensorOptions options = TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory);
 
-  const auto steps_ = steps.value_or(100);
-  TORCH_CHECK(steps_ >= 0, "number of steps must be non-negative");
+  TORCH_CHECK(steps >= 0, "number of steps must be non-negative");
   auto result_options = linspace_logspace_infer_options(start, end, options, "torch.linspace()");
-  Tensor result = at::empty({steps_}, result_options);
+  Tensor result = at::empty({steps}, result_options);
   return at::linspace_out(result, start, end, steps);
 }
 
@@ -1055,11 +1075,11 @@ Tensor _efficientzerotensor(IntArrayRef size,
     c10::optional<Device> device,
     c10::optional<bool> pin_memory) {
     auto device_ = device_or_default(device);
-    auto allocator = at::native::ZeroTensorAllocator(device_);
+    auto allocator = ZeroTensorAllocator(device_);
     auto dtype_ = dtype_or_default(dtype);
-    auto zero_ks = at::DispatchKeySet(c10::DispatchKey::CPU) | at::DispatchKeySet(c10::DispatchKey::ZeroTensor);
-    auto out = at::detail::empty_generic(size, &allocator, zero_ks, dtype_, c10::nullopt);
-    return out;
+    constexpr auto zero_ks = at::DispatchKeySet(at::DispatchKey::ZeroTensor);
+    return at::detail::empty_generic(
+        size, &allocator, zero_ks, dtype_, c10::nullopt);
 }
 
 Tensor& zeros_out(IntArrayRef size, Tensor& result) {

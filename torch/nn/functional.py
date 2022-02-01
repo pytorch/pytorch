@@ -1596,18 +1596,16 @@ In-place version of :func:`~leaky_relu`.
 )
 
 
-def prelu(input: Tensor, weight: Tensor) -> Tensor:
+prelu = _add_docstr(
+    torch.prelu,
     r"""prelu(input, weight) -> Tensor
 
-    Applies element-wise the function
-    :math:`\text{PReLU}(x) = \max(0,x) + \text{weight} * \min(0,x)` where weight is a
-    learnable parameter.
+Applies element-wise the function
+:math:`\text{PReLU}(x) = \max(0,x) + \text{weight} * \min(0,x)` where weight is a
+learnable parameter.
 
-    See :class:`~torch.nn.PReLU` for more details.
-    """
-    if has_torch_function_unary(input):
-        return handle_torch_function(prelu, (input,), input, weight)
-    return torch.prelu(input, weight)
+See :class:`~torch.nn.PReLU` for more details.
+""")
 
 
 def rrelu(
@@ -1651,32 +1649,29 @@ See :class:`~torch.nn.LogSigmoid` for more details.
 )
 
 
-def gelu(input):
-    r"""gelu(input) -> Tensor
-
-    Applies element-wise the function
-    :math:`\text{GELU}(x) = x * \Phi(x)`
-
-    where :math:`\Phi(x)` is the Cumulative Distribution Function for Gaussian Distribution.
-
-    See `Gaussian Error Linear Units (GELUs) <https://arxiv.org/abs/1606.08415>`_.
-    """
-    if has_torch_function_unary(input):
-        return handle_torch_function(gelu, (input,), input)
-    return torch._C._nn.gelu(input)
-
-
-def hardshrink(input: Tensor, lambd: float = 0.5) -> Tensor:
+gelu = _add_docstr(
+    torch._C._nn.gelu,
     r"""
-    hardshrink(input, lambd=0.5) -> Tensor
+gelu(input) -> Tensor
 
-    Applies the hard shrinkage function element-wise
+Applies element-wise the function
+:math:`\text{GELU}(x) = x * \Phi(x)`
 
-    See :class:`~torch.nn.Hardshrink` for more details.
-    """
-    if has_torch_function_unary(input):
-        return handle_torch_function(hardshrink, (input,), input, lambd=lambd)
-    return torch.hardshrink(input, lambd)
+where :math:`\Phi(x)` is the Cumulative Distribution Function for Gaussian Distribution.
+
+See `Gaussian Error Linear Units (GELUs) <https://arxiv.org/abs/1606.08415>`_.
+""")
+
+
+hardshrink = _add_docstr(
+    torch.hardshrink,
+    r"""
+hardshrink(input, lambd=0.5) -> Tensor
+
+Applies the hard shrinkage function element-wise
+
+See :class:`~torch.nn.Hardshrink` for more details.
+""")
 
 
 def tanhshrink(input):
@@ -1939,50 +1934,45 @@ def hardsigmoid(input: Tensor, inplace: bool = False) -> Tensor:
     return torch._C._nn.hardsigmoid(input)
 
 
-def linear(input: Tensor, weight: Tensor, bias: Optional[Tensor] = None) -> Tensor:
+linear = _add_docstr(
+    torch._C._nn.linear,
     r"""
-    Applies a linear transformation to the incoming data: :math:`y = xA^T + b`.
+linear(input, weight, bias=None) -> Tensor
 
-    This operator supports :ref:`TensorFloat32<tf32_on_ampere>`.
+Applies a linear transformation to the incoming data: :math:`y = xA^T + b`.
 
-    Shape:
+This operator supports :ref:`TensorFloat32<tf32_on_ampere>`.
 
-        - Input: :math:`(*, in\_features)` where `*` means any number of
-          additional dimensions, including none
-        - Weight: :math:`(out\_features, in\_features)` or :math:`(in\_features)`
-        - Bias: :math:`(out\_features)` or :math:`()`
-        - Output: :math:`(*, out\_features)` or :math:`(*)`, based on the shape of the weight
-    """
-    if has_torch_function_variadic(input, weight, bias):
-        return handle_torch_function(linear, (input, weight, bias), input, weight, bias=bias)
-    return torch._C._nn.linear(input, weight, bias)
+Shape:
+
+    - Input: :math:`(*, in\_features)` where `*` means any number of
+        additional dimensions, including none
+    - Weight: :math:`(out\_features, in\_features)` or :math:`(in\_features)`
+    - Bias: :math:`(out\_features)` or :math:`()`
+    - Output: :math:`(*, out\_features)` or :math:`(*)`, based on the shape of the weight
+""")
 
 
-def bilinear(input1: Tensor, input2: Tensor, weight: Tensor, bias: Optional[Tensor] = None) -> Tensor:
+bilinear = _add_docstr(
+    torch.bilinear,
     r"""
-    Applies a bilinear transformation to the incoming data:
-    :math:`y = x_1^T A x_2 + b`
+bilinear(input1, input2, weight, bias=None) -> Tensor
 
-    Shape:
+Applies a bilinear transformation to the incoming data:
+:math:`y = x_1^T A x_2 + b`
 
-        - input1: :math:`(N, *, H_{in1})` where :math:`H_{in1}=\text{in1\_features}`
-          and :math:`*` means any number of additional dimensions.
-          All but the last dimension of the inputs should be the same.
-        - input2: :math:`(N, *, H_{in2})` where :math:`H_{in2}=\text{in2\_features}`
-        - weight: :math:`(\text{out\_features}, \text{in1\_features},
-          \text{in2\_features})`
-        - bias: :math:`(\text{out\_features})`
-        - output: :math:`(N, *, H_{out})` where :math:`H_{out}=\text{out\_features}`
-          and all but the last dimension are the same shape as the input.
-    """
-    if has_torch_function_variadic(input1, input2, weight, bias):
-        return handle_torch_function(
-            bilinear,
-            (input1, input2, weight, bias),
-            input1, input2, weight,
-            bias=bias
-        )
-    return torch.bilinear(input1, input2, weight, bias)
+Shape:
+
+    - input1: :math:`(N, *, H_{in1})` where :math:`H_{in1}=\text{in1\_features}`
+      and :math:`*` means any number of additional dimensions.
+      All but the last dimension of the inputs should be the same.
+    - input2: :math:`(N, *, H_{in2})` where :math:`H_{in2}=\text{in2\_features}`
+    - weight: :math:`(\text{out\_features}, \text{in1\_features},
+      \text{in2\_features})`
+    - bias: :math:`(\text{out\_features})`
+    - output: :math:`(N, *, H_{out})` where :math:`H_{out}=\text{out\_features}`
+      and all but the last dimension are the same shape as the input.
+""")
 
 
 def silu(input: Tensor, inplace: bool = False) -> Tensor:
@@ -3863,17 +3853,12 @@ def interpolate(input: Tensor, size: Optional[int] = None, scale_factor: Optiona
     if input.dim() == 5 and mode == "nearest":
         return torch._C._nn.upsample_nearest3d(input, output_size, scale_factors)
 
-    # TODO: Remove this scripting logic once the 2-week FC window has passed.
-    if mode == "nearest-exact":
-        if not torch.jit.is_scripting():
-            if input.dim() == 3 and mode == "nearest-exact":
-                return torch._C._nn._upsample_nearest_exact1d(input, output_size, scale_factors)
-            if input.dim() == 4 and mode == "nearest-exact":
-                return torch._C._nn._upsample_nearest_exact2d(input, output_size, scale_factors)
-            if input.dim() == 5 and mode == "nearest-exact":
-                return torch._C._nn._upsample_nearest_exact3d(input, output_size, scale_factors)
-        else:
-            raise RuntimeError("TorchScript currently does not support nearest-exact")
+    if input.dim() == 3 and mode == "nearest-exact":
+        return torch._C._nn._upsample_nearest_exact1d(input, output_size, scale_factors)
+    if input.dim() == 4 and mode == "nearest-exact":
+        return torch._C._nn._upsample_nearest_exact2d(input, output_size, scale_factors)
+    if input.dim() == 5 and mode == "nearest-exact":
+        return torch._C._nn._upsample_nearest_exact3d(input, output_size, scale_factors)
 
     if input.dim() == 3 and mode == "area":
         assert output_size is not None
@@ -3890,26 +3875,16 @@ def interpolate(input: Tensor, size: Optional[int] = None, scale_factor: Optiona
         return torch._C._nn.upsample_linear1d(input, output_size, align_corners, scale_factors)
     if input.dim() == 4 and mode == "bilinear":
         assert align_corners is not None
-        # Enforce that the full call with the new kwarg is not invoked when scripting.
-        # TODO: Remove this scripting logic once the 2-week FC window has passed.
         if antialias:
-            if not torch.jit.is_scripting():
-                return torch._C._nn._upsample_bilinear2d_aa(input, output_size, align_corners, scale_factors)
-            else:
-                raise RuntimeError("TorchScript currently does not support antialias in interpolate")
+            return torch._C._nn._upsample_bilinear2d_aa(input, output_size, align_corners, scale_factors)
         return torch._C._nn.upsample_bilinear2d(input, output_size, align_corners, scale_factors)
     if input.dim() == 5 and mode == "trilinear":
         assert align_corners is not None
         return torch._C._nn.upsample_trilinear3d(input, output_size, align_corners, scale_factors)
     if input.dim() == 4 and mode == "bicubic":
         assert align_corners is not None
-        # Enforce that the full call with the new kwarg is not invoked when scripting.
-        # TODO: Remove this scripting logic once the 2-week FC window has passed.
         if antialias:
-            if not torch.jit.is_scripting():
-                return torch._C._nn._upsample_bicubic2d_aa(input, output_size, align_corners, scale_factors)
-            else:
-                raise RuntimeError("TorchScript currently does not support antialias in interpolate")
+            return torch._C._nn._upsample_bicubic2d_aa(input, output_size, align_corners, scale_factors)
         return torch._C._nn.upsample_bicubic2d(input, output_size, align_corners, scale_factors)
 
     if input.dim() == 3 and mode == "bilinear":
@@ -4391,13 +4366,13 @@ pad = _pad
 # distance
 
 
-def pairwise_distance(x1: Tensor, x2: Tensor, p: float = 2.0, eps: float = 1e-6, keepdim: bool = False) -> Tensor:
+pairwise_distance = _add_docstr(
+    torch.pairwise_distance,
     r"""
-    See :class:`torch.nn.PairwiseDistance` for details
-    """
-    if has_torch_function_variadic(x1, x2):
-        return handle_torch_function(pairwise_distance, (x1, x2), x1, x2, p=p, eps=eps, keepdim=keepdim)
-    return torch.pairwise_distance(x1, x2, p, eps, keepdim)
+pairwise_distance(x1, x2, p=2.0, eps=1e-6, keepdim=False) -> Tensor
+
+See :class:`torch.nn.PairwiseDistance` for details
+""")
 
 
 pdist = _add_docstr(
