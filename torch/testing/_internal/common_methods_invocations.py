@@ -14448,8 +14448,6 @@ op_db: List[OpInfo] = [
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            skips=(
-               # sort does not correctly warn when resizing out= inputs
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning'),
                # Allows unsafe cast
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out'),
                DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_backward'),
@@ -15101,8 +15099,6 @@ op_db: List[OpInfo] = [
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            skips=(
-               # msort does not correctly warn when resizing out= inputs.
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning'),
                # Expected RuntimeError when doing an unsafe cast from a result of dtype
                #   torch.float32 into an out= with dtype torch.long
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out'),
