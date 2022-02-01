@@ -316,12 +316,12 @@ def _slice_helper(g, input, axes, starts, ends, steps=None, dynamic_slice=False)
 
 _fp_tensor_types = set((torch.float16, torch.float32, torch.float64, torch.bfloat16))
 _fp_scalar_types = set(("Float", "Double", "Half", "BFloat16"))
-_bool_tensor_types = set((torch.bool))
-_bool_scalar_types = set(("Bool"))
+_bool_tensor_types = set((torch.bool,))
+_bool_scalar_types = set(("Bool",))
 
 def _is_specific_type_group(value, tensor_types, scalar_types):
     if value is None:
-      return False
+        return False
     if isinstance(value, torch.Tensor):
         return value.dtype in tensor_types
     else:
