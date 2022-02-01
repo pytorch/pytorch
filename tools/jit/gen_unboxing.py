@@ -21,10 +21,6 @@ class ComputeUnboxingFunctions:
 
     @method_with_native_function
     def __call__(self, f: NativeFunction) -> str:
-        sig_group = CppSignatureGroup.from_native_function(
-            f, method=(Variant.method in f.variants), fallback_binding=f.manual_cpp_binding
-        )
-        sig = sig_group.most_faithful_signature()
 
         if self.target is Target.DECLARATION:
             # Note [The ATen Codegen Unboxing API]
@@ -43,22 +39,21 @@ class ComputeUnboxingFunctions:
 TORCH_API void {f.func.name.unambiguous_name()}(Stack & stack);
 """
         else:
-            # gather all the arguments from native function, including "out"
-            args = list(f.func.arguments.flat_non_out) + (
-                list(f.func.arguments.out) if f.func.arguments.out else []
+            sig_group = CppSignatureGroup.from_native_function(
+                f, method=(Variant.method in f.variants)
             )
-
+            sig = sig_group.most_faithful_signature()
             # parse arguments into C++ code
-            binding_list, code_list = convert_arguments(args,
-                                                        has_tensor_options=f.func.arguments.tensor_options is not None)
+            binding_list, code_list = convert_arguments(f)
 
             # for each C++ argument, generate the conversion code
             code_connector = "\n\t"
             arg_connector = ",\n\t\t"
             # function call and push back to stack
             prefix = "self_base." if sig.method else "at::"
-            args_str = "" if not binding_list else f"""
-        {arg_connector.join(e.expr for e in translate(binding_list, sig.arguments(), method=sig.method))}
+            translated_args = translate(binding_list, sig.arguments(), method=sig.method)
+            args_str = "" if not translated_args else f"""
+        {arg_connector.join(e.expr for e in translated_args)}
     """
             if len(f.func.returns) == 0:
                 ret_str = ""
@@ -73,7 +68,7 @@ TORCH_API void {f.func.name.unambiguous_name()}(Stack & stack);
 TORCH_API void {f.func.name.unambiguous_name()}(Stack & stack) {{
     {code_connector.join(code_list)}
 
-    drop(stack, {len(args)});
+    drop(stack, {len(binding_list)});
 
     {ret_str}{prefix}{sig.name()}({args_str});
     {push_str}
@@ -88,7 +83,7 @@ class ComputeCodegenUnboxedKernels:
     def __call__(self, f: NativeFunction) -> str:
         # We unconditionally generate function wrappers,
         sig_group = CppSignatureGroup.from_native_function(
-            f, method=(Variant.method in f.variants), fallback_binding=f.manual_cpp_binding
+            f, method=(Variant.method in f.variants)
         )
 
         sig = sig_group.most_faithful_signature()

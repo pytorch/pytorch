@@ -1,8 +1,9 @@
 from typing import List, Tuple
 
-from tools.codegen.api.cpp import argumenttype_type, argument
-from tools.codegen.api.types import Binding, CType
+from tools.codegen.api import cpp
+from tools.codegen.api.types import Binding, CType, CppSignatureGroup
 from tools.codegen.model import (
+    NativeFunction,
     Argument,
     Type,
     BaseType,
@@ -96,26 +97,26 @@ connector = "\n\t"
 
 
 # Convert all the arguments in a NativeFunction to C++ code
-def convert_arguments(args: List[Argument], *, has_tensor_options: bool) -> Tuple[List[Binding], List[str]]:
+def convert_arguments(f: NativeFunction) -> Tuple[List[Binding], List[str]]:
+    # we need the 'self' argument so method needs to be False, also it doesn't matter if signature faithful or not
+    args = CppSignatureGroup.from_native_function(f, method=False).most_faithful_signature().arguments()
     code_list = [f"c10::IValue {args[i].name} = std::move(peek(stack, {i}, {len(args)}));" for i in
                  range(len(args))] + [""]
     binding_list = []
     for i, arg in enumerate(args):
-        unboxed_name, _, code = argumenttype_ivalue_convert(arg.type, arg.name, mutable=arg.is_write)
+        unboxed_name, _, code = argumenttype_ivalue_convert(
+            arg.argument.type, arg.argument.name, mutable=arg.argument.is_write
+        )
         code_list.extend(code)
-        # we need the 'self' argument so method needs to be False, also it doesn't matter if signature faithful or not
-        arg_binding = argument(arg, cpp_no_default_args=set(), method=False, faithful=False,
-                               has_tensor_options=has_tensor_options)
-        # since no TensorOptions here, we can safely assume there's only 1 element in arg_binding.
-        if not arg_binding:
-            raise Exception(f"Argument {arg} cannot be converted to Binding. has_tensor_options = {has_tensor_options}")
-        binding_list.append(arg_binding[0].with_name(unboxed_name))
+        binding_list.append(arg.with_name(unboxed_name))
     return binding_list, code_list
 
 
-# Take an argument in JIT type format, returns the C++ code to convert an ivalue from stack to corresponding C++ type.
+# Takes in the type, name and mutability corresponding to an argument, and generates a tuple of:
+# (1) the C++ code necessary to unbox the argument
+# (2) A Binding corresponding to the newly created unboxed variable, including variable name and its CType
 def argumenttype_ivalue_convert(t: Type, arg_name: str, *, mutable: bool = False) -> Tuple[str, CType, List[str]]:
-    ctype = argumenttype_type(t=t, mutable=mutable, binds=arg_name).type
+    ctype = cpp.argumenttype_type(t=t, mutable=mutable, binds=arg_name).type
 
     if isinstance(t, BaseType):
         out_name = f"{arg_name}_base"
