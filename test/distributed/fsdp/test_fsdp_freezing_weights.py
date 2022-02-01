@@ -10,7 +10,7 @@ from torch import distributed as dist
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.nn.parallel import DistributedDataParallel
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
-from torch.testing._internal.commonfsdp import (
+from torch.testing._internal.common_fsdp import (
     FSDPTest,
     get_full_params,
 )
@@ -35,7 +35,7 @@ if TEST_WITH_DEV_DBG_ASAN:
 
 
 class Model(nn.Module):
-    def __init__(self, withfsdp, freeze_after_wrapfsdp):
+    def __init__(self, with_fsdp, freeze_after_wrap_fsdp):
         super().__init__()
         self.trunk = nn.Sequential(
             nn.Conv2d(3, 64, kernel_size=3),
@@ -44,7 +44,7 @@ class Model(nn.Module):
             nn.Flatten(),
         )
         self.head = nn.Linear(64, 10)
-        if withfsdp and freeze_after_wrapfsdp:
+        if with_fsdp and freeze_after_wrap_fsdp:
             self.fsdp_wrap()
 
     def fsdp_wrap(self):
@@ -56,18 +56,18 @@ class Model(nn.Module):
 
 
 class NestedTrunkModel(nn.Module):
-    def __init__(self, withfsdp, freeze_after_wrapfsdp):
+    def __init__(self, with_fsdp, freeze_after_wrap_fsdp):
         super().__init__()
         self.trunk = nn.Sequential(
-            self._create_block(3, 64, withfsdp, freeze_after_wrapfsdp),
-            self._create_block(64, 64, withfsdp, freeze_after_wrapfsdp),
+            self._create_block(3, 64, with_fsdp, freeze_after_wrap_fsdp),
+            self._create_block(64, 64, with_fsdp, freeze_after_wrap_fsdp),
         )
         self.head = nn.Sequential(
             nn.AdaptiveAvgPool2d(output_size=(1, 1)),
             nn.Flatten(),
             nn.Linear(64, 10),
         )
-        if withfsdp and freeze_after_wrapfsdp:
+        if with_fsdp and freeze_after_wrap_fsdp:
             self.fsdp_wrap()
 
     def fsdp_wrap(self):
@@ -81,7 +81,7 @@ class NestedTrunkModel(nn.Module):
         return self.head(self.trunk(x))
 
     def _create_block(
-        self, in_channels, out_channels, withfsdp, freeze_after_wrapfsdp
+        self, in_channels, out_channels, with_fsdp, freeze_after_wrap_fsdp
     ):
         block = nn.Sequential(
             nn.Conv2d(in_channels, out_channels, kernel_size=3),
@@ -96,20 +96,20 @@ class FreezingMethod(str, Enum):
 
 
 class TestFreezingWeights(FSDPTest):
-    def _create_model(self, withfsdp, with_nested_trunk, freeze_after_wrapfsdp):
+    def _create_model(self, with_fsdp, with_nested_trunk, freeze_after_wrap_fsdp):
         if with_nested_trunk:
-            model = NestedTrunkModel(withfsdp, freeze_after_wrapfsdp)
+            model = NestedTrunkModel(with_fsdp, freeze_after_wrap_fsdp)
         else:
-            model = Model(withfsdp, freeze_after_wrapfsdp)
+            model = Model(with_fsdp, freeze_after_wrap_fsdp)
         return model
 
     def _dist_train(
-        self, with_nested_trunk, freezing_method, freeze_after_wrapfsdp, withfsdp
+        self, with_nested_trunk, freezing_method, freeze_after_wrap_fsdp, with_fsdp
     ):
         torch.manual_seed(0)
         batch = torch.randn(size=(2, 3, 224, 224)).cuda()
 
-        model = self._create_model(withfsdp, with_nested_trunk, freeze_after_wrapfsdp)
+        model = self._create_model(with_fsdp, with_nested_trunk, freeze_after_wrap_fsdp)
         model = model.cuda()
 
         # freezing the trunk using requires_grad.
@@ -117,8 +117,8 @@ class TestFreezingWeights(FSDPTest):
             for param in model.trunk.parameters():
                 param.requires_grad = False
 
-        if withfsdp:
-            if not freeze_after_wrapfsdp:
+        if with_fsdp:
+            if not freeze_after_wrap_fsdp:
                 model.fsdp_wrap()
             model = FSDP(model)
         else:
@@ -134,7 +134,7 @@ class TestFreezingWeights(FSDPTest):
             optimizer.zero_grad()
             fake_loss.backward()
             if freezing_method == FreezingMethod.GradToNone:
-                if withfsdp:
+                if with_fsdp:
                     for param in model.module.module.trunk.parameters():
                         param.grad = None
                 else:
@@ -142,7 +142,7 @@ class TestFreezingWeights(FSDPTest):
                         param.grad = None
             optimizer.step()
 
-        if withfsdp:
+        if with_fsdp:
             get_full_params(model)
 
         return list(model.parameters())
@@ -152,18 +152,18 @@ class TestFreezingWeights(FSDPTest):
     @parametrize(
         "freezing_method", [FreezingMethod.RequiresGrad, FreezingMethod.GradToNone]
     )
-    @parametrize("freeze_after_wrapfsdp", [True, False])
+    @parametrize("freeze_after_wrap_fsdp", [True, False])
     def test_freezing_weights(
-        self, with_nested_trunk, freezing_method, freeze_after_wrapfsdp
+        self, with_nested_trunk, freezing_method, freeze_after_wrap_fsdp
     ):
         # DDP
         ddp_state = self._dist_train(
-            with_nested_trunk, freezing_method, freeze_after_wrapfsdp, withfsdp=False
+            with_nested_trunk, freezing_method, freeze_after_wrap_fsdp, with_fsdp=False
         )
 
         # FSDP
         fsdp_state = self._dist_train(
-            with_nested_trunk, freezing_method, freeze_after_wrapfsdp, withfsdp=True
+            with_nested_trunk, freezing_method, freeze_after_wrap_fsdp, with_fsdp=True
         )
 
         self.assertEqual(

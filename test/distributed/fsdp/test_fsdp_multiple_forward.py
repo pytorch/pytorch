@@ -9,7 +9,7 @@ from torch.nn import Linear, Module
 from torch.nn.parallel import DistributedDataParallel
 from torch.optim import SGD
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
-from torch.testing._internal.commonfsdp import (
+from torch.testing._internal.common_fsdp import (
     FSDPTest,
     get_full_params,
 )
@@ -29,12 +29,12 @@ if TEST_WITH_DEV_DBG_ASAN:
 
 
 class Model(Module):
-    def __init__(self, wrapfsdp):
+    def __init__(self, wrap_fsdp):
         super().__init__()
         # keep everything deterministic for model initialization
         torch.manual_seed(0)
         self.inner = Linear(4, 4)
-        if wrapfsdp:
+        if wrap_fsdp:
             self.inner = FSDP(self.inner)
         self.outer = Linear(4, 5)
 
@@ -46,12 +46,12 @@ class Model(Module):
 
 
 class TestMultiForward(FSDPTest):
-    def _dist_train(self, wrapfsdp):
+    def _dist_train(self, wrap_fsdp):
         # keep everything deterministic for input data
         torch.manual_seed(0)
 
-        model = Model(wrapfsdp).cuda()
-        if wrapfsdp:
+        model = Model(wrap_fsdp).cuda()
+        if wrap_fsdp:
             model = FSDP(model)
         else:
             model = DistributedDataParallel(model, device_ids=[self.rank])
@@ -65,7 +65,7 @@ class TestMultiForward(FSDPTest):
             optim.step()
             optim.zero_grad()
 
-        if wrapfsdp:
+        if wrap_fsdp:
             get_full_params(model)
 
         return list(model.parameters())
@@ -73,10 +73,10 @@ class TestMultiForward(FSDPTest):
     @skip_if_lt_x_gpu(2)
     def test_multi_forward(self):
         # DDP
-        ddp_state = self._dist_train(wrapfsdp=False)
+        ddp_state = self._dist_train(wrap_fsdp=False)
 
         # FSDP
-        fsdp_state = self._dist_train(wrapfsdp=True)
+        fsdp_state = self._dist_train(wrap_fsdp=True)
 
         self.assertEqual(ddp_state, fsdp_state)
 

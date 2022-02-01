@@ -10,7 +10,7 @@ import torch.nn as nn
 from torch.testing._internal.common_distributed import (
     skip_if_lt_x_gpu,
 )
-from torch.testing._internal.commonfsdp import (
+from torch.testing._internal.common_fsdp import (
     DummyDDP,
     FSDPInitMode,
     FSDPTest,
