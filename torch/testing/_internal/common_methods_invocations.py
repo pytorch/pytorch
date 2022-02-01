@@ -612,6 +612,8 @@ class OpInfo(object):
                  supports_sparse=False,  # whether the op supports sparse inputs
 
                  supports_scripting=True,  # only run tracing tests
+                 supports_tracing=True,  # only run scripting tests
+
                  # the following metadata relates to sparse csr support and is used in test_sparse_csr.py
                  supports_sparse_csr=False,  # whether the op supports sparse csr inputs
                  # the following metadata relates to complex support and is checked in test_ops.py
@@ -773,6 +775,8 @@ class OpInfo(object):
             self.aliases = tuple(AliasInfo(a) for a in aliases)  # type: ignore[assignment]
 
         self.supports_scripting = supports_scripting
+        self.supports_tracing = supports_tracing
+        assert supports_tracing or supports_scripting, "If neither scripting nor tracing is supported add to skips"
         self.assert_jit_shape_analysis = assert_jit_shape_analysis
 
         self.test_conjugated_samples = test_conjugated_samples
@@ -8635,10 +8639,8 @@ op_db: List[OpInfo] = [
            ref=np.allclose,
            supports_autograd=False,
            supports_forward_ad=False,
+           supports_tracing=False,
            sample_inputs_func=sample_inputs_allclose,
-           skips=(
-               DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
-           ),
            supports_out=False),
     OpInfo('broadcast_to',
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
@@ -10926,11 +10928,7 @@ op_db: List[OpInfo] = [
            supports_out=False,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
-           decorators=[
-               # RuntimeError: Cannot insert a Tensor that requires grad as a constant.
-               # Consider making it a parameter or input, or detaching the gradient
-               DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit', dtypes=(torch.float32,))
-           ],
+           supports_tracing=False,
            sample_inputs_func=sample_inputs_group_norm,),
     OpInfo('nn.functional.instance_norm',
            # no ref because instance_norm will often have numerical instability (large numbers or nan)
@@ -10938,11 +10936,7 @@ op_db: List[OpInfo] = [
            dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
            supports_out=False,
            supports_forward_ad=True,
-           decorators=[
-               # RuntimeError: Cannot insert a Tensor that requires grad as a constant.
-               # Consider making it a parameter or input, or detaching the gradient
-               DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit', dtypes=(torch.float32,))
-           ],
+           supports_tracing=False,
            skips=(
                DecorateInfo(unittest.skip("We don't want to differentiate wrt running mean / std"),
                             "TestCommon", "test_floating_inputs_are_differentiable"),),
@@ -11376,14 +11370,12 @@ op_db: List[OpInfo] = [
         supports_gradgrad=True,
         supports_out=False,
         sample_inputs_func=sample_inputs_nn_functional_prelu,
+        supports_tracing=False,
         decorators=[
             # FIXME: second derivative is implemented but seems to be incorrect
             # https://github.com/pytorch/pytorch/issues/68760
             DecorateInfo(unittest.expectedFailure, 'TestGradients', 'test_fn_gradgrad'),
-            # RuntimeError: Cannot insert a Tensor that requires grad as a constant.
-            # Consider making it a parameter or input, or detaching the gradient
-            # https://github.com/pytorch/pytorch/issues/68752
-            DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'), ],
+        ],
     ),
     UnaryUfuncInfo(
         'nn.functional.celu',
@@ -15374,14 +15366,6 @@ op_db: List[OpInfo] = [
         sample_inputs_func=sample_inputs_argsort,
         supports_out=False,
         supports_autograd=False,
-        skips=(
-            DecorateInfo(
-                unittest.skip("Skipped!"),
-                "TestJit",
-                "test_variant_consistency_jit",
-                dtypes=(torch.float32,),
-            ),
-        ),
     ),
     OpInfo(
         "repeat_interleave",
@@ -15390,14 +15374,16 @@ op_db: List[OpInfo] = [
         supports_out=False,
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
-        skips=(
-            DecorateInfo(
-                unittest.skip("Skipped!"),
-                "TestJit",
-                "test_variant_consistency_jit",
-                dtypes=(torch.float32, torch.complex64),
-            ),
-        ),
+        # RuntimeError: inputSet && outputSet
+        # INTERNAL ASSERT FAILED at "../torch/csrc/jit/passes/utils/check_alias_annotation.cpp":118
+        # skips=(
+        #     DecorateInfo(
+        #         unittest.skip("Skipped!"),
+        #         "TestJit",
+        #         "test_variant_consistency_jit",
+        #         dtypes=(torch.float32, torch.complex64),
+        #     ),
+        # ),
     ),
     OpInfo(
         "nn.functional.pairwise_distance",
@@ -15407,14 +15393,6 @@ op_db: List[OpInfo] = [
         sample_inputs_func=sample_inputs_pairwise_distance,
         dtypes=all_types_and_complex_and(torch.float16, torch.bfloat16),
         supports_out=False,
-        skips=(
-            DecorateInfo(
-                unittest.skip("Skipped!"),
-                "TestJit",
-                "test_variant_consistency_jit",
-                dtypes=(torch.float32, torch.complex64),
-            ),
-        ),
     ),
     OpInfo(
         "nn.functional.pixel_shuffle",
@@ -15423,14 +15401,16 @@ op_db: List[OpInfo] = [
         supports_out=False,
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
-        skips=(
-            DecorateInfo(
-                unittest.skip("Skipped!"),
-                "TestJit",
-                "test_variant_consistency_jit",
-                dtypes=(torch.float32, torch.complex64),
-            ),
-        ),
+        # RuntimeError: inputSet && outputSet
+        # INTERNAL ASSERT FAILED at "../torch/csrc/jit/passes/utils/check_alias_annotation.cpp":118
+        # skips=(
+        #     DecorateInfo(
+        #         unittest.skip("Skipped!"),
+        #         "TestJit",
+        #         "test_variant_consistency_jit",
+        #         dtypes=(torch.float32, torch.complex64),
+        #     ),
+        # ),
     ),
     OpInfo(
         "nn.functional.pixel_unshuffle",
@@ -15439,14 +15419,16 @@ op_db: List[OpInfo] = [
         supports_out=False,
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
-        skips=(
-            DecorateInfo(
-                unittest.skip("Skipped!"),
-                "TestJit",
-                "test_variant_consistency_jit",
-                dtypes=(torch.float32, torch.complex64),
-            ),
-        ),
+        # RuntimeError: inputSet && outputSet
+        # INTERNAL ASSERT FAILED at "../torch/csrc/jit/passes/utils/check_alias_annotation.cpp":118
+        # skips=(
+        #     DecorateInfo(
+        #         unittest.skip("Skipped!"),
+        #         "TestJit",
+        #         "test_variant_consistency_jit",
+        #         dtypes=(torch.float32, torch.complex64),
+        #     ),
+        # ),
     ),
     OpInfo(
         "nn.functional.kl_div",
