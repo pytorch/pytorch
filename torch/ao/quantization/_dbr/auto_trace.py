@@ -131,8 +131,7 @@ def add_auto_observation(
                 output = super().__torch_function__(func, types, args, kwargs)
                 # run "after" hook
                 output = qstate.op_prepare_after_hook(
-                    func, output, args, first_call, qtensor_id, parent_module,
-                    global_op_idx)
+                    func, output, args, first_call, qtensor_id, global_op_idx)
                 qstate.mark_cur_op_complete(func)
             else:
                 output = super().__torch_function__(func, types, args, kwargs)
@@ -243,10 +242,9 @@ def add_auto_observation(
                             old_global_disable_torch_function_override
 
                         # after hooks
-                        # TODO is it correct to call_cur_module twice here?
                         output = parent_qstate.op_prepare_after_hook(
                             cur_module, output, args, first_call, qtensor_id,
-                            cur_module, global_op_idx)
+                            global_op_idx)
                         parent_qstate.mark_cur_op_complete(cur_module)
 
                     elif hook_type is HookType.MODULE_IO_HOOKS:
@@ -325,6 +323,12 @@ def add_auto_observation(
                 global_op_idx[0] = 0
 
                 output = super().__call__(*new_args, **new_kwargs)
+
+                if first_call:
+                    for _, v in self.named_modules():
+                        if hasattr(v, '_auto_quant_state'):
+                            v._auto_quant_state.insert_observers(v)
+
                 return output
             finally:
                 torch.nn.Module.__call__ = orig_module_call

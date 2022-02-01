@@ -13,7 +13,7 @@ from torch.testing._internal.common_device_type import \
      precisionOverride, skipMeta, skipCUDAIf, skipCUDAIfRocm, skipCPUIfNoMklSparse)
 from torch.testing._internal.common_methods_invocations import \
     (op_db, sparse_csr_unary_ufuncs, )
-from torch.testing._internal.common_cuda import _get_torch_cuda_version
+from torch.testing._internal.common_cuda import _get_torch_cuda_version, CUDA11OrLater
 from torch.testing._internal.common_dtype import floating_types, get_all_dtypes
 from test_sparse import CUSPARSE_SPMM_COMPLEX128_SUPPORTED
 
@@ -602,6 +602,72 @@ class TestSparseCSR(TestCase):
             err_msg = "size mismatch, got"
             with self.assertRaisesRegex(RuntimeError, err_msg):
                 csr.matmul(bad_vec)
+
+    @onlyCUDA
+    @unittest.skipIf(not CUDA11OrLater, "Only CUDA 11+ is supported")
+    @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
+    def test_baddbmm(self, device, dtype):
+        def run_test(c, a, a_batched, b, op_b=False, op_out=False, *, dtype=None, device=None):
+            alpha = complex(random.random(), random.random()) if dtype.is_complex else random.random()
+            beta = complex(random.random(), random.random()) if dtype.is_complex else random.random()
+            b = b.mH if (op_b and a.shape == b.shape) else b
+
+            actual = torch.baddbmm(c, a_batched, b, alpha=alpha, beta=beta)
+
+            out = torch.empty_like(c.mH if op_out and a.shape == b.shape else c)
+            torch.baddbmm(c, a_batched, b, alpha=alpha, beta=beta, out=out)
+
+            expected = [torch.addmm(c[i], a, b[i], alpha=alpha, beta=beta) for i in range(c.shape[0])]
+            expected = torch.stack(expected, 0)
+
+            self.assertEqual(actual, out)
+            self.assertEqual(actual, expected)
+
+        for index_dtype in [torch.int32, torch.int64]:
+            for (m, n, k), batch_size, noncontiguous in zip(itertools.product([1, 5], repeat=3), [1, 3], [True, False]):
+                nnz = random.randint(0, m * k)
+                a = self.genSparseCSRTensor((m, k), nnz, dtype=dtype, device=device, index_dtype=index_dtype)
+
+                # a_batched is a regular CSR tensor but with a batch dimension in the shape
+                a_batched = torch._sparse_csr_tensor_unsafe(
+                    a.crow_indices(), a.col_indices(), a.values(), (batch_size, m, k))
+
+                b = make_tensor((batch_size, k, n), dtype=dtype, device=device, noncontiguous=noncontiguous)
+                c = make_tensor((batch_size, m, n), dtype=dtype, device=device, noncontiguous=noncontiguous)
+                for op_b, op_out in itertools.product([True, False], repeat=2):
+                    run_test(c, a, a_batched, b, op_b, op_out, dtype=dtype, device=device)
+
+    @onlyCUDA
+    @unittest.skipIf(not CUDA11OrLater, "Only CUDA 11+ is supported")
+    @skipCUDAIfNoCusparseGeneric
+    @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
+    def test_bmm(self, device, dtype):
+        def run_test(a, a_batched, b, op_b=False, op_out=False, *, dtype=None, device=None):
+            b = b.mH if (op_b and a.shape == b.shape) else b
+
+            actual = torch.bmm(a_batched, b)
+
+            out = torch.empty_like(actual.mH if op_out and a.shape == b.shape else actual)
+            torch.bmm(a_batched, b, out=out)
+
+            expected = [torch.mm(a, b[i]) for i in range(b.shape[0])]
+            expected = torch.stack(expected, 0)
+
+            self.assertEqual(actual, out)
+            self.assertEqual(actual, expected)
+
+        for index_dtype in [torch.int32, torch.int64]:
+            for (m, n, k), batch_size, noncontiguous in zip(itertools.product([1, 5], repeat=3), [1, 3], [True, False]):
+                nnz = random.randint(0, m * k)
+                a = self.genSparseCSRTensor((m, k), nnz, dtype=dtype, device=device, index_dtype=index_dtype)
+
+                # a_batched is a regular CSR tensor but with a batch dimension in the shape
+                a_batched = torch._sparse_csr_tensor_unsafe(
+                    a.crow_indices(), a.col_indices(), a.values(), (batch_size, m, k))
+
+                b = make_tensor((batch_size, k, n), dtype=dtype, device=device, noncontiguous=noncontiguous)
+                for op_b, op_out in itertools.product([True, False], repeat=2):
+                    run_test(a, a_batched, b, op_b, op_out, dtype=dtype, device=device)
 
     def run_test_block_addmm_addmv(self, addmv_addmm, c, a, b, op_b=False, op_out=False, *, dtype=None, device=None):
         alpha = complex(random.random(), random.random()) if dtype.is_complex else random.random()
