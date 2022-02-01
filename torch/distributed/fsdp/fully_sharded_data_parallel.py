@@ -36,6 +36,14 @@ if TYPE_CHECKING:
 
 @dataclass
 class CPUOffload:
+    """
+    CPU offlaoding config. Currently, only parameter and gradient CPU
+    offload are supported.
+    offload_params: Offloading parameters to CPUs when these parameters are
+                    not used for computation on GPUs. This implicitly enables
+                    gradient offloading to CPUs in order for parameters and
+                    gradients to be on the same device to work with optimizer.
+    """
     offload_params: bool = False
     # TODO: state dict offloading
     # https://github.com/pytorch/pytorch/issues/67224
