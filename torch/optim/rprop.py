@@ -1,7 +1,7 @@
 import torch
 from torch import Tensor
 from .optimizer import Optimizer
-from typing import List
+from typing import List, Optional
 
 
 class Rprop(Optimizer):
@@ -52,7 +52,8 @@ class Rprop(Optimizer):
             is used (default: None)
     """
 
-    def __init__(self, params, lr=1e-2, etas=(0.5, 1.2), step_sizes=(1e-6, 50), foreach=None):
+    def __init__(self, params, lr=1e-2, etas=(0.5, 1.2), step_sizes=(1e-6, 50),
+                 foreach: Optional[bool] = None):
         if not 0.0 <= lr:
             raise ValueError("Invalid learning rate: {}".format(lr))
         if not 0.0 < etas[0] < 1.0 < etas[1]:

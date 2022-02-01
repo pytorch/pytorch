@@ -533,7 +533,7 @@ def fast_nvcc(
     print_command_outputs(results)
     if config.table:
         write_log_csv(command_parts, results, filename=config.table)
-    return exit_code([dryrun_data] + results)
+    return exit_code([dryrun_data] + results)  # type: ignore[arg-type, operator]
 
 
 def our_arg(arg: str) -> bool:

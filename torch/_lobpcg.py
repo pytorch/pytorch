@@ -354,7 +354,7 @@ def lobpcg(A: Tensor,
            ) -> Tuple[Tensor, Tensor]:
 
     """Find the k largest (or smallest) eigenvalues and the corresponding
-    eigenvectors of a symmetric positive defined generalized
+    eigenvectors of a symmetric positive definite generalized
     eigenvalue problem using matrix-free LOBPCG methods.
 
     This function is a front-end to the following LOBPCG algorithms
