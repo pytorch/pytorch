@@ -4036,33 +4036,38 @@ class TestAutograd(TestCase):
             return x + y, y
 
         err_msg = "Jacobian computed with forward mode mismatch for output 0 with respect to input 1"
-
-        for fast_mode in [True, False]:
+        for fast_mode, requires_grad in product([True, False], [True, False]):
+            print(f"fast_mode: {fast_mode}, requires_grad: {requires_grad}")
             # Test for all inputs and outputs being real
-            x = torch.rand(2, dtype=torch.double, requires_grad=True)
-            y = torch.rand(2, dtype=torch.double, requires_grad=True)
+            x = torch.rand(2, dtype=torch.double, requires_grad=requires_grad)
+            y = torch.rand(2, dtype=torch.double, requires_grad=requires_grad)
 
-            gradcheck(fn, (x, y), check_forward_ad=True, fast_mode=fast_mode)
+            kwargs = {"check_forward_ad": True, "fast_mode": fast_mode}
+            if not requires_grad:
+                kwargs["check_backward_ad"] = False
+                kwargs["check_batched_grad"] = False
+
+            gradcheck(fn, (x, y), **kwargs)
             with self.assertRaisesRegex(RuntimeError, err_msg):
-                gradcheck(bad_fn, (x, y), check_forward_ad=True, fast_mode=fast_mode)
+                gradcheck(bad_fn, (x, y), **kwargs)
 
             def basic_mul(x):
                 return torch.view_as_real(torch.resolve_conj(x * 1j))
-            gradcheck(basic_mul, x, check_forward_ad=True, fast_mode=fast_mode)
+            gradcheck(basic_mul, x, **kwargs)
 
             # Test for one input and one output being complex
-            x = torch.rand(2, dtype=torch.cdouble, requires_grad=True)
+            x = torch.rand(2, dtype=torch.cdouble, requires_grad=requires_grad)
 
-            gradcheck(fn, (x, y), check_forward_ad=True, fast_mode=fast_mode)
+            gradcheck(fn, (x, y), **kwargs)
             with self.assertRaisesRegex(RuntimeError, err_msg):
-                gradcheck(bad_fn, (x, y), check_forward_ad=True, fast_mode=fast_mode)
+                gradcheck(bad_fn, (x, y), **kwargs)
 
             # Test for all inputs and outputs being complex
-            y = torch.rand(2, dtype=torch.cdouble, requires_grad=True)
+            y = torch.rand(2, dtype=torch.cdouble, requires_grad=requires_grad)
 
-            gradcheck(fn, (x, y), check_forward_ad=True, fast_mode=fast_mode)
+            gradcheck(fn, (x, y), **kwargs)
             with self.assertRaisesRegex(RuntimeError, err_msg):
-                gradcheck(bad_fn, (x, y), check_forward_ad=True, fast_mode=fast_mode)
+                gradcheck(bad_fn, (x, y), **kwargs)
 
     def test_gradcheck_check_forward_or_backward_only(self):
         """Depending on settings for check_forward_ad and check_backward_ad, the
@@ -4092,36 +4097,35 @@ class TestAutograd(TestCase):
                 else:
                     return 2 * gI
 
-        for fast_mode in (True, False):
-            for check_forward_ad in (True, False):
-                for check_backward_ad in (True, False):
-                    for fwd_bad in (True, False):
-                        for bwd_bad in (True, False):
-                            fwd_should_fail = fwd_bad and check_forward_ad
-                            bwd_should_fail = bwd_bad and check_backward_ad
+        for fast_mode, check_forward_ad, check_backward_ad, fwd_bad, bwd_bad, requires_grad in product(*([(True, False)]*6)):
+            if check_backward_ad and not requires_grad:
+                continue
 
-                            def run():
-                                gradcheck(UserFn.apply, (x, fwd_bad, bwd_bad), check_forward_ad=check_forward_ad,
-                                          check_backward_ad=check_backward_ad, check_undefined_grad=check_backward_ad,
-                                          check_batched_grad=check_backward_ad, fast_mode=fast_mode)
+            fwd_should_fail = fwd_bad and check_forward_ad
+            bwd_should_fail = bwd_bad and check_backward_ad
 
-                            x = torch.rand(2, dtype=torch.double, requires_grad=True)
+            def run():
+                gradcheck(UserFn.apply, (x, fwd_bad, bwd_bad), check_forward_ad=check_forward_ad,
+                            check_backward_ad=check_backward_ad, check_undefined_grad=check_backward_ad,
+                            check_batched_grad=check_backward_ad, fast_mode=fast_mode)
 
-                            if not check_forward_ad and not check_backward_ad:
-                                with self.assertRaisesRegex(AssertionError, "Expected at least one of"):
-                                    run()
-                                continue
+            x = torch.rand(2, dtype=torch.double, requires_grad=requires_grad)
 
-                            if not fwd_should_fail and not bwd_should_fail:
-                                run()
-                            else:
-                                # If both fail, backward AD failure "hides" forward AD failure
-                                if fwd_should_fail:
-                                    fail_msg = fwd_fail_err_msg
-                                if bwd_should_fail:
-                                    fail_msg = bwd_fail_err_msg
-                                with self.assertRaisesRegex(RuntimeError, fail_msg):
-                                    run()
+            if not check_forward_ad and not check_backward_ad:
+                with self.assertRaisesRegex(AssertionError, "Expected at least one of"):
+                    run()
+                continue
+
+            if not fwd_should_fail and not bwd_should_fail:
+                run()
+            else:
+                # If both fail, backward AD failure "hides" forward AD failure
+                if fwd_should_fail:
+                    fail_msg = fwd_fail_err_msg
+                if bwd_should_fail:
+                    fail_msg = bwd_fail_err_msg
+                with self.assertRaisesRegex(RuntimeError, fail_msg):
+                    run()
 
     def test_gradcheck_forward_ad_batched_grad(self):
         x = torch.rand(2, dtype=torch.double, requires_grad=True)
