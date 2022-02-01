@@ -250,10 +250,7 @@ def _check_repo(repo, trust_repo=None, calling_fn="load"):
         return
 
     if (trust_repo is False) or (trust_repo == "check" and not is_trusted):
-        response = input(
-            f"The repository {repo} does not belong to the list of trusted repositories and as such cannot be downloaded. "
-            "Do you trust this repository and wish to add it to the trusted list of repositories (y/N)?"
-        )
+        response = _get_trusted_input(repo)
         if response.lower() in ("y", "yes"):
             if is_trusted:
                 print("The repository is already trusted.")
