@@ -1117,12 +1117,17 @@ Tensor trace_cpu(const Tensor& self) {
 Tensor linalg_trace(const Tensor& self, int64_t offset) {
   TORCH_CHECK(self.dim() >= 2,
            "self should have at least 2 dimensions, but has ", self.dim(), " dimensions instead");
+  TORCH_CHECK(-self.size(-2) < offset && offset < self.size(-1),
+           "offset is out of range [", -self.size(-2) + 1, ", ", self.size(-1) - 1, "]");
   return at::sum(at::diagonal(self, offset, -2, -1), -1);
 }
 
 Tensor& linalg_trace_out(const Tensor& self, int64_t offset, Tensor &result) {
+  check_scalar_type_device_layout_equal(result, self);
   TORCH_CHECK(self.dim() >= 2,
            "self should have at least 2 dimensions, but has ", self.dim(), " dimensions instead");
+  TORCH_CHECK(-self.size(-2) < offset && offset < self.size(-1),
+           "offset is out of range [", -self.size(-2) + 1, ", ", self.size(-1) - 1, "]");
   return at::sum_out(result, at::diagonal(self, offset, -2, -1), -1);
 }
 
