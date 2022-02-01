@@ -2340,6 +2340,7 @@ def f({', '.join(param_names)}):
         else:
             raise RuntimeError("Expected test to fail. If it now works, move op into works_list")
 
+    @slowTest
     @onlyCPU
     @ops(op_db, dtypes=OpDTypes.supported)
     def test_nnc_correctness(self, device, dtype, op):
