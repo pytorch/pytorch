@@ -2408,39 +2408,41 @@ class TestDistributions(TestCase):
         self.assertEqual(d.variance, empirical_var, atol=5, rtol=0)
 
     def test_inverse_wishart_shape(self):
-        df = torch.rand(5, requires_grad=True) + 3 + 3
-        df_no_batch = torch.rand([], requires_grad=True) + 3 + 3
-        df_multi_batch = torch.rand(6, 5, requires_grad=True) + 3 + 3
+        ndim = 3
+
+        df = torch.rand(5, requires_grad=True) + ndim + 3
+        df_no_batch = torch.rand([], requires_grad=True) + ndim + 3
+        df_multi_batch = torch.rand(6, 5, requires_grad=True) + ndim + 3
 
         # construct PSD covariance
-        tmp = torch.randn(3, 10)
+        tmp = torch.randn(ndim, 10)
         cov = (torch.matmul(tmp, tmp.t()) / tmp.size(-1)).requires_grad_()
         prec = cov.inverse().requires_grad_()
         scale_tril = torch.linalg.cholesky(cov).requires_grad_()
 
         # construct batch of PSD covariances
-        tmp = torch.randn(6, 5, 3, 10)
+        tmp = torch.randn(6, 5, ndim, 10)
         cov_batched = (tmp.unsqueeze(-2) * tmp.unsqueeze(-3)).mean(-1).requires_grad_()
         prec_batched = cov_batched.inverse()
         scale_tril_batched = torch.linalg.cholesky(cov_batched)
 
         # ensure that sample, batch, event shapes all handled correctly
-        self.assertEqual(InverseWishart(df, cov).sample().size(), (5, 3, 3))
-        self.assertEqual(InverseWishart(df_no_batch, cov).sample().size(), (3, 3))
-        self.assertEqual(InverseWishart(df_multi_batch, cov).sample().size(), (6, 5, 3, 3))
-        self.assertEqual(InverseWishart(df, cov).sample((2,)).size(), (2, 5, 3, 3))
-        self.assertEqual(InverseWishart(df_no_batch, cov).sample((2,)).size(), (2, 3, 3))
-        self.assertEqual(InverseWishart(df_multi_batch, cov).sample((2,)).size(), (2, 6, 5, 3, 3))
-        self.assertEqual(InverseWishart(df, cov).sample((2, 7)).size(), (2, 7, 5, 3, 3))
-        self.assertEqual(InverseWishart(df_no_batch, cov).sample((2, 7)).size(), (2, 7, 3, 3))
-        self.assertEqual(InverseWishart(df_multi_batch, cov).sample((2, 7)).size(), (2, 7, 6, 5, 3, 3))
-        self.assertEqual(InverseWishart(df, cov_batched).sample((2, 7)).size(), (2, 7, 6, 5, 3, 3))
-        self.assertEqual(InverseWishart(df_no_batch, cov_batched).sample((2, 7)).size(), (2, 7, 6, 5, 3, 3))
-        self.assertEqual(InverseWishart(df_multi_batch, cov_batched).sample((2, 7)).size(), (2, 7, 6, 5, 3, 3))
-        self.assertEqual(InverseWishart(df, precision_matrix=prec).sample((2, 7)).size(), (2, 7, 5, 3, 3))
-        self.assertEqual(InverseWishart(df, precision_matrix=prec_batched).sample((2, 7)).size(), (2, 7, 6, 5, 3, 3))
-        self.assertEqual(InverseWishart(df, scale_tril=scale_tril).sample((2, 7)).size(), (2, 7, 5, 3, 3))
-        self.assertEqual(InverseWishart(df, scale_tril=scale_tril_batched).sample((2, 7)).size(), (2, 7, 6, 5, 3, 3))
+        self.assertEqual(InverseWishart(df, cov).sample().size(), (5, ndim, ndim))
+        self.assertEqual(InverseWishart(df_no_batch, cov).sample().size(), (ndim, ndim))
+        self.assertEqual(InverseWishart(df_multi_batch, cov).sample().size(), (6, 5, ndim, ndim))
+        self.assertEqual(InverseWishart(df, cov).sample((2,)).size(), (2, 5, ndim, ndim))
+        self.assertEqual(InverseWishart(df_no_batch, cov).sample((2,)).size(), (2, ndim, ndim))
+        self.assertEqual(InverseWishart(df_multi_batch, cov).sample((2,)).size(), (2, 6, 5, ndim, ndim))
+        self.assertEqual(InverseWishart(df, cov).sample((2, 7)).size(), (2, 7, 5, ndim, ndim))
+        self.assertEqual(InverseWishart(df_no_batch, cov).sample((2, 7)).size(), (2, 7, ndim, ndim))
+        self.assertEqual(InverseWishart(df_multi_batch, cov).sample((2, 7)).size(), (2, 7, 6, 5, ndim, ndim))
+        self.assertEqual(InverseWishart(df, cov_batched).sample((2, 7)).size(), (2, 7, 6, 5, ndim, ndim))
+        self.assertEqual(InverseWishart(df_no_batch, cov_batched).sample((2, 7)).size(), (2, 7, 6, 5, ndim, ndim))
+        self.assertEqual(InverseWishart(df_multi_batch, cov_batched).sample((2, 7)).size(), (2, 7, 6, 5, ndim, ndim))
+        self.assertEqual(InverseWishart(df, precision_matrix=prec).sample((2, 7)).size(), (2, 7, 5, ndim, ndim))
+        self.assertEqual(InverseWishart(df, precision_matrix=prec_batched).sample((2, 7)).size(), (2, 7, 6, 5, ndim, ndim))
+        self.assertEqual(InverseWishart(df, scale_tril=scale_tril).sample((2, 7)).size(), (2, 7, 5, ndim, ndim))
+        self.assertEqual(InverseWishart(df, scale_tril=scale_tril_batched).sample((2, 7)).size(), (2, 7, 6, 5, ndim, ndim))
 
         # check gradients
         # Modified and applied the same tests for multivariate_normal
@@ -2466,14 +2468,16 @@ class TestDistributions(TestCase):
         inverse_wishart_log_prob_gradcheck(df_no_batch, None, None, scale_tril_batched)
 
     def test_inverse_wishart_stable_with_precision_matrix(self):
-        x = torch.randn(10)
+        ndim = 10
+        x = torch.randn(ndim)
         P = torch.exp(-(x - x.unsqueeze(-1)) ** 2)  # RBF kernel
-        InverseWishart(torch.tensor(10), precision_matrix=P)
+        InverseWishart(torch.tensor(ndim + 3 + 1), precision_matrix=P)
 
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     def test_inverse_wishart_log_prob(self):
-        df = torch.rand([], requires_grad=True) + 3 + 3
-        tmp = torch.randn(3, 10)
+        ndim = 3
+        df = torch.rand([], requires_grad=True) + ndim + 3
+        tmp = torch.randn(ndim, 10)
         cov = (torch.matmul(tmp, tmp.t()) / tmp.size(-1)).requires_grad_()
         prec = cov.inverse().requires_grad_()
         scale_tril = torch.linalg.cholesky(cov).requires_grad_()
@@ -2493,8 +2497,8 @@ class TestDistributions(TestCase):
         self.assertEqual(0.0, np.mean((dist3.log_prob(x).detach().numpy() - expected)**2), atol=1e-3, rtol=0)
 
         # Double-check that batched versions behave the same as unbatched
-        df = torch.rand(5, requires_grad=True) + 3 + 3
-        tmp = torch.randn(5, 3, 10)
+        df = torch.rand(5, requires_grad=True) + ndim + 3
+        tmp = torch.randn(5, ndim, 10)
         cov = (tmp.unsqueeze(-2) * tmp.unsqueeze(-3)).mean(-1).requires_grad_()
 
         dist_batched = InverseWishart(df, cov)
@@ -2510,8 +2514,9 @@ class TestDistributions(TestCase):
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     def test_inverse_wishart_sample(self):
         set_rng_seed(0)  # see Note [Randomized statistical tests]
-        df = torch.rand([], requires_grad=True) + 3 + 3
-        tmp = torch.randn(3, 10)
+        ndim = 3
+        df = torch.rand([], requires_grad=True) + ndim + 3
+        tmp = torch.randn(ndim, 10)
         cov = (torch.matmul(tmp, tmp.t()) / tmp.size(-1)).requires_grad_()
         prec = cov.inverse().requires_grad_()
         scale_tril = torch.linalg.cholesky(cov).requires_grad_()
@@ -2530,8 +2535,9 @@ class TestDistributions(TestCase):
                                     multivariate=True)
 
     def test_inverse_wishart_properties(self):
-        df = torch.rand([]) + 3 + 3
-        scale_tril = transform_to(constraints.lower_cholesky)(torch.randn(5, 5))
+        ndim = 5
+        df = torch.rand([]) + ndim + 3
+        scale_tril = transform_to(constraints.lower_cholesky)(torch.randn(ndim, ndim))
         m = InverseWishart(df=df, scale_tril=scale_tril)
         self.assertEqual(m.covariance_matrix, m.scale_tril.mm(m.scale_tril.t()))
         self.assertEqual(m.covariance_matrix.mm(m.precision_matrix), torch.eye(m.event_shape[0]))
@@ -2539,8 +2545,9 @@ class TestDistributions(TestCase):
 
     def test_inverse_wishart_moments(self):
         set_rng_seed(0)  # see Note [Randomized statistical tests]
-        df = torch.rand([]) + 3 + 3
-        scale_tril = transform_to(constraints.lower_cholesky)(torch.randn(3, 3))
+        ndim = 3
+        df = torch.rand([]) + ndim + 3
+        scale_tril = transform_to(constraints.lower_cholesky)(torch.randn(ndim, ndim))
         d = InverseWishart(df=df, scale_tril=scale_tril)
         samples = d.rsample((100000,))
         empirical_mean = samples.mean(0)
