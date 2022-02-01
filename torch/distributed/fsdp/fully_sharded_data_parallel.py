@@ -69,7 +69,7 @@ class BackwardPrefetch(Enum):
                    approach may prefetch full parameters for layers ahead of next layer,
                    this 'ahead' all_gather could delay next layer's all_gather in the
                    single NCCL stream and cause the next layer's computation delay. So it may
-                   cause some performance regession for some models.77
+                   cause some performance regession for some models.
     """
     BACKWARD_PRE = auto()
     BACKWARD_POST = auto()
