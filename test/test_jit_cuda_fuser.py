@@ -24,6 +24,8 @@ import itertools
 import numpy as np
 import math
 
+from torch.autograd.gradcheck import gradcheck
+
 from typing import List
 
 CUDA_MAJOR, CUDA_MINOR = (int(x) for x in torch.version.cuda.split('.'))
@@ -469,21 +471,24 @@ class TestCudaFuser(JitTestCase):
         self.assertGraphContains(t_jit.graph_for(x, y, z), FUSION_GUARD)
 
     def _unary_test_helper(self, operation, dtype, random_data):
-        shape = (4, 8, 32, 32)
+        gradient_check = (dtype == torch.float64) and random_data
+        shape = (8, 7)
 
         # need additional def of t for boolean ops
         def t(x: torch.Tensor, y: torch.Tensor):
             o = x * y
+            o = o + 5e-3
             o = operation(o)
             return o
 
-        y = torch.tensor([1], device="cuda").to(dtype)
+        y = torch.rand(shape, dtype=torch.float32, device="cuda", requires_grad=gradient_check)
+        y = y.to(dtype=dtype)
 
         if random_data:
-            x = torch.randn(shape, dtype=torch.float32, device="cuda")
+            x = torch.rand(shape, dtype=torch.float32, device="cuda", requires_grad=gradient_check)
             if dtype in self.int_types:
                 # prefer a larger variance for integer types
-                x *= 5
+                x = x * 5
             x = x.to(dtype=dtype)
         else:
             x = self.special_values.to(dtype=dtype)
@@ -495,14 +500,14 @@ class TestCudaFuser(JitTestCase):
         t_jit = torch.jit.script(t)
         jit_o = t_jit(x, y)
         jit_o = t_jit(x, y)
-        if dtype in self.support_tensor_dtypes:
+        jit_o = t_jit(x, y)
+        if gradient_check:
+            gradcheck(t_jit, [x, y])
+        elif dtype in self.support_tensor_dtypes:
             self.assertGraphContains(t_jit.graph_for(x, y), FUSION_GUARD)
         o = t(x, y)
         self.assertEqual(o.dtype, jit_o.dtype)
-        self.assertEqual(o, jit_o, msg=f"""
-        failing case:
-            {dtype} {operation} {x}
-        """)
+        self.assertTrue(self._compare("failing case {}\n{}\n{}\n{}".format(dtype, operation, x, y), o, jit_o, 1e-2))
 
     @unittest.skipIf(not RUN_CUDA, "requires CUDA")
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
