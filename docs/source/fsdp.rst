@@ -4,4 +4,5 @@ FullyShardedDataParallel
 ========================
 
 .. autoclass:: torch.distributed.fsdp.FullyShardedDataParallel
+
   :members:
