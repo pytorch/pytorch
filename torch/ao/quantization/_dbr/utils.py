@@ -301,9 +301,15 @@ def get_func_output_dtype_type(
 
     return FuncOutputDTypeType.DTYPE_DEPENDS_ON_QCONFIG
 
+def get_weight_argument_info(op: Callable) -> Optional[Tuple[int, str]]:
+    if op in (F.linear, F.conv2d):
+        return (1, 'weight')
+    return None
+
 def get_op_packing_only_uses_module_attributes(
     op: Callable,
     args: Tuple[Any, ...],
+    kwargs: Dict[str, Any],
     module: torch.nn.Module,
 ) -> bool:
     """
@@ -316,12 +322,13 @@ def get_op_packing_only_uses_module_attributes(
     """
     # check for ops which need packed weights but the weights are
     # coming from another function
-    packable_tensor_arg_idxs = get_packable_tensor_arg_idxs(op)
-    if packable_tensor_arg_idxs is not None:
-        for arg_idx in packable_tensor_arg_idxs:
-            arg_name_in_root = get_param_name(module, args[arg_idx])
-            if arg_name_in_root is None:
-                return False
+    info = get_weight_argument_info(op)
+    if info is not None:
+        idx, name = info
+        param_name = args[idx] if idx < len(args) else kwargs[name]
+        arg_name_in_root = get_param_name(module, param_name)
+        if arg_name_in_root is None:
+            return False
     return True
 
 def get_quantized_op(
@@ -372,7 +379,7 @@ def get_packable_tensor_arg_idxs(op: Callable) -> Optional[List[int]]:
     if op == F.conv2d:
         return [1, 2]
     elif op == F.linear:
-        return [1]
+        return [1, 2]
     return None
 
 def get_packable_tensor_kwarg_names(op: Callable) -> Optional[List[str]]:
@@ -380,8 +387,8 @@ def get_packable_tensor_kwarg_names(op: Callable) -> Optional[List[str]]:
     Returns tensor kwarg names which correspond to parameters which will
     need to be packed.
     """
-    if op == F.linear:
-        return ['bias']
+    if op in (F.conv2d, F.linear):
+        return ['weight', 'bias']
     return None
 
 def get_param_name(module: torch.nn.Module, arg: Any) -> Optional[str]:
@@ -409,8 +416,8 @@ def get_packable_arg_idxs(op: Callable) -> Optional[List[int]]:
         # weight, bias, stride, padding, dilation, groups
         return [1, 2, 3, 4, 5, 6]
     elif op == F.linear:
-        # weight
-        return [1]
+        # weight, bias
+        return [1, 2]
     return None
 
 def get_weight_arg_idx(op: Callable) -> Optional[int]:
