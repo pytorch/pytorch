@@ -8800,11 +8800,7 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_sum_to_size,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
-           supports_out=False,
-           skips=(
-               # RuntimeError: inputSet && outputSet
-               # INTERNAL ASSERT FAILED at "../torch/csrc/jit/passes/utils/check_alias_annotation.cpp":118
-               DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),),),
+           supports_out=False,),
     OpInfo('symeig',
            dtypes=floating_and_complex_types(),
            check_batched_grad=False,
@@ -8860,10 +8856,6 @@ op_db: List[OpInfo] = [
                    supports_sparse=True,
                    supports_sparse_csr=True,
                    skips=(
-                       # RuntimeError: inputSet && outputSet
-                       # INTERNAL ASSERT FAILED at "../torch/csrc/jit/passes/utils/check_alias_annotation.cpp":118,
-                       # please report a bug to PyTorch.
-                       DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit', dtypes=(torch.float32, )),
                        DecorateInfo(unittest.skip("Skipped! conj_physical_ not implemented for sparse"),
                                     'TestSparseUnaryUfuncs', 'test_inplace'),
                    )),
@@ -15271,16 +15263,6 @@ op_db: List[OpInfo] = [
         supports_out=False,
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
-        # RuntimeError: inputSet && outputSet
-        # INTERNAL ASSERT FAILED at "../torch/csrc/jit/passes/utils/check_alias_annotation.cpp":118
-        # skips=(
-        #     DecorateInfo(
-        #         unittest.skip("Skipped!"),
-        #         "TestJit",
-        #         "test_variant_consistency_jit",
-        #         dtypes=(torch.float32, torch.complex64),
-        #     ),
-        # ),
     ),
     OpInfo(
         "nn.functional.pairwise_distance",
@@ -15298,16 +15280,6 @@ op_db: List[OpInfo] = [
         supports_out=False,
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
-        # RuntimeError: inputSet && outputSet
-        # INTERNAL ASSERT FAILED at "../torch/csrc/jit/passes/utils/check_alias_annotation.cpp":118
-        # skips=(
-        #     DecorateInfo(
-        #         unittest.skip("Skipped!"),
-        #         "TestJit",
-        #         "test_variant_consistency_jit",
-        #         dtypes=(torch.float32, torch.complex64),
-        #     ),
-        # ),
     ),
     OpInfo(
         "nn.functional.pixel_unshuffle",
@@ -15316,16 +15288,6 @@ op_db: List[OpInfo] = [
         supports_out=False,
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
-        # RuntimeError: inputSet && outputSet
-        # INTERNAL ASSERT FAILED at "../torch/csrc/jit/passes/utils/check_alias_annotation.cpp":118
-        # skips=(
-        #     DecorateInfo(
-        #         unittest.skip("Skipped!"),
-        #         "TestJit",
-        #         "test_variant_consistency_jit",
-        #         dtypes=(torch.float32, torch.complex64),
-        #     ),
-        # ),
     ),
     OpInfo(
         "nn.functional.kl_div",

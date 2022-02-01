@@ -2073,7 +2073,7 @@ class IrParser {
     {
       std::array<const char*, kNumSumToSize> SumToSize = {
           "aten::_grad_sum_to_size(Tensor(a) self, int[]? size) -> Tensor(a)",
-          "aten::sum_to_size(Tensor self, int[] size) -> Tensor"};
+          "aten::sum_to_size(Tensor(a) self, int[] size) -> Tensor(a)"};
       for (auto signature : SumToSize) {
         auto ptr_op = getOperatorForLiteral(signature);
         REGISTER_PARSE_RULE(
@@ -2868,7 +2868,7 @@ bool insertProfileIValue(ProfilingRecord* pr, Node* node, size_t offset) {
 
   static auto sum_to_size_schema =
       getOperatorForLiteral(
-          "aten::sum_to_size(Tensor self, int[] size) -> Tensor")
+          "aten::sum_to_size(Tensor(a) self, int[] size) -> Tensor(a)")
           ->schema();
   static auto grad_sum_to_size_schema =
       getOperatorForLiteral(

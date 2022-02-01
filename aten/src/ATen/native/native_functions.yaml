@@ -380,7 +380,8 @@
     CompositeExplicitAutograd: _conj_physical
     SparseCsrCPU, SparseCsrCUDA: conj_physical_sparse_csr
 
-- func: conj_physical(Tensor self) -> Tensor
+# TODO: should be -> Tensor(a|b) but breaks python alias parser
+- func: conj_physical(Tensor(a) self) -> Tensor(a)
   variants: function, method
 
 - func: conj_physical.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
@@ -3397,8 +3398,10 @@
 - func: adjoint(Tensor(a) self) -> Tensor(a)
   variants: function, method
 
-- func: pixel_shuffle(Tensor self, int upscale_factor) -> Tensor
+# TODO: should be -> Tensor(a|b) but breaks python alias parser
+- func: pixel_shuffle(Tensor(a) self, int upscale_factor) -> Tensor(a)
 
+# TODO: should be -> Tensor(a|b) but breaks python alias parser
 - func: pixel_unshuffle(Tensor self, int downscale_factor) -> Tensor
 
 - func: channel_shuffle(Tensor self, int groups) -> Tensor
@@ -4284,7 +4287,9 @@
   dispatch:
     CPU, CUDA: nansum_out
 
-- func: sum_to_size(Tensor self, int[] size) -> Tensor
+# TODO: should be -> Tensor(a|b) but breaks python alias parser
+# Can alias if size == self.size()
+- func: sum_to_size(Tensor(a) self, int[] size) -> Tensor(a)
   variants: method
   device_check: NoCheck
   device_guard: False
