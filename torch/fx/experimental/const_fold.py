@@ -1,4 +1,4 @@
-from typing import Callable, Dict, Set, Optional, Union
+from typing import Callable, Dict, Set, Optional, Union, Any
 
 import torch.fx
 import torch.fx.experimental.fx_acc.acc_utils as acc_utils
@@ -248,3 +248,58 @@ def split_const_subgraphs(
     return FoldedGraphModule(
         split, split.graph, root_const_gm.graph, fx_const_folded_attrs_name
     )
+
+def try_fold_node(node: torch.fx.Node) -> Any:
+    """
+    Tries to fold `node`. If all inputs are constant then folds. If folded successfully,
+    returns the value that replaces `node`; else returns None.
+    """
+    # Only fold callable nodes.
+    if node.op not in {"call_function", "call_method", "call_module"}:
+        return None
+
+    # We can fold this node if it has no node inputs aside from get_attrs.
+    getattrs = set()
+    for in_node in node.all_input_nodes:
+        if in_node.op != "get_attr":
+            return None
+        getattrs.add(in_node)
+
+    # Create a local graph for just this node we're folding.
+    g = torch.fx.graph.Graph()
+    # Remap from old getattrs to new getattrs.
+    getattr_remap = {}
+    for old_getattr_node in getattrs:
+        new_getattr_node = g.node_copy(old_getattr_node)
+        getattr_remap[old_getattr_node] = new_getattr_node
+    n = g.node_copy(node, lambda n : getattr_remap[n])
+    g.create_node("output", "output", args=(n,))
+
+    # Create a GraphModule with this graph and the owning module so that we have access
+    # to the same attributes in the owning module via get_attrs, and run it to get res.
+    owning_mod = node.graph.owning_module
+    gm = torch.fx.GraphModule(owning_mod, g)
+    res = gm()
+
+    # Wrap res in a Parameter(List) if necessary, else just replace node + return early.
+    params: Union[torch.nn.Parameter, torch.nn.ParameterList]
+    if isinstance(res, tuple) and len(res) > 0 and isinstance(res[0], torch.Tensor):
+        params = torch.nn.ParameterList([torch.nn.Parameter(i) for i in res])
+    elif isinstance(res, torch.Tensor):
+        params = torch.nn.Parameter(res)
+    else:
+        node.replace_all_uses_with(res)
+        return res
+
+    # Set params into the original owning module so we can access it in the main graph.
+    folded_name = acc_utils.get_unique_attr_name_in_module(
+        owning_mod, f"_FX_CONST_FOLD__{node.name}"
+    )
+    setattr(owning_mod, folded_name, params)
+
+    # Finally, replace the original node with the folded attr.
+    with node.graph.inserting_before(node):
+        folded_node = node.graph.get_attr(folded_name)
+    folded_node.meta = node.meta.copy()
+    node.replace_all_uses_with(folded_node)
+    return folded_node

@@ -654,3 +654,48 @@ class TestConstFold(TestCase):
         # Now run both folded and non-folded to check results equal.
         inp = torch.randn(4, 4)
         self.assertTrue(torch.equal(mod_folded(inp), mod(inp)))
+
+    def test_try_fold_node(self):
+        """
+        Test folding nodes directly iteratively.
+        """
+
+        class ConstFoldTestModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.param = torch.nn.Parameter(torch.randn(2, 3, 4))
+
+            def forward(self, x):
+                no_nodes = torch.mul(x.size()[1:][0], 5)
+                node = self.param - no_nodes
+                multi_res = torch.split(node, 1)[1]
+                return torch.add(x, multi_res)
+
+        mod = ConstFoldTestModule()
+        input = torch.randn(2, 3, 4)
+        gm = acc_tracer.trace(mod, input)
+        res_orig = gm(input)
+
+        # First make sure nothing can be folded initially.
+        for node in gm.graph.nodes:
+            maybe_folded_res = const_fold.try_fold_node(node)
+            self.assertEqual(maybe_folded_res, None)
+
+        # Replace the size op with the actual size so we have some folding to do.
+        for node in gm.graph.nodes:
+            if node.target == acc_ops.size:
+                node.replace_all_uses_with(input.size())
+                break
+        gm.graph.eliminate_dead_code()
+        self.assertEqual(res_orig, gm(input))
+
+        # Now try folding each call_function node iteratively, asserting folding occurs
+        # when expected.
+        for node in gm.graph.nodes:
+            if node.op == "call_function":
+                try_folded_res = const_fold.try_fold_node(node)
+                self.assertEqual(try_folded_res is not None, node.target != acc_ops.add)
+                if isinstance(try_folded_res, torch.fx.Node):
+                    self.assertEqual(try_folded_res.op, "get_attr")
+        gm.graph.eliminate_dead_code()
+        self.assertEqual(res_orig, gm(input))
