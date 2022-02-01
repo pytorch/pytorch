@@ -55,7 +55,7 @@ class PeriodicModelAverager(ModelAverager):
         >>>
         >>>  dist.init_process_group("nccl", rank=rank, world_size=16)
         >>>  torch.cuda.set_device(rank)
-        >>>  module = nn.Linear(1, 1, bias=False).to(rank)
+        >>>  module = nn.Linear(1, 1, bias=False).cuda()
         >>>  model = nn.parallel.DistributedDataParallel(
         >>>     module, device_ids=[rank], output_device=rank
         >>>  )
@@ -73,12 +73,10 @@ class PeriodicModelAverager(ModelAverager):
         >>>     loss = loss_fn(output, labels)
         >>>     loss.backward()
         >>>     optimizer.step()
-        >>>     # Average parameters globally after ``optimizer.step()``.
-        >>>     # Thus, the inter-node communication only occurs periodically after ``warmup_steps``.
+        >>>     # Will average model parameters globally every 4 steps. Thus,
+        >>>     # inter-node communication only occurs every 4 iterations after
+        >>>     # the initial ``warmup_steps`` period.
         >>>     averager.average_parameters(model.parameters())
-
-    .. warning ::
-        `PeriodicModelAverager` is experimental and subject to change.
     """
 
     def __init__(
