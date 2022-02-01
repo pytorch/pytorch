@@ -15281,6 +15281,7 @@ class TestNNDeviceType(NNTestCase):
             with warnings.catch_warnings(record=True) as w:
                 out_t = F.interpolate(in_t, size=4, mode=mode)
                 out_uint8_t = F.interpolate(in_uint8_t, size=4, mode=mode)
+                self.assertEqual(len(w), 0)
             self.assertEqual(torch.ones(1, 2, 4, 4, device=device), out_t)
             self.assertEqual(torch.ones(1, 2, 4, 4, dtype=torch.uint8, device=device), out_uint8_t)
             # Assert that memory format is carried through to the output
@@ -15288,8 +15289,7 @@ class TestNNDeviceType(NNTestCase):
 
             # test forward when input's height is not same as width
             in_t = torch.ones(1, 2, 2, 1, device=device).contiguous(memory_format=memory_format).requires_grad_()
-            with warnings.catch_warnings(record=True) as w:
-                out_t = F.interpolate(in_t, size=(4, 2), mode=mode)
+            out_t = F.interpolate(in_t, size=(4, 2), mode=mode)
             self.assertEqual(torch.ones(1, 2, 4, 2, device=device), out_t)
             self.assertTrue(out_t.is_contiguous(memory_format=memory_format))
 
@@ -15317,9 +15317,8 @@ class TestNNDeviceType(NNTestCase):
                     a_cuda = torch.randn(*shapes, device=device).contiguous(memory_format=memory_format).requires_grad_()
                     a_cpu = a_cuda.detach().cpu().requires_grad_()
 
-                    with warnings.catch_warnings(record=True):
-                        out_cuda = F.interpolate(a_cuda, scale_factor=scale_factor, mode=mode)
-                        out_cpu = F.interpolate(a_cpu, scale_factor=scale_factor, mode=mode)
+                    out_cuda = F.interpolate(a_cuda, scale_factor=scale_factor, mode=mode)
+                    out_cpu = F.interpolate(a_cpu, scale_factor=scale_factor, mode=mode)
 
                     self.assertEqual(out_cpu.cuda(), out_cuda)
 
