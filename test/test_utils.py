@@ -753,7 +753,7 @@ class TestHub(TestCase):
         file_path = os.path.join(torch.hub.get_dir(), 'trusted_list')
         if os.path.exists(folder_path):
             shutil.rmtree(folder_path)
-            shutil.rmtree(file_path)
+            os.remove(file_path)
         model = torch.hub.load(
             'ailzhang/torchhub_example',
             'mnist_zip_1_6',
@@ -767,7 +767,7 @@ class TestHub(TestCase):
         file_path = os.path.join(torch.hub.get_dir(), 'trusted_list')
         if os.path.exists(folder_path):
             shutil.rmtree(folder_path)
-            shutil.rmtree(file_path)
+            os.remove(file_path)
         model = torch.hub.load(
             'ailzhang/torchhub_example',
             'mnist_zip_1_6',
@@ -780,7 +780,7 @@ class TestHub(TestCase):
         file_path = os.path.join(torch.hub.get_dir(), 'trusted_list')
         if os.path.exists(folder_path):
             shutil.rmtree(folder_path)
-            shutil.rmtree(file_path)
+            os.remove(file_path)
 
         with warnings.catch_warnings(record=True) as w:
             warnings.simplefilter("always")
