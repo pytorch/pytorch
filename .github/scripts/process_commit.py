@@ -12,6 +12,7 @@ This script is based on: https://github.com/pytorch/vision/blob/main/.github/pro
 import sys
 from typing import Any, Set, Tuple, List
 import re
+import os
 import json
 import requests
 
@@ -30,14 +31,17 @@ SECONDARY_LABELS = {
     "topic: non-user visible",
 }
 PYTORCH_REPO = "https://api.github.com/repos/pytorch/pytorch"
+GITHUB_TOKEN = os.environ.get('GITHUB_TOKEN')
+REQUEST_HEADERS = {'Accept': 'application/vnd.github.v3+json', 'Authorization': f'token {GITHUB_TOKEN}'}
 
-def query_pytorch(cmd: str, *, accept: str) -> Any:
-    response = requests.get(f"{PYTORCH_REPO}/{cmd}", headers=dict(Accept=accept))
+
+def query_pytorch(cmd: str) -> Any:
+    response = requests.get(f"{PYTORCH_REPO}/{cmd}", headers=REQUEST_HEADERS)
     return response.json()
 
 
 def get_pr_number(commit_hash: str) -> Any:
-    data = query_pytorch(f"commits/{commit_hash}", accept="application/vnd.github.v3+json")
+    data = query_pytorch(f"commits/{commit_hash}")
     if not data or (not data["commit"]["message"]):
         return None
     message = data["commit"]["message"]
@@ -50,7 +54,7 @@ def get_pr_number(commit_hash: str) -> Any:
 
 def get_pr_author_and_labels(pr_number: int) -> Tuple[str, Set[str]]:
     # See https://docs.github.com/en/rest/reference/pulls#get-a-pull-request
-    data = query_pytorch(f"pulls/{pr_number}", accept="application/vnd.github.v3+json")
+    data = query_pytorch(f"pulls/{pr_number}")
     user = data["user"]["login"]
     labels = {label["name"] for label in data["labels"]}
     return user, labels
@@ -58,7 +62,7 @@ def get_pr_author_and_labels(pr_number: int) -> Tuple[str, Set[str]]:
 def get_repo_labels() -> List[str]:
     collected_labels: List[str] = list()
     for page in range(0, 10):
-        response = query_pytorch(f"labels?per_page=100&page={page}", accept="application/json")
+        response = query_pytorch(f"labels?per_page=100&page={page}")
         page_labels = list(map(lambda x: str(x["name"]), response))
         if not page_labels:
             break
@@ -74,7 +78,7 @@ def post_pytorch_comment(pr_number: int, merger: str) -> Any:
     response = requests.post(
         f"{PYTORCH_REPO}/issues/{pr_number}/comments",
         json.dumps(message),
-        headers=dict(Accept="application/vnd.github.v3+json"))
+        headers=REQUEST_HEADERS)
     return response.json()
 
 if __name__ == "__main__":
