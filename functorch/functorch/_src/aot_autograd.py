@@ -214,6 +214,7 @@ def partition_with_recompute_fwd_in_bwd(joint_module: fx.GraphModule, _joint_inp
         import networkx as nx
     except ImportError:
         raise RuntimeError("Need networkx installed to perform smart recomputation heuristics")
+
     # draw_graph(joint_module, "joint.svg")
     full_bw_graph = joint_module.graph
 
@@ -229,8 +230,11 @@ def partition_with_recompute_fwd_in_bwd(joint_module: fx.GraphModule, _joint_inp
                 tangent_closure.add(user)
 
     pointwise_ops = [aten.add, aten.sub, aten.div, aten.atan2, aten.mul, aten.max, aten.min, aten.pow, aten.remainder, aten.fmod, aten.__and__, aten.__or__, aten.__xor__, aten.__lshift__, aten.__rshift__, aten.eq, aten.ne, aten.ge, aten.gt, aten.le, aten.lt, aten.abs, aten.bitwise_not, aten.ceil, aten.floor, aten.frac, aten.neg, aten.relu, aten.round, aten.silu, aten.trunc, aten.log, aten.log10, aten.log1p, aten.log2, aten.lgamma, aten.exp, aten.expm1, aten.erf, aten.erfc, aten.cos, aten.acos, aten.cosh, aten.sin, aten.asin, aten.sinh, aten.tan, aten.atan, aten.tanh, aten.atanh, aten.sqrt, aten.rsqrt,  aten.reciprocal, aten.sigmoid, aten.softplus, aten.threshold, aten.threshold_backward, aten.clamp, aten.where, aten.lerp, aten.addcmul, aten.gelu, aten.gelu_backward]  # noqa: E501
-    reduction_ops = [aten.softmax, aten._softmax, aten._softmax_backward_data, aten.sum, aten.mean, aten._grad_sum_to_size, aten.sum_to_size, aten.amax]  # noqa: E501
     misc_ops = [aten.to, aten.type_as, operator.getitem]
+
+    # Ban reductions for now due to it being unnecessary/running into pathological situations
+    # todo(chilli): add a heuristic to allow reduction only if output node is much smaller than input node
+    # reduction_ops = [aten.softmax, aten._softmax, aten._softmax_backward_data, aten.sum, aten.mean, aten._grad_sum_to_size, aten.sum_to_size, aten.amax]  # noqa: E501
 
     # not recomputed by default since these are kinda expensive/hard to fuse into
     # norm_ops = [aten.instance_norm, aten._batch_norm_impl_index, aten.native_batch_norm, aten.batch_norm, aten._batch_norm_impl_index_backward, aten.native_layer_norm, aten.layer_norm, aten.native_layer_norm_backward]  # noqa: E501
@@ -242,39 +246,47 @@ def partition_with_recompute_fwd_in_bwd(joint_module: fx.GraphModule, _joint_inp
 
     recomputable_ops = set(
         pointwise_ops
-        + reduction_ops
         + misc_ops
+        # + reduction_ops
         # + norm_ops
         # + view_ops
     )
     # ops = set([i.target for i in joint_module.graph.nodes if i.op == 'call_function'])
     # print(ops - recomputable_ops)
     AGGRESSIVE_RECOMPUTATION = False
+
+    def ban_recomputation(node):
+        if AGGRESSIVE_RECOMPUTATION:
+            return (node.op == 'call_function' and node.target in unrecomputable_ops)
+        else:
+            return (node.op == 'call_function' and node.target not in recomputable_ops)
+
+    def get_node_weight(node):
+        mem_sz = size_of(node.meta['tensor_meta'])
+        if node.op == 'placeholder' and "primals" in node.target:
+            return mem_sz
+        else:
+            return mem_sz * 2
+
     for node in full_bw_graph.nodes:
         if node in tangent_closure:
             nx_graph.add_edge(node.name+"_in", "sink", capacity=math.inf)
             continue
-        is_input = False
+
         if node.op == 'placeholder' and "primals" in node.target:
             nx_graph.add_edge("source", node.name+"_in", capacity=math.inf)
-            is_input = True
 
-        if AGGRESSIVE_RECOMPUTATION:
-            if node.op == 'call_function' and node.target in unrecomputable_ops:
-                nx_graph.add_edge("source", node.name+"_in", capacity=math.inf)
-        else:
-            if node.op == 'call_function' and node.target not in recomputable_ops:
-                nx_graph.add_edge("source", node.name+"_in", capacity=math.inf)
+        # If a node can't be recomputed (too expensive or involves randomness),
+        # we prevent it from being recomputed by adding an inf edge to the source
+        if ban_recomputation(node):
+            nx_graph.add_edge("source", node.name+"_in", capacity=math.inf)
 
         if 'tensor_meta' not in node.meta:
             weight = math.inf
         else:
-            mem_sz = size_of(node.meta['tensor_meta'])
-            if is_input:
-                weight = mem_sz
-            else:
-                weight = mem_sz * 2
+            weight = get_node_weight(node)
 
+        # Creates the weights on the "node" edge
         nx_graph.add_edge(node.name+"_in", node.name+"_out", capacity=weight)
         for user in node.users:
             nx_graph.add_edge(node.name+"_out", user.name+"_in", capacity=math.inf)
@@ -355,9 +367,6 @@ def _reshape_alias(x, shape, strides):
 
 
 def create_compiled_function(flat_fn, fw_compiler, bw_compiler, partition_fn, decompositions):
-    # putting these decompositions here since they shouldn't always be used
-    # Kinda sketchy ... we use torch.sub here to have the correct scalar => tensor promotion logic
-
     joint_forward_backward = create_joint_forward_backward(flat_fn)
 
     compiled_fw = None
@@ -612,7 +621,6 @@ def clear_compile_cache():
 
 
 def compiled_module(mod, *args, **kwargs):
-
     def functional_call(named_params, named_buffers, *args, **kwargs):
         params_and_buffers = {**named_params, **named_buffers}
         return _stateless.functional_call(mod, params_and_buffers, args, kwargs)
