@@ -16,9 +16,9 @@ from typing import ForwardRef
 # In case of metaclass conflict due to ABCMeta or _ProtocolMeta
 # For Python 3.9, only Protocol in typing uses metaclass
 from abc import ABCMeta
-from typing import _ProtocolMeta, _GenericAlias  # type: ignore[attr-defined, no-redef]
+from typing import _GenericAlias  # type: ignore[attr-defined, no-redef]
 
-class GenericMeta(_ProtocolMeta, ABCMeta):  # type: ignore[no-redef]
+class GenericMeta(ABCMeta):  # type: ignore[no-redef]
     pass
 
 import torch
@@ -255,13 +255,11 @@ class _DataPipeMeta(GenericMeta):
     def __new__(cls, name, bases, namespace, **kwargs):
         if '__iter__' in namespace:
             hook_iterator(namespace, 'enumerate(DataPipe)#{}'.format(name))
+
         return super().__new__(cls, name, bases, namespace, **kwargs)  # type: ignore[call-overload]
 
         # For Python > 3.6
         cls.__origin__ = None
-        # Need to add _is_protocol for Python 3.7 _ProtocolMeta
-        if '_is_protocol' not in namespace:
-            namespace['_is_protocol'] = True
         if 'type' in namespace:
             return super().__new__(cls, name, bases, namespace, **kwargs)  # type: ignore[call-overload]
 

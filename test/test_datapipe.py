@@ -1555,6 +1555,19 @@ class TestTyping(TestCase):
         self.assertTrue(isinstance(a, A))
         self.assertFalse(isinstance(a, B))
 
+    def test_protocol(self):
+        try:
+            from typing import Protocol
+        except:
+            from typing import _Protocol
+            Protocol = _Protocol
+
+        class P(Protocol):
+            pass
+
+        class A(IterDataPipe[P]):
+            pass
+
     @skipTyping
     def test_subtype(self):
         from torch.utils.data._typing import issubtype
