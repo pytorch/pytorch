@@ -262,6 +262,9 @@ class TestCommon(TestCase):
             # Short-circuits if the op doesn't support grad in this device x dtype
             if not test_grad:
                 continue
+                
+            expected = sample_input.output_process_fn_grad(expected)
+            actual = sample_input.output_process_fn_grad(actual)
 
             if isinstance(expected, torch.Tensor):
                 grad_for_expected = torch.randn_like(expected)
