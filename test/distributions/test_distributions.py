@@ -2327,6 +2327,7 @@ class TestDistributions(TestCase):
         prec = cov.inverse().requires_grad_()
         scale_tril = torch.linalg.cholesky(cov).requires_grad_()
 
+        # Below codes test only cases df > 
         self._check_sampler_sampler(Wishart(df, cov),
                                     scipy.stats.wishart(df.item(), cov.detach().numpy()),
                                     'Wishart(df={}, covariance_matrix={})'.format(df, cov),
@@ -2357,7 +2358,7 @@ class TestDistributions(TestCase):
         d = Wishart(df=df, scale_tril=scale_tril)
         samples = d.rsample((100000,))
         empirical_mean = samples.mean(0)
-        self.assertEqual(d.mean, empirical_mean, atol=0.01, rtol=0)
+        self.assertEqual(d.mean, empirical_mean, atol=0.05, rtol=0)
         empirical_var = samples.var(0)
         self.assertEqual(d.variance, empirical_var, atol=0.05, rtol=0)
 
