@@ -5588,7 +5588,9 @@ for shape in [(1,), ()]:
                   check_backward_ad=False, check_batched_grad=False)
 
     def test_custom_function_forward_mode_forward_is_no_op(self):
-        for jvp_mul_by_2 in (True, False):
+        error_regex = "A custom Function's forward is returning a view \\(or an input as-is\\)"
+
+        for returns_view in (True, False):
             class MyFn(torch.autograd.Function):
                 @staticmethod
                 def forward(ctx, x, y):
@@ -5600,103 +5602,43 @@ for shape in [(1,), ()]:
 
                 @staticmethod
                 def jvp(ctx, x_t, y_t):
-                    if jvp_mul_by_2:
-                        # If the user returns input as-is, this result
-                        # isn't used!
-                        return x_t + y_t, x_t * 2
+                    if returns_view:
+                        # If we return an input as-is in forward, that is treated
+                        # as if self.view_as(self) is performed
+                        return x_t + y_t, x_t.view_as(x_t)
                     else:
                         return x_t + y_t, x_t
 
-            x = torch.tensor(1., dtype=torch.double, requires_grad=True)
+            a = torch.tensor(1., dtype=torch.double, requires_grad=True)
             t = torch.tensor(1., dtype=torch.double)
-            y = torch.tensor(1., dtype=torch.double, requires_grad=True)
+            b = torch.tensor(1., dtype=torch.double, requires_grad=True)
+
+            c = torch.tensor(1., dtype=torch.double)
+            t2 = torch.tensor(1., dtype=torch.double)
+            d = torch.tensor(1., dtype=torch.double)
 
             with fwAD.dual_level():
-                x_dual = fwAD.make_dual(x, t)
-                _, out2 = MyFn.apply(x_dual, y)
-                self.assertTrue(fwAD.unpack_dual(out2).tangent._base is t)
+                a_dual = fwAD.make_dual(a, t)
+                c_dual = fwAD.make_dual(c, t2)
 
-            gradcheck(MyFn.apply, (x, y), check_forward_ad=True)
+                if returns_view:
+                    _, out2 = MyFn.apply(a_dual, b)
+                    self.assertTrue(fwAD.unpack_dual(out2).tangent._base is t)
 
-        # Below, we check when some outputs are "non-differentiable" in
-        # _process_backward_ad.
+                    _, out2 = MyFn.apply(c_dual, d)
+                    self.assertTrue(fwAD.unpack_dual(out2).tangent._base is t2)
+                else:
+                    with self.assertRaisesRegex(RuntimeError, error_regex):
+                        MyFn.apply(a_dual, b)
 
-        # Case 1: None of the inputs require grad
-        # The second output should be equivalent to case B below
-        class MyFn2(torch.autograd.Function):
-            @staticmethod
-            def forward(ctx, x, y):
-                return x + y, x
+                    with self.assertRaisesRegex(RuntimeError, error_regex):
+                        MyFn.apply(c_dual, d)
 
-            @staticmethod
-            def jvp(ctx, x_t, y_t):
-                return x_t + y_t, x_t
-
-        x = torch.tensor(1., dtype=torch.double)
-        t = torch.tensor(1., dtype=torch.double)
-        y = torch.tensor(1., dtype=torch.double)
-
-        with fwAD.dual_level():
-            x_dual = fwAD.make_dual(x, t)
-            _, out2 = MyFn2.apply(x_dual, y)
-            self.assertFalse(out2 is x)
-            self.assertTrue(out2._is_view())
-            self.assertTrue(out2._base is x)
-            self.assertTrue(fwAD.unpack_dual(out2).tangent._base is t)
-
-        # Case 2: At least one, but not all inputs requires grad
-        class MyFn2(torch.autograd.Function):
-            @staticmethod
-            def forward(ctx, x, y, z):
-                # When not differentiable, process backward AD performs a detach
-                # so the forward AD, we check later that the tangent is None
-                ctx.mark_non_differentiable(x)
-                return x, y, z, y + z
-
-            @staticmethod
-            def jvp(ctx, x_t, y_t, z_t):
-                return x_t, y_t, z_t, y_t + z_t
-
-        x = torch.tensor(1., dtype=torch.double, requires_grad=True)
-        t = torch.tensor(1., dtype=torch.double)
-        y = torch.tensor(1., dtype=torch.double)
-        t2 = torch.tensor(1., dtype=torch.double)
-        z = torch.tensor(1., dtype=torch.double, requires_grad=True)
-        t3 = torch.tensor(1., dtype=torch.double)
-
-        with fwAD.dual_level():
-            x_dual = fwAD.make_dual(x, t)
-            y_dual = fwAD.make_dual(y, t2)
-            z_dual = fwAD.make_dual(z, t3)
-            out1, out2, out3, out4 = MyFn2.apply(x_dual, y_dual, z_dual)
-
-            # A) non-differentiable because marked not differentiable -> detach()
-            # expect: out1 is not a view of x, but is aliased to x
-            self.assertFalse(out1 is x)
-            x_clone = x.clone()
-            out1 += 1
-            self.assertFalse(torch.allclose(x, x_clone))
-            self.assertFalse(out1._is_view())
-            self.assertIsNone(fwAD.unpack_dual(out1).tangent)
-
-            # B) non-differentiable because input does not requires grad
-            # (this is equivalent to the case where the tensor is a non-differentiable type)
-            # expect: out2 is a view of y and its tangent's base is y's tangent
-            self.assertFalse(out2 is y)
-            self.assertTrue(out2._is_view())
-            self.assertTrue(out2._base is y)
-            self.assertTrue(fwAD.unpack_dual(out2).tangent._base is t2)
-
-            # C) check the "differentiable" case still work even if there are
-            # other inputs that are non-differentiable (for _process_backward_ad)
-            # expect: out3 is a view of z and its tangent's base is z's tangent
-            self.assertFalse(out3 is z)
-            self.assertTrue(out3._is_view())
-            self.assertTrue(out3._base is z)
-            self.assertTrue(fwAD.unpack_dual(out3).tangent._base is t3)
-
-            # D) returning an output that is not an input behaves as expected
-            self.assertTrue(torch.allclose(t2 + t3, fwAD.unpack_dual(out4).tangent))
+            if returns_view:
+                gradcheck(MyFn.apply, (a, c), check_forward_ad=True)
+            else:
+                with self.assertRaisesRegex(RuntimeError, error_regex):
+                    gradcheck(MyFn.apply, (a, c), check_forward_ad=True)
 
     def test_custom_function_save_for_forward(self):
         class Func(torch.autograd.Function):
