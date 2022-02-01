@@ -29,7 +29,7 @@ from torch.testing._internal.common_methods_invocations import op_db
 from torch.testing._internal.common_device_type import ops, onlyCPU, instantiate_device_type_tests
 
 from textwrap import dedent
-from itertools import product, permutations
+from itertools import product, permutations, combinations
 
 from test_jit import backward_graph, get_lstm_inputs, get_milstm_inputs, \
     LSTMCellC, LSTMCellF, LSTMCellS, MiLSTMCell
@@ -2015,14 +2015,22 @@ class TestTEFuser(JitTestCase):
         script = self.checkScript(eager, (x, y))
         self.assertAllFused(script.graph_for(x, y))
 
+    @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
     def test_channels_last_dims_dynamic(self):
         def eager(x, y):
-            return x / (y + 0.0001)
+            return x + (y + 0.0001)
 
-        for i in range(4):
+        indices = [0, 1, 2, 3]
+        sets = []
+        for i in range(0, len(indices) + 1):
+            for subset in combinations(indices, i):
+                sets.append(subset)
+
+        for set in sets:
             size = [2, 3, 4, 5]
-            size[i] = 1
-            inp = torch.rand(size).to(memory_format=torch.channels_last)
+            for index in set:
+                size[index] = 1
+            inp = torch.rand(size).to(memory_format=torch.channels_last).cuda()
             with texpr_enable_strategy([("DYNAMIC", 20)]):
                 foo_s = torch.jit.trace(eager, (inp, inp))
                 for _ in range(3):
