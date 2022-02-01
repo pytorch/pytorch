@@ -3,7 +3,7 @@ import torch
 from torch import Tensor
 
 from .optimizer import Optimizer
-from typing import List
+from typing import List, Optional
 
 
 class ASGD(Optimizer):
@@ -27,7 +27,8 @@ class ASGD(Optimizer):
         https://dl.acm.org/citation.cfm?id=131098
     """
 
-    def __init__(self, params, lr=1e-2, lambd=1e-4, alpha=0.75, t0=1e6, weight_decay=0, foreach=None):
+    def __init__(self, params, lr=1e-2, lambd=1e-4, alpha=0.75, t0=1e6, weight_decay=0,
+                 foreach: Optional[bool] = None):
         if not 0.0 <= lr:
             raise ValueError("Invalid learning rate: {}".format(lr))
         if not 0.0 <= weight_decay:
@@ -41,6 +42,19 @@ class ASGD(Optimizer):
         super().__setstate__(state)
         for group in self.param_groups:
             group.setdefault('foreach', None)
+        state_values = list(self.state.values())
+        step_is_tensor = (len(state_values) != 0) and torch.is_tensor(state_values[0]['step'])
+        if not step_is_tensor:
+            for s in state_values:
+                s['step'] = torch.tensor(float(s['step']))
+        eta_is_tensor = (len(state_values) != 0) and torch.is_tensor(state_values[0]['eta'])
+        if not eta_is_tensor:
+            for s in state_values:
+                s['eta'] = torch.tensor(s['eta'])
+        mu_is_tensor = (len(state_values) != 0) and torch.is_tensor(state_values[0]['mu'])
+        if not mu_is_tensor:
+            for s in state_values:
+                s['mu'] = torch.tensor(float(s['mu']))
 
     @torch.no_grad()
     def step(self, closure=None):

@@ -1,3 +1,4 @@
+# Owner(s): ["oncall: quantization"]
 # Copied from pytorch/test/fx/test_subgraph_rewriter.py
 
 import os
