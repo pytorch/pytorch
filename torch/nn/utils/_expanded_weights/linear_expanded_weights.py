@@ -1,7 +1,8 @@
 import torch
 import torch.nn.functional as F
 from .expanded_weights_impl import implements_per_sample_grads
-from .expanded_weights_utils import forward_helper, grad_if_exists, grad_if_exists_for_input, unpack_expanded_weight_or_tensor
+from .expanded_weights_utils import \
+    forward_helper, set_grad_sample_if_exists, grad_if_exists_for_input, unpack_expanded_weight_or_tensor
 
 @implements_per_sample_grads(F.linear)
 class LinearPerSampleGrad(torch.autograd.Function):
@@ -21,6 +22,9 @@ class LinearPerSampleGrad(torch.autograd.Function):
         results = []
 
         results.append(grad_if_exists_for_input(input, lambda: grad_output.matmul(unpack_expanded_weight_or_tensor(weight))))
-        results.append(grad_if_exists(weight, lambda _: torch.einsum("n...i,n...j->nij", grad_output, input)))
-        results.append(grad_if_exists(bias, lambda _: torch.einsum("n...k->nk", grad_output)))
+        results.extend([None] * 2)  # weight and bias don't compute batched gradients
+
+        # weight and bias have their grad_sample fields set directly
+        set_grad_sample_if_exists(weight, lambda _: torch.einsum("n...i,n...j->nij", grad_output, input))
+        set_grad_sample_if_exists(bias, lambda _: torch.einsum("n...k->nk", grad_output))
         return tuple(results)

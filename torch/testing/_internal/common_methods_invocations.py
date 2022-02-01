@@ -618,7 +618,7 @@ class OpInfo(object):
                  test_conjugated_samples=True,
                  test_neg_view=True,
                  assert_jit_shape_analysis=False,  # assert that jit shape analysis fully propagates shape
-                 # the following metadata relates to ExpandedWeights support and is checked in test_ops.py
+                 # the following metadata relates to ExpandedWeights support and is checked in test_expanded_weights.py
                  supports_expanded_weight=False,
                  ):
 

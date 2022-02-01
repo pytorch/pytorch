@@ -1,3 +1,5 @@
+# Owner(s): ["module: nn"]
+
 from functools import partial
 from itertools import product
 
@@ -9,7 +11,7 @@ from torch.testing._internal.common_nn import TestBase, module_tests, new_module
 from torch.testing._internal.common_utils import TestCase, freeze_rng_state, make_tensor, run_tests
 from torch.testing._internal.common_methods_invocations import SampleInput, op_db
 from torch.nn.utils._expanded_weights import ExpandedWeight
-from torch.nn.utils._expanded_weights.expanded_weights_utils import forward_helper, grad_if_exists, \
+from torch.nn.utils._expanded_weights.expanded_weights_utils import forward_helper, set_grad_sample_if_exists, \
     grad_if_exists_for_input, unpack_expanded_weight_or_tensor, sum_over_all_but_batch_and_last_n
 
 class TestContext:
@@ -63,31 +65,31 @@ class TestExpandedWeightHelperFunction(TestCase):
         with self.assertRaisesRegex(RuntimeError, r"Got single output but expected at least 4"):
             forward_helper(nn.functional.linear, (input, weight, bias), 4)
 
-    def test_grad_if_exists(self, device):
+    def test_set_grad_sample_if_exists(self, device):
         def test_fn(_):
             return True
 
         orig_weight = torch.randn(4, device=device, requires_grad=True)
         expanded_weight = ExpandedWeight(orig_weight, 3)
-        grad_if_exists(expanded_weight, test_fn)
+        set_grad_sample_if_exists(expanded_weight, test_fn)
         self.assertTrue(hasattr(orig_weight, 'grad_sample'))
         self.assertTrue(orig_weight.grad_sample)
 
         basic_tensor = torch.randn(4, device=device)
-        grad_if_exists(basic_tensor, test_fn)
+        set_grad_sample_if_exists(basic_tensor, test_fn)
         self.assertFalse(hasattr(basic_tensor, 'grad_sample'))
 
         non_tensor = 3
-        grad_if_exists(non_tensor, test_fn)
+        set_grad_sample_if_exists(non_tensor, test_fn)
         self.assertFalse(hasattr(non_tensor, 'grad_sample'))
 
-    def test_grad_if_exists_failure(self, device):
+    def test_set_grad_sample_if_exists_failure(self, device):
         def test_fn(_):
             return True
 
         grad_tensor = torch.randn(4, requires_grad=True, device=device)
         with self.assertRaisesRegex(RuntimeError, r"does not support a mixture of ExpandedWeight parameters and normal Parameters"):
-            grad_if_exists(grad_tensor, test_fn)
+            set_grad_sample_if_exists(grad_tensor, test_fn)
 
     def test_grad_if_exists_for_input(self, device):
         def test_fn():
@@ -343,7 +345,7 @@ for test_param in supported_tests:
     if decorator is not None:
         fn = decorator(fn)
     setattr(TestExpandedWeightModule, test_name, lambda self, test=test: test.test_context_manager(self))
-    setattr(TestExpandedWeightModule, test_name_multi_input, 
+    setattr(TestExpandedWeightModule, test_name_multi_input,
             lambda self, test=test: test.test_context_manager_multiple_inputs(self))
 
 # ------------- HELPER FUNCTIONS -----------------
