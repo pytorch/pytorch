@@ -296,10 +296,10 @@ std::shared_ptr<Graph> preprocessGraphPasses(
     example_values.emplace_back(*example_input);
   }
   graph = TraceGraph(graph, example_values);
-  tensorexpr::annotateInputShapes(graph, example_inputs);
-
   // TODO: Remove annotateInputShapes pass when TraceGraph can also capture
   // input shapes
+  tensorexpr::annotateInputShapes(graph, example_inputs);
+
   RemoveListMutation(graph);
   RemoveTensorMutation(graph);
   EliminateDeadCode(graph);
