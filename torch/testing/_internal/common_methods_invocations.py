@@ -13235,10 +13235,8 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_conversion,
            # The autograd test runner cannot handle functions that change dtype
            supports_autograd=False,
-           skips=(
-               # RuntimeError: attribute lookup is not defined on builtin
-               DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
-           )),
+           # RuntimeError: attribute lookup is not defined on builtin
+           supports_scripting=False),
     OpInfo('bfloat16',
            op=lambda x, *args, **kwargs: x.bfloat16(*args, **kwargs),
            dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
@@ -13247,20 +13245,16 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_conversion_channels_last,
            # The autograd test runner cannot handle functions that change dtype
            supports_autograd=False,
-           skips=(
-               # RuntimeError: attribute lookup is not defined on builtin
-               DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
-           )),
+           # RuntimeError: attribute lookup is not defined on builtin
+           supports_scripting=False),
     OpInfo('bool',
            op=lambda x, *args, **kwargs: x.bool(*args, **kwargs),
            dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
            supports_out=False,
            sample_inputs_func=sample_inputs_conversion,
            supports_autograd=False,
-           skips=(
-               # RuntimeError: attribute lookup is not defined on builtin
-               DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
-           )),
+           # RuntimeError: attribute lookup is not defined on builtin
+           supports_scripting=False),
     OpInfo('bool',
            op=lambda x, *args, **kwargs: x.bool(*args, **kwargs),
            dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
@@ -13268,10 +13262,8 @@ op_db: List[OpInfo] = [
            variant_test_name='channels_last',
            sample_inputs_func=sample_inputs_conversion_channels_last,
            supports_autograd=False,
-           skips=(
-               # RuntimeError: attribute lookup is not defined on builtin
-               DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
-           )),
+           # RuntimeError: attribute lookup is not defined on builtin
+           supports_scripting=False),
     OpInfo('byte',
            op=lambda x, *args, **kwargs: x.byte(*args, **kwargs),
            dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
@@ -13279,10 +13271,8 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_conversion,
            # The autograd test runner cannot handle functions that change dtype
            supports_autograd=False,
-           skips=(
-               # RuntimeError: attribute lookup is not defined on builtin
-               DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
-           )),
+           # RuntimeError: attribute lookup is not defined on builtin
+           supports_scripting=False),
     OpInfo('byte',
            op=lambda x, *args, **kwargs: x.byte(*args, **kwargs),
            dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
@@ -13291,10 +13281,8 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_conversion_channels_last,
            # The autograd test runner cannot handle functions that change dtype
            supports_autograd=False,
-           skips=(
-               # RuntimeError: attribute lookup is not defined on builtin
-               DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
-           )),
+           # RuntimeError: attribute lookup is not defined on builtin
+           supports_scripting=False),
     OpInfo('char',
            op=lambda x, *args, **kwargs: x.char(*args, **kwargs),
            dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
@@ -13302,10 +13290,8 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_conversion,
            # The autograd test runner cannot handle functions that change dtype
            supports_autograd=False,
-           skips=(
-               # RuntimeError: attribute lookup is not defined on builtin
-               DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
-           )),
+           # RuntimeError: attribute lookup is not defined on builtin
+           supports_scripting=False),
     OpInfo('char',
            op=lambda x, *args, **kwargs: x.char(*args, **kwargs),
            dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
@@ -13314,10 +13300,8 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_conversion_channels_last,
            # The autograd test runner cannot handle functions that change dtype
            supports_autograd=False,
-           skips=(
-               # RuntimeError: attribute lookup is not defined on builtin
-               DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
-           )),
+           # RuntimeError: attribute lookup is not defined on builtin
+           supports_scripting=False),
     OpInfo('double',
            op=lambda x, *args, **kwargs: x.double(*args, **kwargs),
            dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
@@ -13325,10 +13309,8 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_conversion,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
-           skips=(
-               # RuntimeError: attribute lookup is not defined on builtin
-               DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
-           )),
+           # RuntimeError: attribute lookup is not defined on builtin
+           supports_scripting=False),
     OpInfo('double',
            op=lambda x, *args, **kwargs: x.double(*args, **kwargs),
            dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
@@ -13337,10 +13319,8 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_conversion_channels_last,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
-           skips=(
-               # RuntimeError: attribute lookup is not defined on builtin
-               DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
-           )),
+           # RuntimeError: attribute lookup is not defined on builtin
+           supports_scripting=False),
     OpInfo('float',
            op=lambda x, *args, **kwargs: x.float(*args, **kwargs),
            dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
@@ -13348,10 +13328,8 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_conversion,
            # The autograd test runner cannot handle functions that change dtype
            supports_autograd=False,
-           skips=(
-               # RuntimeError: attribute lookup is not defined on builtin
-               DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
-           )),
+           # RuntimeError: attribute lookup is not defined on builtin
+           supports_scripting=False),
     OpInfo('float',
            op=lambda x, *args, **kwargs: x.float(*args, **kwargs),
            dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
@@ -13360,10 +13338,8 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_conversion_channels_last,
            # The autograd test runner cannot handle functions that change dtype
            supports_autograd=False,
-           skips=(
-               # RuntimeError: attribute lookup is not defined on builtin
-               DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
-           )),
+           # RuntimeError: attribute lookup is not defined on builtin
+           supports_scripting=False),
     OpInfo('half',
            op=lambda x, *args, **kwargs: x.half(*args, **kwargs),
            dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
@@ -13371,10 +13347,8 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_conversion,
            # The autograd test runner cannot handle functions that change dtype
            supports_autograd=False,
-           skips=(
-               # RuntimeError: attribute lookup is not defined on builtin
-               DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
-           )),
+           # RuntimeError: attribute lookup is not defined on builtin
+           supports_scripting=False),
     OpInfo('half',
            op=lambda x, *args, **kwargs: x.half(*args, **kwargs),
            dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
@@ -13383,20 +13357,16 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_conversion_channels_last,
            # The autograd test runner cannot handle functions that change dtype
            supports_autograd=False,
-           skips=(
-               # RuntimeError: attribute lookup is not defined on builtin
-               DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
-           )),
+           # RuntimeError: attribute lookup is not defined on builtin
+           supports_scripting=False),
     OpInfo('int',
            op=lambda x, *args, **kwargs: x.int(*args, **kwargs),
            dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
            supports_out=False,
            sample_inputs_func=sample_inputs_conversion,
            supports_autograd=False,
-           skips=(
-               # RuntimeError: attribute lookup is not defined on builtin
-               DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
-           )),
+           # RuntimeError: attribute lookup is not defined on builtin
+           supports_scripting=False),
     OpInfo('int',
            op=lambda x, *args, **kwargs: x.int(*args, **kwargs),
            dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
@@ -13404,20 +13374,16 @@ op_db: List[OpInfo] = [
            variant_test_name='channels_last',
            sample_inputs_func=sample_inputs_conversion_channels_last,
            supports_autograd=False,
-           skips=(
-               # RuntimeError: attribute lookup is not defined on builtin
-               DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
-           )),
+           # RuntimeError: attribute lookup is not defined on builtin
+           supports_scripting=False),
     OpInfo('long',
            op=lambda x, *args, **kwargs: x.long(*args, **kwargs),
            dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
            supports_out=False,
            sample_inputs_func=sample_inputs_conversion,
            supports_autograd=False,
-           skips=(
-               # RuntimeError: attribute lookup is not defined on builtin
-               DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
-           )),
+           # RuntimeError: attribute lookup is not defined on builtin
+           supports_scripting=False),
     OpInfo('long',
            op=lambda x, *args, **kwargs: x.long(*args, **kwargs),
            dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
@@ -13425,20 +13391,16 @@ op_db: List[OpInfo] = [
            variant_test_name='channels_last',
            sample_inputs_func=sample_inputs_conversion_channels_last,
            supports_autograd=False,
-           skips=(
-               # RuntimeError: attribute lookup is not defined on builtin
-               DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
-           )),
+           # RuntimeError: attribute lookup is not defined on builtin
+           supports_scripting=False),
     OpInfo('short',
            op=lambda x, *args, **kwargs: x.short(*args, **kwargs),
            dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
            supports_out=False,
            sample_inputs_func=sample_inputs_conversion,
            supports_autograd=False,
-           skips=(
-               # RuntimeError: attribute lookup is not defined on builtin
-               DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
-           )),
+           # RuntimeError: attribute lookup is not defined on builtin
+           supports_scripting=False),
     OpInfo('short',
            op=lambda x, *args, **kwargs: x.short(*args, **kwargs),
            dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
@@ -13446,10 +13408,8 @@ op_db: List[OpInfo] = [
            variant_test_name='channels_last',
            sample_inputs_func=sample_inputs_conversion_channels_last,
            supports_autograd=False,
-           skips=(
-               # RuntimeError: attribute lookup is not defined on builtin
-               DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
-           )),
+           # RuntimeError: attribute lookup is not defined on builtin
+           supports_scripting=False),
     OpInfo('empty_like',
            dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
            supports_out=False,
