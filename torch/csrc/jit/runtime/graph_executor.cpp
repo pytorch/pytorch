@@ -892,7 +892,9 @@ void runNondiffOptimization(
   GRAPH_DEBUG("After BatchMM, before Fusion\n", *graph);
   if (getProfilingMode()) {
     if (tensorExprFuserEnabled()) {
-      FuseTensorExprs(graph);
+      auto min_size = getFusionGroupInlining() ? 2 : 1;
+      auto dyn_shapes = tensorExprDynamicShapeFusionEnabled();
+      FuseTensorExprs(graph, min_size, /*composed_op*/false, dyn_shapes);
     }
   } else {
     FuseGraph(graph, strict_fuser_check);
