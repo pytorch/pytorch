@@ -3,7 +3,7 @@ import torch
 from torch import Tensor
 
 from .optimizer import Optimizer
-from typing import List
+from typing import List, Optional
 
 
 class RAdam(Optimizer):
@@ -60,7 +60,7 @@ class RAdam(Optimizer):
     """
 
     def __init__(self, params, lr=1e-3, betas=(0.9, 0.999), eps=1e-8,
-                 weight_decay=0, foreach=None):
+                 weight_decay=0, foreach: Optional[bool] = None):
         if not 0.0 <= lr:
             raise ValueError("Invalid learning rate: {}".format(lr))
         if not 0.0 <= eps:
@@ -79,6 +79,11 @@ class RAdam(Optimizer):
         super().__setstate__(state)
         for group in self.param_groups:
             group.setdefault('foreach', None)
+        state_values = list(self.state.values())
+        step_is_tensor = (len(state_values) != 0) and torch.is_tensor(state_values[0]['step'])
+        if not step_is_tensor:
+            for s in state_values:
+                s['step'] = torch.tensor(float(s['step']))
 
     @torch.no_grad()
     def step(self, closure=None):

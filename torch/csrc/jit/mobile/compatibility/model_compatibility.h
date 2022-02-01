@@ -1,7 +1,7 @@
 #pragma once
 
 #include <c10/macros/Export.h>
-#include <torch/csrc/jit/mobile/runtime_compatibility.h>
+#include <torch/csrc/jit/mobile/compatibility/runtime_compatibility.h>
 
 #include <istream>
 #include <memory>
