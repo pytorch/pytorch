@@ -1,4 +1,4 @@
-.. automodule:: torch.distributed.optim
+.. automodule:: torch.distributed.fsdp
 .. currentmodule:: torch.distributed.fsdp
 
 FullyShardedDataParallel
