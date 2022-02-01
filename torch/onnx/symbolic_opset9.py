@@ -717,16 +717,17 @@ def squeeze(g, self, dim=None):
 
 def prelu(g, self, weight):
     self_rank = sym_help._get_tensor_rank(self)
-    if self_rank is not None and self_rank > 2:
-        weight = sym_help._unsqueeze_helper(g, weight, list(range(1, self_rank - 1)))
-    elif self_rank is not None and self_rank == 0:
-        self = sym_help._unsqueeze_helper(g, self, [0])
-        self_rank = sym_help._get_tensor_rank(self)
+    if self_rank is not None:
+        if self_rank > 2:
+            weight = sym_help._unsqueeze_helper(g, weight, list(range(1, self_rank - 1)))
+        elif self_rank == 0:
+            self = sym_help._unsqueeze_helper(g, self, [0])
+            self_rank = sym_help._get_tensor_rank(self)
 
     slope_rank = sym_help._get_tensor_rank(weight)
     if self_rank is not None and slope_rank is not None:
         assert self_rank >= slope_rank, \
-            "unidirectional broadcasting: rank(x) must >= rank(slope) but got {} < {}".format(self_rank, slope_rank)
+            "rank(x) should be >= rank(slope) but got {} < {}".format(self_rank, slope_rank)
     return g.op("PRelu", self, weight)
 
 def silu(g, input):
