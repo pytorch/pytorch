@@ -1118,6 +1118,24 @@ class TestNN(NNTestCase):
             names(s.named_buffers()),
             ['0.dummy_buf', '0.l1.layer_dummy_buf'])
 
+    def test_named_parameters_buffers_duplicates(self):
+        class Foo(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.bias = nn.Parameter(torch.randn(3))
+                self.linear = nn.Linear(3, 3)
+                self.linear.bias = self.bias
+                self.linear_cloned = self.linear
+                self.register_buffer('buffer', torch.randn(3))
+                self.register_buffer('buffer_cloned', self.buffer)
+
+        mod = Foo()
+        self.assertEqual(len(list(mod.named_parameters())), 2)
+        self.assertEqual(len(list(mod.named_parameters(remove_duplicate=False))), 5)
+
+        self.assertEqual(len(list(mod.named_buffers())), 1)
+        self.assertEqual(len(list(mod.named_buffers(remove_duplicate=False))), 2)
+
     def test_call_supports_python_dict_output(self):
         class Net(nn.Module):
             def __init__(self):
