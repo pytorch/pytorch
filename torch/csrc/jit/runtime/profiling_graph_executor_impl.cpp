@@ -69,7 +69,13 @@ static std::atomic<bool> profiling_mode{true};
 #endif
 
 static std::mutex fusion_strategy_lock;
+
+// TODO remove ifdef
+#ifdef FBCODE_CAFFE2
 static FusionStrategy fusion_strategy = {{FusionBehavior::STATIC, 20}};
+#else
+static FusionStrategy fusion_strategy = {{FusionBehavior::STATIC, 2}, {FusionBehavior::DYNAMIC, 10}};
+#endif
 
 FusionStrategy getFusionStrategy() {
   std::lock_guard<std::mutex> guard(fusion_strategy_lock);
