@@ -7,6 +7,7 @@ from typing import Any, Dict, List
 import torch
 from tools.codegen.code_template import CodeTemplate
 from torch.jit.generate_bytecode import generate_upgraders_bytecode
+from tools.codegen.operator_versions.gen_mobile_upgraders_constant import MOBILE_UPGRADERS_HEADER_DESCRIPTION
 
 class ByteCode(Enum):
     instructions = 1
@@ -77,12 +78,6 @@ ONE_OPERATOR_IN_VERSION_MAP = CodeTemplate("""
             ${upgrader_list_in_version_map}
         })},""")
 
-# OPERATOR_VERSION_MAP = CodeTemplate("""
-# const std::unordered_map<std::string, std::vector<Upgrader>> kOperatorVersionMap(
-#     {
-#         ${operator_list_in_version_map}
-#     });
-# """)
 
 OPERATOR_VERSION_MAP = CodeTemplate("""
 const std::unordered_map<std::string, std::vector<Upgrader>>
@@ -96,19 +91,9 @@ getOperatorVersionMapForMobile() {
 """)
 
 
-
-UPGRADER_CPP_SRC = CodeTemplate("""/**
- * @generated
- * This is an auto-generated file. Please do not modify it by hand.
- * To re-generate, please run:
- * cd ~/pytorch && python torch/csrc/jit/mobile/upgrader_mobile.cpp
- */
-
-#include <torch/csrc/jit/mobile/upgrader_mobile.h>
-
-#include <ATen/core/ivalue.h>
+UPGRADER_CPP_SRC = CodeTemplate(MOBILE_UPGRADERS_HEADER_DESCRIPTION + """
 #include <caffe2/serialize/versions.h>
-#include <torch/csrc/jit/mobile/type_parser.h>
+#include <torch/csrc/jit/mobile/upgrader_mobile.h>
 
 namespace c10 {
 TypePtr parseType(const std::string& pythonStr);
