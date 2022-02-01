@@ -58,13 +58,12 @@ def texpr_reductions_enabled():
         torch._C._jit_set_texpr_reductions_enabled(old)
 
 @contextlib.contextmanager
-def texpr_dynamic_enabled():
-    old = torch._C._jit_texpr_dynamic_shape_enabled()
-    torch._C._jit_set_texpr_dynamic_shape_enabled(True)
+def texpr_enable_strategy(strategy):
+    old = torch._C._jit_set_fusion_strategy(strategy)
     try:
         yield
     finally:
-        torch._C._jit_set_texpr_dynamic_shape_enabled(old)
+        torch._C._jit_set_fusion_strategy(old)
 
 @contextlib.contextmanager
 def inline_fusion_groups():
@@ -1921,7 +1920,7 @@ class TestTEFuser(JitTestCase):
             size = [2, 3, 4, 5]
             size[i] = 1
             inp = torch.rand(size).to(memory_format=torch.channels_last)
-            with texpr_dynamic_enabled():
+            with texpr_enable_strategy([("DYNAMIC", 20)]):
                 foo_s = torch.jit.trace(eager, (inp, inp))
                 for _ in range(3):
                     out = foo_s(inp, inp)
@@ -1930,6 +1929,23 @@ class TestTEFuser(JitTestCase):
                 self.assertTrue(out.is_contiguous(memory_format=torch.channels_last))
                 g = torch.jit.last_executed_optimized_graph()
                 FileCheck().check("TensorExpr").run(g)
+
+    def test_exhaust_specializations(self):
+        with texpr_enable_strategy([("STATIC", 1)]):
+            @torch.jit.script
+            def foo(x):
+                return x + x + x
+
+            for _ in range(3):
+                foo(torch.rand([2, 2]))
+
+            for _ in range(3):
+                foo(torch.rand([4, 4, 4]))
+
+            g = torch.jit.last_executed_optimized_graph()
+            torch._C._jit_pass_inline(g)
+
+            FileCheck().check_count("TensorExpr", 2, exactly=True).run(g)
 
     def test_unsqueeze_var_dim(self):
         def eager(x, y, z: int):
@@ -2094,7 +2110,7 @@ class TestTEFuser(JitTestCase):
             lambda n: R(n, n + 1, n + 2, n + 3).to(memory_format=torch.channels_last),
         )
 
-        with texpr_dynamic_enabled():
+        with texpr_enable_strategy([("DYNAMIC", 20)]):
             def foo(x, y, z):
                 return torch.sigmoid(torch.tanh(x))
 

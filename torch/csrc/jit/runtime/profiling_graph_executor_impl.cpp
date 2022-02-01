@@ -68,6 +68,22 @@ static std::atomic<bool> executor_mode{true};
 static std::atomic<bool> profiling_mode{true};
 #endif
 
+static std::mutex fusion_strategy_lock;
+static FusionStrategy fusion_strategy = {{FusionBehavior::STATIC, 20}};
+
+FusionStrategy getFusionStrategy() {
+  std::lock_guard<std::mutex> guard(fusion_strategy_lock);
+  FusionStrategy strategy = fusion_strategy;
+  return strategy;
+}
+
+FusionStrategy setFusionStrategy(FusionStrategy& strategy) {
+  std::lock_guard<std::mutex> guard(fusion_strategy_lock);
+  auto old_strategy = fusion_strategy;
+  fusion_strategy = strategy;
+  return old_strategy;
+}
+
 static std::atomic<size_t> num_profiled_runs{kDefaultNumProfiledRuns};
 static std::atomic<size_t> bailout_depth{kDefaultBailoutDepth};
 
@@ -88,13 +104,13 @@ std::atomic<size_t>& getNumProfiledRuns() {
   return num_profiled_runs;
 }
 
-std::atomic<size_t>& getBailoutDepth() {
+size_t getBailoutDepth() {
   // Initialize bailout_depth from command-line flag.
-  static const size_t init = []() {
-    return bailout_depth = FLAGS_torch_jit_bailout_depth;
-  }();
-  (void)init; // Silence clang-tidy.
-  return bailout_depth;
+  size_t depth = 0;
+  for (const auto& pair: getFusionStrategy()) {
+    depth += pair.second;
+  }
+  return depth;
 }
 
 static bool needsGradientInProfilingMode(Block* b) {
@@ -350,7 +366,21 @@ void runPreAutodiffPassPipeline(std::shared_ptr<Graph>& graph) {
       "After CheckInplace (end of runPreAutodiffPassPipeline)\n", *graph);
 }
 
-void runNoGradOptimizations(std::shared_ptr<Graph>& graph) {
+FusionBehavior getCurrentBehavior(size_t remaining_depth) {
+  size_t curr_depth = 0;
+  auto curr_strategy = getFusionStrategy();
+  for (int i = static_cast<int>(curr_strategy.size()) -1; i >= 0; i--) {
+    curr_depth += curr_strategy[i].second;
+    if (remaining_depth <= curr_depth) {
+      return curr_strategy[i].first;
+    }
+  }
+  // should never get here
+  TORCH_WARN("Stratgy changed mid-invocation, NYI");
+  return FusionBehavior::STATIC;
+}
+
+void runNoGradOptimizations(std::shared_ptr<Graph>& graph, size_t remaining_bailout_depth) {
   GRAPH_DEBUG(
       "After customPostPasses (beginning of runNoGradOptimizations)\n", *graph);
   // runNondiffOptimization
@@ -383,7 +413,7 @@ void runNoGradOptimizations(std::shared_ptr<Graph>& graph) {
       BatchMM(graph);
       GRAPH_DEBUG("After BatchMM, before Fusion\n", *graph);
       auto min_size = getFusionGroupInlining() ? 2 : 1;
-      auto dyn_shapes = tensorExprDynamicShapeFusionEnabled();
+      bool dyn_shapes = getCurrentBehavior(remaining_bailout_depth) == FusionBehavior::DYNAMIC;
       FuseTensorExprs(graph, min_size, /*composed_op*/false, dyn_shapes);
       GRAPH_DEBUG(
           "After Fusion, before RemoveTensorTypeSpecializations\n", *graph);
@@ -412,7 +442,7 @@ void runNoGradOptimizations(std::shared_ptr<Graph>& graph) {
 }
 
 void ProfilingGraphExecutorImpl::runProfilingOptimizations(
-    std::shared_ptr<Graph>& copy) {
+    std::shared_ptr<Graph>& copy, size_t remaining_bailout_depth) {
   GRAPH_DEBUG("Before runProfilingOptimizations:\n", *copy);
   if (!getGraphExecutorOptimize()) {
     runNooptPassPipeline(copy);
@@ -460,7 +490,7 @@ void ProfilingGraphExecutorImpl::runProfilingOptimizations(
     GRAPH_DEBUG(
         "After InlineAutodiffSubgraphs and Removing Profiling Nodes\n", *copy);
   } else {
-    runNoGradOptimizations(copy);
+    runNoGradOptimizations(copy, remaining_bailout_depth);
   }
   EliminateDeadCode(copy);
   GRAPH_DEBUG("After runProfilingOptimizations:\n", *copy);
@@ -604,7 +634,7 @@ const ExecutionPlan& ProfilingGraphExecutorImpl::getOptimizedPlanFor(
 
   auto copy = pr_->graph()->copy();
   ProfilingRecord::removeProfileCounter(copy->block());
-  runProfilingOptimizations(copy);
+  runProfilingOptimizations(copy, *remaining_bailout_depth_);
   // replaces a fallback graph inserted by
   // specialize_autogradzero if one exists
   replaceFallbackGraphWithFallbackFunction(copy->block());
