@@ -65,6 +65,7 @@ file(GLOB cuda_nvrtc_stub_cpp "cuda/nvrtc_stub/*.cpp")
 file(GLOB cuda_cu "cuda/*.cu" "cuda/detail/*.cu")
 file(GLOB cudnn_h "cudnn/*.h" "cudnn/*.cuh")
 file(GLOB cudnn_cpp "cudnn/*.cpp")
+file(GLOB ops_h "ops/*.h")
 
 file(GLOB hip_h "hip/*.h" "hip/detail/*.h" "hip/*.cuh" "hip/detail/*.cuh" "hip/impl/*.h")
 file(GLOB hip_cpp "hip/*.cpp" "hip/detail/*.cpp" "hip/impl/*.cpp")
@@ -394,10 +395,10 @@ endif()
 
   if(USE_MAGMA)
     if(USE_CUDA)
-      list(APPEND ATen_CUDA_DEPENDENCY_LIBS ${MAGMA_LIBRARIES})
+      list(APPEND ATen_CUDA_DEPENDENCY_LIBS torch::magma)
     endif(USE_CUDA)
     if(USE_ROCM)
-      list(APPEND ATen_HIP_DEPENDENCY_LIBS ${MAGMA_LIBRARIES})
+      list(APPEND ATen_HIP_DEPENDENCY_LIBS torch::magma)
     endif(USE_ROCM)
     if(MSVC)
       if($ENV{TH_BINARY_BUILD})
@@ -490,7 +491,8 @@ foreach(HEADER ${core_generated_headers})
   install(FILES ${HEADER} DESTINATION ${AT_INSTALL_INCLUDE_DIR}/ATen/core)
 endforeach()
 
-install(FILES ${ops_generated_headers} DESTINATION ${AT_INSTALL_INCLUDE_DIR}/ATen/ops)
+install(FILES ${ops_h} ${ops_generated_headers}
+  DESTINATION ${AT_INSTALL_INCLUDE_DIR}/ATen/ops)
 install(FILES ${CMAKE_BINARY_DIR}/aten/src/ATen/Declarations.yaml
   DESTINATION ${AT_INSTALL_SHARE_DIR}/ATen)
 

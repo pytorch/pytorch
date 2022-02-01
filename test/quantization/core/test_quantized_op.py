@@ -3353,7 +3353,6 @@ class TestQuantizedLinear(TestCase):
                 W_q.q_zero_point(), W_q_origin.q_zero_point())
 
 @unittest.skipIf(IS_MACOS, "Known test failure on Mac.")
-@unittest.skipIf(not BUILD_WITH_CAFFE2, "Test needs Caffe2")
 class TestQuantizedEmbeddingOps(TestCase):
     def _test_embedding_bag_unpack_fn(self, pack_fn, unpack_fn, num_embeddings, embedding_dim, bit_rate, optimized_qparams,
                                       num_batches, data_type=np.float32):
@@ -3440,6 +3439,7 @@ class TestQuantizedEmbeddingOps(TestCase):
         np.testing.assert_allclose(w_unpacked.numpy(), w_unpacked_c2.numpy(), atol=1e-6, rtol=1e-6)
 
     """ Tests the correctness of the embedding_bag_8bit pack/unpack op against C2 """
+    @unittest.skipIf(not BUILD_WITH_CAFFE2, "Test needs Caffe2")
     @given(num_embeddings=st.integers(10, 100),
            embedding_dim=st.integers(5, 50).filter(lambda x: x % 4 == 0),
            num_batches=st.integers(1, 5),
@@ -3452,6 +3452,7 @@ class TestQuantizedEmbeddingOps(TestCase):
             pack_fn, unpack_fn, num_embeddings, embedding_dim, 8, False, num_batches, data_type=data_type)
 
     """ Tests the correctness of the embedding_bag_4bit pack/unpack op against C2 """
+    @unittest.skipIf(not BUILD_WITH_CAFFE2, "Test needs Caffe2")
     @given(num_embeddings=st.integers(10, 100),
            embedding_dim=st.integers(5, 50).filter(lambda x: x % 4 == 0),
            optimized_qparams=st.booleans(),
@@ -3464,6 +3465,7 @@ class TestQuantizedEmbeddingOps(TestCase):
             pack_fn, unpack_fn, num_embeddings, embedding_dim, 4, optimized_qparams, 1, data_type=data_type)
 
     """ Tests the correctness of the embedding_bag_2bit pack/unpack op against C2 """
+    @unittest.skipIf(not BUILD_WITH_CAFFE2, "Test needs Caffe2")
     @given(num_embeddings=st.integers(10, 100),
            embedding_dim=st.integers(5, 50).filter(lambda x: x % 8 == 0),
            optimized_qparams=st.booleans(),
@@ -3685,8 +3687,11 @@ class TestQuantizedEmbeddingOps(TestCase):
            embedding_dim=st.integers(5, 50).filter(lambda x: x % 4 == 0))
     def test_embedding(self, num_embeddings, embedding_dim):
         dtypes = [torch.quint8, torch.quint4x2]
-        quant_ops = [torch.ops.quantized.embedding_byte, torch.ops.quantize.embedding_4bit]
-        for quant_op, dtype in zip(dtypes, quant_ops):
+        quant_ops = [torch.ops.quantized.embedding_byte, torch.ops.quantized.embedding_4bit]
+        atols = [0.005, 0.1]
+        rtols = [1e-3, 1e-2]
+        prepack_op = torch.ops.quantized.embedding_bag_prepack
+        for quant_op, dtype, atol, rtol in zip(quant_ops, dtypes, atols, rtols):
             weights = torch.from_numpy((np.random.random_sample((
                 num_embeddings, embedding_dim)) + 1).astype(np.float32))
 
@@ -3696,7 +3701,7 @@ class TestQuantizedEmbeddingOps(TestCase):
             qparams = obs.calculate_qparams()
 
             # Quantize the weights to 8bits
-            qweight = torch.quantize_per_channel(weights, qparams[0], qparams[1], axis=0, dtype=torch.dtype)
+            qweight = torch.quantize_per_channel(weights, qparams[0], qparams[1], axis=0, dtype=dtype)
             max_segments = 5
             max_segment_length = 20
             num_lengths = np.random.randint(1, max_segments + 1)
@@ -3710,7 +3715,7 @@ class TestQuantizedEmbeddingOps(TestCase):
             qresult = quant_op(packed_weight, indices, pruned_weights=False)
 
             ref = torch.embedding(weights, indices, padding_idx=-1, scale_grad_by_freq=False, sparse=False)
-            torch.testing.assert_close(ref, qresult, atol=0.005, rtol=1e-3)
+            torch.testing.assert_close(ref, qresult, atol=atol, rtol=rtol)
 
     def test_embedding_2d_indices(self):
         """
@@ -3871,35 +3876,30 @@ class TestQuantizedConv(TestCase):
         W_init = torch.randint(
             W_value_min,
             W_value_max,
-            output_shape + kernels
+            output_shape + kernels,
+            device=device,
         )
-        b_init = torch.randint(0, 10, (output_channels,))
+        b_init = torch.randint(0, 10, (output_channels,), device=device)
 
         (X_value_min, X_value_max) = (0, 4)
         X_init = torch.randint(
             X_value_min,
             X_value_max,
             (batch_size, input_channels,) + input_feature_map_shape,
+            device=device
         )
         X = X_scale * (X_init - X_zero_point).float()
 
         if use_channelwise:
             W_shape = (-1, 1) + (1,) * len(kernels)
-            W_scales_tensor = torch.tensor(W_scale, dtype=torch.float)
-            W_zero_points_tensor = torch.tensor(W_zero_point, dtype=torch.float)
+            W_scales_tensor = torch.tensor(W_scale, dtype=torch.float, device=device)
+            W_zero_points_tensor = torch.tensor(W_zero_point, dtype=torch.float, device=device)
             W = W_scales_tensor.reshape(*W_shape) * (
                 W_init.float() - W_zero_points_tensor.reshape(*W_shape)).float()
             b = X_scale * W_scales_tensor * b_init.float()
-            W_scales_tensor = W_scales_tensor.to(device)
-            W_zero_points_tensor = W_zero_points_tensor.to(device)
         else:
             W = W_scale[0] * (W_init - W_zero_point[0]).float()
             b = X_scale * W_scale[0] * b_init.float()
-
-        # set Tensors to use the correct device
-        X = X.to(device)
-        W = W.to(device)
-        b = b.to(device)
 
         X_q = torch.quantize_per_tensor(
             X, scale=X_scale, zero_point=X_zero_point, dtype=input_dtype)
