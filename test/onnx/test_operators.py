@@ -172,6 +172,11 @@ class TestOperators(TestCase):
         x = torch.randn(2, 3, requires_grad=True).double()
         self.assertONNX(lambda x: 1 - x, (x,))
 
+    def test_mul_bool(self):
+        x = torch.tensor([True, False, True, False])
+        y = torch.tensor([True, True, False, False])
+        self.assertONNX(lambda x, y: torch.mul(x, y), (x, y))
+
     def test_transpose(self):
         x = torch.tensor([[0.0, 1.0], [2.0, 3.0]], requires_grad=True)
         self.assertONNX(lambda x: x.transpose(0, 1).transpose(1, 0), x)
