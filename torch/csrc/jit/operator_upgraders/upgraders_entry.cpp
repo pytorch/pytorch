@@ -67,31 +67,22 @@ std::shared_ptr<Graph> create_upgrader_graph(
   GraphFunction& graphFunction = toGraphFunction(jitFunc);
   return graphFunction.graph();
 }
-using UpgraderMap = std::unordered_map<std::string, std::shared_ptr<Graph>>;
-void populate_upgraders_graph_map() {
-  if (!is_upgraders_map_populated()) {
-    UpgraderMap populate_content;
-    for (const auto& entry : kUpgradersEntryMap) {
-      auto upgrader_graph = create_upgrader_graph(entry.first, entry.second);
-      populate_content.insert(std::make_pair(entry.first, upgrader_graph));
-    }
-    populate_upgraders_map(std::forward<UpgraderMap>(populate_content));
-  }
-}
 
-std::vector<ByteCodeEntry> generate_bytecode_list() {
-  std::vector<ByteCodeEntry> upgraders_bytecode_list;
-  upgraders_bytecode_list.reserve(kUpgradersEntryMap.size());
+std::unordered_map<std::string, std::shared_ptr<Graph>>
+generate_upgraders_graph() {
+  std::unordered_map<std::string, std::shared_ptr<Graph>> populate_content;
   for (const auto& entry : kUpgradersEntryMap) {
     auto upgrader_graph = create_upgrader_graph(entry.first, entry.second);
-    CompilationOptions options;
-    GraphFunction jitFunc(entry.first, upgrader_graph, nullptr);
-    auto mobileFunc = convertJitFunctionToMobileFunction(jitFunc, options);
-    auto codeTable = convertMobileFunctionToCodeTable(*mobileFunc, options);
-    upgraders_bytecode_list.emplace_back(
-        std::make_tuple(entry.first, codeTable));
+    populate_content.insert(std::make_pair(entry.first, upgrader_graph));
   }
-  return upgraders_bytecode_list;
+  return populate_content;
+}
+
+void populate_upgraders_graph_map() {
+  if (!is_upgraders_map_populated()) {
+    auto graphs = generate_upgraders_graph();
+    populate_upgraders_map(std::move(graphs));
+  }
 }
 
 } // namespace jit
