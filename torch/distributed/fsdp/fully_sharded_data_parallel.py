@@ -95,10 +95,11 @@ class TrainingState_(Enum):
 class FullyShardedDataParallel(nn.Module):
     """
     A wrapper for sharding Module parameters across data parallel workers. This
-    is inspired by `Xu et al.`_ as well as the ZeRO Stage 3 from `DeepSpeed`_.
-    ``FullyShardedDataParallel`` is commonly shorten to FSDP.
-    `Xu et al.`_: https://arxiv.org/abs/2004.13336
-    `DeepSpeed`_: https://www.deepspeed.ai/
+    is inspired by `Xu et al.`_ as well as the ZeRO Stage 3 from DeepSpeed_.
+    FullyShardedDataParallel is commonly shorten to FSDP.
+
+    .. _`Xu et al.`: https://arxiv.org/abs/2004.13336
+    .. _DeepSpeed: https://www.deepspeed.ai/
 
     Example::
 
