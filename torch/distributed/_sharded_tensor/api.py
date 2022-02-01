@@ -15,15 +15,11 @@ import torch.distributed as dist
 from torch.distributed import rpc
 from torch.distributed import distributed_c10d
 from torch.distributed._sharding_spec import (
-    ChunkShardingSpec,
     EnumerableShardingSpec,
-    ShardMetadata,
     ShardingSpec,
 )
 from torch.distributed._sharding_spec._internals import (
     check_tensor,
-    get_split_size,
-    get_chunked_dim_size,
     validate_non_overlapping_shards_metadata,
 )
 from torch.types import Number
@@ -167,14 +163,27 @@ class ShardedTensor(object):
 
         dims = _flatten_tensor_size(size)
 
+        if not isinstance(sharding_spec, ShardingSpec):
+            raise ValueError(f' sharding_spec: {self._sharding_spec}')
         self._sharding_spec = sharding_spec
 
-        if isinstance(self._sharding_spec, ChunkShardingSpec):
-            self._init_chunked(dims, tensor_init_params)
-        elif isinstance(self._sharding_spec, EnumerableShardingSpec):
-            self._init_enumerable(dims, tensor_init_params)
-        else:
-            raise ValueError(f'Unsupported sharding_spec: {self._sharding_spec}')
+        shards_metadata_list = sharding_spec.shard(dims, process_group=self._process_group)
+
+        local_shards = []
+        current_rank = dist.get_rank(self._process_group)
+
+        for shard_metadata in shards_metadata_list:
+            rank, device = _parse_and_validate_remote_device(self._process_group, shard_metadata.placement)
+            if rank == current_rank:
+                local_tensor = _create_tensor_from_params(
+                    shard_metadata.shard_sizes,
+                    local_device=device,
+                    tensor_init_params=tensor_init_params
+                )
+                self._local_shards.append(Shard(local_tensor, shard_metadata))
+        self._metadata = ShardedTensorMetadata(
+            shards_metadata_list, dims, tensor_init_params.tensor_properties
+        )
 
         # do post initialization (i.e. register sharded_tensor_id, initialize_rpc)
         self._post_init()
@@ -473,78 +482,6 @@ class ShardedTensor(object):
         sharded_tensor._post_init()
         return sharded_tensor
 
-
-    def _init_chunked(self, dims, tensor_init_params: TensorInitParams, ):
-        current_rank = dist.get_rank(self._process_group)
-        sharding_dim = self._sharding_spec.dim  # type: ignore[attr-defined]
-
-        # Validate the sharding spec.
-        if not isinstance(sharding_dim, int):
-            raise ValueError(
-                f"Sharding dim needs to be an integer, found: {sharding_dim}"
-            )
-        if sharding_dim >= len(dims) or sharding_dim < -len(dims):
-            raise ValueError(f"Invalid sharding dim: {sharding_dim}")
-
-        dim_size = dims[sharding_dim]
-        remote_devices = self._sharding_spec.placements  # type: ignore[attr-defined]
-        chunks = len(remote_devices)
-        # split_size computed similar to 'torch.chunk'
-        split_size = get_split_size(dim_size, chunks)
-
-        shards_metadata = []
-        for idx, remote_device in enumerate(remote_devices):
-            rank, local_device = _parse_and_validate_remote_device(self._process_group, remote_device)
-
-            # Adjust the sharding dim for this rank.
-            sharded_dim_size = get_chunked_dim_size(dim_size, split_size, idx)
-
-            if sharded_dim_size > 0:
-                # Build sharding_metadata.
-
-                # deepcopy for modification.
-                rank_dims = dims.copy()
-
-                rank_offsets = [0] * len(dims)
-                rank_offsets[sharding_dim] = split_size * idx
-                rank_dims[sharding_dim] = sharded_dim_size
-
-                shard_metadata = ShardMetadata(rank_offsets, rank_dims, remote_device)
-                shards_metadata.append(shard_metadata)
-
-                # Build the local shard for the current rank if it is involved in the sharding spec.
-                if current_rank == rank:
-                    # Initialize the local shard.
-                    local_shard = _create_tensor_from_params(
-                        *rank_dims, local_device=local_device, tensor_init_params=tensor_init_params)
-                    self._local_shards.append(Shard(local_shard, shard_metadata))
-
-        # Build overall metadata
-        self._metadata = ShardedTensorMetadata(
-            shards_metadata, dims, tensor_init_params.tensor_properties, )
-
-    def _init_enumerable(self, dims, tensor_init_params: TensorInitParams):
-        # Validate the sharding spec is compatible with the tensor.
-        check_tensor(self._sharding_spec.shards, dims)  # type: ignore[attr-defined]
-
-        current_rank = dist.get_rank(self._process_group)
-
-        shards_metadata = []
-        for shard_metadata in self._sharding_spec.shards:  # type: ignore[attr-defined]
-            rank, local_device = _parse_and_validate_remote_device(self._process_group, shard_metadata.placement)
-            shards_metadata.append(shard_metadata)
-
-            if current_rank == rank:
-                # Initialize the local shard.
-                local_shard = _create_tensor_from_params(
-                    *shard_metadata.shard_sizes, local_device=local_device,
-                    tensor_init_params=tensor_init_params)
-                self._local_shards.append(Shard(local_shard, shard_metadata))
-
-        # Build overall metadata
-        self._metadata = ShardedTensorMetadata(
-            shards_metadata, dims, tensor_init_params.tensor_properties, )
-
     def sharding_spec(self) -> ShardingSpec:
         """
         Returns the ShardingSpec for the tensor.
@@ -743,7 +680,7 @@ def _create_tensor_from_params(*size, local_device, tensor_init_params: TensorIn
                           pin_memory=pin_memory,
                           requires_grad=requires_grad,)
     elif tensor_init_params.create_op == CreateOp.FULL:
-        return torch.full(size=size,
+        return torch.full(*size,
                           fill_value=tensor_init_params.fill_value,
                           layout=layout,
                           dtype=dtype,

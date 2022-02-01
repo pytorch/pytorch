@@ -23,7 +23,10 @@ from .api import (
     TensorInitParams,
     TensorProperties,
 )
-from .utils import load_with_process_group
+from .utils import (
+    load_with_process_group,
+    _parse_and_validate_remote_device
+)
 import torch.distributed as dist
 from torch.distributed import distributed_c10d
 
@@ -404,9 +407,6 @@ def shard_parameter(
         currently supported as the ``sharding_spec``.
     """
     # Perform some validation first.
-    if not isinstance(sharding_spec, ChunkShardingSpec):
-        raise ValueError('Only ChunkShardingspec is supported.')
-
     if not hasattr(module, param_name):
         raise ValueError(f'module: {module} does not have parameter with name: {param_name}')
 
@@ -419,7 +419,7 @@ def shard_parameter(
 
     pg = process_group if process_group is not None else distributed_c10d._get_default_group()
     world_size = dist.get_world_size(pg)
-    rank = dist.get_rank(pg)
+    current_rank = dist.get_rank(pg)
 
     # Validate src_rank and sharding_spec are same across all ranks.
     gathered_list = [None] * world_size
@@ -428,60 +428,45 @@ def shard_parameter(
     for idx, entry in enumerate(gathered_list):
         if src_rank != entry[0]:  # type: ignore[index]
             raise ValueError(
-                f'src_rank={src_rank} on rank: {rank} does not '  # type: ignore[index]
+                f'src_rank={src_rank} on rank: {current_rank} does not '  # type: ignore[index]
                 f'match with src_rank={entry[0]} on rank: {idx}')
         if sharding_spec != entry[1]:  # type: ignore[index]
             raise ValueError(
-                f'sharding_spec={sharding_spec} on rank: {rank} does not '  # type: ignore[index]
+                f'sharding_spec={sharding_spec} on rank: {current_rank} does not '  # type: ignore[index]
                 f'match with sharding_spec={entry[1]} on rank: {idx}')
 
     # Rearrange chunks according to placement.
-    local_metadata = None
-    current_offsets = [0] * len(tensor.size())
-    shards_metadata = []
-    sharding_dim_size = tensor.size(sharding_spec.dim)  # type: ignore[arg-type]
-    split_size = get_split_size(sharding_dim_size, world_size)
     tensor_sizes = list(tensor.size())
-    for idx, placement in enumerate(sharding_spec.placements):
-        chunked_dim_size = get_chunked_dim_size(sharding_dim_size, split_size, idx)
-        shard_size = copy.deepcopy(tensor_sizes)
-        shard_size[sharding_spec.dim] = chunked_dim_size  # type: ignore[index]
-
-        shard_metadata = ShardMetadata(
-            shard_offsets=copy.deepcopy(current_offsets),
-            shard_sizes=shard_size,
-            placement=placement,
-        )
-        shards_metadata.append(shard_metadata)
-
-        if rank == placement.rank():  # type: ignore[union-attr]
-            local_metadata = shard_metadata
-
-        current_offsets[sharding_spec.dim] += chunked_dim_size  # type: ignore[index]
-
+    shards_metadata = sharding_spec.shard(tensor_sizes, process_group=pg)
+    local_shards = []
     # Scatter the shards (use broadcast since NCCL doesn't support scatter, this is very inefficient).
     dist.broadcast(tensor, src=src_rank, group=pg)
-
-    # Reshape to get shard for this rank and we don't want autograd
-    # recording here for the narrow op and 'local_shard' should be a
-    # leaf variable in the autograd graph.
-    local_shard = tensor.narrow(
-        sharding_spec.dim,  # type: ignore[arg-type]
-        local_metadata.shard_offsets[sharding_spec.dim],  # type: ignore[union-attr, arg-type, index]
-        local_metadata.shard_sizes[sharding_spec.dim],  # type: ignore[union-attr, index]
-    ).clone().detach().contiguous()
-
-    # Sync requires_grad to local_shard.
-    local_shard.requires_grad = tensor.requires_grad
+    for shard_meta in shards_metadata:
+        rank, device = _parse_and_validate_remote_device(pg, shard_meta.placement)
+        if rank == current_rank:
+            shard_offsets = shard_meta.shard_offsets
+            shard_sizes = shard_meta.shard_sizes
+            local_tensor = tensor
+            for idx, (offset, size) in enumerate(zip(shard_offsets, shard_sizes)):
+                if size < tensor.size(idx):
+                    # Reshape to get shard for this rank and we don't want autograd
+                    # recording here for the narrow op and 'local_shard' should be a
+                    # leaf variable in the autograd graph.
+                    local_tensor = local_tensor.narrow(
+                        idx,
+                        shard_offsets[idx],
+                        shard_sizes[idx]
+                    ).clone().detach().contiguous()
+            # Sync requires_grad to local_shard.
+            local_tensor.requires_grad = tensor.requires_grad
+            local_shards.append(
+                Shard(
+                    tensor=local_tensor,
+                    metadata=shard_meta
+                )
+            )
 
     # Create ShardedTensor based on local shards.
-    local_shards = [
-        Shard(
-            tensor=local_shard,
-            metadata=local_metadata,  # type: ignore[arg-type]
-        )
-    ]
-
     st = ShardedTensor._init_from_local_shards(local_shards, tensor.size(), process_group=pg)
 
     # Manually set sharding_spec

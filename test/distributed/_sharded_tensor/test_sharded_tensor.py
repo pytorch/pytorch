@@ -325,7 +325,7 @@ class TestShardParameter(ShardedTensorTestBase):
                 placement="rank:1/cuda:1",
             ),
         ])
-        with self.assertRaisesRegex(ValueError, 'Only ChunkShardingspec is supported.'):
+        with self.assertRaisesRegex(ValueError, 'do not cover the entire tensor'):
             shard_parameter(fc, 'weight', spec)
 
 

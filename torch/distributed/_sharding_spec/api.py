@@ -1,12 +1,22 @@
-from abc import ABC
+from abc import ABC, abstractmethod
+import copy
 from dataclasses import dataclass
 from typing import List, Union
 import torch
 
 from ._internals import (
+    check_tensor,
+    get_chunked_dim_size,
+    get_split_size,
     ShardMetadata,
     validate_non_overlapping_shards_metadata
 )
+
+# from torch.distributed._sharded_tensor.utils import (
+#     _parse_and_validate_remote_device
+# )
+
+import torch.distributed as dist
 
 class PlacementSpec(ABC):
     """
@@ -14,7 +24,11 @@ class PlacementSpec(ABC):
     class can be used to specify customized placements which might not be
     covered by existing APIs.
     """
-    pass
+    @abstractmethod
+    def apply(self, tensor: torch.Tensor) -> torch.Tensor:
+        """
+        Retrieves a tensor and places it on the appropriate device.
+        """
 
 
 @dataclass
@@ -32,13 +46,20 @@ class DevicePlacementSpec(PlacementSpec):
         if not isinstance(self.device, torch.distributed._remote_device):
             self.device = torch.distributed._remote_device(self.device)
 
+    def apply(self, tensor: torch.Tensor) -> torch.Tensor:
+        tensor.to(self.device)
 
-class ShardingSpec(PlacementSpec):
+
+class ShardingSpec(object):
     """
-    Base class representing sharding specifications. It is special type of
-    PlacementSpec.
+    Base class representing sharding specifications.
     """
-    pass
+    @abstractmethod
+    def shard(self, tensor_sizes: List[int], process_group=None) -> List[ShardMetadata]:
+        """
+        Given a global tensor size list, define how to shard a tensor like this shape
+        across ranks, return a list of ShardMetadata.
+        """
 
 
 @dataclass
@@ -84,6 +105,40 @@ class ChunkShardingSpec(ShardingSpec):
         if not (isinstance(dim, int) or isinstance(dim, str)):
             raise ValueError(f'{dim} needs to either be an int or str')
 
+    def shard(self, tensor_sizes: List[int], process_group=None) -> List[ShardMetadata]:
+        """
+        Shard a tensor base on ChunkShardingSpec, and return a list of shards on the current rank.
+        """
+        pg = process_group if process_group is not None else dist._get_default_group()
+        world_size = dist.get_world_size(pg)
+        tensor_num_dim = len(tensor_sizes)
+
+        if self.dim >= tensor_num_dim or self.dim < -tensor_num_dim:
+            raise ValueError(f"Invalid sharding dim: {self.dim}")
+
+        shards_metadata = []
+        current_offsets = [0] * tensor_num_dim
+        sharding_dim_size = tensor_sizes[self.dim]  # type: ignore[arg-type]
+        split_size = get_split_size(sharding_dim_size, world_size)
+        for idx, placement in enumerate(self.placements):
+            # check if the placement is valid or not
+            # _parse_and_validate_remote_device(process_group, placement)
+            # generate ShardMetadata for each placement device
+            chunked_dim_size = get_chunked_dim_size(sharding_dim_size, split_size, idx)
+            shard_size = copy.deepcopy(tensor_sizes)
+            shard_size[self.dim] = chunked_dim_size  # type: ignore[index]
+
+            shard_metadata = ShardMetadata(
+                shard_offsets=copy.deepcopy(current_offsets),
+                shard_sizes=shard_size,
+                placement=placement,
+            )
+            shards_metadata.append(shard_metadata)
+
+            current_offsets[self.dim] += chunked_dim_size  # type: ignore[index]
+
+        return shards_metadata
+
 
 @dataclass
 class EnumerableShardingSpec(ShardingSpec):
@@ -110,3 +165,8 @@ class EnumerableShardingSpec(ShardingSpec):
             rank = len(shard.shard_offsets)
 
         validate_non_overlapping_shards_metadata(self.shards)
+
+    def shard(self, tensor_sizes: List[int], process_group=None) -> List[ShardMetadata]:
+        # check if shards form a valid tensor
+        check_tensor(self.shards, tensor_sizes)
+        return self.shards
