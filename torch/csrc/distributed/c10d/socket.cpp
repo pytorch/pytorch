@@ -167,6 +167,73 @@ class SocketImpl {
 
   Handle hnd_;
 };
+} // namespace detail
+} // namespace c10d
+
+//
+// libfmt formatters for `addrinfo` and `Socket`
+//
+namespace fmt {
+
+template <>
+struct formatter<::addrinfo> {
+  constexpr decltype(auto) parse(format_parse_context& ctx) {
+    return ctx.begin();
+  }
+
+  template <typename FormatContext>
+  decltype(auto) format(const ::addrinfo& addr, FormatContext& ctx) {
+    char host[NI_MAXHOST], port[NI_MAXSERV]; // NOLINT
+
+    int r = ::getnameinfo(addr.ai_addr,
+                          addr.ai_addrlen,
+                          host,
+                          NI_MAXHOST,
+                          port,
+                          NI_MAXSERV,
+                          NI_NUMERICSERV);
+    if (r != 0) {
+      return format_to(ctx.out(), "?UNKNOWN?");
+    }
+
+    if (addr.ai_addr->sa_family == AF_INET) {
+      return format_to(ctx.out(), "{}:{}",   host, port);
+    } else {
+      return format_to(ctx.out(), "[{}]:{}", host, port);
+    }
+  }
+};
+
+template <>
+struct formatter<c10d::detail::SocketImpl> {
+  constexpr decltype(auto) parse(format_parse_context& ctx) {
+    return ctx.begin();
+  }
+
+  template <typename FormatContext>
+  decltype(auto) format(const c10d::detail::SocketImpl& socket, FormatContext& ctx) {
+    ::sockaddr_storage addr_s{};
+
+    auto addr_ptr = reinterpret_cast<::sockaddr*>(&addr_s);
+
+    ::socklen_t addr_len = sizeof(addr_s);
+
+    if (::getsockname(socket.handle(), addr_ptr, &addr_len) != 0) {
+      return format_to(ctx.out(), "?UNKNOWN?");
+    }
+
+    ::addrinfo addr{};
+    addr.ai_addr = addr_ptr;
+    addr.ai_addrlen = addr_len;
+
+    return format_to(ctx.out(), "{}", addr);
+  }
+};
+
+} // namespace fmt
+
+namespace c10d {
+namespace detail {
 
 SocketImpl::~SocketImpl() {
 #ifdef _WIN32
@@ -329,7 +396,7 @@ class SocketListenOp {
 
   template <typename... Args>
   void recordError(fmt::string_view format, Args&&... args) {
-    auto msg = fmt::format(format, std::forward<Args>(args)...);
+    auto msg = fmt::vformat(format, fmt::make_format_args(args...));
 
     C10D_WARNING(msg);
 
@@ -485,7 +552,7 @@ class SocketConnectOp {
 
   template <typename... Args>
   void recordError(fmt::string_view format, Args&&... args) {
-    auto msg = fmt::format(format, std::forward<Args>(args)...);
+    auto msg = fmt::vformat(format, fmt::make_format_args(args...));
 
     C10D_WARNING(msg);
 
@@ -783,65 +850,3 @@ Socket::Socket(std::unique_ptr<SocketImpl>&& impl) noexcept
 SocketError::~SocketError() = default;
 
 } // namespace c10d
-
-//
-// libfmt formatters for `addrinfo` and `Socket`
-//
-namespace fmt {
-
-template <>
-struct formatter<::addrinfo> {
-  constexpr decltype(auto) parse(format_parse_context& ctx) {
-    return ctx.begin();
-  }
-
-  template <typename FormatContext>
-  decltype(auto) format(const ::addrinfo& addr, FormatContext& ctx) {
-    char host[NI_MAXHOST], port[NI_MAXSERV]; // NOLINT
-
-    int r = ::getnameinfo(addr.ai_addr,
-                          addr.ai_addrlen,
-                          host,
-                          NI_MAXHOST,
-                          port,
-                          NI_MAXSERV,
-                          NI_NUMERICSERV);
-    if (r != 0) {
-      return format_to(ctx.out(), "?UNKNOWN?");
-    }
-
-    if (addr.ai_addr->sa_family == AF_INET) {
-      return format_to(ctx.out(), "{}:{}",   host, port);
-    } else {
-      return format_to(ctx.out(), "[{}]:{}", host, port);
-    }
-  }
-};
-
-template <>
-struct formatter<c10d::detail::SocketImpl> {
-  constexpr decltype(auto) parse(format_parse_context& ctx) {
-    return ctx.begin();
-  }
-
-  template <typename FormatContext>
-  decltype(auto) format(const c10d::detail::SocketImpl& socket, FormatContext& ctx) {
-    ::sockaddr_storage addr_s{};
-
-    auto addr_ptr = reinterpret_cast<::sockaddr*>(&addr_s);
-
-    ::socklen_t addr_len = sizeof(addr_s);
-
-    if (::getsockname(socket.handle(), addr_ptr, &addr_len) != 0) {
-      return format_to(ctx.out(), "?UNKNOWN?");
-    }
-
-    ::addrinfo addr{};
-    addr.ai_addr = addr_ptr;
-    addr.ai_addrlen = addr_len;
-
-    return format_to(ctx.out(), "{}", addr);
-  }
-};
-
-} // namespace fmt
