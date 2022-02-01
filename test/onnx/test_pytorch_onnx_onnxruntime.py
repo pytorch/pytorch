@@ -10209,6 +10209,15 @@ class TestONNXRuntime(unittest.TestCase):
         loaded_model = onnx.load_from_string(f.getvalue())
         self.assertEqual(loaded_model.graph.output[0].type.tensor_type.shape.dim[1].dim_value, 128)
 
+    def test_mul_bool(self):
+        class MyModel(torch.nn.Module):
+            def forward(self, x, y):
+                return torch.mul(x, y)
+
+        x = torch.tensor([True, False, True, False])
+        y = torch.tensor([True, True, False, False])
+        self.run_test(MyModel(), (x, y))
+
 def make_test(name, base, layer, bidirectional, initial_state,
               variable_length, dropout, script_test_min_opset_version,
               **extra_kwargs):
