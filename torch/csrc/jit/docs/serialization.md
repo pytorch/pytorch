@@ -67,17 +67,17 @@ may help make technical decisions on which approach to take when making a
 change.
 
 **Do what Python does**. When it comes to the serialized format, it's much
-simpler in the long-run to be consistent with whatever Python does. A good
+simpler, in the long run, to be consistent with whatever Python does. A good
 rule of thumb is: if I tried to interact with serialized artifacts using
-Python, would it work? i.e., all serialized code should be valid Python, and
+Python, would it work? i.e., all serialized code should be valid in Python, and
 all pickled objects should be depickle-able by Python.
 
 Being consistent with Python means our format is more debuggable (you can
 always crack it open and poke at it from Python) and leads to fewer surprises
 for developers familiar with Python but not familiar with TorchScript.
 
-**Human readable**. In addition to being valid Python, serialized code should
-attempt to be readable Python. We should try to preserve the variable names
+**Human readable**. In addition to being valid in Python, serialized code should
+attempt to be readable in Python. We should try to preserve the variable names
 that authors wrote, appropriately inline short expressions, and so on. This
 helps with debugging the serialized code.
 
@@ -252,7 +252,7 @@ specialized lists.
 
 ### `data/`: How tensors are serialized
 
-During export a list of all the tensors in a model is created. Tensors can
+During export, a list of all the tensors in a model is created. Tensors can
 come from either module parameters or attributes of Tensor type.
 
 Tensors are treated differently from other data (which is pickled using the
@@ -354,7 +354,7 @@ global `CompilationUnit` that holds all code objects defined in Python.
 
 ### `CompilationUnit` ownership semantics
 There are a few different entities that participate in the ownership model:
-**`CompilationUnit`**: A container that owns code objects and gives them name.
+**`CompilationUnit`**: A container that owns code objects and gives them names.
 Every code object has a unique qualified name within the CompilationUnit.
 
 There are two kinds of code objects: `Function`s and `ClassType`s.
