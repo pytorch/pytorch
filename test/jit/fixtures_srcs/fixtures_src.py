@@ -1,4 +1,5 @@
 import torch
+from typing import Union
 
 class TestVersionedDivTensorExampleV7(torch.nn.Module):
     def __init__(self):
@@ -14,7 +15,7 @@ class TestVersionedLinspaceV7(torch.nn.Module):
     def __init__(self):
         super(TestVersionedLinspaceV7, self).__init__()
 
-    def forward(self, a, b):
+    def forward(self, a: Union[int, float, complex], b: Union[int, float, complex]):
         c = torch.linspace(a, b, steps=5)
         d = torch.linspace(a, b)
         return c, d
@@ -23,6 +24,5 @@ class TestVersionedLinspaceOutV7(torch.nn.Module):
     def __init__(self):
         super(TestVersionedLinspaceOutV7, self).__init__()
 
-    def forward(self, a, b):
-        out = torch.empty(100, )
+    def forward(self, a: Union[int, float, complex], b: Union[int, float, complex], out: torch.Tensor):
         return torch.linspace(a, b, out=out)
