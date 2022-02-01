@@ -1661,7 +1661,7 @@ def acc_ops_getitem(
         size = math.ceil((stop - start) * 1.0 / stride)
         return start, size, stride
 
-    if not isinstance(slices, tuple):
+    if not isinstance(slices, tuple) and not isinstance(slices, list):
         slices = (slices,)
 
     if network.has_implicit_batch_dimension:
