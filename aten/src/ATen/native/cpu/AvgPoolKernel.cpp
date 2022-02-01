@@ -286,7 +286,7 @@ void cpu_avg_pool_channels_last<BFloat16>(
       if (ih0 >= ih1 || iw0 >= iw1) {
         // since we are not directly using output as the accumulation buffer,
         // in case the kernel window is out of range, need to zero the output buffer here.
-        for (int64_t k = 0; k < size; k++) {
+        for (const auto k : c10::irange(size)) {
           out[k] = 0;
         }
         // move on to next output index

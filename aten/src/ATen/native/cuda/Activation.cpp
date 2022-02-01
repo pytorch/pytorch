@@ -2,6 +2,7 @@
 
 #include <ATen/ATen.h>
 #include <ATen/native/Resize.h>
+#include <c10/util/irange.h>
 
 namespace at { namespace native {
 
@@ -145,7 +146,7 @@ std::tuple<Tensor, Tensor> prelu_backward_cuda(const Tensor& grad_out_, const Te
     std::vector<int64_t> reduce_dims;
     reduce_dims.push_back(0);
     if (dims > 2) {
-      for(int64_t i = 2; i < dims; i++) reduce_dims.push_back(i);
+      for (const auto i : c10::irange(2, dims))reduce_dims.push_back(i);
     }
     weight_grad = weight_grad_collector.sum(reduce_dims);
   }
