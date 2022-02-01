@@ -2283,7 +2283,7 @@ class TestDistributions(TestCase):
     def test_wishart_log_prob(self):
         ndim = 3
         df = torch.rand([], requires_grad=True) + ndim - 1
-        tmp = torch.randn(p, 10)
+        tmp = torch.randn(ndim, 10)
         cov = (torch.matmul(tmp, tmp.t()) / tmp.size(-1)).requires_grad_()
         prec = cov.inverse().requires_grad_()
         scale_tril = torch.linalg.cholesky(cov).requires_grad_()
