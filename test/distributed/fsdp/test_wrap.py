@@ -12,6 +12,7 @@ import torch.nn.functional as F
 from torch.distributed._fsdp.fully_sharded_data_parallel import (
     FullyShardedDataParallel as FSDP,
     CPUOffload,
+    BackwardPrefetch_,
 )
 from torch.distributed._fsdp.wrap import (
     default_auto_wrap_policy,
@@ -130,10 +131,14 @@ class TestFSDPWrap(FSDPTest):
         [CPUOffload(offload_params=False), CPUOffload(offload_params=True)]
     )
     @parametrize(
+        "backward_prefetch",
+        [BackwardPrefetch_.BACKWARD_POST, BackwardPrefetch_.BACKWARD_PRE]
+    )
+    @parametrize(
         "fsdp_init_mode",
         [FSDPInitMode.CUDA_AFTER, FSDPInitMode.CUDA_BEFORE]
     )
-    def test_main_wrap_api(self, cpu_offload, fsdp_init_mode):
+    def test_main_wrap_api(self, cpu_offload, backward_prefetch, fsdp_init_mode):
 
         if fsdp_init_mode == FSDPInitMode.CUDA_AFTER and cpu_offload.offload_params:
             # they don't work together, expected
@@ -168,22 +173,25 @@ class TestFSDPWrap(FSDPTest):
                 min_num_params=0,  # wrap all modules
             ),
             cpu_offload=cpu_offload,
+            backward_prefetch=backward_prefetch,
         )
         if fsdp_init_mode == FSDPInitMode.CUDA_AFTER:
             wrapped_model = wrapped_model.cuda()
 
-        modules = [
-            wrapped_model,
+        modules_in_fsdp_graph_order = [
             wrapped_model.module.lin1,
             wrapped_model.module.lin2,
             wrapped_model.module.lin3,
-            wrapped_model.module.lin4,
-            # Nested FSDP
             wrapped_model.module.lin4.module.nested_lin,
+            wrapped_model.module.lin4,
+            wrapped_model
         ]
-        for module in modules:
+
+        for module in modules_in_fsdp_graph_order:
             self.assertTrue(isinstance(module, FSDP))
             self._check_cpu_offload(module, cpu_offload)
+            self._check_backward_prefetch(module, backward_prefetch)
+
         # Run model a few times for sanity check.
         optim = torch.optim.SGD(wrapped_model.parameters(), lr=1e-2, momentum=0.9)
         inp = torch.ones(1).cuda()
@@ -192,6 +200,14 @@ class TestFSDPWrap(FSDPTest):
             loss = wrapped_model(inp).sum()
             loss.backward()
             optim.step()
+
+        # Since we ran with backward prefetch, verify backward prefetch related
+        # data.
+        for i, module in enumerate(modules_in_fsdp_graph_order):
+            self.assertEqual(i, module._my_fsdp_idx_in_graph)
+            self.assertTrue(
+                module._fsdp_graph_order == modules_in_fsdp_graph_order
+            )
 
 
 class TestAutoWrap(TestCase):
@@ -217,14 +233,27 @@ class TestAutoWrap(TestCase):
         self.assertEqual(layer.world_size, self.process_group.size())
 
     def test_wrap_disabled_outside_context(self):
-        layer = wrap(nn.Linear(5, 5))
-        self.assertTrue(isinstance(layer, nn.Linear))
+        pg = self.process_group
+
+        class MyModel(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.lin = wrap(nn.Linear(5, 5), process_group=pg)
+
+        model = MyModel()
+        with enable_wrap(wrapper_cls=FSDP, process_group=pg):
+            model = wrap(model)
+
+        self.assertTrue(isinstance(model, FSDP))
+        self.assertFalse(isinstance(model.lin, FSDP))
+        self.assertTrue(isinstance(model.lin, nn.Linear))
 
     def test_wrap_override_defaults(self):
         new_process_group = DummyProcessGroup(rank=0, size=2)
         with enable_wrap(wrapper_cls=FSDP, process_group=self.process_group):
             layer = wrap(nn.Linear(5, 5), process_group=new_process_group)
         self.assertTrue(isinstance(layer, FSDP))
+        self.assertTrue(layer.process_group is new_process_group)
         self.assertEqual(layer.rank, 0)
         self.assertEqual(layer.world_size, 2)
 

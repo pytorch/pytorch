@@ -293,15 +293,15 @@ endif()
 # --- [ PocketFFT
 set(AT_POCKETFFT_ENABLED 0)
 if(NOT AT_MKL_ENABLED)
-  find_path(POCKETFFT_INCLUDE_DIR NAMES pocketfft_hdronly.h PATHS
-            /usr/local/include
-            ENV POCKETFFT_HOME
-            "${PROJECT_SOURCE_DIR}/third_party/pocketfft"
-           )
-  if(POCKETFFT_INCLUDE_DIR)
-    set(AT_POCKETFFT_ENABLED 1)
-    message(STATUS "Using pocketfft in directory: ${POCKETFFT_INCLUDE_DIR}")
+  set(POCKETFFT_INCLUDE_DIR "${Torch_SOURCE_DIR}/third_party/pocketfft/")
+  if(NOT EXISTS "${POCKETFFT_INCLUDE_DIR}")
+    message(FATAL_ERROR "pocketfft directory not found, expected ${POCKETFFT_INCLUDE_DIR}")
+  elif(NOT EXISTS "${POCKETFFT_INCLUDE_DIR}/pocketfft_hdronly.h")
+    message(FATAL_ERROR "pocketfft headers not found in ${POCKETFFT_INCLUDE_DIR}")
   endif()
+
+  set(AT_POCKETFFT_ENABLED 1)
+  message(STATUS "Using pocketfft in directory: ${POCKETFFT_INCLUDE_DIR}")
 endif()
 
 # ---[ Dependencies
