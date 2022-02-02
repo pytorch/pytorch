@@ -5031,7 +5031,8 @@ class TestLinalg(TestCase):
 
     @dtypesIfCUDA(*floating_and_complex_types_and(
                   *[torch.half] if not CUDA9 else [],
-                  *[torch.bfloat16] if CUDA11OrLater and SM53OrLater else []))
+                  *[torch.bfloat16] if CUDA11OrLater and SM53OrLater else []
+                  ))
     @dtypes(*all_types_and_complex_and(torch.bfloat16))
     def test_blas_alpha_beta_empty(self, device, dtype):
         # This test is disabled on CUDA 9 due to:
@@ -5717,7 +5718,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
             self._test_addmm_addmv(torch.addmv, t, m, v, beta=0)
 
     @dtypesIfCUDA(*floating_types_and(*[torch.bfloat16] if TEST_WITH_ROCM or (CUDA11OrLater and
-                                                            SM53OrLater) else []))
+                  SM53OrLater) else []))
     @dtypes(torch.float, torch.double)
     def test_addmv_rowmajor_colmajor_incx_incy_lda(self, device, dtype):
         # tests (o, s)*(s).  o is output size, s is summed size.
