@@ -18,13 +18,22 @@
 #include <cstdlib>
 #include <string>
 
-#if BUILD_JITERATOR_WITH_CACHE
-  // Uses POSIX headers, which is why these are guarded behind BUILD_JITERATOR_WITH_CACHE
-  // TODO: C++17 has the fileystem header, which may replace these
+// TODO: C++17 has the fileystem header, which may replace these
+#ifdef _WIN32
+  // On Windows, the POSIX implementations are considered deprecated. We simply map to the newer variant.
+  #include <process.h>
+  #include <direct.h>
+  #include <io.h>
+  #define access _access
+  #define getpid _getpid
+  #define R_OK    4
+  #define W_OK    2
+  #define F_OK    0
+#else
   #include <sys/types.h>
   #include <sys/stat.h> // mkdir
   #include <unistd.h>
-#endif // BUILD_JITERATOR_WITH_CACHE
+#endif
 
 
 namespace at { namespace cuda { namespace jit {
@@ -358,7 +367,7 @@ const std::string jit_code_template = R"ESCAPE(
     Array<${index_type}, NARGS> get(${index_type} linear_idx) const {
       Array<${index_type}, NARGS> offsets;
       #pragma unroll
-      for (const auto arg : c10::irange(NARGS)) {
+      for (int arg = 0; arg < NARGS; arg++) {
         offsets[arg] = linear_idx;
       }
       return offsets;
@@ -371,12 +380,12 @@ const std::string jit_code_template = R"ESCAPE(
   __device__ __forceinline__ Array<${index_type}, NARGS> get(${index_type} linear_idx) const {
       Array<${index_type}, NARGS> offsets;
       #pragma unroll
-      for (const auto arg : c10::irange(NARGS)) {
+      for (int arg = 0; arg < NARGS; ++arg) {
       offsets[arg] = 0;
       }
 
       #pragma unroll
-      for (const auto dim : c10::irange(25)) {
+      for (int dim = 0; dim < 25; ++dim) {
       if (dim == dims) {
           break;
       }
@@ -385,7 +394,7 @@ const std::string jit_code_template = R"ESCAPE(
       linear_idx = divmod.div;
 
       #pragma unroll
-      for (const auto arg : c10::irange(NARGS)) {
+      for (int arg = 0; arg < NARGS; ++arg) {
           offsets[arg] += divmod.mod * strides_[dim][arg];
       }
       //printf("offset calc thread dim size stride offset %d %d %d %d %d %d %d %d\n",
@@ -421,7 +430,7 @@ const std::string jit_code_template = R"ESCAPE(
     auto thread_idx = threadIdx.x;
 
     #pragma unroll
-    for (const auto j : c10::irange(thread_work_size)) {
+    for (int j = 0; j < thread_work_size; j++){
         if (thread_idx >= remaining) {
             break;
         }
@@ -435,7 +444,7 @@ const std::string jit_code_template = R"ESCAPE(
     }
 
     #pragma unroll
-    for (const auto j : c10::irange(thread_work_size)) {
+    for (int j = 0; j < thread_work_size; j++) {
       if ((threadIdx.x  + j*num_threads) < remaining) {
         out[j] = ${name}<${compute_type}>(${args}${extra_args});
       }
@@ -443,7 +452,7 @@ const std::string jit_code_template = R"ESCAPE(
 
     thread_idx = threadIdx.x;
     #pragma unroll
-    for (const auto j : c10::irange(thread_work_size)) {
+    for (int j = 0; j < thread_work_size; j++){
         if (thread_idx >= remaining) {
             break;
         }
@@ -496,7 +505,7 @@ const std::string jit_vectorized_code_template = R"ESCAPE(
 
       if (remaining < block_work_size) {
         #pragma unroll
-        for (const auto j : c10::irange(thread_work_size)) {
+        for (int j = 0; j < thread_work_size; j++){
           if (thread_idx >= remaining) {
             break;
           }
@@ -505,14 +514,14 @@ const std::string jit_vectorized_code_template = R"ESCAPE(
           thread_idx += num_threads;
         }
         #pragma unroll
-        for (const auto j : c10::irange(thread_work_size)) {
+        for (int j = 0; j < thread_work_size; j++) {
           if ((threadIdx.x  + j*num_threads) < remaining) {
             out[j] = ${name}<${compute_type}>(${args} ${extra_args});
           }
         }
         thread_idx = threadIdx.x;
         #pragma unroll
-        for (const auto j : c10::irange(thread_work_size)) {
+        for (int j = 0; j < thread_work_size; j++) {
           if (thread_idx >= remaining) {
               break;
           }
@@ -526,7 +535,7 @@ const std::string jit_vectorized_code_template = R"ESCAPE(
         using vec_t_input = aligned_vector<${scalar_type}, vec_size>;
         ${vector_pointers}
         #pragma unroll
-        for (const auto i : c10::irange(loop_size)) {
+        for (int i = 0; i<loop_size; i++){
           vec_t_input v;
           ${load_vectorized_inputs}
           thread_idx += num_threads;
@@ -534,17 +543,17 @@ const std::string jit_vectorized_code_template = R"ESCAPE(
 
 
         #pragma unroll
-        for (const auto j : c10::irange(thread_work_size)) {
+        for (int j = 0; j < thread_work_size; j++) {
           out[j] = ${name}<${compute_type}>(${args}${extra_args});
         }
         using vec_t_output = aligned_vector<${result_type}, vec_size>;
         vec_t_output * to_ = reinterpret_cast<vec_t_output *>(data[0]) + block_work_size / vec_size * idx;
         int thread_idx = threadIdx.x;
         #pragma unroll
-        for (const auto i : c10::irange(loop_size)) {
+        for (int i = 0; i<loop_size; i++){
           vec_t_output v;
           #pragma unroll
-          for (const auto j : c10::irange(vec_size)) {
+          for (int j=0; j<vec_size; j++){
             v.val[j] = out[vec_size * i + j];
           }
           to_[thread_idx] = v;
@@ -664,7 +673,7 @@ std::string generate_code(
   // (look at polygamma for example).
   std::string extra_params = "";
   std::string extra_args = "";
-  for (const auto i : c10::irange(extra_args_typenames.size())) {
+  for (size_t i = 0; i < extra_args_typenames.size(); i++) {
     auto type = std::string(extra_args_typenames[i]);
     auto name = "extra_arg_" + std::string(to_string(i));
     extra_params += "," + type + " " + name;
@@ -674,7 +683,7 @@ std::string generate_code(
   env.s("extra_args", extra_args);
 
   std::stringstream declare_load_arrays;
-  for (const auto i : c10::irange(nInputs)) {
+  for (int i = 0; i < nInputs; i++) {
     // TODO these arrays are potentially of the different types, use function
     // traits to determine the types
     declare_load_arrays << f_inputs_type << " arg" << std::to_string(i)
@@ -746,7 +755,7 @@ std::string generate_code(
     }
 
     std::stringstream load_inputs;
-    for (const auto i : c10::irange(nInputs)) {
+    for (int i = 0; i < nInputs; i++) {
       auto i_string = std::to_string(i);
       load_inputs << "arg" << i_string << "[j] = l.load<" << f_inputs_type
                   << ">(data[" << std::to_string(i + nOutputs)
@@ -781,7 +790,7 @@ std::string generate_code(
     auto i_string = std::to_string(i);
     load_vectorized_inputs << "v = vec" << i_string << "[thread_idx];\n";
     load_vectorized_inputs << "#pragma unroll\n";
-    load_vectorized_inputs << "for (const auto j : c10::irange(vec_size)) {\n";
+    load_vectorized_inputs << "for (int j=0; j < vec_size; j++){\n";
     load_vectorized_inputs << "  arg" << i_string << "[vec_size * i + j] = v.val[j];\n";
     load_vectorized_inputs << "}\n";
   }
@@ -800,7 +809,6 @@ std::string generate_code(
 }
 
 
-#if BUILD_JITERATOR_WITH_CACHE
 // Acquires (possibly creating) the kernel cache directory
 c10::optional<std::string> get_cache_dir() {
   // If the environment variable USE_TORCH_KERNEL_CACHE is set to "0" then no persistent cache is used
@@ -811,14 +819,18 @@ c10::optional<std::string> get_cache_dir() {
     return {};
   }
 
-  // Cache path comes from PYTORCH_KERNEL_CACHE_PATH, then XDG_CACHE_HOME, then HOME environment variables
+  // Cache path comes from PYTORCH_KERNEL_CACHE_PATH, then TEMP (Windows) or XDG_CACHE_HOME (Linux), then HOME environment variables
   std::string cache_dir;
   char* ptkcp = std::getenv("PYTORCH_KERNEL_CACHE_PATH");
   if (ptkcp != nullptr) {
     cache_dir = std::string(ptkcp);
   } else {
+#ifdef _WIN32
+    ptkcp = std::getenv("TEMP");
+#else
     // USES XDG_CACHE_HOME if it's set
     ptkcp = std::getenv("XDG_CACHE_HOME");
+#endif
     if (ptkcp != nullptr) {
       cache_dir = std::string(ptkcp) + "/torch/kernels";
     } else {
@@ -838,7 +850,11 @@ c10::optional<std::string> get_cache_dir() {
   const char* p_cache_dir = cache_dir.c_str();
   const bool cache_dir_exists = (access(p_cache_dir, F_OK) == 0);
   if (!cache_dir_exists) {
+#ifdef _WIN32
+    if (_mkdir(p_cache_dir) != 0) {
+#else
     if (mkdir(p_cache_dir, S_IRWXU | S_IRWXG | S_IRWXO) != 0) {
+#endif
       TORCH_WARN_ONCE("Specified kernel cache directory could not be created! This disables kernel caching.",
                       " Specified directory is ", cache_dir, ".",
                       " This warning will appear only once per process.");
@@ -865,7 +881,6 @@ c10::optional<std::string> get_cache_dir() {
 
   return cache_dir;
 }
-#endif // BUILD_JITERATOR_WITH_CACHE
 
 // Compiles the kernel, or acquires if from the cache if caching
 NvrtcFunction jit_pwise_function(
@@ -886,48 +901,46 @@ NvrtcFunction jit_pwise_function(
   NvrtcFunction compiled_kernel_;
   std::string name = kernel_name + "_kernel";
 
-  #if BUILD_JITERATOR_WITH_CACHE
-    static const c10::optional<std::string> cache_dir = get_cache_dir();
+  static const c10::optional<std::string> cache_dir = get_cache_dir();
 
-    std::string file_path;
-    if (cache_dir.has_value()) {
-      // Attemps to read from the cache.
-      // Cubin name is <kernel name>_arch<major>.<minor>_nvrtc<major>.<minor>_<ptx or sass>_<program length>_<string hash>
-      // Note that the SHA1 hash used in the file name is NOT the SHA1 hash of the file's contents,
-      //   because we hash on the CUDA code, but we save the compiled ptx or sass
+  std::string file_path;
+  if (cache_dir.has_value()) {
+    // Attemps to read from the cache.
+    // Cubin name is <kernel name>_arch<major>.<minor>_nvrtc<major>.<minor>_<ptx or sass>_<program length>_<string hash>
+    // Note that the SHA1 hash used in the file name is NOT the SHA1 hash of the file's contents,
+    //   because we hash on the CUDA code, but we save the compiled ptx or sass
 
-      // Acquires SHA1 hash
-      c10::sha1 sha1_hash{code};
-      const auto hash_code = sha1_hash.str();
+    // Acquires SHA1 hash
+    c10::sha1 sha1_hash{code};
+    const auto hash_code = sha1_hash.str();
 
-      // Constructs file path by appending constructed cubin name to cache path
-      std::stringstream ss;
-      ss << *cache_dir << "/";
-      ss << kernel_name;
-      ss << "_arch" << cuda_major << "." << cuda_minor;
-      ss << "_nvrtc" << nvrtc_major << "." << nvrtc_minor;
-      ss << (compile_to_sass ? "_sass" : "_ptx");
-      ss << "_" << code.length();
-      ss << "_" << hash_code;
-      file_path = ss.str();
+    // Constructs file path by appending constructed cubin name to cache path
+    std::stringstream ss;
+    ss << *cache_dir << "/";
+    ss << kernel_name;
+    ss << "_arch" << cuda_major << "." << cuda_minor;
+    ss << "_nvrtc" << nvrtc_major << "." << nvrtc_minor;
+    ss << (compile_to_sass ? "_sass" : "_ptx");
+    ss << "_" << code.length();
+    ss << "_" << hash_code;
+    file_path = ss.str();
 
-      std::ifstream readin{file_path, std::ios::in | std::ifstream::binary};
-      if (readin.fail()) {
-        // NOTE: this does not warn because the file might not exist
-        // TODO: consider if this should explicilty check for the file's existence or not to throw
-        //   an informative warning
-        readin.close();
-      } else {
-        // TODO: try passing the "mapped" file directly to cuModuleLoadCall instead of using an intermediate buffer
-        std::vector<char> buffer(std::istreambuf_iterator<char>(readin), {});
-        AT_CUDA_DRIVER_CHECK(nvrtc.cuModuleLoadData(&(compiled_kernel_.module), buffer.data()));
-        AT_CUDA_DRIVER_CHECK(
-          nvrtc.cuModuleGetFunction(&(compiled_kernel_.function), compiled_kernel_.module, name.c_str()));
-        readin.close();
-        return compiled_kernel_;
-      }
+    std::ifstream readin{file_path, std::ios::in | std::ifstream::binary};
+    if (readin.fail()) {
+      // NOTE: this does not warn because the file might not exist
+      // TODO: consider if this should explicilty check for the file's existence or not to throw
+      //   an informative warning
+      readin.close();
+    } else {
+      // TODO: try passing the "mapped" file directly to cuModuleLoadCall instead of using an intermediate buffer
+      std::vector<char> buffer(std::istreambuf_iterator<char>(readin), {});
+      AT_CUDA_DRIVER_CHECK(nvrtc.cuModuleLoadData(&(compiled_kernel_.module), buffer.data()));
+      AT_CUDA_DRIVER_CHECK(
+        nvrtc.cuModuleGetFunction(&(compiled_kernel_.function), compiled_kernel_.module, name.c_str()));
+      readin.close();
+      return compiled_kernel_;
     }
-  #endif // BUILD_JITERATOR_WITH_CACHE
+  }
 
   // Just-in-time compiles the program
 
@@ -1000,36 +1013,34 @@ NvrtcFunction jit_pwise_function(
   // TODO: use guards to avoid leaking
   AT_CUDA_NVRTC_CHECK(nvrtc.nvrtcDestroyProgram(&program));
 
-  #if BUILD_JITERATOR_WITH_CACHE
-    if (cache_dir.has_value()) {
-      // Writes the program to the cache if caching
-      // NOTE: Actually writes to a per-process temporary file to avoid multi-process contention.
-      //   The temporary file is then renamed to the actual file.
-      //   If the actual file already exists then the rename may fail or replace the actual file,
-      //     the behavior is implementation-specific.
-      //   Files replaced through this process should remain extant if they are being read because
-      //     of UNIX filesystem properties, but this behavior is unverified and may require
-      //     additional review in the future.
-      // TODO: In C++17 we should be able to use the filesystem header.
-      const auto pid = getpid();
-      std::stringstream tmp_file_path_ss;
-      tmp_file_path_ss << file_path << "_tmp_" << pid;
-      const std::string tmp_file_path = tmp_file_path_ss.str();
-      std::ofstream cubin(tmp_file_path, std::ios::out | std::ofstream::binary);
-      if (cubin.fail()) {
-        TORCH_WARN_ONCE("Failed to write temporarily kernel cache file!",
-                        " File path was ", tmp_file_path, ".",
-                        " This warning will only appear once per process.");
-      } else {
-        std::copy(ptx.begin(), ptx.end(), std::ostreambuf_iterator<char>(cubin));
-        if (std::rename(tmp_file_path.c_str(), file_path.c_str()) != 0) {
-          // Removes tmp file if the rename failed
-          std::remove(tmp_file_path.c_str());
-        }
+  if (cache_dir.has_value()) {
+    // Writes the program to the cache if caching
+    // NOTE: Actually writes to a per-process temporary file to avoid multi-process contention.
+    //   The temporary file is then renamed to the actual file.
+    //   If the actual file already exists then the rename may fail or replace the actual file,
+    //     the behavior is implementation-specific.
+    //   Files replaced through this process should remain extant if they are being read because
+    //     of UNIX filesystem properties, but this behavior is unverified and may require
+    //     additional review in the future.
+    // TODO: In C++17 we should be able to use the filesystem header.
+    const auto pid = getpid();
+    std::stringstream tmp_file_path_ss;
+    tmp_file_path_ss << file_path << "_tmp_" << pid;
+    const std::string tmp_file_path = tmp_file_path_ss.str();
+    std::ofstream cubin(tmp_file_path, std::ios::out | std::ofstream::binary);
+    if (cubin.fail()) {
+      TORCH_WARN_ONCE("Failed to write temporarily kernel cache file!",
+                      " File path was ", tmp_file_path, ".",
+                      " This warning will only appear once per process.");
+    } else {
+      std::copy(ptx.begin(), ptx.end(), std::ostreambuf_iterator<char>(cubin));
+      if (std::rename(tmp_file_path.c_str(), file_path.c_str()) != 0) {
+        // Removes tmp file if the rename failed
+        std::remove(tmp_file_path.c_str());
       }
-      cubin.close();
     }
-  #endif // BUILD_JITERATOR_WITH_CACHE
+    cubin.close();
+  }
 
   return compiled_kernel_;
 }

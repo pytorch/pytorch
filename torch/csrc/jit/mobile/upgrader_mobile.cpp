@@ -51,6 +51,14 @@ getOperatorVersionMapForMobile() {
                     std::vector<Upgrader>({
                         Upgrader({0, 7, "linspace_out_0_7", 6})
                     })},
+                {std::string("aten::logspace"),
+                    std::vector<Upgrader>({
+                        Upgrader({0, 8, "logspace_0_8", 7})
+                    })},
+                {std::string("aten::logspace.out"),
+                    std::vector<Upgrader>({
+                        Upgrader({0, 8, "logspace_out_0_8", 8})
+                    })},
       });
   return operatorVersionMapForMobile;
 }
@@ -374,6 +382,105 @@ const std::vector<ByteCodeFunctionWithOperator>& getUpgraderBytecodeList() {
                            std::vector<OperatorString>({
                                    OperatorString({"aten::__is__", "", 2}),
                                    OperatorString({"aten::linspace", "out", 4}),
+                                   OperatorString({"prim::unchecked_cast", "", 1}),
+                           }), // operators list
+                   }),
+                   ByteCodeFunctionWithOperator({
+                           mobile::Function::registerFunc(
+                               "logspace_0_8",
+                               std::vector<Instruction>({
+                                           Instruction{OpCode::STOREN, 1, 8},
+                                           Instruction{OpCode::LOAD, 3, 0},
+                                           Instruction{OpCode::LOADC, 0, 0},
+                                           Instruction{OpCode::OP, 0, 0},
+                                           Instruction{OpCode::JF, 11, 0},
+                                           Instruction{OpCode::LOAD, 1, 0},
+                                           Instruction{OpCode::LOAD, 2, 0},
+                                           Instruction{OpCode::LOADC, 1, 0},
+                                           Instruction{OpCode::LOAD, 4, 0},
+                                           Instruction{OpCode::LOAD, 5, 0},
+                                           Instruction{OpCode::LOAD, 6, 0},
+                                           Instruction{OpCode::LOAD, 7, 0},
+                                           Instruction{OpCode::LOAD, 8, 0},
+                                           Instruction{OpCode::OP, 1, 0},
+                                           Instruction{OpCode::JMP, 11, 0},
+                                           Instruction{OpCode::LOAD, 1, 0},
+                                           Instruction{OpCode::LOAD, 2, 0},
+                                           Instruction{OpCode::LOAD, 3, 0},
+                                           Instruction{OpCode::OP, 2, 0},
+                                           Instruction{OpCode::LOAD, 4, 0},
+                                           Instruction{OpCode::LOAD, 5, 0},
+                                           Instruction{OpCode::LOAD, 6, 0},
+                                           Instruction{OpCode::LOAD, 7, 0},
+                                           Instruction{OpCode::LOAD, 8, 0},
+                                           Instruction{OpCode::OP, 1, 0},
+                                           Instruction{OpCode::STORE, 9, 0},
+                                           Instruction{OpCode::DROPR, 8, 0},
+                                           Instruction{OpCode::DROPR, 7, 0},
+                                           Instruction{OpCode::DROPR, 6, 0},
+                                           Instruction{OpCode::DROPR, 5, 0},
+                                           Instruction{OpCode::DROPR, 4, 0},
+                                           Instruction{OpCode::DROPR, 2, 0},
+                                           Instruction{OpCode::DROPR, 1, 0},
+                                           Instruction{OpCode::DROPR, 3, 0},
+                                           Instruction{OpCode::MOVE, 9, 0},
+                                           Instruction{OpCode::RET, 0, 0},
+                                   }), // instructions list,
+                               std::vector<c10::IValue>({
+                                           c10::IValue(),
+                                           c10::IValue(100),
+                                   }), // constants list,
+                               std::vector<c10::TypePtr>(), // types list,
+                               9
+                           ),
+                           std::vector<OperatorString>({
+                                   OperatorString({"aten::__is__", "", 2}),
+                                   OperatorString({"aten::logspace", "", 8}),
+                                   OperatorString({"prim::unchecked_cast", "", 1}),
+                           }), // operators list
+                   }),
+                   ByteCodeFunctionWithOperator({
+                           mobile::Function::registerFunc(
+                               "logspace_out_0_8",
+                               std::vector<Instruction>({
+                                           Instruction{OpCode::STOREN, 1, 5},
+                                           Instruction{OpCode::LOAD, 3, 0},
+                                           Instruction{OpCode::LOADC, 0, 0},
+                                           Instruction{OpCode::OP, 0, 0},
+                                           Instruction{OpCode::JF, 8, 0},
+                                           Instruction{OpCode::LOAD, 1, 0},
+                                           Instruction{OpCode::LOAD, 2, 0},
+                                           Instruction{OpCode::LOADC, 1, 0},
+                                           Instruction{OpCode::LOAD, 4, 0},
+                                           Instruction{OpCode::LOAD, 5, 0},
+                                           Instruction{OpCode::OP, 1, 0},
+                                           Instruction{OpCode::JMP, 8, 0},
+                                           Instruction{OpCode::LOAD, 1, 0},
+                                           Instruction{OpCode::LOAD, 2, 0},
+                                           Instruction{OpCode::LOAD, 3, 0},
+                                           Instruction{OpCode::OP, 2, 0},
+                                           Instruction{OpCode::LOAD, 4, 0},
+                                           Instruction{OpCode::LOAD, 5, 0},
+                                           Instruction{OpCode::OP, 1, 0},
+                                           Instruction{OpCode::STORE, 6, 0},
+                                           Instruction{OpCode::DROPR, 5, 0},
+                                           Instruction{OpCode::DROPR, 4, 0},
+                                           Instruction{OpCode::DROPR, 2, 0},
+                                           Instruction{OpCode::DROPR, 1, 0},
+                                           Instruction{OpCode::DROPR, 3, 0},
+                                           Instruction{OpCode::MOVE, 6, 0},
+                                           Instruction{OpCode::RET, 0, 0},
+                                   }), // instructions list,
+                               std::vector<c10::IValue>({
+                                           c10::IValue(),
+                                           c10::IValue(100),
+                                   }), // constants list,
+                               std::vector<c10::TypePtr>(), // types list,
+                               6
+                           ),
+                           std::vector<OperatorString>({
+                                   OperatorString({"aten::__is__", "", 2}),
+                                   OperatorString({"aten::logspace", "out", 5}),
                                    OperatorString({"prim::unchecked_cast", "", 1}),
                            }), // operators list
                    }),

@@ -254,7 +254,7 @@ void TestIndexingByScalar() {
   for (const auto i : c10::irange(tensor.numel())) {
     ASSERT_TRUE(tensor[i].equal(one * i));
   }
-  for (const auto i : c10::irange(static_cast<uint64_t>(tensor.numel()))) {
+  for (size_t i = 0; i < static_cast<uint64_t>(tensor.numel()); ++i) {
     ASSERT_TRUE(tensor[i].equal(one * static_cast<int64_t>(i)));
   }
   for (const auto i : c10::irange(tensor.numel())) {
