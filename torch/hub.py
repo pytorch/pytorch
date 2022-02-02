@@ -180,7 +180,7 @@ def _get_cache_or_reload(github, force_reload, verbose=True, skip_validation=Fal
     # To check if cached repo exists, we need to normalize folder names.
     repo_dir = os.path.join(hub_dir, '_'.join([repo_owner, repo_name, normalized_br]))
     # Check that the repo is in the trusted list
-    _check_repo(repo_owner, repo_name, trust_repo=trust_repo, calling_fn=calling_fn)
+    _check_repo(repo_owner, repo_name, normalized_br, trust_repo=trust_repo, calling_fn=calling_fn)
 
     use_cache = (not force_reload) and os.path.exists(repo_dir)
 
@@ -219,24 +219,32 @@ def _get_trusted_input(repo):
         "Do you trust this repository and wish to add it to the trusted list of repositories (y/N)?")
     return response
 
-def _check_repo(repo_owner, repo_name, trust_repo=None, calling_fn="load"):
+def _check_repo(repo_owner, repo_name, repo_branch, trust_repo, calling_fn="load"):
     hub_dir = get_dir()
     filepath = os.path.join(hub_dir, "trusted_list")
+    filepath_legacy = os.path.join(hub_dir, "trusted_list_legacy")
 
     if not os.path.exists(filepath):
         Path(filepath).touch()
 
-        # Initialize with all existing repos
+    if not os.path.exists(filepath_legacy):
+        # Initialize legacy file with all existing repos
         repos = next(os.walk(hub_dir))[1]
-        with open(filepath, "a") as file:
+        with open(filepath_legacy, "w") as file:
             for _repo in repos:
-                file.write(_repo + "\n")
+                if _repo != "checkpoints":
+                    file.write(_repo + "\n")
 
     # load list
     with open(filepath, 'r') as file:
-        trusted_repos = tuple(line.strip() for line in file)
+        trusted_repos = tuple(line.strip() for line in file if len(line.strip()))
+    with open(filepath_legacy, 'r') as file:
+        trusted_repos_legacy = tuple(line.strip() for line in file if len(line.strip()))
     repo = '_'.join([repo_owner, repo_name])
+    repo_branch = '_'.join([repo_owner, repo_name, repo_branch])
+
     is_trusted = any(repo == trusted_repo for trusted_repo in trusted_repos)
+    is_trusted = is_trusted or any(repo_branch == trusted_repo for trusted_repo in trusted_repos_legacy)
     is_trusted = is_trusted or repo_owner in _TRUSTED_REPO_OWNERS
 
     # to be deprecated

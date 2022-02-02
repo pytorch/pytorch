@@ -1,5 +1,5 @@
 # Owner(s): ["high priority"]
-
+import pathlib
 import sys
 import os
 import contextlib
@@ -733,6 +733,29 @@ class TestHub(TestCase):
                 'If it\'s a commit from a forked repo'):
             model = torch.hub.load('pytorch/vision:4e2c216', 'resnet18', force_reload=True, trust_repo=True)
 
+    def _cleanup(self):
+        # cleanup
+        folder_path = os.path.join(torch.hub.get_dir(), 'ailzhang_torchhub_example_master')
+        if os.path.exists(folder_path):
+            shutil.rmtree(folder_path)
+
+        file_path = os.path.join(torch.hub.get_dir(), 'trusted_list')
+        if os.path.exists(file_path):
+            with open(file_path, "r") as f:
+                lines = f.readlines()
+            with open(file_path, "w") as f:
+                for line in lines:
+                    if line.strip("\n") != "ailzhang_torchhub_example":
+                        f.write(line)
+
+        file_path_legacy = os.path.join(torch.hub.get_dir(), 'trusted_list_legacy')
+        if os.path.exists(file_path_legacy):
+            with open(file_path_legacy, "r") as f:
+                lines = f.readlines()
+            with open(file_path_legacy, "w") as f:
+                for line in lines:
+                    if line.strip("\n") != "ailzhang_torchhub_example_master":
+                        f.write(line)
 
     @retry(Exception, tries=3)
     @patch('torch.hub._get_trusted_input', return_value='')
@@ -749,11 +772,7 @@ class TestHub(TestCase):
     @retry(Exception, tries=3)
     @patch('torch.hub._get_trusted_input', return_value='y')
     def test_trusted_repo(self, input):
-        folder_path = os.path.join(torch.hub.get_dir(), 'ailzhang_torchhub_example_master')
-        file_path = os.path.join(torch.hub.get_dir(), 'trusted_list')
-        if os.path.exists(folder_path):
-            shutil.rmtree(folder_path)
-            os.remove(file_path)
+        self._cleanup()
         model = torch.hub.load(
             'ailzhang/torchhub_example',
             'mnist_zip_1_6',
@@ -763,11 +782,7 @@ class TestHub(TestCase):
     @retry(Exception, tries=3)
     @patch('torch.hub._get_trusted_input', return_value='y')
     def test_check_repo(self, input):
-        folder_path = os.path.join(torch.hub.get_dir(), 'ailzhang_torchhub_example_master')
-        file_path = os.path.join(torch.hub.get_dir(), 'trusted_list')
-        if os.path.exists(folder_path):
-            shutil.rmtree(folder_path)
-            os.remove(file_path)
+        self._cleanup()
         model = torch.hub.load(
             'ailzhang/torchhub_example',
             'mnist_zip_1_6',
@@ -776,12 +791,7 @@ class TestHub(TestCase):
 
     @retry(Exception, tries=3)
     def test_none_repo(self):
-        folder_path = os.path.join(torch.hub.get_dir(), 'ailzhang_torchhub_example_master')
-        file_path = os.path.join(torch.hub.get_dir(), 'trusted_list')
-        if os.path.exists(folder_path):
-            shutil.rmtree(folder_path)
-            os.remove(file_path)
-
+        self._cleanup()
         with warnings.catch_warnings(record=True) as w:
             warnings.simplefilter("always")
             model = torch.hub.load(
@@ -792,6 +802,24 @@ class TestHub(TestCase):
             assert len(w) == 1
             assert issubclass(w[-1].category, UserWarning)
             assert "You are about to download an untrusted repository." in str(w[-1].message)
+
+    @retry(Exception, tries=3)
+    @patch('torch.hub._get_trusted_input', return_value='n')
+    def test_check_repo_legacy(self, input):
+        self._cleanup()
+        # add repo to legacy
+        file_path_legacy = os.path.join(torch.hub.get_dir(), 'trusted_list_legacy')
+        if not os.path.exists(file_path_legacy):
+            pathlib.Path(file_path_legacy).touch()
+        with open(file_path_legacy, "a") as f:
+            f.write('ailzhang_torchhub_example_master')
+        # even though we choose to check and answer no to the prompt, we should pass through as the repo is in the
+        # trusted list (legacy)
+        model = torch.hub.load(
+            'ailzhang/torchhub_example',
+            'mnist_zip_1_6',
+            force_reload=True,
+            trust_repo='check')
 
 
 class TestHipify(TestCase):
