@@ -498,7 +498,7 @@ def load(repo_or_dir, model, *args, source='github', trust_repo=None, force_relo
             f'Unknown source: "{source}". Allowed values: "github" | "local".')
 
     if source == 'github':
-        repo_or_dir = _get_cache_or_reload(repo_or_dir, force_reload, verbose, skip_validation,
+        repo_or_dir = _get_cache_or_reload(repo_or_dir, force_reload, verbose=verbose, skip_validation=skip_validation,
                                            trust_repo=trust_repo, calling_fn="load")
 
     model = _load_local(repo_or_dir, model, *args, **kwargs)
