@@ -104,21 +104,6 @@ def exporter_context(model, mode):
         yield (mode_ctx, apex_ctx)
 
 
-def _quantize_wrapper(symbolic_func):
-    from symbolic_helper import _dequantize_helper, _quantize_helper
-    def wrapper(g, *args, **kwargs):
-        is_quantized_arg = len(args) > 0 and args[0].node().kind() == "prim::TupleConstruct"
-
-        if is_quantized_arg:
-            x, x_scale, x_zero_point = _dequantize_helper(g, args[0])
-            output = symbolic_func(g, x, *args[1:], **kwargs)
-            return _quantize_helper(g, output, x_scale, x_zero_point)
-        else:
-            return symbolic_func(g, *args, **kwargs)
-
-    return wrapper
-
-
 def export(model, args, f, export_params=True, verbose=False, training=None,
            input_names=None, output_names=None, operator_export_type=OperatorExportTypes.ONNX,
            opset_version=None, do_constant_folding=True, dynamic_axes=None,
