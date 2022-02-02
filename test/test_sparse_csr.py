@@ -13,7 +13,7 @@ from torch.testing._internal.common_device_type import \
      precisionOverride, skipMeta, skipCUDAIf, skipCUDAIfRocm, skipCPUIfNoMklSparse)
 from torch.testing._internal.common_methods_invocations import \
     (op_db, sparse_csr_unary_ufuncs, )
-from torch.testing._internal.common_cuda import _get_torch_cuda_version
+from torch.testing._internal.common_cuda import _get_torch_cuda_version, CUDA11OrLater
 from torch.testing._internal.common_dtype import (
     floating_types, all_types_and_complex_and, floating_and_complex_types, floating_types_and,
     all_types_and_complex, floating_and_complex_types_and
