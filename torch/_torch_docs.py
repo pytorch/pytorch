@@ -3730,10 +3730,15 @@ add_docstr(torch.fmod,
            r"""
 fmod(input, other, *, out=None) -> Tensor
 
-Applies C++'s `std::fmod <https://en.cppreference.com/w/cpp/numeric/math/fmod>`_
-for floating point tensors, and the modulus operation for integer tensors. The result
-has the same sign as the dividend :attr:`input` and its absolute value
+Applies C++'s `std::fmod <https://en.cppreference.com/w/cpp/numeric/math/fmod>`_ entrywise.
+The result has the same sign as the dividend :attr:`input` and its absolute value
 is less than that of :attr:`other`.
+
+This function may be defined in terms of :func:`torch.div` as
+
+.. code:: python
+
+    torch.fmod(a, b) == a - a.div(b, rounding_mode="trunc") * b
 
 Supports :ref:`broadcasting to a common shape <broadcasting-semantics>`,
 :ref:`type promotion <type-promotion-doc>`, and integer and float inputs.
@@ -3749,6 +3754,11 @@ Supports :ref:`broadcasting to a common shape <broadcasting-semantics>`,
    Complex inputs are not supported. In some cases, it is not mathematically
    possible to satisfy the definition of a modulo operation with complex numbers.
 
+.. seealso::
+
+    :func:`torch.remainder` which implements Python's modulus operator.
+    This one is defined using division rounding down the result.
+
 Args:
     input (Tensor): the dividend
     other (Tensor or Scalar): the divisor
@@ -3763,11 +3773,6 @@ Example::
     >>> torch.fmod(torch.tensor([1, 2, 3, 4, 5]), -1.5)
     tensor([1.0000, 0.5000, 0.0000, 1.0000, 0.5000])
 
-.. seealso::
-
-    :func:`torch.remainder` which is similar to :func:`torch.fmod` except that if the sign
-    of the modulus is different than the sign of the divisor :attr:`other` then the divisor
-    is added to the modulus.
 """.format(**common_args))
 
 add_docstr(torch.frac,
@@ -5134,13 +5139,7 @@ spaced from :attr:`start` to :attr:`end`, inclusive. That is, the value are:
     \text{end})
 """ + """
 
-.. warning::
-    Not providing a value for :attr:`steps` is deprecated. For backwards
-    compatibility, not providing a value for :attr:`steps` will create a tensor
-    with 100 elements. Note that this behavior is not reflected in the
-    documented function signature and should not be relied on. In a future
-    PyTorch release, failing to provide a value for :attr:`steps` will throw a
-    runtime error.
+From PyTorch 1.11 linspace requires the steps argument. Use steps=100 to restore the previous behavior.
 
 Args:
     start (float): the starting value for the set of points
@@ -8315,10 +8314,16 @@ add_docstr(torch.remainder,
            r"""
 remainder(input, other, *, out=None) -> Tensor
 
-Like :func:`torch.fmod` this applies C++'s `std::fmod <https://en.cppreference.com/w/cpp/numeric/math/fmod>`_
-for floating point tensors and the modulus operation for integer tensors.
-Unlike :func:`torch.fmod`, however, if the sign of the modulus is different
-than the sign of the divisor :attr:`other` then the divisor is added to the modulus.
+Computes
+`Python's modulus operation <https://docs.python.org/3/reference/expressions.html#binary-arithmetic-operations>`_
+entrywise.  The result has the same sign as the divisor :attr:`other` and its absolute value
+is less than that of :attr:`other`.
+
+It may also be defined in terms of :func:`torch.div` as
+
+.. code:: python
+
+    torch.remainder(a, b) == a - a.div(b, rounding_mode="floor") * b
 
 Supports :ref:`broadcasting to a common shape <broadcasting-semantics>`,
 :ref:`type promotion <type-promotion-doc>`, and integer and float inputs.
@@ -8328,12 +8333,10 @@ Supports :ref:`broadcasting to a common shape <broadcasting-semantics>`,
     possible to satisfy the definition of a modulo operation with complex numbers.
     See :func:`torch.fmod` for how division by zero is handled.
 
-.. note::
-    This op, like NumPy's `remainder <https://numpy.org/doc/stable/reference/generated/numpy.remainder.html>`_,
-    is equivalent to Python's modulus operation, and different from Python's
-    `math.remainder <https://docs.python.org/dev/library/math.html#math.remainder>`_ and
-    C++'s `std::remainder <https://en.cppreference.com/w/cpp/numeric/math/remainder>`_ which implement
-    the IEEE remainder.
+.. seealso::
+
+    :func:`torch.fmod` which implements C++'s `std::fmod <https://en.cppreference.com/w/cpp/numeric/math/fmod>`_.
+    This one is defined in terms of division rounding towards zero.
 
 Args:
     input (Tensor or Scalar): the dividend
@@ -8348,12 +8351,6 @@ Example::
     tensor([ 1.,  0.,  1.,  1.,  0.,  1.])
     >>> torch.remainder(torch.tensor([1, 2, 3, 4, 5]), -1.5)
     tensor([ -0.5000, -1.0000,  0.0000, -0.5000, -1.0000 ])
-
-.. seealso::
-
-    :func:`torch.fmod` which just computes the modulus for integer inputs and
-    applies C++'s `std::fmod <https://en.cppreference.com/w/cpp/numeric/math/fmod>`_
-    for floating point inputs.
 """.format(**common_args))
 
 add_docstr(torch.renorm,
@@ -8450,26 +8447,53 @@ row_stack(tensors, *, out=None) -> Tensor
 Alias of :func:`torch.vstack`.
 """)
 
-add_docstr(torch.round,
-           r"""
-round(input, *, out=None) -> Tensor
+add_docstr(torch.round, r"""
+round(input, *, decimals=0, out=None) -> Tensor
 
-Returns a new tensor with each of the elements of :attr:`input` rounded
-to the closest integer.
+Rounds elements of :attr:`input` to the nearest integer.
+
+.. note::
+    This function implements the "round half to even" to
+    break ties when a number is equidistant from two
+    integers (e.g. `round(2.5)` is 2).
+
+    When the :attr:\`decimals\` argument is specified the
+    algorithm used is similar to NumPy's `around`. This
+    algorithm is fast but inexact and it can easily
+    overflow for low precision dtypes.
+    Eg. `round(tensor([10000], dtype=torch.float16), decimals=3)` is `inf`.
+
+.. seealso::
+    :func:`torch.ceil`, which rounds up.
+    :func:`torch.floor`, which rounds down.
+    :func:`torch.trunc`, which rounds towards zero.
 
 Args:
     {input}
+    decimals (int): Number of decimal places to round to (default: 0).
+        If decimals is negative, it specifies the number of positions
+        to the left of the decimal point.
 
 Keyword args:
     {out}
 
 Example::
 
-    >>> a = torch.randn(4)
-    >>> a
-    tensor([ 0.9920,  0.6077,  0.9734, -1.0362])
-    >>> torch.round(a)
-    tensor([ 1.,  1.,  1., -1.])
+    >>> torch.round(torch.tensor((4.7, -2.3, 9.1, -7.7)))
+    tensor([ 5.,  -2.,  9., -8.])
+
+    >>> # Values equidistant from two integers are rounded towards the
+    >>> #   the nearest even value (zero is treated as even)
+    >>> torch.round(torch.tensor([-0.5, 0.5, 1.5, 2.5]))
+    tensor([-0., 0., 2., 2.])
+
+    >>> # A positive decimals argument rounds to the to that decimal place
+    >>> torch.round(torch.tensor([0.1234567]), decimals=3)
+    tensor([0.1230])
+
+    >>> # A negative decimals argument rounds to the left of the decimal
+    >>> torch.round(torch.tensor([1200.1234567]), decimals=-3)
+    tensor([1000.])
 """.format(**common_args))
 
 add_docstr(torch.rsqrt,
@@ -8519,7 +8543,7 @@ Slices the :attr:`input` tensor along the selected dimension at the given index.
 This function returns a view of the original tensor with the given dimension removed.
 
 Args:
-    {input} (Tensor)
+    {input}
     dim (int): the dimension to slice
     index (int): the index to select with
 
@@ -8528,7 +8552,7 @@ Args:
     :meth:`select` is equivalent to slicing. For example,
     ``tensor.select(0, index)`` is equivalent to ``tensor[index]`` and
     ``tensor.select(2, index)`` is equivalent to ``tensor[:,:,index]``.
-""")
+""".format(**common_args))
 
 add_docstr(torch.select_scatter,
            r"""
@@ -8539,7 +8563,7 @@ This function returns a tensor with fresh storage; it does not create a view.
 
 
 Args:
-    {input} (Tensor)
+    {input}
     src (Tensor): The tensor to embed into :attr:`input`
     dim (int): the dimension to insert the slice into.
     index (int): the index to select with
@@ -8557,7 +8581,7 @@ Example::
     >>> a.select_scatter(b, 0, 0)
     tensor([[1., 1.],
             [0., 0.]])
-""")
+""".format(**common_args))
 
 add_docstr(torch.slice_scatter,
            r"""
@@ -8569,7 +8593,7 @@ This function returns a tensor with fresh storage; it does not create a view.
 
 
 Args:
-    {input} (Tensor)
+    {input}
     src (Tensor): The tensor to embed into :attr:`input`
     dim (int): the dimension to insert the slice into
     start (Optional[int]): the start index of where to insert the slice
@@ -8600,7 +8624,7 @@ Example::
             [0., 0., 1., 0., 1., 0., 0., 0.],
             [0., 0., 1., 0., 1., 0., 0., 0.],
             [0., 0., 1., 0., 1., 0., 0., 0.]])
-""")
+""".format(**common_args))
 
 add_docstr(torch.set_flush_denormal,
            r"""
@@ -9390,7 +9414,7 @@ always be real-valued, even if :attr:`input` is complex.
 
     .. code:: python
 
-        S = torch.svdvals(A)
+        S = torch.linalg.svdvals(A)
 
 .. note:: Differences with :func:`torch.linalg.svd`:
 
@@ -10784,7 +10808,7 @@ Calculates log determinant of a square matrix or batches of square matrices.
     Backward through :meth:`logdet` internally uses SVD results when :attr:`input`
     is not invertible. In this case, double backward through :meth:`logdet` will
     be unstable in when :attr:`input` doesn't have distinct singular values. See
-    :meth:`~torch.svd` for details.
+    :func:`torch.linalg.svd` for details.
 
 Arguments:
     input (Tensor): the input tensor of size ``(*, n, n)`` where ``*`` is zero or more
