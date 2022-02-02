@@ -244,8 +244,8 @@ class Node:
     @compatibility(is_backward_compatible=True)
     def append(self, x: 'Node') -> None:
         """
-        Insert x after this node in the list of nodes in the graph.
-        Equvalent to ``self.next.prepend(x)``
+        Insert ``x`` after this node in the list of nodes in the graph.
+        Equivalent to ``self.next.prepend(x)``
 
         Args:
             x (Node): The node to put after this node. Must be a member of the same graph.
