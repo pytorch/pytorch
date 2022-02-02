@@ -162,7 +162,7 @@ def _validate_not_a_forked_repo(repo_owner, repo_name, branch):
                      'If it\'s a commit from a forked repo, please call hub.load() with forked repo directly.')
 
 
-def _get_cache_or_reload(github, force_reload, verbose=True, skip_validation=False, trust_repo=None, calling_fn="load"):
+def _get_cache_or_reload(github, force_reload, trust_repo, calling_fn, verbose=True, skip_validation=False):
     # Setup hub_dir to save downloaded files
     hub_dir = get_dir()
     if not os.path.exists(hub_dir):
@@ -247,15 +247,15 @@ def _check_repo(repo_owner, repo_name, repo_branch, trust_repo, calling_fn="load
     is_trusted = is_trusted or any(repo_branch == trusted_repo for trusted_repo in trusted_repos_legacy)
     is_trusted = is_trusted or repo_owner in _TRUSTED_REPO_OWNERS
 
-    # to be deprecated
+    # TODO: Remove `None` option in future version and change the default to "check"
     if trust_repo is None:
         if not is_trusted:
             warnings.warn(
-                "You are about to download an untrusted repository. In a future release, this won't be allowed. "
+                "You are about to download and run code from an untrusted repository. In a future release, this won't be allowed. "
                 f"To add the repository to your trusted list, change the command to {calling_fn}(..., "
                 "trust_repo=False) and a command prompt will appear asking for an explicit confirmation of trust, "
                 f"or {calling_fn}(..., trust_repo=True), which will assume that the prompt is to be answered with "
-                f"'yes'.")
+                f"'yes'. You can also use {calling_fn}(..., trust_repo="check") which will only prompt for confirmation if the repo is not already trusted. This will eventually be the default behaviour").
         return
 
     if (trust_repo is False) or (trust_repo == "check" and not is_trusted):
@@ -352,15 +352,15 @@ def list(github, force_reload=False, skip_validation=False, trust_repo=None):
             requests to the GitHub API; you can specify a non-default GitHub token by setting the
             ``GITHUB_TOKEN`` environment variable. Default is ``False``.
         trust_repo (bool, string or None): ``"check"``, ``True``, ``False`` or ``None``.
-            If ``False``, a prompt will appear and ask the user whether that repo should be trusted from now on.
-            If ``"check"``, the repo address will be checked in against the list of trusted repos in the cache. If it is
-            not present in that list, the behaviour will fall back onto the ``trust_repo=False`` option.
-            If ``True``, the repo will be added to the trusted list and loaded without requiring explicit confirmation.
-            of trust.
-            If ``None``, the presence of the repo in the trusted will be checked. If that check fails, the user will be
-            notified through a warning that the repo has not been formally added to the trusted list. In a future
-            release, that this behaviour will be deprecated in favour of ``"check"``.
-            Default is ``None``.
+             This parameter helps ensuring that users only run code from repos that they trust.
+             
+            - If ``False``, a prompt will ask the user whether the repo should be trusted.
+            - If ``True``, the repo will be added to the trusted list and loaded without requiring explicit confirmation.
+            - If ``"check"``, the repo will be checked against the list of trusted repos in the cache. If it is
+               not present in that list, the behaviour will fall back onto the ``trust_repo=False`` option.
+            - If ``None``: this will raise a warning, inviting the user to set ``trust_repo`` to either ``False``, ``True`` or ``"check"``. This is only present for backward compatibility and will be removed in the future.
+            
+            Default is ``None`` and will eventually change to ``"check"`` in a future version.
 
     Returns:
         list: The available callables entrypoint
