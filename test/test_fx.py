@@ -3025,6 +3025,21 @@ class TestFX(JitTestCase):
             .check("Tuple[str, Tuple[()]]")    \
             .run(scripted.code)
 
+    @unittest.skipIf(IS_WINDOWS, "Python Windows bug? https://bugs.python.org/issue45108")
+    def test_assert(self):
+        def f(x):
+            assert x > 1
+            return x + 1
+        try:
+            torch.fx.proxy.TracerBase.trace_asserts = True
+            traced = symbolic_trace(f)
+        finally:
+            torch.fx.proxy.TracerBase.trace_asserts = False
+
+        self.assertEqual(f(2), traced(2))
+        with self.assertRaises(AssertionError):
+            traced(0)
+
     def test_pytree(self):
         def f_sum(x):
             return sum(x)
@@ -3451,6 +3466,7 @@ class TestFunctionalTracing(JitTestCase):
         "avg_pool1d": BUILT_IN_FUNC,
         "avg_pool2d": BUILT_IN_FUNC,
         "avg_pool3d": BUILT_IN_FUNC,
+        "bilinear": BUILT_IN_FUNC,
         "celu_": BUILT_IN_FUNC,
         "channel_shuffle": BUILT_IN_FUNC,
         "conv1d": BUILT_IN_FUNC,
@@ -3462,13 +3478,18 @@ class TestFunctionalTracing(JitTestCase):
         "conv_transpose3d": BUILT_IN_FUNC,
         "cosine_similarity": BUILT_IN_FUNC,
         "elu_": BUILT_IN_FUNC,
+        "gelu": BUILT_IN_FUNC,
+        "hardshrink": BUILT_IN_FUNC,
         "hardtanh_": BUILT_IN_FUNC,
         "leaky_relu_": BUILT_IN_FUNC,
+        "linear": BUILT_IN_FUNC,
         "logsigmoid": BUILT_IN_FUNC,
         "one_hot": BUILT_IN_FUNC,
+        "pairwise_distance": BUILT_IN_FUNC,
         "pdist": BUILT_IN_FUNC,
         "pixel_shuffle": BUILT_IN_FUNC,
         "pixel_unshuffle": BUILT_IN_FUNC,
+        "prelu": BUILT_IN_FUNC,
         "relu_": BUILT_IN_FUNC,
         "rrelu_": BUILT_IN_FUNC,
         "selu_": BUILT_IN_FUNC,
@@ -3501,10 +3522,8 @@ class TestFunctionalTracing(JitTestCase):
         "adaptive_max_pool1d_with_indices": ARG_TYPE_MISMATCH,
         "fractional_max_pool2d_with_indices": ARG_TYPE_MISMATCH,
         "fractional_max_pool3d_with_indices": ARG_TYPE_MISMATCH,
-        "hardshrink": ARG_TYPE_MISMATCH,
         "layer_norm": ARG_TYPE_MISMATCH,
         "lp_pool1d": ARG_TYPE_MISMATCH,
-        "pairwise_distance": ARG_TYPE_MISMATCH,
 
         "affine_grid": CONTROL_FLOW,
         "alpha_dropout": CONTROL_FLOW,

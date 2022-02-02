@@ -446,9 +446,9 @@ def add_activation_layer(
             "of the TensorRT region!"
         )
     layer = network.add_activation(input_val, operation_type)
-    if alpha:
+    if alpha is not None:
         layer.alpha = alpha
-    if beta:
+    if beta is not None:
         layer.beta = beta
     set_layer_name(layer, target, name)
     return layer.get_output(0)
