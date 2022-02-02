@@ -9,7 +9,7 @@ from typing import Callable, Union, Optional, Iterable, List, Tuple, Dict
 from torch._vmap_internals import vmap, _vmap
 import functools
 from .gradcheck_utils import (
-    GradcheckInfo, GradcheckError, _as_tuple, _is_float_or_complex_tensor)
+    GradcheckInfo, GradcheckFunction, GradcheckError, _as_tuple, _is_float_or_complex_tensor)
 
 
 def _allocate_jacobians_with_inputs(input_tensors: Tuple, numel_output) -> Tuple[torch.Tensor, ...]:
@@ -436,7 +436,8 @@ def _get_numerical_vJu(fn, inputs, inp_indices, func_out, all_u, all_v, eps, is_
         # Filter out the Ju for non floating point outputs
         filtered_Ju = []
         func_out = _as_tuple(func_out)
-        assert len(all_Ju) == len(func_out)
+        # We only need to compute the numerical vJu corresponding to outputs that require grad
+        # assert len(all_Ju) == len(func_out)
         for Ju, output in zip(all_Ju, func_out):
             if _is_float_or_complex_tensor(output):
                 filtered_Ju.append(Ju)
@@ -1021,10 +1022,21 @@ def _real_and_imag_input(fn, complex_inp_indices, tupled_inputs):
     return real_fn, imag_fn
 
 
-def _gradcheck_real_imag(gradcheck_fn, func, func_out, tupled_inputs, outputs, gc_info):
-    complex_out_indices = [i for i, o in enumerate(outputs) if o.is_complex()]
-    has_any_complex_output = any(o.is_complex() for o in _as_tuple(func_out))
+def _gradcheck_real_imag(
+    gradcheck_fn: Callable,
+    fw_fn: GradcheckFunction,
+    rev_fn: GradcheckFunction,
+    gc_info: GradcheckInfo
+) -> None:
     if gc_info.check_backward_ad:
+        func = rev_fn
+        outputs = rev_fn.outputs
+        func_out = rev_fn.outputs_raw
+        tupled_inputs = rev_fn.inputs
+
+        complex_out_indices = [i for i, o in enumerate(outputs) if o.is_complex()]
+        has_any_complex_output = any(o.is_complex() for o in _as_tuple(func_out))
+
         if has_any_complex_output:
             real_fn, imag_fn = _real_and_imag_output(func)
 
@@ -1040,6 +1052,11 @@ def _gradcheck_real_imag(gradcheck_fn, func, func_out, tupled_inputs, outputs, g
             gradcheck_fn(func, func_out, tupled_inputs, outputs, gc_info)
 
     if gc_info.check_forward_ad:
+        func = fw_fn
+        outputs = fw_fn.outputs
+        func_out = fw_fn.outputs_raw
+        tupled_inputs = fw_fn.inputs
+
         complex_inp_indices = [i for i, inp in enumerate(tupled_inputs) if is_tensor_like(inp) and inp.is_complex()]
         if complex_inp_indices:
             real_fn, imag_fn = _real_and_imag_input(func, complex_inp_indices, tupled_inputs)
@@ -1067,7 +1084,7 @@ def _slow_gradcheck(func, func_out, tupled_inputs, outputs, gc_info, *, use_forw
                     test_imag=False):
     func_out = _as_tuple(func_out)
     if not outputs:
-        return _check_no_differentiable_outputs(func, tupled_inputs, func_out, gc_info.eps)
+        return _check_no_differentiable_outputs(func.wrapped_fn_out_no_req_grad, tupled_inputs, func_out, gc_info.eps)
 
     numerical = _transpose(_get_numerical_jacobian(func, tupled_inputs, outputs, eps=gc_info.eps, is_forward_ad=use_forward_ad))
 
@@ -1260,7 +1277,7 @@ def _fast_gradcheck(func, func_out, inputs, outputs, gc_info, *, use_forward_ad=
                                                              all_u=all_u, check_grad_dtypes=gc_info.check_grad_dtypes)
     else:
         if not outputs:
-            _check_no_differentiable_outputs_fast(func, func_out, inputs, inp_tensors_idx, all_u, gc_info.eps, gc_info.nondet_tol)
+            _check_no_differentiable_outputs_fast(func.wrapped_fn_out_no_req_grad, func_out, inputs, inp_tensors_idx, all_u, gc_info.eps, gc_info.nondet_tol)
 
         analytical_vJu = _get_analytical_vJu_backward_mode(inputs, outputs, gc_info.nondet_tol, gc_info.check_grad_dtypes, all_v, all_u_dense)
 
@@ -1295,6 +1312,8 @@ def gradcheck(
     check_forward_ad: bool = False,
     check_backward_ad: bool = True,
     fast_mode: bool = False,
+    diff_in_indices: Tuple[int, ...] = None,
+    diff_out_indices: Tuple[int, ...] = None,
 ) -> bool:
     r"""Check gradients computed via small finite differences against analytical
     gradients w.r.t. tensors in :attr:`inputs` that are of floating point or complex type
@@ -1366,7 +1385,8 @@ def gradcheck(
 
     gc_info = GradcheckInfo(eps, atol, rtol, raise_exception, check_sparse_nnz, nondet_tol,
                             fast_mode, check_undefined_grad, check_grad_dtypes, check_batched_grad,
-                            check_batched_forward_grad, check_forward_ad, check_backward_ad)
+                            check_batched_forward_grad, check_forward_ad, check_backward_ad,
+                            diff_in_indices, diff_out_indices)
     if not raise_exception:
         try:
             return _gradcheck_helper(func, inputs, gc_info)
@@ -1376,32 +1396,35 @@ def gradcheck(
         return _gradcheck_helper(func, inputs, gc_info)
 
 
-def _gradcheck_helper(func: Callable, inputs, gc_info: GradcheckInfo) -> bool:
-    tupled_inputs = _as_tuple(inputs)
-    _check_inputs(tupled_inputs, gc_info.check_sparse_nnz)
+def _gradcheck_helper(func: Callable, inputs_raw, gc_info: GradcheckInfo) -> bool:
+    inputs_raw = _as_tuple(inputs_raw)
+    _check_inputs(inputs_raw, gc_info.check_sparse_nnz)
 
-    func_out = func(*tupled_inputs)
-    outputs = _differentiable_outputs(func_out)
-    _check_outputs(outputs)
+    outputs_raw = _as_tuple(func(*_as_tuple(inputs_raw)))
+
+    fw_fn = GradcheckFunction(func, inputs_raw, outputs_raw, gc_info.diff_in_indices, gc_info.diff_out_indices, False)
+    rev_fn = GradcheckFunction(func, inputs_raw, outputs_raw, gc_info.diff_in_indices, gc_info.diff_out_indices, True)
+
+    _check_outputs(rev_fn.outputs)
 
     gradcheck_fn = _fast_gradcheck if gc_info.fast_mode else _slow_gradcheck
-    _gradcheck_real_imag(gradcheck_fn, func, func_out, tupled_inputs, outputs, gc_info)
+    _gradcheck_real_imag(gradcheck_fn, fw_fn, rev_fn, gc_info)
 
     if gc_info.check_batched_forward_grad:
-        _test_batched_grad_forward_ad(func, tupled_inputs)
+        _test_batched_grad_forward_ad(fw_fn, fw_fn.inputs)
 
     # Short circuit because remaining tests rely on backward AD to be implemented
     if not gc_info.check_backward_ad:
         return True
 
-    for i, o in enumerate(outputs):
+    for i, o in enumerate(rev_fn.outputs):
         if gc_info.check_batched_grad:
-            _test_batched_grad(tupled_inputs, o, i)
+            _test_batched_grad(rev_fn.inputs, o, i)
 
-    _test_backward_mul_by_grad_output(outputs, tupled_inputs, gc_info.check_sparse_nnz)
+    _test_backward_mul_by_grad_output(rev_fn.outputs, rev_fn.inputs, gc_info.check_sparse_nnz)
 
     if gc_info.check_undefined_grad and gc_info.check_backward_ad:
-        _test_undefined_backward_mode(func, outputs, tupled_inputs)
+        _test_undefined_backward_mode(rev_fn, rev_fn.outputs, rev_fn.inputs)
     return True
 
 
