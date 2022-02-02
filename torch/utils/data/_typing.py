@@ -16,9 +16,9 @@ from typing import ForwardRef
 # In case of metaclass conflict due to ABCMeta or _ProtocolMeta
 # For Python 3.9, only Protocol in typing uses metaclass
 from abc import ABCMeta
-from typing import _ProtocolMeta, _GenericAlias  # type: ignore[attr-defined, no-redef]
+from typing import _GenericAlias  # type: ignore[attr-defined, no-redef]
 
-class GenericMeta(_ProtocolMeta, ABCMeta):  # type: ignore[no-redef]
+class GenericMeta(ABCMeta):  # type: ignore[no-redef]
     pass
 
 import torch
@@ -256,16 +256,15 @@ class _DataPipeMeta(GenericMeta):
         if '__iter__' in namespace:
             hook_iterator(namespace, 'enumerate(DataPipe)#{}'.format(name))
 
+        return super().__new__(cls, name, bases, namespace, **kwargs)  # type: ignore[call-overload]
+
         # For Python > 3.6
         cls.__origin__ = None
-        # Need to add _is_protocol for Python 3.7 _ProtocolMeta
-        if '_is_protocol' not in namespace:
-            namespace['_is_protocol'] = True
         if 'type' in namespace:
             return super().__new__(cls, name, bases, namespace, **kwargs)  # type: ignore[call-overload]
 
         namespace['__type_class__'] = False
-        # For plain derived class without annotation
+        #  For plain derived class without annotation
         for base in bases:
             if isinstance(base, _DataPipeMeta):
                 return super().__new__(cls, name, bases, namespace, **kwargs)  # type: ignore[call-overload]
@@ -277,8 +276,9 @@ class _DataPipeMeta(GenericMeta):
     def __init__(self, name, bases, namespace, **kwargs):
         super().__init__(name, bases, namespace, **kwargs)  # type: ignore[call-overload]
 
+    # TODO: Fix isinstance bug
     @_tp_cache
-    def __getitem__(self, params):
+    def _getitem_(self, params):
         if params is None:
             raise TypeError('{}[t]: t can not be None'.format(self.__name__))
         if isinstance(params, str):
@@ -324,15 +324,17 @@ class _DataPipeMeta(GenericMeta):
                                '__type_class__': True,
                                'type': t})
 
-    def __eq__(self, other):
+    # TODO: Fix isinstance bug
+    def _eq_(self, other):
         if not isinstance(other, _DataPipeMeta):
             return NotImplemented
-        if self.__origin__ is None or other.__origin__ is None:
+        if self.__origin__ is None or other.__origin__ is None:  # type: ignore[has-type]
             return self is other
-        return (self.__origin__ == other.__origin__
+        return (self.__origin__ == other.__origin__  # type: ignore[has-type]
                 and self.type == other.type)
 
-    def __hash__(self):
+    # TODO: Fix isinstance bug
+    def _hash_(self):
         return hash((self.__name__, self.type))
 
 
