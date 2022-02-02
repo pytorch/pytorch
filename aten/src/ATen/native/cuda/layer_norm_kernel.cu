@@ -257,15 +257,15 @@ __device__ __inline__ void vectorized_layer_norm_kernel_impl(
 template <typename T, typename T_ACC,
 typename std::enable_if<std::is_same<T, double>::value, int>::type = 0>
 __device__ __inline__ void vectorized_layer_norm_kernel_impl(
-  const int N,
-  T_ACC eps,
-  const  T* __restrict__ X,
-  const  T* gamma,
-  const  T* beta,
-  T_ACC* mean,
-  T_ACC* rstd,
-  T* Y){
-    CUDA_KERNEL_ASSERT("doesn't work with double");
+  const int /*N*/,
+  T_ACC /*eps*/,
+  const  T* __restrict__ /*X*/,
+  const  T* /*gamma*/,
+  const  T* /*beta*/,
+  T_ACC* /*mean*/,
+  T_ACC* /*rstd*/,
+  T* /*Y*/){
+    CUDA_KERNEL_ASSERT(false && "doesn't work with double");
   }
 
 //to avoid windows SFINAE errors
@@ -559,10 +559,6 @@ __global__ void GammaBetaBackwardCUDAKernel(
   alignas(sizeof(double)) extern __shared__ char s_data1[];
   T_ACC * s_data_typed = reinterpret_cast<T_ACC*>(&s_data1);
   const int64_t j = blockIdx.x * blockDim.x + threadIdx.x;
-  T_ACC dg_sum1 = 0;
-  T_ACC dg_sum2 = 0;
-  T_ACC db_sum1 = 0;
-  T_ACC db_sum2 = 0;
   constexpr int unroll = 8;
   T dYs[unroll];
   T Xs[unroll];
@@ -743,18 +739,6 @@ void LayerNormBackwardKernelImplInternal(
   T* dX_data = dX->defined() ? dX->template data_ptr<T>() : nullptr;
   cudaStream_t cuda_stream = at::cuda::getCurrentCUDAStream();
   if (dX_data != nullptr) {
-    const auto kAccType =
-        (X.scalar_type() == kHalf || X.scalar_type() == kBFloat16)
-        ? kFloat
-        : X.scalar_type();
-    Tensor ds = at::empty({M}, X.options().dtype(kAccType));
-    Tensor db = at::empty({M}, X.options().dtype(kAccType));
-    Tensor scale = at::empty({M}, X.options().dtype(kAccType));
-    Tensor bias = at::empty({M}, X.options().dtype(kAccType));
-    T_ACC* ds_data = ds.template data_ptr<T_ACC>();
-    T_ACC* db_data = db.template data_ptr<T_ACC>();
-    T_ACC* scale_data = scale.template data_ptr<T_ACC>();
-    T_ACC* bias_data = bias.template data_ptr<T_ACC>();
     const int num_threads = 128;
     const dim3 blocks(M);
     int nshared = (num_threads/C10_WARP_SIZE) * sizeof(T_ACC);

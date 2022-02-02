@@ -9,25 +9,17 @@ import sys
 from typing import (Any, Dict, Iterator, Generic, List, Set, Tuple, TypeVar, Union,
                     get_type_hints)
 from typing import _eval_type, _tp_cache, _type_check, _type_repr  # type: ignore[attr-defined]
-
-try:  # Python > 3.6
-    from typing import ForwardRef  # type: ignore[attr-defined]
-except ImportError:  # Python 3.6
-    from typing import _ForwardRef as ForwardRef  # type: ignore[attr-defined]
+from typing import ForwardRef
 
 # TODO: Use TypeAlias when Python 3.6 is deprecated
 # Please check [Note: TypeMeta and TypeAlias]
-try:
-    from typing import GenericMeta  # Python 3.6
-    _GenericAlias = GenericMeta
-except ImportError:  # Python > 3.6
-    # In case of metaclass conflict due to ABCMeta or _ProtocolMeta
-    # For Python 3.9, only Protocol in typing uses metaclass
-    from abc import ABCMeta
-    from typing import _ProtocolMeta, _GenericAlias  # type: ignore[attr-defined, no-redef]
+# In case of metaclass conflict due to ABCMeta or _ProtocolMeta
+# For Python 3.9, only Protocol in typing uses metaclass
+from abc import ABCMeta
+from typing import _ProtocolMeta, _GenericAlias  # type: ignore[attr-defined, no-redef]
 
-    class GenericMeta(_ProtocolMeta, ABCMeta):  # type: ignore[no-redef]
-        pass
+class GenericMeta(_ProtocolMeta, ABCMeta):  # type: ignore[no-redef]
+    pass
 
 import torch
 
