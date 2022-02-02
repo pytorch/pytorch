@@ -439,6 +439,8 @@ def shard_parameter(
     local_metadata = None
     current_offsets = [0] * len(tensor.size())
     shards_metadata = []
+    tensors_to_scatter = []
+    local_tensor = None
     sharding_dim_size = tensor.size(sharding_spec.dim)  # type: ignore[arg-type]
     split_size = get_split_size(sharding_dim_size, world_size)
     tensor_sizes = list(tensor.size())
@@ -453,31 +455,35 @@ def shard_parameter(
             placement=placement,
         )
         shards_metadata.append(shard_metadata)
+        # Reshape to get shard for each rank and we don't want autograd
+        # recording here for the narrow op and 'tensor_to_scatter' should be a
+        # leaf variable in the autograd graph.
+        tensor_to_scatter = tensor.narrow(
+            sharding_spec.dim,  # type: ignore[arg-type]
+            shard_metadata.shard_offsets[sharding_spec.dim],  # type: ignore[union-attr, arg-type, index]
+            shard_metadata.shard_sizes[sharding_spec.dim],  # type: ignore[union-attr, index]
+        ).clone().detach().contiguous()
+        tensors_to_scatter.append(
+            tensor_to_scatter
+        )
 
         if rank == placement.rank():  # type: ignore[union-attr]
             local_metadata = shard_metadata
+            local_tensor = torch.empty(local_metadata.shard_sizes, dtype=tensor.dtype, layout=tensor.layout, device=tensor.device)
+            # local_tensor.requires_grad = tensor.requires_grad
 
         current_offsets[sharding_spec.dim] += chunked_dim_size  # type: ignore[index]
 
     # Scatter the shards (use broadcast since NCCL doesn't support scatter, this is very inefficient).
-    dist.broadcast(tensor, src=src_rank, group=pg)
-
-    # Reshape to get shard for this rank and we don't want autograd
-    # recording here for the narrow op and 'local_shard' should be a
-    # leaf variable in the autograd graph.
-    local_shard = tensor.narrow(
-        sharding_spec.dim,  # type: ignore[arg-type]
-        local_metadata.shard_offsets[sharding_spec.dim],  # type: ignore[union-attr, arg-type, index]
-        local_metadata.shard_sizes[sharding_spec.dim],  # type: ignore[union-attr, index]
-    ).clone().detach().contiguous()
+    dist.scatter(local_tensor, scatter_list=tensors_to_scatter, src=src_rank, group=pg)
 
     # Sync requires_grad to local_shard.
-    local_shard.requires_grad = tensor.requires_grad
+    local_tensor.requires_grad = tensor.requires_grad
 
     # Create ShardedTensor based on local shards.
     local_shards = [
         Shard(
-            tensor=local_shard,
+            tensor=local_tensor,
             metadata=local_metadata,  # type: ignore[arg-type]
         )
     ]

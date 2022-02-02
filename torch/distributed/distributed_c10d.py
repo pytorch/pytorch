@@ -2326,11 +2326,11 @@ def scatter(tensor, scatter_list=None, src=0, group=None, async_op=False):
         input_tensors = [scatter_list]
         output_tensors = [tensor]
     else:
-        if scatter_list:
-            raise ValueError(
-                "Argument ``scatter_list`` must NOT be specified "
-                "on non-source ranks."
-            )
+        # if scatter_list:
+        #     raise ValueError(
+        #         "Argument ``scatter_list`` must NOT be specified "
+        #         "on non-source ranks."
+        #     )
         input_tensors = []
         output_tensors = [tensor]
 
