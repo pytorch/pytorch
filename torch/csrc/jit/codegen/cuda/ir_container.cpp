@@ -60,6 +60,9 @@ IrCloner IrContainer::copy(const IrContainer* from, IrContainer* to) {
   return ir_cloner;
 }
 
+IrContainer::IrContainer() {
+}
+
 IrContainer::IrContainer(const IrContainer& other) {
   FUSER_PERF_SCOPE("IrContainer copy");
   IrContainer::copy(&other, this);
