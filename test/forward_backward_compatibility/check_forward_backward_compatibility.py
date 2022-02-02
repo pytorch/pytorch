@@ -85,8 +85,6 @@ ALLOW_LIST = [
     ("aten::linalg_svd_out", datetime.date(2022, 3, 31)),
     ("aten::_max_pool1d_cpu_forward", datetime.date(2022, 2, 8)),
     ("aten::_convolution_nogroup", datetime.date(9999, 1, 1)),
-    ("aten::linspace", datetime.date(2022, 3, 1)),  # TODO this will be removed soon
-    ("aten::logspace", datetime.date(2022, 3, 1)),  # TODO this will be removed soon
     ("aten::miopen_convolution_backward", datetime.date(9999, 1, 1)),
     ("aten::miopen_convolution_backward_bias", datetime.date(9999, 1, 1)),
     ("aten::miopen_convolution_backward_input", datetime.date(9999, 1, 1)),
@@ -155,6 +153,32 @@ def load_schemas_to_dict():
         new_schema_dict[s.name].append(s)
     return new_schema_dict
 
+def has_valid_upgraders(schema):
+    version_map = torch._C._get_operator_version_map()
+    # we want to parse through the map to find if
+    # the schema has valid upgraders. Since the
+    # version map has entry for each overload
+    # we need to do some ugly parsing.
+
+    # the name of the operator
+    schema_name = str(schema).split('(')[0]
+
+    # find if there are entries for this op
+    possible_overloads = set()
+    for key in version_map:
+        if key.split('.')[0] == schema_name:
+            possible_overloads.add(key)
+
+    # there is no entry for this schema
+    if len(possible_overloads) == 0:
+        return False
+
+    current_version = torch._C._get_max_operator_version()
+    for i in possible_overloads:
+        if not torch._C._is_op_current(i, current_version):
+            return False
+    return True
+
 def check_bc(existing_schemas):
     new_schema_dict = load_schemas_to_dict()
     is_bc = True
@@ -163,6 +187,11 @@ def check_bc(existing_schemas):
         if allow_listed(existing_schema):
             print("schema: ", str(existing_schema), " found on allowlist, skipping")
             continue
+
+        if has_valid_upgraders(existing_schema):
+            print("schema: ", str(existing_schema), " has valid upgrader, skipping")
+            continue
+
         print("processing existing schema: ", str(existing_schema))
         matching_new_schemas = new_schema_dict.get(existing_schema.name, [])
         found = False
