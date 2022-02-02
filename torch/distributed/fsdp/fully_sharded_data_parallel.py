@@ -142,6 +142,25 @@ class FullyShardedDataParallel(nn.Module):
             Note that this policy currently will only apply to child modules of
             the passed in module. The remainder modules are always wrapped in
             the returned FSDP root instance.
+            ``default_auto_wrap_policy`` written in ``torch.distributed.fsdp.wrap`` is
+            an example of ``fsdp_auto_wrap_policy`` callable, this policy wraps layers
+            with parameter sizes larger than 100M. Users can supply the customized
+            ``fsdp_auto_wrap_policy`` callable that should accept following arguments:
+            ``module: nn.Module``, ``recurse: bool``, ``unwrapped_params: int``,
+            extra customized arguments could be added to the customized
+            ``fsdp_auto_wrap_policy`` callable as well.
+
+            Example::
+
+                >>> def custom_auto_wrap_policy(
+                >>>     module: nn.Module,
+                >>>     recurse: bool,
+                >>>     unwrapped_params: int,
+                >>>     # These are customizable for this policy function.
+                >>>     min_num_params: int = int(1e8),
+                >>> ) -> bool:
+                >>>     return unwrapped_params >= min_num_params
+
         backward_prefetch: (Optional[BackwardPrefetch]):
             This is an experimental feature that is subject to change in the
             the near future. It allows users to enable two different backward_prefetch
