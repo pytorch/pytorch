@@ -132,6 +132,8 @@ void masked_softmax_dropout(
               for (const auto i : c10::irange(begin, end)) {
                 using Vec = vec::Vectorized<scalar_t>;
                 auto V = vec::Vectorized<scalar_t>::size();
+                using AccVec = vec::Vectorized<accscalar_t>;
+
 
                 scalar_t* input_data = attn_scores_data + i * T;
                 auto max_input = Vec(std::numeric_limits<scalar_t>::lowest());
@@ -145,19 +147,19 @@ void masked_softmax_dropout(
                 for (const auto i : c10::irange(V)) {
                   hmax = std::max(max_input[i], hmax);
                 }
-                accscalar_t hsum = 0;
+
+                AccVec hsum_v = 0;
+                AccVec hmax_v = static_cast<accscalar_t>(hmax);
                 for (auto t = 0; t < T; t += V) {
                   auto v = Vec::loadu(&input_data[t]);
-                  // TODO: vectorize in accscalar_t?
-                  for (const auto i : c10::irange(V)) {
-                    hsum += std::exp(static_cast<accscalar_t>(v[i]) - hmax);
-                  }
+                  AccVec av = at::vec::cast<accscalar_t, scalar_t>(v);
+                  hsum_v += (av - hmax_v).exp();
                 }
+                accscalar_t hsum = std::accumulate(&hsum_v[0], &hsum_v[AccVec::size()], 0);
                 auto inv_denominator = 1.0 / hsum;
                 for (auto t = 0; t < T; t += V) {
                   Vec v = Vec::loadu(&input_data[t]);
 
-                  using AccVec = vec::Vectorized<accscalar_t>;
                   AccVec av = at::vec::cast<accscalar_t, scalar_t>(v);
                   AccVec hmax_v = static_cast<accscalar_t>(hmax);
                   av = (av - hmax_v).exp() * AccVec(inv_denominator);
