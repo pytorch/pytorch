@@ -4,7 +4,6 @@
 
 #include <c10/util/SmallBuffer.h>
 #include <c10/util/C++17.h>
-#include <c10/util/irange.h>
 
 #include <climits>
 
@@ -332,7 +331,7 @@ void gemm_batched_generic(
     const scalar_t **b, int64_t ldb,
     scalar_t beta,
     scalar_t **c, int64_t ldc) {
-  for (const auto batch : c10::irange(batch_size)) {
+  for (int64_t batch = 0; batch < batch_size; ++batch) {
     gemm(transa, transb, m, n, k, alpha, a[batch], lda, b[batch], ldb, beta, c[batch], ldc);
   }
 }
@@ -377,7 +376,7 @@ void gemm_batched_with_stride_generic(
     const scalar_t *b, int64_t ldb, int64_t batch_stride_b,
     scalar_t beta,
     scalar_t *c, int64_t ldc, int64_t batch_stride_c) {
-  for (const auto batch : c10::irange(batch_size)) {
+  for (int64_t batch = 0; batch < batch_size; ++batch) {
     const auto a_batch = a + batch_stride_a * batch;
     const auto b_batch = b + batch_stride_b * batch;
     const auto c_batch = c + batch_stride_c * batch;
@@ -406,7 +405,7 @@ void gemm_batched_with_stride(
           c10::SmallBuffer<const scalar_t*, 16> b_ptrs(batch_size);
           c10::SmallBuffer<scalar_t*, 16> c_ptrs(batch_size);
 
-          for (const auto batch : c10::irange(batch_size)) {
+          for (int64_t batch = 0; batch < batch_size; ++batch) {
             a_ptrs[batch] = a + batch_stride_a * batch;
             b_ptrs[batch] = b + batch_stride_b * batch;
             c_ptrs[batch] = c + batch_stride_c * batch;

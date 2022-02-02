@@ -15,7 +15,6 @@
 #include <ATen/native/cuda/CuFFTPlanCache.h>
 #include <c10/util/Exception.h>
 #include <c10/cuda/CUDACachingAllocator.h>
-#include <c10/util/irange.h>
 
 #if AT_CUDNN_ENABLED()
 #include <ATen/cudnn/cudnn-wrapper.h>
@@ -209,7 +208,7 @@ c10::optional<int64_t> getDeviceIndexWithPrimaryContext() {
       return current_device_index;
     }
   }
-  for (const auto device_index : c10::irange(at::cuda::device_count())) {
+  for (int64_t device_index = 0; device_index < at::cuda::device_count(); device_index++) {
     if (device_index == current_device_index) continue;
     if (hasPrimaryContext(device_index)) {
       return device_index;
