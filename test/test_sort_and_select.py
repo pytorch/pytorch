@@ -166,18 +166,13 @@ class TestSortAndSelect(TestCase):
 
     @dtypes(torch.float32)
     def test_sort_restride(self, device, dtype):
-        shape = (3, 5)
-        inputs = [
-            torch.randn(shape, dtype=dtype, device=device),
-            torch.zeros(shape, dtype=dtype, device=device),
-            torch.zeros(shape, dtype=torch.long, device=device),
-        ]
         # Input: non-contiguous (stride: 5) 3-element array
-        tensor = inputs[0][:, 0]
-        # Outputs: non-contiguous (stride: 5) 2-element array
-        values = inputs[1][0:2, 0]
-        indices = inputs[2][0:2, 0]
-        # Check: outputs were restrided to dense strides
+        tensor = torch.randn((3, 5), dtype=dtype, device=device)[:, 0]
+        # Outputs: 0-dim tensors
+        # They will need to be resized, which means they will also be
+        # restrided with the input tensor's strides as base.
+        values = torch.tensor(0, dtype=dtype, device=device)
+        indices = torch.tensor(0, dtype=torch.long, device=device)
         torch.sort(tensor, out=(values, indices))
         # Check: outputs were restrided to dense strides
         self.assertEqual(values.stride(), (1,))
