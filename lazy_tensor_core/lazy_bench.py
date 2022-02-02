@@ -18,6 +18,14 @@ from scipy.stats import ttest_ind
 import importlib
 import glob
 import collections
+import random
+
+def set_seeds(seed=1337):
+    torch.manual_seed(seed)
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.backends.cudnn.deterministic = True
+    torch.cuda.manual_seed_all(seed)
 
 def get_unique_suffix():
     return f"{time.time()}_{os.getpid()}"
@@ -252,7 +260,7 @@ def dump_lazy_metrics(reset=False):
 def timed(args, benchmark, sync, times=1):
     results = None
     sync.final_sync()
-    torch.manual_seed(1337)
+    set_seeds()
     if args.test == 'eval':
         model, example_inputs = benchmark.get_module()
 
@@ -411,15 +419,15 @@ def lazy_compute_experiment(args, experiment, results, benchmark, lazy_benchmark
 
 def check_eval_correctness(args, benchmark, lazy_benchmark, name):
     try:
-        torch.manual_seed(1337)
+        set_seeds()
         model, example_inputs = benchmark.get_module()
         model.eval()
         correct_result = call_model_with(model, example_inputs)
-        torch.manual_seed(1337)
+        set_seeds()
         lazy_model, lazy_inputs = lazy_benchmark.get_module()
         lazy_model.eval()
         lazy_result = call_model_with(lazy_model, lazy_inputs)
-        if not check_results(correct_result, lazy_result, args.device):
+        if not check_results(correct_result, lazy_result, args.device, args.allclose_atol):
             print(f"INCORRECT: {name}")
             save_error(name, args.test, "Incorrect results.", args.output_dir)
             return False
@@ -430,7 +438,7 @@ def check_eval_correctness(args, benchmark, lazy_benchmark, name):
     return True
 
 def just_run_once(args, lazy_benchmark):
-    torch.manual_seed(1337)
+    set_seeds()
     if args.test == 'eval':
         model, example_inputs = lazy_benchmark.get_module()
         results.append(call_model_with(model, example_inputs))
@@ -441,27 +449,30 @@ def just_run_once(args, lazy_benchmark):
     if current_device == 'cuda':
         torch.cuda.synchronize()
 
-def check_results_impl(correct_result, lazy_result):
+def check_results_impl(correct_result, lazy_result, atol):
     # recursive helper for dealing with nested data structures
     if type(correct_result) is tuple:
         for c, l in zip(correct_result, lazy_result):
-            return check_results_impl(c, l)
+            return check_results_impl(c, l, atol)
 
     if type(correct_result) is dict:
         print(correct_result.keys())
         for k in correct_result:
             assert k in lazy_result
-            return check_results_impl(correct_result[k], lazy_result[k])
+            return check_results_impl(correct_result[k], lazy_result[k], atol)
 
     assert type(correct_result) is torch.Tensor, f"Expect torch.Tensor but got {type(correct_result)}."
-    return torch.allclose(correct_result, lazy_result)
+    ans = torch.allclose(correct_result, lazy_result, atol=atol)
+    if not ans:
+        print(f"correct_result:\n{correct_result}, lazy_result:\n{lazy_result}")
+    return ans
 
-def check_results(correct_result, lazy_result, device):
+def check_results(correct_result, lazy_result, device, atol):
     # to_device has recursive logic and special handling for
     # extracting relevant tensors from huggingface data structures
     correct_result = to_device(correct_result, device)
     lazy_result = to_device(lazy_result, device)
-    return check_results_impl(correct_result, lazy_result)
+    return check_results_impl(correct_result, lazy_result, atol)
 
 def check_fuser(args):
     if args.fuser == 'noopt':
@@ -587,6 +598,8 @@ if __name__ == "__main__" :
                         help="Run the tracing portion only, with noop backend, useful for running under a profiler.")
     parser.add_argument("--run_in_subprocess", "-s", type=str,
                         help="which model run in subprocess. This will ignore filter and exclude")
+    parser.add_argument("--allclose_atol", type=float, default=1e-8, 
+                        help="Absolute tolerance to check lazy result again the correct result")
     args = parser.parse_args()
     results = []
 
@@ -621,9 +634,9 @@ if __name__ == "__main__" :
                         torch._C._jit_set_nvfuser_horizontal_mode(False)
 
                     # no try since we should've already filtered out models we can't create
-                    torch.manual_seed(1337)
+                    set_seeds()
                     benchmark = benchmark_cls(device=args.device, jit=False)
-                    torch.manual_seed(1337)
+                    set_seeds()
                     lazy_benchmark = benchmark_cls(device='lazy', jit=False)
                     # TODO: might be redundant
                     gc.collect()
