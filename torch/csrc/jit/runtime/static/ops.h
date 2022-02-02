@@ -9,7 +9,7 @@ namespace native {
 at::Tensor& reshape_copy_out(
     at::Tensor& out,
     const at::Tensor& self,
-    const std::vector<int64_t>& proposed_shape,
+    at::IntArrayRef proposed_shape,
     bool infer_size = true);
 at::Tensor& to_copy_out(
     Tensor& out,
