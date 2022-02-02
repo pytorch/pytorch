@@ -1,7 +1,6 @@
 #include <ATen/core/DeprecatedTypePropertiesRegistry.h>
 
 #include <ATen/core/DeprecatedTypeProperties.h>
-#include <c10/util/irange.h>
 
 namespace at {
 
@@ -10,8 +9,8 @@ void DeprecatedTypePropertiesDeleter::operator()(DeprecatedTypeProperties * ptr)
 }
 
 DeprecatedTypePropertiesRegistry::DeprecatedTypePropertiesRegistry() {
-  for (const auto b : c10::irange(static_cast<int>(Backend::NumOptions))) {
-    for (const auto s : c10::irange(static_cast<int>(ScalarType::NumOptions))) {
+  for (int b = 0; b < static_cast<int>(Backend::NumOptions); ++b) {
+    for (int s = 0; s < static_cast<int>(ScalarType::NumOptions); ++s) {
       registry[b][s] = std::make_unique<DeprecatedTypeProperties>(
               static_cast<Backend>(b),
               static_cast<ScalarType>(s));

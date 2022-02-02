@@ -428,11 +428,11 @@ Tensor _grid_sampler_2d_cpu_quantized(
   uint8_t* out_ptr = (uint8_t*)output.data_ptr<quint8>();
   float* grid_ptr = grid.data_ptr<float>();
   at::parallel_for(0, N, 0, [&](int64_t start, int64_t end) {
-    for (const auto n : c10::irange(start, end)) {
+    for (int64_t n = start; n < end; ++n) {
       float* grid_ptr_N = grid_ptr + n * grid_sN;
       uint8_t* inp_ptr_N = inp_ptr + n * inp_sN;
-      for (const auto h : c10::irange(out_H)) {
-        for (const auto w : c10::irange(out_W)) {
+      for (int64_t h = 0; h < out_H; ++h) {
+        for (int64_t w = 0; w < out_W; ++w) {
           // get the corresponding input x, y, z co-ordinates from grid
           float* grid_ptr_NHW = grid_ptr_N + h * grid_sH + w * grid_sW;
           float x = *grid_ptr_NHW;

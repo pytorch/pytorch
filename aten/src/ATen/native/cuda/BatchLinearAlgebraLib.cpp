@@ -282,7 +282,7 @@ static void apply_batched_inverse_lib(Tensor& self, Tensor& self_inv, Tensor& in
   // Heuristic: For small batch size or large matrix size, we use for-loop to iterate over the batches instead of
   //            calling the batched cublas routine.
   if (batch_size <= 8 || /* batch_size > 8 && */ n >= 512) {
-    for (const auto i : c10::irange(batch_size)) {
+    for (int64_t i = 0; i < batch_size; i++) {
       auto dataPtr = allocator.allocate(sizeof(int) * lda);
       int* pivot = reinterpret_cast<int*>(dataPtr.get());
 
@@ -398,7 +398,7 @@ inline static void apply_svd_cusolver_gesvd(const Tensor& A, const Tensor& U, co
                                         : batches.size();
 
 
-  for (const auto _i : c10::irange(batchsize)) {
+  for(int _i = 0; _i < batchsize; _i++){
     int i = calculate_all_batches ? _i : batches[_i];
 
     at::cuda::solver::gesvd<scalar_t>(
@@ -487,7 +487,7 @@ inline static void apply_svd_cusolver_gesvdj(const Tensor& A, const Tensor& U, c
 
   auto dataPtr = allocator.allocate(sizeof(scalar_t)*lwork);
 
-  for (const auto i : c10::irange(batchsize)) {
+  for(int i = 0; i < batchsize; i++){
     at::cuda::solver::gesvdj<scalar_t>(
       handle, jobz, econ, m, n,
       A_data + i * A_stride,
@@ -577,7 +577,7 @@ std::vector<int64_t> _check_gesvdj_convergence(const Tensor& infos, int64_t non_
 
   std::vector<int64_t> res;
 
-  for (const auto i : c10::irange(infos.numel())) {
+  for(int64_t i = 0; i < infos.numel(); i++) {
     int info_for_batch_i = infos_cpu_data[i];
 
     // From cusolver doc, if info < 0, the i-th function call parameter is wrong,
@@ -685,7 +685,7 @@ inline static void apply_cholesky_cusolver_potrf_looped(const Tensor& self_worki
   auto workdata_host = host_allocator.allocate(worksize_host * batch_size);
   void* workdata_host_ptr = workdata_host.get();
 
-  for (const auto i : c10::irange(batch_size)) {
+  for (int64_t i = 0; i < batch_size; i++) {
     at::cuda::solver::xpotrf(
       handle, params, uplo, n, datatype,
       self_working_copy_ptr + i * matrix_stride,
@@ -709,7 +709,7 @@ inline static void apply_cholesky_cusolver_potrf_looped(const Tensor& self_worki
   auto work_data = allocator.allocate(sizeof(scalar_t)*lwork * batch_size);
   scalar_t* work_data_ptr = static_cast<scalar_t*>(work_data.get());
 
-  for (const auto i : c10::irange(batch_size)) {
+  for (int64_t i = 0; i < batch_size; i++) {
     at::cuda::solver::potrf<scalar_t>(
       handle, uplo, n_32,
       self_working_copy_ptr + i * matrix_stride,
@@ -782,7 +782,7 @@ inline static void apply_cholesky_cusolver_potrs(Tensor& self_working_copy, cons
   cudaDataType datatype = at::cuda::solver::get_cusolver_datatype<scalar_t>();
   TORCH_CUSOLVER_CHECK(cusolverDnCreateParams(&params));
 
-  for (const auto i : c10::irange(batch_size)) {
+  for (int64_t i = 0; i < batch_size; i++) {
     at::cuda::solver::xpotrs(
       handle, params, uplo, n, nrhs, datatype,
       A_ptr + i * A_matrix_stride,
@@ -800,7 +800,7 @@ inline static void apply_cholesky_cusolver_potrs(Tensor& self_working_copy, cons
   int lda_32 = cuda_int_cast(lda, "lda");
   int ldb_32 = cuda_int_cast(ldb, "ldb");
 
-  for (const auto i : c10::irange(batch_size)) {
+  for (int64_t i = 0; i < batch_size; i++) {
     at::cuda::solver::potrs<scalar_t>(
       handle, uplo, n_32, nrhs_32,
       A_ptr + i * A_matrix_stride,
@@ -1041,7 +1041,7 @@ static void apply_ormqr(const Tensor& input, const Tensor& tau, const Tensor& ot
   auto info = at::zeros({1}, input.options().dtype(at::kInt));
   auto info_data = info.data_ptr<int>();
 
-  for (const auto i : c10::irange(decltype(batch_size){0}, batch_size)) {
+  for (auto i = decltype(batch_size){0}; i < batch_size; i++) {
     scalar_t* input_working_ptr = &input_data[i * input_matrix_stride];
     scalar_t* other_working_ptr = &other_data[i * other_matrix_stride];
     scalar_t* tau_working_ptr = &tau_data[i * tau_stride];
@@ -1119,7 +1119,7 @@ inline static void apply_orgqr(Tensor& self, const Tensor& tau) {
   auto info = at::zeros({1}, self.options().dtype(at::kInt));
   auto info_data = info.data_ptr<int>();
 
-  for (const auto i : c10::irange(decltype(batchsize){0}, batchsize)) {
+  for (auto i = decltype(batchsize){0}; i < batchsize; i++) {
     scalar_t* self_working_ptr = &self_data[i * self_matrix_stride];
     scalar_t* tau_working_ptr = &tau_data[i * tau_stride];
     auto handle = at::cuda::getCurrentCUDASolverDnHandle();
@@ -1411,7 +1411,7 @@ void lu_factor_looped_cusolver(const Tensor& self, const Tensor& pivots, const T
     const auto pivots_stride = get_pivots ? pivots.size(-1) : 0;
 
     const auto handle = at::cuda::getCurrentCUDASolverDnHandle();
-    for (const auto batch : c10::irange(decltype(batch_size){0}, batch_size)) {
+    for (auto batch = decltype(batch_size){0}; batch < batch_size; ++batch) {
       at::cuda::solver::getrf<scalar_t>(
         handle, m, n,
         self_data + batch * self_stride,
@@ -1447,7 +1447,7 @@ void lu_solve_looped_cusolver(const Tensor& b, const Tensor& lu, const Tensor& p
     int leading_dimension = cuda_int_cast(std::max<int>(1, n), "leading_dimension");
 
     auto handle = at::cuda::getCurrentCUDASolverDnHandle();
-    for (const auto batch : c10::irange(decltype(batch_size){0}, batch_size)) {
+    for (auto batch = decltype(batch_size){0}; batch < batch_size; ++batch) {
       at::cuda::solver::getrs<scalar_t>(
         handle,
         n,
