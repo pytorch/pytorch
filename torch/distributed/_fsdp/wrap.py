@@ -72,7 +72,9 @@ default_auto_wrap_policy.FORCE_LEAF_MODULES = {nn.MultiheadAttention}  # type: i
 
 
 @contextlib.contextmanager
-def enable_wrap(*, wrapper_cls: Any, **wrapper_kwargs: Any) -> Generator[None, None, None]:
+def enable_wrap(
+    *, wrapper_cls: Any, **wrapper_kwargs: Any
+) -> Generator[None, None, None]:
     """
     Context manager to wrap modules using a wrapper.
 
@@ -112,12 +114,12 @@ def wrap(module: nn.Module, **wrap_overrides: Any) -> nn.Module:
     a module to be initialized both with and without a wrapper without code
     change.
 
-    Both wrapper_cls and wrapper_config can be taken from 3 sources with
-    increasing priority:
-
-        1. ConfigAutoWrap's context
-        2. module.wrapper_config
-        3. wrap_overrides argument of this function
+    The class that this function wraps the passed in ``nn.Module`` with is the
+    passed in ``wrapper_cls`` argument into ``enable_wrap``. Both
+    ``enable_wrap`` and ``wrap`` can take in kwargs specifying how to construct
+    the ``wrapper_cls`` instance. In the case of duplicate kwargs in
+    ``enable_wrap`` and ``wrap``, the argument passed into ``wrap`` will be
+    respected.
 
     Usage::
 
@@ -132,36 +134,19 @@ def wrap(module: nn.Module, **wrap_overrides: Any) -> nn.Module:
     """
     if ConfigAutoWrap.in_autowrap_context:
         assert ConfigAutoWrap.wrapper_cls is not None
-        # Construct according to priority for BC
-        module_overrides = {}  # type: ignore[var-annotated]
-        if hasattr(module, "wrapper_config"):
-            module_overrides = module.wrapper_config  # type: ignore[assignment]
-            assert isinstance(module_overrides, dict)
-        wrap_overrides = {**ConfigAutoWrap.kwargs, **module_overrides, **wrap_overrides}
+
+        wrap_overrides = {**ConfigAutoWrap.kwargs, **wrap_overrides}
         return _wrap(
             module,
             ConfigAutoWrap.wrapper_cls,
-            # Already passing in any module overrides
-            check_module_overrides=False,
             **wrap_overrides,
         )
     return module
 
 
-def _wrap(module: nn.Module, wrapper_cls: Callable, check_module_overrides: bool = True, **kwargs) -> nn.Module:
-    module_overrides = {}  # type: ignore[var-annotated]
-    # We need check_module_overrides flag to support backward compat with
-    # ConfigAutoWrap.wrap, which uses the kwargs priority order of:
-    # kwargs passed into config auto wrap, then module.wrapper_config kwargs,
-    # then kwargs passed into wrap(), from least to highest precedence. Thus,
-    # ConfigAutoWrap.wrap constructs according to this priority and skips
-    # below logic by passing check_module_overrides=False.
-    if check_module_overrides and hasattr(module, "wrapper_config"):
-        module_overrides = module.wrapper_config  # type: ignore[assignment]
-        assert isinstance(module_overrides, dict)
-    wrap_overrides = {**kwargs, **module_overrides}
+def _wrap(module: nn.Module, wrapper_cls: Callable, **kwargs) -> nn.Module:
     assert wrapper_cls is not None
-    return wrapper_cls(module, **wrap_overrides)
+    return wrapper_cls(module, **kwargs)
 
 
 def _recursive_wrap(
@@ -198,7 +183,10 @@ def _recursive_wrap(
         # Iterate through the children, recursively wrap if necessary
         for name, child in module.named_children():
             wrapped_child, num_wrapped_params = _recursive_wrap(
-                module=child, auto_wrap_policy=auto_wrap_policy, wrapper_cls=wrapper_cls, **kwargs
+                module=child,
+                auto_wrap_policy=auto_wrap_policy,
+                wrapper_cls=wrapper_cls,
+                **kwargs,
             )
             setattr(module, name, wrapped_child)
             # Keep track of how many parameters have been wrapped
@@ -206,7 +194,9 @@ def _recursive_wrap(
         # decide if we need to wrap the current module,
         # since the left over parameters exceed the number of params to wrap
         remainder = num_params - total_wrapped_params
-        if not only_wrap_children and auto_wrap_policy(module=module, recurse=False, unwrapped_params=remainder):
+        if not only_wrap_children and auto_wrap_policy(
+            module=module, recurse=False, unwrapped_params=remainder
+        ):
             # Leaf node or final wrapping of the remainder both happen here.
             return _wrap(module, wrapper_cls, **kwargs), num_params
         else:
@@ -235,7 +225,9 @@ class ConfigAutoWrap:
             )
         ConfigAutoWrap.in_autowrap_context = True
         # Get and save the wrapper cls for the context.
-        assert "wrapper_cls" in kwargs.keys(), "Expected to pass in wrapper_cls arg into ConfigAutoWrap."
+        assert (
+            "wrapper_cls" in kwargs.keys()
+        ), "Expected to pass in wrapper_cls arg into ConfigAutoWrap."
         ConfigAutoWrap.wrapper_cls = cast(Callable, kwargs["wrapper_cls"])
         del kwargs["wrapper_cls"]
         # Save the rest.

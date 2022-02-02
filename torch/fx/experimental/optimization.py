@@ -68,6 +68,8 @@ def fuse(model: torch.nn.Module, inplace=False) -> torch.nn.Module:
                     continue
                 conv = modules[node.args[0].target]
                 bn = modules[node.target]
+                if not bn.track_running_stats:
+                    continue
                 fused_conv = fuse_conv_bn_eval(conv, bn)
                 replace_node_module(node.args[0], modules, fused_conv)
                 node.replace_all_uses_with(node.args[0])
