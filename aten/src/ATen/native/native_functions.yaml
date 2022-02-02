@@ -6842,7 +6842,7 @@
   variants: method, function
   dispatch:
     CPU: index_select_cpu_
-    QuantizedCPU: index_select_cpu_quantized_
+    QuantizedCPU: index_select_quantized_cpu_
     CUDA, QuantizedCUDA: index_select_cuda
     SparseCPU: index_select_sparse
     SparseCUDA: index_select_sparse

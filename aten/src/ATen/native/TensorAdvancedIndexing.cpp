@@ -1079,7 +1079,7 @@ Tensor index_select_cpu_(const Tensor & self, int64_t dim, const Tensor & index)
   return at::native::index_select_out_cpu_(self, dim, index, result);
 }
 
-Tensor index_select_cpu_quantized_(const Tensor & self, int64_t dim, const Tensor & index) {
+Tensor index_select_quantized_cpu_(const Tensor & self, int64_t dim, const Tensor & index) {
   TORCH_CHECK(self.qscheme() == kPerTensorAffine,
               "Only per_tensor quantized quantized tensors are supported by index_select.")
   Tensor result = at::empty_quantized({0}, self);
