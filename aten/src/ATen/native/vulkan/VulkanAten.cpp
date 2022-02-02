@@ -436,7 +436,9 @@ Tensor addmm(
     const Tensor& mat1,
     const Tensor& mat2,
     const Scalar& beta,
-    const Scalar& alpha) {
+    const Scalar& alpha,
+    c10::optional<ScalarType> dtype_opt) {
+  TORCH_CHECK(!dtype_opt.has_value(), "addmm_vulkan: kwarg dtype is not supported for this backend.");
   const VulkanTensor t =
       vtensor_from_vulkan(self.is_vulkan() ? self : self.vulkan());
   const VulkanTensor m1 =
