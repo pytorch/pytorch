@@ -90,6 +90,10 @@ value: changed operator
 """
 ALL_MODULES = {
     TestVersionedDivTensorExampleV7(): "aten::div.Tensor",
+    TestVersionedLinspaceV7(): "aten::linspace",
+    TestVersionedLinspaceOutV7(): "aten::linspace.out",
+    TestVersionedLogspaceV8(): "aten::logspace",
+    TestVersionedLogspaceOutV8(): "aten::logspace.out",
 }
 
 """
@@ -133,8 +137,12 @@ def get_output_model_version(script_module: torch.nn.Module) -> int:
     torch.jit.save(script_module, buffer)
     buffer.seek(0)
     zipped_model = zipfile.ZipFile(buffer)
-    version = int(zipped_model.read('archive/version').decode("utf-8"))
-    return version
+    try:
+        version = int(zipped_model.read('archive/version').decode("utf-8"))
+        return version
+    except KeyError:
+        version = int(zipped_model.read('archive/.data/version').decode("utf-8"))
+        return version
 
 """
 Loop through all test modules. If the corresponding model doesn't exist in
@@ -156,9 +164,6 @@ def generate_models(model_directory_path: Path):
     all_models = get_all_models(model_directory_path)
     for a_module, expect_operator in ALL_MODULES.items():
         print(a_module, expect_operator)
-        script_module = torch.jit.script(a_module)
-        actual_model_version = get_output_model_version(script_module)
-
         # For example: TestVersionedDivTensorExampleV7
         torch_module_name = type(a_module).__name__
 
@@ -167,10 +172,15 @@ def generate_models(model_directory_path: Path):
             '_' + char.lower() if char.isupper() else char for char in torch_module_name
         ]).lstrip('_')
 
+        # Some models may not compile anymore, so skip the ones
+        # that already has pt file for them.
         logger.info(f"Processing {torch_module_name}")
         if model_exist(model_name, all_models):
             logger.info(f"Model {model_name} already exists, skipping")
             continue
+
+        script_module = torch.jit.script(a_module)
+        actual_model_version = get_output_model_version(script_module)
 
         current_operator_version = torch._C._get_max_operator_version()
         if actual_model_version >= current_operator_version + 1:

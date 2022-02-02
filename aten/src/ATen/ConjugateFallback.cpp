@@ -30,6 +30,9 @@ TORCH_LIBRARY_IMPL(aten, Conjugate, m) {
   m.impl("conj_physical_", torch::CppFunction::makeFallthrough());
   m.impl("resolve_conj", torch::CppFunction::makeFallthrough());
   m.impl("resolve_neg", torch::CppFunction::makeFallthrough());
+  m.impl("repeat_interleave.Tensor", torch::CppFunction::makeFallthrough());
+  m.impl("repeat_interleave.self_Tensor", torch::CppFunction::makeFallthrough());
+  m.impl("repeat_interleave.self_int", torch::CppFunction::makeFallthrough());
 
   // See test_metadata_check_when_primal_has_conj_bit in test_autograd.py
   m.impl("_has_same_storage_numel", torch::CppFunction::makeFallthrough());
