@@ -9737,10 +9737,11 @@ op_db: List[OpInfo] = [
                # These tests started breaking after touching the SVD.
                DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', 'test_fn_grad', device_type='cpu',
                             dtypes=(torch.complex128,), active_if=IS_WINDOWS),
-               # Will be removed once https://github.com/pytorch/pytorch/issues/62328 is fixed
+               # For complex dtypes: Will be removed once https://github.com/pytorch/pytorch/issues/62328 is fixed
                # Probable fix (open PR): https://github.com/pytorch/pytorch/pull/62570
-               DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', 'test_fn_grad', device_type='cuda',
-                            dtypes=(torch.complex128,)),
+               # Illegal Memory Access failure: https://github.com/pytorch/pytorch/issues/72203
+               DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', 'test_fn_grad', device_type='cuda'),
+               DecorateInfo(unittest.skip("Skipped!"), 'TestMathBits', 'test_neg_view', device_type='cuda'),
                DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_dtypes'),
                DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', 'test_fn_gradgrad'),
            )),
