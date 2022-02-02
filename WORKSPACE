@@ -1,7 +1,22 @@
 workspace(name = "pytorch")
 
 load("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive")
-load("//tools/rules:workspace.bzl", "new_patched_local_repository", "new_empty_repository")
+load("//tools/rules:workspace.bzl", "new_patched_local_repository")
+
+http_archive(
+    name = "rules_cuda",
+    sha256 = "f80438bee9906e9ecb1a8a4ae2365374ac1e8a283897281a2db2fb7fcf746333",
+    strip_prefix = "runtime-b1c7cce21ba4661c17ac72421c6a0e2015e7bef3/third_party/rules_cuda",
+    urls = ["https://github.com/tensorflow/runtime/archive/b1c7cce21ba4661c17ac72421c6a0e2015e7bef3.tar.gz"],
+)
+
+load("@rules_cuda//cuda:dependencies.bzl", "rules_cuda_dependencies")
+
+rules_cuda_dependencies()
+
+load("@rules_cc//cc:repositories.bzl", "rules_cc_toolchains")
+
+rules_cc_toolchains()
 
 http_archive(
     name = "bazel_skylib",
@@ -171,13 +186,19 @@ load("@rules_python//python:repositories.bzl", "py_repositories")
 
 py_repositories()
 
-local_repository(
-    name = "local_config_cuda",
-    path = "third_party/tensorflow_cuda_bazel_build",
+new_local_repository(
+    name = "cuda",
+    build_file = "@//third_party:cuda.BUILD",
+    path = "/usr/local/cuda",
 )
 
-# Wrapper to expose local_config_cuda in an agnostic way
-new_empty_repository(
-    name = "cuda",
-    build_file = "//third_party:cuda.BUILD",
+new_local_repository(
+    name = "cudnn",
+    build_file = "@//third_party:cudnn.BUILD",
+    path = "/usr/",
+)
+
+local_repository(
+    name = "com_github_google_flatbuffers",
+    path = "third_party/flatbuffers",
 )
