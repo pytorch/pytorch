@@ -353,6 +353,13 @@ c10::optional<ScopePtr> FunctionExtractor::InferScope(Node* n) {
   }
   for (auto output : n->outputs()) {
     for (auto use : output->uses()) {
+      if (!IsValidScope(use.user->scope())) {
+        auto inferred_output_scope = InferScope(use.user);
+        if (inferred_output_scope.has_value() &&
+            IsValidScope(inferred_output_scope.value())) {
+          use.user->setScope(inferred_output_scope.value());
+        }
+      }
       output_scopes.emplace_back(use.user->scope());
     }
   }
