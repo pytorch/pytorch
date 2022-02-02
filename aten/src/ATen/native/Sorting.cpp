@@ -48,12 +48,13 @@ TORCH_META_FUNC2(sort, stable)
   const auto& indices = maybe_get_output(1);
   auto indices_defined = indices.defined();
 
+  // See issue: https://github.com/pytorch/pytorch/issues/65863
+  // Strides should be dense, so as not to allocate too much memory.
+  // We either use 'self' strides, or infer dense strides from them.
   std::vector<int64_t> strides = (self.is_non_overlapping_and_dense())
       ? self.strides().vec()
       : at::infer_dense_strides(self.sizes(), self.strides());
 
-  // 'set_output' will only modify the strides, if the output was resized.
-  // Which means that we can ignore the output's strides here.
   set_output(0, self.sizes(), strides, self.options(), {});
   set_output(1, self.sizes(), strides, self.options().dtype(kLong), {});
 
