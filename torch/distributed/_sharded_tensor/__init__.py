@@ -469,14 +469,15 @@ def shard_parameter(
 
         if rank == placement.rank():  # type: ignore[union-attr]
             local_metadata = shard_metadata
-            local_tensor = torch.empty(local_metadata.shard_sizes, dtype=tensor.dtype, layout=tensor.layout, device=tensor.device)
-            # local_tensor.requires_grad = tensor.requires_grad
+            local_tensor = torch.empty(
+                local_metadata.shard_sizes, dtype=tensor.dtype, layout=tensor.layout, device=tensor.device)
 
         current_offsets[sharding_spec.dim] += chunked_dim_size  # type: ignore[index]
 
     # Scatter the shards (use broadcast since NCCL doesn't support scatter, this is very inefficient).
     dist.scatter(local_tensor, scatter_list=tensors_to_scatter, src=src_rank, group=pg)
 
+    assert local_tensor is not None
     # Sync requires_grad to local_shard.
     local_tensor.requires_grad = tensor.requires_grad
 
