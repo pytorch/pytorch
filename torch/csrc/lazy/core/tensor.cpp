@@ -274,8 +274,21 @@ Value LazyTensor::GetIrValueForTensor(
     if (IsSpecialScalar(value)) {
       return MakeNode<Scalar>(value, tensor.scalar_type());
     }
-    data = LazyGraphExecutor::Get()->GetDeviceData(tensor.cpu(), device);
-    read_only = true;
+    // We really just want to return a DeviceData IR backed by an on-device tensor.
+    // If the tensor is already on device, we don't want to transfer it again.
+    // If the device is cpu/cuda, then 'tensor' is all we need, as long as we take ownership of it
+    // for XLA, there is a legitimate need to upload the eager tensor to the device
+    // In order to avoid uploading multiple times, we cache the uploaded copy against a
+    // key derived from hashing the eager tensor
+    // This means for cuda, we do a lot of extra stuff:
+    // -- we first copy the cuda tensor to cpu to hash it
+    // -- then we look up the device-data version of the cuda tensor so we can return it
+
+    // data = LazyGraphExecutor::Get()->GetDeviceData(tensor.cpu(), device);
+    // read_only = true;
+    TORCH_LAZY_TIMED("IrValueTensorToDataHandle");
+    data = TensorToDataHandle(tensor, device);
+
   } else {
     TORCH_LAZY_TIMED("IrValueTensorToDataHandle");
     data = TensorToDataHandle(tensor, device);
