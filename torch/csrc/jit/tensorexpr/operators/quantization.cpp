@@ -721,6 +721,51 @@ Tensor computeUpsampleNearest2d(
     const std::vector<ExprHandle>& outputShape,
     const c10::optional<ScalarType>& outputType,
     at::Device) {
+  auto A = c10::get<BufHandle>(inputs[0]);
+  auto output_height = outputShape[2];
+  auto output_width = outputShape[3];
+  auto input_height = ExprHandle(A.dim(2));
+  auto input_width = ExprHandle(A.dim(3));
+
+  std::vector<ExprPtr> dims;
+  std::vector<VarPtr> args;
+  unpack_dim_args(c10::fmap<DimArg>(outputShape), &dims, &args);
+  // Handle separately when scale is specified? as in 'scalar_t
+  // compute_scales_value' in UpSample.h
+  auto scale_h =
+      promoteToDtype(input_height, ScalarType::Double) / output_height;
+  auto scale_w = promoteToDtype(input_width, ScalarType::Double) / output_width;
+  // TODO: will repetetive if in idx calculation will be taken out of the loop?
+  auto compute_nearest_idx =
+      [](ExprHandle scale, ExprHandle dst_index, ExprHandle input_size) {
+        return Min::make(
+            promoteToDtype(floor(dst_index * scale), ScalarType::Long),
+            input_size - 1,
+            true);
+      };
+  auto body_func = [&](std::vector<VarHandle> axes) {
+    std::vector<ExprHandle> newAxes(axes.begin(), axes.end());
+    newAxes[2] = compute_nearest_idx(scale_h, axes[2], input_height);
+    newAxes[3] = compute_nearest_idx(scale_w, axes[3], input_width);
+    return A.load(newAxes);
+  };
+  auto e = body_func(VarVectorToVarHandleVector(args));
+  BufPtr buf = alloc<Buf>(
+      "quantize_upsample_nearest2d",
+      ExprHandleVectorToExprVector(outputShape),
+      Dtype(*outputType),
+      nullptr,
+      c10::nullopt,
+      A.node()->qscale(),
+      A.node()->qzero());
+  return Tensor(buf, args, e.node());
+}
+
+Tensor computeUpsampleNearest2dExternalCall(
+    const std::vector<ArgValue>& inputs,
+    const std::vector<ExprHandle>& outputShape,
+    const c10::optional<ScalarType>& outputType,
+    at::Device) {
   Dtype dtype = kFloat;
   if (outputType) {
     dtype = Dtype(*outputType);
