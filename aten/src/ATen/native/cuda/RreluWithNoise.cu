@@ -1,5 +1,5 @@
 #include <ATen/ATen.h>
-#include <ATen/CUDAGeneratorImpl.h>
+#include <ATen/cuda/CUDAGeneratorImpl.h>
 #include <ATen/native/cuda/DistributionTemplates.h>
 
 namespace at { namespace native {

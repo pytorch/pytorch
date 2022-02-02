@@ -8,6 +8,7 @@
 #include <torch/csrc/jit/codegen/cuda/root_domain_map.h>
 #include <torch/csrc/jit/codegen/cuda/transform_iter.h>
 #include <torch/csrc/jit/codegen/cuda/transform_rfactor.h>
+#include <torch/csrc/jit/codegen/cuda/transform_view.h>
 
 #include <c10/util/irange.h>
 
@@ -247,7 +248,7 @@ BroadcastOp::BroadcastOp(Val* out, Val* in, std::vector<bool> is_broadcast_dims)
   for (auto id : p_root) {
     if (root_p2c.find(id) == root_p2c.end()) {
       TORCH_INTERNAL_ASSERT(
-          id->isReduction(),
+          id->isReduction() || id->isStride(),
           "Invalid broadcast op: ",
           id,
           ". Non-reduction input dim does't match to output.");
@@ -637,6 +638,18 @@ int GatherOp::gatherAxis(int axis) const {
   return int(windowShape().size()) + axis;
 }
 
+ViewOp::ViewOp(TensorView* out, TensorView* in)
+    : Expr(ExprType::ViewOp), out_(out), in_(in) {
+  addOutput(out);
+  addInput(in);
+  name_ = FusionGuard::getCurFusion()->registerExpr(this);
+}
+
+ViewOp::ViewOp(const ViewOp* src, IrCloner* ir_cloner)
+    : Expr(src, ir_cloner),
+      out_(ir_cloner->clone(src->out_)),
+      in_(ir_cloner->clone(src->in_)) {}
+
 IterDomain::IterDomain(
     Val* start,
     Val* extent,
@@ -850,6 +863,15 @@ std::pair<IterDomain*, IterDomain*> IterDomain::split(
   return IterDomain::split(in, factor, inner_split, start_offset, stop_offset);
 }
 
+std::pair<IterDomain*, IterDomain*> IterDomain::stridedSplit(int factor) {
+  auto split_out = IterDomain::split(this, new Int(factor), true);
+
+  split_out.second->iter_type_ = IterType::Stride;
+  split_out.first->is_rfactor_domain_ = true;
+  split_out.second->is_rfactor_domain_ = true;
+  return split_out;
+}
+
 // TODO: We should change parallelize interface to be on tensorview or at least
 // vectorize should be done on tensorview. This would let us check that we don't
 // vectorize to the left of the computeAt domain, and could allow us to do some
@@ -961,7 +983,7 @@ TensorDomain::TensorDomain(
       "Invalid contiguity information provided, incorrect size. Recieved vector of size ",
       contiguity_.size(),
       " but needed one of size ",
-      root_domain_.size());
+      getMaybeRFactorDomain().size());
 
   auto inps = IterVisitor::getInputsTo(
       std::vector<Val*>(domain_.begin(), domain_.end()));
@@ -1255,15 +1277,19 @@ std::vector<IterDomain*> TensorDomain::orderedAs(
 std::vector<IterDomain*> TensorDomain::noReductions(
     const std::vector<IterDomain*>& td) {
   size_t size_out = 0;
-  for (auto id : td)
-    if (!id->isReduction())
+  for (auto id : td) {
+    if (!id->isReduction() && !id->isStride()) {
       size_out++;
+    }
+  }
   std::vector<IterDomain*> noReductionDomain(size_out);
 
   int it = 0;
-  for (auto id : td)
-    if (!id->isReduction())
+  for (auto id : td) {
+    if (!id->isReduction() && !id->isStride()) {
       noReductionDomain[it++] = id;
+    }
+  }
 
   return noReductionDomain;
 }
@@ -1305,6 +1331,12 @@ bool TensorDomain::hasNontrivialReduction(const std::vector<IterDomain*>& td) {
     }
   }
   return false;
+}
+
+TensorDomain* TensorDomain::view(
+    const std::vector<std::shared_ptr<ViewTransform>>& transforms) {
+  TORCH_INTERNAL_ASSERT(nDims() > 0, "Tried to view transform a 0-dim domain");
+  return transformView(this, transforms);
 }
 
 // TODO: Rfactor a Welford

@@ -4,6 +4,11 @@
 #include <c10/core/TensorOptions.h>
 #include <ATen/core/Dimname.h>
 
+C10_CLANG_DIAGNOSTIC_PUSH()
+#if C10_CLANG_HAS_WARNING("-Wdeprecated-copy-dtor")
+C10_CLANG_DIAGNOSTIC_IGNORE("-Wdeprecated-copy-dtor")
+#endif
+
 namespace at {
 
 class Tensor;
@@ -74,3 +79,5 @@ struct TORCH_API MetaBase {
 } // namespace impl
 
 } // namespace at
+
+C10_CLANG_DIAGNOSTIC_POP()
