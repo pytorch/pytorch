@@ -1,8 +1,8 @@
 // [Z,Y,X]_THREADS is the number of participating threads in the z, y, x
-// dimension of the block. If set to 0 it means that dimension doesn't
-// participate, otherwise it is the number of threads. We could start with warp
-// reductions, then reduce the warps, this could save some shared memory, but
-// may actually be slower.
+// dimension of the block. If set to false the dimension doesn't
+// participate in the reduction. We could start with warp reductions, then
+// reduce the warps, this could save some shared memory, but could be slower in
+// some instances.
 //
 //  EXAMPLE USAGE:
 //  blockReduceSum<X_THREADS, Y_THREADS, Z_THREADS>
@@ -19,92 +19,68 @@ template <
     bool Z_REDUCE,
     typename T,
     typename Func,
-    typename _dim3ti,
-    typename _dim3bd>
+    typename _dim3,
+    typename _dim3_2>
 __device__ void blockReduce(
     T& out,
     const T& inp_val,
     Func reduction_op,
-    const _dim3ti& thread_idx,
-    const _dim3bd& block_dim,
+    const _dim3& thread_idx,
+    const _dim3_2& block_dim,
     T* shared_mem,
     bool read_pred,
     bool write_pred,
     T init_val) {
-  unsigned int reduction_size = (X_REDUCE ? block_dim.x : 1) *
-      (Y_REDUCE ? block_dim.y : 1) * (Z_REDUCE ? block_dim.z : 1);
-
   // If this thread will output a final result
-  bool should_write = true;
+  bool should_write =
+      index_utils::maskedIsZero<X_REDUCE, Y_REDUCE, Z_REDUCE>(thread_idx);
 
-  if (X_REDUCE)
-    should_write = should_write && thread_idx.x == 0;
-  if (Y_REDUCE)
-    should_write = should_write && thread_idx.y == 0;
-  if (Z_REDUCE)
-    should_write = should_write && thread_idx.z == 0;
+  // Size of the reduction segments
+  unsigned int reduction_size =
+      index_utils::maskedSize<X_REDUCE, Y_REDUCE, Z_REDUCE>(block_dim);
 
-  unsigned int reduction_stride;
-  unsigned int reduction_tid;
-  unsigned int linear_tid;
+  // Index into the reduction segment
+  unsigned int reduction_tid =
+      index_utils::maskedOffset<X_REDUCE, Y_REDUCE, Z_REDUCE>(
+          thread_idx, block_dim);
 
-  if (X_REDUCE && !Y_REDUCE && Z_REDUCE) {
-    // Transpose Z and Y in the shared memory so Z and X dims are contiguous in
-    // smem
-    reduction_stride = 1;
-    linear_tid = threadIdx.y * blockDim.z * blockDim.x +
-        threadIdx.z * blockDim.x + threadIdx.x;
-    reduction_tid = threadIdx.z * blockDim.x + threadIdx.x;
-  } else {
-    // Normal reduction in order
-    reduction_stride =
-        (X_REDUCE ? 1
-                  : (Y_REDUCE ? block_dim.x
-                              : (Z_REDUCE ? block_dim.x * block_dim.y : 0)));
+  // Index of the reduction segment
+  unsigned int reduction_idx =
+      index_utils::maskedOffset<!X_REDUCE, !Y_REDUCE, !Z_REDUCE>(
+          thread_idx, block_dim);
 
-    linear_tid = thread_idx.z * block_dim.y * block_dim.x +
-        thread_idx.y * block_dim.x + thread_idx.x;
+  // Offset into smem for the current thread
+  unsigned int smem_offset = reduction_idx * reduction_size + reduction_tid;
 
-    reduction_tid = (Z_REDUCE ? thread_idx.z : 0) *
-            (Y_REDUCE ? block_dim.y : 1) * (X_REDUCE ? block_dim.x : 1) +
-        (Y_REDUCE ? thread_idx.y : 0) * (X_REDUCE ? block_dim.x : 1) +
-        (X_REDUCE ? thread_idx.x : 0);
-  }
-
-  assert(reduction_stride != 0);
-
+  // Initialize shared memory
   if (read_pred) {
-    shared_mem[linear_tid] = inp_val;
+    shared_mem[smem_offset] = inp_val;
   } else {
-    shared_mem[linear_tid] = init_val;
+    shared_mem[smem_offset] = init_val;
   }
+
   block_sync::sync();
-  // Reduce down to nearest power of 2:
+  // Reduce down to nearest power of 2 for the tree reduction:
   int np2 = 1 << (31 - __clz(reduction_size));
 
-  if (reduction_tid < np2) {
-    if (reduction_tid + np2 < reduction_size) {
-      reduction_op(
-          shared_mem[linear_tid],
-          shared_mem[linear_tid + np2 * reduction_stride]);
-    }
+  if (reduction_tid < np2 && reduction_tid + np2 < reduction_size) {
+    reduction_op(shared_mem[smem_offset], shared_mem[smem_offset + np2]);
   }
   block_sync::sync();
+
   // loop peel the final iteration to save one syncthread for the end
   for (int factor = np2 / 2; factor > 1; factor >>= 1) {
     if (reduction_tid < factor) {
-      reduction_op(
-          shared_mem[linear_tid],
-          shared_mem[linear_tid + factor * reduction_stride]);
+      reduction_op(shared_mem[smem_offset], shared_mem[smem_offset + factor]);
     }
     block_sync::sync();
   }
 
   if (should_write && write_pred) {
     T result = out;
-    reduction_op(result, shared_mem[linear_tid]);
+    reduction_op(result, shared_mem[smem_offset]);
     if (reduction_size > 1) {
-      reduction_op(result, shared_mem[linear_tid + 1 * reduction_stride]);
+      reduction_op(result, shared_mem[smem_offset + 1]);
     }
     out = result;
   }
@@ -118,18 +94,18 @@ template <
     bool Z_REDUCE,
     typename T,
     typename Func,
-    typename _dim3ti,
-    typename _dim3bd>
+    typename _dim3,
+    typename _dim3_2>
 __device__ void blockReduce(
     T& out,
     const T& inp_val,
     Func reduction_op,
-    const _dim3ti& thread_idx,
-    const _dim3bd& block_dim,
+    const _dim3& thread_idx,
+    const _dim3_2& block_dim,
     T* shared_mem,
     bool read_write_pred,
     T init_val) {
-  blockReduce<X_REDUCE, Y_REDUCE, Z_REDUCE, T, Func, _dim3ti, _dim3bd>(
+  blockReduce<X_REDUCE, Y_REDUCE, Z_REDUCE, T, Func, _dim3, _dim3_2>(
       out,
       inp_val,
       reduction_op,

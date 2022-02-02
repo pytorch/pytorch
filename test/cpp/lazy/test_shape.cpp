@@ -80,22 +80,5 @@ TEST(ShapeTest, Ostream) {
   EXPECT_EQ(shape.to_string(), ss.str());
 }
 
-TEST(ShapeTest, ConvertShapes) {
-  auto shape1 = Shape(c10::ScalarType::Long, {1, 2, 3});
-  auto shape2 = Shape(c10::ScalarType::Float, {1, 2});
-
-  auto shapes1 = convertShapes({}, {});
-  EXPECT_TRUE(shapes1.empty());
-
-  auto shapes2 = convertShapes({c10::ScalarType::Long}, {{1, 2, 3}});
-  EXPECT_EQ(shapes2.size(), 1);
-  EXPECT_EQ(shapes2[0], shape1);
-
-  auto shapes3 = convertShapes({c10::ScalarType::Long, c10::ScalarType::Float}, {{1, 2, 3}, {1, 2}});
-  EXPECT_EQ(shapes3.size(), 2);
-  EXPECT_EQ(shapes3[0], shape1);
-  EXPECT_EQ(shapes3[1], shape2);
-}
-
 }  // namespace lazy
 }  // namespace torch

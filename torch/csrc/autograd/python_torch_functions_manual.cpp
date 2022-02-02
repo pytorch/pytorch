@@ -511,7 +511,7 @@ static PyObject * THPVariable_linspace(PyObject* self_, PyObject* args, PyObject
 {
   HANDLE_TH_ERRORS
   static PythonArgParser parser({
-    "linspace(Scalar start, Scalar end, int64_t? steps=None, *, Tensor out=None, ScalarType dtype=None, Layout layout=torch.strided, Device device=None, bool pin_memory=False, bool requires_grad=False)",
+    "linspace(Scalar start, Scalar end, int64_t steps, *, Tensor out=None, ScalarType dtype=None, Layout layout=torch.strided, Device device=None, bool pin_memory=False, bool requires_grad=False)",
   }, /*traceable=*/true);
 
   ParsedArgs<9> parsed_args;
@@ -520,7 +520,7 @@ static PyObject * THPVariable_linspace(PyObject* self_, PyObject* args, PyObject
     return handle_torch_function(_r, nullptr, args, kwargs, THPVariableFunctionsModule, "torch");
   }
   if (_r.isNone(3)) {
-    // aten::linspace(Scalar start, Scalar end, int? steps=None, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
+    // aten::linspace(Scalar start, Scalar end, int steps, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
 
     // NOTE: r.scalartype(X) gives the default dtype if r.isNone(X)
     // This leads to problem in the operator argument checks,
@@ -533,22 +533,22 @@ static PyObject * THPVariable_linspace(PyObject* self_, PyObject* args, PyObject
         .pinned_memory(_r.toBool(7));
     torch::utils::maybe_initialize_cuda(options);
 
-    auto dispatch_linspace = [](Scalar start, Scalar end, c10::optional<int64_t> steps, TensorOptions options) -> Tensor {
+    auto dispatch_linspace = [](Scalar start, Scalar end, int64_t steps, TensorOptions options) -> Tensor {
       pybind11::gil_scoped_release no_gil;
       return torch::linspace(start, end, steps, options);
     };
-    return wrap(dispatch_linspace(_r.scalar(0), _r.scalar(1), _r.toInt64Optional(2), options));
+    return wrap(dispatch_linspace(_r.scalar(0), _r.scalar(1), _r.toInt64(2), options));
   } else {
     // aten::linspace.out(Scalar start, Scalar end, int? steps=None, *, Tensor(a!) out) -> Tensor(a!)
     check_out_type_matches(_r.tensor(3), _r.scalartype(4),
                            _r.isNone(4), _r.layoutOptional(5),
                            _r.device(6), _r.isNone(6));
 
-    auto dispatch_linspace_out = [](Tensor out, Scalar start, Scalar end, c10::optional<int64_t> steps) -> Tensor {
+    auto dispatch_linspace_out = [](Tensor out, Scalar start, Scalar end, int64_t steps) -> Tensor {
       pybind11::gil_scoped_release no_gil;
       return at::linspace_out(out, start, end, steps);
     };
-    return wrap(dispatch_linspace_out(_r.tensor(3), _r.scalar(0), _r.scalar(1), _r.toInt64Optional(2)).set_requires_grad(_r.toBool(8)));
+    return wrap(dispatch_linspace_out(_r.tensor(3), _r.scalar(0), _r.scalar(1), _r.toInt64(2)).set_requires_grad(_r.toBool(8)));
   }
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
