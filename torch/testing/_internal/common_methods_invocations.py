@@ -8084,10 +8084,7 @@ def reference_searchsorted(sorted_sequence, boundary, out_int32=False, right=Fal
 
 def reference_unravel_index_without_tuple(inp, *args):
     out_arr = np.unravel_index(inp, *args)
-    if (inp.ndim == 0):
-        return np.stack(out_arr, axis=0).reshape(len(out_arr))
-    else:
-        return np.stack(out_arr, axis=-1).reshape(*inp.shape, len(out_arr))
+    return np.stack(out_arr, axis=-1).reshape(*inp.shape, len(out_arr))
 
 
 def gradcheck_wrapper_hermitian_input(op, input, *args, **kwargs):
