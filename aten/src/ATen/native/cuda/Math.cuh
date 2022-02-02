@@ -129,14 +129,17 @@ const auto ndtri_string = jiterator_stringify(
   * coef[0] = C  , ..., coef[N] = C  .
   *            N                   0
   */
-template <typename T>
-T polevl(const T x, const T A[], const int len) {
-  T result = 0;
-  for (int i = 0; i < len; ++i) {
-    result = result * x + A[i];
+  template <typename T>
+  T polevl(const T x, const T A[], const int len) {
+    // NOTE: This `polevl` is different from other `polevl`
+    // implementation (in PyTorch) which expect the `len` to be
+    // `len(A) - 1` instead of `len(A)`.
+    T result = 0;
+    for (int i = 0; i < len; ++i) {
+      result = result * x + A[i];
+    }
+    return result;
   }
-  return result;
-}
 
   /*
   * This function is derived from the implementation of the i1e function in the Cephes Math Library.
@@ -501,6 +504,16 @@ const auto lgamma_string = jiterator_stringify(
     return lgamma(a);
   }
 ); // lgamma_string
+
+const auto polygamma_string = zeta_string + jiterator_stringify(
+  template <typename T>
+  T polygamma(T x, int n) {
+    // already blocked if n <= 1
+    const auto one = T{1};
+    return ((n % 2) ? one : -one) * exp(lgamma(static_cast<T>(n) + one)) *
+        zeta<T>(static_cast<T>(n + 1), x);
+  }
+); // polygamma_string
 
 const auto exp2_string = jiterator_stringify(
   template <typename T>
