@@ -1231,8 +1231,8 @@ QuantizerPtr create_subtensor_quantizer(const Tensor& self, bool is_select, int6
   auto zero_points = temp->zero_points();
   if (dim == axis) {
     // Compute scales&zps for sub-tensor
-    scales = scales.slice(0, start, end, step);
-    zero_points = zero_points.slice(0, start, end, step);
+    scales = is_select ? scales.select(0, start) : scales.slice(0, start, end, step);
+    zero_points = is_select ? zero_points.select(0, start) : zero_points.slice(0, start, end, step);
   }
   if (scales.numel() > 1) {
     // Axis only needs to be adjusted if the calling function is select(), since select() reduces
