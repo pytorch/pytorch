@@ -47,7 +47,7 @@ Tensor _inverse_helper_cuda_lib(const Tensor& self);
 Tensor& _linalg_inv_out_helper_cuda_lib(Tensor& result, Tensor& infos_getrf, Tensor& infos_getrs);
 
 // entrance of calculations of `svd` using cusolver gesvdj and gesvdjBatched
-std::tuple<Tensor, Tensor, Tensor> _svd_helper_cuda_lib(const Tensor& self, bool some, bool compute_uv);
+void svd_cusolver(const Tensor& A, const bool full_matrices, const bool compute_uv, const Tensor& U, const Tensor& S, const Tensor& V, const Tensor& info);
 
 // entrance of calculations of `cholesky` using cusolver potrf and potrfBatched
 void cholesky_helper_cusolver(const Tensor& input, bool upper, const Tensor& info);
@@ -61,7 +61,7 @@ Tensor& orgqr_helper_cusolver(Tensor& result, const Tensor& tau);
 void linalg_eigh_cusolver(const Tensor& eigenvalues, const Tensor& eigenvectors, const Tensor& infos, bool upper, bool compute_eigenvectors);
 void lu_solve_looped_cusolver(const Tensor& b, const Tensor& lu, const Tensor& pivots, TransposeType transpose);
 
-void lu_looped_cusolver(const Tensor& self, const Tensor& pivots, const Tensor& infos, bool get_pivots);
+void lu_factor_looped_cusolver(const Tensor& self, const Tensor& pivots, const Tensor& infos, bool get_pivots, const bool use_magma_);
 
 #endif  // USE_CUSOLVER
 

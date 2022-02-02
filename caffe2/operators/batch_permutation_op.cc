@@ -21,11 +21,7 @@ void batch_permutation_loop(
   long numBytes = K * sizeof(float);
   if (forwards) {
 #ifdef _OPENMP
-#if (_OPENMP >= 201307)
-#pragma omp parallel for simd
-#else
 #pragma omp parallel for
-#endif
 #endif
     for (int n = 0; n < N; n++) {
       int origIdx = n * K;
