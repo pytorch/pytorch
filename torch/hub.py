@@ -162,7 +162,7 @@ def _validate_not_a_forked_repo(repo_owner, repo_name, branch):
                      'If it\'s a commit from a forked repo, please call hub.load() with forked repo directly.')
 
 
-def _get_cache_or_reload(github, force_reload, verbose=True, skip_validation=False, trust_repo=None, calling_fn="load"):
+def _get_cache_or_reload(github, force_reload, trust_repo, calling_fn, verbose=True, skip_validation=False):
     # Setup hub_dir to save downloaded files
     hub_dir = get_dir()
     if not os.path.exists(hub_dir):
