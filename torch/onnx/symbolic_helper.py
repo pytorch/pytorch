@@ -134,7 +134,8 @@ def _unpack_list(list_value):
 
 def _unpack_tuple(tuple_value):
     tuple_node = tuple_value.node()
-    assert tuple_node.kind() == "prim::TupleConstruct"
+    if tuple_node.kind() != "prim::TupleConstruct":
+        raise RuntimeError("ONNX symbolic expected node type `prim::TupleConstruct`, got `{}`".format(tuple_node))
     return list(tuple_node.inputs())
 
 # Check if list_value is output from prim::ListConstruct
@@ -192,6 +193,46 @@ def parse_args(*arg_descriptors):
         return wrapper
     return decorator
 
+def quantized_args(*arg_q_descriptors, op_scale=None, op_zero_point=None):
+    def decorator(fn):
+        fn._op_scale = op_scale
+        fn._op_zero_point = op_zero_point
+
+        @wraps(fn)
+        def wrapper(g, *args, **kwargs):
+            _op_scale = fn._op_scale
+            if _op_scale is not None:
+                _op_scale = g.op("Constant", value_t=torch.tensor(_op_scale))
+            _op_zero_point = fn._op_zero_point
+            if _op_zero_point is not None:
+                _op_zero_point = g.op("Constant", value_t=torch.tensor(_op_zero_point))
+
+            # some args may be optional, so the length may be smaller
+            assert len(arg_q_descriptors) >= len(args)
+            get_desc_args = lambda : zip(arg_q_descriptors[:len(args)], args)
+            # Run regular symbolic function if none of the argument is QTensor.
+            if not any([(desc and arg.node().kind() == "prim::TupleConstruct") for desc, arg in get_desc_args()]):
+                return fn(g, *args, **kwargs)
+
+            dequantized_args = []
+            for desc, arg in get_desc_args():
+                if desc:
+                    dequantized_arg, scale, zero_point = _dequantize_helper(g, arg)
+                    dequantized_args.append(dequantized_arg)
+                    if _op_scale is None:
+                        _op_scale = scale
+                    if _op_zero_point is None:
+                        _op_zero_point = zero_point
+                else:
+                    dequantized_args.append(arg)
+            # TODO: only support single output
+            output = fn(g, *dequantized_args, **kwargs)
+
+            assert _op_scale is not None
+            assert _op_zero_point is not None
+            return _quantize_helper(g, output, _op_scale, _op_zero_point)
+        return wrapper
+    return decorator
 
 def _scalar(x):
     """Convert a scalar tensor into a Python value."""
@@ -825,6 +866,28 @@ def _handle_reduce_dim_none(g, self, op_name):
         # set keepdims=1 so that the resulted tensor has the same rank as the input.
         return g.op(op_name, self, keepdims_i=1)
     return g.op(op_name, self, keepdims_i=0)
+
+def _dequantize_helper(g, qtensor, qdtype=None):
+    tensor, scale, zero_point = _unpack_tuple(qtensor)
+    input_qdtype = cast_pytorch_to_onnx[tensor.type().scalarType()]
+    if qdtype is None:
+        if input_qdtype is not None:
+            qdtype = input_qdtype
+        else:
+            qdtype = torch.onnx.TensorProtoDataType.UINT8
+    value = g.op("Cast", tensor, to_i=qdtype)
+    scale = g.op("Cast", scale, to_i=torch.onnx.TensorProtoDataType.FLOAT)
+    zero_point = g.op("Cast", zero_point, to_i=qdtype)
+    return g.op("DequantizeLinear", value, scale, zero_point), scale, zero_point
+
+def _quantize_helper(g, tensor, scale, zero_point):
+    if scale.type().scalarType() != "Float":
+        scale = g.op("Cast", scale, to_i=torch.onnx.TensorProtoDataType.FLOAT)
+
+    if zero_point.type().scalarType() != "Byte" and zero_point.type().scalarType() != "Char":
+        zero_point = g.op("Cast", zero_point, to_i=torch.onnx.TensorProtoDataType.UINT8)
+    output = g.op("QuantizeLinear", tensor, scale, zero_point)
+    return g.op("prim::TupleConstruct", output, scale, zero_point)
 
 # ---------------------------------------------------------------------
 # ONNX operator version

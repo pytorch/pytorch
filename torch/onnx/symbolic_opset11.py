@@ -791,7 +791,8 @@ def narrow(g, input, dim, start, length):
     end = g.op("Add", start, length)
     return _slice_helper(g, input, axes=dim, starts=start, ends=end, dynamic_slice=True)
 
-
+from torch.onnx.symbolic_helper import quantized_args
+@quantized_args(True, False, False)
 @parse_args("v", "i", "i")
 def flatten(g, input, start_dim, end_dim):
     dim = sym_help._get_tensor_rank(input)

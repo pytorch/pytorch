@@ -12,7 +12,7 @@ from functools import partial
 from functools import wraps
 
 import torch.onnx.symbolic_helper as sym_help
-from torch.onnx.symbolic_helper import parse_args, _parse_arg, _unimplemented, ScalarType
+from torch.onnx.symbolic_helper import parse_args, _parse_arg, _unimplemented, ScalarType, quantized_args
 
 from typing import Optional
 from sys import maxsize as maxsize
@@ -920,7 +920,23 @@ def _avg_pool(name, tuple_fn):
                       strides_i=tuple_fn(stride),
                       pads_i=padding)
         return output
-    return symbolic_fn
+
+    sym_fn = symbolic_fn
+
+    def quant_wrapper(g, *args):
+        input = args[0]
+        if input.node().kind() == "prim::TupleConstruct":
+            # input_value, input_scale, input_zero_point = sym_help._unpack_tuple(input)
+            # input = sym_help._dequantize_helper(g, input_value, input_scale, input_zero_point)
+            input, input_scale, input_zero_point = sym_help._dequantize_helper(g, input)
+
+            output = sym_fn(g, input, *args[1:])
+
+            return sym_help._quantize_helper(g, output, input_scale, input_zero_point)
+        else:
+            return sym_fn
+
+    return quant_wrapper
 
 
 avg_pool1d = _avg_pool("avg_pool1d", _single)
@@ -971,7 +987,23 @@ def _adaptive_pool(name, type, tuple_fn, fn=None):
                       kernel_shape_i=tuple_fn(k),
                       strides_i=tuple_fn(k))
         return output
-    return symbolic_fn
+
+    sym_fn = symbolic_fn
+
+    def quant_wrapper(g, *args):
+        input = args[0]
+        if input.node().kind() == "prim::TupleConstruct":
+            # input_value, input_scale, input_zero_point = sym_help._unpack_tuple(input)
+            # input = sym_help._dequantize_helper(g, input_value, input_scale, input_zero_point)
+            input, input_scale, input_zero_point = sym_help._dequantize_helper(g, input)
+
+            output = sym_fn(g, input, *args[1:])
+
+            return sym_help._quantize_helper(g, output, input_scale, input_zero_point)
+        else:
+            return sym_fn(g, *args)
+
+    return quant_wrapper
 
 
 adaptive_avg_pool1d = _adaptive_pool("adaptive_avg_pool1d", "AveragePool", _single)
@@ -1937,6 +1969,8 @@ def hardswish(g, self):
     return g.op("Mul", self, hs)
 
 
+# Fixed scale and zero_point, discovered from aten/src/ATen/native/quantized/cpu/qhardsigmoid.cpp
+@quantized_args(True, op_scale=1.0/256.0, op_zero_point=0)
 @parse_args("v")
 def hardsigmoid(g, self):
     # Set alpha_f to 1 / 6 to make op equivalent to PyTorch's definition of Hardsigmoid.
@@ -2501,6 +2535,7 @@ def erf(g, input):
     return g.op("Erf", input)
 
 
+@quantized_args(True, False, False)
 @parse_args("v", "i", "i")
 def flatten(g, input, start_dim, end_dim):
     dim = sym_help._get_tensor_rank(input)
