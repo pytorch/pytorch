@@ -2606,7 +2606,7 @@ Tensor svd_backward(const Tensor& gU,
   // At this point, at least one of gU, gVh is defined
 
   const bool is_complex = U.is_complex();
-	const auto skew = [](const Tensor& A) { return A - A.mH(); };
+  const auto skew = [](const Tensor& A) { return A - A.mH(); };
   const auto UhgU = gU.defined() ? skew(at::matmul(U.mH(), gU)) : Tensor{};
   const auto VhgV = gVh.defined() ? skew(at::matmul(Vh, gVh.mH())) : Tensor{};
 
