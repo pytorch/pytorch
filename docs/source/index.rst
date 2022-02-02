@@ -69,6 +69,7 @@ Features described in this documentation are classified by release status:
    torch.hub <hub>
    torch.jit <jit>
    torch.linalg <linalg>
+   torch.monitor <monitor>
    torch.special <special>
    torch.overrides
    torch.package <package>

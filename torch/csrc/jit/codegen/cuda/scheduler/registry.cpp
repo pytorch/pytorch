@@ -747,6 +747,11 @@ class ReductionScheduler : public SchedulerEntry {
 
   //! Check if the reduction heuristics apply in given fusion
   static bool canScheduleCompileTime(Fusion* fusion) {
+    auto view_tvs = scheduler_utils::getViewTVs(fusion);
+    if (view_tvs.size() > 0) {
+      return false;
+    }
+
     auto reduction_tvs = scheduler_utils::getReductionTvs(fusion);
 
     if (reduction_tvs.size() == 0) {
@@ -895,6 +900,11 @@ class PersistentKernelScheduler : public SchedulerEntry {
   }
 
   static bool canScheduleCompileTime(Fusion* fusion) {
+    auto view_tvs = scheduler_utils::getViewTVs(fusion);
+    if (view_tvs.size() > 0) {
+      return false;
+    }
+
     auto reduction_tvs = scheduler_utils::getReductionTvs(fusion);
 
     if (reduction_tvs.size() == 0) {
