@@ -226,7 +226,7 @@ class TORCH_API TensorExprKernel {
 
   Tensor convertSymbolicOutputToCorrectStrides(torch::jit::Value* v);
   Tensor convertStaticShapeOutputToCorrectStrides(torch::jit::Value* v);
-  Tensor convertOutputToCorrectStrides(
+  Tensor convertSymbolicOutputToCorrectStrides(
       const std::vector<ExprHandle>& sizes,
       const std::vector<size_t>& sorted_stride_indices_descending,
       const std::vector<ExprPtr>& strides,
