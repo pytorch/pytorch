@@ -26,7 +26,8 @@ using FusionStrategy = std::vector<std::pair<FusionBehavior, size_t>>;
 //   [3,4,5] are observed, then it is assumed that future inputs will have
 //   shapes [a,b,c] and [b,c,d] for some values of a,b,c,d.
 //
-//   In both cases, we also recompile on new striding behavior, device, or dtype.
+//   In both cases, we also recompile on new striding behavior, device, or
+//   dtype.
 //
 // Behavior - fallback functions & depth:
 //   When an input doesn't match the format required by the specialized compiled
@@ -56,7 +57,6 @@ TORCH_API FusionStrategy getFusionStrategy();
 // returns previous strategy
 TORCH_API FusionStrategy setFusionStrategy(FusionStrategy& fusion_strategy);
 
-
 struct TORCH_API ProfilingGraphExecutorImpl : public GraphExecutorImplBase {
   ProfilingGraphExecutorImpl(
       const std::shared_ptr<Graph>& graph,
@@ -75,7 +75,7 @@ struct TORCH_API ProfilingGraphExecutorImpl : public GraphExecutorImplBase {
     optimized_plan_.reset();
     // prevent memory leaks
     fallback_functions_.clear();
-  remaining_bailout_depth_.reset();
+    remaining_bailout_depth_.reset();
   }
 
   bool isOptimized() const override {
@@ -87,7 +87,9 @@ struct TORCH_API ProfilingGraphExecutorImpl : public GraphExecutorImplBase {
       Stack& stack,
       size_t remaining_bailout_depth);
   void runProfilingInsensitiveOptimizations(std::shared_ptr<Graph>& graph);
-  void runProfilingOptimizations(std::shared_ptr<Graph>& graph, size_t remaining_depth);
+  void runProfilingOptimizations(
+      std::shared_ptr<Graph>& graph,
+      size_t remaining_depth);
   void replaceFallbackGraphWithFallbackFunction(Block* b);
   std::unique_ptr<ProfilingRecord> pr_;
   c10::optional<ExecutionPlan>
