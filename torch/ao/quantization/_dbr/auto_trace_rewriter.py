@@ -100,6 +100,14 @@ class AllModuleTracer(torch.fx.Tracer):
         if target == operator.mul:
             target = torch.mul
 
+        # TODO(future PR): move this into mappings
+        if target == 'add':
+            target = torch.add
+            kind = 'call_function'
+        if target == 'mul':
+            target = torch.mul
+            kind = 'call_function'
+
         dtype_to_use = torch.float
 
         if kind == 'call_function' or kind == 'call_method':
@@ -139,11 +147,12 @@ class AllModuleTracer(torch.fx.Tracer):
 
                 # TODO move op-specific logic out of here
                 if target is torch.ops.quantized.linear:
-                    new_args = [*args]
-                    new_args.append(additional_kwargs['scale'])
-                    new_args.append(additional_kwargs['zero_point'])
-                    args = tuple(new_args)
-                    del kwargs['bias']
+                    def linear_rewrite_args(input, weight, bias=None):
+                        return (input, weight,
+                                additional_kwargs['scale'],
+                                additional_kwargs['zero_point'])
+                    args = linear_rewrite_args(*args, **kwargs)
+                    kwargs = {}
                 elif old_target != F.conv2d or target is F.conv2d:
                     kwargs.update(**additional_kwargs)
                 else:

@@ -53,7 +53,7 @@ Usage 2: Launching 2 echo workers as a binary
          entrypoint="echo",
          log_dir="/tmp/foobar",
          args={0: "hello", 1: "world"},
-         redirects={1: Std:OUT},
+         redirects={1: Std.OUT},
         )
 
 Just like ``torch.multiprocessing``, the return value of the function
