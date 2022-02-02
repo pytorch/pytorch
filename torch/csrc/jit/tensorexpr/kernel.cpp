@@ -918,6 +918,17 @@ ExprHandle TensorExprKernel::getStrideArg(
   return it->second;
 }
 
+
+std::vector<torch::jit::StrideInput>& TensorExprKernel::getInputStrideDesc(const torch::jit::Value * value) {
+  for (size_t i: c10::irange(graph_->inputs().size())) {
+    if (value == graph_->inputs().at(i)) {
+      TORCH_INTERNAL_ASSERT(sym_stride_inputs_.count(i));
+      return sym_stride_inputs_[i];
+    }
+  }
+  TORCH_INTERNAL_ASSERT(false);
+}
+
 std::vector<ExprHandle> TensorExprKernel::getInputStrides(
     const torch::jit::Value* input,
     const std::vector<ExprHandle>& inputTensorDims) {
@@ -933,8 +944,7 @@ std::vector<ExprHandle> TensorExprKernel::getInputStrides(
   }
 
   size_t rank = inputTensorDims.size();
-  TORCH_INTERNAL_ASSERT(symbolic_strides_.count(input));
-  std::vector<StrideInput>& stride_input = symbolic_strides_[input];
+  std::vector<StrideInput>& stride_input = getInputStrideDesc(input);
   if (stride_input.size() == 1 &&
       (stride_input[0] == StrideInput::TENSOR_CONT_CHANNELS_LAST ||
        stride_input[0] == StrideInput::TENSOR_CONT)) {
@@ -999,9 +1009,9 @@ Tensor TensorExprKernel::bindInput(const torch::jit::Value* input) {
       auto tt = input->type()->cast<TensorType>();
       bool contiguous_concrete_tensor =
           (input->isCompleteTensor() && isContiguous(input));
-      bool contiguous_strided_tensor = symbolic_strides_.count(input) &&
-          symbolic_strides_[input].size() == 1 &&
-          symbolic_strides_[input][0] == torch::jit::StrideInput::TENSOR_CONT;
+      auto desc = getInputStrideDesc(input);
+      bool contiguous_strided_tensor = desc.size() == 1 &&
+          desc[0] == torch::jit::StrideInput::TENSOR_CONT;
 
       // We don't need to copy the input if:
       //  1) it is not an output AND
@@ -1382,8 +1392,7 @@ BlockPtr TensorExprKernel::bindAllInputs() {
       if (!tt) {
         continue;
       }
-      TORCH_INTERNAL_ASSERT(symbolic_strides_.count(input));
-      auto symbolic_stride = symbolic_strides_[input];
+      auto symbolic_stride = getInputStrideDesc(input);
       for (size_t j = 0; j < symbolic_stride.size(); ++j) {
         if (symbolic_stride[j] == torch::jit::StrideInput::S_AS_ARG) {
           VarHandle v("v" + input_name_map_[input], kLong);
@@ -1492,7 +1501,8 @@ void TensorExprKernel::compile() {
   }
 
   // Move output operands from `bufs_` to `bufOutputs_`
-  for (auto& output : graph_->outputs()) {
+  for (auto i : c10::irange(graph_->outputs().size())) {
+    auto& output = graph_->outputs().at(i);
     if (!bufs_.count(output)) {
       throw malformed_input("cannot find output Tensor");
     }
@@ -1513,10 +1523,9 @@ void TensorExprKernel::compile() {
     if (has_symbolic_shapes_) {
       auto sizes = sizesFromSymbolicShape(tt->symbolic_sizes());
       tensorOutputSymbolicSizes_.push_back(sizes);
-      TORCH_INTERNAL_ASSERT(symbolic_strides_.count(output));
-      auto stride_desc = symbolic_strides_[output];
-      TORCH_INTERNAL_ASSERT(stride_desc.size() == 1);
-      tensorOutputStrideDesc_.push_back(stride_desc[0]);
+      TORCH_INTERNAL_ASSERT(sym_stride_outputs_.count(i));
+      auto stride_desc = sym_stride_outputs_[i];
+      tensorOutputStrideDesc_.push_back(stride_desc);
       Tensor properly_strided_output =
           convertSymbolicOutputToCorrectStrides(output);
       if (properly_strided_output.stmt()) {
@@ -1587,16 +1596,16 @@ TensorExprKernel::TensorExprKernel(
     std::unordered_map<c10::Symbol, NNCLoweringFunction> custom_lowerings,
     std::vector<int64_t> symbolic_shape_inputs,
     bool pre_alloc /*= false*/,
-    std::unordered_map<
-        const torch::jit::Value*,
-        std::vector<torch::jit::StrideInput>> symbolic_strides)
+    std::unordered_map<size_t, std::vector<torch::jit::StrideInput>> sym_stride_inputs,
+    std::unordered_map<size_t, torch::jit::StrideInput> sym_stride_outputs)
     : graph_(subgraph),
       code_(subgraph, ""),
       symbolic_shape_inputs_(std::move(symbolic_shape_inputs)),
       custom_lowerings_(std::move(custom_lowerings)),
       pre_alloc_(pre_alloc),
       kernel_func_name_(kernel_func_name),
-      symbolic_strides_(std::move(symbolic_strides)) {
+      sym_stride_inputs_(std::move(sym_stride_inputs)),
+      sym_stride_outputs_(std::move(sym_stride_outputs)) {
   allow_fallback_ = fallbackAllowed();
 
   if (!allow_fallback_) {

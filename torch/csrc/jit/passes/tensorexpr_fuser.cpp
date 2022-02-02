@@ -1290,19 +1290,21 @@ Operation createTensorExprOp(const Node* node) {
     }
     striding_inputs.push_back(input_desc);
   }
-  std::unordered_map<const Value*, std::vector<StrideInput>> stride_map;
+  std::unordered_map<size_t, std::vector<StrideInput>> sym_stride_inputs;
   size_t index = 0;
-  for (Value* v : subgraph->inputs()) {
+  for (size_t input_i : c10::irange(subgraph->inputs().size())) {
+    Value *v = subgraph->inputs().at(input_i);
     if (!v->type()->cast<TensorType>()) {
       continue;
     }
-    stride_map[v] = striding_inputs[index];
+    sym_stride_inputs[input_i] = striding_inputs[index];
     index++;
   }
   std::vector<std::string> output_desc =
-      node->ival(attr::striding_outputs_desc).to<std::vector<std::string>>();
+    node->ival(attr::striding_outputs_desc).to<std::vector<std::string>>();
+  std::unordered_map<size_t, StrideInput> sym_stride_outputs;
   for (size_t i = 0; i < subgraph->outputs().size(); ++i) {
-    stride_map[subgraph->outputs().at(i)] = {
+    sym_stride_outputs[i] = {
         strideInputFromString(output_desc.at(i))};
   }
 
@@ -1312,7 +1314,8 @@ Operation createTensorExprOp(const Node* node) {
           custom_lowerings,
           sym_shapes,
           /*pre_alloc*/ false,
-          stride_map);
+          sym_stride_inputs,
+          sym_stride_outputs);
 
   auto num_subgraph_inputs = subgraph->inputs().size();
   return [kernel, num_subgraph_inputs, allow_stack_outputs](Stack& stack) {

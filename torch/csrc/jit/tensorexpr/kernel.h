@@ -124,9 +124,8 @@ class TORCH_API TensorExprKernel {
           {},
       std::vector<int64_t> symbolic_shape_inputs = {},
       bool pre_alloc = false,
-      std::unordered_map<
-          const torch::jit::Value*,
-          std::vector<torch::jit::StrideInput>> symbolic_strides = {});
+      std::unordered_map<size_t, std::vector<torch::jit::StrideInput>> sym_stride_inputs = {},
+      std::unordered_map<size_t, torch::jit::StrideInput> sym_stride_outputs = {});
 
   explicit TensorExprKernel(
       const std::shared_ptr<Graph>& subgraph,
@@ -134,16 +133,16 @@ class TORCH_API TensorExprKernel {
           {},
       std::vector<int64_t> symbolic_shape_inputs = {},
       bool pre_alloc = false,
-      std::unordered_map<
-          const torch::jit::Value*,
-          std::vector<torch::jit::StrideInput>> symbolic_strides = {})
+      std::unordered_map<size_t, std::vector<torch::jit::StrideInput>> sym_stride_inputs = {},
+      std::unordered_map<size_t, torch::jit::StrideInput> sym_stride_outputs = {})
       : TensorExprKernel(
             subgraph,
             SubgraphUtils::generateNameForGraph(subgraph),
             custom_lowerings,
             symbolic_shape_inputs,
             pre_alloc,
-            symbolic_strides) {}
+            sym_stride_inputs,
+            sym_stride_outputs) {}
 
   void run(Stack& stack);
   void runFast(
@@ -271,6 +270,7 @@ class TORCH_API TensorExprKernel {
   std::vector<ExprHandle> getInputStrides(
       const torch::jit::Value* input,
       const std::vector<ExprHandle>& inputTensorDims);
+  std::vector<torch::jit::StrideInput>& getInputStrideDesc(const torch::jit::Value * value);
 
   int64_t nInputs_ = 0;
   int64_t nOutputs_ = 0;
@@ -319,10 +319,8 @@ class TORCH_API TensorExprKernel {
   // map from <input index, tensor dimension> to stride as arg VarHandle
   std::unordered_map<std::pair<size_t, size_t>, VarHandle, SmallSizeTPairHash>
       strideArgToVar_;
-  std::unordered_map<
-      const torch::jit::Value*,
-      std::vector<torch::jit::StrideInput>>
-      symbolic_strides_;
+  std::unordered_map<size_t, std::vector<torch::jit::StrideInput>> sym_stride_inputs_;
+  std::unordered_map<size_t, torch::jit::StrideInput> sym_stride_outputs_;
 };
 
 TORCH_API int& getTECudaPointwiseLoopLevels();
