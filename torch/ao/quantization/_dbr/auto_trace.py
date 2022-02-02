@@ -13,6 +13,7 @@ from .utils import (
     HookType,
     get_torch_function_hook_type,
     get_module_hook_type,
+    OpQuantizeabilityType,
 )
 from .model_utils import (
     pack_weights_for_functionals,
@@ -124,10 +125,9 @@ def add_auto_observation(
                     qstate.validate_cur_op(func)
                 # run "before" hook
                 if first_call:
-                    is_quantizeable_op = True
                     args, kwargs = qstate.first_call_op_prepare_before_hook(
                         func, args, kwargs, qtensor_id, fqn, parent_module,
-                        is_quantizeable_op)
+                        OpQuantizeabilityType.QUANTIZEABLE)
                 else:
                     args, kwargs = qstate.op_prepare_before_hook(
                         func, args, kwargs)
@@ -135,32 +135,34 @@ def add_auto_observation(
                 output = super().__torch_function__(func, types, args, kwargs)
                 # run "after" hook
                 if first_call:
-                    is_quantizeable_op = True
                     output = qstate.first_call_op_prepare_after_hook(
-                        func, output, args, qtensor_id, is_quantizeable_op)
+                        func, output, args, qtensor_id,
+                        OpQuantizeabilityType.QUANTIZEABLE)
                 else:
                     output = qstate.op_prepare_after_hook(
                         func, output, args, global_op_idx)
                 qstate.mark_cur_op_complete(func)
             else:
+                # Hook type is not HookType.OP_HOOKS, if first_call is True we
+                # record the DAG of non-quantizeable ops.
+
                 if first_call:
                     qstate = getattr(parent_module, '_auto_quant_state', None)
                     if qstate:
                         fqn = module_id_to_fqn.get(id(parent_module), None) \
                             if parent_module else None
-                        is_quantizeable_op = False
                         args, kwargs = qstate.first_call_op_prepare_before_hook(
                             func, args, kwargs, qtensor_id, fqn, parent_module,
-                            is_quantizeable_op)
+                            OpQuantizeabilityType.NOT_QUANTIZEABLE)
 
                 output = super().__torch_function__(func, types, args, kwargs)
 
                 if first_call:
                     qstate = getattr(parent_module, '_auto_quant_state', None)
                     if qstate:
-                        is_quantizeable_op = False
                         output = qstate.first_call_op_prepare_after_hook(
-                            func, output, args, qtensor_id, is_quantizeable_op)
+                            func, output, args, qtensor_id,
+                            OpQuantizeabilityType.NOT_QUANTIZEABLE)
 
             # TODO: is this right? Don't really understand this
             if output is NotImplemented:
@@ -247,13 +249,12 @@ def add_auto_observation(
                         global_disable_torch_function_override = True
 
                         if first_call:
-                            is_quantizeable_op = True
                             # mypy ignore is used instead of assert because this
                             # runs on every forward and assert has a performance cost
                             args, kwargs = parent_qstate.first_call_op_prepare_before_hook(
                                 cur_module, args, kwargs, qtensor_id,
                                 fqn, cur_module,  # type: ignore[arg-type]
-                                is_quantizeable_op)
+                                OpQuantizeabilityType.QUANTIZEABLE)
                         else:
                             # mypy ignore is used instead of assert because this
                             # runs on every forward and assert has a performance cost
@@ -269,10 +270,9 @@ def add_auto_observation(
 
                         # after hooks
                         if first_call:
-                            is_quantizeable_op = True
                             output = parent_qstate.first_call_op_prepare_after_hook(
                                 cur_module, output, args, qtensor_id,
-                                is_quantizeable_op)
+                                OpQuantizeabilityType.QUANTIZEABLE)
                         else:
                             output = parent_qstate.op_prepare_after_hook(
                                 cur_module, output, args, global_op_idx)
@@ -301,11 +301,11 @@ def add_auto_observation(
                             parent_qstate_fc = getattr(
                                 parent_module, '_auto_quant_state', None)
                             if parent_qstate_fc:
-                                is_quantizeable_op = False
                                 args, kwargs = \
                                     parent_qstate_fc.first_call_op_prepare_before_hook(
                                         cur_module, args, kwargs, qtensor_id, fqn,
-                                        cur_module, is_quantizeable_op)
+                                        cur_module,
+                                        OpQuantizeabilityType.NOT_QUANTIZEABLE)
 
                         output = orig_module_call(self, *args, **kwargs)
                         # if this fp32 was inplace, make sure to set the output dtype
@@ -317,11 +317,10 @@ def add_auto_observation(
                             parent_qstate_fc = getattr(
                                 parent_module, '_auto_quant_state', None)
                             if parent_qstate_fc:
-                                is_quantizeable_op = False
                                 output = \
                                     parent_qstate_fc.first_call_op_prepare_after_hook(
                                         cur_module, output, args, qtensor_id,
-                                        is_quantizeable_op)
+                                        OpQuantizeabilityType.NOT_QUANTIZEABLE)
 
                     else:
                         output = orig_module_call(self, *args, **kwargs)
