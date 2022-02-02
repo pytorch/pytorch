@@ -387,6 +387,7 @@ TORCH_LIBRARY_FRAGMENT(static_runtime, m) {
   m.def(torch::schema(
       "static_runtime::select_tensor(Tensor(a) a, Tensor(b) b, bool use_b) -> Tensor(a|b)",
       c10::AliasAnalysisKind::FROM_SCHEMA));
+  m.def(torch::schema("static_runtime::create_owned_ref(...) -> ..."));
 }
 
 void FuseSignLog1P(std::shared_ptr<torch::jit::Graph>& graph) {
@@ -924,6 +925,46 @@ void UseVariadicGroupedAccessor(const std::shared_ptr<Graph>& graph) {
       graph,
       fromQualString("grouped_accessor::grouped_accessor_op_v2"),
       fromQualString("static_runtime::variadic_grouped_accessor_op_v2"));
+}
+
+namespace {
+
+void CreateOwnedRefsForSpecialValuesHelper(Graph& graph, Block* block) {
+  for (auto* node : block->nodes()) {
+    for (auto* sub_block : node->blocks()) {
+      CreateOwnedRefsForSpecialValuesHelper(graph, sub_block);
+    }
+  }
+
+  auto outputs = block->outputs();
+  for (const auto i : c10::irange(outputs.size())) {
+    auto* output = outputs[i];
+
+    if (output->type()->kind() == c10::TypeKind::NoneType) {
+      // No need to create owned refs of NoneType since moving
+      // from None will have no effect
+      continue;
+    }
+
+    if (toIValue(output).has_value() ||
+        // If the output's owning block is not this one, it's from an outer
+        // scope
+        output->node()->owningBlock() != block) {
+      auto* create_owned_ref_node =
+          graph.create(fromQualString("static_runtime::create_owned_ref"));
+      create_owned_ref_node->addInput(output);
+      create_owned_ref_node->output()->copyMetadata(output);
+
+      block->appendNode(create_owned_ref_node);
+      block->replaceOutput(i, create_owned_ref_node->output());
+    }
+  }
+}
+
+} // namespace
+
+void CreateOwnedRefsForSpecialValues(Graph& graph) {
+  CreateOwnedRefsForSpecialValuesHelper(graph, graph.block());
 }
 
 } // namespace jit

@@ -203,6 +203,15 @@ void PrepareGraphForStaticModule(
     std::vector<IValue> sample_inputs) {
   TORCH_CHECK(canEnableStaticRuntime(graph));
   OptimizeGraph(graph, opts, std::move(sample_inputs));
+
+  // Static runtime moves its outputs out of the runtime
+  // by default. In some rare cases, this is not actually safe to
+  // do - for example, if the value is a constant, static runtime
+  // needs to hold onto a copy. Rather than adding special logic
+  // to handle this rare case, we use this pass to detect it and
+  // create an owned reference that can be safely moved out of the
+  // runtime.
+  CreateOwnedRefsForSpecialValues(*graph);
 }
 
 std::pair<std::shared_ptr<Graph>, c10::optional<Module>> PrepareForStaticModule(
@@ -1826,11 +1835,12 @@ static bool checkNoMemoryOverlap(const at::Tensor& a, const at::Tensor& b) {
 }
 
 bool ProcessedNode::verify_no_memory_overlap(bool force_check) const {
-  const static std::array<c10::Symbol, 4> special_case_ops = {
+  const static std::array<c10::Symbol, 5> special_case_ops = {
       fromQualString("prim::TypeCheck"),
       fromQualString("static_runtime::select_tensor"),
       fromQualString("static_runtime::VarTupleUnpack"),
-      fromQualString("static_runtime::dict_unpack")};
+      fromQualString("static_runtime::dict_unpack"),
+      fromQualString("static_runtime::create_owned_ref")};
   if (!force_check &&
       std::find(
           begin(special_case_ops), end(special_case_ops), node()->kind()) !=

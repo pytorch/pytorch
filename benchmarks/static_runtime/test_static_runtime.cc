@@ -2432,3 +2432,12 @@ TEST(StaticRuntime, Int) {
   std::vector<IValue> args{at::tensor({3.14})};
   testStaticRuntime(src, args);
 }
+
+TEST(StaticRuntime, ReturnConstant) {
+  const auto src = R"JIT(
+    def forward(self):
+        return 1
+  )JIT";
+
+  testStaticRuntime(src, {});
+}
