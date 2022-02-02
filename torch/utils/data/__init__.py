@@ -11,12 +11,12 @@ from torch.utils.data.sampler import (
 from torch.utils.data.dataset import (
     ChainDataset,
     ConcatDataset,
+    DFIterDataPipe,
     DataChunk,
     Dataset,
-    Dataset as MapDataPipe,
-    DFIterDataPipe,
-    IterableDataset,
     IterDataPipe,
+    IterableDataset,
+    MapDataPipe,
     Subset,
     TensorDataset,
     random_split,
@@ -43,6 +43,8 @@ from torch.utils.data import communication
 __all__ = ['BatchSampler',
            'ChainDataset',
            'ConcatDataset',
+           'DFIterDataPipe',
+           'DataChunk',
            'DataLoader',
            'DataLoader2',
            'Dataset',
@@ -72,8 +74,3 @@ __all__ = ['BatchSampler',
 
 # Please keep this list sorted
 assert __all__ == sorted(__all__)
-
-
-################################################################################
-# import subpackage
-################################################################################
