@@ -1765,12 +1765,7 @@ ProcessedNode::ProcessedNode(
     : node_(node),
       fn_(fn),
       inputs_(std::move(inputs)),
-      outputs_offset_(outputs_offset)
-#ifndef PYTORCH_DISABLE_PER_OP_PROFILING
-      ,
-      op_name_(node->kind().toQualString())
-#endif
-{
+      outputs_offset_(outputs_offset) {
   TORCH_CHECK(
       node->outputs().size() < (1 << (sizeof(num_outputs_) * 8)),
       node->outputs().size(),

@@ -107,12 +107,12 @@ Tensor sparse_broadcast_to(const Tensor& self, IntArrayRef size) {
   int64_t nnz_factor = 1;
   int64_t min_broadcast_dim = (sparse_extra_ndim > 0 ? 0: -1);
   int64_t max_unchanged_dim = -1;
-  for (int64_t i=0; i<sparse_extra_ndim; i++) {
+  for (const auto i : c10::irange(sparse_extra_ndim)) {
     auto d = size[i];
     nnz_factor *= d;
     broadcast_sizes.emplace_back(d);
   }
-  for (int64_t i=0; i<self.sparse_dim(); i++) {
+  for (const auto i : c10::irange(self.sparse_dim())) {
     auto d = size[sparse_extra_ndim + i];
     if (self.size(i) != d) {
       TORCH_CHECK(self.size(i) == 1,
@@ -136,7 +136,7 @@ Tensor sparse_broadcast_to(const Tensor& self, IntArrayRef size) {
   bool is_coalesced = self.dim()==0 || (self.is_coalesced() && (max_unchanged_dim < min_broadcast_dim || min_broadcast_dim == -1));
 
   broadcast_dense_sizes.emplace_back(nnz);
-  for (int64_t i=0; i<self.dense_dim(); i++) {
+  for (const auto i : c10::irange(self.dense_dim())) {
     broadcast_dense_sizes.emplace_back(size[sparse_extra_ndim + self.sparse_dim() + i]);
   }
 
@@ -152,7 +152,7 @@ Tensor sparse_broadcast_to(const Tensor& self, IntArrayRef size) {
     // auxilary arange tensors
     Tensor broadcast_indices = at::native::new_ones(indices, broadcast_sizes).nonzero().transpose(0, 1).tile(nnz);
     new_indices.narrow(0, 0, sparse_extra_ndim).copy_(broadcast_indices.narrow(0, 0, sparse_extra_ndim));
-    for (size_t i=0; i<broadcast_dims.size(); i++) {
+    for (const auto i : c10::irange(broadcast_dims.size())) {
       int64_t j=broadcast_dims[i];
       new_indices.select(0, sparse_extra_ndim + j).copy_(broadcast_indices.select(0, sparse_extra_ndim + i));
     }
@@ -1287,7 +1287,7 @@ Tensor index_select_sparse(const Tensor& self, int64_t dim, const Tensor& index)
     std::vector<int64_t> zindices;
     std::vector<int64_t> iindices;
     int64_t new_nnz = 0;
-    for (int64_t i = 0; i < new_sizes[dim]; i++) {
+    for (const auto i : c10::irange(new_sizes[dim])) {
       int64_t idx = cpu_index_ptr[i];
       if (idx < -size || idx >= size) {
         TORCH_CHECK_INDEX(false, "index_select(): index contains ", idx, " that is out of range for tensor of size ",
@@ -1296,7 +1296,7 @@ Tensor index_select_sparse(const Tensor& self, int64_t dim, const Tensor& index)
       if (idx < 0) {
         idx += size;
       }
-      for (int64_t j = 0; j < nnz; j++) {
+      for (const auto j : c10::irange(nnz)) {
         int64_t jdx = cpu_dim_indices_ptr[j];
         if (idx == jdx) {
           new_nnz++;

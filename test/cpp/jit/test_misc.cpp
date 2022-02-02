@@ -2865,11 +2865,9 @@ TEST_F(Composed, ComposedOp) {
   auto ref1 = a * (a * b);
   auto ref2 = a * ref1;
   WithCPUFuser g(true);
-  bool dynamic_enabled = tensorExprFuserEnabled();
-  bool fusable_on_device = torch::jit::tensorexpr::getTEMustUseLLVMOnCPU();
+   bool fusable_on_device = torch::jit::tensorexpr::getTEMustUseLLVMOnCPU();
   torch::jit::tensorexpr::getTEMustUseLLVMOnCPU() = false;
-  setTensorExprDynamicShapeFusionEnabled(true);
-  FuseTensorExprs(graph, /*min_group_size*/ 2, /*add_composed_op*/ true);
+  FuseTensorExprs(graph, /*min_group_size*/2, /*add_composed_op*/true, /*fuse_to_dynamic_shapes*/true);
   Code code(graph, "");
   InterpreterState interpreter{code};
   std::vector<IValue> stack = {a, b};
@@ -2892,7 +2890,6 @@ TEST_F(Composed, ComposedOp) {
   // to the second output. inp_2 is on the top corresponds to first output
   ASSERT_TRUE(at::allclose(inp_1, ref2));
   ASSERT_TRUE(at::allclose(inp_2, ref1));
-  setTensorExprDynamicShapeFusionEnabled(dynamic_enabled);
   torch::jit::tensorexpr::getTEMustUseLLVMOnCPU() = fusable_on_device;
 #endif
 }

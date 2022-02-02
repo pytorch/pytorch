@@ -130,7 +130,7 @@ void fbgemm_spmdm_report_error_(
     int64_t N,
     const index_t* offsets,
     const index_t* indices) {
-  for (int m = 0; m < output_size; ++m) {
+  for (const auto m : c10::irange(output_size)) {
     for (index_t i = offsets[m]; i < offsets[m + 1]; ++i) {
       TORCH_CHECK(i < index_size);
       index_t idx = indices[i];
@@ -899,7 +899,7 @@ static Tensor _embedding_bag_dense_backward_cpu_max(
   auto nonempty_max_indices = max_indices.index_select(0, bag_size.nonzero().view(-1));
   auto nonempty_grad = grad.index_select(0, bag_size.nonzero().view(-1));
 
-  for (int64_t dim = 0; dim < grad.sizes()[1]; dim++) {
+  for (const auto dim : c10::irange(grad.sizes()[1])) {
     index_grad_weight.select(1, dim).index_add_(
       0, nonempty_max_indices.select(1, dim), nonempty_grad.select(1, dim));
   }
