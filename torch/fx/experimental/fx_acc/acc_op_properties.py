@@ -6,6 +6,17 @@ import torch
 import torch.fx
 
 class AccOpProperty(Flag):
+    """
+    A collection of static properties for acc_ops.
+
+    * pointwise - op commutes with data restructuring ops such as reshape,
+        transpose, permute. e.g. op(reshape(x)) == reshape(op(x)).
+        Alternatively, for tensor x = (x1, x2, ...), there exists a scalar
+        function f such that op(x) = (f(x1), f(x2), ...).
+    * quantized - op expects quantized inputs and return quantized outputs
+    * unary - op has exactly one graph dependent input. e.g. relu,
+        dequantize, sum
+    """
     pointwise = auto()
     quantized = auto()
     unary = auto()

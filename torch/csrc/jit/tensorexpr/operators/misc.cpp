@@ -37,6 +37,12 @@ ExprHandle promoteToDtype(ExprHandle e, ScalarType dt) {
     break;
     AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, TYPE_CASE);
 #undef TYPE_CASE
+    case ScalarType::QUInt8:
+      e = cast<c10::quint8>(e);
+      break;
+    case ScalarType::QInt8:
+      e = cast<c10::qint8>(e);
+      break;
     default:
       throw unsupported_dtype();
   }
@@ -254,6 +260,13 @@ ExprHandle tensorOrConstant(
     const std::vector<ExprHandle>& axes) {
   if (auto b = c10::get_if<BufHandle>(&v)) {
     return broadcast(*b, axes);
+  }
+  return constant(v);
+}
+
+ExprHandle scalarOrConstant(const ArgValue& v) {
+  if (auto vh = c10::get_if<VarHandle>(&v)) {
+    return *vh;
   }
   return constant(v);
 }
@@ -623,8 +636,8 @@ Tensor computeCat(
         std::vector<ExprHandle> newAxes(axes.begin(), axes.end());
         ExprHandle load = promoteToDtype(
             tensorOrConstant(nonEmptyInputs[0], newAxes), highType);
-        auto offset = *intValue(nonEmptyInputs[0].node()->dim(dim));
-        newAxes[dim] = newAxes[dim] - ExprHandle(immLike(newAxes[dim], offset));
+        auto offset = ExprHandle(nonEmptyInputs[0].node()->dim(dim));
+        newAxes[dim] = newAxes[dim] - offset;
 
         for (size_t ii = 1; ii < nonEmptyInputs.size(); ++ii) {
           auto input = nonEmptyInputs[ii];
@@ -633,8 +646,8 @@ Tensor computeCat(
               load,
               promoteToDtype(tensorOrConstant(input, newAxes), highType));
 
-          offset += *intValue(input.node()->dim(dim));
-          newAxes[dim] = axes[dim] - ExprHandle(immLike(axes[dim], offset));
+          offset = offset + ExprHandle(input.node()->dim(dim));
+          newAxes[dim] = axes[dim] - offset;
         }
 
         return load;

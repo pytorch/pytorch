@@ -1,5 +1,4 @@
 #pragma once
-#include <ATen/ATen.h>
 #include <ATen/core/ivalue.h>
 #include <torch/csrc/jit/frontend/source_range.h>
 #include <torch/csrc/jit/ir/constants.h>

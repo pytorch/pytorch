@@ -1208,6 +1208,16 @@ class TestTensorCreation(TestCase):
         d = torch.tensor((2, 3), device=device, dtype=torch.double)
         self.assertRaises(RuntimeError, lambda: torch.zeros((2, 3), device=device, dtype=torch.float32, out=d))
 
+    # FIXME: Create an OpInfo-based tensor creation method test that verifies this for all tensor
+    #   creation methods and verify all dtypes and layouts
+    @dtypes(torch.bool, torch.uint8, torch.int16, torch.int64, torch.float16, torch.float32, torch.complex64)
+    def test_zeros_dtype_layout_device_match(self, device, dtype):
+        layout = torch.strided
+        t = torch.zeros((2, 3), device=device, dtype=dtype, layout=layout)
+        self.assertIs(dtype, t.dtype)
+        self.assertIs(layout, t.layout)
+        self.assertEqual(torch.device(device), t.device)
+
     # TODO: update to work on CUDA, too
     @onlyCPU
     def test_trilu_indices(self, device):
@@ -2726,17 +2736,13 @@ class TestTensorCreation(TestCase):
             self.assertEqual(t[0], a[0])
             self.assertEqual(t[steps - 1], a[steps - 1])
 
-    def _linspace_logspace_warning_helper(self, op, device, dtype):
+    def _logspace_warning_helper(self, op, device, dtype):
         with self.assertWarnsOnceRegex(UserWarning, "Not providing a value for .+"):
             op(0, 10, device=device, dtype=dtype)
 
     @dtypes(torch.float)
-    def test_linspace_steps_warning(self, device, dtype):
-        self._linspace_logspace_warning_helper(torch.linspace, device, dtype)
-
-    @dtypes(torch.float)
     def test_logspace_steps_warning(self, device, dtype):
-        self._linspace_logspace_warning_helper(torch.logspace, device, dtype)
+        self._logspace_warning_helper(torch.logspace, device, dtype)
 
     @onlyCUDA
     @largeTensorTest('16GB')
@@ -2941,6 +2947,9 @@ class TestTensorCreation(TestCase):
                          torch.zeros(1, device=device, dtype=dtype), atol=0, rtol=0)
         # steps = 0
         self.assertEqual(torch.linspace(0, 1, 0, device=device, dtype=dtype).numel(), 0, atol=0, rtol=0)
+
+        # steps not provided
+        self.assertRaises(TypeError, lambda: torch.linspace(0, 1, device=device, dtype=dtype))
 
         if dtype == torch.float:
             # passed dtype can't be safely casted to inferred dtype
