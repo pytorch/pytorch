@@ -144,7 +144,8 @@ struct ProfilerLegacyThreadLocalState : public ProfilerThreadLocalStateBase {
   void pushRange(
       const at::RecordFunction& fn,
       const bool record_cuda,
-      std::vector<std::vector<int64_t>>&& shapes = {});
+      std::vector<std::vector<int64_t>>&& shapes = {},
+      std::vector<int64_t>&& seq_ids = {});
 
   void popRange(const at::RecordFunction& fn, const bool record_cuda);
 
@@ -391,6 +392,7 @@ void pushProfilingCallbacksLegacy() {
         state_ptr->popRange(fn, record_cuda);
       })
     .needsInputs(registration_state_ptr->config().report_input_shapes)
+    .needsOutputs(registration_state_ptr->config().report_input_shapes)
     .needsIds(true));
   registration_state_ptr->setCallbackHandle(handle);
 }

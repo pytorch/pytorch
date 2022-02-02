@@ -624,6 +624,7 @@ void pushProfilingCallbacks(const std::unordered_set<at::RecordScope>& scopes) {
             torch::profiler::impl::kineto::popCorrelationId();
           })
           .needsInputs(registration_state_ptr->config().report_input_shapes)
+          .needsOutputs(registration_state_ptr->config().report_input_shapes)
           .needsIds(true)
           .scopes(scopes));
   registration_state_ptr->setCallbackHandle(handle);

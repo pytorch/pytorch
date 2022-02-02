@@ -127,6 +127,9 @@ struct TORCH_API RecordFunction {
   RecordFunction(const RecordFunction&) = delete;
   RecordFunction& operator=(const RecordFunction&) = delete;
 
+  void update_output_tensor_tracking(void);
+  void check_input_mapping(void);
+
   const char* name() const {
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(state_, "Called name() on inactive RecordFunction");
     return state_->name_.c_str();
@@ -150,11 +153,19 @@ struct TORCH_API RecordFunction {
   void setOutputs(std::vector<c10::IValue>&& outputs) {
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(state_, "Called setOutputs() on inactive RecordFunction");
     state_->outputs_ = std::move(outputs);
+    int num_outputs = state_->outputs_.size();
+    state_->output_dims_.reserve(num_outputs);
+    state_->output_tensor_addr_.reserve(num_outputs);
+    update_output_tensor_tracking();
   }
 
   void setOutputs(c10::ArrayRef<c10::IValue> outputs) {
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(state_, "Called setOutputs() on inactive RecordFunction");
     state_->outputs_ = outputs.vec();
+    int num_outputs = state_->outputs_.size();
+    state_->output_dims_.reserve(num_outputs);
+    state_->output_tensor_addr_.reserve(num_outputs);
+    update_output_tensor_tracking();
   }
 
   size_t num_inputs() const {
@@ -284,6 +295,14 @@ struct TORCH_API RecordFunction {
     state_->debug_handle_ = debug_handle;
   }
 
+  std::pair<RecordFunctionHandle, int> inputOpId(int input_nr) const {
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(state_, "Called setDebugHandle() on inactive RecordFunction");
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(input_nr < inputs().size(), "Input nr > array size");
+    auto input_op_info =  state_->input_producer_ops_[input_nr];
+    // returns a pair of <input_op_id, output_nr>
+    return input_op_info;
+  }
+
  private:
 
   // Allows the modification of some internal states for callbacks.
@@ -323,6 +342,12 @@ struct TORCH_API RecordFunction {
     int64_t sequence_nr_ = -1;
     std::vector<c10::IValue> inputs_;
     std::vector<c10::IValue> outputs_;
+
+    std::vector<std::vector<int64_t>> output_dims_;
+    std::vector<TensorImpl*> output_tensor_addr_;
+    //
+    // List of <Op_id, output_nr> pairs.
+    std::vector<std::pair<RecordFunctionHandle, int>> input_producer_ops_;
 
     c10::optional<c10::OperatorName> operator_name_;
     size_t op_input_size{0};

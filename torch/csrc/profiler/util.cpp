@@ -127,6 +127,14 @@ std::string stacksToStr(
   return "\"" + rc + "\"";
 }
 
+int get_input_op_id_from_record_fn(const at::RecordFunction& fn, int input_nr) {
+  auto input_producer_pair = fn.inputOpId(input_nr);
+  at::RecordFunctionHandle input_op_id = input_producer_pair.first;
+  int output_nr = input_producer_pair.second;
+  std::cout << "Profiler: FN " << fn.name() << " Op ID " << fn.handle() << " Input nr " << input_nr << " Input Op ID " << input_op_id<< std::endl;
+  return input_op_id;
+}
+
 int get_seq_id_from_input_tensor(const c10::IValue& input_item) {
   int seq_id = -1;
   TORCH_INTERNAL_ASSERT(
@@ -175,6 +183,33 @@ std::vector<std::vector<int64_t>> inputSizes(const at::RecordFunction& fn) {
   return sizes;
 }
 
+std::vector<int64_t> inputOpIds(const at::RecordFunction& fn) {
+  std::vector<int64_t> op_ids;
+  op_ids.reserve(fn.inputs().size());
+  int input_nr = 0;
+  for (const c10::IValue& input : fn.inputs()) {
+    int op_id = -1;
+    if (!input.isTensor()) {
+      if (input.isList()) {
+        std::vector<int64_t> tmp_op_ids = flatten_list_seq_ids(input.toList(), std::string(fn.name()));
+        // Extend the current sizes array by the array returned from input sizes
+        if (!tmp_op_ids.empty()) {
+          op_ids.insert(op_ids.end(), tmp_op_ids.begin(), tmp_op_ids.end());
+        } else {
+          op_ids.push_back(op_id);
+        }
+      } else {
+        op_ids.push_back(op_id);
+      }
+    } else {
+      op_id = get_input_op_id_from_record_fn(fn, input_nr);
+      op_ids.push_back(op_id);
+    }
+    input_nr++;
+  }
+  return op_ids;
+}
+
 std::vector<int64_t> inputSeqIds(const at::RecordFunction& fn) {
   std::vector<int64_t> seq_ids;
   seq_ids.reserve(fn.inputs().size());
@@ -196,6 +231,8 @@ std::vector<int64_t> inputSeqIds(const at::RecordFunction& fn) {
     } else {
       seq_id = get_seq_id_from_input_tensor(input);
       seq_ids.push_back(seq_id);
+      // Remove this once op id logic is connected
+      at::RecordFunctionHandle op_id = get_input_op_id_from_record_fn(fn, iter);
     }
     iter++;
   }

@@ -11,6 +11,9 @@ namespace at {
 
 namespace {
 
+// Maps the address of an output Tensor to a unique op id and output index of the tensor
+std::unordered_map<at::TensorImpl*, std::pair<RecordFunctionHandle, int>> producer_tensor_map;
+
 // Used to generate unique callback handles
 CallbackHandle next_unique_callback_handle() {
   static std::atomic<uint64_t> unique_cb_id {1};
@@ -579,6 +582,70 @@ uint64_t RecordFunction::currentThreadId() {
   return current_thread_id_;
 }
 
+void RecordFunction::check_input_mapping(void) {
+    int num_inputs = inputs().size();
+    state_->input_producer_ops_.reserve(num_inputs);
+    int idx = 0;
+    for (const c10::IValue& s_tensor : inputs()) {
+        std::cout << "Alex: FN " << name() << " Saved Input  index " << idx << std::endl;
+        bool tensor_valid = false;
+        if(s_tensor.isTensor()) {
+            const at::Tensor& tensor = s_tensor.toTensor();
+            if (tensor.defined()) {
+                auto ten_addr =  tensor.unsafeGetTensorImpl();
+                // See if Address is in the map already
+                if (at::producer_tensor_map.count(ten_addr) > 0) {
+                    auto producer_pair  =  at::producer_tensor_map[ten_addr];
+                    RecordFunctionHandle producer_op_id = producer_pair.first;
+                    int output_nr = producer_pair.second;
+                    std::cout << "  TensorImpl Addr " << std::hex << ten_addr << std::dec << " Producer op id " << producer_op_id << " Output nr " << output_nr << std::endl;
+                    state_->input_producer_ops_.push_back(producer_pair);
+                    tensor_valid = true;
+                } else {
+                    std::cout << "  TensorImpl Addr " <<std::hex << ten_addr << std::dec << " not in map " << std::endl;
+                }
+            }
+        }
+        if (!tensor_valid) {
+            // Set the Pair to be <-1, -1> to indicate unknown values
+            state_->input_producer_ops_.emplace_back(std::pair<at::RecordFunctionHandle, int>{~0,-1});
+        }
+        idx++;
+    }
+}
+
+void RecordFunction::update_output_tensor_tracking(void) {
+    RecordFunctionHandle producer_op_id = handle();
+    std::cout << "Alex: FN " << name() << " Op ID " << producer_op_id <<  " Saving Outputs" << std::endl;
+    int output_nr = 0;
+    for (const c10::IValue& s_tensor : outputs()){
+        bool tensor_valid = false;
+        if(s_tensor.isTensor()) {
+            const at::Tensor& tensor = s_tensor.toTensor();
+            if (tensor.defined()) {
+                auto ten_addr =  tensor.unsafeGetTensorImpl();
+                bool addr_found = at::producer_tensor_map.count(ten_addr) > 0;
+                if (!addr_found) {
+                    std::cout << "  Adding Output TensorImpl Addr " << std::hex << ten_addr << " output nr " << std::dec << output_nr << " to map " << std::endl;
+                } else {
+                    auto producer_pair = at::producer_tensor_map[ten_addr];
+                    RecordFunctionHandle prev_producer_id = producer_pair.first;
+                    std::cout << "  Output tensor reusing Addr " << std::hex << ten_addr << " old producer op " << std::dec << prev_producer_id << " new producer op_id " << producer_op_id << std::endl;
+                }
+                at::producer_tensor_map[ten_addr] = std::pair<RecordFunctionHandle, int> {producer_op_id, output_nr};
+                state_->output_dims_.push_back(tensor.sizes().vec());
+                state_->output_tensor_addr_.push_back(ten_addr);
+                tensor_valid = true;
+            }
+        }
+        if (!tensor_valid) {
+            state_->output_dims_.emplace_back();
+            state_->output_tensor_addr_.emplace_back();
+        }
+        output_nr++;
+    }
+}
+
 void RecordFunction::before(const char* name, int64_t sequence_nr) {
   if (!isActive()) {
     return;
@@ -588,6 +655,7 @@ void RecordFunction::before(const char* name, int64_t sequence_nr) {
   state_->sequence_nr_ = sequence_nr;
   state_->thread_id_ = currentThreadId();
   state_->operator_name_.reset();
+  check_input_mapping();
 
   manager().runStartCallbacks(*this);
 }
@@ -601,6 +669,7 @@ void RecordFunction::before(std::string name, int64_t sequence_nr) {
   state_->sequence_nr_ = sequence_nr;
   state_->thread_id_ = currentThreadId();
   state_->operator_name_.reset();
+  check_input_mapping();
 
   manager().runStartCallbacks(*this);
 }
@@ -617,6 +686,7 @@ void RecordFunction::before(
   state_->op_input_size = op.schema().arguments().size();
   state_->op_output_size = op.schema().returns().size();
   state_->name_ = op.schema().name();
+  check_input_mapping();
 
   manager().runStartCallbacks(*this);
 }

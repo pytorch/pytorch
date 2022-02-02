@@ -40,7 +40,9 @@ std::unique_ptr<at::ObserverContext> enterNVTX(const at::RecordFunction& fn) {
             fn.name(),
             fn.seqNr(),
             report_input_shapes ? torch::profiler::impl::inputSizes(fn)
-                                : std::vector<std::vector<int64_t>>())
+                                : std::vector<std::vector<int64_t>>(),
+            report_input_shapes ? torch::profiler::impl::inputSeqIds(fn)
+                                : std::vector<int64_t>())
             .c_str());
   }
   return nullptr;
@@ -69,6 +71,7 @@ void pushNVTXCallbacks(
             torch::profiler::impl::cudaStubs()->nvtxRangePop();
           })
           .needsInputs(config.report_input_shapes)
+          .needsOutputs(config.report_input_shapes)
           .scopes(scopes));
   state_ptr->setCallbackHandle(handle);
 }
