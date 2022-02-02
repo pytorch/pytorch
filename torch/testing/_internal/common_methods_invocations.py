@@ -8658,6 +8658,9 @@ op_db: List[OpInfo] = [
                # INTERNAL ASSERT FAILED at "../torch/csrc/jit/passes/utils/check_alias_annotation.cpp":252,
                # please report a bug to PyTorch.
                DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit', dtypes=[torch.float32]),
+               # broadcast_arrays returns an iterable of tensors.
+               # AttributeError: 'tuple' object has no attribute 'dtype'
+               DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_jit_alias_remapping'),),
            ),
            sample_inputs_func=sample_inputs_broadcast_tensors),
     OpInfo('block_diag',
