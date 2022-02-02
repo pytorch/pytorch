@@ -241,7 +241,7 @@
 
 - name: addmv(Tensor self, Tensor mat, Tensor vec, *, Scalar beta=1, Scalar alpha=1) -> Tensor
   self: maybe_multiply(grad, beta.conj())
-  mat: maybe_multiply(grad.ger(vec.conj()), alpha.conj())
+  mat: maybe_multiply(grad.outer(vec.conj()), alpha.conj())
   vec: maybe_multiply(mat.t().conj().mv(grad), alpha.conj())
   result: maybe_multiply(self_t, beta) + maybe_multiply(mat_t.mv(vec_p), alpha) + maybe_multiply(mat_p.mv(vec_t), alpha)
 
@@ -1078,7 +1078,7 @@
   result: self_t * other
 
 - name: mv(Tensor self, Tensor vec) -> Tensor
-  self: grad.ger(vec.conj())
+  self: grad.outer(vec.conj())
   vec: self.conj().t().mv(grad)
   result: mv(self_t, vec_p) + mv(self_p, vec_t)
 

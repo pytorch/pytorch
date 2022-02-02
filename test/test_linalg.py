@@ -99,7 +99,7 @@ class TestLinalg(TestCase):
                                     r"input tensors but got shapes \[2, 3\] and \[2, 2\]"):
             torch.randn(2, 3, device=device, dtype=dtype).inner(torch.randn(2, 2, device=device, dtype=dtype))
 
-    # Tests torch.outer, and its alias, torch.ger, vs. NumPy
+    # Tests torch.outer vs. NumPy
     @precisionOverride({torch.bfloat16: 1e-1})
     @dtypes(*(get_all_dtypes()))
     def test_outer(self, device, dtype):
@@ -117,16 +117,10 @@ class TestLinalg(TestCase):
             self.assertEqual(torch.outer(a, b), expected, exact_dtype=False)
             self.assertEqual(torch.Tensor.outer(a, b), expected, exact_dtype=False)
 
-            self.assertEqual(torch.ger(a, b), expected, exact_dtype=False)
-            self.assertEqual(torch.Tensor.ger(a, b), expected, exact_dtype=False)
 
             # test out variant
             out = torch.empty(a.size(0), b.size(0), device=device, dtype=dtype)
             torch.outer(a, b, out=out)
-            self.assertEqual(out, expected, exact_dtype=False)
-
-            out = torch.empty(a.size(0), b.size(0), device=device, dtype=dtype)
-            torch.ger(a, b, out=out)
             self.assertEqual(out, expected, exact_dtype=False)
 
         a = torch.randn(50).to(device=device, dtype=dtype)
@@ -799,7 +793,7 @@ class TestLinalg(TestCase):
     def test_outer_type_promotion(self, device, dtypes):
         a = torch.randn(5).to(device=device, dtype=dtypes[0])
         b = torch.randn(5).to(device=device, dtype=dtypes[1])
-        for op in (torch.outer, torch.Tensor.outer, torch.ger, torch.Tensor.ger):
+        for op in (torch.outer, torch.Tensor.outer):
             result = op(a, b)
             self.assertEqual(result.dtype, torch.result_type(a, b))
 
@@ -825,7 +819,6 @@ class TestLinalg(TestCase):
             b = torch.rand(size[1], device=device)
 
             self.assertEqual(torch.outer(a, b).shape, size)
-            self.assertEqual(torch.ger(a, b).shape, size)
 
             m = torch.empty(size, device=device)
             self.assertEqual(torch.addr(m, a, b).shape, size)
@@ -835,8 +828,6 @@ class TestLinalg(TestCase):
         b = torch.tensor(6, device=device)
         self.assertRaises(RuntimeError, lambda: torch.outer(a, b))
         self.assertRaises(RuntimeError, lambda: torch.outer(b, a))
-        self.assertRaises(RuntimeError, lambda: torch.ger(a, b))
-        self.assertRaises(RuntimeError, lambda: torch.ger(b, a))
         self.assertRaises(RuntimeError, lambda: torch.addr(m, a, b))
         self.assertRaises(RuntimeError, lambda: torch.addr(m, b, a))
 

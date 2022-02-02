@@ -12,7 +12,7 @@ namespace serialize {
 constexpr uint64_t kMinSupportedFileFormatVersion = 0x1L;
 
 #if ENABLE_UPGRADERS
-constexpr uint64_t kMaxSupportedFileFormatVersion = 0x9L;
+constexpr uint64_t kMaxSupportedFileFormatVersion = 0x10L;
 #else
 constexpr uint64_t kMaxSupportedFileFormatVersion = 0x6L;
 #endif
@@ -79,7 +79,10 @@ constexpr uint64_t kMaxSupportedFileFormatVersion = 0x6L;
 //     Bump the version number to 9 to update aten::logspace and
 //     and aten::logspace.out to error out when steps is not
 //     provided. (see: https://github.com/pytorch/pytorch/issues/55951)
-constexpr uint64_t kProducedFileFormatVersion = 0x9L;
+// 2) [02/01/2022]
+//     Bump the version number to 10 to deprecate aten::ger and
+//     and aten::ger.out
+constexpr uint64_t kProducedFileFormatVersion = 0x10L;
 #else
 constexpr uint64_t kProducedFileFormatVersion = 0x3L;
 #endif

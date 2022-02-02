@@ -43,21 +43,29 @@ getOperatorVersionMapForMobile() {
                     std::vector<Upgrader>({
                         Upgrader({0, 3, "div__Tensor_0_3", 3})
                     })},
+                {std::string("aten::ger"),
+                    std::vector<Upgrader>({
+                        Upgrader({0, 9, "ger_0_9", 5})
+                    })},
+                {std::string("aten::ger.out"),
+                    std::vector<Upgrader>({
+                        Upgrader({0, 9, "ger_out_0_9", 6})
+                    })},
                 {std::string("aten::linspace"),
                     std::vector<Upgrader>({
-                        Upgrader({0, 7, "linspace_0_7", 5})
+                        Upgrader({0, 7, "linspace_0_7", 7})
                     })},
                 {std::string("aten::linspace.out"),
                     std::vector<Upgrader>({
-                        Upgrader({0, 7, "linspace_out_0_7", 6})
+                        Upgrader({0, 7, "linspace_out_0_7", 8})
                     })},
                 {std::string("aten::logspace"),
                     std::vector<Upgrader>({
-                        Upgrader({0, 8, "logspace_0_8", 7})
+                        Upgrader({0, 8, "logspace_0_8", 9})
                     })},
                 {std::string("aten::logspace.out"),
                     std::vector<Upgrader>({
-                        Upgrader({0, 8, "logspace_out_0_8", 8})
+                        Upgrader({0, 8, "logspace_out_0_8", 10})
                     })},
       });
   return operatorVersionMapForMobile;
@@ -290,6 +298,47 @@ const std::vector<ByteCodeFunctionWithOperator>& getUpgraderBytecodeList() {
                                    OperatorString({"aten::is_floating_point", "", 1}),
                                    OperatorString({"aten::div", "out", 3}),
                                    OperatorString({"aten::div", "out_mode", 4}),
+                           }), // operators list
+                   }),
+                   ByteCodeFunctionWithOperator({
+                           mobile::Function::registerFunc(
+                               "ger_0_9",
+                               std::vector<Instruction>({
+                                           Instruction{OpCode::STOREN, 1, 2},
+                                           Instruction{OpCode::MOVE, 1, 0},
+                                           Instruction{OpCode::MOVE, 2, 0},
+                                           Instruction{OpCode::OP, 0, 0},
+                                           Instruction{OpCode::RET, 0, 0},
+                                   }), // instructions list,
+                               std::vector<c10::IValue>({
+                               
+                                   }), // constants list,
+                               std::vector<c10::TypePtr>(), // types list,
+                               2
+                           ),
+                           std::vector<OperatorString>({
+                                   OperatorString({"aten::outer", "", 2}),
+                           }), // operators list
+                   }),
+                   ByteCodeFunctionWithOperator({
+                           mobile::Function::registerFunc(
+                               "ger_out_0_9",
+                               std::vector<Instruction>({
+                                           Instruction{OpCode::STOREN, 1, 3},
+                                           Instruction{OpCode::MOVE, 1, 0},
+                                           Instruction{OpCode::MOVE, 2, 0},
+                                           Instruction{OpCode::MOVE, 3, 0},
+                                           Instruction{OpCode::OP, 0, 0},
+                                           Instruction{OpCode::RET, 0, 0},
+                                   }), // instructions list,
+                               std::vector<c10::IValue>({
+                               
+                                   }), // constants list,
+                               std::vector<c10::TypePtr>(), // types list,
+                               3
+                           ),
+                           std::vector<OperatorString>({
+                                   OperatorString({"aten::outer", "out", 3}),
                            }), // operators list
                    }),
                    ByteCodeFunctionWithOperator({

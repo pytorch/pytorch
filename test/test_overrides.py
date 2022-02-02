@@ -811,7 +811,7 @@ class TestEinsumOverride(TestCase):
         x = Wrapper(torch.randn(5))
         y = Wrapper(torch.randn(4))
         self.assertEqual(torch.einsum('i,j->ij', x, y)._data,
-                         torch.ger(x, y)._data)
+                         torch.outer(x, y)._data)
 
         # in the old einsum interface, `operands` is a list
         a = Wrapper(torch.randn(2, 3))

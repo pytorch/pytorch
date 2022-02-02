@@ -41,6 +41,14 @@ def linspace_out_0_7(start: Union[int, float, complex], end: Union[int, float, c
     return torch.linspace(start=start, end=end, steps=100, out=out)
   return torch.linspace(start=start, end=end, steps=steps, out=out)
 )SCRIPT"},
+     {"ger_0_9", R"SCRIPT(
+def ger_0_9(input: Tensor, vec2: Tensor):
+  return torch.outer(input, vec2)
+)SCRIPT"},
+     {"ger_out_0_9", R"SCRIPT(
+def ger_out_0_9(input: Tensor, vec2: Tensor, *, out: Tensor):
+  return torch.outer(input, vec2, out=out)
+)SCRIPT"},
      {"div_Tensor_0_3", R"SCRIPT(
 def div_Tensor_0_3(self: Tensor, other: Tensor) -> Tensor:
   if (self.is_floating_point() or other.is_floating_point()):

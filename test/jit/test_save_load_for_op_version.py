@@ -540,3 +540,74 @@ class TestSaveLoadForOpVersion(JitTestCase):
             self.assertTrue(output.size(dim=0) == 100)
             # "Upgraded" model should match the new version output
             self.assertEqual(output, output_current)
+
+    @settings(max_examples=10, deadline=200000)  # A total of 10 examples will be generated
+    @given(
+        vec1=st.lists(
+            st.integers(min_value=7, max_value=1999),
+            min_size=1,
+            max_size=8,
+        ),
+        vec2=st.lists(
+            st.integers(min_value=7, max_value=1999),
+            min_size=1,
+            max_size=8,
+        )
+    )
+    @example([2, 3, 2.0, 3.0], [3, 2, 2, 2])  # Ensure this example will be covered
+    def test_versioned_ger(self, vec1, vec2):
+        try:
+            v9_mobile_module = _load_for_lite_interpreter(
+                pytorch_test_dir + "/jit/fixtures/test_versioned_ger_v9.ptl")
+            v9_jit_module = torch.jit.load(
+                pytorch_test_dir + "/jit/fixtures/test_versioned_ger_v9.ptl")
+        except Exception as e:
+            self.skipTest("Failed to load fixture!")
+
+        def _helper(m, fn):
+            m1_result = self._try_fn(m, vec1, vec2)
+            m2_result = self._try_fn(fn, vec1, vec2)
+
+            if isinstance(m1_result, Exception):
+                self.assertTrue(m2_result, Exception)
+            else:
+                self.assertEqual(m1_result, m2_result)
+
+        _helper(v9_mobile_module, torch.outer)
+        _helper(v9_jit_module, torch.outer)
+
+
+    @settings(max_examples=10, deadline=200000)  # A total of 10 examples will be generated
+    @given(
+        vec1=st.lists(
+            st.integers(min_value=7, max_value=1999),
+            min_size=6,
+            max_size=6,
+        ),
+        vec2=st.lists(
+            st.integers(min_value=7, max_value=1999),
+            min_size=6,
+            max_size=6,
+        )
+    )
+    @example([2, 3, 2.0, 3.0], [3, 2, 2, 2])  # Ensure this example will be covered
+    def test_versioned_ger_out(self, vec1, vec2):
+        try:
+            v9_mobile_module = _load_for_lite_interpreter(
+                pytorch_test_dir + "/jit/fixtures/test_versioned_ger_out_v9.ptl")
+            v9_jit_module = torch.jit.load(
+                pytorch_test_dir + "/jit/fixtures/test_versioned_ger_out_v9.ptl")
+        except Exception as e:
+            self.skipTest("Failed to load fixture!")
+
+        def _helper(m, fn):
+            m1_result = self._try_fn(m, vec1, vec2, out=out_m1)
+            m2_result = self._try_fn(fn, vec1, vec2, out=out_m2)
+
+            if isinstance(out_m1, Exception):
+                self.assertTrue(out_m2, Exception)
+            else:
+                self.assertEqual(out_m1, out_m2)
+
+        _helper(v9_mobile_module, torch.outer)
+        _helper(v9_jit_module, torch.outer)

@@ -171,6 +171,35 @@ class TestUpgraders(JitTestCase):
         self.assertTrue(version == 8)
 
     @unittest.skipIf(not _is_upgraders_enabled(), "Skipping because upgraders are not enabled")
+    def test_aten_ger(self):
+        model_path = pytorch_test_dir + "/jit/fixtures/test_versioned_ger_v9.ptl"
+        loaded_model = torch.jit.load(model_path)
+        vec1 = torch.arange(1., 5.)
+        vec2 = torch.arange(1., 4.)
+
+        output = loaded_model(vec1, vec2)
+        self.assertTrue(output.size(dim=0) == torch.outer(vec1, vec2))
+
+        version = self._load_model_version(loaded_model)
+        self.assertTrue(version == 9)
+
+    @unittest.skipIf(not _is_upgraders_enabled(), "Skipping because upgraders are not enabled")
+    def test_aten_ger_out(self):
+        model_path = pytorch_test_dir + "/jit/fixtures/test_versioned_ger_out_v9.ptl"
+        loaded_model = torch.jit.load(model_path)
+        vec1 = torch.arange(1., 5.)
+        vec2 = torch.arange(1., 4.)
+        acutal_out = torch.zeros()
+
+        loaded_model(vec1, vec2, acutal_out)
+        expect_out = torch.zeros()
+        torch.outer(out, expect_out)
+        self.assertTrue(acutal_out == expect_out)
+
+        version = self._load_model_version(loaded_model)
+        self.assertTrue(version == 9)
+
+    @unittest.skipIf(not _is_upgraders_enabled(), "Skipping because upgraders are not enabled")
     def test_aten_logspace(self):
         model_path = pytorch_test_dir + "/jit/fixtures/test_versioned_logspace_v8.ptl"
         loaded_model = torch.jit.load(model_path)

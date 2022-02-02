@@ -2845,7 +2845,7 @@ void nnc_aten_ger(
   const at::Tensor& self = tensors[1];
   const at::Tensor& vec2 = tensors[2];
   try {
-    at::ger_out(r, self, vec2);
+    at::outer_out(r, self, vec2);
   } catch (...) {
   }
 }

@@ -87,6 +87,7 @@ ALLOW_LIST = [
     ("aten::_convolution_nogroup", datetime.date(9999, 1, 1)),
     ("aten::linspace", datetime.date(2022, 3, 1)),  # TODO this will be removed soon
     ("aten::logspace", datetime.date(2022, 3, 1)),  # TODO this will be removed soon
+    ("aten::ger", datetime.date(2022, 3, 1)),  # TODO this will be removed soon
     ("aten::miopen_convolution_backward", datetime.date(9999, 1, 1)),
     ("aten::miopen_convolution_backward_bias", datetime.date(9999, 1, 1)),
     ("aten::miopen_convolution_backward_input", datetime.date(9999, 1, 1)),

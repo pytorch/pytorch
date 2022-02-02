@@ -1601,13 +1601,6 @@ geqrf() -> (Tensor, Tensor)
 See :func:`torch.geqrf`
 """)
 
-add_docstr_all('ger',
-               r"""
-ger(vec2) -> Tensor
-
-See :func:`torch.ger`
-""")
-
 add_docstr_all('inner', r"""
 inner(other) -> Tensor
 
