@@ -344,15 +344,15 @@ def list(github, force_reload=False, skip_validation=False, trust_repo=None):
             requests to the GitHub API; you can specify a non-default GitHub token by setting the
             ``GITHUB_TOKEN`` environment variable. Default is ``False``.
         trust_repo (bool, string or None): ``"check"``, ``True``, ``False`` or ``None``.
-            If ``False``, a prompt will appear and ask the user whether that repo should be trusted from now on.
-            If ``"check"``, the repo address will be checked in against the list of trusted repos in the cache. If it is
-            not present in that list, the behaviour will fall back onto the ``trust_repo=False`` option.
-            If ``True``, the repo will be added to the trusted list and loaded without requiring explicit confirmation.
-            of trust.
-            If ``None``, the presence of the repo in the trusted will be checked. If that check fails, the user will be
-            notified through a warning that the repo has not been formally added to the trusted list. In a future
-            release, that this behaviour will be deprecated in favour of ``"check"``.
-            Default is ``None``.
+             This parameter helps ensuring that users only run code from repos that they trust.
+             
+            - If ``False``, a prompt will ask the user whether the repo should be trusted.
+            - If ``True``, the repo will be added to the trusted list and loaded without requiring explicit confirmation.
+            - If ``"check"``, the repo will be checked against the list of trusted repos in the cache. If it is
+               not present in that list, the behaviour will fall back onto the ``trust_repo=False`` option.
+            - If ``None``: this will raise a warning, inviting the user to set ``trust_repo`` to either ``False``, ``True`` or ``"check"``. This is only present for backward compatibility and will be removed in the future.
+            
+            Default is ``None`` and will eventually change to ``"check"`` in a future version.
 
     Returns:
         list: The available callables entrypoint
