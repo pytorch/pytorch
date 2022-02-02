@@ -310,9 +310,7 @@ const std::vector<ByteCodeFunctionWithOperator>& getUpgraderBytecodeList() {
                                            Instruction{OpCode::OP, 0, 0},
                                            Instruction{OpCode::RET, 0, 0},
                                    }), // instructions list,
-                               std::vector<c10::IValue>({
-                               
-                                   }), // constants list,
+                               std::vector<c10::IValue>(), // constants list,
                                std::vector<c10::TypePtr>(), // types list,
                                2
                            ),
@@ -331,9 +329,7 @@ const std::vector<ByteCodeFunctionWithOperator>& getUpgraderBytecodeList() {
                                            Instruction{OpCode::OP, 0, 0},
                                            Instruction{OpCode::RET, 0, 0},
                                    }), // instructions list,
-                               std::vector<c10::IValue>({
-                               
-                                   }), // constants list,
+                               std::vector<c10::IValue>(), // constants list,
                                std::vector<c10::TypePtr>(), // types list,
                                3
                            ),
