@@ -1047,7 +1047,8 @@ class TensorExprFuser {
       // Allow only if the node has a shape function defined.
       // ListConstruct node is an exception since that is needed to fuse
       // aten::cat, though it does not have a shape function.
-      REQ(node->kind() == prim::ListConstruct || node->kind() == prim::TensorExprGroup ||
+      REQ(node->kind() == prim::ListConstruct ||
+          node->kind() == prim::TensorExprGroup ||
           (node->maybeSchema() && shapeComputeGraphForSchema(node->schema())));
     }
 
@@ -1234,13 +1235,15 @@ void FuseTensorExprs(
   }
 
   if (add_composed_op) {
-    TORCH_INTERNAL_ASSERT(fuse_to_dynamic_shapes, "Fusing static shapes with composed op NYI");
+    TORCH_INTERNAL_ASSERT(
+        fuse_to_dynamic_shapes, "Fusing static shapes with composed op NYI");
   }
 
   // Get rid of dead code so that we don't waste effort fusing it.
   EliminateDeadCode(graph);
 
-  TensorExprFuser fuser(graph, min_group_size, add_composed_op, fuse_to_dynamic_shapes);
+  TensorExprFuser fuser(
+      graph, min_group_size, add_composed_op, fuse_to_dynamic_shapes);
   fuser.run();
 
   EliminateCommonSubexpression(graph);
@@ -1250,7 +1253,8 @@ void FuseTensorExprs(
 }
 
 Operation createTensorExprOp(const Node* node) {
-  bool dynamic_shape_fusion_node = node->hasAttribute(attr::striding_inputs_desc);
+  bool dynamic_shape_fusion_node =
+      node->hasAttribute(attr::striding_inputs_desc);
   if (!dynamic_shape_fusion_node) {
     auto kernel =
         std::make_shared<tensorexpr::TensorExprKernel>(node->g(attr::Subgraph));

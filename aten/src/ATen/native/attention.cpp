@@ -6,7 +6,6 @@
 #include <ATen/NativeFunctions.h>
 #include <ATen/Parallel.h>
 #include <ATen/cpu/vec/vec256/vec256.h>
-#include <c10/util/irange.h>
 
 namespace at {
 
@@ -144,7 +143,7 @@ void masked_softmax_dropout(
                 }
 
                 auto hmax = std::numeric_limits<scalar_t>::lowest();
-                for (const auto i : c10::irange(V)) {
+                for (auto i = 0; i < V; ++i) {
                   hmax = std::max(max_input[i], hmax);
                 }
 

@@ -4,7 +4,6 @@
 #include <ATen/nnapi/NeuralNetworks.h>
 #include <ATen/nnapi/nnapi_wrapper.h>
 #include <ATen/nnapi/nnapi_model_loader.h>
-#include <c10/util/irange.h>
 
 
 #ifndef NNAPI_LOADER_STANDALONE
@@ -139,15 +138,15 @@ int load_nnapi_model(
   next_pointer = (uint8_t*)serialized_model + required_size;
   CAFFE_ENFORCE(next_pointer <= end_of_buf);
 
-  for (const auto i : c10::irange(ser_model->operand_count)) {
+  for (int i = 0; i < ser_model->operand_count; i++) {
     required_size += 4 * operands[i].dimension_count;
   }
 
-  for (const auto i : c10::irange(ser_model->value_count)) {
+  for (int i = 0; i < ser_model->value_count; i++) {
     required_size += value_physical_size(values[i].source_length);
   }
 
-  for (const auto i : c10::irange(ser_model->operation_count)) {
+  for (int i = 0; i < ser_model->operation_count; i++) {
     required_size += 4 * (operations[i].input_count + operations[i].output_count);
   }
 
@@ -156,7 +155,7 @@ int load_nnapi_model(
   CAFFE_ENFORCE(model_length >= required_size, "Model is too small.  Size = ", model_length);
   CAFFE_ENFORCE(next_pointer <= end_of_buf);
 
-  for (const auto i : c10::irange(ser_model->operand_count)) {
+  for (int i = 0; i < ser_model->operand_count; i++) {
     ANeuralNetworksOperandType operand;
     operand.type = operands[i].type;
     operand.scale = operands[i].scale;
@@ -172,7 +171,7 @@ int load_nnapi_model(
     NNAPI_CHECK(result);
   }
 
-  for (const auto i : c10::irange(ser_model->value_count)) {
+  for (int i = 0; i < ser_model->value_count; i++) {
     uint32_t len = values[i].source_length;
     const uint8_t* stored_pointer = next_pointer;
     // NOLINTNEXTLINE(modernize-use-nullptr)
@@ -221,7 +220,7 @@ int load_nnapi_model(
     NNAPI_CHECK(result);
   }
 
-  for (const auto i : c10::irange(ser_model->operation_count)) {
+  for (int i = 0; i < ser_model->operation_count; i++) {
     const uint32_t* inputs = (const uint32_t*)next_pointer;
     next_pointer += 4 * operations[i].input_count;
     CAFFE_ENFORCE(next_pointer <= end_of_buf);

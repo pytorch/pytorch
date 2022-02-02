@@ -82,7 +82,7 @@ void _fft_fill_with_conjugate_symmetry_slice(
     // Explicitly loop over a Hermitian mirrored dimension
     if (iter_index[0] > 0) {
       auto end = std::min(signal_half_sizes[0], iter_index[0] + numel_remaining);
-      for (const auto i : c10::irange(iter_index[0], end)) {
+      for (int64_t i = iter_index[0]; i < end; ++i) {
         out_ptr[(signal_half_sizes[0] - i) * out_strides[0]] = std::conj(in_ptr[i * in_strides[0]]);
       }
       numel_remaining -= (end - iter_index[0]);
