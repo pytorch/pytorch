@@ -34,11 +34,11 @@ INSTRUCTION_LIST = CodeTemplate("""std::vector<Instruction>({
 ONE_CONSTANT = CodeTemplate("""
     c10::IValue(${constant}),""")
 
-CONSTANTS_LIST_EMPTY = """std::vector<c10::IValue>(), // constants list"""
-
 CONSTANT_LIST = CodeTemplate("""std::vector<c10::IValue>({
         ${constant_list}
     }), // constants list""")
+
+CONSTANTS_LIST_EMPTY = """std::vector<c10::IValue>(), // constants list"""
 
 ONE_TYPE = CodeTemplate("""c10::parseType("${type_str}"),""")
 
