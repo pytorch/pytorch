@@ -2357,6 +2357,40 @@ TEST(StaticRuntime, ModelCrashOnSecondRun) {
   compareResultsWithJIT(runtime, graph, args_no_crash);
 }
 
+TEST(StaticRuntime, ModelCrashOnFirstRunWithBorrows) {
+  const auto src = R"JIT(
+    graph(%0: Tensor):
+        %1: Tensor = aten::mul(%0, %0)
+        %2: Tensor = aten::mul(%1, %1)
+        %3: bool = prim::Constant[value=1]()
+        %4: Tensor = static_runtime::select_tensor(%1, %2, %3)
+        static_runtime_tests::maybe_throw(%3)
+        return (%4)
+  )JIT";
+  auto graph = getGraphFromIR(src);
+  auto static_module = StaticModule(graph);
+  auto& runtime = static_module.runtime();
+
+  std::vector<IValue> args{at::randn({1})};
+  EXPECT_THROW(runtime(args), std::runtime_error);
+}
+
+TEST(StaticRuntime, ModelCrashOnFirstRunWithBorrowedInputs) {
+  const auto src = R"JIT(
+    graph(%0: Tensor, %1: Tensor):
+        %2: bool = prim::Constant[value=1]()
+        %3: Tensor = static_runtime::select_tensor(%0, %1, %2)
+        static_runtime_tests::maybe_throw(%2)
+        return (%3)
+  )JIT";
+  auto graph = getGraphFromIR(src);
+  auto static_module = StaticModule(graph);
+  auto& runtime = static_module.runtime();
+
+  std::vector<IValue> args{at::randn({1}), at::randn({1})};
+  EXPECT_THROW(runtime(std::move(args)), std::runtime_error);
+}
+
 TEST(StaticRuntime, ReplaceWithMaybeCopy) {
   const std::string to = R"IR(
     graph(%0 : Tensor):
@@ -2397,4 +2431,150 @@ TEST(StaticRuntime, Int) {
   )JIT";
   std::vector<IValue> args{at::tensor({3.14})};
   testStaticRuntime(src, args);
+}
+
+TEST(StaticRuntime, ReturnConstant) {
+  const auto src = R"JIT(
+    def forward(self):
+        return 1
+  )JIT";
+
+  testStaticRuntime(src, {});
+}
+
+TEST(StaticRuntime, SimpleIf) {
+  const auto src = R"JIT(
+    def forward(self, cond: bool, x):
+        if cond:
+            return torch.mul(x, 42).clone()
+        else:
+            return x.clone()
+  )JIT";
+
+  std::vector<IValue> args_false{false, at::randn({1})};
+  std::vector<IValue> args_true{true, at::randn({1})};
+  std::vector<IValue> args_big_tensor{true, at::randn({3, 3, 3})};
+
+  testStaticRuntime(src, args_false);
+  testStaticRuntime(src, args_true);
+  testStaticRuntime(src, args_true, args_big_tensor);
+}
+
+TEST(StaticRuntime, NestedIf) {
+  const auto src = R"JIT(
+    def forward(self, cond1: bool, cond2: bool, x):
+        y = x * 42
+        if cond1:
+            y = y * y
+            if cond2:
+                y += x
+        else:
+            if cond2:
+                return x.clone()
+
+        return y.clone()
+  )JIT";
+
+  for (auto cond1 : {true, false}) {
+    for (auto cond2 : {true, false}) {
+      std::vector<IValue> args1{cond1, cond2, at::randn({1})};
+      std::vector<IValue> args2{cond1, cond2, at::randn({3, 3, 3})};
+      testStaticRuntime(src, args1, args2);
+    }
+  }
+}
+
+TEST(StaticRuntime, DeeplyNestedIf) {
+  const auto src = R"JIT(
+    def forward(self, cond1: bool, cond2: bool, cond3: bool, x):
+        y = x * 42
+        if cond1:
+            y = y * y
+            if cond2:
+                y += x
+
+            if cond2 and cond3:
+                y += 1
+
+            if cond2:
+                if cond3:
+                    y += 2
+                else:
+                    y = y * y
+                    y += 4
+        else:
+            if cond2:
+                return x.clone()
+            if cond3 or cond2:
+                y += 42
+
+        return y.clone()
+  )JIT";
+
+  for (auto cond1 : {true, false}) {
+    for (auto cond2 : {true, false}) {
+      for (auto cond3 : {true, false}) {
+        std::vector<IValue> args1{cond1, cond2, cond3, at::randn({1})};
+        std::vector<IValue> args2{cond1, cond2, cond3, at::randn({3, 3, 3})};
+        testStaticRuntime(src, args1, args2);
+      }
+    }
+  }
+}
+
+TEST(StaticRuntime, BasicForLoop) {
+  const auto src = R"JIT(
+    def forward(self, x, loop_max: int):
+        y = x.clone()
+        for i in range(loop_max):
+            y += 1
+        return y
+  )JIT";
+
+  std::vector<IValue> args1{at::randn({1}), 10};
+  std::vector<IValue> args2{at::randn({3, 3, 3}), 10};
+
+  testStaticRuntime(src, args1, args2);
+}
+
+TEST(StaticRuntime, BasicWhileLoop) {
+  const auto src = R"JIT(
+    def forward(self, x, loop_max: int):
+        y = x.clone()
+        loop_count = 0
+        while loop_count < loop_max:
+            y += 1
+            loop_count += 1
+        return y
+  )JIT";
+
+  std::vector<IValue> args1{at::randn({1}), 10};
+  std::vector<IValue> args2{at::randn({3, 3, 3}), 10};
+
+  testStaticRuntime(src, args1, args2);
+}
+
+TEST(StaticRuntime, NestedLoops) {
+  const auto src = R"JIT(
+    def forward(self, x, loop_max: int):
+        y = x.clone()
+        even: List[int] = []
+        odd: List[int] = []
+
+        for i in range(loop_max):
+            if i % 2:
+                odd.append(i)
+            else:
+                even.append(i)
+
+            for j in range(i):
+                y += 1
+
+        return y, even, odd
+  )JIT";
+
+  std::vector<IValue> args1{at::randn({1}), 10};
+  std::vector<IValue> args2{at::randn({3, 3, 3}), 10};
+
+  testStaticRuntime(src, args1, args2);
 }
