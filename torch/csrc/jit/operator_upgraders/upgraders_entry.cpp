@@ -15,7 +15,20 @@ namespace torch {
 namespace jit {
 
 static std::unordered_map<std::string, std::string> kUpgradersEntryMap(
-    {{"linspace_0_7", R"SCRIPT(
+    {{"logspace_0_8", R"SCRIPT(
+def logspace_0_8(start: Union[int, float, complex], end: Union[int, float, complex], steps: Optional[int], base: float, *, dtype: Optional[int], layout: Optional[int],
+                 device: Optional[Device], pin_memory: Optional[bool]):
+  if (steps is None):
+    return torch.logspace(start=start, end=end, steps=100, base=base, dtype=dtype, layout=layout, device=device, pin_memory=pin_memory)
+  return torch.logspace(start=start, end=end, steps=steps, base=base, dtype=dtype, layout=layout, device=device, pin_memory=pin_memory)
+)SCRIPT"},
+     {"logspace_out_0_8", R"SCRIPT(
+def logspace_out_0_8(start: Union[int, float, complex], end: Union[int, float, complex], steps: Optional[int], base: float, *, out: Tensor):
+  if (steps is None):
+    return torch.logspace(start=start, end=end, steps=100, base=base, out=out)
+  return torch.logspace(start=start, end=end, steps=steps, base=base, out=out)
+)SCRIPT"},
+     {"linspace_0_7", R"SCRIPT(
 def linspace_0_7(start: Union[int, float, complex], end: Union[int, float, complex], steps: Optional[int], *, dtype: Optional[int], layout: Optional[int],
                  device: Optional[Device], pin_memory: Optional[bool]):
   if (steps is None):
