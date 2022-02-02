@@ -16,8 +16,7 @@ from torch.testing._internal.common_utils import (
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, onlyCPU, dtypes, onlyNativeDeviceTypes)
 from torch.testing._internal.common_dtype import (
-    all_types_and_complex_and, integral_types, floating_types_and, complex_types, all_types_and,
-    floating_and_complex_types,
+    all_types_and_complex_and, complex_types, all_types_and, floating_and_complex_types,
 )
 
 # TODO: replace this with make_tensor() in common_utils.py
@@ -231,7 +230,7 @@ class TestViewOps(TestCase):
             a = make_tensor((4, 4, size_ratio + 1), device, dtype, low=-5, high=5)
             with self.assertRaisesRegex(
                     RuntimeError,
-                    rf"self.size\(-1\) must be divisible by {size_ratio}"): 
+                    rf"self.size\(-1\) must be divisible by {size_ratio}"):
                 a.view(view_dtype)
 
             with self.assertRaisesRegex(

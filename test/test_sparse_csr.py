@@ -15,8 +15,8 @@ from torch.testing._internal.common_methods_invocations import \
     (op_db, sparse_csr_unary_ufuncs, )
 from torch.testing._internal.common_cuda import _get_torch_cuda_version
 from torch.testing._internal.common_dtype import (
-    floating_types, all_types_and_complex_and, floating_and_complex_types, complex_types,
-    floating_types_and, all_types_and_complex, floating_and_complex_types_and
+    floating_types, all_types_and_complex_and, floating_and_complex_types, floating_types_and,
+    all_types_and_complex, floating_and_complex_types_and
 )
 from test_sparse import CUSPARSE_SPMM_COMPLEX128_SUPPORTED
 
@@ -589,8 +589,8 @@ class TestSparseCSR(TestCase):
     @skipCUDAIfNoCusparseGeneric
     @dtypes(*floating_and_complex_types())
     @dtypesIfCUDA(*floating_and_complex_types_and(
-                      *[torch.half] if SM53OrLater else [],
-                      *[torch.bfloat16] if SM80OrLater else []))
+                  *[torch.half] if SM53OrLater else [],
+                  *[torch.bfloat16] if SM80OrLater else []))
     def test_csr_matvec(self, device, dtype):
         side = 100
         for index_dtype in [torch.int32, torch.int64]:
@@ -813,8 +813,8 @@ class TestSparseCSR(TestCase):
     @skipCPUIfNoMklSparse
     @dtypes(*floating_and_complex_types())
     @dtypesIfCUDA(*floating_and_complex_types_and(
-                      *[torch.half] if SM53OrLater and TEST_CUSPARSE_GENERIC else [],
-                      *[torch.bfloat16] if SM80OrLater and TEST_CUSPARSE_GENERIC else []))
+                  *[torch.half] if SM53OrLater and TEST_CUSPARSE_GENERIC else [],
+                  *[torch.bfloat16] if SM80OrLater and TEST_CUSPARSE_GENERIC else []))
     @precisionOverride({torch.bfloat16: 1e-2, torch.float16: 1e-2})
     def test_sparse_mm(self, device, dtype):
         def test_shape(d1, d2, d3, nnz, transposed, index_dtype):
@@ -833,8 +833,8 @@ class TestSparseCSR(TestCase):
     @skipCPUIfNoMklSparse
     @dtypes(*floating_and_complex_types())
     @dtypesIfCUDA(*floating_and_complex_types_and(
-                      *[torch.half] if SM53OrLater and TEST_CUSPARSE_GENERIC else [],
-                      *[torch.bfloat16] if SM80OrLater and TEST_CUSPARSE_GENERIC else []))
+                  *[torch.half] if SM53OrLater and TEST_CUSPARSE_GENERIC else [],
+                  *[torch.bfloat16] if SM80OrLater and TEST_CUSPARSE_GENERIC else []))
     @precisionOverride({torch.bfloat16: 1e-2, torch.float16: 1e-2})
     def test_sparse_addmm(self, device, dtype):
         def test_shape(m, n, p, nnz, broadcast, index_dtype, alpha_beta=None):
