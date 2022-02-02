@@ -387,9 +387,6 @@ class TestViewOps(TestCase):
         t = torch.ones((5, 5), dtype=dtype, device=device)
 
         with self.assertRaises(RuntimeError):
-            torch.real(t)
-
-        with self.assertRaises(RuntimeError):
             torch.imag(t)
 
     @onlyNativeDeviceTypes

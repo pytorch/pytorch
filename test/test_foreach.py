@@ -8,6 +8,7 @@ import torch
 import unittest
 
 from torch.testing import make_tensor
+from torch.testing._comparison import default_tolerances
 from torch.testing._internal.common_utils import TestCase, run_tests, TEST_WITH_ROCM, TEST_WITH_SLOW
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, dtypes, onlyCUDA, skipCUDAIfRocm, skipMeta, ops)
@@ -124,7 +125,7 @@ class TestForeach(TestCase):
             else:
                 expected = ref(ref_inputs, **kwargs)
                 if dtype in (torch.float16, torch.bfloat16) and TEST_WITH_ROCM:
-                    self.assertEqual(expected, actual, atol=1.e-3, rtol=self.dtype_precisions[dtype][0])
+                    self.assertEqual(expected, actual, atol=1.e-3, rtol=default_tolerances(dtype)[0])
                 else:
                     self.assertEqual(expected, actual)
 

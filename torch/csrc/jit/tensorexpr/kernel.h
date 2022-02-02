@@ -181,6 +181,10 @@ class TORCH_API TensorExprKernel {
     return codegen_->kernel_func_name();
   }
 
+  const std::vector<int64_t>& getSymbolicShapeInputs() const {
+    return symbolic_shape_inputs_;
+  }
+
  private:
   enum BackendType {
     kUninitialized,
@@ -207,10 +211,6 @@ class TORCH_API TensorExprKernel {
   ArgValue toArg(const torch::jit::Value* v) const;
   ExprHandle constant(const torch::jit::Value* v);
 
-  ExprHandle tensorOrConstant(
-      const torch::jit::Value* v,
-      const std::vector<ExprHandle>& axes);
-
   Tensor computeValue(const torch::jit::Value* v);
 
   void bindConstant(const torch::jit::Value* v);
@@ -230,7 +230,7 @@ class TORCH_API TensorExprKernel {
 
   Tensor convertSymbolicOutputToCorrectStrides(torch::jit::Value* v);
   Tensor convertStaticShapeOutputToCorrectStrides(torch::jit::Value* v);
-  Tensor convertOutputToCorrectStrides(
+  Tensor convertSymbolicOutputToCorrectStrides(
       const std::vector<ExprHandle>& sizes,
       const std::vector<size_t>& sorted_stride_indices_descending,
       const std::vector<ExprPtr>& strides,
@@ -278,6 +278,7 @@ class TORCH_API TensorExprKernel {
   std::vector<std::vector<int64_t>> tensorOutputSizes_;
   std::vector<std::vector<int64_t>> tensorOutputStrides_;
   std::vector<torch::jit::StrideInput> tensorOutputStrideDesc_;
+  std::vector<bool> isOutputScalar_;
   std::vector<UnpackedTensorOptions> tensorOutputTensorOptions_;
   std::unordered_set<BufPtr> bufOutputs_;
   std::unordered_map<const torch::jit::Value*, BufPtr> bufs_;
