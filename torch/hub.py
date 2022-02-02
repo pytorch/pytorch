@@ -239,7 +239,7 @@ def _check_repo(repo_owner, repo_name, trust_repo=None, calling_fn="load"):
     is_trusted = any(repo == trusted_repo for trusted_repo in trusted_repos)
     is_trusted = is_trusted or repo_owner in _TRUSTED_REPO_OWNERS
 
-    # to be deprecated
+    # TODO: Remove `None` option in future version and change the default to "check"
     if trust_repo is None:
         if not is_trusted:
             warnings.warn(
