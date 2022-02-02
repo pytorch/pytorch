@@ -127,11 +127,13 @@ SparseTensor _coalesce_sparse_cuda(const SparseTensor& self) {
 
   // If there is no values to copy, save running the kernel.
   if (newValues.numel() > 0) {
-    const int SZ = 4;
+    const int SZ = thread_work_size();
     values = values.contiguous();
     int64_t stride = c10::multiply_integers(values.sizes().slice(1));
-    dim3 grid(ceil_div(newNnz, (int64_t) SZ), ceil_div(stride, (int64_t) C10_WARP_SIZE*SZ));
-    dim3 block(C10_WARP_SIZE, SZ);
+    dim3 grid(ceil_div(newNnz, (int64_t) SZ), ceil_div(stride, (int64_t) num_threads()));
+
+    int warp_size = at::cuda::warp_size();
+    dim3 block(warp_size, SZ);
     AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(
       at::ScalarType::Half, at::ScalarType::BFloat16, values.scalar_type(), "coalesce_sparse_cuda", [&] {
         using cuda_accscalar_t = acc_type<scalar_t, /* is_cuda */ true>;
