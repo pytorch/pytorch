@@ -347,22 +347,22 @@ Tensor& index_select_out(const Tensor& self, Dimname dim, const Tensor& index, T
 Tensor index_select(const Tensor& self, Dimname dim, const Tensor& index) {
   reportNYIDimnameOverload("index_select");
 }
-Tensor scatter(const Tensor& self, Dimname dim, const Tensor& index, const Tensor& source) {
+Tensor scatter(const Tensor& self, Dimname dim, const Tensor& index, const Tensor& source, bool unique_indices) {
   reportNYIDimnameOverload("scatter");
 }
 Tensor& scatter_(Tensor& self, Dimname dim, const Tensor& index, const Tensor& source) {
   reportNYIDimnameOverload("scatter");
 }
-Tensor scatter(const Tensor& self, Dimname dim, const Tensor& index, const Scalar& source) {
+Tensor scatter(const Tensor& self, Dimname dim, const Tensor& index, const Scalar& source, bool unique_indices) {
   reportNYIDimnameOverload("scatter");
 }
 Tensor& scatter_(Tensor& self, Dimname dim, const Tensor& index, const Scalar& source) {
   reportNYIDimnameOverload("scatter");
 }
-Tensor scatter_add(const Tensor& self, Dimname dim, const Tensor& index, const Tensor& source) {
+Tensor scatter_add(const Tensor& self, Dimname dim, const Tensor& index, const Tensor& source, bool unique_indices) {
   reportNYIDimnameOverload("scatter_add");
 }
-Tensor& scatter_add_(Tensor& self, Dimname dim, const Tensor& index, const Tensor& source) {
+Tensor& scatter_add_(Tensor& self, Dimname dim, const Tensor& index, const Tensor& source, bool unique_indices) {
   reportNYIDimnameOverload("scatter_add");
 }
 std::tuple<Tensor&, Tensor&> sort_out(const Tensor& self, c10::optional<bool> stable, Dimname dim, bool keepdim, Tensor& values, Tensor& indices) {

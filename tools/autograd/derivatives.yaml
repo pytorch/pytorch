@@ -1282,18 +1282,18 @@
   self: -0.5 * grad * result.pow(3).conj()
   result: auto_element_wise
 
-- name: scatter.src(Tensor self, int dim, Tensor index, Tensor src) -> Tensor
+- name: scatter.src(Tensor self, int dim, Tensor index, Tensor src, *, bool unique_indices=False) -> Tensor
   self: grad.scatter(dim, index, 0)
   index: non_differentiable
   src: grad.gather(dim, index)
   result: self_t.scatter(dim, index, src_t)
 
-- name: scatter.value(Tensor self, int dim, Tensor index, Scalar value) -> Tensor
+- name: scatter.value(Tensor self, int dim, Tensor index, Scalar value, *, bool unique_indices=False) -> Tensor
   self: grad.scatter(dim, index, 0)
   index: non_differentiable
   result: self_t.scatter(dim, index, 0)
 
-- name: scatter_add(Tensor self, int dim, Tensor index, Tensor src) -> Tensor
+- name: scatter_add(Tensor self, int dim, Tensor index, Tensor src, *, bool unique_indices=False) -> Tensor
   self: grad
   index: non_differentiable
   src: grad.gather(dim, index)

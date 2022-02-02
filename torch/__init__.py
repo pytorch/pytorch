@@ -396,8 +396,15 @@ def use_deterministic_algorithms(mode, *, warn_only=False):
           tensor
         * :func:`torch.Tensor.put_` with ``accumulate=True`` when called on a CPU
           tensor
-        * :func:`torch.Tensor.scatter_add_` when ``input`` dimension is one and called
-          on a CUDA tensor
+        * :func:`torch.Tensor.scatter_add_` when called on a CPU tensor, ``index``
+          does not contain overlapping entries, and ``unique_indices=True`` is set
+        * :func:`torch.Tensor.scatter_add_` when called on a CUDA tensor and ``input``
+          has one dimension
+        * :func:`torch.Tensor.scatter_` when called on a CPU tensor, ``index`` does
+          not contain overlapping entries, and ``unique_indices=True`` is set
+        * :func:`torch.Tensor.scatter_` when called on a CUDA tensor, ``index`` does
+          not contain overlapping entries, ``unique_indices=True`` is set, and
+          ``reduction`` is not set to ``'add'``
         * :func:`torch.gather` when ``input`` dimension is one and called
           on a CUDA tensor that requires grad
         * :func:`torch.index_add` when called on CUDA tensor
@@ -433,9 +440,13 @@ def use_deterministic_algorithms(mode, *, warn_only=False):
         * :class:`torch.nn.CTCLoss` when attempting to differentiate a CUDA tensor
         * :class:`torch.nn.EmbeddingBag` when attempting to differentiate a CUDA tensor when
           ``mode='max'``
-        * :func:`torch.Tensor.scatter_add_` when ``input`` dimension is larger than one
-          and called on a CUDA tensor
-        * :func:`torch.Tensor.scatter_` when called on a CPU or CUDA tensor
+        * :func:`torch.Tensor.scatter_add_` when called on a CPU tensor and
+          ``unique_indices=False`` is set
+        * :func:`torch.Tensor.scatter_add_` when called on a CUDA tensor and
+          ``input`` has more than one dimension
+        * :func:`torch.Tensor.scatter_` when ``unique_indices=False`` is set
+        * :func:`torch.Tensor.scatter_` when called on a CUDA tensor and
+          ``reduction='add'`` is set
         * :func:`torch.gather` when ``input`` dimension is larger than one
           and called on a CUDA tensor that requires grad
         * :func:`torch.Tensor.put_` when ``accumulate=False``

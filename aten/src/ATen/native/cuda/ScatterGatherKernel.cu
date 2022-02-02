@@ -409,6 +409,9 @@ void scatter_reduce_cuda_kernel(const Tensor& self, const int64_t dim, const Ten
                                const Tensor& src, const SCATTER_GATHER_OP& reduce) {
   switch (reduce) {
   case SCATTER_GATHER_OP::REDUCE_ADD :
+    // See Note [Writing Nondeterministic Operations]
+    // Nondeterministic because of atomicAdd usage
+    globalContext().alertNotDeterministic("scatter_reduce_cuda_kernel with reduce_add");
     cuda_scatter_gather_base_kernel<true, false>()(self, dim, index, src,
                                        "scatter_reduce_cuda_add_", reduce_add);
     break;
@@ -423,6 +426,9 @@ void scatter_scalar_reduce_cuda_kernel(const Tensor& self, const int64_t dim, co
                                const Scalar& value, const SCATTER_GATHER_OP& reduce) {
   switch (reduce) {
   case SCATTER_GATHER_OP::REDUCE_ADD :
+    // See Note [Writing Nondeterministic Operations]
+    // Nondeterministic because of atomicAdd usage
+    globalContext().alertNotDeterministic("scatter_scalar_reduce_cuda_kernel with reduce_add");
     cuda_scatter_fill_base_kernel<false>()(self, dim, index, value,
                                       "scatter_fill_cuda_add_", reduce_add);
     break;

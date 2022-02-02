@@ -3232,7 +3232,7 @@ In-place version of :meth:`~Tensor.rsqrt`
 
 add_docstr_all('scatter_',
                r"""
-scatter_(dim, index, src, reduce=None) -> Tensor
+scatter_(dim, index, src, reduce=None, unique_indices=False) -> Tensor
 
 Writes all values from the tensor :attr:`src` into :attr:`self` at the indices
 specified in the :attr:`index` tensor. For each value in :attr:`src`, its output
@@ -3294,6 +3294,11 @@ Args:
     src (Tensor or float): the source element(s) to scatter.
     reduce (str, optional): reduction operation to apply, can be either
         ``'add'`` or ``'multiply'``.
+    unique_indices (bool, optional): whether the indices to be updated in
+        ``src`` are guaranteed not to overlap with each other. If true, this
+        operation will avoid throwing a nondeterministic error due to
+        overlapping indices while :func:``torch.use_deterministic_algorithms``
+        is enabled.  Default: ``False``.
 
 Example::
 
@@ -3325,7 +3330,7 @@ Example::
 
 add_docstr_all('scatter_add_',
                r"""
-scatter_add_(dim, index, src) -> Tensor
+scatter_add_(dim, index, src, unique_indices=False) -> Tensor
 
 Adds all values from the tensor :attr:`other` into :attr:`self` at the indices
 specified in the :attr:`index` tensor in a similar fashion as
@@ -3358,6 +3363,11 @@ Args:
         either empty or of the same dimensionality as ``src``. When empty, the
         operation returns ``self`` unchanged.
     src (Tensor): the source elements to scatter and add
+    unique_indices (bool, optional): whether the indices to be updated in
+        ``src`` are guaranteed not to overlap with each other. If true, this
+        operation will avoid throwing a nondeterministic error due to
+        overlapping indices while :func:``torch.use_deterministic_algorithms``
+        is enabled.  Default: ``False``.
 
 Example::
 
@@ -4735,14 +4745,14 @@ Out-of-place version of :meth:`torch.Tensor.index_fill_`.
 
 add_docstr_all('scatter',
                r"""
-scatter(dim, index, src) -> Tensor
+scatter(dim, index, src, unique_indices=False) -> Tensor
 
 Out-of-place version of :meth:`torch.Tensor.scatter_`
 """)
 
 add_docstr_all('scatter_add',
                r"""
-scatter_add(dim, index, src) -> Tensor
+scatter_add(dim, index, src, unique_indices=False) -> Tensor
 
 Out-of-place version of :meth:`torch.Tensor.scatter_add_`
 """)

@@ -142,18 +142,22 @@ void scatter_meta_impl(
 }
 
 TORCH_META_FUNC2(scatter, src)
-(const Tensor& self, int64_t dim, const Tensor& index, const Tensor& src) {
-  // See note [Writing Nondeterministic Operations]
-  // Nondeterministic when index contains duplicate entries
-  at::globalContext().alertNotDeterministic("scatter_src_out");
+(const Tensor& self, int64_t dim, const Tensor& index, const Tensor& src, bool unique_indices) {
+  if (!unique_indices) {
+    // See note [Writing Nondeterministic Operations]
+    // Nondeterministic when index contains duplicate entries
+    at::globalContext().alertNotDeterministic("scatter_src_out");
+  }
   scatter_meta_impl(*this, self, dim, index, src);
 }
 
 TORCH_META_FUNC2(scatter, value)
-(const Tensor& self, int64_t dim, const Tensor& index, const Scalar& value) {
-  // See note [Writing Nondeterministic Operations]
-  // Nondeterministic when index contains duplicate entries
-  at::globalContext().alertNotDeterministic("scatter_value_out");
+(const Tensor& self, int64_t dim, const Tensor& index, const Scalar& value, bool unique_indices) {
+  if (!unique_indices) {
+    // See note [Writing Nondeterministic Operations]
+    // Nondeterministic when index contains duplicate entries
+    at::globalContext().alertNotDeterministic("scatter_value_out");
+  }
   scatter_meta_impl(*this, self, dim, index);
 }
 
@@ -162,10 +166,13 @@ TORCH_META_FUNC2(scatter, reduce)
  int64_t dim,
  const Tensor& index,
  const Tensor& src,
- const c10::string_view reduce) {
-  // See note [Writing Nondeterministic Operations]
-  // Nondeterministic when index contains duplicate entries
-  at::globalContext().alertNotDeterministic("scatter_reduce_out");
+ const c10::string_view reduce,
+ bool unique_indices) {
+  if (!unique_indices) {
+    // See note [Writing Nondeterministic Operations]
+    // Nondeterministic when index contains duplicate entries
+    at::globalContext().alertNotDeterministic("scatter_reduce_out");
+  }
   scatter_meta_impl(*this, self, dim, index, src, reduce);
 }
 
@@ -174,15 +181,23 @@ TORCH_META_FUNC2(scatter, value_reduce)
  int64_t dim,
  const Tensor& index,
  const Scalar& src,
- const c10::string_view reduce) {
-  // See note [Writing Nondeterministic Operations]
-  // Nondeterministic when index contains duplicate entries
-  at::globalContext().alertNotDeterministic("scatter_value_reduce_out");
+ const c10::string_view reduce,
+ bool unique_indices) {
+  if (!unique_indices) {
+    // See note [Writing Nondeterministic Operations]
+    // Nondeterministic when index contains duplicate entries
+    at::globalContext().alertNotDeterministic("scatter_value_reduce_out");
+  }
   scatter_meta_impl(*this, self, dim, index, nullopt, reduce);
 }
 
 TORCH_META_FUNC(scatter_add)
-(const Tensor& self, int64_t dim, const Tensor& index, const Tensor& src) {
+(const Tensor& self, int64_t dim, const Tensor& index, const Tensor& src, bool unique_indices) {
+  if (!unique_indices) {
+    // See note [Writing Nondeterministic Operations]
+    // Nondeterministic when index contains duplicate entries
+    at::globalContext().alertNotDeterministic("scatter_add");
+  }
   scatter_meta_impl(*this, self, dim, index, src, "add");
 }
 
@@ -1236,10 +1251,13 @@ TORCH_IMPL_FUNC(scatter_src_out)
  int64_t dim,
  const Tensor& index,
  const Tensor& src,
+ bool unique_indices,
  const Tensor& out) {
-  // See note [Writing Nondeterministic Operations]
-  // Nondeterministic when index contains duplicate entries
-  at::globalContext().alertNotDeterministic("scatter_src_out");
+  if (!unique_indices) {
+    // See note [Writing Nondeterministic Operations]
+    // Nondeterministic when index contains duplicate entries
+    at::globalContext().alertNotDeterministic("scatter_src_out");
+  }
   scatter_impl(self, dim, index, src, out,
                scatter_reduce_stub,
                scatter_stub);
@@ -1250,10 +1268,13 @@ TORCH_IMPL_FUNC(scatter_value_out)
  int64_t dim,
  const Tensor& index,
  const Scalar& value,
+ bool unique_indices,
  const Tensor& out) {
-  // See note [Writing Nondeterministic Operations]
-  // Nondeterministic when index contains duplicate entries
-  at::globalContext().alertNotDeterministic("scatter_value_out");
+  if (!unique_indices) {
+    // See note [Writing Nondeterministic Operations]
+    // Nondeterministic when index contains duplicate entries
+    at::globalContext().alertNotDeterministic("scatter_value_out");
+  }
   scatter_impl(self, dim, index, value, out,
                scatter_scalar_reduce_stub,
                scatter_fill_stub);
@@ -1265,10 +1286,13 @@ TORCH_IMPL_FUNC(scatter_reduce_out)
  const Tensor& index,
  const Tensor& src,
  const c10::string_view reduce,
+ bool unique_indices,
  const Tensor& out) {
-  // See note [Writing Nondeterministic Operations]
-  // Nondeterministic when index contains duplicate entries
-  at::globalContext().alertNotDeterministic("scatter_reduce_out");
+  if (!unique_indices) {
+    // See note [Writing Nondeterministic Operations]
+    // Nondeterministic when index contains duplicate entries
+    at::globalContext().alertNotDeterministic("scatter_reduce_out");
+  }
   scatter_impl(self, dim, index, src, out,
                scatter_reduce_stub,
                scatter_stub,
@@ -1281,10 +1305,13 @@ TORCH_IMPL_FUNC(scatter_value_reduce_out)
  const Tensor& index,
  const Scalar& value,
  const c10::string_view reduce,
+ bool unique_indices,
  const Tensor& out) {
-  // See note [Writing Nondeterministic Operations]
-  // Nondeterministic when index contains duplicate entries
-  at::globalContext().alertNotDeterministic("scatter_value_reduce_out");
+  if (!unique_indices) {
+    // See note [Writing Nondeterministic Operations]
+    // Nondeterministic when index contains duplicate entries
+    at::globalContext().alertNotDeterministic("scatter_value_reduce_out");
+  }
   scatter_impl(self, dim, index, value, out,
                scatter_scalar_reduce_stub,
                scatter_fill_stub,
@@ -1296,6 +1323,7 @@ TORCH_IMPL_FUNC(scatter_add)
  int64_t dim,
  const Tensor& index,
  const Tensor& src,
+ bool unique_indices,
  const Tensor& out) {
   auto mut_out = const_cast<Tensor&>(out);
   dim = maybe_wrap_dim(dim, self.dim());
@@ -1306,6 +1334,9 @@ TORCH_IMPL_FUNC(scatter_add)
 
   if (index.numel() == 0) return;
 
+  // See Note [Enabling Deterministic Operations]
+  // When input is a CUDA tensor that has one dimension, we use the
+  // deterministic index_put_ with accumulation, which sorts the indices
   if (globalContext().deterministicAlgorithms() && self.device().type() == DeviceType::CUDA && self.dim() == 1) {
     TORCH_CHECK(index.dim() == 1 && src.dim() == 1, "index and src should be 1D tensors when self is a 1D tensor, "
       "but their dims are ", index.dim(), " and ", src.dim(), ", respectively");
@@ -1317,6 +1348,11 @@ TORCH_IMPL_FUNC(scatter_add)
     indices.push_back(index);
     mut_out.index_put_(indices, src, true);
   } else {
+    if (!unique_indices) {
+      // See note [Writing Nondeterministic Operations]
+      // Nondeterministic when index contains duplicate entries
+      at::globalContext().alertNotDeterministic("scatter_add");
+    }
     scatter_add_stub(self.device().type(), mut_out, dim, index, src);
   }
 }

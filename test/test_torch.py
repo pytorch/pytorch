@@ -4231,11 +4231,17 @@ else:
             index = torch.tensor([[3]], device=device)
             src = torch.tensor([[1.0]], device=device)
 
-            @expectedAlertNondeterministic('scatter_add_cuda_kernel', ['cuda'])
+            @expectedAlertNondeterministic('scatter_add')
             def forward_func(slf, device):
                 op_call(input, dim, index, src)
 
             forward_func(self, device)
+
+            @expectedAlertNondeterministic('scatter_add_cuda_kernel', ['cuda'])
+            def forward_func_unique_indices(slf, device):
+                op_call(input, dim, index, src, unique_indices=True)
+
+            forward_func_unique_indices(self, device)
 
         test_func(torch.Tensor.scatter_add_)
         test_func(torch.Tensor.scatter_add)
@@ -4252,26 +4258,38 @@ else:
             @expectedAlertNondeterministic('scatter_src_out')
             def test_scatter_src(slf, device):
                 op_call(input, dim, index, src)
-
             test_scatter_src(self, device)
 
             @expectedAlertNondeterministic('scatter_reduce_out')
             def test_scatter_reduce(slf, device):
                 op_call(input, dim, index, src, reduce='add')
-
             test_scatter_reduce(self, device)
 
             @expectedAlertNondeterministic('scatter_value_out')
             def test_scatter_value(slf, device):
                 op_call(input, dim, index, value)
-
             test_scatter_value(self, device)
 
             @expectedAlertNondeterministic('scatter_value_reduce_out')
             def test_scatter_reduce_value(slf, device):
                 op_call(input, dim, index, value, reduce='add')
-
             test_scatter_reduce_value(self, device)
+
+            # Setting unique_indices=True prevents nondeterministic errors
+            # when `reduce != 'add'` or device is not CUDA
+            @expectedAlertNondeterministic('scatter_reduce_cuda_kernel with reduce_add', ['cuda'])
+            def test_scatter_reduce_unique(slf, device):
+                op_call(input, dim, index, src, reduce='add', unique_indices=True)
+            test_scatter_reduce_unique(self, device)
+
+            @expectedAlertNondeterministic('scatter_scalar_reduce_cuda_kernel with reduce_add', ['cuda'])
+            def test_scatter_reduce_value_unique(slf, device):
+                op_call(input, dim, index, value, reduce='add', unique_indices=True)
+            test_scatter_reduce_value_unique(self, device)
+
+            with DeterministicGuard(True):
+                op_call(input, dim, index, src, unique_indices=True)
+                op_call(input, dim, index, value, unique_indices=True)
 
         test_func(torch.Tensor.scatter_)
         test_func(torch.Tensor.scatter)
@@ -4368,7 +4386,7 @@ else:
             res = op_call(a, dim, index)
             grad = torch.ones_like(res)
 
-            @expectedAlertNondeterministic('scatter_add_cuda_kernel', ['cuda'])
+            @expectedAlertNondeterministic('scatter_add')
             def backward_func(slf, device):
                 res.backward(grad)
 
