@@ -2441,3 +2441,83 @@ TEST(StaticRuntime, ReturnConstant) {
 
   testStaticRuntime(src, {});
 }
+
+TEST(StaticRuntime, SimpleIf) {
+  const auto src = R"JIT(
+    def forward(self, cond: bool, x):
+        if cond:
+            return torch.mul(x, 42).clone()
+        else:
+            return x.clone()
+  )JIT";
+
+  std::vector<IValue> args_false{false, at::randn({1})};
+  std::vector<IValue> args_true{true, at::randn({1})};
+  std::vector<IValue> args_big_tensor{true, at::randn({3, 3, 3})};
+
+  testStaticRuntime(src, args_false);
+  testStaticRuntime(src, args_true);
+  testStaticRuntime(src, args_true, args_big_tensor);
+}
+
+TEST(StaticRuntime, NestedIf) {
+  const auto src = R"JIT(
+    def forward(self, cond1: bool, cond2: bool, x):
+        y = x * 42
+        if cond1:
+            y = y * y
+            if cond2:
+                y += x
+        else:
+            if cond2:
+                return x.clone()
+
+        return y.clone()
+  )JIT";
+
+  for (auto cond1 : {true, false}) {
+    for (auto cond2 : {true, false}) {
+      std::vector<IValue> args1{cond1, cond2, at::randn({1})};
+      std::vector<IValue> args2{cond1, cond2, at::randn({3, 3, 3})};
+      testStaticRuntime(src, args1, args2);
+    }
+  }
+}
+
+TEST(StaticRuntime, DeeplyNestedIf) {
+  const auto src = R"JIT(
+    def forward(self, cond1: bool, cond2: bool, cond3: bool, x):
+        y = x * 42
+        if cond1:
+            y = y * y
+            if cond2:
+                y += x
+
+            if cond2 and cond3:
+                y += 1
+
+            if cond2:
+                if cond3:
+                    y += 2
+                else:
+                    y = y * y
+                    y += 4
+        else:
+            if cond2:
+                return x.clone()
+            if cond3 or cond2:
+                y += 42
+
+        return y.clone()
+  )JIT";
+
+  for (auto cond1 : {true, false}) {
+    for (auto cond2 : {true, false}) {
+      for (auto cond3 : {true, false}) {
+        std::vector<IValue> args1{cond1, cond2, cond3, at::randn({1})};
+        std::vector<IValue> args2{cond1, cond2, cond3, at::randn({3, 3, 3})};
+        testStaticRuntime(src, args1, args2);
+      }
+    }
+  }
+}
