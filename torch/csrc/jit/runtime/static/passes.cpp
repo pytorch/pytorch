@@ -961,10 +961,59 @@ void CreateOwnedRefsForSpecialValuesHelper(Graph& graph, Block* block) {
   }
 }
 
+void ForceNonEmptyOutputsHelper(Value* none_value, Block* block) {
+  for (auto* node : block->nodes()) {
+    bool needs_output = false;
+    for (auto* sub_block : node->blocks()) {
+      if (sub_block->outputs().empty()) {
+        sub_block->registerOutput(none_value);
+        needs_output = true;
+      }
+
+      ForceNonEmptyOutputsHelper(none_value, sub_block);
+    }
+
+    if (needs_output) {
+      // Loop sub-blocks should always return at least one output (the new loop
+      // condition)
+      DCHECK(node->kind() == prim::If);
+      auto* output = node->addOutput();
+      output->setType(c10::NoneType::get());
+    }
+  }
+}
+
+Node* findOrCreateNoneConstant(Graph& graph) {
+  // Only search the top-level block
+  for (auto* node : graph.nodes()) {
+    if (node->kind() != prim::Constant) {
+      continue;
+    }
+    const auto ival_opt = toIValue(node->output());
+    DCHECK(ival_opt.has_value());
+    if (ival_opt->isNone()) {
+      return node;
+    }
+  }
+
+  auto* none_node = graph.create(prim::Constant);
+  none_node->output()->setType(c10::NoneType::get());
+  graph.prependNode(none_node);
+  return none_node;
+}
+
 } // namespace
 
 void CreateOwnedRefsForSpecialValues(Graph& graph) {
   CreateOwnedRefsForSpecialValuesHelper(graph, graph.block());
+}
+
+void ForceNonEmptyOutputs(Graph& graph) {
+  auto* none_node = findOrCreateNoneConstant(graph);
+  ForceNonEmptyOutputsHelper(none_node->output(), graph.block());
+  if (!none_node->hasUses()) {
+    none_node->destroy();
+  }
 }
 
 } // namespace jit
