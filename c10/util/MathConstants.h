@@ -4,6 +4,11 @@
 #include <c10/util/BFloat16.h>
 #include <c10/util/Half.h>
 
+C10_CLANG_DIAGNOSTIC_PUSH()
+#if C10_CLANG_HAS_WARNING("-Wimplicit-float-conversion")
+C10_CLANG_DIAGNOSTIC_IGNORE("-Wimplicit-float-conversion")
+#endif
+
 namespace c10 {
 // TODO: Replace me with inline constexpr variable when C++17 becomes available
 namespace detail {
@@ -30,3 +35,5 @@ template <typename T>
 constexpr T pi = c10::detail::pi<T>();
 
 } // namespace c10
+
+C10_CLANG_DIAGNOSTIC_POP()
