@@ -26,3 +26,19 @@ class TestVersionedLinspaceOutV7(torch.nn.Module):
 
     def forward(self, a: Union[int, float, complex], b: Union[int, float, complex], out: torch.Tensor):
         return torch.linspace(a, b, out=out)
+
+class TestVersionedLogspaceV8(torch.nn.Module):
+    def __init__(self):
+        super(TestVersionedLogspaceV8, self).__init__()
+
+    def forward(self, a: Union[int, float, complex], b: Union[int, float, complex]):
+        c = torch.logspace(a, b, steps=5)
+        d = torch.logspace(a, b)
+        return c, d
+
+class TestVersionedLogspaceOutV8(torch.nn.Module):
+    def __init__(self):
+        super(TestVersionedLogspaceOutV8, self).__init__()
+
+    def forward(self, a: Union[int, float, complex], b: Union[int, float, complex], out: torch.Tensor):
+        return torch.logspace(a, b, out=out)
