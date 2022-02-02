@@ -165,6 +165,15 @@ c10::IValue Function::serialize() const {
 
   // memory_plan_
   dict.insert("memory_plan", memory_plan_.serialize());
+
+  // sym_shape_positions_
+  std::vector<c10::IValue> sym_shape_pos_vec;
+  for (const auto& sym_shape_pos : sym_shape_positions_) {
+    sym_shape_pos_vec.emplace_back(
+        Tup({sym_shape_pos.input_idx_, sym_shape_pos.dim_idx_}));
+  }
+  dict.insert("sym_shape_pos", Tup(std::move(sym_shape_pos_vec)));
+
   return dict;
 }
 
@@ -224,18 +233,32 @@ c10::impl::GenericList Function::run(
 
   // Fill in input tensors.
   TORCH_CHECK(
-      input_specs_.size() == inputs.size(),
+      input_specs_.size() == (inputs.size() + sym_shape_positions_.size()),
       "Input size doesn't match the spec, expect: ",
       input_specs_.size(),
       " actual: ",
       inputs.size());
+  std::vector<int64_t> scalar_values;
+  int offset = 0;
   for (const auto i : c10::irange(inputs.size())) {
     const c10::IValue& input = inputs[i];
+    const auto& spec = input_specs_[i];
     const auto& input_tensor = input.toTensor();
     TORCH_CHECK(
         input_specs_[i].validate(input_tensor), "Invalid input at pos: ", i);
     args[i] = input_tensor.data_ptr();
   }
+  offset += inputs.size();
+
+  scalar_values.reserve(sym_shape_positions_.size());
+  for (const auto i : c10::irange(sym_shape_positions_.size())) {
+    const auto& sym_shape_pos = sym_shape_positions_[i];
+    const c10::IValue& input = inputs[sym_shape_pos.input_idx_];
+    auto dim = input.toTensor().size(sym_shape_pos.dim_idx_);
+    scalar_values.push_back(dim);
+    args[i + offset] = &scalar_values[scalar_values.size() - 1];
+  }
+  offset += sym_shape_positions_.size();
 
   // Preallocate and fill in output tensors.
   c10::List<at::Tensor> outputs;
@@ -243,7 +266,7 @@ c10::impl::GenericList Function::run(
   for (const auto i : c10::irange(output_specs_.size())) {
     at::Tensor output = output_specs_[i].allocate();
     outputs.emplace_back(output);
-    args[inputs.size() + i] = output.data_ptr();
+    args[i + offset] = output.data_ptr();
   }
 
   // TODO: check consistency, e.g.: code version, input shape and compiled
