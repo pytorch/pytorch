@@ -1033,6 +1033,15 @@ void initJitScriptBindings(PyObject* module) {
         return self.old_schema;
       });
 
+  py::class_<UpgraderRange>(m, "_UpgraderRange")
+      .def(py::init<int, int>())
+      .def_property_readonly(
+          "min_version",
+          [](const UpgraderRange& self) { return self.min_version; })
+      .def_property_readonly("max_version", [](const UpgraderRange& self) {
+        return self.max_version;
+      });
+
   object_class.def(
       "__deepcopy__", [](const Object& self, const py::dict& memo) {
         return Object(
@@ -1547,6 +1556,15 @@ void initJitScriptBindings(PyObject* module) {
             return std::make_tuple(pp.str(), consts);
           })
       .def_property_readonly("owner", &Method::owner);
+  m.def("_generate_upgraders_graph", &generate_upgraders_graph);
+  m.def(
+      "_compile_graph_to_code_table",
+      [](const std::string& name, const std::shared_ptr<Graph>& graph) {
+        CompilationOptions options;
+        GraphFunction jitFunc(name, graph, nullptr);
+        auto mobileFunc = convertJitFunctionToMobileFunction(jitFunc, options);
+        return convertMobileFunctionToCodeTable(*mobileFunc, options);
+      });
   m.def(
       "_jit_script_compile",
       [](const std::string& qualname,
@@ -1617,8 +1635,6 @@ void initJitScriptBindings(PyObject* module) {
       py::arg("strict"),
       py::arg("force_outplace"),
       py::arg("argument_names") = std::vector<std::string>());
-
-  m.def("_generate_upgraders_bytecode", &generate_bytecode_list);
 
   m.def(
       "_jit_script_class_compile",
@@ -1739,6 +1755,7 @@ void initJitScriptBindings(PyObject* module) {
   m.def("merge_type_from_type_comment", &mergeTypesFromTypeComment);
   m.def("_get_max_operator_version", &getMaxOperatorVersion);
   m.def("_get_operator_version_map", &get_operator_version_map);
+  m.def("_get_upgrader_ranges", &getUpgradersRangeForOp);
   m.def("_test_only_add_entry_to_op_version_map", &test_only_add_entry);
   m.def("_test_only_remove_entry_to_op_version_map", &test_only_remove_entry);
   m.def(
