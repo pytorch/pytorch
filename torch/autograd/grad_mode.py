@@ -104,6 +104,12 @@ class no_grad(_DecoratorContextManager):
         disable gradients locally see :ref:`locally-disable-grad-doc` for
         more information on how they compare.
 
+    .. note::
+        Currently, this API does not apply to :ref:`forward-mode AD <forward-mode-ad>`
+        (possibly subject to change). As a workaround you can unpack your dual tensors.
+        If you have a use-case that could use this API, we'd like to hear your
+        `thoughts <https://github.com/pytorch/pytorch/issues/new>`_.
+
     Example::
 
         >>> x = torch.tensor([1], requires_grad=True)
@@ -146,6 +152,11 @@ class enable_grad(_DecoratorContextManager):
         enable_grad is one of several mechanisms that can enable or
         disable gradients locally see :ref:`locally-disable-grad-doc` for
         more information on how they compare.
+
+    .. note::
+        Currently, this API does not apply to :ref:`forward-mode AD <forward-mode-ad>`
+        (possibly subject to change). If you have a use-case that could use this API,
+        we'd like to hear your `thoughts <https://github.com/pytorch/pytorch/issues/new>`_.
 
     Example::
 
@@ -193,6 +204,11 @@ class set_grad_enabled(_DecoratorContextManager):
         disable gradients locally see :ref:`locally-disable-grad-doc` for
         more information on how they compare.
 
+    .. note::
+        Currently, this API does not apply to :ref:`forward-mode AD <forward-mode-ad>`
+        (possibly subject to change). If you have a use-case that could use this API,
+        we'd like to hear your `thoughts <https://github.com/pytorch/pytorch/issues/new>`_.
+
     Example::
 
         >>> x = torch.tensor([1], requires_grad=True)
@@ -233,7 +249,9 @@ class inference_mode(_DecoratorContextManager):
     InferenceMode is a new context manager analogous to :class:`~no_grad`
     to be used when you are certain your operations will have no interactions
     with autograd (e.g., model training). Code run under this mode gets better
-    performance by disabling view tracking and version counter bumps.
+    performance by disabling view tracking and version counter bumps. Note that
+    unlike some other mechanisms that locally enable or disable grad,
+    entering inference_mode also applies to :ref:`forward-mode AD <forward-mode-ad>`.
 
     This context manager is thread local; it will not affect computation
     in other threads.
