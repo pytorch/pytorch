@@ -418,7 +418,7 @@ class ParameterList(Module):
     r"""Holds parameters in a list.
 
     :class:`~torch.nn.ParameterList` can be used like a regular Python
-    list, but Tensor that are :class:`~torch.nn.Parameter` are properly registered,
+    list, but Tensors that are :class:`~torch.nn.Parameter` are properly registered,
     and will be visible by all :class:`~torch.nn.Module` methods.
 
     Args:
@@ -680,10 +680,7 @@ class ParameterDict(Module):
             key (string): key to get from the ParameterDict
             default (Parameter, optional): value to return if key not present
         """
-        if key in self:
-            return self[key]
-        else:
-            return default
+        return self[key] if key in self else default
 
     def fromkeys(self, keys: Iterable[str], default: Optional[Any] = None) -> 'ParameterDict':
         r"""Return a new ParameterDict with the keys provided
