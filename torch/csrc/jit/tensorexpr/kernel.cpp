@@ -1107,7 +1107,7 @@ bool denseAndNonOverlapping(
   return (strides == at::infer_dense_strides(sizes, strides));
 }
 
-Tensor TensorExprKernel::convertOutputToCorrectStrides(
+Tensor TensorExprKernel::convertSymbolicOutputToCorrectStrides(
     const std::vector<ExprHandle>& sizes,
     const std::vector<size_t>& sorted_stride_indices_descending,
     const std::vector<ExprPtr>& strides,
@@ -1149,12 +1149,11 @@ Tensor TensorExprKernel::convertOutputToCorrectStrides(
           auto size = sizes[stride_index];
           auto stride = strides[stride_index];
           auto index = absolute_position / ExprHandle(stride);
-          auto one = Cast::make(size.dtype(), 1);
-          // if the size is one, we don't advance the absolute position
-          // which would give 0
-          auto non_one_position = absolute_position % ExprHandle(stride);
-          absolute_position = CompareSelect::make(
-              size, one, absolute_position, non_one_position, kEQ);
+          // XXX, in symbolic output ordering, we do not the arbitrary
+          // ordering of strides as in usual output ordering, just
+          // channels last, so even in the presence of size == 1
+          // we produce correct output here
+          absolute_position = absolute_position % ExprHandle(stride);
           new_axes[stride_index] = index;
         }
         return BufHandle(buf).load(new_axes);
@@ -1188,7 +1187,7 @@ Tensor TensorExprKernel::convertSymbolicOutputToCorrectStrides(
   auto zero = LongImm::make(0);
   std::vector<ExprPtr> default_strides = make_contiguous_strides(sizes);
   // See explanation in convertOutputToCorrectStrides
-  return convertOutputToCorrectStrides(
+  return convertSymbolicOutputToCorrectStrides(
       sizes, sorted_stride_indices, strides, buf);
 }
 
