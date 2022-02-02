@@ -5754,6 +5754,9 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
     @dtypes(*get_all_complex_dtypes(), *get_all_fp_dtypes())
     @tf32_on_and_off(0.05)
     def test_addmm(self, device, dtype):
+        should_test_half_to_float_gemm = (
+            self.device_type == 'cuda' and dtype == torch.half and not TEST_WITH_ROCM)
+
         def _torch_addmm_cuda_half_to_float(*args, **kwargs):
             out = torch.addmm(*args, **kwargs, dtype=torch.float)
             self.assertTrue(out.dtype == torch.float)
@@ -5763,7 +5766,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         m1 = torch.randn(10, 50, device=device).to(dtype)
         m2 = torch.randn(50, 25, device=device).to(dtype)
         self._test_addmm_addmv(torch.addmm, M, m1, m2)
-        if self.device_type == 'cuda' and dtype == torch.half:
+        if should_test_half_to_float_gemm:
             self._test_addmm_addmv(_torch_addmm_cuda_half_to_float, M, m1, m2)
 
         # Test 0-strided
@@ -5771,7 +5774,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         m1 = torch.randn(10, 1, device=device).to(dtype).expand(10, 50)
         m2 = torch.randn(50, 25, device=device).to(dtype)
         self._test_addmm_addmv(torch.addmm, M, m1, m2)
-        if self.device_type == 'cuda' and dtype == torch.half:
+        if should_test_half_to_float_gemm:
             self._test_addmm_addmv(_torch_addmm_cuda_half_to_float, M, m1, m2)
 
         # Test beta=0, M=nan
@@ -5779,7 +5782,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         m1 = torch.randn(10, 50, device=device).to(dtype)
         m2 = torch.randn(50, 25, device=device).to(dtype)
         self._test_addmm_addmv(torch.addmm, M, m1, m2, beta=0)
-        if self.device_type == 'cuda' and dtype == torch.half:
+        if should_test_half_to_float_gemm:
             self._test_addmm_addmv(_torch_addmm_cuda_half_to_float, M, m1, m2, beta=0)
 
         # Test transpose
@@ -5793,7 +5796,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
             m1 = maybe_transpose(t2, torch.randn(10, 50, device=device).to(dtype))
             m2 = maybe_transpose(t3, torch.randn(50, 25, device=device).to(dtype))
             self._test_addmm_addmv(torch.addmm, M, m1, m2, transpose_out=t4)
-            if self.device_type == 'cuda' and dtype == torch.half:
+            if should_test_half_to_float_gemm:
                 self._test_addmm_addmv(_torch_addmm_cuda_half_to_float, M, m1, m2, transpose_out=t4)
 
     @dtypes(torch.float, torch.double)
@@ -6065,7 +6068,8 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
                     self.assertRaises(RuntimeError, lambda: torch.bmm(b1, b2, out=res2.cpu()))
 
     def _test_addbmm_baddbmm(self, func, b1, b2, ref, out_tensor):
-        should_test_half_to_float_gemm = (out_tensor.is_cuda and out_tensor.dtype == torch.half and func == 'baddbmm')
+        should_test_half_to_float_gemm = (
+            out_tensor.is_cuda and out_tensor.dtype == torch.half and func == 'baddbmm' and not TEST_WITH_ROCM)
         torch_func = getattr(torch, func)
 
         def _test_wrapper(expected, *args, **kwargs):

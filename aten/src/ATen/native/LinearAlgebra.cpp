@@ -39,7 +39,11 @@ TORCH_META_FUNC(addmm)(const Tensor& self, const Tensor& mat1, const Tensor& mat
 
   auto names = at::namedinference::propagate_names_for_addmm(mat1, mat2, self);
   if (dtype_opt.has_value() && dtype_opt.value() == at::kFloat && self.dtype() == at::kHalf && self.is_cuda()) {
+#ifdef USE_ROCM
+    TORCH_CHECK(false, "addmm: inputs of half precision with kwarg dtype=torch.float is not supported for this backend.");
+#else
     set_output(0, {mat1.sizes()[0], mat2.sizes()[1]}, {}, self.options().dtype(at::kFloat), names);
+#endif
   } else {
     set_output(0, {mat1.sizes()[0], mat2.sizes()[1]}, {}, self.options(), names);
   }
@@ -78,7 +82,11 @@ void common_checks_baddbmm_bmm(Meta& meta, const Tensor& batch1, const Tensor& b
   auto& result = meta.maybe_get_output(0);
   // 'set_output' does not resize for in-place calls
   if (dtype_opt.has_value() && dtype_opt.value() == at::kFloat && batch2.dtype() == at::kHalf && batch2.is_cuda()) {
+#ifdef USE_ROCM
+    TORCH_CHECK(false, "baddbmm: inputs of half precision with kwarg dtype=torch.float is not supported for this backend.");
+#else
     meta.set_output(output_size, batch2.options().dtype(at::kFloat));
+#endif
   } else {
     meta.set_output(output_size, batch2.options());
   }
