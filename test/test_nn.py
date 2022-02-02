@@ -1853,10 +1853,6 @@ class TestNN(NNTestCase):
         with self.assertRaises(ValueError):
             parameter_dict.update(Parameter(torch.randn(10, 10)))
 
-        # Any hashable type is a valid key
-        parameter_dict[1] = Parameter(torch.randn(10, 10))
-        del parameter_dict[1]
-
         p_pop = parameter_dict.pop('p4')
         self.assertIs(p_pop, parameters['p4'])
         parameters.pop('p4')

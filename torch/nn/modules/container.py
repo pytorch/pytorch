@@ -538,21 +538,18 @@ class ParameterList(Module):
 class ParameterDict(Module):
     r"""Holds parameters in a dictionary.
 
-    ParameterDict can be indexed like a regular Python dictionary, but parameters it
+    ParameterDict can be indexed like a regular Python dictionary, but Parameters it
     contains are properly registered, and will be visible by all Module methods.
     Other objects are treated as would be done by a regular Python dictionary
 
-    :class:`~torch.nn.ParameterDict` is an **ordered** dictionary that respects
-
-    * the order of insertion, and
-
-    * in :meth:`~torch.nn.ParameterDict.update`, the order of the merged ``OrderedDict``
-      or another :class:`~torch.nn.ParameterDict` (the argument to
-      :meth:`~torch.nn.ParameterDict.update`).
-
-    Note that :meth:`~torch.nn.ParameterDict.update` with other unordered mapping
+    :class:`~torch.nn.ParameterDict` is an **ordered** dictionary.
+    :meth:`~torch.nn.ParameterDict.update` with other unordered mapping
     types (e.g., Python's plain ``dict``) does not preserve the order of the
-    merged mapping.
+    merged mapping. On the other hand, ``OrderedDict`` or another :class:`~torch.nn.ParameterDict`
+    will preserve their ordering.
+
+    Note that both the constructor, assigning an element of the dictionary and the
+    :meth:`~torch.nn.ParameterDict.update` method will convert any ``Tensor`` into ``Parameter``.
 
     Args:
         values (iterable, optional): a mapping (dictionary) of
@@ -576,54 +573,58 @@ class ParameterDict(Module):
 
     def __init__(self, parameters: Optional[Mapping[str, Any]] = None) -> None:
         super(ParameterDict, self).__init__()
-        self._idxs: Dict[str, None] = {}
-        # BC-breaking if this was passed plain Tensors before
+        self._keys: Dict[str, None] = {}
         if parameters is not None:
             self.update(parameters)
 
-    def _index_to_key(self, idx: str) -> str:
-        if not isinstance(idx, str):
+    def _key_to_attr(self, key: str) -> str:
+        if not isinstance(key, str):
             raise TypeError("Index given to ParameterDict cannot be used as a key as it is "
-                            f"not a string. Type is '{type(idx).__name__}'. Open an issue on "
+                            f"not a string (type is '{type(key).__name__}'). Open an issue on "
                             "github if you need non-string keys.")
         else:
-            # Do some mangling so that users can have entries that would otherwise conflict
-            # with Module attributes
-            return f"_internal_key{idx}"
+            # Use the key as-is so that `.named_parameters()` returns the right thing
+            return key
 
-    def __getitem__(self, idx: str) -> Any:
-        key = self._index_to_key(idx)
-        return getattr(self, key)
+    def __getitem__(self, key: str) -> Any:
+        attr = self._key_to_attr(key)
+        return getattr(self, attr)
 
-    def __setitem__(self, idx: str, value: Any) -> None:
-        # BC-breaking if this was passed plain Tensors before
-        self._idxs[idx] = None
-        key = self._index_to_key(idx)
-        setattr(self, key, value)
+    def __setitem__(self, key: str, value: Any) -> None:
+        # Note that all other function that add an entry to the dictionary part of
+        # the ParameterDict end up here. So this is the only place where we need
+        # to wrap things into Parameter.
+        # Objects added via setattr() are not in the dictionary part and thus won't
+        # call into this function.
+        self._keys[key] = None
+        attr = self._key_to_attr(key)
+        if isinstance(value, torch.Tensor) and not isinstance(value, Parameter):
+            value = Parameter(value)
+        setattr(self, attr, value)
 
-    def __delitem__(self, idx: str) -> None:
-        del self._idxs[idx]
-        key = self._index_to_key(idx)
-        delattr(self, key)
+    def __delitem__(self, key: str) -> None:
+        del self._keys[key]
+        attr = self._key_to_attr(key)
+        delattr(self, attr)
 
     def __len__(self) -> int:
-        return len(self._idxs)
+        return len(self._keys)
 
     def __iter__(self) -> Iterator[str]:
-        return iter(self._idxs)
+        return iter(self._keys)
 
     def __reversed__(self) -> Iterator[str]:
-        return reversed(list(self._idxs))
+        return reversed(list(self._keys))
 
     def copy(self) -> 'ParameterDict':
         """Returns a copy of this :class:`~torch.nn.ParameterDict` instance.
         """
         # We have to use an OrderedDict because the ParameterDict constructor
         # behaves differently on plain dict vs OrderedDict
-        return ParameterDict(OrderedDict((k, self[k]) for k in self._idxs))
+        return ParameterDict(OrderedDict((k, self[k]) for k in self._keys))
 
     def __contains__(self, key: str) -> bool:
-        return key in self._idxs
+        return key in self._keys
 
     def setdefault(self, key: str, default: Optional[Any] = None) -> Any:
         """If key is in the ParameterDict, return its value.
@@ -634,6 +635,7 @@ class ParameterDict(Module):
             key (string): key to set default for
             default (Any): the parameter set to the key
         """
+
         if key not in self:
             self[key] = default
         return self[key]
@@ -641,7 +643,7 @@ class ParameterDict(Module):
     def clear(self) -> None:
         """Remove all items from the ParameterDict.
         """
-        for k in self._idxs.copy():
+        for k in self._keys.copy():
             del self[k]
 
     def pop(self, key: str) -> Any:
@@ -658,9 +660,9 @@ class ParameterDict(Module):
         """Remove and return the last inserted `(key, parameter)` pair
         from the ParameterDict
         """
-        k, _ = self._idxs.popitem()
-        # We need the key in the _idxs to be able to access/del
-        self._idxs[k] = None
+        k, _ = self._keys.popitem()
+        # We need the key in the _keys to be able to access/del
+        self._keys[k] = None
         val = self[k]
         del self[k]
         return k, val
@@ -690,17 +692,17 @@ class ParameterDict(Module):
     def keys(self) -> Iterable[str]:
         r"""Return an iterable of the ParameterDict keys.
         """
-        return self._idxs.keys()
+        return self._keys.keys()
 
     def items(self) -> Iterable[Tuple[str, Any]]:
         r"""Return an iterable of the ParameterDict key/value pairs.
         """
-        return ((k, self[k]) for k in self._idxs)
+        return ((k, self[k]) for k in self._keys)
 
     def values(self) -> Iterable[Any]:
         r"""Return an iterable of the ParameterDict values.
         """
-        return (self[k] for k in self._idxs)
+        return (self[k] for k in self._keys)
 
     def update(self, parameters: Union[Mapping[str, Any], 'ParameterDict']) -> None:
         r"""Update the :class:`~torch.nn.ParameterDict` with the key-value pairs from a
