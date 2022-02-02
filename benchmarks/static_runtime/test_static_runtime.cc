@@ -2521,3 +2521,60 @@ TEST(StaticRuntime, DeeplyNestedIf) {
     }
   }
 }
+
+TEST(StaticRuntime, BasicForLoop) {
+  const auto src = R"JIT(
+    def forward(self, x, loop_max: int):
+        y = x.clone()
+        for i in range(loop_max):
+            y += 1
+        return y
+  )JIT";
+
+  std::vector<IValue> args1{at::randn({1}), 10};
+  std::vector<IValue> args2{at::randn({3, 3, 3}), 10};
+
+  testStaticRuntime(src, args1, args2);
+}
+
+TEST(StaticRuntime, BasicWhileLoop) {
+  const auto src = R"JIT(
+    def forward(self, x, loop_max: int):
+        y = x.clone()
+        loop_count = 0
+        while loop_count < loop_max:
+            y += 1
+            loop_count += 1
+        return y
+  )JIT";
+
+  std::vector<IValue> args1{at::randn({1}), 10};
+  std::vector<IValue> args2{at::randn({3, 3, 3}), 10};
+
+  testStaticRuntime(src, args1, args2);
+}
+
+TEST(StaticRuntime, NestedLoops) {
+  const auto src = R"JIT(
+    def forward(self, x, loop_max: int):
+        y = x.clone()
+        even: List[int] = []
+        odd: List[int] = []
+
+        for i in range(loop_max):
+            if i % 2:
+                odd.append(i)
+            else:
+                even.append(i)
+
+            for j in range(i):
+                y += 1
+
+        return y, even, odd
+  )JIT";
+
+  std::vector<IValue> args1{at::randn({1}), 10};
+  std::vector<IValue> args2{at::randn({3, 3, 3}), 10};
+
+  testStaticRuntime(src, args1, args2);
+}

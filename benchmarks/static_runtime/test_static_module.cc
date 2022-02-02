@@ -328,8 +328,8 @@ TEST(StaticRuntime, CanEnableStaticRuntime) {
   )JIT";
 
   EXPECT_TRUE(testCanEnableStaticRuntime(reshape_inplace_script));
-  EXPECT_FALSE(testCanEnableStaticRuntime(for_script));
-  EXPECT_FALSE(testCanEnableStaticRuntime(while_script));
+  EXPECT_TRUE(testCanEnableStaticRuntime(for_script));
+  EXPECT_TRUE(testCanEnableStaticRuntime(while_script));
   EXPECT_TRUE(testCanEnableStaticRuntime(if_script));
   EXPECT_FALSE(testCanEnableStaticRuntime(is_script));
   EXPECT_FALSE(testCanEnableStaticRuntime(is_not_script));
