@@ -181,6 +181,10 @@ class TORCH_API TensorExprKernel {
     return codegen_->kernel_func_name();
   }
 
+  const std::vector<int64_t>& getSymbolicShapeInputs() const {
+    return symbolic_shape_inputs_;
+  }
+
  private:
   enum BackendType {
     kUninitialized,
@@ -226,7 +230,7 @@ class TORCH_API TensorExprKernel {
 
   Tensor convertSymbolicOutputToCorrectStrides(torch::jit::Value* v);
   Tensor convertStaticShapeOutputToCorrectStrides(torch::jit::Value* v);
-  Tensor convertOutputToCorrectStrides(
+  Tensor convertSymbolicOutputToCorrectStrides(
       const std::vector<ExprHandle>& sizes,
       const std::vector<size_t>& sorted_stride_indices_descending,
       const std::vector<ExprPtr>& strides,
