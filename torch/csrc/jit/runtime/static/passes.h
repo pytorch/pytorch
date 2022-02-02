@@ -41,6 +41,20 @@ inline c10::Symbol fromQualString(const std::string& qual_string) {
   return c10::Symbol::fromQualString(qual_string);
 }
 
+// [Create owned refs for special values]
+// StaticRuntimeBlockRunner moves its outputs to the return value at the end of
+// run_impl. However, there's a corner case where this can cause problems. If
+// we return a constant, then the only reference in the constants_ array can
+// be destroyed by this move.
+// We could add special logic to handle this in run_impl. But since this is a
+// relatively rare corner case, it's simpler to just add an op that does nothing
+// but create an owned reference to its input. This owned reference can be
+// safely moved out of StaticRuntimeBlockRunner. Note that for scalars,
+// this actually does a copy.
+// Note that we have to do the same thing if we are returning a value from an
+// outer scope in a sub-block.
+void CreateOwnedRefsForSpecialValues(Graph& graph);
+
 TORCH_API void UseVariadicGroupedAccessor(const std::shared_ptr<Graph>& graph);
 
 } // namespace jit
