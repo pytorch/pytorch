@@ -2736,14 +2736,6 @@ class TestTensorCreation(TestCase):
             self.assertEqual(t[0], a[0])
             self.assertEqual(t[steps - 1], a[steps - 1])
 
-    def _logspace_warning_helper(self, op, device, dtype):
-        with self.assertWarnsOnceRegex(UserWarning, "Not providing a value for .+"):
-            op(0, 10, device=device, dtype=dtype)
-
-    @dtypes(torch.float)
-    def test_logspace_steps_warning(self, device, dtype):
-        self._logspace_warning_helper(torch.logspace, device, dtype)
-
     @onlyCUDA
     @largeTensorTest('16GB')
     def test_range_factories_64bit_indexing(self, device):
@@ -3092,6 +3084,8 @@ class TestTensorCreation(TestCase):
         torch.logspace(_from, to, 137, device=device, dtype=dtype, out=res2)
         self.assertEqual(res1, res2, atol=0, rtol=0)
         self.assertRaises(RuntimeError, lambda: torch.logspace(0, 1, -1, device=device, dtype=dtype))
+        # steps not provided
+        self.assertRaises(TypeError, lambda: torch.logspace(0, 1, device=device, dtype=dtype))
         self.assertEqual(torch.logspace(0, 1, 1, device=device, dtype=dtype),
                          torch.ones(1, device=device, dtype=dtype), atol=0, rtol=0)
 
