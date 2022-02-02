@@ -147,11 +147,12 @@ class AllModuleTracer(torch.fx.Tracer):
 
                 # TODO move op-specific logic out of here
                 if target is torch.ops.quantized.linear:
-                    new_args = [*args]
-                    new_args.append(additional_kwargs['scale'])
-                    new_args.append(additional_kwargs['zero_point'])
-                    args = tuple(new_args)
-                    del kwargs['bias']
+                    def linear_rewrite_args(input, weight, bias=None):
+                        return (input, weight,
+                                additional_kwargs['scale'],
+                                additional_kwargs['zero_point'])
+                    args = linear_rewrite_args(*args, **kwargs)
+                    kwargs = {}
                 elif old_target != F.conv2d or target is F.conv2d:
                     kwargs.update(**additional_kwargs)
                 else:
