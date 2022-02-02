@@ -532,7 +532,8 @@ def _model_to_graph(model, args, verbose=False,
     if training is None or training == TrainingMode.EVAL:
         params_dict = torch._C._jit_pass_onnx_eval_peephole(graph, params_dict)
 
-    if do_constant_folding and _export_onnx_opset_version in torch.onnx.constant_folding_opset_versions:
+    from torch.onnx.symbolic_helper import _constant_folding_opset_versions
+    if do_constant_folding and _export_onnx_opset_version in _constant_folding_opset_versions:
         params_dict = torch._C._jit_pass_onnx_constant_fold(graph, params_dict,
                                                             _export_onnx_opset_version)
         torch._C._jit_pass_dce_allow_deleting_nodes_with_side_effects(graph)
@@ -553,31 +554,18 @@ def _model_to_graph(model, args, verbose=False,
     params_dict = torch._C._jit_pass_filter_non_tensor_arguments(params_dict)
     torch._C._jit_decay_packed_param_input_types(graph)
 
+    # If output names lack a proper name and are identified only by their unique
+    # give them a legible name for debugging purposes
+    _apply_friendly_debug_names(graph, params_dict)
+
     return graph, params_dict, torch_out
 
 
-def export_to_pretty_string(model, args, f, export_params=True, verbose=False, training=None,
+def export_to_pretty_string(model, args, export_params=True, verbose=False, training=None,
                             input_names=None, output_names=None, operator_export_type=OperatorExportTypes.ONNX,
                             export_type=ExportTypes.PROTOBUF_FILE, google_printer=False, opset_version=None,
                             keep_initializers_as_inputs=None, custom_opsets=None, add_node_names=True,
                             do_constant_folding=True, dynamic_axes=None):
-    if f is not None:
-        warnings.warn("'f' is deprecated and ignored. It will be removed in the next PyTorch release.")
-    return _export_to_pretty_string(model, args, f, export_params, verbose, training,
-                                    input_names, output_names, operator_export_type,
-                                    export_type, google_printer, opset_version,
-                                    do_constant_folding=do_constant_folding,
-                                    add_node_names=add_node_names,
-                                    keep_initializers_as_inputs=keep_initializers_as_inputs,
-                                    custom_opsets=custom_opsets, dynamic_axes=dynamic_axes)
-
-
-def _export_to_pretty_string(model, args, f, export_params=True, verbose=False, training=None,
-                             input_names=None, output_names=None, operator_export_type=OperatorExportTypes.ONNX,
-                             export_type=ExportTypes.PROTOBUF_FILE, google_printer=False, opset_version=None,
-                             do_constant_folding=True, keep_initializers_as_inputs=None,
-                             fixed_batch_size=False, custom_opsets=None, add_node_names=True,
-                             onnx_shape_inference=True, dynamic_axes=None):
     from torch.onnx.symbolic_helper import _default_onnx_opset_version, _set_opset_version
     from torch.onnx.symbolic_helper import _set_operator_export_type
     if opset_version is None:
@@ -587,7 +575,7 @@ def _export_to_pretty_string(model, args, f, export_params=True, verbose=False, 
     _set_opset_version(opset_version)
     _set_operator_export_type(operator_export_type)
     from torch.onnx.symbolic_helper import _set_onnx_shape_inference
-    _set_onnx_shape_inference(onnx_shape_inference)
+    _set_onnx_shape_inference(True)
     with exporter_context(model, training):
         val_keep_init_as_ip = _decide_keep_init_as_input(keep_initializers_as_inputs,
                                                          operator_export_type,
@@ -598,7 +586,6 @@ def _export_to_pretty_string(model, args, f, export_params=True, verbose=False, 
         graph, params_dict, torch_out = _model_to_graph(model, args, verbose, input_names,
                                                         output_names, operator_export_type,
                                                         val_do_constant_folding,
-                                                        fixed_batch_size=fixed_batch_size,
                                                         training=training, dynamic_axes=dynamic_axes)
 
         return graph._pretty_print_onnx(params_dict, opset_version, False,
@@ -675,6 +662,10 @@ def _export(model, args, f, export_params=True, verbose=False, training=None,
             fixed_batch_size=False, custom_opsets=None, add_node_names=True,
             onnx_shape_inference=True, export_modules_as_functions=False):
 
+    if export_modules_as_functions and opset_version < 15:
+        raise ValueError("`export_modules_as_functions` is not supported for `opset_version` < 15."
+                         "This is because `opset_version` < 15 implies IR version < 8, which means "
+                         "no local function support. ")
     export_modules_as_functions = _setup_trace_module_map(model, export_modules_as_functions)
 
     if isinstance(model, torch.nn.DataParallel):
@@ -799,6 +790,18 @@ def _export(model, args, f, export_params=True, verbose=False, training=None,
         __IN_ONNX_EXPORT = False
         _reset_trace_module_map()
     return torch_out
+
+
+def _apply_friendly_debug_names(graph, params):
+    for n in graph.nodes():
+        for v in n.inputs():
+            old_name = v.debugName()
+            if old_name != str(v.unique()):
+                continue
+            new_name = f"{n.kind()}_{v.unique()}"
+            v.setDebugName(new_name)
+            if old_name in params:
+                params[new_name] = params.pop(old_name)
 
 
 def _set_input_and_output_names(graph, input_names, output_names):

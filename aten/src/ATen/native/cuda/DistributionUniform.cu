@@ -1,5 +1,5 @@
 #include <ATen/Dispatch.h>
-#include <ATen/CUDAGeneratorImpl.h>
+#include <ATen/cuda/CUDAGeneratorImpl.h>
 #include <ATen/native/UnaryOps.h>
 #include <ATen/native/cuda/DistributionTemplates.h>
 #include <ATen/native/Distributions.h>

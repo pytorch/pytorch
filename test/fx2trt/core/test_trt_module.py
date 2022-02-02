@@ -1,4 +1,4 @@
-import unittest
+# Owner(s): ["oncall: aiacc"]
 
 import torch
 import torch.fx
@@ -8,9 +8,11 @@ from torch.fx.experimental.fx2trt import (
     InputTensorSpec,
     TRTModule,
 )
+from torch.testing._internal.common_utils import TestCase, run_tests
+import os
 
 
-class TestTRTModule(unittest.TestCase):
+class TestTRTModule(TestCase):
     def test_save_and_load_trt_module(self):
         class TestModule(torch.nn.Module):
             def forward(self, x):
@@ -29,6 +31,7 @@ class TestTRTModule(unittest.TestCase):
         torch.testing.assert_allclose(
             reload_trt_mod(inputs[0].cuda()).cpu(), ref_output, rtol=1e-04, atol=1e-04
         )
+        os.remove(f"{os.getcwd()}/trt.pt")
 
     def test_save_and_load_state_dict(self):
         class TestModule(torch.nn.Module):
@@ -50,3 +53,6 @@ class TestTRTModule(unittest.TestCase):
         torch.testing.assert_allclose(
             new_trt_mod(inputs[0].cuda()).cpu(), ref_output, rtol=1e-04, atol=1e-04
         )
+
+if __name__ == '__main__':
+    run_tests()

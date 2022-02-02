@@ -428,7 +428,7 @@ void block_sparse_mm(
     const Tensor& result) {
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(mat1.is_sparse_csr());
   // values is expected to be a blocks of sparse matrix
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(mat1.values().dim() == 3);
+  TORCH_INTERNAL_ASSERT(mat1.values().dim() == 3);
   // blocks are expected to be square
   TORCH_INTERNAL_ASSERT(mat1.values().size(2) == mat1.values().size(1));
   // only block of size > 1 is supported in cuSPARSE
@@ -520,7 +520,7 @@ void spmm(
     const Scalar& beta,
     const Scalar& alpha,
     const Tensor& result) {
-  if (mat1.values().dim() == 3 && mat1.values().size(-1) > 1) {
+  if (mat1.values().dim() >= 3 && mat1.values().size(-1) > 1) {
     return block_sparse_mm(mat1, mat2, beta, alpha, result);
   }
 #if !AT_USE_CUSPARSE_GENERIC_API()
@@ -543,9 +543,9 @@ void spmm(
   IntArrayRef result_strides = result_->strides();
   IntArrayRef mat2_strides = mat2_->strides();
   auto ndim = result_->dim();
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(ndim == 2);
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(mat1.dim() == 2);
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(mat2.dim() == 2);
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(ndim == 2 || ndim == 3);
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(mat1.dim() == 2 || mat1.dim() == 3);
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(mat2.dim() == 2 || mat2.dim() == 3);
   bool is_result_row_major = (result_strides[ndim - 1] == 1);
   bool is_mat2_row_major = (mat2_strides[ndim - 1] == 1);
   bool transpose_B = (is_result_row_major ^ is_mat2_row_major);
@@ -1063,6 +1063,11 @@ void triangular_solve_out_sparse_csr(
     bool upper,
     bool transpose,
     bool unitriangular) {
+  if (B.numel() == 0 || X.numel() == 0 || A._nnz() == 0) {
+    // If A has no nnz, then A is singular and we can't solve.
+    X.fill_(NAN);
+    return;
+  }
   if (A.values().dim() == 3 && A.values().size(-1) > 1) {
     if (B.size(-1) == 1) {
       return block_sparse_triangular_solve_vec(A, B, X, upper, transpose, unitriangular);
@@ -1077,10 +1082,6 @@ void triangular_solve_out_sparse_csr(
       "PyTorch with at least CUDA 11.3. ",
       "Please use PyTorch built with newer CUDA version.");
 #else
-  if (B.numel() == 0 || X.numel() == 0 || A._nnz() == 0) {
-    return;
-  }
-
   c10::MaybeOwned<Tensor> X_ = prepare_dense_matrix_for_cusparse(X);
   // It should be possible to use mixed memory format
   // but there is a bug in CUDA 11.3.1 version:
