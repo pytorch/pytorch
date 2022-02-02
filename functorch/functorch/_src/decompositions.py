@@ -277,3 +277,31 @@ def _s_where_canonicalization(a, b, c):
 @register_decomposition(aten.detach)
 def detach_decomposition(x):
     return x
+
+
+@register_decomposition(aten.var)
+def var_decomposition(x, dims, correction=0, keepdim=False):
+    if dims is None:
+        dims = []
+
+    if isinstance(dims, (tuple, list)) and len(dims) == 0:
+        n = x.numel()
+    else:
+        n = 1
+        for dim in dims:
+            n *= x.shape[dim]
+
+    mean = aten.mean(x, dims, True)
+    sub = x - mean
+    sq = sub * sub
+    sum = aten.sum(sq, dims, keepdim)
+
+    if correction:
+        n = n - correction
+
+    return sum / n
+
+
+@register_decomposition(aten.std)
+def std_decomposition(x, dims, correction=0, keepdim=False):
+    return aten.sqrt(aten.var(x, dims, correction=correction, keepdim=keepdim))
