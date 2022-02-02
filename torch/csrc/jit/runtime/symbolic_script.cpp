@@ -668,7 +668,7 @@ const std::vector<std::string> functions = {
 
         def mv(self, vec):
             def backward(grad_output):
-                return grad_output.ger(vec), self.t().mv(grad_output)
+                return grad_output.outer(vec), self.t().mv(grad_output)
 
             return torch.mv(self, vec), backward
 
