@@ -94,6 +94,8 @@ ALL_MODULES = {
     TestVersionedLinspaceOutV7(): "aten::linspace.out",
     TestVersionedLogspaceV8(): "aten::logspace",
     TestVersionedLogspaceOutV8(): "aten::logspace.out",
+    TestVersionedGerV9(): "aten::ger",
+    TestVersionedGerOutV9(): "aten::ger.out",
 }
 
 """

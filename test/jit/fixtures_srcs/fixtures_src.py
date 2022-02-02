@@ -42,3 +42,17 @@ class TestVersionedLogspaceOutV8(torch.nn.Module):
 
     def forward(self, a: Union[int, float, complex], b: Union[int, float, complex], out: torch.Tensor):
         return torch.logspace(a, b, out=out)
+
+class TestVersionedGerV9(torch.nn.Module):
+    def __init__(self):
+        super(TestVersionedGerV9, self).__init__()
+
+    def forward(self, v1: torch.Tensor, v2: torch.Tensor):
+        return torch.ger(v1, v2)
+
+class TestVersionedGerOutV9(torch.nn.Module):
+    def __init__(self):
+        super(TestVersionedGerOutV9, self).__init__()
+
+    def forward(self, v1: torch.Tensor, v2: torch.Tensor, out: torch.Tensor):
+        return torch.ger(v1, v2, out=out)
