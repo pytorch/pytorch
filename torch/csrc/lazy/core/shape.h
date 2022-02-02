@@ -36,10 +36,5 @@ class TORCH_API Shape {
 
 TORCH_API std::ostream& operator<<(std::ostream& out, const Shape& shape);
 
-// TODO(alanwaketan): Rethink how code-gen uses shapes.
-TORCH_API std::vector<Shape> convertShapes(
-    const std::vector<at::ScalarType>& dtypes,
-    const std::vector<std::vector<int64_t>>& shapes);
-
 }  // namespace lazy
 }  // namespace torch

@@ -309,18 +309,20 @@ adjust_hist_to_include_zero(const Histogram& hist, float* min, float* max) {
   // Pad histogram to include zero
   int additional_nbins = 0;
   int offset = 0;
-  if (*min > 0) {
-    // additional nbins to include 0
-    additional_nbins = ceil(*min / bin_width);
-    offset = additional_nbins;
-    // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
-    *min -= additional_nbins * bin_width;
-    assert(*min <= 0);
-  } else if (*max < 0) {
-    additional_nbins = ceil((-*max) / bin_width);
-    // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
-    *max += additional_nbins * bin_width;
-    assert(*max >= 0);
+  if (bin_width > 0) {
+    if (*min > 0) {
+      // additional nbins to include 0
+      additional_nbins = ceil(*min / bin_width);
+      offset = additional_nbins;
+      // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
+      *min -= additional_nbins * bin_width;
+      assert(*min <= 0);
+    } else if (*max < 0) {
+      additional_nbins = ceil((-*max) / bin_width);
+      // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
+      *max += additional_nbins * bin_width;
+      assert(*max >= 0);
+    }
   }
 
   vector<float> bins_f(nbins + additional_nbins);
