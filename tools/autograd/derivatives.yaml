@@ -650,8 +650,8 @@
   self: grad / exponent.exp2()
   mantissa: self_t / exponent.exp2()
 
-- name: gather(Tensor self, int dim, Tensor index, *, bool sparse_grad=False) -> Tensor
-  self: gather_backward(grad, self, dim, index, sparse_grad)
+- name: gather(Tensor self, int dim, Tensor index, *, bool sparse_grad=False, bool unique_indices=False) -> Tensor
+  self: gather_backward(grad, self, dim, index, sparse_grad, unique_indices)
   index: non_differentiable
   result: auto_linear
 
@@ -1301,21 +1301,21 @@
   result: auto_element_wise
 
 - name: scatter.src(Tensor self, int dim, Tensor index, Tensor src, *, bool unique_indices=False) -> Tensor
-  self: grad.scatter(dim, index, 0)
+  self: grad.scatter(dim, index, 0, unique_indices)
   index: non_differentiable
-  src: grad.gather(dim, index)
-  result: self_t.scatter(dim, index, src_t)
+  src: grad.gather(dim, index, false, unique_indices)
+  result: self_t.scatter(dim, index, src_t, unique_indices)
 
 - name: scatter.value(Tensor self, int dim, Tensor index, Scalar value, *, bool unique_indices=False) -> Tensor
-  self: grad.scatter(dim, index, 0)
+  self: grad.scatter(dim, index, 0, unique_indices)
   index: non_differentiable
-  result: self_t.scatter(dim, index, 0)
+  result: self_t.scatter(dim, index, 0, unique_indices)
 
 - name: scatter_add(Tensor self, int dim, Tensor index, Tensor src, *, bool unique_indices=False) -> Tensor
   self: grad
   index: non_differentiable
-  src: grad.gather(dim, index)
-  result: scatter_add(self_t, dim, index, src_t)
+  src: grad.gather(dim, index, false, unique_indices)
+  result: scatter_add(self_t, dim, index, src_t, unique_indices)
 
 - name: select.int(Tensor(a) self, int dim, int index) -> Tensor(a)
   self: select_backward(grad, self.sizes(), dim, index)

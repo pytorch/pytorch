@@ -6898,23 +6898,23 @@
 - func: argwhere(Tensor self) -> Tensor
   variants: method, function
 
-- func: gather.out(Tensor self, int dim, Tensor index, *, bool sparse_grad=False, Tensor(a!) out) -> Tensor(a!)
+- func: gather.out(Tensor self, int dim, Tensor index, *, bool sparse_grad=False, bool unique_indices=False, Tensor(a!) out) -> Tensor(a!)
   structured: True
   dispatch:
     CPU, CUDA: gather_out
 
-- func: gather(Tensor self, int dim, Tensor index, *, bool sparse_grad=False) -> Tensor
+- func: gather(Tensor self, int dim, Tensor index, *, bool sparse_grad=False, bool unique_indices=False) -> Tensor
   variants: method, function
   structured_delegate: gather.out
 
-- func: gather_backward(Tensor grad, Tensor self, int dim, Tensor index, bool sparse_grad) -> Tensor
+- func: gather_backward(Tensor grad, Tensor self, int dim, Tensor index, bool sparse_grad, bool unique_indices) -> Tensor
   variants: function
   device_check: NoCheck
   device_guard: False
 
-- func: gather.dimname_out(Tensor self, Dimname dim, Tensor index, *, bool sparse_grad=False, Tensor(a!) out) -> Tensor(a!)
+- func: gather.dimname_out(Tensor self, Dimname dim, Tensor index, *, bool sparse_grad=False, bool unique_indices=False, Tensor(a!) out) -> Tensor(a!)
 
-- func: gather.dimname(Tensor self, Dimname dim, Tensor index, *, bool sparse_grad=False) -> Tensor
+- func: gather.dimname(Tensor self, Dimname dim, Tensor index, *, bool sparse_grad=False, bool unique_indices=False) -> Tensor
   variants: method, function
 
 - func: _gather_sparse_backward(Tensor self, int dim, Tensor index, Tensor grad) -> Tensor

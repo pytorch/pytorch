@@ -308,10 +308,10 @@ std::vector<Tensor> align_tensors(TensorList tensors) {
 
 // Misc. Dimname overloads that don't have homes. Maybe we should move
 // all of them here or autogenerate them because they look so similar.
-Tensor gather(const Tensor& self, Dimname dim, const Tensor& index, bool sparse_grad) {
+Tensor gather(const Tensor& self, Dimname dim, const Tensor& index, bool sparse_grad, bool unique_indices) {
   reportNYIDimnameOverload("gather");
 }
-Tensor& gather_out(const Tensor& self, Dimname dim, const Tensor& index, bool sparse_grad, Tensor& result) {
+Tensor& gather_out(const Tensor& self, Dimname dim, const Tensor& index, bool sparse_grad, bool unique_indices, Tensor& result) {
   reportNYIDimnameOverload("gather");
 }
 Tensor index_add(const Tensor& self, Dimname dim, const Tensor& index, const Tensor& source, const Scalar &alpha) {

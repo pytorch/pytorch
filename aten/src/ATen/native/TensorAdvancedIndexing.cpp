@@ -85,7 +85,7 @@ native::SCATTER_GATHER_OP get_operator_enum(const c10::string_view reduce) {
 }
 
 TORCH_META_FUNC(gather)
-(const Tensor & self, int64_t dim, const Tensor & index, bool sparse_grad) {
+(const Tensor & self, int64_t dim, const Tensor & index, bool sparse_grad, bool unique_indices) {
   const Tensor& result = maybe_get_output(0);
   int64_t wrapped_dim = at::maybe_wrap_dim(dim, self.dim());
 
@@ -1185,17 +1185,18 @@ Tensor index_fill(const Tensor & self, int64_t dim, const Tensor & index, const 
 
 // gather_out_cpu_cuda
 TORCH_IMPL_FUNC(gather_out)
-(const Tensor& self, int64_t dim, const Tensor& index, bool sparse_grad, const Tensor& result) {
+(const Tensor& self, int64_t dim, const Tensor& index, bool sparse_grad, bool unique_indices, const Tensor& result) {
   if (index.numel() == 0) return;
   dim = at::maybe_wrap_dim(dim, self.dim());
   gather_stub(result.device().type(), result, self, dim, index);
 }
 
-Tensor gather_backward(const Tensor& grad, const Tensor& self, int64_t dim, const Tensor& index, bool sparse_grad) {
+Tensor gather_backward(const Tensor& grad, const Tensor& self, int64_t dim, const Tensor& index, bool sparse_grad, bool unique_indices) {
   if (sparse_grad) {
+    // TODO: Does this need to propagate unique_indices?
     return at::_gather_sparse_backward(self, dim, index, grad);
   }
-  return grad.new_zeros(self.sizes()).scatter_add_(dim, index, grad);
+  return grad.new_zeros(self.sizes()).scatter_add_(dim, index, grad, unique_indices);
 }
 
 template <typename T, typename ReduceStub, typename FillStub>

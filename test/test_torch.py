@@ -1436,7 +1436,7 @@ else:
             res = op_call(a, dim, index)
             grad = torch.ones_like(res)
 
-            @expectedAlertNondeterministic('scatter_add_cuda_kernel', ['cuda'])
+            @expectedAlertNondeterministic('scatter_add')
             def backward_func(slf, device):
                 res.backward(grad)
 
