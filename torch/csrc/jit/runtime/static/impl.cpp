@@ -212,6 +212,10 @@ void PrepareGraphForStaticModule(
   // create an owned reference that can be safely moved out of the
   // runtime.
   CreateOwnedRefsForSpecialValues(*graph);
+
+  // We assume that each sub-block has at least one output. If we
+  // detect any that have 0, force the sub-block to return None.
+  ForceNonEmptyOutputs(*graph);
 }
 
 std::pair<std::shared_ptr<Graph>, c10::optional<Module>> PrepareForStaticModule(

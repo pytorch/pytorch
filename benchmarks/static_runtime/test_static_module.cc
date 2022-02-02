@@ -1458,3 +1458,33 @@ TEST(CreateOwnedRefsForSpecialValues, ValueFromOuterScope) {
   CreateOwnedRefsForSpecialValues(*graph);
   EXPECT_TRUE(hasNodeWithKind(graph, "static_runtime::create_owned_ref"));
 }
+
+TEST(ForceNonEmptyOutputs, TwoSubBlocks) {
+  const auto src = R"IR(
+    graph(%cond: bool):
+        %lst : int[] = prim::ListConstruct()
+        %1 : int = prim::Constant[value=1]()
+        %2 : int = prim::Constant[value=2]()
+        prim::If(%cond)
+          block0():
+            aten::append(%lst, %1)
+            -> ()
+          block1():
+            aten::append(%lst, %2)
+            -> ()
+        return (%lst)
+  )IR";
+
+  auto graph = getGraphFromIR(src);
+  ForceNonEmptyOutputs(*graph);
+
+  for (auto* node : graph->nodes()) {
+    if (node->blocks().empty()) {
+      continue;
+    }
+    EXPECT_EQ(node->outputs().size(), 1);
+    for (auto* sub_block : node->blocks()) {
+      EXPECT_EQ(sub_block->outputs().size(), 1);
+    }
+  }
+}
