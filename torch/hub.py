@@ -243,7 +243,7 @@ def _check_repo(repo_owner, repo_name, trust_repo=None, calling_fn="load"):
     if trust_repo is None:
         if not is_trusted:
             warnings.warn(
-                "You are about to download an untrusted repository. In a future release, this won't be allowed. "
+                "You are about to download and run code from an untrusted repository. In a future release, this won't be allowed. "
                 f"To add the repository to your trusted list, change the command to {calling_fn}(..., "
                 "trust_repo=False) and a command prompt will appear asking for an explicit confirmation of trust, "
                 f"or {calling_fn}(..., trust_repo=True), which will assume that the prompt is to be answered with "
