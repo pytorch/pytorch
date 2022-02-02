@@ -38,6 +38,11 @@
 #include <type_traits>
 #include <utility>
 
+C10_CLANG_DIAGNOSTIC_PUSH()
+#if C10_CLANG_HAS_WARNING("-Wshorten-64-to-32")
+C10_CLANG_DIAGNOSTIC_IGNORE("-Wshorten-64-to-32")
+#endif
+
 namespace c10 {
 
 /// This is all the stuff common to all SmallVectors.
@@ -1455,3 +1460,5 @@ inline void swap(c10::SmallVector<T, N>& LHS, c10::SmallVector<T, N>& RHS) {
 }
 
 } // end namespace std
+
+C10_CLANG_DIAGNOSTIC_POP()

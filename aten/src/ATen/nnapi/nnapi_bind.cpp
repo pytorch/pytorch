@@ -174,8 +174,20 @@ void NnapiCompilation::get_operand_type(const at::Tensor& t, ANeuralNetworksOper
     operand->zeroPoint = 0;
     return;
   }
+  if (t.scalar_type() == c10::kShort) {
+    TORCH_WARN(
+      "NNAPI qint16 inputs to model are only supported for ",
+      "testing with fixed scale, zero_point. Please change your ",
+      "inputs if you see this in production");
+    operand->type = ANEURALNETWORKS_TENSOR_QUANT16_ASYMM;
+    // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
+    operand->scale = 0.125;
+    operand->zeroPoint = 0;
+    return;
+  }
+
   // TODO: Support more dtypes.
-  CAFFE_THROW("Bad dtype");
+  CAFFE_THROW("Bad dtype: " + std::to_string(static_cast<int8_t>(t.scalar_type())));
 }
 
 } // namespace bind
