@@ -5139,13 +5139,7 @@ spaced from :attr:`start` to :attr:`end`, inclusive. That is, the value are:
     \text{end})
 """ + """
 
-.. warning::
-    Not providing a value for :attr:`steps` is deprecated. For backwards
-    compatibility, not providing a value for :attr:`steps` will create a tensor
-    with 100 elements. Note that this behavior is not reflected in the
-    documented function signature and should not be relied on. In a future
-    PyTorch release, failing to provide a value for :attr:`steps` will throw a
-    runtime error.
+From PyTorch 1.11 linspace requires the steps argument. Use steps=100 to restore the previous behavior.
 
 Args:
     start (float): the starting value for the set of points
