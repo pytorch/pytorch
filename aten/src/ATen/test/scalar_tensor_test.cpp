@@ -244,7 +244,7 @@ void test(DeprecatedTypeProperties &T) {
       {
         auto lhs = ones(*lhs_it, T);
         auto rhs = ones(*rhs_it, T);
-        TRY_CATCH_ELSE(auto result = lhs.ger(rhs),
+        TRY_CATCH_ELSE(auto result = lhs.outer(rhs),
                        ASSERT_TRUE(
                            (lhs.numel() == 0 || rhs.numel() == 0 ||
                             lhs.dim() != 1 || rhs.dim() != 1)),
