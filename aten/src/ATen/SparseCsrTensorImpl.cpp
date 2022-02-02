@@ -55,7 +55,9 @@ SparseCsrTensorImpl::SparseCsrTensorImpl(
     : TensorImpl(key_set, data_type, values.device()),
       crow_indices_(std::move(crow_indices)),
       col_indices_(std::move(col_indices)),
-      values_(std::move(values)) {}
+      values_(std::move(values)) {
+  set_storage_access_should_throw();
+}
 
 void SparseCsrTensorImpl::resize_(int64_t nnz, IntArrayRef size) {
   auto rows = size[0];

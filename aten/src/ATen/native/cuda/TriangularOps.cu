@@ -6,6 +6,12 @@
 #include <ATen/NativeFunctions.h>
 #include <ATen/native/Resize.h>
 
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#else
+#include <ATen/ops/diag.h>
+#endif
+
 #include <ATen/cuda/CUDAApplyUtils.cuh>
 
 namespace at {
