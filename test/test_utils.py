@@ -801,7 +801,7 @@ class TestHub(TestCase):
                 trust_repo=None)
             assert len(w) == 1
             assert issubclass(w[-1].category, UserWarning)
-            assert "You are about to download an untrusted repository." in str(w[-1].message)
+            assert "You are about to download and run code from an untrusted repository" in str(w[-1].message)
 
     @retry(Exception, tries=3)
     @patch('torch.hub._get_trusted_input', return_value='n')
