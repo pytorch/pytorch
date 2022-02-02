@@ -7,6 +7,27 @@ from torch.distributions import biject_to, constraints, transform_to
 from torch.testing._internal.common_cuda import TEST_CUDA
 
 
+EXAMPLES = [
+    (constraints.symmetric, False, [[2., 0], [2., 2]]),
+    (constraints.positive_semidefinite, False, [[2., 0], [2., 2]]),
+    (constraints.positive_definite, False, [[2., 0], [2., 2]]),
+    (constraints.symmetric, True, [[3., -5], [-5., 3]]),
+    (constraints.positive_semidefinite, False, [[3., -5], [-5., 3]]),
+    (constraints.positive_definite, False, [[3., -5], [-5., 3]]),
+    (constraints.symmetric, True, [[1., 2], [2., 4]]),
+    (constraints.positive_semidefinite, True, [[1., 2], [2., 4]]),
+    (constraints.positive_definite, False, [[1., 2], [2., 4]]),
+    (constraints.symmetric, True, [[[1., -2], [-2., 1]], [[2., 3], [3., 2]]]),
+    (constraints.positive_semidefinite, False, [[[1., -2], [-2., 1]], [[2., 3], [3., 2]]]),
+    (constraints.positive_definite, False, [[[1., -2], [-2., 1]], [[2., 3], [3., 2]]]),
+    (constraints.symmetric, True, [[[1., -2], [-2., 4]], [[1., -1], [-1., 1]]]),
+    (constraints.positive_semidefinite, True, [[[1., -2], [-2., 4]], [[1., -1], [-1., 1]]]),
+    (constraints.positive_definite, False, [[[1., -2], [-2., 4]], [[1., -1], [-1., 1]]]),
+    (constraints.symmetric, True, [[[4., 2], [2., 4]], [[3., -1], [-1., 3]]]),
+    (constraints.positive_semidefinite, True, [[[4., 2], [2., 4]], [[3., -1], [-1., 3]]]),
+    (constraints.positive_definite, True, [[[4., 2], [2., 4]], [[3., -1], [-1., 3]]]),
+]
+
 CONSTRAINTS = [
     (constraints.real,),
     (constraints.real_vector,),
@@ -40,6 +61,14 @@ def build_constraint(constraint_fn, args, is_cuda=False):
         return constraint_fn
     t = torch.cuda.DoubleTensor if is_cuda else torch.DoubleTensor
     return constraint_fn(*(t(x) if isinstance(x, list) else x for x in args))
+
+@pytest.mark.parametrize('constraint_fn, result, value', EXAMPLES)
+@pytest.mark.parametrize('is_cuda', [False,
+                                     pytest.param(True, marks=pytest.mark.skipif(not TEST_CUDA,
+                                                                                 reason='CUDA not found.'))])
+def test_constraint(constraint_fn, result, value, is_cuda):
+    t = torch.cuda.DoubleTensor if is_cuda else torch.DoubleTensor
+    assert constraint_fn.check(t(value)).all() == result
 
 
 @pytest.mark.parametrize('constraint_fn, args', [(c[0], c[1:]) for c in CONSTRAINTS])

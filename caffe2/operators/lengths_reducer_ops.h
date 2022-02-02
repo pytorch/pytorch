@@ -1,4 +1,6 @@
 #pragma once
+
+#include <c10/util/irange.h>
 #include "caffe2/core/context.h"
 #include "caffe2/core/operator.h"
 #include "caffe2/perfkernels/embedding_lookup.h"
@@ -192,7 +194,7 @@ class CPUSparseLengthsReductionOp : public Operator<CPUContext> {
     }
 
     int64_t current = 0;
-    for (int m = 0; m < M; ++m) {
+    for (const auto m : c10::irange(M)) {
       for (int i = 0; i < lengths[m]; ++i) {
         CAFFE_ENFORCE_LT(
             current,
@@ -280,7 +282,7 @@ class TTSparseLengthsSumOp final : public Operator<Context> {
         emb_size(this->template GetSingleArgument<int>("emb_size", 64)) {
     // cumprod of i, used for index slice
     l_cumprod.push_back(1);
-    for (size_t i = 1; i < factor_i.size(); ++i) {
+    for (const auto i : c10::irange(1, factor_i.size())) {
       l_cumprod.push_back(l_cumprod[i - 1] * factor_i[i - 1]);
     }
   }
@@ -290,7 +292,7 @@ class TTSparseLengthsSumOp final : public Operator<Context> {
   void Ind2Sub(int64_t* out_factor_index, const int64_t* indices, int len) {
     // TODO: vectorization
     auto N = factor_i.size();
-    for (int j = 0; j < len; j++) {
+    for (const auto j : c10::irange(len)) {
       auto idx = indices[j];
       for (int i = N; i > 0; i--) {
         out_factor_index[j * N + i - 1] = idx / l_cumprod[i - 1];
@@ -307,7 +309,7 @@ class TTSparseLengthsSumOp final : public Operator<Context> {
       int idx) {
     // implement the functinality index_select(core, 1, ind_slice)
     auto num_of_elements = ranks[idx] * factor_j[idx] * ranks[idx + 1];
-    for (int i = 0; i < bs; i++) {
+    for (const auto i : c10::irange(bs)) {
       memcpy(
           tgt_slice[i].data(),
           core + ind_slice[i] * num_of_elements,
@@ -345,16 +347,16 @@ class TTSparseLengthsSumOp final : public Operator<Context> {
     // Store the intermediate result in each layer
     vector<T*> Z_ptr(bs);
 
-    for (int b = 0; b < bs; b++) {
+    for (const auto b : c10::irange(bs)) {
       Y_ptr[b] = res[b].data();
       Z_ptr[b] = int_res[b].data();
     }
 
     vector<int64_t> ind_slice(bs);
     int rows = 0;
-    for (int i = 0; i < x_len; i++) {
+    for (const auto i : c10::irange(x_len)) {
       // slice cur
-      for (int j = 0; j < bs; j++) {
+      for (const auto j : c10::irange(bs)) {
         ind_slice[j] = ind[x_len * j + i];
       }
       if (i == 0) {
@@ -364,7 +366,7 @@ class TTSparseLengthsSumOp final : public Operator<Context> {
         std::vector<std::vector<T>> slice(
             bs, std::vector<T>(ranks[i] * factor_j[i] * ranks[i + 1], 0));
         vector<const T*> X_ptr(bs);
-        for (int b = 0; b < bs; b++) {
+        for (const auto b : c10::irange(bs)) {
           X_ptr[b] = slice[b].data();
         }
         GetSlice(slice, cores[i], ind_slice, bs, i);
@@ -382,7 +384,7 @@ class TTSparseLengthsSumOp final : public Operator<Context> {
             0.0f,
             Z_ptr.data(),
             &context_);
-        for (int b = 0; b < bs; b++) {
+        for (const auto b : c10::irange(bs)) {
           std::memcpy(Y_ptr[b], Z_ptr[b], (emb_size * max_rank) * sizeof(T));
         }
         rows *= factor_j[i];
@@ -393,7 +395,7 @@ class TTSparseLengthsSumOp final : public Operator<Context> {
       if (i < 2) {
         auto* core_data = Output(i + 1, shape, at::dtype<T>());
         T* out_core = core_data->template mutable_data<T>();
-        for (int b = 0; b < bs; b++) {
+        for (const auto b : c10::irange(bs)) {
           std::memcpy(
               out_core + b * rows * ranks[i + 1],
               Y_ptr[b],
@@ -404,7 +406,7 @@ class TTSparseLengthsSumOp final : public Operator<Context> {
 
     // reduction and store back to output
     vector<int64_t> cum_lengths(segments);
-    for (int seg = 0; seg < segments; seg++) {
+    for (const auto seg : c10::irange(segments)) {
       cum_lengths[seg] =
           seg == 0 ? lengths[0] : lengths[seg] + cum_lengths[seg - 1];
     }
@@ -549,7 +551,7 @@ bool TTSparseLengthsSumGradientOp<T, Context>::RunOnDevice() {
   int64_t* index_out_data = index_out.template mutable_data<int64_t>();
 
   vector<vector<int64_t>> index_slice(bs, vector<int64_t>(3, 0));
-  for (int64_t b = 0; b < bs; b++) {
+  for (const auto b : c10::irange(bs)) {
     memcpy(index_slice[b].data(), index_out_data + b * 3, 3 * sizeof(int64_t));
   }
 
@@ -563,7 +565,7 @@ bool TTSparseLengthsSumGradientOp<T, Context>::RunOnDevice() {
   // expand the gradient into all indices
   vector<vector<T>> core2_out_grad(bs, vector<T>(emb_size, 0));
   int64_t data_index = 0;
-  for (int64_t range_index = 0; range_index < num_segments; ++range_index) {
+  for (const auto range_index : c10::irange(num_segments)) {
     for (int64_t start = data_index;
          data_index < start + lengths_data[range_index];
          ++data_index) {
@@ -582,7 +584,7 @@ bool TTSparseLengthsSumGradientOp<T, Context>::RunOnDevice() {
       bs, vector<T>(core2_shape[1] * core2_shape[2] * core2_shape[3], 0));
   const T* core1_out_data = core1_out.template data<T>();
   // const T* core1_out_p[bs];
-  for (int64_t b = 0; b < bs; b++) {
+  for (const auto b : c10::irange(bs)) {
     A_ptr[b] = core1_out_data + b * core1_out.size(1) * core1_out.size(2);
     B_ptr[b] = core2_out_grad[b].data();
     C_ptr[b] = dCore2_data_slice_grad[b].data();
@@ -609,8 +611,8 @@ bool TTSparseLengthsSumGradientOp<T, Context>::RunOnDevice() {
   vector<vector<T>> core2_slice(
       bs, vector<T>(core2_shape[1] * core2_shape[2] * core2_shape[3], 0));
 
-  for (int64_t b = 0; b < bs; b++) {
-    for (int i = 0; i < num_of_elements; i++) {
+  for (const auto b : c10::irange(bs)) {
+    for (const auto i : c10::irange(num_of_elements)) {
       dCore2_data[index_slice[b][2] * num_of_elements + i] += C_ptr[b][i];
     }
     memcpy(
@@ -623,7 +625,7 @@ bool TTSparseLengthsSumGradientOp<T, Context>::RunOnDevice() {
   vector<vector<T>> core1_out_grad(
       bs, vector<T>(core1_out_shape[1] * core1_out_shape[2], 0));
 
-  for (int64_t b = 0; b < bs; b++) {
+  for (const auto b : c10::irange(bs)) {
     A_ptr[b] = core2_out_grad[b].data();
     B_ptr[b] = core2_slice[b].data();
     C_ptr[b] = core1_out_grad[b].data();
@@ -650,7 +652,7 @@ bool TTSparseLengthsSumGradientOp<T, Context>::RunOnDevice() {
   vector<vector<T>> dCore1_data_slice_grad(
       bs, vector<T>(core1_shape[1] * core1_shape[2] * core1_shape[3], 0));
   const T* core0_out_data = core0_out.template data<T>();
-  for (int64_t b = 0; b < bs; b++) {
+  for (const auto b : c10::irange(bs)) {
     A_ptr[b] = core0_out_data + b * core0_out.size(1) * core0_out.size(2);
     B_ptr[b] = core1_out_grad[b].data();
     C_ptr[b] = dCore1_data_slice_grad[b].data();
@@ -676,8 +678,8 @@ bool TTSparseLengthsSumGradientOp<T, Context>::RunOnDevice() {
   vector<vector<T>> core1_slice(
       bs, vector<T>(core1_shape[1] * core1_shape[2] * core1_shape[3], 0));
 
-  for (int64_t b = 0; b < bs; b++) {
-    for (int i = 0; i < num_of_elements; i++) {
+  for (const auto b : c10::irange(bs)) {
+    for (const auto i : c10::irange(num_of_elements)) {
       dCore1_data[index_slice[b][1] * num_of_elements + i] += C_ptr[b][i];
     }
     memcpy(
@@ -690,7 +692,7 @@ bool TTSparseLengthsSumGradientOp<T, Context>::RunOnDevice() {
   vector<vector<T>> core0_out_grad(
       bs, vector<T>(core0_out_shape[1] * core0_out_shape[2], 0));
 
-  for (int64_t b = 0; b < bs; b++) {
+  for (const auto b : c10::irange(bs)) {
     A_ptr[b] = core1_out_grad[b].data();
     B_ptr[b] = core1_slice[b].data();
     C_ptr[b] = core0_out_grad[b].data();
@@ -712,8 +714,8 @@ bool TTSparseLengthsSumGradientOp<T, Context>::RunOnDevice() {
 
   num_of_elements = core0_shape[1] * core0_shape[2] * core0_shape[3];
 
-  for (int64_t b = 0; b < bs; b++) {
-    for (int i = 0; i < num_of_elements; i++) {
+  for (const auto b : c10::irange(bs)) {
+    for (const auto i : c10::irange(num_of_elements)) {
       dCore0_data[index_slice[b][0] * num_of_elements + i] += C_ptr[b][i];
     }
   }

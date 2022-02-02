@@ -1,6 +1,7 @@
 # coding=utf-8
 
 import copy
+import functools
 import torch
 from torch.distributed._sharding_spec import (
     ChunkShardingSpec,
@@ -13,6 +14,7 @@ from torch.distributed._sharding_spec._internals import (
 from typing import List
 
 from .api import (
+    _register_sharded_op,
     CreateOp,
     Shard,
     ShardMetadata,
@@ -34,7 +36,7 @@ def empty(sharding_spec: ShardingSpec,
           pin_memory=False,
           memory_format=torch.contiguous_format,
           process_group=None,
-          init_rrefs=False):
+          init_rrefs=False) -> ShardedTensor:
     """
     Returns a :class:`ShardedTensor` filled with uninitialized data.
         Needs to be called on all ranks in an SPMD fashion.
@@ -86,7 +88,7 @@ def ones(sharding_spec: ShardingSpec,
          pin_memory=False,
          memory_format=torch.contiguous_format,
          process_group=None,
-         init_rrefs=False):
+         init_rrefs=False) -> ShardedTensor:
     """
     Returns a :class:`ShardedTensor` with the scalar value 1.
         Needs to be called on all ranks in an SPMD fashion.
@@ -137,7 +139,7 @@ def rand(sharding_spec: ShardingSpec,
          pin_memory=False,
          memory_format=torch.contiguous_format,
          process_group=None,
-         init_rrefs=False):
+         init_rrefs=False) -> ShardedTensor:
     """
     Returns a :class:`ShardedTensor` filled with random numbers from a uniform distribution on the
         interval :math:`[0, 1)`. Needs to be called on all ranks in an SPMD fashion.
@@ -189,7 +191,7 @@ def zeros(sharding_spec: ShardingSpec,
           pin_memory=False,
           memory_format=torch.contiguous_format,
           process_group=None,
-          init_rrefs=False):
+          init_rrefs=False) -> ShardedTensor:
     """
     Returns a :class:`ShardedTensor` filled with the scalar value 0.
         Needs to be called on all ranks in an SPMD fashion.
@@ -242,7 +244,7 @@ def full(sharding_spec: ShardingSpec,
          pin_memory=False,
          memory_format=torch.contiguous_format,
          process_group=None,
-         init_rrefs=False):
+         init_rrefs=False) -> ShardedTensor:
     """
     Creates a :class:`ShardedTensor` filled with fill_value. The tensor’s dtype
         is inferred from fill_value. If dtype is specified, it will override the
@@ -293,7 +295,7 @@ def init_from_local_shards(
         local_shards: List[Shard],
         *global_size,
         process_group=None,
-        init_rrefs=False):
+        init_rrefs=False) -> ShardedTensor:
     """
     Creates an :class:`ShardedTensor` from local shards and the global metadata.
     Needs to be called on all ranks in an SPMD fashion.
@@ -351,35 +353,21 @@ def state_dict_hook(module, destination, prefix, local_metadata):
     registered to the Module using
     :meth:`torch.nn.Module._register_state_dict_hook`.
     """
-    _recurse_update_dict(module, destination, prefix)
+    for submodule_name, submodule in module.named_modules():
+        for attr_name, attr in submodule.__dict__.items():
+            if isinstance(attr, ShardedTensor):
+                destination[prefix + submodule_name + '.' + attr_name] = attr
 
 def pre_load_state_dict_hook(module, state_dict, prefix, local_metadata, strict, missing_keys, unexpected_keys, error_msgs):
     """
     Pre-load state dict hook to add ShardedTensor to the module.
     """
-    _recurse_update_module(module, state_dict, prefix)
-
-def _recurse_update_module(module, state_dict, prefix):
-    for attr_name, attr in module.__dict__.items():
-        key = prefix + attr_name
-        if key in state_dict:
-            if isinstance(state_dict[key], ShardedTensor):
-                setattr(module, attr_name, state_dict[key])
-
     for submodule_name, submodule in module.named_modules():
-        key = prefix + submodule_name
-        if submodule_name:
-            _recurse_update_module(submodule, state_dict, key + '.')
-
-
-def _recurse_update_dict(module, destination, prefix):
-    for attr_name, attr in module.__dict__.items():
-        if isinstance(attr, ShardedTensor):
-            destination[prefix + attr_name] = attr
-
-    for submodule_name, submodule in module.named_modules():
-        if submodule_name != '':
-            _recurse_update_dict(submodule, destination, prefix + submodule_name + '.')
+        for attr_name, attr in submodule.__dict__.items():
+            key = prefix + submodule_name + '.' + attr_name
+            if key in state_dict:
+                if isinstance(state_dict[key], ShardedTensor):
+                    setattr(submodule, attr_name, state_dict[key])
 
 def shard_parameter(
         module: torch.nn.Module,
@@ -435,8 +423,7 @@ def shard_parameter(
 
     # Validate src_rank and sharding_spec are same across all ranks.
     gathered_list = [None] * world_size
-    with torch.cuda.device(tensor.device):
-        dist.all_gather_object(gathered_list, (src_rank, sharding_spec), group=pg)
+    dist.all_gather_object(gathered_list, (src_rank, sharding_spec), group=pg)
 
     for idx, entry in enumerate(gathered_list):
         if src_rank != entry[0]:  # type: ignore[index]
@@ -475,12 +462,17 @@ def shard_parameter(
     # Scatter the shards (use broadcast since NCCL doesn't support scatter, this is very inefficient).
     dist.broadcast(tensor, src=src_rank, group=pg)
 
-    # Reshape to get shard for this rank.
+    # Reshape to get shard for this rank and we don't want autograd
+    # recording here for the narrow op and 'local_shard' should be a
+    # leaf variable in the autograd graph.
     local_shard = tensor.narrow(
         sharding_spec.dim,  # type: ignore[arg-type]
         local_metadata.shard_offsets[sharding_spec.dim],  # type: ignore[union-attr, arg-type, index]
         local_metadata.shard_sizes[sharding_spec.dim],  # type: ignore[union-attr, index]
-    ).contiguous()
+    ).clone().detach().contiguous()
+
+    # Sync requires_grad to local_shard.
+    local_shard.requires_grad = tensor.requires_grad
 
     # Create ShardedTensor based on local shards.
     local_shards = [
@@ -504,3 +496,45 @@ def shard_parameter(
 
     # Now we can set the attribute appropriately.
     setattr(module, param_name, st)
+
+def sharded_op_impl(func):
+    """
+    Provides a way for users to write their own custom sharded operator. This
+    can be used to override existing ShardedTensor operators or write a new
+    one not supported by ShardedTensor. If the operator in question is covered
+    by ``__torch_function__`` dispatch and has a ShardedTensor as any of its
+    parameters, the function provided will be invoked for that operator.
+
+    Example::
+        >>> @custom_sharded_op(torch.nn.functional.linear)
+        >>> def my_custom_sharded_linear(types, args, kwargs, process_group):
+        >>>   ....
+        >>>
+        >>> input = torch.rand(10, 32)
+        >>> weight = _sharded_tensor.rand(32, 16)
+        >>> bias = torch.rand(16)
+        >>> # This will call 'my_custom_sharded_linear'
+        >>> torch.nn.functional.linear(input, weight, bias)
+
+    The types, args and kwargs parameters are the same parameters that are
+    passed to ``__torch_function__`` dispatch API
+    (https://pytorch.org/docs/stable/notes/extending.html#extending-torch).
+    There is an additional ``process_group`` parameter which is the
+    process_group used for the ShardedTensor and can be used by
+    implementations for communications within a sharded implementation.
+
+    Args:
+        func(Callable): Torch function for which we want to provide a sharded
+            implementation (ex: torch.nn.functional.linear)
+    """
+    def decorator_sharded_func(wrapped_func):
+        _register_sharded_op(func, wrapped_func)
+
+        @functools.wraps(wrapped_func)
+        def wrapper(*args, **kwargs):
+            return wrapped_func(*args, **kwargs)
+        return wrapper
+    return decorator_sharded_func
+
+# Import all builtin sharded ops
+from .ops import *  # noqa: F403

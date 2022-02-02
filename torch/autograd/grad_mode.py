@@ -4,7 +4,6 @@ import functools
 import inspect
 from typing import Any, Callable, TypeVar, cast
 
-
 __all__ = ['no_grad', 'enable_grad', 'set_grad_enabled',
            'inference_mode']
 
@@ -24,7 +23,7 @@ class _DecoratorContextManager:
 
         @functools.wraps(func)
         def decorate_context(*args, **kwargs):
-            with self.__class__():
+            with self.clone():
                 return func(*args, **kwargs)
         return cast(F, decorate_context)
 
@@ -38,10 +37,9 @@ class _DecoratorContextManager:
             # make sure the grad mode is properly set every time the execution
             # flow returns into the wrapped generator and restored when it
             # returns through our `yield` to our caller (see PR #49017).
-            cls = type(self)
             try:
                 # Issuing `None` to a generator fires it up
-                with cls():
+                with self.clone():
                     response = gen.send(None)
 
                 while True:
@@ -51,18 +49,18 @@ class _DecoratorContextManager:
 
                     except GeneratorExit:
                         # Inform the still active generator about its imminent closure
-                        with cls():
+                        with self.clone():
                             gen.close()
                         raise
 
                     except BaseException:
                         # Propagate the exception thrown at us by the caller
-                        with cls():
+                        with self.clone():
                             response = gen.throw(*sys.exc_info())
 
                     else:
                         # Pass the last request to the generator and get its response
-                        with cls():
+                        with self.clone():
                             response = gen.send(request)
 
             # We let the exceptions raised above by the generator's `.throw` or
@@ -80,6 +78,10 @@ class _DecoratorContextManager:
 
     def __exit__(self, exc_type: Any, exc_value: Any, traceback: Any) -> None:
         raise NotImplementedError
+
+    def clone(self):
+        # override this method if your children class takes __init__ parameters
+        return self.__class__()
 
 
 class no_grad(_DecoratorContextManager):
@@ -172,7 +174,7 @@ class enable_grad(_DecoratorContextManager):
         torch._C._set_grad_enabled(self.prev)
 
 
-class set_grad_enabled(object):
+class set_grad_enabled(_DecoratorContextManager):
     r"""Context-manager that sets gradient calculation to on or off.
 
     ``set_grad_enabled`` will enable or disable grads based on its argument :attr:`mode`.
@@ -213,12 +215,16 @@ class set_grad_enabled(object):
     def __init__(self, mode: bool) -> None:
         self.prev = torch.is_grad_enabled()
         torch._C._set_grad_enabled(mode)
+        self.mode = mode
 
     def __enter__(self) -> None:
         pass
 
     def __exit__(self, exc_type: Any, exc_value: Any, traceback: Any) -> None:
         torch._C._set_grad_enabled(self.prev)
+
+    def clone(self):
+        return self.__class__(self.mode)
 
 
 class inference_mode(_DecoratorContextManager):
@@ -274,3 +280,6 @@ class inference_mode(_DecoratorContextManager):
 
     def __exit__(self, exc_type: Any, exc_value: Any, traceback: Any) -> None:
         del self._inference_mode_raii_guard
+
+    def clone(self):
+        return self.__class__(self.mode)

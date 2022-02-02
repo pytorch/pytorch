@@ -186,6 +186,7 @@ class CUDAHostAllocator {
     {
       std::lock_guard<std::mutex> g(blocks_mutex_);
       blocks_.insert(block);
+      ptr_to_block_.insert({block->ptr_, block});
     }
     return {block->ptr_, reinterpret_cast<void*>(block)};
   }
@@ -229,11 +230,7 @@ class CUDAHostAllocator {
     }
   }
 
-  void record_event(void* ctx, at::cuda::CUDAStream stream) {
-    if (!ctx) {
-      return;
-    }
-
+  bool record_event(void* ptr, void* ctx, at::cuda::CUDAStream stream) {
     auto* block = reinterpret_cast<Block*>(ctx);
 
     // Note: we need to check if the passed-in `ctx` is valid. This is because
@@ -243,15 +240,24 @@ class CUDAHostAllocator {
     // proceeding.
     {
       std::lock_guard<std::mutex> g(blocks_mutex_);
-      if (blocks_.find(block) == blocks_.end()) {
-        return;
+      if (blocks_.find(block) != blocks_.end()) {
+        // Now we know this object is safe to access.
+        std::lock_guard<std::mutex> gb(block->mutex_);
+        TORCH_INTERNAL_ASSERT(block->allocated_);
+        block->streams_.insert(stream);
+        return true;
+      }
+      auto it = ptr_to_block_.find(ptr);
+      if (it != ptr_to_block_.end()) {
+        block = it->second;
+        std::lock_guard<std::mutex> g(block->mutex_);
+        TORCH_INTERNAL_ASSERT(block->allocated_);
+        block->streams_.insert(stream);
+        return true;
       }
     }
 
-    // Now we know this object is safe to access.
-    std::lock_guard<std::mutex> g(block->mutex_);
-    TORCH_INTERNAL_ASSERT(block->allocated_);
-    block->streams_.insert(stream);
+    return false;
   }
 
   void empty_cache() {
@@ -273,6 +279,7 @@ class CUDAHostAllocator {
     free_list_.clear();
     for (auto* block : blocks_to_remove) {
       blocks_.erase(block);
+      ptr_to_block_.erase(block->ptr_);
       AT_CUDA_CHECK(cudaFreeHost(block->ptr_));
       delete block;
     }
@@ -341,7 +348,7 @@ class CUDAHostAllocator {
 
   alignas(64) std::mutex blocks_mutex_;
   std::unordered_set<Block*> blocks_;
-
+  std::unordered_map<void*, Block*> ptr_to_block_;
   // Note: sharding this mutex seems to be profitable in heavily multi-threaded
   // scenarios.
   alignas(64) std::mutex free_list_mutex_;
@@ -365,11 +372,11 @@ static void CUDAHostAllocatorDeleter(void* ctx) {
   getCUDAHostAllocator().free(ctx);
 }
 
-cudaError_t CachingHostAllocator_recordEvent(
+bool CachingHostAllocator_recordEvent(
+    void* ptr,
     void* ctx,
     at::cuda::CUDAStream stream) {
-  getCUDAHostAllocator().record_event(ctx, stream);
-  return cudaSuccess;
+  return getCUDAHostAllocator().record_event(ptr, ctx, stream);
 }
 
 // Releases cached pinned memory allocations via cudaHostFree
