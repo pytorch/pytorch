@@ -87,7 +87,11 @@ using int_same_size_t = typename int_of_size<sizeof(T)>::type;
 // NOTE: If you specialize on a type, you must define all operations!
 
 // emulates Vectorized types
+#if defined(__s390x__)
+template <class T, class TEMP=void>
+#else
 template <class T>
+#endif
 struct Vectorized {
 private:
   __at_align__ T values[VECTOR_WIDTH / sizeof(T)];
