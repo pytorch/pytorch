@@ -393,6 +393,25 @@ object or a device index, and access one of the above attributes. E.g., to set
 the capacity of the cache for device ``1``, one can write
 ``torch.backends.cuda.cufft_plan_cache[1].max_size = 10``.
 
+.. _cuda-just-in-time-compilation:
+
+Just-in-Time Compilation
+------------------------
+
+PyTorch just-in-time compiles some operations, like torch.special.zeta, when
+performed on CUDA tensors. This compilation can be time consuming
+(up to a few seconds depending on your hardware and software)
+and may occur multiple times for a single operator since many PyTorch operators actually
+select from a variety of kernels, each of which must be compiled once, depending on their input.
+This compilation occurs once per process, or just once if a kernel cache is used.
+
+By default, PyTorch creates a kernel cache in $XDG_CACHE_HOME/torch/kernels if
+XDG_CACHE_HOME is defined and $HOME/.cache/torch/kernels if it's not (except on Windows,
+where the kernel cache is not yet supported). The caching behavior can be directly
+controlled with two environment variables. If USE_PYTORCH_KERNEL_CACHE is set to 0 then no
+cache will be used, and if PYTORCH_KERNEL_CACHE_PATH is set then that path will be used
+as a kernel cache instead of the default location.
+
 Best practices
 --------------
 
