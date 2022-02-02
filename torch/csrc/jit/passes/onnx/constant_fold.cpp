@@ -1,9 +1,10 @@
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/onnx/constant_fold.h>
-
-#include <c10/util/Exception.h>
 #include <torch/csrc/jit/passes/onnx/helper.h>
 
+#include <ATen/Functions.h>
+
+#include <c10/util/Exception.h>
 #include <c10/util/Optional.h>
 #include <c10/util/irange.h>
 #include <algorithm>
@@ -462,17 +463,18 @@ c10::optional<at::Tensor> runTorchBackendForOnnx(
     // It needs to be adjusted (+= dim sizes) for aten op
     axis += axis < 0 ? inputTensorValues[0].sizes().size() : 0;
     at::Tensor indices = inputTensorValues[1];
+    auto q = indices.dim();
+    // at::index_select only supports indices with rank <= 1.
+    // See https://pytorch.org/docs/master/generated/torch.index_select.html
+    if (q > 1) {
+      return c10::nullopt;
+    }
     // If indices input for onnx::Gather has a value less than 0,
     // It needs to be adjusted (+= dim value) for aten op
     auto less_mask = at::lt(indices, 0);
     auto indices_corr = at::add(indices, inputTensorValues[0].sizes()[axis]);
     auto indices_masked = at::where(less_mask, indices_corr, indices);
     updated_val = at::index_select(inputTensorValues[0], axis, indices_masked);
-    auto q = indices.dim();
-    // Cases where rank of indices > 1 are not currently supported.
-    if (q > 1) {
-      return c10::nullopt;
-    }
     // If rank of indices is 0, rank of output tensor should be
     // rank_of_input - 1.
     if (q < 1) {
