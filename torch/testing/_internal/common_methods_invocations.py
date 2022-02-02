@@ -6304,6 +6304,8 @@ def skips_mvlgamma(skip_redundant=False):
     skips = (
         # outside domain values are hard error for mvlgamma op.
         DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_float_domains'),
+        # TODO: float16 fails due to tensor not satisfying > (p-1)/2
+        DecorateInfo(unittest.skip("Skipped!"), 'TestNNCOpInfo'),
     )
     if skip_redundant:
         # Redundant tests
@@ -14581,9 +14583,9 @@ op_db: List[OpInfo] = [
             # On CUDA, the op is dispatched (and a few more conditions) to
             # _fused_dropout, which doesn't support forward AD
             DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', 'test_forward_mode_AD', device_type='cuda'),
-            # (ROCm) NotImplementedError: Trying to use forward AD with native_dropout that does not support it
-            DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', 'test_fn_fwgrad_bwgrad',
-                         device_type='cuda', dtypes=[torch.float64], active_if=TEST_WITH_ROCM),),
+            # NotImplementedError: Trying to use forward AD with native_dropout that does not support it
+            DecorateInfo(unittest.expectedFailure, 'TestGradients', 'test_fn_fwgrad_bwgrad',
+                         device_type='cuda', dtypes=[torch.float64]),),
         gradcheck_wrapper=wrapper_set_seed,
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
