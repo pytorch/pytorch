@@ -2736,17 +2736,13 @@ class TestTensorCreation(TestCase):
             self.assertEqual(t[0], a[0])
             self.assertEqual(t[steps - 1], a[steps - 1])
 
-    def _linspace_logspace_warning_helper(self, op, device, dtype):
+    def _logspace_warning_helper(self, op, device, dtype):
         with self.assertWarnsOnceRegex(UserWarning, "Not providing a value for .+"):
             op(0, 10, device=device, dtype=dtype)
 
     @dtypes(torch.float)
-    def test_linspace_steps_warning(self, device, dtype):
-        self._linspace_logspace_warning_helper(torch.linspace, device, dtype)
-
-    @dtypes(torch.float)
     def test_logspace_steps_warning(self, device, dtype):
-        self._linspace_logspace_warning_helper(torch.logspace, device, dtype)
+        self._logspace_warning_helper(torch.logspace, device, dtype)
 
     @onlyCUDA
     @largeTensorTest('16GB')
@@ -2951,6 +2947,9 @@ class TestTensorCreation(TestCase):
                          torch.zeros(1, device=device, dtype=dtype), atol=0, rtol=0)
         # steps = 0
         self.assertEqual(torch.linspace(0, 1, 0, device=device, dtype=dtype).numel(), 0, atol=0, rtol=0)
+
+        # steps not provided
+        self.assertRaises(TypeError, lambda: torch.linspace(0, 1, device=device, dtype=dtype))
 
         if dtype == torch.float:
             # passed dtype can't be safely casted to inferred dtype
