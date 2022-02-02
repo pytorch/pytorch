@@ -57,7 +57,7 @@ namespace jit {
 // corner cases in graph optimizations, allowing for more aggressive
 // optimizations and better performance.
 bool isUnsupportedOp(const NodeKind& kind) {
-  return kind == aten::__is__ || kind == aten::__isnot__ || kind == prim::Loop;
+  return kind == aten::__is__ || kind == aten::__isnot__;
 }
 
 // graph must be frozen or canEnableStaticRuntime would return false
