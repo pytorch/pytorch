@@ -707,42 +707,48 @@ TEST(FlatbufferTest, OpNameExportFetchRootOperators) {
 }
 
 TEST(FlatbufferTest, DefaultArgsConv) {
-  auto s = std::getenv("PYTORCH_TEST_WITH_TSAN");
-  if (s && strcmp(s, "1") == 0)
-    return;
-
+//  auto s = std::getenv("PYTORCH_TEST_WITH_TSAN");
+//  if (s && strcmp(s, "1") == 0)
+//    return;
+//
+//
+//  Module m("m");
+//  m.register_parameter("weight", torch::ones({20, 1, 5, 5}), false);
+//  m.register_parameter("bias", torch::ones({20}), false);
+//  m.define(R"(
+//    def forward(self, input):
+//      return torch.conv2d(input, self.weight, self.bias, [1, 1], [0, 0], [1, 1], 1)
+//  )");
+//
+  Module m = torch::jit::load("/Users/pavithran/Downloads/m_model.ptl");
   std::vector<torch::jit::IValue> inputs;
-
-  Module m("m");
-  m.register_parameter("weight", torch::ones({20, 1, 5, 5}), false);
-  m.register_parameter("bias", torch::ones({20}), false);
-  m.define(R"(
-    def forward(self, input):
-      return torch.conv2d(input, self.weight, self.bias, [1, 1], [0, 0], [1, 1], 1)
-  )");
-
-  inputs.emplace_back(torch::ones({1, 1, 28, 28}));
-
-  auto outputref = m.forward(inputs).toTensor();
+  inputs.emplace_back(torch::zeros({1, 10, 10, 10}));
 
   CompilationOptions options;
   mobile::Module bc = jitModuleToMobile(m, options);
-  IValue res;
-  for (int i = 0; i < 1; ++i) {
-    res = bc.get_method("forward")(inputs);
-  }
-  auto output = res.toTensor();
-  AT_ASSERT(outputref.dim() == output.dim());
-  AT_ASSERT(output.equal(outputref));
+
+//  std::stringstream ss;
+//  m._save_for_mobile(ss, {}, true);
+//  auto loaded = _load_for_mobile(ss);
 
   auto buff = save_mobile_module_to_bytes(bc, true);
   mobile::Module bc2 = parse_mobile_module(buff.data(), buff.size());
-  for (int i = 0; i < 1; ++i) {
-    res = bc2.get_method("forward")(inputs);
-  }
-  output = res.toTensor();
-  AT_ASSERT(outputref.dim() == output.dim());
-  AT_ASSERT(output.equal(outputref));
+
+
+//  auto outputref = m.forward(inputs).toTensor();
+//  IValue res;
+//  for (int i = 0; i < 1; ++i) {
+//    res = bc.get_method("forward")(inputs);
+//  }
+//  auto output = res.toTensor();
+//  AT_ASSERT(outputref.dim() == output.dim());
+//  AT_ASSERT(output.equal(outputref));
+//  for (int i = 0; i < 1; ++i) {
+//    res = bc2.get_method("forward")(inputs);
+//  }
+//  output = res.toTensor();
+//  AT_ASSERT(outputref.dim() == output.dim());
+//  AT_ASSERT(output.equal(outputref));
 }
 
 namespace {

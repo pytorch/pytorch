@@ -385,7 +385,6 @@ void updateSourceRangeTags(
     const SourceRangeRecords& ranges,
     SourceRangeTagMap& m_source_range_tags,
     int64_t* m_current_source_range_tag) {
-  std::cout << "ranges: " << ranges.size() << std::endl;
   for (const auto& range : ranges) {
     if (m_source_range_tags.find(range.range) == m_source_range_tags.end()) {
       std::cout << "m_current_source_range_tag: " << m_current_source_range_tag << std::endl;

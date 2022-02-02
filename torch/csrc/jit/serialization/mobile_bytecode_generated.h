@@ -1939,17 +1939,17 @@ struct MobileDebugInfo FLATBUFFERS_FINAL_CLASS : private flatbuffers::Table {
     VT_NODE_NAME = 8,
     VT_INLINED_CALL_STACK = 10
   };
-  int32_t sr_start() const {
-    return GetField<int32_t>(VT_SR_START, 0);
+  int64_t sr_start() const {
+    return GetField<int64_t>(VT_SR_START, 0);
   }
-  bool mutate_sr_start(int32_t _sr_start) {
-    return SetField<int32_t>(VT_SR_START, _sr_start, 0);
+  bool mutate_sr_start(int64_t _sr_start) {
+    return SetField<int64_t>(VT_SR_START, _sr_start, 0);
   }
-  int32_t sr_end() const {
-    return GetField<int32_t>(VT_SR_END, 0);
+  int64_t sr_end() const {
+    return GetField<int64_t>(VT_SR_END, 0);
   }
-  bool mutate_sr_end(int32_t _sr_end) {
-    return SetField<int32_t>(VT_SR_END, _sr_end, 0);
+  bool mutate_sr_end(int64_t _sr_end) {
+    return SetField<int64_t>(VT_SR_END, _sr_end, 0);
   }
   const flatbuffers::String *node_name() const {
     return GetPointer<const flatbuffers::String *>(VT_NODE_NAME);
@@ -1965,8 +1965,8 @@ struct MobileDebugInfo FLATBUFFERS_FINAL_CLASS : private flatbuffers::Table {
   }
   bool Verify(flatbuffers::Verifier &verifier) const {
     return VerifyTableStart(verifier) &&
-           VerifyField<int32_t>(verifier, VT_SR_START) &&
-           VerifyField<int32_t>(verifier, VT_SR_END) &&
+           VerifyField<int64_t>(verifier, VT_SR_START) &&
+           VerifyField<int64_t>(verifier, VT_SR_END) &&
            VerifyOffset(verifier, VT_NODE_NAME) &&
            verifier.VerifyString(node_name()) &&
            VerifyOffset(verifier, VT_INLINED_CALL_STACK) &&
@@ -1979,11 +1979,11 @@ struct MobileDebugInfoBuilder {
   typedef MobileDebugInfo Table;
   flatbuffers::FlatBufferBuilder &fbb_;
   flatbuffers::uoffset_t start_;
-  void add_sr_start(int32_t sr_start) {
-    fbb_.AddElement<int32_t>(MobileDebugInfo::VT_SR_START, sr_start, 0);
+  void add_sr_start(int64_t sr_start) {
+    fbb_.AddElement<int64_t>(MobileDebugInfo::VT_SR_START, sr_start, 0);
   }
-  void add_sr_end(int32_t sr_end) {
-    fbb_.AddElement<int32_t>(MobileDebugInfo::VT_SR_END, sr_end, 0);
+  void add_sr_end(int64_t sr_end) {
+    fbb_.AddElement<int64_t>(MobileDebugInfo::VT_SR_END, sr_end, 0);
   }
   void add_node_name(flatbuffers::Offset<flatbuffers::String> node_name) {
     fbb_.AddOffset(MobileDebugInfo::VT_NODE_NAME, node_name);
@@ -2005,22 +2005,22 @@ struct MobileDebugInfoBuilder {
 
 inline flatbuffers::Offset<MobileDebugInfo> CreateMobileDebugInfo(
     flatbuffers::FlatBufferBuilder &_fbb,
-    int32_t sr_start = 0,
-    int32_t sr_end = 0,
+    int64_t sr_start = 0,
+    int64_t sr_end = 0,
     flatbuffers::Offset<flatbuffers::String> node_name = 0,
     flatbuffers::Offset<torch::jit::mobile::serialization::InlinedCallStack> inlined_call_stack = 0) {
   MobileDebugInfoBuilder builder_(_fbb);
-  builder_.add_inlined_call_stack(inlined_call_stack);
-  builder_.add_node_name(node_name);
   builder_.add_sr_end(sr_end);
   builder_.add_sr_start(sr_start);
+  builder_.add_inlined_call_stack(inlined_call_stack);
+  builder_.add_node_name(node_name);
   return builder_.Finish();
 }
 
 inline flatbuffers::Offset<MobileDebugInfo> CreateMobileDebugInfoDirect(
     flatbuffers::FlatBufferBuilder &_fbb,
-    int32_t sr_start = 0,
-    int32_t sr_end = 0,
+    int64_t sr_start = 0,
+    int64_t sr_end = 0,
     const char *node_name = nullptr,
     flatbuffers::Offset<torch::jit::mobile::serialization::InlinedCallStack> inlined_call_stack = 0) {
   auto node_name__ = node_name ? _fbb.CreateString(node_name) : 0;

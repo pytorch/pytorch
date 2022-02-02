@@ -149,8 +149,8 @@ table InlinedCallStack {
 }
 
 table MobileDebugInfo {
-    sr_start: int;
-    sr_end: int;
+    sr_start: int64;
+    sr_end: int64;
     node_name: string;
     inlined_call_stack: InlinedCallStack;
 }
@@ -196,6 +196,11 @@ table IValue {
 }
 
 table ExtraFile {
+  name:string;
+  content:string;
+}
+
+table JITCode {
   name:string;
   content:string;
 }

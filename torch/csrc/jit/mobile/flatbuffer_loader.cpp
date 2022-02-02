@@ -505,8 +505,11 @@ ska::flat_hash_map<int64_t, DebugInfoTuple> torch::jit::FlatbufferLoader::parseM
   callstack_ptrs.reserve(mobile_debug_infos->size());
   for (uint32_t i = 0; i < mobile_debug_infos->size(); ++i) {
     const auto* mobileDebugInfo = mobile_debug_infos->Get(i);
-    InlinedCallStackPtr inlinedCallStackPtr = parseInlinedCallStack(
-        mobileDebugInfo->inlined_call_stack());
+    InlinedCallStackPtr inlinedCallStackPtr;
+    if (mobileDebugInfo->inlined_call_stack()) {
+      inlinedCallStackPtr = parseInlinedCallStack(
+          mobileDebugInfo->inlined_call_stack());
+    }
     int64_t debug_handle = mobileDebugInfo->sr_start();
     int64_t source_range_tag = mobileDebugInfo->sr_end();
     const std::string& node_name = mobileDebugInfo->node_name()->str();

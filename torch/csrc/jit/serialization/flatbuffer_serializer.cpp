@@ -136,11 +136,14 @@ class FlatbufferSerializer {
   std::unordered_map<IValue, uint32_t, IValueHash> cached_ivalues_;
 
   const mobile::CompilationUnit* mcu_ = nullptr;
-  flatbuffers::Offset<jit::mobile::serialization::MobileDebugInfo> mobileDebugInfoToFB(
-      FlatBufferBuilder& fbb);
+  flatbuffers::Offset<jit::mobile::serialization::MobileDebugInfo>
+  mobileDebugInfoToFB(FlatBufferBuilder& fbb, const IValue& mobile_debug_info);
 
   flatbuffers::Offset<flatbuffers::Vector<flatbuffers::Offset<mobile::serialization::MobileDebugInfo>>>
-  mobileDebugInfosToFB(FlatBufferBuilder& fbb);
+  mobileDebugInfosToFB(FlatBufferBuilder& fbb, c10::IValue debug_info_node);
+  flatbuffers::Offset<mobile::serialization::InlinedCallStack> serializeInlinedCallStack(
+      FlatBufferBuilder& fbb,
+      const IValue& inlineCallStack);
 };
 
 flatbuffers::Offset<jit::mobile::serialization::Schema> FlatbufferSerializer::
@@ -201,7 +204,6 @@ c10::IValue serializeInlinedStackCall(
     const InlinedCallStackPtr& cs_ptr,
     const SourceRangeTagMap& source_range_tags) {
   if (!cs_ptr) {
-    std::cout << "here" << std::endl;
     return c10::IValue();
   }
   auto cs_it = serialized_inlined_callstack_.find(cs_ptr);
@@ -238,7 +240,6 @@ c10::IValue serializeInlinedStackCall(
   }
   auto fn_name = cs_ptr->function_name();
   if (!fn_name.empty()) {
-    std::cout << fn_name << std::endl;
     elements.emplace_back(fn_name);
   } else {
     elements.emplace_back("FunctionName_UNKNOWN");
@@ -279,37 +280,65 @@ c10::IValue serializeDebugInfo(
     elements.emplace_back(serializeInlinedStackCall(inlined_cs_ptr, source_range_tags));
     ivalues.emplace_back(c10::ivalue::Tuple::create(elements));
   }
-  std::vector<at::Tensor> table;
   c10::IValue ivalue = c10::ivalue::Tuple::create(std::move(ivalues));
   return ivalue;
 }
 
-flatbuffers::Offset<mobile::serialization::MobileDebugInfo>  FlatbufferSerializer::mobileDebugInfoToFB(FlatBufferBuilder& fbb){
+flatbuffers::Offset<mobile::serialization::InlinedCallStack>
+FlatbufferSerializer::serializeInlinedCallStack(FlatBufferBuilder& fbb,
+const IValue& inlineCallStack) {
+  flatbuffers::Offset<mobile::serialization::InlinedCallStack> inlineCallOffset = 0;
+  if (!inlineCallStack.isNone()) {
+    // get inline call stack
+    const auto& inner = inlineCallStack.toTupleRef().elements();
+    if (!inner.empty() && !inner[0].isNone()) {
+      const auto& names = inner[0].toTupleRef().elements();
+        inlineCallOffset = mobile::serialization::CreateInlinedCallStack(
+            fbb,
+            fbb.CreateSharedString(names[0].toStringRef()),
+            fbb.CreateSharedString(names[1].toStringRef()),
+            inner[1].toInt(),
+            inner[2].isNone()
+                ? mobile::serialization::InlinedCallStackUnion::NONE
+                : mobile::serialization::InlinedCallStackUnion::
+                      InlinedCallStack,
+            serializeInlinedCallStack(fbb, inner[2]).Union(),
+            fbb.CreateSharedString(inner[3].toStringRef()));
+      }
+  }
+  return inlineCallOffset;
+}
 
+flatbuffers::Offset<jit::mobile::serialization::MobileDebugInfo>
+FlatbufferSerializer::mobileDebugInfoToFB(
+    FlatBufferBuilder& fbb,
+    const IValue& mobile_debug_info) {
+
+    const auto &elements = mobile_debug_info.toTupleRef().elements();
+    int64_t sr_start =  elements[0].toInt();
+    int64_t sr_end =  elements[1].toInt();
+    std::string node_name = elements[2].toStringRef();
   flatbuffers::Offset<mobile::serialization::InlinedCallStack> inlineCallOffset =
-      mobile::serialization::CreateInlinedCallStack(
-          fbb,
-          fbb.CreateSharedString("a"),
-          fbb.CreateSharedString("a"),
-          0,
-          mobile::serialization::InlinedCallStackUnion::NONE,
-          0,
-          fbb.CreateSharedString("a"));
+      serializeInlinedCallStack(fbb, elements[3]);
 
-  return mobile::serialization::CreateMobileDebugInfo(
+  auto offset = mobile::serialization::CreateMobileDebugInfo(
       fbb,
-      0,
-      0,
-      fbb.CreateSharedString("a"),
+      sr_start,
+      sr_end,
+      fbb.CreateSharedString(node_name),
       inlineCallOffset);
+  return offset;
 }
 
 flatbuffers::Offset<flatbuffers::Vector<flatbuffers::Offset<mobile::serialization::MobileDebugInfo>>>
-    FlatbufferSerializer::mobileDebugInfosToFB(FlatBufferBuilder& fbb) {
+    FlatbufferSerializer::mobileDebugInfosToFB(
+    FlatBufferBuilder& fbb,
+    c10::IValue debug_info_node) {
   std::vector<flatbuffers::Offset<mobile::serialization::MobileDebugInfo>> mdis;
-  mdis.reserve(5);
-  for (int i = 0; i < 5; ++i) {
-      mdis.emplace_back(mobileDebugInfoToFB(fbb));
+  auto tuples = debug_info_node.toTupleRef().elements();
+  mdis.reserve(tuples.size());
+  for (const auto &tuple: tuples) {
+    mdis.emplace_back(mobileDebugInfoToFB(fbb, tuple));
   }
   return fbb.CreateVector(mdis);
 }
@@ -523,7 +552,20 @@ flatbuffers::DetachedBuffer FlatbufferSerializer::serializeModule(
     }
     storage_data_offset = fbb.CreateVector(storage_data);
   }
-  auto mobile_debug_infos = mobileDebugInfosToFB(fbb);
+
+  flatbuffers::Offset<flatbuffers::Vector<flatbuffers::Offset<mobile::serialization::MobileDebugInfo>>> mobile_debug_infos;
+  if (save_mobile_debug_info) {
+//    auto backend_source_range_records = getBackendSourceRanges(module);
+//    SourceRangePickler source_range_pickler;
+//    updateSourceRangeTags(backend_source_range_records);
+    const auto& debug_info = module.getDebugTable().getCallStackPtrMap();
+    BackendDebugInfoMapType debug_handle_cs_ptr_map(
+        debug_info.begin(), debug_info.end());
+    auto source_range_tags = module.getSourceRangeTags();
+    auto debug_info_node = serializeDebugInfo(debug_handle_cs_ptr_map, source_range_tags);
+    mobile_debug_infos = mobileDebugInfosToFB(fbb, debug_info_node);
+  }
+
   auto mod = CreateModule(
       fbb,
       0, /* version */
@@ -536,20 +578,6 @@ flatbuffers::DetachedBuffer FlatbufferSerializer::serializeModule(
       fbb.CreateVector(obj_types_offset_),
       mobile_debug_infos);
   fbb.Finish(mod);
-
-  if (save_mobile_debug_info) {
-//    auto backend_source_range_records = getBackendSourceRanges(module);
-//    SourceRangePickler source_range_pickler;
-//    updateSourceRangeTags(backend_source_range_records);
-    const auto& debug_info = module.getDebugTable().getCallStackPtrMap();
-    std::cout << debug_info.size() << std::endl;
-    BackendDebugInfoMapType debug_handle_cs_ptr_map(
-        debug_info.begin(), debug_info.end());
-    auto source_range_tags = module.getSourceRangeTags();
-    auto debug_info_node = serializeDebugInfo(debug_handle_cs_ptr_map, source_range_tags);
-    std::cout << debug_info_node.isNone() << std::endl;
-  }
-
   return fbb.Release();
 }
 
