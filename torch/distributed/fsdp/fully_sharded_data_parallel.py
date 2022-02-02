@@ -36,11 +36,19 @@ if TYPE_CHECKING:
 
 @dataclass
 class CPUOffload:
+    """
+    CPU offlaoding config. Currently, only parameter and gradient CPU
+    offload are supported.
+    offload_params: Offloading parameters to CPUs when these parameters are
+                    not used for computation on GPUs. This implicitly enables
+                    gradient offloading to CPUs in order for parameters and
+                    gradients to be on the same device to work with optimizer.
+    """
     offload_params: bool = False
-    # TODO: state dict offloading, activation offloading
+    # TODO: state dict offloading
     # https://github.com/pytorch/pytorch/issues/67224
 
-class BackwardPrefetch_(Enum):
+class BackwardPrefetch(Enum):
     """
     Specify where to prefetch next layer's full parameters
     during backward pass.
@@ -88,28 +96,34 @@ class FullyShardedDataParallel(nn.Module):
     """
     A wrapper for sharding Module parameters across data parallel workers. This
     is inspired by `Xu et al.`_ as well as the ZeRO Stage 3 from DeepSpeed_.
-    ``FullyShardedDataParallel`` is commonly shorten to FSDP.
+    FullyShardedDataParallel is commonly shorten to FSDP.
+
     .. _`Xu et al.`: https://arxiv.org/abs/2004.13336
     .. _DeepSpeed: https://www.deepspeed.ai/
+
     Example::
-        import torch
-        from torch.distributed._fsdp import FullyShardedDataParallel as FSDP
-        torch.cuda.set_device(device_id)
-        sharded_module = FSDP(my_module)
-        optim = torch.optim.Adam(sharded_module.parameters(), lr=0.0001)
-        x = sharded_module(x, y=3, z=torch.Tensor([1]))
-        loss = x.sum()
-        loss.backward()
-        optim.step()
+
+        >>> import torch
+        >>> from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
+        >>> torch.cuda.set_device(device_id)
+        >>> sharded_module = FSDP(my_module)
+        >>> optim = torch.optim.Adam(sharded_module.parameters(), lr=0.0001)
+        >>> x = sharded_module(x, y=3, z=torch.Tensor([1]))
+        >>> loss = x.sum()
+        >>> loss.backward()
+        >>> optim.step()
+
     .. warning::
         The optimizer must be initialized *after* the module has been wrapped,
         since FSDP will shard parameters in-place and this will break any
         previously initialized optimizers.
+
     .. warning:
         Module should be already placed on the destination device or
         device is set properly using torch.cuda.set_device(device_id).
         FSDP will get compute device from module first, if module device
         is CPU, FSDP will then get compute device from current device.
+
     Args:
         module (nn.Module):
             module to be wrapped with FSDP.
@@ -128,11 +142,30 @@ class FullyShardedDataParallel(nn.Module):
             Note that this policy currently will only apply to child modules of
             the passed in module. The remainder modules are always wrapped in
             the returned FSDP root instance.
-        backward_prefetch: (Optional[BackwardPrefetch_]):
+            ``default_auto_wrap_policy`` written in ``torch.distributed.fsdp.wrap`` is
+            an example of ``fsdp_auto_wrap_policy`` callable, this policy wraps layers
+            with parameter sizes larger than 100M. Users can supply the customized
+            ``fsdp_auto_wrap_policy`` callable that should accept following arguments:
+            ``module: nn.Module``, ``recurse: bool``, ``unwrapped_params: int``,
+            extra customized arguments could be added to the customized
+            ``fsdp_auto_wrap_policy`` callable as well.
+
+            Example::
+
+                >>> def custom_auto_wrap_policy(
+                >>>     module: nn.Module,
+                >>>     recurse: bool,
+                >>>     unwrapped_params: int,
+                >>>     # These are customizable for this policy function.
+                >>>     min_num_params: int = int(1e8),
+                >>> ) -> bool:
+                >>>     return unwrapped_params >= min_num_params
+
+        backward_prefetch: (Optional[BackwardPrefetch]):
             This is an experimental feature that is subject to change in the
             the near future. It allows users to enable two different backward_prefetch
             algorithms to help backward communication and computation overlapping.
-            Pros and cons of each algorithm is explained in the class ``BackwardPrefetch_``.
+            Pros and cons of each algorithm is explained in the class ``BackwardPrefetch``.
     """
 
     def __init__(
@@ -141,7 +174,7 @@ class FullyShardedDataParallel(nn.Module):
         process_group: Optional[ProcessGroup] = None,
         cpu_offload: Optional[CPUOffload] = None,
         fsdp_auto_wrap_policy: Optional[Callable] = None,
-        backward_prefetch: Optional[BackwardPrefetch_] = None,
+        backward_prefetch: Optional[BackwardPrefetch] = None,
     ):
         torch._C._log_api_usage_once("torch.distributed.fsdp")
         super().__init__()
@@ -566,7 +599,7 @@ class FullyShardedDataParallel(nn.Module):
 
     def _need_prefetch_pre_backward_hook(self) -> bool:
         if (
-            self.backward_prefetch == BackwardPrefetch_.BACKWARD_PRE
+            self.backward_prefetch == BackwardPrefetch.BACKWARD_PRE
             and self._fsdp_graph_order is not None
             and self._my_fsdp_idx_in_graph is not None and self._my_fsdp_idx_in_graph > 0
             and self._fsdp_graph_order[self._my_fsdp_idx_in_graph - 1].training_state != TrainingState_.BACKWARD_POST
@@ -577,7 +610,7 @@ class FullyShardedDataParallel(nn.Module):
 
     def _need_prefetch_post_backward_hook(self) -> bool:
         if (
-            self.backward_prefetch == BackwardPrefetch_.BACKWARD_POST
+            self.backward_prefetch == BackwardPrefetch.BACKWARD_POST
             and self._fsdp_graph_order is not None
             and self._my_fsdp_idx_in_graph is not None and self._my_fsdp_idx_in_graph > 0
             and self._fsdp_graph_order[self._my_fsdp_idx_in_graph - 1].training_state != TrainingState_.BACKWARD_POST
