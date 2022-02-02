@@ -255,7 +255,8 @@ def _check_repo(repo_owner, repo_name, repo_branch, trust_repo, calling_fn="load
                 f"To add the repository to your trusted list, change the command to {calling_fn}(..., "
                 "trust_repo=False) and a command prompt will appear asking for an explicit confirmation of trust, "
                 f"or {calling_fn}(..., trust_repo=True), which will assume that the prompt is to be answered with "
-                f"'yes'. You can also use {calling_fn}(..., trust_repo="check") which will only prompt for confirmation if the repo is not already trusted. This will eventually be the default behaviour").
+                f"'yes'. You can also use {calling_fn}(..., trust_repo='check') which will only prompt for "
+                f"confirmation if the repo is not already trusted. This will eventually be the default behaviour")
         return
 
     if (trust_repo is False) or (trust_repo == "check" and not is_trusted):
@@ -353,13 +354,13 @@ def list(github, force_reload=False, skip_validation=False, trust_repo=None):
             ``GITHUB_TOKEN`` environment variable. Default is ``False``.
         trust_repo (bool, string or None): ``"check"``, ``True``, ``False`` or ``None``.
              This parameter helps ensuring that users only run code from repos that they trust.
-             
+
             - If ``False``, a prompt will ask the user whether the repo should be trusted.
             - If ``True``, the repo will be added to the trusted list and loaded without requiring explicit confirmation.
             - If ``"check"``, the repo will be checked against the list of trusted repos in the cache. If it is
                not present in that list, the behaviour will fall back onto the ``trust_repo=False`` option.
             - If ``None``: this will raise a warning, inviting the user to set ``trust_repo`` to either ``False``, ``True`` or ``"check"``. This is only present for backward compatibility and will be removed in the future.
-            
+
             Default is ``None`` and will eventually change to ``"check"`` in a future version.
 
     Returns:
