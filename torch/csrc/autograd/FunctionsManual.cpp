@@ -2440,7 +2440,7 @@ std::tuple<Tensor, Tensor, Tensor> linalg_svd_jvp(const Tensor& dA,
     if (full_matrices) {
       auto shape = dU.sizes().vec();
       shape.end()[-1] = m - n;
-      dU = at::cat({dU, at::zeros(shape, dU.options())}, /*dim=*/-1);
+      dU = at::cat({dU, dU.new_zeros(shape)}, /*dim=*/-1);
     }
   }
 
@@ -2462,7 +2462,7 @@ std::tuple<Tensor, Tensor, Tensor> linalg_svd_jvp(const Tensor& dA,
     if (full_matrices) {
       auto shape = dVh.sizes().vec();
       shape.end()[-2] = n - m;
-      dVh = at::cat({dVh, at::zeros(shape, dVh.options())}, /*dim=*/-2);
+      dVh = at::cat({dVh, dVh.new_zeros(shape)}, /*dim=*/-2);
     }
   }
 
