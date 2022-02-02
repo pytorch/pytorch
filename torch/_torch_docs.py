@@ -993,60 +993,71 @@ add_docstr(torch.asarray,
            r"""
 asarray(obj, *, dtype=None, device=None, copy=None, requires_grad=False) -> Tensor
 
-Converts :attr:`obj` into a tensor, sharing data and preserving autograd history
-if possible.
+Converts :attr:`obj` to a tensor.
 
 :attr:`obj` can be one of:
 
 1. a tensor
 2. a NumPy array
 3. a DLPack capsule
-4. a Python object that implements the buffer protocol
-5. a Python sequence
+4. an object that implements Python's buffer protocol
+5. a scalar
+6. a sequence of scalars
 
-For each of the mentioned options, in order, this functions will assume :attr:`obj`
-is of that type and try, first, sharing memory. Only then, it will make a copy (if
-necessary).
+When :attr:`obj` is a tensor, NumPy array, or DLPack capsule the returned tensor will,
+by default, not require a gradient, have the same datatype as :attr:`obj`, be on the
+same device, and share memory with it. These properties can be controlled with the
+:attr:`dtype`, :attr:`device`, :attr:`copy`, and :attr:`requires_grad` keyword arguments.
+If the returned tensor is of a different datatype, on a different device, or a copy is
+requested then it will not share its memory with :attr:`obj`. If :attr:`requires_grad`
+is ``True`` then the returned tensor will require a gradient, and if :attr:`obj` is
+also a tensor with an autograd history then the returned tensor will have the same history.
 
-The dtype of the result tensor is inferred from the input object, except when
-object is (4): an object that implements the buffer protocol (see :func:`torch.frombuffer`).
-In that case, the buffer is interpreted as an array of bytes, which are grouped
-according to the size of the given :attr:`dtype` or the global default
-(see :func:`torch.set_default_tensor_type`) if `None` is given.
+When :attr:`obj` is not a tensor, NumPy Array, or DLPack capsule but implements Python's
+buffer protocol then the buffer is interpreted as an array of bytes grouped according to
+the size of the datatype passed to the :attr:`dtype` keyword argument. (If no datatype is
+passed then the default floating point datatype is used, instead.) The returned tensor
+will have the specified datatype (or default floating point datatype if none is specified)
+and, by default, be on the CPU device and share memory with the buffer.
 
-For example: NumPy arrays also implement the buffer protocol. However, since NumPy
-arrays have higher priority than objects implementing the buffer protocol, this function
-will handle them as NumPy arrays. In other words, it will infer its dtype as if using
-``torch.from_numpy`` (instead of ``torch.frombuffer``).
+When :attr:`obj` is none of the above but a scalar or sequence of scalars then the
+returned tensor will, by default, infer its datatype from the scalar values, be on the
+CPU device, and not share its memory.
 
 .. seealso::
-    :func:`torch.as_tensor` tries to avoid copies for tensors and NumPy arrays.
-    :func:`torch.tensor` always copies the data from the input object.
-    :func:`torch.from_numpy` creates a tensor that shares its memory with a NumPy array.
-    :func:`torch.frombuffer` creates a tensor that shares its memory with an object
-    that implements the buffer protocol.
-    :func:`torch.utils.dlpack.from_dlpack` creates a tensor that shares its memory
-    with the object represented in the dlpack.
+    :func:`torch.as_tensor` creates a tensor that always shares memory if the input is a
+           tensor or a NumPy array, copying otherwise.
+
+    :func:`torch.tensor` creates a tensor that always copies the data from the input object.
+
+    :func:`torch.from_numpy` creates a tensor that always shares memory from NumPy arrays.
+
+    :func:`torch.frombuffer` creates a tensor that always shares memory from objects that
+           implement the buffer protocol.
+
+    :func:`torch.utils.dlpack.from_dlpack` creates a tensor that always shares memory from
+           DLPack capsules.
 
 Args:
-    obj (object): a Python object that satisfies, at least, one of the five options
-           mentioned above.
+    obj (object): a tensor, NumPy array, DLPack Capsule, object that implements Python's
+           buffer protocol, scalar, or sequence of scalars.
 
 Keyword args:
-    dtype (:class:`torch.dtype`, optional): the desired data type of returned tensor.
-           Default: if ``None``, it will be inferred from :attr:`obj`.
-    copy (bool, optional): flags whether the object memory should be copied or not.
-           If ``None``, then the result tensor shares memory with the Python object
-           whenever possible. If ``True``, then the object memory is copied. If ``False``,
-           then the object memory is shared. If the object memory cannot be shared
-           and this flag is ``False``, then an error is thrown.
-    device (:class:`torch.device`, optional): the device of the constructed tensor.
-           If `None`, then the device of :attr:`obj` is used. Else, it either copies
-           the data, if :attr:`obj` lives in a different device, or it shares the
-           memory, if :attr:`obj` lives in the same device.
-    requires_grad (bool, optional): If autograd should record operations on the
-           returned tensor. However, if this flag is ``False`` and the input object
-           is a non-leaf :class:`Tensor`, this function will call :func:`torch.Tensor.detach`.
+    dtype (:class:`torch.dtype`, optional): the datatype of the returned tensor.
+           Default: ``None``, which causes the datatype of the returned tensor to be
+           inferred from :attr:`obj`.
+    copy (bool, optional): controls whether the returned tensor shares memory with :attr:`obj`.
+           Default: ``None``, which causes the returned tensor to share memory with :attr:`obj`
+           whenever possible. If ``True`` then the returned tensor does not share its memory.
+           If ``False`` then the returned tensor shares its memory with :attr:`obj` and an
+           error is thrown if it cannot.
+    device (:class:`torch.device`, optional): the device of the returned tensor.
+           Default: ``None``, which causes the device of :attr:`obj` to be used.
+    requires_grad (bool, optional): whether the returned tensor requires grad.
+           Default: ``False``, which causes the returned tensor not to require a gradient.
+           If ``True``, then the returned tensor will require a gradient, and if :attr:`obj`
+           is also a tensor with an autograd history then the returned tensor will have
+           the same history.
 
 Example::
 
