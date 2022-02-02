@@ -155,8 +155,6 @@ void OptimizeGraph(
   UseVariadicGroupedAccessor(graph);
   EliminateNoOps(
       graph, /* custom_ops */ {fromQualString("fb::scale_gradient")});
-  CreateOwnedRefsForSpecialValues(*graph);
-  ForceNonEmptyOutputs(*graph);
   GRAPH_DUMP("Final graph after optimizations: ", graph);
 }
 
@@ -205,6 +203,19 @@ void PrepareGraphForStaticModule(
     std::vector<IValue> sample_inputs) {
   TORCH_CHECK(canEnableStaticRuntime(graph));
   OptimizeGraph(graph, opts, std::move(sample_inputs));
+
+  // Static runtime moves its outputs out of the runtime
+  // by default. In some rare cases, this is not actually safe to
+  // do - for example, if the value is a constant, static runtime
+  // needs to hold onto a copy. Rather than adding special logic
+  // to handle this rare case, we use this pass to detect it and
+  // create an owned reference that can be safely moved out of the
+  // runtime.
+  CreateOwnedRefsForSpecialValues(*graph);
+
+  // We assume that each sub-block has at least one output. If we
+  // detect any that have 0, force the sub-block to return None.
+  ForceNonEmptyOutputs(*graph);
 }
 
 std::pair<std::shared_ptr<Graph>, c10::optional<Module>> PrepareForStaticModule(
@@ -1767,12 +1778,7 @@ ProcessedNode::ProcessedNode(
     : node_(node),
       fn_(fn),
       inputs_(std::move(inputs)),
-      outputs_offset_(outputs_offset)
-#ifndef PYTORCH_DISABLE_PER_OP_PROFILING
-      ,
-      op_name_(node->kind().toQualString())
-#endif
-{
+      outputs_offset_(outputs_offset) {
   TORCH_CHECK(
       node->outputs().size() < (1 << (sizeof(num_outputs_) * 8)),
       node->outputs().size(),

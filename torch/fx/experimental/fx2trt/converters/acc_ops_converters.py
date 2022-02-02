@@ -1422,30 +1422,26 @@ def acc_ops_slice_tensor(
                            "of the TensorRT region!")
 
     ranks = len(input_val.shape) + (1 if network.has_implicit_batch_dimension else 0)
-    dims = [get_positive_dim(dim, ranks) for dim in cast(Sequence[int], kwargs["dims"])]
+    dim = get_positive_dim(cast(int, kwargs["dim"]), ranks)
 
     if network.has_implicit_batch_dimension:
-        if not len(dims):
-            raise RuntimeError("dim argument cannot be empty!")
-        if any([dim == 0 for dim in dims]):
+        if dim == 0:
             raise RuntimeError(
-                f"We do not support slice_tensor at batch dim when it's implicit, got {dims}!"
+                f"We do not support slice_tensor at batch dim when it's implicit, got {dim}!"
             )
-        dims = [d - 1 for d in dims]
+        dim = dim - 1
     else:
         raise RuntimeError("We don't support slice_tensor with explicit batch dimension yet!")
 
+    start_int = cast(int, kwargs["start"])
+    stop_int = cast(int, kwargs["stop"])
+    step_int = cast(int, kwargs["step"])
     start = [0] * len(input_val.shape)
+    start[dim] = start_int
     stride = [1] * len(start)
+    stride[dim] = step_int
     output_shape = list(input_val.shape)
-    starts = cast(Sequence[int], kwargs["starts"])
-    stops = cast(Sequence[int], kwargs["stops"])
-    steps = cast(Sequence[int], kwargs["steps"])
-
-    for i, dim in enumerate(dims):
-        start[dim] = starts[i]
-        stride[dim] = steps[i]
-        output_shape[dim] = (stops[i] - starts[i]) // steps[i]
+    output_shape[dim] = (stop_int - start_int) // step_int
 
     layer = network.add_slice(input_val, start=start, shape=output_shape, stride=stride)
     set_layer_name(layer, target, name)
@@ -1665,7 +1661,7 @@ def acc_ops_getitem(
         size = math.ceil((stop - start) * 1.0 / stride)
         return start, size, stride
 
-    if not isinstance(slices, tuple):
+    if not isinstance(slices, tuple) and not isinstance(slices, list):
         slices = (slices,)
 
     if network.has_implicit_batch_dimension:
