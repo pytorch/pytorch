@@ -4,7 +4,7 @@
 namespace torch {
 namespace jit {
 
-struct ProfilingGraphExecutorImpl : public GraphExecutorImplBase {
+struct TORCH_API ProfilingGraphExecutorImpl : public GraphExecutorImplBase {
   ProfilingGraphExecutorImpl(
       const std::shared_ptr<Graph>& graph,
       std::string function_name);
