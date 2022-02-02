@@ -1,3 +1,4 @@
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 // ${generated_comment}
 
 #include <Python.h>
@@ -35,11 +36,17 @@
 #include "torch/csrc/utils/structseq.h"
 #include "torch/csrc/autograd/python_return_types.h"
 
-#include <ATen/ATen.h>
+#include <ATen/core/Tensor.h>
 #include "c10/util/Optional.h"
 #include "c10/core/Stream.h"
 
 #include <stdexcept>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#else
+$ops_headers
+#endif
 
 using at::DeviceGuard;
 using at::device_of;
@@ -256,11 +263,12 @@ static PyObject * THPVariable_contiguous(PyObject* self, PyObject* args, PyObjec
     // manually.
     if (jit::tracer::isTracing()) {
       auto tracer_state = jit::tracer::getTracingState();
-      auto node = tracer_state->graph->create(jit::aten::contiguous, /*num_outputs=*/0);
+      auto op_name = c10::Symbol::fromQualString("aten::contiguous");
+      auto node = tracer_state->createNode(op_name, /*num_outputs=*/0);
       jit::tracer::recordSourceLocation(node);
       jit::tracer::addInputs(node, "self", self_);
       jit::tracer::addInputs(node, "memory_format", memory_format);
-      tracer_state->graph->insertNode(node);
+      tracer_state->insertNode(node);
       jit::tracer::addOutput(node, self_);
     }
     Py_INCREF(self);
