@@ -3870,7 +3870,6 @@ else:
             with self.assertRaisesRegex(RuntimeError, 'unsupported operation'):
                 getattr(x, op)(*args)
 
-<<<<<<< HEAD
     # FIXME: move to an elementwise ternary test suite and make this an OpInfo test
     @dtypes(torch.double)
     def test_ternary_op_mem_overlap(self, device, dtype):
@@ -3881,28 +3880,6 @@ else:
             ("addcdiv", True, True, 'cuda'),
             ("lerp", True, True, 'cpu'),
             ("lerp", True, True, 'cuda')
-=======
-    @dtypes(*(get_all_fp_dtypes(include_bfloat16=False, include_half=False) +
-              get_all_complex_dtypes()))
-    @dtypesIfCPU(*get_all_dtypes())
-    @dtypesIfCUDA(*get_all_dtypes())
-    def test_scatter_reduce_operations_to_large_input(self, device, dtype):
-        index = torch.tensor([[1], [2]], device=device, dtype=torch.long)
-        test_data = [
-            (torch.zeros(4, 4, device=device, dtype=dtype),
-             torch.ones(2, 2, device=device, dtype=dtype),
-             torch.tensor([[0, 0, 0, 0],
-                           [1, 0, 0, 0],
-                           [1, 0, 0, 0],
-                           [0, 0, 0, 0]],
-                          device=device, dtype=dtype), "add"),
-            (torch.tensor([2], device=device, dtype=dtype).repeat(4, 4),
-             torch.tensor([6], device=device, dtype=dtype).repeat(2, 2),
-             torch.tensor([[2, 2, 2, 2],
-                           [12, 2, 2, 2],
-                           [12, 2, 2, 2],
-                           [2, 2, 2, 2]], device=device, dtype=dtype), "multiply"),
->>>>>>> Disable torch.complex32 dtype
         ]
 
         for (fn, has_input_output_mem_overlap_check,
@@ -3917,7 +3894,6 @@ else:
             self.ternary_check_input_output_mem_overlap(out_op, dev,
                                                         expected_failure=not has_input_output_mem_overlap_check)
 
-<<<<<<< HEAD
     @expectedFailureMeta  # RuntimeError not raised
     @dtypes(torch.double)
     @onlyNativeDeviceTypes
@@ -3928,27 +3904,6 @@ else:
         doubles = torch.randn(2 * sz, dtype=dtype, device=device)
         self.unary_check_input_output_mem_overlap(
             doubles, sz, lambda input, out: out.copy_(input))
-=======
-    @dtypes(*(get_all_fp_dtypes(include_bfloat16=False, include_half=False) +
-              get_all_complex_dtypes()))
-    @dtypesIfCPU(*get_all_dtypes())
-    @dtypesIfCUDA(*get_all_dtypes())
-    def test_scatter_reduce_scalar(self, device, dtype):
-        index = torch.tensor([[1], [2]], device=device, dtype=torch.long)
-        test_data = [
-            (torch.zeros(4, 4, device=device, dtype=dtype), 1,
-             torch.tensor([[0, 0, 0, 0],
-                           [1, 0, 0, 0],
-                           [1, 0, 0, 0],
-                           [0, 0, 0, 0]],
-                          device=device, dtype=dtype), "add"),
-            (torch.tensor([2], device=device, dtype=dtype).repeat(4, 4), 2,
-             torch.tensor([[2, 2, 2, 2],
-                           [4, 2, 2, 2],
-                           [4, 2, 2, 2],
-                           [2, 2, 2, 2]], device=device, dtype=dtype), "multiply"),
-        ]
->>>>>>> Disable torch.complex32 dtype
 
     # FIXME: convert to ErrorInputs
     @onlyNativeDeviceTypes
@@ -3982,7 +3937,6 @@ else:
         with self.assertRaisesRegex(RuntimeError, 'unsupported operation'):
             ind.index_copy_(0, ind.clone(), ind)
 
-<<<<<<< HEAD
     # FIXME: convert to ErrorInputs
     @expectedFailureMeta  # Warning not triggered
     @onlyNativeDeviceTypes
@@ -3991,32 +3945,12 @@ else:
         y = torch.rand((6,), device=device)
         ind = torch.tensor([2, 1, 0], device=device)
         value = torch.rand((3,), device=device)
-=======
-    @dtypes(*(get_all_fp_dtypes(include_bfloat16=False, include_half=False) +
-              get_all_complex_dtypes()))
-    @dtypesIfCPU(*get_all_dtypes())
-    @dtypesIfCUDA(*get_all_dtypes())
-    def test_scatter_reduce_non_unique_index(self, device, dtype):
-        height = 2
-        width = 2
-        index = torch.zeros(height, width, dtype=torch.long, device=device)
-        test_data = [
-            (torch.ones(height, width, device=device, dtype=dtype),
-             torch.ones(height, width, device=device, dtype=dtype),
-             torch.tensor([[3], [1]], device=device, dtype=dtype).repeat(1, width), "add"),
-            (torch.tensor([2], device=device, dtype=dtype).repeat(height, width),
-             torch.tensor([2], device=device, dtype=dtype).repeat(height, width),
-             torch.tensor([[8], [2]], device=device,
-                          dtype=dtype).repeat(1, width), "multiply"),
-        ]
->>>>>>> Disable torch.complex32 dtype
 
         with self.assertWarnsRegex(UserWarning, "index_fill_ on expanded tensors"):
             x.index_fill_(0, ind, 1.0)
         with self.assertRaisesRegex(RuntimeError, 'unsupported operation'):
             ind.index_fill_(0, ind, 0)
 
-<<<<<<< HEAD
     # FIXME: convert to ErrorInputs
     @expectedFailureMeta  # RuntimeError not raised
     @onlyNativeDeviceTypes
@@ -4026,19 +3960,6 @@ else:
             x[:-1] <<= x[1:]
         with self.assertRaisesRegex(RuntimeError, 'unsupported operation'):
             x[:-1] >>= x[1:]
-=======
-    @onlyCUDA
-    @dtypes(*(get_all_complex_dtypes() +
-              get_all_int_dtypes()))
-    def test_scatter_reduce_multiply_unsupported_dtypes(self, device, dtype):
-        height = 2
-        width = 2
-        index = torch.zeros(height, width, dtype=torch.long, device=device)
-        input = torch.ones(height, width, device=device, dtype=dtype)
-        src = torch.ones(height, width, device=device, dtype=dtype)
-        with self.assertRaises(RuntimeError):
-            input.scatter_(0, index, src, reduce="multiply")
->>>>>>> Disable torch.complex32 dtype
 
     # FIXME: convert to ErrorInputs
     @expectedFailureMeta  # RuntimeError not raised
