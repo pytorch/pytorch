@@ -168,9 +168,10 @@ c10::optional<at::Device> pickDeviceType(const std::shared_ptr<Graph>& graph) {
       }
     }
   }
-  TORCH_INTERNAL_ASSERT(
-      device,
-      buildErrorMessage("Could not find device in fuser graph inputs."));
+  if (!device) {
+    // By default assume the device is CPU
+    device = at::kCPU;
+  }
   return device;
 }
 
@@ -321,17 +322,11 @@ ExprHandle TensorExprKernel::constant(const torch::jit::Value* v) {
   return scalars_.at(v);
 }
 
-ExprHandle TensorExprKernel::tensorOrConstant(
-    const torch::jit::Value* v,
-    const std::vector<ExprHandle>& axes) {
-  auto ti = bufs_.find(v);
-  if (ti != bufs_.end()) {
-    return broadcast(BufHandle(ti->second), axes);
-  }
-  return constant(v);
-}
-
 ArgValue TensorExprKernel::toArg(const torch::jit::Value* v) const {
+  auto vi = scalars_.find(v);
+  if (vi != scalars_.end()) {
+    return VarHandle(vi->second);
+  }
   auto ti = bufs_.find(v);
   if (ti != bufs_.end()) {
     return BufHandle(ti->second);
@@ -418,8 +413,9 @@ std::vector<ExprHandle> TensorExprKernel::sizesForValue(
   }
 
   if (v->type()->isSubtypeOf(*FloatType::get()) ||
+      v->type()->isSubtypeOf(*BoolType::get()) ||
       v->type()->isSubtypeOf(*IntType::get())) {
-    return {int64_t{1}};
+    return {};
   }
   if (v->type()->isSubtypeOf(*NoneType::get())) {
     return {};
@@ -438,7 +434,7 @@ c10::optional<ScalarType> findDtypeForValue(const torch::jit::Value* v) {
       return static_cast<ScalarType>(*tt->scalarType());
     }
   }
-  return c10::nullopt;
+  return tryScalarTypeFromJitType(*v->type());
 }
 
 bool constZeroDimTensorAsScalarArg(
@@ -1111,7 +1107,7 @@ bool denseAndNonOverlapping(
   return (strides == at::infer_dense_strides(sizes, strides));
 }
 
-Tensor TensorExprKernel::convertOutputToCorrectStrides(
+Tensor TensorExprKernel::convertSymbolicOutputToCorrectStrides(
     const std::vector<ExprHandle>& sizes,
     const std::vector<size_t>& sorted_stride_indices_descending,
     const std::vector<ExprPtr>& strides,
@@ -1153,12 +1149,11 @@ Tensor TensorExprKernel::convertOutputToCorrectStrides(
           auto size = sizes[stride_index];
           auto stride = strides[stride_index];
           auto index = absolute_position / ExprHandle(stride);
-          auto one = Cast::make(size.dtype(), 1);
-          // if the size is one, we don't advance the absolute position
-          // which would give 0
-          auto non_one_position = absolute_position % ExprHandle(stride);
-          absolute_position = CompareSelect::make(
-              size, one, absolute_position, non_one_position, kEQ);
+          // XXX, in symbolic output ordering, we do not the arbitrary
+          // ordering of strides as in usual output ordering, just
+          // channels last, so even in the presence of size == 1
+          // we produce correct output here
+          absolute_position = absolute_position % ExprHandle(stride);
           new_axes[stride_index] = index;
         }
         return BufHandle(buf).load(new_axes);
@@ -1192,7 +1187,7 @@ Tensor TensorExprKernel::convertSymbolicOutputToCorrectStrides(
   auto zero = LongImm::make(0);
   std::vector<ExprPtr> default_strides = make_contiguous_strides(sizes);
   // See explanation in convertOutputToCorrectStrides
-  return convertOutputToCorrectStrides(
+  return convertSymbolicOutputToCorrectStrides(
       sizes, sorted_stride_indices, strides, buf);
 }
 
@@ -1451,8 +1446,42 @@ void TensorExprKernel::compile() {
       for (auto const& output : n->outputs()) {
         if (output->hasUses()) {
           Tensor t = computeValue(output);
-          bufs_.emplace(output, t.buf());
-          block->append_stmt(t.stmt());
+
+          if (output->type()->cast<TensorType>()) {
+            // Value is tensor
+            if (t.buf()) {
+              bufs_.emplace(output, t.buf());
+            }
+            block->append_stmt(t.stmt());
+          } else {
+            // Value is scalar
+            //
+            // We represent scalar computations in TE with a pair of statements:
+            //   Let val = <compute_expression>
+            //   Store(buf_for_scalar[0], val)
+            //
+            // Subsequent computations will use val when they refer to the
+            // given value, and the buffer will be used if we need to return
+            // the computed value as an output of the kernel. If this is not an
+            // output, the store will be removed later by DCE.
+            //
+            // NB: NNC's lowering functions return Tensor, which is a pair
+            // <Buf, Stmt>, but here we also need Var. How can we obtain all of
+            // Var, Buf, and Stmt?
+            // We use the following trick: the lowering function creates the
+            // Let-stmt and a "fake" buffer, whose only purpose is to hold the
+            // Var. Then outside the lowering function (namely, right here) we
+            // generate the store and the actual buffer.
+            VarPtr v = t.buf()->base_handle();
+            scalars_[output] = VarHandle(v);
+            block->append_stmt(t.stmt());
+            std::vector<ExprPtr> dims;
+            BufHandle buf(
+                "scalar_" + sanitizeName(output->debugName()), {}, v->dtype());
+            StmtPtr store = Store::make(buf, {}, ExprHandle(v));
+            block->append_stmt(store);
+            bufs_.emplace(output, buf.node());
+          }
         }
       }
     }
@@ -1467,6 +1496,19 @@ void TensorExprKernel::compile() {
     if (!bufs_.count(output)) {
       throw malformed_input("cannot find output Tensor");
     }
+    if (!output->type()->cast<TensorType>()) {
+      // Scalar outputs are represented as 0-dim buffers.
+      bufOutputs_.insert(bufs_.at(output));
+      bufferArgs_.emplace_back(BufHandle(bufs_.at(output)));
+      tensorOutputTensorOptions_.emplace_back(
+          c10::TensorOptions(tensorType(bufs_.at(output))).device(device_));
+      tensorOutputSizes_.emplace_back();
+      tensorOutputStrides_.emplace_back();
+      isOutputScalar_.push_back(true);
+      bufs_.erase(output);
+      continue;
+    }
+
     const auto& tt = output->type()->expect<TensorType>();
     if (has_symbolic_shapes_) {
       auto sizes = sizesFromSymbolicShape(tt->symbolic_sizes());
@@ -1509,6 +1551,7 @@ void TensorExprKernel::compile() {
     bufferArgs_.emplace_back(BufHandle(bufs_.at(output)));
     tensorOutputTensorOptions_.emplace_back(
         c10::TensorOptions(tensorType(bufs_.at(output))).device(device_));
+    isOutputScalar_.push_back(false);
     bufs_.erase(output);
   }
 
@@ -1638,6 +1681,8 @@ std::vector<CodeGen::CallArg> TensorExprKernel::prepareRunArgs(
   for (auto& input : inputs) {
     if (input.isInt()) {
       runArgs.emplace_back(input.toInt());
+    } else if (input.isBool()) {
+      runArgs.emplace_back(input.toBool());
     } else if (input.isDouble()) {
       runArgs.emplace_back(input.toDouble());
     } else if (input.isTensor()) {
@@ -1691,8 +1736,16 @@ void TensorExprKernel::runKernel(Stack& stack) {
 
   // Update the stack.
   drop(stack, nInputs_);
+
+  int64_t idx = 0;
   for (auto& o : outputs) {
-    push_one(stack, std::move(o));
+    if (isOutputScalar_[idx++]) {
+      // Scalar outputs are returned as 0-dim tensors, we need to extract the
+      // scalar value from them
+      push_one(stack, o.item());
+    } else {
+      push_one(stack, std::move(o));
+    }
   }
 }
 
