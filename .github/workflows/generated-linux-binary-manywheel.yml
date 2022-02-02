@@ -4,12 +4,6 @@
 name: linux-binary-manywheel
 
 on:
-  pull_request:
-    # NOTE: This workflow should only trigger when changes are made to binary builds
-    # Should catch most of the binary build / test scripts
-    paths:
-      - '.github/workflows/generated-linux-binary-*.yml'
-      - '.circleci/scripts/binary_*.sh'
   push:
     # NOTE: Meta Employees can trigger new nightlies using: https://fburl.com/trigger_pytorch_nightly_build
     branches:
@@ -102,16 +96,27 @@ jobs:
       - name: Preserve github env variables for use in docker
         run: |
           env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
-      - name: Clone pytorch/pytorch
-        uses: actions/checkout@v2
+      - name: Checkout PyTorch
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
-          path: pytorch
           submodules: recursive
-      - name: Clone pytorch/builder
-        uses: actions/checkout@v2
+          path: pytorch
+      - name: Clean PyTorch checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: pytorch
+      - name: Checkout pytorch/builder
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
+          submodules: recursive
           repository: pytorch/builder
           path: builder
+      - name: Clean pytorch/builder checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: builder
       - name: Pull Docker image
         run: |
           retry () {
@@ -481,16 +486,27 @@ jobs:
       - name: Preserve github env variables for use in docker
         run: |
           env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
-      - name: Clone pytorch/pytorch
-        uses: actions/checkout@v2
+      - name: Checkout PyTorch
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
-          path: pytorch
           submodules: recursive
-      - name: Clone pytorch/builder
-        uses: actions/checkout@v2
+          path: pytorch
+      - name: Clean PyTorch checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: pytorch
+      - name: Checkout pytorch/builder
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
+          submodules: recursive
           repository: pytorch/builder
           path: builder
+      - name: Clean pytorch/builder checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: builder
       - name: Pull Docker image
         run: |
           retry () {
@@ -867,16 +883,27 @@ jobs:
       - name: Preserve github env variables for use in docker
         run: |
           env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
-      - name: Clone pytorch/pytorch
-        uses: actions/checkout@v2
+      - name: Checkout PyTorch
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
-          path: pytorch
           submodules: recursive
-      - name: Clone pytorch/builder
-        uses: actions/checkout@v2
+          path: pytorch
+      - name: Clean PyTorch checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: pytorch
+      - name: Checkout pytorch/builder
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
+          submodules: recursive
           repository: pytorch/builder
           path: builder
+      - name: Clean pytorch/builder checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: builder
       - name: Set BUILD_SPLIT_CUDA
         run: |
           echo "BUILD_SPLIT_CUDA='ON'" >> "$GITHUB_ENV"
@@ -1256,16 +1283,27 @@ jobs:
       - name: Preserve github env variables for use in docker
         run: |
           env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
-      - name: Clone pytorch/pytorch
-        uses: actions/checkout@v2
+      - name: Checkout PyTorch
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
-          path: pytorch
           submodules: recursive
-      - name: Clone pytorch/builder
-        uses: actions/checkout@v2
+          path: pytorch
+      - name: Clean PyTorch checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: pytorch
+      - name: Checkout pytorch/builder
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
+          submodules: recursive
           repository: pytorch/builder
           path: builder
+      - name: Clean pytorch/builder checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: builder
       - name: Set BUILD_SPLIT_CUDA
         run: |
           echo "BUILD_SPLIT_CUDA='ON'" >> "$GITHUB_ENV"
@@ -1645,16 +1683,27 @@ jobs:
       - name: Preserve github env variables for use in docker
         run: |
           env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
-      - name: Clone pytorch/pytorch
-        uses: actions/checkout@v2
+      - name: Checkout PyTorch
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
-          path: pytorch
           submodules: recursive
-      - name: Clone pytorch/builder
-        uses: actions/checkout@v2
+          path: pytorch
+      - name: Clean PyTorch checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: pytorch
+      - name: Checkout pytorch/builder
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
+          submodules: recursive
           repository: pytorch/builder
           path: builder
+      - name: Clean pytorch/builder checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: builder
       - name: Set BUILD_SPLIT_CUDA
         run: |
           echo "BUILD_SPLIT_CUDA='ON'" >> "$GITHUB_ENV"
@@ -2034,16 +2083,27 @@ jobs:
       - name: Preserve github env variables for use in docker
         run: |
           env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
-      - name: Clone pytorch/pytorch
-        uses: actions/checkout@v2
+      - name: Checkout PyTorch
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
-          path: pytorch
           submodules: recursive
-      - name: Clone pytorch/builder
-        uses: actions/checkout@v2
+          path: pytorch
+      - name: Clean PyTorch checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: pytorch
+      - name: Checkout pytorch/builder
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
+          submodules: recursive
           repository: pytorch/builder
           path: builder
+      - name: Clean pytorch/builder checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: builder
       - name: Pull Docker image
         run: |
           retry () {
@@ -2415,16 +2475,27 @@ jobs:
       - name: Preserve github env variables for use in docker
         run: |
           env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
-      - name: Clone pytorch/pytorch
-        uses: actions/checkout@v2
+      - name: Checkout PyTorch
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
-          path: pytorch
           submodules: recursive
-      - name: Clone pytorch/builder
-        uses: actions/checkout@v2
+          path: pytorch
+      - name: Clean PyTorch checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: pytorch
+      - name: Checkout pytorch/builder
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
+          submodules: recursive
           repository: pytorch/builder
           path: builder
+      - name: Clean pytorch/builder checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: builder
       - name: Pull Docker image
         run: |
           retry () {
@@ -2795,16 +2866,27 @@ jobs:
       - name: Preserve github env variables for use in docker
         run: |
           env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
-      - name: Clone pytorch/pytorch
-        uses: actions/checkout@v2
+      - name: Checkout PyTorch
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
-          path: pytorch
           submodules: recursive
-      - name: Clone pytorch/builder
-        uses: actions/checkout@v2
+          path: pytorch
+      - name: Clean PyTorch checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: pytorch
+      - name: Checkout pytorch/builder
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
+          submodules: recursive
           repository: pytorch/builder
           path: builder
+      - name: Clean pytorch/builder checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: builder
       - name: Pull Docker image
         run: |
           retry () {
@@ -3174,16 +3256,27 @@ jobs:
       - name: Preserve github env variables for use in docker
         run: |
           env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
-      - name: Clone pytorch/pytorch
-        uses: actions/checkout@v2
+      - name: Checkout PyTorch
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
-          path: pytorch
           submodules: recursive
-      - name: Clone pytorch/builder
-        uses: actions/checkout@v2
+          path: pytorch
+      - name: Clean PyTorch checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: pytorch
+      - name: Checkout pytorch/builder
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
+          submodules: recursive
           repository: pytorch/builder
           path: builder
+      - name: Clean pytorch/builder checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: builder
       - name: Pull Docker image
         run: |
           retry () {
@@ -3560,16 +3653,27 @@ jobs:
       - name: Preserve github env variables for use in docker
         run: |
           env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
-      - name: Clone pytorch/pytorch
-        uses: actions/checkout@v2
+      - name: Checkout PyTorch
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
-          path: pytorch
           submodules: recursive
-      - name: Clone pytorch/builder
-        uses: actions/checkout@v2
+          path: pytorch
+      - name: Clean PyTorch checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: pytorch
+      - name: Checkout pytorch/builder
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
+          submodules: recursive
           repository: pytorch/builder
           path: builder
+      - name: Clean pytorch/builder checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: builder
       - name: Set BUILD_SPLIT_CUDA
         run: |
           echo "BUILD_SPLIT_CUDA='ON'" >> "$GITHUB_ENV"
@@ -3949,16 +4053,27 @@ jobs:
       - name: Preserve github env variables for use in docker
         run: |
           env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
-      - name: Clone pytorch/pytorch
-        uses: actions/checkout@v2
+      - name: Checkout PyTorch
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
-          path: pytorch
           submodules: recursive
-      - name: Clone pytorch/builder
-        uses: actions/checkout@v2
+          path: pytorch
+      - name: Clean PyTorch checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: pytorch
+      - name: Checkout pytorch/builder
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
+          submodules: recursive
           repository: pytorch/builder
           path: builder
+      - name: Clean pytorch/builder checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: builder
       - name: Set BUILD_SPLIT_CUDA
         run: |
           echo "BUILD_SPLIT_CUDA='ON'" >> "$GITHUB_ENV"
@@ -4338,16 +4453,27 @@ jobs:
       - name: Preserve github env variables for use in docker
         run: |
           env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
-      - name: Clone pytorch/pytorch
-        uses: actions/checkout@v2
+      - name: Checkout PyTorch
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
-          path: pytorch
           submodules: recursive
-      - name: Clone pytorch/builder
-        uses: actions/checkout@v2
+          path: pytorch
+      - name: Clean PyTorch checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: pytorch
+      - name: Checkout pytorch/builder
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
+          submodules: recursive
           repository: pytorch/builder
           path: builder
+      - name: Clean pytorch/builder checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: builder
       - name: Set BUILD_SPLIT_CUDA
         run: |
           echo "BUILD_SPLIT_CUDA='ON'" >> "$GITHUB_ENV"
@@ -4727,16 +4853,27 @@ jobs:
       - name: Preserve github env variables for use in docker
         run: |
           env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
-      - name: Clone pytorch/pytorch
-        uses: actions/checkout@v2
+      - name: Checkout PyTorch
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
-          path: pytorch
           submodules: recursive
-      - name: Clone pytorch/builder
-        uses: actions/checkout@v2
+          path: pytorch
+      - name: Clean PyTorch checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: pytorch
+      - name: Checkout pytorch/builder
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
+          submodules: recursive
           repository: pytorch/builder
           path: builder
+      - name: Clean pytorch/builder checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: builder
       - name: Pull Docker image
         run: |
           retry () {
@@ -5108,16 +5245,27 @@ jobs:
       - name: Preserve github env variables for use in docker
         run: |
           env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
-      - name: Clone pytorch/pytorch
-        uses: actions/checkout@v2
+      - name: Checkout PyTorch
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
-          path: pytorch
           submodules: recursive
-      - name: Clone pytorch/builder
-        uses: actions/checkout@v2
+          path: pytorch
+      - name: Clean PyTorch checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: pytorch
+      - name: Checkout pytorch/builder
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
+          submodules: recursive
           repository: pytorch/builder
           path: builder
+      - name: Clean pytorch/builder checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: builder
       - name: Pull Docker image
         run: |
           retry () {
@@ -5488,16 +5636,27 @@ jobs:
       - name: Preserve github env variables for use in docker
         run: |
           env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
-      - name: Clone pytorch/pytorch
-        uses: actions/checkout@v2
+      - name: Checkout PyTorch
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
-          path: pytorch
           submodules: recursive
-      - name: Clone pytorch/builder
-        uses: actions/checkout@v2
+          path: pytorch
+      - name: Clean PyTorch checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: pytorch
+      - name: Checkout pytorch/builder
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
+          submodules: recursive
           repository: pytorch/builder
           path: builder
+      - name: Clean pytorch/builder checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: builder
       - name: Pull Docker image
         run: |
           retry () {
@@ -5867,16 +6026,27 @@ jobs:
       - name: Preserve github env variables for use in docker
         run: |
           env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
-      - name: Clone pytorch/pytorch
-        uses: actions/checkout@v2
+      - name: Checkout PyTorch
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
-          path: pytorch
           submodules: recursive
-      - name: Clone pytorch/builder
-        uses: actions/checkout@v2
+          path: pytorch
+      - name: Clean PyTorch checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: pytorch
+      - name: Checkout pytorch/builder
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
+          submodules: recursive
           repository: pytorch/builder
           path: builder
+      - name: Clean pytorch/builder checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: builder
       - name: Pull Docker image
         run: |
           retry () {
@@ -6253,16 +6423,27 @@ jobs:
       - name: Preserve github env variables for use in docker
         run: |
           env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
-      - name: Clone pytorch/pytorch
-        uses: actions/checkout@v2
+      - name: Checkout PyTorch
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
-          path: pytorch
           submodules: recursive
-      - name: Clone pytorch/builder
-        uses: actions/checkout@v2
+          path: pytorch
+      - name: Clean PyTorch checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: pytorch
+      - name: Checkout pytorch/builder
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
+          submodules: recursive
           repository: pytorch/builder
           path: builder
+      - name: Clean pytorch/builder checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: builder
       - name: Set BUILD_SPLIT_CUDA
         run: |
           echo "BUILD_SPLIT_CUDA='ON'" >> "$GITHUB_ENV"
@@ -6642,16 +6823,27 @@ jobs:
       - name: Preserve github env variables for use in docker
         run: |
           env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
-      - name: Clone pytorch/pytorch
-        uses: actions/checkout@v2
+      - name: Checkout PyTorch
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
-          path: pytorch
           submodules: recursive
-      - name: Clone pytorch/builder
-        uses: actions/checkout@v2
+          path: pytorch
+      - name: Clean PyTorch checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: pytorch
+      - name: Checkout pytorch/builder
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
+          submodules: recursive
           repository: pytorch/builder
           path: builder
+      - name: Clean pytorch/builder checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: builder
       - name: Set BUILD_SPLIT_CUDA
         run: |
           echo "BUILD_SPLIT_CUDA='ON'" >> "$GITHUB_ENV"
@@ -7031,16 +7223,27 @@ jobs:
       - name: Preserve github env variables for use in docker
         run: |
           env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
-      - name: Clone pytorch/pytorch
-        uses: actions/checkout@v2
+      - name: Checkout PyTorch
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
-          path: pytorch
           submodules: recursive
-      - name: Clone pytorch/builder
-        uses: actions/checkout@v2
+          path: pytorch
+      - name: Clean PyTorch checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: pytorch
+      - name: Checkout pytorch/builder
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
+          submodules: recursive
           repository: pytorch/builder
           path: builder
+      - name: Clean pytorch/builder checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: builder
       - name: Set BUILD_SPLIT_CUDA
         run: |
           echo "BUILD_SPLIT_CUDA='ON'" >> "$GITHUB_ENV"
@@ -7420,16 +7623,27 @@ jobs:
       - name: Preserve github env variables for use in docker
         run: |
           env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
-      - name: Clone pytorch/pytorch
-        uses: actions/checkout@v2
+      - name: Checkout PyTorch
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
-          path: pytorch
           submodules: recursive
-      - name: Clone pytorch/builder
-        uses: actions/checkout@v2
+          path: pytorch
+      - name: Clean PyTorch checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: pytorch
+      - name: Checkout pytorch/builder
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
+          submodules: recursive
           repository: pytorch/builder
           path: builder
+      - name: Clean pytorch/builder checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: builder
       - name: Pull Docker image
         run: |
           retry () {
@@ -7801,16 +8015,27 @@ jobs:
       - name: Preserve github env variables for use in docker
         run: |
           env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
-      - name: Clone pytorch/pytorch
-        uses: actions/checkout@v2
+      - name: Checkout PyTorch
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
-          path: pytorch
           submodules: recursive
-      - name: Clone pytorch/builder
-        uses: actions/checkout@v2
+          path: pytorch
+      - name: Clean PyTorch checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: pytorch
+      - name: Checkout pytorch/builder
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
+          submodules: recursive
           repository: pytorch/builder
           path: builder
+      - name: Clean pytorch/builder checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: builder
       - name: Pull Docker image
         run: |
           retry () {
@@ -8181,16 +8406,27 @@ jobs:
       - name: Preserve github env variables for use in docker
         run: |
           env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
-      - name: Clone pytorch/pytorch
-        uses: actions/checkout@v2
+      - name: Checkout PyTorch
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
-          path: pytorch
           submodules: recursive
-      - name: Clone pytorch/builder
-        uses: actions/checkout@v2
+          path: pytorch
+      - name: Clean PyTorch checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: pytorch
+      - name: Checkout pytorch/builder
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
+          submodules: recursive
           repository: pytorch/builder
           path: builder
+      - name: Clean pytorch/builder checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: builder
       - name: Pull Docker image
         run: |
           retry () {
@@ -8560,16 +8796,27 @@ jobs:
       - name: Preserve github env variables for use in docker
         run: |
           env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
-      - name: Clone pytorch/pytorch
-        uses: actions/checkout@v2
+      - name: Checkout PyTorch
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
-          path: pytorch
           submodules: recursive
-      - name: Clone pytorch/builder
-        uses: actions/checkout@v2
+          path: pytorch
+      - name: Clean PyTorch checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: pytorch
+      - name: Checkout pytorch/builder
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
+          submodules: recursive
           repository: pytorch/builder
           path: builder
+      - name: Clean pytorch/builder checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: builder
       - name: Pull Docker image
         run: |
           retry () {
@@ -8946,16 +9193,27 @@ jobs:
       - name: Preserve github env variables for use in docker
         run: |
           env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
-      - name: Clone pytorch/pytorch
-        uses: actions/checkout@v2
+      - name: Checkout PyTorch
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
-          path: pytorch
           submodules: recursive
-      - name: Clone pytorch/builder
-        uses: actions/checkout@v2
+          path: pytorch
+      - name: Clean PyTorch checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: pytorch
+      - name: Checkout pytorch/builder
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
+          submodules: recursive
           repository: pytorch/builder
           path: builder
+      - name: Clean pytorch/builder checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: builder
       - name: Set BUILD_SPLIT_CUDA
         run: |
           echo "BUILD_SPLIT_CUDA='ON'" >> "$GITHUB_ENV"
@@ -9335,16 +9593,27 @@ jobs:
       - name: Preserve github env variables for use in docker
         run: |
           env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
-      - name: Clone pytorch/pytorch
-        uses: actions/checkout@v2
+      - name: Checkout PyTorch
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
-          path: pytorch
           submodules: recursive
-      - name: Clone pytorch/builder
-        uses: actions/checkout@v2
+          path: pytorch
+      - name: Clean PyTorch checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: pytorch
+      - name: Checkout pytorch/builder
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
+          submodules: recursive
           repository: pytorch/builder
           path: builder
+      - name: Clean pytorch/builder checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: builder
       - name: Set BUILD_SPLIT_CUDA
         run: |
           echo "BUILD_SPLIT_CUDA='ON'" >> "$GITHUB_ENV"
@@ -9724,16 +9993,27 @@ jobs:
       - name: Preserve github env variables for use in docker
         run: |
           env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
-      - name: Clone pytorch/pytorch
-        uses: actions/checkout@v2
+      - name: Checkout PyTorch
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
-          path: pytorch
           submodules: recursive
-      - name: Clone pytorch/builder
-        uses: actions/checkout@v2
+          path: pytorch
+      - name: Clean PyTorch checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: pytorch
+      - name: Checkout pytorch/builder
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
+          submodules: recursive
           repository: pytorch/builder
           path: builder
+      - name: Clean pytorch/builder checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: builder
       - name: Set BUILD_SPLIT_CUDA
         run: |
           echo "BUILD_SPLIT_CUDA='ON'" >> "$GITHUB_ENV"
@@ -10113,16 +10393,27 @@ jobs:
       - name: Preserve github env variables for use in docker
         run: |
           env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
-      - name: Clone pytorch/pytorch
-        uses: actions/checkout@v2
+      - name: Checkout PyTorch
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
-          path: pytorch
           submodules: recursive
-      - name: Clone pytorch/builder
-        uses: actions/checkout@v2
+          path: pytorch
+      - name: Clean PyTorch checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: pytorch
+      - name: Checkout pytorch/builder
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
+          submodules: recursive
           repository: pytorch/builder
           path: builder
+      - name: Clean pytorch/builder checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: builder
       - name: Pull Docker image
         run: |
           retry () {
@@ -10494,16 +10785,27 @@ jobs:
       - name: Preserve github env variables for use in docker
         run: |
           env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
-      - name: Clone pytorch/pytorch
-        uses: actions/checkout@v2
+      - name: Checkout PyTorch
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
-          path: pytorch
           submodules: recursive
-      - name: Clone pytorch/builder
-        uses: actions/checkout@v2
+          path: pytorch
+      - name: Clean PyTorch checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: pytorch
+      - name: Checkout pytorch/builder
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
+          submodules: recursive
           repository: pytorch/builder
           path: builder
+      - name: Clean pytorch/builder checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: builder
       - name: Pull Docker image
         run: |
           retry () {

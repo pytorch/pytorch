@@ -67,6 +67,28 @@ def is_pre_volta():
 
 TEST_BF16 = torch.cuda.is_bf16_supported()
 
+class CudaFuserTestOptions():
+    def __init__(self):
+        self.old_cpu_fuse = torch._C._jit_can_fuse_on_cpu()
+        self.old_gpu_fuse = torch._C._jit_can_fuse_on_gpu()
+        torch._C._jit_override_can_fuse_on_cpu(False)
+        torch._C._jit_override_can_fuse_on_gpu(False)
+        self.old_guard = torch._C._jit_set_nvfuser_guard_mode(False)
+        torch._C._debug_set_autodiff_subgraph_inlining(False)
+        self.old_value = torch._C._jit_set_autocast_mode(True)
+
+        if(RUN_CUDA):
+            self.old_nvfuser = torch._C._jit_set_nvfuser_enabled(True)
+
+    def restore(self):
+        if(RUN_CUDA):
+            torch._C._jit_set_nvfuser_enabled(self.old_nvfuser)
+        torch._C._jit_override_can_fuse_on_cpu(self.old_cpu_fuse)
+        torch._C._jit_override_can_fuse_on_gpu(self.old_gpu_fuse)
+        torch._C._jit_set_nvfuser_guard_mode(self.old_guard)
+        torch._C._debug_set_autodiff_subgraph_inlining(True)
+        torch._C._jit_set_autocast_mode(self.old_value)
+
 class TestCudaFuser(JitTestCase):
 
     special_values = torch.tensor(
@@ -113,25 +135,10 @@ class TestCudaFuser(JitTestCase):
 
     def setUp(self):
         super(TestCudaFuser, self).setUp()
-        self.old_cpu_fuse = torch._C._jit_can_fuse_on_cpu()
-        self.old_gpu_fuse = torch._C._jit_can_fuse_on_gpu()
-        torch._C._jit_override_can_fuse_on_cpu(False)
-        torch._C._jit_override_can_fuse_on_gpu(False)
-        self.old_guard = torch._C._jit_set_nvfuser_guard_mode(False)
-        torch._C._debug_set_autodiff_subgraph_inlining(False)
-        self.old_value = torch._C._jit_set_autocast_mode(True)
-
-        if(RUN_CUDA):
-            self.old_nvfuser = torch._C._jit_set_nvfuser_enabled(True)
+        self.cuda_fuser_options = CudaFuserTestOptions()
 
     def tearDown(self):
-        if(RUN_CUDA):
-            torch._C._jit_set_nvfuser_enabled(self.old_nvfuser)
-        torch._C._jit_override_can_fuse_on_cpu(self.old_cpu_fuse)
-        torch._C._jit_override_can_fuse_on_gpu(self.old_gpu_fuse)
-        torch._C._jit_set_nvfuser_guard_mode(self.old_guard)
-        torch._C._debug_set_autodiff_subgraph_inlining(True)
-        torch._C._jit_set_autocast_mode(self.old_value)
+        self.cuda_fuser_options.restore()
         super(TestCudaFuser, self).tearDown()
 
     def _run_helper(self, jit_op, op, *args):
@@ -3203,15 +3210,20 @@ class TestPassManagerCudaFuser(JitTestCase):
         self.assertTrue(torch._C._jit_set_nvfuser_enabled(False))
         self.assertFalse(torch._C._jit_nvfuser_enabled())
 
+
 class TestCudaFuserOpInfo(JitCommonTestCase):
     def setUp(self):
+        super(TestCudaFuserOpInfo, self).setUp()
+        self.cuda_fuser_options = CudaFuserTestOptions()
         self.nvfuser_single_node_mode = torch._C._jit_set_nvfuser_single_node_mode(True)
 
     def tearDown(self):
+        self.cuda_fuser_options.restore()
         torch._C._jit_set_nvfuser_single_node_mode(self.nvfuser_single_node_mode)
+        super(TestCudaFuserOpInfo, self).tearDown()
 
     @unittest.skipIf(not RUN_CUDA, "requires CUDA")
-    @(op_db, dtypes=OpDTypes.supported)
+    @ops(op_db, dtypes=OpDTypes.supported)
     def test_nvfuser_correctness(self, device, dtype, op):
         variant_sample_pairs = get_traced_sample_variant_pairs(device, dtype, op)
 
