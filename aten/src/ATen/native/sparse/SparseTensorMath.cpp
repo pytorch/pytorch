@@ -55,15 +55,30 @@ SparseTensor& mul_out_sparse_zerodim(SparseTensor& r, const SparseTensor& t, con
   AT_ASSERT(t.is_sparse());
   AT_ASSERT(value.dim() == 0);
 
+  // Resolve a possibly sparse COO value to a strided tensor.
+  Tensor value_;
+  if (value.is_sparse()) {
+    if (value._nnz() == 0) {
+      r.resize_as_(t);
+      return r.zero_();
+    }
+    value_ = value.values();
+  } else {
+    value_ = value;
+  }
+  // With broadcasting in action, value_ may be a 1-D tensor as long
+  // as its shape is (1,).
+  AT_ASSERT(value_.numel() == 1);
+
   if (is_same_tensor(r, t)) {
-    r._values().mul_(value);
+    r._values().mul_(value_);
   } else {
     r.resize_as_(t);
     auto indices = r._indices();
     indices.resize_as_(t._indices());
     indices.copy_(t._indices());
     Tensor r_values = r._values(); // Sigh... needed because mul_out takes Tensor&
-    at::mul_out(r_values, t._values(), value);
+    at::mul_out(r_values, t._values(), value_);
     get_sparse_impl(r)->set_nnz_and_narrow(t._nnz());
     r._coalesced_(t.is_coalesced());
   }
@@ -213,7 +228,7 @@ SparseTensor& div_out_sparse_scalar(const SparseTensor& t, Scalar value, SparseT
 
 Tensor div_sparse(const Tensor& self, const Tensor& value, c10::optional<c10::string_view> rounding_mode) {
   auto commonDtype = at::result_type(self, value);
-  if (c10::isIntegralType(commonDtype, /*include_bool=*/true) && !rounding_mode.has_value()) {
+  if (c10::isIntegralType(commonDtype, /*includeBool=*/true) && !rounding_mode.has_value()) {
     commonDtype = typeMetaToScalarType(at::get_default_dtype());
   }
   Tensor result = at::empty({0}, self.options().dtype(commonDtype));
@@ -1163,8 +1178,6 @@ Tensor _sparse_sum(const SparseTensor& input, IntArrayRef dims_to_sum, ScalarTyp
 }
 
 Tensor _sparse_sum(const SparseTensor& input, IntArrayRef dims_to_sum) {
-  TORCH_CHECK(input._nnz() > 0, "_sparse_sum: sparse tensor input._nnz() == 0, please call torch.sparse.sum(input) instead.")
-
   const int64_t input_dim = input.dim();
   auto dims_to_sum_b = dim_list_to_bitset(dims_to_sum, input_dim);
   auto dims_to_sum_v = dims_to_sum.vec();
@@ -1174,7 +1187,6 @@ Tensor _sparse_sum(const SparseTensor& input, IntArrayRef dims_to_sum) {
   Tensor values = input._values();
   IntArrayRef sizes = input.sizes();
   const int64_t sparse_dim = input.sparse_dim();
-  // const int64_t dense_dim = input.dense_dim();
 
   auto dims_to_keep_v = std::vector<int64_t>();
   auto dense_dims_to_sum_v = std::vector<int64_t>();

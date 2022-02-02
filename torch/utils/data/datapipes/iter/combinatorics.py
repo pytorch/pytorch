@@ -13,7 +13,7 @@ class SamplerIterDataPipe(IterDataPipe[T_co]):
 
     Args:
         datapipe: IterDataPipe to sample from
-        sampler: Sampler class to genereate sample elements from input DataPipe.
+        sampler: Sampler class to generate sample elements from input DataPipe.
             Default is :class:`SequentialSampler` for IterDataPipe
     """
     datapipe: IterDataPipe
