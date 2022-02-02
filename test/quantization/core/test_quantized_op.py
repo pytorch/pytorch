@@ -4194,6 +4194,7 @@ class TestQuantizedConv(TestCase):
             warmup=5,
             active=20)
 
+        # fp32 benchmark
         with profile(
                 activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
                 schedule=my_schedule,
@@ -4202,10 +4203,26 @@ class TestQuantizedConv(TestCase):
                 conv_op(input, weight, None, stride, padding, dilation, groups)
                 prof.step()
 
+        print("fp32 benchmark result:")
         print(prof.key_averages().table(sort_by="self_cpu_time_total", row_limit=10))
 
-        quantized_input = torch.quantize_per_tensor(input, 1, 0, torch.qint8).contiguous(memory_format=torch.channels_last)
-        quantized_weight = torch.quantize_per_tensor(weight, 1, 0, torch.qint8).contiguous(memory_format=torch.channels_last)
+        # fp16 benchmark
+        input_fp16 = input.to(torch.float16)
+        weight_fp16 = input.to(torch.float16)
+
+        with profile(
+                activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
+                schedule=my_schedule,
+                on_trace_ready=trace_handler) as prof:
+            for i in range(30):
+                conv_op(input_fp16, weight_fp16, None, stride, padding, dilation, groups)
+                prof.step()
+
+        print("fp16 benchmark result:")
+        print(prof.key_averages().table(sort_by="self_cpu_time_total", row_limit=10))
+
+        input_int8 = torch.quantize_per_tensor(input, 1, 0, torch.qint8).contiguous(memory_format=torch.channels_last)
+        weight_int8 = torch.quantize_per_tensor(weight, 1, 0, torch.qint8).contiguous(memory_format=torch.channels_last)
         scale = 1.0
         zero_point = 0
         conv_op = torch.ops.quantized.conv2d_cudnn
@@ -4214,9 +4231,10 @@ class TestQuantizedConv(TestCase):
                 schedule=my_schedule,
                 on_trace_ready=trace_handler) as prof:
             for i in range(30):
-                conv_op(quantized_input, quantized_weight, None, stride, padding, dilation, groups, scale, zero_point)
+                conv_op(input_int8, weight_int8, None, stride, padding, dilation, groups, scale, zero_point)
                 prof.step()
 
+        print("int8 benchmark result:")
         print(prof.key_averages().table(sort_by="self_cpu_time_total", row_limit=10))
 
     """Tests the correctness of quantized convolution op."""
