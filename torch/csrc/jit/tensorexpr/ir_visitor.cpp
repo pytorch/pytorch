@@ -183,6 +183,11 @@ void IRVisitor::visit(FreePtr v) {
   v->buffer_var()->accept(this);
 }
 
+void IRVisitor::visit(PlacementAllocatePtr v) {
+  v->buf()->accept(this);
+  v->buf_to_reuse()->accept(this);
+}
+
 void IRVisitor::visit(LetPtr v) {
   v->var()->accept(this);
   v->value()->accept(this);

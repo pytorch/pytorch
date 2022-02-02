@@ -347,7 +347,7 @@ inline at::Tensor newLikeFlat(
   }
   auto& t = tensors[deviceIdx][0];
   auto device = t.device();
-  for (size_t i = 1; i < tensors[deviceIdx].size(); ++i) {
+  for (const auto i : c10::irange(1, tensors[deviceIdx].size())) {
     if (tensors[deviceIdx][i].device() != device) {
       TORCH_CHECK(false, "Expecting all tensors on the same device");
     }

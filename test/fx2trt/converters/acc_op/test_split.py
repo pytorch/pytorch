@@ -1,10 +1,11 @@
-# Owner(s): ["oncall: fx"]
+# Owner(s): ["oncall: aiacc"]
 
 import torch
 import torch.fx.experimental.fx_acc.acc_ops as acc_ops
 import torch.nn as nn
 from torch.testing._internal.common_fx2trt import AccTestCase
 from parameterized import parameterized
+from torch.testing._internal.common_utils import run_tests
 
 
 class TestSplitConverter(AccTestCase):
@@ -30,3 +31,24 @@ class TestSplitConverter(AccTestCase):
             },
             test_explicit_batch_dim=False,
         )
+
+    @parameterized.expand(
+        [
+            ("split_with_size", [2, 3, 5], 1),
+        ]
+    )
+    def test_split_with_size(self, _, split_size, dim):
+        class Split(nn.Module):
+            def forward(self, x):
+                return x.split_with_sizes(split_size, dim)
+
+        inputs = [torch.randn(1, 10)]
+        self.run_test(
+            Split(),
+            inputs,
+            expected_ops={acc_ops.slice_tensor},
+            test_explicit_batch_dim=False,
+        )
+
+if __name__ == '__main__':
+    run_tests()
