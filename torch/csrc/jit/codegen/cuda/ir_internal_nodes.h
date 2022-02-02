@@ -950,46 +950,6 @@ class TORCH_CUDA_CU_API Merge : public Expr {
   IterDomain* const inner_ = nullptr;
 };
 
-//! Integer value which has a special name
-//!
-//! These could be:
-//! - threadIdx.x
-//! - blockIdx.y
-//! - blockDim.z
-//! - T3.stride[2]
-//!
-class TORCH_CUDA_CU_API NamedScalar : public Val {
- public:
-  NamedScalar(IrBuilderPasskey passkey, std::string name, DataType dtype);
-
-  NamedScalar(const NamedScalar* src, IrCloner* ir_cloner);
-
-  const std::string& name() const {
-    return name_;
-  }
-
-  bool sameAs(const Statement* other) const override;
-
-  //! Return the named scalar extent of a parallel dimension (e.g. blockDim.x)
-  //! WARNING: Only works with Fusion container at the moment
-  static NamedScalar* getParallelDim(ParallelType p_type);
-
-  //! Return the named scalar index of a parallel dimension (e.g. threadIdx.x)
-  //! WARNING: Only works with Fusion container at the moment
-  static NamedScalar* getParallelIndex(ParallelType p_type);
-
-  //! Return the parallel type of this NamedScalar if it is an extent of a
-  //! parallel dimension
-  c10::optional<ParallelType> getParallelDim() const;
-
-  //! Return the parallel type of this NamedScalar if it is an index of a
-  //! parallel dimension
-  c10::optional<ParallelType> getParallelIndex() const;
-
- private:
-  std::string name_;
-};
-
 } // namespace cuda
 } // namespace fuser
 } // namespace jit
