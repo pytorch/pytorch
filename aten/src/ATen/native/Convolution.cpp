@@ -506,8 +506,8 @@ static void check_shape_forward(const at::Tensor& input,
   int64_t k = input.ndimension();
   int64_t weight_dim = weight_sizes.size();
   int64_t groups = params.groups;
-  auto padding = params.padding;
-  auto dilation = params.dilation;
+  const auto& padding = params.padding;
+  const auto& dilation = params.dilation;
   bool transposed = params.transposed;
 
   TORCH_CHECK(!params.is_padding_neg(), "negative padding is not supported");
@@ -1762,7 +1762,7 @@ std::tuple<Tensor, Tensor, Tensor> convolution_backward(
         std::vector<Tensor> backend_grad_inputs(params.groups);
         std::vector<Tensor> backend_grad_weights(params.groups);
         std::vector<Tensor> backend_grad_biases(params.groups);
-        for (int g = 0; g < params.groups; ++g) {
+        for (const auto g : c10::irange(params.groups)) {
           auto grad_output_g = subtensor(grad_output, 1, params.groups, g);
           auto input_g = subtensor(input, 1, params.groups, g);
           auto weight_g = subtensor(weight, 0, params.groups, g);

@@ -290,6 +290,17 @@ class TestIterableDataPipeBasic(TestCase):
             self.assertTrue((pathname in self.temp_files) or (pathname in self.temp_sub_files))
         self.assertEqual(count, len(self.temp_files) + len(self.temp_sub_files))
 
+    def test_listdirfilesdeterministic_iterable_datapipe(self):
+        temp_dir = self.temp_dir.name
+
+        datapipe = dp.iter.FileLister(temp_dir, '')
+        # The output order should be always the same.
+        self.assertEqual(list(datapipe), list(datapipe))
+
+        datapipe = dp.iter.FileLister(temp_dir, '', recursive=True)
+        # The output order should be always the same.
+        self.assertEqual(list(datapipe), list(datapipe))
+
     def test_readfilesfromdisk_iterable_datapipe(self):
         # test import datapipe class directly
         from torch.utils.data.datapipes.iter import (

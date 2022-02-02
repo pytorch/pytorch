@@ -378,7 +378,7 @@ std::string UnionType::unionStr(TypePrinter printer, bool is_annotation_str)
 
   ss << "Union" + open_delimeter;
   bool printed = false;
-  for (size_t i = 0; i < types_.size(); ++i) {
+  for (const auto i : c10::irange(types_.size())) {
     if (!can_hold_numbertype || !is_numbertype(types_[i])) {
       if (i > 0) {
         ss << ", ";
