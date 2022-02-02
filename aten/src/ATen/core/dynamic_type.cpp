@@ -7,7 +7,6 @@
 #include <ATen/core/jit_type.h>
 #include <ATen/core/type_factory.h>
 #include <c10/util/Exception.h>
-#include <c10/util/irange.h>
 
 namespace c10 {
 
@@ -65,7 +64,7 @@ DynamicType::Arguments::Arguments(
     c10::ArrayRef<TypePtr> args)
     : Arguments(args) {
   TORCH_INTERNAL_ASSERT(names.size() == args.size());
-  for (const auto i : c10::irange(args.size())) {
+  for (size_t i = 0; i < args.size(); i++) {
     elems[i].label = std::string{names[i]};
   }
 }

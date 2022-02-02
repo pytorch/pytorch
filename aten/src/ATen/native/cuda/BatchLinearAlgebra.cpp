@@ -6,7 +6,6 @@
 #include <ATen/cuda/detail/IndexUtils.cuh>
 
 #include <c10/util/Exception.h>
-#include <c10/util/irange.h>
 
 #include <ATen/native/LinearAlgebraUtils.h>
 #include <ATen/native/cuda/MiscUtils.h>
@@ -1288,7 +1287,7 @@ AT_ERROR("solve: MAGMA library not found in "
     ALLOCATE_ARRAY(b_array, scalar_t*, batch_size);
 
     // Set up the created arrays
-    for (const auto i : c10::irange(batch_size)) {
+    for (int64_t i = 0; i < batch_size; i++) {
       A_array[i] = &A_data[i * A_mat_stride];
       b_array[i] = &b_data[i * b_mat_stride];
       ipiv_array[i] = &ipiv_data[i * n];
@@ -1381,7 +1380,7 @@ AT_ERROR("inverse: MAGMA library not found in "
   ALLOCATE_ARRAY(self_inv_array, scalar_t*, batch_size);
 
   // Set up the created arrays
-  for (const auto i : c10::irange(batch_size)) {
+  for (int64_t i = 0; i < batch_size; i++) {
     self_array[i] = &self_data[i * self_mat_stride];
     self_inv_array[i] = &self_inv_data[i * self_inv_mat_stride];
     ipiv_array[i] = &ipiv_data[i * n];
@@ -1522,7 +1521,7 @@ AT_ERROR("cholesky_solve: MAGMA library not found in "
     ALLOCATE_ARRAY(b_array, scalar_t*, batch_size);
 
     // Set up the created arrays
-    for (const auto i : c10::irange(batch_size)) {
+    for (int64_t i = 0; i < batch_size; i++) {
       A_array[i] = &A_data[i * A_mat_stride];
       b_array[i] = &b_data[i * b_mat_stride];
     }
@@ -1629,7 +1628,7 @@ static void apply_cholesky(const Tensor& self, bool upper, const Tensor& info) {
     ALLOCATE_ARRAY(self_array, scalar_t*, batch_size);
 
     // Set up the created arrays
-    for (const auto i : c10::irange(batch_size)) {
+    for (int64_t i = 0; i < batch_size; i++) {
       self_array[i] = &self_data[i * self_mat_stride];
     }
 
@@ -1883,7 +1882,7 @@ static void apply_lu_factor_batched_magma(const Tensor& input, const Tensor& piv
   ALLOCATE_ARRAY(input_array, scalar_t*, batch_size);
 
   // Set up array of pointers to matrices
-  for (const auto i : c10::irange(batch_size)) {
+  for (int64_t i = 0; i < batch_size; i++) {
     input_array[i] = &input_data[i * input_matrix_stride];
   }
 
@@ -1898,7 +1897,7 @@ static void apply_lu_factor_batched_magma(const Tensor& input, const Tensor& piv
     pivots.fill_(1);
     magma_int_t** pivots_array;
     ALLOCATE_ARRAY(pivots_array, magma_int_t*, batch_size);
-    for (const auto i : c10::irange(batch_size)) {
+    for (int64_t i = 0; i < batch_size; i++) {
       pivots_array[i] = &pivots_data[i * pivots_stride];
     }
     magmaLuBatched<scalar_t>(m, n, input_array, leading_dimension, pivots_array, infos_data, batch_size, magma_queue);
@@ -2041,7 +2040,7 @@ AT_ERROR("triangular_solve: MAGMA library not found in "
   ALLOCATE_ARRAY(b_array, scalar_t*, batch_size);
 
   // Set up the created arrays
-  for (const auto i : c10::irange(batch_size)) {
+  for (int64_t i = 0; i < batch_size; i++) {
     A_array[i] = &A_data[i * A_mat_stride];
     b_array[i] = &b_data[i * b_mat_stride];
   }
@@ -2156,7 +2155,7 @@ static void apply_geqrf(const Tensor& input, const Tensor& tau) {
   scalar_t* work_data = nullptr; // workspace is not needed for geqrf2_gpu
 
   magma_int_t info = 0;
-  for (const auto i : c10::irange(batch_size)) {
+  for (int64_t i = 0; i < batch_size; i++) {
     scalar_t* input_working_ptr = &input_data[i * input_matrix_stride];
     scalar_t* tau_working_ptr = &tau_data[i * tau_stride];
 
@@ -2242,7 +2241,7 @@ AT_ERROR("qr: MAGMA library not found in "
   // This phase computes R (the raw version)
   // This uses MAGMA's ?geqrf2_gpu function
   magma_int_t info = 0;
-  for (const auto i : c10::irange(batch_size)) {
+  for (int64_t i = 0; i < batch_size; i++) {
     scalar_t* r_working_ptr = &r_data[i * r_matrix_stride];
     magmaGeqrf<scalar_t>(m, n, r_working_ptr, m, tau_data, work_data, &info, /*is_v2=*/true);
     checkMagmaInternalError(info, "geqrf");
@@ -2260,7 +2259,7 @@ AT_ERROR("qr: MAGMA library not found in "
   // http://icl.cs.utk.edu/magma/forum/viewtopic.php?f=2&t=1015&p=2800&hilit=geqrf_gpu#p2800
   auto q_data = Q.data_ptr<scalar_t>();
   auto q_matrix_stride = matrixStride(Q);
-  for (const auto i : c10::irange(batch_size)) {
+  for (int64_t i = 0; i < batch_size; i++) {
     scalar_t* q_working_ptr = &q_data[i * q_matrix_stride];
     magmaGeqrf<scalar_t>(m, n, q_working_ptr, m, tau_data, work_data, &info, /*is_v2=*/false);
     checkMagmaInternalError(info, "geqrf");
@@ -2650,7 +2649,7 @@ TORCH_CHECK(false, "Calling torch.linalg.eig on a CUDA tensor requires compiling
   Tensor work = at::empty({lwork}, input.dtype());
   auto work_data = work.data_ptr<scalar_t>();
 
-  for (const auto i : c10::irange(decltype(batch_size){0}, batch_size)) {
+  for (auto i = decltype(batch_size){0}; i < batch_size; i++) {
     scalar_t* input_working_ptr = &input_data[i * input_matrix_stride];
     scalar_t* values_working_ptr = &values_data[i * values_stride];
     scalar_t* rvectors_working_ptr = compute_eigenvectors ? &rvectors_data[i * input_matrix_stride] : nullptr;
@@ -2740,7 +2739,7 @@ AT_ERROR("linalg.svd: MAGMA library not found in "
   scalar_t* work;
   ALLOCATE_ARRAY(work, scalar_t, lwork);
 
-  for (const auto i : c10::irange(batchsize)) {
+  for (int64_t i = 0; i < batchsize; i++) {
     // Compute S, U (optionally), Vh (optionally)
     magmaSvd<scalar_t, value_t>(jobz, m, n,
                                 A_data + i * A_stride, lda,
@@ -2920,7 +2919,7 @@ static void apply_lu_solve_batched_magma(const Tensor& b, const Tensor& lu, cons
   ALLOCATE_ARRAY(lu_array, scalar_t*, batch_size);
   ALLOCATE_ARRAY(b_array, scalar_t*, batch_size);
 
-  for (const auto i : c10::irange(batch_size)) {
+  for (int64_t i = 0; i < batch_size; i++) {
     pivots_array[i] = &pivots_data[i * pivots_stride];
     b_array[i] = &b_data[i * b_stride];
     lu_array[i] = &lu_data[i * lu_stride];
