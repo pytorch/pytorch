@@ -3081,7 +3081,6 @@ class TestVmapOperatorsOpInfo(TestCase):
         # Each one of these is a bug
         xfail('svd', device_type='cuda'),
         xfail('linalg.svd', device_type='cuda'),
-        xfail('index_put'),
         xfail('matrix_exp'),
         xfail('lu_unpack'),
         xfail('histogramdd'),
@@ -3143,7 +3142,9 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('fill_'),
         xfail('histogram'),
         xfail('index_fill'),
-        xfail('index_put'),
+        # `index_put` OpInfo in pytorch/pytorch has
+        # masked index as input which is not supported
+        xfail('index_put', ''),
         xfail('isin'),
         xfail('linalg.cholesky'),
         xfail('linalg.eigvals'),
