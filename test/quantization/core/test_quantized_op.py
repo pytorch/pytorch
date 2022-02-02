@@ -4102,9 +4102,9 @@ class TestQuantizedConv(TestCase):
            use_channelwise=st.sampled_from([False]))
     @skipIfNoFBGEMM
     @unittest.skipIf(not TEST_CUDNN, "cudnn is not enabled.")
-    @unittest.skip("Local only - currently the qconv2d_cudnn op is bulid "
-                   "with USE_EXPERIMENTAL_CUDNN_V8_API, we can enable the test "
-                   "after it is built by default")
+    # @unittest.skip("Local only - currently the qconv2d_cudnn op is bulid "
+    #                "with USE_EXPERIMENTAL_CUDNN_V8_API, we can enable the test "
+    #                "after it is built by default")
     def test_qconv2d_cudnn(
             self,
             batch_size,
@@ -4157,14 +4157,14 @@ class TestQuantizedConv(TestCase):
             device=torch.device("cuda"),
             input_dtype=torch.qint8, weight_dtype=torch.qint8, output_dtype=torch.qint8)
 
-    @unittest.skip("used for local benchmarking, uncomment when we want to run it")
+    # @unittest.skip("used for local benchmarking, comment when we want to run it")
     def test_benchmark(self):
-        batch_size = 10
+        batch_size = 16
         in_channel = 64
         out_channel = 64
         kernel_size = 3
-        height = 200
-        width = 200
+        height = 256
+        width = 256
         print(
             "parameters:",
             "batch_size:", batch_size,

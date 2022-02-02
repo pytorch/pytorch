@@ -45,6 +45,8 @@ cudnn_frontend::Tensor getTensorDescriptor(const Tensor &t, int64_t id, uint8_t 
     .build();
 }
 
+// TODO: there is a table from input dtype and weight dtype to operator dtype,
+// we can derive the operator dtype based on input dtype
 cudnn_frontend::ConvDesc_v8 getConvDescriptor(cudnnDataType_t dataType, IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation) {
   uint64_t convDim = stride.size();
   return cudnn_frontend::ConvDescBuilder()
@@ -58,6 +60,8 @@ cudnn_frontend::ConvDesc_v8 getConvDescriptor(cudnnDataType_t dataType, IntArray
     .build();
 }
 
+// TODO: there is a table from input dtype to operator dtype, we can derive
+// the operator dtype based on input dtype
 cudnn_frontend::PointWiseDesc_v8 getPointWiseMulDescriptor(cudnnDataType_t dataType) {
   return cudnn_frontend::PointWiseDescBuilder()
     .setMode(CUDNN_POINTWISE_MUL)
@@ -180,8 +184,8 @@ void raw_cudnn_convolution_forward_out(
     return;
   }
 
-  Tensor conv_output = at::empty_like(output);
-  Tensor requantize_multiplier_tensor = at::empty_like(output);
+  Tensor conv_output = at::empty_like(output, output.options().dtype(at::kFloat));
+  Tensor requantize_multiplier_tensor = at::empty_like(output, output.options().dtype(at::kFloat));
   requantize_multiplier_tensor.fill_(requantize_multiplier);
   cudnnHandle_t handle = getCudnnHandle();
 
@@ -229,7 +233,7 @@ void raw_cudnn_convolution_forward_out(
     .setxDesc(conv_op.getOutputTensor())
     .setbDesc(getTensorDescriptor(requantize_multiplier_tensor, 's', getAlignment(requantize_multiplier_tensor)))
     .setyDesc(getTensorDescriptor(output, 'r', getAlignment(output)))
-    .setpwDesc(getPointWiseMulDescriptor(getCudnnDataType(output)))
+    .setpwDesc(getPointWiseMulDescriptor(getCudnnDataType(requantize_multiplier_tensor)))
     .build();
   // std::cout << "operator:" << requant_op.describe() << std::endl;
 
@@ -273,7 +277,7 @@ void raw_cudnn_convolution_forward_out(
 }
 
 //
-// output Tensor will be a fp32 Tensor
+// output Tensor will be a clampped int8 Tensor
 // both act and weight will be int8 Tensor
 //
 template <int kSpatialDim>
@@ -298,20 +302,20 @@ Tensor raw_cudnn_convolution_forward(
   std::vector<int64_t> kernel_size = {weight.size(2), weight.size(3)};
   at::SmallVector<int64_t, kSpatialDim + 2> output_shape;
   output_shape = MakeConvOutputShape<kSpatialDim>(N, M, {H, W}, kernel_size, stride, padding, dilation);
-  Tensor output_fp32 = at::empty(
+  Tensor output_int8 = at::empty(
       output_shape,
-      at::device(at::kCUDA).dtype(at::kFloat),
+      at::device(at::kCUDA).dtype(at::kChar),
       at::MemoryFormat::ChannelsLast
   );
 
   raw_cudnn_convolution_forward_out(
-      output_fp32, act, weight,
+      output_int8, act, weight,
       padding, stride, dilation, groups,
       benchmark,
       deterministic,
       allow_tf32,
       requantize_multiplier);
-  return output_fp32;
+  return output_int8;
 }
 
 
@@ -339,7 +343,7 @@ class QConvInt8 final {
     auto requantize_multiplier = act_scale * weight_scale / output_scale;
 
     // TODO: check all zero_points are zero/all tensors are symmetrically quantized
-    Tensor output_fp32_requant = raw_cudnn_convolution_forward<kSpatialDim>(
+    Tensor output_int8_requant = raw_cudnn_convolution_forward<kSpatialDim>(
         act.int_repr(), weight.int_repr(),
         IntArrayRef(padding.vec()), IntArrayRef(stride.vec()), IntArrayRef(dilation.vec()), groups,
         false /* benchmark */,
@@ -348,11 +352,10 @@ class QConvInt8 final {
         requantize_multiplier
     );
 
-    // convert output fp32 Tensor to int8 by clamping
-    // TODO: get the range based on target output dtype, for now
-    // we hardcode this to the range for int8
-    Tensor clampped_int8 = output_fp32_requant.clamp(-128, 127).to(at::kChar);
-    Tensor quantized_output = at::_make_per_tensor_quantized_tensor(clampped_int8, output_scale, output_zero_point);
+    // clamping is done in cudnn kernels, which probably defaults to -128, 127
+    // for int8 dtype, we may need to add new operators to the graph if
+    // we want to change the clamping
+    Tensor quantized_output = at::_make_per_tensor_quantized_tensor(output_int8_requant, output_scale, output_zero_point);
     return quantized_output;
   }
 };
