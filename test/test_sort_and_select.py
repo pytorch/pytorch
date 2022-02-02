@@ -8,9 +8,7 @@ from torch._six import nan
 from itertools import permutations, product
 
 from torch.testing import make_tensor
-from torch.testing._internal.common_dtype import (
-    all_types, all_types_and, floating_types_and,
-)
+from torch.testing._internal.common_dtype import all_types, all_types_and, floating_types_and
 from torch.testing._internal.common_utils import \
     (TEST_WITH_ROCM, TestCase, run_tests, slowTest)
 from torch.testing._internal.common_device_type import \
@@ -769,12 +767,9 @@ class TestSortAndSelect(TestCase):
                 self.assertEqual(expected_inverse.view(additional_shape), y_inverse)
                 self.assertEqual(expected_counts, y_counts)
 
-    @dtypesIfCPU(*all_types_and(torch.half, torch.bool, torch.bfloat16))
+    @dtypesIfCPU(*all_types_and(torch.bool, torch.bfloat16))
     @dtypes(*all_types_and(torch.half, torch.bool))
     def test_unique(self, device, dtype):
-        if dtype is torch.half and self.device_type == 'cpu':
-            return  # CPU does not have half support
-
         def ensure_tuple(x):
             if isinstance(x, torch.Tensor):
                 return (x,)
@@ -829,12 +824,9 @@ class TestSortAndSelect(TestCase):
                                 count += 1
                         self.assertEqual(j, count)
 
-    @dtypesIfCPU(*all_types_and(torch.half, torch.bool, torch.bfloat16))
+    @dtypesIfCPU(*all_types_and(torch.bool, torch.bfloat16))
     @dtypes(*all_types_and(torch.half, torch.bool))
     def test_unique_consecutive(self, device, dtype):
-        if dtype is torch.half and self.device_type == 'cpu':
-            return  # CPU does not have half support
-
         if dtype is torch.bool:
             x = torch.tensor([True, False, False, False, True, True, False, False, False], dtype=torch.bool, device=device)
             expected_unique = torch.tensor([True, False, True, False], dtype=torch.bool, device=device)

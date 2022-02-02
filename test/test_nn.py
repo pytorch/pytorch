@@ -13026,7 +13026,7 @@ class TestNNDeviceType(NNTestCase):
 
     @onlyCUDA
     @skipCUDAIfNoCudnn
-    @dtypes(*floating_types_and(*((torch.half, torch.bfloat16) if AMPERE_OR_ROCM else (torch.half, ))))
+    @dtypes(*floating_types_and(torch.half), *[torch.bfloat16] if AMPERE_OR_ROCM else [])
     def test_Conv2d_deterministic_cudnn(self, device, dtype):
         inputs = torch.randn(2, 3, 5, 5, device=device, dtype=dtype, requires_grad=True)
         with cudnn.flags(enabled=True, benchmark=True, deterministic=True):
@@ -13045,7 +13045,7 @@ class TestNNDeviceType(NNTestCase):
 
 
     @onlyCUDA
-    @dtypes(floating_types_and(*((torch.half, torch.bfloat16) if AMPERE_OR_ROCM else (torch.half, ))))
+    @dtypes(floating_types_and(torch.half), *[torch.bfloat16] if AMPERE_OR_ROCM else [])
     def test_Conv2d_large_workspace(self, device, dtype):
         # These sizes require huge cuDNN workspaces. Make sure we choose a
         # reasonable algorithm that does not run out of memory

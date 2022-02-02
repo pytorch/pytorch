@@ -5609,11 +5609,10 @@ class TestLinalg(TestCase):
             A_LU, pivots = fn(torch.lu, (2, 0, 0))
             self.assertEqual([(2, 0, 0), (2, 0)], [A_LU.shape, pivots.shape])
 
-    @dtypesIfCUDA(torch.cfloat, torch.cdouble,
-                  *floating_types_and(
-                      *((torch.half, ) if not CUDA9 else ()),
-                      *((torch.bfloat16, ) if (CUDA11OrLater and SM53OrLater) else ()))
-                  )
+    @dtypesIfCUDA(*floating_and_complex_types_and(
+                      *[torch.half] if not CUDA9 else [],
+                      *[torch.bfloat16] if CUDA11OrLater and SM53OrLater else [],
+                      ))
     @dtypes(*all_types_and_complex_and(torch.bfloat16))
     def test_blas_alpha_beta_empty(self, device, dtype):
         # This test is disabled on CUDA 9 due to:
@@ -6261,10 +6260,9 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
 
     @precisionOverride({torch.bfloat16: 1e-0, torch.half: 5e-4, torch.float: 1e-4, torch.double: 1e-8,
                         torch.cfloat: 1e-4, torch.cdouble: 1e-8})
-    @dtypesIfCUDA(*complex_types(),
-                  *floating_types_and(
-                      *((torch.bfloat16, ) if TEST_WITH_ROCM or (CUDA11OrLater and SM53OrLater) else ()),
-                      *((torch.half, ) if not TEST_WITH_ROCM else ())))
+    @dtypesIfCUDA(*floating_and_complex_types_and(
+                      *[torch.bfloat16] if TEST_WITH_ROCM or (CUDA11OrLater and SM53OrLater) else [],
+                      *[torch.half] if not TEST_WITH_ROCM else []))
     @dtypes(torch.bfloat16, torch.float, torch.double, torch.cfloat, torch.cdouble)
     def test_addmv(self, device, dtype):
         # have to use torch.randn(...).to(bfloat16) instead of
@@ -6299,8 +6297,8 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         for m, v in itertools.product(ms, vs):
             self._test_addmm_addmv(torch.addmv, t, m, v, beta=0)
 
-    @dtypesIfCUDA(*floating_types_and(*((torch.bfloat16, ) if TEST_WITH_ROCM or (CUDA11OrLater and
-                                                                                 SM53OrLater) else ())))
+    @dtypesIfCUDA(*floating_types_and(*[torch.bfloat16] if TEST_WITH_ROCM or (CUDA11OrLater and
+                                                                                 SM53OrLater) else []))
     @dtypes(torch.float, torch.double)
     def test_addmv_rowmajor_colmajor_incx_incy_lda(self, device, dtype):
         # tests (o, s)*(s).  o is output size, s is summed size.
@@ -6331,9 +6329,8 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
 
     @precisionOverride({torch.double: 1e-8, torch.float: 1e-4, torch.bfloat16: 0.6,
                         torch.half: 1e-1, torch.cfloat: 1e-4, torch.cdouble: 1e-8})
-    @dtypesIfCUDA(*complex_types(),
-                  *floating_types_and(
-                      *((torch.bfloat16, ) if TEST_WITH_ROCM or (CUDA11OrLater and SM53OrLater) else ())))
+    @dtypesIfCUDA(*floating_and_complex_types_and(
+                      *[torch.bfloat16] if TEST_WITH_ROCM or (CUDA11OrLater and SM53OrLater) else []))
     @dtypes(*floating_and_complex_types_and(torch.half, torch.bfloat16))
     @tf32_on_and_off(0.05)
     def test_addmm(self, device, dtype):
@@ -6367,7 +6364,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
             self._test_addmm_addmv(torch.addmm, M, m1, m2, transpose_out=t4)
 
     @dtypes(torch.float, torch.double)
-    @dtypesIfCUDA(*([torch.float, torch.double] + list(complex_types())))
+    @dtypesIfCUDA(*floating_and_complex_types())
     @tf32_on_and_off(0.005)
     def test_addmm_sizes(self, device, dtype):
         for m in [0, 1, 25]:

@@ -896,7 +896,7 @@ class TestTypePromotion(TestCase):
 
     @onlyNativeDeviceTypes
     def test_cat_out_different_dtypes(self, device):
-        dtypes = list(all_types_and_complex_and(torch.half))
+        dtypes = all_types_and_complex_and(torch.half)
         for x_dtype, y_dtype, out_dtype in itertools.product(dtypes, dtypes, dtypes):
             out = torch.zeros(6, device=device, dtype=out_dtype)
             x = torch.tensor([1, 2, 3], device=device, dtype=x_dtype)

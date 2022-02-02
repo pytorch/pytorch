@@ -22,7 +22,7 @@ from torch.testing._internal.common_device_type import (
 from torch.testing import make_tensor
 from torch.testing._internal.common_dtype import (
     floating_types_and, all_types_and_complex_and, floating_and_complex_types_and,
-    integral_types_and, get_all_math_dtypes, complex_types
+    integral_types_and, get_all_math_dtypes, complex_types, all_types_and, floating_and_complex_types_and
 )
 
 if TEST_SCIPY:
@@ -514,8 +514,7 @@ class TestUnaryUfuncs(TestCase):
             out = torch.empty_like(input, dtype=out_dtype)
             self._test_out_arg(op, input, out, expected, **torch_kwargs)
 
-    @dtypes(*(integral_types_and(torch.bool) +
-              floating_types_and(torch.half)))
+    @dtypes(*all_types_and(torch.bool, torch.half))
     def test_nan_to_num(self, device, dtype):
         for contiguous in [False, True]:
             x = make_tensor((64, 64), low=0., high=100., dtype=dtype, device=device)
@@ -1344,8 +1343,8 @@ class TestUnaryUfuncs(TestCase):
         self.assertEqual(torch.empty(0, dtype=torch.long), z[0])
 
     # TODO: rationalize with exp OpInfo
-    @dtypes(*floating_types_and(torch.bfloat16) + complex_types())
-    @dtypesIfCUDA(*floating_types_and(torch.half, torch.bfloat16) + complex_types())
+    @dtypes(*floating_and_complex_types_and(torch.bfloat16))
+    @dtypesIfCUDA(*floating_and_complex_types_and(torch.half, torch.bfloat16))
     def test_exp(self, device, dtype):
         for v in (2, -2) + ((1j, 1 + 1j) if dtype.is_complex else ()):
             a = torch.tensor(v, dtype=dtype, device=device) * torch.arange(18, device=device) / 3 * math.pi

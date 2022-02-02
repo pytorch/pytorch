@@ -1884,7 +1884,7 @@ class TestBinaryUfuncs(TestCase):
             result = op(a, b)
             self.assertEqual(result.dtype, torch.result_type(a, b))
 
-    @dtypes(*(list(integral_types()) + [torch.bool]))
+    @dtypes(*integral_types(), torch.bool)
     def test_maximum_minimum_int_and_bool(self, device, dtype):
         ops = ((torch.maximum, torch.max, np.maximum), (torch.minimum, torch.min, np.minimum),
                (torch.fmax, None, np.fmax), (torch.fmin, None, np.fmin))
@@ -2126,7 +2126,7 @@ class TestBinaryUfuncs(TestCase):
             expected = torch.from_numpy(np.copysign(np_a, np_b))
             # To handle inconsistencies of type promotion between PyTorch and Numpy
             # Applied for both arguments having integral precision and bfloat16
-            types = [torch.bool, torch.bfloat16] + list(integral_types())
+            types = [torch.bool, torch.bfloat16, *integral_types()]
             if a.dtype in types or b.dtype in types:
                 promoted_type = torch.promote_types(torch_result.dtype, expected.dtype)
                 torch_result = torch_result.to(promoted_type)
@@ -3021,7 +3021,7 @@ class TestBinaryUfuncs(TestCase):
         self._test_logaddexp(device, dtype, base2=True)
 
     def test_add(self, device):
-        dtypes = [torch.float, torch.double] + list(complex_types())
+        dtypes = [torch.float, torch.double, *complex_types()]
         for dtype in dtypes:
             # [res] torch.add([res,] tensor1, tensor2)
             m1 = torch.randn(100, 100, dtype=dtype, device=device)
@@ -3409,8 +3409,8 @@ class TestBinaryUfuncs(TestCase):
         self.unary_check_input_output_mem_overlap(
             doubles, sz, lambda input, out: torch.pow(42, input, out=out))
 
-    @dtypes(*list(product(all_types_and(torch.half, torch.bfloat16),
-                          all_types_and(torch.half, torch.bfloat16))))
+    @dtypes(*list(product(all_types_and_complex_and(torch.half, torch.bfloat16),
+                          all_types_and_complex_and(torch.half, torch.bfloat16))))
     def test_float_power(self, device, dtypes):
         def to_np(value):
             if isinstance(value, torch.Tensor) and value.dtype == torch.bfloat16:
@@ -3518,7 +3518,7 @@ class TestBinaryUfuncs(TestCase):
             self.assertEqual(expected, out)
 
         def xlogy_inplace_variant_helper(x, y):
-            if x.dtype in list(integral_types()) + [torch.bool]:
+            if x.dtype in [*integral_types(), torch.bool]:
                 with self.assertRaisesRegex(RuntimeError,
                                             "can't be cast to the desired output type"):
                     x.clone().xlogy_(y)

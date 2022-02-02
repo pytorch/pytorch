@@ -16,7 +16,8 @@ from torch.testing._internal.common_utils import (
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, onlyCPU, dtypes, onlyNativeDeviceTypes)
 from torch.testing._internal.common_dtype import (
-    all_types_and_complex_and, integral_types, floating_types_and, complex_types
+    all_types_and_complex_and, integral_types, floating_types_and, complex_types, all_types_and,
+    floating_and_complex_types,
 )
 
 # TODO: replace this with make_tensor() in common_utils.py
@@ -121,7 +122,7 @@ class TestViewOps(TestCase):
         else:
             return x.transpose(dim0, dim1)
 
-    @dtypes(*(integral_types() + floating_types_and(torch.half, torch.bfloat16)))
+    @dtypes(*all_types_and(torch.half, torch.bfloat16))
     def test_conj_self(self, device, dtype):
         t = torch.ones(5, 5, device=device)
         s = t.conj()
@@ -210,8 +211,7 @@ class TestViewOps(TestCase):
         # because view(dtype) does not support backward yet
         # TODO: Remove this when autograd support is added
         if dtype.is_floating_point or dtype.is_complex:
-            for view_dtype in [*list(floating_types_and(torch.half, torch.bfloat16)),
-                               *list(complex_types())]:
+            for view_dtype in floating_and_complex_types():
                 t = make_tensor((5, 5, 64), device, dtype, low=-5, high=5, requires_grad=True)
                 self.assertFalse(t.view(view_dtype).requires_grad)
 
@@ -222,7 +222,7 @@ class TestViewOps(TestCase):
     def test_view_dtype_upsize_errors(self, device, dtype):
         dtype_size = torch._utils._element_size(dtype)
 
-        for view_dtype in list(all_types_and_complex_and(torch.half, torch.bfloat16, torch.bool)):
+        for view_dtype in all_types_and_complex_and(torch.half, torch.bfloat16, torch.bool):
             view_dtype_size = torch._utils._element_size(view_dtype)
             if view_dtype_size <= dtype_size:
                 continue
@@ -231,7 +231,7 @@ class TestViewOps(TestCase):
             a = make_tensor((4, 4, size_ratio + 1), device, dtype, low=-5, high=5)
             with self.assertRaisesRegex(
                     RuntimeError,
-                    rf"self.size\(-1\) must be divisible by {size_ratio}"):
+                    rf"self.size\(-1\) must be divisible by {size_ratio}"): 
                 a.view(view_dtype)
 
             with self.assertRaisesRegex(
@@ -382,7 +382,7 @@ class TestViewOps(TestCase):
         self.assertEqual(t_dsplit[1][2, 2, 0], t[2, 2, 2])
 
     @onlyNativeDeviceTypes
-    @dtypes(*(integral_types() + floating_types_and(torch.half, torch.bfloat16)))
+    @dtypes(*all_types_and(torch.half, torch.bfloat16))
     def test_imag_noncomplex(self, device, dtype):
         t = torch.ones((5, 5), dtype=dtype, device=device)
 
@@ -1396,8 +1396,7 @@ class TestOldViewOps(TestCase):
                         self.assertEqual(np_res, torch_res)
 
     # TODO: are these view ops?
-    @dtypes(*(integral_types() + floating_types_and(torch.half) +
-              complex_types()))
+    @dtypes(*all_types_and_complex_and(torch.half))
     def test_atleast(self, device, dtype):
         self._test_atleast_dim(torch.atleast_1d, np.atleast_1d, device, dtype)
         self._test_atleast_dim(torch.atleast_2d, np.atleast_2d, device, dtype)
