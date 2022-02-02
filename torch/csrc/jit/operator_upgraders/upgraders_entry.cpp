@@ -15,7 +15,20 @@ namespace torch {
 namespace jit {
 
 static std::unordered_map<std::string, std::string> kUpgradersEntryMap(
-    {{"div_Tensor_0_3", R"SCRIPT(
+    {{"linspace_0_7", R"SCRIPT(
+def linspace_0_7(start: Union[int, float, complex], end: Union[int, float, complex], steps: Optional[int], *, dtype: Optional[int], layout: Optional[int],
+                 device: Optional[Device], pin_memory: Optional[bool]):
+  if (steps is None):
+    return torch.linspace(start=start, end=end, steps=100, dtype=dtype, layout=layout, device=device, pin_memory=pin_memory)
+  return torch.linspace(start=start, end=end, steps=steps, dtype=dtype, layout=layout, device=device, pin_memory=pin_memory)
+)SCRIPT"},
+     {"linspace_out_0_7", R"SCRIPT(
+def linspace_out_0_7(start: Union[int, float, complex], end: Union[int, float, complex], steps: Optional[int], *, out: Tensor):
+  if (steps is None):
+    return torch.linspace(start=start, end=end, steps=100, out=out)
+  return torch.linspace(start=start, end=end, steps=steps, out=out)
+)SCRIPT"},
+     {"div_Tensor_0_3", R"SCRIPT(
 def div_Tensor_0_3(self: Tensor, other: Tensor) -> Tensor:
   if (self.is_floating_point() or other.is_floating_point()):
     return self.true_divide(other)
@@ -56,14 +69,6 @@ def full_0_4(size:List[int], fill_value:number, *, dtype:Optional[int]=None,
      {"full_out_0_4", R"SCRIPT(
 def full_out_0_4(size:List[int], fill_value:number, *, out:Tensor) -> Tensor:
   return torch.full(size, fill_value, out=out)
-)SCRIPT"},
-     {"gelu_0_8", R"SCRIPT(
-def gelu_0_8(self: Tensor) -> Tensor:
-  return torch._C._nn.gelu(self, 0)
-)SCRIPT"},
-     {"gelu_out_0_8", R"SCRIPT(
-def gelu_out_0_8(self: Tensor, *, out: Tensor) -> Tensor:
-  return torch._C._nn.gelu(self, 0, out=out)
 )SCRIPT"}});
 
 std::shared_ptr<Graph> create_upgrader_graph(

@@ -16,7 +16,15 @@ static bool isVersionMapSorted = false;
 // Note for developers: The list of upgraders should be SORTED
 // by the version number where the upgrader is registered.
 static std::unordered_map<std::string, std::vector<UpgraderEntry>> operatorVersionMap(
-    {{"aten::div.Tensor",
+    {{"aten::linspace",
+      {{8,
+        "linspace_0_7",
+        "aten::linspace(Scalar start, Scalar end, int? steps=None, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor"}}},
+     {"aten::linspace.out",
+      {{8,
+        "linspace_out_0_7",
+        "aten::linspace.out(Scalar start, Scalar end, int? steps=None, *, Tensor(a!) out) -> Tensor(a!)"}}},
+     {"aten::div.Tensor",
       {{4,
         "div_Tensor_0_3",
         "aten::div.Tensor(Tensor self, Tensor other) -> Tensor"}}},
@@ -43,16 +51,7 @@ static std::unordered_map<std::string, std::vector<UpgraderEntry>> operatorVersi
      {"aten::full.out",
       {{5,
         "full_out_0_4",
-        "aten::full.out(int[] size, Scalar fill_value, *, Tensor(a!) out) -> Tensor(a!)"}}},
-     {"aten::gelu",
-      {{9,
-        "gelu_0_8",
-        "aten::gelu(Tensor self) -> Tensor"}}},
-     {"aten::gelu.out",
-      {{9,
-        "gelu_out_0_8",
-        "aten::gelu(Tensor self, *, Tensor(a!) out) -> Tensor"}}}
-    });
+        "aten::full.out(int[] size, Scalar fill_value, *, Tensor(a!) out) -> Tensor(a!)"}}}});
 
 const std::unordered_map<std::string, std::vector<UpgraderEntry>>&
 get_operator_version_map() {

@@ -1118,6 +1118,24 @@ class TestNN(NNTestCase):
             names(s.named_buffers()),
             ['0.dummy_buf', '0.l1.layer_dummy_buf'])
 
+    def test_named_parameters_buffers_duplicates(self):
+        class Foo(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.bias = nn.Parameter(torch.randn(3))
+                self.linear = nn.Linear(3, 3)
+                self.linear.bias = self.bias
+                self.linear_cloned = self.linear
+                self.register_buffer('buffer', torch.randn(3))
+                self.register_buffer('buffer_cloned', self.buffer)
+
+        mod = Foo()
+        self.assertEqual(len(list(mod.named_parameters())), 2)
+        self.assertEqual(len(list(mod.named_parameters(remove_duplicate=False))), 5)
+
+        self.assertEqual(len(list(mod.named_buffers())), 1)
+        self.assertEqual(len(list(mod.named_buffers(remove_duplicate=False))), 2)
+
     def test_call_supports_python_dict_output(self):
         class Net(nn.Module):
             def __init__(self):
@@ -9153,25 +9171,16 @@ class TestNN(NNTestCase):
             def _gelu_ref(X):
                 return X * stats.norm.cdf(X)
 
-            def _tanh_gelu_ref(X):
-                M_SQRT_2_PI = math.sqrt(2 / math.pi)
-                Z = M_SQRT_2_PI * (X + 0.044715 * np.power(X, 3.0))
-                return 0.5 * X * (1.0 + np.tanh(Z))
-
-            for approximate in ['none', 'tanh']:
-                for d in devices:
-                    if contiguous:
-                        X = torch.rand(n, m, dtype=dtype, requires_grad=True, device=d)
-                    else:
-                        X = torch.rand(n, m, dtype=dtype, requires_grad=True, device=d)[:, ::2]
-                    res = F.gelu(X, approximate)
-                    if approximate == 'tanh':
-                        ref = _tanh_gelu_ref(X.to(numpy_dtype).cpu().detach().numpy())
-                    else:
-                        ref = _gelu_ref(X.to(numpy_dtype).cpu().detach().numpy())
-                    self.assertEqual(res, ref, rtol=rtol, atol=atol, exact_dtype=False)
-                    if dtype == torch.float64:
-                        gradcheck(F.gelu, [X, approximate], eps=1e-4)
+            for d in devices:
+                if contiguous:
+                    X = torch.rand(n, m, dtype=dtype, requires_grad=True, device=d)
+                else:
+                    X = torch.rand(n, m, dtype=dtype, requires_grad=True, device=d)[:, ::2]
+                res = F.gelu(X)
+                ref = _gelu_ref(X.to(numpy_dtype).cpu().detach().numpy())
+                self.assertEqual(res, ref, rtol=rtol, atol=atol, exact_dtype=False)
+                if dtype == torch.float64:
+                    gradcheck(F.gelu, [X], eps=1e-4)
 
         for n in range(1, 10):
             for m in range(1, 10):
@@ -15272,6 +15281,7 @@ class TestNNDeviceType(NNTestCase):
             with warnings.catch_warnings(record=True) as w:
                 out_t = F.interpolate(in_t, size=4, mode=mode)
                 out_uint8_t = F.interpolate(in_uint8_t, size=4, mode=mode)
+                self.assertEqual(len(w), 0)
             self.assertEqual(torch.ones(1, 2, 4, 4, device=device), out_t)
             self.assertEqual(torch.ones(1, 2, 4, 4, dtype=torch.uint8, device=device), out_uint8_t)
             # Assert that memory format is carried through to the output
@@ -15279,8 +15289,7 @@ class TestNNDeviceType(NNTestCase):
 
             # test forward when input's height is not same as width
             in_t = torch.ones(1, 2, 2, 1, device=device).contiguous(memory_format=memory_format).requires_grad_()
-            with warnings.catch_warnings(record=True) as w:
-                out_t = F.interpolate(in_t, size=(4, 2), mode=mode)
+            out_t = F.interpolate(in_t, size=(4, 2), mode=mode)
             self.assertEqual(torch.ones(1, 2, 4, 2, device=device), out_t)
             self.assertTrue(out_t.is_contiguous(memory_format=memory_format))
 
@@ -15308,9 +15317,8 @@ class TestNNDeviceType(NNTestCase):
                     a_cuda = torch.randn(*shapes, device=device).contiguous(memory_format=memory_format).requires_grad_()
                     a_cpu = a_cuda.detach().cpu().requires_grad_()
 
-                    with warnings.catch_warnings(record=True):
-                        out_cuda = F.interpolate(a_cuda, scale_factor=scale_factor, mode=mode)
-                        out_cpu = F.interpolate(a_cpu, scale_factor=scale_factor, mode=mode)
+                    out_cuda = F.interpolate(a_cuda, scale_factor=scale_factor, mode=mode)
+                    out_cpu = F.interpolate(a_cpu, scale_factor=scale_factor, mode=mode)
 
                     self.assertEqual(out_cpu.cuda(), out_cuda)
 
@@ -16943,6 +16951,31 @@ class TestNNDeviceType(NNTestCase):
 
             output = Embed(input=x, offsets=torch.tensor([0, 0], device=device, dtype=dtypes[1]))
             self.assertEqual(output, torch.zeros_like(output))
+
+    @skipCUDAIf(True, "cuda assert is not recovarable.")
+    @dtypes(*itertools.product((torch.float, torch.double), (torch.int, torch.long)))
+    @parametrize_test("padding_idx", [None, 0])
+    @parametrize_test("mode", ["sum", "mean", "max"])
+    def test_embedding_bag_out_of_bounds_idx(self, device, dtypes, padding_idx, mode):
+        padding_idx = 0
+        w_dtype, idx_dtype = dtypes
+        # negative out-of-bound
+        idx1 = torch.tensor([[-1, 1]], device=device, dtype=idx_dtype)
+        # positive out-of-bound
+        idx2 = torch.tensor([[11, 8]], device=device, dtype=idx_dtype)
+        weight = torch.randn(10, 2, device=device, dtype=w_dtype)
+        if mode == 'sum':
+            # Only `sum` supports per_sample_weight
+            per_sample_weights = (None, torch.randn_like(idx1, device=device, dtype=w_dtype))
+        else:
+            per_sample_weights = (None,)
+
+        for p_s_weights, idx in itertools.product(per_sample_weights, (idx1, idx2)):
+            msg = "Expected idx >= 0 && idx < num_embeddings"
+            with self.assertRaisesRegex(RuntimeError, msg):
+                torch.nn.functional.embedding_bag(idx, weight,
+                                                  per_sample_weights=p_s_weights, padding_idx=padding_idx,
+                                                  mode=mode)
 
     @dtypes(*itertools.product((torch.int, torch.long), (torch.int, torch.long)))
     def test_EmbeddingBag_per_sample_weights_failures(self, device, dtypes):
