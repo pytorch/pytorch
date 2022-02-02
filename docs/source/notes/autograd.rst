@@ -78,7 +78,7 @@ But that may not always be the case. For instance:
 Under the hood, to prevent reference cycles, PyTorch has *packed* the tensor
 upon saving and *unpacked* it into a different tensor for reading. Here, the
 tensor you get from accessing ``y.grad_fn._saved_result`` is a different tensor
-object than ``x`` (but they still share the same storage).
+object than ``y`` (but they still share the same storage).
 
 Whether a tensor will be packed into a different tensor object depends on
 whether it is an output of its own `grad_fn`, which is an implementation detail
