@@ -3136,7 +3136,7 @@ void SegmentedFusion::annotateFP16IntermediateTensors() {
   }
 }
 
-TORCH_CUDA_CU_API std::string toString(
+std::string toString(
     const SegmentCandidateFinderOptions& segment_options) {
   std::stringstream ss;
   ss << "segmentation phases {\n";

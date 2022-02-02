@@ -327,7 +327,7 @@ class TORCH_CUDA_CU_API ComputeAtRootDomainMap : public RootDomainMap {
   std::unordered_set<IterDomain*> window_axes_;
 };
 
-std::string toString(const ComputeAtRootDomainMap& root_map);
+TORCH_CUDA_CU_API std::string toString(const ComputeAtRootDomainMap& root_map);
 
 //! Create a DisjointSet of root IterDomains by traversing the
 //! current fusion entirely. IterDomains that can be mapped each
