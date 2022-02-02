@@ -9599,8 +9599,9 @@ op_db: List[OpInfo] = [
                        # Dispatch stub: unsupported device typemeta
                        DecorateInfo(unittest.expectedFailure, 'TestGradients', 'test_fn_fwgrad_bwgrad', device_type='meta'),
                        # (ROCm) Memory access fault by GPU node-4 (Agent handle: 0x55cebc9e8430) on address 0x7fa17b757000
-                       DecorateInfo(unittest.skip("Skipped! ROCm memory exception"), 'TestGradients', 'test_fn_fwgrad_bwgrad',
-                                    device_type='cuda', dtypes=[torch.float64], active_if=TEST_WITH_ROCM),
+                       # CUDA memory exception, see https://github.com/pytorch/pytorch/issues/72177
+                       DecorateInfo(unittest.skip("Skipped! CUDA/ROCm memory exception"), 'TestGradients', 'test_fn_fwgrad_bwgrad',
+                                    device_type='cuda', dtypes=[torch.float64]),
                    )),
     BinaryUfuncInfo('floor_divide',
                     dtypes=all_types_and(torch.half, torch.bfloat16),
