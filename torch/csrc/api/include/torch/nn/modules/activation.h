@@ -849,9 +849,10 @@ class TORCH_API MultiheadAttentionImpl
 
   std::tuple<Tensor, Tensor> forward(const Tensor& query, const Tensor& key,
                  const Tensor& value, const Tensor& key_padding_mask = {},
-                 bool need_weights = true, const Tensor& attn_mask = {});
+                 bool need_weights = true, const Tensor& attn_mask = {},
+                 bool average_attn_weights = true);
  protected:
-  FORWARD_HAS_DEFAULT_ARGS({3, AnyValue(Tensor())}, {4, AnyValue(true)}, {5, AnyValue(Tensor())})
+  FORWARD_HAS_DEFAULT_ARGS({3, AnyValue(Tensor())}, {4, AnyValue(true)}, {5, AnyValue(Tensor())}, {6, AnyValue(true)})
 
  public:
   void reset() override;

@@ -1,7 +1,9 @@
 #include <torch/csrc/profiler/util.h>
+#include <torch/csrc/profiler/kineto_shim.h>
 
 #include <c10/util/ArrayRef.h>
 #include <fmt/format.h>
+#include <c10/util/irange.h>
 
 #ifdef USE_KINETO
 #include <libkineto.h>
@@ -10,19 +12,6 @@
 namespace torch {
 namespace profiler {
 namespace impl {
-
-void addMetadataJson(const std::string& key, const std::string& value) {
-#ifdef USE_KINETO
-  if (libkineto::api().isProfilerInitialized()) {
-    libkineto::api().activityProfiler().addMetadata(key, value);
-  } else {
-    LOG(WARNING) << "Profiler is not initialized: skipping profiling metadata";
-  }
-#else
-  LOG(WARNING) << "Adding profiling metadata requires using "
-               << "torch.profiler with Kineto support (USE_KINETO=1)";
-#endif // USE_KINETO
-}
 
 // ----------------------------------------------------------------------------
 // -- NVTX --------------------------------------------------------------------
@@ -50,7 +39,7 @@ std::string getNvtxStr(
       for (const auto idx : c10::irange(shapes.size())) {
         if (shapes[idx].size() > 0) {
           s << "[";
-          for (size_t dim = 0; dim < shapes[idx].size(); ++dim) {
+          for (const auto dim : c10::irange(shapes[idx].size())) {
             s << shapes[idx][dim];
             if (dim < shapes[idx].size() - 1) {
               s << ", ";
@@ -152,7 +141,7 @@ std::string shapesToStr(const std::vector<std::vector<int64_t>>& shapes) {
       oss << ", ";
     }
     oss << "[";
-    for (size_t s_idx = 0; s_idx < shapes[t_idx].size(); ++s_idx) {
+    for (const auto s_idx : c10::irange(shapes[t_idx].size())) {
       if (s_idx > 0) {
         oss << ", ";
       }
@@ -384,8 +373,8 @@ uint64_t computeFlops(
       return 0;
     }
 
-    const std::vector<int64_t> input_sizes = input_sizes_ref.toIntVector();
-    const std::vector<int64_t> kernel_sizes = kernel_sizes_ref.toIntVector();
+    const auto input_sizes = input_sizes_ref.toDimVector();
+    const auto kernel_sizes = kernel_sizes_ref.toDimVector();
     const uint64_t groups = groups_ref.toInt();
     const std::vector<int64_t> padding = padding_ref.toIntVector();
     const std::vector<int64_t> stride = stride_ref.toIntVector();
@@ -448,8 +437,8 @@ uint64_t computeFlops(
       return 0;
     }
 
-    std::vector<int64_t> mat1_size = mat1_sizes_ref.toIntVector();
-    std::vector<int64_t> mat2_size = mat2_sizes_ref.toIntVector();
+    const auto mat1_size = mat1_sizes_ref.toDimVector();
+    const auto mat2_size = mat2_sizes_ref.toDimVector();
     if (mat1_size.size() == 0) {
       return 0;
     }
@@ -489,8 +478,8 @@ uint64_t computeFlops(
       return 0;
     }
 
-    std::vector<int64_t> mat1_size = mat1_sizes_ref.toIntVector();
-    std::vector<int64_t> mat2_size = mat2_sizes_ref.toIntVector();
+    const auto mat1_size = mat1_sizes_ref.toDimVector();
+    const auto mat2_size = mat2_sizes_ref.toDimVector();
     if (mat1_size.size() == 0) {
       return 0;
     }
@@ -530,7 +519,7 @@ uint64_t computeFlops(
       return 0;
     }
 
-    std::vector<int64_t> mat_size = mat_sizes.toIntVector();
+    const auto mat_size = mat_sizes.toDimVector();
     uint64_t flops = 1;
     for (int64_t dim : mat_size) {
       flops *= dim;
@@ -549,7 +538,7 @@ uint64_t computeFlops(
       return 0;
     }
 
-    std::vector<int64_t> mat_size = mat_sizes.toIntVector();
+    const auto mat_size = mat_sizes.toDimVector();
     uint64_t flops = 1;
     for (int64_t dim : mat_size) {
       flops *= dim;

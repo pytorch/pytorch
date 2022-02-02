@@ -435,6 +435,30 @@ class TestQuantizedOps(TestCase):
         self.assertEqual(qY, qY_hat,
                          msg="F.celu failed ({} vs {})".format(qY, qY_hat))
 
+    """Tests the correctness of the quantized::gelu op."""
+    def test_qgelu(self):
+        shapes = ((4,), (4, 4), (4, 4, 4), (4, 4, 4, 4))
+        dtypes = (torch.quint8, torch.qint8)
+        memory_formats = (torch.channels_last, torch.contiguous_format)
+        test_cases = itertools.product(shapes, dtypes, memory_formats)
+        for shape, dtype, memory_format in test_cases:
+            if memory_format == torch.channels_last and len(shape) != 4:
+                continue
+            X, scale, zero_point, torch_type = \
+                torch.randn(*shape), 0.1, 0, dtype
+            X = X.to(memory_format=memory_format)
+
+            qX = torch.quantize_per_tensor(X, scale=scale, zero_point=zero_point,
+                                           dtype=torch_type)
+            dqX = qX.dequantize()
+
+            op = torch.nn.functional.gelu
+            dqY = op(dqX)
+            qY = torch.quantize_per_tensor(dqY, scale=scale, zero_point=zero_point,
+                                           dtype=torch_type)
+            qY_hat = op(qX)
+            self.assertEqual(qY.dequantize(), qY_hat.dequantize(),
+                             msg="F.gelu failed ({} vs {})".format(qY, qY_hat))
 
     """Tests the correctness of the quantized::qlayer_norm op."""
     @skipIfNoFBGEMM
@@ -3328,7 +3352,6 @@ class TestQuantizedLinear(TestCase):
                 W_q.q_zero_point(), W_q_origin.q_zero_point())
 
 @unittest.skipIf(IS_MACOS, "Known test failure on Mac.")
-@unittest.skipIf(not BUILD_WITH_CAFFE2, "Test needs Caffe2")
 class TestQuantizedEmbeddingOps(TestCase):
     def _test_embedding_bag_unpack_fn(self, pack_fn, unpack_fn, num_embeddings, embedding_dim, bit_rate, optimized_qparams,
                                       num_batches, data_type=np.float32):
@@ -3415,6 +3438,7 @@ class TestQuantizedEmbeddingOps(TestCase):
         np.testing.assert_allclose(w_unpacked.numpy(), w_unpacked_c2.numpy(), atol=1e-6, rtol=1e-6)
 
     """ Tests the correctness of the embedding_bag_8bit pack/unpack op against C2 """
+    @unittest.skipIf(not BUILD_WITH_CAFFE2, "Test needs Caffe2")
     @given(num_embeddings=st.integers(10, 100),
            embedding_dim=st.integers(5, 50).filter(lambda x: x % 4 == 0),
            num_batches=st.integers(1, 5),
@@ -3427,6 +3451,7 @@ class TestQuantizedEmbeddingOps(TestCase):
             pack_fn, unpack_fn, num_embeddings, embedding_dim, 8, False, num_batches, data_type=data_type)
 
     """ Tests the correctness of the embedding_bag_4bit pack/unpack op against C2 """
+    @unittest.skipIf(not BUILD_WITH_CAFFE2, "Test needs Caffe2")
     @given(num_embeddings=st.integers(10, 100),
            embedding_dim=st.integers(5, 50).filter(lambda x: x % 4 == 0),
            optimized_qparams=st.booleans(),
@@ -3439,6 +3464,7 @@ class TestQuantizedEmbeddingOps(TestCase):
             pack_fn, unpack_fn, num_embeddings, embedding_dim, 4, optimized_qparams, 1, data_type=data_type)
 
     """ Tests the correctness of the embedding_bag_2bit pack/unpack op against C2 """
+    @unittest.skipIf(not BUILD_WITH_CAFFE2, "Test needs Caffe2")
     @given(num_embeddings=st.integers(10, 100),
            embedding_dim=st.integers(5, 50).filter(lambda x: x % 8 == 0),
            optimized_qparams=st.booleans(),
@@ -3660,8 +3686,11 @@ class TestQuantizedEmbeddingOps(TestCase):
            embedding_dim=st.integers(5, 50).filter(lambda x: x % 4 == 0))
     def test_embedding(self, num_embeddings, embedding_dim):
         dtypes = [torch.quint8, torch.quint4x2]
-        quant_ops = [torch.ops.quantized.embedding_byte, torch.ops.quantize.embedding_4bit]
-        for quant_op, dtype in zip(dtypes, quant_ops):
+        quant_ops = [torch.ops.quantized.embedding_byte, torch.ops.quantized.embedding_4bit]
+        atols = [0.005, 0.1]
+        rtols = [1e-3, 1e-2]
+        prepack_op = torch.ops.quantized.embedding_bag_prepack
+        for quant_op, dtype, atol, rtol in zip(quant_ops, dtypes, atols, rtols):
             weights = torch.from_numpy((np.random.random_sample((
                 num_embeddings, embedding_dim)) + 1).astype(np.float32))
 
@@ -3671,7 +3700,7 @@ class TestQuantizedEmbeddingOps(TestCase):
             qparams = obs.calculate_qparams()
 
             # Quantize the weights to 8bits
-            qweight = torch.quantize_per_channel(weights, qparams[0], qparams[1], axis=0, dtype=torch.dtype)
+            qweight = torch.quantize_per_channel(weights, qparams[0], qparams[1], axis=0, dtype=dtype)
             max_segments = 5
             max_segment_length = 20
             num_lengths = np.random.randint(1, max_segments + 1)
@@ -3685,7 +3714,7 @@ class TestQuantizedEmbeddingOps(TestCase):
             qresult = quant_op(packed_weight, indices, pruned_weights=False)
 
             ref = torch.embedding(weights, indices, padding_idx=-1, scale_grad_by_freq=False, sparse=False)
-            torch.testing.assert_close(ref, qresult, atol=0.005, rtol=1e-3)
+            torch.testing.assert_close(ref, qresult, atol=atol, rtol=rtol)
 
     def test_embedding_2d_indices(self):
         """
