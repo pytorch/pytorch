@@ -127,7 +127,7 @@ SparseTensor _coalesce_sparse_cuda(const SparseTensor& self) {
 
   // If there is no values to copy, save running the kernel.
   if (newValues.numel() > 0) {
-    const int SZ = thread_work_size();
+    const int SZ = 4;
     values = values.contiguous();
     int64_t stride = c10::multiply_integers(values.sizes().slice(1));
     dim3 grid(ceil_div(newNnz, (int64_t) SZ), ceil_div(stride, (int64_t) num_threads()));
