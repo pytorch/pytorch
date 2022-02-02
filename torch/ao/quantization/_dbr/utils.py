@@ -131,6 +131,10 @@ class SeenNonQOpInfo:
     output_tensor_infos: List[QTensorInfo]
 
 
+class OpQuantizeabilityType(enum.Enum):
+    QUANTIZEABLE = 0
+    NOT_QUANTIZEABLE = 1
+
 def op_needs_quantization(op: Callable) -> bool:
     if op in functions_supported_by_quantization:
         return True

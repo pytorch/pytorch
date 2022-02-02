@@ -33,6 +33,7 @@ from .utils import (
     clone_detach_tensor_without_dispatch,
     get_input_args_quant_dequant_info,
     get_cur_qconfig,
+    OpQuantizeabilityType,
 )
 
 from .function_fusion import (
@@ -286,7 +287,7 @@ class AutoQuantizationState(torch.nn.Module):
         qtensor_id: List[int],
         fqn: str,
         root_module: torch.nn.Module,
-        is_quantizeable_op: bool,
+        op_quantizeability_type: OpQuantizeabilityType,
     ) -> Tuple[Tuple[Any, ...], Dict[str, Any]]:
         """
         This function is expected to be called on args and kwargs of
@@ -301,7 +302,7 @@ class AutoQuantizationState(torch.nn.Module):
         """
         return self._first_call_op_prepare_before_hook_create_subgraphs(
             op, args, kwargs, qtensor_id, fqn, root_module,
-            is_quantizeable_op)
+            op_quantizeability_type)
 
     def op_prepare_before_hook(
         self,
@@ -340,7 +341,7 @@ class AutoQuantizationState(torch.nn.Module):
         output: Any,
         args: Tuple[Any, ...],
         qtensor_id: List[int],
-        is_quantizeable_op: bool,
+        op_quantizeability_type: OpQuantizeabilityType,
     ) -> Any:
         """
         This function is called after an op call on a prepared model.
@@ -350,7 +351,7 @@ class AutoQuantizationState(torch.nn.Module):
         * amend the current seen op with the tensor ID of the output
         """
         self._first_call_op_prepare_after_hook_adjust_subgraphs(
-            op, output, args, qtensor_id, is_quantizeable_op)
+            op, output, args, qtensor_id, op_quantizeability_type)
         return output
 
     def op_prepare_after_hook(
@@ -735,7 +736,7 @@ class AutoQuantizationState(torch.nn.Module):
         qtensor_id: List[int],
         fqn: str,
         root_module: torch.nn.Module,
-        is_quantizeable_op: bool,
+        op_quantizeability_type: OpQuantizeabilityType,
     ) -> Tuple[Tuple[Any, ...], Dict[str, Any]]:
         """
         Given an op, args, kwargs about to be executed, records the subgraph
@@ -751,7 +752,7 @@ class AutoQuantizationState(torch.nn.Module):
                 self._first_call_op_prepare_before_hook_create_subgraphs_tensor(
                     op, arg, arg_tensor_infos, qtensor_id)
 
-        if not is_quantizeable_op:
+        if op_quantizeability_type is OpQuantizeabilityType.NOT_QUANTIZEABLE:
             op_type_is_module = isinstance(op, torch.nn.Module)
             op_type : Callable = type(op) if op_type_is_module else op  # type: ignore[assignment]
             self.seen_nonq_op_infos.append(SeenNonQOpInfo(
@@ -804,7 +805,7 @@ class AutoQuantizationState(torch.nn.Module):
         output: Any,
         args: Tuple[Any, ...],
         qtensor_id: List[int],
-        is_quantizeable_op: bool,
+        op_quantizeability_type: OpQuantizeabilityType,
     ) -> None:
         """
         After `op` was just executed, modifies the subgraph recorded
@@ -815,7 +816,7 @@ class AutoQuantizationState(torch.nn.Module):
         # TODO(future PR): check if _qtensor_id needs to become an actual
         # attribute of Tensor
         # TODO(future PR): handle non-tensor outputs
-        if is_quantizeable_op:
+        if op_quantizeability_type is OpQuantizeabilityType.QUANTIZEABLE:
 
             seen_q_op_info = self._get_cur_seen_q_op_info()
             func_output_dtype_type = get_func_output_dtype_type(seen_q_op_info)
@@ -856,7 +857,7 @@ class AutoQuantizationState(torch.nn.Module):
                 dtype_to_use = output.dtype
             output._qtensor_info = QTensorInfo(
                 qtensor_id[0], output.dtype, dtype_to_use)  # type: ignore[arg-type]
-            if is_quantizeable_op:
+            if op_quantizeability_type is OpQuantizeabilityType.QUANTIZEABLE:
                 target = self.idx_to_seen_q_op_infos[self.idx].output_tensor_infos
             else:
                 target = self.seen_nonq_op_infos[-1].output_tensor_infos
