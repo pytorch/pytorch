@@ -11,6 +11,7 @@ from torch.quantization import (
     ObserverBase,
     FakeQuantizeBase,
 )
+from typing import Optional
 
 def pack_weights_for_functionals(
     module: torch.nn.Module,
@@ -31,7 +32,9 @@ def pack_weights_for_functionals(
 
             if seen_op_info.type == F.conv2d:
                 # fetch all the info needed for packed params
+                assert seen_op_info.packable_tensor_idx_to_name[1] is not None
                 weight = getattr(module, seen_op_info.packable_tensor_idx_to_name[1])
+                assert seen_op_info.packable_tensor_idx_to_name[2] is not None
                 bias = getattr(module, seen_op_info.packable_tensor_idx_to_name[2])
                 stride = seen_op_info.packable_nontensor_idx_to_arg[3]
                 padding = seen_op_info.packable_nontensor_idx_to_arg[4]
@@ -40,6 +43,7 @@ def pack_weights_for_functionals(
 
                 # quantize the weight
                 # TODO: create weight observers from qconfig.weight
+                assert seen_op_info.input_tensor_infos[1] is not None
                 weight_tensor_id = seen_op_info.input_tensor_infos[1].id
                 weight_obs = qstate.tensor_id_to_observer[str(weight_tensor_id)]
                 assert isinstance(weight_obs, (ObserverBase, FakeQuantizeBase))
@@ -63,12 +67,22 @@ def pack_weights_for_functionals(
 
             elif seen_op_info.type == F.linear:
                 # fetch all the info needed for packed params
-                weight = getattr(module, seen_op_info.packable_tensor_idx_to_name[1])
-                bias_name = seen_op_info.packable_tensor_kwarg_name_to_name['bias']
-                bias = getattr(module, bias_name) if bias_name else None
+                def get_tensor_param_name(idx: int, name: str) -> Optional[str]:
+                    param_name = seen_op_info.packable_tensor_idx_to_name.get(idx, None)
+                    if param_name is not None:
+                        return param_name
+                    return seen_op_info.packable_tensor_kwarg_name_to_name.get(name, None)
+
+                weight_name = get_tensor_param_name(1, 'weight')
+                assert weight_name is not None
+                weight = getattr(module, weight_name)
+
+                bias_name = get_tensor_param_name(2, 'bias')
+                bias = getattr(module, bias_name) if bias_name is not None else None
 
                 # quantize the weight
                 # TODO: create weight observers from qconfig.weight
+                assert seen_op_info.input_tensor_infos[1] is not None
                 weight_tensor_id = seen_op_info.input_tensor_infos[1].id
                 weight_obs = qstate.tensor_id_to_observer[str(weight_tensor_id)]
                 assert isinstance(weight_obs, (ObserverBase, FakeQuantizeBase))

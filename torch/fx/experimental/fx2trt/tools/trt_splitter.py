@@ -39,18 +39,28 @@ def create_trt_operator_support(use_implicit_batch_dim=True) -> ops.OperatorSupp
     )
 
 
+class TRTSplitterSetting(splitter_base._SplitterSettingBase):
+    def __init__(self):
+        super().__init__()
+
+        # Determines what batch mode we'll use for lowering.
+        # During split, we'll split out the operators that
+        # don't support the batch dim.
+        self.use_implicit_batch_dim : bool = True
+
+
 class TRTSplitter(splitter_base._SplitterBase):
     def __init__(
         self,
         module: torch.fx.GraphModule,
         sample_input: Tuple[torch.Tensor],
         operator_support: ops.OperatorSupportBase = None,
-        settings: splitter_base._SplitterSettingBase = None,
+        settings: TRTSplitterSetting = None,
     ):
-        if not operator_support:
-            operator_support = create_trt_operator_support()
         if not settings:
-            settings = splitter_base._SplitterSettingBase()
+            settings = TRTSplitterSetting()
+        if not operator_support:
+            operator_support = create_trt_operator_support(settings.use_implicit_batch_dim)
         super().__init__(module, sample_input, operator_support, settings, non_acc_submodule_name="_run_on_gpu_")
 
     def _lower_model_to_backend(
