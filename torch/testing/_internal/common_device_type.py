@@ -821,7 +821,8 @@ def _has_sufficient_memory(device, size):
             return False
         gc.collect()
         torch.cuda.empty_cache()
-        return torch.cuda.get_device_properties(device).total_memory - torch.cuda.memory_allocated(device) >= size
+        # torch.cuda.mem_get_info, aka cudaMemGetInfo, returns a tuple of (free memory, total memory) of a GPU
+        return torch.cuda.memory.mem_get_info(device)[0] >= size
 
     if device == 'xla':
         raise unittest.SkipTest('TODO: Memory availability checks for XLA?')
