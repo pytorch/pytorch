@@ -423,6 +423,7 @@ std::vector<at::Tensor> LtcCreateTensorList(const at::TensorList& tensors) {
 // }
 
 void InitLtcModuleBindings(py::module m) {
+  py::class_<torch::lazy::Node, std::shared_ptr<torch::lazy::Node>>(m, "IrNode");
   m.def("_prepare_to_exit", []() { PrepareToExit(); });
   m.def("_get_git_revs", []() { return GetRevisions(); });
   m.def("_ltc_nms", [](const at::Tensor& boxes, const at::Tensor& scores,

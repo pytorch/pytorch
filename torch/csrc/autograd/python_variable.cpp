@@ -164,7 +164,7 @@ static PyObject* device_to_py_class_ [static_cast<size_t>(c10::DeviceType::COMPI
 void registerPythonTensorClass(const std::string& device, PyObject* python_tensor_class) {
   c10::Device dev(device);
 
-  TORCH_CHECK(dev.type() == kXLA, "Only the python class for XLA can be overriden");
+  TORCH_CHECK(dev.type() == kXLA || dev.type() == kLazy, "Only the python class for XLA and Lazy can be overriden");
   if (device_to_py_class_[static_cast<size_t>(dev.type())] != nullptr) {
     TORCH_WARN("Overriding a previously registered python class for ", dev.str());
   }
@@ -222,7 +222,7 @@ PyObject * THPVariable_Wrap(at::TensorBase var)
     }
   }
 
-  if (C10_LIKELY(var.device().type() != c10::kXLA)) {
+  if (C10_LIKELY(var.device().type() != c10::kXLA && var.device().type() != c10::kLazy)) {
     return THPVariable_NewWithVar(
       (PyTypeObject*)THPVariableClass, std::move(var), status);
   }
