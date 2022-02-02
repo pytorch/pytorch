@@ -442,9 +442,6 @@ class ParameterList(Module):
         super(ParameterList, self).__init__()
         self._size = 0
         if values is not None:
-            # BC-breaking!
-            # Plain Tensors passed here used to be automatically converted into
-            # Parameters. Do we want to keep that behavior?
             self += values
 
     def _get_abs_string_index(self, idx):
@@ -476,7 +473,14 @@ class ParameterList(Module):
             return getattr(self, str(idx))
 
     def __setitem__(self, idx: int, param: Any) -> None:
+        # Note that all other function that add an entry to the list part of
+        # the ParameterList end up here. So this is the only place where we need
+        # to wrap things into Parameter if needed.
+        # Objects added via setattr() are not in the list part and thus won't
+        # call into this function.
         idx = self._get_abs_string_index(idx)
+        if isinstance(param, torch.Tensor) and not isinstance(param, Parameter):
+            param = Parameter(param)
         return setattr(self, str(idx), param)
 
     def __len__(self) -> int:
@@ -497,8 +501,9 @@ class ParameterList(Module):
         Args:
             value (Any): value to append
         """
-        setattr(self, str(len(self)), value)
+        new_idx = len(self)
         self._size += 1
+        self[new_idx] = value
         return self
 
     def extend(self, values: Iterable[Any]) -> 'ParameterList':
@@ -571,7 +576,7 @@ class ParameterDict(Module):
                 return x
     """
 
-    def __init__(self, parameters: Optional[Mapping[str, Any]] = None) -> None:
+    def __init__(self, parameters: Any = None) -> None:
         super(ParameterDict, self).__init__()
         self._keys: Dict[str, None] = {}
         if parameters is not None:
@@ -593,7 +598,7 @@ class ParameterDict(Module):
     def __setitem__(self, key: str, value: Any) -> None:
         # Note that all other function that add an entry to the dictionary part of
         # the ParameterDict end up here. So this is the only place where we need
-        # to wrap things into Parameter.
+        # to wrap things into Parameter if needed.
         # Objects added via setattr() are not in the dictionary part and thus won't
         # call into this function.
         self._keys[key] = None
