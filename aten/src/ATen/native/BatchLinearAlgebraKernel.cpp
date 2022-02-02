@@ -256,7 +256,7 @@ void apply_linalg_eig(Tensor& values, Tensor& vectors, Tensor& input, Tensor& in
   Tensor work = at::empty({lwork}, input.dtype());
   auto work_data = work.data_ptr<scalar_t>();
 
-  for (const auto i : c10::irange(decltype(batch_size){0}, batch_size)) {
+  for (auto i = decltype(batch_size){0}; i < batch_size; i++) {
     scalar_t* input_working_ptr = &input_data[i * input_matrix_stride];
     scalar_t* values_working_ptr = &values_data[i * values_stride];
     scalar_t* rvectors_working_ptr = compute_eigenvectors ? &rvectors_data[i * input_matrix_stride] : nullptr;

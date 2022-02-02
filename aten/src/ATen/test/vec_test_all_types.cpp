@@ -457,7 +457,7 @@ namespace {
         CACHE_ALIGN VT expected_vals[vec::size()];
         auto vals = 1 << (vec::size());
         for (const auto val : c10::irange(vals)) {
-          for (const auto i : c10::irange(vec::size())) {
+          for (int i = 0; i < vec::size(); ++i) {
             if (val & (1 << i)) {
               test_vals[i] = std::numeric_limits<VT>::quiet_NaN();
               // All bits are set to 1 if true, otherwise 0.
@@ -750,7 +750,8 @@ namespace {
         auto power_sets = 1 << (vec::size());
         for (const auto expected : c10::irange(power_sets)) {
             // generate test_val based on expected
-            for (const auto i : c10::irange(vec::size())) {
+            for (int i = 0; i < vec::size(); ++i)
+            {
                 if (expected & (1 << i)) {
                     test_vals[i] = (VT)0;
                 }
@@ -776,7 +777,7 @@ namespace {
         CACHE_ALIGN IntVT expected_vals1[vec::size()];
         // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
         CACHE_ALIGN IntVT actual_vals1[vec::size()];
-        for (const auto i : c10::irange(vec::size())) {
+        for (int64_t i = 0; i < vec::size(); i++) {
             input1[i] = (VT)i * (VT)2.1 + (VT)0.5;
             expected_vals1[i] = static_cast<IntVT>(input1[i]);
         }
@@ -794,7 +795,7 @@ namespace {
         CACHE_ALIGN VT expected_vals2[vec::size()];
         // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
         CACHE_ALIGN VT actual_vals2[vec::size()];
-        for (const auto i : c10::irange(vec::size())) {
+        for (int64_t i = 0; i < vec::size(); i++) {
             input2[i] = (IntVT)i * (IntVT)2 + (IntVT)1;
             expected_vals2[i] = (VT)input2[i];
         }
@@ -833,7 +834,7 @@ namespace {
     test_blend(VT expected_val[vec::size()], VT a[vec::size()], VT b[vec::size()]) {
         // generate expected_val
         int64_t m = mask;
-        for (const auto i : c10::irange(vec::size())) {
+        for (int64_t i = 0; i < vec::size(); i++) {
             expected_val[i] = (m & 0x01) ? b[i] : a[i];
             m = m >> 1;
         }
@@ -852,7 +853,7 @@ namespace {
     test_blendv(VT expected_val[vec::size()], VT a[vec::size()], VT b[vec::size()], VT mask[vec::size()]) {
         using bit_rep = BitType<VT>;
         // generate expected_val
-        for (const auto i : c10::irange(vec::size())) {
+        for (int64_t i = 0; i < vec::size(); i++) {
             bit_rep hex_mask = 0;
             hex_mask=bit_cast<bit_rep>(mask[i]);
             expected_val[i] = (hex_mask & 0x01) ? b[i] : a[i];
@@ -864,7 +865,7 @@ namespace {
         auto expected = vec::loadu(expected_val);
         auto actual = vec::blendv(vec_a, vec_b, vec_m);
         auto mask_str = std::string("\nblendv mask: ");
-        for (const auto i : c10::irange(vec::size())) {
+        for (int64_t i = 0; i < vec::size(); i++) {
             mask_str += std::to_string(mask[i]) + " ";
         }
         if (AssertVectorized<vec>(std::string(NAME_INFO(test_blendv)) + mask_str, expected, actual).check()) {
@@ -952,7 +953,7 @@ namespace {
     void test_set(VT expected_val[vec::size()], VT a[vec::size()], VT b[vec::size()], int64_t count){
         if (count < 0) return;
         //generate expected_val
-        for (const auto i : c10::irange(vec::size())) {
+        for (int64_t i = 0; i < vec::size(); i++) {
             expected_val[i] = (i < count) ? b[i] : a[i];
         }
         // test with set
@@ -999,7 +1000,7 @@ namespace {
         CACHE_ALIGN VT expected_val[vec::size()];
         VT base, step;
         arange_init(base, step);
-        for (const auto i : c10::irange(vec::size())) {
+        for (int64_t i = 0; i < vec::size(); i++) {
             expected_val[i] = base + VT((UVT)i) * step;
         }
         auto expected = vec::loadu(expected_val);
@@ -1058,7 +1059,7 @@ namespace {
             float inv_scale = 1.0f / static_cast<float>(scale);
             auto zero_point_val = generator_zp.get();
             int index = 0;
-            for (const auto j : c10::irange(vec::float_num_vecs())) {
+            for (int j = 0; j < vec::float_num_vecs(); j++) {
                 //generate vals
                 for (auto& v : unit_float_vec) {
                     v = gen.get();
@@ -1106,7 +1107,7 @@ namespace {
             int index = 0;
             auto qint_vec = vec::loadu(qint_vals);
             auto actual_float_ret = qint_vec.dequantize(vf_scale, vf_zp, vf_scale_zp);
-            for (const auto j : c10::irange(vec::float_num_vecs())) {
+            for (int j = 0; j < vec::float_num_vecs(); j++) {
                 for (auto& v : unit_exp_vals) {
                     v = dequantize_val(scale, zero_point_val, qint_vals[index]);
                     index++;
@@ -1143,7 +1144,7 @@ namespace {
             float multiplier = 1.f / (generator_sc.get());
             auto zero_point_val = generator.get();
             int index = 0;
-            for (const auto j : c10::irange(vec::float_num_vecs())) {
+            for (int j = 0; j < vec::float_num_vecs(); j++) {
                 //generate vals
                 for (auto& v : unit_int_vec) {
                     v = c10::qint32(generator.get());
@@ -1179,7 +1180,7 @@ namespace {
         for (const auto i : c10::irange(trials)) {
             (void)i; // Suppress unused variable warning
             //generate vals
-            for (const auto j : c10::irange(vec::size())) {
+            for (int j = 0; j < vec::size(); j++) {
                 qint_vals[j] = generator.get();
                 qint_b[j] = generator.get();
                 if (std::is_same<underlying, int>::value) {
@@ -1191,7 +1192,7 @@ namespace {
             auto qint_vec = vec::loadu(qint_vals);
             auto qint_vec_b = vec::loadu(qint_b);
             auto actual_int_ret = qint_vec.widening_subtract(qint_vec_b);
-            for (const auto j : c10::irange(vec::float_num_vecs())) {
+            for (int j = 0; j < vec::float_num_vecs(); j++) {
                 for (auto& v : unit_exp_vals) {
                     v = widening_subtract(qint_vals[index], qint_b[index]);
                     index++;
