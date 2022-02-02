@@ -129,6 +129,58 @@ class TestObserver(QuantizationTestCase):
             self.assertEqual(myobs.calculate_qparams(), loaded_obs.calculate_qparams())
 
 
+    @given(qscheme=st.sampled_from((torch.per_tensor_affine, torch.per_tensor_symmetric)))
+    def test_per_tensor_observers_qint32(self, qscheme):
+        qdtype = torch.qint32
+        reduce_range = False
+        ObserverList = [MinMaxObserver(dtype=qdtype, qscheme=qscheme,
+                                       reduce_range=reduce_range),
+                        MovingAverageMinMaxObserver(averaging_constant=0.5,
+                                                    dtype=qdtype,
+                                                    qscheme=qscheme,
+                                                    reduce_range=reduce_range)]
+        for myobs in ObserverList:
+            # Calculate Qparams should return with a warning for observers with no data
+            qparams = myobs.calculate_qparams()
+            if type(myobs) == MinMaxObserver:
+                x = torch.tensor([1.0, 2.0, 2.0, 3.0, 4.0, 5.0, 6.0])
+                y = torch.tensor([4.0, 5.0, 5.0, 6.0, 7.0, 8.0])
+            else:
+                # Moving average of min/max for x and y matches that of
+                # extreme values for x/y used for minmax observer
+                x = torch.tensor([0.0, 2.0, 2.0, 3.0, 4.0, 5.0, 6.0])
+                y = torch.tensor([2.0, 5.0, 5.0, 6.0, 7.0, 10.0])
+
+            result = myobs(x)
+            result = myobs(y)
+            self.assertEqual(result, y)
+            self.assertEqual(myobs.min_val, 1.0)
+            self.assertEqual(myobs.max_val, 8.0)
+            qparams = myobs.calculate_qparams()
+
+            if qscheme == torch.per_tensor_symmetric:
+                ref_scale = 0.000244
+                ref_zero_point = 0 if qdtype is torch.qint32 else 2**15
+            else:
+                ref_scale = 0.000122
+                ref_zero_point = -2**15 if qdtype is torch.qint32 else 0
+            self.assertEqual(qparams[1].item(), ref_zero_point)
+            self.assertEqual(qparams[0].item(), ref_scale, atol=1e-5, rtol=0)
+            state_dict = myobs.state_dict()
+            b = io.BytesIO()
+            torch.save(state_dict, b)
+            b.seek(0)
+            loaded_dict = torch.load(b)
+            for key in state_dict:
+                self.assertEqual(state_dict[key], loaded_dict[key])
+            loaded_obs = MinMaxObserver(dtype=qdtype, qscheme=qscheme,
+                                        reduce_range=reduce_range)
+            loaded_obs.load_state_dict(loaded_dict)
+            loaded_qparams = loaded_obs.calculate_qparams()
+            self.assertEqual(myobs.min_val, loaded_obs.min_val)
+            self.assertEqual(myobs.max_val, loaded_obs.max_val)
+            self.assertEqual(myobs.calculate_qparams(), loaded_obs.calculate_qparams())
+
     @given(qdtype=st.sampled_from((torch.qint8, torch.quint8)),
            qscheme=st.sampled_from((torch.per_channel_affine, torch.per_channel_symmetric, torch.per_channel_affine_float_qparams)),
            ch_axis=st.sampled_from((0, 1, 2, 3)), reduce_range=st.booleans())
