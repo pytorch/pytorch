@@ -123,7 +123,6 @@ void slow_conv2d_forward(
   slow_conv2d_shape_check(
       input, {}, weight, bias, kH, kW, dH, dW, padH, padW, /*weight_nullable*/false);
 
-  constexpr int ndim = 4;
   constexpr int dimf = 1;
   constexpr int dimh = 2;
   constexpr int dimw = 3;
