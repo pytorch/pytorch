@@ -2,10 +2,14 @@
 
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
+#include <torch/csrc/jit/backends/backend.h>
+#include <torch/csrc/jit/backends/backend_detail.h>
+#include <torch/csrc/jit/backends/backend_preprocess.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/constant_propagation.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
+#include <torch/csrc/jit/passes/frozen_graph_optimizations.h>
 #include <torch/csrc/jit/passes/lower_tuples.h>
 #include <torch/csrc/jit/passes/peephole.h>
 #include <torch/csrc/jit/passes/remove_mutation.h>
@@ -16,6 +20,7 @@
 #include <torch/csrc/jit/tensorexpr/ir.h>
 #include <torch/csrc/jit/tensorexpr/ir_simplifier.h>
 #include <torch/csrc/jit/tensorexpr/kernel.h>
+#include <fstream>
 
 using namespace torch::jit;
 using namespace torch::jit::tensorexpr;
@@ -178,30 +183,6 @@ std::pair<std::unique_ptr<Function>, const std::string> aotCompile(
   GRAPH_DEBUG("Method name ", method_name);
   GRAPH_DEBUG("Kernel func name ", kernel_func_name);
 
-  CAFFE_ENFORCE(
-      sizes.size() == types.size(),
-      "Number of input sizes and input types should be the same");
-
-  std::vector<at::IValue> example_values;
-  std::vector<c10::optional<at::Tensor>> example_inputs;
-  for (int i = 0; i < sizes.size(); ++i) {
-    auto example_input = at::rand(sizes[i]).to(at::dtype(types[i]));
-    example_values.emplace_back(example_input);
-    example_inputs.emplace_back(example_input);
-  }
-
-  GRAPH_DUMP("graph before compiler passes ", g);
-  tensorexpr::removeUnusedSelfArgument(g);
-  g = TraceGraph(g, example_values);
-  // TODO: Remove annotateInputShapes pass when TraceGraph can also capture
-  // input shapes
-  tensorexpr::annotateInputShapes(g, example_inputs);
-  RemoveListMutation(g);
-  RemoveTensorMutation(g);
-  EliminateDeadCode(g);
-  LowerAllTuples(g);
-  GRAPH_DUMP("graph after compiler passes ", g);
-
   std::shared_ptr<tensorexpr::TensorExprKernel> kernel =
       std::make_shared<tensorexpr::TensorExprKernel>(
           TensorExprKernel(g, kernel_func_name));
@@ -211,6 +192,174 @@ std::pair<std::unique_ptr<Function>, const std::string> aotCompile(
   auto func = compileMethod(kernel, method_name, sizes, types);
   return std::make_pair(std::move(func), compiled_assembly);
 }
+
+void writeOutputLlvmAssembly(
+    const std::string& asm_code,
+    const std::string& output_llvm_file_name) {
+  std::ofstream output(output_llvm_file_name);
+  output << asm_code;
+  GRAPH_DEBUG(
+      "The compiled llvm assembly code was saved to ", output_llvm_file_name);
+}
+
+std::vector<std::string> split(
+    char separator,
+    const std::string& string,
+    bool ignore_empty = true) {
+  std::vector<std::string> pieces;
+  std::stringstream ss(string);
+  std::string item;
+  while (getline(ss, item, separator)) {
+    if (!ignore_empty || !item.empty()) {
+      pieces.push_back(std::move(item));
+    }
+  }
+  return pieces;
+}
+
+std::vector<std::vector<int64_t>> parseInputShapes(
+    const std::string& input_dims_s) {
+  std::vector<std::string> input_dims_list = split(';', input_dims_s);
+  std::vector<std::vector<int64_t>> inputs;
+  for (const auto& input_dims_item : input_dims_list) {
+    auto input_dims_str = split(',', input_dims_item);
+    std::vector<int64_t> input_dims;
+    input_dims.reserve(input_dims_str.size());
+    for (const auto& s : input_dims_str) {
+      input_dims.push_back(c10::stoi(s));
+    }
+    inputs.push_back(input_dims);
+  }
+  return inputs;
+}
+
+std::vector<at::ScalarType> parseInputTypes(
+    const std::string& input_types_str) {
+  std::vector<std::string> inputTypes = split(';', input_types_str);
+  std::vector<at::ScalarType> scalarTypes;
+  for (const auto& inputType : inputTypes) {
+    at::ScalarType scalarType;
+    if (inputType == "float") {
+      scalarType = at::ScalarType::Float;
+    } else if (inputType == "uint8") {
+      scalarType = at::ScalarType::Byte;
+    } else if (inputType == "int64") {
+      scalarType = at::ScalarType::Long;
+    } else {
+      CAFFE_THROW("Unsupported input type: ", inputType);
+    }
+    scalarTypes.push_back(scalarType);
+  }
+  return scalarTypes;
+}
+
+std::string getNncKernelId(
+    const std::string& model_name,
+    const std::string& model_version,
+    const std::string& method_name) {
+  // TODO: calculate the version_token.
+  const std::string version_token = "VERTOKEN";
+  return model_name + ":" + model_version + ":" + method_name + ":" +
+      version_token;
+}
+
+std::string getNncKernelFuncName(
+    const std::string& model_name,
+    const std::string& model_version,
+    const std::string& method_name) {
+  return "nnc_" + model_name + "_" + model_version + "_" + method_name;
+}
+
+std::shared_ptr<Graph> preprocessGraphPasses(
+    std::shared_ptr<Graph>& graph,
+    const std::vector<c10::optional<at::Tensor>>& example_inputs) {
+  GRAPH_DEBUG("Before preprocessing graph passes: ", *graph);
+  torch::jit::RemoveTensorMutation(graph);
+  torch::jit::EliminateDeadCode(graph->block());
+  graph = torch::jit::tensorexpr::removeUnusedSelfArgument(graph);
+
+  torch::jit::tensorexpr::annotateInputShapes(graph, example_inputs);
+  torch::jit::OptimizeFrozenGraph(graph, true);
+  torch::jit::PropagateShapesOnGraph(graph);
+  torch::jit::PeepholeOptimize(graph, false);
+  torch::jit::ConstantPropagation(graph);
+  torch::jit::PropagateShapesOnGraph(graph);
+  torch::jit::PeepholeOptimize(graph, false);
+  torch::jit::ConstantPropagation(graph);
+
+  tensorexpr::removeUnusedSelfArgument(graph);
+
+  std::vector<at::IValue> example_values;
+  example_values.reserve(example_inputs.size());
+  for (auto example_input : example_inputs) {
+    example_values.emplace_back(*example_input);
+  }
+  graph = TraceGraph(graph, example_values);
+  // TODO: Remove annotateInputShapes pass when TraceGraph can also capture
+  // input shapes
+  tensorexpr::annotateInputShapes(graph, example_inputs);
+
+  RemoveListMutation(graph);
+  RemoveTensorMutation(graph);
+  EliminateDeadCode(graph);
+  LowerAllTuples(graph);
+  GRAPH_DEBUG("After preprocessing graph passes: ", *graph);
+  return graph;
+}
+
+std::vector<c10::optional<at::Tensor>> generateExampleInputs(
+    const std::vector<std::vector<int64_t>>& inputShapes,
+    const std::vector<at::ScalarType>& inputTypes) {
+  std::vector<c10::optional<at::Tensor>> example_inputs;
+  example_inputs.reserve(inputShapes.size());
+  for (int i = 0; i < inputShapes.size(); ++i) {
+    example_inputs.emplace_back(
+        at::rand(inputShapes[i]).to(at::dtype(inputTypes[i])));
+  }
+  return example_inputs;
+}
+
+c10::IValue preprocess(
+    const torch::jit::Module& mod,
+    const c10::Dict<c10::IValue, c10::IValue>& compile_spec,
+    const torch::jit::BackendDebugHandleGenerator& generate_debug_handles) {
+  torch::jit::mobile::nnc::CompilationUnit cu;
+  for (const auto& kv : compile_spec) {
+    GRAPH_DEBUG("Key: ", kv.key());
+    GRAPH_DEBUG("Value: ", kv.value());
+    std::string method_name = *(kv.key().toString());
+    GRAPH_DEBUG("Method name: ", method_name);
+    auto method_spec = kv.value().toGenericDict();
+    std::string model_name = *method_spec.at("model_name").toString();
+    std::string model_version = *method_spec.at("model_version").toString();
+    std::string asmfile_name = *method_spec.at("asmfile").toString();
+    GRAPH_DEBUG("Model name: ", model_name);
+    GRAPH_DEBUG("Model version: ", model_version);
+    GRAPH_DEBUG("Asm file name: ", asmfile_name);
+
+    auto method = mod.get_method(method_name);
+    auto graph = toGraphFunction(method.function()).graph()->copy();
+
+    auto sizes = parseInputShapes(*method_spec.at("sizes").toString());
+    auto types = parseInputTypes(*method_spec.at("types").toString());
+
+    auto example_inputs = generateExampleInputs(sizes, types);
+    graph = preprocessGraphPasses(graph, example_inputs);
+
+    auto kernel_func_name =
+        getNncKernelFuncName(model_name, model_version, method_name);
+    auto compiled = torch::jit::mobile::nnc::aotCompile(
+        method_name, graph, sizes, types, kernel_func_name);
+    writeOutputLlvmAssembly(compiled.second, asmfile_name);
+    auto func = std::move(compiled.first);
+    func->set_nnc_kernel_id(
+        getNncKernelId(model_name, model_version, method_name));
+    cu.register_function(std::move(func));
+  }
+  return cu.serialize();
+}
+
+static auto reg = torch::jit::backend_preprocess_register("nnc", preprocess);
 
 } // namespace nnc
 } // namespace mobile
