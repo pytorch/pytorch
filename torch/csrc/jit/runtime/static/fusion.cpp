@@ -334,7 +334,7 @@ void performTensorExprFusion(
       traced_graph,
       /*min_group_size*/ 2,
       /*add_composed_op*/ true,
-      /*fuse_to_dynamic_shapes*/true);
+      /*fuse_to_dynamic_shapes*/ true);
   graph->block()->clear();
   graph->block()->cloneFrom(traced_graph->block(), nullptr);
   GRAPH_DUMP("Graph after fusion: ", graph);

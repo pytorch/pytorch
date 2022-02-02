@@ -2208,6 +2208,24 @@ class TestTEFuser(JitTestCase):
                 test(*args)
         self.assertIn("fused_mul_add", prof.table())
 
+    def test_skip_grad_in_check(self):
+        @torch.jit.script
+        def foo(x):
+            return (x + 2) / 2
+
+        inp = torch.rand([4, 4])
+        for _ in range(3):
+            foo(inp)
+
+        inp.requires_grad_(True)
+        with torch.inference_mode():
+            for _ in range(3):
+                foo(inp)
+        g = torch.jit.last_executed_optimized_graph()
+        torch._C._jit_pass_inline(g)
+        torch._C._jit_pass_inline(g)
+        FileCheck().check_count("prim::If", 1, exactly=True).run(g)
+
     def test_dynamic_shapes(self):
         from functools import partial
         n = 10
