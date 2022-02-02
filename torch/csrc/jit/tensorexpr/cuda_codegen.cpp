@@ -1160,7 +1160,7 @@ void CudaCodeGen::call_raw(const std::vector<void*>& raw_args) {
   std::vector<void*> extent_args;
   size_t raw_args_size = raw_args.size();
   extent_args.reserve(raw_args_size);
-  for (size_t i = 0 ; i < raw_args_size; ++i) {
+  for (size_t i = 0; i < raw_args_size; ++i) {
     if (arg_pos_in_extents_[i]) {
       extent_args.push_back(raw_args[i]);
     }
@@ -1177,7 +1177,8 @@ void CudaCodeGen::call_raw(const std::vector<void*>& raw_args) {
       gpu_thread_extents_v[i] = immediateAs<int64_t>(gpu_thread_extents[i]);
       continue;
     }
-    gpu_thread_extents_v[i] = thread_extents_eval_[i].value<int64_t>(extent_args);
+    gpu_thread_extents_v[i] =
+        thread_extents_eval_[i].value<int64_t>(extent_args);
   }
 
   // Skip launching the kernel if there are no elements to process.
