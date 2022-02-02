@@ -30,6 +30,9 @@ from .wrap import _recursive_wrap
 
 from .utils import (
     _apply_to_tensors,
+    TrainingState_,
+    post_state_dict_hook,
+    pre_load_state_dict_hook,
 )
 
 if TYPE_CHECKING:
@@ -69,22 +72,6 @@ class BackwardPrefetch_(Enum):
     BACKWARD_POST = auto()
     # TODO, BACKWARD_PRE_CPU, prefetch full parameters and keep them in the CPU memory
 
-class TrainingState_(Enum):
-    """
-    Simple enum to indicate what state FSDP is in. Used for asserting
-    to make sure APIs are called in the correct state.
-    ..note::
-        ``BACKWARD_PRE`` and ``BACKWARD_POST`` states are used to ensure we
-        receives backward hooks in the correct order. It is used to catch
-        unexpected order of hooks being called (likely due to our
-        hook registration logic or autograd engine logic changes).
-    """
-
-    IDLE = auto()
-    FORWARD = auto()
-    BACKWARD_PRE = auto()
-    BACKWARD_POST = auto()
-    SUMMON_FULL_PARAMS = auto()
 
 
 class FullyShardedDataParallel(nn.Module):
@@ -231,10 +218,61 @@ class FullyShardedDataParallel(nn.Module):
         # Used for prefetching all gather full params in post backward hook
         self._need_rebuild_full_params = False
 
+        # Register state_dict() and load_state_dict() hooks. These are
+        # responsible for cloning tensors if need be, as well as replacing
+        # prefixes for appropriate processing.
+        self._register_state_dict_hook(post_state_dict_hook)
+        self._register_load_state_dict_pre_hook(pre_load_state_dict_hook)
+
         # If specified, offload parameter shard to CPU.
         if self.cpu_offload.offload_params:
             for p in self.params:
                 self._offload_to_cpu(p)
+
+
+    def state_dict(self, *args, **kwargs) -> Dict[str, Any]:
+        r"""
+        Returns a dictionary mapping original wrapped model's layers to its
+        parameter tensor. Note that :class:`FullyShardedDataParallel` will
+        perform all-gather communication to rebuild full model parameters on
+        each rank when calling this method. As a result, saving/loading of model
+        will happen on each rank and thus consume additional GPU memory. If the
+        model cannot fit on a single GPU this can also result in a GPU OOM. The
+        implementation works by gathering all model paramters across all
+        ranks to rebuild the full model, and then calling into the original
+        module's `state_dict` implementation.
+        """
+
+        if torch.cuda.is_available():
+            torch.cuda.synchronize()
+
+        self._lazy_init()
+
+        if self.training_state != TrainingState_.SUMMON_FULL_PARAMS:
+            with self._summon_full_params(recurse=False, writeback=False):
+                state_dict = super().state_dict(*args, **kwargs)
+        else:
+            state_dict = super().state_dict(*args, **kwargs)
+
+        # TODO: state_dict offload to CPU
+
+        return state_dict
+
+    def load_state_dict(self, state_dict: Dict[str, Any], *args, **kwargs):
+        r"""
+        Loads the input `state_dict`'s paramter tensors into this
+        :class:`FullyShardedDataParallel` instance's wrapped module. Note that
+        this requires all-gather communication to rebuild full model on each
+        rank. As a result, saving/loading of model will happen on each rank and
+        thus consume additional GPU memory. If the model cannot fit on a single
+        GPU this can also result in a GPU OOM. The implementation works by
+        gathering all model parameters across all devices to rebuild the full
+        model, and then calling into the original module's `load_state_dict`
+        implementation.
+        """
+        # Note that it needs writeback=True to persist
+        with self._summon_full_params():
+            return self.module.load_state_dict(state_dict, *args)
 
     @classmethod
     def _check_wrapped(cls, begin_module, check_fn, err_fn):
@@ -636,7 +674,7 @@ class FullyShardedDataParallel(nn.Module):
     def _write_back_current_shard(self):
         for p in self.params:
             if not p._is_sharded:  # type: ignore[attr-defined]
-                pass
+                continue  # p._full_param_padded is not set.
             chunks = p._full_param_padded.chunk(self.world_size)  # type: ignore[attr-defined]
             assert len(chunks) > self.rank
             chunk = chunks[self.rank]
