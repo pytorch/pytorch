@@ -9741,6 +9741,7 @@ op_db: List[OpInfo] = [
                # Probable fix (open PR): https://github.com/pytorch/pytorch/pull/62570
                # Illegal Memory Access failure: https://github.com/pytorch/pytorch/issues/72203
                DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', 'test_fn_grad', device_type='cuda'),
+               # Illegal Memory Access failure: https://github.com/pytorch/pytorch/issues/72204
                DecorateInfo(unittest.skip("Skipped!"), 'TestMathBits', 'test_neg_view', device_type='cuda'),
                DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_dtypes'),
                DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', 'test_fn_gradgrad'),
