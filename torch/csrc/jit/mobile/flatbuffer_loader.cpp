@@ -481,7 +481,8 @@ InlinedCallStackPtr torch::jit::FlatbufferLoader::parseInlinedCallStack(
     const mobile::serialization::InlinedCallStack* inlinedCallStack) {
   auto instance_name = inlinedCallStack->module_instance_name()->str();
   std::shared_ptr<CompilationUnit> cu = std::make_shared<CompilationUnit>();
-  auto type_ptr = cu->get_class(inlinedCallStack->module_type_name()->str());
+  std::string module_type_name = inlinedCallStack->module_type_name()->str();
+  auto type_ptr = module_type_name.empty() ? nullptr : cu->get_class(module_type_name);
   auto module_instance_info = ModuleInstanceInfo(type_ptr, instance_name);
   InlinedCallStackPtr callee, cs_ptr;
   if (inlinedCallStack->calle()){

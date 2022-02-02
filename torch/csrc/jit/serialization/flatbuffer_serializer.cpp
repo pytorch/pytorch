@@ -288,23 +288,28 @@ flatbuffers::Offset<mobile::serialization::InlinedCallStack>
 FlatbufferSerializer::serializeInlinedCallStack(FlatBufferBuilder& fbb,
 const IValue& inlineCallStack) {
   flatbuffers::Offset<mobile::serialization::InlinedCallStack> inlineCallOffset = 0;
+// TODO(@pavithran) check with kimish if this is right
   if (!inlineCallStack.isNone()) {
     // get inline call stack
     const auto& inner = inlineCallStack.toTupleRef().elements();
-    if (!inner.empty() && !inner[0].isNone()) {
+    std::string module_type_name, instance_name;
+    if (!inner[0].isNone()) {
       const auto& names = inner[0].toTupleRef().elements();
-        inlineCallOffset = mobile::serialization::CreateInlinedCallStack(
-            fbb,
-            fbb.CreateSharedString(names[0].toStringRef()),
-            fbb.CreateSharedString(names[1].toStringRef()),
-            inner[1].toInt(),
-            inner[2].isNone()
-                ? mobile::serialization::InlinedCallStackUnion::NONE
-                : mobile::serialization::InlinedCallStackUnion::
-                      InlinedCallStack,
-            serializeInlinedCallStack(fbb, inner[2]).Union(),
-            fbb.CreateSharedString(inner[3].toStringRef()));
-      }
+      module_type_name =  names[0].toStringRef();
+      instance_name =  names[1].toStringRef();
+    }
+
+    inlineCallOffset = mobile::serialization::CreateInlinedCallStack(
+        fbb,
+        fbb.CreateSharedString(module_type_name),
+        fbb.CreateSharedString(instance_name),
+        inner[1].toInt(),
+        inner[2].isNone()
+        ? mobile::serialization::InlinedCallStackUnion::NONE
+        : mobile::serialization::InlinedCallStackUnion::
+        InlinedCallStack,
+        serializeInlinedCallStack(fbb, inner[2]).Union(),
+        fbb.CreateSharedString(inner[3].toStringRef()));
   }
   return inlineCallOffset;
 }
