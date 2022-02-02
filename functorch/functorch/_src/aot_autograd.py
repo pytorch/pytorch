@@ -378,7 +378,10 @@ def create_compiled_function(flat_fn, fw_compiler, bw_compiler, partition_fn, de
         def forward(ctx, *flat_args):
             nonlocal compiled_fw, compiled_bw, num_outs
             if compiled_fw is None:
-                out = flat_fn(*flat_args)
+                with torch.enable_grad():
+                    out = flat_fn(*flat_args)
+                out = pytree.tree_map(lambda x: x.detach() if isinstance(x, Tensor) else x, out)
+
                 if isinstance(out, (list, tuple)):
                     num_outs = len(out)
                 else:
@@ -634,11 +637,8 @@ def compiled_module(mod, *args, **kwargs):
 
         def forward(self, *args, **kwargs):
             return compiled_f(
-                dict(self.orig_module.named_parameters()),
-                dict(self.orig_module.named_buffers()),
-                # to replace once appropriate PR lands in PyTorch core
-                # dict(self.orig_module.named_parameters(remove_duplicate=False)),
-                # dict(self.orig_module.named_buffers(remove_duplicate=False)),
+                dict(self.orig_module.named_parameters(remove_duplicate=False)),
+                dict(self.orig_module.named_buffers(remove_duplicate=False)),
                 *args,
                 **kwargs
             )
