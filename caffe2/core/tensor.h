@@ -8,6 +8,11 @@
 #include <c10/core/TensorOptions.h>
 #include <c10/util/intrusive_ptr.h>
 
+C10_CLANG_DIAGNOSTIC_PUSH()
+#if C10_CLANG_HAS_WARNING("-Wshorten-64-to-32")
+C10_CLANG_DIAGNOSTIC_IGNORE("-Wshorten-64-to-32")
+#endif
+
 #if defined(EXPOSE_C2_OPS) || \
     !defined(CAFFE2_IS_XPLAT_BUILD) && !defined(C10_MOBILE)
 namespace at {
@@ -639,4 +644,7 @@ void TensorPrinter::Print(const Tensor& tensor) {
 }
 
 } // namespace caffe2
+
+C10_CLANG_DIAGNOSTIC_POP()
+
 #endif // CAFFE2_CORE_TENSOR_H_

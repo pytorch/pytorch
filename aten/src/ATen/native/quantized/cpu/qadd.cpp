@@ -124,6 +124,13 @@ Tensor _add_scalar_out(Tensor& out, const Tensor& self, const Scalar& other) {
 template <bool ReLUFused = false>
 Tensor qnnpack_add(Tensor qa, Tensor qb, double scale, int64_t zero_point) {
   TORCH_CHECK(qa.ndimension() > 0, "qnnpack_add(): Got empty input tensor.");
+  TORCH_CHECK(qa.scalar_type() == c10::kQUInt8 && qb.scalar_type() == c10::kQUInt8,
+                "qnnpack_add(): Expected both input data types to be ",
+                toString(c10::kQUInt8),
+                " but got ",
+                toString(qa.scalar_type()),
+                " and ",
+                toString(qb.scalar_type()));
   Tensor qa_contig = qa.contiguous(qa.suggest_memory_format());
   // Reason for use qa's memory format for qb is that for the underlying
   // kernel can flatten all the dims and iterate over both the tensors.
@@ -158,12 +165,12 @@ Tensor qnnpack_add(Tensor qa, Tensor qb, double scale, int64_t zero_point) {
   size_t num_elems = qa_contig.numel() / qa_contig.size(0);
   auto output_min = ReLUFused
       // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
-      ? activationLimits(scale, zero_point, Activation::RELU)
+      ? activationLimits<uint8_t>(scale, zero_point, Activation::RELU)
             .first
       : std::numeric_limits<uint8_t>::min();
   auto output_max = ReLUFused
       // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
-      ? activationLimits(scale, zero_point, Activation::RELU)
+      ? activationLimits<uint8_t>(scale, zero_point, Activation::RELU)
             .second
       : std::numeric_limits<uint8_t>::max();
   const pytorch_qnnp_status createStatus = pytorch_qnnp_create_add_nc_q8(
@@ -217,6 +224,7 @@ Tensor qadd(Tensor qa, Tensor qb, double scale, int64_t zero_point) {
   check_inputs(qa, qb);
 #ifdef USE_PYTORCH_QNNPACK
   if (at::globalContext().qEngine() == at::QEngine::QNNPACK &&
+      qa.sizes() == qb.sizes() && /* qnnpack does not support boradcasting */
       qa.scalar_type() == kQUInt8 && qb.scalar_type() == kQUInt8) {
     return qnnpack_add<ReLUFused>(qa, qb, scale, zero_point);
   }

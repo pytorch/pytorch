@@ -48,6 +48,6 @@ def named_params_with_sharded_tensor(
                 name = mod_prefix + ('.' if mod_prefix else '') + name
                 yield name, val
 
-        # find all nn.Parameters
-        for name, val in mod.named_parameters():
-            yield name, val
+    # find all nn.Parameters
+    for name, val in module.named_parameters():
+        yield name, val
