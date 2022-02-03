@@ -9,8 +9,8 @@ from unittest import mock
 import torch
 import torch.distributed as dist
 import torch.nn as nn
-from torch.distributed._fsdp import FullyShardedDataParallel, CPUOffload
-from torch.distributed._fsdp.fully_sharded_data_parallel import (
+from torch.distributed.fsdp import FullyShardedDataParallel, CPUOffload
+from torch.distributed.fsdp.fully_sharded_data_parallel import (
     TrainingState_,
 )
 from torch.testing._internal.common_distributed import (
