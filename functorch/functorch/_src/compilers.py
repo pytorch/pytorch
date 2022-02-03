@@ -1,8 +1,9 @@
 import torch
 from functools import partial
 from typing import Iterable
-from .aot_autograd import draw_graph, aot_function, partition_with_recompute_fwd_in_bwd, aot_module
+from .aot_autograd import aot_function, aot_module
 from .decompositions import decomposition_table
+from .partitioners import draw_graph, partition_with_recompute_fwd_in_bwd
 import time
 
 
