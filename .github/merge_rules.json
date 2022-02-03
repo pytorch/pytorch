@@ -1,7 +1,28 @@
 [
    {
     "name": "ONNX exporter",
-    "patterns": ["torch/onnx/**", "torch/csrc/jit/passes/onnx/**", "torch/csrc/jit/passes/onnx.*", "test/onnx/**", "docs/source/onnx.rst"],
+    "patterns": [
+       "torch/onnx/**",
+       "torch/csrc/jit/passes/onnx/**",
+       "torch/csrc/jit/passes/onnx.*",
+       "test/onnx/**",
+       "docs/source/onnx.rst",
+
+       "torch/csrc/jit/serialization/export.*",
+
+       "torch/_C/__init__.pyi.in",
+
+       "torch/csrc/jit/python/init.cpp",
+       "torch/csrc/jit/python/script_init.cpp",
+
+       "aten/src/ATen/core/interned_strings.h",
+
+       "torch/CMakeLists.txt",
+       "tools/build_variables.bzl",
+
+       ".jenkins/caffe2/test.sh",
+       "scripts/onnx/**"
+      ],
     "approved_by": ["BowenBao", "garymm"],
     "mandatory_app_id": 12274
    },
