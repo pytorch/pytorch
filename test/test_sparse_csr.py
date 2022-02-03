@@ -1367,6 +1367,21 @@ class TestSparseCSR(TestCase):
             run_test(shape, max(shape), index_dtype, dim0, dim1)
             run_test(shape, shape[0] * shape[1], index_dtype, dim0, dim1)
 
+    # TODO: This is a stopgap for a rigorous extension of our autograd tests
+    # to test the functionality of detach
+    @skipMeta
+    @dtypes(*get_all_dtypes())
+    def test_exercise_detach(self, device, dtype):
+        shape = (3, 3)
+        nnz = 4
+        for index_dtype in [torch.int32, torch.int64]:
+            inp = self.genSparseCSRTensor(shape, nnz, dtype=dtype, device=device, index_dtype=index_dtype)
+            detached_inp = inp.detach()
+            self.assertEqual(inp.values(), detached_inp.values())
+            self.assertEqual(inp.crow_indices(), detached_inp.crow_indices())
+            self.assertEqual(inp.col_indices(), detached_inp.col_indices())
+
+
 
 # e.g., TestSparseCSRCPU and TestSparseCSRCUDA
 instantiate_device_type_tests(TestSparseCSR, globals())
