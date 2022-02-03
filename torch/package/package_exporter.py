@@ -982,9 +982,6 @@ class PackageExporter:
                 ...
         """
         self._execute_dependency_graph()
-
-        for _, fn in self.closing_functions.items():
-            fn(self)
         self._finalize_zip()
 
     def _finalize_zip(self):

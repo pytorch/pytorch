@@ -76,7 +76,7 @@ class PackageImporter(Importer):
         elif isinstance(file_or_buffer, (Path, str)):
             self.filename = str(file_or_buffer)
             if not os.path.isdir(self.filename):
-                self.zip_reader = TorchScriptPackageZipFileReader(self.filename)
+                self.zip_reader = zip_file_reader_type(self.filename)
             else:
                 self.zip_reader = TorchScriptDirectoryReader(self.filename)
         else:
