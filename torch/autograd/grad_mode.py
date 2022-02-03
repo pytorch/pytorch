@@ -106,9 +106,7 @@ class no_grad(_DecoratorContextManager):
 
     .. note::
         Currently this API does not apply to :ref:`forward-mode AD <forward-mode-ad>`
-        (possibly subject to change). As a workaround you can unpack your dual tensors.
-        If you have a use-case that could use this API, we'd like to hear your
-        `thoughts <https://github.com/pytorch/pytorch/issues/new>`_.
+        (subject to change). As a workaround you can unpack your dual tensors.
 
     Example::
 
@@ -155,8 +153,7 @@ class enable_grad(_DecoratorContextManager):
 
     .. note::
         Currently this API does not apply to :ref:`forward-mode AD <forward-mode-ad>`
-        (possibly subject to change). If you have a use-case that could use this API,
-        we'd like to hear your `thoughts <https://github.com/pytorch/pytorch/issues/new>`_.
+        (subject to change).
 
     Example::
 
@@ -206,8 +203,7 @@ class set_grad_enabled(_DecoratorContextManager):
 
     .. note::
         Currently this API does not apply to :ref:`forward-mode AD <forward-mode-ad>`
-        (possibly subject to change). If you have a use-case that could use this API,
-        we'd like to hear your `thoughts <https://github.com/pytorch/pytorch/issues/new>`_.
+        (subject to change).
 
     Example::
 
