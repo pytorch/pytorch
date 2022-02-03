@@ -204,10 +204,32 @@ void recursive_store(char* data, IntArrayRef sizes, IntArrayRef strides, int64_t
   for(const auto i : c10::irange(n)) {
 #ifdef USE_NUMPY
     if (is_numpy_available() && PyArray_Check(items[i])) {
-      TORCH_WARN_ONCE(
-        "Creating a tensor from a list of numpy.ndarrays is extremely slow. "
-        "Please consider converting the list to a single numpy.ndarray with "
-        "numpy.array() before converting to a tensor.");
+      auto np_arr = (PyArrayObject*)items[i];
+      auto np_type = numpy_dtype_to_aten(PyArray_TYPE(np_arr));
+      auto np_arr_is_contiguous = PyArray_IS_C_CONTIGUOUS(np_arr);
+      if (np_arr_is_contiguous) {
+        // take fast-path for contiguous.
+        TORCH_CHECK(at::can_cast(np_type, scalarType), "Can't cast from ", np_type, " to ", scalarType);
+        AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(ScalarType::Half, ScalarType::Bool, ScalarType::BFloat16, scalarType, "tensor_new", [&] {
+          using dest_t = scalar_t;
+          AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(ScalarType::Half, ScalarType::Bool, ScalarType::BFloat16, np_type, "tensor_new", [&] {
+              auto np_data_ptr = static_cast<scalar_t*>(PyArray_DATA(np_arr));
+              auto np_arr_numel = PyArray_SIZE(np_arr);
+              for (const auto i : c10::irange(np_arr_numel)) {
+                scalar_t np_val = *np_data_ptr;
+                *(dest_t*)data = c10::static_cast_with_inter_type<dest_t, scalar_t>::apply(np_val);
+                data += elementSize;
+                np_data_ptr += 1;
+              }
+          });
+        });
+        continue;
+      } else {
+        TORCH_WARN_ONCE(
+            "Creating a tensor from a list of non-contiguous numpy.ndarrays is extremely slow. "
+            "Please consider converting the list to a single numpy.ndarray with "
+            "numpy.array() or making them contiguous before converting to a tensor.");
+      }
     }
 #endif
     recursive_store(data, sizes, strides, dim + 1, scalarType, elementSize, items[i]);
