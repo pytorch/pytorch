@@ -1048,15 +1048,14 @@ Tensor & index_select_out_cpu_(const Tensor & self, int64_t dim, const Tensor & 
 }
 
 Tensor index_select_cpu_(const Tensor & self, int64_t dim, const Tensor & index) {
-  Tensor result;
-  if (self.is_quantized()) {
-    TORCH_CHECK(
-        self.qscheme() == kPerTensorAffine,
-        "Only per_tensor quantized quantized tensors are supported by index_select.")
-    result = at::empty_quantized({0}, self);
-  } else {
-    result = at::empty({0}, self.options());
-  }
+  Tensor result = at::empty({0}, self.options());
+  return at::native::index_select_out_cpu_(self, dim, index, result);
+}
+
+Tensor index_select_quantized_cpu_(const Tensor & self, int64_t dim, const Tensor & index) {
+  TORCH_CHECK(self.qscheme() == kPerTensorAffine,
+              "Only per_tensor quantized quantized tensors are supported by index_select.")
+  Tensor result = at::empty_quantized({0}, self);
   return at::native::index_select_out_cpu_(self, dim, index, result);
 }
 

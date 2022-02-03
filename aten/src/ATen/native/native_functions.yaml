@@ -6853,7 +6853,8 @@
 - func: index_select(Tensor self, int dim, Tensor index) -> Tensor
   variants: method, function
   dispatch:
-    CPU, QuantizedCPU: index_select_cpu_
+    CPU: index_select_cpu_
+    QuantizedCPU: index_select_quantized_cpu_
     CUDA, QuantizedCUDA: index_select_cuda
     SparseCPU: index_select_sparse
     SparseCUDA: index_select_sparse
