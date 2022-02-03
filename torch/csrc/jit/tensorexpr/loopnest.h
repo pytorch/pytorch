@@ -558,6 +558,10 @@ class TORCH_API LoopNest {
   }
   std::vector<BufPtr> getIntermediateBufs() const;
 
+  // Finds which is the outer For between a and b for loops. If neither of the 2
+  // Fors is an ancestor of the other, it returns nullptr.
+  static ForPtr findOuterFor(ForPtr a, ForPtr b);
+
  private:
   void initialize(
       const std::vector<Tensor>& output_tensors,

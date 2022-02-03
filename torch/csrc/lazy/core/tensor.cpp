@@ -488,8 +488,12 @@ LazyTensor GetOrCreateLtcTensor(const c10::optional<at::Tensor>& tensor,
 }
 
 LazyTensor GetLtcTensorOrCreateForWrappedNumber(const at::Tensor& tensor, const BackendDevice& device) {
-  return tensor.unsafeGetTensorImpl()->is_wrapped_number() ?
-      GetOrCreateLtcTensor(tensor, device) : GetLtcTensor(tensor);
+  // TODO: There are places in core where a scalar is wrapped but not marked as
+  // wrapped.
+  return (tensor.unsafeGetTensorImpl()->is_wrapped_number() ||
+          (tensor.dim() == 0 && tensor.numel() == 1))
+             ? GetOrCreateLtcTensor(tensor, device)
+             : GetLtcTensor(tensor);
 }
 
 at::Tensor CreateAtenFromLtcTensor(const LazyTensor& ltc_tensor) {

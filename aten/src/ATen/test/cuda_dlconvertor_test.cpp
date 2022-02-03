@@ -47,7 +47,7 @@ TEST(TestDlconvertor, TestDlconvertorCUDAHIP) {
 #if AT_ROCM_ENABLED()
   ASSERT_TRUE(dlMTensor->dl_tensor.device.device_type == DLDeviceType::kDLROCM);
 #else
-  ASSERT_TRUE(dlMTensor->dl_tensor.device.device_type == DLDeviceType::kDLGPU);
+  ASSERT_TRUE(dlMTensor->dl_tensor.device.device_type == DLDeviceType::kDLCUDA);
 #endif
 
   Tensor b = fromDLPack(dlMTensor);
