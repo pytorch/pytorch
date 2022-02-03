@@ -11,9 +11,9 @@ from torch.fx import (
 from torch.fx.graph import (
     Graph,
 )
+from torch.nn.intrinsic import _FusedModule
 
 from ..utils import _parent_name
-from ..fuser_method_mappings import DEFAULT_OP_LIST_TO_FUSER_METHOD
 from ..qconfig_dict_utils import (
     get_object_type_qconfig,
     maybe_adjust_qconfig_for_module_type_or_name,
@@ -56,23 +56,29 @@ def update_qconfig_for_fusion(
 
     for node in model.graph.nodes:
         if node.op == 'call_module' and node.target in modules:
-            module_type = type(modules[str(node.target)])
-            if module_type not in list(DEFAULT_OP_LIST_TO_FUSER_METHOD.values()):
+            maybe_fused_module = modules[str(node.target)]
+            if not isinstance(maybe_fused_module, _FusedModule):
                 continue
 
-            for ops, fuser in DEFAULT_OP_LIST_TO_FUSER_METHOD.items():
-                if module_type == fuser:
-                    fused_qconfig = object_type_dict.get(ops[0], None)
+            ops = list(maybe_fused_module._modules.values())
+            fused_qconfig = object_type_dict.get(type(ops[0]), None)
 
-                    # Raise an error if the modules in the fused module have
-                    # different qconfigs specified in the qconfig_dict
-                    for op in ops:
-                        if not qconfig_equals(object_type_dict.get(op, None), fused_qconfig):
-                            raise LookupError("During fusion, we need to specify the same " +
-                                              f"qconfigs for both modules in {module_type}.")
+            # Raise an error if the modules in the fused module have
+            # different qconfigs specified in the qconfig_dict
+            # TODO: currently it only works for modules,
+            # need to make this work for torch.nn.functional.relu
+            # TODO: currently it only works for object_type configurations,
+            # ideally it should work for different types of configurations,
+            # maybe we want to redesign this part
+            for op in ops[1:]:
+                if not qconfig_equals(object_type_dict.get(type(op), None), fused_qconfig):
+                    raise LookupError(
+                        "During fusion, we need to specify the same " +
+                        f"qconfigs for all module types in {type(maybe_fused_module)} " +
+                        f"offending type: {type(op)}")
 
-                    if fused_qconfig is not None:
-                        object_type_dict[module_type] = fused_qconfig
+            if fused_qconfig is not None:
+                object_type_dict[type(maybe_fused_module)] = fused_qconfig
 
     return qconfig_dict
 
