@@ -40,6 +40,39 @@ class DropoutResBias:
         return args
 
 
+class DropoutResBiasScalar:
+    @staticmethod
+    def fn(input, bias, residual, p: float):
+        a = torch.add(input, bias)
+        b = torch.nn.functional.dropout(a, p, training=True)
+        c = b + residual
+        return c
+
+    @staticmethod
+    def args():
+        batch_size, seq_len, hidden_size = 32, 196, 1024
+        input = torch.randn(
+            batch_size,
+            seq_len,
+            hidden_size,
+            requires_grad=True,
+            device=device,
+            dtype=dtype,
+        )
+        bias = torch.randn(hidden_size, requires_grad=True, device=device, dtype=dtype)
+        residual = torch.randn(
+            batch_size,
+            seq_len,
+            hidden_size,
+            requires_grad=False,
+            device=device,
+            dtype=dtype,
+        )
+        args = (input, bias, residual, 0.7)
+        return args
+
+
+
 # LightSeq pattern 2
 class BiasReluDropout:
     @staticmethod
@@ -125,7 +158,7 @@ class LayerNormSigmoid:
         return args
 
 
-for cl in [DropoutResBias, BiasReluDropout, BiasDropoutResLayerNorm, LayerNormSigmoid]:
+for cl in [DropoutResBias, BiasReluDropout, DropoutResBiasScalar, BiasDropoutResLayerNorm, LayerNormSigmoid]:
     # Clear the compile cache
     clear_compile_cache()
 
@@ -134,8 +167,14 @@ for cl in [DropoutResBias, BiasReluDropout, BiasDropoutResLayerNorm, LayerNormSi
     fn = obj.fn
     args = obj.args()
 
+    # Find the static args
+    static_argnums = []
+    for idx, arg in enumerate(args):
+        if not isinstance(arg, torch.Tensor):
+            static_argnums.append(idx)
+
     # Get the optimized function
-    opt_fn = memory_efficient_fusion(fn)
+    opt_fn = memory_efficient_fusion(fn, static_argnums)
 
     # Profile cuda kernels
     benchmark_helper.profile_cuda_kernels(fn, args, "Eager")
