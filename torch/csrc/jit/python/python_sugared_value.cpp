@@ -1104,6 +1104,13 @@ std::shared_ptr<SugaredValue> toSugaredValue(
     }
   }
 
+  auto opoverloadpacket_type =
+      py::module::import("torch").attr("_ops").attr("OpOverloadPacket");
+  py::bool_ is_overloadpacket = py::isinstance(obj, opoverloadpacket_type);
+  if (is_overloadpacket) {
+    obj = py::getattr(obj, "op");
+  }
+
   bool isRpcAvailable = py::cast<bool>(
       py::module::import("torch.distributed.rpc").attr("is_available")());
 
