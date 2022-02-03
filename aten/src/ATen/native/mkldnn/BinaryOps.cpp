@@ -40,7 +40,7 @@ Tensor& mkldnn_mul_(Tensor& self, const Tensor& other) {
 } // namespace native
 } // namespace at
 
-#else // AT_MKLDNN_EBABLED
+#else // AT_MKLDNN_ENABLED
 
 #include <ATen/native/mkldnn/MKLDNNCommon.h>
 
@@ -150,4 +150,4 @@ Tensor& mkldnn_mul_(Tensor& self, const Tensor& other) {
 } // namespace native
 } // namespace at
 
-#endif // AT_MKLDNN_EBABLED
+#endif // AT_MKLDNN_ENABLED
