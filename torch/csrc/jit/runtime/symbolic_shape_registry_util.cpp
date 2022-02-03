@@ -87,7 +87,7 @@ const OperatorMap<std::string>& get_tensorexpr_elementwise_set() {
       {"aten::where.Scalar(Tensor condition, Scalar self, Scalar other) -> Tensor", "unary"},
       {"aten::add.Tensor(Tensor self, Tensor other, *, Scalar alpha=1) -> Tensor", "broadcast"},
       {"aten::where.ScalarOther(Tensor condition, Tensor self, Scalar other) -> Tensor", "broadcast"},
-      {"aten::type_as(Tensor self, Tensor other) -> Tensor", "broadcast"},
+      {"aten::type_as(Tensor self, Tensor other) -> Tensor", "unary"},
       {"aten::sub.Tensor(Tensor self, Tensor other, *, Scalar alpha=1) -> Tensor", "broadcast"},
       {"aten::mul.Tensor(Tensor self, Tensor other) -> Tensor", "broadcast"},
       {"aten::div.Tensor(Tensor self, Tensor other) -> Tensor", "broadcast"},
