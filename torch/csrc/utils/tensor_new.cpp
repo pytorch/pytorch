@@ -208,7 +208,7 @@ void recursive_store(char* data, IntArrayRef sizes, IntArrayRef strides, int64_t
       auto np_type = numpy_dtype_to_aten(PyArray_TYPE(np_arr));
       auto np_arr_is_contiguous = PyArray_IS_C_CONTIGUOUS(np_arr);
       if (np_arr_is_contiguous) {
-        // take fast-path for contiguous.
+        // take fast-path for contiguous array.
         TORCH_CHECK(at::can_cast(np_type, scalarType), "Can't cast from ", np_type, " to ", scalarType);
         AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(ScalarType::Half, ScalarType::Bool, ScalarType::BFloat16, scalarType, "tensor_new", [&] {
           using dest_t = scalar_t;
