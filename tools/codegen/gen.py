@@ -86,7 +86,7 @@ _GLOBAL_PARSE_NATIVE_YAML_CACHE = {}
 
 # Parse native_functions.yaml into a sequence of NativeFunctions and Backend Indices.
 ParsedYaml = namedtuple('ParsedYaml', ['native_functions', 'backend_indices'])
-def parse_native_yaml(path: str, *, prim_cpp_dry_run: bool = False) -> ParsedYaml:
+def parse_native_yaml(path: str, *, src_path:Optional[str] = None, prim_cpp_dry_run: bool = False) -> ParsedYaml:
     global _GLOBAL_PARSE_NATIVE_YAML_CACHE
     if path not in _GLOBAL_PARSE_NATIVE_YAML_CACHE:
         with open(path, 'r') as f:
