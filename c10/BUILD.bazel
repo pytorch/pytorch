@@ -69,6 +69,5 @@ cc_library(
         ],
         [],
     ),
-    alwayslink = True,
     visibility = ["//:__pkg__"],
 )
