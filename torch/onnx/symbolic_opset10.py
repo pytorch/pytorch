@@ -341,10 +341,10 @@ class Quantized:
     @staticmethod
     def linear(g, q_input, q_weight, bias, op_scale, op_zero_point):
         # From https://pytorch.org/docs/master/generated/torch.nn.quantized.functional.linear.html
-        input, input_scale, input_zero_point = sym_help._dequantize_helper(g, q_input)
+        input, _, _ = sym_help._dequantize_helper(g, q_input)
         # weight (Tensor) – Quantized weight of type torch.qint8
         weight_type_dq = torch.onnx.TensorProtoDataType.INT8
-        weight, weight_scale, weight_zero_point = sym_help._dequantize_helper(g, q_weight, weight_type_dq)
+        weight, _, _ = sym_help._dequantize_helper(g, q_weight, weight_type_dq)
 
         output = linear(g, input, weight, bias)
 
@@ -352,8 +352,8 @@ class Quantized:
 
     @staticmethod
     def add(g, x, y, op_scale, op_zero_point):
-        x, x_s, x_zp = sym_help._dequantize_helper(g, x)
-        y, y_s, y_zp = sym_help._dequantize_helper(g, y)
+        x, _, _ = sym_help._dequantize_helper(g, x)
+        y, _, _ = sym_help._dequantize_helper(g, y)
 
         output = add(g, x, y)
 
@@ -361,8 +361,8 @@ class Quantized:
 
     @staticmethod
     def mul(g, x, y, op_scale, op_zero_point):
-        x, x_s, x_zp = sym_help._dequantize_helper(g, x)
-        y, y_s, y_zp = sym_help._dequantize_helper(g, y)
+        x, _, _ = sym_help._dequantize_helper(g, x)
+        y, _, _ = sym_help._dequantize_helper(g, y)
 
         output = mul(g, x, y)
 
@@ -370,7 +370,7 @@ class Quantized:
 
     @staticmethod
     def hardswish(g, x, op_scale, op_zero_point):
-        x, x_s, x_zp = sym_help._dequantize_helper(g, x)
+        x, _, _ = sym_help._dequantize_helper(g, x)
 
         output = hardswish(g, x)
 
@@ -378,10 +378,10 @@ class Quantized:
 
     @staticmethod
     def conv2d_relu(g, q_input, q_weight, bias, stride, padding, dilation, groups, op_scale, op_zero_point):
-        input, input_scale, input_zero_point = sym_help._dequantize_helper(g, q_input)
+        input, _, _ = sym_help._dequantize_helper(g, q_input)
         # weight (Tensor) – Quantized weight of type torch.qint8
         weight_type_dq = torch.onnx.TensorProtoDataType.INT8
-        weight, weight_scale, weight_zero_point = sym_help._dequantize_helper(g, q_weight, weight_type_dq)
+        weight, _, _ = sym_help._dequantize_helper(g, q_weight, weight_type_dq)
 
         output = conv2d(g, input, weight, bias, stride, padding, dilation, groups)
         output = relu(g, output)
@@ -391,9 +391,9 @@ class Quantized:
     @staticmethod
     def conv2d(g, q_input, q_weight, bias, stride, padding, dilation, groups, op_scale, op_zero_point):
         # From https://pytorch.org/docs/master/generated/torch.nn.quantized.Conv2d.html#torch.nn.quantized.Conv2d
-        input, input_scale, input_zero_point = sym_help._dequantize_helper(g, q_input)
+        input, _, _ = sym_help._dequantize_helper(g, q_input)
         weight_type_dq = torch.onnx.TensorProtoDataType.INT8
-        weight, weight_scale, weight_zero_point = sym_help._dequantize_helper(g, q_weight, weight_type_dq)
+        weight, _, _ = sym_help._dequantize_helper(g, q_weight, weight_type_dq)
 
         output = conv2d(g, input, weight, bias, stride, padding, dilation, groups)
 
