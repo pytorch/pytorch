@@ -144,9 +144,6 @@ class CommitList:
             if CommitList.keywordInFile(file, ['torch/sparse', 'torch/ao/sparsity', 'test/ao/sparsity', 'aten/src/ATen/native/sparse', 'torch/_masked/__init__.py']):
                 category = 'sparse_frontend'
                 break
-            if CommitList.keywordInFile(file, ['tools/autograd']):
-                category = 'autograd_frontend'
-                break
             if CommitList.keywordInFile(file, ['test/test_nn.py', 'test/test_module.py', 'torch/nn/modules', 'torch/nn/functional.py']):
                 category = 'nn_frontend'
                 break
@@ -161,9 +158,11 @@ class CommitList:
             elif len(files_changed) == 1 and 'torch/testing/_internal/common_methods_invocations.py' in files_changed[0]:
                 # when this is the only file changed, it's almost always an OpInfo change.
                 category = 'python_frontend'
+                topic = 'dev'
             elif len(files_changed) == 1 and 'torch/_torch_docs.py' in files_changed[0]:
                 # individual torch_docs changes are usually for python ops
                 category = 'python_frontend'
+                topic = 'docs'
 
 
         return Commit(commit_hash, category, topic, title)
