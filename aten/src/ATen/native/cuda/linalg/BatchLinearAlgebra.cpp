@@ -9,7 +9,6 @@
 
 #include <ATen/native/LinearAlgebraUtils.h>
 #include <ATen/native/cuda/MiscUtils.h>
-#include <ATen/native/Resize.h>
 #include <ATen/native/LinearAlgebra.h>
 #include <ATen/native/BatchLinearAlgebra.h>
 #include <ATen/native/cuda/linalg/BatchLinearAlgebraLib.h>
@@ -1322,7 +1321,7 @@ AT_ERROR("solve: MAGMA library not found in "
 #endif
 }
 
-std::tuple<Tensor, Tensor> _solve_helper_cuda(const Tensor& self, const Tensor& A) {
+std::tuple<Tensor, Tensor> _solve_helper_cuda_impl(const Tensor& self, const Tensor& A) {
   auto self_working_copy = cloneBatchedColumnMajor(self);
   auto A_working_copy = cloneBatchedColumnMajor(A);
   // infos might not get filled for empty inputs therefore at::zeros is used instead of at::empty
@@ -1572,7 +1571,7 @@ Tensor _cholesky_solve_helper_cuda_magma(const Tensor& self, const Tensor& A, bo
 
 // Todo: cusolverDn<T>potrsBatched only supports nrhs == 1 and does not have good performance.
 //     Batched cholesky_solve is dispatched to magma.
-Tensor _cholesky_solve_helper_cuda(const Tensor& self, const Tensor& A, bool upper) {
+Tensor _cholesky_solve_helper_cuda_impl(const Tensor& self, const Tensor& A, bool upper) {
 #ifdef USE_CUSOLVER
   auto preferred_backend = at::globalContext().linalgPreferredBackend();
   switch (preferred_backend) {
@@ -2320,7 +2319,7 @@ std::tuple<Tensor, Tensor> linalg_qr_helper_magma(const Tensor& self, c10::strin
   return std::make_tuple(q_working_copy, r_working_copy);
 }
 
-std::tuple<Tensor, Tensor> _linalg_qr_helper_cuda(const Tensor& input, c10::string_view mode) {
+std::tuple<Tensor, Tensor> _linalg_qr_helper_cuda_impl(const Tensor& input, c10::string_view mode) {
 #if defined(USE_CUSOLVER)
   auto preferred_backend = at::globalContext().linalgPreferredBackend();
   switch (preferred_backend) {
@@ -2413,7 +2412,7 @@ static void apply_magma_eigh(const Tensor& values, const Tensor& vectors, const 
 #endif
 }
 
-std::tuple<Tensor, Tensor> _symeig_helper_cuda(const Tensor& self, bool eigenvectors, bool upper) {
+std::tuple<Tensor, Tensor> _symeig_helper_cuda_impl(const Tensor& self, bool eigenvectors, bool upper) {
   Tensor infos = at::zeros({std::max<int64_t>(1, batchCount(self))}, self.options().dtype(kInt).device(at::kCPU));
 
   auto eigvals_shape = IntArrayRef(self.sizes().data(), self.dim()-1);  // self.shape[:-1]
@@ -3187,7 +3186,7 @@ REGISTER_CUDA_DISPATCH(lstsq_stub, &lstsq_kernel);
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ legacy_lstsq ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-std::tuple<Tensor, Tensor> legacy_lstsq_cuda(const Tensor &B, const Tensor &A) {
+std::tuple<Tensor, Tensor> legacy_lstsq_cuda_impl(const Tensor &B, const Tensor &A) {
   TORCH_WARN_ONCE(
       "torch.lstsq is deprecated in favor of torch.linalg.lstsq and will be removed in a future PyTorch release.\n",
       "torch.linalg.lstsq has reversed arguments and does not return the QR decomposition in "
@@ -3242,24 +3241,6 @@ std::tuple<Tensor, Tensor> legacy_lstsq_cuda(const Tensor &B, const Tensor &A) {
   TORCH_CHECK(info == 0, "MAGMA gels : Argument %d : illegal value", -info);
   return std::tuple<Tensor, Tensor>(B_working, A_working);
 #endif  // AT_MAGMA_ENABLED()
-}
-
-std::tuple<Tensor&, Tensor&> legacy_lstsq_out_cuda(
-    const Tensor& B, const Tensor& A, Tensor& B_out, Tensor& A_out) {
-  const auto dtype = A.scalar_type();
-  TORCH_CHECK(B.scalar_type() == dtype, "exepected A and B dtypes to match but found ",
-              A.scalar_type(), " and ", B.scalar_type());
-  TORCH_CHECK(A_out.scalar_type() == dtype, "A_out to have scalar type ", dtype,
-              " but found", A_out.scalar_type());
-  TORCH_CHECK(B_out.scalar_type() == dtype, "A_out to have scalar type ", dtype,
-              " but found", B_out.scalar_type());
-  Tensor A_tmp, B_tmp;
-  std::tie(B_tmp, A_tmp) = native::legacy_lstsq_cuda(B, A);
-  resize_output(A_out, A_tmp.sizes());
-  A_out.copy_(A_tmp);
-  resize_output(B_out, B_tmp.sizes());
-  B_out.copy_(B_tmp);
-  return std::tuple<Tensor&, Tensor&>(B_out, A_out);
 }
 
 
