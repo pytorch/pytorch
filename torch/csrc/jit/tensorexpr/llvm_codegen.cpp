@@ -212,6 +212,7 @@ class LLVMCodeGenImpl : public IRVisitor {
 
   std::unordered_map<VarPtr, int> varToArg_;
   std::unordered_map<VarPtr, llvm::Value*> varToVal_;
+  std::unordered_map<VarPtr, VarPtr> varReuse_;
   std::unordered_map<BlockPtr, std::vector<VarPtr>> scopeToVar_;
   BlockPtr scope_;
 
@@ -1101,6 +1102,9 @@ void LLVMCodeGenImpl::visit(VarPtr v) {
 }
 
 llvm::Value* LLVMCodeGenImpl::varToValue(VarPtr v) {
+  if (varReuse_.count(v)) {
+    return varToValue(varReuse_.at(v));
+  }
   // It is possible for v to be in both varToVal_ and varToArgs.
   // In that case, varToVal_ takes precedence.
   if (varToVal_.count(v)) {
@@ -2208,8 +2212,7 @@ void LLVMCodeGenImpl::visit(AllocatePtr v) {
 }
 
 void LLVMCodeGenImpl::visit(PlacementAllocatePtr v) {
-  llvm::Value* ptr = varToVal_.at(v->buf_to_reuse()->base_handle());
-  varToVal_[v->buf()->base_handle()] = ptr;
+  varReuse_[v->buf()->base_handle()] = v->buf_to_reuse()->base_handle();
 }
 
 void LLVMCodeGenImpl::visit(FreePtr v) {

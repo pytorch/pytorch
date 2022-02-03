@@ -444,9 +444,9 @@ Tensor computeQuantizedConv2dRelu(
       Dtype(out_qdtype),
       out_qscale,
       out_qzero);
-  StmtPtr s = ExternalCall::make(
-      ResultBuf,
+  StmtPtr s = ExternalCall2::make(
       "nnc_aten_quantized_conv2d_relu",
+      {ResultBuf},
       {qx, prepacked},
       {immQScale(qx),
        immQZero(qx),
