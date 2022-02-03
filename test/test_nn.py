@@ -16067,11 +16067,10 @@ class TestNNDeviceType(NNTestCase):
     # In this test, the forward pass is expected to produce nan's because when dim=0, we only have unspecified values
     def test_masked_softmax_forward_with_nans(self, device):
         dim = 0
-        shapes = [(1, 1, 4), (1, 1, 310), (1, 1, 1024), (1, 1, 1200)]
-        for (B, num_heads, L) in shapes:
-            input = torch.randn((B, num_heads, L, L), requires_grad=True)
-            mask = torch.randint(0, 2, (B, L))
-            mask = mask.reshape(B, 1, 1, L).expand(B, num_heads, L, L).bool()
+        shapes = [(4, 5), (50, 100), (1500, 1200)]
+        for (x, y) in shapes:
+            input = torch.randn((x, y), requires_grad=True)
+            mask = torch.tensor([i % 2 for i in range(y)]).expand((x, y)).bool()
             if (self.device_type == "cuda"):
                 input = input.cuda().detach().requires_grad_()
                 mask = mask.cuda()
