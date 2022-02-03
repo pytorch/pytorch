@@ -224,13 +224,12 @@ std::ostream& operator<<(std::ostream& str, BackendComponent rhs) {
 
 DispatchKey getAutogradKeyFromBackend(BackendComponent k) {
   // We want this to return an autograd key. We're relying on the fact that
-  // getAutogradRelatedKeySetFromBackend returns an autograd key + ADInplaceOrView,
-  // and autograd has higher precedence.
-  // The core mapping from backend -> autograd key lives in
-  // `getAutogradRelatedKeySetFromBackend` instead of here for performance.
-  // `getAutogradRelatedKeySetFromBackend` is a hotpath function, and
-  // we want to make sure that it doesn't have to construct any DispatchKeySets
-  // at runtime.
+  // getAutogradRelatedKeySetFromBackend returns an autograd key +
+  // ADInplaceOrView, and autograd has higher precedence. The core mapping from
+  // backend -> autograd key lives in `getAutogradRelatedKeySetFromBackend`
+  // instead of here for performance. `getAutogradRelatedKeySetFromBackend` is a
+  // hotpath function, and we want to make sure that it doesn't have to
+  // construct any DispatchKeySets at runtime.
   return getAutogradRelatedKeySetFromBackend(k).highestPriorityTypeId();
 }
 
