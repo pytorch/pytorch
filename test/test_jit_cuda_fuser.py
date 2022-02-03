@@ -677,34 +677,108 @@ class TestCudaFuser(JitTestCase):
         jitted.graph_for(x, y)  # Shows up in second instance, not first
         self.assertGraphContains(jitted.graph_for(x, y), FUSION_GUARD)
 
-    def _binary_test_helper(self, operation, dtypes, random_data):
+    def _get_scalar_binary_test_fn(self, category_and_type1, category_and_type2, operation):
+        category1, dtype_arg1 = category_and_type1
+        category2, dtype_arg2 = category_and_type2
+
+        def t_intx_tensory(x: int, y: torch.Tensor):
+            o = operation(x, y)
+            o = 2 + o
+            return o
+
+        def t_doublex_tensory(x: float, y: torch.Tensor):
+            o = operation(x, y)
+            o = 2 + o
+            return o
+        # Omit both scalar cases and swap cases
+        assert category1 == "scalar" and category2 != "scalar"
+        if dtype_arg1 == torch.float64 or dtype_arg1 == torch.float32:
+            return t_doublex_tensory
+        if dtype_arg1 == torch.int64 or dtype_arg1 == torch.int32:
+            return t_intx_tensory
+        raise NotImplementedError
+
+    def _binary_test_helper(self, operation, dtypes, random_data, categories="ndim"):
         if isinstance(dtypes, tuple):
             dtype_arg1, dtype_arg2 = dtypes
         else:
             dtype_arg1 = dtype_arg2 = dtypes
+
+        if isinstance(categories, tuple) and random_data:
+            category1, category2 = categories
+        elif not random_data:
+            category1 = category2 = "ndim"
+        else:
+            category1 = category2 = categories
+
+        def is_cpu_category(x):
+            return x == "0dimcpu" or x == "scalar"
+
+        # skip unsupported cases
+        if is_cpu_category(category1) and is_cpu_category(category2):
+            return
+
+        # only test cases with first operand as scalar
+        if category2 == "scalar":
+            return
+
+        # skip ops that doesn't support scalar inputs in eager
+        if operation in [
+            torch.atan2,
+            torch.max,
+            torch.min,
+            torch.remainder,  # unsupported in nvfuser
+        ]:
+            if category1 == "scalar" or category2 == "scalar":
+                return
+
+        if operation in [
+            torch.fmod,
+            torch.eq,
+            torch.ne,
+            torch.ge,
+            torch.gt,
+            torch.le,
+            torch.lt
+        ]:
+            if category1 == "scalar":
+                return
 
         def t(x: torch.Tensor, y: torch.Tensor, z: torch.Tensor):
             o = operation(x, y)
             o = o + z
             return o
 
-        def t_int(x: torch.Tensor, y: torch.Tensor):
-            o = operation(x, y)
-            o = 2 + o
-            return o
-
-        def t_float(x: torch.Tensor, y: torch.Tensor):
-            o = operation(x, y)
-            o = 2. + o
-            return o
-
         shape = (4, 32, 32)
+
+        shapex = shape if category1 == "ndim" else ()
+        shapey = shape if category2 == "ndim" else ()
+
         if random_data:
-            x = (torch.randn(shape, dtype=torch.float, device="cuda") * 5).to(dtype_arg1)
-            y = (torch.randn(shape, dtype=torch.float, device="cuda") * 5).to(dtype_arg2)
+            x = (torch.randn(shapex, dtype=torch.float, device="cuda") * 5).to(dtype_arg1)
+            y = (torch.randn(shapey, dtype=torch.float, device="cuda") * 5).to(dtype_arg2)
         else:
             x = self.special_values.to(dtype=dtype_arg1)
             y = (torch.rand_like(self.special_values) * 5).to(dtype_arg2)
+
+        r"""
+            Category conversion
+        """
+        has_scalar = False
+        if category1 == "scalar":
+            has_scalar = True
+            x = x.item()
+
+        if category1 == "0dimcpu":
+            x = x.to(device="cpu")
+
+        if category2 == "scalar":
+            has_scalar = True
+            y = y.item()
+
+        if category2 == "0dimcpu":
+            y = y.to(device="cpu")
+
         z = torch.tensor([2], device="cuda").to(dtype_arg1)
 
         # Avoid division by zero for integer tensors
@@ -712,7 +786,7 @@ class TestCudaFuser(JitTestCase):
         if operation in div_like and (dtype_arg2 == torch.int32 or dtype_arg2 == torch.int64):
             y[y == 0] = 1
 
-        for test_fn in [t, t_int, t_float]:
+        if not has_scalar:
             o = t(x, y, z)
             t_jit = torch.jit.script(t)
             jit_o = t_jit(x, y, z)
@@ -722,6 +796,19 @@ class TestCudaFuser(JitTestCase):
             self.assertEqual(o.dtype, jit_o.dtype)
             self.assertEqual(o, jit_o)
             self.assertGraphContains(t_jit.graph_for(x, y, z), FUSION_GUARD)
+
+        elif category2 != "scalar":  # only test the case where first is scalar
+            test_fn = self._get_scalar_binary_test_fn((category1, dtype_arg1), (category2, dtype_arg2), operation)
+            o = test_fn(x, y)
+            t_jit = torch.jit.script(test_fn)
+            jit_o = t_jit(x, y)
+            jit_o = t_jit(x, y)
+            jit_o = t_jit(x, y)
+
+            self.assertEqual(o.dtype, jit_o.dtype)
+            self.assertEqual(o, jit_o)
+
+            self.assertGraphContains(t_jit.graph_for(x, y), FUSION_GUARD)
 
     @unittest.skipIf(not RUN_CUDA, "requires CUDA")
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
@@ -753,9 +840,21 @@ class TestCudaFuser(JitTestCase):
                       torch.gt,
                       torch.le,
                       torch.lt]
-        binary_dtype_combinations = itertools.combinations(data_types, 2)
+
+        category_types = [
+            "scalar",
+            "0dim",
+            "0dimcpu",
+            "ndim"
+        ]
+
+        binary_dtype_combinations = list(itertools.combinations(data_types, 2))
+        category_combinations = list(itertools.combinations(category_types, 2))
+
+        for op, dtypes, categories in itertools.product(operations, binary_dtype_combinations, category_combinations):
+            self._binary_test_helper(op, dtypes, True, categories)  # random data
+
         for op, dtypes in itertools.product(operations, binary_dtype_combinations):
-            self._binary_test_helper(op, dtypes, True)  # random data
             self._binary_test_helper(op, dtypes, False)  # special numbers
 
     @unittest.skipIf(not RUN_CUDA, "requires CUDA")
