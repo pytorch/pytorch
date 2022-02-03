@@ -3,7 +3,7 @@
 #include <ATen/ThreadLocalState.h>
 
 #include <torch/library.h>
-#include <torch/csrc/jit/runtime/custom_operator.h>
+#include <torch/csrc/jit/runtime/operator.h>
 
 namespace caffe2 {
 // Required for cpp_custom_type_hack to work
@@ -74,18 +74,11 @@ TORCH_LIBRARY_FRAGMENT(profiler, m) {
 
   m.def("_record_function_enter_new", &record_function_enter_new);
   m.def("_record_function_exit_new", &record_function_exit_new);
-}
 
-// Needed to register JIT operator in operator registry below
-c10::AliasAnalysisKind aliasAnalysisFromSchema() {
-  return c10::AliasAnalysisKind::FROM_SCHEMA;
-}
-
-jit::RegisterOperators reg_fut_ops({
-    jit::Operator(
-        "profiler::_call_end_callbacks_on_jit_fut("
+  torch::jit::registerOperator(torch::jit::Operator(
+        "profiler::_call_end_callbacks_on_jit_fut._RecordFunction("
             "__torch__.torch.classes.profiler._RecordFunction x, Future(t) y) -> Future(t)",
-        [](c10::Stack *stack) {
+        [](c10::Stack &stack) {
           // Pop inputs, which should be a future and a PythonRecordFunction
           auto fut = torch::jit::pop(stack).toFuture();
           auto tensor = torch::jit::pop(stack).toCustomClass<PythonRecordFunction>();
@@ -93,8 +86,8 @@ jit::RegisterOperators reg_fut_ops({
           // return future that completes when profiling callbacks have run.
           torch::jit::push(stack, std::move(profiledFut));
         },
-        aliasAnalysisFromSchema()),
-});
+        c10::AliasAnalysisKind::FROM_SCHEMA));
+}
 
 } // namespace profiler
 } // namespace autograd
