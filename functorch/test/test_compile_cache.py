@@ -579,6 +579,35 @@ class TestCompileCacheStaticArgs(TestCase):
         total_recomps = end_num_recomps - start_num_recomps
         assert total_recomps == 2
 
+    def test_tuple_static_args(self):
+        def fn(x, tuple_static_arg):
+            return x * tuple_static_arg[0] * tuple_static_arg[1]
+
+        functorch.compile.clear_compile_cache()
+
+        start_num_recomps = functorch.compile.num_of_recompilations()
+
+        aot_autograd_f = aot_function(fn, nop, nop, static_argnums=1)
+
+        a = torch.randn(2, 2, requires_grad=True)
+        b = (2, 3)
+        self.check(a, b, aot_autograd_f, fn)
+
+        # Same type of args, so no recompilation
+        a = torch.randn(2, 2, requires_grad=True)
+        b = (2, 3)
+        self.check(a, b, aot_autograd_f, fn)
+
+        # Trigger recompilation
+        a = torch.randn(2, 2, requires_grad=True)
+        b = (3, 4)
+        self.check(a, b, aot_autograd_f, fn)
+
+        end_num_recomps = functorch.compile.num_of_recompilations()
+
+        total_recomps = end_num_recomps - start_num_recomps
+        assert total_recomps == 2
+
 
 if __name__ == "__main__":
     run_tests()

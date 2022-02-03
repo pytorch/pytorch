@@ -26,7 +26,8 @@ def profile_cuda_kernels(fn, args, string_id="Model time"):
         for _ in range(0, n_repeats // n_layers):
             args = list(old_args[:])
             for arg in args:
-                arg.grad = None
+                if isinstance(arg, torch.Tensor):
+                    arg.grad = None
             ref = fn(*args)
 
     print(f"###### Forward profile for {string_id} starts #####")
@@ -41,7 +42,8 @@ def profile_cuda_kernels(fn, args, string_id="Model time"):
         for _ in range(0, n_repeats // n_layers):
             args = list(old_args[:])
             for arg in args:
-                arg.grad = None
+                if isinstance(arg, torch.Tensor):
+                    arg.grad = None
             ref = fn(*args)
 
             print(f"###### Backward profile for {string_id} starts #####")
@@ -106,7 +108,8 @@ def time_with_manual_timer(fn, args, string_id):
         args = list(old_args[:])
 
         for arg in args:
-            arg.grad = None
+            if isinstance(arg, torch.Tensor):
+                arg.grad = None
         ref = fn(*args)
         ref.backward(gO)
 
@@ -117,7 +120,8 @@ def time_with_manual_timer(fn, args, string_id):
     for _ in range(0, repeats):
         args = list(old_args[:])
         for arg in args:
-            arg.grad = None
+            if isinstance(arg, torch.Tensor):
+                arg.grad = None
         fwd_start = time.time()
         ref = fn(*args)
         torch.cuda.synchronize()
