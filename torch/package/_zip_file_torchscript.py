@@ -1,4 +1,5 @@
 import torch
+from typing import Union
 from ._zip_file import PackageZipFileReader, PackageZipFileWriter
 
 class TorchScriptPackageZipFileWriter(PackageZipFileWriter):
@@ -30,8 +31,11 @@ class TorchScriptPackageZipFileReader(PackageZipFileReader):
     is a wrapper around the PyTorchReader class.
     """
 
-    def __init__(self, file_name):
-        self.zip_file_reader = torch._C.PyTorchFileReader(file_name)
+    def __init__(self, file_or_buffer: Union[str, torch._C.PyTorchFileReader]):
+        if isinstance(file_or_buffer, torch._C.PyTorchFileReader):
+            self.zip_file_reader = file_or_buffer
+        else:
+            self.zip_file_reader = torch._C.PyTorchFileReader(file_or_buffer)
 
     def get_record(self, name):
         return self.zip_file_reader.get_record(name)

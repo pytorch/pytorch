@@ -8,5 +8,5 @@ from .importer import (
     OrderedImporter,
     sys_importer,
 )
-from .package_exporter import EmptyMatchError, PackageExporter, PackagingError
+from .package_exporter_oss import EmptyMatchError, PackageExporter, PackagingError
 from .package_importer import PackageImporter

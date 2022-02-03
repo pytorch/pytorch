@@ -184,46 +184,12 @@ class PackageImporter(Importer):
         loaded_reduces = {}
         storage_context = torch._C.DeserializationStorageContext()
 
-        # TODO move out and add deprecration warning for this behavior
-        # TODO move to package shim
-        def load_tensor(dtype, size, key, location, restore_location):
-            name = f"{key}.storage"
-
-            if storage_context.has_storage(name):
-                storage = storage_context.get_storage(name, dtype).storage()
-            else:
-                tensor = self.zip_reader.get_storage_from_record(
-                    ".data/" + name, size, dtype
-                )
-                if isinstance(self.zip_reader, torch._C.PyTorchFileReader):
-                    storage_context.add_storage(name, tensor)
-                storage = tensor.storage()
-            loaded_storages[key] = restore_location(storage, location)
-
         def persistent_load(saved_id):
             assert isinstance(saved_id, tuple)
             typename = _maybe_decode_ascii(saved_id[0])
             data = saved_id[1:]
 
-            if typename == "storage":
-                storage_type, key, location, size = data
-                dtype = storage_type.dtype
-
-                if key not in loaded_storages:
-                    load_tensor(
-                        dtype,
-                        size,
-                        key,
-                        _maybe_decode_ascii(location),
-                        restore_location,
-                    )
-                storage = loaded_storages[key]
-                # TODO: Once we decide to break serialization FC, we can
-                # stop wrapping with TypedStorage
-                return torch.storage.TypedStorage(
-                    wrap_storage=storage._untyped(), dtype=dtype
-                )
-            elif typename == "reduce_package":
+            if typename == "reduce_package":
                 # to fix BC breaking change, objects on this load path
                 # will be loaded multiple times erroneously
                 if len(data) == 2:
@@ -246,23 +212,13 @@ class PackageImporter(Importer):
         def set_deserialization_context():
             # to let reduce_package access deserializaiton context
             self.external_registry = {}
-            self.storage_context = storage_context
-            self.last_map_location = map_location
             try:
                 yield
             finally:
                 self.external_registry = None
-                self.storage_context = None
-                self.last_map_location = None
 
         with set_deserialization_context():
             result = unpickler.load()
-
-        # TODO from zdevito:
-        #   This stateful weird function will need to be removed in our efforts
-        #   to unify the format. It has a race condition if multiple python
-        #   threads try to read independent files
-        torch._utils._validate_loaded_sparse_tensors()
 
         return result
 
