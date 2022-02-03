@@ -74,7 +74,6 @@ class DefaultPackageZipFileReader(zipfile.ZipFile, PackageZipFileReader):
     def __init__(self, file_name):
         super().__init__(file_name, mode='r')
         self.records = set(super().namelist())
-        print(self.records)
 
     def get_record(self, name):
         return super().read(name)
