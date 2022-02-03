@@ -1119,20 +1119,6 @@ static void addmm_impl_cpu_(
 
   at::native::resize_output(result, self_sizes);
 
-  TORCH_CHECK(!result._is_zerotensor(), "ZeroTensors are immutable. Please use the materialized zero tensor ",
-                    "obtained using .clone() if you want a mutable tensor.");
-  if (m1._is_zerotensor() || m2._is_zerotensor()) {
-    at::mul_out(
-        result,
-        self,
-        at::native::scalar_tensor(
-            beta,
-            self.scalar_type(),
-            c10::nullopt /* layout */,
-            at::kCPU,
-            c10::nullopt /* pin_memory */));
-    return;
-  }
   const auto result_strides = result.strides();
   const auto result_sizes = result.sizes();
 
