@@ -32,7 +32,6 @@ class TorchScriptPackageZipFileReader(PackageZipFileReader):
 
     def __init__(self, file_name):
         self.zip_file_reader = torch._C.PyTorchFileReader(file_name)
-        self.get_all_records()
 
     def get_record(self, name):
         return self.zip_file_reader.get_record(name)
