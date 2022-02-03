@@ -26,7 +26,7 @@ load_tests = load_tests
 
 _sparse_csr_ops = list(filter(lambda op: op.supports_sparse_csr, op_db))
 # A separate test is written for pow, since it errors out with exponent=0 for Sparse CSR
-sparse_csr_pow = [op for op in sparse_csr_funcs if op.name == 'pow']
+sparse_csr_pow = list(filter(lambda op: op.name == 'pow', op_db))
 
 def _check_cusparse_triangular_solve_available():
     version = _get_torch_cuda_version()
