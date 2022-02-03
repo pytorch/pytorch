@@ -345,8 +345,8 @@ static inline void singleCheckErrors(int64_t info, const c10::string_view name, 
  * this function checks if the computation over all these batches has been
  * successful (info = 0) or not, and report in case of the latter.
  */
-static inline void batchCheckErrors(const std::vector<int64_t>& infos, const c10::string_view name) {
-  for (size_t i = 0; i < infos.size(); i++) {
+static inline void batchCheckErrors(const std::vector<int64_t>& infos, const char* name) {
+  for (const auto i : c10::irange(infos.size())) {
     auto info = infos[i];
     singleCheckErrors(info, name, i);
   }
@@ -358,7 +358,7 @@ static inline void batchCheckErrors(const std::vector<int64_t>& infos, const c10
 static inline void batchCheckErrors(const Tensor& infos, const c10::string_view name) {
   auto infos_cpu = infos.to(at::kCPU);
   auto infos_data = infos_cpu.data_ptr<int>();
-  for (int64_t i = 0; i < infos.numel(); i++) {
+  for (const auto i : c10::irange(infos.numel())) {
     auto info = infos_data[i];
     singleCheckErrors(info, name, i);
   }
