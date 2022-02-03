@@ -2371,21 +2371,20 @@ class RpcTest(RpcAgentTestFixture, RpcTestCommon):
                 fut.wait()
 
     @dist_init
-    def test_async_record_function_double_end_callbacks_new_signatures(self):
-        # Test the new _record_function ops work
-        # Note: Remove once record_function uses these directly
+    def test_async_record_function_legacy(self):
+        # Test the legacy _record_function ops work
+        # Note: These exist for backward compatibility with TorchScript
         num_sleep_seconds = 1
         if self.rank == 1:
-            # Validate that calling the function twice results in an error.
             with _profile() as pf:
                 try:
-                    record = torch.ops.profiler._record_function_enter_new("foo")
+                    handle = torch.ops.profiler._record_function_enter("foo", None)
                     fut = rpc.rpc_async(
                         worker_name(0), my_sleep_func, args=(num_sleep_seconds,)
                     )
-                    torch.ops.profiler._call_end_callbacks_on_jit_fut(record, fut)
+                    torch.ops.profiler._call_end_callbacks_on_jit_fut(handle, fut)
                 finally:
-                    torch.ops.profiler._record_function_exit_new(record)
+                    torch.ops.profiler._record_function_exit(record)
 
                 fut.wait()
 
