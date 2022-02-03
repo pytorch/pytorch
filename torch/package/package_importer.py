@@ -14,6 +14,7 @@ import torch
 from torch.serialization import _get_restore_location, _maybe_decode_ascii
 
 from ._directory_reader import DirectoryReader
+from ._directory_reader_torchscript import TorchScriptDirectoryReader
 from ._importlib import (
     _calc___package__,
     _normalize_line_endings,
@@ -77,7 +78,7 @@ class PackageImporter(Importer):
             if not os.path.isdir(self.filename):
                 self.zip_reader = TorchScriptPackageZipFileReader(self.filename)
             else:
-                self.zip_reader = DirectoryReader(self.filename)
+                self.zip_reader = TorchScriptDirectoryReader(self.filename)
         else:
             self.filename = "<binary>"
             self.zip_reader = TorchScriptPackageZipFileReader(file_or_buffer)
@@ -186,7 +187,9 @@ class PackageImporter(Importer):
         loaded_storages = {}
         loaded_reduces = {}
         storage_context = torch._C.DeserializationStorageContext()
-        #TODO move out and add deprecration warning for this behavior
+
+        # TODO move out and add deprecration warning for this behavior
+        # TODO move to package shim
         def load_tensor(dtype, size, key, location, restore_location):
             name = f"{key}.storage"
 
@@ -241,6 +244,7 @@ class PackageImporter(Importer):
         data_file = io.BytesIO(self.zip_reader.get_record(pickle_file))
         unpickler = self.Unpickler(data_file)
         unpickler.persistent_load = persistent_load
+
         # TODO: it might make sense to have a seperate packager in torch which uses the OSS pacakge but saves state
         @contextmanager
         def set_deserialization_context():
@@ -587,6 +591,9 @@ class PackageImporter(Importer):
         if isinstance(package, _ExternNode):
             return  # the shorter extern covers this extern case
         package.children[last] = _ExternNode()
+
+    def __del__(self):
+        self.zip_reader.close()
 
 
 _NEEDS_LOADING = object()

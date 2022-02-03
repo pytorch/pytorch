@@ -18,14 +18,11 @@ from typing import (
     Sequence,
     Set,
     Union,
-    cast,
     DefaultDict,
     Type,
 )
 
 import torch
-from torch.serialization import location_tag, normalize_storage_type
-from torch.types import Storage
 from torch.utils.hooks import RemovableHandle
 
 from ._digraph import DiGraph
@@ -203,10 +200,6 @@ class PackageExporter:
             self.buffer = f
 
         self.zip_file = zip_file_reader_type(f)
-        #TODO: export to an actual registry somewhere else later in the stack
-        self.external_registry = {}
-        #TODO: export to an actual registry somewhere else later in the stack
-        self.closing_functions = {}
 
         self._written_files: Set[str] = set()
 

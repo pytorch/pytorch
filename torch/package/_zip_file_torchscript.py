@@ -1,19 +1,10 @@
-import os.path
-from glob import glob
-from typing import cast
 import torch
 from ._zip_file import PackageZipFileReader, PackageZipFileWriter
-import zipfile
-from abc import ABC, abstractmethod
 
 class TorchScriptPackageZipFileWriter(PackageZipFileWriter):
     """
-    Class to allow PackageImporter to operate on unzipped packages. Methods
-    copy the behavior of the internal PyTorchFileReader class (which is used for
-    accessing packages in all other cases).
-
-    N.B.: ScriptObjects are not depickleable or accessible via this DirectoryReader
-    class due to ScriptObjects requiring an actual PyTorchFileReader instance.
+    Class to allow PackageExporter to operate torchscript objects. This
+    is a wrapper around the PyTorchFileWriter and ScriptModuleSerializer classes.
     """
 
     def __init__(self, file_name):
@@ -35,12 +26,8 @@ class TorchScriptPackageZipFileWriter(PackageZipFileWriter):
 
 class TorchScriptPackageZipFileReader(PackageZipFileReader):
     """
-    Class to allow PackageImporter to operate on unzipped packages. Methods
-    copy the behavior of the internal PyTorchFileReader class (which is used for
-    accessing packages in all other cases).
-
-    N.B.: ScriptObjects are not depickleable or accessible via this DirectoryReader
-    class due to ScriptObjects requiring an actual PyTorchFileReader instance.
+    Class to allow PackageImporter to operate torchscript objects.  This
+    is a wrapper around the PyTorchReader class.
     """
 
     def __init__(self, file_name):

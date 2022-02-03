@@ -226,9 +226,6 @@ def _default_deserialize(location, storage):
         device = torch.cuda._utils._get_device_index(location, True)
         return torage.cuda(device)
 
-#TODO: remove dependency on load tensor
-#TODO: localize storage_context and loaded_storages
-
 def unpackage_storage(importer, storage_type, key, location, size):
     if 'loaded_storages' not in importer.external_registry:
         importer.external_registry['loaded_storages'] = {}

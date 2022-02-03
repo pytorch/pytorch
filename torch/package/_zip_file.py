@@ -1,14 +1,11 @@
-import os.path
-from glob import glob
-from typing import cast
-
-import torch
 import zipfile
-from torch.types import Storage
 from abc import ABC, abstractmethod
 
 class PackageZipFileReader(ABC):
-
+    """
+    Class to allow PackageImporter to operate objects. To create a custom
+    zip file reader for PackageImporter simply inherit this class.
+    """
     @abstractmethod
     def get_record(self, name: str):
         raise NotImplementedError(
@@ -34,7 +31,10 @@ class PackageZipFileReader(ABC):
         )
 
 class PackageZipFileWriter(ABC):
-
+    """
+    Class to allow PackageExporter to operate objects. To create a custom
+    zip file writer for PackageExporter simply inherit this class.
+    """
 
     @abstractmethod
     def write_record(self, file_name, str_or_bytes, size):
@@ -50,12 +50,9 @@ class PackageZipFileWriter(ABC):
 
 class DefaultPackageZipFileWriter(zipfile.ZipFile, PackageZipFileWriter):
     """
-    Class to allow PackageImporter to operate on unzipped packages. Methods
-    copy the behavior of the internal PyTorchFileReader class (which is used for
-    accessing packages in all other cases).
-
-    N.B.: ScriptObjects are not depickleable or accessible via this DirectoryReader
-    class due to ScriptObjects requiring an actual PyTorchFileReader instance.
+    Class to allow PackageExporter to operate general objects. This is default
+    zipfile reader. This is effectively a wrapper around ZipFile to have a similar
+    API to torch._C.PyTorchWriter.
     """
 
     def __init__(self, file_name):
@@ -69,12 +66,9 @@ class DefaultPackageZipFileWriter(zipfile.ZipFile, PackageZipFileWriter):
 
 class DefaultPackageZipFileReader(zipfile.ZipFile, PackageZipFileReader):
     """
-    Class to allow PackageImporter to operate on unzipped packages. Methods
-    copy the behavior of the internal PyTorchFileReader class (which is used for
-    accessing packages in all other cases).
-
-    N.B.: ScriptObjects are not depickleable or accessible via this DirectoryReader
-    class due to ScriptObjects requiring an actual PyTorchFileReader instance.
+    Class to allow PackageImporter to operate general objects. This is default
+    zipfile reader.  This is effectively a wrapper around ZipFile to have a similar
+    API to torch._C.PyTorchReader.
     """
 
     def __init__(self, file_name):
