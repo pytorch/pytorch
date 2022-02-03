@@ -73,13 +73,14 @@ const std::string jit_common_types = R"ESCAPE(
   _(at::Half, Half) /* 5 */                                  \
   _(float, Float) /* 6 */                                \
   _(double, Double) /* 7 */                              \
-  _(std::complex<float>, ComplexFloat) /* 8 */                          \
-  _(std::complex<double>, ComplexDouble) /* 9 */                         \
-  _(bool, Bool) /* 10 */                                 \
-  _(void, QInt8) /* 11 */                          \
-  _(void, QUInt8) /* 12 */                        \
-  _(void, QInt32) /* 13 */                        \
-  _(at::BFloat16, BFloat16) /* 14 */                             \
+  _(std::complex<at::Half>, ComplexHalf) /* 8 */        \
+  _(std::complex<float>, ComplexFloat) /* 9 */                          \
+  _(std::complex<double>, ComplexDouble) /* 10 */                         \
+  _(bool, Bool) /* 11 */                                 \
+  _(void, QInt8) /* 12 */                          \
+  _(void, QUInt8) /* 13 */                        \
+  _(void, QInt32) /* 14 */                        \
+  _(at::BFloat16, BFloat16) /* 15 */                             \
 
   #define AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_EXCEPT_COMPLEX_HALF(_) \
   _(uint8_t, Byte)                                                 \

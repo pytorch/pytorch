@@ -31,6 +31,8 @@ void direct_copy_kernel(TensorIteratorBase &iter) {
           [=](scalar_t a) -> scalar_t { return a; },
           [=](Vectorized<scalar_t> a) -> Vectorized<scalar_t> { return a; });
     });
+  } else if (dtype == ScalarType::ComplexHalf) {
+    cpu_kernel(iter, [=](c10::complex<at::Half> a) -> c10::complex<at::Half> { return a; });
   } else {
     AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(
         kBool, kHalf, kBFloat16, dtype, "copy_kernel", [&] {

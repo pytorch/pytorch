@@ -41,6 +41,9 @@ DLDataType getDLDataType(const Tensor& t) {
     case ScalarType::Bool:
       TORCH_CHECK(false, "Bool type is not supported by dlpack");
       break;
+    case ScalarType::ComplexHalf:
+      dtype.code = DLDataTypeCode::kDLComplex;
+      break;
     case ScalarType::ComplexFloat:
       dtype.code = DLDataTypeCode::kDLComplex;
       break;
@@ -178,6 +181,9 @@ ScalarType toScalarType(const DLDataType& dtype) {
       break;
     case DLDataTypeCode::kDLComplex:
       switch (dtype.bits) {
+        case 32:
+          stype = ScalarType::ComplexHalf;
+          break;
         case 64:
           stype = ScalarType::ComplexFloat;
           break;
