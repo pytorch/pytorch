@@ -1183,6 +1183,7 @@ class TestSparseCSR(TestCase):
 
     @skipCUDAIfRocm
     @onlyCUDA
+    @skipCUDAIf(True, "Causes CUDA memory exception, see https://github.com/pytorch/pytorch/issues/72177")
     @skipCUDAIf(
         not _check_cusparse_sddmm_available(),
         "cuSparse Generic API SDDMM is not available"
