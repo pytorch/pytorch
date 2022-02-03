@@ -1,20 +1,9 @@
 import os.path
 from glob import glob
-from typing import cast
-
-import torch
-from torch.types import Storage
-
-# because get_storage_from_record returns a tensor!?
-class _HasStorage(object):
-    def __init__(self, storage):
-        self._storage = storage
-
-    def storage(self):
-        return self._storage
+from ._zip_file import PackageZipFileReader
 
 
-class DirectoryReader(object):
+class DirectoryReader(PackageZipFileReader):
     """
     Class to allow PackageImporter to operate on unzipped packages. Methods
     copy the behavior of the internal PyTorchFileReader class (which is used for
@@ -32,12 +21,6 @@ class DirectoryReader(object):
         with open(filename, "rb") as f:
             return f.read()
 
-    def get_storage_from_record(self, name, numel, dtype):
-        filename = f"{self.directory}/{name}"
-        nbytes = torch._utils._element_size(dtype) * numel
-        storage = cast(Storage, torch.UntypedStorage)
-        return _HasStorage(storage.from_file(filename=filename, nbytes=nbytes))
-
     def has_record(self, path):
         full_path = os.path.join(self.directory, path)
         return os.path.isfile(full_path)
@@ -50,3 +33,6 @@ class DirectoryReader(object):
             if not os.path.isdir(filename):
                 files.append(filename[len(self.directory) + 1 :])
         return files
+
+    def close():
+        pass

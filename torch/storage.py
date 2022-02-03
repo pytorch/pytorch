@@ -65,13 +65,10 @@ class _StorageBase(object):
         return (_load_from_bytes, (b.getvalue(),))
 
     def __reduce_package__(self, exporter):
-        if 'script_module_serializer' not in exporter.external_registry:
-            print('adding nnew serializer')
-            exporter.external_registry['script_module_serializer'] = torch._C.ScriptModuleSerializer(exporter.zip_file)
-        if 'write_torchscript_files' not in exporter.closing_functions:
-            exporter.closing_functions['write_torchscript_files'] = lambda exporter: exporter.external_registry['script_module_serializer'].write_files()
-        print('base_storage', self._cdata)
-        storage_context = exporter.external_registry['script_module_serializer'].storage_context()
+
+        assert hasattr(exporter.zip_file, 'get_serializer')
+        assert hasattr(exporter.zip_file, 'get_storage_context')
+        storage_context = exporter.zip_file.get_storage_context()
 
         storage_type = normalize_storage_type(type(self))
         dtype = torch.uint8
@@ -584,11 +581,12 @@ class TypedStorage:
         return (_load_from_bytes, (b.getvalue(),))
 
     def __reduce_package__(self, exporter):
-        if 'script_module_serializer' not in exporter.external_registry:
-            exporter.external_registry['script_module_serializer'] = torch._C.ScriptModuleSerializer(exporter.zip_file)
-        if 'write_torchscript_files' not in exporter.closing_functions:
-            exporter.closing_functions['write_torchscript_files'] = lambda exporter: exporter.external_registry['script_module_serializer'].write_files()
-        storage_context = exporter.external_registry['script_module_serializer'].storage_context()
+
+        assert hasattr(exporter.zip_file, 'get_serializer')
+        assert hasattr(exporter.zip_file, 'get_storage_context')
+
+        storage_context = exporter.zip_file.get_storage_context()
+
         storage = self._storage
         storage_type_str = self.pickle_storage_type()
         storage_type = getattr(torch, storage_type_str)
