@@ -1915,6 +1915,6 @@ test_suite(
         "api_tests",
         "jit_tests",
         "torch_dist_autograd_test",
-        "//c10:tests",
+        "//c10/test:tests",
     ],
 )
