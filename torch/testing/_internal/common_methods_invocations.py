@@ -6073,37 +6073,6 @@ def sample_inputs_masked_softmax(op_info, device, dtype, requires_grad, with_dty
                                       args=sample_input_args, kwargs=sample_input_kwargs))
     return inputs
 
-def sample_inputs_masked_softmax_v2(op_info, device, dtype, requires_grad, **kwargs):
-    """Sample inputs for _masked_softmax.
-
-    Masked normalization operator is a reduction operator with
-    trailing mask optional argument. A mask is a bool tensor with the
-    same shape as input or a shape that is broadcastable to input
-    shape.
-    """
-    make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
-
-    cases = [
-        ((S, ), 0),
-        ((S, S), 0),
-        ((S, S), 1),
-        ((S, S), -1),
-        ((S, M, S), 2),
-    ]
-
-    # PyTorch on XLA throws an error when passed with dim argument for 0d tensor.
-    # See https://github.com/pytorch/xla/issues/3061 for more details.
-    if torch.device(device).type != 'xla':
-        cases.append(((), 0))
-
-    inputs: List[SampleInput] = []
-    for shape, dim in cases:
-        mask = make_tensor(shape, device, torch.bool, requires_grad=False)
-        sample_input = SampleInput(make_arg(shape), args=(dim, mask), kwargs={})
-        inputs.append(sample_input)
-
-    return inputs
-
 def sample_inputs_masked_normalize(op_info, device, dtype, requires_grad, **kwargs):
     """Sample inputs for masked normalize.
     """
@@ -15223,36 +15192,19 @@ op_db: List[OpInfo] = [
         gradcheck_wrapper=gradcheck_wrapper_masked_operation
     ),
     OpInfo(
-        '_masked_softmax',
+        '_masked.softmax',
         method_variant=None,
-        supports_gradgrad=False,
         dtypes=floating_types_and(torch.bfloat16),
-        dtypesIfCUDA=floating_types_and(torch.float16, *[torch.bfloat16] if CUDA11OrLater else []),
-        sample_inputs_func=sample_inputs_masked_softmax_v2,
+        dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16),
+        sample_inputs_func=sample_inputs_masked_softmax,
         skips=(
             # torch.jit.frontend.NotSupportedError: Compiled
             # functions can't take variable number of arguments or
             # use keyword-only arguments with defaults
             DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
-            DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_noncontiguous_samples'),
-            # torch.autograd.gradcheck.GradcheckError: Jacobian mismatch for output 0 with respect to input 0
-            DecorateInfo(unittest.expectedFailure, "TestGradients", "test_fn_grad", device_type='cpu', dtypes=(torch.float64,)),
         ),
+        gradcheck_wrapper=gradcheck_wrapper_masked_operation,
         supports_out=False),
-    # OpInfo(
-    #     '_masked.softmax',
-    #     method_variant=None,
-    #     dtypes=floating_types_and(torch.bfloat16),
-    #     dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16),
-    #     sample_inputs_func=sample_inputs_masked_softmax,
-    #     skips=(
-    #         # torch.jit.frontend.NotSupportedError: Compiled
-    #         # functions can't take variable number of arguments or
-    #         # use keyword-only arguments with defaults
-    #         DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
-    #     ),
-    #     gradcheck_wrapper=gradcheck_wrapper_masked_operation,
-    #     supports_out=False),
     OpInfo(
         '_masked.log_softmax',
         method_variant=None,

@@ -156,7 +156,10 @@ void host_softmax(
               input_data_base + outer_idx * outer_stride + inner_idx;
           scalar_t* output_data =
               output_data_base + outer_idx * outer_stride + inner_idx;
-          bool* mask_data = mask_data_base + outer_idx * outer_stride + inner_idx;
+          bool* mask_data = nullptr;
+          if (MaskedSoftMax) {
+            mask_data = mask_data_base + outer_idx * outer_stride + inner_idx;
+          }
 
           // Calc max in softmax dim
           bool is_meaningful_max = false;
@@ -246,7 +249,10 @@ void host_softmax_backward(
               output_data_base + outer_idx * outer_stride + inner_idx;
           const scalar_t* gradOutput_data =
               gradOutput_data_base + outer_idx * outer_stride + inner_idx;
-          bool* mask_data = mask_data_base + outer_idx * outer_stride + inner_idx;
+          bool* mask_data = nullptr;
+          if (MaskedSoftMax) {
+            mask_data = mask_data_base + outer_idx * outer_stride + inner_idx;
+          }
 
           acc_type<scalar_t, false> sum = 0;
           for (const auto d : c10::irange(dim_size)) {
@@ -512,9 +518,9 @@ Tensor masked_softmax_backward_cpu(
       "Mask should be a boolean tensor");
 
   int64_t dim = maybe_wrap_dim(dim_, grad_.dim());
-  auto grad = grad_.is_contiguous() ? grad_ : grad_.contiguous();
-  auto output = output_.is_contiguous() ? output_ : output_.contiguous();
-  auto mask = mask_.is_contiguous() ? mask_ : mask_.contiguous();
+  auto grad = grad_.contiguous();
+  auto output = output_.contiguous();
+  auto mask = mask_.contiguous();
 
   grad = grad.dim() == 0 ? grad.view(1) : grad;
   output = output.dim() == 0 ? output.view(1) : output;
@@ -528,7 +534,7 @@ Tensor masked_softmax_backward_cpu(
             false /* LogSoftMax */,
             true /* MaskedSoftmax */>(grad_input, grad, output, dim, mask.data_ptr<bool>());
       });
-  return grad_input;
+  return at::nan_to_num_(grad_input);
 }
 }
 }

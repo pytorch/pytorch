@@ -230,7 +230,9 @@ __global__ void softmax_warp_backward(output_t *gradInput, const input_t *grad, 
     grad += thread_offset;
     output += thread_offset;
     gradInput += thread_offset;
-    mask += thread_offset;
+    if (is_masked) {
+        mask += thread_offset;
+    }
 
     // The nested loops over WARP_BATCH and then WARP_ITERATIONS can be simplified to one loop,
     // but I think doing so would obfuscate the logic of the algorithm, thus I chose to keep
@@ -240,7 +242,6 @@ __global__ void softmax_warp_backward(output_t *gradInput, const input_t *grad, 
     // load data from global memory
     acc_t grad_reg[WARP_BATCH][WARP_ITERATIONS];
     acc_t output_reg[WARP_BATCH][WARP_ITERATIONS];
-
     for (int i = 0;  i < WARP_BATCH;  ++i) {
         int batch_element_count = (i >= local_batches) ? 0 : element_count;
         for (int it = 0;  it < WARP_ITERATIONS;  ++it) {
