@@ -127,7 +127,7 @@ struct has_overloaded_addressof {
     return true;
   }
 
-  constexpr static bool value = has_overload<T>(true);
+  const static bool value = has_overload<T>(true);
 };
 
 template <typename T, TR2_OPTIONAL_REQUIRES(!has_overloaded_addressof<T>)>

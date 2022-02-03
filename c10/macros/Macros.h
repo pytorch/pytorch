@@ -420,11 +420,6 @@ __host__ __device__
 #define IS_NOT_GCC5_CONSTEXPR 1
 #endif
 
-#if defined(__CUDA_ARCH__)
-#if defined(_MSC_VER) && defined(__CUDACC__)
-#define CONSTEXPR_EXCEPT_WIN_CUDA const
-#define C10_HOST_CONSTEXPR_EXCEPT_WIN_CUDA __host__
-
 // Note [static constexpr char* members for windows NVCC]
 // The Windows NVCC compiler doesn't handle static constexpr class members,
 // although it's fixed in a later version.
@@ -450,36 +445,43 @@ __host__ __device__
 //
 // This gives us a small perf hit for any code that wants to access these field
 // members, but right now it isn't used in any perf-critical code paths.
-#define STATIC_CONSTEXPR_STR_INL_EXCEPT_WIN_CUDA(field, val) \
-  static const char* field;
-#define STATIC_CONST_STR_OUT_OF_LINE_FOR_WIN_CUDA(cls, field, val) \
-  const char* cls::field = val;
-#else
-#define CONSTEXPR_EXCEPT_WIN_CUDA constexpr
-#define C10_HOST_CONSTEXPR_EXCEPT_WIN_CUDA __host__
 
-#define STATIC_CONSTEXPR_STR_INL_EXCEPT_WIN_CUDA(field, val) \
-  static constexpr const char* field = val;
-#define STATIC_CONST_STR_OUT_OF_LINE_FOR_WIN_CUDA(cls, field, val)
-#endif
-#else
-#if defined(_MSC_VER) && defined(__CUDACC__)
-#define CONSTEXPR_EXCEPT_WIN_CUDA const
-#define C10_HOST_CONSTEXPR_EXCEPT_WIN_CUDA
+// clang-format off
+#if defined(__CUDA_ARCH__)
+  #if defined(__CUDACC__)
+    #define CONSTEXPR_EXCEPT_WIN_CUDA const
+    #define C10_HOST_CONSTEXPR_EXCEPT_WIN_CUDA __host__
+    #define STATIC_CONSTEXPR_STR_INL_EXCEPT_WIN_CUDA(field, val) \
+      static const char* field;
+    #define STATIC_CONST_STR_OUT_OF_LINE_FOR_WIN_CUDA(cls, field, val) \
+      const char* cls::field = val;
+  #else
+    #define CONSTEXPR_EXCEPT_WIN_CUDA constexpr
+    #define C10_HOST_CONSTEXPR_EXCEPT_WIN_CUDA __host__
 
-#define STATIC_CONSTEXPR_STR_INL_EXCEPT_WIN_CUDA(field, val) \
-  static const char* field;
-#define STATIC_CONST_STR_OUT_OF_LINE_FOR_WIN_CUDA(cls, field, val) \
-  const char* cls::field = val;
+    #define STATIC_CONSTEXPR_STR_INL_EXCEPT_WIN_CUDA(field, val) \
+      static constexpr const char* field = val;
+    #define STATIC_CONST_STR_OUT_OF_LINE_FOR_WIN_CUDA(cls, field, val)
+  #endif
 #else
-#define CONSTEXPR_EXCEPT_WIN_CUDA constexpr
-#define C10_HOST_CONSTEXPR_EXCEPT_WIN_CUDA constexpr
+  #if defined(__CUDACC__)
+    #define CONSTEXPR_EXCEPT_WIN_CUDA const
+    #define C10_HOST_CONSTEXPR_EXCEPT_WIN_CUDA
 
-#define STATIC_CONSTEXPR_STR_INL_EXCEPT_WIN_CUDA(field, val) \
-  static constexpr const char* field = val;
-#define STATIC_CONST_STR_OUT_OF_LINE_FOR_WIN_CUDA(cls, field, val)
+    #define STATIC_CONSTEXPR_STR_INL_EXCEPT_WIN_CUDA(field, val) \
+      static const char* field;
+    #define STATIC_CONST_STR_OUT_OF_LINE_FOR_WIN_CUDA(cls, field, val) \
+      const char* cls::field = val;
+  #else
+    #define CONSTEXPR_EXCEPT_WIN_CUDA constexpr
+    #define C10_HOST_CONSTEXPR_EXCEPT_WIN_CUDA constexpr
+
+    #define STATIC_CONSTEXPR_STR_INL_EXCEPT_WIN_CUDA(field, val) \
+      static constexpr const char* field = val;
+    #define STATIC_CONST_STR_OUT_OF_LINE_FOR_WIN_CUDA(cls, field, val)
+  #endif
 #endif
-#endif
+// clang-format on
 
 #ifndef HAS_DEMANGLE
 #if defined(__ANDROID__) || defined(_WIN32) || defined(__EMSCRIPTEN__) || \

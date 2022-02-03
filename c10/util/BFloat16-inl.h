@@ -255,31 +255,31 @@ namespace std {
 template <>
 class numeric_limits<c10::BFloat16> {
  public:
-  static constexpr bool is_signed = true;
-  static constexpr bool is_specialized = true;
-  static constexpr bool is_integer = false;
-  static constexpr bool is_exact = false;
-  static constexpr bool has_infinity = true;
-  static constexpr bool has_quiet_NaN = true;
-  static constexpr bool has_signaling_NaN = true;
-  static constexpr auto has_denorm = numeric_limits<float>::has_denorm;
-  static constexpr auto has_denorm_loss =
-      numeric_limits<float>::has_denorm_loss;
-  static constexpr auto round_style = numeric_limits<float>::round_style;
-  static constexpr bool is_iec559 = false;
-  static constexpr bool is_bounded = true;
-  static constexpr bool is_modulo = false;
-  static constexpr int digits = 8;
-  static constexpr int digits10 = 2;
-  static constexpr int max_digits10 = 4;
-  static constexpr int radix = 2;
-  static constexpr int min_exponent = -125;
-  static constexpr int min_exponent10 = -37;
-  static constexpr int max_exponent = 128;
-  static constexpr int max_exponent10 = 38;
-  static constexpr auto traps = numeric_limits<float>::traps;
-  static constexpr auto tinyness_before =
-      numeric_limits<float>::tinyness_before;
+  static const bool is_signed = true;
+  static const bool is_specialized = true;
+  static const bool is_integer = false;
+  static const bool is_exact = false;
+  static const bool has_infinity = true;
+  static const bool has_quiet_NaN = true;
+  static const bool has_signaling_NaN = true;
+  static const std::float_denorm_style has_denorm =
+      numeric_limits<float>::has_denorm;
+  static const bool has_denorm_loss = numeric_limits<float>::has_denorm_loss;
+  static const std::float_round_style round_style =
+      numeric_limits<float>::round_style;
+  static const bool is_iec559 = false;
+  static const bool is_bounded = true;
+  static const bool is_modulo = false;
+  static const int digits = 8;
+  static const int digits10 = 2;
+  static const int max_digits10 = 4;
+  static const int radix = 2;
+  static const int min_exponent = -125;
+  static const int min_exponent10 = -37;
+  static const int max_exponent = 128;
+  static const int max_exponent10 = 38;
+  static const bool traps = numeric_limits<float>::traps;
+  static const bool tinyness_before = numeric_limits<float>::tinyness_before;
 
   static constexpr c10::BFloat16 min() {
     return c10::BFloat16(0x0080, c10::BFloat16::from_bits());

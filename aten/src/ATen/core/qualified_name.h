@@ -106,7 +106,7 @@ struct QualifiedName {
   }
 
  private:
-  static constexpr char delimiter_ = '.';
+  static const char delimiter_ = '.';
 
   // Helper for cacheAccessors() below.
   template<typename T>

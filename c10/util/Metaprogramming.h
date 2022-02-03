@@ -27,7 +27,7 @@ struct function_traits<Result(Args...)> {
   using func_type = Result(Args...);
   using return_type = Result;
   using parameter_types = typelist::typelist<Args...>;
-  static constexpr auto number_of_parameters = sizeof...(Args);
+  static const size_t number_of_parameters = sizeof...(Args);
 };
 
 /**

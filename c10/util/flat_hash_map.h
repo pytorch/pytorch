@@ -169,7 +169,7 @@ struct sherwood_v3_entry {
   }
 
   int8_t distance_from_desired = -1;
-  static constexpr int8_t special_end_value = 0;
+  static const int8_t special_end_value = 0;
   union {
     T value;
   };
