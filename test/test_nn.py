@@ -16054,7 +16054,7 @@ class TestNNDeviceType(NNTestCase):
     def test_masked_softmax_grad(self, device):
         shapes = [(1, 1, 32), (3, 16, 310), (12, 4, 1024), (4, 2, 1200)]
         for shape in shapes:
-            dims = [0, len(shape)-1] if len(shape) > 0 else [0]
+            dims = [0, len(shape) - 1] if len(shape) > 0 else [0]
             for dim in dims:
                 input = torch.randn(shape, requires_grad=True)
                 mask = torch.randint(0, 2, shape).bool()
