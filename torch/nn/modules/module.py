@@ -1498,17 +1498,16 @@ class Module:
                                self.__class__.__name__, "\n\t".join(error_msgs)))
         return _IncompatibleKeys(missing_keys, unexpected_keys)
 
-    def _named_members(self, get_members_fn, prefix='', recurse=True, remove_duplicate=True):
+    def _named_members(self, get_members_fn, prefix='', recurse=True):
         r"""Helper method for yielding various names + members of modules."""
         memo = set()
-        modules = self.named_modules(prefix=prefix, remove_duplicate=remove_duplicate) if recurse else [(prefix, self)]
+        modules = self.named_modules(prefix=prefix) if recurse else [(prefix, self)]
         for module_prefix, module in modules:
             members = get_members_fn(module)
             for k, v in members:
                 if v is None or v in memo:
                     continue
-                if remove_duplicate:
-                    memo.add(v)
+                memo.add(v)
                 name = module_prefix + ('.' if module_prefix else '') + k
                 yield name, v
 
@@ -1536,10 +1535,7 @@ class Module:
         for name, param in self.named_parameters(recurse=recurse):
             yield param
 
-    def named_parameters(self,
-                         prefix: str = '',
-                         recurse: bool = True,
-                         remove_duplicate: bool = True) -> Iterator[Tuple[str, Parameter]]:
+    def named_parameters(self, prefix: str = '', recurse: bool = True) -> Iterator[Tuple[str, Parameter]]:
         r"""Returns an iterator over module parameters, yielding both the
         name of the parameter as well as the parameter itself.
 
@@ -1548,9 +1544,6 @@ class Module:
             recurse (bool): if True, then yields parameters of this module
                 and all submodules. Otherwise, yields only parameters that
                 are direct members of this module.
-            remove_duplicate (bool): if True, then removes parameters
-                that are duplicates of each other. For example, if two
-                parameters are tied, it'll only return one.
 
         Yields:
             (string, Parameter): Tuple containing the name and parameter
@@ -1564,7 +1557,7 @@ class Module:
         """
         gen = self._named_members(
             lambda module: module._parameters.items(),
-            prefix=prefix, recurse=recurse, remove_duplicate=remove_duplicate)
+            prefix=prefix, recurse=recurse)
         for elem in gen:
             yield elem
 
@@ -1590,7 +1583,7 @@ class Module:
         for _, buf in self.named_buffers(recurse=recurse):
             yield buf
 
-    def named_buffers(self, prefix: str = '', recurse: bool = True, remove_duplicate: bool = True) -> Iterator[Tuple[str, Tensor]]:
+    def named_buffers(self, prefix: str = '', recurse: bool = True) -> Iterator[Tuple[str, Tensor]]:
         r"""Returns an iterator over module buffers, yielding both the
         name of the buffer as well as the buffer itself.
 
@@ -1599,9 +1592,6 @@ class Module:
             recurse (bool): if True, then yields buffers of this module
                 and all submodules. Otherwise, yields only buffers that
                 are direct members of this module.
-            remove_duplicate (bool): if True, then removes buffers
-                that are duplicates of each other. For example, if two
-                buffers are tied, it'll only return one.
 
         Yields:
             (string, torch.Tensor): Tuple containing the name and buffer
@@ -1615,7 +1605,7 @@ class Module:
         """
         gen = self._named_members(
             lambda module: module._buffers.items(),
-            prefix=prefix, recurse=recurse, remove_duplicate=remove_duplicate)
+            prefix=prefix, recurse=recurse)
         for elem in gen:
             yield elem
 
