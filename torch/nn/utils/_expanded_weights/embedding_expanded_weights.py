@@ -10,14 +10,16 @@ class EmbeddingPerSampleGrad(torch.autograd.Function):
     def forward(ctx, *expanded_args):
         if len(expanded_args[0].shape) == 1:
             raise RuntimeError(f"Expanded Weights needs an input with a batch size, got a 1D tensor, {expanded_args[0]}")
-        output, expanded_args, aux_outputs = forward_helper(F.embedding, expanded_args, 1)
+        output, expanded_args, expanded_kwargs, aux_outputs = forward_helper(F.embedding, expanded_args, 1)
         ctx.args = expanded_args
+        ctx.kwargs = expanded_kwargs
         ctx.aux_outputs = aux_outputs
         return output
 
     @staticmethod
     def backward(ctx, grad_output):
-        (input, weight, padding_idx, _, _, scale_grad_by_freq, sparse) = ctx.args
+        input, weight = ctx.args
+        padding_idx, scale_grad_by_freq, sparse = ctx.kwargs['padding_idx'], ctx.kwargs['scale_grad_by_freq'], ctx.kwargs['sparse']
 
         def input_grad(padding_idx):
             if padding_idx is not None:
@@ -49,7 +51,7 @@ class EmbeddingPerSampleGrad(torch.autograd.Function):
         results = []
         results.append(grad_if_exists_for_input(input, partial(input_grad, padding_idx)))
         # weight doesn't compute batched gradients; no other arguments nor was_expanded are differentiable
-        results = results + [None] * (len(ctx.args) - 1)
+        results = results + [None] * (len(ctx.args) + len(ctx.kwargs))
 
         # set grad_sample field for weight with per sample gradients
         set_grad_sample_if_exists(weight, weight_per_sample_grad)

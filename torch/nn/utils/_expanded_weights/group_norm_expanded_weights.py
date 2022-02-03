@@ -8,8 +8,9 @@ from .expanded_weights_utils import \
 class GroupNormPerSampleGrad(torch.autograd.Function):
     @staticmethod
     def forward(ctx, *expanded_args):
-        output, expanded_args, aux_outputs = forward_helper(torch._group_norm_all_outputs, expanded_args, 1)
+        output, expanded_args, expanded_kwargs, aux_outputs = forward_helper(torch._group_norm_all_outputs, expanded_args, 1)
         ctx.args = expanded_args
+        ctx.kwargs = expanded_kwargs
         ctx.aux_outputs = aux_outputs
         return output[0]  # original function returns a single element, forward_helper returns a tuple
 
@@ -27,14 +28,14 @@ class GroupNormPerSampleGrad(torch.autograd.Function):
             input_grad_fn = torch.ops.aten.native_group_norm_backward
             return input_grad_fn(grad_output_c, input_c, mean, rstd, weight_c, N, C, HxW, num_groups, (True, False, False))[0]
 
-        (input, num_groups, weight, bias, eps) = ctx.args
-
-        (mean, rstd) = ctx.aux_outputs
+        input, num_groups = ctx.args
+        weight, bias, eps = ctx.kwargs['weight'], ctx.kwargs['bias'], ctx.kwargs['eps']
+        mean, rstd = ctx.aux_outputs
 
         results = []
         results.append(grad_if_exists_for_input(input, input_grad))
         # weight and bias don't compute batched gradients; no other arguments are differentiable
-        results = results + [None] * (len(ctx.args) - 1)
+        results = results + [None] * (len(ctx.args) + len(ctx.kwargs))
 
         # set grad_sample field for weight and bias with per sample gradients
         set_grad_sample_if_exists(weight,

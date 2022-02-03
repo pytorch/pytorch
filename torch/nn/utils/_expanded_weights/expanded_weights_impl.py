@@ -31,8 +31,7 @@ class ExpandedWeight(torch.Tensor):
     handled_functions = HANDLED_FUNCTIONS
 
     # needed for conv2d default kwargs
-    conv_kwarg_options = ['stride', 'padding', 'dilation', 'groups']
-    conv_kwarg_defaults = {'stride': 1, 'padding': 0, 'dilation': 1, 'groups': 1}
+    conv_kwarg_defaults = {'bias': None, 'stride': 1, 'padding': 0, 'dilation': 1, 'groups': 1}
 
     def __new__(cls, orig_weight, _):
         if not isinstance(orig_weight, torch.Tensor):
@@ -49,11 +48,12 @@ class ExpandedWeight(torch.Tensor):
         conv_functions = (torch.nn.functional.conv1d, torch.nn.functional.conv2d, torch.nn.functional.conv3d)
         if func in conv_functions:
             remaining_kwargs = 7 - len(args)
-            remaining_kwargs_options = cls.conv_kwarg_options[4 - remaining_kwargs:]
-            ordered_kwargs = tuple(kwargs.get(key, cls.conv_kwarg_defaults[key]) for key in remaining_kwargs_options)
-            return cls.handled_functions[func].apply(*(args + ordered_kwargs))
+            kwarg_keys = tuple(cls.conv_kwarg_defaults.keys())
+            remaining_kwargs_options = kwarg_keys[5 - remaining_kwargs:]
+            kwargs = {key: cls.conv_kwarg_defaults[key] for key in remaining_kwargs_options} | kwargs
+            return cls.handled_functions[func].apply(*(args + tuple(kwargs.values())), kwarg_keys)
         if func in cls.handled_functions:
-            return cls.handled_functions[func].apply(*(args + tuple(kwargs.values())))
+            return cls.handled_functions[func].apply(*(args + tuple(kwargs.values())), tuple(kwargs.keys()))
         # We cannot use a fallback here because we do not know the batch dimension for any regular tensor inputs,
         # i.e. torch.add(torch.Tensor, ExpandedWeight)
         raise RuntimeError(f"Expanded Weights encountered but cannot handle function {func.__name__}")

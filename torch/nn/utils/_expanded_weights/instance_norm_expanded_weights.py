@@ -11,16 +11,19 @@ class InstanceNormPerSampleGrad(torch.autograd.Function):
     @staticmethod
     def forward(ctx, *expanded_args):
         instance_norm = partial(torch._instance_norm_all_outputs, cudnn_enabled=True)
-        output, expanded_args, aux_outputs = forward_helper(instance_norm, expanded_args, 1)
+        output, expanded_args, expanded_kwargs, aux_outputs = forward_helper(instance_norm, expanded_args, 1)
         ctx.args = expanded_args
+        ctx.kwargs = expanded_kwargs
         ctx.aux_outputs = aux_outputs
         return output[0]  # original function returns a single element, forward_helper returns a tuple
 
 
     @staticmethod
     def backward(ctx, grad_output):
-        (input, running_mean, running_var, weight, bias, _, _, eps) = ctx.args
-        (mean, rstd, reserve, idx) = ctx.aux_outputs
+        input = ctx.args[0]
+        running_mean, running_var = ctx.kwargs['running_mean'], ctx.kwargs['running_var']
+        weight, bias, eps = ctx.kwargs['weight'], ctx.kwargs['bias'], ctx.kwargs['eps']
+        mean, rstd, reserve, idx = ctx.aux_outputs
 
         def input_grad():
             b = input.shape[0]
@@ -40,7 +43,7 @@ class InstanceNormPerSampleGrad(torch.autograd.Function):
         results = []
         results.append(grad_if_exists_for_input(input, input_grad))
         # weight and bias don't compute batched gradients; no other arguments are differentiable
-        results = results + [None] * (len(ctx.args) - 1)
+        results = results + [None] * (len(ctx.args) + len(ctx.kwargs))
 
         # set grad_sample field for weight and bias with per sample gradients
         set_grad_sample_if_exists(weight,

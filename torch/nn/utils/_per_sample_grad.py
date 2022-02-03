@@ -48,5 +48,10 @@ def call_for_per_sample_grads(module, batch_size, args, kwargs=None):
         raise RuntimeError(f"Batch size passed must be an integer, got {type(batch_size).__name__}")
     if batch_size < 1:
         raise RuntimeError(f"Batch size must be positive, got {batch_size}")
+    for weight in module.parameters():
+        if hasattr(weight, "grad_sample") and weight.grad_sample is not None:
+            raise RuntimeError("Current Expanded Weights accumulates the gradients, which will be incorrect for multiple "
+                               f"calls without clearing gradients. Please clear out the grad_sample parameter of {weight} or "
+                               "post an issue to pytorch/pytorch to prioritize correct behavior")
     params = {name: maybe_build_expanded_weight(value) for (name, value) in module.named_parameters()}
     return functional_call(module, params, args, kwargs)

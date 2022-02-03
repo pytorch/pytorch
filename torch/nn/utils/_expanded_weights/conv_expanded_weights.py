@@ -14,8 +14,9 @@ class Conv1dPerSampleGrad(torch.autograd.Function):
         if any([isinstance(i, str) for i in expanded_args]):
             raise RuntimeError("Expanded Weights does not support convolution padding as a string. "
                                "Please file an issue to prioritize support")
-        output, expanded_args, aux_outputs = forward_helper(F.conv1d, expanded_args, 1)
+        output, expanded_args, expanded_kwargs, aux_outputs = forward_helper(F.conv1d, expanded_args, 1)
         ctx.args = expanded_args
+        ctx.kwargs = expanded_kwargs
         ctx.aux_outputs = aux_outputs
         return output
 
@@ -31,8 +32,9 @@ class Conv2dPerSampleGrad(torch.autograd.Function):
         if any([isinstance(i, str) for i in expanded_args]):
             raise RuntimeError("Expanded Weights does not support convolution padding as a string. "
                                "Please file an issue to prioritize support")
-        output, expanded_args, aux_outputs = forward_helper(F.conv2d, expanded_args, 1)
+        output, expanded_args, expanded_kwargs, aux_outputs = forward_helper(F.conv2d, expanded_args, 1)
         ctx.args = expanded_args
+        ctx.kwargs = expanded_kwargs
         ctx.aux_outputs = aux_outputs
         return output
 
@@ -48,8 +50,9 @@ class Conv3dPerSampleGrad(torch.autograd.Function):
         if any([isinstance(i, str) for i in expanded_args]):
             raise RuntimeError("Expanded Weights does not support convolution padding as a string. "
                                "Please file an issue to prioritize support")
-        output, expanded_args, aux_outputs = forward_helper(F.conv3d, expanded_args, 1)
+        output, expanded_args, expanded_kwargs, aux_outputs = forward_helper(F.conv3d, expanded_args, 1)
         ctx.args = expanded_args
+        ctx.kwargs = expanded_kwargs
         ctx.aux_outputs = aux_outputs
         return output
 

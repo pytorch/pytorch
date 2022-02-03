@@ -41,7 +41,9 @@ def conv_backward(func, ctx, grad_output):
         else:
             return param
 
-    (input, weight, bias, stride, padding, dilation, groups) = ctx.args
+    input, weight = ctx.args
+    bias = ctx.kwargs['bias']
+    stride, padding, dilation, groups = ctx.kwargs['stride'], ctx.kwargs['padding'], ctx.kwargs['dilation'], ctx.kwargs['groups']
     stride, padding, dilation = expand(stride), expand(padding), expand(dilation)
 
     kernel_size = []
@@ -53,7 +55,7 @@ def conv_backward(func, ctx, grad_output):
 
     results.append(grad_if_exists_for_input(input, compute_input_grad))
     # weight and bias don't compute batched gradients; no other arguments are differentiable
-    results = results + [None] * (len(ctx.args) - 1)
+    results = results + [None] * (len(ctx.args) + len(ctx.kwargs))
 
     # set grad_sample field for weight and bias with per sample gradients
     set_grad_sample_if_exists(weight, weight_grad_sample)

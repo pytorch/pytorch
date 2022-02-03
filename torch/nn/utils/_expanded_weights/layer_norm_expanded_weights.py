@@ -14,8 +14,9 @@ class LayerNormPerSampleGrad(torch.autograd.Function):
         if len(input.shape) <= len(normalized_shape):
             raise RuntimeError("Expanded Weights: Layer norm should not normalize over batch dimension for per sample gradient"
                                f"computations but got that normalized shape, {normalized_shape}, matched input shape.")
-        output, expanded_args, aux_outputs = forward_helper(torch.native_layer_norm, expanded_args, 1)
+        output, expanded_args, expanded_kwargs, aux_outputs = forward_helper(torch.native_layer_norm, expanded_args, 1)
         ctx.args = expanded_args
+        ctx.kwargs = expanded_kwargs
         ctx.aux_outputs = aux_outputs
         return output[0]  # original function returns a single element, forward_helper returns a tuple
 
@@ -31,13 +32,14 @@ class LayerNormPerSampleGrad(torch.autograd.Function):
         def weight_per_sample_grad(weight):
             return sum_over_all_but_batch_and_last_n(F.layer_norm(input, normalized_shape, eps=eps) * grad_output, weight.dim())
 
-        (input, normalized_shape, weight, bias, eps) = ctx.args
-        (mean, rstd) = ctx.aux_outputs
+        input, normalized_shape = ctx.args
+        weight, bias, eps = ctx.kwargs['weight'], ctx.kwargs['bias'], ctx.kwargs['eps']
+        mean, rstd = ctx.aux_outputs
 
         results = []
         results.append(grad_if_exists_for_input(input, input_grad))
         # weight and bias don't compute batched gradients; no other arguments are differentiable
-        results = results + [None] * (len(ctx.args) - 1)
+        results = results + [None] * (len(ctx.args) + len(ctx.kwargs))
 
         # set grad_sample field for weight and bias with per sample gradients
         results.append(set_grad_sample_if_exists(weight, weight_per_sample_grad))
