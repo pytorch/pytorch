@@ -92,7 +92,6 @@ def _lower_weighted_ref_module(model: QuantizedGraphModule) -> QuantizedGraphMod
             model.graph.erase_node(q_node)
             model.graph.erase_node(scale_node)
             model.graph.erase_node(zero_point_node)
-        model.recompile()
     return model
 
 def special_pattern_replacement(model: QuantizedGraphModule) -> QuantizedGraphModule:
@@ -129,8 +128,6 @@ def special_pattern_replacement(model: QuantizedGraphModule) -> QuantizedGraphMo
                     model.graph.erase_node(scale_node)
                     model.graph.erase_node(zero_point_node)
 
-
-    model.recompile()
     return model
 
 def _lower_to_native_backend(model: QuantizedGraphModule) -> QuantizedGraphModule:
@@ -140,7 +137,8 @@ def _lower_to_native_backend(model: QuantizedGraphModule) -> QuantizedGraphModul
     """
     model = _lower_weighted_ref_module(model)
     for pattern, replacement in get_fbgemm_patterns_and_replacements():
-        subgraph_rewriter_FORKED_DO_NOT_USE.replace_pattern(model, pattern, replacement)
+        subgraph_rewriter_FORKED_DO_NOT_USE.replace_pattern(model, pattern, replacement, recompile=False)
     special_pattern_replacement(model)
     model.graph.lint()
+    model.recompile()
     return model

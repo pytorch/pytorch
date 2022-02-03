@@ -132,7 +132,7 @@ def _replace_submodules(gm: GraphModule, replacement: torch.nn.Module) -> None:
     gm.graph.lint()
 
 @compatibility(is_backward_compatible=True)
-def replace_pattern(gm: GraphModule, pattern: Callable, replacement: Callable) -> List[Match]:
+def replace_pattern(gm: GraphModule, pattern: Callable, replacement: Callable, recompile: bool=True) -> List[Match]:
     """
     Matches all possible non-overlapping sets of operators and their
     data dependencies (``pattern``) in the Graph of a GraphModule
@@ -435,7 +435,8 @@ def replace_pattern(gm: GraphModule, pattern: Callable, replacement: Callable) -
 
     # Update the passed-in GraphModule to reflect the new state of
     # `original_graph`
-    gm.recompile()
+    if recompile:
+        gm.recompile()
 
     # If `replacement` was an nn.Module, we'll need to make sure that
     # all the submodules have been copied over correctly
