@@ -15,7 +15,7 @@ from typing import Any, Callable, Dict, List, Optional, Set, Type
 import torch
 import torch.distributed as dist
 from torch.distributed.algorithms.join import Join, Joinable, JoinHook
-from torch.distributed.optim import functional_optim_map
+from torch.distributed.optim.utils import functional_optim_map
 from torch.optim import Optimizer
 
 __all__ = ["ZeroRedundancyOptimizer"]
