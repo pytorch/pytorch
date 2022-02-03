@@ -104,6 +104,9 @@ void TensorImpl::_set_fw_grad(
   autograd_meta_->set_fw_grad(new_grad, self, level, is_inplace_op);
 }
 
+// some compiler does not generate the destructor correctly
+TensorImpl::~TensorImpl() = default;
+
 TensorImpl::TensorImpl(
     Storage&& storage,
     DispatchKeySet key_set,
