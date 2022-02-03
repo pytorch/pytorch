@@ -7,7 +7,6 @@
 #include <c10/util/UniqueVoidPtr.h>
 #include <c10/util/flat_hash_map.h>
 #include <c10/util/irange.h>
-#include <c10/util/flat_hash_map.h>
 
 #include <cuda_runtime_api.h>
 #include <algorithm>
@@ -408,7 +407,10 @@ class DeviceCachingAllocator {
   // See free() for this thing's purpose
   std::vector<Block*> needs_events_deferred_until_no_capture;
   // outstanding cuda events
-  ska::flat_hash_map<cuda::CUDAStream, std::deque<std::pair<cudaEvent_t, Block*>>> cuda_events;
+  ska::flat_hash_map<
+      cuda::CUDAStream,
+      std::deque<std::pair<cudaEvent_t, Block*>>>
+      cuda_events;
 
   // record used memory.
   size_t total_allocated_memory = 0;
@@ -1242,7 +1244,7 @@ class DeviceCachingAllocator {
     insert_events_deferred_until_no_capture();
 
     for (auto& st : cuda_events) {
-      for (auto &e : st.second) {
+      for (auto& e : st.second) {
         cudaEvent_t event = e.first;
         Block* block = e.second;
 
@@ -1250,8 +1252,7 @@ class DeviceCachingAllocator {
         free_event_internal(event);
 
         block->event_count--;
-        if (block->event_count == 0)
-        {
+        if (block->event_count == 0) {
           free_block(block);
         }
       }
