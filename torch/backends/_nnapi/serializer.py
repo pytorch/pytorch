@@ -153,7 +153,7 @@ class OperandValueSourceType(object):
 # AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_AND_QINTS.
 # TODO: Expose these directly to Python to avoid maintaining this list.
 class TorchScalarTypes(enum.Enum):
-    QUINT8 = 13
+    QUINT8 = 12
 
 
 def approx_equal(lhs, rhs, tolerance=1e-6):
