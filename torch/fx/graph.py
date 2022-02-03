@@ -488,8 +488,9 @@ class Graph:
             g.inserting_before(n) #  set the insert point permanently
 
         Args:
+
             n (Optional[Node]): The node before which to insert. If None this will insert before
-              the beginning of the entire graph.
+                the beginning of the entire graph.
 
         Returns:
             A resource manager that will restore the insert point on ``__exit__``.
@@ -511,8 +512,9 @@ class Graph:
             g.inserting_after(n) #  set the insert point permanently
 
         Args:
+
             n (Optional[Node]): The node before which to insert. If None this will insert after
-              the beginning of the entire graph.
+                the beginning of the entire graph.
 
         Returns:
             A resource manager that will restore the insert point on ``__exit__``.
@@ -698,8 +700,7 @@ class Graph:
                       type_expr: Optional[Any] = None) -> Node:
         """
         Insert a ``call_function`` ``Node`` into the ``Graph``. A ``call_function`` node
-        represents a call to a Python callable, specified by ``the_function``. ``the_function``
-        can be
+        represents a call to a Python callable, specified by ``the_function``.
 
         Args:
 
@@ -716,7 +717,7 @@ class Graph:
             type_expr (Optional[Any]): an optional type annotation representing the
                 Python type the output of this node will have.
 
-        Returns
+        Returns:
 
             The newly created and inserted ``call_function`` node.
 

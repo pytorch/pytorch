@@ -689,13 +689,6 @@ class FunctionInliner : public IRMutator {
       VarPtr func_callee_arg = producer_index_vars_.at(i);
       ExprPtr func_caller_param = dims.at(i);
       if (func_callee_arg == nullptr) {
-        auto param_val = evalInt(func_caller_param);
-        if (!param_val || *param_val != 0) {
-          // We are implicitly assuming that if you have an index of 0, that
-          // must also be inlined into an index of 0.
-          success_ = false;
-          return nullptr;
-        }
         continue;
       }
       auto iter = inline_mapping_.find(func_callee_arg);

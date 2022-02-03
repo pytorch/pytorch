@@ -413,6 +413,7 @@ lazy_tensor_core_sources = [
     "torch/csrc/lazy/core/view_ops/resize.cpp",
     "torch/csrc/lazy/core/view_ops/select.cpp",
     "torch/csrc/lazy/core/view_ops/squeeze.cpp",
+    "torch/csrc/lazy/core/view_ops/unsqueeze.cpp",
     "torch/csrc/lazy/core/view_ops/select_view_update.cpp",
     "torch/csrc/lazy/core/view_ops/view.cpp",
     "torch/csrc/lazy/ts_backend/config.cpp",
@@ -1313,3 +1314,41 @@ aten_native_source_non_codegen_list = [
 # TODO: move the exceptions to proper locations
 # 2. The whole aten native source list includes the list with and without aten codegen process.
 aten_native_source_list = sorted(aten_native_source_non_codegen_list + aten_native_source_codegen_list)
+
+# These are cpp files which need to go in the torch_cuda_cu library
+# .cu files can be found via glob
+aten_cuda_cu_source_list = [
+    "aten/src/ATen/cuda/CUDABlas.cpp",
+    "aten/src/ATen/cuda/CUDASolver.cpp",
+    "aten/src/ATen/cuda/CUDASparseBlas.cpp",
+    "aten/src/ATen/cuda/CublasHandlePool.cpp",
+    "aten/src/ATen/cuda/CusolverDnHandlePool.cpp",
+    "aten/src/ATen/native/cuda/Activation.cpp",
+    "aten/src/ATen/native/cuda/BatchLinearAlgebra.cpp",
+    "aten/src/ATen/native/cuda/BatchLinearAlgebraLib.cpp",
+    "aten/src/ATen/native/cuda/Blas.cpp",
+    "aten/src/ATen/native/cuda/Equal.cpp",
+    "aten/src/ATen/native/cuda/IndexKernel.cpp",
+    "aten/src/ATen/native/cuda/ReduceOps.cpp",
+    "aten/src/ATen/native/cuda/ScanKernels.cpp",
+    "aten/src/ATen/native/cuda/Sort.cpp",
+    "aten/src/ATen/native/cuda/Sorting.cpp",
+    "aten/src/ATen/native/cuda/TensorModeKernel.cpp",
+    "aten/src/ATen/native/cuda/TensorShapeCUDA.cpp",
+    "aten/src/ATen/native/cuda/TensorTopK.cpp",
+    "aten/src/ATen/native/cuda/jit_utils.cpp",
+    "aten/src/ATen/native/sparse/cuda/SparseBlas.cpp",
+    "aten/src/ATen/native/sparse/cuda/SparseBlasImpl.cpp",
+    "aten/src/ATen/native/sparse/cuda/SparseBlasLegacy.cpp",
+    "aten/src/ATen/native/sparse/cuda/SparseCUDABlas.cpp",
+]
+
+# Files using thrust::sort_by_key need to be linked last
+aten_cuda_with_sort_by_key_source_list = [
+    # empty_cuda is needed by torch_cuda_cpp
+    "aten/src/ATen/native/cuda/TensorFactories.cu",
+]
+
+aten_cuda_cu_with_sort_by_key_source_list = [
+    "aten/src/ATen/native/cuda/Unique.cu",
+]
