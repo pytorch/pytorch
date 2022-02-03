@@ -6,6 +6,7 @@ if exist "%TMP_DIR%/ci_scripts/pytorch_env_restore.bat" (
 set PATH=C:\Program Files\CMake\bin;C:\Program Files\7-Zip;C:\ProgramData\chocolatey\bin;C:\Program Files\Git\cmd;C:\Program Files\Amazon\AWSCLI;C:\Program Files\Amazon\AWSCLI\bin;%PATH%
 
 :: Install Miniconda3
+set INSTALLER_DIR=%SCRIPT_HELPERS_DIR%\installation-helpers
 call :retry %INSTALLER_DIR%\install_miniconda3.bat
 
 :retry
