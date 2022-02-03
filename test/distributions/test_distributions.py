@@ -2219,6 +2219,10 @@ class TestDistributions(TestCase):
         df = torch.rand(5, requires_grad=True) + ndim - 1
         df_no_batch = torch.rand([], requires_grad=True) + ndim - 1
         df_multi_batch = torch.rand(6, 5, requires_grad=True) + ndim - 1
+        if scipy.__version__ < (0, 16, 0):
+            df += 1.
+            df_no_batch += 1.
+            df_multi_batch += 1.            
 
         # construct PSD covariance
         tmp = torch.randn(ndim, 10)
@@ -2283,6 +2287,8 @@ class TestDistributions(TestCase):
     def test_wishart_log_prob(self):
         ndim = 3
         df = torch.rand([], requires_grad=True) + ndim - 1
+        if scipy.__version__ < (0, 16, 0):
+            df += 1.
         tmp = torch.randn(ndim, 10)
         cov = (torch.matmul(tmp, tmp.t()) / tmp.size(-1)).requires_grad_()
         prec = cov.inverse().requires_grad_()
@@ -2304,6 +2310,8 @@ class TestDistributions(TestCase):
 
         # Double-check that batched versions behave the same as unbatched
         df = torch.rand(5, requires_grad=True) + ndim - 1
+        if scipy.__version__ < (0, 16, 0):
+            df += 1.
         tmp = torch.randn(5, ndim, 10)
         cov = (tmp.unsqueeze(-2) * tmp.unsqueeze(-3)).mean(-1).requires_grad_()
 
@@ -2322,22 +2330,26 @@ class TestDistributions(TestCase):
         set_rng_seed(0)  # see Note [Randomized statistical tests]
         ndim = 3
         df = torch.rand([], requires_grad=True) + ndim - 1
+        if scipy.__version__ < (0, 16, 0):
+            df += 1.
         tmp = torch.randn(ndim, 10)
         cov = (torch.matmul(tmp, tmp.t()) / tmp.size(-1)).requires_grad_()
         prec = cov.inverse().requires_grad_()
         scale_tril = torch.linalg.cholesky(cov).requires_grad_()
 
+        ref_dist = scipy.stats.wishart(df.item(), cov.detach().numpy())
+
         # Below codes test only cases df > 
         self._check_sampler_sampler(Wishart(df, cov),
-                                    scipy.stats.wishart(df.item(), cov.detach().numpy()),
+                                    ref_dist,
                                     'Wishart(df={}, covariance_matrix={})'.format(df, cov),
                                     multivariate=True)
         self._check_sampler_sampler(Wishart(df, precision_matrix=prec),
-                                    scipy.stats.wishart(df.item(), cov.detach().numpy()),
+                                    ref_dist,
                                     'Wishart(df={}, precision_matrix={})'.format(df, prec),
                                     multivariate=True)
         self._check_sampler_sampler(Wishart(df, scale_tril=scale_tril),
-                                    scipy.stats.wishart(df.item(), cov.detach().numpy()),
+                                    ref_dist,
                                     'Wishart(df={}, scale_tril={})'.format(df, scale_tril),
                                     multivariate=True)
 
@@ -4625,8 +4637,9 @@ class TestAgainstScipy(TestCase):
                 scipy.stats.weibull_min(c=positive_var2[0], scale=positive_var[0])
             ),
             (
-                Wishart(20 + positive_var[0], cov_tensor),  # scipy var for Wishart only supports scalars
-                scipy.stats.wishart(20 + positive_var[0].item(), cov_tensor),
+                # scipy var for Wishart only supports scalars
+                Wishart((19 if scipy.__version__ < (0, 16, 0) else 20) + positive_var[0], cov_tensor),  
+                scipy.stats.wishart((19 if scipy.__version__ < (0, 16, 0) else 20) + positive_var[0].item(), cov_tensor),
             ),
         ]
 
