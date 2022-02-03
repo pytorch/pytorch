@@ -22,7 +22,7 @@ Tensor make_feature_noise(const Tensor& input) {
     (void)i; //Suppress unused variable warning
     sizes.push_back(1);
   }
-  return at::empty(sizes, input.options());
+  return input.new_empty(sizes);
 }
 
 bool is_fused_kernel_acceptable(const Tensor& input, double p) {

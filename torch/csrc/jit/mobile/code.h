@@ -29,7 +29,7 @@ struct Code {
   // function objects, and then append referenced function pointers. This could
   // be done in parseMethods().
   std::vector<mobile::Function*> functions_;
-  size_t register_size_; // Aggregated output size.
+  size_t register_size_ = 0; // Aggregated output size.
 };
 
 } // namespace mobile
