@@ -328,9 +328,9 @@ TEST(StaticRuntime, CanEnableStaticRuntime) {
   )JIT";
 
   EXPECT_TRUE(testCanEnableStaticRuntime(reshape_inplace_script));
-  EXPECT_FALSE(testCanEnableStaticRuntime(for_script));
-  EXPECT_FALSE(testCanEnableStaticRuntime(while_script));
-  EXPECT_FALSE(testCanEnableStaticRuntime(if_script));
+  EXPECT_TRUE(testCanEnableStaticRuntime(for_script));
+  EXPECT_TRUE(testCanEnableStaticRuntime(while_script));
+  EXPECT_TRUE(testCanEnableStaticRuntime(if_script));
   EXPECT_FALSE(testCanEnableStaticRuntime(is_script));
   EXPECT_FALSE(testCanEnableStaticRuntime(is_not_script));
 }
@@ -1428,4 +1428,63 @@ TEST(StaticModule, NotEnoughArgs) {
         return x
   )JIT";
   testStaticModuleThrows(kwargs_src, {}, {});
+}
+
+TEST(CreateOwnedRefsForSpecialValues, TopLevel) {
+  const auto src = R"IR(
+    graph():
+        %c: int = prim::Constant[value=42]()
+        return (%c)
+  )IR";
+
+  auto graph = getGraphFromIR(src);
+  CreateOwnedRefsForSpecialValues(*graph);
+  EXPECT_TRUE(hasNodeWithKind(graph, "static_runtime::create_owned_ref"));
+}
+
+TEST(CreateOwnedRefsForSpecialValues, ValueFromOuterScope) {
+  const auto src = R"IR(
+    graph(%cond: bool, %1: int):
+        %c: int = aten::add(%1, %1)
+        %x: int = prim::If(%c)
+          block0():
+            -> (%c)
+          block1():
+            -> (%c)
+        return (%x)
+  )IR";
+
+  auto graph = getGraphFromIR(src);
+  CreateOwnedRefsForSpecialValues(*graph);
+  EXPECT_TRUE(hasNodeWithKind(graph, "static_runtime::create_owned_ref"));
+}
+
+TEST(ForceNonEmptyOutputs, TwoSubBlocks) {
+  const auto src = R"IR(
+    graph(%cond: bool):
+        %lst : int[] = prim::ListConstruct()
+        %1 : int = prim::Constant[value=1]()
+        %2 : int = prim::Constant[value=2]()
+        prim::If(%cond)
+          block0():
+            aten::append(%lst, %1)
+            -> ()
+          block1():
+            aten::append(%lst, %2)
+            -> ()
+        return (%lst)
+  )IR";
+
+  auto graph = getGraphFromIR(src);
+  ForceNonEmptyOutputs(*graph);
+
+  for (auto* node : graph->nodes()) {
+    if (node->blocks().empty()) {
+      continue;
+    }
+    EXPECT_EQ(node->outputs().size(), 1);
+    for (auto* sub_block : node->blocks()) {
+      EXPECT_EQ(sub_block->outputs().size(), 1);
+    }
+  }
 }
