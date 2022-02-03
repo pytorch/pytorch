@@ -1,6 +1,5 @@
 load("@bazel_skylib//rules:common_settings.bzl", "bool_flag")
 load("@rules_cc//cc:defs.bzl", "cc_library", "cc_test")
-load("//third_party:substitution.bzl", "header_template_rule")
 load("//tools/config:defs.bzl", "if_cuda")
 
 # The bool_flag targets allow configuring the build from the
@@ -27,28 +26,17 @@ config_setting(
     flag_values = {":use_glog": "true"},
 )
 
-header_template_rule(
-    name = "cuda_cmake_macros_h",
-    src = "cuda/impl/cuda_cmake_macros.h.in",
-    out = "cuda/impl/cuda_cmake_macros.h",
-    substitutions = {
-        "cmakedefine": "define",
-    },
-)
-
 cc_library(
     name = "headers",
     hdrs = [
         "//c10/core:headers",
+        "//c10/cuda:headers",
         "//c10/mobile:headers",
         "//c10/util:headers",
-    ] + glob([
-        "cuda/*.h",
-        "cuda/impl/*.h",
-    ]),
+    ],
     deps = [
-        ":cuda_cmake_macros_h",
         "//c10/core:alignment",
+        "//c10/cuda:Macros",
         "//c10/macros",
     ] + select({
         ":using_gflags": ["@com_github_gflags_gflags//:gflags"],
@@ -62,14 +50,6 @@ cc_library(
 
 cc_library(
     name = "c10",
-    srcs = if_cuda(
-        glob([
-            "cuda/*.cpp",
-            "cuda/impl/*.cpp",
-        ]),
-        [],
-    ),
-    local_defines = ["C10_BUILD_MAIN_LIB"],
     deps = [
         ":headers",
         "//c10/core:CPUAllocator",
@@ -82,7 +62,7 @@ cc_library(
         "//c10/util:base",
         "//c10/util:typeid",
     ] + if_cuda(
-        ["@cuda"],
+        ["//c10/cuda"],
         [],
     ),
     alwayslink = True,
