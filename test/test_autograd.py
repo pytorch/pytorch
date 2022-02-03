@@ -4065,6 +4065,8 @@ class TestAutograd(TestCase):
                 gradcheck(bad_fn, (x, y), check_forward_ad=True, fast_mode=fast_mode)
 
     def test_gradcheck_forward_ad_respects_requires_grad_but_runs_with_no_requires_grad(self):
+        # Currently requires_grad is used as a easy way for gradcheck to know
+        # which inputs of the function are meant to be differentiable
         vjp_count = [0]
         jvp_count = [0]
 
@@ -4106,8 +4108,9 @@ class TestAutograd(TestCase):
         vjp_count = [0]
         jvp_count = [0]
 
-        # Repeat the previous one, except, mark one with requires_grad=False
-        # NB: _test_undefined_forward_mode is (+1), only for single input, not (+2)!
+        # Repeat the previous test except we mark one input with requires_grad=False
+        # NB: _test_undefined_forward_mode is only (+1), when function has single differentiable input, not (+2)!
+        #     Otherwise, other counts are halved.
         x = torch.rand(2, dtype=torch.double, requires_grad=True)
         y = torch.rand(2, dtype=torch.double, requires_grad=False)
         gradcheck(UserFn.apply, (x, y), check_forward_ad=True, check_undefined_grad=True, check_backward_ad=False,
