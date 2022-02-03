@@ -36,7 +36,8 @@ ALLOW_LIST = [
     ("prim::Concat", datetime.date(9999, 1, 1)),
     # Internal, profiler-specific ops
     ("profiler::_call_end_callbacks_on_jit_fut*", datetime.date(9999, 1, 1)),
-    ("profiler::_record_function_enter", datetime.date(9999, 1, 1)),
+    ("profiler::_record_function_enter", datetime.date(2023, 1, 1)),
+    ("profiler::_record_function_exit", datetime.date(2023, 1, 1)),
     ("aten::linalg_matrix_rank", datetime.date(2021, 10, 30)),
     ("aten::linalg_pinv", datetime.date(2021, 10, 30)),
     ("aten::_cholesky_helper", datetime.date(9999, 1, 1)),
