@@ -11,8 +11,11 @@ class FileListerIterDataPipe(IterDataPipe[str]):
 
     Args:
         root: Root directory or a sequence of root directories
-        mask: Unix style filter string or string list for filtering file name(s)
+        masks: Unix style filter string or string list for filtering file name(s)
+        recursive: Whether to return pathname from nested directories or not
         abspath: Whether to return relative pathname or absolute pathname
+        non_deterministic: Whether to return pathname in sorted order or not.
+            If False, the results yielded from each root directory will be sorted
         length: Nominal length of the datapipe
     """
 
