@@ -51,6 +51,7 @@ class TORCH_API IRMutator {
   virtual StmtPtr mutate(AtomicAddPtr v);
   virtual StmtPtr mutate(SyncThreadsPtr v);
   virtual StmtPtr mutate(ExternalCallPtr v);
+  virtual StmtPtr mutate(ExternalCall2Ptr v);
 
   virtual StmtPtr mutate(AllocatePtr v);
   virtual StmtPtr mutate(FreePtr v);

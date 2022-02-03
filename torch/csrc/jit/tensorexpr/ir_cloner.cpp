@@ -321,6 +321,28 @@ StmtPtr IRCloner::mutate(ExternalCallPtr v) {
   return alloc<ExternalCall>(buf_new, v->func_name(), buf_args_new, args_new);
 }
 
+StmtPtr IRCloner::mutate(ExternalCall2Ptr v) {
+  std::vector<BufPtr> buf_out_args_new;
+  buf_out_args_new.reserve(v->buf_out_args().size());
+  for (BufPtr buf_out_arg : v->buf_out_args()) {
+    buf_out_args_new.push_back(to<Buf>(buf_out_arg->accept_mutator(this)));
+  }
+
+  std::vector<BufPtr> buf_args_new;
+  buf_args_new.reserve(v->buf_args().size());
+  for (BufPtr buf_arg : v->buf_args()) {
+    buf_args_new.push_back(to<Buf>(buf_arg->accept_mutator(this)));
+  }
+  std::vector<ExprPtr> args_new;
+  args_new.reserve(v->args().size());
+  for (ExprPtr arg : v->args()) {
+    args_new.push_back(arg->accept_mutator(this));
+  }
+
+  return alloc<ExternalCall2>(
+      v->func_name(), buf_out_args_new, buf_args_new, args_new);
+}
+
 StmtPtr IRCloner::mutate(LetPtr v) {
   auto value_new = v->value()->accept_mutator(this);
   return alloc<Let>(v->var(), value_new);

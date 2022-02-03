@@ -552,6 +552,37 @@ void IRPrinter::visit(ExternalCallPtr v) {
   os() << "})";
 }
 
+void IRPrinter::visit(ExternalCall2Ptr v) {
+  int i = 0;
+  for (BufPtr buf_out_arg : v->buf_out_args()) {
+    if (i++ > 0) {
+      os() << ", ";
+    }
+    os() << *buf_out_arg;
+  }
+
+  os() << " = " << v->func_name() << "(";
+
+  os() << "buf_args={";
+  i = 0;
+  for (BufPtr buf_arg : v->buf_args()) {
+    if (i++ > 0) {
+      os() << ", ";
+    }
+    os() << *buf_arg;
+  }
+
+  os() << "}, args={";
+  i = 0;
+  for (ExprPtr arg : v->args()) {
+    if (i++ > 0) {
+      os() << ", ";
+    }
+    os() << *arg;
+  }
+  os() << "})";
+}
+
 void IRPrinter::emitIndent() {
   os() << std::setw(2 * indent_) << "";
 }

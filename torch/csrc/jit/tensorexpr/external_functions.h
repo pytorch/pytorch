@@ -16,6 +16,7 @@
   _(nnc_aten_addmm)                   \
   _(nnc_aten_quantized_conv1d)        \
   _(nnc_aten_quantized_conv2d)        \
+  _(nnc_aten_quantized_conv2d_out)    \
   _(nnc_aten_quantized_conv2d_relu)   \
   _(nnc_aten_quantized_linear)        \
   _(nnc_aten_quantized_linear_relu)   \

@@ -55,6 +55,7 @@ class TORCH_API IRPrinter : public IRVisitor {
   void visit(AtomicAddPtr v) override;
   void visit(SyncThreadsPtr v) override;
   void visit(ExternalCallPtr v) override;
+  void visit(ExternalCall2Ptr v) override;
   void visit(StorePtr v) override;
   void visit(ForPtr v) override;
   void visit(CondPtr v) override;

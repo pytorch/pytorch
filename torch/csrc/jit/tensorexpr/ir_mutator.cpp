@@ -475,6 +475,50 @@ StmtPtr IRMutator::mutate(ExternalCallPtr v) {
   return v;
 }
 
+StmtPtr IRMutator::mutate(ExternalCall2Ptr v) {
+  bool buf_out_args_changed = false;
+  std::vector<BufPtr> buf_out_args_new;
+  buf_out_args_new.reserve(v->buf_out_args().size());
+  for (BufPtr buf_out_arg : v->buf_out_args()) {
+    BufPtr buf_out_arg_new = to<Buf>(buf_out_arg->accept_mutator(this));
+    TORCH_INTERNAL_ASSERT(
+        buf_out_arg_new, buildErrorMessage("IRMutator produced null for Buf."));
+    buf_out_args_new.push_back(buf_out_arg_new);
+    buf_out_args_changed |= buf_out_arg_new != buf_out_arg;
+  }
+
+  bool buf_args_changed = false;
+  std::vector<BufPtr> buf_args_new;
+  buf_args_new.reserve(v->buf_args().size());
+  for (BufPtr buf_arg : v->buf_args()) {
+    BufPtr buf_arg_new = to<Buf>(buf_arg->accept_mutator(this));
+    TORCH_INTERNAL_ASSERT(
+        buf_arg_new, buildErrorMessage("IRMutator produced null for Buf."));
+    buf_args_new.push_back(buf_arg_new);
+    buf_args_changed |= buf_arg_new != buf_arg;
+  }
+
+  bool args_changed = false;
+  std::vector<ExprPtr> args_new;
+  args_new.reserve(v->args().size());
+  for (ExprPtr arg : v->args()) {
+    ExprPtr arg_new = arg->accept_mutator(this);
+    args_new.push_back(arg_new);
+    args_changed |= arg_new != arg;
+  }
+
+  if (buf_out_args_changed) {
+    v->set_buf_out_args(buf_out_args_new);
+  }
+  if (buf_args_changed) {
+    v->set_buf_args(buf_args_new);
+  }
+  if (args_changed) {
+    v->set_args(args_new);
+  }
+  return v;
+}
+
 StmtPtr IRMutator::mutate(AllocatePtr v) {
   BufPtr buf = v->buf();
   BufPtr buf_new = to<Buf>(buf->accept_mutator(this));

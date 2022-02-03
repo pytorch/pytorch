@@ -196,6 +196,34 @@ class StmtsReadingBuf : public IRVisitor {
   std::vector<StmtPtr> reads_;
 };
 
+class ExternalAllocBufFinder : public IRVisitor {
+ public:
+  void visit(ExternalCall2Ptr v) override {
+    const auto& bufs_out = v->buf_out_args();
+    bufs_.insert(bufs_out.begin(), bufs_out.end());
+    IRVisitor::visit(v);
+  }
+
+  static std::unordered_set<BufPtr> find(StmtPtr s) {
+    ExternalAllocBufFinder f;
+    s->accept(&f);
+    return f.bufs();
+  }
+
+  static std::unordered_set<BufPtr> find(ExprPtr e) {
+    ExternalAllocBufFinder f;
+    e->accept(&f);
+    return f.bufs();
+  }
+
+  const std::unordered_set<BufPtr>& bufs() {
+    return bufs_;
+  }
+
+ private:
+  std::unordered_set<BufPtr> bufs_;
+};
+
 // Traverses the IR to determine if a particular Var is modified within it.
 class ModifiesVarChecker : public IRVisitor {
  public:
@@ -287,6 +315,14 @@ class BufLiveRange : public IRVisitor {
         }
       }
     }
+    auto loads3 = NodeFinder<ExternalCall2>::find(s);
+    for (auto l : loads3) {
+      for (auto lb : l->buf_args()) {
+        if (lb == buf_) {
+          return true;
+        }
+      }
+    }
     return false;
   }
 
@@ -301,6 +337,14 @@ class BufLiveRange : public IRVisitor {
     for (auto w : writes2) {
       if (w->buf() == buf_) {
         return true;
+      }
+    }
+    auto writes3 = NodeFinder<ExternalCall2>::find(s);
+    for (auto w : writes3) {
+      for (auto wb : w->buf_out_args()) {
+        if (wb == buf_) {
+          return true;
+        }
       }
     }
     return false;
