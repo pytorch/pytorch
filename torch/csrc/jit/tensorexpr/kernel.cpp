@@ -1009,14 +1009,17 @@ Tensor TensorExprKernel::bindInput(const torch::jit::Value* input) {
       auto tt = input->type()->cast<TensorType>();
       bool contiguous_concrete_tensor =
           (input->isCompleteTensor() && isContiguous(input));
-      auto desc = getInputStrideDesc(input);
-      bool contiguous_strided_tensor = desc.size() == 1 &&
-          desc[0] == torch::jit::StrideInput::TENSOR_CONT;
+      bool contiguous_sym_tensor = false;
+      if (has_symbolic_shapes_) {
+        auto desc = getInputStrideDesc(input);
+        contiguous_sym_tensor = desc.size() == 1 &&
+            desc[0] == torch::jit::StrideInput::TENSOR_CONT;
+      }
 
       // We don't need to copy the input if:
       //  1) it is not an output AND
       //  2) it is contiguous
-      bool contiguous = contiguous_concrete_tensor || contiguous_strided_tensor;
+      bool contiguous = contiguous_concrete_tensor || contiguous_sym_tensor;
       if (!outputs_set.count(input) && contiguous) {
         BufHandle inBuffer(
             "t" + input_name_map_[input],
