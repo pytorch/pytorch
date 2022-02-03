@@ -187,7 +187,8 @@ Tensor addmm(
     const Tensor& input,
     const Tensor& weight,
     const Scalar& beta,
-    const Scalar& alpha) {
+    const Scalar& alpha,
+    c10::optional<ScalarType> dtype_opt) {
   return LinearOpContext::create(
       weight,
       bias).run(
