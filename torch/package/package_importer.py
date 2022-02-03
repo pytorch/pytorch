@@ -7,13 +7,14 @@ import os.path
 import types
 from contextlib import contextmanager
 from pathlib import Path
-from typing import cast, Any, BinaryIO, Callable, Dict, List, Optional, Union
+from typing import cast, Any, BinaryIO, Callable, Dict, List, Optional, Union, Type
 from weakref import WeakValueDictionary
 
 import torch
 from torch.serialization import _get_restore_location, _maybe_decode_ascii
 
 from ._directory_reader import DirectoryReader
+from ._directory_reader_torchscript import TorchScriptDirectoryReader
 from ._importlib import (
     _calc___package__,
     _normalize_line_endings,
@@ -26,6 +27,8 @@ from ._package_unpickler import PackageUnpickler
 from .file_structure_representation import Directory, _create_directory_from_file_list
 from .glob_group import GlobPattern
 from .importer import Importer
+from ._zip_file import PackageZipFileReader
+from ._zip_file_torchscript import TorchScriptPackageZipFileReader
 
 
 class PackageImporter(Importer):
@@ -49,8 +52,9 @@ class PackageImporter(Importer):
 
     def __init__(
         self,
-        file_or_buffer: Union[str, torch._C.PyTorchFileReader, Path, BinaryIO],
+        file_or_buffer: Union[str, torch._C.PyTorchFileReader, PackageZipFileReader, Path, BinaryIO],
         module_allowed: Callable[[str], bool] = lambda module_name: True,
+        zip_file_reader_type: Type[PackageZipFileReader] = TorchScriptPackageZipFileReader
     ):
         """Open ``file_or_buffer`` for importing. This checks that the imported package only requires modules
         allowed by ``module_allowed``
@@ -72,13 +76,12 @@ class PackageImporter(Importer):
         elif isinstance(file_or_buffer, (Path, str)):
             self.filename = str(file_or_buffer)
             if not os.path.isdir(self.filename):
-                self.zip_reader = torch._C.PyTorchFileReader(self.filename)
+                self.zip_reader = TorchScriptPackageZipFileReader(self.filename)
             else:
-                self.zip_reader = DirectoryReader(self.filename)
+                self.zip_reader = TorchScriptDirectoryReader(self.filename)
         else:
             self.filename = "<binary>"
-            self.zip_reader = torch._C.PyTorchFileReader(file_or_buffer)
-
+            self.zip_reader = TorchScriptPackageZipFileReader(file_or_buffer)
         self.root = _PackageNode(None)
         self.modules = {}
         self.extern_modules = self._read_extern()
@@ -180,10 +183,13 @@ class PackageImporter(Importer):
         """
         pickle_file = self._zipfile_path(package, resource)
         restore_location = _get_restore_location(map_location)
+        self.restore_location = _get_restore_location(map_location)
         loaded_storages = {}
         loaded_reduces = {}
         storage_context = torch._C.DeserializationStorageContext()
 
+        # TODO move out and add deprecration warning for this behavior
+        # TODO move to package shim
         def load_tensor(dtype, size, key, location, restore_location):
             name = f"{key}.storage"
 
@@ -239,14 +245,17 @@ class PackageImporter(Importer):
         unpickler = self.Unpickler(data_file)
         unpickler.persistent_load = persistent_load
 
+        # TODO: it might make sense to have a seperate packager in torch which uses the OSS pacakge but saves state
         @contextmanager
         def set_deserialization_context():
             # to let reduce_package access deserializaiton context
+            self.external_registry = {}
             self.storage_context = storage_context
             self.last_map_location = map_location
             try:
                 yield
             finally:
+                self.external_registry = None
                 self.storage_context = None
                 self.last_map_location = None
 
@@ -582,6 +591,9 @@ class PackageImporter(Importer):
         if isinstance(package, _ExternNode):
             return  # the shorter extern covers this extern case
         package.children[last] = _ExternNode()
+
+    def __del__(self):
+        self.zip_reader.close()
 
 
 _NEEDS_LOADING = object()

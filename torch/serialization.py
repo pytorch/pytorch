@@ -172,7 +172,7 @@ def location_tag(storage: Union[Storage, torch.storage.TypedStorage]):
 
 
 def default_restore_location(storage, location):
-    for _, _, fn in _package_registry:
+    for a, b, fn in _package_registry:
         result = fn(storage, location)
         if result is not None:
             return result
