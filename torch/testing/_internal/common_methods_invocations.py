@@ -261,7 +261,6 @@ NumericsFilter = collections.namedtuple('NumericsFilter', ['condition', 'safe_va
 # If you notice it's out-of-date or think it could be improved then please
 # file an issue.
 #
-# See also: the OpInfo tracker (https://github.com/pytorch/pytorch/issues/54261)
 # See also: "Writing Test Templates" in common_device_type.py to learn how to
 #   parametrize a test template using OpInfos.
 # See also: PyTorch's GitHub wiki on running and writing tests
@@ -304,7 +303,7 @@ NumericsFilter = collections.namedtuple('NumericsFilter', ['condition', 'safe_va
 #   the operator logic you're familiar with instead of having to write tests for
 #   how the operator interacts with each of PyTorch's many systems.
 #
-# And, OK, it turns out that SOMETIMES just writing an OpInfo DOES
+# And it turns out that SOMETIMES just writing an OpInfo DOES
 #   validate your op works as expected, but that's only in special
 #   cases. See below for details.
 #
@@ -397,23 +396,26 @@ NumericsFilter = collections.namedtuple('NumericsFilter', ['condition', 'safe_va
 # test_ops.py:
 #
 #   - that its supported dtypes are specified correctly
+#   - that it produces the same results as a NumPy reference implementation, if
+#       the OpInfo defines a reference
 #   - that the operation produces the same results when called with noncontiguous inputs
 #   - that it supports the out= argument properly (if it allows out=),
 #       see https://github.com/pytorch/pytorch/wiki/Developer-FAQ#how-does-out-work-in-pytorch
 #   - that it works with the conjugate view bit properly
 #   - that its function, method, and inplace variants perform the same operation
 #       (that is, that torch.add, torch.Tensor.add, and torch.Tensor.add_ all
-#       do the same thing).
+#       do the same thing)
 #   - that its inplace variant preserves the input's storage
 #   - that its gradient formula is implemented correctly, and that it supports
 #       gradgrad and complex grad and gradgrad and forward mode AD properly for
 #       the op's function and inplace variants (method variants are skipped
-#       to reduce test time).
+#       to reduce test time)
 #   - that the operation performs the same operation when traced or scripted
 #       using the jit
 #   - that the operation is autodifferentiated by the jit as expected
 #   - that the operator's aliases, if any, perform the same operation and that
 #       the jit understands the alias
+#   - that primTorch aliases (see the [primTorch Aliases] note) are tested by by an OpInfo
 #
 # Additional OpInfo tests are in test_jit_fuser_te.py, test_fx_experimental.py,
 #   and test_fx.py. These tests validate that operators work with NNC and FX
@@ -460,10 +462,12 @@ NumericsFilter = collections.namedtuple('NumericsFilter', ['condition', 'safe_va
 # then you should typically add an OpInfo for it.
 #
 # As mentioned a couple times above, implementing an OpInfo is not
-#   usually sufficient testing (unless the operator is a unary elementwise
-#   operator). The OpInfo will only test the properties described in the
-#   "WHAT'S TESTED" section. It DOES NOT verify that the operator is
-#   implemented correctly.
+#   usually sufficient testing. OpInfos without references that are also
+#   not elementwise unary or elementwise binary operators receive no validation
+#   that there results are correct. Even OpInfos with references or that do
+#   have specialized additional tests may require additional testing to ensure
+#   they're correct. If you have questions about what additional testing is
+#   appropriate ping @mruberry on GitHub.
 #
 # TIPS FOR WRITING AN OPINFO AND OPINFO TESTS
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -500,7 +504,7 @@ NumericsFilter = collections.namedtuple('NumericsFilter', ['condition', 'safe_va
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 #
 # In the future we expect OpInfo coverage to improve and cover
-#   the great majority of PyTorch's (public) operators.
+#   an even greater majority of PyTorch's (public) operators.
 #
 
 # Classes and methods for the operator database

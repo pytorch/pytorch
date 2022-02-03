@@ -357,23 +357,6 @@ Tensor cat(TensorList tensors, Dimname dim) {
   return at::cat(tensors, dimname_to_position(tensors[0], dim));
 }
 
-// torch.concat, alias for torch.cat
-Tensor& concat_out(TensorList tensors, Dimname dim, Tensor& result) {
-  return at::cat_out(result, tensors, dimname_to_position(tensors[0], dim));
-}
-
-Tensor concat(TensorList tensors, Dimname dim) {
-  return at::cat(tensors, dimname_to_position(tensors[0], dim));
-}
-
-Tensor & concat_out(TensorList tensors, int64_t dim, Tensor & result) {
-  return at::cat_out(result, tensors, dim);
-}
-
-Tensor concat(TensorList tensors, int64_t dim) {
-  return at::cat(tensors, dim);
-}
-
 static bool sizes_match_except(IntArrayRef s1, IntArrayRef s2, int64_t dim_except /* should already be wrapped */) {
   if (s1.size() != s2.size()) {
     return false;
@@ -2600,22 +2583,6 @@ Tensor movedim(const Tensor& self, IntArrayRef src, IntArrayRef dst) {
 
 Tensor movedim(const Tensor& self, int64_t src, int64_t dst) {
   return at::movedim(self, IntArrayRef{src}, IntArrayRef{dst});
-}
-
-Tensor moveaxis(const Tensor& self, IntArrayRef src, IntArrayRef dst) {
-  return at::movedim(self, src, dst);
-}
-
-Tensor moveaxis(const Tensor& self, int64_t src, int64_t dst) {
-  return at::movedim(self, IntArrayRef{src}, IntArrayRef{dst});
-}
-
-Tensor swapaxes(const Tensor& self, int64_t axis0, int64_t axis1) {
-  return self.transpose(axis0, axis1);
-}
-
-Tensor& swapaxes_(Tensor& self, int64_t axis0, int64_t axis1) {
-  return self.transpose_(axis0, axis1);
 }
 
 Tensor swapdims(const Tensor& self, int64_t dim0, int64_t dim1) {

@@ -137,11 +137,6 @@ std::tuple<Tensor, Tensor, Tensor> _det_lu_based_helper(const Tensor& self) {
   return std::make_tuple(std::move(det), std::move(lu), std::move(pivs));
 }
 
-// torch.det, alias for torch.linalg.det
-Tensor det(const Tensor& self) {
-  return at::linalg_det(self);
-}
-
 Tensor linalg_det(const Tensor& self) {
   squareCheckInputs(self, "linalg.det");
   checkFloatingOrComplex(self, "linalg.det");

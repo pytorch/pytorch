@@ -178,6 +178,8 @@ genrule(
     name = "all_generated_code",
     srcs = [
         "aten/src/ATen/native/native_functions.yaml",
+        "tools/codegen/prim/aliases.py",
+        "tools/codegen/prim/alias_gen.py",
     ],
     outs = libtorch_cpp_generated_sources + libtorch_python_generated_sources,
     cmd = "$(location :generate_code) --install_dir `dirname $(location torch/csrc/autograd/generated/variable_factories.h)`/../.. --native-functions-path $(location aten/src/ATen/native/native_functions.yaml) --nn-path aten/src",

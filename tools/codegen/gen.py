@@ -41,6 +41,8 @@ from tools.codegen.gen_functionalization_type import (
     gen_functionalization_view_inverse_declaration
 )
 
+from tools.codegen.prim import native_functions_callback
+
 T = TypeVar('T')
 
 # Welcome to the ATen code generator v2!  The ATen code generator is
@@ -84,7 +86,7 @@ _GLOBAL_PARSE_NATIVE_YAML_CACHE = {}
 
 # Parse native_functions.yaml into a sequence of NativeFunctions and Backend Indices.
 ParsedYaml = namedtuple('ParsedYaml', ['native_functions', 'backend_indices'])
-def parse_native_yaml(path: str) -> ParsedYaml:
+def parse_native_yaml(path: str, **kwargs) -> ParsedYaml:
     global _GLOBAL_PARSE_NATIVE_YAML_CACHE
     if path not in _GLOBAL_PARSE_NATIVE_YAML_CACHE:
         with open(path, 'r') as f:
@@ -100,6 +102,13 @@ def parse_native_yaml(path: str) -> ParsedYaml:
                 func, m = NativeFunction.from_yaml(e, loc)
                 rs.append(func)
                 BackendIndex.grow_index(bs, m)
+
+        # Augments native function entries with primTorch generated ops
+        pairs = native_functions_callback(rs, bs, **kwargs)
+        for func, m in pairs:
+            rs.append(func)
+            BackendIndex.grow_index(bs, m)
+
         error_check_native_functions(rs)
         # Default dict is to prevent the codegen from barfing when we have a dispatch key that has no kernels yet.
         indices: Dict[DispatchKey, BackendIndex] = defaultdict(lambda: BackendIndex(
@@ -1562,6 +1571,10 @@ def main() -> None:
         choices=['headers', 'sources', 'declarations_yaml'],
         default=['headers', 'sources', 'declarations_yaml'],
         help='Generate only a subset of files')
+    parser.add_argument(
+        '--prim_cpp_dry_run',
+        action='store_true',
+        help='Only generate and print primTorch C++. Useful when debugging.')
     options = parser.parse_args()
 
     selector = get_custom_build_selector(
@@ -1570,10 +1583,15 @@ def main() -> None:
     )
 
     native_yaml_path = os.path.join(options.source_path, 'native/native_functions.yaml')
-    parsed_yaml = parse_native_yaml(native_yaml_path)
+
+    # Short-circuits on dry run
+    if options.prim_cpp_dry_run:
+        parsed_yaml = parse_native_yaml(native_yaml_path, src_path=options.source_path, prim_cpp_dry_run=True)
+        return
+
+    parsed_yaml = parse_native_yaml(native_yaml_path, src_path=options.source_path)
     native_functions, backend_indices = parsed_yaml.native_functions, parsed_yaml.backend_indices
     grouped_native_functions = get_grouped_native_functions(native_functions)
-
     template_dir = os.path.join(options.source_path, "templates")
 
     # NB: It is mandatory to NOT use os.path.join here, as the install directory

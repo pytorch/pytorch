@@ -302,11 +302,6 @@ static inline Tensor& unary_op_impl_(Tensor& self, OutImpl& out_impl) {
   return out_impl(self, self);
 }
 
-// arccos, alias for acos
-Tensor& arccos_out(const Tensor& self, Tensor& result) { return at::acos_out(result, self); }
-Tensor arccos(const Tensor& self) { return self.acos(); }
-Tensor& arccos_(Tensor& self) { return self.acos_(); }
-
 Tensor& rad2deg_out(const Tensor& self, Tensor& result) {
   TORCH_CHECK(!self.is_complex(), "rad2deg is not supported for complex tensors.");
   constexpr double M_180_PI = 57.295779513082320876798154814105170332405472466564;
@@ -367,17 +362,6 @@ Tensor abs(const Tensor& self) {
 Tensor& abs_(Tensor& self) {
   TORCH_CHECK(!self.is_complex(), "In-place abs is not supported for complex tensors.");
   return unary_op_impl_(self, at::abs_out);
-}
-
-// Absolute, alias for abs
-Tensor& absolute_out(const Tensor& self, Tensor& result) {
-  return at::abs_out(result, self);
-}
-Tensor absolute(const Tensor& self) {
-  return self.abs();
-}
-Tensor& absolute_(Tensor& self) {
-  return self.abs_();
 }
 
 Tensor& angle_out(const Tensor& self, Tensor& result) {

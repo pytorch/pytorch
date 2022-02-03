@@ -62,6 +62,49 @@ class TestCommon(TestCase):
 
             assert len(filtered_ops) == 0, err_msg
 
+    # Verifies primTorch alias relationships, as described in the [primTorch Aliases] note, are
+    #   codified by OpInfos (so they are tested).
+    # Note that this does NOT test the inverse relationship! That is, alias relationships may be codified
+    #   by OpInfos but not expressed as primTorch aliases and this test will not complain.
+    #   This is currently by design, but eventually primTorch should describe all alias
+    #   relationships (whether it generates them or not is a separate issue).
+    # Note also that if there are multiple OpInfos for an operator then this test only
+    #   requires that one of those OpInfos express the aliasing relationship.
+    @onlyCPU
+    def test_alias_relationships(self, device):
+        from torch.prim import alias_infos
+
+        # Constructs a mapping from ATen operator names to a set of their full user-facing alias names
+        #   e.g. abs -> absolute
+        #   e.g. mvlgamma -> special.multigammaln
+        #   e.g. linalg_det -> det
+        #   e.g. transpose -> (swapdims, swapaxes)
+        alias_info_map = {}
+        for alias_info in alias_infos:
+            if alias_info.alias_for not in alias_info_map:
+                alias_info_map[alias_info.alias_for] = set()
+
+            full_name = alias_info.name
+            if alias_info.namespace is not None:
+                full_name = alias_info.namespace + "." + alias_info.name
+
+            alias_info_map[alias_info.alias_for].add(full_name)
+
+        # Removes aliases accounted for by OpInfos
+        for op in (op for op in op_db if (op.aten_name in alias_info_map and op.aliases is not None)):
+            expected_aliases = alias_info_map[op.aten_name]
+            # Note: aliases held by the Operator are actually also AliasInfos, but that
+            #   AliasInfo class is distinct from the primTorch AliasInfo class.
+            for alias in op.aliases:
+                expected_aliases.discard(alias.name)
+
+        # Verifies that all primTorch aliases are accounted for by testing that the
+        #   map contains only empty sets
+        for k, v in alias_info_map.items():
+            msg = "Some aliases for {0} are not covered by OpInfo tests. Missing aliases: {1}"
+            msg = msg.format(k, ", ".join(v))
+            self.assertEqual(len(v), 0, msg=msg)
+
     # Validates that each OpInfo specifies its forward and backward dtypes
     #   correctly for CPU and CUDA devices
     @skipMeta

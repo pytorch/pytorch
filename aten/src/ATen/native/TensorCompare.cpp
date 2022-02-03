@@ -607,31 +607,6 @@ Tensor& clamp_min_(Tensor& self, const Tensor& min) {
   return at::clamp_min_outf(self, min, self);
 }
 
-// Implements the "clip" alias for clamp
-Tensor& clip_out(const Tensor& self, const c10::optional<Scalar>& min, const c10::optional<Scalar>& max, Tensor& result) {
-  return at::clamp_outf(self, min, max, result);
-}
-
-Tensor& clip_out(const Tensor& self, const c10::optional<Tensor>& min, const c10::optional<Tensor>& max, Tensor& result) {
-  return at::clamp_outf(self, min, max, result);
-}
-
-Tensor clip(const Tensor& self, const c10::optional<Scalar>& min, const c10::optional<Scalar>& max) {
-  return at::clamp(self, min, max);
-}
-
-Tensor clip(const Tensor& self, const c10::optional<Tensor>& min, const c10::optional<Tensor>& max) {
-  return at::clamp(self, min, max);
-}
-
-Tensor& clip_(Tensor& self, const c10::optional<Scalar>& min, const c10::optional<Scalar>& max) {
-  return at::clamp_(self, min, max);
-}
-
-Tensor& clip_(Tensor& self, const c10::optional<Tensor>& min, const c10::optional<Tensor>& max) {
-  return at::clamp_(self, min, max);
-}
-
 // Named tensor overloads
 
 std::tuple<Tensor, Tensor> min(const Tensor& self, Dimname dim, bool keepdim) {

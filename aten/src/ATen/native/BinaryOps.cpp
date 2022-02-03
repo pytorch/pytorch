@@ -985,14 +985,6 @@ Tensor& comparison_op_(Tensor& self, const Scalar& other, OutImpl& out_impl) {
 // referring to *_out function is ambiguious.
 using OutFunc = std::add_const<Tensor&(&)(Tensor&, const Tensor&, const Tensor&)>::type;
 
-// less, alias for torch.lt
-Tensor& less_out(const Tensor& self, const Tensor& other, Tensor& result) { return at::lt_out(result, self, other); }
-Tensor less(const Tensor& self, const Tensor& other) { return self.lt(other); }
-Tensor& less_(Tensor& self, const Tensor& other) { return self.lt_(other); }
-Tensor& less_out(const Tensor& self, const Scalar& other, Tensor& result) { return at::lt_out(result, self, other); }
-Tensor less(const Tensor& self, const Scalar& other) { return self.lt(other); }
-Tensor& less_(Tensor& self, const Scalar& other) { return self.lt_(other); }
-
 // less_equal, alias for torch.le
 Tensor& less_equal_out(const Tensor& self, const Tensor& other, Tensor& result) { return at::le_out(result, self, other); }
 Tensor less_equal(const Tensor& self, const Tensor& other) { return self.le(other); }

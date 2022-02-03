@@ -277,40 +277,29 @@
     SparseCPU, SparseCUDA: abs_sparse_out
     SparseCsrCPU, SparseCsrCUDA: abs_sparse_csr_out
 
-# Note [Adding an alias]
+# Note [Adding an Alias]
 # To add an alias do the following:
-#
-# 1) Copy the original functions native_functions.yaml entry, but replace the
+# 1) See if the alias can be added as a primTorch alias. See the [primTorch Aliases] note
+#      for details. This will let you skip steps (2) and (3) below.
+# 2) If the alias cannot be a primTorch alias,
+#      copy the original functions native_functions.yaml entry, but replace the
 #      original function's name with their own and delete any dispatch
 #      keys for the aliases. Specifying a dispatch key will prevent
 #      autograd from recording the operations the alias performs, which
 #      will stop it from "inheriting" the original operation's autograd behavior.
-# 2) Implement the corresponding functions and have them redispatch to the
+# 3) If the alias cannot be a primTorch alias,
+#      implement the corresponding functions and have them redispatch to the
 #      original function.
-# 3) Add docstrings to the new function that reference the original function,
+# 4) Add docstrings to the new function that reference the original function,
 #      and document the method as usual (if it exists.)
 #    (See torch/_torch_docs.py and docs/source/torch.rst if adding a function,
 #     torch/_tensor_docs.py and docs/source/tensors.rst if adding a method,
 #     or module-specific doc bindings (like torch/linalg/__init__.py) if
 #     adding an alias in a namespace.)
-# 4) Update torch/overrides.py consistent with the original function.
-# 5) Update the alias_map in torch/csrc/jit/passes/normalize_ops.cpp.
-# 6) Add aliases argument to existing OpInfo/UnaryUfuncInfo or create new OpInfo/UnaryUfuncInfo entry
+# 5) Update torch/overrides.py consistent with the original function.
+# 6) Update the alias_map in torch/csrc/jit/passes/normalize_ops.cpp.
+# 7) Add aliases argument to existing OpInfo/UnaryUfuncInfo or create new OpInfo/UnaryUfuncInfo entry
 # in op_db list in torch/testing/_internal/common_methods_invocations.py
-#
-# See torch.absolute, an alias for torch.abs, as an example.
-
-# Absolute, alias for abs
-- func: absolute(Tensor self) -> Tensor
-  device_check: NoCheck   # TensorIterator
-  variants: function, method
-
-- func: absolute_(Tensor(a!) self) -> Tensor(a!)
-  device_check: NoCheck   # TensorIterator
-  variants: method
-
-- func: absolute.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
-  device_check: NoCheck   # TensorIterator
 
 - func: angle(Tensor self) -> Tensor
   device_check: NoCheck   # TensorIterator
@@ -422,15 +411,6 @@
   structured_inherits: TensorIteratorBase
   dispatch:
     CPU, CUDA: acos_out
-
-# arccos, alias of acos
-- func: arccos(Tensor self) -> Tensor
-  variants: function, method
-
-- func: arccos_(Tensor(a!) self) -> Tensor(a!)
-  variants: function, method
-
-- func: arccos.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
 
 - func: avg_pool1d(Tensor self, int[1] kernel_size, int[1] stride=[], int[1] padding=0, bool ceil_mode=False, bool count_include_pad=True) -> Tensor
 
@@ -1087,15 +1067,6 @@
 
 - func: cat.names_out(Tensor[] tensors, Dimname dim, *, Tensor(a!) out) -> Tensor(a!)
 
-# alias for torch.cat
-- func: concat(Tensor[] tensors, int dim=0) -> Tensor
-
-- func: concat.out(Tensor[] tensors, int dim=0, *, Tensor(a!) out) -> Tensor(a!)
-
-- func: concat.names(Tensor[] tensors, Dimname dim) -> Tensor
-
-- func: concat.names_out(Tensor[] tensors, Dimname dim, *, Tensor(a!) out) -> Tensor(a!)
-
 - func: block_diag(Tensor[] tensors) -> Tensor
   variants: function
 
@@ -1252,26 +1223,6 @@
 - func: clamp_min.Tensor_out(Tensor self, Tensor min, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
     CPU, CUDA: clamp_min_out
-
-# clip is an alias for clamp
-- func: clip(Tensor self, Scalar? min=None, Scalar? max=None) -> Tensor
-  cpp_no_default_args: ['min']
-  variants: function, method
-
-- func: clip.Tensor(Tensor self, Tensor? min=None, Tensor? max=None) -> Tensor
-  variants: function, method
-
-- func: clip_(Tensor(a!) self, Scalar? min=None, Scalar? max=None) -> Tensor(a!)
-  cpp_no_default_args: ['min']
-  variants: function, method
-
-- func: clip_.Tensor(Tensor(a!) self, Tensor? min=None, Tensor? max=None) -> Tensor(a!)
-  variants: function, method
-
-- func: clip.out(Tensor self, Scalar? min=None, Scalar? max=None, *, Tensor(a!) out) -> Tensor(a!)
-  cpp_no_default_args: ['min']
-
-- func: clip.Tensor_out(Tensor self, Tensor? min=None, Tensor? max=None, *, Tensor(a!) out) -> Tensor(a!)
 
 - func: cudnn_is_acceptable(Tensor self) -> bool
   device_check: NoCheck
@@ -3361,13 +3312,6 @@
   variants: function, method
 
 - func: movedim.int(Tensor(a) self, int source, int destination) -> Tensor(a)
-  variants: function, method
-
-# moveaxis, alias for movedim
-- func: moveaxis.intlist(Tensor(a) self, int[] source, int[] destination) -> Tensor(a)
-  variants: function, method
-
-- func: moveaxis.int(Tensor(a) self, int source, int destination) -> Tensor(a)
   variants: function, method
 
 # Only exposed from C++ -- in Python,
@@ -6802,23 +6746,6 @@
   dispatch:
     CompositeExplicitAutograd: lt_
 
-#  less, alias for torch.lt
-- func: less.Scalar_out(Tensor self, Scalar other, *, Tensor(a!) out) -> Tensor(a!)
-
-- func: less.Scalar(Tensor self, Scalar other) -> Tensor
-  variants: method, function
-
-- func: less.Tensor_out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
-
-- func: less.Tensor(Tensor self, Tensor other) -> Tensor
-  variants: method, function
-
-- func: less_.Scalar(Tensor(a!) self, Scalar other) -> Tensor(a!)
-  variants: method
-
-- func: less_.Tensor(Tensor(a!) self, Tensor other) -> Tensor(a!)
-  variants: method
-
 - func: take.out(Tensor self, Tensor index, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
     CPU, CUDA: take_out
@@ -7018,18 +6945,6 @@
   dispatch:
     CPU: _svd_helper_cpu
     CUDA: _svd_helper_cuda
-
-# swapaxes, alias for transpose
-- func: swapaxes(Tensor(a) self, int axis0, int axis1) -> Tensor(a)
-  variants: function, method
-  device_check: NoCheck
-  device_guard: False
-
-- func: swapaxes_(Tensor(a!) self, int axis0, int axis1) -> Tensor(a!)
-  variants: method
-  device_check: NoCheck
-  device_guard: False
-  tags: inplace_view
 
 # swapdims, alias for transpose
 - func: swapdims(Tensor(a) self, int dim0, int dim1) -> Tensor(a)
@@ -10805,10 +10720,6 @@
 
 - func: linalg_det.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   python_module: linalg
-
-# torch.det, alias for torch.linalg.det
-- func: det(Tensor self) -> Tensor
-  variants: function, method
 
 - func: _det_lu_based_helper(Tensor self) -> (Tensor det, Tensor lu, Tensor pivs)
   variants: function
