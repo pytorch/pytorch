@@ -264,6 +264,13 @@ ExprHandle tensorOrConstant(
   return constant(v);
 }
 
+ExprHandle scalarOrConstant(const ArgValue& v) {
+  if (auto vh = c10::get_if<VarHandle>(&v)) {
+    return *vh;
+  }
+  return constant(v);
+}
+
 ExprHandle broadcast(BufHandle b, const std::vector<ExprHandle>& axes) {
   return b.load(computeIndicesToBroadcast(axes, b.dims()));
 }
@@ -629,8 +636,8 @@ Tensor computeCat(
         std::vector<ExprHandle> newAxes(axes.begin(), axes.end());
         ExprHandle load = promoteToDtype(
             tensorOrConstant(nonEmptyInputs[0], newAxes), highType);
-        auto offset = *intValue(nonEmptyInputs[0].node()->dim(dim));
-        newAxes[dim] = newAxes[dim] - ExprHandle(immLike(newAxes[dim], offset));
+        auto offset = ExprHandle(nonEmptyInputs[0].node()->dim(dim));
+        newAxes[dim] = newAxes[dim] - offset;
 
         for (size_t ii = 1; ii < nonEmptyInputs.size(); ++ii) {
           auto input = nonEmptyInputs[ii];
@@ -639,8 +646,8 @@ Tensor computeCat(
               load,
               promoteToDtype(tensorOrConstant(input, newAxes), highType));
 
-          offset += *intValue(input.node()->dim(dim));
-          newAxes[dim] = axes[dim] - ExprHandle(immLike(axes[dim], offset));
+          offset = offset + ExprHandle(input.node()->dim(dim));
+          newAxes[dim] = axes[dim] - offset;
         }
 
         return load;

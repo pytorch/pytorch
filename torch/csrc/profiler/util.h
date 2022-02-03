@@ -18,24 +18,8 @@
 #include <sys/time.h> // for gettimeofday()
 #endif
 
-// skip Kineto dependency on mobile unless explicitly asked for.
-// When is it explicitly asked for?
-//   KinetoEdgeCPUProfiler uses KinetoProfiler for cpu
-//   event profiling. This has dependency on cpu only libkineto
-#if defined(USE_KINETO) && defined(C10_MOBILE) && \
-    !defined(EDGE_PROFILER_USE_KINETO)
-#undef USE_KINETO
-#endif
-
 namespace torch {
 namespace profiler {
-
-#ifdef USE_KINETO
-constexpr bool kKinetoAvailable {true};
-#else
-constexpr bool kKinetoAvailable {false};
-#endif
-
 namespace impl {
 
 inline int64_t getTime(bool allow_monotonic = false) {
@@ -66,11 +50,6 @@ inline int64_t getTime(bool allow_monotonic = false) {
       static_cast<int64_t>(t.tv_nsec);
 #endif
 }
-
-// NB: This only works if USE_KINETO is set. (Otherwise it just logs a warning)
-TORCH_API void addMetadataJson(
-    const std::string& key,
-    const std::string& value);
 
 std::string getNvtxStr(
     const char* name,

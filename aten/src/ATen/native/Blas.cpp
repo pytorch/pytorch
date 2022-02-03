@@ -155,7 +155,7 @@ Tensor dot(const Tensor &self, const Tensor &other){
   dot_check(self, other);
 
   if (self._is_zerotensor() || other._is_zerotensor()) {
-    return at::zeros({}, self.options());
+    return at::_efficientzerotensor({}, self.options());
   }
 
   if (use_mkldnn_bf16_matmul(self, other, /*result=*/Tensor())){
@@ -193,7 +193,7 @@ Tensor vdot(const Tensor &self, const Tensor &other){
   dot_check(self, other);
 
   if (self._is_zerotensor() || other._is_zerotensor()) {
-    return at::zeros({}, self.options());
+    return at::_efficientzerotensor({}, self.options());
   }
 
   return AT_DISPATCH_COMPLEX_TYPES(self.scalar_type(), "vdot", [&] {

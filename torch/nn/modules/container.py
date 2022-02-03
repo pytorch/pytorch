@@ -1,6 +1,6 @@
 import warnings
 from collections import OrderedDict, abc as container_abcs
-from itertools import islice
+from itertools import chain, islice
 import operator
 
 import torch
@@ -141,6 +141,15 @@ class Sequential(Module):
             input = module(input)
         return input
 
+    def append(self, module: Module) -> 'Sequential':
+        r"""Appends a given module to the end.
+
+        Args:
+            module (nn.Module): module to append
+        """
+        self.add_module(str(len(self)), module)
+        return self
+
 
 class ModuleList(Module):
     r"""Holds submodules in a list.
@@ -213,6 +222,12 @@ class ModuleList(Module):
 
     def __iadd__(self, modules: Iterable[Module]) -> 'ModuleList':
         return self.extend(modules)
+
+    def __add__(self, other: Iterable[Module]) -> 'ModuleList':
+        combined = ModuleList()
+        for i, module in enumerate(chain(self, other)):
+            combined.add_module(str(i), module)
+        return combined
 
     @_copy_to_script_wrapper
     def __dir__(self):
