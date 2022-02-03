@@ -2936,7 +2936,7 @@ class TestAutograd(TestCase):
         # Note: Remove once record_function uses these directly
         x = torch.randn(10, 10)
         with profile(use_kineto=kineto_available()) as p:
-            record = torch.ops.profiler._record_function_enter_new("bar")
+            record = torch.ops.profiler._record_function_enter_new("bar", None)
             try:
                 y = x * 2 + 4
             finally:
