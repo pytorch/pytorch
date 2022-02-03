@@ -7,12 +7,8 @@ from .._src.aot_autograd import (
     aot_module,
     compiled_function,
     compiled_module,
-    draw_joint_graph,
-    default_partition,
-    partition_with_recompute_fwd_in_bwd,
     num_of_recompilations,
     clear_compile_cache,
-    draw_graph,
 )
 from .._src.compilers import (
     ts_compile,
@@ -22,4 +18,10 @@ from .._src.compilers import (
     nnc_jit,
     memory_efficient_fusion,
     debug_compile,
+)
+from .._src.partitioners import (
+    partition_with_recompute_fwd_in_bwd,
+    default_partition,
+    draw_graph,
+    draw_joint_graph,
 )
