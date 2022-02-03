@@ -52,3 +52,16 @@ def batch_norm(g, input, weight, bias, running_mean, running_var, training, mome
         new_running_mean.setType(running_mean.type())
         new_running_var.setType(running_var.type())
         return res
+
+
+# https://github.com/pytorch/pytorch/wiki/PyTorch-ONNX-exporter#quantized-model-export
+class Quantized:
+    domain = "quantized"
+
+    @staticmethod
+    def hardswish(g, x, op_scale, op_zero_point):
+        x, x_s, x_zp = sym_help._dequantize_helper(g, x)
+
+        output = hardswish(g, x)
+
+        return sym_help._quantize_helper(g, output, op_scale, op_zero_point)

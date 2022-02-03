@@ -194,6 +194,36 @@ def parse_args(*arg_descriptors):
     return decorator
 
 def quantized_args(*arg_q_descriptors, op_scale=None, op_zero_point=None):
+    """A decorator which extends support for quantized version of the base operator.
+    Quantization is detected by examining the arguments that are annotated by
+    `arg_q_descriptors`.
+    If quantization is detected, the base operator symbolic function will be wrapped with
+    argument dequantization and output quantization.
+    Otherwise, only base symbolic function will be invoked.
+
+    For example:
+    @quantized_args(True, False)
+    def foo(g, x, y):
+        return x + y
+
+    is equivalent to
+
+    def q_foo(g, x, y):
+        if is_quantized_tensor(x):
+            x = dequantize(x)
+            out = foo(g, x, y)
+            return quantize(out)
+        else:
+            return foo(g, x, y)
+
+    Args:
+        arg_q_descriptors: list of bool, where each element represents if the
+          argument is QTensor for quantized version of this operator.
+        op_scale: float default None, quantized output scale. If None, derive from
+          the first quantized input scale.
+        op_zero_point: int default None, quantized output zero point. If None,
+          derive from the first quantized input zero point.
+    """
     def decorator(fn):
         fn._op_scale = op_scale
         fn._op_zero_point = op_zero_point
