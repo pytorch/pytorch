@@ -26,8 +26,8 @@ from torch.testing._internal.common_utils import (
     run_tests,
 )
 
-from torch.distributed._fsdp import CPUOffload
-from torch.distributed._fsdp.fully_sharded_data_parallel import BackwardPrefetch_
+from torch.distributed.fsdp import CPUOffload
+from torch.distributed.fsdp.fully_sharded_data_parallel import BackwardPrefetch
 
 
 if not dist.is_available():
@@ -69,7 +69,7 @@ class TestParityWithDDP(FSDPTest):
     )
     @parametrize(
         "backward_prefetch",
-        [BackwardPrefetch_.BACKWARD_PRE, BackwardPrefetch_.BACKWARD_POST, None]
+        [BackwardPrefetch.BACKWARD_PRE, BackwardPrefetch.BACKWARD_POST, None]
     )
     def test_nested_wrapped_model(self, cpu_offload, backward_prefetch):
         init_modes = self._get_init_modes_for_test(cpu_offload)
@@ -89,7 +89,7 @@ class TestParityWithDDP(FSDPTest):
     )
     @parametrize(
         "backward_prefetch",
-        [BackwardPrefetch_.BACKWARD_PRE, BackwardPrefetch_.BACKWARD_POST, None]
+        [BackwardPrefetch.BACKWARD_PRE, BackwardPrefetch.BACKWARD_POST, None]
     )
     def test_nested_all_wrapped_model(self, cpu_offload, backward_prefetch):
         init_modes = self._get_init_modes_for_test(cpu_offload)
@@ -110,7 +110,7 @@ class TestParityWithDDP(FSDPTest):
     )
     @parametrize(
         "backward_prefetch",
-        [BackwardPrefetch_.BACKWARD_PRE, BackwardPrefetch_.BACKWARD_POST, None]
+        [BackwardPrefetch.BACKWARD_PRE, BackwardPrefetch.BACKWARD_POST, None]
     )
     def test_transformer_parameterized(self, cpu_offload, backward_prefetch):
         init_modes = self._get_init_modes_for_test(cpu_offload)
@@ -130,7 +130,7 @@ class TestParityWithDDP(FSDPTest):
     )
     @parametrize(
         "backward_prefetch",
-        [BackwardPrefetch_.BACKWARD_PRE, BackwardPrefetch_.BACKWARD_POST, None]
+        [BackwardPrefetch.BACKWARD_PRE, BackwardPrefetch.BACKWARD_POST, None]
     )
     def test_delayed_optim_step(self, cpu_offload, backward_prefetch):
         # We use a model with a long CUDA delay right before the optimizer step.
@@ -156,7 +156,7 @@ class TestParityWithDDP(FSDPTest):
     )
     @parametrize(
         "backward_prefetch",
-        [BackwardPrefetch_.BACKWARD_PRE, BackwardPrefetch_.BACKWARD_POST, None]
+        [BackwardPrefetch.BACKWARD_PRE, BackwardPrefetch.BACKWARD_POST, None]
     )
     def test_delayed_reduce_scatter(self, cpu_offload, backward_prefetch):
         # We insert a delay in the torch.distributed._reduce_scatter_base op, so that
@@ -186,7 +186,7 @@ class TestParityWithDDP(FSDPTest):
     )
     @parametrize(
         "backward_prefetch",
-        [BackwardPrefetch_.BACKWARD_PRE, BackwardPrefetch_.BACKWARD_POST, None]
+        [BackwardPrefetch.BACKWARD_PRE, BackwardPrefetch.BACKWARD_POST, None]
     )
     def test_mixture_of_experts(self, cpu_offload, backward_prefetch):
         init_modes = self._get_init_modes_for_test(cpu_offload)
@@ -209,7 +209,7 @@ class TestParityWithDDP(FSDPTest):
     )
     @parametrize(
         "backward_prefetch",
-        [BackwardPrefetch_.BACKWARD_PRE, BackwardPrefetch_.BACKWARD_POST, None]
+        [BackwardPrefetch.BACKWARD_PRE, BackwardPrefetch.BACKWARD_POST, None]
     )
     def test_mixture_of_experts_with_delay_before_free(self, cpu_offload, backward_prefetch):
         init_modes = self._get_init_modes_for_test(cpu_offload)

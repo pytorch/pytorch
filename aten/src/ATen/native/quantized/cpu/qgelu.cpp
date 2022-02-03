@@ -15,9 +15,9 @@ namespace native {
 
 DEFINE_DISPATCH(qgelu_stub);
 
-Tensor gelu_quantized_cpu(const Tensor& qx, int64_t approximate) {
+Tensor gelu_quantized_cpu(const Tensor& qx) {
   Tensor qy;
-  qgelu_stub(qx.device().type(), qx, qy, approximate);
+  qgelu_stub(qx.device().type(), qx, qy);
   return qy;
 }
 }}  // namespace at::native

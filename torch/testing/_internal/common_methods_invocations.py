@@ -3903,6 +3903,7 @@ def sample_inputs_layer_norm(opinfo, device, dtype, requires_grad, **kwargs):
     # With `None` weight and bias (tests failing for this, see the link above)
     # yield SampleInput(make_arg((1, 2)), args=((2,), None, make_arg((2,))))
 
+
 def sample_inputs_local_response_norm(opinfo, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
 
@@ -4081,13 +4082,8 @@ def sample_inputs_upsample(mode, self, device, dtype, requires_grad, **kwargs):
 
 def sample_inputs_gelu(self, device, dtype, requires_grad, **kwargs):
     N = 5
-    tensors = []
-    for _ in range(1, N):
-        for approximate in ['none', 'tanh']:
-            tensors.append(SampleInput(
-                make_tensor((N * 2, N * 2), device=device, dtype=dtype,
-                            requires_grad=requires_grad, low=-3, high=3),
-                kwargs=dict(approximate=approximate)))
+    tensors = [SampleInput(make_tensor((N * 2, N * 2), device=device, dtype=dtype,
+               requires_grad=requires_grad, low=-3, high=3)) for _ in range(1, N)]
     return tensors
 
 def sample_inputs_max_min_reduction_with_dim(op_info, device, dtype, requires_grad, **kwargs):
@@ -7091,14 +7087,13 @@ def error_inputs_kthvalue(op_info, device, **kwargs):
                        error_type=RuntimeError, error_regex=k_out_of_range_err),)
 
 def sample_inputs_dropout(op_info, device, dtype, requires_grad, *,
-                          train=None, min_input_dim=None, **kwargs):
+                          train=None, valid_input_dim=None, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
 
-    if min_input_dim:
-        # Create cases with dim ranging from min_input_dim to min_input_dim + 2 (inclusive)
-        cases = [(S,) * i for i in range(min_input_dim, min_input_dim + 3)]
+    if valid_input_dim:
+        cases = ((S,) * i for i in valid_input_dim)
     else:
-        cases = [(S, S), (S,), ()]
+        cases = ((S, S), (S,), ())
     p_vals = [0.0, 0.5, 1.0]
     # This is to handle special case for feature_alpha_dropout which has different
     # supported dtypes depending on `train` parameter
@@ -9073,9 +9068,6 @@ op_db: List[OpInfo] = [
                     assert_autodiffed=True,
                     rhs_make_tensor_kwargs=dict(exclude_zero=True),
                     skips=(
-                        # 69913: RuntimeError: CUDA error: an illegal memory access was encountered
-                        DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', 'test_fn_fwgrad_bwgrad',
-                                     device_type='cuda', dtypes=[torch.double, torch.cdouble]),
                         DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', 'test_forward_mode_AD',
                                      device_type='cuda', dtypes=[torch.double, torch.cdouble]),
                         DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', 'test_inplace_forward_mode_AD',
@@ -9092,9 +9084,6 @@ op_db: List[OpInfo] = [
                     assert_autodiffed=True,
                     rhs_make_tensor_kwargs=dict(exclude_zero=True),
                     skips=(
-                        # 69913: RuntimeError: CUDA error: an illegal memory access was encountered
-                        DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', 'test_fn_fwgrad_bwgrad',
-                                     device_type='cuda', dtypes=[torch.double, torch.cdouble]),
                         DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', 'test_forward_mode_AD',
                                      device_type='cuda', dtypes=[torch.double, torch.cdouble]),
                         DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', 'test_inplace_forward_mode_AD',
@@ -9111,9 +9100,6 @@ op_db: List[OpInfo] = [
                     assert_autodiffed=True,
                     rhs_make_tensor_kwargs=dict(exclude_zero=True),
                     skips=(
-                        # 69913: RuntimeError: CUDA error: an illegal memory access was encountered
-                        DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', 'test_fn_fwgrad_bwgrad',
-                                     device_type='cuda', dtypes=[torch.double, torch.cdouble]),
                         DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', 'test_forward_mode_AD',
                                      device_type='cuda', dtypes=[torch.double, torch.cdouble]),
                         DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', 'test_inplace_forward_mode_AD',
@@ -9694,11 +9680,6 @@ op_db: List[OpInfo] = [
                # RuntimeError:
                # Arguments for call are not valid.
                DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit', dtypes=(torch.float32, torch.complex64)),  # noqa: B950
-               # 69925: RuntimeError: Expected all tensors to be on the same device, but found at least two devices, cuda:0 and cpu!
-               DecorateInfo(unittest.expectedFailure, 'TestGradients', 'test_fn_fwgrad_bwgrad', device_type='cuda'),
-               # (ROCm) Memory exception on virtual address 0x7f6f3deb7000, node id 4: Page not present
-               DecorateInfo(unittest.skip("Skipped! ROCm memory exception"), 'TestGradients', 'test_fn_fwgrad_bwgrad',
-                            device_type='cuda', dtypes=[torch.float64, torch.complex128], active_if=TEST_WITH_ROCM),
            ),
            supports_inplace_autograd=False,
            sample_inputs_func=sample_inputs_gradient),
@@ -9756,10 +9737,12 @@ op_db: List[OpInfo] = [
                # These tests started breaking after touching the SVD.
                DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', 'test_fn_grad', device_type='cpu',
                             dtypes=(torch.complex128,), active_if=IS_WINDOWS),
-               # Will be removed once https://github.com/pytorch/pytorch/issues/62328 is fixed
+               # For complex dtypes: Will be removed once https://github.com/pytorch/pytorch/issues/62328 is fixed
                # Probable fix (open PR): https://github.com/pytorch/pytorch/pull/62570
-               DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', 'test_fn_grad', device_type='cuda',
-                            dtypes=(torch.complex128,)),
+               # Illegal Memory Access failure: https://github.com/pytorch/pytorch/issues/72203
+               DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', 'test_fn_grad', device_type='cuda'),
+               # Illegal Memory Access failure: https://github.com/pytorch/pytorch/issues/72204
+               DecorateInfo(unittest.skip("Skipped!"), 'TestMathBits', 'test_neg_view', device_type='cuda'),
                DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_dtypes'),
                DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', 'test_fn_gradgrad'),
            )),
@@ -11268,6 +11251,10 @@ op_db: List[OpInfo] = [
            dtypes=floating_types(),
            dtypesIfCPU=floating_types_and(torch.bfloat16),
            dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
+           skips=(
+               # Pre-existing condition; Needs to be fixed
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_composite_compliance'),
+           ),
            sample_inputs_func=sample_inputs_max_pool),
     OpInfo('nn.functional.max_pool2d',
            aten_name='max_pool2d',
@@ -11777,7 +11764,7 @@ op_db: List[OpInfo] = [
            supports_gradgrad=True,
            supports_out=False,
            supports_forward_ad=True,
-           supports_fwgrad_bwgrad=False,
+           supports_fwgrad_bwgrad=True,
            autodiff_nonfusible_nodes=["aten::gelu"]),
     OpInfo('nn.functional.relu6',
            aten_name="relu6",
@@ -14036,15 +14023,7 @@ op_db: List[OpInfo] = [
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            supports_out=False,
-           sample_inputs_func=sample_cumulative_trapezoid,
-           skips=(
-               # Two failures:
-               # 1. (CUDA) RuntimeError: Expected all tensors to be on the same device, but found at
-               #    least two devices, cuda:0 and cpu!
-               # 2. (ROCm) Memory exception on virtual address 0x7f6a2216f000, node id 4: Page not present
-               DecorateInfo(unittest.skip("Skipped! ROCm memory exception"), 'TestGradients',
-                            'test_fn_fwgrad_bwgrad', device_type='cuda'),
-           )),
+           sample_inputs_func=sample_cumulative_trapezoid,),
     OpInfo('unsqueeze',
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
            supports_out=False,
@@ -14582,7 +14561,8 @@ op_db: List[OpInfo] = [
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
         supports_out=False,
-        sample_inputs_func=partial(sample_inputs_dropout, min_input_dim=2),
+        # As per the docs, valid input dims are (3, 4)
+        sample_inputs_func=partial(sample_inputs_dropout, valid_input_dim=(3, 4)),
         inplace_variant=lambda input, *args, **kwargs:
             wrapper_set_seed(torch.nn.functional.dropout2d, input, *args, **kwargs, inplace=True)),
     # In training mode, feature_alpha_dropout currently doesn't support inputs of complex dtype
@@ -14608,7 +14588,8 @@ op_db: List[OpInfo] = [
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
         supports_out=False,
-        sample_inputs_func=partial(sample_inputs_dropout, train=True, min_input_dim=2),
+        # As per the docs, valid input dims are (4, 5)
+        sample_inputs_func=partial(sample_inputs_dropout, train=True, valid_input_dim=(4, 5)),
         inplace_variant=lambda input, *args, **kwargs:
             wrapper_set_seed(torch.nn.functional.feature_alpha_dropout, input, *args, **kwargs, inplace=True)),
     OpInfo(
