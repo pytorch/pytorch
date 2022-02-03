@@ -917,18 +917,23 @@ class LinearReLUQuantizeHandler(QuantizeHandler):
             # note that relu should already be fused into linear modul in the fusion step
             assert self.relu_node is None, 'linear module and relu fusion is not executed, ' \
                 'please make sure to run fusion before prepare'
-            # we'll always produce reference pattern for torch.nn.Linear,
+            # we'll always produce reference pattern for the following modules
             # will remove the else branch after we migrated all use cases
-            if is_reference or \
-               type(self.linear) in [torch.nn.Linear] and dtypes in [(torch.quint8, torch.qint8, None)]:
+            module_allowlist = [
+                torch.nn.Linear,
+                torch.nn.qat.Linear,
+                torch.nn.intrinsic.modules.fused.LinearReLU,
+                torch.nn.intrinsic.qat.modules.linear_relu.LinearReLU
+            ]
+            if is_reference or type(self.linear) in module_allowlist and dtypes in [(torch.quint8, torch.qint8, None)]:
                 # produce dequant - float_op - quant pattern
                 dtype = torch.float
                 if activation_int8_quantized:
                     dtype = activation_dtype(qconfig)
                 activation = load_arg(quantized=dtype)(self.linear_node.args[0])
                 args = load_arg(quantized=torch.float)(self.linear_node.args)
-                # Get the float linear and attach qscheme and qparams
-                # the the module
+
+                # Get the float linear and attach qscheme and qparams the the module
                 float_linear = self.linear
                 fused_linear = None
                 if isinstance(float_linear, (torch.nn.qat.Linear, torch.nn.intrinsic.qat.LinearReLU)):
@@ -947,8 +952,11 @@ class LinearReLUQuantizeHandler(QuantizeHandler):
                         float_linear = self.linear[0]  # type: ignore[index]
                     # Attach the weight observer to the module
                     weight_post_process = qconfig.weight()  # type: ignore[union-attr]
-                    # Run weight observer
-                    weight_post_process(float_linear.weight)  # type: ignore[operator]
+
+                # Run weight observer
+                # TODO: This is currently a hack for QAT to get the right shapes for scale and zero point.
+                # In the future, we should require the user to calibrate the model after calling prepare
+                weight_post_process(float_linear.weight)  # type: ignore[operator]
 
                 weight_qparams = get_qparam_dict(weight_post_process)
                 # TODO: include the configuration in backend_config_dict

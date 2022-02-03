@@ -106,7 +106,8 @@ TEST(StaticModule, ValueGroup) {
   torch::jit::StaticModule sm(input_graph);
   const Graph& graph = sm.graph();
   std::vector<const Node*> nodes(graph.nodes().begin(), graph.nodes().end());
-  const auto& value_group = sm.value_group();
+  auto* root_block = sm.root_block();
+  const auto& value_group = sm.block_info(root_block).value_group();
 
   std::vector<const Value*> expected_input_aliases{
       graph.inputs()[0], graph.inputs()[1], nodes[0]->output()};
@@ -138,9 +139,11 @@ TEST(StaticModule, IsOptimizableContainerType_NonOptimizableInputs) {
 
   auto sm = makeStaticModuleFromScript(src);
   const auto& graph = sm.graph();
+  auto* root_block = sm.root_block();
+  const auto& block_info = sm.block_info(root_block);
 
   for (const Node* n : graph.nodes()) {
-    EXPECT_FALSE(sm.is_optimizable_container_type(n));
+    EXPECT_FALSE(block_info.node_is_optimizable_container_type(n));
   }
 }
 
@@ -158,9 +161,11 @@ TEST(StaticModule, IsOptimizableContainerType_WrongType) {
 
   auto sm = makeStaticModuleFromScript(src);
   const auto& graph = sm.graph();
+  auto* root_block = sm.root_block();
+  const auto& block_info = sm.block_info(root_block);
 
   for (const Node* n : graph.nodes()) {
-    EXPECT_FALSE(sm.is_optimizable_container_type(n));
+    EXPECT_FALSE(block_info.node_is_optimizable_container_type(n));
   }
 }
 
@@ -175,12 +180,14 @@ TEST(StaticModule, IsOptimizableContainerType_CanUseOutVariant) {
     )JIT";
   auto sm = makeStaticModuleFromScript(src);
   const auto& graph = sm.graph();
+  auto* root_block = sm.root_block();
+  const auto& block_info = sm.block_info(root_block);
 
   for (const Node* n : graph.nodes()) {
     if (n->kind() == c10::prim::ListConstruct) {
-      EXPECT_TRUE(sm.is_optimizable_container_type(n));
+      EXPECT_TRUE(block_info.node_is_optimizable_container_type(n));
     } else {
-      EXPECT_FALSE(sm.is_optimizable_container_type(n));
+      EXPECT_FALSE(block_info.node_is_optimizable_container_type(n));
     }
   }
 }
@@ -1050,7 +1057,8 @@ TEST(ManagedTensorRanges, NoAliases) {
   auto* z = vmap["z"];
 
   FastSet<const Value*> managed_tensors = {y, z};
-  ManagedTensorRanges ranges(graph, managed_tensors);
+  AliasDb alias_db(graph);
+  auto ranges = ManagedTensorRanges(*graph->block(), alias_db, managed_tensors);
 
   std::vector<Node*> nodes(
       graph->block()->nodes().begin(), graph->block()->nodes().end());
@@ -1089,7 +1097,8 @@ TEST(ManagedTensorRanges, AliasExtendingLifetimes) {
   auto* z2 = vmap["z2"];
 
   FastSet<const Value*> managed_tensors = {y, z1, z2};
-  ManagedTensorRanges ranges(graph, managed_tensors);
+  AliasDb alias_db(graph);
+  auto ranges = ManagedTensorRanges(*graph->block(), alias_db, managed_tensors);
 
   std::vector<Node*> nodes(
       graph->block()->nodes().begin(), graph->block()->nodes().end());
@@ -1135,7 +1144,8 @@ TEST(ManagedTensorRanges, LifetimeOverlap) {
   auto* d = vmap["d"];
   auto* e = vmap["e"];
 
-  ManagedTensorRanges ranges(graph, {b, c, d, e});
+  AliasDb alias_db(graph);
+  auto ranges = ManagedTensorRanges(*graph->block(), alias_db, {b, c, d, e});
   const std::vector<std::pair<Value*, Value*>> overlapping_values{
       {b, c}, {c, d}, {c, e}};
 
@@ -1169,7 +1179,8 @@ TEST(ManagedTensorRanges, OverlappingLifetimesContainers) {
   auto* c = vmap["c"];
   auto* d = vmap["d"];
 
-  ManagedTensorRanges ranges(graph, {b, c, d});
+  AliasDb alias_db(graph);
+  auto ranges = ManagedTensorRanges(*graph->block(), alias_db, {b, c, d});
 
   EXPECT_TRUE(ranges.lifetimesOverlap(b, c));
   EXPECT_TRUE(ranges.lifetimesOverlap(b, d));
@@ -1189,7 +1200,8 @@ TEST(ManagedTensorRanges, OverlappingLifetimesOutputs) {
   auto* b = vmap["b"];
   auto* output = vmap["output"];
 
-  ManagedTensorRanges ranges(graph, {b, output});
+  AliasDb alias_db(graph);
+  auto ranges = ManagedTensorRanges(*graph->block(), alias_db, {b, output});
 
   EXPECT_TRUE(ranges.lifetimesOverlap(b, output));
 }
@@ -1275,7 +1287,9 @@ void testAssignStorageToManagedTensors(
   }
   ASSERT_EQ(managed_tensor_values.size(), tensor_value_to_tensor.size());
 
-  auto ranges = ManagedTensorRanges(graph, managed_tensor_values);
+  AliasDb alias_db(graph);
+  auto ranges =
+      ManagedTensorRanges(*graph->block(), alias_db, managed_tensor_values);
   auto groups = assignStorageToManagedTensors(
       graph->block()->nodes(), ranges, tensor_value_to_tensor);
 
