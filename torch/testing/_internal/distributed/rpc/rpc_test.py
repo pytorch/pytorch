@@ -2376,10 +2376,9 @@ class RpcTest(RpcAgentTestFixture, RpcTestCommon):
         # Note: Remove once record_function uses these directly
         num_sleep_seconds = 1
         if self.rank == 1:
-            # Validate that calling the function twice results in an error.
             with _profile() as pf:
                 try:
-                    record = torch.ops.profiler._record_function_enter_new("foo")
+                    record = torch.ops.profiler._record_function_enter_new("foo", None)
                     fut = rpc.rpc_async(
                         worker_name(0), my_sleep_func, args=(num_sleep_seconds,)
                     )
