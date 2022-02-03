@@ -2371,6 +2371,25 @@ class RpcTest(RpcAgentTestFixture, RpcTestCommon):
                 fut.wait()
 
     @dist_init
+    def test_async_record_function_double_end_callbacks_new_signatures(self):
+        # Test the new _record_function ops work
+        # Note: Remove once record_function uses these directly
+        num_sleep_seconds = 1
+        if self.rank == 1:
+            # Validate that calling the function twice results in an error.
+            with _profile() as pf:
+                try:
+                    record = torch.ops.profiler._record_function_enter_new("foo")
+                    fut = rpc.rpc_async(
+                        worker_name(0), my_sleep_func, args=(num_sleep_seconds,)
+                    )
+                    torch.ops.profiler._call_end_callbacks_on_jit_fut(record, fut)
+                finally:
+                    torch.ops.profiler._record_function_exit_new(record)
+
+                fut.wait()
+
+    @dist_init
     def test_async_record_function_cbs_jit_call(self):
         if self.rank == 1:
             with _profile() as pf:
