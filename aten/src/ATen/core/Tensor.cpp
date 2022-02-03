@@ -44,7 +44,7 @@ void TensorBase::enforce_invariants() {
         !impl_->is_sparse(),
         "Sparse Tensors are supported by Tensor, but invariant checking isn't implemented.  Please file a bug.");
     TORCH_INTERNAL_ASSERT(
-        impl_->storage_initialized(),
+        !impl_->has_storage() || impl_->is_meta() || impl_->storage_initialized(),
         "Partially-initialized tensor not supported by Tensor");
   }
 }
