@@ -1511,9 +1511,11 @@ class TestReductions(TestCase):
         with self.assertRaisesRegex(RuntimeError, "nansum does not support complex inputs"):
             torch.nansum(x)
 
-    def test_nansum_out_dtype(self, device):
-        dtypes = all_types_and(torch.half)
-        for inp_dtype, out_dtype in combinations(dtypes, 2):
+    @dtypes(*all_types_and(torch.half))
+    def test_nansum_out_dtype(self, device, dtype):
+        out_dtype = dtype
+        inp_dtypes = all_types_and(torch.half) if out_dtype.is_floating_point else integral_types()
+        for inp_dtype in inp_dtypes:
             shape = _rand_shape(random.randint(2, 5), min_size=5, max_size=10)
             x = _generate_input(shape, inp_dtype, device, with_extremal=False)
             torch_fn = partial(torch.nansum, dtype=out_dtype)
