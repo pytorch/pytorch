@@ -126,7 +126,8 @@ class TestQuantizeDBRIndividualOps(QuantizeDBRTestCase):
                 self.conv = convs[dim](3, 3, 3)
 
             def forward(self, x):
-                return self.conv(x)
+                x1 = self.conv(x)
+                return x1
 
         data = {
             1: torch.randn(1, 3, 10),
