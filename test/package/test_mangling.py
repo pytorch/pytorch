@@ -2,7 +2,12 @@
 
 from io import BytesIO
 
-from torch.package import PackageExporter, PackageImporter
+from torch.package.package_exporter_oss import PackageExporter
+from torch.package.package_importer_oss import PackageImporter
+
+from torch.package.package_exporter import PackageExporter as PackageExporter_fb
+from torch.package import PackageImporter as PackageImporter_fb
+
 from torch.package._mangling import (
     PackageMangler,
     demangle,
@@ -83,14 +88,14 @@ class TestMangling(PackageTestCase):
         obj = package_a.subpackage.PackageASubpackageObject()
         obj2 = package_a.PackageAObject(obj)
         f1 = BytesIO()
-        with PackageExporter(f1) as pe:
+        with PackageExporter_fb(f1) as pe:
             pe.intern("**")
             pe.save_pickle("obj", "obj.pkl", obj2)
         f1.seek(0)
-        importer1 = PackageImporter(f1)
+        importer1 = PackageImporter_fb(f1)
         loaded1 = importer1.load_pickle("obj", "obj.pkl")
         f1.seek(0)
-        importer2 = PackageImporter(f1)
+        importer2 = PackageImporter_fb(f1)
         loaded2 = importer2.load_pickle("obj", "obj.pkl")
 
         # Modules from loaded packages should not shadow the names of modules.

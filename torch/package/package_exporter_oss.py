@@ -32,8 +32,7 @@ from ._stdlib import is_stdlib_module
 from .find_file_dependencies import find_files_source_depends_on
 from .glob_group import GlobGroup, GlobPattern
 from .importer import Importer, OrderedImporter, sys_importer
-from ._zip_file_torchscript import TorchScriptPackageZipFileWriter
-from ._zip_file import PackageZipFileWriter
+from ._zip_file import PackageZipFileWriter, DefaultPackageZipFileWriter
 import inspect
 
 _gate_torchscript_serialization = True
@@ -181,7 +180,7 @@ class PackageExporter:
         self,
         f: Union[str, Path, BinaryIO],
         importer: Union[Importer, Sequence[Importer]] = sys_importer,
-        zip_file_reader_type: Type[PackageZipFileWriter] = TorchScriptPackageZipFileWriter
+        zip_file_reader_type: Type[PackageZipFileWriter] = DefaultPackageZipFileWriter
     ):
         """
         Create an exporter.
@@ -197,7 +196,6 @@ class PackageExporter:
             self.buffer: Optional[BinaryIO] = None
         else:  # is a byte buffer
             self.buffer = f
-
         self.zip_file = zip_file_reader_type(f)
 
         self._written_files: Set[str] = set()

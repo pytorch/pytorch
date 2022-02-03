@@ -5,9 +5,10 @@ from textwrap import dedent
 from unittest import skipIf
 
 import torch
-from torch.package import PackageExporter, PackageImporter, sys_importer
+from torch.package import sys_importer
 from torch.testing._internal.common_utils import IS_FBCODE, IS_SANDCASTLE, run_tests
-
+from torch.package.package_exporter_oss import PackageExporter
+from torch.package.package_importer_oss import PackageImporter
 try:
     from torchvision.models import resnet18
 

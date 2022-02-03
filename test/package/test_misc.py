@@ -5,7 +5,9 @@ import inspect
 from io import BytesIO
 from textwrap import dedent
 
-from torch.package import PackageExporter, PackageImporter, is_from_package
+from torch.package import is_from_package
+from torch.package.package_exporter_oss import PackageExporter
+from torch.package.package_importer_oss import PackageImporter
 from torch.package.package_exporter import PackagingError
 from torch.testing._internal.common_utils import run_tests
 
@@ -30,8 +32,7 @@ class TestMisc(PackageTestCase):
         export_plain = dedent(
             """\
                 ├── .data
-                │   ├── extern_modules
-                │   └── version
+                │   └── extern_modules
                 ├── main
                 │   └── main
                 ├── obj
@@ -53,8 +54,7 @@ class TestMisc(PackageTestCase):
         import_exclude = dedent(
             """\
                 ├── .data
-                │   ├── extern_modules
-                │   └── version
+                │   └── extern_modules
                 ├── main
                 │   └── main
                 ├── obj
