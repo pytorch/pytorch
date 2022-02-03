@@ -149,6 +149,24 @@ struct PeepholeOptimizeNonTensorImpl {
             changed = true;
           }
         }
+
+        // check for types that can be refined
+        for (size_t i = 0; i < n.outputs().size(); ++i) {
+          // common case of optional for now
+          bool inputs_non_optional =
+              !n.thenOutputs().at(i)->type()->cast<OptionalType>() &&
+              !n.elseOutputs().at(i)->type()->cast<OptionalType>();
+          auto output_optional =
+              n.outputs().at(i)->type()->cast<OptionalType>();
+          if (inputs_non_optional && output_optional) {
+            if (auto unif = unifyTypes(
+                    n.thenOutputs().at(i)->type(),
+                    n.elseOutputs().at(i)->type())) {
+              n.outputs().at(i)->setType(*unif);
+              changed = true;
+            }
+          }
+        }
       } else if (
           node->kind() == aten::__is__ || node->kind() == aten::__isnot__) {
         // if we are comparing a None value with a value that can't be None

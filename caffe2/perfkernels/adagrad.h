@@ -6,6 +6,7 @@
 #include <immintrin.h>
 #endif
 #include <c10/util/Half.h>
+#include <c10/util/irange.h>
 
 namespace caffe2 {
 
@@ -26,7 +27,7 @@ static inline void adagrad_update_base_inlined(
     float epsilon,
     float lr,
     float weight_decay = 0.f) {
-  for (auto i = 0; i < N; ++i) {
+  for (const auto i : c10::irange(N)) {
     float gi = std::fma(weight_decay, w[i], g[i]);
     float hi = decay * h[i] + gi * gi;
     nh[i] = hi;

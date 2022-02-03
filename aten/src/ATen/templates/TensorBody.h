@@ -236,9 +236,6 @@ class TORCH_API Tensor: public TensorBase {
   template <typename T>
   T item() const;
 
-  // Purposely not defined here to avoid inlining
-  void print() const;
-
   template<typename T, size_t N, template <typename U> class PtrTraits = DefaultPtrTraits, typename index_t = int64_t>
   C10_DEPRECATED_MESSAGE("packed_accessor is deprecated, use packed_accessor32 or packed_accessor64 instead")
   GenericPackedTensorAccessor<T,N,PtrTraits,index_t> packed_accessor() const & {
