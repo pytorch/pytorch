@@ -35,8 +35,6 @@ Tensor& quantized_copy_from_float_cpu_(Tensor& self, const Tensor& src) {
       float* src_data = src.data_ptr<float>();
       scalar_t* self_data = self.data_ptr<scalar_t>();
       for (const auto i : c10::irange(self.numel())) {
-        auto sc = self.q_scale();
-        auto test = self.q_zero_point();
         self_data[i] = quantize_val<scalar_t>(
             self.q_scale(), self.q_zero_point(), src_data[i]);
       }
