@@ -373,7 +373,9 @@ class TestONNXRuntime(unittest.TestCase):
                 # suppress ort warnings.
                 # 0:Verbose, 1:Info, 2:Warning. 3:Error, 4:Fatal. Default is 2.
                 ort_sess_opt.log_severity_level = 3
-                ort_sess = onnxruntime.InferenceSession(model_file_name, sess_options=ort_sess_opt, providers=["CPUExecutionProvider"])
+                ort_sess = onnxruntime.InferenceSession(model_file_name,
+                                                        sess_options=ort_sess_opt,
+                                                        providers=["CPUExecutionProvider"])
                 input_copy = copy.deepcopy(input)
                 ort_outs = run_ort(ort_sess, input_copy)
                 ort_compare_with_pytorch(ort_outs, output, rtol, atol)

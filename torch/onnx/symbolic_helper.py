@@ -239,7 +239,8 @@ def quantized_args(*arg_q_descriptors, op_scale=None, op_zero_point=None):
 
             # some args may be optional, so the length may be smaller
             assert len(arg_q_descriptors) >= len(args)
-            get_desc_args = lambda : zip(arg_q_descriptors[:len(args)], args)
+            def get_desc_args():
+                return zip(arg_q_descriptors[:len(args)], args)
             # Run regular symbolic function if none of the argument is QTensor.
             if not any([(desc and arg.node().kind() == "prim::TupleConstruct") for desc, arg in get_desc_args()]):
                 return fn(g, *args, **kwargs)

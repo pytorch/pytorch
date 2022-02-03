@@ -1939,7 +1939,7 @@ def hardswish(g, self):
 
 
 # Fixed scale and zero_point, discovered from aten/src/ATen/native/quantized/cpu/qhardsigmoid.cpp
-@quantized_args(True, op_scale=1.0/256.0, op_zero_point=0)
+@quantized_args(True, op_scale=1.0 / 256.0, op_zero_point=0)
 @parse_args("v")
 def hardsigmoid(g, self):
     # Set alpha_f to 1 / 6 to make op equivalent to PyTorch's definition of Hardsigmoid.

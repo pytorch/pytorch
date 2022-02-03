@@ -8,7 +8,7 @@ import torch.onnx
 import torch.onnx.utils
 
 import torch.onnx.symbolic_helper as sym_help
-from torch.onnx.symbolic_helper import parse_args, _unimplemented, ScalarType, _dequantize_helper, _quantize_helper
+from torch.onnx.symbolic_helper import parse_args, _unimplemented
 import torch.onnx.symbolic_opset9
 from torch.onnx.symbolic_opset9 import linear, conv2d, add, mul, hardswish, relu
 
