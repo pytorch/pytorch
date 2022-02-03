@@ -35,7 +35,7 @@ static constexpr int64_t map_alloc_alignment = 64;
 
 TORCH_API std::string NewProcessWideShmHandle()
 {
-  static std::atomic<uint64_t> counter;
+  static std::atomic<uint64_t> counter{0};
   static std::random_device rd;
   std::string handle = "/torch_";
 #ifdef _MSC_VER
