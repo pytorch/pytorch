@@ -1,3 +1,5 @@
+# Owner(s): ["oncall: aiacc"]
+
 import torch
 import torch.fx.experimental.fx_acc.acc_ops as acc_ops
 from torch.testing._internal.common_fx2trt import AccTestCase
@@ -6,6 +8,7 @@ from torch.fx.experimental.fx2trt.passes.fuse_pass import (
     fuse_permute_matmul,
     trt_transposed_matmul,
 )
+from torch.testing._internal.common_utils import run_tests
 
 
 def tranpose_last_two_dims(x):
@@ -118,3 +121,6 @@ class TestFusePermuteMatmul(AccTestCase):
             {trt_transposed_matmul},
             apply_passes=[fuse_permute_matmul],
         )
+
+if __name__ == '__main__':
+    run_tests()

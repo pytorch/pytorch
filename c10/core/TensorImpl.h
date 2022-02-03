@@ -37,6 +37,11 @@ C10_DECLARE_bool(caffe2_keep_on_shrink);
 // respect caffe2_keep_on_shrink.
 C10_DECLARE_int64(caffe2_max_keep_on_shrink_memory);
 
+C10_CLANG_DIAGNOSTIC_PUSH()
+#if C10_CLANG_HAS_WARNING("-Wimplicit-int-float-conversion")
+C10_CLANG_DIAGNOSTIC_IGNORE("-Wimplicit-int-float-conversion")
+#endif
+
 namespace at {
 class Tensor;
 class TensorBase;
@@ -504,6 +509,24 @@ struct C10_API VariableVersion {
   }
 };
 
+// Forward declaration of TensorImpl needed for forward declaration of
+// C10_TensorImpl_Size_Check_Dummy_Class
+struct C10_API TensorImpl;
+
+// Forward declaration needed because TensorImpl needs to be friends with
+// C10_TensorImpl_Size_Check_Dummy_Class in order to check the size
+// of its private fields.
+template <
+    size_t cplusplus,
+    size_t clang_ver_major,
+    size_t gcc_ver,
+    size_t gcc_ver_minor,
+    size_t nvcc,
+    size_t cuda_version,
+    size_t cuda_version_major,
+    size_t ptr_size>
+class C10_TensorImpl_Size_Check_Dummy_Class;
+
 /**
  * NOTE: Some TensorImpl methods are small and not overridden in the
  * PyTorch codebase itself, but may theoretically need to be
@@ -592,6 +615,7 @@ struct C10_API VariableVersion {
  */
 struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   TensorImpl() = delete;
+  virtual ~TensorImpl() override;
   // Note [Enum ImplType]
   // This enum is temporary. In the followup refactor we should
   // think about how to specialize TensorImpl creation for view
@@ -1536,6 +1560,13 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
         (is_sparse(key_set_) && is_sparse(from));
   }
 
+ private:
+  template <typename VariableVersion>
+  c10::intrusive_ptr<TensorImpl> shallow_copy_and_detach_core(
+      VariableVersion&& version_counter,
+      bool allow_tensor_metadata_change) const;
+
+ public:
   /**
    * Return a TensorImpl that is a shallow-copy of this TensorImpl.
    *
@@ -2581,6 +2612,20 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   // INVARIANT: named_tensor_meta_ != nullptr  <==>
   // key_set_.has(DispatchKey::Named)
   DispatchKeySet key_set_;
+
+ private:
+  // C10_TensorImpl_Size_Check_Dummy_Class needs to be friends with
+  // TensorImpl so it can inspect the size of private fields
+  template <
+      size_t cplusplus,
+      size_t clang_ver_major,
+      size_t gcc_ver,
+      size_t gcc_ver_minor,
+      size_t nvcc,
+      size_t cuda_version,
+      size_t cuda_version_major,
+      size_t ptr_size>
+  friend class C10_TensorImpl_Size_Check_Dummy_Class;
 };
 
 // Note [TensorImpl size constraints]
@@ -2634,13 +2679,144 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
 //    DispatchKeySet
 //
 
-// TODO: On C++20 the size has changed. Temporarily disable the assert to
-// unblock other C++20 migration.
-#if 0
-static_assert(
-    sizeof(void*) != sizeof(int64_t) || // if 64-bit...
-        sizeof(TensorImpl) == sizeof(int64_t) * 24,
-    "You changed the size of TensorImpl on 64-bit arch."
-    "See Note [TensorImpl size constraints] on how to proceed.");
+// Various preprocessor macros we use to check that the
+// TensorImpl size hasn't changed unexpectedly. We undef
+// these later.
+#ifndef __NVCC__
+#define C10_NVCC 0
+#else
+#define C10_NVCC __NVCC__
 #endif
+
+#ifndef __CUDA_VER_MAJOR__
+#define C10_CUDA_VERSION_MAJOR 0
+#else
+#define C10_CUDA_VERSION_MAJOR __CUDA_VER_MAJOR__
+#endif
+
+#ifndef CUDA_VERSION
+#define C10_CUDA_VERSION 0
+#else
+#define C10_CUDA_VERSION CUDA_VERSION
+#endif
+
+#ifndef __clang_major__
+#define C10_CLANG_MAJOR_VERSION 0
+#else
+#define C10_CLANG_MAJOR_VERSION __clang_major__
+#endif
+
+#ifndef __GNUC__
+#define C10_GCC_VERSION 0
+#else
+#define C10_GCC_VERSION __GNUC__
+#endif
+
+#ifndef __GNUC_MINOR__
+#define C10_GCC_VERSION_MINOR 0
+#else
+#define C10_GCC_VERSION_MINOR __GNUC_MINOR__
+#endif
+
+// We use a templatized class to both contain the logic of checking the sizes
+// as well as to provide compile-time information that might be useful in
+// figuring out why sizes may have changed.
+template <
+    size_t cplusplus = __cplusplus,
+    size_t clang_ver_major = C10_CLANG_MAJOR_VERSION,
+    size_t gcc_ver = C10_GCC_VERSION,
+    size_t gcc_ver_minor = C10_GCC_VERSION_MINOR,
+    size_t nvcc = C10_NVCC,
+    size_t cuda_version = C10_CUDA_VERSION,
+    size_t cuda_version_major = C10_CUDA_VERSION_MAJOR,
+    size_t ptr_size = sizeof(void*)>
+class C10_TensorImpl_Size_Check_Dummy_Class : private TensorImpl {
+ public:
+  // Compile-time check that TensorImpl field sizes are as expected
+  //
+  // Observed total sizes and associated versions
+  // If you find a flag that predicts when unique_ptr has 16 bytes
+  // on 64-bit systems or when sizes_and_strides_ is 84 vs 88 bytes
+  // on 32-bit systems you get a cookie!
+  // Length | LLVM | GCC  |    C++ |  CUDA
+  //    192 |    ? | 11.2 | 201703 | 11040
+  //    208 |    ? | 11.2 | 201703 | 11040
+  //    208 |    ? | 11.2 | 201402 | 11040
+  //    192 |    ? | 11.2 | 201402 | 11040
+  //    160 |   12 |  4.2 | 201703 |     0
+  //
+  // To keep things clean, we split on systems here.
+
+#if UINTPTR_MAX == 0xFFFFFFFF
+  // This is a 32-bit system
+  static constexpr bool check_sizes() {
+    constexpr size_t tsize = 20 * sizeof(int64_t);
+
+    // clang-format off
+    static_assert(sizeof(storage_)            == 4, "Size of storage_ changed!");
+    static_assert(sizeof(autograd_meta_)      == 4, "Size of autograd_meta_ changed!");
+    static_assert(sizeof(named_tensor_meta_)  == 4, "Size of named_tensor_meta_ changed!");
+    static_assert(sizeof(version_counter_)    == 4, "Size of version_counter_ changed!");
+    static_assert(sizeof(pyobj_interpreter_)  == 4, "Size of pyobj_interpreter_ changed!");
+    static_assert(sizeof(pyobj_)              == 4, "Size of pyobj_ changed!");
+    static_assert(sizeof(sizes_and_strides_)  <= 88,"Size of sizes_and_strides_ changed!");
+    static_assert(sizeof(storage_offset_)     == 8, "Size of storage_offset_ changed!");
+    static_assert(sizeof(numel_)              == 8, "Size of numel_ changed!");
+    static_assert(sizeof(data_type_)          == 2, "Size of data_type_ changed!");
+    static_assert(sizeof(device_opt_)         == 3, "Size of device_opt_ changed!");
+    static_assert(sizeof(key_set_)            == 8, "Size of key_set_ changed!");
+    static_assert(sizeof(TensorImpl)          <= tsize, "Total size changed!");
+    // clang-format on
+
+    return true;
+  }
+#else
+  // This is a 64-bit system
+  static constexpr bool check_sizes() {
+    constexpr size_t tsize = 26 * sizeof(int64_t);
+
+    // clang-format off
+    static_assert(sizeof(storage_)            == 8, "Size of storage_ changed!");
+    // On some systems involving NVCC the size of unique_ptr is 16 bytes. We haven't
+    // figured out how to detect those via macro preprocessors yet, so we use <=
+    // comparisons for the relevant fields.
+    static_assert(sizeof(autograd_meta_)      <= 16,"Size of autograd_meta_ changed!");
+    static_assert(sizeof(named_tensor_meta_)  <= 16,"Size of named_tensor_meta_ changed!");
+    static_assert(sizeof(version_counter_)    == 8, "Size of version_counter_ changed!");
+    static_assert(sizeof(pyobj_interpreter_)  == 8, "Size of pyobj_interpreter_ changed!");
+    static_assert(sizeof(pyobj_)              == 8, "Size of pyobj_ changed!");
+    static_assert(sizeof(sizes_and_strides_)  == 88,"Size of sizes_and_strides_ changed!");
+    static_assert(sizeof(storage_offset_)     == 8, "Size of storage_offset_ changed!");
+    static_assert(sizeof(numel_)              == 8, "Size of numel_ changed!");
+    static_assert(sizeof(data_type_)          == 2, "Size of data_type_ changed!");
+    static_assert(sizeof(device_opt_)         == 3, "Size of device_opt_ changed!");
+    static_assert(sizeof(key_set_)            == 8, "Size of key_set_ changed!");
+    static_assert(sizeof(TensorImpl)          <= tsize, "Total size changed!");
+    // clang-format on
+
+    return true;
+  }
+#endif
+};
+
+// We use a class to encapsulate size-checking logic with
+// templates to capture sizes and flags. We call this within
+// a static assert to prove there is no run-time behaviour.
+// Since the methods we call return either true or fail their
+// own static_asserts, we should never see the error messages
+// below.
+static_assert(
+    C10_TensorImpl_Size_Check_Dummy_Class<>::check_sizes(),
+    "You should not see this message.");
+
+// Clean up after ourselves
+#undef C10_NVCC
+#undef C10_CUDA_VERSION_MAJOR
+#undef C10_CUDA_VERSION
+#undef C10_CLANG_MAJOR_VERSION
+#undef C10_GCC_VERSION
+#undef C10_GCC_VERSION_MINOR
+
 } // namespace c10
+
+C10_CLANG_DIAGNOSTIC_POP()

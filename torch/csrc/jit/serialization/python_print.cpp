@@ -755,6 +755,11 @@ struct PythonPrintImpl {
             min_version_, uint64_t(entry[entry.size() - 1].bumped_at_version));
       }
     }
+    // We want to manually bump the minimum versions for
+    // other variants of aten::div and aten::full which
+    // are not covered by the new upgraders
+    min_version_ =
+        std::max(min_version_, get_min_version_for_kind(node->kind()));
 #else
     min_version_ =
         std::max(min_version_, get_min_version_for_kind(node->kind()));
@@ -917,15 +922,19 @@ struct PythonPrintImpl {
   void printConstant(TaggedStringStream& stmt, const IValue& v) {
     const auto customFormatter = [&](std::ostream& ss, const IValue& v) {
       if (v.isTensor() || containsNonASCIIString(v) || v.isObject()) {
-        TORCH_INTERNAL_ASSERT(!v.type()->is_module());
+        TORCH_INTERNAL_ASSERT(!v.type<c10::Type>()->is_module());
         ss << "CONSTANTS.c" << getOrAddConstant(v);
         return true;
       }
 
-      if (v.isTuple() && v.type()->expectRef<TupleType>().schema()) {
+      auto type = v.type();
+      if (auto dyn = type->castRaw<c10::DynamicType>()) {
+        type = dyn->fallback();
+      }
+      if (v.isTuple() && type->expectRef<TupleType>().schema()) {
         // print the namedtuple constructor and let rest of tuple printing
         // continue
-        ss << v.type()->expectRef<TupleType>().annotation_str(type_printer_);
+        ss << type->expectRef<TupleType>().annotation_str(type_printer_);
       }
       return false;
     };
