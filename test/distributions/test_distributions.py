@@ -34,6 +34,7 @@ import unittest
 from collections import namedtuple
 from itertools import product
 from random import shuffle
+from packaging import version
 
 import torch
 
@@ -2287,7 +2288,7 @@ class TestDistributions(TestCase):
     def test_wishart_log_prob(self):
         ndim = 3
         df = torch.rand([], requires_grad=True) + ndim - 1
-        if scipy.__version__ < (0, 16, 0):
+        if version.parse(scipy.__version__) < version.parse("0.16.0"):
             df += 1.
         tmp = torch.randn(ndim, 10)
         cov = (torch.matmul(tmp, tmp.t()) / tmp.size(-1)).requires_grad_()
@@ -2310,8 +2311,6 @@ class TestDistributions(TestCase):
 
         # Double-check that batched versions behave the same as unbatched
         df = torch.rand(5, requires_grad=True) + ndim - 1
-        if scipy.__version__ < (0, 16, 0):
-            df += 1.
         tmp = torch.randn(5, ndim, 10)
         cov = (tmp.unsqueeze(-2) * tmp.unsqueeze(-3)).mean(-1).requires_grad_()
 
@@ -2330,7 +2329,7 @@ class TestDistributions(TestCase):
         set_rng_seed(0)  # see Note [Randomized statistical tests]
         ndim = 3
         df = torch.rand([], requires_grad=True) + ndim - 1
-        if scipy.__version__ < (0, 16, 0):
+        if version.parse(scipy.__version__) < version.parse("0.16.0"):
             df += 1.
         tmp = torch.randn(ndim, 10)
         cov = (torch.matmul(tmp, tmp.t()) / tmp.size(-1)).requires_grad_()
@@ -4637,8 +4636,14 @@ class TestAgainstScipy(TestCase):
             ),
             (
                 # scipy var for Wishart only supports scalars
-                Wishart((19 if scipy.__version__ < (0, 16, 0) else 20) + positive_var[0], cov_tensor),
-                scipy.stats.wishart((19 if scipy.__version__ < (0, 16, 0) else 20) + positive_var[0].item(), cov_tensor),
+                Wishart(
+                    (20 if version.parse(scipy.__version__) < version.parse("0.16.0") else 19) + positive_var[0],
+                    cov_tensor,
+                ),
+                scipy.stats.wishart(
+                    (20 if version.parse(scipy.__version__) < version.parse("0.16.0") else 19) + positive_var[0].item(),
+                    cov_tensor,
+                ),
             ),
         ]
 
