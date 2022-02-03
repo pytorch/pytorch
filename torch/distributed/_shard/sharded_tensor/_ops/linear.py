@@ -2,23 +2,21 @@ from typing import List, cast
 
 import torch
 import torch.distributed as dist
-from ._common import (
-    _handle_col_wise_sharding_base,
+from torch.distributed.nn.functional import (
+    all_to_all_single,
+    reduce_scatter,
 )
+from torch.distributed._shard.sharded_tensor import sharded_op_impl, ShardedTensor
 from torch.distributed._shard.sharding_spec import ChunkShardingSpec
 from torch.distributed._shard.sharding_spec._internals import (
     get_split_size,
     get_chunked_dim_size,
 )
-from torch.distributed.nn.functional import (
-    all_to_all_single,
-    reduce_scatter,
+
+from ._common import (
+    _handle_col_wise_sharding_base,
 )
 
-from torch.distributed._shard.sharded_tensor import (
-    sharded_op_impl,
-    ShardedTensor
-)
 
 @sharded_op_impl(torch.nn.functional.linear)
 def sharded_linear(types, args, kwargs, pg):
@@ -83,7 +81,7 @@ def sharded_linear(types, args, kwargs, pg):
     """
     input = args[0]
     weight = args[1]
-    bias = kwargs["bias"]
+    bias = args[2]
 
     # Validate types
     if not isinstance(input, torch.Tensor) or not isinstance(bias, torch.Tensor):
@@ -108,7 +106,7 @@ def sharded_linear(types, args, kwargs, pg):
     if len(weight.local_shards()) != 1:
         raise ValueError("Only one local shard supported!")
 
-    local_shard = weight.local_shards()[0].tensor
+    local_shard = weight.local_tensor()
     local_shard_t = local_shard.t().contiguous()
     sharding_dim = weight._sharding_spec.dim
     world_size = dist.get_world_size(pg)
@@ -210,11 +208,15 @@ def _handle_row_wise_sharding(input, world_size, weight, rank, local_shard_t, bi
             0, torch.tensor(indices_flatten, device=input_t.device)
         )
 
-    gathered_input_size = [input_split_sizes[rank] * world_size] + list(input_t_size[1:])
+    gathered_input_size = [input_split_sizes[rank] * world_size] + list(
+        input_t_size[1:]
+    )
     gathered_input = torch.empty(gathered_input_size, device=input_t.device)
 
     # Perform autograd enabled alltoall
-    all_to_all_single(gathered_input, input_t, input_split_sizes=input_split_sizes, group=pg)
+    all_to_all_single(
+        gathered_input, input_t, input_split_sizes=input_split_sizes, group=pg
+    )
     gathered_input = gathered_input.transpose(0, -1)
 
     # Perform local matmuls for all shards
