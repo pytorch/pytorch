@@ -16018,7 +16018,6 @@ class TestNNDeviceType(NNTestCase):
 
     def test_masked_softmax(self, device):
         sizes = [(1, 1, 32), (3, 16, 310), (12, 4, 1024), (4, 2, 1200)]
-        sizes = [(1, 1, 32)]
         for (B, num_heads, L) in sizes:
             for dim in [0, 3]:
                 input = torch.randn((B, num_heads, L, L))
@@ -16068,8 +16067,7 @@ class TestNNDeviceType(NNTestCase):
     # In this test, the forward pass is expected to produce nan's because when dim=0, we only have unspecified values
     def test_masked_softmax_forward_with_nans(self, device):
         dim = 0
-        shapes = [(1, 1, 4), (3, 16, 310), (12, 4, 1024), (4, 2, 1200)]
-        shapes = [(12, 4, 1024)]
+        shapes = [(1, 1, 4), (1, 1, 310), (1, 1, 1024), (1, 1, 1200)]
         for (B, num_heads, L) in shapes:
             input = torch.randn((B, num_heads, L, L), requires_grad=True)
             mask = torch.randint(0, 2, (B, L))
