@@ -1,5 +1,5 @@
 import argparse
-from common import run, topics
+from common import run, topics, get_features
 from collections import defaultdict
 import os
 import csv
@@ -74,6 +74,85 @@ class CommitList:
             for commit in rows:
                 writer.writerow([commit.commit_hash, commit.category, commit.topic, commit.title])
 
+    def keywordInFile(file, keywords):
+        for key in keywords:
+            if key in file:
+                return True
+        return False
+
+    @staticmethod
+    def categorize(commit_hash, title):
+        features = get_features(commit_hash, return_dict=True)
+        title = features['title']
+        category = 'Uncategorized'
+        topic = 'Untopiced'
+
+        # update this to check if each file starts with caffe2
+        if 'caffe2' in title:
+            return Commit(commit_hash, 'caffe2', topic, title)
+        if '[codemod]' in title.lower():
+            return Commit(commit_hash, 'skip', topic, title)
+        labels = features['labels']
+        if 'Reverted' in labels:
+            return Commit(commit_hash, 'skip', topic, title)
+        if 'bc_breaking' in labels:
+            topic = 'bc-breaking'
+        if 'module: deprecation' in labels:
+            topic = 'module: deprecation'
+
+        files_changed = features['files_changed']
+        for file in files_changed:
+            file_lowercase = file.lower()
+            if CommitList.keywordInFile(file, ['docker/', '.circleci', '.github', '.jenkins', '.azure_pipelines']):
+                category = 'releng'
+                break
+            # datapipe(s), torch/utils/data, test_{dataloader, datapipe}
+            if CommitList.keywordInFile(file, ['torch/utils/data', 'test_dataloader', 'test_datapipe']):
+                category = 'dataloader_frontend'
+                break
+            if CommitList.keywordInFile(file, ['torch/csrc/api', 'test/cpp/api']):
+                category = 'cpp_frontend'
+                break
+            if CommitList.keywordInFile(file, ['distributed', 'c10d']):
+                category = 'distributed'
+                break
+            if ('vulkan' in file_lowercase):
+                category = 'vulkan'
+                break
+            if ('Foreach' in file_lowercase):
+                category = 'foreach_frontend'
+                break
+            if 'onnx' in file_lowercase:
+                category = 'onnx'
+                break
+            if CommitList.keywordInFile(file, ['torch/fx', 'test_fx']):
+                category = 'fx'
+                break
+            # torch/quantization, test/quantization, aten/src/ATen/native/quantized, torch/nn/{quantized, quantizable}
+            if CommitList.keywordInFile(file, ['torch/quantization', 'test/quantization', 'aten/src/ATen/native/quantized', 'torch/nn/quantiz']):
+                category = 'quantization'
+                break
+            if CommitList.keywordInFile(file, ['torch/package', 'test/package']):
+                category = 'package'
+                break
+            if CommitList.keywordInFile(file, ['torch/csrc/jit/mobile', 'aten/src/ATen/native/metal', 'test/mobile', 'torch/backends/_nnapi/', 'test/test_nnapi.py']):
+                category = 'mobile'
+                break
+            if CommitList.keywordInFile(file, ['aten/src/ATen/native/LinearAlgebra.cpp', 'test/test_linalg.py', 'torch/linalg']):
+                category = 'linalg_frontend'
+                break
+            if CommitList.keywordInFile(file, ['torch/sparse']):
+                category = 'sparse_frontend'
+                break
+            if CommitList.keywordInFile(file, ['test/test_nn.py', 'test/test_module.py', 'torch/nn/modules']):
+                category = 'nn_frontend'
+                break
+            if CommitList.keywordInFile(file, ['torch/csrc/jit']):
+                category = 'jit'
+                break
+
+        return Commit(commit_hash, category, topic, title)
+
     @staticmethod
     def get_commits_between(base_version, new_version):
         cmd = f'git merge-base {base_version} {new_version}'
@@ -88,7 +167,7 @@ class CommitList:
 
         log_lines = commits.split('\n')
         hashes, titles = zip(*[log_line.split(' ', 1) for log_line in log_lines])
-        return [Commit(commit_hash, 'Uncategorized', 'Untopiced', title) for commit_hash, title in zip(hashes, titles)]
+        return [CommitList.categorize(commit_hash, title) for commit_hash, title in zip(hashes, titles)]
 
     def filter(self, *, category=None, topic=None):
         commits = self.commits
@@ -164,7 +243,7 @@ The categories below are as follows:
 * Developers: All commits that are not end-user facing but still impact people that compile from source, develop into pytorch, extend pytorch, etc
 """
 
-    return [header,]
+    return [header, ]
 
 
 def main():
