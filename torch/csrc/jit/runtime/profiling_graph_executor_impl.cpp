@@ -74,7 +74,9 @@ static std::mutex fusion_strategy_lock;
 #ifdef FBCODE_CAFFE2
 static FusionStrategy fusion_strategy = {{FusionBehavior::STATIC, 20}};
 #else
-static FusionStrategy fusion_strategy = {{FusionBehavior::STATIC, 2}, {FusionBehavior::DYNAMIC, 10}};
+static FusionStrategy fusion_strategy = {
+    {FusionBehavior::STATIC, 2},
+    {FusionBehavior::DYNAMIC, 10}};
 #endif
 
 FusionStrategy getFusionStrategy() {
@@ -113,7 +115,7 @@ std::atomic<size_t>& getNumProfiledRuns() {
 size_t getBailoutDepth() {
   // Initialize bailout_depth from command-line flag.
   size_t depth = 0;
-  for (const auto& pair: getFusionStrategy()) {
+  for (const auto& pair : getFusionStrategy()) {
     depth += pair.second;
   }
   return depth;
@@ -375,7 +377,7 @@ void runPreAutodiffPassPipeline(std::shared_ptr<Graph>& graph) {
 FusionBehavior getCurrentBehavior(size_t remaining_depth) {
   size_t curr_depth = 0;
   auto curr_strategy = getFusionStrategy();
-  for (int i = static_cast<int>(curr_strategy.size()) -1; i >= 0; i--) {
+  for (int i = static_cast<int>(curr_strategy.size()) - 1; i >= 0; i--) {
     curr_depth += curr_strategy[i].second;
     if (remaining_depth <= curr_depth) {
       return curr_strategy[i].first;
@@ -386,7 +388,9 @@ FusionBehavior getCurrentBehavior(size_t remaining_depth) {
   return FusionBehavior::STATIC;
 }
 
-void runNoGradOptimizations(std::shared_ptr<Graph>& graph, size_t remaining_bailout_depth) {
+void runNoGradOptimizations(
+    std::shared_ptr<Graph>& graph,
+    size_t remaining_bailout_depth) {
   GRAPH_DEBUG(
       "After customPostPasses (beginning of runNoGradOptimizations)\n", *graph);
   // runNondiffOptimization
@@ -419,8 +423,9 @@ void runNoGradOptimizations(std::shared_ptr<Graph>& graph, size_t remaining_bail
       BatchMM(graph);
       GRAPH_DEBUG("After BatchMM, before Fusion\n", *graph);
       auto min_size = getFusionGroupInlining() ? 2 : 1;
-      bool dyn_shapes = getCurrentBehavior(remaining_bailout_depth) == FusionBehavior::DYNAMIC;
-      FuseTensorExprs(graph, min_size, /*composed_op*/false, dyn_shapes);
+      bool dyn_shapes = getCurrentBehavior(remaining_bailout_depth) ==
+          FusionBehavior::DYNAMIC;
+      FuseTensorExprs(graph, min_size, /*composed_op*/ false, dyn_shapes);
       GRAPH_DEBUG(
           "After Fusion, before RemoveTensorTypeSpecializations\n", *graph);
 
@@ -448,7 +453,8 @@ void runNoGradOptimizations(std::shared_ptr<Graph>& graph, size_t remaining_bail
 }
 
 void ProfilingGraphExecutorImpl::runProfilingOptimizations(
-    std::shared_ptr<Graph>& copy, size_t remaining_bailout_depth) {
+    std::shared_ptr<Graph>& copy,
+    size_t remaining_bailout_depth) {
   GRAPH_DEBUG("Before runProfilingOptimizations:\n", *copy);
   if (!getGraphExecutorOptimize()) {
     runNooptPassPipeline(copy);
