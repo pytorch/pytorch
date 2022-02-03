@@ -359,7 +359,7 @@ class TestStaticModule(TestCase):
             torch.testing.assert_close(o_ref[i], o_test[i])
 
     def test_create_object(self):
-        class Foo: # noqa
+        class Foo:  # noqa: B903
             def __init__(self, x: torch.Tensor) -> None:
                 self.x = x
 
