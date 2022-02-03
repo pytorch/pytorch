@@ -783,6 +783,14 @@ class TestGradients(TestCase):
             gradcheck_args = (sample.input,) if isinstance(sample.input, torch.Tensor) else tuple(sample.input)
             gradcheck_args += sample.args
 
+            # Convert differentiable kwarg keys to positional indices
+            if op.diff_input_indices is not None:
+                diff_input_pos_indices = [idx for idx in op.diff_input_indices if isinstance(idx, int)]
+                diff_input_kwarg_keys = set(x for x in op.diff_input_indices if isinstance(x, str))
+                diff_input_pos_indices += [i for i, (k, v) in enumerate(sample.kwargs.items()) if k in diff_input_kwarg_keys]
+            else:
+                diff_input_pos_indices = None
+
             if check == 'gradcheck':
                 if check_batched_grad is None:
                     check_batched_grad = op.check_batched_grad
@@ -794,7 +802,9 @@ class TestGradients(TestCase):
                                           check_forward_ad=check_forward_ad,
                                           check_backward_ad=check_backward_ad,
                                           check_undefined_grad=True,
-                                          check_batched_forward_grad=check_batched_forward_grad))
+                                          check_batched_forward_grad=check_batched_forward_grad,
+                                          diff_in_indices=diff_input_pos_indices,
+                                          diff_out_indices=op.diff_output_indices))
             elif check in ('bwgrad_bwgrad', 'fwgrad_bwgrad'):  # gradgrad check
                 self.assertFalse(check_forward_ad, msg="Cannot run forward AD check for gradgradcheck")
                 for gen_non_contig_grad_outputs in (False, True):

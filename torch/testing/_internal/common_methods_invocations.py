@@ -596,6 +596,8 @@ class OpInfo(object):
                  gradcheck_fast_mode=None,  # Whether to use the fast implmentation for gradcheck/gradgradcheck.
                                             # When set to None, defers to the default value provided by the wrapper
                                             # function around gradcheck (testing._internal.common_utils.gradcheck)
+                 diff_input_indices=None,  # TODO
+                 diff_output_indices=None,  # TODO
 
                  # the following metadata relates to JIT support and is tested for correctness in test_ops.py
                  aten_name=None,  # name of the corresponding aten:: operator
@@ -755,6 +757,8 @@ class OpInfo(object):
         self.check_batched_gradgrad = check_batched_gradgrad
         self.check_batched_forward_grad = check_batched_forward_grad
         self.check_inplace_batched_forward_grad = check_inplace_batched_forward_grad
+        self.diff_input_indices = diff_input_indices
+        self.diff_output_indices = diff_output_indices
 
         # Autograd flags that depend on both forward AD and backward AD
         if supports_inplace_autograd is None:
@@ -11627,6 +11631,8 @@ op_db: List[OpInfo] = [
            supports_out=False,
            supports_forward_ad=True,
            sample_inputs_func=sample_inputs_batch_norm,
+           diff_input_indices=(0, "weight", "bias"),
+           diff_output_indices=(0,),
            skips=(
                DecorateInfo(unittest.skip("We don't want to differentiate wrt running mean / std"),
                             "TestCommon", "test_floating_inputs_are_differentiable"),)
@@ -11639,6 +11645,8 @@ op_db: List[OpInfo] = [
            dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
            supports_out=False,
            supports_forward_ad=True,
+           diff_input_indices=(0, "weight", "bias"),
+           diff_output_indices=(0,),
            decorators=[onlyCUDA, disablecuDNN],
            skips=(
                DecorateInfo(unittest.skip("We don't want to differentiate wrt running mean / std"),

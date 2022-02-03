@@ -12,6 +12,46 @@ def _as_tuple(x):
     else:
         return x,
 
+def _assert_list_length_equal(a, b, transpose=False):
+    if transpose:
+        if len(b) > 0:
+            assert len(a) == len(b[0]), f"len(a): {len(a)} != len(b[0]): {len(b[0])}"
+        if len(a) > 0:
+            assert len(b) == len(a[0]), f"len(b): {len(b)} != len(a[0]): {len(a[0])}"
+    else:
+        assert len(a) == len(b), f"len(a): {len(a)} != len(b): {len(b)}"
+        if len(a) > 0:
+            assert len(a[0]) == len(b[0]), f"len(a[0]): {len(a[0])} != len(b[0]): {len(b[0])}"
+
+def _safe_zip(*iterables):
+    # Copied from https://www.python.org/dev/peps/pep-0618/
+    # TODO: We can remove this once we drop support for versions of Python <=3.9
+    #       and simply replace with zip(strict=True)
+    strict=True
+    if not iterables:
+        return
+    iterators = tuple(iter(iterable) for iterable in iterables)
+    try:
+        while True:
+            items = []
+            for iterator in iterators:
+                items.append(next(iterator))
+            yield tuple(items)
+    except StopIteration:
+        if not strict:
+            return
+    if items:
+        i = len(items)
+        plural = " " if i == 1 else "s 1-"
+        msg = f"zip() argument {i+1} is shorter than argument{plural}{i}"
+        raise ValueError(msg)
+    sentinel = object()
+    for i, iterator in enumerate(iterators[1:], 1):
+        if next(iterator, sentinel) is not sentinel:
+            plural = " " if i == 1 else "s 1-"
+            msg = f"zip() argument {i+1} is longer than argument{plural}{i}"
+            raise ValueError(msg)
+
 def _is_differentiable(obj: Any, need_requires_grad: bool) -> bool:
     return _is_float_or_complex_tensor(obj) and (obj.requires_grad or not need_requires_grad)
 
@@ -61,7 +101,7 @@ class GradcheckFunction(Callable):
         is_diff_maybe_req_grad = functools.partial(_is_differentiable, need_requires_grad=need_requires_grad)
         is_diff_no_req_grad = functools.partial(_is_differentiable, need_requires_grad=False)
 
-        # Get the default differentiable indices for inputs and outputs
+        # Get the differentiable indices for inputs and outputs based on dtype and requires grad information
         diff_in_indices = _tuple_indices_where(inputs_raw, is_diff_maybe_req_grad)
         diff_out_indices_maybe_req_grad = _tuple_indices_where(outputs_raw, is_diff_maybe_req_grad)
         diff_out_indices_no_req_grad = _tuple_indices_where(outputs_raw, is_diff_no_req_grad)
