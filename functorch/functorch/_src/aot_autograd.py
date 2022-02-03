@@ -375,11 +375,11 @@ def create_compiled_function(flat_fn, fw_compiler, bw_compiler, partition_fn, de
 
     class CompiledFunction(torch.autograd.Function):
         @staticmethod
-        def forward(ctx, *flat_args):
+        def forward(ctx, *flat_tensor_args):
             nonlocal compiled_fw, compiled_bw, num_outs
             if compiled_fw is None:
                 with torch.enable_grad():
-                    out = flat_fn(*flat_args)
+                    out = flat_fn(*flat_tensor_args)
                 out = pytree.tree_map(lambda x: x.detach() if isinstance(x, Tensor) else x, out)
 
                 if isinstance(out, (list, tuple)):
@@ -387,20 +387,20 @@ def create_compiled_function(flat_fn, fw_compiler, bw_compiler, partition_fn, de
                 else:
                     num_outs = 1
 
-                joint_inputs = (flat_args, out)
+                joint_inputs = (flat_tensor_args, out)
                 aot_decompositions = {**aot_autograd_decompositions, **decompositions}
                 with torch.enable_grad():
                     fx_g = make_fx(joint_forward_backward, aot_decompositions)(*joint_inputs)
                 fw_module, bw_module = partition_fn(fx_g, joint_inputs)
                 # print(fw_module.code, bw_module.code)
 
-                compiled_fw = fw_compiler(fw_module, flat_args)
-                fw_outs = normalize_as_list(compiled_fw(*flat_args))
+                compiled_fw = fw_compiler(fw_module, flat_tensor_args)
+                fw_outs = normalize_as_list(compiled_fw(*flat_tensor_args))
 
                 bw_args = fw_outs[num_outs:] + fw_outs[0:num_outs]
                 compiled_bw = bw_compiler(bw_module, bw_args)
             else:
-                fw_outs = normalize_as_list(compiled_fw(*flat_args))
+                fw_outs = normalize_as_list(compiled_fw(*flat_tensor_args))
             ctx.save_for_backward(*fw_outs[num_outs:])
             return tuple(fw_outs[0:num_outs])
 
@@ -543,44 +543,42 @@ def compiled_function(
 
         # Now flatten the tensor args
         if HAS_TREE:
-            flattened_tensor_args = tree.flatten((tensor_args, kwargs))
+            flat_tensor_args = tree.flatten((tensor_args, kwargs))
         else:
-            flattened_tensor_args, _ = pytree.tree_flatten((tensor_args, kwargs))
+            flat_tensor_args, _ = pytree.tree_flatten((tensor_args, kwargs))
 
         # Check if the fn is already compiled
-        num_tensor_args = len(flattened_tensor_args)
-        flattened_args = flattened_tensor_args + static_args
-        flattened_args_for_cache = flattened_tensor_args + static_args_hashed
+        num_tensor_args = len(flat_tensor_args)
+        flat_args_for_cache = flat_tensor_args + static_args_hashed
         cached_res = compile_cache.at(
             fn_id,
             fw_compiler_id,
             bw_compiler_id,
             num_tensor_args,
             hasher_type,
-            *flattened_args_for_cache,
+            *flat_args_for_cache,
         )
 
         # Compile the function and save it in the cache
         if cached_res is None:
-            # Save the args_spec for flattened_tensor_args to unflatten while tracing
+            # Save the args_spec for flat_tensor_args to unflatten while tracing
             _, tensor_args_spec = pytree.tree_flatten((tensor_args, kwargs))
             out_spec = PytreeThunk()
 
-            def flat_fn(*args):
-                nonlocal out_spec
-                # These args are already flattened_tensor_args + static_args
-                flattened_tensor_args = args[:num_tensor_args]
-                static_args = args[num_tensor_args:]
+            def flat_fn(*flat_tensor_args):
+                # The input are flattened tensor args. Prepare the args in the
+                # order that original function expects. Add static args as well.
+                # They will appear as tensor constants in the traced graph.
+                nonlocal out_spec, static_args
 
                 tensor_args, kwargs = pytree.tree_unflatten(
-                    flattened_tensor_args, tensor_args_spec
+                    flat_tensor_args, tensor_args_spec
                 )
-
-                # Rearrange the args as per the original arg ordering
                 if static_argnums is None:
                     args = tensor_args
                 else:
                     args = rearrange(tensor_args, static_args, static_argnums)
+
                 tree_out = fn(*args, **kwargs)
                 flat_out = pytree.tree_flatten(tree_out)
                 out_spec.set(flat_out[1])
@@ -599,11 +597,11 @@ def compiled_function(
                 num_tensor_args,
                 hasher_type,
                 cached_res,
-                *flattened_args_for_cache,
+                *flat_args_for_cache,
             )
 
         cached_fn, out_spec = cached_res
-        out = cached_fn(*flattened_args)
+        out = cached_fn(*flat_tensor_args)
         return out_spec.unflatten(out)
 
     return returned_function
