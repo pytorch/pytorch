@@ -131,11 +131,11 @@ class UnsupportedOperatorError(RuntimeError):
     def __init__(self, domain, opname, version):
         supported_version = get_op_supported_version(opname, domain, version)
         if domain in ["", "aten", "prim", "quantized"]:
-            msg = "Exporting the operator " + domain + "::" + opname + " to ONNX opset version " + \
-                  str(version) + " is not supported. "
+            msg = ("Exporting the operator {}::{} to ONNX opset version {} is not supported. "
+                   .format(domain, opname, version))
             if supported_version is not None:
-                msg += "Support for this operator was added in version " + str(supported_version) + \
-                       ", try exporting with this version."
+                msg += ("Support for this operator was added in version {}, "
+                        "try exporting with this version.".format(supported_version))
             else:
                 msg += "Please feel free to request support or submit a pull request on PyTorch GitHub."
         else:

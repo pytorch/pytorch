@@ -44,6 +44,8 @@ from torch.onnx.symbolic_helper import _unimplemented
 from torch.onnx.utils import unpack_quantized_tensor
 
 
+_ORT_PROVIDERS = ["CPUExecutionProvider"]
+
 def flatten_tuples(elem):
     tup = []
     for t in elem:
@@ -99,7 +101,7 @@ def convert_to_onnx(model, input=None, opset_version=9, do_constant_folding=True
     # suppress ort warnings.
     # 0:Verbose, 1:Info, 2:Warning. 3:Error, 4:Fatal. Default is 2.
     so.log_severity_level = 3
-    ort_sess = onnxruntime.InferenceSession(f.getvalue(), so, providers=["CPUExecutionProvider"])
+    ort_sess = onnxruntime.InferenceSession(f.getvalue(), so, providers=_ORT_PROVIDERS)
     return ort_sess
 
 
@@ -375,7 +377,7 @@ class TestONNXRuntime(unittest.TestCase):
                 ort_sess_opt.log_severity_level = 3
                 ort_sess = onnxruntime.InferenceSession(model_file_name,
                                                         sess_options=ort_sess_opt,
-                                                        providers=["CPUExecutionProvider"])
+                                                        providers=_ORT_PROVIDERS)
                 input_copy = copy.deepcopy(input)
                 ort_outs = run_ort(ort_sess, input_copy)
                 ort_compare_with_pytorch(ort_outs, output, rtol, atol)
@@ -735,7 +737,7 @@ class TestONNXRuntime(unittest.TestCase):
     @disableScriptTest()
     def test_mobilenet_v3(self):
         model = torchvision.models.quantization.mobilenet_v3_large(pretrained=False)
-        dummy_input = torch.randn(1, 3, 224, 224, requires_grad=True)
+        dummy_input = torch.randn(1, 3, 224, 224)
         self.run_test(model, (dummy_input,))
 
     @unittest.skip("Fixed in PyTorch master. RuntimeError: Error(s) in loading state_dict for QuantizableMobileNetV3")
@@ -10439,7 +10441,9 @@ class TestONNXRuntime(unittest.TestCase):
             def forward(self, x, y):
                 o = torch.nn.quantized.QFunctional().add(x, y)
                 o = torch.nn.quantized.QFunctional().mul(o, x)
-                return o
+                o2 = torch.ops.quantized.add(x, y, 0.4, 100)
+                o2 = torch.ops.quantized.mul(o2, x, 0.4, 100)
+                return o, o2
 
         x = torch.quantize_per_tensor(torch.randn(3, 4), 0.2, 128, torch.quint8)
         y = torch.quantize_per_tensor(torch.randn(3, 4), 0.2, 128, torch.quint8)

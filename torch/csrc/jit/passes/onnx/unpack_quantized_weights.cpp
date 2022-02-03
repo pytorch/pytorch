@@ -413,13 +413,13 @@ void unpackQuantizedWeightsHelper(
     // Remove packed_params
     qlinear_node->removeInput(1);
 
-    // Convert from int8 to uint8
     int8_t* inp_data =
         reinterpret_cast<int8_t*>(unpacked_weight.data_ptr<c10::qint8>());
-    const int64_t weight_zp = unpacked_weight.q_zero_point() + 128;
-    const int64_t wt_numel = unpacked_weight.numel();
 
     if (caffe2) {
+      // Convert from int8 to uint8
+      const int64_t weight_zp = unpacked_weight.q_zero_point() + 128;
+      const int64_t wt_numel = unpacked_weight.numel();
       // Create caffe2::Int8GivenTensorFill node
       std::ostringstream os;
       for (const auto i : c10::irange(wt_numel)) {
@@ -437,7 +437,7 @@ void unpackQuantizedWeightsHelper(
           wt_sizes,
           wt_strides,
           static_cast<float>(unpacked_weight.q_scale()),
-          weight_zp - 128);
+          unpacked_weight.q_zero_point());
       graph->setInsertPoint(qlinear_node);
       Node* quant_node = graph->create(prim::TupleConstruct);
       for (auto* n : unpacked_wt) {
@@ -510,8 +510,7 @@ void unpackQuantizedWeightsHelper(
       conv_ints_args.push_back(stride);
       conv_ints_args.push_back(padding);
       conv_ints_args.push_back(dilation);
-      // For quantized_conv inputs, the order is input, weight, bias, stride,
-      // padding, dilation, groups
+      // skip (input, weight, bias)
       const size_t arg_offset = 3;
       for (const auto i : c10::irange(conv_ints_args.size())) {
         Node* ints_node =

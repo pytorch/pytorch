@@ -60,8 +60,8 @@ class Quantized:
 
     @staticmethod
     def hardswish(g, x, op_scale, op_zero_point):
-        x, _, _ = sym_help._dequantize_helper(g, x)
+        x, _, _ = sym_help.dequantize_helper(g, x)
 
         output = hardswish(g, x)
 
-        return sym_help._quantize_helper(g, output, op_scale, op_zero_point)
+        return sym_help.quantize_helper(g, output, op_scale, op_zero_point)
