@@ -1,15 +1,28 @@
 #!/bin/bash
 set -eux -o pipefail
 
-source "${BINARY_ENV_FILE:-/Users/distiller/project/env}"
+source "/Users/distiller/project/env"
 mkdir -p "$PYTORCH_FINAL_PACKAGE_DIR"
 
+# For some reason `unbuffer` breaks if we change the PATH here, so we
+# write a script with the PATH change in it and unbuffer the whole
+# thing
+build_script="$workdir/build_script.sh"
+touch "$build_script"
+chmod +x "$build_script"
+
 # Build
-export USE_PYTORCH_METAL_EXPORT=1
-export USE_COREML_DELEGATE=1
+cat >"$build_script" <<EOL
+export PATH="$workdir/miniconda/bin:$PATH"
+if [[ "$CIRCLE_BRANCH" == "nightly" ]]; then
+  export USE_PYTORCH_METAL_EXPORT=1
+  export USE_COREML_DELEGATE=1
+fi
 if [[ "$PACKAGE_TYPE" == conda ]]; then
-  "${BUILDER_ROOT}/conda/build_pytorch.sh"
+  "$workdir/builder/conda/build_pytorch.sh"
 else
   export TORCH_PACKAGE_NAME="$(echo $TORCH_PACKAGE_NAME | tr '-' '_')"
-  "${BUILDER_ROOT}/wheel/build_wheel.sh"
+  "$workdir/builder/wheel/build_wheel.sh"
 fi
+EOL
+unbuffer "$build_script" | ts
