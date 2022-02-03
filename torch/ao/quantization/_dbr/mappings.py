@@ -125,14 +125,26 @@ binary_related_ops = (
     (torch.Tensor.mul, torch.Tensor.mul_),
 )
 
-conv_ops = set([
-    F.conv1d,
-    F.conv2d,
-    F.conv3d,
+conv_transpose_ops = set([
     F.conv_transpose1d,
     F.conv_transpose2d,
     F.conv_transpose3d
 ])
+
+conv_ops = set([
+    F.conv1d,
+    F.conv2d,
+    F.conv3d,
+]).union(conv_transpose_ops)
+
+conv_prepack_fns = {
+    F.conv1d: toq.conv1d_prepack,
+    F.conv2d: toq.conv2d_prepack,
+    F.conv3d: toq.conv3d_prepack,
+    F.conv_transpose1d: toq.conv_transpose1d_prepack,
+    F.conv_transpose2d: toq.conv_transpose2d_prepack,
+    F.conv_transpose3d: toq.conv_transpose3d_prepack,
+}
 
 # TODO(future PR): reuse global mapping
 a_related_to_b = set()

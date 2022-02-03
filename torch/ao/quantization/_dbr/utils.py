@@ -14,6 +14,7 @@ from .mappings import (
     fp32_to_int8_fun_mapping,
     add_and_mul_ops,
     conv_ops,
+    conv_transpose_ops,
 )
 
 from ..qconfig import QConfigAny
@@ -303,7 +304,7 @@ def get_func_output_dtype_type(
     return FuncOutputDTypeType.DTYPE_DEPENDS_ON_QCONFIG
 
 def get_weight_argument_info(op: Callable) -> Optional[Tuple[int, str]]:
-    if op in (F.linear, F.conv2d):
+    if op == F.linear or op in conv_ops:
         return (1, 'weight')
     return None
 
@@ -388,7 +389,7 @@ def get_packable_tensor_kwarg_names(op: Callable) -> Optional[List[str]]:
     Returns tensor kwarg names which correspond to parameters which will
     need to be packed.
     """
-    if op in (F.conv2d, F.linear):
+    if op == F.linear or op in conv_ops:
         return ['weight', 'bias']
     return None
 
@@ -407,13 +408,19 @@ def get_packable_nontensor_arg_idxs(op: Callable) -> Optional[List[int]]:
     Returns nontensor arg idxs which correspond to arguments which will need
     to be packed.
     """
-    if op in conv_ops:
+    if op in conv_transpose_ops:
+        # stride, padding, output padding, groups, dilation
+        return [3, 4, 5, 6, 7]
+    elif op in conv_ops:
         # stride, padding, dilation, groups
         return [3, 4, 5, 6]
     return None
 
 def get_packable_arg_idxs(op: Callable) -> Optional[List[int]]:
-    if op in conv_ops:
+    if op in conv_transpose_ops:
+        # weight, bias, stride, padding, output padding, groups, dilation
+        return [1, 2, 3, 4, 5, 6, 7]
+    elif op in conv_ops:
         # weight, bias, stride, padding, dilation, groups
         return [1, 2, 3, 4, 5, 6]
     elif op == F.linear:
