@@ -896,8 +896,12 @@ Tensor & index_select_out_cpu_dim1_(
 }
 
 Tensor & index_select_out_cpu_(const Tensor & self, int64_t dim, const Tensor & index, Tensor & result) {
+  if (self.is_quantized()) {
+    TORCH_CHECK(
+        self.qscheme() == kPerTensorAffine,
+        "Only per_tensor quantized quantized tensors are supported by index_select.")
+  }
   dim = maybe_wrap_dim(dim, self.dim());
-
   auto numel = index.numel();
   TORCH_CHECK_INDEX(index.dim() <= 1, "index_select(): Index is supposed to be a vector");
   TORCH_CHECK(index.scalar_type() == ScalarType::Long || index.scalar_type() == ScalarType::Int, "index_select(): Expected dtype int32 or int64 for index");
@@ -908,19 +912,11 @@ Tensor & index_select_out_cpu_(const Tensor & self, int64_t dim, const Tensor & 
   at::assert_no_internal_overlap(result);
   at::assert_no_overlap(result, self);
   at::assert_no_overlap(result, index);
-
   auto result_size = self.sizes().vec();
   if (self.dim() > 0) {
     result_size[dim] = numel;
   }
-  if (self.is_quantized()) {
-    TORCH_CHECK(
-        self.qscheme() == kPerTensorAffine,
-        "Only per_tensor quantized quantized tensors are supported by index_select.")
-    result = at::empty_quantized(result_size, result);
-  } else {
-    at::native::resize_output(result, result_size);
-  }
+  at::native::resize_output(result, result_size);
 
   auto index_contig = index.contiguous();
 
@@ -1011,7 +1007,6 @@ Tensor & index_select_out_cpu_(const Tensor & self, int64_t dim, const Tensor & 
       AT_DISPATCH_QINT_TYPES(self.scalar_type(), "index_select_quant", [&index_contig, &self, &result, &dim, &numel] {
         auto self_stride = self.dim() == 0 ? 1 : self.stride(dim);
         auto result_stride = result.dim() == 0 ? 1 : result.stride(dim);
-
         auto self_data_ptr = self.data_ptr<scalar_t>();
         auto result_data_ptr = result.data_ptr<scalar_t>();
         auto self_numel = self.numel();
