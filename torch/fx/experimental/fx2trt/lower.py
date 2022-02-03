@@ -1,7 +1,7 @@
 import dataclasses as dc
 import logging
 import typing as t
-from typing import Type, Set, Optional
+from typing import Type, Set, Optional, Callable, List
 
 import tensorrt as trt
 import torch
@@ -53,7 +53,7 @@ def lower_to_trt(
     enable_fuse=True,
     verbose_log=False,
     timing_cache_prefix="",
-    save_timing_cache=True,
+    save_timing_cache=False,
     cuda_graph_batch_size=-1,
 ) -> nn.Module:
     """
@@ -215,6 +215,7 @@ class LowerTrtInterpreter:
             strict_type_constraints=self.lower_setting.strict_type_constraints,
             algorithm_selector=algo_selector,
             timing_cache=cache_data,
+            profiling_verbosity=trt.ProfilingVerbosity.DETAILED,
         )
 
         # Update timing cache file if needed
@@ -306,12 +307,14 @@ class Lowerer(LowerFunc):
     remove_duplicate_output_args: RemoveDuplicateOutputArgsFunc
     trt_interpreter: LowerTrtInterpreter
     fp16: bool
+    trt_module_observer: Optional[Callable[[str, nn.Module, List[torch.Tensor]], None]] = None
 
 
     @classmethod
     def create(
         cls,
         lower_setting: LowerSetting,
+        trt_module_observer: Optional[Callable[[str, nn.Module, List[torch.Tensor]], None]] = None
     ) -> "Lowerer":
         """Instantiate a `Lowerer` instance."""
 
@@ -326,6 +329,7 @@ class Lowerer(LowerFunc):
             remove_duplicate_output_args=remove_duplicate_output_args,
             trt_interpreter=LowerTrtInterpreter.create(lower_setting),
             fp16=lower_setting.fp16_mode,
+            trt_module_observer=trt_module_observer,
         )
 
     def __call__(
@@ -350,6 +354,9 @@ class Lowerer(LowerFunc):
         split_module, splits = self.split(const_split_mod, input)  # type: ignore[arg-type]
         split_module.eval()  # type: ignore[attr-defined]
         for _split in splits:  # type: ignore[attr-defined]
+            if self.trt_module_observer:
+                self.trt_module_observer(_split.name, _split.module, _split.input)  # type: ignore[arg-type]
+
             if _split.device == "acc":
                 # Ensure parent module is updated with the traced sub-net before running
                 # remove_duplicate_output_args.

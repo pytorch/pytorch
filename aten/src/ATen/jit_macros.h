@@ -9,11 +9,3 @@
     // TODO: update this to become a static assertion
     #define jiterator_stringify(...) std::string("USE_JITERATOR is undefined");
 #endif // USE_ROCM
-
-// BUILD_JITERATOR_WITH_CACHE, controls whether jitted kernels can be cached
-// Currently unsupported on Windows
-#ifndef _WIN32
-    #define BUILD_JITERATOR_WITH_CACHE true
-#else
-    #define BUILD_JITERATOR_WITH_CACHE false
-#endif // _WIN32
