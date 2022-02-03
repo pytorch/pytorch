@@ -1277,6 +1277,33 @@ class TestSparseCSR(TestCase):
 
             self.assertEqual(output.to_dense(), expected)
 
+    # Currently, there is no rule in PyTorch for filling zeros in the outputs
+    #   from operations on Sparse CSR tensors. Hence only those operators are supported
+    #   which have 0->0 correspondence, example: sin(0) = 0, tan(0) = 0 but
+    #   cos(0) = 1 (and hence it's not supported).
+    # Note: here, we do this test only for unary operators
+    @ops(sparse_csr_unary_ufuncs)
+    def test_zero_to_zero_correspondence_unary(self, device, dtype, op):
+        zero = torch.zeros((1, 2), dtype=dtype, device=device)
+        tensor_explicit_zeros = torch.sparse_csr_tensor([0, 1], [1], [0], dtype=dtype, device=device)
+
+        output_zero = op(zero)
+        expected_zero = zero.to(output_zero.dtype)
+
+        output_explicit_zeros = op(tensor_explicit_zeros).to_dense()
+        expected_explicit_zeros = tensor_explicit_zeros.to_dense().to(output_explicit_zeros.dtype)
+
+        for (output, expected) in [
+                (output_zero, expected_zero),
+                (output_explicit_zeros, expected_explicit_zeros)
+        ]:
+            self.assertEqual(output, expected, f"This operator ({op.name}) should not be supported for "
+                             "Sparse CSR as it breaks 0->0 correspondence.")
+
+        for inp in [zero.to_sparse_csr(), tensor_explicit_zeros]:
+            self.assertEqual(op(inp).values().numel(), inp.values().numel(),
+                             f"{op.name} fails to preserve sparsity pattern.")
+
     @ops(sparse_csr_unary_ufuncs)
     def test_sparse_csr_unary_out(self, device, dtype, op):
         samples = op.sample_inputs(device, dtype)
