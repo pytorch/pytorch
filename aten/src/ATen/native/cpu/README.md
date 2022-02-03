@@ -1,9 +1,9 @@
 The most important things to know:
 
-**Don't add a kernel to this folder unless you want it to be
+**Don't add a kernel to this folder unless you want it
 compiled multiple times for different instruction sets.**  Yes,
-this folder is named `cpu`, but that doesn't mean put any old
-CPU kernel it.  Only put CPU kernels which need to be compiled
+this folder is named `cpu`, but that doesn't mean putting any old
+CPU kernel in it.  Only put CPU kernels that need to be compiled
 multiple times to take advantage of AVX512/AVX2/SSE instructions, but
 only on processors that support them.
 
@@ -31,9 +31,9 @@ three steps:
    `DEFINE_DISPATCH(fnNameImpl)` (matching the name of your declaration.)
    Include the header file that declares the dispatch in this C++
    file.  Conventionally, we define the dispatch in the same file
-   we will define our native function in.
+   in which we will define our native function.
 
-3. Define a native function which calls into the dispatch using
+3. Define a native function that calls into the dispatch using
    `fnNameImpl(kCPU, arguments...)`, where the arguments are
    the arguments according to the `fn_type` you defined in the
    declaration.

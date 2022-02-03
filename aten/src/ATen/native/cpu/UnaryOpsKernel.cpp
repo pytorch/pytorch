@@ -537,6 +537,14 @@ static void erfcx_kernel(TensorIteratorBase& iter){
   });
 }
 
+static void logerfcx_kernel(TensorIteratorBase& iter){
+  AT_DISPATCH_FLOATING_TYPES(iter.common_dtype(), "logerfcx_cpu", [&]() {
+    cpu_kernel(
+      iter,
+      [](scalar_t a) -> scalar_t { return calc_logerfcx(a); });
+  });
+}
+
 void round_decimals_kernel(TensorIteratorBase& iter, int64_t decimals) {
   AT_DISPATCH_FLOATING_TYPES_AND(
       ScalarType::BFloat16, iter.dtype(), "round_cpu", [&]() {
@@ -644,6 +652,7 @@ REGISTER_DISPATCH(special_ndtri_stub, &CPU_CAPABILITY::ndtri_kernel);
 REGISTER_DISPATCH(special_i1_stub, &CPU_CAPABILITY::i1_kernel);
 REGISTER_DISPATCH(special_i1e_stub, &CPU_CAPABILITY::i1e_kernel);
 REGISTER_DISPATCH(special_erfcx_stub, &CPU_CAPABILITY::erfcx_kernel);
+REGISTER_DISPATCH(special_logerfcx_stub, &CPU_CAPABILITY::logerfcx_kernel);
 REGISTER_DISPATCH(round_decimals_stub, &CPU_CAPABILITY::round_decimals_kernel);
 
 

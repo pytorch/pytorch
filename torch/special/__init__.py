@@ -3,9 +3,9 @@ from torch._C import _add_docstr, _special  # type: ignore[attr-defined]
 from torch._torch_docs import common_args, multi_dim_common
 
 __all__ = ['entr', 'psi', 'digamma', 'gammaln', 'polygamma', 'erf', 'erfc', 'erfinv',
-           'erfcx', 'logit', 'logsumexp', 'expit', 'exp2', 'expm1', 'xlog1py', 'xlogy',
-           'i0', 'i0e', 'i1', 'i1e', 'ndtr', 'ndtri', 'log1p', 'sinc', 'round', 'log_softmax',
-           'zeta', 'multigammaln', 'gammainc', 'gammaincc', 'softmax']
+           'erfcx', 'logerfcx', 'logit', 'logsumexp', 'expit', 'exp2', 'expm1', 'xlog1py',
+           'xlogy', 'i0', 'i0e', 'i1', 'i1e', 'ndtr', 'ndtri', 'log1p', 'sinc', 'round',
+           'log_softmax', 'zeta', 'multigammaln', 'gammainc', 'gammaincc', 'softmax']
 
 Tensor = torch.Tensor
 
@@ -193,6 +193,32 @@ Example::
 
     >>> torch.special.erfcx(torch.tensor([0, -1., 10.]))
     tensor([ 1.0000, 5.0090, 0.0561])
+""".format(**common_args))
+
+logerfcx = _add_docstr(_special.special_logerfcx,
+                       r"""
+logerfcx(input, *, out=None) -> Tensor
+
+Computes the natural logarithm of the scaled complementary error
+function of :attr:`input`. The natural logarithm of the scaled complementary
+error function is defined as follows:
+
+.. math::
+    \mathrm{logerfcx}(x) = \ln(\mathrm{erfcx}(x))
+
+""" + r"""
+
+""" + r"""
+Args:
+    {input}
+
+Keyword args:
+    {out}
+
+Example::
+
+    >>> torch.special.logerfcx(torch.tensor([])
+        tensor([])
 """.format(**common_args))
 
 erfinv = _add_docstr(_special.special_erfinv,

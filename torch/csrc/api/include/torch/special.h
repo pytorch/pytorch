@@ -183,6 +183,22 @@ inline Tensor& erfcx_out(Tensor& result, const Tensor& self) {
   return torch::special_erfcx_out(result, self);
 }
 
+/// Computes the logarithm of the scaled complementary error function
+/// See https://pytorch.org/docs/master/special.html#torch.special.logerfcx.
+///
+/// Example:
+/// ```
+/// auto t = torch::random(411, dtype=kDouble);
+/// torch::special::logerfcx(t);
+/// ```
+inline Tensor logerfcx(const Tensor& self) {
+  return torch::special_logerfcx(self);
+}
+
+inline Tensor& logerfcx_out(Tensor& result, const Tensor& self) {
+  return torch::special_logerfcx_out(result, self);
+}
+
 /// Computes the inverse error function
 /// See https://pytorch.org/docs/master/special.html#torch.special.erfinv.
 ///
