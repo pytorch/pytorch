@@ -436,8 +436,7 @@ def _get_numerical_vJu(fn, inputs, inp_indices, func_out, all_u, all_v, eps, is_
         # Filter out the Ju for non floating point outputs
         filtered_Ju = []
         func_out = _as_tuple(func_out)
-        # We only need to compute the numerical vJu corresponding to outputs that require grad
-        # assert len(all_Ju) == len(func_out)
+        assert len(all_Ju) == len(func_out)
         for Ju, output in zip(all_Ju, func_out):
             if _is_float_or_complex_tensor(output):
                 filtered_Ju.append(Ju)
