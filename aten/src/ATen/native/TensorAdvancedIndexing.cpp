@@ -1168,7 +1168,7 @@ Tensor gather_backward(const Tensor& grad, const Tensor& self, int64_t dim, cons
   if (sparse_grad) {
     return at::_gather_sparse_backward(self, dim, index, grad);
   }
-  return at::zeros(self.sizes(), grad.options()).scatter_add_(dim, index, grad);
+  return grad.new_zeros(self.sizes()).scatter_add_(dim, index, grad);
 }
 
 template <typename T, typename ReduceStub, typename FillStub>
