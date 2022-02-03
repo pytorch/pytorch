@@ -2382,13 +2382,28 @@ Examples::
 trace = _add_docstr(_linalg.linalg_trace, r"""
 trace(input, *, offset=0, out=None) -> Tensor
 
-Returns the sum of the elements of the diagonal. If `offset` is given, the returned value is the sum
-of `input[i, i + offset]` for all `i`.
+Computes the trace of a matrix.
+
+Letting :math:`\mathbb{K}` be :math:`\mathbb{R}` or :math:`\mathbb{C}`,
+the **trace ** of a matrix :math:`A \in \mathbb{K}^{n \times m}` is defined as
+
+.. math::
+
+    \operatorname{tr}(A) = \sum_{i=0}^{\min\{n, m\}-1} A_{i,i}
+
+If :attr:`offset` is provided, the sum will run over the elements :math:`A_{i, j}`
+with :math:`i - j = \texttt{offset}`.
+
+Supports input of float, double, cfloat and cdouble dtypes.
+Also supports batches of matrices, and if :attr:`A` is a batch of matrices then
+the output has the same batch dimensions.
 
 Args:
-    input (Tensor): tensor from which the diagonals are taken.
-    offset (int): offset of the diagonal from the main diagonal. A positive value indicates
-                  an upper diagonal, and negative value a lower diagonal. Default: `0`.
+    A (Tensor): tensor of shape `(*, n, m)` where `*` is zero or more batch dimensions.
+
+Keyword args:
+    offset (int, optional): offset of the diagonal from the main diagonal. A positive value indicates
+    an upper diagonal, and negative value a lower diagonal. Default: `0`.
 
 Example::
 
