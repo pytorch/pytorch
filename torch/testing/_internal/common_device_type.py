@@ -822,6 +822,8 @@ def _has_sufficient_memory(device, size):
         gc.collect()
         torch.cuda.empty_cache()
         # torch.cuda.mem_get_info, aka cudaMemGetInfo, returns a tuple of (free memory, total memory) of a GPU
+        if device == 'cuda':
+            device = 'cuda:0'
         return torch.cuda.memory.mem_get_info(device)[0] >= size
 
     if device == 'xla':
