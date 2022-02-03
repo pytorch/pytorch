@@ -2092,14 +2092,16 @@
   device_check: NoCheck   # TensorIterator
   variants: function, method
   dispatch:
-    CPU, CUDA, QuantizedCPU, QuantizedCUDA: fill_
+    CPU, CUDA: fill_
+    QuantizedCPU, QuantizedCUDA: fill_quantized_
     Meta: fill_meta_
 
 - func: fill_.Tensor(Tensor(a!) self, Tensor value) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
   variants: function, method
   dispatch:
-    CPU, CUDA, QuantizedCPU, QuantizedCUDA: fill_
+    CPU, CUDA: fill_
+    QuantizedCPU, QuantizedCUDA: fill_quantized_
     Meta: fill_meta_
 
 - func: floor(Tensor self) -> Tensor
