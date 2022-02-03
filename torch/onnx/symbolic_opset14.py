@@ -54,8 +54,10 @@ def batch_norm(g, input, weight, bias, running_mean, running_var, training, mome
         return res
 
 
-# https://github.com/pytorch/pytorch/wiki/PyTorch-ONNX-exporter#quantized-model-export
 class Quantized:
+    """
+    https://github.com/pytorch/pytorch/wiki/PyTorch-ONNX-exporter#quantized-model-export
+    """
     domain = "quantized"
 
     @staticmethod
