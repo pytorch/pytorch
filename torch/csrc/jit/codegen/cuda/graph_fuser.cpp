@@ -940,7 +940,11 @@ struct CudaGraphFuser {
       // extended shape expression support to reduction operations
       // TODO: `aten::sum` is too flexible, we should restrict for a better
       // match
-      if (n->kind() == aten::sum) {
+      // TODO: Add python tests where we check for existing ops and their
+      // shape expression logic.
+      static std::unordered_set<Symbol> reduction_ops(
+          {aten::sum, aten::mean, aten::var, aten::std});
+      if (reduction_ops.find(n->kind()) != reduction_ops.end()) {
         // TODO: expand support to wire non-constant inputs, this is currently
         // blocked by profiling executor not capable of profiling scalar inputs.
         TORCH_INTERNAL_ASSERT(

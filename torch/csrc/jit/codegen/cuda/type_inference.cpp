@@ -351,6 +351,7 @@ class NaiveTypePropagator {
         }
         break;
       }
+      case aten::log_softmax:
       case aten::softmax: {
         auto out_type = getInputTensorType(node, 0);
 
@@ -378,6 +379,7 @@ class NaiveTypePropagator {
         node->output()->setType(out_type);
         break;
       }
+      case aten::_log_softmax_backward_data:
       case aten::_softmax_backward_data: {
         auto out_type = getInputTensorType(node, 0);
         if (auto opt_ivalue = toIValue(node->input(3))) {
@@ -402,6 +404,18 @@ class NaiveTypePropagator {
         }
         const auto dims = constant_as<c10::List<int64_t>>(node->input(1));
         const auto keepdim = constant_as<bool>(node->input(2));
+        TORCH_CHECK(
+            dims.has_value() && keepdim.has_value(),
+            "Shape inference cannot handle options.");
+        node->output()->setType(
+            unary_reduce_type(out_type, dims->vec(), keepdim.value()));
+        break;
+      }
+      case aten::std:
+      case aten::var: {
+        auto out_type = getInputTensorType(node, 0);
+        const auto dims = constant_as<c10::List<int64_t>>(node->input(1));
+        const auto keepdim = constant_as<bool>(node->input(3));
         TORCH_CHECK(
             dims.has_value() && keepdim.has_value(),
             "Shape inference cannot handle options.");

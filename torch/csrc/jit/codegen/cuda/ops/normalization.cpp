@@ -7,6 +7,64 @@ namespace jit {
 namespace fuser {
 namespace cuda {
 
+int positiveAxis(int axis, int ndims) {
+  return (axis > 0) ? axis : (ndims + axis);
+}
+
+Val* numFeatures(TensorView* x, const std::vector<int>& dims, int ndims) {
+  Val* num_features = IrBuilder::create<Double>(x->container(), 1);
+  for (const auto dim : dims) {
+    const int axis = positiveAxis(dim, ndims);
+    num_features = mul(num_features, x->domain()->domain()[axis]->extent());
+  }
+  return num_features;
+}
+
+TensorView* mean(TensorView* x, const std::vector<int>& dims, bool keepdim) {
+  TORCH_INTERNAL_ASSERT(x != nullptr, "Input is invalid.");
+
+  const int kNumberOfDims =
+      TensorDomain::noReductions(x->getMaybeRFactorDomain()).size();
+
+  auto sum_x = sum(x, dims, keepdim);
+  auto y = div(sum_x, numFeatures(x, dims, kNumberOfDims));
+  return y;
+}
+
+TensorView* variance(
+    TensorView* x,
+    const std::vector<int>& dims,
+    bool unbiased,
+    bool keepdim) {
+  TORCH_INTERNAL_ASSERT(x != nullptr, "Input is invalid.");
+
+  const int kNumberOfDims =
+      TensorDomain::noReductions(x->getMaybeRFactorDomain()).size();
+
+  auto bcast_mean = mean(x, dims, true /* keepdim */);
+  auto x_mean_sub = sub(x, bcast_mean);
+  auto x_mean_sub_sq = mul(x_mean_sub, x_mean_sub);
+  auto sum_x_mean_sub_sq = sum(x_mean_sub_sq, dims, keepdim);
+
+  auto num_features = numFeatures(x, dims, kNumberOfDims);
+  if (unbiased) {
+    num_features =
+        sub(num_features, IrBuilder::create<Double>(x->container(), 1.));
+  }
+  auto y = div(sum_x_mean_sub_sq, num_features);
+
+  return y;
+}
+
+TensorView* standard_deviation(
+    TensorView* x,
+    const std::vector<int>& dims,
+    bool unbiased,
+    bool keepdim) {
+  TORCH_INTERNAL_ASSERT(x != nullptr, "Input is invalid.");
+  return sqrt(variance(x, dims, unbiased, keepdim));
+}
+
 TensorView* softmax(TensorView* x, int dim) {
   TORCH_INTERNAL_ASSERT(x != nullptr, "Input is invalid.");
 
@@ -46,6 +104,45 @@ TensorView* softmax_backward(TensorView* dy, TensorView* y, int dim) {
   auto bcast_sum = broadcast(sum_new_grad, broadcast_mask);
   auto output_sum_mul = mul(y, bcast_sum);
   auto dx = sub(new_grad, output_sum_mul);
+
+  return dx;
+}
+
+TensorView* log_softmax(TensorView* x, int dim) {
+  TORCH_INTERNAL_ASSERT(x != nullptr, "Input is invalid.");
+
+  const int kNumberOfDims =
+      TensorDomain::noReductions(x->getMaybeRFactorDomain()).size();
+  const int kReductionAxis = (dim < 0) ? dim + kNumberOfDims : dim;
+  TORCH_INTERNAL_ASSERT(kReductionAxis >= 0 && kReductionAxis < kNumberOfDims);
+
+  std::vector<bool> broadcast_mask(kNumberOfDims, false);
+  broadcast_mask[kReductionAxis] = true;
+
+  auto max_val = max(x, {kReductionAxis});
+  auto bcast_max = broadcast(max_val, broadcast_mask);
+  auto x_max_sub = sub(x, bcast_max);
+  auto exp_val = exp(x_max_sub);
+  auto bcast_sum = sum(exp_val, {kReductionAxis}, true /* keepdim */);
+  auto log_sum_exp = log(bcast_sum);
+  auto y = sub(x_max_sub, log_sum_exp);
+
+  return y;
+}
+
+TensorView* log_softmax_backward(TensorView* dy, TensorView* y, int dim) {
+  TORCH_INTERNAL_ASSERT(dy != nullptr, "Grad Output is invalid.");
+  TORCH_INTERNAL_ASSERT(y != nullptr, "Output is invalid.");
+
+  const int kNumberOfDims =
+      TensorDomain::noReductions(y->getMaybeRFactorDomain()).size();
+  const int kReductionAxis = (dim < 0) ? dim + kNumberOfDims : dim;
+  TORCH_INTERNAL_ASSERT(kReductionAxis >= 0 && kReductionAxis < kNumberOfDims);
+
+  auto bcast_sum_grad = sum(dy, {kReductionAxis}, true /* keepdim */);
+  auto softmax = exp(y);
+  auto softmax_sum_mul = mul(softmax, bcast_sum_grad);
+  auto dx = sub(dy, softmax_sum_mul);
 
   return dx;
 }

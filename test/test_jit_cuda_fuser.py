@@ -265,7 +265,7 @@ class TestCudaFuser(JitTestCase):
                      "Requires fusion optimization pass to be effective")
     def test_reduction_dtypes_axis(self):
 
-        for op in [torch.sum, torch.mean, torch.amax]:
+        for op in [torch.sum, torch.mean, torch.amax, torch.var, torch.std]:
             for dtype in [torch.float16, torch.float32, torch.double]:
                 for axis in [-1, 2]:
                     def make_func(op):
@@ -284,6 +284,33 @@ class TestCudaFuser(JitTestCase):
                     self.assertEqual(o.dtype, jit_o.dtype)
                     self.assertTrue(self._compare("comparing output failed", o, jit_o, 1e-4))
                     self.assertGraphContains(t_jit.graph_for(x), FUSION_GUARD)
+
+    @unittest.skipIf(is_pre_volta(), "reduction not supported in pre volta device")
+    @unittest.skipIf(not RUN_CUDA, "requires CUDA")
+    @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
+                     "Requires fusion optimization pass to be effective")
+    def test_variance(self):
+
+        for op in [torch.var, torch.std]:
+            for dtype in [torch.float16, torch.float32, torch.double]:
+                for axis in [-2, -1, 2, 1]:
+                    for unbiased in [False, True]:
+                        def make_func(op):
+                            def func(x: torch.Tensor):
+                                o = torch.mul(x, 2.0)
+                                o = op(o, dim=[axis])
+                                return o
+                            return func
+
+                        x = torch.randn(8, 4, 16, dtype=dtype, device="cuda")
+                        t = make_func(op)
+                        t_jit = torch.jit.trace(t, x)
+                        jit_o = t_jit(x)
+                        jit_o = t_jit(x)
+                        o = t(x)
+                        self.assertEqual(o.dtype, jit_o.dtype)
+                        self.assertTrue(self._compare("comparing output failed", o, jit_o, 1e-4))
+                        self.assertGraphContains(t_jit.graph_for(x), FUSION_GUARD)
 
     @unittest.skipIf(not RUN_CUDA, "requires CUDA")
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
@@ -1479,7 +1506,7 @@ class TestCudaFuser(JitTestCase):
                         x[1] = C
                         self._norm_helper(x, torch.bfloat16, "cuda", 1e-1, is_batch_norm_else_instance_norm)
 
-    def _softmax_helper(self, shape, reduction_axis, dtype, device, error):
+    def _softmax_helper(self, shape, reduction_axis, is_log_softmax, dtype, device, error):
         class MySoftmax(torch.nn.Module):
             __constants__ = ['reduction_axis']
 
@@ -1492,19 +1519,37 @@ class TestCudaFuser(JitTestCase):
                 o = torch.nn.functional.softmax(o, dim=self.reduction_axis)
                 return o
 
-        t = MySoftmax()
+        class MyLogSoftmax(torch.nn.Module):
+            __constants__ = ['reduction_axis']
 
-        x = torch.randn(shape, dtype=dtype, device=device)
-        y = torch.randn(shape, dtype=dtype, device=device)
+            def __init__(self):
+                super(MyLogSoftmax, self).__init__()
+                self.reduction_axis = reduction_axis
+
+            def forward(self, x: torch.Tensor, y: torch.Tensor):
+                o = torch.add(x, y)
+                o = torch.nn.functional.log_softmax(o, dim=self.reduction_axis)
+                return o
+
+        gradient_check = (dtype == torch.float64)
+        t = MyLogSoftmax() if is_log_softmax else MySoftmax()
+
+        x = torch.randn(shape, dtype=dtype, device=device, requires_grad=gradient_check)
+        y = torch.randn(shape, dtype=dtype, device=device, requires_grad=gradient_check)
         t_jit = torch.jit.script(t)
         jit_o = t_jit(x, y)
         jit_o = t_jit(x, y)
-        o = t(x, y)
-        self.assertEqual(o.dtype, jit_o.dtype)
-        # numerical issues here due to our scheduling.
-        # can't use `self.assertEqual(o, jit_o)`
-        self.assertTrue(self._compare("comparing output failed", o, jit_o, error))
-        self.assertGraphContains(t_jit.graph_for(x, y), FUSION_GUARD)
+        jit_o = t_jit(x, y)
+
+        if gradient_check:
+            gradcheck(t_jit.forward, [x, y])
+        else:
+            o = t(x, y)
+            self.assertEqual(o.dtype, jit_o.dtype)
+            # numerical issues here due to our scheduling.
+            # can't use `self.assertEqual(o, jit_o)`
+            self.assertTrue(self._compare("comparing output failed", o, jit_o, error))
+            self.assertGraphContains(t_jit.graph_for(x, y), FUSION_GUARD)
 
     @unittest.skipIf(is_pre_volta(), "reduction not supported in pre volta device")
     @unittest.skipIf(not RUN_CUDA, "requires CUDA")
@@ -1606,11 +1651,18 @@ class TestCudaFuser(JitTestCase):
         output_size = int(pow(output_size, 1. / dims))
         reduction_sizes = [67, 256, 1024, 4096]
 
+        # gradient check
+        for reduction_dim in range(dims):
+            for is_log_softmax in [False, True]:
+                shape = [output_size for idx in range(dims)]
+                self._softmax_helper(shape, reduction_dim, is_log_softmax, torch.float64, "cuda", 1e-4)
+
         for reduction_dim in range(dims):
             for reduction_size in reduction_sizes:
                 x = [output_size for idx in range(dims)]
                 x[reduction_dim] = reduction_size
-                self._softmax_helper(x, reduction_dim, torch.float32, "cuda", 1e-4)
+                for is_log_softmax in [False, True]:
+                    self._softmax_helper(x, reduction_dim, is_log_softmax, torch.float32, "cuda", 1e-4)
 
     @unittest.skipIf(is_pre_volta(), "reduction not supported in pre volta device")
     @unittest.skipIf(not RUN_CUDA, "requires CUDA")
@@ -1626,7 +1678,8 @@ class TestCudaFuser(JitTestCase):
             for reduction_size in reduction_sizes:
                 x = [output_size for idx in range(dims)]
                 x[reduction_dim] = reduction_size
-                self._softmax_helper(x, reduction_dim, torch.float16, "cuda", 5e-3)
+                for is_log_softmax in [False, True]:
+                    self._softmax_helper(x, reduction_dim, is_log_softmax, torch.float16, "cuda", 5e-3)
 
     @unittest.skipIf(is_pre_volta(), "reduction not supported in pre volta device")
     @unittest.skipIf(not RUN_CUDA, "requires CUDA")
@@ -1643,7 +1696,8 @@ class TestCudaFuser(JitTestCase):
             for reduction_size in reduction_sizes:
                 x = [output_size for idx in range(dims)]
                 x[reduction_dim] = reduction_size
-                self._softmax_helper(x, reduction_dim, torch.bfloat16, "cuda", 1e-1)
+                for is_log_softmax in [False, True]:
+                    self._softmax_helper(x, reduction_dim, is_log_softmax, torch.bfloat16, "cuda", 1e-1)
 
     @unittest.skipIf(is_pre_volta(), "reduction not supported in pre volta device")
     @unittest.skipIf(not RUN_CUDA, "requires CUDA")

@@ -28,9 +28,33 @@ struct BackwardNormResult {
   TensorView* grad_bias = nullptr;
 };
 
+TORCH_CUDA_CU_API TensorView* mean(
+    TensorView* x,
+    const std::vector<int>& dims,
+    bool keepdim);
+
+TORCH_CUDA_CU_API TensorView* variance(
+    TensorView* x,
+    const std::vector<int>& dims,
+    bool unbiased,
+    bool keepdim);
+
+TORCH_CUDA_CU_API TensorView* standard_deviation(
+    TensorView* x,
+    const std::vector<int>& dims,
+    bool unbiased,
+    bool keepdim);
+
 TORCH_CUDA_CU_API TensorView* softmax(TensorView* x, int dim);
 
 TORCH_CUDA_CU_API TensorView* softmax_backward(
+    TensorView* dy,
+    TensorView* y,
+    const int dim);
+
+TORCH_CUDA_CU_API TensorView* log_softmax(TensorView* x, int dim);
+
+TORCH_CUDA_CU_API TensorView* log_softmax_backward(
     TensorView* dy,
     TensorView* y,
     const int dim);

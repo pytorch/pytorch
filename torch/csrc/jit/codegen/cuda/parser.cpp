@@ -41,6 +41,9 @@ constexpr auto kNumSumToSize = 2;
 constexpr auto kNumAutocastOps = 2;
 constexpr auto kNumAliasDimOps = 2;
 constexpr auto kNumViewOps = 2;
+constexpr auto kNumVarOps = 2;
+constexpr auto kNumSoftmaxFwd = 2;
+constexpr auto kNumSoftmaxBwd = 2;
 
 namespace {
 
@@ -1829,42 +1832,51 @@ class IrParser {
     }
 
     {
-      auto ptr_op = getOperatorForLiteral(
-          "aten::softmax.int(Tensor self, int dim, int? dtype) -> Tensor");
-      REGISTER_PARSE_RULE(
-          ptr_op,
-          {
-            MemoryFormat format;
-            std::list<Val*> list_val;
-            std::tie(format, list_val) = getConsistentValues(
-                MemoryFormat::Contiguous(),
-                value_map[node->inputs()[0]->unique()]);
-            auto input_t = list_val.front();
-            list_val.pop_front();
-            auto input = input_t->as<TensorView>();
+      std::array<const char*, kNumSoftmaxFwd> SoftmaxFwd = {
+          "aten::softmax.int(Tensor self, int dim, ScalarType? dtype=None) -> Tensor",
+          "aten::log_softmax.int(Tensor self, int dim, ScalarType? dtype=None) -> Tensor"};
+      for (auto signature : SoftmaxFwd) {
+        auto ptr_op = getOperatorForLiteral(signature);
+        REGISTER_PARSE_RULE(
+            ptr_op,
+            {
+              MemoryFormat format;
+              std::list<Val*> list_val;
+              std::tie(format, list_val) = getConsistentValues(
+                  MemoryFormat::Contiguous(),
+                  value_map[node->inputs()[0]->unique()]);
+              auto input_t = list_val.front();
+              list_val.pop_front();
+              auto input = input_t->as<TensorView>();
 
-            auto dim_value = constant_as<int>(node->input(1));
-            TORCH_INTERNAL_ASSERT(
-                dim_value.has_value(), "dim in softmax is not valid");
+              auto dim_value = constant_as<int>(node->input(1));
+              TORCH_INTERNAL_ASSERT(
+                  dim_value.has_value(), "dim in softmax is not valid");
 
-            auto output = softmax(input, dim_value.value());
-            value_map.emplace(node->output()->unique(), output);
-          },
-          [](const Node* node) -> bool {
-            if (node->inputs()[1]->node()->kind() != prim::Constant) {
-              return false;
-            }
-            // TODO: support dynamic input by profiling it
-            if (!node->inputs()[2]->type()->isSubtypeOf(
-                    static_cast<c10::TypePtr>(NoneType::get())) &&
-                node->inputs()[2]->node()->kind() != prim::Constant) {
-              return false;
-            }
-            return true;
-          },
-          [](const Node* node) -> OperatorType {
-            return OperatorType::Normalization;
-          });
+              bool is_log_softmax = node->kind() ==
+                  c10::Symbol::fromQualString("aten::log_softmax");
+
+              auto output = (is_log_softmax)
+                  ? log_softmax(input, dim_value.value())
+                  : softmax(input, dim_value.value());
+              value_map.emplace(node->output()->unique(), output);
+            },
+            [](const Node* node) -> bool {
+              if (node->inputs()[1]->node()->kind() != prim::Constant) {
+                return false;
+              }
+              // TODO: support dynamic input by profiling it
+              if (!node->inputs()[2]->type()->isSubtypeOf(
+                      static_cast<c10::TypePtr>(NoneType::get())) &&
+                  node->inputs()[2]->node()->kind() != prim::Constant) {
+                return false;
+              }
+              return true;
+            },
+            [](const Node* node) -> OperatorType {
+              return OperatorType::Normalization;
+            });
+      }
     }
 
     { // LTC uses this op for softmax
@@ -1914,35 +1926,94 @@ class IrParser {
     }
 
     {
-      auto ptr_op = getOperatorForLiteral(
-          "aten::_softmax_backward_data(Tensor grad_output, Tensor output, int dim, ScalarType input_dtype) -> Tensor");
-      REGISTER_PARSE_RULE(
-          ptr_op,
-          {
-            auto grad_output =
-                value_map[node->input(0)->unique()]->as<TensorView>();
+      std::array<const char*, kNumSoftmaxBwd> SoftmaxBwd = {
+          "aten::_log_softmax_backward_data(Tensor grad_output, Tensor output, int dim, ScalarType input_dtype) -> Tensor",
+          "aten::_softmax_backward_data(Tensor grad_output, Tensor output, int dim, ScalarType input_dtype) -> Tensor"};
+      for (auto signature : SoftmaxBwd) {
+        auto ptr_op = getOperatorForLiteral(signature);
+        REGISTER_PARSE_RULE(
+            ptr_op,
+            {
+              auto grad_output =
+                  value_map[node->input(0)->unique()]->as<TensorView>();
 
-            auto output = value_map[node->input(1)->unique()]->as<TensorView>();
+              auto output =
+                  value_map[node->input(1)->unique()]->as<TensorView>();
 
-            auto dim_value = constant_as<int>(node->input(2));
-            TORCH_INTERNAL_ASSERT(
-                dim_value.has_value(), "dim in softmax is not valid");
+              auto dim_value = constant_as<int>(node->input(2));
+              TORCH_INTERNAL_ASSERT(
+                  dim_value.has_value(), "dim in softmax is not valid");
 
-            // input_dtype here is ignored! type_inference handles it
-            auto grad_input =
-                softmax_backward(grad_output, output, dim_value.value());
+              // input_dtype here is ignored! type_inference handles it
+              bool is_log_softmax = node->kind() ==
+                  c10::Symbol::fromQualString(
+                                        "aten::_log_softmax_backward_data");
+              auto grad_input = (is_log_softmax)
+                  ? log_softmax_backward(grad_output, output, dim_value.value())
+                  : softmax_backward(grad_output, output, dim_value.value());
 
-            value_map.emplace(node->output()->unique(), grad_input);
-          },
-          [](const Node* node) -> bool {
-            if (node->inputs()[2]->node()->kind() != prim::Constant) {
-              return false;
-            }
-            return true;
-          },
-          [](const Node* node) -> OperatorType {
-            return OperatorType::Normalization;
-          });
+              value_map.emplace(node->output()->unique(), grad_input);
+            },
+            [](const Node* node) -> bool {
+              if (node->inputs()[2]->node()->kind() != prim::Constant) {
+                return false;
+              }
+              return true;
+            },
+            [](const Node* node) -> OperatorType {
+              return OperatorType::Normalization;
+            });
+      }
+    }
+
+    {
+      std::array<const char*, kNumVarOps> Variance = {
+          "aten::var.dim(Tensor self, int[1] dim, bool unbiased=True, bool keepdim=False) -> Tensor",
+          "aten::std.dim(Tensor self, int[1] dim, bool unbiased=True, bool keepdim=False) -> Tensor"};
+      for (auto signature : Variance) {
+        auto ptr_op = getOperatorForLiteral(signature);
+        REGISTER_PARSE_RULE(
+            ptr_op,
+            {
+              MemoryFormat format;
+              std::list<Val*> list_val;
+              std::tie(format, list_val) = getConsistentValues(
+                  MemoryFormat::Contiguous(),
+                  value_map[node->inputs()[0]->unique()]);
+              auto input_t = list_val.front();
+              list_val.pop_front();
+              auto input = input_t->as<TensorView>();
+
+              bool is_variance =
+                  node->kind() == c10::Symbol::fromQualString("aten::var");
+
+              auto dims_list = constant_as<c10::List<int64_t>>(node->input(1));
+              TORCH_INTERNAL_ASSERT(
+                  dims_list.has_value(), "Cannot fuse with dynamic axes");
+              std::vector<int> dims;
+              for (const auto dim : dims_list->vec()) {
+                dims.emplace_back(static_cast<int>(dim));
+              }
+
+              auto unbiased = constant_as<bool>(node->input(2));
+              TORCH_INTERNAL_ASSERT(
+                  unbiased.has_value(), "Cannot fuse with dynamic unbiased");
+
+              auto keepdim = constant_as<bool>(node->input(3));
+              TORCH_INTERNAL_ASSERT(
+                  keepdim.has_value(), "Cannot fuse with dynamic keepdim");
+
+              auto output = (is_variance)
+                  ? variance(input, dims, unbiased.value(), keepdim.value())
+                  : standard_deviation(
+                        input, dims, unbiased.value(), keepdim.value());
+              value_map.emplace(node->output()->unique(), output);
+            },
+            nullptr,
+            [](const Node* node) -> OperatorType {
+              return OperatorType::Normalization;
+            });
+      }
     }
 
     {
@@ -3227,11 +3298,16 @@ bool insertProfileIValue(ProfilingRecord* pr, Node* node, size_t offset) {
     }
   }
 
+  static auto log_softmax_backward_data_schema =
+      getOperatorForLiteral(
+          "aten::_log_softmax_backward_data(Tensor grad_output, Tensor output, int dim, ScalarType input_dtype) -> Tensor")
+          ->schema();
   static auto softmax_backward_data_schema =
       getOperatorForLiteral(
           "aten::_softmax_backward_data(Tensor grad_output, Tensor output, int dim, ScalarType input_dtype) -> Tensor")
           ->schema();
-  if (node->matches(softmax_backward_data_schema)) {
+  if (node->matches(log_softmax_backward_data_schema) ||
+      node->matches(softmax_backward_data_schema)) {
     switch (offset) {
       case 3:
         profileInt(pr, node, offset);
