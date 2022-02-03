@@ -1270,10 +1270,9 @@ class TestSparseCSR(TestCase):
             if sample.input.ndim != 2:
                 continue
 
-            expected = op(sample.input, *sample.args, **sample.kwargs)
-
+            expected = op(sample.input)
             assert torch.is_tensor(expected)
-            output = op(sample.input.to_sparse_csr(), *sample.args, **sample.kwargs)
+            output = op(sample.input.to_sparse_csr())
             assert torch.is_tensor(output)
 
             self.assertEqual(output.to_dense(), expected)
@@ -1322,13 +1321,13 @@ class TestSparseCSR(TestCase):
             sample.input = sample.input.to_sparse_csr()
             expect = op(sample.input, *sample.args, **sample.kwargs)
 
-            if sample.input.is_complex() and op.name in ["abs"]:
-                with self.assertRaisesRegex(RuntimeError, "not supported"):
+            if not torch.can_cast(expect.dtype, dtype):
+                with self.assertRaisesRegex(RuntimeError, "result type"):
                     op.inplace_variant(sample.input, *sample.args, **sample.kwargs)
                 continue
 
-            if not torch.can_cast(expect.dtype, dtype):
-                with self.assertRaisesRegex(RuntimeError, "result type"):
+            if sample.input.is_complex() and op.name == "abs":
+                with self.assertRaisesRegex(RuntimeError, "not supported"):
                     op.inplace_variant(sample.input, *sample.args, **sample.kwargs)
                 continue
 
