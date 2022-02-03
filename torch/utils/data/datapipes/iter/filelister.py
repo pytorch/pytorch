@@ -1,6 +1,8 @@
+from typing import Iterator, List, Sequence, Union
+
 from torch.utils.data import IterDataPipe
+from torch.utils.data.datapipes.iter import IterableWrapper
 from torch.utils.data.datapipes.utils.common import get_file_pathnames_from_root
-from typing import List, Union, Iterator
 
 class FileListerIterDataPipe(IterDataPipe[str]):
     r""" :class:`FileListerIterDataPipe`
@@ -8,7 +10,7 @@ class FileListerIterDataPipe(IterDataPipe[str]):
     Iterable DataPipe to load file pathname(s) (path + filename), yield pathname from given disk root dir.
 
     Args:
-        root: Root directory
+        root: Root directory or a sequence of root directories
         mask: Unix style filter string or string list for filtering file name(s)
         abspath: Whether to return relative pathname or absolute pathname
         length: Nominal length of the datapipe
@@ -16,7 +18,7 @@ class FileListerIterDataPipe(IterDataPipe[str]):
 
     def __init__(
         self,
-        root: str = '.',
+        root: Union[str, Sequence[str], IterDataPipe] = '.',
         masks: Union[str, List[str]] = '',
         *,
         recursive: bool = False,
@@ -25,7 +27,11 @@ class FileListerIterDataPipe(IterDataPipe[str]):
         length: int = -1
     ) -> None:
         super().__init__()
-        self.root: str = root
+        if isinstance(root, str):
+            root = [root, ]
+        if not isinstance(root, IterDataPipe):
+            root = IterableWrapper(root)
+        self.datapipe: IterDataPipe = root
         self.masks: Union[str, List[str]] = masks
         self.recursive: bool = recursive
         self.abspath: bool = abspath
@@ -33,8 +39,8 @@ class FileListerIterDataPipe(IterDataPipe[str]):
         self.length: int = length
 
     def __iter__(self) -> Iterator[str] :
-        yield from get_file_pathnames_from_root(self.root, self.masks, self.recursive, self.abspath,
-                                                self.non_deterministic)
+        for path in self.datapipe:
+            yield from get_file_pathnames_from_root(path, self.masks, self.recursive, self.abspath, self.non_deterministic)
 
     def __len__(self):
         if self.length == -1:
