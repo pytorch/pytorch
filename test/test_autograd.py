@@ -4117,8 +4117,6 @@ class TestAutograd(TestCase):
                   check_batched_grad=False, check_batched_forward_grad=True)
         self.assertEqual(vjp_count[0], 0)
         self.assertEqual(jvp_count[0], 5)  # 1 + 1 + 3
-        vjp_count = [0]
-        jvp_count = [0]
 
     def test_gradcheck_check_forward_or_backward_only(self):
         """Depending on settings for check_forward_ad and check_backward_ad, the
