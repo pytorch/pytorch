@@ -25,6 +25,7 @@
 #include <torch/csrc/jit/runtime/static/ops.h>
 #include <torch/csrc/jit/runtime/static/passes.h>
 #include <torch/csrc/jit/runtime/vararg_functions.h>
+#include <algorithm>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/NativeFunctions.h>
@@ -52,12 +53,37 @@ C10_DEFINE_bool(
 namespace torch {
 namespace jit {
 
+namespace {
+
+bool allArgsAreTensors(Node* node) {
+  const auto& inputs = node->inputs();
+  return std::all_of(inputs.begin(), inputs.end(), [](Value* value) {
+    return value->type()->kind() == TypeKind::TensorType;
+  });
+}
+
+} // namespace
+
 // A manually curated set of ops that are disallowed in static runtime.
 // These are rarely-used ops. Disallowing them typically eliminates
 // corner cases in graph optimizations, allowing for more aggressive
 // optimizations and better performance.
-bool isUnsupportedOp(const NodeKind& kind) {
-  return kind == aten::__is__ || kind == aten::__isnot__;
+bool isUnsupportedOp(Node* node) {
+  auto kind = node->kind();
+  if (kind != aten::__is__ && kind != aten::__isnot__) {
+    return false;
+  }
+
+  // We can't support aten::__is__ (and __isnot__) with tensor arguments.
+  // Consider the following graph:
+  // def forward(x):
+  //     y = x.detach()
+  //     return x is y
+  // We have a graph optimization that removes the `detach` node since it is
+  // a no-op during inference. But this affects the result - we get true
+  // instead of false! There are many other graph passes affected by this
+  // issue.
+  return allArgsAreTensors(node);
 }
 
 // graph must be frozen or canEnableStaticRuntime would return false
@@ -67,26 +93,16 @@ bool canEnableStaticRuntime(const std::shared_ptr<torch::jit::Graph>& graph) {
   bool can_support = true;
   bool has_blocks = false;
   for (auto* node : graph->block()->nodes()) {
-    if (node->blocks().size() > 0) {
-      has_blocks = true;
-      VLOG(1) << "Found nested sub-blocks in graph at node: "
-              << PrintNode(node);
-    }
     const auto kind = node->kind();
     if (kind == prim::Constant) {
       continue;
     }
     // check if can get op from Node
     const Operator* op = node->maybeOperator();
-    if (isUnsupportedOp(kind) || (!op && !nativeOpIsRegistered(kind))) {
+    if (isUnsupportedOp(node) || (!op && !nativeOpIsRegistered(kind))) {
       can_support = false;
       LOG(WARNING) << "Found unsupported op: " << kind.toQualString();
     }
-  }
-  if (has_blocks) {
-    LOG(WARNING)
-        << "Found nested sub-block in graph. Static Runtime doesn't support nested sub-blocks.";
-    can_support = false;
   }
   return can_support;
 }
@@ -203,6 +219,19 @@ void PrepareGraphForStaticModule(
     std::vector<IValue> sample_inputs) {
   TORCH_CHECK(canEnableStaticRuntime(graph));
   OptimizeGraph(graph, opts, std::move(sample_inputs));
+
+  // Static runtime moves its outputs out of the runtime
+  // by default. In some rare cases, this is not actually safe to
+  // do - for example, if the value is a constant, static runtime
+  // needs to hold onto a copy. Rather than adding special logic
+  // to handle this rare case, we use this pass to detect it and
+  // create an owned reference that can be safely moved out of the
+  // runtime.
+  CreateOwnedRefsForSpecialValues(*graph);
+
+  // We assume that each sub-block has at least one output. If we
+  // detect any that have 0, force the sub-block to return None.
+  ForceNonEmptyOutputs(*graph);
 }
 
 std::pair<std::shared_ptr<Graph>, c10::optional<Module>> PrepareForStaticModule(
@@ -327,18 +356,12 @@ ManagedTensorRanges::ManagedTensorRanges(
   const FastSet<const Value*> graph_inputs(
       block.inputs().begin(), block.inputs().end());
 
-  auto isUntrackedValue = [&alias_db, &graph_inputs](const Value* value) {
-    return !alias_db.isMutableType(value) ||
-        graph_inputs.find(value) != graph_inputs.end();
-  };
-
   const auto num_nodes = nodes.size();
   for (const auto i : c10::irange(num_nodes)) {
     auto* node = nodes[i];
     for (auto* input : node->inputs()) {
       auto* lifetime = getLifetime(input);
       if (!lifetime) {
-        DCHECK(isUntrackedValue(input));
         continue;
       }
       DCHECK(lifetime->end <= i);
@@ -354,7 +377,6 @@ ManagedTensorRanges::ManagedTensorRanges(
   for (auto* graph_output : block.outputs()) {
     auto* lifetime = getLifetime(graph_output);
     if (!lifetime) {
-      DCHECK(isUntrackedValue(graph_output));
       continue;
     }
     lifetime->end = num_nodes;
@@ -1765,12 +1787,7 @@ ProcessedNode::ProcessedNode(
     : node_(node),
       fn_(fn),
       inputs_(std::move(inputs)),
-      outputs_offset_(outputs_offset)
-#ifndef PYTORCH_DISABLE_PER_OP_PROFILING
-      ,
-      op_name_(node->kind().toQualString())
-#endif
-{
+      outputs_offset_(outputs_offset) {
   TORCH_CHECK(
       node->outputs().size() < (1 << (sizeof(num_outputs_) * 8)),
       node->outputs().size(),
@@ -1831,11 +1848,12 @@ static bool checkNoMemoryOverlap(const at::Tensor& a, const at::Tensor& b) {
 }
 
 bool ProcessedNode::verify_no_memory_overlap(bool force_check) const {
-  const static std::array<c10::Symbol, 4> special_case_ops = {
+  const static std::array<c10::Symbol, 5> special_case_ops = {
       fromQualString("prim::TypeCheck"),
       fromQualString("static_runtime::select_tensor"),
       fromQualString("static_runtime::VarTupleUnpack"),
-      fromQualString("static_runtime::dict_unpack")};
+      fromQualString("static_runtime::dict_unpack"),
+      fromQualString("static_runtime::create_owned_ref")};
   if (!force_check &&
       std::find(
           begin(special_case_ops), end(special_case_ops), node()->kind()) !=
