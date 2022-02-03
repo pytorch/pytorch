@@ -20,12 +20,17 @@ def forward_helper(func, expanded_args, num_true_outs):
         num_true_outs: The number of outputs seen by the user since some functions
           return auxillary data that is only used in the backward pass
     '''
-    unexpanded_args = _check_and_unexpand_args(func, expanded_args)
-    output = func(*unexpanded_args)
+    kwarg_names = expanded_args[-1]
+    expanded_args = expanded_args[:-1]
+    kwarg_values = expanded_args[len(expanded_args) - len(kwarg_names):]
+    expanded_args = expanded_args[:len(expanded_args) - len(kwarg_names)]
+    expanded_kwargs = {name: value for (name, value) in zip(kwarg_names, kwarg_values)}
+    unexpanded_args, unexpanded_kwargs = _check_and_unexpand_args(func, expanded_args, expanded_kwargs)
+    output = func(*unexpanded_args, **unexpanded_kwargs)
     output, aux_outputs = _check_and_detach_output(output, num_true_outs)
-    return (output, expanded_args, aux_outputs)
+    return (output, expanded_args, expanded_kwargs, aux_outputs)
 
-def _check_and_unexpand_args(func, expanded_args):
+def _check_and_unexpand_args(func, expanded_args, expanded_kwargs):
     # input must be the first argument passed
     input = expanded_args[0]
     if isinstance(input, ExpandedWeight):
@@ -40,13 +45,15 @@ def _check_and_unexpand_args(func, expanded_args):
         raise RuntimeError("0 is not a valid batch size for Expanded Weights but got input tensor of "
                            f"{input} in function {func.__name__}")
     batch_size = input.shape[0]
-    for arg in expanded_args:
+    for arg in expanded_args + tuple(expanded_kwargs.values()):
         if isinstance(arg, ExpandedWeight) and arg.batch_size != batch_size:
             raise RuntimeError("Expected ExpandedWeights to have batch size matching input but got "
                                f"input batch size of {batch_size} with ExpandedWeight of batch size {arg.batch_size}")
 
     unexpanded_args = tuple(arg.orig_weight if isinstance(arg, ExpandedWeight) else arg for arg in expanded_args)
-    return unexpanded_args
+    unexpanded_kwargs = {name: arg.orig_weight if isinstance(arg, ExpandedWeight) else arg
+                         for (name, arg) in expanded_kwargs.items()}
+    return unexpanded_args, unexpanded_kwargs
 
 def _check_and_detach_output(output, num_true_outs):
     aux_outputs = None
@@ -66,10 +73,7 @@ def set_grad_sample_if_exists(maybe_expanded_weight, per_sample_grad_fn):
     unpacked = unpack_expanded_weight_or_tensor(maybe_expanded_weight)
     if isinstance(maybe_expanded_weight, ExpandedWeight):
         if hasattr(unpacked, "grad_sample"):
-            if isinstance(unpacked.grad_sample, list):
-                unpacked.grad_sample.append(per_sample_grad_fn(unpacked))
-            else:
-                unpacked.grad_sample = [unpacked.grad_sample, per_sample_grad_fn(unpacked)]
+            unpacked.grad_sample = unpacked.grad_sample + per_sample_grad_fn(unpacked)
         else:
             unpacked.grad_sample = per_sample_grad_fn(unpacked)
 
