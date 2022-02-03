@@ -12,8 +12,8 @@ from torch.testing._internal.common_device_type import \
     (ops, instantiate_device_type_tests, dtypes, dtypesIfCUDA, onlyCPU, onlyCUDA, skipCUDAIfNoCusparseGeneric,
      precisionOverride, skipMeta, skipCUDAIf, skipCUDAIfRocm, skipCPUIfNoMklSparse)
 from torch.testing._internal.common_methods_invocations import \
-    (op_db, UnaryUfuncInfo, sparse_csr_funcs, )
-from torch.testing._internal.common_cuda import _get_torch_cuda_version
+    (op_db, sparse_csr_unary_ufuncs, )
+from torch.testing._internal.common_cuda import _get_torch_cuda_version, CUDA11OrLater
 from torch.testing._internal.common_dtype import floating_types, get_all_dtypes
 from test_sparse import CUSPARSE_SPMM_COMPLEX128_SUPPORTED
 
@@ -24,12 +24,7 @@ if TEST_SCIPY:
 # sharding on sandcastle. This line silences flake warnings
 load_tests = load_tests
 
-# Unary Ufuncs supported by Sparse CSR Layout
-# since square is pow with exponent as 2, and pow has special handling
-# hence, square is temporarily filtered from the list, see: https://github.com/pytorch/pytorch/pull/69603#discussion_r793300941
-sparse_csr_unary_ufuncs = [
-    op for op in sparse_csr_funcs if isinstance(op, UnaryUfuncInfo) and op.name != "square"
-]
+_sparse_csr_ops = list(filter(lambda op: op.supports_sparse_csr, op_db))
 # A separate test is written for pow, since it errors out with exponent=0 for Sparse CSR
 sparse_csr_pow = [op for op in sparse_csr_funcs if op.name == 'pow']
 
@@ -50,10 +45,6 @@ def _check_cusparse_sddmm_available():
     # cusparseSDDMM was added in 11.2.1 but we don't have access to patch version
     min_supported_version = (11, 3)
     return version >= min_supported_version
-
-# pow and square need special handling in tests, hence removed till complex and pow(Tensor, Tensor)
-# support is added. See: https://github.com/pytorch/pytorch/pull/69603#discussion_r793300941
-_sparse_csr_ops = list(filter(lambda op: op.supports_sparse_csr and op.name not in ["pow", "square"], op_db))
 
 # This should be just an import from test_linalg instead of code duplication
 # but https://github.com/pytorch/pytorch/pull/63511#discussion_r733989701
@@ -613,6 +604,72 @@ class TestSparseCSR(TestCase):
             err_msg = "size mismatch, got"
             with self.assertRaisesRegex(RuntimeError, err_msg):
                 csr.matmul(bad_vec)
+
+    @onlyCUDA
+    @unittest.skipIf(not CUDA11OrLater, "Only CUDA 11+ is supported")
+    @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
+    def test_baddbmm(self, device, dtype):
+        def run_test(c, a, a_batched, b, op_b=False, op_out=False, *, dtype=None, device=None):
+            alpha = complex(random.random(), random.random()) if dtype.is_complex else random.random()
+            beta = complex(random.random(), random.random()) if dtype.is_complex else random.random()
+            b = b.mH if (op_b and a.shape == b.shape) else b
+
+            actual = torch.baddbmm(c, a_batched, b, alpha=alpha, beta=beta)
+
+            out = torch.empty_like(c.mH if op_out and a.shape == b.shape else c)
+            torch.baddbmm(c, a_batched, b, alpha=alpha, beta=beta, out=out)
+
+            expected = [torch.addmm(c[i], a, b[i], alpha=alpha, beta=beta) for i in range(c.shape[0])]
+            expected = torch.stack(expected, 0)
+
+            self.assertEqual(actual, out)
+            self.assertEqual(actual, expected)
+
+        for index_dtype in [torch.int32, torch.int64]:
+            for (m, n, k), batch_size, noncontiguous in zip(itertools.product([1, 5], repeat=3), [1, 3], [True, False]):
+                nnz = random.randint(0, m * k)
+                a = self.genSparseCSRTensor((m, k), nnz, dtype=dtype, device=device, index_dtype=index_dtype)
+
+                # a_batched is a regular CSR tensor but with a batch dimension in the shape
+                a_batched = torch._sparse_csr_tensor_unsafe(
+                    a.crow_indices(), a.col_indices(), a.values(), (batch_size, m, k))
+
+                b = make_tensor((batch_size, k, n), dtype=dtype, device=device, noncontiguous=noncontiguous)
+                c = make_tensor((batch_size, m, n), dtype=dtype, device=device, noncontiguous=noncontiguous)
+                for op_b, op_out in itertools.product([True, False], repeat=2):
+                    run_test(c, a, a_batched, b, op_b, op_out, dtype=dtype, device=device)
+
+    @onlyCUDA
+    @unittest.skipIf(not CUDA11OrLater, "Only CUDA 11+ is supported")
+    @skipCUDAIfNoCusparseGeneric
+    @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
+    def test_bmm(self, device, dtype):
+        def run_test(a, a_batched, b, op_b=False, op_out=False, *, dtype=None, device=None):
+            b = b.mH if (op_b and a.shape == b.shape) else b
+
+            actual = torch.bmm(a_batched, b)
+
+            out = torch.empty_like(actual.mH if op_out and a.shape == b.shape else actual)
+            torch.bmm(a_batched, b, out=out)
+
+            expected = [torch.mm(a, b[i]) for i in range(b.shape[0])]
+            expected = torch.stack(expected, 0)
+
+            self.assertEqual(actual, out)
+            self.assertEqual(actual, expected)
+
+        for index_dtype in [torch.int32, torch.int64]:
+            for (m, n, k), batch_size, noncontiguous in zip(itertools.product([1, 5], repeat=3), [1, 3], [True, False]):
+                nnz = random.randint(0, m * k)
+                a = self.genSparseCSRTensor((m, k), nnz, dtype=dtype, device=device, index_dtype=index_dtype)
+
+                # a_batched is a regular CSR tensor but with a batch dimension in the shape
+                a_batched = torch._sparse_csr_tensor_unsafe(
+                    a.crow_indices(), a.col_indices(), a.values(), (batch_size, m, k))
+
+                b = make_tensor((batch_size, k, n), dtype=dtype, device=device, noncontiguous=noncontiguous)
+                for op_b, op_out in itertools.product([True, False], repeat=2):
+                    run_test(a, a_batched, b, op_b, op_out, dtype=dtype, device=device)
 
     def run_test_block_addmm_addmv(self, addmv_addmm, c, a, b, op_b=False, op_out=False, *, dtype=None, device=None):
         alpha = complex(random.random(), random.random()) if dtype.is_complex else random.random()
@@ -1475,6 +1532,21 @@ class TestSparseCSR(TestCase):
             run_test(shape, 0, index_dtype, dim0, dim1)
             run_test(shape, max(shape), index_dtype, dim0, dim1)
             run_test(shape, shape[0] * shape[1], index_dtype, dim0, dim1)
+
+    # TODO: This is a stopgap for a rigorous extension of our autograd tests
+    # to test the functionality of detach
+    @skipMeta
+    @dtypes(*get_all_dtypes())
+    def test_exercise_detach(self, device, dtype):
+        shape = (3, 3)
+        nnz = 4
+        for index_dtype in [torch.int32, torch.int64]:
+            inp = self.genSparseCSRTensor(shape, nnz, dtype=dtype, device=device, index_dtype=index_dtype)
+            detached_inp = inp.detach()
+            self.assertEqual(inp.values(), detached_inp.values())
+            self.assertEqual(inp.crow_indices(), detached_inp.crow_indices())
+            self.assertEqual(inp.col_indices(), detached_inp.col_indices())
+
 
 
 # e.g., TestSparseCSRCPU and TestSparseCSRCUDA
