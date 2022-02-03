@@ -72,6 +72,7 @@ void pushNVTXCallbacks(
           })
           .needsInputs(config.report_input_shapes)
           .needsOutputs(config.report_input_shapes)
+          .needsIds(true)
           .scopes(scopes));
   state_ptr->setCallbackHandle(handle);
 }
