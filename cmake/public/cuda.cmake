@@ -102,11 +102,11 @@ if(CUDA_FOUND)
 endif()
 
 # Find cuDNN.
-if(USE_STATIC_CUDNN)
-  set(CUDNN_STATIC ON CACHE BOOL "")
-else()
-  set(CUDNN_STATIC OFF CACHE BOOL "")
+if(CAFFE2_STATIC_LINK_CUDA AND NOT USE_STATIC_CUDNN)
+  message(WARNING "cuDNN will be linked statically because CAFFE2_STATIC_LINK_CUDA is ON. "
+    "Set USE_STATIC_CUDNN to ON to suppress this warning.")
 endif()
+
 
 find_package(CUDNN)
 
