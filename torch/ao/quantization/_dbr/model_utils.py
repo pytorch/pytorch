@@ -39,7 +39,6 @@ def pack_weights_for_functionals(
                 bias = getattr(module, seen_op_info.packable_tensor_idx_to_name[2])
                 stride = seen_op_info.packable_nontensor_idx_to_arg[3]
                 padding = seen_op_info.packable_nontensor_idx_to_arg[4]
-
                 output_padding = None
                 if seen_op_info.type in conv_transpose_ops:
                     output_padding = seen_op_info.packable_nontensor_idx_to_arg[5]
