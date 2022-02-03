@@ -2220,10 +2220,6 @@ class TestDistributions(TestCase):
         df = torch.rand(5, requires_grad=True) + ndim - 1
         df_no_batch = torch.rand([], requires_grad=True) + ndim - 1
         df_multi_batch = torch.rand(6, 5, requires_grad=True) + ndim - 1
-        if scipy.__version__ < (0, 16, 0):
-            df += 1.
-            df_no_batch += 1.
-            df_multi_batch += 1.
 
         # construct PSD covariance
         tmp = torch.randn(ndim, 10)
@@ -2288,7 +2284,7 @@ class TestDistributions(TestCase):
     def test_wishart_log_prob(self):
         ndim = 3
         df = torch.rand([], requires_grad=True) + ndim - 1
-        if version.parse(scipy.__version__) < version.parse("0.16.0"):
+        if version.parse(scipy.__version__) < version.parse("1.7.0"):
             df += 1.
         tmp = torch.randn(ndim, 10)
         cov = (torch.matmul(tmp, tmp.t()) / tmp.size(-1)).requires_grad_()
@@ -2329,7 +2325,7 @@ class TestDistributions(TestCase):
         set_rng_seed(0)  # see Note [Randomized statistical tests]
         ndim = 3
         df = torch.rand([], requires_grad=True) + ndim - 1
-        if version.parse(scipy.__version__) < version.parse("0.16.0"):
+        if version.parse(scipy.__version__) < version.parse("1.7.0"):
             df += 1.
         tmp = torch.randn(ndim, 10)
         cov = (torch.matmul(tmp, tmp.t()) / tmp.size(-1)).requires_grad_()
@@ -4637,11 +4633,11 @@ class TestAgainstScipy(TestCase):
             (
                 # scipy var for Wishart only supports scalars
                 Wishart(
-                    (20 if version.parse(scipy.__version__) < version.parse("0.16.0") else 19) + positive_var[0],
+                    (20 if version.parse(scipy.__version__) < version.parse("1.7.0") else 19) + positive_var[0],
                     cov_tensor,
                 ),
                 scipy.stats.wishart(
-                    (20 if version.parse(scipy.__version__) < version.parse("0.16.0") else 19) + positive_var[0].item(),
+                    (20 if version.parse(scipy.__version__) < version.parse("1.7.0") else 19) + positive_var[0].item(),
                     cov_tensor,
                 ),
             ),
