@@ -9164,17 +9164,16 @@ class TestNN(NNTestCase):
                 else:
                     X = torch.rand(n, m, dtype=dtype, requires_grad=True, device=d)[:, ::2]
 
-                # TODO Add gradcheck for tanh gelu
-                if dtype == torch.float64:
-                    gradcheck(F.gelu, [X], eps=1e-4)
-
                 for approximate in ['none', 'tanh']:
-                    res = F.gelu(X, approximate=approximate)
+                    res = F.gelu(X, approximate)
                     if approximate == 'tanh':
                         ref = _tanh_gelu_ref(X.to(numpy_dtype).cpu().detach().numpy())
                     else:
                         ref = _gelu_ref(X.to(numpy_dtype).cpu().detach().numpy())
                     self.assertEqual(res, ref, rtol=rtol, atol=atol, exact_dtype=False)
+
+                    if dtype == torch.float64:
+                        gradcheck(F.gelu, [X, approximate], eps=1e-4)
 
         for n in range(1, 10):
             for m in range(1, 10):

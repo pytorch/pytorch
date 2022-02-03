@@ -681,7 +681,7 @@ class GELU(Module):
         self.approximate = approximate
 
     def forward(self, input: Tensor) -> Tensor:
-        return F.gelu(input, approximate=self.approximate)
+        return F.gelu(input, self.approximate)
 
     def extra_repr(self) -> str:
         return 'approximate={}'.format(self.approximate)

@@ -1652,7 +1652,7 @@ See :class:`~torch.nn.LogSigmoid` for more details.
 )
 
 
-def gelu(input: Tensor, *, approximate: str = 'none') -> Tensor:
+def gelu(input: Tensor, approximate: str = 'none') -> Tensor:
     r"""gelu(input, approximate = 'none') -> Tensor
 
     Applies element-wise the function
