@@ -694,8 +694,6 @@ class AutoQuantizationState(torch.nn.Module):
             packable_nontensor_arg_idxs = get_packable_nontensor_arg_idxs(op)
             if packable_nontensor_arg_idxs is not None:
                 for arg_idx in packable_nontensor_arg_idxs:
-                    #if arg_idx >= len(args):
-                    #    continue
                     packable_nontensor_idx_to_arg[arg_idx] = args[arg_idx]
 
             packable_tensor_kwarg_names = \
