@@ -329,7 +329,7 @@ def _get_analytical_jacobian_forward_ad(fn, inputs, outputs, *, check_grad_dtype
                 if inp.layout == torch._mkldnn:  # type: ignore[attr-defined]
                     raise ValueError("MKLDNN inputs are not support for forward AD gradcheck.")
 
-                inp = fwAD.make_dual(inp, torch.zeros_like(inp))
+                inp = fwAD.make_dual(inp.detach(), torch.zeros_like(inp))
                 # If inp is a differentiable view, the dual might not be the tangent given to
                 # make_dual, so read it explicitly from the dual tensor
                 fw_grads.append(fwAD.unpack_dual(inp)[1])
@@ -760,9 +760,12 @@ def _test_batched_grad_forward_ad(func, inputs) -> bool:
     assert isinstance(inputs, tuple)
 
     for input_idx, current_input in enumerate(inputs):
+        if not (is_tensor_like(current_input) and current_input.requires_grad):
+            continue
+
         def jvp(tangent: torch.Tensor):
             with fwAD.dual_level():
-                dual = fwAD.make_dual(current_input, tangent)
+                dual = fwAD.make_dual(current_input.detach(), tangent)
                 inputs_with_dual = tuple(dual if idx == input_idx else inp for idx, inp in enumerate(inputs))
                 dual_outputs = _as_tuple(func(*inputs_with_dual))
                 ret = []
@@ -888,7 +891,7 @@ def _test_undefined_forward_mode(func, outputs, inputs):
                 if inp.layout == torch._mkldnn:  # type: ignore[attr-defined]
                     raise ValueError("MKLDNN inputs are not support for forward AD gradcheck.")
 
-                inp = fwAD.make_dual(inp, torch.zeros_like(inp))
+                inp = fwAD.make_dual(inp.detach(), torch.zeros_like(inp))
                 # If inp is a differentiable view, the dual might not be the tangent given to
                 # make_dual, so read it explicitly from the dual tensor
                 fw_grads.append(fwAD.unpack_dual(inp)[1])
@@ -904,12 +907,12 @@ def _test_undefined_forward_mode(func, outputs, inputs):
             dual_inp_obj = dual_inputs[idx]
 
             # case 1 (Materialized Zero Tensor Tangent)
-            dual_inputs[idx] = fwAD.make_dual(inp, torch.zeros_like(inp))
+            dual_inputs[idx] = fwAD.make_dual(inp.detach(), torch.zeros_like(inp))
             raw_outputs = _as_tuple(func(*dual_inputs))
             dual_outputs1 = filter(_is_float_or_complex_tensor, raw_outputs)
 
             # case 2 (Efficient Zero Tensor Tangent since we don't make a dual object and pass a regular tensor)
-            dual_inputs[idx] = inp
+            dual_inputs[idx] = inp.detach()
             raw_outputs = _as_tuple(func(*dual_inputs))
             dual_outputs2 = filter(_is_float_or_complex_tensor, raw_outputs)
 

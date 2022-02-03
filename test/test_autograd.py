@@ -4064,6 +4064,59 @@ class TestAutograd(TestCase):
             with self.assertRaisesRegex(RuntimeError, err_msg):
                 gradcheck(bad_fn, (x, y), check_forward_ad=True, fast_mode=fast_mode)
 
+    def test_gradcheck_forward_ad_respects_requires_grad_but_runs_with_no_requires_grad(self):
+        vjp_count = [0]
+        jvp_count = [0]
+
+        class UserFn(Function):
+            @staticmethod
+            def forward(ctx, x, y):
+                return x.clone(), y.clone()
+
+            @staticmethod
+            def vjp(ctx, gx, gy):
+                vjp_count[0] += 1
+                return gx, gy
+
+            @staticmethod
+            def jvp(ctx, x_t, y_t):
+                jvp_count[0] += 1
+                return x_t, y_t
+
+        x = torch.rand(2, dtype=torch.double, requires_grad=True)
+        y = torch.rand(2, dtype=torch.double, requires_grad=True)
+        gradcheck(UserFn.apply, (x, y), check_forward_ad=True, check_undefined_grad=False, check_backward_ad=False,
+                  check_batched_grad=False, check_batched_forward_grad=False)
+        self.assertEqual(vjp_count[0], 0)
+        self.assertEqual(jvp_count[0], 2)  # (2) once per input
+        vjp_count = [0]
+        jvp_count = [0]
+
+        gradcheck(UserFn.apply, (x, y), check_forward_ad=True, check_undefined_grad=True, check_backward_ad=False,
+                  check_batched_grad=False, check_batched_forward_grad=False)
+        self.assertEqual(vjp_count[0], 0)
+        self.assertEqual(jvp_count[0], 6)  # (+4): (once with normal ZT (+1), once with efficient ZT (+1)) for each input (x2)
+        vjp_count = [0]
+        jvp_count = [0]
+
+        gradcheck(UserFn.apply, (x, y), check_forward_ad=True, check_undefined_grad=True, check_backward_ad=False,
+                  check_batched_grad=False, check_batched_forward_grad=True)
+        self.assertEqual(vjp_count[0], 0)
+        self.assertEqual(jvp_count[0], 12)  # (+6): (compute batch of 2 with vmap (+1), with a loop (+2)) for each input (x2)
+        vjp_count = [0]
+        jvp_count = [0]
+
+        # Repeat the previous one, except, mark one with requires_grad=False
+        # NB: _test_undefined_forward_mode is (+1), only for single input, not (+2)!
+        x = torch.rand(2, dtype=torch.double, requires_grad=True)
+        y = torch.rand(2, dtype=torch.double, requires_grad=False)
+        gradcheck(UserFn.apply, (x, y), check_forward_ad=True, check_undefined_grad=True, check_backward_ad=False,
+                  check_batched_grad=False, check_batched_forward_grad=True)
+        self.assertEqual(vjp_count[0], 0)
+        self.assertEqual(jvp_count[0], 5)  # 1 + 1 + 3
+        vjp_count = [0]
+        jvp_count = [0]
+
     def test_gradcheck_check_forward_or_backward_only(self):
         """Depending on settings for check_forward_ad and check_backward_ad, the
         correct codepaths should be reached (or not reached)
