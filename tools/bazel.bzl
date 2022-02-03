@@ -1,4 +1,5 @@
 load("@rules_cc//cc:defs.bzl", "cc_library")
+load("@rules_cuda//cuda:defs.bzl", "requires_cuda_enabled")
 load("//c10/macros:cmake_configure_file.bzl", "cmake_configure_file")
 
 # Rules implementation for the Bazel build system. Since the common
@@ -9,5 +10,6 @@ rules = struct(
     cmake_configure_file = cmake_configure_file,
     filegroup = native.filegroup,
     glob = native.glob,
+    requires_cuda_enabled = requires_cuda_enabled,
     select = select,
 )
