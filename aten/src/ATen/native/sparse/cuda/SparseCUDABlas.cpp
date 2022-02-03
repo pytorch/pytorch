@@ -6,6 +6,7 @@
 #include <c10/cuda/CUDACachingAllocator.h>
 
 #include <cusparse.h>
+#include <ATen/native/cuda/linalg/CUDASolver.h>
 
 // LIMITATION (cusparseSpMM):
 // The generic APIs are available on all platforms on CUDA 11.0
