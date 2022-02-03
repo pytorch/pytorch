@@ -1,7 +1,7 @@
 import io
 import pickle
 
-from torch.utils.data import IterDataPipe
+from torch.utils.data import IterDataPipe, MapDataPipe
 
 from typing import Any, Dict
 
@@ -26,7 +26,7 @@ def list_connected_datapipes(scan_obj, only_datapipe):
     def getstate_hook(obj):
         state = {}
         for k, v in obj.__dict__.items():
-            if isinstance(v, (IterDataPipe, tuple)):
+            if isinstance(v, (IterDataPipe, MapDataPipe, tuple)):
                 state[k] = v
         return state
 
