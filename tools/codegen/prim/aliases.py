@@ -44,14 +44,14 @@ class AliasInfo(object):
     #   - namespace, the namespace to add the operator to
     #   - has_method, allows overriding whether the alias should create method variants or not. See the
     #       det alias below for an example.
-    def __init__(self, name: str, *, alias_for: str, namespace: str = None, has_method: Optional[bool] = None):
+    def __init__(self, name: str, *, alias_for: str, namespace: Optional[str] = None, has_method: Optional[bool] = None):
         self.name = name
         self.alias_for = alias_for
         self.namespace = namespace  # NOTE: unexercised
         self.has_method = has_method
 
 # Sequence of all AliasInfos
-alias_infos: Tuple[AliasInfo] = (
+alias_infos: Tuple[AliasInfo, ...] = (
     AliasInfo('absolute', alias_for='abs'),
     AliasInfo('arccos', alias_for='acos'),
     AliasInfo('concat', alias_for='cat'),

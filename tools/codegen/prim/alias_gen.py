@@ -1,4 +1,4 @@
-from typing import List, Dict, Tuple
+from typing import List, Dict, Tuple, Optional
 import os
 from string import Template
 
@@ -22,7 +22,10 @@ _optional_elem_type_to_sig_cpp_map = {
 }
 
 def optional_type_to_sig_cpp(arg: Argument) -> str:
-    return _optional_elem_type_to_sig_cpp_map[arg.type.elem.name]
+    assert isinstance(arg.type, OptionalType), "Trying to generate an OptionalType's C++ for a non-OptionalType arg!"
+    ot: OptionalType = arg.type
+    assert isinstance(ot.elem, BaseType), "Failed to extract BaseType elem from OptionalType!"
+    return _optional_elem_type_to_sig_cpp_map[ot.elem.name]
 
 
 # TODO: extend this map as needed
@@ -32,7 +35,10 @@ _list_elem_type_to_sig_cpp_map = {
 }
 
 def list_type_to_sig_cpp(arg: Argument) -> str:
-    return _list_elem_type_to_sig_cpp_map[arg.type.elem.name]
+    assert isinstance(arg.type, ListType), "Trying to generate a ListType's C++ for a non-ListType arg!"
+    lt: ListType = arg.type
+    assert isinstance(lt.elem, BaseType), "Failed to extract BaseType elem from ListType!"
+    return _list_elem_type_to_sig_cpp_map[lt.elem.name]
 
 # TODO: expand this map as needed
 _base_type_to_sig_cpp_map = {
@@ -78,7 +84,7 @@ def is_inplace(fs: FunctionSchema) -> bool:
     return fs.name.name.inplace
 
 # Constructs the C++ for a method call
-def generate_method_call_cpp(fn_cpp, args: Arguments) -> str:
+def generate_method_call_cpp(fn_cpp: str, args: Arguments) -> str:
     assert has_self(args), "Request to generate method call C++ with Arguments containing no self arg!"
     assert not has_out(args), "Request to generate method call C++ with Arguments containing out arg!"
 
@@ -92,10 +98,11 @@ def generate_method_call_cpp(fn_cpp, args: Arguments) -> str:
 
 # Generates the C++ for a function call
 # Note: assumes the function is in the at namespace
-def generate_function_call_cpp(fn_cpp, args: Arguments) -> str:
+def generate_function_call_cpp(fn_cpp: str, args: Arguments) -> str:
     call_args = list(args.out)
     call_args.extend(args.pre_self_positional)
     if has_self(args):
+        assert args.self_arg is not None  # This is for mypy, which can't figure out the has_self() call
         call_args.append(args.self_arg.argument)
     call_args.extend(args.post_self_positional)
     call_args.extend(args.pre_tensor_options_kwarg_only)
@@ -105,9 +112,10 @@ def generate_function_call_cpp(fn_cpp, args: Arguments) -> str:
     return "at::" + fn_cpp + "(" + arg_cpp + ")"
 
 # Generates the C++ for a function signature
-def generate_signature_cpp(return_cpp, fn_cpp, args: Arguments) -> str:
+def generate_signature_cpp(return_cpp: str, fn_cpp: str, args: Arguments) -> str:
     signature_args = list(args.pre_self_positional)
     if has_self(args):
+        assert args.self_arg is not None  # This is for mypy, which can't figure out the has_self() call
         signature_args.append(args.self_arg.argument)
     signature_args.extend(args.post_self_positional)
     signature_args.extend(args.pre_tensor_options_kwarg_only)
@@ -157,9 +165,10 @@ def generate_signature_name_cpp(fs: FunctionSchema) -> str:
 
 # Generates the C++ for the return type of a function as it appears in a C++ definition
 # Note: Return values that are annotated as written to are references
-def generate_return_cpp(rets: Return) -> str:
+def generate_return_cpp(rets: Tuple[Return, ...]) -> str:
     assert len(rets) == 1, "Aliases for ops that return multiple objects are not supported."
     return_type = rets[0].type
+    assert isinstance(return_type, BaseType), "Aliass for ops with non-BaseType returns are not supported."
     # TODO: this can be relaxed if we find aliases for ops with non-tensor returns
     assert return_type.name is BaseTy.Tensor, "Aliases for ops with non-tensor returns are not supported."
 
@@ -188,11 +197,9 @@ def generate_return_cpp(rets: Return) -> str:
 #       Usage: python -m tools.codegen.gen --prim_cpp_dry_run
 def native_functions_callback(rs: List[NativeFunction],
                               bs: Dict[DispatchKey, Dict[OperatorName, BackendMetadata]],
-                              **kwargs):
-    # Parses optional kwargs (see documentation above for usage)
-    src_path = kwargs.get('src_path', None)
-    is_dry_run = kwargs.get('prim_cpp_dry_run', False)
-
+                              *,
+                              src_path: Optional[str] = None,
+                              is_dry_run: bool = False) -> List[Tuple[NativeFunction, Dict[DispatchKey, Dict[OperatorName, BackendMetadata]]]]:
     # Return values
     # pairs is used to update the internal native function data structures
     # cpp is the C++ defining the aliases to write to ATen/native/Aliases.cpp if src_path is specified
