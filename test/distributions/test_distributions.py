@@ -2222,7 +2222,7 @@ class TestDistributions(TestCase):
         if scipy.__version__ < (0, 16, 0):
             df += 1.
             df_no_batch += 1.
-            df_multi_batch += 1.            
+            df_multi_batch += 1.
 
         # construct PSD covariance
         tmp = torch.randn(ndim, 10)
@@ -2339,7 +2339,6 @@ class TestDistributions(TestCase):
 
         ref_dist = scipy.stats.wishart(df.item(), cov.detach().numpy())
 
-        # Below codes test only cases df > 
         self._check_sampler_sampler(Wishart(df, cov),
                                     ref_dist,
                                     'Wishart(df={}, covariance_matrix={})'.format(df, cov),
@@ -4638,7 +4637,7 @@ class TestAgainstScipy(TestCase):
             ),
             (
                 # scipy var for Wishart only supports scalars
-                Wishart((19 if scipy.__version__ < (0, 16, 0) else 20) + positive_var[0], cov_tensor),  
+                Wishart((19 if scipy.__version__ < (0, 16, 0) else 20) + positive_var[0], cov_tensor),
                 scipy.stats.wishart((19 if scipy.__version__ < (0, 16, 0) else 20) + positive_var[0].item(), cov_tensor),
             ),
         ]
