@@ -35,7 +35,7 @@ py_binary(
     ],
 )
 
-aten_generation_srcs = ["aten/src/ATen/native/native_functions.yaml"] + glob(["aten/src/ATen/templates/**"])
+aten_generation_srcs = ["aten/src/ATen/native/native_functions.yaml"] + ["aten/src/ATen/native/Aliases.cpp.in] + glob(["aten/src/ATen/templates/**"])
 
 generated_cpu_cpp = [
     "aten/src/ATen/RegisterBackendSelect.cpp",
@@ -175,8 +175,6 @@ genrule(
     name = "all_generated_code",
     srcs = [
         "aten/src/ATen/native/native_functions.yaml",
-        "tools/codegen/prim/aliases.py",
-        "tools/codegen/prim/alias_gen.py",
     ],
     outs = libtorch_cpp_generated_sources + libtorch_python_generated_sources,
     cmd = "$(location :generate_code) --install_dir `dirname $(location torch/csrc/autograd/generated/variable_factories.h)`/../.. --native-functions-path $(location aten/src/ATen/native/native_functions.yaml) --nn-path aten/src",
@@ -1634,6 +1632,13 @@ genrule(
     outs = ["torch/csrc/api/include/torch/version.h"],
     cmd = "$(location :gen_version_header) --template-path $(location torch/csrc/api/include/torch/version.h.in) --version-path $(location version.txt) --output-path $@",
     tools = [':gen_version_header'],
+)
+
+genrule(
+    name = "copy_primtorch_aliases",
+    srcs = ["tools/codegen/prim/aliases.py"],
+    outs = ["torch/prim/aliases.py"]
+    cmd = "cp tools/codegen/prim/aliases.py torch/prim/aliases.py"
 )
 
 py_binary(
