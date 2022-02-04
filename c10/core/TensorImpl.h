@@ -2830,7 +2830,7 @@ class C10_TensorImpl_Size_Check_Dummy_Class : private TensorImpl {
     are_equal<sizeof(numel_),              8,  FieldNameEnum::numel_>();
     are_equal<sizeof(data_type_),          2,  FieldNameEnum::data_type_>();
     are_equal<sizeof(device_opt_),         3,  FieldNameEnum::device_opt_>();
-    are_equal<sizeof(key_set_),            6,  FieldNameEnum::key_set_>();
+    are_equal<sizeof(key_set_),            8,  FieldNameEnum::key_set_>();
     is_le<sizeof(TensorImpl),          tsize,  FieldNameEnum::TOTAL_SIZE>();
     // clang-format on
 
