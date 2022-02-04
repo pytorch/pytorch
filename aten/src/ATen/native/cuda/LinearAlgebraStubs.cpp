@@ -57,6 +57,10 @@ Tensor& _linalg_inv_out_helper_cuda(Tensor &result, Tensor& infos_lu, Tensor& in
 }
 
 namespace {
+// Lazy dispatches do nothing but load linalg library and call the stub
+// Loading the library should override the registration of those with the proper implementation
+// getTorchLinalgLibrary() throws an exception if library is not found
+// Which makes it unnecessary to have an explicit error checking
 void lazy_cholesky_kernel(const Tensor& input, const Tensor& info, bool upper) {
   getTorchLinalgLibrary();
   cholesky_stub(DeviceType::CUDA, input, info, upper);

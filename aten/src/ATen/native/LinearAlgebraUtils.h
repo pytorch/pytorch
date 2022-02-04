@@ -3,8 +3,7 @@
 #include <c10/core/ScalarType.h>
 #include <c10/util/irange.h>
 #include <c10/util/Exception.h>
-#include <ATen/ATen.h>
-#include <ATen/core/DimVector.h>
+#include <ATen/core/Tensor.h>
 #include <ATen/ExpandUtils.h>
 #include <ATen/TensorUtils.h>
 #include <ATen/native/TensorIterator.h>
@@ -14,6 +13,15 @@
 #include <cstring>
 #include <cctype>
 
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#else
+#include <ATen/ops/arange.h>
+#include <ATen/ops/empty.h>
+#include <ATen/ops/empty_like.h>
+#include <ATen/ops/empty_strided.h>
+#include <ATen/ops/zeros.h>
+#endif
 
 namespace at { namespace native {
 
