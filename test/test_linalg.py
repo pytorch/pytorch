@@ -3770,7 +3770,7 @@ class TestLinalg(TestCase):
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
     @dtypes(*floating_and_complex_types())
-    def test_linalg_svd_rank_revealing_restricted_as_matrix_rank(self, device, dtype):
+    def test_linalg_svd_rank_restricted_as_matrix_rank(self, device, dtype):
 
         def matrix_rank(x, *args, **kwargs):
             if 'full_matrices' in kwargs:
@@ -3805,7 +3805,7 @@ class TestLinalg(TestCase):
                 rtol = kwargs['rtol'] if 'rtol' in kwargs else None
                 return op(x, atol=atol, rtol=rtol, full_matrices=full_matrices, **out)[-1]
 
-        for op in (torch.linalg.svd_rank_revealing, torch.linalg.svd_rank_restricted):
+        for op in (torch.linalg.svd_rank_restricted,):
             for full_matrices in (True, False):
 
                 def matrix_rank_fn(*args, **kwargs):

@@ -5571,7 +5571,7 @@ def sample_inputs_pow(op_info, device, dtype, requires_grad, **kwargs):
             args=(make_arg((2, 2), requires_grad=requires_grad),)))
     return tuple(samples)
 
-def sample_inputs_linalg_svd_rank_revealing(op_info, device, dtype, requires_grad=False, **kwargs):
+def sample_inputs_linalg_svd_rank_restricted(op_info, device, dtype, requires_grad=False, **kwargs):
     real_dtype_dict = {
         torch.cfloat: torch.float,
         torch.cdouble: torch.double
@@ -12913,12 +12913,15 @@ op_db: List[OpInfo] = [
            op=torch.linalg.svd_rank_restricted,
            aten_name='linalg_svd_rank_restricted',
            dtypes=floating_and_complex_types(),
-           sample_inputs_func=sample_inputs_linalg_svd_rank_revealing,
+           sample_inputs_func=sample_inputs_linalg_svd_rank_restricted,
            # Disable as grads are filled in parts which
            # makes Vmap unhappy because of unavoidable
            # in-place operations
            check_batched_grad=False,
            check_batched_gradgrad=False,
+           # TODO(@nikitaved): implement that
+           supports_fwgrad_bwgrad=True,
+           supports_forward_ad=True,
            decorators=[
                slowTest,
                skipCUDAIfNoMagmaAndNoCusolver,
@@ -12947,13 +12950,16 @@ op_db: List[OpInfo] = [
            ),
            aten_name='linalg_svd_rank_restricted',
            dtypes=floating_and_complex_types(),
-           sample_inputs_func=sample_inputs_linalg_svd_rank_revealing,
+           sample_inputs_func=sample_inputs_linalg_svd_rank_restricted,
            supports_out=False,
            # Disable as grads are filled in parts which
            # makes Vmap unhappy because of unavoidable
            # in-place operations
            check_batched_grad=False,
            check_batched_gradgrad=False,
+           # TODO(@nikitaved): implement that
+           supports_fwgrad_bwgrad=True,
+           supports_forward_ad=True,
            decorators=[
                slowTest,
                skipCUDAIfNoMagmaAndNoCusolver,
@@ -12973,31 +12979,6 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
                # TODO: investigate. Probably implement a custom backward
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_composite_compliance'),
-           )),
-    OpInfo('linalg.svd_rank_revealing',
-           op=torch.linalg.svd_rank_revealing,
-           aten_name='linalg_svd_rank_revealing',
-           dtypes=floating_and_complex_types(),
-           sample_inputs_func=sample_inputs_linalg_svd_rank_revealing,
-           supports_fwgrad_bwgrad=False,
-           supports_forward_ad=False,
-           check_batched_forward_grad=False,
-           # We're using at::allclose, which does not have a batching rule
-           check_batched_grad=False,
-           check_batched_gradgrad=False,
-           decorators=[
-               slowTest,
-               skipCUDAIfNoMagmaAndNoCusolver,
-               skipCPUIfNoLapack,
-           ],
-           skips=(
-               # errors with "leaked XXXX bytes CUDA memory on device 0"
-               # TODO: investigate. Suspect: svd_out, as linalg_pinv is also skipping the very same test and is SVD-based
-               DecorateInfo(
-                   unittest.skip("Skipped!"),
-                   'TestJit', 'test_variant_consistency_jit',
-                   device_type='cuda', dtypes=(torch.complex64, torch.float32)
-               ),
            )),
     OpInfo('linalg.svdvals',
            op=torch.linalg.svdvals,
