@@ -5854,10 +5854,10 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
     @slowTest
     @onlyNativeDeviceTypes
     @dtypes(torch.float32, torch.float64, torch.bfloat16, torch.int32, torch.int64, torch.cfloat, torch.cdouble)
-    @dtypesIfCUDA(torch.float32, torch.float64, torch.cfloat, torch.cdouble)
+    @dtypesIfCUDA(torch.float16, torch.float32, torch.float64, torch.cfloat, torch.cdouble)
     @tf32_on_and_off(0.01)
     def test_mm(self, device, dtype):
-        def _test_mm(n, m, p, dtype, genf):
+        def _test_mm(n, m, p, dtype, genf, torch_mm):
             # helper function
             def matrixmultiply(mat1, mat2):
                 n = mat1.size(0)
@@ -5871,7 +5871,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
             # contiguous case
             mat1 = genf(n, m)
             mat2 = genf(m, p)
-            res = torch.mm(mat1, mat2)
+            res = torch_mm(mat1, mat2)
 
             res2 = matrixmultiply(mat1, mat2)
             self.assertEqual(res, res2)
@@ -5879,7 +5879,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
             # non contiguous case 1
             mat1 = genf(n, m)
             mat2 = genf(p, m).t()
-            res = torch.mm(mat1, mat2)
+            res = torch_mm(mat1, mat2)
 
             res2 = matrixmultiply(mat1, mat2)
             self.assertEqual(res, res2)
@@ -5887,7 +5887,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
             # non contiguous case 2
             mat1 = genf(m, n).t()
             mat2 = genf(m, p)
-            res = torch.mm(mat1, mat2)
+            res = torch_mm(mat1, mat2)
 
             res2 = matrixmultiply(mat1, mat2)
             self.assertEqual(res, res2)
@@ -5895,7 +5895,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
             # non contiguous case 3
             mat1 = genf(m, n).t()
             mat2 = genf(p, m).t()
-            res = torch.mm(mat1, mat2)
+            res = torch_mm(mat1, mat2)
 
             res2 = matrixmultiply(mat1, mat2)
             self.assertEqual(res, res2)
@@ -5903,7 +5903,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
             # test with zero stride
             mat1 = genf(n, m)
             mat2 = genf(m, 1).expand(m, p)
-            res = torch.mm(mat1, mat2)
+            res = torch_mm(mat1, mat2)
 
             res2 = matrixmultiply(mat1, mat2)
             self.assertEqual(res, res2)
@@ -5913,7 +5913,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
             mat1 = genf(n, m)
             mat2 = genf(m, p)
             res = genf(n, p)
-            torch.mm(mat1, mat2, out=res)
+            torch_mm(mat1, mat2, out=res)
 
             res2 = matrixmultiply(mat1, mat2)
             self.assertEqual(res, res2)
@@ -5923,7 +5923,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
             mat1 = genf(m, n).t()
             mat2 = genf(p, m).t()
             res = genf(n, p)
-            torch.mm(mat1, mat2, out=res)
+            torch_mm(mat1, mat2, out=res)
 
             res2 = matrixmultiply(mat1, mat2)
             self.assertEqual(res, res2)
@@ -5945,7 +5945,15 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
             else:
                 genf = genf_float
 
-            _test_mm(n, m, p, dtype, genf)
+            _test_mm(n, m, p, dtype, genf, torch.mm)
+            should_test_half_to_float_gemm = (self.device_type == 'cuda' and dtype == torch.half and not TEST_WITH_ROCM)
+            if should_test_half_to_float_gemm:
+                def _torch_mm_wrapper(*args, **kwargs):
+                    out = torch.mm(*args, **kwargs, dtype=torch.float)
+                    self.assertTrue(out.dtype == torch.float)
+                    return out
+                _test_mm(n, m, p, dtype, genf, _torch_mm_wrapper)
+
 
     @onlyNativeDeviceTypes
     def test_mm_bmm_non_memory_dense(self, device):
