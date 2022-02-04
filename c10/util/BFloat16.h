@@ -98,4 +98,4 @@ struct alignas(2) BFloat16 {
 
 } // namespace c10
 
-#include <c10/util/BFloat16-inl.h>
+#include <c10/util/BFloat16-inl.h>  // IWYU pragma: keep
