@@ -203,7 +203,6 @@ Tensor transform_0213(const Tensor& a) {
 
 Tensor gemm_nt_bias(const Tensor& a, const Tensor& b, const Tensor& c) {
   auto a_ = a.view({a.size(0) * a.size(1), a.size(2)});
-  // TODO: should be b.transpose(1, 0)?
   auto r_ = at::native::linear(a_, b, c);
   return r_.view({a.size(0), a.size(1), r_.size(1)});
 }

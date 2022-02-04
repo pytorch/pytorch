@@ -104,18 +104,17 @@ file(GLOB native_sparse_cpp "native/sparse/*.cpp")
 file(GLOB native_quantized_cpp
             "native/quantized/*.cpp"
             "native/quantized/cpu/*.cpp")
+
 file(GLOB native_h "native/*.h")
 file(GLOB native_ao_sparse_h
             "native/ao_sparse/*.h"
             "native/ao_sparse/cpu/*.h"
             "native/ao_sparse/quantized/*.h"
             "native/ao_sparse/quantized/cpu/*.h")
-file(GLOB native_quantized_h "native/quantized/*.h" "native/quantized/cpu/*.h")
+file(GLOB native_quantized_h "native/quantized/*.h" "native/quantized/cpu/*.h", "native/quantized/cudnn/*.h")
 file(GLOB native_cpu_h "native/cpu/*.h")
 
-file(GLOB native_cuda_cu_sp "native/cuda/Unique.cu" "native/cuda/TensorFactories.cu")
 file(GLOB native_cuda_cu "native/cuda/*.cu")
-exclude(native_cuda_cu "${native_cuda_cu}" ${native_cuda_cu_sp})
 file(GLOB native_cuda_cpp "native/cuda/*.cpp")
 file(GLOB native_cuda_h "native/cuda/*.h" "native/cuda/*.cuh")
 file(GLOB native_hip_h "native/hip/*.h" "native/hip/*.cuh")
@@ -124,6 +123,7 @@ file(GLOB native_sparse_cuda_cu "native/sparse/cuda/*.cu")
 file(GLOB native_sparse_cuda_cpp "native/sparse/cuda/*.cpp")
 file(GLOB native_quantized_cuda_cu "native/quantized/cuda/*.cu")
 file(GLOB native_quantized_cuda_cpp "native/quantized/cuda/*.cpp")
+file(GLOB native_quantized_cudnn_cpp "native/quantized/cudnn/*.cpp")
 
 file(GLOB native_hip_hip "native/hip/*.hip")
 file(GLOB native_hip_cpp "native/hip/*.cpp")
@@ -189,13 +189,36 @@ endif()
 
 if(USE_CUDA)
   list(APPEND ATen_CUDA_INCLUDE ${CMAKE_CURRENT_SOURCE_DIR}/cuda)
-  set(ATen_CUDA_SRCS ${ATen_CUDA_SRCS} ${cuda_cu} ${native_cuda_cu} ${native_sparse_cuda_cu} ${native_quantized_cuda_cu})
-  set(ATen_CUDA_SRCS_W_SORT_BY_KEY ${ATen_CUDA_SRCS_W_SORT_BY_KEY} ${native_cuda_cu_sp})
-  set(all_cuda_cpp ${native_sparse_cuda_cpp} ${native_quantized_cuda_cpp} ${cuda_cpp} ${native_cuda_cpp} ${cuda_generated_sources} ${ATen_CUDA_SRCS})
-  set(all_cuda_cpp ${native_cudnn_cpp} ${native_miopen_cpp} ${all_cuda_cpp})
+
+  list(APPEND ATen_CUDA_CU_SRCS
+    ${cuda_cu}
+    ${native_cuda_cu}
+    ${native_sparse_cuda_cu}
+    ${native_quantized_cuda_cu}
+    ${cuda_generated_sources}
+  )
+  list(APPEND ATen_CUDA_CPP_SRCS
+    ${cuda_cpp}
+    ${native_cuda_cpp}
+    ${native_cudnn_cpp}
+    ${native_miopen_cpp}
+    ${native_quantized_cuda_cpp}
+    ${native_quantized_cudnn_cpp}
+    ${native_sparse_cuda_cpp}
+  )
   if(CAFFE2_USE_CUDNN)
-    set(all_cuda_cpp ${all_cuda_cpp} ${cudnn_cpp})
+    list(APPEND ATen_CUDA_CPP_SRCS ${cudnn_cpp})
   endif()
+
+  append_filelist("aten_cuda_cu_source_list" ATen_CUDA_CU_SRCS)
+  append_filelist("aten_cuda_with_sort_by_key_source_list" ATen_CUDA_SRCS_W_SORT_BY_KEY)
+  append_filelist("aten_cuda_cu_with_sort_by_key_source_list" ATen_CUDA_CU_SRCS_W_SORT_BY_KEY)
+
+  exclude(ATen_CUDA_CPP_SRCS "${ATen_CUDA_CPP_SRCS}"
+      ${ATen_CUDA_CU_SRCS}
+      ${ATen_CUDA_SRCS_W_SORT_BY_KEY} ${ATen_CUDA_CU_SRCS_W_SORT_BY_KEY})
+  exclude(ATen_CUDA_CU_SRCS "${ATen_CUDA_CU_SRCS}"
+      ${ATen_CUDA_SRCS_W_SORT_BY_KEY} ${ATen_CUDA_CU_SRCS_W_SORT_BY_KEY})
 endif()
 
 if(USE_ROCM)
@@ -207,8 +230,6 @@ if(USE_ROCM)
 endif()
 
 list(APPEND ATen_CPU_INCLUDE ${CMAKE_CURRENT_SOURCE_DIR}/..)
-# so the build can find the generated header files
-list(APPEND ATen_CPU_INCLUDE ${CMAKE_CURRENT_BINARY_DIR})
 
 if(USE_TBB)
   if(USE_SYSTEM_TBB)
@@ -393,10 +414,10 @@ endif()
 
   if(USE_MAGMA)
     if(USE_CUDA)
-      list(APPEND ATen_CUDA_DEPENDENCY_LIBS ${MAGMA_LIBRARIES})
+      list(APPEND ATen_CUDA_DEPENDENCY_LIBS torch::magma)
     endif(USE_CUDA)
     if(USE_ROCM)
-      list(APPEND ATen_HIP_DEPENDENCY_LIBS ${MAGMA_LIBRARIES})
+      list(APPEND ATen_HIP_DEPENDENCY_LIBS torch::magma)
     endif(USE_ROCM)
     if(MSVC)
       if($ENV{TH_BINARY_BUILD})
@@ -428,7 +449,6 @@ set(ATen_CPU_SRCS ${all_cpu_cpp})
 list(APPEND ATen_CPU_DEPENDENCY_LIBS ATEN_CPU_FILES_GEN_LIB)
 
 if(USE_CUDA)
-  set(ATen_CUDA_SRCS ${all_cuda_cpp})
   set(ATen_NVRTC_STUB_SRCS ${cuda_nvrtc_stub_cpp})
   list(APPEND ATen_CUDA_DEPENDENCY_LIBS ATEN_CUDA_FILES_GEN_LIB)
 endif()
@@ -512,8 +532,10 @@ list(APPEND ATen_MOBILE_BENCHMARK_SRCS
 # Pass source, includes, and libs to parent
 set(ATen_CORE_SRCS ${ATen_CORE_SRCS} PARENT_SCOPE)
 set(ATen_CPU_SRCS ${ATen_CPU_SRCS} PARENT_SCOPE)
-set(ATen_CUDA_SRCS ${ATen_CUDA_SRCS} PARENT_SCOPE)
+set(ATen_CUDA_CU_SRCS ${ATen_CUDA_CU_SRCS} PARENT_SCOPE)
+set(ATen_CUDA_CPP_SRCS ${ATen_CUDA_CPP_SRCS} PARENT_SCOPE)
 set(ATen_CUDA_SRCS_W_SORT_BY_KEY ${ATen_CUDA_SRCS_W_SORT_BY_KEY} PARENT_SCOPE)
+set(ATen_CUDA_CU_SRCS_W_SORT_BY_KEY ${ATen_CUDA_CU_SRCS_W_SORT_BY_KEY} PARENT_SCOPE)
 set(ATen_NVRTC_STUB_SRCS ${ATen_NVRTC_STUB_SRCS} PARENT_SCOPE)
 set(ATen_HIP_SRCS ${ATen_HIP_SRCS} PARENT_SCOPE)
 set(ATen_QUANTIZED_SRCS ${ATen_QUANTIZED_SRCS} PARENT_SCOPE)
