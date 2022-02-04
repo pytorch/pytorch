@@ -290,7 +290,6 @@ def native_functions_callback(rs: List[NativeFunction],
 
                 # Updates native function data structures
                 pairs.append((alias_nf, alias_bs))
-                # pairs.append((alias_nf, {}))
 
                 # Generates C++ src for the operator if given a source path
                 if src_path is None:
