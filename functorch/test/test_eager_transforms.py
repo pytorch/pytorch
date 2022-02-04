@@ -13,7 +13,6 @@ import torch.nn.functional as F
 import unittest
 import warnings
 import math
-from typing import Callable, Type
 from torch.testing._internal.common_device_type import instantiate_device_type_tests, onlyCPU
 from torch.testing._internal.common_dtype import get_all_fp_dtypes
 from functools import partial
@@ -2205,52 +2204,15 @@ class TestExamplesCorrectness(TestCase):
 
     @unittest.skipIf(not USE_TORCHVISION, "test requires torchvision")
     def test_resnet18_per_sample_grads(self, device):
-        # Straight out of opacus
-        def _replace_child(
-            root: nn.Module, child_name: str, converter: Callable[[nn.Module], nn.Module]
-        ) -> None:
-            # find the immediate parent
-            parent = root
-            nameList = child_name.split(".")
-            for name in nameList[:-1]:
-                parent = parent._modules[name]
-            # set to identity
-            parent._modules[nameList[-1]] = converter(parent._modules[nameList[-1]])
-
-        def replace_all_modules(
-            root: nn.Module,
-            target_class: Type[nn.Module],
-            converter: Callable[[nn.Module], nn.Module],
-        ) -> nn.Module:
-            # base case
-            if isinstance(root, target_class):
-                return converter(root)
-
-            for name, obj in root.named_modules():
-                if isinstance(obj, target_class):
-                    _replace_child(root, name, converter)
-            return root
-
-        def _batchnorm_to_groupnorm(module: nn.modules.batchnorm._BatchNorm) -> nn.Module:
-            return nn.GroupNorm(min(32, module.num_features), module.num_features, affine=True)
-
-        def convert_batchnorm_modules(
-            model: nn.Module,
-            converter: Callable[
-                [nn.modules.batchnorm._BatchNorm], nn.Module
-            ] = _batchnorm_to_groupnorm,
-        ) -> nn.Module:
-            return replace_all_modules(model, nn.modules.batchnorm._BatchNorm, converter)
-
         import torchvision.models as models
-        model = convert_batchnorm_modules(models.resnet18(num_classes=10)).to(device)
-        criterion = nn.CrossEntropyLoss()
+        model = models.__dict__['resnet18'](
+            pretrained=False, norm_layer=(lambda c: nn.GroupNorm(min(32, c), c))
+        ).to(device)
+        criterion = nn.CrossEntropyLoss(reduction='sum')  # avoid cross batch reductions for for loop comparison
 
         func_model, weights = make_functional(model)
 
         def compute_loss(weights, image, target):
-            images = image.unsqueeze(0)
-            targets = target.unsqueeze(0)
             output = func_model(weights, images)
             loss = criterion(output, targets)
             return loss
@@ -2262,12 +2224,12 @@ class TestExamplesCorrectness(TestCase):
         result_grads = vmap(grad(compute_loss), in_dims=(None, 0, 0))(weights, images, targets)
 
         expected_grads = [
-            torch.autograd.grad(compute_loss(weights, images[i], targets[i]), weights)
+            torch.autograd.grad(compute_loss(weights, images[i].unsqueeze(0), targets[i].unsqueeze(0)), weights)
             for i in range(batch_size)
         ]
         expected_grads = [torch.stack(shards) for shards in zip(*expected_grads)]
 
-        self.assertEqual(result_grads, expected_grads)
+        self.assertEqual(result_grads, expected_grads, atol=1e-3, rtol=1.)
 
 
 only_for = ("cpu", "cuda")
