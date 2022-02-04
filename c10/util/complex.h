@@ -607,7 +607,7 @@ C10_CLANG_DIAGNOSTIC_POP()
 
 #define C10_INTERNAL_INCLUDE_COMPLEX_REMAINING_H
 // math functions are included in a separate file
-#include <c10/util/complex_math.h>
+#include <c10/util/complex_math.h>  // IWYU pragma: keep
 // utilities for complex types
-#include <c10/util/complex_utils.h>
+#include <c10/util/complex_utils.h>  // IWYU pragma: keep
 #undef C10_INTERNAL_INCLUDE_COMPLEX_REMAINING_H
