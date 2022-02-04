@@ -106,7 +106,7 @@ class no_grad(_DecoratorContextManager):
 
     .. note::
         This API does not apply to :ref:`forward-mode AD <forward-mode-ad>`.
-        If you want to disable forward AD for a computation, can unpack
+        If you want to disable forward AD for a computation, you can unpack
         your dual tensors.
 
     Example::
