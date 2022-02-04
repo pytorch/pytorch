@@ -16,7 +16,7 @@ def common_conv(network, mod, dimension, input_val, layer_name, is_quantized):
     kernel = to_numpy(mod.weight() if is_quantized else mod.weight)
     bias = to_numpy(mod.bias() if is_quantized else mod.bias)
 
-    layer = network.add_convolution(
+    layer = network.add_convolution_nd(
         input=input_val,
         num_output_maps=mod.out_channels,
         kernel_shape=kernel_size,
@@ -24,9 +24,9 @@ def common_conv(network, mod, dimension, input_val, layer_name, is_quantized):
         bias=bias,
     )
     layer.name = layer_name
-    layer.stride = stride
-    layer.padding = padding
-    layer.dilation = dilation
+    layer.stride_nd = stride
+    layer.padding_nd = padding
+    layer.dilation_nd = dilation
     layer.num_groups = mod.groups
 
     if is_quantized:
@@ -68,6 +68,17 @@ def conv2d(network, submod, args, kwargs, layer_name):
 
     return common_conv(network, submod, dimension=2, input_val=input_val, layer_name=layer_name, is_quantized=False)
 
+@tensorrt_converter(torch.nn.modules.conv.Conv3d)
+def conv3d(network, submod, args, kwargs, layer_name):
+    # args/kwargs should have already been normalized to kwargs
+    assert len(args) == 0
+    input_val = kwargs["input"]
+
+    if not isinstance(input_val, trt.tensorrt.ITensor):
+        raise RuntimeError(f"Conv3d received input {input_val} that is not part "
+                           "of the TensorRT region!")
+
+    return common_conv(network, submod, dimension=3, input_val=input_val, layer_name=layer_name, is_quantized=False)
 
 @tensorrt_converter(torch.nn.quantized.modules.conv.Conv2d)
 def quantized_conv2d(network, submod, args, kwargs, layer_name):
