@@ -50,7 +50,7 @@ class ExpandedWeight(torch.Tensor):
             remaining_kwargs = 7 - len(args)
             kwarg_keys = tuple(cls.conv_kwarg_defaults.keys())
             remaining_kwargs_options = kwarg_keys[5 - remaining_kwargs:]
-            kwargs = {key: cls.conv_kwarg_defaults[key] for key in remaining_kwargs_options} | kwargs
+            kwargs = {key: kwargs.get(key, cls.conv_kwarg_defaults[key]) for key in remaining_kwargs_options}
             return cls.handled_functions[func].apply(*(args + tuple(kwargs.values())), kwarg_keys)
         if func in cls.handled_functions:
             return cls.handled_functions[func].apply(*(args + tuple(kwargs.values())), tuple(kwargs.keys()))
