@@ -2813,7 +2813,7 @@ class C10_TensorImpl_Size_Check_Dummy_Class : private TensorImpl {
 #else
   // This is a 64-bit system
   static constexpr bool check_sizes() {
-    constexpr size_t tsize = 26 * sizeof(int64_t) - 8;
+    constexpr size_t tsize = 26 * sizeof(int64_t);
 
     // clang-format off
     are_equal<sizeof(storage_),            8,  FieldNameEnum::storage_>();
