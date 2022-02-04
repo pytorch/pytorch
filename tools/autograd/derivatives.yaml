@@ -1775,6 +1775,10 @@
   target: smooth_l1_loss_backward(grad, target, self, reduction, beta)
   result: apply_loss_reduction(smooth_l1_loss_backward(self_t.conj(), self_p, target_p, at::Reduction::None, beta).conj() + smooth_l1_loss_backward(target_t.conj(), target_p, self_p, at::Reduction::None, beta).conj(), reduction)
 
+- name: margin_ranking_loss(Tensor input1, Tensor input2, Tensor target, float margin=0.0, int reduction=Mean) -> Tensor
+  input1, input2: "grad.defined() ? sub_backward(margin_ranking_loss_backward_input1(grad, input1, input2, target, margin, reduction)) : std::tuple<Tensor, Tensor>()"
+  target: "grad.defined() ? margin_ranking_loss_backward_target(grad, input1, input2, target, margin, reduction) : Tensor()"
+
 - name: huber_loss(Tensor self, Tensor target, int reduction=Mean, float delta=1.0) -> Tensor
   self: huber_loss_backward(grad, self, target, reduction, delta)
   target: huber_loss_backward(grad, target, self, reduction, delta)

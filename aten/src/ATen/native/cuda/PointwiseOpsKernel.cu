@@ -67,6 +67,28 @@ void huber_backward_cuda_kernel(TensorIterator& iter, const Scalar& norm, double
   });
 }
 
+void margin_ranking_backward_input1_cuda_kernel(TensorIterator& iter, const Scalar& norm, double margin) {
+  AT_DISPATCH_FLOATING_TYPES_AND2(kBFloat16, kHalf, iter.dtype(), "margin_ranking_backward_input1_cuda", [&iter, &norm, margin] {
+    auto norm_val = norm.to<scalar_t>();
+    scalar_t margin_val(margin);
+    gpu_kernel(iter, [norm_val, margin_val]GPU_LAMBDA(scalar_t input1, scalar_t input2, scalar_t target, scalar_t grad_output) -> scalar_t {
+      auto result = std::max(scalar_t(0), target * (input2 - input1) + margin_val);
+      return result > 0 ? -target * norm_val * grad_output : scalar_t(0);
+    });
+  });
+}
+
+void margin_ranking_backward_target_cuda_kernel(TensorIterator& iter, const Scalar& norm, double margin) {
+  AT_DISPATCH_FLOATING_TYPES_AND2(kBFloat16, kHalf, iter.dtype(), "margin_ranking_backward_target_cuda", [&iter, &norm, margin] {
+    auto norm_val = norm.to<scalar_t>();
+    scalar_t margin_val(margin);
+    gpu_kernel(iter, [norm_val, margin_val]GPU_LAMBDA(scalar_t input1, scalar_t input2, scalar_t target, scalar_t grad_output) -> scalar_t {
+      auto result = std::max(scalar_t(0), target * (input2 - input1) + margin_val);
+      return result > 0 ? (input2 - input1) * norm_val * grad_output : scalar_t(0);
+    });
+  });
+}
+
 void mse_backward_cuda_kernel(TensorIterator& iter, const Scalar& value) {
   AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.dtype(), "mse_backward_cuda", [&]() {
     auto alpha = value.to<scalar_t>();
@@ -81,4 +103,6 @@ REGISTER_DISPATCH(addcmul_stub, &addcmul_cuda_kernel);
 REGISTER_DISPATCH(smooth_l1_backward_stub, &smooth_l1_backward_cuda_kernel);
 REGISTER_DISPATCH(huber_backward_stub, &huber_backward_cuda_kernel);
 REGISTER_DISPATCH(mse_backward_stub, &mse_backward_cuda_kernel);
+REGISTER_DISPATCH(margin_ranking_backward_input1_stub, &margin_ranking_backward_input1_cuda_kernel);
+REGISTER_DISPATCH(margin_ranking_backward_target_stub, &margin_ranking_backward_target_cuda_kernel);
 }} // namespace at::native

@@ -3298,7 +3298,7 @@ def margin_ranking_loss(
                 "input1: {}, input2: {}, target: {} ".format(input1.size(), input2.size(), target.size())
             )
         )
-    return torch.margin_ranking_loss(input1, input2, target, margin, reduction_enum)
+    return torch._C._nn.margin_ranking_loss(input1, input2, target, margin, reduction_enum)
 
 
 def hinge_embedding_loss(

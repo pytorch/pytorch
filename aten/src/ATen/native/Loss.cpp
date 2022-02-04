@@ -5,6 +5,7 @@
 #include <ATen/core/Reduction.h>
 #include <ATen/native/BinaryOps.h>
 #include <ATen/native/PointwiseOps.h>
+#include <ATen/native/Resize.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/cpu/Loops.h>
 #include <c10/util/Exception.h>
@@ -49,6 +50,9 @@ DEFINE_DISPATCH(huber_stub);
 DEFINE_DISPATCH(huber_backward_stub);
 DEFINE_DISPATCH(mse_stub);
 DEFINE_DISPATCH(mse_backward_stub);
+DEFINE_DISPATCH(margin_ranking_stub);
+DEFINE_DISPATCH(margin_ranking_backward_input1_stub);
+DEFINE_DISPATCH(margin_ranking_backward_target_stub);
 
 TORCH_IMPL_FUNC(smooth_l1_loss_out)
 (const Tensor& input, const Tensor& target, int64_t reduction, double beta, const Tensor& result) {
@@ -68,6 +72,76 @@ TORCH_IMPL_FUNC(smooth_l1_loss_out)
   } else {
     smooth_l1_stub(device_type(), *this, beta);
   }
+}
+
+Tensor& margin_ranking_loss_out
+(const Tensor& input1,
+ const Tensor& input2,
+ const Tensor& target,
+ double margin,
+ int64_t reduction,
+ Tensor& result
+) {
+  TORCH_CHECK(
+    !input1.is_complex() &&
+    !input2.is_complex() &&
+    !target.is_complex(),
+    "margin_ranking_loss expects inputs to be non-complex");
+
+  // Disallow broadcasting:
+  // https://github.com/pytorch/pytorch/pull/64975
+  TORCH_CHECK(
+    input1.sizes() == input2.sizes() &&
+    input1.sizes() == target.sizes(),
+    "margin_ranking_loss: all input tensors should have same size but got sizes"
+    ": input1: ", input1.sizes(),
+    ", input2: ", input2.sizes(),
+    ", target: ", target.sizes());
+
+  const auto common_type1 = promoteTypes(input1.scalar_type(), target.scalar_type());
+  const auto common_type2 = promoteTypes(common_type1, input2.scalar_type());
+  const auto reduce = reduction != Reduction::None;
+  const auto options = input1.options().dtype(common_type2);
+
+  // Make sure the result is defined before we use it.
+  if (!result.defined()) {
+    result = at::empty(reduce ? IntArrayRef{} : IntArrayRef{0}, options);
+  }
+
+  auto output_iter =
+    reduce ? MaybeOwned<Tensor>::owned(at::empty({0}, options))
+           : MaybeOwned<Tensor>::borrowed(result);
+
+  TensorIterator iter;
+  iter.build_ternary_op(*output_iter, input1, input2, target);
+
+  margin_ranking_stub(iter.device_type(), iter, margin);
+
+  // No need to resize the output otherwise, as TensorIterator will take care of
+  // that.
+  if (reduce) {
+    at::native::resize_output(result, {});
+  }
+
+  if (reduction == Reduction::Mean) {
+    result.copy_(output_iter->mean());
+  } else if (reduction == Reduction::Sum) {
+    result.copy_(output_iter->sum());
+  }
+
+  return result;
+}
+
+Tensor margin_ranking_loss
+(const Tensor& input1,
+ const Tensor& input2,
+ const Tensor& target,
+ double margin,
+ int64_t reduction
+) {
+  Tensor output;
+  margin_ranking_loss_out(input1, input2, target, margin, reduction, output);
+  return output;
 }
 
 Tensor cosine_embedding_loss(const Tensor& input1, const Tensor& input2, const Tensor& target, double margin, int64_t reduction) {
@@ -139,11 +213,6 @@ Tensor triplet_margin_loss(const Tensor& anchor, const Tensor& positive, const T
     dist_neg = at::min(dist_neg, dist_swap);
   }
   auto output = at::clamp_min(margin + dist_pos - dist_neg, 0);
-  return apply_loss_reduction(output, reduction);
-}
-
-Tensor margin_ranking_loss(const Tensor& input1, const Tensor& input2, const Tensor& target, double margin, int64_t reduction) {
-  auto output =  (-target * (input1 - input2) + margin).clamp_min_(0);
   return apply_loss_reduction(output, reduction);
 }
 
@@ -415,6 +484,50 @@ Tensor smooth_l1_loss_backward(const Tensor& grad_output, const Tensor& input, c
       return at::native::l1_loss_backward(grad_output, input, target, reduction);
   auto grad_input = at::zeros_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   return at::smooth_l1_loss_backward_out(grad_input, grad_output, input, target, reduction, beta);
+}
+
+Tensor margin_ranking_loss_backward_input1(
+  const Tensor& grad_output,
+  const Tensor& input1,
+  const Tensor& input2,
+  const Tensor& target,
+  double margin,
+  int64_t reduction
+) {
+  // All tensors should be of the same size here, so we can use any of them.
+  auto norm = reduction == Reduction::Mean ? (1. / target.numel()) : 1.;
+  auto grad_input = at::zeros_like(target, MemoryFormat::Contiguous);
+  auto iter = TensorIteratorConfig()
+    .add_output(grad_input)
+    .add_input(input1)
+    .add_input(input2)
+    .add_input(target)
+    .add_input(grad_output)
+    .build();
+  margin_ranking_backward_input1_stub(iter.device_type(), iter, norm, margin);
+  return grad_input;
+}
+
+Tensor margin_ranking_loss_backward_target(
+  const Tensor& grad_output,
+  const Tensor& input1,
+  const Tensor& input2,
+  const Tensor& target,
+  double margin,
+  int64_t reduction
+) {
+  // All tensors should be of the same size here, so we can use any of them.
+  auto norm = reduction == Reduction::Mean ? (1. / target.numel()) : 1.;
+  auto grad_input = at::zeros_like(target, MemoryFormat::Contiguous);
+  auto iter = TensorIteratorConfig()
+    .add_output(grad_input)
+    .add_input(input1)
+    .add_input(input2)
+    .add_input(target)
+    .add_input(grad_output)
+    .build();
+  margin_ranking_backward_target_stub(iter.device_type(), iter, norm, margin);
+  return grad_input;
 }
 
 Tensor huber_loss(const Tensor& input, const Tensor& target, int64_t reduction, double delta) {

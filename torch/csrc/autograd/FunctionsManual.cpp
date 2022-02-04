@@ -1636,6 +1636,10 @@ Tensor smooth_l1_loss_double_backward_grad_output(const Tensor & grad, const Ten
   return (r * grad).sum();
 }
 
+std::tuple<Tensor, Tensor> sub_backward(const Tensor& grad) {
+  return std::make_tuple(grad, -grad);
+}
+
 Tensor huber_loss_double_backward(const Tensor & grad, const Tensor & input, const Tensor & target, int64_t reduction, double delta) {
   auto d = (input - target).abs();
   auto grad_input = grad * (d < delta);

@@ -167,6 +167,52 @@ static void huber_backward_cpu_kernel(TensorIterator& iter, const Scalar& norm, 
   });
 }
 
+static void margin_ranking_backward_input1_cpu_kernel(TensorIterator& iter, const Scalar& norm, double margin) {
+  ScalarType dtype = iter.dtype(0);
+  AT_DISPATCH_FLOATING_TYPES_AND2(kBFloat16, kHalf, dtype, "margin_ranking_backward_input1_cpu", [&iter, &norm, margin] {
+    using Vec = Vectorized<scalar_t>;
+    auto norm_val = norm.to<scalar_t>();
+    auto norm_val_vec = Vec(norm_val);
+    scalar_t margin_val(margin);
+    auto margin_val_vec = Vec(margin_val);
+    cpu_kernel_vec(iter,
+      [=](scalar_t input1, scalar_t input2, scalar_t target, scalar_t grad_output) -> scalar_t {
+        auto result = std::max(scalar_t(0), target * (input2 - input1) + margin_val);
+        return result > 0 ? -target * norm_val * grad_output : scalar_t(0);
+      },
+      [=](Vec input1, Vec input2, Vec target, Vec grad_output) {
+        auto result = maximum(Vec(scalar_t(0)), target * (input2 - input1) + margin_val_vec);
+        return Vectorized<scalar_t>::blendv(
+          Vec(scalar_t(0)),
+          (target * norm_val_vec * grad_output).neg(),
+          result > scalar_t(0));
+      });
+  });
+}
+
+static void margin_ranking_backward_target_cpu_kernel(TensorIterator& iter, const Scalar& norm, double margin) {
+  ScalarType dtype = iter.dtype(0);
+  AT_DISPATCH_FLOATING_TYPES_AND2(kBFloat16, kHalf, dtype, "margin_ranking_backward_target_cpu", [&iter, &norm, margin] {
+    using Vec = Vectorized<scalar_t>;
+    auto norm_val = norm.to<scalar_t>();
+    auto norm_val_vec = Vec(norm_val);
+    scalar_t margin_val(margin);
+    auto margin_val_vec = Vec(margin_val);
+    cpu_kernel_vec(iter,
+      [=](scalar_t input1, scalar_t input2, scalar_t target, scalar_t grad_output) -> scalar_t {
+        auto result = std::max(scalar_t(0), target * (input2 - input1) + margin_val);
+        return result > 0 ? (input2 - input1) * norm_val * grad_output : scalar_t(0);
+      },
+      [=](Vec input1, Vec input2, Vec target, Vec grad_output) {
+        auto result = maximum(Vec(scalar_t(0)), target * (input2 - input1) + margin_val_vec);
+        return Vectorized<scalar_t>::blendv(
+          Vec(scalar_t(0)),
+          (input2 - input1) * norm_val_vec * grad_output,
+          result > scalar_t(0));
+      });
+  });
+}
+
 static void mse_backward_cpu_kernel(TensorIterator& iter, const Scalar& value) {
   ScalarType dtype = iter.dtype(0);
   AT_DISPATCH_ALL_TYPES(dtype, "mse_backward_cpu_out", [&] {
@@ -191,6 +237,8 @@ REGISTER_DISPATCH(addcmul_stub, &addcmul_cpu_kernel);
 REGISTER_DISPATCH(addcdiv_stub, &addcdiv_cpu_kernel);
 REGISTER_DISPATCH(smooth_l1_backward_stub, &smooth_l1_backward_cpu_kernel);
 REGISTER_DISPATCH(huber_backward_stub, &huber_backward_cpu_kernel);
+REGISTER_DISPATCH(margin_ranking_backward_input1_stub, &margin_ranking_backward_input1_cpu_kernel);
+REGISTER_DISPATCH(margin_ranking_backward_target_stub, &margin_ranking_backward_target_cpu_kernel);
 REGISTER_DISPATCH(mse_backward_stub, &mse_backward_cpu_kernel);
 
 } // namespace native

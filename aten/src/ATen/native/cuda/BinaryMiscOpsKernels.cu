@@ -22,6 +22,16 @@ void smooth_l1_kernel_cuda(TensorIteratorBase& iter, double beta) {
   });
 }
 
+void margin_ranking_kernel_cuda(TensorIteratorBase& iter, double margin) {
+  const auto dtype = iter.common_dtype();
+  AT_DISPATCH_FLOATING_TYPES_AND2(kBFloat16, kHalf, iter.dtype(), "margin_ranking_cuda", [&iter, margin]() {
+    scalar_t margin_val(margin);
+    gpu_kernel(iter, [margin_val] GPU_LAMBDA (scalar_t i1, scalar_t i2, scalar_t t) -> scalar_t {
+      return std::max(scalar_t(0), t * (i2 - i1) + margin_val);
+    });
+  });
+}
+
 void huber_kernel_cuda(TensorIterator& iter, double delta) {
   AT_DISPATCH_FLOATING_TYPES_AND2(kBFloat16, kHalf, iter.dtype(), "huber_cuda", [&iter, delta] {
     scalar_t delta_val(delta);
@@ -70,6 +80,7 @@ void xlog1py_kernel_cuda(TensorIteratorBase& iter) {
 }
 
 REGISTER_DISPATCH(smooth_l1_stub, &smooth_l1_kernel_cuda);
+REGISTER_DISPATCH(margin_ranking_stub, &margin_ranking_kernel_cuda);
 REGISTER_DISPATCH(huber_stub, &huber_kernel_cuda);
 REGISTER_DISPATCH(mse_stub, &mse_kernel_cuda);
 REGISTER_DISPATCH(xlogy_stub, &xlogy_kernel_cuda);

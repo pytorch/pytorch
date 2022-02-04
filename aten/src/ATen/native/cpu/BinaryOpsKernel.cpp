@@ -674,6 +674,24 @@ void smooth_l1_kernel(TensorIteratorBase& iter, double beta) {
       });
 }
 
+void margin_ranking_kernel(TensorIteratorBase& iter, double margin) {
+  AT_DISPATCH_FLOATING_TYPES_AND2(
+    kBFloat16, kHalf, iter.dtype(), "margin_ranking_cpu", [&]() {
+    using Vec = Vectorized<scalar_t>;
+    const scalar_t margin_val(margin);
+    const Vec margin_val_vec(margin_val);
+    const Vec zero_vec(static_cast<scalar_t>(0));
+    cpu_kernel_vec(
+      iter,
+      [margin_val](scalar_t i1, scalar_t i2, scalar_t t) -> scalar_t {
+        return std::max(scalar_t(0), t * (i2 - i1) + margin_val);
+      },
+      [&zero_vec, &margin_val_vec](Vec i1, Vec i2, Vec t) {
+        return maximum(zero_vec, t * (i2 - i1) + margin_val_vec);
+      });
+  });
+}
+
 void huber_kernel(TensorIterator& iter, double delta) {
   AT_DISPATCH_FLOATING_TYPES_AND2(kBFloat16, kHalf, iter.dtype(), "huber_cpu", [&]() {
     using Vec = Vectorized<scalar_t>;
@@ -1161,6 +1179,7 @@ REGISTER_DISPATCH(minimum_stub, &minimum_kernel);
 REGISTER_DISPATCH(fmax_stub, &fmax_kernel);
 REGISTER_DISPATCH(fmin_stub, &fmin_kernel);
 REGISTER_DISPATCH(smooth_l1_stub, &smooth_l1_kernel);
+REGISTER_DISPATCH(margin_ranking_stub, &margin_ranking_kernel);
 REGISTER_DISPATCH(huber_stub, &huber_kernel);
 REGISTER_DISPATCH(sigmoid_backward_stub, &sigmoid_backward_kernel);
 REGISTER_DISPATCH(logit_backward_stub, &logit_backward_kernel);

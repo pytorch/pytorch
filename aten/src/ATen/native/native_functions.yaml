@@ -2854,7 +2854,29 @@
 - func: logsumexp.names_out(Tensor self, Dimname[1] dim, bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
 
+- func: margin_ranking_loss.out(Tensor input1, Tensor input2, Tensor target, float margin=0.0, int reduction=Mean, *, Tensor(a!) out) -> Tensor(a!)
+  device_check: NoCheck   # TensorIterator
+  python_module: nn
+  dispatch:
+    CPU, CUDA: margin_ranking_loss_out
+
 - func: margin_ranking_loss(Tensor input1, Tensor input2, Tensor target, float margin=0.0, int reduction=Mean) -> Tensor
+  device_check: NoCheck   # TensorIterator
+  python_module: nn
+  dispatch:
+    CPU, CUDA: margin_ranking_loss
+
+- func: margin_ranking_loss_backward_input1(Tensor grad_output, Tensor input1, Tensor input2, Tensor target, float margin, int reduction) -> Tensor
+  device_check: NoCheck   # TensorIterator
+  python_module: nn
+  dispatch:
+    CPU, CUDA: margin_ranking_loss_backward_input1
+
+- func: margin_ranking_loss_backward_target(Tensor grad_output, Tensor input1, Tensor input2, Tensor target, float margin, int reduction) -> Tensor
+  device_check: NoCheck   # TensorIterator
+  python_module: nn
+  dispatch:
+    CPU, CUDA: margin_ranking_loss_backward_target
 
 - func: matmul(Tensor self, Tensor other) -> Tensor
   variants: function, method
