@@ -11,8 +11,11 @@ class LinearPerSampleGrad(torch.autograd.Function):
         if len(expanded_args[0].shape) <= 1:
             raise RuntimeError("Input does not have a batch dimension. Expanded Weights "
                                f"expected input of at least rank 2, got of rank {len(expanded_args[0].shape)}")
-        output, expanded_args, expanded_kwargs, aux_outputs = forward_helper(F.linear, expanded_args, 1)
-        ctx.args = expanded_args
+        expanded_args = expanded_args[:-1]
+        expanded_kwargs = {'bias': expanded_args[2] if len(expanded_args) == 3 else None}
+        expanded_args_without_kwargs = expanded_args[:2]
+        output, aux_outputs = forward_helper(F.linear, expanded_args_without_kwargs, expanded_kwargs, 1)
+        ctx.args = expanded_args_without_kwargs
         ctx.kwargs = expanded_kwargs
         ctx.aux_outputs = aux_outputs
         return output
