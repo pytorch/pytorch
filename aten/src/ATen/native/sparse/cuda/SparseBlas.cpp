@@ -1,8 +1,23 @@
-#include <ATen/ATen.h>
-#include <ATen/Dispatch.h>
-#include <ATen/cuda/CUDASparse.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
+#include <ATen/ExpandUtils.h>
 #include <ATen/native/Resize.h>
 #include <ATen/native/sparse/cuda/SparseBlasImpl.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/addmm_native.h>
+#include <ATen/ops/addmv_native.h>
+#include <ATen/ops/copy_native.h>
+#include <ATen/ops/empty.h>
+#include <ATen/ops/mul.h>
+#include <ATen/ops/resize_as_sparse_native.h>
+#include <ATen/ops/scalar_tensor_native.h>
+#include <ATen/ops/sparse_sampled_addmm_native.h>
+#include <ATen/ops/triangular_solve_native.h>
+#endif
 
 #include <c10/util/MaybeOwned.h>
 
