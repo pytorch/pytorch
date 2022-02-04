@@ -23,7 +23,7 @@
 #include <ATen/ops/_sparse_addmm.h>
 #include <ATen/ops/_sparse_addmm_native.h>
 #include <ATen/ops/_sparse_coo_tensor_with_dims_and_tensors.h>
-#include <ATen/ops/_sparse_mm_native.h>
+#include <ATen/ops/_sparse_mm_deprecated_native.h>
 #include <ATen/ops/_sparse_sum.h>
 #include <ATen/ops/_sparse_sum_backward_native.h>
 #include <ATen/ops/_sparse_sum_native.h>
