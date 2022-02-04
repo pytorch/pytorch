@@ -1420,19 +1420,22 @@ std::vector<Tensor> unsafe_split(const Tensor& self, int64_t split_size, int64_t
 std::vector<Tensor> hsplit(const Tensor& self, int64_t split_size) {
   TORCH_CHECK(self.dim() >= 1, "torch.hsplit requires a tensor with at least 1 dimension, but got a tensor with ", self.dim(), " dimensions!")
   int64_t dim = (self.dim() == 1) ? 0 : 1;
-  TORCH_CHECK(self.sizes()[dim] % split_size == 0, "torch.hsplit attempted to split along dimension ", dim,", but the size of the dimension ", self.sizes()[dim], " is not divisible by the split_size ", split_size, "!");
+  TORCH_CHECK(split_size != 0 && self.sizes()[dim] % split_size == 0,
+    "torch.hsplit attempted to split along dimension ", dim,", but the size of the dimension ", self.sizes()[dim], " is not divisible by the split_size ", split_size, "!");
   return at::tensor_split(self, split_size, dim);
 }
 
 std::vector<Tensor> vsplit(const Tensor& self, int64_t split_size) {
   TORCH_CHECK(self.dim() >= 2, "torch.vsplit requires a tensor with at least 2 dimension, but got a tensor with ", self.dim(), " dimensions!")
-  TORCH_CHECK(self.sizes()[0] % split_size == 0, "torch.vsplit attempted to split along dimension ", 0,", but the size of the dimension ", self.sizes()[0], " is not divisible by the split_size ", split_size, "!");
+  TORCH_CHECK(split_size != 0 && self.sizes()[0] % split_size == 0,
+    "torch.vsplit attempted to split along dimension ", 0,", but the size of the dimension ", self.sizes()[0], " is not divisible by the split_size ", split_size, "!");
   return at::tensor_split(self, split_size, 0);
 }
 
 std::vector<Tensor> dsplit(const Tensor& self, int64_t split_size) {
   TORCH_CHECK(self.dim() >= 3, "torch.dsplit requires a tensor with at least 3 dimension, but got a tensor with ", self.dim(), " dimensions!")
-  TORCH_CHECK(self.sizes()[2] % split_size == 0, "torch.dsplit attempted to split along dimension ", 2,", but the size of the dimension ", self.sizes()[2], " is not divisible by the split_size ", split_size, "!");
+  TORCH_CHECK(split_size != 0 && self.sizes()[2] % split_size == 0,
+    "torch.dsplit attempted to split along dimension ", 2,", but the size of the dimension ", self.sizes()[2], " is not divisible by the split_size ", split_size, "!");
   return at::tensor_split(self, split_size, 2);
 }
 
@@ -1907,66 +1910,52 @@ inferUnsqueezeGeometry(const Tensor& tensor, int64_t dim) {
   return result;
 }
 
-Tensor squeeze_qtensor(const Tensor& self) {
+// dim is present if squeezing a single dimension and absent if squeezing all dimensions
+Tensor squeeze_qtensor(const Tensor& self, c10::optional<int64_t> dim) {
   auto quantizer = get_qtensorimpl(self)->quantizer();
   DimVector sizes;
   DimVector strides;
-  std::tie(sizes, strides) = inferSqueezeGeometry(self);
+  std::tie(sizes, strides) = dim.has_value() ? inferSqueezeGeometry(self, dim.value()) : inferSqueezeGeometry(self);
   if (quantizer->qscheme() == QScheme::PER_CHANNEL_AFFINE) {
     const auto* per_channel_quantizer = static_cast<at::PerChannelAffineQuantizer*>(quantizer.get());
     auto axis = per_channel_quantizer->axis();
     int64_t shift = 0;
-    for (const auto d : c10::irange(self.dim())) {
+    integer_range<int64_t> dims = dim.has_value() ? integer_range<int64_t>{dim.value(), dim.value() + 1} : c10::irange(self.dim());
+    for (const auto d : dims) {
       if (self.sizes()[d] == 1) {
         TORCH_CHECK(axis != d, "Squeeze is only possible on non-axis dimension for Per-Channel Quantized Tensors.");
         if (d < axis) {
-          shift += 1;
+          ++shift;
         }
       }
     }
-    axis = axis - shift;
+    axis -= shift;
     quantizer = make_per_channel_affine_quantizer(per_channel_quantizer->scales(),
                                                   per_channel_quantizer->zero_points(),
                                                   axis,
                                                   quantizer->scalar_type());
-  }
-  return make_qtensor(self, sizes, strides, quantizer);
-}
-
-Tensor squeeze_qtensor(const Tensor& self, int64_t dim) {
-  auto quantizer = get_qtensorimpl(self)->quantizer();
-  DimVector sizes;
-  DimVector strides;
-  std::tie(sizes, strides) = inferSqueezeGeometry(self, dim);
-  if (quantizer->qscheme() == QScheme::PER_CHANNEL_AFFINE) {
-    const auto* per_channel_quantizer = static_cast<at::PerChannelAffineQuantizer*>(quantizer.get());
-    auto axis = per_channel_quantizer->axis();
-    TORCH_CHECK(axis != dim, "Squeeze is only possible on non-axis dimension for Per-Channel Quantized Tensors.");
-    if (axis >= dim) {
-      axis -= 1;
-    }
-    quantizer = make_per_channel_affine_quantizer(per_channel_quantizer->scales(),
-                                                  per_channel_quantizer->zero_points(),
-                                                  axis,
-                                                  quantizer->scalar_type());
-  }
-  if (self.dim() == 0 || self.sizes()[dim] != 1) {
-    sizes = self.sizes().vec();
-    strides = self.strides().vec();
   }
   auto result = make_qtensor(self, sizes, strides, quantizer);
-  namedinference::propagate_names_except(result, self, {dim});
+  if (dim.has_value()) {
+    namedinference::propagate_names_except(result, self, {dim.value()});
+  } else {
+    auto maybe_outnames = namedinference::compute_squeeze_outnames(self);
+    namedinference::propagate_names_if_nonempty(result, maybe_outnames);
+  }
+
   return result;
 }
 
 Tensor squeeze(const Tensor& self) {
   auto g = inferSqueezeGeometry(self);
-  at::Tensor result;
-  if (self.is_quantized()) {
-    result = squeeze_qtensor(self);
-  } else {
-    result = self.as_strided(std::get<0>(g), std::get<1>(g));
-  }
+  at::Tensor result = self.as_strided(std::get<0>(g), std::get<1>(g));
+  auto maybe_outnames = namedinference::compute_squeeze_outnames(self);
+  namedinference::propagate_names_if_nonempty(result, maybe_outnames);
+  return result;
+}
+
+Tensor squeeze_quantized(const Tensor& self) {
+  at::Tensor result = squeeze_qtensor(self, c10::nullopt);
   auto maybe_outnames = namedinference::compute_squeeze_outnames(self);
   namedinference::propagate_names_if_nonempty(result, maybe_outnames);
   return result;
@@ -1975,10 +1964,6 @@ Tensor squeeze(const Tensor& self) {
 Tensor squeeze(const Tensor& self, int64_t dim) {
   int64_t dims = self.dim();
   dim = maybe_wrap_dim(dim, dims);
-
-  if (self.is_quantized()) {
-    return squeeze_qtensor(self, dim);
-  }
   if (dims == 0 || self.sizes()[dim] != 1) {
     return self.as_strided(self.sizes(), self.strides());
   }
@@ -1986,6 +1971,12 @@ Tensor squeeze(const Tensor& self, int64_t dim) {
   auto result = self.as_strided(std::get<0>(g), std::get<1>(g));
   namedinference::propagate_names_except(result, self, {dim});
   return result;
+}
+
+Tensor squeeze_quantized(const Tensor& self, int64_t dim) {
+  int64_t dims = self.dim();
+  dim = maybe_wrap_dim(dim, dims);
+  return squeeze_qtensor(self, dim);
 }
 
 Tensor & squeeze_(Tensor& self) {
@@ -2022,7 +2013,14 @@ Tensor _unsafe_view(const Tensor& self, IntArrayRef size) {
   return self.view(size);
 }
 
-static Tensor unsqueeze_sparse(Tensor const &self, int64_t dim /* should already be wrapped */) {
+Tensor unsqueeze(const Tensor& self, int64_t dim) {
+  dim = maybe_wrap_dim(dim, self.dim() + 1);
+  auto g = inferUnsqueezeGeometry(self, dim);
+  return self.as_strided(g.sizes, g.strides);
+}
+
+Tensor unsqueeze_sparse(Tensor const &self, int64_t dim) {
+  dim = maybe_wrap_dim(dim, self.dim() + 1);
   int64_t sparse_dim = self.sparse_dim();
   int64_t dense_dim = self.dense_dim();
   auto indices = self._indices();
@@ -2046,7 +2044,7 @@ static Tensor unsqueeze_sparse(Tensor const &self, int64_t dim /* should already
   }
 }
 
-Tensor unsqueeze_qtensor(const Tensor& self, int64_t dim) {
+Tensor unsqueeze_quantized(const Tensor& self, int64_t dim) {
   dim = maybe_wrap_dim(dim, self.dim() + 1);
   auto g = inferUnsqueezeGeometry(self, dim);
   auto quantizer = get_qtensorimpl(self)->quantizer();
@@ -2062,19 +2060,6 @@ Tensor unsqueeze_qtensor(const Tensor& self, int64_t dim) {
                                                   quantizer->scalar_type());
   }
   return make_qtensor(self, g.sizes, g.strides, quantizer);
-}
-
-Tensor unsqueeze(const Tensor& self, int64_t dim) {
-  dim = maybe_wrap_dim(dim, self.dim() + 1);
-
-  if (self.is_sparse()) {
-    return unsqueeze_sparse(self, dim);
-  } else if (self.is_quantized()) {
-    return unsqueeze_qtensor(self, dim);
-  } else {
-    auto g = inferUnsqueezeGeometry(self, dim);
-    return self.as_strided(g.sizes, g.strides);
-  }
 }
 
 Tensor & unsqueeze_(Tensor& self, int64_t dim) {
@@ -2395,9 +2380,13 @@ Tensor alias(const Tensor& self) {
 }
 
 Tensor detach(const Tensor& self) {
-  // this just exists to give us a hook in VariableType and an entry in Declarations.yaml
-  //AT_ERROR("detach is not implemented for Tensor");
-  return native::alias(self);
+  // NB: detach() is not the same thing as alias()! The main difference is that
+  // detach does not allow metadata change while alias does.
+  return Tensor(self.getIntrusivePtr()->shallow_copy_and_detach(
+    // NB: The ADInplaceOrView logic will overwrite these with the
+    // appropriate values if it runs; otherwise these are the values.
+    /*version_counter=*/0,
+    /*allow_tensor_metadata_change=*/false));
 }
 
 Tensor unfold(const Tensor& self, int64_t dimension, int64_t size, int64_t step) {

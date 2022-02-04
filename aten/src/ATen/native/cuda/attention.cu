@@ -39,7 +39,6 @@ __global__ void transform_bias_rescale_qkv_kernel(
     PackedTensorAccessor64<scalar_t, 5, RestrictPtrTraits> q_k_v) {
   // warp per DH.
   // so launch B * NH * T warps.
-  auto B = q_k_v.size(1);
   auto NH = q_k_v.size(2);
   auto T = q_k_v.size(3);
   auto DH = q_k_v.size(4);
@@ -204,7 +203,6 @@ Tensor transform_0213(const Tensor& a) {
 
 Tensor gemm_nt_bias(const Tensor& a, const Tensor& b, const Tensor& c) {
   auto a_ = a.view({a.size(0) * a.size(1), a.size(2)});
-  // TODO: should be b.transpose(1, 0)?
   auto r_ = at::native::linear(a_, b, c);
   return r_.view({a.size(0), a.size(1), r_.size(1)});
 }
