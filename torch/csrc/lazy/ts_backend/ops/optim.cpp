@@ -37,23 +37,6 @@ std::tuple<std::vector<at::Tensor>, std::vector<int64_t>> flatten_with_positions
   return std::make_tuple(flattened_lists, list_sizes);
 }
 
-// TODO: move to CUDA extensions
-RegisterOperators reg({
-    torch::jit::Operator(
-    "LazyCUDA::L2NormMpCuda(Tensor[] list, int[] sizes, int chunk_size, bool? per_tensor_python) -> Tensor, Tensor",
-    [](torch::jit::Stack& stack) {
-      RECORD_FUNCTION("_grad_sum_to_size", std::vector<c10::IValue>());
-      at::TensorList tl; 
-      std::vector<int64_t> sizes;
-      int chunk_size;
-      c10::IValue ptp;
-      torch::jit::pop(stack, tl, sizes, chunk_size, ptp);
-      // TODO: run the cuda code
-      torch::jit::push(stack, at::Tensor{}, at::Tensor{});
-    },
-    c10::AliasAnalysisKind::FROM_SCHEMA),
-});
-
 }
 
 std::tuple<at::Tensor, at::Tensor> buildL2NormMpCuda(int chunk_size,
@@ -123,3 +106,17 @@ std::string L2NormMpCuda::ToString() const {
 
 } // namespace
 } // namespace lazy
+
+// TODO: this needs to be moved to the CUDA extension
+std::tuple<at::Tensor, at::Tensor> L2NormMpCuda(at::TensorList t, std::vector<int64_t> sizes, int chunk_size, c10::optional<bool> per_tensor_python) {
+  // unflatted using sizes
+  // std::tuple<at::Tensor, at::Tensor> results =  call_into(CUDA)
+  return {};
+}
+
+// TODO: this needs to be moved to the CUDA extension
+TORCH_LIBRARY(LazyCUDA, m) {
+  m.def("L2NormMpCuda", L2NormMpCuda);
+}
+
+
