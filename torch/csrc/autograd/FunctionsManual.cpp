@@ -2746,10 +2746,11 @@ Tensor _linalg_svd_rank_restricted_helper_backward(
     // Form an index for matrices of rank r.
     const auto rank_r_mask = at::where(rank == r);
     std::vector<TensorIndex> rank_r_indices;
+    rank_r_indices.reserve(n_batch_dims + 2);
     // Populate indices of rank r matrices only if
     // batch dimension is non-empty.
     if (n_batch_dims) {
-      rank_r_indices = at::native::toVectorOfTensorIndices(rank_r_mask, n_batch_dims + 2);
+      rank_r_indices.assign(rank_r_mask.begin(), rank_r_mask.end());
     }
     // It is equivalent to indexing at [rank == r, :]
     rank_r_indices.push_back(Slice());
