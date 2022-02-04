@@ -498,7 +498,7 @@ class _PositiveSemidefinite(_Symmetric):
         sym_check = super().check(value)
         if not sym_check.all():
             return sym_check
-        return torch.linalg.eigvalsh(value).ge(0).all(-1)
+        return torch.linalg.eigvalsh(value).ge(-torch.finfo(value.dtype).eps).all(-1)
 
 
 class _PositiveDefinite(_Symmetric):
