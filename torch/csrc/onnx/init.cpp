@@ -7,6 +7,114 @@ namespace torch {
 namespace onnx {
 void initONNXBindings(PyObject* module) {
   auto m = py::handle(module).cast<py::module>();
+
+  // ONNX specific passes
+  m.def("_jit_pass_onnx_remove_print", RemovePrintOps)
+      .def("_jit_pass_onnx_preprocess_caffe2", PreprocessCaffe2Ops)
+      .def("_jit_pass_onnx", ToONNX)
+      .def(
+          "_jit_pass_onnx_assign_output_shape",
+          [](std::shared_ptr<Graph>& graph,
+             const std::vector<at::Tensor>& tensors,
+             const python::IODescriptor& desc,
+             bool onnx_shape_inference = false) {
+            ONNXAssignOutputShape(graph, tensors, desc, onnx_shape_inference);
+          })
+      .def("_jit_pass_onnx_function_substitution", ONNXFunctionCallSubstitution)
+      .def(
+          "_jit_pass_onnx_peephole",
+          [](std::shared_ptr<Graph>& graph,
+             int opset_version,
+             bool fixed_batch_size) {
+            return PeepholeOptimizeONNX(graph, opset_version, fixed_batch_size);
+          })
+      .def("_jit_pass_onnx_preprocess", PreprocessForONNX)
+      .def(
+          "_jit_pass_onnx_eval_peephole",
+          [](std::shared_ptr<Graph>& graph,
+             std::map<std::string, IValue>& paramsDict) {
+            EvalPeepholeONNX(graph, paramsDict);
+            return paramsDict;
+          },
+          pybind11::return_value_policy::move)
+      .def(
+          "_jit_pass_onnx_cast_all_constant_to_floating",
+          CastAllConstantToFloating)
+      .def(
+          "_jit_pass_onnx_constant_fold",
+          [](std::shared_ptr<Graph>& graph,
+             std::map<std::string, IValue>& paramsDict,
+             int opset_version) {
+            ConstantFoldONNX(
+                graph,
+                paramsDict,
+                opset_version); // overload resolution
+            return paramsDict;
+          },
+          pybind11::return_value_policy::move)
+      .def(
+          "_jit_pass_onnx_eliminate_unused_items",
+          [](std::shared_ptr<Graph>& graph,
+             std::map<std::string, IValue>& paramsDict) {
+            EliminateUnusedItemsONNX(
+                graph->block(),
+                paramsDict); // overload resolution
+            return paramsDict;
+          },
+          pybind11::return_value_policy::move)
+      .def(
+          "_jit_pass_onnx_scalar_type_analysis",
+          [](std::shared_ptr<Graph>& graph,
+             bool lowprecision_cast,
+             int opset_version) {
+            return ScalarTypeAnalysisForONNX(
+                graph, lowprecision_cast, opset_version);
+          },
+          py::arg("graph"),
+          py::arg("lowprecision_cast") = true,
+          py::arg("opset_version"))
+      .def(
+          "_jit_pass_onnx_remove_inplace_ops_for_onnx", RemoveInplaceOpsForONNX)
+      .def(
+          "_jit_pass_onnx_node_shape_type_inference",
+          [](Node* n,
+             std::map<std::string, IValue>& params_dict,
+             int opset_version) {
+            ONNXShapeTypeInference(n, params_dict, opset_version);
+          })
+      .def(
+          "_jit_pass_onnx_graph_shape_type_inference",
+          [](std::shared_ptr<Graph>& graph,
+             std::map<std::string, IValue>& params_dict,
+             int opset_version) {
+            ONNXShapeTypeInference(graph, params_dict, opset_version);
+          })
+      .def("_jit_pass_onnx_set_dynamic_input_shape", ONNXSetDynamicInputShape)
+      .def("_jit_pass_onnx_lint", ONNXLintGraph)
+      .def("_jit_pass_onnx_function_extraction", onnx::ONNXFunctionExtraction)
+      .def("_jit_pass_onnx_block", BlockToONNX)
+      .def(
+          "_jit_pass_onnx_unpack_quantized_weights",
+          [](std::shared_ptr<Graph>& graph,
+             std::map<std::string, IValue>& paramsDict) {
+            UnpackQuantizedWeights(graph, paramsDict);
+            return paramsDict;
+          },
+          pybind11::return_value_policy::move)
+      .def(
+          "_jit_pass_onnx_quantization_insert_permutes",
+          [](std::shared_ptr<Graph>& graph,
+             std::map<std::string, IValue>& paramsDict) {
+            insertPermutes(graph, paramsDict);
+            return paramsDict;
+          },
+          pybind11::return_value_policy::move);
+
+  m.def(
+      "_check_onnx_proto",
+      [](const std::string& proto_string) { check_onnx_proto(proto_string); },
+      py::arg("proto_string"));
+
   auto onnx = m.def_submodule("_onnx");
   py::enum_<::ONNX_NAMESPACE::TensorProto_DataType>(onnx, "TensorProtoDataType")
       .value("UNDEFINED", ::ONNX_NAMESPACE::TensorProto_DataType_UNDEFINED)

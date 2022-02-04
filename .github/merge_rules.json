@@ -7,16 +7,9 @@
        "torch/csrc/jit/passes/onnx.*",
        "test/onnx/**",
        "docs/source/onnx.rst",
-
        "torch/csrc/jit/serialization/export.*",
        "torch/csrc/jit/serialization/onnx.*",
-
-       "torch/_C/__init__.pyi.in",
-
-       "torch/csrc/jit/python/init.cpp",
-       "torch/csrc/jit/python/script_init.cpp",
-
-       "aten/src/ATen/core/interned_strings.h",
+       "torch/_C/__init__.pyi.in"
       ],
     "approved_by": ["BowenBao", "garymm"],
     "mandatory_app_id": 12274
