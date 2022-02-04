@@ -12,7 +12,7 @@ from torch.testing._internal.common_utils import TestCase, freeze_rng_state, mak
 from torch.testing._internal.common_methods_invocations import SampleInput, op_db
 from torch.nn.utils._expanded_weights import ExpandedWeight
 from torch.nn.utils._expanded_weights.expanded_weights_utils import forward_helper, set_grad_sample_if_exists, \
-    grad_if_exists_for_input, unpack_expanded_weight_or_tensor, sum_over_all_but_batch_and_last_n
+    grad_if_exists_for_input, unpack_expanded_weight_or_tensor, sum_over_all_but_batch_and_last_n, standard_kwargs
 
 class TestContext:
     pass
@@ -26,15 +26,16 @@ class TestExpandedWeightHelperFunction(TestCase):
             maybe_batched_weight = ExpandedWeight(weight.clone().requires_grad_(), 3) if weight_batched else weight
             maybe_batched_bias = ExpandedWeight(bias.clone().requires_grad_(), 3) if bias_batched else bias
             args = (input, maybe_batched_weight, maybe_batched_bias, ('bias',))
-            (res, ctx_args, ctx_kwargs, aux_outputs) = forward_helper(nn.functional.linear, args, 1)
+            expanded_args, expanded_kwargs = standard_kwargs(args)
+            (res, aux_outputs) = forward_helper(nn.functional.linear, expanded_args, expanded_kwargs, 1)
             expected = nn.functional.linear(input, weight, bias)
             self.assertEqual(res, expected)
 
-            self.assertEqual(len(ctx_args), 2)
-            assert ctx_args[0] is args[0]  # avoids property checks in assertEquals
-            assert ctx_args[1] is args[1]  # avoids property checks in assertEquals
-            self.assertEqual(len(ctx_kwargs), 1)
-            assert ctx_kwargs['bias'] is args[2]  # avoids property checks in assertEquals
+            self.assertEqual(len(expanded_args), 2)
+            assert expanded_args[0] is args[0]  # avoids property checks in assertEquals
+            assert expanded_args[1] is args[1]  # avoids property checks in assertEquals
+            self.assertEqual(len(expanded_kwargs), 1)
+            assert expanded_kwargs['bias'] is args[2]  # avoids property checks in assertEquals
             self.assertEqual(aux_outputs, None)
 
     def test_forward_helper_failure_args(self, device):
@@ -42,15 +43,17 @@ class TestExpandedWeightHelperFunction(TestCase):
         bias = torch.randn(5, device=device)
         with self.assertRaisesRegex(RuntimeError, r"do not support inputs that are also ExpandedWeights."):
             input = ExpandedWeight(torch.randn(3, 4, requires_grad=True), 3)
-            forward_helper(nn.functional.linear, (input, weight, bias, ('bias',)), 1)
+            expanded_args, expanded_kwargs = standard_kwargs((input, weight, bias, ('bias',)))
+            forward_helper(nn.functional.linear, expanded_args, expanded_kwargs, 1)
         with self.assertRaisesRegex(RuntimeError, r"requires a Tensor as the first input"):
-            forward_helper(nn.functional.linear, (3, weight, bias, ('bias',)), 1)
+            expanded_args, expanded_kwargs = standard_kwargs((3, weight, bias, ('bias',)))
+            forward_helper(nn.functional.linear, expanded_args, expanded_kwargs, 1)
         with self.assertRaisesRegex(RuntimeError, r"requires a batch dimension but got an input of size 0"):
-            input = torch.tensor(3)
-            forward_helper(nn.functional.linear, (input, weight, bias, ('bias',)), 1)
+            expanded_args, expanded_kwargs = standard_kwargs((torch.tensor(3), weight, bias, ('bias',)))
+            forward_helper(nn.functional.linear, expanded_args, expanded_kwargs, 1)
         with self.assertRaisesRegex(RuntimeError, r"0 is not a valid batch size for Expanded Weights"):
-            input = torch.randn(0, 1, 2)
-            forward_helper(nn.functional.linear, (input, weight, bias, ('bias',)), 1)
+            expanded_args, expanded_kwargs = standard_kwargs((torch.randn(0, 1, 2), weight, bias, ('bias',)))
+            forward_helper(nn.functional.linear, expanded_args, expanded_kwargs, 1)
         input = torch.randn(3, 4)
         for (weight_batched, bias_batched) in product([True, False], [True, False]):
             if not weight_batched and not bias_batched:
@@ -58,14 +61,16 @@ class TestExpandedWeightHelperFunction(TestCase):
             maybe_batched_weight = ExpandedWeight(weight.clone().requires_grad_(), 4) if weight_batched else weight
             maybe_batched_bias = ExpandedWeight(bias.clone().requires_grad_(), 4) if bias_batched else bias
             with self.assertRaisesRegex(RuntimeError, r"Expected ExpandedWeights to have batch size matching input"):
-                forward_helper(nn.functional.linear, (input, maybe_batched_weight, maybe_batched_bias, ('bias',)), 1)
+                expanded_args, expanded_kwargs = standard_kwargs((input, maybe_batched_weight, maybe_batched_bias, ('bias',)))
+                forward_helper(nn.functional.linear, expanded_args, expanded_kwargs, 1)
 
     def test_forward_helper_failure_outputs(self, device):
         input = torch.randn(3, 4, device=device)
         weight = torch.randn(5, 4, device=device)
         bias = torch.randn(5, device=device)
         with self.assertRaisesRegex(RuntimeError, r"Got single output but expected at least 4"):
-            forward_helper(nn.functional.linear, (input, weight, bias, ('bias',)), 4)
+            expanded_args, expanded_kwargs = standard_kwargs((input, weight, bias, ('bias',)))
+            forward_helper(nn.functional.linear, expanded_args, expanded_kwargs, 4)
 
     def test_set_grad_sample_if_exists(self, device):
         def test_fn(_):
