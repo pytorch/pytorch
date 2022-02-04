@@ -138,6 +138,20 @@ class PackedSequenceTest(TestCase):
             RuntimeError,
             lambda: rnn_utils.pack_padded_sequence(b_a, [22, 25], enforce_sorted=True))
 
+    def test_pad_sequence_with_tensor_sequences(self):
+        seq_tuple_input = torch.nn.utils.rnn.pad_sequence(
+            (torch.tensor([[7, 6]]), torch.tensor([[-7, -1]]))
+        )
+        seq_tensor_input = torch.nn.utils.rnn.pad_sequence(
+            torch.tensor([[[7, 6]], [[-7, -1]]])
+        )
+        self.assertEqual(seq_tuple_input, seq_tensor_input)
+        self.assertEqual(seq_tuple_input.shape, torch.Size([1, 2, 2]))
+
+    def test_pad_sequence_with_non_iterable_sequences(self):
+        with self.assertRaisesRegex(RuntimeError, 'Expected iterable for input sequences'):
+            torch.nn.utils.rnn.pad_sequence(5)
+
     def test_total_length(self):
         padded, lengths = self._padded_sequence(torch.FloatTensor)
         max_length = max(lengths)
