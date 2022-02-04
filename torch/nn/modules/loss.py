@@ -1275,7 +1275,7 @@ class MarginRankingLoss(_Loss):
     The loss function for each pair of samples in the mini-batch is:
 
     .. math::
-        \text{loss}(x1, x2, y) = \max(0, -y * (x1 - x2) + \text{margin})
+        \text{loss}(x1, x2, y, margin) = \max(0, -y * (x1 - x2) + \text{margin})
 
     Args:
         margin (float, optional): Has a default value of :math:`0`.
