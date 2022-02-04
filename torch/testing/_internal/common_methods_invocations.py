@@ -15407,6 +15407,15 @@ op_db: List[OpInfo] = [
         dtypes=floating_types_and(torch.bfloat16, torch.float16),
         supports_out=False,
         sample_inputs_func=sample_inputs_margin_ranking_loss,
+        skips=(
+            # False is not true : Found a sampled tensor of floating-point dtype
+            # torch.float32 sampled with requires_grad=False. If this is
+            # intended, please skip/xfail this test. Remember that sampling
+            # operations are executed under a torch.no_grad contextmanager.
+            DecorateInfo(unittest.expectedFailure, "TestCommon",
+                "test_floating_inputs_are_differentiable",
+                dtypes=(torch.float32,)),
+        )
     ),
     OpInfo(
         "nn.functional.poisson_nll_loss",
