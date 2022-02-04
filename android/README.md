@@ -34,8 +34,8 @@ repositories {
 
 dependencies {
     ...
-    implementation 'org.pytorch:pytorch_android:1.11.0-SNAPSHOT'
-    implementation 'org.pytorch:pytorch_android_torchvision:1.11.0-SNAPSHOT'
+    implementation 'org.pytorch:pytorch_android:1.12.0-SNAPSHOT'
+    implementation 'org.pytorch:pytorch_android_torchvision:1.12.0-SNAPSHOT'
     ...
 }
 ```
