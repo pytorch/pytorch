@@ -80,6 +80,31 @@ IValue parseEnum(
     FlatbufferLoader&,
     const mobile::serialization::IValue& ivalue);
 
+TypePtr resolveType(
+    const std::string& type_string,
+    std::shared_ptr<CompilationUnit> cu) {
+  TypePtr type;
+  c10::string_view type_str(type_string);
+  if (type_str.starts_with(kCustomClassPrefix)) {
+    type = getCustomClass(type_string);
+    TORCH_CHECK(
+        type, "The implementation of class ", type_string, " cannot be found.");
+  } else if (
+      type_str.starts_with(kTorchPrefix) || type_str.starts_with(kJitPrefix)) {
+    c10::QualifiedName qn(type_string);
+    if (cu->get_class(qn) == nullptr) {
+      auto classtype = ClassType::create(qn, cu, true);
+      cu->register_type(classtype);
+      type = classtype;
+    } else {
+      type = cu->get_class(qn);
+    }
+  } else {
+    type = c10::parseType(type_string);
+  }
+  return type;
+}
+
 FlatbufferLoader::FlatbufferLoader()
     : mcu_(std::make_shared<mobile::CompilationUnit>()),
       cu_(std::make_shared<CompilationUnit>()),
@@ -107,12 +132,18 @@ FlatbufferLoader::FlatbufferLoader()
   registerIValueParser(mobile::serialization::IValueUnion::Device, &parseBasic);
   registerIValueParser(
       mobile::serialization::IValueUnion::EnumValue, &parseEnum);
+  internal_registerTypeResolver(&resolveType);
 }
 
 void FlatbufferLoader::registerIValueParser(
     mobile::serialization::IValueUnion ivalue_type,
     IValueParser parser) {
   ivalue_parsers_[static_cast<uint8_t>(ivalue_type)] = parser;
+}
+
+void FlatbufferLoader::internal_registerTypeResolver(
+    TypeResolver type_resolver) {
+  type_resolver_ = type_resolver;
 }
 
 mobile::Module FlatbufferLoader::parseModule(
@@ -496,28 +527,7 @@ TypePtr FlatbufferLoader::getOrCreateTypeAnnotations(
   if (iter != type_annotations_.end()) {
     return iter->second;
   }
-  TypePtr type;
-  c10::string_view qn_str(offset->c_str(), offset->size());
-  c10::QualifiedName qn(offset->str());
-  if (qn_str.starts_with(kCustomClassPrefix)) {
-    type = getCustomClass(qn.qualifiedName());
-    TORCH_CHECK(
-        type,
-        "The implementation of class ",
-        qn.qualifiedName(),
-        " cannot be found.");
-  } else if (
-      qn_str.starts_with(kTorchPrefix) || qn_str.starts_with(kJitPrefix)) {
-    if (cu_->get_class(qn) == nullptr) {
-      auto classtype = ClassType::create(qn, cu_, true);
-      cu_->register_type(classtype);
-      type = classtype;
-    } else {
-      type = cu_->get_class(qn);
-    }
-  } else {
-    type = c10::parseType(qn.qualifiedName());
-  }
+  TypePtr type = type_resolver_(offset->str(), cu_);
   type_annotations_[offset] = type;
   return type;
 }
