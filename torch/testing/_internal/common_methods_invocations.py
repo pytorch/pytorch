@@ -12920,8 +12920,8 @@ op_db: List[OpInfo] = [
            check_batched_grad=False,
            check_batched_gradgrad=False,
            # TODO(@nikitaved): implement that
-           supports_fwgrad_bwgrad=True,
-           supports_forward_ad=True,
+           supports_fwgrad_bwgrad=False,
+           supports_forward_ad=False,
            decorators=[
                slowTest,
                skipCUDAIfNoMagmaAndNoCusolver,
@@ -12937,6 +12937,9 @@ op_db: List[OpInfo] = [
                ),
                # TODO: investigate. Probably implement a custom backward
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_composite_compliance'),
+               # Derivative wrt atol/rtol are not implemented
+               DecorateInfo(unittest.expectedFailure, "TestCommon",
+                            "test_floating_inputs_are_differentiable")
            )),
     OpInfo('linalg.svd_rank_restricted',
            variant_test_name='singular',
@@ -12958,8 +12961,8 @@ op_db: List[OpInfo] = [
            check_batched_grad=False,
            check_batched_gradgrad=False,
            # TODO(@nikitaved): implement that
-           supports_fwgrad_bwgrad=True,
-           supports_forward_ad=True,
+           supports_fwgrad_bwgrad=False,
+           supports_forward_ad=False,
            decorators=[
                slowTest,
                skipCUDAIfNoMagmaAndNoCusolver,
@@ -12979,6 +12982,9 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
                # TODO: investigate. Probably implement a custom backward
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_composite_compliance'),
+               # Derivative wrt atol/rtol are not implemented
+               DecorateInfo(unittest.expectedFailure, "TestCommon",
+                            "test_floating_inputs_are_differentiable")
            )),
     OpInfo('linalg.svdvals',
            op=torch.linalg.svdvals,
