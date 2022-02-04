@@ -105,8 +105,9 @@ class no_grad(_DecoratorContextManager):
         more information on how they compare.
 
     .. note::
-        Currently this API does not apply to :ref:`forward-mode AD <forward-mode-ad>`
-        (subject to change). As a workaround you can unpack your dual tensors.
+        This API does not apply to :ref:`forward-mode AD <forward-mode-ad>`.
+        If you want to disable forward AD for a computation, can unpack
+        your dual tensors.
 
     Example::
 
@@ -152,8 +153,7 @@ class enable_grad(_DecoratorContextManager):
         more information on how they compare.
 
     .. note::
-        Currently this API does not apply to :ref:`forward-mode AD <forward-mode-ad>`
-        (subject to change).
+        This API does not apply to :ref:`forward-mode AD <forward-mode-ad>`.
 
     Example::
 
@@ -202,8 +202,7 @@ class set_grad_enabled(_DecoratorContextManager):
         more information on how they compare.
 
     .. note::
-        Currently this API does not apply to :ref:`forward-mode AD <forward-mode-ad>`
-        (subject to change).
+        This API does not apply to :ref:`forward-mode AD <forward-mode-ad>`.
 
     Example::
 
