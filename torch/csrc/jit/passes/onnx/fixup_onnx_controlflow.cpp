@@ -335,11 +335,9 @@ std::vector<Value*> FixupONNXLoopNode(Node* node, int opset_version) {
   GRAPH_DEBUG("after FixupONNXLoopNodeInputs: ", *node->owningGraph());
   FixupONNXLoopBlockOutputs(node);
   GRAPH_DEBUG("after FixupONNXLoopBlockOutputs: ", *node->owningGraph());
-
   // NOTE: the output order is deliberately changed to match expected order
   //       since onnx loop requires scan outputs to be the last outputs.
   auto new_outputs = ConvertSequenceDependencies(node, opset_version);
-
   // Copy type of block output to node output.
   FixupONNXControlflowNodeOutputs(node);
   GRAPH_DEBUG("after FixupONNXControlflowNodeOutputs: ", *node->owningGraph());
@@ -670,17 +668,20 @@ std::vector<Value*> FixupONNXControlflowNode(Node* n, int opset_version) {
 void FixupONNXControlflowNodeOutputs(Node* n) {
   switch (n->kind()) {
     case ::c10::onnx::Loop: {
-      // inputs (0, 1) are (i, cond).
-      auto loop_carried_output_size = n->blocks().at(0)->inputs().size() - 2;
+      Block* loop_block = n->blocks().at(0);
+      // inputs (0, 1) are (i, cond), remainder are carried outputs.
+      size_t loop_carried_output_size = loop_block->inputs().size() - 2;
+
       for (auto i : c10::irange(n->outputs().size())) {
-        // Get the type from the input rather than the output
-        // to handle the case where a block input is Optional but the
-        // output is not (i.e. if the loop executes > 0 times, the
-        // output will not be None).
-        auto type = n->blocks().at(0)->inputs().at(i + 2)->type();
         if (i < loop_carried_output_size) {
-          n->output(i)->setType(type);
+          // Get the type from the input rather than the output
+          // to handle the case where a block input is Optional but the
+          // output is not (i.e. if the loop executes > 0 times, the
+          // output will not be None).
+          n->output(i)->setType(loop_block->inputs().at(i + 2)->type());
         } else {
+          // scan output, should be a Tensor type
+          TypePtr type = loop_block->outputs().at(i + 1)->type();
           if (auto t_type = type->cast<TensorType>()) {
             auto sizes = t_type->symbolic_sizes().sizes();
             if (sizes.has_value()) {
