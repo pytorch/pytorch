@@ -115,7 +115,7 @@ def div(g, self, other, *args):
 
 
 @parse_args("v", "v", "v", "f")
-def addcmul(g, self, tensor1, tensor2, value=1):
+def addcmul(g, self, tensor1, tensor2, value=1.0):
     value_tens = g.op("Constant", value_t=torch.tensor([value]))
     return add(g, self, mul(g, mul(g, tensor1, tensor2), value_tens))
 
