@@ -24,7 +24,11 @@ const bool use_magma_ = true;
 namespace {
 struct MagmaInitializer {
   MagmaInitializer() {
+#if defined(BUILD_LAZY_CUDA_LINALG)
+    magma_init();
+#else
     ::at::cuda::detail::set_magma_init_fn([]{ magma_init(); });
+#endif
   };
 } initializer;
 }  // namespace (anonymous)
