@@ -3968,7 +3968,7 @@ Example::
 
 add_docstr(torch.gather,
            r"""
-gather(input, dim, index, *, sparse_grad=False, out=None) -> Tensor
+gather(input, dim, index, *, sparse_grad=False, unique_indices=False, out=None) -> Tensor
 
 Gathers values along an axis specified by `dim`.
 
@@ -3990,6 +3990,11 @@ Args:
 
 Keyword arguments:
     sparse_grad (bool, optional): If ``True``, gradient w.r.t. :attr:`input` will be a sparse tensor.
+    unique_indice (bool, optional): whether the indices to be updated in
+        ``src`` are guaranteed not to overlap with each other. If true, this
+        operation will avoid throwing a nondeterministic error due to
+        overlapping indices while :func:``torch.use_deterministic_algorithms``
+        is enabled.  Default: ``False``.
     out (Tensor, optional): the destination tensor
 
 Example::
@@ -8529,14 +8534,14 @@ Example::
 
 add_docstr(torch.scatter,
            r"""
-scatter(input, dim, index, src) -> Tensor
+scatter(input, dim, index, src, *, unique_indices=False) -> Tensor
 
 Out-of-place version of :meth:`torch.Tensor.scatter_`
 """)
 
 add_docstr(torch.scatter_add,
            r"""
-scatter_add(input, dim, index, src) -> Tensor
+scatter_add(input, dim, index, src, *, unique_indices=False) -> Tensor
 
 Out-of-place version of :meth:`torch.Tensor.scatter_add_`
 """)

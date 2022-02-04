@@ -56,6 +56,7 @@ from torch.testing._internal.common_cuda import tf32_on_and_off, tf32_is_not_fp3
 from torch.testing._internal.common_dtype import (
     get_all_fp_dtypes, get_all_int_dtypes, get_all_math_dtypes, get_all_dtypes, get_all_complex_dtypes
 )
+import torch.autograd.forward_ad as fwAD
 
 # Protects against includes accidentally setting the default dtype
 assert torch.get_default_dtype() is torch.float32
@@ -1298,6 +1299,27 @@ else:
         test_func(torch.Tensor.scatter_add)
         test_func(torch.scatter_add)
 
+    def test_nondeterministic_alert_scatter_add_autograd(self, device):
+        def test_func(op_call):
+            input = torch.randn(5, 4, device=device)
+            dim = 0
+            index = torch.tensor([[3]], device=device)
+            src = torch.tensor([[1.0]], device=device)
+
+            # unique_indices=True should propagate through forward AD
+            # formula. CUDA should still throw nondeterministic error
+            # unrelated to duplicate indices
+            @expectedAlertNondeterministic('scatter_add_cuda_kernel', ['cuda'])
+            def forward_func_unique_indices(slf, device):
+                with fwAD.dual_level():
+                    dual_input = fwAD.make_dual(input, torch.ones_like(input))
+                    op_call(dual_input, dim, index, src, unique_indices=True)
+
+            forward_func_unique_indices(self, device)
+
+        test_func(torch.Tensor.scatter_add)
+        test_func(torch.scatter_add)
+
     def test_nondeterministic_alert_scatter(self, device):
         def test_func(op_call):
             input = torch.randn(5, 4, device=device)
@@ -1343,6 +1365,53 @@ else:
                 op_call(input, dim, index, value, unique_indices=True)
 
         test_func(torch.Tensor.scatter_)
+        test_func(torch.Tensor.scatter)
+        test_func(torch.scatter)
+
+    def test_nondeterministic_alert_scatter_autograd(self, device):
+        def test_func(op_call):
+            input = torch.randn(5, 4, device=device, requires_grad=True)
+            dim = 0
+            index = torch.tensor([[3]], device=device)
+            src = torch.tensor([[1.0]], device=device)
+            value = 1.0
+
+            # scatter.src
+            res = op_call(input, dim, index, src)
+
+            @expectedAlertNondeterministic('scatter_value_out')
+            def backward_func_src(slf, device):
+                res.backward(torch.ones_like(res))
+            backward_func_src(self, device)
+
+            # scatter.value
+            res = op_call(input, dim, index, value)
+
+            @expectedAlertNondeterministic('scatter_value_out')
+            def backward_func_value(slf, device):
+                res.backward(torch.ones_like(res))
+            backward_func_value(self, device)
+
+            # unique_indices=True should propagate through backward AD
+            # formulas
+            res_src = op_call(input, dim, index, src, unique_indices=True)
+            res_value = op_call(input, dim, index, value, unique_indices=True)
+
+            with DeterministicGuard(True):
+                res_src.backward(torch.ones_like(res_src))
+                res_value.backward(torch.ones_like(res_value))
+
+            # unique_indices=True should propagate through forward AD
+            # formulas as well
+            with DeterministicGuard(True):
+                with fwAD.dual_level():
+                    dual_input = fwAD.make_dual(input, torch.ones_like(input))
+                    op_call(dual_input, dim, index, value, unique_indices=True)
+
+                    dual_input = fwAD.make_dual(input, torch.ones_like(input))
+                    op_call(dual_input, dim, index, src, unique_indices=True)
+
+
         test_func(torch.Tensor.scatter)
         test_func(torch.scatter)
 
@@ -1433,14 +1502,42 @@ else:
             a = torch.randn(3, 3, device=device, requires_grad=True)
             dim = 0
             index = torch.tensor([[0]], device=device)
+
+            # Backward should alert with 2-dim input and unique_indices=False
             res = op_call(a, dim, index)
-            grad = torch.ones_like(res)
 
             @expectedAlertNondeterministic('scatter_add')
             def backward_func(slf, device):
-                res.backward(grad)
-
+                res.backward(torch.ones_like(res))
             backward_func(self, device)
+
+            # Backward should alert only for CUDA with 2-dim input and
+            # unique_indices=True
+            res = op_call(a, dim, index, unique_indices=True)
+
+            @expectedAlertNondeterministic('scatter_add_cuda_kernel', ['cuda'])
+            def backward_func_unique_indices(slf, device):
+                res.backward(torch.ones_like(res))
+            backward_func_unique_indices(self, device)
+
+            a = torch.randn(3, device=device, requires_grad=True)
+            dim = 0
+            index = torch.tensor([0], device=device)
+
+            # Backward should alert with 1-dim input and unique_indices=False
+            res = op_call(a, dim, index)
+
+            @expectedAlertNondeterministic('scatter_add')
+            def backward_func(slf, device):
+                res.backward(torch.ones_like(res))
+            backward_func(self, device)
+
+            # Backward should not alert with 1-dim input and
+            # unique_indices=True
+            res = op_call(a, dim, index, unique_indices=True)
+
+            with DeterministicGuard(True):
+                res.backward(torch.ones_like(res))
 
         test_func(torch.gather)
         test_func(torch.Tensor.gather)
@@ -1532,7 +1629,7 @@ else:
             dim = 0
             src = torch.randn(m, device=device, requires_grad=True)
             idx = torch.randint(m, (elems,), device=device)
-            res = torch.gather(src, dim, idx)
+            res = torch.gather(src, dim, idx, unique_indices=True)
             weight = torch.rand_like(res, device=device) * 10 ** 6
             res.backward(weight)
             grad = src.grad.detach().clone()
@@ -1540,7 +1637,7 @@ else:
             if torch.device(device).type == 'cuda':
                 for _ in range(2):
                     src.grad.data.zero_()
-                    res = torch.gather(src, dim, idx)
+                    res = torch.gather(src, dim, idx, unique_indices=True)
                     res.backward(weight)
                     self.assertEqual(src.grad, grad, atol=0, rtol=0)
             else:
@@ -1570,7 +1667,7 @@ else:
             idx = torch.randint(m, (elems,), device=device)
 
             x = torch.zeros(m, device=device)
-            res = x.scatter_add(dim, idx, src)
+            res = x.scatter_add(dim, idx, src, unique_indices=True)
 
             expected = torch.zeros(m, device=device)
             for i in range(elems):

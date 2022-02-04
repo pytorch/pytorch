@@ -405,8 +405,9 @@ def use_deterministic_algorithms(mode, *, warn_only=False):
         * :func:`torch.Tensor.scatter_` when called on a CUDA tensor, ``index`` does
           not contain overlapping entries, ``unique_indices=True`` is set, and
           ``reduction`` is not set to ``'add'``
-        * :func:`torch.gather` when ``input`` dimension is one and called
-          on a CUDA tensor that requires grad
+        * :func:`torch.gather` when ``input`` dimension is one, ``index`` does not
+          contain overlapping entries, ``unique_indices=True`` is set,
+          and called on a CUDA tensor that requires grad
         * :func:`torch.index_add` when called on CUDA tensor
         * :func:`torch.index_select` when attempting to differentiate a CUDA tensor
         * :func:`torch.repeat_interleave` when attempting to differentiate a CUDA tensor
@@ -449,6 +450,8 @@ def use_deterministic_algorithms(mode, *, warn_only=False):
           ``reduction='add'`` is set
         * :func:`torch.gather` when ``input`` dimension is larger than one
           and called on a CUDA tensor that requires grad
+        * :func:`torch.gather` when ``unique_indices=False`` is set and called on
+          a tensor that requires grad
         * :func:`torch.Tensor.put_` when ``accumulate=False``
         * :func:`torch.Tensor.put_` when ``accumulate=True`` and called on a CUDA tensor
         * :func:`torch.histc` when called on a CUDA tensor
