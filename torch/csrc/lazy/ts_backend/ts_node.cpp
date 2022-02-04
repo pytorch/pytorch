@@ -157,5 +157,17 @@ TSOpVector TsNode::Lower(std::shared_ptr<torch::jit::GraphFunction> function,
   return {};
 }
 
+NodeCache* GetNodeCache() {
+  static NodeCache* cache = new NodeCache(FLAGS_torch_lazy_ts_shape_cache_size);
+  return cache;
+}
+
+void RemoveEntryFromNodeCache(hash_t hash) {
+  NodeCache* cache = GetNodeCache();
+  if (cache->Get(hash) != nullptr) {
+    cache->Erase(hash);
+  }
+}
+
 }  // namespace lazy
 }  // namespace torch

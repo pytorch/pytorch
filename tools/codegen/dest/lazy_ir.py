@@ -242,6 +242,31 @@ class GenLazyNativeFuncDefinition:
 
         node_str = f"""auto node = torch::lazy::MakeNode<ir::ops::{schema.node_name}>({node_ctor_input_str},
                                                                                       std::move(shapes));"""
+
+        node_cache_str = f"""
+            auto node_cache = torch::lazy::GetNodeCache();
+            if (node_cache->Get(new_node->hash()) == nullptr)
+            {{
+                node_cache->Add(new_node->hash(), new_node);
+                node = std::move(new_node);
+                std::cout << "Create a new " << node->ToString() << std::endl;
+            }} else {{
+                // Reuse the old node instead of using the newly-created IR, to see if reusing works
+                node = node_cache->Get(new_node->hash());
+                std::cout << "Reuse " << node->ToString() << std::endl;
+            }}
+        """ if not schema.name.name.inplace and not func.func.is_out_fn() else """node = std::move(new_node);
+        """
+        # """ if schema.aten_name in ["addcdiv", "addcmul", "sqrt", "gelu"] else """node = std::move(new_node);
+        # """
+        node_str = f"""torch::lazy::NodePtr node;
+        {{
+            TORCH_LAZY_TIMED("{self.class_method_name}::{schema.aten_name}::MakeNode");
+            torch::lazy::NodePtr new_node = torch::lazy::MakeNode<ir::ops::{schema.node_name}>({node_ctor_input_str},
+                            std::move(shapes));
+            {node_cache_str}
+        }}"""
+
         first_tensor_name = value_types_names[0]
         bridge_str = """auto result = torch::lazy::CreateAtenFromLtcTensor(
                 torch::lazy::LazyTensor::Create(std::move(node), *common_device));"""

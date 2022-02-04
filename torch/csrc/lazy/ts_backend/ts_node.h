@@ -2,6 +2,7 @@
 
 #include <c10/util/ArrayRef.h>
 #include <torch/csrc/lazy/backend/lowering_context.h>
+#include <torch/csrc/lazy/core/cache.h>
 #include <torch/csrc/lazy/core/shape.h>
 #include <torch/csrc/lazy/core/ir.h>
 #include <torch/csrc/jit/ir/ir.h>
@@ -86,6 +87,11 @@ class TORCH_API TsNode : public lazy::Node {
   std::vector<Output> operands_as_outputs_;
   std::string python_stacktrace_;
 };
+
+using NodeCache = Cache<hash_t, Node, HashReducer>;
+TORCH_API NodeCache* GetNodeCache();
+
+TORCH_API void RemoveEntryFromNodeCache(hash_t hash);
 
 }  // namespace lazy
 }  // namespace torch

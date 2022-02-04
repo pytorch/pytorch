@@ -150,7 +150,9 @@ class TORCH_API LazyGraphExecutor {
   struct PostOrderData {
     std::vector<Node*> post_order;
     Util::EmissionMap emission_map;
-    std::vector<BackendDataPtr> parameters_data;
+    //std::vector<BackendDataPtr> parameters_data;
+    // Only remember column index here, the actual is read from the 
+    std::vector<size_t> parameter_backend_data_storage_column;
     std::vector<size_t> parameter_sequence;
   };
 
@@ -158,13 +160,13 @@ class TORCH_API LazyGraphExecutor {
     BackendDevice device;
     size_t emitted_nodes = 0;
     ComputationPtr computation;
-    std::vector<BackendDataPtr> parameters_data;
+    std::vector<size_t> parameter_backend_data_storage_column;
   };
 
   struct Async {
     Async(
         SyncTensorCollection* coll,
-        std::vector<BackendDataPtr> parameters_data,
+        std::vector<size_t> parameter_backend_data_storage_column,
         std::vector<BackendDataPtr> tensors_data,
         ComputationCache::TypePtr cached_computation);
 
@@ -173,7 +175,7 @@ class TORCH_API LazyGraphExecutor {
     MultiWait mwait;
     std::vector<size_t> indices;
     std::vector<ExceptionCleanup> unlocker;
-    std::vector<BackendDataPtr> parameters_data;
+    std::vector<size_t> parameter_backend_data_storage_column;
     BackendDevice device;
     ComputationCache::TypePtr cached_computation;
     std::vector<BackendDataPtr> tensors_data;
@@ -223,14 +225,14 @@ class TORCH_API LazyGraphExecutor {
   // present within the coll structure.
   std::shared_ptr<Async> ScheduleSyncTensorsGraph(
       SyncTensorCollection* coll,
-      std::vector<BackendDataPtr> parameters_data,
+      std::vector<size_t> parameter_backend_data_storage_column,
       std::vector<BackendDataPtr> tensors_data,
       ComputationCache::TypePtr cached_computation);
 
   std::shared_ptr<Async> ScheduleSyncTensorsGraph(
       std::vector<LazyTensorPtr>* tensors,
       SyncTensorCollection* coll,
-      std::vector<BackendDataPtr> parameters_data,
+      std::vector<size_t> parameter_backend_data_storage_column,
       ComputationCache::TypePtr cached_computation);
 
   std::vector<at::Tensor> GetTensorsFused(std::vector<LazyTensorPtr>* tensors);
