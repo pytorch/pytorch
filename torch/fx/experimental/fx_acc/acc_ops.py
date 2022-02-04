@@ -1511,6 +1511,13 @@ def getitem(*, input, idx):
     return input[idx]
 
 
+@register_acc_op_mapping(op_and_target=("call_function", torch.nan_to_num))
+@register_acc_op_mapping(op_and_target=("call_method", "nan_to_num"))
+@register_acc_op
+def nan_to_num(*, input, nan=0.0, posinf=None, neginf=None):
+    return torch.nan_to_num(input, nan=nan, posinf=posinf, neginf=neginf)
+
+
 @register_acc_op_properties(AccOpProperty.unary)
 @register_acc_op
 def slice_tensor(*, input, dim, start, stop, step):
