@@ -6,28 +6,30 @@
 #include <cstdint>
 #include <vector>
 
-#define FOR_ALL_EXTERNAL_FUNCTIONS(_) \
-  _(nnc_aten_conv2d)                  \
-  _(nnc_aten_matmul)                  \
-  _(nnc_aten_mv)                      \
-  _(nnc_aten_mm)                      \
-  _(nnc_aten_adaptive_avg_pool2d)     \
-  _(nnc_aten_mean)                    \
-  _(nnc_aten_addmm)                   \
-  _(nnc_aten_quantized_conv1d)        \
-  _(nnc_aten_quantized_conv2d)        \
-  _(nnc_aten_quantized_conv2d_out)    \
-  _(nnc_aten_quantized_conv2d_relu)   \
-  _(nnc_aten_quantized_linear)        \
-  _(nnc_aten_quantized_linear_relu)   \
-  _(nnc_aten_quantized_add)           \
-  _(nnc_aten_quantized_cat)           \
-  _(nnc_aten_quantized_mul)           \
-  _(nnc_aten_quantized_mul_scalar)    \
-  _(nnc_aten_quantized_relu)          \
-  _(nnc_aten_quantized_sigmoid)       \
-  _(nnc_aten_quantize_per_tensor)     \
-  _(nnc_aten_dequantize)              \
+#define FOR_ALL_EXTERNAL_FUNCTIONS(_)   \
+  _(nnc_aten_conv2d)                    \
+  _(nnc_aten_matmul)                    \
+  _(nnc_aten_mv)                        \
+  _(nnc_aten_mm)                        \
+  _(nnc_aten_adaptive_avg_pool2d)       \
+  _(nnc_aten_mean)                      \
+  _(nnc_aten_addmm)                     \
+  _(nnc_aten_quantized_conv1d)          \
+  _(nnc_aten_quantized_conv2d)          \
+  _(nnc_aten_quantized_conv2d_out)      \
+  _(nnc_aten_quantized_conv2d_relu)     \
+  _(nnc_aten_quantized_conv2d_relu_out) \
+  _(nnc_aten_quantized_linear)          \
+  _(nnc_aten_quantized_linear_relu)     \
+  _(nnc_aten_quantized_add)             \
+  _(nnc_aten_quantized_cat)             \
+  _(nnc_aten_quantized_mul)             \
+  _(nnc_aten_quantized_mul_out)         \
+  _(nnc_aten_quantized_mul_scalar)      \
+  _(nnc_aten_quantized_relu)            \
+  _(nnc_aten_quantized_sigmoid)         \
+  _(nnc_aten_quantize_per_tensor)       \
+  _(nnc_aten_dequantize)                \
   _(nnc_aten_upsample_nearest2d)
 
 #define DECLARE_EXTERNAL_FUNCTION(NAME) \

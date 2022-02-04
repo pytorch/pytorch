@@ -408,7 +408,7 @@ void nnc_aten_quantized_conv2d_out(
   // NOLINTNEXTLINE
   auto r = convPackedParams->apply(tensors[1], out_qscale, out_qzero);
   buf_data[0] = r.data_ptr();
-  // c10::raw::intrusive_ptr::incref(r.getIntrusivePtr().get());
+  c10::raw::intrusive_ptr::incref(r.getIntrusivePtr().get());
 }
 
 void nnc_aten_quantized_conv2d_relu(
@@ -438,6 +438,36 @@ void nnc_aten_quantized_conv2d_relu(
   // NOLINTNEXTLINE
   auto r = convPackedParams->apply_relu(tensors[1], out_qscale, out_qzero);
   memcpy(buf_data[0], r.data_ptr(), r.element_size() * r.numel());
+}
+
+void nnc_aten_quantized_conv2d_relu_out(
+    int64_t bufs_num,
+    void** buf_data,
+    int64_t* buf_ranks,
+    int64_t* buf_dims,
+    int64_t* buf_strides,
+    int8_t* buf_dtypes,
+    int64_t,
+    int64_t* extra_args) {
+  const double x_qscale = ((double*)extra_args)[0];
+  const int64_t x_qzero = extra_args[1];
+  const c10::ScalarType x_qdtype = static_cast<c10::ScalarType>(extra_args[2]);
+  auto tensors = constructTensors(
+      bufs_num,
+      buf_data,
+      buf_ranks,
+      buf_dims,
+      buf_strides,
+      buf_dtypes,
+      {{1u, {x_qscale, x_qzero, toQIntType(x_qdtype)}}});
+  auto convPackedParams =
+      reinterpret_cast<ConvPackedParamsBase<2>*>(buf_data[2]);
+  const double out_qscale = ((double*)extra_args)[3];
+  const int64_t out_qzero = extra_args[4];
+  // NOLINTNEXTLINE
+  auto r = convPackedParams->apply_relu(tensors[1], out_qscale, out_qzero);
+  buf_data[0] = r.data_ptr();
+  c10::raw::intrusive_ptr::incref(r.getIntrusivePtr().get());
 }
 
 void nnc_aten_quantized_linear(
@@ -561,6 +591,42 @@ void nnc_aten_quantized_mul(
   const int64_t out_qzero = extra_args[7];
   // NOLINTNEXTLINE
   auto r = quantized_mul(tensors[1], tensors[2], out_qscale, out_qzero);
+  memcpy(buf_data[0], r.data_ptr(), r.element_size() * r.numel());
+}
+
+void nnc_aten_quantized_mul_out(
+    int64_t bufs_num,
+    void** buf_data,
+    int64_t* buf_ranks,
+    int64_t* buf_dims,
+    int64_t* buf_strides,
+    int8_t* buf_dtypes,
+    int64_t,
+    int64_t* extra_args) {
+  const double a_qscale = ((double*)extra_args)[0];
+  const int64_t a_qzero = extra_args[1];
+  const c10::ScalarType a_qdtype = static_cast<c10::ScalarType>(extra_args[2]);
+  const double b_qscale = ((double*)extra_args)[3];
+  const int64_t b_qzero = extra_args[4];
+  const c10::ScalarType b_qdtype = static_cast<c10::ScalarType>(extra_args[5]);
+  auto tensors = constructTensors(
+      bufs_num,
+      buf_data,
+      buf_ranks,
+      buf_dims,
+      buf_strides,
+      buf_dtypes,
+      {{1u, {a_qscale, a_qzero, toQIntType(a_qdtype)}},
+       {2u, {b_qscale, b_qzero, toQIntType(b_qdtype)}}});
+  const double out_qscale = ((double*)extra_args)[6];
+  const int64_t out_qzero = extra_args[7];
+  std::cout << "XXX " << __FILE__ << ":" << __LINE__ << "\n tensors[1]:\n"
+            << tensors[1] << "\n tensors[2]:\n"
+            << tensors[2] << std::endl;
+  // NOLINTNEXTLINE
+  auto r = quantized_mul(tensors[1], tensors[2], out_qscale, out_qzero);
+  std::cout << "XXX " << __FILE__ << ":" << __LINE__ << "\n r:" << r
+            << std::endl;
   // memcpy(buf_data[0], r.data_ptr(), r.element_size() * r.numel());
   buf_data[0] = r.data_ptr();
   c10::raw::intrusive_ptr::incref(r.getIntrusivePtr().get());
@@ -1010,9 +1076,15 @@ const static RegisterNNCExternalFunction nnc_quantized_conv1d(
 const static RegisterNNCExternalFunction nnc_quantized_conv2d(
     "nnc_aten_quantized_conv2d",
     nnc_aten_quantized_conv2d);
+const static RegisterNNCExternalFunction nnc_quantized_conv2d_out(
+    "nnc_aten_quantized_conv2d_out",
+    nnc_aten_quantized_conv2d_out);
 const static RegisterNNCExternalFunction nnc_quantized_conv2d_relu(
     "nnc_aten_quantized_conv2d_relu",
     nnc_aten_quantized_conv2d_relu);
+const static RegisterNNCExternalFunction nnc_quantized_conv2d_relu_out(
+    "nnc_aten_quantized_conv2d_relu_out",
+    nnc_aten_quantized_conv2d_relu_out);
 const static RegisterNNCExternalFunction nnc_quantized_linear(
     "nnc_aten_quantized_linear",
     nnc_aten_quantized_linear);
@@ -1023,6 +1095,9 @@ const static RegisterNNCExternalFunction nnc_quantized_add(
 const static RegisterNNCExternalFunction nnc_quantized_mul(
     "nnc_aten_quantized_mul",
     nnc_aten_quantized_mul);
+const static RegisterNNCExternalFunction nnc_quantized_mul_out(
+    "nnc_aten_quantized_mul_out",
+    nnc_aten_quantized_mul_out);
 const static RegisterNNCExternalFunction nnc_quantized_mul_scalar(
     "nnc_aten_quantized_mul_scalar",
     nnc_aten_quantized_mul_scalar);

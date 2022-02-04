@@ -1102,12 +1102,22 @@ void LLVMCodeGenImpl::visit(VarPtr v) {
 }
 
 llvm::Value* LLVMCodeGenImpl::varToValue(VarPtr v) {
+  std::cout << "XXX " << __FILE__ << ":" << __LINE__ << __FUNCTION__
+            << " varToVal " << *v
+            << " varReuse_.count(v):" << varReuse_.count(v) << std::endl;
   if (varReuse_.count(v)) {
+    std::cout << "XXX " << __FILE__ << ":" << __LINE__ << __FUNCTION__
+              << " varReuse(" << *v << "): " << *varReuse_.at(v) << std::endl;
     return varToValue(varReuse_.at(v));
   }
+
   // It is possible for v to be in both varToVal_ and varToArgs.
   // In that case, varToVal_ takes precedence.
   if (varToVal_.count(v)) {
+    auto val = varToVal_.at(v);
+    std::cout << "XXX " << __FILE__ << ":" << __LINE__ << __FUNCTION__
+              << "ret val " << val << std::endl;
+    val->dump();
     return varToVal_.at(v);
   } else if (varToArg_.count(v)) {
     auto idx = varToArg_.at(v);
@@ -1908,6 +1918,7 @@ void LLVMCodeGenImpl::visit(IntrinsicsPtr v) {
 }
 
 void LLVMCodeGenImpl::visit(ExternalCallPtr v) {
+  std::cout << "XXX " << __FILE__ << ":" << __LINE__ << " " << *v << std::endl;
   auto& func_registry = getNNCFunctionRegistry();
   if (!func_registry.count(v->func_name())) {
     throw unimplemented_lowering(v);
@@ -1915,6 +1926,7 @@ void LLVMCodeGenImpl::visit(ExternalCallPtr v) {
 
   // Prepare a vector of bufs that we need to pass to the external function.
   // This vector is the output buf followed by the buf_args.
+  std::cout << "XXX " << __FILE__ << ":" << __LINE__ << std::endl;
   std::vector<BufPtr> bufs(v->buf_args());
   bufs.insert(bufs.begin(), v->buf());
 
@@ -1923,11 +1935,13 @@ void LLVMCodeGenImpl::visit(ExternalCallPtr v) {
 
   // Count the size of dims array - it consists of dimension of all bufs
   // concatenated together.
+  std::cout << "XXX " << __FILE__ << ":" << __LINE__ << std::endl;
   int64_t dims_num = 0;
   for (BufPtr b : bufs) {
     dims_num += b->dims().size();
   }
 
+  std::cout << "XXX " << __FILE__ << ":" << __LINE__ << std::endl;
   llvm::Value* buf_ptrs = irb_.CreateAlloca(
       Int8PtrTy_, llvm::ConstantInt::getSigned(IntTy_, bufs_num));
   llvm::Value* buf_ranks = irb_.CreateAlloca(
@@ -1941,6 +1955,7 @@ void LLVMCodeGenImpl::visit(ExternalCallPtr v) {
   llvm::Value* extra_args = irb_.CreateAlloca(
       LongTy_, llvm::ConstantInt::getSigned(IntTy_, args_num));
 
+  std::cout << "XXX " << __FILE__ << ":" << __LINE__ << std::endl;
   int i = 0;
   int dim_idx = 0;
   int stride_idx = 0;
@@ -1948,6 +1963,8 @@ void LLVMCodeGenImpl::visit(ExternalCallPtr v) {
     // Store value for buf pointer
     auto gep = irb_.CreateInBoundsGEP(
         Int8PtrTy_, buf_ptrs, llvm::ConstantInt::getSigned(IntTy_, i));
+    std::cout << "XXX " << __FILE__ << ":" << __LINE__ << " "
+              << *b->base_handle() << std::endl;
     b->base_handle()->accept(this);
     auto buf_ptr = this->value_;
     auto buf_void_ptr = irb_.CreatePointerCast(buf_ptr, Int8PtrTy_);
@@ -1991,6 +2008,7 @@ void LLVMCodeGenImpl::visit(ExternalCallPtr v) {
     i++;
   }
 
+  std::cout << "XXX " << __FILE__ << ":" << __LINE__ << std::endl;
   i = 0;
   for (ExprPtr arg : v->args()) {
     auto gep = irb_.CreateInBoundsGEP(
@@ -2000,6 +2018,7 @@ void LLVMCodeGenImpl::visit(ExternalCallPtr v) {
     i++;
   }
 
+  std::cout << "XXX " << __FILE__ << ":" << __LINE__ << std::endl;
   // Generate the call itself
   std::string fname = v->func_name();
   FunctionCallee callee = module_->getOrInsertFunction(
@@ -2020,6 +2039,7 @@ void LLVMCodeGenImpl::visit(ExternalCallPtr v) {
   auto call_fn = callee.getCallee();
   llvm::cast<llvm::Function>(call_fn)->addFnAttr(llvm::Attribute::NoUnwind);
 
+  std::cout << "XXX " << __FILE__ << ":" << __LINE__ << std::endl;
   irb_.CreateCall(
       call_ty,
       call_fn,
@@ -2031,6 +2051,7 @@ void LLVMCodeGenImpl::visit(ExternalCallPtr v) {
        buf_dtypes,
        llvm::ConstantInt::getSigned(LongTy_, args_num),
        extra_args});
+  std::cout << "XXX " << __FILE__ << ":" << __LINE__ << std::endl;
 
   value_ = llvm::ConstantInt::get(IntTy_, 0);
 }
@@ -2172,8 +2193,17 @@ void LLVMCodeGenImpl::visit(ExternalCall2Ptr v) {
     const auto& buf_out = bufs_out[i];
     auto gep = irb_.CreateInBoundsGEP(
         Int8PtrTy_, buf_ptrs, llvm::ConstantInt::getSigned(IntTy_, i));
+    std::cout << "XXX " << __FILE__ << ":" << __LINE__
+              << " visit(ExternalCall2) " << *v << std::endl;
     varToVal_[buf_out->base_handle()] = irb_.CreatePointerCast(
         irb_.CreateLoad(Int8PtrTy_, gep), dtypeToLLVMPtr(buf_out->dtype()));
+    std::cout << "XXX " << __FILE__ << ":" << __LINE__ << " varToVal_["
+              << *buf_out->base_handle()
+              << "]=" << varToVal_[buf_out->base_handle()]
+
+              << std::endl;
+
+    varToVal_[buf_out->base_handle()]->dump();
   }
 
   value_ = llvm::ConstantInt::get(IntTy_, 0);
@@ -2212,6 +2242,16 @@ void LLVMCodeGenImpl::visit(AllocatePtr v) {
 }
 
 void LLVMCodeGenImpl::visit(PlacementAllocatePtr v) {
+  // llvm::Value* ptr = varToVal_.at(v->buf_to_reuse()->base_handle());
+  // varToVal_[v->buf()->base_handle()] = ptr;
+
+  std::cout << "XXX " << __FILE__ << ":" << __LINE__
+            << " visit PlacementAllocate:" << *v << std::endl;
+  std::cout << "XXX " << __FILE__ << ":" << __LINE__
+            << " visit PlacementAllocate:"
+            << " varReuse_[" << *v->buf()->base_handle()
+            << "] = " << *v->buf_to_reuse()->base_handle() << std::endl;
+
   varReuse_[v->buf()->base_handle()] = v->buf_to_reuse()->base_handle();
 }
 
