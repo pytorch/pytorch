@@ -43,11 +43,6 @@ TORCH_META_FUNC2(sort, stable)
       "sort(): c10::optional<bool> for stable has to have value.");
   maybe_wrap_dim(dim, self.dim());
 
-  const auto& values = maybe_get_output(0);
-  auto values_defined = values.defined();
-  const auto& indices = maybe_get_output(1);
-  auto indices_defined = indices.defined();
-
   // See issue: https://github.com/pytorch/pytorch/issues/65863
   // Strides should be dense, so as not to allocate too much memory.
   // We either use 'self' strides, or infer dense strides from them.
@@ -57,24 +52,6 @@ TORCH_META_FUNC2(sort, stable)
 
   set_output(0, self.sizes(), strides, self.options(), {});
   set_output(1, self.sizes(), strides, self.options().dtype(kLong), {});
-
-  // Overlap Checking
-  // 1. 'self' can be the same as 'values' (in-place).
-  // 2. 'self' can't overlap with 'indices'
-  // 3. 'values' and 'indices' can't overlap.
-  if (values_defined) {
-    at::assert_no_internal_overlap(values);
-    at::assert_no_partial_overlap(self, values);
-  }
-
-  if (indices_defined) {
-    at::assert_no_internal_overlap(indices);
-    at::assert_no_overlap(self, indices);
-  }
-
-  if (values_defined && indices_defined) {
-    at::assert_no_overlap(values, indices);
-  }
 }
 
 } // namespace meta
