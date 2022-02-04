@@ -695,11 +695,6 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
             dictIndex(stack);
           }
             INST_NEXT;
-          case INST(TO_LIST): {
-            INST_GUARD;
-            toList(stack);
-          }
-            INST_NEXT;
           case INST(NUM_TO_TENSOR): {
             INST_GUARD;
             numToTensorScalar(stack);

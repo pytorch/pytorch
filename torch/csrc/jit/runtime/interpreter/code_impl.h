@@ -755,9 +755,6 @@ struct CodeImpl {
       case prim::NumToTensor:
         emitOperatorOrInstruction(node, NUM_TO_TENSOR);
         break;
-      case prim::tolist:
-        emitOperatorOrInstruction(node, TO_LIST);
-        break;
     }
   }
 

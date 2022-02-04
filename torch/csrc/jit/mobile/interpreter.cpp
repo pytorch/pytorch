@@ -292,10 +292,6 @@ bool InterpreterState::run(Stack& stack) {
           dictIndex(stack);
           frame.step();
         } break;
-        case TO_LIST: {
-          toList(stack);
-          frame.step();
-        } break;
         case NUM_TO_TENSOR: {
           numToTensorScalar(stack);
           frame.step();

@@ -83,7 +83,7 @@ bool isOpSupportedInMobile(OpCode op) {
       RAISE_EXCEPTION, UNCHECKED_CAST, __IS__, UN_INITIALIZED,
       __ISNOT__, FORMAT, DEVICE, DICT_INDEX,
       DTYPE, TUPLE_INDEX, DIM, __NOT__,
-      TO_LIST, NUM_TO_TENSOR, IS_CUDA};
+      NUM_TO_TENSOR, IS_CUDA};
   // clang-format on
 
   for (auto sop : supported_ops_in_mobile) {

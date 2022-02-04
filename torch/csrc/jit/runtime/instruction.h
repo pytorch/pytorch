@@ -66,7 +66,6 @@ namespace jit {
   _(DTYPE, "") /* invokes aten::dtype for a Tensor */                          \
   _(DIM, "") /* invokes aten::dim for a Tensor */                              \
   _(__NOT__, "") /* performs `not` operator from Python  */                    \
-  _(TO_LIST, "") /* convert the input to a list */                             \
   _(NUM_TO_TENSOR,                                                             \
     "") /* performs the conversion of a number/scalar to Tensor */             \
   _(IS_CUDA, "") /* invokes aten::is_cuda for a Tensor */                      \
