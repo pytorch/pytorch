@@ -5701,7 +5701,7 @@
   variants: method
   dispatch:
     QuantizedCPU, QuantizedCUDA: item_quantized
-    CPU, CUDA, SparseCPU, SparseCUDA : item
+    CPU, CUDA, SparseCPU, SparseCUDA: item
 
 - func: result_type.Tensor(Tensor tensor, Tensor other) -> ScalarType
   variants: function
