@@ -260,12 +260,15 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject *unused) {
         rec->before(name);
       }
     }
-    return python_rec;
+    return torch::jit::toPyObject(std::move(python_rec));
   });
 
   // Ends the profiling scope created with record_function_with_param_enter.
   m.def("_record_function_with_args_exit",
-        [](const c10::intrusive_ptr<torch::autograd::profiler::PythonRecordFunction>& python_record) {
+        [](const py::object &obj) {
+          using torch::autograd::profiler::PythonRecordFunction;
+          auto python_record = torch::jit::toCustomClass<PythonRecordFunction>(obj);
+
           // We don't actually need to do anything with handle just need to persist the
           // lifetime until now.
           python_record->record.end();

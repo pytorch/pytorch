@@ -428,9 +428,9 @@ class record_function(ContextDecorator):
         self.args: Optional[str] = args
         # Whether or not we should run record function's end callbacks when exiting.
         self.run_callbacks_on_exit: bool = True
-        # Stores underlying RecordFunction as a tensor. TODO: move to custom
-        # class (https://github.com/pytorch/pytorch/issues/35026).
-        self.record: Optional["torch.classes.profiler._RecordFunction"] = None
+        # TODO: TorchScript ignores standard type annotation here
+        # self.record: Optional["torch.classes.profiler._RecordFunction"] = None
+        self.record = torch.jit.annotate(Optional["torch.classes.profiler._RecordFunction"], None)
 
     def __enter__(self):
         self.record = torch.ops.profiler._record_function_enter_new(self.name, self.args)
@@ -438,7 +438,10 @@ class record_function(ContextDecorator):
 
     def __exit__(self, exc_type: Any, exc_value: Any, traceback: Any):
         if self.run_callbacks_on_exit:
-            torch.ops.profiler._record_function_exit_new(self.record)
+            # Local variable is needed by TorchScript to refine Optional[T] to T
+            record = self.record
+            assert record is not None
+            torch.ops.profiler._record_function_exit_new(record)
 
     def _call_end_callbacks_on_future(self, fut: Future[Any]) -> Future[Any]:
         """
@@ -465,7 +468,11 @@ class record_function(ContextDecorator):
         # We are scheduling to run this RecordFunction's end callbacks when the
         # passed in future completes, so don't run end callbacks on exit.
         self.run_callbacks_on_exit = False
-        profiled_future = torch.ops.profiler._call_end_callbacks_on_jit_fut(self.record, fut)
+
+        # Local variable is needed by TorchScript to refine Optional[T] to T
+        record = self.record
+        assert record is not None
+        profiled_future = torch.ops.profiler._call_end_callbacks_on_jit_fut(record, fut)
         return profiled_future
 
 

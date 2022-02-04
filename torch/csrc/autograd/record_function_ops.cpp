@@ -129,7 +129,7 @@ TORCH_LIBRARY_FRAGMENT(profiler, m) {
   m.def("_record_function_enter", &record_function_enter_legacy);
   m.def("_record_function_enter_new", &record_function_enter_new);
   m.def("_record_function_exit", &record_function_exit_legacy);
-  m.def("_record_function_exit_new", &record_function_exit_new);
+  m.def("_record_function_exit._RecordFunction", &record_function_exit_new);
 
   torch::jit::registerOperator(torch::jit::Operator(
         "profiler::_call_end_callbacks_on_jit_fut(Tensor x, Future(t) y) -> Future(t)",
