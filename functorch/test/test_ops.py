@@ -518,7 +518,6 @@ class TestOperators(TestCase):
         xfail('masked_select'),  # Not possible due to dynamic shapes
 
         # All of the following are bugs and need to be fixed
-        xfail('diag_embed'),
         xfail('eig'),
         xfail('view_as_complex'),
         xfail('fft.ihfft'),
@@ -526,10 +525,6 @@ class TestOperators(TestCase):
         xfail('fft.rfft'),
         xfail('fft.rfft'),
         xfail('fft.rfftn'),
-        xfail('fmax'),
-        xfail('fmin'),
-        xfail('index_copy'),
-        xfail('index_fill'),
         xfail('linalg.det', ''),
         xfail('linalg.cholesky'),
         xfail('linalg.eig'),  # Uses aten::allclose
@@ -544,7 +539,6 @@ class TestOperators(TestCase):
         skip('linalg.svdvals'),
         xfail('logdet'),
         xfail('lu_unpack'),
-        xfail('masked_fill'),
         xfail('masked_scatter'),
         xfail('matrix_exp'),
         xfail('nanquantile'),
@@ -561,7 +555,6 @@ class TestOperators(TestCase):
         xfail('fft.ihfftn'),
         xfail('double', 'channels_last'),
         xfail('nn.functional.gaussian_nll_loss'),
-        xfail('nn.functional.poisson_nll_loss'),
         xfail('fft.rfft2'),
         skip('qr'),  # Nondetermistic
         xfail('_masked.prod'),  # calls aten::item
@@ -571,8 +564,7 @@ class TestOperators(TestCase):
         xfail('as_strided'),
         xfail('nn.functional.fractional_max_pool2d'),
         xfail('__getitem__', ''),
-        xfail('__getitem__', 'functorch'),
-        xfail('index_put'),
+        xfail('index_put', ''),
         xfail('lu_solve'),
         xfail('nn.functional.instance_norm'),
     })
@@ -618,10 +610,6 @@ class TestOperators(TestCase):
         xfail('matrix_exp'),
         xfail('fill_'),
         xfail('block_diag'),  # TODO: We expect this to fail in core, but it doesn't
-        xfail('index_copy'),
-        xfail('index_put'),
-        xfail('masked_fill'),
-        xfail('masked_scatter'),
 
         # https://gist.github.com/zou3519/c42d032c0111c6b65235583d391bf7a3
         xfail('nn.functional.linear'),
@@ -723,8 +711,8 @@ class TestOperators(TestCase):
         xfail('nn.functional.instance_norm', device_type='cpu'),
 
         # xfail list
+        xfail('norm', 'nuc'),
         xfail('linalg.inv'),
-        xfail('masked_fill'),
         xfail('linalg.tensorinv'),
         xfail('linalg.matrix_power'),
         xfail('maximum'),
@@ -741,18 +729,14 @@ class TestOperators(TestCase):
         xfail('max', 'binary'),
         xfail('nn.functional.gaussian_nll_loss'),
         xfail('min', 'binary'),
-        xfail('index_put'),
         xfail('std_mean'),
         xfail('double', 'channels_last'),
         xfail('block_diag'),
-        xfail('diag_embed'),
         xfail('minimum'),
         xfail('scatter'),
         xfail('matrix_exp'),
         xfail('nanquantile'),
         xfail('nn.functional.linear'),
-        xfail('index_copy'),
-        xfail('masked_scatter'),
         xfail('view_as_complex'),
         xfail('prod'),
 
@@ -793,14 +777,13 @@ class TestOperators(TestCase):
         xfail('cummax'),
         xfail('cummin'),
         xfail('cumprod'),
-        xfail('diag_embed'),
         xfail('eig'),
+        xfail('fmin'),
+        xfail('fmax'),
         xfail('fft.ihfft'),
         xfail('fft.rfft'),
         xfail('fft.rfftn'),
         xfail('fill_'),
-        xfail('fmax'),
-        xfail('fmin'),
         xfail('index_copy'),
         xfail('index_fill'),
         xfail('linalg.cholesky'),
@@ -907,7 +890,6 @@ class TestOperators(TestCase):
         xfail('clamp', ''),
         xfail('fill_'),
         xfail('index_put', ''),
-        xfail('linalg.svdvals'),
         xfail('lu_solve'),
         xfail('lu_unpack'),
         xfail('matrix_exp'),
