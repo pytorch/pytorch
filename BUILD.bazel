@@ -1637,8 +1637,8 @@ genrule(
 genrule(
     name = "copy_primtorch_aliases",
     srcs = ["tools/codegen/prim/aliases.py"],
-    outs = ["torch/prim/aliases.py"]
-    cmd = "cp tools/codegen/prim/aliases.py torch/prim/aliases.py"
+    outs = ["torch/prim/aliases.py"],
+    cmd = "cp tools/codegen/prim/aliases.py torch/prim/aliases.py",
 )
 
 py_binary(
