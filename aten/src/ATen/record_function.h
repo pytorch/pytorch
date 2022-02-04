@@ -129,6 +129,8 @@ struct TORCH_API RecordFunction {
 
   void update_output_tensor_tracking(void);
   void check_input_mapping(void);
+  std::vector<std::pair<RecordFunctionHandle, int>> flatten_list_op_ids(c10::List<c10::IValue> list, std::string fn_name);
+  std::pair<RecordFunctionHandle, int> get_op_id_from_input(const c10::IValue& input_item);
 
   const char* name() const {
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(state_, "Called name() on inactive RecordFunction");
@@ -301,6 +303,10 @@ struct TORCH_API RecordFunction {
     auto input_op_info =  state_->input_producer_ops_[input_nr];
     // returns a pair of <input_op_id, output_nr>
     return input_op_info;
+  }
+
+  std::vector<std::pair<RecordFunctionHandle, int>> inputProducerOps() const {
+      return state_->input_producer_ops_;
   }
 
  private:

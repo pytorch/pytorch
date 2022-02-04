@@ -20,8 +20,10 @@ namespace impl {
 std::string getNvtxStr(
     const char* name,
     int64_t sequence_nr,
+    at::RecordFunctionHandle op_id,
     const std::vector<std::vector<int64_t>>& shapes,
-    const std::vector<int64_t>& seq_ids) {
+    const std::vector<int64_t>& seq_ids,
+    const std::vector<std::pair<at::RecordFunctionHandle, int>>& input_op_ids) {
   if (sequence_nr >= -1 || shapes.size() > 0) {
     std::string str;
     if (sequence_nr >= 0) {
@@ -36,38 +38,17 @@ std::string getNvtxStr(
     }
     std::stringstream s;
     s << str;
+    s << ", op_id = " << int(op_id);
     if (shapes.size() > 0) {
-      s << ", sizes = [";
-      for (const auto idx : c10::irange(shapes.size())) {
-        if (shapes[idx].size() > 0) {
-          s << "[";
-          for (const auto dim : c10::irange(shapes[idx].size())) {
-            s << shapes[idx][dim];
-            if (dim < shapes[idx].size() - 1) {
-              s << ", ";
-            }
-          }
-          s << "]";
-        } else {
-          s << "[]";
-        }
-        if (idx < shapes.size() - 1) {
-          s << ", ";
-        }
-      }
-      s << "]";
+      s << ", sizes = " << shapesToStr(shapes);
     }
     // Include the sequence ids of the input edges so
     // you can build the network graph
     if (seq_ids.size() > 0) {
-      s << ", seq_ids = [";
-        for (size_t idx = 0; idx < seq_ids.size(); ++idx) {
-          s << seq_ids[idx];
-          if (idx < seq_ids.size() - 1) {
-            s << ", ";
-          }
-        }
-      s << "]";
+      s << ", seq_ids = " << seqIdsToStr(seq_ids);
+    }
+    if (input_op_ids.size() > 0) {
+      s << ", input_op_ids = " << inputOpIdsToStr(input_op_ids);
     }
     return s.str();
   } else {
@@ -127,12 +108,12 @@ std::string stacksToStr(
   return "\"" + rc + "\"";
 }
 
-int get_input_op_id_from_record_fn(const at::RecordFunction& fn, int input_nr) {
+std::pair<at::RecordFunctionHandle, int> get_input_op_id_from_record_fn(const at::RecordFunction& fn, int input_nr) {
   auto input_producer_pair = fn.inputOpId(input_nr);
   at::RecordFunctionHandle input_op_id = input_producer_pair.first;
   int output_nr = input_producer_pair.second;
-  std::cout << "Profiler: FN " << fn.name() << " Op ID " << fn.handle() << " Input nr " << input_nr << " Input Op ID " << input_op_id<< std::endl;
-  return input_op_id;
+  std::cout << "Profiler: FN " << fn.name() << " Op ID " << fn.handle() << " Input nr " << input_nr << " Input Op ID " << int(input_op_id) << std::endl;
+  return input_producer_pair;
 }
 
 int get_seq_id_from_input_tensor(const c10::IValue& input_item) {
@@ -183,31 +164,16 @@ std::vector<std::vector<int64_t>> inputSizes(const at::RecordFunction& fn) {
   return sizes;
 }
 
-std::vector<int64_t> inputOpIds(const at::RecordFunction& fn) {
-  std::vector<int64_t> op_ids;
-  op_ids.reserve(fn.inputs().size());
+std::vector<std::pair<at::RecordFunctionHandle, int>> inputOpIds(const at::RecordFunction& fn) {
+  std::vector<std::pair<at::RecordFunctionHandle, int>> input_op_ids;
+  int num_inputs = fn.inputProducerOps().size();
+  input_op_ids.reserve(num_inputs);
   int input_nr = 0;
-  for (const c10::IValue& input : fn.inputs()) {
-    int op_id = -1;
-    if (!input.isTensor()) {
-      if (input.isList()) {
-        std::vector<int64_t> tmp_op_ids = flatten_list_seq_ids(input.toList(), std::string(fn.name()));
-        // Extend the current sizes array by the array returned from input sizes
-        if (!tmp_op_ids.empty()) {
-          op_ids.insert(op_ids.end(), tmp_op_ids.begin(), tmp_op_ids.end());
-        } else {
-          op_ids.push_back(op_id);
-        }
-      } else {
-        op_ids.push_back(op_id);
-      }
-    } else {
-      op_id = get_input_op_id_from_record_fn(fn, input_nr);
-      op_ids.push_back(op_id);
-    }
-    input_nr++;
+  for (input_nr = 0; input_nr < num_inputs; input_nr++) {
+    auto op_id_pair = fn.inputOpId(input_nr);
+    input_op_ids.push_back(op_id_pair);
   }
-  return op_ids;
+  return input_op_ids;
 }
 
 std::vector<int64_t> inputSeqIds(const at::RecordFunction& fn) {
@@ -232,7 +198,7 @@ std::vector<int64_t> inputSeqIds(const at::RecordFunction& fn) {
       seq_id = get_seq_id_from_input_tensor(input);
       seq_ids.push_back(seq_id);
       // Remove this once op id logic is connected
-      at::RecordFunctionHandle op_id = get_input_op_id_from_record_fn(fn, iter);
+      auto op_id_info = get_input_op_id_from_record_fn(fn, iter);
     }
     iter++;
   }
@@ -254,6 +220,21 @@ std::string shapesToStr(const std::vector<std::vector<int64_t>>& shapes) {
       oss << shapes[t_idx][s_idx];
     }
     oss << "]";
+  }
+  oss << "]";
+  return oss.str();
+}
+
+std::string inputOpIdsToStr(const std::vector<std::pair<at::RecordFunctionHandle, int>>& input_op_ids) {
+  std::ostringstream oss;
+  oss << "[";
+  for (const auto idx : c10::irange(input_op_ids.size())) {
+    if (idx > 0) {
+      oss << ", ";
+    }
+    auto op_id_info_pair = input_op_ids[idx];
+    // OpId:OutputNr
+    oss << int(op_id_info_pair.first) << ":" << op_id_info_pair.second;
   }
   oss << "]";
   return oss.str();

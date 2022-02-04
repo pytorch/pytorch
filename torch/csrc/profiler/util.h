@@ -54,8 +54,10 @@ inline int64_t getTime(bool allow_monotonic = false) {
 std::string getNvtxStr(
     const char* name,
     int64_t sequence_nr,
+    at::RecordFunctionHandle op_id,
     const std::vector<std::vector<int64_t>>& shapes,
-    const std::vector<int64_t>& seq_ids);
+    const std::vector<int64_t>& seq_ids,
+    const std::vector<std::pair<at::RecordFunctionHandle, int>>& input_op_ids);
 
 struct TORCH_API FileLineFunc {
   std::string filename;
@@ -73,10 +75,12 @@ TORCH_API std::string stacksToStr(
 TORCH_API std::vector<std::vector<int64_t>> inputSizes(
     const at::RecordFunction& fn);
 TORCH_API std::vector<int64_t> inputSeqIds(const at::RecordFunction& fn);
+TORCH_API std::vector<std::pair<at::RecordFunctionHandle, int>> inputOpIds(const at::RecordFunction& fn);
 TORCH_API std::string shapesToStr(
     const std::vector<std::vector<int64_t>>& shapes);
 TORCH_API std::string dtypesToStr(const std::vector<std::string>& types);
 TORCH_API std::string seqIdsToStr(const std::vector<int64_t>& seq_ids);
+TORCH_API std::string inputOpIdsToStr(const std::vector<std::pair<at::RecordFunctionHandle, int>>& input_op_ids);
 TORCH_API std::vector<std::string> inputTypes(const at::RecordFunction& fn);
 
 std::unordered_map<std::string, c10::IValue> TORCH_API

@@ -39,10 +39,13 @@ std::unique_ptr<at::ObserverContext> enterNVTX(const at::RecordFunction& fn) {
         torch::profiler::impl::getNvtxStr(
             fn.name(),
             fn.seqNr(),
+            fn.handle(),
             report_input_shapes ? torch::profiler::impl::inputSizes(fn)
                                 : std::vector<std::vector<int64_t>>(),
             report_input_shapes ? torch::profiler::impl::inputSeqIds(fn)
-                                : std::vector<int64_t>())
+                                : std::vector<int64_t>(),
+            report_input_shapes ? torch::profiler::impl::inputOpIds(fn)
+                                : std::vector<std::pair<at::RecordFunctionHandle, int>>())
             .c_str());
   }
   return nullptr;

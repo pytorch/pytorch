@@ -82,6 +82,14 @@ struct TORCH_API KinetoEvent {
     return *seq_ids_;
   }
 
+  bool hasInputOpIds() const {
+    return input_op_ids_ != c10::nullopt;
+  }
+
+  const std::vector<std::pair<at::RecordFunctionHandle, int>>& input_op_ids() const {
+    return *input_op_ids_;
+  }
+
   uint64_t flops() const {
     return flops_;
   }
@@ -95,8 +103,17 @@ struct TORCH_API KinetoEvent {
     return sequence_nr_;
   }
 
+  at::RecordFunctionHandle opId() const {
+    return op_id_;
+  }
+
   KinetoEvent& sequenceNr(int64_t sequence_nr) {
     sequence_nr_ = sequence_nr;
+    return *this;
+  }
+
+  KinetoEvent& opId(at::RecordFunctionHandle op_id) {
+    op_id_ = op_id;
     return *this;
   }
 
@@ -146,6 +163,11 @@ struct TORCH_API KinetoEvent {
 
   KinetoEvent& seq_ids(const std::vector<int64_t>& seq_ids) {
     seq_ids_ = seq_ids;
+    return *this;
+  }
+
+  KinetoEvent& input_op_ids(const std::vector<std::pair<at::RecordFunctionHandle, int>>& input_op_ids) {
+    input_op_ids_ = input_op_ids;
     return *this;
   }
 
@@ -254,6 +276,7 @@ struct TORCH_API KinetoEvent {
   uint64_t end_thread_id_ = 0;
   uint64_t fwd_thread_id_ = 0;
   int64_t sequence_nr_ = -1;
+  at::RecordFunctionHandle op_id_ = 0;
   uint8_t scope_ = 0;
 
   uint8_t activity_type_ = 0;
@@ -262,6 +285,7 @@ struct TORCH_API KinetoEvent {
   c10::optional<std::vector<std::string>> module_hierarchy_;
   c10::optional<std::vector<std::string>> dtypes_;
   c10::optional<std::vector<int64_t>> seq_ids_;
+  c10::optional<std::vector<std::pair<at::RecordFunctionHandle, int>>> input_op_ids_;
   uint64_t flops_ = 0;
 
   std::string name_;

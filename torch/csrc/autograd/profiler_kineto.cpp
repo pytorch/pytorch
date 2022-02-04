@@ -126,6 +126,7 @@ struct OpEventData {
     uint64_t start_thread_id_;
     uint64_t end_thread_id_;
     int64_t sequence_number_;
+    at::RecordFunctionHandle op_id_;
     uint64_t forward_thread_id_;
     uint8_t record_function_scope_;
     bool is_async_;
@@ -137,6 +138,7 @@ struct OpEventData {
     // report_input_shapes
     std::vector<std::vector<int64_t>> shapes_;
     std::vector<int64_t> seq_ids_;
+    std::vector<std::pair<at::RecordFunctionHandle, int>> input_op_ids_;
     std::vector<std::string> dtypes_;
 
     // with_stack
@@ -289,6 +291,7 @@ struct KinetoThreadLocalState : public ProfilerThreadLocalStateBase {
           .startThreadId(e.start_thread_id_)
           .endThreadId(e.end_thread_id_)
           .sequenceNr(e.sequence_number_)
+          .opId(e.op_id_)
           .fwdThreadId(e.forward_thread_id_)
           .scope(e.record_function_scope_)
           .setAsync(e.is_async_)
@@ -300,6 +303,10 @@ struct KinetoThreadLocalState : public ProfilerThreadLocalStateBase {
 
       if (!e.seq_ids_.empty()) {
         kineto_events_.back().seq_ids(e.seq_ids_);
+      }
+
+      if (!e.input_op_ids_.empty()) {
+        kineto_events_.back().input_op_ids(e.input_op_ids_);
       }
 
       if (!e.dtypes_.empty()) {
@@ -350,6 +357,9 @@ struct KinetoThreadLocalState : public ProfilerThreadLocalStateBase {
       if (kineto_event.hasShapes()) {
         activity.addMetadata("Input SeqIds", torch::profiler::impl::seqIdsToStr(kineto_event.seq_ids()));
       }
+      if (kineto_event.hasShapes()) {
+        activity.addMetadata("Input OpIds", torch::profiler::impl::inputOpIdsToStr(kineto_event.input_op_ids()));
+      }
       if (kineto_event.hasStack()) {
         // NB: This is only for the JIT stack. The python stack (if applicable)
         //     is constructed later.
@@ -377,6 +387,9 @@ struct KinetoThreadLocalState : public ProfilerThreadLocalStateBase {
             "Sequence number", std::to_string(kineto_event.sequenceNr()));
         generateForwardBackwardLink(
             kineto_event, fwd_bwd_link_id, activity, tidSeq2activity);
+      }
+      if (kineto_event.opId() >= 0) {
+        activity.addMetadata( "Unique Op Id", std::to_string(kineto_event.opId()));
       }
     }
 
@@ -621,6 +634,7 @@ void pushProfilingCallbacks(const std::unordered_set<at::RecordScope>& scopes) {
             data_ptr->correlation_id_ = corr_id;
             data_ptr->start_thread_id_ = fn.threadId();
             data_ptr->sequence_number_ = fn.seqNr();
+            data_ptr->op_id_ = fn.handle();
             data_ptr->forward_thread_id_ = fn.forwardThreadId();
             data_ptr->record_function_scope_ = (uint8_t)fn.scope();
             data_ptr->is_async_ = fn.isAsync();
@@ -630,6 +644,7 @@ void pushProfilingCallbacks(const std::unordered_set<at::RecordScope>& scopes) {
             if (config.report_input_shapes) {
               data_ptr->shapes_ = torch::profiler::impl::inputSizes(fn);
               data_ptr->seq_ids_ = torch::profiler::impl::inputSeqIds(fn);
+              data_ptr->input_op_ids_ = torch::profiler::impl::inputOpIds(fn);
               data_ptr->dtypes_ = torch::profiler::impl::inputTypes(fn);
             }
 #if !defined BUILD_LITE_INTERPRETER && !defined C10_MOBILE
