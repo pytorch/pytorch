@@ -69,6 +69,9 @@ class DistTestCases:
     # Backends that do not support a specific collective
     skip_collective = {}
     skip_collective["allgather_coalesced"] = {"nccl", "mpi"}
+    # Empty sets are used by plugins that may not implement a collective
+    skip_collective["gather"] = set()
+    skip_collective["scatter"] = set()
     skip_collective["reduce"] = set()
     skip_collective["sendrecv anysource"] = {"nccl"}
     skip_collective["cpu barrier"] = {"nccl"}
