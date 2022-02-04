@@ -13,6 +13,8 @@ def _orthogonalize(matrix, epsilon=0):
     Decide between Gram-Schmidt or QR factorization to orthogonalize the matrix.
     QR factorization doesn't work with half-precision, but it is usually faster with a rank > 2.
     """
+    assert len(matrix.shape) == 2 and matrix.shape[1] <= matrix.shape[0]
+
     rank = matrix.shape[1]
     dtype = matrix.dtype
     if rank <= 2 or dtype in [torch.float16, torch.bfloat16]:
