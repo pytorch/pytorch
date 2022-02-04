@@ -401,6 +401,13 @@ Tensor quantized_max_pool2d(
   return qy;
 }
 
+std::tuple<at::Tensor &,at::Tensor &> max_pool2d_with_indices_out_quantized(const at::Tensor & self, at::IntArrayRef kernel_size, at::IntArrayRef stride, at::IntArrayRef padding, at::IntArrayRef dilation, bool ceil_mode, at::Tensor & out, at::Tensor & indices) {
+  auto empty_tensor = at::Tensor{};
+  auto sub = at::quantized_max_pool2d(self, kernel_size, stride, padding, dilation, ceil_mode);
+  return std::tuple<at::Tensor &,at::Tensor &>(sub, empty_tensor);
+}
+
+
 // Quantized max_pool1d is a special case of the max_pool2d, with one of the
 // dimensions and kernels removed.
 Tensor quantized_max_pool1d(
