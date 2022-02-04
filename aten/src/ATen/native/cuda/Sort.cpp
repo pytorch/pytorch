@@ -61,11 +61,7 @@ void sort_cuda_kernel(
     bool stable) {
   // this algorithm is always stable
 
-  bool is_non_overlapping_and_dense = self.is_non_overlapping_and_dense();
-  int64_t ndim = self.dim();
-  int64_t nsort = self.sizes()[dim];
-
-  TORCH_CHECK(nsort <= std::numeric_limits<int>::max(),
+  TORCH_CHECK(self.sizes()[dim] <= std::numeric_limits<int>::max(),
     "The dimension being sorted can not have more than INT_MAX elements.");
 
   const auto self_dtype = self.dtype();
@@ -91,7 +87,7 @@ void sort_cuda_kernel(
 
   Tensor self_;
   bool newself = false;
-  if (is_non_overlapping_and_dense && self.stride(dim) == 1) {
+  if (self.is_non_overlapping_and_dense() && self.stride(dim) == 1) {
     self_ = self;
   } else {
     auto new_strides_unsort = infer_dense_strides_dim_last(self, dim);
