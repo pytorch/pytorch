@@ -1168,6 +1168,20 @@ def quantized_conv2d(
     )
 
 
+@register_acc_op_mapping(op_and_target=("call_function", torch.conv3d))
+@register_acc_op
+def conv3d(*, input, weight, bias, stride, padding, dilation, groups):
+    return nn.functional.conv3d(
+        input=input,
+        weight=weight,
+        bias=bias,
+        stride=stride,
+        padding=padding,
+        dilation=dilation,
+        groups=groups,
+    )
+
+
 @register_acc_op_mapping(op_and_target=("call_function", nn.functional.batch_norm))
 @register_acc_op
 def batch_norm(

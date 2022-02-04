@@ -19,9 +19,9 @@ from torch.fx.passes.shape_prop import TensorMetadata
 
 from .converter_utils import *  # noqa: F403
 
-
+@tensorrt_converter(acc_ops.conv3d)
 @tensorrt_converter(acc_ops.conv2d)
-def acc_ops_conv2d(
+def acc_ops_convnd(
     network: TRTNetwork,
     target: Target,
     args: Tuple[Argument, ...],
@@ -32,7 +32,7 @@ def acc_ops_conv2d(
 
     if not isinstance(input_val, TRTTensor):
         raise RuntimeError(
-            f"Conv2d received input {input_val} that is not part "
+            f"Conv received input {input_val} that is not part "
             "of the TensorRT region!"
         )
 
@@ -54,8 +54,7 @@ def acc_ops_conv2d(
         # will need to use uninitialized weight and set it later to support
         # ITensor weights
         dummy_weight = trt.Weights()
-
-        layer = network.add_convolution(
+        layer = network.add_convolution_nd(
             input=input_val,
             num_output_maps=weight.shape[0],
             kernel_shape=weight.shape[2:],
@@ -70,7 +69,7 @@ def acc_ops_conv2d(
                 f"linear {name} has weight of type {type(kwargs['weight'])}, Expect Optional[Tenosr]"
             )
         weight = to_numpy(kwargs["weight"])
-        layer = network.add_convolution(
+        layer = network.add_convolution_nd(
             input=input_val,
             num_output_maps=weight.shape[0],
             kernel_shape=weight.shape[2:],
@@ -79,9 +78,9 @@ def acc_ops_conv2d(
         )
 
     set_layer_name(layer, target, name)
-    layer.stride = kwargs["stride"]
-    layer.padding = kwargs["padding"]
-    layer.dilation = kwargs["dilation"]
+    layer.stride_nd = kwargs["stride"]
+    layer.padding_nd = kwargs["padding"]
+    layer.dilation_nd = kwargs["dilation"]
     if kwargs["groups"] is not None:
         layer.num_groups = kwargs["groups"]
 
