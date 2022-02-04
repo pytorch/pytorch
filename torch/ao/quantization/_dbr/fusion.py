@@ -41,7 +41,7 @@ def get_module_fusion_fqns(
                 if is_match:
                     cur_fqns = [seen_q_op_info.fqn]
                     cur_seen_q_op_info = seen_q_op_info
-                    for element in fusion_pattern[:-1]:
+                    for _element in fusion_pattern[:-1]:
                         users = get_users_of_seen_q_op_info(
                             qstate.idx_to_seen_q_op_infos, cur_seen_q_op_info)
                         cur_seen_q_op_info = users[0]
