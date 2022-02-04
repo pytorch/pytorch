@@ -1118,7 +1118,6 @@ static void addmm_impl_cpu_(
       self_sizes[0], "x", self_sizes[1], ")");
 
   at::native::resize_output(result, self_sizes);
-
   const auto result_strides = result.strides();
   const auto result_sizes = result.sizes();
 
