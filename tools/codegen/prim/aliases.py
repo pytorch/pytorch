@@ -5,7 +5,7 @@ from typing import Tuple, Optional
 #   allows them to be used as datasources when building and be available
 #   for programmatic inspection after PyTorch is installed.
 # To do this, PyTorch's build system copies some primTorch files
-#   from tools/codegen/prim to torch/prim, where they override placeholders.
+#   from tools/codegen/prim to torch/_prim, where they override placeholders.
 # Because of this, this file can only import Python packages and other
 #   primTorch components that are also available at both build and run time.
 

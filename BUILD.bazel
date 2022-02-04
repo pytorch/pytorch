@@ -80,6 +80,7 @@ generated_cpu_cpp = [
     "aten/src/ATen/core/TensorBody.h",
     "aten/src/ATen/core/TensorMethods.cpp",
     "aten/src/ATen/core/ATenOpList.cpp",
+    "aten/src/ATen/native/Aliases.cpp",
 ]
 
 generated_cuda_cpp = [
@@ -1637,7 +1638,7 @@ genrule(
 genrule(
     name = "copy_primtorch_aliases",
     srcs = ["tools/codegen/prim/aliases.py"],
-    outs = ["torch/prim/aliases.py"],
+    outs = ["torch/_prim/aliases.py"],
     cmd = "cp $< $@",
 )
 

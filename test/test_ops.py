@@ -72,7 +72,7 @@ class TestCommon(TestCase):
     #   requires that one of those OpInfos express the aliasing relationship.
     @onlyCPU
     def test_alias_relationships(self, device):
-        from torch.prim import alias_infos
+        from torch._prim import alias_infos
 
         # Constructs a mapping from ATen operator names to a set of their full user-facing alias names
         #   e.g. abs -> absolute
