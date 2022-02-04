@@ -799,7 +799,7 @@ In-place version of :meth:`~Tensor.logical_xor`
 
 add_docstr_all('bmm',
                r"""
-bmm(batch2) -> Tensor
+bmm(batch2, dtype=None) -> Tensor
 
 See :func:`torch.bmm`
 """)

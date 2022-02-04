@@ -1271,7 +1271,7 @@ Example:
 
 add_docstr(torch.bmm,
            r"""
-bmm(input, mat2, *, out=None) -> Tensor
+bmm(input, mat2, *, dtype=None, out=None) -> Tensor
 
 Performs a batch matrix-matrix product of matrices stored in :attr:`input`
 and :attr:`mat2`.
@@ -1286,6 +1286,11 @@ If :attr:`input` is a :math:`(b \times n \times m)` tensor, :attr:`mat2` is a
 .. math::
     \text{out}_i = \text{input}_i \mathbin{@} \text{mat2}_i
 """ + r"""
+
+Optional keyword argument :attr:`dtype` is only supported when all input matrices
+are half precision on CUDA devices and the argument is set to `dtype=torch.float`.
+This will give an output matrix of float type.
+
 {tf32_note}
 
 .. note:: This function does not :ref:`broadcast <broadcasting-semantics>`.
@@ -1296,6 +1301,7 @@ Args:
     mat2 (Tensor): the second batch of matrices to be multiplied
 
 Keyword Args:
+    {dtype}
     {out}
 
 Example::
@@ -1305,7 +1311,7 @@ Example::
     >>> res = torch.bmm(input, mat2)
     >>> res.size()
     torch.Size([10, 3, 5])
-""".format(**common_args, **tf32_notes))
+""".format(**common_args, **tf32_notes, **factory_data_common_args))
 
 add_docstr(torch.bitwise_and,
            r"""
