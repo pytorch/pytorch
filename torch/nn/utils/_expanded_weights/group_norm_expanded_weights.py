@@ -1,14 +1,15 @@
 import torch
 import torch.nn.functional as F
 from .expanded_weights_impl import implements_per_sample_grads
-from .expanded_weights_utils import \
+from .expanded_weights_utils import standard_kwargs, \
     forward_helper, set_grad_sample_if_exists, grad_if_exists_for_input, unpack_expanded_weight_or_tensor
 
 @implements_per_sample_grads(F.group_norm)
 class GroupNormPerSampleGrad(torch.autograd.Function):
     @staticmethod
-    def forward(ctx, *expanded_args):
-        output, expanded_args, expanded_kwargs, aux_outputs = forward_helper(torch._group_norm_all_outputs, expanded_args, 1)
+    def forward(ctx, *expanded_args_and_kwargs):
+        expanded_args, expanded_kwargs = standard_kwargs(expanded_args_and_kwargs)
+        output, aux_outputs = forward_helper(torch._group_norm_all_outputs, expanded_args, expanded_kwargs, 1)
         ctx.args = expanded_args
         ctx.kwargs = expanded_kwargs
         ctx.aux_outputs = aux_outputs

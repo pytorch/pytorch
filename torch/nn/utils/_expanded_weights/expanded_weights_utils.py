@@ -1,7 +1,18 @@
 import torch
 from .expanded_weights_impl import ExpandedWeight
 
-def forward_helper(func, expanded_args, num_true_outs):
+def standard_kwargs(expanded_args):
+    r'''Most `__torch_function__`s standardize the kwargs that they give, so this will separate
+    the args and kwargs they pass. Functions that don't are linear and convND
+    '''
+    kwarg_names = expanded_args[-1]
+    expanded_args = expanded_args[:-1]
+    kwarg_values = expanded_args[len(expanded_args) - len(kwarg_names):]
+    expanded_args_without_kwargs = expanded_args[:len(expanded_args) - len(kwarg_names)]
+    expanded_kwargs = {name: value for (name, value) in zip(kwarg_names, kwarg_values)}
+    return expanded_args_without_kwargs, expanded_kwargs
+
+def forward_helper(func, expanded_args, expanded_kwargs, num_true_outs):
     r'''Forward helper computes the forward pass for a function that has expanded weight(s)
     passed to it. It will run the forward pass where all ExpandedWeights are their original
     weight. It runs checks on the given arguments and detaches the outputs.
@@ -20,15 +31,10 @@ def forward_helper(func, expanded_args, num_true_outs):
         num_true_outs: The number of outputs seen by the user since some functions
           return auxillary data that is only used in the backward pass
     '''
-    kwarg_names = expanded_args[-1]
-    expanded_args = expanded_args[:-1]
-    kwarg_values = expanded_args[len(expanded_args) - len(kwarg_names):]
-    expanded_args = expanded_args[:len(expanded_args) - len(kwarg_names)]
-    expanded_kwargs = {name: value for (name, value) in zip(kwarg_names, kwarg_values)}
     unexpanded_args, unexpanded_kwargs = _check_and_unexpand_args(func, expanded_args, expanded_kwargs)
     output = func(*unexpanded_args, **unexpanded_kwargs)
     output, aux_outputs = _check_and_detach_output(output, num_true_outs)
-    return (output, expanded_args, expanded_kwargs, aux_outputs)
+    return (output, aux_outputs)
 
 def _check_and_unexpand_args(func, expanded_args, expanded_kwargs):
     # input must be the first argument passed

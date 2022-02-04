@@ -17,6 +17,20 @@ def conv_picker(func, conv1dOpt, conv2dOpt, conv3dOpt):
         assert func == F.conv3d
         return conv3dOpt
 
+conv_kwarg_defaults = {'bias': None, 'stride': 1, 'padding': 0, 'dilation': 1, 'groups': 1}
+def conv_args_and_kwargs(expanded_args_and_kwargs):
+    kwarg_names = expanded_args_and_kwargs[-1]
+    expanded_args_and_kwargs = expanded_args_and_kwargs[:-1]
+
+    args = expanded_args_and_kwargs[:len(expanded_args_and_kwargs) - len(kwarg_names)]
+    named_kwargs = expanded_args_and_kwargs[len(expanded_args_and_kwargs) - len(kwarg_names):]
+    unnamed_kwargs = args[2:]  # input and weight are the only two that can't be kwargs
+
+    conv_kwargs = tuple(conv_kwarg_defaults.keys())
+    kwargs = {key: value for (key, value) in zip(conv_kwargs[:len(unnamed_kwargs)] + kwarg_names, unnamed_kwargs + named_kwargs)}
+    kwargs = {key: kwargs.get(key, conv_kwarg_defaults[key]) for key in conv_kwarg_defaults}
+    return args[:2], kwargs
+
 def conv_backward(func, ctx, grad_output):
     def compute_input_grad():
         output_padding = []
