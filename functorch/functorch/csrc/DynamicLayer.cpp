@@ -101,6 +101,13 @@ class FuncTorchTLS : public FuncTorchTLSBase {
     return 0;
   }
 
+  void checkSupportsInplaceRequiresGrad() const override {
+    // Does nothing
+  }
+  void checkSupportsRetainGrad() const override {
+    // Does nothing
+  }
+
   // Initial autograd layer, because autograd is always "on"
   // TODO: Get rid of this, it is bad for composability
   std::vector<DynamicLayer> dynamicLayerStack = { DynamicLayer(DispatchKey::Autograd, 1, nullopt, true) };
