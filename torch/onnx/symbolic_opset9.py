@@ -231,7 +231,7 @@ def _list(g, self):
     return self
 
 
-def mm(g, self, other):
+def mm(g, self, other, dtype):
     # Create a dummy C tensor. Only needed for API purposes, the value is
     # since beta = 0
     C = g.op("Constant", value_t=torch.tensor([1]))

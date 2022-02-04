@@ -1109,7 +1109,7 @@ class ShapePropagator : public PropertyPropBase {
     static const register_formula_for binary_ops_strict_match{
         {
             "aten::normal(Tensor mean, Tensor std, *, Generator? generator) -> Tensor",
-            "aten::mm(Tensor self, Tensor mat2) -> Tensor",
+            "aten::mm(Tensor self, Tensor mat2, *, ScalarType? dtype) -> Tensor",
             "aten::bmm(Tensor self, Tensor mat2) -> Tensor",
         },
         [](Node* node) -> type_vec_t {
@@ -1941,7 +1941,7 @@ class ShapePropagator : public PropertyPropBase {
         node->matches("aten::tanh(Tensor self) -> Tensor")) {
       node->output()->setType(tensor_types.at(0)->contiguous());
       return true;
-    } else if (node->matches("aten::mm(Tensor self, Tensor mat2) -> Tensor")) {
+    } else if (node->matches("aten::mm(Tensor self, Tensor mat2, *, ScalarType? dtype) -> Tensor")) {
       auto lhs_type = tensor_types.at(0);
       auto rhs_type = tensor_types.at(1);
       auto lhs_sizes = lhs_type->sizes().concrete_sizes().value();

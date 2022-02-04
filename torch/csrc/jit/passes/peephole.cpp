@@ -337,7 +337,7 @@ bool FuseAddMM(Block* block) {
           }
 
           if (node->input(mm_side)->node()->matches(
-                  "aten::mm(Tensor self, Tensor mat2) -> Tensor")) {
+                  "aten::mm(Tensor self, Tensor mat2, *, ScalarType? dtype) -> Tensor")) {
             WithInsertPoint guard(node);
 
             auto* graph = node->owningGraph();

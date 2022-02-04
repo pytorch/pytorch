@@ -606,7 +606,7 @@ def squeeze(g, self, dim=None):
 def unsqueeze(g, self, dim):
     return sym_help._unsqueeze_helper(g, self, [dim])
 
-def mm(g, self, other):
+def mm(g, self, other, dtype):
     return g.op("Gemm", self, other, beta_f=0.0, alpha_f=1.0)
 
 

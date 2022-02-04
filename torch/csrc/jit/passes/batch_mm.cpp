@@ -184,7 +184,7 @@ struct TreeToken {
   static TreeToken transpose(Node* t, TreeToken& inp_token) {
     TreeToken token;
     if (!inp_token.node->matches(
-            "aten::mm(Tensor self, Tensor mat2) -> Tensor")) {
+            "aten::mm(Tensor self, Tensor mat2, *, ScalarType? dtype) -> Tensor")) {
       return token;
     }
     token.tree_size = 1;
@@ -220,12 +220,12 @@ struct TreeToken {
     while (!queue.empty()) {
       auto n = queue.back();
       queue.pop_back();
-      if (n->matches("aten::mm(Tensor self, Tensor mat2) -> Tensor")) {
+      if (n->matches("aten::mm(Tensor self, Tensor mat2, *, ScalarType? dtype) -> Tensor")) {
         matmuls.push_back(n);
       } else if (n->matches("aten::t(Tensor self) -> Tensor")) {
         Node* input_node = n->input()->node();
         AT_ASSERT(input_node->matches(
-            "aten::mm(Tensor self, Tensor mat2) -> Tensor"));
+            "aten::mm(Tensor self, Tensor mat2, *, ScalarType? dtype) -> Tensor"));
         // (AB)^T == B^TA^T
         WithInsertPoint insert_guard{input_node};
         Value* A = input_node->inputs()[0];
@@ -256,7 +256,7 @@ void BatchMMTreeReduce(Block* block, AliasDb& alias_db) {
   // Look for trees in the block
   std::unordered_map<Node*, TreeToken> tokens;
   for (auto node : block->nodes()) {
-    if (node->matches("aten::mm(Tensor self, Tensor mat2) -> Tensor") &&
+    if (node->matches("aten::mm(Tensor self, Tensor mat2, *, ScalarType? dtype) -> Tensor") &&
         !alias_db.hasWriters(node)) {
       tokens[node] = TreeToken::mm(node);
     } else if (
@@ -399,7 +399,7 @@ std::pair<std::vector<Node*>, std::vector<Node*>> gatherIndependentMMUses(
   std::vector<Node*> rhses; // Like above, but rhs
   for (Use u : value->uses()) {
     if (u.user->owningBlock() == block &&
-        u.user->matches("aten::mm(Tensor self, Tensor mat2) -> Tensor") &&
+        u.user->matches("aten::mm(Tensor self, Tensor mat2, *, ScalarType? dtype) -> Tensor") &&
         !alias_db.hasWriters(u.user)) {
       if (u.offset == 0 && u.user->inputs()[1] != value) {
         lhses.push_back(u.user);
@@ -438,7 +438,7 @@ void BatchMMSide(Block* block, AliasDb& alias_db) {
 
   std::unordered_set<Value*> considered_values;
   for (Node* node : block->nodes()) {
-    if (node->matches("aten::mm(Tensor self, Tensor mat2) -> Tensor") &&
+    if (node->matches("aten::mm(Tensor self, Tensor mat2, *, ScalarType? dtype) -> Tensor") &&
         !alias_db.hasWriters(node)) {
       for (Value* input : node->inputs()) {
         if (/*bool not_inserted = */ !considered_values.emplace(input).second) {
@@ -476,7 +476,7 @@ bool hasMMOperators(std::shared_ptr<Graph>& graph) {
   DepthFirstGraphNodeIterator it(graph);
   Node* n = nullptr;
   while ((n = it.next()) != nullptr) {
-    if (n->matches("aten::mm(Tensor self, Tensor mat2) -> Tensor")) {
+    if (n->matches("aten::mm(Tensor self, Tensor mat2, *, ScalarType? dtype) -> Tensor")) {
       return true;
     }
   }

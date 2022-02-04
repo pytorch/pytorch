@@ -160,7 +160,7 @@ def prelu(g, self, weight):
         return g.op("PRelu", self, weight)
 
 
-def mm(g, self, other):
+def mm(g, self, other, dtype):
     # Create a dummy C tensor. Only needed for API purposes, the value is
     # since beta = 0
     ty = sym_help._try_get_scalar_type(self, other).lower()

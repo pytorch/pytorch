@@ -85,7 +85,7 @@ static const OperatorMap<std::string>& get_schema_to_function_graph() {
       {"aten::_no_grad_embedding_renorm_(Tensor weight, Tensor input, float max_norm, float norm_type) -> Tensor", "unary"},
       {"aten::embedding_renorm_(Tensor(a!) self, Tensor indices, float max_norm, float norm_type) -> Tensor(a!)", "unary"},
       {"aten::embedding(Tensor weight, Tensor indices, int padding_idx=-1, bool scale_grad_by_freq=False, bool sparse=False) -> Tensor", "embedding"},
-      {"aten::mm(Tensor self, Tensor mat2) -> Tensor", "mm"},
+      {"aten::mm(Tensor self, Tensor mat2, *, ScalarType? dtype=None) -> Tensor", "mm"},
       {"aten::dot(Tensor self, Tensor tensor) -> Tensor", "dot"},
       {"aten::mv(Tensor self, Tensor vec) -> Tensor", "mv"},
       {"aten::matmul(Tensor self, Tensor other) -> Tensor", "matmul"},

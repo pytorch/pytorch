@@ -1572,7 +1572,7 @@ int nnc_lowerings_lazy_registration() {
 
   // aten::mm is a subset of aten::matmul where both inputs are rank 2
   RegisterNNCLoweringsFunction aten_matmul(
-      {"aten::mm(Tensor self, Tensor mat2) -> (Tensor)",
+      {"aten::mm(Tensor self, Tensor mat2, *, ScalarType? dtype=None) -> (Tensor)",
        "aten::matmul(Tensor self, Tensor other) -> (Tensor)"},
       computeMatmul);
 
