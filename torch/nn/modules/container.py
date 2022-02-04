@@ -421,6 +421,10 @@ class ParameterList(Module):
     list, but Tensors that are :class:`~torch.nn.Parameter` are properly registered,
     and will be visible by all :class:`~torch.nn.Module` methods.
 
+    Note that both the constructor, assigning an element of the list, the
+    :meth:`~torch.nn.ParameterDict.append` method and the :meth:`~torch.nn.ParameterDict.extend`
+    method will convert any :class:`~torch.Tensor` into :class:`~torch.nn.Parameter`.
+
     Args:
         parameters (iterable, optional): an iterable of elements to add to the list.
 
@@ -554,7 +558,8 @@ class ParameterDict(Module):
     will preserve their ordering.
 
     Note that both the constructor, assigning an element of the dictionary and the
-    :meth:`~torch.nn.ParameterDict.update` method will convert any ``Tensor`` into ``Parameter``.
+    :meth:`~torch.nn.ParameterDict.update` method will convert any :class:`~torch.Tensor` into
+    :class:`~torch.nn.Parameter`.
 
     Args:
         values (iterable, optional): a mapping (dictionary) of

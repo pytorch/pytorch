@@ -2047,6 +2047,8 @@ class TestNN(NNTestCase):
             self.assertIsNotNone(p2.grad_fn)
             self.assertIs(p2._base, p)
 
+        self.assertEqual(param_dict["foo"], new_param_dict["foo"])
+
     def test_add_module(self):
         methods_to_test = ['add_module', 'register_module']
         for fn in methods_to_test:
