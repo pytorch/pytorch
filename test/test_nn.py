@@ -9752,23 +9752,16 @@ class TestNN(NNTestCase):
         with self.assertRaisesRegex(RuntimeError, "0D target tensor expects 1D input tensors"):
             F.cosine_embedding_loss(torch.randn(2, 5), torch.randn(2, 5), torch.randn(()))
 
-    def test_margin_ranking_loss_no_reduce(self):
-        input1 = torch.randn(15).mul_(10).requires_grad_()
-        input2 = torch.randn(15).mul_(10).requires_grad_()
-        target = torch.randn(15).sign()
-        self.assertTrue(gradcheck(lambda x, y, z: F.margin_ranking_loss(
-            x, y, z, reduction='none'), (input1, input2, target)))
-        self.assertEqual(F.margin_ranking_loss(input1, input2, target, reduction='none'),
-                         loss_reference_fns['MarginRankingLoss'](input1, input2, target, reduction='none'))
+    # Tested with OpInfo.
+    def test_margin_ranking_loss_invalid_type(self):
+        input1 = torch.randn(15, dtype=torch.complex64)
+        input2 = torch.randn(15, dtype=torch.complex64)
+        target = torch.randn(15, dtype=torch.complex64).sgn()
 
-    def test_margin_ranking_loss_margin_no_reduce(self):
-        input1 = torch.randn(15).mul_(10).requires_grad_()
-        input2 = torch.randn(15).mul_(10).requires_grad_()
-        target = torch.randn(15).sign()
-        self.assertTrue(gradcheck(lambda x, y, z: F.margin_ranking_loss(
-            x, y, z, margin=0.5, reduction='none'), (input1, input2, target)))
-        self.assertEqual(F.margin_ranking_loss(input1, input2, target, margin=0.5, reduction='none'),
-                         loss_reference_fns['MarginRankingLoss'](input1, input2, target, margin=0.5, reduction='none'))
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "margin_ranking_loss expects inputs to be non-complex"):
+                F.margin_ranking_loss(input1, input2, target)
 
     def test_triplet_margin_loss(self):
         input1 = torch.randn(5, 10, requires_grad=True)

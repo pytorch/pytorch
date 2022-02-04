@@ -7605,6 +7605,49 @@ def sample_inputs_poisson_nll_loss(op_info, device, dtype, requires_grad, **kwar
     for input, target, kwargs in gen_shape_kwargs():
         yield SampleInput(input, args=(target, ), kwargs=kwargs)
 
+def sample_inputs_margin_ranking_loss(op_info, device, dtype, requires_grad, **kwargs):
+    make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+
+    shapes = (
+        (),
+        (0,),
+        (1,),
+        (L,),
+        (M,),
+        (S,),
+    )
+
+    margins = (
+        0.,
+        -1.5,
+        2.7,
+    )
+
+    reductions = (
+        'none',
+        'mean',
+        'sum',
+    )
+
+    for shape, margin, reduction in product(shapes, margins, reductions):
+        # RuntimeError: max(): Expected reduction dim to be specified for
+        # input.numel() == 0. Specify the reduction dim with the 'dim' argument.
+        if shape == (0,) and reduction == 'mean':
+            continue
+
+        input1 = make_arg(shape)
+        input2 = make_arg(shape)
+        target = make_arg(shape).sign()
+
+        args = (input2, target)
+
+        kwargs = {
+            'margin': margin,
+            'reduction': reduction,
+        }
+
+        yield SampleInput(input1, args=args, kwargs=kwargs)
+
 def sample_inputs_pairwise_distance(op_info, device, dtype, requires_grad, **kwargs):
     make = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
 
@@ -7982,6 +8025,19 @@ def reference_mse_loss(input, target, reduction="mean"):
         return np.sum(se)
     else:  # reduction == "none"
         return se
+
+
+def reference_margin_ranking_loss(input1, input2, target, margin=0.0, reduction='mean'):
+    zeros = np.zeros(input1.shape)
+
+    res = np.maximum(zeros, target * (input2 - input1) + margin)
+
+    if reduction == 'mean':
+        res = np.mean(res)
+    elif reduction == 'sum':
+        res = np.sum(res)
+
+    return res
 
 
 def wrapper_set_seed(op, *args, **kwargs):
@@ -15344,6 +15400,13 @@ op_db: List[OpInfo] = [
             # please report a bug to PyTorch.
             DecorateInfo(unittest.skip("Skipped!"), "TestJit", "test_variant_consistency_jit", dtypes=(torch.float32,),),
         )
+    ),
+    OpInfo(
+        "nn.functional.margin_ranking_loss",
+        ref=reference_margin_ranking_loss,
+        dtypes=floating_types_and(torch.bfloat16, torch.float16),
+        supports_out=False,
+        sample_inputs_func=sample_inputs_margin_ranking_loss,
     ),
     OpInfo(
         "nn.functional.poisson_nll_loss",
