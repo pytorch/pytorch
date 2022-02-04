@@ -35,7 +35,7 @@ py_binary(
     ],
 )
 
-aten_generation_srcs = ["aten/src/ATen/native/native_functions.yaml"] + ["aten/src/ATen/native/Aliases.cpp.in] + glob(["aten/src/ATen/templates/**"])
+aten_generation_srcs = ["aten/src/ATen/native/native_functions.yaml"] + ["aten/src/ATen/native/Aliases.cpp.in"] + glob(["aten/src/ATen/templates/**"])
 
 generated_cpu_cpp = [
     "aten/src/ATen/RegisterBackendSelect.cpp",
