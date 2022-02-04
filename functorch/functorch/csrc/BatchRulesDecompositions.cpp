@@ -248,6 +248,17 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   OP_DECOMPOSE(special_polygamma);
   OP_DECOMPOSE(special_softmax);
   OP_DECOMPOSE(square);
+  OP_DECOMPOSE(numpy_T);
+  OP_DECOMPOSE(reshape_as);
+  OP_DECOMPOSE(t);
+  OP_DECOMPOSE2(result_type, Tensor);
+  OP_DECOMPOSE2(result_type, Scalar);
+  OP_DECOMPOSE2(result_type, Scalar_Tensor);
+  OP_DECOMPOSE2(result_type, Scalar_Scalar);
+  OP_DECOMPOSE(is_same_size);
+  OP_DECOMPOSE(view_as);
+  OP_DECOMPOSE2(size, int);
+  OP_DECOMPOSE(is_complex);
   OP_DECOMPOSE(std);
   OP_DECOMPOSE2(std, dim);
   OP_DECOMPOSE(std_mean);
