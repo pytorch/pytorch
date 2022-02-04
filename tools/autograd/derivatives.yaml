@@ -1779,6 +1779,15 @@
   input1, input2: "grad.defined() ? sub_backward(margin_ranking_loss_backward_input1(grad, input1, input2, target, margin, reduction)) : std::tuple<Tensor, Tensor>()"
   target: "grad.defined() ? margin_ranking_loss_backward_target(grad, input1, input2, target, margin, reduction) : Tensor()"
 
+- name: margin_ranking_loss_backward_input1(Tensor grad_output, Tensor input1, Tensor input2, Tensor target, float margin, int reduction) -> Tensor
+  grad_output, target: margin_ranking_loss_backward_input1_backward(grad, grad_output, input1, input2, target, margin, reduction)
+  input1: zeros_like(input1)
+  input2: zeros_like(input2)
+
+- name: margin_ranking_loss_backward_target(Tensor grad_output, Tensor input1, Tensor input2, Tensor target, float margin, int reduction) -> Tensor
+  grad_output, input1, input2: margin_ranking_loss_backward_target_backward(grad, grad_output, input1, input2, target, margin, reduction)
+  target: zeros_like(target)
+
 - name: huber_loss(Tensor self, Tensor target, int reduction=Mean, float delta=1.0) -> Tensor
   self: huber_loss_backward(grad, self, target, reduction, delta)
   target: huber_loss_backward(grad, target, self, reduction, delta)
