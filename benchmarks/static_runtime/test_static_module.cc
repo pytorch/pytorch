@@ -317,22 +317,34 @@ TEST(StaticRuntime, CanEnableStaticRuntime) {
             return a * a
   )JIT";
 
-  const auto is_script = R"JIT(
+  const auto is_script_tensors = R"JIT(
     def forward(self, a: Tensor, b: Tensor):
         return a is b
   )JIT";
 
-  const auto is_not_script = R"JIT(
+  const auto is_script_none = R"JIT(
+    def forward(self, a: Optional[Tensor]):
+        return a is None
+  )JIT";
+
+  const auto is_not_script_tensors = R"JIT(
     def forward(self, a: Tensor, b: Tensor):
         return a is not b
+  )JIT";
+
+  const auto is_not_script_none = R"JIT(
+    def forward(self, a: Optional[Tensor]):
+        return a is not None
   )JIT";
 
   EXPECT_TRUE(testCanEnableStaticRuntime(reshape_inplace_script));
   EXPECT_TRUE(testCanEnableStaticRuntime(for_script));
   EXPECT_TRUE(testCanEnableStaticRuntime(while_script));
   EXPECT_TRUE(testCanEnableStaticRuntime(if_script));
-  EXPECT_FALSE(testCanEnableStaticRuntime(is_script));
-  EXPECT_FALSE(testCanEnableStaticRuntime(is_not_script));
+  EXPECT_FALSE(testCanEnableStaticRuntime(is_script_tensors));
+  EXPECT_TRUE(testCanEnableStaticRuntime(is_script_none));
+  EXPECT_FALSE(testCanEnableStaticRuntime(is_not_script_tensors));
+  EXPECT_TRUE(testCanEnableStaticRuntime(is_not_script_none));
 }
 
 TEST(StaticRuntime, NestedOutput) {
