@@ -72,7 +72,7 @@ def _check_and_detach_output(output, num_true_outs):
 def set_grad_sample_if_exists(maybe_expanded_weight, per_sample_grad_fn):
     unpacked = unpack_expanded_weight_or_tensor(maybe_expanded_weight)
     if isinstance(maybe_expanded_weight, ExpandedWeight):
-        if hasattr(unpacked, "grad_sample"):
+        if hasattr(unpacked, "grad_sample") and unpacked.grad_sample is not None:
             unpacked.grad_sample = unpacked.grad_sample + per_sample_grad_fn(unpacked)
         else:
             unpacked.grad_sample = per_sample_grad_fn(unpacked)
