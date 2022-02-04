@@ -1613,6 +1613,33 @@ class TestFX(JitTestCase):
         env_key_names = set(n.name for n in interp.env.keys())
         self.assertEqual(env_key_names, set(['output']))
 
+    def test_interpreter_default_args(self):
+        class Model(torch.nn.Module):
+            def forward(self, x, y=3.14159):
+                return x + y
+
+        model = Model()
+        gm = torch.fx.symbolic_trace(model)
+
+        interp = Interpreter(gm)
+        x = torch.randn(5, 3)
+        out = interp.run(x)
+        torch.testing.assert_allclose(out, x + 3.14159)
+
+    def test_interpreter_not_enough_args(self):
+        class Model(torch.nn.Module):
+            def forward(self, x, y):
+                return x + y
+
+        model = Model()
+        gm = torch.fx.symbolic_trace(model)
+
+        interp = Interpreter(gm)
+        x = torch.randn(5, 3)
+        with self.assertRaisesRegex(RuntimeError,
+                                    'Expected positional argument for parameter y, but one was not passed in'):
+            out = interp.run(x)
+
     def test_transformer_noop(self):
         class MyModule(torch.nn.Module):
             def __init__(self):
