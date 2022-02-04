@@ -7180,17 +7180,9 @@ class TestONNXRuntime(unittest.TestCase):
 
     @skipIfUnsupportedMinOpsetVersion(8)
     def test_cosine_similarity(self):
-        class CosineSimilarityModel(torch.nn.Module):
-            def __init__(self):
-                super(CosineSimilarityModel, self).__init__()
-                self.cos_fn = torch.nn.CosineSimilarity(dim=2)
-
-            def forward(self, x, y):
-                return self.cos_fn(x, y)
-
         x = torch.randn(5, 3, 2)
         y = torch.randn(5, 3, 2)
-        self.run_test(CosineSimilarityModel(), input=(x, y))
+        self.run_test(torch.nn.CosineSimilarity(dim=2), input=(x, y))
 
     @skipIfUnsupportedMinOpsetVersion(12)
     def test_crossentropyloss(self):
