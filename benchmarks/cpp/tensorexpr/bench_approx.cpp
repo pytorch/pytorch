@@ -25,7 +25,7 @@ void optimizePointwise(tensorexpr::LoopNest* ln, tensorexpr::Tensor target) {
   ln->vectorize(inner);
   ln->splitWithTail(outer, 8, &inner, &tail);
   StmtPtr unrolled;
-  LoopNest::unroll(inner, &unrolled);
+  LoopNest::fullUnroll(inner, &unrolled);
 }
 
 static void relu_nnc(benchmark::State& state) {
