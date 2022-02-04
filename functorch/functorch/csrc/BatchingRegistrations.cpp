@@ -831,50 +831,17 @@ TORCH_LIBRARY_IMPL(_, FT_BATCHED_KEY, m) {
 }
 
 TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
-  // VMAP_OUTPLACE_OP("abs", abs_batch_rule);
-  // m.impl("abs", PrimBatchRule7<decltype(&abs_batch_rule), &abs_batch_rule, to_operator_t<decltype(abs_batch_rule)>>::apply);
-
-  // NB: Ideally we would like some operators, like size.int, to "fallthrough"
-  // to the underlying implementation. However, because a BatchedTensor is a
-  // Tensor wrapper, it only has one dispatch key (Batched) on it. The resolution
-  // here is to just directly call the underlying implementation.
-  m.impl("size.int", static_cast<int64_t (*)(const Tensor&, int64_t)>(native::size));
-  // m.impl("_add_batch_dim", native::_add_batch_dim);
-  // m.impl("_remove_batch_dim", native::_remove_batch_dim);
-
-  m.impl("is_complex", native::is_complex);
-//
-//   // inplace operations
-//   m.impl("fill_.Scalar", fill_inplace_scalar_batching_rule);
-//   m.impl("fill_.Tensor", fill_inplace_tensor_batching_rule);
-//   m.impl("zero_", zero_inplace_batching_rule);
-
-//   // autograd things...
-//   m.impl("is_leaf", BatchedTensor_is_leaf);
-//   m.impl("requires_grad_", BatchedTensor_requires_grad_);
-
-  // view operations
   m.impl("as_strided", as_strided_batching_rule);
-  // m.impl("chunk", chunk_batching_rule);
   m.impl("tensor_split.sections", tensor_split_sections_batching_rule);
   m.impl("tensor_split.indices", tensor_split_indices_batching_rule);
-  // NB: static_cast because there's another variant of narrow. However, we don't
-  // want to support the other variant yet bc it isn't documented...
-  m.impl("numpy_T", native::numpy_T); // composite wrt autograd
-  m.impl("reshape_as", native::reshape_as); // composite wrt autograd
   m.impl("slice.Tensor", slice_batching_rule);
   m.impl("split.Tensor", split_batching_rule);
   m.impl("split_with_sizes", split_with_sizes_batching_rule);
   m.impl("squeeze_.dim", squeeze_dim__batching_rule);
-  m.impl("t", native::t); // composite wrt autograd
-  // m.impl("trace", trace_batching_rule);
   m.impl("transpose.int", transpose_int_batching_rule);
   m.impl("unbind.int", unbind_batching_rule);
   m.impl("unsqueeze_", unsqueeze__batching_rule);
-  m.impl("view_as", native::view_as); // composite wrt autograd
-
   m.impl("addmm", addmm_batching_rule);
-  // clamp operations
 
 // unary pointwise, out-of-place, no additional arguments.
 #define TO_BATCHING_RULE(name, ...) \
@@ -890,26 +857,6 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
 #undef TO_BATCHING_RULE
   m.impl("clone", clone_batching_rule);
 
-//   m.impl("sigmoid_backward", binary_pointwise_batching_rule<TensorTensorType, at::sigmoid_backward>);
-//   m.impl(
-//       "threshold_backward",
-//       binary_pointwise_batching_rule<
-//           TensorTensorScalarType,
-//           at::threshold_backward,
-//           Scalar>);
-//
-  // for at::result_type, call the native::result_type implementation.
-  // We don't have to do anything special because native::result_type operates
-  // on the logical shape of the tensors.
-  m.impl("result_type.Tensor", static_cast<ScalarType (*)(const Tensor&, const Tensor&)>(native::result_type));
-  m.impl("result_type.Scalar", static_cast<ScalarType (*)(const Tensor&, const Scalar&)>(native::result_type));
-  m.impl("result_type.Scalar_Tensor", static_cast<ScalarType (*)(const Scalar&, const Tensor&)>(native::result_type));
-  m.impl("result_type.Scalar_Scalar", static_cast<ScalarType (*)(const Scalar&, const Scalar&)>(native::result_type));
-//
-// #undef BINARY_POINTWISE_VA
-// #undef BINARY_POINTWISE
-//
-//
 #define TRIVIAL_OP(op) m.impl(#op, \
     unwrap_and_call<Tensor (*)(const Tensor&), at::op>);
   // complex number view operators
@@ -917,25 +864,9 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   TRIVIAL_OP(real);
   TRIVIAL_OP(view_as_real);
   m.impl("view_as_complex", view_as_complex_batching_rule);
-// #undef TRIVIAL
-// //
-// //   // matmul-like operators
-// //   m.impl("bmm", bmm_batching_rule);
-// //
-  // cat/stack
   m.impl("cat", cat_batching_rule);
   m.impl("stack", stack_batching_rule);
-  m.impl("is_same_size", native::is_same_size);
-// //
-// //   // backward operators
-// //   m.impl("trace_backward", trace_backward_batching_rule);
-// //
-// //   // Tensor.new_* operators
-//   m.impl("ones_like", ones_like_batching_rule);
-// //   m.impl("new_empty", new_empty_batching_rule);
   m.impl("new_empty_strided", new_empty_strided_batching_rule);
-// //   m.impl("new_zeros", new_zeros_batching_rule);
-// //
   m.impl("contiguous", contiguous_batching_rule);
 }
 
