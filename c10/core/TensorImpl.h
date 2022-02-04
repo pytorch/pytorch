@@ -2721,6 +2721,8 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
 // We use a templatized class to both contain the logic of checking the sizes
 // as well as to provide compile-time information that might be useful in
 // figuring out why sizes may have changed.
+// All the compile time information is given by the template fields that are
+// always printed by the compiler when the static_assert fails.
 template <
     size_t cplusplus = __cplusplus,
     size_t clang_ver_major = C10_CLANG_MAJOR_VERSION,
