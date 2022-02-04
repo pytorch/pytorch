@@ -6675,7 +6675,7 @@ Example::
 
 add_docstr(torch.mm,
            r"""
-mm(input, mat2, *, out=None) -> Tensor
+mm(input, mat2, *, dtype=None, out=None) -> Tensor
 
 Performs a matrix multiplication of the matrices :attr:`input` and :attr:`mat2`.
 
@@ -6688,6 +6688,10 @@ If :attr:`input` is a :math:`(n \times m)` tensor, :attr:`mat2` is a
 Supports strided and sparse 2-D tensors as inputs, autograd with
 respect to strided inputs.
 
+Optional keyword argument :attr:`dtype` is only supported when all input matrices
+are half precision on CUDA devices and the argument is set to `dtype=torch.float`.
+This will give an output matrix of float type.
+
 {tf32_note}
 
 Args:
@@ -6695,6 +6699,7 @@ Args:
     mat2 (Tensor): the second matrix to be matrix multiplied
 
 Keyword args:
+    {dtype}
     {out}
 
 Example::
@@ -6704,7 +6709,7 @@ Example::
     >>> torch.mm(mat1, mat2)
     tensor([[ 0.4851,  0.5037, -0.3633],
             [-0.0760, -3.6705,  2.4784]])
-""".format(**common_args, **tf32_notes))
+""".format(**common_args, **tf32_notes, **factory_data_common_args))
 
 add_docstr(torch.hspmm,
            r"""

@@ -2517,7 +2517,7 @@ See :func:`torch.argmin`
 
 add_docstr_all('mm',
                r"""
-mm(mat2) -> Tensor
+mm(mat2, dtype=None) -> Tensor
 
 See :func:`torch.mm`
 """)
