@@ -104,13 +104,14 @@ file(GLOB native_sparse_cpp "native/sparse/*.cpp")
 file(GLOB native_quantized_cpp
             "native/quantized/*.cpp"
             "native/quantized/cpu/*.cpp")
+
 file(GLOB native_h "native/*.h")
 file(GLOB native_ao_sparse_h
             "native/ao_sparse/*.h"
             "native/ao_sparse/cpu/*.h"
             "native/ao_sparse/quantized/*.h"
             "native/ao_sparse/quantized/cpu/*.h")
-file(GLOB native_quantized_h "native/quantized/*.h" "native/quantized/cpu/*.h")
+file(GLOB native_quantized_h "native/quantized/*.h" "native/quantized/cpu/*.h", "native/quantized/cudnn/*.h")
 file(GLOB native_cpu_h "native/cpu/*.h")
 
 file(GLOB native_cuda_cu "native/cuda/*.cu")
@@ -122,6 +123,7 @@ file(GLOB native_sparse_cuda_cu "native/sparse/cuda/*.cu")
 file(GLOB native_sparse_cuda_cpp "native/sparse/cuda/*.cpp")
 file(GLOB native_quantized_cuda_cu "native/quantized/cuda/*.cu")
 file(GLOB native_quantized_cuda_cpp "native/quantized/cuda/*.cpp")
+file(GLOB native_quantized_cudnn_cpp "native/quantized/cudnn/*.cpp")
 
 file(GLOB native_hip_hip "native/hip/*.hip")
 file(GLOB native_hip_cpp "native/hip/*.cpp")
@@ -201,6 +203,7 @@ if(USE_CUDA)
     ${native_cudnn_cpp}
     ${native_miopen_cpp}
     ${native_quantized_cuda_cpp}
+    ${native_quantized_cudnn_cpp}
     ${native_sparse_cuda_cpp}
   )
   if(CAFFE2_USE_CUDNN)
