@@ -1,3 +1,4 @@
+#include <ATen/ATen.h>
 #include <ATen/Context.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/Dispatch.h>
@@ -13,6 +14,15 @@
 #include <ATen/native/cuda/MiscUtils.h>
 #include <ATen/native/cuda/BatchLinearAlgebraLib.h>
 
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#else
+#include <ATen/ops/arange.h>
+#include <ATen/ops/empty.h>
+#include <ATen/ops/nan_to_num.h>
+#include <ATen/ops/ones.h>
+#include <ATen/ops/zeros.h>
+#endif
 
 namespace at {
 namespace native {
