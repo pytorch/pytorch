@@ -127,9 +127,10 @@ void ConcatBatchMatMulBatchGather(std::shared_ptr<torch::jit::Graph>& graph) {
   // TODO:: check restrictions for inputs; outputs not used elsewhere
   std::string pattern = R"IR(
     graph(%a, %b, %c, %d, %e, %f):
+        %dtype: None = prim::Constant()
         %y0 : Tensor = aten::stack(%a, %b)
         %y1 : Tensor = aten::transpose(%y0, %b, %c)
-        %y2 : Tensor = aten::bmm(%y0, %y1)
+        %y2 : Tensor = aten::bmm(%y0, %y1, %dtype)
         %y3 : Tensor = aten::flatten(%y2, %d, %e)
         %res : Tensor = aten::index_select(%y3, %b, %f)
         return (%res))IR";

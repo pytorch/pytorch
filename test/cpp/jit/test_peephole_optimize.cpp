@@ -106,7 +106,8 @@ TEST(PeepholeOptimizeTest, AddMMFusion) {
         %1 : Float(2, 3, 4),
         %2 : Float(1, 1, 1)):
         %3 : int = prim::Constant[value=1]()
-        %4 : Tensor = aten::mm(%0, %1)
+        %dtype: None = prim::Constant()
+        %4 : Tensor = aten::mm(%0, %1, %dtype)
         %5 : Tensor = aten::add(%4, %2, %3)
         %6 : Tensor = aten::add(%5, %2, %3)
         return (%6)

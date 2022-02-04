@@ -70,8 +70,9 @@ std::shared_ptr<Graph> build_lstm() {
           %2 : Tensor,
           %3 : Tensor,
           %4 : Tensor):
-      %5 : Tensor = aten::mm(%0, %3)
-      %6 : Tensor = aten::mm(%1, %4)
+      %dtype: None = prim::Constant()
+      %5 : Tensor = aten::mm(%0, %3, %dtype)
+      %6 : Tensor = aten::mm(%1, %4, %dtype)
       %7 : int = prim::Constant[value=1]()
       %8 : Tensor = aten::add(%5, %6, %7)
       %9 : Tensor, %10 : Tensor, %11 : Tensor, %12 : Tensor = prim::ConstantChunk[chunks=4, dim=1](%8)
