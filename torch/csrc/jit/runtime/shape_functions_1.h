@@ -362,7 +362,7 @@ def upsample_nearest2d(
     assert 0, "Either output_size or scale_factors must be presented"
 
 
-def mm(self: List[int], mat2: List[int], dtype: Optional[int]):
+def mm(self: List[int], mat2: List[int], *, dtype: Optional[int] = None):
     assert len(self) == 2, "self must be a matrix"
     assert len(mat2) == 2, "mat2 must be a matrix"
 

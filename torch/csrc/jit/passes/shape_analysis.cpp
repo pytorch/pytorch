@@ -1110,7 +1110,7 @@ class ShapePropagator : public PropertyPropBase {
         {
             "aten::normal(Tensor mean, Tensor std, *, Generator? generator) -> Tensor",
             "aten::mm(Tensor self, Tensor mat2, *, ScalarType? dtype) -> Tensor",
-            "aten::bmm(Tensor self, Tensor mat2) -> Tensor",
+            "aten::bmm(Tensor self, Tensor mat2, *, ScalarType? dtype) -> Tensor",
         },
         [](Node* node) -> type_vec_t {
           if (auto type = any_tensor_type(node)) {

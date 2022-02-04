@@ -238,7 +238,7 @@ def mm(g, self, other, dtype):
     return g.op("Gemm", self, other, C, beta_f=0.0, alpha_f=1.0)
 
 
-def bmm(g, self, other):
+def bmm(g, self, other, dtype):
     return g.op("MatMul", self, other)
 
 

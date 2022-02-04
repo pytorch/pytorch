@@ -642,7 +642,7 @@ REGISTER_OPERATOR_FUNCTOR(aten::clamp, aten_clamp, [](Node* n) -> SROperator {
 
 REGISTER_OPERATOR_FUNCTOR(aten::bmm, aten_bmm, [](Node* n) -> SROperator {
   if (!n->matches(
-          torch::schema("aten::bmm(Tensor self, Tensor mat2) -> Tensor"))) {
+          torch::schema("aten::bmm(Tensor self, Tensor mat2, *, ScalarType? dtype) -> Tensor"))) {
     LogAndDumpSchema(n);
     return nullptr;
   }

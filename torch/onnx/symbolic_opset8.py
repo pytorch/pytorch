@@ -137,7 +137,7 @@ def lt(g, input, other):
     return _comparison_operator(g, input, other, "Less")
 
 
-def bmm(g, self, other):
+def bmm(g, self, other, dtype):
     if _try_get_scalar_type(self):
         old_type, self, other = _try_cast_integer_to_float(g, self, other)
         return _cast_to_type(g, g.op("MatMul", self, other), old_type)
@@ -146,7 +146,7 @@ def bmm(g, self, other):
 
 
 def matmul(g, self, other):
-    return bmm(g, self, other)
+    return bmm(g, self, other, None)
 
 
 def prelu(g, self, weight):
