@@ -2,6 +2,25 @@
 #include <torch/csrc/onnx/init.h>
 #include <torch/csrc/onnx/onnx.h>
 #include <torch/version.h>
+#include <torch/csrc/jit/passes/onnx.h>
+#include <torch/csrc/jit/passes/onnx/cast_all_constant_to_floating.h>
+#include <torch/csrc/jit/passes/onnx/constant_fold.h>
+#include <torch/csrc/jit/passes/onnx/eliminate_unused_items.h>
+#include <torch/csrc/jit/passes/onnx/eval_peephole.h>
+#include <torch/csrc/jit/passes/onnx/fixup_onnx_controlflow.h>
+#include <torch/csrc/jit/passes/onnx/function_extraction.h>
+#include <torch/csrc/jit/passes/onnx/function_substitution.h>
+#include <torch/csrc/jit/passes/onnx/list_model_parameters.h>
+#include <torch/csrc/jit/passes/onnx/pattern_conversion/pattern_conversion.h>
+#include <torch/csrc/jit/passes/onnx/pattern_conversion/pattern_encapsulation.h>
+#include <torch/csrc/jit/passes/onnx/peephole.h>
+#include <torch/csrc/jit/passes/onnx/prepare_division_for_onnx.h>
+#include <torch/csrc/jit/passes/onnx/preprocess_for_onnx.h>
+#include <torch/csrc/jit/passes/onnx/remove_inplace_ops_for_onnx.h>
+#include <torch/csrc/jit/passes/onnx/scalar_type_analysis.h>
+#include <torch/csrc/jit/passes/onnx/shape_type_inference.h>
+#include <torch/csrc/jit/passes/onnx/unpack_quantized_weights.h>
+#include <torch/csrc/jit/serialization/export.h>
 
 namespace torch {
 namespace onnx {
