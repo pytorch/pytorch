@@ -24,6 +24,9 @@
 
 namespace torch {
 namespace onnx {
+
+using namespace torch::jit;
+
 void initONNXBindings(PyObject* module) {
   auto m = py::handle(module).cast<py::module>();
 
@@ -110,7 +113,7 @@ void initONNXBindings(PyObject* module) {
           })
       .def("_jit_pass_onnx_set_dynamic_input_shape", ONNXSetDynamicInputShape)
       .def("_jit_pass_onnx_lint", ONNXLintGraph)
-      .def("_jit_pass_onnx_function_extraction", onnx::ONNXFunctionExtraction)
+      .def("_jit_pass_onnx_function_extraction", torch::jit::onnx::ONNXFunctionExtraction)
       .def("_jit_pass_onnx_block", BlockToONNX)
       .def(
           "_jit_pass_onnx_unpack_quantized_weights",
@@ -127,7 +130,14 @@ void initONNXBindings(PyObject* module) {
             insertPermutes(graph, paramsDict);
             return paramsDict;
           },
-          pybind11::return_value_policy::move);
+          pybind11::return_value_policy::move)
+      .def(
+          "_jit_onnx_list_model_parameters",
+          [](Module& module) { return list_module_parameters(module); })
+      .def("_jit_pass_prepare_division_for_onnx", PrepareDivisionForONNX)
+      .def(
+          "_jit_onnx_convert_pattern_from_subblock", ConvertPatternFromSubblock)
+      .def("_jit_pass_fixup_onnx_controlflow_node", FixupONNXControlflowNode);
 
   m.def(
       "_check_onnx_proto",

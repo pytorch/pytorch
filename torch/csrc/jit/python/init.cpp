@@ -268,9 +268,6 @@ void initJITBindings(PyObject* module) {
           "_jit_pass_fold_convbn",
           [](Module& module) { return FoldConvBatchNorm(module); })
       .def(
-          "_jit_onnx_list_model_parameters",
-          [](Module& module) { return list_module_parameters(module); })
-      .def(
           "_freeze_module",
           [](Module& module,
              std::vector<std::string>& preservedAttrs,
@@ -487,7 +484,6 @@ void initJITBindings(PyObject* module) {
       .def("_jit_pass_erase_number_types", EraseNumberTypes)
       .def("_jit_pass_inline_fork_wait", InlineForkWait)
       .def("_jit_pass_inline", Inline)
-      .def("_jit_pass_prepare_division_for_onnx", PrepareDivisionForONNX)
       .def(
           "_jit_pass_lower_graph",
           [](std::shared_ptr<Graph>& graph, const Module& self) {
@@ -570,9 +566,6 @@ void initJITBindings(PyObject* module) {
             return py::reinterpret_steal<py::object>(
                 python::unflatten(vars, desc));
           })
-      .def(
-          "_jit_onnx_convert_pattern_from_subblock", ConvertPatternFromSubblock)
-      .def("_jit_pass_fixup_onnx_controlflow_node", FixupONNXControlflowNode)
       .def("_jit_pass_canonicalize_graph_fuser_ops", CanonicalizeOps)
       .def("_jit_pass_decompose_ops", DecomposeOps)
       .def("_jit_pass_specialize_autogradzero", specializeAutogradZero)
