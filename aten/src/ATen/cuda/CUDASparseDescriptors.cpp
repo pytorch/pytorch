@@ -58,7 +58,7 @@ CuSparseDnMatDescriptor::CuSparseDnMatDescriptor(const Tensor& input) {
   IntArrayRef input_strides = input.strides();
   IntArrayRef input_sizes = input.sizes();
   auto ndim = input.dim();
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(ndim == 2);
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(ndim == 2 || ndim == 3);
   auto rows = input_sizes[ndim - 2];
   auto cols = input_sizes[ndim - 1];
 
@@ -94,6 +94,13 @@ CuSparseDnMatDescriptor::CuSparseDnMatDescriptor(const Tensor& input) {
       value_type,
       order));
 
+  if (ndim == 3) {
+    int batch_count =
+        at::native::cuda_int_cast(at::native::batchCount(input), "batch_count");
+    TORCH_CUDASPARSE_CHECK(cusparseDnMatSetStridedBatch(
+        raw_descriptor, batch_count, input_strides[ndim - 3]));
+  }
+
   descriptor_.reset(raw_descriptor);
 }
 
@@ -116,17 +123,17 @@ CuSparseDnVecDescriptor::CuSparseDnVecDescriptor(const Tensor& input) {
 
 CuSparseSpMatCsrDescriptor::CuSparseSpMatCsrDescriptor(const Tensor& input) {
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(input.is_sparse_csr());
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(input.dim() == 2);
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(input.dim() == 2 || input.dim() == 3);
 
   IntArrayRef input_sizes = input.sizes();
   auto ndim = input.dim();
   auto rows = input_sizes[ndim - 2];
   auto cols = input_sizes[ndim - 1];
-  auto nnz = input._nnz();
 
   auto crow_indices = input.crow_indices();
   auto col_indices = input.col_indices();
   auto values = input.values();
+  auto nnz = values.size(-1);
 
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(crow_indices.is_contiguous());
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(col_indices.is_contiguous());
@@ -152,6 +159,32 @@ CuSparseSpMatCsrDescriptor::CuSparseSpMatCsrDescriptor(const Tensor& input) {
       CUSPARSE_INDEX_BASE_ZERO, // base index of row offset and col indes
       value_type // data type of values
       ));
+
+#if defined(CUDA_VERSION) && CUDA_VERSION >= 11000
+  if (ndim == 3) {
+    int batch_count =
+        at::native::cuda_int_cast(at::native::batchCount(input), "batch_count");
+    if (crow_indices.dim() >= 2 || values.dim() >= 2 ||
+        col_indices.dim() >= 2) {
+      // cuSPARSE ignores the strides and uses only the first batch
+      TORCH_INTERNAL_ASSERT(
+          false,
+          "Support for batched CSR indices and values is not implemented.");
+      TORCH_CUDASPARSE_CHECK(cusparseCsrSetStridedBatch(
+          raw_descriptor,
+          batch_count,
+          crow_indices.stride(-2),
+          values.stride(-2)));
+    } else {
+      // cuSPARSE allows broadcasting of indices and values across batches for
+      // batched matmul
+      TORCH_CUDASPARSE_CHECK(
+          cusparseCsrSetStridedBatch(raw_descriptor, batch_count, 0, 0));
+    }
+  }
+#else
+  TORCH_CHECK(ndim == 2, "Experimental support for batched CSR matrices is implemented only for CUDA 11+");
+#endif
 
   descriptor_.reset(raw_descriptor);
 }
