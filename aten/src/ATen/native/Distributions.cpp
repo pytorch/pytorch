@@ -257,14 +257,20 @@ struct NormalStub {
   }
 };
 
+template<typename RNG>
+struct NormalMeta {
+  // No-op!
+  void operator()(Tensor& self, double mean, double std, c10::optional<Generator> gen) {
+  }
+};
+
 // inplace
 Tensor& normal_(Tensor& self, double mean, double std, c10::optional<Generator> gen) {
   return at::native::templates::normal_impl_<NormalStub, Generator>(self, mean, std, gen);
 }
 
 Tensor& normal_meta_(Tensor& self, double mean, double std, c10::optional<Generator> gen) {
-  CHECK_NORMAL_STD(std);
-  return self;
+  return at::native::templates::normal_impl_<NormalMeta, Generator>(self, mean, std, gen);
 }
 
 // out tensor float
@@ -273,10 +279,7 @@ Tensor& normal_out(const Tensor& mean, double std, c10::optional<Generator> gen,
 }
 
 Tensor& normal_out_meta(const Tensor& mean, double std, c10::optional<Generator> gen, Tensor& output) {
-  CHECK_NORMAL_STD(std);
-  auto std_tensor = at::empty_like(output, MemoryFormat::Contiguous);
-  at::native::templates::resize_output_for_normal(output, mean, std_tensor);
-  return output;
+  return at::native::templates::normal_out_impl<NormalMeta, Generator>(output, mean, std, gen);
 }
 
 // out float tensor
@@ -285,10 +288,8 @@ Tensor& normal_out(double mean, const Tensor& std, c10::optional<Generator> gen,
 }
 
 Tensor& normal_out_meta(double mean, const Tensor& std, c10::optional<Generator> gen, Tensor& output) {
-  CHECK_NORMAL_TENSOR_STD(std);
-  auto mean_tensor = at::empty_like(output, MemoryFormat::Contiguous);
-  at::native::templates::resize_output_for_normal(output, mean_tensor, std);
-  return output;
+  return at::native::templates::normal_out_impl<NormalMeta, Generator>(output, mean, std, gen);
+
 }
 
 // out tensor tensor
@@ -297,9 +298,7 @@ Tensor& normal_out(const Tensor& mean, const Tensor& std, c10::optional<Generato
 }
 
 Tensor& normal_out_meta(const Tensor& mean, const Tensor& std, c10::optional<Generator> gen, Tensor& output) {
-  CHECK_NORMAL_TENSOR_STD(std);
-  at::native::templates::resize_output_for_normal(output, mean, std);
-  return output;
+  return at::native::templates::normal_out_impl<NormalMeta, Generator>(output, mean, std, gen);
 }
 
 // functional tensor float
@@ -308,9 +307,7 @@ Tensor normal(const Tensor& mean, double std, c10::optional<Generator> gen) {
 }
 
 Tensor normal_meta(const Tensor& mean, double std, c10::optional<Generator> gen) {
-  CHECK_NORMAL_STD(std);
-  auto ret = at::empty_like(mean, MemoryFormat::Contiguous);
-  return ret;
+  return at::native::templates::normal_impl<NormalMeta, Generator>(mean, std, gen);
 }
 
 // functional float tensor
@@ -319,9 +316,7 @@ Tensor normal(double mean, const Tensor& std, c10::optional<Generator> gen) {
 }
 
 Tensor normal_meta(double mean, const Tensor& std, c10::optional<Generator> gen) {
-  CHECK_NORMAL_TENSOR_STD(std);
-  auto ret = at::empty_like(std, MemoryFormat::Contiguous);
-  return ret;
+  return at::native::templates::normal_impl<NormalMeta, Generator>(mean, std, gen);
 }
 
 // functional tensor tensor
@@ -330,10 +325,7 @@ Tensor normal(const Tensor& mean, const Tensor& std, c10::optional<Generator> ge
 }
 
 Tensor normal_meta(const Tensor& mean, const Tensor& std, c10::optional<Generator> gen) {
-  CHECK_NORMAL_TENSOR_STD(std);
-  auto ret = at::empty_like(mean, MemoryFormat::Contiguous);
-  at::native::templates::resize_output_for_normal(ret, mean, std);
-  return ret;
+  return at::native::templates::normal_impl<NormalMeta, Generator>(mean, std, gen);
 }
 
 // ==================================================== Random ========================================================

@@ -7221,31 +7221,47 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
 
             # inputs are expandable tensors
             self.assertEqual(torch.normal(tensor2345, tensor1).size(), (2, 3, 4, 5))
-            self.assertEqual(torch.normal(tensor2145, tensor2345).size(), (2, 3, 4, 5))
+            with self.assertWarnsRegex(
+                    UserWarning,
+                    "This behavior is deprecated, and in a future PyTorch "
+                    "release outputs will not be resized unless they have "
+                    "zero elements"):
+                self.assertEqual(torch.normal(tensor2145, tensor2345).size(), (2, 3, 4, 5))
 
             # inputs are non-expandable tensors, but they have same number of elements
-            # TORCH_WARN_ONCE is used in torch.normal, only 1st assertEqual will show warn msg
-            if not warned:
-                self.assertWarnsRegex(UserWarning, "deprecated and the support will be removed",
-                                      lambda: self.assertEqual(torch.normal(tensor120, tensor2345).size(), (120,)))
-                warned = True
-            else:
+            with self.assertRaisesRegex(
+                    RuntimeError,
+                    r"The size of tensor a \(120\) must match the size of "
+                    r"tensor b \(5\) at non-singleton dimension 3"):
                 self.assertEqual(torch.normal(tensor120, tensor2345).size(), (120,))
-            self.assertEqual(torch.normal(tensor2345, tensor120).size(), (2, 3, 4, 5))
+            with self.assertRaisesRegex(
+                    RuntimeError,
+                    r"The size of tensor a \(5\) must match the size of "
+                    r"tensor b \(120\) at non-singleton dimension 3"):
+                self.assertEqual(torch.normal(tensor2345, tensor120).size(), (2, 3, 4, 5))
 
             # inputs are non-expandable tensors and they don't have same number of elements
-            with self.assertRaisesRegex(RuntimeError, "inconsistent tensor"):
+            with self.assertRaisesRegex(
+                    RuntimeError,
+                    r"The size of tensor a \(5\) must match the size of "
+                    r"tensor b \(4\) at non-singleton dimension 3"):
                 torch.normal(tensor2345, tensor4)
 
             # output and inputs are size compatible
             self.assertEqual(torch.normal(tensor2345, tensor2345, out=output2345).size(), (2, 3, 4, 5))
 
             # output and inputs are not size compatible
-            with self.assertRaisesRegex(RuntimeError, "inconsistent tensor"):
-                # inputs are expandable but have different broadcasted size than output
-                torch.normal(tensor2345, tensor2145, out=output345)
-            with self.assertRaisesRegex(RuntimeError, "inconsistent tensor"):
-                # inputs are not expandable but reshapeable, output size is not the same as mean
+            with self.assertWarnsRegex(
+                    UserWarning,
+                    "This behavior is deprecated, and in a future PyTorch "
+                    "release outputs will not be resized unless they have "
+                    "zero elements"):
+                self.assertEqual(torch.normal(tensor2345, tensor2145, out=output345).size(), (2, 3, 4, 5))
+            with self.assertRaisesRegex(
+                    RuntimeError,
+                    r"The size of tensor a \(5\) must match the size of "
+                    r"tensor b \(120\) at non-singleton dimension 3"):
+                # inputs are not expandable, output size is not the same as mean
                 torch.normal(tensor2345, tensor120, out=output345)
 
     def test_tensoriterator_output_setup(self):

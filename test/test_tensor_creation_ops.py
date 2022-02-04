@@ -3341,7 +3341,7 @@ class TestRandomTensorCreation(TestCase):
         std = torch.tensor(-1, dtype=torch.float32, device=device)
 
         for input in [0, a]:
-            with self.assertRaisesRegex(RuntimeError, r'normal_ expects std >= 0.0'):
+            with self.assertRaisesRegex(RuntimeError, r'normal expects std >= 0.0, but found std'):
                 torch.normal(input, -1, (10,))
 
             with self.assertRaisesRegex(RuntimeError, r'normal expects all elements of std >= 0.0'):
