@@ -132,12 +132,12 @@ _INCLUDE_QCONFIG_PROPAGATE_LIST : Set[Callable] = {
 # Default mapping from floating point function or torch ops to quantized ops
 # TODO: merge with default static mapping
 DEFAULT_FLOAT_TO_QUANTIZED_OPERATOR_MAPPINGS : Dict[Union[Callable, str], Callable] = {
-    F.elu: torch.ops.quantized.elu,
-    F.hardswish: torch.ops.quantized.hardswish,
-    F.instance_norm: torch.ops.quantized.instance_norm,
-    F.layer_norm: torch.ops.quantized.layer_norm,
-    F.leaky_relu: torch.ops.quantized.leaky_relu,
-    F.dropout: torch.ops.quantized.dropout,
+    F.elu: torch.ops.quantized.elu.op,
+    F.hardswish: torch.ops.quantized.hardswish.op,
+    F.instance_norm: torch.ops.quantized.instance_norm.op,
+    F.layer_norm: torch.ops.quantized.layer_norm.op,
+    F.leaky_relu: torch.ops.quantized.leaky_relu.op,
+    F.dropout: torch.ops.quantized.dropout.op,
 }
 
 # mapping from module to output activation post process class

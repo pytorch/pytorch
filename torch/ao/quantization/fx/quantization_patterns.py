@@ -337,16 +337,16 @@ class BinaryOpQuantizeHandler(QuantizeHandler):
             (self.num_tensor_args == len(self.binary_op_node.args))
 
         qbin_op_mapping: Dict[Union[Callable, str], Callable] = {
-            operator.add: torch.ops.quantized.add,
-            torch.add: torch.ops.quantized.add,
-            operator.mul: torch.ops.quantized.mul,
-            torch.mul: torch.ops.quantized.mul,
+            operator.add: torch.ops.quantized.add.op,
+            torch.add: torch.ops.quantized.add.op,
+            operator.mul: torch.ops.quantized.mul.op,
+            torch.mul: torch.ops.quantized.mul.op,
         }
         qbin_relu_op_mapping: Dict[Union[Callable, str], Callable] = {
-            operator.add: torch.ops.quantized.add_relu,
-            torch.add: torch.ops.quantized.add_relu,
-            operator.mul: torch.ops.quantized.mul_relu,
-            torch.mul: torch.ops.quantized.mul_relu,
+            operator.add: torch.ops.quantized.add_relu.op,
+            torch.add: torch.ops.quantized.add_relu.op,
+            operator.mul: torch.ops.quantized.mul_relu.op,
+            torch.mul: torch.ops.quantized.mul_relu.op,
         }
         # corresponding quantized op
         self.quantized_binary_op: Optional[Callable] = None
@@ -1092,7 +1092,7 @@ class LinearReLUQuantizeHandler(QuantizeHandler):
                         'call_function', prepack_op, prepack_args, {})
                 # construct linear input
                 if activation_int8_quantized:
-                    qlinear_op = torch.ops.quantized.linear_relu if self.relu_node else torch.ops.quantized.linear
+                    qlinear_op = torch.ops.quantized.linear_relu.op if self.relu_node else torch.ops.quantized.linear.op
                     linear_input = load_arg(quantized=torch.quint8)(self.linear_node.args[0])
                     activation_post_process = \
                         self._maybe_get_last_node_only_observer(modules)
@@ -1118,14 +1118,14 @@ class LinearReLUQuantizeHandler(QuantizeHandler):
                     # choose linear dynamic or linear dynamic fp16 op based on weight dtype
                     if weight_dtype == torch.qint8:
                         if self.relu_node:
-                            qlinear_op = torch.ops.quantized.linear_relu_dynamic
+                            qlinear_op = torch.ops.quantized.linear_relu_dynamic.op
                         else:
-                            qlinear_op = torch.ops.quantized.linear_dynamic
+                            qlinear_op = torch.ops.quantized.linear_dynamic.op
                     else:
                         if self.relu_node:
-                            qlinear_op = torch.ops.quantized.linear_relu_dynamic_fp16
+                            qlinear_op = torch.ops.quantized.linear_relu_dynamic_fp16.op
                         else:
-                            qlinear_op = torch.ops.quantized.linear_dynamic_fp16
+                            qlinear_op = torch.ops.quantized.linear_dynamic_fp16.op
 
                     linear_input = load_arg(quantized=torch.float)(self.linear_node.args[0])
                     qlinear_args = (linear_input, packed_weight)  # type: ignore[assignment]
