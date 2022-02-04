@@ -441,7 +441,7 @@ class record_function(ContextDecorator):
             # Local variable is needed by TorchScript to refine Optional[T] to T
             record = self.record
             assert record is not None
-            torch.ops.profiler._record_function_exit_new(record)
+            torch.ops.profiler._record_function_exit(record)
 
     def _call_end_callbacks_on_future(self, fut: Future[Any]) -> Future[Any]:
         """
