@@ -87,7 +87,7 @@ def filter_master_only_jobs(items):
         filters = item.get('filters', None)
         branches = filters.get('branches', None) if filters is not None else None
         branches_only = branches.get('only', None) if branches is not None else None
-        return 'master' in branches_only if branches_only is not None else False
+        return 'main' in branches_only if branches_only is not None else False
 
     master_deps = set()
 
@@ -115,7 +115,7 @@ def filter_master_only_jobs(items):
         return {item_type: item}
 
     # Scan of dependencies twice to pick up nested required jobs
-    # I.e. jobs depending on jobs that master-only job depend on
+    # I.e. jobs depending on jobs that main-only job depend on
     _for_all_items(items, _save_requires_if_master)
     _for_all_items(items, _save_requires_if_master)
     return _do_filtering(items)

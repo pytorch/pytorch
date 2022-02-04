@@ -52,7 +52,7 @@ The `logits` input does not need to explicitly be a 2D vector; rather, it will b
 
 Github Links:
 
-- https://github.com/pytorch/pytorch/blob/master/caffe2/operators/softmax_with_loss_op.cc
+- https://github.com/pytorch/pytorch/blob/main/caffe2/operators/softmax_with_loss_op.cc
 
 
 <details>

@@ -27,7 +27,7 @@ on:
 {%- endfor %}
 {%- if not is_scheduled and not only_on_pr %}
     branches:
-      - master
+      - main
       - release/*
 {%- endif %}
 {%- if is_scheduled and not only_on_pr %}
@@ -424,7 +424,7 @@ jobs:
           if [[ "${GITHUB_REF}" =~ ^refs/tags/v([0-9]+\.[0-9]+)\.* ]]; then
             target="${BASH_REMATCH[1]}"
           else
-            target="master"
+            target="main"
           fi
           # detached container should get cleaned up by teardown_ec2_linux
           container_name=$(docker run \
@@ -462,7 +462,7 @@ jobs:
           retention-days: 14
           s3-bucket: doc-previews
           if-no-files-found: error
-          path: pytorch.github.io/docs/master/
+          path: pytorch.github.io/docs/main/
           s3-prefix: pytorch/${{ github.event.pull_request.number }}
       - uses: !{{ common.upload_artifact_s3_action }}
         name: Upload C++ Docs Preview

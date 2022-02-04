@@ -54,9 +54,9 @@ own `description`, which allows them to appear in separate columns.
 Statistics do not mix values of different descriptions, since comparing the
 run time of drastically different inputs is generally not meaningful.
 
-* `env`: An optional description of the torch environment. (e.g. `master` or
+* `env`: An optional description of the torch environment. (e.g. `main` or
 `my_branch`). Like sub_labels, statistics are calculated across envs. (Since
-comparing a branch to master or a stable release is a common use case.)
+comparing a branch to main or a stable release is a common use case.)
 However `Compare` will visually group rows which are run with the same `env`.
 
 * `num_threads`: By default, `Timer` will run in single-threaded mode. If

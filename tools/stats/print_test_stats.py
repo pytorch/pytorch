@@ -108,7 +108,7 @@ def plural(n: int) -> str:
 
 def get_base_commit(sha1: str) -> str:
     return subprocess.check_output(
-        ["git", "merge-base", sha1, "origin/master"],
+        ["git", "merge-base", sha1, "origin/main"],
         encoding="ascii",
     ).strip()
 
@@ -206,7 +206,7 @@ def analyze(
     base_reports: Dict[Commit, List[SimplerReport]],
 ) -> List[SuiteDiff]:
     nonempty_shas = [sha for sha, reports in base_reports.items() if reports]
-    # most recent master ancestor with at least one S3 report,
+    # most recent main ancestor with at least one S3 report,
     # or empty list if there are none (will show all tests as added)
     base_report = base_reports[nonempty_shas[0]] if nonempty_shas else []
 
@@ -391,9 +391,9 @@ def graph(
     other_ancestors: int = 0,
 ) -> str:
     lines = [
-        'Commit graph (base is most recent master ancestor with at least one S3 report):',
+        'Commit graph (base is most recent main ancestor with at least one S3 report):',
         '',
-        '    : (master)',
+        '    : (main)',
         '    |',
     ]
 
@@ -525,7 +525,7 @@ def regression_info(
     and its test times. Since Python dicts maintain insertion order
     (guaranteed as part of the language spec since 3.7), the
     base_reports argument must list the head's several most recent
-    master commits, from newest to oldest (so the merge-base is
+    main commits, from newest to oldest (so the merge-base is
     list(base_reports)[0]).
     """
     simpler_head = simplify(head_report)
@@ -913,7 +913,7 @@ def send_report_to_s3(head_report: Version2Report) -> None:
 
     job_report_dirname = f'{job}{f"-{test_config}" if test_config is not None else ""}{shard}'
 
-    if branch not in ['master', 'nightly'] and not branch.startswith("release/"):
+    if branch not in ['main', 'nightly'] and not branch.startswith("release/"):
         pr = os.environ.get('PR_NUMBER', os.environ.get('CIRCLE_PR_NUMBER', 'unknown'))
         key = f'pr_test_time/{pr}/{sha1}/{job_report_dirname}/{now}Z.json.bz2'  # Z meaning UTC
     else:
@@ -966,7 +966,7 @@ def print_regressions(head_report: Report, *, num_prev_commits: int) -> None:
         encoding="ascii",
     ))
 
-    # if current commit is already on master, we need to exclude it from
+    # if current commit is already on main, we need to exclude it from
     # this history; otherwise we include the merge-base
     commits = subprocess.check_output(
         ["git", "rev-list", f"--max-count={num_prev_commits+1}", base],

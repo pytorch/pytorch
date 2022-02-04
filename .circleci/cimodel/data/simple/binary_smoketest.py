@@ -96,7 +96,7 @@ WORKFLOW_DATA = [
         is_master_only=True,
     ),
     # This job has an average run time of 3 hours o.O
-    # Now only running this on master to reduce overhead
+    # Now only running this on main to reduce overhead
     SmoketestJob(
         "binary_mac_build",
         ["libtorch", "3.7", "cpu"],

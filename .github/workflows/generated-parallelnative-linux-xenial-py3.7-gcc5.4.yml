@@ -11,7 +11,7 @@ on:
       - 'ciflow/linux/*'
       - 'ciflow/trunk/*'
     branches:
-      - master
+      - main
       - release/*
   workflow_dispatch:
 

@@ -6,7 +6,7 @@ name: macos-10-15-py3-arm64
 on:
   push:
     branches:
-      - master
+      - main
       - release/*
     tags:
       - 'ciflow/all/*'

@@ -16,7 +16,7 @@ namespace nn {
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Identity ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 /// A placeholder identity operator that is argument-insensitive.
-/// See https://pytorch.org/docs/master/generated/torch.nn.Identity.html to learn
+/// See https://pytorch.org/docs/main/generated/torch.nn.Identity.html to learn
 /// about the exact behavior of this module.
 // NOLINTNEXTLINE(bugprone-exception-escape)
 class TORCH_API IdentityImpl : public Cloneable<IdentityImpl> {
@@ -38,7 +38,7 @@ TORCH_MODULE(Identity);
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Linear ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 /// Applies a linear transformation with optional bias.
-/// See https://pytorch.org/docs/master/generated/torch.nn.Linear.html to learn
+/// See https://pytorch.org/docs/main/generated/torch.nn.Linear.html to learn
 /// about the exact behavior of this module.
 ///
 /// See the documentation for `torch::nn::LinearOptions` class to learn what
@@ -87,7 +87,7 @@ TORCH_MODULE(Linear);
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Flatten ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 /// A placeholder for Flatten operator
-/// See https://pytorch.org/docs/master/generated/torch.nn.Flatten.html to learn
+/// See https://pytorch.org/docs/main/generated/torch.nn.Flatten.html to learn
 /// about the exact behavior of this module.
 ///
 /// See the documentation for `torch::nn::FlattenOptions` class to learn what
@@ -124,7 +124,7 @@ TORCH_MODULE(Flatten);
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Unflatten ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 /// A placeholder for unflatten operator
-/// See https://pytorch.org/docs/master/generated/torch.nn.Unflatten.html to learn
+/// See https://pytorch.org/docs/main/generated/torch.nn.Unflatten.html to learn
 /// about the exact behavior of this module.
 ///
 /// See the documentation for `torch::nn::UnflattenOptions` class to learn what
@@ -166,7 +166,7 @@ TORCH_MODULE(Unflatten);
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Bilinear ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 /// Applies a billinear transformation with optional bias.
-/// See https://pytorch.org/docs/master/generated/torch.nn.Bilinear.html to learn
+/// See https://pytorch.org/docs/main/generated/torch.nn.Bilinear.html to learn
 /// about the exact behavior of this module.
 ///
 /// See the documentation for `torch::nn::BilinearOptions` class to learn what

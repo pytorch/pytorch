@@ -48,7 +48,7 @@ inline Tensor embedding(const Tensor& input,
 } // namespace detail
 #endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
-/// See https://pytorch.org/docs/master/nn.functional.html#torch.nn.functional.embedding
+/// See https://pytorch.org/docs/main/nn.functional.html#torch.nn.functional.embedding
 /// about the exact behavior of this functional.
 ///
 /// See the documentation for `torch::nn::functional::EmbeddingFuncOptions` class to learn what
@@ -148,7 +148,7 @@ inline Tensor embedding_bag(
 } // namespace detail
 #endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
-/// See https://pytorch.org/docs/master/nn.functional.html#torch.nn.functional.embedding_bag
+/// See https://pytorch.org/docs/main/nn.functional.html#torch.nn.functional.embedding_bag
 /// about the exact behavior of this functional.
 ///
 /// See the documentation for `torch::nn::functional::EmbeddingBagFuncOptions` class to learn what

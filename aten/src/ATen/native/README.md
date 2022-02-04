@@ -254,7 +254,7 @@ contains Tensors that alias the input.
   - `func: chunk(Tensor(a -> *) self, int chunks, int dim=0) -> Tensor(a)[]`
 We assume lists contain memory which aliases the heap, so in order to correctly set up the aliasing
 relationship between the output and input, we annotate that the input Tensor enters the wildcard set `(a -> *)`.
-For more details, see the JIT [README](https://github.com/pytorch/pytorch/blob/master/torch/csrc/jit/OVERVIEW.md#aliasing-and-mutation-annotations-in-functionschema).
+For more details, see the JIT [README](https://github.com/pytorch/pytorch/blob/main/torch/csrc/jit/OVERVIEW.md#aliasing-and-mutation-annotations-in-functionschema).
 
 We have some asserts to check whether a developer uses these annotations correctly and throw asserts
 if she doesn't. For example, any out function must use the `(a!)` annotation as described above.
@@ -291,7 +291,7 @@ If two backends have the same dispatch function, you can write `CPU, CUDA: func`
 to reuse the same function name in both cases.
 
 Available backend options can be found by searching `dispatch_keys` in
-[codegen](https://github.com/pytorch/pytorch/blob/master/tools/codegen/gen.py).
+[codegen](https://github.com/pytorch/pytorch/blob/main/tools/codegen/gen.py).
 There are also two special "generic" backends:
 
   - `CompositeExplicitAutograd` (previously known as `DefaultBackend`):
@@ -542,7 +542,7 @@ Here're steps to follow to decide the right dispatch keyword:
       Note: current plan on record for ops using this boilerplate is to replace `at::` with `at::native` in
       the implementations and add dispatch section with device keywords instead.
 3. Validate the computed dispatch table matches what you want. You can use `PythonDispatcher` provided in
-[torch/_python_dispatcher.py](https://github.com/pytorch/pytorch/blob/master/torch/_python_dispatcher.py).
+[torch/_python_dispatcher.py](https://github.com/pytorch/pytorch/blob/main/torch/_python_dispatcher.py).
 It shows for a certain operator, what the computed dispatch table looks like after your registrations.
 
     ```

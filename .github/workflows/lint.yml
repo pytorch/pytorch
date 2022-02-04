@@ -3,7 +3,7 @@ name: Lint
 on:
   push:
     branches:
-      - master
+      - main
   pull_request:
 
 jobs:
@@ -204,7 +204,7 @@ jobs:
             echo '    .github/scripts/generate_ci_workflows.py'
             echo
             echo 'If running that command does nothing, you may need to rebase'
-            echo 'onto a more recent commit from the PyTorch master branch.'
+            echo 'onto a more recent commit from the PyTorch main branch.'
             false
           fi
       - name: Install ShellCheck
@@ -337,7 +337,7 @@ jobs:
       - name: Add annotations
         # Don't run on forked pull requests
         if: ${{ failure() && github.event.pull_request.head.repo.full_name == github.repository }}
-        uses: pytorch/add-annotations-github-action@master
+        uses: pytorch/add-annotations-github-action@main
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
@@ -390,9 +390,9 @@ jobs:
             --diff-file pr.diff \
             --disable-progress-bar 2>&1 | tee "${GITHUB_WORKSPACE}"/clang-tidy-output.txt
 
-      # Run clang-tidy on a smaller subset of the codebase on master until we
+      # Run clang-tidy on a smaller subset of the codebase on main until we
       # make the repository clang-tidy clean
-      - name: Run master clang-tidy
+      - name: Run main clang-tidy
         run: |
           cd "${GITHUB_WORKSPACE}"
 
@@ -430,7 +430,7 @@ jobs:
       - name: Add annotations
         # Don't run on forked pull requests
         if: ${{ failure() && github.event.pull_request.head.repo.full_name == github.repository }}
-        uses: pytorch/add-annotations-github-action@master
+        uses: pytorch/add-annotations-github-action@main
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:

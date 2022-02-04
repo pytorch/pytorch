@@ -18,7 +18,7 @@ OPERATOR_SCHEMA(Sqr)
 Performs element-wise squaring ($x^2$) of input tensor.
 
 Github Link:
-- https://github.com/pytorch/pytorch/blob/master/caffe2/operators/sqr_op.cc
+- https://github.com/pytorch/pytorch/blob/main/caffe2/operators/sqr_op.cc
 
 <details>
 

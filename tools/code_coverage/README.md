@@ -3,7 +3,7 @@
 ## Overview
 
 This tool is designed for calculating code coverage for Pytorch project.
-It’s an integrated tool. You can use this tool to run and generate both file-level and line-level report for C++ and Python tests. It will also be the tool we use in *CircleCI* to generate report for each master commit.
+It’s an integrated tool. You can use this tool to run and generate both file-level and line-level report for C++ and Python tests. It will also be the tool we use in *CircleCI* to generate report for each main commit.
 
 ### Simple
 * *Simple command to run:*

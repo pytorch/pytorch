@@ -71,7 +71,7 @@ void RMSpropParamState::serialize(torch::serialize::InputArchive& archive) {
 }
 
 /// Adapted from
-/// https://github.com/pytorch/pytorch/blob/master/torch/optim/rmsprop.py
+/// https://github.com/pytorch/pytorch/blob/main/torch/optim/rmsprop.py
 Tensor RMSprop::step(LossClosure closure)  {
   NoGradGuard no_grad;
   Tensor loss = {};

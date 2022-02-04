@@ -1,5 +1,5 @@
 NON_PR_BRANCH_LIST = [
-    "master",
+    "main",
     r"/ci-all\/.*/",
     r"/release\/.*/",
 ]

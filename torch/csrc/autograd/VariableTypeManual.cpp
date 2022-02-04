@@ -280,7 +280,7 @@ Tensor & detach_(c10::DispatchKeySet ks, Tensor & self) {
 // The reason for (3) is that ops that also use dispatch (e.g. register CPU/CUDA/QuantizedCPU
 // kernels) will skip picking up CompositeImplicitAutograd kernels for Autograd, so we register them to both
 // CompositeExplicitAutograd and Autograd instead. See
-// https://github.com/pytorch/pytorch/tree/master/aten/src/ATen/native#choosing-the-right-dispatch-keyword
+// https://github.com/pytorch/pytorch/tree/main/aten/src/ATen/native#choosing-the-right-dispatch-keyword
 // for more details.
 // Invariant:
 // - Ops registered to CompositeImplicitAutograd or CompositeExplicitAutograd below must match `MANUAL_BACKEND` set in tools/autograd/gen_variable_type.py.

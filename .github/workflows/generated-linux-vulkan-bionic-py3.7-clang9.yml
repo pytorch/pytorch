@@ -13,7 +13,7 @@ on:
       - 'ciflow/trunk/*'
       - 'ciflow/vulkan/*'
     branches:
-      - master
+      - main
       - release/*
   workflow_dispatch:
 

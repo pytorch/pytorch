@@ -20,7 +20,7 @@ namespace nn {
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ TransformerEncoderLayer ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 /// TransformerEncoderLayer module.
-/// See https://pytorch.org/docs/master/generated/torch.nn.TransformerEncoderLayer.html to
+/// See https://pytorch.org/docs/main/generated/torch.nn.TransformerEncoderLayer.html to
 /// learn abouut the exact behavior of this encoder layer model
 ///
 /// See the documentation for `torch::nn::TransformerEncoderLayer` class to learn what
@@ -95,7 +95,7 @@ TORCH_MODULE(TransformerEncoderLayer);
 /// Lukasz Kaiser, and Illia Polosukhin. 2017. Attention is all you need. In Advances in
 /// Neural Information Processing Systems, pages 6000-6010. Users may modify or implement
 /// in a different way during application.
-/// See https://pytorch.org/docs/master/nn.html#transformer-layers to learn
+/// See https://pytorch.org/docs/main/nn.html#transformer-layers to learn
 /// about the exact behavior of this module.
 ///
 /// See the documentation for `torch::nn::TransformerDecoderLayerOptions` class to learn what

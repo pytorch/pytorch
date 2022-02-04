@@ -84,7 +84,7 @@ TORCH_LIBRARY_IMPL(quantized, QuantizedCPU, m) {
 ### Step 2b. [Optional] Registering the operation with the `native_functions.yaml`
 
 In some cases, if the signature of the quantized function and its non-quantized counterpart are the same, it is worth adding it to the `ATen/native/native_functions.yaml`.
-A detailed explanation on this file can be found [here](https://github.com/pytorch/pytorch/blob/master/aten/src/ATen/native/README.md).
+A detailed explanation on this file can be found [here](https://github.com/pytorch/pytorch/blob/main/aten/src/ATen/native/README.md).
 
 **If adding a new entry to the `native_functions.yaml`:**
 
