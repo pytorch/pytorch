@@ -71,8 +71,8 @@ c10::intrusive_ptr<JitFuture> rpcTorchscript(
     }
   }));
   if (shouldProfile) {
-    auto profiledFutPtr = torch::autograd::profiler::_call_end_callbacks_on_fut_new(
-        std::move(record), futPtr);
+    auto profiledFutPtr =
+        torch::autograd::profiler::_call_end_callbacks_on_fut_new(record, futPtr);
     return profiledFutPtr;
   }
   return futPtr;

@@ -2384,7 +2384,7 @@ class RpcTest(RpcAgentTestFixture, RpcTestCommon):
                     )
                     torch.ops.profiler._call_end_callbacks_on_jit_fut(record, fut)
                 finally:
-                    torch.ops.profiler._record_function_exit_new(record)
+                    torch.ops.profiler._record_function_exit(record)
 
                 fut.wait()
 

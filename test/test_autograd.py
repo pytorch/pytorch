@@ -2940,7 +2940,7 @@ class TestAutograd(TestCase):
             try:
                 y = x * 2 + 4
             finally:
-                torch.ops.profiler._record_function_exit_new(record)
+                torch.ops.profiler._record_function_exit(record)
 
         function_events = p.function_events
         foo_event = [event for event in function_events if "bar" in event.name][0]
