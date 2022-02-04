@@ -3820,59 +3820,6 @@ class TestLinalg(TestCase):
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
     @dtypes(*floating_and_complex_types())
-    def test_linalg_svd_rank_revealing_as_svd_compute_uv(self, device, dtype):
-
-        # match to linalg.svd
-        def svd(x, *args, **kwargs):
-            if len(args) > 0:
-                full_matrices = args[0]
-
-            if 'out' in kwargs:
-                out = {
-                    'out': (
-                        *kwargs['out'],
-                        torch.empty(x.shape[:-2], dtype=torch.long, device=x.device)
-                    )
-                }
-            else:
-                out = {}
-
-            return torch.linalg.svd_rank_revealing(x, full_matrices=full_matrices, **out)[:-1]
-
-        self._test_linalg_svd_compute_uv(device, dtype, svd=svd)
-
-    @skipCUDAIfNoMagma
-    @skipCPUIfNoLapack
-    @dtypes(*floating_and_complex_types())
-    def test_linalg_svd_rank_revealing_restricted_as_svd_errors_and_warnings(self, device, dtype):
-
-        for op in (torch.linalg.svd_rank_revealing, torch.linalg.svd_rank_restricted):
-            # match to linalg.svd
-            def svd(x, *args, **kwargs):
-                if len(args) > 0:
-                    full_matrices = args[0]
-                elif 'full_matrices' in kwargs:
-                    full_matrices = kwargs['full_matrices']
-                else:
-                    full_matrices = True
-
-                if 'out' in kwargs:
-                    out = {
-                        'out': (
-                            *kwargs['out'],
-                            torch.empty(x.shape[:-2], dtype=torch.long, device=x.device)
-                        )
-                    }
-                else:
-                    out = {}
-
-                return op(x, full_matrices=full_matrices, **out)[:-1]
-
-            self._test_svd_errors_and_warnings(device, dtype, linalg_svd=svd)
-
-    @skipCUDAIfNoMagma
-    @skipCPUIfNoLapack
-    @dtypes(*floating_and_complex_types())
     def test_linalg_svd_rank_restricted_rank_restriction(self, device, dtype):
         n_low = 3
         n_high = 10
