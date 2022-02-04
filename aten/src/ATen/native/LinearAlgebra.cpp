@@ -70,7 +70,7 @@ TORCH_META_FUNC(mm)(const Tensor & self, const Tensor & mat2, c10::optional<Scal
 
 template <typename Meta>
 void common_checks_baddbmm_bmm(Meta& meta, const Tensor& batch1, const Tensor& batch2, const Scalar& beta, const Scalar& alpha,
-    bool is_bmm, const c10::optional<Tensor>& self_baddbmm = nullopt, c10::optional<ScalarType> dtype_opt = c10::nullopt) {
+    bool is_bmm, const c10::optional<Tensor>& self_baddbmm, c10::optional<ScalarType> dtype_opt) {
   TORCH_CHECK(batch1.dim() == 3, "batch1 must be a 3D tensor");
   TORCH_CHECK(batch2.dim() == 3, "batch2 must be a 3D tensor");
 
@@ -91,7 +91,7 @@ void common_checks_baddbmm_bmm(Meta& meta, const Tensor& batch1, const Tensor& b
   // 'set_output' does not resize for in-place calls
   if (dtype_opt.has_value() && dtype_opt.value() == at::kFloat && batch2.dtype() == at::kHalf && batch2.is_cuda()) {
 #ifdef USE_ROCM
-    TORCH_CHECK(false, "baddbmm: inputs of half precision with kwarg dtype=torch.float is not supported for this backend.");
+    TORCH_CHECK(false, "baddbmm/bmm: inputs of half precision with kwarg dtype=torch.float is not supported for this backend.");
 #else
     meta.set_output(output_size, batch2.options().dtype(at::kFloat));
 #endif
@@ -124,8 +124,8 @@ void common_checks_baddbmm_bmm(Meta& meta, const Tensor& batch1, const Tensor& b
   );
 }
 
-TORCH_META_FUNC(bmm)(const Tensor& self, const Tensor& mat2) {
-    common_checks_baddbmm_bmm(*this, self, mat2, Scalar(0.0), Scalar(1.0), true);
+TORCH_META_FUNC(bmm)(const Tensor& self, const Tensor& mat2, c10::optional<ScalarType> dtype_opt) {
+    common_checks_baddbmm_bmm(*this, self, mat2, Scalar(0.0), Scalar(1.0), true, /* self_baddbmm */ c10::nullopt, dtype_opt);
 }
 
 TORCH_META_FUNC(baddbmm)(const Tensor& self, const Tensor& batch1, const Tensor& batch2, const Scalar& beta, const Scalar& alpha,
@@ -1572,7 +1572,8 @@ TORCH_IMPL_FUNC(baddbmm_out_cpu)
   }
 
 TORCH_IMPL_FUNC(bmm_out_cpu)
-(const Tensor & batch1, const Tensor & batch2, const Tensor & result) {
+(const Tensor & batch1, const Tensor & batch2, c10::optional<ScalarType> dtype_opt, const Tensor & result) {
+    TORCH_CHECK(!dtype_opt.has_value(), "bmm_out_cpu: kwarg dtype is not supported for this backend.");
     {
     NoNamesGuard guard;
     bool result_is_conj = result.is_conj();

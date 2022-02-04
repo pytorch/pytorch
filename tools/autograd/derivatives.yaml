@@ -335,7 +335,7 @@
   self: zeros_like(grad)
   result: self_t.zero_()
 
-- name: bmm(Tensor self, Tensor mat2) -> Tensor
+- name: bmm(Tensor self, Tensor mat2, *, ScalarType? dtype=None) -> Tensor
   self: grad.bmm(mat2.transpose(1, 2).conj())
   mat2: self.transpose(1, 2).conj().bmm(grad)
   result: self_t.bmm(mat2_p) + self_p.bmm(mat2_t)

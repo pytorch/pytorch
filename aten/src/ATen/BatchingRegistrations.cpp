@@ -873,7 +873,7 @@ Tensor dot_batching_rule(const Tensor& self, const Tensor& other) {
   TORCH_INTERNAL_ASSERT(false, "either self or other must be a BatchedTensor");
 }
 
-Tensor bmm_batching_rule(const Tensor& self, const Tensor& other) {
+Tensor bmm_batching_rule(const Tensor& self, const Tensor& other, c10::optional<ScalarType> dtype_opt) {
   TORCH_CHECK(/*logical*/self.dim() == 3 && /*logical*/other.dim() == 3,
       "bmm(self, other): Shape mismatch: expected 3D `self` "
       "(got `self` of size ", self.sizes(), ") ",
@@ -884,7 +884,7 @@ Tensor bmm_batching_rule(const Tensor& self, const Tensor& other) {
   return physical_args[0].getPhysicalToLogicalMap().apply(result);
 }
 
-Tensor mm_batching_rule(const Tensor& self, const Tensor& other) {
+Tensor mm_batching_rule(const Tensor& self, const Tensor& other, c10::optional<ScalarType> dtype_opt) {
   auto self_batched = isBatchedTensor(self);
   auto other_batched = isBatchedTensor(other);
 
@@ -910,10 +910,6 @@ Tensor mm_batching_rule(const Tensor& self, const Tensor& other) {
     return physical_args[0].getPhysicalToLogicalMap().apply(result.squeeze(-1).squeeze(-1));
   }
   TORCH_INTERNAL_ASSERT(false, "either self or other must be a BatchedTensor");
-}
-
-Tensor mm_batching_rule_with_dtype(const Tensor& self, const Tensor& other, c10::optional<ScalarType> dtype_opt) {
-  return mm_batching_rule(self, other);
 }
 
 Tensor cat_batching_rule(TensorList tensors, int64_t dim) {
@@ -1243,7 +1239,7 @@ TORCH_LIBRARY_IMPL(aten, Batched, m) {
   m.impl("mv", mv_batching_rule);
   m.impl("dot", dot_batching_rule);
   m.impl("bmm", bmm_batching_rule);
-  m.impl("mm", mm_batching_rule_with_dtype);
+  m.impl("mm", mm_batching_rule);
 
   // cat/stack
   m.impl("cat", cat_batching_rule);

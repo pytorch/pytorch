@@ -1048,14 +1048,14 @@
 
 - func: blackman_window.periodic(int window_length, bool periodic, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
 
-- func: bmm(Tensor self, Tensor mat2) -> Tensor
+- func: bmm(Tensor self, Tensor mat2, *, ScalarType? dtype=None) -> Tensor
   structured_delegate: bmm.out
   variants: function, method
   dispatch:
     SparseCPU: bmm_sparse_cpu
     SparseCUDA: bmm_sparse_cuda
 
-- func: bmm.out(Tensor self, Tensor mat2, *, Tensor(a!) out) -> Tensor(a!)
+- func: bmm.out(Tensor self, Tensor mat2, *, ScalarType? dtype=None, Tensor(a!) out) -> Tensor(a!)
   structured: True
   variants: function
   dispatch:

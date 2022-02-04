@@ -1433,9 +1433,10 @@ Tensor any_sparse(const Tensor& self) {
   return at::any(self._values());
 }
 
-Tensor bmm_sparse_cpu(const SparseTensor& self, const Tensor& mat2) {
+Tensor bmm_sparse_cpu(const SparseTensor& self, const Tensor& mat2, c10::optional<ScalarType> dtype_opt) {
+  TORCH_CHECK(!dtype_opt.has_value(), "bmm_sparse_cpu: kwarg dtype is not supported for this backend.");
   Tensor result = at::empty({}, mat2.options());
-  return bmm_out_sparse_cpu(self, mat2, result);
+  return bmm_out_sparse_cpu(self, mat2, c10::nullopt, result);
 }
 
 // Search a sorted strided array for the rightmost instance of a value.
@@ -1479,7 +1480,8 @@ scalar_t binary_search_strided_rightmost(scalar_t search_val, TensorAccessor<sca
   return mid_ind;
 }
 
-Tensor& bmm_out_sparse_cpu(const SparseTensor& self, const Tensor& mat2, Tensor& result) {
+Tensor& bmm_out_sparse_cpu(const SparseTensor& self, const Tensor& mat2, c10::optional<ScalarType> dtype_opt, Tensor& result) {
+  TORCH_CHECK(!dtype_opt.has_value(), "bmm_out_sparse_cpu: kwarg dtype is not supported for this backend.");
   TORCH_CHECK(!mat2.is_sparse(), "bmm_sparse: Tensor 'mat2' must be dense");
 
   TORCH_CHECK(self.dense_dim() == 0, "bmm_sparse: Tensor 'self' must have 0 dense dims, but has ", self.dense_dim());

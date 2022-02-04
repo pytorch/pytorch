@@ -155,6 +155,7 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
   int64_t mat2_ld = mat2_->stride((transpose_mat2 == transpose_result) ? 1 : 0);
   int64_t result_ld = result_->stride(transpose_result ? 0 : 1);
 
+  // [Which scalar_type to use in mm, bmm, addmm, baddbmm]
   // In most cases, the four tensors result, self, mat1, mat2 have the same dtype.
   // However, in cuda fp16 @ fp16 -> fp32 case, there are two different scenarios:
   // - addmm: result in fp32; self, mat1, mat2 in fp16
@@ -277,7 +278,8 @@ const Tensor& baddbmm_out_cuda_impl(const Tensor& result, const Tensor& self, co
 
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(!result_->is_conj());
 
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, self.scalar_type(), "baddbmm_cuda", [&] {
+  // Also see comment in [Which scalar_type to use in mm, bmm, addmm, baddbmm]
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, batch1.scalar_type(), "baddbmm_cuda", [&] {
     using opmath_t = at::opmath_type<scalar_t>;
     opmath_t alpha_val = alpha.to<opmath_t>();
     opmath_t beta_val = beta.to<opmath_t>();
@@ -337,12 +339,12 @@ TORCH_IMPL_FUNC(baddbmm_out_cuda)(const Tensor& self, const Tensor& batch1, cons
   }
 }
 
-TORCH_IMPL_FUNC(bmm_out_cuda)(const Tensor& batch1, const Tensor& batch2, const Tensor &result) {
+TORCH_IMPL_FUNC(bmm_out_cuda)(const Tensor& batch1, const Tensor& batch2, c10::optional<ScalarType> dtype_opt, const Tensor &result) {
   Scalar beta(0.0);
   Scalar alpha(1.0);
   {
     NoNamesGuard guard;
-    baddbmm_out_cuda_impl(result, result, batch1, batch2, beta, alpha, c10::nullopt);
+    baddbmm_out_cuda_impl(result, result, batch1, batch2, beta, alpha, dtype_opt);
   }
 }
 

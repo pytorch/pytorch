@@ -216,7 +216,9 @@ Tensor& baddbmm_out_sparse_csr_cuda(
 Tensor& bmm_out_sparse_csr_cuda(
     const Tensor& mat1,
     const Tensor& mat2,
+    c10::optional<ScalarType> dtype_opt,
     Tensor& result) {
+  TORCH_CHECK(!dtype_opt.has_value(), "bmm_out_sparse_csr_cuda: kwarg dtype is not supported for this backend.");
   Scalar beta(0.0);
   Scalar alpha(1.0);
   return at::native::baddbmm_out_sparse_csr_cuda(result, mat1, mat2, beta, alpha, c10::nullopt, result);

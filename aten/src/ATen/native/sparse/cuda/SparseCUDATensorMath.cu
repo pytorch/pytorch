@@ -684,9 +684,10 @@ Tensor _sparse_sum_backward_cuda(const Tensor& grad_, const SparseTensor& input_
   }
 }
 
-Tensor bmm_sparse_cuda(const SparseTensor& self, const Tensor& mat2) {
+Tensor bmm_sparse_cuda(const SparseTensor& self, const Tensor& mat2, c10::optional<ScalarType> dtype_opt) {
+  TORCH_CHECK(!dtype_opt.has_value(), "bmm_sparse_cuda: kwarg dtype is not supported for this backend.");
   Tensor result = at::empty({self.size(0), mat2.size(2), self.size(1)}, mat2.options(), at::MemoryFormat::Contiguous);
-  return bmm_out_sparse_cuda(self, mat2, result);
+  return bmm_out_sparse_cuda(self, mat2, c10::nullopt, result);
 }
 
 #if !(defined(USE_ROCM) || (defined(_MSC_VER) && CUSPARSE_VERSION < 11000))
@@ -769,7 +770,8 @@ cudaDataType getTensorCudaDataType(Tensor self) {
 }
 #endif
 
-Tensor& bmm_out_sparse_cuda(const SparseTensor& self, const Tensor& mat2, Tensor& result) {
+Tensor& bmm_out_sparse_cuda(const SparseTensor& self, const Tensor& mat2, c10::optional<ScalarType> dtype_opt, Tensor& result) {
+  TORCH_CHECK(!dtype_opt.has_value(), "bmm_out_sparse_cuda: kwarg dtype is not supported for this backend.");
 #if defined(USE_ROCM)
   TORCH_CHECK(false, "bmm sparse-dense is not supported on HIP");
 #elif defined(_MSC_VER) && (CUSPARSE_VERSION < 11000)
