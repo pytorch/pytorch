@@ -336,10 +336,11 @@ def dequantize(g, input):
 class Quantized:
     """
     https://github.com/pytorch/pytorch/wiki/PyTorch-ONNX-exporter#quantized-model-export
+
+    Support starts from opset 10 because `DequantizeLinear` and `QuantizeLinear` were introduced in opset version 10.
     """
     domain = "quantized"
 
-    # DequantizeLinear was added in opset version 10.
     @staticmethod
     def linear(g, q_input, q_weight, bias, op_scale, op_zero_point):
         input, _, _ = sym_help.dequantize_helper(g, q_input)
