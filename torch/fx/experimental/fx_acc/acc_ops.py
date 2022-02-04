@@ -3,7 +3,7 @@ import operator
 import warnings
 
 import torch  # isort:skip
-from typing import Sequence, Optional, List, cast
+from typing import Sequence, List, cast
 
 import torch.fx.experimental.fx_acc.acc_utils as acc_utils
 import torch.nn as nn
@@ -1278,6 +1278,14 @@ def linalg_norm(*, input, ord, dim, keepdim):
     ],
 )
 @register_custom_acc_mapper_fn(
+    op_and_target=("call_method", "split_with_sizes"),
+    arg_replacement_tuples=[
+        ("tensor", "input"),
+        ("split_sizes", "split_size_or_sections"),
+        ("dim", "dim"),
+    ],
+)
+@register_custom_acc_mapper_fn(
     op_and_target=("call_function", torch.split),
     arg_replacement_tuples=[
         ("tensor", "input"),
@@ -1310,10 +1318,10 @@ def torch_split_mapper(node: torch.fx.Node, mod: nn.Module) -> torch.fx.Node:
             assert isinstance(i, int)
             new_kwargs = {
                 "input": node.kwargs["input"],
-                "dims": (node.kwargs["dim"],),
-                "starts": (start,),
-                "stops": (start + i,),
-                "steps": (1,),
+                "dim": node.kwargs["dim"],
+                "start": start,
+                "stop": start + i,
+                "step": 1,
             }
             new_node = node.graph.call_function(slice_tensor, kwargs=new_kwargs)
             new_node.meta["type"] = torch.Tensor
@@ -1504,19 +1512,16 @@ def getitem(*, input, idx):
 
 @register_acc_op_properties(AccOpProperty.unary)
 @register_acc_op
-def slice_tensor(*, input, dims, starts, stops, steps):
-    slices: List[Optional[slice]] = [None for _ in range(input.dim())]
+def slice_tensor(*, input, dim, start, stop, step):
+    slc = slice(start, stop, step)
+    if dim >= 0:
+        slices: List[slice] = [slice(None, None, None) for _ in range(dim)]
+        slices.append(slc)
+    else:
+        slices = [Ellipsis, slc]  # type: ignore[list-item]
+        slices.extend([slice(None, None, None) for _ in range(-dim - 1)])
 
-    # For all provided dims, extract out a slice for starts/stops/steps.
-    for idx, dim in enumerate(dims):
-        slices[dim] = slice(starts[idx], stops[idx], steps[idx])
-
-    # For all unspecified dims, default to the full slice.
-    for idx, s in enumerate(slices):
-        if s is None:
-            slices[idx] = slice(None, None, None)
-
-    return input[slices]
+    return input[tuple(slices)]
 
 
 @register_custom_acc_mapper_fn(
@@ -1543,10 +1548,10 @@ def custom_narrow_mapper(node: torch.fx.Node, mod: nn.Module) -> torch.fx.Node:
     )
     kwargs = {
         "input": node.kwargs["input"],
-        "dims": (node.kwargs["dim"],),
-        "starts": (node.kwargs["start"],),
-        "stops": (node.kwargs["start"] + node.kwargs["length"],),
-        "steps": (1,),
+        "dim": node.kwargs["dim"],
+        "start": node.kwargs["start"],
+        "stop": node.kwargs["start"] + node.kwargs["length"],
+        "step": 1,
     }
     with node.graph.inserting_before(node):
         new_node = node.graph.call_function(slice_tensor, kwargs=kwargs)
