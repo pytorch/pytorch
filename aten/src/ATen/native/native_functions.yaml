@@ -3133,6 +3133,9 @@
     SparseCPU, SparseCUDA: _sparse_mm_out
     SparseCsrCPU, SparseCsrCUDA: _sparse_csr_mm_out
 
+# A thin wrapper of _sparse_mm
+- func: _sparse_mm_deprecated(Tensor sparse, Tensor dense) -> Tensor
+
 - func: _sparse_sparse_matmul(Tensor self, Tensor other) -> Tensor
   dispatch:
     SparseCPU: sparse_sparse_matmul_cpu

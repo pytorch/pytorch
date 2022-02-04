@@ -933,6 +933,13 @@ Tensor _sparse_mm(
   return at::_sparse_addmm(t, sparse, dense, 0, 1);  // redispatch!
 }
 
+Tensor _sparse_mm_deprecated(
+  const SparseTensor& sparse,
+  const Tensor& dense
+) {
+  return at::native::_sparse_mm(sparse, dense, c10::nullopt);
+}
+
 // NB: Despite its suggestive name, this actually only exists so that
 // we can redispatch to addmm_out; this is NOT an implementation of
 // the sparse masking version of mm

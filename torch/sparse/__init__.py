@@ -88,7 +88,8 @@ def mm(mat1: Tensor, mat2: Tensor) -> Tensor:
     """
     if mat1.is_sparse and mat2.is_sparse:
         return torch._sparse_sparse_matmul(mat1, mat2)
-    return torch._sparse_mm(mat1, mat2)
+    # Todo: should change dispatch logic and use torch.mm instead
+    return torch._sparse_mm_deprecated(mat1, mat2)
 
 
 sampled_addmm = _add_docstr(_sparse.sparse_sampled_addmm, r"""
