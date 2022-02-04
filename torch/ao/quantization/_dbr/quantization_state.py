@@ -507,7 +507,7 @@ class AutoQuantizationState(torch.nn.Module):
 
         # TODO move op-specific logic out of here
         if op is torch.ops.quantized.linear:
-            del kwargs['bias']
+            kwargs.pop('bias', None)
 
         return op, tuple(new_args), kwargs
 
@@ -760,7 +760,7 @@ class AutoQuantizationState(torch.nn.Module):
             return args, kwargs
 
         op_packing_only_uses_module_attributes = \
-            get_op_packing_only_uses_module_attributes(op, args, root_module)
+            get_op_packing_only_uses_module_attributes(op, args, kwargs, root_module)
 
         packable_tensor_idx_to_name = {}
         packable_nontensor_idx_to_arg = {}
@@ -769,6 +769,8 @@ class AutoQuantizationState(torch.nn.Module):
             packable_tensor_arg_idxs = get_packable_tensor_arg_idxs(op)
             if packable_tensor_arg_idxs is not None:
                 for arg_idx in packable_tensor_arg_idxs:
+                    if arg_idx >= len(args):
+                        continue
                     arg = args[arg_idx]
                     param_name = get_param_name(root_module, arg)
                     packable_tensor_idx_to_name[arg_idx] = param_name
@@ -782,6 +784,8 @@ class AutoQuantizationState(torch.nn.Module):
                 get_packable_tensor_kwarg_names(op)
             if packable_tensor_kwarg_names is not None:
                 for kwarg_name in packable_tensor_kwarg_names:
+                    if kwarg_name not in kwargs:
+                        continue
                     kwarg = kwargs[kwarg_name]
                     kwarg_name_on_module = get_param_name(root_module, kwarg)
                     packable_tensor_kwarg_name_to_name[kwarg_name] = \
@@ -909,21 +913,16 @@ class AutoQuantizationState(torch.nn.Module):
         seen_q_op_info: SeenQOpInfo,
         root_module: torch.nn.Module,
     ):
-        is_start_of_fusion = seen_q_op_info.fusion_info and \
-            seen_q_op_info.fusion_info.is_first_element
-        is_not_start_of_fusion = seen_q_op_info.fusion_info and \
-            not seen_q_op_info.fusion_info.is_first_element
-
-        # if we are in a fusion but not at the start, do not insert observer
-        if is_not_start_of_fusion:
-            return
-
-        # if we are in a fusion and at the start, insert observer for its end
-        if is_start_of_fusion:
-            # get the output of the end of the fusion
-            cur_seen_q_op_info = get_seen_q_op_info_of_end_of_fusion(
-                seen_q_op_info, self.idx_to_seen_q_op_infos)
-            output_tensor_id = cur_seen_q_op_info.output_tensor_infos[0].id
+        if seen_q_op_info.fusion_info is not None:
+            if not seen_q_op_info.fusion_info.is_first_element:
+                # if we are in a fusion but not at the start, do not insert observer
+                return
+            else:
+                # if we are in a fusion and at the start, insert observer for its end
+                # get the output of the end of the fusion
+                cur_seen_q_op_info = get_seen_q_op_info_of_end_of_fusion(
+                    seen_q_op_info, self.idx_to_seen_q_op_infos)
+                output_tensor_id = cur_seen_q_op_info.output_tensor_infos[0].id
         else:
             output_tensor_id = seen_q_op_info.output_tensor_infos[0].id
 

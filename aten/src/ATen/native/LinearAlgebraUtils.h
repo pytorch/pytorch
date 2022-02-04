@@ -3,8 +3,7 @@
 #include <c10/core/ScalarType.h>
 #include <c10/util/irange.h>
 #include <c10/util/Exception.h>
-#include <ATen/ATen.h>
-#include <ATen/core/DimVector.h>
+#include <ATen/core/Tensor.h>
 #include <ATen/ExpandUtils.h>
 #include <ATen/TensorUtils.h>
 #include <ATen/native/TensorIterator.h>
@@ -14,6 +13,15 @@
 #include <cstring>
 #include <cctype>
 
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#else
+#include <ATen/ops/arange.h>
+#include <ATen/ops/empty.h>
+#include <ATen/ops/empty_like.h>
+#include <ATen/ops/empty_strided.h>
+#include <ATen/ops/zeros.h>
+#endif
 
 namespace at { namespace native {
 
@@ -306,16 +314,6 @@ static inline void singleCheckErrors(int64_t info, const c10::string_view name, 
     batch_string = ": (Batch element " + std::to_string(batch_id) + ")";
   }
   if (info < 0) {
-    // Reference LAPACK 3.10+ changed `info` behavior for inputs with non-finite values
-    // Previously, it would return `info` > 0, but now it returns `info` = -4
-    // OpenBLAS 0.3.15+ uses the Reference LAPACK 3.10+.
-    // MKL 2022.0+ uses the Reference LAPACK 3.10+.
-    // Older version of MKL and OpenBLAS follow the old behavior (return `info` > 0).
-    // Here we check for the case where `info` is -4 and raise an error
-    if (name.find("svd") != name.npos) {
-      TORCH_CHECK_LINALG(info != -4, name, batch_string,
-          ": The algorithm failed to converge because the input matrix contained non-finite values.");
-    }
     TORCH_INTERNAL_ASSERT(false, name, batch_string,
         ": Argument ", -info, " has illegal value. Most certainly there is a bug in the implementation calling the backend library.");
   } else if (info > 0) {

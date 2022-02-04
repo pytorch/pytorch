@@ -5,7 +5,7 @@ import unittest
 
 import torch
 from torch import distributed as dist
-from torch.distributed._fsdp.flatten_params_wrapper import FlattenParamsWrapper
+from torch.distributed.fsdp.flatten_params_wrapper import FlattenParamsWrapper
 from torch.testing._internal.common_utils import run_tests, TestCase
 
 
