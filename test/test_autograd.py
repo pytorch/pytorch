@@ -2873,7 +2873,7 @@ class TestAutograd(TestCase):
         self.assertTrue(found_bwd_sum)
         self.assertTrue(found_empty)
 
-    def test_profiler_input_seq_ids(self):
+    def test_profiler_input_op_ids(self):
         with profile(use_kineto=kineto_available(), record_shapes=True) as prof:
             x = torch.randn(10, 10, requires_grad=True)
             y = torch.randn(10, 10, requires_grad=True)
@@ -2881,28 +2881,28 @@ class TestAutograd(TestCase):
             z = 2 * z
             s = z.sum()
             s.backward()
-        # Expecting that each op with a valid sequence_nr should have
-        # a list of input seq ids.
-        # This test just checks to see that input seq ids
-        # match op sequence ids that have already been executed.
-        found_input_seq_id = False
-        seq_id_list = []
+        # Expecting that each op with a valid op_id should have
+        # a list of input op ids.
+        # This test just checks to see that input op ids
+        # match the op ids that have already been executed.
+        found_input_op_id = False
+        op_id_list = []
         print("Checking events")
         for event in prof.function_events:
-            if event.sequence_nr >= 0:
-                # Checks that each valid input seq id has
-                # has already been observed and associated with an operator
-                print("Saved seq_ids {}".format(seq_id_list))
-                print("Input seq_ids {}".format(event.input_seq_ids))
-                for seq_id in event.input_seq_ids:
-                    if seq_id >= 0:
-                        self.assertTrue(seq_id in seq_id_list)
-                        found_input_seq_id = True
-                if event.sequence_nr not in seq_id_list:
-                    seq_id_list.append(event.sequence_nr)
-        self.assertTrue(found_input_seq_id)
+            if event.op_id >= 0:
+                # Checks that each valid input op id has
+                # already been observed and associated with an operator
+                print("Saved op_ids {}".format(op_id_list))
+                print("Input op_ids {}".format(event.input_op_ids))
+                for (op_id, output_nr) in event.input_op_ids:
+                    if op_id >= 0:
+                        self.assertTrue(op_id in op_id_list)
+                        found_input_op_id = True
+                if event.op_id not in op_id_list:
+                    op_id_list.append(event.op_id)
+        self.assertTrue(found_input_op_id)
 
-    def test_custom_module_input_seq_ids(self):
+    def test_custom_module_input_op_ids(self):
         class MyFunc(Function):
             @staticmethod
             def forward(ctx, x):
@@ -2927,15 +2927,15 @@ class TestAutograd(TestCase):
 
         found_custom_op = False
         for event in prof.function_events:
-            if event.sequence_nr >= 0:
+            if event.op_id >= 0:
                 if event.name == 'MyFunc':
                     found_custom_op = True
-                    input_seq_id_valid = False
-                    for seq_id in event.input_seq_ids:
-                        if seq_id >= 0:
-                            input_seq_id_valid = True
+                    input_op_id_valid = False
+                    for (op_id, output_nr) in event.input_op_ids:
+                        if op_id >= 0:
+                            input_op_id_valid = True
                             break
-                    self.assertTrue(input_seq_id_valid)
+                    self.assertTrue(input_op_id_valid)
         self.assertTrue(found_custom_op)
 
     def test_profiler_unboxed_only(self):

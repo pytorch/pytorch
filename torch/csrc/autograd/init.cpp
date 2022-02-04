@@ -99,12 +99,14 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject *unused) {
       .def("has_cuda", &LegacyEvent::hasCuda)
       .def("shapes", &LegacyEvent::shapes)
       .def("seq_ids", &LegacyEvent::seq_ids)
+      .def("input_op_ids", &LegacyEvent::inputOpIds)
       .def("cpu_memory_usage", &LegacyEvent::cpuMemoryUsage)
       .def("cuda_memory_usage", &LegacyEvent::cudaMemoryUsage)
       .def("handle", &LegacyEvent::handle)
       .def("node_id", &LegacyEvent::nodeId)
       .def("is_remote", &LegacyEvent::isRemote)
       .def("sequence_nr", &LegacyEvent::sequenceNr)
+      .def("op_id", &LegacyEvent::handle)
       .def("stack", &LegacyEvent::stack)
       .def("scope", &LegacyEvent::scope)
       .def("correlation_id", &LegacyEvent::correlationId)
@@ -153,6 +155,10 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject *unused) {
       .def("sequence_nr", [](const KinetoEvent& e) {
         return e.sequenceNr();
       })
+      // Unique op instance id, extends coverage of sequence_nr
+      .def("op_id", [](const KinetoEvent& e) {
+        return e.opId();
+      })
       // absolute start time (since unix epoch) in us
       .def("start_us", [](const KinetoEvent& e) {
         return e.startUs();
@@ -179,6 +185,13 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject *unused) {
           return e.seq_ids();
         } else {
           return std::vector<int64_t>();
+        }
+      })
+      .def("input_op_ids", [](const KinetoEvent& e) {
+        if (e.hasInputOpIds()) {
+          return e.input_op_ids();
+        } else {
+          return std::vector<std::pair<at::RecordFunctionHandle, int>>();
         }
       })
       .def("dtypes", [](const KinetoEvent& e) {
