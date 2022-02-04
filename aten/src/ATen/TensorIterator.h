@@ -417,42 +417,109 @@ public:
 
   void set_output(int64_t output_idx, IntArrayRef sizes, IntArrayRef strides, TensorOptions options, DimnameList names) override;
 
-#define TORCH_DISALLOW_TEMPORARIES_IMPL(methodname, maybestatic)                               \
-  maybestatic void methodname(TensorBase&& out, const TensorBase& a, const TensorBase& b) = delete; \
-  maybestatic void methodname(const TensorBase& out, TensorBase&& a, const TensorBase& b) = delete; \
-  maybestatic void methodname(const TensorBase& out, const TensorBase& a, TensorBase&& b) = delete; \
+#define TORCH_DISALLOW_TEMPORARIES_IMPL1(methodname, maybestatic) \
+  maybestatic void methodname(TensorBase&& out, TensorBase&& a) = delete; \
+  maybestatic void methodname(TensorBase&& out, const TensorBase& a) = delete; \
+  maybestatic void methodname(const TensorBase& out, TensorBase&& a) = delete; \
+
+#define TORCH_DISALLOW_TEMPORARIES_IMPL2(methodname, maybestatic) \
+  maybestatic void methodname(TensorBase&& out, TensorBase&& a, TensorBase&& b) = delete; \
   maybestatic void methodname(TensorBase&& out, TensorBase&& a, const TensorBase& b) = delete; \
   maybestatic void methodname(TensorBase&& out, const TensorBase& a, TensorBase&& b) = delete; \
+  maybestatic void methodname(TensorBase&& out, const TensorBase& a, const TensorBase& b) = delete; \
   maybestatic void methodname(const TensorBase& out, TensorBase&& a, TensorBase&& b) = delete; \
-  maybestatic void methodname(TensorBase&& out, TensorBase&& a, TensorBase&& b) = delete;
+  maybestatic void methodname(const TensorBase& out, TensorBase&& a, const TensorBase& b) = delete; \
+  maybestatic void methodname(const TensorBase& out, const TensorBase& a, TensorBase&& b) = delete; \
 
-#define TORCH_DISALLOW_TEMPORARIES(methodname) TORCH_DISALLOW_TEMPORARIES_IMPL(methodname,)
+#define TORCH_DISALLOW_TEMPORARIES_IMPL3(methodname, maybestatic) \
+  maybestatic void methodname(TensorBase&& out, TensorBase&& a, TensorBase&& b, TensorBase&& c) = delete; \
+  maybestatic void methodname(TensorBase&& out, TensorBase&& a, TensorBase&& b, const TensorBase& c) = delete; \
+  maybestatic void methodname(TensorBase&& out, TensorBase&& a, const TensorBase& b, TensorBase&& c) = delete; \
+  maybestatic void methodname(TensorBase&& out, TensorBase&& a, const TensorBase& b, const TensorBase& c) = delete; \
+  maybestatic void methodname(TensorBase&& out, const TensorBase& a, TensorBase&& b, TensorBase&& c) = delete; \
+  maybestatic void methodname(TensorBase&& out, const TensorBase& a, TensorBase&& b, const TensorBase& c) = delete; \
+  maybestatic void methodname(TensorBase&& out, const TensorBase& a, const TensorBase& b, TensorBase&& c) = delete; \
+  maybestatic void methodname(TensorBase&& out, const TensorBase& a, const TensorBase& b, const TensorBase& c) = delete; \
+  maybestatic void methodname(const TensorBase& out, TensorBase&& a, TensorBase&& b, TensorBase&& c) = delete; \
+  maybestatic void methodname(const TensorBase& out, TensorBase&& a, TensorBase&& b, const TensorBase& c) = delete; \
+  maybestatic void methodname(const TensorBase& out, TensorBase&& a, const TensorBase& b, TensorBase&& c) = delete; \
+  maybestatic void methodname(const TensorBase& out, TensorBase&& a, const TensorBase& b, const TensorBase& c) = delete; \
+  maybestatic void methodname(const TensorBase& out, const TensorBase& a, TensorBase&& b, TensorBase&& c) = delete; \
+  maybestatic void methodname(const TensorBase& out, const TensorBase& a, TensorBase&& b, const TensorBase& c) = delete; \
+  maybestatic void methodname(const TensorBase& out, const TensorBase& a, const TensorBase& b, TensorBase&& c) = delete; \
+
+#define TORCH_DISALLOW_TEMPORARIES_IMPL4(methodname, maybestatic) \
+  maybestatic void methodname(TensorBase&& out, TensorBase&& a, TensorBase&& b, TensorBase&& c, TensorBase&& d) = delete; \
+  maybestatic void methodname(TensorBase&& out, TensorBase&& a, TensorBase&& b, TensorBase&& c, const TensorBase& d) = delete; \
+  maybestatic void methodname(TensorBase&& out, TensorBase&& a, TensorBase&& b, const TensorBase& c, TensorBase&& d) = delete; \
+  maybestatic void methodname(TensorBase&& out, TensorBase&& a, TensorBase&& b, const TensorBase& c, const TensorBase& d) = delete; \
+  maybestatic void methodname(TensorBase&& out, TensorBase&& a, const TensorBase& b, TensorBase&& c, TensorBase&& d) = delete; \
+  maybestatic void methodname(TensorBase&& out, TensorBase&& a, const TensorBase& b, TensorBase&& c, const TensorBase& d) = delete; \
+  maybestatic void methodname(TensorBase&& out, TensorBase&& a, const TensorBase& b, const TensorBase& c, TensorBase&& d) = delete; \
+  maybestatic void methodname(TensorBase&& out, TensorBase&& a, const TensorBase& b, const TensorBase& c, const TensorBase& d) = delete; \
+  maybestatic void methodname(TensorBase&& out, const TensorBase& a, TensorBase&& b, TensorBase&& c, TensorBase&& d) = delete; \
+  maybestatic void methodname(TensorBase&& out, const TensorBase& a, TensorBase&& b, TensorBase&& c, const TensorBase& d) = delete; \
+  maybestatic void methodname(TensorBase&& out, const TensorBase& a, TensorBase&& b, const TensorBase& c, TensorBase&& d) = delete; \
+  maybestatic void methodname(TensorBase&& out, const TensorBase& a, TensorBase&& b, const TensorBase& c, const TensorBase& d) = delete; \
+  maybestatic void methodname(TensorBase&& out, const TensorBase& a, const TensorBase& b, TensorBase&& c, TensorBase&& d) = delete; \
+  maybestatic void methodname(TensorBase&& out, const TensorBase& a, const TensorBase& b, TensorBase&& c, const TensorBase& d) = delete; \
+  maybestatic void methodname(TensorBase&& out, const TensorBase& a, const TensorBase& b, const TensorBase& c, TensorBase&& d) = delete; \
+  maybestatic void methodname(TensorBase&& out, const TensorBase& a, const TensorBase& b, const TensorBase& c, const TensorBase& d) = delete; \
+  maybestatic void methodname(const TensorBase& out, TensorBase&& a, TensorBase&& b, TensorBase&& c, TensorBase&& d) = delete; \
+  maybestatic void methodname(const TensorBase& out, TensorBase&& a, TensorBase&& b, TensorBase&& c, const TensorBase& d) = delete; \
+  maybestatic void methodname(const TensorBase& out, TensorBase&& a, TensorBase&& b, const TensorBase& c, TensorBase&& d) = delete; \
+  maybestatic void methodname(const TensorBase& out, TensorBase&& a, TensorBase&& b, const TensorBase& c, const TensorBase& d) = delete; \
+  maybestatic void methodname(const TensorBase& out, TensorBase&& a, const TensorBase& b, TensorBase&& c, TensorBase&& d) = delete; \
+  maybestatic void methodname(const TensorBase& out, TensorBase&& a, const TensorBase& b, TensorBase&& c, const TensorBase& d) = delete; \
+  maybestatic void methodname(const TensorBase& out, TensorBase&& a, const TensorBase& b, const TensorBase& c, TensorBase&& d) = delete; \
+  maybestatic void methodname(const TensorBase& out, TensorBase&& a, const TensorBase& b, const TensorBase& c, const TensorBase& d) = delete; \
+  maybestatic void methodname(const TensorBase& out, const TensorBase& a, TensorBase&& b, TensorBase&& c, TensorBase&& d) = delete; \
+  maybestatic void methodname(const TensorBase& out, const TensorBase& a, TensorBase&& b, TensorBase&& c, const TensorBase& d) = delete; \
+  maybestatic void methodname(const TensorBase& out, const TensorBase& a, TensorBase&& b, const TensorBase& c, TensorBase&& d) = delete; \
+  maybestatic void methodname(const TensorBase& out, const TensorBase& a, TensorBase&& b, const TensorBase& c, const TensorBase& d) = delete; \
+  maybestatic void methodname(const TensorBase& out, const TensorBase& a, const TensorBase& b, TensorBase&& c, TensorBase&& d) = delete; \
+  maybestatic void methodname(const TensorBase& out, const TensorBase& a, const TensorBase& b, TensorBase&& c, const TensorBase& d) = delete; \
+  maybestatic void methodname(const TensorBase& out, const TensorBase& a, const TensorBase& b, const TensorBase& c, TensorBase&& d) = delete; \
+
+#define TORCH_DISALLOW_TEMPORARIES1(methodname) TORCH_DISALLOW_TEMPORARIES_IMPL1(methodname,)
+#define TORCH_DISALLOW_TEMPORARIES2(methodname) TORCH_DISALLOW_TEMPORARIES_IMPL2(methodname,)
+#define TORCH_DISALLOW_TEMPORARIES3(methodname) TORCH_DISALLOW_TEMPORARIES_IMPL3(methodname,)
+#define TORCH_DISALLOW_TEMPORARIES4(methodname) TORCH_DISALLOW_TEMPORARIES_IMPL4(methodname,)
 
   void build_binary_float_op(const TensorBase& out, const TensorBase& a, const TensorBase& b);
   void build_borrowing_binary_float_op(const TensorBase& out, const TensorBase& a, const TensorBase& b);
-  TORCH_DISALLOW_TEMPORARIES(build_borrowing_binary_float_op)
+  TORCH_DISALLOW_TEMPORARIES2(build_borrowing_binary_float_op)
+  void build_quaternary_op(const TensorBase& out, const TensorBase& a, const TensorBase& b, const TensorBase& c, const TensorBase& d);
+  void build_borrowing_quaternary_op(const TensorBase& out, const TensorBase& a, const TensorBase& b, const TensorBase& c, const TensorBase& d);
+  TORCH_DISALLOW_TEMPORARIES4(build_borrowing_quaternary_op)
+  void build_ternary_op(const TensorBase& out, const TensorBase& a, const TensorBase& b, const TensorBase& c);
+  void build_borrowing_ternary_op(const TensorBase& out, const TensorBase& a, const TensorBase& b, const TensorBase& c);
+  TORCH_DISALLOW_TEMPORARIES3(build_borrowing_ternary_op)
   void build_binary_op(const TensorBase& out, const TensorBase& a, const TensorBase& b);
   void build_borrowing_binary_op(const TensorBase& out, const TensorBase& a, const TensorBase& b);
-  TORCH_DISALLOW_TEMPORARIES(build_borrowing_binary_op)
+  TORCH_DISALLOW_TEMPORARIES2(build_borrowing_binary_op)
   void build_unary_float_op(const TensorBase& out, const TensorBase& a);
   void build_borrowing_unary_float_op(const TensorBase& out, const TensorBase& a);
-  TORCH_DISALLOW_TEMPORARIES(build_borrowing_unary_float_op)
+  TORCH_DISALLOW_TEMPORARIES1(build_borrowing_unary_float_op)
   void build_unary_op(const TensorBase& out, const TensorBase& a);
   // Odd special case needed for pow. Has to borrow the output because
   // it's a structured kernel, but the argument is potentially a copy.
   void build_output_borrowing_argument_owning_unary_op(const TensorBase& out, const TensorBase& a);
   void build_borrowing_unary_op(const TensorBase& out, const TensorBase& a);
-  TORCH_DISALLOW_TEMPORARIES(build_borrowing_unary_op)
+  TORCH_DISALLOW_TEMPORARIES1(build_borrowing_unary_op)
   void build_borrowing_unary_force_boolean_op(const TensorBase& out, const TensorBase& a);
-  TORCH_DISALLOW_TEMPORARIES(build_borrowing_unary_force_boolean_op)
+  TORCH_DISALLOW_TEMPORARIES1(build_borrowing_unary_force_boolean_op)
   void build_comparison_op(const TensorBase& out, const TensorBase& a, const TensorBase& b);
   void build_borrowing_comparison_op(const TensorBase& out, const TensorBase& a, const TensorBase& b);
-  TORCH_DISALLOW_TEMPORARIES(build_borrowing_comparison_op)
+  TORCH_DISALLOW_TEMPORARIES2(build_borrowing_comparison_op)
   // Another special case: we need to own the second argument for comparison ops.
   void build_borrowing_except_last_argument_comparison_op(const TensorBase& out, const TensorBase& a, const TensorBase& b);
-  void build_ternary_op(const TensorBase& out, const TensorBase& a, const TensorBase& b, const TensorBase& c);
 
-#undef TORCH_DISALLOW_TEMPORARIES
+#undef TORCH_DISALLOW_TEMPORARIES1
+#undef TORCH_DISALLOW_TEMPORARIES2
+#undef TORCH_DISALLOW_TEMPORARIES3
+#undef TORCH_DISALLOW_TEMPORARIES4
+
 protected:
   // Mutable reference as it moves tensors out of TensorIteratorConfig
   void populate_operands(TensorIteratorConfig&);
@@ -573,12 +640,20 @@ struct TORCH_API TensorIterator final : public TensorIteratorBase {
   // Slicing is OK, TensorIterator guaranteed NOT to have any fields
   TensorIterator(const TensorIteratorBase& iter) : TensorIteratorBase(iter) {}
 
-#define TORCH_DISALLOW_TEMPORARIES(methodname) TORCH_DISALLOW_TEMPORARIES_IMPL(methodname, static)
+#define TORCH_DISALLOW_TEMPORARIES2(methodname) TORCH_DISALLOW_TEMPORARIES_IMPL2(methodname, static)
+#define TORCH_DISALLOW_TEMPORARIES3(methodname) TORCH_DISALLOW_TEMPORARIES_IMPL3(methodname, static)
+#define TORCH_DISALLOW_TEMPORARIES4(methodname) TORCH_DISALLOW_TEMPORARIES_IMPL4(methodname, static)
 
   static TensorIterator binary_float_op(TensorBase& out, const TensorBase& a, const TensorBase& b);
+  static TensorIterator quaternary_op(TensorBase& out, const TensorBase& a, const TensorBase& b, const TensorBase& c, const TensorBase& d);
+  static TensorIterator borrowing_quaternary_op(const TensorBase& out, const TensorBase& a, const TensorBase& b, const TensorBase& c, const TensorBase& d);
+  TORCH_DISALLOW_TEMPORARIES4(borrowing_quaternary_op)
+  static TensorIterator ternary_op(TensorBase& out, const TensorBase& a, const TensorBase& b, const TensorBase& c);
+  static TensorIterator borrowing_ternary_op(const TensorBase& out, const TensorBase& a, const TensorBase& b, const TensorBase& c);
+  TORCH_DISALLOW_TEMPORARIES3(borrowing_ternary_op)
   static TensorIterator binary_op(TensorBase& out, const TensorBase& a, const TensorBase& b);
   static TensorIterator borrowing_binary_op(const TensorBase& out, const TensorBase& a, const TensorBase& b);
-  TORCH_DISALLOW_TEMPORARIES(borrowing_binary_op)
+  TORCH_DISALLOW_TEMPORARIES2(borrowing_binary_op)
   static TensorIterator comparison_op(TensorBase& out, const TensorBase& a, const TensorBase& b);
   static TensorIterator unary_op(TensorBase& out, const TensorBase& a);
   static TensorIterator unary_float_op(TensorBase& out, const TensorBase& a);
@@ -587,8 +662,13 @@ struct TORCH_API TensorIterator final : public TensorIteratorBase {
   static TensorIterator borrowing_nullary_op(TensorBase&& out) = delete;
   static TensorIterator reduce_op(TensorBase& out, const TensorBase& a);
   static TensorIterator reduce_op(TensorBase& out1, TensorBase& out2, const TensorBase& a);
-#undef TORCH_DISALLOW_TEMPORARIES
-#undef TORCH_DISALLOW_TEMPORARIES_IMPL
+
+#undef TORCH_DISALLOW_TEMPORARIES2
+#undef TORCH_DISALLOW_TEMPORARIES_IMPL2
+#undef TORCH_DISALLOW_TEMPORARIES3
+#undef TORCH_DISALLOW_TEMPORARIES_IMPL3
+#undef TORCH_DISALLOW_TEMPORARIES4
+#undef TORCH_DISALLOW_TEMPORARIES_IMPL4
 
   const Tensor& maybe_get_output(int64_t output_idx) override;
   void set_output(int64_t output_idx, IntArrayRef sizes, IntArrayRef strides, TensorOptions options, DimnameList names) override;

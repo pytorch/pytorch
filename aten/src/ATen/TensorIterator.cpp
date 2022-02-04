@@ -934,28 +934,74 @@ void TensorIteratorBase::build_borrowing_except_last_argument_comparison_op(
   build(config);
 }
 
-void TensorIteratorBase::build_ternary_op(
-    const TensorBase& out, const TensorBase& a,
-    const TensorBase& b, const TensorBase& c) {
-  build(TensorIteratorConfig()
-      .add_owned_output(out)
-      .add_owned_input(a)
-      .add_owned_input(b)
-      .add_owned_input(c));
-}
-
 // This cannot be a function because TensorIteratorConfig is not
 // copyable or movable, so it can't be returned from the function.
-#define BINARY_OP_CONFIG()                              \
-  TensorIteratorConfig()                                \
-    .set_check_mem_overlap(true)                        \
-    .allow_cpu_scalars(true)                            \
-    .promote_inputs_to_common_dtype(true)               \
-    .cast_common_dtype_to_outputs(true)                 \
-    .enforce_safe_casting_to_output(true)               \
+#define ELEMENTWISE_OP_CONFIG()           \
+  TensorIteratorConfig()                  \
+    .set_check_mem_overlap(true)          \
+    .allow_cpu_scalars(true)              \
+    .promote_inputs_to_common_dtype(true) \
+    .cast_common_dtype_to_outputs(true)   \
+    .enforce_safe_casting_to_output(true) \
+
+void TensorIteratorBase::build_quaternary_op(
+  const TensorBase& out,
+  const TensorBase& a,
+  const TensorBase& b,
+  const TensorBase& c,
+  const TensorBase& d
+) {
+  build(ELEMENTWISE_OP_CONFIG()
+    .add_owned_output(out)
+    .add_owned_input(a)
+    .add_owned_input(b)
+    .add_owned_input(c)
+    .add_owned_input(d));
+}
+
+void TensorIteratorBase::build_borrowing_quaternary_op(
+  const TensorBase& out,
+  const TensorBase& a,
+  const TensorBase& b,
+  const TensorBase& c,
+  const TensorBase& d
+) {
+  build(ELEMENTWISE_OP_CONFIG()
+    .add_output(out)
+    .add_input(a)
+    .add_input(b)
+    .add_input(c)
+    .add_input(d));
+}
+
+void TensorIteratorBase::build_ternary_op(
+  const TensorBase& out,
+  const TensorBase& a,
+  const TensorBase& b,
+  const TensorBase& c
+) {
+  build(ELEMENTWISE_OP_CONFIG()
+    .add_owned_output(out)
+    .add_owned_input(a)
+    .add_owned_input(b)
+    .add_owned_input(c));
+}
+
+void TensorIteratorBase::build_borrowing_ternary_op(
+  const TensorBase& out,
+  const TensorBase& a,
+  const TensorBase& b,
+  const TensorBase& c
+) {
+  build(ELEMENTWISE_OP_CONFIG()
+    .add_output(out)
+    .add_input(a)
+    .add_input(b)
+    .add_input(c));
+}
 
 void TensorIteratorBase::build_binary_op(const TensorBase& out, const TensorBase& a, const TensorBase& b) {
-  build(BINARY_OP_CONFIG()
+  build(ELEMENTWISE_OP_CONFIG()
       .add_owned_output(out)
       .add_owned_input(a)
       .add_owned_input(b));
@@ -963,7 +1009,7 @@ void TensorIteratorBase::build_binary_op(const TensorBase& out, const TensorBase
 
 void TensorIteratorBase::build_borrowing_binary_op(
     const TensorBase& out, const TensorBase& a, const TensorBase& b) {
-  build(BINARY_OP_CONFIG()
+  build(ELEMENTWISE_OP_CONFIG()
       .add_output(out)
       .add_input(a)
       .add_input(b));
@@ -1028,6 +1074,52 @@ void TensorIteratorBase::build_borrowing_unary_force_boolean_op(const TensorBase
       .declare_static_device(a.device())
       .add_output(out)
       .add_input(a));
+}
+
+TensorIterator TensorIterator::quaternary_op(
+  TensorBase& out,
+  const TensorBase& a,
+  const TensorBase& b,
+  const TensorBase& c,
+  const TensorBase& d
+) {
+  TensorIterator iter;
+  iter.build_quaternary_op(out, a, b, c, d);
+  return iter;
+}
+
+TensorIterator TensorIterator::borrowing_quaternary_op(
+  const TensorBase& out,
+  const TensorBase& a,
+  const TensorBase& b,
+  const TensorBase& c,
+  const TensorBase& d
+) {
+  TensorIterator iter;
+  iter.build_borrowing_quaternary_op(out, a, b, c, d);
+  return iter;
+}
+
+TensorIterator TensorIterator::ternary_op(
+  TensorBase& out,
+  const TensorBase& a,
+  const TensorBase& b,
+  const TensorBase& c
+) {
+  TensorIterator iter;
+  iter.build_ternary_op(out, a, b, c);
+  return iter;
+}
+
+TensorIterator TensorIterator::borrowing_ternary_op(
+  const TensorBase& out,
+  const TensorBase& a,
+  const TensorBase& b,
+  const TensorBase& c
+) {
+  TensorIterator iter;
+  iter.build_borrowing_ternary_op(out, a, b, c);
+  return iter;
 }
 
 TensorIterator TensorIterator::binary_op(TensorBase& out, const TensorBase& a, const TensorBase& b) {
