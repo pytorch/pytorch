@@ -1817,15 +1817,17 @@ void TensorExprKernel::runWithAllocatedOutputs(Stack& stack) {
     }
   }
 
+  std::vector<int64_t> stride_values(input_stride_args_.size());
   if (has_symbolic_shapes_) {
     updateOutputSizesAndStrides(stack_inputs);
 
     // add stride args
     for (auto idx : c10::irange(input_stride_args_.size())) {
       const auto& input_stride_arg = input_stride_args_[idx];
-      args.emplace_back(const_cast<long*>(
-          &stack_inputs[input_stride_arg.first].toTensor().strides().at(
-              input_stride_arg.second)));
+      stride_values[idx] =
+          stack_inputs[input_stride_arg.first].toTensor().strides().at(
+              input_stride_arg.second);
+      args.emplace_back(&stride_values[idx]);
     }
 
     TORCH_INTERNAL_ASSERT(nOutputs_ == bufOutputs_.size());
