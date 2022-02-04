@@ -976,7 +976,7 @@ class TestDecompositionOpInfo(TestCase):
         skip('view_as_complex'),
         xfail('linalg.cholesky'),
         xfail('linalg.inv'),
-        xfail('linalg.det', 'singular', device_type='cuda'),
+        skip('linalg.det', 'singular', device_type='cuda'),  # this is nasty and seems to stop the test suite
         xfail('linalg.matrix_power'),
         xfail('linalg.tensorinv'),
         xfail('to_sparse'),
