@@ -66,7 +66,7 @@ def fetch_and_cache(
 
 
 def get_slow_tests(dirpath: str, filename: str = SLOW_TESTS_FILE) -> Optional[Dict[str, float]]:
-    url = "https://raw.githubusercontent.com/pytorch/test-infra/main/stats/slow-tests.json"
+    url = "https://raw.githubusercontent.com/pytorch/test-infra/generated-stats/stats/slow-tests.json"
     try:
         return fetch_and_cache(dirpath, filename, url, lambda x: x)
     except Exception:
@@ -95,7 +95,7 @@ def get_disabled_tests(dirpath: str, filename: str = DISABLED_TESTS_FILE) -> Opt
                 disabled_test_from_issues[test_name] = (item['html_url'], platforms_to_skip)
         return disabled_test_from_issues
     try:
-        url = 'https://raw.githubusercontent.com/pytorch/test-infra/main/stats/disabled-tests.json'
+        url = 'https://raw.githubusercontent.com/pytorch/test-infra/generated-stats/stats/disabled-tests.json'
         return fetch_and_cache(dirpath, filename, url, process_disabled_test)
     except Exception:
         print("Couldn't download test skip set, leaving all tests enabled...")
