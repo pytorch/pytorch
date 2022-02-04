@@ -199,7 +199,8 @@ def native_functions_callback(rs: List[NativeFunction],
                               bs: Dict[DispatchKey, Dict[OperatorName, BackendMetadata]],
                               *,
                               src_path: Optional[str] = None,
-                              is_dry_run: bool = False) -> List[Tuple[NativeFunction, Dict[DispatchKey, Dict[OperatorName, BackendMetadata]]]]:
+                              is_dry_run: bool = False) -> \
+        List[Tuple[NativeFunction, Dict[DispatchKey, Dict[OperatorName, BackendMetadata]]]]:
     # Return values
     # pairs is used to update the internal native function data structures
     # cpp is the C++ defining the aliases to write to ATen/native/Aliases.cpp if src_path is specified
@@ -289,6 +290,7 @@ def native_functions_callback(rs: List[NativeFunction],
 
                 # Updates native function data structures
                 pairs.append((alias_nf, alias_bs))
+                # pairs.append((alias_nf, {}))
 
                 # Generates C++ src for the operator if given a source path
                 if src_path is None:

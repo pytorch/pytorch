@@ -50,14 +50,13 @@ class AliasInfo(object):
         self.namespace = namespace  # NOTE: unexercised
         self.has_method = has_method
 
-# Sequence of all AliasInfos
+# Sequence of all AliasInfos (in alphabetical order)
 alias_infos: Tuple[AliasInfo, ...] = (
     AliasInfo('absolute', alias_for='abs'),
     AliasInfo('arccos', alias_for='acos'),
+    AliasInfo('clip', alias_for='clamp'),
     AliasInfo('concat', alias_for='cat'),
     AliasInfo('det', alias_for='linalg_det', has_method=True),
-    AliasInfo('clip', alias_for='clamp'),
-    AliasInfo('moveaxis', alias_for='movedim'),
     AliasInfo('less', alias_for='lt'),
-    AliasInfo('swapaxes', alias_for='transpose'),
+    AliasInfo('moveaxis', alias_for='movedim'),
 )

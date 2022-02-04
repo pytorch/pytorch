@@ -6958,6 +6958,18 @@
 - func: svd(Tensor self, bool some=True, bool compute_uv=True) -> (Tensor U, Tensor S, Tensor V)
   variants: method, function
 
+# swapaxes, a pseudoalias for transpose (axis0 and axis1 replace dim0 and dim1)
+- func: swapaxes(Tensor(a) self, int axis0, int axis1) -> Tensor(a)
+  variants: function, method
+  device_check: NoCheck
+  device_guard: False
+
+- func: swapaxes_(Tensor(a!) self, int axis0, int axis1) -> Tensor(a!)
+  variants: method
+  device_check: NoCheck
+  device_guard: False
+  tags: inplace_view
+
 # swapdims, alias for transpose
 - func: swapdims(Tensor(a) self, int dim0, int dim1) -> Tensor(a)
   variants: function, method

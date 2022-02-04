@@ -2571,6 +2571,15 @@ Tensor movedim(const Tensor& self, int64_t src, int64_t dst) {
   return at::movedim(self, IntArrayRef{src}, IntArrayRef{dst});
 }
 
+// Swapaxes is a pseduo-alias for transpose (because it has axis0 and axis1 instead of dim0 and dim1)
+Tensor swapaxes(const Tensor& self, int64_t axis0, int64_t axis1) {
+  return self.transpose(axis0, axis1);
+}
+
+Tensor& swapaxes_(Tensor& self, int64_t axis0, int64_t axis1) {
+  return self.transpose_(axis0, axis1);
+}
+
 Tensor swapdims(const Tensor& self, int64_t dim0, int64_t dim1) {
   return self.transpose(dim0, dim1);
 }
