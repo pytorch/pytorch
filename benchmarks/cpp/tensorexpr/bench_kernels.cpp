@@ -25,6 +25,16 @@ static const std::string kernel_symbolic_shapes = R"IR(
 
 class KernelBench : public benchmark::Fixture {
  public:
+  void Eager(benchmark::State& state) {
+    auto dim = state.range(0);
+    auto a = at::rand({dim}, at::TensorOptions(at::kCPU).dtype(at::kFloat));
+    auto b = at::rand({dim}, at::TensorOptions(at::kCPU).dtype(at::kFloat));
+
+    for (auto _ : state) {
+      auto o = at::mul(a, at::mul(a, b));
+    }
+  }
+
   void GraphWithStaticShapes(benchmark::State& state) {
     auto dim = state.range(0);
     auto graph = std::make_shared<Graph>();
@@ -34,8 +44,6 @@ class KernelBench : public benchmark::Fixture {
         format(kernel_static_shapes_template, env);
     parseIR(kernel_static_shapes, &*graph);
     TensorExprKernel k(graph);
-    auto stmt = k.getCodeGenStmt();
-    std::cout << "kernel stmt: " << *stmt << std::endl;
 
     auto a = at::rand({dim}, at::TensorOptions(at::kCPU).dtype(at::kFloat));
     auto b = at::rand({dim}, at::TensorOptions(at::kCPU).dtype(at::kFloat));
@@ -65,20 +73,21 @@ class KernelBench : public benchmark::Fixture {
     TensorExprKernel k(
         graph, {}, symbolic_shape_inputs, false, symbolic_strides);
 
-    auto stmt = k.getCodeGenStmt();
-    std::cout << "kernel stmt: " << *stmt << std::endl;
+    auto a = at::rand({dim}, at::TensorOptions(at::kCPU).dtype(at::kFloat));
+    auto b = at::rand({dim}, at::TensorOptions(at::kCPU).dtype(at::kFloat));
+    std::vector<at::Tensor> inputs = {a, b};
 
     for (auto _ : state) {
-      auto a = at::rand({dim}, at::TensorOptions(at::kCPU).dtype(at::kFloat));
-      auto b = at::rand({dim}, at::TensorOptions(at::kCPU).dtype(at::kFloat));
-      std::vector<at::Tensor> inputs = {a, b};
-
       std::vector<IValue> stack = at::fmap<at::IValue>(inputs);
       stack.push_back(dim);
       k.run(stack);
     }
   }
 };
+
+BENCHMARK_DEFINE_F(KernelBench, Eager)(benchmark::State& state) {
+  Eager(state);
+}
 
 BENCHMARK_DEFINE_F(KernelBench, StaticShapes)(benchmark::State& state) {
   GraphWithStaticShapes(state);
@@ -87,5 +96,6 @@ BENCHMARK_DEFINE_F(KernelBench, SymbolicShapes)(benchmark::State& state) {
   GraphWithSymbolicShapes(state);
 }
 
-BENCHMARK_REGISTER_F(KernelBench, StaticShapes)->Args({1500});
-BENCHMARK_REGISTER_F(KernelBench, SymbolicShapes)->Args({1500});
+BENCHMARK_REGISTER_F(KernelBench, Eager)->Range(32, 2048);
+BENCHMARK_REGISTER_F(KernelBench, StaticShapes)->Range(32, 2048);
+BENCHMARK_REGISTER_F(KernelBench, SymbolicShapes)->Range(32, 2048);
