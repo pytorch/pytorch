@@ -925,8 +925,10 @@ Tensor _sparse_addmm(
 
 Tensor _sparse_mm(
   const SparseTensor& sparse,
-  const Tensor& dense
+  const Tensor& dense,
+  c10::optional<ScalarType> dtype_opt
 ) {
+  TORCH_CHECK(!dtype_opt.has_value(), "_sparse_mm: kwarg dtype is not supported for this backend.");
   Tensor t = at::zeros({}, dense.options());
   return at::_sparse_addmm(t, sparse, dense, 0, 1);  // redispatch!
 }
@@ -936,7 +938,9 @@ Tensor _sparse_mm(
 // the sparse masking version of mm
 SparseTensor& _sparse_mm_out(const SparseTensor& sparse,
   const Tensor& dense,
+  c10::optional<ScalarType> dtype_opt,
   SparseTensor& result) {
+  TORCH_CHECK(!dtype_opt.has_value(), "_sparse_mm_out: kwarg dtype is not supported for this backend.");
   Tensor t = at::zeros({}, dense.options());
   return at::addmm_out(result, t, sparse, dense, 0, 1);  // redispatch!
 }

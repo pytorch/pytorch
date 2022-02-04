@@ -199,7 +199,8 @@ Tensor addmm(
 
 Tensor mm(
     const Tensor& mat1_arg,
-    const Tensor& mat2_arg) {
+    const Tensor& mat2_arg,
+    c10::optional<ScalarType> dtype_opt) {
   return LinearOpContext::create(
       mat2_arg,
       c10::optional<Tensor>()).run(

@@ -419,7 +419,9 @@ Tensor addmm_sparse_csr_dense(
 Tensor& _sparse_csr_mm_out(
     const Tensor& mat1,
     const Tensor& mat2,
+    c10::optional<ScalarType> dtype_opt,
     Tensor& result) {
+  TORCH_CHECK(!dtype_opt.has_value(), "_sparse_csr_mm_out: kwarg dtype is not supported for this backend.");
   Tensor zero;
   if (result.is_sparse_csr()) {
     // TODO: replace with at::zeros when it's implemented for sparse csr
@@ -432,7 +434,9 @@ Tensor& _sparse_csr_mm_out(
 
 Tensor _sparse_csr_mm(
     const Tensor& mat1,
-    const Tensor& mat2) {
+    const Tensor& mat2,
+    c10::optional<ScalarType> dtype_opt) {
+  TORCH_CHECK(!dtype_opt.has_value(), "_sparse_csr_mm: kwarg dtype is not supported for this backend.");
   Tensor zero;
   if (mat1.is_sparse_csr() && mat2.is_sparse_csr()) {
     // TODO: replace with at::zeros when it's implemented for sparse csr

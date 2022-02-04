@@ -154,7 +154,14 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
   int64_t mat1_ld = mat1_->stride((transpose_mat1 == transpose_result) ? 1 : 0);
   int64_t mat2_ld = mat2_->stride((transpose_mat2 == transpose_result) ? 1 : 0);
   int64_t result_ld = result_->stride(transpose_result ? 0 : 1);
-  at::ScalarType scalar_type = self_->scalar_type();
+
+  // In most cases, the four tensors result, self, mat1, mat2 have the same dtype.
+  // However, in cuda fp16 @ fp16 -> fp32 case, there are two different scenarios:
+  // - addmm: result in fp32; self, mat1, mat2 in fp16
+  // - mm: result, self (alias of result) in fp32; mat1, mat2 in fp16
+  // Since this `scalar_type` is used in the dispatch below and `scalar_t` is used to get data_ptr of `mat1` and `mat2`,
+  // it's better to get `scalar_type` from `mat1` (or `mat2`) instead of `result` or `self`.
+  at::ScalarType scalar_type = mat1_->scalar_type();
 
   if (mat1.numel() == 0) {
     // By definition, when beta==0, values in self should be ignored. nans and infs
@@ -318,8 +325,8 @@ TORCH_IMPL_FUNC(addmm_out_cuda)(const Tensor& self, const Tensor& mat1, const Te
   addmm_out_cuda_impl(const_cast<Tensor&>(result), self, mat1, mat2, beta, alpha, dtype_opt);
 }
 
-TORCH_IMPL_FUNC(mm_out_cuda)(const Tensor& self, const Tensor& mat2, const Tensor& result) {
-  addmm_out_cuda_impl(const_cast<Tensor&>(result), result, self, mat2, 0, 1, c10::nullopt);
+TORCH_IMPL_FUNC(mm_out_cuda)(const Tensor& self, const Tensor& mat2, c10::optional<ScalarType> dtype_opt, const Tensor& result) {
+  addmm_out_cuda_impl(const_cast<Tensor&>(result), result, self, mat2, 0, 1, dtype_opt);
 }
 
 TORCH_IMPL_FUNC(baddbmm_out_cuda)(const Tensor& self, const Tensor& batch1, const Tensor& batch2, const Scalar& beta, const Scalar& alpha,

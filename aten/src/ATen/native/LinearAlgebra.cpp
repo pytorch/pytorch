@@ -49,7 +49,7 @@ TORCH_META_FUNC(addmm)(const Tensor& self, const Tensor& mat1, const Tensor& mat
   }
 }
 
-TORCH_META_FUNC(mm)(const Tensor & self, const Tensor & mat2) {
+TORCH_META_FUNC(mm)(const Tensor & self, const Tensor & mat2, c10::optional<ScalarType> dtype_opt) {
   TORCH_CHECK(self.dim() == 2, "self must be a matrix");
   TORCH_CHECK(mat2.dim() == 2, "mat2 must be a matrix");
   TORCH_CHECK(
@@ -57,7 +57,15 @@ TORCH_META_FUNC(mm)(const Tensor & self, const Tensor & mat2) {
       self.sizes()[0], "x", self.sizes()[1], " and ", mat2.sizes()[0], "x", mat2.sizes()[1], ")");
 
   auto names = at::namedinference::compute_matmul_outnames(self, mat2);
-  set_output(0, {self.sizes()[0], mat2.sizes()[1]}, {}, self.options(), names);
+  if (dtype_opt.has_value() && dtype_opt.value() == at::kFloat && self.dtype() == at::kHalf && self.is_cuda()) {
+#ifdef USE_ROCM
+    TORCH_CHECK(false, "mm: inputs of half precision with kwarg dtype=torch.float is not supported for this backend.");
+#else
+    set_output(0, {self.sizes()[0], mat2.sizes()[1]}, {}, self.options().dtype(at::kFloat), names);
+#endif
+  } else {
+    set_output(0, {self.sizes()[0], mat2.sizes()[1]}, {}, self.options(), names);
+  }
 }
 
 template <typename Meta>
@@ -1310,8 +1318,9 @@ TORCH_IMPL_FUNC(addmm_out_cpu)(const Tensor& self, const Tensor& mat1, const Ten
   }
 }
 
-TORCH_IMPL_FUNC(mm_out_cpu)(const Tensor & self, const Tensor & mat2, const Tensor & result) {
+TORCH_IMPL_FUNC(mm_out_cpu)(const Tensor & self, const Tensor & mat2, c10::optional<ScalarType> dtype_opt, const Tensor & result) {
   {
+    TORCH_CHECK(!dtype_opt.has_value(), "mm_out_cpu: kwarg dtype is not supported for this backend.");
     at::NoNamesGuard guard;
     addmm_impl_cpu_(const_cast<Tensor&>(result), result, self, mat2, 0, 1);
   }

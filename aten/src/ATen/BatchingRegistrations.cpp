@@ -912,6 +912,10 @@ Tensor mm_batching_rule(const Tensor& self, const Tensor& other) {
   TORCH_INTERNAL_ASSERT(false, "either self or other must be a BatchedTensor");
 }
 
+Tensor mm_batching_rule_with_dtype(const Tensor& self, const Tensor& other, c10::optional<ScalarType> dtype_opt) {
+  return mm_batching_rule(self, other);
+}
+
 Tensor cat_batching_rule(TensorList tensors, int64_t dim) {
   auto physical_views = MultiBatchVmapTransform::logicalToPhysical(tensors);
   auto physical_tensors = fmap(
@@ -1239,7 +1243,7 @@ TORCH_LIBRARY_IMPL(aten, Batched, m) {
   m.impl("mv", mv_batching_rule);
   m.impl("dot", dot_batching_rule);
   m.impl("bmm", bmm_batching_rule);
-  m.impl("mm", mm_batching_rule);
+  m.impl("mm", mm_batching_rule_with_dtype);
 
   // cat/stack
   m.impl("cat", cat_batching_rule);

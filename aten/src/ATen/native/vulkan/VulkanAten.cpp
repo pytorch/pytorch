@@ -453,7 +453,8 @@ Tensor addmm(
   return new_with_vtensor_vulkan(std::move(output), self.options());
 }
 
-Tensor mm(const Tensor& self, const Tensor& mat2) {
+Tensor mm(const Tensor& self, const Tensor& mat2, c10::optional<ScalarType> dtype_opt) {
+  TORCH_CHECK(!dtype_opt.has_value(), "mm_vulkan: kwarg dtype is not supported for this backend.");
   TORCH_INTERNAL_ASSERT(
       self.dim() == 2 && mat2.dim() == 2,
       "vulkan_mm expects 2-dimensional tensors");
