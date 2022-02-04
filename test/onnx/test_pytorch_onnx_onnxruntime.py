@@ -10266,7 +10266,7 @@ class TestONNXRuntime(unittest.TestCase):
         ort_sess = convert_to_onnx(model_export, input=dummy_input, opset_version=self.opset_version,
                                    training=torch.onnx.TrainingMode.EVAL)
 
-        ort_out = run_ort(ort_sess, input=dummy_input)
+        ort_out = run_ort(ort_sess, inputs=dummy_input)
 
         actual_std = np.std(ort_out)
         actual_mean = np.mean(ort_out)
@@ -10303,7 +10303,7 @@ class TestONNXRuntime(unittest.TestCase):
         ort_sess = convert_to_onnx(model_export, input=dummy_input, opset_version=self.opset_version,
                                    training=torch.onnx.TrainingMode.EVAL)
 
-        ort_out = run_ort(ort_sess, input=dummy_input)
+        ort_out = run_ort(ort_sess, inputs=dummy_input)
         actual_min = np.min(ort_out)
         actual_max = np.max(ort_out)
         actual_mean = np.mean(ort_out)
