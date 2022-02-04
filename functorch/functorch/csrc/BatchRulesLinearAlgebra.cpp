@@ -178,7 +178,7 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   VARIADIC_BDIMS(pinverse);
   VARIADIC_BDIMS(inverse);
   VARIADIC_BDIMS_BOXED(slogdet);
-  VARIADIC_BDIMS_BOXED(_svd_helper);
+  VARIADIC_BDIMS_BOXED(_linalg_svd);
   VARIADIC_BDIMS_BOXED(solve);
   VARIADIC_BDIMS_BOXED(symeig);
   VARIADIC_BDIMS_BOXED(triangular_solve);
