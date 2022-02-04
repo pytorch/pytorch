@@ -1,14 +1,26 @@
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/AccumulateType.h>
-#include <ATen/ATen.h>
+#include <ATen/core/Tensor.h>
 #include <ATen/ceil_div.h>
+#include <ATen/Dispatch.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/ThrustAllocator.h>
 #include <ATen/native/sparse/cuda/SparseCUDAApplyUtils.cuh>
 #include <ATen/native/cuda/SortingCommon.cuh>
-#include <ATen/NativeFunctions.h>
 #include <ATen/SparseTensorUtils.h>
 #include <c10/macros/Macros.h>
 #include <c10/util/accumulate.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/_coalesce_native.h>
+#include <ATen/ops/_sparse_coo_tensor_unsafe_native.h>
+#include <ATen/ops/_sparse_mask_helper_native.h>
+#include <ATen/ops/empty.h>
+#include <ATen/ops/zeros.h>
+#endif
 
 #include <thrust/device_ptr.h>
 #include <thrust/device_vector.h>
