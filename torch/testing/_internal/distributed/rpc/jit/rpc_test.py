@@ -1146,7 +1146,7 @@ class JitRpcTest(
                     "worker1",
                 )
                 with torch.autograd.profiler.record_function(prof_key) as rf:
-                    ret = call_rpc_with_profiling(rf.handle, "worker1")
+                    ret = call_rpc_with_profiling(rf.record, "worker1")
             # TODO: Can't get a reliable time for this profiling event since
             # it's hard to estimate the execution time on the remote end for non-UDFs.
             # This can be resolved by https://github.com/pytorch/pytorch/issues/36272.
