@@ -2100,6 +2100,14 @@ class TestTEFuser(JitTestCase):
             return F.hardsigmoid(x) * 1.01
         self._test_fwd_bwd(eager)
 
+    def test_cat_graph_opt(self):
+        def foo(x, y, z):
+            return torch.log(torch.cat([x, y, z]))
+
+        self.checkScript(foo, (torch.rand([5, 5]), torch.rand([2, 5]), torch.rand([1, 5])))
+        # TODO: not sure why not updated graph isn't reflected in last_optimized_graph
+        self.assertLastGraphAllFused()
+
     def test_dynamic_cat(self):
         with inline_fusion_groups():
             @torch.jit.script
