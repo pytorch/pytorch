@@ -578,6 +578,7 @@ class TestQuantizeDBR(QuantizeDBRTestCase):
             # TODO enable scripting support for this
             do_torchscript_checks=False)
 
+    @unittest.skip('will be reenabled in the next PR')
     def test_method(self):
         class M(torch.nn.Module):
             def forward(self, x):
