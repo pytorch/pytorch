@@ -1,6 +1,5 @@
 from __future__ import annotations  # type: ignore[attr-defined]
-from dataclasses import dataclass, field
-from enum import Enum
+from dataclasses import dataclass
 from typing import (
     Callable,
     Dict,
@@ -31,7 +30,6 @@ from torch.distributed._shard.sharding_spec._internals import (
 from torch.distributed.nn.functional import (
     reduce_scatter,
 )
-from torch.types import Number
 from .metadata import TensorProperties, ShardedTensorMetadata
 from .shard import Shard
 from .reshard import reshuffle_local_shard, reshard_local_shard
@@ -74,34 +72,6 @@ def _register_remote_shards(sharded_tensor_id: int, rrefs: List[rpc.RRef[Shard]]
         else:
             sharded_tensor._register_remote_shards(rrefs, rpc_rank)
 
-
-class CreateOp(Enum):
-    EMPTY = 0
-    FULL = 1
-    ONES = 2
-    RAND = 3
-    ZEROS = 4
-
-
-@dataclass
-class TensorInitParams(object):
-    """ Container for list of common params to create new local tensor. """
-
-    create_op: CreateOp
-
-    # needed when create_op is FULL
-    # default set to False (not None) since None is incompatible with Number.
-    fill_value: Number = field(default=False)
-
-    tensor_properties: TensorProperties = field(
-        default=TensorProperties(dtype=torch.get_default_dtype(),
-                                 layout=torch.strided,
-                                 requires_grad=False,
-                                 memory_format=torch.contiguous_format,
-                                 pin_memory=False))
-
-
-
 class ShardedTensor(object):
     """
     ShardedTensor is an abstraction to represent Tensors that are sharded
@@ -126,7 +96,16 @@ class ShardedTensor(object):
             tensor. Can be a variable number of arguments or a collection like a list or tuple.
 
     Keyword args:
-        tensor_init_params (:class: `TensorInitParams`): common params to create tensor.
+        dtype (:class:`torch.dtype`, optional): the desired data type of returned tensor.
+                Default: if ``None``, uses a global default (see :func:`torch.set_default_tensor_type`).
+        layout (:class:`torch.layout`, optional): the desired layout of returned Tensor.
+            Default: ``torch.strided``.
+        requires_grad (bool, optional): If autograd should record operations on the
+            returned tensor. Default: ``False``.
+        pin_memory (bool, optional): If set, returned tensor would be allocated in
+            the pinned memory. Works only for CPU tensors. Default: ``False``.
+        memory_format (:class:`torch.memory_format`, optional): the desired memory format of
+            returned Tensor. Default: ``torch.contiguous_format``.
         init_rrefs (bool, optional): Whether or not to initialize
             :class:`torch.distributed.rpc.RRef`s pointing to remote shards.
             Need to initialize the RPC Framework if specified as ``True``.
@@ -151,7 +130,11 @@ class ShardedTensor(object):
         self,
         sharding_spec: ShardingSpec,
         *size,
-        tensor_init_params: TensorInitParams,
+        dtype=None,
+        layout=torch.strided,
+        requires_grad=False,
+        pin_memory=False,
+        memory_format=torch.contiguous_format,
         process_group=None,
         init_rrefs=False,
     ):
@@ -159,16 +142,18 @@ class ShardedTensor(object):
         # _process_group, _local_shards, etc.
         self._prepare_init(process_group=process_group, init_rrefs=init_rrefs)
 
-        if tensor_init_params.tensor_properties is None:
+        tensor_properties = TensorProperties(dtype, layout, requires_grad, memory_format, pin_memory)
+
+        if tensor_properties is None:
             raise ValueError('tensor_properties must not be None.')
 
-        if tensor_init_params.tensor_properties.dtype is None:
-            tensor_init_params.tensor_properties.dtype = torch.get_default_dtype()
+        if tensor_properties.dtype is None:
+            tensor_properties.dtype = torch.get_default_dtype()
 
-        if tensor_init_params.tensor_properties.layout != torch.strided:
+        if tensor_properties.layout != torch.strided:
             raise ValueError('Only torch.strided layout is currently supported')
 
-        if tensor_init_params.tensor_properties.memory_format != torch.contiguous_format:
+        if tensor_properties.memory_format != torch.contiguous_format:
             raise ValueError('Only torch.contiguous_format memory_format is currently supported')
 
         dims = _flatten_tensor_size(size)
@@ -176,9 +161,9 @@ class ShardedTensor(object):
         self._sharding_spec = sharding_spec
 
         if isinstance(self._sharding_spec, ChunkShardingSpec):
-            self._init_chunked(dims, tensor_init_params)
+            self._init_chunked(dims, tensor_properties)
         elif isinstance(self._sharding_spec, EnumerableShardingSpec):
-            self._init_enumerable(dims, tensor_init_params)
+            self._init_enumerable(dims, tensor_properties)
         else:
             raise ValueError(f'Unsupported sharding_spec: {self._sharding_spec}')
 
@@ -480,7 +465,7 @@ class ShardedTensor(object):
         return sharded_tensor
 
 
-    def _init_chunked(self, dims, tensor_init_params: TensorInitParams, ):
+    def _init_chunked(self, dims, tensor_properties: TensorProperties):
         current_rank = dist.get_rank(self._process_group)
         sharding_dim = self._sharding_spec.dim  # type: ignore[attr-defined]
 
@@ -522,14 +507,14 @@ class ShardedTensor(object):
                 if current_rank == rank:
                     # Initialize the local shard.
                     local_shard = _create_tensor_from_params(
-                        *rank_dims, local_device=local_device, tensor_init_params=tensor_init_params)
+                        *rank_dims, local_device=local_device, tensor_properties=tensor_properties)
                     self._local_shards.append(Shard(local_shard, shard_metadata))
 
         # Build overall metadata
         self._metadata = ShardedTensorMetadata(
-            shards_metadata, dims, tensor_init_params.tensor_properties, )
+            shards_metadata, dims, tensor_properties)
 
-    def _init_enumerable(self, dims, tensor_init_params: TensorInitParams):
+    def _init_enumerable(self, dims, tensor_properties: TensorProperties):
         # Validate the sharding spec is compatible with the tensor.
         check_tensor(self._sharding_spec.shards, dims)  # type: ignore[attr-defined]
 
@@ -544,12 +529,12 @@ class ShardedTensor(object):
                 # Initialize the local shard.
                 local_shard = _create_tensor_from_params(
                     *shard_metadata.shard_sizes, local_device=local_device,
-                    tensor_init_params=tensor_init_params)
+                    tensor_properties=tensor_properties)
                 self._local_shards.append(Shard(local_shard, shard_metadata))
 
         # Build overall metadata
         self._metadata = ShardedTensorMetadata(
-            shards_metadata, dims, tensor_init_params.tensor_properties, )
+            shards_metadata, dims, tensor_properties)
 
     def sharding_spec(self) -> ShardingSpec:
         """
@@ -827,48 +812,19 @@ class ShardedTensor(object):
         self._post_init()
 
 
-def _create_tensor_from_params(*size, local_device, tensor_init_params: TensorInitParams):
+def _create_tensor_from_params(*size, local_device, tensor_properties: TensorProperties):
     """ Helper to construct tensor from size, device and common params. """
+    dtype = tensor_properties.dtype
+    layout = tensor_properties.layout
+    requires_grad = tensor_properties.requires_grad
+    memory_format = tensor_properties.memory_format
+    pin_memory = tensor_properties.pin_memory
 
-    create_op = tensor_init_params.create_op
-    dtype = tensor_init_params.tensor_properties.dtype
-    layout = tensor_init_params.tensor_properties.layout
-    requires_grad = tensor_init_params.tensor_properties.requires_grad
-    memory_format = tensor_init_params.tensor_properties.memory_format
-    pin_memory = tensor_init_params.tensor_properties.pin_memory
-
-    if create_op == CreateOp.ONES:
-        return torch.ones(*size, dtype=dtype, layout=layout,
-                          device=local_device, pin_memory=pin_memory,
-                          requires_grad=requires_grad,)
-    elif create_op == CreateOp.EMPTY:
-        return torch.empty(*size, dtype=dtype, layout=layout,
-                           device=local_device, requires_grad=requires_grad,
-                           # NB: memory_format param is not accepted by torch.ones
-                           memory_format=memory_format, pin_memory=pin_memory,)
-    elif tensor_init_params.create_op == CreateOp.ZEROS:
-        return torch.zeros(*size,
-                           dtype=dtype,
-                           layout=layout,
-                           device=local_device,
-                           pin_memory=pin_memory,
-                           requires_grad=requires_grad,)
-    elif tensor_init_params.create_op == CreateOp.RAND:
-        return torch.rand(*size,
-                          dtype=dtype,
-                          layout=layout,
-                          device=local_device,
-                          pin_memory=pin_memory,
-                          requires_grad=requires_grad,)
-    elif tensor_init_params.create_op == CreateOp.FULL:
-        return torch.full(size=size,
-                          fill_value=tensor_init_params.fill_value,
-                          layout=layout,
-                          dtype=dtype,
-                          requires_grad=requires_grad,
-                          device=local_device, )
-    else:
-        raise ValueError(f'Unsupported create_op: {tensor_init_params.create_op}')
+    return torch.empty(
+        *size, dtype=dtype, layout=layout,
+        device=local_device, requires_grad=requires_grad,
+        memory_format=memory_format, pin_memory=pin_memory
+    )
 
 
 class _PartialTensor(object):
