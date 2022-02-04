@@ -184,7 +184,7 @@ class OrderedImporter(Importer):
     def __init__(self, *args):
         self._importers: List[Importer] = list(args)
 
-    def _check_if_malformed_package(self, module):
+    def _check_if_fileless_package(self, module):
         if not hasattr(module, '__path__'):
             return False
         if not hasattr(module, '__file__'):
@@ -201,7 +201,7 @@ class OrderedImporter(Importer):
                 )
             try:
                 module = importer.import_module(module_name)
-                if self._check_if_malformed_package(module):
+                if self._check_if_fileless_package(module):
                     continue
                 return module
             except ModuleNotFoundError as err:
