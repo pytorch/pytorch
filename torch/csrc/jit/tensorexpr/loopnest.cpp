@@ -689,13 +689,6 @@ class FunctionInliner : public IRMutator {
       VarPtr func_callee_arg = producer_index_vars_.at(i);
       ExprPtr func_caller_param = dims.at(i);
       if (func_callee_arg == nullptr) {
-        auto param_val = evalInt(func_caller_param);
-        if (!param_val || *param_val != 0) {
-          // We are implicitly assuming that if you have an index of 0, that
-          // must also be inlined into an index of 0.
-          success_ = false;
-          return nullptr;
-        }
         continue;
       }
       auto iter = inline_mapping_.find(func_callee_arg);
@@ -2316,7 +2309,7 @@ bool LoopNest::areLoopsPerfectlyNested(const std::vector<ForPtr>& loops) {
   return true;
 }
 
-void LoopNest::unroll(ForPtr f, StmtPtr* unrolled) {
+void LoopNest::fullUnroll(ForPtr f, StmtPtr* unrolled) {
   BlockPtr p = to<Block>(f->get_parent());
   if (!f) {
     throw malformed_input("unroll attempted on null loop");
@@ -2348,10 +2341,26 @@ void LoopNest::unroll(ForPtr f, StmtPtr* unrolled) {
   p->replace_stmt(f, *unrolled);
 }
 
-void LoopNest::unroll(ForPtr f) {
+void LoopNest::fullUnroll(ForPtr f) {
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   StmtPtr unrolled;
-  unroll(f, &unrolled);
+  fullUnroll(f, &unrolled);
+}
+
+void LoopNest::unroll(ForPtr f, int factor, ForPtr* tail) {
+  if (factor < 2) {
+    return;
+  }
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
+  ForPtr inner;
+  splitWithTail(f, factor, &inner, tail);
+  fullUnroll(inner);
+}
+
+void LoopNest::unroll(ForPtr f, int factor) {
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
+  ForPtr tail;
+  unroll(f, factor, &tail);
 }
 
 bool LoopNest::isNormalized(ForPtr f) {
