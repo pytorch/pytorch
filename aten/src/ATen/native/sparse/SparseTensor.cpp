@@ -900,5 +900,30 @@ Tensor empty_like_sparse_coo(
   }
 }
 
+Tensor& eye_sparse_out(int64_t n, Tensor& result) {
+  return at::native::eye_sparse_out(n, n, result);
+}
+
+Tensor& eye_sparse_out(int64_t n, int64_t m, Tensor& result) {
+  TORCH_INTERNAL_ASSERT(result.is_sparse());
+
+  auto result_values = result.values();
+
+  // This call also ensures proper checks are done for the arguments
+  at::native::eye_out_cpu(n, m, result_values);
+
+  auto indices = at::native::nonzero(result_values, /*as_tuple=*/ true);
+
+  auto result = at::native::_sparse_coo_tensor_unsafe(
+    indices,
+    result_values,
+    result.sizes(),
+    result.layout(),
+    result_values.device()
+  );
+
+  return result;
+}
+
 } // namespace native
 } // namespace at

@@ -388,5 +388,21 @@ Tensor empty_like_sparse_csr(
   }
 }
 
+Tensor& eye_sparse_csr_out(int64_t n, Tensor& result) {
+  return eye_sparse_csr_out(n, n, result);
+}
+
+Tensor& eye_sparse_csr_out(int64_t n, int64_t m, Tensor& result) {
+  TORCH_INTERNAL_ASSERT(result.is_sparse_csr());
+
+  auto result_values = result.values();
+
+  // This call also ensures proper checks are done for the arguments
+  at::native::eye_out_cpu(n, m, result_values);
+
+  result.copy_(result_values.to_sparse_csr());
+  return result;
+}
+
 } // namespace native
 } // namespace at
