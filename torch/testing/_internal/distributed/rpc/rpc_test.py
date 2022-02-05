@@ -2385,7 +2385,7 @@ class RpcTest(RpcAgentTestFixture, RpcTestCommon):
                         worker_name(0), my_script_func, args=(torch.tensor(1),)
                     )
                     # Intentionally calling record_function internals
-                    fut = torch.ops.profiler._call_end_callbacks_on_jit_fut(rf.handle, fut)
+                    fut = torch.ops.profiler._call_end_callbacks_on_jit_fut(rf.record, fut)
                 result = fut.wait()
                 # Validate that the profiling future returns the same value as the RPC
                 # future.

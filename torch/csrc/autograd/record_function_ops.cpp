@@ -51,7 +51,7 @@ c10::intrusive_ptr<c10::ivalue::Future> _call_end_callbacks_on_fut_new(
   // Profiling callback that ends the associated record_function
   // and returns the value of the passed in future.
   std::function<c10::IValue(c10::ivalue::Future&)> futureProfilingFunc =
-      [record = std::move(record)](c10::ivalue::Future& fut) {
+      [record](c10::ivalue::Future& fut) {
         record->record.end();
         // Note: this future is returned to the user to ensure that a call to wait()
         // ensures that profiling callbacks have ran. To ensure that this is
