@@ -39,12 +39,59 @@ static bool hastensor(Module& m, const char* name) {
   return m.hasattr(name) && m.attr(name).isTensor();
 }
 
+void restoreConvBiasWithNone(Module& module) {
+  for (const auto& method : module.get_methods()) {
+    auto graph = method.graph();
+
+    const PatternInfo& pattern_get_bias = PatternInfo::parse_from_str(R"(
+        graph(%self):
+          %bias : Tensor = prim::GetAttr[name="bias"](%self)
+          return (%bias) )");
+    // removing prim::GetAttr[name="bias"] and replace its uses with a None node, this restores the asserted placeholder for bias to facilitate fusion of conv and relu.
+    auto replace_bias = [&](const PatternInfo& pattern_get_bias) {
+      const Graph& pattern_get_bias_graph = *pattern_get_bias.pattern_graph;
+      const auto& get_bias_vmap = pattern_get_bias.vmap;
+
+      const auto& matches = findPatternMatches(pattern_get_bias_graph, *graph);
+
+      Value* none_val = graph->insertConstant(IValue());
+      for (const auto& match : matches) {
+        auto get_bias_node =
+            match.values_map.at(get_bias_vmap.at("bias"))->node();
+        if (get_bias_node->isBefore(none_val->node())) {
+          none_val->node()->moveBefore(get_bias_node);
+        }
+        get_bias_node->output()->replaceAllUsesWith(none_val);
+        get_bias_node->destroy();
+      }
+    };
+    replace_bias(pattern_get_bias);
+  }
+}
+
 void replaceConvBiasWithGetAttr(Module& module) {
   for (const auto& method : module.get_methods()) {
     auto graph = method.graph();
-    // Only looks for _convolution pattern.
-    // Thus assumes that tracing will have always gotten rid of aten::conv2d or
-    // aten::conv3d. If it did not, BN folding will fail.
+
+    // setting NoneType of convXd to TensorType. This avoids optimization to
+    // remove the bias argument, which gives wrong result, since it was later
+    // fused with bias from BatchNorm.
+    const PatternInfo& pattern_get_bias = PatternInfo::parse_from_str(R"(
+        graph(%self):
+          %bias : NoneType = prim::GetAttr[name="bias"](%self)
+          return (%bias) )");
+    auto replace_type = [&](const PatternInfo& pattern_get_bias) {
+      const Graph& pattern_get_bias_graph = *pattern_get_bias.pattern_graph;
+      const auto& get_bias_vmap = pattern_get_bias.vmap;
+
+      const auto& matches = findPatternMatches(pattern_get_bias_graph, *graph);
+      for (const auto& match : matches) {
+        match.values_map.at(get_bias_vmap.at("bias"))
+            ->setType(TensorType::get());
+      }
+    };
+    replace_type(pattern_get_bias);
+
     const PatternInfo& pattern_convolution = PatternInfo::parse_from_str(R"(
         graph(%a, %w, %b, %stride:int[], %padding:int[], %dilation:int[],
             %transposed:bool, %output_padding:int[], %groups:int, %benchmark:bool,
@@ -86,7 +133,29 @@ void replaceConvBiasWithGetAttr(Module& module) {
   }
 }
 
-void addBiasForConvIfNone(Module& module, const std::string& pattern_name) {
+void reverseBiasForConvIfNotDefined(Module& module) {
+  auto t = module.type()->expect<ClassType>();
+
+  const std::string real_typename = t->name()->qualifiedName();
+  const std::string demangled_typename = removeTorchMangle(real_typename);
+  bool is_floating_point_conv =
+      ((demangled_typename == "__torch__.torch.nn.modules.conv.Conv1d") ||
+       (demangled_typename == "__torch__.torch.nn.modules.conv.Conv2d") ||
+       (demangled_typename == "__torch__.torch.nn.modules.conv.Conv3d"));
+
+  if (is_floating_point_conv) {
+    if (hastensor(module, "bias") && !module.attr("bias").toTensor().defined()) {
+      t->unsafeRemoveAttribute("bias");
+      restoreConvBiasWithNone(module);
+    }
+
+  }
+  for (Module m : module.children()) {
+    reverseBiasForConvIfNotDefined(m);
+  }
+}
+
+void addBiasForConvIfNone(Module& module) {
   auto t = module.type()->expect<ClassType>();
 
   const std::string real_typename = t->name()->qualifiedName();
@@ -98,15 +167,20 @@ void addBiasForConvIfNone(Module& module, const std::string& pattern_name) {
 
   if (is_floating_point_conv) {
     if (!t->hasAttribute("bias")) {
-      auto optional_tensor_type = OptionalType::create(TensorType::get());
-      t->addAttribute("bias", optional_tensor_type, true);
-      auto optional_tensor = c10::optional<at::Tensor>();
-      module.setattr("bias", optional_tensor);
+      t->addAttribute("bias", TensorType::get(), true);
+      module.setattr("bias", at::Tensor());
       replaceConvBiasWithGetAttr(module);
+    } else {
+      if (!module.attr("bias").isTensor()) {
+        t->unsafeRemoveAttribute("bias");
+        t->addAttribute("bias", TensorType::get(), true);
+        module.setattr("bias", at::Tensor());
+        replaceConvBiasWithGetAttr(module);
+      }
     }
   }
   for (Module m : module.children()) {
-    addBiasForConvIfNone(m, pattern_name);
+    addBiasForConvIfNone(m);
   }
 }
 
@@ -221,7 +295,7 @@ bool FoldConvBatchNormHelper::tryExtractingConvBNParameters(
     Module& conv,
     Module& bn,
     ConvBNParameters& r) {
-  if (!hastensor(conv, "weight") || !conv.hasattr("bias") ||
+  if (!hastensor(conv, "weight") || !hastensor(conv, "bias") ||
       !hastensor(bn, "running_mean") || !hastensor(bn, "running_var")) {
     return false;
   }
@@ -233,12 +307,10 @@ bool FoldConvBatchNormHelper::tryExtractingConvBNParameters(
   }
 
   r.conv_w = conv.attr("weight").toTensor();
-  r.conv_b = at::zeros_like(r.bn_rm);
-  auto bias_opt = conv.attr("bias").toOptional<at::Tensor>();
-  if (bias_opt) {
-    r.conv_b = *bias_opt;
+  r.conv_b = conv.attr("bias").toTensor();
+  if (!r.conv_b.defined()) {
+    r.conv_b = at::zeros_like(r.bn_rm);
   }
-
   return true;
 }
 
@@ -374,8 +446,7 @@ void FoldConvBatchNormHelper::transform() {
 Module FoldConvBatchNorm(const Module& module) {
   Module m = module.clone();
 
-  addBiasForConvIfNone(m, "Conv2d");
-  addBiasForConvIfNone(m, "Conv3d");
+  addBiasForConvIfNone(m);
   // Conv2d + BatchNorm2d
   const PatternInfo pattern2d = PatternInfo::parse_from_str(
       R"(
@@ -400,6 +471,7 @@ graph(%self, %input, %conv, %batchnorm):
     h.analyze(m, pattern);
     h.transform();
   }
+  reverseBiasForConvIfNotDefined(m);
   return m;
 }
 
