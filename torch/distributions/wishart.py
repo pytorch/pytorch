@@ -190,8 +190,8 @@ class Wishart(ExponentialFamily):
 
         # Implemented Sampling using Bartlett decomposition
         noise = _clamp_with_eps(
-            self._dist_chi2.rsample(sample_shape)
-        ).sqrt().diag_embed(dim1=-2, dim2=-1)
+            self._dist_chi2.rsample(sample_shape).sqrt()
+        ).diag_embed(dim1=-2, dim2=-1)
 
         i, j = torch.tril_indices(p, p, offset=-1)
         noise[..., i, j] = torch.randn(
@@ -222,12 +222,7 @@ class Wishart(ExponentialFamily):
         is_singular = self.support.check(sample)
         if self._batch_shape:
             is_singular = is_singular.amax(self._batch_dims)
-        
-        if is_singular.any():
-            eps_matrix = torch.eye(self._event_shape[-1], dtype = sample.dtype, device = sample.device)
-          sample[is_singular] = sample[is_singular] + 
 
-        """
         if torch._C._get_tracing_state():
             # Less optimized version for JIT
             for _ in range(max_try_correction):
@@ -254,7 +249,6 @@ class Wishart(ExponentialFamily):
 
                     if not is_singular.any():
                         break
-        """
 
         return sample
 
