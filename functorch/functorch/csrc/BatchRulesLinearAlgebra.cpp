@@ -151,9 +151,15 @@ Tensor linear_decomp(
   return result;
 }
 
+Tensor addmm_decomp(const Tensor& self, const Tensor& mat1, const Tensor& mat2, const Scalar& beta, const Scalar& alpha) {
+  // Decomposition that is probably not very fast...
+  return at::add(self * beta, at::mm(mat1, mat2), alpha);
+}
+
 TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   VMAP_SUPPORT(bmm, bmm_batch_rule);
   m.impl("addmv", addmv_decomp);
+  m.impl("addmm", addmm_decomp);
   m.impl("addbmm", addbmm_decomp);
   m.impl("baddbmm", baddbmm_decomp);
   VMAP_SUPPORT(dot, dot_batch_rule);
