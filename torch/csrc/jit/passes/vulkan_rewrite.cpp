@@ -45,7 +45,7 @@ void insertPrePackedLinearOp(std::shared_ptr<Graph>& graph) {
   linear_rewriter.runOnGraph(graph);
 }
 
-void insertPrePackedMcLarenEncoderBlockOp(std::shared_ptr<Graph>& graph) {
+void insertPrePackedGatedConv2dModuleOp(std::shared_ptr<Graph>& graph) {
   graph_rewrite_helper::replaceConvolutionWithAtenConv(graph);
 
   std::string conv_2d_pattern = R"(
@@ -65,11 +65,11 @@ void insertPrePackedMcLarenEncoderBlockOp(std::shared_ptr<Graph>& graph) {
           %input2, %weight2, %bias2, %stride2:int[], %padding2:int[], %dilation2:int[], %groups2:int):
         %transposed : bool = prim::Constant[value=0]()
         %output_padding : int[] = prim::Constant[value=[0, 0]]()
-        %packed = mclaren_prepack::mclaren_encoder_block_prepack(
+        %packed = vulkan_prepack::gated_conv2d_module_prepack(
           %weight1, %bias1, %stride1, %padding1, %output_padding, %dilation1, %groups1,
           %weight2, %bias2, %stride2, %padding2, %output_padding, %dilation2, %groups2,
           %transposed)
-        %r = mclaren_prepack::mclaren_encoder_block_run(%input1, %input2, %packed)
+        %r = vulkan_prepack::gated_conv2d_module_run(%input1, %input2, %packed)
         return (%r) )";
 
   SubgraphRewriter rewriter;
@@ -94,11 +94,11 @@ void insertPrePackedMcLarenEncoderBlockOp(std::shared_ptr<Graph>& graph) {
           %input1, %weight1, %bias1, %stride1:int[], %padding1:int[], %dilation1:int[], %output_padding1:int[], %groups1:int,
           %input2, %weight2, %bias2, %stride2:int[], %padding2:int[], %dilation2:int[], %output_padding2:int[], %groups2:int):
         %transposed : bool = prim::Constant[value=1]()
-        %packed = mclaren_prepack::mclaren_encoder_block_prepack(
+        %packed = vulkan_prepack::gated_conv2d_module_prepack(
           %weight1, %bias1, %stride1, %padding1, %output_padding1, %dilation1, %groups1,
           %weight2, %bias2, %stride2, %padding2, %output_padding2, %dilation2, %groups2,
           %transposed)
-        %r = mclaren_prepack::mclaren_encoder_block_run(%input1, %input2, %packed)
+        %r = vulkan_prepack::gated_conv2d_module_run(%input1, %input2, %packed)
         return (%r) )";
 
   SubgraphRewriter transpose_rewriter;
@@ -237,7 +237,7 @@ void fuseReluWithPackedOps(std::shared_ptr<Graph>& graph) {
 
 void vulkanInsertPrePackedOps(std::shared_ptr<Graph>& graph) {
   insertPrePackedLinearOp(graph);
-  insertPrePackedMcLarenEncoderBlockOp(graph);
+  insertPrePackedGatedConv2dModuleOp(graph);
   insertPrePackedConv2dOp(graph);
 }
 
@@ -265,7 +265,7 @@ void vulkanFoldPrePackingOps(script::Module& m) {
         (n->kind() ==
          Symbol::fromQualString("vulkan_prepack::linear_prepack")) ||
         (n->kind() ==
-         Symbol::fromQualString("mclaren_prepack::mclaren_encoder_block_prepack")) ||
+         Symbol::fromQualString("vulkan_prepack::gated_conv2d_module_prepack")) ||
         (n->kind() ==
          Symbol::fromQualString(
              "vulkan_prepack::conv2d_transpose_clamp_prepack")));
@@ -298,6 +298,9 @@ script::Module vulkanOptimizeForMobile(
   //cloned_module.dump(true, false, false);
   vulkanFusePrePackedConvWithClamp(cloned_module);
   vulkanFoldPrePackingOps(cloned_module);
+
+  cloned_module.dump(true, false, false);
+
   removeDropout(cloned_module);
   vulkanRemoveMutation(cloned_module);
   // remove duplicated constants

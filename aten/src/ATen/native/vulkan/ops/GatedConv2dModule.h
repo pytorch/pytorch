@@ -11,9 +11,9 @@ namespace native {
 namespace vulkan {
 namespace ops {
 
-class McLarenEncoderBlockOpContext final : public torch::jit::CustomClassHolder {
+class GatedConv2dModuleOpContext final : public torch::jit::CustomClassHolder {
  public:
-  static McLarenEncoderBlockOpContext create(
+  static GatedConv2dModuleOpContext create(
       const Tensor& weight_1,
       const c10::optional<Tensor>& bias_1,
       IntArrayRef stride_1,
@@ -51,7 +51,7 @@ class McLarenEncoderBlockOpContext final : public torch::jit::CustomClassHolder 
   State unpack() const;
 
  private:
-  McLarenEncoderBlockOpContext(
+  GatedConv2dModuleOpContext(
       const Tensor& weight_1,
       const c10::optional<Tensor>& bias_1,
       IntArrayRef stride_1,
@@ -100,12 +100,12 @@ class McLarenEncoderBlockOpContext final : public torch::jit::CustomClassHolder 
   } unpacked_;
 };
 
-Tensor mclaren_encoder_block_run(
+Tensor gated_conv2d_module_run(
     const Tensor& input_1,
     const Tensor& input_2,
-    const c10::intrusive_ptr<McLarenEncoderBlockOpContext>& context);
+    const c10::intrusive_ptr<GatedConv2dModuleOpContext>& context);
 
-c10::intrusive_ptr<McLarenEncoderBlockOpContext> mclaren_encoder_block_prepack(
+c10::intrusive_ptr<GatedConv2dModuleOpContext> gated_conv2d_module_prepack(
     Tensor&& weight_1,
     c10::optional<Tensor>&& bias_1,
     std::vector<int64_t>&& stride_1,

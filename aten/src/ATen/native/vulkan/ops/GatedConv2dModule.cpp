@@ -1,4 +1,4 @@
-#include <ATen/native/vulkan/ops/McLarenEncoderBlock.h>
+#include <ATen/native/vulkan/ops/GatedConv2dModule.h>
 #include <ATen/native/ConvUtils.h>
 #include <ATen/native/utils/ParamUtils.h>
 #include <ATen/native/vulkan/ops/Common.h>
@@ -223,7 +223,7 @@ static inline std::vector<int64_t> get_conv_transpose_output_size(
   return output_size;
 }
 
-McLarenEncoderBlockOpContext::McLarenEncoderBlockOpContext(
+GatedConv2dModuleOpContext::GatedConv2dModuleOpContext(
       const Tensor& weight_1,
       const c10::optional<Tensor>& bias_1,
       IntArrayRef stride_1,
@@ -269,7 +269,7 @@ McLarenEncoderBlockOpContext::McLarenEncoderBlockOpContext(
     } {
 }
 
-McLarenEncoderBlockOpContext McLarenEncoderBlockOpContext::create(
+GatedConv2dModuleOpContext GatedConv2dModuleOpContext::create(
       const Tensor& weight_1,
       const c10::optional<Tensor>& bias_1,
       IntArrayRef stride_1,
@@ -286,7 +286,7 @@ McLarenEncoderBlockOpContext McLarenEncoderBlockOpContext::create(
       const int64_t groups_2,
       const bool transposed) {
   // Pass in the originals
-  return McLarenEncoderBlockOpContext{
+  return GatedConv2dModuleOpContext{
     weight_1,
     bias_1,
     stride_1,
@@ -305,7 +305,7 @@ McLarenEncoderBlockOpContext McLarenEncoderBlockOpContext::create(
   };
 }
 
-Tensor McLarenEncoderBlockOpContext::run(const Tensor& input_arg_1, const Tensor& input_arg_2) const {
+Tensor GatedConv2dModuleOpContext::run(const Tensor& input_arg_1, const Tensor& input_arg_2) const {
   api::Context* const context = api::context();
 
   const Tensor input_1 = input_arg_1.is_vulkan() ? input_arg_1 : input_arg_1.vulkan();
@@ -315,10 +315,10 @@ Tensor McLarenEncoderBlockOpContext::run(const Tensor& input_arg_1, const Tensor
 
   std::vector<int64_t> input_1_size = input_1.sizes().vec();
   std::vector<int64_t> input_2_size = input_2.sizes().vec();
-  TORCH_CHECK(input_1_size.size() == 4, "McLarenEncoderBlock: first input tensor must have exactly 4 dims")
-  TORCH_CHECK(input_2_size.size() == 4, "McLarenEncoderBlock: second input tensor must have exactly 4 dims")
-  //TORCH_CHECK(input_1_size[2] == 1, "McLarenEncoderBlock: first input tensor must have height of exactly 1")
-  //TORCH_CHECK(input_2_size[2] == 1, "McLarenEncoderBlock: second input tensor must have height of exactly 1")
+  TORCH_CHECK(input_1_size.size() == 4, "GatedConv2dModule: first input tensor must have exactly 4 dims")
+  TORCH_CHECK(input_2_size.size() == 4, "GatedConv2dModule: second input tensor must have exactly 4 dims")
+  //TORCH_CHECK(input_1_size[2] == 1, "GatedConv2dModule: first input tensor must have height of exactly 1")
+  //TORCH_CHECK(input_2_size[2] == 1, "GatedConv2dModule: second input tensor must have height of exactly 1")
   std::vector<int64_t> conv_input_size(input_1_size);
   conv_input_size[2] = 2;
   std::vector<int64_t> output_size = !unpacked_.transposed ? conv_output_size(
@@ -387,7 +387,7 @@ Tensor McLarenEncoderBlockOpContext::run(const Tensor& input_arg_1, const Tensor
           VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
           VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
         },
-        unpacked_.transposed ? VK_KERNEL(mclaren_decoder_block) : VK_KERNEL(mclaren_encoder_block),
+        unpacked_.transposed ? VK_KERNEL(gated_conv_transpose2d_module) : VK_KERNEL(gated_conv2d_module),
         global_size,
         adaptive_work_group_size(global_size),
         v_output.image(
@@ -414,8 +414,8 @@ Tensor McLarenEncoderBlockOpContext::run(const Tensor& input_arg_1, const Tensor
   //return convert(packed_.v_weight);
 }
 
-McLarenEncoderBlockOpContext::State McLarenEncoderBlockOpContext::unpack() const {
-  return McLarenEncoderBlockOpContext::State{
+GatedConv2dModuleOpContext::State GatedConv2dModuleOpContext::unpack() const {
+  return GatedConv2dModuleOpContext::State{
     unpacked_.weight_1,
     unpacked_.bias_1,
     unpacked_.stride_1,
@@ -434,7 +434,7 @@ McLarenEncoderBlockOpContext::State McLarenEncoderBlockOpContext::unpack() const
   };
 }
 
-c10::intrusive_ptr<McLarenEncoderBlockOpContext> mclaren_encoder_block_prepack(
+c10::intrusive_ptr<GatedConv2dModuleOpContext> gated_conv2d_module_prepack(
     Tensor&& weight_1,
     c10::optional<Tensor>&& bias_1,
     std::vector<int64_t>&& stride_1,
@@ -450,8 +450,8 @@ c10::intrusive_ptr<McLarenEncoderBlockOpContext> mclaren_encoder_block_prepack(
     std::vector<int64_t>&& dilation_2,
     const int64_t groups_2,
     const bool transposed) {
-  return c10::make_intrusive<McLarenEncoderBlockOpContext>(
-      McLarenEncoderBlockOpContext::create(
+  return c10::make_intrusive<GatedConv2dModuleOpContext>(
+      GatedConv2dModuleOpContext::create(
           std::move(weight_1),
           std::move(bias_1),
           std::move(stride_1),
@@ -469,10 +469,10 @@ c10::intrusive_ptr<McLarenEncoderBlockOpContext> mclaren_encoder_block_prepack(
           transposed));
 }
 
-Tensor mclaren_encoder_block_run(
+Tensor gated_conv2d_module_run(
     const Tensor& input_1,
     const Tensor& input_2,
-    const c10::intrusive_ptr<McLarenEncoderBlockOpContext>& context) {
+    const c10::intrusive_ptr<GatedConv2dModuleOpContext>& context) {
   return context->run(input_1, input_2);
 }
 
