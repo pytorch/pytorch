@@ -1699,7 +1699,7 @@ class CustomModuleQuantizeHandler(QuantizeHandler):
 @register_quant_pattern('reshape')
 @register_quant_pattern('resize_')
 @register_quant_pattern('shape')
-@register_quant_pattern('size')
+# @register_quant_pattern('size')
 @register_quant_pattern('squeeze')
 @register_quant_pattern('squeeze_')
 @register_quant_pattern('transpose')
@@ -1733,22 +1733,19 @@ class GeneralTensorShapeOpQuantizeHandler(QuantizeHandler):
                 load_arg: Callable,
                 is_reference: bool = False,
                 convert_custom_config_dict: Dict[str, Any] = None) -> Node:
-        if is_reference:
-            # when activation dtype is torch.float, the node does not require
-            # observation
-            # e.g. dynamic quantization or weight_only quantization
-            act_dtype = activation_dtype(qconfig)
-            if act_dtype == torch.float:
-                op_out = quantized_graph.node_copy(node, load_arg(quantized=torch.float))
-                return op_out
-            else:
-                activation_post_process = \
-                    self._maybe_get_last_node_only_observer(modules)
-                assert activation_post_process is not None
+        # when activation dtype is torch.float, the node does not require
+        # observation
+        # e.g. dynamic quantization or weight_only quantization
+        act_dtype = activation_dtype(qconfig)
+        if act_dtype == torch.float:
+            op_out = quantized_graph.node_copy(node, load_arg(quantized=torch.float))
+            return op_out
+        else:
+            activation_post_process = \
+                self._maybe_get_last_node_only_observer(modules)
+            if activation_post_process is not None:
                 # TODO: remove special case for operator.getitem
                 # make sure the input is quantized to act_dtype if it's not operator.getitem
-                if node.target != operator.getitem:
-                    load_arg(quantized={0: act_dtype})(node.args)
                 args = list(load_arg(quantized=torch.float)(node.args))
                 kwargs = load_arg(quantized=torch.float)(node.kwargs)
                 op_out = quantized_graph.node_copy(node, load_arg(quantized=torch.float))
@@ -1756,8 +1753,8 @@ class GeneralTensorShapeOpQuantizeHandler(QuantizeHandler):
                     op_out,
                     activation_post_process,
                     node, modules, quantized_graph, node_name_to_scope, is_input=False)
-        else:
-            return quantized_graph.node_copy(node, load_arg(quantized=None))
+            else:
+                return quantized_graph.node_copy(node, load_arg(quantized=torch.float))
 
 class StandaloneModuleQuantizeHandler(QuantizeHandler):
     """ Converts an observed standalone module to quantized standalone module

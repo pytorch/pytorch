@@ -12,6 +12,7 @@ from .match_utils import is_match
 from .match_utils import MatchAllNode
 from ..utils import _parent_name, check_node
 from typing import Dict, Tuple, Type
+from torch.fx import Node
 
 # Mapping from reference module class to the replacement quantized module class for lowering
 LOWER_MODULE_MAP: Dict[Type[nn.Module], Type[ReferenceableQuantizedModule]] = {
@@ -100,14 +101,24 @@ def special_pattern_replacement(model: QuantizedGraphModule) -> QuantizedGraphMo
     nodes = list(model.graph.nodes)
     for n in model.graph.nodes:
         q_node = n
-        if q_node.target == torch.quantize_per_tensor:
+        if q_node.target == torch.quantize_per_tensor or \
+           (q_node.op == "call_method" and q_node.target == "to" and q_node.args[1] == torch.float16):
+            ref_node = q_node.args[0]
             # get output scale/zero_point/dtype from the quantize node
-            ref_node, scale_node, zero_point_node, dtype = q_node.args
+            # ref_node, scale_node, zero_point_node, dtype = q_node.args
+            # TODO: add safety checks that users for the ref_node and dq_node needs to be one
 
             is_call_function, is_call_method, is_call_module = check_node(ref_node, modules)
             if is_call_module or is_call_function or is_call_method:
                 dq_node = ref_node.args[0]
-                if dq_node.target == 'dequantize':
+                assert isinstance(dq_node, Node) or isinstance(dq_node, (tuple, list))
+                if isinstance(dq_node, Node):
+                    is_dequantize = dq_node.target == 'dequantize'
+                elif isinstance(dq_node, (tuple, list)):
+                    is_dequantize = all(x.target == 'dequantize' for x in dq_node)
+                else:
+                    is_dequantize = False
+                if is_dequantize:
                     if is_call_module:
                         ref_module = modules[ref_node.target]
                         # change this pattern to use the corresponding quantized module
@@ -118,16 +129,23 @@ def special_pattern_replacement(model: QuantizedGraphModule) -> QuantizedGraphMo
                         dq_node.target = ref_node
 
                     # remove dq node:
-                    dq_node_input = dq_node.args[0]
-                    dq_node.replace_all_uses_with(dq_node_input)
-                    model.graph.erase_node(dq_node)
+                    if isinstance(dq_node, Node):
+                        dq_node_input = dq_node.args[0]
+                        dq_node.replace_all_uses_with(dq_node_input)
+                        model.graph.erase_node(dq_node)
+                    elif isinstance(dq_node, (tuple, list)):
+                        for dn in dq_node:
+                            dn_input = dn.args[0]
+                            dn.replace_all_uses_with(dn_input)
+                            model.graph.erase_node(dn)
 
                     # remove q node and args:
                     q_node_input = q_node.args[0]
                     q_node.replace_all_uses_with(q_node_input)
                     model.graph.erase_node(q_node)
-                    model.graph.erase_node(scale_node)
-                    model.graph.erase_node(zero_point_node)
+                    for n in list(q_node.args)[1:]:
+                        if isinstance(n, Node):
+                            model.graph.erase_node(n)
 
 
     model.recompile()
