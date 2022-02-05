@@ -430,13 +430,13 @@ BufHandle Buf::make(const std::vector<ExprHandle>& dims, Dtype dtype) {
 }
 
 BufHandle Buf::make(
-      const std::string& name_hint,
-      const std::vector<ExprHandle>& dims,
-      Dtype dtype,
-      c10::optional<ExprHandle> initializer,
-      c10::optional<std::vector<ExprHandle>> strides,
-      c10::optional<ExprHandle> qscale,
-      c10::optional<ExprHandle> qzero) {
+    const std::string& name_hint,
+    const std::vector<ExprHandle>& dims,
+    Dtype dtype,
+    c10::optional<ExprHandle> initializer,
+    c10::optional<std::vector<ExprHandle>> strides,
+    c10::optional<ExprHandle> qscale,
+    c10::optional<ExprHandle> qzero) {
   c10::optional<std::vector<ExprPtr>> opt_strides;
   if (strides) {
     opt_strides = ExprHandleVectorToExprVector(*strides);

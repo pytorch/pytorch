@@ -4,7 +4,6 @@
 #include <functional>
 #include <vector>
 
-#include <torch/csrc/jit/tensorexpr/dim_arg.h>
 #include <torch/csrc/jit/tensorexpr/expr.h>
 #include <torch/csrc/jit/tensorexpr/reduction.h>
 
@@ -73,22 +72,22 @@ class TORCH_API Tensor {
 
 TORCH_API Tensor Compute(
     const std::string& func_name,
-    const std::vector<DimArg>& dim_args,
+    const std::vector<ExprHandle>& dims,
     const std::function<ExprHandle(const VarHandle&)>& body_func);
 TORCH_API Tensor Compute(
     const std::string& func_name,
-    const std::vector<DimArg>& dim_args,
+    const std::vector<ExprHandle>& dims,
     const std::function<ExprHandle(const VarHandle&, const VarHandle&)>&
         body_func);
 TORCH_API Tensor Compute(
     const std::string& func_name,
-    const std::vector<DimArg>& dim_args,
+    const std::vector<ExprHandle>& dims,
     const std::function<
         ExprHandle(const VarHandle&, const VarHandle&, const VarHandle&)>&
         body_func);
 TORCH_API Tensor Compute(
     const std::string& func_name,
-    const std::vector<DimArg>& dim_args,
+    const std::vector<ExprHandle>& dims,
     const std::function<ExprHandle(
         const VarHandle&,
         const VarHandle&,
@@ -96,40 +95,31 @@ TORCH_API Tensor Compute(
         const VarHandle&)>& body_func);
 TORCH_API Tensor Compute(
     const std::string& func_name,
-    const std::vector<DimArg>& dim_args,
+    const std::vector<ExprHandle>& dims,
     const std::function<ExprHandle(const std::vector<VarHandle>&)>& body_func);
 
-inline void unpack_dim_args(
-    const std::vector<DimArg>& dim_args,
-    std::vector<ExprHandle>* dims,
-    std::vector<VarHandle>* vars) {
-  dims->clear();
-  vars->clear();
-  for (const DimArg& dim_arg : dim_args) {
-    ExprHandle expr = dim_arg.dim();
-    dims->push_back(expr);
-    vars->push_back(VarHandle(alloc<Var>(
-        dim_arg.name_hint(),
-        expr.dtype().scalar_type() == ScalarType::Long ? kLong : kInt)));
+inline std::vector<VarHandle> create_index_vars(
+    const std::vector<ExprHandle>& dims) {
+  std::vector<VarHandle> vars;
+  vars.reserve(dims.size());
+  for (const ExprHandle& dim : dims) {
+    vars.push_back(VarHandle(alloc<Var>(
+        "i", dim.dtype().scalar_type() == ScalarType::Long ? kLong : kInt)));
   }
+  return vars;
 }
 
 // Handle reductions over a Reducer and a body_func which produces values.
 template <typename InitFunc, typename BodyFunc>
 Tensor Reduce(
     const std::string& func_name,
-    const std::vector<DimArg>& dim_args,
+    const std::vector<ExprHandle>& dims,
     const Reducer& reducer,
     const InitFunc& init_func,
     const BodyFunc& body_func,
-    const std::vector<DimArg>& reduce_args) {
-  std::vector<ExprHandle> dims;
-  std::vector<VarHandle> vars;
-  unpack_dim_args(dim_args, &dims, &vars);
-
-  std::vector<ExprHandle> reduce_dims;
-  std::vector<VarHandle> reduce_vars;
-  unpack_dim_args(reduce_args, &reduce_dims, &reduce_vars);
+    const std::vector<ExprHandle>& reduce_dims) {
+  std::vector<VarHandle> vars = create_index_vars(dims);
+  std::vector<VarHandle> reduce_vars = create_index_vars(reduce_dims);
 
   // If reduce_vars is empty, then it's not a reduction, but rather a simple
   // copy
@@ -155,45 +145,45 @@ Tensor Reduce(
 template <typename BodyFunc>
 Tensor Reduce(
     const std::string& func_name,
-    const std::vector<DimArg>& dim_args,
+    const std::vector<ExprHandle>& dims,
     const Reducer& reducer,
     const BodyFunc& body_func,
-    const std::vector<DimArg>& reduce_args) {
+    const std::vector<ExprHandle>& reduce_dims) {
   return Reduce(
       func_name,
-      dim_args,
+      dims,
       reducer,
       [&](ParameterList p) { return ExprHandle(reducer.initializer()); },
       body_func,
-      reduce_args);
+      reduce_dims);
 }
 
 // Overload which allows inline lambda functions for the body_func.
 template <typename BodyFunc>
 Tensor Reduce(
     const std::string& func_name,
-    const std::vector<DimArg>& dim_args,
+    const std::vector<ExprHandle>& dims,
     const Reducer& reducer,
     const BodyFunc&& body_func,
-    const std::vector<DimArg>& reduce_args) {
-  return Reduce(func_name, dim_args, reducer, body_func, reduce_args);
+    const std::vector<ExprHandle>& reduce_dims) {
+  return Reduce(func_name, dims, reducer, body_func, reduce_dims);
 }
 
 TORCH_API Tensor Reduce(
     const std::string& name,
-    const std::vector<DimArg>& dim_args,
+    const std::vector<ExprHandle>& dims,
     const Reducer& reducer,
     const BufHandle& buffer,
-    const std::vector<DimArg>& reduce_args);
+    const std::vector<ExprHandle>& reduce_dims);
 
 // Overload for the common case of all dimensions of a prevously Computed
 // Tensor.
 TORCH_API Tensor Reduce(
     const std::string& func_name,
-    const std::vector<DimArg>& dim_args,
+    const std::vector<ExprHandle>& dims,
     const Reducer& reducer,
     Tensor tensor,
-    const std::vector<DimArg>& reduce_args);
+    const std::vector<ExprHandle>& reduce_dims);
 
 template <typename... Ts>
 inline ExprHandle Tensor::load(const Ts&... ts) const {
