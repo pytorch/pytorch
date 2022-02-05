@@ -620,14 +620,8 @@ void nnc_aten_quantized_mul_out(
        {2u, {b_qscale, b_qzero, toQIntType(b_qdtype)}}});
   const double out_qscale = ((double*)extra_args)[6];
   const int64_t out_qzero = extra_args[7];
-  std::cout << "XXX " << __FILE__ << ":" << __LINE__ << "\n tensors[1]:\n"
-            << tensors[1] << "\n tensors[2]:\n"
-            << tensors[2] << std::endl;
   // NOLINTNEXTLINE
   auto r = quantized_mul(tensors[1], tensors[2], out_qscale, out_qzero);
-  std::cout << "XXX " << __FILE__ << ":" << __LINE__ << "\n r:" << r
-            << std::endl;
-  // memcpy(buf_data[0], r.data_ptr(), r.element_size() * r.numel());
   buf_data[0] = r.data_ptr();
   c10::raw::intrusive_ptr::incref(r.getIntrusivePtr().get());
 }

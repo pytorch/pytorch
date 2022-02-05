@@ -850,8 +850,8 @@ class SimpleIREvaluatorImpl : public IRVisitor {
       if (iter == buffer_mapping_.end()) {
         throw malformed_input("could not find buf", v);
       }
-      buf_ptrs.push_back(iter->second);
 
+      buf_ptrs.push_back(iter->second);
       buf_ranks.push_back(b->dims().size());
       buf_dtypes.push_back((int8_t)b->dtype().scalar_type());
       for (ExprPtr dim_expr : b->dims()) {

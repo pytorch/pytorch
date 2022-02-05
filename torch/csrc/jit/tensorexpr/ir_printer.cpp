@@ -561,7 +561,7 @@ void IRPrinter::visit(ExternalCall2Ptr v) {
     os() << *buf_out_arg;
   }
 
-  os() << " = " << v->func_name() << "(";
+  os() << " := " << v->func_name() << "(";
 
   os() << "buf_args={";
   i = 0;

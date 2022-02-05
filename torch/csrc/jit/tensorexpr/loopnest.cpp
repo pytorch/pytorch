@@ -886,7 +886,7 @@ StmtPtr computeInlineImpl(
   }
   for (auto& use : buf_load_store_uses.at(b)) {
     StmtPtr s = use.s;
-    if (to<ExternalCall>(s)) {
+    if (to<ExternalCall>(s) || to<ExternalCall2>(s)) {
       return nullptr;
     }
   }
@@ -985,7 +985,7 @@ void LoopNest::inlineIntermediateBufs(bool allow_duplicated_work) {
         } else {
           // If S is not a store, it must be an ExternalCall.
           TORCH_INTERNAL_ASSERT(
-              to<ExternalCall>(stores[0].s),
+              to<ExternalCall>(stores[0].s) || to<ExternalCall2>(stores[0].s),
               buildErrorMessage(
                   "Expected stmt: " + std::to_string(stores[0].s) +
                   "\nto be either a Store or an ExternalCall in the fuser."));
@@ -1045,6 +1045,23 @@ class LoadOrStoreUseFinder : public IRVisitor {
     IRVisitor::visit(v);
   }
 
+  void visit(ExternalCall2Ptr v) override {
+    for (BufPtr out_buf : v->buf_out_args()) {
+      if (stores_[out_buf].insert(last_stmt_).second) {
+        uses_[out_buf].push_back({(StmtPtr)v, true});
+      }
+    }
+    last_stmt_ = (StmtPtr)v;
+
+    for (BufPtr input_buf : v->buf_args()) {
+      if (loads_[input_buf].insert(last_stmt_).second) {
+        uses_[input_buf].push_back({last_stmt_, false});
+      }
+    }
+
+    IRVisitor::visit(v);
+  }
+
   void visit(LoadPtr v) override {
     if (loads_[v->buf()].insert(last_stmt_).second) {
       uses_[v->buf()].push_back({last_stmt_, false});
@@ -1081,6 +1098,10 @@ class ContainedStmtsFinder : public IRVisitor {
     IRVisitor::visit(v);
   }
   void visit(ExternalCallPtr v) override {
+    contained_.insert((StmtPtr)v);
+    IRVisitor::visit(v);
+  }
+  void visit(ExternalCall2Ptr v) override {
     contained_.insert((StmtPtr)v);
     IRVisitor::visit(v);
   }

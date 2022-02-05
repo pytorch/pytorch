@@ -413,7 +413,6 @@ Tensor computeQuantizedConv2d(
       Dtype(out_qdtype),
       out_qscale,
       out_qzero);
-  /*
   StmtPtr s = ExternalCall2::make(
       "nnc_aten_quantized_conv2d_out",
       {ResultBuf},
@@ -423,7 +422,7 @@ Tensor computeQuantizedConv2d(
        (int64_t)immQDType(qx),
        out_qscale,
        out_qzero});
-  */
+  /*
   StmtPtr s = ExternalCall::make(
       ResultBuf,
       "nnc_aten_quantized_conv2d",
@@ -433,6 +432,7 @@ Tensor computeQuantizedConv2d(
        (int64_t)immQDType(qx),
        out_qscale,
        out_qzero});
+  */
   return Tensor(ResultBuf.node(), s);
 }
 
@@ -455,7 +455,6 @@ Tensor computeQuantizedConv2dRelu(
       Dtype(out_qdtype),
       out_qscale,
       out_qzero);
-  /*
   StmtPtr s = ExternalCall2::make(
       "nnc_aten_quantized_conv2d_relu_out",
       {ResultBuf},
@@ -465,7 +464,7 @@ Tensor computeQuantizedConv2dRelu(
        (int64_t)immQDType(qx),
        out_qscale,
        out_qzero});
-  */
+  /*
   StmtPtr s = ExternalCall::make(
       ResultBuf,
       "nnc_aten_quantized_conv2d_relu",
@@ -475,6 +474,7 @@ Tensor computeQuantizedConv2dRelu(
        (int64_t)immQDType(qx),
        out_qscale,
        out_qzero});
+  */
   return Tensor(ResultBuf.node(), s);
 }
 
