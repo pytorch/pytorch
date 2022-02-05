@@ -11528,7 +11528,7 @@ Returns:
 
 Example::
 
-    >>> t = torch.quantize_per_tensor(torch.tensor([-1.0, 0.0, 1.0, 2.0]), torch.quint8, False)
+    >>> t = torch.quantize_per_tensor_dynamic(torch.tensor([-1.0, 0.0, 1.0, 2.0]), torch.quint8, False)
     >>> print(t)
     tensor([-1.,  0.,  1.,  2.], size=(4,), dtype=torch.quint8,
            quantization_scheme=torch.per_tensor_affine, scale=0.011764705882352941,
