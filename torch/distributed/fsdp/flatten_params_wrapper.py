@@ -205,7 +205,10 @@ class FlattenParamsWrapper(nn.Module):
         """Forward indexing calls in case the module is a nn.Sequential."""
         return self.module.__getitem__(key)
 
-    def forward(self, *inputs: Any, **kwinputs: Any) -> Any:
+    def _unflatten_params_if_needed(self) -> None:
         if self.flat_param is not None:
             self._unflatten_params_as_views()
+
+    def forward(self, *inputs: Any, **kwinputs: Any) -> Any:
+        self._unflatten_params_if_needed()
         return self.module(*inputs, **kwinputs)
