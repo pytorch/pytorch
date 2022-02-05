@@ -328,6 +328,8 @@ class TestOperators(TestCase):
         skip('nn.functional.fractional_max_pool2d'),  # fails on cuda, runs okay on cpu
         skip('nn.functional.fractional_max_pool3d'),  # fails on cuda, runs okay on cpu
         skip('nn.functional.max_pool1d'),  # fails on cpu, runs okay on cuda
+        xfail('nn.functional.batch_norm', device_type='cuda'),
+        xfail('nn.functional.batch_norm', 'without_cudnn', device_type='cuda'),
 
         # See https://github.com/pytorch/pytorch/issues/69034
         # RuntimeError: expected scalar type double but found float
@@ -663,7 +665,8 @@ class TestOperators(TestCase):
         skip('true_divide', device_type='cuda'),
 
         # Causing multiple forward mode AD issues, needs investigation
-        xfail('nn.functional.batch_norm', device_type='cpu'),
+        xfail('nn.functional.batch_norm'),
+        xfail('nn.functional.batch_norm', 'without_cudnn', device_type='cuda'),
 
         # Some kind of issue with unsymmetric tangent type
         # Runtime Error: The tangent part of the matrix A should also be symmetric.
@@ -696,6 +699,12 @@ class TestOperators(TestCase):
         xfail('nn.functional.fractional_max_pool2d'),  # Cannot access data pointer of Tensor that doesn't have storage
         xfail('nn.functional.fractional_max_pool3d'),  # Cannot access data pointer of Tensor that doesn't have storage
         skip('nn.functional.max_pool1d'),  # fails on cpu, runs on cuda
+        xfail('_masked.mean', device_type='cuda'),
+        xfail('_masked.prod', device_type='cuda'),
+        xfail('nn.functional.batch_norm', device_type='cuda'),
+        xfail('nn.functional.batch_norm', 'without_cudnn', device_type='cuda'),
+        xfail('nn.functional.hinge_embedding_loss', device_type='cuda'),
+        xfail('nn.functional.instance_norm', device_type='cuda'),
 
         # Causing a CUDA assert, needs investigation
         skip('div', 'floor_rounding', device_type='cuda'),
@@ -974,6 +983,8 @@ class TestDecompositionOpInfo(TestCase):
     # Each one of these is a bug (or needs to be investigated)
     @skipOps('TestDecompositionOpInfo', 'test_decomposition', {
         skip('view_as_complex'),
+        skip('log_softmax', device_type='cuda'),
+        skip('nn.functional.softmin', device_type='cuda'),
         xfail('linalg.cholesky'),
         xfail('linalg.inv'),
         skip('linalg.det', 'singular', device_type='cuda'),  # this is nasty and seems to stop the test suite
