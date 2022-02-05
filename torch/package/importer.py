@@ -185,9 +185,9 @@ class OrderedImporter(Importer):
         self._importers: List[Importer] = list(args)
 
     def _check_if_fileless_package(self, module):
-        if not hasattr(module, '__path__'):
+        if not hasattr(module, "__path__"):
             return False
-        if not hasattr(module, '__file__'):
+        if not hasattr(module, "__file__"):
             return True
         return module.__file__ is None
 
