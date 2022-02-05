@@ -176,10 +176,10 @@ TEST(VulkanAPITest, mclaren_encoder_block) {
   const auto input_2_cpu = at::randn({1,4,1,161}, at::device(at::kCPU).dtype(at::kFloat))*5;
 
   const auto weights_1_cpu = at::randn({32,4,2,3}, at::device(at::kCPU).dtype(at::kFloat))*2;
-  const auto bias_1_cpu = at::randn({32}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto bias_1_cpu = at::randn({32}, at::device(at::kCPU).dtype(at::kFloat))*2;
 
   const auto weights_2_cpu = at::randn({32,4,2,3}, at::device(at::kCPU).dtype(at::kFloat))*2;
-  const auto bias_2_cpu = at::randn({32}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto bias_2_cpu = at::randn({32}, at::device(at::kCPU).dtype(at::kFloat))*2;
 
   const auto input_cpu = at::cat({input_1_cpu, input_2_cpu}, 2);
   const auto output_1_cpu = at::conv2d(

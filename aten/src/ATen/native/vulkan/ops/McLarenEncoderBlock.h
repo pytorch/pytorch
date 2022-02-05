@@ -72,20 +72,10 @@ class McLarenEncoderBlockOpContext final : public torch::jit::CustomClassHolder 
 
  private:
   struct {
-    vTensor v_weight_1;
-    vTensor v_bias_1;
-    std::array<int64_t, 4> filter_1;
-    std::array<int64_t, 2> stride_1;
-    std::array<int64_t, 2> padding_1;
-    std::array<int64_t, 2> dilation_1;
-    int32_t groups_1;
-    vTensor v_weight_2;
-    vTensor v_bias_2;
-    std::array<int64_t, 4> filter_2;
-    std::array<int64_t, 2> stride_2;
-    std::array<int64_t, 2> padding_2;
-    std::array<int64_t, 2> dilation_2;
-    int32_t groups_2;
+    vTensor v_weight;
+    vTensor v_bias;
+    std::array<int64_t, 4> filter;
+    std::array<int64_t, 2> stride;
   } packed_;
 
   struct {

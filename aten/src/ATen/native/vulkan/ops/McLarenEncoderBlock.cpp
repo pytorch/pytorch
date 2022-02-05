@@ -12,6 +12,130 @@ namespace ops {
 
 using namespace api::utils;
 
+vTensor pack_combined_weights(const Tensor& weight_1, const Tensor& weight_2) {
+  api::Context* const context = api::context();
+  api::Command::Buffer& command_buffer = context->command().pool.stream();
+
+  /* Source */
+  const IntArrayRef src_filter = weight_1.sizes();
+  const float* const src_weight_1_ptr = weight_1.data_ptr<float>();
+  const float* const src_weight_2_ptr = weight_2.data_ptr<float>();
+
+  const int64_t src_kw_sz = src_filter[Layout::Filter::width];
+  const int64_t src_kh_sz = src_filter[Layout::Filter::height];
+  const int64_t src_kernel_sz = src_kw_sz * src_kh_sz;
+  const int64_t src_block_sz = src_kernel_sz * src_filter[Layout::Filter::input];
+
+  const int64_t num_stacks = div_up(src_filter[Layout::Filter::output], INT64_C(4));
+  const int64_t stack_depth = api::utils::align_up(src_filter[Layout::Filter::input], INT64_C(4));
+
+  /* Destination */
+  const int64_t dst_kw_sz = src_kw_sz * stack_depth;
+  const int64_t dst_kh_sz = 2 * src_kh_sz * num_stacks;
+  const int64_t dst_kernel_sz = dst_kw_sz * dst_kh_sz;
+
+  vTensor v_weight{
+      context,
+      {
+          4,
+          dst_kh_sz,
+          dst_kw_sz,
+      },
+      weight_1.options(),
+  };
+
+  using Future = vTensor::Future<float, vTensor::Access::Write>;
+  Future v_weight_future = v_weight.host<float, vTensor::Access::Write>(command_buffer);
+  Future::Payload v_weight_payload = v_weight_future.wait();
+
+  float* const dst_weight_ptr = v_weight_payload.get();
+  memset(dst_weight_ptr, 0, v_weight.nbytes());
+
+  for (int64_t src_oc = 0; src_oc < src_filter[Layout::Filter::output]; ++src_oc) {
+    /* Source */
+    const float* const src_weight_1_oc_ptr = src_weight_1_ptr + src_oc * src_block_sz;
+    const float* const src_weight_2_oc_ptr = src_weight_2_ptr + src_oc * src_block_sz;
+
+    /* Destination */
+    const int64_t dst_oh = src_oc / 4;
+    const int64_t dst_c = src_oc % 4;
+
+    float* const dst_weight_c_ptr = dst_weight_ptr + dst_c * dst_kernel_sz;
+
+    for (int64_t src_ic = 0; src_ic < src_filter[Layout::Filter::input]; ++src_ic) {
+      const int64_t dst_ic4 = src_ic / 4;
+
+      for (const auto src_ih : c10::irange(src_kh_sz)) {
+        for (const auto src_iw : c10::irange(src_kw_sz)) {
+          memcpy(
+              dst_weight_c_ptr + (2*(dst_oh * src_kh_sz + src_ih)) * dst_kw_sz +
+                dst_ic4 * src_kw_sz * 4 + src_iw * 4 + src_ic % 4,
+              src_weight_1_oc_ptr + src_ic * src_kernel_sz + src_ih * src_kw_sz + src_iw,
+              sizeof(float));
+          memcpy(
+              dst_weight_c_ptr + (2*(dst_oh * src_kh_sz + src_ih)+1) * dst_kw_sz +
+                dst_ic4 * src_kw_sz * 4 + src_iw * 4 + src_ic % 4,
+              src_weight_2_oc_ptr + src_ic * src_kernel_sz + src_ih * src_kw_sz + src_iw,
+              sizeof(float));
+        }
+      }
+    }
+  }
+
+  return v_weight;
+}
+
+vTensor pack_combined_biases(const c10::optional<Tensor>& bias_1,
+                             const c10::optional<Tensor>& bias_2) {
+  api::Context* const context = api::context();
+  api::Command::Buffer& command_buffer = context->command().pool.stream();
+
+  int64_t src_w = 1;
+  if (bias_1) {
+    for (const auto i : bias_1->sizes().vec()) {
+      if (i > 1) src_w = i;
+    }
+  }
+  const int64_t packed_w = div_up(src_w, INT64_C(4));
+  vTensor v_bias{
+    context,
+    {
+      4,
+      2,
+      packed_w,
+    },
+    bias_1->options(),
+  };
+
+  using Future = vTensor::Future<float, vTensor::Access::Write>;
+  Future v_bias_future = v_bias.host<float, vTensor::Access::Write>(command_buffer);
+  Future::Payload v_bias_payload = v_bias_future.wait();
+  float* const dst_bias_ptr = v_bias_payload.get();
+
+  memset(dst_bias_ptr, 0, v_bias.nbytes());
+  if (bias_1) {
+    const float* const src_bias_ptr = bias_1->contiguous().data_ptr<float>();
+
+    for (const auto i : c10::irange(src_w)) {
+      const int64_t c = i % 4;
+      const int64_t x = i / 4;
+      dst_bias_ptr[c * 2 * packed_w + x] = src_bias_ptr[i];
+    }
+  }
+  if (bias_2) {
+    const float* const src_bias_ptr = bias_2->contiguous().data_ptr<float>();
+
+    for (const auto i : c10::irange(src_w)) {
+      const int64_t c = i % 4;
+      const int64_t x = i / 4;
+      dst_bias_ptr[c * 2 * packed_w + packed_w + x] = src_bias_ptr[i];
+    }
+  }
+
+  return v_bias;
+}
+
+
 McLarenEncoderBlockOpContext::McLarenEncoderBlockOpContext(
       const Tensor& weight_1,
       const c10::optional<Tensor>& bias_1,
@@ -26,20 +150,10 @@ McLarenEncoderBlockOpContext::McLarenEncoderBlockOpContext(
       IntArrayRef dilation_2,
       int64_t groups_2)
   : packed_{
-      pack_conv2d_weights(weight_1, Conv2dSlidingWindow),
-      pack_conv2d_biases(bias_1, weight_1),
+      pack_combined_weights(weight_1, weight_2),
+      pack_combined_biases(bias_1, bias_2),
       pack_conv2d_filter(weight_1, expand_param_if_needed(dilation_1, "dilation", 2)),
       pack_conv2d_params(expand_param_if_needed(stride_1, "stride", 2)),
-      pack_conv2d_params(expand_param_if_needed(padding_1, "padding", 2)),
-      pack_conv2d_params(expand_param_if_needed(dilation_1, "dilation", 2)),
-      safe_downcast<int32_t>(groups_1),
-      pack_conv2d_weights(weight_2, Conv2dSlidingWindow),
-      pack_conv2d_biases(bias_2, weight_2),
-      pack_conv2d_filter(weight_2, expand_param_if_needed(dilation_2, "dilation", 2)),
-      pack_conv2d_params(expand_param_if_needed(stride_2, "stride", 2)),
-      pack_conv2d_params(expand_param_if_needed(padding_2, "padding", 2)),
-      pack_conv2d_params(expand_param_if_needed(dilation_2, "dilation", 2)),
-      safe_downcast<int32_t>(groups_2),
     },
     unpacked_{
       weight_1,
@@ -205,9 +319,9 @@ Tensor McLarenEncoderBlockOpContext::run(const Tensor& input_arg_1, const Tensor
   std::vector<int64_t> output_size = conv_output_size(
     conv_input_size,
     unpacked_.filter_1,
-    packed_.padding_1,
-    packed_.stride_1,
-    packed_.dilation_1
+    /*padding=*/{0,0},
+    packed_.stride,
+    /*dilation=*/{1,1}
   );
 
   vTensor v_output{
@@ -225,16 +339,12 @@ Tensor McLarenEncoderBlockOpContext::run(const Tensor& input_arg_1, const Tensor
       ivec4 kernel;
       ivec2 ikernel;
       ivec2 stride;
-      ivec2 padding;
-      ivec2 dilate;
-      vec2 clamp;
-      ivec4 src_filter;
     } block {
       v_output.extents(),
-      safe_downcast<int32_t>(packed_.filter_1[Layout::Filter::input]),
+      safe_downcast<int32_t>(packed_.filter[Layout::Filter::input]),
       {
-        safe_downcast<int32_t>(packed_.filter_1[Layout::Filter::width]),
-        safe_downcast<int32_t>(packed_.filter_1[Layout::Filter::height]),
+        safe_downcast<int32_t>(packed_.filter[Layout::Filter::width]),
+        safe_downcast<int32_t>(packed_.filter[Layout::Filter::height]),
         safe_downcast<int32_t>(conv_input_size[Layout::Activation4D::width]),
         safe_downcast<int32_t>(conv_input_size[Layout::Activation4D::height]),
       },
@@ -243,20 +353,8 @@ Tensor McLarenEncoderBlockOpContext::run(const Tensor& input_arg_1, const Tensor
         safe_downcast<int32_t>(unpacked_.filter_1[Layout::Filter::height]),
       },
       {
-        safe_downcast<int32_t>(packed_.stride_1[Layout::Parameter::width]),
-        safe_downcast<int32_t>(packed_.stride_1[Layout::Parameter::height]),
-      },
-      {
-        safe_downcast<int32_t>(packed_.padding_1[Layout::Parameter::width]),
-        safe_downcast<int32_t>(packed_.padding_1[Layout::Parameter::height]),
-      },
-      {
-        safe_downcast<int32_t>(packed_.dilation_1[Layout::Parameter::width]),
-        safe_downcast<int32_t>(packed_.dilation_1[Layout::Parameter::height]),
-      },
-      {
-        -std::numeric_limits<float>::infinity(),
-        std::numeric_limits<float>::infinity()
+        safe_downcast<int32_t>(packed_.stride[Layout::Parameter::width]),
+        safe_downcast<int32_t>(packed_.stride[Layout::Parameter::height]),
       },
     };
 
@@ -266,8 +364,6 @@ Tensor McLarenEncoderBlockOpContext::run(const Tensor& input_arg_1, const Tensor
         command_buffer,
         {
           VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
-          VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-          VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
           VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
           VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
           VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
@@ -287,16 +383,10 @@ Tensor McLarenEncoderBlockOpContext::run(const Tensor& input_arg_1, const Tensor
         v_input_2.image(
             command_buffer,
             vTensor::Stage::Compute),
-        packed_.v_weight_1.image(
+        packed_.v_weight.image(
             command_buffer,
             vTensor::Stage::Compute),
-        packed_.v_bias_1.image(
-            command_buffer,
-            vTensor::Stage::Compute),
-        packed_.v_weight_2.image(
-            command_buffer,
-            vTensor::Stage::Compute),
-        packed_.v_bias_2.image(
+        packed_.v_bias.image(
             command_buffer,
             vTensor::Stage::Compute),
         context->resource().pool.uniform(block).object);
