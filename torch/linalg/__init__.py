@@ -1356,7 +1356,7 @@ Examples::
 """)
 
 matmul = _add_docstr(_linalg.linalg_matmul, r"""
-linalg.matmul(input, other, *, out=None) -> Tensor
+linalg.matmul(input, other, *, dtype=None, out=None) -> Tensor
 
 Alias for :func:`torch.matmul`
 """)
