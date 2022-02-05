@@ -17,6 +17,7 @@
 #include <ATen/ops/_nnz_native.h>
 #include <ATen/ops/_sparse_csr_tensor_unsafe_native.h>
 #include <ATen/ops/_validate_sparse_csr_tensor_args_native.h>
+#include <ATen/ops/arange.h>
 #include <ATen/ops/clone_native.h>
 #include <ATen/ops/col_indices_native.h>
 #include <ATen/ops/copy_native.h>
@@ -24,6 +25,8 @@
 #include <ATen/ops/empty.h>
 #include <ATen/ops/empty_like_native.h>
 #include <ATen/ops/empty_native.h>
+#include <ATen/ops/eye.h>
+#include <ATen/ops/full.h>
 #include <ATen/ops/resize_as_sparse_native.h>
 #include <ATen/ops/resize_native.h>
 #include <ATen/ops/sparse_csr_tensor_native.h>
@@ -388,10 +391,6 @@ Tensor empty_like_sparse_csr(
   }
 }
 
-Tensor& eye_sparse_csr_out(int64_t n, Tensor& result) {
-  return eye_sparse_csr_out(n, n, result);
-}
-
 Tensor& eye_sparse_csr_out(int64_t n, int64_t m, Tensor& result) {
   TORCH_INTERNAL_ASSERT(result.is_sparse_csr());
 
@@ -404,13 +403,17 @@ Tensor& eye_sparse_csr_out(int64_t n, int64_t m, Tensor& result) {
   col_indices = at::empty({sz});
 
   // This call also ensures proper checks are done for the arguments
-  at::native::eye_out_cpu(n, m, result_values);
+  at::eye_out(result_values, n, m);
 
   TensorOptions options = TensorOptions().dtype(ScalarType::Long).layout(kStrided).device(result.device());
-  at::arange(sz, options, /*out=*/ crow_indices[:sz]);
-  at::arange(sz, options, /*out=*/ col_indices);
+  auto temp_crow_indicess = at::arange(sz, options);
+  col_indices = at::arange(sz, options);
 
   return result;
+}
+
+Tensor& eye_sparse_csr_out(int64_t n, Tensor& result) {
+  return at::native::eye_sparse_csr_out(n, n, result);
 }
 
 } // namespace native

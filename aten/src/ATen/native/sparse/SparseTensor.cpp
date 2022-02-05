@@ -34,6 +34,7 @@
 #include <ATen/ops/_sparse_mask_helper_native.h>
 #include <ATen/ops/_validate_sparse_coo_tensor_args_native.h>
 #include <ATen/ops/_values_native.h>
+#include <ATen/ops/arange.h>
 #include <ATen/ops/clone_native.h>
 #include <ATen/ops/coalesce_native.h>
 #include <ATen/ops/copy_native.h>
@@ -43,6 +44,8 @@
 #include <ATen/ops/empty.h>
 #include <ATen/ops/empty_like_native.h>
 #include <ATen/ops/empty_native.h>
+#include <ATen/ops/eye.h>
+#include <ATen/ops/full.h>
 #include <ATen/ops/index_select.h>
 #include <ATen/ops/indices_native.h>
 #include <ATen/ops/is_coalesced_native.h>
@@ -54,6 +57,7 @@
 #include <ATen/ops/sparse_mask_native.h>
 #include <ATen/ops/sparse_resize_and_clear_native.h>
 #include <ATen/ops/sparse_resize_native.h>
+#include <ATen/ops/stack.h>
 #include <ATen/ops/to_dense_native.h>
 #include <ATen/ops/to_sparse_native.h>
 #include <ATen/ops/unique_dim.h>
@@ -900,29 +904,25 @@ Tensor empty_like_sparse_coo(
   }
 }
 
-Tensor& eye_sparse_out(int64_t n, Tensor& result) {
-  return at::native::eye_sparse_out(n, n, result);
-}
-
 Tensor& eye_sparse_out(int64_t n, int64_t m, Tensor& result) {
   TORCH_INTERNAL_ASSERT(result.is_sparse());
 
   auto result_values = result.values();
 
   // This call also ensures proper checks are done for the arguments
-  at::native::eye_out_cpu(n, m, result_values);
+  at::eye_out(result_values, n, m);
 
-  auto indices = at::native::nonzero(result_values, /*as_tuple=*/ true);
-
-  auto result = at::native::_sparse_coo_tensor_unsafe(
-    indices,
-    result_values,
-    result.sizes(),
-    result.layout(),
-    result_values.device()
-  );
+  // auto indices = at::native::nonzero(result_values, /*as_tuple=*/ true);
+  int64_t sz = std::min<int64_t>(n, m);
+  result.indices() = at::stack((at::arange(sz), at::arange(sz)));
 
   return result;
+}
+
+Tensor& eye_sparse_out(int64_t n, Tensor& result) {
+  TORCH_INTERNAL_ASSERT(result.is_sparse());
+
+  return at::native::eye_sparse_out(n, n, result);
 }
 
 } // namespace native
