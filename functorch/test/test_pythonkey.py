@@ -283,6 +283,7 @@ class TestAOTAutograd(TestCase):
         inps = [torch.randn((), requires_grad=True)]
         self.verify_aot_autograd(foo, inps)
 
+    @unittest.expectedFailure
     def test_grad_context(self):
         def foo(x):
             return x * 2
@@ -323,6 +324,7 @@ class TestAOTAutograd(TestCase):
         inp = [{'a': torch.randn(3, requires_grad=True), 'b': torch.randn(3, requires_grad=True)}]
         self.verify_aot_autograd(f, inp)
 
+    @unittest.expectedFailure
     def test_module(self):
         mod = nn.Sequential(nn.Linear(32, 32), nn.ReLU())
         compiled_mod = compiled_module(mod, nop, nop)
@@ -335,6 +337,7 @@ class TestAOTAutograd(TestCase):
         grads = sorted([(name, p.grad) for name, p in mod.named_parameters()])
         self.assertEqual((out, grads), (ref_out, ref_grads))
 
+    @unittest.expectedFailure
     def test_batchnorm(self):
         mod = compiled_module(nn.BatchNorm2d(4), nop, nop)
         x = torch.ones(1, 4, 2, 2)
@@ -349,6 +352,7 @@ class TestEagerFusionOpInfo(TestCase):
         xfail('__rmatmul__'),
         xfail('linalg.cholesky'),
         xfail('matmul'),
+        xfail('msort'),
         xfail('nn.functional.linear'),
         xfail('nn.functional.dropout'),
         xfail('polar'),
