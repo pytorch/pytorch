@@ -2072,8 +2072,8 @@
   dispatch:
     CPU: eye_out_cpu
     CUDA: eye_out_cuda
-    SparseCPU, SparseCUDA: eye_sparse_m_out
-    SparseCsrCPU, SparseCsrCUDA: eye_sparse_csr_m_out
+    SparseCPU, SparseCUDA: eye_sparse_out
+    SparseCsrCPU, SparseCsrCUDA: eye_sparse_csr_out
 
 - func: flatten.using_ints(Tensor(a) self, int start_dim=0, int end_dim=-1) -> Tensor(a)
   variants: function, method
