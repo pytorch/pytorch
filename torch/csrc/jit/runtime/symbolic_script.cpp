@@ -431,15 +431,15 @@ const std::vector<std::string> functions = {
                 out = torch.matmul(mat1, mat2)
             return out
 
-        def matmul(self, other):
+        def matmul(self, other, *, dtype: Optional[int]):
             def backward(grad_output):
                 self_size = self.size()
                 other_size = other.size()
                 grad_self = AD_matmul_bw_size(grad_output, AD_mat_transpose(other), self_size)._grad_sum_to_size(self_size)
                 grad_other = AD_matmul_bw_size(AD_mat_transpose(self), grad_output, other_size)._grad_sum_to_size(other_size)
-                return grad_self, grad_other
+                return grad_self, grad_other, None
 
-            return torch.matmul(self, other), backward
+            return torch.matmul(self, other, dtype=dtype), backward
 
         def linear(input : Tensor,
                    weight : Tensor,

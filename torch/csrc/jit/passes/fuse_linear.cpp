@@ -51,12 +51,12 @@ void FuseLinear(std::shared_ptr<Graph>& graph) {
       {aten_add_alpha_is_one, beta_is_one, dtype_is_none, weight_transposed});
 
   std::string matmul_add_pattern = R"IR(
-    graph(%input, %weight_t, %bias, %alpha):
-        %output = aten::matmul(%input, %weight_t)
+    graph(%input, %weight_t, %bias, %alpha, %dtype):
+        %output = aten::matmul(%input, %weight_t, %dtype)
         %res = aten::add_(%output, %bias, %alpha)
         return (%res))IR";
   std::string fused_linear_matmul = R"IR(
-    graph(%input, %weight_t, %bias, %alpha):
+    graph(%input, %weight_t, %bias, %alpha, %dtype):
         %weight = aten::t(%weight_t)
         %res = aten::linear(%input, %weight, %bias)
         return (%res))IR";
@@ -66,14 +66,14 @@ void FuseLinear(std::shared_ptr<Graph>& graph) {
   matmuladd_to_linear.RegisterRewritePattern(
       matmul_add_pattern, fused_linear_matmul, value_mappings);
   matmuladd_to_linear.runOnGraph(
-      graph, {aten_add_alpha_is_one, weight_transposed});
+      graph, {aten_add_alpha_is_one, dtype_is_none, weight_transposed});
 
   std::string matmul_pattern = R"IR(
-    graph(%input, %weight_t):
-        %output = aten::matmul(%input, %weight_t)
+    graph(%input, %weight_t, %dtype):
+        %output = aten::matmul(%input, %weight_t, %dtype)
         return (%output))IR";
   std::string fused_linear_bias_none = R"IR(
-    graph(%input, %weight_t):
+    graph(%input, %weight_t, %dtype):
         %weight = aten::t(%weight_t)
         %bias: Tensor? = prim::Constant()
         %res = aten::linear(%input, %weight, %bias)
@@ -83,7 +83,7 @@ void FuseLinear(std::shared_ptr<Graph>& graph) {
   SubgraphRewriter matmul_to_linear;
   matmul_to_linear.RegisterRewritePattern(
       matmul_pattern, fused_linear_bias_none, value_mappings);
-  matmul_to_linear.runOnGraph(graph, weight_transposed);
+  matmul_to_linear.runOnGraph(graph, {dtype_is_none, weight_transposed});
 
   // clean up extra transpose for the weight of aten::linear
   std::string linear_weight_extra_transpose = R"IR(

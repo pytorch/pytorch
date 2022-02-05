@@ -1634,10 +1634,11 @@ The behavior depends on the dimensionality of the Tensors as follows:
   must be broadcastable).  For example, if tensor1 is a (j x 1 x n x m) Tensor
   and tensor2 is a (k x m x p) Tensor, the returned tensor will be an (j x k x n x p) Tensor.
 */
-Tensor matmul(
+Tensor _matmul(
     c10::optional<Tensor> out_opt,
     const Tensor& tensor1,
-    const Tensor& tensor2) {
+    const Tensor& tensor2,
+    c10::optional<ScalarType> dtype_opt = c10::nullopt) {
   NoNamesGuard guard;
   auto dim_tensor1 = tensor1.dim();
   auto dim_tensor2 = tensor2.dim();
@@ -1649,10 +1650,10 @@ Tensor matmul(
   } else if (dim_tensor1 == 2 && dim_tensor2 == 1) {
     return has_out ? at::mv_out(out, tensor1, tensor2) : tensor1.mv(tensor2);
   } else if (dim_tensor1 == 1 && dim_tensor2 == 2) {
-    return has_out ? at::mm_out(out, tensor1.unsqueeze(0), tensor2).squeeze_(0)
-                   : tensor1.unsqueeze(0).mm(tensor2).squeeze_(0);
+    return has_out ? at::mm_out(out, tensor1.unsqueeze(0), tensor2, dtype_opt).squeeze_(0)
+                   : tensor1.unsqueeze(0).mm(tensor2, dtype_opt).squeeze_(0);
   } else if (dim_tensor1 == 2 && dim_tensor2 == 2) {
-    return has_out ? at::mm_out(out, tensor1, tensor2) : tensor1.mm(tensor2);
+    return has_out ? at::mm_out(out, tensor1, tensor2, dtype_opt) : tensor1.mm(tensor2, dtype_opt);
   } else if (dim_tensor1 >= 3 && (dim_tensor2 == 1 || dim_tensor2 == 2)) {
     // optimization: use mm instead of bmm by folding tensor1's batch into
     // its leading matrix dimension.
@@ -1673,8 +1674,8 @@ Tensor matmul(
     // So we manually compute the folding as a result.
     const auto dim1_size = c10::multiply_integers(size1.begin(), size1.end() - 1);
     auto t1 = tensor1.expect_contiguous()->view({dim1_size, size1[size1.size() - 1]});
-    Tensor output = has_out ? at::_unsafe_view(at::mm_out(out, t1, t2), output_size)
-                            : at::_unsafe_view(t1.mm(t2), output_size);
+    Tensor output = has_out ? at::_unsafe_view(at::mm_out(out, t1, t2, dtype_opt), output_size)
+                            : at::_unsafe_view(t1.mm(t2, dtype_opt), output_size);
     return has_out ? out.set_(output) : output;
   } else if ((dim_tensor1 == 1 || dim_tensor1 == 2) && dim_tensor2 >= 3) {
     // optimization: transpose the inner dimensions of the arguments, call
@@ -1686,7 +1687,7 @@ Tensor matmul(
 
     const Tensor t2_T = tensor2.transpose(-1, -2);
     const Tensor t1_T = dim_tensor1 == 2 ? tensor1.t() : tensor1.reshape({n, m}).t();
-    const Tensor res_T = matmul(out_opt, t2_T, t1_T);
+    const Tensor res_T = _matmul(out_opt, t2_T, t1_T, dtype_opt);
 
     if (dim_tensor1 == 2) {
       Tensor res = res_T.transpose(-1, -2).contiguous();
@@ -1740,8 +1741,8 @@ Tensor matmul(
       output_shape.push_back(p);
     }
 
-    Tensor output = has_out ? at::_unsafe_view(at::bmm_out(out, tensor1_expanded, tensor2_expanded), output_shape)
-                            : at::_unsafe_view(tensor1_expanded.bmm(tensor2_expanded), output_shape);
+    Tensor output = has_out ? at::_unsafe_view(at::bmm_out(out, tensor1_expanded, tensor2_expanded, dtype_opt), output_shape)
+                            : at::_unsafe_view(tensor1_expanded.bmm(tensor2_expanded, dtype_opt), output_shape);
 
     return has_out ? out.set_(output) : output;
   }
@@ -1750,27 +1751,27 @@ Tensor matmul(
           dim_tensor1, "D and ", dim_tensor2, "D");
 }
 
-Tensor matmul(const Tensor & tensor1, const Tensor & tensor2) {
+Tensor matmul(const Tensor & tensor1, const Tensor & tensor2, c10::optional<ScalarType> dtype_opt) {
   auto maybe_outnames = namedinference::compute_matmul_outnames(tensor1, tensor2);
-  auto result = at::native::matmul(c10::nullopt, tensor1, tensor2);
+  auto result = at::native::_matmul(c10::nullopt, tensor1, tensor2, dtype_opt);
   namedinference::propagate_names_if_nonempty(result, maybe_outnames);
   return result;
 }
 
-Tensor& matmul_out(const Tensor & tensor1, const Tensor & tensor2, Tensor &result) {
+Tensor& matmul_out(const Tensor & tensor1, const Tensor & tensor2, c10::optional<ScalarType> dtype_opt, Tensor &result) {
   auto maybe_outnames = namedinference::compute_matmul_outnames(tensor1, tensor2);
-  at::native::matmul(c10::optional<Tensor>(result), tensor1, tensor2);
+  at::native::_matmul(c10::optional<Tensor>(result), tensor1, tensor2, dtype_opt);
   namedinference::propagate_names_if_nonempty(result, maybe_outnames);
   return result;
 }
 
 // torch.linalg.matmul, alias for torch.matmul
-Tensor linalg_matmul(const Tensor & tensor1, const Tensor & tensor2) {
-  return at::native::matmul(tensor1, tensor2);
+Tensor linalg_matmul(const Tensor & tensor1, const Tensor & tensor2, c10::optional<ScalarType> dtype_opt) {
+  return at::native::matmul(tensor1, tensor2, dtype_opt);
 }
 
-Tensor& linalg_matmul_out(const Tensor & tensor1, const Tensor & tensor2, Tensor &result) {
-  return at::native::matmul_out(tensor1, tensor2, result);
+Tensor& linalg_matmul_out(const Tensor & tensor1, const Tensor & tensor2, c10::optional<ScalarType> dtype_opt, Tensor &result) {
+  return at::native::matmul_out(tensor1, tensor2, dtype_opt, result);
 }
 
 // torch.linalg.diagonal, alias for torch.diagonal with dim1=-2, dim2=-1 as defaults
@@ -1831,7 +1832,7 @@ void _fill_matrix_powers(Tensor& buffer, const Tensor& a, int num_matrices) {
 
   // fill a^2
   if (2 <= num_matrices - 1) {
-    at::native::matmul(
+    at::native::_matmul(
       buffer.select(0, 2), // out for a^2
       buffer.select(0, 1),
       buffer.select(0, 1)
@@ -1840,7 +1841,7 @@ void _fill_matrix_powers(Tensor& buffer, const Tensor& a, int num_matrices) {
 
   // fill a^3
   if (3 <= num_matrices - 1) {
-    at::native::matmul(
+    at::native::_matmul(
       buffer.select(0, 3), // out for a^3
       buffer.select(0, 1),
       buffer.select(0, 2)
@@ -1849,7 +1850,7 @@ void _fill_matrix_powers(Tensor& buffer, const Tensor& a, int num_matrices) {
 
   // fill a^6
   if (4 <= num_matrices - 1) {
-    at::native::matmul(
+    at::native::_matmul(
       buffer.select(0, 4),
       buffer.select(0, 3),
       buffer.select(0, 3)
@@ -1908,7 +1909,7 @@ Tensor compute_T4(const Tensor& A) {
   // 3 for {I, A, A^2}
   _fill_matrix_powers(As, A, 3);
 
-  at::native::matmul(
+  at::native::_matmul(
     // output for A^2 * (I / 2 + A / 6 + A^2 / 24)
     As.select(0, 3),
     // contains A^2
@@ -1943,7 +1944,7 @@ Tensor compute_T8(const Tensor& A) {
   _fill_matrix_powers(As, A, 3);
 
   // A4 =  A2 * (x1 * A + x2 * A2)
-  at::native::matmul(
+  at::native::_matmul(
     // output for A4
     As.select(0, 3),
     // As.select(0, 2) = A^2
@@ -1956,7 +1957,7 @@ Tensor compute_T8(const Tensor& A) {
   );
 
   // A8 = (x3 * A2 + A4) * (x4 * I + x5 * A + x6 * A2 + x7 * A4)
-  at::native::matmul(
+  at::native::_matmul(
     // output for A8
     As.select(0, 4),
     // x3 * A2 + A4
@@ -2023,14 +2024,14 @@ Tensor compute_T12(const Tensor& A) {
   auto Bs = at::native::_compute_linear_combination(As, bs);
 
   // compute A6
-  Bs.select(0, 2).add_(at::native::matmul(
+  Bs.select(0, 2).add_(at::native::_matmul(
     // tmp buffer for this matrix product
     As.select(0, 0),
     Bs.select(0, 3),
     Bs.select(0, 3)
   ));
 
-  return Bs.select(0,0).add_(at::native::matmul(
+  return Bs.select(0,0).add_(at::native::_matmul(
     // tmp buffer for this matrix product
     As.select(0, 0),
     Bs.select(0, 1).add_(Bs.select(0, 2)),
@@ -2095,14 +2096,14 @@ Tensor compute_T18(const Tensor& A) {
   auto Bs = at::native::_compute_linear_combination(As, bs);
 
   // compute A9
-  Bs.select(0, 3).add_(at::native::matmul(
+  Bs.select(0, 3).add_(at::native::_matmul(
     // tmp buffer for this matrix product
     As.select(0, 0),
     Bs.select(0, 0),
     Bs.select(0, 4))
   );
 
-  return Bs.select(0, 1).add_(at::native::matmul(
+  return Bs.select(0, 1).add_(at::native::_matmul(
     // tmp buffer for this matrix product
     As.select(0, 0),
     Bs.select(0, 2).add_(Bs.select(0, 3)),

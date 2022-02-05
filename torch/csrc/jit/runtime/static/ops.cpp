@@ -265,7 +265,7 @@ Tensor& linear_out(
     // Fused op is marginally faster.
     return at::cpu::addmm_out(output, *bias, input, weight.t());
   }
-  at::native::matmul_out(input, weight.t(), output);
+  at::native::matmul_out(input, weight.t(), /* dtype_opt= */ c10::nullopt, output);
   if (bias->defined()) {
     at::cpu::add_(output, *bias);
   }
@@ -2162,7 +2162,7 @@ REGISTER_OPERATOR_FUNCTOR(aten::norm, aten_norm, [](Node* n) -> SROperator {
 
 REGISTER_OPERATOR_FUNCTOR(aten::matmul, aten_matmul, [](Node* n) -> SROperator {
   if (!n->matches(
-          torch::schema("aten::matmul(Tensor self, Tensor other) -> Tensor"))) {
+          torch::schema("aten::matmul(Tensor self, Tensor other, *, ScalarType? dtype=None) -> Tensor"))) {
     LogAndDumpSchema(n);
     return nullptr;
   }
@@ -2171,12 +2171,12 @@ REGISTER_OPERATOR_FUNCTOR(aten::matmul, aten_matmul, [](Node* n) -> SROperator {
     const auto& in1_t = p_node->Input(1).toTensor();
 
     if (p_node->Output(0).isNone()) {
-      p_node->Output(0) = at::native::matmul(in0_t, in1_t);
+      p_node->Output(0) = at::native::matmul(in0_t, in1_t, c10::nullopt);
       return;
     }
     auto& out_t = p_node->Output(0).toTensor();
     fastResizeToZero(out_t);
-    at::native::matmul_out(in0_t, in1_t, out_t);
+    at::native::matmul_out(in0_t, in1_t, /* dtype_opt= */ c10::nullopt ,out_t);
   };
 });
 

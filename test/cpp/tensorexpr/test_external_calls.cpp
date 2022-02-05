@@ -630,7 +630,9 @@ TEST(ExternalCall, BinaryFloat) {
       std::string>;
   std::vector<Test> tests = {};
   tests.push_back(
-      Test{{100, 200}, {200, 300}, {100, 300}, at::matmul, "nnc_aten_matmul"});
+      Test{{100, 200}, {200, 300}, {100, 300},
+        [&](const at::Tensor& a, const at::Tensor& b) { return at::matmul(a, b); },
+        "nnc_aten_matmul"});
   tests.push_back(Test{{100, 300}, {300}, {100}, at::mv, "nnc_aten_mv"});
   tests.push_back(
       Test{{100, 200}, {200, 300}, {100, 300},

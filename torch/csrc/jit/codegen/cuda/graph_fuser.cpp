@@ -1878,8 +1878,9 @@ void decomposeLinearOps(Block* block) {
   for (Node* n : linear_nodes) {
     WithInsertPoint guard(n);
     auto weight_t = graph->insertNode(graph->create(aten::t, {n->input(1)}, 1));
+    auto none_val = n->owningGraph()->insertConstant(IValue());
     auto matmul = graph->insertNode(
-        graph->create(aten::matmul, {n->input(0), weight_t->output()}, 1));
+        graph->create(aten::matmul, {n->input(0), weight_t->output(), none_val}, 1));
     auto input_tensor_type = n->input(0)->type()->cast<c10::TensorType>();
     auto mat0_size = input_tensor_type->sizes().concrete_sizes();
     auto mat1_size =

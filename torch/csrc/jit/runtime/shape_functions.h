@@ -160,7 +160,7 @@ def select(self: List[int], dim: int, index: int):
     return out
 
 
-def matmul(tensor1: List[int], tensor2: List[int]):
+def matmul(tensor1: List[int], tensor2: List[int], dtype: Optional[int]):
     dim_tensor1 = len(tensor1)
     dim_tensor2 = len(tensor2)
     if dim_tensor1 == 1 and dim_tensor2 == 1:
@@ -233,7 +233,7 @@ def transpose(self: List[int], dim0: int, dim1: int):
 
 
 def linear(input: List[int], weight: List[int], bias: Optional[List[int]]):
-    out = matmul(input, t(weight))
+    out = matmul(input, t(weight), None)
     if bias is not None:
         assert broadcast(bias, out) == out
     return out

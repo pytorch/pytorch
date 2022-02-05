@@ -1779,7 +1779,7 @@ class ShapePropagator : public PropertyPropBase {
         auto& t = tensor_types.at(0);
         return t->dim() && *t->dim() > 0 ? t->withDim(*t->dim() - 1) : nullptr;
       } else if (node->matches(
-                     "aten::matmul(Tensor self, Tensor other) -> Tensor")) {
+                     "aten::matmul(Tensor self, Tensor other, *, ScalarType? dtype) -> Tensor")) {
         if (!tensor_types.at(0)->dim() || !tensor_types.at(1)->dim()) {
           return nullptr;
         }

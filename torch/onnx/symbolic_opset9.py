@@ -242,7 +242,7 @@ def bmm(g, self, other, dtype):
     return g.op("MatMul", self, other)
 
 
-def matmul(g, self, other):
+def matmul(g, self, other, dtype=None):
     return g.op("MatMul", self, other)
 
 

@@ -92,7 +92,8 @@ TEST_F(Kernel, PreAllocIntermediateBufs) {
 graph(%a.1 : Float(8, 8, strides=[8, 1], requires_grad=0, device=cpu),
       %b.1 : Float(8, 8, strides=[8, 1], requires_grad=0, device=cpu)):
   %2 : int = prim::Constant[value=1]()
-  %c.2 : Float(8, 8, strides=[8, 1], requires_grad=0, device=cpu) = aten::matmul(%a.1, %b.1) # test_matmul.py:12:12
+  %dtype : None = prim::Constant()
+  %c.2 : Float(8, 8, strides=[8, 1], requires_grad=0, device=cpu) = aten::matmul(%a.1, %b.1, %dtype) # test_matmul.py:12:12
   %3 : Float(8, 8, strides=[8, 1], requires_grad=0, device=cpu) = aten::add(%a.1, %c.2, %2) # test_matmul.py:13:15
   return (%3))IR";
   auto graph = std::make_shared<Graph>();

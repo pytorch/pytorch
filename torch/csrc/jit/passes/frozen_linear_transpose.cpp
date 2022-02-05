@@ -61,7 +61,8 @@ class TransposeFrozenLinear {
       Tensor weight_t_tensor = at::transpose(weight_tensor, 1, 0)
                                    .clone(at::MemoryFormat::Contiguous);
       Value* weight_t = graph_->insertConstant(weight_t_tensor);
-      matmul = graph_->create(aten::matmul, {node->inputs()[0], weight_t});
+      auto none_val = node->owningGraph()->insertConstant(IValue());
+      matmul = graph_->create(aten::matmul, {node->inputs()[0], weight_t, none_val});
       matmul->insertAfter(node);
     }
 

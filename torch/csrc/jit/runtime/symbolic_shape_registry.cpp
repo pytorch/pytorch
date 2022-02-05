@@ -88,7 +88,7 @@ static const OperatorMap<std::string>& get_schema_to_function_graph() {
       {"aten::mm(Tensor self, Tensor mat2, *, ScalarType? dtype=None) -> Tensor", "mm"},
       {"aten::dot(Tensor self, Tensor tensor) -> Tensor", "dot"},
       {"aten::mv(Tensor self, Tensor vec) -> Tensor", "mv"},
-      {"aten::matmul(Tensor self, Tensor other) -> Tensor", "matmul"},
+      {"aten::matmul(Tensor self, Tensor other, *, ScalarType? dtype=None) -> Tensor", "matmul"},
       {"aten::linear(Tensor input, Tensor weight, Tensor? bias=None) -> Tensor", "linear"},
       {"aten::max_pool2d(Tensor self, int[2] kernel_size, int[2] stride=[], int[2] padding=0, int[2] dilation=1, bool ceil_mode=False) -> Tensor", "max_pool2d"},
       {"aten::max_pool2d_with_indices(Tensor self, int[2] kernel_size, int[2] stride=[], int[2] padding=0, int[2] dilation=1, bool ceil_mode=False) -> (Tensor, Tensor)", "max_pool2d_with_indices"},
