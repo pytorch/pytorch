@@ -343,21 +343,23 @@ def _decide_input_format(model, args):
         return args
     try:
         ordered_list_keys = list(sig.parameters.keys())
+        args_dict = {}
+        args = list(args)
         if isinstance(args[-1], dict):
             args_dict = args[-1]
-            args = list(args)[:-1]
-            n_nonkeyword = len(args)
-            for optional_arg in ordered_list_keys[n_nonkeyword:]:
-                if optional_arg in args_dict:
-                    args.append(args_dict[optional_arg])
-                # Check if this arg has a default value
+            args = args[:-1]
+        n_nonkeyword = len(args)
+        for optional_arg in ordered_list_keys[n_nonkeyword:]:
+            if optional_arg in args_dict:
+                args.append(args_dict[optional_arg])
+            # Check if this arg has a default value
+            else:
+                param = sig.parameters[optional_arg]
+                if param.default is param.empty:
+                    args.append(None)
                 else:
-                    param = sig.parameters[optional_arg]
-                    if param.default is param.empty:
-                        args.append(None)
-                    else:
-                        args.append(param.default)
-            args = tuple(args)
+                    args.append(param.default)
+        args = tuple(args)
     # Cases of models with no input args
     except IndexError:
         warnings.warn("No input args, skipping _decide_input_format")
@@ -405,32 +407,34 @@ def _get_param_count_list(method_graph, args_params):
         if "PackedParams" in str(input_.type()):
             in_vars, _ = torch.jit._flatten(arg_params_)
             param_count_list.append(len(in_vars))
-        elif arg_params_ is None:
-            param_count_list.append(0)
         else:
-            param_count_list.append(1)
+            param_count_list.append(arg_params_ is not None)
+
     return param_count_list
 
 
-def _resolve_and_flatten_graph_inputs(model, args_params):
-    sig = _signature(model)
-    param_keys = list(sig.parameters.keys())
-    resolved_args = []  # type: ignore[var-annotated]
-    if isinstance(model, (torch.jit.ScriptFunction, torch.jit.ScriptModule)):
-        for i, var in enumerate(args_params):
-            if var is None:
-                resolved_args.append(sig.parameters[param_keys[i]].default)
-            elif isinstance(var, tuple):
-                for offset, sub_var in enumerate(var):
-                    if sub_var is None:
-                        resolved_args.append(sig.parameters[param_keys[i]].default[offset])
-                    else:
-                        resolved_args.append(sub_var)
-            else:
-                resolved_args.append(var)
-    else:
-        resolved_args = args_params
-    return torch.jit._flatten(resolved_args)[0]
+def _check_flattened_did_not_remove(original, jit_flattened):
+    """torch.jit._flatten removes None. Check if it did so in this case."""
+    def flatten(x):
+        if isinstance(x, (list, tuple)):
+            for o in x:
+                for y in flatten(o):
+                    yield y
+        elif isinstance(x, dict):
+            for o in x.values():
+                for y in flatten(o):
+                    yield y
+        else:
+            yield x
+    flattened_with_none = list(flatten(original))
+    num_none = len(flattened_with_none) - len(jit_flattened)
+    assert num_none >= 0
+    if num_none:
+        raise ValueError(
+            f"example_inputs contained {num_none} None's after flattening. "
+            "When exporting a ScriptModule or ScriptFunction, no example_inputs may "
+            "be None because that breaks type propagation.")
+
 
 
 def _create_jit_graph(model, args):
@@ -439,17 +443,18 @@ def _create_jit_graph(model, args):
     if isinstance(model, torch.jit.ScriptModule):
         try:
             graph = model.forward.graph
-            torch._C._jit_pass_onnx_function_substitution(graph)
-            freezed_m = torch._C._freeze_module(model._c, preserveParameters=True)
-            module, params = torch._C._jit_onnx_list_model_parameters(freezed_m)
-            method_graph = module._get_method("forward").graph
-            args_params = tuple(args) + tuple(params)
-            param_count_list = _get_param_count_list(method_graph, args_params)
-            graph_inputs = _resolve_and_flatten_graph_inputs(model, args_params)
-            graph = _propagate_and_assign_input_shapes(
-                method_graph, graph_inputs, param_count_list, False, False)
         except AttributeError as e:
             raise RuntimeError("'forward' method must be a script method") from e
+        torch._C._jit_pass_onnx_function_substitution(graph)
+        freezed_m = torch._C._freeze_module(model._c, preserveParameters=True)
+        module, params = torch._C._jit_onnx_list_model_parameters(freezed_m)
+        method_graph = module._get_method("forward").graph
+        args_params = tuple(args) + tuple(params)
+        param_count_list = _get_param_count_list(method_graph, args_params)
+        in_vars, _ = torch.jit._flatten(args_params)
+        _check_flattened_did_not_remove(args_params, in_vars)
+        graph = _propagate_and_assign_input_shapes(
+            method_graph, tuple(in_vars), param_count_list, False, False)
         return graph, params, torch_out, module
     elif isinstance(model, torch.jit.ScriptFunction):
         params = ()
@@ -457,6 +462,7 @@ def _create_jit_graph(model, args):
         graph = model.graph
         torch._C._jit_pass_onnx_function_substitution(graph)
         param_count_list = _get_param_count_list(graph, args)
+        _check_flattened_did_not_remove(args_params, in_vars)
         graph = _propagate_and_assign_input_shapes(
             graph, tuple(in_vars), param_count_list, False, False)
         return graph, params, torch_out, None

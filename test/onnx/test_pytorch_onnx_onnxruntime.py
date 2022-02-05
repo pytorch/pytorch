@@ -129,11 +129,10 @@ def run_ort(ort_sess, inputs):
     inputs = to_numpy(inputs)
     ort_sess_inputs = ort_sess.get_inputs()
     for i, input in enumerate(inputs):
-        input_name = ort_sess_inputs[i].name
-        if input_name in ort_inputs:
+        if i == len(ort_sess_inputs) or ort_sess_inputs[i].name in ort_inputs:
             raise ValueError(
                 f"got too many positional inputs. inputs: {inputs}. kw_inputs: {kw_inputs}")
-        ort_inputs[input_name] = input
+        ort_inputs[ort_sess_inputs[i].name] = input
     ort_outs = ort_sess.run(None, ort_inputs)
     return inline_flatten_list(ort_outs, [])
 
@@ -995,6 +994,7 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(model, (x, {"z": z}))
         self.run_test(model, (x, {"y": y}))
 
+    @skipScriptTest()  # tracing eliminates None inputs so it works differently. See _script version below.
     @skipIfUnsupportedMinOpsetVersion(15)
     def test_mixed_optional_default_tensor(self):
         class Model(torch.nn.Module):
@@ -1009,27 +1009,43 @@ class TestONNXRuntime(unittest.TestCase):
         y = torch.randn(2, 3)
         z = torch.randn(2, 3)
         model = Model()
-        # Without kwargs dict.
+
         self.run_test(model, (x, y, None))
         self.run_test(model, (x, None, z))
 
-        # With kwargs dict.
-        # Requires input_names to be set so that we can feed the inputs properly into ORT.
+    @skipIfUnsupportedMinOpsetVersion(15)
+    def test_mixed_optional_default_tensor_script(self):
+        class Model(torch.nn.Module):
+            def forward(self, x, y: Optional[Tensor] = torch.ones(2, 3), z: Optional[Tensor] = torch.zeros(2, 3)):
+                if y is not None:
+                    return x + y
+                if z is not None:
+                    return x + z
+                return x
 
+        x = torch.randn(2, 3)
+        y = torch.randn(2, 3)
+        z = torch.randn(2, 3)
+        model = torch.jit.script(Model())
+
+        self.run_test(model, (x, y, z), input_names=("x", "y", "z"))
+        self.run_test(model, (x, {"y": y, "z": z}), input_names=("x", "y", "z"))
+
+        # Requires input_names to be set so that we can feed the inputs properly into ORT.
         # TODO: Export default values as ONNX initializers, then this should not raise.
         # https://msdata.visualstudio.com/Vienna/_workitems/edit/969268
         # Default values are accessible via FunctionSchema.
         with self.assertRaisesRegex(ValueError, "Model requires 3 inputs. Input Feed contains 2"):
             self.run_test(model, (x, {"y": y}), input_names=("x", "y"))
 
-        # Setting any input to None in tracing means that
-        # input doesn't exist at all in the exported model, so input_names doesn't match.
-        # Thus the remaining tests only work in scripting.
-        # In tracing we'll provide the user with a reasonable error message:
-        # "number of input names provided (3) exceeded number of inputs (2)"
-        script_model = torch.jit.script(model)
-        self.run_test(script_model, (x, {"y": y, "z": None}), input_names=("x", "y", "z"))
-        self.run_test(script_model, (x, {"y": None, "z": z}), input_names=("x", "y", "z"))
+        for example_inputs in ((x, y, None),
+                               (x, None, z),
+                               (x, {"y": y, "z": None}),
+                               (x, {"y": None, "z": z})):
+            with self.assertRaisesRegex(ValueError, "example_inputs contained 1 None's after flattening."):
+                self.run_test(model, example_inputs, input_names=("x", "y", "z"))
+
+
 
     @skipScriptTest()  # Needs https://github.com/pytorch/rfcs/pull/21
     @skipIfUnsupportedMinOpsetVersion(15)
@@ -1050,6 +1066,7 @@ class TestONNXRuntime(unittest.TestCase):
                       # y disappears in tracing.
                       input_names=("x",))
 
+    @skipScriptTest()  # tracing eliminates None inputs so it works differently. See _script version below.
     @skipIfUnsupportedMinOpsetVersion(15)
     def test_all_optional_default_tensor(self):
         class Model(torch.nn.Module):
@@ -1062,14 +1079,39 @@ class TestONNXRuntime(unittest.TestCase):
                     return torch.tensor(-1.)
 
         x = torch.randn(2, 3)
+        y = torch.randn(2, 3)
         model = Model()
         self.run_test(model, (x, None))
-        self.run_test(
-            # Because otherwise y would get erased during tracing.
-            torch.jit.script(model),
-            ({"x": x, "y": None},),
-            # So that we can feed the inputs properly into ORT.
-            input_names=("x", "y"))
+        self.run_test(model, (None, y))
+        # tracing means y is never used so it's removed from the exported model inputs,
+        # and we fail when trying to run ORT.
+        with self.assertRaisesRegex(ValueError, "got too many positional inputs"):
+            self.run_test(model, (x, y))
+
+    @skipIfUnsupportedMinOpsetVersion(15)
+    def test_all_optional_default_tensor_script(self):
+        class Model(torch.nn.Module):
+            def forward(self, x: Optional[Tensor] = torch.ones(2, 3), y: Optional[Tensor] = torch.zeros(2, 3)):
+                if x is not None:
+                    return x
+                elif y is not None:
+                    return y
+                else:
+                    return torch.tensor(-1.)
+
+        x = torch.randn(2, 3)
+        y = torch.randn(2, 3)
+        model = torch.jit.script(Model())
+
+        # TODO: Export default values as ONNX initializers, then this should not raise.
+        # https://msdata.visualstudio.com/Vienna/_workitems/edit/969268
+        # Default values are accessible via FunctionSchema.
+        with self.assertRaisesRegex(ValueError, "Model requires 2 inputs. Input Feed contains 1"):
+            self.run_test(model, (x,))
+            self.run_test(model, ({"y": y},))
+        self.run_test(model, (x, y))
+        self.run_test(model, ({"x": x, "y": y},), input_names=("x", "y"))
+
 
     @skipScriptTest()  # Needs https://github.com/pytorch/rfcs/pull/21
     @skipIfUnsupportedMinOpsetVersion(15)
@@ -1100,6 +1142,7 @@ class TestONNXRuntime(unittest.TestCase):
         y1 = torch.randn(2, 3)
         self.run_test(Model(), (x, (None, y1)))
 
+    @skipScriptTest()  # tracing eliminates None inputs so it works differently. See _script version below.
     @skipIfUnsupportedMinOpsetVersion(15)
     def test_tuple_of_optional_default_tensor(self):
         class Model(torch.nn.Module):
@@ -1118,6 +1161,35 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(2, 3)
         y1 = torch.randn(2, 3)
         self.run_test(Model(), (x, (None, y1)))
+
+    @skipIfUnsupportedMinOpsetVersion(15)
+    def test_tuple_of_optional_default_tensor_script(self):
+        class Model(torch.nn.Module):
+            def forward(
+                self,
+                x,
+                y: Tuple[Optional[Tensor], Optional[Tensor]] = (torch.zeros(2, 3), torch.zeros(2, 3))
+            ):
+                y0, y1 = y
+                if y0 is not None:
+                    return x + y0
+                if y1 is not None:
+                    return x + y1
+                return x
+
+        x = torch.randn(2, 3)
+        y0 = torch.randn(2, 3)
+        y1 = torch.randn(2, 3)
+        model = torch.jit.script(Model())
+        with self.assertRaisesRegex(
+                ValueError,
+                "example_inputs contained 1 None's after flattening."):
+            self.run_test(model, (x, (None, y1)))
+        self.run_test(model, (x, (y0, y1)))
+        # export succeeds, but running ORT through run_test would fail because the exported model
+        # has the inputs flattened into 3 inputs.
+        torch.onnx.export(model, (x, {"y": (y0, y1)}), io.BytesIO(), opset_version=self.opset_version)
+
 
     def test_primitive_input_integer(self):
         class Model(torch.nn.Module):

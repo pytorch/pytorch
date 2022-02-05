@@ -227,9 +227,11 @@ void FixupONNXSubblockOutputs(Node* n) {
   }
 }
 
+// Infer type of optional inputs from outputs.
 void FixupONNXLoopBlockInputs(Node* n) {
   for (Block* block : n->blocks()) {
     for (const auto i : c10::irange(1, block->inputs().size())) {
+      // input i corresponds to output i until we run FixupONNXLoopNodeInputs.
       Value* input_i = block->inputs().at(i);
       if (input_i->type()->cast<OptionalType>() &&
           !block->outputs().at(i)->type()->cast<OptionalType>()) {
@@ -246,6 +248,7 @@ void FixupONNXLoopBlockInputs(Node* n) {
   }
 }
 
+// Replace None in outputs with Optional.
 void FixupONNXLoopBlockOutputs(Node* n) {
   for (Block* block : n->blocks()) {
     // output 0 is continue_condition, never None.
@@ -402,6 +405,7 @@ void InferShapeTypeForUninitializedOutput(
       const_node->output()->setType(other_output->type());
     }
   } else if (auto output_type = other_output->type()->cast<OptionalType>()) {
+    // Don't need return value. We just need to add the optional node to graph.
     ONNXOptionalNode(output_type, graph);
   } else {
     std::cerr << "Warning: Inferring type for prim::Uninitialized node from "

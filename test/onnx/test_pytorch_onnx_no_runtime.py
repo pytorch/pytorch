@@ -5,7 +5,6 @@
 import io
 import unittest
 
-from google.protobuf import text_format
 import onnx
 import torch
 from torch.testing._internal.common_utils import instantiate_parametrized_tests, parametrize
@@ -65,20 +64,8 @@ class TestOptionalOutput(unittest.TestCase):
         exported = onnx.load_from_string(f.getvalue())
         expected_elem_type = symbolic_helper.scalar_type_to_onnx[
             symbolic_helper.scalar_type_to_pytorch_type.index(x.dtype)].value
-        expected_output_type = text_format.Parse(
-            ("optional_type {\n"
-             "    elem_type {\n"
-             "        tensor_type {\n"
-             f"            elem_type: {expected_elem_type}\n"
-             "             shape {\n"
-             "               dim {\n"
-             f"                 dim_param: \"{dynamic_axis_name}\"\n"
-             "               }\n"
-             "             }\n"
-             "        }\n"
-             "    }\n"
-             "}\n"),
-            onnx.TypeProto())
+        expected_output_type = onnx.helper.make_optional_type_proto(
+            onnx.helper.make_tensor_type_proto(expected_elem_type, (dynamic_axis_name,)))
         self.assertEqual(expected_output_type, exported.graph.output[0].type)
 
 
