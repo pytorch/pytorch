@@ -1,12 +1,39 @@
 #pragma once
-
+#include <iostream>
 
 namespace c10 {
 namespace impl {
 
 
-class C10_API AbstractSizeVal;
+class C10_API AbstractSizeVal {
+    public:
+    AbstractSizeVal(int64_t val): value(val) {}
 
+    int64_t* get() {
+        std::cout << "Accessing abstract size: " << value <<std::endl;
+        return &value;
+    }
+
+    const int64_t* get() const {
+        std::cout << "Accessing const abstract size: " << value <<std::endl;
+        return &value;
+    }
+
+    AbstractSizeVal* operator+(int64_t other) const {
+        std::cout << "Adding const abstract size: " << value <<std::endl;
+        AbstractSizeVal* res = new AbstractSizeVal(value + other);
+        return res;
+    }
+
+    AbstractSizeVal* operator+(int64_t other) {
+        std::cout << "Adding abstract size: " << value <<std::endl;
+        AbstractSizeVal* res = new AbstractSizeVal(value + other);
+        return res;
+    }
+
+
+    int64_t value;
+};
 
 class C10_API SizeVal {
 public:
@@ -14,6 +41,12 @@ public:
 
     SizeVal(int inp) {
         this->field_.val = inp;
+    }
+
+    SizeVal(AbstractSizeVal* ptr) {
+        int64_t saved_ptr = (int64_t)ptr;
+        saved_ptr |= ((int64_t)1 << 63);
+        this->field_.ptr = (AbstractSizeVal*) saved_ptr;
     }
 
     SizeVal(const int64_t& inp) {
@@ -25,19 +58,43 @@ public:
     }
 
     operator int64_t*() {
-        return &field_.val;
+        if (field_.val < 0) {
+            int64_t real_ptr = (int64_t)field_.ptr;
+            real_ptr &= ~((int64_t)1 << 63);
+            return ((AbstractSizeVal*)real_ptr)->get();
+        } else {
+            return &field_.val;
+        }
     }
  
     operator const int64_t*() const {
-        return &field_.val;
+        if (field_.val < 0) {
+            int64_t real_ptr = (int64_t)field_.ptr;
+            real_ptr &= ~((int64_t)1 << 63);
+            return ((AbstractSizeVal*)real_ptr)->get();
+        } else {
+            return &field_.val;
+        }
     }
 
     operator int64_t() {
-        return field_.val;
+        if (field_.val < 0) {
+            int64_t real_ptr = (int64_t)field_.ptr;
+            real_ptr &= ~((int64_t)1 << 63);
+            return *((AbstractSizeVal*)real_ptr)->get();
+        } else {
+            return field_.val;
+        }
     }
 
     operator int64_t() const {
-        return field_.val;
+        if (field_.val < 0) {
+            int64_t real_ptr = (int64_t)field_.ptr;
+            real_ptr &= ~((int64_t)1 << 63);
+            return *((AbstractSizeVal*)real_ptr)->get();
+        } else {
+            return field_.val;
+        }
     }
 
     SizeVal operator-(int64_t other) const {
@@ -49,7 +106,13 @@ public:
     }
 
     SizeVal operator+(int64_t other) const {
-        return SizeVal(field_.val + other);
+        if (field_.val < 0) {
+            int64_t real_ptr = (int64_t)field_.ptr;
+            real_ptr &= ~((int64_t)1 << 63);
+            return SizeVal(*((AbstractSizeVal*)real_ptr) + other);
+        } else {
+            return SizeVal(field_.val + other);
+        }
     }
 
     SizeVal operator+(const SizeVal& other) const {
@@ -57,7 +120,13 @@ public:
     }
 
     SizeVal operator+(int64_t other) {
-        return SizeVal(field_.val + other);
+        if (field_.val < 0) {
+            int64_t real_ptr = (int64_t)field_.ptr;
+            real_ptr &= ~((int64_t)1 << 63);
+            return SizeVal(*((AbstractSizeVal*)real_ptr) + other);
+        } else {
+            return SizeVal(field_.val + other);
+        }
     }
 
     SizeVal operator+(int other) const {
@@ -69,8 +138,25 @@ public:
     }
 
     SizeVal& operator=(int64_t val) {
-      this->field_.val = val;
-      return *this;
+        this->field_.val = val;
+        return *this;
+    }
+
+    SizeVal& operator=(const long unsigned int val) {
+        this->field_.val = val;
+        return *this;
+    }
+
+    SizeVal& operator=(const int val) {
+        this->field_.val = val;
+        return *this;
+    }
+
+    SizeVal& operator=(AbstractSizeVal* ptr) {
+        int64_t saved_ptr = (int64_t)ptr;
+        saved_ptr |= ((int64_t)1 << 63);
+        this->field_.ptr = (AbstractSizeVal*) saved_ptr;
+        return *this;
     }
 
     bool operator==(const SizeVal& other) const {

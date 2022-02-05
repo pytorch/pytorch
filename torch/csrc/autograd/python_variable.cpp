@@ -439,6 +439,15 @@ static PyObject* THPVariable_make_wrapper_subclass(PyObject*, PyObject* args, Py
         .make_tensor();
   data.set_requires_grad(r.toBool(9));
 
+  SizeValArrayRef size = data.sizes();
+  TORCH_CHECK(size.size() == 1);
+
+  // Leaking!
+  const c10::impl::AbstractSizeVal* sz = new c10::impl::AbstractSizeVal(size[0]);
+  uint64_t val = ((uint64_t)sz | ((int64_t)1 << 63));
+  (c10::impl::SizeVal)size[0] = val;
+  std::cout<<"new size: "<<val<<std::endl;
+
   return THPVariable_NewWithVar(
       (PyTypeObject*)cls,
       std::move(data),
