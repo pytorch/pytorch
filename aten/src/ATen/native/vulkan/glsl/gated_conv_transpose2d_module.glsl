@@ -8,11 +8,12 @@ layout(std430) buffer;
 
 layout(set = 0, binding = 0, FORMAT) uniform PRECISION restrict writeonly image3D   uOutput;
 layout(set = 0, binding = 1)         uniform PRECISION                    sampler3D uPadding;
-layout(set = 0, binding = 2)         uniform PRECISION                    sampler3D uPrevOut;
-layout(set = 0, binding = 3)         uniform PRECISION                    sampler3D uEncoderOut;
-layout(set = 0, binding = 4)         uniform PRECISION                    sampler3D uKernel;
-layout(set = 0, binding = 5)         uniform PRECISION                    sampler3D uBias;
-layout(set = 0, binding = 6)         uniform PRECISION restrict           Block {
+layout(set = 0, binding = 2)         uniform PRECISION                    sampler3D uPrevEncOut;
+layout(set = 0, binding = 3)         uniform PRECISION                    sampler3D uPrevOut;
+layout(set = 0, binding = 4)         uniform PRECISION                    sampler3D uEncoderOut;
+layout(set = 0, binding = 5)         uniform PRECISION                    sampler3D uKernel;
+layout(set = 0, binding = 6)         uniform PRECISION                    sampler3D uBias;
+layout(set = 0, binding = 7)         uniform PRECISION restrict           Block {
   ivec4 size;
   ivec4 kernel;
   ivec2 ikernel;
@@ -41,6 +42,8 @@ void main() {
     vec4 sum1 = texelFetch(uBias, ivec3(pos.z, 0, 0), 0);
     vec4 sum2 = texelFetch(uBias, ivec3(pos.z, 1, 0), 0);
 
+    const int z4_half_pt = uBlock.size.w/8;
+
     int ky_start = uBlock.kernel.y - 1 - (ipos.y - uBlock.stride.y*start.y) + pos.z * uBlock.ikernel.y;
     int kx_start = (uBlock.kernel.x - 1 - (ipos.x - uBlock.stride.x*start.x)) * uBlock.size.w;
     int kx_stride = uBlock.size.w * (uBlock.stride.x - 1);
@@ -48,9 +51,11 @@ void main() {
       int kx = kx_start;
       for (int x = start.x, kx = kx_start; x < end.x; ++x, kx += kx_stride) {
         for (int z4 = 0; z4 < uBlock.size.w/4; ++z4, kx += 4) {
-          const vec4 In = (y == 1) ? ((z4 < uBlock.size.w/8) ? texelFetch(uPrevOut, ivec3(x, 0, z4), 0)
-                                                             : texelFetch(uEncoderOut, ivec3(x, 0, z4 - uBlock.size.w/8), 0))
-                                   : texelFetch(uPadding, ivec3(x, 0, z4), 0);
+          bool first_half = z4 < z4_half_pt;
+          const vec4 In = (y == 1) ? (first_half ? texelFetch(uPrevOut, ivec3(x, 0, z4), 0)
+                                                 : texelFetch(uEncoderOut, ivec3(x, 0, z4 - z4_half_pt), 0))
+                                   : (first_half ? texelFetch(uPadding, ivec3(x, 0, z4), 0)
+                                                 : texelFetch(uPrevEncOut, ivec3(x, 0, z4 - z4_half_pt), 0));
           //const vec4 In = (y == 0) ? texelFetch(uPadding, ivec3(x, 0, z4), 0)
           //                         : texelFetch(uPrevOut, ivec3(x, 0, z4), 0);
           //vec4 In = texelFetch(uPadding, ivec3(x, y, z4), 0);

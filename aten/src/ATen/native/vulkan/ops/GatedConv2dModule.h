@@ -39,10 +39,9 @@ class GatedConv2dModuleOpContext final : public torch::jit::CustomClassHolder {
 
   Tensor run(const Tensor& padding, const Tensor& prev_out) const;
   Tensor run_transpose(
-      const Tensor& prev_out, const Tensor& encoder_out, const Tensor& padding) const;
+      const Tensor& prev_out, const Tensor& prev_enc_out, const Tensor& encoder_out, const Tensor& padding) const;
   State unpack() const;
 
- private:
   GatedConv2dModuleOpContext(
       const Tensor& weight_a,
       const c10::optional<Tensor>& bias_a,
@@ -55,7 +54,6 @@ class GatedConv2dModuleOpContext final : public torch::jit::CustomClassHolder {
       int64_t groups,
       bool transposed);
 
- private:
   struct {
     vTensor v_weight;
     vTensor v_bias;
@@ -86,10 +84,23 @@ Tensor gated_conv2d_module_run(
     const Tensor& prev_out,
     const c10::intrusive_ptr<GatedConv2dModuleOpContext>& context);
 
+Tensor gated_conv2d_module_run_cpu(
+    const Tensor& padding,
+    const Tensor& prev_out,
+    const c10::intrusive_ptr<GatedConv2dModuleOpContext>& context);
+
 Tensor gated_conv_transpose2d_module_run(
+    const Tensor& padding,
+    const Tensor& prev_enc_out,
     const Tensor& prev_out,
     const Tensor& encoder_out,
+    const c10::intrusive_ptr<GatedConv2dModuleOpContext>& context);
+
+Tensor gated_conv_transpose2d_module_run_cpu(
     const Tensor& padding,
+    const Tensor& prev_enc_out,
+    const Tensor& prev_out,
+    const Tensor& encoder_out,
     const c10::intrusive_ptr<GatedConv2dModuleOpContext>& context);
 
 c10::intrusive_ptr<GatedConv2dModuleOpContext> gated_conv2d_module_prepack(

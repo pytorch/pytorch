@@ -392,26 +392,32 @@ Tensor GatedConv2dModuleOpContext::run(const Tensor& padding_arg, const Tensor& 
 }
 
 Tensor GatedConv2dModuleOpContext::run_transpose(
-    const Tensor& padding_arg, const Tensor& prev_out_arg, const Tensor& encoder_out_arg) const {
+    const Tensor& padding_arg, const Tensor& prev_enc_out_arg,
+    const Tensor& prev_out_arg, const Tensor& encoder_out_arg) const {
   api::Context* const context = api::context();
 
   const Tensor padding = padding_arg.is_vulkan() ? padding_arg : padding_arg.vulkan();
   const vTensor& v_padding = convert(padding);
+  const Tensor prev_enc_out = prev_enc_out_arg.is_vulkan() ? prev_enc_out_arg : prev_enc_out_arg.vulkan();
+  const vTensor& v_prev_enc_out = convert(prev_enc_out);
   const Tensor prev_out = prev_out_arg.is_vulkan() ? prev_out_arg : prev_out_arg.vulkan();
   const vTensor& v_prev_out = convert(prev_out);
   const Tensor encoder_out = encoder_out_arg.is_vulkan() ? encoder_out_arg : encoder_out_arg.vulkan();
   const vTensor& v_encoder_out = convert(encoder_out);
 
   std::vector<int64_t> padding_size = padding.sizes().vec();
+  std::vector<int64_t> prev_enc_out_size = prev_enc_out.sizes().vec();
   std::vector<int64_t> prev_out_size = prev_out.sizes().vec();
   std::vector<int64_t> encoder_out_size = encoder_out.sizes().vec();
-  //TORCH_CHECK(padding_size.size() == 4, "GatedConv2dModule: third input tensor must have exactly 4 dims")
-  //TORCH_CHECK(prev_out_size[2] == 1, "GatedConv2dModule: first input tensor must have height of exactly 1")
-  //TORCH_CHECK(prev_out_size.size() == 4, "GatedConv2dModule: first input tensor must have exactly 4 dims")
-  //TORCH_CHECK(encoder_out_size.size() == 4, "GatedConv2dModule: second input tensor must have exactly 4 dims")
-  //TORCH_CHECK(encoder_out_size[2] == 1, "GatedConv2dModule: second input tensor must have height of exactly 1")
-  //TORCH_CHECK(padding_size[2] == 1, "GatedConv2dModule: third input tensor must have height of exactly 1")
-  //TORCH_CHECK(prev_out_size[1] == encoder_out_size[1], "GatedConv2dModule: first two inputs must have the number of channels")
+  TORCH_CHECK(padding_size.size() == 4, "GatedConv2dModule: padding tensor must have exactly 4 dims")
+  TORCH_CHECK(prev_enc_out_size.size() == 4, "GatedConv2dModule: previous encoder output tensor must have exactly 4 dims")
+  TORCH_CHECK(prev_out_size.size() == 4, "GatedConv2dModule: previous output tensor must have exactly 4 dims")
+  TORCH_CHECK(encoder_out_size.size() == 4, "GatedConv2dModule: encoder output tensor must have exactly 4 dims")
+  TORCH_CHECK(padding_size[2] == 1, "GatedConv2dModule: padding tensor must have height of exactly 1")
+  TORCH_CHECK(prev_enc_out_size[2] == 1, "GatedConv2dModule: previous encoder output tensor must have height of exactly 1")
+  TORCH_CHECK(prev_out_size[2] == 1, "GatedConv2dModule: previous output tensor must have height of exactly 1")
+  TORCH_CHECK(encoder_out_size[2] == 1, "GatedConv2dModule: encoder output tensor must have height of exactly 1")
+  //TODO: check number of channels match
   std::vector<int64_t> conv_input_size(padding_size);
   conv_input_size[2] = 2;
   std::vector<int64_t> output_size = get_conv_transpose_output_size(
@@ -473,6 +479,7 @@ Tensor GatedConv2dModuleOpContext::run_transpose(
           VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
           VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
           VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+          VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
           VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
         },
         VK_KERNEL(gated_conv_transpose2d_module),
@@ -483,6 +490,9 @@ Tensor GatedConv2dModuleOpContext::run_transpose(
             vTensor::Stage::Compute,
             vTensor::Access::Write),
         v_padding.image(
+            command_buffer,
+            vTensor::Stage::Compute),
+        v_prev_enc_out.image(
             command_buffer,
             vTensor::Stage::Compute),
         v_prev_out.image(
@@ -554,10 +564,67 @@ Tensor gated_conv2d_module_run(
 
 Tensor gated_conv_transpose2d_module_run(
     const Tensor& padding,
+    const Tensor& prev_enc_out,
     const Tensor& prev_out,
     const Tensor& encoder_out,
     const c10::intrusive_ptr<GatedConv2dModuleOpContext>& context) {
-  return context->run_transpose(padding, prev_out, encoder_out);
+  return context->run_transpose(padding, prev_enc_out, prev_out, encoder_out);
+}
+
+Tensor gated_conv2d_module_run_cpu(
+    const Tensor& padding,
+    const Tensor& prev_out,
+    const c10::intrusive_ptr<GatedConv2dModuleOpContext>& context) {
+  const auto input = at::cat({padding, prev_out}, 2);
+  const auto output_a_cpu = at::conv2d(
+      input,
+      context->unpacked_.weight_a,
+      context->unpacked_.bias_a,
+      context->unpacked_.stride,
+      context->unpacked_.padding,
+      context->unpacked_.dilation,
+      context->unpacked_.groups);
+  const auto output_b_cpu = at::conv2d(
+      input,
+      context->unpacked_.weight_b,
+      context->unpacked_.bias_b,
+      context->unpacked_.stride,
+      context->unpacked_.padding,
+      context->unpacked_.dilation,
+      context->unpacked_.groups);
+
+  return output_a_cpu * at::sigmoid(output_b_cpu);
+}
+
+
+Tensor gated_conv_transpose2d_module_run_cpu(
+    const Tensor& padding,
+    const Tensor& prev_enc_out,
+    const Tensor& prev_out,
+    const Tensor& encoder_out,
+    const c10::intrusive_ptr<GatedConv2dModuleOpContext>& context) {
+  const auto top_row_cpu = at::cat({padding, prev_enc_out}, 1);
+  const auto bottom_row_cpu = at::cat({prev_out, encoder_out}, 1);
+  const auto input_cpu = at::cat({top_row_cpu, bottom_row_cpu}, 2);
+  const auto output_a_cpu = at::conv_transpose2d(
+      input_cpu,
+      context->unpacked_.weight_a,
+      context->unpacked_.bias_a,
+      context->unpacked_.stride,
+      context->unpacked_.padding,
+      context->unpacked_.output_padding,
+      context->unpacked_.groups,
+      context->unpacked_.dilation);
+  const auto output_b_cpu = at::conv_transpose2d(
+      input_cpu,
+      context->unpacked_.weight_b,
+      context->unpacked_.bias_b,
+      context->unpacked_.stride,
+      context->unpacked_.padding,
+      context->unpacked_.output_padding,
+      context->unpacked_.groups,
+      context->unpacked_.dilation);
+  return output_a_cpu * at::sigmoid(output_b_cpu);
 }
 
 } // namespace ops

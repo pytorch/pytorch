@@ -118,7 +118,7 @@ TORCH_LIBRARY(vulkan_prepack, m) {
       "vulkan_prepack::gated_conv2d_module_run(Tensor X_padding, Tensor X_prev_out, "
       "__torch__.torch.classes.vulkan.GatedConv2dModuleOpContext prepacked) -> Tensor Y"));
   m.def(TORCH_SELECTIVE_SCHEMA(
-      "vulkan_prepack::gated_conv_transpose2d_module_run(Tensor X_padding, Tensor X_prev_out, Tensor X_encoder_out, "
+      "vulkan_prepack::gated_conv_transpose2d_module_run(Tensor X_padding, Tensor X_prev_enc_out, Tensor X_prev_out, Tensor X_encoder_out, "
       "__torch__.torch.classes.vulkan.GatedConv2dModuleOpContext prepacked) -> Tensor Y"));
 }
 
@@ -127,6 +127,8 @@ TORCH_LIBRARY_IMPL(vulkan_prepack, CPU, m) {
   m.impl(TORCH_SELECTIVE_NAME("vulkan_prepack::conv2d_transpose_clamp_prepack"), TORCH_FN(conv2d_transpose_clamp_prepack));
   m.impl(TORCH_SELECTIVE_NAME("vulkan_prepack::linear_prepack"), TORCH_FN(linear_prepack));
   m.impl(TORCH_SELECTIVE_NAME("vulkan_prepack::gated_conv2d_module_prepack"), TORCH_FN(gated_conv2d_module_prepack));
+  m.impl(TORCH_SELECTIVE_NAME("vulkan_prepack::gated_conv2d_module_run"), TORCH_FN(gated_conv2d_module_run_cpu));
+  m.impl(TORCH_SELECTIVE_NAME("vulkan_prepack::gated_conv_transpose2d_module_run"), TORCH_FN(gated_conv_transpose2d_module_run_cpu));
 }
 
 TORCH_LIBRARY_IMPL(vulkan_prepack, Vulkan, m) {
