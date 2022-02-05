@@ -50,9 +50,11 @@ return std::make_tuple(self_.unsqueeze(dim), 0);
 Now, we return a tuple of the tensor along with its batch dimension (which is now 0 since we moved it to the front).
 
 ```
-VMAP_SUPPORT("unsqueeze", unsqueeze_batch_rule);
+VMAP_SUPPORT(unsqueeze, unsqueeze_batch_rule);
 ```
 Finally, we add support for it by using the `VMAP_SUPPORT` macro.
+
+You may need to use the `VMAP_SUPPORT2` macro if the operator has an overload name.
 
 ### Implementing multiple batching rules with boxed fallbacks or templates
 Often, we find that large classes of operators have similar patterns of batching rules. For example, every single pointwise op has a similar pattern. In that case, it's a bit ridiculous to separately write a batching rule for those situations.

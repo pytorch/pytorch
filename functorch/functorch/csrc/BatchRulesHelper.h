@@ -45,9 +45,13 @@ inline Tensor ensure_has_bdim(const Tensor& tensor, bool has_bdim, int64_t batch
   return tensor.expand(expanded_shape);
 }
 
-
 #define VMAP_SUPPORT(op, batch_rule) \
-  m.impl(op, PrimBatchRule7< \
+  m.impl(#op, PrimBatchRule7< \
+      decltype(&batch_rule), &batch_rule, to_operator_t<decltype(batch_rule)> \
+      >::apply);
+
+#define VMAP_SUPPORT2(op, overload, batch_rule) \
+  m.impl(#op "." #overload, PrimBatchRule7< \
       decltype(&batch_rule), &batch_rule, to_operator_t<decltype(batch_rule)> \
       >::apply);
 
@@ -75,7 +79,7 @@ struct BasicUnaryBatchRuleHelper<F, Func, typelist<A, T...>> {
       c10::guts::function_traits<decltype(fn)>::parameter_types>::apply)
 
 #define UNARY_POINTWISE(op) \
-  VMAP_SUPPORT(#op, BASIC_UNARY_BATCH_RULE(ATEN_FN(op)));
+  VMAP_SUPPORT(op, BASIC_UNARY_BATCH_RULE(ATEN_FN(op)));
 
 template <typename A, A a, typename C>
 struct VariadicBdimsBatchRuleHelper;
@@ -101,10 +105,10 @@ struct VariadicBdimsBatchRuleHelper<F, Func, typelist<A, T...>> {
       c10::guts::function_traits<decltype(fn)>::parameter_types>::apply)
 
 #define VARIADIC_BDIMS(op) \
-  VMAP_SUPPORT(#op, VARIADIC_BDIMS_BATCH_RULE(ATEN_FN(op)));
+  VMAP_SUPPORT(op, VARIADIC_BDIMS_BATCH_RULE(ATEN_FN(op)));
 
 #define VARIADIC_BDIMS2(op, overload) \
-  VMAP_SUPPORT(#op"."#overload, VARIADIC_BDIMS_BATCH_RULE(ATEN_FN2(op, overload)));
+  VMAP_SUPPORT2(op, overload, VARIADIC_BDIMS_BATCH_RULE(ATEN_FN2(op, overload)));
 
 template<class F, F Func>
 void boxed_tensor_inputs_batch_rule(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
@@ -375,10 +379,10 @@ struct ExistingBdimBatchRuleHelper<F, Func, typelist<A, T...>> {
 
 
 #define EXISTING_BDIM(op) \
-  VMAP_SUPPORT(#op, EXISTING_BDIM_BATCH_RULE(ATEN_FN(op)));
+  VMAP_SUPPORT(op, EXISTING_BDIM_BATCH_RULE(ATEN_FN(op)));
 
 #define EXISTING_BDIM2(op, overload) \
-  VMAP_SUPPORT(#op"."#overload, EXISTING_BDIM_BATCH_RULE(ATEN_FN2(op, overload)));
+  VMAP_SUPPORT2(op, overload, EXISTING_BDIM_BATCH_RULE(ATEN_FN2(op, overload)));
 
 #define INVOKE(object,ptrToMember)  ((object).*(ptrToMember))
 

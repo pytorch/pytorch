@@ -808,15 +808,15 @@ std::tuple<at::Tensor,at::Tensor,at::Tensor> cudnn_batch_norm_backward_wrapper(
   }
 
 TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
-  VMAP_SUPPORT("native_batch_norm", NATIVE_BATCH_NORM_BATCH_RULE(native_batch_norm));
-  VMAP_SUPPORT("cudnn_batch_norm", CUDNN_BATCH_NORM_BATCH_RULE(cudnn_batch_norm));
-  VMAP_SUPPORT("miopen_batch_norm", MIOPEN_BATCH_NORM_BATCH_RULE(miopen_batch_norm));
+  VMAP_SUPPORT(native_batch_norm, NATIVE_BATCH_NORM_BATCH_RULE(native_batch_norm));
+  VMAP_SUPPORT(cudnn_batch_norm, CUDNN_BATCH_NORM_BATCH_RULE(cudnn_batch_norm));
+  VMAP_SUPPORT(miopen_batch_norm, MIOPEN_BATCH_NORM_BATCH_RULE(miopen_batch_norm));
   m.impl("native_batch_norm_backward", NATIVE_BATCH_NORM_BACKWARD_BATCH_RULE(native_batch_norm_backward));
   m.impl("cudnn_batch_norm_backward", CUDNN_BATCH_NORM_BACKWARD_BATCH_RULE(at::functorch::cudnn_batch_norm_backward_wrapper));
   m.impl("miopen_batch_norm_backward", MIOPEN_BATCH_NORM_BACKWARD_BATCH_RULE(at::functorch::miopen_batch_norm_backward_wrapper));
   m.impl("native_group_norm", native_group_norm_plumbing);
   m.impl("native_group_norm_backward", native_group_norm_backward_plumbing);
-  VMAP_SUPPORT("native_layer_norm", native_layer_norm_batch_rule);
+  VMAP_SUPPORT(native_layer_norm, native_layer_norm_batch_rule);
   m.impl("native_layer_norm_backward", native_layer_norm_backward_plumbing);
 }
 

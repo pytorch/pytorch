@@ -152,13 +152,13 @@ Tensor linear_decomp(
 }
 
 TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
-  VMAP_SUPPORT("bmm", bmm_batch_rule);
+  VMAP_SUPPORT(bmm, bmm_batch_rule);
   m.impl("addmv", addmv_decomp);
   m.impl("addbmm", addbmm_decomp);
   m.impl("baddbmm", baddbmm_decomp);
-  VMAP_SUPPORT("dot", dot_batch_rule);
-  VMAP_SUPPORT("mv", mv_batch_rule);
-  VMAP_SUPPORT("mm", mm_batch_rule);
+  VMAP_SUPPORT(dot, dot_batch_rule);
+  VMAP_SUPPORT(mv, mv_batch_rule);
+  VMAP_SUPPORT(mm, mm_batch_rule);
   m.impl("linear", linear_decomp);
 
   VARIADIC_BDIMS_BOXED(cholesky_solve);
