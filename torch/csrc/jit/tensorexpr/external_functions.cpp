@@ -378,8 +378,6 @@ void nnc_aten_quantized_conv2d(
   memcpy(buf_data[0], r.data_ptr(), r.element_size() * r.numel());
 }
 
-// TODO: change signature for ExternalCall2 ? to have out strides, several out
-// buffers, out scalars ?
 void nnc_aten_quantized_conv2d_out(
     int64_t bufs_num,
     void** buf_data,

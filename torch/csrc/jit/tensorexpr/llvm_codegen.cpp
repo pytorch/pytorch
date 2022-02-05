@@ -247,7 +247,7 @@ class LLVMCodeGenImpl : public IRVisitor {
   llvm::Value* packFuncArgs(const std::vector<llvm::Value*>& func_args);
   std::vector<llvm::Value*> unpackFuncArgs(llvm::Value* packed, int arg_count);
   void processParallelFor(ForPtr v);
-  void handleBufferReuse(BufPtr buf, BufPtr buf_to_reuse);
+  void handleBufReuse(BufPtr buf, BufPtr buf_to_reuse);
 
  public:
   LLVMCodeGenImpl(
@@ -1907,7 +1907,7 @@ void LLVMCodeGenImpl::visit(IntrinsicsPtr v) {
   }
 }
 
-void LLVMCodeGenImpl::handleBufferReuse(BufPtr buf, BufPtr buf_to_reuse) {
+void LLVMCodeGenImpl::handleBufReuse(BufPtr buf, BufPtr buf_to_reuse) {
   llvm::Value* ptr = varToVal_.at(buf_to_reuse->base_handle());
   if (buf_to_reuse->dtype().scalar_type() != buf->dtype().scalar_type()) {
     ptr = irb_.CreatePointerCast(ptr, dtypeToLLVMPtr(buf->dtype()));
@@ -2188,7 +2188,7 @@ void LLVMCodeGenImpl::visit(ExternalCall2Ptr v) {
          it != bufsExtAllocReuse_.end();
          it++) {
       auto buf = it->second;
-      handleBufferReuse(buf, buf_out);
+      handleBufReuse(buf, buf_out);
     }
     bufsExtAllocReuse_.erase(buf_out);
   }
@@ -2237,7 +2237,7 @@ void LLVMCodeGenImpl::visit(PlacementAllocatePtr v) {
     return;
   }
 
-  handleBufferReuse(buf, buf_to_reuse);
+  handleBufReuse(buf, buf_to_reuse);
 }
 
 void LLVMCodeGenImpl::visit(FreePtr v) {

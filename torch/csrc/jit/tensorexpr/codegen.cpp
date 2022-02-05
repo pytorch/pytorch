@@ -160,7 +160,7 @@ std::vector<std::pair<BufPtr, BufPtr>> AllocBufsWithMemReuse(
       buf_mem_map.erase(buf_rl);
     }
 
-    bool reused = false;
+    bool allocated = false;
     if (bufs_external_allocs.find(buf) == bufs_external_allocs.end()) {
       // Check whether there are free memories that this buf can reuse.
       for (auto it = mem_up_for_grabs.begin(); it != mem_up_for_grabs.end();
@@ -169,7 +169,7 @@ std::vector<std::pair<BufPtr, BufPtr>> AllocBufsWithMemReuse(
         if (bufSize(m) >= bufSize(buf)) {
           buf_mem_map[buf] = m;
           buf_allocs.emplace_back(std::make_pair(buf, m));
-          reused = true;
+          allocated = true;
           mem_up_for_grabs.erase(it);
           break;
         }
@@ -178,7 +178,7 @@ std::vector<std::pair<BufPtr, BufPtr>> AllocBufsWithMemReuse(
 
     // If there are no memories to reuse, we'll have to allocate new memory for
     // it.
-    if (!reused) {
+    if (!allocated) {
       buf_mem_map[buf] = buf;
       buf_allocs.emplace_back(std::make_pair(buf, buf));
     }
