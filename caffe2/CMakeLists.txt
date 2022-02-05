@@ -161,7 +161,7 @@ if(BUILD_CAFFE2 AND (NOT INTERN_BUILD_MOBILE OR BUILD_CAFFE2_MOBILE))
   # add_subdirectory(test) # todo: use caffe2_gtest_main instead of gtest_main because we will need to call GlobalInit
   add_subdirectory(transforms)
 endif()
-if(NOT BUILD_CAFFE2)
+if(NOT BUILD_CAFFE2 AND (NOT INTERN_BUILD_MOBILE OR BUILD_CAFFE2_MOBILE))
   add_subdirectory(proto)
 endif()
 
@@ -1817,7 +1817,7 @@ if(BUILD_TEST)
   endif()
 
   # For special tests that explicitly uses dependencies, we add them here
-  if(USE_MPI)
+  if(BUILD_CAFFE2 AND USE_MPI)
     target_link_libraries(mpi_test ${MPI_CXX_LIBRARIES})
     if(USE_CUDA)
       target_link_libraries(mpi_gpu_test ${MPI_CXX_LIBRARIES})
