@@ -1040,6 +1040,28 @@ TEST(FlatbufferTest, OperatorSize1) {
       func2.get_code().operators_.size());
 }
 
+TEST(FlatbufferTest, BoolAndDoubleList) {
+  Module m("m");
+  c10::List<bool> boollist;
+  boollist.push_back(false);
+  IValue boollist_ival = boollist;
+  IValue doublelist = std::vector<double>{2.0};
+  m.register_attribute("bool_list", boollist_ival.type(), boollist_ival);
+  m.register_attribute("double_list", doublelist.type(), doublelist);
+
+  CompilationOptions options;
+  mobile::Module bc = jitModuleToMobile(m, options);
+  auto buff = save_mobile_module_to_bytes(bc);
+  mobile::Module bc2 = parse_mobile_module(buff.data(), buff.size());
+
+  // if the variables read are wrong type the conversion will raise exception
+  auto boolval = bc2.attr("bool_list", {}).toBoolList().get(0);
+  auto doubleval = bc2.attr("double_list", {}).toDoubleList().get(0);
+
+  ASSERT_EQ(boolval, false);
+  ASSERT_EQ(doubleval, 2.0);
+}
+
 TEST(FlatbufferTest, OperatorTest2) { // NOLINT (use =delete in gtest)
   const std::vector<std::string> test_programs{
       // test invoking a method with default parameter
