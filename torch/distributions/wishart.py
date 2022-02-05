@@ -121,9 +121,6 @@ class Wishart(ExponentialFamily):
             )
         )
 
-        # Save eigenvectors to improve numerical stability of samples
-        self.eigvecs = torch.linalg.eigh
-
     def expand(self, batch_shape, _instance=None):
         new = self._get_checked_instance(Wishart, _instance)
         batch_shape = torch.Size(batch_shape)
@@ -225,7 +222,12 @@ class Wishart(ExponentialFamily):
         is_singular = self.support.check(sample)
         if self._batch_shape:
             is_singular = is_singular.amax(self._batch_dims)
+        
+        if is_singular.any():
+            eps_matrix = torch.eye(self._event_shape[-1], dtype = sample.dtype, device = sample.device)
+          sample[is_singular] = sample[is_singular] + 
 
+        """
         if torch._C._get_tracing_state():
             # Less optimized version for JIT
             for _ in range(max_try_correction):
@@ -252,6 +254,7 @@ class Wishart(ExponentialFamily):
 
                     if not is_singular.any():
                         break
+        """
 
         return sample
 
