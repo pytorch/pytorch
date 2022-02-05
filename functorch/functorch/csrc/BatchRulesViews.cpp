@@ -339,6 +339,46 @@ std::tuple<Tensor,optional<int64_t>> diagonal_backward_batch_rule(
   return std::make_tuple(std::move(result), 0);
 }
 
+std::tuple<Tensor,optional<int64_t>> slice_batch_rule(
+    const Tensor& self,
+    optional<int64_t> self_bdim,
+    int64_t dim,
+    c10::optional<int64_t> start,
+    c10::optional<int64_t> end,
+    int64_t step) {
+  auto self_ = moveBatchDimToFront(self, self_bdim);
+  dim = getPhysicalDim(self, self_bdim.has_value(), dim);
+
+  auto result = self_.slice(dim, start, end, step);
+  return std::make_tuple(result, 0);
+}
+
+static bool is_allowed_dim_on_scalar_tensor(int64_t dim) {
+  return dim == 0 || dim == -1;
+}
+
+std::tuple<Tensor,optional<int64_t>>
+transpose_int_batch_rule(
+    const Tensor& self,
+    optional<int64_t> self_bdim,
+    int64_t dim0,
+    int64_t dim1) {
+  // PyTorch has a special case where scalar_tensor.transpose(dim0, dim1) works
+  // for dim0, dim1 in {0, -1} and returns the scalar tensor. If the following happens:
+  // >>> x = torch.randn(B0)  # the per-examples are all scalars
+  // >>> vmap(lambda x: x.transpose(0, -1), x)
+  // then we replicate this behavior.
+  if (/*physical*/self.dim() == 1 && is_allowed_dim_on_scalar_tensor(dim0) &&
+      is_allowed_dim_on_scalar_tensor(dim1)) {
+    return std::make_tuple(self, self_bdim);
+  }
+  auto self_ = moveBatchDimToFront(self, self_bdim);
+  dim0 = getPhysicalDim(self, self_bdim.has_value(), dim0);
+  dim1 = getPhysicalDim(self, self_bdim.has_value(), dim1);
+  auto result = self_.transpose(dim0, dim1);
+  return std::make_tuple(result, 0);
+}
+
 std::tuple<Tensor, optional<int64_t>> permute_batching_rule(
     const Tensor &self, optional<int64_t> self_bdim, IntArrayRef dims)
 {
@@ -479,6 +519,8 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   VMAP_SUPPORT(expand, expand_batch_rule);
   VMAP_SUPPORT(unfold, unfold_batch_rule);
   VMAP_SUPPORT2(movedim, intlist, movedim_batch_rule);
+  VMAP_SUPPORT2(slice, Tensor, slice_batch_rule);
+  VMAP_SUPPORT2(transpose, int, transpose_int_batch_rule);
 }
 
 }}
