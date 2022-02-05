@@ -18,18 +18,22 @@ class McLarenEncoderBlockOpContext final : public torch::jit::CustomClassHolder 
       const c10::optional<Tensor>& bias_1,
       IntArrayRef stride_1,
       IntArrayRef padding_1,
+      IntArrayRef output_padding_1,
       IntArrayRef dilation_1,
-      int64_t groups_1,
+      const int64_t groups_1,
       const Tensor& weight_2,
       const c10::optional<Tensor>& bias_2,
       IntArrayRef stride_2,
       IntArrayRef padding_2,
+      IntArrayRef output_padding_2,
       IntArrayRef dilation_2,
-      int64_t groups_2);
+      const int64_t groups_2,
+      const bool transposed);
 
   using State = std::tuple<
       Tensor,
       c10::optional<Tensor>,
+      std::vector<int64_t>,
       std::vector<int64_t>,
       std::vector<int64_t>,
       std::vector<int64_t>,
@@ -39,7 +43,9 @@ class McLarenEncoderBlockOpContext final : public torch::jit::CustomClassHolder 
       std::vector<int64_t>,
       std::vector<int64_t>,
       std::vector<int64_t>,
-      int64_t>;
+      std::vector<int64_t>,
+      int64_t,
+      bool>;
 
   Tensor run(const Tensor& input_arg_1, const Tensor& input_arg_2) const;
   State unpack() const;
@@ -50,25 +56,17 @@ class McLarenEncoderBlockOpContext final : public torch::jit::CustomClassHolder 
       const c10::optional<Tensor>& bias_1,
       IntArrayRef stride_1,
       IntArrayRef padding_1,
+      IntArrayRef output_padding_1,
       IntArrayRef dilation_1,
       int64_t groups_1,
       const Tensor& weight_2,
       const c10::optional<Tensor>& bias_2,
       IntArrayRef stride_2,
       IntArrayRef padding_2,
+      IntArrayRef output_padding_2,
       IntArrayRef dilation_2,
-      int64_t groups_2);
-
-  void conv2d_sliding_window(
-      vTensor& v_output,
-      const vTensor& v_input,
-      const vTensor& v_weight,
-      const vTensor& v_bias,
-      std::array<int64_t, 4> filter,
-      std::vector<int64_t> orig_filter,
-      std::array<int64_t, 2> stride,
-      std::array<int64_t, 2> padding,
-      std::array<int64_t, 2> dilation) const;
+      int64_t groups_2,
+      bool transposed);
 
  private:
   struct {
@@ -76,6 +74,9 @@ class McLarenEncoderBlockOpContext final : public torch::jit::CustomClassHolder 
     vTensor v_bias;
     std::array<int64_t, 4> filter;
     std::array<int64_t, 2> stride;
+    std::array<int64_t, 2> padding;
+    std::array<int64_t, 2> output_padding;
+    std::array<int64_t, 2> dilation;
   } packed_;
 
   struct {
@@ -84,6 +85,7 @@ class McLarenEncoderBlockOpContext final : public torch::jit::CustomClassHolder 
     std::vector<int64_t> filter_1;
     std::vector<int64_t> stride_1;
     std::vector<int64_t> padding_1;
+    std::vector<int64_t> output_padding_1;
     std::vector<int64_t> dilation_1;
     int64_t groups_1;
     Tensor weight_2;
@@ -91,8 +93,10 @@ class McLarenEncoderBlockOpContext final : public torch::jit::CustomClassHolder 
     std::vector<int64_t> filter_2;
     std::vector<int64_t> stride_2;
     std::vector<int64_t> padding_2;
+    std::vector<int64_t> output_padding_2;
     std::vector<int64_t> dilation_2;
     int64_t groups_2;
+    bool transposed;
   } unpacked_;
 };
 
@@ -106,14 +110,17 @@ c10::intrusive_ptr<McLarenEncoderBlockOpContext> mclaren_encoder_block_prepack(
     c10::optional<Tensor>&& bias_1,
     std::vector<int64_t>&& stride_1,
     std::vector<int64_t>&& padding_1,
+    std::vector<int64_t>&& output_padding_1,
     std::vector<int64_t>&& dilation_1,
     const int64_t groups_1,
     Tensor&& weight_2,
     c10::optional<Tensor>&& bias_2,
     std::vector<int64_t>&& stride_2,
     std::vector<int64_t>&& padding_2,
+    std::vector<int64_t>&& output_padding_2,
     std::vector<int64_t>&& dilation_2,
-    const int64_t groups_2);
+    const int64_t groups_2,
+    const bool transposed);
 
 } // namespace ops
 } // namespace vulkan

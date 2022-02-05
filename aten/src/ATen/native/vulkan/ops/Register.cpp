@@ -53,7 +53,10 @@ TORCH_LIBRARY(vulkan, m) {
                 std::move(std::get<8>(state)),
                 std::move(std::get<9>(state)),
                 std::move(std::get<10>(state)),
-                std::move(std::get<11>(state)));
+                std::move(std::get<11>(state)),
+                std::move(std::get<12>(state)),
+                std::move(std::get<13>(state)),
+                std::move(std::get<14>(state)));
           });
   m.class_<TransposeConv2dOpContext>("TransposeConv2dOpContext")
       .def_pickle(
@@ -90,8 +93,9 @@ TORCH_LIBRARY(vulkan, m) {
 TORCH_LIBRARY(mclaren_prepack, m) {
   m.def(TORCH_SELECTIVE_SCHEMA(
       "mclaren_prepack::mclaren_encoder_block_prepack("
-      "Tensor W_1, Tensor? B_1, int[2] stride_1, int[2] padding_1, int[2] dilation_1, int groups_1, "
-      "Tensor W_2, Tensor? B_2, int[2] stride_2, int[2] padding_2, int[2] dilation_2, int groups_2) "
+      "Tensor W_1, Tensor? B_1, int[2] stride_1, int[2] padding_1, int[2] output_padding_1, int[2] dilation_1, int groups_1, "
+      "Tensor W_2, Tensor? B_2, int[2] stride_2, int[2] padding_2, int[2] output_padding_2, int[2] dilation_2, int groups_2, "
+      "bool transposed) "
       "-> __torch__.torch.classes.vulkan.McLarenEncoderBlockOpContext"));
   m.def(TORCH_SELECTIVE_SCHEMA(
       "mclaren_prepack::mclaren_encoder_block_run(Tensor X_1, Tensor X_2, "
@@ -174,37 +178,6 @@ Tensor convolution(
       output_padding,
       groups
   ).run(input);
-}
-
-Tensor mclaren_encoder_block(
-    const Tensor& input_1,
-    const Tensor& input_2,
-    const Tensor& weight_1,
-    const c10::optional<Tensor>& bias_1,
-    const IntArrayRef stride_1,
-    const IntArrayRef padding_1,
-    const IntArrayRef dilation_1,
-    const int64_t groups_1,
-    const Tensor& weight_2,
-    const c10::optional<Tensor>& bias_2,
-    const IntArrayRef stride_2,
-    const IntArrayRef padding_2,
-    const IntArrayRef dilation_2,
-    const int64_t groups_2) {
-  return McLarenEncoderBlockOpContext::create(
-      weight_1,
-      bias_1,
-      stride_1,
-      padding_1,
-      dilation_1,
-      groups_1,
-      weight_2,
-      bias_2,
-      stride_2,
-      padding_2,
-      dilation_2,
-      groups_2
-  ).run(input_1, input_2);
 }
 
 TORCH_LIBRARY_IMPL(aten, Vulkan, m) {

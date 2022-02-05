@@ -49,7 +49,8 @@ void insertPrePackedMcLarenEncoderBlockOp(std::shared_ptr<Graph>& graph) {
   graph_rewrite_helper::replaceConvolutionWithAtenConv(graph);
 
   std::string conv_2d_pattern = R"(
-    graph(%dim:int, %input1, %weight1, %bias1, %stride1:int[], %padding1:int[], %dilation1:int[], %groups1:int,
+    graph(%dim:int,
+          %input1, %weight1, %bias1, %stride1:int[], %padding1:int[], %dilation1:int[], %groups1:int,
           %input2, %weight2, %bias2, %stride2:int[], %padding2:int[], %dilation2:int[], %groups2:int):
         %list : Tensor[] = prim::ListConstruct(%input1, %input2)
         %input = aten::cat(%list, %dim)
@@ -62,9 +63,12 @@ void insertPrePackedMcLarenEncoderBlockOp(std::shared_ptr<Graph>& graph) {
   std::string prepacked_ops_conv2d_pattern = R"(
     graph(%dim:int, %input1, %weight1, %bias1, %stride1:int[], %padding1:int[], %dilation1:int[], %groups1:int,
           %input2, %weight2, %bias2, %stride2:int[], %padding2:int[], %dilation2:int[], %groups2:int):
+        %transposed : bool = prim::Constant[value=0]()
+        %output_padding : int[] = prim::Constant[value=[0, 0]]()
         %packed = mclaren_prepack::mclaren_encoder_block_prepack(
-          %weight1, %bias1, %stride1, %padding1, %dilation1, %groups1,
-          %weight2, %bias2, %stride2, %padding2, %dilation2, %groups2)
+          %weight1, %bias1, %stride1, %padding1, %output_padding, %dilation1, %groups1,
+          %weight2, %bias2, %stride2, %padding2, %output_padding, %dilation2, %groups2,
+          %transposed)
         %r = mclaren_prepack::mclaren_encoder_block_run(%input1, %input2, %packed)
         return (%r) )";
 
@@ -72,6 +76,35 @@ void insertPrePackedMcLarenEncoderBlockOp(std::shared_ptr<Graph>& graph) {
   rewriter.RegisterRewritePattern(
       conv_2d_pattern, prepacked_ops_conv2d_pattern);
   rewriter.runOnGraph(graph);
+
+  std::string conv_2d_transpose_pattern = R"(
+    graph(%dim:int,
+          %input1, %weight1, %bias1, %stride1:int[], %padding1:int[], %dilation1:int[], %output_padding1:int[], %groups1:int,
+          %input2, %weight2, %bias2, %stride2:int[], %padding2:int[], %dilation2:int[], %output_padding2:int[], %groups2:int):
+        %list : Tensor[] = prim::ListConstruct(%input1, %input2)
+        %input = aten::cat(%list, %dim)
+        %r1 = aten::conv_transpose2d(%input, %weight1, %bias1, %stride1, %padding1, %output_padding1, %groups1, %dilation1)
+        %r2 = aten::conv_transpose2d(%input, %weight2, %bias2, %stride2, %padding2, %output_padding2, %groups2, %dilation2)
+        %r3 = aten::sigmoid(%r2)
+        %r = aten::mul(%r1, %r3)
+        return (%r) )";
+
+  std::string prepacked_ops_conv2d_transpose_pattern = R"(
+    graph(%dim:int,
+          %input1, %weight1, %bias1, %stride1:int[], %padding1:int[], %dilation1:int[], %output_padding1:int[], %groups1:int,
+          %input2, %weight2, %bias2, %stride2:int[], %padding2:int[], %dilation2:int[], %output_padding2:int[], %groups2:int):
+        %transposed : bool = prim::Constant[value=1]()
+        %packed = mclaren_prepack::mclaren_encoder_block_prepack(
+          %weight1, %bias1, %stride1, %padding1, %output_padding1, %dilation1, %groups1,
+          %weight2, %bias2, %stride2, %padding2, %output_padding2, %dilation2, %groups2,
+          %transposed)
+        %r = mclaren_prepack::mclaren_encoder_block_run(%input1, %input2, %packed)
+        return (%r) )";
+
+  SubgraphRewriter transpose_rewriter;
+  transpose_rewriter.RegisterRewritePattern(
+      conv_2d_transpose_pattern, prepacked_ops_conv2d_transpose_pattern);
+  transpose_rewriter.runOnGraph(graph);
 }
 
 void insertPrePackedConv2dOp(std::shared_ptr<Graph>& graph) {
@@ -260,8 +293,9 @@ script::Module vulkanOptimizeForMobile(
   cloned_module.eval();
   cloned_module = FoldConvBatchNorm(cloned_module);
   cloned_module = freeze_module(cloned_module, preserved_methods);
-  vulkanInsertPrePackedOps(cloned_module);
   cloned_module.dump(true, false, false);
+  vulkanInsertPrePackedOps(cloned_module);
+  //cloned_module.dump(true, false, false);
   vulkanFusePrePackedConvWithClamp(cloned_module);
   vulkanFoldPrePackingOps(cloned_module);
   removeDropout(cloned_module);

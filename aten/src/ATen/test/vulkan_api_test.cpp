@@ -169,6 +169,7 @@ TEST(VulkanAPITest, mclaren_encoder_block) {
   constexpr int64_t groups = 1;
   constexpr std::array<int64_t, 2u> stride{1, 2};
   constexpr std::array<int64_t, 2u> padding{0, 0};
+  constexpr std::array<int64_t, 2u> output_padding{0, 0};
   //TODO: Support conv2d with dilation != 1
   constexpr std::array<int64_t, 2u> dilation{1, 1};
 
@@ -207,18 +208,139 @@ TEST(VulkanAPITest, mclaren_encoder_block) {
       bias_1_cpu,
       stride,
       padding,
+      output_padding,
       dilation,
       groups,
       weights_2_cpu,
       bias_2_cpu,
       stride,
       padding,
+      output_padding,
       dilation,
-      groups);
+      groups,
+      false);
 
   auto op_out_ivalues =
       callOpByName("mclaren_prepack::mclaren_encoder_block_run", "", input_1_cpu.vulkan(), input_2_cpu.vulkan(), prepack[0]);
   auto output_vulkan = op_out_ivalues[0].toTensor().cpu();
+
+  const bool check = almostEqual(output_cpu, output_vulkan);
+
+  ASSERT_TRUE(check);
+}
+
+TEST(VulkanAPITest, mclaren_decoder_block) {
+  if (!at::is_vulkan_available()) {
+    return;
+  }
+
+  constexpr int64_t groups = 1;
+  constexpr std::array<int64_t, 2u> stride{1, 2};
+  constexpr std::array<int64_t, 2u> padding{1, 0};
+  constexpr std::array<int64_t, 2u> output_padding{0, 1};
+  //TODO: Support conv2d with dilation != 1
+  constexpr std::array<int64_t, 2u> dilation{1, 1};
+
+  const auto input_1_cpu = at::randn({1,4,1,39}, at::device(at::kCPU).dtype(at::kFloat))*5;
+  const auto input_2_cpu = at::randn({1,4,1,39}, at::device(at::kCPU).dtype(at::kFloat))*5;
+
+  const auto weights_1_cpu = at::randint(50, {4,1,2,3}, at::device(at::kCPU).dtype(at::kFloat))*2;
+  const auto bias_1_cpu = at::randint(50, {1}, at::device(at::kCPU).dtype(at::kFloat))*2;
+
+  const auto weights_2_cpu = at::randn({4,1,2,3}, at::device(at::kCPU).dtype(at::kFloat))*2;
+  const auto bias_2_cpu = at::randn({1}, at::device(at::kCPU).dtype(at::kFloat))*2;
+
+  const auto input_cpu = at::cat({input_1_cpu, input_2_cpu}, 2);
+  const auto output_1_cpu = at::conv_transpose2d(
+      input_cpu,
+      weights_1_cpu,
+      bias_1_cpu,
+      stride,
+      padding,
+      output_padding,
+      groups,
+      dilation);
+  const auto output_2_cpu = at::conv_transpose2d(
+      input_cpu,
+      weights_2_cpu,
+      bias_2_cpu,
+      stride,
+      padding,
+      output_padding,
+      groups,
+      dilation);
+  const auto output_cpu = output_1_cpu * at::sigmoid(output_2_cpu);
+  //const auto output_cpu = output_2_cpu;
+
+  auto prepack = callOpByName(
+      "mclaren_prepack::mclaren_encoder_block_prepack",
+      "",
+      weights_1_cpu,
+      bias_1_cpu,
+      stride,
+      padding,
+      output_padding,
+      dilation,
+      groups,
+      weights_2_cpu,
+      bias_2_cpu,
+      stride,
+      padding,
+      output_padding,
+      dilation,
+      groups,
+      true);
+
+  auto op_out_ivalues =
+      callOpByName("mclaren_prepack::mclaren_encoder_block_run", "", input_cpu.vulkan(), input_2_cpu.vulkan(), prepack[0]);
+  auto output_vulkan = op_out_ivalues[0].toTensor().cpu();
+
+  const bool check = almostEqual(output_cpu, output_vulkan);
+
+  ASSERT_TRUE(check);
+}
+
+TEST(VulkanAPITest, transpose_conv2d) {
+  if (!at::is_vulkan_available()) {
+    return;
+  }
+
+  constexpr int64_t groups = 1;
+  constexpr std::array<int64_t, 2u> stride{1, 2};
+  constexpr std::array<int64_t, 2u> padding{1, 0};
+  constexpr std::array<int64_t, 2u> output_padding{0, 1};
+  //TODO: Support conv2d with dilation != 1
+  constexpr std::array<int64_t, 2u> dilation{1, 1};
+
+  const auto input_1_cpu = at::randn({1,16,1,39}, at::device(at::kCPU).dtype(at::kFloat))*5;
+  const auto input_2_cpu = at::randn({1,16,1,39}, at::device(at::kCPU).dtype(at::kFloat))*5;
+
+  const auto weights_1_cpu = at::randn({16,8,2,3}, at::device(at::kCPU).dtype(at::kFloat))*2;
+  const auto bias_1_cpu = at::randn({8}, at::device(at::kCPU).dtype(at::kFloat))*2;
+
+  const auto weights_2_cpu = at::randn({16,8,2,3}, at::device(at::kCPU).dtype(at::kFloat))*2;
+  const auto bias_2_cpu = at::randn({8}, at::device(at::kCPU).dtype(at::kFloat))*2;
+
+  const auto input_cpu = at::cat({input_1_cpu, input_2_cpu}, 2);
+  const auto output_cpu = at::conv_transpose2d(
+      input_cpu,
+      weights_1_cpu,
+      bias_1_cpu,
+      stride,
+      padding,
+      output_padding,
+      groups,
+      dilation);
+
+  auto output_vulkan = at::conv_transpose2d(
+      input_cpu.vulkan(),
+      weights_1_cpu,
+      bias_1_cpu,
+      stride,
+      padding,
+      output_padding,
+      groups,
+      dilation).cpu();
 
   const bool check = almostEqual(output_cpu, output_vulkan);
 
