@@ -4592,7 +4592,7 @@ Fills :attr:`self` tensor with zeros.
 
 add_docstr_all('matmul',
                r"""
-matmul(tensor2) -> Tensor
+matmul(tensor2, *, dtype=None) -> Tensor
 
 See :func:`torch.matmul`
 """)

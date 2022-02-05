@@ -6736,7 +6736,7 @@ Keyword args:
 
 add_docstr(torch.matmul,
            r"""
-matmul(input, other, *, out=None) -> Tensor
+matmul(input, other, *, dtype=None, out=None) -> Tensor
 
 Matrix product of two tensors.
 
@@ -6765,6 +6765,10 @@ The behavior depends on the dimensionality of the tensors as follows:
   tensor, these inputs are valid for broadcasting even though the final two dimensions (i.e. the
   matrix dimensions) are different. :attr:`out` will be a :math:`(j \times k \times n \times p)` tensor.
 
+Optional keyword argument :attr:`dtype` is only supported when all input matrices
+are half precision on CUDA devices and the argument is set to `dtype=torch.float`.
+This will give an output matrix of float type.
+
 {tf32_note}
 
 .. note::
@@ -6776,6 +6780,7 @@ Arguments:
     other (Tensor): the second tensor to be multiplied
 
 Keyword args:
+    {dtype}
     {out}
 
 Example::
@@ -6806,7 +6811,7 @@ Example::
     >>> torch.matmul(tensor1, tensor2).size()
     torch.Size([10, 3, 5])
 
-""".format(**common_args, **tf32_notes))
+""".format(**common_args, **tf32_notes, **factory_data_common_args))
 
 add_docstr(torch.mode,
            r"""
