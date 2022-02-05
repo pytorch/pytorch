@@ -3213,14 +3213,12 @@ class TestPassManagerCudaFuser(JitTestCase):
 
 class TestCudaFuserOpInfo(JitCommonTestCase):
     def setUp(self):
-        super(TestCudaFuserOpInfo, self).setUp()
         self.cuda_fuser_options = CudaFuserTestOptions()
         self.nvfuser_single_node_mode = torch._C._jit_set_nvfuser_single_node_mode(True)
 
     def tearDown(self):
         self.cuda_fuser_options.restore()
         torch._C._jit_set_nvfuser_single_node_mode(self.nvfuser_single_node_mode)
-        super(TestCudaFuserOpInfo, self).tearDown()
 
     @unittest.skipIf(not RUN_CUDA, "requires CUDA")
     @ops(op_db, dtypes=OpDTypes.supported)
