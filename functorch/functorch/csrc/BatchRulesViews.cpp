@@ -57,7 +57,7 @@ namespace at { namespace functorch {
 // TORCH_LIBRARY_IMPL block:
 //   TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
 //     ...
-//     VMAP_SUPPORT("sum.int", sum_batch_rule);
+//     VMAP_SUPPORT2(sum, int, sum_batch_rule);
 //     ...
 //   }
 //
@@ -454,31 +454,31 @@ std::tuple<Tensor, optional<int64_t>> movedim_batch_rule(const Tensor& self, opt
 }
 
 TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
-  VMAP_SUPPORT("diag", diag_batch_rule);
-  VMAP_SUPPORT("chunk", chunk_batching_rule);
+  VMAP_SUPPORT(diag, diag_batch_rule);
+  VMAP_SUPPORT(chunk, chunk_batching_rule);
   m.impl("flatten.using_ints", static_cast<decltype(&ATEN_FN2(flatten, using_ints))>(native::flatten));
-  VMAP_SUPPORT("flip", flip_batch_rule);
+  VMAP_SUPPORT(flip, flip_batch_rule);
   m.impl("trace", trace_decomp);
-  VMAP_SUPPORT("tril", VARIADIC_BDIMS_BATCH_RULE(ATEN_FN(tril)));
-  VMAP_SUPPORT("triu", VARIADIC_BDIMS_BATCH_RULE(ATEN_FN(triu)));
-  VMAP_SUPPORT("repeat", repeat_batch_rule);
-  VMAP_SUPPORT("_unsafe_view", _unsafe_view_batch_rule);
-  VMAP_SUPPORT("unsqueeze", unsqueeze_batch_rule);
+  VMAP_SUPPORT(tril, VARIADIC_BDIMS_BATCH_RULE(ATEN_FN(tril)));
+  VMAP_SUPPORT(triu, VARIADIC_BDIMS_BATCH_RULE(ATEN_FN(triu)));
+  VMAP_SUPPORT(repeat, repeat_batch_rule);
+  VMAP_SUPPORT(_unsafe_view, _unsafe_view_batch_rule);
+  VMAP_SUPPORT(unsqueeze, unsqueeze_batch_rule);
   m.impl("resize_", resize__plumbing);
-  VMAP_SUPPORT("select.int", select_batching_rule);
-  VMAP_SUPPORT("squeeze", squeeze_batch_rule);
-  VMAP_SUPPORT("squeeze.dim", squeeze_dim_batch_rule);
-  VMAP_SUPPORT("_reshape_alias", _reshape_alias_batch_rule);
-  VMAP_SUPPORT("roll", roll_batch_rule);
-  VMAP_SUPPORT("permute", permute_batching_rule);
-  VMAP_SUPPORT("diagonal", diagonal_batching_rule);
-  VMAP_SUPPORT("diagonal_backward", diagonal_backward_batch_rule);
-  VMAP_SUPPORT("select_backward", select_backward_batch_rule);
-  VMAP_SUPPORT("slice_backward", slice_backward_batch_rule);
-  VMAP_SUPPORT("view", view_batching_rule);
-  VMAP_SUPPORT("expand", expand_batch_rule);
-  VMAP_SUPPORT("unfold", unfold_batch_rule);
-  VMAP_SUPPORT("movedim.intlist", movedim_batch_rule);
+  VMAP_SUPPORT2(select, int, select_batching_rule);
+  VMAP_SUPPORT(squeeze, squeeze_batch_rule);
+  VMAP_SUPPORT2(squeeze, dim, squeeze_dim_batch_rule);
+  VMAP_SUPPORT(_reshape_alias, _reshape_alias_batch_rule);
+  VMAP_SUPPORT(roll, roll_batch_rule);
+  VMAP_SUPPORT(permute, permute_batching_rule);
+  VMAP_SUPPORT(diagonal, diagonal_batching_rule);
+  VMAP_SUPPORT(diagonal_backward, diagonal_backward_batch_rule);
+  VMAP_SUPPORT(select_backward, select_backward_batch_rule);
+  VMAP_SUPPORT(slice_backward, slice_backward_batch_rule);
+  VMAP_SUPPORT(view, view_batching_rule);
+  VMAP_SUPPORT(expand, expand_batch_rule);
+  VMAP_SUPPORT(unfold, unfold_batch_rule);
+  VMAP_SUPPORT2(movedim, intlist, movedim_batch_rule);
 }
 
 }}

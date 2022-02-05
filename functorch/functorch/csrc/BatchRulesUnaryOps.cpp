@@ -14,10 +14,10 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
 
 #define UNARY_POINTWISE_ALL2(op, overload) \
   POINTWISE_BOXED2(op ## _, overload); \
-  VMAP_SUPPORT(#op "." #overload, BASIC_UNARY_BATCH_RULE(ATEN_FN2(op, overload)));
+  VMAP_SUPPORT2(op, overload, BASIC_UNARY_BATCH_RULE(ATEN_FN2(op, overload)));
 #define UNARY_POINTWISE_ALL(op) \
   POINTWISE_BOXED(op ## _); \
-  VMAP_SUPPORT(#op, BASIC_UNARY_BATCH_RULE(ATEN_FN(op)));
+  VMAP_SUPPORT(op, BASIC_UNARY_BATCH_RULE(ATEN_FN(op)));
 
   UNARY_POINTWISE(_to_copy);
   UNARY_POINTWISE(alias);

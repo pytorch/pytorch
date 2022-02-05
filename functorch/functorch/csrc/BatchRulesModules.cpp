@@ -375,7 +375,7 @@ struct CudnnGridSampleBackwardBatchRuleHelper {
 #define CUDNN_GRID_SAMPLE_BW_BATCH_RULE(fn)\
     CudnnGridSampleBackwardBatchRuleHelper<decltype(&ATEN_FN(fn)), &ATEN_FN(fn)>::apply
 
-#define UPSAMPLE_BACKWARD(op, overload) VMAP_SUPPORT(#op"."#overload, SINGLE_ARG(\
+#define UPSAMPLE_BACKWARD(op, overload) VMAP_SUPPORT2(op, overload, SINGLE_ARG(\
     UpsampleBackwardBatchRuleHelper<\
       decltype(&ATEN_FN2(op, overload)),\
       &ATEN_FN2(op, overload),\
@@ -390,18 +390,18 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   EXISTING_BDIM(im2col);
   EXISTING_BDIM(im2col_backward);
 
-  VMAP_SUPPORT("embedding", embedding_batch_rule);
-  VMAP_SUPPORT("embedding_dense_backward", embedding_dense_backward_batch_rule);
+  VMAP_SUPPORT(embedding, embedding_batch_rule);
+  VMAP_SUPPORT(embedding_dense_backward, embedding_dense_backward_batch_rule);
 
-  VMAP_SUPPORT("grid_sampler_2d", GRID_SAMPLE_BATCH_RULE(grid_sampler));
-  VMAP_SUPPORT("grid_sampler_2d_backward", GRID_SAMPLE_BW_BATCH_RULE(grid_sampler_2d_backward));
+  VMAP_SUPPORT(grid_sampler_2d, GRID_SAMPLE_BATCH_RULE(grid_sampler));
+  VMAP_SUPPORT(grid_sampler_2d_backward, GRID_SAMPLE_BW_BATCH_RULE(grid_sampler_2d_backward));
 
-  VMAP_SUPPORT("grid_sampler_3d", GRID_SAMPLE_BATCH_RULE(grid_sampler));
-  VMAP_SUPPORT("grid_sampler_3d_backward", GRID_SAMPLE_BW_BATCH_RULE(grid_sampler_3d_backward));
-  VMAP_SUPPORT("cudnn_grid_sampler_backward", CUDNN_GRID_SAMPLE_BW_BATCH_RULE(cudnn_grid_sampler_backward));
+  VMAP_SUPPORT(grid_sampler_3d, GRID_SAMPLE_BATCH_RULE(grid_sampler));
+  VMAP_SUPPORT(grid_sampler_3d_backward, GRID_SAMPLE_BW_BATCH_RULE(grid_sampler_3d_backward));
+  VMAP_SUPPORT(cudnn_grid_sampler_backward, CUDNN_GRID_SAMPLE_BW_BATCH_RULE(cudnn_grid_sampler_backward));
 
-  VMAP_SUPPORT("cudnn_grid_sampler", GRID_SAMPLE_BATCH_RULE(cudnn_grid_sampler));
-  VMAP_SUPPORT("cross", cross_batch_rule);
+  VMAP_SUPPORT(cudnn_grid_sampler, GRID_SAMPLE_BATCH_RULE(cudnn_grid_sampler));
+  VMAP_SUPPORT(cross, cross_batch_rule);
 
   EXISTING_BDIM(pixel_shuffle);
   EXISTING_BDIM(pixel_unshuffle);
