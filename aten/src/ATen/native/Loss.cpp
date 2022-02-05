@@ -112,8 +112,8 @@ Tensor& margin_ranking_loss_out
     reduce ? MaybeOwned<Tensor>::owned(at::empty({0}, options))
            : MaybeOwned<Tensor>::borrowed(result);
 
-  TensorIterator iter;
-  iter.build_ternary_op(*output_iter, input1, input2, target);
+  auto iter = TensorIterator::borrowing_ternary_op(
+    *output_iter, input1, input2, target);
 
   margin_ranking_stub(iter.device_type(), iter, margin);
 
@@ -497,13 +497,8 @@ Tensor margin_ranking_loss_backward_input1(
   // All tensors should be of the same size here, so we can use any of them.
   auto norm = reduction == Reduction::Mean ? (1. / target.numel()) : 1.;
   auto grad_input = at::zeros_like(target, MemoryFormat::Contiguous);
-  auto iter = TensorIteratorConfig()
-    .add_output(grad_input)
-    .add_input(input1)
-    .add_input(input2)
-    .add_input(target)
-    .add_input(grad_output)
-    .build();
+  auto iter = TensorIterator::borrowing_quaternary_op(
+    grad_input, input1, input2, target, grad_output);
   margin_ranking_backward_input1_stub(iter.device_type(), iter, norm, margin);
   return grad_input;
 }
@@ -519,13 +514,8 @@ Tensor margin_ranking_loss_backward_target(
   // All tensors should be of the same size here, so we can use any of them.
   auto norm = reduction == Reduction::Mean ? (1. / target.numel()) : 1.;
   auto grad_input = at::zeros_like(target, MemoryFormat::Contiguous);
-  auto iter = TensorIteratorConfig()
-    .add_output(grad_input)
-    .add_input(input1)
-    .add_input(input2)
-    .add_input(target)
-    .add_input(grad_output)
-    .build();
+  auto iter = TensorIterator::borrowing_quaternary_op(
+    grad_input, input1, input2, target, grad_output);
   margin_ranking_backward_target_stub(iter.device_type(), iter, norm, margin);
   return grad_input;
 }

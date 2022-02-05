@@ -627,9 +627,8 @@ TORCH_MODULE(PoissonNLLLoss);
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ MarginRankingLoss ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-/// Creates a criterion that measures the loss given
-/// inputs :math:`x1`, :math:`x2`, two 1D mini-batch `Tensors`,
-/// and a label 1D mini-batch tensor :math:`y` (containing 1 or -1).
+/// Creates a criterion that measures the loss given tensor
+/// inputs :math:`x1`, :math:`x2` and a label tensor :math:`y` (containing 1 or -1).
 /// See https://pytorch.org/docs/master/nn.html#torch.nn.MarginRankingLoss to learn
 /// about the exact behavior of this module.
 ///

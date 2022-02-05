@@ -613,7 +613,6 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.less: lambda input, other, out=None: -1,
         torch.lu: lambda A, pivot=True, get_infos=False, out=None: -1,
         torch.lu_solve: lambda b, LU_data, LU_pivots, out=None: -1,
-        torch.margin_ranking_loss: lambda input1, input2, target, margin=0, size_average=None, reduce=None, reduction='mean': -1,  # type: ignore[attr-defined]  # noqa: B950
         torch.masked_fill: lambda input, mask, value: -1,
         torch.masked_scatter: lambda input, mask, source: -1,
         torch.masked_select: lambda input, mask, out=None: -1,

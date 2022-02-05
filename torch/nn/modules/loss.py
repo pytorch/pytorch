@@ -1266,9 +1266,8 @@ class CosineEmbeddingLoss(_Loss):
 
 
 class MarginRankingLoss(_Loss):
-    r"""Creates a criterion that measures the loss given
-    inputs :math:`x1`, :math:`x2`, two 1D mini-batch or 0D `Tensors`,
-    and a label 1D mini-batch or 0D `Tensor` :math:`y` (containing 1 or -1).
+    r"""Creates a criterion that measures the loss given tensor
+    inputs :math:`x1`, :math:`x2` and a label tensor :math:`y` (containing 1 or -1).
 
     If :math:`y = 1` then it assumed the first input should be ranked higher
     (have a larger value) than the second input, and vice-versa for :math:`y = -1`.
@@ -1276,7 +1275,7 @@ class MarginRankingLoss(_Loss):
     The loss function for each pair of samples in the mini-batch is:
 
     .. math::
-        \text{loss}(x1, x2, y) = \max(0, -y * (x1 - x2) + \text{margin})
+        \text{loss}(x1, x2, y, margin) = \max(0, -y * (x1 - x2) + \text{margin})
 
     Args:
         margin (float, optional): Has a default value of :math:`0`.

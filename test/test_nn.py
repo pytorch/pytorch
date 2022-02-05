@@ -9759,9 +9759,9 @@ class TestNN(NNTestCase):
         target = torch.randn(15, dtype=torch.complex64).sgn()
 
         with self.assertRaisesRegex(
-            RuntimeError,
-            "margin_ranking_loss expects inputs to be non-complex"):
-                F.margin_ranking_loss(input1, input2, target)
+                RuntimeError,
+                "margin_ranking_loss expects inputs to be non-complex"):
+            F.margin_ranking_loss(input1, input2, target)
 
     def test_triplet_margin_loss(self):
         input1 = torch.randn(5, 10, requires_grad=True)
