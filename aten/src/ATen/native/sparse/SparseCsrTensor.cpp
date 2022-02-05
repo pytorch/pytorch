@@ -396,11 +396,20 @@ Tensor& eye_sparse_csr_out(int64_t n, int64_t m, Tensor& result) {
   TORCH_INTERNAL_ASSERT(result.is_sparse_csr());
 
   auto result_values = result.values();
+  int sz = (m < n) ? m : n;
+  auto crow_indices = result.crow_indices();
+  auto col_indices = result.col_indices();
+
+  crow_indices = at::full({n + 1}, /*fill_value=*/sz);
+  col_indices = at::empty({sz});
 
   // This call also ensures proper checks are done for the arguments
   at::native::eye_out_cpu(n, m, result_values);
 
-  result.copy_(result_values.to_sparse_csr());
+  TensorOptions options = TensorOptions().dtype(ScalarType::Long).layout(kStrided).device(result.device());
+  at::arange(sz, options, /*out=*/ crow_indices[:sz]);
+  at::arange(sz, options, /*out=*/ col_indices);
+
   return result;
 }
 
