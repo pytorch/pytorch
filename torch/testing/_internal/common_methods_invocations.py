@@ -12915,7 +12915,7 @@ op_db: List[OpInfo] = [
                    device_type='cuda', dtypes=(torch.float32, torch.complex64)
                ),
                # TODO: investigate. Probably implement a custom backward
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_composite_compliance'),
+               #DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_composite_compliance'),
                # Derivative wrt atol/rtol are not implemented
                DecorateInfo(unittest.expectedFailure, "TestCommon",
                             "test_floating_inputs_are_differentiable")
@@ -12960,7 +12960,7 @@ op_db: List[OpInfo] = [
                # test does not work with passing lambda for op
                DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
                # TODO: investigate. Probably implement a custom backward
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_composite_compliance'),
+               #DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_composite_compliance'),
                # Derivative wrt atol/rtol are not implemented
                DecorateInfo(unittest.expectedFailure, "TestCommon",
                             "test_floating_inputs_are_differentiable")

@@ -729,10 +729,13 @@ linalg_svd_rank_restricted(
     // init a mask by setting elements r:k to zero
     // NOTE: for performance reasons it would make sense to store these masks
     // in a single tensor. However, a view + zero_ on a buffer breaks CompositeCompliance tests.
-    // TODO: fix that once and if things with the autograd composite compliance become
-    // more flexible.
-    auto r_mask = at::ones({k}, input.options().dtype(at::kBool));
-    r_mask.narrow(-1, r, k - r).zero_();
+    // The code below creates a composite compliant r_mask such that
+    // r_mask[:r] == 1 and r_mask[:r] == 0
+    const auto mask_template = at::zeros({k}, input.options().dtype(at::kBool));
+    const auto r_mask_idx = at::arange(r, input.options().dtype(at::kLong));
+    // index_put does not work with scalars
+    const auto r_indicator = at::ones({1}, input.options().dtype(at::kBool)).expand({r});
+    const auto r_mask = mask_template.index_put({r_mask_idx}, r_indicator);
 
     // Form an index for matrices of rank r.
     const auto rank_r_mask = at::where(rank == r);
