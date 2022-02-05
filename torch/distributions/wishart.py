@@ -121,6 +121,9 @@ class Wishart(ExponentialFamily):
             )
         )
 
+        # Save eigenvectors to improve numerical stability of samples
+        self.eigvecs = torch.linalg.eigh
+
     def expand(self, batch_shape, _instance=None):
         new = self._get_checked_instance(Wishart, _instance)
         batch_shape = torch.Size(batch_shape)
@@ -190,8 +193,8 @@ class Wishart(ExponentialFamily):
 
         # Implemented Sampling using Bartlett decomposition
         noise = _clamp_with_eps(
-            self._dist_chi2.rsample(sample_shape).sqrt()
-        ).diag_embed(dim1=-2, dim2=-1)
+            self._dist_chi2.rsample(sample_shape)
+        ).sqrt().diag_embed(dim1=-2, dim2=-1)
 
         i, j = torch.tril_indices(p, p, offset=-1)
         noise[..., i, j] = torch.randn(

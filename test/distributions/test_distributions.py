@@ -2217,9 +2217,9 @@ class TestDistributions(TestCase):
     def test_wishart_shape(self):
         ndim = 3
 
-        df = torch.rand(5, requires_grad=True) + ndim - 1
-        df_no_batch = torch.rand([], requires_grad=True) + ndim - 1
-        df_multi_batch = torch.rand(6, 5, requires_grad=True) + ndim - 1
+        df = torch.rand(5, requires_grad=True) + ndim
+        df_no_batch = torch.rand([], requires_grad=True) + ndim
+        df_multi_batch = torch.rand(6, 5, requires_grad=True) + ndim
 
         # construct PSD covariance
         tmp = torch.randn(ndim, 10)
