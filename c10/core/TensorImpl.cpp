@@ -104,6 +104,9 @@ void TensorImpl::_set_fw_grad(
   autograd_meta_->set_fw_grad(new_grad, self, level, is_inplace_op);
 }
 
+// some compiler does not generate the destructor correctly
+TensorImpl::~TensorImpl() = default;
+
 TensorImpl::TensorImpl(
     Storage&& storage,
     DispatchKeySet key_set,
@@ -145,8 +148,7 @@ TensorImpl::TensorImpl(
       numel_(0),
       data_type_(data_type),
       device_opt_(storage_.device()),
-      key_set_(key_set.remove(
-          DispatchKey::Python)) { // See [Note: Python key removal]
+      key_set_(key_set - c10::python_ks) { // See [Note: Python key removal]
   init_bitfields();
   // Inference tensor doesn't have version counter.
   if (!is_inference()) {
@@ -187,12 +189,12 @@ TensorImpl::TensorImpl(
 
   // TODO: be more explicit about the full key set at call sites so we
   // don't have to keep recomputing it here
-  DispatchKey k = key_set.highestPriorityBackendTypeId();
+  auto k = key_set.highestBackendKey();
 
   key_set = key_set | getAutocastRelatedKeySetFromBackend(k);
 
-  key_set =
-      key_set.remove(DispatchKey::Python); // See [Note: Python key removal]
+  // See [Note: Python key removal]
+  key_set = key_set - c10::python_ks;
 
   // Inference tensor doesn't have autograd related keys.
   if (inference_mode) {
