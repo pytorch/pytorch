@@ -17,6 +17,27 @@ enum Conv2dMethod {
   Conv2dWinograd_2_3,
 };
 
+Conv2dMethod determine_method(
+    const IntArrayRef filter,
+    const IntArrayRef stride,
+    const IntArrayRef padding,
+    const IntArrayRef dilation,
+    const int64_t groups);
+
+vTensor pack_conv2d_weights(
+    const Tensor& weight_arg,
+    const Conv2dMethod conv_method);
+
+vTensor pack_conv2d_biases(
+    const c10::optional<Tensor>& bias,
+    const Tensor& weight);
+
+std::array<int64_t, 4> pack_conv2d_filter(
+    const Tensor& weight,
+    const IntArrayRef dilation);
+
+std::array<int64_t, 2> pack_conv2d_params(const std::vector<int64_t>& vector);
+
 class Conv2dOpContext final : public torch::jit::CustomClassHolder {
  public:
   static Conv2dOpContext create(

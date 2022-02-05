@@ -49,21 +49,6 @@ inline bool is_winograd_n_3(
          all_lessthan(dilation, 2);
 }
 
-Conv2dMethod determine_method(
-    const IntArrayRef filter,
-    const IntArrayRef stride,
-    const IntArrayRef padding,
-    const IntArrayRef dilation,
-    const int64_t groups) {
-  if (is_depthwise(filter, groups))
-    return Conv2dDepthwise;
-  if (is_pointwise(filter))
-    return Conv2dPointwise;
-  if (Experimentation::kUseWinogradConvs && is_winograd_n_3(filter, stride, dilation))
-    return Conv2dWinograd_2_3;
-  return Conv2dSlidingWindow;
-}
-
 vTensor pack_weights_dw(
     api::Context* const context,
     api::Command::Buffer& command_buffer,
@@ -282,118 +267,6 @@ vTensor pack_weights_2d_winograd_2_3(
   return v_weight;
 }
 
-vTensor pack_weights(
-    const Tensor& weight_arg,
-    const Conv2dMethod conv_method) {
-  if (weight_arg.is_vulkan()) {
-    return convert(weight_arg);
-  }
-
-  api::Context* const context = api::context();
-  api::Command::Buffer& command_buffer = context->command().pool.stream();
-
-  const Tensor weight = weight_arg.contiguous();
-
-  if (conv_method == Conv2dDepthwise) {
-    return pack_weights_dw(
-        context,
-        command_buffer,
-        weight);
-  }
-
-  if (conv_method == Conv2dWinograd_2_3) {
-    return pack_weights_2d_winograd_2_3(
-        context,
-        command_buffer,
-        weight);
-  }
-
-  return pack_weights_2d(
-      context,
-      command_buffer,
-      weight);
-}
-
-vTensor pack_biases(
-    const c10::optional<Tensor>& bias,
-    const Tensor& weight) {
-  if (bias && bias->is_vulkan()) {
-    return convert(*bias);
-  }
-
-  api::Context* const context = api::context();
-  api::Command::Buffer& command_buffer = context->command().pool.stream();
-
-  const int64_t src_w = weight.size(Layout::Filter::output);
-  const int64_t packed_w = div_up(src_w, INT64_C(4));
-  vTensor v_bias{
-    context,
-    {
-      4,
-      1,
-      packed_w,
-    },
-    weight.options(),
-  };
-
-  using Future = vTensor::Future<float, vTensor::Access::Write>;
-  Future v_bias_future = v_bias.host<float, vTensor::Access::Write>(command_buffer);
-  Future::Payload v_bias_payload = v_bias_future.wait();
-
-  if (bias) {
-    const float* const src_bias_ptr = bias->contiguous().data_ptr<float>();
-    float* const dst_bias_ptr = v_bias_payload.get();
-
-    memset(dst_bias_ptr, 0, v_bias.nbytes());
-    for (const auto i : c10::irange(src_w)) {
-      const int64_t c = i % 4;
-      const int64_t x = i / 4;
-      dst_bias_ptr[c * packed_w + x] = src_bias_ptr[i];
-    }
-  }
-  else {
-    memset(
-        v_bias_payload.get(),
-        // 2's complement integers and IEEE-754 floating point numbers both
-        // have identical bit representations for 0, so can use memset which
-        // only accepts uint8_t parameter.
-        0,
-        v_bias.nbytes());
-  }
-
-  return v_bias;
-}
-
-std::array<int64_t, 4> pack_filter(
-    const Tensor& weight,
-    const IntArrayRef dilation) {
-  const IntArrayRef filter = weight.sizes();
-
-  const auto effective = [](const int64_t k, const int64_t d) {
-    return k + (k - 1) * (d - 1);
-  };
-
-  return {
-    align_up(filter[Layout::Filter::output], INT64_C(4)),
-    align_up(filter[Layout::Filter::input], INT64_C(4)),
-    effective(
-        filter[Layout::Filter::height],
-        dilation[Layout::Parameter::height]),
-    effective(
-        filter[Layout::Filter::width],
-        dilation[Layout::Parameter::width]),
-  };
-}
-
-std::array<int64_t, 2> pack_params(const std::vector<int64_t>& vector) {
-  TORCH_INTERNAL_ASSERT(2u == vector.size(), "Invalid usage!");
-
-  return {
-    vector[0],
-    vector[1],
-  };
-}
-
 bool available(
     const Tensor& weight,
     const c10::optional<Tensor>& bias,
@@ -460,6 +333,133 @@ bool usable(const Tensor& input) {
 
 } // namespace
 
+Conv2dMethod determine_method(
+    const IntArrayRef filter,
+    const IntArrayRef stride,
+    const IntArrayRef padding,
+    const IntArrayRef dilation,
+    const int64_t groups) {
+  if (is_depthwise(filter, groups))
+    return Conv2dDepthwise;
+  if (is_pointwise(filter))
+    return Conv2dPointwise;
+  if (Experimentation::kUseWinogradConvs && is_winograd_n_3(filter, stride, dilation))
+    return Conv2dWinograd_2_3;
+  return Conv2dSlidingWindow;
+}
+
+vTensor pack_conv2d_weights(
+    const Tensor& weight_arg,
+    const Conv2dMethod conv_method) {
+  if (weight_arg.is_vulkan()) {
+    return convert(weight_arg);
+  }
+
+  api::Context* const context = api::context();
+  api::Command::Buffer& command_buffer = context->command().pool.stream();
+
+  const Tensor weight = weight_arg.contiguous();
+
+  if (conv_method == Conv2dDepthwise) {
+    return pack_weights_dw(
+        context,
+        command_buffer,
+        weight);
+  }
+
+  if (conv_method == Conv2dWinograd_2_3) {
+    return pack_weights_2d_winograd_2_3(
+        context,
+        command_buffer,
+        weight);
+  }
+
+  return pack_weights_2d(
+      context,
+      command_buffer,
+      weight);
+}
+
+vTensor pack_conv2d_biases(
+    const c10::optional<Tensor>& bias,
+    const Tensor& weight) {
+  if (bias && bias->is_vulkan()) {
+    return convert(*bias);
+  }
+
+  api::Context* const context = api::context();
+  api::Command::Buffer& command_buffer = context->command().pool.stream();
+
+  const int64_t src_w = weight.size(Layout::Filter::output);
+  const int64_t packed_w = div_up(src_w, INT64_C(4));
+  vTensor v_bias{
+    context,
+    {
+      4,
+      1,
+      packed_w,
+    },
+    weight.options(),
+  };
+
+  using Future = vTensor::Future<float, vTensor::Access::Write>;
+  Future v_bias_future = v_bias.host<float, vTensor::Access::Write>(command_buffer);
+  Future::Payload v_bias_payload = v_bias_future.wait();
+
+  if (bias) {
+    const float* const src_bias_ptr = bias->contiguous().data_ptr<float>();
+    float* const dst_bias_ptr = v_bias_payload.get();
+
+    memset(dst_bias_ptr, 0, v_bias.nbytes());
+    for (const auto i : c10::irange(src_w)) {
+      const int64_t c = i % 4;
+      const int64_t x = i / 4;
+      dst_bias_ptr[c * packed_w + x] = src_bias_ptr[i];
+    }
+  }
+  else {
+    memset(
+        v_bias_payload.get(),
+        // 2's complement integers and IEEE-754 floating point numbers both
+        // have identical bit representations for 0, so can use memset which
+        // only accepts uint8_t parameter.
+        0,
+        v_bias.nbytes());
+  }
+
+  return v_bias;
+}
+
+std::array<int64_t, 4> pack_conv2d_filter(
+    const Tensor& weight,
+    const IntArrayRef dilation) {
+  const IntArrayRef filter = weight.sizes();
+
+  const auto effective = [](const int64_t k, const int64_t d) {
+    return k + (k - 1) * (d - 1);
+  };
+
+  return {
+    align_up(filter[Layout::Filter::output], INT64_C(4)),
+    align_up(filter[Layout::Filter::input], INT64_C(4)),
+    effective(
+        filter[Layout::Filter::height],
+        dilation[Layout::Parameter::height]),
+    effective(
+        filter[Layout::Filter::width],
+        dilation[Layout::Parameter::width]),
+  };
+}
+
+std::array<int64_t, 2> pack_conv2d_params(const std::vector<int64_t>& vector) {
+  TORCH_INTERNAL_ASSERT(2u == vector.size(), "Invalid usage!");
+
+  return {
+    vector[0],
+    vector[1],
+  };
+}
+
 Conv2dOpContext::Conv2dOpContext(
     const Tensor& weight,
     const c10::optional<Tensor>& bias,
@@ -473,12 +473,12 @@ Conv2dOpContext::Conv2dOpContext(
     const c10::optional<Scalar>& output_min,
     const c10::optional<Scalar>& output_max)
   : packed_{
-      pack_weights(weight, method),
-      pack_biases(bias, weight),
-      pack_filter(weight, expand_param_if_needed(dilation, "dilation", 2)),
-      pack_params(expand_param_if_needed(stride, "stride", 2)),
-      pack_params(expand_param_if_needed(padding, "padding", 2)),
-      pack_params(expand_param_if_needed(dilation, "dilation", 2)),
+      pack_conv2d_weights(weight, method),
+      pack_conv2d_biases(bias, weight),
+      pack_conv2d_filter(weight, expand_param_if_needed(dilation, "dilation", 2)),
+      pack_conv2d_params(expand_param_if_needed(stride, "stride", 2)),
+      pack_conv2d_params(expand_param_if_needed(padding, "padding", 2)),
+      pack_conv2d_params(expand_param_if_needed(dilation, "dilation", 2)),
       safe_downcast<int32_t>(groups),
       output_min ? output_min->template to<float>() : -std::numeric_limits<float>::infinity(),
       output_max ? output_max->template to<float>() : +std::numeric_limits<float>::infinity(),

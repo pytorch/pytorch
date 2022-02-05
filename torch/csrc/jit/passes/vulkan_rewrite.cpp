@@ -45,6 +45,35 @@ void insertPrePackedLinearOp(std::shared_ptr<Graph>& graph) {
   linear_rewriter.runOnGraph(graph);
 }
 
+void insertPrePackedMcLarenEncoderBlockOp(std::shared_ptr<Graph>& graph) {
+  graph_rewrite_helper::replaceConvolutionWithAtenConv(graph);
+
+  std::string conv_2d_pattern = R"(
+    graph(%dim:int, %input1, %weight1, %bias1, %stride1:int[], %padding1:int[], %dilation1:int[], %groups1:int,
+          %input2, %weight2, %bias2, %stride2:int[], %padding2:int[], %dilation2:int[], %groups2:int):
+        %list : Tensor[] = prim::ListConstruct(%input1, %input2)
+        %input = aten::cat(%list, %dim)
+        %r1 = aten::conv2d(%input, %weight1, %bias1, %stride1, %padding1, %dilation1, %groups1)
+        %r2 = aten::conv2d(%input, %weight2, %bias2, %stride2, %padding2, %dilation2, %groups2)
+        %r3 = aten::sigmoid(%r2)
+        %r = aten::mul(%r1, %r3)
+        return (%r) )";
+
+  std::string prepacked_ops_conv2d_pattern = R"(
+    graph(%dim:int, %input1, %weight1, %bias1, %stride1:int[], %padding1:int[], %dilation1:int[], %groups1:int,
+          %input2, %weight2, %bias2, %stride2:int[], %padding2:int[], %dilation2:int[], %groups2:int):
+        %packed = mclaren_prepack::mclaren_encoder_block_prepack(
+          %weight1, %bias1, %stride1, %padding1, %dilation1, %groups1,
+          %weight2, %bias2, %stride2, %padding2, %dilation2, %groups2)
+        %r = mclaren_prepack::mclaren_encoder_block_run(%input1, %input2, %packed)
+        return (%r) )";
+
+  SubgraphRewriter rewriter;
+  rewriter.RegisterRewritePattern(
+      conv_2d_pattern, prepacked_ops_conv2d_pattern);
+  rewriter.runOnGraph(graph);
+}
+
 void insertPrePackedConv2dOp(std::shared_ptr<Graph>& graph) {
   graph_rewrite_helper::replaceConvolutionWithAtenConv(graph);
 
@@ -175,6 +204,7 @@ void fuseReluWithPackedOps(std::shared_ptr<Graph>& graph) {
 
 void vulkanInsertPrePackedOps(std::shared_ptr<Graph>& graph) {
   insertPrePackedLinearOp(graph);
+  insertPrePackedMcLarenEncoderBlockOp(graph);
   insertPrePackedConv2dOp(graph);
 }
 
@@ -202,6 +232,8 @@ void vulkanFoldPrePackingOps(script::Module& m) {
         (n->kind() ==
          Symbol::fromQualString("vulkan_prepack::linear_prepack")) ||
         (n->kind() ==
+         Symbol::fromQualString("mclaren_prepack::mclaren_encoder_block_prepack")) ||
+        (n->kind() ==
          Symbol::fromQualString(
              "vulkan_prepack::conv2d_transpose_clamp_prepack")));
   };
@@ -227,8 +259,9 @@ script::Module vulkanOptimizeForMobile(
   auto cloned_module = m.clone();
   cloned_module.eval();
   cloned_module = FoldConvBatchNorm(cloned_module);
-  vulkanInsertPrePackedOps(cloned_module);
   cloned_module = freeze_module(cloned_module, preserved_methods);
+  vulkanInsertPrePackedOps(cloned_module);
+  cloned_module.dump(true, false, false);
   vulkanFusePrePackedConvWithClamp(cloned_module);
   vulkanFoldPrePackingOps(cloned_module);
   removeDropout(cloned_module);

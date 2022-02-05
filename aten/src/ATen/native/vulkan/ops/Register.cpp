@@ -3,6 +3,7 @@
 #include <ATen/native/vulkan/ops/Common.h>
 #include <ATen/native/vulkan/ops/Convolution.h>
 #include <ATen/native/vulkan/ops/TransposeConvolution2d.h>
+#include <ATen/native/vulkan/ops/McLarenEncoderBlock.h>
 #include <ATen/native/vulkan/ops/Mm.h>
 #include <torch/custom_class.h>
 #include <torch/library.h>
@@ -31,6 +32,28 @@ TORCH_LIBRARY(vulkan, m) {
                 std::move(std::get<5>(state)),
                 std::move(std::get<6>(state)),
                 std::move(std::get<7>(state)));
+          });
+  m.class_<McLarenEncoderBlockOpContext>("McLarenEncoderBlockOpContext")
+      .def_pickle(
+          // __getstate__
+          [](const c10::intrusive_ptr<McLarenEncoderBlockOpContext>& context) {
+            return context->unpack();
+          },
+          // __setstate__
+          [](McLarenEncoderBlockOpContext::State state) {
+            return mclaren_encoder_block_prepack(
+                std::move(std::get<0>(state)),
+                std::move(std::get<1>(state)),
+                std::move(std::get<2>(state)),
+                std::move(std::get<3>(state)),
+                std::move(std::get<4>(state)),
+                std::move(std::get<5>(state)),
+                std::move(std::get<6>(state)),
+                std::move(std::get<7>(state)),
+                std::move(std::get<8>(state)),
+                std::move(std::get<9>(state)),
+                std::move(std::get<10>(state)),
+                std::move(std::get<11>(state)));
           });
   m.class_<TransposeConv2dOpContext>("TransposeConv2dOpContext")
       .def_pickle(
@@ -62,6 +85,25 @@ TORCH_LIBRARY(vulkan, m) {
             return linear_prepack(
                 std::move(std::get<0>(state)), std::move(std::get<1>(state)));
           });
+}
+
+TORCH_LIBRARY(mclaren_prepack, m) {
+  m.def(TORCH_SELECTIVE_SCHEMA(
+      "mclaren_prepack::mclaren_encoder_block_prepack("
+      "Tensor W_1, Tensor? B_1, int[2] stride_1, int[2] padding_1, int[2] dilation_1, int groups_1, "
+      "Tensor W_2, Tensor? B_2, int[2] stride_2, int[2] padding_2, int[2] dilation_2, int groups_2) "
+      "-> __torch__.torch.classes.vulkan.McLarenEncoderBlockOpContext"));
+  m.def(TORCH_SELECTIVE_SCHEMA(
+      "mclaren_prepack::mclaren_encoder_block_run(Tensor X_1, Tensor X_2, "
+      "__torch__.torch.classes.vulkan.McLarenEncoderBlockOpContext W_prepack) -> Tensor Y"));
+}
+
+TORCH_LIBRARY_IMPL(mclaren_prepack, CPU, m) {
+  m.impl(TORCH_SELECTIVE_NAME("mclaren_prepack::mclaren_encoder_block_prepack"), TORCH_FN(mclaren_encoder_block_prepack));
+}
+
+TORCH_LIBRARY_IMPL(mclaren_prepack, Vulkan, m) {
+  m.impl(TORCH_SELECTIVE_NAME("mclaren_prepack::mclaren_encoder_block_run"), TORCH_FN(mclaren_encoder_block_run));
 }
 
 TORCH_LIBRARY(vulkan_prepack, m) {
@@ -132,6 +174,37 @@ Tensor convolution(
       output_padding,
       groups
   ).run(input);
+}
+
+Tensor mclaren_encoder_block(
+    const Tensor& input_1,
+    const Tensor& input_2,
+    const Tensor& weight_1,
+    const c10::optional<Tensor>& bias_1,
+    const IntArrayRef stride_1,
+    const IntArrayRef padding_1,
+    const IntArrayRef dilation_1,
+    const int64_t groups_1,
+    const Tensor& weight_2,
+    const c10::optional<Tensor>& bias_2,
+    const IntArrayRef stride_2,
+    const IntArrayRef padding_2,
+    const IntArrayRef dilation_2,
+    const int64_t groups_2) {
+  return McLarenEncoderBlockOpContext::create(
+      weight_1,
+      bias_1,
+      stride_1,
+      padding_1,
+      dilation_1,
+      groups_1,
+      weight_2,
+      bias_2,
+      stride_2,
+      padding_2,
+      dilation_2,
+      groups_2
+  ).run(input_1, input_2);
 }
 
 TORCH_LIBRARY_IMPL(aten, Vulkan, m) {
