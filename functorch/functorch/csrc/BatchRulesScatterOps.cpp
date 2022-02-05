@@ -716,15 +716,15 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   m.impl("select_scatter", select_scatter_decomp);
   m.impl("index_copy", index_copy_decomp);
   m.impl("index_select", index_select_decomp);
-  VMAP_SUPPORT("index_add", index_add_batch_rule);
-  VMAP_SUPPORT("diagonal_scatter", diagonal_scatter_batch_rule);
-  VMAP_SUPPORT("gather", gather_batch_rule);
-  VMAP_SUPPORT("gather_backward", gather_backward_batch_rule);
-  VMAP_SUPPORT("scatter.value", scatter_value_batch_rule);
-  VMAP_SUPPORT("scatter.src", scatter_src_batch_rule);
-  VMAP_SUPPORT("scatter_add", scatter_add_batch_rule);
-  VMAP_SUPPORT("scatter.reduce", scatter_reduce_batch_rule);
-  VMAP_SUPPORT("scatter.value_reduce", scatter_value_reduce_batch_rule);
+  VMAP_SUPPORT(index_add, index_add_batch_rule);
+  VMAP_SUPPORT(diagonal_scatter, diagonal_scatter_batch_rule);
+  VMAP_SUPPORT(gather, gather_batch_rule);
+  VMAP_SUPPORT(gather_backward, gather_backward_batch_rule);
+  VMAP_SUPPORT2(scatter, value, scatter_value_batch_rule);
+  VMAP_SUPPORT2(scatter, src, scatter_src_batch_rule);
+  VMAP_SUPPORT(scatter_add, scatter_add_batch_rule);
+  VMAP_SUPPORT2(scatter, reduce, scatter_reduce_batch_rule);
+  VMAP_SUPPORT2(scatter, value_reduce, scatter_value_reduce_batch_rule);
 }
 
 }}
