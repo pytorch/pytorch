@@ -7,11 +7,12 @@ layout(std430) buffer;
 /* Qualifiers: layout - storage - precision - memory */
 
 layout(set = 0, binding = 0, FORMAT) uniform PRECISION restrict writeonly image3D   uOutput;
-layout(set = 0, binding = 1)         uniform PRECISION                    sampler3D uInput1;
-layout(set = 0, binding = 2)         uniform PRECISION                    sampler3D uInput2;
-layout(set = 0, binding = 3)         uniform PRECISION                    sampler3D uKernel;
-layout(set = 0, binding = 4)         uniform PRECISION                    sampler3D uBias;
-layout(set = 0, binding = 5)         uniform PRECISION restrict           Block {
+layout(set = 0, binding = 1)         uniform PRECISION                    sampler3D uPadding;
+layout(set = 0, binding = 2)         uniform PRECISION                    sampler3D uPrevOut;
+layout(set = 0, binding = 3)         uniform PRECISION                    sampler3D uEncoderOut;
+layout(set = 0, binding = 4)         uniform PRECISION                    sampler3D uKernel;
+layout(set = 0, binding = 5)         uniform PRECISION                    sampler3D uBias;
+layout(set = 0, binding = 6)         uniform PRECISION restrict           Block {
   ivec4 size;
   ivec4 kernel;
   ivec2 ikernel;
@@ -47,8 +48,12 @@ void main() {
       int kx = kx_start;
       for (int x = start.x, kx = kx_start; x < end.x; ++x, kx += kx_stride) {
         for (int z4 = 0; z4 < uBlock.size.w/4; ++z4, kx += 4) {
-          const vec4 In = (y == 0) ? texelFetch(uInput1, ivec3(x, 0, z4), 0)
-                                   : texelFetch(uInput2, ivec3(x, 0, z4), 0);
+          const vec4 In = (y == 1) ? ((z4 < uBlock.size.w/8) ? texelFetch(uPrevOut, ivec3(x, 0, z4), 0)
+                                                             : texelFetch(uEncoderOut, ivec3(x, 0, z4 - uBlock.size.w/8), 0))
+                                   : texelFetch(uPadding, ivec3(x, 0, z4), 0);
+          //const vec4 In = (y == 0) ? texelFetch(uPadding, ivec3(x, 0, z4), 0)
+          //                         : texelFetch(uPrevOut, ivec3(x, 0, z4), 0);
+          //vec4 In = texelFetch(uPadding, ivec3(x, y, z4), 0);
           const ivec4 kxs = kx + ivec4(0, 1, 2, 3);
 
           sum1 = fma(In.xxxx, texelFetch(uKernel, ivec3(kxs.x, 2*ky, 0), 0), sum1);

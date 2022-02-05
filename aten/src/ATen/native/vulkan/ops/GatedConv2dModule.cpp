@@ -143,6 +143,12 @@ vTensor pack_combined_weights_reverse(const Tensor& weight_arg_1, const Tensor& 
         for (int64_t src_iw = 0; src_iw < src_kw_sz; ++src_iw) {
           const int64_t dst_w = src_kw_sz - 1 - src_iw;
           const int64_t dst_w_offset = dst_w * stack_depth;
+          /*
+          memcpy(
+              dst_weight_c_ptr + (dst_oh * src_kh_sz + dst_h) * dst_kw_sz + src_ic + dst_w_offset,
+              src_weight_1_oc_ptr + src_ic * src_kernel_sz + src_ih * src_kw_sz + src_iw,
+              sizeof(float));
+          */
           memcpy(
               dst_weight_c_ptr + (2*(dst_oh * src_kh_sz + dst_h)) * dst_kw_sz + src_ic + dst_w_offset,
               src_weight_1_oc_ptr + src_ic * src_kernel_sz + src_ih * src_kw_sz + src_iw,
@@ -224,114 +230,86 @@ static inline std::vector<int64_t> get_conv_transpose_output_size(
 }
 
 GatedConv2dModuleOpContext::GatedConv2dModuleOpContext(
-      const Tensor& weight_1,
-      const c10::optional<Tensor>& bias_1,
-      IntArrayRef stride_1,
-      IntArrayRef padding_1,
-      IntArrayRef output_padding_1,
-      IntArrayRef dilation_1,
-      const int64_t groups_1,
-      const Tensor& weight_2,
-      const c10::optional<Tensor>& bias_2,
-      IntArrayRef stride_2,
-      IntArrayRef padding_2,
-      IntArrayRef output_padding_2,
-      IntArrayRef dilation_2,
-      const int64_t groups_2,
+      const Tensor& weight_a,
+      const c10::optional<Tensor>& bias_a,
+      const Tensor& weight_b,
+      const c10::optional<Tensor>& bias_b,
+      IntArrayRef stride,
+      IntArrayRef padding,
+      IntArrayRef output_padding,
+      IntArrayRef dilation,
+      const int64_t groups,
       const bool transposed)
   : packed_{
-      transposed ? pack_combined_weights_reverse(weight_1, weight_2) : pack_combined_weights(weight_1, weight_2),
-      pack_combined_biases(bias_1, bias_2),
-      pack_conv2d_filter(weight_1, expand_param_if_needed(dilation_1, "dilation", 2)),
-      pack_conv2d_params(expand_param_if_needed(stride_1, "stride", 2)),
-      pack_conv2d_params(expand_param_if_needed(padding_1, "padding", 2)),
-      pack_conv2d_params(expand_param_if_needed(output_padding_1, "output_padding", 2)),
-      pack_conv2d_params(expand_param_if_needed(dilation_1, "dilation", 2)),
+      transposed ? pack_combined_weights_reverse(weight_a, weight_b) : pack_combined_weights(weight_a, weight_b),
+      pack_combined_biases(bias_a, bias_b),
+      pack_conv2d_filter(weight_a, expand_param_if_needed(dilation, "dilation", 2)),
+      pack_conv2d_params(expand_param_if_needed(stride, "stride", 2)),
+      pack_conv2d_params(expand_param_if_needed(padding, "padding", 2)),
+      pack_conv2d_params(expand_param_if_needed(output_padding, "output_padding", 2)),
+      pack_conv2d_params(expand_param_if_needed(dilation, "dilation", 2)),
     },
     unpacked_{
-      weight_1,
-      bias_1,
-      weight_1.sizes().vec(),
-      stride_1.vec(),
-      padding_1.vec(),
-      output_padding_1.vec(),
-      dilation_1.vec(),
-      groups_1,
-      weight_2,
-      bias_2,
-      weight_2.sizes().vec(),
-      stride_2.vec(),
-      padding_2.vec(),
-      output_padding_2.vec(),
-      dilation_2.vec(),
-      groups_2,
-      transposed,
+      weight_a,
+      bias_a,
+      weight_b,
+      bias_b,
+      weight_a.sizes().vec(),
+      stride.vec(),
+      padding.vec(),
+      output_padding.vec(),
+      dilation.vec(),
+      groups,
+      transposed
     } {
 }
 
 GatedConv2dModuleOpContext GatedConv2dModuleOpContext::create(
-      const Tensor& weight_1,
-      const c10::optional<Tensor>& bias_1,
-      IntArrayRef stride_1,
-      IntArrayRef padding_1,
-      IntArrayRef output_padding_1,
-      IntArrayRef dilation_1,
-      const int64_t groups_1,
-      const Tensor& weight_2,
-      const c10::optional<Tensor>& bias_2,
-      IntArrayRef stride_2,
-      IntArrayRef padding_2,
-      IntArrayRef output_padding_2,
-      IntArrayRef dilation_2,
-      const int64_t groups_2,
+      const Tensor& weight_a,
+      const c10::optional<Tensor>& bias_a,
+      const Tensor& weight_b,
+      const c10::optional<Tensor>& bias_b,
+      IntArrayRef stride,
+      IntArrayRef padding,
+      IntArrayRef output_padding,
+      IntArrayRef dilation,
+      const int64_t groups,
       const bool transposed) {
   // Pass in the originals
   return GatedConv2dModuleOpContext{
-    weight_1,
-    bias_1,
-    stride_1,
-    padding_1,
-    output_padding_1,
-    dilation_1,
-    groups_1,
-    weight_2,
-    bias_2,
-    stride_2,
-    padding_2,
-    output_padding_2,
-    dilation_2,
-    groups_2,
+    weight_a,
+    bias_a,
+    weight_b,
+    bias_b,
+    stride,
+    padding,
+    output_padding,
+    dilation,
+    groups,
     transposed
   };
 }
 
-Tensor GatedConv2dModuleOpContext::run(const Tensor& input_arg_1, const Tensor& input_arg_2) const {
+Tensor GatedConv2dModuleOpContext::run(const Tensor& padding_arg, const Tensor& prev_out_arg) const {
   api::Context* const context = api::context();
 
-  const Tensor input_1 = input_arg_1.is_vulkan() ? input_arg_1 : input_arg_1.vulkan();
-  const vTensor& v_input_1 = convert(input_1);
-  const Tensor input_2 = input_arg_2.is_vulkan() ? input_arg_2 : input_arg_2.vulkan();
-  const vTensor& v_input_2 = convert(input_2);
+  const Tensor padding = padding_arg.is_vulkan() ? padding_arg : padding_arg.vulkan();
+  const vTensor& v_padding = convert(padding);
+  const Tensor prev_out = prev_out_arg.is_vulkan() ? prev_out_arg : prev_out_arg.vulkan();
+  const vTensor& v_prev_out = convert(prev_out);
 
-  std::vector<int64_t> input_1_size = input_1.sizes().vec();
-  std::vector<int64_t> input_2_size = input_2.sizes().vec();
-  TORCH_CHECK(input_1_size.size() == 4, "GatedConv2dModule: first input tensor must have exactly 4 dims")
-  TORCH_CHECK(input_2_size.size() == 4, "GatedConv2dModule: second input tensor must have exactly 4 dims")
-  //TORCH_CHECK(input_1_size[2] == 1, "GatedConv2dModule: first input tensor must have height of exactly 1")
-  //TORCH_CHECK(input_2_size[2] == 1, "GatedConv2dModule: second input tensor must have height of exactly 1")
-  std::vector<int64_t> conv_input_size(input_1_size);
+  std::vector<int64_t> padding_size = padding.sizes().vec();
+  std::vector<int64_t> prev_out_size = prev_out.sizes().vec();
+  TORCH_CHECK(padding_size.size() == 4, "GatedConv2dModule: first input tensor must have exactly 4 dims")
+  TORCH_CHECK(prev_out_size.size() == 4, "GatedConv2dModule: second input tensor must have exactly 4 dims")
+  //TORCH_CHECK(padding_size[2] == 1, "GatedConv2dModule: first input tensor must have height of exactly 1")
+  //TORCH_CHECK(prev_out_size[2] == 1, "GatedConv2dModule: second input tensor must have height of exactly 1")
+  std::vector<int64_t> conv_input_size(padding_size);
   conv_input_size[2] = 2;
-  std::vector<int64_t> output_size = !unpacked_.transposed ? conv_output_size(
+  std::vector<int64_t> output_size = conv_output_size(
     conv_input_size,
-    unpacked_.filter_1,
+    unpacked_.filter,
     /*padding=*/{0,0},
-    packed_.stride,
-    /*dilation=*/{1,1}
-  ) : get_conv_transpose_output_size(
-    conv_input_size,
-    unpacked_.filter_1,
-    packed_.padding,
-    packed_.output_padding,
     packed_.stride,
     /*dilation=*/{1,1}
   );
@@ -339,7 +317,7 @@ Tensor GatedConv2dModuleOpContext::run(const Tensor& input_arg_1, const Tensor& 
   vTensor v_output{
     context,
     output_size,
-    input_1.options(),
+    padding.options(),
   };
 
   api::Command::Pool& command_pool = context->command().pool;
@@ -362,8 +340,8 @@ Tensor GatedConv2dModuleOpContext::run(const Tensor& input_arg_1, const Tensor& 
         safe_downcast<int32_t>(conv_input_size[Layout::Activation4D::height]),
       },
       {
-        safe_downcast<int32_t>(unpacked_.filter_1[Layout::Filter::width]),
-        safe_downcast<int32_t>(unpacked_.filter_1[Layout::Filter::height]),
+        safe_downcast<int32_t>(unpacked_.filter[Layout::Filter::width]),
+        safe_downcast<int32_t>(unpacked_.filter[Layout::Filter::height]),
       },
       {
         safe_downcast<int32_t>(packed_.stride[Layout::Parameter::width]),
@@ -387,17 +365,17 @@ Tensor GatedConv2dModuleOpContext::run(const Tensor& input_arg_1, const Tensor& 
           VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
           VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
         },
-        unpacked_.transposed ? VK_KERNEL(gated_conv_transpose2d_module) : VK_KERNEL(gated_conv2d_module),
+        VK_KERNEL(gated_conv2d_module),
         global_size,
         adaptive_work_group_size(global_size),
         v_output.image(
             command_buffer,
             vTensor::Stage::Compute,
             vTensor::Access::Write),
-        v_input_1.image(
+        v_padding.image(
             command_buffer,
             vTensor::Stage::Compute),
-        v_input_2.image(
+        v_prev_out.image(
             command_buffer,
             vTensor::Stage::Compute),
         packed_.v_weight.image(
@@ -411,69 +389,175 @@ Tensor GatedConv2dModuleOpContext::run(const Tensor& input_arg_1, const Tensor& 
   command_pool.submit(context->gpu().queue, command_buffer);
 
   return convert(v_output);
-  //return convert(packed_.v_weight);
+}
+
+Tensor GatedConv2dModuleOpContext::run_transpose(
+    const Tensor& padding_arg, const Tensor& prev_out_arg, const Tensor& encoder_out_arg) const {
+  api::Context* const context = api::context();
+
+  const Tensor padding = padding_arg.is_vulkan() ? padding_arg : padding_arg.vulkan();
+  const vTensor& v_padding = convert(padding);
+  const Tensor prev_out = prev_out_arg.is_vulkan() ? prev_out_arg : prev_out_arg.vulkan();
+  const vTensor& v_prev_out = convert(prev_out);
+  const Tensor encoder_out = encoder_out_arg.is_vulkan() ? encoder_out_arg : encoder_out_arg.vulkan();
+  const vTensor& v_encoder_out = convert(encoder_out);
+
+  std::vector<int64_t> padding_size = padding.sizes().vec();
+  std::vector<int64_t> prev_out_size = prev_out.sizes().vec();
+  std::vector<int64_t> encoder_out_size = encoder_out.sizes().vec();
+  //TORCH_CHECK(padding_size.size() == 4, "GatedConv2dModule: third input tensor must have exactly 4 dims")
+  //TORCH_CHECK(prev_out_size[2] == 1, "GatedConv2dModule: first input tensor must have height of exactly 1")
+  //TORCH_CHECK(prev_out_size.size() == 4, "GatedConv2dModule: first input tensor must have exactly 4 dims")
+  //TORCH_CHECK(encoder_out_size.size() == 4, "GatedConv2dModule: second input tensor must have exactly 4 dims")
+  //TORCH_CHECK(encoder_out_size[2] == 1, "GatedConv2dModule: second input tensor must have height of exactly 1")
+  //TORCH_CHECK(padding_size[2] == 1, "GatedConv2dModule: third input tensor must have height of exactly 1")
+  //TORCH_CHECK(prev_out_size[1] == encoder_out_size[1], "GatedConv2dModule: first two inputs must have the number of channels")
+  std::vector<int64_t> conv_input_size(padding_size);
+  conv_input_size[2] = 2;
+  std::vector<int64_t> output_size = get_conv_transpose_output_size(
+    conv_input_size,
+    unpacked_.filter,
+    packed_.padding,
+    packed_.output_padding,
+    packed_.stride,
+    /*dilation=*/{1,1}
+  );
+
+  vTensor v_output{
+    context,
+    output_size,
+    prev_out.options(),
+  };
+
+  api::Command::Pool& command_pool = context->command().pool;
+  api::Command::Buffer& command_buffer = command_pool.stream();
+  {
+    const struct Block final {
+      uvec3 extents;
+      int32_t ic4;
+      ivec4 kernel;
+      ivec2 ikernel;
+      ivec2 stride;
+      ivec2 padding;
+    } block {
+      v_output.extents(),
+      safe_downcast<int32_t>(packed_.filter[Layout::TransposedFilter::input]),
+      {
+        safe_downcast<int32_t>(packed_.filter[Layout::Filter::width]),
+        safe_downcast<int32_t>(packed_.filter[Layout::Filter::height]),
+        safe_downcast<int32_t>(conv_input_size[Layout::Activation4D::width]),
+        safe_downcast<int32_t>(conv_input_size[Layout::Activation4D::height]),
+      },
+      {
+        safe_downcast<int32_t>(unpacked_.filter[Layout::Filter::width]),
+        safe_downcast<int32_t>(unpacked_.filter[Layout::Filter::height]),
+      },
+      {
+        safe_downcast<int32_t>(packed_.stride[Layout::Parameter::width]),
+        safe_downcast<int32_t>(packed_.stride[Layout::Parameter::height]),
+      },
+      {
+        safe_downcast<int32_t>(packed_.padding[Layout::Parameter::width]),
+        safe_downcast<int32_t>(packed_.padding[Layout::Parameter::height]),
+      },
+    };
+
+    uvec3 global_size = v_output.extents();
+
+    context->dispatch(
+        command_buffer,
+        {
+          VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+          VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+          VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+          VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+          VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+          VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+          VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+        },
+        VK_KERNEL(gated_conv_transpose2d_module),
+        global_size,
+        adaptive_work_group_size(global_size),
+        v_output.image(
+            command_buffer,
+            vTensor::Stage::Compute,
+            vTensor::Access::Write),
+        v_padding.image(
+            command_buffer,
+            vTensor::Stage::Compute),
+        v_prev_out.image(
+            command_buffer,
+            vTensor::Stage::Compute),
+        v_encoder_out.image(
+            command_buffer,
+            vTensor::Stage::Compute),
+        packed_.v_weight.image(
+            command_buffer,
+            vTensor::Stage::Compute),
+        packed_.v_bias.image(
+            command_buffer,
+            vTensor::Stage::Compute),
+        context->resource().pool.uniform(block).object);
+  }
+  command_pool.submit(context->gpu().queue, command_buffer);
+
+  //return convert(v_output);
+  return convert(v_output);
 }
 
 GatedConv2dModuleOpContext::State GatedConv2dModuleOpContext::unpack() const {
   return GatedConv2dModuleOpContext::State{
-    unpacked_.weight_1,
-    unpacked_.bias_1,
-    unpacked_.stride_1,
-    unpacked_.padding_1,
-    unpacked_.output_padding_1,
-    unpacked_.dilation_1,
-    unpacked_.groups_1,
-    unpacked_.weight_2,
-    unpacked_.bias_2,
-    unpacked_.stride_2,
-    unpacked_.padding_2,
-    unpacked_.output_padding_2,
-    unpacked_.dilation_2,
-    unpacked_.groups_2,
+    unpacked_.weight_a,
+    unpacked_.bias_a,
+    unpacked_.weight_b,
+    unpacked_.bias_b,
+    unpacked_.stride,
+    unpacked_.padding,
+    unpacked_.output_padding,
+    unpacked_.dilation,
+    unpacked_.groups,
     unpacked_.transposed
   };
 }
 
 c10::intrusive_ptr<GatedConv2dModuleOpContext> gated_conv2d_module_prepack(
-    Tensor&& weight_1,
-    c10::optional<Tensor>&& bias_1,
-    std::vector<int64_t>&& stride_1,
-    std::vector<int64_t>&& padding_1,
-    std::vector<int64_t>&& output_padding_1,
-    std::vector<int64_t>&& dilation_1,
-    const int64_t groups_1,
-    Tensor&& weight_2,
-    c10::optional<Tensor>&& bias_2,
-    std::vector<int64_t>&& stride_2,
-    std::vector<int64_t>&& padding_2,
-    std::vector<int64_t>&& output_padding_2,
-    std::vector<int64_t>&& dilation_2,
-    const int64_t groups_2,
+    Tensor&& weight_a,
+    c10::optional<Tensor>&& bias_a,
+    Tensor&& weight_b,
+    c10::optional<Tensor>&& bias_b,
+    std::vector<int64_t>&& stride,
+    std::vector<int64_t>&& padding,
+    std::vector<int64_t>&& output_padding,
+    std::vector<int64_t>&& dilation,
+    const int64_t groups,
     const bool transposed) {
   return c10::make_intrusive<GatedConv2dModuleOpContext>(
       GatedConv2dModuleOpContext::create(
-          std::move(weight_1),
-          std::move(bias_1),
-          std::move(stride_1),
-          std::move(padding_1),
-          std::move(output_padding_1),
-          std::move(dilation_1),
-          groups_1,
-          std::move(weight_2),
-          std::move(bias_2),
-          std::move(stride_2),
-          std::move(padding_2),
-          std::move(output_padding_2),
-          std::move(dilation_2),
-          groups_2,
+          std::move(weight_a),
+          std::move(bias_a),
+          std::move(weight_b),
+          std::move(bias_b),
+          std::move(stride),
+          std::move(padding),
+          std::move(output_padding),
+          std::move(dilation),
+          groups,
           transposed));
 }
 
 Tensor gated_conv2d_module_run(
-    const Tensor& input_1,
-    const Tensor& input_2,
+    const Tensor& padding,
+    const Tensor& prev_out,
     const c10::intrusive_ptr<GatedConv2dModuleOpContext>& context) {
-  return context->run(input_1, input_2);
+  return context->run(padding, prev_out);
+}
+
+Tensor gated_conv_transpose2d_module_run(
+    const Tensor& padding,
+    const Tensor& prev_out,
+    const Tensor& encoder_out,
+    const c10::intrusive_ptr<GatedConv2dModuleOpContext>& context) {
+  return context->run_transpose(padding, prev_out, encoder_out);
 }
 
 } // namespace ops

@@ -14,30 +14,20 @@ namespace ops {
 class GatedConv2dModuleOpContext final : public torch::jit::CustomClassHolder {
  public:
   static GatedConv2dModuleOpContext create(
-      const Tensor& weight_1,
-      const c10::optional<Tensor>& bias_1,
-      IntArrayRef stride_1,
-      IntArrayRef padding_1,
-      IntArrayRef output_padding_1,
-      IntArrayRef dilation_1,
-      const int64_t groups_1,
-      const Tensor& weight_2,
-      const c10::optional<Tensor>& bias_2,
-      IntArrayRef stride_2,
-      IntArrayRef padding_2,
-      IntArrayRef output_padding_2,
-      IntArrayRef dilation_2,
-      const int64_t groups_2,
+      const Tensor& weight_a,
+      const c10::optional<Tensor>& bias_a,
+      const Tensor& weight_b,
+      const c10::optional<Tensor>& bias_b,
+      IntArrayRef stride,
+      IntArrayRef padding,
+      IntArrayRef output_padding,
+      IntArrayRef dilation,
+      const int64_t groups,
       const bool transposed);
 
   using State = std::tuple<
       Tensor,
       c10::optional<Tensor>,
-      std::vector<int64_t>,
-      std::vector<int64_t>,
-      std::vector<int64_t>,
-      std::vector<int64_t>,
-      int64_t,
       Tensor,
       c10::optional<Tensor>,
       std::vector<int64_t>,
@@ -47,25 +37,22 @@ class GatedConv2dModuleOpContext final : public torch::jit::CustomClassHolder {
       int64_t,
       bool>;
 
-  Tensor run(const Tensor& input_arg_1, const Tensor& input_arg_2) const;
+  Tensor run(const Tensor& padding, const Tensor& prev_out) const;
+  Tensor run_transpose(
+      const Tensor& prev_out, const Tensor& encoder_out, const Tensor& padding) const;
   State unpack() const;
 
  private:
   GatedConv2dModuleOpContext(
-      const Tensor& weight_1,
-      const c10::optional<Tensor>& bias_1,
-      IntArrayRef stride_1,
-      IntArrayRef padding_1,
-      IntArrayRef output_padding_1,
-      IntArrayRef dilation_1,
-      int64_t groups_1,
-      const Tensor& weight_2,
-      const c10::optional<Tensor>& bias_2,
-      IntArrayRef stride_2,
-      IntArrayRef padding_2,
-      IntArrayRef output_padding_2,
-      IntArrayRef dilation_2,
-      int64_t groups_2,
+      const Tensor& weight_a,
+      const c10::optional<Tensor>& bias_a,
+      const Tensor& weight_b,
+      const c10::optional<Tensor>& bias_b,
+      IntArrayRef stride,
+      IntArrayRef padding,
+      IntArrayRef output_padding,
+      IntArrayRef dilation,
+      int64_t groups,
       bool transposed);
 
  private:
@@ -80,46 +67,41 @@ class GatedConv2dModuleOpContext final : public torch::jit::CustomClassHolder {
   } packed_;
 
   struct {
-    Tensor weight_1;
-    c10::optional<Tensor> bias_1;
-    std::vector<int64_t> filter_1;
-    std::vector<int64_t> stride_1;
-    std::vector<int64_t> padding_1;
-    std::vector<int64_t> output_padding_1;
-    std::vector<int64_t> dilation_1;
-    int64_t groups_1;
-    Tensor weight_2;
-    c10::optional<Tensor> bias_2;
-    std::vector<int64_t> filter_2;
-    std::vector<int64_t> stride_2;
-    std::vector<int64_t> padding_2;
-    std::vector<int64_t> output_padding_2;
-    std::vector<int64_t> dilation_2;
-    int64_t groups_2;
+    Tensor weight_a;
+    c10::optional<Tensor> bias_a;
+    Tensor weight_b;
+    c10::optional<Tensor> bias_b;
+    std::vector<int64_t> filter;
+    std::vector<int64_t> stride;
+    std::vector<int64_t> padding;
+    std::vector<int64_t> output_padding;
+    std::vector<int64_t> dilation;
+    int64_t groups;
     bool transposed;
   } unpacked_;
 };
 
 Tensor gated_conv2d_module_run(
-    const Tensor& input_1,
-    const Tensor& input_2,
+    const Tensor& padding,
+    const Tensor& prev_out,
+    const c10::intrusive_ptr<GatedConv2dModuleOpContext>& context);
+
+Tensor gated_conv_transpose2d_module_run(
+    const Tensor& prev_out,
+    const Tensor& encoder_out,
+    const Tensor& padding,
     const c10::intrusive_ptr<GatedConv2dModuleOpContext>& context);
 
 c10::intrusive_ptr<GatedConv2dModuleOpContext> gated_conv2d_module_prepack(
-    Tensor&& weight_1,
-    c10::optional<Tensor>&& bias_1,
-    std::vector<int64_t>&& stride_1,
-    std::vector<int64_t>&& padding_1,
-    std::vector<int64_t>&& output_padding_1,
-    std::vector<int64_t>&& dilation_1,
-    const int64_t groups_1,
-    Tensor&& weight_2,
-    c10::optional<Tensor>&& bias_2,
-    std::vector<int64_t>&& stride_2,
-    std::vector<int64_t>&& padding_2,
-    std::vector<int64_t>&& output_padding_2,
-    std::vector<int64_t>&& dilation_2,
-    const int64_t groups_2,
+    Tensor&& weight_a,
+    c10::optional<Tensor>&& bias_a,
+    Tensor&& weight_b,
+    c10::optional<Tensor>&& bias_b,
+    std::vector<int64_t>&& stride,
+    std::vector<int64_t>&& padding,
+    std::vector<int64_t>&& output_padding,
+    std::vector<int64_t>&& dilation,
+    const int64_t groups,
     const bool transposed);
 
 } // namespace ops

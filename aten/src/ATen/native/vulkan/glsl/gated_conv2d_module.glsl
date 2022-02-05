@@ -7,8 +7,8 @@ layout(std430) buffer;
 /* Qualifiers: layout - storage - precision - memory */
 
 layout(set = 0, binding = 0, FORMAT) uniform PRECISION restrict writeonly image3D   uOutput;
-layout(set = 0, binding = 1)         uniform PRECISION                    sampler3D uInput1;
-layout(set = 0, binding = 2)         uniform PRECISION                    sampler3D uInput2;
+layout(set = 0, binding = 1)         uniform PRECISION                    sampler3D uPadding;
+layout(set = 0, binding = 2)         uniform PRECISION                    sampler3D uPrevOut;
 layout(set = 0, binding = 3)         uniform PRECISION                    sampler3D uKernel;
 layout(set = 0, binding = 4)         uniform PRECISION                    sampler3D uBias;
 layout(set = 0, binding = 5)         uniform PRECISION restrict           Block {
@@ -35,7 +35,7 @@ void main() {
     for (int z4 = 0; z4 < uBlock.size.w/4; ++z4, kstart.x += uBlock.ikernel.x*4) {
       int ky = kstart.y;
       for (int x = start_x, kx = kstart.x; x < end_x; ++x, kx += 4) {
-        vec4 In = texelFetch(uInput1, ivec3(x, 0, z4), 0);
+        vec4 In = texelFetch(uPadding, ivec3(x, 0, z4), 0);
         const ivec4 kxs = kx + ivec4(0, 1, 2, 3);
 
         sum1 = fma(In.xxxx, texelFetch(uKernel, ivec3(kxs.x, ky, 0), 0), sum1);
@@ -50,7 +50,7 @@ void main() {
       }
       ky += 2;
       for (int x = start_x, kx = kstart.x; x < end_x; ++x, kx += 4) {
-        vec4 In = texelFetch(uInput2, ivec3(x, 0, z4), 0);
+        vec4 In = texelFetch(uPrevOut, ivec3(x, 0, z4), 0);
         const ivec4 kxs = kx + ivec4(0, 1, 2, 3);
 
         sum1 = fma(In.xxxx, texelFetch(uKernel, ivec3(kxs.x, ky, 0), 0), sum1);
