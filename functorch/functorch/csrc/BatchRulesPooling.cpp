@@ -64,7 +64,7 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   ALL_TENSORS_HAVE_OPTIONAL_BDIM_BOXED_CONTIG1(3, adaptive_max_pool2d_backward, 2);
   ALL_TENSORS_HAVE_OPTIONAL_BDIM_BOXED_CONTIG1(4, adaptive_max_pool3d_backward, 2);
 
-  VMAP_SUPPORT("max_pool2d_with_indices", max_pool2d_with_indices_batch_rule);
+  VMAP_SUPPORT(max_pool2d_with_indices, max_pool2d_with_indices_batch_rule);
   ALL_TENSORS_HAVE_OPTIONAL_BDIM_BOXED_CONTIG1(3, max_pool2d_with_indices_backward, 2);
 }
 
