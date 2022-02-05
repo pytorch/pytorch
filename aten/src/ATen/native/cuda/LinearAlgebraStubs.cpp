@@ -26,37 +26,19 @@ struct MagmaInitializer {
 #endif
 namespace at {
 namespace native {
-#if !defined(BUILD_LAZY_CUDA_LINALG)
-std::tuple<Tensor, Tensor> legacy_lstsq_cuda_impl(const Tensor &B, const Tensor &A);
-std::tuple<Tensor, Tensor> _solve_helper_cuda_impl(const Tensor& self, const Tensor& A);
-std::tuple<Tensor, Tensor> _symeig_helper_cuda_impl(const Tensor& self, bool eigenvectors, bool upper);
-Tensor _cholesky_solve_helper_cuda_impl(const Tensor& self, const Tensor& A, bool upper);
-std::tuple<Tensor, Tensor> _linalg_qr_helper_cuda_impl(const Tensor& input, c10::string_view mode);
-Tensor& _linalg_inv_out_helper_cuda_impl(Tensor &result, Tensor& infos_lu, Tensor& infos_getri);
-#else
+#if defined(BUILD_LAZY_CUDA_LINALG)
 namespace {
-std::tuple<Tensor, Tensor> (*legacy_lstsq_cuda_impl)(const Tensor &B, const Tensor &A) = nullptr;
-std::tuple<Tensor, Tensor> (*_solve_helper_cuda_impl)(const Tensor& self, const Tensor& A) = nullptr;
-std::tuple<Tensor, Tensor> (*_symeig_helper_cuda_impl)(const Tensor& self, bool eigenvectors, bool upper) = nullptr;
-Tensor (*_cholesky_solve_helper_cuda_impl)(const Tensor& self, const Tensor& A, bool upper) = nullptr;
-std::tuple<Tensor, Tensor> (*_linalg_qr_helper_cuda_impl)(const Tensor& input, c10::string_view mode) = nullptr;
-Tensor& (*_linalg_inv_out_helper_cuda_impl)(Tensor &result, Tensor& infos_lu, Tensor& infos_getri) = nullptr;
-}
 
 at::DynamicLibrary& getTorchLinalgLibrary() {
-  static at::DynamicLibrary lib("libtorch_cuda_linalg.so");
+  static at::DynamicLibrary lib("libtorch_cuda_linalg.so", nullptr, true);
   return lib;
 }
 
-Tensor& _linalg_inv_out_helper_cuda(Tensor &result, Tensor& infos_lu, Tensor& infos_getri) {
-    if (!_linalg_inv_out_helper_cuda_impl) {
-          _linalg_inv_out_helper_cuda_impl = reinterpret_cast<decltype(&_linalg_inv_out_helper_cuda)>(getTorchLinalgLibrary().sym("_ZN2at6native32_linalg_inv_out_helper_cuda_implERNS_6TensorES2_S2_"));
-          TORCH_CHECK(_linalg_inv_out_helper_cuda_impl != nullptr, "Can't find");
-        }
-    return _linalg_inv_out_helper_cuda_impl(result, infos_lu, infos_getri);
+template<typename T>
+T getTorchLinalgFunc(const char *fname) {
+  return reinterpret_cast<T>(getTorchLinalgLibrary().sym(fname));
 }
 
-namespace {
 // Lazy dispatches do nothing but load linalg library and call the stub
 // Loading the library should override the registration of those with the proper implementation
 // getTorchLinalgLibrary() throws an exception if library is not found
@@ -149,23 +131,41 @@ REGISTER_CUDA_DISPATCH(lu_solve_trans_stub, &lazy_lu_solve_trans);
 REGISTER_CUDA_DISPATCH(lu_solve_stub, &lazy_lu_solve);
 REGISTER_CUDA_DISPATCH(lstsq_stub, &lazy_lstsq_kernel);
 } // anonymous namespace
-#endif /*defined(BUILD_LAZY_CUDA_LINALG)*/
+
+// Old style dispatch
+Tensor& _linalg_inv_out_helper_cuda(Tensor &result, Tensor& infos_lu, Tensor& infos_getri) {
+    static auto impl = getTorchLinalgFunc<decltype(&_linalg_inv_out_helper_cuda)>("_ZN2at6native27_linalg_inv_out_helper_cudaERNS_6TensorES2_S2_");
+    TORCH_CHECK(impl != nullptr, "Can't find _linalg_inv_out_helper_cuda");
+    return impl(result, infos_lu, infos_getri);
+}
 
 std::tuple<Tensor, Tensor> legacy_lstsq_cuda(const Tensor &B, const Tensor &A) {
-    return legacy_lstsq_cuda_impl(B, A);
+    static auto impl = getTorchLinalgFunc<decltype(&legacy_lstsq_cuda)>("_ZN2at6native17legacy_lstsq_cudaERKNS_6TensorES3_");
+    TORCH_CHECK(impl != nullptr, "Can't find legacy_lstsq_cuda");
+    return impl(B, A);
 }
+
 Tensor _cholesky_solve_helper_cuda(const Tensor& self, const Tensor& A, bool upper) {
-    return _cholesky_solve_helper_cuda_impl(self, A, upper);
+    static auto impl = getTorchLinalgFunc<decltype(&_cholesky_solve_helper_cuda)>("_ZN2at6native27_cholesky_solve_helper_cudaERKNS_6TensorES3_b");
+    return impl(self, A, upper);
 }
+
 std::tuple<Tensor, Tensor> _linalg_qr_helper_cuda(const Tensor& input, c10::string_view mode) {
-    return _linalg_qr_helper_cuda_impl(input, mode);
+    static auto impl = getTorchLinalgFunc<decltype(&_linalg_qr_helper_cuda)>("_ZN2at6native22_linalg_qr_helper_cudaERKNS_6TensorEN3c1017basic_string_viewIcEE");
+    return impl(input, mode);
 }
+
 std::tuple<Tensor, Tensor> _symeig_helper_cuda(const Tensor& self, bool eigenvectors, bool upper) {
-    return _symeig_helper_cuda_impl(self, eigenvectors, upper);
+    static auto impl = getTorchLinalgFunc<decltype(&_symeig_helper_cuda)>("_ZN2at6native19_symeig_helper_cudaERKNS_6TensorEbb");
+    return impl(self, eigenvectors, upper);
 }
+
 std::tuple<Tensor, Tensor> _solve_helper_cuda(const Tensor& self, const Tensor& A) {
-    return _solve_helper_cuda_impl(self, A);
+    static auto impl = getTorchLinalgFunc<decltype(&_solve_helper_cuda)>("_ZN2at6native18_solve_helper_cudaERKNS_6TensorES3_");
+    return impl(self, A);
 }
+
+#endif /*defined(BUILD_LAZY_CUDA_LINALG)*/
 
 std::tuple<Tensor&, Tensor&> legacy_lstsq_out_cuda(
     const Tensor& B, const Tensor& A, Tensor& B_out, Tensor& A_out) {

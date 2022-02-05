@@ -1325,7 +1325,7 @@ AT_ERROR("solve: MAGMA library not found in "
 #endif
 }
 
-std::tuple<Tensor, Tensor> _solve_helper_cuda_impl(const Tensor& self, const Tensor& A) {
+std::tuple<Tensor, Tensor> _solve_helper_cuda(const Tensor& self, const Tensor& A) {
   auto self_working_copy = cloneBatchedColumnMajor(self);
   auto A_working_copy = cloneBatchedColumnMajor(A);
   // infos might not get filled for empty inputs therefore at::zeros is used instead of at::empty
@@ -1575,7 +1575,7 @@ Tensor _cholesky_solve_helper_cuda_magma(const Tensor& self, const Tensor& A, bo
 
 // Todo: cusolverDn<T>potrsBatched only supports nrhs == 1 and does not have good performance.
 //     Batched cholesky_solve is dispatched to magma.
-Tensor _cholesky_solve_helper_cuda_impl(const Tensor& self, const Tensor& A, bool upper) {
+Tensor _cholesky_solve_helper_cuda(const Tensor& self, const Tensor& A, bool upper) {
 #ifdef USE_CUSOLVER
   auto preferred_backend = at::globalContext().linalgPreferredBackend();
   switch (preferred_backend) {
@@ -2323,7 +2323,7 @@ std::tuple<Tensor, Tensor> linalg_qr_helper_magma(const Tensor& self, c10::strin
   return std::make_tuple(q_working_copy, r_working_copy);
 }
 
-std::tuple<Tensor, Tensor> _linalg_qr_helper_cuda_impl(const Tensor& input, c10::string_view mode) {
+std::tuple<Tensor, Tensor> _linalg_qr_helper_cuda(const Tensor& input, c10::string_view mode) {
 #if defined(USE_CUSOLVER)
   auto preferred_backend = at::globalContext().linalgPreferredBackend();
   switch (preferred_backend) {
@@ -2416,7 +2416,7 @@ static void apply_magma_eigh(const Tensor& values, const Tensor& vectors, const 
 #endif
 }
 
-std::tuple<Tensor, Tensor> _symeig_helper_cuda_impl(const Tensor& self, bool eigenvectors, bool upper) {
+std::tuple<Tensor, Tensor> _symeig_helper_cuda(const Tensor& self, bool eigenvectors, bool upper) {
   Tensor infos = at::zeros({std::max<int64_t>(1, batchCount(self))}, self.options().dtype(kInt).device(at::kCPU));
 
   auto eigvals_shape = IntArrayRef(self.sizes().data(), self.dim()-1);  // self.shape[:-1]
@@ -3190,7 +3190,7 @@ REGISTER_CUDA_DISPATCH(lstsq_stub, &lstsq_kernel);
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ legacy_lstsq ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-std::tuple<Tensor, Tensor> legacy_lstsq_cuda_impl(const Tensor &B, const Tensor &A) {
+std::tuple<Tensor, Tensor> legacy_lstsq_cuda(const Tensor &B, const Tensor &A) {
   TORCH_WARN_ONCE(
       "torch.lstsq is deprecated in favor of torch.linalg.lstsq and will be removed in a future PyTorch release.\n",
       "torch.linalg.lstsq has reversed arguments and does not return the QR decomposition in "
