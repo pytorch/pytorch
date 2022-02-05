@@ -7,7 +7,6 @@ import numpy as np
 import tensorrt as trt
 import torch
 import torch.fx.experimental.fx_acc.acc_ops as acc_ops
-import torch.fx.experimental.fx_acc.acc_utils as acc_utils
 from torch.fx.experimental.fx2trt.converter_registry import tensorrt_converter
 from torch.fx.experimental.fx2trt.types import *  # noqa: F403
 from torch.fx.experimental.fx2trt.utils import (
@@ -16,6 +15,7 @@ from torch.fx.experimental.fx2trt.utils import (
 )
 from torch.fx.immutable_collections import immutable_list
 from torch.fx.node import Target, Argument
+from torch.fx.passes.shape_prop import TensorMetadata
 
 from .converter_utils import *  # noqa: F403
 
@@ -1376,7 +1376,7 @@ def acc_ops_reshape(
             "of the TensorRT region!"
         )
 
-    shape = acc_utils.get_field_from_acc_out_ty(kwargs["acc_out_ty"], "shape")  # type: ignore[arg-type]
+    shape = TensorMetadata(*kwargs["acc_out_ty"]).shape  # type: ignore[misc]
     if network.has_implicit_batch_dimension:
         shape = shape[1:]
 
@@ -1422,30 +1422,26 @@ def acc_ops_slice_tensor(
                            "of the TensorRT region!")
 
     ranks = len(input_val.shape) + (1 if network.has_implicit_batch_dimension else 0)
-    dims = [get_positive_dim(dim, ranks) for dim in cast(Sequence[int], kwargs["dims"])]
+    dim = get_positive_dim(cast(int, kwargs["dim"]), ranks)
 
     if network.has_implicit_batch_dimension:
-        if not len(dims):
-            raise RuntimeError("dim argument cannot be empty!")
-        if any([dim == 0 for dim in dims]):
+        if dim == 0:
             raise RuntimeError(
-                f"We do not support slice_tensor at batch dim when it's implicit, got {dims}!"
+                f"We do not support slice_tensor at batch dim when it's implicit, got {dim}!"
             )
-        dims = [d - 1 for d in dims]
+        dim = dim - 1
     else:
         raise RuntimeError("We don't support slice_tensor with explicit batch dimension yet!")
 
+    start_int = cast(int, kwargs["start"])
+    stop_int = cast(int, kwargs["stop"])
+    step_int = cast(int, kwargs["step"])
     start = [0] * len(input_val.shape)
+    start[dim] = start_int
     stride = [1] * len(start)
+    stride[dim] = step_int
     output_shape = list(input_val.shape)
-    starts = cast(Sequence[int], kwargs["starts"])
-    stops = cast(Sequence[int], kwargs["stops"])
-    steps = cast(Sequence[int], kwargs["steps"])
-
-    for i, dim in enumerate(dims):
-        start[dim] = starts[i]
-        stride[dim] = steps[i]
-        output_shape[dim] = (stops[i] - starts[i]) // steps[i]
+    output_shape[dim] = (stop_int - start_int) // step_int
 
     layer = network.add_slice(input_val, start=start, shape=output_shape, stride=stride)
     set_layer_name(layer, target, name)
@@ -1665,7 +1661,7 @@ def acc_ops_getitem(
         size = math.ceil((stop - start) * 1.0 / stride)
         return start, size, stride
 
-    if not isinstance(slices, tuple):
+    if not isinstance(slices, tuple) and not isinstance(slices, list):
         slices = (slices,)
 
     if network.has_implicit_batch_dimension:
@@ -1887,10 +1883,10 @@ def acc_ops_quantize_per_tensor(
         raise RuntimeError(f"{name} received input {input_val} that is not part "
                            "of the TensorRT region!")
 
-    qparams = acc_utils.get_field_from_acc_out_ty(kwargs["acc_out_ty"], "qparams")  # type: ignore[arg-type]
+    qparams = TensorMetadata(*kwargs["acc_out_ty"]).qparams  # type: ignore[misc]
     q_scale = qparams["scale"]
     q_zero_point = qparams["zero_point"]
-    dtype = acc_utils.get_field_from_acc_out_ty(kwargs["acc_out_ty"], "dtype")  # type: ignore[arg-type]
+    dtype = TensorMetadata(*kwargs["acc_out_ty"]).dtype  # type: ignore[misc]
     if dtype not in (torch.quint8, torch.qint8, torch.qint32):
         raise RuntimeError("Only support (torch.quint8, torch.qint8, torch.qint32) "
                            f"quantized type in quantize_per_tensor, get {dtype}.")
@@ -1923,11 +1919,11 @@ def acc_ops_quantize_per_channel(
         raise RuntimeError(f"{name} received input {input_val} that is not part "
                            "of the TensorRT region!")
 
-    qparams = acc_utils.get_field_from_acc_out_ty(kwargs["acc_out_ty"], "qparams")  # type: ignore[arg-type]
+    qparams = TensorMetadata(*kwargs["acc_out_ty"]).qparams  # type: ignore[misc]
     q_per_channel_scales = qparams["scale"]
     q_per_channel_zero_points = qparams["zero_point"]
     q_per_channel_axis = qparams["axis"]
-    dtype = acc_utils.get_field_from_acc_out_ty(kwargs["acc_out_ty"], "dtype")  # type: ignore[arg-type]
+    dtype = TensorMetadata(*kwargs["acc_out_ty"]).dtype  # type: ignore[misc]
     if dtype not in (torch.quint8, torch.qint8, torch.qint32):
         raise RuntimeError("Only support (torch.quint8, torch.qint8, torch.qint32) "
                            f"quantized type in quantize_per_tensor, get {dtype}.")
@@ -1970,7 +1966,7 @@ def acc_ops_dequantize(
         raise RuntimeError(f"{name} received input {input_val} that is not part "
                            "of the TensorRT region!")
 
-    qparams = acc_utils.get_field_from_acc_out_ty(input_val_tensor_meta, "qparams")  # type: ignore[arg-type]
+    qparams = TensorMetadata(*input_val_tensor_meta).qparams  # type: ignore[misc]
     qscheme = qparams["qscheme"]
     if qscheme == torch.per_tensor_affine:
         q_scale = qparams["scale"]
@@ -1990,7 +1986,7 @@ def acc_ops_dequantize(
     else:
         raise RuntimeError("Unsupported qscheme in dequantize: {qscheme}")
 
-    dtype = acc_utils.get_field_from_acc_out_ty(input_val_tensor_meta, "dtype")  # type: ignore[arg-type]
+    dtype = TensorMetadata(*input_val_tensor_meta).dtype  # type: ignore[misc]
 
     if dtype not in (torch.quint8, torch.qint8, torch.qint32):
         raise RuntimeError("Only support (torch.quint8, torch.qint8, torch.qint32) "

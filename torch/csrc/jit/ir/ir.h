@@ -1485,6 +1485,9 @@ inline Value::Value(Node* node_, size_t offset_)
 
 inline Value* Value::setType(TypePtr type) {
   AT_ASSERT(type);
+  if (auto dyn = type->castRaw<c10::DynamicType>()) {
+    type = dyn->fallback();
+  }
   type_ = std::move(type);
   for (Use& use : uses_) {
     use.user->op_ = nullptr;

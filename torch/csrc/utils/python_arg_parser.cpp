@@ -1146,7 +1146,7 @@ at::Scalar PythonArgs::scalar_slow(int i) {
   if (traceable && jit::tracer::isTracing() && THPVariable_Check(args[i])) {
     auto& var = THPVariable_Unpack(args[i]);
     jit::tracer::ArgumentStash::stashValue(
-        signature.params[i].name, idx, var, jit::NumberType::get());
+        signature.params[i].name, idx, var, c10::NumberType::get());
   }
 
   return scalar_slow(args[i]);

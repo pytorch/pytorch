@@ -87,7 +87,7 @@ jobs:
         uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      !{{ common.checkout_pytorch("recursive") }}
+      !{{ common.checkout() }}
       !{{ common.display_ec2_information() }}
       - name: Install Visual Studio 2019 toolchain
         shell: powershell
@@ -119,7 +119,7 @@ jobs:
           if-no-files-found: error
           name: ${{ env.BUILD_ENVIRONMENT }}
           path: C:\${{ github.run_id }}\build-results
-      !{{ wait_and_kill_ssh() }}
+      !{{ common.wait_and_kill_ssh_windows() }}
       - name: Cleanup build-results and workspaces
         if: always()
         shell: bash
@@ -178,7 +178,7 @@ jobs:
         uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      !{{ common.checkout_pytorch("recursive") }}
+      !{{ common.checkout() }}
       - name: Install Visual Studio 2019 toolchain
         shell: powershell
         run: |
@@ -220,7 +220,7 @@ jobs:
       !{{ common.upload_downloaded_files(name='windows') }}
       !{{ common.upload_test_reports(name='windows') }}
       !{{ common.render_test_results() }}
-      !{{ wait_and_kill_ssh() }}
+      !{{ common.wait_and_kill_ssh_windows() }}
       !{{ common.parse_ref() }}
       !{{ common.upload_test_statistics(build_environment) }}
       - name: Cleanup workspace
