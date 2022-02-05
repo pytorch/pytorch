@@ -2298,7 +2298,7 @@ class TestDistributions(TestCase):
         dist3 = Wishart(df, scale_tril=scale_tril)
         ref_dist = scipy.stats.wishart(df.item(), cov.detach().numpy())
 
-        x = dist1.sample((10,))
+        x = dist1.sample((1000,))
         expected = ref_dist.logpdf(x.transpose(0, 2).numpy())
 
         self.assertEqual(0.0, np.mean((dist1.log_prob(x).detach().numpy() - expected)**2), atol=1e-3, rtol=0)
@@ -2313,7 +2313,7 @@ class TestDistributions(TestCase):
         dist_batched = Wishart(df, cov)
         dist_unbatched = [Wishart(df[i], cov[i]) for i in range(df.size(0))]
 
-        x = dist_batched.sample((10,))
+        x = dist_batched.sample((1000,))
         batched_prob = dist_batched.log_prob(x)
         unbatched_prob = torch.stack([dist_unbatched[i].log_prob(x[:, i]) for i in range(5)]).t()
 
