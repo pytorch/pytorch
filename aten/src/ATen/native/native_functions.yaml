@@ -6917,7 +6917,7 @@
   variants: method, function
   structured_delegate: gather.out
 
-- func: gather_backward(Tensor grad, Tensor self, int dim, Tensor index, bool sparse_grad, bool unique_indices) -> Tensor
+- func: gather_backward(Tensor grad, Tensor self, int dim, Tensor index, bool sparse_grad, *, bool unique_indices=False) -> Tensor
   variants: function
   device_check: NoCheck
   device_guard: False
