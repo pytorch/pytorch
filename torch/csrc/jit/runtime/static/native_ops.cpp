@@ -787,5 +787,17 @@ REGISTER_NATIVE_OPERATOR_FUNCTOR(
       };
     });
 
+REGISTER_NATIVE_OPERATOR_FUNCTOR(
+    prim::CreateObject,
+    prim_CreateObject,
+    [](Node* node) -> SROperator {
+      auto class_type = node->output()->type()->expect<ClassType>();
+      return [class_type = std::move(class_type)](ProcessedNode* pnode) {
+        pnode->Output(0) = c10::ivalue::Object::create(
+            c10::StrongTypePtr(class_type->compilation_unit(), class_type),
+            class_type->numAttributes());
+      };
+    });
+
 } // namespace jit
 } // namespace torch
