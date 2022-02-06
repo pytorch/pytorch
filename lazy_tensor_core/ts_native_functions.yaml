@@ -5,6 +5,7 @@ full_codegen:
   - _log_softmax_backward_data
   - _softmax
   - _softmax_backward_data
+  - abs
   - add.Tensor
   - addcdiv
   - addcmul
@@ -53,10 +54,12 @@ full_codegen:
   - lt.Tensor
   - masked_fill_.Scalar
   - masked_fill_.Tensor
+  - max
   - max_pool2d_with_indices
   - max_pool2d_with_indices_backward
   - mean
   - mean.dim
+  - min
   - mm
   - mul.Tensor
   - mv
@@ -66,6 +69,7 @@ full_codegen:
   - native_layer_norm_backward
   - ne.Scalar
   - ne.Tensor
+  - neg
   - nll_loss_backward
   - nll_loss_forward
   - nll_loss2d_backward
