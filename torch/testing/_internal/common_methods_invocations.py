@@ -539,8 +539,9 @@ class OpInfo(object):
 
                  # the following are pointers to functions to generate certain classes
                  #   of inputs
-                 sample_inputs_func=None,  # function to generate sample inputs
+                 sample_inputs_func=None,  # function to generate sample inputs with strided-only layouts
                  error_inputs_func=None,  # function to generate inputs that will throw errors
+                 sample_inputs_mixed_func=None,  # function to generate sample inputs with mixed layouts
 
                  # the following metadata relates to dtype support and is tested for correctness in test_ops.py
                  dtypes,  # dtypes this function works with on the CPU,
@@ -688,6 +689,7 @@ class OpInfo(object):
         # We run the sampling functions without tracking the gradiends of the creation of inputs
         self.sample_inputs_func = torch.no_grad()(sample_inputs_func)
         self.error_inputs_func = error_inputs_func
+        self.sample_inputs_mixed_func = torch.no_grad()(sample_inputs_mixed_func)
 
         self.assert_autodiffed = assert_autodiffed
         self.autodiff_fusible_nodes = autodiff_fusible_nodes if autodiff_fusible_nodes else []
@@ -861,6 +863,13 @@ class OpInfo(object):
         """
         return self.error_inputs_func(self, device, **kwargs)
 
+    def sample_inputs_mixed(self, device, dtype, requires_grad=False, **kwargs):
+        """Returns an iterable of SampleInputs that contain inputs with
+        non-strided layout.
+        """
+        samples = self.sample_inputs_mixed_func(self, device, dtype, requires_grad, **kwargs)
+        return samples
+
     def get_decorators(self, test_class, test_name, device, dtype):
         '''Returns the decorators targeting the given test.'''
         result = []
@@ -1016,6 +1025,7 @@ def sample_inputs_masked_reduction(op_info, device, dtype, requires_grad, **kwar
     """
     inputs: List[SampleInput] = []
     kwargs['supports_multiple_dims'] = op_info.supports_multiple_dims
+
     for sample_input in sample_inputs_reduction(op_info, device, dtype, requires_grad, **kwargs):
         for mask in _generate_masked_op_mask(sample_input.input.shape, device, **kwargs):
             sample_input_args, sample_input_kwargs = sample_input.args, dict(mask=mask, **sample_input.kwargs)
@@ -1030,6 +1040,36 @@ def sample_inputs_masked_reduction(op_info, device, dtype, requires_grad, **kwar
                     inputs.append(SampleInput(t.detach().requires_grad_(requires_grad),
                                               args=sample_input_args,
                                               kwargs=sample_input_kwargs))
+
+    return inputs
+
+
+def sample_inputs_mixed_masked_reduction(op_info, device, dtype, requires_grad, **kwargs):
+    """Sample inputs for masked reduction operators that support inputs
+    with mixed layouts.
+    """
+    inputs: List[SampleInput] = []
+
+    for sample_input in sample_inputs_masked_reduction(op_info, device, dtype, requires_grad, **kwargs):
+        for (supports_layout, to_layout) in [
+                (op_info.supports_sparse, torch.Tensor.to_sparse),
+                (op_info.supports_sparse_csr, torch.Tensor.to_sparse_csr),
+        ]:
+            if not supports_layout:
+                continue
+            # input has given layout, mask is strided or None:
+            inputs.append(SampleInput(to_layout(sample_input.input),
+                                      args=sample_input.args, kwargs=sample_input.kwargs))
+            mask = sample_input.kwargs.get('mask')
+            if mask is not None:
+                sample_input_kwargs = sample_input.kwargs.copy()
+                sample_input_kwargs = sample_input_kwargs.update(mask=to_layout(mask))
+                # input is strided, mask has given layout:
+                inputs.append(SampleInput(sample_input.input.detach().clone().requires_grad_(requires_grad),
+                                          args=sample_input.args, kwargs=sample_input_kwargs))
+                # input and mask have given layout
+                inputs.append(SampleInput(to_layout(sample_input.input),
+                                          args=sample_input.args, kwargs=sample_input_kwargs))
 
     return inputs
 
@@ -15015,7 +15055,8 @@ op_db: List[OpInfo] = [
             DecorateInfo(toleranceOverride({torch.float16: tol(atol=1e-02, rtol=1e-03)}),
                          'TestReductions', 'test_ref_small_input'),
         ],
-        sample_inputs_func=sample_inputs_masked_reduction
+        sample_inputs_func=sample_inputs_masked_reduction,
+        sample_inputs_mixed_func=sample_inputs_mixed_masked_reduction
     ),
     ReductionOpInfo(
         '_masked.prod',
