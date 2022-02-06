@@ -1630,7 +1630,7 @@ def clamp(g, self, min, max):
         return clamp_min(g, self, min)
     else:
         if sym_help._is_constant(min) and sym_help._is_constant(max):
-            return g.op("Clip", self, min_f=_parse_arg(min, "f"), max_f=_parse_arg(max, "f"))
+            return _compatible_float_cast(g, "Clip", self, min_f=_parse_arg(min, "f"), max_f=_parse_arg(max, "f"))
         else:
             return clamp_max(g, clamp_min(g, self, min), max)
 
@@ -1638,7 +1638,7 @@ def clamp(g, self, min, max):
 @parse_args("v", "v")
 def clamp_min(g, self, min):
     if sym_help._is_constant(min):
-        return g.op("Clip", self, min_f=_parse_arg(min, "f"))
+        return _compatible_float_cast(g, "Clip", self, min_f=_parse_arg(min, "f"))
     else:
         dtype = self.type().scalarType()
         min = g.op("Cast", min, to_i=sym_help.cast_pytorch_to_onnx[dtype])
@@ -1648,7 +1648,7 @@ def clamp_min(g, self, min):
 @parse_args("v", "v")
 def clamp_max(g, self, max):
     if sym_help._is_constant(max):
-        return g.op("Clip", self, max_f=_parse_arg(max, "f"))
+        return _compatible_float_cast(g, "Clip", self, max_f=_parse_arg(max, "f"))
     else:
         dtype = self.type().scalarType()
         max = g.op("Cast", max, to_i=sym_help.cast_pytorch_to_onnx[dtype])
@@ -1985,7 +1985,7 @@ def slice(g, self, *args):
 
 @parse_args("v", "f", "f")
 def hardtanh(g, self, min_val, max_val):
-    return g.op("Clip", self, min_f=min_val, max_f=max_val)
+    return _compatible_float_cast(g, "Clip", self, min_f=min_val, max_f=max_val)
 
 
 @parse_args("v")
@@ -2690,7 +2690,7 @@ def prim_shape(g, self):
 
 
 def prim_max(g, self, other):
-    return g.op("Max", self, other)
+    return _compatible_float_cast(g, "Max", self, other)
 
 
 def prim_min(g, self, other=None):
