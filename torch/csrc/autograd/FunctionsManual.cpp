@@ -229,11 +229,7 @@ Tensor norm_backward(Tensor grad, const Tensor& self, const optional<Scalar> & p
   }
   // handle case at 0 where we return a subgradient containing 0
   scale_v.masked_fill_(norm == 0, 0);
-  std::cout << ">>>>> CALLING NORM BACKWARD NOWWW. <<<<< \n";
-  std::cout << "COMPLEX tensors: norm-> " << norm.is_complex() << " grad -> "
-            << grad.is_complex() << " self -> " << self.is_complex() << std::endl;
   if (norm.is_complex()) {
-    std::cout << "COMPLEX NORM FOUND.\n";
     auto complex_view = at::view_as_complex(self_scaled);
     return complex_view * scale_v;
   }
@@ -245,15 +241,6 @@ Tensor norm_backward(Tensor grad, const Tensor& self, const optional<Scalar> & p
 Tensor linalg_vector_norm_backward(Tensor grad, const Tensor& self, const Scalar& scalar_ord, Tensor norm, const optional<IntArrayRef>& opt_dim, bool keepdim) {
   auto dim = opt_dim.value_or(IntArrayRef({}));
   return norm_backward(grad, self, scalar_ord, norm, dim, keepdim);
-}
-
-Tensor frobenius_norm_backward(Tensor grad, const Tensor& self, Tensor norm, const optional<IntArrayRef>& opt_dim, bool keepdim) {
-  auto dim = opt_dim.value_or(IntArrayRef({}));
-  return norm_backward(grad, self, 2, norm, dim, keepdim);
-}
-
-Tensor frobenius_norm_backward(Tensor grad, const Tensor& self, Tensor norm) {
-  return norm_backward(grad, self, 2, norm);
 }
 
 Tensor pow_backward(Tensor grad, const Tensor & self, const Scalar & exponent) {

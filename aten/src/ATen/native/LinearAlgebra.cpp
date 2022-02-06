@@ -2467,42 +2467,45 @@ static Tensor& linalg_norm_out_impl(Tensor& result, const Tensor& self, const op
       "dtype = ", dtype, ", out.dtype = ", result.scalar_type());
   }
   int64_t ndim = self.dim();
+  std::vector<int64_t> dim_ = opt_dim.has_value() ? opt_dim.value().vec() : make_dim_list(ndim);
+
   if (opt_str_ord.has_value()) {
-    // 'ord' is string
     auto str_ord = opt_str_ord.value();
-    check_str_ord_valid(str_ord, opt_dim, ndim);
-    Tensor self_ = opt_dtype.has_value() ? self.to(opt_dtype.value()) : self;
-    if (str_ord == "fro") {
-      // Do not use frobenius_norm_out here since doing so results in nans in the backward
-      // as a result of using the backward of sqrt() if the input contains zeros. frobenius_norm_out
-      // here does not support implicit autograd.
-      Tensor result_ = at::frobenius_norm(self_, opt_dim.value_or(IntArrayRef({0, 1})), keepdim);
-      at::native::resize_output(result, result_.sizes());
-      result.copy_(result_);
-    } else if (str_ord == "nuc") {
-      if (opt_dim.has_value()) {
-        at::nuclear_norm_out(result, self_, opt_dim.value(), keepdim);
+    bool matrix_frob_norm = (str_ord == "fro") && (dim_.size() == 2 || dim_.size() == 1) && self.ndimension() >= 2;
+
+    if (!matrix_frob_norm) {
+      // 'ord' is string
+      auto str_ord = opt_str_ord.value();
+      check_str_ord_valid(str_ord, opt_dim, ndim);
+      Tensor self_ = opt_dtype.has_value() ? self.to(opt_dtype.value()) : self;
+      if (str_ord == "fro") {
+        at::frobenius_norm_out(result, self_, opt_dim.value_or(IntArrayRef({0, 1})), keepdim);
+      } else if (str_ord == "nuc") {
+        if (opt_dim.has_value()) {
+          at::nuclear_norm_out(result, self_, opt_dim.value(), keepdim);
+        } else {
+          at::nuclear_norm_out(result, self_, keepdim);
+        }
+      }
+    } else {
+      // 'ord' is int or None
+      if (!opt_num_ord.has_value() || dim_.size() == 1) {
+        Tensor result_ = at::linalg_vector_norm(
+                                                self, opt_num_ord.value_or(2), opt_dim, keepdim, opt_dtype);
+        // TODO: Resize and copy should be avoided with
+        //       https://github.com/pytorch/pytorch/issues/52712
+        at::native::resize_output(result, result_.sizes());
+        result.copy_(result_);
+      } else if (dim_.size() == 2) {
+        _linalg_norm_matrix_out(result, self, opt_num_ord.value(), dim_, keepdim, opt_dtype);
       } else {
-        at::nuclear_norm_out(result, self_, keepdim);
+        TORCH_CHECK(false, "'dim' must specify 1 or 2 dimensions when order is numerical and input is "
+                    "not 1-D or 2-D");
       }
     }
-  } else {
-    // 'ord' is int or None
-    std::vector<int64_t> dim_ = opt_dim.has_value() ? opt_dim.value().vec() : make_dim_list(ndim);
-    if (!opt_num_ord.has_value() || dim_.size() == 1) {
-      Tensor result_ = at::linalg_vector_norm(
-          self, opt_num_ord.value_or(2), opt_dim, keepdim, opt_dtype);
-      // TODO: Resize and copy should be avoided with
-      //       https://github.com/pytorch/pytorch/issues/52712
-      at::native::resize_output(result, result_.sizes());
-      result.copy_(result_);
-    } else if (dim_.size() == 2) {
-      _linalg_norm_matrix_out(result, self, opt_num_ord.value(), dim_, keepdim, opt_dtype);
-    } else {
-      TORCH_CHECK(false, "'dim' must specify 1 or 2 dimensions when order is numerical and input is "
-        "not 1-D or 2-D");
-    }
   }
+
+
   return result;
 }
 

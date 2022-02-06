@@ -4990,18 +4990,12 @@
 
 - func: frobenius_norm(Tensor self) -> Tensor
   variants: function
-  dispatch:
-    CompositeExplicitAutograd: frobenius_norm
 
 - func: frobenius_norm.dim(Tensor self, int[1] dim, bool keepdim=False) -> Tensor
   variants: function
-  dispatch:
-    CompositeExplicitAutograd: frobenius_norm
 
 - func: frobenius_norm.out(Tensor self, int[1] dim, bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
   variants: function
-  dispatch:
-    CompositeExplicitAutograd: frobenius_norm_out
 
 - func: nuclear_norm(Tensor self, bool keepdim=False) -> Tensor
   variants: function
