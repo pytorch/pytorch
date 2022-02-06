@@ -5598,7 +5598,6 @@
     CPU: fused_moving_avg_obs_fake_quant_cpu
     CUDA: fused_moving_avg_obs_fake_quant_cuda
 
-
 - func: _choose_qparams_per_tensor(Tensor self, bool reduce_range=False) -> (float, int)
   variants: function
 

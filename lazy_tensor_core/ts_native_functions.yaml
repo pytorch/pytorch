@@ -1,6 +1,8 @@
 backend: Lazy
 cpp_namespace: torch_lazy_tensors
 full_codegen:
+  - _adaptive_avg_pool2d
+  - _adaptive_avg_pool2d_backward
   - _log_softmax
   - _log_softmax_backward_data
   - _softmax
@@ -11,18 +13,23 @@ full_codegen:
   - addcmul
   - addmm
   - arange.start_out
+  - all
+  - any
   - avg_pool2d
   - avg_pool2d_backward
   - baddbmm
   - binary_cross_entropy
   - binary_cross_entropy_backward
   - bitwise_and.Tensor
+  - bitwise_or.Tensor
   - bmm
+  - clamp
+  - clamp_min
   - constant_pad_nd
   - convolution
   - convolution_backward
   - cos
-  - clamp
+  - cumsum
   - div.Tensor
   - div.Tensor_mode
   - elu
@@ -32,20 +39,30 @@ full_codegen:
   - eq.Scalar
   - eq.Tensor
   - exp
+  - flip
   - floor
   - frac
+  - gather
   - ge.Scalar
   - ge.Tensor
   - gelu
   - gelu_backward
+  - glu
+  - glu_backward
+  - grid_sampler_2d
+  - grid_sampler_2d_backward
   - gt.Scalar
   - gt.Tensor
+  - hardsigmoid
+  - hardswish_
   - index_select
   - kl_div_backward
+  - l1_loss_backward
   - le.Scalar
   - le.Tensor
   - leaky_relu
   - leaky_relu_backward
+  - log
   - log2
   - logdet
   - log_sigmoid_backward
@@ -55,11 +72,14 @@ full_codegen:
   - masked_fill_.Scalar
   - masked_fill_.Tensor
   - max
+  - max.dim
   - max_pool2d_with_indices
   - max_pool2d_with_indices_backward
+  - maximum
   - mean
   - mean.dim
   - min
+  - minimum
   - mm
   - mul.Tensor
   - mv
@@ -77,9 +97,13 @@ full_codegen:
   - norm.ScalarOpt_dim
   - pow.Tensor_Scalar
   - pow.Tensor_Tensor
+  - reciprocal
   - relu
   - relu_
+  - remainder.Tensor
   - rsqrt
+  - scatter_add
+  - sgn
   - sigmoid
   - sigmoid_backward
   - silu
@@ -100,8 +124,13 @@ full_codegen:
   - threshold_backward
   - topk
   - trace
+  - tril
   - triu
   - trunc
+  - upsample_bilinear2d
+  - upsample_bilinear2d_backward
+  - upsample_nearest2d
+  - upsample_nearest2d_backward
   - zero_
 supported:
   - as_strided
