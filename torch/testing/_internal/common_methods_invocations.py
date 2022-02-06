@@ -1026,7 +1026,6 @@ def sample_inputs_masked_reduction(op_info, device, dtype, requires_grad, **kwar
     inputs: List[SampleInput] = []
     kwargs['supports_multiple_dims'] = op_info.supports_multiple_dims
 
-    skip_sparse_coo_samples = kwargs.get('skip_sparse_coo_samples', False)
     for sample_input in sample_inputs_reduction(op_info, device, dtype, requires_grad, **kwargs):
         for mask in _generate_masked_op_mask(sample_input.input.shape, device, **kwargs):
             sample_input_args, sample_input_kwargs = sample_input.args, dict(mask=mask, **sample_input.kwargs)
@@ -1041,11 +1040,6 @@ def sample_inputs_masked_reduction(op_info, device, dtype, requires_grad, **kwar
                     inputs.append(SampleInput(t.detach().requires_grad_(requires_grad),
                                               args=sample_input_args,
                                               kwargs=sample_input_kwargs))
-            if op_info.supports_sparse and mask is not None and not skip_sparse_coo_samples:
-                mask = mask.to_sparse()
-                sample_input_args, sample_input_kwargs = sample_input.args, dict(mask=mask, **sample_input.kwargs)
-                inputs.append(SampleInput(sample_input.input.detach().clone().requires_grad_(requires_grad),
-                                          args=sample_input_args, kwargs=sample_input_kwargs))
     return inputs
 
 
@@ -8183,8 +8177,7 @@ def reference_reduction_numpy(f, supports_keepdims=True):
         if 'mask' in keys:
             mask = kwargs.pop('mask')
             if mask is not None:
-                if mask.layout != torch.strided:
-                    mask = mask.to_dense()
+                assert mask.layout == torch.strided
                 kwargs['where'] = mask.cpu().numpy()
 
         if 'identity' in keys:

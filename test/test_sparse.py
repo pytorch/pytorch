@@ -3559,35 +3559,6 @@ class TestSparseMaskedReductions(TestCase):
     exact_dtype = True
 
     @ops(sparse_masked_reduction_ops)
-    def test_sparse_consistency(self, device, dtype, op):
-        """Here we test masked reduction operations on sparse COO tensors
-        using masked reductions on strided tensors as reference.
-        """
-        unsupportedTypes = [
-            torch.bfloat16,  # add_dense_sparse not implemented for BFloat16
-            torch.float16,   # add_dense_sparse not implemented for Half
-        ]
-        if torch.device(device).type == 'cuda':
-            # mul_out_sparse_cuda not implemented for ComplexFloat
-            unsupportedTypes.extend([torch.complex64])
-        if dtype in unsupportedTypes:
-            self.skipTest(f'Skipped! Unsupported dtype for {op.name}[device={device}]: {dtype}')
-
-        samples = op.sample_inputs_func(op, device, dtype, requires_grad=False)
-        for sample_input in samples:
-            t = sample_input.input
-            mask = sample_input.kwargs.get('mask')
-            expected = op(t, *sample_input.args, **sample_input.kwargs)
-            actual = op(t.to_sparse(), *sample_input.args, **sample_input.kwargs)
-            self.assertEqual(actual.layout, torch.sparse_coo)
-
-            outmask = torch._masked._output_mask(op.op, t, **sample_input.kwargs)
-            expected = torch.where(outmask, expected, torch.zeros_like(expected))
-            actual = actual.to_dense()
-            actual = torch.where(outmask, actual, torch.zeros_like(actual))
-            self.assertEqual(actual, expected, equal_nan=True)
-
-    @ops(sparse_masked_reduction_ops)
     def test_future_empty_dim(self, device, dtype, op):
         """Currently, `dim=()` in reductions operations means "reduce over
         all dimensions" while in future, it will read "no reduce". See
@@ -3603,14 +3574,6 @@ class TestSparseMaskedReductions(TestCase):
         can be deleted. See also `torch._masked._canonical_dim`
         implementation about changing the `dim=()` behavior.
         """
-        unsupportedTypes = [
-            torch.bfloat16,
-            torch.float16,
-        ]
-        if torch.device(device).type == 'cuda':
-            unsupportedTypes.extend([torch.complex64])
-        if dtype in unsupportedTypes:
-            self.skipTest(f'Skipped! Unsupported dtype for {op.name}[device={device}]: {dtype}')
 
         samples = op.sample_inputs_func(op, device, dtype, requires_grad=False)
         for sample_input in samples:
