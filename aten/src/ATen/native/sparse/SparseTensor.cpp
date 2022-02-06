@@ -49,6 +49,7 @@
 #include <ATen/ops/index_select.h>
 #include <ATen/ops/indices_native.h>
 #include <ATen/ops/is_coalesced_native.h>
+#include <ATen/ops/ones.h>
 #include <ATen/ops/resize_as_sparse.h>
 #include <ATen/ops/resize_as_sparse_native.h>
 #include <ATen/ops/sparse_coo_tensor.h>
@@ -906,22 +907,23 @@ Tensor empty_like_sparse_coo(
 
 Tensor& eye_sparse_out(int64_t n, int64_t m, Tensor& result) {
   TORCH_INTERNAL_ASSERT(result.is_sparse());
+  TORCH_CHECK(n >= 0, "n must be greater or equal to 0, got ", n);
+  TORCH_CHECK(m >= 0, "m must be greater or equal to 0, got ", m);
 
-  auto result_values = result.values();
-
-  // This call also ensures proper checks are done for the arguments
-  at::eye_out(result_values, n, m);
-
-  // auto indices = at::native::nonzero(result_values, /*as_tuple=*/ true);
   int64_t sz = std::min<int64_t>(n, m);
-  result.indices() = at::stack((at::arange(sz), at::arange(sz)));
+  auto options = TensorOptions().device(result.device()).dtype(result.dtype()).layout(kStrided);
+
+  Tensor values = at::ones({sz}, options);
+  Tensor indices = at::arange(sz, options).unsqueeze(0).expand({2, -1}).contiguous();
+
+  get_sparse_impl(result)->resize_(2, 0, {n, m});
+  copy_into_sparse(result, indices, values, false);
+  get_sparse_impl(result)->coalesced_ = true;
 
   return result;
 }
 
 Tensor& eye_sparse_out(int64_t n, Tensor& result) {
-  TORCH_INTERNAL_ASSERT(result.is_sparse());
-
   return at::native::eye_sparse_out(n, n, result);
 }
 

@@ -27,6 +27,7 @@
 #include <ATen/ops/empty_native.h>
 #include <ATen/ops/eye.h>
 #include <ATen/ops/full.h>
+#include <ATen/ops/ones.h>
 #include <ATen/ops/resize_as_sparse_native.h>
 #include <ATen/ops/resize_native.h>
 #include <ATen/ops/sparse_csr_tensor_native.h>
@@ -393,21 +394,20 @@ Tensor empty_like_sparse_csr(
 
 Tensor& eye_sparse_csr_out(int64_t n, int64_t m, Tensor& result) {
   TORCH_INTERNAL_ASSERT(result.is_sparse_csr());
+  TORCH_CHECK(n >= 0, "n must be greater or equal to 0, got ", n);
+  TORCH_CHECK(m >= 0, "m must be greater or equal to 0, got ", m);
 
-  auto result_values = result.values();
-  int sz = (m < n) ? m : n;
-  auto crow_indices = result.crow_indices();
-  auto col_indices = result.col_indices();
+  int64_t sz = std::min<int64_t>(n, m);
+  auto options = TensorOptions().device(result.device()).dtype(result.dtype()).layout(kStrided);
 
-  crow_indices = at::full({n + 1}, /*fill_value=*/sz);
-  col_indices = at::empty({sz});
+  Tensor values = at::ones({sz}, options);
 
-  // This call also ensures proper checks are done for the arguments
-  at::eye_out(result_values, n, m);
+  Tensor col_indices = at::arange(sz, options);
+  Tensor crow_indices = at::full({n + 1}, /*fill_value=*/ sz, options);
+  for (const auto i : c10::irange(0, sz)) crow_indices[i] = col_indices[i];
 
-  TensorOptions options = TensorOptions().dtype(ScalarType::Long).layout(kStrided).device(result.device());
-  auto temp_crow_indicess = at::arange(sz, options);
-  col_indices = at::arange(sz, options);
+  get_sparse_csr_impl(result)->resize_(sz, {n, m});
+  get_sparse_csr_impl(result)->set_member_tensors(crow_indices, col_indices, values, {n, m});
 
   return result;
 }
