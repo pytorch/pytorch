@@ -6,6 +6,7 @@
 #include <gtest/gtest.h>
 #include <torch/csrc/jit/ir/irparser.h>
 #include <torch/csrc/jit/runtime/graph_executor.h>
+#include <torch/csrc/jit/runtime/graph_iterator.h>
 #include <torch/csrc/jit/runtime/static/impl.h>
 #include <torch/csrc/jit/runtime/static/memory_planner.h>
 #include <torch/csrc/jit/runtime/static/passes.h>
@@ -220,8 +221,23 @@ Node* getNodeWithKind(const StaticModule& smodule, const std::string& kind) {
   return smodule.findNodeWithKindForTesting(kind);
 }
 
+Node* getNodeWithKind(std::shared_ptr<Graph>& graph, const std::string& kind) {
+  const auto symbol = c10::Symbol::fromQualString(kind);
+  DepthFirstGraphNodeIterator it(graph);
+  for (auto* node = it.next(); node != nullptr; node = it.next()) {
+    if (node->kind() == symbol) {
+      return node;
+    }
+  }
+  return nullptr;
+}
+
 bool hasNodeWithKind(const StaticModule& smodule, const std::string& kind) {
   return getNodeWithKind(smodule, kind) != nullptr;
+}
+
+bool hasNodeWithKind(std::shared_ptr<Graph>& graph, const std::string& kind) {
+  return getNodeWithKind(graph, kind) != nullptr;
 }
 
 std::shared_ptr<Graph> getGraphFromScript(const std::string& jit_script) {
