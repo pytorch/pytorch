@@ -643,7 +643,7 @@ int nnc_lowerings_lazy_registration() {
       });
 
   RegisterNNCLoweringsFunction aten_gelu(
-      {"aten::gelu(Tensor self, int approximate=0) -> (Tensor)"},
+      {"aten::gelu(Tensor self, *, str approximate='none') -> (Tensor)"},
       [](const std::vector<ArgValue>& inputs,
          const std::vector<ExprHandle>& outputShape,
          const c10::optional<ScalarType>& outputType,
@@ -656,7 +656,7 @@ int nnc_lowerings_lazy_registration() {
             [](const ExprHandle& a, const ExprHandle& approximate) {
               auto one = Cast::make(a.dtype(), 1.);
               auto point_five = Cast::make(a.dtype(), .5);
-              auto tanh_gelu_flag = Cast::make(approximate.dtype(), at::Gelu::Tanh);
+              auto tanh_gelu_flag = Cast::make(approximate.dtype(), at::native::GeluType::Tanh);
 
               // approximate == 'none'
               auto m_sqrt1_2 = Cast::make(a.dtype(), M_SQRT1_2);

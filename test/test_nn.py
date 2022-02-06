@@ -9165,7 +9165,7 @@ class TestNN(NNTestCase):
                     X = torch.rand(n, m, dtype=dtype, requires_grad=True, device=d)[:, ::2]
 
                 for approximate in ['none', 'tanh']:
-                    res = F.gelu(X, approximate)
+                    res = F.gelu(X, approximate=approximate)
                     if approximate == 'tanh':
                         ref = _tanh_gelu_ref(X.to(numpy_dtype).cpu().detach().numpy())
                     else:

@@ -166,7 +166,7 @@ void elu_backward_kernel(TensorIteratorBase& it, const Scalar& alpha, const Scal
 // TODO(yangxm): Add another fast kernel using formula
 // y = 0.5x * (1 + tanh(sqrt(2/Pi) * (x + 0.044715x^3)))
 // and the fast tanh impl from Eigen.
-void GeluKernelImpl(TensorIteratorBase& it, int64_t approximate) {
+void GeluKernelImpl(TensorIteratorBase& it, GeluType approximate) {
   auto grain_size = at::internal::GRAIN_SIZE;
   // Numbers based on benchmarking.
   // Benchmark: benchmarks/operator_benchmarks/pt/gelu_test.py
@@ -187,7 +187,7 @@ void GeluKernelImpl(TensorIteratorBase& it, int64_t approximate) {
   if (it.numel() > GELU_MIN_ELEMENTS_FOR_MULTI_THREADING) {
     grain_size = it.numel() / at::get_num_threads();
   }
-  if (approximate == at::Gelu::Tanh) {
+  if (approximate == GeluType::Tanh) {
     AT_DISPATCH_FLOATING_TYPES_AND(
         ScalarType::BFloat16, it.dtype(), "GeluKernelImpl", [&]() {
       using Vec = vec::Vectorized<scalar_t>;
@@ -233,8 +233,8 @@ void GeluKernelImpl(TensorIteratorBase& it, int64_t approximate) {
   }
 }
 
-void GeluBackwardKernelImpl(TensorIteratorBase& it, int64_t approximate) {
-  if (approximate == at::Gelu::Tanh) {
+void GeluBackwardKernelImpl(TensorIteratorBase& it, GeluType approximate) {
+  if (approximate == GeluType::Tanh) {
     AT_DISPATCH_FLOATING_TYPES_AND(
         ScalarType::BFloat16, it.dtype(), "GeluBackwardKernelImpl", [&]() {
       using Vec = vec::Vectorized<scalar_t>;

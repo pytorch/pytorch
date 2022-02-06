@@ -103,12 +103,8 @@ using GLUFuncOptions = GLUOptions;
 /// GELU model(GELUOptions(torch::kNone));
 /// ```
 struct TORCH_API GELUOptions {
-  typedef c10::variant<enumtype::kNone, enumtype::kTanh> gelu_t;
-
-  TORCH_OPTIONS_CTOR_VARIANT_ARG2(GELUOptions, approximate, kNone, kTanh)
-
   /// Specifies the approximation to apply to the output.
-  TORCH_ARG(gelu_t, approximate) = torch::kNone;
+  TORCH_ARG(std::string, approximate) = "none";
 };
 
 namespace functional {

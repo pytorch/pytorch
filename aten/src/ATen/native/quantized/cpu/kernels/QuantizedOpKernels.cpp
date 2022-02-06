@@ -616,7 +616,7 @@ static void leaky_qrelu_out_kernel(Tensor& out, const Tensor& qx,
   });
 }
 
-void qgelu_kernel(const Tensor& qx, Tensor& qy, int64_t approximate) {
+void qgelu_kernel(const Tensor& qx, Tensor& qy, GeluType approximate) {
   int64_t zero_point = qx.q_zero_point();
   // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
   float scale = qx.q_scale();
@@ -632,7 +632,7 @@ void qgelu_kernel(const Tensor& qx, Tensor& qy, int64_t approximate) {
   const auto kOneVec = Vectorized<float>(1);
   const auto kPointFiveVec = Vectorized<float>(0.5);
 
-  if (approximate == at::Gelu::Tanh) {
+  if (approximate == GeluType::Tanh) {
     AT_DISPATCH_QINT_TYPES(qx.scalar_type(), "qgelu", [&]() {
       qy = at::_empty_affine_quantized(
           qx.sizes(),

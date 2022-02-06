@@ -25,7 +25,7 @@ void launch_prelu_cuda_backward_kernel_multi_weights(
     const TensorBase &input, const TensorBase &weight, const TensorBase &grad_out,
     const TensorBase &input_grad, const TensorBase &weight_grad_collector);
 
-void GeluCUDAKernelImpl(TensorIteratorBase& it, int64_t approximate);
-void GeluBackwardCUDAKernelImpl(TensorIteratorBase& it, int64_t approximate);
+void GeluCUDAKernelImpl(TensorIteratorBase& it, GeluType approximate);
+void GeluBackwardCUDAKernelImpl(TensorIteratorBase& it, GeluType approximate);
 
 }}  // namespace at::native

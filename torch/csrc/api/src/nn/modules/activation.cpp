@@ -284,7 +284,7 @@ void GLUImpl::pretty_print(std::ostream& stream) const {
 
 // ============================================================================
 
-GELUImpl::GELUImpl(const GELUOptions& options_) : options(options_) {}
+GELUImpl::GELUImpl(GELUOptions options_) : options(std::move(options_)) {}
 
 Tensor GELUImpl::forward(const Tensor& input) {
   return F::detail::gelu(input, options.approximate());

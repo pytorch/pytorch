@@ -3505,7 +3505,6 @@ class TestFunctionalTracing(JitTestCase):
         "conv_transpose3d": BUILT_IN_FUNC,
         "cosine_similarity": BUILT_IN_FUNC,
         "elu_": BUILT_IN_FUNC,
-        "gelu": BUILT_IN_FUNC,
         "hardshrink": BUILT_IN_FUNC,
         "hardtanh_": BUILT_IN_FUNC,
         "leaky_relu_": BUILT_IN_FUNC,

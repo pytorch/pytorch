@@ -2343,8 +2343,9 @@ Tensor gelu_double_backward(
                 const Tensor & ggI,
                 const Tensor & gO,
                 const Tensor & input,
-                int64_t approximate) {
-  if (approximate == at::Gelu::Tanh) {
+                c10::string_view approximate) {
+  //if (at::native::get_gelutype_enum(approximate) == at::native::GeluType::Tanh) {
+  if (approximate == "tanh") {
     constexpr auto kBeta = M_SQRT2 * M_2_SQRTPI * 0.5;
     constexpr auto kKappa = 0.044715;
 
