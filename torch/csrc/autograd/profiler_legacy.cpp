@@ -145,7 +145,6 @@ struct ProfilerLegacyThreadLocalState : public ProfilerThreadLocalStateBase {
       const at::RecordFunction& fn,
       const bool record_cuda,
       std::vector<std::vector<int64_t>>&& shapes = {},
-      std::vector<int64_t>&& seq_ids = {},
       std::vector<std::pair<at::RecordFunctionHandle, int>>&& input_op_ids = {});
 
   void popRange(const at::RecordFunction& fn, const bool record_cuda);
@@ -223,14 +222,13 @@ void ProfilerLegacyThreadLocalState::pushRange(
     const at::RecordFunction& fn,
     const bool record_cuda,
     std::vector<std::vector<int64_t>>&& shapes,
-    std::vector<int64_t>&& seq_ids,
     std::vector<std::pair<at::RecordFunctionHandle, int>>&& input_op_ids) {
   if (config_.state == torch::profiler::impl::ProfilerState::Disabled) {
     return;
   }
   if (config_.state == torch::profiler::impl::ProfilerState::NVTX) {
     torch::profiler::impl::cudaStubs()->nvtxRangePushA(torch::profiler::impl::getNvtxStr(
-        fn.name(), fn.seqNr(), fn.handle(), shapes, seq_ids, input_op_ids).c_str());
+        fn.name(), fn.seqNr(), fn.handle(), shapes, input_op_ids).c_str());
   } else {
     LegacyEvent evt(
         EventKind::PushRange,
@@ -373,9 +371,8 @@ void pushProfilingCallbacksLegacy() {
 
         if (state_ptr->config().report_input_shapes) {
           auto sizes = torch::profiler::impl::inputSizes(fn);
-          auto input_seq_ids = torch::profiler::impl::inputSeqIds(fn);
           auto input_op_ids = torch::profiler::impl::inputOpIds(fn);
-          state_ptr->pushRange(fn, record_cuda, std::move(sizes), std::move(input_seq_ids), std::move(input_op_ids));
+          state_ptr->pushRange(fn, record_cuda, std::move(sizes), std::move(input_op_ids));
         } else {
           state_ptr->pushRange(fn, record_cuda);
         }

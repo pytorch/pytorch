@@ -137,7 +137,6 @@ struct OpEventData {
 
     // report_input_shapes
     std::vector<std::vector<int64_t>> shapes_;
-    std::vector<int64_t> seq_ids_;
     std::vector<std::pair<at::RecordFunctionHandle, int>> input_op_ids_;
     std::vector<std::string> dtypes_;
 
@@ -301,10 +300,6 @@ struct KinetoThreadLocalState : public ProfilerThreadLocalStateBase {
         kineto_events_.back().shapes(e.shapes_);
       }
 
-      if (!e.seq_ids_.empty()) {
-        kineto_events_.back().seq_ids(e.seq_ids_);
-      }
-
       if (!e.input_op_ids_.empty()) {
         kineto_events_.back().input_op_ids(e.input_op_ids_);
       }
@@ -353,9 +348,6 @@ struct KinetoThreadLocalState : public ProfilerThreadLocalStateBase {
 
       if (kineto_event.hasShapes()) {
         activity.addMetadata("Input Dims", torch::profiler::impl::shapesToStr(kineto_event.shapes()));
-      }
-      if (kineto_event.hasShapes()) {
-        activity.addMetadata("Input SeqIds", torch::profiler::impl::seqIdsToStr(kineto_event.seq_ids()));
       }
       if (kineto_event.hasShapes()) {
         activity.addMetadata("Input OpIds", torch::profiler::impl::inputOpIdsToStr(kineto_event.input_op_ids()));
@@ -643,7 +635,6 @@ void pushProfilingCallbacks(const std::unordered_set<at::RecordScope>& scopes) {
             data_ptr->name_ = fn.name();
             if (config.report_input_shapes) {
               data_ptr->shapes_ = torch::profiler::impl::inputSizes(fn);
-              data_ptr->seq_ids_ = torch::profiler::impl::inputSeqIds(fn);
               data_ptr->input_op_ids_ = torch::profiler::impl::inputOpIds(fn);
               data_ptr->dtypes_ = torch::profiler::impl::inputTypes(fn);
             }

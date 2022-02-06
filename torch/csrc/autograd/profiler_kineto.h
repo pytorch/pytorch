@@ -74,14 +74,6 @@ struct TORCH_API KinetoEvent {
     return *dtypes_;
   }
 
-  bool hasSeqIds() const {
-    return seq_ids_ != c10::nullopt;
-  }
-
-  const std::vector<int64_t>& seq_ids() const {
-    return *seq_ids_;
-  }
-
   bool hasInputOpIds() const {
     return input_op_ids_ != c10::nullopt;
   }
@@ -159,11 +151,6 @@ struct TORCH_API KinetoEvent {
 
   int64_t debugHandle() const {
     return debug_handle_;
-  }
-
-  KinetoEvent& seq_ids(const std::vector<int64_t>& seq_ids) {
-    seq_ids_ = seq_ids;
-    return *this;
   }
 
   KinetoEvent& input_op_ids(const std::vector<std::pair<at::RecordFunctionHandle, int>>& input_op_ids) {
@@ -284,7 +271,6 @@ struct TORCH_API KinetoEvent {
   c10::optional<std::vector<std::string>> stack_;
   c10::optional<std::vector<std::string>> module_hierarchy_;
   c10::optional<std::vector<std::string>> dtypes_;
-  c10::optional<std::vector<int64_t>> seq_ids_;
   c10::optional<std::vector<std::pair<at::RecordFunctionHandle, int>>> input_op_ids_;
   uint64_t flops_ = 0;
 

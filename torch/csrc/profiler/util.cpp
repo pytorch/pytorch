@@ -22,7 +22,6 @@ std::string getNvtxStr(
     int64_t sequence_nr,
     at::RecordFunctionHandle op_id,
     const std::vector<std::vector<int64_t>>& shapes,
-    const std::vector<int64_t>& seq_ids,
     const std::vector<std::pair<at::RecordFunctionHandle, int>>& input_op_ids) {
   if (sequence_nr >= -1 || shapes.size() > 0) {
     std::string str;
@@ -42,11 +41,8 @@ std::string getNvtxStr(
     if (shapes.size() > 0) {
       s << ", sizes = " << shapesToStr(shapes);
     }
-    // Include the sequence ids of the input edges so
+    // Include the op ids of the input edges so
     // you can build the network graph
-    if (seq_ids.size() > 0) {
-      s << ", seq_ids = " << seqIdsToStr(seq_ids);
-    }
     if (input_op_ids.size() > 0) {
       s << ", input_op_ids = " << inputOpIdsToStr(input_op_ids);
     }
@@ -116,36 +112,6 @@ std::pair<at::RecordFunctionHandle, int> get_input_op_id_from_record_fn(const at
   return input_producer_pair;
 }
 
-int get_seq_id_from_input_tensor(const c10::IValue& input_item) {
-  int seq_id = -1;
-  TORCH_INTERNAL_ASSERT(
-    input_item.isTensor(),
-    "Expected input item to be a Tensor."
-  );
-  const at::Tensor& tensor = input_item.toTensor();
-  if (tensor.defined()) {
-      torch::autograd::Node *grad_fn = tensor.grad_fn().get();
-    // If no grad_fn then it means the tensor is a weight or
-    // other trained variable. -1 seq_id indicates this condition.
-    if (grad_fn)  {
-        seq_id = grad_fn->sequence_nr();
-    }
-  }
-  return seq_id;
-}
-
-std::vector<int64_t> flatten_list_seq_ids(c10::List<c10::IValue> list, std::string fn_name) {
-  std::vector<int64_t> input_seq_ids;
-  int seq_id = -1;
-  for (const c10::IValue input : list) {
-    if (input.isTensor()) {
-      seq_id = get_seq_id_from_input_tensor(input);
-      input_seq_ids.push_back(seq_id);
-    }
-  }
-  return input_seq_ids;
-}
-
 std::vector<std::vector<int64_t>> inputSizes(const at::RecordFunction& fn) {
   std::vector<std::vector<int64_t>> sizes;
   sizes.reserve(fn.inputs().size());
@@ -174,35 +140,6 @@ std::vector<std::pair<at::RecordFunctionHandle, int>> inputOpIds(const at::Recor
     input_op_ids.push_back(op_id_pair);
   }
   return input_op_ids;
-}
-
-std::vector<int64_t> inputSeqIds(const at::RecordFunction& fn) {
-  std::vector<int64_t> seq_ids;
-  seq_ids.reserve(fn.inputs().size());
-  int iter = 0;
-  for (const c10::IValue& input : fn.inputs()) {
-    int seq_id = -1;
-    if (!input.isTensor()) {
-      if (input.isList()) {
-        std::vector<int64_t> tmp_seq_ids = flatten_list_seq_ids(input.toList(), std::string(fn.name()));
-        // Extend the current sizes array by the array returned from input sizes
-        if (!tmp_seq_ids.empty()) {
-          seq_ids.insert(seq_ids.end(), tmp_seq_ids.begin(), tmp_seq_ids.end());
-        } else {
-          seq_ids.push_back(seq_id);
-        }
-      } else {
-        seq_ids.push_back(seq_id);
-      }
-    } else {
-      seq_id = get_seq_id_from_input_tensor(input);
-      seq_ids.push_back(seq_id);
-      // Remove this once op id logic is connected
-      auto op_id_info = get_input_op_id_from_record_fn(fn, iter);
-    }
-    iter++;
-  }
-  return seq_ids;
 }
 
 std::string shapesToStr(const std::vector<std::vector<int64_t>>& shapes) {
@@ -235,19 +172,6 @@ std::string inputOpIdsToStr(const std::vector<std::pair<at::RecordFunctionHandle
     auto op_id_info_pair = input_op_ids[idx];
     // OpId:OutputNr
     oss << int(op_id_info_pair.first) << ":" << op_id_info_pair.second;
-  }
-  oss << "]";
-  return oss.str();
-}
-
-std::string seqIdsToStr(const std::vector<int64_t>& seq_ids) {
-  std::ostringstream oss;
-  oss << "[";
-  for (const auto idx : c10::irange(seq_ids.size())) {
-    if (idx > 0) {
-      oss << ", ";
-    }
-    oss << seq_ids[idx];
   }
   oss << "]";
   return oss.str();
