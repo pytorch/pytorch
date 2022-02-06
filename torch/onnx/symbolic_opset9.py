@@ -734,7 +734,7 @@ def mish(g, input):
     return g.op("Mul", input, g.op("Tanh", g.op("Softplus", input)))
 
 
-def _compatible_float_cast(g, op_name, self, other_operands=[], opset_before=None, *args, **kwargs):
+def _compatible_float_cast(g, op_name, self, other_operands=None, opset_before=None, *args, **kwargs):
     origin_dtype = self.type().scalarType()
     will_cast = not sym_help._is_fp(self) and (opset_before is None or sym_help._export_onnx_opset_version < opset_before)
 
@@ -742,8 +742,9 @@ def _compatible_float_cast(g, op_name, self, other_operands=[], opset_before=Non
         warnings.warn(
             f"{op_name}-{sym_help._export_onnx_opset_version} only support float types. Using cast-relu-cast instead.")
         self = g.op("Cast", self, to_i=sym_help.cast_pytorch_to_onnx["Float"])
-        for i in range(len(other_operands)):
-            other_operands[i] = g.op("Cast", other_operands[i], to_i=sym_help.cast_pytorch_to_onnx["Float"])
+        if other_operands is not None:
+            for i in range(len(other_operands)):
+                other_operands[i] = g.op("Cast", other_operands[i], to_i=sym_help.cast_pytorch_to_onnx["Float"])
 
     self = g.op(op_name, self, *other_operands, *args, **kwargs)
 
