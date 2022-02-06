@@ -183,7 +183,7 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject *unused) {
         if (e.hasInputOpIds()) {
           return e.input_op_ids();
         } else {
-          return std::vector<std::pair<at::RecordFunctionHandle, int>>();
+          return std::vector<std::pair<int, int>>();
         }
       })
       .def("dtypes", [](const KinetoEvent& e) {

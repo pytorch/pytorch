@@ -22,7 +22,7 @@ std::string getNvtxStr(
     int64_t sequence_nr,
     at::RecordFunctionHandle op_id,
     const std::vector<std::vector<int64_t>>& shapes,
-    const std::vector<std::pair<at::RecordFunctionHandle, int>>& input_op_ids) {
+    const std::vector<std::pair<int, int>>& input_op_ids) {
   if (sequence_nr >= -1 || shapes.size() > 0) {
     std::string str;
     if (sequence_nr >= 0) {
@@ -130,8 +130,8 @@ std::vector<std::vector<int64_t>> inputSizes(const at::RecordFunction& fn) {
   return sizes;
 }
 
-std::vector<std::pair<at::RecordFunctionHandle, int>> inputOpIds(const at::RecordFunction& fn) {
-  std::vector<std::pair<at::RecordFunctionHandle, int>> input_op_ids;
+std::vector<std::pair<int, int>> inputOpIds(const at::RecordFunction& fn) {
+  std::vector<std::pair<int, int>> input_op_ids;
   int num_inputs = fn.inputProducerOps().size();
   input_op_ids.reserve(num_inputs);
   int input_nr = 0;
@@ -162,7 +162,7 @@ std::string shapesToStr(const std::vector<std::vector<int64_t>>& shapes) {
   return oss.str();
 }
 
-std::string inputOpIdsToStr(const std::vector<std::pair<at::RecordFunctionHandle, int>>& input_op_ids) {
+std::string inputOpIdsToStr(const std::vector<std::pair<int, int>>& input_op_ids) {
   std::ostringstream oss;
   oss << "[";
   for (const auto idx : c10::irange(input_op_ids.size())) {

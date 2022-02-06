@@ -78,7 +78,7 @@ struct TORCH_API KinetoEvent {
     return input_op_ids_ != c10::nullopt;
   }
 
-  const std::vector<std::pair<at::RecordFunctionHandle, int>>& input_op_ids() const {
+  const std::vector<std::pair<int, int>>& input_op_ids() const {
     return *input_op_ids_;
   }
 
@@ -153,7 +153,7 @@ struct TORCH_API KinetoEvent {
     return debug_handle_;
   }
 
-  KinetoEvent& input_op_ids(const std::vector<std::pair<at::RecordFunctionHandle, int>>& input_op_ids) {
+  KinetoEvent& input_op_ids(const std::vector<std::pair<int, int>>& input_op_ids) {
     input_op_ids_ = input_op_ids;
     return *this;
   }
@@ -271,7 +271,7 @@ struct TORCH_API KinetoEvent {
   c10::optional<std::vector<std::string>> stack_;
   c10::optional<std::vector<std::string>> module_hierarchy_;
   c10::optional<std::vector<std::string>> dtypes_;
-  c10::optional<std::vector<std::pair<at::RecordFunctionHandle, int>>> input_op_ids_;
+  c10::optional<std::vector<std::pair<int, int>>> input_op_ids_;
   uint64_t flops_ = 0;
 
   std::string name_;

@@ -43,7 +43,7 @@ std::unique_ptr<at::ObserverContext> enterNVTX(const at::RecordFunction& fn) {
             report_input_shapes ? torch::profiler::impl::inputSizes(fn)
                                 : std::vector<std::vector<int64_t>>(),
             report_input_shapes ? torch::profiler::impl::inputOpIds(fn)
-                                : std::vector<std::pair<at::RecordFunctionHandle, int>>())
+                                : std::vector<std::pair<int, int>>())
             .c_str());
   }
   return nullptr;

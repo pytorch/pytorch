@@ -39,7 +39,7 @@ struct TORCH_API LegacyEvent {
       std::vector<std::vector<int64_t>>&& shapes = {},
       int node_id = -1,
       bool is_async = false,
-      std::vector<std::pair<at::RecordFunctionHandle, int>>&& input_op_ids = {})
+      std::vector<std::pair<int, int>>&& input_op_ids = {})
       : name_(std::move(name)),
         kind_(kind),
         thread_id_(thread_id),
@@ -67,7 +67,7 @@ struct TORCH_API LegacyEvent {
       int64_t cuda_memory_usage = 0,
       int device = -1,
       double cuda_us = -1,
-      std::vector<std::pair<at::RecordFunctionHandle, int>>&& input_op_ids = {})
+      std::vector<std::pair<int, int>>&& input_op_ids = {})
       : cpu_ns_(cpu_ns),
         name_(std::move(name)),
         kind_(kind),
@@ -124,7 +124,7 @@ struct TORCH_API LegacyEvent {
     return shapes_;
   }
 
-  std::vector<std::pair<at::RecordFunctionHandle, int>> inputOpIds() const {
+  std::vector<std::pair<int, int>> inputOpIds() const {
     return input_op_ids_;
   }
 
@@ -277,7 +277,7 @@ struct TORCH_API LegacyEvent {
   int64_t sequence_nr_ = -1;
   bool is_async_ = false;
 
-  std::vector<std::pair<at::RecordFunctionHandle, int>> input_op_ids_;
+  std::vector<std::pair<int, int>> input_op_ids_;
   std::vector<std::string> stack_;
   uint8_t scope_;
   uint64_t correlation_id_;

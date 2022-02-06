@@ -145,7 +145,7 @@ struct ProfilerLegacyThreadLocalState : public ProfilerThreadLocalStateBase {
       const at::RecordFunction& fn,
       const bool record_cuda,
       std::vector<std::vector<int64_t>>&& shapes = {},
-      std::vector<std::pair<at::RecordFunctionHandle, int>>&& input_op_ids = {});
+      std::vector<std::pair<int, int>>&& input_op_ids = {});
 
   void popRange(const at::RecordFunction& fn, const bool record_cuda);
 
@@ -222,7 +222,7 @@ void ProfilerLegacyThreadLocalState::pushRange(
     const at::RecordFunction& fn,
     const bool record_cuda,
     std::vector<std::vector<int64_t>>&& shapes,
-    std::vector<std::pair<at::RecordFunctionHandle, int>>&& input_op_ids) {
+    std::vector<std::pair<int, int>>&& input_op_ids) {
   if (config_.state == torch::profiler::impl::ProfilerState::Disabled) {
     return;
   }

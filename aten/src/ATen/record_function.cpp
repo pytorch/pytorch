@@ -582,15 +582,15 @@ uint64_t RecordFunction::currentThreadId() {
   return current_thread_id_;
 }
 
-std::pair<RecordFunctionHandle, int> RecordFunction::get_op_id_from_input(const c10::IValue& input_item) {
-    std::pair<RecordFunctionHandle, int> producer_op_pair(~0, -1);
+std::pair<int, int> RecordFunction::get_op_id_from_input(const c10::IValue& input_item) {
+    std::pair<int, int> producer_op_pair(-1, -1);
     const at::Tensor& tensor = input_item.toTensor();
     if (tensor.defined()) {
         auto ten_addr =  tensor.unsafeGetTensorImpl();
         // See if Address is in the map already
         if (at::producer_tensor_map.count(ten_addr) > 0) {
             producer_op_pair  =  at::producer_tensor_map[ten_addr];
-            RecordFunctionHandle producer_op_id = producer_op_pair.first;
+            int producer_op_id = producer_op_pair.first;
             int output_nr = producer_op_pair.second;
             std::cout << "  TensorImpl Addr " << std::hex << ten_addr << std::dec << " Producer op id " << producer_op_id << " Output nr " << output_nr << std::endl;
         } else {
@@ -600,12 +600,16 @@ std::pair<RecordFunctionHandle, int> RecordFunction::get_op_id_from_input(const 
     return producer_op_pair;
 }
 
-std::vector<std::pair<RecordFunctionHandle, int>> RecordFunction::flatten_list_op_ids(c10::List<c10::IValue> list, std::string fn_name) {
-  std::vector<std::pair<RecordFunctionHandle, int>> input_op_id_list;
+std::vector<std::pair<int, int>> RecordFunction::flatten_list_op_ids(c10::List<c10::IValue> list, std::string fn_name) {
+  std::pair<int, int> default_pair(-1, -1);
+  std::vector<std::pair<int, int>> input_op_id_list;
   for (const c10::IValue input : list) {
     if (input.isTensor()) {
         auto producer_op_pair = get_op_id_from_input(input);
         input_op_id_list.push_back(producer_op_pair);
+    }
+    else {
+        input_op_id_list.emplace_back(default_pair);
     }
   }
   return input_op_id_list;
@@ -613,7 +617,7 @@ std::vector<std::pair<RecordFunctionHandle, int>> RecordFunction::flatten_list_o
 
 void RecordFunction::check_input_mapping(void) {
     int num_inputs = inputs().size();
-    std::pair<at::RecordFunctionHandle, int> undefined_op_pair(~0,-1);
+    std::pair<int, int> undefined_op_pair(-1,-1);
     state_->input_producer_ops_.reserve(num_inputs);
     int idx = 0;
     for (const c10::IValue& input_item : inputs()) {
@@ -625,7 +629,7 @@ void RecordFunction::check_input_mapping(void) {
             state_->input_producer_ops_.push_back(producer_pair);
         } else {
           if (input_item.isList()) {
-            std::vector<std::pair<RecordFunctionHandle, int>> tmp_op_ids = flatten_list_op_ids(input_item.toList(), std::string(name()));
+            std::vector<std::pair<int, int>> tmp_op_ids = flatten_list_op_ids(input_item.toList(), std::string(name()));
             // Extend the current sizes array by the array returned from input sizes
             if (!tmp_op_ids.empty()) {
               state_->input_producer_ops_.insert(state_->input_producer_ops_.end(), tmp_op_ids.begin(), tmp_op_ids.end());
@@ -639,7 +643,7 @@ void RecordFunction::check_input_mapping(void) {
 }
 
 void RecordFunction::update_output_tensor_tracking(void) {
-    RecordFunctionHandle producer_op_id = handle();
+    int producer_op_id = int(handle());
     std::cout << "Alex: FN " << name() << " Op ID " << producer_op_id <<  " Saving Outputs" << std::endl;
     int output_nr = 0;
     for (const c10::IValue& s_tensor : outputs()){
@@ -653,10 +657,10 @@ void RecordFunction::update_output_tensor_tracking(void) {
                     std::cout << "  Adding Output TensorImpl Addr " << std::hex << ten_addr << " output nr " << std::dec << output_nr << " to map " << std::endl;
                 } else {
                     auto producer_pair = at::producer_tensor_map[ten_addr];
-                    RecordFunctionHandle prev_producer_id = producer_pair.first;
+                    int prev_producer_id = producer_pair.first;
                     std::cout << "  Output tensor reusing Addr " << std::hex << ten_addr << " old producer op " << std::dec << prev_producer_id << " new producer op_id " << producer_op_id << std::endl;
                 }
-                at::producer_tensor_map[ten_addr] = std::pair<RecordFunctionHandle, int> {producer_op_id, output_nr};
+                at::producer_tensor_map[ten_addr] = std::pair<int, int> {producer_op_id, output_nr};
                 state_->output_dims_.push_back(tensor.sizes().vec());
                 state_->output_tensor_addr_.push_back(ten_addr);
                 tensor_valid = true;

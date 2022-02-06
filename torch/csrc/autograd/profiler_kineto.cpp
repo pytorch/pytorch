@@ -137,7 +137,7 @@ struct OpEventData {
 
     // report_input_shapes
     std::vector<std::vector<int64_t>> shapes_;
-    std::vector<std::pair<at::RecordFunctionHandle, int>> input_op_ids_;
+    std::vector<std::pair<int, int>> input_op_ids_;
     std::vector<std::string> dtypes_;
 
     // with_stack
