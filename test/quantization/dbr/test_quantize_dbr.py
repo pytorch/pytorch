@@ -80,12 +80,6 @@ class QuantizeDBRTestCase(QuantizationTestCase):
             # print(m_copy_q)
             # print(m_copy_q.graph)
             out_q_fx = m_copy_q(*example_args)
-
-            # TODO: ANDREW DELETE
-            #m_copy_q_traced = torch.jit.trace(m_copy_q, example_args, check_trace=False)
-            #print("========== FX GRAPH")
-            #print(m_copy_q_traced.graph)
-
             # print(out_q)
             # print(out_q_fx)
             self.assertTrue(_allclose(out_p, out_m_copy_p))
@@ -97,10 +91,6 @@ class QuantizeDBRTestCase(QuantizationTestCase):
             # verify torch.jit.trace works
             mq_jit_traced = torch.jit.trace(
                 mq, example_args, check_trace=False)
-
-            # TODO: ANDREW DELETE
-            #print("========== DBR GRAPH")
-
             # print(mq_jit_traced.graph)
             traced_out = mq_jit_traced(*example_args)
             self.assertTrue(_allclose(traced_out, out_q))
