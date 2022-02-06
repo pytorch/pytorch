@@ -734,18 +734,20 @@ def mish(g, input):
     return g.op("Mul", input, g.op("Tanh", g.op("Softplus", input)))
 
 
-def _compatible_float_cast(g, op_name, self, **args):
+def _compatible_float_cast(g, op_name, self, other_operands=[], opset_before=None, *args, **kwargs):
     origin_dtype = self.type().scalarType()
-    is_fp = sym_help._is_fp(self)
+    will_cast = not sym_help._is_fp(self) and (opset_before is None or sym_help._export_onnx_opset_version < opset_before)
 
-    if not is_fp:
+    if will_cast:
         warnings.warn(
             f"{op_name}-{sym_help._export_onnx_opset_version} only support float types. Using cast-relu-cast instead.")
         self = g.op("Cast", self, to_i=sym_help.cast_pytorch_to_onnx["Float"])
+        for i in range(len(other_operands)):
+            other_operands[i] = g.op("Cast", other_operands[i], to_i=sym_help.cast_pytorch_to_onnx["Float"])
 
-    self = g.op(op_name, self, **args)
+    self = g.op(op_name, self, *other_operands, *args, **kwargs)
 
-    if not is_fp:
+    if will_cast:
         self = g.op(
             "Cast", self, to_i=sym_help.cast_pytorch_to_onnx[origin_dtype])
 
@@ -753,11 +755,11 @@ def _compatible_float_cast(g, op_name, self, **args):
 
 
 def relu(g, input):
-    return _compatible_float_cast(g, "Relu", input)
+    return _compatible_float_cast(g, "Relu", input, opset_before=14)
 
 
 def relu6(g, input):
-    relu = _compatible_float_cast(g, "Relu", input)
+    relu = _compatible_float_cast(g, "Relu", input, opset_before=14)
     return clamp_max(g, relu, 6)
 
 
@@ -1070,21 +1072,21 @@ def constant_pad_nd(g, input, padding, value):
 
     padding = _convert_padding_node(padding)
     paddings = _prepare_onnx_paddings(sym_help._get_tensor_rank(input), padding)
-    return _compatible_float_cast(g, "Pad", input, pads_i=paddings, mode_s=mode, value_f=value)
+    return _compatible_float_cast(g, "Pad", input, opset_before=11, pads_i=paddings, mode_s=mode, value_f=value)
 
 
 def reflection_pad(g, input, padding):
     mode = "reflect"
     padding = _convert_padding_node(padding)
     paddings = _prepare_onnx_paddings(sym_help._get_tensor_rank(input), padding)
-    return _compatible_float_cast(g, "Pad", input, pads_i=paddings, mode_s=mode)
+    return _compatible_float_cast(g, "Pad", input, opset_before=11, pads_i=paddings, mode_s=mode)
 
 
 def replication_pad(g, input, padding):
     mode = "edge"
     padding = _convert_padding_node(padding)
     paddings = _prepare_onnx_paddings(sym_help._get_tensor_rank(input), padding)
-    return _compatible_float_cast(g, "Pad", input, pads_i=paddings, mode_s=mode)
+    return _compatible_float_cast(g, "Pad", input, opset_before=11, pads_i=paddings, mode_s=mode)
 
 
 reflection_pad1d = reflection_pad
@@ -1630,7 +1632,7 @@ def clamp(g, self, min, max):
         return clamp_min(g, self, min)
     else:
         if sym_help._is_constant(min) and sym_help._is_constant(max):
-            return _compatible_float_cast(g, "Clip", self, min_f=_parse_arg(min, "f"), max_f=_parse_arg(max, "f"))
+            return _compatible_float_cast(g, "Clip", self, opset_before=12, min_f=_parse_arg(min, "f"), max_f=_parse_arg(max, "f"))
         else:
             return clamp_max(g, clamp_min(g, self, min), max)
 
@@ -1638,21 +1640,21 @@ def clamp(g, self, min, max):
 @parse_args("v", "v")
 def clamp_min(g, self, min):
     if sym_help._is_constant(min):
-        return _compatible_float_cast(g, "Clip", self, min_f=_parse_arg(min, "f"))
+        return _compatible_float_cast(g, "Clip", self, opset_before=12, min_f=_parse_arg(min, "f"))
     else:
         dtype = self.type().scalarType()
         min = g.op("Cast", min, to_i=sym_help.cast_pytorch_to_onnx[dtype])
-        return _compatible_float_cast(g, "Max", self, min)
+        return _compatible_float_cast(g, "Max", self, opset_before=12, other_operands=[min])
 
 
 @parse_args("v", "v")
 def clamp_max(g, self, max):
     if sym_help._is_constant(max):
-        return _compatible_float_cast(g, "Clip", self, max_f=_parse_arg(max, "f"))
+        return _compatible_float_cast(g, "Clip", self, opset_before=12, max_f=_parse_arg(max, "f"))
     else:
         dtype = self.type().scalarType()
         max = g.op("Cast", max, to_i=sym_help.cast_pytorch_to_onnx[dtype])
-        return _compatible_float_cast(g, "Min", self, max)
+        return _compatible_float_cast(g, "Min", self, other_operands=[max], opset_before=12)
 
 
 # torch.max (same for torch.min) actually has two interfaces smashed together:
@@ -1663,7 +1665,10 @@ def max(g, self, dim_or_y=None, keepdim=None):
         return g.op("ReduceMax", self, keepdims_i=0)
     # torch.max(input, other)
     if keepdim is None:
-        return _compatible_float_cast(g, "Max", self, dim_or_y)
+        if sym_help._export_onnx_opset_version < 12:
+            return _compatible_float_cast(g, "Max", self, other_operands=[dim_or_y], opset_before=12)
+        else:
+            return g.op("Max", self, dim_or_y)
     # torch.max(input, dim, keepdim)
     else:
         dim = sym_help._get_const(dim_or_y, "i", "dim")
@@ -1679,7 +1684,7 @@ def min(g, self, dim_or_y=None, keepdim=None):
         return g.op("ReduceMin", self, keepdims_i=0)
     # torch.min(input, other)
     if keepdim is None:
-        return _compatible_float_cast(g, "Min", self, dim_or_y)
+        return _compatible_float_cast(g, "Min", self, other_operands=[dim_or_y], opset_before=12)
     # torch.min(input, dim, keepdim)
     else:
         dim = sym_help._get_const(dim_or_y, "i", "dim")
@@ -1985,7 +1990,7 @@ def slice(g, self, *args):
 
 @parse_args("v", "f", "f")
 def hardtanh(g, self, min_val, max_val):
-    return _compatible_float_cast(g, "Clip", self, min_f=min_val, max_f=max_val)
+    return _compatible_float_cast(g, "Clip", self, opset_before=12, min_f=min_val, max_f=max_val)
 
 
 @parse_args("v")
@@ -2690,7 +2695,7 @@ def prim_shape(g, self):
 
 
 def prim_max(g, self, other):
-    return _compatible_float_cast(g, "Max", self, other)
+    return _compatible_float_cast(g, "Max", self, other_operands=[other], opset_before=12)
 
 
 def prim_min(g, self, other=None):
