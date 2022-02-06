@@ -1,8 +1,9 @@
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/native/sparse/cuda/SparseCUDATensorMath.cuh>
 
-#include <ATen/ATen.h>
+#include <ATen/core/Tensor.h>
+#include <ATen/Dispatch.h>
 #include <ATen/cuda/CUDAContext.h>
-#include <ATen/NativeFunctions.h>
 #include <ATen/SparseTensorUtils.h>
 #include <ATen/native/sparse/SparseTensorMath.h>
 #include <ATen/native/sparse/cuda/SparseBlasLegacy.h>
@@ -14,6 +15,25 @@
 #include <ATen/WrapDimUtilsMulti.h>
 #include <ATen/ExpandUtils.h>
 #include <c10/cuda/CUDACachingAllocator.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/_sparse_coo_tensor_with_dims_and_tensors.h>
+#include <ATen/ops/_sparse_sum_native.h>
+#include <ATen/ops/add_native.h>
+#include <ATen/ops/addmm_native.h>
+#include <ATen/ops/bmm_native.h>
+#include <ATen/ops/cat.h>
+#include <ATen/ops/copy_sparse_to_sparse.h>
+#include <ATen/ops/empty.h>
+#include <ATen/ops/empty_like.h>
+#include <ATen/ops/hspmm_native.h>
+#include <ATen/ops/mul.h>
+#include <ATen/ops/result_type.h>
+#include <ATen/ops/scalar_tensor.h>
+#endif
 
 #include <thrust/device_ptr.h>
 #include <thrust/sequence.h>
@@ -483,8 +503,8 @@ SparseTensor& mul_out_sparse_cuda(const SparseTensor& t_, const SparseTensor& sr
   TORCH_CHECK(cuda::getApplyGrid(valueSize, grid, curDevice), "mul: Argument #0: tensor too large or too many dimensions");
 
   Tensor resultNnz = at::empty({1}, CUDA(kLong));
-  AT_DISPATCH_ALL_TYPES_AND(
-    at::ScalarType::Half, commonDtype, "mul_out_sparse_cuda", [&] {
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(
+    at::ScalarType::Half, at::ScalarType::BFloat16, commonDtype, "mul_out_sparse_cuda", [&] {
         apply::valueSparseIntersectionKernel<<<grid, block, 0, stream>>>(
             TensorMulOp<scalar_t>(),
             I_INFO(r_indices_), I_INFO(t_indices_), I_INFO(s_indices_),
