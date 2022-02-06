@@ -31,7 +31,7 @@ def pack_weights_for_functionals(
             if packable_args_len == 0:
                 continue
 
-            if seen_op_info.type in conv_ops:
+            if seen_op_info.type in conv_ops or seen_op_info.type in conv_transpose_ops:
                 # fetch all the info needed for packed params
                 assert seen_op_info.packable_tensor_idx_to_name[1] is not None
                 weight = getattr(module, seen_op_info.packable_tensor_idx_to_name[1])

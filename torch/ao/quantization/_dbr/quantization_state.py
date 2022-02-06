@@ -5,6 +5,7 @@ import torch.nn.functional as F
 
 from .mappings import (
     conv_ops,
+    conv_transpose_ops,
     ops_are_related,
 )
 
@@ -432,7 +433,7 @@ class AutoQuantizationState(torch.nn.Module):
         # potentially extend kwargs with scale and zero_point
         # TODO move op-specific logic out of here
         if len(additional_kwargs):
-            if orig_op not in conv_ops and orig_op != F.linear:
+            if orig_op not in conv_ops and orig_op not in conv_transpose_ops and orig_op != F.linear:
                 kwargs.update(**additional_kwargs)
             else:
                 seen_op_info = self._get_cur_seen_op_info()

@@ -6,8 +6,7 @@ from typing import Callable, Any, Tuple, Dict
 
 import torch
 import torch.fx
-import torch.nn.functional as F
-from .mappings import conv_ops
+from .mappings import conv_ops, conv_transpose_ops
 from .quantization_state import AutoQuantizationState
 from .utils import get_packable_arg_idxs
 
@@ -154,7 +153,8 @@ class AllModuleTracer(torch.fx.Tracer):
                                 additional_kwargs['zero_point'])
                     args = linear_rewrite_args(*args, **kwargs)
                     kwargs = {}
-                elif old_target not in conv_ops or target in conv_ops:
+                elif (old_target not in conv_ops and old_target not in conv_transpose_ops) or\
+                        (target in conv_ops or target in conv_transpose_ops):
                     kwargs.update(**additional_kwargs)
                 else:
                     new_args = [*args]

@@ -125,17 +125,17 @@ binary_related_ops = (
     (torch.Tensor.mul, torch.Tensor.mul_),
 )
 
+conv_ops = set([
+    F.conv1d,
+    F.conv2d,
+    F.conv3d,
+])
+
 conv_transpose_ops = set([
     F.conv_transpose1d,
     F.conv_transpose2d,
     F.conv_transpose3d
 ])
-
-conv_ops = set([
-    F.conv1d,
-    F.conv2d,
-    F.conv3d,
-]).union(conv_transpose_ops)
 
 conv_prepack_fns = {
     F.conv1d: toq.conv1d_prepack,
