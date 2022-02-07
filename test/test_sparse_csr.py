@@ -7,7 +7,7 @@ import unittest
 from torch.testing import get_all_complex_dtypes, get_all_fp_dtypes, floating_and_complex_types, make_tensor
 from torch.testing._internal.common_cuda import SM53OrLater, SM80OrLater, TEST_CUSPARSE_GENERIC
 from torch.testing._internal.common_utils import \
-    (TEST_WITH_ROCM, TEST_SCIPY, TestCase, run_tests, load_tests, coalescedonoff)
+    (TEST_WITH_ROCM, TEST_SCIPY, TEST_MKL, IS_WINDOWS, TestCase, run_tests, load_tests, coalescedonoff)
 from torch.testing._internal.common_device_type import \
     (ops, instantiate_device_type_tests, dtypes, OpDTypes, dtypesIfCUDA, onlyCPU, onlyCUDA, skipCUDAIfNoCusparseGeneric,
      precisionOverride, skipMeta, skipCUDAIf, skipCUDAIfRocm, skipCPUIfNoMklSparse)
@@ -23,6 +23,8 @@ if TEST_SCIPY:
 # load_tests from torch.testing._internal.common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
 load_tests = load_tests
+
+no_mkl_sparse = IS_WINDOWS or not TEST_MKL
 
 def _check_cusparse_triangular_solve_available():
     version = _get_torch_cuda_version()
@@ -1425,6 +1427,7 @@ class TestSparseCSR(TestCase):
             b = make_tensor(sample.args[1].shape, device=device, dtype=dtype, noncontiguous=True, requires_grad=True)
             self.assertTrue(torch.autograd.gradcheck(fn, [c, b], fast_mode=True))
 
+    @skipCPUIfNoMklSparse
     @dtypes(torch.float64)
     def test_autograd_dense_output_addmv(self, device, dtype):
         from torch.testing._internal.common_methods_invocations import sample_inputs_addmv
@@ -1454,6 +1457,9 @@ class TestSparseCSR(TestCase):
 
     @ops(binary_ops_with_dense_output, dtypes=OpDTypes.supported, allowed_dtypes=[torch.double, ])
     def test_autograd_dense_output(self, device, dtype, op):
+        if op.name == "mv" and no_mkl_sparse:
+            unittest.skip("MKL Sparse is not available")
+
         samples = list(op.sample_inputs(device, dtype, requires_grad=True))
 
         # Fail early to prevent silent success with this test
