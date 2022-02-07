@@ -98,7 +98,7 @@ connector = "\n\t"
 
 # Convert all the arguments in a NativeFunction to C++ code
 def convert_arguments(f: NativeFunction) -> Tuple[List[Binding], List[str]]:
-    # we need the 'self' argument so method needs to be False, also it doesn't matter if signature faithful or not
+    # we need the 'self' argument so method needs to be False
     args = CppSignatureGroup.from_native_function(f, method=False).most_faithful_signature().arguments()
     code_list = [f"c10::IValue {args[i].name} = std::move(peek(stack, {i}, {len(args)}));" for i in
                  range(len(args))] + [""]
@@ -137,29 +137,26 @@ def argumenttype_ivalue_convert(t: Type, arg_name: str, *, mutable: bool = False
 
 
 def _gen_code_base_type(arg_name: str, out_name: str, ctype: CType) -> List[str]:
-    ctype_str = ctype.cpp_type(strip_ref=True)
-    return [f"{ctype_str} {out_name} = {arg_name}.to<{ctype_str}>();"]
+    return [f"{ctype.cpp_type(strip_ref=True)} {out_name} = {arg_name}.to<{ctype.cpp_type(strip_ref=True)}>();"]
 
 
 def _gen_code_optional_type(arg_name: str, out_name: str, t: OptionalType, ctype: CType) -> List[str]:
-    ctype_str = ctype.cpp_type(strip_ref=True)
     in_name = f"{arg_name}_opt_in"
     res_name, _, res_code = argumenttype_ivalue_convert(t.elem, in_name)
     return f"""
 c10::optional<c10::IValue> {arg_name}_opt = {arg_name}.toOptional<c10::IValue>();
-{ctype_str} {out_name};
+{ctype.cpp_type(strip_ref=True)} {out_name};
 if ({arg_name}_opt.has_value()) {{
     const c10::IValue {in_name} = {arg_name}_opt.value();
     {connector.join(res_code)}
-    {out_name} = {ctype_str}({res_name});
+    {out_name} = {ctype.cpp_type(strip_ref=True)}({res_name});
 }} else {{
-    {out_name} = {ctype_str}();
+    {out_name} = {ctype.cpp_type(strip_ref=True)}();
 }}
         """.split("\n")
 
 
 def _gen_code_list_type(arg_name: str, out_name: str, t: ListType, ctype: CType) -> List[str]:
-    ctype_str = ctype.cpp_type(strip_ref=True)
     in_name = f"{arg_name}_list_in"
     elem_name = f"{arg_name}_elem"
     code = [f"const c10::List<c10::IValue> {in_name} = {arg_name}.toList();"]
@@ -168,7 +165,7 @@ def _gen_code_list_type(arg_name: str, out_name: str, t: ListType, ctype: CType)
     if isinstance(t.elem, BaseType) and t.elem.name == BaseTy.bool and t.size:
         code.extend(
             f"""
-{ctype_str} {out_name} = as_array<{res_ctype.cpp_type(strip_ref=True)}, {t.size}>({in_name});
+{ctype.cpp_type(strip_ref=True)} {out_name} = as_array<{res_ctype.cpp_type(strip_ref=True)}, {t.size}>({in_name});
             """.split(
                 "\n"
             )
@@ -177,7 +174,7 @@ def _gen_code_list_type(arg_name: str, out_name: str, t: ListType, ctype: CType)
     elif isinstance(t.elem, OptionalType):
         code.extend(
             f"""
-{ctype_str} {out_name};
+{ctype.cpp_type(strip_ref=True)} {out_name};
 for (c10::IValue {elem_name}: {in_name}) {{
     {connector.join(res_code)}
     {out_name}.push_back({res_name});
@@ -196,7 +193,7 @@ for (c10::IValue {elem_name}: {in_name}) {{
     {connector.join(res_code)}
     {vec_name}.push_back({res_name});
 }}
-{ctype_str} {out_name}({vec_name});
+{ctype.cpp_type(strip_ref=True)} {out_name}({vec_name});
             """.split(
                 "\n"
             )
