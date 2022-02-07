@@ -590,15 +590,15 @@ TEST(DynamicShapes, GraphFromModel) {
   {
     std::vector<at::Tensor> inputs = {x0, x1, x2, x3, x4, x5};
     std::vector<IValue> stack = at::fmap<at::IValue>(inputs);
-    stack.push_back(i10);
-    stack.push_back(i9);
-    stack.push_back(i8);
-    stack.push_back(i7);
-    stack.push_back(i6);
-    stack.push_back(i5);
-    stack.push_back(i4);
-    stack.push_back(i3);
-    stack.push_back(i2);
+    stack.emplace_back(i10);
+    stack.emplace_back(i9);
+    stack.emplace_back(i8);
+    stack.emplace_back(i7);
+    stack.emplace_back(i6);
+    stack.emplace_back(i5);
+    stack.emplace_back(i4);
+    stack.emplace_back(i3);
+    stack.emplace_back(i2);
     k.run(stack);
 
     auto o = stack[0].toTensor();
@@ -610,15 +610,15 @@ TEST(DynamicShapes, GraphFromModel) {
         at::rand({i2, i10}, at::TensorOptions(at::kCPU).dtype(at::kFloat));
     std::vector<at::Tensor> inputs = {out, x0, x1, x2, x3, x4, x5};
     std::vector<IValue> stack = at::fmap<at::IValue>(inputs);
-    stack.push_back(i10);
-    stack.push_back(i9);
-    stack.push_back(i8);
-    stack.push_back(i7);
-    stack.push_back(i6);
-    stack.push_back(i5);
-    stack.push_back(i4);
-    stack.push_back(i3);
-    stack.push_back(i2);
+    stack.emplace_back(i10);
+    stack.emplace_back(i9);
+    stack.emplace_back(i8);
+    stack.emplace_back(i7);
+    stack.emplace_back(i6);
+    stack.emplace_back(i5);
+    stack.emplace_back(i4);
+    stack.emplace_back(i3);
+    stack.emplace_back(i2);
     k.runWithAllocatedOutputs(stack);
 
     ASSERT_TRUE(at::allclose(out, ref));
