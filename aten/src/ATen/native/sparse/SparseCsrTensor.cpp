@@ -25,6 +25,7 @@
 #include <ATen/ops/empty.h>
 #include <ATen/ops/empty_like_native.h>
 #include <ATen/ops/empty_native.h>
+#include <ATen/ops/eye_native.h>
 #include <ATen/ops/full.h>
 #include <ATen/ops/ones.h>
 #include <ATen/ops/resize_as_sparse_native.h>
