@@ -25,6 +25,7 @@
 #include <torch/csrc/jit/runtime/static/ops.h>
 #include <torch/csrc/jit/runtime/static/passes.h>
 #include <torch/csrc/jit/runtime/vararg_functions.h>
+#include <algorithm>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/NativeFunctions.h>
@@ -52,12 +53,37 @@ C10_DEFINE_bool(
 namespace torch {
 namespace jit {
 
+namespace {
+
+bool allArgsAreTensors(Node* node) {
+  const auto& inputs = node->inputs();
+  return std::all_of(inputs.begin(), inputs.end(), [](Value* value) {
+    return value->type()->kind() == TypeKind::TensorType;
+  });
+}
+
+} // namespace
+
 // A manually curated set of ops that are disallowed in static runtime.
 // These are rarely-used ops. Disallowing them typically eliminates
 // corner cases in graph optimizations, allowing for more aggressive
 // optimizations and better performance.
-bool isUnsupportedOp(const NodeKind& kind) {
-  return kind == aten::__is__ || kind == aten::__isnot__;
+bool isUnsupportedOp(Node* node) {
+  auto kind = node->kind();
+  if (kind != aten::__is__ && kind != aten::__isnot__) {
+    return false;
+  }
+
+  // We can't support aten::__is__ (and __isnot__) with tensor arguments.
+  // Consider the following graph:
+  // def forward(x):
+  //     y = x.detach()
+  //     return x is y
+  // We have a graph optimization that removes the `detach` node since it is
+  // a no-op during inference. But this affects the result - we get true
+  // instead of false! There are many other graph passes affected by this
+  // issue.
+  return allArgsAreTensors(node);
 }
 
 // graph must be frozen or canEnableStaticRuntime would return false
@@ -73,7 +99,7 @@ bool canEnableStaticRuntime(const std::shared_ptr<torch::jit::Graph>& graph) {
     }
     // check if can get op from Node
     const Operator* op = node->maybeOperator();
-    if (isUnsupportedOp(kind) || (!op && !nativeOpIsRegistered(kind))) {
+    if (isUnsupportedOp(node) || (!op && !nativeOpIsRegistered(kind))) {
       can_support = false;
       LOG(WARNING) << "Found unsupported op: " << kind.toQualString();
     }
