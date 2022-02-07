@@ -101,6 +101,11 @@ known_module_fusion_patterns = [
     (torch.nn.Conv2d, torch.nn.BatchNorm2d),
 ]
 
+# TODO(future): reuse global mapping
+known_function_fusion_patterns_and_replacements = {
+    (torch.Tensor.add, torch.relu): toq.add_relu,
+}
+
 binary_related_ops = (
     (torch.add, torch.Tensor.add),
     (torch.add, torch.Tensor.add_),
