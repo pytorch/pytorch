@@ -6,7 +6,7 @@ from torch import Tensor
 from ... import _VF
 from ..._jit_internal import Optional
 
-from typing import List, Tuple
+from typing import List, Tuple, Union
 
 
 
@@ -321,7 +321,7 @@ def pad_packed_sequence(sequence, batch_first=False, padding_value=0.0, total_le
 
 
 def pad_sequence(sequences, batch_first=False, padding_value=0.0):
-    # type: (List[Tensor], bool, float) -> Tensor
+    # type: (Union[List[Tensor], Tensor], bool, float) -> Tensor
     r"""Pad a list of variable length Tensors with ``padding_value``
 
     ``pad_sequence`` stacks a list of Tensors along a new dimension,
@@ -360,6 +360,8 @@ def pad_sequence(sequences, batch_first=False, padding_value=0.0):
 
     # assuming trailing dimensions and type of all the Tensors
     # in sequences are same and fetching those from sequences[0]
+    if isinstance(sequences, torch.Tensor):
+        sequences = sequences.unbind(0)
     return torch._C._nn.pad_sequence(sequences, batch_first, padding_value)
 
 
