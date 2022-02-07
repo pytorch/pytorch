@@ -1,9 +1,9 @@
+#include <ATen/ATen.h>
 #include <ATen/Context.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/Dispatch.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/cuda/PinnedMemoryAllocator.h>
-#include <ATen/cuda/CUDASolver.h>
 #include <ATen/cuda/CUDABlas.h>
 #include <ATen/cuda/CUDAEvent.h>
 #include <c10/cuda/CUDAStream.h>
@@ -11,8 +11,18 @@
 
 #include <ATen/native/LinearAlgebraUtils.h>
 #include <ATen/native/cuda/MiscUtils.h>
-#include <ATen/native/cuda/BatchLinearAlgebraLib.h>
+#include <ATen/native/cuda/linalg/CUDASolver.h>
+#include <ATen/native/cuda/linalg/BatchLinearAlgebraLib.h>
 
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#else
+#include <ATen/ops/arange.h>
+#include <ATen/ops/empty.h>
+#include <ATen/ops/nan_to_num.h>
+#include <ATen/ops/ones.h>
+#include <ATen/ops/zeros.h>
+#endif
 
 namespace at {
 namespace native {
