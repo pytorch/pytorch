@@ -392,7 +392,7 @@ void runNoGradOptimizations(
     std::shared_ptr<Graph>& graph,
     size_t remaining_bailout_depth) {
   GRAPH_DEBUG(
-      "After customPostPasses (beginning of runNoGradOptimizations)\n", *graph);
+      "Before customPrePasses (beginning of runNoGradOptimizations)\n", *graph);
   // runNondiffOptimization
   {
     // Run custom passes that different backends can register.
