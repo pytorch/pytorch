@@ -94,6 +94,7 @@
 #include <ATen/ops/trunc.h>
 #include <ATen/ops/trunc_native.h>
 #include <ATen/ops/zeros.h>
+#include <ATen/ops/zeros_like.h>
 #endif
 
 #include <algorithm>
