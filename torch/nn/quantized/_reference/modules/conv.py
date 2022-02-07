@@ -341,11 +341,11 @@ class ConvTranspose1d(_ConvTransposeNd, nn.ConvTranspose1d):
         """
         we have:
         w(float) -- quant - dequant \
-        x(float) ------------- F.conv1d ---
+        x(float) ------------- F.convTranspose1d ---
 
         In the full model, we will see
         w(float) -- quant - *dequant \
-        x -- quant --- *dequant --  *F.conv1d --- *quant - dequant
+        x -- quant --- *dequant --  *F.convTranspose1d --- *quant - dequant
         and the backend should be able to fuse the ops with `*` into a quantized conv1d
         """
 
@@ -363,7 +363,7 @@ class ConvTranspose1d(_ConvTransposeNd, nn.ConvTranspose1d):
         return result
 
     def _get_name(self):
-        return "QuantizedConv1d(Reference)"
+        return "QuantizedConvTranspose1d(Reference)"
 
     @classmethod
     def from_float(cls, float_conv, weight_qparams):
@@ -387,11 +387,11 @@ class ConvTranspose2d(_ConvTransposeNd, nn.ConvTranspose2d):
         """
         we have:
         w(float) -- quant - dequant \
-        x(float) ------------- F.conv2d ---
+        x(float) ------------- F.convTranspose2d ---
 
         In the full model, we will see
         w(float) -- quant - *dequant \
-        x -- quant --- *dequant --  *F.conv2d --- *quant - dequant
+        x -- quant --- *dequant --  *F.convTranspose2d --- *quant - dequant
         and the backend should be able to fuse the ops with `*` into a quantized conv2d
         """
         assert isinstance(self.padding, tuple)
@@ -408,7 +408,7 @@ class ConvTranspose2d(_ConvTransposeNd, nn.ConvTranspose2d):
         return result
 
     def _get_name(self):
-        return "QuantizedConv2d(Reference)"
+        return "QuantizedConvTranspose2d(Reference)"
 
     @classmethod
     def from_float(cls, float_conv, weight_qparams):
@@ -431,11 +431,11 @@ class ConvTranspose3d(_ConvTransposeNd, nn.ConvTranspose3d):
         """
         we have:
         w(float) -- quant - dequant \
-        x(float) ------------- F.conv3d ---
+        x(float) ------------- F.convTranspose3d ---
 
         In the full model, we will see
         w(float) -- quant - *dequant \
-        x -- quant --- *dequant --  *F.conv3d --- *quant - dequant
+        x -- quant --- *dequant --  *F.convTranspose3d --- *quant - dequant
         and the backend should be able to fuse the ops with `*` into a quantized conv3d
         """
 
@@ -452,7 +452,7 @@ class ConvTranspose3d(_ConvTransposeNd, nn.ConvTranspose3d):
         return result
 
     def _get_name(self):
-        return "QuantizedConv3d(Reference)"
+        return "QuantizedConvTranspose3d(Reference)"
 
     @classmethod
     def from_float(cls, float_conv, weight_qparams):
