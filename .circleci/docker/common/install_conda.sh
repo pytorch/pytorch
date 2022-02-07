@@ -126,9 +126,9 @@ if [ -n "$ANACONDA_PYTHON_VERSION" ]; then
   # Install numba only on python-3.8 or below
   # For numba issue see https://github.com/pytorch/pytorch/issues/51511
   if [[ $(python -c "import sys; print(int(sys.version_info < (3, 9)))") == "1" ]]; then
-    as_jenkins pip install --progress-bar off numba librosa>=0.6.2
+    as_jenkins pip install --progress-bar off numba "librosa>=0.6.2<0.9.0"
   else
-    as_jenkins pip install --progress-bar off numba==0.49.0 librosa>=0.6.2
+    as_jenkins pip install --progress-bar off numba==0.49.0 "librosa>=0.6.2,<0.9.0"
   fi
 
   # Update scikit-learn to a python-3.8 compatible version
