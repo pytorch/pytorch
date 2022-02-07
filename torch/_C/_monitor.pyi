@@ -15,21 +15,12 @@ class Aggregation(Enum):
 class Stat:
     name: str
     count: int
+    def __init__(
+        self, name: str, aggregations: List[Aggregation], window_size: int,
+        max_samples: int = -1,
+    ) -> None: ...
     def add(self, v: float) -> None: ...
     def get(self) -> Dict[Aggregation, float]: ...
-
-class IntervalStat(Stat):
-    def __init__(
-        self,
-        name: str,
-        aggregations: List[Aggregation],
-        window_size: datetime.timedelta,
-    ) -> None: ...
-
-class FixedCountStat(Stat):
-    def __init__(
-        self, name: str, aggregations: List[Aggregation], window_size: int
-    ) -> None: ...
 
 class Event:
     name: str

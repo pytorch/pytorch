@@ -66,7 +66,6 @@ class AccTracerTest(unittest.TestCase):
 
             def forward(self, a: torch.Tensor) -> torch.Tensor:
                 return self._torch_op(a, *self._args, **self._kwargs)
-
         m = TestModule(torch_op, args, kwargs)
         m.eval()
         a = torch.randn(*input_shape)
@@ -94,7 +93,7 @@ class AccTracerTest(unittest.TestCase):
 
         ref_outputs = m(a)
         outputs = traced(a)
-        traced_again = acc_tracer.trace(m, [a])
+        traced_again = acc_tracer.trace(traced, [a])
         outputs_again = traced_again(a)
         if isinstance(ref_outputs, torch.Tensor):
             ref_outputs = [ref_outputs]
@@ -124,6 +123,10 @@ class AccTracerTest(unittest.TestCase):
     def test_sum(self):
         self._make_acc_op_function_test(acc_ops.sum, torch.sum)
         self._make_acc_op_function_test(acc_ops.sum, torch.sum, dim=(1,), keepdim=True)
+
+    def test_prod(self):
+        self._make_acc_op_function_test(acc_ops.prod, torch.prod)
+        self._make_acc_op_function_test(acc_ops.prod, torch.prod, dim=1, keepdim=True)
 
     def test_mean(self):
         self._make_acc_op_function_test(acc_ops.mean, torch.mean)
@@ -1881,6 +1884,27 @@ class AccTracerTest(unittest.TestCase):
         for i, j in zip(ref_output, output):
             self.assertTrue(torch.equal(i, j))
 
+    @parameterized.expand(
+        [
+            ("neg_1", -1, 1, 3),
+            ("neg_2", -2, 1, 3),
+            ("neg_4", -4, 1, 1),
+        ]
+    )
+    def test_negative_slicing(self, _, dim, start, length):
+        """
+        Test that slicing with negative dims works.
+        """
+        self._make_acc_op_function_test(
+            acc_ops.slice_tensor,
+            torch.narrow,
+            input_shape=(2, 3, 4, 5),
+            validate_same_kwargs=False,
+            dim=dim,
+            start=start,
+            length=length,
+        )
+
     def test_list_input(self):
         """
         Test that list inputs are traced correctly.
@@ -2024,6 +2048,7 @@ class AccTracerTest(unittest.TestCase):
                 acc_ops.unsqueeze,
                 acc_ops.sigmoid,
                 acc_ops.sum,
+                acc_ops.prod,
                 acc_ops.max_full_reduce,
                 acc_ops.max_dim_reduce,
                 acc_ops.maximum,
@@ -2074,5 +2099,6 @@ class AccTracerTest(unittest.TestCase):
                 acc_ops.chunk,
                 acc_ops.rescale_quantize_per_tensor,
                 acc_ops.rescale_quantize_per_channel,
+                acc_ops.nan_to_num,
             },
         )
