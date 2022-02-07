@@ -11,6 +11,7 @@ It is lazily initialized, so you can always import it, and use
 import contextlib
 import os
 import torch
+from torch.types import Device
 import traceback
 import warnings
 import threading
@@ -18,7 +19,7 @@ from typing import List, Optional, Tuple, Union, Any
 from ._utils import _get_device_index, _dummy_type
 from .._utils import classproperty
 from .graphs import CUDAGraph, graph_pool_handle, graph, make_graphed_callables
-from .streams import Stream, Event
+from .streams import ExternalStream, Stream, Event
 from .. import device as _device
 import torch._C
 
@@ -570,6 +571,58 @@ def get_sync_debug_mode() -> int:
 
     _lazy_init()
     return torch._C._cuda_get_sync_debug_mode()
+
+
+def memory_usage(device: Optional[Union[Device, int]] = None) -> int:
+    r"""Returns the percent of time over the past sample period during which global (device)
+    memory was being read or written. as given by `nvidia-smi`.
+
+    Args:
+        device (torch.device or int, optional): selected device. Returns
+            statistic for the current device, given by :func:`~torch.cuda.current_device`,
+            if :attr:`device` is ``None`` (default).
+
+    Warning: Each sample period may be between 1 second and 1/6 second,
+    depending on the product being queried.
+    """
+    try:
+        import pynvml  # type: ignore[import]
+    except ModuleNotFoundError:
+        raise ModuleNotFoundError("pynvml module not found, please install pynvml")
+    from pynvml import NVMLError_DriverNotLoaded
+    try:
+        pynvml.nvmlInit()
+    except NVMLError_DriverNotLoaded:
+        raise RuntimeError("cuda driver can't be loaded, is cuda enabled?")
+    device = _get_device_index(device, optional=True)
+    handle = pynvml.nvmlDeviceGetHandleByIndex(device)
+    return pynvml.nvmlDeviceGetUtilizationRates(handle).memory
+
+
+def utilization(device: Optional[Union[Device, int]] = None) -> int:
+    r"""Returns the percent of time over the past sample period during which one or
+    more kernels was executing on the GPU as given by `nvidia-smi`.
+
+    Args:
+        device (torch.device or int, optional): selected device. Returns
+            statistic for the current device, given by :func:`~torch.cuda.current_device`,
+            if :attr:`device` is ``None`` (default).
+
+    Warning: Each sample period may be between 1 second and 1/6 second,
+    depending on the product being queried.
+    """
+    try:
+        import pynvml  # type: ignore[import]
+    except ModuleNotFoundError:
+        raise ModuleNotFoundError("pynvml module not found, please install pynvml")
+    from pynvml import NVMLError_DriverNotLoaded
+    try:
+        pynvml.nvmlInit()
+    except NVMLError_DriverNotLoaded:
+        raise RuntimeError("cuda driver can't be loaded, is cuda enabled?")
+    device = _get_device_index(device, optional=True)
+    handle = pynvml.nvmlDeviceGetHandleByIndex(device)
+    return pynvml.nvmlDeviceGetUtilizationRates(handle).gpu
 
 
 from .memory import *  # noqa: F403

@@ -44,7 +44,7 @@ class ElasticDistributedSampler(DistributedSampler):
 
         self.start_index = start_index
         self.num_samples = int(
-            math.ceil(float(len(self.dataset) - self.start_index) / self.num_replicas)
+            math.ceil(float(len(self.dataset) - self.start_index) / self.num_replicas)  # type: ignore[arg-type]
         )
         self.total_size = self.num_samples * self.num_replicas
 
@@ -53,7 +53,7 @@ class ElasticDistributedSampler(DistributedSampler):
         g = torch.Generator()
         g.manual_seed(self.epoch)
         indices = (
-            torch.randperm(len(self.dataset) - self.start_index, generator=g)
+            torch.randperm(len(self.dataset) - self.start_index, generator=g)  # type: ignore[arg-type]
             .add(self.start_index)
             .tolist()
         )
