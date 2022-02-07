@@ -2466,15 +2466,15 @@ static Tensor& linalg_norm_out_impl(Tensor& result, const Tensor& self, const op
   int64_t ndim = self.dim();
   std::vector<int64_t> dim_ = opt_dim.has_value() ? opt_dim.value().vec() : make_dim_list(ndim);
 
-  bool matrix_frob_norm = false;
+  bool str_ord_non_matrix_norm = false;
 
   if (opt_str_ord.has_value()) {
     auto str_ord = opt_str_ord.value();
     check_str_ord_valid(str_ord, opt_dim, ndim);
-    matrix_frob_norm = (str_ord != "fro") && (dim_.size() != 2 || dim_.size() != 1);
+    str_ord_non_matrix_norm = (str_ord != "fro") && (dim_.size() != 2 || dim_.size() != 1);
   }
 
-  if (matrix_frob_norm) {
+  if (str_ord_non_matrix_norm) {
     // 'ord' is string
     auto str_ord = opt_str_ord.value();
     Tensor self_ = opt_dtype.has_value() ? self.to(opt_dtype.value()) : self;
