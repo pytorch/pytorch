@@ -3,6 +3,7 @@
 import torch
 import torch.nn as nn
 import torch.nn.quantized as nnq
+import torch.nn.quantized._reference as nnqr
 from torch.nn.utils.rnn import PackedSequence
 from torch.ao.quantization import (
     quantize,
@@ -74,6 +75,26 @@ import unittest
 import numpy as np
 
 class TestQuantizeEagerOps(QuantizationTestCase):
+    def test_conv_transpose_op(self):
+        class refCTmodel(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.rct_op = nnqr.ConvTranspose2d(1, 1, 1)
+                self.quant = QuantStub()
+                self.dequant = DeQuantStub()
+
+            def forward(self, x):
+                x = self.quant(x)
+                x = self.dequant(x)
+                x = self.rct_op(x)
+                x = self.quant(x)
+                x = self.dequant(x)
+                return x
+
+        x = torch.randn(1, 1, 10, 10, dtype=torch.float)
+        rct = refCTmodel().eval()
+        out = rct(x)
+
     def _test_activation_op_impl(
             self, float_module_class, quantized_module_class, extra_module_kwargs):
         """ Implementation for testing common activation ops like leaky relu
