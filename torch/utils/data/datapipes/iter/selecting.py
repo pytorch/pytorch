@@ -21,14 +21,13 @@ except ImportError:
 
 @functional_datapipe('filter')
 class FilterIterDataPipe(IterDataPipe[T_co]):
-    r""" :class:`FilterIterDataPipe`.
-
-    Iterable DataPipe to filter elements from datapipe according to filter_fn.
+    r"""
+    Filter out elements from the source datapipe according to input ``filter_fn`` (functional name: ``filter``).
 
     Args:
         datapipe: Iterable DataPipe being filtered
         filter_fn: Customized function mapping an element to a boolean.
-        drop_empty_batches: By default, drops batch if it is empty after filtering instead of keeping an empty list
+        drop_empty_batches: By default, drops a batch if it is empty after filtering instead of keeping an empty list
     """
     datapipe: IterDataPipe
     filter_fn: Callable

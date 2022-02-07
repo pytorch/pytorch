@@ -15,9 +15,9 @@ T_co = TypeVar('T_co', covariant=True)
 
 @functional_datapipe('concat')
 class ConcaterIterDataPipe(IterDataPipe):
-    r""" :class:`ConcaterIterDataPipe`.
-
-    Iterable DataPipe to concatenate multiple Iterable DataPipes.
+    r"""
+    Concatenate multiple Iterable DataPipes (functional name: ``concat``). The resulting DataPipe will
+    yield all the elements from the first input DataPipe, before yielding from the subsequent ones.
 
     Args:
         datapipes: Iterable DataPipes being concatenated
@@ -52,16 +52,15 @@ class ConcaterIterDataPipe(IterDataPipe):
 
 @functional_datapipe('fork')
 class ForkerIterDataPipe(IterDataPipe):
-    r""" :class:`ForkerIterDataPipe`.
+    r"""
+    Create multiple instances of the same Iterable DataPipe (functional name: ``fork``).
 
-        Iterable DataPipe to create multiple instances of the same Iterable DataPipe.
-
-        Args:
-            datapipe: Iterable DataPipe being copied
-            num_instances: number of instances of the datapipe to create
-            buffer_size: this restricts how far ahead the leading child DataPipe
-             can read relative to the slowest child DataPipe.
-             Use -1 for the unlmited buffer
+    Args:
+        datapipe: Iterable DataPipe being copied
+        num_instances: number of instances of the datapipe to create
+        buffer_size: this restricts how far ahead the leading child DataPipe
+           can read relative to the slowest child DataPipe.
+           Defaults to ``1000``. Use ``-1`` for the unlimited buffer.
     """
     def __new__(cls, datapipe: IterDataPipe, num_instances: int, buffer_size: int = 1000):
         if num_instances < 1:
@@ -73,11 +72,10 @@ class ForkerIterDataPipe(IterDataPipe):
 
 
 class _ForkerIterDataPipe(IterDataPipe):
-    r""" :class:`_ForkerIterDataPipe`.
-
-        Container to hold instance-specific information on behalf of ForkerIterDataPipe. It tracks
-        the state of its child DataPipes, maintains the buffer, and yields the next value
-        as requested by the child DataPipes.
+    r"""
+    Container to hold instance-specific information on behalf of ForkerIterDataPipe. It tracks
+    the state of its child DataPipes, maintains the buffer, and yields the next value
+    as requested by the child DataPipes.
     """
     def __init__(self, datapipe: IterDataPipe, num_instances: int, buffer_size: int = 1000):
         self.main_datapipe = datapipe
@@ -143,14 +141,13 @@ class _ForkerIterDataPipe(IterDataPipe):
         self.end_ptr = None
 
 class _ChildDataPipe(IterDataPipe):
-    r""" :class:`_ChildDataPipe`.
+    r"""
+    Iterable Datapipe that is a child of a main DataPipe. The instance of this class
+    will pass its instance_id to get the next value from its main DataPipe.
 
-        Iteratable Datapipe that is a child of a main DataPipe. The instance of this class
-        will pass its instance_id to get the next value from its main DataPipe.
-
-        Args:
-            main_datapipe: Main DataPipe with a method 'get_next_element_by_instance(instance_id)'
-            instance_id: integer identifier of this instance
+    Args:
+        main_datapipe: Main DataPipe with a method 'get_next_element_by_instance(instance_id)'
+        instance_id: integer identifier of this instance
     """
     def __init__(self, main_datapipe, instance_id: int):
         required_attrs = ["get_next_element_by_instance", "is_instance_started", "is_every_instance_exhausted", "reset"]
@@ -178,19 +175,18 @@ class _ChildDataPipe(IterDataPipe):
 
 @functional_datapipe('demux')
 class DemultiplexerIterDataPipe(IterDataPipe):
-    r""" :class:`DemultiplexerIterDataPipe`.
+    r"""
+    Split the input DataPipe into multiple child DataPipes, using the given
+    classification function (functional name: ``demux``). A list of the child DataPipes is returned from this operation.
 
-        Iterable DataPipe to split the input DataPipe into multiple child DataPipes, using the given
-        classification function. A list of the child DataPipes is returned from this operation.
-
-        Args:
-            datapipe: Iterable DataPipe being filtered
-            num_instances: number of instances of the DataPipe to create
-            classifier_fn: a function that maps values to an integer within the range [0, num_instances - 1] or None
-            drop_none: defaults to False, if True, the function will skip over elements classified as None
-            buffer_size: this defines the maximum number of inputs that the buffer can hold across all child
-                DataPipes while waiting for their values to be yielded.
-                Use -1 for the unlimited buffer
+    Args:
+        datapipe: Iterable DataPipe being filtered
+        num_instances: number of instances of the DataPipe to create
+        classifier_fn: a function that maps values to an integer within the range ``[0, num_instances - 1]`` or ``None``
+        drop_none: defaults to ``False``, if ``True``, the function will skip over elements classified as ``None``
+        buffer_size: this defines the maximum number of inputs that the buffer can hold across all child
+            DataPipes while waiting for their values to be yielded.
+            Defaults to ``1000``. Use ``-1`` for the unlimited buffer.
     """
     def __new__(cls, datapipe: IterDataPipe, num_instances: int,
                 classifier_fn: Callable[[T_co], Optional[int]], drop_none: bool = False, buffer_size: int = 1000):
@@ -207,11 +203,10 @@ class DemultiplexerIterDataPipe(IterDataPipe):
 
 
 class _DemultiplexerIterDataPipe(IterDataPipe):
-    r""" :class:`_DemultiplexerIterDataPipe`.
-
-        Container to hold instance-specific information on behalf of DemultiplexerIterDataPipe. It tracks
-        the state of its child DataPipes, maintains the buffer, classifies and yields the next correct value
-        as requested by the child DataPipes.
+    r"""
+    Container to hold instance-specific information on behalf of DemultiplexerIterDataPipe. It tracks
+    the state of its child DataPipes, maintains the buffer, classifies and yields the next correct value
+    as requested by the child DataPipes.
     """
 
     def __init__(self, datapipe: IterDataPipe[T_co], num_instances: int,
@@ -324,14 +319,13 @@ class _DemultiplexerIterDataPipe(IterDataPipe):
 
 @functional_datapipe('mux')
 class MultiplexerIterDataPipe(IterDataPipe):
-    r""" :class:`MultiplexerIterDataPipe`.
+    r"""
+    Yields one element at a time from each of the input Iterable DataPipes (functional name: ``mux``). As in,
+    one element from the 1st input DataPipe, then one element from the 2nd DataPipe in the next iteration,
+    and so on. It skips over DataPipes that are exhausted, and ends when all input DataPipes are exhausted.
 
-        Iterable DataPipe that yields one element at a time from each input Iterable DataPipe
-        (i.e. one element from the 1st input DataPipe, then one element from the 2nd DataPipe in the next iteration,
-        and so on). It skips over DataPipes that are exhausted, and ends when all input DataPipes are exhausted.
-
-        Args:
-            datapipes: Iterable DataPipes that will take turn to yield their elements, until they are all exhausted
+    Args:
+        datapipes: Iterable DataPipes that will take turn to yield their elements, until they are all exhausted
     """
     def __init__(self, *datapipes):
         self.datapipes = datapipes
@@ -363,11 +357,9 @@ class MultiplexerIterDataPipe(IterDataPipe):
 
 @functional_datapipe('zip')
 class ZipperIterDataPipe(IterDataPipe[Tuple[T_co]]):
-    r""" :class:`ZipperIterDataPipe`.
-
-    Iterable DataPipe aggregates elements into a tuple from each of
-    the input DataPipe. The output DataPipe is stopped when the
-    shortest input DataPipe is exhausted.
+    r"""
+    Aggregates elements into a tuple from each of the input DataPipes (functional name: ``zip``).
+    The output is stopped as soon as the shortest input DataPipe is exhausted.
 
     Args:
         *datapipes: Iterable DataPipes being aggregated
