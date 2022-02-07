@@ -1117,7 +1117,7 @@ class TestLinalg(TestCase):
 
     def test_fro_norm_backward_zero(self, device):
         a = torch.zeros(3, 3, requires_grad=True, device=device)
-        aa = torch.linalg.norm(a, 'fro').backward()
+        torch.linalg.norm(a, 'fro').backward()
         self.assertEqual(a.grad, torch.zeros(3, 3, device=device))
 
     # This test confirms that torch.linalg.norm's dtype argument works
