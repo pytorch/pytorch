@@ -15,6 +15,7 @@ set CMAKE_VERBOSE_MAKEFILE=1
 
 set INSTALLER_DIR=%SCRIPT_HELPERS_DIR%\installation-helpers
 
+
 call %INSTALLER_DIR%\install_mkl.bat
 if errorlevel 1 exit /b
 if not errorlevel 0 exit /b
@@ -27,7 +28,10 @@ call %INSTALLER_DIR%\install_sccache.bat
 if errorlevel 1 exit /b
 if not errorlevel 0 exit /b
 
-call %INSTALLER_DIR%\install_miniconda3.bat
+call :retry %INSTALLER_DIR%\install_miniconda3.bat
+
+:retry
+call %* || (powershell -nop -c "& {sleep 1}" && call %*) || (powershell -nop -c "& {sleep 2}" && call %*)
 if errorlevel 1 exit /b
 if not errorlevel 0 exit /b
 

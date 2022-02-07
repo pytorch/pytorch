@@ -2,7 +2,7 @@
 #include <ATen/native/cpu/Loops.h>
 #include <ATen/native/quantized/cpu/quantized_ops.h>
 #include <ATen/native/TensorIterator.h>
-#include <ATen/NamedTensorUtils.h>
+#include <ATen/native/TensorShape.h>
 #include <ATen/NativeFunctions.h>
 #include <c10/util/irange.h>
 #include <torch/library.h>
@@ -133,28 +133,17 @@ TORCH_LIBRARY_IMPL(quantized, QuantizedCPU, m) {
   m.impl(TORCH_SELECTIVE_NAME("quantized::cat_relu_out"), TORCH_FN(qcat_out<true>));
 }
 
-Tensor quantized_cat_impl_wrapper(
-    TensorList qxs,
-    int64_t dim,
-    double scale,
-    int64_t zero_point) {
-  auto maybe_outnames = namedinference::compute_cat_outnames(qxs);
-  auto result =
-      quantized_cat_impl<false>(c10::List<Tensor>(qxs), dim, scale, zero_point);
-  namedinference::propagate_names_if_nonempty(result, maybe_outnames);
-  return result;
-}
-
 Tensor cat_quantized_cpu(TensorList qxs, int64_t dim) {
   TORCH_CHECK(is_valid_quantization_scheme(qxs[0]),
               "Only per-tensor quantization is supported in 'cat'!");
   TORCH_CHECK(
       all_inputs_sharing_qparams(qxs),
       "All inputs should share the same quantization parameters.");
-
+  check_cat_no_zero_dim(qxs);
+  dim = legacy_cat_wrap_dim(dim, qxs);
   double _scale = qxs[0].q_scale();
   int64_t _zero_point = qxs[0].q_zero_point();
-  return quantized_cat_impl_wrapper(qxs, dim, _scale, _zero_point);
+  return quantized_cat_impl<false>(c10::List<Tensor>(qxs), dim, _scale, _zero_point);
 }
 
 Tensor& cat_out_quantized_cpu(TensorList qxs, int64_t dim, Tensor& out) {
@@ -162,8 +151,10 @@ Tensor& cat_out_quantized_cpu(TensorList qxs, int64_t dim, Tensor& out) {
               "Only per-tensor quantization is supported in 'cat'!")
   TORCH_CHECK(is_valid_quantization_scheme(out),
               "Only per-tensor quantization is supported in 'cat'!")
-  auto out_ =
-      quantized_cat_impl_wrapper(qxs, dim, out.q_scale(), out.q_zero_point());
+  check_cat_no_zero_dim(qxs);
+  dim = legacy_cat_wrap_dim(dim, qxs);
+  auto out_ = quantized_cat_impl<false>(c10::List<Tensor>(qxs), dim, out.q_scale(),
+                                        out.q_zero_point());
   at::native::copy_(out, out_, /*non_blocking=*/false);
   return out;
 }

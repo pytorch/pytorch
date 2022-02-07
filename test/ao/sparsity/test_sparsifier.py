@@ -156,14 +156,65 @@ class TestBaseSparsifier(TestCase):
         sparsifier.prepare(model, [model.linear])
         assert hasattr(model.linear.parametrizations.weight[0], 'mask')
         assert is_parametrized(model.linear, 'weight')
-        assert not hasattr(model.seq[0], 'mask')
         assert not is_parametrized(model.seq[0], 'weight')
 
         sparsifier.squash_mask()
-        assert not hasattr(model.seq[0], 'mask')
         assert not is_parametrized(model.seq[0], 'weight')
-        assert not hasattr(model.linear, 'mask')
         assert not is_parametrized(model.linear, 'weight')
+
+    def test_mask_squash_with_params1(self):
+        model = Model()
+        sparsifier = ImplementedSparsifier(foo=3, bar=2, baz=1)
+        sparsifier.prepare(model, [model.linear, model.seq[0]])
+        sparsifier.squash_mask(
+            params_to_keep_per_layer={
+                'linear': ('foo', 'bar'),
+                'seq.0': ('baz',)
+            })
+        assert not is_parametrized(model.seq[0], 'weight')
+        assert not is_parametrized(model.linear, 'weight')
+        assert hasattr(model.seq[0], 'sparse_params')
+        assert hasattr(model.linear, 'sparse_params')
+        assert model.seq[0].sparse_params.get('foo', None) is None
+        assert model.seq[0].sparse_params.get('bar', None) is None
+        assert model.seq[0].sparse_params.get('baz', None) == 1
+        assert model.linear.sparse_params.get('foo', None) == 3
+        assert model.linear.sparse_params.get('bar', None) == 2
+        assert model.linear.sparse_params.get('baz', None) is None
+
+    def test_mask_squash_with_params2(self):
+        model = Model()
+        sparsifier = ImplementedSparsifier(foo=3, bar=2, baz=1)
+        sparsifier.prepare(model, [model.linear, model.seq[0]])
+        sparsifier.squash_mask(params_to_keep=('foo', 'bar'))
+        assert not is_parametrized(model.seq[0], 'weight')
+        assert not is_parametrized(model.linear, 'weight')
+        assert hasattr(model.seq[0], 'sparse_params')
+        assert hasattr(model.linear, 'sparse_params')
+        assert model.seq[0].sparse_params.get('foo', None) == 3
+        assert model.seq[0].sparse_params.get('bar', None) == 2
+        assert model.seq[0].sparse_params.get('baz', None) is None
+        assert model.linear.sparse_params.get('foo', None) == 3
+        assert model.linear.sparse_params.get('bar', None) == 2
+        assert model.linear.sparse_params.get('baz', None) is None
+
+    def test_mask_squash_with_params3(self):
+        model = Model()
+        sparsifier = ImplementedSparsifier(foo=3, bar=2, baz=1)
+        sparsifier.prepare(model, [model.linear, model.seq[0]])
+        sparsifier.squash_mask(
+            params_to_keep=('foo', 'bar'),
+            params_to_keep_per_layer={'seq.0': ('baz',)})
+        assert not is_parametrized(model.seq[0], 'weight')
+        assert not is_parametrized(model.linear, 'weight')
+        assert hasattr(model.seq[0], 'sparse_params')
+        assert hasattr(model.linear, 'sparse_params')
+        assert model.seq[0].sparse_params.get('foo', None) == 3
+        assert model.seq[0].sparse_params.get('bar', None) == 2
+        assert model.seq[0].sparse_params.get('baz', None) == 1
+        assert model.linear.sparse_params.get('foo', None) == 3
+        assert model.linear.sparse_params.get('bar', None) == 2
+        assert model.linear.sparse_params.get('baz', None) is None
 
 
 class TestWeightNormSparsifier(TestCase):

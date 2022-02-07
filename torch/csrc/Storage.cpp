@@ -4,9 +4,6 @@
 #endif
 #include <structmember.h>
 
-#include <TH/TH.h>
-// See Note [TH abstraction violation]
-//  - Used to get at the allocator associated with a storage
 #include <libshm.h>
 #include <torch/csrc/THP.h>
 #include <torch/csrc/copy_utils.h>
@@ -20,7 +17,7 @@
 
 // NOLINTNEXTLINE(bugprone-suspicious-include)
 #include <torch/csrc/generic/Storage.cpp>
-#include <TH/THGenerateByteType.h>
+#include <torch/csrc/THGenerateByteType.h>
 
 #include <c10/util/intrusive_ptr.h>
 
