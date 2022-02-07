@@ -1,14 +1,15 @@
 # Guidance for Operator Developer
 
-After add change for the operator, if it causes BC breakage, an upgrader is needed and following is the process to add an upgrader:
+After you change either the operator signature in a BC breaking way or the semantics of the operator, you will need to write an “upgrader” to make the change non-BC breaking iff they are used in TorchScript or mobile. In general, you can know your operator is BC breaking, if it fails `test/forward_backward_compatibility/check_forward_backward_compatibility.py `
 
+The steps to write upgrader:
 
 1. Prepare a model before making changes to the operator, following the process:
      1. add a module in `test/jit/fixtures_srcs/fixtures_src.py`. The reason why switching to commit is that, an old model with the old operator before the change is needed to ensure the upgrader is working as expected. In `test/jit/fixtures_srcs/generate_models.py`, add the module and its corresponding changed operator like following
 
         ```
         ALL_MODULES = {
-           TestVersionedDivTensorExampleV7(): "aten::div.Tensor",
+           TestVersionedLinspaceV7(): "aten::linspace",
         }
         ```
 
@@ -71,6 +72,10 @@ After add change for the operator, if it causes BC breakage, an upgrader is need
             1. For mobile tests: `test/test_save_load_for_op_versions.py`
             2. For server tests: `test/jit/test_upgraders.py`
     6. Commit  changes made in all changes in step 2 in a single PR
+
+You can look at following PRs to get the rough idea of what needs to be done:
+1. [PR that adds `logspace` test modules](https://github.com/pytorch/pytorch/pull/72052)
+2. [PR that updates `logspace`](https://github.com/pytorch/pytorch/pull/72051)
 
 ---
 **NOTE**
