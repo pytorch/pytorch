@@ -32,7 +32,7 @@ if TEST_WITH_DEV_DBG_ASAN:
 class TestGradAcc(FSDPTest):
     """Tests ``FullyShardedDataParallel``'s gradient accumulation via its
     ``no_sync()`` context manager."""
-    
+
     def _test_no_sync(self, batch_dim, num_iters_to_acc):
         """
         Tests ``no_sync()`` by comparing a run that trains sequentially through
@@ -64,7 +64,7 @@ class TestGradAcc(FSDPTest):
         for (batch1, batch2) in itertools.combinations(batches, r=2):
             for t1, t2 in zip(batch1, batch2):
                 assert not torch.all(t1 == t2)
-        
+
         # Concatenate the batches along the given batch dimension
         concat_batch: Tuple[torch.Tensor, ...] = tuple(
             torch.cat(ts, dim=batch_dim) for ts in zip(*batches)
