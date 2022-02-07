@@ -23,13 +23,14 @@ Tensor gemm_nt(const Tensor& a, const Tensor& b) {
 // compute q = (q + q_bias) / sqrt(dim_per_head), k = k + k_bias, v = v + v_bias
 std::tuple<Tensor, Tensor, Tensor> transform_bias_rescale_qkv(
     const Tensor& qkv,
-    const Tensor& qkv_bias) {
+    const Tensor& qkv_bias,
+    const int64_t num_head) {
   auto B = qkv.size(0);
   auto T = qkv.size(1);
   auto _3D = qkv.size(2);
   auto D = _3D / 3;
-  auto dim_per_head = 64;
-  auto num_head = D / dim_per_head;
+  TORCH_CHECK(D % num_head == 0);
+  const auto dim_per_head = D / num_head;
   auto q_k_v = at::empty({3, B, num_head, T, dim_per_head}, qkv.options());
 
   AT_DISPATCH_FLOATING_TYPES_AND2(
@@ -41,6 +42,7 @@ std::tuple<Tensor, Tensor, Tensor> transform_bias_rescale_qkv(
         scalar_t* qkv_data = qkv.data_ptr<scalar_t>();
         scalar_t* qkv_bias_data = qkv_bias.data_ptr<scalar_t>();
         scalar_t* q_k_v_data = q_k_v.data_ptr<scalar_t>();
+        const scalar_t sqrt_dim_per_head = std::sqrt(static_cast<scalar_t>(dim_per_head));
 
         int64_t grain_size =
             std::min(internal::GRAIN_SIZE / (3 * dim_per_head), (int64_t)1);
@@ -72,7 +74,7 @@ std::tuple<Tensor, Tensor, Tensor> transform_bias_rescale_qkv(
                       Vec::loadu(&qkv_data[b * _3D * T + t * _3D + d + 2 * D]) +
                       v_bias_data;
 
-                  q_data = q_data / Vec(8.0);
+                  q_data = q_data / Vec(sqrt_dim_per_head);
 
                   q_data.store(&q_k_v_data
                                    [0 * B * num_head * T * dim_per_head +
@@ -202,6 +204,7 @@ Tensor multi_head_self_attention_cpu(
     const Tensor& qkv_bias,
     const Tensor& proj_weight,
     const Tensor& proj_bias,
+    const int64_t num_head,
     const c10::optional<Tensor>& mask) {
   // query shape: [B, T, D]
   // qkv_weight shape: [3 * D, D]
@@ -210,7 +213,7 @@ Tensor multi_head_self_attention_cpu(
   auto qkv = gemm_nt(query, qkv_weight);
 
   // shape: 3 x [B, num_head, T, dim_per_head]
-  auto q_k_v = transform_bias_rescale_qkv(qkv, qkv_bias);
+  auto q_k_v = transform_bias_rescale_qkv(qkv, qkv_bias, num_head);
   auto q = std::get<0>(q_k_v);
   auto k = std::get<1>(q_k_v);
   auto v = std::get<2>(q_k_v);
