@@ -3,7 +3,7 @@ from typing import List
 import torch
 
 from .utils import (
-    get_users_of_seen_op_info,
+    get_users_of_seen_q_op_info,
 )
 
 from .mappings import (
@@ -32,20 +32,20 @@ def get_module_fusion_fqns(
         # Walk the subgraphs and record the FQNs of all known module fusions.
         # For now, this is brute forced for simplicity, can be optimized later if
         # necessary.
-        for idx, seen_op_info in qstate.idx_to_seen_op_infos.items():
+        for idx, seen_q_op_info in qstate.idx_to_seen_q_op_infos.items():
             for fusion_pattern in known_module_fusion_patterns:
                 cur_fqns = []
-                cur_seen_op_info = seen_op_info
+                cur_seen_q_op_info = seen_q_op_info
                 is_match = True
                 for mod_type in fusion_pattern:
-                    if cur_seen_op_info is not None and mod_type == cur_seen_op_info.type:
-                        cur_fqns.append(cur_seen_op_info.fqn)
-                        next_seen_op_infos = get_users_of_seen_op_info(
-                            qstate.idx_to_seen_op_infos, cur_seen_op_info)
-                        if len(next_seen_op_infos) == 1:
-                            cur_seen_op_info = next_seen_op_infos[0]
+                    if cur_seen_q_op_info is not None and mod_type == cur_seen_q_op_info.type:
+                        cur_fqns.append(cur_seen_q_op_info.fqn)
+                        next_seen_q_op_infos = get_users_of_seen_q_op_info(
+                            qstate.idx_to_seen_q_op_infos, cur_seen_q_op_info)
+                        if len(next_seen_q_op_infos) == 1:
+                            cur_seen_q_op_info = next_seen_q_op_infos[0]
                         else:
-                            cur_seen_op_info = None
+                            cur_seen_q_op_info = None
                         continue
                     else:
                         is_match = False
