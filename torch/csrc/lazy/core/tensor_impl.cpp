@@ -192,7 +192,8 @@ bool LTCTensorImpl::is_contiguous(c10::MemoryFormat _unused) const {
 }
 
 const at::Storage& LTCTensorImpl::storage() const {
-  TORCH_CHECK(false, "Lazy tensors do not have storage");
+  // TORCH_CHECK(false, "Lazy tensors do not have storage");
+  return storage_;
 }
 
 #endif  // C10_DISABLE_TENSORIMPL_EXTENSIBILITY

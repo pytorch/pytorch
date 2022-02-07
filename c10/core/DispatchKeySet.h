@@ -237,6 +237,8 @@ constexpr DispatchKeySet default_included_set = DispatchKeySet({
 constexpr DispatchKeySet default_excluded_set = DispatchKeySet({
     DispatchKey::AutocastCPU,
     DispatchKey::AutocastCUDA,
+    DispatchKey::Lazy,
+    DispatchKey::AutogradLazy,
 });
 
 constexpr DispatchKeySet autograd_dispatch_keyset_with_ADInplaceOrView =

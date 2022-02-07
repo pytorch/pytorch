@@ -32,7 +32,7 @@ LazyTensor::Data::~Data() {
 LazyTensorPtr LazyTensor::Create(
     const at::Tensor& tensor,
     const BackendDevice& device) {
-  TORCH_CHECK(tensor.device().type() != at::kLazy);
+  // TORCH_CHECK(tensor.device().type() != at::kLazy);
   LazyTensorPtr lazy_tensor = c10::make_intrusive<LazyTensor>(LazyTensor(tensor, device));
   LazyGraphExecutor::Get()->RegisterTensor(lazy_tensor->data_ptr());
   return lazy_tensor;
@@ -503,10 +503,12 @@ LazyTensorPtr GetOrCreateLtcTensor(const c10::optional<at::Tensor>& tensor,
 LazyTensorPtr GetLtcTensorOrCreateForWrappedNumber(const at::Tensor& tensor, const BackendDevice& device) {
   // TODO: There are places in core where a scalar is wrapped but not marked as
   // wrapped.
-  return (tensor.unsafeGetTensorImpl()->is_wrapped_number() ||
-          (tensor.dim() == 0 && tensor.numel() == 1))
-             ? GetOrCreateLtcTensor(tensor, device)
-             : GetLtcTensor(tensor);
+  return GetOrCreateLtcTensor(tensor, device);
+
+  // return (tensor.unsafeGetTensorImpl()->is_wrapped_number() ||
+  //         (tensor.dim() == 0 && tensor.numel() == 1))
+  //            ? GetOrCreateLtcTensor(tensor, device)
+  //            : GetLtcTensor(tensor);
 }
 
 at::Tensor CreateAtenFromLtcTensor(const LazyTensorPtr& ltc_tensor) {

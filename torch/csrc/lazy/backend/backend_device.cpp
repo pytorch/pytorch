@@ -44,14 +44,15 @@ std::ostream& operator<<(std::ostream& os, const BackendDevice& device) {
 
 // TODO(whc) refactor this: we need to support non-zero default ordinal for torch/XLA.
 BackendDevice atenDeviceToBackendDevice(const c10::Device& device) {
-  TORCH_CHECK(device.type() == at::kLazy, device);
+  // TORCH_CHECK(device.type() == at::kLazy, device);
   int64_t ordinal = device.has_index() ? device.index() : 0;
   return BackendDevice(getBackend()->GetDefaultDeviceType(), ordinal);
 }
 
 // TODO(whc) refactor this: we need to support non 1 on 1 mapping for torch/XLA.
 c10::Device backendDeviceToAtenDevice(const BackendDevice& device) {
-  return c10::Device(at::kLazy, device.ordinal());
+  // return c10::Device(at::kLazy, device.ordinal());
+  return c10::Device(at::kCUDA, device.ordinal());
 }
 
 c10::optional<BackendDevice> GetBackendDevice(const at::TensorList tensors) {
@@ -64,6 +65,16 @@ c10::optional<BackendDevice> GetBackendDevice(const at::TensorList tensors) {
 }
 
 c10::optional<BackendDevice> GetBackendDevice(const at::Tensor& tensor) {
+  // TORCH_INTERNAL_ASSERT(tensor.device().has_value(), "need to have value\n");
+  // return GetOrCreateLtcTensor(tensor, atenDeviceToBackendDevice(tensor.device()));
+  if (auto lt = TryGetLtcTensor(tensor)) {
+    return lt.GetDevice();
+  } else {
+    c10::Device device("lazy");
+    device.set_index(tensor.device().index());
+    return atenDeviceToBackendDevice(device);
+  }
+
   if (auto lt = TryGetLtcTensor(tensor)) {
     return lt->GetDevice();
   }

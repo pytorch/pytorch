@@ -188,6 +188,14 @@ TensorImpl::TensorImpl(
     C10_LOG_API_USAGE_ONCE("tensor.create");
   }
 
+  if (key_set.has(DispatchKey::Lazy)) {
+    // for lazy tensor, attach cuda regardless (lazy mode hack)
+    key_set = key_set | DispatchKeySet({DispatchKey::CUDA});
+  } else {
+    // attach Lazy dispatch regardless (lazy mode hack)
+    key_set = key_set | DispatchKeySet({DispatchKey::Lazy});
+  }
+
   bool inference_mode = c10::InferenceMode::is_enabled();
 
   // TODO: be more explicit about the full key set at call sites so we
