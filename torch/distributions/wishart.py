@@ -280,7 +280,7 @@ class Wishart(ExponentialFamily):
     @property
     def _natural_params(self):
         return (
-            0.5 * self.df,
+            0.5 * (self.df - p - 1),
             - 0.5 * self.precision_matrix,
         )
 
