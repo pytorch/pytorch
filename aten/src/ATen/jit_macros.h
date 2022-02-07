@@ -12,11 +12,3 @@
     #define AT_USE_JITERATOR() false
     #define jiterator_stringify(...) std::string("Jiterator is disabled");
 #endif // USE_ROCM
-
-// BUILD_JITERATOR_WITH_CACHE, controls whether jitted kernels can be cached
-// Currently unsupported on Windows
-#ifndef _WIN32
-    #define AT_BUILD_JITERATOR_WITH_CACHE() true
-#else
-    #define AT_BUILD_JITERATOR_WITH_CACHE() false
-#endif // _WIN32
