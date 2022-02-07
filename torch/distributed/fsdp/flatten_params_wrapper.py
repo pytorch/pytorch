@@ -14,18 +14,46 @@ from typing import (
     Generator,
     Iterator,
     List,
+    Mapping,
     NamedTuple,
     Optional,
     Sequence,
     Tuple,
+    Union,
 )
 
 import torch
 import torch.nn as nn
 from torch import Tensor
 
+from .utils import _replace_by_prefix
+
 ParamOffset = Tuple[int, int]
 SharedParamInfo = Tuple[str, str, nn.Module, str, nn.Module, str]
+
+
+def _post_state_dict_hook(
+    module: nn.Module, state_dict: "OrderedDict[str, Tensor]", prefix: str, *args: Any
+) -> "OrderedDict[str, Tensor]":
+    # Move everything from .fpw_module up one level.
+    _replace_by_prefix(state_dict, prefix + "_fpw_module.", prefix)
+    return state_dict
+
+
+def _pre_load_state_dict_hook(
+    state_dict: Union[Dict[str, Tensor], "OrderedDict[str, Tensor]"],
+    prefix: str,
+    *args: Any,
+) -> None:
+    # Push everything down to ._fpw_module level.
+    _replace_by_prefix(state_dict, prefix, prefix + "_fpw_module.")
+    # The flat_param_* keys actually needs to move one level up.
+    flat_param_key = prefix + "_fpw_module.flat_param"
+    for k in list(state_dict.keys()):
+        if k.startswith(flat_param_key):
+            last_part = k.split(".")[-1]
+            assert last_part.startswith("flat_param"), last_part
+            _replace_by_prefix(state_dict, k, prefix + last_part)
 
 
 class ParamInfo(NamedTuple):
@@ -124,7 +152,7 @@ class FlatParameter(nn.Parameter):
             (0, numel) for numel in self._param_numels
         ]
         # The number of padding elements.
-        self._num_padded = 0
+        self.num_padded = 0
 
     def shard_by_offsets(self, start: int, end: int, num_padded: int) -> None:
         assert self._is_sharded
@@ -133,8 +161,8 @@ class FlatParameter(nn.Parameter):
                 f"Shard the flatten parameter with an invalid offset pair {(start, end)}."
             )
         _shard_size = end - start + 1
-        self._num_padded = num_padded
-        if self._num_padded > _shard_size:
+        self.num_padded = num_padded
+        if self.num_padded > _shard_size:
             raise ValueError("The number of padding is larger than the shard size.")
         self._sharded_param_offsets.clear()
 
@@ -255,6 +283,11 @@ class FlattenParamsWrapper(nn.Module):
         # even if flat_param is temporarily deleted.
         self._orig_flat_param = [None]
         self._flatten_params()
+
+        # Register hook to be called after state_dict() to remove the
+        # "_fpw_module." prefix and before load_state_dict() to add it back.
+        self._register_state_dict_hook(_post_state_dict_hook)
+        self._register_load_state_dict_pre_hook(_pre_load_state_dict_hook)
 
     @property
     def module(self) -> Any:
@@ -390,6 +423,12 @@ class FlattenParamsWrapper(nn.Module):
     def __getitem__(self, key: int) -> Any:
         """Forward indexing calls in case the module is a nn.Sequential."""
         return self.module.__getitem__(key)
+
+    def flat_state_dict(self, *args: Any, **kwargs: Any) -> Dict[str, Any]:
+        """Return the flattened state_dict."""
+        assert getattr(self, "flat_param", None) is not None
+        assert isinstance(self.flat_param, FlatParameter)
+        return self.state_dict(*args, **kwargs)
 
     def _unflatten_params_if_needed(self) -> None:
         if self.flat_param is not None:
