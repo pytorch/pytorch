@@ -167,9 +167,13 @@ void Logger::set_construction_data_and_log(
     const std::vector<int>& device_ids,
     int output_device,
     bool broadcast_buffers,
-    bool has_sync_bn) {
+    bool has_sync_bn,
+    bool static_graph) {
   // No lock is needed, as it will be called in DistributedDataParallel
   // constructor.
+  if (static_graph) {
+    set_static_graph();
+  }
   ddp_logging_data_->strs_map["module_name"] = module_name;
   ddp_logging_data_->ints_map["world_size"] =
       reducer_->process_group_->getSize();
