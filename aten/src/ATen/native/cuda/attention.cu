@@ -23,10 +23,7 @@ namespace native {
 namespace {
 
 Tensor gemm_nt(const Tensor& a, const Tensor& b) {
-  auto a_ = a.view({a.size(0) * a.size(1), a.size(2)});
-  auto b_ = b.transpose(1, 0);
-  auto c_ = at::native::matmul(a_, b_);
-  return c_.view({a.size(0), a.size(1), b.size(0)});
+  return at::native::matmul(a, b.t());
 }
 
 template <typename scalar_t, typename accscalar_t>
