@@ -33,8 +33,10 @@ For a whirlwind tour of how to use the transforms, please check out `this sectio
 
 
 .. toctree::
-   :maxdepth: 1
+   :maxdepth: 2
+   :caption: Content
 
-   Install <install>
-   functorch API Reference <functorch>
-   Tutorials <tutorials>
+   install
+   tutorials
+   functorch
+

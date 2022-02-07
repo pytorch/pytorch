@@ -11,7 +11,10 @@ Function Transforms
 
     grad
     grad_and_value
+    hessian
     jacrev
+    jacfwd
+    jvp
     vmap
     vjp
 
