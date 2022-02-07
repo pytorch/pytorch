@@ -185,6 +185,7 @@ void opmath_jitted_gpu_kernel_with_scalars(TensorIteratorBase& iter, const std::
     jitted_gpu_kernel<name, return_type, f_inputs_type, 2>(iter, f);
   }
 }
-#endif // AT_USE_JITERATOR()
 
 }}  // at::native
+
+#endif // AT_USE_JITERATOR()
