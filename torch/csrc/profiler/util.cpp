@@ -111,20 +111,47 @@ std::pair<at::RecordFunctionHandle, int> get_input_op_id_from_record_fn(const at
   return input_producer_pair;
 }
 
+std::vector<std::vector<int64_t>> flatten_list(c10::List<c10::IValue> list, std::string fn_name) {
+  std::vector<std::vector<int64_t>> tensor_dims;
+  int idx = 0;
+  for (const c10::IValue& input : list) {
+    if (input.isTensor()) {
+        const at::Tensor& tensor = input.toTensor();
+        if (tensor.defined()) {
+          tensor_dims.push_back(input.toTensor().sizes().vec());
+        }
+    }
+    idx += 1;
+  }
+  return tensor_dims;
+}
+
 std::vector<std::vector<int64_t>> inputSizes(const at::RecordFunction& fn) {
   std::vector<std::vector<int64_t>> sizes;
   sizes.reserve(fn.inputs().size());
+  int iter = 0;
   for (const c10::IValue& input : fn.inputs()) {
     if (!input.isTensor()) {
-      sizes.emplace_back();
-      continue;
-    }
-    const at::Tensor& tensor = input.toTensor();
-    if (tensor.defined()) {
-      sizes.push_back(input.toTensor().sizes().vec());
+      if (input.isList()) {
+        std::vector<std::vector<int64_t>> tmp_sizes = flatten_list(input.toList(), std::string(fn.name()));
+        // Extend the current sizes array by the array returned from input sizes
+        if (!tmp_sizes.empty()) {
+          sizes.insert(sizes.end(), tmp_sizes.begin(), tmp_sizes.end());
+        } else {
+          sizes.emplace_back();
+        }
+      } else {
+        sizes.emplace_back();
+      }
     } else {
-      sizes.emplace_back();
+      const at::Tensor& tensor = input.toTensor();
+      if (tensor.defined()) {
+        sizes.push_back(input.toTensor().sizes().vec());
+      } else {
+        sizes.emplace_back();
+      }
     }
+    iter++;
   }
   return sizes;
 }
