@@ -1613,6 +1613,33 @@ class TestFX(JitTestCase):
         env_key_names = set(n.name for n in interp.env.keys())
         self.assertEqual(env_key_names, set(['output']))
 
+    def test_interpreter_default_args(self):
+        class Model(torch.nn.Module):
+            def forward(self, x, y=3.14159):
+                return x + y
+
+        model = Model()
+        gm = torch.fx.symbolic_trace(model)
+
+        interp = Interpreter(gm)
+        x = torch.randn(5, 3)
+        out = interp.run(x)
+        torch.testing.assert_allclose(out, x + 3.14159)
+
+    def test_interpreter_not_enough_args(self):
+        class Model(torch.nn.Module):
+            def forward(self, x, y):
+                return x + y
+
+        model = Model()
+        gm = torch.fx.symbolic_trace(model)
+
+        interp = Interpreter(gm)
+        x = torch.randn(5, 3)
+        with self.assertRaisesRegex(RuntimeError,
+                                    'Expected positional argument for parameter y, but one was not passed in'):
+            out = interp.run(x)
+
     def test_transformer_noop(self):
         class MyModule(torch.nn.Module):
             def __init__(self):
@@ -3025,6 +3052,21 @@ class TestFX(JitTestCase):
             .check("Tuple[str, Tuple[()]]")    \
             .run(scripted.code)
 
+    @unittest.skipIf(IS_WINDOWS, "Python Windows bug? https://bugs.python.org/issue45108")
+    def test_assert(self):
+        def f(x):
+            assert x > 1
+            return x + 1
+        try:
+            torch.fx.proxy.TracerBase.trace_asserts = True
+            traced = symbolic_trace(f)
+        finally:
+            torch.fx.proxy.TracerBase.trace_asserts = False
+
+        self.assertEqual(f(2), traced(2))
+        with self.assertRaises(AssertionError):
+            traced(0)
+
     def test_pytree(self):
         def f_sum(x):
             return sum(x)
@@ -3119,7 +3161,16 @@ class TestFX(JitTestCase):
         nf = symbolic_trace(nf)
         self.assertEqual(nf(**val), f(**val))
 
-
+    def test_imul_code_print(self):
+        graph = torch.fx.Graph()
+        a = graph.placeholder("a")
+        b = graph.placeholder("b")
+        graph.call_function(operator.imul, (a, b), {})
+        graph.output(a)
+        gm = torch.fx.GraphModule({}, graph)
+        gm.recompile()
+        self.assertEqual(gm(2, 3), 6)
+        self.assertIn("a *= b", gm.code)
 
 
 def run_getitem_target():
@@ -3442,6 +3493,7 @@ class TestFunctionalTracing(JitTestCase):
         "avg_pool1d": BUILT_IN_FUNC,
         "avg_pool2d": BUILT_IN_FUNC,
         "avg_pool3d": BUILT_IN_FUNC,
+        "bilinear": BUILT_IN_FUNC,
         "celu_": BUILT_IN_FUNC,
         "channel_shuffle": BUILT_IN_FUNC,
         "conv1d": BUILT_IN_FUNC,
@@ -3453,13 +3505,18 @@ class TestFunctionalTracing(JitTestCase):
         "conv_transpose3d": BUILT_IN_FUNC,
         "cosine_similarity": BUILT_IN_FUNC,
         "elu_": BUILT_IN_FUNC,
+        "gelu": BUILT_IN_FUNC,
+        "hardshrink": BUILT_IN_FUNC,
         "hardtanh_": BUILT_IN_FUNC,
         "leaky_relu_": BUILT_IN_FUNC,
+        "linear": BUILT_IN_FUNC,
         "logsigmoid": BUILT_IN_FUNC,
         "one_hot": BUILT_IN_FUNC,
+        "pairwise_distance": BUILT_IN_FUNC,
         "pdist": BUILT_IN_FUNC,
         "pixel_shuffle": BUILT_IN_FUNC,
         "pixel_unshuffle": BUILT_IN_FUNC,
+        "prelu": BUILT_IN_FUNC,
         "relu_": BUILT_IN_FUNC,
         "rrelu_": BUILT_IN_FUNC,
         "selu_": BUILT_IN_FUNC,
@@ -3492,10 +3549,8 @@ class TestFunctionalTracing(JitTestCase):
         "adaptive_max_pool1d_with_indices": ARG_TYPE_MISMATCH,
         "fractional_max_pool2d_with_indices": ARG_TYPE_MISMATCH,
         "fractional_max_pool3d_with_indices": ARG_TYPE_MISMATCH,
-        "hardshrink": ARG_TYPE_MISMATCH,
         "layer_norm": ARG_TYPE_MISMATCH,
         "lp_pool1d": ARG_TYPE_MISMATCH,
-        "pairwise_distance": ARG_TYPE_MISMATCH,
 
         "affine_grid": CONTROL_FLOW,
         "alpha_dropout": CONTROL_FLOW,
