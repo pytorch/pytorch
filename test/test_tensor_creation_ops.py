@@ -2121,6 +2121,11 @@ class TestTensorCreation(TestCase):
         self.assertRaises(TypeError, lambda: torch.set_default_tensor_type('torch.IntTensor'))
         self.assertRaises(TypeError, lambda: torch.set_default_dtype(torch.int64))
 
+        # don't support complex.
+        self.assertRaises(TypeError, lambda: torch.set_default_dtype(torch.complex32))
+        self.assertRaises(TypeError, lambda: torch.set_default_dtype(torch.complex64))
+        self.assertRaises(TypeError, lambda: torch.set_default_dtype(torch.complex128))
+
         # don't allow passing dtype to set_default_tensor_type
         self.assertRaises(TypeError, lambda: torch.set_default_tensor_type(torch.float32))
 
