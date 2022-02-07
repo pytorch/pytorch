@@ -381,6 +381,7 @@ def add_auto_observation(
                 if first_call:
                     for _, v in self.named_modules():
                         if hasattr(v, '_auto_quant_state'):
+                            v._auto_quant_state.match_fusion_patterns()
                             v._auto_quant_state.insert_observers(v)
 
                 return output
