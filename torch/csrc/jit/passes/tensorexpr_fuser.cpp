@@ -198,6 +198,11 @@ void removeProfileNodesAndSpecializeTypes(Block* b) {
         input_is_optional = true;
       }
 
+      if (input_is_optional) {
+        it.destroyCurrent();
+        continue;
+      }
+
       // A value can be profiled with differently typed uses.
       // This can occur from:
       // - having a use which is not executed, so the type will be
@@ -214,12 +219,7 @@ void removeProfileNodesAndSpecializeTypes(Block* b) {
       // a use with a different profiled type, we will still be correct.
       // In the future we could consider unifying the types of uses, or adding a
       // type refinement node so uses can have the correct corresponding type.
-      if (profiled_type == TensorType::get() && !input_is_optional) {
-        continue;
-      }
-
-      if (input_is_optional) {
-        it.destroyCurrent();
+      if (profiled_type == TensorType::get()) {
         continue;
       }
 

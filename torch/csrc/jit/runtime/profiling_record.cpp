@@ -145,6 +145,11 @@ void ProfilingRecord::insertShapeProfile(
     pno->setType(OptionalType::create(TensorType::get()));
   } else if (input_type->kind() == c10::TypeKind::TensorType) {
     pno->setType(TensorType::get());
+  } else {
+    TORCH_INTERNAL_ASSERT(
+        false,
+        "Trying to profile an unsupported type (neither Tensor or Optional[Tensor]): ",
+        input_type->str());
   }
   std::function<void(Stack&)> shape_profiler = [this, pn, pno](Stack& stack) {
     int64_t frame_id = 0;
