@@ -813,11 +813,7 @@ class FullyShardedDataParallel(nn.Module):
                 "FSDP only works with gradients that don't require gradients"
             )
 
-        if self._require_backward_grad_sync:
-            # We do not free the full parameters in a `no_sync()` context since
-            # the parameters will not get updated before the next forward; this
-            # saves network bandwidth but uses more GPU memory
-            self._free_full_params([param])
+        self._free_full_params([param])
 
         # Switch to local shard after backward.
         self._use_param_local_shard([param])
