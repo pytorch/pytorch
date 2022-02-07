@@ -115,15 +115,18 @@ std::tuple<Tensor, Tensor, Tensor> transform_bias_rescale_qkv(
   TORCH_CHECK(_3D % 3 == 0);
   const auto dim_per_head = D / num_head;
   auto q_k_v = at::empty({3, B, num_head, T, dim_per_head}, qkv.options());
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(q_k_v.is_contiguous());
 
-  AT_DISPATCH_FLOATING_TYPES_AND2(
+  const auto qkv_contig = qkv.expect_contiguous();
+  const auto qkv_bias_contig = qkv_bias.expect_contiguous();
+ AT_DISPATCH_FLOATING_TYPES_AND2(
       ScalarType::Half,
       ScalarType::BFloat16,
       qkv.scalar_type(),
       "transform_bias_rescale_qkv",
       [&] {
-        scalar_t* qkv_data = qkv.data_ptr<scalar_t>();
-        scalar_t* qkv_bias_data = qkv_bias.data_ptr<scalar_t>();
+        scalar_t* qkv_data = qkv_contig->data_ptr<scalar_t>();
+        scalar_t* qkv_bias_data = qkv_bias_contig->data_ptr<scalar_t>();
         scalar_t* q_k_v_data = q_k_v.data_ptr<scalar_t>();
         const scalar_t sqrt_dim_per_head = std::sqrt(static_cast<scalar_t>(dim_per_head));
 
@@ -136,6 +139,7 @@ std::tuple<Tensor, Tensor, Tensor> transform_bias_rescale_qkv(
       });
   auto q_k_v_s =
       at::native::split(q_k_v.view({3 * B, num_head, T, dim_per_head}), B, 0);
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(q_k_v_s.size() == 3);
   return std::make_tuple(q_k_v_s[0], q_k_v_s[1], q_k_v_s[2]);
 }
 
