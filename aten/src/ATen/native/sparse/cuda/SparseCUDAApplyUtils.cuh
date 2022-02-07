@@ -2,7 +2,6 @@
 
 #include <ATen/cuda/detail/TensorInfo.cuh>
 #include <ATen/cuda/CUDAApplyUtils.cuh>
-#include <ATen/native/cuda/thread_constants.h>
 #include <c10/macros/Macros.h>
 
 namespace at { namespace native {
@@ -298,7 +297,7 @@ __global__ void indexSparseIntersectionKernel(
 // }
 
 template <typename Dtype, typename Acctype>
-C10_LAUNCH_BOUNDS_1(num_threads())
+C10_LAUNCH_BOUNDS_1(C10_WARP_SIZE*4)
 __global__ void coalesceValuesKernel(
   int64_t *segment_offsets, int64_t *value_indices,
   Dtype *values, Dtype *newValues,
