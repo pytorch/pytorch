@@ -422,6 +422,25 @@ class TestQuantizeDBR(QuantizeDBRTestCase):
         qconfig = torch.quantization.default_qconfig
         self._test_auto_tracing(m, qconfig, (torch.randn(1, 1, 2, 2),))
 
+    def test_fusion_functions(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                x = x + x
+                x = torch.relu(x)
+                return x
+
+        m = M().eval()
+        qconfig = torch.quantization.default_qconfig
+        mp = _quantize_dbr.prepare(m, {'': qconfig}, (torch.randn(1, 1, 1, 1),))
+        self.assertTrue(
+            mp._auto_quant_state.idx_to_seen_q_op_infos[0].fusion_info is not None)
+        self.assertTrue(
+            mp._auto_quant_state.idx_to_seen_q_op_infos[1].fusion_info is not None)
+        # TODO(future PR): use fusion results to insert observers
+        # TODO(future PR): use fusion results to replace function at inference
+        # TODO(future PR): use information about non-quantizeable ops during
+        #   matching fusion patterns
+
     def test_observers_not_touched_by_tracing(self):
         """
         Verifies that running dynamic tracing does not change any data
