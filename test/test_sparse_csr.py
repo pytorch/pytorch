@@ -1183,6 +1183,7 @@ class TestSparseCSR(TestCase):
 
     @skipCUDAIfRocm
     @onlyCUDA
+    @skipCUDAIf(True, "Causes CUDA memory exception, see https://github.com/pytorch/pytorch/issues/72177")
     @skipCUDAIf(
         not _check_cusparse_sddmm_available(),
         "cuSparse Generic API SDDMM is not available"
@@ -1277,6 +1278,33 @@ class TestSparseCSR(TestCase):
 
             self.assertEqual(output.to_dense(), expected)
 
+    # Currently, there is no rule in PyTorch for filling zeros in the outputs
+    #   from operations on Sparse CSR tensors. Hence only those operators are supported
+    #   which have 0->0 correspondence, example: sin(0) = 0, tan(0) = 0 but
+    #   cos(0) = 1 (and hence it's not supported).
+    # Note: here, we do this test only for unary operators
+    @ops(sparse_csr_unary_ufuncs)
+    def test_zero_to_zero_correspondence_unary(self, device, dtype, op):
+        zero = torch.zeros((1, 2), dtype=dtype, device=device)
+        tensor_explicit_zeros = torch.sparse_csr_tensor([0, 1], [1], [0], dtype=dtype, device=device)
+
+        output_zero = op(zero)
+        expected_zero = zero.to(output_zero.dtype)
+
+        output_explicit_zeros = op(tensor_explicit_zeros).to_dense()
+        expected_explicit_zeros = tensor_explicit_zeros.to_dense().to(output_explicit_zeros.dtype)
+
+        for (output, expected) in [
+                (output_zero, expected_zero),
+                (output_explicit_zeros, expected_explicit_zeros)
+        ]:
+            self.assertEqual(output, expected, f"This operator ({op.name}) should not be supported for "
+                             "Sparse CSR as it breaks 0->0 correspondence.")
+
+        for inp in [zero.to_sparse_csr(), tensor_explicit_zeros]:
+            self.assertEqual(op(inp).values().numel(), inp.values().numel(),
+                             f"{op.name} fails to preserve sparsity pattern.")
+
     @ops(sparse_csr_unary_ufuncs)
     def test_sparse_csr_unary_out(self, device, dtype, op):
         samples = op.sample_inputs(device, dtype)
@@ -1366,6 +1394,21 @@ class TestSparseCSR(TestCase):
             run_test(shape, 0, index_dtype, dim0, dim1)
             run_test(shape, max(shape), index_dtype, dim0, dim1)
             run_test(shape, shape[0] * shape[1], index_dtype, dim0, dim1)
+
+    # TODO: This is a stopgap for a rigorous extension of our autograd tests
+    # to test the functionality of detach
+    @skipMeta
+    @dtypes(*get_all_dtypes())
+    def test_exercise_detach(self, device, dtype):
+        shape = (3, 3)
+        nnz = 4
+        for index_dtype in [torch.int32, torch.int64]:
+            inp = self.genSparseCSRTensor(shape, nnz, dtype=dtype, device=device, index_dtype=index_dtype)
+            detached_inp = inp.detach()
+            self.assertEqual(inp.values(), detached_inp.values())
+            self.assertEqual(inp.crow_indices(), detached_inp.crow_indices())
+            self.assertEqual(inp.col_indices(), detached_inp.col_indices())
+
 
 
 # e.g., TestSparseCSRCPU and TestSparseCSRCUDA

@@ -256,7 +256,7 @@ class AliasDb {
   // Mapping of values to MemoryDAG elements
   ska::flat_hash_map<const Value*, Element*> elementMap_;
   // All wildcard Elements (one for each unique mutable type)
-  std::unordered_map<TypePtr, Element*, HashType, EqualType> wildcardIndex_;
+  ska::flat_hash_map<TypePtr, Element*, HashType, EqualType> wildcardIndex_;
   Element* getWildcard(const TypePtr& type) const;
   c10::optional<Element*> tryGetOrCreateWildcard(const TypePtr& type);
   void addContainedTypesToFreshElement(
@@ -272,7 +272,7 @@ class AliasDb {
   bool hasWriters(const at::ArrayRef<Value*>& values) const;
 
   // Cached mapping of type ptrs to their mutable types
-  mutable std::unordered_map<TypePtr, AliasTypeSet> mapped_mutable_types_;
+  mutable ska::flat_hash_map<TypePtr, AliasTypeSet> mapped_mutable_types_;
 
   /**
    * State for tracking write info.
