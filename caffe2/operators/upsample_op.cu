@@ -83,8 +83,6 @@ __global__ void UpsampleBilinearGradientKernel(
     const int input_width,
     const int output_height,
     const int output_width,
-    const float height_scale,
-    const float width_scale,
     const float* dY,
     float* dX) {
   CUDA_1D_KERNEL_LOOP(index, input_size) {
@@ -227,8 +225,6 @@ bool UpsampleBilinearGradientOp<float, CUDAContext>::RunOnDevice() {
       input_width,
       output_height,
       output_width,
-      height_scale_,
-      width_scale_,
       dY.data<float>(),
       dX->template mutable_data<float>());
   C10_CUDA_KERNEL_LAUNCH_CHECK();
