@@ -745,7 +745,8 @@ def _compatible_float_cast(g, op_name, self, *args, other_operands=None, opset_b
             f"{op_name}-{sym_help._export_onnx_opset_version} only support float types. Using cast-{op_name}-cast instead.")
         self = g.op("Cast", self, to_i=sym_help.cast_pytorch_to_onnx["Float"])
         for i in range(len(other_operands)):
-            other_operands[i] = g.op("Cast", other_operands[i], to_i=sym_help.cast_pytorch_to_onnx["Float"])
+            if not sym_help._is_fp(other_operands[i]):
+                other_operands[i] = g.op("Cast", other_operands[i], to_i=sym_help.cast_pytorch_to_onnx["Float"])
 
     self = g.op(op_name, self, *other_operands, *args, **kwargs)
 
