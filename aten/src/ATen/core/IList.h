@@ -105,8 +105,6 @@
  */
 
 namespace c10 {
-struct IValue;
-
 /*
  * Applies arbitrary macros to each `IListTag`.
  */
@@ -283,22 +281,13 @@ class IListIterator : public std::iterator<std::bidirectional_iterator_tag, T> {
       typename detail::IListTagImpl<IListTag::TAG, T>::elem_type>;
   TORCH_ILIST_FORALL_TAGS(DEFINE_FRIEND_CLASS);
 #undef DEFINE_FRIEND_CLASS
-  friend struct IValue;
 
+ public:
   using unboxed_iterator_type = typename detail::
       IListTagImpl<IListTag::Unboxed, T>::list_type::const_iterator;
   using boxed_iterator_type = typename detail::
       IListTagImpl<IListTag::Boxed, T>::list_type::const_iterator;
 
-  union Payload {
-    boxed_iterator_type boxed_iterator;
-    unboxed_iterator_type unboxed_iterator;
-    void* _init_ptr;
-    Payload() : _init_ptr(nullptr) {}
-    ~Payload() = default;
-  };
-
- public:
   IListIterator() : tag_(IListTag::None) {}
 
   IListIterator(boxed_iterator_type boxed) : tag_(IListTag::Boxed) {
@@ -350,6 +339,14 @@ class IListIterator : public std::iterator<std::bidirectional_iterator_tag, T> {
   }
 
  private:
+  union Payload {
+    boxed_iterator_type boxed_iterator;
+    unboxed_iterator_type unboxed_iterator;
+    void* _init_ptr;
+    Payload() : _init_ptr(nullptr) {}
+    ~Payload() = default;
+  };
+
   Payload payload_;
   IListTag tag_;
 };
@@ -402,31 +399,18 @@ class IList {
       typename detail::IListTagImpl<IListTag::TAG, T>::elem_type>;
   TORCH_ILIST_FORALL_TAGS(DEFINE_FRIEND_CLASS);
 #undef DEFINE_FRIEND_CLASS
-  friend struct IValue;
 
+ public:
   using unboxed_type =
       typename detail::IListTagImpl<IListTag::Unboxed, T>::list_type;
   using boxed_type =
       typename detail::IListTagImpl<IListTag::Boxed, T>::list_type;
 
-  union Payload {
-    const boxed_type* boxed;
-    unboxed_type unboxed;
-    Payload() : boxed(nullptr) {}
-    ~Payload() = default;
-  };
-
- public:
   using iterator = IListIterator<T>;
   using const_iterator = IListIterator<T>;
   using value_type = typename iterator::value_type;
 
   IList() : tag_(IListTag::None) {}
-
-  IList(const std::initializer_list<T>& list)
-      : tag_(IListTag::Unboxed) {
-    payload_.unboxed = unboxed_type(list);
-  }
 
   IList(const boxed_type& boxed) : tag_(IListTag::Boxed) {
     payload_.boxed = &boxed;
@@ -436,11 +420,41 @@ class IList {
     payload_.unboxed = unboxed;
   }
 
+  /*
+   * Enable only 2 implicit constructors:
+   * 1. IList(const std::vector<T>&)
+   * 2. IList(std::initializer_list<T>)
+   *
+   * These are only enabled if the `unboxed_type` also has a constructor
+   * for those types.
+   */
+  IList(
+      const std::vector<T>& vec,
+      std::enable_if_t<
+          std::is_constructible<unboxed_type, std::vector<T>>::value,
+          std::nullptr_t> = nullptr)
+      : tag_(IListTag::Unboxed) {
+    payload_.unboxed = unboxed_type(vec);
+  }
+
+  constexpr IList(
+      std::initializer_list<T> il,
+      std::enable_if_t<
+          std::is_constructible<unboxed_type, std::initializer_list<T>>::value,
+          std::nullptr_t> = nullptr)
+      : tag_(IListTag::Unboxed) {
+    payload_.unboxed = unboxed_type(il);
+  }
+
+  /*
+   * For convenience, enable other supported `unboxed_type` constructors as
+   * explicit constructors.
+   */
   template <
       typename... UnboxedConstructorArgs,
       typename = std::enable_if_t<
           std::is_constructible<unboxed_type, UnboxedConstructorArgs...>::value>>
-  IList(UnboxedConstructorArgs&&... args) : tag_(IListTag::Unboxed) {
+  explicit IList(UnboxedConstructorArgs&&... args) : tag_(IListTag::Unboxed) {
     payload_.unboxed = unboxed_type(std::forward<UnboxedConstructorArgs>(args)...);
   }
 
@@ -464,6 +478,10 @@ class IList {
     TORCH_ILIST_UNWRAP(tag_, { return ImplT::get(this_, i); });
   }
 
+  std::vector<T> vec() const {
+    return {begin(), end()};
+  }
+
 #define DEFINE_CHECK(TAG, ...)    \
   bool is##TAG() const {          \
     return tag_ == IListTag::TAG; \
@@ -485,6 +503,13 @@ class IList {
 #undef DEFINE_CASTING
 
  private:
+  union Payload {
+    const boxed_type* boxed;
+    unboxed_type unboxed;
+    Payload() : boxed(nullptr) {}
+    ~Payload() = default;
+  };
+
   Payload payload_;
   IListTag tag_;
 };

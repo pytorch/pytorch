@@ -151,7 +151,7 @@ REGISTER_DISPATCH(log_normal_stub, &log_normal_kernel);
 #ifdef CPU_CAPABILITY_AVX512
 // normal_stub isn't being dispatched to AVX512 because it exposes
 // flakiness in test_sgd of test/test_optim.py
-REGISTER_NO_AVX512_DISPATCH(normal_stub, void(*)(Tensor&, const double, const double, c10::optional<Generator>));
+REGISTER_NO_AVX512_DISPATCH(normal_stub);
 #else
 REGISTER_DISPATCH(normal_stub, &normal_kernel);
 #endif

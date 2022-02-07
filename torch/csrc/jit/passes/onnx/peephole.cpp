@@ -6,6 +6,16 @@
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
 #include <torch/csrc/jit/passes/onnx/helper.h>
 
+#include <ATen/ScalarOps.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/full.h>
+#include <ATen/ops/ones_like_native.h>
+#endif
+
 #include <c10/util/Optional.h>
 
 #if defined(_MSC_VER)

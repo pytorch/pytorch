@@ -412,11 +412,6 @@ TORCH_IMPL_FUNC(cat_out_cuda)
  bool all_same_sizes_and_stride,
  MemoryFormat memory_format,
  const Tensor& result) {
-  // This is true only if there are no valid tensors (i.e. we skipped all of them)
-  if (static_cast<size_t>(valid) == tensors.size()) {
-    return;
-  }
-
   if (result.numel() == 0) {
     return;
   }
