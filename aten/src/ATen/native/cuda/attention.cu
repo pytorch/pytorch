@@ -209,6 +209,14 @@ Tensor gemm_nt_bias(const Tensor& a, const Tensor& b, const Tensor& c) {
   return r_.view({a.size(0), a.size(1), r_.size(1)});
 }
 
+void debug_assert_shape(const Tensor& t, c10::IntArrayRef shape) {
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY((size_t)t.dim() == shape.size(), "expected ", shape.size(), "-D tensor but got ", t.dim());
+  for (auto idx : c10::irange(shape.size())) {
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(t.sizes()[idx] == shape[idx], "expected dim ", idx, " to be ", shape[idx], " but got ", t.sizes()[idx]);
+  }
+}
+
+
 } // namespace
 
 Tensor multi_head_self_attention_cuda(
@@ -222,29 +230,63 @@ Tensor multi_head_self_attention_cuda(
   // query shape: [B, T, D]
   // qkv_weight shape: [3 * D, D]
 
+  const auto D = query.sizes()[2];
+
+  TORCH_CHECK(query.dim() == 3, "expected 3-dimensional query, got ", query.dim(), "-D tensor");
+  TORCH_CHECK(qkv_weight.dim() == 2, "expected 2-dimensional qkv_weight, got ", qkv_weight.dim(), "-D tensor");
+  TORCH_CHECK(D * 3 == qkv_weight.sizes()[0], "expected qkv_weight first dim to be 3x last dim of query");
+  TORCH_CHECK(D == qkv_weight.sizes()[1], "expected qkv_weight second dim and last dim of query to be equal");
+  TORCH_CHECK(D % num_head == 0, "D must divide evenly by num_head");
+
+#ifndef NDEBUG
+  const auto B = query.sizes()[0];
+  const auto T = query.sizes()[1];
+  const auto dim_per_head = D / num_head;
+#endif
+
   // shape: [B, T, 3 x D]
   auto qkv = gemm_nt(query, qkv_weight);
+#ifndef NDEBUG
+  debug_assert_shape(qkv, {B, T, 3 * D});
+#endif
 
   // shape: 3 x [B, num_head, T, dim_per_head]
   auto q_k_v = transform_bias_rescale_qkv(qkv, qkv_bias, num_head);
-  auto q = std::get<0>(q_k_v);
-  auto k = std::get<1>(q_k_v);
-  auto v = std::get<2>(q_k_v);
+  const auto& q = std::get<0>(q_k_v);
+  const auto& k = std::get<1>(q_k_v);
+  const auto& v = std::get<2>(q_k_v);
+#ifndef NDEBUG
+  debug_assert_shape(q, {B, num_head, T, dim_per_head});
+  debug_assert_shape(k, {B, num_head, T, dim_per_head});
+  debug_assert_shape(v, {B, num_head, T, dim_per_head});
+#endif
 
   // shape: [B, num_head, T, T]
   auto qkt = bmm_nt(q, k);
+#ifndef NDEBUG
+  debug_assert_shape(qkt, {B, num_head, T, T});
+#endif
 
   // shape: [B, num_head, T, T]
   masked_softmax_dropout(qkt, mask);
 
   // shape: [B, num_head, T, dim_per_head]
   auto attn_ctx = bmm_nn(qkt, v);
+#ifndef NDEBUG
+  debug_assert_shape(attn_ctx, {B, num_head, T, dim_per_head});
+#endif
 
   // shape: [B, T, D]
   auto attn = transform_0213(attn_ctx);
+#ifndef NDEBUG
+  debug_assert_shape(attn, {B, T, D});
+#endif
 
   // shape: [B, T, D]
   auto proj = gemm_nt_bias(attn, proj_weight, proj_bias);
+#ifndef NDEBUG
+  debug_assert_shape(proj, {B, T, D});
+#endif
 
   return proj;
 }
