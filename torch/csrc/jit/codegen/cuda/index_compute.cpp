@@ -2813,8 +2813,7 @@ bool canOmitStopPredicate(
     }
   }
 
-  // Omit only when both the index and extent are "simple".
-  if (!(index_simple && contig_id->extent()->definition() == nullptr)) {
+  if (!index_simple) {
     return false;
   }
 
@@ -2827,13 +2826,19 @@ bool canOmitStopPredicate(
 
   auto stop_offset_val = stop_offset->as<Int>()->value();
 
-  auto halo_ext = gpu_lower->haloInfo().getRootAxisInfo(contig_id).width();
-
   // If they are not compile-time constant, can't prove the
   // condition.
   if (!stop_offset_val.has_value()) {
     return false;
   }
+
+  // Note that when a root domain is halo extended, it is the domain
+  // to be predicated, not its merged contig id even if it exists. So,
+  // if contig_id does not have root axis info, contig_id is
+  // guaranteed to have no halo.
+  auto halo_ext = gpu_lower->haloInfo().hasRootAxisInfo(contig_id)
+      ? gpu_lower->haloInfo().getRootAxisInfo(contig_id).width()
+      : 0;
 
   if (halo_ext + stop_offset_val.value() > 0) {
     return false;

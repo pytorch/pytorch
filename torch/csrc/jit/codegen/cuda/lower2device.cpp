@@ -207,31 +207,40 @@ void GpuLower::lower(Fusion* fusion) {
   // prepare for lowering
   validateIr(fusion_);
 
+  // Checks if any TIDx dim is marked as padded to a warp. Also checks if we can
+  // determine the padding is explicitly a single warp.
   collectPaddedParallelDims();
 
+  // Replaces integers that are tensor sizes by named scalars as "T0.size[0]"
   replaceSymbolicSizes(fusion_);
 
+  // Traverse through reductions and termine if any iteration domains are
+  // trivial reductions. Add these iteration domains to trivial_reduction_info_
+  // which simply holds a map of which axes are trivial and which are not.
   trivial_reduction_info_.build(fusion_);
-  trivialReductionReplacement(fusion_, trivialReductionInfo());
+  // Replaces trivial reduction expressions (all id's being reduced are trivial)
+  // with set unary op
+  trivialReductionReplacement(fusion_, trivial_reduction_info_);
 
   // In the future we may directly use this map, but for now it will propagate
-  // and validate (to some extent) the parallelization strategy.
-  // This is the first time nodes will be lowered to kir nodes. Since for now we
-  // propagate the parallel strategy in some instances, we need to do it before
-  // lowering.
+  // and validate (to some extent) the parallelization strategy. Map only axes
+  // to the left of compute at position, forward broadcast in replay.
   ca_parallel_map_ = ComputeAtMap(ComputeAtMap::MappingMode::PARALLEL);
   ca_parallel_map_.build(fusion_, current());
 
-  // Want to run this after parallel map is created
-  validateVectorize(fusion_);
-
-  // Generate mappings to generate indices
+  // Generate mappings to generate indices. Maps all iteration domains but
+  // doesn't map any broadcast iteration domains, nor forward them in replay.
   ca_index_map_ = ComputeAtMap(ComputeAtMap::MappingMode::INDEX);
   ca_index_map_.build(fusion_, current());
 
-  // Generate mappings to generate and map to loop nests
+  // Generate mappings to generate and map to loop nests. Maps all iteration
+  // domains, forwards broadcasts, ensures root domain mappings exist (aren't
+  // replaced in forwarding).
   ca_loop_map_ = ComputeAtMap(ComputeAtMap::MappingMode::LOOP);
   ca_loop_map_.build(fusion_, current());
+
+  // Used in parallel dimension map
+  concretized_broadcast_domains_.build(fusion_);
 
   parallelDimensionMap().build(fusion_);
   if (isDebugDumpEnabled(DebugDumpOption::ParallelDimensions)) {
@@ -239,7 +248,8 @@ void GpuLower::lower(Fusion* fusion) {
     std::cout << parallel_dimension_map_.toString() << std::endl;
   }
 
-  concretized_broadcast_domains_.build(fusion_);
+  // Want to run this after parallel map is created
+  validateVectorize(fusion_);
 
   // Compute thread predicates. Depends on parallel_dimension_map_
   thread_pred_map_.build(fusion_);
