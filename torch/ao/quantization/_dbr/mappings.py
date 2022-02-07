@@ -26,9 +26,6 @@ fp32_to_int8_fun_mapping = {
     F.conv1d: torch.ops.quantized.conv1d,
     F.conv2d: torch.ops.quantized.conv2d,
     F.conv3d: torch.ops.quantized.conv3d,
-    F.conv_transpose1d: torch.ops.quantized.conv_transpose1d,
-    F.conv_transpose2d: torch.ops.quantized.conv_transpose2d,
-    F.conv_transpose3d: torch.ops.quantized.conv_transpose3d,
     F.linear: toq.linear,
 }
 
@@ -51,15 +48,9 @@ functions_supported_by_quantization = set([
     F.conv1d,
     F.conv2d,
     F.conv3d,
-    F.conv_transpose1d,
-    F.conv_transpose2d,
-    F.conv_transpose3d,
     toq.conv1d,
     toq.conv2d,
     toq.conv3d,
-    toq.conv_transpose1d,
-    toq.conv_transpose2d,
-    toq.conv_transpose3d,
     F.dropout,
     torch.relu,
     F.relu,
@@ -116,6 +107,11 @@ known_module_fusion_patterns = [
     (torch.nn.Conv2d, torch.nn.BatchNorm2d),
 ]
 
+# TODO(future): reuse global mapping
+known_function_fusion_patterns_and_replacements = {
+    (torch.Tensor.add, torch.relu): toq.add_relu,
+}
+
 binary_related_ops = (
     (torch.add, torch.Tensor.add),
     (torch.add, torch.Tensor.add_),
@@ -131,19 +127,10 @@ conv_ops = set([
     F.conv3d,
 ])
 
-conv_transpose_ops = set([
-    F.conv_transpose1d,
-    F.conv_transpose2d,
-    F.conv_transpose3d
-])
-
 conv_prepack_fns = {
     F.conv1d: toq.conv1d_prepack,
     F.conv2d: toq.conv2d_prepack,
     F.conv3d: toq.conv3d_prepack,
-    F.conv_transpose1d: toq.conv_transpose1d_prepack,
-    F.conv_transpose2d: toq.conv_transpose2d_prepack,
-    F.conv_transpose3d: toq.conv_transpose3d_prepack,
 }
 
 # TODO(future PR): reuse global mapping
