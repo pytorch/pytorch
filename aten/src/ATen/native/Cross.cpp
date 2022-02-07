@@ -6,7 +6,39 @@
 
 #include <ATen/native/Cross.h>
 
-namespace at { namespace native {
+namespace at {
+namespace meta {
+
+TORCH_PRECOMPUTE_META_FUNC(linalg_cross)
+(const Tensor & input, const Tensor & other, const int64_t dimension) {
+  const Tensor& out = maybe_get_output(0);
+
+  auto device1 = input.device().type();
+  auto device2 = other.device().type();
+
+  if (out.defined()) {
+    TORCH_CHECK(!out.is_cuda() || out.get_device() == input.get_device(),
+                "device of out(", input.get_device(), ") must match device of input(", other.get_device(), ")");
+  }
+
+  TORCH_CHECK(!input.is_cuda() || input.get_device() == other.get_device(),
+              "device of input (", input.get_device(), ") must match device of other (", other.get_device(), ")");
+  TORCH_CHECK(input.dim() == other.dim(), "inconsistent tensors dimensions input: ", input.dim(), " other: ", other.dim());
+  TORCH_CHECK(input.sizes() == other.sizes(), "inconsistent tensors sizes input: ", input.sizes(), " other: ", other.sizes());
+
+  auto out_size = infer_size(input.sizes(), other.sizes());
+  Tensor input_broadcasted = input.expand(out_size);
+  Tensor other_broadcasted = other.expand(out_size);
+
+  int64_t dim = maybe_wrap_dim(dimension, input.dim()); // default dim = -1
+  TORCH_CHECK(input_broadcasted.size(dim) == 3, "dimension ", dimension, " does not have size 3");
+
+  set_output(out_size, input.options());
+  return TORCH_PRECOMPUTE_STRUCT(linalg_cross)().set_dim(dim);
+}
+
+}
+namespace native {
 
 DEFINE_DISPATCH(cross_stub);
 
@@ -37,28 +69,13 @@ Tensor & cross_out(const Tensor & input, const Tensor & other, const c10::option
   return at::linalg_cross_out(out, input, other, dim);
 }
 
-Tensor linalg_cross(const Tensor & input, const Tensor & other, const int64_t dimension) {
-  Tensor out = at::empty({0}, input.options());
-  native::linalg_cross_out(input, other, dimension, out);
-  return out;
-}
-
-Tensor & linalg_cross_out(const Tensor & input, const Tensor & other, const int64_t dimension, Tensor & out) {
-  // Broadcast inputs
+TORCH_IMPL_FUNC(linalg_cross_out)
+(const Tensor & input, const Tensor & other, const int64_t dim, const Tensor & out) {
   auto out_size = infer_size(input.sizes(), other.sizes());
   Tensor input_broadcasted = input.expand(out_size);
   Tensor other_broadcasted = other.expand(out_size);
 
-  // default dimension=-1
-  int64_t dim = maybe_wrap_dim(dimension, input.dim());
-  TORCH_CHECK(input_broadcasted.size(dim) == 3, "dimension ", dimension, " does not have size 3");
-
-  // check if resizing output is required
-  // raise a warning while resizing if output has one or more elements
-  at::native::resize_output(out, out_size);
-
   cross_stub(input.device().type(), out, input_broadcasted, other_broadcasted, dim);
-  return out;
 }
 
 }} // namespace at::native
