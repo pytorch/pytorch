@@ -2171,6 +2171,26 @@ def pixel_shuffle(g, self, upscale_factor):
                                     allowzero=0)
 
 
+@parse_args("v", "i")
+def pixel_unshuffle(g, self, downscale_factor):
+    dims = sym_help._get_tensor_sizes(self)
+    if len(dims) != 4:
+        return _unimplemented("pixel_shuffle", "only support 4d input")
+    if any([i is None for i in dims[1:]]):
+        return _unimplemented("pixel_shuffle", "only support static input shape, except for batch size")
+    output_channel = dims[1] * downscale_factor * downscale_factor
+    after_view = sym_help._reshape_helper(g, self,
+                                          g.op("Constant", value_t=torch.tensor([-1, dims[1],
+                                                                                dims[2] // downscale_factor, downscale_factor,
+                                                                                dims[3] // downscale_factor, downscale_factor])),
+                                          allowzero=0)
+    after_transpose = g.op("Transpose", after_view, perm_i=[0, 1, 3, 5, 2, 4])
+    return sym_help._reshape_helper(g, after_transpose,
+                                    g.op("Constant", value_t=torch.tensor([-1, output_channel,
+                                                                          dims[2] // downscale_factor, dims[3] // downscale_factor])),
+                                    allowzero=0)
+
+
 def _generic_rnn(g, variant, input, initial_states, all_weights, has_biases,
                  num_layers, dropout, train, bidirectional, batch_first=None, batch_sizes=None):
 

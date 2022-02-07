@@ -5898,6 +5898,15 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(PixelShuffle(), x)
 
     @skipIfUnsupportedMinOpsetVersion(9)
+    def test_pixel_unshuffle(self):
+        class PixelShuffle(torch.nn.Module):
+            def forward(self, x):
+                return torch.pixel_unshuffle(x, downscale_factor=2)
+
+        x = torch.randn(2, 16, 4, 6, requires_grad=True)
+        self.run_test(PixelShuffle(), x)
+
+    @skipIfUnsupportedMinOpsetVersion(9)
     def test_reciprocal(self):
         class ReciprocalModel(torch.nn.Module):
             def forward(self, x):
