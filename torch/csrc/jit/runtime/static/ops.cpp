@@ -831,7 +831,7 @@ void varstackNonserialOut(
   std::vector<at::Tensor> inputs_unsqueezed =
       unsqueezeVarStackInputs(inputs, dim);
   fastResizeToZero(result);
-  at::native::_cat_out_cpu(inputs_unsqueezed, dim, result);
+  at::cpu::cat_outf(inputs_unsqueezed, dim, result);
 }
 
 void varStackFastOut(
@@ -2503,7 +2503,7 @@ REGISTER_OPERATOR_FUNCTOR(
         }
         auto dim = p_node->Input(num_inputs - 1).toInt();
         if (p_node->Output(0).isNone()) {
-          p_node->Output(0) = at::native::_cat_cpu(inputs, dim);
+          p_node->Output(0) = at::cpu::cat(inputs, dim);
           return;
         }
         auto& out_t = p_node->Output(0).toTensor();
