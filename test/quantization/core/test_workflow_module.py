@@ -68,12 +68,12 @@ NP_RANDOM_SEED = 19
 tolerance = 1e-6
 
 class TestObserver(QuantizationTestCase):
-    @given(qdtype=st.sampled_from((torch.qint8, torch.quint8)),
+    @given(qdtype=st.sampled_from((torch.qint8, torch.quint8, torch.qint32)),
            qscheme=st.sampled_from((torch.per_tensor_affine, torch.per_tensor_symmetric)),
            reduce_range=st.booleans())
     def test_per_tensor_observers(self, qdtype, qscheme, reduce_range):
         # reduce_range cannot be true for symmetric quantization with uint8
-        if qdtype == torch.quint8 and qscheme == torch.per_tensor_symmetric:
+        if (qdtype == torch.quint8 and qscheme == torch.per_tensor_symmetric) or qdtype == torch.qint32:
             reduce_range = False
         ObserverList = [MinMaxObserver(dtype=qdtype, qscheme=qscheme, reduce_range=reduce_range),
                         MovingAverageMinMaxObserver(averaging_constant=0.5,
@@ -83,20 +83,21 @@ class TestObserver(QuantizationTestCase):
         for myobs in ObserverList:
             # Calculate Qparams should return with a warning for observers with no data
             qparams = myobs.calculate_qparams()
+            input_scale = 2**16 if qdtype is torch.qint32 else 1
             if type(myobs) == MinMaxObserver:
-                x = torch.tensor([1.0, 2.0, 2.0, 3.0, 4.0, 5.0, 6.0])
-                y = torch.tensor([4.0, 5.0, 5.0, 6.0, 7.0, 8.0])
+                x = torch.tensor([1.0, 2.0, 2.0, 3.0, 4.0, 5.0, 6.0]) * input_scale
+                y = torch.tensor([4.0, 5.0, 5.0, 6.0, 7.0, 8.0]) * input_scale
             else:
                 # Moving average of min/max for x and y matches that of
                 # extreme values for x/y used for minmax observer
-                x = torch.tensor([0.0, 2.0, 2.0, 3.0, 4.0, 5.0, 6.0])
-                y = torch.tensor([2.0, 5.0, 5.0, 6.0, 7.0, 10.0])
+                x = torch.tensor([0.0, 2.0, 2.0, 3.0, 4.0, 5.0, 6.0]) * input_scale
+                y = torch.tensor([2.0, 5.0, 5.0, 6.0, 7.0, 10.0]) * input_scale
 
             result = myobs(x)
             result = myobs(y)
             self.assertEqual(result, y)
-            self.assertEqual(myobs.min_val, 1.0)
-            self.assertEqual(myobs.max_val, 8.0)
+            self.assertEqual(myobs.min_val, 1.0 * input_scale)
+            self.assertEqual(myobs.max_val, 8.0 * input_scale)
             qparams = myobs.calculate_qparams()
             if reduce_range:
                 if qscheme == torch.per_tensor_symmetric:
@@ -106,12 +107,20 @@ class TestObserver(QuantizationTestCase):
                     ref_scale = 0.0313725 * 255 / 127
                     ref_zero_point = -64 if qdtype is torch.qint8 else 0
             else:
-                if qscheme == torch.per_tensor_symmetric:
-                    ref_scale = 0.062745
-                    ref_zero_point = 0 if qdtype is torch.qint8 else 128
+                if qdtype == torch.qint32:
+                    if qscheme == torch.per_tensor_symmetric:
+                        ref_scale = 0.000244
+                        ref_zero_point = 0
+                    else:
+                        ref_scale = 0.000122
+                        ref_zero_point = -2**31
                 else:
-                    ref_scale = 0.0313725
-                    ref_zero_point = -128 if qdtype is torch.qint8 else 0
+                    if qscheme == torch.per_tensor_symmetric:
+                        ref_scale = 0.062745
+                        ref_zero_point = 0 if qdtype is torch.qint8 else 128
+                    else:
+                        ref_scale = 0.0313725
+                        ref_zero_point = -128 if qdtype is torch.qint8 else 0
             self.assertEqual(qparams[1].item(), ref_zero_point)
             self.assertEqual(qparams[0].item(), ref_scale, atol=1e-5, rtol=0)
             state_dict = myobs.state_dict()
