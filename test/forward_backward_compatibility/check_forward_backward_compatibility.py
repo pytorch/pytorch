@@ -220,7 +220,7 @@ def check_fc(existing_schemas):
         print("Found forward compatible schemas for all existing schemas")
     else:
         print(
-            "The PR is introducing a potentially forward incompatible changes to the "
+            "The PR is introducing a forward incompatible changes to the "
             "operator library. Please contact PyTorch team to confirm "
             "whether this change is wanted or not. \n\nBroken ops: "
             "[\n\t{}\n]".format("\n\t".join(broken_ops))
@@ -250,9 +250,8 @@ if __name__ == "__main__":
             s = parse_schema(line.strip())
             slist.append(s)
 
-    # TODO in case there is FC breaking changes,
-    # we just warn for now until there is a policy.
-    check_fc(slist)
+    if not check_fc(slist):
+        sys.exit(1)
 
     if not check_bc(slist):
         sys.exit(1)
