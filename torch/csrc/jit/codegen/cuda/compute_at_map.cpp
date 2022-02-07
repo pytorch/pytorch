@@ -256,10 +256,15 @@ void ComputeAtMap::build(Fusion* fusion, GpuLower* gpu_lower) {
       if (first_output_tv == nullptr) {
         first_output_tv = c_tv;
       } else {
-        // Map multi outputs of an expression to eachother. c is current output,
-        // and f as first output. Keep consistent with the later section of
-        // producer and consumers. Which here producer is now "first output",
-        // and consumer is still consumer.
+        // Map multi outputs of an expression to each other. c is current
+        // output, and f as first output. Keep consistent with the later section
+        // of producer and consumers. Which here producer is now "first output",
+        // and consumer is still consumer. One exception is how the
+        // domains left of CA positions are handled in the Parallel
+        // map. Those domains are not mapped in producer and consumer
+        // mappings as they do not share loops, but are mapped in the
+        // case of mapping multiple outputs since they do share the
+        // same loops.
 
         TORCH_INTERNAL_ASSERT(
             c_tv->getRootDomain().size() ==
@@ -282,35 +287,14 @@ void ComputeAtMap::build(Fusion* fusion, GpuLower* gpu_lower) {
 
         auto c2f_map = replay_FasC.getReplay();
 
-        // If we're creating parallel map, only map the leaf
-        // axes. Also, the producer axis must be left of the CA
-        // point.
-        // Otherwise, map the entire replay map.
-        if (mapping_mode_ == MappingMode::PARALLEL) {
-          // Mark axes left of compute at point for parallel type tracking
-          std::unordered_set<IterDomain*> producer_axes_to_map(
-              first_output_tv->domain()->domain().begin(),
-              first_output_tv->domain()->domain().begin() +
-                  first_output_tv->getComputeAtPosition());
-
-          for (auto c_id : c_tv->domain()->domain()) {
-            auto it = c2f_map.find(c_id);
-            if (it == c2f_map.end()) {
-              continue;
-            }
-            auto f_id = it->second;
-            if (producer_axes_to_map.find(f_id) == producer_axes_to_map.end()) {
-              continue;
-            }
-            mapIds(f_id, c_id);
-          }
-        } else {
-          for (auto entry : c2f_map) {
-            auto c_id = entry.first;
-            auto f_id = entry.second;
-            // Map the id's together
-            mapIds(f_id, c_id);
-          }
+        // Map the entire replay map between the multiple
+        // consumers even for the Parallel map as they share the same
+        // loop.
+        for (auto entry : c2f_map) {
+          auto c_id = entry.first;
+          auto f_id = entry.second;
+          // Map the id's together
+          mapIds(f_id, c_id);
         }
       }
 
