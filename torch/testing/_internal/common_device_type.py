@@ -377,6 +377,14 @@ class DeviceTypeTestBase(TestCase):
                 except RuntimeError as rte:
                     # check if rte should stop entire test suite.
                     self._stop_test_suite = self._should_stop_test_suite()
+                    # Check if test has been decorated with `@expectedFailure`
+                    # Using `__unittest_expecting_failure__` attribute, see
+                    # https://github.com/python/cpython/blob/ffa505b580464/Lib/unittest/case.py#L164
+                    # In that case, make it fail with "unexpected success" by suppressing exception
+                    if getattr(test, "__unittest_expecting_failure__", False) and self._stop_test_suite:
+                        import sys
+                        print("Suppressing fatal exception to trigger unexpected success", file=sys.stderr)
+                        return
                     # raise the runtime error as is for the test suite to record.
                     raise rte
                 finally:
