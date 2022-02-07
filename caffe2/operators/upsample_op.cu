@@ -28,8 +28,6 @@ __global__ void UpsampleBilinearKernel(
     const int input_width,
     const int output_height,
     const int output_width,
-    const float height_scale,
-    const float width_scale,
     const float* __restrict__ X,
     float* __restrict__ Y) {
 
@@ -98,9 +96,6 @@ __global__ void UpsampleBilinearGradientKernel(
     const int c = indexTemp % num_channels;
     indexTemp /= num_channels;
     const int n = indexTemp;
-
-    const int out_y = fminf(in_y / height_scale, output_height - 1);
-    const int out_x = fminf(in_x / width_scale, output_width - 1);
 
     const float rheight =
         output_height > 1 ? (output_height - 1.f) / (input_height - 1.f) : 0.f;
@@ -187,8 +182,6 @@ bool UpsampleBilinearOp<float, CUDAContext>::RunOnDevice() {
       input_width,
       output_height,
       output_width,
-      height_scale_,
-      width_scale_,
       X.data<float>(),
       Y->template mutable_data<float>());
   C10_CUDA_KERNEL_LAUNCH_CHECK();
