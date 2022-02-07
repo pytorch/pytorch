@@ -325,7 +325,7 @@ struct ApplyOp2<Op, scalar1, scalar2, IndexType, ADims, BDims, 0, Offset> {
 __device__ __forceinline__
 static void apply(detail::TensorInfo<scalar1, IndexType> &a,
                   detail::TensorInfo<scalar2, IndexType> &b,
-                  const Op &op, int n, IndexType linearIndex,
+                  const Op &op, int /*n*/, IndexType /*linearIndex*/,
                   Offset aOffset, Offset bOffset) {
   op(a.data[aOffset], b.data[bOffset]);
 }
