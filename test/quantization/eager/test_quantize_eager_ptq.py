@@ -3,6 +3,7 @@
 import torch
 import torch.nn as nn
 import torch.nn.quantized as nnq
+import torch.nn.quantized._reference as nnqr
 from torch.nn.utils.rnn import PackedSequence
 from torch.ao.quantization import (
     quantize,
@@ -73,6 +74,78 @@ import unittest
 import numpy as np
 
 class TestQuantizeEagerOps(QuantizationTestCase):
+
+    def test_conv_transpose_op(self):
+        class floatCTmodel(torch.nn.Module):
+            # def __init__(self):
+            #     super().__init__()
+            #     # self.ct_op = float_module_class(**extra_module_kwargs)
+            #     self.ct_op = nn.ConvTranspose2d(1, 1, 1)
+            #     self.quant = QuantStub()
+            #     self.dequant = DeQuantStub()
+
+            # def forward(self, x):
+            #     x = self.quant(x)
+            #     x = self.ct_op(x)
+            #     x = self.dequant(x)
+            #     return x
+
+            def __init__(self):
+                super().__init__()
+                self.rct_op = nn.ConvTranspose2d(1, 1, 1)
+                self.quant = QuantStub()
+                self.dequant = DeQuantStub()
+
+            def forward(self, x):
+                x = self.quant(x)
+                x = self.dequant(x)
+                x = self.rct_op(x)
+                x = self.quant(x)
+                x = self.dequant(x)
+                return x
+
+
+        class refCTmodel(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.rct_op = nnqr.ConvTranspose2d(1, 1, 1)
+                self.quant = QuantStub()
+                self.dequant = DeQuantStub()
+
+            def forward(self, x):
+                x = self.quant(x)
+                x = self.dequant(x)
+                x = self.rct_op(x)
+                x = self.quant(x)
+                x = self.dequant(x)
+                return x
+
+        # ct = floatCTmodel()
+        W = torch.randn(1, 1, 1, 1, dtype=torch.float32)
+        x = torch.randn(1, 1, 10, 10, dtype=torch.float) #* 255
+        ct = floatCTmodel().eval()
+        rct = refCTmodel().eval()
+
+        out_ct = ct(x)
+        out_rct = rct(x)
+
+
+        print(out_rct)
+        print(out_ct)
+
+        # rct = TestReferenceConvTranspose().eval()
+        # # print(rct)
+        # rct.qconfig = default_qconfig
+        # ct = prepare(rct)
+        # self.checkObservers(rct)
+        # rct = convert(rct)
+        # print(rct)
+
+        # self.assertEqual(type(rct.rct_op), quantized_module_class)
+
+
+        self.assertEqual(out_ct, out_rct)
+
     def _test_activation_op_impl(
             self, float_module_class, quantized_module_class, extra_module_kwargs):
         """ Implementation for testing common activation ops like leaky relu
