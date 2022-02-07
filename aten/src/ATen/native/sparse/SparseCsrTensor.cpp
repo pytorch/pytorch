@@ -25,7 +25,6 @@
 #include <ATen/ops/empty.h>
 #include <ATen/ops/empty_like_native.h>
 #include <ATen/ops/empty_native.h>
-#include <ATen/ops/eye.h>
 #include <ATen/ops/full.h>
 #include <ATen/ops/ones.h>
 #include <ATen/ops/resize_as_sparse_native.h>
@@ -398,9 +397,9 @@ Tensor& eye_sparse_csr_out(int64_t n, int64_t m, Tensor& result) {
   TORCH_CHECK(m >= 0, "m must be greater or equal to 0, got ", m);
 
   int64_t sz = std::min<int64_t>(n, m);
-  auto options = TensorOptions().device(result.device()).dtype(result.dtype()).layout(kStrided);
+  auto options = TensorOptions().device(result.device()).dtype(ScalarType::Long).layout(kStrided);
 
-  Tensor values = at::ones({sz}, options);
+  Tensor values = at::ones({sz}, options.dtype(result.dtype()));
   Tensor col_indices = at::arange(sz, options);
   Tensor crow_indices = at::full({n + 1}, /*fill_value=*/ sz, options);
   for (const auto i : c10::irange(0, sz)) crow_indices[i] = col_indices[i];

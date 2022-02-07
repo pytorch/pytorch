@@ -44,7 +44,6 @@
 #include <ATen/ops/empty.h>
 #include <ATen/ops/empty_like_native.h>
 #include <ATen/ops/empty_native.h>
-#include <ATen/ops/eye.h>
 #include <ATen/ops/full.h>
 #include <ATen/ops/index_select.h>
 #include <ATen/ops/indices_native.h>
@@ -58,7 +57,6 @@
 #include <ATen/ops/sparse_mask_native.h>
 #include <ATen/ops/sparse_resize_and_clear_native.h>
 #include <ATen/ops/sparse_resize_native.h>
-#include <ATen/ops/stack.h>
 #include <ATen/ops/to_dense_native.h>
 #include <ATen/ops/to_sparse_native.h>
 #include <ATen/ops/unique_dim.h>
