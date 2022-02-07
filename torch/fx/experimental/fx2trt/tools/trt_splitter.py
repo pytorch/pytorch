@@ -11,6 +11,7 @@ from torch.fx.experimental.fx2trt import (
     NO_EXPLICIT_BATCH_DIM_SUPPORT,
     NO_IMPLICIT_BATCH_DIM_SUPPORT,
 )
+from torch.fx.passes.tools_common import get_acc_ops_name
 import torch.fx.passes.operator_support as ops
 from torch.fx.passes.tools_common import Tensors
 
@@ -98,13 +99,3 @@ class TRTSplitter(splitter_base._SplitterBase):
                 reports += f"{node.format_node()}\n"
 
         return reports
-
-
-def get_acc_ops_name(k):
-    if isinstance(k, str):
-        return k
-    elif k.__module__ and "acc_ops" in k.__module__:
-        return f"acc_ops.{k.__name__}"
-    else:
-        module = k.__module__
-        return f"{module if module else ''}.{k.__name__}".replace('_', '')
