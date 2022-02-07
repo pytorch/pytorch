@@ -79,17 +79,17 @@ std::tuple<Tensor, Tensor, Tensor> transform_bias_rescale_qkv(
                   q_data.store(&q_k_v_data
                                    [0 * B * num_head * T * dim_per_head +
                                     b * num_head * T * dim_per_head +
-                                    num_head * T * dim_per_head +
+                                    nh * T * dim_per_head +
                                     t * dim_per_head + dh]);
                   k_data.store(&q_k_v_data
                                    [1 * B * num_head * T * dim_per_head +
                                     b * num_head * T * dim_per_head +
-                                    num_head * T * dim_per_head +
+                                    nh * T * dim_per_head +
                                     t * dim_per_head + dh]);
                   v_data.store(&q_k_v_data
                                    [2 * B * num_head * T * dim_per_head +
                                     b * num_head * T * dim_per_head +
-                                    num_head * T * dim_per_head +
+                                    nh * T * dim_per_head +
                                     t * dim_per_head + dh]);
                 }
               }
@@ -134,7 +134,7 @@ void masked_softmax_dropout(
                 using Vec = vec::Vectorized<scalar_t>;
                 auto V = vec::Vectorized<scalar_t>::size();
 
-                scalar_t* input_data = attn_scores_data + i * T;
+                scalar_t* input_data = attn_scores_data + i;
                 auto max_input = Vec(std::numeric_limits<scalar_t>::lowest());
                 // TODO: handle epilogue
                 for (auto t = 0; t < T; t += V) {
