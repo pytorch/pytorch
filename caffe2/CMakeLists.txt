@@ -765,6 +765,9 @@ if(HAVE_SOVERSION)
 endif()
 torch_compile_options(torch_cpu)  # see cmake/public/utils.cmake
 
+set_property(SOURCE ${ATen_CORE_SRCS} APPEND
+    PROPERTY COMPILE_DEFINITIONS "TORCH_ASSERT_ONLY_METHOD_OPERATORS")
+
 if(USE_PRECOMPILED_HEADERS)
   target_precompile_headers(torch_cpu PRIVATE
       "$<$<COMPILE_LANGUAGE:CXX>:ATen/core/ATen_pch.h>")
@@ -1052,7 +1055,6 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
   set(ATen_CPU_INCLUDE
     ${TORCH_ROOT}/aten/src
     ${CMAKE_CURRENT_BINARY_DIR}/../aten/src
-    ${CMAKE_CURRENT_BINARY_DIR}/../aten/src/ATen
     ${CMAKE_BINARY_DIR}/aten/src)
 
     if(CMAKE_CXX_COMPILER_ID MATCHES "Clang" OR CMAKE_CXX_COMPILER_ID STREQUAL "GNU")

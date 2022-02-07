@@ -29,7 +29,7 @@ WINDOWS_RUNNERS = {
 LINUX_CPU_TEST_RUNNER = "linux.2xlarge"
 # contains 1 gpu
 LINUX_CUDA_TEST_RUNNER = "linux.4xlarge.nvidia.gpu"
-# contains 4 gpus
+# contains at least 2 gpus
 LINUX_ROCM_TEST_RUNNER = "linux.rocm.gpu"
 LINUX_RUNNERS = {
     LINUX_CPU_TEST_RUNNER,
@@ -582,10 +582,8 @@ LINUX_WORKFLOWS = [
         docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-bionic-rocm4.5-py3.7",
         test_runner_type=LINUX_ROCM_TEST_RUNNER,
         num_test_shards=2,
-        only_on_pr=True,
         ciflow_config=CIFlowConfig(
-            labels=set([LABEL_CIFLOW_LINUX, LABEL_CIFLOW_ROCM]),
-            isolated_workflow=True,
+            labels=set([LABEL_CIFLOW_DEFAULT, LABEL_CIFLOW_LINUX, LABEL_CIFLOW_ROCM]),
         ),
     ),
     CIWorkflow(
