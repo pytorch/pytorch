@@ -343,6 +343,8 @@ def _decide_input_format(model, args):
         return args
     try:
         ordered_list_keys = list(sig.parameters.keys())
+        if ordered_list_keys[0] == "self":
+            ordered_list_keys = ordered_list_keys[1:]
         args_dict = {}
         args = list(args)
         if isinstance(args[-1], dict):
@@ -355,9 +357,7 @@ def _decide_input_format(model, args):
             # Check if this arg has a default value
             else:
                 param = sig.parameters[optional_arg]
-                if param.default is param.empty:
-                    args.append(None)
-                else:
+                if param.default != param.empty:
                     args.append(param.default)
         args = tuple(args)
     # Cases of models with no input args
@@ -417,12 +417,12 @@ def _check_flattened_did_not_remove(original, jit_flattened):
     """torch.jit._flatten removes None. Check if it did so in this case."""
     def flatten(x):
         if isinstance(x, (list, tuple)):
-            for o in x:
-                for y in flatten(o):
+            for inner in x:
+                for y in flatten(inner):
                     yield y
         elif isinstance(x, dict):
-            for o in x.values():
-                for y in flatten(o):
+            for inner in x.values():
+                for y in flatten(inner):
                     yield y
         else:
             yield x
