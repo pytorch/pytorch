@@ -1098,17 +1098,15 @@ class FullyShardedDataParallel(nn.Module):
     def no_sync(self) -> Generator:
         """
         A context manager to disable gradient synchronizations across FSDP
-        instances. Within this context, gradients will be accumulated on module
+        instances. Within this context, gradients will be accumulated in module
         variables, which will later be synchronized in the first
-        forward-backward pass after exiting the context.
+        forward-backward pass after exiting the context. This should only be
+        used on the root FSDP instance and will recursively apply to all
+        children FSDP instances.
 
         .. note:: This likely results in higher memory usage because FSDP will
             accumulate the full model gradients (instead of gradient shards)
             until the eventual sync.
-
-        .. note:: Gradient accumulation can be done without this context,
-            avoiding the extra GPU memory overhead, but with the extra
-            networking overhead.
         """
         self._lazy_init()
         assert self._is_root, \
@@ -1123,7 +1121,9 @@ class FullyShardedDataParallel(nn.Module):
             yield
         finally:
             for m, old_flag in old_flags:
-                assert not m._require_backward_grad_sync
+                assert not m._require_backward_grad_sync, \
+                    "`_require_backward_grad_sync` was incorrectly set to " \
+                    "`True` while in the `no_sync()` context manager"
                 m._require_backward_grad_sync = old_flag
 
 

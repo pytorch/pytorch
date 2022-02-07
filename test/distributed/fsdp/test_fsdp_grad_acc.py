@@ -183,9 +183,10 @@ class TestGradAcc(FSDPTest):
         expected_num_reduce_scatter_sync = num_fsdp
 
         with patch("torch.distributed.all_gather") as mock_all_gather, \
-            patch("torch.distributed.reduce_scatter") as mock_reduce_scatter, \
-            patch(all_gather_base_str) as mock_all_gather_base, \
-            patch(reduce_scatter_base_str) as mock_reduce_scatter_base:
+                patch("torch.distributed.reduce_scatter") \
+                as mock_reduce_scatter, \
+                patch(all_gather_base_str) as mock_all_gather_base, \
+                patch(reduce_scatter_base_str) as mock_reduce_scatter_base:
             num_all_gather = 0
             num_reduce_scatter = 0
 
@@ -214,10 +215,10 @@ class TestGradAcc(FSDPTest):
             loss = fsdp_model.module.get_loss(batch, output)
             loss.backward()
             # Subtract the previous counts since the mock counts do not reset
-            num_all_gather = (mock_all_gather.call_count +
-                mock_all_gather_base.call_count) - num_all_gather
-            num_reduce_scatter = (mock_reduce_scatter.call_count +
-                mock_reduce_scatter_base.call_count) - num_reduce_scatter
+            num_all_gather = mock_all_gather.call_count + \
+                mock_all_gather_base.call_count - num_all_gather
+            num_reduce_scatter = mock_reduce_scatter.call_count + \
+                mock_reduce_scatter_base.call_count - num_reduce_scatter
             assert num_all_gather == expected_num_all_gather_sync, \
                 f"Expected {expected_num_all_gather_sync} all-gathers " \
                 f"but saw {num_all_gather} all-gathers when not using " \
