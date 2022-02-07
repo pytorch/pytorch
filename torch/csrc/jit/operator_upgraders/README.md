@@ -15,9 +15,9 @@ After add change for the operator, if it causes BC breakage, an upgrader is need
         This module should include the changed operator. If the operator isn't covered in the model, the model export process will fail.
 
        2. Export the model to `test/jit/fixtures` by running
-            ```
-            python test/jit/fixtures_src/generate_models.py
-            ```
+        ```
+        python test/jit/fixtures_src/generate_models.py
+        ```
 
        3. Commit the change and submit a pr
 
@@ -71,3 +71,20 @@ After add change for the operator, if it causes BC breakage, an upgrader is need
             1. For mobile tests: `test/test_save_load_for_op_versions.py`
             2. For server tests: `test/jit/test_upgraders.py`
     6. Commit  changes made in all changes in step 2 in a single PR
+
+---
+**NOTE**
+
+Adding default arguments is not BC breaking and it doesn't requirement. For example, the following change is not BC breaking, and doesn't require upgrader:
+```
+# before
+def foo(x, y):
+    return x, y
+```
+```
+# after
+def foo(x, y, z=100):
+    return x, y, z
+```
+
+---
