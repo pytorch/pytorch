@@ -27,6 +27,8 @@
 #include <cstdint>
 #include <vector>
 
+#include <torch/csrc/lazy/core/tensor_impl.h>
+
 namespace at {
 namespace native {
 
@@ -834,6 +836,25 @@ Tensor make_qtensor(const Tensor& self, IntArrayRef size, IntArrayRef stride, Qu
 }
 
 Tensor as_strided_tensorimpl(const Tensor& self, IntArrayRef size, IntArrayRef stride, optional<int64_t> storage_offset_) {
+
+
+  TensorImpl* tensor_impl = self.unsafeGetTensorImpl();
+  torch::lazy::LTCTensorImpl* ltc_tensor_impl = dynamic_cast<torch::lazy::LTCTensorImpl*>(tensor_impl);
+  //printf("as_strided_tensorimpl is tensor impl: %p? is LTC tensor impl: %p?\n", tensor_impl, ltc_tensor_impl);
+  if (ltc_tensor_impl) {
+    auto self2 = ltc_tensor_impl->tensor().ToTensor(false);
+    //printf("new tensor is lazy: %d? is cuda: %d? has storage %d\n", self2.is_cuda(), self2.is_lazy(), self2.has_storage());
+
+    auto storage_offset = storage_offset_.value_or(self2.storage_offset());
+    auto result = at::detail::make_tensor<TensorImpl>(
+        c10::TensorImpl::VIEW, Storage(self2.storage()), self2.key_set(), self2.dtype());
+    setStrided(result, size, stride, storage_offset);
+    return result;
+  }
+
+
+
+
   auto storage_offset = storage_offset_.value_or(self.storage_offset());
   auto result = at::detail::make_tensor<TensorImpl>(
       c10::TensorImpl::VIEW, Storage(self.storage()), self.key_set(), self.dtype());
@@ -1112,6 +1133,25 @@ Tensor alias_with_sizes_and_strides(
   //caller should make sure that sizes and strides are valid for self
   //(storage is sufficient, strides are non-negative, strides and sizes array size is the same)
   Tensor self_;
+  //printf("checking tensor when entering\n");
+  //printf(" is lazy: %d? is cuda: %d? has storage: %d\n", self.is_cuda(), self.is_lazy(), self.has_storage());
+  TensorImpl* tensor_impl = self.unsafeGetTensorImpl();
+  torch::lazy::LTCTensorImpl* ltc_tensor_impl = dynamic_cast<torch::lazy::LTCTensorImpl*>(tensor_impl);
+  //printf(" is tensor impl: %p? is LTC tensor impl: %p?\n", tensor_impl, ltc_tensor_impl);
+  if (ltc_tensor_impl) {
+    auto self2 = ltc_tensor_impl->tensor().ToTensor(false);
+    printf("new tensor is lazy: %d? is cuda: %d? has storage %d\n", self2.is_cuda(), self2.is_lazy(), self2.has_storage());
+    auto self3 = ltc_tensor_impl->tensor().ToTensor(true);
+    printf("new tensor is lazy: %d? is cuda: %d? has storage %d\n", self3.is_cuda(), self3.is_lazy(), self3.has_storage());
+
+    self_ = at::detail::make_tensor<TensorImpl>(
+      c10::TensorImpl::VIEW, Storage(self2.storage()), self2.key_set(), self2.dtype());
+    setStrided(self_, sizes, strides, self2.storage_offset());
+    namedinference::propagate_names(self_, self2);
+    return self_;
+  }
+
+
   if (self.is_quantized()) {
     self_ = at::detail::make_tensor<QTensorImpl>(
       c10::TensorImpl::VIEW, Storage(self.storage()), self.key_set(), self.dtype(), get_qtensorimpl(self)->quantizer());

@@ -665,6 +665,7 @@ void InitLtcModuleBindings(py::module m) {
   });
   m.def("_ltc_enable_thread_pool", []() {
     FLAGS_torch_lazy_use_thread_pool = true;
+  });
   m.def("_ltc_enable_lazy_mode", []() {
     c10::impl::tls_set_dispatch_key_excluded(c10::DispatchKey::Lazy, false);
     c10::impl::tls_set_dispatch_key_excluded(c10::DispatchKey::AutogradLazy, false);
