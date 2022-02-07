@@ -36,6 +36,10 @@ from .utils import (
     OpQuantizeabilityType,
 )
 
+from .function_fusion import (
+    match_fusion_patterns,
+)
+
 OpConvertInfo = Tuple[
     # quantized equivalent of original op (None means keep original)
     Optional[Callable],
@@ -176,7 +180,7 @@ class AutoQuantizationState(torch.nn.Module):
                 s += f"  {k}: {v}\n"
             s += "}\n"
         else:
-            s += "(idx_to_packed_weight_name): {}"
+            s += "(idx_to_packed_weight_name): {}\n"
         if len(self.tensor_id_to_scale_zp):
             s += "(tensor_id_to_scale_zp): {\n"
             for k, v in self.tensor_id_to_scale_zp.items():  # type: ignore[assignment]
@@ -758,7 +762,7 @@ class AutoQuantizationState(torch.nn.Module):
                 self.idx, op_type, op_type_is_module, fqn, arg_tensor_infos, [],
                 packable_tensor_idx_to_name, packable_nontensor_idx_to_arg,
                 packable_tensor_kwarg_name_to_name,
-                op_packing_only_uses_module_attributes, qconfig)
+                op_packing_only_uses_module_attributes, qconfig, None)
 
         return args, kwargs
 
@@ -833,6 +837,9 @@ class AutoQuantizationState(torch.nn.Module):
             for element in output:
                 if isinstance(element, torch.Tensor):
                     _add_output_qtensor_info(element, dtype_to_use)
+
+    def match_fusion_patterns(self):
+        match_fusion_patterns(self.idx_to_seen_q_op_infos)
 
     def _maybe_insert_input_observers(self, seen_q_op_info: SeenQOpInfo):
         func_output_dtype_type = get_func_output_dtype_type(seen_q_op_info)
