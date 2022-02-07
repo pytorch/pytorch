@@ -17506,6 +17506,37 @@ class TestNNDeviceType(NNTestCase):
         self._test_EmbeddingBag(device, 'sum', True, wdtype=torch.bfloat16, dtype=dtypes[0], odtype=dtypes[1], test_backward=True)
         self._test_EmbeddingBag(device, 'mean', True, wdtype=torch.bfloat16, dtype=dtypes[0], odtype=dtypes[1], test_backward=True)
 
+    @dtypesIfCUDA(torch.float)
+    @dtypes(torch.float)
+    def test_transform_bias_rescale_qkv(self, device, dtype):
+        # TODO: debug CPU test failure with settings (48, 4, 16, 8) and add that mode
+        tests = [
+            (64, 4, 16, 8),
+            # dim_per_head = 12 does not divide evenly by CPU vectorization length of 8
+            (24, 2, 4, 2)
+        ]
+        if "cuda" not in str(device):
+            # TODO: CUDA implementation doesn't work if size is too small.
+            tests.append((2, 2, 2, 2))
+        print(tests)
+        print(device)
+        for (embed_dim, num_heads, sl, bs) in tests:
+            x = torch.randn(sl, bs, embed_dim, device=device, dtype=dtype) * 10
+            qkv = torch.nn.Linear(embed_dim, 3 * embed_dim, device=device, dtype=dtype)
+
+            with torch.no_grad():
+                (q, k, v) = torch._transform_bias_rescale_qkv(x @ qkv.weight.t(), qkv.bias, num_head=num_heads)
+
+                def simple_transform_bias_rescale_qkv(qkv, bias):
+                    (q, k, v) = torch.split(qkv, embed_dim, dim=-1)
+                    (q_bias, k_bias, v_bias) = torch.split(bias, embed_dim, dim=-1)
+                    return tuple(x.reshape((sl, bs, num_heads, embed_dim // num_heads)).transpose(2, 1) for x in ((q + q_bias) / math.sqrt(embed_dim // num_heads), (k + k_bias), (v + v_bias)))
+                correct_q, correct_k, correct_v = simple_transform_bias_rescale_qkv(x @ qkv.weight.t(), qkv.bias)
+
+            self.assertEqual(q.size(), correct_q.size())
+            self.assertTrue(torch.allclose(q, correct_q))
+            self.assertTrue(torch.allclose(k, correct_k))
+            self.assertTrue(torch.allclose(v, correct_v))
 
     @onlyCUDA
     @dtypes(torch.half, torch.float, torch.double)

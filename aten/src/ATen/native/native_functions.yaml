@@ -2548,6 +2548,11 @@
     CPU: multi_head_self_attention_cpu
     CUDA: multi_head_self_attention_cuda
 
+- func: _transform_bias_rescale_qkv(Tensor qkv, Tensor qkv_bias, int num_head) -> (Tensor, Tensor, Tensor)
+  dispatch:
+    CPU: transform_bias_rescale_qkv_op_cpu
+    CUDA: transform_bias_rescale_qkv_op_cuda
+
 - func: native_layer_norm_backward(Tensor grad_out, Tensor input, int[] normalized_shape, Tensor mean, Tensor rstd, Tensor? weight, Tensor? bias, bool[3] output_mask) -> (Tensor, Tensor, Tensor)
   dispatch:
     CPU: layer_norm_backward_cpu
