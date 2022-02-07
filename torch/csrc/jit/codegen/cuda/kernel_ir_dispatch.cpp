@@ -107,6 +107,18 @@ std::vector<Expr*> ExprMutator::mutate(bool reverse_order) {
     }
   }
 
+  for (auto removal_info : removal_) {
+    if (removal_info.scope == nullptr) {
+      auto pos_it =
+          std::find(exprs_.begin(), exprs_.end(), removal_info.reference);
+      TORCH_INTERNAL_ASSERT(
+          pos_it != exprs_.end(), "Issue finding expression to remove.");
+      exprs_.erase(pos_it);
+    } else {
+      removal_info.scope->erase(removal_info.reference);
+    }
+  }
+
   insertions_.clear();
   replacements_.clear();
 
@@ -132,8 +144,12 @@ void ExprMutator::registerMutation(
   mutation.mode = mode;
   if (mode == MutationMode::BEFORE || mode == MutationMode::AFTER) {
     insertions_.push_back(mutation);
-  } else {
+  } else if (mode == MutationMode::REPLACE) {
     replacements_.push_back(mutation);
+  } else if (mode == MutationMode::REMOVE) {
+    removal_.push_back(mutation);
+  } else {
+    TORCH_INTERNAL_ASSERT(false, "Invalid mutation type");
   }
 }
 
@@ -158,6 +174,10 @@ void ExprMutator::registerReplace(
   registerMutation(reference, new_expr, scope, MutationMode::REPLACE);
 }
 
+void ExprMutator::registerRemove(Expr* expr_to_remove, Scope* scope) {
+  registerMutation(expr_to_remove, nullptr, scope, MutationMode::REMOVE);
+}
+
 void ExprMutator::registerInsertBefore(Expr* reference, Expr* new_expr) {
   Scope* scope = scope_.empty() ? nullptr : scope_.back();
   registerInsertBefore(reference, new_expr, scope);
@@ -171,6 +191,11 @@ void ExprMutator::registerInsertAfter(Expr* reference, Expr* new_expr) {
 void ExprMutator::registerReplace(Expr* reference, Expr* new_expr) {
   Scope* scope = scope_.empty() ? nullptr : scope_.back();
   registerReplace(reference, new_expr, scope);
+}
+
+void ExprMutator::registerRemove(Expr* expr_to_remove) {
+  Scope* scope = scope_.empty() ? nullptr : scope_.back();
+  registerRemove(expr_to_remove, scope);
 }
 
 } // namespace kir
