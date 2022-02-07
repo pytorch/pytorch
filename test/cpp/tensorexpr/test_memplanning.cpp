@@ -85,6 +85,195 @@ TEST(BufLiveRange, MulRangeLine) {
   ASSERT_TRUE(std::get<1>(range_b) == 1);
 }
 
+TEST(MemPlanning, MemReuseWithTypeCast) {
+  int M = 1024;
+  int N = 1024;
+  int K = 2048;
+
+  BufHandle AP("A", {M, K}, kFloat);
+  BufHandle BP("B", {K, N}, kFloat);
+  BufHandle EP("E", {M, N}, kQUInt8);
+  BufHandle FP("F", {M, N}, kQUInt8);
+
+  Tensor CT = Reduce(
+      "gemm",
+      {{M, "M"}, {N, "N"}},
+      Sum(),
+      [&](const ExprHandle& m, const ExprHandle& n, const ExprHandle& k) {
+        return AP.load(m, k) * BP.load(k, n);
+      },
+      {{K, "K"}});
+  Tensor DT = Compute(
+      "relu",
+      {{M, "M"}, {N, "N"}},
+      [&](const ExprHandle& m, const ExprHandle& n) {
+        auto zero = Cast::make(CT.buf()->dtype(), 0);
+        return CompareSelect::make(
+            CT.load(m, n), zero, zero, CT.load(m, n), kLT);
+      });
+
+  VarHandle i("i", kInt);
+  VarHandle j("j", kInt);
+  StorePtr store_e = Store::make(
+      EP, {i, j}, Cast::make(kQUInt8, DT.load(i, j) + DT.load(i, j)));
+  StmtPtr loop_e = For::make(i, 0, 32, For::make(j, 0, 32, store_e));
+
+  StorePtr store_f =
+      Store::make(FP, {i, j}, Load::make(EP, {i, j}) + Load::make(EP, {i, j}));
+  StmtPtr loop_f = For::make(i, 0, 32, For::make(j, 0, 32, store_f));
+  auto stmt = Block::make({CT.stmt(), DT.stmt(), loop_e, loop_f});
+
+  // Constructed stmt:
+  // Intermediate buffers and their liveness ranges: gemm [0, 1], relu [1, 2],
+  // E [2, 3]. The dimensions of 'gemm' and 'E' are the same but their types are
+  // different: 'E' type quint8 < 'gemm' type float. We'll reuse 'gemm' for 'E'
+  // with typecasting.
+  // {
+  //   for (int M = 0; M < 1024; M++) {
+  //     for (int N = 0; N < 1024; N++) {
+  //       gemm[M, N] = float(0);
+  //       for (int K = 0; K < 2048; K++) {
+  //         gemm[M, N] = ReduceOp((gemm[M, N]) + (A[M, K]) * (B[K, N]),
+  //         reduce_args={K});
+  //       }
+  //     }
+  //   }
+  //   for (int M_1 = 0; M_1 < 1024; M_1++) {
+  //     for (int N_1 = 0; N_1 < 1024; N_1++) {
+  //       relu[M_1, N_1] = (gemm[M_1, N_1])<float(0) ? float(0) : (gemm[M_1,
+  //       N_1]);
+  //     }
+  //   }
+  //   for (int i = 0; i < 32; i++) {
+  //     for (int j = 0; j < 32; j++) {
+  //       E[i, j] = quint8((relu[i, j]) + (relu[i, j]));
+  //     }
+  //   }
+  //   for (int i = 0; i < 32; i++) {
+  //     for (int j = 0; j < 32; j++) {
+  //       F[i, j] = (E[i, j]) + (E[i, j]);
+  //     }
+  //   }
+  // }
+
+  SimpleIREvaluator cg(stmt, {AP, BP, FP});
+
+  checkIR(cg.stmt(), R"IR(
+# CHECK: Allocate(gemm); // dtype=float, dims=[1024, 1024]
+# CHECK: Allocate(relu); // dtype=float, dims=[1024, 1024]
+# CHECK: Alias(E,gemm);
+# CHECK: Free(relu);
+# CHECK: Free(gemm))IR");
+
+#ifdef TORCH_ENABLE_LLVM
+  LoopNest loop(Stmt::clone(stmt), {FP.node()});
+  loop.prepareForCodegen();
+  LLVMCodeGen cg_llvm(loop.root_stmt(), {AP, BP, FP});
+
+  checkIR(cg_llvm.stmt(), R"IR(
+# CHECK: Allocate(gemm); // dtype=float, dims=[1024, 1024]
+# CHECK: Allocate(relu); // dtype=float, dims=[1024, 1024]
+# CHECK: Alias(E,gemm);
+# CHECK: Free(relu);
+# CHECK: Free(gemm))IR");
+#endif
+}
+
+TEST(MemPlanning, NoMemReuseForLargerType) {
+  int M = 1024;
+  int N = 1024;
+  int K = 2048;
+
+  BufHandle AP("A", {M, K}, kShort);
+  BufHandle BP("B", {K, N}, kShort);
+  BufHandle EP("E", {M, N}, kFloat);
+  BufHandle FP("F", {M, N}, kFloat);
+
+  Tensor CT = Reduce(
+      "gemm",
+      {{M, "M"}, {N, "N"}},
+      Sum(),
+      [&](const ExprHandle& m, const ExprHandle& n, const ExprHandle& k) {
+        return AP.load(m, k) * BP.load(k, n);
+      },
+      {{K, "K"}});
+  Tensor DT = Compute(
+      "relu",
+      {{M, "M"}, {N, "N"}},
+      [&](const ExprHandle& m, const ExprHandle& n) {
+        auto zero = Cast::make(CT.buf()->dtype(), 0);
+        return CompareSelect::make(
+            CT.load(m, n), zero, zero, CT.load(m, n), kLT);
+      });
+
+  VarHandle i("i", kInt);
+  VarHandle j("j", kInt);
+  StorePtr store_e = Store::make(
+      EP, {i, j}, Cast::make(kFloat, DT.load(i, j) + DT.load(i, j)));
+  StmtPtr loop_e = For::make(i, 0, 32, For::make(j, 0, 32, store_e));
+
+  StorePtr store_f =
+      Store::make(FP, {i, j}, Load::make(EP, {i, j}) + Load::make(EP, {i, j}));
+  StmtPtr loop_f = For::make(i, 0, 32, For::make(j, 0, 32, store_f));
+  auto stmt = Block::make({CT.stmt(), DT.stmt(), loop_e, loop_f});
+
+  // Constructed stmt:
+  // Intermediate buffers and their liveness ranges: gemm [0, 1], relu [1, 2],
+  // E [2, 3]. The dimensions of 'gemm' and 'E' are the same but their types are
+  // different: 'E' type float > 'gemm' type int16. We won't reuse 'gemm' for 'E'.
+  // {
+  //   for (int M = 0; M < 1024; M++) {
+  //     for (int N = 0; N < 1024; N++) {
+  //       gemm[M, N] = float(0);
+  //       for (int K = 0; K < 2048; K++) {
+  //         gemm[M, N] = ReduceOp((gemm[M, N]) + (A[M, K]) * (B[K, N]),
+  //         reduce_args={K});
+  //       }
+  //     }
+  //   }
+  //   for (int M_1 = 0; M_1 < 1024; M_1++) {
+  //     for (int N_1 = 0; N_1 < 1024; N_1++) {
+  //       relu[M_1, N_1] = (gemm[M_1, N_1])<float(0) ? float(0) : (gemm[M_1,
+  //       N_1]);
+  //     }
+  //   }
+  //   for (int i = 0; i < 32; i++) {
+  //     for (int j = 0; j < 32; j++) {
+  //       E[i, j] = quint8((relu[i, j]) + (relu[i, j]));
+  //     }
+  //   }
+  //   for (int i = 0; i < 32; i++) {
+  //     for (int j = 0; j < 32; j++) {
+  //       F[i, j] = (E[i, j]) + (E[i, j]);
+  //     }
+  //   }
+  // }
+
+  SimpleIREvaluator cg(stmt, {AP, BP, FP});
+
+  checkIR(cg.stmt(), R"IR(
+# CHECK: Allocate(gemm); // dtype=int16_t, dims=[1024, 1024]
+# CHECK: Allocate(relu); // dtype=int16_t, dims=[1024, 1024]
+# CHECK: Allocate(E); // dtype=float, dims=[1024, 1024]
+# CHECK: Free(E);
+# CHECK: Free(relu);
+# CHECK: Free(gemm))IR");
+
+#ifdef TORCH_ENABLE_LLVM
+  LoopNest loop(Stmt::clone(stmt), {FP.node()});
+  loop.prepareForCodegen();
+  LLVMCodeGen cg_llvm(loop.root_stmt(), {AP, BP, FP});
+
+  checkIR(cg_llvm.stmt(), R"IR(
+# CHECK: Allocate(gemm); // dtype=int16_t, dims=[1024, 1024]
+# CHECK: Allocate(relu); // dtype=int16_t, dims=[1024, 1024]
+# CHECK: Allocate(E); // dtype=float, dims=[1024, 1024]
+# CHECK: Free(E);
+# CHECK: Free(relu);
+# CHECK: Free(gemm))IR");
+#endif
+}
+
 TEST(MemPlanning, SameBufSizeMemReuse) {
   int M = 1024;
   int N = 1024;
