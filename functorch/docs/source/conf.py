@@ -25,14 +25,11 @@ import functorch
 RELEASE = os.environ.get('RELEASE', False)
 
 import pytorch_sphinx_theme
-import sphinx_rtd_theme
 import sys
 
 # -- General configuration ------------------------------------------------
 
-# If your documentation needs a minimal Sphinx version, state it here.
-#
-needs_sphinx = '3.1.2'
+# Required version of sphinx is set from docs/requirements.txt
 
 # Add any Sphinx extension module names here, as strings. They can be
 # extensions coming with Sphinx (named 'sphinx.ext.*') or your custom
@@ -157,43 +154,21 @@ autodoc_docstring_signature = True
 #
 #
 
-html_theme = 'sphinx_rtd_theme'
-html_theme_path = [sphinx_rtd_theme.get_html_theme_path()]
+html_theme = 'pytorch_sphinx_theme'
+html_theme_path = [pytorch_sphinx_theme.get_html_theme_path()]
 
 # Theme options are theme-specific and customize the look and feel of a theme
 # further.  For a list of options available for each theme, see the
 # documentation.
 #
 html_theme_options = {
-    'collapse_navigation': False,
-    'display_version': True,
+    "collapse_navigation": False,
+    "display_version": True,
+    "logo_only": True,
+    "pytorch_project": "docs",
+    "navigation_with_keys": True,
+    "analytics_id": "UA-117752657-2",
 }
-
-html_context = {
-    'css_files': [
-        'https://fonts.googleapis.com/css?family=Lato',
-        '_static/css/pytorch_theme.css'
-    ],
-}
-
-# html_theme = 'pytorch_sphinx_theme'
-# html_theme_path = [pytorch_sphinx_theme.get_html_theme_path()]
-# 
-# Theme options are theme-specific and customize the look and feel of a theme
-# further.  For a list of options available for each theme, see the
-# documentation.
-
-# html_theme_options = {
-#     'collapse_navigation': False,
-#     'display_version': True,
-#     'logo_only': True,
-#     'analytics_id': 'UA-117752657-2',
-# }
-
-# html_logo = '_static/img/pytorch-logo-dark-unstable.png'
-# if RELEASE:
-#     html_logo = '_static/img/pytorch-logo-dark.svg'
-
 
 # Add any paths that contain custom static files (such as style sheets) here,
 # relative to this directory. They are copied after the builtin static files,
@@ -201,7 +176,7 @@ html_context = {
 html_static_path = ['_static']
 
 html_css_files = [
-    'css/jit.css',
+    'css/custom.css',
 ]
 
 
@@ -260,7 +235,7 @@ latex_documents = [
 # One entry per manual page. List of tuples
 # (source start file, name, description, authors, manual section).
 man_pages = [
-    (master_doc, 'PyTorch', 'PyTorch Documentation',
+    (master_doc, 'functorch', 'functorch Documentation',
      [author], 1)
 ]
 
@@ -271,8 +246,8 @@ man_pages = [
 # (source start file, target name, title, author,
 #  dir menu entry, description, category)
 texinfo_documents = [
-    (master_doc, 'PyTorch', 'PyTorch Documentation',
-     author, 'PyTorch', 'One line description of project.',
+    (master_doc, 'functorch', 'functorch Documentation',
+     author, 'functorch', 'One line description of project.',
      'Miscellaneous'),
 ]
 
@@ -281,6 +256,7 @@ texinfo_documents = [
 intersphinx_mapping = {
     'python': ('https://docs.python.org/3', None),
     'numpy': ('https://numpy.org/doc/stable', None),
+    "torch": ("https://pytorch.org/docs/stable/", None),
 }
 
 # -- A patch that prevents Sphinx from cross-referencing ivar tags -------

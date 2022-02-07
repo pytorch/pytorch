@@ -1,0 +1,11 @@
+.codeblock-height-limiter {
+    max-height: 500px;
+    overflow: scroll;
+}
+
+div.container a.header-logo {
+  height: 80px;
+  width: 160px;
+  background-image: url("../images/functorch.svg");
+  background-size: 160px;
+}
