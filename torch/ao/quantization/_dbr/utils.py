@@ -369,12 +369,17 @@ def get_op_packing_only_uses_module_attributes(
 
 def get_quantized_op(
     seen_q_op_info: SeenQOpInfo,
+    idx_to_seen_q_op_infos: Dict[int, SeenQOpInfo],
 ) -> Optional[Callable]:
     """
     Given a `seen_q_op_info`, returns the quantized version of the seen function.
     If the `seen_q_op_info` corresponds to a module, returns `None`.
     If the function does need quantizing, returns `None`.
     """
+    # if we are in a fusion, use the fusion replacement rules
+    if seen_q_op_info.fusion_info is not None:
+        return seen_q_op_info.fusion_info.replacement_type_this_element
+
     op_type = seen_q_op_info.type
     is_module = isinstance(op_type, type(torch.nn.Module))
     if is_module:
