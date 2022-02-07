@@ -257,6 +257,48 @@ class TestQuantizedTensor(TestCase):
             loaded_int_repr = loaded_q.int_repr()
             self.assertEqual(int_repr, loaded_int_repr)
 
+    def test_qtensor_channel_float_assignment(self):
+        t1 = torch.rand(2, 3, 5, 5)
+        t2 = torch.rand(2, 3, 5, 5)
+        for axis in range(t1.ndim):
+            scales = np.random.rand(t1.size()[axis])
+            zero_points = np.random.randint(low=0, high=50, size=t1.size()[axis])
+            for dtype in [torch.qint8, torch.quint8, torch.qint32]:
+                qt1 = torch.quantize_per_channel(t1, scales=torch.tensor(scales),
+                                                 zero_points=torch.tensor(zero_points), dtype=dtype, axis=axis)
+                qt2 = torch.quantize_per_channel(t2, scales=torch.tensor(scales),
+                                                 zero_points=torch.tensor(zero_points), dtype=dtype, axis=axis)
+                i = 0
+                j = 1
+                k = 2
+                l = 4
+                # scalar assignment verification
+                qt1[i][j][k][l] = t2[i][j][k][l]
+                self.assertEqual(qt1[i][j][k][l], qt2[i][j][k][l])
+                # 1D tensor assignment verification
+                qt1[i][j][k][2:l] = t2[i][j][k][2:l]
+                self.assertEqual(qt1[i][j][k][2:l], qt2[i][j][k][2:l])
+                qt1[i][j][k] = t2[i][j][k]
+                self.assertEqual(qt1[i][j][k], qt2[i][j][k])
+                # 2D tensor assignment verification
+                qt1[i][j][k:] = t2[i][j][k:]
+                self.assertEqual(qt1[i][j][k:], qt2[i][j][k:])
+                qt1[i][j] = t2[i][j]
+                self.assertEqual(qt1[i][j], qt2[i][j])
+                # 3D tensor assignment verification
+                qt1[i][j:] = t2[i][j:]
+                self.assertEqual(qt1[i][j:], qt2[i][j:])
+                qt1[i] = t2[i]
+                self.assertEqual(qt1[i], qt2[i])
+                # 4D tensor assignment verification
+                qt1[:1] = t2[:1]
+                self.assertEqual(qt1[:1], qt2[:1])
+                qt1[:] = t2[:]
+                self.assertEqual(qt1[:], qt2[:])
+                # non-contiguous case **this should raise an exception**
+                with self.assertRaisesRegex(RuntimeError, "Quantized copy only works with contiguous Tensors"):
+                    qt1[:, 0] = t2[:, 0]
+
     def test_qtensor_float_assignment(self):
         # Scalar Tensor
         # item
