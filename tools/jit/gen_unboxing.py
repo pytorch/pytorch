@@ -48,7 +48,7 @@ TORCH_API void {f.func.name.unambiguous_name()}(Stack & stack);
 
             # for each C++ argument, generate the conversion code
             code_connector = "\n\t"
-            arg_connector = ","
+            arg_connector = ", "
             # function call and push back to stack
             prefix = "self_base." if sig.method else "at::"
             translated_args = translate(binding_list, sig.arguments(), method=sig.method)
