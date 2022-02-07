@@ -19,6 +19,8 @@ bool isFloatingPointType(DataType dtype) {
       return true;
     case DataType::Int:
     case DataType::Int32:
+    case DataType::ComplexFloat:
+    case DataType::ComplexDouble:
       return false;
     case DataType::Null:
       TORCH_CHECK(
@@ -35,6 +37,8 @@ bool isIntegralType(DataType dtype) {
     case DataType::Float:
     case DataType::Half:
     case DataType::BFloat16:
+    case DataType::ComplexFloat:
+    case DataType::ComplexDouble:
       return false;
     case DataType::Int:
     case DataType::Int32:
@@ -44,6 +48,26 @@ bool isIntegralType(DataType dtype) {
           false, "Null type is not a valid argument to isFloatingPoint");
     default:
       TORCH_CHECK(false, "Type not supported in isFloatingPoint");
+  }
+}
+
+bool isComplexType(DataType dtype) {
+  switch (dtype) {
+    case DataType::ComplexFloat:
+    case DataType::ComplexDouble:
+      return true;
+    case DataType::Bool:
+    case DataType::Double:
+    case DataType::Float:
+    case DataType::Half:
+    case DataType::BFloat16:
+    case DataType::Int:
+    case DataType::Int32:
+      return false;
+    case DataType::Null:
+      TORCH_CHECK(false, "Null type is not a valid argument to isComplexType");
+    default:
+      TORCH_CHECK(false, "Type not supported in isComplexType");
   }
 }
 
@@ -71,6 +95,21 @@ DataType promote_type(const DataType& t1, const DataType& t2) {
       t1,
       " and ",
       t2);
+  // FIXME: type promotion is not as simple as (t1 < t2 ? t1 : t2)
+  // hint:
+  // half + bfloat = float
+  // double + complex float = complex double
+  bool is_unsupported =
+      (DataType::BFloat16 == t1 || DataType::BFloat16 == t2 ||
+       DataType::ComplexFloat == t1 || DataType::ComplexFloat == t2 ||
+       DataType::ComplexDouble == t1 || DataType::ComplexDouble == t2);
+  TORCH_INTERNAL_ASSERT(
+      !is_unsupported,
+      "type promotion for ",
+      t1,
+      " and ",
+      t2,
+      " are not implemented yet");
   return t1 < t2 ? t1 : t2;
 }
 
@@ -109,6 +148,10 @@ static const char* data_type2string(DataType t) {
       return "int64_t";
     case DataType::Int32:
       return "int";
+    case DataType::ComplexFloat:
+      return "std::complex<float>";
+    case DataType::ComplexDouble:
+      return "std::complex<double>";
     case DataType::Null:
       return "null_type";
     default:
@@ -599,6 +642,10 @@ DataType aten_to_data_type(const at::ScalarType& scalar_type) {
       return DataType::Int;
     case at::ScalarType::Int:
       return DataType::Int32;
+    case at::ScalarType::ComplexFloat:
+      return DataType::ComplexFloat;
+    case at::ScalarType::ComplexDouble:
+      return DataType::ComplexDouble;
     default:
       return DataType::Null;
   }
@@ -620,6 +667,10 @@ at::ScalarType data_type_to_aten(const DataType& data_type) {
       return at::ScalarType::Long;
     case DataType::Int32:
       return at::ScalarType::Int;
+    case DataType::ComplexFloat:
+      return at::ScalarType::ComplexFloat;
+    case DataType::ComplexDouble:
+      return at::ScalarType::ComplexDouble;
     default:
       TORCH_INTERNAL_ASSERT(false, "No data type found for scalar type.");
   }

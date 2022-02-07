@@ -1505,6 +1505,74 @@ TEST_F(NVFuserTest, FusionSimplePWise_CUDA) {
   TORCH_CHECK(output_ref.equal(output));
 }
 
+TEST_F(NVFuserTest, FusionSimplePWiseDtypeComplex_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+  // dimensionality of the problem
+  int nDims = 3;
+
+  // Set up your input tensor views
+  TensorView* tv0 = makeContigTensor(nDims, DataType::ComplexFloat);
+  TensorView* tv1 = makeContigTensor(nDims, DataType::ComplexFloat);
+
+  // Register your inputs
+  fusion.addInput(tv0);
+  fusion.addInput(tv1);
+
+  // Do math with it, it returns a `Val*` but can be static_casted back to
+  // TensorView
+  //
+  // TODO: define ComplexDouble enable the following
+  // c10::complex<double> scalar(2.0, 3.0);
+  // TensorView* tv2 = add(tv1, IrBuilder::create<ComplexDouble>(scalar));
+  //
+  // Related files:
+  // in torch/csrc/jit/codegen/cuda/dispatch.h
+  // and torch/csrc/jit/codegen/cuda/ir_interface_nodes.h
+  TensorView* tv2 = add(tv0, tv1); // TODO: replace this
+  TensorView* tv3 = add(tv0, tv2);
+
+  // Register your outputs
+  fusion.addOutput(tv3);
+
+  // Do transformations, remember, transformations are outputs to inputs
+  // This doesn't have to be in this order
+  tv3->merge(1);
+  tv3->merge(0);
+
+  // Split by n_threads
+  tv3->split(0, 128);
+  tv3->split(0, 4);
+
+  // For all inputs, computeAt the output inline, temporaries should be squeezed
+  // between them
+  tv0->computeAt(tv3, -1);
+  tv1->computeAt(tv3, -1);
+
+  // Parallelize TV3
+  tv3->axis(0)->parallelize(ParallelType::BIDx);
+  tv3->axis(-2)->parallelize(ParallelType::Unroll);
+  tv3->axis(-1)->parallelize(ParallelType::TIDx);
+
+  auto options =
+      at::TensorOptions().dtype(at::kComplexFloat).device(at::kCUDA, 0);
+
+  at::Tensor input1 = at::randn({64, 2, 128}, options);
+  at::Tensor input2 = at::rand_like(input1);
+  at::Tensor output = at::empty_like(input1);
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion, {input1, input2});
+  fe.runFusion({input1, input2}, {output});
+
+  // TODO: use the following
+  // at::Tensor tv2_ref = input2 + scalar;
+  at::Tensor tv2_ref = input2 + input1; // TODO: replace this
+  at::Tensor output_ref = input1 + tv2_ref;
+
+  TORCH_CHECK(output_ref.equal(output));
+}
+
 TEST_F(NVFuserTest, FusionExecKernel_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);

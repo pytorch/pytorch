@@ -88,6 +88,10 @@ std::unique_ptr<TensorArgAbstract> getTensorArg(
       return getTensorArg<int64_t, INDEX_MODE>(nDims);
     case c10::ScalarType::Int:
       return getTensorArg<int32_t, INDEX_MODE>(nDims);
+    case c10::ScalarType::ComplexFloat:
+      return getTensorArg<c10::complex<float>, INDEX_MODE>(nDims);
+    case c10::ScalarType::ComplexDouble:
+      return getTensorArg<c10::complex<double>, INDEX_MODE>(nDims);
     default:
       TORCH_CHECK(
           false,

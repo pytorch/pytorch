@@ -13,6 +13,7 @@
 
 #include <ATen/core/LegacyTypeDispatch.h>
 #include <ATen/cuda/CUDAContext.h>
+#include <ATen/cuda/llvm_jit_strings.h>
 #include <ATen/cuda/nvrtc_stub/ATenNVRTC.h>
 #include <c10/core/DeviceGuard.h>
 #include <c10/cuda/CUDAFunctions.h>
@@ -56,6 +57,12 @@ typedef unsigned long long int uint64_t;
 )";
 }
 
+static const std::string& defineComplexTypes() {
+  static std::string result =
+      at::cuda::get_traits_string() + at::cuda::get_complex_body_string();
+  return result;
+}
+
 } // namespace
 
 std::string FusionExecutor::getStructuredCode(const std::string& kernel) {
@@ -70,7 +77,7 @@ std::string FusionExecutor::getStructuredCode(const std::string& kernel) {
 #endif
   code += std::string("namespace ") + FusionExecutor::kernelNamespace() +
       " {\n" + defineIntegerTypes() + defineIndexMode(options_.index_mode) +
-      executor_utils::kernelPreamble() + kernel + "}\n";
+      defineComplexTypes() + executor_utils::kernelPreamble() + kernel + "}\n";
 
   if (isDebugDumpEnabled(DebugDumpOption::CudaKernel)) {
     std::cout << "\n======= Codegen output for kernel: " << kernelName()

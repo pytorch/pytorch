@@ -120,6 +120,11 @@ bool compatibleType(const torch::jit::Value* val) {
           DataType::Null) {
         return false;
       }
+      // Complex is disabled until its support is completely added
+      // TODO: remove this logic
+      if (isComplexType(aten_to_data_type(tensor_type->scalarType().value()))) {
+        return false;
+      }
     }
   }
   return true;

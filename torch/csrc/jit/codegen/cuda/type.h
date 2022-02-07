@@ -54,12 +54,25 @@ enum class PredicateType {
   ReductionWrite
 };
 
-enum class DataType { Double, Float, Half, Int, Int32, Bool, BFloat16, Null };
+enum class DataType {
+  Double,
+  Float,
+  Half,
+  Int,
+  Int32,
+  Bool,
+  BFloat16,
+  ComplexFloat,
+  ComplexDouble,
+  Null
+};
 
 // Returns if the datatype is a floating point type
 bool isFloatingPointType(DataType dtype);
 // Returns if the datatype is an integer type
 bool isIntegralType(DataType dtype);
+// Returns if the datatype is a complex type
+bool isComplexType(DataType dtype);
 
 enum class ExprType {
   Invalid,

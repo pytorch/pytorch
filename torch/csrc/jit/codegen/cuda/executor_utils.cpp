@@ -166,6 +166,12 @@ bool validateKernelArgTensor(
     case at::ScalarType::Bool:
       match = param_data_type == DataType::Bool;
       break;
+    case at::ScalarType::ComplexFloat:
+      match = param_data_type == DataType::ComplexFloat;
+      break;
+    case at::ScalarType::ComplexDouble:
+      match = param_data_type == DataType::ComplexDouble;
+      break;
     default:
       msg << "Argument element type, " << arg_data_type << ", is not supported."
           << "\n";
@@ -200,6 +206,7 @@ bool validateKernelArgScalar(
     case c10::ScalarType::Bool:
       match = param_type == DataType::Bool;
       break;
+    // TODO: support complex double scalar
     default:
       match = false;
   }
