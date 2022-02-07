@@ -96,8 +96,8 @@ class TestObserver(QuantizationTestCase):
             result = myobs(x)
             result = myobs(y)
             self.assertEqual(result, y)
-            self.assertEqual(myobs.min_val, 1.0*input_scale)
-            self.assertEqual(myobs.max_val, 8.0*input_scale)
+            self.assertEqual(myobs.min_val, 1.0 * input_scale)
+            self.assertEqual(myobs.max_val, 8.0 * input_scale)
             qparams = myobs.calculate_qparams()
             if reduce_range:
                 if qscheme == torch.per_tensor_symmetric:
