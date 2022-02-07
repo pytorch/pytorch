@@ -44,6 +44,7 @@ from torch.ao.quantization import (
     float16_dynamic_qconfig,
     float16_static_qconfig,
     float_qparams_weight_only_qconfig,
+    float_qparams_weight_only_qconfig_4bit,
     get_default_qconfig,
     get_default_qat_qconfig,
     get_default_qconfig_dict,
@@ -169,7 +170,7 @@ class BinaryOpNonQuantizedInput(torch.nn.Module):
         return x
 
 class BinaryOpRelu(torch.nn.Module):
-    def __init__(self, binary_op, ibinary_op, is_inplace, is_functional_relu,
+    def __init__(self, binary_op, ibinary_op, is_inplace, relu_callable,
                  is_scalar):
         """ ibinary_op means inplace binary op
         """
@@ -177,10 +178,12 @@ class BinaryOpRelu(torch.nn.Module):
         self.conv1 = torch.nn.Conv2d(1, 1, 1).float()
         self.conv2 = torch.nn.Conv2d(1, 1, 1).float()
         self.op = ibinary_op if ibinary_op and is_inplace else binary_op
-        self.is_functional_relu = is_functional_relu
+        self.relu_callable = relu_callable
         self.is_scalar = is_scalar
-        self.relu = F.relu if self.is_functional_relu \
-            else torch.nn.ReLU()
+        if relu_callable is torch.nn.ReLU:
+            self.relu = torch.nn.ReLU()
+        else:
+            self.relu = relu_callable
 
     def forward(self, x, y):
         x = self.conv1(x)
@@ -4058,18 +4061,19 @@ class TestQuantizeFxOps(QuantizationTestCase):
         quant_type = QuantType.STATIC
         quantized_node = ns.call_function(quantized_op)
         options = itertools.product(
-            [True, False], [True, False], [True, False])
-        for is_inplace_op, is_functional_relu, is_scalar in options:
+            [True, False], [nn.ReLU, F.relu, torch.relu], [True, False])
+        for is_inplace_op, relu_callable, is_scalar in options:
+            model = BinaryOpRelu(
+                binary_op, ibinary_op, is_inplace_op, relu_callable, is_scalar)
             self.checkGraphModeFxOp(
-                BinaryOpRelu(binary_op, ibinary_op, is_inplace_op, is_functional_relu, is_scalar),
-                data, quant_type, quantized_node)
+                model, data, quant_type, quantized_node)
 
     def _test_binary_op_relu_float16_impl(self, binary_op, ibinary_op):
         data = (torch.rand((1, 1, 1, 1), dtype=torch.float),
                 torch.rand((1, 1, 1, 1), dtype=torch.float))
         quant_type = QuantType.STATIC
         options = itertools.product(
-            [True, False], [True, False], [True, False])
+            [True, False], [nn.ReLU, F.relu, torch.relu], [True, False])
         custom_qconfig_dict = {
             "": float16_static_qconfig,
             "object_type": [(torch.nn.Conv2d, None)]
@@ -4078,9 +4082,10 @@ class TestQuantizeFxOps(QuantizationTestCase):
             node_occurrence = {
                 ns.call_method("to"): 3 if is_scalar else 4
             }
+            model = BinaryOpRelu(
+                binary_op, ibinary_op, is_inplace_op, is_functional_relu, is_scalar)
             self.checkGraphModeFxOp(
-                BinaryOpRelu(binary_op, ibinary_op, is_inplace_op, is_functional_relu, is_scalar),
-                data, quant_type, custom_qconfig_dict=custom_qconfig_dict,
+                model, data, quant_type, custom_qconfig_dict=custom_qconfig_dict,
                 expected_node_occurrence=node_occurrence)
 
 
@@ -5300,25 +5305,26 @@ class TestQuantizeFxOps(QuantizationTestCase):
             def forward(self, indices):
                 return self.emb(indices)
 
-        model = M().eval()
-        indices = torch.tensor([9, 6, 5, 7, 8, 8, 9, 2, 8, 6, 6, 9, 1, 6, 8, 8, 3, 2, 3, 6, 3, 6, 5, 7, 0, 8, 4, 6, 5, 8, 2, 3])
-        quantized_node = ns.call_module(nnq.Embedding)
-        configs = [
-            (float_qparams_weight_only_qconfig, ns.call_module(nnq.Embedding)),
-            (None, ns.call_module(nn.Embedding)),
-            (default_qconfig, ns.call_module(nn.Embedding)),
-        ]
+        for qconfig_type in [float_qparams_weight_only_qconfig, float_qparams_weight_only_qconfig_4bit]:
+            model = M().eval()
+            indices = torch.tensor([9, 6, 5, 7, 8, 8, 9, 2, 8, 6, 6, 9, 1, 6, 8, 8, 3, 2, 3, 6, 3, 6, 5, 7, 0, 8, 4, 6, 5, 8, 2, 3])
+            quantized_node = ns.call_module(nnq.Embedding)
+            configs = [
+                (qconfig_type, ns.call_module(nnq.Embedding)),
+                (None, ns.call_module(nn.Embedding)),
+                (default_qconfig, ns.call_module(nn.Embedding)),
+            ]
 
-        for qconfig, node in configs:
-            qconfig_dict = {"": qconfig}
-            m = prepare_fx(model, qconfig_dict)
-            self.checkGraphModuleNodes(m, expected_node_occurrence={
-                ns.call_module(torch.ao.quantization.MinMaxObserver): 0
-            })
-            m = convert_fx(m)
-            self.checkGraphModuleNodes(m, expected_node=node)
-            # make sure it runs
-            m(indices)
+            for qconfig, node in configs:
+                qconfig_dict = {"": qconfig}
+                m = prepare_fx(model, qconfig_dict)
+                self.checkGraphModuleNodes(m, expected_node_occurrence={
+                    ns.call_module(torch.ao.quantization.MinMaxObserver): 0
+                })
+                m = convert_fx(m)
+                self.checkGraphModuleNodes(m, expected_node=node)
+                # make sure it runs
+                m(indices)
 
     def test_embedding_bag(self):
         class M(torch.nn.Module):

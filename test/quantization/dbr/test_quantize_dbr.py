@@ -56,13 +56,17 @@ class QuantizeDBRTestCase(QuantizationTestCase):
         fuse_modules=True,
         do_fx_comparison=True,
         do_torchscript_checks=True,
+        # there are some keys in DBR prepare_custom_config_dict which
+        # are not supported in FX, this argument is for DBR only
+        dbr_prepare_custom_config_dict=None,
     ):
         m_copy = copy.deepcopy(m)
 
         qconfig_dict = {'': qconfig}
 
         mp = _quantize_dbr.prepare(
-            m, qconfig_dict, example_args, fuse_modules=fuse_modules)
+            m, qconfig_dict, example_args, fuse_modules=fuse_modules,
+            prepare_custom_config_dict=dbr_prepare_custom_config_dict)
         out_p = mp(*example_args)
         # print(mp)
         mq = _quantize_dbr.convert(mp)
@@ -417,6 +421,40 @@ class TestQuantizeDBR(QuantizeDBRTestCase):
         m = M().eval()
         qconfig = torch.quantization.default_qconfig
         self._test_auto_tracing(m, qconfig, (torch.randn(1, 1, 2, 2),))
+
+    def test_fusion_functions(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                x = x + x
+                x = torch.relu(x)
+                return x
+
+        m = M().eval()
+        qconfig = torch.quantization.default_qconfig
+        mp = _quantize_dbr.prepare(m, {'': qconfig}, (torch.randn(1, 1, 1, 1),))
+
+        self.assertTrue(
+            mp._auto_quant_state.idx_to_seen_q_op_infos[0].fusion_info is not None)
+        self.assertTrue(
+            mp._auto_quant_state.idx_to_seen_q_op_infos[1].fusion_info is not None)
+
+        # verify that the add relu is not observed
+        self.assertTrue(
+            '1' not in mp._auto_quant_state.tensor_id_to_observer)
+        # verify that the relu is observed
+        self.assertTrue(
+            '2' in mp._auto_quant_state.tensor_id_to_observer)
+
+        mp(torch.randn(1, 1, 1, 1))
+        mq = _quantize_dbr.convert(mp)
+
+        # verify that the add-relu got fused
+        mqt = torch.jit.trace(mq, (torch.randn(1, 1, 1, 1),))
+        FileCheck().check_count("quantized::add_relu", 1, exactly=True).run(
+            mqt.graph)
+
+        # TODO(future PR): use information about non-quantizeable ops during
+        #   matching fusion patterns
 
     def test_observers_not_touched_by_tracing(self):
         """
@@ -850,9 +888,9 @@ class TestQuantizeDBR(QuantizeDBRTestCase):
         m = M().eval()
         qconfig_dict = {'': torch.quantization.default_qconfig}
         mp = _quantize_dbr.prepare(m, qconfig_dict, (torch.randn(1, 1, 1, 1),))
-        expected = set([nn.Softshrink, F.tanhshrink])
-        self.assertTrue(
-            mp._auto_quant_state.seen_op_types_without_op_hooks == expected)
+        self.assertTrue(len(mp._auto_quant_state.seen_nonq_op_infos) == 2)
+        self.assertTrue(mp._auto_quant_state.seen_nonq_op_infos[0].type == nn.Softshrink)
+        self.assertTrue(mp._auto_quant_state.seen_nonq_op_infos[1].type == F.tanhshrink)
 
     def test_unknown_op_after_quantized(self):
         class M(torch.nn.Module):
@@ -1422,9 +1460,13 @@ class TestQuantizeDBRMultipleOps(QuantizeDBRTestCase):
 
         model_fp32 = M().eval()
         qconfig = torch.quantization.default_qconfig
+        prepare_custom_config_dict = {
+            'output_dtypes': (torch.int64,),
+        }
         self._test_auto_tracing(
             model_fp32, qconfig, (torch.LongTensor([[0]]),),
-            fuse_modules=False)
+            fuse_modules=False,
+            dbr_prepare_custom_config_dict=prepare_custom_config_dict)
 
     def test_lstm(self):
         # building block of torchbenchmark/tts_angular
