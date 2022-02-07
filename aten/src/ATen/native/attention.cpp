@@ -53,9 +53,8 @@ std::tuple<Tensor, Tensor, Tensor> transform_bias_rescale_qkv(
                 auto b = i;
                 using Vec = vec::Vectorized<scalar_t>;
                 auto V = vec::Vectorized<scalar_t>::size();
-                // TODO: handle epilogue
-                TORCH_INTERNAL_ASSERT(dim_per_head % V == 0, "epilogue not implemented yet");
-                for (auto dh = 0; dh < dim_per_head; dh += V) {
+                auto dh = 0;
+                for (; dh < dim_per_head; dh += V) {
                   auto d = nh * dim_per_head + dh;
                   // load
                   auto q_bias_data = Vec::loadu(&qkv_bias_data[d + 0 * D]);
@@ -89,6 +88,30 @@ std::tuple<Tensor, Tensor, Tensor> transform_bias_rescale_qkv(
                                     b * num_head * T * dim_per_head +
                                     nh * T * dim_per_head +
                                     t * dim_per_head + dh]);
+                }
+                if (dh != dim_per_head) {
+                  for (dh = std::max(0, dh - V); dh < dim_per_head; dh++) {
+                    auto d = nh * dim_per_head + dh;
+                    auto q_bias = qkv_bias_data[d + 0 * D];
+                    auto k_bias = qkv_bias_data[d + 1 * D];
+                    auto v_bias = qkv_bias_data[d + 2 * D];
+                    auto q_data = qkv_data[b * _3D * T + t * _3D + d + 0 * D] + q_bias;
+                    auto k_data = qkv_data[b * _3D * T + t * _3D + d + 1 * D] + k_bias;
+                    auto v_data = qkv_data[b * _3D * T + t * _3D + d + 2 * D] + v_bias;
+                    q_data = q_data / sqrt_dim_per_head;
+                    q_k_v_data[0 * B * num_head * T * dim_per_head +
+                               b * num_head * T * dim_per_head +
+                               nh * T * dim_per_head +
+                               t * dim_per_head + dh] = q_data;
+                    q_k_v_data[1 * B * num_head * T * dim_per_head +
+                               b * num_head * T * dim_per_head +
+                               nh * T * dim_per_head +
+                               t * dim_per_head + dh] = k_data;
+                    q_k_v_data[2 * B * num_head * T * dim_per_head +
+                               b * num_head * T * dim_per_head +
+                               nh * T * dim_per_head +
+                               t * dim_per_head + dh] = v_data;
+                  }
                 }
               }
             });
@@ -135,6 +158,7 @@ void masked_softmax_dropout(
                 scalar_t* input_data = attn_scores_data + i;
                 auto max_input = Vec(std::numeric_limits<scalar_t>::lowest());
                 // TODO: handle epilogue
+                TORCH_CHECK(T % V == 0, "epilogue not implemented yet");
                 for (auto t = 0; t < T; t += V) {
                   auto v = Vec::loadu(&input_data[t]);
                   max_input = vec::maximum(max_input, v);
@@ -145,6 +169,7 @@ void masked_softmax_dropout(
                   hmax = std::max(max_input[i], hmax);
                 }
                 accscalar_t hsum = 0;
+                TORCH_CHECK(T % V == 0, "epilogue not implemented yet");
                 for (auto t = 0; t < T; t += V) {
                   auto v = Vec::loadu(&input_data[t]);
                   // TODO: vectorize in accscalar_t?
@@ -153,6 +178,7 @@ void masked_softmax_dropout(
                   }
                 }
                 auto inv_denominator = 1.0 / hsum;
+                TORCH_CHECK(T % V == 0, "epilogue not implemented yet");
                 for (auto t = 0; t < T; t += V) {
                   Vec v = Vec::loadu(&input_data[t]);
 
