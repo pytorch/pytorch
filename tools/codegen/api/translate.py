@@ -1,12 +1,11 @@
 from typing import Dict, Sequence, List, NoReturn, Union
-from tools.codegen.api.types import (ListCType, tensorListT, BaseCType, Binding, ConstRefCType,
+from tools.codegen.api.types import (BaseCType, Binding, ConstRefCType,
                                      Expr, MutRefCType, OptionalCType,
                                      NamedCType, SpecialArgName, tensorT,
                                      memoryFormatT, tensorOptionsT, scalarTypeT,
                                      boolT, deviceT, layoutT, optionalTensorRefT,
-                                     iTensorListT, iOptTensorRefListT, scalarT,
-                                     optionalScalarRefT, VectorCType, longT,
-                                     intArrayRefT)
+                                     scalarT, optionalScalarRefT, VectorCType,
+                                     longT, intArrayRefT)
 
 # This file implements a small program synthesis engine that implements
 # conversions between one API to another.

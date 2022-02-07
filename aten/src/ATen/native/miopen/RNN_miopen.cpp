@@ -815,7 +815,7 @@ std::tuple<Tensor, Tensor> pack_hidden<std::tuple<Tensor, Tensor>>(const Tensor&
 template<typename hidden_type>
 std::pair<Tensor, hidden_type> _miopen_impl(
     const Tensor& input, const Tensor& _batch_sizes, const hidden_type& hidden,
-    TensorList params, bool has_biases, miopenRNNMode_t mode,
+    ITensorList params, bool has_biases, miopenRNNMode_t mode,
     int64_t num_layers, double dropout_p, bool train, bool bidirectional) {
     Tensor hx, cx;
     std::tie(hx, cx) = unpack_hidden(hidden);
