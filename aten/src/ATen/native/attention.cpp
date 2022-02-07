@@ -57,7 +57,8 @@ std::tuple<Tensor, Tensor, Tensor> transform_bias_rescale_qkv(
                 using Vec = vec::Vectorized<scalar_t>;
                 auto V = vec::Vectorized<scalar_t>::size();
                 // TODO: handle epilogue
-                for (auto dh = 0; dh < dim_per_head / V; dh += V) {
+                TORCH_INTERNAL_ASSERT(dim_per_head % V == 0, "epilogue not implemented yet");
+                for (auto dh = 0; dh < dim_per_head; dh += V) {
                   auto d = nh * dim_per_head + dh;
                   // load
                   auto q_bias_data = Vec::loadu(&qkv_bias_data[d + 0 * D]);
