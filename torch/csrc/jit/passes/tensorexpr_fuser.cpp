@@ -360,6 +360,21 @@ void insertTypeGuard(
   }
 }
 
+namespace {
+bool has_unsupported_pin_memory(const Node* node) {
+  // cant support non-constant pin_memory or pin_memory = True
+  if (auto maybe_index = node->schema().argumentIndexWithName("pin_memory")) {
+    int index = *maybe_index;
+    auto inp = node->input(index);
+    if (inp->type() != NoneType::get() &&
+        constant_as<bool>(inp).value_or(true)) {
+      return true;
+    }
+  }
+  return false;
+}
+} // namespace
+
 class TensorExprFuser {
  public:
   TensorExprFuser(
@@ -963,15 +978,22 @@ class TensorExprFuser {
           return false;
         }
       }
-      // cant support non-constant pin_memory or pin_memory = True
-      if (auto maybe_index =
-              node->schema().argumentIndexWithName("pin_memory")) {
-        int index = *maybe_index;
-        auto inp = node->input(index);
-        if (inp->type() != NoneType::get() &&
-            constant_as<bool>(inp).value_or(true)) {
+
+      if (has_unsupported_pin_memory(node)) {
+        return false;
+      }
+    }
+
+    if (node->kind() == aten::_autocast_to_reduced_precision ||
+        node->kind() == aten::_autocast_to_full_precision) {
+      for (auto i : c10::irange(1, node->inputs().size())) {
+        if (node->inputs().at(i)->node()->kind() != prim::Constant) {
           return false;
         }
+      }
+
+      if (has_unsupported_pin_memory(node)) {
+        return false;
       }
     }
 
