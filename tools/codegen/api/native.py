@@ -35,8 +35,6 @@ def argumenttype_type(t: Type, *, mutable: bool, binds: ArgName) -> NamedCType:
             return NamedCType(binds, MutRefCType(tensor_type))
         else:
             return NamedCType(binds, ConstRefCType(tensor_type))
-    elif str(t) == 'Tensor?[]':
-        return NamedCType(binds, ConstRefCType(ListCType(OptionalCType(BaseCType(tensorT)))))
     elif str(t) == 'Scalar':
         return NamedCType(binds, ConstRefCType(BaseCType(scalarT)))
     elif str(t) == 'Scalar?':

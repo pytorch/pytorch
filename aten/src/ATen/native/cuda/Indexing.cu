@@ -205,7 +205,7 @@ int64_t largestIndex(const Tensor &self) {
   return result;
 }
 
-void index_put_with_sort_kernel(Tensor & self, const c10::List<c10::optional<Tensor>>& indices, const Tensor & value, bool accumulate, bool unsafe) {
+void index_put_with_sort_kernel(Tensor & self, IOptTensorRefList indices, const Tensor & value, bool accumulate, bool unsafe) {
   if (indices.size() > (size_t)self.dim()) {
     TORCH_CHECK_INDEX(false, "too many indices for tensor of dimension ", self.dim(), " (got ", indices.size(), ")");
   }

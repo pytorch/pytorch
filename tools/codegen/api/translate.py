@@ -110,10 +110,6 @@ def translate(
             ctx[NamedCType(t.name, BaseCType(optionalScalarRefT))] = \
                 f'({b.expr}.has_value() ? at::OptionalScalarRef(&({b.expr}.value())) : at::OptionalScalarRef())'
 
-        # [Note: IOptTensorRefList]
-        if t.type == ConstRefCType(ListCType(OptionalCType(BaseCType(tensorT)))):
-            ctx[NamedCType(t.name, BaseCType(iOptTensorRefListT))] = f"{b.expr}"
-
     # Add implicit bindings if the generated code is inside a Tensor method
     if method:
         ctx[NamedCType("self", MutRefCType(BaseCType(tensorT)))] = "const_cast<Tensor&>(*this)"

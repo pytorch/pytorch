@@ -13,7 +13,7 @@ namespace at { namespace native {
 
 enum class SCATTER_GATHER_OP: uint8_t {REDUCE_ADD, REDUCE_MULTIPLY};
 
-using index_put_with_sort_fn = void(*)(Tensor &, const c10::List<c10::optional<Tensor>> &, const Tensor &, bool accumulate, bool unsafe);
+using index_put_with_sort_fn = void(*)(Tensor &, IOptTensorRefList, const Tensor &, bool accumulate, bool unsafe);
 
 using gather_fn = void (*)(const Tensor & result, const Tensor & self, int64_t dim, const Tensor & index);
 using scatter_fn = void(*)(const Tensor& self, int64_t dim, const Tensor& index, const Tensor& src);
@@ -32,7 +32,5 @@ DECLARE_DISPATCH(scatter_fill_fn, scatter_fill_stub);
 DECLARE_DISPATCH(scatter_add_fn, scatter_add_stub);
 DECLARE_DISPATCH(scatter_reduce_fn, scatter_reduce_stub);
 DECLARE_DISPATCH(scatter_scalar_reduce_fn, scatter_scalar_reduce_stub);
-
-TORCH_API Tensor& index_out(Tensor& result, const Tensor & self, const c10::List<c10::optional<at::Tensor>>& indices);
 
 }} // namespace at::native

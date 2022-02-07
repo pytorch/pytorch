@@ -4100,7 +4100,7 @@ Tensor embedding_dense_double_backward(const Tensor & grad, const Tensor & indic
   return gg_weight.view(size);
 }
 
-Tensor index_backward(Tensor zeros_like_self, const torch::List<c10::optional<Tensor>>& indices, const Tensor& grad) {
+Tensor index_backward(Tensor zeros_like_self, const at::IOptTensorRefList& indices, const Tensor& grad) {
   return (areAnyTensorSubclassLike({zeros_like_self, grad}) ||
           areAnyOptionalTensorSubclassLike(indices))
       ? zeros_like_self.index_put(indices, grad, true)

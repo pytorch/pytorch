@@ -285,7 +285,7 @@ static void build_index_op(
 }
 
 TORCH_PRECOMPUTE_META_FUNC2(index, Tensor)
-(const Tensor& self, at::IOptTensorRefList indices) {
+(const Tensor& self, const at::IOptTensorRefList& indices) {
   TORCH_CHECK_INDEX(
       indices.size() <= (size_t)self.dim(),
       "too many indices for tensor of dimension ",
@@ -296,7 +296,6 @@ TORCH_PRECOMPUTE_META_FUNC2(index, Tensor)
   if (result.defined()) {
     at::assert_no_internal_overlap(result);
     at::assert_no_overlap(result, self);
-    // NOLINTNEXTLINE(performance-implicit-conversion-in-loop)
     for (const auto& index: indices) {
       if (index.has_value()) {
         at::assert_no_overlap(result, *index);
@@ -424,7 +423,7 @@ AdvancedIndex::AdvancedIndex(const Tensor& src, TensorList indices_list)
   }
 }
 
-static std::tuple<bool, Tensor> canDispatchToMaskedFill(const Tensor& self, const torch::List<c10::optional<at::Tensor>>& indices,
+static std::tuple<bool, Tensor> canDispatchToMaskedFill(const Tensor& self, const IOptTensorRefList& indices,
 const Tensor& value){
   if (!(value.numel() ==1 && value.device().is_cpu())){
     return std::make_tuple(false,Tensor());
@@ -432,11 +431,11 @@ const Tensor& value){
   int64_t num_ind = 0;
   Tensor mask;
   auto self_device = self.device();
-  for (const c10::optional<Tensor> i: indices) {
-    if (!i.has_value() || !(*i).defined()){
+  for (const auto& i: indices) {
+    if (!i.has_value()) {
       num_ind++;
     } else {
-      Tensor index = std::move(*i);
+      const Tensor& index = *i;
       if ((index.scalar_type() != kByte && index.scalar_type() != kBool) ||
           index.device() != self_device || mask.defined()){
         return std::make_tuple(false, Tensor());
@@ -488,7 +487,7 @@ TORCH_IMPL_FUNC(index_out)
   index_stub(device_type(), *this, sizes, strides);
 }
 
-Tensor quantized_index(const Tensor & self, const torch::List<c10::optional<Tensor>>& indices) {
+Tensor quantized_index(const Tensor & self, const IOptTensorRefList& indices) {
   TORCH_INTERNAL_ASSERT(
       self.qscheme() == c10::kPerTensorAffine ||
       self.qscheme() == c10::kPerTensorSymmetric,
@@ -548,11 +547,11 @@ Tensor put(const Tensor & self, const Tensor& index, const Tensor & source, cons
   return self.clone(at::MemoryFormat::Preserve).put_(index, source, accumulate);
 }
 
-Tensor index_put(const Tensor & self, const torch::List<c10::optional<Tensor>>& indices, const Tensor & value, bool accumulate) {
+Tensor index_put(const Tensor & self, const IOptTensorRefList& indices, const Tensor & value, bool accumulate) {
   return self.clone(at::MemoryFormat::Preserve).index_put_(indices, value, accumulate);
 }
 
-Tensor & _index_put_impl_(Tensor & self, const torch::List<c10::optional<Tensor>>& indices, const Tensor & value, const bool accumulate, const bool unsafe) {
+Tensor & _index_put_impl_(Tensor & self, const IOptTensorRefList& indices, const Tensor & value, const bool accumulate, const bool unsafe) {
   TORCH_CHECK_INDEX(indices.size() <= (size_t)self.dim(), "too many indices for tensor of dimension ", self.dim(), " (got ", indices.size(), ")");
   if (at::has_internal_overlap(self) == MemOverlap::YES) {
     TORCH_WARN(
@@ -572,7 +571,7 @@ Tensor & _index_put_impl_(Tensor & self, const torch::List<c10::optional<Tensor>
   }
   at::assert_no_overlap(self, value);
   // NOLINTNEXTLINE(performance-implicit-conversion-in-loop)
-  for (const c10::optional<Tensor>& index: indices) {
+  for (const auto& index: indices) {
     if (index.has_value()) {
       at::assert_no_overlap(self, *index);
     }
@@ -630,7 +629,7 @@ Tensor take(const Tensor& self, const Tensor& index) {
     return out;
 }
 
-Tensor & index_put_(Tensor & self, const torch::List<c10::optional<Tensor>>& indices, const Tensor & value, const bool accumulate) {
+Tensor & index_put_(Tensor & self, const IOptTensorRefList& indices, const Tensor & value, const bool accumulate) {
   return at::_index_put_impl_(self, indices, value, accumulate, /*unsafe=*/false);
 }
 

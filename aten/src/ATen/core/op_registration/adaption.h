@@ -74,9 +74,11 @@ inline void check_and_update_common_device(optional<Device>& common_device, at::
   }
 }
 
-inline void check_and_update_common_device(optional<Device>& common_device, const List<optional<at::Tensor>>& tensors, at::CheckedFrom methodName, at::CheckedFrom argName) {
+inline void check_and_update_common_device(optional<Device>& common_device, at::IOptTensorRefList tensors, at::CheckedFrom methodName, at::CheckedFrom argName) {
   for (const auto& tensor : tensors) {
-    check_and_update_common_device(common_device, tensor, methodName, argName);
+    if (tensor.has_value()) {
+      check_and_update_common_device(common_device, (*tensor), methodName, argName);
+    }
   }
 }
 } // namespace impl

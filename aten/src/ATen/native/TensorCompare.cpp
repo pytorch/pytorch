@@ -319,7 +319,7 @@ static void isin_sorting(
   if (assume_unique) {
     out.copy_(mask.slice(0, 0, elements.numel()).view_as(out));
   } else {
-    out.copy_(at::index(mask, {c10::optional<Tensor>(unique_order)}));
+    out.copy_(at::index(mask, {unique_order}));
   }
 }
 

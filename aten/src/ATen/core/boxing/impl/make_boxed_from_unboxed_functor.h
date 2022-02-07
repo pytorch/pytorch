@@ -358,6 +358,13 @@ namespace impl {
     }
   };
 
+  template<bool AllowDeprecatedTypes>
+  struct ivalue_to_arg<at::IOptTensorRefList, AllowDeprecatedTypes> final {
+    static List<optional<at::Tensor>> call(IValue& v) {
+      return toTypedList<optional<at::Tensor>>(v.toList());
+    }
+  };
+
   template<class T, bool AllowDeprecatedTypes>
   struct ivalue_to_arg<ArrayRef<T>, AllowDeprecatedTypes> final {
     // If an argument is ArrayRef<T>, convert the IValue to a std::vector<T> and pass that

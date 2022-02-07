@@ -44,7 +44,7 @@ def argumenttype_type(t: Type, *, mutable: bool, binds: ArgName) -> NamedCType:
         if t.elem == BaseType(BaseTy.Tensor):
             return NamedCType(binds, ConstRefCType(BaseCType(iTensorListT)))
         elif t.elem == OptionalType(BaseType(BaseTy.Tensor)):
-            return NamedCType(binds, BaseCType(iOptTensorRefListT))
+            return NamedCType(binds, ConstRefCType(BaseCType(iOptTensorRefListT)))
         # TODO: delete these special cases; see tools.codegen.api.cpp--these
         # must be changed in tandem, but there are problems; see
         # https://github.com/pytorch/pytorch/pull/51485
