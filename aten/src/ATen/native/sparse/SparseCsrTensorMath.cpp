@@ -62,6 +62,7 @@
 #include <ATen/ops/isneginf_native.h>
 #include <ATen/ops/isposinf.h>
 #include <ATen/ops/isposinf_native.h>
+#include <ATen/ops/linalg_solve_native.h>
 #include <ATen/ops/log1p.h>
 #include <ATen/ops/log1p_native.h>
 #include <ATen/ops/mm_native.h>
