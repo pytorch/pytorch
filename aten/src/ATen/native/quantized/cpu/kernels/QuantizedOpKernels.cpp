@@ -2029,6 +2029,9 @@ void qupsample_bilinear2d_nhwc_kernel(
         const auto rwidth = area_pixel_compute_scale<float>(
             input_width, output_width, align_corners, scales_w);
 
+        const int64_t input_q_zero_point = input.q_zero_point();
+        const int64_t output_q_zero_point = output.q_zero_point();
+
         for (const auto b : c10::irange(nbatch)) {
           auto* i_p = reinterpret_cast<typename scalar_t::underlying*>(
               idata + b * input_height * input_width * channels);
@@ -2069,8 +2072,8 @@ void qupsample_bilinear2d_nhwc_kernel(
                   output_height,
                   output_width,
                   channels,
-                  output.q_zero_point(),
-                  input.q_zero_point(),
+                  output_q_zero_point,
+                  input_q_zero_point,
                   inverse_scale,
                   h0lambda,
                   h1lambda,
@@ -2088,8 +2091,8 @@ void qupsample_bilinear2d_nhwc_kernel(
                          w1lambda * pos1[(h1p * input_width + w1p) * channels]);
                 pos2[0] = at::native::quantize_val<scalar_t>(
                               inverse_scale,
-                              output.q_zero_point(),
-                              result - input.q_zero_point())
+                              output_q_zero_point,
+                              result - input_q_zero_point)
                               .val_;
                 pos1 += 1;
                 pos2 += 1;

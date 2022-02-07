@@ -1,5 +1,6 @@
 #include <torch/csrc/lazy/core/lazy_graph_executor.h>
 
+#include <ATen/ScalarOps.h>
 #include <c10/util/Logging.h>
 #include <c10/util/irange.h>
 #include <torch/csrc/lazy/core/config.h>
@@ -17,8 +18,6 @@
 #include <torch/csrc/lazy/ts_backend/ops/device_data.h>
 #include <torch/csrc/lazy/ts_backend/ops/expand.h>
 #include <torch/csrc/lazy/ts_backend/ops/scalar.h>
-
-#include <ATen/ScalarOps.h>
 
 namespace torch {
 namespace lazy {
@@ -528,6 +527,16 @@ Value LazyGraphExecutor::GetDeviceDataIrValue(
   return MakeNode<DeviceData>(std::move(data));
 }
 
+Value LazyGraphExecutor::GetIrValueForScalarFromCodegen(const at::Scalar& value) {
+  if (IsSpecialScalar(value)) {
+    return MakeNode<Scalar>(value, value.type());
+  }
+  auto cpu_device = getBackend()->GetBackendDevice(c10::Device(c10::kCPU, 0));
+  BackendDataPtr data = getBackend()->MakeComputationDataFromScalar(value, cpu_device);
+  data->SetInfo(std::make_shared<DeviceDataInfo>(/*tensor_id=*/-1, /*read_only=*/true));
+  return MakeNode<DeviceData>(std::move(data));
+}
+
 Value LazyGraphExecutor::GetIrValueForScalar(
     const at::Scalar& value,
     c10::ScalarType type,
@@ -535,7 +544,7 @@ Value LazyGraphExecutor::GetIrValueForScalar(
   if (IsSpecialScalar(value)) {
     return MakeNode<Scalar>(value, type);
   }
-  return GetDeviceDataIrValue(value, type, device);
+  return GetDeviceDataIrValue(value, type, getBackend()->GetBackendDevice(c10::Device(c10::kCPU, 0)));
 }
 
 Value LazyGraphExecutor::GetIrValueForScalar(
@@ -544,26 +553,18 @@ Value LazyGraphExecutor::GetIrValueForScalar(
   return GetIrValueForScalar(value, value.type(), device);
 }
 
-Value LazyGraphExecutor::GetIrValueForScalar(
-    const at::Scalar& value,
-    c10::ScalarType type,
-    c10::ArrayRef<int64_t> dimensions,
+Value LazyGraphExecutor::GetIrValueForExpandedScalar(
+    const at::Scalar& value, const Shape& shape,
     const BackendDevice& device) {
+  c10::ArrayRef<int64_t> dimensions = shape.sizes();
+  auto type = shape.scalar_type();
   Value ir_value = GetIrValueForScalar(value, type, device);
   if (!dimensions.empty()) {
-    ir_value = MakeNode<Expand>(
-        ir_value,
-        dimensions.vec(),
-        /*is_scalar_expand=*/true);
+      ir_value = MakeNode<Expand>(
+          ir_value, dimensions.vec(),
+          /*is_scalar_expand=*/true);
   }
   return ir_value;
-}
-
-Value LazyGraphExecutor::GetIrValueForScalar(
-    const at::Scalar& value,
-    const Shape& shape,
-    const BackendDevice& device) {
-  return GetIrValueForScalar(value, shape.scalar_type(), shape.sizes(), device);
 }
 
 LazyGraphExecutor::Async::Async(

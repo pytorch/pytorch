@@ -23,6 +23,8 @@ constexpr int MIOPEN_DIM_MAX = 5;
 
 namespace at { namespace native {
 
+DEFINE_DISPATCH(conv_depthwise2d_backward_stub);
+DEFINE_DISPATCH(conv_depthwise3d_backward_stub);
 DEFINE_DISPATCH(cudnn_convolution_backward_stub);
 DEFINE_DISPATCH(cudnn_convolution_transpose_backward_stub);
 DEFINE_DISPATCH(slow_conv_transpose3d_backward_stub);
@@ -34,6 +36,8 @@ DEFINE_DISPATCH(mkldnn_convolution_backward_stub);
 DEFINE_DISPATCH(slow_conv_dilated2d_backward_stub);
 DEFINE_DISPATCH(slow_conv_dilated3d_backward_stub);
 DEFINE_DISPATCH(slow_conv_transpose2d_backward_stub);
+REGISTER_NO_CPU_DISPATCH(conv_depthwise2d_backward_stub);
+REGISTER_NO_CPU_DISPATCH(conv_depthwise3d_backward_stub);
 REGISTER_NO_CPU_DISPATCH(cudnn_convolution_backward_stub);
 REGISTER_NO_CPU_DISPATCH(cudnn_convolution_transpose_backward_stub);
 REGISTER_NO_CPU_DISPATCH(miopen_convolution_backward_stub);
@@ -172,6 +176,11 @@ auto ConvParams::needs_64bit_indexing_no_split(const at::Tensor& input, const at
 }
 
 auto ConvParams::use_cudnn(const at::Tensor& input, const at::Tensor& weight) const -> bool {
+
+// Note [Mobile check segfaults]
+// cudnn and miopen are guaranteed not to be on mobile, and T102591915 / T110194934 suggest
+// that maybe the compiledWithCuDNN() check sometimes segfaults (though I can't imagine how)
+#if !defined(C10_MOBILE)
   if (needs_64bit_indexing_no_split(input, weight)) {
     return false;
   }
@@ -195,6 +204,9 @@ auto ConvParams::use_cudnn(const at::Tensor& input, const at::Tensor& weight) co
     }
   }
   return !is_output_padding_big();
+#else
+  return false;
+#endif
 }
 
 auto ConvParams::use_miopen(const at::Tensor& input, const at::Tensor& weight, bool bias_defined) const -> bool {
@@ -494,8 +506,8 @@ static void check_shape_forward(const at::Tensor& input,
   int64_t k = input.ndimension();
   int64_t weight_dim = weight_sizes.size();
   int64_t groups = params.groups;
-  auto padding = params.padding;
-  auto dilation = params.dilation;
+  const auto& padding = params.padding;
+  const auto& dilation = params.dilation;
   bool transposed = params.transposed;
 
   TORCH_CHECK(!params.is_padding_neg(), "negative padding is not supported");
@@ -1070,9 +1082,7 @@ static inline at::MemoryFormat determine_backend_memory_format(
   at::MemoryFormat backend_memory_format = at::MemoryFormat::Contiguous;
   auto k = weight.ndimension();
 #if !defined(C10_MOBILE)
-  // cudnn and miopen are guaranteed not to be on mobile, and T102591915
-  // suggests that maybe the cudnn condition sometimes segfaults (though
-  // I can't imagine how)
+  // See Note [Mobile check segfaults]
   if (detail::getCUDAHooks().compiledWithCuDNN()) {
     backend_memory_format = cudnn_conv_suggest_memory_format(input, weight);
   }
@@ -1302,7 +1312,6 @@ std::tuple<Tensor,Tensor,Tensor> _convolution_double_backward( const c10::option
     const Tensor& gO_r, const Tensor& weight_r, const Tensor& input,
     IntArrayRef stride_, IntArrayRef padding_, IntArrayRef dilation_,
     bool transposed_, IntArrayRef output_padding_, int64_t groups_,
-    bool benchmark, bool deterministic, bool cudnn_enabled, bool allow_tf32,
     std::array<bool, 3> output_mask) {
   // See [Note: hacky wrapper removal for optional tensor]
   c10::MaybeOwned<Tensor> ggI_maybe_owned = at::borrow_from_optional_tensor(ggI_opt);
@@ -1331,10 +1340,6 @@ std::tuple<Tensor,Tensor,Tensor> _convolution_double_backward( const c10::option
   } else {
     params.groups = groups_;
   }
-  params.benchmark = benchmark;
-  params.deterministic = deterministic;
-  params.cudnn_enabled = cudnn_enabled;
-  params.allow_tf32 = allow_tf32;
 
   // Compute ggO = conv(ggI, w) + conv(i, ggW) + ggb
   Tensor ggO;
@@ -1343,14 +1348,14 @@ std::tuple<Tensor,Tensor,Tensor> _convolution_double_backward( const c10::option
       if (weight.is_cuda()) {
         weight = weight.contiguous();
       }
-      ggO = at::_convolution(ggI, weight, Tensor(), params.stride, params.padding, params.dilation, params.transposed, params.output_padding, params.groups, params.benchmark, params.deterministic, params.cudnn_enabled, params.allow_tf32);
+      ggO = at::convolution(ggI, weight, Tensor(), params.stride, params.padding, params.dilation, params.transposed, params.output_padding, params.groups);
     }
 
     if (ggW.defined()) {
       if (ggW.is_cuda()) {
         ggW = ggW.contiguous();
       }
-      auto ggW_term = at::_convolution(input, ggW, Tensor(), params.stride, params.padding, params.dilation, params.transposed, params.output_padding, params.groups, params.benchmark, params.deterministic, params.cudnn_enabled, params.allow_tf32);
+      auto ggW_term = at::convolution(input, ggW, Tensor(), params.stride, params.padding, params.dilation, params.transposed, params.output_padding, params.groups);
       if (ggO.defined()) {
         ggO = ggO + ggW_term;
       } else {
@@ -1405,9 +1410,9 @@ std::tuple<Tensor,Tensor,Tensor> _convolution_double_backward( const c10::option
         // Compute conv
         if (params.transposed) {
           gw_conv_params.transposed = false;
-          gWt = at::_convolution(gOt, ggIt, Tensor(), gw_conv_params.stride, gw_conv_params.padding, gw_conv_params.dilation, gw_conv_params.transposed, gw_conv_params.output_padding, gw_conv_params.groups, gw_conv_params.benchmark, gw_conv_params.deterministic, gw_conv_params.cudnn_enabled, params.allow_tf32);
+          gWt = at::convolution(gOt, ggIt, Tensor(), gw_conv_params.stride, gw_conv_params.padding, gw_conv_params.dilation, gw_conv_params.transposed, gw_conv_params.output_padding, gw_conv_params.groups);
         } else {
-          gWt = at::_convolution(ggIt, gOt, Tensor(), gw_conv_params.stride, gw_conv_params.padding, gw_conv_params.dilation, gw_conv_params.transposed, gw_conv_params.output_padding, gw_conv_params.groups, gw_conv_params.benchmark, gw_conv_params.deterministic, gw_conv_params.cudnn_enabled, params.allow_tf32);
+          gWt = at::convolution(ggIt, gOt, Tensor(), gw_conv_params.stride, gw_conv_params.padding, gw_conv_params.dilation, gw_conv_params.transposed, gw_conv_params.output_padding, gw_conv_params.groups);
         }
       } else {
         std::vector<Tensor> gWt_list(groups);
@@ -1421,9 +1426,9 @@ std::tuple<Tensor,Tensor,Tensor> _convolution_double_backward( const c10::option
           // Compute conv
           if (params.transposed) {
             gw_conv_params.transposed = false;
-            gWt_list[g] = at::_convolution(gOt_g, ggIt_g, Tensor(), gw_conv_params.stride, gw_conv_params.padding, gw_conv_params.dilation, gw_conv_params.transposed, gw_conv_params.output_padding, gw_conv_params.groups, gw_conv_params.benchmark, gw_conv_params.deterministic, gw_conv_params.cudnn_enabled, params.allow_tf32);
+            gWt_list[g] = at::convolution(gOt_g, ggIt_g, Tensor(), gw_conv_params.stride, gw_conv_params.padding, gw_conv_params.dilation, gw_conv_params.transposed, gw_conv_params.output_padding, gw_conv_params.groups);
           } else {
-            gWt_list[g] = at::_convolution(ggIt_g, gOt_g, Tensor(), gw_conv_params.stride, gw_conv_params.padding, gw_conv_params.dilation, gw_conv_params.transposed, gw_conv_params.output_padding, gw_conv_params.groups, gw_conv_params.benchmark, gw_conv_params.deterministic, gw_conv_params.cudnn_enabled, params.allow_tf32);
+            gWt_list[g] = at::convolution(ggIt_g, gOt_g, Tensor(), gw_conv_params.stride, gw_conv_params.padding, gw_conv_params.dilation, gw_conv_params.transposed, gw_conv_params.output_padding, gw_conv_params.groups);
           }
         }
 
@@ -1459,7 +1464,7 @@ std::tuple<Tensor,Tensor,Tensor> _convolution_double_backward( const c10::option
         if (gO.is_cuda()) {
           gO = gO.contiguous();
         }
-        gI = at::_convolution(gO, ggW, Tensor(), gi_conv_params.stride, gi_conv_params.padding, gi_conv_params.dilation, gi_conv_params.transposed, gi_conv_params.output_padding, gi_conv_params.groups, gi_conv_params.benchmark, gi_conv_params.deterministic, gi_conv_params.cudnn_enabled, params.allow_tf32);
+        gI = at::convolution(gO, ggW, Tensor(), gi_conv_params.stride, gi_conv_params.padding, gi_conv_params.dilation, gi_conv_params.transposed, gi_conv_params.output_padding, gi_conv_params.groups);
 
         // narrow gI to only relevant portion
         // we do it this way because negative output_padding is not supported
@@ -1493,7 +1498,8 @@ std::tuple<Tensor,Tensor,Tensor> _convolution_double_backward( const c10::option
         if (gO.is_cuda()) {
           gO = gO.contiguous();
         }
-        gI = at::_convolution(gO, ggW, Tensor(), gi_conv_params.stride, gi_conv_params.padding, gi_conv_params.dilation, gi_conv_params.transposed, gi_conv_params.output_padding, gi_conv_params.groups, gi_conv_params.benchmark, gi_conv_params.deterministic, gi_conv_params.cudnn_enabled, params.allow_tf32);
+
+        gI = at::convolution(gO, ggW, Tensor(), gi_conv_params.stride, gi_conv_params.padding, gi_conv_params.dilation, gi_conv_params.transposed, gi_conv_params.output_padding, gi_conv_params.groups);
       }
     }
   }
@@ -1618,16 +1624,19 @@ std::tuple<Tensor, Tensor, Tensor> convolution_backward(
   auto kernel_size = weight.sizes().slice(2);
   switch(backend) {
     case ConvBackend::CudaDepthwise2d:
+    {
+      std::array<bool, 2> input_weight_output_mask = {output_mask[0], output_mask[1]};
       std::tie(backend_grad_input, backend_grad_weight) =
-        at::_conv_depthwise2d_backward(grad_output.contiguous(), input.contiguous(), weight, kernel_size,
-            params.stride, params.padding, params.dilation, {output_mask[0], output_mask[1]});
+        conv_depthwise2d_backward_stub(input.device().type(), grad_output, input,
+          weight, kernel_size, params.stride, params.padding, params.dilation, input_weight_output_mask);
       break;
+    }
     case ConvBackend::CudaDepthwise3d:
       TORCH_CHECK(input.ndimension() == 5);
       std::tie(backend_grad_input, backend_grad_weight, backend_grad_bias) =
-        at::conv_depthwise3d_backward(
-          grad_output.contiguous(), input.contiguous(), weight, kernel_size, params.stride, params.padding,
-          params.dilation, output_mask);
+        conv_depthwise3d_backward_stub(
+          input.device().type(), grad_output, input, weight, kernel_size, params.stride,
+          params.padding, params.dilation, output_mask);
       break;
     case ConvBackend::Cudnn:
     {
@@ -1635,7 +1644,9 @@ std::tuple<Tensor, Tensor, Tensor> convolution_backward(
       std::array<bool, 2> input_weight_output_mask = {output_mask[0], output_mask[1]};
       std::tie(backend_grad_input, backend_grad_weight) = cudnn_convolution_backward_stub(
           input.device().type(),
-          input.contiguous(backend_memory_format), grad_output, weight, params.padding, params.stride,
+          // Only make input contiguous when it is necessary for the backwards computation
+          output_mask[1] ? input.contiguous(backend_memory_format) : input,
+          grad_output, weight, params.padding, params.stride,
           params.dilation, params.groups, params.benchmark, params.deterministic, params.allow_tf32,
           input_weight_output_mask);
       break;
@@ -1646,7 +1657,9 @@ std::tuple<Tensor, Tensor, Tensor> convolution_backward(
       std::array<bool, 2> input_weight_output_mask = {output_mask[0], output_mask[1]};
       std::tie(backend_grad_input, backend_grad_weight) = cudnn_convolution_transpose_backward_stub(
         input.device().type(),
-        input.contiguous(backend_memory_format), grad_output, weight, params.padding, params.output_padding,
+        // Only make input contiguous when it is necessary for the backwards computation
+        output_mask[1] ? input.contiguous(backend_memory_format) : input,
+        grad_output, weight, params.padding, params.output_padding,
         params.stride, params.dilation, params.groups, params.benchmark, params.deterministic, params.allow_tf32,
         input_weight_output_mask);
       break;
