@@ -108,7 +108,6 @@ std::pair<at::RecordFunctionHandle, int> get_input_op_id_from_record_fn(const at
   auto input_producer_pair = fn.inputOpId(input_nr);
   at::RecordFunctionHandle input_op_id = input_producer_pair.first;
   int output_nr = input_producer_pair.second;
-  std::cout << "Profiler: FN " << fn.name() << " Op ID " << fn.handle() << " Input nr " << input_nr << " Input Op ID " << int(input_op_id) << std::endl;
   return input_producer_pair;
 }
 
@@ -171,7 +170,7 @@ std::string inputOpIdsToStr(const std::vector<std::pair<int, int>>& input_op_ids
     }
     auto op_id_info_pair = input_op_ids[idx];
     // OpId:OutputNr
-    oss << int(op_id_info_pair.first) << ":" << op_id_info_pair.second;
+    oss << "(" << int(op_id_info_pair.first) << "," << op_id_info_pair.second << ")";
   }
   oss << "]";
   return oss.str();

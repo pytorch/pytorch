@@ -592,9 +592,6 @@ std::pair<int, int> RecordFunction::get_op_id_from_input(const c10::IValue& inpu
             producer_op_pair  =  at::producer_tensor_map[ten_addr];
             int producer_op_id = producer_op_pair.first;
             int output_nr = producer_op_pair.second;
-            std::cout << "  TensorImpl Addr " << std::hex << ten_addr << std::dec << " Producer op id " << producer_op_id << " Output nr " << output_nr << std::endl;
-        } else {
-            std::cout << "  TensorImpl Addr " <<std::hex << ten_addr << std::dec << " not in map " << std::endl;
         }
     }
     return producer_op_pair;
@@ -621,7 +618,6 @@ void RecordFunction::check_input_mapping(void) {
     state_->input_producer_ops_.reserve(num_inputs);
     int idx = 0;
     for (const c10::IValue& input_item : inputs()) {
-        std::cout << "Alex: FN " << name() << " Saved Input  index " << idx << std::endl;
         bool tensor_valid = false;
         if(input_item.isTensor()) {
             const at::Tensor& tensor = input_item.toTensor();
@@ -644,7 +640,6 @@ void RecordFunction::check_input_mapping(void) {
 
 void RecordFunction::update_output_tensor_tracking(void) {
     int producer_op_id = int(handle());
-    std::cout << "Alex: FN " << name() << " Op ID " << producer_op_id <<  " Saving Outputs" << std::endl;
     int output_nr = 0;
     for (const c10::IValue& s_tensor : outputs()){
         bool tensor_valid = false;
@@ -653,13 +648,6 @@ void RecordFunction::update_output_tensor_tracking(void) {
             if (tensor.defined()) {
                 auto ten_addr =  tensor.unsafeGetTensorImpl();
                 bool addr_found = at::producer_tensor_map.count(ten_addr) > 0;
-                if (!addr_found) {
-                    std::cout << "  Adding Output TensorImpl Addr " << std::hex << ten_addr << " output nr " << std::dec << output_nr << " to map " << std::endl;
-                } else {
-                    auto producer_pair = at::producer_tensor_map[ten_addr];
-                    int prev_producer_id = producer_pair.first;
-                    std::cout << "  Output tensor reusing Addr " << std::hex << ten_addr << " old producer op " << std::dec << prev_producer_id << " new producer op_id " << producer_op_id << std::endl;
-                }
                 at::producer_tensor_map[ten_addr] = std::pair<int, int> {producer_op_id, output_nr};
                 state_->output_dims_.push_back(tensor.sizes().vec());
                 state_->output_tensor_addr_.push_back(ten_addr);
