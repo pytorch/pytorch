@@ -232,10 +232,12 @@ def _default_schedule_fn(_: int) -> ProfilerAction:
     """
     return ProfilerAction.RECORD
 
-def tensorboard_trace_handler(dir_name: str, worker_name: Optional[str] = None, use_gzip: bool = False):
+def tensorboard_trace_handler(dir_name: str = None, worker_name: Optional[str] = None, use_gzip: bool = False,
+                              use_wandb: bool = False):
     """
     Outputs tracing files to directory of ``dir_name``, then that directory can be
     directly delivered to tensorboard as logdir.
+    Outputs to Weights & Biases when using ``use_wandb = True``.
     ``worker_name`` should be unique for each worker in distributed scenario,
     it will be set to '[hostname]_[pid]' by default.
     """
@@ -243,19 +245,31 @@ def tensorboard_trace_handler(dir_name: str, worker_name: Optional[str] = None, 
     import socket
     import time
 
+    assert dir_name is not None or use_wandb is True, "tensorboard_trace_handler requires a dir_name or use_wandb = True"
+    dirs = []
+    if dir_name is not None:
+        dirs.append(dir_name)
+    if use_wandb is True:
+        import wandb
+        assert wandb.run is not None, "You need to call wandb.init() prior to using tensorboard_trace_handler"
+        wandb_trace_dir = os.path.join(wandb.run.dir, "pytorch_traces")
+        dirs.append(wandb_trace_dir)
+    assert len(dirs)  # should never be empty
+
     def handler_fn(prof) -> None:
         nonlocal worker_name
-        if not os.path.isdir(dir_name):
-            try:
-                os.makedirs(dir_name, exist_ok=True)
-            except Exception:
-                raise RuntimeError("Can't create directory: " + dir_name)
         if not worker_name:
             worker_name = "{}_{}".format(socket.gethostname(), str(os.getpid()))
         file_name = "{}.{}.pt.trace.json".format(worker_name, int(time.time() * 1000))
         if use_gzip:
             file_name = file_name + '.gz'
-        prof.export_chrome_trace(os.path.join(dir_name, file_name))
+        for dir in dirs:
+            if not os.path.isdir(dir):
+                try:
+                    os.makedirs(dir, exist_ok=True)
+                except Exception:
+                    raise RuntimeError("Can't create directory: " + dir)
+            prof.export_chrome_trace(os.path.join(dir, file_name))
     return handler_fn
 
 
