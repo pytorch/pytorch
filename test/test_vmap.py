@@ -2303,7 +2303,7 @@ class TestVmapBatchedGradient(Namespace.TestVmapBase):
 
     @allowVmapFallbackUsage
     def test_binary_cross_entropy(self, device):
-        x = F.sigmoid(torch.randn(3, 2, device=device, requires_grad=True))
+        x = torch.sigmoid(torch.randn(3, 2, device=device, requires_grad=True))
         target = torch.rand(3, 2, device=device)
 
         op = functools.partial(F.binary_cross_entropy, target=target)

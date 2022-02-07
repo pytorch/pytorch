@@ -116,6 +116,10 @@
 #     These are not CUDA versions, instead, they specify what
 #     classes of NVIDIA hardware we should generate PTX for.
 #
+#   PYTORCH_ROCM_ARCH
+#     specify which AMD GPU targets to build for.
+#     ie `PYTORCH_ROCM_ARCH="gfx900;gfx906"`
+#
 #   ONNX_NAMESPACE
 #     specify a namespace for ONNX built here rather than the hard-coded
 #     one in this file; needed to build with other frameworks that share ONNX.
@@ -202,7 +206,7 @@ if sys.platform == 'win32' and sys.maxsize.bit_length() == 31:
     sys.exit(-1)
 
 import platform
-python_min_version = (3, 6, 2)
+python_min_version = (3, 7, 0)
 python_min_version_str = '.'.join(map(str, python_min_version))
 if sys.version_info < python_min_version:
     print("You are using Python {}. Python >={} is required.".format(platform.python_version(),
@@ -404,7 +408,6 @@ def build_deps():
 # the list of runtime dependencies required by this built package
 install_requires = [
     'typing_extensions',
-    'dataclasses; python_version < "3.7"'
 ]
 
 missing_pydep = '''
@@ -947,6 +950,7 @@ if __name__ == '__main__':
                 'include/ATen/cuda/detail/*.cuh',
                 'include/ATen/cuda/detail/*.h',
                 'include/ATen/cudnn/*.h',
+                'include/ATen/ops/*.h',
                 'include/ATen/hip/*.cuh',
                 'include/ATen/hip/*.h',
                 'include/ATen/hip/detail/*.cuh',
@@ -1024,6 +1028,7 @@ if __name__ == '__main__':
                 'include/torch/csrc/jit/tensorexpr/*.h',
                 'include/torch/csrc/jit/tensorexpr/operators/*.h',
                 'include/torch/csrc/onnx/*.h',
+                'include/torch/csrc/profiler/*.h',
                 'include/torch/csrc/utils/*.h',
                 'include/torch/csrc/tensor/*.h',
                 'include/torch/csrc/lazy/core/*.h',
