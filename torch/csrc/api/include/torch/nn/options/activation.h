@@ -100,7 +100,7 @@ using GLUFuncOptions = GLUOptions;
 ///
 /// Example:
 /// ```
-/// GELU model(GELUOptions(torch::kNone));
+/// GELU model(GELUOptions().approximate("none"));
 /// ```
 struct TORCH_API GELUOptions {
   /// Specifies the approximation to apply to the output.
@@ -116,7 +116,7 @@ namespace functional {
 /// Example:
 /// ```
 /// namespace F = torch::nn::functional;
-/// F::gelu(input, F::GELUFuncOptions(torch::kNone));
+/// F::gelu(input, F::GELUFuncOptions().approximate("none"));
 /// ```
 using GELUFuncOptions = GELUOptions;
 } // namespace functional

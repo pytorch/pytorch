@@ -455,7 +455,7 @@ class TestQuantizedOps(TestCase):
             dqX = qX.dequantize()
 
             op = torch.nn.functional.gelu
-            dqY = op(dqX, approximate)
+            dqY = op(dqX, approximate=approximate)
             qY = torch.quantize_per_tensor(dqY, scale=scale, zero_point=zero_point,
                                            dtype=torch_type)
             qY_hat = op(qX)
