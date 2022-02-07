@@ -16084,6 +16084,7 @@ class TestNNDeviceType(NNTestCase):
                     return exp / s
 
                 pt_res = slow_masked_softmax(input, mask)
+                pt_res = torch.nan_to_num(pt_res)
                 self.assertEqual(pt_res, native_res, exact_dtype=True)
 
     def _test_masked_softmax_helper(self, input, dim, mask):
@@ -16097,8 +16098,11 @@ class TestNNDeviceType(NNTestCase):
         result.backward(grad)
         expected.backward(grad)
 
-        self.assertEqual(result, expected)
-        self.assertEqual(input.grad, input_ref.grad)
+        self.assertEqual(result, torch.nan_to_num(expected))
+        self.assertEqual(input.grad, torch.nan_to_num(input_ref.grad))
+
+        self.assertEqual(result, result.masked_fill(mask_not, 0.0))
+        self.assertEqual(input.grad, input.grad.masked_fill(mask_not, 0.0))
 
     def test_masked_softmax_grad(self, device):
         shapes = [(1, 1, 32), (3, 16, 310), (12, 4, 1024), (4, 2, 1200)]
@@ -16110,7 +16114,6 @@ class TestNNDeviceType(NNTestCase):
                 if (self.device_type == "cuda"):
                     input = input.cuda().detach().requires_grad_()
                     mask = mask.cuda()
-
                 self._test_masked_softmax_helper(input, dim, mask)
 
     # In this test, the forward pass is expected to produce nan's because when dim=0, we only have unspecified values
@@ -16148,6 +16151,7 @@ class TestNNDeviceType(NNTestCase):
             s = exp.sum(dim=dim, keepdim=True).expand(exp.size())
             return exp / s
         pt_res = slow_masked_softmax(input, mask)
+        pt_res = torch.nan_to_num(pt_res)
         self.assertEqual(pt_res, native_res, exact_dtype=True)
 
     # Test fails on Vg20

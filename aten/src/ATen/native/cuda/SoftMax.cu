@@ -964,6 +964,8 @@ Tensor masked_softmax_cuda(const Tensor& input_, int64_t dim, const Tensor& mask
       [&] {
         Tensor mask_not = mask.logical_not();
         output = at::softmax(input.masked_fill(mask_not, -std::numeric_limits<scalar_t>::infinity()), dim);
+        // masked_softmax should return 0 in the output even when falling back to vanilla softmax
+        output = at::nan_to_num(output);
       });
     return output;
   }
@@ -1051,6 +1053,7 @@ Tensor masked_softmax_backward_cuda(
           dim,
           grad_input.scalar_type()
         );
+        grad_input = at::nan_to_num(grad_input);
       });
   } else {
     grad = grad * output;
@@ -1072,7 +1075,7 @@ Tensor masked_softmax_backward_cuda(
         );
       });
   }
-  return at::nan_to_num(grad_input);
+  return grad_input;
 }
 }
 }

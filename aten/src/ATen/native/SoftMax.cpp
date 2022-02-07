@@ -203,7 +203,10 @@ void host_softmax(
           // update output
           for (const auto d : c10::irange(dim_size)) {
             // LogSoftMax and MaskedSoftMax should not both be true
-            if (LogSoftMax) {
+            if (MaskedSoftMax && !mask_data[d * dim_stride]) {
+              output_data[d * dim_stride] = 0;
+            }
+            else if (LogSoftMax) {
               output_data[d * dim_stride] =
                   input_data[d * dim_stride] - max_input - tmpsum;
             } else {
@@ -534,7 +537,7 @@ Tensor masked_softmax_backward_cpu(
             false /* LogSoftMax */,
             true /* MaskedSoftmax */>(grad_input, grad, output, dim, mask.data_ptr<bool>());
       });
-  return at::nan_to_num_(grad_input);
+  return grad_input;
 }
 }
 }
