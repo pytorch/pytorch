@@ -346,7 +346,7 @@ void addmm_out_sparse_csr_native_cpu(const Tensor& sparse, const Tensor& dense, 
   auto values = sparse.values();
 
   scalar_t cast_alpha = alpha.to<scalar_t>();
-  scalar_t cast_beta = beta.to<scalar_t>();
+  r.mul_(beta);
   AT_DISPATCH_INDEX_TYPES(col_indices.scalar_type(), "csr_mm_crow_indices", [&]() {
     auto csr_accessor = csr.accessor<index_t, 1>();
     auto col_indices_accessor = col_indices.accessor<index_t, 1>();
@@ -470,7 +470,7 @@ Tensor& addmm_out_sparse_csr_cpu(
           "Please use PyTorch built with MKL on Linux.");
     }
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(result.layout() == kStrided);
-    AT_DISPATCH_FLOATING_TYPES(result.scalar_type(), "addmm_sparse_dense", [&] {
+    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(result.scalar_type(), "addmm_sparse_dense", [&] {
         addmm_out_sparse_csr_native_cpu<scalar_t>(mat1, mat2, result, alpha, beta);
     });
 #else
