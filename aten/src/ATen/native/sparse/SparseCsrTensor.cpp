@@ -401,7 +401,6 @@ Tensor& eye_sparse_csr_out(int64_t n, int64_t m, Tensor& result) {
   auto options = TensorOptions().device(result.device()).dtype(result.dtype()).layout(kStrided);
 
   Tensor values = at::ones({sz}, options);
-
   Tensor col_indices = at::arange(sz, options);
   Tensor crow_indices = at::full({n + 1}, /*fill_value=*/ sz, options);
   for (const auto i : c10::irange(0, sz)) crow_indices[i] = col_indices[i];

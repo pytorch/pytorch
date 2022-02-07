@@ -22,7 +22,7 @@ from torch.testing._internal.common_cuda import \
     (SM53OrLater, SM80OrLater, CUDA11OrLater)
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, ops, dtypes, dtypesIfCUDA, onlyCPU, onlyCUDA, precisionOverride,
-     deviceCountAtLeast, OpDTypes)
+     deviceCountAtLeast, OpDTypes, skipMeta)
 from torch.testing._internal.common_methods_invocations import \
     (sparse_unary_ufuncs)
 from torch.testing._internal.common_dtype import (
@@ -3403,6 +3403,21 @@ class TestSparse(TestCase):
         test(4, 6, [7, 3, 1, 3, 0], [2, 7, 3, 1, 3, 0])
         test(4, 6, [7, 3, 1, 3, 1, 3], [7, 3, 1, 3, 2, 3])
         test(4, 6, [7, 3, 1, 3, 2, 1], [7, 3, 1, 3, 2, 3])
+
+    @skipMeta
+    @dtypes(*get_all_dtypes(include_bool=False, include_bfloat16=False, include_complex=False))
+    def test_eye(self, device, dtype):
+        for n in (3, 5, 7):
+            sparse_coo_output = torch.eye(n, layout=torch.sparse_coo, device=device, dtype=dtype)
+            dense_output = torch.eye(n, device=device, dtype=dtype)
+            assert sparse_coo_output.is_coalesced()
+            self.assertEqual(sparse_coo_output.to_dense(), dense_output)
+
+        for n, m in itertools.product([3, 5, 7], repeat=2):
+            sparse_coo_output = torch.eye(n, m, layout=torch.sparse_coo, device=device, dtype=dtype)
+            dense_output = torch.eye(n, m, device=device, dtype=dtype)
+            assert sparse_coo_output.is_coalesced()
+            self.assertEqual(sparse_coo_output.to_dense(), dense_output)
 
 
 class TestSparseOneOff(TestCase):
