@@ -16085,7 +16085,13 @@ class TestNNDeviceType(NNTestCase):
 
                 pt_res = slow_masked_softmax(input, mask)
                 pt_res = torch.nan_to_num(pt_res)
-                self.assertEqual(pt_res, native_res, exact_dtype=True)
+
+                mask_not = mask.logical_not()
+                self.assertEqual(
+                    pt_res.masked_fill(mask_not, 0),
+                    native_res.masked_fill(mask_not, 0),
+                    exact_dtype=True
+                )
 
     def _test_masked_softmax_helper(self, input, dim, mask):
         input_ref = input.detach().clone().requires_grad_()
@@ -16098,10 +16104,9 @@ class TestNNDeviceType(NNTestCase):
         result.backward(grad)
         expected.backward(grad)
 
-        self.assertEqual(result, torch.nan_to_num(expected))
-        self.assertEqual(input.grad, torch.nan_to_num(input_ref.grad))
+        self.assertEqual(result.masked_fill(mask_not, 0), expected.masked_fill(mask_not, 0))
 
-        self.assertEqual(result, result.masked_fill(mask_not, 0.0))
+        self.assertEqual(input.grad, torch.nan_to_num(input_ref.grad))
         self.assertEqual(input.grad, input.grad.masked_fill(mask_not, 0.0))
 
     def test_masked_softmax_grad(self, device):
