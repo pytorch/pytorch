@@ -228,13 +228,7 @@ Tensor norm_backward(Tensor grad, const Tensor& self, const optional<Scalar> & p
   }
   // handle case at 0 where we return a subgradient containing 0
   scale_v.masked_fill_(norm == 0, 0);
-  if (norm.is_complex()) {
-    auto complex_view = at::view_as_complex(self_scaled);
-    return complex_view * scale_v;
-  }
-  else {
-    return self_scaled * scale_v;
-  }
+  return self_scaled * scale_v;
 }
 
 Tensor linalg_vector_norm_backward(Tensor grad, const Tensor& self, const Scalar& scalar_ord, Tensor norm, const optional<IntArrayRef>& opt_dim, bool keepdim) {
