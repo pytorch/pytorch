@@ -39,7 +39,6 @@ __global__ void transform_bias_rescale_qkv_kernel(
     PackedTensorAccessor64<scalar_t, 5, RestrictPtrTraits> q_k_v) {
   // warp per DH.
   // so launch B * NH * T warps.
-  auto B = q_k_v.size(1);
   auto NH = q_k_v.size(2);
   auto T = q_k_v.size(3);
   auto DH = q_k_v.size(4);
@@ -49,6 +48,7 @@ __global__ void transform_bias_rescale_qkv_kernel(
 
   auto D = NH * DH;
   constexpr int VEC = 4;
+  const scalar_t sqrt_dim_per_head = std::sqrt(static_cast<scalar_t>(DH));
   using LoadT = memory::aligned_vector<scalar_t, VEC>;
 
   // FIXME: assert ((D % VEC) == 0)
@@ -84,7 +84,7 @@ __global__ void transform_bias_rescale_qkv_kernel(
       qkv_q[ii] = static_cast<scalar_t>(
           (static_cast<accscalar_t>(qkv_q[ii]) +
            static_cast<accscalar_t>(qkv_bias_q[ii])) /
-          static_cast<accscalar_t>(8));
+          static_cast<accscalar_t>(sqrt_dim_per_head));
       qkv_k[ii] = static_cast<scalar_t>(
           (static_cast<accscalar_t>(qkv_k[ii]) +
            static_cast<accscalar_t>(qkv_bias_k[ii])));
@@ -104,13 +104,14 @@ __global__ void transform_bias_rescale_qkv_kernel(
 // compute q = (q + q_bias) / sqrt(dim_per_head), k = k + k_bias, v = v + v_bias
 std::tuple<Tensor, Tensor, Tensor> transform_bias_rescale_qkv(
     const Tensor& qkv,
-    const Tensor& qkv_bias) {
+    const Tensor& qkv_bias,
+    const int64_t num_head) {
   auto B = qkv.size(0);
   auto T = qkv.size(1);
   auto _3D = qkv.size(2);
   auto D = _3D / 3;
-  auto dim_per_head = 64;
-  auto num_head = D / dim_per_head;
+  TORCH_CHECK(D % num_head == 0);
+  const auto dim_per_head = D / num_head;
   auto q_k_v = at::empty({3, B, num_head, T, dim_per_head}, qkv.options());
   AT_DISPATCH_FLOATING_TYPES_AND2(
       ScalarType::Half,
@@ -204,7 +205,6 @@ Tensor transform_0213(const Tensor& a) {
 
 Tensor gemm_nt_bias(const Tensor& a, const Tensor& b, const Tensor& c) {
   auto a_ = a.view({a.size(0) * a.size(1), a.size(2)});
-  // TODO: should be b.transpose(1, 0)?
   auto r_ = at::native::linear(a_, b, c);
   return r_.view({a.size(0), a.size(1), r_.size(1)});
 }
@@ -217,6 +217,7 @@ Tensor multi_head_self_attention_cuda(
     const Tensor& qkv_bias,
     const Tensor& proj_weight,
     const Tensor& proj_bias,
+    const int64_t num_head,
     const c10::optional<Tensor>& mask) {
   // query shape: [B, T, D]
   // qkv_weight shape: [3 * D, D]
@@ -225,7 +226,7 @@ Tensor multi_head_self_attention_cuda(
   auto qkv = gemm_nt(query, qkv_weight);
 
   // shape: 3 x [B, num_head, T, dim_per_head]
-  auto q_k_v = transform_bias_rescale_qkv(qkv, qkv_bias);
+  auto q_k_v = transform_bias_rescale_qkv(qkv, qkv_bias, num_head);
   auto q = std::get<0>(q_k_v);
   auto k = std::get<1>(q_k_v);
   auto v = std::get<2>(q_k_v);
