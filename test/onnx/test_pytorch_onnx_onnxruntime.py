@@ -7688,12 +7688,15 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.tensor([[1, 2, float("inf")], [2, float("nan"), -float("inf")]])
         self.run_test(WithParams(), (x, ))
 
-        class IntModel(torch.nn.Module):
-            def forward(self, x):
-                return x.nan_to_num()
+    @skipIfUnsupportedMinOpsetVersion(9)
+    def test_maximum_minimum(self):
+        class ModelWithNan(torch.nn.Module):
+            def forward(self, x, y):
+                return torch.maximum(x, y), torch.minimum(x, y)
 
-        x = torch.tensor((2, 4), dtype=torch.int)
-        self.run_test(IntModel(), (x, ))
+        x = torch.tensor([-2, -2, float("nan")])
+        y = torch.rand(1, 3)
+        self.run_test(ModelWithNan(), (x, y))
 
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_any(self):

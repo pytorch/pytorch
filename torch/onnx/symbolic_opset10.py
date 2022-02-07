@@ -349,15 +349,16 @@ def nan_to_num(g, input, nan, posinf, neginf):
 
     # For None values of posinf, neginf we use the greatest/lowest finite
     # value representable by input’s dtype.
+    finfo = torch.finfo()
     if posinf is None:
-        posinf = 3.402823e+38
+        posinf = finfo.max
     posinf_cond = logical_and(g, isinf(g, nan_result),
                               gt(g, nan_result, g.op("Constant", value_t=torch.LongTensor([0]))))
     nan_posinf_result = g.op("Where", posinf_cond,
                              g.op("Constant", value_t=torch.FloatTensor([posinf])), nan_result)
 
     if neginf is None:
-        neginf = -3.402823e+38
+        neginf = finfo.min
     neginf_cond = logical_and(g, isinf(g, nan_posinf_result),
                               lt(g, nan_posinf_result, g.op("Constant", value_t=torch.LongTensor([0]))))
     return g.op("Where", neginf_cond,
