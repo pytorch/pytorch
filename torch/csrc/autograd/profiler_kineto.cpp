@@ -349,7 +349,7 @@ struct KinetoThreadLocalState : public ProfilerThreadLocalStateBase {
       if (kineto_event.hasShapes()) {
         activity.addMetadata("Input Dims", torch::profiler::impl::shapesToStr(kineto_event.shapes()));
       }
-      if (kineto_event.hasShapes()) {
+      if (kineto_event.hasInputOpIds()) {
         activity.addMetadata("Input OpIds", torch::profiler::impl::inputOpIdsToStr(kineto_event.input_op_ids()));
       }
       if (kineto_event.hasStack()) {
