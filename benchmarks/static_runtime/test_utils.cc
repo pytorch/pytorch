@@ -6,9 +6,17 @@
 #include <gtest/gtest.h>
 #include <torch/csrc/jit/ir/irparser.h>
 #include <torch/csrc/jit/runtime/graph_executor.h>
+#include <torch/csrc/jit/runtime/graph_iterator.h>
 #include <torch/csrc/jit/runtime/static/impl.h>
 #include <torch/csrc/jit/runtime/static/memory_planner.h>
 #include <torch/csrc/jit/runtime/static/passes.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#else
+#include <ATen/ops/allclose.h>
+#endif
+
 #include <memory>
 #include <unordered_map>
 
@@ -21,6 +29,27 @@ namespace jit {
 namespace test {
 
 namespace {
+
+class GraphExecutorWrapper {
+ public:
+  GraphExecutorWrapper() = default;
+
+  explicit GraphExecutorWrapper(const std::shared_ptr<Graph>& graph)
+      : graph_exec_(graph, "") {}
+
+  c10::IValue operator()(const std::vector<c10::IValue>& args) {
+    Stack stack(args);
+    graph_exec_.run(stack);
+
+    if (stack.size() == 1) {
+      return stack[0];
+    }
+    return c10::ivalue::Tuple::create(stack);
+  }
+
+ private:
+  GraphExecutor graph_exec_;
+};
 
 // Test scripts passed to testStaticRuntime can either be IR or JIT.
 // The logic for running the script and producing a corresponding StaticModule
@@ -48,7 +77,8 @@ class ModuleStaticRuntimeTestContext : public StaticRuntimeTestContext {
   }
 
   StaticModule makeStaticModule(const StaticModuleOptions& opt) const override {
-    return torch::jit::StaticModule(module_, /* is_frozen */ false, opt);
+    return torch::jit::StaticModule(
+        module_, /* is_frozen */ false, opt, /* sample_inputs */ {});
   }
 
  private:
@@ -62,26 +92,20 @@ class GraphStaticRuntimeContext : public StaticRuntimeTestContext {
     std::unordered_map<std::string, Value*> vmap;
     parseIR(source_ir, graph_.get(), vmap);
 
-    graph_exec_ = GraphExecutor(graph_, "");
+    graph_exec_ = GraphExecutorWrapper(graph_);
   }
 
   IValue getExpected(const std::vector<IValue>& args) override {
-    Stack stack(args);
-    graph_exec_.run(stack);
-
-    if (stack.size() == 1) {
-      return stack[0];
-    }
-    return c10::ivalue::Tuple::create(stack);
+    return graph_exec_(args);
   }
 
   StaticModule makeStaticModule(const StaticModuleOptions& opt) const override {
-    return StaticModule(graph_, opt);
+    return StaticModule(graph_, opt, /* sample_inputs */ {});
   }
 
  private:
   std::shared_ptr<Graph> graph_;
-  GraphExecutor graph_exec_;
+  GraphExecutorWrapper graph_exec_;
 };
 
 std::unique_ptr<StaticRuntimeTestContext> makeTestContext(
@@ -197,8 +221,31 @@ Node* getNodeWithKind(const StaticModule& smodule, const std::string& kind) {
   return smodule.findNodeWithKindForTesting(kind);
 }
 
+Node* getNodeWithKind(std::shared_ptr<Graph>& graph, const std::string& kind) {
+  const auto symbol = c10::Symbol::fromQualString(kind);
+  DepthFirstGraphNodeIterator it(graph);
+  for (auto* node = it.next(); node != nullptr; node = it.next()) {
+    if (node->kind() == symbol) {
+      return node;
+    }
+  }
+  return nullptr;
+}
+
 bool hasNodeWithKind(const StaticModule& smodule, const std::string& kind) {
   return getNodeWithKind(smodule, kind) != nullptr;
+}
+
+bool hasNodeWithKind(std::shared_ptr<Graph>& graph, const std::string& kind) {
+  return getNodeWithKind(graph, kind) != nullptr;
+}
+
+std::shared_ptr<Graph> getGraphFromScript(const std::string& jit_script) {
+  script::Module module("module");
+  module.define(jit_script);
+
+  Method method = module.get_method("forward");
+  return module.get_method("forward").graph();
 }
 
 std::shared_ptr<Graph> getGraphFromIR(const std::string& ir) {
@@ -206,6 +253,19 @@ std::shared_ptr<Graph> getGraphFromIR(const std::string& ir) {
   std::unordered_map<std::string, Value*> vmap;
   parseIR(ir, graph.get(), vmap);
   return graph;
+}
+
+void compareResultsWithJIT(
+    StaticRuntime& runtime,
+    const std::shared_ptr<Graph>& graph,
+    const std::vector<c10::IValue>& args,
+    const bool use_allclose,
+    const bool use_equalnan) {
+  GraphExecutorWrapper graph_exec(graph);
+  auto expected = graph_exec(args);
+  auto actual = runtime(args, {});
+  runtime.check_for_memory_leak();
+  compareResults(expected, actual, use_allclose, use_equalnan);
 }
 
 void testStaticRuntime(
@@ -238,7 +298,6 @@ void testStaticRuntime(
       // 2nd run: exercise memory planner and resizing with args2
       // 3rd run: run with args again
       StaticModuleOptions opts{
-          .cleanup_activations = true,
           .enable_out_variant = enable_out_variant,
           .optimize_memory = enable_out_variant,
           .manage_output_tensors = manage_output_tensors};
@@ -288,9 +347,7 @@ void testStaticRuntime(
         size_t new_managed_bytes =
             memory_planner ? memory_planner->total_managed() : 0;
         if (check_resize && new_managed_bytes > 0) {
-          VLOG(1) << "managed_bytes: " << managed_bytes
-                  << ", new_managed_bytes: " << new_managed_bytes;
-          EXPECT_TRUE(new_managed_bytes > managed_bytes);
+          EXPECT_GT(new_managed_bytes, managed_bytes);
         }
 
         // Run static runtime again with an input of the shape observed during

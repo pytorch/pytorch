@@ -3,7 +3,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from typing import Optional, Dict, Any
 from torch.nn.common_types import _size_1_t
-from .utils import _quantize_and_dequantize_weight
+from .utils import _quantize_weight, _quantize_and_dequantize_weight
 from .utils import _save_weight_qparams
 from .utils import _get_weight_qparam_keys
 
@@ -42,7 +42,7 @@ class _ConvNd(torch.nn.modules.conv._ConvNd):
         self.weight_qscheme = weight_qparams["qscheme"]
         self.weight_dtype = weight_qparams["dtype"]
         assert self.weight_qscheme in [None, torch.per_tensor_affine, torch.per_channel_affine], \
-            Exception(f"qscheme: {self.weight_qscheme} is not support in reference quantized linear module")
+            Exception(f"qscheme: {self.weight_qscheme} is not support in reference quantized conv module")
         if self.weight_qscheme is not None:
             self.register_buffer(
                 "weight_scale",
@@ -73,6 +73,15 @@ class _ConvNd(torch.nn.modules.conv._ConvNd):
         return _quantize_and_dequantize_weight(
             self.weight, self.weight_qscheme,
             self.weight_dtype, self.weight_scale, self.weight_zero_point, self.weight_axis)
+
+    def get_quantized_weight(self):
+        # suppress mypy warning
+        assert isinstance(self.weight_scale, torch.Tensor)
+        assert isinstance(self.weight_zero_point, torch.Tensor)
+        assert isinstance(self.weight_axis, torch.Tensor)
+        return _quantize_weight(
+            self.weight, self.weight_qscheme, self.weight_dtype, self.weight_scale,
+            self.weight_zero_point, self.weight_axis)
 
     @staticmethod
     def from_float(cls, float_conv, weight_qparams):

@@ -150,9 +150,9 @@ struct InitLockAcquire {
 
 struct __attribute__((visibility("hidden"))) ConcreteInterpreterImpl
     : public torch::deploy::InterpreterImpl {
-  ConcreteInterpreterImpl() {
+  explicit ConcreteInterpreterImpl(
+      const std::vector<std::string>& extra_python_paths) {
     BuiltinRegistry::runPreInitialization();
-
     PyPreConfig preconfig;
     PyPreConfig_InitIsolatedConfig(&preconfig);
     PyStatus status = Py_PreInitialize(&preconfig);
@@ -182,7 +182,12 @@ struct __attribute__((visibility("hidden"))) ConcreteInterpreterImpl
     status = Py_InitializeFromConfig(&config);
     PyConfig_Clear(&config);
     TORCH_INTERNAL_ASSERT(!PyStatus_Exception(status))
-
+#ifdef FBCODE_CAFFE2
+    auto sys_path = global_impl("sys", "path");
+    for (const auto& entry : extra_python_paths) {
+      sys_path.attr("insert")(0, entry);
+    }
+#endif
     BuiltinRegistry::runPostInitialization();
 
     int r = PyRun_SimpleString(start);
@@ -293,9 +298,8 @@ struct __attribute__((visibility("hidden"))) ConcreteInterpreterSessionImpl
 
     py::tuple storages(obj.storages_.size());
     for (size_t i = 0, N = obj.storages_.size(); i < N; ++i) {
-      py::object new_storage =
-          py::reinterpret_steal<py::object>(torch::createPyObject(
-              obj.storages_[i], scalarTypeToTypeMeta(obj.types_[i])));
+      py::object new_storage = py::reinterpret_steal<py::object>(
+          torch::createPyObject(obj.storages_[i]));
       storages[i] = std::move(new_storage);
     }
     py::tuple dtypes(obj.types_.size());
@@ -402,6 +406,6 @@ torch::deploy::InterpreterSessionImpl* ConcreteInterpreterImpl::
 
 extern "C" __attribute__((visibility("default")))
 torch::deploy::InterpreterImpl*
-newInterpreterImpl(void) {
-  return new ConcreteInterpreterImpl();
+newInterpreterImpl(const std::vector<std::string>& extra_python_paths) {
+  return new ConcreteInterpreterImpl(extra_python_paths);
 }

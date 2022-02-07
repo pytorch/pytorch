@@ -4,13 +4,13 @@
 #include <c10/core/ScalarType.h>
 #include <c10/util/Exception.h>
 #include <torch/csrc/autograd/grad_mode.h>
+#include <torch/csrc/jit/mobile/compatibility/runtime_compatibility.h>
 #include <torch/csrc/jit/mobile/model_tracer/KernelDTypeTracer.h>
 #include <torch/csrc/jit/mobile/model_tracer/MobileModelRunner.h>
 #include <torch/csrc/jit/mobile/model_tracer/OperatorCallTracer.h>
 #include <torch/csrc/jit/mobile/model_tracer/TensorUtils.h>
 #include <torch/csrc/jit/mobile/model_tracer/TracerRunner.h>
 #include <torch/csrc/jit/mobile/parse_operators.h>
-#include <torch/csrc/jit/mobile/runtime_compatibility.h>
 #include <torch/csrc/jit/runtime/operator.h>
 #include <torch/script.h>
 
@@ -159,7 +159,14 @@ void recordCustomClassesFromOpSchemas(
     if (type_name.find("__torch__") != std::string::npos) {
       // The name of a customClassType here is its fully qualified name, but
       // in registration only the class name is used so only record that
-      loaded_classes.insert(type_name.substr(type_name.find_last_of('.') + 1));
+      auto class_name = type_name.substr(type_name.find_last_of('.') + 1);
+      // Function schemas can include other type indicators such as [] so we
+      // need to trim to just alphanumeric + '_' characters as well
+      class_name = class_name.substr(
+          0,
+          class_name.find_first_not_of(
+              "aAbBcCdDeEfFgGhHiIjJkKlLmMnNoOpPqQrRsStTuUvVwWxXyYzZ_1234567890"));
+      loaded_classes.insert(class_name);
     }
   };
 
