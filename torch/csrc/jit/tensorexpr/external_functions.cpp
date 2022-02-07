@@ -407,6 +407,9 @@ void nnc_aten_quantized_conv2d_out(
   auto r = convPackedParams->apply(tensors[1], out_qscale, out_qzero);
   buf_data[0] = r.data_ptr();
   c10::raw::intrusive_ptr::incref(r.getIntrusivePtr().get());
+  void* ptr_to_free =
+      r.unsafeGetTensorImpl()->storage().data_ptr().get_context();
+  buf_data[bufs_num] = ptr_to_free;
 }
 
 void nnc_aten_quantized_conv2d_relu(

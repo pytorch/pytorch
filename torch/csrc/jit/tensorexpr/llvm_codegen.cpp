@@ -213,6 +213,7 @@ class LLVMCodeGenImpl : public IRVisitor {
   std::unordered_map<VarPtr, int> varToArg_;
   std::unordered_map<VarPtr, llvm::Value*> varToVal_;
   std::unordered_set<BufPtr> bufsExtAlloc_;
+  std::unordered_map<VarPtr, llvm::Value*> bufsExtToFreeVal_;
   std::unordered_multimap<BufPtr, BufPtr> bufsExtAllocReuse_;
   std::unordered_map<BlockPtr, std::vector<VarPtr>> scopeToVar_;
   BlockPtr scope_;
@@ -2068,7 +2069,8 @@ void LLVMCodeGenImpl::visit(ExternalCall2Ptr v) {
   }
 
   llvm::Value* buf_ptrs = irb_.CreateAlloca(
-      Int8PtrTy_, llvm::ConstantInt::getSigned(IntTy_, bufs_num));
+      Int8PtrTy_,
+      llvm::ConstantInt::getSigned(IntTy_, bufs_num + bufs_out.size()));
   llvm::Value* buf_ranks = irb_.CreateAlloca(
       LongTy_, llvm::ConstantInt::getSigned(IntTy_, bufs_num));
   llvm::Value* buf_dims = irb_.CreateAlloca(
@@ -2191,6 +2193,14 @@ void LLVMCodeGenImpl::visit(ExternalCall2Ptr v) {
       handleBufReuse(buf, buf_out);
     }
     bufsExtAllocReuse_.erase(buf_out);
+
+    gep = irb_.CreateInBoundsGEP(
+        Int8PtrTy_,
+        buf_ptrs,
+        llvm::ConstantInt::getSigned(IntTy_, bufs_num + i));
+    llvm::Value* free_val = irb_.CreatePointerCast(
+        irb_.CreateLoad(Int8PtrTy_, gep), dtypeToLLVMPtr(buf_out->dtype()));
+    bufsExtToFreeVal_[buf_out->base_handle()] = free_val;
   }
 
   value_ = llvm::ConstantInt::get(IntTy_, 0);
@@ -2242,6 +2252,13 @@ void LLVMCodeGenImpl::visit(PlacementAllocatePtr v) {
 
 void LLVMCodeGenImpl::visit(FreePtr v) {
   value_ = llvm::ConstantInt::get(IntTy_, 0);
+
+  if (bufsExtToFreeVal_.count(v->buffer_var())) {
+    llvm::Value* extPtr = bufsExtToFreeVal_.at(v->buffer_var());
+    irb_.Insert(llvm::CallInst::CreateFree(extPtr, irb_.GetInsertBlock()));
+    return;
+  }
+
   llvm::Value* ptr = varToVal_.at(v->buffer_var());
   if (!llvm::isa<llvm::AllocaInst>(ptr)) {
     irb_.Insert(llvm::CallInst::CreateFree(ptr, irb_.GetInsertBlock()));
