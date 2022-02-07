@@ -7679,7 +7679,9 @@ class TestONNXRuntime(unittest.TestCase):
                 return x.nan_to_num()
 
         x = torch.tensor([[1, 2, float("inf")], [2, float("nan"), -float("inf")]])
+        x1 = torch.ones((2, 4), dtype=torch.int)
         self.run_test(NoParams(), (x, ))
+        self.run_test(NoParams(), (x1, ))
 
         class WithParams(torch.nn.Module):
             def forward(self, x):
