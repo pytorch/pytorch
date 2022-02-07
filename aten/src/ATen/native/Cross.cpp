@@ -16,16 +16,6 @@ TORCH_PRECOMPUTE_META_FUNC(linalg_cross)
   auto device1 = input.device().type();
   auto device2 = other.device().type();
 
-  if (out.defined()) {
-    TORCH_CHECK(!out.is_cuda() || out.get_device() == input.get_device(),
-                "device of out(", input.get_device(), ") must match device of input(", other.get_device(), ")");
-  }
-
-  TORCH_CHECK(!input.is_cuda() || input.get_device() == other.get_device(),
-              "device of input (", input.get_device(), ") must match device of other (", other.get_device(), ")");
-  TORCH_CHECK(input.dim() == other.dim(), "inconsistent tensors dimensions input: ", input.dim(), " other: ", other.dim());
-  TORCH_CHECK(input.sizes() == other.sizes(), "inconsistent tensors sizes input: ", input.sizes(), " other: ", other.sizes());
-
   auto out_size = infer_size(input.sizes(), other.sizes());
   Tensor input_broadcasted = input.expand(out_size);
   Tensor other_broadcasted = other.expand(out_size);
