@@ -1,7 +1,7 @@
 #pragma once
 
 #ifdef TORCH_ENABLE_LLVM
-#include <torch/csrc/WindowsTorchApiMacro.h>
+#include <torch/csrc/Export.h>
 
 #include <torch/csrc/jit/tensorexpr/codegen.h>
 #include <torch/csrc/jit/tensorexpr/ir.h>

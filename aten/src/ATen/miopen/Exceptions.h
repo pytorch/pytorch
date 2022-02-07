@@ -5,8 +5,6 @@
 #include <stdexcept>
 #include <sstream>
 
-struct THCState;
-
 namespace at { namespace native {
 
 class miopen_exception : public std::runtime_error {

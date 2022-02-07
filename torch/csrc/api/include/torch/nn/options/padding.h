@@ -3,7 +3,7 @@
 #include <c10/util/variant.h>
 #include <torch/arg.h>
 #include <torch/enum.h>
-#include <torch/csrc/WindowsTorchApiMacro.h>
+#include <torch/csrc/Export.h>
 #include <torch/expanding_array.h>
 #include <torch/types.h>
 
