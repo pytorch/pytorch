@@ -26,103 +26,82 @@ from torch._C import parse_schema
 # ]
 #
 # NB: function name DOES NOT include overload name!
-ALLOW_LIST = [
-    ("c10_experimental", datetime.date(2222, 1, 1)),
-    # Internal
-    ("static", datetime.date(9999, 1, 1)),
-    ("prim::ModuleDictIndex", datetime.date(9999, 1, 1)),
-    ("prim::MKLDNNRelu6", datetime.date(9999, 1, 1)),
-    ("prim::MKLDNNRelu6_", datetime.date(9999, 1, 1)),
-    ("prim::Concat", datetime.date(9999, 1, 1)),
-    # Internal, profiler-specific ops
-    ("profiler::_call_end_callbacks_on_jit_fut*", datetime.date(9999, 1, 1)),
-    ("profiler::_record_function_enter", datetime.date(9999, 1, 1)),
-    ("aten::linalg_matrix_rank", datetime.date(2021, 10, 30)),
-    ("aten::linalg_pinv", datetime.date(2021, 10, 30)),
-    ("aten::_cholesky_helper", datetime.date(9999, 1, 1)),
-    ("aten::_lstsq_helper", datetime.date(9999, 1, 1)),
-    ("aten::_syevd_helper", datetime.date(9999, 1, 1)),
-    ("aten::_linalg_solve_out_helper_", datetime.date(9999, 1, 1)),
-    ("aten::select_backward", datetime.date(9999, 1, 1)),
-    ("aten::slice_backward", datetime.date(9999, 1, 1)),
-    ("aten::diagonal_backward", datetime.date(9999, 1, 1)),
-    ("aten::rowwise_prune", datetime.date(9999, 1, 1)),
-    ("aten::adaptive_avg_pool3d_backward", datetime.date(9999, 1, 1)),
-    ("aten::_embedding_bag_dense_backward", datetime.date(9999, 1, 1)),
-    ("aten::randperm", datetime.date(9999, 1, 1)),
-    ("aten::_conv_depthwise2d_backward", datetime.date(2022, 1, 31)),
-    ("aten::conv_depthwise3d_backward", datetime.date(2022, 1, 31)),
-    ("aten::cudnn_convolution.deprecated", datetime.date(2022, 1, 31)),
-    ("aten::cudnn_convolution.deprecated2", datetime.date(2022, 1, 31)),
-    ("aten::cudnn_convolution_transpose.deprecated", datetime.date(2022, 1, 31)),
-    ("aten::cudnn_convolution_transpose.deprecated2", datetime.date(2022, 1, 31)),
-    ("aten::cudnn_convolution_backward", datetime.date(2022, 1, 31)),
-    ("aten::cudnn_convolution_backward_input", datetime.date(2022, 1, 31)),
-    ("aten::cudnn_convolution_backward_weight", datetime.date(2022, 1, 31)),
-    ("aten::cudnn_convolution_transpose_backward", datetime.date(2022, 1, 31)),
-    ("aten::cudnn_convolution_transpose_backward_input", datetime.date(2022, 1, 31)),
-    ("aten::cudnn_convolution_transpose_backward_weight", datetime.date(2022, 1, 31)),
-    ("aten::mkldnn_convolution_backward", datetime.date(2022, 1, 31)),
-    ("aten::mkldnn_convolution_backward_input", datetime.date(2022, 1, 31)),
-    ("aten::mkldnn_convolution_backward_weights", datetime.date(2022, 1, 31)),
-    ("aten::_nnpack_spatial_convolution_backward", datetime.date(2022, 1, 31)),
-    ("aten::_nnpack_spatial_convolution_backward_input", datetime.date(2022, 1, 31)),
-    ("aten::_nnpack_spatial_convolution_backward_weight", datetime.date(2022, 1, 31)),
-    ("aten::_slow_conv2d_forward", datetime.date(2022, 1, 31)),
-    ("aten::_slow_conv2d_backward", datetime.date(2022, 1, 31)),
-    ("aten::slow_conv3d_forward", datetime.date(2022, 1, 31)),
-    ("aten::slow_conv3d_backward", datetime.date(2022, 1, 31)),
-    ("aten::slow_conv_dilated2d_backward", datetime.date(2022, 1, 31)),
-    ("aten::slow_conv_dilated3d_backward", datetime.date(2022, 1, 31)),
-    ("aten::slow_conv_transpose2d", datetime.date(2022, 1, 31)),
-    ("aten::slow_conv_transpose2d_backward", datetime.date(2022, 1, 31)),
-    ("aten::slow_conv_transpose3d", datetime.date(2022, 1, 31)),
-    ("aten::slow_conv_transpose3d_backward", datetime.date(2022, 1, 31)),
+ALLOW_LIST_WITH_DEADLINE = [
     ("aten::_svd_helper", datetime.date(2022, 3, 31)),
     ("aten::linalg_svdvals", datetime.date(2022, 3, 31)),
     ("aten::linalg_svdvals_out", datetime.date(2022, 3, 31)),
     ("aten::linalg_svd", datetime.date(2022, 3, 31)),
     ("aten::linalg_svd_out", datetime.date(2022, 3, 31)),
     ("aten::_max_pool1d_cpu_forward", datetime.date(2022, 2, 8)),
-    ("aten::_convolution_nogroup", datetime.date(9999, 1, 1)),
     ("aten::linspace", datetime.date(2022, 3, 1)),  # TODO this will be removed soon
     ("aten::logspace", datetime.date(2022, 3, 1)),  # TODO this will be removed soon
-    ("aten::miopen_convolution_backward", datetime.date(9999, 1, 1)),
-    ("aten::miopen_convolution_backward_bias", datetime.date(9999, 1, 1)),
-    ("aten::miopen_convolution_backward_input", datetime.date(9999, 1, 1)),
-    ("aten::miopen_convolution_backward_weight", datetime.date(9999, 1, 1)),
-    ("aten::miopen_convolution_transpose_backward", datetime.date(9999, 1, 1)),
-    ("aten::miopen_convolution_transpose_backward_input", datetime.date(9999, 1, 1)),
-    ("aten::miopen_convolution_transpose_backward_weight", datetime.date(9999, 1, 1)),
-    ("aten::miopen_depthwise_convolution_backward", datetime.date(9999, 1, 1)),
-    ("aten::miopen_depthwise_convolution_backward_input", datetime.date(9999, 1, 1)),
-    ("aten::miopen_depthwise_convolution_backward_weight", datetime.date(9999, 1, 1)),
-    ("caffe2::", datetime.date(2021, 10, 23)),
-    ("prepacked::unpack_prepacked_sizes_conv2d", datetime.date(9999, 1, 1)),
-    ("prepacked::unpack_prepacked_sizes_linear", datetime.date(9999, 1, 1)),
-    ("q::_FloatToBfloat16Quantized", datetime.date(2021, 12, 21)),
-    ("q::_Bfloat16QuantizedToFloat", datetime.date(2021, 12, 21)),
-    ("aten::_inverse_helper", datetime.date(2021, 12, 31)),
-    ("aten::softplus_backward", datetime.date(2022, 1, 31)),
-    ("aten::softplus_backward.grad_input", datetime.date(2022, 1, 31)),
     ("aten::quantile", datetime.date(2022, 9, 30)),
     ("aten::nanquantile", datetime.date(2022, 9, 30)),
     ("aten::_convolution_double_backward", datetime.date(2022, 3, 31)),
-    ("aten::_scatter_reduce", datetime.date(2022, 1, 31)),
-    ("aten::native_multi_head_self_attention", datetime.date(9999, 1, 1)),
-    ("aten::_native_multi_head_self_attention", datetime.date(9999, 1, 1)),
 ]
 
-ALLOW_LIST_COMPILED = [
-    (
-        re.compile(item[0]),
-        item[1],
-        re.compile(item[2]) if len(item) > 2 else None,
-    ) for item in ALLOW_LIST if item[1] >= datetime.date.today()
+MAX_ALLOWED_PERIOD = datetime.timedelta(days=365)
+
+# WARNING: The operators that are included in this list is extremely unsafe
+# because they would bypass all BC/FC checks for indefinite amount of time.
+# This could cause many severe production issues. Please proceed with extreme caution,
+# if you must add an entry to this list.
+ALLOW_LIST_WITHOUT_DEADLINE = [
+    "c10_experimental",
+    "static",
+    "prim::ModuleDictIndex",
+    "prim::MKLDNNRelu6",
+    "prim::MKLDNNRelu6_",
+    "prim::Concat",
+    # Internal, profiler-specific ops
+    "profiler::_call_end_callbacks_on_jit_fut*",
+    "profiler::_record_function_enter",
+    "aten::_cholesky_helper",
+    "aten::_lstsq_helper",
+    "aten::_syevd_helper",
+    "aten::_linalg_solve_out_helper_",
+    "aten::select_backward",
+    "aten::slice_backward",
+    "aten::diagonal_backward",
+    "aten::rowwise_prune",
+    "aten::adaptive_avg_pool3d_backward",
+    "aten::_embedding_bag_dense_backward",
+    "aten::randperm",
+    "aten::_convolution_nogroup",
+    "aten::miopen_convolution_backward",
+    "aten::miopen_convolution_backward_bias",
+    "aten::miopen_convolution_backward_input",
+    "aten::miopen_convolution_backward_weight",
+    "aten::miopen_convolution_transpose_backward",
+    "aten::miopen_convolution_transpose_backward_input",
+    "aten::miopen_convolution_transpose_backward_weight",
+    "aten::miopen_depthwise_convolution_backward",
+    "aten::miopen_depthwise_convolution_backward_input",
+    "aten::miopen_depthwise_convolution_backward_weight",
+    "prepacked::unpack_prepacked_sizes_conv2d",
+    "prepacked::unpack_prepacked_sizes_linear",
+    "aten::native_multi_head_self_attention",
+    "aten::_native_multi_head_self_attention",
 ]
 
-def allow_listed(schema):
-    for item in ALLOW_LIST_COMPILED:
+def compile_allow_list_with_deadline():
+    output = []
+    for item in ALLOW_LIST_WITH_DEADLINE:
+        deadline = item[1]
+        today = datetime.date.today()
+        if deadline > today and deadline - today < MAX_ALLOWED_PERIOD:
+            output.append((re.compile(item[0]), deadline, re.compile(item[2]) if len(item) > 2 else None))
+        if deadline - today >= MAX_ALLOWED_PERIOD:
+            print("{} will be BC broken for too long. We only allow {} days"
+                  " for the BC breaking window".format(item[0], MAX_ALLOWED_PERIOD.days))
+            sys.exit(1)
+
+    return output
+
+ALLOW_LIST_COMPILED_WITH_DEADLINE = compile_allow_list_with_deadline()
+
+def allow_listed_with_deadline(schema):
+    for item in ALLOW_LIST_COMPILED_WITH_DEADLINE:
         if item[0].search(str(schema)):
             if len(item) > 2 and item[2] is not None:
                 # if arguments regex is present, use it
@@ -130,6 +109,11 @@ def allow_listed(schema):
             return True
     return False
 
+def allow_listed_without_deadline(schema):
+    for item in ALLOW_LIST_WITHOUT_DEADLINE:
+        if re.compile(item).search(str(schema)):
+            return True
+    return False
 
 # The nightly will fail to parse newly added syntax to schema declarations
 # Add new schemas that will fail the nightly here
@@ -162,8 +146,11 @@ def check_bc(existing_schemas):
     is_bc = True
     broken_ops = []
     for existing_schema in existing_schemas:
-        if allow_listed(existing_schema):
+        if allow_listed_with_deadline(existing_schema):
             print("schema: ", str(existing_schema), " found on allowlist, skipping")
+            continue
+        if allow_listed_without_deadline(existing_schema):
+            print("schema: {} is found in forever BC breaking list. This is very dangerous".format(str(existing_schema)))
             continue
         print("processing existing schema: ", str(existing_schema))
         matching_new_schemas = new_schema_dict.get(existing_schema.name, [])
@@ -199,7 +186,7 @@ def check_fc(existing_schemas):
     is_fc = True
     broken_ops = []
     for existing_schema in existing_schemas:
-        if allow_listed(existing_schema):
+        if allow_listed_with_deadline(existing_schema):
             print("schema: ", str(existing_schema), " found on allowlist, skipping")
             continue
         print("processing existing schema: ", str(existing_schema))
@@ -232,7 +219,7 @@ def check_fc(existing_schemas):
     if is_fc:
         print("Found forward compatible schemas for all existing schemas")
     else:
-        warnings.warn(
+        print(
             "The PR is introducing a potentially forward incompatible changes to the "
             "operator library. Please contact PyTorch team to confirm "
             "whether this change is wanted or not. \n\nBroken ops: "
