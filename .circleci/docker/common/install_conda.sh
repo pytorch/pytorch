@@ -113,7 +113,7 @@ if [ -n "$ANACONDA_PYTHON_VERSION" ]; then
   as_jenkins pip install --progress-bar off pytest \
     scipy==1.1.0 \
     scikit-image \
-    librosa>=0.6.2 \
+    "librosa>=0.6.2,<0.9.0" \
     psutil \
     numba \
     llvmlite \
