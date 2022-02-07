@@ -3,7 +3,7 @@ import torch
 
 import torch.nn as nn
 import torch.nn.intrinsic as nni
-from torch.nn.quantized.modules.utils import _quantize_weight, hide_packed_params_repr
+from torch.nn.quantized.modules.utils import _quantize_weight, hide_packed_params_repr, ReferenceableQuantizedModule
 from typing import Optional
 
 class LinearPackedParams(torch.nn.Module):
@@ -108,7 +108,7 @@ class LinearPackedParams(torch.nn.Module):
         return self._weight_bias().__repr__()
 
 
-class Linear(torch.nn.Module):
+class Linear(ReferenceableQuantizedModule):
     r"""
     A quantized linear module with quantized tensor as inputs and outputs.
     We adopt the same interface as `torch.nn.Linear`, please see

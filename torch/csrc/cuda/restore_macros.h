@@ -1,3 +1,4 @@
+#include <torch/csrc/THConcat.h>
 
 #define THWTensor                    TH_CONCAT_3(TH,Real,Tensor)
 #define THWTensor_(NAME)             TH_CONCAT_4(TH,Real,Tensor_,NAME)

@@ -71,10 +71,11 @@ TEST(ITensorListTest, CtorUnboxedIndirect_IsUnboxed) {
   auto check_is_unboxed = [](at::ITensorList list) {
     EXPECT_TRUE(list.isUnboxed());
   };
-  check_is_unboxed(vec[0]);
-  check_is_unboxed({vec.data(), vec.size()});
-  check_is_unboxed({&*vec.begin(), &*vec.end()});
+  check_is_unboxed(at::ITensorList{vec[0]});
+  check_is_unboxed(at::ITensorList{vec.data(), vec.size()});
+  check_is_unboxed(at::ITensorList{&*vec.begin(), &*vec.end()});
   check_is_unboxed(vec);
+  check_is_unboxed({vec[0], vec[1], vec[2]});
 }
 
 TEST(ITensorListTest, CtorTemp_IsUnboxed) {
@@ -122,10 +123,14 @@ TEST(ITensorListTest, Unboxed_Equal) {
 
 TEST(ITensorListTest, UnboxedIndirect_Equal) {
   auto vec = get_tensor_vector();
-  check_elements_same(vec[0], std::vector<at::Tensor>{vec[0]});
-  check_elements_same({vec.data(), vec.size()}, vec);
-  check_elements_same({&*vec.begin(), &*vec.end()}, vec);
+  // Explicit constructors
+  check_elements_same(at::ITensorList{vec[0]}, std::vector<at::Tensor>{vec[0]});
+  check_elements_same(at::ITensorList{vec.data(), vec.size()}, vec);
+  check_elements_same(at::ITensorList{&*vec.begin(), &*vec.end()}, vec);
+  // Vector constructor
   check_elements_same(vec, vec);
+  // InitializerList constructor
+  check_elements_same({vec[0], vec[1], vec[2]}, std::vector<at::Tensor>{vec[0], vec[1], vec[2]});
 }
 
 TEST(ITensorListIteratorTest, CtorEmpty_ThrowsError) {

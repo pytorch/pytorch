@@ -3,6 +3,7 @@
 
 #include <ATen/ATen.h>
 #include <ATen/core/Vitals.h>
+#include <c10/util/irange.h>
 #include <cstdlib>
 
 using namespace at::vitals;
@@ -62,7 +63,7 @@ TEST(Vitals, MultiString) {
 }
 
 TEST(Vitals, OnAndOff) {
-  for (auto i = 0; i < 2; ++i) {
+  for (const auto i : c10::irange(2)) {
     std::stringstream buffer;
 
     std::streambuf* sbuf = std::cout.rdbuf();

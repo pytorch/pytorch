@@ -301,7 +301,7 @@ at::Tensor PackedLinearWeightsQnnp::apply_dynamic_impl(
     auto* qnnp_w_data = qnnp_weight.data_ptr<c10::quint8>();
     int8_t* w_data = (int8_t*)weight_contig.data_ptr<c10::qint8>();
     auto wt_numel = weight_contig.numel();
-    for (int i = 0; i < wt_numel; ++i) {
+    for (const auto i : c10::irange(wt_numel)) {
       qnnp_w_data[i] = static_cast<c10::quint8>(w_data[i] + 128);
     }
 

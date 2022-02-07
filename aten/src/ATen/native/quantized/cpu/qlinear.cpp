@@ -29,6 +29,11 @@ at::Tensor& PackedLinearWeight::apply_impl(
   // a fallback path and rather fail loudly if we cannot run FBGEMM.
   TORCH_CHECK(
       fbgemm::fbgemmSupportedCPU(), "Your CPU does not support FBGEMM.");
+  TORCH_CHECK(input.scalar_type() == c10::kQUInt8,
+                "Expected input data type ",
+                toString(c10::kQUInt8),
+                " but got ",
+                toString(input.scalar_type()));
 
   // TODO: contiguous is called for further jit optimizations.
   auto input_contig = input.expect_contiguous();
@@ -273,6 +278,12 @@ at::Tensor PackedLinearWeightsQnnp::apply_impl(
   TORCH_CHECK(
       input.dim() >= 2,
       "quantized::linear(): Input tensor rank should be >= 2");
+  TORCH_CHECK(input.scalar_type() == c10::kQUInt8,
+                "quantized::linear (qnnpack): Expected input data type ",
+                toString(c10::kQUInt8),
+                " but got ",
+                toString(input.scalar_type()));
+
   auto input_contig = input.contiguous();
 
   // Weight packing is not thread safe
@@ -303,7 +314,7 @@ at::Tensor PackedLinearWeightsQnnp::apply_impl(
         w_zero_points[0]);
     auto* qnnp_w_data = qnnp_weight.data_ptr<c10::quint8>();
     auto wt_numel = weight_contig.numel();
-    for (int i = 0; i < wt_numel; ++i) {
+    for (const auto i : c10::irange(wt_numel)) {
       qnnp_w_data[i] = static_cast<c10::quint8>(w_data[i] + 128);
     }
     // Original bias was float, so we requantize it here.
@@ -368,12 +379,12 @@ at::Tensor PackedLinearWeightsQnnp::apply_impl(
 
   auto output_min = ReluFused
       // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
-      ? activationLimits(output_scale, output_zero_point, Activation::RELU)
+      ? activationLimits<uint8_t>(output_scale, output_zero_point, Activation::RELU)
             .first
       : std::numeric_limits<uint8_t>::min();
   auto output_max = ReluFused
       // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
-      ? activationLimits(output_scale, output_zero_point, Activation::RELU)
+      ? activationLimits<uint8_t>(output_scale, output_zero_point, Activation::RELU)
             .second
       : std::numeric_limits<uint8_t>::max();
   TORCH_INTERNAL_ASSERT(packB != nullptr, "Packed Weights are NULL");

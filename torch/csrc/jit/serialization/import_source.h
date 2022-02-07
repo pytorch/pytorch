@@ -2,6 +2,7 @@
 
 #include <ATen/core/ivalue_inl.h>
 #include <ATen/core/qualified_name.h>
+#include <c10/util/Optional.h>
 #include <torch/csrc/jit/api/module.h>
 #include <torch/csrc/jit/frontend/parser.h>
 #include <torch/csrc/jit/frontend/resolver.h>
@@ -66,6 +67,7 @@ struct SourceImporterImpl : public Resolver,
   std::shared_ptr<CompilationUnit> cu_;
   std::unordered_map<std::string, std::shared_ptr<SugaredValue>> env_;
   SourceLoader source_loader_;
+  c10::optional<size_t> version_ = c10::nullopt;
   std::unordered_set<std::string> loaded_sources_;
   // named types and functions loaded from a file but not yet defined because
   // their type has not been requested yet.

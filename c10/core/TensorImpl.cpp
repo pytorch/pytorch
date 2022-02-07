@@ -5,6 +5,7 @@
 #include <c10/core/WrapDimMinimal.h>
 #include <c10/core/impl/LocalDispatchKeySet.h>
 #include <c10/util/Optional.h>
+#include <c10/util/irange.h>
 
 C10_DEFINE_bool(
     caffe2_keep_on_shrink,
@@ -102,6 +103,9 @@ void TensorImpl::_set_fw_grad(
     autograd_meta_ = impl::GetAutogradMetaFactory()->make();
   autograd_meta_->set_fw_grad(new_grad, self, level, is_inplace_op);
 }
+
+// some compiler does not generate the destructor correctly
+TensorImpl::~TensorImpl() = default;
 
 TensorImpl::TensorImpl(
     Storage&& storage,
@@ -335,7 +339,7 @@ bool TensorImpl::compute_non_overlapping_and_dense() const {
   }
   SmallVector<int64_t, 5> perm;
   perm.resize(dim());
-  for (int64_t i = 0; i < dim(); i++) {
+  for (const auto i : c10::irange(dim())) {
     perm[i] = i;
   }
   // Sort by strides, leaving 0 and 1 sized dims at the end of the array
@@ -349,7 +353,7 @@ bool TensorImpl::compute_non_overlapping_and_dense() const {
         sizes_and_strides_.stride_at_unchecked(b);
   });
   auto require_stride = 1;
-  for (int64_t i = 0; i < dim(); i++) {
+  for (const auto i : c10::irange(dim())) {
     const auto size_perm_i = sizes_and_strides_.size_at_unchecked(perm[i]);
     if (size_perm_i < 2) {
       return true;
@@ -496,14 +500,15 @@ c10::AutogradMetaInterface* TensorImpl::autograd_meta() const {
   return autograd_meta_.get();
 }
 
-c10::intrusive_ptr<TensorImpl> TensorImpl::shallow_copy_and_detach(
-    const c10::VariableVersion& version_counter,
+template <typename VariableVersion>
+c10::intrusive_ptr<TensorImpl> TensorImpl::shallow_copy_and_detach_core(
+    VariableVersion&& version_counter,
     bool allow_tensor_metadata_change) const {
   if (key_set_.has(DispatchKey::Python) &&
       !c10::impl::tls_is_dispatch_key_excluded(DispatchKey::Python)) {
     auto r = pyobj_interpreter_.load(std::memory_order_acquire)->detach(this);
     if (r) {
-      r->set_version_counter(version_counter);
+      r->set_version_counter(std::forward<VariableVersion>(version_counter));
       r->set_allow_tensor_metadata_change(allow_tensor_metadata_change);
       return r;
     }
@@ -518,7 +523,7 @@ c10::intrusive_ptr<TensorImpl> TensorImpl::shallow_copy_and_detach(
   copy_tensor_metadata(
       /*src_impl=*/this,
       /*dest_impl=*/impl.get(),
-      /*version_counter=*/version_counter,
+      /*version_counter=*/std::forward<VariableVersion>(version_counter),
       /*allow_tensor_metadata_change=*/allow_tensor_metadata_change);
   impl->refresh_numel();
   impl->refresh_contiguous();
@@ -526,32 +531,17 @@ c10::intrusive_ptr<TensorImpl> TensorImpl::shallow_copy_and_detach(
 }
 
 c10::intrusive_ptr<TensorImpl> TensorImpl::shallow_copy_and_detach(
+    const c10::VariableVersion& version_counter,
+    bool allow_tensor_metadata_change) const {
+  return shallow_copy_and_detach_core(
+      version_counter, allow_tensor_metadata_change);
+}
+
+c10::intrusive_ptr<TensorImpl> TensorImpl::shallow_copy_and_detach(
     c10::VariableVersion&& version_counter,
     bool allow_tensor_metadata_change) const {
-  if (key_set_.has(DispatchKey::Python) &&
-      !c10::impl::tls_is_dispatch_key_excluded(DispatchKey::Python)) {
-    auto r = pyobj_interpreter_.load(std::memory_order_acquire)->detach(this);
-    if (r) {
-      r->set_version_counter(std::move(version_counter));
-      r->set_allow_tensor_metadata_change(allow_tensor_metadata_change);
-      return r;
-    }
-    // otherwise just copy the TensorImpl and not the PyObject.  Since
-    // the interpreter is dead no one can call us out on it
-  }
-  auto impl = c10::make_intrusive<TensorImpl>(
-      // No need to populate Storage; copy_tensor_metadata will do it for us.
-      key_set_,
-      data_type_,
-      device_opt_);
-  copy_tensor_metadata(
-      /*src_impl=*/this,
-      /*dest_impl=*/impl.get(),
-      /*version_counter=*/std::move(version_counter),
-      /*allow_tensor_metadata_change=*/allow_tensor_metadata_change);
-  impl->refresh_numel();
-  impl->refresh_contiguous();
-  return impl;
+  return shallow_copy_and_detach_core(
+      std::move(version_counter), allow_tensor_metadata_change);
 }
 
 void TensorImpl::copy_tensor_metadata_except_version_counter(
