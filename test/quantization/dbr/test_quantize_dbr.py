@@ -432,12 +432,27 @@ class TestQuantizeDBR(QuantizeDBRTestCase):
         m = M().eval()
         qconfig = torch.quantization.default_qconfig
         mp = _quantize_dbr.prepare(m, {'': qconfig}, (torch.randn(1, 1, 1, 1),))
+
         self.assertTrue(
             mp._auto_quant_state.idx_to_seen_q_op_infos[0].fusion_info is not None)
         self.assertTrue(
             mp._auto_quant_state.idx_to_seen_q_op_infos[1].fusion_info is not None)
-        # TODO(future PR): use fusion results to insert observers
-        # TODO(future PR): use fusion results to replace function at inference
+
+        # verify that the add relu is not observed
+        self.assertTrue(
+            '1' not in mp._auto_quant_state.tensor_id_to_observer)
+        # verify that the relu is observed
+        self.assertTrue(
+            '2' in mp._auto_quant_state.tensor_id_to_observer)
+
+        mp(torch.randn(1, 1, 1, 1))
+        mq = _quantize_dbr.convert(mp)
+
+        # verify that the add-relu got fused
+        mqt = torch.jit.trace(mq, (torch.randn(1, 1, 1, 1),))
+        FileCheck().check_count("quantized::add_relu", 1, exactly=True).run(
+            mqt.graph)
+
         # TODO(future PR): use information about non-quantizeable ops during
         #   matching fusion patterns
 
@@ -578,7 +593,6 @@ class TestQuantizeDBR(QuantizeDBRTestCase):
             # TODO enable scripting support for this
             do_torchscript_checks=False)
 
-    @unittest.skip('will be reenabled in the next PR')
     def test_method(self):
         class M(torch.nn.Module):
             def forward(self, x):

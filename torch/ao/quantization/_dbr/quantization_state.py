@@ -38,6 +38,8 @@ from .utils import (
 
 from .function_fusion import (
     match_fusion_patterns,
+    get_seen_q_op_info_of_start_of_fusion,
+    get_seen_q_op_info_of_end_of_fusion,
 )
 
 OpConvertInfo = Tuple[
@@ -365,13 +367,37 @@ class AutoQuantizationState(torch.nn.Module):
         * observe the output, if needed
         """
         seen_q_op_info = self._get_cur_seen_q_op_info()
-        func_output_obs_type = get_func_output_obs_type(seen_q_op_info)
-        # TODO(future PR): other output types
-        if func_output_obs_type != FuncOutputObsType.NONE:
-            seen_q_op_info = self._get_cur_seen_q_op_info()
-            tensor_id = seen_q_op_info.output_tensor_infos[0].id
-            obs = self.tensor_id_to_observer[str(tensor_id)]
-            output = obs(output)
+
+        # if we are in a fusion, we only observe at the end of it
+        is_fusion = seen_q_op_info.fusion_info is not None
+        is_end_of_fusion = seen_q_op_info.fusion_info is not None and \
+            seen_q_op_info.fusion_info.is_last_element
+
+        if is_fusion:
+            if is_end_of_fusion:
+                # do observe in the end of fusions, according to info
+                # of the base op
+                seen_q_op_info_start = get_seen_q_op_info_of_start_of_fusion(
+                    seen_q_op_info, self.idx_to_seen_q_op_infos)
+                # use the obs type from beginning of pattern
+                func_output_obs_type = get_func_output_obs_type(seen_q_op_info_start)
+                if func_output_obs_type != FuncOutputObsType.NONE:
+                    # use the output tensor ID from the end of pattern
+                    tensor_id = seen_q_op_info.output_tensor_infos[0].id
+                    obs = self.tensor_id_to_observer[str(tensor_id)]
+                    output = obs(output)
+
+            else:
+                # do not observe in the middle of fusions
+                pass
+        else:
+            # observe without fusions as normal
+            func_output_obs_type = get_func_output_obs_type(seen_q_op_info)
+            # TODO(future PR): other output types
+            if func_output_obs_type != FuncOutputObsType.NONE:
+                tensor_id = seen_q_op_info.output_tensor_infos[0].id
+                obs = self.tensor_id_to_observer[str(tensor_id)]
+                output = obs(output)
 
         if self.log_op_outputs:
             output_clone = clone_detach_tensor_without_dispatch(output)
@@ -523,7 +549,8 @@ class AutoQuantizationState(torch.nn.Module):
         `get_op_convert_info`.
         """
         # calculate new op
-        maybe_new_op = get_quantized_op(seen_q_op_info)
+        maybe_new_op = get_quantized_op(
+            seen_q_op_info, self.idx_to_seen_q_op_infos)
 
         # calculate quant infos
         arg_quant_infos, arg_dequant_infos, any_arg_quant_or_dequant_needed = \
@@ -539,7 +566,17 @@ class AutoQuantizationState(torch.nn.Module):
         additional_kwargs = {}
         needs_scale_zp = converted_func_needs_scale_zp(seen_q_op_info)
         if needs_scale_zp:
-            output_tensor_infos = seen_q_op_info.output_tensor_infos
+            cur_seen_q_op_info = seen_q_op_info
+
+            # if this is a start of a fusion pattern, get the observer
+            # from the end of the fusion
+            is_start_of_fusion = seen_q_op_info.fusion_info and \
+                seen_q_op_info.fusion_info.is_first_element
+            if is_start_of_fusion:
+                cur_seen_q_op_info = get_seen_q_op_info_of_end_of_fusion(
+                    seen_q_op_info, self.idx_to_seen_q_op_infos)
+
+            output_tensor_infos = cur_seen_q_op_info.output_tensor_infos
             tensor_id = output_tensor_infos[0].id
             scale, zp = self.tensor_id_to_scale_zp[tensor_id]
             additional_kwargs.update({'scale': scale, 'zero_point': zp})
@@ -876,9 +913,20 @@ class AutoQuantizationState(torch.nn.Module):
         seen_q_op_info: SeenQOpInfo,
         root_module: torch.nn.Module,
     ):
-        func_output_obs_type = get_func_output_obs_type(seen_q_op_info)
-        output_tensor_id = seen_q_op_info.output_tensor_infos[0].id
+        if seen_q_op_info.fusion_info is not None:
+            if not seen_q_op_info.fusion_info.is_first_element:
+                # if we are in a fusion but not at the start, do not insert observer
+                return
+            else:
+                # if we are in a fusion and at the start, insert observer for its end
+                # get the output of the end of the fusion
+                cur_seen_q_op_info = get_seen_q_op_info_of_end_of_fusion(
+                    seen_q_op_info, self.idx_to_seen_q_op_infos)
+                output_tensor_id = cur_seen_q_op_info.output_tensor_infos[0].id
+        else:
+            output_tensor_id = seen_q_op_info.output_tensor_infos[0].id
 
+        func_output_obs_type = get_func_output_obs_type(seen_q_op_info)
         if func_output_obs_type == FuncOutputObsType.NEW_OBS:
             # TODO(future PR): check qconfig is None
             qconfig = get_cur_qconfig(
