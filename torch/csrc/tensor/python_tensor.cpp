@@ -277,6 +277,10 @@ static THPObjectPtr get_tensor_dict() {
 static std::vector<PyTensorType*> tensor_types;
 
 void set_default_tensor_type(PyTensorType* type) {
+  if (!type) {
+    throw TypeError("invalid tensor type");
+  }
+
   if (!at::isFloatingType(type->get_scalar_type())) {
     throw TypeError("only floating-point types are supported as the default type");
   }
