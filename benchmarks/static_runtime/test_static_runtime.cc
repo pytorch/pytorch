@@ -2598,14 +2598,14 @@ TEST(StaticRuntime, TupleIndex) {
   torch::jit::Module mod("module");
   mod.define(src);
   StaticModule smod(mod);
-  EXPECT_THROW(smod({100, tuple}), std::runtime_error);
+  EXPECT_THROW(smod({100, tuple}), std::out_of_range);
 }
 
 TEST(StaticRuntime, RaiseException) {
   const auto src = R"IR(
     graph(%str: str):
         %none: NoneType = prim::Constant()
-        prim::RaiseException(%str)
+        prim::RaiseException(%str, %none)
         return (%none)
   )IR";
   auto graph = getGraphFromIR(src);

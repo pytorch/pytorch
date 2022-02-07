@@ -20,6 +20,18 @@ constexpr auto createBorrowedIValue =
 namespace torch {
 namespace jit {
 
+namespace {
+
+std::vector<IValue> boxInputs(const ProcessedNode& pnode) {
+  std::vector<IValue> result;
+  for (const auto i : c10::irange(pnode.num_inputs())) {
+    result.push_back(pnode.Input(i));
+  }
+  return result;
+}
+
+}
+
 C10_DEFINE_REGISTRY(SRNativeOperatorRegistry, SROperatorFunctor);
 
 bool nativeOpIsRegistered(const c10::Symbol& op_name) {
@@ -41,12 +53,7 @@ REGISTER_NATIVE_OPERATOR_FUNCTOR(
     [](Node* n) -> SROperator {
       return [](ProcessedNode* p_node) {
         // prepare inputs
-        std::vector<IValue> stack;
-        const size_t size = p_node->num_inputs();
-        stack.reserve(size);
-        for (const auto i : c10::irange(size)) {
-          stack.emplace_back(p_node->Input(i));
-        }
+        auto stack = boxInputs(*p_node);
         // run op
         auto* node = p_node->node();
         const auto& type = node->output()->type()->expect<TupleType>();
@@ -82,12 +89,7 @@ REGISTER_NATIVE_OPERATOR_FUNCTOR(
     [](Node* n) -> SROperator {
       return [](ProcessedNode* p_node) {
         // prepare inputs
-        std::vector<IValue> stack;
-        const size_t size = p_node->num_inputs();
-        stack.reserve(size);
-        for (const auto i : c10::irange(size)) {
-          stack.emplace_back(p_node->Input(i));
-        }
+        auto stack = boxInputs(*p_node);
         // run op
         auto* node = p_node->node();
         dictConstruct(
@@ -151,12 +153,7 @@ REGISTER_NATIVE_OPERATOR_FUNCTOR(
     [](Node* n) -> SROperator {
       return [](ProcessedNode* p_node) {
         // prepare inputs
-        std::vector<IValue> stack;
-        const size_t size = p_node->num_inputs();
-        stack.reserve(size);
-        for (const auto i : c10::irange(size)) {
-          stack.emplace_back(p_node->Input(i));
-        }
+        auto stack = boxInputs(*p_node);
         // run op
         listConstruct(
             stack,
@@ -173,12 +170,7 @@ REGISTER_NATIVE_OPERATOR_FUNCTOR(
     [](Node* n) -> SROperator {
       return [](ProcessedNode* p_node) {
         // prepare inputs
-        std::vector<IValue> stack;
-        const size_t size = p_node->num_inputs();
-        stack.reserve(size);
-        for (const auto i : c10::irange(size)) {
-          stack.emplace_back(p_node->Input(i));
-        }
+        auto stack = boxInputs(*p_node);
         // run op
         size_t num_outputs = p_node->outputs().size();
         listUnpack(stack, num_outputs);
@@ -795,26 +787,38 @@ REGISTER_NATIVE_OPERATOR_FUNCTOR(
     });
 
 REGISTER_NATIVE_OPERATOR_FUNCTOR(
+    prim::CreateObject,
+    prim_CreateObject,
+    [](Node* node) -> SROperator {
+      auto class_type = node->output()->type()->expect<ClassType>();
+      return [class_type = std::move(class_type)](ProcessedNode* pnode) {
+        pnode->Output(0) = c10::ivalue::Object::create(
+            c10::StrongTypePtr(class_type->compilation_unit(), class_type),
+            class_type->numAttributes());
+      };
+    });
+
+REGISTER_NATIVE_OPERATOR_FUNCTOR(
     prim::TupleIndex,
     prim_TupleIndex,
     [](Node*) -> SROperator {
       return [](ProcessedNode* pnode) {
         const auto& elems = pnode->Input(0).toTupleRef().elements();
         const auto num_elems = elems.size();
-        auto idx = pnode->Input(1).toInt();
-        idx = normalizeIndex(idx, num_elems);
-        if (idx < 0 || idx >= num_elems) {
+        const auto idx = pnode->Input(1).toInt();
+        const auto norm_idx = normalizeIndex(idx, num_elems);
+        if (norm_idx < 0 || norm_idx >= num_elems) {
           // Use std::runtime_error instead of c10::Error to be consistent with
           // JIT
-          throw std::runtime_error("Tuple index out of range");
+          throw std::out_of_range("Tuple index out of range");
         }
-        pnode->Output(0) = elems[idx];
+        pnode->Output(0) = elems[norm_idx];
       };
     });
 
 REGISTER_NATIVE_OPERATOR_FUNCTOR(
-    prim::RaiseExecption,
-    prim_RaiseExeception,
+    prim::RaiseException,
+    prim_RaiseException,
     [](Node*) -> SROperator {
       return [](ProcessedNode* pnode) {
         const auto& message = pnode->Input(0).toStringRef();
@@ -834,15 +838,11 @@ REGISTER_NATIVE_OPERATOR_FUNCTOR(
 REGISTER_NATIVE_OPERATOR_FUNCTOR(
     aten::format,
     aten_format,
-    [](Node*) -> SROperator {
+    [](Node* n) -> SROperator {
+      TORCH_CHECK(n->inputs().size() > 0);
       return [](ProcessedNode* pnode) {
         const auto num_inputs = pnode->num_inputs();
-        TORCH_CHECK(num_inputs > 0);
-        std::vector<IValue> stack;
-        stack.reserve(num_inputs);
-        for (const auto i : c10::irange(num_inputs)) {
-          stack.push_back(pnode->Input(i));
-        }
+        auto stack = boxInputs(*pnode);
         format(stack, num_inputs);
         DCHECK_EQ(stack.size(), 1);
         pnode->Output(0) = std::move(stack[0]);
@@ -896,21 +896,18 @@ REGISTER_NATIVE_OPERATOR_FUNCTOR(
           pnode->Output(0) = at::native::is_nonzero(input);
         };
       }
-
       if (n->matches(torch::schema("aten::Bool.int(int a) -> bool"))) {
         return [](ProcessedNode* pnode) {
           const auto input = pnode->Input(0).toInt();
           pnode->Output(0) = static_cast<bool>(input);
         };
       }
-
       if (n->matches(torch::schema("aten::Bool.float(float a) -> bool"))) {
         return [](ProcessedNode* pnode) {
           const auto input = pnode->Input(0).toDouble();
           pnode->Output(0) = static_cast<bool>(input);
         };
       }
-
       LogAndDumpSchema(n);
       return nullptr;
     });
