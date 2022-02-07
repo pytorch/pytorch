@@ -184,6 +184,13 @@ class OrderedImporter(Importer):
     def __init__(self, *args):
         self._importers: List[Importer] = list(args)
 
+    def _check_if_fileless_package(self, module):
+        if not hasattr(module, '__path__'):
+            return False
+        if not hasattr(module, '__file__'):
+            return True
+        return module.__file__ is None
+
     def import_module(self, module_name: str) -> ModuleType:
         last_err = None
         for importer in self._importers:
@@ -193,7 +200,10 @@ class OrderedImporter(Importer):
                     "All importers in OrderedImporter must inherit from Importer."
                 )
             try:
-                return importer.import_module(module_name)
+                module = importer.import_module(module_name)
+                if self._check_if_fileless_package(module):
+                    continue
+                return module
             except ModuleNotFoundError as err:
                 last_err = err
 
