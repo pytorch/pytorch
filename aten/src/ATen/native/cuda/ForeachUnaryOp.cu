@@ -41,7 +41,7 @@
 
 namespace at { namespace native {
 
-template <typename scalar_t, template<class> class Op> std::vector<Tensor> foreach_unary_op(TensorList tensors) {
+template <typename scalar_t, template<class> class Op> std::vector<Tensor> foreach_unary_op(ITensorList tensors) {
     std::vector<std::vector<at::Tensor>> tensor_lists;
     std::vector<at::Tensor> vec_res;
     vec_res.reserve(tensors.size());
@@ -63,7 +63,7 @@ template <typename scalar_t, template<class> class Op> std::vector<Tensor> forea
     return tensor_lists[1];
 }
 
-template <typename scalar_t, template<class> class Op> void foreach_unary_op_(TensorList tensors) {
+template <typename scalar_t, template<class> class Op> void foreach_unary_op_(ITensorList tensors) {
     std::vector<std::vector<at::Tensor>> tensor_lists;
     tensor_lists.emplace_back(tensors.vec());
     using opmath_t = typename at::opmath_type<scalar_t>;
@@ -76,84 +76,84 @@ template <typename scalar_t, template<class> class Op> void foreach_unary_op_(Te
 }
 
 template <template<class> class Op>
-std::vector<Tensor> floating_complex_half(TensorList tensors) {
+std::vector<Tensor> floating_complex_half(ITensorList tensors) {
     return AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(ScalarType::Half,  tensors[0].scalar_type(), "foreach_unary_op_cuda", [&]() {
         return foreach_unary_op<scalar_t, Op>(tensors);
     });
 }
 
 template <template<class> class Op>
-void floating_complex_half_(TensorList tensors) {
+void floating_complex_half_(ITensorList tensors) {
     AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(ScalarType::Half, tensors[0].scalar_type(), "foreach_unary_op_cuda_", [&]() {
         foreach_unary_op_<scalar_t, Op>(tensors);
     });
 }
 
 template <template<class> class Op>
-std::vector<Tensor> all_types_complex_bfloat16_half_bool(TensorList tensors) {
+std::vector<Tensor> all_types_complex_bfloat16_half_bool(ITensorList tensors) {
     return AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(ScalarType::Half, ScalarType::BFloat16, ScalarType::Bool, tensors[0].scalar_type(), "foreach_unary_op_cuda", [&]() {
         return foreach_unary_op<scalar_t, Op>(tensors);
     });
 }
 
 template <template<class> class Op>
-void all_types_complex_bfloat16_half_bool_(TensorList tensors) {
+void all_types_complex_bfloat16_half_bool_(ITensorList tensors) {
     AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(ScalarType::Half, ScalarType::BFloat16, ScalarType::Bool, tensors[0].scalar_type(), "foreach_unary_op_cuda", [&]() {
         foreach_unary_op_<scalar_t, Op>(tensors);
     });
 }
 
 template <template<class> class Op>
-std::vector<Tensor> floating_complex_half_bfloat16(TensorList tensors) {
+std::vector<Tensor> floating_complex_half_bfloat16(ITensorList tensors) {
     return AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(ScalarType::Half, ScalarType::BFloat16, tensors[0].scalar_type(), "foreach_unary_op_cuda", [&]() {
         return foreach_unary_op<scalar_t, Op>(tensors);
     });
 }
 
 template <template<class> class Op>
-void floating_complex_half_bfloat16_(TensorList tensors) {
+void floating_complex_half_bfloat16_(ITensorList tensors) {
     AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(ScalarType::Half, ScalarType::BFloat16, tensors[0].scalar_type(), "foreach_unary_op_cuda_", [&]() {
         foreach_unary_op_<scalar_t, Op>(tensors);
     });
 }
 
 template <template<class> class Op>
-std::vector<Tensor> all_types_half_complex_bfloat16(TensorList tensors) {
+std::vector<Tensor> all_types_half_complex_bfloat16(ITensorList tensors) {
     return AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(ScalarType::Half, at::ScalarType::BFloat16, tensors[0].scalar_type(), "foreach_unary_op_cuda", [&]() {
         return foreach_unary_op<scalar_t, Op>(tensors);
     });
 }
 
 template <template<class> class Op>
-void all_types_half_complex_bfloat16_(TensorList tensors) {
+void all_types_half_complex_bfloat16_(ITensorList tensors) {
     AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(ScalarType::Half, at::ScalarType::BFloat16, tensors[0].scalar_type(), "foreach_unary_op_cuda_", [&]() {
         foreach_unary_op_<scalar_t, Op>(tensors);
     });
 }
 
 template <template<class> class Op>
-std::vector<Tensor> floating_half(TensorList tensors) {
+std::vector<Tensor> floating_half(ITensorList tensors) {
     return AT_DISPATCH_FLOATING_TYPES_AND(ScalarType::Half,  tensors[0].scalar_type(), "foreach_unary_op_cuda", [&]() {
         return foreach_unary_op<scalar_t, Op>(tensors);
     });
 }
 
 template <template<class> class Op>
-void floating_half_(TensorList tensors) {
+void floating_half_(ITensorList tensors) {
     AT_DISPATCH_FLOATING_TYPES_AND_HALF(tensors[0].scalar_type(), "foreach_unary_op_cuda_", [&]() {
         foreach_unary_op_<scalar_t, Op>(tensors);
     });
 }
 
 template <template<class> class Op>
-std::vector<Tensor> floating_half_bfloat16(TensorList tensors) {
+std::vector<Tensor> floating_half_bfloat16(ITensorList tensors) {
     return AT_DISPATCH_FLOATING_TYPES_AND2(ScalarType::Half, ScalarType::BFloat16,  tensors[0].scalar_type(), "foreach_unary_op_cuda", [&]() {
         return foreach_unary_op<scalar_t, Op>(tensors);
     });
 }
 
 template <template<class> class Op>
-void floating_half_bfloat16_(TensorList tensors) {
+void floating_half_bfloat16_(ITensorList tensors) {
     AT_DISPATCH_FLOATING_TYPES_AND2(ScalarType::Half, ScalarType::BFloat16, tensors[0].scalar_type(), "foreach_unary_op_cuda_", [&]() {
         foreach_unary_op_<scalar_t, Op>(tensors);
     });
@@ -168,14 +168,14 @@ struct functor_name {                                                \
 
 // given a functor and a "dispatch function", creates the outplace and inplace operations
 #define OP_CUSTOM_FUNCTOR(function, op_name, functor_name)                \
-std::vector<Tensor> foreach_tensor_##op_name##_cuda(TensorList tensors) { \
+std::vector<Tensor> foreach_tensor_##op_name##_cuda(const ITensorList& tensors) { \
     check_foreach_api_restrictions(tensors);                              \
     if (!can_use_fast_route(tensors) || has_integral_tensor(tensors, /* includeBool */ true)) { \
         return at::native::foreach_tensor_##op_name##_slow(tensors);      \
     }                                                                     \
     return function<functor_name>(tensors);                               \
 }                                                                         \
-void foreach_tensor_##op_name##_cuda_(TensorList tensors) {               \
+void foreach_tensor_##op_name##_cuda_(const ITensorList& tensors) {       \
     check_foreach_api_restrictions(tensors);                              \
     if (!can_use_fast_route(tensors) || has_integral_tensor(tensors, /* includeBool */ true)) { \
         return at::native::foreach_tensor_##op_name##_slow_(tensors);     \
@@ -249,7 +249,7 @@ OP_CUSTOM_FUNCTOR(floating_complex_half_bfloat16, reciprocal, Reciprocal)
 // note(mkozuki): tensor dtype checks of `neg` kernels.
 // Since `check_foreach_api_restrictions` don't require all the tensors to have the same dtype,
 // I think it safer to check every single tensor's dtype inside negation kernels.
-std::vector<Tensor> foreach_tensor_neg_cuda(TensorList tensors) {
+std::vector<Tensor> foreach_tensor_neg_cuda(const ITensorList& tensors) {
     check_foreach_api_restrictions(tensors);
 
     if (!can_use_fast_route(tensors)) {
@@ -262,7 +262,7 @@ std::vector<Tensor> foreach_tensor_neg_cuda(TensorList tensors) {
     return all_types_half_complex_bfloat16<std::negate>(tensors);
 }
 
-void foreach_tensor_neg_cuda_(TensorList tensors) {
+void foreach_tensor_neg_cuda_(const ITensorList& tensors) {
     check_foreach_api_restrictions(tensors);
 
     if (!can_use_fast_route(tensors)) {
@@ -283,7 +283,7 @@ struct Abs {
     __device__ T operator()(T t) const { return std::abs(t); }
 };
 
-std::vector<Tensor> foreach_tensor_abs_cuda(TensorList tensors) {
+std::vector<Tensor> foreach_tensor_abs_cuda(const ITensorList& tensors) {
     check_foreach_api_restrictions(tensors);
     const bool has_complex = std::any_of(
         tensors.begin(), tensors.end(),
@@ -295,7 +295,7 @@ std::vector<Tensor> foreach_tensor_abs_cuda(TensorList tensors) {
     return all_types_complex_bfloat16_half_bool<Abs>(tensors);
 }
 
-void foreach_tensor_abs_cuda_(TensorList tensors) {
+void foreach_tensor_abs_cuda_(const ITensorList& tensors) {
     check_foreach_api_restrictions(tensors);
     const bool has_complex = std::any_of(
         tensors.begin(), tensors.end(),
@@ -307,7 +307,7 @@ void foreach_tensor_abs_cuda_(TensorList tensors) {
     all_types_complex_bfloat16_half_bool_<Abs>(tensors);
 }
 
-void foreach_tensor_zero_cuda_(TensorList tensors) {
+void foreach_tensor_zero_cuda_(const ITensorList& tensors) {
     check_foreach_api_restrictions(tensors);
 
     if (!can_use_fast_route(tensors)) {

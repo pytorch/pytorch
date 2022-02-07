@@ -68,7 +68,7 @@ Tensor quantize_per_tensor_tensor_qparams(
 }
 
 std::vector<Tensor> quantize_per_tensor_list_cpu(
-    TensorList tensors,
+    const ITensorList& tensors,
     const Tensor& scales,
     const Tensor& zero_points,
     ScalarType dtype) {
@@ -101,7 +101,7 @@ Tensor dequantize_quantized(const Tensor& self) {
   return get_qtensorimpl(self)->quantizer()->dequantize(self);
 }
 
-std::vector<Tensor> dequantize_tensors_quantized_cpu(TensorList tensors) {
+std::vector<Tensor> dequantize_tensors_quantized_cpu(const ITensorList& tensors) {
   std::vector<Tensor> dequantized_tensors;
   for (const auto & tensor : tensors) {
     dequantized_tensors.push_back(tensor.dequantize());

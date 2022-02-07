@@ -2,10 +2,41 @@
 
 #include <ATen/core/List.h>
 #include <ATen/core/Tensor.h>
+#include <type_traits>
 
 namespace at {
 class Tensor;
 class OptionalTensorRef;
+
+/*
+ * Temporary ArrayRef<T> class.
+ *
+ * What is this for?
+ * =================
+ * Conveniently provides an 'ArrayRef<T>' out of a 'IList<T>'. It tries not to
+ * copy, but will do so if 'IList' is not unboxed.
+ *
+ * This is a workaround for, mainly 'MatrixRef'. It needs 'ArrayRef' methods,
+ * such as 'slice', which is not possible to implement for 'List' (boxed_type).
+ */
+template <typename T>
+class TempArrayRef {
+ public:
+  explicit TempArrayRef(IList<T> il) {
+    constexpr bool is_unboxed_arrayref = std::is_same<ArrayRef<T>, typename c10::IList<T>::unboxed_type>::value;
+    bool should_own_list = !is_unboxed_arrayref || !il.isUnboxed();
+    data_ = should_own_list ? c10::optional<std::vector<T>>({il.begin(), il.end()}) : c10::nullopt;
+    arr_ = should_own_list ? data_.value() : il.toUnboxed();
+  }
+
+  ArrayRef<T> operator*() const {
+    return arr_;
+  }
+
+ private:
+  ArrayRef<T> arr_;
+  c10::optional<std::vector<T>> data_;
+};
 }
 
 namespace c10 {

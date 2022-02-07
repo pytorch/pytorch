@@ -54,7 +54,7 @@ static c10::MemoryFormat cat_compute_output_memory_format(ITensorList inputs) {
   return format.value();
 }
 
-TORCH_PRECOMPUTE_META_FUNC(cat)(ITensorList tensors, int64_t dim) {
+TORCH_PRECOMPUTE_META_FUNC(cat)(const ITensorList& tensors, int64_t dim) {
   // previously, size [0] tensors were the only possible empty tensors; thus, it wasn't possible
   // to cat empty tensors unless all the other tensors were 1-dimensional, so we allowed these tensors
   // to be "skipped".  We maintain this behavior for backwards compatibility, but only for this specific
@@ -298,12 +298,12 @@ Tensor broadcast_to(const Tensor& self, IntArrayRef size) {
   return self.expand(size);
 }
 
-std::vector<Tensor> broadcast_tensors(TensorList tensors) {
+std::vector<Tensor> broadcast_tensors(const ITensorList& tensors) {
   return expand_outplace(tensors);
 }
 
 TORCH_IMPL_FUNC(cat_out_cpu)
-(ITensorList tensors,
+(const ITensorList& tensors,
  int64_t dim,
  int64_t valid,
  bool all_contiguous,
@@ -375,30 +375,30 @@ TORCH_IMPL_FUNC(cat_out_cpu)
   }
 }
 
-Tensor& cat_out(TensorList tensors, Dimname dim, Tensor& result) {
+Tensor& cat_out(const ITensorList& tensors, Dimname dim, Tensor& result) {
   TORCH_CHECK(!tensors.empty(), "expected a non-empty list of Tensors");
   return at::cat_out(result, tensors, dimname_to_position(tensors[0], dim));
 }
 
-Tensor cat(TensorList tensors, Dimname dim) {
+Tensor cat(const ITensorList& tensors, Dimname dim) {
   TORCH_CHECK(!tensors.empty(), "expected a non-empty list of Tensors");
   return at::cat(tensors, dimname_to_position(tensors[0], dim));
 }
 
 // torch.concat, alias for torch.cat
-Tensor& concat_out(TensorList tensors, Dimname dim, Tensor& result) {
+Tensor& concat_out(const ITensorList& tensors, Dimname dim, Tensor& result) {
   return at::cat_out(result, tensors, dimname_to_position(tensors[0], dim));
 }
 
-Tensor concat(TensorList tensors, Dimname dim) {
+Tensor concat(const ITensorList& tensors, Dimname dim) {
   return at::cat(tensors, dimname_to_position(tensors[0], dim));
 }
 
-Tensor & concat_out(TensorList tensors, int64_t dim, Tensor & result) {
+Tensor & concat_out(const ITensorList& tensors, int64_t dim, Tensor & result) {
   return at::cat_out(result, tensors, dim);
 }
 
-Tensor concat(TensorList tensors, int64_t dim) {
+Tensor concat(const ITensorList& tensors, int64_t dim) {
   return at::cat(tensors, dim);
 }
 
@@ -432,7 +432,7 @@ static void check_cat_sparse_dims(Tensor const &t,
             ", but tensor at position ", pos, " has ", t.sparse_dim(), ", ", t.dense_dim(), ".");
 }
 
-static Tensor cat_sparse_impl(TensorList tensors, int64_t dim) {
+static Tensor cat_sparse_impl(ITensorList tensors, int64_t dim) {
   std::vector<Tensor> indices;
   std::vector<Tensor> values;
   int64_t wrapped = maybe_wrap_dim(dim, tensors[0].dim());
@@ -546,14 +546,14 @@ static Tensor cat_sparse_impl(TensorList tensors, int64_t dim) {
   }
 }
 
-Tensor cat_sparse(TensorList tensors, int64_t dim) {
+Tensor cat_sparse(const ITensorList& tensors, int64_t dim) {
   auto maybe_outnames = namedinference::compute_cat_outnames(tensors);
   auto result = cat_sparse_impl(tensors, at::legacy_cat_wrap_dim(dim, tensors));
   namedinference::propagate_names_if_nonempty(result, maybe_outnames);
   return result;
 }
 
-Tensor block_diag(TensorList tensors) {
+Tensor block_diag(const ITensorList& tensors) {
   Tensor result;
   if (tensors.size() == 0) {
     result = at::empty({1, 0});
@@ -1506,7 +1506,7 @@ std::vector<Tensor> dsplit(const Tensor& self, IntArrayRef split_sizes) {
 }
 
 // Precondition: tensors is non-empty
-static inline std::vector<Tensor> get_stack_inputs(TensorList tensors, int64_t dim) {
+static inline std::vector<Tensor> get_stack_inputs(ITensorList tensors, int64_t dim) {
   std::vector<Tensor> inputs(tensors.size());
   at::IntArrayRef entry_shape = tensors[0].sizes();
   inputs[0] = tensors[0].unsqueeze(dim);
@@ -1519,9 +1519,9 @@ static inline std::vector<Tensor> get_stack_inputs(TensorList tensors, int64_t d
   return inputs;
 }
 
-bool inline maybe_native_stack(Tensor& result, TensorList tensors, int64_t dim) {
+bool inline maybe_native_stack(Tensor& result, ITensorList tensors, int64_t dim) {
   dim = maybe_wrap_dim(dim, tensors[0].dim() + 1);
-  if (detail::CanUseNativeSerialStack<TensorList, /*skip_overlap_check*/ false>::call(result, tensors, dim)) {
+  if (detail::CanUseNativeSerialStack<ITensorList, /*skip_overlap_check*/ false>::call(result, tensors, dim)) {
     // compute the size of the result
     auto result_sizes = tensors[0].sizes().vec();
     result_sizes.insert(result_sizes.begin() + dim, tensors.size());
@@ -1541,19 +1541,19 @@ bool inline maybe_native_stack(Tensor& result, TensorList tensors, int64_t dim) 
   return false;
 }
 
-Tensor _stack(TensorList tensors, int64_t dim) {
+Tensor _stack(const ITensorList& tensors, int64_t dim) {
   ScalarType high_type = result_type(tensors);
   Tensor result = at::empty({0}, tensors[0].options().dtype(high_type));
   return at::native::_stack_out(get_stack_inputs(tensors, dim), dim, result);
 }
 
-Tensor _stack_cpu(TensorList tensors, int64_t dim) {
+Tensor _stack_cpu(const ITensorList& tensors, int64_t dim) {
   ScalarType high_type = result_type(tensors);
   Tensor result = at::empty({0}, tensors[0].options().dtype(high_type));
   return at::native::_stack_out_cpu(tensors, dim, result);
 }
 
-void check_stack_inputs(TensorList tensors, int64_t dim) {
+void check_stack_inputs(ITensorList tensors, int64_t dim) {
   at::IntArrayRef entry_shape = tensors[0].sizes();
   for (const auto i : c10::irange(1, tensors.size())) {
     TORCH_CHECK(tensors[i].sizes() == entry_shape,
@@ -1563,7 +1563,7 @@ void check_stack_inputs(TensorList tensors, int64_t dim) {
 }
 
 // TODO(msubkhankulov): refactor to use _stack
-Tensor stack(TensorList tensors, int64_t dim) {
+Tensor stack(const ITensorList& tensors, int64_t dim) {
   TORCH_CHECK(tensors.size() > 0,
            "stack expects a non-empty TensorList");
   auto wrapped_dim = maybe_wrap_dim(dim, tensors[0].ndimension()+1);
@@ -1579,7 +1579,7 @@ Tensor stack(TensorList tensors, int64_t dim) {
 }
 
 // CPU specific implementation
-Tensor& _stack_out_cpu(TensorList tensors, int64_t dim, Tensor& result) {
+Tensor& _stack_out_cpu(const ITensorList& tensors, int64_t dim, Tensor& result) {
   if (maybe_native_stack(result, tensors, dim)) {
     return result;
   } else {
@@ -1588,12 +1588,12 @@ Tensor& _stack_out_cpu(TensorList tensors, int64_t dim, Tensor& result) {
 }
 
 // default backend
-Tensor& _stack_out(TensorList tensors, int64_t dim, Tensor& result) {
+Tensor& _stack_out(const ITensorList& tensors, int64_t dim, Tensor& result) {
   return at::cat_out(result, tensors, dim);
 }
 
 // TODO(msubkhankulov): refactor to use _stack_out
-Tensor& stack_out(TensorList tensors, int64_t dim, Tensor& result) {
+Tensor& stack_out(const ITensorList& tensors, int64_t dim, Tensor& result) {
   TORCH_CHECK(tensors.size() > 0,
            "stack expects a non-empty TensorList");
   auto wrapped_dim = maybe_wrap_dim(dim, tensors[0].ndimension()+1);
@@ -1616,7 +1616,7 @@ Tensor& stack_out(TensorList tensors, int64_t dim, Tensor& result) {
 
 }
 
-Tensor hstack(TensorList tensors) {
+Tensor hstack(const ITensorList& tensors) {
   TORCH_CHECK(tensors.size() > 0,
            "hstack expects a non-empty TensorList");
   auto rep = at::atleast_1d(tensors);
@@ -1626,7 +1626,7 @@ Tensor hstack(TensorList tensors) {
   return at::cat(rep, 1);
 }
 
-Tensor& hstack_out(TensorList tensors, Tensor& result) {
+Tensor& hstack_out(const ITensorList& tensors, Tensor& result) {
   TORCH_CHECK(tensors.size() > 0,
            "hstack expects a non-empty TensorList");
   auto rep = at::atleast_1d(tensors);
@@ -1636,27 +1636,27 @@ Tensor& hstack_out(TensorList tensors, Tensor& result) {
   return at::cat_out(result, rep, 1);
 }
 
-Tensor vstack(TensorList tensors) {
+Tensor vstack(const ITensorList& tensors) {
   TORCH_CHECK(tensors.size() > 0,
            "vstack expects a non-empty TensorList");
   auto rep = at::atleast_2d(tensors);
   return at::cat(rep, 0);
 }
 
-Tensor& vstack_out(TensorList tensors, Tensor& result) {
+Tensor& vstack_out(const ITensorList& tensors, Tensor& result) {
   TORCH_CHECK(tensors.size() > 0,
            "vstack expects a non-empty TensorList");
   auto rep = at::atleast_2d(tensors);
   return at::cat_out(result, rep, 0);
 }
 
-Tensor dstack(TensorList tensors) {
+Tensor dstack(const ITensorList& tensors) {
   TORCH_CHECK(tensors.size() > 0,
            "dstack expects a non-empty TensorList");
   auto rep = at::atleast_3d(tensors);
   return at::cat(rep, 2);
 }
-Tensor& dstack_out(TensorList tensors, Tensor& result) {
+Tensor& dstack_out(const ITensorList& tensors, Tensor& result) {
   TORCH_CHECK(tensors.size() > 0,
            "dstack expects a non-empty TensorList");
   auto rep = at::atleast_3d(tensors);
@@ -1726,15 +1726,15 @@ static inline Tensor sparse_csr_transpose(const Tensor & self) {
 }
 
 // torch.row_stack, alias for torch.vstack
-Tensor& row_stack_out(TensorList tensors, Tensor& result) {
+Tensor& row_stack_out(const ITensorList& tensors, Tensor& result) {
   return at::vstack_out(result, tensors);
 }
 
-Tensor row_stack(TensorList tensors) {
+Tensor row_stack(const ITensorList& tensors) {
   return at::vstack(tensors);
 }
 
-static std::vector<Tensor> reshape_input_for_column_stack(TensorList tensors) {
+static std::vector<Tensor> reshape_input_for_column_stack(ITensorList tensors) {
   std::vector<Tensor> result(tensors.size());
   auto transform_lambda = [](const Tensor& input) -> Tensor {
     // reshape 0D or 1D tensor t into (t.numel(), 1)
@@ -1743,14 +1743,14 @@ static std::vector<Tensor> reshape_input_for_column_stack(TensorList tensors) {
     }
     return input;
   };
-  std::transform(tensors.cbegin(),
-                 tensors.cend(),
+  std::transform(tensors.begin(),
+                 tensors.end(),
                  result.begin(),
                  transform_lambda);
   return result;
 }
 
-Tensor& column_stack_out(TensorList tensors, Tensor& result) {
+Tensor& column_stack_out(const ITensorList& tensors, Tensor& result) {
   TORCH_CHECK(tensors.size() > 0,
               "column_stack expects a non-empty TensorList");
 
@@ -1758,7 +1758,7 @@ Tensor& column_stack_out(TensorList tensors, Tensor& result) {
   return at::hstack_out(result, reshaped_tensors);
 }
 
-Tensor column_stack(TensorList tensors) {
+Tensor column_stack(const ITensorList& tensors) {
   TORCH_CHECK(tensors.size() > 0,
               "column_stack expects a non-empty TensorList");
 
@@ -2242,13 +2242,13 @@ std::vector<Tensor> unbind(const Tensor& self, Dimname dim) {
   return at::unbind(self, dimname_to_position(self, dim));
 }
 
-std::vector<Tensor> meshgrid(TensorList tensors) {
+std::vector<Tensor> meshgrid(const ITensorList& tensors) {
   TORCH_WARN_ONCE("torch.meshgrid: in an upcoming release, it will be required to pass the "
                   "indexing argument.");
   return native::meshgrid(tensors, /*indexing=*/"ij");
 }
 
-std::vector<Tensor> meshgrid(TensorList tensors,
+std::vector<Tensor> meshgrid(const ITensorList& tensors,
                              c10::string_view indexing) {
   int64_t size = tensors.size();
   TORCH_CHECK(size > 0, "meshgrid expects a non-empty TensorList");
@@ -2631,14 +2631,14 @@ Tensor& swapdims_(Tensor& self, int64_t dim0, int64_t dim1) {
   return self.transpose_(dim0, dim1);
 }
 
-Tensor flatten_dense_tensors(TensorList tensors) {
+Tensor flatten_dense_tensors(const ITensorList& tensors) {
   static auto flatten = [](const Tensor &t) { return t.contiguous().view({-1}); };
   if (tensors.size() == 1)
     return flatten(tensors[0]);
   return at::cat(fmap(tensors, flatten));
 }
 
-std::vector<Tensor> unflatten_dense_tensors(const Tensor& flat, TensorList tensors) {
+std::vector<Tensor> unflatten_dense_tensors(const Tensor& flat, const ITensorList& tensors) {
   std::vector<Tensor> outputs;
   outputs.reserve(tensors.size());
   size_t offset = 0;

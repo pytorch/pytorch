@@ -373,7 +373,7 @@ static inline void batchCheckErrors(const Tensor& infos, const c10::string_view 
 }
 
 // Checks if all the Tensors in a TensorList are of the same dimensions
-static inline void checkAllSameDim(TensorList tensors, int64_t dim) {
+static inline void checkAllSameDim(ITensorList tensors, int64_t dim) {
   for (auto &t : tensors) {
     TORCH_CHECK(t.dim() == dim, "Tensor dimension is ", t.dim(), ", expected ", dim, " instead.");
   }

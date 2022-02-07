@@ -1774,6 +1774,13 @@ struct getTypePtr_<c10::List<T>> final {
     return type;
   }
 };
+template <class T>
+struct getTypePtr_<c10::IList<T>> final {
+  static const auto& call() {
+    static auto type = ListType::create(getTypePtr_<T>::call());
+    return type;
+  }
+};
 template <class T, size_t N>
 struct getTypePtr_<std::array<T, N>> final {
   static const auto& call() {

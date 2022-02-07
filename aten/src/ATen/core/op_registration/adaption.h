@@ -68,7 +68,7 @@ inline void check_and_update_common_device(optional<Device>& common_device, cons
   }
 }
 
-inline void check_and_update_common_device(optional<Device>& common_device, at::TensorList tensors, at::CheckedFrom methodName, at::CheckedFrom argName) {
+inline void check_and_update_common_device(optional<Device>& common_device, at::ITensorList tensors, at::CheckedFrom methodName, at::CheckedFrom argName) {
   for (const auto& tensor : tensors) {
     check_and_update_common_device(common_device, tensor, methodName, argName);
   }

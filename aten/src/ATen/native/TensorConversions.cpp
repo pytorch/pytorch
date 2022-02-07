@@ -227,7 +227,7 @@ Tensor to(const Tensor& self, const Tensor& other, bool non_blocking, bool copy,
 // This op is important primarily for lazy / graph-based backends.
 // While this vanilla implementation loops through each tensor and independently converts it to cpu,
 // a lazy backend like XLA might need to tell sync updates across tensors.
-std::vector<Tensor> _to_cpu(TensorList tensors) {
+std::vector<Tensor> _to_cpu(const ITensorList& tensors) {
     std::vector<Tensor> cpu_tensors;
     for (const auto& t : tensors) {
         cpu_tensors.push_back(t.cpu());

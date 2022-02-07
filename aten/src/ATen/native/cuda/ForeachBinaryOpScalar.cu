@@ -18,7 +18,7 @@
 namespace at { namespace native {
 
 template<template<class> class Op>
-std::vector<Tensor> foreach_binary_op(TensorList tensors, const Scalar& scalar) {
+std::vector<Tensor> foreach_binary_op(ITensorList tensors, const Scalar& scalar) {
     std::vector<std::vector<at::Tensor>> tensor_lists;
     std::vector<at::Tensor> vec_res;
     vec_res.reserve(tensors.size());
@@ -43,7 +43,7 @@ std::vector<Tensor> foreach_binary_op(TensorList tensors, const Scalar& scalar) 
 }
 
 template<template<class> class Op>
-void foreach_binary_op_(TensorList tensors, const Scalar& scalar) {
+void foreach_binary_op_(ITensorList tensors, const Scalar& scalar) {
     std::vector<std::vector<at::Tensor>> tensor_lists;
     tensor_lists.emplace_back(tensors.vec());
 
@@ -60,7 +60,7 @@ void foreach_binary_op_(TensorList tensors, const Scalar& scalar) {
 }
 
 #define FOREACH_BINARY_OP_SCALAR(NAME, OP, DIVISION_OP)                                             \
-void foreach_tensor_##NAME##_scalar_kernel_cuda_(TensorList tensors, const Scalar& scalar) {               \
+void foreach_tensor_##NAME##_scalar_kernel_cuda_(const ITensorList& tensors, const Scalar& scalar) { \
     check_foreach_api_restrictions(tensors);                                                        \
     if (!can_use_fast_route(tensors, scalar, DIVISION_OP)) {                                        \
         return at::native::foreach_tensor_##NAME##_scalar_kernel_slow_(tensors, scalar);            \
@@ -69,7 +69,7 @@ void foreach_tensor_##NAME##_scalar_kernel_cuda_(TensorList tensors, const Scala
     foreach_binary_op_<OP>(tensors, scalar);                                                        \
 }                                                                                                   \
                                                                                                     \
-std::vector<Tensor> foreach_tensor_##NAME##_scalar_kernel_cuda(TensorList tensors, const Scalar& scalar) { \
+std::vector<Tensor> foreach_tensor_##NAME##_scalar_kernel_cuda(const ITensorList& tensors, const Scalar& scalar) { \
     check_foreach_api_restrictions(tensors);                                                        \
     if (!can_use_fast_route(tensors, scalar, DIVISION_OP)) {                                        \
         return at::native::foreach_tensor_##NAME##_scalar_kernel_slow(tensors, scalar);             \
@@ -86,7 +86,7 @@ FOREACH_BINARY_OP_SCALAR(mul, std::multiplies, false);
 FOREACH_BINARY_OP_SCALAR(div, std::divides, true);
 
 // In the case of subtraction, we dont allow scalar to be boolean following the torch.sub logic
-void foreach_tensor_sub_scalar_kernel_cuda_(TensorList tensors, const Scalar& scalar) {
+void foreach_tensor_sub_scalar_kernel_cuda_(const ITensorList& tensors, const Scalar& scalar) {
     check_foreach_api_restrictions(tensors);
     at::native::sub_check(tensors[0], scalar);
 
@@ -97,7 +97,7 @@ void foreach_tensor_sub_scalar_kernel_cuda_(TensorList tensors, const Scalar& sc
     foreach_binary_op_<std::minus>(tensors, scalar);
 }
 
-std::vector<Tensor> foreach_tensor_sub_scalar_kernel_cuda(TensorList tensors, const Scalar& scalar) {
+std::vector<Tensor> foreach_tensor_sub_scalar_kernel_cuda(const ITensorList& tensors, const Scalar& scalar) {
     check_foreach_api_restrictions(tensors);
     at::native::sub_check(tensors[0], scalar);
 

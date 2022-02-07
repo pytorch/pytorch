@@ -548,7 +548,7 @@ static std::vector<T> unpair_vec(std::vector<pair_of<T>>&& vals) {
 }
 
 // Parses a flat list of parameter tensors into a list of CellParams
-static std::vector<CellParams> gather_params(TensorList params, bool has_biases, bool has_projections = false) {
+static std::vector<CellParams> gather_params(ITensorList params, bool has_biases, bool has_projections = false) {
   static at::Tensor undefined;
   std::vector<CellParams> result;
   if (has_biases) {
@@ -1218,7 +1218,7 @@ bool _use_cudnn_rnn_flatten_weight() {
   std::tuple<Tensor, Tensor> NAME(                                          \
       const Tensor& _input,                                                 \
       const Tensor& hx,                                                     \
-      TensorList _params,                                                   \
+      const ITensorList& _params,                                           \
       bool has_biases,                                                      \
       int64_t num_layers,                                                   \
       double dropout_p,                                                     \
@@ -1281,7 +1281,7 @@ bool _use_cudnn_rnn_flatten_weight() {
       const Tensor& data,                                                   \
       const Tensor& batch_sizes,                                            \
       const Tensor& hx,                                                     \
-      TensorList _params,                                                   \
+      const ITensorList& _params,                                                   \
       bool has_biases,                                                      \
       int64_t num_layers,                                                   \
       double dropout_p,                                                     \
@@ -1470,8 +1470,8 @@ REGISTER_NO_CPU_DISPATCH(lstm_miopen_stub);
 REGISTER_NO_CPU_DISPATCH(lstm_packed_miopen_stub);
 
 std::tuple<Tensor, Tensor, Tensor> lstm(
-      const Tensor& _input, TensorList hx,
-      TensorList _params, bool has_biases,
+      const Tensor& _input, const ITensorList& hx,
+      const ITensorList& _params, bool has_biases,
       int64_t num_layers, double dropout_p, bool train, bool bidirectional, bool batch_first) {
   TORCH_CHECK(hx.size() == 2, "lstm expects two hidden states");
   if (at::cudnn_is_acceptable(_input)) {
@@ -1506,8 +1506,8 @@ std::tuple<Tensor, Tensor, Tensor> lstm(
 }
 
 std::tuple<Tensor, Tensor, Tensor> lstm(
-      const Tensor& data, const Tensor& batch_sizes, TensorList hx,
-      TensorList _params, bool has_biases,
+      const Tensor& data, const Tensor& batch_sizes, const ITensorList& hx,
+      const ITensorList& _params, bool has_biases,
       int64_t num_layers, double dropout_p, bool train, bool bidirectional) {
   TORCH_CHECK(hx.size() == 2, "lstm expects two hidden states");
   if (at::cudnn_is_acceptable(data)) {
@@ -1541,7 +1541,7 @@ std::tuple<Tensor, Tensor, Tensor> lstm(
 }
 
 std::tuple<Tensor, Tensor> lstm_cell(
-    const Tensor& input, TensorList hx,
+    const Tensor& input, const ITensorList& hx,
     const Tensor& w_ih, const Tensor& w_hh, const c10::optional<Tensor>& b_ih_opt, const c10::optional<Tensor>& b_hh_opt) {
   // See [Note: hacky wrapper removal for optional tensor]
   c10::MaybeOwned<Tensor> b_ih_maybe_owned = at::borrow_from_optional_tensor(b_ih_opt);
@@ -1943,14 +1943,14 @@ return_type name( \
 // Quantized LSTM cell
 using quantized_lstm_cell_type = LSTMCell<QuantizedCellParams>;
 using quantized_lstm_return_type = std::tuple<Tensor, Tensor>;
-std::tuple<Tensor, Tensor> prepare_quantized_lstm_hx(TensorList hx) {
+std::tuple<Tensor, Tensor> prepare_quantized_lstm_hx(ITensorList hx) {
   return std::make_tuple(hx[0], hx[1]);
 }
 
 // Quantized LSTM cell
 using quantized_lstm_cell_dynamic_type = LSTMCell<QuantizedCellParamsDynamic>;
 
-DEFINE_QUANTIZED_RNN_CELL(quantized_lstm_cell, TensorList, quantized_lstm_cell_type, quantized_lstm_return_type, prepare_quantized_lstm_hx);
+DEFINE_QUANTIZED_RNN_CELL(quantized_lstm_cell, const ITensorList&, quantized_lstm_cell_type, quantized_lstm_return_type, prepare_quantized_lstm_hx);
 
 DEFINE_QUANTIZED_RNN_CELL_DYNAMIC(quantized_lstm_cell_dynamic, TensorList, quantized_lstm_cell_dynamic_type, quantized_lstm_return_type, prepare_quantized_lstm_hx);
 

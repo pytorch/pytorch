@@ -18,7 +18,7 @@
 namespace at { namespace native {
 
 template<template<class> class Op>
-std::vector<Tensor> foreach_binary_op(TensorList tensors, at::ArrayRef<Scalar> scalars) {
+std::vector<Tensor> foreach_binary_op(ITensorList tensors, at::ArrayRef<Scalar> scalars) {
     std::vector<std::vector<at::Tensor>> tensor_lists;
     std::vector<at::Tensor> vec_res;
     vec_res.reserve(tensors.size());
@@ -44,7 +44,7 @@ std::vector<Tensor> foreach_binary_op(TensorList tensors, at::ArrayRef<Scalar> s
 }
 
 template<template<class> class Op>
-void foreach_binary_op_(TensorList tensors, at::ArrayRef<Scalar> scalars) {
+void foreach_binary_op_(ITensorList tensors, at::ArrayRef<Scalar> scalars) {
     std::vector<std::vector<at::Tensor>> tensor_lists;
     tensor_lists.emplace_back(tensors.vec());
 
@@ -61,7 +61,7 @@ void foreach_binary_op_(TensorList tensors, at::ArrayRef<Scalar> scalars) {
 }
 
 #define FOREACH_BINARY_OP_SCALARLIST(NAME, OP, DIV_OP)                                                                   \
-void foreach_tensor_##NAME##_scalarlist_kernel_cuda_(TensorList tensors, at::ArrayRef<Scalar> scalars) {                 \
+void foreach_tensor_##NAME##_scalarlist_kernel_cuda_(const ITensorList& tensors, at::ArrayRef<Scalar> scalars) {         \
     check_foreach_api_restrictions(tensors, scalars);                                                                    \
     if (!can_use_fast_route(tensors, scalars, DIV_OP)) {                                                                 \
         return at::native::foreach_tensor_##NAME##_scalarlist_kernel_slow_(tensors, scalars);                            \
@@ -70,7 +70,7 @@ void foreach_tensor_##NAME##_scalarlist_kernel_cuda_(TensorList tensors, at::Arr
     foreach_binary_op_<OP>(tensors, scalars);                                                                            \
 }                                                                                                                        \
                                                                                                                          \
-std::vector<Tensor> foreach_tensor_##NAME##_scalarlist_kernel_cuda(TensorList tensors, at::ArrayRef<Scalar> scalars) {   \
+std::vector<Tensor> foreach_tensor_##NAME##_scalarlist_kernel_cuda(const ITensorList& tensors, at::ArrayRef<Scalar> scalars) { \
     check_foreach_api_restrictions(tensors, scalars);                                                                    \
     if (!can_use_fast_route(tensors, scalars, DIV_OP)) {                                                                 \
         return at::native::foreach_tensor_##NAME##_scalarlist_kernel_slow(tensors, scalars);                             \
@@ -85,7 +85,7 @@ FOREACH_BINARY_OP_SCALARLIST(div, std::divides, /*div_op*/ true);
 
 // This does not use FOREACH_BINARY_OP_SCALARLIST because
 // In the case of subtraction, we dont allow scalar to be boolean following the torch.sub logic
-void foreach_tensor_sub_scalarlist_kernel_cuda_(TensorList tensors, at::ArrayRef<Scalar> scalars) {
+void foreach_tensor_sub_scalarlist_kernel_cuda_(const ITensorList& tensors, at::ArrayRef<Scalar> scalars) {
     check_foreach_api_restrictions(tensors, scalars);
     for (int i = 0; i < tensors.size(); i++) {
         sub_check(tensors[i], scalars[i]);
@@ -98,7 +98,7 @@ void foreach_tensor_sub_scalarlist_kernel_cuda_(TensorList tensors, at::ArrayRef
     foreach_binary_op_<std::minus>(tensors, scalars);
 }
 
-std::vector<Tensor> foreach_tensor_sub_scalarlist_kernel_cuda(TensorList tensors, at::ArrayRef<Scalar> scalars) {
+std::vector<Tensor> foreach_tensor_sub_scalarlist_kernel_cuda(const ITensorList& tensors, at::ArrayRef<Scalar> scalars) {
     check_foreach_api_restrictions(tensors, scalars);
     for (int i = 0; i < tensors.size(); i++) {
         sub_check(tensors[i], scalars[i]);

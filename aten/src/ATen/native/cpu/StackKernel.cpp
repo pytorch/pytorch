@@ -11,10 +11,10 @@ namespace native {
 
 namespace {
 
-void stack_serial_kernel(Tensor& result, TensorList tensors, int64_t dim) {
+void stack_serial_kernel(Tensor& result, ITensorList tensors, int64_t dim) {
   AT_DISPATCH_FLOATING_TYPES(
       result.scalar_type(), "stack_serial_kernel", [&]() {
-        detail::stack_serial_kernel_impl<scalar_t, TensorList>(result, tensors, dim);
+        detail::stack_serial_kernel_impl<scalar_t, ITensorList>(result, tensors, dim);
       });
 }
 

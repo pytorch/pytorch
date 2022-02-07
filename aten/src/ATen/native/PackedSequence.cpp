@@ -185,18 +185,18 @@ std::tuple<Tensor, Tensor> _pad_packed_sequence(const Tensor& data, const Tensor
   return std::make_tuple(output, lengths_t);
 }
 
-Tensor pad_sequence(TensorList sequences, bool batch_first, double padding_value) {
-  const int64_t sequences_size = sequences.size();
+Tensor pad_sequence(const ITensorList& sequences, bool batch_first, double padding_value) {
+  const int64_t sequences_size = static_cast<int64_t>(sequences.size());
   TORCH_CHECK(sequences_size > 0, "received an empty list of sequences");
   IntArrayRef max_size = sequences[0].sizes();
   IntArrayRef trailing_dims = max_size.slice(1);
-  int64_t max_len = std::max_element(
+  auto max_it = std::max_element(
     sequences.begin(),
     sequences.end(),
     [](const Tensor &a, const Tensor &b) {
       return a.size(0) < b.size(0);
-    }
-  )->size(0);
+    });
+  int64_t max_len = (*max_it).size(0);
 
   DimVector out_dims;
   if (batch_first) {

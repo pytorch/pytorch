@@ -85,7 +85,7 @@ void _amp_non_finite_check_and_unscale_cuda_(Tensor& scaled_grad,
 // found_inf:  A single-element float tensor to which 1.0 will be written if any gradient contain infs/nans.
 //             Pre-zeroing found_inf, if appropriate, is the responsibility of the caller.
 // inv_scale:  The inverse of the scale factor by which scaled_grads are currently multiplied.
-void _amp_foreach_non_finite_check_and_unscale_cuda_(TensorList scaled_grads,
+void _amp_foreach_non_finite_check_and_unscale_cuda_(const ITensorList& scaled_grads,
                                                      Tensor& found_inf,
                                                      const Tensor& inv_scale)
 {

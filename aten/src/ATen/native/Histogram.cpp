@@ -51,7 +51,7 @@ namespace {
 
 /* Checks properties of input tensors input, bins, and weight.
  */
-void histogramdd_check_inputs(const Tensor& input, const TensorList& bins, const c10::optional<Tensor>& weight) {
+void histogramdd_check_inputs(const Tensor& input, ITensorList bins, const c10::optional<Tensor>& weight) {
     TORCH_CHECK(input.dim() >= 2, "torch.histogramdd: input tensor should have at least 2 dimensions, but got ",
                 input.dim());
 
@@ -104,7 +104,7 @@ void histogramdd_check_inputs(const Tensor& input, const TensorList& bins, const
 /* Checks properties of output tensors hist and bin_edges, then resizes them.
  */
 void histogramdd_prepare_out(const Tensor& input, const std::vector<int64_t>& bin_ct,
-        const Tensor& hist, const TensorList& bin_edges) {
+        const Tensor& hist, ITensorList bin_edges) {
     const int64_t N = input.size(-1);
 
     TORCH_INTERNAL_ASSERT((int64_t)bin_ct.size() == N);
@@ -127,8 +127,8 @@ void histogramdd_prepare_out(const Tensor& input, const std::vector<int64_t>& bi
     at::native::resize_output(hist, bin_ct);
 }
 
-void histogramdd_prepare_out(const Tensor& input, TensorList bins,
-        const Tensor& hist, const TensorList& bin_edges) {
+void histogramdd_prepare_out(const Tensor& input, ITensorList bins,
+        const Tensor& hist, ITensorList bin_edges) {
     std::vector<int64_t> bin_ct(bins.size());
     std::transform(bins.begin(), bins.end(), bin_ct.begin(), [](Tensor t) { return t.numel() - 1; });
     histogramdd_prepare_out(input, bin_ct, hist, bin_edges);
@@ -240,9 +240,9 @@ std::vector<Tensor> allocate_bin_edges_tensors(const Tensor& self) {
 
 /* Versions of histogramdd in which bins is a Tensor[] defining the sequences of bin edges.
  */
-Tensor& histogramdd_out_cpu(const Tensor& self, TensorList bins,
+Tensor& histogramdd_out_cpu(const Tensor& self, ITensorList bins,
         const c10::optional<Tensor>& weight, bool density,
-        Tensor& hist, TensorList& bin_edges) {
+        Tensor& hist, ITensorList bin_edges) {
     histogramdd_check_inputs(self, bins, weight);
     histogramdd_prepare_out(self, bins, hist, bin_edges);
 
@@ -254,13 +254,10 @@ Tensor& histogramdd_out_cpu(const Tensor& self, TensorList bins,
     return hist;
 }
 
-Tensor histogramdd_cpu(const Tensor& self, TensorList bins,
+Tensor histogramdd_cpu(const Tensor& self, const ITensorList& bins,
         const c10::optional<Tensor>& weight, bool density) {
     Tensor hist = at::empty({0}, self.options(), MemoryFormat::Contiguous);
-    std::vector<Tensor> bin_edges_out = allocate_bin_edges_tensors(self);
-    TensorList bin_edges_out_tl(bin_edges_out);
-
-    histogramdd_out_cpu(self, bins, weight, density, hist, bin_edges_out_tl);
+    histogramdd_out_cpu(self, bins, weight, density, hist, allocate_bin_edges_tensors(self));
     return hist;
 }
 

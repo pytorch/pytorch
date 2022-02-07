@@ -68,8 +68,13 @@ def value_has_tensors(v):
 
 
 def value_is_tensor_type(v):
-    return value_has_tensors(v) and v['dynamic_type'] not in ['at::TensorList', 'const c10::List<c10::optional<at::Tensor>> &']
+    return value_has_tensors(v) and v['dynamic_type'] not in TENSORLIST_TYPE
 
+TENSORLIST_TYPE = [
+    'at::TensorList',
+    'const at::ITensorList &',
+    'const c10::List<c10::optional<at::Tensor>> &',
+]
 
 # for each aten type, how do we handle a return value of that type?
 RETURN_MAP = {
@@ -208,7 +213,7 @@ def self_as_first_argument(arguments):
 def get_num_inputs(o):
     args = 0
     for a in o['arguments']:
-        if a['type'] in ['at::TensorList', 'const c10::List<c10::optional<at::Tensor>> &']:
+        if a['type'] in TENSORLIST_TYPE:
             return '*'
         elif value_has_tensors(a):
             args += 1
@@ -277,17 +282,17 @@ if __name__ == '__main__':
             # e.g. "Float" is at::kFloat
             assert('Type' in o['method_of'])
 
-        static_tensor_inputs = sum(arg['type'] not in ['at::TensorList', 'const c10::List<c10::optional<at::Tensor>> &'] and value_is_tensor_type(arg) for arg in o['arguments'])
-        has_tensorlist = any(arg['type'] in ['at::TensorList', 'const c10::List<c10::optional<at::Tensor>> &'] for arg in o['arguments'])
+        static_tensor_inputs = sum(arg['type'] not in TENSORLIST_TYPE and value_is_tensor_type(arg) for arg in o['arguments'])
+        has_tensorlist = any(arg['type'] in TENSORLIST_TYPE for arg in o['arguments'])
         if has_tensorlist:
-            tensorlist_idx = [i for i, arg in enumerate(o['arguments']) if arg['type'] in ['at::TensorList', 'const c10::List<c10::optional<at::Tensor>> &']][0]
+            tensorlist_idx = [i for i, arg in enumerate(o['arguments']) if arg['type'] in TENSORLIST_TYPE][0]
 
         real_inputs = 0
         for i, arg in enumerate(o['arguments']):
             env['arguments'].append(arg['name'])
             # Pretend the flat argument list is a stack where the end is the top.
             view_length = 'InputSize()' if has_tensorlist and i < tensorlist_idx else static_tensor_inputs
-            if arg['type'] == 'at::TensorList':
+            if arg['type'] == 'at::TensorList' or arg['type'] == 'const at::ITensorList &':
                 # NOTE: do not advance real_inputs here. After this we will
                 # switch to indexing the "stack" from the end
                 env['statements'].append(

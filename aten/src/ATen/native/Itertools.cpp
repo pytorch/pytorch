@@ -30,7 +30,7 @@ Tensor _triu_mask(int64_t n, int64_t dims, bool diagonal, TensorOptions opt) {
 namespace at {
 namespace native{
 
-Tensor cartesian_prod(TensorList tensors) {
+Tensor cartesian_prod(const ITensorList& tensors) {
   for(const Tensor &t : tensors) {
     TORCH_CHECK(t.dim() == 1, "Expect a 1D vector, but got shape ", t.sizes());
   }

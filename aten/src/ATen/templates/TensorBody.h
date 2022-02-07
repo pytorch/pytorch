@@ -62,6 +62,7 @@ namespace at {
 class OptionalTensorRef;
 class Tensor;
 using TensorList = ArrayRef<Tensor>;
+using ITensorList = IList<Tensor>;
 
 using Stream = c10::Stream;
 
@@ -414,18 +415,7 @@ class TORCH_API Tensor: public TensorBase {
   ///     the current implementation will call its grad_fn (even though it is not strictly needed to get this gradients).
   ///     It is an implementation detail on which the user should not rely.
   ///     See https://github.com/pytorch/pytorch/pull/60521#issuecomment-867061780 for more details.
-  void backward(const Tensor & gradient={}, c10::optional<bool> retain_graph=c10::nullopt, bool create_graph=false, c10::optional<TensorList> inputs=c10::nullopt) const {
-    // NB: Adding this wrapper to _backward here because we'd like our
-    // 'backwards' api to accept the 'inputs' argument optionally. Since code gen
-    // currently does not support optional of TensorList our approach is to replace
-    // backward in native_functions.yaml with _backward and call it here instead.
-    if (inputs.has_value()) {
-      TORCH_CHECK(inputs.value().size() > 0, "'inputs' argument to backward cannot be empty")
-      this->_backward(inputs.value(), gradient, retain_graph, create_graph);
-    } else {
-      this->_backward({}, gradient, retain_graph, create_graph);
-    }
-  }
+  void backward(const Tensor & gradient={}, c10::optional<bool> retain_graph=c10::nullopt, bool create_graph=false, c10::optional<TensorList> inputs=c10::nullopt) const;
 
   /// \fn Tensor detach() const;
   ///
@@ -607,7 +597,7 @@ class TORCH_API Tensor: public TensorBase {
     return TensorBase::data();
   }
 
-  void _backward(TensorList inputs, const c10::optional<Tensor>& gradient, c10::optional<bool> keep_graph, bool create_graph) const;
+  void _backward(ITensorList inputs, const c10::optional<Tensor>& gradient, c10::optional<bool> keep_graph, bool create_graph) const;
 
   const Tensor& requires_grad_(bool _requires_grad=true) const {
     TensorBase::requires_grad_(_requires_grad);

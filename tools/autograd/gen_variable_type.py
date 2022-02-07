@@ -37,8 +37,8 @@ from .gen_inplace_or_view_type import (
     AUTOGRAD_NOT_IMPLEMENTED_REGISTRATION
 )
 
-from tools.codegen.api.types import (Binding, DispatcherSignature, BaseCType, intArrayRefT,
-                                     tensorT, tensorListT, MutRefCType, OptionalCType,
+from tools.codegen.api.types import (Binding, DispatcherSignature, BaseCType, TENSOR_LIST_LIKE_CTYPES, intArrayRefT,
+                                     tensorT, tensorListT, iTensorListT, MutRefCType, OptionalCType,
                                      ListCType, SpecialArgName, scalarT, stringT,
                                      VectorCType)
 from tools.codegen.api.autograd import (
@@ -623,7 +623,7 @@ def emit_body(fn: NativeFunctionWithDifferentiabilityInfo) -> List[str]:
         for arg in differentiable_outputs:
             name = arg.name
             # TODO: should be `arg.type.is_tensor_like()`?
-            if arg.cpp_type in ['at::Tensor', 'at::TensorList', 'const c10::List<c10::optional<at::Tensor>> &']:
+            if arg.cpp_type == 'at::Tensor' or arg.cpp_type in TENSOR_LIST_LIKE_CTYPES:
                 body.append(f'throw_error_for_complex_autograd({name}, "{base_name}");')
         return body
 
@@ -689,7 +689,7 @@ def emit_body(fn: NativeFunctionWithDifferentiabilityInfo) -> List[str]:
                     expr = f'SavedVariable({var}, {str(is_output).lower()}, {is_inplace_view})'
                 else:
                     expr = f'SavedVariable({var}, {str(is_output).lower()})'
-            elif type == BaseCType(tensorListT) or type == ListCType(OptionalCType(BaseCType(tensorT))):
+            elif type == BaseCType(iTensorListT) or type == ListCType(OptionalCType(BaseCType(tensorT))):
                 expr = f'make_saved_variable_list({name})'
                 name += '_'
             elif type == BaseCType(intArrayRefT):
@@ -756,7 +756,7 @@ def emit_body(fn: NativeFunctionWithDifferentiabilityInfo) -> List[str]:
         for unpacked_binding in unpacked_bindings:
             arg = unpacked_binding.name
             noref_cpp_type = unpacked_binding.nctype.type.remove_const_ref()
-            if noref_cpp_type == BaseCType(tensorListT):
+            if noref_cpp_type == BaseCType(iTensorListT):
                 stmts_before_call += [SAVE_TENSORLIST_STORAGE.substitute(tensorlist_name=arg),
                                       SAVE_TENSORLIST_IMPL.substitute(tensorlist_name=arg)]
                 stmts_after_call += [ENFORCE_SAME_TENSORLIST_STORAGE.substitute(tensorlist_name=arg),

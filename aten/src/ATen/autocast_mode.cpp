@@ -331,8 +331,8 @@ TORCH_LIBRARY_IMPL(aten, Autocast, m) {
   KERNEL(ADD_NS(addbmm), "addbmm", Tensor (const Tensor &, const Tensor &, const Tensor &, const Scalar&, const Scalar&), lower_precision_fp)
   KERNEL(ADD_NS(baddbmm), "baddbmm", Tensor (const Tensor &, const Tensor &, const Tensor &, const Scalar&, const Scalar&), lower_precision_fp)
   KERNEL(ADD_NS(bmm), "bmm", Tensor (const Tensor &, const Tensor &), lower_precision_fp)
-  KERNEL(ADD_NS(chain_matmul), "chain_matmul", Tensor (TensorList), lower_precision_fp)
-  KERNEL(ADD_NS(linalg_multi_dot), "linalg_multi_dot", Tensor (TensorList), lower_precision_fp)
+  KERNEL(ADD_NS(chain_matmul), "chain_matmul", Tensor (const ITensorList &), lower_precision_fp)
+  KERNEL(ADD_NS(linalg_multi_dot), "linalg_multi_dot", Tensor (const ITensorList &), lower_precision_fp)
   // The macro doesn't like these (I think it chokes on commas inside <>) so write them manually
   m.impl(TORCH_SELECTIVE_NAME("aten::_thnn_fused_lstm_cell"),
          TORCH_FN((&WrapFunction<CastPolicy::lower_precision_fp, DeviceType::CUDA,
@@ -346,8 +346,8 @@ TORCH_LIBRARY_IMPL(aten, Autocast, m) {
                                  &ADD_NS(_thnn_fused_gru_cell)>::type::call)));
   m.impl("lstm_cell",
          TORCH_FN((&WrapFunction<CastPolicy::lower_precision_fp, DeviceType::CUDA,
-                                 std::tuple<Tensor,Tensor> (const Tensor &, TensorList, const Tensor &, const Tensor &, const c10::optional<Tensor>&, const c10::optional<Tensor>&),
-                                 std::tuple<Tensor,Tensor> (const Tensor &, TensorList, const Tensor &, const Tensor &, const c10::optional<Tensor>&, const c10::optional<Tensor>&),
+                                 std::tuple<Tensor,Tensor> (const Tensor &, const ITensorList &, const Tensor &, const Tensor &, const c10::optional<Tensor>&, const c10::optional<Tensor>&),
+                                 std::tuple<Tensor,Tensor> (const Tensor &, const ITensorList &, const Tensor &, const Tensor &, const c10::optional<Tensor>&, const c10::optional<Tensor>&),
                                  &ADD_NS(lstm_cell)>::type::call)));
   m.impl("gru_cell",
          TORCH_FN((&WrapFunction<CastPolicy::lower_precision_fp, DeviceType::CUDA,
@@ -774,8 +774,8 @@ TORCH_LIBRARY_IMPL(aten, AutocastCPU, m) {
                                  &ADD_NS(linalg_inv_ex)>::type::call)));
 
   // promote
-  KERNEL_CPU(ADD_NS(cat), "cat", Tensor (TensorList, int64_t), promote)
-  KERNEL_CPU(ADD_NS(stack), "stack", Tensor (TensorList, int64_t), promote)
+  KERNEL_CPU(ADD_NS(cat), "cat", Tensor (const ITensorList &, int64_t), promote)
+  KERNEL_CPU(ADD_NS(stack), "stack", Tensor (const ITensorList &, int64_t), promote)
   KERNEL_CPU(ADD_NS(index_copy), "index_copy", Tensor (const Tensor &, int64_t, const Tensor &, const Tensor &), promote)
   KERNEL_CPU(ADD_NS(index_copy), "index_copy.dimname", Tensor (const Tensor &, at::Dimname, const Tensor &, const Tensor &), promote)
 

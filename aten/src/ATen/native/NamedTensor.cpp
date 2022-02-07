@@ -288,7 +288,7 @@ Tensor align_as(const Tensor& tensor, const Tensor& other) {
   return native::align_to(tensor, other.names());
 }
 
-static std::vector<Tensor> align_tensors_to(TensorList tensors, DimnameList names) {
+static std::vector<Tensor> align_tensors_to(ITensorList tensors, DimnameList names) {
   std::vector<Tensor> result;
   result.reserve(tensors.size());
   for (const auto& tensor : tensors) {
@@ -297,13 +297,13 @@ static std::vector<Tensor> align_tensors_to(TensorList tensors, DimnameList name
   return result;
 }
 
-std::vector<Tensor> align_tensors(TensorList tensors) {
+std::vector<Tensor> align_tensors(const ITensorList& tensors) {
   auto longest_dim = std::max_element(
       tensors.begin(), tensors.end(),
       [](const Tensor& a, const Tensor& b) {
         return a.dim() < b.dim();
       });
-  return align_tensors_to(tensors, longest_dim->names());
+  return align_tensors_to(tensors, (*longest_dim).names());
 }
 
 // Misc. Dimname overloads that don't have homes. Maybe we should move

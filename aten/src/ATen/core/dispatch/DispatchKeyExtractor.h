@@ -61,7 +61,7 @@ namespace detail {
         ts = ts | x->key_set();
       }
     }
-    void operator()(at::ArrayRef<at::Tensor> xs) {
+    void operator()(at::ITensorList xs) {
       for (const auto& x : xs) {
         ts = ts | x.key_set();
       }

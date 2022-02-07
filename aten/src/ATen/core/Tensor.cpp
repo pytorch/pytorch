@@ -103,7 +103,20 @@ bool TensorBase::retains_grad() const {
   return impl::GetVariableHooks()->retains_grad(*this);
 }
 
-void Tensor::_backward(TensorList inputs,
+void Tensor::backward(const Tensor & gradient, c10::optional<bool> retain_graph, bool create_graph, c10::optional<TensorList> inputs) const {
+  // NB: Adding this wrapper to _backward here because we'd like our
+  // 'backwards' api to accept the 'inputs' argument optionally. Since code gen
+  // currently does not support optional of TensorList our approach is to replace
+  // backward in native_functions.yaml with _backward and call it here instead.
+  if (inputs.has_value()) {
+    TORCH_CHECK(inputs.value().size() > 0, "'inputs' argument to backward cannot be empty")
+    this->_backward(inputs.value(), gradient, retain_graph, create_graph);
+  } else {
+    this->_backward({}, gradient, retain_graph, create_graph);
+  }
+}
+
+void Tensor::_backward(ITensorList inputs,
         const c10::optional<Tensor>& gradient,
         c10::optional<bool> keep_graph,
         bool create_graph) const {

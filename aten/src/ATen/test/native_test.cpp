@@ -43,7 +43,7 @@ void TestChunk(TensorOptions T, Tensor& t) {
   ASSERT_EQUAL(at::cat(chunkMethod, 0), t);
 }
 
-typedef Tensor StackFunc (TensorList, int64_t);
+typedef Tensor StackFunc (const ITensorList&, int64_t);
 
 // helper function for TestStack
 void _test_stack(TensorList inputs, int64_t dim, StackFunc stack_func) {

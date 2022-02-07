@@ -1,6 +1,7 @@
 #pragma once
 
 #include <ATen/core/Tensor.h>
+#include <ATen/core/IList.h>
 #include <c10/util/irange.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
@@ -13,12 +14,12 @@ namespace at {
 namespace native {
 namespace {
 // Check if tensor list has either a boolean tensor or a integer tensor
-bool has_integral_tensor(TensorList tensors, const bool includeBool) {
+bool has_integral_tensor(ITensorList tensors, const bool includeBool) {
   return std::any_of(tensors.begin(), tensors.end(),
     [&includeBool](const auto & t) { return at::isIntegralType(t.scalar_type(), includeBool); });
 }
 // check if tensor list has bool tensors
-bool has_bool_tensor(TensorList tensors) {
+bool has_bool_tensor(ITensorList tensors) {
   return std::any_of(tensors.begin(), tensors.end(),
     [](const auto & t) -> bool { return t.scalar_type() == ScalarType::Bool; });
 }
@@ -27,22 +28,22 @@ bool has_bool_tensor(TensorList tensors) {
 // - Tensor lists must be non-empty.
 // - All TensorLists and ScalarLists must have the same number of elements.
 // - Corresponding tensors must have the same size.
-void check_foreach_api_restrictions(TensorList tensors) {
+void check_foreach_api_restrictions(ITensorList tensors) {
   TORCH_CHECK(tensors.size() > 0, "Tensor list must have at least one tensor.");
 }
 
-void check_foreach_api_restrictions(TensorList tensors, ArrayRef<Scalar> scalars) {
+void check_foreach_api_restrictions(ITensorList tensors, ArrayRef<Scalar> scalars) {
   check_foreach_api_restrictions(tensors);
   TORCH_CHECK(tensors.size() == scalars.size(), "Tensor list must have same number of elements as scalar list.");
 }
 
-void check_foreach_api_restrictions(TensorList tensors1, TensorList tensors2) {
+void check_foreach_api_restrictions(ITensorList tensors1, ITensorList tensors2) {
   TORCH_CHECK(tensors1.size() > 0, "Tensor list must have at least one tensor.");
   TORCH_CHECK(tensors2.size() > 0, "Tensor list must have at least one tensor.");
   TORCH_CHECK(tensors1.size() == tensors2.size(), "Tensor lists must have the same number of tensors, got ", tensors1.size(), " and ", tensors2.size());
 }
 
-void check_foreach_api_restrictions(TensorList tensors1, TensorList tensors2, TensorList tensors3) {
+void check_foreach_api_restrictions(ITensorList tensors1, ITensorList tensors2, ITensorList tensors3) {
   TORCH_CHECK(tensors1.size() > 0, "Tensor list must have at least one tensor.");
   TORCH_CHECK(tensors2.size() > 0, "Tensor list must have at least one tensor.");
   TORCH_CHECK(tensors3.size() > 0, "Tensor list must have at least one tensor.");
@@ -50,7 +51,7 @@ void check_foreach_api_restrictions(TensorList tensors1, TensorList tensors2, Te
   TORCH_CHECK(tensors1.size() == tensors3.size(), "Tensor lists must have the same number of tensors, got ", tensors1.size(), " and ", tensors3.size());
 }
 
-void check_foreach_api_restrictions(TensorList tensors1, TensorList tensors2, TensorList tensors3, ArrayRef<Scalar> scalars) {
+void check_foreach_api_restrictions(ITensorList tensors1, ITensorList tensors2, ITensorList tensors3, ArrayRef<Scalar> scalars) {
   check_foreach_api_restrictions(tensors1, tensors2, tensors3);
   TORCH_CHECK(tensors1.size() == scalars.size(), "Tensor list must have same number of elements as scalar list, got ", tensors1.size(), " and ", scalars.size());
 }
@@ -65,7 +66,7 @@ void check_foreach_api_restrictions(TensorList tensors1, TensorList tensors2, Te
 // Please, make sure to call check_foreach_api_restrictions before calling this method.
 // There is a set of preconditions that have to be satisfied.
 bool check_fast_path_restrictions(
-  ArrayRef<TensorList> tensorLists,
+  ArrayRef<ITensorList> tensorLists,
   ArrayRef<Scalar> scalarList = {},
   bool does_op_promote_integer_inputs_to_float = false) {
     const auto expected_dtype = tensorLists[0][0].dtype();
@@ -123,7 +124,7 @@ bool check_fast_path_restrictions(
     return true;
 }
 
-bool can_use_fast_route(ArrayRef<TensorList> tensorLists,
+bool can_use_fast_route(ArrayRef<ITensorList> tensorLists,
                         ArrayRef<Scalar> scalarList = {},
                         bool does_op_promote_integer_inputs_to_float = false) {
 #if defined(USE_ROCM)
@@ -133,7 +134,7 @@ bool can_use_fast_route(ArrayRef<TensorList> tensorLists,
 #endif
 }
 
-bool can_use_fast_route(TensorList tensors1, TensorList tensors2, bool does_op_promote_integer_inputs_to_float = false) {
+bool can_use_fast_route(ITensorList tensors1, ITensorList tensors2, bool does_op_promote_integer_inputs_to_float = false) {
 #if defined(USE_ROCM)
   return false;
 #else

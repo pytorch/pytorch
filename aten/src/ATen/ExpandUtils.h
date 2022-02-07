@@ -1,6 +1,7 @@
 #pragma once
 
 #include <ATen/core/DimVector.h>
+#include <ATen/core/IList.h>
 #include <ATen/Tensor.h>
 #include <c10/util/Exception.h>
 #include <c10/util/MaybeOwned.h>
@@ -263,7 +264,7 @@ inline c10::MaybeOwned<Tensor> expand_size(const Tensor &to_expand, IntArrayRef 
 
 inline c10::MaybeOwned<Tensor> expand_size(Tensor &&to_expand, IntArrayRef sizes, const char *api_name) = delete;
 
-inline std::vector<Tensor> expand_outplace(TensorList to_expand) {
+inline std::vector<Tensor> expand_outplace(ITensorList to_expand) {
   // expands a list of Tensors; ignores undefined (null) tensors
   bool first = true;
   DimVector sizes;

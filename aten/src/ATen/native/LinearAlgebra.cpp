@@ -698,7 +698,7 @@ Tensor matrix_chain_multiplication(
 }
 
 // Implements torch.linalg.multi_dot
-Tensor multi_dot_impl(TensorList _tensors, c10::optional<Tensor> _out) {
+Tensor multi_dot_impl(ITensorList _tensors, c10::optional<Tensor> _out) {
   const size_t n = _tensors.size();
   TORCH_CHECK(n >= 2, "multi_dot(): expected at least 2 tensors but got ", n);
 
@@ -860,16 +860,16 @@ Tensor multi_dot_impl(TensorList _tensors, c10::optional<Tensor> _out) {
 
 } // namespace
 
-Tensor linalg_multi_dot(TensorList tensors) {
+Tensor linalg_multi_dot(const ITensorList& tensors) {
   return multi_dot_impl(tensors, c10::nullopt);
 }
 
-Tensor& linalg_multi_dot_out(TensorList tensors, Tensor& result) {
+Tensor& linalg_multi_dot_out(const ITensorList& tensors, Tensor& result) {
   multi_dot_impl(tensors, result);
   return result;
 }
 
-Tensor chain_matmul(TensorList matrices) {
+Tensor chain_matmul(const ITensorList& matrices) {
   TORCH_WARN_ONCE(
       "torch.chain_matmul is deprecated and will be removed in a future PyTorch release. ",
       "Use torch.linalg.multi_dot instead, which accepts a list of two or more tensors rather than ",
@@ -887,7 +887,7 @@ Tensor chain_matmul(TensorList matrices) {
   return at::native::linalg_multi_dot(matrices);
 }
 
-Tensor& chain_matmul_out(TensorList matrices, Tensor& result) {
+Tensor& chain_matmul_out(const ITensorList& matrices, Tensor& result) {
   TORCH_WARN_ONCE(
       "torch.chain_matmul is deprecated and will be removed in a future PyTorch release. ",
       "Use torch.linalg.multi_dot instead, which accepts a list of two or more tensors rather than ",

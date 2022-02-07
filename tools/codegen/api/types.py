@@ -7,6 +7,13 @@ from enum import Enum
 
 _T = TypeVar('_T')
 
+TENSOR_LIST_LIKE_CTYPES = [
+    'at::TensorList',
+    'const c10::List<c10::optional<at::Tensor>> &',
+    'const at::ITensorList &',
+    'const at::IOptTensorRefList &'
+]
+
 # An ArgName is just the str name of the argument in schema;
 # but in some special circumstances, we may add a little extra
 # context.  The Enum SpecialArgName covers all of these cases;

@@ -717,7 +717,7 @@ void addInputs(
 void addInputs(
     Node* n,
     const char* name,
-    at::TensorList value,
+    at::ITensorList value,
     bool allow_undefined) {
   Graph* g = n->owningGraph();
   Node* list_node = nullptr;

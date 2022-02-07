@@ -127,10 +127,10 @@
 #     - if your function is applied element wise (and has a single input), you
 #       can specify so by just using the string "auto_element_wise" for the formula.
 #
-# Note that to avoid unpacking overhead, functions taking TensorList as inputs
-# will always have their forward grad formula called. This function is responsible
-# to check if any computation is needed and should return an undefined Tensor when
-# there is nothing to do. You can check "cat_forward" for a full example.
+# Note that to avoid unpacking overhead, functions taking TensorList (or ITensorList)
+# as inputs will always have their forward grad formula called. This function is
+# responsible to check if any computation is needed and should return an undefined
+# Tensor when there is nothing to do. You can check "cat_forward" for a full example.
 #
 # NB: There are a number of gradient definitions in here which are bogus
 # (implemented using zeros_like).  These gradients are (hopefully) not

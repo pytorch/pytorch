@@ -346,7 +346,7 @@ struct VariableHooks final : at::impl::VariableHooksInterface {
   int64_t _version(const at::TensorBase & self) const override;
   void retain_grad(const at::TensorBase& self) const override;
   bool retains_grad(const at::TensorBase& self) const override;
-  void _backward(const Tensor& self, at::TensorList inputs,
+  void _backward(const Tensor& self, at::ITensorList inputs,
     const c10::optional<Tensor>& gradient, c10::optional<bool> keep_graph,
     bool create_graph) const override;
   void requires_grad_(const at::TensorBase& self, bool _requires_grad) const override;
@@ -483,7 +483,7 @@ bool VariableHooks::retains_grad(const at::TensorBase& self) const {
 
 void VariableHooks::_backward(
     const Tensor& self,
-    at::TensorList inputs,
+    at::ITensorList inputs,
     const c10::optional<Tensor>& gradient,
     c10::optional<bool> keep_graph,
     bool create_graph) const {

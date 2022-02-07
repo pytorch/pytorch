@@ -201,7 +201,7 @@ void histogramdd_cpu_contiguous(Tensor& hist, const TensorList& bin_edges,
  */
 template<BIN_SELECTION_ALGORITHM bin_algorithm>
 void histogramdd_out_cpu_template(const Tensor& self, const c10::optional<Tensor>& weight, bool density,
-        Tensor& hist, const TensorList& bin_edges) {
+        Tensor& hist, ITensorList bin_edges) {
     hist.fill_(0);
 
     const int64_t N = self.size(-1);
@@ -252,7 +252,7 @@ void histogramdd_out_cpu_template(const Tensor& self, const c10::optional<Tensor
  * Refer to histogramdd_out_cpu_template for more details.
  */
 static void histogramdd_kernel_impl(const Tensor& self, const c10::optional<Tensor>& weight, bool density,
-        Tensor& hist, const TensorList& bin_edges) {
+        Tensor& hist, ITensorList bin_edges) {
     histogramdd_out_cpu_template<BINARY_SEARCH>(self, weight, density, hist, bin_edges);
 }
 

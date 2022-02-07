@@ -2,6 +2,7 @@
 
 #include <c10/macros/Export.h>
 #include <ATen/core/Tensor.h>
+#include <ATen/core/IList.h>
 
 // A little explanation about why this file exists at all.  We have
 // a few methods on Tensor class which require access to reified access to
@@ -57,7 +58,7 @@ struct TORCH_API VariableHooksInterface {
   virtual int64_t _version(const TensorBase&) const = 0;
   virtual void retain_grad(const TensorBase&) const = 0;
   virtual bool retains_grad(const TensorBase&) const = 0;
-  virtual void _backward(const Tensor&, TensorList, const c10::optional<Tensor>&, c10::optional<bool>, bool) const = 0;
+  virtual void _backward(const Tensor&, ITensorList, const c10::optional<Tensor>&, c10::optional<bool>, bool) const = 0;
   virtual void requires_grad_(const TensorBase&, bool) const = 0;
 };
 

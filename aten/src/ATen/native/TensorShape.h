@@ -24,7 +24,7 @@ inline void check_cat_shape_except_dim(const Tensor & first, const Tensor & seco
    }
  }
 
-inline void check_cat_no_zero_dim(at::ArrayRef<Tensor> tensors) {
+inline void check_cat_no_zero_dim(ITensorList tensors) {
   for(const auto i : c10::irange(tensors.size())) {
     auto& t = tensors[i];
     TORCH_CHECK(t.dim() > 0,

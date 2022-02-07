@@ -187,7 +187,7 @@ unsigned char einsum_index_to_label(uint8_t index) {
 // 2. Unsqueeze missing dimensions from input operands and permute to align them
 // 3. Compute result by multiplying input operands and summing contraction
 //    dimensions We do the last part by reducing to bmm.
-Tensor einsum(c10::string_view equation, TensorList operands) {
+Tensor einsum(c10::string_view equation, const ITensorList& operands) {
   TORCH_CHECK(!operands.empty(), "einsum(): must provide at least one operand");
 
   // Code used to identify ELLIPSIS ("...")

@@ -267,7 +267,7 @@ TORCH_API void addInputs(
 TORCH_API void addInputs(
     Node* n,
     const char* name,
-    ArrayRef<at::Tensor> value,
+    at::ITensorList value,
     bool allow_undefined = false);
 TORCH_API void addInputs(
     Node* n,

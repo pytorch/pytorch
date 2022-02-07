@@ -110,10 +110,6 @@ def translate(
             ctx[NamedCType(t.name, BaseCType(optionalScalarRefT))] = \
                 f'({b.expr}.has_value() ? at::OptionalScalarRef(&({b.expr}.value())) : at::OptionalScalarRef())'
 
-        # [Note: ITensorList]
-        if t.type == BaseCType(tensorListT):
-            ctx[NamedCType(t.name, BaseCType(iTensorListT))] = f"{b.expr}"
-
         # [Note: IOptTensorRefList]
         if t.type == ConstRefCType(ListCType(OptionalCType(BaseCType(tensorT)))):
             ctx[NamedCType(t.name, BaseCType(iOptTensorRefListT))] = f"{b.expr}"

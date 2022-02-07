@@ -10,7 +10,7 @@ namespace cudnn_rnn {
 
 TORCH_CUDA_CPP_API std::tuple<Tensor, std::vector<Tensor>>
 copy_weights_to_flat_buf_views(
-    TensorList weight_arr,
+    const ITensorList& weight_arr,
     int64_t weight_stride0,
     int64_t input_size,
     int64_t mode,

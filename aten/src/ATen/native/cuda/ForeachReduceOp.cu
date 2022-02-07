@@ -104,7 +104,7 @@ __global__ void lpnorm_cleanup(
 // note(mkozuki): Why excluding Int and Complex from fast path
 // - Int: at::norm does not support.
 // - Complex: __shfl_down_sync does not support complex and foreach does not support functions whose inputs dtypes and output dtype are different.
-std::vector<Tensor> foreach_tensor_norm_cuda(TensorList tensors, const Scalar& ord) {
+std::vector<Tensor> foreach_tensor_norm_cuda(const ITensorList& tensors, const Scalar& ord) {
   double p;
   if (ord.isIntegral(false)) {
     p = ord.to<int64_t>();

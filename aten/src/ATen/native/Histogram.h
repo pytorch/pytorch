@@ -7,7 +7,7 @@
 
 namespace at { namespace native {
 
-using histogramdd_fn = void(*)(const Tensor&, const c10::optional<Tensor>&, bool, Tensor&, const TensorList&);
+using histogramdd_fn = void(*)(const Tensor&, const c10::optional<Tensor>&, bool, Tensor&, ITensorList);
 using histogramdd_linear_fn = void(*)(const Tensor&, const c10::optional<Tensor>&, bool, Tensor&, const TensorList&, bool);
 
 DECLARE_DISPATCH(histogramdd_fn, histogramdd_stub);
