@@ -345,6 +345,10 @@ void Kernel::registerExpr(Expr* expr) {
   Fusion::registerExpr(expr);
 }
 
+std::vector<Expr*>& KernelInternalProxy::topLevelExprs() {
+  return kernel_->top_level_exprs_;
+}
+
 } // namespace kir
 } // namespace cuda
 } // namespace fuser

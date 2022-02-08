@@ -53,6 +53,8 @@ class CudaKernelGenerator : private OptOutConstDispatch {
       params.push_back(val);
     }
     for (auto val : kernel_->outputs()) {
+      TORCH_INTERNAL_ASSERT(
+          !val->isScalar(), "No scalar output is allowed: ", val->toString());
       params.push_back(val);
     }
 
@@ -247,7 +249,8 @@ class CudaKernelGenerator : private OptOutConstDispatch {
 
   void handle(const Bool* pred) final {
     const auto def = pred->definition();
-    if (print_inline_ && def != nullptr) {
+    const bool has_alloc = alloc_map_.find(pred) != alloc_map_.end();
+    if (def != nullptr && !has_alloc) {
       code_ << "(" << gen(def) << ")";
     } else if (pred->isConst()) {
       code_ << (*pred->value() ? "true" : "false");
@@ -258,7 +261,8 @@ class CudaKernelGenerator : private OptOutConstDispatch {
 
   void handle(const Double* d) final {
     const auto def = d->definition();
-    if (print_inline_ && def != nullptr) {
+    const bool has_alloc = alloc_map_.find(d) != alloc_map_.end();
+    if (def != nullptr && !has_alloc) {
       code_ << "(" << gen(def) << ")";
     } else if (d->isConst()) {
       const int digits = std::numeric_limits<Double::ScalarType>::max_digits10;
@@ -270,8 +274,9 @@ class CudaKernelGenerator : private OptOutConstDispatch {
 
   void handle(const Int* i) final {
     const auto def = i->definition();
-    if (print_inline_ && def != nullptr) {
-      code_ << "(" << gen(def) << ")";
+    const bool has_alloc = alloc_map_.find(i) != alloc_map_.end();
+    if (def != nullptr && !has_alloc) {
+      code_ << "(" << genInline(def) << ")";
     } else if (i->isConst()) {
       code_ << *i->value();
     } else {
@@ -1259,6 +1264,9 @@ class CudaKernelGenerator : private OptOutConstDispatch {
   void handle(const kir::Allocate* alloc) final {
     const auto buffer_dtype = alloc->buffer()->dtype();
 
+    TORCH_INTERNAL_ASSERT(alloc->buffer() != nullptr);
+    alloc_map_.emplace(alloc->buffer(), alloc);
+
     if (!alloc->buffer()->isA<TensorView>()) {
       indent() << buffer_dtype << " " << gen(alloc->buffer()) << ";\n";
       return;
@@ -1338,6 +1346,10 @@ class CudaKernelGenerator : private OptOutConstDispatch {
 
   //! Holds active replacement mappings during codegen
   std::unordered_map<const Statement*, const Statement*> replacement_map_;
+
+  //! Keep track of Allocate node for Val. Used to determine if Val
+  //! should be inlined.
+  std::unordered_map<const Val*, const kir::Allocate*> alloc_map_;
 };
 
 } // namespace

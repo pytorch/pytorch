@@ -20629,6 +20629,91 @@ TEST_F(NVFuserTest, FusionBroadcastConcretization4_CUDA) {
 }
 #endif
 
+// Test code generation of allocated scalars
+TEST_F(NVFuserTest, FusionCodegenAllocatedScalars_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  // Fusion is just a dummy container in this test, just used for
+  // getting a Kernel container
+  auto tv0 = makeSymbolicTensor(0);
+  fusion.addInput(tv0);
+  auto tv1 = set(tv0);
+  fusion.addOutput(tv1);
+
+  GpuLower gpulw(&fusion);
+  auto kernel = gpulw.kernel();
+
+  // Set the kernel as the current fusion
+  FusionGuard kg(kernel);
+
+  // Create alocated scalars
+  auto ks0 = add(kernel->zeroVal(), kernel->oneVal());
+  auto ks0_alloc = IrBuilder::create<kir::Allocate>(
+      ks0, MemoryType::Local, kernel->oneVal());
+
+  auto ks1 = add(ks0, kernel->oneVal());
+  auto ks1_alloc = IrBuilder::create<kir::Allocate>(
+      ks1, MemoryType::Local, kernel->oneVal());
+
+  auto tk0 = kernel->inputs()[0]->as<TensorView>();
+  auto tki0 = IrBuilder::create<kir::TensorIndex>(tk0, std::vector<Val*>{ks0});
+  auto tki1 = IrBuilder::create<kir::TensorIndex>(tk0, std::vector<Val*>{ks1});
+  auto tk0_expr = IrBuilder::create<UnaryOp>(UnaryOpType::Set, tki0, tki1);
+
+  // Insert the scalar expression and the allocation of the
+  // output directly to the kernel
+  auto proxy = kir::KernelInternalProxy(kernel);
+
+  const auto indent = "  ";
+  const auto ks0_name = "i" + std::to_string(ks0->name());
+  const auto ks1_name = "i" + std::to_string(ks1->name());
+  const auto tk0_name = "T" + std::to_string(tk0->name());
+
+  auto& exprs = proxy.topLevelExprs();
+  exprs.push_back(tk0_expr);
+
+  // Invalid code gen
+  const auto no_alloc_code = codegen::generateCudaKernel(kernel);
+
+  // Without alloc, Int vals are just inlined, resulting in:
+  // t0[(0 + 1)] = t0[((0 + 1) + 1)]
+  std::stringstream no_alloc_ref;
+  no_alloc_ref << "\n"
+               << indent << tk0_name << "[(0 + 1)]\n"
+               << indent << indent << " = " << tk0_name << "[((0 + 1) + 1)];\n";
+
+  TORCH_CHECK(
+      no_alloc_code.find(no_alloc_ref.str()) != std::string::npos,
+      "Invalid code generation. Expected:",
+      no_alloc_ref.str(),
+      "Actual:\n",
+      no_alloc_code);
+
+  // Insert proper allocations and definitions
+  exprs.insert(std::find(exprs.begin(), exprs.end(), tk0_expr), ks0_alloc);
+  exprs.insert(
+      std::find(exprs.begin(), exprs.end(), tk0_expr), ks0->definition());
+  exprs.insert(std::find(exprs.begin(), exprs.end(), tk0_expr), ks1_alloc);
+  exprs.insert(
+      std::find(exprs.begin(), exprs.end(), tk0_expr), ks1->definition());
+
+  const auto valid_code = codegen::generateCudaKernel(kernel);
+
+  std::stringstream valid_ref;
+  valid_ref << "\n"
+            << indent << tk0_name << "[" << ks0_name << "]\n"
+            << indent << indent << " = " << tk0_name << "[" << ks1_name
+            << "];\n";
+
+  TORCH_CHECK(
+      valid_code.find(valid_ref.str()) != std::string::npos,
+      "Invalid code generation. Expected:",
+      valid_ref.str(),
+      "Actual:\n",
+      valid_code);
+}
+
 } // namespace jit
 } // namespace torch
 #endif // #if defined(USE_CUDA)

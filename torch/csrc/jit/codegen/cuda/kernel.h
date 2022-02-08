@@ -80,10 +80,14 @@ struct KernelSummary {
       broadcast_parallel_types;
 };
 
+class KernelInternalProxy;
+
 //! Container for a lowered Kernel IR
 //!
 // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 class TORCH_CUDA_CU_API Kernel final : public Fusion {
+  friend KernelInternalProxy;
+
  public:
   // Kernel starts by grabbing all the nodes from the provided fusion.
   // Kernel is not SSA, if a definition is not set, we should update it, but
@@ -148,6 +152,19 @@ class TORCH_CUDA_CU_API Kernel final : public Fusion {
   KernelSummary summary_;
 
   WarpPaddedParallelInfo warp_padded_parallel_info_;
+};
+
+//! A special debugging proxy for Kernel.
+//!
+//! Should not be used for other than testing and debugging.
+class TORCH_CUDA_CU_API KernelInternalProxy {
+ public:
+  KernelInternalProxy(Kernel* kernel) : kernel_(kernel) {}
+
+  std::vector<Expr*>& topLevelExprs();
+
+ private:
+  Kernel* kernel_ = nullptr;
 };
 
 } // namespace kir
