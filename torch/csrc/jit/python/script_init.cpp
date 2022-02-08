@@ -1395,12 +1395,7 @@ void initJitScriptBindings(PyObject* module) {
       .def(
           "get_class",
           [](const std::shared_ptr<CompilationUnit>& self,
-             const std::string& name) { return self->get_class(name); })
-      .def(
-          "drop_all_functions",
-          [](const std::shared_ptr<CompilationUnit>& self) {
-            self->drop_all_functions();
-          });
+             const std::string& name) { return self->get_class(name); });
 
   py::class_<StrongFunctionPtr>(m, "ScriptFunction", py::dynamic_attr())
       .def(
@@ -1761,7 +1756,7 @@ void initJitScriptBindings(PyObject* module) {
   m.def("_get_max_operator_version", &getMaxOperatorVersion);
   m.def("_get_operator_version_map", &get_operator_version_map);
   m.def("_get_upgrader_ranges", &getUpgradersRangeForOp);
-  m.def("_is_op_current", &isOpSymbolCurrent);
+  m.def("_is_op_symbol_current", &isOpSymbolCurrent);
   m.def("_test_only_add_entry_to_op_version_map", &test_only_add_entry);
   m.def("_test_only_remove_entry_to_op_version_map", &test_only_remove_entry);
   m.def(

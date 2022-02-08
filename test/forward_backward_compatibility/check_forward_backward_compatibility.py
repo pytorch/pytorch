@@ -172,7 +172,7 @@ def has_valid_upgraders(schema, version_map):
 
     current_version = torch._C._get_max_operator_version()
     for overload in possible_overloads:
-        if not torch._C._is_op_current(overload, current_version):
+        if not torch._C._is_op_symbol_current(overload, current_version):
             return False
     return True
 
