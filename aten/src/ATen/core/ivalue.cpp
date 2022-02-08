@@ -467,7 +467,7 @@ std::ostream& printMaybeAnnotatedList(
   auto list_elem_type = the_list.type()->containedType(0);
   if (the_list.toListRef().size() == 0 ||
       !elementTypeCanBeInferredFromMembers(list_elem_type)) {
-    out << "annotate(" << the_list.type()->annotation_str() << ", ";
+    out << "annotate(" << the_list.type<c10::Type>()->annotation_str() << ", ";
     printList(out, the_list.toListRef(), "[", "]", formatter);
     out << ")";
     return out;
@@ -508,7 +508,7 @@ std::ostream& printMaybeAnnotatedDict(
   auto value_type = the_dict.type()->castRaw<DictType>()->getValueType();
   if (the_dict.toGenericDict().size() == 0 ||
       !elementTypeCanBeInferredFromMembers(value_type)) {
-    out << "annotate(" << the_dict.type()->annotation_str() << ",";
+    out << "annotate(" << the_dict.type<c10::Type>()->annotation_str() << ",";
     printDict(out, the_dict.toGenericDict(), formatter) << ")";
   } else {
     return printDict(out, the_dict.toGenericDict(), formatter);

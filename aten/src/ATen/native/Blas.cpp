@@ -154,6 +154,10 @@ Tensor dot(const Tensor &self, const Tensor &other){
   at::NoNamesGuard guard;
   dot_check(self, other);
 
+  if (self._is_zerotensor() || other._is_zerotensor()) {
+    return at::_efficientzerotensor({}, self.options());
+  }
+
   if (use_mkldnn_bf16_matmul(self, other, /*result=*/Tensor())){
     // mkldnn matmul expect result have sizes info to create ideep tensor
     auto r =  at::empty({1, 1}, self.options());
@@ -187,6 +191,10 @@ Tensor vdot(const Tensor &self, const Tensor &other){
   at::NoNamesGuard guard;
   // For complex dtypes.
   dot_check(self, other);
+
+  if (self._is_zerotensor() || other._is_zerotensor()) {
+    return at::_efficientzerotensor({}, self.options());
+  }
 
   return AT_DISPATCH_COMPLEX_TYPES(self.scalar_type(), "vdot", [&] {
     Tensor result = at::empty({}, self.options());
