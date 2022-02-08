@@ -1,6 +1,5 @@
 # Owner(s): ["oncall: distributed"]
 
-from email.policy import default
 import itertools
 import sys
 from unittest.mock import patch
@@ -51,7 +50,7 @@ class TestGradAcc(FSDPTest):
                 synchronized until the final iteration.
         """
         # Use double precision to avoid floating point drift
-        default_dtype = torch.get_default_dtype()
+        old_default_dtype = torch.get_default_dtype()
         torch.set_default_dtype(torch.float64)
 
         # Initialize the FSDP model
@@ -112,7 +111,8 @@ class TestGradAcc(FSDPTest):
             assert ref_grad.dtype == acc_grad.dtype
             torch.testing.assert_allclose(ref_grad, acc_grad)
 
-        torch.set_default_dtype(default_dtype)
+        # Restore the default dtype
+        torch.set_default_dtype(old_default_dtype)
 
     @skip_if_lt_x_gpu(2)
     @parametrize(
