@@ -4115,7 +4115,6 @@ class TestONNXRuntime(unittest.TestCase):
 
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_lstm_sequence(self):
-        # TODO: Bug in shape inference preventing full symbolic shape inference.
         class LstmNet(torch.nn.Module):
             def __init__(self):
                 super().__init__()
