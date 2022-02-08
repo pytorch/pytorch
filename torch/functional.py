@@ -1788,7 +1788,7 @@ def unravel_index(
     Args:
         indices: An integral `Tensor` containing flattened indices of a `Tensor` of dimension `shape`.
         shape: The shape (can be an `int`, a `Sequence` or a `Tensor`) of the `Tensor` for which
-        the flattened `indices` are unraveled.
+               the flattened `indices` are unraveled.
 
     Keyword Args:
         as_tuple: A boolean value, which if `True` will return the result as tuple of Tensors,
@@ -1797,6 +1797,9 @@ def unravel_index(
     Returns:
         unraveled coordinates from the given `indices` and `shape`. See description of `as_tuple` for
         returning a `tuple`.
+
+    .. note:: The default behaviour of this function is analogous to
+              `numpy.unravel_index <https://numpy.org/doc/stable/reference/generated/numpy.unravel_index.html>`_.
 
     Example::
         >>> indices = torch.tensor([22, 41, 37])
@@ -1807,6 +1810,13 @@ def unravel_index(
                 [6, 1]])
         >>> torch.unravel_index(indices, shape, as_tuple=True)
         (tensor([3, 6, 6]), tensor([4, 5, 1]))
+
+        >>> indices = torch.tensor([3, 10, 12])
+        >>> shape = (4, 2, 3)
+        >>> torch.unravel_index(indices, shape, as_tuple=False)
+        tensor([[0, 1, 0],
+                [1, 1, 1],
+                [2, 0, 0]])
     """
     def _helper_type_check(inp: Union[int, Sequence, Tensor], name: str):
         # `indices` is expected to be a tensor, while `shape` can be a sequence/int/tensor
