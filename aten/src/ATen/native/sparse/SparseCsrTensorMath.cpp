@@ -761,11 +761,7 @@ Tensor linalg_solve_sparse_csr(const Tensor& input, const Tensor& other) {
 
 DEFINE_DISPATCH(linalg_solve_sparse_csr_stub);
 
-REGISTER_ARCH_DISPATCH(linalg_solve_sparse_csr_stub, DEFAULT, &linalg_solve_sparse_csr_kernel_error);
-REGISTER_AVX512_DISPATCH(linalg_solve_sparse_csr_stub, &linalg_solve_sparse_csr_kernel_error);
-REGISTER_AVX2_DISPATCH(linalg_solve_sparse_csr_stub, &linalg_solve_sparse_csr_kernel_error);
-REGISTER_VSX_DISPATCH(linalg_solve_sparse_csr_stub, &linalg_solve_sparse_csr_kernel_error);
-REGISTER_ZVECTOR_DISPATCH(linalg_solve_sparse_csr_stub, &linalg_solve_sparse_csr_kernel_error);
+REGISTER_ALL_CPU_DISPATCH(linalg_solve_sparse_csr_stub, &linalg_solve_sparse_csr_kernel_error);;
 
 } // namespace native
 } // namespace at
