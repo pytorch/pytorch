@@ -304,16 +304,16 @@ if(INTERN_BUILD_ATEN_OPS)
     )
   endforeach()
 
+  if(NOT USE_LIGHTWEIGHT_DISPATCH)
+    set(generated_unboxing_sources "")
+  endif()
   # Generated headers used from a CUDA (.cu) file are
   # not tracked correctly in CMake. We make the libATen.so depend explicitly
   # on building the generated ATen files to workaround.
   add_custom_target(ATEN_CPU_FILES_GEN_TARGET DEPENDS
       ${generated_headers} ${core_generated_headers} ${ops_generated_headers}
       ${generated_sources} ${core_generated_sources} ${ops_generated_sources}
-      ${generated_declarations_yaml})
-  if(USE_LIGHTWEIGHT_DISPATCH)
-    add_dependencies(ATEN_CPU_FILES_GEN_TARGET ${generated_unboxing_sources})
-  endif()
+      ${generated_declarations_yaml} ${generated_unboxing_sources})
   add_custom_target(ATEN_CUDA_FILES_GEN_TARGET DEPENDS
       ${cuda_generated_headers} ${cuda_generated_sources})
   add_library(ATEN_CPU_FILES_GEN_LIB INTERFACE)
