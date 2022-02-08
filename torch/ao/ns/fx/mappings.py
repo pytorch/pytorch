@@ -6,6 +6,7 @@ import torch.nn.functional as F
 toq = torch.ops.quantized
 
 import torch.nn.quantized as nnq
+import torch.nn.quantized._reference as nnqr
 import torch.nn.quantized.dynamic as nnqd
 import torch.nn.intrinsic.quantized as nniq
 import torch.nn.intrinsic.quantized.dynamic as nniqd
@@ -582,6 +583,9 @@ def get_node_type_to_io_type_map() -> Dict[str, Set[NSNodeTargetType]]:
         nnq.ConvTranspose1d,
         nnq.ConvTranspose2d,
         nnq.ConvTranspose3d,
+        nnqr.ConvTranspose1d,
+        nnqr.ConvTranspose2d,
+        nnqr.ConvTranspose3d,
         nnq.ELU,
         nnq.GroupNorm,
         nnq.InstanceNorm1d,
