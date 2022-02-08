@@ -590,6 +590,7 @@ void RecordFunction::before(const char* name, int64_t sequence_nr) {
   state_->operator_name_.reset();
 
   manager().runStartCallbacks(*this);
+  invalidateInputs();
 }
 
 void RecordFunction::before(std::string name, int64_t sequence_nr) {
@@ -603,6 +604,7 @@ void RecordFunction::before(std::string name, int64_t sequence_nr) {
   state_->operator_name_.reset();
 
   manager().runStartCallbacks(*this);
+  invalidateInputs();
 }
 
 void RecordFunction::before(
@@ -619,6 +621,7 @@ void RecordFunction::before(
   state_->name_ = op.schema().name();
 
   manager().runStartCallbacks(*this);
+  invalidateInputs();
 }
 
 /* static */ void RecordFunction::setDefaultNodeId(int64_t newDefaultNodeId) {

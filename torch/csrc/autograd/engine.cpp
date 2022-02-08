@@ -424,7 +424,7 @@ auto Engine::thread_main(const std::shared_ptr<GraphTask>& graph_task) -> void {
                 c10::str(
                     "autograd::engine::evaluate_function: ",
                     task.fn_.get()->name()),
-                std::vector<c10::IValue>());
+                c10::ArrayRef<const c10::IValue>());
             evaluate_function(
                 local_graph_task,
                 task.fn_.get(),

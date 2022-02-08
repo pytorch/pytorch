@@ -490,7 +490,7 @@ inline void ProcessGroupGloo::AsyncWork::recordAsyncWorkProfilingInfo(
           inputs.emplace_back(tensor);
         }
       }
-      recordingFunction->before(profilingTitle, inputs);
+      recordingFunction->before(profilingTitle, c10::ArrayRef<const c10::IValue>(inputs.data(), inputs.size()));
     };
     recordFunctionBeforeCallback_ = at::wrapPropagateTLSState(before_handler);
     std::function<void()> end_handler = [recordingFunction]() {

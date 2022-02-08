@@ -220,7 +220,7 @@ static constexpr auto kMat2Size = "mat2_size";
 static bool validateInput(
     const std::string& op_name,
     size_t min_size,
-    const std::vector<c10::IValue>& inputs,
+    c10::ArrayRef<const c10::IValue> inputs,
     const c10::ArrayRef<int>& should_be_tensor) {
   std::stringstream ss;
   if (inputs.size() < min_size) {
@@ -245,7 +245,7 @@ std::unordered_map<std::string, c10::IValue> saveExtraArgs(
     const at::RecordFunction& fn) {
   // for specific types of fn, return the saved extra args for computing flops
   std::unordered_map<std::string, c10::IValue> map;
-  std::vector<c10::IValue> inputs = fn.inputs();
+  auto inputs = fn.inputs();
   std::string fname(fn.name());
 
   if (inputs.empty()) {

@@ -160,9 +160,10 @@ struct TORCH_API Node : std::enable_shared_from_this<Node> {
         // the forward pass function
         guard.setForwardThreadId(thread_id_);
         if (guard.needsInputs()) {
+          std::vector<c10::IValue> inputs_vec(inputs.begin(), inputs.end());
           guard.before(
             name(),
-            std::vector<c10::IValue>(inputs.begin(), inputs.end()),
+            c10::ArrayRef<const c10::IValue>(inputs_vec.data(), inputs_vec.size()),
             sequence_nr());
         } else {
           guard.before(name(), sequence_nr());

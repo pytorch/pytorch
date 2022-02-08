@@ -354,11 +354,11 @@ int64_t Dispatcher::sequenceNumberForRunningRecordFunction(DispatchKey dispatchK
 }
 
 void Dispatcher::runRecordFunction(at::RecordFunction& guard, const OperatorHandle& op, DispatchKey dispatchKey, const torch::jit::Stack &stack) {
-  guard.before(op, stack, sequenceNumberForRunningRecordFunction(dispatchKey));
+  guard.before(op, c10::ArrayRef<const IValue>(stack.data(), stack.size()), sequenceNumberForRunningRecordFunction(dispatchKey));
 }
 
 void Dispatcher::runRecordFunction(at::RecordFunction& guard, const OperatorHandle& op, DispatchKey dispatchKey, torch::jit::Stack &&stack) {
-  guard.before(op, std::move(stack), sequenceNumberForRunningRecordFunction(dispatchKey));
+  guard.before(op, c10::ArrayRef<const IValue>(stack.data(), stack.size()), sequenceNumberForRunningRecordFunction(dispatchKey));
 }
 
 void Dispatcher::runRecordFunction(at::RecordFunction& guard, const OperatorHandle& op, DispatchKey dispatchKey) {

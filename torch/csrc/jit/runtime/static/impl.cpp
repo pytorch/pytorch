@@ -1198,7 +1198,7 @@ c10::IValue BlockRunner::run_impl_record_functions(
         at::RecordScope::STATIC_RUNTIME_MODEL, pre_sampled);
     if (guard.isActive()) {
       if (guard.needsInputs()) {
-        guard.before("forward", &args);
+        guard.before("forward", c10::ArrayRef<const IValue>(args.data(), args.size()));
       } else {
         guard.before("forward");
       }
@@ -1813,7 +1813,8 @@ void ProcessedNode::run() {
     at::RecordFunction guard(at::RecordScope::STATIC_RUNTIME_OP, pre_sampled);
     if (guard.isActive()) {
       if (guard.needsInputs()) {
-        guard.before(get_op_name(), inputs_ivalue_vec());
+        const auto iiv = inputs_ivalue_vec();
+        guard.before(get_op_name(), c10::ArrayRef<const IValue>(iiv.data(), iiv.size()));
       } else {
         guard.before(get_op_name());
       }
