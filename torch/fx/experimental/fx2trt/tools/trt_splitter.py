@@ -1,8 +1,8 @@
-from typing import Dict, Iterable, Tuple
+from typing import Any, Sequence, Dict, Iterable
 
 import torch
+import torch.fx.passes.operator_support as ops
 import torch.fx.passes.splitter_base as splitter_base
-from torch.fx.experimental.fx2trt.tools.trt_minimizer import TensorRTMinimizer
 from torch.fx.experimental.fx2trt import (
     InputTensorSpec,
     TRTModule,
@@ -11,9 +11,9 @@ from torch.fx.experimental.fx2trt import (
     NO_EXPLICIT_BATCH_DIM_SUPPORT,
     NO_IMPLICIT_BATCH_DIM_SUPPORT,
 )
-from torch.fx.passes.tools_common import get_acc_ops_name
-import torch.fx.passes.operator_support as ops
+from torch.fx.experimental.fx2trt.tools.trt_minimizer import TensorRTMinimizer
 from torch.fx.passes.tools_common import Tensors
+from torch.fx.passes.tools_common import get_acc_ops_name
 
 
 def create_trt_operator_support(use_implicit_batch_dim=True) -> ops.OperatorSupportBase:
@@ -54,7 +54,7 @@ class TRTSplitter(splitter_base._SplitterBase):
     def __init__(
         self,
         module: torch.fx.GraphModule,
-        sample_input: Tuple[torch.Tensor],
+        sample_input: Sequence[Any],
         operator_support: ops.OperatorSupportBase = None,
         settings: TRTSplitterSetting = None,
     ):
