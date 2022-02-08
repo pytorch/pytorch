@@ -4281,8 +4281,22 @@ class TestQuantizeFxOps(QuantizationTestCase):
                     ns.call_function(torch.cat),
                     ns.call_function(torch.quantize_per_tensor)
                 ]
+                converted_node_occurrence = {
+                    # inputs and outputs of the two conv, and output of cat
+                    ns.call_method("dequantize"): 5,
+                    ns.call_function(torch.cat): 1,
+                    # inputs and outputs of the two conv, and output of cat
+                    ns.call_function(torch.quantize_per_tensor): 5,
+                }
             else:
                 converted_node_list = None
+                converted_node_occurrence = {
+                    # output of cat
+                    ns.call_method("dequantize"): 1,
+                    ns.call_function(torch.cat): 1,
+                    # for two inputs
+                    ns.call_function(torch.quantize_per_tensor): 2,
+                }
 
             self.checkGraphModeFxOp(
                 M(),
@@ -4290,6 +4304,7 @@ class TestQuantizeFxOps(QuantizationTestCase):
                 quant_type,
                 quantized_node,
                 expected_node_list=converted_node_list,
+                expected_node_occurrence=converted_node_occurrence,
                 is_reference=is_reference)
 
         # check cat is using the same observer for input and output
