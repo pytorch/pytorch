@@ -11,7 +11,6 @@
 struct THPStorage;
 struct THSPTensor;
 
-typedef class THPPointer<THWTensor>       THWTensorPtr;
 typedef class THPPointer<THPStorage>     THPStoragePtr;
 
 #if (!defined(THC_GENERIC_FILE)) && \

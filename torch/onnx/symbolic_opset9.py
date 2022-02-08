@@ -1966,6 +1966,24 @@ def hardsigmoid(g, self):
     # See https://pytorch.org/docs/stable/generated/torch.nn.Hardsigmoid.html
     return g.op("HardSigmoid", self, alpha_f=1 / 6)
 
+@parse_args("v")
+def tanhshrink(g, self):
+    return g.op("Sub", self, tanh(g, self))
+
+@parse_args("v", "f")
+def hardshrink(g, self, lambd):
+    lambd_op = g.op("Constant", value_t=torch.FloatTensor([lambd]))
+    cond = logical_or(g, gt(g, self, lambd_op), lt(g, self, neg(g, lambd_op)))
+    return g.op("Where", cond, self, g.op("Constant", value_t=torch.FloatTensor([0])))
+
+@parse_args("v", "f")
+def softshrink(g, self, lambd):
+    lambd_op = g.op("Constant", value_t=torch.FloatTensor([lambd]))
+    gt_cond = gt(g, self, lambd_op)
+    gt_out = g.op("Where", gt_cond, sub(g, self, lambd_op), g.op("Constant", value_t=torch.FloatTensor([0])))
+    lt_cond = lt(g, self, neg(g, lambd_op))
+    lt_out = g.op("Where", lt_cond, add(g, self, lambd_op), g.op("Constant", value_t=torch.FloatTensor([0])))
+    return add(g, gt_out, lt_out)
 
 def alias(g, self):
     return self
@@ -3196,7 +3214,7 @@ def linear(g, input, weight, bias):
 def hann_window(g, window_length, periodic=True, dtype=None, layout=None, device=None, pin_memory=None, requires_grad=False):
     if dtype is None:
         dtype = torch.get_default_dtype()
-        if sym_help._dtype_is_fp(dtype) is False:
+        if not dtype or not dtype.is_floating_point:
             dtype = torch.float
         dtype = sym_help.scalar_type_to_pytorch_type.index(dtype)
 
@@ -3231,10 +3249,15 @@ def fill(g, self, value):
     return full_like(g, self, value, dtype)
 
 
-def index_add(g, self, dim, index, other):
+def index_add(g, self, dim, index, other, alpha=None):
     warnings.warn("Warning: ONNX export does not support duplicated values in 'index' field, " +
                   "this will cause the ONNX model to be incorrect.")
     from torch.onnx.symbolic_opset9 import scatter_add
+
+    # ONNX does not support "alpha" argument, unlike aten index_add
+    # See: https://github.com/pytorch/pytorch/pull/65993#issuecomment-953151102 for more context
+    if alpha and sym_help._scalar(sym_help._maybe_get_scalar(alpha)) != 1:
+        return _unimplemented("index_add", "alpha != 1")
 
     dim = sym_help._maybe_get_const(dim, "i")
     if dim is None:
