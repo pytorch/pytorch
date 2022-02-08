@@ -476,7 +476,8 @@ def _named_members(mod, get_members_fn, prefix='', recurse=True, remove_duplicat
 
 
 def _named_parameters(mod, prefix: str = '', recurse: bool = True, remove_duplicate: bool = True):
-    gen = mod._named_members(
+    gen = _named_members(
+        mod,
         lambda module: module._parameters.items(),
         prefix=prefix, recurse=recurse, remove_duplicate=remove_duplicate)
     for elem in gen:
@@ -484,7 +485,8 @@ def _named_parameters(mod, prefix: str = '', recurse: bool = True, remove_duplic
 
 
 def _named_buffers(mod, prefix: str = '', recurse: bool = True, remove_duplicate: bool = True):
-    gen = mod._named_members(
+    gen = _named_members(
+        mod,
         lambda module: module._buffers.items(),
         prefix=prefix, recurse=recurse, remove_duplicate=remove_duplicate)
     for elem in gen:
