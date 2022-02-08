@@ -260,15 +260,18 @@ def check_compiler_ok_for_platform(compiler: str) -> bool:
     # Check the compiler name
     if any(name in compiler_path for name in _accepted_compilers_for_platform()):
         return True
-    # If ccache is used the compiler path is /usr/bin/ccache. Check by -v flag.
+    # If compiler wrapper is used try to infer the actual compiler by invoking it with -v flag
     version_string = subprocess.check_output([compiler, '-v'], stderr=subprocess.STDOUT).decode(*SUBPROCESS_DECODE_ARGS)
     if IS_LINUX:
-        # Check for 'gcc' or 'g++'
+        # Check for 'gcc' or 'g++' for sccache warpper
         pattern = re.compile("^COLLECT_GCC=(.*)$", re.MULTILINE)
         results = re.findall(pattern, version_string)
         if len(results) != 1:
             return False
         compiler_path = os.path.realpath(results[0].strip())
+        # On RHEL/CentOS c++ is a gcc compiler wrapper
+        if os.path.basename(compiler_path) == 'c++' and 'gcc version' in version_string:
+            return True
         return any(name in compiler_path for name in _accepted_compilers_for_platform())
     if IS_MACOS:
         # Check for 'clang' or 'clang++'
@@ -1636,11 +1639,14 @@ def _get_rocm_arch_flags(cflags: Optional[List[str]] = None) -> List[str]:
         for flag in cflags:
             if 'amdgpu-target' in flag:
                 return ['-fno-gpu-rdc']
-    # Use same defaults from file cmake/public/LoadHIP.cmake.
-    # Must keep in sync if defaults change.
+    # Use same defaults as used for building PyTorch
     # Allow env var to override, just like during initial cmake build.
-    archs = os.environ.get('PYTORCH_ROCM_ARCH', 'gfx803;gfx900;gfx906;gfx908')
-    flags = ['--amdgpu-target=%s' % arch for arch in archs.split(';')]
+    _archs = os.environ.get('PYTORCH_ROCM_ARCH', None)
+    if not _archs:
+        archs = torch.cuda.get_arch_list()
+    else:
+        archs = _archs.replace(' ', ';').split(';')
+    flags = ['--amdgpu-target=%s' % arch for arch in archs]
     flags += ['-fno-gpu-rdc']
     return flags
 

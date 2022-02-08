@@ -79,6 +79,7 @@ class DispatchKey(Enum):
     PrivateUse3 = auto()
     EndOfBackendKeys = PrivateUse3
 
+    ZeroTensor = auto()
     Meta = auto()
     BackendSelect = auto()
     Named = auto()
@@ -492,6 +493,10 @@ class NativeFunction:
                                inp.annotation.alias_set_after != "" for inp in self.func.schema_order_arguments())
         return is_non_mutating_view or is_inplace_view or is_wildcard_view
 
+    @property
+    def root_name(self) -> str:
+        return self.func.name.name.base
+
 SchemaKind = Enum('SchemaKind', ('functional', 'inplace', 'out'))
 
 # A structured kernel is guaranteed to have a functional and out variant, and
@@ -543,6 +548,10 @@ class NativeFunctionsGroup:
         yield self.out
         if self.inplace is not None:
             yield self.inplace
+
+    @property
+    def root_name(self) -> str:
+        return self.functional.root_name
 
     @staticmethod
     def from_dict(d: Dict[SchemaKind, NativeFunction]) -> Optional['NativeFunctionsGroup']:
@@ -646,6 +655,10 @@ class BackendIndex:
     # Mainly important for structured kernels, this determines which variant in the operator group is used to implement the others.
     # All in-tree ops use out kernels, while XLA uses functional kernels.
     use_out_as_primary: bool
+    # Whether the backend requires a device guard, and device checks.
+    # For in-tree backends, this is currently just CUDA/HIP
+    # For out-of-tree backends, this is currently just Intel XPU
+    device_guard: bool
     # Whether the backend is in-tree (CPU/CUDA) or out-of-tree (XLA)
     external: bool
     # Other backend-specific information that is on a per-operator basis
@@ -1582,6 +1595,8 @@ class Precompute:
     # A map from kernel argument name -> a list of precomputed
     # elements that replaces/supersedes it.
     replace: Dict[str, List[Argument]]
+    # List of precomputed args added without replacement
+    add: List[Argument]
 
     @staticmethod
     def parse(src: object) -> 'Precompute':
@@ -1589,18 +1604,29 @@ class Precompute:
 
         # src is a list of strings of the format:
         #   {kernel param name} -> {replacement decl}[, {replacement decl}, ...]
-        # Parse this list to get the names of which precomputed elements
+        #   [{add decl}[, {add decl}, ...]]
+        # The last line is optional and contains the precomputed parameters that are
+        # added without replacement.
+        # The other lines are parsed to get the names of which precomputed elements
         # should replace which kernel arguments.
+        add_args = []
+        if ' -> ' not in src[-1]:
+            add_list = src[-1].split(',')
+            add_args = [Argument.parse(name.strip()) for name in add_list]
+            src = src[:-1]
+
         replace = {}
         for raw_replace_item in src:
             assert isinstance(raw_replace_item, str)
+            assert ' -> ' in raw_replace_item, 'precomputed parameters without replacement' \
+                                               ' are allowed only in the last line'
 
             arg, with_list_raw = raw_replace_item.split(' -> ')
             with_list = with_list_raw.split(',')
             with_list_args = [Argument.parse(name.strip()) for name in with_list]
             replace[arg] = with_list_args
 
-        r = Precompute(replace=replace)
+        r = Precompute(replace=replace, add=add_args)
         assert r.to_list() == src, 'r.to_list() != src'
         return r
 

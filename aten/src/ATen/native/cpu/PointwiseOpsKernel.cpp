@@ -119,7 +119,7 @@ void l1_backward_cpu_kernel(TensorIterator& iter, const Scalar& norm) {
         [norm_val_vec, zero_vec](Vec input, Vec target, Vec grad_output) -> Vec {
           const auto x = input - target;
           const auto y = norm_val_vec * grad_output;
-          return Vec::blendv(y.neg(), y, x > zero_vec);
+          return Vec::blendv(Vec::blendv(y.neg(), y, x > zero_vec), zero_vec, x == zero_vec);
         });
     });
   }

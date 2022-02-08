@@ -1,14 +1,19 @@
 #include <ATen/ATen.h>
-#include <ATen/NativeFunctions.h>
-#include <ATen/Dispatch.h>
 #include <ATen/CPUApplyUtils.h>
+#include <ATen/Dispatch.h>
+#include <ATen/NativeFunctions.h>
+#include <ATen/core/Reduction.h>
 #include <ATen/native/BinaryOps.h>
 #include <ATen/native/PointwiseOps.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/cpu/Loops.h>
+<<<<<<< HEAD
+#include <c10/util/Exception.h>
+=======
 #include <ATen/native/Resize.h>
 #include <c10/core/MemoryFormat.h>
 #include <c10/core/ScalarType.h>
+>>>>>>> b85378ed96 (fix `torch.nn.functional.l1_loss` for complex inputs)
 
 constexpr float EPSILON = 1e-12;
 
@@ -23,7 +28,26 @@ namespace {
   }
 }
 
-namespace at { namespace native {
+namespace at {
+namespace meta {
+
+TORCH_META_FUNC(smooth_l1_loss)
+(const Tensor& input, const Tensor& target, const int64_t reduction, double beta) {
+  TORCH_CHECK(beta >= 0, "smooth_l1_loss does not support negative values for beta.")
+  // TODO: Reduce this extra TensorIterator construction for Reduction::Mean & Sum.
+  // We do another TensorIterator construction in the IMPL for the two cases.
+  build_borrowing_binary_op(maybe_get_output(), input, target);
+  if (reduction == Reduction::None) {
+    return;
+  }
+
+  TORCH_INTERNAL_ASSERT(reduction == Reduction::Mean || reduction == Reduction::Sum);
+  maybe_get_output().resize_({});
+}
+
+} // namespace meta
+
+namespace native {
 
 DEFINE_DISPATCH(l1_stub);
 DEFINE_DISPATCH(l1_backward_stub);
@@ -33,6 +57,26 @@ DEFINE_DISPATCH(huber_stub);
 DEFINE_DISPATCH(huber_backward_stub);
 DEFINE_DISPATCH(mse_stub);
 DEFINE_DISPATCH(mse_backward_stub);
+
+TORCH_IMPL_FUNC(smooth_l1_loss_out)
+(const Tensor& input, const Tensor& target, int64_t reduction, double beta, const Tensor& result) {
+  if (beta == 0) {
+      at::native::l1_loss_out(input, target, reduction, const_cast<Tensor&>(result));
+      return;
+  }
+  if (reduction != Reduction::None) {
+    Tensor loss;
+    auto iter = TensorIterator::borrowing_binary_op(loss, input, target);
+    smooth_l1_stub(iter.device_type(), iter, beta);
+    if (reduction == Reduction::Mean) {
+      at::mean_out(const_cast<Tensor&>(result), iter.output(), IntArrayRef{});
+    } else {
+      at::sum_out(const_cast<Tensor&>(result), iter.output(), IntArrayRef{});
+    }
+  } else {
+    smooth_l1_stub(device_type(), *this, beta);
+  }
+}
 
 Tensor cosine_embedding_loss(const Tensor& input1, const Tensor& input2, const Tensor& target, double margin, int64_t reduction) {
   auto targ_dim = target.dim();
