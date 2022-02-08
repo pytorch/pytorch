@@ -181,16 +181,19 @@ def get_base_name_to_sets_of_related_ops() -> Dict[str, Set[NSNodeTargetType]]:
         set([
             nn.ConvTranspose1d,
             nnq.ConvTranspose1d,
+            nnqr.ConvTranspose1d,
             nnqd.ConvTranspose1d,
         ]),
         set([
             nn.ConvTranspose2d,
             nnq.ConvTranspose2d,
+            nnqr.ConvTranspose2d,
             nnqd.ConvTranspose2d,
         ]),
         set([
             nn.ConvTranspose3d,
             nnq.ConvTranspose3d,
+            nnqr.ConvTranspose3d,
             nnqd.ConvTranspose3d,
         ]),
         set([
