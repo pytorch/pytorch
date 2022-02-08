@@ -1,3 +1,4 @@
+from __future__ import annotations
 from collections import OrderedDict, namedtuple
 import itertools
 import warnings
