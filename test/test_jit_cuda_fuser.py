@@ -2186,13 +2186,14 @@ class TestCudaFuser(JitTestCase):
         x = torch.randn([1024, 1024], dtype=dtype, device=device, requires_grad=True)
         grads = torch.randn([1024, 1024], dtype=dtype, device=device, requires_grad=False)
 
-        def t(x: torch.Tensor):
-            o = torch.nn.functional.gelu(x)
+        def t(x: torch.Tensor, mode : str):
+            o = torch.nn.functional.gelu(x, approximate=mode)
             o = o * 2.0
             return o
 
         t_jit = torch.jit.script(t)
-        self._run_training_helper(t_jit, t, grads, x)
+        self._run_training_helper(t_jit, t, grads, x, 'none')
+        self._run_training_helper(t_jit, t, grads, x, 'tanh')
 
     @unittest.skipIf(not RUN_CUDA, "requires CUDA")
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,

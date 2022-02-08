@@ -64,6 +64,7 @@ const auto& intListAttr = Symbol::attr("profiled_int_list");
 const auto& intAttr = Symbol::attr("profiled_int");
 const auto& boolListAttr = Symbol::attr("profiled_bool_list");
 const auto& boolAttr = Symbol::attr("profiled_bool");
+const auto& strAttr = Symbol::attr("profiled_str");
 
 typedef Val* CgValue;
 typedef Expr* CgOp;
@@ -2287,14 +2288,15 @@ class IrParser {
             auto self = list_val.front();
             list_val.pop_front();
 
-            auto approximate = constant_as<int64_t>(node->input(1));
+            auto approximate = constant_as<std::string>(node->input(1));
             TORCH_INTERNAL_ASSERT(
                 approximate.has_value(),
                 "The approximate parameter is required.");
             const auto kApproximate = approximate.value();
 
             Val* out = nullptr;
-            if (kApproximate == at::native::GeluType::Tanh) {
+            if (at::native::get_gelutype_enum(kApproximate) ==
+                at::native::GeluType::Tanh) {
               out = fast_gelu(self);
             } else {
               out = unaryOp(UnaryOpType::Gelu, self);
@@ -2324,14 +2326,15 @@ class IrParser {
             auto self = list_val.front();
             list_val.pop_front();
 
-            auto approximate = constant_as<int64_t>(node->input(2));
+            auto approximate = constant_as<std::string>(node->input(2));
             TORCH_INTERNAL_ASSERT(
                 approximate.has_value(),
                 "The approximate parameter is required.");
             const auto kApproximate = approximate.value();
 
             Val* grad_in = nullptr;
-            if (kApproximate == at::native::GeluType::Tanh) {
+            if (at::native::get_gelutype_enum(kApproximate) ==
+                at::native::GeluType::Tanh) {
               grad_in = fast_gelu_backward(grad_out, self);
             } else {
               grad_in = gelu_backward(grad_out, self);
@@ -2484,6 +2487,9 @@ class IrParser {
     } else if (val->type()->isSubtypeOf(
                    static_cast<c10::TypePtr>(NoneType::get()))) {
       // TODO: should we consider adding support for NoneType;
+      return true;
+    } else if (val->type()->isSubtypeOf(
+                   static_cast<c10::TypePtr>(StringType::get()))) {
       return true;
     } else if (val->type()->cast<ListType>()) {
       // TODO: we don't support list type in codegen yet;
@@ -2666,6 +2672,35 @@ void profileIntList(ProfilingRecord* pr, Node* node, size_t offset) {
                   profiled_ints.begin(),
                   profiled_ints.end(),
                   input_ints.begin()),
+          "profiling ivalue doesn't support merge");
+    }
+    push(stack, value);
+  };
+
+  pn->setCallback(ivalue_profiler);
+}
+
+void profileString(ProfilingRecord* pr, Node* node, size_t offset) {
+  auto pn = insertProfileIValueOp(node, offset, pr);
+
+  const auto ivalue_profiler = [pr, pn](Stack& stack) {
+    std::lock_guard<std::mutex> lock(pr->mutex_);
+
+    // TODO: we don't care about merging multiple profiling runs as we don't
+    // support it at all;
+    int64_t frame_id = 0;
+    pop(stack, frame_id);
+    IValue value;
+    pop(stack, value);
+    TORCH_INTERNAL_ASSERT(
+        value.isString(), "profiling seeing the wrong data type");
+    if (!pn->hasAttribute(strAttr)) {
+      pn->s_(strAttr, value.toStringRef());
+    } else {
+      auto profiled_str = pn->s(strAttr);
+      auto input_str = value.toStringRef();
+      TORCH_INTERNAL_ASSERT(
+          input_str == profiled_str,
           "profiling ivalue doesn't support merge");
     }
     push(stack, value);
@@ -3043,7 +3078,6 @@ bool insertProfileIValue(ProfilingRecord* pr, Node* node, size_t offset) {
     }
   }
 
-  /*
   static auto gelu_schema =
       getOperatorForLiteral(
           "aten::gelu(Tensor self, *, str approximate='none') -> Tensor")
@@ -3052,7 +3086,7 @@ bool insertProfileIValue(ProfilingRecord* pr, Node* node, size_t offset) {
     switch (offset) {
       // argument 1: approximate;
       case 1:
-        profileInt(pr, node, offset);
+        profileString(pr, node, offset);
         break;
       default:
         return false;
@@ -3068,14 +3102,13 @@ bool insertProfileIValue(ProfilingRecord* pr, Node* node, size_t offset) {
     switch (offset) {
       // argument 2: approximate;
       case 2:
-        profileInt(pr, node, offset);
+        profileString(pr, node, offset);
         break;
       default:
         return false;
     }
     return true;
   }
-  */
 
   static auto softmax_backward_data_schema =
       getOperatorForLiteral(
