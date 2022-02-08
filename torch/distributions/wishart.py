@@ -279,11 +279,14 @@ class Wishart(ExponentialFamily):
 
     @property
     def _natural_params(self):
+        nu = self.df  # has shape (batch_shape)
+        p = self._event_shape[-1]  # has singleton shape
         return (
-            0.5 * (self.df - p - 1),
             - 0.5 * self.precision_matrix,
+            0.5 * (nu),
+            # (0.5 * (nu - p - 1)).expand(self._batch_shape + self._event_shape),
         )
 
     def _log_normalizer(self, x, y):
-        p = y.shape[-1]
-        return x * (- torch.linalg.slogdet(-2 * y).logabsdet + _log_2 * p) + _mvdigamma(x, p=p)
+        p = self._event_shape[-1]
+        return y * (- torch.linalg.slogdet(-2 * x).logabsdet + _log_2 * p) + torch.mvlgamma(y, p=p)
