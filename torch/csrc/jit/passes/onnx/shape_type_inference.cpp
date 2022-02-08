@@ -1039,7 +1039,7 @@ void ProcessReshapeNode(Node* n, int opset_version) {
     if (shape_vector_0.has_value()) {
       shape_vector_0_value = shape_vector_0.value();
     }
-    if (shape_vector_0.has_value() || shape_temp.size() > 0) {
+    if (shape_vector_0.has_value() && shape_temp.size() > 0) {
       auto final_shape = ComputeShapeFromReshape(
           n, shape_vector_0_value, shape_temp, opset_version);
       if (final_shape.has_value()) {
