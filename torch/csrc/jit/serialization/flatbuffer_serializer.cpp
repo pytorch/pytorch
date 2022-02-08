@@ -10,6 +10,23 @@
 #include <torch/csrc/jit/serialization/export.h>
 #include <string>
 
+namespace {
+c10::optional<std::string> type_printer(
+    const c10::Type& type,
+    torch::jit::TypeNameUniquer& type_name_uniquer) {
+  if (auto dyn = type.castRaw<c10::DynamicType>()) {
+    return dyn->fallback()->annotation_str(
+        [&](auto&& t) { return type_printer(t, type_name_uniquer); });
+  }
+  auto namedType = type.cast<c10::NamedType>();
+  if (namedType && namedType->name()) {
+    return type_name_uniquer.getUniqueName(namedType).qualifiedName();
+  }
+  return c10::nullopt;
+}
+
+}
+
 namespace torch {
 namespace jit {
 
@@ -91,6 +108,9 @@ class FlatbufferSerializer {
       flatbuffers::FlatBufferBuilder& fbb,
       ClassTypePtr class_ptr);
 
+  flatbuffers::Offset<flatbuffers::Vector<flatbuffers::Offset<mobile::serialization::JITFile>>>
+  storeJITFilesAndGetOffset(FlatBufferBuilder& builder);
+
   uint32_t storeIValueAndGetIndex(
       flatbuffers::FlatBufferBuilder& fbb,
       const IValue& ivalue);
@@ -122,6 +142,11 @@ class FlatbufferSerializer {
   // qualified name to serialized class, type or function
   std::unordered_map<std::string, uint32_t> qn_to_serialized_values_;
 
+  PrintDepsTable class_deps_;
+  std::unordered_set<c10::NamedTypePtr> converted_types_;
+  OrderedDict<std::string, PythonPrint> file_streams_;
+  TypeNameUniquer type_name_uniquer_;
+
   // cache of some ivalues
   struct IValueHash {
     size_t operator()(const IValue& val) const {
@@ -132,6 +157,9 @@ class FlatbufferSerializer {
   std::unordered_map<IValue, uint32_t, IValueHash> cached_ivalues_;
 
   const mobile::CompilationUnit* mcu_ = nullptr;
+  void convertNamedType(
+      const c10::NamedTypePtr& class_type,
+      std::vector<IValue> constant_table);
 };
 
 flatbuffers::Offset<jit::mobile::serialization::Schema> FlatbufferSerializer::
@@ -165,6 +193,31 @@ flatbuffers::Offset<jit::mobile::serialization::Schema> FlatbufferSerializer::
   }
   return CreateSchema(
       fbb, fbb.CreateVector(arg_vec), fbb.CreateVector(return_vec));
+}
+
+void FlatbufferSerializer::convertNamedType(
+    const c10::NamedTypePtr& class_type,
+    std::vector<c10::IValue> constant_table) {
+  if (converted_types_.count(class_type)) {
+    return;
+  }
+  auto qualname = type_name_uniquer_.getUniqueName(class_type);
+  std::string qualifier = qualname.prefix();
+  converted_types_.insert(class_type);
+  PythonPrint* pp = file_streams_.find(qualifier);
+
+  if (!pp) {
+    pp = &file_streams_.insert(
+        std::move(qualifier),
+        PythonPrint(
+            constant_table,
+            class_deps_,
+            [&](const c10::Type& t) {
+              return type_printer(t, type_name_uniquer_);
+            },
+            /*enforce_importable=*/true));
+  }
+  pp->printNamedType(class_type);
 }
 
 flatbuffers::Offset<mobile::serialization::Function> FlatbufferSerializer::
@@ -251,6 +304,12 @@ flatbuffers::Offset<mobile::serialization::Function> FlatbufferSerializer::
     schema_offset =
         CreateFBSchema(fbb, schema.arguments(), schema.returns(), type_printer);
     auto classtype = schema.arguments()[0].type()->cast<ClassType>();
+    class_deps_.add(classtype);
+    for (size_t i = 0; i < class_deps_.size(); ++i) {
+      // note: convertNameType may extend class_deps_, so re-checking .size() is
+      // necessary
+      convertNamedType(class_deps_[i], code.constants_);
+    }
     class_index = storeClassTypeAndGetIndex(fbb, classtype);
   }
 
@@ -323,6 +382,11 @@ flatbuffers::DetachedBuffer FlatbufferSerializer::serializeModule(
     storage_data_offset = fbb.CreateVector(storage_data);
   }
 
+  auto jit_files_offset = storeJITFilesAndGetOffset(fbb);
+
+//  for (const auto& item : qn_to_serialized_values_){
+//    std::cout << item.first << std::endl;
+//  }
   auto mod = CreateModule(
       fbb,
       0, /* version */
@@ -332,7 +396,8 @@ flatbuffers::DetachedBuffer FlatbufferSerializer::serializeModule(
       fbb.CreateVector(ivalue_offsets_),
       tensor_data_.size(),
       storage_data_offset,
-      fbb.CreateVector(obj_types_offset_));
+      fbb.CreateVector(obj_types_offset_),
+      jit_files_offset);
   fbb.Finish(mod);
   return fbb.Release();
 }
@@ -439,6 +504,8 @@ uint32_t FlatbufferSerializer::storeClassTypeAndGetIndex(
   uint32_t res = obj_types_offset_.size();
   obj_types_offset_.push_back(offset);
   qn_to_serialized_values_[type_str] = res;
+//  std::cout << "type_str: "
+//      << type_str << std::endl;
   return res;
 }
 
@@ -660,6 +727,22 @@ flatbuffers::Offset<mobile::serialization::IValue> FlatbufferSerializer::
     AT_ERROR("Invalid IValue type for serialization: ", ivalue.tagKind());
   }
   return CreateIValue(fbb, ivalue_type, offset);
+}
+
+flatbuffers::Offset<flatbuffers::Vector<flatbuffers::Offset<mobile::serialization::JITFile>>>
+    FlatbufferSerializer::storeJITFilesAndGetOffset(FlatBufferBuilder& fbb){
+  std::vector<flatbuffers::Offset<mobile::serialization::JITFile>> jit_file_offsets;
+  for (const auto& item : file_streams_) {
+    //    std::cout << item.key() << std::endl;
+    //    std::cout << item.value().str() << std::endl;
+    flatbuffers::Offset<mobile::serialization::JITFile> jit_file =
+        mobile::serialization::CreateJITFile(
+        fbb,
+        fbb.CreateSharedString(item.key()),
+        fbb.CreateString(item.value().str()));
+    jit_file_offsets.emplace_back(jit_file);
+  }
+  return fbb.CreateVector(jit_file_offsets);
 }
 
 } // namespace

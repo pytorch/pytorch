@@ -159,6 +159,13 @@ mobile::Module FlatbufferLoader::parseModule(
   all_types_.resize(module->object_types()->size());
   storages_.resize(module->storage_data_size());
   storage_loaded_.resize(module->storage_data_size(), false);
+  auto jit_files = module->jit_files();
+
+  for (uint32_t i = 0; i < jit_files->size(); ++i) {
+    const auto* jit_file = jit_files->Get(i);
+    //    std::cout << jit_file->name()->str() << std::endl;
+    //    std::cout << jit_file->content()->str() << std::endl;
+  }
 
   for (uint32_t i = 0; i < ivalues->size(); i++) {
     const auto* ival = ivalues->Get(i);
