@@ -4,12 +4,15 @@
 namespace at {
 namespace native {
 
-// _make_dual is actually implemented in VariableTypeManual.cpp, this is just a stub
-// because codegen assumes that a function of this name exists in the native namespace
-// TODO: check the behavior of this and _fw_primal in inference mode
-Tensor _make_dual(const Tensor& primal, const Tensor& tangnet, int64_t level) {
-  TORCH_INTERNAL_ASSERT(false, "This is just a stub.");
-  return Tensor();
+// We expect this code to only be reached in inference mode and when all inputs are inference tensors
+Tensor _make_dual(const Tensor& primal, const Tensor& tangent, int64_t level) {
+  TORCH_INTERNAL_ASSERT(
+      InferenceMode::is_enabled() && primal.is_inference() && tangent.is_inference(),
+      "Expected this function to only be reached in inference mode and when all the "
+      "inputs are inference tensors. You should NOT call this function directly as "
+      "native::_make_dual. Please use the dispatcher, i.e., at::_make_dual. Please "
+      "file an issue if you come across this error otherwise.");
+  return at::alias(primal);
 }
 
 /// This function can be used to unpack a given dual Tensor to get its primal and tangent. The returned primal
@@ -68,6 +71,10 @@ Tensor _new_zeros_with_same_feature_meta(
   // Inherit the TensorOptions of the primal
   auto new_tensor = at::zeros({storage_numel}, other.options());
   return new_tensor.as_strided(out_sizes, out_strides, other_storage_offset);
+}
+
+bool _has_same_storage_numel(const at::Tensor& base, const at::Tensor& other) {
+  return base.storage().nbytes() / base.itemsize() == other.storage().nbytes() / other.itemsize();
 }
 
 } // namespace native

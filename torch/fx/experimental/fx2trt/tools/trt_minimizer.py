@@ -2,7 +2,7 @@ from typing import Tuple, Callable, Any
 
 import torch
 import torch.fx.passes.net_min_base as net_min_base
-from torch.fx.experimental.fx2trt.fx2trt import (
+from torch.fx.experimental.fx2trt import (
     TRTModule,
     TRTInterpreter,
     InputTensorSpec,

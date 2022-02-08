@@ -5,6 +5,7 @@
 #include "caffe2/core/logging.h"
 #include "caffe2/core/operator.h"
 #include "caffe2/operators/create_scope_op.h"
+#include "c10/util/irange.h"
 
 namespace caffe2 {
 
@@ -94,7 +95,7 @@ class ONNXWhileOp final : public Operator<Context> {
         "outputs");
 
     // Copy initial loop-carried dependencies
-    for (int i = 0; i < num_loop_carried_deps; ++i) {
+    for (const auto i : c10::irange(num_loop_carried_deps)) {
       scope_->lcd_tensor(i)->CopyFrom(Input(i + num_inputs_before_lcds));
     }
 
@@ -126,7 +127,7 @@ class ONNXWhileOp final : public Operator<Context> {
     };
 
     // Allocate scan_outputs for zero-iteration case
-    for (int i = 0; i < num_scan_outputs; ++i) {
+    for (const auto i : c10::irange(num_scan_outputs)) {
       Output(i + num_loop_carried_deps)->Resize(0);
       Output(i + num_loop_carried_deps)->template mutable_data<int32_t>();
     }
@@ -154,13 +155,13 @@ class ONNXWhileOp final : public Operator<Context> {
         }
 
         // Copy forward loop-carried dependencies
-        for (int i = 0; i < num_loop_carried_deps; ++i) {
+        for (const auto i : c10::irange(num_loop_carried_deps)) {
           Blob* b = cur_ws->GetBlob(scope_->net()->external_output()[i + 1]);
           const Tensor& t = b->template Get<Tensor>();
           scope_->lcd_tensor(i)->CopyFrom(t);
         }
         // Copy out scan_outputs
-        for (int i = 0; i < num_scan_outputs; ++i) {
+        for (const auto i : c10::irange(num_scan_outputs)) {
           int net_output_idx = i + 1 + num_loop_carried_deps;
           const Tensor& scan_output =
               cur_ws->GetBlob(scope_->net()->external_output()[net_output_idx])
@@ -202,7 +203,7 @@ class ONNXWhileOp final : public Operator<Context> {
     }
 
     // Copy out final loop-carried dependencies
-    for (int i = 0; i < num_loop_carried_deps; ++i) {
+    for (const auto i : c10::irange(num_loop_carried_deps)) {
       Output(i)->CopyFrom(*scope_->lcd_tensor(i));
     }
 
