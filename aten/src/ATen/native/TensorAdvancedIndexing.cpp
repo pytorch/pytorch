@@ -1295,7 +1295,7 @@ Tensor scatter_reduce_two_cpu(const Tensor& self,
 
   TORCH_CHECK(self.dim() == index.dim(),
       "Shape mismatch between `self` (got ", self.sizes(), ") and `index` (got ", index.sizes(), ")");
-  for (int64_t i = 0; i < self.dim(); i++) {
+  for (const auto i : c10::irange(self.dim())) {
     TORCH_CHECK(self.size(i) == index.size(i),
         "Shape mismatch between `self` (got ", self.sizes(), ") and `index` (got ", index.sizes(), ")");
   }
@@ -1332,16 +1332,18 @@ Tensor scatter_reduce_two_cpu(const Tensor& self,
 
 
     int64_t offset1 = 1, offset2 = 1;
-    for (int64_t d = 0; d < dim; d++)
+    for (const auto d : c10::irange(dim)) {
       offset1 *= self.size(d);
-    for (int64_t d = dim + 1; d < self.dim(); d++)
+    }
+    for (int64_t d = dim + 1; d < self.dim(); d++) {
       offset2 *= self.size(d);
+    }
 
     scalar_t value;
     int64_t dim_index;
-    for (int64_t i = 0; i < offset1; i++) {
-      for (int64_t j = 0; j < self.size(dim); j++) {
-        for (int64_t k = 0; k < offset2; k++) {
+    for (const auto i : c10::irange(offset1)) {
+      for (const auto j : c10::irange(self.size(dim))) {
+        for (const auto k : c10::irange(offset2)) {
           value = self_data[i * self_cont.stride(dim) * self_cont.size(dim) + j * self_cont.stride(dim) + k];
           dim_index = index_data[i * index_cont.stride(dim) * index_cont.size(dim) + j * index_cont.stride(dim) + k];
           TORCH_CHECK(dim_index >= 0 && dim_index < out.size(dim),
