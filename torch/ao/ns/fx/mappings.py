@@ -196,10 +196,6 @@ def get_base_name_to_sets_of_related_ops() -> Dict[str, Set[NSNodeTargetType]]:
             nnqr.ConvTranspose3d,
             nnqd.ConvTranspose3d,
         ]),
-        set([
-            nn.ConvTranspose3d,
-            nnq.ConvTranspose3d,
-        ]),
         # ELU
         set([
             nn.ELU,

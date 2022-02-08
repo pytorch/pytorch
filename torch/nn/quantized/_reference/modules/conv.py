@@ -225,7 +225,7 @@ class _ConvTransposeNd(torch.nn.modules.conv._ConvTransposeNd):
         this is useful when user want to use this module in other backends like Glow.
     """
     __annotations__ = {"bias": Optional[torch.Tensor]}
-    _IS_REFERNECE = True
+    _IS_REFERENCE = True
 
     def _save_to_state_dict(self, destination, prefix, keep_vars):
         super()._save_to_state_dict(destination, prefix, keep_vars)
@@ -353,7 +353,6 @@ class ConvTranspose1d(_ConvTransposeNd, nn.ConvTranspose1d):
         # TorchScript does not support `Sequence[T]` or `Tuple[T, ...]`.
         output_padding = self._output_padding(
             input, output_size, self.stride, self.padding, self.kernel_size, self.dilation)  # type: ignore[arg-type]
-
 
         weight_dequant = self.get_weight()
         result = F.conv_transpose1d(

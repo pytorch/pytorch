@@ -75,11 +75,11 @@ import unittest
 import numpy as np
 
 class TestQuantizeEagerOps(QuantizationTestCase):
-    def test_conv_transpose_op(self):
+    def _test_conv_transpose_op_impl(self, float_module_class, quantized_module_class, extra_module_kwargs, input_size):
         class M(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.conv = nn.ConvTranspose2d(1, 1, 1)
+                self.conv = float_module_class(**extra_module_kwargs)
                 self.quant = QuantStub()
                 self.dequant = DeQuantStub()
 
@@ -94,7 +94,7 @@ class TestQuantizeEagerOps(QuantizationTestCase):
         class RefM(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.conv = nnqr.ConvTranspose2d(1, 1, 1)
+                self.conv = quantized_module_class(**extra_module_kwargs)
                 self.quant = QuantStub()
                 self.dequant = DeQuantStub()
 
@@ -106,7 +106,7 @@ class TestQuantizeEagerOps(QuantizationTestCase):
                 x = self.dequant(x)
                 return x
 
-        data = torch.randn(16, 1, 10, 10, dtype=torch.float)
+        data = torch.randn(*input_size, dtype=torch.float)
         original_m = M()
         original_ref_m = RefM()
 
@@ -120,7 +120,7 @@ class TestQuantizeEagerOps(QuantizationTestCase):
         m = convert(m)
         # check if the module is properly quantized
         self.assertEqual(type(m.quant), nnq.Quantize)
-        self.assertEqual(type(m.conv), nnqr.ConvTranspose2d)
+        self.assertEqual(type(m.conv), quantized_module_class)
         self.assertEqual(type(m.dequant), nnq.DeQuantize)
         res = m(data)
 
@@ -133,6 +133,14 @@ class TestQuantizeEagerOps(QuantizationTestCase):
         ref_res = ref_m(data)
         self.assertEqual(res, ref_res)
 
+    def test_conv_transpose_1d(self):
+        self._test_conv_transpose_op_impl(nn.ConvTranspose1d, nnqr.ConvTranspose1d, {'in_channels': 1, 'out_channels': 1, 'kernel_size': 1}, (16, 1, 1))
+
+    def test_conv_transpose_2d(self):
+        self._test_conv_transpose_op_impl(nn.ConvTranspose2d, nnqr.ConvTranspose2d, {'in_channels': 1, 'out_channels': 1, 'kernel_size': 1}, (16, 1, 10, 10))
+
+    def test_conv_transpose_3d(self):
+        self._test_conv_transpose_op_impl(nn.ConvTranspose3d, nnqr.ConvTranspose3d, {'in_channels': 1, 'out_channels': 1, 'kernel_size': 1}, (16, 1, 10, 10, 10))
 
     def _test_activation_op_impl(
             self, float_module_class, quantized_module_class, extra_module_kwargs):
