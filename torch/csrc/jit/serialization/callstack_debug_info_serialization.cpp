@@ -222,7 +222,7 @@ ska::flat_hash_map<int64_t, DebugInfoTuple> CallStackDebugInfoUnpickler::
       {},
       c10::parseType);
   ska::flat_hash_map<int64_t, DebugInfoTuple> callstack_ptrs;
-  auto ivalues = std::move(std::move(ival).toTupleRef()).elements();
+  auto ivalues = std::move(ival.toTupleRef()).elements();
   for (auto& val : ivalues) {
     const auto& tup_elems = std::move(val.toTupleRef()).elements();
     TORCH_CHECK(
