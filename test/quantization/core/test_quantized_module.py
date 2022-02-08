@@ -13,6 +13,7 @@ from torch.ao.quantization import (
     default_float_qparams_observer,
     PerChannelMinMaxObserver,
 )
+from torch.package import PackageExporter, PackageImporter
 from torch.testing._internal.common_quantization import (
     QuantizationTestCase,
     prepare_dynamic,
@@ -107,6 +108,8 @@ class TestStaticQuantizedModule(QuantizationTestCase):
         qlinear = class_map[use_fused](in_features, out_features)
 
         qlinear_copy = copy.deepcopy(qlinear)
+        # set random quantized weight and bias before test torch scriptable
+        qlinear_copy.set_weight_bias(W_q, B)
         self.checkScriptable(qlinear_copy, [[X_q]], check_save_load=True)
         # Run module with default-initialized parameters.
         # This tests that the constructor is correct.
@@ -174,6 +177,22 @@ class TestStaticQuantizedModule(QuantizationTestCase):
         self.assertEqual(qlinear.weight(), loaded.weight())
         self.assertEqual(qlinear.scale, loaded.scale)
         self.assertEqual(qlinear.zero_point, loaded.zero_point)
+
+        # Test torch.package
+        buffer = io.BytesIO()
+        with PackageExporter(buffer) as pe:
+            pe.save_pickle("module", "qlinear.pkl", qlinear)
+        buffer.seek(0)
+
+        importer = PackageImporter(buffer)
+        loaded_from_package = importer.load_pickle("module", "qlinear.pkl")
+        self.assertEqual(qlinear.weight(), loaded_from_package.weight())
+        self.assertEqual(qlinear.scale, loaded_from_package.scale)
+        self.assertEqual(qlinear.zero_point, loaded_from_package.zero_point)
+
+        for name, module in loaded_from_package.named_modules():
+            # noop, just make sure attribute "_modules" is restored correctly during torch.package import
+            assert(name is not None)
 
         # Test copy and deepcopy
         copied_linear = copy.copy(qlinear)
