@@ -2474,6 +2474,11 @@ class IrParser {
       value_map_.emplace(val->unique(), cg_val);
       return true;
     } else if (val->type()->isSubtypeOf(
+                   static_cast<c10::TypePtr>(StringType::get()))) {
+      // String scalars are only used in parsing rules;
+      // Do not register string with codegen IR.
+      return true;
+    } else if (val->type()->isSubtypeOf(
                    static_cast<c10::TypePtr>(BoolType::get()))) {
       // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
       CgValue cg_val;
@@ -2487,9 +2492,6 @@ class IrParser {
     } else if (val->type()->isSubtypeOf(
                    static_cast<c10::TypePtr>(NoneType::get()))) {
       // TODO: should we consider adding support for NoneType;
-      return true;
-    } else if (val->type()->isSubtypeOf(
-                   static_cast<c10::TypePtr>(StringType::get()))) {
       return true;
     } else if (val->type()->cast<ListType>()) {
       // TODO: we don't support list type in codegen yet;

@@ -3014,11 +3014,11 @@ def remainder(g, input, other):
     quo = g.op("Mul", div, other)
     return g.op("Sub", input, quo)
 
-@parse_args("v", "i")
+@parse_args("v", "s")
 def gelu(g, self, approximate):
     # none approximate : onnx::Constant[value={0}]
     # tanh approximate : onnx::Constant[value={1}]
-    if approximate == 1:
+    if approximate == 'tanh':
         kBeta = math.sqrt(2 / math.pi)
         kKappa = 0.044715
 
