@@ -11,7 +11,7 @@ from .quantized_fusion_patterns_and_replacements import get_fbgemm_patterns_and_
 from .match_utils import is_match
 from .match_utils import MatchAllNode
 from ..utils import _parent_name, check_node
-from typing import Dict, Tuple, Type
+from typing import Dict, Tuple, Type, List
 from torch.fx import Node
 
 # Mapping from reference module class to the replacement quantized module class for lowering
@@ -101,7 +101,7 @@ def special_pattern_replacement(model: QuantizedGraphModule) -> QuantizedGraphMo
     nodes = list(model.graph.nodes)
     for n in model.graph.nodes:
         q_node = n
-        if not (q_node.target == torch.quantize_per_tensor or \
+        if not (q_node.target == torch.quantize_per_tensor or
            (q_node.op == "call_method" and q_node.target == "to" and q_node.args[1] == torch.float16)):
             continue
         ref_node = q_node.args[0]
@@ -135,11 +135,11 @@ def special_pattern_replacement(model: QuantizedGraphModule) -> QuantizedGraphMo
         #     setattr(modules[parent_name], module_name, ref_module)
 
         # remove dq node:
-        dq_nodes = []
+        dq_nodes: List[Node] = []
         if isinstance(dq_node_or_nodes, Node):
             dq_nodes = [dq_node_or_nodes]
         elif isinstance(dq_node_or_nodes, (tuple, list)):
-            dq_nodes = dq_node_or_nodes
+            dq_nodes = list(dq_node_or_nodes)
 
         for dq_node in dq_nodes:
             dn_input = dq_node.args[0]
