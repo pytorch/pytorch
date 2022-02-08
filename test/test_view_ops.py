@@ -914,10 +914,7 @@ class TestOldViewOps(TestCase):
                 flat = src.ravel()
                 self.assertEqual(flat.shape, torch.Size([size]))
                 self.assertEqual(src.view(-1), flat)
-                # To verify both tensors has the same memory address
                 self.assertIs(flat._base, src)
-                # To check the return value
-                self.assertTrue(flat._base is not None)
                 self.assertTrue(flat.is_contiguous())
 
                 # Non-continuous Tensor -> Copy
@@ -926,10 +923,7 @@ class TestOldViewOps(TestCase):
                     nc_flat = nc_src.ravel()
                     self.assertEqual(nc_flat.shape, torch.Size([size]))
                     self.assertEqual(nc_src.contiguous().view(-1), nc_flat)
-                    # To verify both tensors has the same memory address
-                    self.assertIsNot(nc_flat._base, src)
-                    # To check the return value
-                    self.assertTrue(nc_flat._base is None)
+                    assert nc_flat._base is None
                     self.assertTrue(nc_flat.is_contiguous())
 
         # Test that flatten returns 1-dim tensor when given a 0-dim tensor
