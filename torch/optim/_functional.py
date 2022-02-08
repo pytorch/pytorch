@@ -16,7 +16,7 @@ def _make_sparse(grad, grad_indices, values):
 def adagrad(params: List[Tensor],
             grads: List[Tensor],
             state_sums: List[Tensor],
-            state_steps: List[int],
+            state_steps: List[Tensor],
             *,
             lr: float,
             weight_decay: float,
@@ -27,7 +27,14 @@ def adagrad(params: List[Tensor],
     See :class:`~torch.optim.Adagrad` for details.
     """
 
-    for (param, grad, state_sum, step) in zip(params, grads, state_sums, state_steps):
+    if not all([isinstance(t, torch.Tensor) for t in state_steps]):
+        raise RuntimeError("API has changed, `state_steps` argument must contain a list of singleton tensors")
+
+    for (param, grad, state_sum, step_t) in zip(params, grads, state_sums, state_steps):
+        # update step
+        step_t += 1
+        step = step_t.item()
+
         if weight_decay != 0:
             if grad.is_sparse:
                 raise RuntimeError("weight_decay option is not compatible with sparse gradients")
@@ -66,7 +73,7 @@ def adam(params: List[Tensor],
          exp_avgs: List[Tensor],
          exp_avg_sqs: List[Tensor],
          max_exp_avg_sqs: List[Tensor],
-         state_steps: List[int],
+         state_steps: List[Tensor],
          *,
          amsgrad: bool,
          beta1: float,
@@ -80,12 +87,18 @@ def adam(params: List[Tensor],
     See :class:`~torch.optim.Adam` for details.
     """
 
+    if not all([isinstance(t, torch.Tensor) for t in state_steps]):
+        raise RuntimeError("API has changed, `state_steps` argument must contain a list of singleton tensors")
+
     for i, param in enumerate(params):
 
         grad = grads[i] if not maximize else -grads[i]
         exp_avg = exp_avgs[i]
         exp_avg_sq = exp_avg_sqs[i]
-        step = state_steps[i]
+        step_t = state_steps[i]
+        # update step
+        step_t += 1
+        step = step_t.item()
 
         bias_correction1 = 1 - beta1 ** step
         bias_correction2 = 1 - beta2 ** step
@@ -114,7 +127,7 @@ def adamw(params: List[Tensor],
           exp_avgs: List[Tensor],
           exp_avg_sqs: List[Tensor],
           max_exp_avg_sqs: List[Tensor],
-          state_steps: List[int],
+          state_steps: List[Tensor],
           *,
           amsgrad: bool,
           beta1: float,
@@ -127,11 +140,18 @@ def adamw(params: List[Tensor],
 
     See :class:`~torch.optim.AdamW` for details.
     """
+
+    if not all([isinstance(t, torch.Tensor) for t in state_steps]):
+        raise RuntimeError("API has changed, `state_steps` argument must contain a list of singleton tensors")
+
     for i, param in enumerate(params):
         grad = grads[i] if not maximize else -grads[i]
         exp_avg = exp_avgs[i]
         exp_avg_sq = exp_avg_sqs[i]
-        step = state_steps[i]
+        step_t = state_steps[i]
+        # update step
+        step_t += 1
+        step = step_t.item()
 
         # Perform stepweight decay
         param.mul_(1 - lr * weight_decay)
@@ -308,7 +328,7 @@ def adamax(params: List[Tensor],
            grads: List[Tensor],
            exp_avgs: List[Tensor],
            exp_infs: List[Tensor],
-           state_steps: List[int],
+           state_steps: List[Tensor],
            *,
            eps: float,
            beta1: float,
@@ -320,11 +340,17 @@ def adamax(params: List[Tensor],
     See :class:`~torch.optim.Adamax` for details.
     """
 
+    if not all([isinstance(t, torch.Tensor) for t in state_steps]):
+        raise RuntimeError("API has changed, `state_steps` argument must contain a list of singleton tensors")
+
     for i, param in enumerate(params):
         grad = grads[i]
         exp_avg = exp_avgs[i]
         exp_inf = exp_infs[i]
-        step = state_steps[i]
+        step_t = state_steps[i]
+        # update step
+        step_t += 1
+        step = step_t.item()
 
         if weight_decay != 0:
             grad = grad.add(param, alpha=weight_decay)
@@ -428,7 +454,7 @@ def radam(params: List[Tensor],
           grads: List[Tensor],
           exp_avgs: List[Tensor],
           exp_avg_sqs: List[Tensor],
-          state_steps: List[int],
+          state_steps: List[Tensor],
           *,
           beta1: float,
           beta2: float,
@@ -440,11 +466,17 @@ def radam(params: List[Tensor],
     See :class:`~torch.optim.RAdam` for details.
     """
 
+    if not all([isinstance(t, torch.Tensor) for t in state_steps]):
+        raise RuntimeError("API has changed, `state_steps` argument must contain a list of singleton tensors")
+
     for i, param in enumerate(params):
         grad = grads[i]
         exp_avg = exp_avgs[i]
         exp_avg_sq = exp_avg_sqs[i]
-        step = state_steps[i]
+        step_t = state_steps[i]
+        # update step
+        step_t += 1
+        step = step_t.item()
 
         bias_correction1 = 1 - beta1 ** step
         bias_correction2 = 1 - beta2 ** step
