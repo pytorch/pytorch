@@ -13,7 +13,7 @@
 #include <torch/nn/pimpl.h>
 #include <torch/types.h>
 
-#include <torch/csrc/WindowsTorchApiMacro.h>
+#include <torch/csrc/Export.h>
 
 #include <cstddef>
 #include <vector>

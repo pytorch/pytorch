@@ -9,10 +9,10 @@
 #include <pybind11/pytypes.h>
 #include <torch/csrc/Device.h>
 #include <torch/csrc/Dtype.h>
+#include <torch/csrc/Export.h>
 #include <torch/csrc/Layout.h>
 #include <torch/csrc/QScheme.h>
 #include <torch/csrc/Stream.h>
-#include <torch/csrc/WindowsTorchApiMacro.h>
 #include <torch/csrc/jit/api/module.h>
 #include <torch/csrc/jit/frontend/schema_matching.h>
 #include <torch/csrc/jit/frontend/tracer.h>
@@ -692,6 +692,8 @@ inline py::object toPyObject(IValue ivalue) {
     }
     guardAgainstNamedTensor<at::Tensor>(tensor);
     return py::cast(autograd::Variable(std::move(tensor)));
+  } else if (ivalue.isStorage()) {
+    return py::cast(ivalue.toStorage());
   } else if (ivalue.isDouble()) {
     return py::cast(std::move(ivalue).toDouble());
   } else if (ivalue.isComplexDouble()) {

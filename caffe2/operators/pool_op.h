@@ -20,12 +20,12 @@ class PoolOp final : public ConvPoolOpBase<Context> {
   explicit PoolOp(Args&&... args)
       : ConvPoolOpBase<Context>(std::forward<Args>(args)...), functor_(*this) {
     const int kernel_size = kernel_.size();
-    for (int i = 0; i < kernel_size; ++i) {
+    for (const auto i : c10::irange(kernel_size)) {
       CAFFE_ENFORCE_EQ(
           dilation_[i], 1, "Pooling op does not support dilation right now.");
     }
     if (!global_pooling_) {
-      for (int i = 0; i < kernel_size; ++i) {
+      for (const auto i : c10::irange(kernel_size)) {
         CAFFE_ENFORCE(
             pads_[i] < kernel_[i] && pads_[i + kernel_size] < kernel_[i],
             "Pad should be smaller than kernel.");
