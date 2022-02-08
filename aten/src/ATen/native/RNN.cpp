@@ -1348,7 +1348,7 @@ std::tuple<Tensor, Tensor> quantized_gru_data_legacy(
   TORCH_CHECK(
       false,
       "torch.quantized_gru with List[Tensor] for parameters is "
-      "not longer supported. Please re-export your model "
+      "no longer supported. Please re-export your model "
       "using the newer definitions in torch.jit.quantized");
 }
 
@@ -1668,7 +1668,7 @@ std::tuple<Tensor, Tensor, Tensor> quantized_lstm_input_legacy(
   TORCH_CHECK(
       false,
       "torch.quantized_lstm with List[Tensor] for parameters is "
-      "not longer supported. Please re-export your model "
+      "no longer supported. Please re-export your model "
       "using the newer definitions in torch.jit.quantized");
 }
 
