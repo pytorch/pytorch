@@ -8,7 +8,7 @@ from operator import methodcaller
 
 import torch
 from torch.testing._internal.common_device_type import (
-    instantiate_device_type_tests, onlyCUDA, toleranceOverride, tol)
+    instantiate_device_type_tests, onlyCUDA, toleranceOverride, tol, skipMeta)
 from torch.testing._internal.common_modules import module_db, modules
 from torch.testing._internal.common_utils import (
     TestCase, run_tests, freeze_rng_state, mock_wrapper, get_tensors_from, gradcheck, gradgradcheck)
@@ -233,6 +233,7 @@ class TestModule(TestCase):
 
     @modules([module_info for module_info in module_db
               if 'inplace' in signature(module_info.module_cls).parameters])
+    @skipMeta
     def test_check_inplace(self, device, dtype, module_info):
         # Check if the inplace variant of the module gives the same result as the out of place
         # variant.
