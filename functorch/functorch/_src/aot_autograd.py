@@ -490,22 +490,6 @@ def _named_buffers(mod, prefix: str = '', recurse: bool = True, remove_duplicate
     for elem in gen:
         yield elem
 
-def aot_module(mod: nn.Module, *args, **kwargs) -> nn.Module:
-    """
-    Returns a `nn.Module` object that behaves like the original attr:`mod` and
-    uses the func:`aot_function` function to compile the foward and backward
-    graph of the module. See func:`aot_function` description for more details.
-
-    Args:
-        mod (nn.Module): The original module.
-        args : The args for func:`aot_function`
-        kwargs : The kwargs for func:`aot_function`
-
-    Return:
-        Returns a `nn.Module` that behaves like the original attr:`fn` and uses
-        func:`aot_function` to compile the forward and backward graphs.
-    """
-
 
 def aot_module(mod, *args, **kwargs):
     def functional_call(named_params, named_buffers, *args, **kwargs):
