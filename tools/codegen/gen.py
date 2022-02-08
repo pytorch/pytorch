@@ -16,7 +16,7 @@ from tools.codegen.model import (Argument, DispatchKey, FunctionSchema,
                                  TensorOptionsArguments, Type, Variant,
                                  is_cuda_dispatch_key,
                                  is_generic_dispatch_key,
-                                 Tag, BaseOperatorName)
+                                 BaseOperatorName)
 from tools.codegen.api.types import (Binding, CppSignature, CppSignatureGroup,
                                      DispatcherSignature, NativeSignature)
 from tools.codegen.api import cpp
@@ -85,6 +85,8 @@ _GLOBAL_PARSE_NATIVE_YAML_CACHE = {}
 # Parse native_functions.yaml into a sequence of NativeFunctions and Backend Indices.
 ParsedYaml = namedtuple('ParsedYaml', ['native_functions', 'backend_indices'])
 def parse_native_yaml(path: str) -> ParsedYaml:
+    # parse tags.yaml
+    # create a tags database (a dict of tag name mapping to a Tag object)
     global _GLOBAL_PARSE_NATIVE_YAML_CACHE
     if path not in _GLOBAL_PARSE_NATIVE_YAML_CACHE:
         with open(path, 'r') as f:
@@ -136,7 +138,7 @@ def error_check_native_functions(funcs: Sequence[NativeFunction]) -> None:
                 f"{f.func.name} is marked as a structured_delegate pointing to " \
                 f"{f.structured_delegate}, but {f.structured_delegate} is not marked as structured. " \
                 f"Consider adding 'structured=True' to the delegated operator"
-        if f.tag is not None and f.tag is Tag.inplace_view:
+        if 'is_inplace_view' in f.tags.keys() and f.tags['is_inplace_view']:
             base_name = f.func.name.name
             overload_name = f.func.name.overload_name
             assert base_name.inplace, \

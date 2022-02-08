@@ -730,7 +730,8 @@
   variants: function, method
   device_check: NoCheck
   device_guard: False
-  tags: inplace_view
+  tags:
+    is_inplace_view: True
   dispatch:
     CompositeExplicitAutograd: as_strided_
 
@@ -4015,7 +4016,8 @@
 # this. If this `Variable` is a view, throws an `std::runtime_error()`.
 - func: detach_(Tensor(a!) self) -> Tensor(a!)
   variants: function, method
-  tags: inplace_view
+  tags:
+    is_inplace_view: True
   dispatch:
     CompositeExplicitAutograd: detach_
 
@@ -4169,7 +4171,8 @@
   variants: method
   device_check: NoCheck
   device_guard: False
-  tags: inplace_view
+  tags:
+    is_inplace_view: True
   dispatch:
     CompositeExplicitAutograd: squeeze_
 
@@ -4177,7 +4180,8 @@
   variants: method
   device_check: NoCheck
   device_guard: False
-  tags: inplace_view
+  tags:
+    is_inplace_view: True
   dispatch:
     CompositeExplicitAutograd: squeeze_
 
@@ -4185,7 +4189,8 @@
   variants: method
   device_check: NoCheck
   device_guard: False
-  tags: inplace_view
+  tags:
+    is_inplace_view: True
 
 - func: sspaddmm(Tensor self, Tensor mat1, Tensor mat2, *, Scalar beta=1, Scalar alpha=1) -> Tensor
   variants: function, method
@@ -4422,7 +4427,8 @@
   device_check: NoCheck
   device_guard: False
   variants: method
-  tags: inplace_view
+  tags:
+    is_inplace_view: True
   dispatch:
     CompositeExplicitAutograd: t_
 
@@ -4544,7 +4550,8 @@
   variants: method
   device_check: NoCheck
   device_guard: False
-  tags: inplace_view
+  tags:
+    is_inplace_view: True
   dispatch:
     CompositeExplicitAutograd: transpose_
 
@@ -4687,7 +4694,8 @@
   variants: method
   device_check: NoCheck
   device_guard: False
-  tags: inplace_view
+  tags:
+    is_inplace_view: True
   dispatch:
     CompositeExplicitAutograd: unsqueeze_
 
@@ -7032,7 +7040,8 @@
   variants: method
   device_check: NoCheck
   device_guard: False
-  tags: inplace_view
+  tags:
+    is_inplace_view: True
 
 # swapdims, alias for transpose
 - func: swapdims(Tensor(a) self, int dim0, int dim1) -> Tensor(a)
@@ -7044,7 +7053,8 @@
   variants: method
   device_check: NoCheck
   device_guard: False
-  tags: inplace_view
+  tags:
+    is_inplace_view: True
 
 - func: cholesky.out(Tensor self, bool upper=False, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
