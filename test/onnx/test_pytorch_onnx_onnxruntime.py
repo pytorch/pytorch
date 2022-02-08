@@ -8677,14 +8677,14 @@ class TestONNXRuntime(unittest.TestCase):
 
         ort_sess = convert_to_onnx(model, input=(x,), opset_version=self.opset_version,
                                    training=torch.onnx.TrainingMode.TRAINING)
-        ort_outs = run_ort(ort_sess, input=(x,))
+        ort_outs = run_ort(ort_sess, (x,))
         assert not torch.all(torch.eq(x, torch.from_numpy(ort_outs[0])))
 
         script_model = torch.jit.script(model)
         output = model(x)
         ort_sess = convert_to_onnx(script_model, input=(x,), opset_version=self.opset_version,
                                    training=torch.onnx.TrainingMode.TRAINING)
-        ort_outs = run_ort(ort_sess, input=(x,))
+        ort_outs = run_ort(ort_sess, (x,))
         assert not torch.all(torch.eq(x, torch.from_numpy(ort_outs[0])))
 
     @skipIfUnsupportedMinOpsetVersion(12)
@@ -8710,7 +8710,7 @@ class TestONNXRuntime(unittest.TestCase):
         model.train()
         ort_sess = convert_to_onnx(model, input=(x,), opset_version=self.opset_version,
                                    training=torch.onnx.TrainingMode.TRAINING)
-        ort_outs = run_ort(ort_sess, input=(x,))
+        ort_outs = run_ort(ort_sess, (x,))
 
         y = model(input)
         output = y.cpu().numpy()
@@ -8727,7 +8727,7 @@ class TestONNXRuntime(unittest.TestCase):
         output = y.cpu().numpy()
         ort_sess = convert_to_onnx(script_model, input=(x,), opset_version=self.opset_version,
                                    training=torch.onnx.TrainingMode.TRAINING)
-        ort_outs = run_ort(ort_sess, input=(x,))
+        ort_outs = run_ort(ort_sess, (x,))
         ort_mask = np.where(ort_outs[0] != 0, 1, 0)
         pyt_mask = np.where(output != 0, 1, 0)
 

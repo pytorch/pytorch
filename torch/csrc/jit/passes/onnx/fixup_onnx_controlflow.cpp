@@ -361,8 +361,7 @@ bool IsUninitializedNode(Node* n) {
 
 // Infer shape and type of the uninitialized_output from the corresponding
 // output of the other subblock. prim::Uninitialized node is proven to be
-// unused. So replace this node with a Constant (TensorType) or
-// Sequence (ListType) of the inferred shape and type.
+// unused. So replace this node with one of the inferred shape and type.
 void InferShapeTypeForUninitializedOutput(
     Graph* graph,
     Block* block,
@@ -405,8 +404,7 @@ void InferShapeTypeForUninitializedOutput(
       const_node->output()->setType(other_output->type());
     }
   } else if (auto output_type = other_output->type()->cast<OptionalType>()) {
-    // Don't need return value. We just need to add the optional node to graph.
-    ONNXOptionalNode(output_type, graph);
+    const_node = ONNXOptionalNode(output_type, graph);
   } else {
     std::cerr << "Warning: Inferring type for prim::Uninitialized node from "
               << other_output->type()->repr_str() << " not supported."

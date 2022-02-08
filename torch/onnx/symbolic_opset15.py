@@ -33,7 +33,7 @@ from torch.onnx.symbolic_helper import _is_none
 
 def __is_(g, self, other):
     if _is_none(other):
-        if isinstance(self.type(), (NoneType, OptionalType)):
+        if isinstance(self.type(), OptionalType):
             none = g.op("OptionalHasElement", self)
             return g.op("Not", none)
         else:
