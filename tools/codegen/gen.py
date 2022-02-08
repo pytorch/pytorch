@@ -85,8 +85,7 @@ _GLOBAL_PARSE_NATIVE_YAML_CACHE = {}
 # Parse native_functions.yaml into a sequence of NativeFunctions and Backend Indices.
 ParsedYaml = namedtuple('ParsedYaml', ['native_functions', 'backend_indices'])
 def parse_native_yaml(path: str) -> ParsedYaml:
-    # parse tags.yaml
-    # create a tags database (a dict of tag name mapping to a Tag object)
+    # TODO: parse tags.yaml and create a tags database (a dict of tag name mapping to a Tag object)
     global _GLOBAL_PARSE_NATIVE_YAML_CACHE
     if path not in _GLOBAL_PARSE_NATIVE_YAML_CACHE:
         with open(path, 'r') as f:

@@ -335,7 +335,7 @@ class NativeFunction:
 
         tags = e.pop('tags', {})
         assert isinstance(tags, dict)
-        # verify that the tags keys are valid keys and that each tag value is a valid value
+        # TODO: verify that the tags keys are valid keys and that each tag value is a valid value
 
         from tools.codegen.api import cpp
 
