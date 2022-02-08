@@ -163,6 +163,10 @@ struct TORCH_API StaticModuleOptions {
   // graph, where storage is deallocated outside static runtime
   // (enable_out_variant must be true)
   bool manage_output_tensors{false};
+  // Gates the ReplaceWithCopy pass, which replaces ops that
+  // sometimes alias their outputs with out variants that
+  // always copy (so the output may participate in memory planning)
+  bool use_copy_variants{true};
   // Gates the ReplaceWithMaybeCopy pass, which replaces ops that
   // sometimes alias their outputs with subgraphs that include an out
   // variant.
@@ -785,13 +789,7 @@ class TORCH_API ProcessedNode {
         // TODO(T105178680): For this task, we should move
         // block runners out of ProcessedNode. Then, we don't have to deal
         // with this caveat.
-        block_runners_(nullptr)
-#ifndef PYTORCH_DISABLE_PER_OP_PROFILING
-        ,
-        op_name_(other.op_name_)
-#endif
-  {
-  }
+        block_runners_(nullptr) {}
 
   ProcessedNode& operator=(const ProcessedNode& other) {
     if (&other == this) {
@@ -805,9 +803,6 @@ class TORCH_API ProcessedNode {
     num_outputs_ = other.num_outputs_;
     values_ = other.values_;
     block_runners_ = nullptr;
-#ifndef PYTORCH_DISABLE_PER_OP_PROFILING
-    op_name_ = other.op_name_;
-#endif
     return *this;
   }
 
@@ -863,7 +858,7 @@ class TORCH_API ProcessedNode {
 
 #ifndef PYTORCH_DISABLE_PER_OP_PROFILING
   const char* get_op_name() const {
-    return op_name_;
+    return node_->kind().toQualString();
   }
 #endif
 
@@ -920,9 +915,6 @@ class TORCH_API ProcessedNode {
   // For control flow; processed nodes may have sub-blocks which can
   // be executed by op implementations.
   std::unique_ptr<std::vector<BlockRunner>> block_runners_;
-#ifndef PYTORCH_DISABLE_PER_OP_PROFILING
-  const char* op_name_;
-#endif
 };
 
 // `StaticRuntime` is the owner of the array of IValues (used for constants,

@@ -2058,7 +2058,7 @@ fed9b90ed4,jit,Untopiced,fixing removeProfilingNodes duplicated functions (#1282
 6078e12ad6,autograd_frontend,Untopiced,Add forward AD support for as_strided (#68629)
 51033ec840,autograd_frontend,Untopiced,Add forward AD layout check for storage numel (#68631)
 badf7b0210,autograd_frontend,Untopiced,fix typo changing the generated code (#69899)
-4829dcea09,build_frontend,Untopiced,Codegen: Generate seperate headers per operator (#68247)
+4829dcea09,cpp_frontend,bc_breaking,Codegen: Generate seperate headers per operator (#68247)
 620a1fcb55,fx,Untopiced,"OpInfos for: normal, bernoulli, multinomial (#66358)"
 d90012689f,dataloader_frontend,Untopiced,[DataPipe] Control shuffle settings from DataLoader2 (#65756)
 fa615b332d,python_frontend,docs,added set_printoptions examples (#68324)
@@ -2117,12 +2117,12 @@ c6bcfb152d,profiler,Untopiced,"[PyTorch][easy] Move GlobalRecordFunctionCallback
 8a08e70bf4,package,Untopiced,Revert D32596676: Avoid adding torch::deploy interpreter library to the data section
 1c4c81622c,skip,Untopiced,Support torch.equal for ShardedTensor. (#69734)
 a406a427ae,distributed,Untopiced,Revert D33004315: Support torch.equal for ShardedTensor.
-bab61be43b,skip,Untopiced,"Codegen: Add root_name property to NativeFunction{,sGroup} (#68687)"
-303d60b8da,cpp_frontend,Untopiced,Add TORCH_ASSERT_ONLY_METHOD_OPERATORS macro (#68688)
-6ba18ba87e,build_frontend,Untopiced,Codegen: Generate static dispatch headers per operator (#68714)
-7bb4b683b5,sparse_frontend,Untopiced,Codegen: Registration now only includes the functions used (#68689)
-9c7c1b769a,skip,Untopiced,Functionalization: Only include headers for required ops (#68690)
-38cfacd817,skip,Untopiced,Tensor: Define operators override functions in TensorBody.h (#68697)
+bab61be43b,cpp_frontend,bc_breaking,"Codegen: Add root_name property to NativeFunction{,sGroup} (#68687)"
+303d60b8da,cpp_frontend,bc_breaking,Add TORCH_ASSERT_ONLY_METHOD_OPERATORS macro (#68688)
+6ba18ba87e,cpp_frontend,bc_breaking,Codegen: Generate static dispatch headers per operator (#68714)
+7bb4b683b5,cpp_frontend,bc_breaking,Codegen: Registration now only includes the functions used (#68689)
+9c7c1b769a,cpp_frontend,bc_breaking,Functionalization: Only include headers for required ops (#68690)
+38cfacd817,cpp_frontend,bc_breaking,Tensor: Define operators override functions in TensorBody.h (#68697)
 b28a4100ff,build_frontend,Untopiced,scripts: Fix manylinux2014 promotion to pypi (#70003)
 66406ee0f7,jit,Untopiced,[PyTorch][Static Runtime] Fix to() w/dtype bool (#69935)
 65ab63310b,profiler,Untopiced,[PyTorch] use div instead of mul when calculating sampling probability (#70001)
@@ -2201,8 +2201,8 @@ de992c6b21,python_frontend,improvements,Specify ij indexing when cartesian_prod 
 bc95e5a196,python_frontend,Untopiced,[ROCm] Skip test_fn_fwgrad_bwgrad_gradient_cuda_complex128 (#70061)
 0cfff65395,python_frontend,bug_fixes,Apply contiguous on inputs of cdist backward (#70016)
 60eb1e53b2,sparse_frontend,Untopiced,Sparse CSR CPU: Add block sparse support for MKL path (#68710)
-2f622e87bd,autograd_frontend,Untopiced,Revert D32596274: Codegen: ADInplaceOrViewType only include operators registered
-26e32988bd,jit,Untopiced,Revert D32596264: Codegen: TraceType only includes operators being registered
+2f622e87bd,skip,Untopiced,Revert D32596274: Codegen: ADInplaceOrViewType only include operators registered
+26e32988bd,skip,Untopiced,Revert D32596264: Codegen: TraceType only includes operators being registered
 254360e182,python_frontend,Untopiced,[ROCm] Skip test_fn_fwgrad_bwgrad_* unexpected success tests (#70124)
 a6b7521428,build_frontend,Untopiced,always use max cmake when cmake3 and cmake are all existed (#69355)
 38e026c14d,cpp_frontend,devs,Add tanh_backward to AT symbols (#70071)
@@ -2393,7 +2393,7 @@ e6c3aa3880,autograd_frontend,Untopiced,Remove backward ops for mkldnn convolutio
 65faf1a7eb,fx,Untopiced,[fx2trt] Add version check for ProfilingVerbosity bulider config (#70286)
 ce86881afa,quantization,Untopiced,[quant][graphmode][fx] Add qat module mapping support in backend_config_dict (#70287)
 779f41a78a,quantization,Untopiced,[quant] Add a e2e test for standalone module + custom backend_config_dict (#70152)
-fa09099ba3,skip,Untopiced,Codegen: TraceType only includes operators being registered (#68691)
+fa09099ba3,cpp_frontend,bc_breaking,Codegen: TraceType only includes operators being registered (#68691)
 ab49d41bb5,skip,Untopiced,[AutoAccept][Codemod][FBSourceClangFormatLinter] Daily `arc lint --take CLANGFORMAT`
 1e67570f3a,caffe2,Untopiced,Drop omp simd from batch_permutation_op.cc (#70579)
 bc3246453b,build_frontend,Untopiced,Added explicit build command for Windows and clarification on obtaining (#70190)
@@ -2672,7 +2672,7 @@ e1f01d2c01,releng,Untopiced,".ci: Add nightly trigger, remove CircleCI linux bin
 3c0c5bde0e,build_frontend,Untopiced,[cmake] Uncomment binaries (#71157)
 de62bcac66,skip,Untopiced,Implement the patterns module for the multi subgraph rewriter. (#71181)
 cc55da8a9b,caffe2,Untopiced,[caffe2/server quant] use new depthwise conv fbgemm interface (#71166)
-ad803936d1,skip,Untopiced,Codegen: ADInplaceOrViewType only include operators registered (#68692)
+ad803936d1,cpp_frontend,bc_breaking,Codegen: ADInplaceOrViewType only include operators registered (#68692)
 67941c8a94,cuda,Untopiced,"Document `torch.cuda.ExternalStream`, `torch.cuda.caching_allocator_alloc` and `torch.cuda.caching_allocator_delete` (#70126)"
 9ca367d48b,jit,Untopiced,[nnc] Use given kernel function name while emitting code (#67781)
 7a93d8bb2d,fx,Untopiced,Revert D32374542: Implement the patterns module for the multi subgraph rewriter.
@@ -2852,7 +2852,7 @@ c5fe70021c,releng,Untopiced,Fix version strings in CI (#71564)
 dea61e7e6c,python_frontend,Untopiced,[Docs] Fixed missing format common args (#70439)
 401e755354,python_frontend,bug_fixes,Fix hsplit vsplit dsplit crash when section is 0 (#69342)
 7680a0ae9d,quantization,Untopiced,Deprecates _aminmax (#71576)
-40d1f77384,cpp_frontend,Untopiced,Codegen: python_torch_functions only include relevant operators (#68693)
+40d1f77384,cpp_frontend,bc_breaking,Codegen: python_torch_functions only include relevant operators (#68693)
 36b4c95e74,dataloader_frontend,Untopiced,[DataPipe] adding serialization test for all core IterDataPipes (#71456)
 13ea2cb330,dataloader_frontend,Untopiced,[DataPipe] Make GroupBy serializable with lambda function (#71497)
 1a917e637c,skip,Untopiced,Bump dlpack.h to latest version (#65047)
@@ -2867,7 +2867,7 @@ e2191e7084,skip,Untopiced,Fix persistent worker exits before pin_memory thread (
 d8abe813bc,distributed,Untopiced,"[LocalSGD] Move feature to Beta, clean up some docs (#71621)"
 7dd6ead0ac,releng,Untopiced,Update actions/stale to latest version
 b09d6224e2,skip,Untopiced,"Register{Schema,BackendSelect}.cpp: cleanup header includes (#70021)"
-71a41323bb,skip,Untopiced,BackendSelect: Use at::_ops API and per-operator headers (#69840)
+71a41323bb,cpp_frontend,bc_breaking,BackendSelect: Use at::_ops API and per-operator headers (#69840)
 0a2cdd18f3,nn_frontend,Untopiced,nice error msg from load_state_dict for non-tensor value (#70596)
 84fe4279db,skip,Untopiced,Structured Kernels: Use at::detail::empty functions (#70617)
 26d54b4076,skip,Untopiced,monitor: add docstrings to pybind interface (#71481)
