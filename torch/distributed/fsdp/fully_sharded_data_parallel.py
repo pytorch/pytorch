@@ -8,15 +8,14 @@ from typing import (
     TYPE_CHECKING,
     Any,
     Callable,
-    cast,
     Dict,
     Generator,
     List,
     Optional,
-    Generator,
     Set,
     Tuple,
     Union,
+    cast,
 )
 
 import torch
