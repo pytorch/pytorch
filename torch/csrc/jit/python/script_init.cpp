@@ -1395,12 +1395,7 @@ void initJitScriptBindings(PyObject* module) {
       .def(
           "get_class",
           [](const std::shared_ptr<CompilationUnit>& self,
-             const std::string& name) { return self->get_class(name); })
-      .def(
-          "drop_all_functions",
-          [](const std::shared_ptr<CompilationUnit>& self) {
-            self->drop_all_functions();
-          });
+             const std::string& name) { return self->get_class(name); });
 
   py::class_<StrongFunctionPtr>(m, "ScriptFunction", py::dynamic_attr())
       .def(
