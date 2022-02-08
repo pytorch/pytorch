@@ -26,6 +26,19 @@ class _BatchNorm(torch.nn.modules.batchnorm._BatchNorm):
         new_mod.zero_point = zero_point
         return new_mod
 
+    @classmethod
+    def from_reference(cls, bn, output_scale, output_zero_point):
+        qbn = cls(
+            bn.num_features,
+            bn.eps,
+            bn.momentum,
+            device=bn.weight.device,
+            dtype=bn.weight.dtype
+        )
+        qbn.scale = float(output_scale)
+        qbn.zero_point = float(output_zero_point)
+        return qbn
+
 class BatchNorm2d(_BatchNorm):
     r"""This is the quantized version of :class:`~torch.nn.BatchNorm2d`.
     """

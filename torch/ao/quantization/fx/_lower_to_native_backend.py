@@ -41,11 +41,18 @@ def is_fixed_qparams_node(node, modules):
     return is_call_function, is_call_method, is_call_module
 
 # Mapping from reference module class to the replacement quantized module class for lowering
-LOWER_MODULE_MAP: Dict[Type[nn.Module], Type[ReferenceableQuantizedModule]] = {
+LOWER_MODULE_MAP: Dict[Type[ReferenceableQuantizedModule], Type[torch.nn.Module]] = {
     nnqr.Linear: nnq.Linear,
     nnqr.Conv1d: nnq.Conv1d,
     nnqr.Conv2d: nnq.Conv2d,
     nnqr.Conv3d: nnq.Conv3d,
+}
+
+# TODO: merge with LOWER_MODULE_MAP after we merge
+# _lower_weighted_ref_module and special_pattern_replacement
+LOWER_MODULE_MAP2 = {
+    nn.BatchNorm2d: nnq.BatchNorm2d,
+    nn.BatchNorm3d: nnq.BatchNorm3d,
 }
 
 # Mapping from fused module class to a 2-tuple of:
@@ -159,12 +166,18 @@ def special_pattern_replacement(model: QuantizedGraphModule) -> QuantizedGraphMo
             continue
 
         # TODO: enable we have patterns that needs to swap the modules
-        # if is_call_module:
-        #     ref_module = modules[ref_node.target]
-        #     # change this pattern to use the corresponding quantized module
-        #     # replace reference module with quantized module
-        #     parent_name, module_name = _parent_name(ref_node.target)
-        #     setattr(modules[parent_name], module_name, ref_module)
+        if is_call_module:
+            ref_module = modules[ref_node.target]
+            if type(ref_module) in LOWER_MODULE_MAP2 and is_quantize:
+                qmodule_cls = LOWER_MODULE_MAP2.get(type(ref_module))
+                scale_node = q_node.args[1]
+                zero_point_node = q_node.args[2]
+                output_scale = getattr(model, scale_node.target)
+                zero_point = getattr(model, zero_point_node.target)
+                qmodule = qmodule_cls.from_reference(ref_module, ouput_scale, output_zero_point)
+                # replace reference module with quantized module
+                parent_name, module_name = _parent_name(ref_node.target)
+                setattr(modules[parent_name], module_name, qmodule)
 
         # remove dq node:
         dq_nodes = []
