@@ -20,11 +20,11 @@
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
 #else
+#include <ATen/ops/_native_multi_head_self_attention_native.h>
 #include <ATen/ops/empty.h>
 #include <ATen/ops/linear_native.h>
 #include <ATen/ops/matmul.h>
 #include <ATen/ops/matmul_native.h>
-#include <ATen/ops/native_multi_head_self_attention_native.h>
 #include <ATen/ops/split_native.h>
 #endif
 
