@@ -18,9 +18,10 @@ from .._src.compilers import (
     nnc_jit,
     memory_efficient_fusion,
     debug_compile,
+    print_compile
 )
 from .._src.partitioners import (
-    partition_with_recompute_fwd_in_bwd,
+    min_cut_rematerialization_partition,
     default_partition,
     draw_graph,
     draw_joint_graph,
