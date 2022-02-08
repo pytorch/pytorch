@@ -515,21 +515,29 @@ REGISTER_NATIVE_OPERATOR_FUNCTOR(
     aten::size,
     aten_size,
     [](Node* n) -> SROperator {
-      if (!n->matches(
+      if (n->matches(
               torch::schema("aten::size(Tensor self, int dim) -> int"))) {
-        LogAndDumpSchema(n);
-        return nullptr;
-      }
-      return [](ProcessedNode* p_node) {
-        const auto& input = p_node->Input(0).toTensor();
-        auto dim = p_node->Input(1).toInt();
-        const auto ndim = input.dim();
+        return [](ProcessedNode* p_node) {
+          const auto& input = p_node->Input(0).toTensor();
+          auto dim = p_node->Input(1).toInt();
+          const auto ndim = input.dim();
 
-        if (dim < 0 || dim >= ndim) {
-          dim = c10::maybe_wrap_dim(dim, ndim);
-        }
-        p_node->Output(0) = input.sizes()[dim];
-      };
+          if (dim < 0 || dim >= ndim) {
+            dim = c10::maybe_wrap_dim(dim, ndim);
+          }
+          p_node->Output(0) = input.sizes()[dim];
+        };
+      }
+
+      if (n->matches(torch::schema("aten::size(Tensor self) -> int[]"))) {
+        return [](ProcessedNode* p_node) {
+          const auto& input = p_node->Input(0).toTensor();
+          p_node->Output(0) = input.sizes();
+        };
+      }
+
+      LogAndDumpSchema(n);
+      return nullptr;
     });
 
 REGISTER_NATIVE_OPERATOR_FUNCTOR(
@@ -665,17 +673,26 @@ REGISTER_NATIVE_OPERATOR_FUNCTOR(
     aten::add,
     aten_add,
     [](Node* n) -> SROperator {
-      if (!n->matches(torch::schema("aten::add.t(t[] a, t[] b) -> (t[])"))) {
-        LogAndDumpSchema(n);
-        return nullptr;
+      if (n->matches(torch::schema("aten::add.t(t[] a, t[] b) -> (t[])"))) {
+        return [](ProcessedNode* pnode) {
+          const auto& a = pnode->Input(0).toList();
+          const auto& b = pnode->Input(1).toList();
+          auto ret = a.copy();
+          ret.append(b);
+          pnode->Output(0) = ret;
+        };
       }
-      return [](ProcessedNode* pnode) {
-        const auto& a = pnode->Input(0).toList();
-        const auto& b = pnode->Input(1).toList();
-        auto ret = a.copy();
-        ret.append(b);
-        pnode->Output(0) = ret;
-      };
+
+      if (n->matches(torch::schema("aten::add.int(int a, int b) -> (int)"))) {
+        return [](ProcessedNode* pnode) {
+          const auto a = pnode->Input(0).toInt();
+          const auto b = pnode->Input(1).toInt();
+          pnode->Output(0) = a + b;
+        };
+      }
+
+      LogAndDumpSchema(n);
+      return nullptr;
     });
 
 REGISTER_NATIVE_OPERATOR_FUNCTOR(
