@@ -5124,6 +5124,13 @@ class TestONNXRuntime(unittest.TestCase):
                           input_names=["x"],
                           dynamic_axes={"x": {0: "batch_size", 1: "dims"}})
 
+    def test_batchnorm1d_type_promotion(self):
+        num_features = 5
+        fp16 = torch.rand(300, num_features).half()
+        model = torch.nn.BatchNorm1d(num_features)
+        with torch.autocast(device_type='cpu'):
+            self.run_test(model, (fp16))
+
     def test_concat(self):
         class ConcatModel(torch.nn.Module):
             def forward(self, x, y, z):
