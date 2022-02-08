@@ -163,7 +163,7 @@ std::vector<std::pair<int, int>> inputOpIds(const at::RecordFunction& fn) {
   int input_nr = 0;
   for (input_nr = 0; input_nr < num_inputs; input_nr++) {
     auto op_id_pair = fn.inputOpId(input_nr);
-    input_op_ids.push_back(op_id_pair);
+    input_op_ids.emplace_back(op_id_pair);
   }
   return input_op_ids;
 }
