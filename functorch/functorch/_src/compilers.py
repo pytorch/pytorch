@@ -3,7 +3,7 @@ from functools import partial
 from typing import Iterable
 from .aot_autograd import aot_function, aot_module
 from .decompositions import decomposition_table
-from .partitioners import draw_graph, partition_with_recompute_fwd_in_bwd
+from .partitioners import draw_graph, min_cut_rematerialization_partition
 import time
 
 
@@ -230,6 +230,11 @@ default_decompositions = set([
 default_decompositions = {k: v for k, v in decomposition_table.items() if k in default_decompositions}
 
 
+def print_compile(fx_g, _):
+    print(fx_g.code)
+    return fx_g
+
+
 def memory_efficient_fusion(fn, static_argnums=None):
     """
     Recomputes the fwd pass in the bwd pass to perform memory efficient fusion.
@@ -238,7 +243,7 @@ def memory_efficient_fusion(fn, static_argnums=None):
     config = {
         'fw_compiler': ts_compile,
         'bw_compiler': ts_compile,
-        'partition_fn': partition_with_recompute_fwd_in_bwd,
+        'partition_fn': min_cut_rematerialization_partition,
         'hasher_type': "StaticShapheHasher",
         'decompositions': default_decompositions,
         'static_argnums': static_argnums

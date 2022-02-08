@@ -18,7 +18,7 @@ from functorch import (
 )
 from functorch.compile import (
     nnc_jit, compiled_function, compiled_module,
-    partition_with_recompute_fwd_in_bwd, aot_function, aot_module, decomposition_table, nop,
+    min_cut_rematerialization_partition, aot_function, aot_module, decomposition_table, nop,
     num_of_recompilations
 )
 
@@ -442,7 +442,7 @@ class TestPartitioning(TestCase):
         def compile_fn(x, _):
             return x
 
-        compiled_fn = compiled_function(fn, compile_fn, compile_fn, partition_with_recompute_fwd_in_bwd)
+        compiled_fn = compiled_function(fn, compile_fn, compile_fn, min_cut_rematerialization_partition)
         res = compiled_fn(res_a, res_b)
         res.sum().backward()
         assert torch.allclose(ref, res, atol=1e-3, rtol=1e-3)
