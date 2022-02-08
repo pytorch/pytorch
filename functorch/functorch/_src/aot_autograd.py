@@ -9,12 +9,20 @@ from torch.nn.utils import _stateless
 from functorch._C import CompileCache
 from .decompositions import register_decomposition
 from .partitioners import default_partition
-from typing import List, Dict, Any, Tuple
+from typing import Callable, List, Dict, Any, Tuple, Optional
 
-pytree._register_pytree_node(immutable_collections.immutable_list, lambda x: (
-    list(x), None), lambda x, c: immutable_collections.immutable_list(x))
-pytree._register_pytree_node(immutable_collections.immutable_dict, lambda x: (list(x.values()), list(
-    x.keys())), lambda x, c: immutable_collections.immutable_dict({key: value for key, value in zip(c, x)}))
+pytree._register_pytree_node(
+    immutable_collections.immutable_list,
+    lambda x: (list(x), None),
+    lambda x, c: immutable_collections.immutable_list(x),
+)
+pytree._register_pytree_node(
+    immutable_collections.immutable_dict,
+    lambda x: (list(x.values()), list(x.keys())),
+    lambda x, c: immutable_collections.immutable_dict(
+        {key: value for key, value in zip(c, x)}
+    ),
+)
 
 # TODO - move this to PyTorch core. This overrides the pytree implementation for
 # dict to maintain parity with Deepmind pytree.
@@ -37,14 +45,16 @@ aten = torch.ops.aten
 
 
 def create_joint_forward_backward(fn):
-    def joint_forward_backward(primals: List[Any], tangents: List[Any]) -> Tuple[List[Any], List[Any]]:
+    def joint_forward_backward(
+        primals: List[Any], tangents: List[Any]
+    ) -> Tuple[List[Any], List[Any]]:
         # Call the forward pass
         outs = fn(*primals)
         # Get the inputs that need gradients
         grad_primals = []
         inputs_needs_grads = []
         for p in primals:
-            is_grad_tensor = (isinstance(p, Tensor) and p.requires_grad)
+            is_grad_tensor = isinstance(p, Tensor) and p.requires_grad
             inputs_needs_grads.append(is_grad_tensor)
             if is_grad_tensor:
                 grad_primals.append(p)
@@ -60,10 +70,17 @@ def create_joint_forward_backward(fn):
         backward_out = []
         # Call the backwards pass
         if grad_primals:
-            backward_out = torch.autograd.grad(needed_outs, grad_primals,
-                                               grad_outputs=needed_tangents, allow_unused=True)
+            backward_out = torch.autograd.grad(
+                needed_outs,
+                grad_primals,
+                grad_outputs=needed_tangents,
+                allow_unused=True,
+            )
         backward_out_iter = iter(backward_out)
-        return outs, [next(backward_out_iter) if i else None for i in inputs_needs_grads]
+        return outs, [
+            next(backward_out_iter) if i else None for i in inputs_needs_grads
+        ]
+
     return joint_forward_backward
 
 
@@ -88,7 +105,21 @@ def _reshape_alias(x, shape, strides):
     return aten.view(x, shape)
 
 
-def create_aot_autograd_function(flat_fn, fw_compiler, bw_compiler, partition_fn, decompositions, grad_state):
+def create_aot_autograd_function(
+    flat_fn, fw_compiler, bw_compiler, partition_fn, decompositions, grad_state
+):
+    """
+    Traces the forward and backward graphs of the attr:`flat_fn` to generate a
+    joint graph. The joint graph is an Fx graph with Aten ops. Please refer to
+    the tracing mechanism to understand the graph capturing details.
+
+    The joint graph is then passed through attr:`partition_fn` to isolate the
+    forward and backward portions, which are then respectively compiled via the
+    provided attr:`fw_compiler` and attr:`bw_compiler`.
+
+    The resulting compiled forward and backward graphs are then wrapped up in a
+    ``torch.autograd.Function`` object.
+    """
     joint_forward_backward = create_joint_forward_backward(flat_fn)
 
     compiled_fw = None
@@ -102,7 +133,9 @@ def create_aot_autograd_function(flat_fn, fw_compiler, bw_compiler, partition_fn
             if compiled_fw is None:
                 with torch.set_grad_enabled(grad_state):
                     out = flat_fn(*flat_tensor_args)
-                out = pytree.tree_map(lambda x: x.detach() if isinstance(x, Tensor) else x, out)
+                out = pytree.tree_map(
+                    lambda x: x.detach() if isinstance(x, Tensor) else x, out
+                )
 
                 if isinstance(out, (list, tuple)):
                     num_outs = len(out)
@@ -112,7 +145,9 @@ def create_aot_autograd_function(flat_fn, fw_compiler, bw_compiler, partition_fn
                 joint_inputs = (flat_tensor_args, out)
                 aot_decompositions = {**aot_autograd_decompositions, **decompositions}
                 with torch.set_grad_enabled(grad_state):
-                    fx_g = make_fx(joint_forward_backward, aot_decompositions)(*joint_inputs)
+                    fx_g = make_fx(joint_forward_backward, aot_decompositions)(
+                        *joint_inputs
+                    )
                 fw_module, bw_module = partition_fn(fx_g, joint_inputs)
                 # print(fw_module.code, bw_module.code)
 
@@ -144,6 +179,7 @@ class _CompileCache(CompileCache):
 # using a C++-based pytree reduces the overhead by about 50%
 try:
     import tree
+
     HAS_TREE = True
 except ImportError:
     HAS_TREE = False
@@ -154,13 +190,17 @@ compile_cache = None
 class PytreeThunk:
     spec = None
     # These are some kinda dumb microoptimizations that save about 3-4 us of overhead.
-    is_simple = None  # if the output spec is a tuple/list, we won't bother unflattening it.
+    is_simple = (
+        None  # if the output spec is a tuple/list, we won't bother unflattening it.
+    )
     is_really_simple = None  # if the output spec is a LeafSpec
 
     def set(self, spec):
         assert self.spec is None or self.spec == spec
         self.spec = spec
-        if type(self.spec) in [tuple, list] and all([isinstance(i, pytree.LeafSpec) for i in spec.children_specs]):
+        if type(self.spec) in [tuple, list] and all(
+            [isinstance(i, pytree.LeafSpec) for i in spec.children_specs]
+        ):
             self.is_simple = True
         if isinstance(self.spec, pytree.LeafSpec):
             self.is_really_simple = True
@@ -219,14 +259,79 @@ def rearrange(tensor_args, static_args, static_argnums):
 
 
 def aot_function(
-    fn,
-    fw_compiler,
-    bw_compiler=None,
-    partition_fn=default_partition,
-    decompositions={},
-    hasher_type="StaticShapeHasher",
-    static_argnums=None,
-):
+    fn: Callable,
+    fw_compiler: Callable,
+    bw_compiler: Optional[Callable] = None,
+    partition_fn: Callable = default_partition,
+    decompositions: Dict = {},
+    hasher_type: str = "StaticShapeHasher",
+    static_argnums: Optional[Tuple[int]] = None,
+) -> Callable:
+    """
+    Returns a function that behaves like the original :attr:`func`, but
+    internally its forward graph is compiled via :attr:`fw_compiler` and
+    backward graph is compiled via :attr:`bw_compiler`.
+
+    :func:`aot_function` traces the forward and backward graph ahead of time,
+    and generates a joint forward and backward graph.  :attr:`partition_fn` is
+    then used to generate separate forward and backward graphs. The partitioner
+    function can be used to perform optimizations such as recomputation. One can
+    set `decompositions` dictionary to decompose the operators into a sequence
+    of core or simpler operators supported by the backend compilers.
+
+    :func:`aot_function` uses a compilation cache, based on input tensor
+    properties, to detect when there is a need of recompilation. By default, its
+    behavior is static, i.e., it recompiles if shape of any input tensor
+    changes.
+
+    :attr:`static_argnums` allows user to mark the arguments of the original
+    :attr:`fn` as static. This is useful when an argument is a non-tensor, e.g.,
+    ``int`` or ``bool``. A change in the actual value of static arg causes
+    recompilation.
+
+    Args:
+        fn (Callable): A Python function that takes one ore more arguments. Must
+            return one or more Tensors.
+        fw_compiler (Callable): A Python function that accepts an Fx graph with
+            Aten ops and input args, and returns a Callable that semantically is
+            equivalent to the input Fx graph.
+        bw_compiler (Optional[Callable]): A Python function that accepts an
+            Fx graph with Aten ops and input args, and returns a Callable that
+            semantically is equivalent to the input Fx graph.  Default: None
+            (when None, it defaults to the :attr:`fw_compiler`)
+        partition_fn (Callable): A Python function that takes a joint forward
+            and backward graph, and partitions it into separate forward and
+            backward graphs.
+        decompositions (Dict): A dictionary to define the decomposition of
+            larger Aten ops into simpler or core Aten ops.
+        static_argnums (Optional[Tuple[Int]]): An option tuple of ints to mark
+            the arguments of the function as static.
+
+    Returns:
+        Returns a ``Callable`` that retains the eager behavior of the original
+        :attr:`fn`, but with forward and backward graph compiled via
+        :attr:`fw_compile` and :attr:`bw_compile`.
+
+    A simple example usage of :func:`aot_function` is as follows. This example
+    will print the forward and backward graphs of the function ``fn``
+        >>> fn = lambda x : x.sin().cos()
+        >>> def print_compile_fn(fx_module, args):
+        >>>     print(fx_module)
+        >>>     return fx_module
+        >>> aot_fn = aot_function(fn, print_compile_fn)
+        >>> x = torch.randn(4, 5, requires_grad=True)
+        >>> aot_fn(x)
+
+    The static argnums are used to mark the non-tensor arguments as static. An
+    example is as follows where the dropout probability is as argument to the
+    original function.
+        >>> def fn(input, bias, residual, p: float):
+        >>>     a = torch.add(input, bias)
+        >>>     b = torch.nn.functional.dropout(a, p, training=True)
+        >>>     c = b + residual
+        >>>     return c
+        >>> aot_fn = aot_function(fn, print_compile_fn, static_argnums=(3,))
+    """
     global compile_cache
     if compile_cache is None:
         compile_cache = CompileCache()
@@ -306,7 +411,12 @@ def aot_function(
                 return flat_out
 
             compiled_fn = create_aot_autograd_function(
-                flat_fn, fw_compiler, bw_compiler, partition_fn, decompositions, grad_state=torch.is_grad_enabled()
+                flat_fn,
+                fw_compiler,
+                bw_compiler,
+                partition_fn,
+                decompositions,
+                grad_state=torch.is_grad_enabled(),
             ).apply
             cached_res = (compiled_fn, out_spec)
 
@@ -329,6 +439,10 @@ def aot_function(
 
 
 def num_of_recompilations():
+    """
+    Returns the numbers of recompilations since the last time cache was cleared.
+    This is equivalent to the number of entries in the compilation cache.
+    """
     global compile_cache
     if compile_cache is None:
         return 0
@@ -336,13 +450,31 @@ def num_of_recompilations():
 
 
 def clear_compile_cache():
+    """
+    Clears the compilation cache.
+    """
     global compile_cache
     if compile_cache is not None:
         compile_cache.clear()
         compile_cache = None
 
 
-def aot_module(mod, *args, **kwargs):
+def aot_module(mod: nn.Module, *args, **kwargs) -> nn.Module:
+    """
+    Returns a `nn.Module` object that behaves like the original attr:`mod` and
+    uses the func:`aot_function` function to compile the foward and backward
+    graph of the module. See func:`aot_function` description for more details.
+
+    Args:
+        mod (nn.Module): The original module.
+        args : The args for func:`aot_function`
+        kwargs : The kwargs for func:`aot_function`
+
+    Return:
+        Returns a `nn.Module` that behaves like the original attr:`fn` and uses
+        func:`aot_function` to compile the forward and backward graphs.
+    """
+
     def functional_call(named_params, named_buffers, *args, **kwargs):
         params_and_buffers = {**named_params, **named_buffers}
         return _stateless.functional_call(mod, params_and_buffers, args, kwargs)
@@ -359,7 +491,7 @@ def aot_module(mod, *args, **kwargs):
                 dict(self.orig_module.named_parameters(remove_duplicate=False)),
                 dict(self.orig_module.named_buffers(remove_duplicate=False)),
                 *args,
-                **kwargs
+                **kwargs,
             )
 
     return AOTModule()
