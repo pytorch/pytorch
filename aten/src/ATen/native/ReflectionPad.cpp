@@ -861,18 +861,10 @@ Tensor& reflection_pad1d_out_cpu(const Tensor& input, IntArrayRef padding,
 }
 
 Tensor reflection_pad1d_cpu(const Tensor& input, IntArrayRef padding) {
-  Tensor output;
-  if (input.is_quantized()) {
-    if (input.qscheme() == kPerTensorAffine) {
-      output = at::_empty_affine_quantized({0}, input.options(),
+  TORCH_CHECK(input.qscheme() == kPerTensorAffine, "Only per tensor quantization is supported");
+  Tensor output = at::_empty_affine_quantized({0}, input.options(),
                                            input.q_scale(),
                                            input.q_zero_point());
-    } else {
-      TORCH_CHECK(false, "Only per tensor quantization is supported");
-    }
-  } else {
-    output = at::empty({0}, input.options());
-  }
   reflection_pad1d_out_template(output, input, padding);
   return output;
 }
