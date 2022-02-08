@@ -57,8 +57,8 @@ class TestGradAcc(FSDPTest):
                 synchronized until the final iteration.
             cpu_offload (CPUOffload): Configures CPU offloading.
             backward_prefetch (BackwardPrefetch): Specifies at which point to
-                prefetch the next layer's full parameters, if at all.
-    during backward pass.
+                prefetch the next layer's full parameters during the backward
+                pass, if at all.
         """
         old_default_dtype = torch.get_default_dtype()
         try:
