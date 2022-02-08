@@ -7,6 +7,7 @@ from typing import (
     TYPE_CHECKING,
     Any,
     Callable,
+    cast,
     Dict,
     List,
     Optional,
@@ -25,12 +26,11 @@ from torch.distributed import ProcessGroup
 from torch.distributed.distributed_c10d import _get_default_group
 from torch.nn.parameter import Parameter
 
-from .flatten_params_wrapper import FlattenParamsWrapper
-from .wrap import _recursive_wrap
-
+from .flatten_params_wrapper import FlatParameter, FlattenParamsWrapper
 from .utils import (
     _apply_to_tensors,
 )
+from .wrap import _recursive_wrap
 
 if TYPE_CHECKING:
     from collections import OrderedDict  # noqa: F401
@@ -46,9 +46,11 @@ class CPUOffload:
                     gradient offloading to CPUs in order for parameters and
                     gradients to be on the same device to work with optimizer.
     """
+
     offload_params: bool = False
     # TODO: state dict offloading
     # https://github.com/pytorch/pytorch/issues/67224
+
 
 class BackwardPrefetch(Enum):
     """
@@ -73,9 +75,11 @@ class BackwardPrefetch(Enum):
                    single NCCL stream and cause the next layer's computation delay. So it may
                    cause some performance regession for some models.
     """
+
     BACKWARD_PRE = auto()
     BACKWARD_POST = auto()
     # TODO, BACKWARD_PRE_CPU, prefetch full parameters and keep them in the CPU memory
+
 
 class TrainingState_(Enum):
     """
@@ -235,7 +239,7 @@ class FullyShardedDataParallel(nn.Module):
         # shard any leftover parameters.
         params = []
         for param_name, param in module.named_parameters():
-            if not hasattr(param, "_is_sharded"):
+            if not isinstance(param, FlatParameter):
                 params.append(param)
 
         self._fsdp_wrapped_module: FlattenParamsWrapper = FlattenParamsWrapper(
@@ -252,8 +256,10 @@ class FullyShardedDataParallel(nn.Module):
 
         # Make sure all parameters are sharded.
         for n, p in self.named_parameters():
-            if not hasattr(p, "_is_sharded"):
-                raise RuntimeError(f"found unsharded parameter: {n} ; {p.size()}")
+            if not isinstance(p, FlatParameter):
+                raise RuntimeError(
+                    f"found unsharded parameter: {n} ; {p.size()} {p.__class__}"
+                )
         self._reset_lazy_init()
 
         # Enum to indicate if we're in the forward/backward pass, idle, etc.
@@ -343,11 +349,8 @@ class FullyShardedDataParallel(nn.Module):
         allocate less memory for optimizer state, avoiding redundancy across
         data parallel workers.
         """
-        self.numel_padded_per_param = []
         for p in self.params:
-            assert not hasattr(
-                p, "_is_sharded"
-            ), "Param should have not been sharded yet."
+            assert not p._is_sharded, "Param should have not been sharded yet."
             assert (
                 p.is_floating_point()
             ), "Autograd does not support operations for integer type."
@@ -371,11 +374,17 @@ class FullyShardedDataParallel(nn.Module):
             # Replace p with the relevant shard.
             local_shard, num_padded = self._get_shard(p)
             p.set_(local_shard)  # type: ignore[call-overload]
+            p.shard_by_offsets(
+                self.rank * local_shard.numel(),
+                (self.rank + 1) * local_shard.numel() - 1,
+                num_padded,
+            )
             self.numel_padded_per_param.append(num_padded)
 
             # Free storage that contains the original full data.
             if orig_storage.size() > 0:
                 orig_storage.resize_(0)  # type: ignore[attr-defined]
+
         assert len(self.numel_padded_per_param) == len(
             self.params
         ), "numel_padded_per_param is not populated correctly."
@@ -511,12 +520,11 @@ class FullyShardedDataParallel(nn.Module):
         # CPU if we are CPU offloading, since p.data would be on CPU during
         # init.
         if self.cpu_offload.offload_params:
-            assert p.device == torch.device(
-                "cpu"
-            ), ("Expected param to be on CPU when cpu_offloading is enabled. "
+            assert p.device == torch.device("cpu"), (
+                "Expected param to be on CPU when cpu_offloading is enabled. "
                 "If CPU offloading is enabled correctly, you may be "
                 "accidentally moving the model to CUDA after FSDP initialization."
-                )
+            )
         p._local_shard = p.data  # type: ignore[attr-defined]
         # If CPU offloading, pin the memory to enable faster CPU -> GPU device
         # transfer.
@@ -604,8 +612,10 @@ class FullyShardedDataParallel(nn.Module):
         if (
             self.backward_prefetch == BackwardPrefetch.BACKWARD_PRE
             and self._fsdp_graph_order is not None
-            and self._my_fsdp_idx_in_graph is not None and self._my_fsdp_idx_in_graph > 0
-            and self._fsdp_graph_order[self._my_fsdp_idx_in_graph - 1].training_state != TrainingState_.BACKWARD_POST
+            and self._my_fsdp_idx_in_graph is not None
+            and self._my_fsdp_idx_in_graph > 0
+            and self._fsdp_graph_order[self._my_fsdp_idx_in_graph - 1].training_state
+            != TrainingState_.BACKWARD_POST
         ):
             return True
         else:
@@ -615,9 +625,13 @@ class FullyShardedDataParallel(nn.Module):
         if (
             self.backward_prefetch == BackwardPrefetch.BACKWARD_POST
             and self._fsdp_graph_order is not None
-            and self._my_fsdp_idx_in_graph is not None and self._my_fsdp_idx_in_graph > 0
-            and self._fsdp_graph_order[self._my_fsdp_idx_in_graph - 1].training_state != TrainingState_.BACKWARD_POST
-            and self._fsdp_graph_order[self._my_fsdp_idx_in_graph - 1]._need_rebuild_full_params
+            and self._my_fsdp_idx_in_graph is not None
+            and self._my_fsdp_idx_in_graph > 0
+            and self._fsdp_graph_order[self._my_fsdp_idx_in_graph - 1].training_state
+            != TrainingState_.BACKWARD_POST
+            and self._fsdp_graph_order[
+                self._my_fsdp_idx_in_graph - 1
+            ]._need_rebuild_full_params
         ):
             return True
         else:
@@ -885,9 +899,9 @@ class FullyShardedDataParallel(nn.Module):
                 "FSDP only works with gradients that don't require gradients"
             )
 
-        self._free_full_params([param])
+        self._free_full_params(cast(List[FlatParameter], [param]))
         # Switch to local shard after backward.
-        self._use_param_local_shard([param])
+        self._use_param_local_shard(cast(List[FlatParameter], [param]))
 
         # Prefetch previous layer's full params in backward pass post backward hook,
         # If next layer's backward computation is done and full params are freed,
@@ -1103,7 +1117,7 @@ class FullyShardedDataParallel(nn.Module):
                 p.grad = None
 
     @torch.no_grad()
-    def _free_full_params(self, params: Optional[List[Parameter]] = None) -> None:
+    def _free_full_params(self, params: Optional[List[FlatParameter]] = None) -> None:
         """
         Free up storage for full parameters.
         """
@@ -1126,7 +1140,9 @@ class FullyShardedDataParallel(nn.Module):
             _free_storage(p._full_param_padded)  # type: ignore[attr-defined]
 
     @torch.no_grad()
-    def _use_param_local_shard(self, params: Optional[List[Parameter]] = None) -> None:
+    def _use_param_local_shard(
+        self, params: Optional[List[FlatParameter]] = None
+    ) -> None:
         """Use local shard for a list of params. Also implicitly offloads
         parameters back to CPU if we are CPU offloading."""
         if params is None:
@@ -1136,9 +1152,7 @@ class FullyShardedDataParallel(nn.Module):
                 # Ensure local_shard resides in CPU if we are offloading params.
                 assert p._local_shard.device == torch.device(  # type: ignore[attr-defined]
                     "cpu"
-                ), (
-                    "Expected p._local_shard to be on CPU"
-                )
+                ), "Expected p._local_shard to be on CPU"
             p.data = p._local_shard  # type: ignore[attr-defined]
 
     def _assert_state(self, state: Union[TrainingState_, List[TrainingState_]]) -> None:
