@@ -4134,7 +4134,7 @@ class TestONNXRuntime(unittest.TestCase):
         input = torch.zeros((1, 100, 8), dtype=torch.float32)
         self.run_test(LstmNet(), input, input_names=['input'], output_names=['output'],
                       dynamic_axes={'input' : {0 : 'batch_size', 1: 'w', 2: 'h'},
-                                    'output' : {0 : 'batch_size', 1: 'w', 2: 'h'},})
+                                    'output' : {0 : 'batch_size', 1: 'w', 2: 'h'}, })
 
     @disableScriptTest()
     def test_rnn_no_bias(self):
