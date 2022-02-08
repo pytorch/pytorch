@@ -1,15 +1,40 @@
 import torch
 import torch.nn.quantized.functional
 import torch.nn.intrinsic as nni
+from torch import Tensor
 
-class BatchNorm2d(torch.nn.BatchNorm2d):
+class _BatchNorm(torch.nn.modules.batchnorm._BatchNorm):
+    def __init__(self, num_features, eps=1e-5, momentum=0.1, device=None, dtype=None) -> None:
+        factory_kwargs = {'device': device, 'dtype': dtype}
+        super().__init__(num_features, eps, momentum, True, True, **factory_kwargs)
+
+    def forward(self, input: Tensor) -> Tensor:
+        return NotImplementedError
+
+    @staticmethod
+    def from_float(cls, mod):
+        activation_post_process = mod.activation_post_process
+        if type(mod) == cls._NNI_BN_RELU_MODULE:
+            mod = mod[0]
+        scale, zero_point = activation_post_process.calculate_qparams()
+        new_mod = cls(mod.num_features, mod.eps)
+        new_mod.weight = mod.weight
+        new_mod.bias = mod.bias
+        new_mod.running_mean = mod.running_mean
+        new_mod.running_var = mod.running_var
+        new_mod.scale = scale
+        new_mod.zero_point = zero_point
+        return new_mod
+
+class BatchNorm2d(_BatchNorm):
     r"""This is the quantized version of :class:`~torch.nn.BatchNorm2d`.
     """
 
+    _NNI_BN_RELU_MODULE = nni.BNReLU2d
+
     def __init__(self, num_features, eps=1e-5, momentum=0.1, device=None, dtype=None) -> None:
         factory_kwargs = {'device': device, 'dtype': dtype}
-        super(BatchNorm2d, self).__init__(num_features, **factory_kwargs)
-        self.eps = eps
+        super().__init__(num_features, eps, momentum, **factory_kwargs)
         self.register_buffer('scale', torch.tensor(1.0, **factory_kwargs))
         self.register_buffer('zero_point', torch.tensor(0, **factory_kwargs))
 
@@ -22,28 +47,17 @@ class BatchNorm2d(torch.nn.BatchNorm2d):
 
     @classmethod
     def from_float(cls, mod):
-        activation_post_process = mod.activation_post_process
-        if type(mod) == nni.BNReLU2d:
-            mod = mod[0]
-        scale, zero_point = activation_post_process.calculate_qparams()
-        new_mod = cls(mod.num_features, mod.eps)
-        new_mod.weight = mod.weight
-        new_mod.bias = mod.bias
-        new_mod.running_mean = mod.running_mean
-        new_mod.running_var = mod.running_var
-        new_mod.scale = scale
-        new_mod.zero_point = zero_point
-        return new_mod
+        return _BatchNorm.from_float(cls, mod)
 
-# TODO: dedup with BatchNorm2d
-class BatchNorm3d(torch.nn.BatchNorm3d):
+class BatchNorm3d(_BatchNorm):
     r"""This is the quantized version of :class:`~torch.nn.BatchNorm3d`.
     """
 
+    _NNI_BN_RELU_MODULE = nni.BNReLU3d
+
     def __init__(self, num_features, eps=1e-5, momentum=0.1, device=None, dtype=None):
         factory_kwargs = {'device': device, 'dtype': dtype}
-        super(BatchNorm3d, self).__init__(num_features, **factory_kwargs)
-        self.eps = eps
+        super().__init__(num_features, eps, momentum, **factory_kwargs)
         self.register_buffer('scale', torch.tensor(1.0, **factory_kwargs))
         self.register_buffer('zero_point', torch.tensor(0, **factory_kwargs))
 
@@ -56,15 +70,4 @@ class BatchNorm3d(torch.nn.BatchNorm3d):
 
     @classmethod
     def from_float(cls, mod):
-        activation_post_process = mod.activation_post_process
-        if type(mod) == nni.BNReLU3d:
-            mod = mod[0]
-        scale, zero_point = activation_post_process.calculate_qparams()
-        new_mod = cls(mod.num_features, mod.eps)
-        new_mod.weight = mod.weight
-        new_mod.bias = mod.bias
-        new_mod.running_mean = mod.running_mean
-        new_mod.running_var = mod.running_var
-        new_mod.scale = scale
-        new_mod.zero_point = zero_point
-        return new_mod
+        return _BatchNorm.from_float(cls, mod)
