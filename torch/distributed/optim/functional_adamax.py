@@ -57,7 +57,7 @@ class _FunctionalAdamax(object):
         grads = []
         exp_avgs = []
         exp_infs = []
-        state_steps: List[int] = []
+        state_steps: List[Tensor] = []
 
         if len(params) != len(gradients):
             raise ValueError(
@@ -84,11 +84,7 @@ class _FunctionalAdamax(object):
 
                 exp_avgs.append(state['exp_avg'])
                 exp_infs.append(state['exp_inf'])
-
-                # update the steps for each param group update
-                state['step'] += 1
-                # record the step after step update
-                state_steps.append(state['step'].item())
+                state_steps.append(state['step'])
 
         with torch.no_grad():
             F.adamax(params_with_grad,

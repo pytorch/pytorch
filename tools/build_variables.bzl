@@ -1320,13 +1320,9 @@ aten_native_source_list = sorted(aten_native_source_non_codegen_list + aten_nati
 # .cu files can be found via glob
 aten_cuda_cu_source_list = [
     "aten/src/ATen/cuda/CUDABlas.cpp",
-    "aten/src/ATen/cuda/CUDASolver.cpp",
     "aten/src/ATen/cuda/CUDASparseBlas.cpp",
     "aten/src/ATen/cuda/CublasHandlePool.cpp",
-    "aten/src/ATen/cuda/CusolverDnHandlePool.cpp",
     "aten/src/ATen/native/cuda/Activation.cpp",
-    "aten/src/ATen/native/cuda/BatchLinearAlgebra.cpp",
-    "aten/src/ATen/native/cuda/BatchLinearAlgebraLib.cpp",
     "aten/src/ATen/native/cuda/Blas.cpp",
     "aten/src/ATen/native/cuda/Equal.cpp",
     "aten/src/ATen/native/cuda/IndexKernel.cpp",
