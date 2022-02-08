@@ -153,7 +153,7 @@ def _size_of(metadata):
     return numel * sizes[dtype]
 
 
-def partition_with_recompute_fwd_in_bwd(joint_module: fx.GraphModule, _joint_inputs):
+def min_cut_rematerialization_partition(joint_module: fx.GraphModule, _joint_inputs):
     """
     Partitions the joint graph such that the backward recomputes the forward.
     Recomputing helps in trading off memory bandwidth with computation.
@@ -223,7 +223,7 @@ def partition_with_recompute_fwd_in_bwd(joint_module: fx.GraphModule, _joint_inp
             return mem_sz * 2
 
     for node in full_bw_graph.nodes:
-        if node in tangent_closure:
+        if node in tangent_closure and node.op != 'output':
             nx_graph.add_edge(node.name+"_in", "sink", capacity=math.inf)
             continue
 
