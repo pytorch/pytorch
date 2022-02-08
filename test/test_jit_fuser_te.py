@@ -2281,6 +2281,26 @@ class TestTEFuser(JitTestCase):
                     torch._C._jit_pass_dce(g)
                     FileCheck().check_count("TensorExprDynamicGuard", len(gen_tensor), exactly=True).run(g)
 
+    def test_autocast_up(self):
+        def f(x):
+            y = x._autocast_to_full_precision(True, True)
+            z = torch.exp(y)
+            return z
+
+        x = torch.rand((2, 2))
+        scripted = self.checkScript(f, (x,))
+        self.assertAllFused(scripted.graph_for(x))
+
+    def test_autocast_down(self):
+        def f(x):
+            y = torch.sigmoid(x)
+            z = y._autocast_to_reduced_precision(True, True, torch.half, torch.half)
+            return z
+
+        x = torch.rand((2, 2))
+        scripted = self.checkScript(f, (x,))
+        self.assertAllFused(scripted.graph_for(x))
+
 class TestTEFuserStatic(TestTEFuser):
     dynamic_shapes = False
 
