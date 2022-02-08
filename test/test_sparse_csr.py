@@ -1413,8 +1413,6 @@ class TestSparseCSR(TestCase):
     @dtypes(*get_all_dtypes(include_bool=False, include_bfloat16=False, include_complex=False))
     def test_eye(self, device, dtype):
         for n in (3, 5, 7):
-            # This will fail with an error:
-            # RuntimeError: torch.empty: Only 2D sparse CSR tensors are supported.
             sparse_csr_output = torch.eye(n, layout=torch.sparse_csr, device=device, dtype=dtype)
             dense_output = torch.eye(n, device=device, dtype=dtype)
             self.assertEqual(sparse_csr_output.to_dense(), dense_output)
