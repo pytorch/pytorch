@@ -297,9 +297,6 @@ class Join():
         """
         ones = torch.ones(1, device=self._device)
         dist.all_reduce(ones, group=self._process_group)
-        # NOTE: Raising `StopIteration` does not throw an error in Python 3.6
-        # and throws a `RuntimeError` in Python 3.7+ (PEP 479), so we just
-        # raise a `RuntimeError` here
         raise RuntimeError(f"Rank {self._rank} exhausted all inputs.")
 
     @staticmethod
