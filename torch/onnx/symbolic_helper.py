@@ -1064,6 +1064,8 @@ scalar_type_to_pytorch_type = [
     torch.bfloat16,     # 15
 ]
 
+# source of truth is
+# https://github.com/pytorch/pytorch/blob/master/torch/csrc/utils/tensor_dtypes.cpp
 pytorch_name_to_type = {
     "Byte": torch.uint8,
     "Char": torch.int8,
