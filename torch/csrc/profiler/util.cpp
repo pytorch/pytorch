@@ -114,7 +114,7 @@ std::pair<at::RecordFunctionHandle, int> get_input_op_id_from_record_fn(const at
 std::vector<std::vector<int64_t>> flatten_list(c10::List<c10::IValue> list, std::string fn_name) {
   std::vector<std::vector<int64_t>> tensor_dims;
   int idx = 0;
-  for (const c10::IValue& input : list) {
+  for (const c10::IValue input : list) {
     if (input.isTensor()) {
         const at::Tensor& tensor = input.toTensor();
         if (tensor.defined()) {

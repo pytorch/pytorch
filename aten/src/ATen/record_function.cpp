@@ -590,8 +590,6 @@ std::pair<int, int> RecordFunction::get_op_id_from_input(const c10::IValue& inpu
         // See if Address is in the map already
         if (at::producer_tensor_map.count(ten_addr) > 0) {
             producer_op_pair  =  at::producer_tensor_map[ten_addr];
-            int producer_op_id = producer_op_pair.first;
-            int output_nr = producer_op_pair.second;
         }
     }
     return producer_op_pair;
@@ -647,7 +645,6 @@ void RecordFunction::update_output_tensor_tracking(void) {
             const at::Tensor& tensor = s_tensor.toTensor();
             if (tensor.defined()) {
                 auto ten_addr =  tensor.unsafeGetTensorImpl();
-                bool addr_found = at::producer_tensor_map.count(ten_addr) > 0;
                 at::producer_tensor_map[ten_addr] = std::pair<int, int> {producer_op_id, output_nr};
                 state_->output_dims_.push_back(tensor.sizes().vec());
                 state_->output_tensor_addr_.push_back(ten_addr);
