@@ -2181,13 +2181,16 @@ def pixel_unshuffle(g, self, downscale_factor):
     output_channel = dims[1] * downscale_factor * downscale_factor
     after_view = sym_help._reshape_helper(g, self,
                                           g.op("Constant", value_t=torch.tensor([-1, dims[1],
-                                                                                dims[2] // downscale_factor, downscale_factor,
-                                                                                dims[3] // downscale_factor, downscale_factor])),
+                                                                                dims[2] // downscale_factor,
+                                                                                downscale_factor,
+                                                                                dims[3] // downscale_factor,
+                                                                                downscale_factor])),
                                           allowzero=0)
     after_transpose = g.op("Transpose", after_view, perm_i=[0, 1, 3, 5, 2, 4])
     return sym_help._reshape_helper(g, after_transpose,
                                     g.op("Constant", value_t=torch.tensor([-1, output_channel,
-                                                                          dims[2] // downscale_factor, dims[3] // downscale_factor])),
+                                                                          dims[2] // downscale_factor,
+                                                                          dims[3] // downscale_factor])),
                                     allowzero=0)
 
 
