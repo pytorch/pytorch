@@ -895,6 +895,17 @@ def acc_ops_sum(
     return add_reduce_layer(network, target, args, kwargs, trt.ReduceOperation.SUM, name)
 
 
+@tensorrt_converter(acc_ops.prod)
+def acc_ops_prod(
+    network: TRTNetwork,
+    target: Target,
+    args: Tuple[Argument, ...],
+    kwargs: Dict[str, Argument],
+    name: str,
+) -> TRTTensor:
+    return add_reduce_layer(network, target, args, kwargs, trt.ReduceOperation.PROD, name)
+
+
 @tensorrt_converter(acc_ops.mean)
 def acc_ops_mean(
     network: TRTNetwork,
