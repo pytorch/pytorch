@@ -1793,7 +1793,7 @@ def unravel_index(
 
     Keyword Args:
         as_tuple: A boolean value, which if `True` will return the result as tuple of Tensors,
-                  else a `Tensor` will be returned. Default: `False`
+                  else a `Tensor` will be returned. Default: `True`
 
     Returns:
         unraveled coordinates from the given `indices` and `shape`. See description of `as_tuple` for
@@ -1809,7 +1809,7 @@ def unravel_index(
         tensor([[3, 4],
                 [6, 5],
                 [6, 1]])
-        >>> torch.unravel_index(indices, shape, as_tuple=True)
+        >>> torch.unravel_index(indices, shape)
         (tensor([3, 6, 6]), tensor([4, 5, 1]))
 
         >>> indices = torch.tensor([3, 10, 12])
