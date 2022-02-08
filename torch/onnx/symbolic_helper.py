@@ -1064,6 +1064,24 @@ scalar_type_to_pytorch_type = [
     torch.bfloat16,     # 15
 ]
 
+pytorch_name_to_type = {
+    "Byte": torch.uint8,
+    "Char": torch.int8,
+    "Double": torch.double,
+    "Float": torch.float,
+    "Half": torch.half,
+    "Int": torch.int,
+    "Long": torch.int64,
+    "Short": torch.short,
+    "Bool": torch.bool,
+    "ComplexFloat": torch.complex64,
+    "ComplexDouble": torch.complex128,
+    "QInt8": torch.qint8,
+    "QUInt8": torch.quint8,
+    "QInt32": torch.qint32,
+    "BFloat16": torch.bfloat16,
+}
+
 def _cast_func_template(to_i, g, input, non_blocking):
     return g.op("Cast", input, to_i=to_i)
 
