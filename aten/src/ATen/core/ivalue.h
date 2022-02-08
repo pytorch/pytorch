@@ -6,6 +6,7 @@
 #include <ATen/core/custom_class.h>
 #include <ATen/core/ivalue_to.h>
 #include <ATen/core/jit_type_base.h>
+#include <ATen/core/type_factory.h>
 #include <c10/util/C++17.h>
 #include <c10/util/MaybeOwned.h>
 #include <c10/util/intrusive_ptr.h>
@@ -895,8 +896,8 @@ public:
     }
   }
 
-  template <typename T = c10::Type>
-  typename T::Ptr type() const;
+  template <typename T = c10::PlatformType>
+  TypePtr type() const;
 
   // Detect aliased tensors.
   struct HashAliasedIValue {
@@ -1268,4 +1269,4 @@ struct TORCH_API WeakOrStrongTypePtr {
 
 } // namespace c10
 
-#include <ATen/core/ivalue_inl.h>
+#include <ATen/core/ivalue_inl.h>  // IWYU pragma: keep

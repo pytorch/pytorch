@@ -825,21 +825,6 @@ if IS_WINDOWS:
 # Dict of torch dtype -> NumPy dtype
 torch_to_numpy_dtype_dict = {value : key for (key, value) in numpy_to_torch_dtype_dict.items()}
 
-ALL_TENSORTYPES = [torch.float,
-                   torch.double,
-                   torch.half]
-
-# bfloat16 bringup is currently only available on ROCm
-# ALL_TENSORTYPES2 will eventually be unified with ALL_TENSORTYPES
-# when bfloat16 bringup is complete on all platforms
-if TEST_WITH_ROCM:
-    ALL_TENSORTYPES2 = [torch.float,
-                        torch.double,
-                        torch.half,
-                        torch.bfloat16]
-else:
-    ALL_TENSORTYPES2 = ALL_TENSORTYPES
-
 def skipIfRocm(fn):
     @wraps(fn)
     def wrapper(*args, **kwargs):
@@ -1672,6 +1657,7 @@ class TestCase(expecttest.TestCase):
             try:
                 torch.cuda.synchronize()
             except RuntimeError as rte:
+                print("TEST SUITE EARLY TERMINATION due to torch.cuda.synchronize() failure", file=sys.stderr)
                 return True
             return False
         else:
@@ -1780,6 +1766,20 @@ class TestCase(expecttest.TestCase):
         super().run(result=result)
         # Early terminate test if necessary.
         if self._should_stop_test_suite():
+            if result.wasSuccessful():
+                case = TestCase()
+                if TEST_SAVE_XML is not None:
+                    # This is a big hacky, XMLRunner modifies expected type from TestCase to TestInfo
+                    # Create dummy TestInfo to record results correctly
+                    from xmlrunner.result import _TestInfo  # type: ignore[import]
+                    case = _TestInfo(result, case)
+                    case.output = _TestInfo.ERROR
+                    case.elapsed_time = 0.0
+                    case.test_description = "TestSuiteEarlyFailure"
+                # This shouldn't really happen, but if does add fake failure
+                # For more details see https://github.com/pytorch/pytorch/issues/71973
+                result.failures.append((case, "TestSuite execution was aborted early"))
+                assert result.wasSuccessful() is False
             result.stop()
 
         if not RETRY_TEST_CASES or not using_unittest:
@@ -2517,26 +2517,28 @@ def noncontiguous_like(t):
         return t
 
     # Special-cases 0-dim tensors
-    if t.ndim == 0:
-        result = t.detach().unsqueeze(0).repeat_interleave(2, dim=-1)
-        if t.dtype.is_floating_point or t.dtype.is_complex:
-            result[0] = math.nan
-        else:
-            result[0] = 0
-        result.set_(result.storage(), 1, t.size(), ())
-        result.requires_grad_(t.requires_grad)
-        return result
+    zero_dim = t.ndim == 0
+    if zero_dim:
+        t = t.unsqueeze(0)
 
-    # 1+ dim tensor case
     result = torch.repeat_interleave(t.detach(), 2, dim=-1)
-    if t.dtype.is_floating_point or t.dtype.is_complex:
-        result[..., 1::2] = math.nan
-    else:
-        result[..., 1::2] = 0
 
-    strides = list(result.stride())
-    strides[-1] = strides[-1] * 2
-    result.set_(result.storage(), result.storage_offset(), t.size(), stride=tuple(strides))
+    # Choose a "weird" value that won't be accessed
+    if t.dtype.is_floating_point or t.dtype.is_complex:
+        value = math.nan
+    elif t.dtype == torch.bool:
+        value = True
+    else:
+        value = 12
+
+    if zero_dim:
+        result[0] = value
+        result.set_(result.storage(), 1, (), ())
+    else:
+        result[..., 1::2] = value
+        strides = list(result.stride())
+        strides[-1] *= 2
+        result.set_(result.storage(), result.storage_offset(), t.size(), stride=tuple(strides))
     result.requires_grad_(t.requires_grad)
     return result
 
@@ -2617,13 +2619,12 @@ def random_hermitian_pd_matrix(matrix_size, *batch_dims, dtype, device):
                     dtype=dtype, device=device)
     return A @ A.mH + torch.eye(matrix_size, dtype=dtype, device=device)
 
-# Creates a full rank matrix with distinct signular values or
+# Creates a full rank matrix with distinct singular values or
 #   a batch of such matrices
 def make_fullrank_matrices_with_distinct_singular_values(*shape, device, dtype, requires_grad=False):
     with torch.no_grad():
         t = make_tensor(shape, device=device, dtype=dtype)
         u, _, vh = torch.linalg.svd(t, full_matrices=False)
-        # TODO: improve the handling of complex tensors here
         real_dtype = t.real.dtype if t.dtype.is_complex else t.dtype
         k = min(shape[-1], shape[-2])
         # We choose the singular values to be "around one"
