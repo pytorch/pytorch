@@ -451,6 +451,8 @@ void ScriptModuleSerializer::serialize(
   }
   // Acquires and sets minimum (dynamic) version
   for (auto& item : file_streams_) {
+//    std::cout << item.key() << std::endl;
+//    std::cout << item.value().str() << std::endl;
     writer_.setMinVersion(item.value().minVersion());
   }
 }

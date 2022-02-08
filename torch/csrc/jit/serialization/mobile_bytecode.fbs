@@ -183,6 +183,11 @@ table ExtraFile {
   content:string;
 }
 
+table JITFile {
+  name:string;
+  content:string;
+}
+
 table Module {
   version:int;
   extra_files:[ExtraFile];
@@ -192,6 +197,7 @@ table Module {
   storage_data_size:int;  // number of storage data;
   storage_data:[StorageData];
   object_types:[ObjectType];
+  jit_files: [JITFile];
 }
 
 root_type Module;
