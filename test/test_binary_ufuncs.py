@@ -1497,6 +1497,7 @@ class TestBinaryUfuncs(TestCase):
             self._test_pow(base, second_exp)
 
     @onlyNativeDeviceTypes
+    @skipMeta
     def test_pow_scalar_type_promotion(self, device):
         # Test against a scalar and non-scalar input
         inputs = [17, [17]]
