@@ -751,11 +751,7 @@ void index_select_out_cuda_impl(
     newSize[dim] = numIndices;
   }
 
-  if (self.is_quantized()){
-      out = at::empty_quantized(newSize, out);
-  } else {
-    at::native::resize_output(out, newSize);
-  }
+  at::native::resize_output(out, newSize);
 
   ptrdiff_t outTotalSize = out.numel();
   if (outTotalSize == 0) {
