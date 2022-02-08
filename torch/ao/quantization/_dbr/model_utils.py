@@ -24,27 +24,27 @@ def pack_weights_for_functionals(
     if hasattr(module, '_auto_quant_state'):
         qstate: AutoQuantizationState = module._auto_quant_state  # type: ignore[assignment]
         # find any ops which need packing
-        for idx, seen_op_info in qstate.idx_to_seen_op_infos.items():
-            packable_args_len = len(seen_op_info.packable_tensor_idx_to_name) + \
-                len(seen_op_info.packable_nontensor_idx_to_arg)
+        for idx, seen_q_op_info in qstate.idx_to_seen_q_op_infos.items():
+            packable_args_len = len(seen_q_op_info.packable_tensor_idx_to_name) + \
+                len(seen_q_op_info.packable_nontensor_idx_to_arg)
             if packable_args_len == 0:
                 continue
 
-            if seen_op_info.type == F.conv2d:
+            if seen_q_op_info.type == F.conv2d:
                 # fetch all the info needed for packed params
-                assert seen_op_info.packable_tensor_idx_to_name[1] is not None
-                weight = getattr(module, seen_op_info.packable_tensor_idx_to_name[1])
-                assert seen_op_info.packable_tensor_idx_to_name[2] is not None
-                bias = getattr(module, seen_op_info.packable_tensor_idx_to_name[2])
-                stride = seen_op_info.packable_nontensor_idx_to_arg[3]
-                padding = seen_op_info.packable_nontensor_idx_to_arg[4]
-                dilation = seen_op_info.packable_nontensor_idx_to_arg[5]
-                groups = seen_op_info.packable_nontensor_idx_to_arg[6]
+                assert seen_q_op_info.packable_tensor_idx_to_name[1] is not None
+                weight = getattr(module, seen_q_op_info.packable_tensor_idx_to_name[1])
+                assert seen_q_op_info.packable_tensor_idx_to_name[2] is not None
+                bias = getattr(module, seen_q_op_info.packable_tensor_idx_to_name[2])
+                stride = seen_q_op_info.packable_nontensor_idx_to_arg[3]
+                padding = seen_q_op_info.packable_nontensor_idx_to_arg[4]
+                dilation = seen_q_op_info.packable_nontensor_idx_to_arg[5]
+                groups = seen_q_op_info.packable_nontensor_idx_to_arg[6]
 
                 # quantize the weight
                 # TODO: create weight observers from qconfig.weight
-                assert seen_op_info.input_tensor_infos[1] is not None
-                weight_tensor_id = seen_op_info.input_tensor_infos[1].id
+                assert seen_q_op_info.input_tensor_infos[1] is not None
+                weight_tensor_id = seen_q_op_info.input_tensor_infos[1].id
                 weight_obs = qstate.tensor_id_to_observer[str(weight_tensor_id)]
                 assert isinstance(weight_obs, (ObserverBase, FakeQuantizeBase))
                 scale, zp = weight_obs.calculate_qparams()
@@ -65,13 +65,13 @@ def pack_weights_for_functionals(
                 qstate.idx_to_packed_weight_name[idx] = name_candidate
                 # TODO: delete the original weights
 
-            elif seen_op_info.type == F.linear:
+            elif seen_q_op_info.type == F.linear:
                 # fetch all the info needed for packed params
                 def get_tensor_param_name(idx: int, name: str) -> Optional[str]:
-                    param_name = seen_op_info.packable_tensor_idx_to_name.get(idx, None)
+                    param_name = seen_q_op_info.packable_tensor_idx_to_name.get(idx, None)
                     if param_name is not None:
                         return param_name
-                    return seen_op_info.packable_tensor_kwarg_name_to_name.get(name, None)
+                    return seen_q_op_info.packable_tensor_kwarg_name_to_name.get(name, None)
 
                 weight_name = get_tensor_param_name(1, 'weight')
                 assert weight_name is not None
@@ -82,8 +82,8 @@ def pack_weights_for_functionals(
 
                 # quantize the weight
                 # TODO: create weight observers from qconfig.weight
-                assert seen_op_info.input_tensor_infos[1] is not None
-                weight_tensor_id = seen_op_info.input_tensor_infos[1].id
+                assert seen_q_op_info.input_tensor_infos[1] is not None
+                weight_tensor_id = seen_q_op_info.input_tensor_infos[1].id
                 weight_obs = qstate.tensor_id_to_observer[str(weight_tensor_id)]
                 assert isinstance(weight_obs, (ObserverBase, FakeQuantizeBase))
                 scale, zp = weight_obs.calculate_qparams()
@@ -139,9 +139,9 @@ def attach_op_convert_info_to_model(
     """
     if hasattr(module, '_auto_quant_state'):
         qstate: AutoQuantizationState = module._auto_quant_state  # type: ignore[assignment]
-        for _, seen_op_info in qstate.idx_to_seen_op_infos.items():
-            qstate.idx_to_op_convert_info[seen_op_info.idx] = \
-                qstate.calculate_op_convert_info(seen_op_info)
+        for _, seen_q_op_info in qstate.idx_to_seen_q_op_infos.items():
+            qstate.idx_to_op_convert_info[seen_q_op_info.idx] = \
+                qstate.calculate_op_convert_info(seen_q_op_info)
 
     for _, child in module.named_children():
         attach_op_convert_info_to_model(child)
