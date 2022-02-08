@@ -11,7 +11,7 @@ from .quantized_fusion_patterns_and_replacements import get_fbgemm_patterns_and_
 from .match_utils import is_match
 from .match_utils import MatchAllNode
 from ..utils import _parent_name, check_node
-from typing import Dict, Tuple, Type
+from typing import Dict, Tuple, Type, List
 from torch.fx import Node
 
 
@@ -41,7 +41,8 @@ def is_fixed_qparams_node(node, modules):
     return is_call_function, is_call_method, is_call_module
 
 # Mapping from reference module class to the replacement quantized module class for lowering
-LOWER_MODULE_MAP: Dict[Type[ReferenceableQuantizedModule], Type[torch.nn.Module]] = {
+# TODO: fix typing, the key is reference module
+LOWER_MODULE_MAP: Dict[Type[torch.nn.Module], Type[ReferenceableQuantizedModule]] = {
     nnqr.Linear: nnq.Linear,
     nnqr.Conv1d: nnq.Conv1d,
     nnqr.Conv2d: nnq.Conv2d,
@@ -173,18 +174,19 @@ def special_pattern_replacement(model: QuantizedGraphModule) -> QuantizedGraphMo
                 scale_node = q_node.args[1]
                 zero_point_node = q_node.args[2]
                 output_scale = getattr(model, scale_node.target)
-                zero_point = getattr(model, zero_point_node.target)
-                qmodule = qmodule_cls.from_reference(ref_module, ouput_scale, output_zero_point)
+                output_zero_point = getattr(model, zero_point_node.target)
+
+                qmodule = qmodule_cls.from_reference(ref_module, output_scale, output_zero_point)  # type:ignore[union-attr]
                 # replace reference module with quantized module
                 parent_name, module_name = _parent_name(ref_node.target)
                 setattr(modules[parent_name], module_name, qmodule)
 
         # remove dq node:
-        dq_nodes = []
+        dq_nodes: List[Node] = []
         if isinstance(dq_node_or_nodes, Node):
             dq_nodes = [dq_node_or_nodes]
         elif isinstance(dq_node_or_nodes, (tuple, list)):
-            dq_nodes = dq_node_or_nodes
+            dq_nodes = list(dq_node_or_nodes)
 
         for dq_node in dq_nodes:
             dn_input = dq_node.args[0]
