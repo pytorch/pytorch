@@ -1813,8 +1813,8 @@ def unravel_index(
         (tensor([3, 6, 6]), tensor([4, 5, 1]))
 
         >>> indices = torch.tensor([3, 10, 12])
-        >>> shape = (4, 2, 3)
-        >>> torch.unravel_index(indices, shape, as_tuple=False)
+        >>> shape_ = (4, 2, 3)
+        >>> torch.unravel_index(indices, shape_, as_tuple=False)
         tensor([[0, 1, 0],
                 [1, 1, 1],
                 [2, 0, 0]])
