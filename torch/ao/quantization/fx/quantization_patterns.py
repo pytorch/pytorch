@@ -311,6 +311,8 @@ def _to_reference(float_module, weight_qparams):
 @register_quant_pattern((torch.nn.functional.relu, operator.mul))
 @register_quant_pattern((torch.nn.functional.relu, torch.add))
 @register_quant_pattern((torch.nn.functional.relu, torch.mul))
+@register_quant_pattern((torch.relu, operator.add))
+@register_quant_pattern((torch.relu, operator.mul))
 class BinaryOpQuantizeHandler(QuantizeHandler):
     def __init__(
             self,
@@ -318,8 +320,13 @@ class BinaryOpQuantizeHandler(QuantizeHandler):
             modules: Dict[str, torch.nn.Module]):
         super().__init__(node, modules)
         self.relu_node = None
-        if (node.op == 'call_function' and node.target is torch.nn.functional.relu) or \
-           (node.op == 'call_module' and isinstance(modules[str(node.target)], torch.nn.ReLU)):
+        if (
+            node.op == 'call_function' and
+                node.target in (torch.nn.functional.relu, torch.relu)
+        ) or (
+            node.op == 'call_module' and
+                isinstance(modules[str(node.target)], torch.nn.ReLU)
+        ):
             self.relu_node = node
             node = node.args[0]  # type: ignore[assignment]
         self.binary_op_node = node
