@@ -446,6 +446,7 @@ Tensor log_softmax(const Tensor& input_, const int64_t dim_, c10::optional<Scala
   return result;
 }
 
+// special_log_softmax, alias for log_softmax
 Tensor special_log_softmax(const Tensor& input, const int64_t dim, c10::optional<ScalarType> dtype) {
   return at::log_softmax(input, dim, dtype);
 }
