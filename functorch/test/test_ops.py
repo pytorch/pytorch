@@ -330,6 +330,7 @@ class TestOperators(TestCase):
         skip('nn.functional.max_pool1d'),  # fails on cpu, runs okay on cuda
         xfail('nn.functional.batch_norm', device_type='cuda'),
         xfail('nn.functional.batch_norm', 'without_cudnn', device_type='cuda'),
+        skip('nn.functional.conv_transpose3d', device_type='cuda'),
 
         # See https://github.com/pytorch/pytorch/issues/69034
         # RuntimeError: expected scalar type double but found float
