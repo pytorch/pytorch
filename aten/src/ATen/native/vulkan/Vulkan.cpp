@@ -2,6 +2,7 @@
 #include <c10/util/accumulate.h>
 #include <c10/util/ArrayRef.h>
 #include <c10/util/Exception.h>
+#include <c10/util/irange.h>
 
 #ifdef USE_VULKAN_WRAPPER
 #include <vulkan_wrapper.h>
@@ -192,7 +193,7 @@ uint32_t VContext::getComputeQueueFamilyIndex() {
   vkGetPhysicalDeviceQueueFamilyProperties(
       physicalDevice_, &queueFamilyCount, queueFamilies.data());
 
-  for (uint32_t i = 0; i < queueFamilies.size(); ++i) {
+  for (const auto i : c10::irange(queueFamilies.size())) {
     VkQueueFamilyProperties props = queueFamilies[i];
     if (props.queueCount > 0 && (props.queueFlags & VK_QUEUE_COMPUTE_BIT)) {
       return i;
@@ -274,7 +275,7 @@ uint32_t findMemoryType(
     const VkMemoryPropertyFlags properties) {
   VkPhysicalDeviceMemoryProperties memoryProperties{};
   vkGetPhysicalDeviceMemoryProperties(physicalDevice, &memoryProperties);
-  for (uint32_t i = 0; i < memoryProperties.memoryTypeCount; ++i) {
+  for (const auto i : c10::irange(memoryProperties.memoryTypeCount)) {
     if ((memoryTypeBits & (1 << i)) &&
         ((memoryProperties.memoryTypes[i].propertyFlags & properties) ==
          properties)) {

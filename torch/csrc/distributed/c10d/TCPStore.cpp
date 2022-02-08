@@ -599,7 +599,11 @@ class TCPStoreWorkerDaemon : public BackgroundThread {
     callbackRegisteredData_ = false;
   }
   void setCallbackRegistered() {
-    callbackRegisteredData_ = true;
+    {
+      std::unique_lock<std::mutex> callbackRegistrationLock(
+          callbackRegistrationMutex_);
+      callbackRegisteredData_ = true;
+    }
     callbackRegisteredCV_.notify_one();
   }
 

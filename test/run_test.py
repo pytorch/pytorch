@@ -4,6 +4,7 @@ import argparse
 import copy
 from datetime import datetime
 from distutils.util import strtobool
+from distutils.version import LooseVersion
 import functools
 import os
 import pathlib
@@ -85,7 +86,8 @@ TESTS = discover_tests(
         'bottleneck_test',
         'custom_backend',
         'custom_operator',
-        'fx',        # executed by test_fx.py
+        'fx/',        # executed by test_fx.py
+        'fx_acc/',
         'jit',      # executed by test_jit.py
         'mobile',
         'onnx',
@@ -96,14 +98,12 @@ TESTS = discover_tests(
         'test_bundled_images',
         'test_cpp_extensions_aot',
         'test_determination',
-        'test_gen_backend_stubs',
         'test_jit_fuser',
         'test_jit_simple',
         'test_jit_string',
         'test_kernel_launch_checks',
         'test_metal',
         'test_nnapi',
-        'test_python_dispatch',
         'test_functionalization',
         'test_segment_reductions',
         'test_static_runtime',
@@ -120,6 +120,7 @@ TESTS = discover_tests(
         "distributed/test_c10d_spawn",
         'distributions/test_transforms',
         'distributions/test_utils',
+        "fx2trt/test_quant_trt",
     ],
     extra_tests=[
         "test_cpp_extensions_aot_ninja",
@@ -137,6 +138,8 @@ TESTS = discover_tests(
 )
 
 FSDP_TEST = [test for test in TESTS if test.startswith("distributed/fsdp")]
+
+FX2TRT_TESTS = [test for test in TESTS if test.startswith("fx2trt/")]
 
 # Tests need to be run with pytest.
 USE_PYTEST_LIST = [
@@ -199,23 +202,36 @@ WINDOWS_BLOCKLIST = [
     "distributed/pipeline/sync/test_worker",
     "distributed/elastic/agent/server/test/api_test",
     "distributed/elastic/multiprocessing/api_test",
-    "distributed/_sharded_tensor/test_sharded_tensor",
-    "distributed/_sharded_tensor/ops/test_embedding",
-    "distributed/_sharded_tensor/ops/test_embedding_bag",
-    "distributed/_sharded_tensor/ops/test_init",
-    "distributed/_sharded_tensor/ops/test_linear",
-] + FSDP_TEST
+    "distributed/_shard/sharding_spec/test_sharding_spec",
+    "distributed/_shard/sharded_tensor/test_megatron_prototype",
+    "distributed/_shard/sharded_tensor/test_sharded_tensor",
+    "distributed/_shard/sharded_tensor/test_sharded_tensor_reshard",
+    "distributed/_shard/sharded_tensor/test_partial_tensor",
+    "distributed/_shard/sharded_tensor/ops/test_elementwise_ops",
+    "distributed/_shard/sharded_tensor/ops/test_embedding",
+    "distributed/_shard/sharded_tensor/ops/test_embedding_bag",
+    "distributed/_shard/sharded_tensor/ops/test_binary_cmp",
+    "distributed/_shard/sharded_tensor/ops/test_init",
+    "distributed/_shard/sharded_tensor/ops/test_linear",
+    "distributed/_shard/sharded_optim/test_sharded_optim",
+] + FSDP_TEST + FX2TRT_TESTS
 
 ROCM_BLOCKLIST = [
     "distributed/nn/jit/test_instantiator",
     "distributed/rpc/test_faulty_agent",
     "distributed/rpc/test_tensorpipe_agent",
     "distributed/rpc/cuda/test_tensorpipe_agent",
-    "distributed/_sharded_tensor/test_sharded_tensor",
-    "distributed/_sharded_tensor/ops/test_embedding",
-    "distributed/_sharded_tensor/ops/test_embedding_bag",
-    "distributed/_sharded_tensor/ops/test_init",
-    "distributed/_sharded_tensor/ops/test_linear",
+    "distributed/_shard/sharded_tensor/test_megatron_prototype",
+    "distributed/_shard/sharded_tensor/test_sharded_tensor",
+    "distributed/_shard/sharded_tensor/test_sharded_tensor_reshard",
+    "distributed/_shard/sharded_tensor/test_partial_tensor",
+    "distributed/_shard/sharded_tensor/ops/test_elementwise_ops",
+    "distributed/_shard/sharded_tensor/ops/test_embedding",
+    "distributed/_shard/sharded_tensor/ops/test_embedding_bag",
+    "distributed/_shard/sharded_tensor/ops/test_binary_cmp",
+    "distributed/_shard/sharded_tensor/ops/test_init",
+    "distributed/_shard/sharded_tensor/ops/test_linear",
+    "distributed/_shard/sharded_optim/test_sharded_optim",
     "test_determination",
     "test_multiprocessing",
     "test_jit_legacy",
@@ -347,12 +363,18 @@ DISTRIBUTED_TESTS = [
     "distributed/elastic/utils/util_test",
     "distributed/elastic/utils/distributed_test",
     "distributed/elastic/multiprocessing/api_test",
-    "distributed/_sharding_spec/test_sharding_spec",
-    "distributed/_sharded_tensor/test_sharded_tensor",
-    "distributed/_sharded_tensor/ops/test_embedding",
-    "distributed/_sharded_tensor/ops/test_embedding_bag",
-    "distributed/_sharded_tensor/ops/test_init",
-    "distributed/_sharded_tensor/ops/test_linear",
+    "distributed/_shard/sharding_spec/test_sharding_spec",
+    "distributed/_shard/sharded_tensor/test_megatron_prototype",
+    "distributed/_shard/sharded_tensor/test_sharded_tensor",
+    "distributed/_shard/sharded_tensor/test_sharded_tensor_reshard",
+    "distributed/_shard/sharded_tensor/test_partial_tensor",
+    "distributed/_shard/sharded_tensor/ops/test_elementwise_ops",
+    "distributed/_shard/sharded_tensor/ops/test_embedding",
+    "distributed/_shard/sharded_tensor/ops/test_embedding_bag",
+    "distributed/_shard/sharded_tensor/ops/test_binary_cmp",
+    "distributed/_shard/sharded_tensor/ops/test_init",
+    "distributed/_shard/sharded_tensor/ops/test_linear",
+    "distributed/_shard/sharded_optim/test_sharded_optim",
 ] + [test for test in TESTS if test.startswith("distributed/fsdp")]
 
 # Dictionary matching test modules (in TESTS) to lists of test cases (within that test_module) that would be run when
@@ -662,6 +684,12 @@ def parse_args():
         help="run all distributed tests",
     )
     parser.add_argument(
+        "--fx2trt-tests",
+        "--fx2trt-tests",
+        action="store_true",
+        help="run all fx2trt tests",
+    )
+    parser.add_argument(
         "-core",
         "--core",
         action="store_true",
@@ -774,6 +802,11 @@ def parse_args():
         help="exclude distributed tests",
     )
     parser.add_argument(
+        "--exclude-fx2trt-tests",
+        action="store_true",
+        help="exclude fx2trt tests",
+    )
+    parser.add_argument(
         "--run-specified-test-cases",
         nargs="?",
         type=str,
@@ -870,6 +903,14 @@ def get_selected_tests(options):
             filter(lambda test_name: test_name in DISTRIBUTED_TESTS, selected_tests)
         )
 
+    # Only run fx2trt test with specified option argument
+    if options.fx2trt_tests:
+        selected_tests = list(
+            filter(lambda test_name: test_name in FX2TRT_TESTS, selected_tests)
+        )
+    else:
+        options.exclude.extend(FX2TRT_TESTS)
+
     # Filter to only run core tests when --core option is specified
     if options.core:
         selected_tests = list(
@@ -898,6 +939,9 @@ def get_selected_tests(options):
     if options.exclude_distributed_tests:
         options.exclude.extend(DISTRIBUTED_TESTS)
 
+    if options.exclude_fx2trt_tests:
+        options.exclude.extend(FX2TRT_TESTS)
+
     selected_tests = exclude_tests(options.exclude, selected_tests)
 
     if sys.platform == "win32" and not options.ignore_win_blocklist:
@@ -908,6 +952,13 @@ def get_selected_tests(options):
             WINDOWS_BLOCKLIST.append("cpp_extensions_jit")
             WINDOWS_BLOCKLIST.append("jit")
             WINDOWS_BLOCKLIST.append("jit_fuser")
+
+        # This is exception that's caused by this issue https://github.com/pytorch/pytorch/issues/69460
+        # This below code should be removed once this issue is solved
+        if torch.version.cuda is not None and LooseVersion(torch.version.cuda) >= "11.5":
+            WINDOWS_BLOCKLIST.append("test_cpp_extensions_aot")
+            WINDOWS_BLOCKLIST.append("test_cpp_extensions_aot_ninja")
+            WINDOWS_BLOCKLIST.append("test_cpp_extensions_aot_no_ninja")
 
         selected_tests = exclude_tests(WINDOWS_BLOCKLIST, selected_tests, "on Windows")
 
@@ -930,6 +981,11 @@ def get_selected_tests(options):
         selected_tests = get_shard_based_on_S3(
             which_shard, num_shards, selected_tests, TEST_TIMES_FILE
         )
+
+    # skip all distributed tests if distributed package is not available.
+    if not dist.is_available():
+        selected_tests = exclude_tests(DISTRIBUTED_TESTS, selected_tests,
+                                       "PyTorch is built without distributed support.")
 
     return selected_tests
 

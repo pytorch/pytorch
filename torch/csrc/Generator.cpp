@@ -4,7 +4,6 @@
 #include <ATen/ATen.h>
 #include <ATen/CPUGeneratorImpl.h>
 
-#include <TH/TH.h>
 #include <torch/csrc/THP.h>
 #include <torch/csrc/Device.h>
 #include <torch/csrc/Exceptions.h>
@@ -15,7 +14,7 @@
 #include <torch/csrc/autograd/generated/variable_factories.h>
 
 #ifdef USE_CUDA
-#include <ATen/CUDAGeneratorImpl.h>
+#include <ATen/cuda/CUDAGeneratorImpl.h>
 #endif
 
 using namespace at;
