@@ -454,10 +454,12 @@ class SimpleIREvaluatorImpl : public IRVisitor {
     value_ = iter->second;
   }
 
+  // disable ubsan because sometimes this performs out-of-bound casts
+  // e.g. it will cast negative floats to unsigned char
   template <typename SrcType, typename DstType>
   std::vector<DstType> castValues(
       const Dtype& src_dtype,
-      const InterpValue& v) {
+      const InterpValue& v) __ubsan_ignore_undefined__ {
     const std::vector<SrcType>& src_values = v.as_vec<SrcType>();
     std::vector<DstType> dst_values(src_values.size());
     for (int i = 0; i < src_dtype.lanes(); ++i) {
