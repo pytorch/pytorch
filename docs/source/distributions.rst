@@ -356,6 +356,15 @@ Probability distributions - torch.distributions
     :undoc-members:
     :show-inheritance:
 
+:hidden:`Wishart`
+~~~~~~~~~~~~~~~~~~~~~~~
+
+.. currentmodule:: torch.distributions.wishart
+.. autoclass:: Wishart
+    :members:
+    :undoc-members:
+    :show-inheritance:
+
 `KL Divergence`
 ~~~~~~~~~~~~~~~~~~~~~~~
 

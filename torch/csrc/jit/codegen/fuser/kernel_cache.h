@@ -1,7 +1,7 @@
 #pragma once
 
 #include <c10/util/Optional.h>
-#include <torch/csrc/WindowsTorchApiMacro.h>
+#include <torch/csrc/Export.h>
 #include <torch/csrc/jit/codegen/fuser/kernel_spec.h>
 #include <torch/csrc/jit/ir/ir.h>
 

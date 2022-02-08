@@ -70,6 +70,49 @@ TORCH_META_FUNC(fractional_max_pool2d) (
   }
 }
 
+TORCH_META_FUNC(fractional_max_pool2d_backward)(
+  const at::Tensor& gradOutput_,
+  const at::Tensor& input,
+  IntArrayRef pool_size /* unused */,
+  IntArrayRef output_size,
+  const at::Tensor& indices) {
+
+  int numBatch = 1;
+  int planeDim = 0;
+  int heightDim = 1;
+  int widthDim = 2;
+
+  int outputH = output_size[0];
+  int outputW = output_size[1];
+
+  int ndims = input.ndimension();
+  if (ndims == 4) {
+    numBatch = input.size(0);
+    planeDim = 1;
+    heightDim++;
+    widthDim++;
+  }
+
+  /* sizes */
+  int numPlanes = input.size(planeDim);
+  int inputH = input.size(heightDim);
+  int inputW = input.size(widthDim);
+
+  /* get contiguous gradOutput */
+  auto gradOutput = gradOutput_.contiguous();
+
+  TORCH_CHECK(outputW == gradOutput.size(widthDim),
+    "fractional_max_pool2d_backward(): gradOutput width unexpected");
+  TORCH_CHECK(outputH == gradOutput.size(heightDim),
+    "fractional_max_pool2d_backward(): gradOutput height unexpected");
+
+  /* resize */
+  if (ndims == 3) {
+    set_output(0, {numPlanes, inputH, inputW}, input.options());
+  } else {
+    set_output(0, {numBatch, numPlanes, inputH, inputW}, input.options());
+  }
+}
 } // namespace meta
 
 namespace native {
@@ -189,63 +232,6 @@ static void fractional_max_pool2d_out_frame(
     });
   }
 
-} // anonymous namespace
-
-TORCH_IMPL_FUNC(fractional_max_pool2d_out_cpu) (
-  const at::Tensor& input_,
-  IntArrayRef pool_size,
-  IntArrayRef output_size,
-  const at::Tensor& randomSamples,
-  const at::Tensor& output,
-  const at::Tensor& indices) {
-
-  int64_t numBatch = 1;
-  int64_t planeDim = 0;
-  int64_t heightDim = 1;
-  int64_t widthDim = 2;
-  int64_t outputH = output_size[0]; // output.size(heightDim)
-  int64_t outputW = output_size[1]; // output.size(widthDim)
-  int64_t poolSizeH = pool_size[0];
-  int64_t poolSizeW = pool_size[1];
-
-  /* get contiguous input */
-  auto input = input_.contiguous();
-
-  int64_t ndims = input.ndimension();
-
-  if (ndims == 4) {
-    numBatch = input.size(0);
-    planeDim++;
-    heightDim++;
-    widthDim++;
-  }
-
-  /* sizes */
-  int64_t numPlanes = input.size(planeDim);
-  int64_t inputH = input.size(heightDim);
-  int64_t inputW = input.size(widthDim);
-
-  AT_DISPATCH_FLOATING_TYPES(input.scalar_type(),
-  "fractional_max_pool2d_out_frame", [&] {
-    auto input_data = input.data_ptr<scalar_t>();
-    auto output_data = output.data_ptr<scalar_t>();
-    auto indices_data = indices.data_ptr<int64_t>();
-    auto randomSamples_data = randomSamples.data_ptr<scalar_t>();
-    fractional_max_pool2d_out_frame<scalar_t>(
-      input_data,
-      output_data,
-      indices_data,
-      randomSamples_data,
-      numBatch, numPlanes,
-      inputW, inputH,
-      outputW, outputH,
-      poolSizeW, poolSizeH);
-    }
-  );
-}
-
-namespace {
-
 template <typename scalar_t>
 static void fractional_max_pool2d_backward_out_single_batch_frame(
   scalar_t* gradInput,
@@ -302,13 +288,70 @@ static void fractional_max_pool2d_backward_out_frame(
     });
 }
 
-Tensor& fractional_max_pool2d_backward_out_cpu_template(
-  const at::Tensor& input,
-  const at::Tensor& gradOutput_,
-  at::Tensor& gradInput,
+} // anonymous namespace
+
+TORCH_IMPL_FUNC(fractional_max_pool2d_out_cpu) (
+  const at::Tensor& input_,
+  IntArrayRef pool_size,
   IntArrayRef output_size,
-  IntArrayRef pool_size /* unused */,
+  const at::Tensor& randomSamples,
+  const at::Tensor& output,
   const at::Tensor& indices) {
+
+  int64_t numBatch = 1;
+  int64_t planeDim = 0;
+  int64_t heightDim = 1;
+  int64_t widthDim = 2;
+  int64_t outputH = output_size[0]; // output.size(heightDim)
+  int64_t outputW = output_size[1]; // output.size(widthDim)
+  int64_t poolSizeH = pool_size[0];
+  int64_t poolSizeW = pool_size[1];
+
+  /* get contiguous input */
+  auto input = input_.contiguous();
+
+  int64_t ndims = input.ndimension();
+
+  if (ndims == 4) {
+    numBatch = input.size(0);
+    planeDim++;
+    heightDim++;
+    widthDim++;
+  }
+
+  /* sizes */
+  int64_t numPlanes = input.size(planeDim);
+  int64_t inputH = input.size(heightDim);
+  int64_t inputW = input.size(widthDim);
+
+  AT_DISPATCH_FLOATING_TYPES(input.scalar_type(),
+  "fractional_max_pool2d_out_frame", [&] {
+    auto input_data = input.data_ptr<scalar_t>();
+    auto output_data = output.data_ptr<scalar_t>();
+    auto indices_data = indices.data_ptr<int64_t>();
+    auto randomSamples_data = randomSamples.data_ptr<scalar_t>();
+    fractional_max_pool2d_out_frame<scalar_t>(
+      input_data,
+      output_data,
+      indices_data,
+      randomSamples_data,
+      numBatch, numPlanes,
+      inputW, inputH,
+      outputW, outputH,
+      poolSizeW, poolSizeH);
+    }
+  );
+}
+
+TORCH_IMPL_FUNC(fractional_max_pool2d_backward_cpu) (
+  const at::Tensor& gradOutput_,
+  const at::Tensor& input,
+  IntArrayRef pool_size,
+  IntArrayRef output_size,
+  const at::Tensor& indices,
+  const at::Tensor& gradInput) {
+
+  gradInput.zero_();
 
   int numBatch = 1;
   int planeDim = 0;
@@ -334,15 +377,6 @@ Tensor& fractional_max_pool2d_backward_out_cpu_template(
   /* get contiguous gradOutput */
   auto gradOutput = gradOutput_.contiguous();
 
-  TORCH_CHECK(outputW == gradOutput.size(widthDim),
-    "fractional_max_pool2d_backward(): gradOutput width unexpected");
-  TORCH_CHECK(outputH == gradOutput.size(heightDim),
-    "fractional_max_pool2d_backward(): gradOutput height unexpected");
-
-  /* resize */
-  gradInput.resize_as_(input);
-  gradInput.zero_();
-
   /* backprop */
   AT_DISPATCH_FLOATING_TYPES(
     input.scalar_type(), "fractional_max_pool2d_backward_out_frame", [&] {
@@ -357,47 +391,8 @@ Tensor& fractional_max_pool2d_backward_out_cpu_template(
         inputW, inputH,
         outputW, outputH
       );
-      }
-    );
-  return gradInput;
-}
-
-} // namespace
-
-Tensor& fractional_max_pool2d_backward_out_cpu(const at::Tensor& gradOutput_,
-  const at::Tensor& input,
-  IntArrayRef pool_size,
-  IntArrayRef output_size,
-  const at::Tensor& indices,
-  at::Tensor& gradInput)
-{
-  gradInput.resize_as_(input);
-  fractional_max_pool2d_backward_out_cpu_template(
-    input,
-    gradOutput_,
-    gradInput,
-    output_size,
-    pool_size,
-    indices);
-  return gradInput;
-}
-
-Tensor fractional_max_pool2d_backward_cpu(
-  const at::Tensor& gradOutput_,
-  const at::Tensor& input,
-  IntArrayRef pool_size,
-  IntArrayRef output_size,
-  const at::Tensor& indices)
-{
-  Tensor gradInput = at::empty({0}, input.options());
-  fractional_max_pool2d_backward_out_cpu_template(
-    input,
-    gradOutput_,
-    gradInput,
-    output_size,
-    pool_size,
-    indices);
-  return gradInput;
+    }
+  );
 }
 
 } // at::native

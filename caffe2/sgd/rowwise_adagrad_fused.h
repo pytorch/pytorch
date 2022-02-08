@@ -217,8 +217,8 @@ class RowWiseSparseAdagradFusedWithSparseLengthsSumGradientOp final
     auto* grad_buffer_data =
         is_mean ? grad_buffer_.template mutable_data<T>() : NULL;
     if (is_mean) {
-      for (auto rangeIndex = 0; rangeIndex < numSegments; ++rangeIndex) {
-        for (auto tmpIndex = 0; tmpIndex < block_size; ++tmpIndex) {
+      for (const auto rangeIndex : c10::irange(numSegments)) {
+        for (const auto tmpIndex : c10::irange(block_size)) {
           auto offsetI = rangeIndex * block_size;
           grad_buffer_data[offsetI + tmpIndex] = lengths[rangeIndex] > 0
               ? gradIn[offsetI + tmpIndex] / lengths[rangeIndex]
@@ -269,7 +269,7 @@ class RowWiseSparseAdagradFusedWithSparseLengthsSumGradientOp final
       T counter_halflife,
       rowWiseAdagradT& kernel) {
     int dataIndex = 0;
-    for (auto rangeIndex = 0; rangeIndex < numSegments; ++rangeIndex) {
+    for (const auto rangeIndex : c10::irange(numSegments)) {
       auto offsetI = rangeIndex * block_size;
       const float* g = gradIn + offsetI;
 
@@ -557,7 +557,7 @@ class RowWiseSparseAdagradFusedWithSparseLengthsWeightedSumGradientOp final
     // ignores this dependency and fuses these two loops.
     std::vector<T> temp_grad(block_size);
     int dataIndex = 0;
-    for (auto rangeIndex = 0; rangeIndex < numSegments; ++rangeIndex) {
+    for (const auto rangeIndex : c10::irange(numSegments)) {
       for (auto start = dataIndex; dataIndex < start + lengths[rangeIndex];
            ++dataIndex) {
         std::size_t idx = indices[dataIndex];
@@ -591,7 +591,7 @@ class RowWiseSparseAdagradFusedWithSparseLengthsWeightedSumGradientOp final
     CAFFE_ENFORCE_EQ(dataIndex, n);
 
     dataIndex = 0;
-    for (auto rangeIndex = 0; rangeIndex < numSegments; ++rangeIndex) {
+    for (const auto rangeIndex : c10::irange(numSegments)) {
       auto offsetI = rangeIndex * block_size;
       const float* g = gradIn + offsetI;
 
@@ -606,7 +606,7 @@ class RowWiseSparseAdagradFusedWithSparseLengthsWeightedSumGradientOp final
         auto offsetIdx = idx * block_size;
         auto localOffset = dataIndex - start;
 
-        for (int i = 0; i < block_size; ++i) {
+        for (const auto i : c10::irange(block_size)) {
           temp_grad[i] = auxParamIn[localOffset] * g[i];
         }
 
@@ -839,7 +839,7 @@ class RowWiseSparseAdagradFusedWithSparseLengthsWeightedSumGradientApproxOp
 
     std::vector<T> temp_grad(block_size);
     int dataIndex = 0;
-    for (auto rangeIndex = 0; rangeIndex < numSegments; ++rangeIndex) {
+    for (const auto rangeIndex : c10::irange(numSegments)) {
       auto offsetI = rangeIndex * block_size;
       const float* g = gradIn + offsetI;
 
@@ -902,7 +902,7 @@ class RowWiseSparseAdagradFusedWithSparseLengthsWeightedSumGradientApproxOp
 
         alignas(64) float temp[VLEN];
         _mm256_store_ps(temp, acc_v);
-        for (int j = 0; j < VLEN; ++j) {
+        for (const auto j : c10::irange(VLEN)) {
           acc += temp[j];
         }
 #endif
