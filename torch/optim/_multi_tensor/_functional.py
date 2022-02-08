@@ -2,7 +2,7 @@ r"""Functional interface"""
 import math
 import torch
 from torch import Tensor
-from typing import List, Dict
+from typing import List
 
 def _make_sparse(grad, grad_indices, values):
     size = grad.size()
@@ -152,7 +152,11 @@ def adadelta(params: List[Tensor],
 
 def asgd(params: List[Tensor],
          grads: List[Tensor],
-         states: List[Dict],
+         axs: List[Tensor],
+         mus: List[Tensor],
+         etas: List[Tensor],
+         state_steps: List[Tensor],
+         *,
          lambd: float,
          lr: float,
          t0: float,
@@ -162,28 +166,32 @@ def asgd(params: List[Tensor],
     See :class:`~torch.optim.ASGD` for details.
     """
 
+    # update step
+    torch._foreach_add_(state_steps, 1)
+
     if weight_decay != 0:
         torch._foreach_add_(grads, params, alpha=weight_decay)
 
     # decay term
-    eta = states[0]['eta']
+    eta = etas[0].item()
     torch._foreach_mul_(params, 1 - lambd * eta)
 
     # update parameter
     torch._foreach_add_(params, grads, alpha=-eta)
 
     # averaging
-    for i in range(len(states)):
-        if states[i]['mu'] != 1:
-            states[i]['ax'].add_(params[i].sub(states[i]['ax']).mul(states[i]['mu']))
+    for i in range(len(axs)):
+        if mus[i].item() != 1:
+            axs[i].add_(params[i].sub(axs[i]).mul(mus[i]))
         else:
-            states[i]['ax'].copy_(params[i])
+            axs[i].copy_(params[i])
 
     # update eta and mu
-    for state in states:
-        state['eta'] = (lr /
-                        math.pow((1 + lambd * lr * state['step']), alpha))
-        state['mu'] = 1 / max(1, state['step'] - t0)
+    for i in range(len(mus)):
+        new_eta = lr / math.pow((1 + lambd * lr * state_steps[i].item()), alpha)
+        etas[i].fill_(new_eta)
+        new_mu = 1 / max(1, state_steps[i].item() - t0)
+        mus[i].fill_(new_mu)
 
 
 def radam(params: List[Tensor],
