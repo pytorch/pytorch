@@ -449,6 +449,24 @@ class TORCH_API Free : public StmtNode<Free> {
   BufPtr buf_;
 };
 
+class TORCH_API FreeExt : public StmtNode<FreeExt> {
+ public:
+  static FreeExtPtr make(const std::vector<BufHandle>& bufs);
+
+  std::vector<BufPtr> bufs() const {
+    return bufs_;
+  }
+
+  void set_bufs(std::vector<BufPtr> bufs) {
+    bufs_ = std::move(bufs);
+  }
+
+  explicit FreeExt(std::vector<BufPtr> bufs) : bufs_(std::move(bufs)) {}
+
+ private:
+  std::vector<BufPtr> bufs_;
+};
+
 class TORCH_API Let : public StmtNode<Let> {
  public:
   static LetPtr make(const VarHandle& var, const ExprHandle& val) {

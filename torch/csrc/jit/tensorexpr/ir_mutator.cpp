@@ -541,6 +541,24 @@ StmtPtr IRMutator::mutate(FreePtr v) {
   return v;
 }
 
+StmtPtr IRMutator::mutate(FreeExtPtr v) {
+  bool bufs_changed = false;
+  std::vector<BufPtr> bufs_new;
+  bufs_new.reserve(v->bufs().size());
+  for (BufPtr buf : v->bufs()) {
+    BufPtr buf_new = to<Buf>(buf->accept_mutator(this));
+    TORCH_INTERNAL_ASSERT(
+        buf_new, buildErrorMessage("IRMutator produced null for Buf."));
+    bufs_new.push_back(buf_new);
+    bufs_changed |= buf_new != buf;
+  }
+
+  if (bufs_changed) {
+    v->set_bufs(bufs_new);
+  }
+  return v;
+}
+
 StmtPtr IRMutator::mutate(PlacementAllocatePtr v) {
   BufPtr buf = v->buf();
   BufPtr buf_new = to<Buf>(buf->accept_mutator(this));

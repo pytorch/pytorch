@@ -196,19 +196,23 @@ StmtPtr insertAllocFree(
     b = alloc<Block>(std::vector<StmtPtr>({stmt}));
   }
 
+  std::vector<BufPtr> bufs_ext_to_free;
   // Insert allocations and frees for temporary buffers at global scope.
   for (auto rit = buf_allocs.rbegin(); rit != buf_allocs.rend(); ++rit) {
     if (rit->first == rit->second) {
       BufPtr buf = rit->first;
       if (bufs_external_allocs.find(buf) == bufs_external_allocs.end()) {
         b->prepend_stmt(alloc<Allocate>(buf));
+        b->append_stmt(alloc<Free>(buf));
+      } else {
+        bufs_ext_to_free.push_back(buf);
       }
-      b->append_stmt(alloc<Free>(buf));
     } else {
       b->prepend_stmt(alloc<PlacementAllocate>(rit->first, rit->second));
     }
   }
 
+  b->append_stmt(alloc<FreeExt>(bufs_ext_to_free));
   return b;
 }
 

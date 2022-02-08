@@ -62,6 +62,7 @@ class TORCH_API IRPrinter : public IRVisitor {
   void visit(BlockPtr v) override;
   void visit(AllocatePtr v) override;
   void visit(FreePtr v) override;
+  void visit(FreeExtPtr v) override;
   void visit(PlacementAllocatePtr v) override;
   void visit(LetPtr v) override;
 

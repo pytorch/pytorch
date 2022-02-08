@@ -296,6 +296,7 @@ class LLVMCodeGenImpl : public IRVisitor {
   void visit(IntrinsicsPtr v) override;
   void visit(AllocatePtr v) override;
   void visit(FreePtr v) override;
+  void visit(FreeExtPtr v) override;
   void visit(PlacementAllocatePtr v) override;
   void visit(LetPtr v) override;
   void visit(CondPtr v) override;
@@ -2253,16 +2254,50 @@ void LLVMCodeGenImpl::visit(PlacementAllocatePtr v) {
 void LLVMCodeGenImpl::visit(FreePtr v) {
   value_ = llvm::ConstantInt::get(IntTy_, 0);
 
-  if (bufsExtToFreeVal_.count(v->buffer_var())) {
-    llvm::Value* extPtr = bufsExtToFreeVal_.at(v->buffer_var());
-    irb_.Insert(llvm::CallInst::CreateFree(extPtr, irb_.GetInsertBlock()));
-    return;
-  }
+  llvm::Value* ptr = bufsExtToFreeVal_.count(v->buffer_var())
+      ? bufsExtToFreeVal_.at(v->buffer_var())
+      : varToVal_.at(v->buffer_var());
 
-  llvm::Value* ptr = varToVal_.at(v->buffer_var());
   if (!llvm::isa<llvm::AllocaInst>(ptr)) {
     irb_.Insert(llvm::CallInst::CreateFree(ptr, irb_.GetInsertBlock()));
   }
+}
+
+void LLVMCodeGenImpl::visit(FreeExtPtr v) {
+  value_ = llvm::ConstantInt::get(IntTy_, 0);
+  const auto& bufs = v->bufs();
+  int64_t bufs_num = bufs.size();
+
+  llvm::Value* ptrs = irb_.CreateAlloca(
+      Int8PtrTy_, llvm::ConstantInt::getSigned(IntTy_, bufs_num));
+  for (const auto i : c10::irange(bufs_num)) {
+    const auto& buf = bufs[i];
+    llvm::Value* gep = irb_.CreateInBoundsGEP(
+        Int8PtrTy_, ptrs, llvm::ConstantInt::getSigned(IntTy_, i));
+    auto ptr = bufsExtToFreeVal_[buf->base_handle()];
+    irb_.CreateStore(ptr, gep);
+  }
+
+  FunctionCallee callee = module_->getOrInsertFunction(
+      "nnc_aten_free",
+      llvm::FunctionType::get(
+          llvm::Type::getVoidTy(getContext()), // return type
+          {
+              LongTy_, // int64_t bufs_num
+              Int8PtrTy_->getPointerTo(), // void** ptrs
+          },
+          false)); // is var_arg
+
+  auto call_ty = callee.getFunctionType();
+  auto call_fn = callee.getCallee();
+  llvm::cast<llvm::Function>(call_fn)->addFnAttr(llvm::Attribute::NoUnwind);
+
+  irb_.CreateCall(
+      call_ty,
+      call_fn,
+      {llvm::ConstantInt::getSigned(LongTy_, bufs_num), ptrs});
+
+  value_ = llvm::ConstantInt::get(IntTy_, 0);
 }
 
 void LLVMCodeGenImpl::visit(LetPtr v) {

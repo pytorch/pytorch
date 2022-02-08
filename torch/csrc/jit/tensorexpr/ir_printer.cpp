@@ -483,6 +483,19 @@ void IRPrinter::visit(FreePtr v) {
   os() << "Free(" << *v->buffer_var() << ");";
 }
 
+void IRPrinter::visit(FreeExtPtr v) {
+  os() << "FreeExt(bufs={";
+  int i = 0;
+  for (BufPtr buf : v->bufs()) {
+    if (i++ > 0) {
+      os() << ", ";
+    }
+    os() << *buf;
+  }
+
+  os() << "});";
+}
+
 void IRPrinter::visit(PlacementAllocatePtr v) {
   os() << "Alias(" << *v->buf()->base_handle() << ","
        << *v->buf_to_reuse()->base_handle() << ");";

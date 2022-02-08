@@ -152,6 +152,12 @@ void IRVisitor::visit(ExternalCall2Ptr v) {
   }
 }
 
+void IRVisitor::visit(FreeExtPtr v) {
+  for (BufPtr buf : v->bufs()) {
+    buf->accept(this);
+  }
+}
+
 void IRVisitor::visit(BlockPtr v) {
   for (StmtPtr s : *v) {
     s->accept(this);

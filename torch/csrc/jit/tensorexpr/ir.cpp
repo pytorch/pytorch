@@ -215,6 +215,15 @@ ExternalCall2Ptr ExternalCall2::make(
       ExprHandleVectorToExprVector(args));
 }
 
+FreeExtPtr FreeExt::make(const std::vector<BufHandle>& bufs) {
+  std::vector<BufPtr> buf_nodes;
+  buf_nodes.reserve(bufs.size());
+  for (const BufHandle& buf : bufs) {
+    buf_nodes.push_back(buf.node());
+  }
+  return alloc<FreeExt>(buf_nodes);
+}
+
 std::vector<ExprPtr> ExprHandleVectorToExprVector(
     const std::vector<ExprHandle>& v) {
   std::vector<ExprPtr> result(v.size());

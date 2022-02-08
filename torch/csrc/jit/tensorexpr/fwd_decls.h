@@ -103,6 +103,7 @@ class ExternalCall;
 class ExternalCall2;
 class For;
 class Free;
+class FreeExt;
 class PlacementAllocate;
 class SyncThreads;
 using AllocatePtr = NodePtr<Allocate>;
@@ -113,6 +114,7 @@ using ExternalCallPtr = NodePtr<ExternalCall>;
 using ExternalCall2Ptr = NodePtr<ExternalCall2>;
 using ForPtr = NodePtr<For>;
 using FreePtr = NodePtr<Free>;
+using FreeExtPtr = NodePtr<FreeExt>;
 using PlacementAllocatePtr = NodePtr<PlacementAllocate>;
 using SyncThreadsPtr = NodePtr<SyncThreads>;
 

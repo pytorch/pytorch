@@ -12,6 +12,7 @@
 #include <ATen/native/xnnpack/OpContext.h>
 #include <ATen/quantized/QTensorImpl.h>
 #include <aten/src/ATen/Parallel.h>
+#include <c10/core/TensorImpl.h>
 #include <c10/core/TensorOptions.h>
 #include <c10/util/ArrayRef.h>
 #include <c10/util/irange.h>
@@ -469,6 +470,13 @@ void nnc_aten_quantized_conv2d_relu_out(
   auto r = convPackedParams->apply_relu(tensors[1], out_qscale, out_qzero);
   buf_data[0] = r.data_ptr();
   c10::raw::intrusive_ptr::incref(r.getIntrusivePtr().get());
+}
+
+void nnc_aten_free(int64_t bufs_num, void** ptrs) noexcept {
+  for (const auto i : c10::irange(bufs_num)) {
+    void* ptr = ptrs[i];
+    c10::raw::intrusive_ptr::decref((c10::TensorImpl*)ptr);
+  }
 }
 
 void nnc_aten_quantized_linear(
