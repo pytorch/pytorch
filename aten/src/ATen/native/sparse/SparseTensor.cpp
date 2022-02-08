@@ -913,7 +913,7 @@ Tensor& eye_sparse_out(int64_t n, int64_t m, Tensor& result) {
   auto options = TensorOptions().device(result.device()).dtype(result.dtype()).layout(kStrided);
 
   Tensor values = at::ones({sz}, options);
-  Tensor indices = at::arange(sz, options).unsqueeze(0).expand({2, -1}).contiguous();
+  Tensor indices = at::arange(sz, options.dtype(ScalarType::Long)).unsqueeze(0).expand({2, -1}).contiguous();
 
   get_sparse_impl(result)->resize_(2, 0, {n, m});
   copy_into_sparse(result, indices, values, false);
