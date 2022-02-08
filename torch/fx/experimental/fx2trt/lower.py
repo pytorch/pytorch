@@ -1,7 +1,6 @@
 import dataclasses as dc
 import logging
-import typing as t
-from typing import Type, Set, Optional, Callable, List
+from typing import Callable, List, Any, Sequence, Type, Set, Optional
 
 import tensorrt as trt
 import torch
@@ -9,6 +8,7 @@ import torch.fx as fx
 import torch.fx.experimental.fx_acc.acc_tracer as acc_tracer
 import torch.nn as nn
 from torch.fx.experimental.const_fold import split_const_subgraphs
+from torch.fx.passes.splitter_base import SplitResult
 
 from .fx2trt import (
     TRTInterpreter,
@@ -22,16 +22,12 @@ from .passes.fuse_pass import (
     fuse_unsqueeze_cat_sum,
 )
 from .passes.remove_duplicate_output_args import (
-    RemoveDuplicateOutputArgsFunc,
     remove_duplicate_output_args,
-)
-from .split import (
-    Splitter,
-    SplitFunc,
 )
 from .tools.timing_cache_utils import (
     TimingCacheManager,
 )
+from .tools.trt_splitter import TRTSplitter, TRTSplitterSetting
 from .trt_module import (
     TRTModule,
 )
@@ -39,8 +35,7 @@ from .trt_module import (
 
 logger = logging.getLogger(__name__)
 
-Input = t.Sequence[t.Any]
-TModule = t.TypeVar("TModule", bound=nn.Module)
+Input = Sequence[Any]
 
 
 def lower_to_trt(
@@ -144,7 +139,7 @@ class LowerSetting:
     modules will not be traced into.
     """
     max_batch_size: int = 2048
-    input_specs: t.List[InputTensorSpec] = dc.field(default_factory=list)
+    input_specs: List[InputTensorSpec] = dc.field(default_factory=list)
     explicit_batch_dimension: bool = True
     explicit_precision: bool = False
     fp16_mode: bool = False
@@ -160,6 +155,33 @@ class LowerSetting:
     ast_rewriter_allow_list: Optional[Set[Type[nn.Module]]] = None
     leaf_module_list: Optional[Set[Type[nn.Module]]] = None
 
+
+def run_const_fold(traced_mod: torch.fx.GraphModule) -> torch.fx.GraphModule:
+    # Now we do constant folding on traced module. We want to skip pattern like
+    # weights -> quant -> dequant -> op during constant folding when the model is
+    # a quantized int8 model.
+    def skip_folding_quant_dequant(node: torch.fx.Node):
+        if node.target != torch.quantize_per_tensor:
+            return False
+        # If quantize_per_node -> dequantize, then skip folding.
+        for user in node.users:
+            if user.target == "dequantize":
+                return True
+        return False
+
+    const_split_mod = split_const_subgraphs(traced_mod, skip_folding_quant_dequant)
+    const_split_mod.run_folding()
+    return const_split_mod
+
+
+def default_split_function(model: fx.GraphModule, inputs: Input, lower_setting: LowerSetting) -> SplitResult:
+    splitter_setting = TRTSplitterSetting()
+    splitter_setting.use_implicit_batch_dim = not lower_setting.explicit_batch_dimension
+    # TODO: avoid hardcode here by introducing another flag in lowering setting.
+    splitter_setting.min_acc_module_size = 10
+    splitter = TRTSplitter(model, inputs, settings=splitter_setting)
+    splitter.node_support_preview()
+    return splitter.generate_split_results()
 
 
 @dc.dataclass
@@ -226,144 +248,102 @@ class LowerTrtInterpreter:
         return interp_result
 
 
-class LowerFunc:
-    """Signature for fx2trt lower functions"""
-
-    def __call__(
-        self,
-        module: fx.GraphModule,
-        input: Input,
-    ) -> nn.Module:
-        """Lowers a module using fx2trt
-
-        Args:
-            module: module to be lowered
-            input: sample input to the module
-
-        Returns:
-            the lowered module
-        """
-        raise NotImplementedError()
-
-
-def fx2trt_lower(module: nn.Module, sample_input: t.Any) -> fx.GraphModule:
-    """Lowers the module using fx2trt
-
-    TODO: @kefeilu: this function's body should be moved into the actual calling
-    site in the model publisher workflow, since now the lowering function
-    signature (`LowerFunc`) is encapsulated in the `Lowerer` callable class.
-    """
-
-    assert isinstance(
-        module, fx.GraphModule
-    ), f"Expecting fx.GraphModule, got: {type(module)}"
-    logger.info(f"Module FX Graph: {module.graph}")
-    lower_setting = LowerSetting()
-    lower = Lowerer.create(lower_setting=lower_setting)
-
-    module_lowered = lower(module, sample_input)
-
-    assert isinstance(module_lowered, fx.GraphModule)
-    return module_lowered
-
-
 @dc.dataclass(frozen=True)
-class Lowerer(LowerFunc):
+class Lowerer:
     """Lowers a module using fx2trt.
 
     This is a composable class to facilitate fx2trt. A normal fx2trt process
     composes of the following passes to transform an `fx.GraphModule`:
 
-        1. split - the input graph module is split into several sub-nets,
+        1. trace - use torch.fx to trace the module so we can get the graph
+            representation of the model.
+        2. split - the graph module is split into several submodules,
             running either via TensorRT, or via regular CUDA.
 
     For each split that need to run via TRT, the following passes are
     invoked:
 
-        2. acc_trace - trace the module for TRT conversion
-        3. `remove_duplicate_output_args` - since fx2TRT doesn't support duplicate arguments in
-            an `fx.GraphModule`'s `output` node, this pass is needed to remove the duplicated
-            output args from the split and also update the parent module to fix their uses
-            accordingly.
-        4. `TRTInterpreter` - runs the acc traced module through `TRTInterpreter`
-            to build the TRT engine
-        5. Wraps the executable TRT engine into `TRTModule`, which is an `nn.Module`.
-        6. The lowered subnet is then set back onto the top-level module
+        3. `TRTInterpreter` - build the TRT engine for the submodule that
+            can be supported through `TRTInterpreter`.
+        4. Wraps the executable TRT engine into `TRTModule`, which is an `nn.Module`.
+        5. The converted submodule is then set back onto the top-level module
 
     # TODO: @kefeilu: also incorporates a validator to do inference (and optionally)
     # result comparison along the way.
 
     Attributes:
-        split: the fx2trt split function.
-        acc_trace: trace function for TRT conversion.
-        remove_duplicate_output_args: moduel transformation pass to remove duplicate args in
-            a subnet's `output` node.
+        trace_func: fx trace function for TRT conversion.
+        split_func: the fx2trt split function.
         trt_interpret: function to create and run `TRTInterpreter` to convert `fx.GraphModule`
             into a TensorRT engine.
+        lower_setting: see above LowerSetting class for the details.
     """
 
-    split: SplitFunc
-    acc_trace: t.Callable[[fx.GraphModule, Input], fx.GraphModule]
-    remove_duplicate_output_args: RemoveDuplicateOutputArgsFunc
+    trace_func: Callable[[nn.Module, Input], fx.GraphModule]
+    split_func: Callable[[fx.GraphModule, Input, LowerSetting], SplitResult]
     trt_interpreter: LowerTrtInterpreter
-    fp16: bool
-    trt_module_observer: Optional[Callable[[str, nn.Module, List[torch.Tensor]], None]] = None
-
+    lower_setting: LowerSetting
+    trt_module_observer: Optional[Callable[[str, nn.Module, List[torch.Tensor]], None]]
 
     @classmethod
     def create(
         cls,
         lower_setting: LowerSetting,
-        trt_module_observer: Optional[Callable[[str, nn.Module, List[torch.Tensor]], None]] = None
+        trt_module_observer: Optional[Callable[[str, nn.Module, List[torch.Tensor]], None]] = None,
     ) -> "Lowerer":
         """Instantiate a `Lowerer` instance."""
 
-        return Lowerer(
-            split=Splitter.create(not lower_setting.explicit_batch_dimension),
-            acc_trace=lambda mod, input:
-            acc_tracer.trace(
-                mod,
-                input,  # type: ignore[arg-type]
+        return cls(
+            trace_func=lambda module, inputs: acc_tracer.trace(
+                module,
+                inputs,  # type: ignore[arg-type]
                 ast_rewriter_allow_list=lower_setting.ast_rewriter_allow_list,
                 leaf_module_list=lower_setting.leaf_module_list),  # type: ignore[arg-type]
-            remove_duplicate_output_args=remove_duplicate_output_args,
+            split_func=default_split_function,
             trt_interpreter=LowerTrtInterpreter.create(lower_setting),
-            fp16=lower_setting.fp16_mode,
+            lower_setting=lower_setting,
             trt_module_observer=trt_module_observer,
         )
 
     def __call__(
         self,
         module: nn.Module,
-        input: Input,
+        inputs: Input,
         cuda_graph_batch_size: int = -1,
-        skip_folding_node_fn: t.Optional[t.Callable[[fx.Node], bool]] = None,
     ) -> nn.Module:
-        """See `LowerFunc` protocol"""
-        if self.fp16:
-            module.eval().half()
-            input = tuple(x.half() if x.dtype == torch.float32 else x for x in input)
+        module.eval()
 
-        # Exure ast_rewrite is done for input module before const_fold
-        module = self.acc_trace(module, input)  # type: ignore[misc]
+        if self.lower_setting.fp16_mode:
+            module.half()
+            inputs = tuple(x.half() if x.dtype == torch.float32 else x for x in inputs)
 
-        const_split_mod = split_const_subgraphs(module, skip_folding_node_fn)
-        const_split_mod.run_folding()
-        const_split_mod = self.acc_trace(const_split_mod, input)  # type: ignore[misc]
+        # Ensure ast_rewrite is done for input module before const_fold.
+        traced_mod = self.trace_func(module, inputs)  # type: ignore[misc]
 
-        split_module, splits = self.split(const_split_mod, input)  # type: ignore[arg-type]
-        split_module.eval()  # type: ignore[attr-defined]
-        for _split in splits:  # type: ignore[attr-defined]
+        # Run const folding.
+        traced_mod = run_const_fold(traced_mod)
+
+        # Retrace here to eliminate no-op introduced by const folding and map new introduced
+        # nodes to acc op nodes.
+        traced_mod = self.trace_func(traced_mod, inputs)  # type: ignore[misc]
+
+        # Run split.
+        split_result = self.split_func(traced_mod, inputs, self.lower_setting)  # type: ignore[misc,operator]
+
+        # TesnorRT doesn't like duplicate outputs. Run this pass to eliminate such case.
+        remove_duplicate_output_args(split_result.split_module, split_result.submodule_inputs.keys())
+
+
+        for submod_name, submod_inputs in split_result.submodule_inputs.items():
+            submod = getattr(split_result.split_module, submod_name)
+
             if self.trt_module_observer:
-                self.trt_module_observer(_split.name, _split.module, _split.input)  # type: ignore[arg-type]
+                self.trt_module_observer(submod_name, submod, submod_inputs)  # type: ignore[arg-type]
 
-            if _split.device == "acc":
-                # Ensure parent module is updated with the traced sub-net before running
-                # remove_duplicate_output_args.
-                self.remove_duplicate_output_args(_split.module, [_split.name])  # type: ignore[misc, operator]
-
+            # We only lower acc submodules.
+            if not submod_name.startswith(split_result.non_acc_submodule_prefix):
                 interp_res = self.trt_interpreter(
-                    _split.module, _split.input, _split.name
+                    submod, submod_inputs, submod_name
                 )
 
                 trt_module = TRTModule(
@@ -372,6 +352,6 @@ class Lowerer(LowerFunc):
                     output_names=interp_res.output_names,
                     cuda_graph_batch_size=cuda_graph_batch_size,
                 )
-                setattr(split_module, _split.name, trt_module)
+                setattr(split_result.split_module, submod_name, trt_module)
 
-        return split_module  # type: ignore[return-value]
+        return split_result.split_module
