@@ -249,14 +249,14 @@ void initCompileCacheBindings(PyObject *module) {
       .def("at",
            [](CompileCache &self, int64_t id, int64_t fw_compiler_id,
               int64_t bw_compiler_id, int numTensorArgs,
-              const std::string hasherType, py::args args) {
+              const std::string &hasherType, py::args args) {
              return self.at(id, fw_compiler_id, bw_compiler_id, numTensorArgs,
                             hasherType, args.ptr());
            })
       .def("insert",
            [](CompileCache &self, int64_t id, int64_t fw_compiler_id,
               int64_t bw_compiler_id, int numTensorArgs,
-              const std::string hasherType, const py::object &compileFn,
+              const std::string &hasherType, const py::object &compileFn,
               py::args args, py::kwargs kwargs) {
              self.insert(id, fw_compiler_id, bw_compiler_id, numTensorArgs,
                          hasherType, compileFn, args.ptr());
