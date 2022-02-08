@@ -350,6 +350,68 @@ TEST(DynamicShapes, GraphWithPartiallySymbolicOutput) {
 #endif
 }
 
+TEST(DynamicShapes, GraphWithSymbolicStrides) {
+#ifdef TORCH_ENABLE_LLVM
+  std::shared_ptr<Graph> graph = std::make_shared<Graph>();
+  const auto graph_string = R"IR(
+    graph(%0 : Float(SS(-2), SS(-3), requires_grad=0, device=cpu),
+          %1 : Float(SS(-2), SS(-3), requires_grad=0, device=cpu),
+          %SS_3 : int,
+          %SS_2 : int):
+      %15 : int = prim::Constant[value=1]()
+      %21 : Float(SS(-2), SS(-3), requires_grad=0, device=cpu) = aten::add(%0, %1, %15)
+      %22 : Float(SS(-2), SS(-3), requires_grad=0, device=cpu) = aten::mul(%21, %0)
+      return (%22))IR";
+  parseIR(graph_string, &*graph);
+
+  std::vector<torch::jit::StrideInput> input_desc = {
+      torch::jit::StrideInput::S_AS_ARG, torch::jit::StrideInput::S_ONE};
+  std::vector<torch::jit::StrideInput> output_desc = {
+      torch::jit::StrideInput::TENSOR_CONT};
+  std::unordered_map<
+      const torch::jit::Value*,
+      std::vector<torch::jit::StrideInput>>
+      symbolic_strides;
+  symbolic_strides[graph->inputs().at(0)] = input_desc;
+  symbolic_strides[graph->inputs().at(1)] = input_desc;
+  symbolic_strides[graph->outputs().at(0)] = output_desc;
+  std::vector<int64_t> symbolic_shape_inputs = {-3, -2};
+  TensorExprKernel k(graph, {}, symbolic_shape_inputs, false, symbolic_strides);
+  std::cout << "Stmt: " << *k.getCodeGenStmt() << std::endl;
+
+  {
+    auto x0 = at::rand({10, 32}, at::TensorOptions(at::kCPU).dtype(at::kFloat));
+    auto x1 = at::rand({10, 32}, at::TensorOptions(at::kCPU).dtype(at::kFloat));
+    auto ref = at::mul(at::add(x0, x1, 1), x0);
+
+    std::vector<at::Tensor> inputs = {x0, x1};
+    std::vector<IValue> stack = at::fmap<at::IValue>(inputs);
+    stack.push_back(32);
+    stack.push_back(10);
+    k.run(stack);
+
+    auto o = stack[0].toTensor();
+    ASSERT_TRUE(at::allclose(o, ref));
+  }
+
+  {
+    auto x0 = at::rand({10, 32}, at::TensorOptions(at::kCPU).dtype(at::kFloat));
+    auto x1 = at::rand({10, 32}, at::TensorOptions(at::kCPU).dtype(at::kFloat));
+    auto out =
+        at::rand({10, 32}, at::TensorOptions(at::kCPU).dtype(at::kFloat));
+    auto ref = at::mul(at::add(x0, x1, 1), x0);
+
+    std::vector<at::Tensor> inputs = {out, x0, x1};
+    std::vector<IValue> stack = at::fmap<at::IValue>(inputs);
+    stack.push_back(32);
+    stack.push_back(10);
+    k.runWithAllocatedOutputs(stack);
+
+    ASSERT_TRUE(at::allclose(out, ref));
+  }
+#endif
+}
+
 TEST(DynamicShapes, GraphWithCatAndBroadcast) {
 #ifdef TORCH_ENABLE_LLVM
   std::shared_ptr<Graph> graph = std::make_shared<Graph>();
