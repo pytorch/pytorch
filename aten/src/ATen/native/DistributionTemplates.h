@@ -246,9 +246,8 @@ Tensor normal_impl(double mean, const Tensor& std, c10::optional<Generator> gen)
 template<template<typename> class normal_kernel, typename RNG>
 Tensor normal_impl(const Tensor& mean, const Tensor& std, c10::optional<Generator> gen) {
   CHECK_NORMAL_TENSOR_STD(std);
-  Tensor ret = at::empty_like(mean, MemoryFormat::Contiguous);
   auto shape = at::infer_size(mean.sizes(), std.sizes());
-  at::native::resize_output(ret, shape);
+  Tensor ret = at::empty(shape, mean.options(), MemoryFormat::Contiguous);
   normal_out_impl<normal_kernel, RNG>(ret, mean, std, gen);
   return ret;
 }
