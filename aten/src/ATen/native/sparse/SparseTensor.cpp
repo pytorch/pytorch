@@ -12,6 +12,7 @@
 
 #include <ATen/native/Copy.h>
 #include <ATen/native/CPUBlas.h>
+#include <c10/util/irange.h>
 
 namespace at {
 namespace native {
@@ -229,7 +230,7 @@ Tensor sparse_coo_tensor(const Tensor& indices, const Tensor& values_,
     auto cpu_min_indices_accessor = cpu_min_indices.accessor<int64_t, 1>();
     auto cpu_computed_indices_sizes_accessor =
         cpu_computed_indices_sizes.accessor<int64_t, 1>();
-    for (int64_t d = 0; d < sparse_dim; d++) {
+    for (const auto d : c10::irange(sparse_dim)) {
       int64_t min_index_in_dim = cpu_min_indices_accessor[d];
       TORCH_CHECK(
           min_index_in_dim >= 0,
@@ -244,11 +245,11 @@ Tensor sparse_coo_tensor(const Tensor& indices, const Tensor& values_,
     // If the indices doesn't have elements in it, there is not enough
     // information to know what the minimum sparse dimension sizes should be,
     // and in this case we set them to 0
-    for (int64_t d = 0; d < sparse_dim; d++) {
+    for (const auto d : c10::irange(sparse_dim)) {
       computed_sizes[static_cast<size_t>(d)] = 0;
     }
   }
-  for (int64_t d = 0; d < dense_dim; d++) {
+  for (const auto d : c10::irange(dense_dim)) {
     computed_sizes[static_cast<size_t>(sparse_dim + d)] = values.size(d + 1);
   }
 
@@ -305,7 +306,7 @@ void _validate_sparse_coo_tensor_args(
     }
     auto cpu_min_indices_accessor = cpu_min_indices.accessor<int64_t, 1>();
     auto cpu_max_indices_accessor = cpu_max_indices.accessor<int64_t, 1>();
-    for (int64_t d = 0; d < sparse_dim; d++) {
+    for (const auto d : c10::irange(sparse_dim)) {
       // NB: This used to sync ndim times to access each entry; now we copy
       // everything to CPU first and then access it.
       int64_t min_index_in_dim = cpu_min_indices_accessor[d];
@@ -597,7 +598,7 @@ SparseTensor _coalesce_sparse_cpu(const SparseTensor& self) {
     int64_t blockSize = values.stride(0);
     scalar_t* values_ptr = values.data_ptr<scalar_t>();
     scalar_t* newValues_ptr = newValues.data_ptr<scalar_t>();
-    for (int64_t j = 0; j < nnz; j++) {
+    for (const auto j : c10::irange(nnz)) {
       int64_t pos = indicesPermutationAccessor[j];
       int64_t curr = indicesBufferAccessor[j];
       if (curr == prev) {
@@ -613,7 +614,7 @@ SparseTensor _coalesce_sparse_cpu(const SparseTensor& self) {
         }
       } else {
         ++i;
-        for (int64_t d = 0; d < sparse_dim; d++) {
+        for (const auto d : c10::irange(sparse_dim)) {
           newIndicesAccessor[d][i] = indicesAccessor[d][pos];
         }
         if (values.numel() >
@@ -656,9 +657,9 @@ void inline sparse_mask_out_cpu_kernel(
   auto t_strides = t.strides();
 
   at::parallel_for(0, r_nnz, 1000, [&](int64_t start, int64_t end) {
-    for (auto i = start; i < end; i++) {
+    for (const auto i : c10::irange(start, end)) {
       int64_t idx = 0;
-      for (int64_t d = 0; d < sparse_dim; d++) {
+      for (const auto d : c10::irange(sparse_dim)) {
         idx += mask_indices_accessor[d][i] * t_strides[d];
       }
       r_values_accessor[i] = t_ptr[idx];
@@ -706,14 +707,14 @@ SparseTensor& sparse_mask_out_cpu(
     // ]. Keeping this implementation because it is faster than
     // flatten_indices()
     Tensor indices = at::zeros({mask._nnz()}, mask_indices.options());
-    for (int64_t d = 0; d < mask.sparse_dim(); d++) {
+    for (const auto d : c10::irange(mask.sparse_dim())) {
       indices.mul_(mask.size(d));
       indices.add_(mask_indices.select(0, d));
     }
 
     std::vector<int64_t> view_size(1 + mask.dense_dim());
     view_size[0] = -1;
-    for (int64_t d = 0; d < mask.dense_dim(); d++) {
+    for (const auto d : c10::irange(mask.dense_dim())) {
       view_size[d + 1] = mask.size(mask.sparse_dim() + d);
     }
 
@@ -777,7 +778,7 @@ Tensor sparse_mask_helper_cpu(
 
   // Step 1: flatten the sparse indices `t._indices()` tensor and then  map this
   // flatten value `index` to the original position `i`
-  for (int64_t i = 0; i < t_nnz; i++) {
+  for (const auto i : c10::irange(t_nnz)) {
     int64_t index = ti_flattened_indices.data_ptr<int64_t>()[i];
     t_flatten_indices[index] = i;
   }
@@ -802,7 +803,7 @@ Tensor sparse_mask_helper_cpu(
     const auto r_values_stride = r_values.strides()[0] * r_values.element_size();
     const auto t_values_stride = t_v.strides()[0] * t_v.element_size();
 
-    for (auto i = start; i < end; i++) {
+    for (const auto i : c10::irange(start, end)) {
       int64_t index = flattened_mask_indices.data_ptr<int64_t>()[i];
       auto iter = t_flatten_indices.find(index);
       if (iter != t_flatten_indices.end()) {
@@ -816,6 +817,40 @@ Tensor sparse_mask_helper_cpu(
     }
   });
   return r_values;
+}
+
+Tensor empty_like_sparse_coo(
+    const Tensor& self,
+    c10::optional<ScalarType> dtype,
+    c10::optional<Layout> layout,
+    c10::optional<Device> device,
+    c10::optional<bool> pin_memory,
+    c10::optional<c10::MemoryFormat> optional_memory_format) {
+  TensorOptions options_ = TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory);
+
+  TORCH_CHECK(
+    !(options_.has_memory_format() && optional_memory_format.has_value()),
+    "Cannot set memory_format both in TensorOptions and explicit argument; please delete "
+    "the redundant setter.");
+
+  TensorOptions options =
+      self.options()
+          .merge_in(options_)
+          .merge_memory_format(optional_memory_format);
+
+  TORCH_CHECK(
+      !(options.layout() != kStrided &&
+          optional_memory_format.has_value()),
+      "memory format option is only supported by strided tensors");
+
+  if (options.layout() == kSparse) {
+    auto result = at::empty({0}, options);
+    result.sparse_resize_and_clear_(
+        self.sizes(), self.sparse_dim(), self.dense_dim());
+    return result;
+  } else {
+    return at::native::empty_like(self, dtype, layout, device, pin_memory, optional_memory_format);
+  }
 }
 
 } // namespace native

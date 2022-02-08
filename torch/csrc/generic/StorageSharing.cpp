@@ -58,8 +58,7 @@ static PyObject * THPStorage_(pyNewFilenameStorage)(PyObject *_unused, PyObject 
     size,
     THManagedMapAllocator::makeDataPtr("", handle.c_str(), flags, size),
     /*allocator=*/nullptr,
-    /*resizable=*/false)
-    .release());
+    /*resizable=*/false));
   END_HANDLE_TH_ERRORS
 }
 
@@ -78,19 +77,17 @@ static PyObject * THPStorage_(shareFilename)(PyObject *_self, PyObject *noargs)
     // TODO: free GIL - but remember to reacquire it when an exception is thrown
     int flags = at::ALLOCATOR_MAPPED_SHAREDMEM | at::ALLOCATOR_MAPPED_EXCLUSIVE;
     std::string handle = at::NewProcessWideShmHandle();
-    c10::StorageImpl* new_storage = c10::make_intrusive<at::StorageImpl>(
+    at::Storage new_storage(c10::make_intrusive<at::StorageImpl>(
       c10::StorageImpl::use_byte_size_t(),
       storage->nbytes(),
       THManagedMapAllocator::makeDataPtr("", handle.c_str(), flags, storage->nbytes()),
       /*allocator=*/nullptr,
-      /*resizable=*/false)
-      .release();
+      /*resizable=*/false));
 
-    at::Storage new_storage_aten = at::unsafeStorageFromTH(new_storage, /*retain=*/true);
     at::Storage _self_aten = torch::createStorage(_self);
-    storage_copy(new_storage_aten, _self_aten);
+    storage_copy(new_storage, _self_aten);
 
-    std::swap(*storage, *new_storage);
+    std::swap(*storage, *new_storage.unsafeGetStorageImpl());
     ctx = THManagedMapAllocator::fromDataPtr(storage->data_ptr());
     AT_ASSERT(ctx);
   }
@@ -134,12 +131,11 @@ static PyObject * THPStorage_(newSharedFilename)(PyObject *_unused, PyObject *ar
       size,
       THManagedMapAllocator::makeDataPtr(manager_handle, object_handle, flags, size),
       /*allocator=*/nullptr,
-      /*resizable=*/false)
-      .release());
+      /*resizable=*/false));
   END_HANDLE_TH_ERRORS
 }
 
-static c10::StorageImpl* THPStorage_(newFdStorage)(ptrdiff_t size)
+static c10::intrusive_ptr<c10::StorageImpl> THPStorage_(newFdStorage)(ptrdiff_t size)
 {
   int flags = at::ALLOCATOR_MAPPED_SHAREDMEM |
               at::ALLOCATOR_MAPPED_EXCLUSIVE |
@@ -152,8 +148,7 @@ static c10::StorageImpl* THPStorage_(newFdStorage)(ptrdiff_t size)
     size,
     std::move(sptr),
     /*allocator=*/nullptr,
-    /*resizable=*/false)
-    .release();
+    /*resizable=*/false);
 }
 
 static PyObject * THPStorage_(pyNewFdStorage)(PyObject *_unused, PyObject *args)
@@ -179,12 +174,11 @@ static PyObject * THPStorage_(shareFd)(PyObject *_self, PyObject *noargs)
   if ((ctx = at::MapAllocator::fromDataPtr(storage->data_ptr()))) {
     // done
   } else {
-    c10::StorageImpl* new_storage = THPStorage_(newFdStorage)(storage->nbytes());
-    at::Storage new_storage_aten = at::unsafeStorageFromTH(new_storage, /*retain=*/true);
+    at::Storage new_storage(THPStorage_(newFdStorage)(storage->nbytes()));
     at::Storage _self_aten = torch::createStorage(_self);
-    storage_copy(new_storage_aten, _self_aten);
+    storage_copy(new_storage, _self_aten);
 
-    std::swap(*storage, *new_storage);
+    std::swap(*storage, *new_storage.unsafeGetStorageImpl());
     ctx = at::MapAllocator::fromDataPtr(storage->data_ptr());
     AT_ASSERT(ctx);
   }
@@ -232,8 +226,7 @@ static PyObject * THPStorage_(newSharedFd)(PyObject *_unused, PyObject *args)
       size,
       at::MapAllocator::makeDataPtr(at::WITH_FD, "", fd, flags, size, nullptr),
       /*allocator=*/nullptr,
-      /*resizable=*/false)
-      .release());
+      /*resizable=*/false));
   END_HANDLE_TH_ERRORS
 }
 
@@ -499,7 +492,7 @@ static PyObject * THPStorage_(newSharedCuda)(PyObject *_unused, PyObject *args)
   base->set_resizable(false);
   base->set_received_cuda(true);
 
-  return THPStorage_(New)(base.release());
+  return THPStorage_(New)(std::move(base));
   END_HANDLE_TH_ERRORS
 }
 #endif
@@ -524,7 +517,7 @@ PyObject * THPStorage_(newWithWeakPtr)(PyObject *_unused, PyObject *arg)
       "_new_with_weak_ptr(): arg must be an 'int'");
   c10::StorageImpl *weak_storage = (c10::StorageImpl*)PyLong_AsVoidPtr(arg);
   if (auto* storage = c10::raw::weak_intrusive_ptr::lock(weak_storage)) {
-    return THPStorage_(New)(storage);
+    return THPStorage_(New)(c10::intrusive_ptr<c10::StorageImpl>::reclaim(storage));
   }
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS

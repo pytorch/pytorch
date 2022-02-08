@@ -5,23 +5,31 @@
 #define __STDC_FORMAT_MACROS
 #endif
 
+// NOTE: This condition is true for all PyTorch internal libraries, it
+//       just excludes external projects such as torch_xla which
+//       re-use some of the PyTorch codegen machinery.
+#if defined(CAFFE2_BUILD_MAIN_LIB)        || \
+    defined(TORCH_CUDA_BUILD_MAIN_LIB)    || \
+    defined(TORCH_HIP_BUILD_MAIN_LIB)     || \
+    defined(TORCH_CUDA_CU_BUILD_MAIN_LIB) || \
+    defined(TORCH_CUDA_CPP_BUILD_MAIN_LIB)
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#endif
+
 // ${generated_comment}
 
 #include <c10/core/TensorImpl.h>
 #include <c10/core/Allocator.h>
 #include <ATen/DeviceGuard.h>
-#include <ATen/NativeFunctions.h>
 #include <ATen/NamedTensorUtils.h>
 #include <ATen/Utils.h>
 #include <ATen/WrapDimUtils.h>
 #include <ATen/Dispatch.h>
 #include <c10/util/ExclusivelyOwned.h>
 #include <c10/util/Half.h>
-#include <c10/core/TensorImpl.h>
 #include <c10/core/UndefinedTensorImpl.h>
 #include <c10/util/Optional.h>
 #include <ATen/Tensor.h>
-#include <ATen/Functions.h>
 #include <ATen/native/Resize.h>
 
 #include <cstddef>
@@ -34,7 +42,9 @@
 #include <torch/library.h>
 $extra_cuda_headers
 $external_backend_headers
-$namespaced_headers
+$dispatch_headers
+$ops_headers
+
 
 namespace at {
 

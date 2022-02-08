@@ -1,9 +1,10 @@
 #include <ATen/ATen.h>
+#include <ATen/core/Dict.h>
+#include <c10/util/intrusive_ptr.h>
+#include <c10/util/irange.h>
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 #include <torch/torch.h>
-#include <c10/util/intrusive_ptr.h>
-#include <ATen/core/Dict.h>
 
 // Snippets for checking assembly.
 c10::IValue inspectTupleConstruction() {
@@ -31,6 +32,7 @@ TEST(IValueTest, Basic) {
   ASSERT_EQ(foo2.toDouble(), 4.0);
   ASSERT_EQ(foo.use_count(), 2);
   ASSERT_TRUE(baz.toIntVector() == std::vector<int64_t>({3, 4, 5}));
+  ASSERT_TRUE(baz.toDimVector() == at::DimVector({3, 4, 5}));
 
   auto move_it = std::move(baz).toIntList();
   ASSERT_EQ(foo.use_count(), 2);
@@ -643,7 +645,7 @@ TEST(IValueTest, IdentityComparisonAndHashing) {
   auto moreSampleIValues = makeMoreSampleIValues();
 
   ASSERT_EQ(sampleIValues.size(), moreSampleIValues.size());
-  for (int ii = 0; ii < sampleIValues.size(); ++ii) {
+  for (const auto ii : c10::irange(sampleIValues.size())) {
     if (sampleIValues[ii].isComplexDouble() ||
         sampleIValues[ii].isBlob() ||
         sampleIValues[ii].isList() ||
@@ -671,6 +673,62 @@ TEST(IValueTest, IdentityComparisonAndHashing) {
     }
   }
 }
+
+// Sparse tensors do not work with static CPU dispatch
+#ifndef ATEN_CPU_STATIC_DISPATCH
+TEST(IValueTest, IdentityAndHashing_SparseCOO) {
+  using namespace torch::indexing;
+
+  at::Tensor t1 = at::rand({3, 4}).to_sparse();
+  at::Tensor t2 = at::rand({3, 4}).to_sparse();
+  at::Tensor t3 = at::rand({3, 4});
+
+  IValue tv1(t1), tv1b(t1), tv2(t2), tv3(t3);
+
+  EXPECT_EQ(tv1.hash(), tv1b.hash());
+  EXPECT_NE(tv1.hash(), tv2.hash());
+
+  EXPECT_TRUE(tv1.is(tv1b));
+  EXPECT_FALSE(tv1.is(tv2));
+
+  EXPECT_TRUE(tv1.isAliasOf(tv1b));
+  EXPECT_FALSE(tv1.isAliasOf(tv2));
+  EXPECT_FALSE(tv1.isAliasOf(tv3));
+
+  std::vector<int64_t> idx_array1 = {0, 1, 1, 0, 0, 1};
+  at::Tensor idx1 = torch::from_blob(
+      idx_array1.data(),
+      {2, 3},
+      torch::TensorOptions().dtype(torch::kInt64).device(torch::kCPU));
+  std::vector<int64_t> idx_array2 = {1, 1, 2, 0, 1, 2};
+  at::Tensor idx2 = torch::from_blob(
+      idx_array2.data(),
+      {2, 3},
+      torch::TensorOptions().dtype(torch::kInt64).device(torch::kCPU));
+  std::vector<int32_t> val_array = {3, -5, 7};
+  at::Tensor val = torch::from_blob(
+      val_array.data(),
+      {3},
+      torch::TensorOptions().dtype(torch::kInt32).device(torch::kCPU));
+  at::Tensor sparse1 = torch::sparse_coo_tensor(
+      idx1, val, {3, 3}, torch::TensorOptions().dtype(torch::kInt32));
+  at::Tensor sparse2 = torch::sparse_coo_tensor(
+      idx2, val, {3, 3}, torch::TensorOptions().dtype(torch::kInt32));
+
+  IValue idx1_v(idx1), idx2_v(idx2);
+  IValue val_v(val);
+  IValue sparse1_v(sparse1), sparse2_v(sparse2);
+
+  EXPECT_TRUE(sparse1_v.isAliasOf(sparse2_v));
+  EXPECT_TRUE(sparse1_v.isAliasOf(idx1_v));
+  EXPECT_TRUE(sparse1_v.isAliasOf(val_v));
+  EXPECT_TRUE(sparse2_v.isAliasOf(idx2_v));
+  EXPECT_TRUE(sparse2_v.isAliasOf(val_v));
+  EXPECT_FALSE(idx1_v.isAliasOf(idx2_v));
+  EXPECT_FALSE(idx1_v.isAliasOf(val_v));
+  EXPECT_FALSE(sparse1_v.isAliasOf(idx2_v));
+}
+#endif // ATEN_CPU_STATIC_DISPATCH
 
 TEST(IValueTest, getSubValues) {
   // Scalars have no subvalues.

@@ -24,9 +24,9 @@ namespace cuda {
 TORCH_CUDA_CPP_API c10::Allocator* getCachingHostAllocator();
 
 // Records an event in the specified stream. The allocation corresponding to the
-// 'ctx' will not be re-used until the event has occurred.
-TORCH_CUDA_CPP_API cudaError_t
-CachingHostAllocator_recordEvent(void* ctx, c10::cuda::CUDAStream stream);
+// input `ptr`/`ctx` will not be re-used until the event has occurred.
+TORCH_CUDA_CPP_API bool
+CachingHostAllocator_recordEvent(void* ptr, void* ctx, c10::cuda::CUDAStream stream);
 
 // Releases cached pinned memory allocations via cudaHostFree
 TORCH_CUDA_CPP_API void CachingHostAllocator_emptyCache();

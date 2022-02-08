@@ -304,6 +304,14 @@ class TORCH_API TensorBase {
     return impl_->storage().is_alias_of(other.storage());
   }
 
+  inline bool _is_zerotensor() const {
+    return impl_->_is_zerotensor();
+  }
+
+  inline void _set_zero(bool zero) const {
+    impl_->_set_zero(zero);
+  }
+
   inline bool is_conj() const {
     return impl_->is_conj();
   }
@@ -886,13 +894,14 @@ struct ExclusivelyOwnedTraits<at::TensorBase> {
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(toDestroy != nullptr, "Tensor somehow got null TensorImpl?");
     // May be 0 because UndefinedTensorImpl doesn't get its refcount
     // incremented.
+    const bool isUndefined = toDestroy == UndefinedTensorImpl::singleton();
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
-        toDestroy->refcount_ == 1 || (toDestroy->refcount_ == 0 && toDestroy == UndefinedTensorImpl::singleton()),
-        "ExclusivelyOwned<Tensor> destroyed with refcount ", toDestroy->refcount_, ", expected 1!");
+        toDestroy->refcount_ == 1 || (toDestroy->refcount_ == 0 && isUndefined),
+        "ExclusivelyOwned<Tensor> destroyed with isUndefined ", isUndefined, " and refcount ", toDestroy->refcount_, ", expected 1 or, if isUndefined, 0!");
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
         toDestroy->weakcount_ == 1 || (toDestroy->weakcount_ == 0 && toDestroy == UndefinedTensorImpl::singleton()),
-        "ExclusivelyOwned<Tensor> destroyed with weakcount ", toDestroy->weakcount_, ", expected 1!");
-    if (toDestroy != UndefinedTensorImpl::singleton()) {
+        "ExclusivelyOwned<Tensor> destroyed with isUndefined ", isUndefined, " and weakcount ", toDestroy->weakcount_, ", expected 1 or, if isUndefined, 0!");
+    if (!isUndefined) {
 #ifndef NDEBUG
       // Needed to pass the debug assertions in ~intrusive_ptr_target.
       toDestroy->refcount_ = 0;

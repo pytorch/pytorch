@@ -6,7 +6,7 @@
 #include <torch/csrc/autograd/variable.h>
 #include <torch/csrc/DynamicTypes.h>
 
-#include <torch/csrc/WindowsTorchApiMacro.h>
+#include <torch/csrc/Export.h>
 
 #include <algorithm>
 #include <cstdarg>
@@ -174,13 +174,6 @@ bool maybeThrowBackCompatKeepdimWarn(char *func) {
     PyErr_WarnEx(PyExc_UserWarning, ss.str().c_str(), 1);
   }
   return true;
-}
-
-template<>
-void THPPointer<THTensor>::free() {
-  if (ptr) {
-    THTensor_free(LIBRARY_STATE ptr);
-  }
 }
 
 template<>
