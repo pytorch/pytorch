@@ -30,7 +30,7 @@ prepare_model_and_dump_root_ops() {
   MODEL="${BUILD_ROOT}/MobileNetV2.pt"
   ROOT_OPS="${BUILD_ROOT}/MobileNetV2.yaml"
 
-  python "${TEST_SRC_ROOT}/prepare_model.py"
+  python3 "${TEST_SRC_ROOT}/prepare_model.py"
 }
 
 run_default_build() {
@@ -45,16 +45,16 @@ run_custom_build_with_static_dispatch() {
   LIBTORCH_BUILD_ROOT="${BUILD_ROOT}/build_custom_libtorch_static"
   LIBTORCH_INSTALL_PREFIX="${LIBTORCH_BUILD_ROOT}/install"
 
-  # Here it generates registration code for used ROOT ops only, whose unboxing
-  # kernels are still needed by the JIT runtime. The intermediate ops will be
+  # Here it generates unboxing kernels and registration code to JIT op registry
+  # for used ROOT ops only. The intermediate ops will be
   # automatically kepted by the linker as they are statically referenced by the
   # static dispatch code, for which we can bypass the registration.
-  # We don't set '-DSTATIC_DISPATCH_BACKEND=CPU' explicitly to test automatic
-  # fallback to static dispatch.
   BUILD_ROOT="${LIBTORCH_BUILD_ROOT}" \
     "${SRC_ROOT}/scripts/build_mobile.sh" \
     -DCMAKE_CXX_FLAGS="-DSTRIP_ERROR_MESSAGES" \
-    -DSELECTED_OP_LIST="${ROOT_OPS}"
+    -DSELECTED_OP_LIST="${ROOT_OPS}" \
+    -DSTATIC_DISPATCH_BACKEND="CPU" \
+    -DUSE_LIGHTWEIGHT_DISPATCH="ON"
 }
 
 build_predictor() {
