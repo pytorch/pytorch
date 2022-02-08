@@ -917,7 +917,7 @@ class TestOldViewOps(TestCase):
                 # To verify both tensors has the same memory address
                 self.assertIs(flat._base, src)
                 # To check the return value
-                self.assertTrue(flat._base != None)
+                self.assertTrue(flat._base is not None)
                 self.assertTrue(flat.is_contiguous())
 
                 # Non-continuous Tensor -> Copy
@@ -929,7 +929,7 @@ class TestOldViewOps(TestCase):
                     # To verify both tensors has the same memory address
                     self.assertIsNot(nc_flat._base, src)
                     # To check the return value
-                    self.assertTrue(nc_flat._base == None)
+                    self.assertTrue(nc_flat._base is None)
                     self.assertTrue(nc_flat.is_contiguous())
 
         # Test that flatten returns 1-dim tensor when given a 0-dim tensor
