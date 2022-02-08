@@ -11,15 +11,15 @@ namespace sparse {
 
 namespace {
 
-  template <typename scalar_t, typename MKL_Complex>
-  MKL_Complex to_mkl_complex(c10::complex<scalar_t> scalar) {
-    MKL_Complex mkl_scalar;
-    mkl_scalar.real = scalar.real();
-    mkl_scalar.imag = scalar.imag();
-    return mkl_scalar;
-  }
-
+template <typename scalar_t, typename MKL_Complex>
+MKL_Complex to_mkl_complex(c10::complex<scalar_t> scalar) {
+  MKL_Complex mkl_scalar;
+  mkl_scalar.real = scalar.real();
+  mkl_scalar.imag = scalar.imag();
+  return mkl_scalar;
 }
+
+} // namespace
 
 // There are link errors when compiling with create_csr functions on Windows.
 // See https://github.com/pytorch/pytorch/pull/50937#issuecomment-779272492
@@ -55,6 +55,65 @@ void create_csr<c10::complex<double>>(
       indexing,
       rows,
       cols,
+      rows_start,
+      rows_end,
+      col_indx,
+      reinterpret_cast<MKL_Complex16*>(values)));
+}
+
+template <>
+void create_bsr<float>(MKL_SPARSE_CREATE_BSR_ARGTYPES(float)) {
+  TORCH_MKLSPARSE_CHECK(mkl_sparse_s_create_bsr(
+      A,
+      indexing,
+      block_layout,
+      rows,
+      cols,
+      block_size,
+      rows_start,
+      rows_end,
+      col_indx,
+      values));
+}
+template <>
+void create_bsr<double>(MKL_SPARSE_CREATE_BSR_ARGTYPES(double)) {
+  TORCH_MKLSPARSE_CHECK(mkl_sparse_d_create_bsr(
+      A,
+      indexing,
+      block_layout,
+      rows,
+      cols,
+      block_size,
+      rows_start,
+      rows_end,
+      col_indx,
+      values));
+}
+template <>
+void create_bsr<c10::complex<float>>(
+    MKL_SPARSE_CREATE_BSR_ARGTYPES(c10::complex<float>)) {
+  TORCH_MKLSPARSE_CHECK(mkl_sparse_c_create_bsr(
+      A,
+      indexing,
+      block_layout,
+      rows,
+      cols,
+      block_size,
+      rows_start,
+      rows_end,
+      col_indx,
+      reinterpret_cast<MKL_Complex8*>(values)));
+}
+template <>
+void create_bsr<c10::complex<double>>(
+    MKL_SPARSE_CREATE_BSR_ARGTYPES(c10::complex<double>)) {
+  TORCH_MKLSPARSE_CHECK(mkl_sparse_z_create_bsr(
+      A,
+      indexing,
+      block_layout,
+      rows,
+      cols,
+      block_size,
       rows_start,
       rows_end,
       col_indx,

@@ -1,4 +1,4 @@
-#include <ATen/CUDAGeneratorImpl.h>
+#include <ATen/cuda/CUDAGeneratorImpl.h>
 #include <c10/util/irange.h>
 
 // Extract size and strides
@@ -63,9 +63,9 @@ std::unique_ptr<TensorArgAbstract> getTensorArg(int nDims) {
     default:
       TORCH_INTERNAL_ASSERT(
           false,
-          "Tried to gerneate a tensor to run a generated kernel with ",
+          "Tried to generate a tensor to run a generated kernel with ",
           nDims,
-          " dimensions, however it must be a 1-8 dimensional tensor.");
+          " dimensions, however it must be a size 0 to 8 dimensional tensor.");
   }
   return nullptr;
 }

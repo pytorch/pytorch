@@ -4,13 +4,13 @@
 #include <c10/core/ScalarType.h>
 #include <c10/util/Exception.h>
 #include <torch/csrc/autograd/grad_mode.h>
+#include <torch/csrc/jit/mobile/compatibility/runtime_compatibility.h>
 #include <torch/csrc/jit/mobile/model_tracer/KernelDTypeTracer.h>
 #include <torch/csrc/jit/mobile/model_tracer/MobileModelRunner.h>
 #include <torch/csrc/jit/mobile/model_tracer/OperatorCallTracer.h>
 #include <torch/csrc/jit/mobile/model_tracer/TensorUtils.h>
 #include <torch/csrc/jit/mobile/model_tracer/TracerRunner.h>
 #include <torch/csrc/jit/mobile/parse_operators.h>
-#include <torch/csrc/jit/mobile/runtime_compatibility.h>
 #include <torch/csrc/jit/runtime/operator.h>
 #include <torch/script.h>
 
@@ -54,6 +54,10 @@ void call_setup_methods() {
   at::ones({2, 2});
   at::Tensor t1 = at::empty({7, 7});
   at::Tensor t2 = t1.fill_(3);
+  at::Tensor t3 = t1.new_empty_strided(
+      {2, 3},
+      {3,
+       1}); // TODO investigate how this is different from normal empty_strided
   at::narrow(t2, 1, 0, 1);
   at::eq(t1, t2);
   const volatile bool nz = at::native::is_nonzero(at::zeros({1}));
@@ -78,8 +82,9 @@ void call_setup_methods() {
       at::kLong};
   for (const auto dtype : all_dtypes_for_copy) {
     auto tensor1 = at::empty({10}, dtype);
-    tensor1.copy_(at::zeros({10}, at::kFloat));
     tensor1.copy_(at::zeros({10}, at::kBool));
+    tensor1.copy_(at::zeros({10}, at::kFloat));
+    tensor1.copy_(at::zeros({10}, at::kInt));
   }
 
   torch::zeros({0, 0}, torch::ScalarType::Float);
@@ -154,7 +159,14 @@ void recordCustomClassesFromOpSchemas(
     if (type_name.find("__torch__") != std::string::npos) {
       // The name of a customClassType here is its fully qualified name, but
       // in registration only the class name is used so only record that
-      loaded_classes.insert(type_name.substr(type_name.find_last_of('.') + 1));
+      auto class_name = type_name.substr(type_name.find_last_of('.') + 1);
+      // Function schemas can include other type indicators such as [] so we
+      // need to trim to just alphanumeric + '_' characters as well
+      class_name = class_name.substr(
+          0,
+          class_name.find_first_not_of(
+              "aAbBcCdDeEfFgGhHiIjJkKlLmMnNoOpPqQrRsStTuUvVwWxXyYzZ_1234567890"));
+      loaded_classes.insert(class_name);
     }
   };
 
