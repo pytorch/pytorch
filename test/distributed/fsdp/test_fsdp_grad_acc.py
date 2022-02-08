@@ -2,8 +2,8 @@
 
 import itertools
 import sys
-from unittest.mock import patch
 from typing import List, Tuple
+from unittest.mock import patch
 
 import torch
 from torch import distributed as dist

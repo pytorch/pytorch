@@ -902,7 +902,7 @@ class FullyShardedDataParallel(nn.Module):
                 "FSDP only works with gradients that don't require gradients"
             )
 
-        self._free_full_params([param])
+        self._free_full_params(cast(List[FlatParameter], [param]))
 
         # Switch to local shard after backward.
         self._use_param_local_shard(cast(List[FlatParameter], [param]))
