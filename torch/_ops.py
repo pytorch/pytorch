@@ -99,7 +99,14 @@ class OpOverloadPacket:
         if key == '__file__':
             return 'torch.ops'
 
-        if key is '__name__':
+        # this list of keys is maintained to ensure that query for attributes
+        # that does not exist on opoverloadpacket but instead exists on the
+        # self._op object does not call `_get_operation_overload` (which is an expensive operation)
+        # more than once. This is done to prevent any potential slowdown. This list can be extended
+        # if there exists other attributes like `__name__` that only exist on self._op and not on the
+        # opoverloadpacket.
+        no_opoverloadpacket_attributes = ['__name__']
+        if key in no_opoverloadpacket_attributes:
             return getattr(self._op, key)
 
         try:
@@ -112,14 +119,14 @@ class OpOverloadPacket:
             setattr(self, key, overload)
             return overload
         except RuntimeError:
-            raise AttributeError("'{}' object has no attribute '{}'".format(str(self), key)) from None
-        #     try:
-        #         # This is added to maintain bc in case the user queries an attribute that exists on `self._op`
-        #         # which used to be returned before instead of the OpOverloadPacket
-        #         out = getattr(self._op, key)
-        #         return out
-        #     except AttributeError:
-        #         raise AttributeError("'{}' object has no attribute '{}'".format(str(self), key)) from None
+            try:
+                # This is added to maintain bc in case the user queries an attribute that exists on `self._op`
+                # which used to be returned before instead of the OpOverloadPacket
+                out = getattr(self._op, key)
+                no_opoverloadpacket_attributes.append(key)
+                return out
+            except AttributeError:
+                raise AttributeError("'{}' object has no attribute '{}'".format(str(self), key)) from None
 
     def __call__(self, *args, **kwargs):
         # overloading __call__ to ensure torch.ops.foo.bar() is still callable from JIT
