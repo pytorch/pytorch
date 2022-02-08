@@ -591,6 +591,7 @@ Torch functions specific to sparse Tensors
     sparse_csr_tensor
     sparse.sum
     sparse.addmm
+    sparse.sampled_addmm
     sparse.mm
     sspaddmm
     hspmm
