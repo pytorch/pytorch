@@ -61,8 +61,7 @@ signature.
 - `int`. Think about this like a Python int. This is translated into a C++ argument of type `int64_t`.
 - `float`. Think about this like a Python `float`. It is translated into a C++ argument of type `double`.
 - `bool`
-- `str`.  It is translated into a C++ argument of type `std::string`
-  (but we should fix this, see https://github.com/pytorch/pytorch/issues/53546)
+- `str`.  It is translated into a C++ argument of non-owning type `c10::string_view`
 - `Scalar`. `Scalar` supports binding to any numerical types from Python, including integral types,
   floating point types, and zero dimensional tensors. `int` and `float` bind to the corresponding Python
   numerical types. However, you probably don't want to use `Scalar`;
@@ -412,9 +411,9 @@ By default, ATen code generation will generate device check,
 which will ensure all the tensor parameters passed to kernel are
 on the same device.
 
-However, in some cases, checking the device is unncessary, becuase,
+However, in some cases, checking the device is unncessary, because,
 e.g., you call a function allows to work on multiple devices.
-In that case, code generation of the device check can e disabled by adding
+In that case, code generation of the device check can be disabled by adding
 `device_check: NoCheck` to your function definition.
 
 ### `manual_kernel_registration`
@@ -517,7 +516,7 @@ Here're steps to follow to decide the right dispatch keyword:
 
       You're done. This op will be called in inference for all backends.
 
-      Note: to support training you're required to add a autograd formula,
+      Note: to support training you're required to add an autograd formula,
       or it'll error out in backward pass when calling with a Tensor has requires_grad=True.
 
     - No: ops in this category are mainly using `_out` boilerplate where its out version doesn't have a derivative
@@ -543,7 +542,7 @@ Here're steps to follow to decide the right dispatch keyword:
       Note: current plan on record for ops using this boilerplate is to replace `at::` with `at::native` in
       the implementations and add dispatch section with device keywords instead.
 3. Validate the computed dispatch table matches what you want. You can use `PythonDispatcher` provided in
-[torch/_python_dispatcher.py](https://github.com/pytorch/pytorch/blob/master/torch/_python_dispacher.py).
+[torch/_python_dispatcher.py](https://github.com/pytorch/pytorch/blob/master/torch/_python_dispatcher.py).
 It shows for a certain operator, what the computed dispatch table looks like after your registrations.
 
     ```

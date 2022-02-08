@@ -3,6 +3,7 @@
 
 #include "caffe2/core/context.h"
 #include "caffe2/core/operator.h"
+#include <c10/util/irange.h>
 
 namespace caffe2 {
 
@@ -44,7 +45,7 @@ static void check_indexarray_range(
     IndexType indexing_axis_dim,
     bool wrap_indices) {
   //
-  for (auto i = 0; i < n; ++i) {
+  for (const auto i : c10::irange(n)) {
     auto idx = indices[i];
     if (wrap_indices && idx < 0) {
       idx = idx + indexing_axis_dim;
@@ -114,7 +115,7 @@ static bool gather_impl(
   auto N = indices.numel();
   if (match_outer) {
     CAFFE_ENFORCE_GE(axis, 1, "Axis should be at least 1");
-    for (auto i = 0; i < axis; i++) {
+    for (const auto i : c10::irange(axis)) {
       CAFFE_ENFORCE_EQ(
           data.size(i),
           indices.size(i),
@@ -129,12 +130,12 @@ static bool gather_impl(
 
   // Special-case single-float copy for efficiency
   if (data.template IsType<float>() && block_size == 1) {
-    for (auto batch = 0; batch < outer_dims_product; ++batch) {
+    for (const auto batch : c10::irange(outer_dims_product)) {
       const float* src_floats =
           (const float*)(src_base + batch * src_batch_bytesize);
       float* dst_floats = (float*)(out + batch * gathered_batch_bytesize);
 
-      for (auto i = 0; i < N; ++i) {
+      for (const auto i : c10::irange(N)) {
         auto idx = idxs[i];
         if (match_outer) {
           idx = idxs[batch * idx_inner_dims_product + i];
@@ -148,8 +149,8 @@ static bool gather_impl(
   } else {
     // outer_dims_product specifies how many times we repeat inner dimensions,
     // so we just iterate over it to cover all outer dimensions.
-    for (auto batch = 0; batch < outer_dims_product; ++batch) {
-      for (auto i = 0; i < N; ++i) {
+    for (const auto batch : c10::irange(outer_dims_product)) {
+      for (const auto i : c10::irange(N)) {
         auto idx = idxs[i];
         if (match_outer) {
           idx = idxs[batch * idx_inner_dims_product + i];

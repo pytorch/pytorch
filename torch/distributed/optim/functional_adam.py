@@ -23,6 +23,7 @@ class _FunctionalAdam(object):
         eps: float = 1e-8,
         weight_decay: float = 0.0,
         amsgrad: bool = False,
+        maximize: bool = False,
         _allow_empty_param_list: bool = False,
     ):
         if not 0.0 <= lr:
@@ -44,6 +45,7 @@ class _FunctionalAdam(object):
             "weight_decay": weight_decay,
         }
         self.amsgrad = amsgrad
+        self.maximize = maximize
         self.state = torch.jit.annotate(Dict[torch.Tensor, Dict[str, torch.Tensor]], {})
 
         if len(params) == 0 and not _allow_empty_param_list:
@@ -96,6 +98,7 @@ class _FunctionalAdam(object):
                    max_exp_avg_sqs,
                    state_steps,
                    amsgrad=self.amsgrad,
+                   maximize=self.maximize,
                    beta1=self.defaults['beta1'],
                    beta2=self.defaults['beta2'],
                    lr=self.defaults['lr'],
@@ -156,6 +159,7 @@ class _FunctionalAdam(object):
                    max_exp_avg_sqs,
                    state_steps,
                    amsgrad=self.amsgrad,
+                   maximize=self.maximize,
                    beta1=self.defaults['beta1'],
                    beta2=self.defaults['beta2'],
                    lr=self.defaults['lr'],
