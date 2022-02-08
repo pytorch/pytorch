@@ -41,7 +41,7 @@ std::atomic<uint64_t> next_thread_id_ {0};
 thread_local uint64_t current_thread_id_ = 0;
 
 // Low probability constant
-static const double kLowProb = 0.001;
+static constexpr double kLowProb = 0.001;
 struct CoinflipTLS {
   int tries_left_;
   std::mt19937 genGeo_;
@@ -71,6 +71,66 @@ int sample_geometric() {
 double sample_zero_one() {
   return coinflip_tls().distZeroOne_(coinflip_tls().genZeroOne_);
 }
+
+struct GlobalRecordFunctionCallbacksEntry {
+  RecordFunctionCallback callback;
+ private:
+  std::atomic<bool> enabled;
+ public:
+  CallbackHandle handle;
+
+  GlobalRecordFunctionCallbacksEntry(RecordFunctionCallback&& cb, CallbackHandle h)
+      : callback(std::move(cb)), enabled(true), handle(h) {}
+
+  // Copying is fine despite std::atomic<bool> not being supposed to
+  // have a copy/move constructor: adding & removing callbacks is
+  // already not thread-safe.
+  GlobalRecordFunctionCallbacksEntry(
+      const GlobalRecordFunctionCallbacksEntry& rhs)
+      : callback(rhs.callback), enabled(rhs.enabled.load()), handle(rhs.handle) {}
+
+  GlobalRecordFunctionCallbacksEntry& operator=(const GlobalRecordFunctionCallbacksEntry& rhs) {
+    callback = rhs.callback;
+    enabled = rhs.enabled.load();
+    handle = rhs.handle;
+    return *this;
+  }
+
+  GlobalRecordFunctionCallbacksEntry(
+      GlobalRecordFunctionCallbacksEntry&& rhs) noexcept
+      : callback(std::move(rhs.callback)), enabled(rhs.enabled.load()), handle(rhs.handle) {}
+
+  GlobalRecordFunctionCallbacksEntry& operator=(GlobalRecordFunctionCallbacksEntry&& rhs) noexcept {
+    callback = std::move(rhs.callback);
+    enabled = rhs.enabled.load();
+    handle = rhs.handle;
+    return *this;
+  }
+
+  // Returns true if the status changed, false otherwise.
+  bool disable() {
+    bool expected = true;
+    // NOTE: we use sequentially consistent access here and in
+    // enable() because updating further atomic flags depends on this
+    // operation.
+    return enabled.compare_exchange_strong(expected, false);
+  }
+
+  // Returns true if the status changed, false otherwise.
+  bool enable() {
+    bool expected = false;
+    return enabled.compare_exchange_strong(expected, true);
+  }
+
+  // Read the flag. Note that it is neither necessary nor correct to
+  // check this before calling enable() or disable().
+  bool isEnabled() const {
+    return enabled.load(std::memory_order_relaxed);
+  }
+};
+
+using GlobalRecordFunctionCallbacks =
+  c10::SmallVector<GlobalRecordFunctionCallbacksEntry, kSoftLimitCallbacks>;
 
 } // namespace
 
@@ -246,10 +306,11 @@ class CallbackManager {
 
     // otherwise potentially do the sampling
     double sampling_prob = cb.sampling_prob_;
+    constexpr double kLowProbInv = 1 / kLowProb;
     if (pre_sampled) {
       // adjust the sampling rate to account for kLowProb pre-sampling of
       // the RecordFunction
-      sampling_prob /= kLowProb;
+      sampling_prob *= kLowProbInv;
     }
 
     if (sampling_prob < 1.0) {
@@ -261,7 +322,7 @@ class CallbackManager {
       if (sampling_prob < kLowProb) {
         if (coinflip_tls().tries_left_ == 0) {
           coinflip_tls().tries_left_ = sample_geometric();
-          return (sample_zero_one() < sampling_prob / kLowProb);
+          return (sample_zero_one() < sampling_prob * kLowProbInv);
         } else {
           --coinflip_tls().tries_left_;
           return false;
