@@ -46,8 +46,8 @@ static void setupLayerNorm(Fusion* fusion, DataType dtype) {
 
   auto output = layer_norm_results.output;
 
-  if (dtype == DataType::Half) {
-    output = castOp(DataType::Half, output);
+  if (dtype != DataType::Float) {
+    output = castOp(dtype, output);
   }
 
   fusion->addOutput(output);

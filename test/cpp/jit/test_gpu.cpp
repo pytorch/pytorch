@@ -8727,6 +8727,84 @@ TEST_F(NVFuserTest, FusionMagicSchedulerLayerNormBackward_CUDA) {
       __FILE__);
 }
 
+TEST_F(NVFuserTest, FusionMagicSchedulerRMSNormBackward_CUDA) {
+  std::unique_ptr<Fusion> fusion_ptr = std::make_unique<Fusion>();
+  Fusion& fusion = *fusion_ptr.get();
+  FusionGuard fg(&fusion);
+  const size_t NORM_SIZE = 1024;
+  std::vector<int64_t> shape{8, 56, NORM_SIZE};
+  std::vector<int64_t> norm_shape{NORM_SIZE};
+
+  const size_t kM = shape.size();
+  const size_t kN = norm_shape.size();
+  const size_t kOuterNumDims = kM - kN;
+
+  std::vector<int64_t> outer_shape;
+  for (const auto idx : c10::irange(kOuterNumDims)) {
+    outer_shape.push_back(shape[idx]);
+  }
+  for (const auto idx : c10::irange(kOuterNumDims, kM)) {
+    outer_shape.push_back(1);
+  }
+
+  auto grad_out = makeContigTensor(shape.size());
+  auto input = makeContigTensor(shape.size());
+  auto rstd = makeConcreteTensor(outer_shape);
+  auto weight = makeContigTensor(norm_shape.size());
+  fusion.addInput(grad_out);
+  fusion.addInput(input);
+  fusion.addInput(rstd);
+  fusion.addInput(weight);
+
+  auto grads = rms_norm_backward(
+      grad_out, input, norm_shape, rstd, weight, {true, true});
+
+  fusion.addOutput(grads.grad_input);
+  fusion.addOutput(grads.grad_weight);
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::Tensor aten_grad_out = at::randn(shape, options);
+  at::Tensor aten_input = at::randn(shape, options);
+  at::Tensor aten_weight = at::randn(norm_shape, options);
+  auto at_weight = c10::optional<at::Tensor>(aten_weight);
+
+  const float kEps = 1e-6;
+  auto pow2 = at::pow(aten_input, 2);
+  auto sum = at::sum(pow2, -1, true);
+  auto var = at::mul(sum, 1.0 / NORM_SIZE);
+  auto aten_rstd = at::pow(at::add(var, kEps), -0.5);
+
+  FusionExecutorCache fec(std::move(fusion_ptr));
+  std::vector<IValue> aten_inputs = {
+      aten_grad_out, aten_input, aten_rstd, aten_weight};
+  auto cg_outputs = fec.runFusionWithInputs(aten_inputs);
+
+  auto in_mul_rstd = at::mul(aten_input, aten_rstd);
+  auto grad_out_mul = at::mul(aten_grad_out, in_mul_rstd);
+  auto aten_grad_weight = at::sum(grad_out_mul, c10::IntArrayRef{0, 1});
+  auto sum_loss1 = at::sum(at::mul(aten_grad_out, aten_weight), -1, true);
+  auto sum_loss2 = at::sum(
+      at::mul(
+          at::mul(at::mul(aten_grad_out, aten_weight), aten_input), aten_rstd),
+      -1,
+      true);
+
+  const float fH = NORM_SIZE;
+  auto term1 = at::mul(aten_rstd, 1.0 / fH);
+  auto aten_grad_input = at::mul(at::mul(aten_grad_out, fH), aten_weight);
+  aten_grad_input = at::sub(aten_grad_input, sum_loss1);
+  aten_grad_input = at::sub(
+      aten_grad_input, at::mul(at::mul(aten_input, aten_rstd), sum_loss2));
+  aten_grad_input = at::mul(aten_grad_input, term1);
+  testValidate(
+      &fusion,
+      cg_outputs,
+      aten_inputs,
+      {aten_grad_input, aten_grad_weight},
+      __LINE__,
+      __FILE__);
+}
+
 TEST_F(NVFuserTest, FusionMagicSchedulerLayerNormalization_CUDA) {
   std::unique_ptr<Fusion> fusion_ptr = std::make_unique<Fusion>();
   Fusion& fusion = *fusion_ptr.get();
@@ -8759,12 +8837,8 @@ TEST_F(NVFuserTest, FusionMagicSchedulerLayerNormalization_CUDA) {
   auto reduction_params = getPersistentHeuristics(&fusion, {aten_input});
   TORCH_CHECK(reduction_params, "Reduction schedule was not generated!");
 
-  schedulePersistentKernel(&fusion, reduction_params.value());
-  auto lparams = reduction_params.value().lparams;
-
-  torch::jit::fuser::cuda::FusionExecutor fe;
-  fe.compileFusion(&fusion, {aten_input}, lparams);
-  auto cg_outputs = fe.runFusion({aten_input}, lparams);
+  FusionExecutorCache fec(std::move(fusion_ptr));
+  auto cg_outputs = fec.runFusionWithInputs({aten_input});
 
   testValidate(
       &fusion,
@@ -8775,8 +8849,54 @@ TEST_F(NVFuserTest, FusionMagicSchedulerLayerNormalization_CUDA) {
        std::get<2>(aten_outputs)},
       __LINE__,
       __FILE__,
-      "",
-      lparams);
+      "");
+}
+
+TEST_F(NVFuserTest, FusionMagicSchedulerRMSNormalization_CUDA) {
+  std::unique_ptr<Fusion> fusion_ptr = std::make_unique<Fusion>();
+  Fusion& fusion = *fusion_ptr.get();
+  FusionGuard fg(&fusion);
+
+  size_t NORM_SIZE = 1024;
+  const float kEps = 1e-6;
+  Double* eps_ptr = IrBuilder::create<Double>(kEps);
+
+  std::vector<int64_t> input_shape{8, 56, NORM_SIZE};
+  std::vector<int64_t> norm_shape{NORM_SIZE};
+
+  auto input = makeContigTensor(input_shape.size());
+  fusion.addInput(input);
+  auto result = rms_norm(input, norm_shape, nullptr, eps_ptr);
+
+  fusion.addOutput(result.output);
+  fusion.addOutput(result.invstd);
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::Tensor aten_input = at::randn(input_shape, options);
+  c10::optional<at::Tensor> aten_weight = c10::nullopt;
+
+  auto pow2 = at::pow(aten_input, 2);
+
+  auto sum = at::sum(pow2, -1, true);
+  auto var = at::mul(sum, 1.0 / NORM_SIZE);
+  auto invstd = at::pow(at::add(var, kEps), -0.5);
+  auto output = at::mul(aten_input, invstd);
+  //// Check reduction axis is same for all reductions
+  //// Generate Launch Parameters
+  auto reduction_params = getPersistentHeuristics(&fusion, {aten_input});
+  TORCH_CHECK(reduction_params, "Reduction schedule was not generated!");
+
+  FusionExecutorCache fec(std::move(fusion_ptr));
+  auto cg_outputs = fec.runFusionWithInputs({aten_input});
+
+  testValidate(
+      &fusion,
+      cg_outputs,
+      {aten_input},
+      {output, invstd},
+      __LINE__,
+      __FILE__,
+      "");
 }
 
 TEST_F(NVFuserTest, FusionMagicSchedulerBatchNormalization_CUDA) {
