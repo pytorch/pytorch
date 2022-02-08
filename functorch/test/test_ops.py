@@ -1040,7 +1040,6 @@ class TestDecompositionOpInfo(TestCase):
                 rtol, atol = tol_table[(b.dtype, op)]
             else:
                 rtol, atol = _getDefaultRtolAndAtol(a.dtype, b.dtype)
-            atol_diff = (a - b).abs().max()
             if not torch.allclose(a, b, rtol=rtol, atol=atol):
                 atol_diff = (a - b).abs().max()
                 rtol_diff = ((a - b).abs()/b.abs()).nan_to_num(0).max()
