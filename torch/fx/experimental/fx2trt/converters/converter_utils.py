@@ -359,10 +359,25 @@ def add_binary_elementwise_layer(
     if isinstance(rhs_val, TRTTensor):
         dtype = torch_dtype_from_trt(rhs_val.dtype)
         is_rhs_trt_tensor = True
+
     if not is_lhs_trt_tensor and not is_rhs_trt_tensor:
         warnings.warn(f"Both operands of the binary elementwise op {name} "
                       "are constant. In this case, please consider constant fold the model first.")
         return get_python_op_from_trt_elementwise_op(op_type)(lhs_val, rhs_val)
+
+    # When lhs is scalar, and rhs has shape [1,], then currently the assert
+    # will fail because lhs shape has fewer dimensions than rhs shape.  This
+    # happens when using implicit batch dimension, when we removed the 1st
+    # dimension from input tensor, causing it to have shape [] - a scalar.  We
+    # fix it by reducing the rhs constant with a squeeze_left, so it becomes a
+    # scalar too. More generally, we squeeze_left on input if it's a constant
+    # tensor. This is safe because broadcast will pad dimensions on the left
+    # (prepend) to make lhs and rhs shape compatible.
+    if network.has_implicit_batch_dimension:
+        if isinstance(lhs_val, torch.Tensor):
+            lhs_val = squeeze_left(lhs_val)
+        if isinstance(rhs_val, torch.Tensor):
+            rhs_val = squeeze_left(rhs_val)
 
     lhs_val = get_trt_tensor(network, lhs_val, f"{name}_lhs", dtype)
     rhs_val = get_trt_tensor(network, rhs_val, f"{name}_rhs", dtype)
@@ -380,6 +395,17 @@ def add_binary_elementwise_layer(
     layer = network.add_elementwise(lhs_val, rhs_val, op_type)
     set_layer_name(layer, target, name)
     return layer.get_output(0)
+
+
+def squeeze_left(const: torch.Tensor):
+    """
+    Squeeze the size-1 dimensions on the left side of the shape tuple.
+    PyTorch's `squeeze()` doesn't support passing multiple `dim`s at once, so
+    we do it iteratively.
+    """
+    while len(const.shape) > 0 and const.shape[0] == 1:
+        const = const.squeeze(dim=0)
+    return const
 
 
 def add_unary_layer(
