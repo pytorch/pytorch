@@ -13,7 +13,7 @@ from typing_extensions import Literal
 from torch._six import inf
 
 from torch.types import _int, _float, _bool, _dtype, _device, _qscheme, _size, _layout, Device, Number, Storage
-from torch.storage import TypedStorage
+from torch.storage import _TypedStorage
 
 import builtins
 

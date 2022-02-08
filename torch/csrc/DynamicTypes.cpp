@@ -66,7 +66,7 @@ PyTypeObject* getPyTypeObject(const at::Storage& storage) {
       scalarType);
   auto it = attype_to_py_storage_type.find(attype);
   TORCH_INTERNAL_ASSERT(it != attype_to_py_storage_type.end(),
-        "Failed to get the Python type of `UntypedStorage`.");
+        "Failed to get the Python type of `_UntypedStorage`.");
   return it->second;
 }
 } // namespace
@@ -115,10 +115,10 @@ PyTypeObject* loadTypedStorageTypeObject() {
   PyObject* storage_module = PyImport_ImportModule("torch.storage");
   TORCH_INTERNAL_ASSERT(storage_module && PyModule_Check(storage_module));
 
-  PyObject* typed_storage_obj = PyObject_GetAttrString(storage_module, "TypedStorage");
+  PyObject* typed_storage_obj = PyObject_GetAttrString(storage_module, "_TypedStorage");
   TORCH_INTERNAL_ASSERT(typed_storage_obj && PyType_Check(typed_storage_obj));
   return reinterpret_cast<PyTypeObject*>(
-      PyObject_GetAttrString(storage_module, "TypedStorage"));
+      PyObject_GetAttrString(storage_module, "_TypedStorage"));
 }
 
 PyTypeObject* getTypedStorageTypeObject() {
@@ -169,7 +169,7 @@ at::Storage createStorageGetType(PyObject* obj, at::ScalarType& scalar_type, boo
     }
     if (obj_type == storage_type) {
       auto& type = *item.second;
-      // UntypedStorage should always be interpreted with byte dtype
+      // _UntypedStorage should always be interpreted with byte dtype
       scalar_type = at::kByte;
       return type.unsafeStorageFromTH(((THPVoidStorage*)obj)->cdata, true);
     }
