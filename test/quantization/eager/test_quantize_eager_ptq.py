@@ -106,7 +106,7 @@ class TestQuantizeEagerOps(QuantizationTestCase):
                 x = self.dequant(x)
                 return x
 
-        data = torch.randn(1, 1, 10, 10, dtype=torch.float)
+        data = torch.randn(16, 1, 10, 10, dtype=torch.float)
         original_m = M()
         original_ref_m = RefM()
 
