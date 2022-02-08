@@ -14,6 +14,32 @@ from ..utils import _parent_name, check_node
 from typing import Dict, Tuple, Type
 from torch.fx import Node
 
+
+def is_fixed_qparams_node(node, modules):
+    func_list = [
+        torch.nn.functional.hardsigmoid,
+        torch.nn.functional.sigmoid,
+        torch.sigmoid,
+        torch.tanh,
+    ]
+    method_list = [
+        'hardsigmoid',
+        'hardsigmoid_',
+        'sigmoid',
+        'sigmoid_',
+        'tanh',
+        'tanh_',
+    ]
+    module_type_list = [
+        torch.nn.Hardsigmoid,
+        torch.nn.Sigmoid,
+        torch.nn.Tanh,
+    ]
+    is_call_function = node.op == "call_function" and node.target in func_list
+    is_call_method = node.op == "call_method" and node.target in method_list
+    is_call_module = node.op == "call_module" and type(modules[str(node.target)]) in module_type_list
+    return is_call_function, is_call_method, is_call_module
+
 # Mapping from reference module class to the replacement quantized module class for lowering
 LOWER_MODULE_MAP: Dict[Type[nn.Module], Type[ReferenceableQuantizedModule]] = {
     nnqr.Linear: nnq.Linear,
@@ -101,13 +127,19 @@ def special_pattern_replacement(model: QuantizedGraphModule) -> QuantizedGraphMo
     nodes = list(model.graph.nodes)
     for n in model.graph.nodes:
         q_node = n
-        if not (q_node.target == torch.quantize_per_tensor or \
-           (q_node.op == "call_method" and q_node.target == "to" and q_node.args[1] == torch.float16)):
+        is_quantize = q_node.target == torch.quantize_per_tensor
+        is_to_fp16 = q_node.op == "call_method" and q_node.target == "to" and q_node.args[1] == torch.float16
+        if not (is_quantize or is_to_fp16):
             continue
         ref_node = q_node.args[0]
         # get output scale/zero_point/dtype from the quantize node
         # ref_node, scale_node, zero_point_node, dtype = q_node.args
         # TODO: add safety checks that users for the ref_node and dq_node needs to be one
+
+        is_call_function, is_call_method, is_call_module = is_fixed_qparams_node(ref_node, modules)
+        if is_to_fp16 and (is_call_function or is_call_method or is_call_module):
+            # TODO: add a warning or error out here? (bc-breaking if error out)
+            continue
 
         is_call_function, is_call_method, is_call_module = check_node(ref_node, modules)
         if not (is_call_module or is_call_function or is_call_method):
