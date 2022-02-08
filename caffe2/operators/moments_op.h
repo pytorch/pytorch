@@ -1,12 +1,13 @@
 #ifndef CAFFE2_OPERATORS_MOMENTS_OP_H_
 #define CAFFE2_OPERATORS_MOMENTS_OP_H_
 
-#include <algorithm>
-#include <vector>
-
 #include "caffe2/core/context.h"
 #include "caffe2/core/operator.h"
 #include "caffe2/utils/math.h"
+#include <c10/util/irange.h>
+
+#include <algorithm>
+#include <vector>
 
 namespace caffe2 {
 
@@ -45,7 +46,7 @@ class MomentsOp final : public Operator<Context> {
     std::vector<std::int64_t> output_dims;
     output_dims.reserve(ndim);
     std::size_t cur_axis = 0;
-    for (int i = 0; i < ndim; ++i) {
+    for (const auto i : c10::irange(ndim)) {
       if (cur_axis < axes_.size() && i == axes_[cur_axis]) {
         if (keep_dims_) {
           output_dims.push_back(1);

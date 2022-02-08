@@ -1,6 +1,6 @@
 #pragma once
 
-#include <ATen/CUDAGeneratorImpl.h>
+#include <ATen/cuda/CUDAGeneratorImpl.h>
 #include <ATen/cuda/CUDAEvent.h>
 #include <ATen/cuda/detail/UnpackRaw.cuh>
 #include <ATen/cuda/detail/CUDAHooks.h>

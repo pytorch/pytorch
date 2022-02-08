@@ -52,6 +52,10 @@ std::shared_ptr<OperatorSet> nn_ops_first_input_preserving() {
       "aten::upsample_nearest3d(Tensor self, int[] output_size, float? scales_d, float? scales_h, float? scales_w) -> Tensor",
       "aten::upsample_trilinear3d(Tensor self, int[] output_size, bool align_corners, float? scales_d, float? scales_h, float? scales_w) -> Tensor",
       "aten::prelu(Tensor self, Tensor weight) -> Tensor",
+
+      // Added because Hardswish is really hard to convert to metatensors
+      "aten::hardswish(Tensor self) -> Tensor",
+      "aten::hardswish_(Tensor self) -> Tensor",
   });
   return ops;
 };
