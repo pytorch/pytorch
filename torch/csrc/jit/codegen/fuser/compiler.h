@@ -1,7 +1,7 @@
 #pragma once
 
 #include <ATen/core/stack.h>
-#include <torch/csrc/WindowsTorchApiMacro.h>
+#include <torch/csrc/Export.h>
 #include <torch/csrc/jit/codegen/fuser/arg_spec.h>
 #include <torch/csrc/jit/codegen/fuser/fused_kernel.h>
 #include <torch/csrc/jit/codegen/fuser/interface.h>
