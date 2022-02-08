@@ -713,42 +713,36 @@ TEST(FlatbufferTest, DefaultArgsConv) {
 
   std::vector<torch::jit::IValue> inputs;
 
-//  Module m("m");
-//  m.register_parameter("weight", torch::ones({20, 1, 5, 5}), false);
-//  m.register_parameter("bias", torch::ones({20}), false);
-//  m.define(R"(
-//    def forward(self, input):
-//      return torch.conv2d(input, self.weight, self.bias, [1, 1], [0, 0], [1, 1], 1)
-//  )");
+  Module m("m");
+  m.register_parameter("weight", torch::ones({20, 1, 5, 5}), false);
+  m.register_parameter("bias", torch::ones({20}), false);
+  m.define(R"(
+    def forward(self, input):
+      return torch.conv2d(input, self.weight, self.bias, [1, 1], [0, 0], [1, 1], 1)
+  )");
 
-  Module m = torch::jit::load("/Users/pavithran/Downloads/m_model.ptl");
-  std::stringstream ss;
-  m._save_for_mobile(ss);
-  load(ss);
+  inputs.emplace_back(torch::ones({1, 1, 28, 28}));
 
-//  inputs.emplace_back(torch::ones({1, 1, 28, 28}));
-
-//  auto outputref = m.forward(inputs).toTensor();
+  auto outputref = m.forward(inputs).toTensor();
 
   CompilationOptions options;
   mobile::Module bc = jitModuleToMobile(m, options);
-//  IValue res;
-//  for (int i = 0; i < 1; ++i) {
-//    res = bc.get_method("forward")(inputs);
-//  }
-//  auto output = res.toTensor();
-//  AT_ASSERT(outputref.dim() == output.dim());
-//  AT_ASSERT(output.equal(outputref));
-
+  IValue res;
+  for (int i = 0; i < 1; ++i) {
+    res = bc.get_method("forward")(inputs);
+  }
+  auto output = res.toTensor();
+  AT_ASSERT(outputref.dim() == output.dim());
+  AT_ASSERT(output.equal(outputref));
 
   auto buff = save_mobile_module_to_bytes(bc);
   mobile::Module bc2 = parse_mobile_module(buff.data(), buff.size());
-//  for (int i = 0; i < 1; ++i) {
-//    res = bc2.get_method("forward")(inputs);
-//  }
-//  output = res.toTensor();
-//  AT_ASSERT(outputref.dim() == output.dim());
-//  AT_ASSERT(output.equal(outputref));
+  for (int i = 0; i < 1; ++i) {
+    res = bc2.get_method("forward")(inputs);
+  }
+  output = res.toTensor();
+  AT_ASSERT(outputref.dim() == output.dim());
+  AT_ASSERT(output.equal(outputref));
 }
 
 namespace {
