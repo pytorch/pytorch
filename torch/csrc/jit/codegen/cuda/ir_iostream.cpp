@@ -146,33 +146,29 @@ void IrPrinter::handle(const TensorDomain* td) {
 }
 
 void IrPrinter::handle(const TensorView* tv) {
-  if (tv->nDims() == 0) {
-    os_ << typePrefix(tv->getDataType().value()) << varName(tv);
-  } else {
-    os_ << "T" << varName(tv);
-    switch (tv->getMemoryType()) {
-      case MemoryType::Global:
-        os_ << "_g";
-        break;
-      case MemoryType::Shared:
-        os_ << "_s";
-        break;
-      case MemoryType::Local:
-        os_ << "_l";
-        break;
-    }
-    handle(tv->domain());
+  os_ << "T" << varName(tv);
+  switch (tv->getMemoryType()) {
+    case MemoryType::Global:
+      os_ << "_g";
+      break;
+    case MemoryType::Shared:
+      os_ << "_s";
+      break;
+    case MemoryType::Local:
+      os_ << "_l";
+      break;
+  }
+  handle(tv->domain());
 
-    if (tv->getComputeAtPosition() > 0) {
-      os_ << " ca_pos( ";
-      os_ << tv->getComputeAtPosition();
-      os_ << " )";
-    }
-    if (tv->getMaxProducerPosition() > 0) {
-      os_ << " produce_pos( ";
-      os_ << tv->getMaxProducerPosition();
-      os_ << ")";
-    }
+  if (tv->getComputeAtPosition() > 0) {
+    os_ << " ca_pos( ";
+    os_ << tv->getComputeAtPosition();
+    os_ << " )";
+  }
+  if (tv->getMaxProducerPosition() > 0) {
+    os_ << " produce_pos( ";
+    os_ << tv->getMaxProducerPosition();
+    os_ << ")";
   }
 }
 
