@@ -693,8 +693,6 @@ class FullyShardedDataParallel(nn.Module):
             p._local_shard.copy_(chunk)  # type: ignore[attr-defined]
 
     def _collect_local_params(self):
-
-
         def _is_full_param_in_use(p: Parameter):
             return p._is_sharded and p._full_param_padded.storage().size() > 0  # type: ignore[attr-defined]
 
