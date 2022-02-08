@@ -15,6 +15,9 @@
 #include <c10/util/ArrayRef.h>
 #include <torch/csrc/lazy/core/hash.h>
 #include <torch/csrc/lazy/core/ir_metadata.h>
+#include <c10/util/Flags.h>
+
+C10_DECLARE_bool(ltc_enable_dynamic_shapes);
 
 namespace torch {
 namespace lazy {
@@ -69,6 +72,8 @@ struct TORCH_API Value {
   /* implicit */ Value(const NodePtr& node, size_t index = 0) : node(node), index(index) {}
 
   hash_t hash() const;
+  hash_t hash_with_sizes() const;
+  hash_t hash_without_sizes() const;
 
   operator bool() const {
     return node != nullptr;
@@ -122,7 +127,6 @@ inline std::ostream& operator<<(std::ostream& stream, const OpKind& op) {
 
 using OpList = c10::ArrayRef<Value>;
 
-
 // A node in the graph. Nodes for operations which requires extra data to be
 // stored for lowering, should inherit from this class and add operation
 // specific member there. For example, a constant might create a new
@@ -131,13 +135,21 @@ using OpList = c10::ArrayRef<Value>;
 // client data handle in it.
 class TORCH_API Node {
  public:
+  static bool enableDynamicShape() {
+    static bool enabled = std::getenv("LTC_ENABLE_DYNAMIC_SHAPES") != nullptr;
+    return enabled || FLAGS_ltc_enable_dynamic_shapes;
+  }
+
   // Creates a new node with the given op name. The op is a unique identifier
   // for the operation. The num_outputs tells how many outputs a given operation
   // generates.
-  Node(OpKind op, size_t num_outputs, hash_t node_hash, hash_t dag_hash);
+  //
+  // None leaf node's node_hash does not contains shape information always.
+  // So we pass in the hash value rather than a function.
+  Node(OpKind op, size_t num_outputs, hash_t node_hash, std::function<hash_t(bool)> dag_hash_fn);
 
   // Contructor used to create leaf nodes.
-  Node(OpKind op, size_t num_outputs, hash_t node_hash);
+  Node(OpKind op, size_t num_outputs, std::function<hash_t(bool)> node_hash_fn);
 
   virtual ~Node();
 
@@ -158,7 +170,15 @@ class TORCH_API Node {
   }
 
   hash_t hash() const {
-    return dag_hash_;
+    return enableDynamicShape() ? dag_hash_without_sizes_ : dag_hash_with_sizes_;
+  }
+
+  hash_t hash_without_sizes() const {
+    return dag_hash_without_sizes_;
+  }
+
+  hash_t hash_with_sizes() const {
+    return dag_hash_with_sizes_;
   }
 
   const MetaData& metadata() const {
@@ -185,7 +205,8 @@ class TORCH_API Node {
   // The hash value of this node.
   hash_t node_hash_;
   // The hash value of the graph rooted at this node.
-  hash_t dag_hash_;
+  hash_t dag_hash_without_sizes_;
+  hash_t dag_hash_with_sizes_;
   // The IR specific metadata attached to the IR node.
   MetaData metadata_;
   // The IR framework user can attach a user defined metadata object deriving
