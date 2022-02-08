@@ -964,8 +964,15 @@ class DistributedDataParallel(Module, Joinable):
                 self._check_global_requires_backward_grad_sync(is_joined_rank=False)
 
             if self.device_ids:
+                isLazy = inputs[0].device.type == 'lazy'
                 inputs, kwargs = self.to_kwargs(inputs, kwargs, self.device_ids[0])
-                output = self.module(*inputs[0], **kwargs[0])
+                if isLazy:
+                    lazy_input = []
+                    for input in inputs[0]:
+                        lazy_input.append(input.to('lazy'))
+                    output = self.module(*lazy_input, **kwargs[0])
+                else:
+                    output = self.module(*inputs[0], **kwargs[0])
             else:
                 output = self.module(*inputs, **kwargs)
 

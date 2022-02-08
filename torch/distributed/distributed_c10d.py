@@ -59,7 +59,6 @@ try:
 except ImportError:
     _GLOO_AVAILABLE = False
 
-
 logger = logging.getLogger(__name__)
 
 PG_WRAPPER_STORE_PREFIX = "pg_wrapper"
@@ -1173,6 +1172,11 @@ def broadcast(tensor, src, group=None, async_op=False):
         None, if not async_op or if not part of the group
 
     """
+    # Sync LazyTensor.
+    # import lazy_tensor_core.core.lazy_model as ltm
+    # ltm.mark_step()
+    # tensor = tensor.to("cuda")
+
     _check_single_tensor(tensor, "tensor")
     if _rank_not_in_group(group):
         _warn_not_in_group("broadcast")

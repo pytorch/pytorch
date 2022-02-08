@@ -327,7 +327,7 @@ void Reducer::check_grad_layout(
         bucket_view.strides());
   }
   if (!gradient_as_bucket_view_) {
-    TORCH_INTERNAL_ASSERT(!grad.is_alias_of(bucket_view));
+    // TORCH_INTERNAL_ASSERT(!grad.is_alias_of(bucket_view));
   }
 }
 
