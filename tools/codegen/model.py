@@ -1542,6 +1542,11 @@ class OperatorName:
             overload_name=overload_name
         )
         assert str(r) == op_name, f'{str(r)} != {op_name}'
+        # default is used as an attribute on the `OpOverloadPacket`
+        # (obtained using `torch.ops.aten.foo`) to get the operator
+        # overload with overload name as an empty string
+        # and so shouldn't be used as an overload name
+        assert overload_name != 'default'
         return r
 
     def __str__(self) -> str:
