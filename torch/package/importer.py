@@ -200,10 +200,7 @@ class OrderedImporter(Importer):
                     "All importers in OrderedImporter must inherit from Importer."
                 )
             try:
-                module = importer.import_module(module_name)
-                if self._check_if_fileless_package(module):
-                    continue
-                return module
+                return importer.import_module(module_name)
             except ModuleNotFoundError as err:
                 last_err = err
 
