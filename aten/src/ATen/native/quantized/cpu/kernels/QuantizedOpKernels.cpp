@@ -158,7 +158,7 @@ Tensor qcat_nhwc_kernel(
             int64_t vec_num = elem_size / kVLEN;
             std::array<typename scalar_t::underlying, VLEN> buf_in;
             memcpy(buf_in.data(), iptr + c, vec_num * kVLEN);
-            auto inp_vec = Vec::loadu(buf_in.data() + c);
+            auto inp_vec = Vec::loadu(buf_in.data());
             auto float_values = inp_vec.dequantize(
                 curr_scale_vec, curr_zero_pt_vec, scale_neg_zp_premul);
             Vec::float_vec_return_type retvals;
