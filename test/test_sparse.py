@@ -3405,7 +3405,7 @@ class TestSparse(TestCase):
         test(4, 6, [7, 3, 1, 3, 2, 1], [7, 3, 1, 3, 2, 3])
 
     @skipMeta
-    @dtypes(*get_all_dtypes(include_half=False, include_bfloat16=False, include_complex32=False))
+    @dtypes(*get_all_dtypes(include_half=False, include_complex32=False))
     def test_eye(self, device, dtype):
         for n in (3, 5, 7):
             sparse_coo_output = torch.eye(n, layout=torch.sparse_coo, device=device, dtype=dtype)
