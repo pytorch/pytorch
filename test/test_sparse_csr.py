@@ -1410,7 +1410,7 @@ class TestSparseCSR(TestCase):
             self.assertEqual(inp.col_indices(), detached_inp.col_indices())
 
     @skipMeta
-    @dtypes(*get_all_dtypes(include_bfloat16=False, include_complex=False))
+    @dtypes(*get_all_dtypes(include_bfloat16=False))
     def test_eye(self, device, dtype):
         for n in (3, 5, 7):
             sparse_csr_output = torch.eye(n, layout=torch.sparse_csr, device=device, dtype=dtype)
