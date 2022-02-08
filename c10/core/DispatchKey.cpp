@@ -111,6 +111,9 @@ const char* toString(DispatchKey t) {
       return "AutogradPrivateUse3";
     case DispatchKey::AutogradOther:
       return "AutogradOther";
+
+    case DispatchKey::ZeroTensor:
+      return "ZeroTensor";
     case DispatchKey::BackendSelect:
       return "BackendSelect";
     case DispatchKey::Named:
@@ -122,8 +125,13 @@ const char* toString(DispatchKey t) {
     case DispatchKey::Tracer:
       return "Tracer";
 
+    // Note: AutocastCUDA and Autocast are the same, currently.
+    // See comments in DispatchKey.h
     case DispatchKey::Autocast:
       return "Autocast";
+
+    case DispatchKey::AutocastCPU:
+      return "AutocastCPU";
 
     case DispatchKey::Batched:
       return "Batched";
@@ -149,8 +157,6 @@ const char* toString(DispatchKey t) {
     // https://github.com/zou3519/functorch
     // We plan on eventually upstreaming the prototype into core, at which
     // point it will have a different design that should use fewer keys.
-    case DispatchKey::FuncTorchPython:
-      return "FuncTorchPython";
     case DispatchKey::FuncTorchDynamicLayerBackMode:
       return "FuncTorchDynamicLayerBackMode";
     case DispatchKey::FuncTorchDynamicLayerFrontMode:
@@ -242,10 +248,10 @@ c10::DispatchKey parseDispatchKey(const std::string& k) {
       {"PrivateUse3", c10::DispatchKey::PrivateUse3},
       {"BackendSelect", c10::DispatchKey::BackendSelect},
       {"Python", c10::DispatchKey::Python},
-      {"FuncTorchPython", c10::DispatchKey::FuncTorchPython},
       {"Named", c10::DispatchKey::Named},
       {"Conjugate", c10::DispatchKey::Conjugate},
       {"Negative", c10::DispatchKey::Negative},
+      {"ZeroTensor", c10::DispatchKey::ZeroTensor},
       {"FuncTorchDynamicLayerBackMode",
        c10::DispatchKey::FuncTorchDynamicLayerBackMode},
       {"ADInplaceOrView", c10::DispatchKey::ADInplaceOrView},

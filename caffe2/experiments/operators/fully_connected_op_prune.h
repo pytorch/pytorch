@@ -32,7 +32,7 @@ template <int N>
 const std::vector<int64_t>& shape(Shape<N> vs) {
   static thread_local std::vector<int64_t> cache;
   cache.resize(vs.size());
-  for (auto i = 0; i < vs.size(); ++i) {
+  for (const auto i : c10::irange(vs.size())) {
     cache[i] = vs[i];
   }
   return cache;
@@ -86,7 +86,7 @@ void MaskMatrix_Inc<float, CPUContext>(
     int /*N*/,
     int seq_len,
     float target) {
-  for (int i = 0; i < seq_len; ++i) {
+  for (const auto i : c10::irange(seq_len)) {
     // assume that the mask_seq is smaller than size
     // Although it seems that random access gets bad performance,
     // we make sure that seq is in order;

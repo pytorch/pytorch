@@ -390,12 +390,12 @@ class {module_name}(torch.nn.Module):
         for buffer_name, buffer in self._buffers.items():
             if buffer is None:
                 continue
-            model_str += f"{tab*2}self.register_buffer('{buffer_name}', torch.empty({list(buffer.shape)}))\n"
+            model_str += f"{tab*2}self.register_buffer('{buffer_name}', torch.empty({list(buffer.shape)}, dtype={buffer.dtype}))\n"
 
         for param_name, param in self._parameters.items():
             if param is None:
                 continue
-            model_str += f"{tab*2}self.{param_name} = torch.nn.Parameter(torch.empty({list(param.shape)}))\n"
+            model_str += f"{tab*2}self.{param_name} = torch.nn.Parameter(torch.empty({list(param.shape)}, dtype={param.dtype}))\n"
 
         model_str += f"{tab*2}self.load_state_dict(torch.load(r'{folder}/state_dict.pt'))\n"
         model_str += f"{_addindent(self.code, 4)}\n"
