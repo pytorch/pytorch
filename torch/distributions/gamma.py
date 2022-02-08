@@ -86,3 +86,9 @@ class Gamma(ExponentialFamily):
 
     def _log_normalizer(self, x, y):
         return torch.lgamma(x + 1) + (x + 1) * torch.log(-y.reciprocal())
+
+    def cdf(self, value):
+        value = torch.as_tensor(value, dtype=self.rate.dtype, device=self.rate.device)
+        if self._validate_args:
+            self._validate_sample(value)
+        return torch.special.gammainc(self.concentration, self.rate * value)
