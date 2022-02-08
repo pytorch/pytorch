@@ -4,12 +4,12 @@ from typing import Callable, List, Tuple
 import torch
 import torch.fx
 import torch.fx.experimental.fx_acc.acc_tracer as acc_tracer
-from torch.fx.experimental.fx2trt.fx2trt import (
-    create_inputs_from_specs,
+from torch.fx.experimental.fx2trt import (
     TRTInterpreter,
     InputTensorSpec,
     TRTModule,
 )
+from torch.testing._internal.common_utils import TestCase
 from torch.fx.experimental.normalize import NormalizeArgs
 from torch.fx.passes import shape_prop
 
@@ -36,8 +36,9 @@ def fetch_attr(mod, target):
 
 
 @unittest.skipIf(not torch.cuda.is_available(), "Skip because CUDA is not available")
-class TRTTestCase(unittest.TestCase):
+class TRTTestCase(TestCase):
     def setUp(self):
+        super().setUp()
         torch.manual_seed(3)
 
     def run_test(self, mod, inputs, expected_ops, unexpected_ops, interpreter, rtol, atol):
@@ -138,7 +139,6 @@ class TRTTestCase(unittest.TestCase):
         self.assertTrue(
             ops_in_mod >= ops, f"expected ops {ops}, actuall ops {ops_in_mod}"
         )
-
 
     def assert_unexpected_op(self, mod, ops):
         for node in mod.graph.nodes:
@@ -241,7 +241,7 @@ class AccTestCase(TRTTestCase):
         atol=1e-03,
     ):
         mod.eval()
-        inputs = create_inputs_from_specs(input_specs)
+        inputs = InputTensorSpec.create_inputs_from_specs(input_specs)
         mod = acc_tracer.trace(mod, inputs)
         interp = TRTInterpreter(mod, input_specs, explicit_batch_dimension=True)
         super().run_test(mod, inputs, expected_ops, unexpected_ops, interp, rtol, atol)
