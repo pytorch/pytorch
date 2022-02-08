@@ -2865,9 +2865,13 @@ TEST_F(Composed, ComposedOp) {
   auto ref1 = a * (a * b);
   auto ref2 = a * ref1;
   WithCPUFuser g(true);
-   bool fusable_on_device = torch::jit::tensorexpr::getTEMustUseLLVMOnCPU();
+  bool fusable_on_device = torch::jit::tensorexpr::getTEMustUseLLVMOnCPU();
   torch::jit::tensorexpr::getTEMustUseLLVMOnCPU() = false;
-  FuseTensorExprs(graph, /*min_group_size*/2, /*add_composed_op*/true, /*fuse_to_dynamic_shapes*/true);
+  FuseTensorExprs(
+      graph,
+      /*min_group_size*/ 2,
+      /*add_composed_op*/ true,
+      /*fuse_to_dynamic_shapes*/ true);
   Code code(graph, "");
   InterpreterState interpreter{code};
   std::vector<IValue> stack = {a, b};
