@@ -11,11 +11,6 @@ namespace meta {
 
 TORCH_PRECOMPUTE_META_FUNC(linalg_cross)
 (const Tensor & input, const Tensor & other, const int64_t dimension) {
-  const Tensor& out = maybe_get_output(0);
-
-  auto device1 = input.device().type();
-  auto device2 = other.device().type();
-
   auto out_size = infer_size(input.sizes(), other.sizes());
   Tensor input_broadcasted = input.expand(out_size);
   Tensor other_broadcasted = other.expand(out_size);
