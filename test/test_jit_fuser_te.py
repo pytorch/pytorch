@@ -2100,6 +2100,14 @@ class TestTEFuser(JitTestCase):
             return F.hardsigmoid(x) * 1.01
         self._test_fwd_bwd(eager)
 
+    def test_cat_graph_opt(self):
+        def foo(x, y, z):
+            return torch.log(torch.cat([x, y, z]))
+
+        self.checkScript(foo, (torch.rand([5, 5]), torch.rand([2, 5]), torch.rand([1, 5])))
+        # TODO: not sure why not updated graph isn't reflected in last_optimized_graph
+        self.assertLastGraphAllFused()
+
     def test_dynamic_cat(self):
         with inline_fusion_groups():
             @torch.jit.script
@@ -2207,6 +2215,24 @@ class TestTEFuser(JitTestCase):
             for _ in range(3):
                 test(*args)
         self.assertIn("fused_mul_add", prof.table())
+
+    def test_skip_grad_in_check(self):
+        @torch.jit.script
+        def foo(x):
+            return (x + 2) / 2
+
+        inp = torch.rand([4, 4])
+        for _ in range(3):
+            foo(inp)
+
+        inp.requires_grad_(True)
+        with torch.inference_mode():
+            for _ in range(3):
+                foo(inp)
+        g = torch.jit.last_executed_optimized_graph()
+        torch._C._jit_pass_inline(g)
+        torch._C._jit_pass_inline(g)
+        FileCheck().check_count("prim::If", 1, exactly=True).run(g)
 
     def test_dynamic_shapes(self):
         from functools import partial
