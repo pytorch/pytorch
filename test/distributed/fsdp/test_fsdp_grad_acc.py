@@ -60,75 +60,76 @@ class TestGradAcc(FSDPTest):
                 prefetch the next layer's full parameters, if at all.
     during backward pass.
         """
-        # Use double precision to avoid floating point drift
         old_default_dtype = torch.get_default_dtype()
-        torch.set_default_dtype(torch.float64)
+        try:
+            # Use double precision to avoid floating point drift
+            torch.set_default_dtype(torch.float64)
 
-        # Initialize the FSDP model and optimizer
-        group = dist.distributed_c10d._get_default_group()
-        fsdp_model: FSDP = self._get_wrapped_model(
-            group, cuda_first=False, add_bn=False,
-            cpu_offload=cpu_offload, backward_prefetch=backward_prefetch,
-        )  # disable BN since the test uses varying batch sizes
-        fsdp_model.eval()  # disable dropout
-        device = torch.device("cuda")
-        optim = torch.optim.SGD(fsdp_model.parameters(), lr=0.01, momentum=0.9)
+            # Initialize the FSDP model and optimizer
+            group = dist.distributed_c10d._get_default_group()
+            fsdp_model: FSDP = self._get_wrapped_model(
+                group, cuda_first=False, add_bn=False,
+                cpu_offload=cpu_offload, backward_prefetch=backward_prefetch,
+            )  # disable BN since the test uses varying batch sizes
+            fsdp_model.eval()  # disable dropout
+            device = torch.device("cuda")
+            optim = torch.optim.SGD(fsdp_model.parameters(), lr=0.01, momentum=0.9)
 
-        # Generate the sequence of batches, each containing the same data but
-        # permuted
-        def permute_tensor(x: torch.Tensor):
-            return x.view(-1)[torch.randperm(x.numel())].view_as(x)
+            # Generate the sequence of batches, each containing the same data but
+            # permuted
+            def permute_tensor(x: torch.Tensor):
+                return x.view(-1)[torch.randperm(x.numel())].view_as(x)
 
-        batch: Tuple[torch.Tensor, ...] = fsdp_model.module.get_input(device)
-        batches: List[Tuple[torch.Tensor, ...]] = [batch]
-        for _ in range(num_iters_to_acc - 1):
-            batches.append(tuple(permute_tensor(t) for t in batch))
-        for (batch1, batch2) in itertools.combinations(batches, r=2):
-            for t1, t2 in zip(batch1, batch2):
-                assert not torch.all(t1 == t2)
+            batch: Tuple[torch.Tensor, ...] = fsdp_model.module.get_input(device)
+            batches: List[Tuple[torch.Tensor, ...]] = [batch]
+            for _ in range(num_iters_to_acc - 1):
+                batches.append(tuple(permute_tensor(t) for t in batch))
+            for (batch1, batch2) in itertools.combinations(batches, r=2):
+                for t1, t2 in zip(batch1, batch2):
+                    assert not torch.all(t1 == t2)
 
-        # Concatenate the batches along the given batch dimension
-        concat_batch: Tuple[torch.Tensor, ...] = tuple(
-            torch.cat(ts, dim=batch_dim) for ts in zip(*batches)
-        )
+            # Concatenate the batches along the given batch dimension
+            concat_batch: Tuple[torch.Tensor, ...] = tuple(
+                torch.cat(ts, dim=batch_dim) for ts in zip(*batches)
+            )
 
-        # Establish reference gradients using the concatenated batch
-        fsdp_model.zero_grad()
-        output = fsdp_model(*concat_batch)
-        ref_loss = fsdp_model.module.get_loss(concat_batch, output)
-        ref_loss.backward()
-        ref_grads = [p.grad.detach().clone() for p in fsdp_model.parameters()]
+            # Establish reference gradients using the concatenated batch
+            fsdp_model.zero_grad()
+            output = fsdp_model(*concat_batch)
+            ref_loss = fsdp_model.module.get_loss(concat_batch, output)
+            ref_loss.backward()
+            ref_grads = [p.grad.detach().clone() for p in fsdp_model.parameters()]
 
-        # Compute the gradients by accumulating via `no_sync()`
-        fsdp_model.zero_grad()
-        losses = []
-        with fsdp_model.no_sync():
-            for batch in batches[:-1]:  # accumulate for all but the last batch
-                output = fsdp_model(*batch)
-                loss = fsdp_model.module.get_loss(batch, output)
-                loss.backward()
-                losses.append(loss)
-        output = fsdp_model(*batches[-1])
-        loss = fsdp_model.module.get_loss(batches[-1], output)
-        loss.backward()
-        losses.append(loss)
-        acc_loss = sum(losses)
-        acc_grads = [p.grad.detach().clone() for p in fsdp_model.parameters()]
+            # Compute the gradients by accumulating via `no_sync()`
+            fsdp_model.zero_grad()
+            losses = []
+            with fsdp_model.no_sync():
+                for batch in batches[:-1]:  # accumulate for all but the last batch
+                    output = fsdp_model(*batch)
+                    loss = fsdp_model.module.get_loss(batch, output)
+                    loss.backward()
+                    losses.append(loss)
+            output = fsdp_model(*batches[-1])
+            loss = fsdp_model.module.get_loss(batches[-1], output)
+            loss.backward()
+            losses.append(loss)
+            acc_loss = sum(losses)
+            acc_grads = [p.grad.detach().clone() for p in fsdp_model.parameters()]
 
-        # Compare the losses and gradients
-        torch.testing.assert_allclose(ref_loss, acc_loss)
-        assert len(ref_grads) == len(acc_grads)
-        for ref_grad, acc_grad in zip(ref_grads, acc_grads):
-            assert ref_grad.device == acc_grad.device
-            assert ref_grad.size() == acc_grad.size()
-            assert ref_grad.dtype == acc_grad.dtype
-            torch.testing.assert_allclose(ref_grad, acc_grad)
+            # Compare the losses and gradients
+            torch.testing.assert_allclose(ref_loss, acc_loss)
+            assert len(ref_grads) == len(acc_grads)
+            for ref_grad, acc_grad in zip(ref_grads, acc_grads):
+                assert ref_grad.device == acc_grad.device
+                assert ref_grad.size() == acc_grad.size()
+                assert ref_grad.dtype == acc_grad.dtype
+                torch.testing.assert_allclose(ref_grad, acc_grad)
 
-        # Check that the optimizer step does not error
-        optim.step()
-
-        # Restore the default dtype
-        torch.set_default_dtype(old_default_dtype)
+            # Check that the optimizer step does not error
+            optim.step()
+        finally:
+            # Restore the default dtype
+            torch.set_default_dtype(old_default_dtype)
 
     @skip_if_lt_x_gpu(2)
     @parametrize(
