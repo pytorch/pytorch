@@ -9,6 +9,7 @@ import torch.fx.experimental.fx_acc.acc_tracer as acc_tracer
 import torch.nn as nn
 from torch.fx.experimental.const_fold import split_const_subgraphs
 from torch.fx.passes.splitter_base import SplitResult
+import torch.fx.experimental.fx2trt.diagnostics as diagnostics
 
 from .fx2trt import (
     TRTInterpreter,
@@ -333,10 +334,9 @@ class Lowerer:
         # TesnorRT doesn't like duplicate outputs. Run this pass to eliminate such case.
         remove_duplicate_output_args(split_result.split_module, split_result.submodule_inputs.keys())
 
-
         for submod_name, submod_inputs in split_result.submodule_inputs.items():
             submod = getattr(split_result.split_module, submod_name)
-
+            diagnostics.write(f"lower.split.{submod_name}.module.graph", lambda: str(submod.graph))
             if self.trt_module_observer:
                 self.trt_module_observer(submod_name, submod, submod_inputs)  # type: ignore[arg-type]
 
