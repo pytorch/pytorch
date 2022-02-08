@@ -167,7 +167,7 @@ def min_cut_rematerialization_partition(joint_module: fx.GraphModule, _joint_inp
     except ImportError:
         raise RuntimeError("Need networkx installed to perform smart recomputation heuristics")
 
-    # draw_graph(joint_module, "joint.svg")
+    draw_graph(joint_module, "joint.svg")
     full_bw_graph = joint_module.graph
 
     nx_graph = nx.DiGraph()

@@ -983,8 +983,8 @@ class TestDecompositionOpInfo(TestCase):
     # Each one of these is a bug (or needs to be investigated)
     @skipOps('TestDecompositionOpInfo', 'test_decomposition', {
         skip('view_as_complex'),
-        skip('log_softmax', device_type='cuda'),
-        skip('nn.functional.softmin', device_type='cuda'),
+        # skip('log_softmax', device_type='cuda'),
+        # skip('nn.functional.softmin', device_type='cuda'),
         xfail('linalg.cholesky'),
         xfail('linalg.inv'),
         skip('linalg.det', 'singular', device_type='cuda'),  # this is nasty and seems to stop the test suite
@@ -1040,6 +1040,7 @@ class TestDecompositionOpInfo(TestCase):
                 rtol, atol = tol_table[(b.dtype, op)]
             else:
                 rtol, atol = _getDefaultRtolAndAtol(a.dtype, b.dtype)
+            atol_diff = (a - b).abs().max()
             if not torch.allclose(a, b, rtol=rtol, atol=atol):
                 atol_diff = (a - b).abs().max()
                 rtol_diff = ((a - b).abs()/b.abs()).nan_to_num(0).max()
@@ -1089,6 +1090,8 @@ class TestDecompositionOpInfo(TestCase):
                     upcast_table = set([
                         aten.tanh_backward,
                         aten._log_softmax,
+                        aten._log_softmax_backward_data,
+                        aten._softmax_backward_data,
                     ])
                     decomposition = decomposition_table[func]
                     global run_decompositions

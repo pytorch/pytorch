@@ -459,6 +459,37 @@ def clear_compile_cache():
         compile_cache = None
 
 
+# Polyfilled from pytorch core while we figure out the `remove_duplicate` issues.
+def _named_members(mod, get_members_fn, prefix='', recurse=True, remove_duplicate=True):
+    r"""Helper method for yielding various names + members of modules."""
+    memo = set()
+    modules = mod.named_modules(prefix=prefix, remove_duplicate=remove_duplicate) if recurse else [(prefix, mod)]
+    for module_prefix, module in modules:
+        members = get_members_fn(module)
+        for k, v in members:
+            if v is None or v in memo:
+                continue
+            if remove_duplicate:
+                memo.add(v)
+            name = module_prefix + ('.' if module_prefix else '') + k
+            yield name, v
+
+
+def _named_parameters(mod, prefix: str = '', recurse: bool = True, remove_duplicate: bool = True):
+    gen = mod._named_members(
+        lambda module: module._parameters.items(),
+        prefix=prefix, recurse=recurse, remove_duplicate=remove_duplicate)
+    for elem in gen:
+        yield elem
+
+
+def _named_buffers(mod, prefix: str = '', recurse: bool = True, remove_duplicate: bool = True):
+    gen = mod._named_members(
+        lambda module: module._buffers.items(),
+        prefix=prefix, recurse=recurse, remove_duplicate=remove_duplicate)
+    for elem in gen:
+        yield elem
+
 def aot_module(mod: nn.Module, *args, **kwargs) -> nn.Module:
     """
     Returns a `nn.Module` object that behaves like the original attr:`mod` and
@@ -475,6 +506,8 @@ def aot_module(mod: nn.Module, *args, **kwargs) -> nn.Module:
         func:`aot_function` to compile the forward and backward graphs.
     """
 
+
+def aot_module(mod, *args, **kwargs):
     def functional_call(named_params, named_buffers, *args, **kwargs):
         params_and_buffers = {**named_params, **named_buffers}
         return _stateless.functional_call(mod, params_and_buffers, args, kwargs)
@@ -488,8 +521,8 @@ def aot_module(mod: nn.Module, *args, **kwargs) -> nn.Module:
 
         def forward(self, *args, **kwargs):
             return compiled_f(
-                dict(self.orig_module.named_parameters(remove_duplicate=False)),
-                dict(self.orig_module.named_buffers(remove_duplicate=False)),
+                dict(_named_parameters(mod, remove_duplicate=False)),
+                dict(_named_buffers(mod, remove_duplicate=False)),
                 *args,
                 **kwargs,
             )
