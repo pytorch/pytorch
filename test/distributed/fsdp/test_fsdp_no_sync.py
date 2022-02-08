@@ -30,7 +30,7 @@ if TEST_WITH_DEV_DBG_ASAN:
     sys.exit(0)
 
 
-class TestGradAcc(FSDPTest):
+class TestNoSync(FSDPTest):
     """Tests ``FullyShardedDataParallel``'s gradient accumulation via its
     ``no_sync()`` context manager."""
 
@@ -60,10 +60,10 @@ class TestGradAcc(FSDPTest):
                 point to prefetch the next layer's full parameters during the
                 backward pass, if at all.
         """
-        old_default_dtype = torch.get_default_dtype()
+        old_allow_tf32 = torch.backends.cuda.matmul.allow_tf32
         try:
-            # Use double precision to avoid floating point drift
-            torch.set_default_dtype(torch.float64)
+            # Disable TF32 to prevent floating point drift
+            torch.backends.cuda.matmul.allow_tf32 = False
 
             # Initialize the FSDP model and optimizer
             group = dist.distributed_c10d._get_default_group()
@@ -128,8 +128,7 @@ class TestGradAcc(FSDPTest):
             # Check that the optimizer step does not error
             optim.step()
         finally:
-            # Restore the default dtype
-            torch.set_default_dtype(old_default_dtype)
+            torch.backends.cuda.matmul.allow_tf32 = old_allow_tf32
 
     @skip_if_lt_x_gpu(2)
     @parametrize(
@@ -161,7 +160,7 @@ class TestGradAcc(FSDPTest):
         )
 
 
-instantiate_parametrized_tests(TestGradAcc)
+instantiate_parametrized_tests(TestNoSync)
 
 if __name__ == "__main__":
     run_tests()
