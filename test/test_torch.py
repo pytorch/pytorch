@@ -5732,7 +5732,7 @@ class TestTorch(TestCase):
 
         for reduce in reduces:
             for dim in range(len(shape)):
-                output = input.scatter_reduce(dim, index, reduce, output_size=output_size)
+                output = input._scatter_reduce(dim, index, reduce, output_size=output_size)
 
                 # Check that output is of the correct size
                 output_shape = copy.copy(shape)
@@ -5766,16 +5766,16 @@ class TestTorch(TestCase):
                 self.assertTrue(torch.allclose(output, expected))
 
         with self.assertRaisesRegex(RuntimeError, "Expected `dim` to be in range -3 to 2"):
-            torch.scatter_reduce(input, 4, index, "sum")
+            torch._scatter_reduce(input, 4, index, "sum")
 
         with self.assertRaisesRegex(RuntimeError, "Shape mismatch"):
             index2 = torch.randint(0, output_size, (10, ), dtype=torch.long, device=device)
-            torch.scatter_reduce(input, 0, index2, "sum")
+            torch._scatter_reduce(input, 0, index2, "sum")
 
         with self.assertRaisesRegex(RuntimeError, "Expected `index` values to be in range 0 to 2"):
             input2 = torch.randn(10, dtype=dtype, device=device)
             index2 = torch.tensor([0, 1, 0, 1, 2, 3, 3, 4, 4, 3])
-            torch.scatter_reduce(input2, 0, index2, "sum", output_size=2)
+            torch._scatter_reduce(input2, 0, index2, "sum", output_size=2)
 
     def test_structseq_repr(self):
         a = torch.arange(250).reshape(5, 5, 10)
