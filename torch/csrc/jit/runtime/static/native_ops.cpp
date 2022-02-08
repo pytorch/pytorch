@@ -30,7 +30,7 @@ std::vector<IValue> boxInputs(const ProcessedNode& pnode) {
   return result;
 }
 
-}
+} // namespace
 
 C10_DEFINE_REGISTRY(SRNativeOperatorRegistry, SROperatorFunctor);
 
