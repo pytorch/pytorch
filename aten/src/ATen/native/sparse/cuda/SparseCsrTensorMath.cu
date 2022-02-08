@@ -12,7 +12,7 @@
 #include <ATen/native/LinearAlgebra.h>
 #include <ATen/native/sparse/SparseCsrTensorMath.h>
 #include <ATen/cuda/CUDASparseDescriptors.h>
-#include <ATen/cuda/CUDASolver.h>
+#include <ATen/native/cuda/linalg/CUDASolver.h>
 #include <algorithm>
 
 #ifndef AT_PER_OPERATOR_HEADERS
