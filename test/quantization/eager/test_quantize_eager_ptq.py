@@ -76,24 +76,63 @@ import numpy as np
 
 class TestQuantizeEagerOps(QuantizationTestCase):
     def test_conv_transpose_op(self):
-        class refCTmodel(torch.nn.Module):
+        class M(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.rct_op = nnqr.ConvTranspose2d(1, 1, 1)
+                self.conv = nn.ConvTranspose2d(1, 1, 1)
                 self.quant = QuantStub()
                 self.dequant = DeQuantStub()
 
             def forward(self, x):
                 x = self.quant(x)
                 x = self.dequant(x)
-                x = self.rct_op(x)
+                x = self.conv(x)
                 x = self.quant(x)
                 x = self.dequant(x)
                 return x
 
-        x = torch.randn(1, 1, 10, 10, dtype=torch.float)
-        rct = refCTmodel().eval()
-        out = rct(x)
+        class RefM(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv = nnqr.ConvTranspose2d(1, 1, 1)
+                self.quant = QuantStub()
+                self.dequant = DeQuantStub()
+
+            def forward(self, x):
+                x = self.quant(x)
+                x = self.dequant(x)
+                x = self.conv(x)
+                x = self.quant(x)
+                x = self.dequant(x)
+                return x
+
+        data = torch.randn(1, 1, 10, 10, dtype=torch.float)
+        original_m = M()
+        original_ref_m = RefM()
+
+        original_ref_m.conv.weight = torch.nn.Parameter(original_m.conv.weight.detach())
+        original_ref_m.conv.bias = torch.nn.Parameter(original_m.conv.bias.detach())
+
+        original_m.qconfig = torch.ao.quantization.default_qconfig
+        m = prepare(original_m)
+        # calibration
+        m(data)
+        m = convert(m)
+        # check if the module is properly quantized
+        self.assertEqual(type(m.quant), nnq.Quantize)
+        self.assertEqual(type(m.conv), nnqr.ConvTranspose2d)
+        self.assertEqual(type(m.dequant), nnq.DeQuantize)
+        res = m(data)
+
+        # quantize the reference model
+        original_ref_m.eval()
+        original_ref_m.qconfig = default_qconfig
+        ref_m = prepare(original_ref_m)
+        ref_m(data)
+        ref_m = convert(ref_m)
+        ref_res = ref_m(data)
+        self.assertEqual(res, ref_res)
+
 
     def _test_activation_op_impl(
             self, float_module_class, quantized_module_class, extra_module_kwargs):

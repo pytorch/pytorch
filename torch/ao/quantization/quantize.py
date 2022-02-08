@@ -16,7 +16,7 @@ from torch.ao.quantization.quantization_mappings import (
     _has_special_act_post_process,
     _get_special_act_post_process,
 )
-
+from .utils import get_qparam_dict
 from torch.ao.quantization.stubs import DeQuantStub, QuantWrapper
 from torch.ao.quantization.qconfig import (
     add_module_to_qconfig_obs_ctr,
@@ -565,7 +565,14 @@ def swap_module(mod, mapping, custom_module_class_mapping):
             new_mod = custom_module_class_mapping[type(mod)].from_observed(mod)
             swapped = True
         elif type(mod) in mapping:
-            new_mod = mapping[type(mod)].from_float(mod)
+            qmod = mapping[type(mod)]
+            if hasattr(qmod, '_IS_REFERNECE') and qmod._IS_REFERNECE:
+                assert mod.qconfig is not None
+                weight_post_process = mod.qconfig.weight()
+                weight_qparams = get_qparam_dict(weight_post_process)
+                new_mod = qmod.from_float(mod, weight_qparams)
+            else:
+                new_mod = qmod.from_float(mod)
             swapped = True
 
         if swapped:

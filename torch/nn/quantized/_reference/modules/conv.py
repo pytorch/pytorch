@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from typing import Optional, Dict, Any, List
-from torch.nn.common_types import _size_1_t, _size_2_t, _size_3_t
+from torch.nn.common_types import _size_1_t
 from .utils import _quantize_weight, _quantize_and_dequantize_weight
 from .utils import _save_weight_qparams
 from .utils import _get_weight_qparam_keys
@@ -225,6 +225,7 @@ class _ConvTransposeNd(torch.nn.modules.conv._ConvTransposeNd):
         this is useful when user want to use this module in other backends like Glow.
     """
     __annotations__ = {"bias": Optional[torch.Tensor]}
+    _IS_REFERNECE = True
 
     def _save_to_state_dict(self, destination, prefix, keep_vars):
         super()._save_to_state_dict(destination, prefix, keep_vars)
@@ -302,9 +303,10 @@ class _ConvTransposeNd(torch.nn.modules.conv._ConvTransposeNd):
             float_conv.kernel_size,  # type: ignore[arg-type]
             float_conv.stride,  # type: ignore[arg-type]
             float_conv.padding,  # type: ignore[arg-type]
-            float_conv.dilation,  # type: ignore[arg-type]
+            float_conv.output_padding,  # type: ignore[arg-type]
             float_conv.groups,
             float_conv.bias is not None,  # type: ignore[arg-type]
+            float_conv.dilation,  # type: ignore[arg-type]
             float_conv.padding_mode,
             device=float_conv.weight.device,
             dtype=float_conv.weight.dtype,
@@ -322,10 +324,10 @@ class ConvTranspose1d(_ConvTransposeNd, nn.ConvTranspose1d):
                  kernel_size: _size_1_t,
                  stride: _size_1_t = 1,
                  padding: _size_1_t = 0,
-                 dilation: _size_1_t = 1,
-                 groups: int = 1,
                  output_padding: _size_1_t = 0,
+                 groups: int = 1,
                  bias: bool = True,
+                 dilation: _size_1_t = 1,
                  padding_mode: str = "zeros",
                  device=None,
                  dtype=None,
@@ -368,8 +370,8 @@ class ConvTranspose1d(_ConvTransposeNd, nn.ConvTranspose1d):
 
 class ConvTranspose2d(_ConvTransposeNd, nn.ConvTranspose2d):
     def __init__(self, in_channels, out_channels, kernel_size, stride=1,
-                 padding=0, dilation=1, groups=1, bias=True,
-                 output_padding: _size_2_t = 0,
+                 padding=0, output_padding=0,
+                 groups=1, bias=True, dilation=1,
                  padding_mode='zeros',
                  device=None,
                  dtype=None,
@@ -393,6 +395,7 @@ class ConvTranspose2d(_ConvTransposeNd, nn.ConvTranspose2d):
         assert isinstance(self.padding, tuple)
         # One cannot replace List by Tuple or Sequence in "_output_padding" because
         # TorchScript does not support `Sequence[T]` or `Tuple[T, ...]`.
+
         output_padding = self._output_padding(
             input, output_size, self.stride, self.padding, self.kernel_size, self.dilation)  # type: ignore[arg-type]
 
@@ -412,8 +415,8 @@ class ConvTranspose2d(_ConvTransposeNd, nn.ConvTranspose2d):
 
 class ConvTranspose3d(_ConvTransposeNd, nn.ConvTranspose3d):
     def __init__(self, in_channels, out_channels, kernel_size, stride=1,
-                 padding=0, dilation=1, groups=1, bias=True,
-                 output_padding: _size_3_t = 0,
+                 padding=0, output_padding=0,
+                 groups=1, bias=True, dilation=1,
                  padding_mode="zeros",
                  device=None,
                  dtype=None,
