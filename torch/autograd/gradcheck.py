@@ -344,7 +344,7 @@ def _get_analytical_jacobian_forward_ad(fn, inputs, outputs, *, check_grad_dtype
                 dual_outputs = filter(_is_float_or_complex_tensor, raw_outputs)
                 for index_o, d_o in enumerate(dual_outputs):
                     val, res = fwAD.unpack_dual(d_o)
-                    if check_grad_dtypes and val.is_complex() != res.is_complex():
+                    if check_grad_dtypes and res is not None and val.is_complex() != res.is_complex():
                         raise GradcheckError('Forward AD gradient has dtype mismatch.')
 
                     # Remove extra dimension of size 1 corresponding to the reduced input
@@ -871,8 +871,63 @@ def _test_backward_mul_by_grad_output(outputs, inputs, check_sparse_nnz) -> bool
             raise GradcheckError('grad is incorrect size')
     return True
 
+def _test_undefined_forward_mode(func, outputs, inputs):
+    fwAD = torch.autograd.forward_ad
 
-def _test_undefined_grad(func, outputs, inputs) -> bool:
+    inp_tensors_idx, inp_tensors = _get_inp_tensors(inputs)
+    all_v, all_u, all_u_dense = _make_vectors(inp_tensors, outputs, use_forward_ad=True)
+
+    tensor_inputs = tuple(i for i in inputs if is_tensor_like(i) and i.requires_grad)
+
+    with fwAD.dual_level():
+        fw_grads = []
+        dual_inputs = []
+        tensor_indices = set()
+        for i, inp in enumerate(inputs):
+            if is_tensor_like(inp) and inp.requires_grad:
+                if inp.layout == torch._mkldnn:  # type: ignore[attr-defined]
+                    raise ValueError("MKLDNN inputs are not support for forward AD gradcheck.")
+
+                inp = fwAD.make_dual(inp, torch.zeros_like(inp))
+                # If inp is a differentiable view, the dual might not be the tangent given to
+                # make_dual, so read it explicitly from the dual tensor
+                fw_grads.append(fwAD.unpack_dual(inp)[1])
+                tensor_indices.add(i)
+            dual_inputs.append(inp)
+
+        for i, (fw_grad, u) in enumerate(zip(fw_grads, all_u)):
+            fw_grad.copy_(u.view_as(fw_grad))
+
+        for idx, inp in enumerate(inputs):
+            if idx not in tensor_indices:
+                continue
+            dual_inp_obj = dual_inputs[idx]
+
+            # case 1 (Materialized Zero Tensor Tangent)
+            dual_inputs[idx] = fwAD.make_dual(inp, torch.zeros_like(inp))
+            raw_outputs = _as_tuple(func(*dual_inputs))
+            dual_outputs1 = filter(_is_float_or_complex_tensor, raw_outputs)
+
+            # case 2 (Efficient Zero Tensor Tangent since we don't make a dual object and pass a regular tensor)
+            dual_inputs[idx] = inp
+            raw_outputs = _as_tuple(func(*dual_inputs))
+            dual_outputs2 = filter(_is_float_or_complex_tensor, raw_outputs)
+
+            # reset
+            dual_inputs[idx] = dual_inp_obj
+
+            for index_o, (d_o1, d_o2) in enumerate(zip(dual_outputs1, dual_outputs2)):
+                val1, res1 = fwAD.unpack_dual(d_o1)
+                val2, res2 = fwAD.unpack_dual(d_o2)
+
+                if not (res1 is None or res2 is None):
+                    if not torch.allclose(res1, res2):
+                        raise GradcheckError("Mismatch in tangent values for output with index: ", index_o,
+                                             " when input: ", inp, " has an undefined tangent value. ",
+                                             " Got: ", res1, " but expected: ", res2)
+    return True
+
+def _test_undefined_backward_mode(func, outputs, inputs) -> bool:
     diff_input_list: List[torch.Tensor] = list(_iter_tensors(inputs, True))
     if not diff_input_list:
         raise GradcheckError("no Tensors requiring grad found in input")
@@ -984,7 +1039,8 @@ def _real_and_imag_input(fn, complex_inp_indices, tupled_inputs):
 
 
 def _gradcheck_real_imag(gradcheck_fn, func, func_out, tupled_inputs, outputs, eps, rtol,
-                         atol, check_grad_dtypes, check_forward_ad, check_backward_ad, nondet_tol):
+                         atol, check_grad_dtypes, check_forward_ad, check_backward_ad, nondet_tol,
+                         check_undefined_grad):
     complex_out_indices = [i for i, o in enumerate(outputs) if o.is_complex()]
     has_any_complex_output = any(o.is_complex() for o in _as_tuple(func_out))
     if check_backward_ad:
@@ -1023,10 +1079,14 @@ def _gradcheck_real_imag(gradcheck_fn, func, func_out, tupled_inputs, outputs, e
             gradcheck_fn(real_fn, real_func_out, real_inputs, diff_real_func_out, eps,
                          rtol, atol, check_grad_dtypes, nondet_tol, complex_indices=complex_inp_indices,
                          use_forward_ad=True)
+            if check_undefined_grad:
+                _test_undefined_forward_mode(imag_fn, imag_func_out, imag_inputs)
+                _test_undefined_forward_mode(real_fn, real_func_out, real_inputs)
         else:
             gradcheck_fn(func, func_out, tupled_inputs, outputs, eps,
                          rtol, atol, check_grad_dtypes, nondet_tol, use_forward_ad=True)
-
+            if check_undefined_grad:
+                _test_undefined_forward_mode(func, outputs, tupled_inputs)
 
 def _slow_gradcheck(func, func_out, tupled_inputs, outputs, eps, rtol, atol, check_grad_dtypes,
                     nondet_tol, *, use_forward_ad=False, complex_indices=None, test_imag=False):
@@ -1210,6 +1270,13 @@ def _fast_gradcheck(func, func_out, inputs, outputs, eps, rtol,
                     atol, check_grad_dtypes, nondet_tol, *, use_forward_ad=False, complex_indices=None, test_imag=False):
     # See https://github.com/pytorch/pytorch/issues/53876 for details
     inp_tensors_idx, inp_tensors = _get_inp_tensors(inputs)
+    # Backward mode computes v^T * J (VJP)
+    # Since we computed J * u (JVP) through finite difference method, we perform an equality check
+    # between VJP * u, v * JVP
+    # ----
+    # Forward mode computes J * u (JVP)
+    # Since we already compute JVP through finite difference method,
+    # we don't need v for correctness check here as asserted below
     all_v, all_u, all_u_dense = _make_vectors(inp_tensors, outputs, use_forward_ad=use_forward_ad)
 
     numerical_vJu = _get_numerical_vJu(func, inputs, inp_tensors_idx, func_out, all_u, all_v, eps, is_forward_ad=use_forward_ad)
@@ -1318,8 +1385,6 @@ def gradcheck(
     """
     assert check_forward_ad or check_backward_ad, \
         "Expected at least one of check_forward_ad or check_backward_ad to be True"
-    assert not (check_undefined_grad and not check_backward_ad), \
-        "Setting check_undefined_grad=True requires check_backward_ad to be True"
     assert not (check_batched_grad and not check_backward_ad), (
         "Setting check_batched_grad=True requires check_backward_ad to be True")
     assert not (check_batched_forward_grad and not check_forward_ad), (
@@ -1348,7 +1413,8 @@ def _gradcheck_helper(func, inputs, eps, atol, rtol, check_sparse_nnz, nondet_to
     gradcheck_fn = _fast_gradcheck if fast_mode else _slow_gradcheck
     _gradcheck_real_imag(gradcheck_fn, func, func_out, tupled_inputs, outputs, eps,
                          rtol, atol, check_grad_dtypes, check_forward_ad=check_forward_ad,
-                         check_backward_ad=check_backward_ad, nondet_tol=nondet_tol)
+                         check_backward_ad=check_backward_ad, nondet_tol=nondet_tol,
+                         check_undefined_grad=check_undefined_grad)
 
     if check_batched_forward_grad:
         _test_batched_grad_forward_ad(func, tupled_inputs)
@@ -1363,8 +1429,8 @@ def _gradcheck_helper(func, inputs, eps, atol, rtol, check_sparse_nnz, nondet_to
 
     _test_backward_mul_by_grad_output(outputs, tupled_inputs, check_sparse_nnz)
 
-    if check_undefined_grad:
-        _test_undefined_grad(func, outputs, tupled_inputs)
+    if check_undefined_grad and check_backward_ad:
+        _test_undefined_backward_mode(func, outputs, tupled_inputs)
     return True
 
 
@@ -1382,6 +1448,8 @@ def gradgradcheck(
     check_undefined_grad: bool = True,
     check_grad_dtypes: bool = False,
     check_batched_grad: bool = False,
+    check_fwd_over_rev: bool = False,
+    check_rev_over_rev: bool = True,
     fast_mode: bool = False,
 ) -> bool:
     r"""Check gradients of gradients computed via small finite differences
@@ -1437,6 +1505,15 @@ def gradgradcheck(
     Returns:
         True if all differences satisfy allclose condition
     """
+    assert check_fwd_over_rev or check_rev_over_rev, \
+        "Expected at least one of check_fwd_over_rev or check_rev_over_rev to be True"
+    assert not (check_undefined_grad and not check_rev_over_rev), \
+        "Setting check_undefined_grad=True requires check_rev_over_rev to be True"
+    assert not (check_batched_grad and not check_rev_over_rev), (
+        "Setting check_batched_grad=True requires check_rev_over_rev to be True")
+    # TODO: do we want to test this too?
+    # assert not (check_batched_forward_grad and not check_fwd_over_rev), (
+    #     "Setting check_batched_forward_grad=True requires check_fwd_over_rev to be True")
     tupled_inputs = _as_tuple(inputs)
 
     if grad_outputs is None:
@@ -1469,4 +1546,5 @@ def gradgradcheck(
     return gradcheck(
         new_func, tupled_inputs + tupled_grad_outputs, eps=eps, atol=atol, rtol=rtol, raise_exception=raise_exception,
         nondet_tol=nondet_tol, check_undefined_grad=check_undefined_grad,
-        check_grad_dtypes=check_grad_dtypes, check_batched_grad=check_batched_grad, fast_mode=fast_mode)
+        check_grad_dtypes=check_grad_dtypes, check_batched_grad=check_batched_grad, fast_mode=fast_mode,
+        check_forward_ad=check_fwd_over_rev, check_backward_ad=check_rev_over_rev)

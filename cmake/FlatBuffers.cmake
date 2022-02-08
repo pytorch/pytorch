@@ -1,2 +1,10 @@
-set(CMAKE_BUILD_WITH_INSTALL_RPATH ON CACHE BOOL "" FORCE)
-add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/../third_party/flatbuffers ${CMAKE_CURRENT_BINARY_DIR}/flatbuffers-build EXCLUDE_FROM_ALL)
+set(FlatBuffers_Include ${PROJECT_SOURCE_DIR}/third_party/flatbuffers/include)
+file(GLOB FlatBuffers_Library_SRCS
+  ${FlatBuffers_Include}/flatbuffers/*.h
+)
+add_library(flatbuffers INTERFACE)
+target_sources(
+  flatbuffers
+  INTERFACE ${FlatBuffers_Library_SRCS}
+)
+target_include_directories(flatbuffers INTERFACE ${FlatBuffers_Include})

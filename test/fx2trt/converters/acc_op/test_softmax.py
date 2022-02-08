@@ -1,10 +1,11 @@
-# Owner(s): ["oncall: fx"]
+# Owner(s): ["oncall: aiacc"]
 
 import torch
 import torch.fx.experimental.fx_acc.acc_ops as acc_ops
 import torch.nn as nn
 from torch.testing._internal.common_fx2trt import AccTestCase, InputTensorSpec
 from parameterized import parameterized
+from torch.testing._internal.common_utils import run_tests
 
 
 class TestSoftmaxConverter(AccTestCase):
@@ -64,3 +65,6 @@ class TestSoftmaxConverter(AccTestCase):
             expect_error=AssertionError,
             test_explicit_batch_dim=False,
         )
+
+if __name__ == '__main__':
+    run_tests()
