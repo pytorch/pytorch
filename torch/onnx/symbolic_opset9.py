@@ -2607,7 +2607,7 @@ def argmin(g, input, dim, keepdim):
 
 
 @parse_args("v", "i", "v", "v")
-def scatter(g, self, dim, index, src):
+def scatter(g, self, dim, index, src, unique_indices=False):
     src_type = src.type().scalarType()
     src = sym_help._maybe_get_scalar(src)
     if sym_help._is_value(src):
@@ -2621,7 +2621,7 @@ def scatter(g, self, dim, index, src):
 
 
 @parse_args("v", "i", "v", "v")
-def scatter_add(g, self, dim, index, src):
+def scatter_add(g, self, dim, index, src, unique_indices=False):
     dtype = sym_help._try_get_scalar_type(self)
     if dtype is None:
         return _unimplemented("scatter_add", "input dtype not accessible")
@@ -2711,7 +2711,7 @@ def one_hot(g, self, num_classes):
 
 
 @parse_args("v", "i", "v", "v")
-def gather(g, self, dim, index, sparse_grad=False):
+def gather(g, self, dim, index, sparse_grad=False, unique_indices=False):
     if sym_help._maybe_get_const(sparse_grad, "i"):
         return _unimplemented("gather", "sparse_grad == True")
     # NOTE: This workaround is needed since GatherElement is only supported

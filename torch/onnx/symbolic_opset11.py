@@ -221,19 +221,19 @@ def __interpolate(g, input, size, scale_factor, mode, align_corners, recompute_s
     return sym_help.__interpolate_helper(g, input, size, scale_factor, mode, align_corners, recompute_scale_factor)
 
 @parse_args("v", "i", "v", "v")
-def gather(g, self, dim, index, sparse_grad=False):
+def gather(g, self, dim, index, sparse_grad=False, unique_indices=False):
     if sym_help._maybe_get_const(sparse_grad, "i"):
         return _unimplemented("gather", "sparse_grad == True")
     if sym_help._operator_export_type == torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK:
-        return g.op("ATen", self, dim, index, sparse_grad, operator_s="gather")
+        return g.op("ATen", self, dim, index, sparse_grad, unique_indices, operator_s="gather")
     return g.op("GatherElements", self, index, axis_i=dim)
 
 
 @parse_args("v", "i", "v", "v")
-def scatter(g, self, dim, index, src):
+def scatter(g, self, dim, index, src, unique_indices=False):
     from torch.onnx.symbolic_opset9 import expand_as
     if sym_help._operator_export_type == torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK:
-        return g.op("ATen", self, dim, index, src, operator_s="scatter")
+        return g.op("ATen", self, dim, index, src, unique_indices, operator_s="scatter")
     src_type = src.type().scalarType()
     src = sym_help._maybe_get_scalar(src)
     if sym_help._is_value(src):
