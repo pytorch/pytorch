@@ -627,7 +627,19 @@ LINUX_WORKFLOWS = [
         enable_noarch_test=1,
         enable_xla_test=1,
         ciflow_config=CIFlowConfig(
-            labels={LABEL_CIFLOW_DEFAULT, LABEL_CIFLOW_LINUX, LABEL_CIFLOW_CPU, LABEL_CIFLOW_XLA, LABEL_CIFLOW_NOARCH},
+            labels={LABEL_CIFLOW_DEFAULT, LABEL_CIFLOW_LINUX, LABEL_CIFLOW_CPU, LABEL_CIFLOW_NOARCH},
+        ),
+    ),
+    CIWorkflow(
+        arch="linux",
+        build_environment="xla-linux-bionic-py3.7-clang8",
+        docker_image_base=f"{DOCKER_REGISTRY}/pytorch/xla_base",
+        test_runner_type=LINUX_CPU_TEST_RUNNER,
+        num_test_shards=2,
+        distributed_test=False,
+        enable_xla_test=1,
+        ciflow_config=CIFlowConfig(
+            labels={LABEL_CIFLOW_LINUX, LABEL_CIFLOW_CPU, LABEL_CIFLOW_XLA},
         ),
     ),
     CIWorkflow(
@@ -832,7 +844,6 @@ MACOS_WORKFLOWS = [
 ]
 
 DOCKER_IMAGES = {
-    f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-bionic-cuda10.2-cudnn7-py3.7-clang9",  # for pytorch/xla
     f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-bionic-rocm4.3.1-py3.7",               # for rocm
     f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-bionic-rocm4.5-py3.7",                 # for rocm
 }
