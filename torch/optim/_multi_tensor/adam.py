@@ -52,6 +52,11 @@ class Adam(Optimizer):
         for group in self.param_groups:
             group.setdefault('amsgrad', False)
             group.setdefault('maximize', False)
+        state_values = list(self.state.values())
+        step_is_tensor = (len(state_values) != 0) and torch.is_tensor(state_values[0]['step'])
+        if not step_is_tensor:
+            for s in state_values:
+                s['step'] = torch.tensor(float(s['step']))
 
     @torch.no_grad()
     def step(self, closure=None):
@@ -70,7 +75,7 @@ class Adam(Optimizer):
             amsgrad = group['amsgrad']
 
             grads = []
-            states = []
+            state_steps = []
             exp_avg = []
             exp_avg_sq = []
             max_exp_avg_sq = []
@@ -92,7 +97,7 @@ class Adam(Optimizer):
 
                 # State initialization
                 if len(state) == 0:
-                    state['step'] = 0
+                    state['step'] = torch.tensor(0.)
                     # Exponential moving average of gradient values
                     state['exp_avg'] = torch.zeros_like(p, memory_format=torch.preserve_format)
                     # Exponential moving average of squared gradient values
@@ -107,13 +112,15 @@ class Adam(Optimizer):
                 if amsgrad:
                     max_exp_avg_sq.append(state['max_exp_avg_sq'])
 
-                state['step'] += 1
-                states.append(state)
+                state_steps.append(state['step'])
 
             beta1, beta2 = group['betas']
 
-            bias_correction1 = [1 - beta1 ** state['step'] for state in states]
-            bias_correction2 = [1 - beta2 ** state['step'] for state in states]
+            # update steps
+            torch._foreach_add_(state_steps, 1)
+
+            bias_correction1 = [1 - beta1 ** step.item() for step in state_steps]
+            bias_correction2 = [1 - beta2 ** step.item() for step in state_steps]
             if group['weight_decay'] != 0:
                 grads = torch._foreach_add(grads, params_with_grad, alpha=group['weight_decay'])
 
