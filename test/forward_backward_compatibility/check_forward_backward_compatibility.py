@@ -146,17 +146,16 @@ def has_valid_upgraders(schema, version_map):
     # the name of the operator
     schema_name = schema.name
 
-    # find if there are entries for this op
+    if schema_name not in version_map:
+        return False
+
+    entries = version_map[schema_name]
+
     possible_overloads = []
     possible_schemas = []
-    for key, upgrader_entries in version_map.items():
-        if key.split('.')[0] == schema_name:
-            possible_overloads.append(key)
-            possible_schemas.extend([entry.old_schema for entry in upgrader_entries])
-
-    # there is no entry for this schema
-    if len(possible_overloads) == 0:
-        return False
+    for key, upgrader_entries in entries.items():
+        possible_overloads.append(key)
+        possible_schemas.extend([entry.old_schema for entry in upgrader_entries])
 
     # let's make sure this existing schema is part of possible
     # schemas
@@ -191,9 +190,23 @@ def load_schemas_to_dict():
         new_schema_dict[s.name].append(s)
     return new_schema_dict
 
+def process_version_map(version_map):
+    # version map maps full schema name to
+    # list of upgraders. Since we only have
+    # the name of the schema (aka no overload)
+    # we want to first process the map to make
+    # the key lookup easier. After this it will be:
+    # Dict[schema_name, Dict[overload, List[UpgraderEntry]]]
+
+    output = defaultdict(dict)
+    for (key, entries) in version_map.items():
+        new_key = key.split(".")[0]
+        output[new_key][key] = entries
+    return output
+
 def check_bc(existing_schemas):
     new_schema_dict = load_schemas_to_dict()
-    version_map = torch._C._get_operator_version_map()
+    version_map = process_version_map(torch._C._get_operator_version_map())
     is_bc = True
     broken_ops = []
     for existing_schema in existing_schemas:
