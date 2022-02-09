@@ -4,7 +4,7 @@ import torch
 import torch.fx.experimental.fx_acc.acc_ops as acc_ops
 from torch.testing._internal.common_fx2trt import AccTestCase
 from parameterized import parameterized, param
-from torch.fx.experimental.fx2trt.passes.fuse_pass import (
+from fx2trt_oss.fx.passes.fuse_pass import (
     fuse_permute_matmul,
     trt_transposed_matmul,
 )

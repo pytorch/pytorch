@@ -1,9 +1,9 @@
 # Owner(s): ["oncall: aiacc"]
 
 import logging
-# @manual=//caffe2:torch_fx2trt
-from torch.fx.experimental.fx2trt.lower import Lowerer
-from torch.fx.experimental.fx2trt import LowerSetting
+# @manual=//deeplearning/trt/fx2trt_oss:torch_fx2trt
+from fx2trt_oss.fx.lower import Lowerer
+from fx2trt_oss.fx import LowerSetting
 import torch
 import torch.fx as fx
 import torch.nn as nn

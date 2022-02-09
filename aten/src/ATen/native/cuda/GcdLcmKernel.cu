@@ -15,7 +15,7 @@ namespace at { namespace native {
 // See note [Jiterator]
 const char gcd_name[] = "gcd";
 void gcd_kernel_cuda(TensorIteratorBase& iter) {
-  #ifdef USE_JITERATOR
+  #if AT_USE_JITERATOR()
     AT_DISPATCH_INTEGRAL_TYPES(iter.common_dtype(), "gcd_cuda", [&]() {
       jitted_gpu_kernel</*name=*/gcd_name,
                         /*return_dtype=*/ scalar_t,
@@ -28,13 +28,13 @@ void gcd_kernel_cuda(TensorIteratorBase& iter) {
         return calc_gcd(a, b);
       });
     });
-  #endif // USE_JITERATOR
+  #endif // AT_USE_JITERATOR()
 }
 
 // See note [Jiterator]
 const char lcm_name[] = "lcm";
 void lcm_kernel_cuda(TensorIteratorBase& iter) {
-  #ifdef USE_JITERATOR
+  #if AT_USE_JITERATOR()
     AT_DISPATCH_INTEGRAL_TYPES(iter.common_dtype(), "lcm_cuda", [&]() {
       jitted_gpu_kernel</*name=*/lcm_name,
                         /*return_dtype=*/ scalar_t,
@@ -48,7 +48,7 @@ void lcm_kernel_cuda(TensorIteratorBase& iter) {
         return (g == 0) ? 0 : ::abs(a / g * b);
       });
     });
-  #endif // USE_JITERATOR
+  #endif // AT_USE_JITERATOR()
 }
 
 REGISTER_DISPATCH(gcd_stub, &gcd_kernel_cuda);
