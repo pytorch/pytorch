@@ -2,7 +2,7 @@ import gzip
 import json
 import os
 import tempfile
-from enum import Enum
+from enum import Enum, IntEnum
 from functools import partial
 from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
 from warnings import warn
@@ -10,6 +10,10 @@ from warnings import warn
 import torch
 import torch.autograd.profiler as prof
 from torch.autograd import ProfilerActivity, kineto_available
+
+
+class ProfilerBackend(IntEnum):
+    WANDB = 1
 
 
 def supported_activities():
@@ -233,11 +237,11 @@ def _default_schedule_fn(_: int) -> ProfilerAction:
     return ProfilerAction.RECORD
 
 def tensorboard_trace_handler(dir_name: str = None, worker_name: Optional[str] = None, use_gzip: bool = False,
-                              use_wandb: bool = False):
+                              backend: int = None):
     """
     Outputs tracing files to directory of ``dir_name``, then that directory can be
     directly delivered to tensorboard as logdir.
-    Outputs to Weights & Biases when using ``use_wandb = True``.
+    ``backend`` can be used to log traces to another platform (e.g. "ProfilerBackend.WANDB").
     ``worker_name`` should be unique for each worker in distributed scenario,
     it will be set to '[hostname]_[pid]' by default.
     """
@@ -245,11 +249,12 @@ def tensorboard_trace_handler(dir_name: str = None, worker_name: Optional[str] =
     import socket
     import time
 
-    assert dir_name is not None or use_wandb is True, "tensorboard_trace_handler requires a dir_name or use_wandb = True"
+    assert dir_name is not None or backend is not None, "tensorboard_trace_handler requires a dir_name or a backend"
+    # list of dirs to which the traces will be saved
     dirs = []
     if dir_name is not None:
         dirs.append(dir_name)
-    if use_wandb is True:
+    if backend == ProfilerBackend.WANDB:
         import wandb
         assert wandb.run is not None, "You need to call wandb.init() prior to using tensorboard_trace_handler"
         wandb_trace_dir = os.path.join(wandb.run.dir, "pytorch_traces")
