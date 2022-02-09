@@ -11,4 +11,4 @@ from .rprop import Rprop as Rprop
 from .asgd import ASGD as ASGD
 from .adamax import Adamax as Adamax
 Adadelta = partial(optim.Adadelta, foreach=True)
-from .adagrad import Adagrad as Adagrad
+Adagrad = partial(optim.Adagrad, foreach=True)
