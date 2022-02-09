@@ -327,9 +327,9 @@ void performTensorExprFusion(
     std::vector<IValue> sample_inputs) {
   // Enable TensorExpr fusion with dynamic shapes
   setTensorExprDynamicShapeFusionEnabled(true);
-  GRAPH_DEBUG("Graph before tracing: ", graph);
+  GRAPH_DEBUG("Graph before tracing: ", *graph);
   auto traced_graph = TraceGraph(graph, sample_inputs);
-  GRAPH_DEBUG("Graph after tracing: ", traced_graph);
+  GRAPH_DEBUG("Graph after tracing: ", *traced_graph);
   FuseTensorExprs(
       traced_graph,
       /*min_group_size*/ 2,

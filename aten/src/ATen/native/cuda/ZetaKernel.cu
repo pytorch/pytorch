@@ -16,7 +16,7 @@ namespace {
 // See note [Jiterator]
 const char zeta_name[] = "zeta";
 void zeta_kernel_cuda(TensorIteratorBase& iter) {
-  #ifdef USE_JITERATOR
+  #if AT_USE_JITERATOR()
     AT_DISPATCH_FLOATING_TYPES(iter.common_dtype(), "zeta_cuda", [&]() {
       opmath_jitted_gpu_kernel_with_scalars</*name=*/zeta_name,
                                      /*return_dtype=*/ scalar_t,
