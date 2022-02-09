@@ -792,10 +792,9 @@ void _linalg_check_errors(
   }
 }
 
-bool _linalg_requires_fw_or_bw_grad(const Tensor& input) {
+bool _requires_fw_or_bw_grad(const Tensor& input) {
   return ((at::GradMode::is_enabled() && input.requires_grad())
-          || input._fw_grad(/*level */ 0).defined()
-          || isTensorSubclassLike(input));
+          || input._fw_grad(/*level */ 0).defined());
 }
 
 // Below of the definitions of the functions operating on a batch that are going to be dispatched
@@ -2388,7 +2387,7 @@ std::tuple<Tensor&, Tensor&> linalg_eigh_out(const Tensor& input, c10::string_vi
 Tensor linalg_eigvalsh(const Tensor& input, c10::string_view uplo) {
   // if input requires grad we must compute the eigenvectors to make this function differentiable
   // the eigenvectors are not exposed to the user
-  if (_linalg_requires_fw_or_bw_grad(input)) {
+  if (_requires_fw_or_bw_grad(input)) {
     Tensor values;
     std::tie(values, std::ignore) = at::linalg_eigh(input, uplo);
     return values;
@@ -2884,7 +2883,7 @@ Tensor& linalg_eigvals_out(const Tensor& input, Tensor& values) {
 Tensor linalg_eigvals(const Tensor& input) {
   // if input requires grad we must compute the eigenvectors to make this function differentiable
   // the eigenvectors are not exposed to the user
-  if (_linalg_requires_fw_or_bw_grad(input)) {
+  if (_requires_fw_or_bw_grad(input)) {
     return std::get<0>(at::linalg_eig(input));
   }
 
@@ -3069,7 +3068,7 @@ Tensor& linalg_svdvals_out(const Tensor& A, Tensor & S) {
 }
 
 Tensor linalg_svdvals(const Tensor& A) {
-  return std::get<1>(at::_linalg_svd(A, /*full_matrices=*/false, /*comptue_uv=*/_linalg_requires_fw_or_bw_grad(A)));
+  return std::get<1>(at::_linalg_svd(A, /*full_matrices=*/false, /*comptue_uv=*/_requires_fw_or_bw_grad(A)));
 }
 
 std::tuple<Tensor&, Tensor&, Tensor&> svd_out(const Tensor& self, bool some, bool compute_uv, Tensor& U, Tensor& S, Tensor& V) {
