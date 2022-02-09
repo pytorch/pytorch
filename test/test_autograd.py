@@ -4074,8 +4074,8 @@ class TestAutograd(TestCase):
             @staticmethod
             def forward(ctx, x, y):
                 if fwAD._current_level >= 0:
-                    assert x.requires_grad is False
-                    assert y.requires_grad is False
+                    self.assertFalse(x.requires_grad)
+                    self.assertFalse(y.requires_grad)
                 return x.clone(), y.clone()
 
             @staticmethod
