@@ -410,7 +410,7 @@ Val* getProducerOffsetWithGather(
 
   // producer offset: window_index - padding
   auto producer_offset = SimplifyingIrBuilder::subExpr(
-      window_idx, IrBuilder::create<Int>(pad_width));
+      window_idx, SimplifyingIrBuilder::create<Int>(pad_width));
   return producer_offset;
 }
 
@@ -511,14 +511,14 @@ Val* getProducerIndexWithPartialSplit(
     if (consumer_offset->isZeroInt()) {
       return producer_index;
     } else {
-      return IrBuilder::addExpr(producer_index, consumer_offset);
+      return SimplifyingIrBuilder::addExpr(producer_index, consumer_offset);
     }
   }
 
   // Non-global case. Difference of the split offsets must be
   // accounted.
 
-  auto diff = IrBuilder::subExpr(consumer_offset, producer_offset);
+  auto diff = SimplifyingIrBuilder::subExpr(consumer_offset, producer_offset);
   kir::ExpressionEvaluator ee;
   auto diff_eval = ee.evaluate(diff);
   // We currently only allow constant offsetting
@@ -528,8 +528,8 @@ Val* getProducerIndexWithPartialSplit(
     return producer_index;
   }
 
-  return IrBuilder::addExpr(
-      producer_index, IrBuilder::create<Int>(diff_eval.value()));
+  return SimplifyingIrBuilder::addExpr(
+      producer_index, SimplifyingIrBuilder::create<Int>(diff_eval.value()));
 }
 
 } // namespace
@@ -579,13 +579,14 @@ void IndexCompute::handle(Split* split) {
     index_map_[in_id] = outer_ind;
     extent_map_[in_id] = getExtent(outer_id);
   } else {
-    index_map_[in_id] = IrBuilder::addExpr(
-        IrBuilder::mulExpr(outer_ind, getExtent(inner_id)), inner_ind);
+    index_map_[in_id] = SimplifyingIrBuilder::addExpr(
+        SimplifyingIrBuilder::mulExpr(outer_ind, getExtent(inner_id)),
+        inner_ind);
     // The extent should be updated only when its allocation is
     // partial, i.e., zero_merged_in is true. See PR #1270.
     if (zero_merged_in) {
-      extent_map_[in_id] =
-          IrBuilder::mulExpr(getExtent(outer_id), getExtent(inner_id));
+      extent_map_[in_id] = SimplifyingIrBuilder::mulExpr(
+          getExtent(outer_id), getExtent(inner_id));
     }
   }
 }
@@ -694,8 +695,8 @@ void IndexCompute::handle(Merge* merge) {
     zero_merged_in_.emplace(inner_id);
     zero_merged_in_.emplace(outer_id);
   } else {
-    index_map_[outer_id] = IrBuilder::divExpr(out_ind, inner_extent);
-    index_map_[inner_id] = IrBuilder::modExpr(out_ind, inner_extent);
+    index_map_[outer_id] = SimplifyingIrBuilder::divExpr(out_ind, inner_extent);
+    index_map_[inner_id] = SimplifyingIrBuilder::modExpr(out_ind, inner_extent);
   }
 }
 
@@ -872,10 +873,13 @@ class UpdateLeafIndices : public IterVisitor {
     }
 
     auto factor = split->factor();
-    index_map_[inner_id] = IrBuilder::modExpr(index_map_[in_id], factor);
+    index_map_[inner_id] =
+        SimplifyingIrBuilder::modExpr(index_map_[in_id], factor);
     extent_map_[inner_id] = factor;
-    index_map_[outer_id] = IrBuilder::divExpr(index_map_[in_id], factor);
-    extent_map_[outer_id] = IrBuilder::ceilDivExpr(getExtent(in_id), factor);
+    index_map_[outer_id] =
+        SimplifyingIrBuilder::divExpr(index_map_[in_id], factor);
+    extent_map_[outer_id] =
+        SimplifyingIrBuilder::ceilDivExpr(getExtent(in_id), factor);
   }
 
   void handle(Merge* merge) override {
@@ -894,12 +898,13 @@ class UpdateLeafIndices : public IterVisitor {
     TORCH_INTERNAL_ASSERT(
         index_map_.find(inner_id) != index_map_.end(), "Inner ID not found");
 
-    index_map_[out_id] = IrBuilder::mulExpr(
+    index_map_[out_id] = SimplifyingIrBuilder::mulExpr(
         index_map_[inner_id],
-        IrBuilder::mulExpr(index_map_[outer_id], getExtent(inner_id)));
+        SimplifyingIrBuilder::mulExpr(
+            index_map_[outer_id], getExtent(inner_id)));
 
     extent_map_[out_id] =
-        IrBuilder::mulExpr(getExtent(outer_id), getExtent(inner_id));
+        SimplifyingIrBuilder::mulExpr(getExtent(outer_id), getExtent(inner_id));
   }
 
   // return extent_map_[id] if exists, else return id->extent()
@@ -926,8 +931,8 @@ Val* getHaloExtentOfRootAxis(IterDomain* id, Val* normal_extent = nullptr) {
 
   const auto& halo = GpuLower::current()->haloInfo().getRootAxisInfo(id);
   if (halo.hasHalo()) {
-    auto halo_extent =
-        IrBuilder::addExpr(normal_extent, IrBuilder::create<Int>(halo.width()));
+    auto halo_extent = SimplifyingIrBuilder::addExpr(
+        normal_extent, SimplifyingIrBuilder::create<Int>(halo.width()));
     return halo_extent;
   } else {
     return normal_extent;
@@ -979,8 +984,8 @@ void IndexSwizzle::run() {
       auto idx_to_swizzle_i = indexMap().at(id_to_swizzle_i);
       auto idx_to_swizzle_j = indexMap().at(id_to_swizzle_j);
 
-      auto swizzled_idx = IrBuilder::modExpr(
-          IrBuilder::addExpr(idx_to_swizzle_i, idx_to_swizzle_j),
+      auto swizzled_idx = SimplifyingIrBuilder::modExpr(
+          SimplifyingIrBuilder::addExpr(idx_to_swizzle_i, idx_to_swizzle_j),
           id_to_swizzle_j->extent());
       index_map_[id_to_swizzle_j] = swizzled_idx;
       swizzled_ids_.insert(id_to_swizzle_j);
@@ -1107,7 +1112,8 @@ indexMapFromTV(
     }
 
     if (loop == double_buffer_loop) {
-      idx = IrBuilder::addExpr(idx, GpuLower::current()->kernel()->oneVal());
+      idx = SimplifyingIrBuilder::addExpr(
+          idx, GpuLower::current()->kernel()->oneVal());
     }
 
     loop_to_ind_map[loop] = idx;
@@ -1447,7 +1453,8 @@ std::vector<Val*> Index::getGlobalProducerStridedIndices(
       }
       std::stringstream ss;
       ss << "T" << producer_tv->name() << ".stride[" << stride_i++ << "]";
-      strides[i] = IrBuilder::create<NamedScalar>(ss.str(), DataType::Int);
+      strides[i] =
+          SimplifyingIrBuilder::create<NamedScalar>(ss.str(), DataType::Int);
     }
   }
 
@@ -1488,12 +1495,13 @@ std::vector<Val*> Index::getGlobalProducerStridedIndices(
       // by extent of this dimension
       auto root_dim_extent = getHaloExtentOfRootAxis(root_dom[dim]);
       cur_contig_stride =
-          IrBuilder::mulExpr(cur_contig_stride, root_dim_extent);
+          SimplifyingIrBuilder::mulExpr(cur_contig_stride, root_dim_extent);
     } else {
       // If non contiguous dimension, keep local stride information, set cur
       // stride to local stride * local raw extent
       auto root_dim_extent = getHaloExtentOfRootAxis(root_dom[dim]);
-      cur_contig_stride = IrBuilder::mulExpr(strides[dim], root_dim_extent);
+      cur_contig_stride =
+          SimplifyingIrBuilder::mulExpr(strides[dim], root_dim_extent);
     }
   }
 
@@ -1553,9 +1561,10 @@ std::vector<Val*> Index::getGlobalProducerStridedIndices(
     if (root_ind->isZeroInt()) {
       continue;
     } else {
-      auto strided_ind = IrBuilder::mulExpr(root_ind, strides[i]);
+      auto strided_ind = SimplifyingIrBuilder::mulExpr(root_ind, strides[i]);
       if (i == root_dom.size() - 1 && vectorize_shift != nullptr) {
-        strided_inds[i] = IrBuilder::addExpr(strided_ind, vectorize_shift);
+        strided_inds[i] =
+            SimplifyingIrBuilder::addExpr(strided_ind, vectorize_shift);
       } else {
         strided_inds[i] = strided_ind;
       }
@@ -1854,13 +1863,13 @@ std::vector<Val*> Index::getNonGlobalProducerStridedIndices(
         if (stride == nullptr) {
           stride = root_ext_j;
         } else {
-          stride = IrBuilder::mulExpr(stride, root_ext_j);
+          stride = SimplifyingIrBuilder::mulExpr(stride, root_ext_j);
         }
       }
     }
 
     if (stride != nullptr) {
-      strided_inds[i] = IrBuilder::mulExpr(root_ind_i, stride);
+      strided_inds[i] = SimplifyingIrBuilder::mulExpr(root_ind_i, stride);
     } else {
       strided_inds[i] = root_ind_i;
     }
@@ -1870,12 +1879,12 @@ std::vector<Val*> Index::getNonGlobalProducerStridedIndices(
     auto db_loop = gpu_lower->doubleBufferInfo().getDoubleBufferLoop(
         producer_tv, loops, true);
     if (db_loop != nullptr) {
-      auto db_switch_index =
-          IrBuilder::modExpr(db_loop->index(), IrBuilder::create<Int>(2));
+      auto db_switch_index = SimplifyingIrBuilder::modExpr(
+          db_loop->index(), SimplifyingIrBuilder::create<Int>(2));
       auto original_alloc_size =
           gpu_lower->doubleBufferInfo().getOriginalAllocSize(producer_tv);
       auto db_strided_index =
-          IrBuilder::mulExpr(db_switch_index, original_alloc_size);
+          SimplifyingIrBuilder::mulExpr(db_switch_index, original_alloc_size);
       strided_inds.push_back(db_strided_index);
     }
   }
@@ -2201,13 +2210,13 @@ std::vector<Val*> Index::getNonGlobalConsumerStridedIndices(
         if (stride == nullptr) {
           stride = root_ext_j;
         } else {
-          stride = IrBuilder::mulExpr(stride, root_ext_j);
+          stride = SimplifyingIrBuilder::mulExpr(stride, root_ext_j);
         }
       }
     }
 
     if (stride != nullptr) {
-      strided_inds[i] = IrBuilder::mulExpr(root_ind_i, stride);
+      strided_inds[i] = SimplifyingIrBuilder::mulExpr(root_ind_i, stride);
     } else {
       strided_inds[i] = root_ind_i;
     }
@@ -2226,13 +2235,14 @@ std::vector<Val*> Index::getNonGlobalConsumerStridedIndices(
     auto db_loop = gpu_lower->doubleBufferInfo().getDoubleBufferLoop(
         consumer_tv, loops, true);
     if (db_loop != nullptr) {
-      auto db_switch_index = IrBuilder::subExpr(
+      auto db_switch_index = SimplifyingIrBuilder::subExpr(
           gpu_lower->kernel()->oneVal(),
-          IrBuilder::modExpr(db_loop->index(), IrBuilder::create<Int>(2)));
+          SimplifyingIrBuilder::modExpr(
+              db_loop->index(), SimplifyingIrBuilder::create<Int>(2)));
       auto original_alloc_size =
           gpu_lower->doubleBufferInfo().getOriginalAllocSize(consumer_tv);
       auto db_strided_index =
-          IrBuilder::mulExpr(db_switch_index, original_alloc_size);
+          SimplifyingIrBuilder::mulExpr(db_switch_index, original_alloc_size);
       strided_inds.push_back(db_strided_index);
     }
   }
@@ -2274,7 +2284,8 @@ kir::TensorIndex* Index::getProducerIndex(
     const TensorView* consumer,
     const std::vector<kir::ForLoop*>& loops) {
   auto strided_indices = getProducerStridedIndices(producer, consumer, loops);
-  return IrBuilder::create<kir::TensorIndex>(producer, strided_indices);
+  return SimplifyingIrBuilder::create<kir::TensorIndex>(
+      producer, strided_indices);
 }
 
 std::vector<Val*> Index::getConsumerStridedIndices(
@@ -2302,7 +2313,8 @@ kir::TensorIndex* Index::getConsumerIndex(
     const TensorView* consumer,
     const std::vector<kir::ForLoop*>& loops) {
   auto strided_indices = getConsumerStridedIndices(consumer, loops);
-  return IrBuilder::create<kir::TensorIndex>(consumer, strided_indices);
+  return SimplifyingIrBuilder::create<kir::TensorIndex>(
+      consumer, strided_indices);
 }
 
 namespace {
@@ -2552,8 +2564,8 @@ std::pair<Val*, Val*> getStartAndStopOffsetsForShift(
   }
 
   return {
-      IrBuilder::create<Int>(start_offset),
-      IrBuilder::create<Int>(stop_offset)};
+      SimplifyingIrBuilder::create<Int>(start_offset),
+      SimplifyingIrBuilder::create<Int>(stop_offset)};
 }
 
 std::pair<Val*, Val*> getStartAndStopOffsetsForGather(
@@ -2828,7 +2840,7 @@ auto getPredicateReferenceIndexing(
       // unswitch. In that case, it is not necessary to move ahead the
       // index for double buffering.
       if (cur_index == db_loop->index()) {
-        loop_to_ind_map[db_loop] = IrBuilder::addExpr(
+        loop_to_ind_map[db_loop] = SimplifyingIrBuilder::addExpr(
             cur_index, GpuLower::current()->kernel()->oneVal());
       }
     }
