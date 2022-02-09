@@ -2363,8 +2363,7 @@ class TestAutograd(TestCase):
                 y = Variable(y) if y_var else y
                 self.assertIsInstance(x.type(t), t)
                 self.assertIsInstance(x.type_as(y), t)
-                # TODO: t.dtype should work
-                t_dtype = t().dtype
+                t_dtype = t.dtype
                 self.assertIsInstance(x.type(t_dtype), t)
                 self.assertIs(t_dtype, x.type(t_dtype).dtype)
                 self.assertEqual(y.data_ptr(), y.type(t).data_ptr())
