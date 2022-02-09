@@ -185,6 +185,24 @@ void removeProfileNodesAndSpecializeTypes(Block* b) {
       it->output()->replaceAllUsesWith(it->input());
       auto profiled_type = it->ty(attr::profiled_type)->expect<TensorType>();
 
+      TensorTypePtr input_tensor_type = nullptr;
+      bool input_is_optional = false;
+      if (it->input()->type()->kind() == c10::TypeKind::TensorType) {
+        input_tensor_type = it->input()->type()->expect<TensorType>();
+      } else {
+        input_tensor_type = it->input()
+                                ->type()
+                                ->expectRef<OptionalType>()
+                                .getElementType()
+                                ->expect<TensorType>();
+        input_is_optional = true;
+      }
+
+      if (input_is_optional) {
+        it.destroyCurrent();
+        continue;
+      }
+
       // A value can be profiled with differently typed uses.
       // This can occur from:
       // - having a use which is not executed, so the type will be
@@ -204,18 +222,18 @@ void removeProfileNodesAndSpecializeTypes(Block* b) {
       if (profiled_type == TensorType::get()) {
         continue;
       }
+
       // If we encounter non-identical profiled types for the same value, merge
       // them.  This situation can happen if, e.g., loop unrolling duplicates
       // profiled types in a loop body in a manner that isn't logically
       // consistent (see TestTEFuser.test_unrolled_cat).
-      auto input_type = it->input()->type()->expect<TensorType>();
-      if (input_type == TensorType::get()) {
+      if (input_tensor_type == TensorType::get()) {
         it->input()->setType(profiled_type);
       } else {
-        it->input()->setType(input_type->merge(*profiled_type));
+        it->input()->setType(input_tensor_type->merge(*profiled_type));
       }
-      it.destroyCurrent();
 
+      it.destroyCurrent();
     } else {
       for (Block* ib : it->blocks()) {
         removeProfileNodesAndSpecializeTypes(ib);
@@ -1047,7 +1065,8 @@ class TensorExprFuser {
       // Allow only if the node has a shape function defined.
       // ListConstruct node is an exception since that is needed to fuse
       // aten::cat, though it does not have a shape function.
-      REQ(node->kind() == prim::ListConstruct || node->kind() == prim::TensorExprGroup ||
+      REQ(node->kind() == prim::ListConstruct ||
+          node->kind() == prim::TensorExprGroup ||
           (node->maybeSchema() && shapeComputeGraphForSchema(node->schema())));
     }
 
@@ -1234,13 +1253,15 @@ void FuseTensorExprs(
   }
 
   if (add_composed_op) {
-    TORCH_INTERNAL_ASSERT(fuse_to_dynamic_shapes, "Fusing static shapes with composed op NYI");
+    TORCH_INTERNAL_ASSERT(
+        fuse_to_dynamic_shapes, "Fusing static shapes with composed op NYI");
   }
 
   // Get rid of dead code so that we don't waste effort fusing it.
   EliminateDeadCode(graph);
 
-  TensorExprFuser fuser(graph, min_group_size, add_composed_op, fuse_to_dynamic_shapes);
+  TensorExprFuser fuser(
+      graph, min_group_size, add_composed_op, fuse_to_dynamic_shapes);
   fuser.run();
 
   EliminateCommonSubexpression(graph);
@@ -1250,7 +1271,8 @@ void FuseTensorExprs(
 }
 
 Operation createTensorExprOp(const Node* node) {
-  bool dynamic_shape_fusion_node = node->hasAttribute(attr::striding_inputs_desc);
+  bool dynamic_shape_fusion_node =
+      node->hasAttribute(attr::striding_inputs_desc);
   if (!dynamic_shape_fusion_node) {
     auto kernel =
         std::make_shared<tensorexpr::TensorExprKernel>(node->g(attr::Subgraph));

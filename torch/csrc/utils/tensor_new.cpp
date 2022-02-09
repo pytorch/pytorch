@@ -1162,9 +1162,11 @@ Tensor asarray(
 
     // Make tensor from sequence, inferring its type, and then convert
     // it to the desired type.
+    // Type inference is activated only if the dtype has not been specified.
+    // Otherwise, we force the unwrapped dtype.
     tensor = internal_new_from_data(
-        TensorOptions(), dtype_unwrapped, device, obj, false, false, true);
-    tensor = tensor.to(dtype_unwrapped);
+        TensorOptions(), dtype_unwrapped, device, obj,
+        /* copy_variables = */ false, /* copy_numpy = */ false, /* type_inference = */ !dtype.has_value());
     tensor.set_requires_grad(requires_grad);
   }
 
