@@ -5,13 +5,6 @@ from test.jit.fixtures_srcs.generate_models import ALL_MODULES
 from torch.testing._internal.common_utils import TestCase, run_tests
 
 
-if __name__ == "__main__":
-    raise RuntimeError(
-        "This test file is not meant to be run directly, use:\n\n"
-        "\tpython test/test_jit.py TESTNAME\n\n"
-        "instead."
-    )
-
 class TestUpgraderModelGeneration(TestCase):
     def test_all_modules(self):
         for a_module, expect_operator in ALL_MODULES.items():
