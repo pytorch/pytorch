@@ -944,7 +944,7 @@ scalar_type_to_pytorch_type = [
     torch.half,         # 5
     torch.float,        # 6
     torch.double,       # 7
-    torch.complex32,    # 8
+    None,               # 8
     torch.complex64,    # 9
     torch.complex128,   # 10
     torch.bool,         # 11

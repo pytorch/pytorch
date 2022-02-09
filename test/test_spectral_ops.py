@@ -727,7 +727,6 @@ class TestFFT(TestCase):
     # Legacy fft tests
     def _test_fft_ifft_rfft_irfft(self, device, dtype):
         complex_dtype = {
-            torch.float16: torch.complex32,
             torch.float32: torch.complex64,
             torch.float64: torch.complex128
         }[dtype]
