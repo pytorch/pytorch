@@ -7,9 +7,8 @@ T_co = TypeVar('T_co', covariant=True)
 
 
 class SamplerIterDataPipe(IterDataPipe[T_co]):
-    r""" :class:`SamplerIterDataPipe`.
-
-    Iterable DataPipe to generate sample elements.
+    r"""
+    Generate sample elements using the provided ``Sampler`` (defaults to :class:`SequentialSampler`).
 
     Args:
         datapipe: IterDataPipe to sample from
@@ -46,17 +45,16 @@ class SamplerIterDataPipe(IterDataPipe[T_co]):
 
 @functional_datapipe('shuffle')
 class ShufflerIterDataPipe(IterDataPipe[T_co]):
-    r""" :class:`ShufflerIterDataPipe`
-
-    Iterable DataPipe to shuffle the input DataPipe with a buffer. The buffer
-    with `buffer_size` is filled with elements from the datapipe first. Then,
+    r"""
+    Shuffle the input DataPipe with a buffer (functional name: ``shuffle``). The buffer
+    with ``buffer_size`` is filled with elements from the datapipe first. Then,
     each item will be yielded from the buffer by reservoir sampling via iterator.
 
-    `buffer_size` is required to be larger than 0. For `buffer_size == 1`, the
+    ``buffer_size`` is required to be larger than ``0``. For ``buffer_size == 1``, the
     datapipe is not shuffled. In order to fully shuffle all elements from datapipe,
-    `buffer_size` is required to be greater than or equal to the size of datapipe.
+    ``buffer_size`` is required to be greater than or equal to the size of datapipe.
 
-    When it is used with :class:`~torch.utils.data.DataLoader`, the methods to
+    When it is used with :class:`torch.utils.data.DataLoader`, the methods to
     set up random seed are different based on :attr:`num_workers`.
 
     For single-process mode (:attr:`num_workers == 0`), the random seed is set before
@@ -66,8 +64,8 @@ class ShufflerIterDataPipe(IterDataPipe[T_co]):
 
     Args:
         datapipe: The IterDataPipe being shuffled
-        buffer_size: The buffer size for shuffling (default to 10000)
-        unbatch_level: Specifies if it necessary to unbatch source data before
+        buffer_size: The buffer size for shuffling (default to ``10000``)
+        unbatch_level: Specifies if it is necessary to unbatch source data before
             applying the shuffle
     """
     datapipe: IterDataPipe[T_co]
