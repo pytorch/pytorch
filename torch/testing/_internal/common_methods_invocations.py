@@ -4078,6 +4078,21 @@ def sample_inputs_upsample(mode, self, device, dtype, requires_grad, **kwargs):
 
     return sample_inputs
 
+
+def ref_gelu(X, *, approximate='none'):
+    def _gelu_ref(X):
+        return X * stats.norm.cdf(X)
+
+    def _tanh_gelu_ref(X):
+        M_SQRT_2_PI = math.sqrt(2 / math.pi)
+        Z = M_SQRT_2_PI * (X + 0.044715 * np.power(X, 3.0))
+        return 0.5 * X * (1.0 + np.tanh(Z))
+
+    if approximate == 'tanh':
+        return _tanh_gelu_ref(X)
+    else:
+        return _gelu_ref(X)
+
 def sample_inputs_gelu(self, device, dtype, requires_grad, **kwargs):
     N = 5
     tensors = []
@@ -11761,6 +11776,7 @@ op_db: List[OpInfo] = [
            ),
     OpInfo('nn.functional.gelu',
            aten_name="gelu",
+           ref=ref_gelu,
            supports_autograd=True,
            assert_autodiffed=True,
            sample_inputs_func=sample_inputs_gelu,
