@@ -220,7 +220,7 @@ upsample_bicubic2d = _interpolate("upsample_bicubic2d", 4, "cubic")
 def __interpolate(g, input, size, scale_factor, mode, align_corners, recompute_scale_factor, antialias):
     return sym_help.__interpolate_helper(g, input, size, scale_factor, mode, align_corners, recompute_scale_factor)
 
-@parse_args("v", "i", "v", "v")
+@parse_args("v", "i", "v", "v", "i", "b")
 def gather(g, self, dim, index, sparse_grad=False, unique_indices=False):
     if sym_help._maybe_get_const(sparse_grad, "i"):
         return _unimplemented("gather", "sparse_grad == True")
@@ -231,7 +231,7 @@ def gather(g, self, dim, index, sparse_grad=False, unique_indices=False):
     return g.op("GatherElements", self, index, axis_i=dim)
 
 
-@parse_args("v", "i", "v", "v")
+@parse_args("v", "i", "v", "v", "b")
 def scatter(g, self, dim, index, src, unique_indices=False):
     if sym_help._maybe_get_const(unique_indices, "b"):
         return _unimplemented("scatter", "unique_indices == True")

@@ -2606,7 +2606,7 @@ def argmin(g, input, dim, keepdim):
         return g.op("ArgMin", input, axis_i=dim, keepdims_i=keepdim)
 
 
-@parse_args("v", "i", "v", "v")
+@parse_args("v", "i", "v", "v", "b")
 def scatter(g, self, dim, index, src, unique_indices=False):
     if sym_help._maybe_get_const(unique_indices, "b"):
         return _unimplemented("scatter", "unique_indices == True")
@@ -2622,7 +2622,7 @@ def scatter(g, self, dim, index, src, unique_indices=False):
         return g.op("Scatter", self, index, expand_as(g, src, index), axis_i=dim)
 
 
-@parse_args("v", "i", "v", "v")
+@parse_args("v", "i", "v", "v", "b")
 def scatter_add(g, self, dim, index, src, unique_indices=False):
     if sym_help._maybe_get_const(unique_indices, "b"):
         return _unimplemented("scatter", "unique_indices == True")
@@ -2714,7 +2714,7 @@ def one_hot(g, self, num_classes):
     return g.op("OneHot", self, num_classes, values, axis_i=-1)
 
 
-@parse_args("v", "i", "v", "v")
+@parse_args("v", "i", "v", "v", "i", "b")
 def gather(g, self, dim, index, sparse_grad=False, unique_indices=False):
     if sym_help._maybe_get_const(sparse_grad, "i"):
         return _unimplemented("gather", "sparse_grad == True")
