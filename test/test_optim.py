@@ -4,7 +4,9 @@ import warnings
 import math
 import unittest
 import functools
+import itertools
 from copy import deepcopy
+
 import torch
 from torch._six import inf
 import torch.optim as optim
@@ -20,7 +22,6 @@ from torch.optim.lr_scheduler import LambdaLR, MultiplicativeLR, SequentialLR, S
 from torch.optim.swa_utils import AveragedModel, SWALR, update_bn
 from torch.testing._internal.common_utils import TestCase, run_tests, TEST_WITH_UBSAN, load_tests, \
     skipIfRocm
-
 # load_tests from common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
 load_tests = load_tests
@@ -183,6 +184,15 @@ class TestOptim(TestCase):
         optimizer_c.param_groups.extend(optimizer_c.param_groups)
         self.assertEqual(optimizer.state_dict()['param_groups'][-1],
                          optimizer_c.state_dict()['param_groups'][-1])
+
+        # Make sure that optimizers that support maximize can load older models
+        state_dict = optimizer.state_dict()
+        if 'maximize' in state_dict['param_groups'][0]:
+            for group in state_dict['param_groups']:
+                del group['maximize']
+            optimizer.load_state_dict(state_dict)
+            # Make sure we can still step
+            optimizer.step()
 
         # Check that state dict can be loaded even when we cast parameters
         # to a different type and move to a different device.
@@ -602,6 +612,8 @@ class TestOptim(TestCase):
     # ROCm precision is too low to pass this test
     @skipIfRocm
     def test_adadelta(self):
+        # Handles https://github.com/pytorch/pytorch/issues/69698
+        self.rel_tol = 4e-3
         for optimizer in [optim.Adadelta, optim_mt.Adadelta]:
             self._test_basic_cases(
                 lambda weight, bias: optimizer([weight, bias])
@@ -623,6 +635,8 @@ class TestOptim(TestCase):
                 optimizer(None, lr=1e-2, rho=1.1)
 
     def test_adadelta_complex(self):
+        # Handles https://github.com/pytorch/pytorch/issues/69698
+        self.rel_tol = 2e-2
         for optimizer in [optim.Adadelta]:
             self._test_complex_optimizer(
                 lambda weight: optimizer([weight])
@@ -1419,6 +1433,21 @@ class TestLRScheduler(TestCase):
         scheduler = SequentialLR(self.opt, schedulers=schedulers, milestones=milestones)
         self._test(scheduler, targets, epochs)
 
+    def test_get_last_lr_sequentiallr(self):
+        epochs = 12
+        milestones = [3, 6]
+        schedulers = [None] * 3
+        schedulers[0] = ConstantLR(self.opt, factor=0.1, total_iters=3)
+        schedulers[1] = ExponentialLR(self.opt, gamma=0.8)
+        schedulers[2] = StepLR(self.opt, gamma=0.1, step_size=2)
+        scheduler = SequentialLR(self.opt, schedulers=schedulers, milestones=milestones)
+        constant_lr_target = [0.005] * 3
+        exponential_lr_target = [0.05, 0.04, 0.032]
+        step_lr_target = [0.05, 0.05, 0.005, 0.005, 0.0005, 0.0005]
+        single_targets = constant_lr_target + exponential_lr_target + step_lr_target
+        targets = [single_targets, [x * 10 for x in single_targets]]
+        self._test_get_last_lr(scheduler, targets, epochs)
+
     def test_chained_lr2_get_last_lr_before_step(self):
         schedulers = [
             LinearLR(self.opt, start_factor=0.4, total_iters=3),
@@ -2192,10 +2221,6 @@ class TestLRScheduler(TestCase):
     def _test(self, schedulers, targets, epochs=10):
         if isinstance(schedulers, _LRScheduler):
             schedulers = [schedulers]
-
-        optimizers = set()
-        for scheduler in schedulers:
-            optimizers.add(scheduler.optimizer)
         for epoch in range(epochs):
             for param_group, target in zip(self.opt.param_groups, targets):
                 self.assertEqual(target[epoch], param_group['lr'],
@@ -2451,8 +2476,8 @@ class TestSWAUtils(TestCase):
         for p_avg, p_swa in zip(averaged_params, averaged_dnn.parameters()):
             self.assertEqual(p_avg, p_swa)
 
-    def test_averaged_model_exponential_use_state_dict(self):
-        # Test AveragedModel with EMA as avg_fn and use_state_dict as True.
+    def test_averaged_model_exponential_buffers(self):
+        # Test AveragedModel with EMA as avg_fn and use_buffers as True.
         dnn = torch.nn.Sequential(
             torch.nn.Conv2d(1, 5, kernel_size=3),
             torch.nn.BatchNorm2d(5, momentum=0.3),
@@ -2462,13 +2487,14 @@ class TestSWAUtils(TestCase):
 
         def avg_fn(p_avg, p, n_avg):
             return alpha * p_avg + (1 - alpha) * p
-        averaged_dnn = AveragedModel(dnn, avg_fn=avg_fn, mode='state_dict')
-        averaged_params = [torch.zeros_like(param) for param in dnn.state_dict().values()
+        averaged_dnn = AveragedModel(dnn, avg_fn=avg_fn, use_buffers=True)
+        dnn_params = itertools.chain(dnn.parameters(), dnn.buffers())
+        averaged_params = [torch.zeros_like(param) for param in dnn_params
                            if param.size() != torch.Size([])]
         n_updates = 10
         for i in range(n_updates):
             updated_averaged_params = []
-            for p, p_avg in zip(dnn.state_dict().values(), averaged_params):
+            for p, p_avg in zip(dnn_params, averaged_params):
                 if p.size() == torch.Size([]):
                     continue
                 p.detach().add_(torch.randn_like(p))
@@ -2480,7 +2506,8 @@ class TestSWAUtils(TestCase):
             averaged_dnn.update_parameters(dnn)
             averaged_params = updated_averaged_params
 
-        for p_avg, p_swa in zip(averaged_params, averaged_dnn.module.state_dict().values()):
+        for p_avg, p_swa in zip(
+                averaged_params, itertools.chain(averaged_dnn.module.parameters(), averaged_dnn.module.buffers())):
             self.assertEqual(p_avg, p_swa)
 
     def _test_update_bn(self, dnn, dl_x, dl_xy, cuda):

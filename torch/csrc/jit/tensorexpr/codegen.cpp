@@ -201,7 +201,9 @@ void CodeGen::insertAllocFree(
     // Only allocate buffers that are mapped to selves.
     if (rit->first == rit->second) {
       BufPtr buf = rit->first;
-      if (pre_alloc) {
+      auto size = bufSize(buf);
+      // Preallocate buffers with static shapes if specified.
+      if (pre_alloc && size) {
         // Save buffers for buffer preallocation in TEK.
         buffers_to_pre_alloc_.emplace_back(buf);
         // Add preallocated buffers to args.
