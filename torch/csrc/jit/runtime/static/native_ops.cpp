@@ -292,8 +292,8 @@ REGISTER_NATIVE_OPERATOR_FUNCTOR(aten::slice, aten_slice, [](Node* n) -> SROpera
   return [](ProcessedNode* p_node) {
     const auto& in0_t = p_node->Input(0).toTensor();
     const auto in1_i = p_node->Input(1).toInt();
-    const auto in2_i = p_node->Input(2).toInt();
-    const auto in3_i = p_node->Input(3).toInt();
+    const auto in2_i = p_node->Input(2).toOptional<int64_t>();
+    const auto in3_i = p_node->Input(3).toOptional<int64_t>();
     const auto in4_i = p_node->Input(4).toInt();
     p_node->Output(0) = at::native::slice(in0_t, in1_i, in2_i, in3_i, in4_i);
   };
