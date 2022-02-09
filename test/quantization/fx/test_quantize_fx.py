@@ -3819,7 +3819,7 @@ class TestQuantizeFxOps(QuantizationTestCase):
                 is_reference=is_reference,
                 custom_qconfig_dict={"": float16_static_qconfig},
                 prepare_expected_node_occurrence=prepare_node_occurrence,
-                expected_node_occurrence=convert_node_occurrence, print_debug_info=True)
+                expected_node_occurrence=convert_node_occurrence)
 
     @skipIfNoFBGEMM
     def test_conv_module(self):
@@ -4964,7 +4964,7 @@ class TestQuantizeFxOps(QuantizationTestCase):
         # observers and also successfully fused two quantized::conv2d
         # patterns
         # one quantize_per_tensor for input
-        # check exact counts of quantize and dequantize
+        # check exact counts of quantize and dequantiz
         count_check = {
             # input of conv and two outputs of getitem
             ns.call_function(torch.quantize_per_tensor) : 2,
@@ -5464,7 +5464,7 @@ class TestQuantizeFxOps(QuantizationTestCase):
         b = torch.randn(4)
         m = M(w, b).eval()
         qconfig_dict = {
-            # this has no effect on reshape since it's a CopyNode
+            # reshape will be quantized to fp16 as requested by this qconfig
             "": float16_static_qconfig,
             "object_type": [
                 (torch.nn.functional.linear, default_qconfig)
@@ -5486,6 +5486,7 @@ class TestQuantizeFxOps(QuantizationTestCase):
             ns.call_function(torch.quantize_per_tensor): 2,
             # dequantize after first linear, before reshape and before output
             ns.call_method("dequantize"): 3,
+            # before reshape, to(fp16)
             ns.call_method("to"): 1,
             ns.call_function(torch.ops.quantized.linear): 2
         }
