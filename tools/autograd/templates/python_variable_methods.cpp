@@ -37,6 +37,7 @@
 #include "torch/csrc/autograd/python_return_types.h"
 
 #include <ATen/core/Tensor.h>
+#include <ATen/FuncTorchTLS.h>
 #include "c10/util/Optional.h"
 #include "c10/core/Stream.h"
 
@@ -788,6 +789,12 @@ static PyObject * THPVariable_requires_grad_(PyObject* self, PyObject* args, PyO
 
   if(r.has_torch_function()){
     return handle_torch_function(r, self, args, kwargs, THPVariableClass, "torch.Tensor");
+  }
+
+  // temporary hack to improve functorch UX.
+  const auto& functorch_tls = at::functorch::functorchTLSAccessor();
+  if (functorch_tls) {
+    functorch_tls->checkSupportsInplaceRequiresGrad();
   }
 
   auto requires_grad = r.toBool(0);
