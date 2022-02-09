@@ -11233,7 +11233,7 @@ op_db: List[OpInfo] = [
            skips=(
                # Pre-existing condition; Needs to be fixed
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_composite_compliance'),
-               # RuntimeError: attribute lookup is not defined on function
+               # RuntimeError: torch.jit.frontend.UnsupportedNodeError: global variables aren't supported
                DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
            ),
            sample_inputs_func=sample_inputs_max_pool),
@@ -11252,7 +11252,7 @@ op_db: List[OpInfo] = [
            dtypesIfCPU=floating_types_and(torch.bfloat16),
            dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
            skips=(
-               # RuntimeError: attribute lookup is not defined on function
+               # RuntimeError: torch.jit.frontend.UnsupportedNodeError: global variables aren't supported
                DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
            ),
            sample_inputs_func=sample_inputs_max_pool),
@@ -11271,7 +11271,7 @@ op_db: List[OpInfo] = [
            # TODO: investigate nondeterminism
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
            skips=(
-               # RuntimeError: attribute lookup is not defined on function
+               # RuntimeError: torch.jit.frontend.UnsupportedNodeError: global variables aren't supported
                DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
            ),
            sample_inputs_func=sample_inputs_max_pool),
