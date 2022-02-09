@@ -24,7 +24,7 @@ from torch.testing._internal.common_methods_invocations import op_db
 from torch.testing._internal.common_device_type import ops, onlyCPU, instantiate_device_type_tests
 import torch.utils._pytree as pytree
 import torch.fx._pytree as fx_pytree
-from torch.fx import symbolic_trace, Proxy, Node, GraphModule, Interpreter, Tracer, Transformer, Graph, wrap, PH
+from torch.fx import symbolic_trace, Proxy, Node, GraphModule, Interpreter, Tracer, Transformer, Graph, wrap, PH, CodeGen
 from torch.fx.node import Target, Argument
 from torch.fx.passes import shape_prop
 from torch.fx.immutable_collections import immutable_dict, immutable_list
@@ -3160,6 +3160,31 @@ class TestFX(JitTestCase):
 
         nf = symbolic_trace(nf)
         self.assertEqual(nf(**val), f(**val))
+
+    def test_custom_codegen(self):
+        class ListCodeGen(CodeGen):
+            def generate_prologue(self, free_vars, maybe_return_annotation):
+                lst_unpack = f"""
+def forward(self, args_list: List[torch.Tensor]){maybe_return_annotation}:
+    {', '.join(free_vars)} = args_list"""
+                return lst_unpack
+
+            def additional_globals(self):
+                return [('List', typing.List)]
+
+        def f(a, b):
+            return a + b
+
+        nf = symbolic_trace(f)
+        vals = [torch.randn(3), torch.randn(3)]
+        self.assertEqual(nf(*vals), f(*vals))
+        nf.graph.set_codegen(ListCodeGen())
+        nf.recompile()
+        print(nf.code)
+        self.assertEqual(nf(vals), f(*vals))
+
+
+
 
     def test_imul_code_print(self):
         graph = torch.fx.Graph()
