@@ -13,7 +13,7 @@ namespace onednn {
 using opkind = dnnl::graph::op::kind;
 
 void fixConvOptionalBias(Node* node) {
-  if (!node->input(2)->mustNotBeNone()) {
+  if (node->namedInput("bias")->mustNotBeNone() == false) {
     // Replace non-existent optional bias with const None
     auto g = node->owningGraph();
     auto n = g->createNone();
@@ -23,23 +23,33 @@ void fixConvOptionalBias(Node* node) {
 }
 
 c10::optional<size_t> getDimensions(Value* v) {
-  if (v->type()->isSubtypeOf(TensorType::get()))
+  if (v->type()->isSubtypeOf(TensorType::get())) {
     return v->type()->cast<TensorType>()->sizes().size();
-  else
+  } else {
     return c10::nullopt;
+  }
 }
 
+// PyTorch ops that can't otherwise be mapped to oneDNN Graph ops are mapped as
+// Wildcards instead. They make the integration code with PyTorch simpler by
+// passing every op to the oneDNN Graph library in the add_op call -
+// no need to check beforehand whether the op is supported by oneDNN Graph or not.
+// oneDNN Graph ops separated by wildcards don't end up in the same partition.
 Operator makeWildcardOp(Node* node) {
   auto o = Operator(node, opkind::Wildcard);
   // wildcard op contains only topology info
-  for (size_t i = 0; i < node->inputs().size(); i++)
+  for (size_t i = 0; i < node->inputs().size(); i++) {
     o.setInput(i);
-  for (size_t i = 0; i < node->outputs().size(); i++)
+  }
+  for (size_t i = 0; i < node->outputs().size(); i++) {
     o.setOutput(i);
+  }
   return o;
 }
 
-#define REQ(cond)                                     \
+// If we don't meet a certain condition to map a PyTorch op to a oneDNN Graph op,
+// then we create a wildcard op corresponding to that PyTorch op instead.
+#define REQUIRE(cond)                                 \
   if (!(cond)) {                                      \
     GRAPH_DEBUG("Unsupported condition " #cond "\n"); \
     return makeWildcardOp(node);                      \
@@ -50,11 +60,15 @@ Operator makeEltwiseOp(Node* node, opkind kind) {
 }
 
 Operator makeBinaryOp(Node* node, opkind kind) {
-  REQ(node->input(0)->type()->isSubtypeOf(TensorType::get()) &&
+  REQUIRE(node->input(0)->type()->isSubtypeOf(TensorType::get()) &&
       node->input(1)->type()->isSubtypeOf(TensorType::get()))
   return Operator(node, kind).setInput(0, 1).setOutput(0);
 }
 
+// Map a PyTorch op to its corresponding oneDNN Graph op.
+// If mapping isn't possible, then create a wildcard op instead.
+// The mapping is done as per oneDNN Graph op schema defined in
+// third_party/ideep/mkl-dnn/src/interface/op_def.hpp.
 Operator createOperator(Node* node) {
   switch (node->kind()) {
     case aten::conv2d: {
@@ -71,8 +85,8 @@ Operator createOperator(Node* node) {
     }
 
     case aten::_convolution: {
-      bool transposed = Operator::Bool(node, 6);
-      REQ(!transposed);
+      bool transposed = toIValue(node->namedInput("transposed"))->toBool();
+      REQUIRE(!transposed);
 
       return Operator(node, opkind::Convolution)
           .setInput(0, 1, 2)
@@ -86,9 +100,9 @@ Operator createOperator(Node* node) {
     }
 
     case aten::batch_norm: {
-      auto training = toIValue(node->input(5));
-      REQ(training.has_value()); // cannot get training status in script mode
-      REQ(!training->toBool()); // TODO: support bn training
+      auto training = toIValue(node->namedInput("training"));
+      REQUIRE(training.has_value()); // cannot get training status in script mode
+      REQUIRE(!training->toBool()); // TODO: support bn training
       return Operator(node, opkind::BatchNormInference)
           .setInput(0, 1, 2, 3, 4)
           .setOutput(0)
@@ -96,8 +110,8 @@ Operator createOperator(Node* node) {
     }
 
     case aten::layer_norm: {
-      auto normalized_shape = Operator::Ints(node, 1);
-      REQ(normalized_shape.size() == 1);
+      auto normalized_shape = toIValue(node->namedInput("normalized_shape"));
+      REQUIRE(normalized_shape->toIntList().size() == 1);
       return Operator(node, opkind::LayerNorm)
           .setInput(0, 2, 3)
           .setOutput(0)
@@ -146,7 +160,7 @@ Operator createOperator(Node* node) {
           .setAttr("max", 6.f);
 
     case aten::softmax: {
-      auto axis = Operator::Int(node, 1);
+      auto axis = toIValue(node->namedInput("dim"))->toInt();
       return Operator(node, opkind::SoftMax)
           .setInput(0)
           .setOutput(0)
@@ -155,9 +169,9 @@ Operator createOperator(Node* node) {
 
     case aten::cat: {
       auto o = Operator(node, opkind::Concat);
-      REQ(node->input(0)->node()->kind() == prim::ListConstruct);
-      REQ(node->input(0)->uses().size() == 1);
-      REQ(node->input(1)->node()->kind() == prim::Constant);
+      REQUIRE(node->namedInput("tensors")->node()->kind() == prim::ListConstruct);
+      REQUIRE(node->namedInput("tensors")->uses().size() == 1);
+      REQUIRE(node->namedInput("dim")->node()->kind() == prim::Constant);
       // aten::cat needs a special handling since it takes a Tensor[] as input.
       // We set the inputs of ListConstruct as the inputs of cat.
       //
@@ -174,9 +188,9 @@ Operator createOperator(Node* node) {
     }
 
     case aten::max_pool2d: {
-      REQ(node->input(1)->node()->kind() == prim::Constant);
+      REQUIRE(node->namedInput("kernel_size")->node()->kind() == prim::Constant);
 
-      auto rounding_type = Operator::Bool(node, 5) ? "ceil" : "floor";
+      auto rounding_type = toIValue(node->namedInput("ceil_mode"))->toBool() ? "ceil" : "floor";
       return Operator(node, opkind::MaxPool)
           .setInput(0)
           .setOutput(0)
@@ -189,12 +203,12 @@ Operator createOperator(Node* node) {
     }
 
     case aten::avg_pool2d: {
-      // TODO: do we need add check for all Constant?
-      REQ(node->input(1)->node()->kind() == prim::Constant);
+      // TODO: do we need add checks for all Constant?
+      REQUIRE(node->namedInput("kernel_size")->node()->kind() == prim::Constant);
 
-      auto rounding_type = Operator::Bool(node, 4) ? "ceil" : "floor";
-      auto divisor_override = toIValue(node->input(6));
-      REQ(divisor_override->isNone());
+      auto rounding_type = toIValue(node->namedInput("ceil_mode"))->toBool() ? "ceil" : "floor";
+      auto divisor_override = toIValue(node->namedInput("divisor_override"));
+      REQUIRE(divisor_override->isNone());
       return Operator(node, opkind::AvgPool)
           .setInput(0)
           .setOutput(0)
@@ -207,10 +221,10 @@ Operator createOperator(Node* node) {
     }
 
     case aten::matmul: {
-      auto dim0 = getDimensions(node->input(0)).value_or(-1);
-      auto dim1 = getDimensions(node->input(1)).value_or(-1);
+      auto dim0 = getDimensions(node->namedInput("self")).value_or(-1);
+      auto dim1 = getDimensions(node->namedInput("other")).value_or(-1);
       // TODO: support all shape combinations
-      REQ((dim0 == 2 && dim1 == 2) || (dim0 == 4 && dim1 == 4) ||
+      REQUIRE((dim0 == 2 && dim1 == 2) || (dim0 == 4 && dim1 == 4) ||
           (dim0 == 3 && dim1 == 2));
     } // fall through
     case aten::mm: {
@@ -239,11 +253,13 @@ bool isSupported(Node* node) {
 
 DeviceType inferDeviceFromValue(Value* v) {
   auto tt = v->type()->cast<TensorType>();
-  if (!tt)
+  if (!tt) {
     return at::kCPU;
+  }
   auto device = tt->device();
-  if (!device)
+  if (!device) {
     return at::kCPU;
+  }
   return device->type();
 }
 
@@ -278,7 +294,7 @@ void mayAddListConstructIntoConcatPartition(
   // We emphasize on 'virtually' because get_num_ops() for cat's partition
   // would still return 1.
   if (n->kind() == aten::cat && opToOwningPartition.has(n)) {
-    auto listConstrcut = n->input(0)->node();
+    auto listConstrcut = n->namedInput("tensors")->node();
     auto partitionId = opToOwningPartition.get(n);
     opToOwningPartition.add(listConstrcut, partitionId);
   }
@@ -297,12 +313,12 @@ LlgaGraphHelper::LlgaGraphHelper(
     auto op = createLlgaOp(node);
     try {
       g.add_op(op);
+      GRAPH_DEBUG("  Added node ", node->kind().toQualString());
     } catch (std::exception& e) {
       GRAPH_DEBUG(
           "The backend failed to add node ", node->kind().toQualString());
       g.add_op(makeWildcardOp(node).llgaOp());
     }
-    GRAPH_DEBUG("  Added node ", node->kind().toQualString());
 
     for (Value* input : node->inputs()) {
       tensorIdToValue_.emplace(input->unique(), input);
@@ -313,8 +329,9 @@ LlgaGraphHelper::LlgaGraphHelper(
   std::vector<dnnl::graph::partition> partitions = g.get_partitions(policy);
   // excluded unsupported Wildcard partitions
   for (auto& partition : partitions) {
-    if (partition.is_supported())
+    if (partition.is_supported()) {
       partitions_.push_back(partition);
+    }
   }
 
   GRAPH_DEBUG("  Got #partitions: ", partitions_.size());
@@ -346,20 +363,6 @@ bool LlgaGraphHelper::shouldMerge(Node* toMerge, Node* subgraph) {
       opToOwningPartition_.get(subgraph);
 }
 
-bool isViewOp(Node* n) {
-  switch (n->kind()) {
-    case aten::view:
-    case aten::view_as:
-    case aten::reshape:
-    case aten::reshape_as:
-    case aten::transpose:
-    case aten::expand:
-    case aten::expand_as:
-      return true;
-  }
-  return false;
-}
-
 // Except for conv & GEMMs, which should always be handled by oneDNN Graph,
 // only use single-op partitions for ops unsupported by NNC, or ops
 // that oneDNN executes faster. prim::ListConstruct is an exception, since
@@ -377,8 +380,6 @@ bool isBetterSuitedForLLGA(NodeKind kindOfOp) {
       (kindOfOp == prim::ListConstruct)) {
     return true;
   } else {
-    GRAPH_DEBUG(kindOfOp.toQualString(),
-                " will not be used in a single-op oneDNN Graph partition.");
     return false;
   }
 }
@@ -403,9 +404,6 @@ bool LlgaGraphHelper::shouldConsiderForMerge(Node* node) {
   // if we're already in the process of merging
   if (isLlgaSubgraph(node)) {
     return true;
-  }
-  if (isViewOp(node)) {
-    return false;
   }
   return checkForSingleOpPartition(node);
 }

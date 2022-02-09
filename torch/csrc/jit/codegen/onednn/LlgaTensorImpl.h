@@ -11,6 +11,13 @@ namespace jit {
 namespace fuser {
 namespace onednn {
 
+// Engine represents a device and its context. From the device kind, the engine
+// knows how to generate code for the target device and what kind of device
+// object to be expected. The device id ensures that there is a unique engine
+// being created for each device. The device handle passed from PyTorch allows
+// oneDNN Graph implementation to work on the device specified by PyTorch, which
+// is currently CPU, so we only have one engine. 
+// Ref: https://spec.oneapi.io/onednn-graph/latest/programming_model.html#engine
 struct Engine {
   // CPU engine singleton
   static dnnl::graph::engine& getEngine();
@@ -18,6 +25,9 @@ struct Engine {
   void operator=(const Engine&) = delete;
 };
 
+// Stream is the logical abstraction for execution units. It is created on top
+// of oneDNN Graph engine. A compiled oneDNN Graph partition is submitted to a
+// stream for execution.
 struct Stream {
   // CPU stream singleton
   static dnnl::graph::stream& getStream();

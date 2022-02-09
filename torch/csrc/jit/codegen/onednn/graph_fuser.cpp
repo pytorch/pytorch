@@ -30,10 +30,10 @@ class GraphRewriter {
       : block_(block),
         graph_(std::move(graph)),
         aliasDb_(aliasDb),
-        llgaHelper(graph_) {}
+        llgaHelper_(graph_) {}
 
   void run() {
-    // We maintain alias db correctness in-place while building up the autodiff
+    // We maintain alias db correctness in-place while building up the LLGA
     // subgraphs, however it is difficult to preserve correctness when
     // un-inlining autodiff subgraphs. We first recursively construct all
     // subgraphs and then recursively cleanup & unmerge the small subgraphs
@@ -50,7 +50,7 @@ class GraphRewriter {
     while (curNode != *block_->nodes().rend()) {
       // Save the previous node, since we might delete `curNode` in next block
       auto prevNode = curNode->prev();
-      if (llgaHelper.isLlgaSubgraph(curNode)) {
+      if (llgaHelper_.isLlgaSubgraph(curNode)) {
         // Inlining nodes may cause some subexpression to come back in the
         // subgraphs (for example, copying constants in repeatedly will generate
         // redundant prim::Constants). Run CSE to clean them up.
@@ -60,7 +60,7 @@ class GraphRewriter {
 
         // Unmerge subgraph if we don't get every nodes of a partition
         // into the subgraph due to failed alias check
-        llgaHelper.unmergeIfAnyNodeIsMissing(curNode);
+        llgaHelper_.unmergeIfAnyNodeIsMissing(curNode);
       }
       curNode = prevNode;
     }
@@ -147,9 +147,9 @@ class GraphRewriter {
       graph_node_list::iterator workblock_begin) {
     GRAPH_DEBUG("Scanning ", consumer->kind().toQualString());
 
-    if (llgaHelper.shouldConsiderForMerge(consumer)) {
-      if (!llgaHelper.isLlgaSubgraph(consumer)) {
-        consumer = llgaHelper.createSingletonSubgraph(consumer, aliasDb_);
+    if (llgaHelper_.shouldConsiderForMerge(consumer)) {
+      if (!llgaHelper_.isLlgaSubgraph(consumer)) {
+          consumer = llgaHelper_.createSingletonSubgraph(consumer, aliasDb_);
       }
 
       // Iterate through the workblock to merge nodes of the
@@ -181,15 +181,15 @@ class GraphRewriter {
   // Try to merge `producer` into `consumer`. If successful, this destroys
   // `producer` and returns the `consumer` group.
   c10::optional<Node*> tryMerge(Node* consumer, Node* producer) {
-    AT_ASSERT(llgaHelper.isLlgaSubgraph(consumer));
-    bool canMerge = llgaHelper.shouldMerge(producer, consumer) &&
+    AT_ASSERT(llgaHelper_.isLlgaSubgraph(consumer));
+    bool canMerge = llgaHelper_.shouldMerge(producer, consumer) &&
         aliasDb_.moveBeforeTopologicallyValid(producer, consumer);
 
     if (!canMerge) {
       return c10::nullopt;
     }
 
-    llgaHelper.mergeNodeIntoSubgraph(producer, consumer, aliasDb_);
+    llgaHelper_.mergeNodeIntoSubgraph(producer, consumer, aliasDb_);
 
     return consumer;
   }
@@ -197,7 +197,7 @@ class GraphRewriter {
   Block* block_;
   std::shared_ptr<Graph> graph_;
   AliasDb& aliasDb_;
-  LlgaGraphHelper llgaHelper;
+  LlgaGraphHelper llgaHelper_;
 };
 } // anonymous namespace
 

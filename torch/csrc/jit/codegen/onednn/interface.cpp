@@ -44,9 +44,7 @@ void fuseGraph(std::shared_ptr<Graph>& g) {
 
     RemoveTensorMutation(g);
     RemoveListMutation(g);
-    GRAPH_DUMP("After mutation removal. Before DecomposeOps", g);
-    DecomposeOps(g);
-    GRAPH_DUMP("After DecomposeOps. Before PrepareBinaryForLLGA", g);
+    GRAPH_DUMP("After mutation removal. Before PrepareBinaryForLLGA", g);
     PrepareBinaryForLLGA(g);
     GRAPH_DUMP("After PrepareBinaryForLLGA. Before DeferSizeCheck", g);
     DeferSizeCheck(g);
@@ -90,6 +88,10 @@ RegisterOperators oneDNNFusionGroupOp({
         AliasAnalysisKind::INTERNAL_SPECIAL_CASE),
 });
 
+// Currently, we convert some scalar inputs, such as the second argument of
+// binary ops to a 1D tensor. Other scalar inputs are prim::Constant nodes.
+// But if we have any scalar inputs to guard in the future, some logic here
+// would have to be changed.
 Operation createLlgaGuardKernel(const Node* node) {
   return [node](Stack* stack) {
     GRAPH_DEBUG("Guarding node: ", node->kind().toQualString());
@@ -127,8 +129,6 @@ Operation createLlgaGuardKernel(const Node* node) {
       }
     }
 
-    // TODO: check type and return the right flag
-    // naively return true;
     GRAPH_DEBUG("all check done, return true");
     push(stack, IValue(true));
     return;

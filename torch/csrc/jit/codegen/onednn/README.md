@@ -1,5 +1,6 @@
 # Pytorch - oneDNN Graph API Bridge
-This integration will add the infrastructure of a new PyTorch JIT graph fuser based on oneDNN Graph API. The oneDNN Graph API provides flexible API for aggressive fusion. The current preview2 version supports fusion for FP32 inference.
+This integration will add the infrastructure of a new PyTorch JIT graph fuser based on [oneDNN Graph API](https://spec.oneapi.io/onednn-graph/latest/programming_model.html), which provides a flexible API for aggressive fusion. The current preview4 version supports fusion for FP32 inference. Currently, the speedup is achieved for static shapes,
+although we'd soon add dynamic-shape support. When oneDNN Graph is enabled, weights are cached, as they're constant during inference.
 
 ## Graph Optimization
 We have registered optimization passes in the custom pre-passes set of PyTorch:
@@ -40,7 +41,10 @@ pytest test/test_jit_llga_fuser.py
 
 A simple cascaded Conv-Relu example is provided in test. Please consider enabling log outputs to familiarize yourself with the whole pipeline:
 
-**Mutation Removal -> DecomposeOps -> Prepare Binary -> Defer Size Check -> Graph Fuser -> Layout Propagation -> Type Guard -> Kernel Execution**
+**Mutation Removal -> Prepare Binary -> Defer Size Check -> Graph Fuser -> Layout Propagation -> Type Guard -> Kernel Execution**
+
+oneDNN Graph was formerly known as LLGA (Low Level Graph API),
+and thus LLGA in the codebase corresponds to oneDNN Graph.
 
 ```bash
 DNNL_VERBOSE=1 PYTORCH_JIT_LOG_LEVEL=">>graph_helper:>>graph_fuser:>>kernel:>>interface" python -u test/test_jit_llga_fuser.py -k test_conv2d_eltwise
