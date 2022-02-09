@@ -9,6 +9,8 @@ void initNvtxBindings(PyObject* module) {
   auto nvtx = m.def_submodule("_nvtx", "libNvToolsExt.so bindings");
   nvtx.def("rangePushA", nvtxRangePushA);
   nvtx.def("rangePop", nvtxRangePop);
+  nvtx.def("rangeStartA", nvtxRangeStartA);
+  nvtx.def("rangeEnd", nvtxRangeEnd);
   nvtx.def("markA", nvtxMarkA);
 }
 
