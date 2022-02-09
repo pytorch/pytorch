@@ -17,7 +17,7 @@ from .rprop import Rprop
 from .asgd import ASGD
 from .adamax import Adamax
 Adadelta = partial(optim.Adadelta, foreach=True)
-from .adagrad import Adagrad
+Adagrad = partial(optim.Adagrad, foreach=True)
 
 del adam
 del adamw
@@ -28,4 +28,3 @@ del rmsprop
 del rprop
 del asgd
 del adamax
-del adagrad
