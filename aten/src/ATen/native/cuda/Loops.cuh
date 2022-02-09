@@ -84,7 +84,7 @@ __device__ inline void elementwise_kernel_helper(func_t f, policy_t policy) {
 
 namespace at { namespace native {
 
-#ifdef USE_JITERATOR
+#if AT_USE_JITERATOR()
 /* Note [Jiterator]
 The "jiterator" simply just-in-time compiles the same kernels that
 Loops.cuh (and CUDALoops.cuh) usually build. This reduces build time,
@@ -249,7 +249,7 @@ void opmath_jitted_gpu_kernel_with_scalars(TensorIteratorBase& iter, const std::
     jitted_gpu_kernel<name, return_type, f_inputs_type, 2>(iter, f);
   }
 }
-#endif // USE_JITERATOR
+#endif // AT_USE_JITERATOR()
 
 template <typename func_t>
 void gpu_kernel(TensorIteratorBase& iter, const func_t& f) {
