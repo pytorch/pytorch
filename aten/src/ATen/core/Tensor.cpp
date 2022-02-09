@@ -1,4 +1,3 @@
-#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/core/Tensor.h>
 #include <ATen/core/Formatting.h>
 #include <ATen/core/VariableHooksInterface.h>
@@ -6,9 +5,12 @@
 #include <ATen/FunctionalTensorWrapper.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
-#include <ATen/Functions.h>
+#include <ATen/MethodOperators.h>
 #else
+#include <ATen/ops/contiguous_ops.h>
+#include <ATen/ops/fill_ops.h>
 #include <ATen/ops/to_ops.h>
+#include <ATen/ops/zero_ops.h>
 #endif
 
 #include <iostream>
