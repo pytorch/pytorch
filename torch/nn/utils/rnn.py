@@ -362,7 +362,7 @@ def pad_sequence(sequences, batch_first=False, padding_value=0.0):
     # in sequences are same and fetching those from sequences[0]
     if isinstance(sequences, torch.Tensor):
         sequences = sequences.unbind(0)
-    return torch._C._nn.pad_sequence(sequences, batch_first, padding_value)
+    return torch._C._nn.pad_sequence(tuple(sequences), batch_first, padding_value)
 
 
 def unpad_sequence(padded_sequences, lengths, batch_first=False):
