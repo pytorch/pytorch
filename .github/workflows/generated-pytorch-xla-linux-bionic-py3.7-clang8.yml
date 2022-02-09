@@ -4,7 +4,6 @@
 name: pytorch-xla-linux-bionic-py3.7-clang8
 
 on:
-  pull_request:
   push:
     tags:
       - 'ciflow/all/*'
@@ -108,12 +107,12 @@ jobs:
       - name: Calculate docker image tag
         id: calculate-tag
         run: |
-          echo "XLA workflow uses pre-built test image at :latest"
+          echo "XLA workflow uses pre-built test image at :v0.1"
           DOCKER_TAG=$(git rev-parse HEAD:.circleci/docker)
           echo "DOCKER_TAG=${DOCKER_TAG}" >> "${GITHUB_ENV}"
-          echo "DOCKER_IMAGE=${DOCKER_IMAGE_BASE}:latest" >> "${GITHUB_ENV}"
+          echo "DOCKER_IMAGE=${DOCKER_IMAGE_BASE}:v0.1" >> "${GITHUB_ENV}"
           echo "::set-output name=docker_tag::${DOCKER_TAG}"
-          echo "::set-output name=docker_image::${DOCKER_IMAGE_BASE}:latest"
+          echo "::set-output name=docker_image::${DOCKER_IMAGE_BASE}:v0.1"
       - name: Pull Docker image
         run: |
           retry () {

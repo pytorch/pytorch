@@ -666,7 +666,7 @@ XLA_WORKFLOWS = [
         distributed_test=False,
         enable_xla_test=1,
         ciflow_config=CIFlowConfig(
-            labels={LABEL_CIFLOW_DEFAULT, LABEL_CIFLOW_LINUX, LABEL_CIFLOW_CPU, LABEL_CIFLOW_XLA},
+            labels={LABEL_CIFLOW_LINUX, LABEL_CIFLOW_CPU, LABEL_CIFLOW_XLA},
         ),
     ),
 ]
