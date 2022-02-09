@@ -12,7 +12,7 @@ import torch.utils._pytree as pytree
 
 from ._compatibility import compatibility
 from .node import Argument, map_aggregate, base_types
-from .graph import CodeGen, Graph, _PyTreeInfo, PyTreeCodeGen
+from .graph import CodeGen, Graph, _PyTreeInfo, _PyTreeCodeGen
 from .graph_module import GraphModule
 from .proxy import TracerBase, Proxy, ParameterProxy
 
@@ -452,7 +452,7 @@ class Tracer(TracerBase):
             # In the case that we have pytree-flattened inputs in
             # `concrete_args`, generate a flattening wrapper around the
             # original root function and return that.
-            self.graph._codegen = PyTreeCodeGen(_PyTreeInfo(orig_args[:total_args], in_spec, None))
+            self.graph._codegen = _PyTreeCodeGen(_PyTreeInfo(orig_args[:total_args], in_spec, None))
 
             def flatten_fn(*args):
                 tree_args = pytree.tree_unflatten(list(args), in_spec)

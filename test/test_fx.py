@@ -3178,9 +3178,10 @@ def forward(self, args_list: List[torch.Tensor]){maybe_return_annotation}:
         nf = symbolic_trace(f)
         vals = [torch.randn(3), torch.randn(3)]
         self.assertEqual(nf(*vals), f(*vals))
+
         nf.graph.set_codegen(ListCodeGen())
         nf.recompile()
-        print(nf.code)
+
         self.assertEqual(nf(vals), f(*vals))
 
 

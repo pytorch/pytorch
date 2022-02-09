@@ -254,25 +254,50 @@ class _PyTreeInfo(NamedTuple):
 
 class CodeGen(object):
     def __init__(self):
-        self._body_transformer = None
+        self._body_transformer: Optional[TransformCodeFunc] = None
 
-    def generate_prologue(self, free_vars, maybe_return_annotation):
+    def generate_prologue(self, free_vars: List[str], maybe_return_annotation: str) -> str:
+        """
+        Given the free variables and a return annotation, generates the beginning of the FX function.
+        By default, `generate_prologue(['a', 'b'], '') == 'def forward(a, b):'`
+
+        """
         # If the original function didn't have self as its first argument, we
         # would have added it.
         if len(free_vars) == 0 or free_vars[0] != 'self':
             free_vars.insert(0, 'self')
         return f"def forward({', '.join(free_vars)}){maybe_return_annotation}:"
 
-    def generate_output(self, output_args):
+    def generate_output(self, output_args: Argument) -> str:
+        """
+        Given the output arguments, generates the return statement of the FX function.
+        """
         return f'return {repr(output_args)}'
 
-    def process_inputs(self, inputs):
+    def process_inputs(self, inputs: Any) -> Any:
+        """
+        Transforms the inputs so that the graph can take them as arguments, as
+        non-default codegen may result in the inputs to the function being
+        different from the inputs to the graph.
+
+        If the graph was directly runnable, this invariant should hold true
+        `f.process_outputs(f.graph(f.process_inputs(inputs))) == f(inputs)`
+        """
         return inputs
 
-    def process_outputs(self, outputs):
+    def process_outputs(self, outputs: Any) -> Any:
+        """
+        Transforms the outputs of the graph to be identical to the codegen.
+
+        See ``process_inputs`` for more details.
+        """
         return outputs
 
-    def additional_globals(self):
+    def additional_globals(self) -> List[Tuple[str, Any]]:
+        """
+        If your codegen uses extra global values, add them here.
+        For example, return ['List', typing.List] if you need ``List`` in the global context.
+        """
         return []
 
     def _python_code_func(self, nodes, root_module: str, namespace: _Namespace) -> PythonCode:
@@ -466,22 +491,29 @@ class CodeGen(object):
 {code}"""
         return PythonCode(fn_code, globals_)
 
-class PyTreeCodeGen(CodeGen):
-    def __init__(self, pytree_info):
-        super().__init__()
-        self.pytree_info = pytree_info
 
-    def process_inputs(self, *inputs):
-        flat_args, args_spec = pytree.tree_flatten(*inputs)
+# Ideally, we'd like to refactor all of the pytree logic into this codegen
+# class. Unfortunately, there are 3 areas we currently need extra logic in FX.
+# 1. In the initial symbolic trace, the pytree logic is tied up with `concrete_args`.
+# 2. In the FX graph, we need to access 2 attributes - in_spec and out_spec.
+#    Since we can't access .graph within the FX forward, we need to copy the attribute to the module.
+# 3. We currently can't register the pytree imports with `add_global` - not sure why.
+class _PyTreeCodeGen(CodeGen):
+    def __init__(self, pytree_info: _PyTreeInfo):
+        super().__init__()
+        self.pytree_info: _PyTreeInfo = pytree_info
+
+    def process_inputs(self, inputs: Any) -> Any:
+        flat_args, _ = pytree.tree_flatten(inputs)
         return flat_args
 
-    def process_outputs(self, out):
+    def process_outputs(self, out: Any) -> Any:
         if self.pytree_info is None:
             return out
         if not isinstance(out, list):
             out = [out]
         assert(self.pytree_info.out_spec is not None)
-        return pytree.tree_unflatten(out, self._codegen.pytree_info.out_spec)
+        return pytree.tree_unflatten(out, self.pytree_info.out_spec)
 
     def generate_prologue(self, free_vars, maybe_return_annotation):
         if self.pytree_info is None:
@@ -684,6 +716,9 @@ class Graph:
 
     @compatibility(is_backward_compatible=False)
     def process_inputs(self, *args):
+        """
+        Processes args so that they can be passed to the FX graph.
+        """
         return self._codegen.process_inputs(*args)
 
     @compatibility(is_backward_compatible=False)
@@ -1327,7 +1362,7 @@ class Graph:
             # remains - that means you can run `gm` with pdb here too, until you
             # run next `recompile()`).
         """
-        on_gen_code_old = self._on_generate_code
+        on_gen_code_old = self._codegen._body_transformer
         self._codegen._body_transformer = make_transformer(on_gen_code_old)
 
         @contextlib.contextmanager
