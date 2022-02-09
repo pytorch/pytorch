@@ -3126,6 +3126,12 @@ class TestFX(JitTestCase):
             orig_out = f(val)
             nf = symbolic_trace(f, concrete_args={'x': inp})
             self.assertEqual(nf(val), orig_out)
+
+            bare_fx = GraphModule({}, copy.deepcopy(nf.graph))
+            bare_fx.graph.set_codegen(CodeGen())
+            bare_fx.recompile()
+            self.assertEqual(nf.graph.process_outputs(bare_fx(*nf.graph.process_inputs(val))), orig_out)
+
             assert num_flat_args == 0 or "tree_flatten_spec" in nf.code
             assert(sum([i.op == 'placeholder' for i in nf.graph.nodes]) == num_flat_args)
 
@@ -3182,7 +3188,12 @@ def forward(self, args_list: List[torch.Tensor]){maybe_return_annotation}:
         nf.graph.set_codegen(ListCodeGen())
         nf.recompile()
 
+        bare_fx = GraphModule({}, copy.deepcopy(nf.graph))
+        bare_fx.graph.set_codegen(CodeGen())
+        bare_fx.recompile()
+
         self.assertEqual(nf(vals), f(*vals))
+        self.assertEqual(nf.graph.process_outputs(bare_fx(*nf.graph.process_inputs(vals))), f(*vals))
 
 
 

@@ -274,16 +274,16 @@ class CodeGen(object):
         """
         return f'return {repr(output_args)}'
 
-    def process_inputs(self, inputs: Any) -> Any:
+    def process_inputs(self, args: Any) -> Any:
         """
         Transforms the inputs so that the graph can take them as arguments, as
         non-default codegen may result in the inputs to the function being
         different from the inputs to the graph.
 
         If the graph was directly runnable, this invariant should hold true
-        `f.process_outputs(f.graph(f.process_inputs(inputs))) == f(inputs)`
+        `f.process_outputs(f.graph(*f.process_inputs(*inputs))) == f(*inputs)`
         """
-        return inputs
+        return args
 
     def process_outputs(self, outputs: Any) -> Any:
         """
