@@ -1217,11 +1217,8 @@ def _isinstance(obj, target_type) -> bool:
     if origin_type:
         return container_checker(obj, target_type)
 
-    # Check to handle weird python type behaviors
-    # 1. python 3.6 returns None for origin of containers without
-    #    contained type (intead of returning outer container type)
-    # 2. non-typed optional origin returns as none instead
-    #    of as optional in 3.6-3.8
+    # Check to handle non-typed optional origin returns as none instead
+    #    of as optional in 3.7-3.8
     check_args_exist(target_type)
 
     # handle non-containers

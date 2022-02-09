@@ -101,6 +101,7 @@ Indexing, Slicing, Joining, Mutating Ops
     hsplit
     hstack
     index_add
+    index_copy
     index_select
     masked_select
     movedim
