@@ -59,7 +59,8 @@ std::vector<at::Tensor> constructTensors(
     int64_t* buf_strides,
     int8_t* buf_dtypes,
     c10::optional<std::vector<std::pair<size_t, QIData>>> qdataArg =
-        c10::nullopt);
+        c10::nullopt,
+    int64_t bufs_out_num = 0);
 
 #ifdef C10_MOBILE
 extern "C" {

@@ -81,26 +81,31 @@ std::vector<at::Tensor> constructTensors(
     int64_t* buf_dims,
     int64_t* buf_strides,
     int8_t* buf_dtypes,
-    c10::optional<std::vector<std::pair<size_t, QIData>>> qdataArg) {
+    c10::optional<std::vector<std::pair<size_t, QIData>>> qdataArg,
+    int64_t bufs_out_num) {
   std::vector<void*> buf_data_vec;
   std::vector<std::vector<int64_t>> buf_dims_vec;
   std::vector<std::vector<int64_t>> buf_strides_vec;
   std::vector<c10::ScalarType> buf_dtypes_vec;
   int64_t buf_dims_idx = 0;
   int64_t buf_strides_idx = 0;
-  for (const auto i : c10::irange(bufs_num)) {
+  for (const auto i : c10::irange(bufs_out_num, bufs_num)) {
     buf_data_vec.push_back(buf_data[i]);
     buf_dims_vec.emplace_back();
     buf_strides_vec.emplace_back();
     for (const auto dim : c10::irange(buf_ranks[i])) {
       (void)dim;
-      buf_dims_vec[i].push_back(buf_dims[buf_dims_idx++]);
-      buf_strides_vec[i].push_back(buf_strides[buf_strides_idx++]);
+      buf_dims_vec[i - bufs_out_num].push_back(buf_dims[buf_dims_idx++]);
+      buf_strides_vec[i - bufs_out_num].push_back(
+          buf_strides[buf_strides_idx++]);
     }
     buf_dtypes_vec.push_back(static_cast<c10::ScalarType>(buf_dtypes[i]));
   }
 
   std::vector<at::Tensor> tensors;
+  for (const auto i : c10::irange(bufs_out_num)) {
+    tensors.push_back({});
+  }
   if (!qdataArg.has_value()) {
     for (const auto i : c10::irange(buf_data_vec.size())) {
       auto options = at::TensorOptions()
@@ -124,9 +129,10 @@ std::vector<at::Tensor> constructTensors(
     }
   } else {
     // handle quantized
-    std::vector<c10::optional<QIData>> qdata(bufs_num, c10::nullopt);
+    std::vector<c10::optional<QIData>> qdata(
+        bufs_num - bufs_out_num, c10::nullopt);
     for (const auto& qd : *qdataArg) {
-      qdata[qd.first] = qd.second;
+      qdata[qd.first - bufs_out_num] = qd.second;
     }
     for (const auto i : c10::irange(buf_data_vec.size())) {
       auto options = at::TensorOptions()
@@ -172,10 +178,18 @@ std::vector<at::Tensor> constructTensors(
     int64_t* buf_dims,
     int64_t* buf_strides,
     int8_t* buf_dtypes,
-    std::vector<std::pair<size_t, QIData>> qdata) {
+    std::vector<std::pair<size_t, QIData>> qdata,
+    int64_t bufs_out_num = 0) {
   c10::optional<std::vector<std::pair<size_t, QIData>>> opt = std::move(qdata);
   return constructTensors(
-      bufs_num, buf_data, buf_ranks, buf_dims, buf_strides, buf_dtypes, opt);
+      bufs_num,
+      buf_data,
+      buf_ranks,
+      buf_dims,
+      buf_strides,
+      buf_dtypes,
+      opt,
+      bufs_out_num);
 }
 
 #ifndef _WIN32
@@ -399,7 +413,8 @@ void nnc_aten_quantized_conv2d_out(
       buf_dims,
       buf_strides,
       buf_dtypes,
-      {{1u, {x_qscale, x_qzero, toQIntType(x_qdtype)}}});
+      {{1u, {x_qscale, x_qzero, toQIntType(x_qdtype)}}},
+      1);
   auto convPackedParams =
       reinterpret_cast<ConvPackedParamsBase<2>*>(buf_data[2]);
   const double out_qscale = ((double*)extra_args)[3];
@@ -408,9 +423,7 @@ void nnc_aten_quantized_conv2d_out(
   auto r = convPackedParams->apply(tensors[1], out_qscale, out_qzero);
   buf_data[0] = r.data_ptr();
   c10::raw::intrusive_ptr::incref(r.getIntrusivePtr().get());
-  void* ptr_to_free =
-      r.unsafeGetTensorImpl()->storage().data_ptr().get_context();
-  buf_data[bufs_num] = ptr_to_free;
+  buf_data[bufs_num] = r.getIntrusivePtr().get();
 }
 
 void nnc_aten_quantized_conv2d_relu(
@@ -461,7 +474,8 @@ void nnc_aten_quantized_conv2d_relu_out(
       buf_dims,
       buf_strides,
       buf_dtypes,
-      {{1u, {x_qscale, x_qzero, toQIntType(x_qdtype)}}});
+      {{1u, {x_qscale, x_qzero, toQIntType(x_qdtype)}}},
+      1);
   auto convPackedParams =
       reinterpret_cast<ConvPackedParamsBase<2>*>(buf_data[2]);
   const double out_qscale = ((double*)extra_args)[3];
@@ -470,6 +484,7 @@ void nnc_aten_quantized_conv2d_relu_out(
   auto r = convPackedParams->apply_relu(tensors[1], out_qscale, out_qzero);
   buf_data[0] = r.data_ptr();
   c10::raw::intrusive_ptr::incref(r.getIntrusivePtr().get());
+  buf_data[bufs_num] = r.getIntrusivePtr().get();
 }
 
 void nnc_aten_free(int64_t bufs_num, void** ptrs) noexcept {
@@ -626,13 +641,15 @@ void nnc_aten_quantized_mul_out(
       buf_strides,
       buf_dtypes,
       {{1u, {a_qscale, a_qzero, toQIntType(a_qdtype)}},
-       {2u, {b_qscale, b_qzero, toQIntType(b_qdtype)}}});
+       {2u, {b_qscale, b_qzero, toQIntType(b_qdtype)}}},
+      1);
   const double out_qscale = ((double*)extra_args)[6];
   const int64_t out_qzero = extra_args[7];
   // NOLINTNEXTLINE
   auto r = quantized_mul(tensors[1], tensors[2], out_qscale, out_qzero);
   buf_data[0] = r.data_ptr();
   c10::raw::intrusive_ptr::incref(r.getIntrusivePtr().get());
+  buf_data[bufs_num] = r.getIntrusivePtr().get();
 }
 
 void nnc_aten_quantized_mul_scalar(
