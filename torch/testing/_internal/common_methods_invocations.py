@@ -1315,7 +1315,7 @@ def sample_inputs_linalg_det(op_info, device, dtype, requires_grad, **kwargs):
     return [SampleInput(t) for t in inputs]
 
 def sample_inputs_linalg_det_singular(op_info, device, dtype, requires_grad, **kwargs):
-    make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+    make_arg = partial(make_tensor, device=device, dtype=dtype)
 
     def make_singular_matrix_batch_base(size, rank):
         assert size[-1] == size[-2]
@@ -1338,10 +1338,11 @@ def sample_inputs_linalg_det_singular(op_info, device, dtype, requires_grad, **k
         return matrix
 
     def sample_generator():
-        for batch, size in product(((), (2,), (2, 2)), range(6)):
-            shape = batch + (size, size)
-            for rank in range(1, size):
-                yield make_singular_matrix_batch_base(shape, rank)
+        batch = (2, 2)
+        size = 5
+        shape = batch + (size, size)
+        for rank in (2,):
+            yield make_singular_matrix_batch_base(shape, rank)
 
     return [SampleInput(t) for t in sample_generator()]
 
@@ -9723,7 +9724,7 @@ op_db: List[OpInfo] = [
                # Illegal Memory Access failure: https://github.com/pytorch/pytorch/issues/72203
                DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', 'test_fn_grad', device_type='cuda'),
                # Illegal Memory Access failure: https://github.com/pytorch/pytorch/issues/72204
-               DecorateInfo(unittest.skip("Skipped!"), 'TestMathBits', 'test_neg_view', device_type='cuda'),
+               #DecorateInfo(unittest.skip("Skipped!"), 'TestMathBits', 'test_neg_view', device_type='cuda'),
                DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_dtypes'),
                DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', 'test_fn_gradgrad'),
            )),
