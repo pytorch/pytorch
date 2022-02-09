@@ -8888,7 +8888,7 @@ op_db: List[OpInfo] = [
            test_conjugated_samples=False,
            ),
     OpInfo('view_as_complex',
-           dtypes=floating_types_and(torch.half),
+           dtypes=floating_types(),
            supports_out=False,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,

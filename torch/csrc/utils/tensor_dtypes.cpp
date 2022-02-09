@@ -73,6 +73,8 @@ void initializeDtypes() {
     std::string primary_name, legacy_name;
     std::tie(primary_name, legacy_name) = getDtypeNames(scalarType);
     PyObject *dtype = THPDtype_New(scalarType, primary_name);
+    // disable complex32 dtype
+    if (primary_name == "complex32") continue;
     torch::registerDtypeObject((THPDtype*)dtype, scalarType);
     Py_INCREF(dtype);
     if (PyModule_AddObject(torch_module.get(), primary_name.c_str(), dtype) !=

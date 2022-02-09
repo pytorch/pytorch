@@ -1630,6 +1630,10 @@ else:
             self.assertEqual(a_with_output.dtype, y.dtype)
             self.assertEqual(a_with_output.size(), torch.Size([3, 2]))
 
+    def test_unsupported_complex_type(self, device):
+        with self.assertRaisesRegex(AttributeError, r'module \'torch\' has no attribute \'complex32\''):
+            torch.tensor(1j, dtype=torch.complex32, device=device)
+
     @dtypes(*get_all_fp_dtypes(include_half=False, include_bfloat16=False))
     @dtypesIfCPU(*(get_all_fp_dtypes(include_half=False, include_bfloat16=True)))
     @dtypesIfCUDA(*(get_all_fp_dtypes(include_bfloat16=False)))

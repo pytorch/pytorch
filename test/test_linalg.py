@@ -1121,8 +1121,6 @@ class TestLinalg(TestCase):
                     return torch.float
                 elif dtype == torch.cdouble:
                     return torch.double
-                elif dtype == torch.complex32:
-                    return torch.float16
                 else:
                     return dtype
 
