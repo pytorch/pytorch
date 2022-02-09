@@ -508,7 +508,8 @@ def compute_meta_function_declaration(g: NativeFunctionsGroup) -> Optional[str]:
             # Generate the template declaration with one bool parameter for each
             # precomputed element. Each parameter is true if the corresponding (in
             # terms of position) precomputed element has been set.
-            precomputed_elements = [elem for replace_list in precomputed.replace.values() for elem in replace_list]
+            precomputed_values = [*precomputed.replace.values(), precomputed.add]
+            precomputed_elements = [elem for replace_list in precomputed_values for elem in replace_list]
             precomputed_template_parameters = [elem.name.upper() for elem in precomputed_elements]
             precomputed_template_params_str = ", ".join(f"bool {param} = false" for param in precomputed_template_parameters)
             precompute_template_decl = f"template <{precomputed_template_params_str}>"
