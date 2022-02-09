@@ -535,7 +535,7 @@ test_lazy_tensor_core() {
   # which it is not (due to how build/test are set up in this CI config)
   # or we can be in the build dir where all the artifacts are
   pushd lazy_tensor_core/build/lib.linux-x86_64-3.7
-  python ../../../example.py
+  python ../../example.py
   popd
   assert_git_not_dirty
 }
