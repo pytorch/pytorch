@@ -289,7 +289,6 @@ TEST(
         return (d)
   )JIT");
   ExpectNotToReplaceWithCopy(reshape_inplace_script);
-  ExpectNotToReplaceWithCopy(reshape_inplace_script_1);
 }
 
 TEST(StaticRuntime, CanEnableStaticRuntime) {
