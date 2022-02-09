@@ -14415,9 +14415,21 @@ op_db: List[OpInfo] = [
     # These paths have different dtype support. Also JIT supports,
     # most variants but not all of them. So we split the OpInfo entries,
     # for `norm` based on the code-paths and JIT support.
-    OpInfo('norm',
-           sample_inputs_func=sample_inputs_norm,
-           dtypes=floating_and_complex_types_and(torch.float16, torch.bfloat16)),
+    OpInfo(
+        "norm",
+        sample_inputs_func=sample_inputs_norm,
+        dtypes=floating_and_complex_types_and(torch.float16, torch.bfloat16),
+        skips=(
+            # AssertionError: RuntimeError not raised : Expected RuntimeError when doing an unsafe cast from a result
+            # of dtype torch.float32 into an out= with dtype torch.long
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestCommon",
+                "test_out",
+                device_type="meta",
+            ),
+        ),
+    ),
     OpInfo('norm',
            variant_test_name='nuc',
            sample_inputs_func=sample_inputs_norm_nuc,
@@ -14452,19 +14464,40 @@ op_db: List[OpInfo] = [
                # Arguments for call are not valid.
                DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit', dtypes=(torch.complex64, torch.float32,)),  # noqa: B950
            )),
-    OpInfo('norm',
-           variant_test_name='inf',
-           sample_inputs_func=sample_inputs_norm_inf,
-           dtypes=floating_and_complex_types_and(torch.float16, torch.bfloat16),
-           backward_dtypesIfCPU=floating_and_complex_types_and(torch.float16, torch.bfloat16),
-           skips=(
-               # https://github.com/pytorch/pytorch/issues/67517
-               DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_noncontiguous_samples'),
-               # following 2 tests failed intermittenly
-               DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', 'test_fn_grad', device_type='cpu', dtypes=(torch.complex128,)),  # noqa: B950
-               DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', 'test_fn_gradgrad', device_type='cpu', dtypes=(torch.complex128,)),  # noqa: B950
-           )
-           ),
+    OpInfo(
+        "norm",
+        variant_test_name="inf",
+        sample_inputs_func=sample_inputs_norm_inf,
+        dtypes=floating_and_complex_types_and(torch.float16, torch.bfloat16),
+        backward_dtypesIfCPU=floating_and_complex_types_and(torch.float16, torch.bfloat16),
+        skips=(
+            # https://github.com/pytorch/pytorch/issues/67517
+            DecorateInfo(unittest.skip("Skipped!"), "TestCommon", "test_noncontiguous_samples"),
+            # following 2 tests failed intermittenly
+            DecorateInfo(
+                unittest.skip("Skipped!"),
+                "TestGradients",
+                "test_fn_grad",
+                device_type="cpu",
+                dtypes=(torch.complex128,),
+            ),
+            DecorateInfo(
+                unittest.skip("Skipped!"),
+                "TestGradients",
+                "test_fn_gradgrad",
+                device_type="cpu",
+                dtypes=(torch.complex128,),
+            ),
+            # AssertionError: RuntimeError not raised : Expected RuntimeError when doing an unsafe cast from a result
+            # of dtype torch.float32 into an out= with dtype torch.long
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestCommon",
+                "test_out",
+                device_type="meta",
+            ),
+        ),
+    ),
     OpInfo('t',
            sample_inputs_func=sample_inputs_t,
            supports_out=False,
