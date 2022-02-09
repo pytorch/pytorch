@@ -15,7 +15,7 @@ from .radam import RAdam as RAdam
 from .rmsprop import RMSprop
 from .rprop import Rprop
 from .asgd import ASGD
-from .adamax import Adamax
+Adamax = partial(optim.Adamax, foreach=True)
 Adadelta = partial(optim.Adadelta, foreach=True)
 Adagrad = partial(optim.Adagrad, foreach=True)
 
@@ -27,4 +27,3 @@ del nadam
 del rmsprop
 del rprop
 del asgd
-del adamax
