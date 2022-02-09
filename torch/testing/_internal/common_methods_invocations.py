@@ -8986,6 +8986,7 @@ op_db: List[OpInfo] = [
            dtypesIfCUDA=all_types_and_complex_and(torch.half),
            sample_inputs_func=sample_inputs_cross,
            supports_fwgrad_bwgrad=True,
+           supports_out=True,
            supports_forward_ad=True),
     OpInfo('linalg.cross',
            ref=lambda x, y, dim=-1: np.cross(x, y, axis=dim),
@@ -8995,6 +8996,7 @@ op_db: List[OpInfo] = [
            dtypesIfCUDA=all_types_and_complex_and(torch.half),
            aten_name='linalg_cross',
            sample_inputs_func=sample_inputs_cross,
+           supports_out=True,
            supports_fwgrad_bwgrad=True,
            supports_forward_ad=True),
     OpInfo('cumsum',
@@ -9066,13 +9068,7 @@ op_db: List[OpInfo] = [
                     promotes_int_to_float=True,
                     supports_fwgrad_bwgrad=True,
                     assert_autodiffed=True,
-                    rhs_make_tensor_kwargs=dict(exclude_zero=True),
-                    skips=(
-                        DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', 'test_forward_mode_AD',
-                                     device_type='cuda', dtypes=[torch.double, torch.cdouble]),
-                        DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', 'test_inplace_forward_mode_AD',
-                                     device_type='cuda', dtypes=[torch.double, torch.cdouble]),
-                    ),),
+                    rhs_make_tensor_kwargs=dict(exclude_zero=True),),
     BinaryUfuncInfo('div',
                     aliases=('divide',),
                     variant_test_name='trunc_rounding',
@@ -9082,13 +9078,7 @@ op_db: List[OpInfo] = [
                     promotes_int_to_float=True,
                     supports_fwgrad_bwgrad=True,
                     assert_autodiffed=True,
-                    rhs_make_tensor_kwargs=dict(exclude_zero=True),
-                    skips=(
-                        DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', 'test_forward_mode_AD',
-                                     device_type='cuda', dtypes=[torch.double, torch.cdouble]),
-                        DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', 'test_inplace_forward_mode_AD',
-                                     device_type='cuda', dtypes=[torch.double, torch.cdouble]),
-                    ),),
+                    rhs_make_tensor_kwargs=dict(exclude_zero=True),),
     BinaryUfuncInfo('div',
                     aliases=('divide',),
                     variant_test_name='floor_rounding',
@@ -9098,13 +9088,7 @@ op_db: List[OpInfo] = [
                     promotes_int_to_float=True,
                     supports_fwgrad_bwgrad=True,
                     assert_autodiffed=True,
-                    rhs_make_tensor_kwargs=dict(exclude_zero=True),
-                    skips=(
-                        DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', 'test_forward_mode_AD',
-                                     device_type='cuda', dtypes=[torch.double, torch.cdouble]),
-                        DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', 'test_inplace_forward_mode_AD',
-                                     device_type='cuda', dtypes=[torch.double, torch.cdouble]),
-                    ),),
+                    rhs_make_tensor_kwargs=dict(exclude_zero=True),),
     BinaryUfuncInfo('true_divide',
                     dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
                     supports_forward_ad=True,
@@ -9598,10 +9582,6 @@ op_db: List[OpInfo] = [
                    skips=(
                        # Dispatch stub: unsupported device typemeta
                        DecorateInfo(unittest.expectedFailure, 'TestGradients', 'test_fn_fwgrad_bwgrad', device_type='meta'),
-                       # (ROCm) Memory access fault by GPU node-4 (Agent handle: 0x55cebc9e8430) on address 0x7fa17b757000
-                       # CUDA memory exception, see https://github.com/pytorch/pytorch/issues/72177
-                       DecorateInfo(unittest.skip("Skipped! CUDA/ROCm memory exception"), 'TestGradients', 'test_fn_fwgrad_bwgrad',
-                                    device_type='cuda', dtypes=[torch.float64]),
                    )),
     BinaryUfuncInfo('floor_divide',
                     dtypes=all_types_and(torch.half, torch.bfloat16),
@@ -13178,7 +13158,7 @@ op_db: List[OpInfo] = [
     OpInfo('index_copy',
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
            supports_inplace_autograd=False,
-           supports_out=False,
+           supports_out=True,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            # https://github.com/pytorch/pytorch/issues/66357
@@ -13194,9 +13174,7 @@ op_db: List[OpInfo] = [
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL),
     OpInfo('index_add',
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
-           # An `out=` variant exists but is not exposed to the Python API
-           # see: https://github.com/pytorch/pytorch/pull/65993#discussion_r737760723
-           supports_out=False,
+           supports_out=True,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            # https://github.com/pytorch/pytorch/issues/66357
@@ -14001,10 +13979,6 @@ op_db: List[OpInfo] = [
            skips=(
                # Dispatch stub: unsupported device typemeta
                DecorateInfo(unittest.expectedFailure, 'TestGradients', 'test_fn_fwgrad_bwgrad', device_type='meta'),
-               # (ROCm) Memory access fault by GPU node-4 (Agent handle: 0x55860348e690) on address 0x7f0f4ddcb000
-               # CUDA memory access fault  https://github.com/pytorch/pytorch/issues/72189
-               DecorateInfo(unittest.skip("Skipped! CUDA/ROCm memory exception"), 'TestGradients', 'test_fn_fwgrad_bwgrad',
-                            device_type='cuda', dtypes=[torch.float64, torch.complex128]),
            )),
     OpInfo('trapezoid',
            dtypes=all_types_and_complex_and(torch.float16, torch.bfloat16),
@@ -14015,10 +13989,6 @@ op_db: List[OpInfo] = [
            skips=(
                # Dispatch stub: unsupported device typemeta
                DecorateInfo(unittest.expectedFailure, 'TestGradients', 'test_fn_fwgrad_bwgrad', device_type='meta'),
-               # (ROCm) Memory access fault by GPU node-4 (Agent handle: 0x55bbf53d5500) on address 0x7fe536eb5000
-               # CUDA memory access fault  https://github.com/pytorch/pytorch/issues/72189
-               DecorateInfo(unittest.skip("Skipped! CUDA/ROCm memory exception"), 'TestGradients', 'test_fn_fwgrad_bwgrad',
-                            device_type='cuda', dtypes=[torch.float64, torch.complex128]),
            )),
     OpInfo('cumulative_trapezoid',
            dtypes=all_types_and_complex_and(),
@@ -15455,10 +15425,6 @@ op_db: List[OpInfo] = [
                 "TestGradients",
                 "test_fn_gradgrad",
             ),
-            # (ROCm) Memory access fault by GPU node-4 (Agent handle: 0x5642a3aa7b60) on address 0x5642bab40000
-            # CUDA memory exception as well
-            DecorateInfo(unittest.skip("Skipped! CUDA/ROCm memory exception"), 'TestGradients', 'test_forward_mode_AD',
-                         device_type='cuda', dtypes=[torch.float64, torch.complex128]),
         ),
     ),
     OpInfo(
