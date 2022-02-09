@@ -551,21 +551,16 @@ $6 = torch._ops.aten.add_($1, $5)''')
         self.assertFalse(out.requires_grad)
         self.assertIsNone(out.grad_fn)
 
-        # TODO: this should be True
-        self.assertFalse(out.elem.requires_grad)
-        # TODO: this should be not None
-        self.assertIsNone(out.elem.grad_fn)
+        self.assertTrue(out.elem.requires_grad)
+        self.assertIsNotNone(out.elem.grad_fn)
 
         with self.assertRaisesRegex(RuntimeError, "does not require grad"):
-            out.backward()
+            out.sum().backward()
 
-        # TODO: this should not raise
-        with self.assertRaisesRegex(RuntimeError, "does not require grad"):
-            out.elem.backward()
+        out.elem.sum().backward()
 
         self.assertIsNone(t.grad)
-        # TODO: this should not be None
-        self.assertIsNone(t.elem.grad)
+        self.assertIsNotNone(t.elem.grad)
 
 
 if __name__ == '__main__':
