@@ -368,11 +368,13 @@ def pad_sequence(sequences, batch_first=False, padding_value=0.0):
         # In JIT context this leads to,
         # RuntimeError: cannot statically infer the expected size of a list in this context
         sequences = tuple(sequences)
+    else:
+        # For JIT, we only support Union[Tensor, Tuple[Tensor]]
+        if isinstance(sequences, torch.Tensor):
+            sequences = sequences.unbind(0)
 
     # assuming trailing dimensions and type of all the Tensors
     # in sequences are same and fetching those from sequences[0]
-    if isinstance(sequences, torch.Tensor):
-        sequences = sequences.unbind(0)
     return torch._C._nn.pad_sequence(sequences, batch_first, padding_value)
 
 
