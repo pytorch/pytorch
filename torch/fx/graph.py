@@ -254,7 +254,7 @@ class _PyTreeInfo(NamedTuple):
 
 class CodeGen(object):
     def __init__(self):
-        self.body_transformer = None
+        self._body_transformer = None
 
     def generate_prologue(self, free_vars, maybe_return_annotation):
         # If the original function didn't have self as its first argument, we
@@ -266,7 +266,13 @@ class CodeGen(object):
     def generate_output(self, output_args):
         return f'return {repr(output_args)}'
 
-    def python_code_func(self, nodes, root_module: str, namespace: _Namespace) -> PythonCode:
+    def process_inputs(self, inputs):
+        return inputs
+
+    def process_outputs(self, outputs):
+        return outputs
+
+    def _python_code_func(self, nodes, root_module: str, namespace: _Namespace) -> PythonCode:
         free_vars: List[str] = []
         body: List[str] = []
         globals_: Dict[str, Any] = {}
@@ -440,8 +446,8 @@ class CodeGen(object):
         else:
             wrap_stmts = ''
 
-        if self.body_transformer:
-            body = self.body_transformer(body)
+        if self._body_transformer:
+            body = self._body_transformer(body)
 
 
         prologue = self.generate_prologue(free_vars, maybe_return_annotation[0])
@@ -459,6 +465,18 @@ class PyTreeCodeGen(CodeGen):
     def __init__(self, pytree_info):
         super().__init__()
         self.pytree_info = pytree_info
+
+    def process_inputs(self, *inputs):
+        flat_args, args_spec = pytree.tree_flatten(*inputs)
+        return flat_args
+
+    def process_outputs(self, out):
+        if self.pytree_info is None:
+            return out
+        if not isinstance(out, list):
+            out = [out]
+        assert(self.pytree_info.out_spec is not None)
+        return pytree.tree_unflatten(out, self._codegen.pytree_info.out_spec)
 
     def generate_prologue(self, free_vars, maybe_return_annotation):
         if self.pytree_info is None:
@@ -660,18 +678,13 @@ class Graph:
         return n
 
     @compatibility(is_backward_compatible=False)
-    def flatten_inps(self, *args):
-        flat_args, args_spec = pytree.tree_flatten(args)
-        return flat_args
+    def process_inputs(self, *args):
+        return self._codegen.process_inputs(*args)
 
     @compatibility(is_backward_compatible=False)
-    def unflatten_outs(self, out):
-        if self._codegen.pytree_info is None:
-            return out
-        if not isinstance(out, list):
-            out = [out]
-        assert(self._codegen.pytree_info.out_spec is not None)
-        return pytree.tree_unflatten(out, self._codegen.pytree_info.out_spec)
+    def process_outputs(self, out):
+        return self._codegen.process_outputs(out)
+
 
     @compatibility(is_backward_compatible=True)
     def erase_node(self, to_erase : Node) -> None:
@@ -1077,7 +1090,7 @@ class Graph:
             return self._python_code(root_module, namespace)
 
     def _python_code(self, root_module: str, namespace: _Namespace) -> PythonCode:
-        return self._codegen.python_code_func(self.nodes, root_module, namespace)
+        return self._codegen._python_code_func(self.nodes, root_module, namespace)
 
 
     def __str__(self) -> str:
@@ -1231,6 +1244,9 @@ class Graph:
 
         return changed
 
+    @compatibility(is_backward_compatible=False)
+    def set_codegen(self, codegen: CodeGen):
+        self._codegen = codegen
 
     @compatibility(is_backward_compatible=False)
     def on_generate_code(
@@ -1307,14 +1323,14 @@ class Graph:
             # run next `recompile()`).
         """
         on_gen_code_old = self._on_generate_code
-        self._codegen.body_transformer = make_transformer(on_gen_code_old)
+        self._codegen._body_transformer = make_transformer(on_gen_code_old)
 
         @contextlib.contextmanager
         def on_generate_code_context_manager():
             try:
                 yield
             finally:
-                self._codegen.body_transformer = on_gen_code_old
+                self._codegen._body_transformer = on_gen_code_old
 
         return on_generate_code_context_manager()
 
