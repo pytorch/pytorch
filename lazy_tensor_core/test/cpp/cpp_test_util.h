@@ -2,16 +2,15 @@
 
 #include <gtest/gtest.h>
 #include <torch/csrc/lazy/backend/backend_device.h>
+#include <torch/csrc/lazy/core/debug_util.h>
 #include <torch/csrc/lazy/core/ir.h>
+#include <torch/csrc/lazy/core/tensor.h>
 #include <torch/torch.h>
 
 #include <cmath>
 #include <functional>
 #include <string>
 #include <unordered_set>
-
-#include "lazy_tensor_core/csrc/debug_util.h"
-#include <torch/csrc/lazy/core/tensor.h>
 
 #define XLA_CPP_TEST_ENABLED(name)                          \
   do {                                                      \

@@ -12,6 +12,7 @@
 #include <torch/csrc/lazy/core/tensor_util.h>
 #include <torch/csrc/lazy/core/thread_pool.h>
 #include <torch/csrc/lazy/core/util.h>
+#include <torch/csrc/lazy/python/python_util.h>
 
 #include <cstring>
 #include <sstream>
@@ -19,7 +20,6 @@
 #include <thread>
 #include <vector>
 
-#include "lazy_tensor_core/csrc/python_util.h"
 #include "lazy_tensor_core/csrc/tensor_aten_ops.h"
 #include "lazy_tensor_core/csrc/tensor_distributed.h"
 #include "lazy_tensor_core/csrc/ts_backend/backend_impl.h"

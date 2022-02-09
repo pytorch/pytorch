@@ -6,15 +6,17 @@
 
 #include <torch/csrc/lazy/core/tensor.h>
 
-namespace torch_lazy_tensors {
+namespace torch {
+namespace lazy {
 
-class DebugUtil {
+class TORCH_API DebugUtil {
  public:
   enum GraphFormat {
     kText,
     kDot,
     kBackend,
   };
+  static void RegisterGetPythonFramesFunction(std::function<std::vector<SourceLocation>()> func);
 
   static GraphFormat GetDefaultGraphFormat();
 
@@ -34,6 +36,10 @@ class DebugUtil {
       GraphFormat format = GetDefaultGraphFormat());
 
   static bool ExperimentEnabled(const std::string& name);
+
+  static std::function <std::vector<SourceLocation>()> GetPythonFramesIfAvailable;
 };
 
-}  // namespace torch_lazy_tensors
+
+}  // namespace lazy
+}  // namespace torch

@@ -1,11 +1,20 @@
-#include "lazy_tensor_core/csrc/python_util.h"
+#include <torch/csrc/lazy/python/python_util.h>
 
+// #include <torch/csrc/python_headers.h>
 #include <Python.h>
 #include <frameobject.h>
 #include <pybind11/pybind11.h>
 #include <torch/csrc/utils/python_strings.h>
+#include <torch/csrc/lazy/core/debug_util.h>
 
-namespace torch_lazy_tensors {
+namespace torch {
+namespace lazy {
+
+// When libtorch_python is loaded, we register the python frame getter
+// otherwise, debug util simply omits python frames
+__attribute__((constructor)) void init_python_util() {
+  DebugUtil::RegisterGetPythonFramesFunction(GetPythonFrames);
+}
 
 c10::optional<SourceLocation> GetPythonFrameTop() {
   if (!Py_IsInitialized()) {
@@ -50,4 +59,5 @@ std::ostream& operator<<(std::ostream& stream,
   return stream;
 }
 
-}  // namespace torch_lazy_tensors
+}  // namespace lazy
+}  // namespace torch

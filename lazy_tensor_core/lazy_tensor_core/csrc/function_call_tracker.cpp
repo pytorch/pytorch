@@ -1,6 +1,7 @@
 #include "lazy_tensor_core/csrc/function_call_tracker.h"
 
 #include <torch/csrc/lazy/core/helpers.h>
+#include <torch/csrc/lazy/python/python_util.h>
 
 #include <fstream>
 #include <limits>
@@ -9,7 +10,6 @@
 #include <thread>
 #include <unordered_set>
 
-#include "lazy_tensor_core/csrc/python_util.h"
 #include "lazy_tensors/computation_client/sys_util.h"
 #include "lazy_tensors/core/platform/stacktrace.h"
 
@@ -58,7 +58,7 @@ void LogFunction(TrackerContext* tctx, const char* tag) {
   std::ofstream fn_file(tctx->path, std::ios_base::app);
   fn_file << "[TAG " << tag << " From Thread " << std::this_thread::get_id()
           << "]\n"
-          << GetPythonFrames() << "\nC++ Frames:\n"
+          << torch::lazy::GetPythonFrames() << "\nC++ Frames:\n"
           << lazy_tensors::CurrentStackTrace() << "\n";
 }
 
