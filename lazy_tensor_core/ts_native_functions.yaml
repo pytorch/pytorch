@@ -54,7 +54,6 @@ full_codegen:
   - gt.Scalar
   - gt.Tensor
   - hardsigmoid
-  - hardswish_
   - index_select
   - kl_div_backward
   - l1_loss_backward
