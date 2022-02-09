@@ -396,8 +396,8 @@ def _input_mask(input: Tensor, *args, **kwargs) -> Tensor:
     use the layout of the :attr:`input` tensor.
 
     """
-    if input.layout not in {torch.strided, torch.sparse_coo}:
-        raise ValueError(f'_input_mask expects strided or sparse COO tensor but got {input.layout}')
+    if input.layout not in {torch.strided, torch.sparse_coo, torch.sparse_csr}:
+        raise ValueError(f'_input_mask expects strided or sparse COO or sparse CSR tensor but got {input.layout}')
 
     mask = kwargs.get('mask')
 
@@ -414,24 +414,38 @@ def _input_mask(input: Tensor, *args, **kwargs) -> Tensor:
             raise IndexError("_input_mask expected broadcastable mask (got mask dimensionality higher than of the input)")
         if mask.layout == torch.strided:
             mask = torch.broadcast_to(mask.clone(), input.shape).to(dtype=torch.bool)
-        else:
+        elif input.layout == torch.sparse_coo:
             mask = torch._sparse_broadcast_to(mask, input.shape)
+        else:
+            assert mask.layout == torch.sparse_csr
+            # Broadcasting of CSR tensors is not implemented. Working
+            # around by using COO layout.
+            coo_mask = torch.sparse_coo_tensor(
+                torch._convert_indices_from_csr_to_coo(mask.crow_indices(), mask.col_indices()),
+                mask.values())._coalesced_(True)
+            mask = torch._sparse_broadcast_to(coo_mask, input.shape).to_sparse_csr()
 
     # mask layout must match with input layout
+    #
+    # TODO: This restriction can be relaxed when elementwise
+    # multiplication of tensors with different layouts are supported.
     if mask.layout != input.layout:
         if input.layout == torch.strided:
             if mask.dtype == torch.bool and not mask.is_coalesced():
                 # to_dense calls coalesce but coalesce not implemented for Bool
                 mask = mask.to(torch.uint8).coalesce().to(torch.bool)
             mask = mask.to_dense()
-        else:
+        elif input.layout == torch.sparse_coo:
             mask = mask.to_sparse(input.sparse_dim())
+        else:
+            assert input.layout == torch.sparse_csr
+            mask = mask.to_sparse_csr()
 
     # mask is a boolean tensor
-    if input.layout == torch.strided:
+    if mask.layout == torch.strided:
         if mask.dtype != torch.bool:
             mask = mask.to(dtype=torch.bool)
-    else:
+    elif mask.layout == torch.sparse_coo:
         if mask.dtype != torch.bool:
             if not mask.is_coalesced():
                 mask = mask.coalesce()
@@ -442,7 +456,13 @@ def _input_mask(input: Tensor, *args, **kwargs) -> Tensor:
         elif not mask.is_coalesced():
             # coalesce not implemented for Bool
             mask = mask.to(torch.uint8).coalesce().to(torch.bool)
-
+    else:
+        assert mask.layout == torch.sparse_csr
+        if mask.dtype != torch.bool:
+            values = mask.values()
+            mask = torch.sparse_csr_tensor(mask.crow_indices(),
+                                           mask.col_indices(),
+                                           values.new_ones(values.shape, dtype=torch.bool))
     return mask
 
 
@@ -521,6 +541,24 @@ def sum(input: Tensor,
             shape = tuple((1 if i in dim_ else mask_input.shape[i]) for i in range(mask_input.ndim))
             result = torch.sparse_coo_tensor(indices, result._values(), shape, dtype=result.dtype, device=result.device)
 
+        return result
+    elif input.layout == torch.sparse_csr:
+        if mask is None or mask is input:
+            mask_input = input
+        else:
+            mask = _input_mask(input, mask=mask)
+            # Elementwise multiplication of sparse tensors is not
+            # implemented yet. Here we workaround this by using COO
+            # mul support:
+            coo_input = torch.sparse_coo_tensor(
+                torch._convert_indices_from_csr_to_coo(input.crow_indices(), input.col_indices()),
+                input.values(), input.shape)._coalesced_(True)
+            coo_mask = torch.sparse_coo_tensor(
+                torch._convert_indices_from_csr_to_coo(mask.crow_indices(), mask.col_indices()),
+                mask.values(), mask.shape)._coalesced_(True)
+            mask_input = (coo_input * coo_mask).to_sparse_csr()
+
+        result = torch._sparse_csr_sum(mask_input, dim=list(dim_), keepdim=bool(keepdim), dtype=dtype)
         return result
     else:
         raise ValueError(f'masked sum expects strided or sparse_coo tensor (got {input.layout} tensor)')

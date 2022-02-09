@@ -1050,12 +1050,20 @@ def sample_inputs_mixed_masked_reduction(op_info, device, dtype, requires_grad, 
     inputs: List[SampleInput] = []
 
     for sample_input in sample_inputs_masked_reduction(op_info, device, dtype, requires_grad, **kwargs):
-        for (supports_layout, to_layout) in [
-                (op_info.supports_sparse, torch.Tensor.to_sparse),
-                (op_info.supports_sparse_csr, torch.Tensor.to_sparse_csr),
+        for (supports_layout, to_layout, layout) in [
+                (op_info.supports_sparse, torch.Tensor.to_sparse, torch.sparse_coo),
+                (op_info.supports_sparse_csr, torch.Tensor.to_sparse_csr, torch.sparse_csr),
         ]:
             if not supports_layout:
                 continue
+
+            if layout == torch.sparse_csr:
+                # Sparse CSR tensors are always 2-D tensors. So,
+                # masked reduction on CSR tensors are defined only if
+                # keepdim is True.
+                if not (sample_input.input.ndim == 2 and sample_input.kwargs.get('keepdim')):
+                    continue
+
             # input has given layout, mask is strided or None:
             inputs.append(SampleInput(to_layout(sample_input.input),
                                       args=sample_input.args, kwargs=sample_input.kwargs))
@@ -15039,6 +15047,7 @@ op_db: List[OpInfo] = [
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
         supports_sparse=True,
+        supports_sparse_csr=True,
         promotes_int_to_int64=False,
         dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
         skips=(

@@ -4,6 +4,7 @@
 """
 
 import itertools
+import pytest
 import torch
 from typing import List, Any
 
@@ -208,10 +209,26 @@ class TestMasked(TestCase):
         sample_inputs = op.sample_inputs_mixed(device, dtype)
         for sample_input in sample_inputs:
             t_inp, t_args, t_kwargs = sample_input.input, sample_input.args, sample_input.kwargs
+
+            # Temporarily skip CUDA CSR tensors:
+            _mask = t_kwargs.get('mask')
+            if (
+                    (t_inp.layout == torch.sparse_csr
+                     or (_mask is not None and _mask.layout == torch.sparse_csr))
+                    and device != 'cpu'
+                    and op.name in {'_masked.sum'}):
+                pytest.xfail(f'{op.name} not yet supported on CSR tensors with device={device}')
+                continue
             actual = op.op(t_inp, *t_args, **t_kwargs)
 
             # the first input defines the result layout
-            assert actual.layout == t_inp.layout
+            if t_inp.layout == torch.sparse_csr:
+                # scalars cannot be represented as CSR tensors, so
+                # masked reduction with dim=(0, 1) and keedim=False
+                # returns a strided scalar tensor.
+                assert not t_kwargs or actual.layout == t_inp.layout
+            else:
+                assert actual.layout == t_inp.layout
 
             # check masked invariance:
             #  op(inp, mask).to_dense() == op(inp.to_dense(), mask.to_dense()) at outmask
