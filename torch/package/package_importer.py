@@ -12,9 +12,9 @@ from weakref import WeakValueDictionary
 
 import torch
 from torch.serialization import _get_restore_location, _maybe_decode_ascii
-from ._directory_reader_torchscript import TorchScriptDirectoryReader
 
 from ._directory_reader import DirectoryReader
+from ._directory_reader_torchscript import TorchScriptDirectoryReader
 from ._importlib import (
     _calc___package__,
     _normalize_line_endings,
@@ -29,6 +29,7 @@ from .glob_group import GlobPattern
 from .importer import Importer
 from ._zip_file import PackageZipFileReader
 from ._zip_file_torchscript import TorchScriptPackageZipFileReader
+
 
 class PackageImporter(Importer):
     """Importers allow you to load code written to packages by :class:`PackageExporter`.
@@ -57,12 +58,14 @@ class PackageImporter(Importer):
     ):
         """Open ``file_or_buffer`` for importing. This checks that the imported package only requires modules
         allowed by ``module_allowed``
+
         Args:
             file_or_buffer: a file-like object (has to implement :meth:`read`, :meth:`readline`, :meth:`tell`, and :meth:`seek`),
                 a string, or an ``os.PathLike`` object containing a filename.
             module_allowed (Callable[[str], bool], optional): A method to determine if a externally provided module
                 should be allowed. Can be used to ensure packages loaded do not depend on modules that the server
                 does not support. Defaults to allowing anything.
+
         Raises:
             ImportError: If the package will use a disallowed module.
         """
@@ -107,6 +110,7 @@ class PackageImporter(Importer):
 
         # used for torch.serialization._load
         self.Unpickler = lambda *args, **kwargs: PackageUnpickler(self, *args, **kwargs)
+
     def import_module(self, name: str, package=None):
         """Load a module from the package if it hasn't already been loaded, and then return
         the module. Modules are loaded locally
@@ -179,10 +183,13 @@ class PackageImporter(Importer):
         """
         pickle_file = self._zipfile_path(package, resource)
         restore_location = _get_restore_location(map_location)
+        self.restore_location = _get_restore_location(map_location)
         loaded_storages = {}
         loaded_reduces = {}
         storage_context = torch._C.DeserializationStorageContext()
 
+        # TODO move out and add deprecration warning for this behavior
+        # TODO move to package shim
         def load_tensor(dtype, size, key, location, restore_location):
             name = f"{key}.storage"
 
@@ -238,14 +245,17 @@ class PackageImporter(Importer):
         unpickler = self.Unpickler(data_file)
         unpickler.persistent_load = persistent_load
 
+        # TODO: it might make sense to have a seperate packager in torch which uses the OSS pacakge but saves state
         @contextmanager
         def set_deserialization_context():
             # to let reduce_package access deserializaiton context
+            self.external_registry = {}
             self.storage_context = storage_context
             self.last_map_location = map_location
             try:
                 yield
             finally:
+                self.external_registry = None
                 self.storage_context = None
                 self.last_map_location = None
 
@@ -581,6 +591,9 @@ class PackageImporter(Importer):
         if isinstance(package, _ExternNode):
             return  # the shorter extern covers this extern case
         package.children[last] = _ExternNode()
+
+    def __del__(self):
+        self.zip_reader.close()
 
 
 _NEEDS_LOADING = object()
