@@ -1,7 +1,6 @@
 import torch
 from . import _functional as F
 from ..optimizer import Optimizer
-from collections import defaultdict
 
 class NAdam(Optimizer):
     r"""Implements NAdam algorithm with multi tensor APIs.
@@ -38,8 +37,20 @@ class NAdam(Optimizer):
         if not 0.0 <= momentum_decay:
             raise ValueError("Invalid momentum_decay value: {}".format(momentum_decay))
         defaults = dict(lr=lr, betas=betas, eps=eps,
-                        weight_decay=weight_decay, momentum_decay=momentum_decay)
+                        weight_decay=weight_decay, momentum_decay=momentum_decay, foreach=True)
         super(NAdam, self).__init__(params, defaults)
+
+    def __setstate__(self, state):
+        super().__setstate__(state)
+        state_values = list(self.state.values())
+        step_is_tensor = (len(state_values) != 0) and torch.is_tensor(state_values[0]['step'])
+        if not step_is_tensor:
+            for s in state_values:
+                s['step'] = torch.tensor(float(s['step']))
+        mu_product_is_tensor = (len(state_values) != 0) and torch.is_tensor(state_values[0]['mu_product'])
+        if not mu_product_is_tensor:
+            for s in state_values:
+                s['mu_product'] = torch.tensor(s['mu_product'])
 
     @torch.no_grad()
     def step(self, closure=None):
@@ -59,7 +70,7 @@ class NAdam(Optimizer):
             exp_avg = []
             exp_avg_sq = []
             mu_products = []
-            states = []
+            state_steps = []
             beta1, beta2 = group['betas']
 
             for p in group['params']:
@@ -74,8 +85,8 @@ class NAdam(Optimizer):
 
                 # Lazy state initialization
                 if len(state) == 0:
-                    state['step'] = 0
-                    state['mu_product'] = 1.
+                    state['step'] = torch.tensor(0.)
+                    state['mu_product'] = torch.tensor(1.)
                     # Exponential moving average of gradient values
                     state['exp_avg'] = torch.zeros_like(p, memory_format=torch.preserve_format)
                     # Exponential moving average of squared gradient values
@@ -83,12 +94,7 @@ class NAdam(Optimizer):
 
                 exp_avg.append(state['exp_avg'])
                 exp_avg_sq.append(state['exp_avg_sq'])
-
-                state['step'] += 1
-                states.append(state)
-
-                mu = beta1 * (1. - 0.5 * (0.96 ** (state['step'] * group['momentum_decay'])))
-                state['mu_product'] *= mu
+                state_steps.append(state['step'])
                 mu_products.append(state['mu_product'])
 
             F.nadam(params_with_grad,
@@ -96,7 +102,7 @@ class NAdam(Optimizer):
                     exp_avg,
                     exp_avg_sq,
                     mu_products,
-                    states,
+                    state_steps,
                     beta1=beta1,
                     beta2=beta2,
                     lr=group['lr'],
@@ -105,26 +111,3 @@ class NAdam(Optimizer):
                     eps=group['eps'])
 
             return loss
-
-    # TODO: refactor to a base class once foreach ops are in a good shape.
-    def zero_grad(self, set_to_none: bool = False):
-        per_device_and_dtype_grads = defaultdict(lambda: defaultdict(list))
-        for group in self.param_groups:
-            for p in group['params']:
-                if p.grad is not None:
-                    if set_to_none:
-                        p.grad = None
-                    else:
-                        if p.grad.grad_fn is not None:
-                            p.grad.detach_()
-                        else:
-                            p.grad.requires_grad_(False)
-
-                        if p.grad.is_sparse:
-                            p.grad.zero_()
-                        else:
-                            per_device_and_dtype_grads[p.grad.device][p.grad.dtype].append(p.grad)
-
-            for _, per_dtype_grads in per_device_and_dtype_grads.items():
-                for grads in per_dtype_grads.values():
-                    torch._foreach_zero_(grads)

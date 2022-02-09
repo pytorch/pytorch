@@ -31,10 +31,10 @@ class AdamW(Optimizer):
             &\hspace{5mm}\textbf{if} \: amsgrad                                                  \\
             &\hspace{10mm}\widehat{v_t}^{max} \leftarrow \mathrm{max}(\widehat{v_t}^{max},
                 \widehat{v_t})                                                                   \\
-            &\hspace{10mm}\theta_t \leftarrow \theta_{t-1} - \gamma \widehat{m_t}/
+            &\hspace{10mm}\theta_t \leftarrow \theta_t - \gamma \widehat{m_t}/
                 \big(\sqrt{\widehat{v_t}^{max}} + \epsilon \big)                                 \\
             &\hspace{5mm}\textbf{else}                                                           \\
-            &\hspace{10mm}\theta_t \leftarrow \theta_{t-1} - \gamma \widehat{m_t}/
+            &\hspace{10mm}\theta_t \leftarrow \theta_t - \gamma \widehat{m_t}/
                 \big(\sqrt{\widehat{v_t}} + \epsilon \big)                                       \\
             &\rule{110mm}{0.4pt}                                                          \\[-1.ex]
             &\bf{return} \:  \theta_t                                                     \\[-1.ex]
@@ -84,6 +84,12 @@ class AdamW(Optimizer):
         super(AdamW, self).__setstate__(state)
         for group in self.param_groups:
             group.setdefault('amsgrad', False)
+            group.setdefault('maximize', False)
+        state_values = list(self.state.values())
+        step_is_tensor = (len(state_values) != 0) and torch.is_tensor(state_values[0]['step'])
+        if not step_is_tensor:
+            for s in state_values:
+                s['step'] = torch.tensor(float(s['step']))
 
     @torch.no_grad()
     def step(self, closure=None):
@@ -121,7 +127,7 @@ class AdamW(Optimizer):
 
                 # State initialization
                 if len(state) == 0:
-                    state['step'] = 0
+                    state['step'] = torch.tensor(0.)
                     # Exponential moving average of gradient values
                     state['exp_avg'] = torch.zeros_like(p, memory_format=torch.preserve_format)
                     # Exponential moving average of squared gradient values
@@ -136,9 +142,6 @@ class AdamW(Optimizer):
                 if amsgrad:
                     max_exp_avg_sqs.append(state['max_exp_avg_sq'])
 
-                # update the steps for each param group update
-                state['step'] += 1
-                # record the step after step update
                 state_steps.append(state['step'])
 
             F.adamw(params_with_grad,

@@ -82,7 +82,7 @@ void _fft_fill_with_conjugate_symmetry_slice(
     // Explicitly loop over a Hermitian mirrored dimension
     if (iter_index[0] > 0) {
       auto end = std::min(signal_half_sizes[0], iter_index[0] + numel_remaining);
-      for (int64_t i = iter_index[0]; i < end; ++i) {
+      for (const auto i : c10::irange(iter_index[0], end)) {
         out_ptr[(signal_half_sizes[0] - i) * out_strides[0]] = std::conj(in_ptr[i * in_strides[0]]);
       }
       numel_remaining -= (end - iter_index[0]);
@@ -151,6 +151,7 @@ static void _fft_fill_with_conjugate_symmetry_cpu_(
 REGISTER_ARCH_DISPATCH(fft_fill_with_conjugate_symmetry_stub, DEFAULT, &_fft_fill_with_conjugate_symmetry_cpu_)
 REGISTER_AVX2_DISPATCH(fft_fill_with_conjugate_symmetry_stub, &_fft_fill_with_conjugate_symmetry_cpu_)
 REGISTER_AVX512_DISPATCH(fft_fill_with_conjugate_symmetry_stub, &_fft_fill_with_conjugate_symmetry_cpu_)
+REGISTER_ZVECTOR_DISPATCH(fft_fill_with_conjugate_symmetry_stub, &_fft_fill_with_conjugate_symmetry_cpu_)
 REGISTER_VSX_DISPATCH(fft_fill_with_conjugate_symmetry_stub, &_fft_fill_with_conjugate_symmetry_cpu_)
 
 // _out variants can be shared between PocketFFT and MKL
@@ -560,7 +561,7 @@ Tensor _fft_c2c_mkl(const Tensor& self, IntArrayRef dim, int64_t normalization, 
 #else
 
 namespace at { namespace native {
-REGISTER_NO_CPU_DISPATCH(fft_fill_with_conjugate_symmetry_stub, fft_fill_with_conjugate_symmetry_fn);
+REGISTER_NO_CPU_DISPATCH(fft_fill_with_conjugate_symmetry_stub);
 
 Tensor _fft_c2r_mkl(const Tensor& self, IntArrayRef dim, int64_t normalization, int64_t last_dim_size) {
   AT_ERROR("fft: ATen not compiled with FFT support");

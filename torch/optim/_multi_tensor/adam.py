@@ -1,7 +1,6 @@
 import math
 import torch
 from ..optimizer import Optimizer
-from collections import defaultdict
 
 class Adam(Optimizer):
     r"""Implements Adam algorithm with multi tensor APIs.
@@ -44,13 +43,20 @@ class Adam(Optimizer):
         if not 0.0 <= weight_decay:
             raise ValueError("Invalid weight_decay value: {}".format(weight_decay))
         defaults = dict(lr=lr, betas=betas, eps=eps,
-                        weight_decay=weight_decay, amsgrad=amsgrad, maximize=maximize)
+                        weight_decay=weight_decay, amsgrad=amsgrad,
+                        maximize=maximize, foreach=True)
         super(Adam, self).__init__(params, defaults)
 
     def __setstate__(self, state):
         super(Adam, self).__setstate__(state)
         for group in self.param_groups:
             group.setdefault('amsgrad', False)
+            group.setdefault('maximize', False)
+        state_values = list(self.state.values())
+        step_is_tensor = (len(state_values) != 0) and torch.is_tensor(state_values[0]['step'])
+        if not step_is_tensor:
+            for s in state_values:
+                s['step'] = torch.tensor(float(s['step']))
 
     @torch.no_grad()
     def step(self, closure=None):
@@ -69,7 +75,7 @@ class Adam(Optimizer):
             amsgrad = group['amsgrad']
 
             grads = []
-            states = []
+            state_steps = []
             exp_avg = []
             exp_avg_sq = []
             max_exp_avg_sq = []
@@ -91,7 +97,7 @@ class Adam(Optimizer):
 
                 # State initialization
                 if len(state) == 0:
-                    state['step'] = 0
+                    state['step'] = torch.tensor(0.)
                     # Exponential moving average of gradient values
                     state['exp_avg'] = torch.zeros_like(p, memory_format=torch.preserve_format)
                     # Exponential moving average of squared gradient values
@@ -106,13 +112,15 @@ class Adam(Optimizer):
                 if amsgrad:
                     max_exp_avg_sq.append(state['max_exp_avg_sq'])
 
-                state['step'] += 1
-                states.append(state)
+                state_steps.append(state['step'])
 
             beta1, beta2 = group['betas']
 
-            bias_correction1 = [1 - beta1 ** state['step'] for state in states]
-            bias_correction2 = [1 - beta2 ** state['step'] for state in states]
+            # update steps
+            torch._foreach_add_(state_steps, 1)
+
+            bias_correction1 = [1 - beta1 ** step.item() for step in state_steps]
+            bias_correction2 = [1 - beta2 ** step.item() for step in state_steps]
             if group['weight_decay'] != 0:
                 grads = torch._foreach_add(grads, params_with_grad, alpha=group['weight_decay'])
 
@@ -144,26 +152,3 @@ class Adam(Optimizer):
             torch._foreach_addcdiv_(params_with_grad, exp_avg, denom, step_size)
 
         return loss
-
-    # TODO: refactor to a base class once foreach ops are in a good shape.
-    def zero_grad(self, set_to_none: bool = False):
-        per_device_and_dtype_grads = defaultdict(lambda: defaultdict(list))
-        for group in self.param_groups:
-            for p in group['params']:
-                if p.grad is not None:
-                    if set_to_none:
-                        p.grad = None
-                    else:
-                        if p.grad.grad_fn is not None:
-                            p.grad.detach_()
-                        else:
-                            p.grad.requires_grad_(False)
-
-                        if p.grad.is_sparse:
-                            p.grad.zero_()
-                        else:
-                            per_device_and_dtype_grads[p.grad.device][p.grad.dtype].append(p.grad)
-
-            for _, per_dtype_grads in per_device_and_dtype_grads.items():
-                for grads in per_dtype_grads.values():
-                    torch._foreach_zero_(grads)

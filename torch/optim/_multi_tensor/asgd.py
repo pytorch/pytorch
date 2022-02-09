@@ -1,7 +1,6 @@
 import torch
 from . import _functional as F
 from ..optimizer import Optimizer
-from collections import defaultdict
 
 class ASGD(Optimizer):
     """Implements Averaged Stochastic Gradient Descent.
@@ -29,8 +28,24 @@ class ASGD(Optimizer):
             raise ValueError("Invalid weight_decay value: {}".format(weight_decay))
 
         defaults = dict(lr=lr, lambd=lambd, alpha=alpha, t0=t0,
-                        weight_decay=weight_decay)
+                        weight_decay=weight_decay, foreach=True)
         super(ASGD, self).__init__(params, defaults)
+
+    def __setstate__(self, state):
+        super().__setstate__(state)
+        state_values = list(self.state.values())
+        step_is_tensor = (len(state_values) != 0) and torch.is_tensor(state_values[0]['step'])
+        if not step_is_tensor:
+            for s in state_values:
+                s['step'] = torch.tensor(float(s['step']))
+        eta_is_tensor = (len(state_values) != 0) and torch.is_tensor(state_values[0]['eta'])
+        if not eta_is_tensor:
+            for s in state_values:
+                s['eta'] = torch.tensor(s['eta'])
+        mu_is_tensor = (len(state_values) != 0) and torch.is_tensor(state_values[0]['mu'])
+        if not mu_is_tensor:
+            for s in state_values:
+                s['mu'] = torch.tensor(float(s['mu']))
 
     @torch.no_grad()
     def step(self, closure=None):
@@ -45,11 +60,14 @@ class ASGD(Optimizer):
             with torch.enable_grad():
                 loss = closure()
 
-        grads = []
-        params_with_grad = []
-        states = []
-
         for group in self.param_groups:
+            grads = []
+            params_with_grad = []
+            mus = []
+            axs = []
+            etas = []
+            state_steps = []
+
             for p in group['params']:
                 if p.grad is not None:
                     if p.grad.is_sparse:
@@ -61,17 +79,22 @@ class ASGD(Optimizer):
 
                     # State initialization
                     if len(state) == 0:
-                        state['step'] = 0
-                        state['eta'] = group['lr']
-                        state['mu'] = 1
+                        state['step'] = torch.tensor(0.)
+                        state['eta'] = torch.tensor(group['lr'])
+                        state['mu'] = torch.tensor(1.)
                         state['ax'] = torch.zeros_like(p, memory_format=torch.preserve_format)
 
-                    state['step'] += 1
-                    states.append(state)
+                    mus.append(state['mu'])
+                    axs.append(state['ax'])
+                    etas.append(state['eta'])
+                    state_steps.append(state['step'])
 
             F.asgd(params_with_grad,
                    grads,
-                   states,
+                   axs,
+                   mus,
+                   etas,
+                   state_steps,
                    lambd=group['lambd'],
                    lr=group['lr'],
                    t0=group['t0'],
@@ -79,26 +102,3 @@ class ASGD(Optimizer):
                    weight_decay=group['weight_decay'])
 
         return loss
-
-    # TODO: refactor to a base class once foreach ops are in a good shape.
-    def zero_grad(self, set_to_none: bool = False):
-        per_device_and_dtype_grads = defaultdict(lambda: defaultdict(list))
-        for group in self.param_groups:
-            for p in group['params']:
-                if p.grad is not None:
-                    if set_to_none:
-                        p.grad = None
-                    else:
-                        if p.grad.grad_fn is not None:
-                            p.grad.detach_()
-                        else:
-                            p.grad.requires_grad_(False)
-
-                        if p.grad.is_sparse:
-                            p.grad.zero_()
-                        else:
-                            per_device_and_dtype_grads[p.grad.device][p.grad.dtype].append(p.grad)
-
-            for _, per_dtype_grads in per_device_and_dtype_grads.items():
-                for grads in per_dtype_grads.values():
-                    torch._foreach_zero_(grads)

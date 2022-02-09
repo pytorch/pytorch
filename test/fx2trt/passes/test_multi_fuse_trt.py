@@ -1,13 +1,16 @@
+# Owner(s): ["oncall: aiacc"]
+
 import torch
 import torch.fx.experimental.fx_acc.acc_ops as acc_ops
 from torch.testing._internal.common_fx2trt import AccTestCase
 from parameterized import parameterized
-from torch.fx.experimental.fx2trt.passes.fuse_pass import (
+from fx2trt_oss.fx.passes.fuse_pass import (
     fuse_permute_linear,
     trt_transposed_linear,
     fuse_permute_matmul,
     trt_transposed_matmul,
 )
+from torch.testing._internal.common_utils import run_tests
 
 
 def permute021(x):
@@ -57,3 +60,6 @@ class TestMultiFuse(AccTestCase):
             {acc_ops.permute},
             apply_passes=[fuse_permute_matmul, fuse_permute_linear],
         )
+
+if __name__ == '__main__':
+    run_tests()
