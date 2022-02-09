@@ -969,7 +969,7 @@ class DistributedDataParallel(Module, Joinable):
                 if isLazy:
                     lazy_input = []
                     for input in inputs[0]:
-                        lazy_input.append(input.to('lazy'))
+                        lazy_input.append(input.to(f'lazy:{input.device.index}'))
                     output = self.module(*lazy_input, **kwargs[0])
                 else:
                     output = self.module(*inputs[0], **kwargs[0])

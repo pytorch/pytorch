@@ -1382,7 +1382,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::collective(
   // A hack to copy lazy to cuda to bypass following checks.
   if (inputs.front().device().type() == at::kLazy) {
     for (auto& input : inputs) {
-      input = input.to("cuda");
+      input = input.to(c10::Device(c10::kCUDA, input.device().index()));
     }
   }
 
