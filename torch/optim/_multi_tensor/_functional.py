@@ -4,6 +4,7 @@ import torch
 from torch import Tensor
 from typing import List
 
+
 def _make_sparse(grad, grad_indices, values):
     size = grad.size()
     if grad_indices.numel() == 0 or values.numel() == 0:
@@ -114,40 +115,6 @@ def adamax(params: List[Tensor],
     bias_corrections = [1 - beta1 ** step.item() for step in state_steps]
     clr = [-1 * (lr / bias_correction) for bias_correction in bias_corrections]
     torch._foreach_addcdiv_(params, exp_avgs, exp_infs, clr)
-
-
-def adadelta(params: List[Tensor],
-             grads: List[Tensor],
-             square_avgs: List[Tensor],
-             acc_deltas: List[Tensor],
-             *,
-             lr: float,
-             weight_decay: float,
-             rho: float,
-             eps: float):
-    r"""Functional API that performs Adadelta algorithm computation.
-
-    See :class:`~torch.optim.Adadelta` for details.
-    """
-
-    if weight_decay != 0:
-        torch._foreach_add_(grads, params, alpha=weight_decay)
-
-    torch._foreach_mul_(square_avgs, rho)
-    torch._foreach_addcmul_(square_avgs, grads, grads, value=1 - rho)
-
-    std = torch._foreach_add(square_avgs, eps)
-    torch._foreach_sqrt_(std)
-
-    deltas = torch._foreach_add(acc_deltas, eps)
-    torch._foreach_sqrt_(deltas)
-    torch._foreach_div_(deltas, std)
-    torch._foreach_mul_(deltas, grads)
-
-    torch._foreach_add_(params, deltas, alpha=-lr)
-
-    torch._foreach_mul_(acc_deltas, rho)
-    torch._foreach_addcmul_(acc_deltas, deltas, deltas, value=1 - rho)
 
 
 def asgd(params: List[Tensor],
