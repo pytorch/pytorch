@@ -171,7 +171,7 @@ def generate_models(model_directory_path: Path):
                 f"The module {torch_module_name} "
                 f"is not a torch.nn.module instance. "
                 f"Please ensure it's a subclass of torch.nn.module in fixtures_src.py"
-                f"and it's registered as a instance in ALL_MODULES in generated_models.py")
+                f"and it's registered as an instance in ALL_MODULES in generated_models.py")
 
 
         # The corresponding model name is: test_versioned_div_tensor_example_v4
