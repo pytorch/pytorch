@@ -41,6 +41,7 @@ func_list = {
     torch.squeeze,
     torch.stack,
     torch.unsqueeze,
+    torch.cat,
 }
 method_list = {
     torch.mean,
