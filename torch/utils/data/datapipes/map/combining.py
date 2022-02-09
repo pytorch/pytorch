@@ -6,15 +6,15 @@ T_co = TypeVar('T_co', covariant=True)
 
 @functional_datapipe('concat')
 class ConcaterMapDataPipe(MapDataPipe):
-    r""" :class:`ConcaterMapDataPipe`.
-
-    Map DataPipe to concatenate multiple Map DataPipes.
-    The actual index of is the cumulative sum of source datapipes.
-    For example, if there are 2 source datapipes both with length 5,
+    r"""
+    Concatenate multiple Map DataPipes (functional name: ``concat``).
+    The new index of is the cumulative sum of source DataPipes.
+    For example, if there are 2 source DataPipes both with length 5,
     index 0 to 4 of the resulting `ConcatMapDataPipe` would refer to
-    elements of the first datapipe, and 5 to 9 would refer to elements
-    of the second datapipe.
-    args:
+    elements of the first DataPipe, and 5 to 9 would refer to elements
+    of the second DataPipe.
+
+    Args:
         datapipes: Map DataPipes being concatenated
     """
     datapipes: Tuple[MapDataPipe]
@@ -47,11 +47,9 @@ class ConcaterMapDataPipe(MapDataPipe):
 
 @functional_datapipe('zip')
 class ZipperMapDataPipe(MapDataPipe[Tuple[T_co, ...]]):
-    r""" :class:`ZipperMapDataPipe`.
-
-    Map DataPipe that aggregates elements into a tuple from each of
-    the input DataPipe. This MataPipe is out of bound when the
-    shortest input DataPipe is exhausted.
+    r"""
+    Aggregates elements into a tuple from each of the input DataPipes (functional name: ``zip``).
+    This MataPipe is out of bound as soon as the shortest input DataPipe is exhausted.
 
     Args:
         *datapipes: Map DataPipes being aggregated

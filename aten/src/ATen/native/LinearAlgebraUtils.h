@@ -3,8 +3,7 @@
 #include <c10/core/ScalarType.h>
 #include <c10/util/irange.h>
 #include <c10/util/Exception.h>
-#include <ATen/ATen.h>
-#include <ATen/core/DimVector.h>
+#include <ATen/core/Tensor.h>
 #include <ATen/ExpandUtils.h>
 #include <ATen/TensorUtils.h>
 #include <ATen/native/TensorIterator.h>
@@ -14,6 +13,15 @@
 #include <cstring>
 #include <cctype>
 
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#else
+#include <ATen/ops/arange.h>
+#include <ATen/ops/empty.h>
+#include <ATen/ops/empty_like.h>
+#include <ATen/ops/empty_strided.h>
+#include <ATen/ops/zeros.h>
+#endif
 
 namespace at { namespace native {
 
@@ -356,7 +364,7 @@ static inline void singleCheckErrors(int64_t info, const c10::string_view name, 
  * successful (info = 0) or not, and report in case of the latter.
  */
 static inline void batchCheckErrors(const std::vector<int64_t>& infos, const c10::string_view name) {
-  for (size_t i = 0; i < infos.size(); i++) {
+  for (const auto i : c10::irange(infos.size())) {
     auto info = infos[i];
     singleCheckErrors(info, name, i);
   }
@@ -368,7 +376,7 @@ static inline void batchCheckErrors(const std::vector<int64_t>& infos, const c10
 static inline void batchCheckErrors(const Tensor& infos, const c10::string_view name) {
   auto infos_cpu = infos.to(at::kCPU);
   auto infos_data = infos_cpu.data_ptr<int>();
-  for (int64_t i = 0; i < infos.numel(); i++) {
+  for (const auto i : c10::irange(infos.numel())) {
     auto info = infos_data[i];
     singleCheckErrors(info, name, i);
   }
