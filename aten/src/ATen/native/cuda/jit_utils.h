@@ -53,7 +53,7 @@ struct delayed_false : std::false_type {
 template <typename T>
 inline std::string typeName() {
   // we can't use static_assert(false) directly as the
-  // program will be not compile even if the template is not
+  // program will be not compiled even if the template is not
   // instantiated, so we use `delayed_false`
   // to make sure compiler doesn't eagerly raise
   // fail this assertion.
@@ -76,10 +76,6 @@ template <> inline std::string typeName<c10::complex<float>>(){
 }
 template <> inline std::string typeName<c10::complex<double>>(){
     return "std::complex<double>";
-}
-template <> inline std::string typeName<c10::complex<c10::Half>>(){
-    TORCH_INTERNAL_ASSERT(false, "torch.complex32 is not supported");
-    return "std::complex<at::Half>";
 }
 template <> inline std::string typeName<at::Half>(){
     return "at::Half";
