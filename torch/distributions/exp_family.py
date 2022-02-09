@@ -58,9 +58,3 @@ class ExponentialFamily(Distribution):
         for np, g in zip(nparams, gradients):
             result -= (np * g).reshape(self._batch_shape + (-1,)).sum(-1)
         return result
-    
-    
-    
-    
-    
-    
