@@ -14,6 +14,7 @@
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
 #else
+#include <ATen/ops/_efficientzerotensor_native.h>
 #include <ATen/ops/empty_native.h>
 #include <ATen/ops/empty_strided_native.h>
 #include <ATen/ops/eye_native.h>
