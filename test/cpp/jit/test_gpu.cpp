@@ -20629,6 +20629,107 @@ TEST_F(NVFuserTest, FusionBroadcastConcretization4_CUDA) {
 }
 #endif
 
+TEST_F(NVFuserTest, FusionIssue1430) {
+  // Derived from an expression sorting issue when using loop map, now expr
+  // sorting uses parallel map.
+  std::unique_ptr<Fusion> fusion_ptr = std::make_unique<Fusion>();
+  Fusion& fusion = *fusion_ptr.get();
+  FusionGuard fg(&fusion);
+
+  int V = 2, W = 3, X = 4, Y = 5, Z = 6;
+
+  // setup fusion
+  auto tv0 = TensorViewBuilder()
+                 .ndims(5)
+                 .dtype(DataType::Half)
+                 .contiguity(std::vector<bool>(5, true))
+                 .shape({V, W, X, Y, Z})
+                 .build();
+
+  fusion.addInput(tv0);
+  auto tv1 = set(tv0);
+  auto tv2 = castOp(DataType::Float, tv1);
+
+  auto tvs = Welford(tv2, {1, 2, 3, 4});
+  auto tv3 = tvs.avg;
+  auto tv4 = tvs.var_sum;
+  auto tv5 = tvs.n;
+
+  // avg
+  auto tv6 = broadcast(tvs.avg, {false, true, true, true, true});
+
+  // var
+  auto tv7 = mul(tv4, IrBuilder::create<Double>(1. / (W * X * Y * Z)));
+  auto tv8 = add(tv7, IrBuilder::create<Double>(1.e-6));
+  auto tv9 = broadcast(tv8, {false, true, true, true, true});
+  auto tv10 = rsqrt(tv9);
+
+  auto tv11 = castOp(DataType::Float, tv1);
+  auto tv12 = sub(tv11, tv6);
+  auto tv13 = mul(tv12, tv10);
+
+  auto tv14 = set(tv13);
+  fusion.addOutput(tv14);
+
+  tv3->axis(0)->parallelize(ParallelType::BIDy);
+  tv3->axis(2)->parallelize(ParallelType::BIDx);
+  tv3->axis(3)->parallelize(ParallelType::TIDx);
+  tv3->axis(4)->parallelize(ParallelType::Vectorize);
+
+  // tv3->reorder({{1, -2}});
+
+  auto rfactor = ir_utils::rfactorHelper(tv3, {1, 4});
+
+  scheduler_utils::parallelizeAllLike(rfactor, ir_utils::allTvs(&fusion));
+
+  for (auto tv : ir_utils::allTvs(&fusion)) {
+    if (tv != tv1 || tv != tv3) {
+      for (auto i : c10::irange(tv->nDims())) {
+        if (isParallelTypeVectorize(tv->axis(i)->getParallelType())) {
+          tv->axis(i)->parallelize(ParallelType::Serial);
+        }
+      }
+    }
+  }
+
+  tv0->computeAt(tv14, 1);
+  tv13->computeAt(tv14, -2);
+  tv2->computeAt(tv14, -1, ComputeAtMode::MostInlined);
+  tv11->computeAt(tv14, -1, ComputeAtMode::MostInlined);
+
+  auto options = at::TensorOptions().dtype(at::kHalf).device(at::kCUDA, 0);
+  at::Tensor t0 = at::randn({V, W, X, Y, Z}, options);
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion);
+  auto cg_outputs = fe.runFusion({t0}, LaunchParams(X, V, -1, Y, -1, -1));
+
+  auto t0_double = t0.to(at::kDouble);
+
+  auto at_mu = at::mean(t0_double, {1, 2, 3, 4})
+                   .unsqueeze(-1)
+                   .unsqueeze(-1)
+                   .unsqueeze(-1)
+                   .unsqueeze(-1);
+  auto at_var = at::var(t0_double, {1, 2, 3, 4}, false)
+                    .unsqueeze(-1)
+                    .unsqueeze(-1)
+                    .unsqueeze(-1)
+                    .unsqueeze(-1);
+
+  auto at_out = t0_double.sub(at_mu).div(at_var.add(1.e-6).sqrt());
+
+  testValidate(
+      &fusion,
+      cg_outputs,
+      {t0},
+      {at_out},
+      __LINE__,
+      __FILE__,
+      "",
+      LaunchParams(X, V, -1, Y, -1, -1));
+}
+
 // Test code generation of allocated scalars
 TEST_F(NVFuserTest, FusionCodegenAllocatedScalars_CUDA) {
   Fusion fusion;
