@@ -149,7 +149,7 @@ void fbgemm_spmdm_report_error_(
     int64_t N,
     const OffsetType* offsets,
     const IndexType* indices) {
-  for (int m = 0; m < output_size; ++m) {
+  for (const auto m : c10::irange(output_size)) {
     for (OffsetType i = offsets[m]; i < offsets[m + 1]; ++i) {
       TORCH_CHECK(i < index_size);
       IndexType idx = indices[i];
