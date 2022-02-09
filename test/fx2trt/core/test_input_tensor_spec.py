@@ -3,7 +3,7 @@
 from typing import List, Optional
 
 import torch
-from torch.fx.experimental.fx2trt import (
+from fx2trt_oss.fx import (
     InputTensorSpec,
 )
 from torch.testing._internal.common_utils import TestCase, run_tests
