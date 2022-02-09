@@ -153,25 +153,29 @@ def has_valid_upgraders(schema, version_map):
 
     possible_overloads = []
     possible_schemas = []
-    for key, upgrader_entries in entries.items():
+    for key, upgrader_schema_entries in entries.items():
         possible_overloads.append(key)
-        possible_schemas.extend([entry.old_schema for entry in upgrader_entries])
+        possible_schemas.extend(upgrader_schema_entries)
 
     # let's make sure this existing schema is part of possible
     # schemas
     found = False
     for old_schema in possible_schemas:
-        if parse_schema(old_schema) == schema:
+        if old_schema == schema:
             found = True
 
-    if not found:
-        return False
+    if found:
+        return True
 
-    current_version = torch._C._get_max_operator_version()
-    for overload in possible_overloads:
-        if not torch._C._is_op_symbol_current(overload, current_version):
-            return False
-    return True
+    # this existing schema can be up to date
+    if not found:
+        current_version = torch._C._get_max_operator_version()
+        for overload in possible_overloads:
+            if not torch._C._is_op_symbol_current(overload, current_version):
+                return False
+        return True
+
+    return False
 
 def dont_parse(schema_line):
     for item in dont_parse_list:
@@ -196,12 +200,13 @@ def process_version_map(version_map):
     # the name of the schema (aka no overload)
     # we want to first process the map to make
     # the key lookup easier. After this it will be:
-    # Dict[schema_name, Dict[overload, List[UpgraderEntry]]]
+    # Dict[schema_name, Dict[overload, List[schema]]]
 
     output = defaultdict(dict)
     for (key, entries) in version_map.items():
         new_key = key.split(".")[0]
-        output[new_key][key] = entries
+        schema_entries = [parse_schema(entry.old_schema) for entry in entries]
+        output[new_key][key] = schema_entries
     return output
 
 def check_bc(existing_schemas):
