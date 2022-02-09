@@ -93,9 +93,6 @@ class TestCommunication(FSDPTest):
         # Both with and without `no_sync()`:
         #   Forward: `num_fsdp` all-gathers
         #   Backward: `num_fsdp` - 1 all-gathers (only excluding the root)
-        # NOTE: Fairscale FSDP only requires `num_fsdp` - 1 all-gathers in the
-        # forward pass when not using `no_sync()`
-        # See https://github.com/pytorch/pytorch/issues/72541
         expected_num_all_gather_no_sync = num_fsdp + (num_fsdp - 1)
         expected_num_all_gather_sync = num_fsdp + (num_fsdp - 1)
         expected_num_reduce_scatter_no_sync = 0
