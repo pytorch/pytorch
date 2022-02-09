@@ -71,9 +71,9 @@ A **binary configuration** is a collection of
 * release or nightly
     * releases are stable, nightlies are beta and built every night
 * python version
-    * linux: 3.5m, 3.6m 3.7m (mu is wide unicode or something like that. It usually doesn't matter but you should know that it exists)
-    * macos: 3.6, 3.7, 3.8
-    * windows: 3.6, 3.7, 3.8
+    * linux: 3.7m (mu is wide unicode or something like that. It usually doesn't matter but you should know that it exists)
+    * macos: 3.7, 3.8
+    * windows: 3.7, 3.8
 * cpu version
     * cpu, cuda 9.0, cuda 10.0
     * The supported cuda versions occasionally change
@@ -428,7 +428,7 @@ docker run \
 # possibly need are in .circleci/scripts/binary_populate_env.sh
 # You should probably always export at least these 3 variables
 export PACKAGE_TYPE=conda
-export DESIRED_PYTHON=3.6
+export DESIRED_PYTHON=3.7
 export DESIRED_CUDA=cpu
 
 # Call the entrypoint
@@ -476,7 +476,7 @@ conda activate binary
 # possibly need are in .circleci/scripts/binary_populate_env.sh
 # You should probably always export at least these 3 variables
 export PACKAGE_TYPE=conda
-export DESIRED_PYTHON=3.6
+export DESIRED_PYTHON=3.7
 export DESIRED_CUDA=cpu
 
 # Call the entrypoint you want
