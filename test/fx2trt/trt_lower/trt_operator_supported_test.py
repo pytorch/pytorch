@@ -3,7 +3,7 @@
 import torch.fx.experimental.fx_acc.acc_ops  # noqa: F401
 import torch
 import torch.fx
-from torch.fx.experimental.fx2trt.tools.trt_splitter import create_trt_operator_support
+from fx2trt_oss.fx.tools.trt_splitter import create_trt_operator_support
 import torch.nn as nn
 from torch.fx.experimental.fx_acc import acc_ops, acc_tracer
 from torch.testing._internal.common_utils import TestCase, run_tests
