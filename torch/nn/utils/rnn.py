@@ -6,7 +6,7 @@ from torch import Tensor
 from ... import _VF
 from ..._jit_internal import Optional
 
-from typing import List, Tuple, Union
+from typing import List, Tuple, Union, Iterable
 
 
 
@@ -358,11 +358,22 @@ def pad_sequence(sequences, batch_first=False, padding_value=0.0):
         Tensor of size ``B x T x *`` otherwise
     """
 
+    if not (torch.jit.is_tracing() or torch.jit.is_scripting()):
+        # JIT doesn't support `Iterable`
+        if not isinstance(sequences, Iterable):
+            msg = ('pad_sequence: Expected iterable for input sequences, but got arg of type: '
+                   f'{type(sequences)}')
+            raise RuntimeError(msg)
+
+        # In JIT context this leads to,
+        # RuntimeError: cannot statically infer the expected size of a list in this context
+        sequences = tuple(sequences)
+
     # assuming trailing dimensions and type of all the Tensors
     # in sequences are same and fetching those from sequences[0]
     if isinstance(sequences, torch.Tensor):
         sequences = sequences.unbind(0)
-    return torch._C._nn.pad_sequence(tuple(sequences), batch_first, padding_value)
+    return torch._C._nn.pad_sequence(sequences, batch_first, padding_value)
 
 
 def unpad_sequence(padded_sequences, lengths, batch_first=False):
