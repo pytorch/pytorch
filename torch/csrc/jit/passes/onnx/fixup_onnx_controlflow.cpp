@@ -194,19 +194,23 @@ Node* ONNXOptionalNode(OptionalTypePtr opt_type, Graph* g) {
   return opt_node;
 }
 
-// Replaces block output i with an empty onnx::Optional
+// Replaces block output i with an onnx::Optional
 // with `type` taken from opt_type.
 // Needed when control flow has multiple branches, one of which
 // is defined by `block` and returns a None and another branch
-// returns not-None since ONNX doesn't have a bare None type, just
-// empty optionals. The passed-in opt_type should be from the other branch.
+// returns not-None. The passed-in opt_type should be from the other branch.
 void ReplaceBlockOutputWithOptional(
     OptionalTypePtr opt_type,
     Block* block,
     size_t i) {
   Node* opt_node = ONNXOptionalNode(opt_type, block->owningGraph());
   opt_node->insertBefore(block->return_node());
-  block->outputs().at(i)->replaceAllUsesWith(opt_node->output());
+  Value* block_output = block->outputs().at(i);
+  block_output->replaceAllUsesWith(opt_node->output());
+  if (!block_output->type()->cast<NoneType>()) {
+    opt_node->addInput(block_output);
+    opt_node->copyMetadata(block_output->node());
+  }
 }
 
 // Resolving limitation from ONNX that the block output can not be
@@ -404,6 +408,7 @@ void InferShapeTypeForUninitializedOutput(
       const_node->output()->setType(other_output->type());
     }
   } else if (auto output_type = other_output->type()->cast<OptionalType>()) {
+    // TODO: Find a test that triggers this code path.
     const_node = ONNXOptionalNode(output_type, graph);
   } else {
     std::cerr << "Warning: Inferring type for prim::Uninitialized node from "
@@ -626,15 +631,21 @@ void ONNXMergeIfBlockOutputShapes(Node* node) {
       if (auto optional_type =
               mergeOptionalType(then_optional_type, else_optional_type)) {
         output_i->setType(optional_type);
+        // Both branches output types must match.
+        if (!then_optional_type) {
+          ReplaceBlockOutputWithOptional(optional_type, then_block, i);
+        } else if (!else_optional_type) {
+          ReplaceBlockOutputWithOptional(optional_type, else_block, i);
+        }
       }
     }
 
-    if (then_none_type) {
+    if (then_none_type && !else_optional_type) {
       ReplaceBlockOutputWithOptional(
           output_i->type()->cast<OptionalType>(), then_block, i);
     }
 
-    if (else_none_type) {
+    if (else_none_type && !then_optional_type) {
       ReplaceBlockOutputWithOptional(
           output_i->type()->cast<OptionalType>(), else_block, i);
     }

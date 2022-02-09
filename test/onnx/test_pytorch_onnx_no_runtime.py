@@ -15,6 +15,8 @@ from typing import Optional, Type
 
 
 class TestOptionalOutput(unittest.TestCase):
+    # TODO: Move these tests to test_pytorch_onnx_onnxruntime once
+    # ONNX Runtime 1.11 is released and supports opset 16.
 
     class IfNoneInput(torch.nn.Module):
         def forward(self, x) -> Optional[Tensor]:
@@ -67,6 +69,12 @@ class TestOptionalOutput(unittest.TestCase):
         expected_output_type = onnx.helper.make_optional_type_proto(
             onnx.helper.make_tensor_type_proto(expected_elem_type, (dynamic_axis_name,)))
         self.assertEqual(expected_output_type, exported.graph.output[0].type)
+        for node in exported.graph.node:
+            # Both branches output types should match.
+            if node.op_type == "If":
+                for attr in node.attribute:
+                    if attr.name in ("then_branch", "else_branch"):
+                        self.assertEqual(expected_output_type, attr.g.output[0].type)
 
 
 instantiate_parametrized_tests(TestOptionalOutput)

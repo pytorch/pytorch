@@ -101,7 +101,7 @@ def skipIfONNXShapeInference(onnx_shape_inference):
     def skip_dec(func):
         def wrapper(self):
             if self.onnx_shape_inference is onnx_shape_inference:
-                raise unittest.SkipTest("Skip verify test for unsupported opset_version")
+                raise unittest.SkipTest("Skip test due to onnx_shape_inference")
             return func(self)
         return wrapper
     return skip_dec
