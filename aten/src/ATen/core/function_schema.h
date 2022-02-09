@@ -344,7 +344,7 @@ struct FunctionSchema {
   }
 
   c10::optional<int> argumentIndexWithName(c10::string_view name) const {
-    for(size_t i = 0; i < arguments().size(); ++i) {
+    for (const auto i : c10::irange(arguments().size())) {
       if(name == arguments()[i].name())
         return i;
     }
@@ -510,4 +510,4 @@ inline std::string toString(const FunctionSchema& schema) {
 
 } // namespace c10
 
-#include <ATen/core/function_schema_inl.h>
+#include <ATen/core/function_schema_inl.h>  // IWYU pragma: keep

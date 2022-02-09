@@ -1666,6 +1666,7 @@ class TestCase(expecttest.TestCase):
             try:
                 torch.cuda.synchronize()
             except RuntimeError as rte:
+                print("TEST SUITE EARLY TERMINATION due to torch.cuda.synchronize() failure", file=sys.stderr)
                 return True
             return False
         else:
@@ -1774,6 +1775,20 @@ class TestCase(expecttest.TestCase):
         super().run(result=result)
         # Early terminate test if necessary.
         if self._should_stop_test_suite():
+            if result.wasSuccessful():
+                case = TestCase()
+                if TEST_SAVE_XML is not None:
+                    # This is a big hacky, XMLRunner modifies expected type from TestCase to TestInfo
+                    # Create dummy TestInfo to record results correctly
+                    from xmlrunner.result import _TestInfo  # type: ignore[import]
+                    case = _TestInfo(result, case)
+                    case.output = _TestInfo.ERROR
+                    case.elapsed_time = 0.0
+                    case.test_description = "TestSuiteEarlyFailure"
+                # This shouldn't really happen, but if does add fake failure
+                # For more details see https://github.com/pytorch/pytorch/issues/71973
+                result.failures.append((case, "TestSuite execution was aborted early"))
+                assert result.wasSuccessful() is False
             result.stop()
 
         if not RETRY_TEST_CASES or not using_unittest:
