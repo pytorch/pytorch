@@ -3,6 +3,7 @@
 #include <ATen/native/UpSample.h>
 #include <ATen/native/quantized/affine_quantizer.h>
 #include <ATen/native/quantized/cpu/quantized_ops.h>
+#include <ATen/native/cpu/utils.h>
 #include <c10/util/irange.h>
 
 #include <algorithm>
@@ -138,25 +139,27 @@ static void upsample_bilinear2d_out_frame(
       scales_h,
       scales_w);
 
-  at::parallel_for(0, channels, 0, [&](int64_t begin, int64_t end) {
-    for (const auto c : c10::irange(begin, end)) {
-      const auto* pos1 = &i_p[c * input_height * input_width];
-      auto* pos2 = &o_p[c * output_height * output_width];
+  // treat output shape as {nbatch * channels, output_height * output_width}
+  at::parallel_for(0,  channels * output_height * output_width, 0, [&](int64_t begin, int64_t end) {
+    int64_t nc{0}, hw{0};
+    data_index_init(begin, nc, channels, hw, output_height * output_width);
 
-      for (const auto i : c10::irange(output_height * output_width)) {
-        const auto& param = params[i];
-        float result =
-            param.w00 * pos1[param.p00] +
-            param.w01 * pos1[param.p01] +
-            param.w10 * pos1[param.p10] +
-            param.w11 * pos1[param.p11] -
-            input_q_zero_point;
+    for (const auto i : c10::irange(begin, end)) {
+      const auto* pos1 = &i_p[nc * input_height * input_width];
+      const auto& param = params[hw];
+      float result =
+          param.w00 * pos1[param.p00] +
+          param.w01 * pos1[param.p01] +
+          param.w10 * pos1[param.p10] +
+          param.w11 * pos1[param.p11] -
+          input_q_zero_point;
 
-        // requantization
-        pos2[i] = at::native::quantize_val<scalar_t>(
-            output_scale, output_q_zero_point, result)
-            .val_;
-      }
+      // requantization
+      o_p[i] = at::native::quantize_val<scalar_t>(
+          output_scale, output_q_zero_point, result)
+          .val_;
+
+      data_index_step(nc, channels, hw, output_height * output_width);
     }
   });
 }
