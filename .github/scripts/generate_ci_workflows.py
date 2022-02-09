@@ -627,21 +627,6 @@ LINUX_WORKFLOWS = [
         enable_noarch_test=1,
         ciflow_config=CIFlowConfig(
             labels={LABEL_CIFLOW_DEFAULT, LABEL_CIFLOW_LINUX, LABEL_CIFLOW_CPU, LABEL_CIFLOW_NOARCH},
-<<<<<<< HEAD
-=======
-        ),
-    ),
-    CIWorkflow(
-        arch="linux",
-        build_environment="xla-linux-bionic-py3.7-clang8",
-        docker_image_base=f"{DOCKER_REGISTRY}/pytorch/xla_base",
-        test_runner_type=LINUX_CPU_TEST_RUNNER,
-        num_test_shards=2,
-        distributed_test=False,
-        enable_xla_test=1,
-        ciflow_config=CIFlowConfig(
-            labels={LABEL_CIFLOW_LINUX, LABEL_CIFLOW_CPU, LABEL_CIFLOW_XLA},
->>>>>>> 68a8c2dbf5 (Run XLA test workflow on xla_base image)
         ),
     ),
     CIWorkflow(
@@ -684,7 +669,6 @@ XLA_WORKFLOWS = [
             labels={LABEL_CIFLOW_LINUX, LABEL_CIFLOW_CPU, LABEL_CIFLOW_XLA},
         ),
     ),
-
 ]
 
 ANDROID_SHORT_WORKFLOWS = [
