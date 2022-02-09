@@ -3,7 +3,7 @@ import operator
 import warnings
 
 import torch  # isort:skip
-from typing import Sequence, Optional, List, cast
+from typing import Sequence, List, cast
 
 import torch.fx.experimental.fx_acc.acc_utils as acc_utils
 import torch.nn as nn
@@ -16,7 +16,7 @@ from torch.fx.experimental.fx_acc.acc_op_properties import (
     AccOpProperty,
     register_acc_op_properties,
 )
-from torch.fx.passes.shape_prop import _extract_tensor_metadata
+from torch.fx.passes.shape_prop import _extract_tensor_metadata, TensorMetadata
 
 this_arg_is_optional = True
 move_to_qparams = True
@@ -33,7 +33,7 @@ def linear(*, input, weight, bias):
 @register_acc_op
 def quantized_linear(*, input, weight, bias, acc_out_ty=None):
     assert acc_out_ty is not None
-    qparams = acc_utils.get_field_from_acc_out_ty(acc_out_ty, "qparams")
+    qparams = TensorMetadata(*acc_out_ty).qparams
     return nn.quantized.functional.linear(
         input,
         weight,
@@ -462,11 +462,13 @@ def dropout_mapper(node: torch.fx.Node, mod: nn.Module):
     """
     return node.kwargs["input"]
 
+
 try:
     from torchvision.ops import stochastic_depth
 except Exception as e:
     warnings.warn(f"Unable to import torchvision related libraries.: {e}")
 else:
+
     @register_custom_acc_mapper_fn(
         op_and_target=("call_function", stochastic_depth),
         arg_replacement_tuples=[("input", "input")],
@@ -476,6 +478,7 @@ else:
         Remove dropout node and directly map its input to output.
         """
         return node.kwargs["input"]
+
 
 @register_acc_op_properties(AccOpProperty.pointwise, AccOpProperty.unary)
 @register_acc_op_mapping(
@@ -502,9 +505,7 @@ def hardsigmoid(*, input):
 def silu(node: torch.fx.Node, _: nn.Module) -> torch.fx.Node:
     input_node = node.kwargs["input"]
     with node.graph.inserting_before(node):
-        sigmoid_node = node.graph.call_function(
-            sigmoid, kwargs={"input": input_node}
-        )
+        sigmoid_node = node.graph.call_function(sigmoid, kwargs={"input": input_node})
         sigmoid_node.meta = node.meta.copy()
         new_node = node.graph.call_function(
             mul, kwargs={"input": sigmoid_node, "other": input_node}
@@ -550,7 +551,7 @@ def hardswish_mapper(node: torch.fx.Node, _: nn.Module) -> torch.fx.Node:
 @register_acc_op
 def quantized_add(*, input, other, acc_out_ty=None):
     assert acc_out_ty is not None
-    qparams = acc_utils.get_field_from_acc_out_ty(acc_out_ty, "qparams")
+    qparams = TensorMetadata(*acc_out_ty).qparams
     return torch.ops.quantized.add(
         input,
         other,
@@ -576,7 +577,7 @@ def quantized_add(*, input, other, acc_out_ty=None):
 @register_acc_op
 def quantized_mul(*, input, other, acc_out_ty=None):
     assert acc_out_ty is not None
-    qparams = acc_utils.get_field_from_acc_out_ty(acc_out_ty, "qparams")
+    qparams = TensorMetadata(*acc_out_ty).qparams
     return torch.ops.quantized.mul(
         input,
         other,
@@ -604,8 +605,8 @@ def quantized_mul(*, input, other, acc_out_ty=None):
 @register_acc_op
 def quantize_per_tensor(*, input, acc_out_ty=None):
     assert acc_out_ty is not None
-    qparams = acc_utils.get_field_from_acc_out_ty(acc_out_ty, "qparams")
-    dtype = acc_utils.get_field_from_acc_out_ty(acc_out_ty, "dtype")
+    qparams = TensorMetadata(*acc_out_ty).qparams
+    dtype = TensorMetadata(*acc_out_ty).dtype
     return torch.quantize_per_tensor(
         input, qparams["scale"], qparams["zero_point"], dtype
     )
@@ -631,8 +632,8 @@ def quantize_per_tensor(*, input, acc_out_ty=None):
 @register_acc_op
 def quantize_per_channel(*, input, acc_out_ty=None):
     assert acc_out_ty is not None
-    qparams = acc_utils.get_field_from_acc_out_ty(acc_out_ty, "qparams")
-    dtype = acc_utils.get_field_from_acc_out_ty(acc_out_ty, "dtype")
+    qparams = TensorMetadata(*acc_out_ty).qparams
+    dtype = TensorMetadata(*acc_out_ty).dtype
     return torch.quantize_per_channel(
         input,
         torch.tensor(qparams["scale"]),
@@ -857,6 +858,41 @@ def sum(*, input, dim=None, keepdim=False, dtype=None):
 )
 def sum_mapper(node: torch.fx.Node, mod: torch.fx.GraphModule) -> torch.fx.Node:
     return reduce_op_mapper(node, mod, sum)
+
+
+@register_acc_op_properties(AccOpProperty.unary)
+@register_acc_op
+def prod(*, input, dim=None, keepdim=False, dtype=None):
+    if dim is not None:
+        return torch.prod(input, dim=dim, keepdim=keepdim, dtype=dtype)
+    else:
+        return input.prod(dtype=dtype)
+
+@register_custom_acc_mapper_fn(
+    op_and_target=("call_method", "prod"),
+    arg_replacement_tuples=[
+        ("input", "input"),
+        ("dim", "dim", this_arg_is_optional),
+        ("keepdim", "keepdim", this_arg_is_optional),
+        ("dtype", "dtype", this_arg_is_optional),
+    ],
+)
+@register_custom_acc_mapper_fn(
+    op_and_target=("call_function", torch.prod),
+    arg_replacement_tuples=[
+        ("input", "input"),
+        ("dim", "dim", this_arg_is_optional),
+        ("keepdim", "keepdim", this_arg_is_optional),
+        ("dtype", "dtype", this_arg_is_optional),
+    ],
+)
+def prod_mapper(node: torch.fx.Node, mod: torch.fx.GraphModule) -> torch.fx.Node:
+    func = prod
+    with node.graph.inserting_before(node):
+        kwargs = dict(node.kwargs)
+        new_node = node.graph.call_function(func, kwargs=kwargs)
+        new_node.meta = node.meta.copy()
+        return new_node
 
 
 @register_acc_op_properties(AccOpProperty.unary)
@@ -1098,6 +1134,7 @@ def abs(*, input):
 
 
 @register_acc_op_properties(AccOpProperty.pointwise, AccOpProperty.unary)
+@register_acc_op_mapping(op_and_target=("call_function", operator.neg))
 @register_acc_op_mapping(op_and_target=("call_function", torch.neg))
 @register_acc_op
 def neg(*, input):
@@ -1152,7 +1189,7 @@ def quantized_conv2d(
     padding_mode,
     acc_out_ty,
 ):
-    qparams = acc_utils.get_field_from_acc_out_ty(acc_out_ty, "qparams")
+    qparams = TensorMetadata(*acc_out_ty).qparams
     return torch.nn.quantized.functional.conv2d(
         input=input,
         weight=weight,
@@ -1277,6 +1314,14 @@ def linalg_norm(*, input, ord, dim, keepdim):
     ],
 )
 @register_custom_acc_mapper_fn(
+    op_and_target=("call_method", "split_with_sizes"),
+    arg_replacement_tuples=[
+        ("tensor", "input"),
+        ("split_sizes", "split_size_or_sections"),
+        ("dim", "dim"),
+    ],
+)
+@register_custom_acc_mapper_fn(
     op_and_target=("call_function", torch.split),
     arg_replacement_tuples=[
         ("tensor", "input"),
@@ -1309,10 +1354,10 @@ def torch_split_mapper(node: torch.fx.Node, mod: nn.Module) -> torch.fx.Node:
             assert isinstance(i, int)
             new_kwargs = {
                 "input": node.kwargs["input"],
-                "dims": (node.kwargs["dim"],),
-                "starts": (start,),
-                "stops": (start + i,),
-                "steps": (1,),
+                "dim": node.kwargs["dim"],
+                "start": start,
+                "stop": start + i,
+                "step": 1,
             }
             new_node = node.graph.call_function(slice_tensor, kwargs=new_kwargs)
             new_node.meta["type"] = torch.Tensor
@@ -1359,7 +1404,7 @@ def tuple_construct(*, tensors):
 def quantized_batch_norm2d(
     *, input, running_mean, running_var, weight, bias, eps, acc_out_ty
 ):
-    qparams = acc_utils.get_field_from_acc_out_ty(acc_out_ty, "qparams")
+    qparams = TensorMetadata(*acc_out_ty).qparams
     return torch.ops.quantized.batch_norm2d(
         input,
         weight,
@@ -1501,21 +1546,25 @@ def getitem(*, input, idx):
     return input[idx]
 
 
+@register_acc_op_mapping(op_and_target=("call_function", torch.nan_to_num))
+@register_acc_op_mapping(op_and_target=("call_method", "nan_to_num"))
+@register_acc_op
+def nan_to_num(*, input, nan=0.0, posinf=None, neginf=None):
+    return torch.nan_to_num(input, nan=nan, posinf=posinf, neginf=neginf)
+
+
 @register_acc_op_properties(AccOpProperty.unary)
 @register_acc_op
-def slice_tensor(*, input, dims, starts, stops, steps):
-    slices: List[Optional[slice]] = [None for _ in range(input.dim())]
+def slice_tensor(*, input, dim, start, stop, step):
+    slc = slice(start, stop, step)
+    if dim >= 0:
+        slices: List[slice] = [slice(None, None, None) for _ in range(dim)]
+        slices.append(slc)
+    else:
+        slices = [Ellipsis, slc]  # type: ignore[list-item]
+        slices.extend([slice(None, None, None) for _ in range(-dim - 1)])
 
-    # For all provided dims, extract out a slice for starts/stops/steps.
-    for idx, dim in enumerate(dims):
-        slices[dim] = slice(starts[idx], stops[idx], steps[idx])
-
-    # For all unspecified dims, default to the full slice.
-    for idx, s in enumerate(slices):
-        if s is None:
-            slices[idx] = slice(None, None, None)
-
-    return input[slices]
+    return input[tuple(slices)]
 
 
 @register_custom_acc_mapper_fn(
@@ -1542,10 +1591,10 @@ def custom_narrow_mapper(node: torch.fx.Node, mod: nn.Module) -> torch.fx.Node:
     )
     kwargs = {
         "input": node.kwargs["input"],
-        "dims": (node.kwargs["dim"],),
-        "starts": (node.kwargs["start"],),
-        "stops": (node.kwargs["start"] + node.kwargs["length"],),
-        "steps": (1,),
+        "dim": node.kwargs["dim"],
+        "start": node.kwargs["start"],
+        "stop": node.kwargs["start"] + node.kwargs["length"],
+        "step": 1,
     }
     with node.graph.inserting_before(node):
         new_node = node.graph.call_function(slice_tensor, kwargs=kwargs)
@@ -1573,9 +1622,7 @@ def custom_narrow_mapper(node: torch.fx.Node, mod: nn.Module) -> torch.fx.Node:
 @register_acc_op
 def reshape(*, input, acc_out_ty=None):
     assert acc_out_ty is not None
-    return torch.reshape(
-        input, tuple(acc_utils.get_field_from_acc_out_ty(acc_out_ty, "shape"))
-    )
+    return input.reshape(TensorMetadata(*acc_out_ty).shape)
 
 
 @register_custom_acc_mapper_fn(
@@ -1615,7 +1662,7 @@ def custom_tensor_reshape_mapper(node: torch.fx.Node, _: nn.Module) -> torch.fx.
 @register_acc_op
 def to_dtype(input, acc_out_ty=None):
     assert acc_out_ty is not None
-    return input.to(dtype=acc_utils.get_field_from_acc_out_ty(acc_out_ty, "dtype"))
+    return input.to(dtype=TensorMetadata(*acc_out_ty).dtype)
 
 
 @register_custom_acc_mapper_fn(
