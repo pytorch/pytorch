@@ -272,6 +272,9 @@ class CodeGen(object):
     def process_outputs(self, outputs):
         return outputs
 
+    def additional_globals(self):
+        return []
+
     def _python_code_func(self, nodes, root_module: str, namespace: _Namespace) -> PythonCode:
         free_vars: List[str] = []
         body: List[str] = []
@@ -449,6 +452,8 @@ class CodeGen(object):
         if self._body_transformer:
             body = self._body_transformer(body)
 
+        for name, value in self.additional_globals():
+            add_global(name, value)
 
         prologue = self.generate_prologue(free_vars, maybe_return_annotation[0])
 
