@@ -22,7 +22,6 @@ from typing import (
     Type,
 )
 
-import torch
 from ._hooks import RemovableHandle
 
 from ._digraph import DiGraph
@@ -36,8 +35,6 @@ from .importer import Importer, OrderedImporter, sys_importer
 from ._zip_file_torchscript import TorchScriptPackageZipFileWriter
 from ._zip_file import PackageZipFileWriter
 import inspect
-
-_gate_torchscript_serialization = True
 
 ActionHook = Callable[["PackageExporter", str], None]
 
