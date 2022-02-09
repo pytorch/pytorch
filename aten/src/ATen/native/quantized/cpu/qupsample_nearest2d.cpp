@@ -64,14 +64,16 @@ static void upsample_nearest2d_out_frame(
     }
   }
 
-  at::parallel_for(0, channels, 0, [&](int64_t begin, int64_t end) {
-    for (const auto c : c10::irange(begin, end)) {
-      const auto* pos1 = &i_p[c * input_height * input_width];
-      auto* pos2 = &o_p[c * output_height * output_width];
+  // treat output shape as {nbatch * channels, output_height * output_width}
+  at::parallel_for(0, channels * output_height * output_width, 0, [&](int64_t begin, int64_t end) {
+    int64_t nc{0}, hw{0};
+    data_index_init(begin, nc, channels, hw, output_height * output_width);
 
-      for (const auto i : c10::irange(output_height * output_width)) {
-        pos2[i] = pos1[input_offset[i]];
-      }
+    for (const auto i : c10::irange(begin, end)) {
+      const auto* pos1 = &i_p[nc * input_height * input_width];
+      o_p[i] = pos1[input_offset[hw]];
+
+      data_index_step(nc, channels, hw, output_height * output_width);
     }
   });
 }
