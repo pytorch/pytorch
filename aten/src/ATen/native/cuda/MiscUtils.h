@@ -1,5 +1,4 @@
 #pragma once
-#include <ATen/ATen.h>
 #include <ATen/cuda/Exceptions.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/CUDAConfig.h>

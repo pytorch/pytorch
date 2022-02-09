@@ -185,6 +185,26 @@ Tensor computeNoop(
       });
 }
 
+Tensor computeScalar(
+    const std::string& name,
+    const std::vector<ArgValue>& inputValues,
+    const std::vector<ExprHandle>& outputShape,
+    const c10::optional<ScalarType>& outputType,
+    const std::function<ExprHandle(const ExprHandle&, const ExprHandle&)>&
+        innerExpr) {
+  auto dt = Dtype(*outputType);
+  VarPtr let_var = alloc<Var>(name + "_var", dt);
+  std::vector<ExprHandle> inputs = {
+      scalarOrConstant(inputValues[0]), scalarOrConstant(inputValues[1])};
+  promoteInputs(inputs);
+  ExprHandle compute = innerExpr(inputs[0], inputs[1]);
+  StmtPtr let_stmt =
+      Let::make(VarHandle(let_var), demoteOutput(compute, outputType));
+  std::vector<ExprPtr> dims;
+  BufPtr buf = alloc<Buf>(let_var, dims, dt);
+  return Tensor(buf, let_stmt);
+}
+
 } // namespace tensorexpr
 } // namespace jit
 } // namespace torch
