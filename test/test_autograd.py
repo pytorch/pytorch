@@ -20,7 +20,7 @@ from itertools import product
 from operator import mul
 from functools import reduce
 import torch
-v
+
 from torch import nn
 from torch._six import inf, nan
 from torch.autograd.function import once_differentiable
@@ -2363,7 +2363,8 @@ class TestAutograd(TestCase):
                 y = Variable(y) if y_var else y
                 self.assertIsInstance(x.type(t), t)
                 self.assertIsInstance(x.type_as(y), t)
-                t_dtype = t.dtype
+                # TODO: t.dtype should work
+                t_dtype = t().dtype
                 self.assertIsInstance(x.type(t_dtype), t)
                 self.assertIs(t_dtype, x.type(t_dtype).dtype)
                 self.assertEqual(y.data_ptr(), y.type(t).data_ptr())
