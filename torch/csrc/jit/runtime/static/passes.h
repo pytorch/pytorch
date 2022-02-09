@@ -53,14 +53,14 @@ inline c10::Symbol fromQualString(const std::string& qual_string) {
 // this actually does a copy.
 // Note that we have to do the same thing if we are returning a value from an
 // outer scope in a sub-block.
-void CreateOwnedRefsForSpecialValues(Graph& graph);
+TORCH_API void CreateOwnedRefsForSpecialValues(Graph& graph);
 
 // [Force non-empty outputs]
 // It is technically possible for sub-blocks to not return anything. This is
 // problematic for StaticRuntimeBlockRunner because it assumes that at least one
 // output is being returned. Rather than slowing down SR with special logic for
 // this corner case, we simply force blocks that return nothing to return None.
-void ForceNonEmptyOutputs(Graph& graph);
+TORCH_API void ForceNonEmptyOutputs(Graph& graph);
 
 TORCH_API void UseVariadicGroupedAccessor(const std::shared_ptr<Graph>& graph);
 
