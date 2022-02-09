@@ -215,7 +215,6 @@ class TestSerialization(TestCase):
             self._test_op(module, input_size=[1, 3, 6, 6, 6], generate=False)
             # TODO: graph mode quantized conv3d module
 
-    @unittest.skipIf(True, "skip test to see if other errors occur")
     @override_qengines
     def test_lstm(self):
         class LSTMModule(torch.nn.Module):
