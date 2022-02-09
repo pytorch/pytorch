@@ -9,6 +9,6 @@ from .radam import RAdam as RAdam
 from .rmsprop import RMSprop as RMSprop
 from .rprop import Rprop as Rprop
 from .asgd import ASGD as ASGD
-from .adamax import Adamax as Adamax
+Adamax = partial(optim.Adamax, foreach=True)
 Adadelta = partial(optim.Adadelta, foreach=True)
 Adagrad = partial(optim.Adagrad, foreach=True)
