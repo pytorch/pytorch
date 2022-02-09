@@ -119,7 +119,7 @@ static inline void launch_vectorized_kernel(int64_t N, const func_t& f, array_t 
 }
 
 // Jiterator functions are guarded behind this macro
-#ifdef USE_JITERATOR
+#if AT_USE_JITERATOR()
 
 namespace {
 
@@ -393,7 +393,7 @@ void jitted_gpu_kernel_impl(TensorIteratorBase& iter, const std::string& f, cons
     iter.device().index(), numel, f, data, input_offset_calculator,
     output_offset_calculator, loader, storer, contiguous, scalar_val, extra_args);
 }
-#endif // USE_JITERATOR
+#endif // AT_USE_JITERATOR()
 
 template<typename func_t, typename array_t, typename inp_calc_t, typename out_calc_t, typename loader_t, typename storer_t>
 static inline void launch_unrolled_kernel(int64_t N, const func_t& f, array_t data,

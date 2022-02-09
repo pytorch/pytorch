@@ -2,7 +2,7 @@ r"""Functional interface"""
 import math
 import torch
 from torch import Tensor
-from typing import List, Dict
+from typing import List
 
 def _make_sparse(grad, grad_indices, values):
     size = grad.size()
@@ -152,7 +152,11 @@ def adadelta(params: List[Tensor],
 
 def asgd(params: List[Tensor],
          grads: List[Tensor],
-         states: List[Dict],
+         axs: List[Tensor],
+         mus: List[Tensor],
+         etas: List[Tensor],
+         state_steps: List[Tensor],
+         *,
          lambd: float,
          lr: float,
          t0: float,
@@ -162,28 +166,32 @@ def asgd(params: List[Tensor],
     See :class:`~torch.optim.ASGD` for details.
     """
 
+    # update step
+    torch._foreach_add_(state_steps, 1)
+
     if weight_decay != 0:
         torch._foreach_add_(grads, params, alpha=weight_decay)
 
     # decay term
-    eta = states[0]['eta']
+    eta = etas[0].item()
     torch._foreach_mul_(params, 1 - lambd * eta)
 
     # update parameter
     torch._foreach_add_(params, grads, alpha=-eta)
 
     # averaging
-    for i in range(len(states)):
-        if states[i]['mu'] != 1:
-            states[i]['ax'].add_(params[i].sub(states[i]['ax']).mul(states[i]['mu']))
+    for i in range(len(axs)):
+        if mus[i].item() != 1:
+            axs[i].add_(params[i].sub(axs[i]).mul(mus[i]))
         else:
-            states[i]['ax'].copy_(params[i])
+            axs[i].copy_(params[i])
 
     # update eta and mu
-    for state in states:
-        state['eta'] = (lr /
-                        math.pow((1 + lambd * lr * state['step']), alpha))
-        state['mu'] = 1 / max(1, state['step'] - t0)
+    for i in range(len(mus)):
+        new_eta = lr / math.pow((1 + lambd * lr * state_steps[i].item()), alpha)
+        etas[i].fill_(new_eta)
+        new_mu = 1 / max(1, state_steps[i].item() - t0)
+        mus[i].fill_(new_mu)
 
 
 def radam(params: List[Tensor],
@@ -245,7 +253,7 @@ def nadam(params: List[Tensor],
           exp_avg: List[Tensor],
           exp_avg_sq: List[Tensor],
           mu_products: List[Tensor],
-          states: List[Dict],
+          state_steps: List[Tensor],
           *,
           beta1: float,
           beta2: float,
@@ -254,15 +262,27 @@ def nadam(params: List[Tensor],
           momentum_decay: float,
           eps: float):
     r"""Functional API that performs NAdam algorithm computation.
-
     See :class:`~torch.optim.NAdam` for details.
     """
 
-    bias_correction1 = [1 - beta1 ** state['step'] for state in states]
-    bias_correction2 = [1 - beta2 ** state['step'] for state in states]
-    mus = [beta1 * (1. - 0.5 * (0.96 ** (state['step'] * momentum_decay))) for state in states]
-    mu_nexts = [beta1 * (1. - 0.5 * (0.96 ** ((state['step'] + 1) * momentum_decay)))
-                for state in states]
+    if not all([isinstance(t, torch.Tensor) for t in state_steps]):
+        raise RuntimeError("API has changed, `state_steps` argument must contain a list of singleton tensors")
+
+    if not all([isinstance(t, torch.Tensor) for t in mu_products]):
+        raise RuntimeError("API has changed, `mu_products` argument must contain a list of singleton tensors")
+
+    # update steps
+    torch._foreach_add_(state_steps, 1)
+
+    bias_correction1 = [1 - beta1 ** step.item() for step in state_steps]
+    bias_correction2 = [1 - beta2 ** step.item() for step in state_steps]
+    mus = [beta1 * (1. - 0.5 * (0.96 ** (step.item() * momentum_decay))) for step in state_steps]
+    mu_nexts = [beta1 * (1. - 0.5 * (0.96 ** ((step.item() + 1) * momentum_decay)))
+                for step in state_steps]
+
+    # update mu_products
+    torch._foreach_mul_(mu_products, mus)
+
     if weight_decay != 0:
         torch._foreach_add_(grads, params, alpha=weight_decay)
 
@@ -278,9 +298,9 @@ def nadam(params: List[Tensor],
     torch._foreach_div_(exp_avg_sq_sqrt, bias_correction_sqrt)
     denom = torch._foreach_add(exp_avg_sq_sqrt, eps)
 
-    step_size_grads = [(lr * (1. - mu) / (1. - mu_product)) * -1
+    step_size_grads = [(lr * (1. - mu) / (1. - mu_product.item())) * -1
                        for mu_product, mu in zip(mu_products, mus)]
-    step_size_expavg = [(lr * mu_next / (1. - mu_product * mu_next)) * -1
+    step_size_expavg = [(lr * mu_next / (1. - mu_product.item() * mu_next)) * -1
                         for mu_product, mu_next in zip(mu_products, mu_nexts)]
     torch._foreach_addcdiv_(params, grads, denom, step_size_grads)
     torch._foreach_addcdiv_(params, exp_avg, denom, step_size_expavg)
