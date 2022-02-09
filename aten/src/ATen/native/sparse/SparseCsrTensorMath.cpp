@@ -198,7 +198,7 @@ void convert_indices_from_csr_to_coo_cpu(const Tensor& indices, const Tensor& cr
   output_t* data_out = row0.data_ptr<output_t>();
   row1.copy_(*col_indices.expect_contiguous());
   at::parallel_for(0, nrows, GRAIN_SIZE, [&](int64_t start, int64_t end) {
-    for (int64_t i = start; i < end; i++) {
+    for (const auto i : c10::irange(start, end)) {
       std::fill(&data_out[crow_indices_data_in[i]], &data_out[crow_indices_data_in[i + 1]], static_cast<output_t>(i));
     }
   });
