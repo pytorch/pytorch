@@ -5,6 +5,7 @@
 #include <c10/util/irange.h>
 #include <torch/csrc/jit/api/function_impl.h>
 #include <torch/csrc/jit/ir/alias_analysis.h>
+#include <torch/csrc/jit/passes/add_ternary_op.h>
 #include <torch/csrc/jit/passes/clear_profiling.h>
 #include <torch/csrc/jit/passes/eliminate_no_ops.h>
 #include <torch/csrc/jit/passes/inliner.h>
@@ -107,6 +108,7 @@ class AttributePropagator {
           /* const_prop_user_classes? */ false);
       EliminateNoOps(subgraph);
       LowerSimpleTuples(subgraph);
+      AddTernaryOp(subgraph);
     };
 
     for (auto function : preservedMethods_) {

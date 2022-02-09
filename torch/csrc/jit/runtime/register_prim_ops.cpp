@@ -702,6 +702,20 @@ static const std::vector<OperatorGeneratorArgs> opGenArgs{
         aliasAnalysisFromSchema()),
     OperatorGeneratorArgs(
         TORCH_SELECTIVE_SCHEMA(
+            "prim::Ternary(bool cond, t(a) x, t(b) y) -> t(a|b)"),
+        [](Stack& stack) {
+          auto b = pop(stack);
+          auto a = pop(stack);
+          auto cond = pop(stack).toBool();
+          if (cond) {
+            push(stack, std::move(a));
+          } else {
+            push(stack, std::move(b));
+          }
+        },
+        aliasAnalysisFromSchema()),
+    OperatorGeneratorArgs(
+        TORCH_SELECTIVE_SCHEMA(
             "aten::eq.enum(AnyEnumType a, AnyEnumType b) -> bool"),
         [](Stack& stack) {
           IValue x = pop(stack);
