@@ -56,7 +56,7 @@ enum class DispatchKey : uint8_t {
   CUDA, // registered at build/aten/src/ATen/RegisterCUDA.cpp
   HIP, // NB: I think this is not actually used, due to Note [Masquerading as
   // CUDA]
-  FPGA, // Xilinx support lives out of tree at
+  // FPGA, // Xilinx support lives out of tree at
   // https://gitlab.com/pytorch-complex/vitis_kernels
 
   // ONNX Runtime, lives out of tree at https://github.com/pytorch/ort and

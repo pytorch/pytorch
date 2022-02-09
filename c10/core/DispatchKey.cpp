@@ -17,8 +17,8 @@ const char* toString(DispatchKey t) {
       return "HIP";
     case DispatchKey::VE:
       return "VE";
-    case DispatchKey::FPGA:
-      return "FPGA";
+    // case DispatchKey::FPGA:
+    //   return "FPGA";
     case DispatchKey::XPU:
       return "XPU";
     case DispatchKey::ORT:
@@ -219,7 +219,7 @@ c10::DispatchKey parseDispatchKey(const std::string& k) {
       {"CPU", c10::DispatchKey::CPU},
       {"CUDA", c10::DispatchKey::CUDA},
       {"HIP", c10::DispatchKey::HIP},
-      {"FPGA", c10::DispatchKey::FPGA},
+      // {"FPGA", c10::DispatchKey::FPGA},
       {"ORT", c10::DispatchKey::ORT},
       {"XLA", c10::DispatchKey::XLA},
       {"MLC", c10::DispatchKey::MLC},

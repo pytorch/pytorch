@@ -247,7 +247,7 @@ constexpr DispatchKeySet autograd_dispatch_keyset_with_ADInplaceOrView =
 constexpr DispatchKeySet autogradother_backends = DispatchKeySet(
     {DispatchKey::HIP,
      DispatchKey::VE,
-     DispatchKey::FPGA,
+     // DispatchKey::FPGA,
      DispatchKey::ORT,
      DispatchKey::Vulkan,
      DispatchKey::Metal,

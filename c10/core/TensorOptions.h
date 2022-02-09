@@ -662,8 +662,8 @@ inline DispatchKey computeDispatchKey(
           return DispatchKey::HIP;
         case DeviceType::VE:
           return DispatchKey::VE;
-        case DeviceType::FPGA:
-          return DispatchKey::FPGA;
+        // case DeviceType::FPGA:
+        //   return DispatchKey::FPGA;
         case DeviceType::ORT:
           return DispatchKey::ORT;
         case DeviceType::XLA:

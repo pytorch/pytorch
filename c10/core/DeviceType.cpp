@@ -74,7 +74,7 @@ bool isValidDeviceType(DeviceType d) {
     case DeviceType::IDEEP:
     case DeviceType::HIP:
     case DeviceType::VE:
-    case DeviceType::FPGA:
+    // case DeviceType::FPGA:
     case DeviceType::ORT:
     case DeviceType::XLA:
     case DeviceType::Lazy:
