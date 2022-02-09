@@ -176,6 +176,10 @@ void Fusion::removeVal(Val* val) {
 void Fusion::addInput(Val* input) {
   assertInContainer(input, "Cannot register input ");
 
+  TORCH_INTERNAL_ASSERT(
+      input->getDataType() != DataType::Index,
+      "Data type Index is a local compile time data type only, it cannot be used as an input in case it was generated from another kernel.");
+
   if (input->getValType().value() == ValType::TensorView) {
     auto tv = input->as<TensorView>();
     tv->setMemoryType(MemoryType::Global);
@@ -304,13 +308,13 @@ void Fusion::print() {
   std::cout << "}\n\n";
 }
 
-void Fusion::printKernel() {
+void Fusion::printKernel(DataType index_type) {
   FUSER_PERF_SCOPE("Fusion::printKernel");
   TORCH_INTERNAL_ASSERT(
       !this->isA<kir::Kernel>(),
       "Cannot \"print kernel\" of a kernel container. ",
       "This would require lowering during lowering.");
-  std::cout << codegen::generateCudaKernel(GpuLower(this).kernel());
+  std::cout << codegen::generateCudaKernel(GpuLower(this, index_type).kernel());
 }
 
 void Fusion::printMath(bool from_outputs_only) {

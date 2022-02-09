@@ -103,6 +103,19 @@ const std::vector<Expr*>& Val::uses() const {
   return uses_;
 }
 
+void Val::resolveIndexDtype() {
+  TORCH_INTERNAL_ASSERT(
+      vtype_ == ValType::TensorView,
+      "Resolving index type is currently only supported on tensor view values.");
+  TORCH_INTERNAL_ASSERT(
+      dtype_ == DataType::Index,
+      "Can only resolve index type if a tensor has an Index DataType.");
+  TORCH_INTERNAL_ASSERT(
+      container()->isA<kir::Kernel>(),
+      "Index type can only be resolved at compile time.");
+  dtype_ = container()->as<kir::Kernel>()->indexType();
+}
+
 namespace {
 
 // Traverse definition of all values involved in constructing the provided val.

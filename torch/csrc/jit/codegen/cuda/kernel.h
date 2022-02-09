@@ -95,7 +95,9 @@ class TORCH_CUDA_CU_API Kernel final : public Fusion {
   // we do something like generate an initialization statement for a reduction
   // TV, we may want to continue to do fusion like analysis on the original
   // expression.
-  Kernel(Fusion* fusion) : Fusion(*fusion) {}
+  // TODO: Assert index type is int or int32
+  Kernel(Fusion* fusion, DataType index_type = DataType::Int)
+      : Fusion(*fusion), index_type_(index_type) {}
 
   Kernel() = delete;
 
@@ -116,6 +118,10 @@ class TORCH_CUDA_CU_API Kernel final : public Fusion {
 
   const KernelSummary& summary() const {
     return summary_;
+  }
+
+  DataType indexType() const {
+    return index_type_;
   }
 
   //! Checks if parallel type is padded
@@ -144,12 +150,15 @@ class TORCH_CUDA_CU_API Kernel final : public Fusion {
   // Analyze the kernel IR and caches the summary of interesting data
   void analyze();
 
- private:
   // Top level statements
   std::vector<Expr*> top_level_exprs_;
 
   // Summary of interesting kernel data
   KernelSummary summary_;
+
+  // Is this kernel being compiled with int32 or int64 indexing. This
+  // information is required to resolve DataType::Index
+  DataType index_type_ = DataType::Int;
 
   WarpPaddedParallelInfo warp_padded_parallel_info_;
 };

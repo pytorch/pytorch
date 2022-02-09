@@ -875,7 +875,7 @@ class CudaKernelGenerator : private OptOutConstDispatch {
         indent() << data_type << " "
                  << "block_result_var_" << block_reduce_name_ << " = "
                  << gen(wop->initVar()) << ";\n";
-        indent() << DataType::Int << " "
+        indent() << out_N->dtype() << " "
                  << "block_result_n_" << block_reduce_name_ << " = "
                  << gen(wop->initN()) << ";\n";
       }
@@ -905,7 +905,7 @@ class CudaKernelGenerator : private OptOutConstDispatch {
                << "*>(shared_mem_avg),\n";
       indent() << kTab << "reinterpret_cast<" << data_type
                << "*>(shared_mem_var),\n";
-      indent() << kTab << "reinterpret_cast<" << DataType::Int
+      indent() << kTab << "reinterpret_cast<" << out_N->dtype()
                << "*>(shared_mem_n),\n";
       TORCH_INTERNAL_ASSERT(wop->predicate() != nullptr);
       TORCH_INTERNAL_ASSERT(

@@ -615,6 +615,8 @@ size_t SchedulerRuntimeInfo::getVectorizableWidth(TensorView* tv) {
 
 void SchedulerRuntimeInfo::collectIndexModeInfo(
     const at::ArrayRef<at::IValue>& inputs) {
+  // TODO: Need to check the output sizes as well.
+
   // Save 1 more bit besides the sign bit to be conservative
   constexpr int64_t most_positive_int32_index =
       std::numeric_limits<int>::max() / 2;

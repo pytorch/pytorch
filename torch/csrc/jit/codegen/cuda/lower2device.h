@@ -39,9 +39,12 @@ class TORCH_CUDA_CU_API GpuLower : public NonCopyable {
  public:
   GpuLower() = delete;
 
+  // GpuLower lowers the provided fusion into a kernel which can be translated
+  // into cuda code. index_type allows to compile the kernel based on int32
+  // indexing instead of int64 for additional performance.
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
-  explicit GpuLower(Fusion* fusion) {
-    lower(fusion);
+  explicit GpuLower(Fusion* fusion, DataType index_type = DataType::Int) {
+    lower(fusion, index_type);
   }
 
   kir::Kernel* kernel() const;
@@ -131,7 +134,7 @@ class TORCH_CUDA_CU_API GpuLower : public NonCopyable {
   }
 
  private:
-  void lower(Fusion* fusion);
+  void lower(Fusion* fusion, DataType index_type);
 
   // Goes through the parallelized iterdomains of the used TVs and find
   //  the parallel dimensions that need to be padded to a multiples of

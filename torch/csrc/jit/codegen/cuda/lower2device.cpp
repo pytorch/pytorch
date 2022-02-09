@@ -184,7 +184,7 @@ void GpuLower::collectPaddedParallelDims() {
   }
 }
 
-void GpuLower::lower(Fusion* fusion) {
+void GpuLower::lower(Fusion* fusion, DataType index_type) {
   FUSER_PERF_SCOPE("GpuLower::lower");
   TORCH_INTERNAL_ASSERT(fusion != nullptr);
   TORCH_INTERNAL_ASSERT(
@@ -199,9 +199,16 @@ void GpuLower::lower(Fusion* fusion) {
     }
   } lower_guard(this);
   // Copy fusion into a new kernel for processing
-  kernel_ = std::make_unique<kir::Kernel>(fusion);
+  kernel_ = std::make_unique<kir::Kernel>(fusion, index_type);
   // Alias the fusion kernel caries around as a view of itself.
   fusion_ = kernel_.get();
+
+  // Convert tensor views of DataType::Index type to either Int or Int32
+  for (auto tv : ir_utils::allTvs(fusion_)) {
+    if (tv->dtype() == DataType::Index) {
+      tv->resolveIndexDtype();
+    }
+  }
 
   FusionGuard fg(fusion_);
   // prepare for lowering

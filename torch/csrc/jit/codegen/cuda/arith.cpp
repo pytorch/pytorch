@@ -856,7 +856,7 @@ WelfordResult Welford(
   // Create tensor outputs
   TensorView* out_avg = newForReduction(tv, uint_axes);
   TensorView* out_var = newForReduction(tv, uint_axes);
-  TensorView* out_N = newForReduction(tv, uint_axes, DataType::Int);
+  TensorView* out_N = newForReduction(tv, uint_axes, DataType::Index);
 
   IrBuilder::create<WelfordOp>(
       out_avg,

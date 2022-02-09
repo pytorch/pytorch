@@ -176,12 +176,15 @@ void FusionExecutor::compileFusion(
   c10::DeviceGuard dg(options_.device);
 
   TORCH_INTERNAL_ASSERT(
-      options.device.is_cuda(), "Provided device to CUDA fuser is the CPU.");
-  auto properties = at::cuda::getDeviceProperties(options.device.index());
+      options_.device.is_cuda(), "Provided device to CUDA fuser is the CPU.");
+  auto properties = at::cuda::getDeviceProperties(options_.device.index());
   max_device_smem = properties->sharedMemPerBlock;
   warp_size_ = properties->warpSize;
 
-  lowered_ = std::make_unique<GpuLower>(fusion);
+  lowered_ = std::make_unique<GpuLower>(
+      fusion,
+      options_.index_mode == KernelIndexMode::INT64 ? DataType::Int
+                                                    : DataType::Int32);
   const auto kernel = lowered_->kernel();
   fusion_ = lowered_->kernel()->as<Fusion>();
 

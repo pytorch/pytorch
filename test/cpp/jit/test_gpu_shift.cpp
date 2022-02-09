@@ -3985,7 +3985,12 @@ TEST_F(NVFuserTest, FusionShiftNoPadding3_CUDA) {
   auto ref_N = at::ones({}, options_int) * (numel_x - 2) * (numel_y - 2);
 
   testValidate(
-      &fusion, outputs, inputs, {ref_avg, ref_M2, ref_N}, __LINE__, __FILE__);
+      fe.kernel(),
+      outputs,
+      inputs,
+      {ref_avg, ref_M2, ref_N},
+      __LINE__,
+      __FILE__);
 }
 
 // Shift indexing and predication with contiguous merge

@@ -54,11 +54,17 @@ enum class PredicateType {
   ReductionWrite
 };
 
+// Index type is a convenience type that may be a 64 or 32 signed integer.
+// This is helpful for math on indexing/size when we don't know what the index
+// type might be. This allows us to prevent assuming the welford count must be
+// int64_t which is relatively heavy to carry around. Index will be resolved
+// at compile time with KernelIndexMode.
 enum class DataType {
   Double,
   Float,
   Half,
   Int,
+  Index,
   Int32,
   Bool,
   BFloat16,

@@ -17,6 +17,7 @@ bool isFloatingPointType(DataType dtype) {
     case DataType::Half:
     case DataType::BFloat16:
       return true;
+    case DataType::Index:
     case DataType::Int:
     case DataType::Int32:
     case DataType::ComplexFloat:
@@ -40,6 +41,7 @@ bool isIntegralType(DataType dtype) {
     case DataType::ComplexFloat:
     case DataType::ComplexDouble:
       return false;
+    case DataType::Index:
     case DataType::Int:
     case DataType::Int32:
       return true;
@@ -62,6 +64,7 @@ bool isComplexType(DataType dtype) {
     case DataType::Half:
     case DataType::BFloat16:
     case DataType::Int:
+    case DataType::Index:
     case DataType::Int32:
       return false;
     case DataType::Null:
@@ -146,6 +149,8 @@ static const char* data_type2string(DataType t) {
       return "__bfloat";
     case DataType::Int:
       return "int64_t";
+    case DataType::Index:
+      return "nvfuser_index_t";
     case DataType::Int32:
       return "int";
     case DataType::ComplexFloat:
@@ -589,18 +594,27 @@ constexpr unsigned int supported_switch_pair(DataType t1, DataType t2) {
 static const char* supported_casts2string(
     const std::pair<DataType, DataType>& t) {
   switch (supported_switch_pair(std::get<0>(t), std::get<1>(t))) {
+    case supported_switch_pair(DataType::Index, DataType::Float):
     case supported_switch_pair(DataType::Int, DataType::Float):
     case supported_switch_pair(DataType::Int32, DataType::Float):
     case supported_switch_pair(DataType::Double, DataType::Float):
       return "(float)";
+    case supported_switch_pair(DataType::Index, DataType::Int):
     case supported_switch_pair(DataType::Int32, DataType::Int):
     case supported_switch_pair(DataType::Float, DataType::Int):
     case supported_switch_pair(DataType::Double, DataType::Int):
       return "(int64_t)";
+    case supported_switch_pair(DataType::Index, DataType::Int32):
     case supported_switch_pair(DataType::Int, DataType::Int32):
     case supported_switch_pair(DataType::Float, DataType::Int32):
     case supported_switch_pair(DataType::Double, DataType::Int32):
       return "(int32_t)";
+    case supported_switch_pair(DataType::Int, DataType::Index):
+    case supported_switch_pair(DataType::Int32, DataType::Index):
+    case supported_switch_pair(DataType::Float, DataType::Index):
+    case supported_switch_pair(DataType::Double, DataType::Index):
+      return "(nvfuser_index_t)";
+    case supported_switch_pair(DataType::Index, DataType::Double):
     case supported_switch_pair(DataType::Int, DataType::Double):
     case supported_switch_pair(DataType::Int32, DataType::Double):
     case supported_switch_pair(DataType::Float, DataType::Double):
@@ -665,6 +679,13 @@ at::ScalarType data_type_to_aten(const DataType& data_type) {
       return at::ScalarType::BFloat16;
     case DataType::Int:
       return at::ScalarType::Long;
+    case DataType::Index:
+      TORCH_INTERNAL_ASSERT(
+          false,
+          "Index is determined at compile time,",
+          " to convert from an aten type you need to have the compiled information. ",
+          "This information is passed to GpuLower at compile time, and then copied to kerned.",
+          "There's also this information in FusionExecutorCache and the Registry system.");
     case DataType::Int32:
       return at::ScalarType::Int;
     case DataType::ComplexFloat:
@@ -751,6 +772,7 @@ std::string typePrefix(const DataType data_type) {
     case DataType::Half:
     case DataType::BFloat16:
       return "f";
+    case DataType::Index:
     case DataType::Int:
     case DataType::Int32:
       return "i";
@@ -797,6 +819,9 @@ size_t dataTypeSize(DataType type) {
       return sizeof(at::Half);
     case DataType::BFloat16:
       return sizeof(at::BFloat16);
+    case DataType::Index:
+      TORCH_INTERNAL_ASSERT(
+          false, "The actual type of Index is only known at compile time.");
     case DataType::Int:
       return sizeof(uint64_t);
     case DataType::Int32:

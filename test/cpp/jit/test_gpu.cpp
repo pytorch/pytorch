@@ -12363,7 +12363,7 @@ TEST_F(NVFuserTest, FusionWelfordOp_CUDA) {
   outputs[1] /= N;
 
   testValidate(
-      &fusion,
+      fe.kernel(),
       outputs,
       {t0},
       {t0.mean({1}), t0.var({1}, false), at::ones({M}, options_int) * N},
@@ -12409,7 +12409,7 @@ TEST_F(NVFuserTest, FusionBlockWelfordOp_CUDA) {
   outputs[1] /= N;
 
   testValidate(
-      &fusion,
+      fe.kernel(),
       outputs,
       {t0},
       {t0.mean({1}), t0.var({1}, false), at::ones({M}, options_int) * N},
@@ -12455,7 +12455,7 @@ TEST_F(NVFuserTest, FusionGridWelfordOp_CUDA) {
   outputs[1] /= N;
 
   testValidate(
-      &fusion,
+      fe.kernel(),
       outputs,
       {t0},
       {t0.mean({1}), t0.var({1}, false), at::ones({M}, options_int) * N},
@@ -12500,7 +12500,7 @@ TEST_F(NVFuserTest, FusionRfactorWelfordOp_CUDA) {
   outputs[1] /= N;
 
   testValidate(
-      &fusion,
+      fe.kernel(),
       outputs,
       {t0},
       {t0.mean({1}), t0.var({1}, false), at::ones({M}, options_int) * N},
@@ -12546,7 +12546,7 @@ TEST_F(NVFuserTest, FusionWelfordSchedule_CUDA) {
   auto at_n = at::ones({M}, options_int) * N;
 
   testValidate(
-      &fusion,
+      fe.kernel(),
       outputs,
       {t0},
       {at_avg, at_var, at_n},
@@ -12628,7 +12628,7 @@ void testWelford(DataType dtype, int red_axis, int odim, int rdim) {
   at_n = at_n.sum({axis});
 
   testValidate(
-      &fusion,
+      fe.kernel(),
       outputs,
       {aten_input},
       {at_avg, at_var, at_n},
