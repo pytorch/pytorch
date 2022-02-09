@@ -1627,6 +1627,10 @@ def max(g, self, dim_or_y=None, keepdim=None):
         return max, indices
 
 
+def maximum(g, input, other):
+    return max(g, input, dim_or_y=other)
+
+
 def min(g, self, dim_or_y=None, keepdim=None):
     # torch.min(input)
     if dim_or_y is None and keepdim is None:
@@ -1641,6 +1645,10 @@ def min(g, self, dim_or_y=None, keepdim=None):
         min = g.op("ReduceMin", self, axes_i=[dim], keepdims_i=keepdim)
         indices = g.op("ArgMin", self, axis_i=dim, keepdims_i=keepdim)
         return min, indices
+
+
+def minimum(g, input, other):
+    return min(g, input, dim_or_y=other)
 
 
 def exp(g, self):
