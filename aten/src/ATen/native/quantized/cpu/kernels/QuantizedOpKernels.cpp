@@ -13,7 +13,7 @@
 #include <c10/util/irange.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
-#include <ATen/NativeFunctions.h>
+#include <ATen/Functions.h>
 #else
 #include <ATen/ops/_empty_affine_quantized.h>
 #endif
