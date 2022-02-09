@@ -408,7 +408,7 @@ void py_set_default_dtype(PyObject* obj) {
     if (it != tensor_types.end()) {
       set_default_tensor_type(*it);
     } else {
-      throw TypeError("tensor type not found");
+      throw TypeError("tensor dtype not found");
     }
   } else {
     throw TypeError("invalid dtype object");
