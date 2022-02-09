@@ -344,19 +344,19 @@ def unpackage_script_module(importer: PackageImporter, script_module_id: str) ->
     Performs work of loading and returning a ScriptModule from a ``torch.package`` archive.
     """
 
-    if 'storage_context' not in importer.external_registry:
-        importer.external_registry['storage_context'] = torch._C.DeserializationStorageContext()
+    # if 'storage_context' not in importer.external_registry:
+    #     importer.external_registry['storage_context'] = torch._C.DeserializationStorageContext()
 
     if not isinstance(importer.zip_reader, TorchScriptPackageZipFileReader):
         raise RuntimeError(
             "Loading ScriptObjects from a PackageImporter created from a "
-            "directory is not supported. Use a package archive file instead."
+            f"directory is not supported. Use a package archive file instead. is of type {type(importer.zip_reader)}"
         )
     cu = torch._C.CompilationUnit()
     cpp_module = torch._C._import_ir_module_from_package(
         cu,
         importer.zip_reader.get_zip_file_reader(),
-        importer.external_registry['storage_context'],
+        importer.storage_context,
         validate_map_location(importer.last_map_location),
         script_module_id,
     )

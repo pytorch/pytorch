@@ -65,32 +65,6 @@ class _StorageBase(object):
         torch.save(self, b, _use_new_zipfile_serialization=False)
         return (_load_from_bytes, (b.getvalue(),))
 
-    def __reduce_package__(self, exporter):
-
-        assert hasattr(exporter.zip_file, 'get_serializer')
-        assert hasattr(exporter.zip_file, 'get_storage_context')
-        storage_context = exporter.zip_file.get_storage_context()
-
-        storage_type = normalize_storage_type(type(self))
-        dtype = torch.uint8
-        size = self.nbytes()
-
-        storage = cast(Storage, self)
-
-        storage_present = storage_context.has_storage(storage)
-        storage_id = storage_context.get_or_add_storage(storage)
-
-        if not storage_present:
-            if storage.device.type != "cpu":
-                storage = storage.cpu()
-        num_bytes = storage.nbytes()
-        exporter.zip_file.write_record(
-            f".data/{storage_id}.storage", storage.data_ptr(), num_bytes
-        )
-
-        return unpackage_storage, (storage_type, storage_id, _get_location(storage), size)
-
-
     def __sizeof__(self):
         return super(_StorageBase, self).__sizeof__() + self.size()
 
@@ -210,49 +184,6 @@ def _load_from_bytes(b):
 _StorageBase.type = _type  # type: ignore[assignment]
 _StorageBase.cuda = _cuda  # type: ignore[assignment]
 
-def _get_location(storage):
-    if type(storage).__module__ == 'torch':
-        return 'cpu'
-    else:
-        return 'cuda:' + str(obj.get_device())
-
-def _default_deserialize(location, storage):
-    if location == 'cpu':
-        return storage
-    elif location.startswith('cuda'):
-        print('cuda func')
-        location = 'cuda:' + str(storage.get_device())
-        assert torch.cuda.is_available()
-        assert device < device_count == torch.cuda.device_count()
-        device = torch.cuda._utils._get_device_index(location, True)
-        return torage.cuda(device)
-
-def unpackage_storage(importer, storage_type, key, location, size):
-    if 'loaded_storages' not in importer.external_registry:
-        importer.external_registry['loaded_storages'] = {}
-    if 'storage_context' not in importer.external_registry:
-        importer.external_registry['storage_context'] = torch._C.DeserializationStorageContext()
-    storage_context = importer.external_registry['storage_context']
-    loaded_storages = importer.external_registry['loaded_storages']
-    dtype = storage_type.dtype
-    if key not in loaded_storages:
-        name = f"{key}.storage"
-        if storage_context.has_storage(name):
-            storage = storage_context.get_storage(name, dtype).storage()
-        else:
-            tensor = importer.zip_reader.get_storage_from_record(
-                ".data/" + name, size, dtype
-            )
-            if isinstance(importer.zip_reader, torch._C.PyTorchFileReader):
-                storage_context.add_storage(name, tensor)
-            storage = tensor.storage()
-        loaded_storages[key] = _default_deserialize(location, storage)
-    storage = loaded_storages[key]
-    # TODO: Once we decide to break serialization FC, we can
-    # stop wrapping with TypedStorage
-    return TypedStorage(
-        wrap_storage=storage._untyped(), dtype=dtype
-    )
 
 @lru_cache(maxsize=None)
 def _dtype_to_storage_type_map():
@@ -577,34 +508,6 @@ class TypedStorage:
         b = io.BytesIO()
         torch.save(self, b, _use_new_zipfile_serialization=False)
         return (_load_from_bytes, (b.getvalue(),))
-
-    def __reduce_package__(self, exporter):
-
-        assert hasattr(exporter.zip_file, 'get_serializer')
-        assert hasattr(exporter.zip_file, 'get_storage_context')
-
-        storage_context = exporter.zip_file.get_storage_context()
-
-        storage = self._storage
-        storage_type_str = self.pickle_storage_type()
-        storage_type = getattr(torch, storage_type_str)
-        dtype = self.dtype
-        size = self.size()
-
-        storage = cast(Storage, storage)
-
-        storage_present = storage_context.has_storage(storage)
-        storage_id = storage_context.get_or_add_storage(storage)
-
-        if not storage_present:
-            if storage.device.type != "cpu":
-                storage = storage.cpu()
-            num_bytes = storage.nbytes()
-            exporter.zip_file.write_record(
-                f".data/{storage_id}.storage", storage.data_ptr(), num_bytes
-            )
-
-        return unpackage_storage, (storage_type, storage_id, _get_location(storage), size)
 
     def data_ptr(self):
         return self._storage.data_ptr()

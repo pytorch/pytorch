@@ -10,6 +10,7 @@ from enum import Enum
 from pathlib import Path
 from typing import (
     Any,
+    cast,
     BinaryIO,
     Callable,
     Dict,
@@ -21,6 +22,7 @@ from typing import (
     DefaultDict,
     Type,
 )
+from torch.types import Storage
 
 import torch
 from torch.utils.hooks import RemovableHandle
@@ -36,6 +38,7 @@ from .importer import Importer, OrderedImporter, sys_importer
 from ._zip_file_torchscript import TorchScriptPackageZipFileWriter
 from ._zip_file import PackageZipFileWriter
 import inspect
+from torch.serialization import location_tag
 
 _gate_torchscript_serialization = True
 
@@ -200,6 +203,7 @@ class PackageExporter:
             self.buffer = f
 
         self.zip_file = zip_file_reader_type(f)
+        self.storage_context = self.zip_file.get_storage_context()
 
         self._written_files: Set[str] = set()
 
@@ -849,7 +853,38 @@ class PackageExporter:
         )
 
     def _persistent_id(self, obj):
-        if hasattr(obj, "__reduce_package__") and not inspect.isclass(obj):
+        if torch.is_storage(obj) or isinstance(obj, torch.storage.TypedStorage):
+            if isinstance(obj, torch.storage.TypedStorage):
+                # TODO: Once we decide to break serialization FC, we can
+                # remove this case
+                storage = obj._storage
+                storage_type_str = obj.pickle_storage_type()
+                storage_type = getattr(torch, storage_type_str)
+                dtype = obj.dtype
+                storage_numel = obj.size()
+
+            else:
+                storage = obj
+                storage_type = normalize_storage_type(type(storage))
+                dtype = torch.uint8
+                storage_numel = storage.nbytes()
+
+            storage = cast(Storage, storage)
+            location = location_tag(storage)
+
+            # serialize storage if not already written
+            storage_present = self.storage_context.has_storage(storage)
+            storage_id = self.storage_context.get_or_add_storage(storage)
+            if not storage_present:
+                if storage.device.type != "cpu":
+                    storage = storage.cpu()
+                num_bytes = storage.nbytes()
+                self.zip_file.write_record(
+                    f".data/{storage_id}.storage", storage.data_ptr(), num_bytes
+                )
+            return ("storage", storage_type, storage_id, location, storage_numel)
+
+        if hasattr(obj, "__reduce_package__"):
             if _gate_torchscript_serialization and isinstance(
                 obj, torch.jit.RecursiveScriptModule
             ):
