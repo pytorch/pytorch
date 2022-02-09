@@ -7,11 +7,10 @@ T = TypeVar('T')
 
 @functional_datapipe('batch')
 class BatcherMapDataPipe(MapDataPipe[DataChunk]):
-    r""" :class:`BatcherMapDataPipe`.
-
-    Map DataPipe to create mini-batches of data. An outer dimension will be added as
-    `batch_size` if `drop_last` is set to `True`, or `length % batch_size` for the
-    last batch if `drop_last` is set to `False`.
+    r"""
+    Create mini-batches of data (functional name: ``batch``). An outer dimension will be added as
+    ``batch_size`` if ``drop_last`` is set to ``True``, or ``length % batch_size`` for the
+    last batch if ``drop_last`` is set to ``False``.
 
     Args:
         datapipe: Iterable DataPipe being batched
