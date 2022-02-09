@@ -1,6 +1,6 @@
 # Guidance for Operator Developer
 
-After you change either the operator signature in a BC breaking way or the semantics of the operator, you will need to write an “upgrader” to make the change non-BC breaking iff they are used in TorchScript or mobile. In general, you can know your operator is BC breaking, if it fails `test/forward_backward_compatibility/check_forward_backward_compatibility.py `
+After you change to operator either the operator schema is BC-breaking way or the semantics of the operator, you will need to write an “upgrader” to make the change non-BC breaking iff they are used in TorchScript or mobile. In general, you can know your operator is BC breaking, if it fails `test/forward_backward_compatibility/check_forward_backward_compatibility.py `
 
 The steps to write upgrader:
 
@@ -24,7 +24,7 @@ The steps to write upgrader:
 
 2. Make changes to the operator and write an upgrader.
     1. Make the operator change.
-    2. Write an upgrader in `caffe2/torch/csrc/jit/operator_upgraders/upgraders_entry.cpp` file inside a map `kUpgradersEntryMap`. The softly enforced naming format is `&lt;operator_name>_&lt;operator_overload>_&lt;start>_&lt;end>`. For example, the below example means that `linspace.out `and` linspace` at versions from 0 to 7 need to be replaced by these upgraders.
+    2. Write an upgrader in `caffe2/torch/csrc/jit/operator_upgraders/upgraders_entry.cpp` file inside a map `kUpgradersEntryMap`. The softly enforced naming format is `<operator_name>_<operator_overload>_<start>_<end>`. The start and end means the upgrader can be applied to the operator exported during when [the global operator version](https://github.com/pytorch/pytorch/blob/master/caffe2/serialize/versions.h#L82) within the range `[start, end]`. For example, the below example means that the operator `linspace.out `and the operator ` linspace` exported at version from 0 to 7 can be replaced by these upgraders.
 
     ```
     static std::unordered_map<std::string, std::string> kUpgradersEntryMap(
