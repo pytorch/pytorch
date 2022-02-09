@@ -645,7 +645,8 @@ return {sig.name()}({', '.join(e.expr for e in translate(cpp_sig.arguments(), si
                 # Put all of the contents of the precompute struct into the context
                 # so that translate will be able to return the correct args for the
                 # call to the impl.
-                for precomputed_elems in self.g.out.precomputed.replace.values():
+                precomputed_values = [*self.g.out.precomputed.replace.values(), self.g.out.precomputed.add]
+                for precomputed_elems in precomputed_values:
                     for arg in precomputed_elems:
                         context.append(Expr(
                             expr=f"precompute.{arg.name}",
