@@ -1710,7 +1710,7 @@ class TestNN(NNTestCase):
 
     def test_ParameterList(self):
         def make_param():
-            return Parameter(torch.randn(10, 10))
+            return Parameter(torch.randn(2, 2))
         parameters = [make_param(), make_param()]
         param_list = nn.ParameterList(parameters)
 
@@ -1718,7 +1718,7 @@ class TestNN(NNTestCase):
             self.assertEqual(len(parameters), len(param_list))
             for p1, p2 in zip(parameters, param_list):
                 self.assertIs(p1, p2)
-            for p1, p2 in zip(parameters, param_list.parameters()):
+            for p1, p2 in zip(filter(lambda x: isinstance(x, Parameter), parameters), param_list.parameters()):
                 self.assertIs(p1, p2)
             for i in range(len(parameters)):
                 self.assertIs(parameters[i], param_list[i])
@@ -1775,6 +1775,39 @@ class TestNN(NNTestCase):
         param_list.extend(s.parameters())
         check()
 
+        param_list.append(torch.rand(2, 2))
+        self.assertIsInstance(param_list[-1], Parameter)
+        parameters.append(param_list[-1])
+
+        param_list.extend([torch.rand(2, 2), "foo"])
+        self.assertIsInstance(param_list[-2], Parameter)
+        self.assertIsInstance(param_list[-1], str)
+        parameters.extend(param_list[-2:])
+
+        param_list += ["bar", torch.rand(2, 2)]
+        self.assertIsInstance(param_list[-2], str)
+        self.assertIsInstance(param_list[-1], Parameter)
+        parameters += param_list[-2:]
+        check()
+
+    def test_ParameterList_replication(self):
+        # The actual replication code from DP cannot be used on CPU so doing it manually here
+        def make_param():
+            return Parameter(torch.randn(2, 2))
+        parameters = [make_param(), make_param()]
+        param_list = nn.ParameterList(parameters)
+
+        new_param_list = param_list._replicate_for_data_parallel()
+
+        for n, p in param_list.named_parameters():
+            # Do a view here so that we can check the base later
+            setattr(new_param_list, n, p.view_as(p))
+
+        for p, p2 in zip(param_list, new_param_list):
+            self.assertEqual(p, p2)
+            self.assertIsNotNone(p2.grad_fn)
+            self.assertIs(p2._base, p)
+
     def test_ParameterDict(self):
         parameters = OrderedDict([
             ('p1', Parameter(torch.randn(10, 10))),
@@ -1786,7 +1819,8 @@ class TestNN(NNTestCase):
 
         def check():
             self.assertEqual(len(parameter_dict), len(parameters))
-            for k1, m2 in zip(parameters, parameter_dict.parameters()):
+            for i, (k1, (k2, m2)) in enumerate(zip(parameters, parameter_dict.named_parameters())):
+                self.assertEqual(k1, k2)
                 self.assertIs(parameters[k1], m2)
             for k1, k2 in zip(parameters, parameter_dict):
                 self.assertIs(parameters[k1], parameter_dict[k2])
@@ -1852,9 +1886,6 @@ class TestNN(NNTestCase):
         with self.assertRaises(ValueError):
             parameter_dict.update(Parameter(torch.randn(10, 10)))
 
-        with self.assertRaises(TypeError):
-            parameter_dict[1] = Parameter(torch.randn(10, 10))
-
         p_pop = parameter_dict.pop('p4')
         self.assertIs(p_pop, parameters['p4'])
         parameters.pop('p4')
@@ -1894,18 +1925,23 @@ class TestNN(NNTestCase):
         p_popitem = parameter_dict.popitem()
         self.assertEqual(p_popitem[0], 'p12')
         self.assertIs(p_popitem[1], p)
+        check()
 
         # Unit test for set_default
         # 1. Ensure parameter is correctly inserted when
         #    the key is not present in `ParameterDict`
         assert 'p11' not in parameter_dict
+        assert 'p11' not in parameters
         parameters['p11'] = Parameter(torch.randn(10, 10))
         p_setdefault = parameter_dict.setdefault('p11', parameters['p11'])
         self.assertIs(p_setdefault, parameters['p11'])
+        self.assertIs(p_setdefault, parameter_dict['p11'])
+        check()
         # 2. Ensure parameter is NOT inserted when the
         #    key is already present in `ParameterDict`
         p = Parameter(torch.randn(10, 10))
         self.assertFalse(parameter_dict.setdefault('p11', p) is p)
+        check()
         # 3. Ensure `None` is inserted when the key is not
         #    present in `Parameter` and parameter is not specified
         self.assertIs(parameter_dict.setdefault('p26'), None)
@@ -1981,6 +2017,37 @@ class TestNN(NNTestCase):
         parameter_dict2 = parameter_dict.fromkeys(['p19', 'p20'], temp_param)
         self.assertEqual({'p19': temp_param, 'p20': temp_param}, parameter_dict2)
         check()
+
+        parameter_dict['p21'] = torch.rand(2, 2)
+        self.assertIsInstance(parameter_dict['p21'], Parameter)
+        parameters['p21'] = parameter_dict['p21']
+
+        parameter_dict.update({'p22': torch.rand(2, 2), 'foo': 'bar'})
+        self.assertIsInstance(parameter_dict['p22'], Parameter)
+        self.assertIsInstance(parameter_dict['foo'], str)
+        parameters['p22'] = parameter_dict['p22']
+        parameters['foo'] = parameter_dict['foo']
+
+    def test_ParameterDict_replication(self):
+        # The actual replication code from DP cannot be used on CPU so doing it manually here
+        def make_param():
+            return Parameter(torch.randn(2, 2))
+        parameters = {"foo": make_param(), "bar": make_param()}
+        param_dict = nn.ParameterDict(parameters)
+
+        new_param_dict = param_dict._replicate_for_data_parallel()
+
+        for n, p in param_dict.named_parameters():
+            # Do a view here so that we can check the base later
+            setattr(new_param_dict, n, p.view_as(p))
+
+        for (k, p), (k2, p2) in zip(param_dict.items(), new_param_dict.items()):
+            self.assertEqual(k, k2)
+            self.assertEqual(p, p2)
+            self.assertIsNotNone(p2.grad_fn)
+            self.assertIs(p2._base, p)
+
+        self.assertEqual(param_dict["foo"], new_param_dict["foo"])
 
     def test_add_module(self):
         methods_to_test = ['add_module', 'register_module']
@@ -4106,10 +4173,6 @@ class TestNN(NNTestCase):
             mod.eval()
         self.assertTrue(len(w) == 0)
 
-        with self.assertWarnsRegex(UserWarning,
-                                   r"Setting attributes on ParameterList is not supported"):
-            torch.nn.utils.weight_norm(mod, "0")
-
         with warnings.catch_warnings(record=True) as w:
             mod = nn.ParameterDict({"a": nn.Parameter(torch.rand(2)), "b": nn.Parameter(torch.rand(2))})
         self.assertTrue(len(w) == 0)
@@ -4119,18 +4182,8 @@ class TestNN(NNTestCase):
             mod.eval()
         self.assertTrue(len(w) == 0)
 
-        with self.assertWarnsRegex(UserWarning,
-                                   r"Setting attributes on ParameterDict is not supported"):
-            torch.nn.utils.weight_norm(mod, "b")
-
     def test_parameterlistdict_pickle(self):
         m = nn.ParameterList(map(nn.Parameter, [torch.rand(2), torch.rand(2)]))
-        with warnings.catch_warnings(record=True) as w:
-            m = pickle.loads(pickle.dumps(m))
-        self.assertTrue(len(w) == 0)
-
-        m = nn.ParameterList(map(nn.Parameter, [torch.rand(2), torch.rand(2)]))
-        del m._initialized
         with warnings.catch_warnings(record=True) as w:
             m = pickle.loads(pickle.dumps(m))
         self.assertTrue(len(w) == 0)
@@ -4143,12 +4196,6 @@ class TestNN(NNTestCase):
         self.assertTrue(len(w) == 0)
 
         m = nn.ParameterDict({"a": nn.Parameter(torch.rand(2)), "b": nn.Parameter(torch.rand(2))})
-        with warnings.catch_warnings(record=True) as w:
-            m = pickle.loads(pickle.dumps(m))
-        self.assertTrue(len(w) == 0)
-
-        m = nn.ParameterDict({"a": nn.Parameter(torch.rand(2)), "b": nn.Parameter(torch.rand(2))})
-        del m._initialized
         with warnings.catch_warnings(record=True) as w:
             m = pickle.loads(pickle.dumps(m))
         self.assertTrue(len(w) == 0)
