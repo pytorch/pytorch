@@ -3,7 +3,7 @@
 import logging
 
 import torch.fx as fx
-import torch.fx.experimental.fx2trt.passes.remove_duplicate_output_args as dedup
+import fx2trt_oss.fx.passes.remove_duplicate_output_args as dedup
 import torch.nn as nn
 from torch.testing._internal.common_utils import TestCase, run_tests
 

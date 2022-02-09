@@ -6,7 +6,7 @@ import glob
 import os
 import shutil
 import tempfile
-import torch.fx.experimental.fx2trt.diagnostics as diag
+import fx2trt_oss.fx.diagnostics as diag
 
 
 def reset_diag(fn):
