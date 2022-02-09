@@ -5477,6 +5477,10 @@ class TestDevicePrecision(TestCase):
             actual = x[..., :1].clamp(lb, ub)
             self.assertEqual(expect, actual)
 
+    def test_cuda_device_idx(self, device):
+        x = torch.zeros(3, device=device)
+        y = torch._efficientzerotensor(3, device=device)
+        self.assertEqual(x.device, y.device)
 
 # we implemented custom deallocation for subclasses, so it behooves
 # us to make sure all of these bits work.  We'll use __del__ to
@@ -7221,12 +7225,7 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
 
             # inputs are expandable tensors
             self.assertEqual(torch.normal(tensor2345, tensor1).size(), (2, 3, 4, 5))
-            with self.assertWarnsRegex(
-                    UserWarning,
-                    "This behavior is deprecated, and in a future PyTorch "
-                    "release outputs will not be resized unless they have "
-                    "zero elements"):
-                self.assertEqual(torch.normal(tensor2145, tensor2345).size(), (2, 3, 4, 5))
+            self.assertEqual(torch.normal(tensor2145, tensor2345).size(), (2, 3, 4, 5))
 
             # inputs are non-expandable tensors, but they have same number of elements
             with self.assertRaisesRegex(
