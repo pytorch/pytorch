@@ -2197,7 +2197,7 @@ void LLVMCodeGenImpl::visit(ExternalCall2Ptr v) {
     gep = irb_.CreateInBoundsGEP(
         Int8PtrTy_,
         buf_ptrs,
-        llvm::ConstantInt::getSigned(IntTy_, bufs_num + i));
+        llvm::ConstantInt::getSigned(IntTy_, bufs_out_size + bufs_in_size + i));
     llvm::Value* free_val = irb_.CreatePointerCast(
         irb_.CreateLoad(Int8PtrTy_, gep), dtypeToLLVMPtr(buf_out->dtype()));
     bufsExtToFreeVal_[buf_out->base_handle()] = free_val;
