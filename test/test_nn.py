@@ -149,8 +149,8 @@ class PackedSequenceTest(TestCase):
         self.assertEqual(seq_tuple_input.shape, torch.Size([1, 2, 2]))
 
     def test_pad_sequence_with_non_iterable_sequences(self):
-        msg = r"argument 'sequences' \(position 1\) must be tuple of Tensors"
-        with self.assertRaisesRegex(TypeError, msg):
+        msg = r"Expected iterable for input sequences, but got arg of type"
+        with self.assertRaisesRegex(RuntimeError, msg):
             torch.nn.utils.rnn.pad_sequence(5)
 
     def test_total_length(self):
