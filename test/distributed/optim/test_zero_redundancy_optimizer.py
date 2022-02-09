@@ -484,8 +484,11 @@ class TestZeroRedundancyOptimizerDistributed(TestZeroRedundancyOptimizer):
         some_trainable()
 
     def test_multiple_param_groups(self):
-        """Tests parity between constructing with multiple parameter groups
-        upfront versus adding parameter groups after construction."""
+        """
+        Tests parity between constructing ZeRO with multiple parameter groups
+        upfront versus adding parameter groups to ZeRO after construction
+        versus a non-sharded optimizer.
+        """
         self.dist_init(self.rank)
 
         model1 = torch.nn.Sequential(
@@ -494,8 +497,10 @@ class TestZeroRedundancyOptimizerDistributed(TestZeroRedundancyOptimizer):
             torch.nn.Linear(10, 5),
         )
         model2 = copy.deepcopy(model1)
+        model3 = copy.deepcopy(model1)
         model1 = model1.to(self.device)
         model2 = model2.to(self.device)
+        model3 = model3.to(self.device)
 
         batch_size = 8
         num_iters = 3
@@ -518,19 +523,30 @@ class TestZeroRedundancyOptimizerDistributed(TestZeroRedundancyOptimizer):
         optim2.add_param_group(
             {"params": [l.bias for l in model2], "weight_decay": 0.01}
         )
+        # Construct `optim3` as a non-sharded optimizer
+        optim3 = AdamW(
+            [
+                {"params": [l.weight for l in model3], "weight_decay": 0.},
+                {"params": [l.bias for l in model3], "weight_decay": 0.01},
+            ], lr=0.01,
+        )
 
         # Check parity over a few iterations
         for iter in range(num_iters):
-            for model, optim in ((model1, optim1), (model2, optim2)):
+            for model, optim in (
+                (model1, optim1), (model2, optim2), (model3, optim3),
+            ):
                 optim.zero_grad()
                 out = model(inputs[iter])
                 loss = out.sum()
                 loss.backward()
                 optim.step()
 
-            for i in range(len(model1)):
-                assert torch.allclose(model1[i].weight, model2[i].weight)
-                assert torch.allclose(model1[i].bias, model2[i].bias)
+            for layer1, layer2, layer3 in zip(model1, model2, model3):
+                assert torch.allclose(layer1.weight, layer2.weight)
+                assert torch.allclose(layer1.weight, layer3.weight)
+                assert torch.allclose(layer1.bias, layer2.bias)
+                assert torch.allclose(layer1.bias, layer3.bias)
 
     @common_distributed.skip_if_lt_x_gpu(2)
     def test_collect_shards(self):

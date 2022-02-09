@@ -1311,7 +1311,7 @@ class ZeroRedundancyOptimizer(Optimizer, Joinable):
             TypeError: ``params`` has an invalid type.
             ValueError: ``params`` is empty.
 
-        Return:
+        Returns:
             The persistent form of ``params`` to be passed into the parent
             :class:`Optimizer` constructor -- i.e. returns ``params`` as a
             :class:`list` if it is originally any iterable of
@@ -1345,6 +1345,12 @@ class ZeroRedundancyOptimizer(Optimizer, Joinable):
             self._all_params = []
             # `all_params` contains parameter groups (not parameters)
             for param_group in all_params:
+                if "params" not in param_group:
+                    raise ValueError(
+                        "Each parameter group passed-in via `params` must "
+                        "have a 'params' key mapping to the parameters in "
+                        "the group"
+                    )
                 self._all_params.extend(param_group["params"])
             return params
 
