@@ -252,31 +252,19 @@ class _PyTreeInfo(NamedTuple):
     in_spec: pytree.TreeSpec
     out_spec: Optional[pytree.TreeSpec]
 
-
 class CodeGen(object):
-    def __init__(self, pytree_info, input_transformer=None, output_transformer=None):
-        super().__init__()
-        self._pytree_info = pytree_info
-        def pytree_output(output_args):
-            if pytree_info is not None:
-                return f'return pytree.tree_unflatten({repr(output_args)}, self._out_spec)'
-            else:
-                return f'return {repr(output_args)}'
+    def __init__(self):
+        self.body_transformer = None
 
-        self.output_transformer = pytree_output
+    def generate_prologue(self, free_vars, maybe_return_annotation):
+        # If the original function didn't have self as its first argument, we
+        # would have added it.
+        if len(free_vars) == 0 or free_vars[0] != 'self':
+            free_vars.insert(0, 'self')
+        return f"def forward({', '.join(free_vars)}){maybe_return_annotation}:"
 
-        def pytree_input(body, free_vars):
-            if self._pytree_info is None:
-                return body, free_vars
-            function_args = pytree_info.orig_args
-            has_orig_self = (function_args[0] == 'self')
-            if has_orig_self:
-                free_vars.insert(0, 'self')
-            if len(free_vars) > 0:  # pytree has placeholders in it
-                body.insert(0, f"{', '.join(free_vars)}, = fx_pytree.tree_flatten_spec([{', '.join(function_args)}], self._in_spec)\n")
-            return body, function_args
-
-        self.input_transformer = pytree_input
+    def generate_output(self, output_args):
+        return f'return {repr(output_args)}'
 
     def python_code_func(self, nodes, root_module: str, namespace: _Namespace) -> PythonCode:
         free_vars: List[str] = []
@@ -428,10 +416,7 @@ class CodeGen(object):
             elif node.op == 'output':
                 if node.type is not None:
                     maybe_return_annotation[0] = f" -> {type_repr(node.type)}"
-                if self.output_transformer:
-                    body.append(self.output_transformer(node.args[0]))
-                else:
-                    body.append(f'return {repr(node.args[0])}')
+                body.append(self.generate_output(node.args[0]))
                 return
             raise NotImplementedError(f'node: {node.op} {node.target}')
 
@@ -455,28 +440,44 @@ class CodeGen(object):
         else:
             wrap_stmts = ''
 
-        if False:
-        # if self._on_generate_code:
-            body = self._on_generate_code(body)
+        if self.body_transformer:
+            body = self.body_transformer(body)
 
-        if self.input_transformer:
-            body, function_args = self.input_transformer(body, free_vars)
-        else:
-            function_args = free_vars
 
-        # If the original function didn't have self as its first argument, we
-        # would have added it.
-        if len(function_args) == 0 or function_args[0] != 'self':
-            function_args.insert(0, 'self')
+        prologue = self.generate_prologue(free_vars, maybe_return_annotation[0])
 
         code = ''.join(body)
         code = '\n'.join('    ' + line for line in code.split('\n'))
         fn_code = f"""
 {wrap_stmts}
 
-def forward({', '.join(function_args)}){maybe_return_annotation[0]}:
+{prologue}
 {code}"""
         return PythonCode(fn_code, globals_)
+
+class PyTreeCodeGen(CodeGen):
+    def __init__(self, pytree_info):
+        super().__init__()
+        self.pytree_info = pytree_info
+
+    def generate_prologue(self, free_vars, maybe_return_annotation):
+        if self.pytree_info is None:
+            return super().generate_prologue(free_vars, maybe_return_annotation)
+        function_args = self.pytree_info.orig_args
+        has_orig_self = (function_args[0] == 'self')
+        if has_orig_self:
+            free_vars.insert(0, 'self')
+        function_definition = super().generate_prologue(function_args[:], maybe_return_annotation)
+        if len(free_vars) > 0:  # pytree has placeholders in it
+            pytree_flatten_stmt = f"{', '.join(free_vars)}, = fx_pytree.tree_flatten_spec([{', '.join(function_args)}], self._in_spec)"
+            function_definition += f"\n    {pytree_flatten_stmt}"
+        return function_definition
+
+    def generate_output(self, output_args):
+        if self.pytree_info:
+            return f'return pytree.tree_unflatten({repr(output_args)}, self._out_spec)'
+        else:
+            return super().generate_output(output_args)
 
 @compatibility(is_backward_compatible=True)
 class Graph:
@@ -536,10 +537,7 @@ class Graph:
         self._owners = 0
         self._owning_module = owning_module
         self._tracer_cls = tracer_cls
-        self._pytree_info: Optional[_PyTreeInfo] = None
-
-        # A function `list[str] -> list[str]` to transform the body of the generated code
-        self._on_generate_code: Optional[TransformCodeFunc] = None
+        self._codegen = CodeGen()
 
     @property
     def owning_module(self):
@@ -668,12 +666,12 @@ class Graph:
 
     @compatibility(is_backward_compatible=False)
     def unflatten_outs(self, out):
-        if self._pytree_info is None:
+        if self._codegen.pytree_info is None:
             return out
         if not isinstance(out, list):
             out = [out]
-        assert(self._pytree_info.out_spec is not None)
-        return pytree.tree_unflatten(out, self._pytree_info.out_spec)
+        assert(self._codegen.pytree_info.out_spec is not None)
+        return pytree.tree_unflatten(out, self._codegen.pytree_info.out_spec)
 
     @compatibility(is_backward_compatible=True)
     def erase_node(self, to_erase : Node) -> None:
@@ -1079,7 +1077,7 @@ class Graph:
             return self._python_code(root_module, namespace)
 
     def _python_code(self, root_module: str, namespace: _Namespace) -> PythonCode:
-        return CodeGen(self._pytree_info).python_code_func(self.nodes, root_module, namespace)
+        return self._codegen.python_code_func(self.nodes, root_module, namespace)
 
 
     def __str__(self) -> str:
@@ -1309,14 +1307,14 @@ class Graph:
             # run next `recompile()`).
         """
         on_gen_code_old = self._on_generate_code
-        self._on_generate_code = make_transformer(on_gen_code_old)
+        self._codegen.body_transformer = make_transformer(on_gen_code_old)
 
         @contextlib.contextmanager
         def on_generate_code_context_manager():
             try:
                 yield
             finally:
-                self._on_generate_code = on_gen_code_old
+                self._codegen.body_transformer = on_gen_code_old
 
         return on_generate_code_context_manager()
 
