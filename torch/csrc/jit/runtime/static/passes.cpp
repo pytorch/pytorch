@@ -746,8 +746,6 @@ void FuseListUnpack(std::shared_ptr<torch::jit::Graph>& graph) {
   AliasDb alias_db(
       graph,
       /*isFrozen=*/false);
-  const std::vector<Value*> graph_outputs(
-      graph->outputs().begin(), graph->outputs().end());
   auto nodes = graph->nodes();
   std::vector<Node*> to_remove;
   for (auto* node : nodes) {
