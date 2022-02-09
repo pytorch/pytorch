@@ -10,7 +10,17 @@ import inspect
 import io
 import logging
 from itertools import chain
-from typing import Any, Callable, Dict, List, Optional, Set, Type
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    Iterable,
+    List,
+    Optional,
+    Set,
+    Type,
+    Union,
+)
 
 import torch
 import torch.distributed as dist
@@ -361,7 +371,7 @@ class ZeroRedundancyOptimizer(Optimizer, Joinable):
         **defaults: Any,
     ):
         # Perform type and assumption checks on the input parameters
-        self._verify_and_init_params(params)
+        params = self._verify_and_init_params(params)
         self._verify_same_dense_param_type()
 
         # NOTE: The parent constructor uses `add_param_group()` which is
@@ -370,7 +380,7 @@ class ZeroRedundancyOptimizer(Optimizer, Joinable):
         # between the parent and child.
         self.initialized = False
 
-        Optimizer.__init__(self, self._all_params, defaults)
+        Optimizer.__init__(self, params, defaults)
         Joinable.__init__(self)
         # Now, all parameters are held in both `self._all_params` and
         # `self.param_groups`
@@ -1286,36 +1296,57 @@ class ZeroRedundancyOptimizer(Optimizer, Joinable):
                     offset = offset_next
                 bucket_assignment.tensor = tensor
 
-    def _verify_and_init_params(self, params: Any) -> None:
+    def _verify_and_init_params(
+        self, params: Any,
+    ) -> Union[Iterable[torch.Tensor], Iterable[dict]]:
         r"""
         Verifies the type of ``params`` and initializes ``self._all_params``
-        if ``params`` is valid.
+        as a :class:`list` of all parameters if ``params`` is valid.
 
-        While :class:`optim.Optimizer <torch.optim.Optimizer>` allows
-        ``params`` to be an iterable of :class:`dict` s, currently
-        ``ZeroRedundancyOptimizer`` strictly requires ``params`` to be an
-        iterable of :class:`torch.Tensor` s.
+        Arguments:
+            params (Any): Candidate parameter list or parameter groups to
+                verify.
 
         Raises:
             TypeError: ``params`` has an invalid type.
             ValueError: ``params`` is empty.
+
+        Return:
+            The persistent form of ``params`` to be passed into the parent
+            :class:`Optimizer` constructor -- i.e. returns ``params`` as a
+            :class:`list` if it is originally any iterable of
+            :class:`torch.Tensor` to ensure it can be iterated over again, and
+            returns ``params`` as is if it is an iterable of ``dict``.
         """
         if isinstance(params, torch.Tensor):
-            raise TypeError("params argument should be an iterable of "
+            raise TypeError("`params` argument should be an iterable of "
                             f"Tensors, but got {torch.typename(params)}")
         try:
-            self._all_params = list(params)
+            all_params = list(params)
         except TypeError:
-            raise TypeError("params argument should be an iterable of "
+            raise TypeError("`params` argument should be an iterable of "
                             f"Tensors, but got {torch.typename(params)}")
-        if len(self._all_params) == 0:
+        if len(all_params) == 0:
             raise ValueError("ZeroRedundancyOptimizer got an empty parameter "
                              "list")
-        for param in self._all_params:
-            if not isinstance(param, torch.Tensor):
-                raise TypeError("params argument should be an iterable of "
-                                "Tensors, but got an iterable containing "
-                                f"{torch.typename(param)}")
+        all_tensors = True
+        all_dicts = True
+        for param in all_params:
+            all_tensors &= isinstance(param, torch.Tensor)
+            all_dicts &= isinstance(param, dict)
+        if not all_tensors and not all_dicts:
+            raise TypeError("`params` argument should be an iterable of "
+                            "Tensors or dicts")
+        # Ensure that `self._all_params` contains a list of all parameters
+        if all_tensors:
+            self._all_params = all_params
+            return self._all_params
+        elif all_dicts:
+            self._all_params = []
+            # `all_params` contains parameter groups (not parameters)
+            for param_group in all_params:
+                self._all_params.extend(param_group["params"])
+            return params
 
     def _verify_same_dense_param_type(self) -> None:
         r"""
@@ -1331,6 +1362,9 @@ class ZeroRedundancyOptimizer(Optimizer, Joinable):
         NOTE: This method can be removed once support for sparse parameters
         and varying parameter types is added.
         """
+        assert isinstance(self._all_params[0], torch.Tensor), \
+            "`self._all_params` should contain Tensors, not " \
+            f"{type(self._all_params[0])}"
         typename = torch.typename(self._all_params[0])
         if self._all_params[0].is_sparse:
             raise ValueError("ZeroRedundancyOptimizer only supports using "
