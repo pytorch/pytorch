@@ -2051,42 +2051,42 @@ void LLVMCodeGenImpl::visit(ExternalCall2Ptr v) {
     throw unimplemented_lowering(v);
   }
 
-  std::vector<BufPtr> bufs;
   const auto& bufs_out = v->buf_out_args();
   const auto& bufs_in = v->buf_args();
 
-  bufs.reserve(bufs_in.size());
-  bufs.insert(bufs.end(), bufs_in.begin(), bufs_in.end());
-
-  int64_t bufs_num = bufs.size();
-  int64_t args_num = v->args().size();
+  const auto bufs_in_size = bufs_in.size();
+  const auto bufs_out_size = bufs_out.size();
+  const auto args_num = v->args().size();
 
   // Count the size of dims array - it consists of dimension of all bufs
   // concatenated together.
   int64_t dims_num = 0;
-  for (BufPtr b : bufs) {
+  for (BufPtr b : bufs_in) {
     dims_num += b->dims().size();
   }
 
+  // bufs_out_size for out tensors data pointers
+  // bufs_in_size for input pointers
+  // bufs_out_size for out tensors TensorImpl* to pass to nnc_aten_free to
+  // release out tensors
   llvm::Value* buf_ptrs = irb_.CreateAlloca(
       Int8PtrTy_,
-      llvm::ConstantInt::getSigned(IntTy_, bufs_num + bufs_out.size()));
+      llvm::ConstantInt::getSigned(IntTy_, bufs_in_size + 2 * bufs_out_size));
   llvm::Value* buf_ranks = irb_.CreateAlloca(
-      LongTy_, llvm::ConstantInt::getSigned(IntTy_, bufs_num));
+      LongTy_, llvm::ConstantInt::getSigned(IntTy_, bufs_in_size));
   llvm::Value* buf_dims = irb_.CreateAlloca(
       LongTy_, llvm::ConstantInt::getSigned(IntTy_, dims_num));
   llvm::Value* buf_strides = irb_.CreateAlloca(
       LongTy_, llvm::ConstantInt::getSigned(IntTy_, dims_num));
   llvm::Value* buf_dtypes = irb_.CreateAlloca(
-      ByteTy_, llvm::ConstantInt::getSigned(IntTy_, bufs_num));
+      ByteTy_, llvm::ConstantInt::getSigned(IntTy_, bufs_in_size));
   llvm::Value* extra_args = irb_.CreateAlloca(
       LongTy_, llvm::ConstantInt::getSigned(IntTy_, args_num));
 
   int i = 0;
   int dim_idx = 0;
   int stride_idx = 0;
-  const auto bufs_out_size = v->buf_out_args().size();
-  for (BufPtr b : bufs) {
+  for (BufPtr b : bufs_in) {
     llvm::Value* gep;
     // TODO: Fill buf_ptrs for for out bufs with nullptr?
     // Store value for buf pointer
@@ -2152,7 +2152,7 @@ void LLVMCodeGenImpl::visit(ExternalCall2Ptr v) {
       fname,
       llvm::FunctionType::get(
           llvm::Type::getVoidTy(getContext()), // return type
-          {LongTy_, // int64_t bufs_num
+          {LongTy_, // int64_t bufs_in_size
            Int8PtrTy_->getPointerTo(), // void** buf_data
            LongTy_->getPointerTo(), // int64_t* buf_ranks
            LongTy_->getPointerTo(), // int64_t* buf_dims
@@ -2169,7 +2169,7 @@ void LLVMCodeGenImpl::visit(ExternalCall2Ptr v) {
   irb_.CreateCall(
       call_ty,
       call_fn,
-      {llvm::ConstantInt::getSigned(LongTy_, bufs_num),
+      {llvm::ConstantInt::getSigned(LongTy_, bufs_in_size),
        buf_ptrs,
        buf_ranks,
        buf_dims,

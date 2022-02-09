@@ -81,31 +81,26 @@ std::vector<at::Tensor> constructTensors(
     int64_t* buf_dims,
     int64_t* buf_strides,
     int8_t* buf_dtypes,
-    c10::optional<std::vector<std::pair<size_t, QIData>>> qdataArg,
-    size_t bufs_out_num) {
+    c10::optional<std::vector<std::pair<size_t, QIData>>> qdataArg) {
   std::vector<void*> buf_data_vec;
   std::vector<std::vector<int64_t>> buf_dims_vec;
   std::vector<std::vector<int64_t>> buf_strides_vec;
   std::vector<c10::ScalarType> buf_dtypes_vec;
   int64_t buf_dims_idx = 0;
   int64_t buf_strides_idx = 0;
-  for (const auto i : c10::irange(bufs_num - bufs_out_num)) {
-    buf_data_vec.push_back(buf_data[bufs_out_num + i]);
+  for (const auto i : c10::irange(bufs_num)) {
+    buf_data_vec.push_back(buf_data[i]);
     buf_dims_vec.emplace_back();
     buf_strides_vec.emplace_back();
     for (const auto dim : c10::irange(buf_ranks[i])) {
       (void)dim;
-      buf_dims_vec[i - bufs_out_num].push_back(buf_dims[buf_dims_idx++]);
-      buf_strides_vec[i - bufs_out_num].push_back(
-          buf_strides[buf_strides_idx++]);
+      buf_dims_vec[i].push_back(buf_dims[buf_dims_idx++]);
+      buf_strides_vec[i].push_back(buf_strides[buf_strides_idx++]);
     }
     buf_dtypes_vec.push_back(static_cast<c10::ScalarType>(buf_dtypes[i]));
   }
 
   std::vector<at::Tensor> tensors;
-  for (const auto i : c10::irange(bufs_out_num)) {
-    tensors.push_back({});
-  }
   if (!qdataArg.has_value()) {
     for (const auto i : c10::irange(buf_data_vec.size())) {
       auto options = at::TensorOptions()
@@ -129,10 +124,9 @@ std::vector<at::Tensor> constructTensors(
     }
   } else {
     // handle quantized
-    std::vector<c10::optional<QIData>> qdata(
-        bufs_num - bufs_out_num, c10::nullopt);
+    std::vector<c10::optional<QIData>> qdata(bufs_num, c10::nullopt);
     for (const auto& qd : *qdataArg) {
-      qdata[qd.first - bufs_out_num] = qd.second;
+      qdata[qd.first] = qd.second;
     }
     for (const auto i : c10::irange(buf_data_vec.size())) {
       auto options = at::TensorOptions()
@@ -178,11 +172,119 @@ std::vector<at::Tensor> constructTensors(
     int64_t* buf_dims,
     int64_t* buf_strides,
     int8_t* buf_dtypes,
+    std::vector<std::pair<size_t, QIData>> qdata) {
+  c10::optional<std::vector<std::pair<size_t, QIData>>> opt = std::move(qdata);
+  return constructTensors(
+      bufs_num, buf_data, buf_ranks, buf_dims, buf_strides, buf_dtypes, opt);
+}
+
+std::vector<at::Tensor> constructTensors2(
+    int64_t bufs_in_num,
+    void** buf_data,
+    int64_t* buf_ranks,
+    int64_t* buf_dims,
+    int64_t* buf_strides,
+    int8_t* buf_dtypes,
+    c10::optional<std::vector<std::pair<size_t, QIData>>> qdataArg,
+    size_t bufs_out_num) {
+  std::vector<void*> buf_data_vec;
+  std::vector<std::vector<int64_t>> buf_dims_vec;
+  std::vector<std::vector<int64_t>> buf_strides_vec;
+  std::vector<c10::ScalarType> buf_dtypes_vec;
+  int64_t buf_dims_idx = 0;
+  int64_t buf_strides_idx = 0;
+  for (const auto i : c10::irange(bufs_in_num)) {
+    buf_data_vec.push_back(buf_data[bufs_out_num + i]);
+    buf_dims_vec.emplace_back();
+    buf_strides_vec.emplace_back();
+    for (const auto dim : c10::irange(buf_ranks[i])) {
+      (void)dim;
+      buf_dims_vec[i].push_back(buf_dims[buf_dims_idx++]);
+      buf_strides_vec[i].push_back(buf_strides[buf_strides_idx++]);
+    }
+    buf_dtypes_vec.push_back(static_cast<c10::ScalarType>(buf_dtypes[i]));
+  }
+
+  std::vector<at::Tensor> tensors;
+  for (const auto i : c10::irange(bufs_out_num)) {
+    tensors.push_back({});
+  }
+  if (!qdataArg.has_value()) {
+    for (const auto i : c10::irange(buf_data_vec.size())) {
+      auto options = at::TensorOptions()
+                         // NOLINTNEXTLINE
+                         .dtype(buf_dtypes_vec[i])
+                         .layout(at::kStrided)
+                         .device(at::kCPU) // TODO: support GPUs too
+                         .memory_format(deduce_memory_format(
+                             // NOLINTNEXTLINE
+                             buf_strides_vec[i],
+                             // NOLINTNEXTLINE
+                             buf_dims_vec[i]))
+                         .requires_grad(false);
+      auto tensor = at::from_blob(
+          // NOLINTNEXTLINE
+          buf_data_vec[i],
+          buf_dims_vec[i],
+          buf_strides_vec[i],
+          options);
+      tensors.emplace_back(tensor);
+    }
+  } else {
+    // handle quantized
+    std::vector<c10::optional<QIData>> qdata(bufs_in_num, c10::nullopt);
+    for (const auto& qd : *qdataArg) {
+      qdata[qd.first - bufs_out_num] = qd.second;
+    }
+    for (const auto i : c10::irange(buf_data_vec.size())) {
+      auto options = at::TensorOptions()
+                         // NOLINTNEXTLINE
+                         .dtype(buf_dtypes_vec[i])
+                         .layout(at::kStrided)
+                         .device(at::kCPU) // TODO: support GPUs too
+                         .memory_format(deduce_memory_format(
+                             // NOLINTNEXTLINE
+                             buf_strides_vec[i],
+                             // NOLINTNEXTLINE
+                             buf_dims_vec[i]))
+                         .requires_grad(false);
+      if (auto qd = qdata[i]) {
+        // inplace tensor
+        auto tensor = from_blob_quantized(
+            // NOLINTNEXTLINE
+            buf_data_vec[i],
+            buf_dims_vec[i],
+            buf_strides_vec[i],
+            qd->scale,
+            qd->zero,
+            qd->scalarType);
+        tensors.emplace_back(tensor);
+      } else {
+        auto tensor = at::from_blob(
+            // NOLINTNEXTLINE
+            buf_data_vec[i],
+            buf_dims_vec[i],
+            buf_strides_vec[i],
+            options);
+        tensors.emplace_back(tensor);
+      }
+    }
+  }
+  return tensors;
+}
+
+std::vector<at::Tensor> constructTensors2(
+    int64_t bufs_in_num,
+    void** buf_data,
+    int64_t* buf_ranks,
+    int64_t* buf_dims,
+    int64_t* buf_strides,
+    int8_t* buf_dtypes,
     std::vector<std::pair<size_t, QIData>> qdata,
     size_t bufs_out_num = 0u) {
   c10::optional<std::vector<std::pair<size_t, QIData>>> opt = std::move(qdata);
-  return constructTensors(
-      bufs_num,
+  return constructTensors2(
+      bufs_in_num,
       buf_data,
       buf_ranks,
       buf_dims,
@@ -406,8 +508,8 @@ void nnc_aten_quantized_conv2d_out(
   const int64_t x_qzero = extra_args[1];
   const c10::ScalarType x_qdtype = static_cast<c10::ScalarType>(extra_args[2]);
   // TODO: optimize constructTensors to skip creating tensor for out tensors
-  auto tensors = constructTensors(
-      bufs_num - 1,
+  auto tensors = constructTensors2(
+      bufs_num,
       buf_data,
       buf_ranks,
       buf_dims,
@@ -467,8 +569,8 @@ void nnc_aten_quantized_conv2d_relu_out(
   const double x_qscale = ((double*)extra_args)[0];
   const int64_t x_qzero = extra_args[1];
   const c10::ScalarType x_qdtype = static_cast<c10::ScalarType>(extra_args[2]);
-  auto tensors = constructTensors(
-      bufs_num - 1,
+  auto tensors = constructTensors2(
+      bufs_num,
       buf_data,
       buf_ranks,
       buf_dims,
@@ -633,7 +735,7 @@ void nnc_aten_quantized_mul_out(
   const double b_qscale = ((double*)extra_args)[3];
   const int64_t b_qzero = extra_args[4];
   const c10::ScalarType b_qdtype = static_cast<c10::ScalarType>(extra_args[5]);
-  auto tensors = constructTensors(
+  auto tensors = constructTensors2(
       bufs_num,
       buf_data,
       buf_ranks,

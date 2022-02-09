@@ -59,6 +59,16 @@ std::vector<at::Tensor> constructTensors(
     int64_t* buf_strides,
     int8_t* buf_dtypes,
     c10::optional<std::vector<std::pair<size_t, QIData>>> qdataArg =
+        c10::nullopt);
+
+std::vector<at::Tensor> constructTensors2(
+    int64_t bufs_in_num,
+    void** buf_data,
+    int64_t* buf_ranks,
+    int64_t* buf_dims,
+    int64_t* buf_strides,
+    int8_t* buf_dtypes,
+    c10::optional<std::vector<std::pair<size_t, QIData>>> qdataArg =
         c10::nullopt,
     size_t bufs_out_num = 0);
 
