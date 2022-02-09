@@ -5892,6 +5892,12 @@
     CUDA: masked_softmax_cuda
     CPU: masked_softmax_cpu
 
+# Native FFN feed forward network used for Transformer
+- func: _ffn(Tensor input, Tensor weight1, Tensor bias1, Tensor weight2, Tensor bias2, bool use_gelu=False, bool add_norm=False) -> Tensor
+  dispatch:
+    CUDA: ffn_cuda
+    CPU: ffn_cpu
+
 - func: view(Tensor(a) self, int[] size) -> Tensor(a)
   variants: method
   device_check: NoCheck
