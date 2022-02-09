@@ -2080,7 +2080,7 @@ Tensor & squeeze_(Tensor& self, int64_t dim) {
 // This is a hack because in-place operations on tensors treated like views
 // can be much more expensive than the same operations on non-view tensors.
 
-__inline__ Tensor view_impl(const Tensor& self, IntArrayRef size) {
+inline Tensor view_impl(const Tensor& self, IntArrayRef size) {
 
   at::DimVector inferred_size = at::infer_size_dv(size, self.numel());
   auto stride = at::detail::computeStride(self.sizes(),
