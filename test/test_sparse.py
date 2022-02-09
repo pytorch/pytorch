@@ -305,18 +305,10 @@ class TestSparse(TestCase):
             x.to_dense()  # Tests triple to_dense for memory corruption
             x.to_dense()
             x.to_dense()
-            # We dont have to_dense for half types, so we don't request
-            # exact_dtype if res.type is torch.float16.
-            dense_x = x.to_dense()
-            safe_dense_x = self.safeToDense(x)
-            if (res.dtype == torch.float16):
-                exact_dtype = False
-            else:
-                exact_dtype = True
-                dense_x = dense_x.to(res.dtype)
-                safe_dense_x = safe_dense_x.to(res.dtype)
-            self.assertEqual(res, dense_x, exact_dtype=exact_dtype)
-            self.assertEqual(res, safe_dense_x, exact_dtype=exact_dtype)
+            dense_x = x.to_dense().to(res.dtype)
+            safe_dense_x = self.safeToDense(x).to(res.dtype)
+            self.assertEqual(res, dense_x, exact_dtype=True)
+            self.assertEqual(res, safe_dense_x, exact_dtype=True)
 
             def fn(x):
                 return x.to_dense()
@@ -3405,7 +3397,7 @@ class TestSparse(TestCase):
         test(4, 6, [7, 3, 1, 3, 2, 1], [7, 3, 1, 3, 2, 3])
 
     @skipMeta
-    @dtypes(*get_all_dtypes(include_half=False, include_complex32=False))
+    @dtypes(*get_all_dtypes(include_complex32=False))
     def test_eye(self, device, dtype):
         for n in (3, 5, 7):
             sparse_coo_output = torch.eye(n, layout=torch.sparse_coo, device=device, dtype=dtype)
