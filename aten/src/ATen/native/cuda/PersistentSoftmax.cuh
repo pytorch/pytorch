@@ -195,6 +195,8 @@ __global__ void softmax_warp_forward(output_t *dst, const input_t *src, int batc
                 }
                 if (is_log_softmax) {
                     dst[i*element_count+it*WARP_SIZE] = elements[i][it] - max_value[i] - sum[i];
+                } else if (sum[i] == 0) {
+                    dst[i*element_count+it*WARP_SIZE] = std::numeric_limits<acc_t>::quiet_NaN();
                 } else {
                     dst[i*element_count+it*WARP_SIZE] = elements[i][it] / sum[i];
                 }

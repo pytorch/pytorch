@@ -196,6 +196,8 @@ void host_softmax(
 
           if (LogSoftMax) {
             tmpsum = std::log(tmpsum);
+          } else if (tmpsum == 0) {
+            tmpsum = std::numeric_limits<scalar_t>::quiet_NaN();
           } else {
             tmpsum = 1 / tmpsum;
           }
