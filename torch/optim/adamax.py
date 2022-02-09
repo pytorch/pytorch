@@ -60,6 +60,14 @@ class Adamax(Optimizer):
         defaults = dict(lr=lr, betas=betas, eps=eps, weight_decay=weight_decay)
         super(Adamax, self).__init__(params, defaults)
 
+    def __setstate__(self, state):
+        super().__setstate__(state)
+        state_values = list(self.state.values())
+        step_is_tensor = (len(state_values) != 0) and torch.is_tensor(state_values[0]['step'])
+        if not step_is_tensor:
+            for s in state_values:
+                s['step'] = torch.tensor(float(s['step']))
+
     @torch.no_grad()
     def step(self, closure=None):
         """Performs a single optimization step.
@@ -97,14 +105,12 @@ class Adamax(Optimizer):
 
                 # State initialization
                 if len(state) == 0:
-                    state['step'] = 0
+                    state['step'] = torch.tensor(0.)
                     state['exp_avg'] = torch.zeros_like(p, memory_format=torch.preserve_format)
                     state['exp_inf'] = torch.zeros_like(p, memory_format=torch.preserve_format)
 
                 exp_avgs.append(state['exp_avg'])
                 exp_infs.append(state['exp_inf'])
-
-                state['step'] += 1
                 state_steps.append(state['step'])
 
             F.adamax(params_with_grad,
