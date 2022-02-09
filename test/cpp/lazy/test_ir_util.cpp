@@ -12,7 +12,7 @@ namespace lazy {
 class IrUtilNode : public Node {
  public:
   explicit IrUtilNode()
-      : Node(OpKind(), /* num_outputs */ 1, /* hash_seed */ Hash(0)) {}
+      : Node(OpKind(), /* num_outputs */ 1, [&](bool /* unused */) { return Hash(0); }) {}
   ~IrUtilNode() override = default;
 
   void AddOperand(Value v) {
