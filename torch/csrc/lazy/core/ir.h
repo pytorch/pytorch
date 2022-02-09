@@ -204,7 +204,15 @@ class TORCH_API Node {
 
   // The hash value of this node.
   hash_t node_hash_;
-  // The hash value of the graph rooted at this node.
+  // dag_hash represents the hash value of the graph rooted at this node. There are 2 variants, one
+  // with sizes info and one without. We need 2 such hashes to support dynamic
+  // shape. Here are the logic to pick the hash in the 2 major scenarios that a hash is needed:
+  // - shape cache: in this case, we always use the dag hash with size info. This way, looking up the
+  //   shape for one node does not get the shape for another node with the same rank but different sizes
+  // - lookup the compiled graph by a hash: in this case, we will use the dag hash
+  //   WITHOUT size info if dynamic shape is enabled and use the dag hash WITH size info otherwise.
+  // The different requirement for the hash in these 2 scenarios forces us to maintain 2
+  // different hashes.
   hash_t dag_hash_without_sizes_;
   hash_t dag_hash_with_sizes_;
   // The IR specific metadata attached to the IR node.
