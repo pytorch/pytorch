@@ -16075,7 +16075,7 @@ class TestNNDeviceType(NNTestCase):
                 if (self.device_type == "cuda"):
                     input = input.cuda()
                     mask = mask.cuda()
-                native_res = torch._masked_softmax(input, dim, mask)
+                native_res = torch._masked_softmax(input, mask, dim)
 
                 def slow_masked_softmax(input, mask):
                     exp = torch.exp(input)
@@ -16087,15 +16087,18 @@ class TestNNDeviceType(NNTestCase):
                 pt_res = torch.nan_to_num(pt_res)
 
                 mask_not = mask.logical_not()
+                # In result, should only fill the entirely masked out rows since those are non-deterministic (*may* be 0)
+                # Converts rows with all True's to False
+                mask_out = mask_not.all(dim, keepdim=True).expand(mask_not.shape)
                 self.assertEqual(
-                    pt_res.masked_fill(mask_not, 0),
-                    native_res.masked_fill(mask_not, 0),
+                    pt_res.masked_fill(mask_out, 0),
+                    native_res.masked_fill(mask_out, 0),
                     exact_dtype=True
                 )
 
     def _test_masked_softmax_helper(self, input, dim, mask):
         input_ref = input.detach().clone().requires_grad_()
-        result = torch._masked_softmax(input, dim, mask)
+        result = torch._masked_softmax(input, mask, dim)
 
         mask_not = mask.logical_not()
         expected = torch._softmax(input_ref.masked_fill(mask_not, float('-inf')), dim, False)
@@ -16104,7 +16107,18 @@ class TestNNDeviceType(NNTestCase):
         result.backward(grad)
         expected.backward(grad)
 
-        self.assertEqual(result.masked_fill(mask_not, 0), expected.masked_fill(mask_not, 0))
+        # Make sure the optional argument works as well
+        if dim == input.dim() - 1:
+            input_ref_default = input.detach().clone().requires_grad_()
+            result_default = torch._masked_softmax(input_ref_default, mask)
+            result_default.backward(grad)
+            self.assertEqual(result, result_default)
+            self.assertEqual(input.grad, input_ref_default.grad)
+
+        # In result, should only fill the entirely masked out rows since those are non-deterministic (*may* be 0)
+        # Converts rows with all True's to False
+        mask_out = mask_not.all(dim, keepdim=True).expand(mask_not.shape)
+        self.assertEqual(result.masked_fill(mask_out, 0), expected.masked_fill(mask_out, 0))
 
         self.assertEqual(input.grad, torch.nan_to_num(input_ref.grad))
         self.assertEqual(input.grad, input.grad.masked_fill(mask_not, 0.0))
@@ -16146,7 +16160,7 @@ class TestNNDeviceType(NNTestCase):
             input = input.cuda()
             mask = mask.cuda()
         mask = mask.bool()
-        native_res = torch._masked_softmax(input, dim, mask)
+        native_res = torch._masked_softmax(input, mask, dim)
         mask = mask.reshape(B, 1, 1, L).expand(B, num_heads, L, L)
         mask = mask.float()
 

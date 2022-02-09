@@ -5881,12 +5881,12 @@
   dispatch:
     CompositeExplicitAutograd: masked_scatter
 
-- func: _masked_softmax(Tensor self, int dim, Tensor mask) -> Tensor
+- func: _masked_softmax(Tensor self, Tensor mask, int? dim=None) -> Tensor
   dispatch:
     CUDA: masked_softmax_cuda
     CPU: masked_softmax_cpu
 
-- func: _masked_softmax_backward(Tensor grad_output, Tensor output, int dim, Tensor mask) -> Tensor
+- func: _masked_softmax_backward(Tensor grad_output, Tensor output, Tensor mask, int? dim=None) -> Tensor
   dispatch:
     CUDA: masked_softmax_backward_cuda
     CPU: masked_softmax_backward_cpu

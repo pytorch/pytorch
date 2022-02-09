@@ -942,7 +942,7 @@ TORCH_IMPL_FUNC(softmax_backward_cuda_out)
   host_softmax_backward<SoftMaxBackwardEpilogue, false>(tmp, output, dim, half_to_float, grad_input);
 }
 
-Tensor masked_softmax_cuda(const Tensor& input_, int64_t dim, const Tensor& mask_) {
+Tensor masked_softmax_cuda(const Tensor& input_, const Tensor& mask_, const c10::optional<int64_t> dim_) {
   Tensor output = at::empty_like(input_, input_.options());
   TORCH_CHECK(mask_.scalar_type() == ScalarType::Bool, "Mask should be a boolean tensor");
   bool is_transformer_mask = (input_.dim() == 4 && mask_.dim() == 2 && input_.size(0) == mask_.size(0) && input_.size(2) == mask_.size(1) && input_.size(3) == mask_.size(1));
@@ -950,12 +950,17 @@ Tensor masked_softmax_cuda(const Tensor& input_, int64_t dim, const Tensor& mask
 
   auto input = input_.dim() == 0 ? input_.view(1) : input_;
   auto mask = mask_.dim() == 0 ? mask_.view(1) : mask_;
+  int64_t dim = dim_.has_value() ? dim_.value() : input.dim() - 1;
 
   int softmax_elements = input.size(dim);
-  // Persistent softmax only support softmax_elements <= 1024,
-  // Therefore once softmax_elements > 1024, we need to fallback to vanilla masked_softmax
-  // Fallback to a slower masked softmax solution
+  // Persistent softmax is only supported when all of the conditions are held:
+  //     1) softmax_elements <= 1024
+  //     2) softmax_elements * input.element_size() <= 4096
+  //     3) mask.is_contiguous()
+  //     4) dim == input.dim() - 1
+  // Otherwise, we fallback to vanilla softmax (where we do not support transformer_mask since converting the mask is expensive)
   if (softmax_elements > 1024 || softmax_elements * input.element_size() > 4096 || !mask.is_contiguous() || dim < input.dim()-1) {
+    TORCH_CHECK(mask.sizes() == input.sizes(), "Mask shape should match input shape; transformer_mask is not supported in the fallback case.");
     AT_DISPATCH_FLOATING_TYPES_AND2(
       ScalarType::Half,
       ScalarType::BFloat16,
@@ -1015,8 +1020,8 @@ Tensor masked_softmax_cuda(const Tensor& input_, int64_t dim, const Tensor& mask
 Tensor masked_softmax_backward_cuda(
     const Tensor& grad_,
     const Tensor& output_,
-    int64_t dim,
-    const Tensor& mask_) {
+    const Tensor& mask_,
+    const c10::optional<int64_t> dim_) {
   Tensor grad_input = at::empty_like(grad_, grad_.options());
   if (grad_.numel() == 0) {
     return grad_input;
@@ -1025,6 +1030,7 @@ Tensor masked_softmax_backward_cuda(
   auto grad = grad_.contiguous();
   auto output = output_.contiguous();
   auto mask = mask_.contiguous();
+  int64_t dim = dim_.has_value() ? dim_.value() : output.dim() - 1;
 
   grad = grad.dim() == 0 ? grad.view(1) : grad;
   mask = mask.dim() == 0 ? mask.view(1) : mask;
