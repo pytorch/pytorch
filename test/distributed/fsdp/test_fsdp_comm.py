@@ -54,9 +54,8 @@ class TestCommunication(FSDPTest):
         num_no_sync_iters: int,
     ):
         """
-        Tests the ``no_sync()`` context manager by checking the communication
-        cost in terms of calls to collective communication primitives (i.e.
-        all-gather and reduce-scatter).
+        Tests FSDP's communication cost in terms of calls to collective
+        communication primitives (i.e. all-gather and reduce-scatter).
 
         Arguments:
             nested_model (bool): If ``True``, uses ``NestedWrappedModule``,
