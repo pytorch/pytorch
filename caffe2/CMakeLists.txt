@@ -1114,6 +1114,7 @@ endif()
       )
     else()
       add_subdirectory(${TORCH_ROOT}/test/cpp/jit ${CMAKE_BINARY_DIR}/test_jit)
+      add_subdirectory(${TORCH_ROOT}/test/cpp/embedded ${CMAKE_BINARY_DIR}/test_embedded)
       add_subdirectory(
         ${TORCH_ROOT}/test/cpp/tensorexpr
         ${CMAKE_BINARY_DIR}/test_tensorexpr
