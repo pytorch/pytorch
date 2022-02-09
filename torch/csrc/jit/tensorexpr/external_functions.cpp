@@ -496,7 +496,7 @@ void nnc_aten_quantized_conv2d(
 }
 
 void nnc_aten_quantized_conv2d_out(
-    int64_t bufs_num,
+    int64_t bufs_in_num,
     void** buf_data,
     int64_t* buf_ranks,
     int64_t* buf_dims,
@@ -504,19 +504,20 @@ void nnc_aten_quantized_conv2d_out(
     int8_t* buf_dtypes,
     int64_t,
     int64_t* extra_args) {
+  const size_t bufs_out_num = 1u;
   const double x_qscale = ((double*)extra_args)[0];
   const int64_t x_qzero = extra_args[1];
   const c10::ScalarType x_qdtype = static_cast<c10::ScalarType>(extra_args[2]);
   // TODO: optimize constructTensors to skip creating tensor for out tensors
   auto tensors = constructTensors2(
-      bufs_num,
+      bufs_in_num,
       buf_data,
       buf_ranks,
       buf_dims,
       buf_strides,
       buf_dtypes,
       {{1u, {x_qscale, x_qzero, toQIntType(x_qdtype)}}},
-      1u);
+      bufs_out_num);
   auto convPackedParams =
       reinterpret_cast<ConvPackedParamsBase<2>*>(buf_data[2]);
   const double out_qscale = ((double*)extra_args)[3];
@@ -525,7 +526,7 @@ void nnc_aten_quantized_conv2d_out(
   auto r = convPackedParams->apply(tensors[1], out_qscale, out_qzero);
   buf_data[0] = r.data_ptr();
   c10::raw::intrusive_ptr::incref(r.getIntrusivePtr().get());
-  buf_data[bufs_num] = r.getIntrusivePtr().get();
+  buf_data[bufs_in_num + bufs_out_num] = r.getIntrusivePtr().get();
 }
 
 void nnc_aten_quantized_conv2d_relu(
@@ -558,7 +559,7 @@ void nnc_aten_quantized_conv2d_relu(
 }
 
 void nnc_aten_quantized_conv2d_relu_out(
-    int64_t bufs_num,
+    int64_t bufs_in_num,
     void** buf_data,
     int64_t* buf_ranks,
     int64_t* buf_dims,
@@ -566,18 +567,19 @@ void nnc_aten_quantized_conv2d_relu_out(
     int8_t* buf_dtypes,
     int64_t,
     int64_t* extra_args) {
+  const size_t bufs_out_num = 1u;
   const double x_qscale = ((double*)extra_args)[0];
   const int64_t x_qzero = extra_args[1];
   const c10::ScalarType x_qdtype = static_cast<c10::ScalarType>(extra_args[2]);
   auto tensors = constructTensors2(
-      bufs_num,
+      bufs_in_num,
       buf_data,
       buf_ranks,
       buf_dims,
       buf_strides,
       buf_dtypes,
       {{1u, {x_qscale, x_qzero, toQIntType(x_qdtype)}}},
-      1u);
+      bufs_out_num);
   auto convPackedParams =
       reinterpret_cast<ConvPackedParamsBase<2>*>(buf_data[2]);
   const double out_qscale = ((double*)extra_args)[3];
@@ -586,7 +588,7 @@ void nnc_aten_quantized_conv2d_relu_out(
   auto r = convPackedParams->apply_relu(tensors[1], out_qscale, out_qzero);
   buf_data[0] = r.data_ptr();
   c10::raw::intrusive_ptr::incref(r.getIntrusivePtr().get());
-  buf_data[bufs_num] = r.getIntrusivePtr().get();
+  buf_data[bufs_in_num + bufs_out_num] = r.getIntrusivePtr().get();
 }
 
 void nnc_aten_free(int64_t bufs_num, void** ptrs) noexcept {
@@ -721,7 +723,7 @@ void nnc_aten_quantized_mul(
 }
 
 void nnc_aten_quantized_mul_out(
-    int64_t bufs_num,
+    int64_t bufs_in_num,
     void** buf_data,
     int64_t* buf_ranks,
     int64_t* buf_dims,
@@ -729,6 +731,7 @@ void nnc_aten_quantized_mul_out(
     int8_t* buf_dtypes,
     int64_t,
     int64_t* extra_args) {
+  const size_t bufs_out_num = 1u;
   const double a_qscale = ((double*)extra_args)[0];
   const int64_t a_qzero = extra_args[1];
   const c10::ScalarType a_qdtype = static_cast<c10::ScalarType>(extra_args[2]);
@@ -736,7 +739,7 @@ void nnc_aten_quantized_mul_out(
   const int64_t b_qzero = extra_args[4];
   const c10::ScalarType b_qdtype = static_cast<c10::ScalarType>(extra_args[5]);
   auto tensors = constructTensors2(
-      bufs_num,
+      bufs_in_num,
       buf_data,
       buf_ranks,
       buf_dims,
@@ -751,7 +754,7 @@ void nnc_aten_quantized_mul_out(
   auto r = quantized_mul(tensors[1], tensors[2], out_qscale, out_qzero);
   buf_data[0] = r.data_ptr();
   c10::raw::intrusive_ptr::incref(r.getIntrusivePtr().get());
-  buf_data[bufs_num] = r.getIntrusivePtr().get();
+  buf_data[bufs_in_num + bufs_out_num] = r.getIntrusivePtr().get();
 }
 
 void nnc_aten_quantized_mul_scalar(
@@ -927,6 +930,36 @@ void nnc_aten_quantize_per_tensor(
   memcpy(buf_data[0], r.data_ptr(), r.element_size() * r.numel());
 }
 
+void nnc_aten_quantize_per_tensor_out(
+    int64_t bufs_in_num,
+    void** buf_data,
+    int64_t* buf_ranks,
+    int64_t* buf_dims,
+    int64_t* buf_strides,
+    int8_t* buf_dtypes,
+    int64_t,
+    int64_t* extra_args) {
+  const size_t bufs_out_num = 1u;
+  auto tensors = constructTensors2(
+      bufs_in_num,
+      buf_data,
+      buf_ranks,
+      buf_dims,
+      buf_strides,
+      buf_dtypes,
+      c10::nullopt,
+      bufs_out_num);
+  // NOLINTNEXTLINE(facebook-hte-LocalUncheckedArrayBounds)
+  at::Tensor x = tensors[1];
+  const double qscale = ((double*)extra_args)[0];
+  const int64_t qzero = extra_args[1];
+  const c10::ScalarType qdtype = static_cast<c10::ScalarType>(extra_args[2]);
+  auto r = at::quantize_per_tensor(x, qscale, qzero, qdtype);
+  buf_data[0] = r.data_ptr();
+  c10::raw::intrusive_ptr::incref(r.getIntrusivePtr().get());
+  buf_data[bufs_in_num + bufs_out_num] = r.getIntrusivePtr().get();
+}
+
 void nnc_aten_dequantize(
     int64_t bufs_num,
     void** buf_data,
@@ -951,6 +984,35 @@ void nnc_aten_dequantize(
   // NOLINTNEXTLINE
   auto r = at::dequantize(tensors[1]);
   memcpy(buf_data[0], r.data_ptr(), r.element_size() * r.numel());
+}
+
+void nnc_aten_dequantize_out(
+    int64_t bufs_in_num,
+    void** buf_data,
+    int64_t* buf_ranks,
+    int64_t* buf_dims,
+    int64_t* buf_strides,
+    int8_t* buf_dtypes,
+    int64_t,
+    int64_t* extra_args) {
+  const size_t bufs_out_num = 1u;
+  const double qscale = ((double*)extra_args)[0];
+  const int64_t qzero = extra_args[1];
+  const int64_t qdtype = extra_args[2];
+  auto tensors = constructTensors2(
+      bufs_in_num,
+      buf_data,
+      buf_ranks,
+      buf_dims,
+      buf_strides,
+      buf_dtypes,
+      {{1u, {qscale, qzero, toQIntType(static_cast<c10::ScalarType>(qdtype))}}},
+      bufs_out_num);
+  // NOLINTNEXTLINE
+  auto r = at::dequantize(tensors[1]);
+  buf_data[0] = r.data_ptr();
+  c10::raw::intrusive_ptr::incref(r.getIntrusivePtr().get());
+  buf_data[bufs_in_num + bufs_out_num] = r.getIntrusivePtr().get();
 }
 
 void nnc_aten_conv1d(
