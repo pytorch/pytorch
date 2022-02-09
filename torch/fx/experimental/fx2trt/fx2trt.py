@@ -11,6 +11,7 @@ from torch.fx.passes.shape_prop import TensorMetadata
 from .converter_registry import CONVERTERS
 from .input_tensor_spec import InputTensorSpec
 from .utils import torch_dtype_to_trt, get_dynamic_dims
+import torch.fx.experimental.fx2trt.diagnostics as diagnostics
 
 
 class TRTInterpreterResult(NamedTuple):
@@ -150,6 +151,11 @@ class TRTInterpreter(torch.fx.Interpreter):
         timing_cache=None,
         profiling_verbosity=None,
     ) -> TRTInterpreterResult:
+        diagnostics.write(
+            "trt_interpreter.graph.input",
+            lambda: str(self.module.graph),
+        )
+
         # For float outputs, we set their dtype to fp16 only if fp16_mode=True and
         # force_fp32_output=False.
         self.output_fp16 = not force_fp32_output and fp16_mode
