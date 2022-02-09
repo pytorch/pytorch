@@ -82,15 +82,15 @@ std::vector<at::Tensor> constructTensors(
     int64_t* buf_strides,
     int8_t* buf_dtypes,
     c10::optional<std::vector<std::pair<size_t, QIData>>> qdataArg,
-    int64_t bufs_out_num) {
+    size_t bufs_out_num) {
   std::vector<void*> buf_data_vec;
   std::vector<std::vector<int64_t>> buf_dims_vec;
   std::vector<std::vector<int64_t>> buf_strides_vec;
   std::vector<c10::ScalarType> buf_dtypes_vec;
   int64_t buf_dims_idx = 0;
   int64_t buf_strides_idx = 0;
-  for (const auto i : c10::irange(bufs_out_num, bufs_num)) {
-    buf_data_vec.push_back(buf_data[i]);
+  for (const auto i : c10::irange(bufs_num - bufs_out_num)) {
+    buf_data_vec.push_back(buf_data[bufs_out_num + i]);
     buf_dims_vec.emplace_back();
     buf_strides_vec.emplace_back();
     for (const auto dim : c10::irange(buf_ranks[i])) {
@@ -179,7 +179,7 @@ std::vector<at::Tensor> constructTensors(
     int64_t* buf_strides,
     int8_t* buf_dtypes,
     std::vector<std::pair<size_t, QIData>> qdata,
-    int64_t bufs_out_num = 0) {
+    size_t bufs_out_num = 0u) {
   c10::optional<std::vector<std::pair<size_t, QIData>>> opt = std::move(qdata);
   return constructTensors(
       bufs_num,
@@ -407,14 +407,14 @@ void nnc_aten_quantized_conv2d_out(
   const c10::ScalarType x_qdtype = static_cast<c10::ScalarType>(extra_args[2]);
   // TODO: optimize constructTensors to skip creating tensor for out tensors
   auto tensors = constructTensors(
-      bufs_num,
+      bufs_num - 1,
       buf_data,
       buf_ranks,
       buf_dims,
       buf_strides,
       buf_dtypes,
       {{1u, {x_qscale, x_qzero, toQIntType(x_qdtype)}}},
-      1);
+      1u);
   auto convPackedParams =
       reinterpret_cast<ConvPackedParamsBase<2>*>(buf_data[2]);
   const double out_qscale = ((double*)extra_args)[3];
@@ -468,14 +468,14 @@ void nnc_aten_quantized_conv2d_relu_out(
   const int64_t x_qzero = extra_args[1];
   const c10::ScalarType x_qdtype = static_cast<c10::ScalarType>(extra_args[2]);
   auto tensors = constructTensors(
-      bufs_num,
+      bufs_num - 1,
       buf_data,
       buf_ranks,
       buf_dims,
       buf_strides,
       buf_dtypes,
       {{1u, {x_qscale, x_qzero, toQIntType(x_qdtype)}}},
-      1);
+      1u);
   auto convPackedParams =
       reinterpret_cast<ConvPackedParamsBase<2>*>(buf_data[2]);
   const double out_qscale = ((double*)extra_args)[3];
@@ -642,7 +642,7 @@ void nnc_aten_quantized_mul_out(
       buf_dtypes,
       {{1u, {a_qscale, a_qzero, toQIntType(a_qdtype)}},
        {2u, {b_qscale, b_qzero, toQIntType(b_qdtype)}}},
-      1);
+      1u);
   const double out_qscale = ((double*)extra_args)[6];
   const int64_t out_qzero = extra_args[7];
   // NOLINTNEXTLINE

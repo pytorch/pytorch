@@ -2055,8 +2055,7 @@ void LLVMCodeGenImpl::visit(ExternalCall2Ptr v) {
   const auto& bufs_out = v->buf_out_args();
   const auto& bufs_in = v->buf_args();
 
-  bufs.reserve(bufs_out.size() + bufs_in.size());
-  bufs.insert(bufs.end(), bufs_out.begin(), bufs_out.end());
+  bufs.reserve(bufs_in.size());
   bufs.insert(bufs.end(), bufs_in.begin(), bufs_in.end());
 
   int64_t bufs_num = bufs.size();
@@ -2090,15 +2089,15 @@ void LLVMCodeGenImpl::visit(ExternalCall2Ptr v) {
   for (BufPtr b : bufs) {
     llvm::Value* gep;
     // TODO: Fill buf_ptrs for for out bufs with nullptr?
-    if (i >= bufs_out_size) {
-      // Store value for buf pointer
-      gep = irb_.CreateInBoundsGEP(
-          Int8PtrTy_, buf_ptrs, llvm::ConstantInt::getSigned(IntTy_, i));
-      b->base_handle()->accept(this);
-      auto buf_ptr = this->value_;
-      auto buf_void_ptr = irb_.CreatePointerCast(buf_ptr, Int8PtrTy_);
-      irb_.CreateStore(buf_void_ptr, gep);
-    }
+    // Store value for buf pointer
+    gep = irb_.CreateInBoundsGEP(
+        Int8PtrTy_,
+        buf_ptrs,
+        llvm::ConstantInt::getSigned(IntTy_, bufs_out_size + i));
+    b->base_handle()->accept(this);
+    auto buf_ptr = this->value_;
+    auto buf_void_ptr = irb_.CreatePointerCast(buf_ptr, Int8PtrTy_);
+    irb_.CreateStore(buf_void_ptr, gep);
 
     // Store dtype of the buf
     gep = irb_.CreateInBoundsGEP(
