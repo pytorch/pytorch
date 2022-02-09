@@ -9,8 +9,6 @@ ONNX_ARCHIVE_MODEL_PROTO_NAME = "__MODEL_PROTO"
 
 producer_name = "pytorch"
 producer_version = _C._onnx.PRODUCER_VERSION
-constant_folding_opset_versions = [9, 10, 11, 12, 13, 14]
-
 
 class ExportTypes:
     r""""Specifies how the ONNX model is stored."""
@@ -287,9 +285,11 @@ def export(model, args, f, export_params=True, verbose=False, training=TrainingM
             the opset version is set to 1. Only custom opset domain name and version should be
             indicated through this argument.
 
-        export_modules_as_functions (bool or set of str, type or nn.Module, default False): Flag to enable
+        export_modules_as_functions (bool or set of type of nn.Module, default False): Flag to enable
             exporting all ``nn.Module`` forward calls as local functions in ONNX. Or a set to indicate the
-            particular modules to export as local functions in ONNX.
+            particular types of modules to export as local functions in ONNX.
+            This feature requires ``opset_version`` >= 15, otherwise the export will fail. This is because
+            ``opset_version`` < 15 implies IR version < 8, which means no local function support.
 
             * ``False``(default): export ``nn.Module`` forward calls as fine grained nodes.
             * ``True``: export all ``nn.Module`` forward calls as local function nodes.
