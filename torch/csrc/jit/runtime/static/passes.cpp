@@ -387,6 +387,7 @@ TORCH_LIBRARY_FRAGMENT(static_runtime, m) {
   m.def(torch::schema(
       "static_runtime::select_tensor(Tensor(a) a, Tensor(b) b, bool use_b) -> Tensor(a|b)",
       c10::AliasAnalysisKind::FROM_SCHEMA));
+  m.def(torch::schema("static_runtime::create_owned_ref(...) -> ..."));
 }
 
 void FuseSignLog1P(std::shared_ptr<torch::jit::Graph>& graph) {
@@ -770,13 +771,15 @@ void FuseListUnpack(std::shared_ptr<torch::jit::Graph>& graph) {
       continue;
     }
 
-    const bool is_equally_split =
-        node->kind() == fromQualString("fb::equally_split");
-    if (!is_equally_split) {
+    const bool checks_all_outputs =
+        node->kind() == fromQualString("fb::equally_split") ||
+        node->kind() == fromQualString("fb::gather_ranges_to_dense") ||
+        node->kind() == fromQualString("fb::gather_ranges_to_dense_v2");
+
+    if (!checks_all_outputs) {
       // If any output of the ListUnpack node is unmanaged, disable fusion
       // since the fused op assumes all outputs are either managed or not.
-      // "fb::equally_split" is excluded here since it does doublecheck
-      // individual outputs without having this assumption.
+      // Ops excluded here check all outputs.
       const std::vector<Value*> list_unpack_outputs_vec(
           list_unpack_outputs.begin(), list_unpack_outputs.end());
       if (alias_db.mayContainAlias(list_unpack_outputs_vec, graph_outputs)) {
@@ -924,6 +927,95 @@ void UseVariadicGroupedAccessor(const std::shared_ptr<Graph>& graph) {
       graph,
       fromQualString("grouped_accessor::grouped_accessor_op_v2"),
       fromQualString("static_runtime::variadic_grouped_accessor_op_v2"));
+}
+
+namespace {
+
+void CreateOwnedRefsForSpecialValuesHelper(Graph& graph, Block* block) {
+  for (auto* node : block->nodes()) {
+    for (auto* sub_block : node->blocks()) {
+      CreateOwnedRefsForSpecialValuesHelper(graph, sub_block);
+    }
+  }
+
+  auto outputs = block->outputs();
+  for (const auto i : c10::irange(outputs.size())) {
+    auto* output = outputs[i];
+
+    if (output->type()->kind() == c10::TypeKind::NoneType) {
+      // No need to create owned refs of NoneType since moving
+      // from None will have no effect
+      continue;
+    }
+
+    if (toIValue(output).has_value() ||
+        // If the output's owning block is not this one, it's from an outer
+        // scope
+        output->node()->owningBlock() != block) {
+      auto* create_owned_ref_node =
+          graph.create(fromQualString("static_runtime::create_owned_ref"));
+      create_owned_ref_node->addInput(output);
+      create_owned_ref_node->output()->copyMetadata(output);
+
+      block->appendNode(create_owned_ref_node);
+      block->replaceOutput(i, create_owned_ref_node->output());
+    }
+  }
+}
+
+void ForceNonEmptyOutputsHelper(Value* none_value, Block* block) {
+  for (auto* node : block->nodes()) {
+    bool needs_output = false;
+    for (auto* sub_block : node->blocks()) {
+      if (sub_block->outputs().empty()) {
+        sub_block->registerOutput(none_value);
+        needs_output = true;
+      }
+
+      ForceNonEmptyOutputsHelper(none_value, sub_block);
+    }
+
+    if (needs_output) {
+      // Loop sub-blocks should always return at least one output (the new loop
+      // condition)
+      DCHECK(node->kind() == prim::If);
+      auto* output = node->addOutput();
+      output->setType(c10::NoneType::get());
+    }
+  }
+}
+
+Node* findOrCreateNoneConstant(Graph& graph) {
+  // Only search the top-level block
+  for (auto* node : graph.nodes()) {
+    if (node->kind() != prim::Constant) {
+      continue;
+    }
+    const auto ival_opt = toIValue(node->output());
+    DCHECK(ival_opt.has_value());
+    if (ival_opt->isNone()) {
+      return node;
+    }
+  }
+
+  auto* none_node = graph.create(prim::Constant);
+  none_node->output()->setType(c10::NoneType::get());
+  graph.prependNode(none_node);
+  return none_node;
+}
+
+} // namespace
+
+void CreateOwnedRefsForSpecialValues(Graph& graph) {
+  CreateOwnedRefsForSpecialValuesHelper(graph, graph.block());
+}
+
+void ForceNonEmptyOutputs(Graph& graph) {
+  auto* none_node = findOrCreateNoneConstant(graph);
+  ForceNonEmptyOutputsHelper(none_node->output(), graph.block());
+  if (!none_node->hasUses()) {
+    none_node->destroy();
+  }
 }
 
 } // namespace jit
