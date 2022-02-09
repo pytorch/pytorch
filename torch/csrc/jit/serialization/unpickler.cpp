@@ -92,9 +92,9 @@ void restoreAccurateTypeTags(const IValue& root, const TypePtr& type_tag) {
         // TODO(gmagogsfm): Implement serialization/deserialization of Enum.
         TORCH_INTERNAL_ASSERT(false);
       case TupleType::Kind: {
-        auto t = w.value.toTuple();
+        auto t = w.value.toTupleRef();
         for (size_t i = 0; i < w.type->containedTypeSize(); ++i) {
-          Work elem = {w.type->containedType(i), t->elements().at(i)};
+          Work elem = {w.type->containedType(i), t.elements().at(i)};
           to_process.emplace_back(std::move(elem));
         }
       } break;
@@ -444,8 +444,8 @@ PickleOpCode Unpickler::readInstruction() {
       globals_.at(idx)();
     } break;
     case PickleOpCode::BINPERSID: {
-      auto tuple = pop(stack_).toTuple();
-      const auto& args = tuple->elements();
+      auto tuple = std::move(pop(stack_).toTupleRef());
+      const auto& args = tuple.elements();
       AT_ASSERT(
           args.at(0).toStringRef() == "storage",
           "unknown PERSID key ",
@@ -556,8 +556,8 @@ void Unpickler::readGlobal(
       });
     } else if (class_name == "restore_type_tag") {
       globals_.emplace_back([this] {
-        auto tuple = stack_.back().toTuple();
-        const auto& data = tuple->elements();
+        auto tuple = std::move(stack_.back().toTupleRef());
+        const auto& data = tuple.elements();
         auto type_str = data.at(1).toStringRef();
         stack_.pop_back();
         TypePtr type = nullptr;
@@ -613,8 +613,8 @@ void Unpickler::readGlobal(
     rebuildSparseTensor();
   } else if (module_name == "builtins" && class_name == "complex") {
     globals_.emplace_back([this] {
-      auto tuple = pop(stack_).toTuple();
-      const auto& elems = tuple->elements();
+      auto tuple = std::move(pop(stack_).toTupleRef());
+      const auto& elems = tuple.elements();
       AT_ASSERT(elems.size() == 2);
       auto complex =
           c10::complex<double>(elems.at(0).toDouble(), elems.at(1).toDouble());
@@ -711,8 +711,8 @@ void Unpickler::readGlobal(
 
 void Unpickler::rebuildSparseTensor() {
   globals_.emplace_back([this] {
-    auto tup = pop(stack_).toTuple();
-    const auto& elements = tup->elements();
+    const auto& tup = pop(stack_).toTupleRef();
+    const auto& elements = tup.elements();
     size_t idx = 0;
     auto layout = elements.at(idx++).toInt();
     at::Tensor result;
@@ -767,8 +767,8 @@ void Unpickler::rebuildTensor(bool quantized) {
     std::vector<int64_t> stride = tupleToIntList(elements.at(idx++));
     at::Tensor result;
     if (quantized) {
-      auto qparams_tuple = elements.at(idx++).toTuple();
-      const auto& qparams = qparams_tuple->elements();
+      const auto& qparams_tuple = elements.at(idx++).toTupleRef();
+      const auto& qparams = qparams_tuple.elements();
       auto qscheme = static_cast<at::QScheme>(qparams.at(0).toInt());
       switch (qscheme) {
         case at::kPerTensorAffine: {
