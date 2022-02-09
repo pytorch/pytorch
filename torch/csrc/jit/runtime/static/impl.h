@@ -62,7 +62,7 @@ TORCH_API inline bool borrowsOutputs(c10::Symbol kind) {
       c10::Symbol::fromQualString("static_runtime::select_tensor"),
       c10::Symbol::fromQualString("static_runtime::dict_unpack"),
       c10::Symbol::fromQualString("static_runtime::VarTupleUnpack"),
-      c10::Symbol::fromQualString("prim::Ternary"),
+      c10::Symbol::fromQualString("prim::IfThenElse"),
   };
   return std::find(
              symbols_with_borrowed_outputs.begin(),

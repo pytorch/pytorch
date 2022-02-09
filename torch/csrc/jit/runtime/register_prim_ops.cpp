@@ -702,16 +702,13 @@ static const std::vector<OperatorGeneratorArgs> opGenArgs{
         aliasAnalysisFromSchema()),
     OperatorGeneratorArgs(
         TORCH_SELECTIVE_SCHEMA(
-            "prim::Ternary(bool cond, t(a) x, t(b) y) -> t(a|b)"),
+            "prim::IfThenElse(bool cond, t(a) x, t(b) y) -> t(a|b)"),
         [](Stack& stack) {
-          auto b = pop(stack);
-          auto a = pop(stack);
-          auto cond = pop(stack).toBool();
-          if (cond) {
-            push(stack, std::move(a));
-          } else {
-            push(stack, std::move(b));
-          }
+          const auto cond = stack[stack.size() - 3].toBool();
+          stack[stack.size() - 3] =
+              std::move(stack[stack.size() - (cond ? 2 : 1)]);
+          stack.pop_back();
+          stack.pop_back();
         },
         aliasAnalysisFromSchema()),
     OperatorGeneratorArgs(

@@ -948,8 +948,8 @@ REGISTER_NATIVE_OPERATOR_FUNCTOR(
 
 // See [Borrowed IValue Outputs]
 REGISTER_NATIVE_OPERATOR_FUNCTOR(
-    prim::Ternary,
-    prim_Ternary,
+    prim::IfThenElse,
+    prim_IfThenElse,
     [](Node*) -> SROperator {
       return [](ProcessedNode* pnode) {
         const auto condition = pnode->Input(0).toBool();

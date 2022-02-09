@@ -5,7 +5,7 @@
 namespace torch {
 namespace jit {
 
-TORCH_API bool AddTernaryOp(std::shared_ptr<Graph>& graph);
+TORCH_API bool AddIfThenElseOp(std::shared_ptr<Graph>& graph);
 
 } // namespace jit
 } // namespace torch

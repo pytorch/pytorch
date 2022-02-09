@@ -2714,11 +2714,11 @@ TEST(StaticRuntime, ToList) {
   testStaticRuntime(src, {at::randn({2, 2})});
 }
 
-TEST(StaticRuntime, Ternary) {
+TEST(StaticRuntime, IfThenElse) {
   const auto src = R"IR(
     graph(%cond: bool, %a: Tensor, %b: Tensor):
         %none: NoneType = prim::Constant()
-        %c: Tensor = prim::Ternary(%cond, %a, %b)
+        %c: Tensor = prim::IfThenElse(%cond, %a, %b)
         %d: Tensor = aten::clone(%c, %none)
         return (%d)
   )IR";
