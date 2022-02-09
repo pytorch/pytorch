@@ -5052,14 +5052,14 @@ def multi_head_attention_forward(
     value: Tensor,
     embed_dim_to_check: int,
     num_heads: int,
-    in_proj_weight: Tensor,
-    in_proj_bias: Optional[Tensor],
-    bias_k: Optional[Tensor],
-    bias_v: Optional[Tensor],
-    add_zero_attn: bool,
-    dropout_p: float,
-    out_proj_weight: Tensor,
-    out_proj_bias: Optional[Tensor],
+    in_proj_weight: Optional[Tensor] = None,
+    in_proj_bias: Optional[Tensor] = None,
+    bias_k: Optional[Tensor] = None,
+    bias_v: Optional[Tensor] = None,
+    add_zero_attn: bool = False,
+    dropout_p: float = 0.0,
+    out_proj_weight: Tensor = None,
+    out_proj_bias: Optional[Tensor] = None,
     training: bool = True,
     key_padding_mask: Optional[Tensor] = None,
     need_weights: bool = True,
@@ -5081,8 +5081,8 @@ def multi_head_attention_forward(
         in_proj_weight, in_proj_bias: input projection weight and bias.
         bias_k, bias_v: bias of the key and value sequences to be added at dim=0.
         add_zero_attn: add a new batch of zeros to the key and
-                       value sequences at dim=1.
-        dropout_p: probability of an element to be zeroed.
+                       value sequences at dim=1. Default: False
+        dropout_p: probability of an element to be zeroed. Default: 0.0
         out_proj_weight, out_proj_bias: the output projection weight and bias.
         training: apply dropout if is ``True``.
         key_padding_mask: if provided, specified padding elements in the key will
