@@ -1,4 +1,6 @@
-from typing import Any, Tuple, Sequence, Union, List, Optional, Dict
+import operator
+import warnings
+from typing import Any, Tuple, Sequence, Union, List, Optional, Dict, Callable
 
 import numpy as np
 import tensorrt as trt
@@ -324,11 +326,12 @@ def add_binary_elementwise_layer(
     name: str
 ) -> TRTTensor:
     """
-    This function adds a TensorRT elementwise layer. We only allow at most one
-    operand to not be a trt tensor, otherwise, we should const fold it first.
-    If any operand is not a trt tensor, we make it a trt constant layer which
-    has the same type as the other trt tensor. Then we broadcast these two inputs
-    to have the same number of dimensions.
+    This function adds a TensorRT elementwise layer. We allow both operands to be
+    constant (not a trt tensor) because in implicit batch dimension mode, we could
+    introduce constant via .size() op. Other scenario should be const folded first.
+    If any operand is not a trt tensor, we make it a trt constant layer which has
+    the same type as the other trt tensor. Then we broadcast these two inputs to
+    have the same number of dimensions.
 
     Limitation:
         If we are using implicit batch dim mode, the operand that is not a trt
@@ -356,9 +359,25 @@ def add_binary_elementwise_layer(
     if isinstance(rhs_val, TRTTensor):
         dtype = torch_dtype_from_trt(rhs_val.dtype)
         is_rhs_trt_tensor = True
+
     if not is_lhs_trt_tensor and not is_rhs_trt_tensor:
-        raise RuntimeError(f"Both operands of the binary elementwise op {name}"
-                           "are constant. In this case, please consider constant fold the model first.")
+        warnings.warn(f"Both operands of the binary elementwise op {name} "
+                      "are constant. In this case, please consider constant fold the model first.")
+        return get_python_op_from_trt_elementwise_op(op_type)(lhs_val, rhs_val)
+
+    # When lhs is scalar, and rhs has shape [1,], then currently the assert
+    # will fail because lhs shape has fewer dimensions than rhs shape.  This
+    # happens when using implicit batch dimension, when we removed the 1st
+    # dimension from input tensor, causing it to have shape [] - a scalar.  We
+    # fix it by reducing the rhs constant with a squeeze_left, so it becomes a
+    # scalar too. More generally, we squeeze_left on input if it's a constant
+    # tensor. This is safe because broadcast will pad dimensions on the left
+    # (prepend) to make lhs and rhs shape compatible.
+    if network.has_implicit_batch_dimension:
+        if isinstance(lhs_val, torch.Tensor):
+            lhs_val = squeeze_left(lhs_val)
+        if isinstance(rhs_val, torch.Tensor):
+            rhs_val = squeeze_left(rhs_val)
 
     lhs_val = get_trt_tensor(network, lhs_val, f"{name}_lhs", dtype)
     rhs_val = get_trt_tensor(network, rhs_val, f"{name}_rhs", dtype)
@@ -376,6 +395,17 @@ def add_binary_elementwise_layer(
     layer = network.add_elementwise(lhs_val, rhs_val, op_type)
     set_layer_name(layer, target, name)
     return layer.get_output(0)
+
+
+def squeeze_left(const: torch.Tensor):
+    """
+    Squeeze the size-1 dimensions on the left side of the shape tuple.
+    PyTorch's `squeeze()` doesn't support passing multiple `dim`s at once, so
+    we do it iteratively.
+    """
+    while len(const.shape) > 0 and const.shape[0] == 1:
+        const = const.squeeze(dim=0)
+    return const
 
 
 def add_unary_layer(
@@ -442,9 +472,9 @@ def add_activation_layer(
             "of the TensorRT region!"
         )
     layer = network.add_activation(input_val, operation_type)
-    if alpha:
+    if alpha is not None:
         layer.alpha = alpha
-    if beta:
+    if beta is not None:
         layer.beta = beta
     set_layer_name(layer, target, name)
     return layer.get_output(0)
@@ -614,3 +644,18 @@ def trunc_div(
                                           trt.ElementWiseOperation.PROD, target, f"{name}_output")
 
     return output
+
+
+def get_python_op_from_trt_elementwise_op(trt_op: TRTElementWiseOp) -> Callable[[Any, Any], Any]:
+    if trt_op == trt.ElementWiseOperation.SUM:
+        return operator.add
+    elif trt_op == trt.ElementWiseOperation.PROD:
+        return operator.mul
+    elif trt_op == trt.ElementWiseOperation.SUB:
+        return operator.sub
+    elif trt_op == trt.ElementWiseOperation.DIV:
+        return operator.truediv
+    elif trt_op == trt.ElementWiseOperation.FLOOR_DIV:
+        return operator.floordiv
+    else:
+        raise RuntimeError(f"{trt_op} is not supported yet!")

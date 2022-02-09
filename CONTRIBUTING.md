@@ -132,10 +132,6 @@ For example:
 - Install local PyTorch in `develop` mode
 - modify your Python file `torch/__init__.py` (for example)
 - test functionality
-- modify your Python file `torch/__init__.py`
-- test functionality
-- modify your Python file `torch/__init__.py`
-- test functionality
 
 You do not need to repeatedly install after modifying Python files (`.py`). However, you would need to reinstall
 if you modify Python interface (`.pyi`, `.pyi.in`) or non-Python files (`.cpp`, `.cc`, `.cu`, `.h`, ...).
@@ -1316,7 +1312,7 @@ This choice depends on several factors; here is the decision tree as of
     - pytorch_linux_xenial_py3_6_gcc5_4_build
       - pytorch_cpp_doc_build
       - pytorch_doc_test
-      - pytorch_linux_backward_compatibility_check_test
+      - pytorch_linux_forward_backward_compatibility_check_test
       - pytorch_linux_xenial_py3_6_gcc5_4_jit_legacy_test
       - pytorch_linux_xenial_py3_6_gcc5_4_test
       - pytorch_python_doc_build
