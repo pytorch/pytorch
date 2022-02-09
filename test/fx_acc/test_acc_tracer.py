@@ -66,7 +66,6 @@ class AccTracerTest(unittest.TestCase):
 
             def forward(self, a: torch.Tensor) -> torch.Tensor:
                 return self._torch_op(a, *self._args, **self._kwargs)
-
         m = TestModule(torch_op, args, kwargs)
         m.eval()
         a = torch.randn(*input_shape)
@@ -124,6 +123,10 @@ class AccTracerTest(unittest.TestCase):
     def test_sum(self):
         self._make_acc_op_function_test(acc_ops.sum, torch.sum)
         self._make_acc_op_function_test(acc_ops.sum, torch.sum, dim=(1,), keepdim=True)
+
+    def test_prod(self):
+        self._make_acc_op_function_test(acc_ops.prod, torch.prod)
+        self._make_acc_op_function_test(acc_ops.prod, torch.prod, dim=1, keepdim=True)
 
     def test_mean(self):
         self._make_acc_op_function_test(acc_ops.mean, torch.mean)
@@ -2045,6 +2048,7 @@ class AccTracerTest(unittest.TestCase):
                 acc_ops.unsqueeze,
                 acc_ops.sigmoid,
                 acc_ops.sum,
+                acc_ops.prod,
                 acc_ops.max_full_reduce,
                 acc_ops.max_dim_reduce,
                 acc_ops.maximum,
