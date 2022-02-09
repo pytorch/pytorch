@@ -11,7 +11,7 @@ from .adam import Adam
 from .adamw import AdamW
 NAdam = partial(optim.NAdam, foreach=True)
 from .sgd import SGD
-from .radam import RAdam as RAdam
+RAdam = partial(optim.RAdam, foreach=True)
 from .rmsprop import RMSprop
 from .rprop import Rprop
 from .asgd import ASGD
@@ -22,7 +22,6 @@ Adagrad = partial(optim.Adagrad, foreach=True)
 del adam
 del adamw
 del sgd
-del radam
 del rmsprop
 del rprop
 del asgd

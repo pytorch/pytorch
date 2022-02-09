@@ -8,6 +8,7 @@ from .adadelta import adadelta  # type: ignore[attr-defined] # noqa: F401
 from .adagrad import adagrad, _make_sparse  # type: ignore[attr-defined] # noqa: F401
 from .adamax import adamax  # type: ignore[attr-defined] # noqa: F401
 from .nadam import nadam  # type: ignore[attr-defined] # noqa: F401
+from .radam import radam  # type: ignore[attr-defined] # noqa: F401
 
 # TODO: use foreach API in optim._functional to do all the computation
 
@@ -282,61 +283,6 @@ def asgd(params: List[Tensor],
         new_mu = torch.tensor(1 / max(1, step - t0))
         mu.copy_(new_mu)
 
-
-def radam(params: List[Tensor],
-          grads: List[Tensor],
-          exp_avgs: List[Tensor],
-          exp_avg_sqs: List[Tensor],
-          state_steps: List[Tensor],
-          *,
-          beta1: float,
-          beta2: float,
-          lr: float,
-          weight_decay: float,
-          eps: float):
-    r"""Functional API that performs RAdam algorithm computation.
-
-    See :class:`~torch.optim.RAdam` for details.
-    """
-
-    if not all([isinstance(t, torch.Tensor) for t in state_steps]):
-        raise RuntimeError("API has changed, `state_steps` argument must contain a list of singleton tensors")
-
-    for i, param in enumerate(params):
-        grad = grads[i]
-        exp_avg = exp_avgs[i]
-        exp_avg_sq = exp_avg_sqs[i]
-        step_t = state_steps[i]
-        # update step
-        step_t += 1
-        step = step_t.item()
-
-        bias_correction1 = 1 - beta1 ** step
-        bias_correction2 = 1 - beta2 ** step
-
-        if weight_decay != 0:
-            grad = grad.add(param, alpha=weight_decay)
-
-        # Decay the first and second moment running average coefficient
-        exp_avg.mul_(beta1).add_(grad, alpha=1 - beta1)
-        exp_avg_sq.mul_(beta2).addcmul_(grad, grad, value=1 - beta2)
-
-        # correcting bias for the first moving moment
-        bias_corrected_exp_avg = exp_avg / bias_correction1
-
-        # maximum length of the approximated SMA
-        rho_inf = 2 / (1 - beta2) - 1
-        # compute the length of the approximated SMA
-        rho_t = rho_inf - 2 * step * (beta2 ** step) / bias_correction2
-
-        if rho_t > 5.:
-            # Compute the variance rectification term and update parameters accordingly
-            rect = math.sqrt((rho_t - 4) * (rho_t - 2) * rho_inf / ((rho_inf - 4) * (rho_inf - 2) * rho_t))
-            adaptive_lr = math.sqrt(bias_correction2) / exp_avg_sq.sqrt().add_(eps)
-
-            param.add_(bias_corrected_exp_avg * lr * adaptive_lr * rect, alpha=-1.0)
-        else:
-            param.add_(bias_corrected_exp_avg * lr, alpha=-1.0)
 
 
 def sparse_adam(params: List[Tensor],
