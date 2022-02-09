@@ -2325,7 +2325,7 @@ class TestTEFuser(JitTestCase):
             z = y._autocast_to_reduced_precision(True, True, torch.half, torch.half)
             return z
 
-        x = torch.rand((2, 2), device="cuda")
+        x = torch.rand((2, 2), dtype=torch.float, device="cuda")
         scr = torch.jit.script(f)
         scr(x)
         scr(x)
