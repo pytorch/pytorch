@@ -648,6 +648,7 @@ libtorch_cuda_core_sources = [
     "torch/csrc/jit/codegen/cuda/lower_expr_sort.cpp",
     "torch/csrc/jit/codegen/cuda/lower_fusion_simplifier.cpp",
     "torch/csrc/jit/codegen/cuda/lower_index.cpp",
+    "torch/csrc/jit/codegen/cuda/lower_index_hoist.cpp",
     "torch/csrc/jit/codegen/cuda/lower_insert_syncs.cpp",
     "torch/csrc/jit/codegen/cuda/lower_loops.cpp",
     "torch/csrc/jit/codegen/cuda/lower_magic_zero.cpp",

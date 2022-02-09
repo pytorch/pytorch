@@ -576,7 +576,11 @@ void IrPrinter::handle(const kir::GridReduction* node) {
   os_ << ", init=";
   handle(reduction_op->init());
   os_ << ", pred=";
-  handle(reduction_op->predicate());
+  if (reduction_op->predicate() != nullptr) {
+    handle(reduction_op->predicate());
+  } else {
+    os_ << "nullptr";
+  }
   os_ << ")\n";
   indent() << kTab << ".reduction_buffer=";
   handle(node->reduction_buffer()->buffer());

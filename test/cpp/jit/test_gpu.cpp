@@ -20714,6 +20714,221 @@ TEST_F(NVFuserTest, FusionCodegenAllocatedScalars_CUDA) {
       valid_code);
 }
 
+TEST_F(NVFuserTest, FusionIndexHoist1_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeSymbolicTensor(2);
+  fusion.addInput(tv0);
+
+  auto tv1 = set(tv0);
+  auto tv2 = set(tv1);
+  auto tv3 = set(tv2);
+  auto tv4 = set(tv3);
+  auto tv5 = set(tv4);
+  fusion.addOutput(tv5);
+
+  tv1->split(-1, 4);
+  tv2->split(-1, 4);
+  tv3->merge(0, 1);
+  tv3->split(0, 8);
+  tv5->merge(0, 1);
+  tv5->split(0, 8);
+  tv4->computeAt(tv5, -1);
+
+  tv1->setMemoryType(MemoryType::Global);
+  tv2->setMemoryType(MemoryType::Global);
+  tv3->setMemoryType(MemoryType::Global);
+
+  GpuLower gpulw(&fusion);
+  auto kernel = gpulw.kernel();
+
+  auto is_index_times_one = [](Val* val, Val* index) -> bool {
+    auto def = dynamic_cast<BinaryOp*>(val->definition());
+    if (def == nullptr) {
+      return false;
+    }
+    return def->getBinaryOpType() == BinaryOpType::Mul &&
+        def->rhs()->isOneInt() && def->lhs() == index;
+  };
+
+  auto is_index_times_ns = [](Val* val, Val* index, std::string name) -> bool {
+    auto def = dynamic_cast<BinaryOp*>(val->definition());
+    if (def == nullptr) {
+      return false;
+    }
+    return def->getBinaryOpType() == BinaryOpType::Mul &&
+        def->rhs()->isA<NamedScalar>() &&
+        def->rhs()->as<NamedScalar>()->name() == name && def->lhs() == index;
+  };
+
+  // Validate indices in the kernel are hoisted as
+  // intended. Validation could be also done by just string comparison
+  // as the parser test, but updating such tests would be tedious.
+  for (auto top_level_loop :
+       ir_utils::filterByType<kir::ForLoop>(kernel->topLevelExprs())) {
+    auto innermost_loop = top_level_loop;
+    while (auto first_expr_loop = dynamic_cast<kir::ForLoop*>(
+               innermost_loop->body().exprs().at(0))) {
+      innermost_loop = first_expr_loop;
+    }
+    const auto& exprs = innermost_loop->body().exprs();
+    auto hoisted_index = exprs.at(0)->as<kir::Allocate>()->buffer();
+    kir::Predicate* pred = nullptr;
+    for (auto expr : exprs) {
+      if (expr->isA<kir::IfThenElse>()) {
+        pred = expr->as<kir::IfThenElse>()->predicate();
+        auto arith_expr = expr->as<kir::IfThenElse>()->thenBody().exprs().at(0);
+        auto out_ti = arith_expr->outputs()[0]->as<kir::TensorIndex>();
+        if (out_ti->view()->name() == 1) {
+          // Ref: T1[*, hoisted_index * 1] = T0[*, hoisted_index * T0.stride];
+          auto t1_index = out_ti->index(1);
+          TORCH_CHECK(
+              is_index_times_one(t1_index, hoisted_index),
+              "Invalid index: ",
+              t1_index->toInlineString());
+          // Pred: hoisted_index < T0.size[1]
+          TORCH_CHECK(
+              pred->value()->definition()->as<BinaryOp>()->lhs() ==
+                  hoisted_index,
+              "Invalid predicate: ",
+              pred->value()->toInlineString());
+          TORCH_CHECK(arith_expr->inputs().size() == 1);
+          auto in0 = arith_expr->inputs().front()->as<kir::TensorIndex>();
+          TORCH_CHECK(in0->view()->name() == 0);
+          // hoisted_index * T0.stride[1]
+          auto t0_index = in0->index(1);
+          TORCH_CHECK(
+              is_index_times_ns(t0_index, hoisted_index, "T0.stride[1]"),
+              "Invalid index: ",
+              t0_index->toInlineString());
+        } else if (out_ti->view()->name() == 2) {
+          // Ref: T3[*, hoisted_index * 1] = T2[*, hoisted_index * 1];
+          auto out_index = out_ti->index(1);
+          TORCH_CHECK(
+              is_index_times_one(out_index, hoisted_index),
+              "Invalid index: ",
+              out_index->toInlineString());
+          TORCH_CHECK(
+              pred->value()->definition()->as<BinaryOp>()->lhs() ==
+                  hoisted_index,
+              "Invalid predicate: ",
+              pred->value()->toInlineString());
+          TORCH_CHECK(arith_expr->inputs().size() == 1);
+          auto in0 = arith_expr->inputs().front()->as<kir::TensorIndex>();
+          TORCH_CHECK(in0->view()->name() == 1);
+          auto in0_index = in0->index(1);
+          TORCH_CHECK(
+              is_index_times_one(in0_index, hoisted_index),
+              "Invalid index: ",
+              in0_index->toInlineString());
+        } else if (out_ti->view()->name() == 3) {
+          // Ref: T3[hoisted_index * 1] = T2[hoisted_index * 1];
+          auto out_index = out_ti->index(0);
+          TORCH_CHECK(
+              is_index_times_one(out_index, hoisted_index),
+              "Invalid index: ",
+              out_index->toInlineString());
+          TORCH_CHECK(
+              pred->value()->definition()->as<BinaryOp>()->lhs() ==
+                  hoisted_index,
+              "Invalid predicate: ",
+              pred->value()->toInlineString());
+          TORCH_CHECK(arith_expr->inputs().size() == 1);
+          auto in0 = arith_expr->inputs().front()->as<kir::TensorIndex>();
+          TORCH_CHECK(in0->view()->name() == 2);
+          auto in0_index = in0->index(0);
+          TORCH_CHECK(
+              is_index_times_one(in0_index, hoisted_index),
+              "Invalid index: ",
+              in0_index->toInlineString());
+        } else if (out_ti->view()->name() == 4) {
+          // Ref: T4[0] = T3[hoisted_index * 1];
+          TORCH_CHECK(
+              pred->value()->definition()->as<BinaryOp>()->lhs() ==
+                  hoisted_index,
+              "Invalid predicate: ",
+              pred->value()->toInlineString());
+          TORCH_CHECK(arith_expr->inputs().size() == 1);
+          auto in0 = arith_expr->inputs().front()->as<kir::TensorIndex>();
+          TORCH_CHECK(in0->view()->name() == 3);
+          auto in0_index = in0->index(0);
+          TORCH_CHECK(
+              is_index_times_one(in0_index, hoisted_index),
+              "Invalid index: ",
+              in0_index->toInlineString());
+        } else if (out_ti->view()->name() == 5) {
+          // Ref: T5[hoisted_index * 1] = T4[0]
+          auto out_index = out_ti->index(0);
+          TORCH_CHECK(
+              is_index_times_one(out_index, hoisted_index),
+              "Invalid index: ",
+              out_index->toInlineString());
+          TORCH_CHECK(
+              pred->value()->definition()->as<BinaryOp>()->lhs() ==
+                  hoisted_index,
+              "Invalid predicate: ",
+              pred->value()->toInlineString());
+        }
+      }
+    }
+  }
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::manual_seed(0);
+  auto t0 = at::randn({15, 17}, options);
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion, {t0});
+  auto cg_outputs = fe.runFusion({t0});
+
+  auto ref = t0;
+
+  testValidate(&fusion, cg_outputs, {t0}, {ref}, __LINE__, __FILE__);
+}
+
+// Hoist indices for vectorized tensors
+TEST_F(NVFuserTest, FusionIndexHoist2_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeContigTensor(1);
+  fusion.addInput(tv0);
+  auto tv1 = makeContigTensor(1);
+  fusion.addInput(tv1);
+
+  auto tv2 = set(tv0);
+  auto tv3 = set(tv1);
+  auto tv4 = add(tv2, tv3);
+  auto tv5 = set(tv4);
+  fusion.addOutput(tv5);
+
+  tv5->split(-1, 4);
+  TransformPropagator::from(tv5);
+
+  tv4->split(-1, 3);
+
+  tv0->computeAt(tv5, 1);
+  tv1->computeAt(tv5, 1);
+
+  tv2->axis(-1)->parallelize(ParallelType::Vectorize);
+  tv3->axis(-1)->parallelize(ParallelType::Vectorize);
+  tv5->axis(-1)->parallelize(ParallelType::Vectorize);
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::manual_seed(0);
+  auto t0 = at::randn({16}, options);
+  auto t1 = at::randn({16}, options);
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion, {t0, t1});
+  auto cg_outputs = fe.runFusion({t0, t1});
+
+  auto ref = t0 + t1;
+
+  testValidate(&fusion, cg_outputs, {t0, t1}, {ref}, __LINE__, __FILE__);
+}
+
 } // namespace jit
 } // namespace torch
 #endif // #if defined(USE_CUDA)

@@ -322,9 +322,13 @@ void GpuLower::lower(Fusion* fusion) {
   const auto exprs_conditional_loops =
       generateConditionalFromPredicate(exprs_with_fused_broadcast);
 
+  const auto exprs_common_index_allocated =
+      allocateCommonIndices(exprs_conditional_loops);
+
   // Insert fake zero updates to make sure nvrtc doesn't blow out register use
   // on index and predicate reuse
-  const auto exprs_register_adjusted = insertMagicZero(exprs_conditional_loops);
+  const auto exprs_register_adjusted =
+      insertMagicZero(exprs_common_index_allocated);
 
   const auto exprs_cleaned_up_loops =
       KIRCleaner::cleanUp(exprs_register_adjusted);

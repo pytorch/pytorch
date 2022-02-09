@@ -51,6 +51,8 @@ class ContigIDs : public OptInDispatch {
   const std::vector<bool>& root_contiguity_;
   std::unordered_map<IterDomain*, bool> is_contig_root;
 
+  std::unordered_map<IterDomain*, IterDomain*> root_to_contig_id_;
+
   bool inRoot(const std::vector<IterDomain*>& ids) {
     return std::all_of(ids.begin(), ids.end(), [this](IterDomain* id) {
       return is_contig_root.find(id) != is_contig_root.end();
@@ -160,6 +162,13 @@ class ContigIDs : public OptInDispatch {
       }
 
       within_contig_ids[out] = within_out;
+
+      for (auto root : lhs_inputs) {
+        root_to_contig_id_[root] = out;
+      }
+      for (auto root : rhs_inputs) {
+        root_to_contig_id_[root] = out;
+      }
     }
   }
 
@@ -205,6 +214,8 @@ class ContigIDs : public OptInDispatch {
       } else {
         is_contig_root[root_domain_[i]] = false;
       }
+      root_to_contig_id_[root_domain_[i]->as<IterDomain>()] =
+          root_domain_[i]->as<IterDomain>();
     }
 
     auto exprs = StmtSort::getExprs(ids[0]->fusion(), {ids.begin(), ids.end()});
@@ -214,13 +225,17 @@ class ContigIDs : public OptInDispatch {
     }
   }
 
-  const std::unordered_set<IterDomain*> contigIDs() const {
+  const std::unordered_set<IterDomain*>& contigIDs() const {
     return contig_ids;
   }
 
-  const std::unordered_map<IterDomain*, std::unordered_set<IterDomain*>>
+  const std::unordered_map<IterDomain*, std::unordered_set<IterDomain*>>&
   withinContigIDs() const {
     return within_contig_ids;
+  }
+
+  const std::unordered_map<IterDomain*, IterDomain*>& rootToContigID() const {
+    return root_to_contig_id_;
   }
 };
 
@@ -724,6 +739,7 @@ IndexCompute::IndexCompute(
     ContigIDs contig_finder(
         td_->domain(), td_->getMaybeRFactorDomain(), root_contiguity);
     contig_ids = contig_finder.contigIDs();
+    root_to_contig_id_ = contig_finder.rootToContigID();
     auto within_contig = contig_finder.withinContigIDs();
     for (auto contig_id : contig_ids) {
       if (index_map_.find(contig_id) != index_map_.end()) {
@@ -733,6 +749,10 @@ IndexCompute::IndexCompute(
           index_map_.erase(id);
         }
       }
+    }
+  } else {
+    for (auto root_id : td_->getMaybeRFactorDomain()) {
+      root_to_contig_id_[root_id] = root_id;
     }
   }
 }
@@ -1192,6 +1212,130 @@ std::unordered_map<IterDomain*, IterDomain*> indexMapReferenceTo(
   return index_map_ref_to_producer;
 }
 
+Val* hoistConsumerIndex(
+    IterDomain* consumer_root_id,
+    const TensorView* consumer_tv,
+    const IndexCompute& consumer_indexing,
+    TensorDomain* ref_td,
+    const IndexCompute& ref_indexing,
+    const std::vector<kir::ForLoop*>& loops,
+    Val* index) {
+  // If index has no defining expression, there's nothing to hoist
+  if (index->definition() == nullptr) {
+    return index;
+  }
+
+  // The old swizzle interface, which should be deprecated, is not
+  // supported.
+  if (consumer_tv->swizzleType() != SwizzleType::NoSwizzle) {
+    return index;
+  }
+
+  // Find the true indexed domain, which can be a merged contiguous domain.
+  auto indexed_consumer_id_it =
+      consumer_indexing.rootToContigID().find(consumer_root_id);
+  TORCH_INTERNAL_ASSERT(
+      indexed_consumer_id_it != consumer_indexing.rootToContigID().end(),
+      "Consumer indexed ID not found: ",
+      consumer_root_id->toString());
+  auto indexed_consumer_id = indexed_consumer_id_it->second;
+
+  // Insert the index into the common index map. A previously inserted
+  // val can be returned.
+  auto common_index = GpuLower::current()
+                          ->commonIndexMap()
+                          .insert(
+                              indexed_consumer_id,
+                              consumer_tv->domain(),
+                              ref_td,
+                              ref_indexing.indexMap(),
+                              loops,
+                              index)
+                          .first;
+
+  return common_index;
+}
+
+std::unordered_map<IterDomain*, IterDomain*> invertOneToOneMap(
+    const std::unordered_map<IterDomain*, IterDomain*>& map) {
+  std::unordered_map<IterDomain*, IterDomain*> inverted;
+  for (const auto& kv : map) {
+    bool inserted = inverted.emplace(kv.second, kv.first).second;
+    TORCH_INTERNAL_ASSERT(
+        inserted,
+        "Multiple mappings to the same value detected: ",
+        kv.second->toString());
+  }
+  return inverted;
+}
+
+Val* hoistProducerIndex(
+    IterDomain* producer_root_id,
+    const TensorView* producer_tv,
+    const IndexCompute& producer_indexing,
+    const TensorView* consumer_tv,
+    const std::unordered_map<IterDomain*, IterDomain*>& p2c_map,
+    TensorDomain* ref_td,
+    const IndexCompute& ref_indexing,
+    const std::vector<kir::ForLoop*>& loops,
+    Val* index) {
+  // If index has no defining expression, there's nothing to hoist
+  if (index->definition() == nullptr) {
+    return index;
+  }
+
+  // The old swizzle interface, which should be deprecated, is not
+  // supported.
+  if (producer_tv->swizzleType() != SwizzleType::NoSwizzle) {
+    return index;
+  }
+
+  auto indexed_producer_id_it =
+      producer_indexing.rootToContigID().find(producer_root_id);
+  TORCH_INTERNAL_ASSERT(
+      indexed_producer_id_it != producer_indexing.rootToContigID().end(),
+      "Producer indexed ID not found: ",
+      producer_root_id->toString());
+  auto indexed_producer_id = indexed_producer_id_it->second;
+
+  // Use the corresponding consumer domain to find matching
+  // for-loops. Note that there's no CA mapping with the producer
+  // domains as the producer TensorDomain is a temporary replay
+  // domain.
+
+  auto indexed_consumer_id_it = p2c_map.find(indexed_producer_id);
+
+  // There can be no corresponding consumer ID. For example, consider:
+  //   consumer: [b1, i2, i3]
+  //   producer: [i2, i3].
+  // Suppose the consumer is transformed as:
+  //   consumer: [(b1*i2)*i3]
+  // Then the producer would be transformed when indexed:
+  //   producer: [i2*i3]
+  // Assuming i2 and i3 are contiguous, the producer indexing is done
+  // with the mreged i2*i3 domain, but there's no domain in the
+  // cosumer that maps with the producer indexed domain.
+  // It seems non-trivial to support patterns like this. Skip for now.
+  if (indexed_consumer_id_it == p2c_map.end()) {
+    return index;
+  }
+
+  IterDomain* indexed_consumer_id = indexed_consumer_id_it->second;
+
+  auto common_index = GpuLower::current()
+                          ->commonIndexMap()
+                          .insert(
+                              indexed_consumer_id,
+                              consumer_tv->domain(),
+                              ref_td,
+                              ref_indexing.indexMap(),
+                              loops,
+                              index)
+                          .first;
+
+  return common_index;
+}
+
 } // namespace
 
 std::vector<Val*> Index::getGlobalProducerStridedIndices(
@@ -1219,16 +1363,17 @@ std::vector<Val*> Index::getGlobalProducerStridedIndices(
   // Map everything we can from reference to producer using compute at index
   // map. Use consumer as a proxy between producer and the generated reference.
   std::unordered_map<IterDomain*, IterDomain*> index_map_ref_to_producer;
+
+  // This replay has to be consistent with compute at index map.
+  BestEffortReplay replay_producer_as_consumer(
+      producer_tv->domain()->domain(),
+      consumer_tv->domain()->domain(),
+      pairwise_map.mapConsumerToProducer(
+          consumer_tv->domain(), producer_tv->domain()));
+
+  const auto& c2p_map = replay_producer_as_consumer.getReplay();
+  const auto p2c_map = invertOneToOneMap(c2p_map);
   {
-    // This replay has to be consistent with compute at index map.
-    BestEffortReplay replay_producer_as_consumer(
-        producer_tv->domain()->domain(),
-        consumer_tv->domain()->domain(),
-        pairwise_map.mapConsumerToProducer(
-            consumer_tv->domain(), producer_tv->domain()));
-
-    const auto& c2p_map = replay_producer_as_consumer.getReplay();
-
     std::unordered_map<IterDomain*, IterDomain*> index_map_ref_to_consumer =
         indexMapReferenceTo(
             consumer_tv, gpu_lower->caIndexMap(), reference_id_map);
@@ -1380,6 +1525,18 @@ std::vector<Val*> Index::getGlobalProducerStridedIndices(
 
     auto root_ind = producer_indexing.indexMap().at(root_dom[i]);
 
+    // index hoist must be done before the adjustments for halo
+    root_ind = hoistProducerIndex(
+        root_dom[i],
+        producer_tv,
+        producer_indexing,
+        consumer_tv,
+        p2c_map,
+        reference.domain,
+        ref_compute,
+        loops,
+        root_ind);
+
     root_ind = getProducerIndexWithHalo(producer_tv, i, root_ind, consumer_tv);
 
     root_ind = getProducerIndexWithGather(
@@ -1434,25 +1591,25 @@ std::vector<Val*> Index::getNonGlobalProducerStridedIndices(
   // the allocation position of the producer, and to figure out which producer
   // indices are mapped to consumer trivial reductions.
   std::unordered_map<IterDomain*, IterDomain*> p2c_alloc_map;
-  {
-    //  We want to play producer as consumer instead of the other way around
-    //  since consumer may have some broadcasted axes producer doesn't have
-    //  merged into loops producer may use. If we did consumer as producer we
-    //  wouldn't have this information in the mapping.
-    auto replay_PasC = BestEffortReplay::replayPasC(
-        producer_tv, consumer_tv, -1, pairwise_map);
 
-    auto c2p_map = replay_PasC.getReplay();
+  //  We want to play producer as consumer instead of the other way around
+  //  since consumer may have some broadcasted axes producer doesn't have
+  //  merged into loops producer may use. If we did consumer as producer we
+  //  wouldn't have this information in the mapping.
+  auto replay_PasC =
+      BestEffortReplay::replayPasC(producer_tv, consumer_tv, -1, pairwise_map);
 
-    // Grab consumer domain entries and reverse replay map. TODO: Maybe
-    // TransformReplay::replayPasC could return this map
-    for (auto id : consumer_tv->domain()->domain()) {
-      auto c2p_it = c2p_map.find(id);
-      if (c2p_it != c2p_map.end()) {
-        auto c_id = c2p_it->first;
-        auto p_id = c2p_it->second;
-        p2c_alloc_map[p_id] = c_id;
-      }
+  const auto& c2p_map = replay_PasC.getReplay();
+  const auto p2c_map = invertOneToOneMap(c2p_map);
+
+  // Grab consumer domain entries and reverse replay map. TODO: Maybe
+  // TransformReplay::replayPasC could return this map
+  for (auto id : consumer_tv->domain()->domain()) {
+    auto c2p_it = c2p_map.find(id);
+    if (c2p_it != c2p_map.end()) {
+      auto c_id = c2p_it->first;
+      auto p_id = c2p_it->second;
+      p2c_alloc_map[p_id] = c_id;
     }
   }
 
@@ -1640,6 +1797,18 @@ std::vector<Val*> Index::getNonGlobalProducerStridedIndices(
         root_dom[i]->toString());
 
     auto root_ind_i = index_map.at(root_dom[i]);
+
+    // index hoist must be done before the adjustments for halo
+    root_ind_i = hoistProducerIndex(
+        root_dom[i],
+        producer_tv,
+        producer_indexing,
+        consumer_tv,
+        c2p_map,
+        reference.domain,
+        ref_compute,
+        loops,
+        root_ind_i);
 
     root_ind_i =
         getProducerIndexWithHalo(producer_tv, i, root_ind_i, consumer_tv);
@@ -1845,6 +2014,16 @@ std::vector<Val*> Index::getGlobalConsumerStridedIndices(
 
     auto root_ind = consumer_indexing.indexMap().at(root_dom[i]);
 
+    // index hoist must be done before the adjustments for halo
+    root_ind = hoistConsumerIndex(
+        root_dom[i],
+        consumer_tv,
+        consumer_indexing,
+        reference.domain,
+        ref_compute,
+        loops,
+        root_ind);
+
     root_ind = SimplifyingIrBuilder::addExpr(
         root_ind, getGlobalConsumerOffsetWithPartialSplit(root_dom[i]));
 
@@ -1979,10 +2158,20 @@ std::vector<Val*> Index::getNonGlobalConsumerStridedIndices(
         " id: ",
         root_dom[i]->toString());
 
-    const auto root_ind_i = index_map.at(root_dom[i]);
+    auto root_ind_i = index_map.at(root_dom[i]);
     if (root_ind_i->isZeroInt()) {
       continue;
     }
+
+    // index hoist must be done before the adjustments for halo
+    root_ind_i = hoistConsumerIndex(
+        root_dom[i],
+        consumer_tv,
+        consumer_indexing,
+        reference.domain,
+        ref_compute,
+        loops,
+        root_ind_i);
 
     // Compute striding for this index.
     Val* stride = nullptr;
@@ -2863,6 +3052,49 @@ bool canOmitStopPredicate(
   return true;
 }
 
+std::pair<Val*, Val*> hoistPredicates(
+    Val* start_index,
+    Val* stop_index,
+    const std::vector<kir::ForLoop*>& loops,
+    kir::ForLoop* unswitch_or_vec_loop,
+    IterDomain* predicated_consumer_id,
+    TensorView* predicated_consumer_tv,
+    TensorDomain* ref_td,
+    const std::unordered_map<IterDomain*, Val*>& ref_index_map) {
+  const std::pair<Val*, Val*> same_indices{start_index, stop_index};
+
+  // Don't hoist unswitch predicates. Would need to differentiate
+  // start and stop indices. Skip for now as probably not worth for
+  // extra complexity.
+  if (unswitch_or_vec_loop != nullptr &&
+      unswitch_or_vec_loop->iter_domain()->getParallelType() !=
+          ParallelType::Vectorize) {
+    return same_indices;
+  }
+
+  const auto start_is_same_as_stop = stop_index == start_index;
+
+  // If the index doens't have an expression, nothing to hoist
+  if (stop_index->definition() == nullptr) {
+    return same_indices;
+  }
+
+  Val* hoisted_stop_index = nullptr;
+  bool inserted = false;
+  std::tie(hoisted_stop_index, inserted) =
+      GpuLower::current()->commonIndexMap().insert(
+          predicated_consumer_id,
+          predicated_consumer_tv->domain(),
+          ref_td,
+          ref_index_map,
+          loops,
+          stop_index);
+
+  return {
+      start_is_same_as_stop ? hoisted_stop_index : start_index,
+      hoisted_stop_index};
+}
+
 } // namespace
 
 // Returns predicates and the concrete (by loop map) root domains they cover
@@ -2990,6 +3222,16 @@ std::pair<std::vector<RootPredicateInfo>, ReferenceTensor> Index::
 
     auto stop_index = consumer_stop_indexing_it->second;
     auto start_index = consumer_start_index_map.at(contig_id);
+
+    std::tie(start_index, stop_index) = hoistPredicates(
+        start_index,
+        stop_index,
+        loops,
+        unswitch_or_vec_loop,
+        contig_id,
+        consumer_tv,
+        reference.domain,
+        ref_stop_indexing.indexMap());
 
     // Build predicates for start positions as:
     //   start_index + start_offset >= 0

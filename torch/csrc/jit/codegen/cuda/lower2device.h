@@ -8,6 +8,7 @@
 #include <torch/csrc/jit/codegen/cuda/kernel_ir.h>
 #include <torch/csrc/jit/codegen/cuda/lower_allocation.h>
 #include <torch/csrc/jit/codegen/cuda/lower_double_buffer.h>
+#include <torch/csrc/jit/codegen/cuda/lower_index_hoist.h>
 #include <torch/csrc/jit/codegen/cuda/lower_predicate.h>
 #include <torch/csrc/jit/codegen/cuda/lower_shift.h>
 #include <torch/csrc/jit/codegen/cuda/lower_thread_predicate.h>
@@ -125,6 +126,10 @@ class TORCH_CUDA_CU_API GpuLower : public NonCopyable {
     return double_buffer_info_;
   }
 
+  CommonIndexMap& commonIndexMap() {
+    return common_index_map_;
+  }
+
  private:
   void lower(Fusion* fusion);
 
@@ -152,6 +157,7 @@ class TORCH_CUDA_CU_API GpuLower : public NonCopyable {
   PartialSplitMap partial_split_map_;
   NonDivisibleSplitInfo non_divisible_split_info_;
   DoubleBufferInfo double_buffer_info_;
+  CommonIndexMap common_index_map_;
 
   Fusion* fusion_ = nullptr;
 };
