@@ -224,6 +224,8 @@ def __interpolate(g, input, size, scale_factor, mode, align_corners, recompute_s
 def gather(g, self, dim, index, sparse_grad=False, unique_indices=False):
     if sym_help._maybe_get_const(sparse_grad, "i"):
         return _unimplemented("gather", "sparse_grad == True")
+    if sym_help._maybe_get_const(unique_indices, "b"):
+        return _unimplemented("gather", "unique_indices == True")
     if sym_help._operator_export_type == torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK:
         return g.op("ATen", self, dim, index, sparse_grad, unique_indices, operator_s="gather")
     return g.op("GatherElements", self, index, axis_i=dim)
@@ -231,6 +233,8 @@ def gather(g, self, dim, index, sparse_grad=False, unique_indices=False):
 
 @parse_args("v", "i", "v", "v")
 def scatter(g, self, dim, index, src, unique_indices=False):
+    if sym_help._maybe_get_const(unique_indices, "b"):
+        return _unimplemented("scatter", "unique_indices == True")
     from torch.onnx.symbolic_opset9 import expand_as
     if sym_help._operator_export_type == torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK:
         return g.op("ATen", self, dim, index, src, unique_indices, operator_s="scatter")

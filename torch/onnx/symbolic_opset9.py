@@ -2608,6 +2608,8 @@ def argmin(g, input, dim, keepdim):
 
 @parse_args("v", "i", "v", "v")
 def scatter(g, self, dim, index, src, unique_indices=False):
+    if sym_help._maybe_get_const(unique_indices, "b"):
+        return _unimplemented("scatter", "unique_indices == True")
     src_type = src.type().scalarType()
     src = sym_help._maybe_get_scalar(src)
     if sym_help._is_value(src):
@@ -2622,6 +2624,8 @@ def scatter(g, self, dim, index, src, unique_indices=False):
 
 @parse_args("v", "i", "v", "v")
 def scatter_add(g, self, dim, index, src, unique_indices=False):
+    if sym_help._maybe_get_const(unique_indices, "b"):
+        return _unimplemented("scatter", "unique_indices == True")
     dtype = sym_help._try_get_scalar_type(self)
     if dtype is None:
         return _unimplemented("scatter_add", "input dtype not accessible")
@@ -2714,6 +2718,8 @@ def one_hot(g, self, num_classes):
 def gather(g, self, dim, index, sparse_grad=False, unique_indices=False):
     if sym_help._maybe_get_const(sparse_grad, "i"):
         return _unimplemented("gather", "sparse_grad == True")
+    if sym_help._maybe_get_const(unique_indices, "b"):
+        return _unimplemented("gather", "unique_indices == True")
     # NOTE: This workaround is needed since GatherElement is only supported
     #       since opset 11, and Gather in ONNX is not the same as torch.gather.
     dtype = self.type().scalarType()
