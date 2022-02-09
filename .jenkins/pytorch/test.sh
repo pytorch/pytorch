@@ -530,11 +530,14 @@ test_lazy_tensor_core() {
   ln -sf "$TORCH_LIB_DIR"/libc10* torch/lib/
   ln -sf "$PWD"/lazy_tensor_core/build/lib.linux-x86_64-3.7/_LAZYC.cpython-37m-x86_64-linux-gnu.so lazy_tensor_core/build/lib.linux-x86_64-3.7/libptltc.so
   lazy_tensor_core/test/cpp/build/test_ptltc
-  # this example script does not run on CI (import error)
-  pushd lazy_tensor_core
-  python example.py
-  assert_git_not_dirty
+
+  # to import lazy tensor from python, it needs to either be properly installed,
+  # which it is not (due to how build/test are set up in this CI config)
+  # or we can be in the build dir where all the artifacts are
+  pushd lazy_tensor_core/build/lib.linux-x86_64-3.7
+  python ../../../example.py
   popd
+  assert_git_not_dirty
 }
 
 if ! [[ "${BUILD_ENVIRONMENT}" == *libtorch* || "${BUILD_ENVIRONMENT}" == *-bazel-* ]]; then
