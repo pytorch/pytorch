@@ -440,7 +440,7 @@ jobs:
   pytorch_linux_build:
     <<: *pytorch_params
     machine:
-      image: ubuntu-2004:202010-01 
+      image: ubuntu-1604:202007-01 
     steps:
     # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
     - checkout
@@ -521,7 +521,7 @@ jobs:
   pytorch_linux_test:
     <<: *pytorch_params
     machine:
-      image: ubuntu-2004:202010-01 
+      image: ubuntu-1604:202007-01 
     steps:
     # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
     - checkout
@@ -838,7 +838,7 @@ jobs:
   binary_linux_test:
     <<: *binary_linux_test_upload_params
     machine:
-        image: ubuntu-2004:202010-01 
+        image: ubuntu-1604:202007-01 
     steps:
     # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
     - checkout
@@ -901,7 +901,7 @@ jobs:
   smoke_linux_test:
     <<: *binary_linux_test_upload_params
     machine:
-      image: ubuntu-2004:202010-01 
+      image: ubuntu-1604:202007-01 
     steps:
     - checkout
     - calculate_docker_image_tag
@@ -1194,7 +1194,7 @@ jobs:
   pytorch_doc_push:
     resource_class: medium
     machine:
-      image: ubuntu-2004:202010-01 
+      image: ubuntu-1604:202007-01 
     parameters:
       branch:
         type: string
@@ -1223,7 +1223,7 @@ jobs:
       DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3.6-gcc5.4"
     resource_class: large
     machine:
-      image: ubuntu-2004:202010-01 
+      image: ubuntu-1604:202007-01 
     steps:
     - checkout
     - calculate_docker_image_tag
@@ -1268,7 +1268,7 @@ jobs:
       DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3.6-gcc5.4"
     resource_class: large
     machine:
-      image: ubuntu-2004:202010-01 
+      image: ubuntu-1604:202007-01 
     steps:
     - checkout
     - calculate_docker_image_tag
@@ -1367,7 +1367,7 @@ jobs:
       PYTHON_VERSION: "3.6"
     resource_class: large
     machine:
-      image: ubuntu-2004:202010-01 
+      image: ubuntu-1604:202007-01 
     steps:
     - checkout
     - calculate_docker_image_tag
@@ -1456,7 +1456,7 @@ jobs:
       PYTHON_VERSION: "3.6"
     resource_class: large
     machine:
-      image: ubuntu-2004:202010-01 
+      image: ubuntu-1604:202007-01 
     steps:
     - checkout
     - calculate_docker_image_tag
@@ -1492,7 +1492,7 @@ jobs:
       PYTHON_VERSION: "3.6"
     resource_class: large
     machine:
-      image: ubuntu-2004:202010-01 
+      image: ubuntu-1604:202007-01 
     steps:
     - checkout
     - calculate_docker_image_tag
@@ -1534,7 +1534,7 @@ jobs:
       PYTHON_VERSION: "3.6"
     resource_class: large
     machine:
-      image: ubuntu-2004:202010-01 
+      image: ubuntu-1604:202007-01 
     steps:
     - checkout
     - calculate_docker_image_tag
@@ -1690,7 +1690,7 @@ jobs:
   pytorch_linux_bazel_build:
     <<: *pytorch_params
     machine:
-      image: ubuntu-2004:202010-01 
+      image: ubuntu-1604:202007-01 
     steps:
     - checkout
     - calculate_docker_image_tag
@@ -1728,7 +1728,7 @@ jobs:
   pytorch_linux_bazel_test:
     <<: *pytorch_params
     machine:
-      image: ubuntu-2004:202010-01 
+      image: ubuntu-1604:202007-01 
     steps:
     - checkout
     - calculate_docker_image_tag
@@ -1775,7 +1775,7 @@ jobs:
       DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3.6-gcc5.4"
     resource_class: medium
     machine:
-      image: ubuntu-2004:202010-01 
+      image: ubuntu-1604:202007-01 
     steps:
     - checkout
     - calculate_docker_image_tag
@@ -1820,7 +1820,7 @@ jobs:
   # then install the one with the most recent version.
   update_s3_htmls: &update_s3_htmls
     machine:
-      image: ubuntu-2004:202010-01 
+      image: ubuntu-1604:202007-01 
     resource_class: medium
     steps:
     - checkout
@@ -1883,7 +1883,7 @@ jobs:
           type: string
           default: ""
       machine:
-        image: ubuntu-2004:202010-01 
+        image: ubuntu-1604:202007-01 
       resource_class: large
       environment:
         IMAGE_NAME: << parameters.image_name >>
@@ -1935,7 +1935,7 @@ jobs:
               cd .circleci/docker && ./build_docker.sh
   docker_for_ecr_gc_build_job:
       machine:
-        image: ubuntu-2004:202010-01 
+        image: ubuntu-1604:202007-01 
       steps:
         - checkout
         - run:
