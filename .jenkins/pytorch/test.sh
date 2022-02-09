@@ -531,8 +531,10 @@ test_lazy_tensor_core() {
   ln -sf "$PWD"/lazy_tensor_core/build/lib.linux-x86_64-3.7/_LAZYC.cpython-37m-x86_64-linux-gnu.so lazy_tensor_core/build/lib.linux-x86_64-3.7/libptltc.so
   lazy_tensor_core/test/cpp/build/test_ptltc
   # this example script does not run on CI (import error)
-  #python lazy_tensor_core/example.py
+  pushd lazy_tensor_core
+  python example.py
   assert_git_not_dirty
+  popd
 }
 
 if ! [[ "${BUILD_ENVIRONMENT}" == *libtorch* || "${BUILD_ENVIRONMENT}" == *-bazel-* ]]; then
