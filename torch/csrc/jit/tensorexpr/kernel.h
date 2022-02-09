@@ -271,6 +271,8 @@ class TORCH_API TensorExprKernel {
   std::vector<ExprHandle> getInputStrides(
       const torch::jit::Value* input,
       const std::vector<ExprHandle>& inputTensorDims);
+  std::vector<torch::jit::StrideInput>& getSymbolicInputStrideDesc(
+      const torch::jit::Value* value);
 
   int64_t nInputs_ = 0;
   int64_t nOutputs_ = 0;
@@ -319,10 +321,9 @@ class TORCH_API TensorExprKernel {
   // map from <input index, tensor dimension> to stride as arg VarHandle
   std::unordered_map<std::pair<size_t, size_t>, VarHandle, SmallSizeTPairHash>
       strideArgToVar_;
-  std::unordered_map<
-      const torch::jit::Value*,
-      std::vector<torch::jit::StrideInput>>
-      symbolic_strides_;
+  std::unordered_map<size_t, std::vector<torch::jit::StrideInput>>
+      sym_stride_inputs_;
+  std::unordered_map<size_t, torch::jit::StrideInput> sym_stride_outputs_;
 };
 
 TORCH_API int& getTECudaPointwiseLoopLevels();
