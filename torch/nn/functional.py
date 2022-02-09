@@ -612,6 +612,18 @@ fractional_max_pool3d = boolean_dispatch(
 )
 
 
+
+# Used to limit number of warnings in CI to only one
+# See: https://github.com/pytorch/pytorch/issues/71257 for more context
+# Also see discussions here: https://github.com/pytorch/pytorch/pull/71258 to make
+# return_indices and ceil_mode kw-only args in the future
+_MAX_POOL1D_WITH_INDICES_WARNING_COUNT = 0
+_MAX_POOL1D_WARNING_COUNT = 0
+_MAX_POOL2D_WITH_INDICES_WARNING_COUNT = 0
+_MAX_POOL2D_WARNING_COUNT = 0
+_MAX_POOL3D_WITH_INDICES_WARNING_COUNT = 0
+_MAX_POOL3D_WARNING_COUNT = 0
+
 def max_pool1d_with_indices(
     input: Tensor, kernel_size: BroadcastingList1[int],
     stride: Optional[BroadcastingList1[int]] = None,
@@ -647,12 +659,13 @@ def max_pool1d_with_indices(
     """
     # See: https://github.com/pytorch/pytorch/pull/62544#issuecomment-896195121
     # and https://github.com/pytorch/pytorch/issues/62545 for context
+    global _MAX_POOL1D_WITH_INDICES_WARNING_COUNT
     if ceil_mode != return_indices:
         # Only raise the warning if it isn't raised already in a single run
-        if (max_pool1d_with_indices.warning_count == 0):
+        if (_MAX_POOL1D_WITH_INDICES_WARNING_COUNT == 0):
             warnings.warn("Note that order of the arguments: ceil_mode and return_indices will change"
                           " to match the args list in nn.MaxPool1d in a future release.", DeprecationWarning)
-        max_pool1d_with_indices.warning_count += 1
+        _MAX_POOL1D_WITH_INDICES_WARNING_COUNT += 1
 
     if has_torch_function_unary(input):
         return handle_torch_function(
@@ -681,12 +694,13 @@ def _max_pool1d(
 ) -> Tensor:
     # See: https://github.com/pytorch/pytorch/pull/62544#issuecomment-896195121
     # and https://github.com/pytorch/pytorch/issues/62545 for context
+    global _MAX_POOL1D_WARNING_COUNT
     if ceil_mode != return_indices:
         # Only raise the warning if it isn't raised already in a single run
-        if _max_pool1d.warning_count == 0:
+        if _MAX_POOL1D_WARNING_COUNT == 0:
             warnings.warn("Note that order of the arguments: ceil_mode and return_indices will change"
                           " to match the args list in nn.MaxPool1d in a future release.", DeprecationWarning)
-        _max_pool1d.warning_count += 1
+        _MAX_POOL1D_WARNING_COUNT += 1
 
     if has_torch_function_unary(input):
         return handle_torch_function(
@@ -705,10 +719,6 @@ def _max_pool1d(
     return torch.max_pool1d(input, kernel_size, stride, padding, dilation, ceil_mode)
 
 
-# Used to limit number of warnings in CI to only one
-# See: https://github.com/pytorch/pytorch/issues/71257 for more context
-max_pool1d_with_indices.warning_count = 0
-_max_pool1d.warning_count = 0
 max_pool1d = boolean_dispatch(
     arg_name="return_indices",
     arg_index=6,
@@ -755,12 +765,13 @@ def max_pool2d_with_indices(
     """
     # See: https://github.com/pytorch/pytorch/pull/62544#issuecomment-896195121
     # and https://github.com/pytorch/pytorch/issues/62545 for context
+    global _MAX_POOL2D_WITH_INDICES_WARNING_COUNT
     if ceil_mode != return_indices:
         # Only raise the warning if it isn't raised already in a single run
-        if max_pool2d_with_indices.warning_count == 0:
+        if _MAX_POOL2D_WITH_INDICES_WARNING_COUNT == 0:
             warnings.warn("Note that order of the arguments: ceil_mode and return_indices will change"
                           " to match the args list in nn.MaxPool2d in a future release.", DeprecationWarning)
-        max_pool2d_with_indices.warning_count += 1
+        _MAX_POOL2D_WITH_INDICES_WARNING_COUNT += 1
 
     if has_torch_function_unary(input):
         return handle_torch_function(
@@ -789,12 +800,13 @@ def _max_pool2d(
 ) -> Tensor:
     # See: https://github.com/pytorch/pytorch/pull/62544#issuecomment-896195121
     # and https://github.com/pytorch/pytorch/issues/62545 for context
+    global _MAX_POOL2D_WARNING_COUNT
     if ceil_mode != return_indices:
         # Only raise the warning if it isn't raised already in a single run
-        if (_max_pool2d.warning_count == 0):
+        if (_MAX_POOL2D_WARNING_COUNT == 0):
             warnings.warn("Note that order of the arguments: ceil_mode and return_indices will change"
                           " to match the args list in nn.MaxPool2d in a future release.", DeprecationWarning)
-        _max_pool2d.warning_count += 1
+        _MAX_POOL2D_WARNING_COUNT += 1
 
     if has_torch_function_unary(input):
         return handle_torch_function(
@@ -813,10 +825,6 @@ def _max_pool2d(
     return torch.max_pool2d(input, kernel_size, stride, padding, dilation, ceil_mode)
 
 
-# Used to limit number of warnings in CI to only one
-# See: https://github.com/pytorch/pytorch/issues/71257 for more context
-max_pool2d_with_indices.warning_count = 0
-_max_pool2d.warning_count = 0
 max_pool2d = boolean_dispatch(
     arg_name="return_indices",
     arg_index=6,
@@ -863,12 +871,13 @@ def max_pool3d_with_indices(
     """
     # See: https://github.com/pytorch/pytorch/pull/62544#issuecomment-896195121
     # and https://github.com/pytorch/pytorch/issues/62545 for context
+    global _MAX_POOL3D_WITH_INDICES_WARNING_COUNT
     if ceil_mode != return_indices:
         # Only raise the warning if it isn't raised already in a single run
-        if max_pool3d_with_indices.warning_count == 0:
+        if _MAX_POOL3D_WITH_INDICES_WARNING_COUNT == 0:
             warnings.warn("Note that order of the arguments: ceil_mode and return_indices will change"
                           " to match the args list in nn.MaxPool3d in a future release.", DeprecationWarning)
-        max_pool3d_with_indices.warning_count += 1
+        _MAX_POOL3D_WITH_INDICES_WARNING_COUNT += 1
 
     if has_torch_function_unary(input):
         return handle_torch_function(
@@ -897,12 +906,13 @@ def _max_pool3d(
 ) -> Tensor:
     # See: https://github.com/pytorch/pytorch/pull/62544#issuecomment-896195121
     # and https://github.com/pytorch/pytorch/issues/62545 for context
+    global _MAX_POOL3D_WARNING_COUNT
     if ceil_mode != return_indices:
         # Only raise the warning if it isn't raised already in a single run
-        if _max_pool3d.warning_count == 0:
+        if _MAX_POOL3D_WARNING_COUNT == 0:
             warnings.warn("Note that order of the arguments: ceil_mode and return_indices will change"
                           " to match the args list in nn.MaxPool3d in a future release.", DeprecationWarning)
-        _max_pool3d.warning_count += 1
+        _MAX_POOL3D_WARNING_COUNT += 1
 
     if has_torch_function_unary(input):
         return handle_torch_function(
@@ -921,10 +931,6 @@ def _max_pool3d(
     return torch.max_pool3d(input, kernel_size, stride, padding, dilation, ceil_mode)
 
 
-# Used to limit number of warnings in CI to only one
-# See: https://github.com/pytorch/pytorch/issues/71257 for more context
-max_pool3d_with_indices.warning_count = 0
-_max_pool3d.warning_count = 0
 max_pool3d = boolean_dispatch(
     arg_name="return_indices",
     arg_index=6,
