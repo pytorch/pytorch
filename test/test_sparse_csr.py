@@ -1458,7 +1458,7 @@ class TestSparseCSR(TestCase):
     @ops(binary_ops_with_dense_output, dtypes=OpDTypes.supported, allowed_dtypes=[torch.double, ])
     def test_autograd_dense_output(self, device, dtype, op):
         if op.name == "mv" and no_mkl_sparse:
-            unittest.skip("MKL Sparse is not available")
+            self.skipTest("MKL Sparse is not available")
 
         samples = list(op.sample_inputs(device, dtype, requires_grad=True))
 
