@@ -154,6 +154,11 @@ ViewInfo::ViewInfo(Type view_type, const Shape& source_shape, SelectInfo select)
   TORCH_CHECK(view_type == Type::kSelect);
 }
 
+ViewInfo::ViewInfo(OpList source_shape, OpList target_shape): 
+  view_type(Type::kDynamicReshape),
+  src_shape_ir_vals_(source_shape.begin(), source_shape.end()),
+  tgt_shape_ir_vals_(target_shape.begin(), target_shape.end()) {}
+
 ViewInfo::ViewInfo(
     Type view_type,
     Shape shape,
@@ -215,6 +220,7 @@ LazyView::LazyView(
       alias_(std::move(alias)) {}
 
 void LazyView::Update(Value ir_value) {
+  std::cerr << "LazyView::Update\n";
   alias_->Update(std::move(ir_value), view_infos_);
 }
 
@@ -228,6 +234,7 @@ std::shared_ptr<LazyView> LazyView::CreateSubView(
 }
 
 std::tuple<Value, bool> LazyView::GetViewIrNode() {
+  std::cerr << "LazyView::GetViewIrNode\n";
   if (IsUpToDate()) {
     return std::make_tuple(ir_value_, false);
   }

@@ -52,6 +52,7 @@ struct TORCH_API ViewInfo {
     kSelect,
     kAsStrided,
     kDiagonal,
+    kDynamicReshape,
   };
 
   ViewInfo() = default;
@@ -60,6 +61,8 @@ struct TORCH_API ViewInfo {
       Type view_type,
       Shape source_shape,
       std::vector<int64_t> permutation);
+  ViewInfo(OpList source_shape,
+    OpList target_shape);
   ViewInfo(Type view_type, const Shape& source_shape, SelectInfo select);
   ViewInfo(
       Type view_type,
@@ -92,6 +95,9 @@ struct TORCH_API ViewInfo {
   c10::optional<AsStridedInfo> as_strided;
   // Information used for diagonal views.
   c10::optional<DiagonalInfo> diagonal;
+
+  std::vector<Value> src_shape_ir_vals_;
+  std::vector<Value> tgt_shape_ir_vals_;
 };
 
 // When a "view" (capture by reference) is taken on a node, an Alias object is
