@@ -7105,8 +7105,8 @@ def sample_inputs_dropout(op_info, device, dtype, requires_grad, *,
 
 
 def sample_inputs_embedding_bag(op_info, device, dtype, requires_grad, **kwargs):
-    def make_input(shape):
-        return make_tensor(shape, device=device, dtype=dtype, requires_grad=requires_grad)
+    def make_input(shape, _requires_grad=requires_grad):
+        return make_tensor(shape, device=device, dtype=dtype, requires_grad=_requires_grad)
 
     def make_long_input(shape, *, low, high, noncontiguous=False):
         return make_tensor(shape, device=device, dtype=torch.long, low=low, high=high,
@@ -7116,7 +7116,10 @@ def sample_inputs_embedding_bag(op_info, device, dtype, requires_grad, **kwargs)
         # a tensor of float / double weights, or None
         # to indicate all weights should be taken to be 1
         if flag:
-            return make_input(idx.shape)
+            # TEMPORARY FIX! See https://github.com/pytorch/functorch/issues/469
+            # Always setting requires_grad=False here is OK because we currently don't test
+            # the gradient for this input anyway currently (see the OpInfo).
+            return make_input(idx.shape, _requires_grad=False)
         return None
 
     offsets = torch.tensor([0, 3], device=device, dtype=torch.long)
