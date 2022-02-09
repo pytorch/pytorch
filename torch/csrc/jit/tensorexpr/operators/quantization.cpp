@@ -284,15 +284,15 @@ Tensor computeQuantizePerTensorExternalCall(
     return makeQBufHandleNCHW(
         "quantize_per_tensor", outputShape, dtype, qscale, qzero);
   }();
-  /*
   StmtPtr s = ExternalCall::make(
       ResultBuf, "nnc_aten_quantize_per_tensor", {x}, {qscale, qzero, qdtype});
-  */
+  /*
   StmtPtr s = ExternalCall2::make(
       "nnc_aten_quantize_per_tensor_out",
       {ResultBuf},
       {x},
       {qscale, qzero, qdtype});
+  */
   return Tensor(ResultBuf.node(), s);
 }
 
@@ -312,7 +312,6 @@ Tensor computeDequantizeExternalCall(
   const int64_t qdtype = (int64_t)immQDType(qx);
 
   BufHandle ResultBuf("dequantize", outputShape, dtype);
-  /*
   StmtPtr s = ExternalCall::make(
       ResultBuf,
       "nnc_aten_dequantize",
@@ -320,7 +319,7 @@ Tensor computeDequantizeExternalCall(
       {ExprHandle(IRSimplifier::simplify(qx.node()->qscale())),
        ExprHandle(IRSimplifier::simplify(qx.node()->qzero())),
        qdtype});
-  */
+  /*
   StmtPtr s = ExternalCall2::make(
       "nnc_aten_dequantize_out",
       {ResultBuf},
@@ -328,6 +327,7 @@ Tensor computeDequantizeExternalCall(
       {ExprHandle(IRSimplifier::simplify(qx.node()->qscale())),
        ExprHandle(IRSimplifier::simplify(qx.node()->qzero())),
        qdtype});
+  */
   return Tensor(ResultBuf.node(), s);
 }
 

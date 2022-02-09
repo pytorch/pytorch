@@ -29,7 +29,9 @@
   _(nnc_aten_quantized_relu)            \
   _(nnc_aten_quantized_sigmoid)         \
   _(nnc_aten_quantize_per_tensor)       \
+  _(nnc_aten_quantize_per_tensor_out)   \
   _(nnc_aten_dequantize)                \
+  _(nnc_aten_dequantize_out)            \
   _(nnc_aten_upsample_nearest2d)
 
 #define DECLARE_EXTERNAL_FUNCTION(NAME) \

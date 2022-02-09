@@ -1298,9 +1298,15 @@ const static RegisterNNCExternalFunction nnc_quantized_relu(
 const static RegisterNNCExternalFunction nnc_quantize_per_tensor(
     "nnc_aten_quantize_per_tensor",
     nnc_aten_quantize_per_tensor);
+const static RegisterNNCExternalFunction nnc_quantize_per_tensor_out(
+    "nnc_aten_quantize_per_tensor_out",
+    nnc_aten_quantize_per_tensor_out);
 const static RegisterNNCExternalFunction nnc_dequantize(
     "nnc_aten_dequantize",
     nnc_aten_dequantize);
+const static RegisterNNCExternalFunction nnc_dequantize_out(
+    "nnc_aten_dequantize_out",
+    nnc_aten_dequantize_out);
 
 const static RegisterNNCExternalFunction nnc_upsample_nearest2d(
     "nnc_aten_upsample_nearest2d",
