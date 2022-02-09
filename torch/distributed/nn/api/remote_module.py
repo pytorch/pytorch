@@ -374,7 +374,7 @@ class _RemoteModule(nn.Module):
         )
 
     def named_parameters(  # type: ignore[return]
-        self, prefix: str = "", recurse: bool = True, remove_duplicate: bool = True
+        self, prefix: str = "", recurse: bool = True
     ) -> Iterator[Tuple[str, Parameter]]:
         _raise_not_supported(self.named_parameters.__name__)
 
@@ -382,7 +382,7 @@ class _RemoteModule(nn.Module):
         _raise_not_supported(self.buffers.__name__)
 
     def named_buffers(  # type: ignore[return]
-        self, prefix: str = "", recurse: bool = True, remove_duplicate: bool = True
+        self, prefix: str = "", recurse: bool = True
     ) -> Iterator[Tuple[str, Tensor]]:
         _raise_not_supported(self.named_buffers.__name__)
 
