@@ -160,7 +160,6 @@ class ShardedTensor(object):
         sharded_tensor_metadata = sharding_spec.build_metadata(
             dims, tensor_properties=tensor_properties, process_group=self._process_group)
 
-        local_shards = []
         current_rank = dist.get_rank(self._process_group)
 
         for shard_metadata in sharded_tensor_metadata.shards_metadata:

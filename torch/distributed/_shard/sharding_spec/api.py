@@ -1,7 +1,8 @@
 from abc import ABC, abstractmethod
-import copy
 from dataclasses import dataclass
 from typing import List, Union
+from typing import TYPE_CHECKING
+
 import torch
 
 from ._internals import (
@@ -20,6 +21,11 @@ import torch.distributed as dist
 from torch.distributed import distributed_c10d
 import torch.distributed._shard.sharded_tensor.metadata as sharded_tensor_meta
 from torch.distributed._shard.sharded_tensor.shard import Shard
+
+if TYPE_CHECKING:
+    # Only include ShardedTensor when do type checking, exclude it
+    # from run-time to resolve circular dependency.
+    from torch.distributed._shard.sharded_tensor import ShardedTensor
 
 class PlacementSpec(ABC):
     """
@@ -129,11 +135,12 @@ class ChunkShardingSpec(ShardingSpec):
         pg = process_group if process_group is not None else distributed_c10d._get_default_group()
         tensor_num_dim = len(tensor_sizes)
 
+        self._verify_dim(self.dim)
         if self.dim >= tensor_num_dim or self.dim < -tensor_num_dim:
             raise ValueError(f"Invalid sharding dim: {self.dim}")
 
         shards_metadata = []
-        sharding_dim_size = tensor_sizes[self.dim]  # type: ignore[arg-type]
+        sharding_dim_size = tensor_sizes[self.dim]
         chunks = len(self.placements)
         split_size = get_split_size(sharding_dim_size, chunks)
         for idx, placement in enumerate(self.placements):

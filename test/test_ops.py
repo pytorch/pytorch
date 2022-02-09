@@ -22,7 +22,7 @@ from torch.testing._internal.common_device_type import \
 from torch.testing._internal.common_jit import JitCommonTestCase, check_against_reference
 from torch.testing._internal.jit_metaprogramming_utils import create_script_fn, create_traced_fn, \
     check_alias_annotation
-from torch.testing._internal.jit_utils import disable_autodiff_subgraph_inlining
+from torch.testing._internal.jit_utils import disable_autodiff_subgraph_inlining, is_lambda
 import torch.testing._internal.opinfo_helper as opinfo_helper
 from torch.testing._internal.composite_compliance import _check_composite_compliance
 
@@ -934,11 +934,6 @@ class TestGradients(TestCase):
         samples = op.sample_inputs(device, dtype, requires_grad=True)
         sample = first_sample(self, samples)
         result = op(sample.input, *sample.args, **sample.kwargs)
-
-# types.LambdaType gave false positives
-def is_lambda(lamb):
-    LAMBDA = lambda: 0  # noqa: E731
-    return isinstance(lamb, type(LAMBDA)) and lamb.__name__ == LAMBDA.__name__
 
 
 # Tests operators for consistency between JIT and eager, also checks

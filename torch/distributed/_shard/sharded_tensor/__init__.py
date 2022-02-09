@@ -402,7 +402,7 @@ from ._ops import *  # noqa: F403
 
 def _reshard_output(
         module: torch.nn.Module,
-        resharding_spec: sharding_spec.ShardingSpec) -> torch.nn.Module:
+        resharding_spec: shard_spec.ShardingSpec) -> torch.nn.Module:
     """
     Hook a module with local shards collection in the forward pass according
     to the given ``resharding_spec``.
