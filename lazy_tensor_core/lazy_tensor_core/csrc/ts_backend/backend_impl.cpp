@@ -69,7 +69,7 @@ class TSBackendImpl : public torch::lazy::BackendImplInterface {
   torch::lazy::BackendDataPtr MakeComputationDataFromTensor(
       const at::Tensor& tensor, const torch::lazy::Shape& shape,
       const torch::lazy::BackendDevice& device) const override {
-    at::TensorOptions options = tensor.options().device(default_device_type_.c10Type());
+    at::TensorOptions options = tensor.options().device(default_device_type_.c10Type(), device.ordinal());
     if (tensor.device().type() == default_device_type_.c10Type() &&
         default_device_type_.c10Type() == at::kCUDA) {
       return std::make_shared<TSData>(tensor.to(options, /*non_blocking=*/true), shape, device);
@@ -185,7 +185,6 @@ std::vector<torch::lazy::BackendDataPtr> TSBackendImpl::ExecuteComputation(
             ts_data->data().device().type() == at::kCUDA);
       stack.emplace_back(ts_data->data());
     }
-
   }
   graph_executor.run(stack);
   std::vector<torch::lazy::BackendDataPtr> results;
