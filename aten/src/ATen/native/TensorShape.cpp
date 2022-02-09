@@ -2084,13 +2084,12 @@ __inline__ Tensor view_impl(const Tensor& self, IntArrayRef size) {
 
   at::DimVector inferred_size = at::infer_size_dv(size, self.numel());
   auto stride = at::detail::computeStride(self.sizes(),
-                                        self.strides(),
-                                        inferred_size);
+                                          self.strides(),
+                                          inferred_size);
   TORCH_CHECK(stride.has_value(), "view size is "
     "not compatible with input tensor's size and stride (at least one dimension"
     " spans across two contiguous subspaces). Use .reshape(...) instead.");
-  auto stride_value = *stride;
-  return alias_with_sizes_and_strides(self, inferred_size, stride_value);
+  return alias_with_sizes_and_strides(self, inferred_size, *stride);
 
 }
 
