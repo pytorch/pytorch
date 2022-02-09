@@ -4,6 +4,11 @@ set -eux -o pipefail
 # print cpu information
 cat /proc/cpuinfo
 
+# get cpu architecure 
+git clone https://github.com/spack/spack.git -b releases/v0.17 ~/spack
+. ~/spack/share/spack/setup-env.sh
+spack arch
+
 # Set up CircleCI GPG keys for apt, if needed
 curl --retry 3 -s -L https://packagecloud.io/circleci/trusty/gpgkey | sudo apt-key add -
 
