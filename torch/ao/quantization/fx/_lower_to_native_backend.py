@@ -51,7 +51,7 @@ LOWER_MODULE_MAP: Dict[Type[torch.nn.Module], Type[ReferenceableQuantizedModule]
 
 # TODO: merge with LOWER_MODULE_MAP after we merge
 # _lower_weighted_ref_module and special_pattern_replacement
-LOWER_MODULE_MAP2 = {
+SPECIAL_PATTERN_LOWER_MODULE_MAP = {
     nn.BatchNorm2d: nnq.BatchNorm2d,
     nn.BatchNorm3d: nnq.BatchNorm3d,
 }
@@ -169,8 +169,8 @@ def special_pattern_replacement(model: QuantizedGraphModule) -> QuantizedGraphMo
         # TODO: enable we have patterns that needs to swap the modules
         if is_call_module:
             ref_module = modules[ref_node.target]
-            if type(ref_module) in LOWER_MODULE_MAP2 and is_quantize:
-                qmodule_cls = LOWER_MODULE_MAP2.get(type(ref_module))
+            if type(ref_module) in SPECIAL_PATTERN_LOWER_MODULE_MAP and is_quantize:
+                qmodule_cls = SPECIAL_PATTERN_LOWER_MODULE_MAP.get(type(ref_module))
                 scale_node = q_node.args[1]
                 zero_point_node = q_node.args[2]
                 output_scale = getattr(model, scale_node.target)

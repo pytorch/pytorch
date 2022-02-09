@@ -4979,7 +4979,7 @@ class TestQuantizeFxOps(QuantizationTestCase):
         # observers and also successfully fused two quantized::conv2d
         # patterns
         # one quantize_per_tensor for input
-        # check exact counts of quantize and dequantiz
+        # check exact counts of quantize and dequantize
         count_check = {
             # input of conv and two outputs of getitem
             ns.call_function(torch.quantize_per_tensor) : 2,
@@ -5626,6 +5626,27 @@ class TestQuantizeFxOps(QuantizationTestCase):
         self.checkGraphModuleNodes(
             m,
             expected_node_occurrence=expected_occurrence)
+
+    def test_qmatmul(self):
+        class M(torch.nn.Module):
+            def forward(self, x, y):
+                z = torch.matmul(x, y)
+                return z
+
+        m = M().eval()
+        qconfig_dict = {"": torch.quantization.default_qconfig}
+        mp = prepare_fx(m, qconfig_dict)
+        mp(torch.randn(2, 2), torch.randn(2, 2))
+        mq = convert_fx(mp)
+        expected_occurrence = {
+            ns.call_function(torch.matmul): 0,
+            ns.call_function(torch.ops.quantized.matmul): 1,
+        }
+        self.checkGraphModuleNodes(
+            mq,
+            expected_node_occurrence=expected_occurrence)
+        # verify no crash
+        res = mq(torch.randn(2, 2), torch.randn(2, 2))
 
 class TestQuantizeFxModels(QuantizationTestCase):
     @skipIfNoFBGEMM
