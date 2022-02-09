@@ -195,7 +195,8 @@ void block_sparse_triangular_solve_vec(
             &buffer_size);
 
         auto& allocator = *c10::cuda::CUDACachingAllocator::get();
-        auto work_data = allocator.allocate(buffer_size);
+        auto work_data_analysis = allocator.allocate(buffer_size);
+        auto work_data_solve = allocator.allocate(buffer_size);
 
         at::cuda::sparse::bsrsv2_analysis(
             handle,
@@ -209,8 +210,8 @@ void block_sparse_triangular_solve_vec(
             col_indices_data_ptr,
             block_size,
             info.descriptor(),
-            CUSPARSE_SOLVE_POLICY_NO_LEVEL,
-            work_data.get());
+            CUSPARSE_SOLVE_POLICY_USE_LEVEL,
+            work_data_analysis.get());
 
         at::cuda::sparse::bsrsv2_solve(
             handle,
@@ -227,8 +228,8 @@ void block_sparse_triangular_solve_vec(
             info.descriptor(),
             B_->data_ptr<scalar_t>(),
             X_->data_ptr<scalar_t>(),
-            CUSPARSE_SOLVE_POLICY_NO_LEVEL,
-            work_data.get());
+            CUSPARSE_SOLVE_POLICY_USE_LEVEL,
+            work_data_solve.get());
       });
   if (!X.is_same(*X_)) {
     X.copy_(*X_);
@@ -319,7 +320,8 @@ void block_sparse_triangular_solve_mat(
             &buffer_size);
 
         auto& allocator = *c10::cuda::CUDACachingAllocator::get();
-        auto work_data = allocator.allocate(buffer_size);
+        auto work_data_analysis = allocator.allocate(buffer_size);
+        auto work_data_solve = allocator.allocate(buffer_size);
 
         at::cuda::sparse::bsrsm2_analysis(
             handle,
@@ -335,8 +337,8 @@ void block_sparse_triangular_solve_mat(
             col_indices_data_ptr,
             block_size,
             info.descriptor(),
-            CUSPARSE_SOLVE_POLICY_NO_LEVEL,
-            work_data.get());
+            CUSPARSE_SOLVE_POLICY_USE_LEVEL,
+            work_data_analysis.get());
 
         at::cuda::sparse::bsrsm2_solve(
             handle,
@@ -357,8 +359,8 @@ void block_sparse_triangular_solve_mat(
             ldb,
             X_->data_ptr<scalar_t>(),
             ldx,
-            CUSPARSE_SOLVE_POLICY_NO_LEVEL,
-            work_data.get());
+            CUSPARSE_SOLVE_POLICY_USE_LEVEL,
+            work_data_solve.get());
       });
   if (!X.is_same(*X_)) {
     X.copy_(*X_);
