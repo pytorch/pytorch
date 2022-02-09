@@ -569,6 +569,7 @@ def swap_module(mod, mapping, custom_module_class_mapping):
             if hasattr(qmod, '_IS_REFERENCE') and qmod._IS_REFERENCE:
                 assert mod.qconfig is not None
                 weight_post_process = mod.qconfig.weight()
+                weight_post_process(mod.weight)
                 weight_qparams = get_qparam_dict(weight_post_process)
                 new_mod = qmod.from_float(mod, weight_qparams)
             else:
