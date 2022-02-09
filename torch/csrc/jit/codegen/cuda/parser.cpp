@@ -2474,11 +2474,6 @@ class IrParser {
       value_map_.emplace(val->unique(), cg_val);
       return true;
     } else if (val->type()->isSubtypeOf(
-                   static_cast<c10::TypePtr>(StringType::get()))) {
-      // String scalars are only used in parsing rules;
-      // Do not register string with codegen IR.
-      return true;
-    } else if (val->type()->isSubtypeOf(
                    static_cast<c10::TypePtr>(BoolType::get()))) {
       // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
       CgValue cg_val;
@@ -2490,8 +2485,12 @@ class IrParser {
       value_map_.emplace(val->unique(), cg_val);
       return true;
     } else if (val->type()->isSubtypeOf(
+                   static_cast<c10::TypePtr>(StringType::get())) ||
+               val->type()->isSubtypeOf(
                    static_cast<c10::TypePtr>(NoneType::get()))) {
       // TODO: should we consider adding support for NoneType;
+      // String scalars are only used in parsing rules;
+      // Do not register string with codegen IR.
       return true;
     } else if (val->type()->cast<ListType>()) {
       // TODO: we don't support list type in codegen yet;
@@ -2699,8 +2698,8 @@ void profileString(ProfilingRecord* pr, Node* node, size_t offset) {
     if (!pn->hasAttribute(strAttr)) {
       pn->s_(strAttr, value.toStringRef());
     } else {
-      auto profiled_str = pn->s(strAttr);
-      auto input_str = value.toStringRef();
+      const auto& profiled_str = pn->s(strAttr);
+      const auto& input_str = value.toStringRef();
       TORCH_INTERNAL_ASSERT(
           input_str == profiled_str,
           "profiling ivalue doesn't support merge");

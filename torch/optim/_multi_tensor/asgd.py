@@ -31,6 +31,22 @@ class ASGD(Optimizer):
                         weight_decay=weight_decay, foreach=True)
         super(ASGD, self).__init__(params, defaults)
 
+    def __setstate__(self, state):
+        super().__setstate__(state)
+        state_values = list(self.state.values())
+        step_is_tensor = (len(state_values) != 0) and torch.is_tensor(state_values[0]['step'])
+        if not step_is_tensor:
+            for s in state_values:
+                s['step'] = torch.tensor(float(s['step']))
+        eta_is_tensor = (len(state_values) != 0) and torch.is_tensor(state_values[0]['eta'])
+        if not eta_is_tensor:
+            for s in state_values:
+                s['eta'] = torch.tensor(s['eta'])
+        mu_is_tensor = (len(state_values) != 0) and torch.is_tensor(state_values[0]['mu'])
+        if not mu_is_tensor:
+            for s in state_values:
+                s['mu'] = torch.tensor(float(s['mu']))
+
     @torch.no_grad()
     def step(self, closure=None):
         """Performs a single optimization step.
@@ -44,11 +60,14 @@ class ASGD(Optimizer):
             with torch.enable_grad():
                 loss = closure()
 
-        grads = []
-        params_with_grad = []
-        states = []
-
         for group in self.param_groups:
+            grads = []
+            params_with_grad = []
+            mus = []
+            axs = []
+            etas = []
+            state_steps = []
+
             for p in group['params']:
                 if p.grad is not None:
                     if p.grad.is_sparse:
@@ -60,17 +79,22 @@ class ASGD(Optimizer):
 
                     # State initialization
                     if len(state) == 0:
-                        state['step'] = 0
-                        state['eta'] = group['lr']
-                        state['mu'] = 1
+                        state['step'] = torch.tensor(0.)
+                        state['eta'] = torch.tensor(group['lr'])
+                        state['mu'] = torch.tensor(1.)
                         state['ax'] = torch.zeros_like(p, memory_format=torch.preserve_format)
 
-                    state['step'] += 1
-                    states.append(state)
+                    mus.append(state['mu'])
+                    axs.append(state['ax'])
+                    etas.append(state['eta'])
+                    state_steps.append(state['step'])
 
             F.asgd(params_with_grad,
                    grads,
-                   states,
+                   axs,
+                   mus,
+                   etas,
+                   state_steps,
                    lambd=group['lambd'],
                    lr=group['lr'],
                    t0=group['t0'],
