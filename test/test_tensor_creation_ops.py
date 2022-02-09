@@ -2815,7 +2815,8 @@ class TestTensorCreation(TestCase):
         self._test_signal_window_functions(window, dtype, device)
 
     @onlyNativeDeviceTypes
-    @expectedFailureMeta
+    # See https://github.com/pytorch/pytorch/issues/72630
+    @skipMeta
     @precisionOverride({torch.bfloat16: 5e-2, torch.half: 1e-3})
     @unittest.skipIf(not TEST_SCIPY, "Scipy not found")
     @dtypesIfCUDA(torch.float, torch.double, torch.bfloat16, torch.half, torch.long)
