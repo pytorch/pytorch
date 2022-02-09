@@ -1806,6 +1806,7 @@
 - name: gelu_backward(Tensor grad_output, Tensor self, *, str approximate='none') -> Tensor
   grad_output: gelu_backward(grad, self, approximate)
   self: gelu_double_backward(grad, grad_output, self, approximate)
+  result: gelu_backward(grad_output_t, self_p, approximate) + gelu_double_backward(self_t, grad_output_p, self_p, approximate)
 
 - name: glu(Tensor self, int dim=-1) -> Tensor
   self: glu_backward(grad, self, dim)

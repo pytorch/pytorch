@@ -11785,7 +11785,7 @@ op_db: List[OpInfo] = [
            supports_gradgrad=True,
            supports_out=False,
            supports_forward_ad=True,
-           supports_fwgrad_bwgrad=False,
+           supports_fwgrad_bwgrad=True,
            autodiff_nonfusible_nodes=["aten::gelu"]),
     OpInfo('nn.functional.relu6',
            aten_name="relu6",
