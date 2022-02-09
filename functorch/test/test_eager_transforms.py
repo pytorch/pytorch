@@ -528,19 +528,6 @@ class TestGradTransform(TestCase):
         self.assertNotEqual(grads['a'].sum(), 0.0)
         self.assertEqual(grads['b'].sum(), 0.0)
 
-    def test_grad_any_aux(self, device):
-        def f(x):
-            return (x ** 2).sum(), ["any", x, {"a": x}]
-
-        x = torch.rand(4, device=device)
-        _, expected_aux = f(x)
-        output = grad(f, has_aux=True)(x)
-        assert isinstance(output, tuple) and len(output) == 2
-        assert isinstance(output[0], torch.Tensor)
-        self.assertEqual(output[1], expected_aux)
-        assert not output[1][1].requires_grad
-        assert not output[1][2]["a"].requires_grad
-
     def test_unrelated_grad(self, device):
         x = torch.tensor(1., device=device)
         y = torch.tensor(2., device=device)
@@ -695,7 +682,7 @@ class TestGradTransform(TestCase):
     def test_vjp_aux_pytree(self, device):
         def f(x):
             y = x.sin()
-            return y, {'a': x.cos(), 'b': [x.tan()], 'c': 1, 'd': 1.0, 'e': 'any'}
+            return y, {'a': x.cos(), 'b': [x.tan()]}
 
         x = torch.randn(3, device=device)
 
