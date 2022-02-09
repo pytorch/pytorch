@@ -9,16 +9,15 @@ T_co = TypeVar('T_co', covariant=True)
 
 @functional_datapipe('shuffle')
 class ShufflerMapDataPipe(MapDataPipe[T_co]):
-    r""" :class:`ShufflerMapDataPipe`
-
-    Map DataPipe to shuffle the input DataPipe via its indices.
+    r"""
+    Shuffle the input DataPipe via its indices (functional name: ``shuffle``).
 
     When it is used with :class:`~torch.utils.data.DataLoader`, the methods to
     set up random seed are different based on :attr:`num_workers`.
 
     For single-process mode (:attr:`num_workers == 0`), the random seed is set before
     the :class:`~torch.utils.data.DataLoader` in the main process. For multi-process
-    mode (:attr:`num_worker > 0`), `worker_init_fn` is used to set up a random seed
+    mode (:attr:`num_worker > 0`), ``worker_init_fn`` is used to set up a random seed
     for each worker process.
 
     Args:
