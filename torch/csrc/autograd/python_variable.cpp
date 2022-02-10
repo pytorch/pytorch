@@ -1677,6 +1677,7 @@ void concrete_dispatch_fn(
   // Parse the name into namespace and name (no overload_name)
   // TODO: put this into the library
   const auto& qualified_name = op.operator_name().name;
+  const auto& overload_name = op.overload_name();
   auto pos = qualified_name.find("::");
   TORCH_INTERNAL_ASSERT(pos != std::string::npos, qualified_name);
   // Make me some null terminated strings
@@ -1696,7 +1697,7 @@ void concrete_dispatch_fn(
   // For now, overloads get coalesced.  Might be easier for users if they get
   // overload resolution but is more complicated (need to expose separate
   // functions per overload)
-  py::handle torch_api_function = py::module::import("torch").attr("ops").attr(ns).attr(func_name);
+  py::handle torch_api_function = py::module::import("torch").attr("ops").attr(ns).attr(func_name).attr(overload_name);
   std::string module_name_str = "torch.ops." + ns_str;
 
   // About all the pointers:
