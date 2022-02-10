@@ -196,24 +196,36 @@ at::Tensor LazyNativeFunctions::_copy_from(const at::Tensor& self,
   auto dst_tensor = torch::lazy::TryGetLtcTensor(dst);
   auto self_tensor = torch::lazy::TryGetLtcTensor(self);
   if (!self_tensor) {
+    // providing a new 'eager' value (self) for an existing lazy tensor (dst)
     static bool sync_update =
         lazy_tensors::sys_util::GetEnvBool("XLA_TENSOR_UPDATE_SYNC", true);
     CHECK(dst_tensor);
     dst_tensor.UpdateFromTensor(self, /*sync=*/sync_update);
   } else if (!dst_tensor) {
-    at::Tensor tensor = self_tensor.ToTensor(/*detached=*/true);
+    // materializing a lazy tensor (self) and copying its value into eager tensor (dst)
+    // detached=false lets us skip a copy in `ToTensor`, which should be safe
+    // becuase we are only going to use the tensor for dst.copy_()
+    at::Tensor tensor = self_tensor.ToTensor(/*detached=*/false);
     at::Tensor typed_tensor =
         torch::lazy::CopyTensor(tensor, dst.scalar_type(), /*copy=*/false);
     dst.resize_as_(typed_tensor).copy_(typed_tensor);
   } else {
+    // Copying one lazy tensor to another
     if (!dst_tensor.CurrentIrValue()) {
+      // if dest is not backed by IR (e.g. result of some lazy operation),
+      // then it should have at::Tensor data backing it instead
       auto dst_tensor_data = dst_tensor.CurrentTensorData();
       CHECK(dst_tensor_data);
       auto src_tensor_data = self_tensor.CurrentTensorData();
       if (src_tensor_data) {
+        // both src/dst are simply backed by at::Tensor data, no IR- do a straightforward copy
         dst_tensor_data->copy_(*src_tensor_data);
       } else {
-        dst_tensor_data->copy_(self_tensor.ToTensor(/*detached=*/true));
+        // src needs to be materialized before its result can be used for a copy into dst
+        // since we use the src tensor only for making a copy, we don't need to detach it
+        // note: it would be even more efficient if we could cause ToTensor to materialize the
+        // value directly into dst's buffer (that would need to be detached though).
+        dst_tensor_data->copy_(self_tensor.ToTensor(/*detached=*/false));
       }
     } else {
       lazy_tensor_aten_ops::copy_(dst_tensor, self_tensor);
