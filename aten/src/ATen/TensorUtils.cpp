@@ -317,22 +317,6 @@ std::vector<int64_t> defaultStrides(IntArrayRef sizes) {
   return strides;
 }
 
-size_t computeStorageNbytes(
-    IntArrayRef sizes,
-    IntArrayRef strides,
-    size_t itemsize_bytes) {
-  // size of the underlying storage is 1 bigger than the offset
-  // of the last element according to stride
-  size_t size = 1;
-  for (const auto i : c10::irange(sizes.size())) {
-    if(sizes[i] == 0) {
-      return 0;
-    }
-    size += strides[i]*(sizes[i]-1);
-  }
-  return size * itemsize_bytes;
-}
-
 // On a high level,
 // 1. separate `oldshape` into chunks of dimensions, where the dimensions are
 //    ``contiguous'' in each chunk, i.e., oldstride[i] = oldshape[i+1] *
