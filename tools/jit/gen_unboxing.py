@@ -2,6 +2,7 @@
 import argparse
 import json
 import os
+import pathlib
 from dataclasses import dataclass
 from tools.codegen.api.translate import translate
 from tools.codegen.api.types import CppSignatureGroup
@@ -149,6 +150,10 @@ def main() -> None:
         "-d", "--install_dir", help="output directory", default="build/aten/src/ATen"
     )
     parser.add_argument(
+        '-o',
+        '--output-dependencies',
+        help='output a list of dependencies into the given file and exit')
+    parser.add_argument(
         '--dry-run', action='store_true',
         help='run without writing any files (still updates outputs)')
 
@@ -163,6 +168,14 @@ def main() -> None:
 
     cpu_fm = make_file_manager(options=options)
     gen_unboxing(native_functions=native_functions, cpu_fm=cpu_fm)
+
+    if options.output_dependencies:
+        depfile_path = pathlib.Path(options.output_dependencies).resolve()
+        depfile_name = depfile_path.name
+        depfile_stem = depfile_path.stem
+
+        path = depfile_path.parent / depfile_name
+        cpu_fm.write_outputs(depfile_stem, str(path))
 
 
 if __name__ == "__main__":

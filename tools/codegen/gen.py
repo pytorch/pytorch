@@ -1401,7 +1401,7 @@ def gen_source_files(
                     class_method_name=None),
                 grouped_native_functions
             )),
-            'dispatch_registrations': list(concatMap(
+            'dispatch_registrations': [] if static_dispatch_idx else list(concatMap(
                 dest.RegisterDispatchKey(
                     backend_index,
                     Target.REGISTRATION,
@@ -1429,7 +1429,7 @@ def gen_source_files(
     if force_schema_registration:
         schema_selector = SelectiveBuilder.get_nop_selector()
     cpu_fm.write('RegisterSchema.cpp', lambda: {
-        'schema_registrations': list(mapMaybe(RegisterSchema(schema_selector), native_functions)),
+        'schema_registrations': [] if static_dispatch_idx else list(mapMaybe(RegisterSchema(schema_selector), native_functions)),
     })
 
     def key_func(fn: Union[NativeFunction, NativeFunctionsGroup]) -> str:
