@@ -608,6 +608,75 @@ class TestCompileCacheStaticArgs(TestCase):
         total_recomps = end_num_recomps - start_num_recomps
         assert total_recomps == 2
 
+    def test_arg_none(self):
+        def check(a, b, c, aot_autograd_fn, fn):
+            def cloner(x):
+                if x is not None:
+                    return x.clone().detach().requires_grad_(True)
+                return None
+
+            def check_grad(x, x_clone):
+                if x is not None:
+                    return torch.allclose(x.grad, x_clone.grad)
+                return True
+
+            ref = fn(a, b, c)
+            res = aot_autograd_fn(a, b, c)
+            assert torch.allclose(res, ref)
+
+            a_clone = cloner(a)
+            b_clone = cloner(b)
+            c_clone = cloner(c)
+            ref.sum().backward()
+            res = aot_autograd_fn(a_clone, b_clone, c_clone)
+            res.sum().backward()
+
+            check_grad(a, a_clone)
+            check_grad(b, b_clone)
+            check_grad(c, c_clone)
+
+        def fn(a, b, c):
+            if a is None and b is None:
+                return c
+            elif a is None and c is None:
+                return b
+            elif b is None and c is None:
+                return a
+            elif a is None:
+                return b + c
+            elif b is None:
+                return a + c
+            elif c is None:
+                return a + b
+            return a + b + c
+
+        functorch.compile.clear_compile_cache()
+
+        start_num_recomps = functorch.compile.num_of_recompilations()
+
+        aot_autograd_f = aot_function(fn, nop, nop)
+
+        t1 = torch.randn(2, 2, requires_grad=True)
+        check(t1, None, None, aot_autograd_f, fn)
+        check(None, t1, None, aot_autograd_f, fn)
+        check(None, None, t1, aot_autograd_f, fn)
+
+        t2 = torch.randn(2, 2, requires_grad=True)
+        check(t1, t2, None, aot_autograd_f, fn)
+        check(t1, None, t2, aot_autograd_f, fn)
+        check(None, t1, t2, aot_autograd_f, fn)
+
+        t3 = torch.randn(2, 2, requires_grad=True)
+        check(t1, t2, t3, aot_autograd_f, fn)
+
+        # Same type of args, so no recompilation
+        check(t1, t2, None, aot_autograd_f, fn)
+
+        end_num_recomps = functorch.compile.num_of_recompilations()
+
+        total_recomps = end_num_recomps - start_num_recomps
+        assert total_recomps == 7
+
 
 if __name__ == "__main__":
     run_tests()
