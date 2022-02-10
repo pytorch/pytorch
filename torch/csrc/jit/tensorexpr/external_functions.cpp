@@ -1030,6 +1030,9 @@ void nnc_aten_dequantize_out(
   const double qscale = ((double*)extra_args)[0];
   const int64_t qzero = extra_args[1];
   const int64_t qdtype = extra_args[2];
+  std::cout << "XXX " << __FILE__ << ":" << __LINE__ << " " << __FUNCTION__
+            << " bufs_in_num:" << bufs_in_num
+            << " bufs_out_num:" << bufs_out_num << std::endl;
   auto tensors = constructTensors2(
       bufs_in_num,
       buf_data,
@@ -1041,6 +1044,10 @@ void nnc_aten_dequantize_out(
       bufs_out_num);
   // NOLINTNEXTLINE
   auto r = at::dequantize(tensors[1]);
+  std::cout << "XXX " << __FILE__ << ":" << __LINE__ << " " << __FUNCTION__
+            << "\n tensors[1]:\n"
+            << tensors[1] << "\n r:\n"
+            << r << std::endl;
   buf_data[0] = r.data_ptr();
   c10::raw::intrusive_ptr::incref(r.getIntrusivePtr().get());
   buf_data[bufs_in_num + bufs_out_num] = r.getIntrusivePtr().get();

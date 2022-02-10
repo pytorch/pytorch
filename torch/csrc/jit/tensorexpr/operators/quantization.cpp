@@ -285,15 +285,8 @@ Tensor computeQuantizePerTensorExternalCall(
     return makeQBufHandleNCHW(
         "quantize_per_tensor", outputShape, dtype, qscale, qzero);
   }();
-  /*
   StmtPtr s = ExternalCall::make(
       ResultBuf, "nnc_aten_quantize_per_tensor", {x}, {qscale, qzero, qdtype});
-  */
-  StmtPtr s = ExternalCall2::make(
-      "nnc_aten_quantize_per_tensor_out",
-      {ResultBuf},
-      {x},
-      {qscale, qzero, qdtype});
   return Tensor(ResultBuf.node(), s);
 }
 
@@ -320,15 +313,6 @@ Tensor computeDequantizeExternalCall(
       {ExprHandle(IRSimplifier::simplify(qx.node()->qscale())),
        ExprHandle(IRSimplifier::simplify(qx.node()->qzero())),
        qdtype});
-  /*
-  StmtPtr s = ExternalCall2::make(
-      "nnc_aten_dequantize_out",
-      {ResultBuf},
-      {qx},
-      {ExprHandle(IRSimplifier::simplify(qx.node()->qscale())),
-       ExprHandle(IRSimplifier::simplify(qx.node()->qzero())),
-       qdtype});
-  */
   return Tensor(ResultBuf.node(), s);
 }
 
@@ -430,16 +414,6 @@ Tensor computeQuantizedConv2d(
       Dtype(out_qdtype),
       out_qscale,
       out_qzero);
-  StmtPtr s = ExternalCall2::make(
-      "nnc_aten_quantized_conv2d_out",
-      {ResultBuf},
-      {qx, prepacked},
-      {immQScale(qx),
-       immQZero(qx),
-       (int64_t)immQDType(qx),
-       out_qscale,
-       out_qzero});
-  /*
   StmtPtr s = ExternalCall::make(
       ResultBuf,
       "nnc_aten_quantized_conv2d",
@@ -449,7 +423,6 @@ Tensor computeQuantizedConv2d(
        (int64_t)immQDType(qx),
        out_qscale,
        out_qzero});
-  */
   return Tensor(ResultBuf.node(), s);
 }
 
@@ -472,16 +445,6 @@ Tensor computeQuantizedConv2dRelu(
       Dtype(out_qdtype),
       out_qscale,
       out_qzero);
-  StmtPtr s = ExternalCall2::make(
-      "nnc_aten_quantized_conv2d_relu_out",
-      {ResultBuf},
-      {qx, prepacked},
-      {immQScale(qx),
-       immQZero(qx),
-       (int64_t)immQDType(qx),
-       out_qscale,
-       out_qzero});
-  /*
   StmtPtr s = ExternalCall::make(
       ResultBuf,
       "nnc_aten_quantized_conv2d_relu",
@@ -491,7 +454,6 @@ Tensor computeQuantizedConv2dRelu(
        (int64_t)immQDType(qx),
        out_qscale,
        out_qzero});
-  */
   return Tensor(ResultBuf.node(), s);
 }
 
@@ -615,19 +577,6 @@ Tensor computeQuantizedMul(
   const auto out_qdtype = immQDType(qa);
   auto ResultBuf = makeQBufHandleNCHW(
       "quantized_mul", outputShape, Dtype(out_qdtype), out_qscale, out_qzero);
-  StmtPtr s = ExternalCall2::make(
-      "nnc_aten_quantized_mul_out",
-      {ResultBuf},
-      {qa, qb},
-      {immQScale(qa),
-       immQZero(qa),
-       (int64_t)immQDType(qa),
-       immQScale(qb),
-       immQZero(qb),
-       (int64_t)immQDType(qb),
-       out_qscale,
-       out_qzero});
-  /*
   StmtPtr s = ExternalCall::make(
       ResultBuf,
       "nnc_aten_quantized_mul",
@@ -640,7 +589,6 @@ Tensor computeQuantizedMul(
        (int64_t)immQDType(qb),
        out_qscale,
        out_qzero});
-  */
   return Tensor(ResultBuf.node(), s);
 }
 
@@ -885,35 +833,21 @@ Tensor computeQuantizedSigmoidExternalCall(
   const double out_qscale = 1.0f / 256.0f;
   const int64_t out_qzero = (out_qdtype == ScalarType::QInt8) ? -128 : 0;
 
-  auto ResultBuf =
-    isNHWC(qx) || isNLC(qx)
-    ? makeQBufHandleNHWC(
-      "quantized_sigmoid",
-      outputShape,
-      Dtype(out_qdtype),
-      out_qscale,
-      out_qzero)
-    :
-      makeQBufHandleNCHW(
-      "quantized_sigmoid",
-      outputShape,
-      Dtype(out_qdtype),
-      out_qscale,
-      out_qzero);
-  /*
+  auto ResultBuf = isNHWC(qx) || isNLC(qx) ? makeQBufHandleNHWC(
+                                                 "quantized_sigmoid",
+                                                 outputShape,
+                                                 Dtype(out_qdtype),
+                                                 out_qscale,
+                                                 out_qzero)
+                                           : makeQBufHandleNCHW(
+                                                 "quantized_sigmoid",
+                                                 outputShape,
+                                                 Dtype(out_qdtype),
+                                                 out_qscale,
+                                                 out_qzero);
   StmtPtr s = ExternalCall::make(
       ResultBuf,
       "nnc_aten_quantized_sigmoid",
-      {qx},
-      {immQScale(qx),
-       immQZero(qx),
-       (int64_t)immQDType(qx),
-       out_qscale,
-       out_qzero});
-  */
-  StmtPtr s = ExternalCall2::make(
-      "nnc_aten_quantized_sigmoid_out",
-      {ResultBuf},
       {qx},
       {immQScale(qx),
        immQZero(qx),

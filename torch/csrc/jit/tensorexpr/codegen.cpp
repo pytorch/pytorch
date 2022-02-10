@@ -8,6 +8,20 @@ namespace torch {
 namespace jit {
 namespace tensorexpr {
 
+CodeGen::CodeGen(
+    StmtPtr stmt,
+    std::vector<BufferArg> buffer_args,
+    at::Device device,
+    std::string kernel_func_name)
+    : stmt_(stmt),
+      buffer_args_(std::move(buffer_args)),
+      device_(device),
+      kernel_func_name_(std::move(kernel_func_name)) {
+  ExtCallMemoryReuse extCallMemoryReuse(buffer_args_);
+  apply_mutator(&extCallMemoryReuse);
+  allocIntermediateBufs();
+}
+
 RegisterCodeGenList::StmtFactoryMethod RegisterCodeGenList::
     FindStmtFactoryMethod(const std::string& name) {
   auto iter = stmt_factory_methods_.find(name);
@@ -214,6 +228,44 @@ StmtPtr insertAllocFree(
 
   b->append_stmt(alloc<FreeExt>(bufs_ext_to_free));
   return b;
+}
+
+std::unordered_map<std::string, std::string> ExtCallMemoryReuse::
+    makeExtCallFuncNameMap() {
+  return {
+      {"nnc_aten_quantize_per_tensor", "nnc_aten_quantize_per_tensor_out"},
+      {"nnc_aten_dequantize", "nnc_aten_dequantize_out"},
+      {"nnc_aten_quantized_mul", "nnc_aten_quantized_mul_out"},
+      {"nnc_aten_quantized_conv2d", "nnc_aten_quantized_conv2d_out"},
+      {"nnc_aten_quantized_conv2d_relu", "nnc_aten_quantized_conv2d_relu_out"},
+      {"nnc_aten_quantized_mul", "nnc_aten_quantized_mul_out"},
+      {"nnc_aten_quantized_sigmoid", "nnc_aten_quantized_sigmoid_out"},
+  };
+}
+
+const std::unordered_map<std::string, std::string>
+    ExtCallMemoryReuse::extCallFuncNameMap_ = makeExtCallFuncNameMap();
+
+ExtCallMemoryReuse::ExtCallMemoryReuse(
+    const std::vector<CodeGen::BufferArg>& bufferArgs) {
+  for (const auto& ba : bufferArgs) {
+    if (ba.buf()) {
+      bufferArgs_.insert(ba.buf());
+    }
+  }
+}
+
+StmtPtr ExtCallMemoryReuse::mutate(ExternalCallPtr v) {
+  if (extCallFuncNameMap_.count(v->func_name()) &&
+      bufferArgs_.count(v->buf()) == 0) {
+    std::vector<BufPtr> buf_out_args = {v->buf()};
+    return alloc<ExternalCall2>(
+        extCallFuncNameMap_.at(v->func_name()),
+        buf_out_args,
+        v->buf_args(),
+        v->args());
+  }
+  return v;
 }
 
 // We allocate intermediate buffers by inserting Allocate/Free or
