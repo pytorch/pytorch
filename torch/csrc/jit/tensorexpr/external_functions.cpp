@@ -834,6 +834,37 @@ void nnc_aten_quantized_sigmoid(
   memcpy(buf_data[0], r.data_ptr(), r.element_size() * r.numel());
 }
 
+void nnc_aten_quantized_sigmoid_out(
+    int64_t bufs_in_num,
+    void** buf_data,
+    int64_t* buf_ranks,
+    int64_t* buf_dims,
+    int64_t* buf_strides,
+    int8_t* buf_dtypes,
+    int64_t,
+    int64_t* extra_args) {
+  const double x_qscale = ((double*)extra_args)[0];
+  const int64_t x_qzero = extra_args[1];
+  const c10::ScalarType x_qdtype = static_cast<c10::ScalarType>(extra_args[2]);
+  const size_t bufs_out_num = 1u;
+  auto tensors = constructTensors2(
+      bufs_in_num,
+      buf_data,
+      buf_ranks,
+      buf_dims,
+      buf_strides,
+      buf_dtypes,
+      {{1u, {x_qscale, x_qzero, toQIntType(x_qdtype)}}},
+      bufs_out_num);
+
+  // NOLINTNEXTLINE
+  auto r = at::sigmoid(tensors[1]);
+  // memcpy(buf_data[0], r.data_ptr(), r.element_size() * r.numel());
+  buf_data[0] = r.data_ptr();
+  c10::raw::intrusive_ptr::incref(r.getIntrusivePtr().get());
+  buf_data[bufs_in_num + bufs_out_num] = r.getIntrusivePtr().get();
+}
+
 void nnc_aten_quantized_cat(
     int64_t bufs_num,
     void** buf_data,
@@ -1288,6 +1319,9 @@ const static RegisterNNCExternalFunction nnc_quantized_mul_scalar(
 const static RegisterNNCExternalFunction nnc_quantized_sigmoid(
     "nnc_aten_quantized_sigmoid",
     nnc_aten_quantized_sigmoid);
+const static RegisterNNCExternalFunction nnc_quantized_sigmoid_out(
+    "nnc_aten_quantized_sigmoid_out",
+    nnc_aten_quantized_sigmoid_out);
 const static RegisterNNCExternalFunction nnc_quantized_cat(
     "nnc_aten_quantized_cat",
     nnc_aten_quantized_cat);

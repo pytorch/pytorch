@@ -885,15 +885,35 @@ Tensor computeQuantizedSigmoidExternalCall(
   const double out_qscale = 1.0f / 256.0f;
   const int64_t out_qzero = (out_qdtype == ScalarType::QInt8) ? -128 : 0;
 
-  auto ResultBuf = makeQBufHandleNHWC(
+  auto ResultBuf =
+    isNHWC(qx) || isNLC(qx)
+    ? makeQBufHandleNHWC(
+      "quantized_sigmoid",
+      outputShape,
+      Dtype(out_qdtype),
+      out_qscale,
+      out_qzero)
+    :
+      makeQBufHandleNCHW(
       "quantized_sigmoid",
       outputShape,
       Dtype(out_qdtype),
       out_qscale,
       out_qzero);
+  /*
   StmtPtr s = ExternalCall::make(
       ResultBuf,
       "nnc_aten_quantized_sigmoid",
+      {qx},
+      {immQScale(qx),
+       immQZero(qx),
+       (int64_t)immQDType(qx),
+       out_qscale,
+       out_qzero});
+  */
+  StmtPtr s = ExternalCall2::make(
+      "nnc_aten_quantized_sigmoid_out",
+      {ResultBuf},
       {qx},
       {immQScale(qx),
        immQZero(qx),
