@@ -293,7 +293,7 @@ class ZeroRedundancyOptimizer(Optimizer, Joinable):
 
     Arguments:
         params (``Iterable``): an ``Iterable`` of :class:`torch.Tensor` s
-            or :class:`dict` giving all parameters, which will be sharded
+            or :class:`dict` s giving all parameters, which will be sharded
             across ranks.
 
     Keyword Args:
@@ -1365,9 +1365,6 @@ class ZeroRedundancyOptimizer(Optimizer, Joinable):
         NOTE: This method can be removed once support for sparse parameters
         and varying parameter types is added.
         """
-        assert isinstance(self._all_params[0], torch.Tensor), \
-            "`self._all_params` should contain Tensors, not " \
-            f"{type(self._all_params[0])}"
         typename = torch.typename(self._all_params[0])
         if self._all_params[0].is_sparse:
             raise ValueError("ZeroRedundancyOptimizer only supports using "
