@@ -1,4 +1,5 @@
 import os
+import tempfile
 import time
 
 
@@ -25,11 +26,20 @@ class FileBaton:
         Returns:
             True if the file could be created, else False.
         '''
-        try:
-            self.fd = os.open(self.lock_file_path, os.O_CREAT | os.O_EXCL)
-            return True
-        except FileExistsError:
-            return False
+        # See `open(2)` man page for why we don't use `O_EXCL`.
+        # TL;DR: this is more portable for different file systems.
+        with tempfile.NamedTemporaryFile(
+                mode='w',
+                # Use the same directory so we decrease chances of
+                # cross-device linking (which would fail).
+                dir=os.path.dirname(self.lock_file_path),
+        ) as tmp_f:
+            try:
+                os.link(tmp_f.name, self.lock_file_path)
+                self.fd = os.open(self.lock_file_path, os.O_RDONLY)
+                return True
+            except FileExistsError:
+                return os.stat(tmp_f.name).st_nlink == 2
 
     def wait(self):
         '''
