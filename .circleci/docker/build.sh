@@ -138,7 +138,6 @@ case "$image" in
     DB=yes
     VISION=yes
     KATEX=yes
-    USE_DEPLOY=1
     ;;
   pytorch-linux-bionic-cuda11.5-cudnn8-py3-gcc7)
     CUDA_VERSION=11.5.0
