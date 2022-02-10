@@ -637,7 +637,7 @@ std::vector<SegmentInfo> snapshot() {
               "Calling snapshot with backend:cudaMallocAsync is not meaningful. "
               "(For backend:native, snapshot returns a detailed summary of all "
               "blocks tracked by the allocator, but the cudaMallocAsync backend "
-              "does not track individual blocks.");
+              "does not track individual blocks.)");
   // Alternative: TORCH_WARN
   return {};
 }
