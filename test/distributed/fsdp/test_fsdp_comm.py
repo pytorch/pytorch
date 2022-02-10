@@ -38,20 +38,10 @@ class TestCommunication(FSDPTest):
         "use_no_sync",
         [False, True],
     )
-    @parametrize(
-        "num_sync_iters",
-        [1, 3],
-    )
-    @parametrize(
-        "num_no_sync_iters",
-        [1, 3],
-    )
     def test_communication(
         self,
         nested_model: bool,
         use_no_sync: bool,
-        num_sync_iters: int,
-        num_no_sync_iters: int,
     ):
         """
         Tests FSDP's communication cost in terms of calls to collective
@@ -65,11 +55,6 @@ class TestCommunication(FSDPTest):
                 manager to accumulate gradients for one iteration before
                 synchronizing gradients in the second iteration; if ``False``,
                 only checks the communication cost of normal execution.
-            num_sync_iters (int): Number of iterations to run the normal
-                execution.
-            num_no_sync_iters (int): Number of iterations to run the
-                ``no_sync()`` execution; ignored if ``use_no_sync`` is
-                ``False``.
         """
         # Initialize the model and inputs
         group = dist.distributed_c10d._get_default_group()
@@ -97,6 +82,8 @@ class TestCommunication(FSDPTest):
         expected_num_reduce_scatter_no_sync = 0
         expected_num_reduce_scatter_sync = num_fsdp
 
+        num_no_sync_iters = 3
+        num_sync_iters = 3
         with patch("torch.distributed._all_gather_base") as mock_all_gather, \
                 patch("torch.distributed._reduce_scatter_base") as mock_reduce_scatter:
             def reset_mocks():
