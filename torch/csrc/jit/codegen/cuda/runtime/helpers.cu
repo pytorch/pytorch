@@ -205,6 +205,18 @@ __device__ int64_t where(bool c, int64_t a, int64_t b) {
   return c ? a : b;
 }
 
+__device__ int where(bool c, int a, int b) {
+  return c ? a : b;
+}
+
+__device__ int64_t where(bool c, int64_t a, int b) {
+  return c ? a : b;
+}
+
+__device__ int64_t where(bool c, int a, int64_t b) {
+  return c ? a : b;
+}
+
 __device__ double randLike(Philox& rnd) {
   return uniform(rnd(), rnd());
 }

@@ -705,7 +705,10 @@ TensorView* max(
       init = IrBuilder::create<Double>(std::numeric_limits<float>::lowest());
       break;
     case (DataType::Int):
-      init = IrBuilder::create<Int>(INT_MIN);
+      init = IrBuilder::create<Int>(std::numeric_limits<int64_t>::lowest());
+      break;
+    case (DataType::Int32):
+      init = IrBuilder::create<Int>(std::numeric_limits<int32_t>::lowest());
       break;
     default:
       TORCH_CHECK(
@@ -730,7 +733,10 @@ TensorView* min(
       init = IrBuilder::create<Double>(FLT_MAX);
       break;
     case (DataType::Int):
-      init = IrBuilder::create<Int>(INT_MAX);
+      init = IrBuilder::create<Int>(std::numeric_limits<int64_t>::max());
+      break;
+    case (DataType::Int32):
+      init = IrBuilder::create<Int>(std::numeric_limits<int32_t>::max());
       break;
     default:
       TORCH_CHECK(

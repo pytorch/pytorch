@@ -724,7 +724,9 @@ kir::ExpressionEvaluator bindKernelInputs(
       // NOLINTNEXTLINE: https://bugs.llvm.org/show_bug.cgi?id=48525
     } else if (input->isScalar() && input->dtype() == DataType::Int) {
       TORCH_INTERNAL_ASSERT(
-          aten_inputs[i].type()->kind() == c10::TypeKind::IntType);
+          aten_inputs[i].type()->kind() == c10::TypeKind::IntType,
+          "kernel expected Scalar Int inputs, but found",
+          aten_inputs[i].type()->str());
       expr_eval.bind(input, aten_inputs[i].toInt());
     }
   }
@@ -781,7 +783,9 @@ ExpressionEvaluator bindFusionInputs(
         inputs[i]->getValType().value() == ValType::Scalar &&
         inputs[i]->getDataType().value() == DataType::Int) {
       TORCH_INTERNAL_ASSERT(
-          aten_inputs[i].type()->kind() == c10::TypeKind::IntType);
+          aten_inputs[i].type()->kind() == c10::TypeKind::IntType,
+          "fusion expected Scalar Int inputs, but found",
+          aten_inputs[i].type()->str());
       evaluator.bind(inputs[i], aten_inputs[i].toInt());
     }
   }

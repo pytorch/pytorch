@@ -598,16 +598,19 @@ static const char* supported_casts2string(
     case supported_switch_pair(DataType::Int, DataType::Float):
     case supported_switch_pair(DataType::Int32, DataType::Float):
     case supported_switch_pair(DataType::Double, DataType::Float):
+    case supported_switch_pair(DataType::Bool, DataType::Float):
       return "(float)";
     case supported_switch_pair(DataType::Index, DataType::Int):
     case supported_switch_pair(DataType::Int32, DataType::Int):
     case supported_switch_pair(DataType::Float, DataType::Int):
     case supported_switch_pair(DataType::Double, DataType::Int):
+    case supported_switch_pair(DataType::Bool, DataType::Int):
       return "(int64_t)";
     case supported_switch_pair(DataType::Index, DataType::Int32):
     case supported_switch_pair(DataType::Int, DataType::Int32):
     case supported_switch_pair(DataType::Float, DataType::Int32):
     case supported_switch_pair(DataType::Double, DataType::Int32):
+    case supported_switch_pair(DataType::Bool, DataType::Int32):
       return "(int32_t)";
     case supported_switch_pair(DataType::Int, DataType::Index):
     case supported_switch_pair(DataType::Int32, DataType::Index):
@@ -618,7 +621,13 @@ static const char* supported_casts2string(
     case supported_switch_pair(DataType::Int, DataType::Double):
     case supported_switch_pair(DataType::Int32, DataType::Double):
     case supported_switch_pair(DataType::Float, DataType::Double):
+    case supported_switch_pair(DataType::Bool, DataType::Double):
       return "(double)";
+    case supported_switch_pair(DataType::Float, DataType::Bool):
+    case supported_switch_pair(DataType::Double, DataType::Bool):
+    case supported_switch_pair(DataType::Int32, DataType::Bool):
+    case supported_switch_pair(DataType::Int, DataType::Bool):
+      return "(bool)";
     case supported_switch_pair(DataType::Float, DataType::Half):
       return "__float2half";
     case supported_switch_pair(DataType::Float, DataType::BFloat16):
@@ -627,14 +636,6 @@ static const char* supported_casts2string(
       return "__half2float";
     case supported_switch_pair(DataType::BFloat16, DataType::Float):
       return "__bfloat2float";
-    case supported_switch_pair(DataType::Bool, DataType::Double):
-      return "double";
-    case supported_switch_pair(DataType::Bool, DataType::Float):
-      return "float";
-    case supported_switch_pair(DataType::Bool, DataType::Int):
-      return "int64_t";
-    case supported_switch_pair(DataType::Bool, DataType::Int32):
-      return "int32_t";
     default:
       return nullptr;
   }
