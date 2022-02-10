@@ -4376,7 +4376,7 @@ class DistributedTest:
                     rank * local_batch_size : (rank + 1) * local_batch_size
                 ]
 
-                if iteration % num_iters == 0:
+                if iteration % 2 == 0:
                     # accumulate grads locally
                     with ddp_model.no_sync():
                         step_model(ddp_model, ddp_input, ddp_target)
@@ -4387,7 +4387,7 @@ class DistributedTest:
                 for i, j in zip(model.parameters(), ddp_model.parameters()):
                     if not i.requires_grad:
                         continue
-                    if iteration % num_iters == 0:
+                    if iteration % 2 == 0:
                         self.assertNotEqual(i.grad, j.grad)
                     else:
                         self.assertEqual(i.grad, j.grad)
