@@ -36,6 +36,7 @@ env:
   SCCACHE_BUCKET: ossci-compiler-cache-circleci-v2
   XLA_CLANG_CACHE_S3_BUCKET_NAME: ossci-compiler-clang-cache-circleci-xla
   TORCH_CUDA_ARCH_LIST: 5.2
+  XLA_CUDA: 0
   IN_CI: 1
   IS_GHA: 1
   # This is used for the phase of adding wheel tests only, will be removed once completed
@@ -98,6 +99,7 @@ jobs:
             -e BRANCH \
             -e GITHUB_RUN_ID \
             -e SCCACHE_BUCKET \
+            -e XLA_CUDA \
             -e XLA_CLANG_CACHE_S3_BUCKET_NAME \
             -e CUSTOM_TEST_ARTIFACT_BUILD_DIR \
             -e SKIP_SCCACHE_INITIALIZATION=1 \
@@ -310,6 +312,7 @@ jobs:
             -e PR_LABELS \
             -e MAX_JOBS="$(nproc --ignore=2)" \
             -e SCCACHE_BUCKET \
+            -e XLA_CUDA \
             -e XLA_CLANG_CACHE_S3_BUCKET_NAME \
 {%- if 'rocm' not in test_runner_type %}
             ${PROXY_ENV} \
