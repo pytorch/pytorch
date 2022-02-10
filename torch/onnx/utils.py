@@ -105,15 +105,10 @@ def exporter_context(model, mode):
 
 
 def export(model, args, f, export_params=True, verbose=False, training=None,
-           input_names=None, output_names=None, operator_export_type=None,
+           input_names=None, output_names=None, operator_export_type=OperatorExportTypes.ONNX,
            opset_version=None, do_constant_folding=True, dynamic_axes=None,
            keep_initializers_as_inputs=None, custom_opsets=None,
            export_modules_as_functions=False):
-    if operator_export_type is None:
-        if torch.onnx.PYTORCH_ONNX_CAFFE2_BUNDLE:
-            operator_export_type = OperatorExportTypes.ONNX_ATEN_FALLBACK
-        else:
-            operator_export_type = OperatorExportTypes.ONNX
 
     _export(model, args, f, export_params, verbose, training, input_names, output_names,
             operator_export_type=operator_export_type, opset_version=opset_version,
@@ -205,7 +200,10 @@ def _optimize_graph(graph, operator_export_type, _disable_torch_constant_prop=Fa
     torch._C._jit_pass_onnx_remove_print(graph)
     torch._C._jit_pass_onnx_preprocess_caffe2(graph)
 
-    if operator_export_type == OperatorExportTypes.ONNX_ATEN_FALLBACK:
+    # Caffe2-specific optimization
+    is_caffe2_aten_fallback = (operator_export_type == OperatorExportTypes.ONNX_ATEN_FALLBACK and
+                               torch.onnx._CAFFE2_ATEN_FALLBACK)
+    if is_caffe2_aten_fallback:
         torch.onnx.symbolic_helper._quantized_ops.clear()
         # Unpack quantized weights for conv and linear ops and insert into graph.
         torch._C._jit_pass_onnx_unpack_quantized_weights(graph, params_dict)
@@ -532,7 +530,8 @@ def _model_to_graph(model, args, verbose=False,
     if training is None or training == TrainingMode.EVAL:
         params_dict = torch._C._jit_pass_onnx_eval_peephole(graph, params_dict)
 
-    if do_constant_folding and _export_onnx_opset_version in torch.onnx.constant_folding_opset_versions:
+    from torch.onnx.symbolic_helper import _constant_folding_opset_versions
+    if do_constant_folding and _export_onnx_opset_version in _constant_folding_opset_versions:
         params_dict = torch._C._jit_pass_onnx_constant_fold(graph, params_dict,
                                                             _export_onnx_opset_version)
         torch._C._jit_pass_dce_allow_deleting_nodes_with_side_effects(graph)
@@ -552,6 +551,10 @@ def _model_to_graph(model, args, verbose=False,
 
     params_dict = torch._C._jit_pass_filter_non_tensor_arguments(params_dict)
     torch._C._jit_decay_packed_param_input_types(graph)
+
+    # If output names lack a proper name and are identified only by their unique
+    # give them a legible name for debugging purposes
+    _apply_friendly_debug_names(graph, params_dict)
 
     return graph, params_dict, torch_out
 
@@ -651,12 +654,16 @@ def _reset_trace_module_map():
     torch.jit._trace._trace_module_map = None
 
 def _export(model, args, f, export_params=True, verbose=False, training=None,
-            input_names=None, output_names=None, operator_export_type=None,
+            input_names=None, output_names=None, operator_export_type=OperatorExportTypes.ONNX,
             export_type=ExportTypes.PROTOBUF_FILE, opset_version=None,
             do_constant_folding=True, dynamic_axes=None, keep_initializers_as_inputs=None,
             fixed_batch_size=False, custom_opsets=None, add_node_names=True,
             onnx_shape_inference=True, export_modules_as_functions=False):
 
+    if export_modules_as_functions and opset_version < 15:
+        raise ValueError("`export_modules_as_functions` is not supported for `opset_version` < 15."
+                         "This is because `opset_version` < 15 implies IR version < 8, which means "
+                         "no local function support. ")
     export_modules_as_functions = _setup_trace_module_map(model, export_modules_as_functions)
 
     if isinstance(model, torch.nn.DataParallel):
@@ -676,7 +683,7 @@ def _export(model, args, f, export_params=True, verbose=False, training=None,
         if opset_version is None:
             opset_version = _default_onnx_opset_version
         if not operator_export_type:
-            if torch.onnx.PYTORCH_ONNX_CAFFE2_BUNDLE:
+            if torch.onnx._CAFFE2_ATEN_FALLBACK:
                 operator_export_type = OperatorExportTypes.ONNX_ATEN_FALLBACK
             else:
                 operator_export_type = OperatorExportTypes.ONNX
@@ -781,6 +788,18 @@ def _export(model, args, f, export_params=True, verbose=False, training=None,
         __IN_ONNX_EXPORT = False
         _reset_trace_module_map()
     return torch_out
+
+
+def _apply_friendly_debug_names(graph, params):
+    for n in graph.nodes():
+        for v in n.inputs():
+            old_name = v.debugName()
+            if old_name != str(v.unique()):
+                continue
+            new_name = f"{n.kind()}_{v.unique()}"
+            v.setDebugName(new_name)
+            if old_name in params:
+                params[new_name] = params.pop(old_name)
 
 
 def _set_input_and_output_names(graph, input_names, output_names):
@@ -1000,8 +1019,10 @@ def _run_symbolic_function(g, block, n, inputs, env, operator_export_type=Operat
 
         sym_registry.register_version("", opset_version)
 
-        # Quantized op symbolics are registered for opset 9 only.
-        if operator_export_type == OperatorExportTypes.ONNX_ATEN_FALLBACK and opset_version == 9:
+        # Caffe2-specific: Quantized op symbolics are registered for opset 9 only.
+        is_caffe2_aten_fallback = (operator_export_type == OperatorExportTypes.ONNX_ATEN_FALLBACK and
+                                   torch.onnx._CAFFE2_ATEN_FALLBACK)
+        if is_caffe2_aten_fallback and opset_version == 9:
             import torch.onnx.symbolic_caffe2
             torch.onnx.symbolic_caffe2.register_quantized_ops("caffe2", opset_version)
 
@@ -1154,7 +1175,8 @@ def _run_symbolic_function(g, block, n, inputs, env, operator_export_type=Operat
 
         elif ns == "quantized":
             domain = ""
-            if operator_export_type == OperatorExportTypes.ONNX_ATEN_FALLBACK:
+            # Caffe2-specific quantized op
+            if is_caffe2_aten_fallback:
                 domain = "caffe2"
             symbolic_fn = _find_symbolic_in_registry(domain, op_name, opset_version, operator_export_type)
             if symbolic_fn is None:

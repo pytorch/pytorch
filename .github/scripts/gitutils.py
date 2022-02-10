@@ -2,7 +2,7 @@
 
 from collections import defaultdict
 from datetime import datetime
-from typing import cast, Any, Dict, List, Optional, Tuple, Union
+from typing import cast, Any, Dict, Iterator, List, Optional, Tuple, Union
 import os
 import re
 
@@ -30,8 +30,18 @@ def fuzzy_list_to_dict(items: List[Tuple[str, str]]) -> Dict[str, List[str]]:
 
 
 def _check_output(items: List[str], encoding: str = "utf-8") -> str:
-    from subprocess import check_output
-    return check_output(items).decode(encoding)
+    from subprocess import check_output, CalledProcessError
+    try:
+        return check_output(items).decode(encoding)
+    except CalledProcessError as e:
+        msg = f"Command `{' '.join(e.cmd)}` returned non-zero exit code {e.returncode}"
+        stdout = e.stdout.decode(encoding) if e.stdout is not None else ""
+        stderr = e.stderr.decode(encoding) if e.stderr is not None else ""
+        if len(stderr) == 0:
+            msg += f"\n{stdout}"
+        else:
+            msg += f"\nstdout:\n{stdout}\nstderr:\n{stderr}"
+        raise RuntimeError(msg) from e
 
 
 class GitCommit:
@@ -99,11 +109,14 @@ def parse_fuller_format(lines: Union[str, List[str]]) -> GitCommit:
 
 
 class GitRepo:
-    def __init__(self, path: str, remote: str = "origin") -> None:
+    def __init__(self, path: str, remote: str = "origin", debug: bool = False) -> None:
         self.repo_dir = path
         self.remote = remote
+        self.debug = debug
 
     def _run_git(self, *args: Any) -> str:
+        if self.debug:
+            print(f"+ git -C {self.repo_dir} {' '.join(args)}")
         return _check_output(["git", "-C", self.repo_dir] + list(args))
 
     def revlist(self, revision_range: str) -> List[str]:
@@ -137,11 +150,20 @@ class GitRepo:
         rc = _check_output(['sh', '-c', f'git -C {self.repo_dir} show {ref}|git patch-id --stable']).strip()
         return [cast(Tuple[str, str], x.split(" ", 1)) for x in rc.split("\n")]
 
+    def commits_resolving_gh_pr(self, pr_num: int) -> List[str]:
+        owner, name = self.gh_owner_and_name()
+        msg = f"Pull Request resolved: https://github.com/{owner}/{name}/pull/{pr_num}"
+        rc = self._run_git('log', '--format=%H', '--grep', msg).strip()
+        return rc.split("\n") if len(rc) > 0 else []
+
     def get_commit(self, ref: str) -> GitCommit:
         return parse_fuller_format(self._run_git('show', '--format=fuller', '--date=unix', '--shortstat', ref))
 
     def cherry_pick(self, ref: str) -> None:
         self._run_git('cherry-pick', '-x', ref)
+
+    def revert(self, ref: str) -> None:
+        self._run_git("revert", "--no-edit", ref)
 
     def compute_branch_diffs(self, from_branch: str, to_branch: str) -> Tuple[List[str], List[str]]:
         """
@@ -183,11 +205,15 @@ class GitRepo:
             self.checkout(orig_branch)
             return
         for commit in reversed(from_commits):
+            print(f"Cherry picking commit {commit}")
             self.cherry_pick(commit)
         self.checkout(orig_branch)
 
-    def push(self, branch: str) -> None:
-        self._run_git("push", self.remote, branch)
+    def push(self, branch: str, dry_run: bool) -> None:
+        if dry_run:
+            self._run_git("push", "--dry-run", self.remote, branch)
+        else:
+            self._run_git("push", self.remote, branch)
 
     def head_hash(self) -> str:
         return self._run_git("show-ref", "--hash", "HEAD").strip()
@@ -211,7 +237,7 @@ class GitRepo:
         self._run_git("commit", "--amend", "-m", msg)
 
 
-class PeekableIterator:
+class PeekableIterator(Iterator[str]):
     def __init__(self, val: str) -> None:
         self._val = val
         self._idx = -1
@@ -221,7 +247,7 @@ class PeekableIterator:
             return None
         return self._val[self._idx + 1]
 
-    def __iter__(self) -> Any:
+    def __iter__(self) -> "PeekableIterator":
         return self
 
     def __next__(self) -> str:
