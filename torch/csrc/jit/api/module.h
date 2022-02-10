@@ -340,6 +340,9 @@ using FusionStrategy = std::vector<std::pair<FusionBehavior, size_t>>;
 //   indicates that the first two specializations will use static fusions, the
 //   following two specializations will use dynamic fusion, and any inputs that
 //   satisfy none of the 4 options will run an unfused implementation.
+//
+// NB: in the future, if more as more fusion backends are added there may be more granular
+//   apis for specific fusers.
 // Below an example of the fallback function structure is shown, if given a
 //   strategy of [("STATIC", 2), ("DYNAMIC", 2)] and if consecutive runs had
 //   these input shapes:

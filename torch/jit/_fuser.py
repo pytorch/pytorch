@@ -106,7 +106,7 @@ def _script_method_graph_for(self, parent, *args, **kwargs):
         self(*args, **kwargs)
         return last_executed_optimized_graph()
 
-def _set_fusion_strategy(strategy: List[Tuple[str, int]]):
+def set_fusion_strategy(strategy: List[Tuple[str, int]]):
     """
     Sets the type and number of specializations that can occur during fusion
 
@@ -140,6 +140,10 @@ def _set_fusion_strategy(strategy: List[Tuple[str, int]]):
       two specializations will use static fusions, the following two specializations will use
       dynamic fusion, and any inputs that satisfy none of the 4 options will run an
       unfused implementation.
+
+    NB: in the future, if more as more fusion backends are added there may be more granular
+      apis for specific fusers.
+
     Below an example of the fallback function structure is shown, if given a strategy of
       [("STATIC", 2), ("DYNAMIC", 2)] and if consecutive runs had these input shapes:
       [2, 2], [3, 3], [4, 4], [3, 5], ...
