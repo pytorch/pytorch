@@ -4,7 +4,7 @@ MobileNetV2 TorchScript model, and dumps root ops used by the model for custom
 build script to create a tailored build which only contains these used ops.
 """
 
-import torch
+import torch.jit.mobile
 import torchvision
 import yaml
 
@@ -15,7 +15,7 @@ example = torch.rand(1, 3, 224, 224)
 traced_script_module = torch.jit.trace(model, example)
 
 # Save traced TorchScript model.
-traced_script_module.save("MobileNetV2.pt")
+traced_script_module._save_for_lite_interpreter("MobileNetV2.pt")
 
 # Dump root ops used by the model (for custom build optimization).
 ops = torch.jit.export_opnames(traced_script_module)

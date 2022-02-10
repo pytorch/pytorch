@@ -6,22 +6,16 @@
 #include <string>
 #include <c10/util/irange.h>
 #include <torch/script.h>
+#include <torch/torch.h>
+#include <torch/csrc/jit/mobile/import.h>
+#include <torch/csrc/jit/mobile/module.h>
 
 using namespace std;
 
 namespace {
 
-struct MobileCallGuard {
-  // Set InferenceMode for inference only use case.
-  c10::InferenceMode guard;
-  // Disable graph optimizer to ensure list of unused ops are not changed for
-  // custom mobile build.
-  torch::jit::GraphOptimizerEnabledGuard no_optimizer_guard{false};
-};
-
-torch::jit::Module loadModel(const std::string& path) {
-  MobileCallGuard guard;
-  auto module = torch::jit::load(path);
+torch::jit::mobile::Module loadModel(const std::string& path) {
+  auto module = torch::jit::_load_for_mobile(path);
   module.eval();
   return module;
 }
@@ -36,7 +30,6 @@ int main(int argc, const char* argv[]) {
   auto module = loadModel(argv[1]);
   auto input = torch::ones({1, 3, 224, 224});
   auto output = [&]() {
-    MobileCallGuard guard;
     return module.forward({input}).toTensor();
   }();
 

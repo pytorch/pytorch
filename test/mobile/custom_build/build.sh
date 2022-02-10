@@ -30,7 +30,7 @@ prepare_model_and_dump_root_ops() {
   MODEL="${BUILD_ROOT}/MobileNetV2.pt"
   ROOT_OPS="${BUILD_ROOT}/MobileNetV2.yaml"
 
-  python3 "${TEST_SRC_ROOT}/prepare_model.py"
+  python "${TEST_SRC_ROOT}/prepare_model.py"
 }
 
 run_default_build() {
@@ -54,7 +54,8 @@ run_custom_build_with_static_dispatch() {
     -DCMAKE_CXX_FLAGS="-DSTRIP_ERROR_MESSAGES" \
     -DSELECTED_OP_LIST="${ROOT_OPS}" \
     -DSTATIC_DISPATCH_BACKEND="CPU" \
-    -DUSE_LIGHTWEIGHT_DISPATCH="ON"
+    -DUSE_LIGHTWEIGHT_DISPATCH="ON" \
+    -DBUILD_LITE_INTERPRETER="ON"
 }
 
 build_predictor() {
