@@ -3632,9 +3632,6 @@ def sample_inputs_max_pool(op_info, device, dtype, requires_grad, **kwargs):
     for (shape, memory_format), kwargs in params_generator.gen_input_params():
         arg = make_arg(shape).to(memory_format=memory_format).requires_grad_(requires_grad)
         yield SampleInput(arg, kwargs=kwargs)
-        for ceil_mode in [True, False]:
-            kwargs['ceil_mode'] = ceil_mode
-            yield SampleInput(arg, kwargs=kwargs)
 
 def sample_inputs_normalize(self, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, low=-1, high=1, device=device, dtype=dtype, requires_grad=requires_grad)
