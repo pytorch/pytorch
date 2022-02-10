@@ -1645,6 +1645,13 @@ TEST(StaticRuntime, Slice) {
 
   testStaticRuntime(slice_script, args_a);
   testStaticRuntime(slice_script, args_a, args_b);
+
+  const auto slice_script2 = R"JIT(
+    def forward(self, a: Tensor, dim: int, step: int):
+      return a.slice(dim, None, None, step).clone()
+  )JIT";
+  std::vector<IValue> args_c{b, dim_b, step_b};
+  testStaticRuntime(slice_script2, args_c);
 }
 
 TEST(StaticRuntime, Narrow) {

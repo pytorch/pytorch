@@ -4285,8 +4285,22 @@ class TestQuantizeFxOps(QuantizationTestCase):
                     ns.call_function(torch.cat),
                     ns.call_function(torch.quantize_per_tensor)
                 ]
+                converted_node_occurrence = {
+                    # inputs and outputs of the two conv, and output of cat
+                    ns.call_method("dequantize"): 5,
+                    ns.call_function(torch.cat): 1,
+                    # inputs and outputs of the two conv, and output of cat
+                    ns.call_function(torch.quantize_per_tensor): 5,
+                }
             else:
                 converted_node_list = None
+                converted_node_occurrence = {
+                    # output of cat
+                    ns.call_method("dequantize"): 1,
+                    ns.call_function(torch.cat): 1,
+                    # for two inputs
+                    ns.call_function(torch.quantize_per_tensor): 2,
+                }
 
             self.checkGraphModeFxOp(
                 M(),
@@ -4294,6 +4308,7 @@ class TestQuantizeFxOps(QuantizationTestCase):
                 quant_type,
                 quantized_node,
                 expected_node_list=converted_node_list,
+                expected_node_occurrence=converted_node_occurrence,
                 is_reference=is_reference)
 
         # check cat is using the same observer for input and output
@@ -5611,6 +5626,27 @@ class TestQuantizeFxOps(QuantizationTestCase):
         self.checkGraphModuleNodes(
             m,
             expected_node_occurrence=expected_occurrence)
+
+    def test_qmatmul(self):
+        class M(torch.nn.Module):
+            def forward(self, x, y):
+                z = torch.matmul(x, y)
+                return z
+
+        m = M().eval()
+        qconfig_dict = {"": torch.quantization.default_qconfig}
+        mp = prepare_fx(m, qconfig_dict)
+        mp(torch.randn(2, 2), torch.randn(2, 2))
+        mq = convert_fx(mp)
+        expected_occurrence = {
+            ns.call_function(torch.matmul): 0,
+            ns.call_function(torch.ops.quantized.matmul): 1,
+        }
+        self.checkGraphModuleNodes(
+            mq,
+            expected_node_occurrence=expected_occurrence)
+        # verify no crash
+        res = mq(torch.randn(2, 2), torch.randn(2, 2))
 
 class TestQuantizeFxModels(QuantizationTestCase):
     @skipIfNoFBGEMM
