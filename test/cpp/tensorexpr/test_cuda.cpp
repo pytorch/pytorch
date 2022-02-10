@@ -984,8 +984,8 @@ TEST(Cuda, HalfPropagation_CUDA) {
   const std::string& verification_pattern =
       R"IR(
 # CHECK: for (
-# CHECK:  float v = float(a[n]);
-# CHECK:  relu[n] = half(Max(v, 0.f
+# CHECK:  float v = float(a[i]);
+# CHECK:  relu[i] = half(Max(v, 0.f
 # CHECK: })IR";
 
   torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
@@ -1033,8 +1033,8 @@ TEST(Cuda, UnusedHalfArgument_CUDA) {
   const std::string& verification_pattern =
       R"IR(
 # CHECK: for (
-# CHECK:  float v = a[n];
-# CHECK:  relu[n] = Max(v, 0.f
+# CHECK:  float v = a[i];
+# CHECK:  relu[i] = Max(v, 0.f
 # CHECK: })IR";
 
   torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
