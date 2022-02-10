@@ -23,6 +23,7 @@
 #include <torch/csrc/jit/passes/cuda_graph_fuser.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
 #include <torch/csrc/jit/passes/decompose_ops.h>
+#include <torch/csrc/jit/passes/device_type_analysis.h>
 #include <torch/csrc/jit/passes/dtype_analysis.h>
 #include <torch/csrc/jit/passes/erase_number_types.h>
 #include <torch/csrc/jit/passes/fold_conv_bn.h>
@@ -117,6 +118,7 @@
 #include <pybind11/iostream.h>
 #include <pybind11/operators.h>
 
+#include <torch/csrc/jit/runtime/profiling_graph_executor_impl.h>
 #include <memory>
 #include <sstream>
 #include <stdexcept>
@@ -462,6 +464,7 @@ void initJITBindings(PyObject* module) {
       .def("_jit_pass_constant_pooling", ConstantPooling)
       // RemoveInplaceOps is used by CoreML so it must be removed with care.
       .def("_jit_pass_propagate_dtype", DtypePropagation)
+      .def("_jit_pass_propagate_device", DeviceTypePropagation)
       .def(
           "_jit_pass_remove_inplace_ops",
           [](const std::shared_ptr<Graph>& g) { return RemoveInplaceOps(g); })
@@ -760,9 +763,40 @@ void initJITBindings(PyObject* module) {
       .def(
           "_jit_set_bailout_depth",
           [](size_t depth) {
+            TORCH_WARN(
+                "Use _jit_set_fusion_strategy, bailout depth is deprecated. Setting to (STATIC, ",
+                depth,
+                ")");
             size_t old_depth = getBailoutDepth();
-            getBailoutDepth() = depth;
+            FusionStrategy strat = {{FusionBehavior::STATIC, depth}};
+            setFusionStrategy(strat);
             return old_depth;
+          })
+      .def(
+          "_jit_set_fusion_strategy",
+          [](std::vector<std::pair<std::string, size_t>> strategy) {
+            FusionStrategy vec_conv;
+            for (const auto& pair : strategy) {
+              if (pair.first == "STATIC") {
+                vec_conv.emplace_back(FusionBehavior::STATIC, pair.second);
+              } else if (pair.first == "DYNAMIC") {
+                vec_conv.emplace_back(FusionBehavior::DYNAMIC, pair.second);
+              } else {
+                TORCH_INTERNAL_ASSERT(
+                    "FusionBehavior only supported 'STATIC' or 'DYNAMIC', got: ",
+                    pair.first);
+              }
+            }
+            auto old_strategy = getFusionStrategy();
+            auto strat =
+                fmap(old_strategy, [](std::pair<FusionBehavior, size_t> behav) {
+                  return std::pair<std::string, size_t>(
+                      behav.first == FusionBehavior::STATIC ? "STATIC"
+                                                            : "DYNAMIC",
+                      behav.second);
+                });
+            setFusionStrategy(vec_conv);
+            return strat;
           })
       .def(
           "_jit_set_inline_everything_mode",
@@ -836,6 +870,12 @@ void initJITBindings(PyObject* module) {
       .def("_jit_texpr_fallback_allowed", &tensorexpr::fallbackAllowed)
       .def("_jit_texpr_set_fallback_allowed", &tensorexpr::setFallbackAllowed)
       .def("_jit_set_texpr_reductions_enabled", &setTexprReductionsEnabled)
+      .def(
+          "_jit_set_texpr_dynamic_shape_enabled",
+          &setTensorExprDynamicShapeFusionEnabled)
+      .def(
+          "_jit_texpr_dynamic_shape_enabled",
+          &tensorExprDynamicShapeFusionEnabled)
       .def("_jit_texpr_reductions_enabled", &texprReductionsEnabled)
       .def(
           "_jit_set_te_generate_block_code",

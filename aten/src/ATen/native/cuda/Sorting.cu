@@ -55,10 +55,10 @@ __global__ void gatherKthValue(
   radixSelect<
       scalar_t,
       typename TopKTypeConfig<scalar_t>::RadixType,
-      index_t,
-      false>(
+      index_t>(
       inputSliceStart,
       k,
+      false,
       inputSliceSize,
       inputWithinSliceStride,
       smem,
@@ -146,10 +146,10 @@ __global__ void gatherMedian(
   radixSelect<
       scalar_t,
       typename TopKTypeConfig<scalar_t>::RadixType,
-      index_t,
-      false>(
+      index_t>(
       inputSliceStart,
       k + 1,
+      false,
       inputSliceSize,
       inputWithinSliceStride,
       smem,
@@ -182,6 +182,7 @@ struct KthValueLauncher {
       int collapse_self_dim,
       int64_t num_slices,
       int64_t slice_size) {
+    (void)collapse_indices_dim; // Suppress unused variable warning
     dim3 grid;
     if (!getGridFromTiles(num_slices, grid)) {
       AT_ERROR("slices are too many");
@@ -219,6 +220,7 @@ struct MedianLauncher {
       int collapse_self_dim,
       int64_t num_slices,
       int64_t slice_size) {
+    (void)collapse_values_dim; // Suppress unused variable warning
     (void)collapse_indices_dim; // Suppress unused variable warning
     dim3 grid;
     if (!getGridFromTiles(num_slices, grid)) {

@@ -48,22 +48,25 @@ def fetch_and_cache(
         return diff.total_seconds() < FILE_CACHE_LIFESPAN_SECONDS
 
     if os.path.exists(path) and is_cached_file_valid():
-        # Another test process already downloaded the file, so don't re-do it
+        # Another test process already download the file, so don't re-do it
         with open(path, "r") as f:
             return cast(Dict[str, Any], json.load(f))
-    try:
-        contents = urlopen(url, timeout=1).read().decode('utf-8')
-        processed_contents = process_fn(json.loads(contents))
-        with open(path, "w") as f:
-            f.write(json.dumps(processed_contents))
-        return processed_contents
-    except Exception as e:
-        print(f'Could not download {url} because of error {e}.')
-        return {}
+
+    for _ in range(3):
+        try:
+            contents = urlopen(url, timeout=5).read().decode('utf-8')
+            processed_contents = process_fn(json.loads(contents))
+            with open(path, "w") as f:
+                f.write(json.dumps(processed_contents))
+            return processed_contents
+        except Exception as e:
+            print(f'Could not download {url} because: {e}.')
+    print(f'All retries exhausted, downloading {url} failed.')
+    return {}
 
 
 def get_slow_tests(dirpath: str, filename: str = SLOW_TESTS_FILE) -> Optional[Dict[str, float]]:
-    url = "https://raw.githubusercontent.com/pytorch/test-infra/main/stats/slow-tests.json"
+    url = "https://raw.githubusercontent.com/pytorch/test-infra/generated-stats/stats/slow-tests.json"
     try:
         return fetch_and_cache(dirpath, filename, url, lambda x: x)
     except Exception:
@@ -92,7 +95,7 @@ def get_disabled_tests(dirpath: str, filename: str = DISABLED_TESTS_FILE) -> Opt
                 disabled_test_from_issues[test_name] = (item['html_url'], platforms_to_skip)
         return disabled_test_from_issues
     try:
-        url = 'https://raw.githubusercontent.com/pytorch/test-infra/main/stats/disabled-tests.json'
+        url = 'https://raw.githubusercontent.com/pytorch/test-infra/generated-stats/stats/disabled-tests.json'
         return fetch_and_cache(dirpath, filename, url, process_disabled_test)
     except Exception:
         print("Couldn't download test skip set, leaving all tests enabled...")
