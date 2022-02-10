@@ -968,11 +968,10 @@ void ProcessReshapeNode(Node* n, int opset_version) {
 
   // Only shape of new shape is known, assign output rank.
   if (ConstantValueMap::HasShape(shape_name)) {
-    auto static_shape_shape =
-        ConstantValueMap::GetShapeInto1DInt64Vector(shape_name);
-    if (static_shape_shape.has_value()) {
-      TORCH_INTERNAL_ASSERT(static_shape_shape.value().size() == 1);
-      UpdateRank(n->output(), static_shape_shape.value()[0]);
+    auto output_rank = ConstantValueMap::GetShapeInto1DInt64Vector(shape_name);
+    if (output_rank.has_value()) {
+      TORCH_INTERNAL_ASSERT(output_rank.value().size() == 1);
+      UpdateRank(n->output(), output_rank.value()[0]);
       return;
     }
   }
