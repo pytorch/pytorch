@@ -109,7 +109,7 @@ $5 = torch._ops.aten.kl_div($0, $1, 2, log_target=True)''')
 
                 @classmethod
                 def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
-                    if func == torch.ops.aten.split:
+                    if func.overload_packet == torch.ops.aten.split:
                         with no_dispatch():
                             return list_type(torch.split(*args))
                     else:

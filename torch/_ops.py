@@ -46,6 +46,12 @@ class OpOverload:
     def __getattr__(self, key):
         return getattr(self._op, key)
 
+    def __eq__(self, other):
+        if self._op == other._op:
+            return True
+        else:
+            return False
+
     # `my_namespace::my_op`
     @property
     def name(self):
@@ -74,6 +80,12 @@ class OpOverloadPacket:
         self._qualified_op_name = qualified_op_name
         self._op_name = op_name
         self._op = op
+
+    def __eq__(self, other):
+        if self._op == other._op:
+            return True
+        else:
+            return False
 
     # it's a no-op since OpOverloadPacket object is immutable and must be unique for a given op.
     def __deepcopy__(self, memo=None):
