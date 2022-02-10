@@ -1604,12 +1604,11 @@ void guardFusionGroup(
         // TODO: Add support for dynamic split to view guard
 
         // Path from profile-ivalue to prim::view_copy operation
-        // profile-ivalue -> Uses: [Constant, CudaFusionGroup]
+        // profile-ivalue -> Constant -> CudaFusionGroup
         // Get argument position in CudaFusionGroup
         // Get argument in subgraph for CudaFusionGroup
         // CudaFusionGroup argument -> Constant List -> prim::view_copy
-        auto cuda_fusion_group_arg = profiled_ival->uses().back().offset;
-        auto subgraph_arg = fusion_graph->inputs()[cuda_fusion_group_arg];
+        auto subgraph_arg = fusion_graph->inputs()[offset];
         auto constant = subgraph_arg->uses().front().user->output();
         auto view = constant->uses().front().user;
         TORCH_INTERNAL_ASSERT(

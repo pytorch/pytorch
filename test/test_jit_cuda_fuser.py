@@ -3837,6 +3837,23 @@ class TestCudaFuser(JitTestCase):
         for t in [t_unsqueeze, t_squeeze, t_squeeze_dim, t_squeeze_dim_no_op]:
             run(t)
 
+    @unittest.skipIf(not RUN_CUDA, "requires CUDA")
+    @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
+                     "Requires fusion optimization pass to be effective")
+    def test_view_copy_graph_guard(self):
+        x = torch.randn(4, 2, 3, device="cuda").permute([1, 2, 0])
+        y = [4, 6]
+
+        with nvfuser_singleton_fusion(True):
+            def t(x, y : List[int]):
+                t1 = x + 1.0
+                t2 = t1 * 1.0
+                out = t2.reshape(y)
+                return out.relu()
+
+            t_jit = torch.jit.script(t)
+            self._run_helper(t_jit, t, x, y)
+
 class TestPassManagerCudaFuser(JitTestCase):
 
     @unittest.skipIf(not RUN_CUDA, "requires CUDA")
