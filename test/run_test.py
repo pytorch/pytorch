@@ -134,12 +134,14 @@ TESTS = discover_tests(
         "distributed/elastic/utils/util_test",
         "distributed/elastic/utils/distributed_test",
         "distributed/elastic/multiprocessing/api_test",
+        "test_deploy",
     ]
 )
 
 FSDP_TEST = [test for test in TESTS if test.startswith("distributed/fsdp")]
 
 FX2TRT_TESTS = [test for test in TESTS if test.startswith("fx2trt/")]
+
 
 # Tests need to be run with pytest.
 USE_PYTEST_LIST = [
@@ -171,6 +173,7 @@ USE_PYTEST_LIST = [
     "test_typing",
     "distributed/elastic/events/lib_test",
     "distributed/elastic/agent/server/test/api_test",
+    "test_deploy",
 ]
 
 WINDOWS_BLOCKLIST = [

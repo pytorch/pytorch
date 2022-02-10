@@ -25,6 +25,7 @@ env:
   TORCH_CUDA_ARCH_LIST: 5.2
   IN_CI: 1
   IS_GHA: 1
+  ENABLE_DEPLOY_TEST: 1
   # This is used for the phase of adding wheel tests only, will be removed once completed
   IN_WHEEL_TEST: 1
   # Used for custom_opertor, jit_hooks, custom_backend, see .jenkins/pytorch/build.sh
