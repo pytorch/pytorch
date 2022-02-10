@@ -7,9 +7,9 @@ using c10::string_view;
 namespace {
 namespace testutils {
 constexpr bool string_equal(const char* lhs, const char* rhs, size_t size) {
-  return (size == 0)
-      ? true
-      : (*lhs != *rhs) ? false : string_equal(lhs + 1, rhs + 1, size - 1);
+  return (size == 0)   ? true
+      : (*lhs != *rhs) ? false
+                       : string_equal(lhs + 1, rhs + 1, size - 1);
 }
 static_assert(string_equal("hi", "hi", 2), "");
 static_assert(string_equal("", "", 0), "");
@@ -177,32 +177,16 @@ static_assert('o' == hello.at(4), "");
 
 TEST(StringViewTest, whenCallingAccessOperatorOutOfRange_thenThrows) {
   expectThrows<std::out_of_range>(
-      [] { string_view("")[1]; },
-      "string_view::operator[] or string_view::at() out of range. Index: 1, size: 0");
-
-  expectThrows<std::out_of_range>(
       [] { string_view("").at(1); },
       "string_view::operator[] or string_view::at() out of range. Index: 1, size: 0");
-
-  expectThrows<std::out_of_range>(
-      [] { string_view("hello")[5]; },
-      "string_view::operator[] or string_view::at() out of range. Index: 5, size: 5");
 
   expectThrows<std::out_of_range>(
       [] { string_view("hello").at(5); },
       "string_view::operator[] or string_view::at() out of range. Index: 5, size: 5");
 
   expectThrows<std::out_of_range>(
-      [] { string_view("hello")[100]; },
-      "string_view::operator[] or string_view::at() out of range. Index: 100, size: 5");
-
-  expectThrows<std::out_of_range>(
       [] { string_view("hello").at(100); },
       "string_view::operator[] or string_view::at() out of range. Index: 100, size: 5");
-
-  expectThrows<std::out_of_range>(
-      [] { string_view("hello")[string_view::npos]; },
-      "string_view::operator[] or string_view::at() out of range. Index: 18446744073709551615, size: 5");
 
   expectThrows<std::out_of_range>(
       [] { string_view("hello").at(string_view::npos); },
@@ -217,7 +201,7 @@ static_assert('o' == string_view("hello").back(), "");
 
 namespace test_data {
 static_assert(string_equal("hello", string_view("hello").data(), 5), "");
-}
+} // namespace test_data
 
 namespace test_size_length {
 static_assert(0 == string_view("").size(), "");
@@ -326,6 +310,7 @@ TEST(StringViewTest, testSwapMethod) {
 namespace test_copy {
 TEST(StringViewTest, whenCopyingFullStringView_thenDestinationHasCorrectData) {
   string_view data = "hello";
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,cppcoreguidelines-avoid-magic-numbers,modernize-avoid-c-arrays)
   char result[5];
   size_t num_copied = data.copy(result, 5);
   EXPECT_EQ(5, num_copied);
@@ -334,6 +319,7 @@ TEST(StringViewTest, whenCopyingFullStringView_thenDestinationHasCorrectData) {
 
 TEST(StringViewTest, whenCopyingSubstr_thenDestinationHasCorrectData) {
   string_view data = "hello";
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
   char result[2];
   size_t num_copied = data.copy(result, 2, 2);
   EXPECT_EQ(2, num_copied);
@@ -342,6 +328,7 @@ TEST(StringViewTest, whenCopyingSubstr_thenDestinationHasCorrectData) {
 
 TEST(StringViewTest, whenCopyingTooMuch_thenJustCopiesLess) {
   string_view data = "hello";
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,cppcoreguidelines-avoid-magic-numbers,modernize-avoid-c-arrays)
   char result[100];
   size_t num_copied = data.copy(result, 100, 2);
   EXPECT_EQ(3, num_copied);
@@ -350,6 +337,7 @@ TEST(StringViewTest, whenCopyingTooMuch_thenJustCopiesLess) {
 
 TEST(StringViewTest, whenCopyingJustAtRange_thenDoesntCrash) {
   string_view data = "hello";
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
   char result[1];
   size_t num_copied = data.copy(result, 2, 5);
   EXPECT_EQ(0, num_copied);
@@ -357,8 +345,10 @@ TEST(StringViewTest, whenCopyingJustAtRange_thenDoesntCrash) {
 
 TEST(StringViewTest, whenCopyingOutOfRange_thenThrows) {
   string_view data = "hello";
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
   char result[2];
   expectThrows<std::out_of_range>(
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,cppcoreguidelines-avoid-magic-numbers,modernize-avoid-c-arrays)
       [&] { data.copy(result, 2, 6); },
       "basic_string_view::copy: out of range. Index: 6, size: 5");
 }

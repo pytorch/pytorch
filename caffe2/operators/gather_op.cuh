@@ -107,6 +107,7 @@ static bool gather_impl_cuda(
         block_size,
         src_indexing_axis_dim,
         wrap_indices);
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
   }
   return true;
 }

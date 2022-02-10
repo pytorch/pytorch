@@ -18,6 +18,7 @@ inline c10::optional<char> parseOctal(const std::string& str, size_t pos) {
     return c10::nullopt;
   size_t c = 0;
   for (size_t i = 1, b = 64; i < 4; ++i, b /= 8) {
+    // NOLINTNEXTLINE(bugprone-signed-char-misuse)
     int d = str[pos + i];
     if (d < '0' || d > '7')
       return c10::nullopt;

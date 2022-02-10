@@ -2,7 +2,7 @@
 #include <ATen/ATen.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/native/Resize.h>
-#include <ATen/native/cuda/Resize.cuh>
+#include <ATen/native/cuda/Resize.h>
 
 namespace at {
 namespace native {

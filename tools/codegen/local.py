@@ -2,8 +2,6 @@ import threading
 from contextlib import contextmanager
 from typing import Optional, Iterator
 
-from tools.codegen.model import UseC10Dispatcher
-
 # Simple dynamic scoping implementation.  The name "parametrize" comes
 # from Racket.
 #
@@ -17,24 +15,21 @@ from tools.codegen.model import UseC10Dispatcher
 # DON'T add a new entry here.
 
 class Locals(threading.local):
-    use_c10_dispatcher: Optional[UseC10Dispatcher] = None
+    use_const_ref_for_mutable_tensors: Optional[bool] = None
+
 _locals = Locals()
 
-# The use_c10_dispatcher field in native_functions.yaml is used to
-# control codegen behavior, so that we can handle cases where
-# Dispatcher templating logic can't handle.  In the terminal
-# state, use_c10_dispatcher should always be UseC10Dispatcher.full
-# and this flag can be eliminated.
-def use_c10_dispatcher() -> UseC10Dispatcher:
-    assert _locals.use_c10_dispatcher is not None, \
-        "need to initialize local.use_c10_dispatcher with local.parametrize"
-    return _locals.use_c10_dispatcher
+def use_const_ref_for_mutable_tensors() -> bool:
+    assert _locals.use_const_ref_for_mutable_tensors is not None, \
+        "need to initialize local.use_const_ref_for_mutable_tensors with " \
+        "local.parametrize"
+    return _locals.use_const_ref_for_mutable_tensors
 
 @contextmanager
-def parametrize(*, use_c10_dispatcher: UseC10Dispatcher) -> Iterator[None]:
-    old_use_c10_dispatcher = _locals.use_c10_dispatcher
+def parametrize(*, use_const_ref_for_mutable_tensors: bool) -> Iterator[None]:
+    old_use_const_ref_for_mutable_tensors = _locals.use_const_ref_for_mutable_tensors
     try:
-        _locals.use_c10_dispatcher = use_c10_dispatcher
+        _locals.use_const_ref_for_mutable_tensors = use_const_ref_for_mutable_tensors
         yield
     finally:
-        _locals.use_c10_dispatcher = old_use_c10_dispatcher
+        _locals.use_const_ref_for_mutable_tensors = old_use_const_ref_for_mutable_tensors

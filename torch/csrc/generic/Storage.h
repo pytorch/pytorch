@@ -4,7 +4,7 @@
 
 #include <torch/csrc/StorageDefs.h>
 
-THP_API PyObject * THPStorage_(New)(THWStorage *ptr);
+TORCH_PYTHON_API PyObject * THPStorage_(New)(c10::intrusive_ptr<c10::StorageImpl> ptr);
 extern PyObject *THPStorageClass;
 
 #include <torch/csrc/Types.h>

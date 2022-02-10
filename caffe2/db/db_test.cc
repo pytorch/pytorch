@@ -26,7 +26,7 @@ static bool CreateAndFill(const string& db_type, const string& name) {
   for (int i = 0; i < kMaxItems; ++i) {
     std::stringstream ss;
     ss << std::setw(2) << std::setfill('0') << i;
-    trans->Put(ss.str(), ss.str());
+    trans->Put(ss.str(), std::string{ss.str()});
   }
   trans->Commit();
   trans.reset();

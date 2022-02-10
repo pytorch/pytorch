@@ -139,7 +139,7 @@ def print_autograd_prof_summary(prof, mode, sortby='cpu_time', topk=15):
     result = {
         'mode': mode,
         'description': 'top {} events sorted by {}'.format(topk, sortby),
-        'output': torch.autograd.profiler.build_table(topk_events),
+        'output': torch.autograd.profiler_util._build_table(topk_events),
         'cuda_warning': cuda_warning
     }
 

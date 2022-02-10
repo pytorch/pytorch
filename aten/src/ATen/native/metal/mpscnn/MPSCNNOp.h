@@ -1,12 +1,5 @@
-#import <Foundation/Foundation.h>
 #import <Metal/Metal.h>
 #import <MetalPerformanceShaders/MetalPerformanceShaders.h>
-
-#if (defined(__ARM_NEON__) || defined(__ARM_NEON))
-typedef float16_t fp16;
-#else
-typedef uint16_t fp16;
-#endif
 
 @protocol MPSCNNOp<NSObject>
 

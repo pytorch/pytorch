@@ -14,7 +14,7 @@ class PythonOpTest(hu.HypothesisTestCase):
     @given(x=hu.tensor(),
            n=st.integers(min_value=1, max_value=20),
            w=st.integers(min_value=1, max_value=20))
-    @settings(deadline=1000)
+    @settings(deadline=10000)
     def test_simple_python_op(self, x, n, w):
         def g(input_, output):
             output[...] = input_

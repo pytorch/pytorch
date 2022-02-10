@@ -41,9 +41,9 @@ class LSTMBenchmark(op_bench.TorchBenchmarkBase):
             bidirectional=D,
         )
         cell_temp = nn.Sequential(cell_nn)
-        self.cell = torch.quantization.quantize_dynamic(cell_temp,
-                                                        {nn.LSTM, nn.Linear},
-                                                        dtype=dtype)[0]
+        self.cell = torch.ao.quantization.quantize_dynamic(cell_temp,
+                                                           {nn.LSTM, nn.Linear},
+                                                           dtype=dtype)[0]
 
         x = torch.randn(sequence_len,  # sequence length
                         batch_size,    # batch size

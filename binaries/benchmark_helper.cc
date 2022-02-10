@@ -16,6 +16,7 @@
 
 #include <chrono>
 #include <fstream>
+#include <iostream>
 #include <string>
 #include <thread>
 #ifdef _WIN32
@@ -281,13 +282,18 @@ void runNetwork(
       iter,
       ".");
   LOG(INFO) << "net runs.";
+  long long duration_sum = 0;
   for (int i = 0; i < iter; ++i) {
     caffe2::ObserverConfig::initSampleRate(1, 1, 1, 0, warmup);
     fillInputBlob(workspace, tensor_protos_map, i);
     if (wipe_cache) {
       caffe2::wipe_cache();
     }
+    auto start = std::chrono::high_resolution_clock::now();
     CAFFE_ENFORCE(net->Run(), "Main run ", i, " has failed.");
+    auto stop = std::chrono::high_resolution_clock::now();
+    auto duration = std::chrono::duration_cast<std::chrono::microseconds>(stop - start);
+    duration_sum += duration.count();
     // Write the output for the first num_blobs times
     writeOutput(
         workspace,
@@ -305,6 +311,7 @@ void runNetwork(
           std::chrono::seconds(sleep_between_iteration));
     }
   }
+  std::cout << "Average Duration: " << (duration_sum/iter) << " us" << std::endl;
   if (run_individual) {
     LOG(INFO) << "operator runs.";
     if (sleep_between_net_and_operator > 0) {

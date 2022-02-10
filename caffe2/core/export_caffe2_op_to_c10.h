@@ -9,6 +9,7 @@
 #include <ATen/core/op_registration/op_registration.h>
 #include <torch/csrc/jit/frontend/function_schema_parser.h>
 #include <c10/core/CompileTimeFunctionPointer.h>
+#include <c10/util/irange.h>
 #include <torch/library.h>
 #include <vector>
 
@@ -28,8 +29,8 @@ inline c10::List<at::Tensor> _call_caffe2_op(
     const c10::FunctionSchema& schema,
     std::vector<c10::IValue>&& inputs,
     c10::List<at::Tensor>&& outputs) {
-  Caffe2Operator op(schema, std::move(inputs), std::move(outputs));
-  op.Run();
+  Caffe2Operator op(schema, std::move(inputs), std::move(outputs), -1);
+  op.Run(-1);
   return std::move(op).move_newstyle_outputs();
 }
 
@@ -57,7 +58,7 @@ inline void _call_caffe2_op_from_c10(
   AT_ASSERT(
       schema.arguments().size() != 0 &&
       schema.arguments().back().type()->isSubtypeOf(
-          OptionalType::create(ListType::ofTensors())));
+          *OptionalType::create(ListType::ofTensors())));
   IValue preallocated_outputs = torch::jit::pop(*stack);
 
   const size_t num_outputs = schema.returns().size();
@@ -94,7 +95,7 @@ inline void _call_caffe2_op_from_c10(
     // We should not unwrap the list if we expect tensor list in the schema.
     torch::jit::push(*stack, outputs);
   } else {
-    for (size_t i = 0; i < outputs.size(); ++i) {
+    for (const auto i : c10::irange(outputs.size())) {
       torch::jit::push(*stack, outputs.extract(i));
     }
   }

@@ -1,7 +1,7 @@
 #pragma once
 
 #include <ATen/ATen.h>
-#include <torch/csrc/WindowsTorchApiMacro.h>
+#include <torch/csrc/Export.h>
 #include <torch/csrc/jit/codegen/fuser/fused_kernel.h>
 
 #include <cuda.h>
@@ -17,14 +17,16 @@ namespace jit {
 namespace fuser {
 namespace cuda {
 
-TORCH_CUDA_API void getMajorMinor(
+// query codegen output arch and target
+TORCH_CUDA_CU_API void codegenOutputQuery(
     const cudaDeviceProp* const prop,
     int& major,
-    int& minor);
+    int& minor,
+    bool& compile_to_sass);
 
 // A class holding metadata for an actual CUDA function.
 // Note: CUDA functions are per device.
-struct TORCH_CUDA_API FusedKernelCUDA
+struct TORCH_CUDA_CU_API FusedKernelCUDA
     : public ::torch::jit::fuser::FusedKernel {
   FusedKernelCUDA(
       at::DeviceIndex device,

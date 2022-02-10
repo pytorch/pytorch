@@ -17,7 +17,11 @@ android {
         }
         externalNativeBuild {
             cmake {
-                arguments "-DANDROID_STL=c++_shared"
+              if(System.env.BUILD_LITE_INTERPRETER == '0') {
+                arguments "-DANDROID_STL=c++_shared", "-DBUILD_LITE_INTERPRETER=OFF", "-DUSE_LITE_INTERPRETER_PROFILER=OFF"
+              } else {
+                arguments "-DANDROID_STL=c++_shared", "-DUSE_LITE_INTERPRETER_PROFILER=OFF"
+              }
             }
         }
     }
@@ -33,10 +37,16 @@ android {
     sourceSets {
         main {
             java {
+              if(System.env.BUILD_LITE_INTERPRETER == '0') {
+                println 'Build pytorch_jni'
                 exclude 'org/pytorch/LiteModuleLoader.java'
                 exclude 'org/pytorch/LiteNativePeer.java'
+              } else {
+                println 'Build pytorch_jni_lite'
+              }
             }
             jniLibs.srcDirs = ['src/main/jniLibs']
+            manifest.srcFile 'src/main/AndroidManifest.xml'
         }
         androidTest {
             java {
@@ -64,7 +74,6 @@ android {
 
 dependencies {
     implementation 'com.facebook.fbjni:fbjni-java-only:' + rootProject.fbjniJavaOnlyVersion
-    implementation 'com.android.support:appcompat-v7:' + rootProject.androidSupportAppCompatV7Version
     implementation 'com.facebook.soloader:nativeloader:' + rootProject.soLoaderNativeLoaderVersion
 
     testImplementation 'junit:junit:' + rootProject.junitVersion
@@ -108,37 +117,37 @@ afterEvaluate {
 
 tasks.whenTaskAdded { task ->
   if (task.name.startsWith("bundle") && task.name.endsWith("Aar")) {
-    task.doLast {
-      addFolderToAarTask(
-        "addHeadersTo" + task.name,
-        task.archivePath,
-        getLibtorchHeadersDir(),
-        "headers").execute()
+    doLast {
+      addFolderToAar("addHeadersTo" + task.name, task.archivePath, getLibtorchHeadersDir(), 'headers')
     }
   }
 }
 
 def addFolderToAarTask(taskName, aarPath, folderPath, folderPathInAar) {
-  def tmpDir = file("${buildDir}/${taskName}")
-  tmpDir.mkdir()
-  def tmpDirFolder = file("${tmpDir.path}/${folderPathInAar}")
-  tmpDirFolder.mkdir()
-  return tasks.create(name: taskName) {
+  return tasks.register(taskName) {
     doLast {
-      copy {
-        from zipTree(aarPath)
-        into tmpDir
-      }
-      copy {
-        from fileTree(folderPath)
-        into tmpDirFolder
-      }
-      ant.zip(destfile: aarPath) {
-        fileset(dir: tmpDir.path)
-      }
-      delete tmpDir
+      addFolderToAar(taskName, aarPath, folderPath, folderPathInAar)
     }
   }
+}
+
+def addFolderToAar(taskName, aarPath, folderPath, folderPathInAar) {
+    def tmpDir = file("${buildDir}/${taskName}")
+    tmpDir.mkdir()
+    def tmpDirFolder = file("${tmpDir.path}/${folderPathInAar}")
+    tmpDirFolder.mkdir()
+    copy {
+      from zipTree(aarPath)
+      into tmpDir
+    }
+    copy {
+      from fileTree(folderPath)
+      into tmpDirFolder
+    }
+    ant.zip(destfile: aarPath) {
+      fileset(dir: tmpDir.path)
+    }
+    delete tmpDir
 }
 
 artifacts.add('archives', sourcesJar)

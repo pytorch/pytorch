@@ -12,7 +12,7 @@ add_configs = op_bench.cross_product_configs(
 
 
 class AddBenchmark(op_bench.TorchBenchmarkBase):
-    def init(self, M, N, K, device): 
+    def init(self, M, N, K, device):
         self.input_one = torch.rand(M, N, K, device=device, requires_grad=True)
         self.input_two = torch.rand(M, N, K, device=device, requires_grad=True)
         self.set_module_name("add")

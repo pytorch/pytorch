@@ -13,7 +13,6 @@ namespace ops {
 class LinearOpContext final : public torch::jit::CustomClassHolder {
  public:
   static LinearOpContext create(
-      api::Resource::Pool& pool,
       const Tensor& weight,
       const c10::optional<Tensor>& bias);
 
@@ -24,7 +23,6 @@ class LinearOpContext final : public torch::jit::CustomClassHolder {
 
  private:
   LinearOpContext(
-      api::Resource::Pool& pool,
       const Tensor& weight,
       const c10::optional<Tensor>& bias);
 

@@ -22,10 +22,10 @@ configure_file(
 set(C10_CUDA_SRCS
     CUDAStream.cpp
     CUDAFunctions.cpp
+    CUDAMiscFunctions.cpp
     CUDACachingAllocator.cpp
     impl/CUDAGuardImpl.cpp
     impl/CUDATest.cpp
-    CUDAFunctions.cpp
 )
 set(C10_CUDA_HEADERS
     CUDAException.h
@@ -34,6 +34,7 @@ set(C10_CUDA_HEADERS
     CUDAMathCompat.h
     CUDAStream.h
     CUDAFunctions.h
+    CUDAMiscFunctions.h
     impl/CUDAGuardImpl.h
     impl/CUDATest.h
 )
@@ -48,9 +49,7 @@ if(${COMPILER_SUPPORTS_HIDDEN_VISIBILITY})
 endif()
 
 # ---[ Dependency of c10_cuda
-target_link_libraries(c10_cuda PUBLIC c10)
-
-target_link_libraries(c10_cuda INTERFACE torch::cudart)
+target_link_libraries(c10_cuda PUBLIC c10 torch::cudart)
 
 target_include_directories(
     c10_cuda PUBLIC

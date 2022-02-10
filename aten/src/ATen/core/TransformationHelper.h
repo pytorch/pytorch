@@ -1,6 +1,7 @@
 #include <c10/macros/Macros.h>
 #include <c10/util/Half.h>
 #include <c10/util/BFloat16.h>
+#include <c10/util/MathConstants.h>
 #include <ATen/NumericUtils.h>
 #include <limits>
 #include <cstdint>
@@ -101,7 +102,20 @@ C10_HOST_DEVICE inline T normal(T val, T mean, T std) {
 template <typename T>
 C10_HOST_DEVICE inline T cauchy(T val, T median, T sigma) {
   // https://en.wikipedia.org/wiki/Cauchy_distribution#Cumulative_distribution_function
-  return median + sigma * at::tan(static_cast<T>(M_PI) * (val - static_cast<T>(0.5)));
+  // __tanf overflows and returns `inf/-inf` when (val > 1 - eps) or (val < 0 + eps),
+  // thus we clip those values.
+  constexpr T eps = std::numeric_limits<T>::epsilon();
+  constexpr T one_minus_eps = 1 - eps;
+  constexpr T zero_plus_eps = 0 + eps;
+  val = (val > one_minus_eps ? one_minus_eps : val);
+  val = (val < zero_plus_eps ? zero_plus_eps : val);
+  return median + sigma * at::tan(c10::pi<T> * (val - static_cast<T>(0.5)));
+}
+
+template <>
+C10_HOST_DEVICE inline double cauchy(double val, double median, double sigma) {
+  // https://en.wikipedia.org/wiki/Cauchy_distribution#Cumulative_distribution_function
+  return median + sigma * at::tan(c10::pi<double> * (val - static_cast<double>(0.5)));
 }
 
 /**
@@ -115,7 +129,14 @@ C10_HOST_DEVICE __ubsan_ignore_float_divide_by_zero__ inline T exponential(T val
   // TODO: must be investigated and unified!!!
   // https://github.com/pytorch/pytorch/issues/38662
 #if defined(__CUDACC__) || defined(__HIPCC__)
-  return static_cast<T>(-1.0) / lambda * at::log(val);
+      // BEFORE TOUCHING THIS CODE READ: https://github.com/pytorch/pytorch/issues/16706
+      // curand_uniform has (0,1] bounds. log(1) is 0 and exponential excludes 0.
+      // we need log to be not 0, and not underflow when converted to half
+      // fast __logf approximation can underflow, so set log to -epsilon/2 for 1 or close to 1 args
+  auto log = val >= static_cast<T>(1.) - std::numeric_limits<T>::epsilon() / 2
+      ? -std::numeric_limits<T>::epsilon() / 2
+      : at::log(val);
+  return static_cast<T>(-1.0) / lambda * log;
 #else
   return static_cast<T>(-1.0) / lambda * at::log(static_cast<T>(1.0) - val);
 #endif

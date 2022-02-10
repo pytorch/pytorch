@@ -30,6 +30,7 @@ class IDEEPInt8PoolOp final : public IDEEPConvPoolOpBase {
       LOG(FATAL) << "Unsupported pooling method: " << operator_def.type();
     }
   }
+  // NOLINTNEXTLINE(modernize-use-equals-default)
   ~IDEEPInt8PoolOp() override {}
 
   bool RunOnDeviceWithOrderNCHW() override {

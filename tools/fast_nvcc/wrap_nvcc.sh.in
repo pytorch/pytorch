@@ -1,0 +1,5 @@
+#!/bin/bash
+
+# This script was created because cmake is not happy about dangling -- when
+# defining CUDA_NVCC_EXECUTABLE, thus we wrapped it in a shell script.
+@FAST_NVCC_EXECUTABLE@ --nvcc @CUDA_NVCC_EXECUTABLE_ORIGIN@ -- "$@"

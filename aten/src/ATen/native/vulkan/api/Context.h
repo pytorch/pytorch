@@ -9,6 +9,7 @@
 #include <ATen/native/vulkan/api/Pipeline.h>
 #include <ATen/native/vulkan/api/Resource.h>
 #include <ATen/native/vulkan/api/Shader.h>
+#include <ATen/native/vulkan/api/ThreadContext.h>
 
 namespace at {
 namespace native {
@@ -41,13 +42,13 @@ class Context final {
   Resource& resource();
 
   // GPU RPC
-
   template<typename... Arguments>
   void dispatch(
       Command::Buffer& command_buffer,
       const Shader::Layout::Signature& shader_layout_signature,
       const Shader::Descriptor& shader_descriptor,
       const Shader::WorkGroup& global_work_group,
+      const Shader::WorkGroup& local_work_group_size,
       Arguments&&... arguments);
 
   // This function is expensive and its use consequential for performance. Only
@@ -55,6 +56,10 @@ class Context final {
   // performant solution.
 
   void flush();
+
+  // Use this function only for debugging and testing when you want to make sure
+  // all GPU operations get finished before calling flush(). Otherwise, it may crash.
+  void wait(const at::Tensor& src);
 
  private:
   VkDevice device();
@@ -65,11 +70,9 @@ class Context final {
   Adapter adapter_;
   Handle<VkDevice, decltype(&VK_DELETER(Device))> device_;
   VkQueue queue_;
-  Command command_;
   Shader shader_;
   Pipeline pipeline_;
-  Descriptor descriptor_;
-  Resource resource_;
+  ThreadContext threadcontext_;
 };
 
 bool available();
@@ -88,10 +91,6 @@ inline GPU Context::gpu() {
   };
 }
 
-inline Command& Context::command() {
-  return command_;
-}
-
 inline Shader& Context::shader() {
   return shader_;
 }
@@ -100,12 +99,16 @@ inline Pipeline& Context::pipeline() {
   return pipeline_;
 }
 
+inline Command& Context::command() {
+  return threadcontext_.command();
+}
+
 inline Descriptor& Context::descriptor() {
-  return descriptor_;
+  return threadcontext_.descriptor();
 }
 
 inline Resource& Context::resource() {
-  return resource_;
+  return threadcontext_.resource();
 }
 
 inline VkDevice Context::device() {
@@ -141,18 +144,21 @@ inline void Context::dispatch(
     const Shader::Layout::Signature& shader_layout_signature,
     const Shader::Descriptor& shader_descriptor,
     const Shader::WorkGroup& global_work_group,
+    const Shader::WorkGroup& local_work_group_size,
     Arguments&&... arguments) {
   // Forward declaration
   Descriptor::Set dispatch_prologue(
       Command::Buffer&,
       const Shader::Layout::Signature&,
-      const Shader::Descriptor&);
+      const Shader::Descriptor&,
+      const Shader::WorkGroup&);
 
   // Factor out template parameter independent code to minimize code bloat.
   Descriptor::Set descriptor_set = dispatch_prologue(
       command_buffer,
       shader_layout_signature,
-      shader_descriptor);
+      shader_descriptor,
+      local_work_group_size);
 
   detail::bind(
       descriptor_set,

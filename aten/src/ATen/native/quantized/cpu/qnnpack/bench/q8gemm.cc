@@ -81,7 +81,7 @@ class Q8GEMM : public benchmark::Fixture {
   inline Q8GEMM(uint32_t mr, uint32_t nr, uint32_t np, uint32_t kr)
       : mr_(mr), nr_(nr), np_(np), kr_(kr), mc_(mr), nc_(nr), kc_(kr) {}
 
-  virtual void SetUp(const benchmark::State&) override {
+   void SetUp(const benchmark::State&) override {
     std::random_device randomDevice;
     auto rng = std::mt19937(randomDevice());
     auto s32rng =
@@ -125,7 +125,7 @@ class Q8GEMM : public benchmark::Fixture {
         requantization_scales.data(), 127, 1, 254);
   }
 
-  virtual void TearDown(benchmark::State& state) override {
+   void TearDown(benchmark::State& state) override {
     state.SetItemsProcessed(
         uint64_t(state.iterations()) * 2 * mc() * nc() * kc());
     a_.clear();
@@ -238,7 +238,7 @@ class Q8GEMM_Op : public Q8GEMM {
  public:
   inline Q8GEMM_Op() : Q8GEMM(MR, NR, NP, KR) {}
 
-  virtual void SetUp(const benchmark::State& state) override {
+   void SetUp(const benchmark::State& state) override {
     mc_ = state.range(0);
     nc_ = state.range(1);
     kc_ = state.range(2);
@@ -251,7 +251,7 @@ class Q8GEMM_XZP : public Q8GEMM {
  public:
   inline Q8GEMM_XZP(uint32_t mr, uint32_t nr, uint32_t np, uint32_t kr)
       : Q8GEMM(mr, nr, np, kr) {}
-  virtual void SetUp(const benchmark::State&) override {
+   void SetUp(const benchmark::State&) override {
     std::random_device randomDevice;
     auto rng = std::mt19937(randomDevice());
     auto s32rng =
@@ -288,7 +288,7 @@ class Q8GEMM_XZP : public Q8GEMM {
         pytorch_qnnp_compute_requantization_params(0.75f, 127, 1, 254);
   }
 
-  virtual void TearDown(benchmark::State& state) override {
+   void TearDown(benchmark::State& state) override {
     state.SetItemsProcessed(
         uint64_t(state.iterations()) * 2 * mc() * nc() * kc());
     a_.clear();
@@ -337,7 +337,7 @@ class Q8GEMM_XZP_Op : public Q8GEMM_XZP {
  public:
   inline Q8GEMM_XZP_Op() : Q8GEMM_XZP(MR, NR, NP, KR) {}
 
-  virtual void SetUp(const benchmark::State& state) override {
+   void SetUp(const benchmark::State& state) override {
     mc_ = state.range(0);
     nc_ = state.range(1);
     kc_ = state.range(2);
@@ -351,7 +351,7 @@ class COMPUTE_ROW_SUM_Op : public Q8GEMM_XZP {
  public:
   inline COMPUTE_ROW_SUM_Op() : Q8GEMM_XZP(MR, NR, NP, KR) {}
 
-  virtual void SetUp(const benchmark::State& state) override {
+   void SetUp(const benchmark::State& state) override {
     mc_ = state.range(0);
     nc_ = state.range(1);
     kc_ = state.range(2);
@@ -359,7 +359,7 @@ class COMPUTE_ROW_SUM_Op : public Q8GEMM_XZP {
     Q8GEMM_XZP::SetUp(state);
   }
 
-  virtual void TearDown(benchmark::State& state) override {
+   void TearDown(benchmark::State& state) override {
     state.SetItemsProcessed(uint64_t(state.iterations()) * (mc() * kc()));
     a_.clear();
     k_.clear();
@@ -372,7 +372,7 @@ class COMPUTE_ROW_SUM_Op : public Q8GEMM_XZP {
 #if PYTORCH_QNNPACK_BENCHMARK_GEMMLOWP
 class GEMMLOWP : public benchmark::Fixture {
  public:
-  virtual void SetUp(const benchmark::State& state) override {
+   void SetUp(const benchmark::State& state) override {
     const uint_fast32_t seed =
         std::chrono::system_clock::now().time_since_epoch().count();
     auto rng =
@@ -394,7 +394,7 @@ class GEMMLOWP : public benchmark::Fixture {
     threadingContext.set_max_num_threads(1);
   }
 
-  virtual void TearDown(benchmark::State& state) override {
+   void TearDown(benchmark::State& state) override {
     state.SetItemsProcessed(
         uint64_t(state.iterations()) * 2 * mc() * nc() * kc());
     a_.clear();

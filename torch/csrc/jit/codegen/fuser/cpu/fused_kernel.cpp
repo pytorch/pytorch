@@ -1,10 +1,11 @@
 #include <torch/csrc/jit/codegen/fuser/cpu/fused_kernel.h>
 
+#include <ATen/DynamicLibrary.h>
+#include <ATen/code_template.h>
 #include <c10/util/Exception.h>
 #include <c10/util/Optional.h>
 #include <torch/csrc/jit/codegen/fuser/compiler.h>
 #include <torch/csrc/jit/codegen/fuser/cpu/temp_file.h>
-#include <torch/csrc/jit/frontend/code_template.h>
 #include <torch/csrc/utils/memory.h>
 
 #include <cstdlib>
@@ -33,15 +34,14 @@ static const std::string getTempPath() {
 static const std::string temp_dir = getTempPath();
 static const std::string so_template = temp_dir + "pytorch_fuserXXXXXX.dll";
 static const std::string cpp_template = temp_dir + "pytorch_fuserXXXXXX.cpp";
-static const std::string check_exists_string =
-    "where \"${program}\" > nul 2> nul";
+static const std::string check_exists_string = "where ${program} > nul 2> nul";
 static std::vector<std::wstring> env_list;
 constexpr int so_suffix_len = 4;
 constexpr int cpp_suffix_len = 4;
 #else
 static const std::string so_template = "/tmp/pytorch_fuserXXXXXX.so";
 static const std::string cpp_template = "/tmp/pytorch_fuserXXXXXX.cpp";
-static const std::string check_exists_string = "which '${program}' > /dev/null";
+static const std::string check_exists_string = "which ${program} > /dev/null";
 constexpr int so_suffix_len = 3;
 constexpr int cpp_suffix_len = 4;
 #endif
@@ -49,8 +49,10 @@ constexpr int cpp_suffix_len = 4;
 intptr_t run(const std::string& cmd);
 
 static bool programExists(const std::string& program) {
-  TemplateEnv env;
-  env.s("program", program);
+  std::stringstream ss;
+  c10::printQuotedString(ss, program);
+  at::jit::TemplateEnv env;
+  env.s("program", ss.str());
   std::string cmd = format(check_exists_string, env);
 #ifdef _MSC_VER
   return (run(cmd.c_str()) == 0);
@@ -187,6 +189,7 @@ struct CompilerConfig {
 #endif
 
     if (!programExists(cxx)) {
+      TORCH_WARN("Compiler passed via CXX envvar does not exist!");
       cxx = "";
     }
   }
@@ -196,11 +199,20 @@ struct CompilerConfig {
 #ifdef _MSC_VER
   std::string cxx = "cl";
   const std::string openmp_flags = "/openmp";
+#elif defined(__clang__)
+  std::string cxx = "clang++";
+  const std::string openmp_flags = "-fopenmp";
 #else
   std::string cxx = "g++";
   const std::string openmp_flags = "-fopenmp";
 #endif
+// Set openmp to true only if PyTorch is compiled with OpenMP support
+// OpenMP is typically not available on MacOS platform
+#if defined(_OPENMP)
   bool openmp = true;
+#else
+  bool openmp = false;
+#endif
 };
 
 static CompilerConfig& getConfig() {
@@ -257,7 +269,10 @@ static void runCompiler(
     const std::string& cpp_file,
     const std::string& so_file) {
   auto& config = getConfig();
-  TemplateEnv env;
+  TORCH_CHECK(
+      !config.cxx.empty(),
+      "Failed to compile a fused CPU kernel: Compiler not found");
+  at::jit::TemplateEnv env;
   env.s("cxx", config.cxx);
   env.s("fopenmp", config.openmp ? config.openmp_flags : "");
   env.s("cpp_file", cpp_file);
@@ -284,7 +299,7 @@ static const std::string disas_string =
 static const std::string disas_string = "objdump -M  intel -d \"${so_file}\"";
 #endif
 static void disas(const std::string& so_file) {
-  TemplateEnv env;
+  at::jit::TemplateEnv env;
   env.s("so_file", so_file);
   std::string cmd = format(disas_string, env);
   int r = system(cmd.c_str());

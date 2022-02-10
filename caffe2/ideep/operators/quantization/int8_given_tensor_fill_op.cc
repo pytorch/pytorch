@@ -40,6 +40,7 @@ class IDEEPInt8GivenTensorFillOp final : public IDEEPOperator {
     auto src_size = source_values.size();
     values_.Resize(src_size);
     uint8_t* values_data = values_.template mutable_data<uint8_t>();
+    // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
     for (int i = 0; i < src_size; i++) {
       values_data[i] = static_cast<uint8_t>(source_values[i]);
     }
@@ -110,6 +111,7 @@ class IDEEPInt8GivenIntTensorFillOp final : public IDEEPOperator {
     auto src_size = source_values.size();
     values_.Resize(src_size);
     auto* values_data = values_.template mutable_data<int32_t>();
+    // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
     for (int i = 0; i < src_size; i++) {
       values_data[i] = static_cast<int32_t>(source_values[i]);
     }

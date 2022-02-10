@@ -18,7 +18,7 @@ c10::optional<IValue> getIValue(
     const std::string& name,
     const std::unordered_map<const Value*, Value*>& match_vmap,
     const std::unordered_map<std::string, Value*>& vmap);
-void replaceConvolutionWithAtenConv(std::shared_ptr<Graph>& graph);
+TORCH_API void replaceConvolutionWithAtenConv(std::shared_ptr<Graph>& graph);
 
 bool isClampFusable(
     const Match& match,

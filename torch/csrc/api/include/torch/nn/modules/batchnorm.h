@@ -14,12 +14,14 @@ namespace nn {
 
 /// Base class for all (dimension-specialized) batchnorm and instancenorm modules.
 template <size_t D, typename Derived, typename DerivedOptions>
+// NOLINTNEXTLINE(bugprone-exception-escape)
 class NormImplBase : public torch::nn::Cloneable<Derived> {
  protected:
   virtual void _check_input_dim(const Tensor& input) = 0;
 
  public:
   NormImplBase(const DerivedOptions& options_) : options(options_) {
+    // NOLINTNEXTLINE(clang-analyzer-optin.cplusplus.VirtualCall)
     reset();
   }
 
@@ -85,12 +87,14 @@ class NormImplBase : public torch::nn::Cloneable<Derived> {
 
 /// Base class for all (dimension-specialized) batchnorm modules.
 template <size_t D, typename Derived>
+// NOLINTNEXTLINE(bugprone-exception-escape)
 class BatchNormImplBase : public NormImplBase<D, Derived, BatchNormOptions> {
  public:
   using NormImplBase<D, Derived, BatchNormOptions>::NormImplBase;
 
   Tensor forward(const Tensor& input) {
     this->_check_input_dim(input);
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     double exponential_average_factor;
     if (this->options.momentum() == c10::nullopt) {
       exponential_average_factor = 0.0;
@@ -137,9 +141,10 @@ class BatchNormImplBase : public NormImplBase<D, Derived, BatchNormOptions> {
 /// ```
 /// BatchNorm1d model(BatchNorm1dOptions(4).eps(0.5).momentum(0.1).affine(false).track_running_stats(true));
 /// ```
+// NOLINTNEXTLINE(bugprone-exception-escape)
 class TORCH_API BatchNorm1dImpl : public BatchNormImplBase<1, BatchNorm1dImpl> {
  protected:
-  virtual void _check_input_dim(const Tensor& input) override;
+   void _check_input_dim(const Tensor& input) override;
 
  public:
   using BatchNormImplBase<1, BatchNorm1dImpl>::BatchNormImplBase;
@@ -165,9 +170,10 @@ TORCH_MODULE(BatchNorm1d);
 /// ```
 /// BatchNorm2d model(BatchNorm2dOptions(4).eps(0.5).momentum(0.1).affine(false).track_running_stats(true));
 /// ```
+// NOLINTNEXTLINE(bugprone-exception-escape)
 class TORCH_API BatchNorm2dImpl : public BatchNormImplBase<2, BatchNorm2dImpl> {
  protected:
-  virtual void _check_input_dim(const Tensor& input) override;
+   void _check_input_dim(const Tensor& input) override;
 
  public:
   using BatchNormImplBase<2, BatchNorm2dImpl>::BatchNormImplBase;
@@ -193,9 +199,10 @@ TORCH_MODULE(BatchNorm2d);
 /// ```
 /// BatchNorm3d model(BatchNorm3dOptions(4).eps(0.5).momentum(0.1).affine(false).track_running_stats(true));
 /// ```
+// NOLINTNEXTLINE(bugprone-exception-escape)
 class TORCH_API BatchNorm3dImpl : public BatchNormImplBase<3, BatchNorm3dImpl> {
  protected:
-  virtual void _check_input_dim(const Tensor& input) override;
+   void _check_input_dim(const Tensor& input) override;
 
  public:
   using BatchNormImplBase<3, BatchNorm3dImpl>::BatchNormImplBase;

@@ -1,5 +1,5 @@
-#import <ATen/native/metal/mpscnn/MPSCNN.h>
-#import <ATen/native/metal/mpscnn/MPSCNNContext.h>
+#import <ATen/native/metal/mpscnn/MPSCNNUtils.h>
+#import <ATen/native/metal/MetalContext.h>
 #import <ATen/native/metal/mpscnn/MPSCNNConvOp.h>
 #import <ATen/native/metal/mpscnn/MPSCNNNeuronOp.h>
 
@@ -79,7 +79,7 @@
   const int64_t iC = params.C;
   const int64_t kH = params.KH;
   const int64_t kW = params.KW;
-  MPSCNNNeuron* neuron = [MPSCNNConvOp neuron:t];
+  MPSCNNNeuron* neuron = neuronType(t);
   MPSCNNConvolutionDescriptor* desc = nil;
   if (params.isDepthwise()) {
     if (@available(iOS 11.0, *)) {
@@ -120,14 +120,14 @@
   MPSCNNConvolution* conv = nil;
   if (@available(iOS 11.0, *)) {
     conv = [[MPSCNNConvolution alloc]
-        initWithDevice:[MPSCNNContext sharedInstance].device
+        initWithDevice:[MetalContext sharedInstance].device
                weights:dataSource];
 
   } else {
 #if TARGET_OS_IPHONE
     // Fallback on earlier versions
     conv = [[MPSCNNConvolution alloc]
-               initWithDevice:[MPSCNNContext sharedInstance].device
+               initWithDevice:[MetalContext sharedInstance].device
         convolutionDescriptor:desc
                 kernelWeights:w
                     biasTerms:b
@@ -156,18 +156,6 @@
          sourceImage:(MPSImage*)src
     destinationImage:(MPSImage*)dst {
   [_kernel encodeToCommandBuffer:cb sourceImage:src destinationImage:dst];
-}
-
-+ (MPSCNNNeuron*)neuron:(NeuronType)type {
-  if (type == NeuronType::Relu) {
-    return [MPSCNNNeuronOp relu];
-  } else if (type == NeuronType::Sigmoid) {
-    return [MPSCNNNeuronOp sigmoid];
-  } else if (type == NeuronType::Tanh) {
-    return [MPSCNNNeuronOp tanh];
-  } else {
-    return nil;
-  }
 }
 
 @end

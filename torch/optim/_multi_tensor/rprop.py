@@ -1,6 +1,5 @@
 import torch
 from ..optimizer import Optimizer
-from collections import defaultdict
 
 class Rprop(Optimizer):
     """Implements the resilient backpropagation algorithm.
@@ -22,7 +21,7 @@ class Rprop(Optimizer):
         if not 0.0 < etas[0] < 1.0 < etas[1]:
             raise ValueError("Invalid eta values: {}, {}".format(etas[0], etas[1]))
 
-        defaults = dict(lr=lr, etas=etas, step_sizes=step_sizes)
+        defaults = dict(lr=lr, etas=etas, step_sizes=step_sizes, foreach=True)
         super(Rprop, self).__init__(params, defaults)
 
     @torch.no_grad()
@@ -81,7 +80,7 @@ class Rprop(Optimizer):
 
             # for dir<0, dfdx=0
             # for dir>=0 dfdx=dfdx
-            for i in range(len(grads)): 
+            for i in range(len(grads)):
                 grads[i] = grads[i].clone(memory_format=torch.preserve_format)
                 grads[i][signs[i].eq(etaminus)] = 0
 
@@ -93,26 +92,3 @@ class Rprop(Optimizer):
                 states[i]['prev'].copy_(grads[i])
 
         return loss
-
-    # TODO: refactor to a base class once foreach ops are in a good shape.
-    def zero_grad(self, set_to_none: bool = False):
-        per_device_and_dtype_grads = defaultdict(lambda: defaultdict(list))
-        for group in self.param_groups:
-            for p in group['params']:
-                if p.grad is not None:
-                    if set_to_none:
-                        p.grad = None
-                    else:
-                        if p.grad.grad_fn is not None:
-                            p.grad.detach_()
-                        else:
-                            p.grad.requires_grad_(False)
-
-                        if p.grad.is_sparse:
-                            p.grad.zero_()
-                        else:
-                            per_device_and_dtype_grads[p.grad.device][p.grad.dtype].append(p.grad)
-
-            for _, per_dtype_grads in per_device_and_dtype_grads.items():
-                for grads in per_dtype_grads.values():
-                    torch._foreach_zero_(grads)

@@ -2,7 +2,7 @@
 ##############################################################################
 # Example command to build the Raspbian target.
 ##############################################################################
-# 
+#
 # This script shows how one can build a Caffe2 binary for raspbian. The build
 # is essentially much similar to a host build, with one additional change
 # which is to specify -mfpu=neon for optimized speed.

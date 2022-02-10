@@ -1,3 +1,5 @@
+# Owner(s): ["oncall: distributed"]
+
 # Copyright 2019 Kakao Brain
 #
 # Copyright (c) Facebook, Inc. and its affiliates. All rights reserved.
@@ -17,7 +19,7 @@ from torch.distributed.pipeline.sync.skip.tracker import current_skip_tracker
 class Stash(nn.Module):
     def forward(self, input):
         yield stash("skip", input)
-        return input # noqa
+        return input  # noqa: B901
 
 
 @skippable(pop=["skip"])

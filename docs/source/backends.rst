@@ -25,6 +25,10 @@ torch.backends.cuda
     A :class:`bool` that controls whether TensorFloat-32 tensor cores may be used in matrix
     multiplications on Ampere or newer GPUs. See :ref:`tf32_on_ampere`.
 
+.. attribute::  torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction
+
+    A :class:`bool` that controls whether reduced precision reductions (e.g., with fp16 accumulation type) are allowed with fp16 GEMMs.
+
 .. attribute::  torch.backends.cuda.cufft_plan_cache
 
     ``cufft_plan_cache`` caches the cuFFT plans
@@ -40,7 +44,9 @@ torch.backends.cuda
     .. method::  clear()
 
         Clears the cuFFT plan cache.
-    
+
+.. autofunction:: torch.backends.cuda.preferred_linalg_library
+
 
 torch.backends.cudnn
 ^^^^^^^^^^^^^^^^^^^^
@@ -61,7 +67,8 @@ torch.backends.cudnn
 .. attribute::  torch.backends.cudnn.deterministic
 
     A :class:`bool` that, if True, causes cuDNN to only use deterministic convolution algorithms.
-    See also :func:`torch.is_deterministic` and :func:`torch.set_deterministic`.
+    See also :func:`torch.are_deterministic_algorithms_enabled` and
+    :func:`torch.use_deterministic_algorithms`.
 
 .. attribute::  torch.backends.cudnn.benchmark
 

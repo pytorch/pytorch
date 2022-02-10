@@ -1,3 +1,5 @@
+# Owner(s): ["oncall: jit"]
+
 import os
 import sys
 
@@ -27,6 +29,8 @@ class TestProfiler(JitTestCase):
         torch.set_default_dtype(torch.double)
         self.old_fusion_inlining = torch._C._debug_get_fusion_group_inlining()
         torch._C._debug_set_fusion_group_inlining(False)
+        self.old_te_must_use_llvm_cpu = torch._C._jit_get_te_must_use_llvm_cpu()
+        torch._C._jit_set_te_must_use_llvm_cpu(False)
 
     def tearDown(self):
         torch._C._jit_set_profiling_executor(self.prev_exec)
@@ -37,6 +41,7 @@ class TestProfiler(JitTestCase):
         torch.set_default_dtype(self.default_dtype)
         torch._C._jit_set_texpr_reductions_enabled(self.old_reduction_enabled)
         torch._C._debug_set_fusion_group_inlining(self.old_fusion_inlining)
+        torch._C._jit_set_te_must_use_llvm_cpu(self.old_te_must_use_llvm_cpu)
 
     def test_tensor_type_not_determined_by_inputs(self):
         @torch.jit.script

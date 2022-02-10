@@ -10,6 +10,7 @@
 #include <ATen/core/functional.h>
 
 #include <c10/cuda/CUDAGuard.h>
+#include <c10/util/irange.h>
 
 #include <sstream>
 #include <unordered_map>
@@ -79,7 +80,7 @@ static std::vector<ncclComm_t> unpack_comms(PyObject* obj, size_t size) {
       throw python_error();
     auto size = PySequence_Fast_GET_SIZE(seq.get());
     comms = std::vector<ncclComm_t>(size);
-    for (int64_t i = 0; i < size; i++) {
+    for(const auto i : c10::irange(size)) {
       comms[i] = unpack_nccl_comm(PySequence_Fast_GET_ITEM(seq.get(), i));
     }
   }
@@ -287,7 +288,7 @@ at::Tensor extract_tensor(PyObject* obj) {
   if (!THPVariable_Check(obj)) {
     throw torch::TypeError("expected Tensor (got %s)", Py_TYPE(obj)->tp_name);
   }
-  return ((THPVariable*)obj)->cdata;
+  return THPVariable_Unpack(obj);
 }
 
 static inline
@@ -304,8 +305,7 @@ std::vector<at::Tensor> extract_tensors(PyObject* obj) {
       throw torch::TypeError(
           "expected Tensor at %d (got %s)", (int)i, Py_TYPE(item)->tp_name);
     }
-    auto var = (THPVariable*)item;
-    list.emplace_back(var->cdata);
+    list.emplace_back(THPVariable_Unpack(item));
   }
   return list;
 }

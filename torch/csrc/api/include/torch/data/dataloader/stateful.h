@@ -1,6 +1,7 @@
 #pragma once
 
 #include <torch/data/dataloader/base.h>
+#include <c10/util/irange.h>
 
 #include <cstddef>
 #include <thread>
@@ -36,9 +37,10 @@ class StatefulDataLoader : public DataLoaderBase<
   /// Constructs the `StatefulDataLoader` from a `dataset` and some `options`.
   StatefulDataLoader(Dataset dataset, DataLoaderOptions options)
       : super(
+            // NOLINTNEXTLINE(performance-move-const-arg)
             std::move(options),
             torch::make_unique<Dataset>(std::move(dataset))) {
-    for (size_t w = 0; w < this->options_.workers; ++w) {
+    for (const auto w : c10::irange(this->options_.workers))  {
       // As opposed to the stateless case, here all worker threads access the
       // same underlying dataset.
       this->workers_.emplace_back(

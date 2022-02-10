@@ -81,9 +81,34 @@ struct C10_API Device final {
     return type_ == DeviceType::CUDA;
   }
 
+  /// Return true if the device is of HIP type.
+  bool is_hip() const noexcept {
+    return type_ == DeviceType::HIP;
+  }
+
+  /// Return true if the device is of VE type.
+  bool is_ve() const noexcept {
+    return type_ == DeviceType::VE;
+  }
+
+  /// Return true if the device is of XPU type.
+  bool is_xpu() const noexcept {
+    return type_ == DeviceType::XPU;
+  }
+
+  /// Return true if the device is of HPU type.
+  bool is_hpu() const noexcept {
+    return type_ == DeviceType::HPU;
+  }
+
   /// Return true if the device is of CPU type.
   bool is_cpu() const noexcept {
     return type_ == DeviceType::CPU;
+  }
+
+  /// Return true if the device supports arbirtary strides.
+  bool supports_as_strided() const noexcept {
+    return type_ != DeviceType::XLA && type_ != DeviceType::Lazy;
   }
 
   /// Same string as returned from operator<<.
@@ -97,16 +122,18 @@ struct C10_API Device final {
     // performance in micro-benchmarks.
     // This is safe to do, because backends that use the DeviceIndex
     // have a later check when we actually try to switch to that device.
-    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(index_ == -1 || index_ >= 0,
-        "Device index must be -1 or non-negative, got ", (int)index_);
-    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(!is_cpu() || index_ <= 0,
-        "CPU device index must be -1 or zero, got ", (int)index_);
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+        index_ == -1 || index_ >= 0,
+        "Device index must be -1 or non-negative, got ",
+        (int)index_);
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+        !is_cpu() || index_ <= 0,
+        "CPU device index must be -1 or zero, got ",
+        (int)index_);
   }
 };
 
-C10_API std::ostream& operator<<(
-    std::ostream& stream,
-    const Device& device);
+C10_API std::ostream& operator<<(std::ostream& stream, const Device& device);
 
 } // namespace c10
 
@@ -126,10 +153,11 @@ struct hash<c10::Device> {
     // half of the resulting integer.
     //
     // Technically, by C/C++ integer promotion rules, we only need one of the
-    // uint32_t casts to the result type, but we put in both for explicitness's sake.
-    uint32_t bits =
-        static_cast<uint32_t>(static_cast<uint8_t>(d.type())) << 16
-      | static_cast<uint32_t>(static_cast<uint8_t>(d.index()));
+    // uint32_t casts to the result type, but we put in both for explicitness's
+    // sake.
+    uint32_t bits = static_cast<uint32_t>(static_cast<uint8_t>(d.type()))
+            << 16 |
+        static_cast<uint32_t>(static_cast<uint8_t>(d.index()));
     return std::hash<uint32_t>{}(bits);
   }
 };

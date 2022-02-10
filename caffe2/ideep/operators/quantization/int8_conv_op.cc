@@ -9,6 +9,7 @@ class IDEEPInt8ConvOp : public IDEEPConvPoolOpBase {
   USE_IDEEP_DEF_ALIASES();
   USE_IDEEP_CONV_POOL_BASE_FUNCTIONS();
 
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   IDEEPInt8ConvOp(const OperatorDef& operator_def, Workspace* ws)
       : IDEEPConvPoolOpBase(operator_def, ws),
         scale_(this->template GetSingleArgument<float>("Y_scale", 1.0)),
@@ -27,6 +28,7 @@ class IDEEPInt8ConvOp : public IDEEPConvPoolOpBase {
     CAFFE_ENFORCE(zero_point_ == 128 || zero_point_ == 0);
     Y_scales_ = ConvertScales({scale_});
   }
+  // NOLINTNEXTLINE(modernize-use-override,modernize-use-equals-default)
   virtual ~IDEEPInt8ConvOp() {}
 
   bool RunOnDeviceWithOrderNCHW() override {
@@ -156,17 +158,28 @@ class IDEEPInt8ConvOp : public IDEEPConvPoolOpBase {
   }
 
  protected:
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   iattr attr_;
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   ialgo algo_;
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   float scale_;
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   int last_input_;
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   int32_t zero_point_;
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   ilowp_kind lowp_kind_;
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   FusionType fusion_type_;
 
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   itensor filter_, bias_;
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   iscale  Y_scales_;
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   itensor::descriptor cached_X_descriptor_, cached_weights_descriptor_;
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   ideep::convolution_forward_params conv_param;
 
   INPUT_TAGS(INPUT_X, FILTER, BIAS_OR_INPUT_S, INPUT_S);
@@ -185,6 +198,7 @@ class IDEEPInt8ConvReluOp final : public IDEEPInt8ConvOp {
     attr_ = iattr::fuse_relu();
     fusion_type_ = FUSION_CONV_RELU;
   }
+  // NOLINTNEXTLINE(modernize-use-override,modernize-use-equals-default)
   virtual ~IDEEPInt8ConvReluOp() {}
 };
 
@@ -199,6 +213,7 @@ class IDEEPInt8ConvSumOp final : public IDEEPInt8ConvOp {
     attr_ = iattr::fuse_sum();
     fusion_type_ = FUSION_CONV_SUM;
   }
+  // NOLINTNEXTLINE(modernize-use-override,modernize-use-equals-default)
   virtual ~IDEEPInt8ConvSumOp() {}
 };
 
@@ -213,6 +228,7 @@ class IDEEPInt8ConvSumReluOp final : public IDEEPInt8ConvOp {
     attr_ = iattr::residual();
     fusion_type_ = FUSION_CONV_SUM_RELU;
   }
+  // NOLINTNEXTLINE(modernize-use-override,modernize-use-equals-default)
   virtual ~IDEEPInt8ConvSumReluOp() {}
 };
 
@@ -221,6 +237,7 @@ REGISTER_IDEEP_OPERATOR_WITH_ENGINE(Int8ConvRelu, DNNLOWP, IDEEPInt8ConvReluOp);
 REGISTER_IDEEP_OPERATOR_WITH_ENGINE(Int8ConvSum, DNNLOWP, IDEEPInt8ConvSumOp);
 REGISTER_IDEEP_OPERATOR_WITH_ENGINE(Int8ConvSumRelu, DNNLOWP, IDEEPInt8ConvSumReluOp);
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables,clang-diagnostic-unused-function)
 OPERATOR_SCHEMA(Int8ConvSum)
     .NumInputs(2, 4)
     .NumOutputs(1)
@@ -229,6 +246,7 @@ OPERATOR_SCHEMA(Int8ConvSum)
         ConvPoolOpBase<CPUContext>::CostInferenceForConv))
     .AllowInplace({{2, 0}, {3, 0}});
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables,clang-diagnostic-unused-function)
 OPERATOR_SCHEMA(Int8ConvSumRelu)
     .NumInputs(2, 4)
     .NumOutputs(1)

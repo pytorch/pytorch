@@ -1,4 +1,5 @@
 #include "caffe2/operators/distance_op.h"
+#include "caffe2/core/types.h"
 #include "caffe2/utils/eigen_utils.h"
 #ifdef CAFFE2_USE_MKLDNN
 #include <caffe2/ideep/operators/operator_fallback_ideep.h>
@@ -7,7 +8,7 @@
 
 namespace caffe2 {
 
-template<>
+template <>
 bool SquaredL2DistanceOp<float, CPUContext>::RunOnDevice() {
   auto& X = Input(0);
   auto& Y = Input(1);
@@ -18,11 +19,13 @@ bool SquaredL2DistanceOp<float, CPUContext>::RunOnDevice() {
   }
   int N = X.dim() > 0 ? X.dim32(0) : 1;
   auto* distance = Output(0, {N}, at::dtype<float>());
+  // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
   int D = N > 0 ? X.numel() / N : 0;
   float* distance_data = distance->template mutable_data<float>();
   const float* X_data = X.data<float>();
   const float* Y_data = Y.data<float>();
   for (int i = 0; i < N; ++i) {
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     float Xscale, Yscale, cross;
     math::Dot<float, CPUContext>(
         D, X_data + i * D, X_data + i * D, &Xscale, &context_);
@@ -30,6 +33,7 @@ bool SquaredL2DistanceOp<float, CPUContext>::RunOnDevice() {
         D, Y_data + i * D, Y_data + i * D, &Yscale, &context_);
     math::Dot<float, CPUContext>(
         D, X_data + i * D, Y_data + i * D, &cross, &context_);
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers,bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
     distance_data[i] = (Xscale + Yscale) * 0.5 - cross;
   }
   return true;
@@ -46,6 +50,7 @@ bool L1DistanceOp<float, CPUContext>::RunOnDevice() {
   }
   int N = X.dim() > 0 ? X.dim32(0) : 1;
   auto* distance = Output(0, {N}, at::dtype<float>());
+  // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
   int D = N > 0 ? X.numel() / N : 0;
 
   const float* X_data = X.data<float>();
@@ -72,6 +77,7 @@ bool L1DistanceGradientOp<float, CPUContext>::RunOnDevice() {
     CAFFE_ENFORCE_EQ(X.dim32(i), Y.dim32(i));
   }
   int N = X.dim() > 0 ? X.dim32(0) : 1;
+  // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
   int D = N > 0 ? X.numel() / N : 0;
   CAFFE_ENFORCE(X.dim() == Y.dim());
   for (int i = 0; i < X.dim(); ++i) {
@@ -122,6 +128,7 @@ bool CosineSimilarityOp<float, CPUContext>::RunOnDevice() {
   float* result_data = result->template mutable_data<float>();
   const float* X_data = X.data<float>();
   const float* Y_data = Y.data<float>();
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   float X2, Y2;
   const float kEps = 1e-12f;
   for (int i = 0; i < N; ++i) { // TODO: multithreading
@@ -159,6 +166,7 @@ bool CosineSimilarityGradientOp<float, CPUContext>::RunOnDevice() {
   const auto* dCos_data = dCos.template data<float>();
   auto* dX_data = dX->template mutable_data<float>();
   auto* dY_data = dY->template mutable_data<float>();
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   float XN, YN, XY;
   const float kEps = 1e-12f;
   for (int i = 0; i < N; ++i) { // TODO: multithreading
@@ -210,9 +218,11 @@ bool DotProductOp<float, CPUContext>::RunOnDevice() {
   for (int i = 0; i < X.dim(); ++i) {
     CAFFE_ENFORCE_EQ(X.dim32(i), Y.dim32(i), "dimension at ", i);
   }
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   int N, D;
   if (X.numel() > 0) {
     N = X.dim() > 0 ? X.dim32(0) : 1;
+    // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
     D = X.numel() / N;
   } else {
     N = 0;
@@ -248,7 +258,9 @@ OpSchema::Cost CostInferenceForDotProduct(
   CAFFE_ENFORCE_EQ(out[0].dims().size(), 1);
 
   struct OpSchema::Cost c = PointwiseCostInference<2>(def, in);
-  c.bytes_written = out[0].dims(0) * sizeof(out[0].data_type());
+  auto const& out_0_element_size_byte =
+      DataTypeToTypeMeta(out[0].data_type()).itemsize();
+  c.bytes_written = out[0].dims(0) * out_0_element_size_byte;
   c.params_bytes = 0;
   return c;
 }
@@ -259,9 +271,11 @@ bool DotProductGradientOp<float, CPUContext>::RunOnDevice() {
   auto& Y = Input(Y_IN);
   auto& dDot = Input(DER_DOT_IN);
 
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   int N, D;
   if (X.numel() > 0) {
     N = X.dim() > 0 ? X.dim32(0) : 1;
+    // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
     D = X.numel() / N;
   } else {
     N = 0;
@@ -299,10 +313,13 @@ bool DotProductWithPaddingOp<float, CPUContext>::RunOnDevice() {
   CAFFE_ENFORCE_EQ(X.dim(), Y.dim());
   CAFFE_ENFORCE_EQ(X.dim32(0), Y.dim32(0));
 
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   int N, D, DX, DY, restD;
   if (X.numel() > 0) {
     N = X.dim() > 0 ? X.dim32(0) : 1;
+    // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
     DX = X.numel() / N;
+    // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
     DY = Y.numel() / N;
   } else {
     N = 0;
@@ -320,7 +337,9 @@ bool DotProductWithPaddingOp<float, CPUContext>::RunOnDevice() {
     auto offsetX = i * DX, offsetY = i * DY;
     if (replicate_) {
       // L_ for longer vector and S_ for shorter vector
+      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
       const float *L_data, *S_data;
+      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
       int DL, DS;
       if (DX > DY) {
         L_data = X_data + offsetX;
@@ -347,6 +366,7 @@ bool DotProductWithPaddingOp<float, CPUContext>::RunOnDevice() {
     }
 
     if (!replicate_ && DX != DY) {
+      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
       const float* rest_data;
       float rest_sum = 0;
       if (DX > DY) {
@@ -362,10 +382,12 @@ bool DotProductWithPaddingOp<float, CPUContext>::RunOnDevice() {
 }
 
 // L2
-REGISTER_CPU_OPERATOR(SquaredL2Distance,
-                      SquaredL2DistanceOp<float, CPUContext>);
-REGISTER_CPU_OPERATOR(SquaredL2DistanceGradient,
-                      SquaredL2DistanceGradientOp<float, CPUContext>);
+REGISTER_CPU_OPERATOR(
+    SquaredL2Distance,
+    SquaredL2DistanceOp<float, CPUContext>);
+REGISTER_CPU_OPERATOR(
+    SquaredL2DistanceGradient,
+    SquaredL2DistanceGradientOp<float, CPUContext>);
 
 OPERATOR_SCHEMA(SquaredL2Distance)
     .NumInputs(2)
@@ -385,7 +407,8 @@ class GetSquaredL2DistanceGradient : public GradientMakerBase {
   using GradientMakerBase::GradientMakerBase;
   vector<OperatorDef> GetGradientDefs() override {
     return SingleGradientDef(
-        "SquaredL2DistanceGradient", "",
+        "SquaredL2DistanceGradient",
+        "",
         vector<string>{I(0), I(1), GO(0)},
         vector<string>{GI(0), GI(1)});
   }
@@ -745,9 +768,9 @@ class GetDotProductWithPaddingGradient : public GradientMakerBase {
       replicate = GetArgument(Def(), "replicate").i();
     }
 
-    const auto dot_arg =
-        vector<Argument>{MakeArgument<float>("pad_value", pad_value),
-                         MakeArgument<bool>("replicate", replicate)};
+    const auto dot_arg = vector<Argument>{
+        MakeArgument<float>("pad_value", pad_value),
+        MakeArgument<bool>("replicate", replicate)};
 
     return SingleGradientDef(
         "DotProductWithPaddingGradient",
@@ -758,4 +781,4 @@ class GetDotProductWithPaddingGradient : public GradientMakerBase {
   }
 };
 REGISTER_GRADIENT(DotProductWithPadding, GetDotProductWithPaddingGradient);
-}  // namespace caffe2
+} // namespace caffe2

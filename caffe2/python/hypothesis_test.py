@@ -1,7 +1,3 @@
-
-
-
-
 import numpy as np
 import copy
 import time
@@ -346,6 +342,7 @@ class TestOperators(hu.HypothesisTestCase):
 
     @unittest.skipIf(not workspace.has_gpu_support,
                      "Skipping test due to no gpu present.")
+    @settings(deadline=None)
     @given(hidden_size=st.integers(min_value=1, max_value=3),
            num_layers=st.integers(min_value=1, max_value=3),
            bidirectional=st.booleans(),
@@ -1300,11 +1297,7 @@ class TestOperators(hu.HypothesisTestCase):
           original matrices.
         """
         import threading
-        try:
-            import queue
-        except ImportError:
-            # Py3
-            import Queue as queue
+        import queue
         op = core.CreateOperator(
             "CreateBlobsQueue",
             [],

@@ -15,7 +15,9 @@ TensorQuantizationParams KLDivergenceMinimization::ChooseQuantizationParams(
   float min = hist.Min(), max = hist.Max();
   assert(min <= 0.f);
   assert(max >= 0.f);
+  // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
   double bin_width = (max - min) / nbins;
+  // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
   int zero_bin = round(-min / bin_width);
 
   double total_sum = 0;
@@ -47,12 +49,14 @@ TensorQuantizationParams KLDivergenceMinimization::ChooseQuantizationParams(
       }
     }
 
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     int start_bin;
     for (start_bin = start_bin_begin; start_bin < start_bin_end; ++start_bin) {
       double kl = 0;
 
       // sum outliers
       uint64_t left_outliers = 0;
+      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
       int src_bin;
       for (src_bin = 0; src_bin < start_bin; ++src_bin) {
         left_outliers += bins[src_bin];
@@ -69,6 +73,7 @@ TensorQuantizationParams KLDivergenceMinimization::ChooseQuantizationParams(
         double sum = 0;
         double src_bin_begin_not_rounded =
             start_bin + (double)dst_bin * nbins_selected / dst_nbins;
+        // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
         int src_bin_begin = src_bin_begin_not_rounded;
         double src_bin_end_not_rounded =
             start_bin + (double)(dst_bin + 1) * nbins_selected / dst_nbins;
@@ -164,7 +169,9 @@ TensorQuantizationParams KLDivergenceMinimization::ChooseQuantizationParams(
   VLOG(2) << "best start_bin " << best_start_bin << " nbins_selected "
           << best_nbins_selected;
 
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers,bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
   min = hist.Min() + bin_width * (best_start_bin + 0.5);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers,bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
   max = hist.Min() + bin_width * (best_start_bin + best_nbins_selected + 0.5);
 
   QuantizationFactory* qfactory = QuantizationFactory::GetDefaultInstance();

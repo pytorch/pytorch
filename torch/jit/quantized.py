@@ -1,12 +1,11 @@
+from torch import Tensor, _VF  # noqa: F401
+from torch.nn.utils.rnn import PackedSequence
 import torch
 
-from typing import Tuple, Optional, List
-
-from torch import Tensor, _VF  # noqa: F401
-
-from torch.nn.utils.rnn import PackedSequence
-
 import warnings
+
+from typing import List, Optional, Tuple
+
 
 class QuantizedLinear(torch.jit.ScriptModule):
     __constants__ = ['scale', 'zero_point']
@@ -264,7 +263,7 @@ class QuantizedRNNBase(torch.jit.ScriptModule):
         if dtype != torch.int8 and dtype != torch.float16:
             raise RuntimeError('Unsupported dtype: {}'.format(dtype))
 
-        self.all_weights = []  # type: ignore
+        self.all_weights = []
         for layer in range(self.num_layers):
             for direction in range(num_directions):
                 layer_input_size = self.input_size if layer == 0 else self.hidden_size * num_directions
@@ -348,7 +347,6 @@ class QuantizedLSTM(QuantizedRNNBase):
     @torch.jit.script_method
     def forward_impl(self, input: Tensor, hx: Optional[Tuple[Tensor, Tensor]], batch_sizes: Optional[Tensor],
                      max_batch_size: int, sorted_indices: Optional[Tensor]) -> Tuple[Tensor, Tuple[Tensor, Tensor]]:
-        # noqa
         if hx is None:
             num_directions = 2 if self.bidirectional else 1
             zeros = torch.zeros(self.num_layers * num_directions,
@@ -423,7 +421,6 @@ class QuantizedGRU(QuantizedRNNBase):
     @torch.jit.script_method
     def forward_impl(self, input: Tensor, hx: Optional[Tensor], batch_sizes: Optional[Tensor], max_batch_size: int,
                      sorted_indices: Optional[Tensor]) -> Tuple[Tensor, Tensor]:
-        # noqa
         if hx is None:
             num_directions = 2 if self.bidirectional else 1
             hx = torch.zeros(self.num_layers * num_directions,
@@ -478,7 +475,7 @@ class QuantizedGRU(QuantizedRNNBase):
 
 def quantize_rnn_cell_modules(module):
     warnings.warn("quantize_rnn_cell_modules function has been deprecated. "
-                  "Please use torch.quantization.quantize_dynamic API instead.")
+                  "Please use torch.ao.quantization.quantize_dynamic API instead.")
     reassign = {}
     for name, mod in module.named_modules():
         if mod is module:
@@ -499,7 +496,7 @@ def quantize_rnn_cell_modules(module):
 
 def quantize_linear_modules(module, dtype=torch.int8):
     warnings.warn("quantize_linear_modules function has been deprecated. "
-                  "Please use torch.quantization.quantize_dynamic API instead.")
+                  "Please use torch.ao.quantization.quantize_dynamic API instead.")
 
     reassign = {}
     for name, mod in module.named_modules():
@@ -524,7 +521,7 @@ def quantize_linear_modules(module, dtype=torch.int8):
 
 def quantize_rnn_modules(module, dtype=torch.int8):
     warnings.warn("quantize_rnn_modules function has been deprecated. "
-                  "Please use torch.quantization.quantize_dynamic API instead.")
+                  "Please use torch.ao.quantization.quantize_dynamic API instead.")
     reassign = {}
     for name, mod in module.named_modules():
         if mod is module:

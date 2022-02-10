@@ -1,3 +1,4 @@
+#include <c10/util/irange.h>
 #include <torch/nn/modules/adaptive.h>
 #include <torch/nn/options/activation.h>
 #include <torch/nn/options/linear.h>
@@ -16,6 +17,7 @@ AdaptiveLogSoftmaxWithLossImpl::AdaptiveLogSoftmaxWithLossImpl(AdaptiveLogSoftma
       shortlist_size(0),
       n_clusters(0),
       head_size(0) {
+  // NOLINTNEXTLINE(clang-analyzer-optin.cplusplus.VirtualCall)
   reset();
 }
 
@@ -37,7 +39,7 @@ void AdaptiveLogSoftmaxWithLossImpl::reset() {
   head = this->register_module("head", Linear(LinearOptions(options.in_features(), head_size).bias(options.head_bias())));
   tail = this->register_module("tail", ModuleList());
 
-  for (int64_t i = 0; i < n_clusters; i++) {
+  for(const auto i : c10::irange(n_clusters)) {
     int64_t hsz = options.in_features() / static_cast<int64_t>(std::pow(options.div_value(), (i + 1)));
     int64_t osz = cutoffs[i + 1] - cutoffs[i];
 
@@ -50,7 +52,7 @@ void AdaptiveLogSoftmaxWithLossImpl::reset() {
 
 void AdaptiveLogSoftmaxWithLossImpl::reset_parameters() {
   head->reset_parameters();
-  for (size_t i = 0; i < tail->size(); ++i) {
+  for (const auto i : c10::irange(tail->size())) {
     auto i2h = tail[i]->children()[0]->as<Linear>();
     auto h2o = tail[i]->children()[1]->as<Linear>();
     i2h->reset_parameters();
@@ -58,9 +60,30 @@ void AdaptiveLogSoftmaxWithLossImpl::reset_parameters() {
   }
 }
 
-ASMoutput AdaptiveLogSoftmaxWithLossImpl::forward(const Tensor& input, const Tensor& target) {
-  TORCH_CHECK(input.size(0) == target.size(0),
-      "Input and target should have the same size in the batch dimension.");
+ASMoutput AdaptiveLogSoftmaxWithLossImpl::forward(const Tensor& input_, const Tensor& target_) {
+  auto targ_dim = target_.dim();
+
+  TORCH_CHECK(
+    targ_dim == 1 || targ_dim == 0,
+    "0D or 1D target tensor expected, multi-target not supported");
+
+  if (targ_dim == 1) {
+  TORCH_CHECK(
+      input_.dim() == 2,
+      "1D target tensor expects 2D input tensors, but found inputs with sizes ",
+      input_.sizes(),
+      ".");
+  } else {
+    TORCH_CHECK(
+      input_.dim() == 1,
+      "0D target tensor expects 1D input tensors, but found inputs with sizes ",
+      input_.sizes(),
+      ".");
+  }
+
+  bool is_batched = (targ_dim > 0);
+  Tensor input = is_batched ? input_ : input_.unsqueeze(0);
+  Tensor target = is_batched ? target_ : target_.unsqueeze(0);
 
   int64_t used_rows = 0;
   const int64_t batch_size = target.size(0);
@@ -112,6 +135,10 @@ ASMoutput AdaptiveLogSoftmaxWithLossImpl::forward(const Tensor& input, const Ten
   output += head_logprob.gather(1, gather_inds.unsqueeze(1)).squeeze();
   const double loss = (-output).mean().item().toDouble();
 
+  if (!is_batched) {
+    output = output.squeeze(0);
+  }
+
   return ASMoutput(output, loss);
 }
 
@@ -159,7 +186,7 @@ Tensor AdaptiveLogSoftmaxWithLossImpl::predict(const Tensor& input) {
 }
 
 void AdaptiveLogSoftmaxWithLossImpl::pretty_print(std::ostream& stream) const {
-  stream << "torch::nn::AdaptiveLogSoftmaxWithLoss"; 
+  stream << "torch::nn::AdaptiveLogSoftmaxWithLoss";
 }
 
 } // namespace nn

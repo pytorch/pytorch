@@ -1,12 +1,17 @@
 #pragma once
 
 #include <torch/csrc/jit/ir/ir.h>
+#include <torch/csrc/jit/passes/onnx/helper.h>
+#include <torch/csrc/jit/python/python_arg_flatten.h>
 
 namespace torch {
 namespace jit {
 
-TORCH_API TypePtr
-MergeInferredType(TypePtr existing_type, TypePtr inferred_type);
+void MergeInferredTypeAndSetMap(
+    Value* dest_v,
+    TypePtr existing_type,
+    TypePtr inferred_type,
+    bool set_constant_value_map = true);
 
 // Update graph input types with dynamic axes info.
 // Axes that are marked as dynamic will be assigned as dynamic ShapeSymbol.
@@ -26,13 +31,17 @@ TORCH_API void ONNXSetDynamicInputShape(
 TORCH_API void ONNXAssignOutputShape(
     std::shared_ptr<Graph>& graph,
     at::ArrayRef<at::Tensor> outputs,
+    const python::IODescriptor& desc,
     bool onnx_shape_inference);
 
 // Utilize ONNX Shape Inference for node.
 // The node must have ONNX namespace, and is valid ONNX node accroding to spec.
 // On successful ONNX shape inference runs, the function updates output types of
 // n with inferred shape and type. Otherwise n is unchanged.
-TORCH_API void ONNXShapeTypeInference(Node* n, int opset_version);
+TORCH_API void ONNXShapeTypeInference(
+    Node* n,
+    const ParamMap& params_dict,
+    int opset_version);
 
 // Utilize ONNX Shape Inference for graph.
 // Internally calls ONNXShapeTypeInference for each node, to achieve more
@@ -40,7 +49,13 @@ TORCH_API void ONNXShapeTypeInference(Node* n, int opset_version);
 // the entire graph.
 TORCH_API void ONNXShapeTypeInference(
     std::shared_ptr<Graph>& g,
+    const ParamMap& params_dict,
     int opset_version);
+
+std::pair<bool, bool> AreInputsReliableOrStatic(Node* n);
+void UpdateReliable(
+    torch::jit::Value* output,
+    const std::pair<bool, bool>& input_reliable);
 
 } // namespace jit
 } // namespace torch

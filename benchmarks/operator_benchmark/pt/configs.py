@@ -104,8 +104,16 @@ embeddingbag_short_configs = op_bench.cross_product_configs(
     mode=['sum'],
     input_size=[8, 16, 64],
     offset=[0],
-    sparse=[True],
+    sparse=[True, False],
     include_last_offset=[True, False],
+    device=['cpu'],
+    tags=['short']
+)
+
+embedding_short_configs = op_bench.cross_product_configs(
+    num_embeddings=[10, 120, 1000, 2300],
+    embedding_dim=[64],
+    input_size=[8, 16, 64],
     device=['cpu'],
     tags=['short']
 )

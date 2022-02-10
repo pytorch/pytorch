@@ -24,7 +24,7 @@ namespace at { namespace cuda {
 * called before the event is ever recorded, it will use the current device.
 * Later streams that record the event must match this device.
 */
-struct TORCH_CUDA_API CUDAEvent {
+struct TORCH_CUDA_CPP_API CUDAEvent {
   // Constructors
   // Default value for `flags` is specified below - it's cudaEventDisableTiming
   CUDAEvent() {}
@@ -32,7 +32,7 @@ struct TORCH_CUDA_API CUDAEvent {
 
   CUDAEvent(
       DeviceIndex device_index, const cudaIpcEventHandle_t* handle) {
-    #ifndef __HIP_PLATFORM_HCC__
+    #if !defined(USE_ROCM)
       device_index_ = device_index;
       CUDAGuard guard(device_index_);
 
@@ -93,6 +93,9 @@ struct TORCH_CUDA_API CUDAEvent {
       return true;
     } else if (err != cudaErrorNotReady) {
       C10_CUDA_CHECK(err);
+    } else {
+      // ignore and clear the error if not ready
+      cudaGetLastError();
     }
 
     return false;
@@ -145,7 +148,7 @@ struct TORCH_CUDA_API CUDAEvent {
 
   // Note: cudaIpcGetEventHandle must be called on the same device as the event
   void ipc_handle(cudaIpcEventHandle_t * handle) {
-    #ifndef __HIP_PLATFORM_HCC__
+    #if !defined(USE_ROCM)
       if (!is_created_) {
         // this CUDAEvent object was initially constructed from flags but event_
         // is not created yet.
@@ -163,7 +166,7 @@ private:
   bool is_created_ = false;
   bool was_recorded_ = false;
   DeviceIndex device_index_ = -1;
-  cudaEvent_t event_;
+  cudaEvent_t event_{};
 
   void createEvent(DeviceIndex device_index) {
     device_index_ = device_index;

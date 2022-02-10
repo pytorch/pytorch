@@ -28,7 +28,7 @@ class DLPackWrapper {
       : tensor(tensor), device_option(device_option) {}
 
   py::object data() {
-    DLContext tensor_context;
+    DLDevice tensor_context;
     auto device_type_ptr = CaffeToDLDeviceType(device_option.device_type());
     CAFFE_ENFORCE(
         device_type_ptr,
@@ -55,7 +55,7 @@ class DLPackWrapper {
 
     DLTensor dlTensor;
     dlTensor.data = const_cast<void*>(tensor->raw_data());
-    dlTensor.ctx = tensor_context;
+    dlTensor.device = tensor_context;
     dlTensor.ndim = tensor->dim();
     dlTensor.dtype = tensor_type;
     dlTensor.shape = const_cast<int64_t*>(&(tensor->sizes()[0]));
@@ -65,7 +65,7 @@ class DLPackWrapper {
     managed_tensor.dl_tensor = dlTensor;
     // C2 Tensor memory is managed by C2
     managed_tensor.manager_ctx = nullptr;
-    managed_tensor.deleter= [](DLManagedTensor*) {};
+    managed_tensor.deleter = [](DLManagedTensor*) {};
 
     return py::reinterpret_steal<py::object>(
         PyCapsule_New(&managed_tensor, "dltensor", nullptr));
@@ -83,9 +83,9 @@ class DLPackWrapper {
         "Unsupported device type: ",
         device_option.device_type());
     CAFFE_ENFORCE(
-        dlTensor->ctx.device_type == *device_type_ptr,
+        dlTensor->device.device_type == *device_type_ptr,
         "DLPack tensor device type mismatch");
-    int dlpack_device_id = dlTensor->ctx.device_id;
+    int dlpack_device_id = dlTensor->device.device_id;
     CAFFE_ENFORCE_EQ(
         dlpack_device_id,
         device_option.device_id(),

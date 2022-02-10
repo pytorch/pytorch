@@ -104,6 +104,7 @@ class GetConvGradient : public GradientMakerBase {
 
     ArgumentHelper argsHelper(def_);
 
+    // NOLINTNEXTLINE(modernize-use-bool-literals)
     auto compute_dX = !argsHelper.GetSingleArgument<bool>("no_gradient_to_input", 0);
 
     if (def_.input_size() == 3) {

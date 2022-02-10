@@ -10,6 +10,8 @@
 #include <ATen/Dispatch.h>
 #include <ATen/Parallel.h>
 #include <ATen/TensorUtils.h>
+#include <ATen/native/Fill.h>
+#include <c10/util/irange.h>
 
 #include <numeric>
 #include <type_traits>
@@ -53,12 +55,13 @@ std::tuple<Tensor, Tensor> ctc_loss_cpu_template(const Tensor& log_probs, const 
   TORCH_CHECK((int64_t) input_lengths.size() == batch_size, "input_lengths must be of size batch_size");
   TORCH_CHECK((int64_t) target_lengths.size() == batch_size, "target_lengths must be of size batch_size");
 
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   size_t tg_target_stride;
   int64_t max_target_length = 0;
   std::vector<int64_t> tg_batch_offsets(batch_size);
   if (targets.dim() == 1) { // concatenated targets
     int64_t pos = 0;
-    for (int64_t i = 0; i < batch_size; i++) {
+    for (const auto i : c10::irange(batch_size)) {
       tg_batch_offsets[i] = pos;
       pos += target_lengths[i];
       if (max_target_length < target_lengths[i])
@@ -70,7 +73,7 @@ std::tuple<Tensor, Tensor> ctc_loss_cpu_template(const Tensor& log_probs, const 
   else { // batch x max_target_length
     // dim is 2
     int64_t tg_batch_stride = targets.stride(0);
-    for (int64_t i = 0; i < batch_size; i++) {
+    for (const auto i : c10::irange(batch_size)) {
       tg_batch_offsets[i] = i * tg_batch_stride;
       if (max_target_length < target_lengths[i])
         max_target_length = target_lengths[i];
@@ -82,7 +85,7 @@ std::tuple<Tensor, Tensor> ctc_loss_cpu_template(const Tensor& log_probs, const 
              " (while checking arguments for ", c, ")");
   }
   int64_t max_input_length = log_probs.size(0);
-  for (int64_t b = 0; b < batch_size; b++) {
+  for (const auto b : c10::irange(batch_size)) {
     TORCH_CHECK(input_lengths[b] <= max_input_length,
              "Expected input_lengths to have value at most ", max_input_length, ", but got value ", input_lengths[b],
              " (while checking arguments for ", c, ")");
@@ -101,7 +104,7 @@ std::tuple<Tensor, Tensor> ctc_loss_cpu_template(const Tensor& log_probs, const 
   // first the default
   log_alpha.narrow(1, 0, 1).fill_(neginf);
   at::parallel_for(0, batch_size, 0, [&](int64_t start, int64_t end) {
-    for (int64_t b = start; b < end; b++) {
+    for (const auto b : c10::irange(start, end)) {
       int64_t input_length = input_lengths[b];
       int64_t target_length = target_lengths[b];
       auto log_probs_a = log_probs_a_global[b];
@@ -114,8 +117,8 @@ std::tuple<Tensor, Tensor> ctc_loss_cpu_template(const Tensor& log_probs, const 
         log_alpha_a[0][1] = log_probs_a[0][get_target_prime(targets_data, tg_batch_offset, tg_target_stride, 1, BLANK)];
 
       // now the loop over the inputs
-      for (int64_t t=1; t<input_length; t++) {
-        for (int64_t s=0; s<2*target_length+1; s++) {
+      for (const auto t : c10::irange(1, input_length)) {
+        for (const auto s : c10::irange(2*target_length+1)) {
           auto current_target_prime = get_target_prime(targets_data, tg_batch_offset, tg_target_stride, s, BLANK);
           // this loop over s could be parallel/vectorized, too, but the required items are one index apart
           // alternatively, one might consider moving s to the outer loop to cache current_target_prime more (but then it needs to be descending)
@@ -178,14 +181,16 @@ Tensor ctc_loss_backward_cpu_template(const Tensor& grad_out, const Tensor& log_
   Tensor grad = at::full_like(log_probs, neginf, LEGACY_CONTIGUOUS_MEMORY_FORMAT); // at this point, this is log of empty sum
 
   // The admin bits. We don't do much checking and assume that the forward did.
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   int64_t tg_target_stride;
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   int64_t max_target_length;
   std::vector<int64_t> tg_batch_offsets(batch_size);
 
   if (targets.dim() == 1) { // concatenated targets
     int64_t pos = 0;
     max_target_length = 0;
-    for (int64_t i = 0; i < batch_size; i++) {
+    for (const auto i : c10::irange(batch_size)) {
       tg_batch_offsets[i] = pos;
       pos += target_lengths[i];
       if (max_target_length < target_lengths[i])
@@ -196,7 +201,7 @@ Tensor ctc_loss_backward_cpu_template(const Tensor& grad_out, const Tensor& log_
   else { // batch x max_target_length
     // dim is 2
     int64_t tg_batch_stride = targets.stride(0);
-    for (int64_t i = 0; i < batch_size; i++) {
+    for (const auto i : c10::irange(batch_size)) {
       tg_batch_offsets[i] = i * tg_batch_stride;
     }
     tg_target_stride = targets.stride(1);
@@ -212,18 +217,37 @@ Tensor ctc_loss_backward_cpu_template(const Tensor& grad_out, const Tensor& log_
   auto grad_a_global = gp.accessor<scalar_t, 3>();
   auto targets_data = targets.data_ptr<target_t>();
 
+  auto create_fill_iterator = [](const Tensor& tensor, IntArrayRef squash_dims) {
+    return TensorIteratorConfig()
+        .set_check_mem_overlap(false)  // Fill is idempotent, so overlap is okay
+        .check_all_same_dtype(false)
+        .add_output(tensor)
+        .resize_outputs(false)
+        .declare_static_shape(tensor.sizes(), squash_dims)
+        .build();
+  };
+  const auto fill_iter = create_fill_iterator(grad, /*squash_dims=*/1);
+  const auto fill_1d_iter = create_fill_iterator(grad, /*squash_dims=*/{0, 1});
+  const auto fill_log_beta_1d_iter = create_fill_iterator(log_beta, /*squash_dims=*/{0, 1});
+
   at::parallel_for(0, batch_size, 0, [&](int64_t start, int64_t end) {
-    for (int64_t b = start; b < end; b++) {
+    TensorIterator fill_iter_local(fill_iter);
+    TensorIterator fill_1d_iter_local(fill_1d_iter);
+    TensorIterator fill_log_beta_1d_iter_local(fill_log_beta_1d_iter);
+
+    for (const auto b : c10::irange(start, end)) {
       scalar_t nll = neg_log_likelihood.accessor<scalar_t, 1>()[b];
-      if (zero_infinity &&  nll == std::numeric_limits<scalar_t>::infinity()) {
-        grad.narrow(1, b, 1).zero_();
+      auto grad_a = grad_a_global[b];
+      if (zero_infinity && nll == std::numeric_limits<scalar_t>::infinity()) {
+        // grad_batch.zero_();
+        fill_iter_local.unsafe_replace_operand(0, grad_a.data());
+        fill_stub(kCPU, fill_iter_local, 0);
         continue;
       }
 
       auto log_probs_a = log_probs_a_global[b];
       auto log_alpha_a = log_alpha_a_global[b];
       auto log_beta_a = log_beta_a_global[b];
-      auto grad_a = grad_a_global[b];
       int64_t input_length = input_lengths[b];
       int64_t target_length = target_lengths[b];
       int64_t tg_batch_offset = tg_batch_offsets[b];
@@ -232,7 +256,11 @@ Tensor ctc_loss_backward_cpu_template(const Tensor& grad_out, const Tensor& log_
       // here we do the fill for each batch item separately, as the input lengths will differ, so the t in which
       // we start varies
       if (input_length > 0) {
-        log_beta.narrow(0, b, 1).narrow(1, input_length-1, 1).fill_(neginf);
+        // log_beta.select(0, b).select(1, input_length-1).fill_(neginf);
+        fill_log_beta_1d_iter_local.unsafe_replace_operand(
+            0, log_beta_a[input_length - 1].data());
+        fill_stub(kCPU, fill_log_beta_1d_iter_local, neginf);
+
         log_beta_a[input_length-1][2*target_length] = log_probs_a[input_length-1][BLANK];
         grad_a[input_length-1][BLANK] = log_alpha_a[input_length-1][2*target_length] + log_beta_a[input_length-1][2*target_length];
 
@@ -294,17 +322,20 @@ Tensor ctc_loss_backward_cpu_template(const Tensor& grad_out, const Tensor& log_
       // now we wrap up the calculation by adding in the remaining items of eq (16)
       // this could be a great target for further vectorization.
       // grad is the output gradient, nll is the loss. Note that the likelihood -nll is the Z of eq (16)
-      scalar_t gr =  grad_out.accessor<scalar_t, 1>()[b];
-      for (int64_t t = 0; t < input_length; t++) { // or go for the full thing?
-        for (int64_t c = 0; c < num_labels; c++) {
+      scalar_t gr = grad_out.accessor<scalar_t, 1>()[b];
+      for (const auto t : c10::irange(input_length)) { // or go for the full thing?
+        for (const auto c : c10::irange(num_labels)) {
           scalar_t& res = grad_a[t][c];
           scalar_t lp = log_probs_a[t][c];
           res = (std::exp(lp)-std::exp(res + nll - lp)) * gr;
         }
       }
+
       // zero the remainder
-      if (input_length < max_input_length) {
-        grad.narrow(0, input_length, max_input_length - input_length).narrow(1, b, 1).zero_();
+      for (auto l : c10::irange(input_length, max_input_length)) {
+        // grad_batch.select(0, l).zero_();
+        fill_1d_iter_local.unsafe_replace_operand(0, grad_a[l].data());
+        fill_stub(kCPU, fill_1d_iter_local, 0);
       }
     }
   });
@@ -338,7 +369,9 @@ Tensor ctc_loss_backward_cpu(const Tensor& grad, const Tensor& log_probs, const 
 // this wrapper function dispatches to the native and cudnn implementations and hides the alpha/grad from the user (by just returning the loss)
 // the gradient is implemented for _cudnn_ctc_loss (just in derivatives.yaml) and _ctc_loss and this function has automatic gradients
 // it also handles the reduction if desired
-Tensor ctc_loss(const Tensor& log_probs, const Tensor& targets, IntArrayRef input_lengths, IntArrayRef target_lengths, int64_t BLANK, int64_t reduction, bool zero_infinity) {
+Tensor ctc_loss(const Tensor& log_probs_, const Tensor& targets, IntArrayRef input_lengths, IntArrayRef target_lengths, int64_t BLANK, int64_t reduction, bool zero_infinity) {
+  auto is_batched = log_probs_.dim() == 3;
+  Tensor log_probs = is_batched ? log_probs_ : log_probs_.unsqueeze(1);
   bool use_cudnn =
       (log_probs.device().type() == at::kCUDA) &&
       at::_use_cudnn_ctc_loss(
@@ -370,7 +403,7 @@ Tensor ctc_loss(const Tensor& log_probs, const Tensor& targets, IntArrayRef inpu
   } else if (reduction == at::Reduction::Sum) {
     return res.sum();
   }
-  return res;
+  return is_batched ? res : res.squeeze(0);
 }
 
 // Convenience function accepting Tensors

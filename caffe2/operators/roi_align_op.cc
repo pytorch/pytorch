@@ -312,4 +312,3 @@ C10_EXPORT_CAFFE2_OP_TO_C10_CPU(
     "    bool aligned"
     ") -> Tensor",
     caffe2::RoIAlignCPUOp<float>);
-

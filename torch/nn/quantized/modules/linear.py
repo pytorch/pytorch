@@ -3,7 +3,7 @@ import torch
 
 import torch.nn as nn
 import torch.nn.intrinsic as nni
-from torch.nn.quantized.modules.utils import _quantize_weight, hide_packed_params_repr
+from torch.nn.quantized.modules.utils import _quantize_weight, hide_packed_params_repr, ReferenceableQuantizedModule
 from typing import Optional
 
 class LinearPackedParams(torch.nn.Module):
@@ -83,22 +83,12 @@ class LinearPackedParams(torch.nn.Module):
         super(LinearPackedParams, self)._load_from_state_dict(state_dict, prefix, local_metadata, False,
                                                               missing_keys, unexpected_keys, error_msgs)
 
-    @torch.jit.export
-    def __getstate__(self):
-        qweight, bias = self._weight_bias()
-        return qweight, bias, self.training, self.dtype
-
-    @torch.jit.export
-    def __setstate__(self, state):
-        self.dtype = state[3]
-        self.set_weight_bias(state[0], state[1])
-        self.training = state[2]
 
     def __repr__(self):
         return self._weight_bias().__repr__()
 
 
-class Linear(torch.nn.Module):
+class Linear(ReferenceableQuantizedModule):
     r"""
     A quantized linear module with quantized tensor as inputs and outputs.
     We adopt the same interface as `torch.nn.Linear`, please see
@@ -125,7 +115,7 @@ class Linear(torch.nn.Module):
         torch.Size([128, 30])
     """
     _version = 3
-    _FLOAT_MODULE = (nn.Linear, nn.modules.linear._LinearWithBias)
+    _FLOAT_MODULE = (nn.Linear, nn.modules.linear.NonDynamicallyQuantizableLinear)
 
     def __init__(self, in_features, out_features, bias_=True,
                  dtype=torch.qint8):
@@ -242,10 +232,10 @@ class Linear(torch.nn.Module):
 
     @classmethod
     def from_float(cls, mod):
-        r"""Create a quantized module from a float module or qparams_dict
+        r"""Create a quantized module from an observed float module
 
         Args:
-            mod (Module): a float module, either produced by torch.quantization
+            mod (Module): a float module, either produced by torch.ao.quantization
                           utilities or provided by the user
         """
         if hasattr(mod, 'weight_fake_quant'):
@@ -257,10 +247,10 @@ class Linear(torch.nn.Module):
             # the type mismatch in assignment. Also, mypy has an issue with
             # iterables not being implemented, so we are ignoring those too.
             if not isinstance(cls._FLOAT_MODULE, Iterable):
-                cls._FLOAT_MODULE = [cls._FLOAT_MODULE]  # type: ignore
-            supported_modules = ', '.join([float_mod.__name__ for float_mod in cls._FLOAT_MODULE])  # type: ignore
-            error_msg = 'nnq.{}.from_float only works for {}'.format(cls.__name__, supported_modules)
-            assert type(mod) in cls._FLOAT_MODULE, error_msg.format()  # type: ignore
+                cls._FLOAT_MODULE = [cls._FLOAT_MODULE]  # type: ignore[assignment]
+            supported_modules = ', '.join([float_mod.__name__ for float_mod in cls._FLOAT_MODULE])  # type: ignore[attr-defined]
+            error_msg = 'nnq.{}.from_float only works for {}, but got: {}'.format(cls.__name__, supported_modules, type(mod))
+            assert type(mod) in cls._FLOAT_MODULE, error_msg.format()  # type: ignore[attr-defined]
             assert hasattr(mod, 'qconfig'), 'Input float module must have qconfig defined'
             activation_post_process = mod.activation_post_process
             if type(mod) == nni.LinearReLU:
@@ -277,4 +267,24 @@ class Linear(torch.nn.Module):
         qlinear.set_weight_bias(qweight, mod.bias)
         qlinear.scale = float(act_scale)
         qlinear.zero_point = int(act_zp)
+        return qlinear
+
+    @classmethod
+    def from_reference(cls, ref_qlinear, output_scale, output_zero_point):
+        r"""Create a (fbgemm/qnnpack) quantized module from a reference quantized module
+
+        Args:
+            ref_module (Module): a reference quantized  module, either produced by torch.ao.quantization
+                          utilities or provided by the user
+            output_scale (float): scale for output Tensor
+            zero_point (int): zero point for output Tensor
+        """
+        qlinear = cls(
+            ref_qlinear.in_features,
+            ref_qlinear.out_features)
+        qweight = ref_qlinear.get_quantized_weight()
+        qlinear.set_weight_bias(qweight, ref_qlinear.bias)
+
+        qlinear.scale = float(output_scale)
+        qlinear.zero_point = int(output_zero_point)
         return qlinear

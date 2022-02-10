@@ -16,6 +16,13 @@ TorchScript
 
     jit_language_reference
 
+
+.. toctree::
+    :maxdepth: 1
+
+    jit_language_reference_v2
+
+
 .. contents:: :local:
     :depth: 2
 
@@ -42,6 +49,7 @@ Creating TorchScript Code
 
 .. autosummary::
     :toctree: generated
+    :nosignatures:
 
     script
     trace
@@ -52,11 +60,14 @@ Creating TorchScript Code
     ScriptModule
     ScriptFunction
     freeze
+    optimize_for_inference
     save
     load
     ignore
     unused
     isinstance
+    Attribute
+    annotate
 
 Mixing Tracing and Scripting
 ----------------------------
@@ -465,7 +476,7 @@ In this case, data-dependent control flow like this can be captured using
     #print(str(scripted_fn.graph).strip())
 
     for input_tuple in [inputs] + check_inputs:
-        torch.testing.assert_allclose(fn(*input_tuple), scripted_fn(*input_tuple))
+        torch.testing.assert_close(fn(*input_tuple), scripted_fn(*input_tuple))
 
 .. testoutput::
     :hide:
@@ -548,17 +559,17 @@ best practices?
       cpu_model = gpu_model.cpu()
       sample_input_cpu = sample_input_gpu.cpu()
       traced_cpu = torch.jit.trace(cpu_model, sample_input_cpu)
-      torch.jit.save(traced_cpu, "cpu.pth")
+      torch.jit.save(traced_cpu, "cpu.pt")
 
       traced_gpu = torch.jit.trace(gpu_model, sample_input_gpu)
-      torch.jit.save(traced_gpu, "gpu.pth")
+      torch.jit.save(traced_gpu, "gpu.pt")
 
       # ... later, when using the model:
 
       if use_gpu:
-        model = torch.jit.load("gpu.pth")
+        model = torch.jit.load("gpu.pt")
       else:
-        model = torch.jit.load("cpu.pth")
+        model = torch.jit.load("cpu.pt")
 
       model(input)
 
@@ -619,6 +630,15 @@ Q: I would like to trace module's method but I keep getting this error:
       - On the other hand, invoking ``trace`` with module's instance (e.g. ``my_module``) creates a new module and correctly copies parameters into the new module, so they can accumulate gradients if required.
 
     To trace a specific method on a module, see :func:`torch.jit.trace_module <torch.jit.trace_module>`
+
+Known Issues
+---------------
+
+If you're using ``Sequential`` with TorchScript, the inputs of some
+of the ``Sequential`` submodules may be falsely inferred to be
+``Tensor``, even if they're annotated otherwise. The canonical
+solution is to subclass ``nn.Sequential`` and redeclare ``forward``
+with the input typed correctly.
 
 Appendix
 --------

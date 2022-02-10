@@ -28,7 +28,7 @@
 #  |out ch indx| 16
 #  |params     | 20
 #  |-----------|
-#  
+#
 
 #  After loading w pointer in ip reg.
 #  And after pushing r4-r9 and d8-d15 on stack
@@ -42,7 +42,7 @@
 #  |out ch indx| 104
 #  |params     | 108
 #  |-----------|
-#  
+#
 
 #
 # New Struct for pytorch_qnnp_conv_quantization_params

@@ -2,12 +2,13 @@ from . import benchmark
 
 
 class ReduceBench(benchmark.Benchmark):
-    def __init__(self, mode, device, dtype, case, M, N, K):
+    def __init__(self, mode, device, dtype, case, M, N, K, skip_input_transform):
         super().__init__(mode, device, dtype)
         self.case = case
         self.M = M
         self.N = N
         self.K = K
+        self._set_skip_input_transform(skip_input_transform)
 
         self.inputs = [self.randn(
             [M, N, K], device=device, dtype=dtype, requires_grad=self.requires_grad
@@ -18,22 +19,29 @@ class ReduceBench(benchmark.Benchmark):
             self.dims = [0, 2]
         elif case == "col":
             self.dims = [0, 1]
+        elif case == "full":
+            self.dims = [0, 1, 2]
         else:
             raise ValueError("invalid case: %s" % case)
 
     def forward(self, inputs):
-        x = self.add(inputs, 0.001)
+        if self.skip_input_transform:
+            x = inputs
+        else:
+            x = self.add(inputs, 0.001)
         y = self.sum(x, self.dims)
         return y
 
     def config(self):
-        return [self.M, self.N, self.K]
+        if self.case == "full":
+            return [self.M * self.N * self.K, self._skip_input_transform_str()]
+        return [self.M, self.N, self.K, self._skip_input_transform_str()]
 
     @staticmethod
     def default_configs():
         return [
             # [512, 512, 512],
-            [512, 64, 512],
+            [512, 64, 512, "s0"],
         ]
 
     @staticmethod
@@ -54,10 +62,25 @@ class ReduceBench(benchmark.Benchmark):
             "algorithmic": buffer_size * algorithmic_count,
         }
 
+    def _set_skip_input_transform(self, input_str):
+        # In the test setting, s1 will skip the input transformation, and s0 will not.
+        if input_str == "s0":
+            self.skip_input_transform = False
+        elif input_str == "s1":
+            self.skip_input_transform = True
+        else:
+            raise ValueError('invalid skip_input_transform: %s' % (input_str))
+
+    def _skip_input_transform_str(self):
+        if self.skip_input_transform:
+            return "s1"
+        else:
+            return "s0"
+
 
 class ReduceRowBench(ReduceBench):
-    def __init__(self, mode, device, dtype, M, N, K):
-        super(ReduceRowBench, self).__init__(mode, device, dtype, "row", M, N, K)
+    def __init__(self, mode, device, dtype, M, N, K, skip_input_transform):
+        super(ReduceRowBench, self).__init__(mode, device, dtype, "row", M, N, K, skip_input_transform)
 
     @staticmethod
     def module():
@@ -65,8 +88,8 @@ class ReduceRowBench(ReduceBench):
 
 
 class ReduceMidBench(ReduceBench):
-    def __init__(self, mode, device, dtype, M, N, K):
-        super(ReduceMidBench, self).__init__(mode, device, dtype, "mid", M, N, K)
+    def __init__(self, mode, device, dtype, M, N, K, skip_input_transform):
+        super(ReduceMidBench, self).__init__(mode, device, dtype, "mid", M, N, K, skip_input_transform)
 
     @staticmethod
     def module():
@@ -74,12 +97,31 @@ class ReduceMidBench(ReduceBench):
 
 
 class ReduceColBench(ReduceBench):
-    def __init__(self, mode, device, dtype, M, N, K):
-        super(ReduceColBench, self).__init__(mode, device, dtype, "col", M, N, K)
+    def __init__(self, mode, device, dtype, M, N, K, skip_input_transform):
+        super(ReduceColBench, self).__init__(mode, device, dtype, "col", M, N, K, skip_input_transform)
 
     @staticmethod
     def module():
         return "reduce_col"
+
+
+class ReduceFullBench(ReduceBench):
+    def __init__(self, mode, device, dtype, M, skip_input_transform):
+        super(ReduceFullBench, self).__init__(mode, device, dtype, "full", M, 1, 1, skip_input_transform)
+
+    def config(self):
+        return [self.M * self.N * self.K, self._skip_input_transform_str()]
+
+    @staticmethod
+    def default_configs():
+        return [
+            [1 << 24, "s1"],
+        ]
+
+    @staticmethod
+    def module():
+        return "reduce_full"
+
 
 class Reduce2DBench(benchmark.Benchmark):
     '''
@@ -139,6 +181,15 @@ class Reduce2DInnerBench(Reduce2DBench):
         super(Reduce2DInnerBench, self).__init__(mode, device, dtype, 1, dim0, dim1)
 
     @staticmethod
+    def default_configs():
+        parent_config = Reduce2DBench.default_configs()[0]
+        return [parent_config[1:]]
+
+    def config(self):
+        parent_config = super(Reduce2DInnerBench, self).config()
+        return parent_config[1:]
+
+    @staticmethod
     def module():
         return "reduce2d_inner"
 
@@ -147,14 +198,24 @@ class Reduce2DOuterBench(Reduce2DBench):
         super(Reduce2DOuterBench, self).__init__(mode, device, dtype, 0, dim0, dim1)
 
     @staticmethod
+    def default_configs():
+        parent_config = Reduce2DBench.default_configs()[0]
+        return [parent_config[1:]]
+
+    def config(self):
+        parent_config = super(Reduce2DOuterBench, self).config()
+        return parent_config[1:]
+
+    @staticmethod
     def module():
         return "reduce2d_outer"
+
 benchmark.register_benchmark_class(ReduceRowBench)
 benchmark.register_benchmark_class(ReduceMidBench)
 benchmark.register_benchmark_class(ReduceColBench)
 benchmark.register_benchmark_class(Reduce2DInnerBench)
 benchmark.register_benchmark_class(Reduce2DOuterBench)
-
+benchmark.register_benchmark_class(ReduceFullBench)
 
 class DynamicReduce2DBench(benchmark.DynamicShape, Reduce2DBench):
     '''
@@ -183,6 +244,15 @@ class DynamicReduce2DInnerBench(DynamicReduce2DBench):
         super().__init__(mode, device, dtype, 1, dim0, dim1)
 
     @staticmethod
+    def default_configs():
+        parent_config = DynamicReduce2DBench.default_configs()[0]
+        return [parent_config[1:]]
+
+    def config(self):
+        parent_config = super(DynamicReduce2DInnerBench, self).config()
+        return parent_config[1:]
+
+    @staticmethod
     def module():
         return "reduce2d_dynamic_inner"
 
@@ -190,6 +260,15 @@ class DynamicReduce2DInnerBench(DynamicReduce2DBench):
 class DynamicReduce2DOuterBench(DynamicReduce2DBench):
     def __init__(self, mode, device, dtype, dim0, dim1):
         super().__init__(mode, device, dtype, 0, dim0, dim1)
+
+    @staticmethod
+    def default_configs():
+        parent_config = DynamicReduce2DBench.default_configs()[0]
+        return [parent_config[1:]]
+
+    def config(self):
+        parent_config = super(DynamicReduce2DInnerBench, self).config()
+        return parent_config[1:]
 
     @staticmethod
     def module():

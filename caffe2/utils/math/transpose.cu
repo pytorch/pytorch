@@ -21,7 +21,6 @@ constexpr int kBlockRows = 8;
 // Reference https://devblogs.nvidia.com/efficient-matrix-transpose-cuda-cc/
 template <typename TIndex, typename TData>
 __global__ void BatchTranspose2DCUDAKernel(
-    const TIndex N,
     const TIndex H,
     const TIndex W,
     const TIndex dh,
@@ -38,7 +37,7 @@ __global__ void BatchTranspose2DCUDAKernel(
   int y = r * kTileDim + threadIdx.y;
   if (x < W) {
     for (int i = 0; threadIdx.y + i < kTileDim && y + i < H; i += kBlockRows) {
-#if __CUDA_ARCH__ >= 350 || defined(__HIP_PLATFORM_HCC__)
+#if __CUDA_ARCH__ >= 350 || defined(USE_ROCM)
       tile[threadIdx.y + i][threadIdx.x] = __ldg(X + offset + (y + i) * W + x);
 #else
       tile[threadIdx.y + i][threadIdx.x] = X[offset + (y + i) * W + x];
@@ -67,7 +66,8 @@ void BatchTranspose2DCUDAImpl(
   const TIndex dw = DivUp<TIndex>(W, kTileDim);
   BatchTranspose2DCUDAKernel<TIndex, TData>
       <<<N * dh * dw, dim3(kTileDim, kBlockRows), 0, context->cuda_stream()>>>(
-          N, H, W, dh, dw, X, Y);
+          H, W, dh, dw, X, Y);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 
 #define DELEGATE_TRANSPOSE_2D_CUDA_IMPL(TIndex, TData, CuBLASFunc) \
@@ -105,7 +105,8 @@ void BatchTranspose2DCUDAImpl(
           <<<N * dh * dw,                                          \
              dim3(kTileDim, kBlockRows),                           \
              0,                                                    \
-             context->cuda_stream()>>>(N, H, W, dh, dw, X, Y);     \
+             context->cuda_stream()>>>(H, W, dh, dw, X, Y);        \
+      C10_CUDA_KERNEL_LAUNCH_CHECK();                              \
     }                                                              \
   }
 DELEGATE_TRANSPOSE_2D_CUDA_IMPL(std::int32_t, float, cublasSgeam)
@@ -130,7 +131,7 @@ __global__ void TransposeCUDAKernel(
       X_index += v % Y_dims.data[i] * X_strides.data[i];
       v /= Y_dims.data[i];
     }
-#if __CUDA_ARCH__ >= 350 || defined(__HIP_PLATFORM_HCC__)
+#if __CUDA_ARCH__ >= 350 || defined(USE_ROCM)
     Y[Y_index] = __ldg(X + X_index);
 #else
     Y[Y_index] = X[X_index];
@@ -157,6 +158,7 @@ void TransposeCUDAImpl(
   TransposeCUDAKernel<TIndex, TData, D>
       <<<M, CAFFE_CUDA_NUM_THREADS, 0, context->cuda_stream()>>>(
           size, X_strides, Y_dims, X, Y);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 
 } // namespace

@@ -1,3 +1,5 @@
+# Owner(s): ["oncall: distributed"]
+
 # Copyright 2019 Kakao Brain
 #
 # Copyright (c) Facebook, Inc. and its affiliates. All rights reserved.
@@ -24,7 +26,7 @@ def test_stash(skip_tracker):
     class Stash(nn.Module):
         def forward(self, input):
             yield stash("foo", input)
-            return input * 2 # noqa
+            return input * 2  # noqa: B901
 
     l1 = Stash()
 
@@ -41,13 +43,13 @@ def test_pop():
     class Stash(nn.Module):
         def forward(self, input):
             yield stash("foo", input)
-            return input * 2 # noqa
+            return input * 2  # noqa: B901
 
     @skippable(pop=["foo"])
     class Pop(nn.Module):
         def forward(self, input):
             foo = yield pop("foo")
-            return foo # noqa
+            return foo
 
     l1 = Stash()
     l2 = Pop()
@@ -83,7 +85,7 @@ def test_stash_not_declared():
     class Stash(nn.Module):
         def forward(self, input):
             yield stash("foo", input)
-            return input * 2 # noqa
+            return input * 2  # noqa: B901
 
     l1 = Stash()
 
@@ -96,13 +98,13 @@ def test_pop_not_declared():
     class Stash(nn.Module):
         def forward(self, input):
             yield stash("foo", input)
-            return input * 2 # noqa
+            return input * 2  # noqa: B901
 
     @skippable()
     class Pop(nn.Module):
         def forward(self, input):
             foo = yield pop("foo")
-            return foo # noqa
+            return foo
 
     l1 = Stash()
     l2 = Pop()
@@ -130,7 +132,7 @@ def test_stash_none():
     class Stash(nn.Module):
         def forward(self, input):
             yield stash("foo", None)
-            return input * 2 # noqa
+            return input * 2  # noqa: B901
 
     l1 = Stash()
     l1(torch.tensor(42))

@@ -1,6 +1,7 @@
 #include "caffe2/core/context_gpu.h"
 #include "caffe2/operators/prelu_op.h"
 
+#include "caffe2/utils/cub_namespace.cuh"
 #include <cub/block/block_reduce.cuh>
 
 namespace caffe2 {
@@ -123,16 +124,15 @@ __global__ void PReluWGradientKernelNCHW(
 template <typename T>
 __global__ void PReluWGradientKernelNHWC(
     const int C,
-    const int N,
     const int num_items,
     const T* Xdata,
     const T* dYdata,
     T* dW) {
-  int c = blockIdx.x;
+  const auto c = blockIdx.x;
   T wsum = 0.0;
-  int items_per_channel = num_items / C;
+  const auto items_per_channel = num_items / C;
   for (int i = threadIdx.x; i < items_per_channel; i += blockDim.x) {
-    int ii = i * C + c;
+    const auto ii = i * C + c;
     wsum += (Xdata[ii] <= 0) * dYdata[ii] * Xdata[ii];
   }
 
@@ -168,6 +168,8 @@ bool PReluOp<float, CUDAContext>::RunOnDevice() {
         CAFFE_CUDA_NUM_THREADS,
         0,
         context_.cuda_stream()>>>(X.numel(), Xdata, Wdata, Ydata);
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
+
     return true;
   }
   // non-shared case.
@@ -181,6 +183,7 @@ bool PReluOp<float, CUDAContext>::RunOnDevice() {
           CAFFE_CUDA_NUM_THREADS,
           0,
           context_.cuda_stream()>>>(N, C, dim, Xdata, Wdata, Ydata);
+      C10_CUDA_KERNEL_LAUNCH_CHECK();
 
       break;
     }
@@ -190,6 +193,7 @@ bool PReluOp<float, CUDAContext>::RunOnDevice() {
           CAFFE_CUDA_NUM_THREADS,
           0,
           context_.cuda_stream()>>>(X.numel(), C, Xdata, Wdata, Ydata);
+      C10_CUDA_KERNEL_LAUNCH_CHECK();
 
       break;
     }
@@ -229,11 +233,14 @@ bool PReluGradientOp<float, CUDAContext>::RunOnDevice() {
         CAFFE_CUDA_NUM_THREADS,
         0,
         context_.cuda_stream()>>>(X.numel(), Xdata, dYdata, dWdata);
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
+
     PReluGradientKernel<<<
         CAFFE_GET_BLOCKS(X.numel()),
         CAFFE_CUDA_NUM_THREADS,
         0,
         context_.cuda_stream()>>>(X.numel(), Xdata, Wdata, dYdata, dXdata);
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
 
     return true;
   }
@@ -246,11 +253,14 @@ bool PReluGradientOp<float, CUDAContext>::RunOnDevice() {
           CAFFE_CUDA_NUM_THREADS,
           0,
           context_.cuda_stream()>>>(C, N, X.numel(), Xdata, dYdata, dWdata);
+      C10_CUDA_KERNEL_LAUNCH_CHECK();
+
       PReluGradientKernelNCHW<<<
           CAFFE_GET_BLOCKS(X.numel()),
           CAFFE_CUDA_NUM_THREADS,
           0,
           context_.cuda_stream()>>>(N, C, dim, Xdata, Wdata, dYdata, dXdata);
+      C10_CUDA_KERNEL_LAUNCH_CHECK();
 
       break;
     }
@@ -259,12 +269,15 @@ bool PReluGradientOp<float, CUDAContext>::RunOnDevice() {
           C,
           CAFFE_CUDA_NUM_THREADS,
           0,
-          context_.cuda_stream()>>>(C, N, X.numel(), Xdata, dYdata, dWdata);
+          context_.cuda_stream()>>>(C, X.numel(), Xdata, dYdata, dWdata);
+      C10_CUDA_KERNEL_LAUNCH_CHECK();
+
       PReluGradientKernelNHWC<<<
           CAFFE_GET_BLOCKS(Y.numel()),
           CAFFE_CUDA_NUM_THREADS,
           0,
           context_.cuda_stream()>>>(X.numel(), C, Xdata, Wdata, dYdata, dXdata);
+      C10_CUDA_KERNEL_LAUNCH_CHECK();
 
       break;
     }

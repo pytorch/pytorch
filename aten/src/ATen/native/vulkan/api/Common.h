@@ -20,7 +20,11 @@
 #endif /* USE_VULKAN_SHADERC_RUNTIME */
 
 #ifdef USE_VULKAN_WRAPPER
+#ifdef USE_VULKAN_VOLK
+#include <volk.h>
+#else
 #include <vulkan_wrapper.h>
+#endif /* USE_VULKAN_VOLK */
 #else
 #include <vulkan/vulkan.h>
 #endif /* USE_VULKAN_WRAPPER */
@@ -131,6 +135,9 @@ class Handle final {
 //
 // Impl
 //
+
+template<typename Type, typename Deleter>
+constexpr Type Handle<Type, Deleter>::kNull;
 
 template<typename Type, typename Deleter>
 inline Handle<Type, Deleter>::Handle(const Type payload, Deleter deleter)

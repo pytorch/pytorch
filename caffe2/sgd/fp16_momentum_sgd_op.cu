@@ -22,7 +22,7 @@ __global__ void FP16MomentumSGDKernel(
     bool nesterov,
     const float wd,
     half2* param) {
-#if __CUDA_ARCH__ >= 530 || defined(__HIP_PLATFORM_HCC__)
+#if __CUDA_ARCH__ >= 530 || defined(USE_ROCM)
   const float lr2 = lr[0];
   const half2 LR = __float2half2_rn(lr2);
   const half2 momentum = __float2half2_rn(mom);
@@ -109,7 +109,7 @@ __global__ void FP16MomentumSGDFP32Kernel(
     bool nesterov,
     const float wd,
     half2* param) {
-#if __CUDA_ARCH__ >= 530 || defined(__HIP_PLATFORM_HCC__)
+#if __CUDA_ARCH__ >= 530 || defined(USE_ROCM)
   const float lr2 = lr[0];
   const float LR = lr2;
   const float momentum = mom;

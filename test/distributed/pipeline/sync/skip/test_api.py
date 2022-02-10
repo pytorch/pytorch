@@ -1,3 +1,5 @@
+# Owner(s): ["oncall: distributed"]
+
 # Copyright 2019 Kakao Brain
 #
 # Copyright (c) Facebook, Inc. and its affiliates. All rights reserved.
@@ -32,7 +34,7 @@ def test_skippable_repr():
 
         def forward(self, x):
             yield stash("hello", x)
-            return self.conv(x) # noqa
+            return self.conv(x)  # noqa: B901
 
     m = Hello()
     assert (

@@ -6,4 +6,4 @@
 
 #include <c10/macros/Export.h>
 
-// Use TORCH_CUDA_API for exports from this folder
+// Use TORCH_CUDA_CPP_API or TORCH_CUDA_CU_API for exports from this folder

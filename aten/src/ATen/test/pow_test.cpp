@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 
 #include <ATen/native/Pow.h>
+#include <c10/util/irange.h>
 
 #include <torch/types.h>
 #include <torch/utils.h>
@@ -126,8 +127,10 @@ void tensor_pow_scalar(const Vals vals, const Pows pows, const torch::ScalarType
   const auto tensor = torch::tensor(vals, valsDtype);
 
   for (const auto pow : pows) {
+    // NOLINTNEXTLINE(clang-diagnostic-implicit-const-int-float-conversion)
     if ( dtype == kInt && pow > std::numeric_limits<int>::max()) {
       // value cannot be converted to type int without overflow
+      // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
       EXPECT_THROW(tensor.pow(pow), std::runtime_error);
       continue;
     }
@@ -201,7 +204,7 @@ void tensor_pow_tensor(const Vals vals, c10::ScalarType vals_dtype, Pows pows, c
   std::cout.precision(dbl::max_digits10);
 
   const auto vals_tensor = torch::tensor(vals, vals_dtype);
-  for (size_t shift = 0; shift < pows.size(); shift++) {
+  for (const auto shift : c10::irange(pows.size())) {
     const auto pows_tensor = torch::tensor(pows, pows_dtype);
 
     const auto actual_pow = vals_tensor.pow(pows_tensor);
@@ -364,4 +367,3 @@ TEST(PowTest, TestIntegralPow) {
   test_inverse(longs);
   test_inverse(ints);
 }
-

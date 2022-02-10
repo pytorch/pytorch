@@ -58,7 +58,8 @@ struct AddFunctor {
         TGrad(1),
         dC,
         dA,
-        context);
+        context,
+        true);
     math::ReduceSum(
         C_dims.size(),
         C_dims.data(),
@@ -66,7 +67,8 @@ struct AddFunctor {
         TGrad(1),
         dC,
         dB,
-        context);
+        context,
+        true);
     return true;
   }
 };

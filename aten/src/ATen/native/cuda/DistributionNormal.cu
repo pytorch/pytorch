@@ -3,7 +3,7 @@
 #include <ATen/NativeFunctions.h>
 #include <ATen/cuda/CUDAApplyUtils.cuh>
 #include <ATen/AccumulateType.h>
-#include <ATen/CUDAGeneratorImpl.h>
+#include <ATen/cuda/CUDAGeneratorImpl.h>
 #include <ATen/native/UnaryOps.h>
 #include <ATen/native/cuda/DistributionTemplates.h>
 
@@ -16,11 +16,6 @@
 #include <ATen/native/Distributions.h>
 #include <ATen/native/cuda/Loops.cuh>
 #include <ATen/native/TensorIterator.h>
-#include <ATen/LegacyTHFunctionsCUDA.h>
-
-#include <THC/THCGeneral.h>
-#include <THC/THCApply.cuh>
-#include <THC/THCDeviceUtils.cuh>
 
 #include <cstdint>
 #include <limits>

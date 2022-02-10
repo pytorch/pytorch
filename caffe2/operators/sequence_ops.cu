@@ -1,6 +1,7 @@
 #include <algorithm>
 
 #include <cub/cub.cuh>
+#include "caffe2/utils/cub_namespace.cuh"
 
 #include "caffe2/core/context_gpu.h"
 #include "caffe2/operators/sequence_ops.h"
@@ -226,6 +227,8 @@ bool AddPaddingOp<CUDAContext>::MakePadding(
           endPaddingWidth_,
           out_ptr,
           lengths_out_ptr);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+
   return true;
 }
 
@@ -290,6 +293,8 @@ bool RemovePaddingOp<CUDAContext>::DoRunWithType() {
           endPaddingWidth_,
           out_ptr,
           lengths_out_ptr);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+
   return true;
 }
 
@@ -365,6 +370,7 @@ void GatherPaddingOp<CUDAContext>::GatherPadding(
             lengths_prefix_sum_.template data<int>(),
             padding_start_ptr,
             padding_end_ptr);
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
   }
 }
 REGISTER_CUDA_OPERATOR(RemovePadding, RemovePaddingOp<CUDAContext>);

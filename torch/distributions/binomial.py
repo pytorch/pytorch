@@ -67,7 +67,7 @@ class Binomial(Distribution):
     def _new(self, *args, **kwargs):
         return self._param.new(*args, **kwargs)
 
-    @constraints.dependent_property
+    @constraints.dependent_property(is_discrete=True, event_dim=0)
     def support(self):
         return constraints.integer_interval(0, self.total_count)
 
@@ -111,6 +111,14 @@ class Binomial(Distribution):
                           + self.total_count * torch.log1p(torch.exp(-torch.abs(self.logits)))
                           - log_factorial_n)
         return value * self.logits - log_factorial_k - log_factorial_nmk - normalize_term
+
+    def entropy(self):
+        total_count = int(self.total_count.max())
+        if not self.total_count.min() == total_count:
+            raise NotImplementedError("Inhomogeneous total count not supported by `entropy`.")
+
+        log_prob = self.log_prob(self.enumerate_support(False))
+        return -(torch.exp(log_prob) * log_prob).sum(0)
 
     def enumerate_support(self, expand=True):
         total_count = int(self.total_count.max())

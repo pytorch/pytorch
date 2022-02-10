@@ -47,6 +47,8 @@ bool DropoutOp<float, CUDAContext>::RunOnDevice() {
         X.data<float>(),
         Ydata,
         mask->template mutable_data<bool>());
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
+
     return true;
   }
 }
@@ -88,6 +90,8 @@ bool DropoutGradientOp<float, CUDAContext>::RunOnDevice() {
         mask.data<bool>(),
         scale,
         dX->template mutable_data<float>());
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
+
     return true;
   }
 }

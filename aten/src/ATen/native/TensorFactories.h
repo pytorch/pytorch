@@ -65,8 +65,10 @@ inline void check_args(
 
 using at::check_size_nonnegative;
 
+// assumes maximum value in created tensor is n-1 (e.g., torch.randperm(n))
 inline void check_supported_max_int_with_precision(int64_t n, const Tensor& tensor) {
-  TORCH_CHECK(at::scalar_tensor(n, tensor.options()).defined(),
+  // match defined() to behavior of checks below
+  TORCH_CHECK(at::scalar_tensor(n>0?n-1:n, tensor.options()).defined(),
               "n is too large for result tensor type: '", tensor.toString(), "'");
 
   // Ensure sufficient precision for floating point representation.
@@ -85,12 +87,27 @@ inline void check_supported_max_int_with_precision(int64_t n, const Tensor& tens
   }
 }
 
+// The ZeroTensor allocator ignores whatever allocation is requested and always
+// gives you nullptr
+struct ZeroTensorAllocator final : public at::Allocator {
+  ZeroTensorAllocator(at::Device device) : device_(device) {};
+  ~ZeroTensorAllocator() override = default;
+  static void deleter(void* const pointer) {
+    TORCH_INTERNAL_ASSERT(!pointer);
+  }
+  DataPtr allocate(const size_t nbytes) const override {
+    return {nullptr, nullptr, &deleter, device_};
+  }
+  DeleterFnPtr raw_deleter() const override {
+    return deleter;
+  }
+  at::Device device_;
+};
+
 using binary_fn = void (*)(TensorIterator&);
 
 DECLARE_DISPATCH(binary_fn, complex_stub);
 DECLARE_DISPATCH(binary_fn, polar_stub);
-
-DECLARE_DISPATCH(void(*)(TensorIterator&, const int64_t, const double), kaiser_window_stub);
 
 } // namespace native
 } // namespace at

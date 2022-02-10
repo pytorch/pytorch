@@ -115,9 +115,11 @@ operator()(const int N, const T* X, T* Y, CUDAContext* context) const {
   if (fast_gelu) {
     FastGeluCUDAKernel<T>
         <<<M, CAFFE_CUDA_NUM_THREADS, 0, context->cuda_stream()>>>(N, X, Y);
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
   } else {
     GeluCUDAKernel<T>
         <<<M, CAFFE_CUDA_NUM_THREADS, 0, context->cuda_stream()>>>(N, X, Y);
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
   }
   return true;
 }
@@ -139,11 +141,13 @@ bool GeluGradientFunctor<CUDAContext>::Forward(
     FastGeluGradientCUDAKernel<T>
         <<<M, CAFFE_CUDA_NUM_THREADS, 0, context->cuda_stream()>>>(
             N, dY, X, dX);
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
   } else {
     // y = x * P(X <= x) where X ~ N(0, 1)
     GeluGradientCUDAKernel<T>
         <<<M, CAFFE_CUDA_NUM_THREADS, 0, context->cuda_stream()>>>(
             N, dY, X, dX);
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
   }
   return true;
 }

@@ -1,6 +1,6 @@
 #pragma once
 
-#include <torch/csrc/WindowsTorchApiMacro.h>
+#include <torch/csrc/Export.h>
 #include <torch/csrc/jit/codegen/cuda/kernel.h>
 
 #include <string>
@@ -12,8 +12,8 @@ namespace cuda {
 namespace codegen {
 
 //! Generates a CUDA kernel definition for the given kernel
-TORCH_CUDA_API std::string generateCudaKernel(
-    const Kernel* kernel,
+TORCH_CUDA_CU_API std::string generateCudaKernel(
+    const kir::Kernel* kernel,
     const std::string& kernel_name = "CUDAGeneratedKernel");
 
 } // namespace codegen

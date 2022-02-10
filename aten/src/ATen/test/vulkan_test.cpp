@@ -5,6 +5,7 @@
 #include <ATen/ATen.h>
 #include <ATen/core/dispatch/Dispatcher.h>
 #include <ATen/vulkan/Context.h>
+#include <c10/util/irange.h>
 
 bool checkRtol(const at::Tensor& diff, const std::vector<at::Tensor> inputs) {
   double maxValue = 0.0;
@@ -145,7 +146,8 @@ TEST(VulkanTest, addScalar) {
   auto t_in = at::rand({3, 2, 2, 3}, at::device(at::kCPU).dtype(at::kFloat));
   float* data = t_in.data_ptr<float>();
   auto numel = t_in.numel();
-  for (int i = 0; i < numel; i++) {
+  for (const auto i : c10::irange(numel)) {
+    // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
     data[i] = i;
   }
 
@@ -419,7 +421,7 @@ class Conv2d : public BaseOp {
 
 class OpsList {
  public:
-  OpsList() {}
+  OpsList() = default;
   OpsList(std::vector<std::unique_ptr<BaseOp>>& _ops) : ops(std::move(_ops)) {}
 
   auto runDual(at::Tensor& in, at::Tensor& vin) {
@@ -771,7 +773,8 @@ TEST(VulkanTest, tensor5d_transpose) {
       at::empty({1, 2, 3, 2, 1}, at::TensorOptions(at::kCPU).dtype(at::kFloat));
   float* data = t_in.data_ptr<float>();
   auto numel = t_in.numel();
-  for (int i = 0; i < numel; i++) {
+  for (const auto i : c10::irange(numel)) {
+    // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
     data[i] = i;
   }
 
@@ -814,7 +817,8 @@ TEST(VulkanTest, slice) {
       at::empty({1, 4, 2, 2}, at::TensorOptions(at::kCPU).dtype(at::kFloat));
   float* data = t_in.data_ptr<float>();
   auto numel = t_in.numel();
-  for (int i = 0; i < numel; i++) {
+  for (const auto i : c10::irange(numel)) {
+    // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
     data[i] = i;
   }
 
@@ -838,7 +842,8 @@ TEST(VulkanTest, select) {
       at::empty({1, 4, 2, 2}, at::TensorOptions(at::kCPU).dtype(at::kFloat));
   float* data = t_in.data_ptr<float>();
   auto numel = t_in.numel();
-  for (int i = 0; i < numel; i++) {
+  for (const auto i : c10::irange(numel)) {
+    // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
     data[i] = i;
   }
 
@@ -862,7 +867,8 @@ TEST(VulkanTest, unsqueeze) {
       at::empty({1, 2, 2}, at::TensorOptions(at::kCPU).dtype(at::kFloat));
   float* data = t_in.data_ptr<float>();
   auto numel = t_in.numel();
-  for (int i = 0; i < numel; i++) {
+  for (const auto i : c10::irange(numel)) {
+    // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
     data[i] = i;
   }
 

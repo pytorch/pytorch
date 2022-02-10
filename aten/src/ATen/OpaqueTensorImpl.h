@@ -28,6 +28,8 @@ struct TORCH_API OpaqueTensorImpl : public TensorImpl {
       bool is_non_overlapping_and_dense = true)
       : TensorImpl(key_set, data_type, device),
         opaque_handle_(std::move(opaque_handle)) {
+    set_storage_access_should_throw();
+    set_has_contiguity_policy(HasContiguityPolicy::ContiguityNotSupported);
     sizes_and_strides_.set_sizes(sizes);
     refresh_numel();
     is_non_overlapping_and_dense_ = is_non_overlapping_and_dense;
@@ -40,12 +42,6 @@ struct TORCH_API OpaqueTensorImpl : public TensorImpl {
 
   IntArrayRef strides() const override {
     AT_ERROR("opaque tensors do not have strides");
-  }
-
-  bool is_contiguous(
-      c10::MemoryFormat memory_format =
-          c10::MemoryFormat::Contiguous) const override {
-    AT_ERROR("opaque tensors do not have is_contiguous");
   }
 
   int64_t stride(int64_t d) const override {
@@ -64,17 +60,12 @@ struct TORCH_API OpaqueTensorImpl : public TensorImpl {
     AT_ERROR("opaque tensors do not have set_storage_offset");
   }
 
+#ifdef DEBUG
   bool has_storage() const override {
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(!storage_, "OpaqueTensorImpl assumes that storage_ is never set");
     return false;
   }
-
-  const Storage& storage() const override {
-    AT_ERROR("opaque tensors do not have storage");
-  }
-
-  int64_t storage_offset() const override {
-    AT_ERROR("opaque tensors do not have storage");
-  }
+#endif
 
   /**
    * Return a TensorImpl that is a shallow-copy of this TensorImpl.
@@ -181,6 +172,10 @@ struct TORCH_API OpaqueTensorImpl : public TensorImpl {
   }
 
  private:
+  const char* tensorimpl_type_name() const override {
+    return "OpaqueTensorImpl";
+  }
+
   OpaqueHandle opaque_handle_;
 };
 

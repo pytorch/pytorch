@@ -9,6 +9,8 @@ namespace {
   DeviceType sparseTensorSetToDeviceType(DispatchKeySet key_set) {
     if (key_set.has(DispatchKey::SparseCPU)) {
       return kCPU;
+    } else if (key_set.has(DispatchKey::SparseXPU)) {
+      return kXPU;
     } else if (key_set.has(DispatchKey::SparseCUDA)) {
       return kCUDA;
     } else {
@@ -48,13 +50,18 @@ SparseTensorImpl::SparseTensorImpl(at::DispatchKeySet key_set, const caffe2::Typ
   AT_ASSERT(values_.device() == device());
 
   is_non_overlapping_and_dense_ = false;
+  set_storage_access_should_throw();
+  set_has_contiguity_policy(HasContiguityPolicy::ContiguityNotSupported);
+}
+
+void SparseTensorImpl::release_resources() {
+  TensorImpl::release_resources();
+  values_.reset();
+  indices_.reset();
 }
 
 IntArrayRef SparseTensorImpl::strides() const {
   AT_ERROR("sparse tensors do not have strides");
-}
-bool SparseTensorImpl::is_contiguous(at::MemoryFormat memory_format) const {
-  AT_ERROR("sparse tensors do not have is_contiguous");
 }
 int64_t SparseTensorImpl::stride(int64_t d) const {
   AT_ERROR("sparse tensors do not have strides");
@@ -68,20 +75,17 @@ void SparseTensorImpl::set_stride(int64_t dim, int64_t new_stride) {
 void SparseTensorImpl::set_storage_offset(int64_t storage_offset) {
   AT_ERROR("sparse tensors do not have set_storage_offset");
 }
-
-int64_t SparseTensorImpl::dim() const {
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(sparse_dim_ + dense_dim_ == TensorImpl::dim());
-  return sparse_dim_ + dense_dim_;
-}
+#ifdef DEBUG
 bool SparseTensorImpl::has_storage() const {
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(!storage_, "SparseTensorImpl assumes that storage_ is never set");
   return false;
 }
-const Storage& SparseTensorImpl::storage() const {
-  AT_ERROR("sparse tensors do not have storage");
+#endif
+
+const char* SparseTensorImpl::tensorimpl_type_name() const {
+  return "SparseTensorImpl";
 }
-int64_t SparseTensorImpl::storage_offset() const {
-  AT_ERROR("sparse tensors do not have storage");
-}
+
 void SparseTensorImpl::set_indices_and_values_unsafe(const Tensor& indices, const Tensor& values) {
   TORCH_CHECK(allow_tensor_metadata_change(), "set_indices_and_values_unsafe ", err_msg_tensor_metadata_change_not_allowed);
 

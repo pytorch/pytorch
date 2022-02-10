@@ -82,15 +82,15 @@ class PYBIND11_EXPORT PythonRpcHandler {
   // referenced by a given RRef.
   const RRefTypeFunctions& getRRefTypeFunctions() const;
 
- private:
-  void init();
-  PythonRpcHandler();
-  ~PythonRpcHandler() = default;
-
   PythonRpcHandler(const PythonRpcHandler&) = delete;
   PythonRpcHandler& operator=(const PythonRpcHandler&) = delete;
   PythonRpcHandler(PythonRpcHandler&&) = delete;
   PythonRpcHandler& operator=(PythonRpcHandler&&) = delete;
+
+ private:
+  void init();
+  PythonRpcHandler();
+  ~PythonRpcHandler() = default;
 
   // Ref to `torch.distributed.rpc.internal._run_function`.
   py::object pyRunFunction_;

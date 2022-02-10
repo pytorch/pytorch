@@ -17,9 +17,9 @@
 #include "nomnigraph/Representations/Compiler.h"
 #include "nomnigraph/Representations/ControlFlow.h"
 #include "nomnigraph/Support/Casting.h"
-#include "nomnigraph/Support/Pointer.h"
 #include "nomnigraph/Transformations/SubgraphMatcher.h"
 
+#include <memory>
 #include <sstream>
 #include <string>
 #include <type_traits>
@@ -290,7 +290,7 @@ NNGraph::NodeRef NNModule::replaceSubgraphWithOperator(
     const std::vector<NNGraph::NodeRef>& subgraph_inputs,
     const std::vector<NNGraph::NodeRef>& subgraph_outputs,
     Args... args) {
-  auto node = dataFlow.createNode(util::make_unique<T>(args...));
+  auto node = dataFlow.createNode(std::make_unique<T>(args...));
   replaceSubgraph(sg, node, subgraph_inputs, subgraph_outputs);
   return node;
 }
@@ -424,20 +424,20 @@ void insertOp(
     NNGraph::NodeRef b,
     Args... args) {
   if (is<NeuralNetData>(a) && is<NeuralNetOperator>(b)) {
-    auto newNode = g.createNode(util::make_unique<T>(args...));
+    auto newNode = g.createNode(std::make_unique<T>(args...));
     auto data = get<NeuralNetData>(a);
     auto newData =
-        g.createNode(util::make_unique<Tensor>(data->getName() + "_"));
+        g.createNode(std::make_unique<Tensor>(data->getName() + "_"));
     g.createEdge(a, newNode);
     g.createEdge(newNode, newData);
     g.createEdge(newData, b);
     return;
   }
   if (is<NeuralNetOperator>(a) && is<NeuralNetData>(b)) {
-    auto newNode = g.createNode(util::make_unique<T>(args...));
+    auto newNode = g.createNode(std::make_unique<T>(args...));
     auto data = get<NeuralNetData>(b);
     auto newData =
-        g.createNode(util::make_unique<Tensor>(data->getName() + "_"));
+        g.createNode(std::make_unique<Tensor>(data->getName() + "_"));
     g.createEdge(a, newData);
     g.createEdge(newData, newNode);
     g.createEdge(newNode, b);
@@ -455,7 +455,7 @@ NNGraph::NodeRef convertNode(NNGraph& g, NNGraph::NodeRef node) {
       dyn_cast<NeuralNetOperator>(node->mutableData()->release());
 
   auto newNode =
-      g.createNode(util::make_unique<NewT>(*dyn_cast<OldT>(nnOpPtr)));
+      g.createNode(std::make_unique<NewT>(*dyn_cast<OldT>(nnOpPtr)));
 
   g.replaceNode(node, newNode);
   g.deleteNode(node);
@@ -503,7 +503,7 @@ TORCH_API NNGraph::NodeRef createOperator(NNModule* nn, Args... args);
 // Create an operator
 template <typename T, typename... Args>
 NNGraph::NodeRef createOperator(NNModule* nn, Args... args) {
-  return nn->dataFlow.createNode(util::make_unique<T>(args...));
+  return nn->dataFlow.createNode(std::make_unique<T>(args...));
 }
 
 TORCH_API void coalesceInsertedDataDependencies(repr::NNModule* m);

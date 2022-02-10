@@ -1,14 +1,14 @@
-from .quantize import *
-from .observer import *
-from .qconfig import *
-from .fake_quantize import *
+from .quantize import *  # noqa: F403
+from .observer import *  # noqa: F403
+from .qconfig import *  # noqa: F403
+from .fake_quantize import *  # noqa: F403
 from .fuse_modules import fuse_modules
-from .stubs import *
-from .quant_type import *
-from .quantize_jit import *
+from .stubs import *  # noqa: F403
+from .quant_type import *  # noqa: F403
+from .quantize_jit import *  # noqa: F403
 # from .quantize_fx import *
-from .quantization_mappings import *
-from .fuser_method_mappings import *
+from .quantization_mappings import *  # noqa: F403
+from .fuser_method_mappings import *  # noqa: F403
 
 def default_eval_fn(model, calib_data):
     r"""
@@ -18,6 +18,7 @@ def default_eval_fn(model, calib_data):
     for data, target in calib_data:
         model(data)
 
+# TODO(future PR): fix the typo, should be `__all__`
 _all__ = [
     'QuantWrapper', 'QuantStub', 'DeQuantStub',
     # Top level API for eager mode quantization
@@ -42,8 +43,10 @@ _all__ = [
     'default_eval_fn', 'get_observer_dict',
     'register_activation_post_process_hook',
     # Observers
-    'ObserverBase', 'WeightObserver', 'observer', 'default_observer',
+    'ObserverBase', 'WeightObserver', 'HistogramObserver',
+    'observer', 'default_observer',
     'default_weight_observer', 'default_placeholder_observer',
+    'default_per_channel_weight_observer',
     # FakeQuantize (for qat)
     'default_fake_quant', 'default_weight_fake_quant',
     'default_symmetric_fixed_qparams_fake_quant',

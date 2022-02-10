@@ -57,19 +57,30 @@ def enable():
 _python_cu = torch._C.CompilationUnit()
 
 
-# qualified_name => ScriptClass mapping
+# python class => ScriptClass mapping
 _script_classes = {}
-
-def _add_script_class(cls, name):
-    global _script_classes
-    _script_classes[name] = cls
+_name_to_pyclass = {}
 
 
-def _get_script_class(name):
-    global _script_classes
-    if name not in _script_classes:
-        return None
-    return _script_classes[name]
+def _add_script_class(python_class, script_class):
+    _script_classes[python_class] = script_class
+    _name_to_pyclass[script_class.qualified_name()] = python_class
+
+
+def _get_script_class(python_class):
+    override = getattr(python_class, "_jit_override_qualname", None)
+    if override is not None:
+        python_class = _get_python_class(override)
+    return _script_classes.get(python_class, None)
+
+
+def _get_python_class(qualified_name):
+    return _name_to_pyclass.get(qualified_name, None)
+
+
+def _clear_class_state():
+    _script_classes.clear()
+    _name_to_pyclass.clear()
 
 
 # Caching: we currently cache compilation of free functions and overloaded functions.

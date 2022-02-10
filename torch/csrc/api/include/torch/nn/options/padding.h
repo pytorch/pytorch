@@ -3,7 +3,7 @@
 #include <c10/util/variant.h>
 #include <torch/arg.h>
 #include <torch/enum.h>
-#include <torch/csrc/WindowsTorchApiMacro.h>
+#include <torch/csrc/Export.h>
 #include <torch/expanding_array.h>
 #include <torch/types.h>
 
@@ -19,6 +19,8 @@ struct TORCH_API ReflectionPadOptions {
   /// If it is `int`, uses the same padding in all boundaries.
   /// If it is a 2-`tuple` (for ReflectionPad1d), uses (padding_left, padding_right).
   /// If it is a 4-`tuple` (for ReflectionPad2d), uses (padding_left, padding_right, padding_top, padding_bottom).
+  /// If it is a 6-`tuple` (for ReflectionPad3d), uses (padding_left, padding_right, padding_top, padding_bottom, padding_front, padding_back).
+
   TORCH_ARG(ExpandingArray<D*2>, padding);
 };
 
@@ -37,6 +39,14 @@ using ReflectionPad1dOptions = ReflectionPadOptions<1>;
 /// ReflectionPad2d model(ReflectionPad2dOptions({1, 1, 2, 0}));
 /// ```
 using ReflectionPad2dOptions = ReflectionPadOptions<2>;
+
+/// `ReflectionPadOptions` specialized for the `ReflectionPad3d` module.
+///
+/// Example:
+/// ```
+/// ReflectionPad3d model(ReflectionPad3dOptions({1, 1, 2, 0, 1, 1}));
+/// ```
+using ReflectionPad3dOptions = ReflectionPadOptions<3>;
 
 // ============================================================================
 

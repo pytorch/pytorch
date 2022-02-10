@@ -48,6 +48,7 @@ bool PercentileOp<CPUContext>::RunOnDevice() {
 
   int current_ind = 0;
   int current_dist_start = 0;
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   int current_length;
   for (int i = 0; i < num_examples; i++) {
     current_dist_start = 0;
