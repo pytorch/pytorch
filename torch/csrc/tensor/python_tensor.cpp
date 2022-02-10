@@ -405,11 +405,9 @@ void py_set_default_dtype(PyObject* obj) {
       [backend, scalar_type](PyTensorType *x) {
         return x->get_backend() == backend && x->get_scalar_type() == scalar_type;
       });
-    if (it != tensor_types.end()) {
-      set_default_tensor_type(*it);
-    } else {
-      throw TypeError("tensor dtype not found");
-    }
+    // Make sure the iterator is valid before dereferencing it.
+    TORCH_INTERNAL_ASSERT(it != tensor_types.end(), "tensor dtype not found");
+    set_default_tensor_type(*it);
   } else {
     throw TypeError("invalid dtype object");
   }
