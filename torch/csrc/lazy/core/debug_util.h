@@ -37,8 +37,6 @@ class TORCH_API DebugUtil {
       GraphFormat format = GetDefaultGraphFormat());
 
   static bool ExperimentEnabled(const std::string& name);
-
-  static std::function <std::vector<SourceLocation>()> GetPythonFramesIfAvailable;
 };
 
 
