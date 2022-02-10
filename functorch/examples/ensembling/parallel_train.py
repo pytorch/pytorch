@@ -1,3 +1,4 @@
+import argparse
 import math
 import torch
 import torch.nn as nn
@@ -16,7 +17,16 @@ from functorch import make_functional, grad_and_value, vmap, combine_state_for_e
 # GOAL: Demonstrate that it is possible to use eager-mode vmap
 # to parallelize training over models.
 
-DEVICE = 'cpu'
+parser = argparse.ArgumentParser(description="Functorch Ensembled Models")
+parser.add_argument(
+    "--device",
+    type=str,
+    default="cpu",
+    help="CPU or GPU ID for this process (default: 'cpu')",
+)
+args = parser.parse_args()
+
+DEVICE = args.device
 
 # Step 1: Make some spirals
 
@@ -26,7 +36,7 @@ def make_spirals(n_samples, noise_std=0., rotations=1.):
     rs = ts ** 0.5
     thetas = rs * rotations * 2 * math.pi
     signs = torch.randint(0, 2, (n_samples,), device=DEVICE) * 2 - 1
-    labels = (signs > 0).to(torch.long)
+    labels = (signs > 0).to(torch.long).to(DEVICE)
 
     xs = rs * signs * torch.cos(thetas) + torch.randn(n_samples, device=DEVICE) * noise_std
     ys = rs * signs * torch.sin(thetas) + torch.randn(n_samples, device=DEVICE) * noise_std
@@ -98,7 +108,7 @@ step4()
 
 
 def init_fn(num_models):
-    models = [MLPClassifier() for _ in range(num_models)]
+    models = [MLPClassifier().to(DEVICE) for _ in range(num_models)]
     _, params, _ = combine_state_for_ensemble(models)
     return params
 
