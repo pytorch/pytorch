@@ -13,6 +13,7 @@ from .mappings import (
     functions_supported_by_quantization_preserves_dtype,
     fp32_to_int8_fun_mapping,
     add_and_mul_ops,
+    conv_ops,
 )
 
 from ..qconfig import QConfigAny
@@ -291,7 +292,7 @@ def converted_func_needs_scale_zp(seen_q_op_info: SeenQOpInfo) -> bool:
             inputs[0] is not None and \
             inputs[0].inf_dtype not in (torch.int32, torch.int64)
         return first_dtype_is_not_int
-    elif op_type in (F.conv2d, F.linear):
+    elif op_type in conv_ops or op_type == F.linear:
         outputs = seen_q_op_info.output_tensor_infos
         is_int8 = outputs[0].inf_dtype == torch.quint8
         return is_int8
@@ -338,7 +339,7 @@ def get_func_output_dtype_type(
     return FuncOutputDTypeType.DTYPE_DEPENDS_ON_QCONFIG
 
 def get_weight_argument_info(op: Callable) -> Optional[Tuple[int, str]]:
-    if op in (F.linear, F.conv2d):
+    if op == F.linear or op in conv_ops:
         return (1, 'weight')
     return None
 
@@ -405,7 +406,7 @@ def get_input_observed_arg_idxs(
     if op_type_is_module:
         # TODO(future PR): handle RNNs
         return [0]
-    elif op_type == F.conv2d:
+    elif op_type in conv_ops:
         return [0, 1]
     elif op_type == F.linear:
         return [0, 1]
@@ -417,7 +418,7 @@ def get_packable_tensor_arg_idxs(op: Callable) -> Optional[List[int]]:
     Returns tensor arg idxs which correspond to parameters which will need
     to be packed.
     """
-    if op == F.conv2d:
+    if op in conv_ops:
         return [1, 2]
     elif op == F.linear:
         return [1, 2]
@@ -428,7 +429,7 @@ def get_packable_tensor_kwarg_names(op: Callable) -> Optional[List[str]]:
     Returns tensor kwarg names which correspond to parameters which will
     need to be packed.
     """
-    if op in (F.conv2d, F.linear):
+    if op == F.linear or op in conv_ops:
         return ['weight', 'bias']
     return None
 
@@ -447,13 +448,13 @@ def get_packable_nontensor_arg_idxs(op: Callable) -> Optional[List[int]]:
     Returns nontensor arg idxs which correspond to arguments which will need
     to be packed.
     """
-    if op == F.conv2d:
+    if op in conv_ops:
         # stride, padding, dilation, groups
         return [3, 4, 5, 6]
     return None
 
 def get_packable_arg_idxs(op: Callable) -> Optional[List[int]]:
-    if op == F.conv2d:
+    if op in conv_ops:
         # weight, bias, stride, padding, dilation, groups
         return [1, 2, 3, 4, 5, 6]
     elif op == F.linear:
@@ -462,7 +463,7 @@ def get_packable_arg_idxs(op: Callable) -> Optional[List[int]]:
     return None
 
 def get_weight_arg_idx(op: Callable) -> Optional[int]:
-    if op == F.conv2d:
+    if op in conv_ops:
         return 1
     elif op == F.linear:
         return 1
