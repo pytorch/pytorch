@@ -30,7 +30,7 @@ prepare_model_and_dump_root_ops() {
   MODEL="${BUILD_ROOT}/MobileNetV2.pt"
   ROOT_OPS="${BUILD_ROOT}/MobileNetV2.yaml"
 
-  python "${TEST_SRC_ROOT}/prepare_model.py"
+  python "${TEST_SRC_ROOT}/prepare_model.py" "$1"
 }
 
 run_default_build() {
@@ -66,7 +66,8 @@ build_predictor() {
 
   cmake "${TEST_SRC_ROOT}" \
     -DCMAKE_PREFIX_PATH="${LIBTORCH_INSTALL_PREFIX}" \
-    -DCMAKE_BUILD_TYPE=Release
+    -DCMAKE_BUILD_TYPE=Release \
+    $1
 
   make
 }
@@ -85,16 +86,16 @@ run_predictor() {
 }
 
 test_default_build() {
-  prepare_model_and_dump_root_ops
+  prepare_model_and_dump_root_ops "--server"
   run_default_build
   build_predictor
   run_predictor
 }
 
 test_custom_build_with_static_dispatch() {
-  prepare_model_and_dump_root_ops
+  prepare_model_and_dump_root_ops "--mobile"
   run_custom_build_with_static_dispatch
-  build_predictor
+  build_predictor "-DBUILD_LITE_INTERPRETER=ON"
   run_predictor
 }
 

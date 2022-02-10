@@ -8,7 +8,12 @@ set(CMAKE_CXX_STANDARD 14)
 find_package(Torch REQUIRED)
 
 # Main executable
-add_executable(Predictor predictor.cpp)
+if(BUILD_LITE_INTERPRETER)
+  add_executable(Predictor lite_predictor.cpp)
+else()
+  add_executable(Predictor predictor.cpp)
+endif()
+
 target_include_directories(Predictor PUBLIC ${TORCH_INCLUDE_DIRS})
 
 find_package(Threads REQUIRED)
