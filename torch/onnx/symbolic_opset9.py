@@ -722,7 +722,7 @@ def prelu(g, self, weight):
             weight = sym_help._unsqueeze_helper(g, weight, list(range(1, self_rank - 1)))
         elif self_rank == 0:
             self = sym_help._unsqueeze_helper(g, self, [0])
-            self_rank = sym_help._get_tensor_rank(self)
+            self_rank = 1
 
     slope_rank = sym_help._get_tensor_rank(weight)
     if self_rank is not None and slope_rank is not None:
