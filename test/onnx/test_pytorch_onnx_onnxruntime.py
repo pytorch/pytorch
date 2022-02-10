@@ -6034,6 +6034,10 @@ class TestONNXRuntime(unittest.TestCase):
                       dynamic_axes={"x": [1, 2]},
                       test_with_inputs=[y])
 
+    def test_prelu_scalar(self):
+        x = torch.scalar_tensor(1.)
+        self.run_test(torch.nn.PReLU(), x, input_names=["x"],
+                      test_with_inputs=[x])
 
     def test_relu6(self):
         class Relu6Model(torch.nn.Module):
