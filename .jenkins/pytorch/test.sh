@@ -526,12 +526,6 @@ test_docs_test() {
   .jenkins/pytorch/docs-test.sh
 }
 
-test_torch_fx2trt() {
-  pip install parameterized
-  time python test/run_test.py --fx2trt-tests --verbose
-  assert_git_not_dirty
-}
-
 if ! [[ "${BUILD_ENVIRONMENT}" == *libtorch* || "${BUILD_ENVIRONMENT}" == *-bazel-* ]]; then
   (cd test && python -c "import torch; print(torch.__config__.show())")
   (cd test && python -c "import torch; print(torch.__config__.parallel_info())")
@@ -577,8 +571,6 @@ elif [[ "${BUILD_ENVIRONMENT}" == *distributed* || "${JOB_BASE_NAME}" == *distri
   test_rpc
 elif [[ "${TEST_CONFIG}" = docs_test ]]; then
   test_docs_test
-elif [[ "${TEST_CONFIG}" == fx2trt ]]; then
-  test_torch_fx2trt
 else
   install_torchvision
   install_monkeytype
