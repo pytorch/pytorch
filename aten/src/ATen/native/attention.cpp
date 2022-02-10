@@ -277,9 +277,8 @@ Tensor multi_head_self_attention_cpu(
   TORCH_CHECK(qkv_weight.dim() == 2, "expected 2-dimensional qkv_weight, got ", qkv_weight.dim(), "-D tensor");
   TORCH_CHECK(D * 3 == qkv_weight.sizes()[0], "expected qkv_weight first dim to be 3x last dim of query");
   TORCH_CHECK(D == qkv_weight.sizes()[1], "expected qkv_weight second dim and last dim of query to be equal");
-  TORCH_CHECK(qkv_bias.dim() == 2, "expected 2-dimensional qkv_bias, got ", qkv_bias.dim(), "-D tensor");
-  TORCH_CHECK(qkv_bias.sizes()[0] == D, "expected qkv_bias first dim and last dim of query to be equal");
-  TORCH_CHECK(qkv_bias.sizes()[1] == 3, "expected qkv_bias second dim to be 3, got ", qkv_bias.sizes()[1]);
+  TORCH_CHECK(qkv_bias.dim() == 1, "expected 2-dimensional qkv_bias, got ", qkv_bias.dim(), "-D tensor");
+  TORCH_CHECK(qkv_bias.sizes()[0] == 3 * D, "expected qkv_bias first dim and first dim of query to be equal");
   TORCH_CHECK(D % num_head == 0, "D must divide evenly by num_head");
 
 #ifndef NDEBUG
