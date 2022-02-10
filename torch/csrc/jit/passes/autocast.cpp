@@ -9,6 +9,7 @@
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/cuda_graph_fuser.h>
 #include <torch/csrc/jit/passes/quantization/helper.h>
+#include <torch/csrc/jit/runtime/graph_iterator.h>
 
 #include <stack>
 #include <unordered_set>
@@ -473,6 +474,45 @@ void Autocast(const std::shared_ptr<Graph>& graph) {
     handleBlock(graph->block(), init);
   }
   GRAPH_DUMP("\nAfter Autocast: ", graph);
+}
+
+TORCH_API void CastOpsToFloat(
+    std::shared_ptr<Graph>& graph,
+    const std::vector<Symbol>& ops) {
+  GRAPH_DUMP("\nBefore CastOpsToFloat: ", graph);
+
+  DepthFirstGraphNodeIterator it(graph);
+  Node* n = nullptr;
+
+  while ((n = it.next()) != nullptr) {
+    bool found = false;
+    for (const auto& op : ops) {
+      if (n->kind() == op) {
+        found = true;
+        break;
+      }
+    }
+    if (found) {
+      for (auto input : n->inputs()) {
+        if (input->type()->cast<TensorType>()) {
+          WithInsertPoint insert_point(n);
+          const auto float_type = at::ScalarType::Float;
+          const auto float_input = graph->insert(
+              aten::to,
+              {
+                  input,
+                  /* dtype */ graph->insertConstant(IValue(float_type)),
+                  /* non_blocking */ graph->insertConstant(IValue(false)),
+                  /* copy */ graph->insertConstant(IValue(false)),
+                  /* memory_format */ graph->insertConstant(IValue()),
+              });
+          n->replaceInputWith(input, float_input);
+        }
+      }
+    }
+  }
+
+  GRAPH_DUMP("\nAfter CastOpsToFloat: ", graph);
 }
 
 } // namespace jit

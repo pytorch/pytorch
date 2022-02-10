@@ -283,6 +283,19 @@ void initJITBindings(PyObject* module) {
       .def("_jit_pass_onnx_set_dynamic_input_shape", ONNXSetDynamicInputShape)
       .def("_jit_pass_autocast", Autocast)
       .def("_jit_set_autocast_mode", &setAutocastMode)
+      .def(
+          "_jit_pass_cast_ops_to_float",
+          [](std::shared_ptr<Graph>& g, std::vector<std::string>& op_names) {
+            std::vector<Symbol> op_symbols;
+            std::transform(
+                op_names.begin(),
+                op_names.end(),
+                std::back_inserter(op_symbols),
+                [](const std::string& name) {
+                  return Symbol::fromQualString(name);
+                });
+            CastOpsToFloat(g, op_symbols);
+          })
       .def("_jit_pass_onnx_lint", ONNXLintGraph)
       .def("_jit_pass_onnx_function_extraction", onnx::ONNXFunctionExtraction)
       .def("_jit_pass_fuse", FuseGraph)
