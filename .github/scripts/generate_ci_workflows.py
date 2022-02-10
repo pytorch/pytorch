@@ -166,6 +166,7 @@ class CIWorkflow:
     num_test_shards_on_pull_request: int = -1
     distributed_test: bool = True
     fx2trt_test: bool = False
+    deploy_test: bool = False
     timeout_after: int = 240
     xcode_version: str = ''
     only_on_pr: bool = False
@@ -186,6 +187,7 @@ class CIWorkflow:
     enable_xla_test: YamlShellBool = "''"
     enable_noarch_test: YamlShellBool = "''"
     enable_force_on_cpu_test: YamlShellBool = "''"
+    enable_deploy_test: YamlShellBool = "''"
 
     def __post_init__(self) -> None:
         if not self.build_generates_artifacts:
@@ -434,6 +436,15 @@ LINUX_WORKFLOWS = [
         arch="linux",
         build_environment="parallelnative-linux-xenial-py3.7-gcc5.4",
         docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-xenial-py3.7-gcc5.4",
+        test_runner_type=LINUX_CPU_TEST_RUNNER,
+        ciflow_config=CIFlowConfig(
+            labels={LABEL_CIFLOW_LINUX, LABEL_CIFLOW_CPU},
+        ),
+    ),
+    CIWorkflow(
+        arch="linux",
+        build_environment="deploy-linux-xenial-cuda11.3-cudnn8-py3-gcc7",
+            docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-xenial-cuda11.3-cudnn8-py3-gcc7",
         test_runner_type=LINUX_CPU_TEST_RUNNER,
         ciflow_config=CIFlowConfig(
             labels={LABEL_CIFLOW_LINUX, LABEL_CIFLOW_CPU},
