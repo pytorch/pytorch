@@ -14,7 +14,7 @@ import signal
 import subprocess
 import sys
 import time
-from contextlib import AbstractContextManager
+from contextlib import nullcontext
 from dataclasses import dataclass, field
 from enum import IntFlag
 from multiprocessing import synchronize
@@ -334,22 +334,9 @@ class PContext(abc.ABC):
             self._stderr_tail.stop()
 
 
-class _nullcontext(AbstractContextManager):
-    # TODO remove and replace in favor of contextlib.nullcontext
-    # when torch drops support for python3.6
-    def __init__(self, enter_result=None):
-        self.enter_result = enter_result
-
-    def __enter__(self):
-        return self.enter_result
-
-    def __exit__(self, *excinfo):
-        pass
-
-
 def get_std_cm(std_rd: str, redirect_fn):
     if IS_WINDOWS or IS_MACOS or not std_rd:
-        return _nullcontext()
+        return nullcontext()
     else:
         return redirect_fn(std_rd)
 
