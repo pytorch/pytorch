@@ -61,7 +61,7 @@ def generate_aten_impl(ctx):
             "--per-operator-headers",
             "--install_dir",
             install_dir,
-        ] + ctx.attr.extra_config,
+        ],
         tools = tool_inputs,
         input_manifests = tool_inputs_manifest,
         use_default_shell_env = True,
@@ -79,6 +79,5 @@ generate_aten = rule(
         ),
         "outs": attr.output_list(),
         "srcs": attr.label_list(allow_files = True),
-        "extra_config": attr.label_list(),
     },
 )
