@@ -55,7 +55,9 @@ std::vector<SourceLocation> NoPythonFrames(){
 }
 
 std::function<std::vector<SourceLocation>()>& GetPythonFramesFunction() {
-  static std::function<std::vector<SourceLocation>()> func_ = NoPythonFrames;
+  // for torch deploy compatibility, there may be a different libtorch_python per thread,
+  // so we store the frame-getter function thread_locally
+  static thread_local std::function<std::vector<SourceLocation>()> func_ = NoPythonFrames;
   return func_;
 }
 
