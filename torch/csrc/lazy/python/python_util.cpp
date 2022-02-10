@@ -10,11 +10,6 @@
 namespace torch {
 namespace lazy {
 
-// When libtorch_python is loaded, we register the python frame getter
-// otherwise, debug util simply omits python frames
-__attribute__((constructor)) void init_python_util() {
-  DebugUtil::RegisterGetPythonFramesFunction(GetPythonFrames);
-}
 
 c10::optional<SourceLocation> GetPythonFrameTop() {
   if (!Py_IsInitialized()) {

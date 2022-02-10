@@ -9,6 +9,8 @@
 namespace torch {
 namespace lazy {
 
+TORCH_API std::function<std::vector<SourceLocation>()>& GetPythonFramesFunction();
+
 class TORCH_API DebugUtil {
  public:
   enum GraphFormat {
@@ -16,7 +18,6 @@ class TORCH_API DebugUtil {
     kDot,
     kBackend,
   };
-  static void RegisterGetPythonFramesFunction(std::function<std::vector<SourceLocation>()> func);
 
   static GraphFormat GetDefaultGraphFormat();
 

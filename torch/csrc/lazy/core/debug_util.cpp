@@ -49,13 +49,14 @@ std::unordered_set<std::string>* LoadExperiments() {
 }  // namespace
 
 std::vector<SourceLocation> NoPythonFrames(){
-  return {};
+  return {
+    {.file = "No Python Frames"}
+  };
 }
 
-std::function <std::vector<SourceLocation>()> DebugUtil::GetPythonFramesIfAvailable = NoPythonFrames;
-
-void DebugUtil::RegisterGetPythonFramesFunction(std::function<std::vector<SourceLocation>()> func) {
-  DebugUtil::GetPythonFramesIfAvailable = func;
+std::function<std::vector<SourceLocation>()>& GetPythonFramesFunction() {
+  static std::function<std::vector<SourceLocation>()> func_ = NoPythonFrames;
+  return func_;
 }
 
 DebugUtil::GraphFormat DebugUtil::GetDefaultGraphFormat() {
@@ -93,7 +94,8 @@ std::string DebugUtil::GetTensorsGraphInfo(c10::ArrayRef<torch::lazy::LazyTensor
     }
   }
   std::stringstream ss;
-  std::vector<SourceLocation> frames = GetPythonFramesIfAvailable();
+  // Call into a function pointer that may backed by python or empty depending on runtime
+  std::vector<SourceLocation> frames = GetPythonFramesFunction()();
   ss << "Python Stacktrace:\n";
   for (auto& location : frames) {
     ss << "  " << location.function << " (" << location.file << ":"

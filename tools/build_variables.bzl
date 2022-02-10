@@ -424,6 +424,7 @@ lazy_tensor_core_sources = [
 ]
 
 lazy_tensor_core_python_sources = [
+    "torch/csrc/lazy/python/init.cpp",
     "torch/csrc/lazy/python/python_util.cpp",
 ]
 
