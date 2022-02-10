@@ -3662,6 +3662,31 @@ class TestCudaFuser(JitTestCase):
     @unittest.skipIf(not RUN_CUDA, "requires CUDA")
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
                      "Requires fusion optimization pass to be effective")
+    def test_issue1445_fusion(self):
+        def f(t0, t1, t2, t3):
+            masked_input = torch.where(t1, t2, t3)
+            total = masked_input.sum([0, 1, 2, 3])
+            sizes : List[int] = []
+            t10 = torch.reshape(t0, sizes)
+            t7 = total / t10
+            t4 = t7.to(dtype=torch.float)
+            return t4
+
+        x = torch.randn(1, 1, 1, 1, device='cuda').to(dtype=torch.long)
+        y = torch.randn(3, 2, 1, 1, device='cuda').to(dtype=torch.bool).expand([3, 2, 1, 2])
+        z = torch.randn(3, 2, 1, 2, device='cuda')
+        w = torch.tensor(1.5, device='cuda')
+
+        f_jit = torch.jit.script(f)
+        for i in range(5):
+            out_jit = f_jit(x, y, z, w)
+        out = f(x, y, z, w)
+        self.assertEqual(out, out_jit)
+        self.assertGraphContainsExactly(f_jit.graph_for(x, y, z, w), FUSION_GROUP, 1)
+
+    @unittest.skipIf(not RUN_CUDA, "requires CUDA")
+    @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
+                     "Requires fusion optimization pass to be effective")
     def test_disable_sibling_fuse(self):
         x = torch.randn(4, 2, device="cuda")
         y = torch.randn(8, device="cuda")

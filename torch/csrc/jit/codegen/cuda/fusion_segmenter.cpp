@@ -3012,6 +3012,7 @@ void SegmentCandidateFinder::finalize() {
 
   // Finalize each group, fill in the missing inputs, i.e. tensor dims.
   for (auto g : groups()) {
+    g->setHeuristic(deriveHeuristic(g));
     g->finalize();
   }
 }
