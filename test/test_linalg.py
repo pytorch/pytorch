@@ -7763,17 +7763,23 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         self.assertEqual(a, an)
 
     def test_linalg_trace(self, device):
-        shapes = [(1, 1), (10, 1), (1, 10), (2, 3, 4), (4, 3, 2)]
-        offsets = [0, 1, -1, 2, -2, 10, -10]
+        inputs = [
+            {'shape': (1, 1), 'offsets': [0]},
+            {'shape': (10, 1), 'offsets': [0, -9]},
+            {'shape': (1, 10), 'offsets': [0, 9]},
+            {'shape': (2, 3, 4), 'offsets': [0, 3, -2]},
+            {'shape': (2, 4, 3), 'offsets': [0, 2, -3]},
+        ]
 
-        for shape in shapes:
+        for args in inputs:
+            shape = args['shape']
             size = np.prod(shape)
             x = torch.arange(size, device=device).reshape(*shape)
             y = torch.linalg.trace(x)
             yn = np.trace(x.cpu(), axis1=-2, axis2=-1)
             self.assertEqual(y, yn)
 
-            for offset in offsets:
+            for offset in args['offsets']:
                 y = torch.linalg.trace(x, offset=offset)
                 yn = np.trace(x.cpu(), offset, axis1=-2, axis2=-1)
                 self.assertEqual(y, yn)
