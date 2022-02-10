@@ -76,7 +76,9 @@ commands:
       - run:
           name: Set Up CI Environment After attach_workspace
           no_output_timeout: "1h"
-          command: .circleci/scripts/setup_ci_environment.sh
+          command: |
+            .circleci/scripts/setup_ci_environment.sh
+            cat $BASH_ENV
 
   brew_update:
     description: "Update Homebrew and install base formulae"
