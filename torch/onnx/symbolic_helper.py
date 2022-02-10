@@ -476,41 +476,43 @@ def _interpolate_warning(interpolate_mode):
                   "to support Pytorch's behavior (like coordinate_transformation_mode and nearest_mode).\n"
                   "We recommend using opset 11 and above for models using this operator.")
 
+
 def _unsqueeze_helper(g, input, axes_i):
     if _is_constant(axes_i[0]):
         if _export_onnx_opset_version >= 13:
             axes = g.op("Constant", value_t=torch.tensor(axes_i, dtype=torch.long))
             return g.op("Unsqueeze", input, axes)
-        else:
-            return g.op("Unsqueeze", input, axes_i=axes_i)
-    else:  # Tensor type
-        if _export_onnx_opset_version >= 13:
-            axes_t = axes_i[0]
-            return g.op("Unsqueeze", input, axes_t)
-        else:
-            raise ValueError("Opset version must be >= 13 for Unsqueeze with dynamic axes.")
+        return g.op("Unsqueeze", input, axes_i=axes_i)
+    # Tensor type
+    if _export_onnx_opset_version < 13:
+        input_rank = _get_tensor_rank(input)
+        raise ValueError("Opset version must be >= 13 for Unsqueeze with dynamic axes. " +
+                         f"And accepted input axes range is [{-input_rank}, {input_rank-1}].")
+    return g.op("Unsqueeze", input, axes_i[0])
+
 
 def _squeeze_helper(g, input, axes_i):
     if _is_constant(axes_i[0]):
         if _export_onnx_opset_version >= 13:
             axes = g.op("Constant", value_t=torch.tensor(axes_i, dtype=torch.long))
             return g.op("Squeeze", input, axes)
-        else:
-            return g.op("Squeeze", input, axes_i=axes_i)
-    else:  # Tensor type
-        if _export_onnx_opset_version >= 13:
-            axes_t = axes_i[0]
-            axes_rank = _get_tensor_rank(axes_t)
-            if axes_rank == 0:
-                # axes is a scalar. Unsqueeze it to a rank 1 tensor.
-                axes_t = _unsqueeze_helper(g, axes_t, [0])
-                return g.op("Squeeze", input, axes_t)
-            elif axes_rank == 1:
-                return g.op("Squeeze", input, axes_t)
-            else:
-                raise ValueError("For Squeeze axses as input, the rank must be one in ONNX spec")
-        else:
-            raise ValueError("Opset version must be >= 13 for Squeeze with dynamic axes.")
+        return g.op("Squeeze", input, axes_i=axes_i)
+    # Tensor type
+    input_rank = _get_tensor_rank(input)
+    if _export_onnx_opset_version < 13:
+        print("_get_tensor_rank(axes_t):", input_rank)
+        raise ValueError("Opset version must be >= 13 for Squeeze with dynamic axes. " +
+                         f"And accepted input axes range is [{-input_rank}, {input_rank-1}].")
+    axes_t = axes_i[0]
+    axes_rank = _get_tensor_rank(axes_t)
+    if axes_rank > 1:
+        raise ValueError("For Squeeze axses as input, the axes rank must be one in ONNX spec.")
+    elif axes_rank == 0:
+        # The axes is a scalar. Unsqueeze it to a rank 1 tensor.
+        axes_t = _unsqueeze_helper(g, axes_t, [0])
+        return g.op("Squeeze", input, axes_t)
+    return g.op("Squeeze", input, axes_t)
+
 
 def _reducesum_helper(g, input, axes_i=None, keepdims_i=1, noop_with_empty_axes_i=0):
     keepdims_i = _maybe_get_const(keepdims_i, "i")
@@ -522,6 +524,7 @@ def _reducesum_helper(g, input, axes_i=None, keepdims_i=1, noop_with_empty_axes_
         return g.op("ReduceSum", input, keepdims_i=keepdims_i, noop_with_empty_axes_i=noop_with_empty_axes_i)
     else:
         return g.op("ReduceSum", input, axes_i=axes_i, keepdims_i=keepdims_i)
+
 
 def _interpolate_size_to_scales(g, input, output_size, dim):
     output_size = _maybe_get_const(output_size, "is")

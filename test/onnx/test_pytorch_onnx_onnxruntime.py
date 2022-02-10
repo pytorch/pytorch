@@ -1526,7 +1526,7 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(Squeeze(), x)
 
     @skipIfUnsupportedMinOpsetVersion(13)
-    def test_squeeze_dynamic_axes(self):
+    def test_squeeze_dynamic_dim(self):
         class Squeeze(torch.nn.Module):
             def forward(self, x, dim: int):
                 return torch.squeeze(x, dim)
@@ -1544,7 +1544,7 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(Unsqueeze(), x)
 
     @skipIfUnsupportedMinOpsetVersion(13)
-    def test_unsqueeze_dynamic_axes(self):
+    def test_unsqueeze_dynamic_dim(self):
         class Unsqueeze(torch.nn.Module):
             def forward(self, x, dim: int):
                 return torch.unsqueeze(x, dim)
