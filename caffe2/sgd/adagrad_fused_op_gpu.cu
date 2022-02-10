@@ -114,7 +114,6 @@ __global__ void sparse_adagrad_fused_length_sum_gradient_kernel(
                                                     // segments)
     int N, // number of rows (hash size) of embedding table
     int block_size, // embedding dimension size
-    int num_lengths, // number of segments
     const float epsilon,
     TParam* param,
     TParam* param_mom,
@@ -256,7 +255,6 @@ template <typename SIndex>
 C10_LAUNCH_BOUNDS_2(1024, SEGREDUCE_MINBLOCKS)
 #endif
 __global__ void linear_index_weight_offsets_dedup_kernel(
-    const SIndex* indices,
     const int* __restrict__ prefix_sum_length_data, // prefix of lengths
     int* __restrict__ seg_id_data // segment id
 ) {
@@ -283,9 +281,7 @@ template <
 C10_LAUNCH_BOUNDS_2(1024, SEGREDUCE_MINBLOCKS)
 #endif
 __global__ void rowwise_sparse_adagrad_fused_length_sum_gradient_dedup_kernel(
-    const int N, // number of rows (hash size) of embedding table
     const int block_size, // embedding dimension size
-    const int num_lengths, // number of segments
     const int num_indices, // number of indices
     const float epsilon,
     TParam *const param,
@@ -647,7 +643,6 @@ class CUDASparseAdagradFusedWithSparseLengthsSumGradientOp final
           prefix_sum_length_data,
           N,
           block_size,
-          num_lengths,
           epsilon_,
           paramOut,
           momentOut,
@@ -666,7 +661,6 @@ class CUDASparseAdagradFusedWithSparseLengthsSumGradientOp final
           prefix_sum_length_data,
           N,
           block_size,
-          num_lengths,
           epsilon_,
           paramOut,
           momentOut,
@@ -1225,7 +1219,6 @@ class CUDARowWiseSparseAdagradFusedWithSparseLengthsSumGradientExactOp final
     auto* paramOut = Output(OUTPUT_PARAM)->template mutable_data<TParam>();
     auto* momentOut = Output(OUTPUT_MOMENT_1)->template mutable_data<T>();
 
-    int N = output_0dim;
     int block_size = segmentGradsInput.size_from_dim(1);
 
     auto maxThreads =
@@ -1252,7 +1245,6 @@ class CUDARowWiseSparseAdagradFusedWithSparseLengthsSumGradientExactOp final
 
     linear_index_weight_offsets_dedup_kernel<IndexType>
         <<<num_lengths, 32, 0, context_.cuda_stream()>>>(
-            indices,
             prefix_sum_length_data,
             seg_id_buffer_.template mutable_data<int>());
     C10_CUDA_KERNEL_LAUNCH_CHECK();
@@ -1305,9 +1297,7 @@ class CUDARowWiseSparseAdagradFusedWithSparseLengthsSumGradientExactOp final
                threads,
                sm_size,
                context_.cuda_stream()>>>(
-                N,
                 block_size,
-                num_lengths,
                 num_indices,
                 epsilon_,
                 paramOut,
@@ -1330,9 +1320,7 @@ class CUDARowWiseSparseAdagradFusedWithSparseLengthsSumGradientExactOp final
                threads,
                sm_size,
                context_.cuda_stream()>>>(
-                N,
                 block_size,
-                num_lengths,
                 num_indices,
                 epsilon_,
                 paramOut,
@@ -1363,9 +1351,7 @@ class CUDARowWiseSparseAdagradFusedWithSparseLengthsSumGradientExactOp final
                std::min(maxThreads, block_size),
                sm_size,
                context_.cuda_stream()>>>(
-                N,
                 block_size,
-                num_lengths,
                 num_indices,
                 epsilon_,
                 paramOut,
@@ -1388,9 +1374,7 @@ class CUDARowWiseSparseAdagradFusedWithSparseLengthsSumGradientExactOp final
                std::min(maxThreads, block_size),
                sm_size,
                context_.cuda_stream()>>>(
-                N,
                 block_size,
-                num_lengths,
                 num_indices,
                 epsilon_,
                 paramOut,

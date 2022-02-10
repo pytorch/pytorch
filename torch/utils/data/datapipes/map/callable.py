@@ -27,14 +27,14 @@ def default_fn(data):
 
 @functional_datapipe('map')
 class MapperMapDataPipe(MapDataPipe[T_co]):
-    r""":class:`MapperMapDataPipe`.
-
-    Map DataPipe to run a function over each item from the source DataPipe.
-    The function can be any regular python function or partial object. Lambda
+    r"""
+    Apply the input function over each item from the source DataPipe (functional name: ``map``).
+    The function can be any regular Python function or partial object. Lambda
     function is not recommended as it is not supported by pickle.
-    args:
-        datapipe: Source Map DataPipe
-        fn: Function called over each item
+
+    Args:
+        datapipe: Source MapDataPipe
+        fn: Function being applied to each item
     """
     datapipe: MapDataPipe
     fn: Callable

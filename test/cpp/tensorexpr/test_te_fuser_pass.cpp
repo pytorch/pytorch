@@ -300,24 +300,6 @@ TEST(TEFuserPass, FuserPass_MergeGroups) {
       ->run(*g);
 }
 
-TEST(TEFuserPass, FuserPass_UnknownShapesIgnored) {
-  WithCPUFuser cf;
-  const auto graph_string = R"IR(
-    graph(%x : Float(device=cpu),
-          %y : Float(device=cpu)):
-      %a : Float(device=cpu) = aten::mul(%x, %y)
-      %b : Float(device=cpu) = aten::mul(%x, %a)
-      return (%b))IR";
-  auto g = std::make_shared<Graph>();
-  torch::jit::parseIR(graph_string, g.get());
-
-  g->lint();
-  FuseTensorExprs(g, /* min_group_size= */ 2, /* disable_shape_checks= */ true);
-
-  // Test that we are generating fusion groups even though shapes are not known
-  testing::FileCheck().check("prim::TensorExprGroup")->run(*g);
-}
-
 TEST(TEFuserPass, FuserPass_IgnoreUnknownShapeAtStart) {
   WithCPUFuser cf;
   const auto graph_string = R"IR(

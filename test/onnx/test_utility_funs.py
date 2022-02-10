@@ -627,7 +627,7 @@ class TestUtilityFuns_opset9(_BaseTestCase):
         # verify that the model state is preserved
         self.assertEqual(model.training, old_state)
 
-    @skipIfUnsupportedMinOpsetVersion(12)
+    @skipIfUnsupportedMinOpsetVersion(15)
     def test_local_function(self):
         class N(torch.nn.Module):
             def __init__(self, prob):
@@ -717,6 +717,7 @@ class TestUtilityFuns_opset9(_BaseTestCase):
         funcs = onnx_model.functions
         self.assertEqual(len(funcs), 3)
 
+    @skipIfUnsupportedMinOpsetVersion(15)
     def test_local_function_overloads(self):
         class NWithOverloads(torch.nn.Module):
             def forward(self, x, y=None, z=None):
@@ -750,6 +751,24 @@ class TestUtilityFuns_opset9(_BaseTestCase):
         self.assertIn("NWithOverloads", func_names)
         self.assertIn("NWithOverloads.1", func_names)
         self.assertIn("NWithOverloads.2", func_names)
+
+    @skipIfUnsupportedMinOpsetVersion(15)
+    def test_local_function_infer_scopes(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                # Concatenation of scalars inserts unscoped tensors in IR graph.
+                new_tensor_shape = x.size()[:-1] + (1, 1, -1)
+                tensor = x.view(*new_tensor_shape)
+                return tensor
+
+        x = torch.randn(4, 5)
+        f = io.BytesIO()
+        torch.onnx.export(M(), (x,), f, export_modules_as_functions=True,
+                          opset_version=self.opset_version, do_constant_folding=False)
+
+        onnx_model = onnx.load(io.BytesIO(f.getvalue()))
+        funcs = onnx_model.functions
+        self.assertIn("M", [f.name for f in funcs])
 
     def test_aten_fallthrough(self):
         # Test aten export of op with no symbolic
@@ -1126,6 +1145,32 @@ class TestUtilityFuns_opset9(_BaseTestCase):
         graph = onnx.load(io.BytesIO(f.getvalue()))
         self.assertEqual(graph.graph.input[1].name, "in_weight")
         self.assertEqual(graph.graph.input[2].name, "in_bias")
+
+    def test_onnx_intermediate_renaming(self):
+        class RenamedIntermediateModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self._module_1 = torch.nn.Linear(10, 10)
+                self._module_2 = torch.nn.Linear(10, 10)
+                self._module_3 = torch.nn.Linear(10, 10)
+                self._module_4 = torch.nn.Linear(10, 10)
+
+            def forward(self, x):
+                y = self._module_1(x)
+                z = self._module_2(y)
+                z = self._module_3(y * z)
+                z = self._module_4(y * z)
+                return z
+
+        module = RenamedIntermediateModule()
+
+        g, p, o = utils._model_to_graph(module, torch.ones(1, 10), output_names=['y'])
+        renamed_intermediate = 0
+        for n in g.nodes():
+            for v in n.inputs():
+                if v.debugName().startswith("onnx::Mul_"):
+                    renamed_intermediate += 1
+        self.assertEqual(renamed_intermediate, 2)
 
     def _test_deduplicate_initializers(self, torchscript=False):
         class MyModule(torch.nn.Module):
