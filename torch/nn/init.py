@@ -391,7 +391,13 @@ def kaiming_uniform_(tensor, a=0, mode='fan_in', nonlinearity='leaky_relu'):
         >>> nn.init.kaiming_uniform_(w, mode='fan_in', nonlinearity='relu')
     """
     if torch.overrides.has_torch_function_variadic(tensor):
-        return torch.overrides.handle_torch_function(kaiming_uniform_, (tensor,), tensor=tensor, a=a, mode=mode, nonlinearity=nonlinearity)
+        return torch.overrides.handle_torch_function(
+            kaiming_uniform_,
+            (tensor,),
+            tensor=tensor,
+            a=a,
+            mode=mode,
+            nonlinearity=nonlinearity)
 
     if 0 in tensor.shape:
         warnings.warn("Initializing zero-element tensors is a no-op")
