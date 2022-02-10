@@ -1426,6 +1426,7 @@ class TestSparseCSR(TestCase):
             b = make_tensor(sample.args[1].shape, device=device, dtype=dtype, noncontiguous=True, requires_grad=True)
             self.assertTrue(torch.autograd.gradcheck(fn, [c, b], fast_mode=True))
 
+    @skipCUDAIfRocm
     @skipCPUIfNoMklSparse
     @dtypes(torch.float64)
     def test_autograd_dense_output_addmv(self, device, dtype):
@@ -1456,8 +1457,11 @@ class TestSparseCSR(TestCase):
 
     @ops(binary_ops_with_dense_output, dtypes=OpDTypes.supported, allowed_dtypes=[torch.double, ])
     def test_autograd_dense_output(self, device, dtype, op):
-        if op.name == "mv" and no_mkl_sparse:
+        if op.name == "mv" and no_mkl_sparse and self.device_type == 'cpu':
             self.skipTest("MKL Sparse is not available")
+        if op.name == "mv" and TEST_WITH_ROCM and self.device_type == 'cuda':
+            # mv currently work only on CUDA
+            self.skipTest("ROCm is not supported")
 
         samples = list(op.sample_inputs(device, dtype, requires_grad=True))
 
