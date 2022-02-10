@@ -252,6 +252,7 @@ class _PyTreeInfo(NamedTuple):
     in_spec: pytree.TreeSpec
     out_spec: Optional[pytree.TreeSpec]
 
+@compatibility(is_backward_compatible=False)
 class CodeGen(object):
     def __init__(self):
         self._body_transformer: Optional[TransformCodeFunc] = None
@@ -260,7 +261,6 @@ class CodeGen(object):
         """
         Given the free variables and a return annotation, generates the beginning of the FX function.
         By default, `generate_prologue(['a', 'b'], '') == 'def forward(a, b):'`
-
         """
         # If the original function didn't have self as its first argument, we
         # would have added it.
@@ -274,7 +274,7 @@ class CodeGen(object):
         """
         return f'return {repr(output_args)}'
 
-    def process_inputs(self, args: Any) -> Any:
+    def process_inputs(self, *args: Any) -> Any:
         """
         Transforms the inputs so that the graph can take them as arguments, as
         non-default codegen may result in the inputs to the function being
@@ -503,7 +503,7 @@ class _PyTreeCodeGen(CodeGen):
         super().__init__()
         self.pytree_info: _PyTreeInfo = pytree_info
 
-    def process_inputs(self, inputs: Any) -> Any:
+    def process_inputs(self, *inputs: Any) -> Any:
         flat_args, _ = pytree.tree_flatten(inputs)
         return flat_args
 
@@ -524,8 +524,8 @@ class _PyTreeCodeGen(CodeGen):
             free_vars.insert(0, 'self')
         function_definition = super().generate_prologue(function_args[:], maybe_return_annotation)
         if len(free_vars) > 0:  # pytree has placeholders in it
-            pytree_flatten_stmt = f"{', '.join(free_vars)}, = fx_pytree.tree_flatten_spec([{', '.join(function_args)}], self._in_spec)"
-            function_definition += f"\n    {pytree_flatten_stmt}"
+            function_definition += f"""
+    {', '.join(free_vars)}, = fx_pytree.tree_flatten_spec([{', '.join(function_args)}], self._in_spec)"""
         return function_definition
 
     def generate_output(self, output_args):

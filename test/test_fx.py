@@ -3178,6 +3178,10 @@ def forward(self, args_list: List[torch.Tensor]){maybe_return_annotation}:
             def additional_globals(self):
                 return [('List', typing.List)]
 
+            def process_inputs(self, *inputs):
+                assert(len(inputs) == 1)
+                return inputs[0]
+
         def f(a, b):
             return a + b
 

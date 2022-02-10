@@ -12,7 +12,7 @@ import torch.utils._pytree as pytree
 
 from ._compatibility import compatibility
 from .node import Argument, map_aggregate, base_types
-from .graph import CodeGen, Graph, _PyTreeInfo, _PyTreeCodeGen
+from .graph import Graph, _PyTreeInfo, _PyTreeCodeGen
 from .graph_module import GraphModule
 from .proxy import TracerBase, Proxy, ParameterProxy
 
