@@ -41,6 +41,7 @@ target_link_libraries(test_deploy PUBLIC "-Wl,--no-as-needed" gtest dl torch_dep
 add_library(test_deploy_lib SHARED test_deploy_lib.cpp)
 add_dependencies(test_deploy_lib cpython)
 target_include_directories(test_deploy_lib BEFORE PRIVATE ${PYTHON_INC_DIR})
+target_link_libraries(test_deploy_lib PRIVATE pybind::pybind11)
 
 add_executable(deploy_benchmark ${DEPLOY_DIR}/example/benchmark.cpp)
 target_include_directories(deploy_benchmark PRIVATE ${PYTORCH_ROOT}/torch)
