@@ -13,7 +13,7 @@ namespace {
 template <typename Dtype>
 __global__ void MaxPoolForward(
     const int nthreads,
-    const Dtype *const const bottom_data,
+    const Dtype *const bottom_data,
     const int channels,
     const int height,
     const int width,
@@ -25,7 +25,7 @@ __global__ void MaxPoolForward(
     const int stride_w,
     const int pad_h,
     const int pad_w,
-    Dtype *const const top_data,
+    Dtype *const top_data,
     int *const mask) {
   CUDA_1D_KERNEL_LOOP(index, nthreads) {
     const int pw = index % pooled_width;
@@ -58,8 +58,8 @@ __global__ void MaxPoolForward(
 template <typename Dtype>
 __global__ void MaxPoolBackward(
     const int nthreads,
-    const Dtype *const const top_diff,
-    const int *const const mask,
+    const Dtype *const top_diff,
+    const int *const mask,
     const int channels,
     const int height,
     const int width,
@@ -71,7 +71,7 @@ __global__ void MaxPoolBackward(
     const int stride_w,
     const int pad_h,
     const int pad_w,
-    Dtype *const const bottom_diff) {
+    Dtype *const bottom_diff) {
   CUDA_1D_KERNEL_LOOP(index, nthreads) {
     // find out the local index
     // find out the local offset
