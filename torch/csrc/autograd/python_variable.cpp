@@ -1835,7 +1835,7 @@ c10::intrusive_ptr<TensorImpl> concrete_detach_fn(const c10::impl::PyInterpreter
     args.ptr(),
     kwargs.ptr(),
     "detach",
-    py::module::import("torch").attr("ops").attr("aten").attr("detach").ptr(),
+    py::module::import("torch").attr("ops").attr("aten").attr("detach").attr("default").ptr(),
     "torch.ops.aten",
     "__torch_dispatch__"
   ));
