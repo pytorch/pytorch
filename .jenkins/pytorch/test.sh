@@ -531,11 +531,11 @@ test_lazy_tensor_core() {
   ln -sf "$PWD"/lazy_tensor_core/build/lib.linux-x86_64-3.7/_LAZYC.cpython-37m-x86_64-linux-gnu.so lazy_tensor_core/build/lib.linux-x86_64-3.7/libptltc.so
   lazy_tensor_core/test/cpp/build/test_ptltc
 
-  # to import lazy tensor from python, it needs to either be properly installed,
-  # which it is not (due to how build/test are set up in this CI config)
-  # or we can be in the build dir where all the artifacts are
-  pushd lazy_tensor_core/build/lib.linux-x86_64-3.7
-  python ../../example.py
+  # to import lazy tensor from python, it needs to either be installed,
+  # but the install was aparently done in another venv in the 'build' step in this CI setup
+  pushd lazy_tensor_core
+  python setup.py develop
+  python example.py
   popd
   assert_git_not_dirty
 }
