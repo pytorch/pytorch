@@ -728,10 +728,10 @@ def prelu(g, self, weight):
             self = sym_help._unsqueeze_helper(g, self, [0])
             self_rank = 1
 
-    slope_rank = sym_help._get_tensor_rank(weight)
-    if self_rank is not None and slope_rank is not None:
-        assert self_rank >= slope_rank, \
-            "rank(x) should be >= rank(slope) but got {} < {}".format(self_rank, slope_rank)
+    weight_rank = sym_help._get_tensor_rank(weight)
+    if self_rank is not None and weight_rank is not None:
+        assert self_rank >= weight_rank, \
+            "rank(x) should be >= rank(slope) but got {} < {}".format(self_rank, weight_rank)
     return g.op("PRelu", self, weight)
 
 def silu(g, input):
