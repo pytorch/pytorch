@@ -128,10 +128,10 @@ inline std::ostream& operator<<(std::ostream& stream, const OpKind& op) {
 using OpList = c10::ArrayRef<Value>;
 
 // A node in the graph. Nodes for operations which requires extra data to be
-// stored for lowering, should inherit from this class and add operation
+// stored for lowering should inherit from this class and add an operation
 // specific member there. For example, a constant might create a new
 // NodeConstant class (inheriting from Node) with an extra lazy_tensors::Literal
-// field, or a tensor value might create a new NodeTensor with computation
+// field or a tensor value might create a new NodeTensor with a computation
 // client data handle in it.
 class TORCH_API Node {
  public:
@@ -243,6 +243,8 @@ const T* NodeCast(const Node* node, OpKind op) {
   return &dynamic_cast<const T&>(*node);
 #endif
 }
+
+hash_t OperandHashes(const OpList& operands, const hash_t& seed, bool bakeInSizes);
 
 } // namespace lazy
 } // namespace torch

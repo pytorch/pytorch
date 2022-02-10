@@ -2,7 +2,9 @@
 #include <c10/util/Optional.h>
 #include <torch/csrc/lazy/backend/backend_device.h>
 #include <torch/csrc/lazy/backend/backend_interface.h>
+#include <torch/csrc/lazy/core/dynamic_ir.h>
 #include <torch/csrc/lazy/core/helpers.h>
+#include <torch/csrc/lazy/core/ir.h>
 #include <torch/csrc/lazy/core/ir_dump_util.h>
 #include <torch/csrc/lazy/core/ir_util.h>
 #include <torch/csrc/lazy/core/lazy_graph_executor.h>
@@ -424,6 +426,7 @@ std::vector<at::Tensor> LtcCreateTensorList(const at::TensorList& tensors) {
 // }
 
 void InitLtcModuleBindings(py::module m) {
+  py::class_<torch::lazy::Node, std::shared_ptr<torch::lazy::Node>>(m, "IrNode");
   m.def("_prepare_to_exit", []() { PrepareToExit(); });
   m.def("_get_git_revs", []() { return GetRevisions(); });
   m.def("_ltc_nms", [](const at::Tensor& boxes, const at::Tensor& scores,
@@ -514,6 +517,35 @@ void InitLtcModuleBindings(py::module m) {
     // auto replication_devices =
     //     torch::lazy::getBackend()->GetReplicationDevices();
     // return replication_devices != nullptr ? replication_devices->size() : 0;
+  });
+  m.def("_is_dynamic", [](std::shared_ptr<torch::lazy::Node> n) {
+      return std::dynamic_pointer_cast<torch::lazy::DimensionNode>(n)->isDynamic();
+  });
+  m.def("_get_static_value", [](std::shared_ptr<torch::lazy::Node> n) {
+      return std::dynamic_pointer_cast<torch::lazy::DimensionNode>(n)->getStaticValue();
+  });
+  m.def("_dynamic_size", [](at::Tensor t, size_t dim) -> torch::lazy::NodePtr {
+      auto lt = torch::lazy::GetLtcTensor(t);
+      return std::make_shared<torch::lazy::SizeNode>(lt.GetIrValue(), dim);
+  });
+  m.def("_dynamic_add", [](at::Tensor a, at::Tensor b) -> torch::lazy::NodePtr {
+      auto a_lt = torch::lazy::GetLtcTensor(a);
+      auto b_lt = torch::lazy::GetLtcTensor(b);
+      return std::make_shared<torch::lazy::SizeAdd>(a_lt.GetIrValue(), b_lt.GetIrValue());
+  });
+  m.def("_dynamic_mul", [](at::Tensor a, at::Tensor b) -> torch::lazy::NodePtr {
+      auto a_lt = torch::lazy::GetLtcTensor(a);
+      auto b_lt = torch::lazy::GetLtcTensor(b);
+      return std::make_shared<torch::lazy::SizeMul>(a_lt.GetIrValue(), b_lt.GetIrValue());
+  });
+  m.def("_dynamic_div", [](at::Tensor a, at::Tensor b) -> torch::lazy::NodePtr {
+      auto a_lt = torch::lazy::GetLtcTensor(a);
+      auto b_lt = torch::lazy::GetLtcTensor(b);
+      return std::make_shared<torch::lazy::SizeDiv>(a_lt.GetIrValue(), b_lt.GetIrValue());
+  });
+  m.def("_dynamic_int", [](at::Tensor a) -> torch::lazy::NodePtr {
+      auto a_lt = torch::lazy::GetLtcTensor(a);
+      return std::make_shared<torch::lazy::SizeInt>(a_lt.GetIrValue());
   });
 
   py::class_<torch::lazy::Value, std::shared_ptr<torch::lazy::Value>>(
@@ -687,6 +719,7 @@ void InitLtcModuleBindings(py::module m) {
   m.def("_ltc_enable_thread_pool", []() {
     FLAGS_torch_lazy_use_thread_pool = true;
   });
+
 }  // namespace
 
 }  // namespace
