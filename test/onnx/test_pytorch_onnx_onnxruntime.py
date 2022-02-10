@@ -6036,8 +6036,7 @@ class TestONNXRuntime(unittest.TestCase):
 
     def test_prelu_scalar(self):
         x = torch.scalar_tensor(1.)
-        self.run_test(torch.nn.PReLU(), x, input_names=["x"],
-                      test_with_inputs=[x])
+        self.run_test(torch.nn.PReLU(), x, input_names=["x"])
 
     def test_relu6(self):
         class Relu6Model(torch.nn.Module):
