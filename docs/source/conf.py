@@ -174,6 +174,7 @@ coverage_ignore_classes = [
     "CatTransform",
     "ComposeTransform",
     "CorrCholeskyTransform",
+    "CumulativeDistributionTransform",
     "ExpTransform",
     "IndependentTransform",
     "PowerTransform",
