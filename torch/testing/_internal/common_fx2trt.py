@@ -4,7 +4,7 @@ from typing import Callable, List, Tuple
 import torch
 import torch.fx
 import torch.fx.experimental.fx_acc.acc_tracer as acc_tracer
-from torch.fx.experimental.fx2trt import (
+from fx2trt_oss.fx import (
     TRTInterpreter,
     InputTensorSpec,
     TRTModule,
