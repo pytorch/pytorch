@@ -354,7 +354,7 @@ parallel backwards that share part/whole of the GraphTask.
 
 Custom Python ``autograd.function`` is automatically thread safe because of GIL.
 For built-in C++ Autograd Nodes (e.g. AccumulateGrad, CopySlices) and custom
-``autograd::Function``s, the Autograd Engine uses thread mutex locking to ensure
+``autograd::Function``\s, the Autograd Engine uses thread mutex locking to ensure
 thread safety on autograd Nodes that might have state write/read.
 
 No thread safety on C++ hooks
