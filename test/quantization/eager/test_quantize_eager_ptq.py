@@ -153,27 +153,27 @@ class TestQuantizeEagerOps(QuantizationTestCase):
         self.assertEqual(res, ref_res)
 
     def test_conv_1d(self):
-        self._test_reference_module_impl(nn.Conv1d, nnq.Conv1d, \
+        self._test_reference_module_impl(nn.Conv1d, nnq.Conv1d,
                                         {'in_channels': 1, 'out_channels': 1, 'kernel_size': 1}, (16, 1, 1))
 
     def test_conv_2d(self):
-        self._test_reference_module_impl(nn.Conv2d, nnq.Conv2d, \
+        self._test_reference_module_impl(nn.Conv2d, nnq.Conv2d,
                                         {'in_channels': 1, 'out_channels': 1, 'kernel_size': 1}, (16, 1, 10, 10))
 
     def test_conv_3d(self):
-        self._test_reference_module_impl(nn.Conv3d, nnq.Conv3d, \
+        self._test_reference_module_impl(nn.Conv3d, nnq.Conv3d,
                                         {'in_channels': 1, 'out_channels': 1, 'kernel_size': 1}, (16, 1, 10, 10, 10))
 
     def test_conv_transpose_1d(self):
-        self._test_reference_module_impl(nn.ConvTranspose1d, nnq.ConvTranspose1d, \
+        self._test_reference_module_impl(nn.ConvTranspose1d, nnq.ConvTranspose1d,
                                         {'in_channels': 1, 'out_channels': 1, 'kernel_size': 1}, (16, 1, 1))
 
     def test_conv_transpose_2d(self):
-        self._test_reference_module_impl(nn.ConvTranspose2d, nnq.ConvTranspose2d, \
+        self._test_reference_module_impl(nn.ConvTranspose2d, nnq.ConvTranspose2d,
                                         {'in_channels': 1, 'out_channels': 1, 'kernel_size': 1}, (16, 1, 10, 10))
 
     def test_conv_transpose_3d(self):
-        self._test_reference_module_impl(nn.ConvTranspose3d, nnq.ConvTranspose3d, \
+        self._test_reference_module_impl(nn.ConvTranspose3d, nnq.ConvTranspose3d,
                                         {'in_channels': 1, 'out_channels': 1, 'kernel_size': 1}, (16, 1, 10, 10, 10))
 
     def _test_activation_op_impl(
