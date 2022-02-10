@@ -141,7 +141,7 @@ Keyword args:
 Example::
 
     >>> torch.abs(torch.tensor([-1, -2, 3]))
-    tensor([ 1,  2,  3])
+    tensor([1, 2, 3])
 """.format(**common_args))
 
 add_docstr(torch.absolute,
@@ -167,11 +167,11 @@ Keyword args:
 
 Example::
 
-    >>> a = torch.randn(4)
+    >>> a = torch.randn(4).uniform_(-1, 1)
     >>> a
-    tensor([ 0.3348, -0.5889,  0.2005, -0.1584])
+    tensor([-0.0887,  0.2646, -0.3022, -0.1966])
     >>> torch.acos(a)
-    tensor([ 1.2294,  2.2004,  1.3690,  1.7298])
+    tensor([1.6597, 1.3030, 1.8778, 1.7687])
 """.format(**common_args))
 
 add_docstr(torch.arccos, r"""
@@ -202,9 +202,9 @@ Example::
 
     >>> a = torch.randn(4).uniform_(1, 2)
     >>> a
-    tensor([ 1.3192, 1.9915, 1.9674, 1.7151 ])
+    tensor([1.4556, 1.6323, 1.3489, 1.4017])
     >>> torch.acosh(a)
-    tensor([ 0.7791, 1.3120, 1.2979, 1.1341 ])
+    tensor([0.9216, 1.0724, 0.8128, 0.8688])
 """.format(**common_args))
 
 add_docstr(torch.arccosh, r"""
@@ -249,24 +249,24 @@ Examples::
 
     >>> a = torch.randn(4)
     >>> a
-    tensor([ 0.0202,  1.0985,  1.3506, -0.6056])
+    tensor([ 1.5410, -0.2934, -2.1788,  0.5684])
     >>> torch.add(a, 20)
-    tensor([ 20.0202,  21.0985,  21.3506,  19.3944])
+    tensor([21.5410, 19.7066, 17.8212, 20.5684])
 
     >>> b = torch.randn(4)
     >>> b
-    tensor([-0.9732, -0.3497,  0.6245,  0.4022])
+    tensor([-1.0845, -1.3986,  0.4033,  0.8380])
     >>> c = torch.randn(4, 1)
     >>> c
-    tensor([[ 0.3743],
-            [-1.7724],
-            [-0.5811],
-            [-0.8017]])
+    tensor([[-0.7193],
+            [-0.4033],
+            [-0.5966],
+            [ 0.1820]])
     >>> torch.add(b, c, alpha=10)
-    tensor([[  2.7695,   3.3930,   4.3672,   4.1450],
-            [-18.6971, -18.0736, -17.0994, -17.3216],
-            [ -6.7845,  -6.1610,  -5.1868,  -5.4090],
-            [ -8.9902,  -8.3667,  -7.3925,  -7.6147]])
+    tensor([[-8.2771, -8.5912, -6.7892, -6.3545],
+            [-5.1180, -5.4320, -3.6301, -3.1954],
+            [-7.0509, -7.3649, -5.5630, -5.1283],
+            [ 0.7358,  0.4218,  2.2237,  2.6584]])
 """.format(**common_args))
 
 add_docstr(torch.addbmm,
@@ -314,9 +314,9 @@ Example::
     >>> batch1 = torch.randn(10, 3, 4)
     >>> batch2 = torch.randn(10, 4, 5)
     >>> torch.addbmm(M, batch1, batch2)
-    tensor([[  6.6311,   0.0503,   6.9768, -12.0362,  -2.1653],
-            [ -4.8185,  -1.4255,  -6.6760,   8.9453,   2.5743],
-            [ -3.8202,   4.3691,   1.0943,  -1.1109,   5.4730]])
+    tensor([[  3.0814,  -5.7618,  -9.4894,   8.9151,   1.1962],
+            [  7.3079,   1.0348,   5.8707,  -2.3542,  -7.2059],
+            [ -1.5940, -11.4675, -10.2971,   9.0244,   0.0852]])
 """.format(**common_args, **tf32_notes))
 
 add_docstr(torch.addcdiv, r"""
@@ -359,9 +359,9 @@ Example::
     >>> t1 = torch.randn(3, 1)
     >>> t2 = torch.randn(1, 3)
     >>> torch.addcdiv(t, t1, t2, value=0.1)
-    tensor([[-0.2312, -3.6496,  0.1312],
-            [-1.0428,  3.4292, -0.1030],
-            [-0.5369, -0.9829,  0.0430]])
+    tensor([[ 1.6819, -0.2256, -2.2578],
+            [ 1.2721, -0.4228, -2.0280],
+            [ 1.1942, -0.4603, -1.9843]])
 """.format(**common_args))
 
 add_docstr(torch.addcmul,
@@ -396,9 +396,9 @@ Example::
     >>> t1 = torch.randn(3, 1)
     >>> t2 = torch.randn(1, 3)
     >>> torch.addcmul(t, t1, t2, value=0.1)
-    tensor([[-0.8635, -0.6391,  1.6174],
-            [-0.7617, -0.5879,  1.7388],
-            [-0.8353, -0.6249,  1.6511]])
+    tensor([[ 1.5639, -0.2458, -2.2197],
+            [ 1.4973, -0.3843, -2.1008],
+            [ 1.4846, -0.4106, -2.0782]])
 """.format(**common_args))
 
 add_docstr(torch.addmm,
@@ -443,8 +443,8 @@ Example::
     >>> mat1 = torch.randn(2, 3)
     >>> mat2 = torch.randn(3, 3)
     >>> torch.addmm(M, mat1, mat2)
-    tensor([[-4.8716,  1.4671, -1.3746],
-            [ 0.7573, -3.9555, -2.8681]])
+    tensor([[ 1.9399,  0.7613, -2.5646],
+            [ 0.6784, -1.4653, -1.1217]])
 """.format(**common_args, **tf32_notes))
 
 add_docstr(torch.adjoint,
@@ -467,6 +467,7 @@ Example::
     >>> (A.adjoint() == A.mH).all()
     tensor(True)
 """)
+
 
 add_docstr(torch.sspaddmm,
            r"""
@@ -542,7 +543,7 @@ Example::
     >>> mat = torch.randn(2, 3)
     >>> vec = torch.randn(3)
     >>> torch.addmv(M, mat, vec)
-    tensor([-0.3768, -5.5565])
+    tensor([3.5259, 0.0498])
 """.format(**common_args))
 
 add_docstr(torch.addr,
@@ -584,9 +585,9 @@ Example::
     >>> vec2 = torch.arange(1., 3.)
     >>> M = torch.zeros(3, 2)
     >>> torch.addr(M, vec1, vec2)
-    tensor([[ 1.,  2.],
-            [ 2.,  4.],
-            [ 3.,  6.]])
+    tensor([[1., 2.],
+            [2., 4.],
+            [3., 6.]])
 """.format(**common_args))
 
 add_docstr(torch.allclose,
@@ -634,9 +635,9 @@ Example::
 
     >>> a = torch.rand(1, 2).bool()
     >>> a
-    tensor([[False, True]], dtype=torch.bool)
+    tensor([[True, True]])
     >>> torch.all(a)
-    tensor(False, dtype=torch.bool)
+    tensor(True)
     >>> a = torch.arange(0, 3)
     >>> a
     tensor([0, 1, 2])
@@ -664,13 +665,13 @@ Example::
     >>> a = torch.rand(4, 2).bool()
     >>> a
     tensor([[True, True],
-            [True, False],
             [True, True],
-            [True, True]], dtype=torch.bool)
+            [True, True],
+            [True, True]])
     >>> torch.all(a, dim=1)
-    tensor([ True, False,  True,  True], dtype=torch.bool)
+    tensor([True, True, True, True])
     >>> torch.all(a, dim=0)
-    tensor([ True, False], dtype=torch.bool)
+    tensor([True, True])
 """.format(**single_dim_common))
 
 add_docstr(torch.any,
@@ -687,9 +688,9 @@ Example::
 
     >>> a = torch.rand(1, 2).bool()
     >>> a
-    tensor([[False, True]], dtype=torch.bool)
+    tensor([[True, True]])
     >>> torch.any(a)
-    tensor(True, dtype=torch.bool)
+    tensor(True)
     >>> a = torch.arange(0, 3)
     >>> a
     tensor([0, 1, 2])
@@ -718,10 +719,10 @@ Example::
     >>> a
     tensor([[ True,  True],
             [False,  True],
-            [ True,  True],
-            [False, False]])
+            [False,  True],
+            [ True, False]])
     >>> torch.any(a, 1)
-    tensor([ True,  True,  True, False])
+    tensor([True, True, True, True])
     >>> torch.any(a, 0)
     tensor([True, True])
 """.format(**single_dim_common))
@@ -749,7 +750,7 @@ Keyword args:
 Example::
 
     >>> torch.angle(torch.tensor([-1 + 1j, -2 + 2j, 3 - 3j]))*180/3.14159
-    tensor([ 135.,  135,  -45])
+    tensor([135.0001, 135.0001, -45.0000])
 """.format(**common_args))
 
 add_docstr(torch.as_strided,
@@ -768,6 +769,7 @@ Create a view of an existing `torch.Tensor` :attr:`input` with specified
     "overlapped" (with multiple indices referring to the same element in
     memory) its behavior is undefined.
 
+
 Args:
     {input}
     size (tuple or ints): the shape of the output tensor
@@ -778,16 +780,14 @@ Example::
 
     >>> x = torch.randn(3, 3)
     >>> x
-    tensor([[ 0.9039,  0.6291,  1.0795],
-            [ 0.1586,  2.1939, -0.4900],
-            [-0.1909, -0.7503,  1.9355]])
+    tensor([[ 1.5410, -0.2934, -2.1788],
+            [ 0.5684, -1.0845, -1.3986],
+            [ 0.4033,  0.8380, -0.7193]])
     >>> t = torch.as_strided(x, (2, 2), (1, 2))
     >>> t
-    tensor([[0.9039, 1.0795],
-            [0.6291, 0.1586]])
+    tensor([[ 1.5410, -2.1788],
+            [-0.2934,  0.5684]])
     >>> t = torch.as_strided(x, (2, 2), (1, 2), 1)
-    tensor([[0.6291, 0.1586],
-            [1.0795, 2.1939]])
 """.format(**common_args))
 
 add_docstr(torch.as_tensor,
@@ -823,7 +823,7 @@ Example::
     >>> a = numpy.array([1, 2, 3])
     >>> t = torch.as_tensor(a)
     >>> t
-    tensor([ 1,  2,  3])
+    tensor([1, 2, 3])
     >>> t[0] = -1
     >>> a
     array([-1,  2,  3])
@@ -831,10 +831,10 @@ Example::
     >>> a = numpy.array([1, 2, 3])
     >>> t = torch.as_tensor(a, device=torch.device('cuda'))
     >>> t
-    tensor([ 1,  2,  3])
+    tensor([1, 2, 3], device='cuda:0')
     >>> t[0] = -1
     >>> a
-    array([1,  2,  3])
+    array([1, 2, 3])
 """.format(**factory_data_common_args))
 
 add_docstr(torch.asin, r"""
@@ -855,9 +855,9 @@ Example::
 
     >>> a = torch.randn(4)
     >>> a
-    tensor([-0.5962,  1.4985, -0.4396,  1.4525])
+    tensor([ 1.5410, -0.2934, -2.1788,  0.5684])
     >>> torch.asin(a)
-    tensor([-0.6387,     nan, -0.4552,     nan])
+    tensor([    nan, -0.2978,     nan,  0.6046])
 """.format(**common_args))
 
 add_docstr(torch.arcsin, r"""
@@ -885,9 +885,9 @@ Example::
 
     >>> a = torch.randn(4)
     >>> a
-    tensor([ 0.1606, -1.4267, -1.0899, -1.0250 ])
+    tensor([ 1.5410, -0.2934, -2.1788,  0.5684])
     >>> torch.asinh(a)
-    tensor([ 0.1599, -1.1534, -0.9435, -0.8990 ])
+    tensor([ 1.2173, -0.2894, -1.5208,  0.5416])
 """.format(**common_args))
 
 add_docstr(torch.arcsinh, r"""
@@ -914,9 +914,9 @@ Example::
 
     >>> a = torch.randn(4)
     >>> a
-    tensor([ 0.2341,  0.2539, -0.6256, -0.6448])
+    tensor([ 1.5410, -0.2934, -2.1788,  0.5684])
     >>> torch.atan(a)
-    tensor([ 0.2299,  0.2487, -0.5591, -0.5727])
+    tensor([ 0.9952, -0.2854, -1.1405,  0.5169])
 """.format(**common_args))
 
 add_docstr(torch.arctan, r"""
@@ -950,9 +950,9 @@ Example::
 
     >>> a = torch.randn(4)
     >>> a
-    tensor([ 0.9041,  0.0196, -0.3108, -2.4423])
+    tensor([ 1.5410, -0.2934, -2.1788,  0.5684])
     >>> torch.atan2(a, torch.randn(4))
-    tensor([ 0.9833,  0.0811, -1.9743, -1.4151])
+    tensor([ 2.1841, -2.9348, -1.3877,  0.5960])
 """.format(**common_args))
 
 add_docstr(torch.arctan2,
@@ -984,9 +984,9 @@ Example::
 
     >>> a = torch.randn(4).uniform_(-1, 1)
     >>> a
-    tensor([ -0.9385, 0.2968, -0.8591, -0.1871 ])
+    tensor([-0.0887,  0.2646, -0.3022, -0.1966])
     >>> torch.atanh(a)
-    tensor([ -1.7253, 0.3060, -1.2899, -0.1893 ])
+    tensor([-0.0890,  0.2711, -0.3120, -0.1992])
 """.format(**common_args))
 
 add_docstr(torch.arctanh, r"""
@@ -1101,6 +1101,7 @@ Example::
     False
 """)
 
+
 add_docstr(torch.baddbmm,
            r"""
 baddbmm(input, batch1, batch2, *, beta=1, alpha=1, out=None) -> Tensor
@@ -1184,24 +1185,24 @@ Example::
 
     >>> a = torch.empty(3, 3).uniform_(0, 1)  # generate a uniform random matrix with range [0, 1]
     >>> a
-    tensor([[ 0.1737,  0.0950,  0.3609],
-            [ 0.7148,  0.0289,  0.2676],
-            [ 0.9456,  0.8937,  0.7202]])
+    tensor([[0.4963, 0.7682, 0.0885],
+            [0.1320, 0.3074, 0.6341],
+            [0.4901, 0.8964, 0.4556]])
     >>> torch.bernoulli(a)
-    tensor([[ 1.,  0.,  0.],
-            [ 0.,  0.,  0.],
-            [ 1.,  1.,  1.]])
+    tensor([[0., 1., 0.],
+            [1., 1., 1.],
+            [0., 1., 0.]])
 
     >>> a = torch.ones(3, 3) # probability of drawing "1" is 1
     >>> torch.bernoulli(a)
-    tensor([[ 1.,  1.,  1.],
-            [ 1.,  1.,  1.],
-            [ 1.,  1.,  1.]])
+    tensor([[1., 1., 1.],
+            [1., 1., 1.],
+            [1., 1., 1.]])
     >>> a = torch.zeros(3, 3) # probability of drawing "1" is 0
     >>> torch.bernoulli(a)
-    tensor([[ 0.,  0.,  0.],
-            [ 0.,  0.,  0.],
-            [ 0.,  0.,  0.]])
+    tensor([[0., 0., 0.],
+            [0., 0., 0.],
+            [0., 0., 0.]])
 """.format(**common_args))
 
 add_docstr(torch.bincount,
@@ -1236,14 +1237,13 @@ Example::
     >>> input = torch.randint(0, 8, (5,), dtype=torch.int64)
     >>> weights = torch.linspace(0, 1, steps=5)
     >>> input, weights
-    (tensor([4, 3, 6, 3, 4]),
-     tensor([ 0.0000,  0.2500,  0.5000,  0.7500,  1.0000])
+    (tensor([4, 7, 5, 0, 3]), tensor([0.0000, 0.2500, 0.5000, 0.7500, 1.0000]))
 
     >>> torch.bincount(input)
-    tensor([0, 0, 0, 2, 2, 0, 1])
+    tensor([1, 0, 0, 1, 1, 1, 0, 1])
 
     >>> input.bincount(weights)
-    tensor([0.0000, 0.0000, 0.0000, 1.0000, 1.0000, 0.0000, 0.5000])
+    tensor([0.7500, 0.0000, 0.0000, 1.0000, 0.0000, 0.5000, 0.0000, 0.2500])
 """.format(**reproducibility_notes))
 
 add_docstr(torch.bitwise_not,
@@ -1320,9 +1320,9 @@ Keyword args:
 Example:
 
     >>> torch.bitwise_and(torch.tensor([-1, -2, 3], dtype=torch.int8), torch.tensor([1, 0, 3], dtype=torch.int8))
-    tensor([1, 0,  3], dtype=torch.int8)
+    tensor([1, 0, 3], dtype=torch.int8)
     >>> torch.bitwise_and(torch.tensor([True, True, False]), torch.tensor([False, True, False]))
-    tensor([ False, True, False])
+    tensor([False,  True, False])
 """.format(**common_args))
 
 add_docstr(torch.bitwise_or,
@@ -1344,7 +1344,7 @@ Example:
     >>> torch.bitwise_or(torch.tensor([-1, -2, 3], dtype=torch.int8), torch.tensor([1, 0, 3], dtype=torch.int8))
     tensor([-1, -2,  3], dtype=torch.int8)
     >>> torch.bitwise_or(torch.tensor([True, True, False]), torch.tensor([False, True, False]))
-    tensor([ True, True, False])
+    tensor([ True,  True, False])
 """.format(**common_args))
 
 add_docstr(torch.bitwise_xor,
@@ -1599,17 +1599,13 @@ Example::
             [ 7,  8,  9, 10, 11, 12, 13]])
     >>> torch.tensor_split(x, 3, dim=1)
     (tensor([[0, 1, 2],
-            [7, 8, 9]]),
-     tensor([[ 3,  4],
-            [10, 11]]),
-     tensor([[ 5,  6],
+            [7, 8, 9]]), tensor([[ 3,  4],
+            [10, 11]]), tensor([[ 5,  6],
             [12, 13]]))
     >>> torch.tensor_split(x, (1, 6), dim=1)
     (tensor([[0],
-            [7]]),
-     tensor([[ 1,  2,  3,  4,  5],
-            [ 8,  9, 10, 11, 12]]),
-     tensor([[ 6],
+            [7]]), tensor([[ 1,  2,  3,  4,  5],
+            [ 8,  9, 10, 11, 12]]), tensor([[ 6],
             [13]]))
 """)
 
@@ -1643,25 +1639,11 @@ Arguments:
 
 Example::
     >>> torch.arange(11).chunk(6)
-    (tensor([0, 1]),
-     tensor([2, 3]),
-     tensor([4, 5]),
-     tensor([6, 7]),
-     tensor([8, 9]),
-     tensor([10]))
+    (tensor([0, 1]), tensor([2, 3]), tensor([4, 5]), tensor([6, 7]), tensor([8, 9]), tensor([10]))
     >>> torch.arange(12).chunk(6)
-    (tensor([0, 1]),
-     tensor([2, 3]),
-     tensor([4, 5]),
-     tensor([6, 7]),
-     tensor([8, 9]),
-     tensor([10, 11]))
+    (tensor([0, 1]), tensor([2, 3]), tensor([4, 5]), tensor([6, 7]), tensor([8, 9]), tensor([10, 11]))
     >>> torch.arange(13).chunk(6)
-    (tensor([0, 1, 2]),
-     tensor([3, 4, 5]),
-     tensor([6, 7, 8]),
-     tensor([ 9, 10, 11]),
-     tensor([12]))
+    (tensor([0, 1, 2]), tensor([3, 4, 5]), tensor([6, 7, 8]), tensor([ 9, 10, 11]), tensor([12]))
 """)
 
 add_docstr(torch.unsafe_chunk,
@@ -1724,24 +1706,20 @@ Example::
             [12., 13., 14., 15.]])
     >>> torch.hsplit(t, 2)
     (tensor([[ 0.,  1.],
-             [ 4.,  5.],
-             [ 8.,  9.],
-             [12., 13.]]),
-     tensor([[ 2.,  3.],
-             [ 6.,  7.],
-             [10., 11.],
-             [14., 15.]]))
+            [ 4.,  5.],
+            [ 8.,  9.],
+            [12., 13.]]), tensor([[ 2.,  3.],
+            [ 6.,  7.],
+            [10., 11.],
+            [14., 15.]]))
     >>> torch.hsplit(t, [3, 6])
     (tensor([[ 0.,  1.,  2.],
-             [ 4.,  5.,  6.],
-             [ 8.,  9., 10.],
-             [12., 13., 14.]]),
-     tensor([[ 3.],
-             [ 7.],
-             [11.],
-             [15.]]),
-     tensor([], size=(4, 0)))
-
+            [ 4.,  5.,  6.],
+            [ 8.,  9., 10.],
+            [12., 13., 14.]]), tensor([[ 3.],
+            [ 7.],
+            [11.],
+            [15.]]), tensor([], size=(4, 0)))
 """)
 
 add_docstr(torch.vsplit,
@@ -1771,16 +1749,12 @@ Example::
             [12., 13., 14., 15.]])
     >>> torch.vsplit(t, 2)
     (tensor([[0., 1., 2., 3.],
-             [4., 5., 6., 7.]]),
-     tensor([[ 8.,  9., 10., 11.],
-             [12., 13., 14., 15.]]))
+            [4., 5., 6., 7.]]), tensor([[ 8.,  9., 10., 11.],
+            [12., 13., 14., 15.]]))
     >>> torch.vsplit(t, [3, 6])
     (tensor([[ 0.,  1.,  2.,  3.],
-             [ 4.,  5.,  6.,  7.],
-             [ 8.,  9., 10., 11.]]),
-     tensor([[12., 13., 14., 15.]]),
-     tensor([], size=(0, 4)))
-
+            [ 4.,  5.,  6.,  7.],
+            [ 8.,  9., 10., 11.]]), tensor([[12., 13., 14., 15.]]), tensor([], size=(0, 4)))
 """)
 
 add_docstr(torch.dsplit,
@@ -1810,25 +1784,21 @@ Example::
              [12., 13., 14., 15.]]])
     >>> torch.dsplit(t, 2)
     (tensor([[[ 0.,  1.],
-            [ 4.,  5.]],
-           [[ 8.,  9.],
-            [12., 13.]]]),
-     tensor([[[ 2.,  3.],
-              [ 6.,  7.]],
-             [[10., 11.],
-              [14., 15.]]]))
+             [ 4.,  5.]],
+            [[ 8.,  9.],
+             [12., 13.]]]), tensor([[[ 2.,  3.],
+             [ 6.,  7.]],
+            [[10., 11.],
+             [14., 15.]]]))
 
     >>> torch.dsplit(t, [3, 6])
     (tensor([[[ 0.,  1.,  2.],
-              [ 4.,  5.,  6.]],
-             [[ 8.,  9., 10.],
-              [12., 13., 14.]]]),
-     tensor([[[ 3.],
-              [ 7.]],
-             [[11.],
-              [15.]]]),
-     tensor([], size=(2, 2, 0)))
-
+             [ 4.,  5.,  6.]],
+            [[ 8.,  9., 10.],
+             [12., 13., 14.]]]), tensor([[[ 3.],
+             [ 7.]],
+            [[11.],
+             [15.]]]), tensor([], size=(2, 2, 0)))
 """)
 
 add_docstr(torch.can_cast,
@@ -1885,11 +1855,11 @@ Example::
             [-1.,  1.]])
     >>> x = torch.randn(2, 4)
     >>> x
-    tensor([[-0.2678, -0.0908, -0.3766,  0.2780],
-            [-0.5812,  0.1535,  0.2387,  0.2350]])
+    tensor([[ 1.5410, -0.2934, -2.1788,  0.5684],
+            [-1.0845, -1.3986,  0.4033,  0.8380]])
     >>> torch.corrcoef(x)
-    tensor([[1.0000, 0.3582],
-            [0.3582, 1.0000]])
+    tensor([[ 1.0000, -0.3413],
+            [-0.3413,  1.0000]])
     >>> torch.corrcoef(x[0])
     tensor(1.)
 """)
@@ -1958,13 +1928,13 @@ Example::
             [-0.6667,  0.6667]])
     >>> fw = torch.randint(1, 10, (3,))
     >>> fw
-    tensor([1, 6, 9])
+    tensor([9, 1, 3])
     >>> aw = torch.rand(3)
     >>> aw
-    tensor([0.4282, 0.0255, 0.4144])
+    tensor([0.1320, 0.3074, 0.6341])
     >>> torch.cov(x, fweights=fw, aweights=aw)
-    tensor([[ 0.4169, -0.4169],
-            [-0.4169,  0.4169]])
+    tensor([[ 0.9904, -0.9904],
+            [-0.9904,  0.9904]])
 """)
 
 add_docstr(torch.cat,
@@ -1993,20 +1963,20 @@ Example::
 
     >>> x = torch.randn(2, 3)
     >>> x
-    tensor([[ 0.6580, -1.0969, -0.4614],
-            [-0.1034, -0.5790,  0.1497]])
+    tensor([[ 1.5410, -0.2934, -2.1788],
+            [ 0.5684, -1.0845, -1.3986]])
     >>> torch.cat((x, x, x), 0)
-    tensor([[ 0.6580, -1.0969, -0.4614],
-            [-0.1034, -0.5790,  0.1497],
-            [ 0.6580, -1.0969, -0.4614],
-            [-0.1034, -0.5790,  0.1497],
-            [ 0.6580, -1.0969, -0.4614],
-            [-0.1034, -0.5790,  0.1497]])
+    tensor([[ 1.5410, -0.2934, -2.1788],
+            [ 0.5684, -1.0845, -1.3986],
+            [ 1.5410, -0.2934, -2.1788],
+            [ 0.5684, -1.0845, -1.3986],
+            [ 1.5410, -0.2934, -2.1788],
+            [ 0.5684, -1.0845, -1.3986]])
     >>> torch.cat((x, x, x), 1)
-    tensor([[ 0.6580, -1.0969, -0.4614,  0.6580, -1.0969, -0.4614,  0.6580,
-             -1.0969, -0.4614],
-            [-0.1034, -0.5790,  0.1497, -0.1034, -0.5790,  0.1497, -0.1034,
-             -0.5790,  0.1497]])
+    tensor([[ 1.5410, -0.2934, -2.1788,  1.5410, -0.2934, -2.1788,  1.5410, -0.2934,
+             -2.1788],
+            [ 0.5684, -1.0845, -1.3986,  0.5684, -1.0845, -1.3986,  0.5684, -1.0845,
+             -1.3986]])
 """.format(**common_args))
 
 add_docstr(torch.concat,
@@ -2036,9 +2006,9 @@ Example::
 
     >>> a = torch.randn(4)
     >>> a
-    tensor([-0.6341, -1.4208, -1.0900,  0.5826])
+    tensor([ 1.5410, -0.2934, -2.1788,  0.5684])
     >>> torch.ceil(a)
-    tensor([-0., -1., -1.,  1.])
+    tensor([ 2., -0., -2.,  1.])
 """.format(**common_args))
 
 add_docstr(torch.real,
@@ -2058,10 +2028,9 @@ Example::
 
     >>> x=torch.randn(4, dtype=torch.cfloat)
     >>> x
-    tensor([(0.3100+0.3553j), (-0.5445-0.7896j), (-1.6492-0.0633j), (-0.0638-0.8119j)])
+    tensor([ 1.0896-0.2075j, -1.5406+0.4019j, -0.7669-0.9890j,  0.2852+0.5926j])
     >>> x.real
-    tensor([ 0.3100, -0.5445, -1.6492, -0.0638])
-
+    tensor([ 1.0896, -1.5406, -0.7669,  0.2852])
 """.format(**common_args))
 
 add_docstr(torch.imag,
@@ -2081,10 +2050,9 @@ Example::
 
     >>> x=torch.randn(4, dtype=torch.cfloat)
     >>> x
-    tensor([(0.3100+0.3553j), (-0.5445-0.7896j), (-1.6492-0.0633j), (-0.0638-0.8119j)])
+    tensor([ 1.0896-0.2075j, -1.5406+0.4019j, -0.7669-0.9890j,  0.2852+0.5926j])
     >>> x.imag
-    tensor([ 0.3553, -0.7896, -0.0633, -0.8119])
-
+    tensor([-0.2075,  0.4019, -0.9890,  0.5926])
 """.format(**common_args))
 
 add_docstr(torch.view_as_real,
@@ -2106,12 +2074,12 @@ Example::
 
     >>> x=torch.randn(4, dtype=torch.cfloat)
     >>> x
-    tensor([(0.4737-0.3839j), (-0.2098-0.6699j), (0.3470-0.9451j), (-0.5174-1.3136j)])
+    tensor([ 1.0896-0.2075j, -1.5406+0.4019j, -0.7669-0.9890j,  0.2852+0.5926j])
     >>> torch.view_as_real(x)
-    tensor([[ 0.4737, -0.3839],
-            [-0.2098, -0.6699],
-            [ 0.3470, -0.9451],
-            [-0.5174, -1.3136]])
+    tensor([[ 1.0896, -0.2075],
+            [-1.5406,  0.4019],
+            [-0.7669, -0.9890],
+            [ 0.2852,  0.5926]])
 """.format(**common_args))
 
 add_docstr(torch.view_as_complex,
@@ -2138,12 +2106,12 @@ Example::
 
     >>> x=torch.randn(4, 2)
     >>> x
-    tensor([[ 1.6116, -0.5772],
-            [-1.4606, -0.9120],
-            [ 0.0786, -1.7497],
-            [-0.6561, -1.6623]])
+    tensor([[ 1.5410, -0.2934],
+            [-2.1788,  0.5684],
+            [-1.0845, -1.3986],
+            [ 0.4033,  0.8380]])
     >>> torch.view_as_complex(x)
-    tensor([(1.6116-0.5772j), (-1.4606-0.9120j), (0.0786-1.7497j), (-0.6561-1.6623j)])
+    tensor([ 1.5410-0.2934j, -2.1788+0.5684j, -1.0845-1.3986j,  0.4033+0.8380j])
 """.format(**common_args))
 
 add_docstr(torch.reciprocal,
@@ -2170,9 +2138,9 @@ Example::
 
     >>> a = torch.randn(4)
     >>> a
-    tensor([-0.4595, -2.1219, -1.4314,  0.7298])
+    tensor([ 1.5410, -0.2934, -2.1788,  0.5684])
     >>> torch.reciprocal(a)
-    tensor([-2.1763, -0.4713, -0.6986,  1.3702])
+    tensor([ 0.6489, -3.4080, -0.4590,  1.7592])
 """.format(**common_args))
 
 add_docstr(torch.cholesky, r"""
@@ -2419,14 +2387,13 @@ Example::
 
     >>> a = torch.randn(4)
     >>> a
-    tensor([-1.7120,  0.1734, -0.0478, -0.0922])
+    tensor([ 1.5410, -0.2934, -2.1788,  0.5684])
     >>> torch.clamp(a, min=-0.5, max=0.5)
-    tensor([-0.5000,  0.1734, -0.0478, -0.0922])
+    tensor([ 0.5000, -0.2934, -0.5000,  0.5000])
 
     >>> min = torch.linspace(-1, 1, steps=4)
     >>> torch.clamp(a, min=min)
-    tensor([-1.0000,  0.1734,  0.3333,  1.0000])
-
+    tensor([ 1.5410, -0.2934,  0.3333,  1.0000])
 """.format(**common_args))
 
 add_docstr(torch.clip, r"""
@@ -2456,8 +2423,8 @@ Example::
     >>> b = torch.tensor([4, 5, 6])
     >>> torch.column_stack((a, b))
     tensor([[1, 4],
-        [2, 5],
-        [3, 6]])
+            [2, 5],
+            [3, 6]])
     >>> a = torch.arange(5)
     >>> b = torch.arange(10).reshape(5, 2)
     >>> torch.column_stack((a, b, b))
@@ -2466,7 +2433,6 @@ Example::
             [2, 4, 5, 4, 5],
             [3, 6, 7, 6, 7],
             [4, 8, 9, 8, 9]])
-
 """.format(**common_args))
 
 add_docstr(torch.complex,
@@ -2492,10 +2458,9 @@ Example::
     >>> imag = torch.tensor([3, 4], dtype=torch.float32)
     >>> z = torch.complex(real, imag)
     >>> z
-    tensor([(1.+3.j), (2.+4.j)])
+    tensor([1.+3.j, 2.+4.j])
     >>> z.dtype
     torch.complex64
-
 """)
 
 add_docstr(torch.polar,
@@ -2535,7 +2500,7 @@ Example::
     >>> angle = torch.tensor([np.pi / 2, 5 * np.pi / 4], dtype=torch.float64)
     >>> z = torch.polar(abs, angle)
     >>> z
-    tensor([(0.0000+1.0000j), (-1.4142-1.4142j)], dtype=torch.complex128)
+    tensor([ 6.1232e-17+1.0000j, -1.4142e+00-1.4142j], dtype=torch.complex128)
 """)
 
 add_docstr(torch.conj_physical,
@@ -2564,7 +2529,7 @@ Keyword args:
 Example::
 
     >>> torch.conj_physical(torch.tensor([-1 + 1j, -2 + 2j, 3 - 3j]))
-    tensor([-1 - 1j, -2 - 2j, 3 + 3j])
+    tensor([-1.-1.j, -2.-2.j,  3.+3.j])
 """.format(**common_args))
 
 add_docstr(torch.conj,
@@ -2613,7 +2578,7 @@ Example::
     True
     >>> z = y.resolve_conj()
     >>> z
-    tensor([-1 - 1j, -2 - 2j, 3 + 3j])
+    tensor([-1.-1.j, -2.-2.j,  3.+3.j])
     >>> z.is_conj()
     False
 """.format(**common_args))
@@ -2636,10 +2601,9 @@ Example::
     True
     >>> out = y.resolve_neg()
     >>> out
-    tensor([-1, -2, -3])
+    tensor([-1.-1.j, -2.-2.j,  3.+3.j])
     >>> out.is_neg()
     False
-
 """.format(**common_args))
 
 add_docstr(torch.copysign,
@@ -2670,23 +2634,21 @@ Example::
 
     >>> a = torch.randn(5)
     >>> a
-    tensor([-1.2557, -0.0026, -0.5387,  0.4740, -0.9244])
+    tensor([ 1.5410, -0.2934, -2.1788,  0.5684, -1.0845])
     >>> torch.copysign(a, 1)
-    tensor([1.2557, 0.0026, 0.5387, 0.4740, 0.9244])
+    tensor([1.5410, 0.2934, 2.1788, 0.5684, 1.0845])
     >>> a = torch.randn(4, 4)
     >>> a
-    tensor([[ 0.7079,  0.2778, -1.0249,  0.5719],
-            [-0.0059, -0.2600, -0.4475, -1.3948],
-            [ 0.3667, -0.9567, -2.5757, -0.1751],
-            [ 0.2046, -0.0742,  0.2998, -0.1054]])
+    tensor([[-0.0885,  0.5239, -0.6659,  0.8504],
+            [-1.3527, -1.6959,  0.5667,  0.7935],
+            [-0.1932, -0.3090,  0.5026, -0.8594],
+            [ 0.7502, -0.5855, -0.1734,  0.1835]])
     >>> b = torch.randn(4)
-    tensor([ 0.2373,  0.3120,  0.3190, -1.1128])
     >>> torch.copysign(a, b)
-    tensor([[ 0.7079,  0.2778,  1.0249, -0.5719],
-            [ 0.0059,  0.2600,  0.4475, -1.3948],
-            [ 0.3667,  0.9567,  2.5757, -0.1751],
-            [ 0.2046,  0.0742,  0.2998, -0.1054]])
-
+    tensor([[-0.0885, -0.5239,  0.6659, -0.8504],
+            [-1.3527, -1.6959,  0.5667, -0.7935],
+            [-0.1932, -0.3090,  0.5026, -0.8594],
+            [-0.7502, -0.5855,  0.1734, -0.1835]])
 """.format(**common_args))
 
 add_docstr(torch.cos,
@@ -2708,9 +2670,9 @@ Example::
 
     >>> a = torch.randn(4)
     >>> a
-    tensor([ 1.4309,  1.2706, -0.8562,  0.9796])
+    tensor([ 1.5410, -0.2934, -2.1788,  0.5684])
     >>> torch.cos(a)
-    tensor([ 0.1395,  0.2957,  0.6553,  0.5574])
+    tensor([ 0.0298,  0.9573, -0.5712,  0.8427])
 """.format(**common_args))
 
 add_docstr(torch.cosh,
@@ -2733,9 +2695,9 @@ Example::
 
     >>> a = torch.randn(4)
     >>> a
-    tensor([ 0.1632,  1.1835, -0.6979, -0.7325])
+    tensor([ 1.5410, -0.2934, -2.1788,  0.5684])
     >>> torch.cosh(a)
-    tensor([ 1.0133,  1.7860,  1.2536,  1.2805])
+    tensor([2.4417, 1.0434, 4.4744, 1.1660])
 
 .. note::
    When :attr:`input` is on the CPU, the implementation of torch.cosh may use
@@ -2747,13 +2709,13 @@ add_docstr(torch.cross,
            r"""
 cross(input, other, dim=None, *, out=None) -> Tensor
 
-
 Returns the cross product of vectors in dimension :attr:`dim` of :attr:`input`
 and :attr:`other`.
 
 Supports input of float, double, cfloat and cdouble dtypes. Also supports batches
 of vectors, for which it computes the product along the dimension :attr:`dim`.
 In this case, the output has the same batch dimensions as the inputs.
+
 
 If :attr:`dim` is not given, it defaults to the first dimension found with the
 size 3. Note that this might be unexpected.
@@ -2777,26 +2739,26 @@ Example::
 
     >>> a = torch.randn(4, 3)
     >>> a
-    tensor([[-0.3956,  1.1455,  1.6895],
-            [-0.5849,  1.3672,  0.3599],
-            [-1.1626,  0.7180, -0.0521],
-            [-0.1339,  0.9902, -2.0225]])
+    tensor([[ 1.5410, -0.2934, -2.1788],
+            [ 0.5684, -1.0845, -1.3986],
+            [ 0.4033,  0.8380, -0.7193],
+            [-0.4033, -0.5966,  0.1820]])
     >>> b = torch.randn(4, 3)
     >>> b
-    tensor([[-0.0257, -1.4725, -1.2251],
-            [-1.1479, -0.7005, -1.9757],
-            [-1.3904,  0.3726, -1.1836],
-            [-0.9688, -0.7153,  0.2159]])
+    tensor([[-0.8567,  1.1006, -1.0712],
+            [ 0.1227, -0.5663,  0.3731],
+            [-0.8920, -1.5091,  0.3704],
+            [ 1.4565,  0.9398,  0.7748]])
     >>> torch.cross(a, b, dim=1)
-    tensor([[ 1.0844, -0.5281,  0.6120],
-            [-2.4490, -1.5687,  1.9792],
-            [-0.8304, -1.3037,  0.5650],
-            [-1.2329,  1.9883,  1.0551]])
+    tensor([[ 2.7123,  3.5172,  1.4447],
+            [-1.1967, -0.3837, -0.1888],
+            [-0.7750,  0.4922,  0.1388],
+            [-0.6334,  0.5777,  0.4899]])
     >>> torch.cross(a, b)
-    tensor([[ 1.0844, -0.5281,  0.6120],
-            [-2.4490, -1.5687,  1.9792],
-            [-0.8304, -1.3037,  0.5650],
-            [-1.2329,  1.9883,  1.0551]])
+    tensor([[ 2.7123,  3.5172,  1.4447],
+            [-1.1967, -0.3837, -0.1888],
+            [-0.7750,  0.4922,  0.1388],
+            [-0.6334,  0.5777,  0.4899]])
 """.format(**common_args))
 
 add_docstr(torch.logcumsumexp,
@@ -2821,8 +2783,8 @@ Example::
 
     >>> a = torch.randn(10)
     >>> torch.logcumsumexp(a, dim=0)
-    tensor([-0.42296738, -0.04462666,  0.86278635,  0.94622083,  1.05277811,
-             1.39202815,  1.83525007,  1.84492621,  2.06084887,  2.06844475]))
+    tensor([1.5410, 1.6892, 1.7098, 1.9870, 2.0323, 2.0642, 2.2381, 2.4585, 2.4993,
+            2.5528])
 """.format(**reduceops_common_args))
 
 add_docstr(torch.cummax,
@@ -2846,13 +2808,13 @@ Example::
 
     >>> a = torch.randn(10)
     >>> a
-    tensor([-0.3449, -1.5447,  0.0685, -1.5104, -1.1706,  0.2259,  1.4696, -1.3284,
-         1.9946, -0.8209])
+    tensor([ 1.5410, -0.2934, -2.1788,  0.5684, -1.0845, -1.3986,  0.4033,  0.8380,
+            -0.7193, -0.4033])
     >>> torch.cummax(a, dim=0)
     torch.return_types.cummax(
-        values=tensor([-0.3449, -0.3449,  0.0685,  0.0685,  0.0685,  0.2259,  1.4696,  1.4696,
-         1.9946,  1.9946]),
-        indices=tensor([0, 0, 2, 2, 2, 5, 6, 6, 8, 8]))
+    values=tensor([1.5410, 1.5410, 1.5410, 1.5410, 1.5410, 1.5410, 1.5410, 1.5410, 1.5410,
+            1.5410]),
+    indices=tensor([0, 0, 0, 0, 0, 0, 0, 0, 0, 0]))
 """.format(**reduceops_common_args))
 
 add_docstr(torch.cummin,
@@ -2876,13 +2838,13 @@ Example::
 
     >>> a = torch.randn(10)
     >>> a
-    tensor([-0.2284, -0.6628,  0.0975,  0.2680, -1.3298, -0.4220, -0.3885,  1.1762,
-         0.9165,  1.6684])
+    tensor([ 1.5410, -0.2934, -2.1788,  0.5684, -1.0845, -1.3986,  0.4033,  0.8380,
+            -0.7193, -0.4033])
     >>> torch.cummin(a, dim=0)
     torch.return_types.cummin(
-        values=tensor([-0.2284, -0.6628, -0.6628, -0.6628, -1.3298, -1.3298, -1.3298, -1.3298,
-        -1.3298, -1.3298]),
-        indices=tensor([0, 1, 1, 1, 4, 4, 4, 4, 4, 4]))
+    values=tensor([ 1.5410, -0.2934, -2.1788, -2.1788, -2.1788, -2.1788, -2.1788, -2.1788,
+            -2.1788, -2.1788]),
+    indices=tensor([0, 1, 2, 2, 2, 2, 2, 2, 2, 2]))
 """.format(**reduceops_common_args))
 
 add_docstr(torch.cumprod,
@@ -2910,16 +2872,16 @@ Example::
 
     >>> a = torch.randn(10)
     >>> a
-    tensor([ 0.6001,  0.2069, -0.1919,  0.9792,  0.6727,  1.0062,  0.4126,
-            -0.2129, -0.4206,  0.1968])
+    tensor([ 1.5410, -0.2934, -2.1788,  0.5684, -1.0845, -1.3986,  0.4033,  0.8380,
+            -0.7193, -0.4033])
     >>> torch.cumprod(a, dim=0)
-    tensor([ 0.6001,  0.1241, -0.0238, -0.0233, -0.0157, -0.0158, -0.0065,
-             0.0014, -0.0006, -0.0001])
+    tensor([ 1.5410, -0.4522,  0.9852,  0.5600, -0.6073,  0.8494,  0.3426,  0.2871,
+            -0.2065,  0.0833])
 
     >>> a[5] = 0.0
     >>> torch.cumprod(a, dim=0)
-    tensor([ 0.6001,  0.1241, -0.0238, -0.0233, -0.0157, -0.0000, -0.0000,
-             0.0000, -0.0000, -0.0000])
+    tensor([ 1.5410, -0.4522,  0.9852,  0.5600, -0.6073, -0.0000, -0.0000, -0.0000,
+             0.0000, -0.0000])
 """.format(**reduceops_common_args))
 
 add_docstr(torch.cumsum,
@@ -2947,11 +2909,11 @@ Example::
 
     >>> a = torch.randn(10)
     >>> a
-    tensor([-0.8286, -0.4890,  0.5155,  0.8443,  0.1865, -0.1752, -2.0595,
-             0.1850, -1.1571, -0.4243])
+    tensor([ 1.5410, -0.2934, -2.1788,  0.5684, -1.0845, -1.3986,  0.4033,  0.8380,
+            -0.7193, -0.4033])
     >>> torch.cumsum(a, dim=0)
-    tensor([-0.8286, -1.3175, -0.8020,  0.0423,  0.2289,  0.0537, -2.0058,
-            -1.8209, -2.9780, -3.4022])
+    tensor([ 1.5410,  1.2476, -0.9312, -0.3628, -1.4473, -2.8459, -2.4426, -1.6045,
+            -2.3238, -2.7271])
 """.format(**reduceops_common_args))
 
 add_docstr(torch.count_nonzero,
@@ -2970,13 +2932,13 @@ Example::
     >>> x = torch.zeros(3,3)
     >>> x[torch.randn(3,3) > 0.5] = 1
     >>> x
-    tensor([[0., 1., 1.],
-            [0., 0., 0.],
-            [0., 0., 1.]])
+    tensor([[1., 0., 0.],
+            [1., 0., 0.],
+            [0., 1., 0.]])
     >>> torch.count_nonzero(x)
     tensor(3)
     >>> torch.count_nonzero(x, dim=0)
-    tensor([0, 1, 2])
+    tensor([2, 1, 0])
 """.format(**reduceops_common_args))
 
 add_docstr(torch.dequantize,
@@ -3032,28 +2994,28 @@ Get the square matrix where the input vector is the diagonal::
 
     >>> a = torch.randn(3)
     >>> a
-    tensor([ 0.5950,-0.0872, 2.3298])
+    tensor([ 1.5410, -0.2934, -2.1788])
     >>> torch.diag(a)
-    tensor([[ 0.5950, 0.0000, 0.0000],
-            [ 0.0000,-0.0872, 0.0000],
-            [ 0.0000, 0.0000, 2.3298]])
+    tensor([[ 1.5410,  0.0000,  0.0000],
+            [ 0.0000, -0.2934,  0.0000],
+            [ 0.0000,  0.0000, -2.1788]])
     >>> torch.diag(a, 1)
-    tensor([[ 0.0000, 0.5950, 0.0000, 0.0000],
-            [ 0.0000, 0.0000,-0.0872, 0.0000],
-            [ 0.0000, 0.0000, 0.0000, 2.3298],
-            [ 0.0000, 0.0000, 0.0000, 0.0000]])
+    tensor([[ 0.0000,  1.5410,  0.0000,  0.0000],
+            [ 0.0000,  0.0000, -0.2934,  0.0000],
+            [ 0.0000,  0.0000,  0.0000, -2.1788],
+            [ 0.0000,  0.0000,  0.0000,  0.0000]])
 
 Get the k-th diagonal of a given matrix::
 
     >>> a = torch.randn(3, 3)
     >>> a
-    tensor([[-0.4264, 0.0255,-0.1064],
-            [ 0.8795,-0.2429, 0.1374],
-            [ 0.1029,-0.6482,-1.6300]])
+    tensor([[ 0.5684, -1.0845, -1.3986],
+            [ 0.4033,  0.8380, -0.7193],
+            [-0.4033, -0.5966,  0.1820]])
     >>> torch.diag(a, 0)
-    tensor([-0.4264,-0.2429,-1.6300])
+    tensor([0.5684, 0.8380, 0.1820])
     >>> torch.diag(a, 1)
-    tensor([ 0.0255, 0.1374])
+    tensor([-1.0845, -0.7193])
 """.format(**common_args))
 
 add_docstr(torch.diag_embed,
@@ -3098,7 +3060,7 @@ Example::
     tensor([[[ 1.5410,  0.0000,  0.0000],
              [ 0.0000, -0.2934,  0.0000],
              [ 0.0000,  0.0000, -2.1788]],
-
+    
             [[ 0.5684,  0.0000,  0.0000],
              [ 0.0000, -1.0845,  0.0000],
              [ 0.0000,  0.0000, -1.3986]]])
@@ -3106,17 +3068,16 @@ Example::
     >>> torch.diag_embed(a, offset=1, dim1=0, dim2=2)
     tensor([[[ 0.0000,  1.5410,  0.0000,  0.0000],
              [ 0.0000,  0.5684,  0.0000,  0.0000]],
-
+    
             [[ 0.0000,  0.0000, -0.2934,  0.0000],
              [ 0.0000,  0.0000, -1.0845,  0.0000]],
-
+    
             [[ 0.0000,  0.0000,  0.0000, -2.1788],
              [ 0.0000,  0.0000,  0.0000, -1.3986]],
-
+    
             [[ 0.0000,  0.0000,  0.0000,  0.0000],
              [ 0.0000,  0.0000,  0.0000,  0.0000]]])
 """.format(**common_args))
-
 
 add_docstr(torch.diagflat,
            r"""
@@ -3142,26 +3103,26 @@ Examples::
 
     >>> a = torch.randn(3)
     >>> a
-    tensor([-0.2956, -0.9068,  0.1695])
+    tensor([ 1.5410, -0.2934, -2.1788])
     >>> torch.diagflat(a)
-    tensor([[-0.2956,  0.0000,  0.0000],
-            [ 0.0000, -0.9068,  0.0000],
-            [ 0.0000,  0.0000,  0.1695]])
+    tensor([[ 1.5410,  0.0000,  0.0000],
+            [ 0.0000, -0.2934,  0.0000],
+            [ 0.0000,  0.0000, -2.1788]])
     >>> torch.diagflat(a, 1)
-    tensor([[ 0.0000, -0.2956,  0.0000,  0.0000],
-            [ 0.0000,  0.0000, -0.9068,  0.0000],
-            [ 0.0000,  0.0000,  0.0000,  0.1695],
+    tensor([[ 0.0000,  1.5410,  0.0000,  0.0000],
+            [ 0.0000,  0.0000, -0.2934,  0.0000],
+            [ 0.0000,  0.0000,  0.0000, -2.1788],
             [ 0.0000,  0.0000,  0.0000,  0.0000]])
 
     >>> a = torch.randn(2, 2)
     >>> a
-    tensor([[ 0.2094, -0.3018],
-            [-0.1516,  1.9342]])
+    tensor([[ 0.5684, -1.0845],
+            [-1.3986,  0.4033]])
     >>> torch.diagflat(a)
-    tensor([[ 0.2094,  0.0000,  0.0000,  0.0000],
-            [ 0.0000, -0.3018,  0.0000,  0.0000],
-            [ 0.0000,  0.0000, -0.1516,  0.0000],
-            [ 0.0000,  0.0000,  0.0000,  1.9342]])
+    tensor([[ 0.5684,  0.0000,  0.0000,  0.0000],
+            [ 0.0000, -1.0845,  0.0000,  0.0000],
+            [ 0.0000,  0.0000, -1.3986,  0.0000],
+            [ 0.0000,  0.0000,  0.0000,  0.4033]])
 """.format(**common_args))
 
 add_docstr(torch.diagonal,
@@ -3198,45 +3159,36 @@ Examples::
 
     >>> a = torch.randn(3, 3)
     >>> a
-    tensor([[-1.0854,  1.1431, -0.1752],
-            [ 0.8536, -0.0905,  0.0360],
-            [ 0.6927, -0.3735, -0.4945]])
-
+    tensor([[ 1.5410, -0.2934, -2.1788],
+            [ 0.5684, -1.0845, -1.3986],
+            [ 0.4033,  0.8380, -0.7193]])
 
     >>> torch.diagonal(a, 0)
-    tensor([-1.0854, -0.0905, -0.4945])
-
+    tensor([ 1.5410, -1.0845, -0.7193])
 
     >>> torch.diagonal(a, 1)
-    tensor([ 1.1431,  0.0360])
-
+    tensor([-0.2934, -1.3986])
 
     >>> x = torch.randn(2, 5, 4, 2)
     >>> torch.diagonal(x, offset=-1, dim1=1, dim2=2)
-    tensor([[[-1.2631,  0.3755, -1.5977, -1.8172],
-             [-1.1065,  1.0401, -0.2235, -0.7938]],
-
-            [[-1.7325, -0.3081,  0.6166,  0.2335],
-             [ 1.0500,  0.7336, -0.3836, -1.1015]]])
+    tensor([[[ 1.3894,  0.6408,  1.2032, -0.5731],
+             [ 1.5863,  0.4412,  0.0845, -0.5554]],
+            [[-1.4782, -0.1407, -0.0033,  0.9663],
+             [ 2.5672,  0.8058, -0.5344,  1.6248]]])
 """.format(**common_args))
 
 add_docstr(torch.diagonal_scatter,
            r"""
 diagonal_scatter(input, src, offset=0, dim1=0, dim2=1) -> Tensor
-
 Embeds the values of the :attr:`src` tensor into :attr:`input` along
 the diagonal elements of :attr:`input`, with respect to :attr:`dim1`
 and :attr:`dim2`.
-
 This function returns a tensor with fresh storage; it does not
 return a view.
-
 The argument :attr:`offset` controls which diagonal to consider:
-
 - If :attr:`offset` = 0, it is the main diagonal.
 - If :attr:`offset` > 0, it is above the main diagonal.
 - If :attr:`offset` < 0, it is below the main diagonal.
-
 Args:
     {input} Must be at least 2-dimensional.
     src (Tensor): the tensor to embed into :attr:`input`.
@@ -3246,26 +3198,20 @@ Args:
         take diagonal. Default: 0.
     dim2 (int, optional): second dimension with respect to which to
         take diagonal. Default: 1.
-
 .. note::
-
     :attr:`src` must be of the proper size in order to be embedded
     into :attr:`input`. Specifically, it should have the same shape as
     ``torch.diagonal(input, offset, dim1, dim2)``
-
 Examples::
-
     >>> a = torch.zeros(3, 3)
     >>> a
     tensor([[0., 0., 0.],
             [0., 0., 0.],
             [0., 0., 0.]])
-
     >>> torch.diagonal_scatter(a, torch.ones(3), 0)
     tensor([[1., 0., 0.],
             [0., 1., 0.],
             [0., 0., 1.]])
-
     >>> torch.diagonal_scatter(a, torch.ones(2), 1)
     tensor([[0., 1., 0.],
             [0., 0., 1.],
@@ -3333,18 +3279,18 @@ Example::
 
     >>> x = torch.randn(4)
     >>> x
-    tensor([-1.5393, -0.8675,  0.5916,  1.6321])
+    tensor([ 1.5410, -0.2934, -2.1788,  0.5684])
     >>> y = torch.randn(4)
     >>> y
-    tensor([ 0.0967, -1.0511,  0.6295,  0.8360])
+    tensor([-1.0845, -1.3986,  0.4033,  0.8380])
     >>> torch.dist(x, y, 3.5)
-    tensor(1.6727)
+    tensor(3.1969)
     >>> torch.dist(x, y, 3)
-    tensor(1.6973)
+    tensor(3.3227)
     >>> torch.dist(x, y, 0)
-    tensor(inf)
+    tensor(4.)
     >>> torch.dist(x, y, 1)
-    tensor(2.6537)
+    tensor(6.5824)
 """.format(**common_args))
 
 add_docstr(torch.div, r"""
@@ -3386,7 +3332,6 @@ Examples::
     >>> x = torch.tensor([ 0.3810,  1.2774, -0.2972, -0.3719,  0.4637])
     >>> torch.div(x, 0.5)
     tensor([ 0.7620,  2.5548, -0.5944, -0.7438,  0.9274])
-
     >>> a = torch.tensor([[-0.3711, -1.9353, -0.4605, -0.2917],
     ...                   [ 0.1815, -1.0111,  0.9805, -1.5923],
     ...                   [ 0.1062,  1.4581,  0.7759, -1.2344],
@@ -3397,13 +3342,11 @@ Examples::
             [ 0.2260, -3.4509, -1.2086,  6.8990],
             [ 0.1322,  4.9764, -0.9564,  5.3484],
             [-0.2278, -0.1068, -1.4678,  6.3938]])
-
     >>> torch.div(a, b, rounding_mode='trunc')
     tensor([[-0., -6.,  0.,  1.],
             [ 0., -3., -1.,  6.],
             [ 0.,  4., -0.,  5.],
             [-0., -0., -1.,  6.]])
-
     >>> torch.div(a, b, rounding_mode='floor')
     tensor([[-1., -7.,  0.,  1.],
             [ 0., -4., -2.,  6.],
@@ -3469,9 +3412,9 @@ Example::
     >>> a = torch.tensor((1 +2j, 3 - 1j))
     >>> b = torch.tensor((2 +1j, 4 - 0j))
     >>> torch.vdot(a, b)
-    tensor([16.+1.j])
+    tensor(16.+1.j)
     >>> torch.vdot(b, a)
-    tensor([16.-1.j])
+    tensor(16.-1.j)
 """.format(**common_args))
 
 add_docstr(torch.eig,
@@ -3543,7 +3486,7 @@ Example::
             [3., 0.]], dtype=torch.float64)
     >>> v
     tensor([], dtype=torch.float64)
-
+    
     Compute also the eigenvectors:
 
     >>> e, v = torch.eig(a, eigenvectors=True)
@@ -3555,7 +3498,6 @@ Example::
     tensor([[1., 0., 0.],
             [0., 1., 0.],
             [0., 0., 1.]], dtype=torch.float64)
-
 """)
 
 add_docstr(torch.eq, r"""
@@ -3580,7 +3522,7 @@ Example::
 
     >>> torch.eq(torch.tensor([[1, 2], [3, 4]]), torch.tensor([[1, 1], [4, 4]]))
     tensor([[ True, False],
-            [False, True]])
+            [False,  True]])
 """.format(**common_args))
 
 add_docstr(torch.equal,
@@ -3635,7 +3577,7 @@ Keyword args:
 Example::
 
     >>> torch.exp(torch.tensor([0, math.log(2.)]))
-    tensor([ 1.,  2.])
+    tensor([1., 2.])
 """.format(**common_args))
 
 add_docstr(torch.exp2,
@@ -3675,9 +3617,9 @@ Returns:
 Example::
 
     >>> torch.eye(3)
-    tensor([[ 1.,  0.,  0.],
-            [ 0.,  1.,  0.],
-            [ 0.,  0.,  1.]])
+    tensor([[1., 0., 0.],
+            [0., 1., 0.],
+            [0., 0., 1.]])
 """.format(**factory_common_args))
 
 add_docstr(torch.floor,
@@ -3700,9 +3642,9 @@ Example::
 
     >>> a = torch.randn(4)
     >>> a
-    tensor([-0.8166,  1.5308, -0.2530, -0.2091])
+    tensor([ 1.5410, -0.2934, -2.1788,  0.5684])
     >>> torch.floor(a)
-    tensor([-1.,  1., -1., -1.])
+    tensor([ 1., -1., -3.,  0.])
 """.format(**common_args))
 
 add_docstr(torch.floor_divide, r"""
@@ -3723,7 +3665,6 @@ quotient towards zero. Equivalently, it truncates the quotient(s):
     \text{{out}}_i = \text{trunc} \left( \frac{{\text{{input}}_i}}{{\text{{other}}_i}} \right)
 
 """ + r"""
-
 Supports broadcasting to a common shape, type promotion, and integer and float inputs.
 
 Args:
@@ -3738,9 +3679,9 @@ Example::
     >>> a = torch.tensor([4.0, 3.0])
     >>> b = torch.tensor([2.0, 2.0])
     >>> torch.floor_divide(a, b)
-    tensor([2.0, 1.0])
+    tensor([2., 1.])
     >>> torch.floor_divide(a, 1.4)
-    tensor([2.0, 2.0])
+    tensor([2., 2.])
 """.format(**common_args))
 
 add_docstr(torch.fmod,
@@ -3756,6 +3697,11 @@ This function may be defined in terms of :func:`torch.div` as
 .. code:: python
 
     torch.fmod(a, b) == a - a.div(b, rounding_mode="trunc") * b
+
+.. seealso::
+
+    :func:`torch.remainder` which implements Python's modulus operator.
+    This one is defined using division rounding down the result.
 
 Supports :ref:`broadcasting to a common shape <broadcasting-semantics>`,
 :ref:`type promotion <type-promotion-doc>`, and integer and float inputs.
@@ -3789,7 +3735,6 @@ Example::
     tensor([-1., -0., -1.,  1.,  0.,  1.])
     >>> torch.fmod(torch.tensor([1, 2, 3, 4, 5]), -1.5)
     tensor([1.0000, 0.5000, 0.0000, 1.0000, 0.5000])
-
 """.format(**common_args))
 
 add_docstr(torch.frac,
@@ -3860,7 +3805,7 @@ Example::
     >>> a = numpy.array([1, 2, 3])
     >>> t = torch.from_numpy(a)
     >>> t
-    tensor([ 1,  2,  3])
+    tensor([1, 2, 3])
     >>> t[0] = -1
     >>> a
     array([-1,  2,  3])
@@ -3924,10 +3869,10 @@ Example::
     >>> a = array.array('i', [1, 2, 3])
     >>> t = torch.frombuffer(a, dtype=torch.int32)
     >>> t
-    tensor([ 1,  2,  3])
+    tensor([1, 2, 3], dtype=torch.int32)
     >>> t[0] = -1
     >>> a
-    array([-1,  2,  3])
+    array('i', [-1, 2, 3])
 
     >>> # Interprets the signed char bytes as 32-bit integers.
     >>> # Each 4 signed char elements will be interpreted as
@@ -4002,10 +3947,9 @@ Example::
 
     >>> t = torch.tensor([[1, 2], [3, 4]])
     >>> torch.gather(t, 1, torch.tensor([[0, 0], [1, 0]]))
-    tensor([[ 1,  1],
-            [ 4,  3]])
+    tensor([[1, 1],
+            [4, 3]])
 """)
-
 
 add_docstr(torch.gcd,
            r"""
@@ -4058,7 +4002,8 @@ Returns:
 Example::
 
     >>> torch.ge(torch.tensor([[1, 2], [3, 4]]), torch.tensor([[1, 1], [4, 4]]))
-    tensor([[True, True], [False, True]])
+    tensor([[ True,  True],
+            [False,  True]])
 """.format(**common_args))
 
 add_docstr(torch.greater_equal, r"""
@@ -4137,7 +4082,7 @@ Examples::
     >>> coordinates = (torch.tensor([-2., -1., 1., 4.]),)
     >>> values = torch.tensor([4., 1., 1., 16.], )
     >>> torch.gradient(values, spacing = coordinates)
-    (tensor([-3., -2., 2., 5.]),)
+    (tensor([-3., -2.,  2.,  5.]),)
 
     >>> # Estimates the gradient of the R^2 -> R function whose samples are
     >>> # described by the tensor t. Implicit coordinates are [0, 1] for the outermost
@@ -4146,9 +4091,8 @@ Examples::
     >>> t = torch.tensor([[1, 2, 4, 8], [10, 20, 40, 80]])
     >>> torch.gradient(t)
     (tensor([[ 9., 18., 36., 72.],
-             [ 9., 18., 36., 72.]]),
-     tensor([[ 1.0000, 1.5000, 3.0000, 4.0000],
-             [10.0000, 15.0000, 30.0000, 40.0000]]))
+            [ 9., 18., 36., 72.]]), tensor([[ 1.0000,  1.5000,  3.0000,  4.0000],
+            [10.0000, 15.0000, 30.0000, 40.0000]]))
 
     >>> # A scalar value for spacing modifies the relationship between tensor indices
     >>> # and input coordinates by multiplying the indices to find the
@@ -4156,17 +4100,15 @@ Examples::
     >>> # 0, 1, 2, 3 translate to coordinates of [0, 2, 4, 6], and the indices of
     >>> # the outermost dimension 0, 1 translate to coordinates of [0, 2].
     >>> torch.gradient(t, spacing = 2.0) # dim = None (implicitly [0, 1])
-    (tensor([[ 4.5000, 9.0000, 18.0000, 36.0000],
-              [ 4.5000, 9.0000, 18.0000, 36.0000]]),
-     tensor([[ 0.5000, 0.7500, 1.5000, 2.0000],
-              [ 5.0000, 7.5000, 15.0000, 20.0000]]))
+    (tensor([[ 4.5000,  9.0000, 18.0000, 36.0000],
+            [ 4.5000,  9.0000, 18.0000, 36.0000]]), tensor([[ 0.5000,  0.7500,  1.5000,  2.0000],
+            [ 5.0000,  7.5000, 15.0000, 20.0000]]))
     >>> # doubling the spacing between samples halves the estimated partial gradients.
 
-    >>>
     >>> # Estimates only the partial derivative for dimension 1
     >>> torch.gradient(t, dim = 1) # spacing = None (implicitly 1.)
-    (tensor([[ 1.0000, 1.5000, 3.0000, 4.0000],
-             [10.0000, 15.0000, 30.0000, 40.0000]]),)
+    (tensor([[ 1.0000,  1.5000,  3.0000,  4.0000],
+            [10.0000, 15.0000, 30.0000, 40.0000]]),)
 
     >>> # When spacing is a list of scalars, the relationship between the tensor
     >>> # indices and input coordinates changes based on dimension.
@@ -4174,20 +4116,17 @@ Examples::
     >>> # to coordinates of [0, 3, 6, 9], and the indices of the outermost dimension
     >>> # 0, 1 translate to coordinates of [0, 2].
     >>> torch.gradient(t, spacing = [3., 2.])
-    (tensor([[ 4.5000, 9.0000, 18.0000, 36.0000],
-             [ 4.5000, 9.0000, 18.0000, 36.0000]]),
-     tensor([[ 0.3333, 0.5000, 1.0000, 1.3333],
-             [ 3.3333, 5.0000, 10.0000, 13.3333]]))
+    (tensor([[ 3.,  6., 12., 24.],
+            [ 3.,  6., 12., 24.]]), tensor([[ 0.5000,  0.7500,  1.5000,  2.0000],
+            [ 5.0000,  7.5000, 15.0000, 20.0000]]))
 
     >>> # The following example is a replication of the previous one with explicit
     >>> # coordinates.
     >>> coords = (torch.tensor([0, 2]), torch.tensor([0, 3, 6, 9]))
     >>> torch.gradient(t, spacing = coords)
-    (tensor([[ 4.5000, 9.0000, 18.0000, 36.0000],
-             [ 4.5000, 9.0000, 18.0000, 36.0000]]),
-     tensor([[ 0.3333, 0.5000, 1.0000, 1.3333],
-             [ 3.3333, 5.0000, 10.0000, 13.3333]]))
-
+    (tensor([[ 4.5000,  9.0000, 18.0000, 36.0000],
+            [ 4.5000,  9.0000, 18.0000, 36.0000]]), tensor([[ 0.3333,  0.5000,  1.0000,  1.3333],
+            [ 3.3333,  5.0000, 10.0000, 13.3333]]))
 """)
 
 add_docstr(torch.geqrf,
@@ -4253,33 +4192,29 @@ Example::
     >>> torch.inner(torch.tensor([1, 2, 3]), torch.tensor([0, 2, 1]))
     tensor(7)
 
-    # Multidimensional input tensors
     >>> a = torch.randn(2, 3)
     >>> a
-    tensor([[0.8173, 1.0874, 1.1784],
-            [0.3279, 0.1234, 2.7894]])
+    tensor([[ 1.5410, -0.2934, -2.1788],
+            [ 0.5684, -1.0845, -1.3986]])
     >>> b = torch.randn(2, 4, 3)
     >>> b
-    tensor([[[-0.4682, -0.7159,  0.1506],
-            [ 0.4034, -0.3657,  1.0387],
-            [ 0.9892, -0.6684,  0.1774],
-            [ 0.9482,  1.3261,  0.3917]],
-
-            [[ 0.4537,  0.7493,  1.1724],
-            [ 0.2291,  0.5749, -0.2267],
-            [-0.7920,  0.3607, -0.3701],
-            [ 1.3666, -0.5850, -1.7242]]])
+    tensor([[[-0.0885,  0.5239, -0.6659],
+             [ 0.8504, -1.3527, -1.6959],
+             [ 0.5667,  0.7935,  0.4397],
+             [ 0.1124,  0.6408,  0.4412]],
+            [[-0.2159, -0.7425,  0.5627],
+             [ 0.2596,  0.5229,  2.3022],
+             [-1.4689, -1.5867,  1.2032],
+             [ 0.0845, -1.2001, -0.0048]]])
     >>> torch.inner(a, b)
-    tensor([[[-0.9837,  1.1560,  0.2907,  2.6785],
-            [ 2.5671,  0.5452, -0.6912, -1.5509]],
+    tensor([[[ 1.1606,  5.4024, -0.3176, -0.9760],
+             [-1.3408, -4.7694, -4.4196,  0.4929]],
+            [[ 0.3128,  4.3223, -1.1534, -1.2481],
+             [-0.1044, -3.6393, -0.7970,  1.3563]]])
 
-            [[ 0.1782,  2.9843,  0.7366,  1.5672],
-            [ 3.5115, -0.4864, -1.2476, -4.4337]]])
-
-    # Scalar input
     >>> torch.inner(a, torch.tensor(2))
-    tensor([[1.6347, 2.1748, 2.3567],
-            [0.6558, 0.2469, 5.5787]])
+    tensor([[ 3.0820, -0.5869, -4.3576],
+            [ 1.1369, -2.1690, -2.7972]])
 """)
 
 add_docstr(torch.outer, r"""
@@ -4303,10 +4238,10 @@ Example::
     >>> v1 = torch.arange(1., 5.)
     >>> v2 = torch.arange(1., 4.)
     >>> torch.outer(v1, v2)
-    tensor([[  1.,   2.,   3.],
-            [  2.,   4.,   6.],
-            [  3.,   6.,   9.],
-            [  4.,   8.,  12.]])
+    tensor([[ 1.,  2.,  3.],
+            [ 2.,  4.,  6.],
+            [ 3.,  6.,  9.],
+            [ 4.,  8., 12.]])
 """)
 
 add_docstr(torch.ger,
@@ -4378,17 +4313,14 @@ Example::
     ...                   [9.81, -4.09, -4.57, -8.61,  8.99]]).t()
     >>> X, LU = torch.solve(B, A)
     >>> torch.dist(B, torch.mm(A, X))
-    tensor(1.00000e-06 *
-           7.0977)
+    tensor(7.0977e-06)
 
     >>> # Batched solver example
     >>> A = torch.randn(2, 3, 1, 4, 4)
     >>> B = torch.randn(2, 3, 1, 4, 6)
     >>> X, LU = torch.solve(B, A)
     >>> torch.dist(B, A.matmul(X))
-    tensor(1.00000e-06 *
-       3.6386)
-
+    tensor(2.5960e-06)
 """)
 
 add_docstr(torch.get_default_dtype,
@@ -4430,7 +4362,6 @@ gt(input, other, *, out=None) -> Tensor
 
 Computes :math:`\text{input} > \text{other}` element-wise.
 """ + r"""
-
 The second argument can be a number or a tensor whose shape is
 :ref:`broadcastable <broadcasting-semantics>` with the first argument.
 
@@ -4447,7 +4378,8 @@ Returns:
 Example::
 
     >>> torch.gt(torch.tensor([[1, 2], [3, 4]]), torch.tensor([[1, 1], [4, 4]]))
-    tensor([[False, True], [False, False]])
+    tensor([[False,  True],
+            [False, False]])
 """.format(**common_args))
 
 add_docstr(torch.greater, r"""
@@ -4483,7 +4415,7 @@ Returns:
 Example::
 
     >>> torch.histc(torch.tensor([1., 2, 1]), bins=4, min=0, max=3)
-    tensor([ 0.,  2.,  1.,  0.])
+    tensor([0., 2., 1., 0.])
 """.format(**common_args))
 
 add_docstr(torch.histogram,
@@ -4524,10 +4456,14 @@ Returns:
 Example::
 
     >>> torch.histogram(torch.tensor([1., 2, 1]), bins=4, range=(0., 3.), weight=torch.tensor([1., 2., 4.]))
-    (tensor([ 0.,  5.,  2.,  0.]), tensor([0., 0.75, 1.5, 2.25, 3.]))
+    torch.return_types.histogram(
+    hist=tensor([0., 5., 2., 0.]),
+    bin_edges=tensor([0.0000, 0.7500, 1.5000, 2.2500, 3.0000]))
     >>> torch.histogram(torch.tensor([1., 2, 1]), bins=4, range=(0., 3.), weight=torch.tensor([1., 2., 4.]), density=True)
-    (tensor([ 0.,  0.9524,  0.3810,  0.]), tensor([0., 0.75, 1.5, 2.25, 3.]))
-""".format(**common_args))
+    torch.return_types.histogram(
+    hist=tensor([0.0000, 0.9524, 0.3810, 0.0000]),
+    bin_edges=tensor([0.0000, 0.7500, 1.5000, 2.2500, 3.0000]))"""
+           .format(**common_args))
 
 add_docstr(torch.hypot,
            r"""
@@ -4550,7 +4486,7 @@ Keyword args:
 
 Example::
 
-    >>> a = torch.hypot(torch.tensor([4.0]), torch.tensor([3.0, 4.0, 5.0]))
+    >>> torch.hypot(torch.tensor([4.0]), torch.tensor([3.0, 4.0, 5.0]))
     tensor([5.0000, 5.6569, 6.4031])
 
 """.format(**common_args))
@@ -4604,17 +4540,17 @@ Example::
 
     >>> x = torch.randn(3, 4)
     >>> x
-    tensor([[ 0.1427,  0.0231, -0.5414, -1.0009],
-            [-0.4664,  0.2647, -0.1228, -1.1068],
-            [-1.1734, -0.6571,  0.7230, -0.6004]])
+    tensor([[ 1.5410, -0.2934, -2.1788,  0.5684],
+            [-1.0845, -1.3986,  0.4033,  0.8380],
+            [-0.7193, -0.4033, -0.5966,  0.1820]])
     >>> indices = torch.tensor([0, 2])
     >>> torch.index_select(x, 0, indices)
-    tensor([[ 0.1427,  0.0231, -0.5414, -1.0009],
-            [-1.1734, -0.6571,  0.7230, -0.6004]])
+    tensor([[ 1.5410, -0.2934, -2.1788,  0.5684],
+            [-0.7193, -0.4033, -0.5966,  0.1820]])
     >>> torch.index_select(x, 1, indices)
-    tensor([[ 0.1427, -0.5414],
-            [-0.4664, -0.1228],
-            [-1.1734,  0.7230]])
+    tensor([[ 1.5410, -2.1788],
+            [-1.0845,  0.4033],
+            [-0.7193, -0.5966]])
 """.format(**common_args))
 
 add_docstr(torch.inverse, r"""
@@ -4671,7 +4607,7 @@ Returns:
 Example::
 
     >>> torch.isinf(torch.tensor([1, float('inf'), 2, float('-inf'), float('nan')]))
-    tensor([False,  True,  False,  True,  False])
+    tensor([False,  True, False,  True, False])
 """.format(**common_args))
 
 add_docstr(torch.isposinf,
@@ -4710,7 +4646,8 @@ Example::
     tensor([ True, False, False])
 """.format(**common_args))
 
-add_docstr(torch.isclose, r"""
+add_docstr(torch.isclose,
+           r"""
 isclose(input, other, rtol=1e-05, atol=1e-08, equal_nan=False) -> Tensor
 
 Returns a new tensor with boolean elements representing if each element of
@@ -4741,7 +4678,8 @@ Examples::
     tensor([True, True])
 """)
 
-add_docstr(torch.isfinite, r"""
+add_docstr(torch.isfinite,
+           r"""
 isfinite(input) -> Tensor
 
 Returns a new tensor with boolean elements representing if each element is `finite` or not.
@@ -4758,7 +4696,7 @@ Returns:
 Example::
 
     >>> torch.isfinite(torch.tensor([1, float('inf'), 2, float('-inf'), float('nan')]))
-    tensor([True,  False,  True,  False,  False])
+    tensor([ True, False,  True, False, False])
 """.format(**common_args))
 
 add_docstr(torch.isnan, r"""
@@ -4777,7 +4715,7 @@ Returns:
 Example::
 
     >>> torch.isnan(torch.tensor([1, float('nan'), 2]))
-    tensor([False, True, False])
+    tensor([False,  True, False])
 """.format(**common_args))
 
 add_docstr(torch.isreal, r"""
@@ -4795,7 +4733,7 @@ Returns:
 Example::
 
     >>> torch.isreal(torch.tensor([1, 1+1j, 2+0j]))
-    tensor([True, False, True])
+    tensor([ True, False,  True])
 """.format(**common_args))
 
 add_docstr(torch.is_floating_point, r"""
@@ -4881,11 +4819,11 @@ Examples::
     >>> torch.is_nonzero(torch.tensor([1, 3, 5]))
     Traceback (most recent call last):
     ...
-    RuntimeError: bool value of Tensor with more than one value is ambiguous
+    RuntimeError: Boolean value of Tensor with more than one value is ambiguous
     >>> torch.is_nonzero(torch.tensor([]))
     Traceback (most recent call last):
     ...
-    RuntimeError: bool value of Tensor with no values is ambiguous
+    RuntimeError: Boolean value of Tensor with no values is ambiguous
 """.format(**common_args))
 
 add_docstr(torch.kron,
@@ -4981,17 +4919,20 @@ Example::
 
     >>> x = torch.arange(1., 6.)
     >>> x
-    tensor([ 1.,  2.,  3.,  4.,  5.])
+    tensor([1., 2., 3., 4., 5.])
     >>> torch.kthvalue(x, 4)
-    torch.return_types.kthvalue(values=tensor(4.), indices=tensor(3))
-
+    torch.return_types.kthvalue(
+    values=tensor(4.),
+    indices=tensor(3))
     >>> x=torch.arange(1.,7.).resize_(2,3)
     >>> x
-    tensor([[ 1.,  2.,  3.],
-            [ 4.,  5.,  6.]])
+    tensor([[1., 2., 3.],
+            [4., 5., 6.]])
     >>> torch.kthvalue(x, 2, 0, True)
-    torch.return_types.kthvalue(values=tensor([[4., 5., 6.]]), indices=tensor([[1, 1, 1]]))
-""".format(**single_dim_common))
+    torch.return_types.kthvalue(
+    values=tensor([[4., 5., 6.]]),
+    indices=tensor([[1, 1, 1]]))"""
+           .format(**single_dim_common))
 
 add_docstr(torch.lcm,
            r"""
@@ -5057,7 +4998,6 @@ le(input, other, *, out=None) -> Tensor
 
 Computes :math:`\text{input} \leq \text{other}` element-wise.
 """ + r"""
-
 The second argument can be a number or a tensor whose shape is
 :ref:`broadcastable <broadcasting-semantics>` with the first argument.
 
@@ -5075,7 +5015,8 @@ Returns:
 Example::
 
     >>> torch.le(torch.tensor([[1, 2], [3, 4]]), torch.tensor([[1, 1], [4, 4]]))
-    tensor([[True, False], [True, True]])
+    tensor([[ True, False],
+            [ True,  True]])
 """.format(**common_args))
 
 add_docstr(torch.less_equal, r"""
@@ -5111,13 +5052,13 @@ Example::
     >>> start = torch.arange(1., 5.)
     >>> end = torch.empty(4).fill_(10)
     >>> start
-    tensor([ 1.,  2.,  3.,  4.])
+    tensor([1., 2., 3., 4.])
     >>> end
-    tensor([ 10.,  10.,  10.,  10.])
+    tensor([10., 10., 10., 10.])
     >>> torch.lerp(start, end, 0.5)
-    tensor([ 5.5000,  6.0000,  6.5000,  7.0000])
+    tensor([5.5000, 6.0000, 6.5000, 7.0000])
     >>> torch.lerp(start, end, torch.full_like(start, 0.5))
-    tensor([ 5.5000,  6.0000,  6.5000,  7.0000])
+    tensor([5.5000, 6.0000, 6.5000, 7.0000])
 """.format(**common_args))
 
 add_docstr(torch.lgamma,
@@ -5128,7 +5069,7 @@ Computes the natural logarithm of the absolute value of the gamma function on :a
 
 .. math::
     \text{out}_{i} = \ln \Gamma(|\text{input}_{i}|)
-""" + """
+""" + r"""
 Args:
     {input}
 
@@ -5154,7 +5095,7 @@ spaced from :attr:`start` to :attr:`end`, inclusive. That is, the value are:
     \ldots,
     \text{start} + (\text{steps} - 2) * \frac{\text{end} - \text{start}}{\text{steps} - 1},
     \text{end})
-""" + """
+""" + r"""
 
 From PyTorch 1.11 linspace requires the steps argument. Use steps=100 to restore the previous behavior.
 
@@ -5173,11 +5114,10 @@ Keyword arguments:
     {device}
     {requires_grad}
 
-
 Example::
 
     >>> torch.linspace(3, 10, steps=5)
-    tensor([  3.0000,   4.7500,   6.5000,   8.2500,  10.0000])
+    tensor([ 3.0000,  4.7500,  6.5000,  8.2500, 10.0000])
     >>> torch.linspace(-10, 10, steps=5)
     tensor([-10.,  -5.,   0.,   5.,  10.])
     >>> torch.linspace(start=-10, end=10, steps=5)
@@ -5196,7 +5136,6 @@ of :attr:`input`.
 .. math::
     y_{i} = \log_{e} (x_{i})
 """ + r"""
-
 Args:
     {input}
 
@@ -5207,9 +5146,9 @@ Example::
 
     >>> a = torch.randn(5)
     >>> a
-    tensor([-0.7168, -0.5471, -0.8933, -1.4428, -0.1190])
+    tensor([ 1.5410, -0.2934, -2.1788,  0.5684, -1.0845])
     >>> torch.log(a)
-    tensor([ nan,  nan,  nan,  nan,  nan])
+    tensor([ 0.4324,     nan,     nan, -0.5649,     nan])
 """.format(**common_args))
 
 add_docstr(torch.log10,
@@ -5222,7 +5161,6 @@ of :attr:`input`.
 .. math::
     y_{i} = \log_{10} (x_{i})
 """ + r"""
-
 Args:
     {input}
 
@@ -5233,12 +5171,10 @@ Example::
 
     >>> a = torch.rand(5)
     >>> a
-    tensor([ 0.5224,  0.9354,  0.7257,  0.1301,  0.2251])
-
+    tensor([0.4963, 0.7682, 0.0885, 0.1320, 0.3074])
 
     >>> torch.log10(a)
-    tensor([-0.2820, -0.0290, -0.1392, -0.8857, -0.6476])
-
+    tensor([-0.3043, -0.1145, -1.0532, -0.8793, -0.5123])
 """.format(**common_args))
 
 add_docstr(torch.log1p,
@@ -5263,9 +5199,9 @@ Example::
 
     >>> a = torch.randn(5)
     >>> a
-    tensor([-1.0090, -0.9923,  1.0249, -0.5372,  0.2492])
+    tensor([ 1.5410, -0.2934, -2.1788,  0.5684, -1.0845])
     >>> torch.log1p(a)
-    tensor([    nan, -4.8653,  0.7055, -0.7705,  0.2225])
+    tensor([ 0.9326, -0.3473,     nan,  0.4501,     nan])
 """.format(**common_args))
 
 add_docstr(torch.log2,
@@ -5278,7 +5214,6 @@ of :attr:`input`.
 .. math::
     y_{i} = \log_{2} (x_{i})
 """ + r"""
-
 Args:
     {input}
 
@@ -5289,12 +5224,10 @@ Example::
 
     >>> a = torch.rand(5)
     >>> a
-    tensor([ 0.8419,  0.8003,  0.9971,  0.5287,  0.0490])
-
+    tensor([0.4963, 0.7682, 0.0885, 0.1320, 0.3074])
 
     >>> torch.log2(a)
-    tensor([-0.2483, -0.3213, -0.0042, -0.9196, -4.3504])
-
+    tensor([-1.0108, -0.3804, -3.4985, -2.9211, -1.7017])
 """.format(**common_args))
 
 add_docstr(torch.logaddexp,
@@ -5486,7 +5419,6 @@ with base :attr:`base`. That is, the values are:
     \text{base}^{\text{end}})
 """ + """
 
-
 From PyTorch 1.11 logspace requires the steps argument. Use steps=100 to restore the previous behavior.
 
 Args:
@@ -5508,13 +5440,13 @@ Keyword arguments:
 Example::
 
     >>> torch.logspace(start=-10, end=10, steps=5)
-    tensor([ 1.0000e-10,  1.0000e-05,  1.0000e+00,  1.0000e+05,  1.0000e+10])
+    tensor([1.0000e-10, 1.0000e-05, 1.0000e+00, 1.0000e+05, 1.0000e+10])
     >>> torch.logspace(start=0.1, end=1.0, steps=5)
-    tensor([  1.2589,   2.1135,   3.5481,   5.9566,  10.0000])
+    tensor([ 1.2589,  2.1135,  3.5481,  5.9566, 10.0000])
     >>> torch.logspace(start=0.1, end=1.0, steps=1)
     tensor([1.2589])
     >>> torch.logspace(start=2, end=2, steps=1, base=2)
-    tensor([4.0])
+    tensor([4.])
 """.format(**factory_common_args))
 
 add_docstr(torch.logsumexp,
@@ -5544,9 +5476,9 @@ Example::
 
     >>> a = torch.randn(3, 3)
     >>> torch.logsumexp(a, 1)
-    tensor([1.4907, 1.0593, 1.5696])
+    tensor([1.7098, 0.8546, 1.4576])
     >>> torch.dist(torch.logsumexp(a, 1), torch.log(torch.sum(torch.exp(a), 1)))
-    tensor(1.6859e-07)
+    tensor(0.)
 """.format(**multi_dim_common))
 
 add_docstr(torch.lstsq,
@@ -5630,11 +5562,11 @@ Example::
     ...                   [ 18, 16]])
     >>> X, _ = torch.lstsq(B, A)
     >>> X
-    tensor([[  2.0000,   1.0000],
-            [  1.0000,   1.0000],
-            [  1.0000,   2.0000],
-            [ 10.9635,   4.8501],
-            [  8.9332,   5.2418]])
+    tensor([[ 2.0000,  1.0000],
+            [ 1.0000,  1.0000],
+            [ 1.0000,  2.0000],
+            [10.9635,  4.8501],
+            [ 8.9332,  5.2418]])
 """)
 
 add_docstr(torch.lt, r"""
@@ -5642,7 +5574,6 @@ lt(input, other, *, out=None) -> Tensor
 
 Computes :math:`\text{input} < \text{other}` element-wise.
 """ + r"""
-
 The second argument can be a number or a tensor whose shape is
 :ref:`broadcastable <broadcasting-semantics>` with the first argument.
 
@@ -5659,7 +5590,8 @@ Returns:
 Example::
 
     >>> torch.lt(torch.tensor([[1, 2], [3, 4]]), torch.tensor([[1, 1], [4, 4]]))
-    tensor([[False, False], [True, False]])
+    tensor([[False, False],
+            [ True, False]])
 """.format(**common_args))
 
 add_docstr(torch.lu_unpack, r"""
@@ -5689,7 +5621,6 @@ Examples::
     >>> A = torch.randn(2, 3, 3)
     >>> A_LU, pivots = A.lu()
     >>> P, A_L, A_U = torch.lu_unpack(A_LU, pivots)
-    >>>
     >>> # can recover A from factorization
     >>> A_ = torch.bmm(P, torch.bmm(A_L, A_U))
 
@@ -5701,27 +5632,24 @@ Examples::
     tensor([[[1., 0., 0.],
              [0., 1., 0.],
              [0., 0., 1.]],
-
             [[0., 0., 1.],
-             [0., 1., 0.],
-             [1., 0., 0.]]])
+             [1., 0., 0.],
+             [0., 1., 0.]]])
     >>> A_L
     tensor([[[ 1.0000,  0.0000],
-             [ 0.4763,  1.0000],
-             [ 0.3683,  0.1135]],
-
+             [ 0.3655,  1.0000],
+             [-0.5240, -0.2629]],
             [[ 1.0000,  0.0000],
-             [ 0.2957,  1.0000],
-             [-0.9668, -0.3335]]])
+             [ 0.5519,  1.0000],
+             [ 0.5696, -0.1327]]])
     >>> A_U
-    tensor([[[ 2.1962,  1.0881],
-             [ 0.0000, -0.8681]],
-
-            [[-1.0947,  0.3736],
-             [ 0.0000,  0.5718]]])
+    tensor([[[ 0.4087,  1.4214],
+             [ 0.0000, -1.1904]],
+            [[-1.2427, -0.4762],
+             [ 0.0000, -1.2423]]])
     >>> A_ = torch.bmm(P, torch.bmm(A_L, A_U))
     >>> torch.norm(A_ - A)
-    tensor(2.9802e-08)
+    tensor(8.4294e-08)
 """.format(**common_args))
 
 add_docstr(torch.less, r"""
@@ -5759,8 +5687,7 @@ Example::
     >>> A_LU = torch.lu(A)
     >>> x = torch.lu_solve(b, *A_LU)
     >>> torch.norm(torch.bmm(A, x) - b)
-    tensor(1.00000e-07 *
-           2.8312)
+    tensor(6.4300e-07)
 """.format(**common_args))
 
 add_docstr(torch.masked_select,
@@ -5787,16 +5714,16 @@ Example::
 
     >>> x = torch.randn(3, 4)
     >>> x
-    tensor([[ 0.3552, -2.3825, -0.8297,  0.3477],
-            [-1.2035,  1.2252,  0.5002,  0.6248],
-            [ 0.1307, -2.0608,  0.1244,  2.0139]])
+    tensor([[ 1.5410, -0.2934, -2.1788,  0.5684],
+            [-1.0845, -1.3986,  0.4033,  0.8380],
+            [-0.7193, -0.4033, -0.5966,  0.1820]])
     >>> mask = x.ge(0.5)
     >>> mask
-    tensor([[False, False, False, False],
-            [False, True, True, True],
-            [False, False, False, True]])
+    tensor([[ True, False, False,  True],
+            [False, False, False,  True],
+            [False, False, False, False]])
     >>> torch.masked_select(x, mask)
-    tensor([ 1.2252,  0.5002,  0.6248,  2.0139])
+    tensor([1.5410, 0.5684, 0.8380])
 """.format(**common_args))
 
 add_docstr(torch.matrix_rank, r"""
@@ -5867,9 +5794,9 @@ Example::
 
     >>> a = torch.randn(1, 3)
     >>> a
-    tensor([[ 0.6763,  0.7445, -2.2369]])
+    tensor([[ 1.5410, -0.2934, -2.1788]])
     >>> torch.max(a)
-    tensor(0.7445)
+    tensor(1.5410)
 
 .. function:: max(input, dim, keepdim=False, *, out=None) -> (Tensor, LongTensor)
    :noindex:
@@ -5899,18 +5826,19 @@ Example::
 
     >>> a = torch.randn(4, 4)
     >>> a
-    tensor([[-1.2360, -0.2942, -0.1222,  0.8475],
-            [ 1.1949, -1.1127, -2.2379, -0.6702],
-            [ 1.5717, -0.9207,  0.1297, -1.8768],
-            [-0.6172,  1.0036, -0.6060, -0.2432]])
+    tensor([[-0.3561,  0.4372,  0.4913, -0.2041],
+            [-0.0885,  0.5239, -0.6659,  0.8504],
+            [-1.0438, -1.3453,  0.7854,  0.9928],
+            [-0.1932, -0.3090,  0.5026, -0.8594]])
     >>> torch.max(a, 1)
-    torch.return_types.max(values=tensor([0.8475, 1.1949, 1.5717, 1.0036]), indices=tensor([3, 0, 0, 1]))
+    torch.return_types.max(
+    values=tensor([0.4913, 0.8504, 0.9928, 0.5026]),
+    indices=tensor([2, 3, 3, 2]))
 
 .. function:: max(input, other, *, out=None) -> Tensor
    :noindex:
 
 See :func:`torch.maximum`.
-
 """.format(**single_dim_common))
 
 add_docstr(torch.maximum, r"""
@@ -5937,7 +5865,8 @@ Example::
     tensor([3, 2, 4])
 """.format(**common_args))
 
-add_docstr(torch.fmax, r"""
+add_docstr(torch.fmax,
+           r"""
 fmax(input, other, *, out=None) -> Tensor
 
 Computes the element-wise maximum of :attr:`input` and :attr:`other`.
@@ -5995,12 +5924,12 @@ Example::
 
     >>> a = torch.randn(4, 4)
     >>> a
-    tensor([[ 0.8177,  1.4878, -0.2491,  0.9130],
-            [-0.7158,  1.1775,  2.0992,  0.4817],
-            [-0.0053,  0.0164, -1.3738, -0.0507],
-            [ 1.9700,  1.1106, -1.0318, -1.0816]])
+    tensor([[-1.1258, -1.1524, -0.2506, -0.4339],
+            [ 0.8487,  0.6920, -0.3160, -2.1152],
+            [ 0.3223, -1.2633,  0.3500,  0.3081],
+            [ 0.1198,  1.2377,  1.1168, -0.2473]])
     >>> torch.amax(a, 1)
-    tensor([1.4878, 2.0992, 0.0164, 1.9700])
+    tensor([-0.2506,  0.8487,  0.3500,  1.2377])
 """.format(**multi_dim_common))
 
 add_docstr(torch.argmax,
@@ -6021,12 +5950,12 @@ Example::
 
     >>> a = torch.randn(4, 4)
     >>> a
-    tensor([[ 1.3398,  0.2663, -0.2686,  0.2450],
-            [-0.7401, -0.8805, -0.3402, -1.1936],
-            [ 0.4907, -1.3948, -1.0691, -0.3132],
-            [-1.6092,  0.5419, -0.2993,  0.3195]])
+    tensor([[-1.1258, -1.1524, -0.2506, -0.4339],
+            [ 0.8487,  0.6920, -0.3160, -2.1152],
+            [ 0.3223, -1.2633,  0.3500,  0.3081],
+            [ 0.1198,  1.2377,  1.1168, -0.2473]])
     >>> torch.argmax(a)
-    tensor(0)
+    tensor(13)
 
 .. function:: argmax(input, dim, keepdim=False) -> LongTensor
    :noindex:
@@ -6045,12 +5974,12 @@ Example::
 
     >>> a = torch.randn(4, 4)
     >>> a
-    tensor([[ 1.3398,  0.2663, -0.2686,  0.2450],
-            [-0.7401, -0.8805, -0.3402, -1.1936],
-            [ 0.4907, -1.3948, -1.0691, -0.3132],
-            [-1.6092,  0.5419, -0.2993,  0.3195]])
+    tensor([[-1.3527, -1.6959,  0.5667,  0.7935],
+            [ 0.5988, -1.5551, -0.3414,  1.8530],
+            [ 0.7502, -0.5855, -0.1734,  0.1835],
+            [ 1.3894,  1.5863,  0.9463, -0.8437]])
     >>> torch.argmax(a, dim=1)
-    tensor([ 0,  2,  0,  1])
+    tensor([3, 3, 0, 1])
 """.format(**single_dim_common))
 
 add_docstr(torch.argwhere,
@@ -6088,65 +6017,8 @@ Example::
             [1, 2]])
 """)
 
-add_docstr(torch.mean, r"""
-mean(input, *, dtype=None) -> Tensor
-
-Returns the mean value of all elements in the :attr:`input` tensor.
-
-Args:
-    {input}
-
-Keyword args:
-    {dtype}
-
-Example::
-
-    >>> a = torch.randn(1, 3)
-    >>> a
-    tensor([[ 0.2294, -0.5481,  1.3288]])
-    >>> torch.mean(a)
-    tensor(0.3367)
-
-.. function:: mean(input, dim, keepdim=False, *, dtype=None, out=None) -> Tensor
-   :noindex:
-
-Returns the mean value of each row of the :attr:`input` tensor in the given
-dimension :attr:`dim`. If :attr:`dim` is a list of dimensions,
-reduce over all of them.
-
-{keepdim_details}
-
-Args:
-    {input}
-    {dim}
-    {keepdim}
-
-Keyword args:
-    {dtype}
-    {out}
-
-.. seealso::
-
-    :func:`torch.nanmean` computes the mean value of `non-NaN` elements.
-
-Example::
-
-    >>> a = torch.randn(4, 4)
-    >>> a
-    tensor([[-0.3841,  0.6320,  0.4254, -0.7384],
-            [-0.9644,  1.0131, -0.6549, -1.4279],
-            [-0.2951, -1.3350, -0.7694,  0.5600],
-            [ 1.0842, -0.9580,  0.3623,  0.2343]])
-    >>> torch.mean(a, 1)
-    tensor([-0.0163, -0.5085, -0.4599,  0.1807])
-    >>> torch.mean(a, 1, True)
-    tensor([[-0.0163],
-            [-0.5085],
-            [-0.4599],
-            [ 0.1807]])
-""".format(**multi_dim_common))
-
-add_docstr(torch.nanmean, r"""
+add_docstr(torch.nanmean,
+           r"""
 nanmean(input, dim=None, keepdim=False, *, dtype=None, out=None) -> Tensor
 
 Computes the mean of all `non-NaN` elements along the specified dimensions.
@@ -6209,9 +6081,9 @@ Example::
 
     >>> a = torch.randn(1, 3)
     >>> a
-    tensor([[ 1.5219, -1.5212,  0.2202]])
+    tensor([[ 1.5410, -0.2934, -2.1788]])
     >>> torch.median(a)
-    tensor(0.2202)
+    tensor(-0.2934)
 
 .. function:: median(input, dim=-1, keepdim=False, *, out=None) -> (Tensor, LongTensor)
    :noindex:
@@ -6253,13 +6125,15 @@ Example::
 
     >>> a = torch.randn(4, 5)
     >>> a
-    tensor([[ 0.2505, -0.3982, -0.9948,  0.3518, -1.3131],
-            [ 0.3180, -0.6993,  1.0436,  0.0438,  0.2270],
-            [-0.2751,  0.7303,  0.2192,  0.3321,  0.2488],
-            [ 1.0778, -1.9510,  0.7048,  0.4742, -0.7125]])
+    tensor([[-0.3561,  0.4372,  0.4913, -0.2041,  0.1665],
+            [ 0.8744, -0.1435, -0.1116, -0.6136,  0.0316],
+            [-0.4927,  0.2484,  0.6181, -0.4128, -0.8411],
+            [-2.3160, -0.1023,  0.7924, -0.2897,  0.0525]])
     >>> torch.median(a, 1)
-    torch.return_types.median(values=tensor([-0.3982,  0.2270,  0.2488,  0.4742]), indices=tensor([1, 4, 4, 3]))
-""".format(**single_dim_common))
+    torch.return_types.median(
+    values=tensor([ 0.1665, -0.1116, -0.4128, -0.1023]),
+    indices=tensor([4, 2, 3, 1]))"""
+           .format(**single_dim_common))
 
 add_docstr(torch.nanmedian,
            r"""
@@ -6311,10 +6185,14 @@ Example::
     tensor([[2., 3., 1.],
             [nan, 1., nan]])
     >>> a.median(0)
-    torch.return_types.median(values=tensor([nan, 1., nan]), indices=tensor([1, 1, 1]))
+    torch.return_types.median(
+    values=tensor([nan, 1., nan]),
+    indices=tensor([1, 1, 1]))
     >>> a.nanmedian(0)
-    torch.return_types.nanmedian(values=tensor([2., 1., 1.]), indices=tensor([0, 1, 0]))
-""".format(**single_dim_common))
+    torch.return_types.nanmedian(
+    values=tensor([2., 1., 1.]),
+    indices=tensor([0, 1, 0]))"""
+           .format(**single_dim_common))
 
 add_docstr(torch.quantile, r"""
 quantile(input, q, dim=None, keepdim=False, *, interpolation='linear', out=None) -> Tensor
@@ -6385,8 +6263,9 @@ Example::
     tensor(1.)
 """.format(**single_dim_common))
 
-add_docstr(torch.nanquantile, r"""
-nanquantile(input, q, dim=None, keepdim=False, *, interpolation='linear', out=None) -> Tensor
+add_docstr(torch.nanquantile,
+           r"""
+nanquantile(input, q, dim=None, keepdim=False, *, out=None) -> Tensor
 
 This is a variant of :func:`torch.quantile` that "ignores" ``NaN`` values,
 computing the quantiles :attr:`q` as if ``NaN`` values in :attr:`input` did
@@ -6400,9 +6279,6 @@ Args:
     {keepdim}
 
 Keyword arguments:
-    interpolation (string): interpolation method to use when the desired quantile lies between two data points.
-                            Can be ``linear``, ``lower``, ``higher``, ``midpoint`` and ``nearest``.
-                            Default is ``linear``.
     {out}
 
 Example::
@@ -6438,9 +6314,9 @@ Example::
 
     >>> a = torch.randn(1, 3)
     >>> a
-    tensor([[ 0.6750,  1.0857,  1.7197]])
+    tensor([[ 1.5410, -0.2934, -2.1788]])
     >>> torch.min(a)
-    tensor(0.6750)
+    tensor(-2.1788)
 
 .. function:: min(input, dim, keepdim=False, *, out=None) -> (Tensor, LongTensor)
    :noindex:
@@ -6470,12 +6346,14 @@ Example::
 
     >>> a = torch.randn(4, 4)
     >>> a
-    tensor([[-0.6248,  1.1334, -1.1899, -0.2803],
-            [-1.4644, -0.2635, -0.3651,  0.6134],
-            [ 0.2457,  0.0384,  1.0128,  0.7015],
-            [-0.1153,  2.9849,  2.1458,  0.5788]])
+    tensor([[-0.3561,  0.4372,  0.4913, -0.2041],
+            [-0.0885,  0.5239, -0.6659,  0.8504],
+            [-1.0438, -1.3453,  0.7854,  0.9928],
+            [-0.1932, -0.3090,  0.5026, -0.8594]])
     >>> torch.min(a, 1)
-    torch.return_types.min(values=tensor([-1.1899, -1.4644,  0.0384, -0.1153]), indices=tensor([2, 0, 1, 0]))
+    torch.return_types.min(
+    values=tensor([-0.3561, -0.6659, -1.3453, -0.8594]),
+    indices=tensor([0, 2, 1, 3]))
 
 .. function:: min(input, other, *, out=None) -> Tensor
    :noindex:
@@ -6504,7 +6382,7 @@ Example::
     >>> a = torch.tensor((1, 2, -1))
     >>> b = torch.tensor((3, 0, 4))
     >>> torch.minimum(a, b)
-    tensor([1, 0, -1])
+    tensor([ 1,  0, -1])
 """.format(**common_args))
 
 add_docstr(torch.fmin, r"""
@@ -6533,7 +6411,7 @@ Example::
     >>> a = torch.tensor([2.2, float('nan'), 2.1, float('nan')])
     >>> b = torch.tensor([-9.3, 0.1, float('nan'), float('nan')])
     >>> torch.fmin(a, b)
-    tensor([-9.3000, 0.1000, 2.1000,    nan])
+    tensor([-9.3000,  0.1000,  2.1000,     nan])
 """.format(**common_args))
 
 add_docstr(torch.amin,
@@ -6565,12 +6443,12 @@ Example::
 
     >>> a = torch.randn(4, 4)
     >>> a
-    tensor([[ 0.6451, -0.4866,  0.2987, -1.3312],
-            [-0.5744,  1.2980,  1.8397, -0.2713],
-            [ 0.9128,  0.9214, -1.7268, -0.2995],
-            [ 0.9023,  0.4853,  0.9075, -1.6165]])
+    tensor([[-1.1258, -1.1524, -0.2506, -0.4339],
+            [ 0.8487,  0.6920, -0.3160, -2.1152],
+            [ 0.3223, -1.2633,  0.3500,  0.3081],
+            [ 0.1198,  1.2377,  1.1168, -0.2473]])
     >>> torch.amin(a, 1)
-    tensor([-1.3312, -0.5744, -1.7268, -1.6165])
+    tensor([-1.1524, -2.1152, -1.2633, -0.2473])
 """.format(**multi_dim_common))
 
 add_docstr(torch.aminmax, r"""
@@ -6654,19 +6532,19 @@ Example::
 
     >>> a = torch.randn(4, 4)
     >>> a
-    tensor([[ 0.1139,  0.2254, -0.1381,  0.3687],
-            [ 1.0100, -1.1975, -0.0102, -0.4732],
-            [-0.9240,  0.1207, -0.7506, -1.0213],
-            [ 1.7809, -1.2960,  0.9384,  0.1438]])
+    tensor([[-1.1258, -1.1524, -0.2506, -0.4339],
+            [ 0.8487,  0.6920, -0.3160, -2.1152],
+            [ 0.3223, -1.2633,  0.3500,  0.3081],
+            [ 0.1198,  1.2377,  1.1168, -0.2473]])
     >>> torch.argmin(a)
-    tensor(13)
+    tensor(7)
     >>> torch.argmin(a, dim=1)
-    tensor([ 2,  1,  3,  1])
+    tensor([1, 3, 1, 3])
     >>> torch.argmin(a, dim=1, keepdim=True)
-    tensor([[2],
-            [1],
+    tensor([[1],
             [3],
-            [1]])
+            [1],
+            [3]])
 """.format(**single_dim_common))
 
 add_docstr(torch.mm,
@@ -6698,8 +6576,8 @@ Example::
     >>> mat1 = torch.randn(2, 3)
     >>> mat2 = torch.randn(3, 3)
     >>> torch.mm(mat1, mat2)
-    tensor([[ 0.4851,  0.5037, -0.3633],
-            [-0.0760, -3.6705,  2.4784]])
+    tensor([[ 2.6064, -0.9315,  1.1721],
+            [ 1.8649, -0.4159,  0.8919]])
 """.format(**common_args, **tf32_notes))
 
 add_docstr(torch.hspmm,
@@ -6823,11 +6701,13 @@ Example::
 
     >>> a = torch.randint(10, (5,))
     >>> a
-    tensor([6, 5, 1, 0, 2])
+    tensor([4, 9, 3, 0, 3])
     >>> b = a + (torch.randn(50, 1) * 5).long()
     >>> torch.mode(b, 0)
-    torch.return_types.mode(values=tensor([6, 5, 1, 0, 2]), indices=tensor([2, 2, 2, 2, 2]))
-""".format(**single_dim_common))
+    torch.return_types.mode(
+    values=tensor([4, 9, 3, 0, 3]),
+    indices=tensor([44, 44, 44, 44, 44]))"""
+           .format(**single_dim_common))
 
 add_docstr(torch.mul, r"""
 mul(input, other, *, out=None) -> Tensor
@@ -6838,7 +6718,6 @@ Multiplies :attr:`input` by :attr:`other`.
 .. math::
     \text{out}_i = \text{input}_i \times \text{other}_i
 """ + r"""
-
 Supports :ref:`broadcasting to a common shape <broadcasting-semantics>`,
 :ref:`type promotion <type-promotion-doc>`, and integer, float, and complex inputs.
 
@@ -6853,24 +6732,24 @@ Examples::
 
     >>> a = torch.randn(3)
     >>> a
-    tensor([ 0.2015, -0.4255,  2.6087])
+    tensor([ 1.5410, -0.2934, -2.1788])
     >>> torch.mul(a, 100)
-    tensor([  20.1494,  -42.5491,  260.8663])
+    tensor([ 154.0996,  -29.3429, -217.8789])
 
     >>> b = torch.randn(4, 1)
     >>> b
-    tensor([[ 1.1207],
-            [-0.3137],
-            [ 0.0700],
-            [ 0.8378]])
+    tensor([[ 0.5684],
+            [-1.0845],
+            [-1.3986],
+            [ 0.4033]])
     >>> c = torch.randn(1, 4)
     >>> c
-    tensor([[ 0.5146,  0.1216, -0.5244,  2.2382]])
+    tensor([[ 0.8380, -0.7193, -0.4033, -0.5966]])
     >>> torch.mul(b, c)
-    tensor([[ 0.5767,  0.1363, -0.5877,  2.5083],
-            [-0.1614, -0.0382,  0.1645, -0.7021],
-            [ 0.0360,  0.0085, -0.0367,  0.1567],
-            [ 0.4312,  0.1019, -0.4394,  1.8753]])
+    tensor([[ 0.4764, -0.4088, -0.2293, -0.3391],
+            [-0.9089,  0.7801,  0.4374,  0.6471],
+            [-1.1721,  1.0060,  0.5641,  0.8345],
+            [ 0.3380, -0.2901, -0.1627, -0.2407]])
 """.format(**common_args))
 
 add_docstr(torch.multiply, r"""
@@ -6925,10 +6804,9 @@ Example::
     >>> torch.multinomial(weights, 2)
     tensor([1, 2])
     >>> torch.multinomial(weights, 4) # ERROR!
-    RuntimeError: invalid argument 2: invalid multinomial distribution (with replacement=False,
-    not enough non-negative category to sample) at ../aten/src/TH/generic/THTensorRandom.cpp:320
+    tensor([2, 1, 0, 3])
     >>> torch.multinomial(weights, 4, replacement=True)
-    tensor([ 2,  1,  1,  1])
+    tensor([1, 1, 1, 1])
 """.format(**common_args))
 
 add_docstr(torch.mv,
@@ -6955,7 +6833,7 @@ Example::
     >>> mat = torch.randn(2, 3)
     >>> vec = torch.randn(3)
     >>> torch.mv(mat, vec)
-    tensor([ 1.0404, -0.6361])
+    tensor([1.9428, 0.3264])
 """.format(**common_args))
 
 add_docstr(torch.mvlgamma,
@@ -6983,30 +6861,30 @@ Examples::
 
     >>> t = torch.randn(3,2,1)
     >>> t
-    tensor([[[-0.3362],
-            [-0.8437]],
+    tensor([[[ 1.5410],
+             [-0.2934]],
 
-            [[-0.9627],
-            [ 0.1727]],
+            [[-2.1788],
+             [ 0.5684]],
 
-            [[ 0.5173],
-            [-0.1398]]])
+            [[-1.0845],
+             [-1.3986]]])
     >>> torch.movedim(t, 1, 0).shape
     torch.Size([2, 3, 1])
     >>> torch.movedim(t, 1, 0)
-    tensor([[[-0.3362],
-            [-0.9627],
-            [ 0.5173]],
+    tensor([[[ 1.5410],
+             [-2.1788],
+             [-1.0845]],
 
-            [[-0.8437],
-            [ 0.1727],
-            [-0.1398]]])
+            [[-0.2934],
+             [ 0.5684],
+             [-1.3986]]])
     >>> torch.movedim(t, (1, 2), (0, 1)).shape
     torch.Size([2, 1, 3])
     >>> torch.movedim(t, (1, 2), (0, 1))
-    tensor([[[-0.3362, -0.9627,  0.5173]],
+    tensor([[[ 1.5410, -2.1788, -1.0845]],
 
-            [[-0.8437,  0.1727, -0.1398]]])
+            [[-0.2934,  0.5684, -1.3986]]])
 """.format(**common_args))
 
 add_docstr(torch.moveaxis, r"""
@@ -7020,30 +6898,30 @@ Examples::
 
     >>> t = torch.randn(3,2,1)
     >>> t
-    tensor([[[-0.3362],
-            [-0.8437]],
+    tensor([[[ 1.5410],
+             [-0.2934]],
 
-            [[-0.9627],
-            [ 0.1727]],
+            [[-2.1788],
+             [ 0.5684]],
 
-            [[ 0.5173],
-            [-0.1398]]])
+            [[-1.0845],
+             [-1.3986]]])
     >>> torch.moveaxis(t, 1, 0).shape
     torch.Size([2, 3, 1])
     >>> torch.moveaxis(t, 1, 0)
-    tensor([[[-0.3362],
-            [-0.9627],
-            [ 0.5173]],
+    tensor([[[ 1.5410],
+             [-2.1788],
+             [-1.0845]],
 
-            [[-0.8437],
-            [ 0.1727],
-            [-0.1398]]])
+            [[-0.2934],
+             [ 0.5684],
+             [-1.3986]]])
     >>> torch.moveaxis(t, (1, 2), (0, 1)).shape
     torch.Size([2, 1, 3])
     >>> torch.moveaxis(t, (1, 2), (0, 1))
-    tensor([[[-0.3362, -0.9627,  0.5173]],
+    tensor([[[ 1.5410, -2.1788, -1.0845]],
 
-            [[-0.8437,  0.1727, -0.1398]]])
+            [[-0.2934,  0.5684, -1.3986]]])
 """.format(**common_args))
 
 add_docstr(torch.swapdims, r"""
@@ -7058,22 +6936,22 @@ Examples::
     >>> x = torch.tensor([[[0,1],[2,3]],[[4,5],[6,7]]])
     >>> x
     tensor([[[0, 1],
-            [2, 3]],
+             [2, 3]],
 
             [[4, 5],
-            [6, 7]]])
+             [6, 7]]])
     >>> torch.swapdims(x, 0, 1)
     tensor([[[0, 1],
-            [4, 5]],
+             [4, 5]],
 
             [[2, 3],
-            [6, 7]]])
+             [6, 7]]])
     >>> torch.swapdims(x, 0, 2)
     tensor([[[0, 4],
-            [2, 6]],
+             [2, 6]],
 
             [[1, 5],
-            [3, 7]]])
+             [3, 7]]])
 """.format(**common_args))
 
 add_docstr(torch.swapaxes, r"""
@@ -7088,22 +6966,22 @@ Examples::
     >>> x = torch.tensor([[[0,1],[2,3]],[[4,5],[6,7]]])
     >>> x
     tensor([[[0, 1],
-            [2, 3]],
+             [2, 3]],
 
             [[4, 5],
-            [6, 7]]])
+             [6, 7]]])
     >>> torch.swapaxes(x, 0, 1)
     tensor([[[0, 1],
-            [4, 5]],
+             [4, 5]],
 
             [[2, 3],
-            [6, 7]]])
+             [6, 7]]])
     >>> torch.swapaxes(x, 0, 2)
     tensor([[[0, 4],
-            [2, 6]],
+             [2, 6]],
 
             [[1, 5],
-            [3, 7]]])
+             [3, 7]]])
 """.format(**common_args))
 
 add_docstr(torch.narrow,
@@ -7124,12 +7002,12 @@ Example::
 
     >>> x = torch.tensor([[1, 2, 3], [4, 5, 6], [7, 8, 9]])
     >>> torch.narrow(x, 0, 0, 2)
-    tensor([[ 1,  2,  3],
-            [ 4,  5,  6]])
+    tensor([[1, 2, 3],
+            [4, 5, 6]])
     >>> torch.narrow(x, 1, 1, 2)
-    tensor([[ 2,  3],
-            [ 5,  6],
-            [ 8,  9]])
+    tensor([[2, 3],
+            [5, 6],
+            [8, 9]])
 """)
 
 add_docstr(torch.nan_to_num,
@@ -7172,7 +7050,6 @@ ne(input, other, *, out=None) -> Tensor
 
 Computes :math:`\text{input} \neq \text{other}` element-wise.
 """ + r"""
-
 The second argument can be a number or a tensor whose shape is
 :ref:`broadcastable <broadcasting-semantics>` with the first argument.
 
@@ -7189,7 +7066,8 @@ Returns:
 Example::
 
     >>> torch.ne(torch.tensor([[1, 2], [3, 4]]), torch.tensor([[1, 1], [4, 4]]))
-    tensor([[False, True], [True, False]])
+    tensor([[False,  True],
+            [ True, False]])
 """.format(**common_args))
 
 add_docstr(torch.not_equal, r"""
@@ -7217,9 +7095,9 @@ Example::
 
     >>> a = torch.randn(5)
     >>> a
-    tensor([ 0.0090, -0.2262, -0.0682, -0.2866,  0.3940])
+    tensor([ 1.5410, -0.2934, -2.1788,  0.5684, -1.0845])
     >>> torch.neg(a)
-    tensor([-0.0090,  0.2262,  0.0682,  0.2866, -0.3940])
+    tensor([-1.5410,  0.2934,  2.1788, -0.5684,  1.0845])
 """.format(**common_args))
 
 add_docstr(torch.negative,
@@ -7310,18 +7188,18 @@ Returns:
 Example::
 
     >>> torch.nonzero(torch.tensor([1, 1, 1, 0, 1]))
-    tensor([[ 0],
-            [ 1],
-            [ 2],
-            [ 4]])
+    tensor([[0],
+            [1],
+            [2],
+            [4]])
     >>> torch.nonzero(torch.tensor([[0.6, 0.0, 0.0, 0.0],
     ...                             [0.0, 0.4, 0.0, 0.0],
     ...                             [0.0, 0.0, 1.2, 0.0],
     ...                             [0.0, 0.0, 0.0,-0.4]]))
-    tensor([[ 0,  0],
-            [ 1,  1],
-            [ 2,  2],
-            [ 3,  3]])
+    tensor([[0, 0],
+            [1, 1],
+            [2, 2],
+            [3, 3]])
     >>> torch.nonzero(torch.tensor([1, 1, 1, 0, 1]), as_tuple=True)
     (tensor([0, 1, 2, 4]),)
     >>> torch.nonzero(torch.tensor([[0.6, 0.0, 0.0, 0.0],
@@ -7366,8 +7244,8 @@ Keyword args:
 Example::
 
     >>> torch.normal(mean=torch.arange(1., 11.), std=torch.arange(1, 0, -0.1))
-    tensor([  1.0425,   3.5672,   2.7969,   4.2925,   4.7229,   6.2134,
-              8.0505,   8.1408,   9.0563,  10.0566])
+    tensor([2.5410, 1.7359, 1.2570, 4.3979, 4.3493, 5.3007, 7.1613, 8.2514, 8.8561,
+            9.9597])
 
 .. function:: normal(mean=0.0, std, *, out=None) -> Tensor
    :noindex:
@@ -7385,7 +7263,7 @@ Keyword args:
 Example::
 
     >>> torch.normal(mean=0.5, std=torch.arange(1., 6.))
-    tensor([-1.2793, -1.0732, -2.0687,  5.1177, -1.2303])
+    tensor([-0.0966,  0.8641, -2.0700,  4.9024, -4.8559])
 
 .. function:: normal(mean, std=1.0, *, out=None) -> Tensor
    :noindex:
@@ -7403,7 +7281,7 @@ Keyword args:
 Example::
 
     >>> torch.normal(mean=torch.arange(1., 6.))
-    tensor([ 1.1552,  2.6148,  2.6535,  5.8318,  4.2361])
+    tensor([1.1227, 1.4337, 3.3731, 3.1080, 3.4909])
 
 .. function:: normal(mean, std, size, *, out=None) -> Tensor
    :noindex:
@@ -7422,7 +7300,7 @@ Keyword args:
 Example::
 
     >>> torch.normal(2, 3, size=(1, 4))
-    tensor([[-1.3987, -1.9544,  3.6048,  0.7909]])
+    tensor([[3.1112, 6.3695, 4.8194, 4.3245]])
 """.format(**common_args))
 
 add_docstr(torch.numel,
@@ -7466,12 +7344,11 @@ Keyword arguments:
 Example::
 
     >>> torch.ones(2, 3)
-    tensor([[ 1.,  1.,  1.],
-            [ 1.,  1.,  1.]])
+    tensor([[1., 1., 1.],
+            [1., 1., 1.]])
 
     >>> torch.ones(5)
-    tensor([ 1.,  1.,  1.,  1.,  1.])
-
+    tensor([1., 1., 1., 1., 1.])
 """.format(**factory_common_args))
 
 add_docstr(torch.ones_like,
@@ -7501,8 +7378,8 @@ Example::
 
     >>> input = torch.empty(2, 3)
     >>> torch.ones_like(input)
-    tensor([[ 1.,  1.,  1.],
-            [ 1.,  1.,  1.]])
+    tensor([[1., 1., 1.],
+            [1., 1., 1.]])
 """.format(**factory_like_common_args))
 
 add_docstr(torch.orgqr,
@@ -7589,10 +7466,10 @@ Example::
 
     >>> rates = torch.rand(4, 4) * 5  # rate parameter between 0 and 5
     >>> torch.poisson(rates)
-    tensor([[9., 1., 3., 5.],
-            [8., 6., 6., 0.],
-            [0., 4., 5., 3.],
-            [2., 1., 4., 2.]])
+    tensor([[2., 3., 0., 0.],
+            [0., 4., 2., 6.],
+            [1., 5., 0., 3.],
+            [0., 0., 3., 3.]])
 """.format(**common_args))
 
 add_docstr(torch.polygamma,
@@ -7616,9 +7493,9 @@ Example::
 
     >>> t = torch.randn(5)
     >>> t
-    tensor([ 0.0090, -0.2262, -0.0682, -0.2866,  0.3940])
+    tensor([ 1.5410, -0.2934, -2.1788,  0.5684, -1.0845])
     >>> torch.positive(t)
-    tensor([ 0.0090, -0.2262, -0.0682, -0.2866,  0.3940])
+    tensor([ 1.5410, -0.2934, -2.1788,  0.5684, -1.0845])
 """.format(**common_args))
 
 add_docstr(torch.pow,
@@ -7655,18 +7532,18 @@ Example::
 
     >>> a = torch.randn(4)
     >>> a
-    tensor([ 0.4331,  1.2475,  0.6834, -0.2791])
+    tensor([ 1.5410, -0.2934, -2.1788,  0.5684])
     >>> torch.pow(a, 2)
-    tensor([ 0.1875,  1.5561,  0.4670,  0.0779])
+    tensor([2.3747, 0.0861, 4.7471, 0.3231])
     >>> exp = torch.arange(1., 5.)
 
     >>> a = torch.arange(1., 5.)
     >>> a
-    tensor([ 1.,  2.,  3.,  4.])
+    tensor([1., 2., 3., 4.])
     >>> exp
-    tensor([ 1.,  2.,  3.,  4.])
+    tensor([1., 2., 3., 4.])
     >>> torch.pow(a, exp)
-    tensor([   1.,    4.,   27.,  256.])
+    tensor([  1.,   4.,  27., 256.])
 
 .. function:: pow(self, exponent, *, out=None) -> Tensor
    :noindex:
@@ -7691,7 +7568,7 @@ Example::
     >>> exp = torch.arange(1., 5.)
     >>> base = 2
     >>> torch.pow(base, exp)
-    tensor([  2.,   4.,   8.,  16.])
+    tensor([ 2.,  4.,  8., 16.])
 """.format(**common_args))
 
 add_docstr(torch.float_power,
@@ -7720,13 +7597,13 @@ Example::
 
     >>> a = torch.randint(10, (4,))
     >>> a
-    tensor([6, 4, 7, 1])
+    tensor([4, 9, 3, 0])
     >>> torch.float_power(a, 2)
-    tensor([36., 16., 49.,  1.], dtype=torch.float64)
+    tensor([16., 81.,  9.,  0.], dtype=torch.float64)
 
     >>> a = torch.arange(1, 5)
     >>> a
-    tensor([ 1,  2,  3,  4])
+    tensor([1, 2, 3, 4])
     >>> exp = torch.tensor([2, -3, 4, -5])
     >>> exp
     tensor([ 2, -3,  4, -5])
@@ -7750,9 +7627,9 @@ Example::
 
     >>> a = torch.randn(1, 3)
     >>> a
-    tensor([[-0.8020,  0.5428, -1.5854]])
+    tensor([[ 1.5410, -0.2934, -2.1788]])
     >>> torch.prod(a)
-    tensor(0.6902)
+    tensor(0.9852)
 
 .. function:: prod(input, dim, keepdim=False, *, dtype=None) -> Tensor
    :noindex:
@@ -7774,12 +7651,12 @@ Example::
 
     >>> a = torch.randn(4, 2)
     >>> a
-    tensor([[ 0.5261, -0.3837],
-            [ 1.1857, -0.2498],
-            [-1.1646,  0.0705],
-            [ 1.1131, -1.0629]])
+    tensor([[ 0.5684, -1.0845],
+            [-1.3986,  0.4033],
+            [ 0.8380, -0.7193],
+            [-0.4033, -0.5966]])
     >>> torch.prod(a, 1)
-    tensor([-0.2018, -0.2962, -0.0821, -1.1831])
+    tensor([-0.6165, -0.5641, -0.6028,  0.2406])
 """.format(**single_dim_common))
 
 add_docstr(torch.promote_types,
@@ -7800,7 +7677,7 @@ Example::
     >>> torch.promote_types(torch.int32, torch.float32)
     torch.float32
     >>> torch.promote_types(torch.uint8, torch.long)
-    torch.long
+    torch.int64
 """)
 
 add_docstr(torch.qr,
@@ -7874,15 +7751,22 @@ Example::
             [   6.,  167.,  -68.],
             [  -4.,   24.,  -41.]])
     >>> torch.mm(q.t(), q).round()
-    tensor([[ 1.,  0.,  0.],
-            [ 0.,  1., -0.],
-            [ 0., -0.,  1.]])
+    tensor([[1., 0., 0.],
+            [0., 1., 0.],
+            [0., 0., 1.]])
     >>> a = torch.randn(3, 4, 5)
     >>> q, r = torch.qr(a, some=False)
     >>> torch.allclose(torch.matmul(q, r), a)
     True
-    >>> torch.allclose(torch.matmul(q.mT, q), torch.eye(5))
+    >>> torch.allclose(torch.matmul(q.transpose(-2, -1), q), torch.eye(4), atol=1e-7)
     True
+
+
+
+
+
+
+
 """)
 
 add_docstr(torch.rad2deg,
@@ -7945,7 +7829,6 @@ The Heaviside step function is defined as:
         1, & \text{if input > 0}
     \end{cases}
 """ + r"""
-
 Args:
     {input}
     values (Tensor): The values to use where :attr:`input` is zero.
@@ -7961,8 +7844,7 @@ Example::
     tensor([0.0000, 0.5000, 1.0000])
     >>> values = torch.tensor([1.2, -2.0, 3.5])
     >>> torch.heaviside(input, values)
-    tensor([0., -2., 1.])
-
+    tensor([ 0., -2.,  1.])
 """.format(**common_args))
 
 add_docstr(torch.rand,
@@ -7989,10 +7871,10 @@ Keyword args:
 Example::
 
     >>> torch.rand(4)
-    tensor([ 0.5204,  0.2503,  0.3525,  0.5673])
+    tensor([0.4963, 0.7682, 0.0885, 0.1320])
     >>> torch.rand(2, 3)
-    tensor([[ 0.8237,  0.5781,  0.6879],
-            [ 0.3816,  0.7249,  0.0998]])
+    tensor([[0.3074, 0.6341, 0.4901],
+            [0.8964, 0.4556, 0.6323]])
 """.format(**factory_common_args))
 
 add_docstr(torch.rand_like,
@@ -8017,9 +7899,8 @@ Keyword args:
 """.format(**factory_like_common_args))
 
 add_docstr(torch.randint,
-           """
-randint(low=0, high, size, \\*, generator=None, out=None, \
-dtype=None, layout=torch.strided, device=None, requires_grad=False) -> Tensor
+           r"""
+randint(low=0, high, size, \*, generator=None, out=None, dtype=None, layout=torch.strided, device=None, requires_grad=False) -> Tensor
 
 Returns a tensor filled with random integers generated uniformly
 between :attr:`low` (inclusive) and :attr:`high` (exclusive).
@@ -8031,7 +7912,7 @@ The shape of the tensor is defined by the variable argument :attr:`size`.
     a tensor with dtype ``torch.int64``.
 
 Args:
-    low (int, optional): Lowest integer to be drawn from the distribution. Default: 0.
+    low (int, optional): Lowest integer to be drawn from the distribution. Default: 0.quick
     high (int): One above the highest integer to be drawn from the distribution.
     size (tuple): a tuple defining the shape of the output tensor.
 
@@ -8047,19 +7928,15 @@ Keyword args:
 Example::
 
     >>> torch.randint(3, 5, (3,))
-    tensor([4, 3, 4])
-
+    tensor([3, 4, 4])
 
     >>> torch.randint(10, (2, 2))
-    tensor([[0, 2],
-            [5, 5]])
-
+    tensor([[0, 3],
+            [9, 7]])
 
     >>> torch.randint(3, 10, (2, 2))
-    tensor([[4, 5],
-            [6, 7]])
-
-
+    tensor([[6, 7],
+            [8, 5]])
 """.format(**factory_common_args))
 
 add_docstr(torch.randint_like,
@@ -8117,10 +7994,10 @@ Keyword args:
 Example::
 
     >>> torch.randn(4)
-    tensor([-2.1436,  0.9966,  2.3426, -0.6366])
+    tensor([ 1.5410, -0.2934, -2.1788,  0.5684])
     >>> torch.randn(2, 3)
-    tensor([[ 1.5954,  2.8929, -1.0923],
-            [ 1.1719, -0.4709, -0.1996]])
+    tensor([[-1.0845, -1.3986,  0.4033],
+            [ 0.8380, -0.7193, -0.4033]])
 """.format(**factory_common_args))
 
 add_docstr(torch.randn_like,
@@ -8167,7 +8044,7 @@ Keyword args:
 Example::
 
     >>> torch.randperm(4)
-    tensor([2, 1, 0, 3])
+    tensor([0, 1, 3, 2])
 """.format(**factory_common_args))
 
 add_docstr(torch.tensor,
@@ -8223,6 +8100,7 @@ Example::
     tensor([])
 """.format(**factory_data_common_args))
 
+
 add_docstr(torch.range,
            r"""
 range(start=0, end, step=1, *, out=None, dtype=None, layout=torch.strided, device=None, requires_grad=False) -> Tensor
@@ -8257,9 +8135,9 @@ Keyword args:
 Example::
 
     >>> torch.range(1, 4)
-    tensor([ 1.,  2.,  3.,  4.])
+    tensor([1., 2., 3., 4.])
     >>> torch.range(1, 4, 0.5)
-    tensor([ 1.0000,  1.5000,  2.0000,  2.5000,  3.0000,  3.5000,  4.0000])
+    tensor([1.0000, 1.5000, 2.0000, 2.5000, 3.0000, 3.5000, 4.0000])
 """.format(**factory_common_args))
 
 add_docstr(torch.arange,
@@ -8296,11 +8174,11 @@ Keyword args:
 Example::
 
     >>> torch.arange(5)
-    tensor([ 0,  1,  2,  3,  4])
+    tensor([0, 1, 2, 3, 4])
     >>> torch.arange(1, 4)
-    tensor([ 1,  2,  3])
+    tensor([1, 2, 3])
     >>> torch.arange(1, 2.5, 0.5)
-    tensor([ 1.0000,  1.5000,  2.0000])
+    tensor([1.0000, 1.5000, 2.0000])
 """.format(**factory_common_args))
 
 add_docstr(torch.ravel,
@@ -8388,17 +8266,17 @@ Example::
 
     >>> x = torch.ones(3, 3)
     >>> x[1].fill_(2)
-    tensor([ 2.,  2.,  2.])
+    tensor([2., 2., 2.])
     >>> x[2].fill_(3)
-    tensor([ 3.,  3.,  3.])
+    tensor([3., 3., 3.])
     >>> x
-    tensor([[ 1.,  1.,  1.],
-            [ 2.,  2.,  2.],
-            [ 3.,  3.,  3.]])
+    tensor([[1., 1., 1.],
+            [2., 2., 2.],
+            [3., 3., 3.]])
     >>> torch.renorm(x, 1, 0, 5)
-    tensor([[ 1.0000,  1.0000,  1.0000],
-            [ 1.6667,  1.6667,  1.6667],
-            [ 1.6667,  1.6667,  1.6667]])
+    tensor([[1.0000, 1.0000, 1.0000],
+            [1.6667, 1.6667, 1.6667],
+            [1.6667, 1.6667, 1.6667]])
 """.format(**common_args))
 
 add_docstr(torch.reshape,
@@ -8424,13 +8302,12 @@ Example::
 
     >>> a = torch.arange(4.)
     >>> torch.reshape(a, (2, 2))
-    tensor([[ 0.,  1.],
-            [ 2.,  3.]])
+    tensor([[0., 1.],
+            [2., 3.]])
     >>> b = torch.tensor([[0, 1], [2, 3]])
     >>> torch.reshape(b, (-1,))
-    tensor([ 0,  1,  2,  3])
+    tensor([0, 1, 2, 3])
 """)
-
 
 add_docstr(torch.result_type,
            r"""
@@ -8461,48 +8338,37 @@ Alias of :func:`torch.vstack`.
 
 add_docstr(torch.round, r"""
 round(input, *, decimals=0, out=None) -> Tensor
-
 Rounds elements of :attr:`input` to the nearest integer.
-
 .. note::
     This function implements the "round half to even" to
     break ties when a number is equidistant from two
     integers (e.g. `round(2.5)` is 2).
-
     When the :attr:\`decimals\` argument is specified the
     algorithm used is similar to NumPy's `around`. This
     algorithm is fast but inexact and it can easily
     overflow for low precision dtypes.
     Eg. `round(tensor([10000], dtype=torch.float16), decimals=3)` is `inf`.
-
 .. seealso::
     :func:`torch.ceil`, which rounds up.
     :func:`torch.floor`, which rounds down.
     :func:`torch.trunc`, which rounds towards zero.
-
 Args:
     {input}
     decimals (int): Number of decimal places to round to (default: 0).
         If decimals is negative, it specifies the number of positions
         to the left of the decimal point.
-
 Keyword args:
     {out}
-
 Example::
-
     >>> torch.round(torch.tensor((4.7, -2.3, 9.1, -7.7)))
     tensor([ 5.,  -2.,  9., -8.])
-
     >>> # Values equidistant from two integers are rounded towards the
     >>> #   the nearest even value (zero is treated as even)
     >>> torch.round(torch.tensor([-0.5, 0.5, 1.5, 2.5]))
     tensor([-0., 0., 2., 2.])
-
     >>> # A positive decimals argument rounds to the to that decimal place
     >>> torch.round(torch.tensor([0.1234567]), decimals=3)
     tensor([0.1230])
-
     >>> # A negative decimals argument rounds to the left of the decimal
     >>> torch.round(torch.tensor([1200.1234567]), decimals=-3)
     tensor([1000.])
@@ -8528,9 +8394,9 @@ Example::
 
     >>> a = torch.randn(4)
     >>> a
-    tensor([-0.0370,  0.2970,  1.5420, -0.9105])
+    tensor([ 1.5410, -0.2934, -2.1788,  0.5684])
     >>> torch.rsqrt(a)
-    tensor([    nan,  1.8351,  0.8053,     nan])
+    tensor([0.8056,    nan,    nan, 1.3264])
 """.format(**common_args))
 
 add_docstr(torch.scatter,
@@ -8656,12 +8522,11 @@ Example::
     >>> torch.set_flush_denormal(True)
     True
     >>> torch.tensor([1e-323], dtype=torch.float64)
-    tensor([ 0.], dtype=torch.float64)
+    tensor([0.], dtype=torch.float64)
     >>> torch.set_flush_denormal(False)
     True
     >>> torch.tensor([1e-323], dtype=torch.float64)
-    tensor(9.88131e-324 *
-           [ 1.0000], dtype=torch.float64)
+    tensor([9.8813e-324], dtype=torch.float64)
 """)
 
 add_docstr(torch.set_num_threads, r"""
@@ -8738,7 +8603,7 @@ Example::
 
     >>> a = torch.tensor([0.7, -1.2, 0., 2.3])
     >>> torch.signbit(a)
-    tensor([ False, True,  False,  False])
+    tensor([False,  True, False, False])
 """.format(**common_args))
 
 add_docstr(torch.sgn,
@@ -8790,9 +8655,9 @@ Example::
 
     >>> a = torch.randn(4)
     >>> a
-    tensor([-0.5461,  0.1347, -2.7266, -0.2746])
+    tensor([ 1.5410, -0.2934, -2.1788,  0.5684])
     >>> torch.sin(a)
-    tensor([-0.5194,  0.1343, -0.4032, -0.2711])
+    tensor([ 0.9996, -0.2892, -0.8208,  0.5383])
 """.format(**common_args))
 
 add_docstr(torch.sinc,
@@ -8822,9 +8687,9 @@ Example::
 
     >>> a = torch.randn(4)
     >>> a
-    tensor([ 0.5380, -0.8632, -0.1265,  0.9399])
+    tensor([ 1.5410, -0.2934, -2.1788,  0.5684])
     >>> torch.sinh(a)
-    tensor([ 0.5644, -0.9744, -0.1268,  1.0845])
+    tensor([ 2.2275, -0.2977, -4.3612,  0.5995])
 
 .. note::
    When :attr:`input` is on the CPU, the implementation of torch.sinh may use
@@ -8867,32 +8732,32 @@ Example::
     >>> x = torch.randn(3, 4)
     >>> sorted, indices = torch.sort(x)
     >>> sorted
-    tensor([[-0.2162,  0.0608,  0.6719,  2.3332],
-            [-0.5793,  0.0061,  0.6058,  0.9497],
-            [-0.5071,  0.3343,  0.9553,  1.0960]])
+    tensor([[-2.1788, -0.2934,  0.5684,  1.5410],
+            [-1.3986, -1.0845,  0.4033,  0.8380],
+            [-0.7193, -0.5966, -0.4033,  0.1820]])
     >>> indices
-    tensor([[ 1,  0,  2,  3],
-            [ 3,  1,  0,  2],
-            [ 0,  3,  1,  2]])
+    tensor([[2, 1, 3, 0],
+            [1, 0, 2, 3],
+            [0, 2, 1, 3]])
 
     >>> sorted, indices = torch.sort(x, 0)
     >>> sorted
-    tensor([[-0.5071, -0.2162,  0.6719, -0.5793],
-            [ 0.0608,  0.0061,  0.9497,  0.3343],
-            [ 0.6058,  0.9553,  1.0960,  2.3332]])
+    tensor([[-1.0845, -1.3986, -2.1788,  0.1820],
+            [-0.7193, -0.4033, -0.5966,  0.5684],
+            [ 1.5410, -0.2934,  0.4033,  0.8380]])
     >>> indices
-    tensor([[ 2,  0,  0,  1],
-            [ 0,  1,  1,  2],
-            [ 1,  2,  2,  0]])
+    tensor([[1, 1, 0, 2],
+            [2, 2, 2, 0],
+            [0, 0, 1, 1]])
     >>> x = torch.tensor([0, 1] * 9)
     >>> x.sort()
     torch.return_types.sort(
-        values=tensor([0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1]),
-        indices=tensor([ 2, 16,  4,  6, 14,  8,  0, 10, 12,  9, 17, 15, 13, 11,  7,  5,  3,  1]))
+    values=tensor([0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1]),
+    indices=tensor([ 2, 16,  4,  6, 14,  8,  0, 10, 12,  9, 17, 15, 13, 11,  7,  5,  3,  1]))
     >>> x.sort(stable=True)
     torch.return_types.sort(
-        values=tensor([0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1]),
-        indices=tensor([ 0,  2,  4,  6,  8, 10, 12, 14, 16,  1,  3,  5,  7,  9, 11, 13, 15, 17]))
+    values=tensor([0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1]),
+    indices=tensor([ 0,  2,  4,  6,  8, 10, 12, 14, 16,  1,  3,  5,  7,  9, 11, 13, 15, 17]))
 """.format(**common_args))
 
 add_docstr(torch.argsort,
@@ -8914,17 +8779,16 @@ Example::
 
     >>> a = torch.randn(4, 4)
     >>> a
-    tensor([[ 0.0785,  1.5267, -0.8521,  0.4065],
-            [ 0.1598,  0.0788, -0.0745, -1.2700],
-            [ 1.2208,  1.0722, -0.7064,  1.2564],
-            [ 0.0669, -0.2318, -0.8229, -0.9280]])
-
+    tensor([[-1.1258, -1.1524, -0.2506, -0.4339],
+            [ 0.8487,  0.6920, -0.3160, -2.1152],
+            [ 0.3223, -1.2633,  0.3500,  0.3081],
+            [ 0.1198,  1.2377,  1.1168, -0.2473]])
 
     >>> torch.argsort(a, dim=1)
-    tensor([[2, 0, 3, 1],
+    tensor([[1, 0, 3, 2],
             [3, 2, 1, 0],
-            [2, 1, 0, 3],
-            [3, 2, 1, 0]])
+            [1, 3, 0, 2],
+            [3, 0, 2, 1]])
 """.format(**common_args))
 
 add_docstr(torch.msort,
@@ -8947,13 +8811,13 @@ Example::
 
     >>> t = torch.randn(3, 4)
     >>> t
-    tensor([[-0.1321,  0.4370, -1.2631, -1.1289],
-            [-2.0527, -1.1250,  0.2275,  0.3077],
-            [-0.0881, -0.1259, -0.5495,  1.0284]])
+    tensor([[ 1.5410, -0.2934, -2.1788,  0.5684],
+            [-1.0845, -1.3986,  0.4033,  0.8380],
+            [-0.7193, -0.4033, -0.5966,  0.1820]])
     >>> torch.msort(t)
-    tensor([[-2.0527, -1.1250, -1.2631, -1.1289],
-            [-0.1321, -0.1259, -0.5495,  0.3077],
-            [-0.0881,  0.4370,  0.2275,  1.0284]])
+    tensor([[-1.0845, -1.3986, -2.1788,  0.1820],
+            [-0.7193, -0.4033, -0.5966,  0.5684],
+            [ 1.5410, -0.2934,  0.4033,  0.8380]])
 """.format(**common_args))
 
 add_docstr(torch.sparse_csr_tensor,
@@ -9066,14 +8930,14 @@ Example::
     #
     # For instance, to create an empty sparse tensor with nnz = 0, dense_dim = 0 and
     # sparse_dim = 1 (hence indices is a 2D tensor of shape = (1, 0))
-    >>> S = torch.sparse_coo_tensor(torch.empty([1, 0]), [], [1])
+    >>> torch.sparse_coo_tensor(torch.empty([1, 0]), [], [1])
     tensor(indices=tensor([], size=(1, 0)),
            values=tensor([], size=(0,)),
            size=(1,), nnz=0, layout=torch.sparse_coo)
 
     # and to create an empty sparse tensor with nnz = 0, dense_dim = 1 and
     # sparse_dim = 1
-    >>> S = torch.sparse_coo_tensor(torch.empty([1, 0]), torch.empty([0, 2]), [1, 2])
+    >>> torch.sparse_coo_tensor(torch.empty([1, 0]), torch.empty([0, 2]), [1, 2])
     tensor(indices=tensor([], size=(1, 0)),
            values=tensor([], size=(0, 2)),
            size=(1, 2), nnz=0, layout=torch.sparse_coo)
@@ -9100,9 +8964,9 @@ Example::
 
     >>> a = torch.randn(4)
     >>> a
-    tensor([-2.0755,  1.0226,  0.0831,  0.4806])
+    tensor([ 1.5410, -0.2934, -2.1788,  0.5684])
     >>> torch.sqrt(a)
-    tensor([    nan,  1.0112,  0.2883,  0.6933])
+    tensor([1.2414,    nan,    nan, 0.7539])
 """.format(**common_args))
 
 add_docstr(torch.square,
@@ -9121,9 +8985,9 @@ Example::
 
     >>> a = torch.randn(4)
     >>> a
-    tensor([-2.0755,  1.0226,  0.0831,  0.4806])
+    tensor([ 1.5410, -0.2934, -2.1788,  0.5684])
     >>> torch.square(a)
-    tensor([ 4.3077,  1.0457,  0.0069,  0.2310])
+    tensor([2.3747, 0.0861, 4.7471, 0.3231])
 """.format(**common_args))
 
 add_docstr(torch.squeeze,
@@ -9250,7 +9114,8 @@ Example::
     (tensor(0.4188), tensor(-0.8509))
 """.format(**multi_dim_common))
 
-add_docstr(torch.sub, r"""
+add_docstr(torch.sub,
+           r"""
 sub(input, other, *, alpha=1, out=None) -> Tensor
 
 Subtracts :attr:`other`, scaled by :attr:`alpha`, from :attr:`input`.
@@ -9300,9 +9165,9 @@ Example::
 
     >>> a = torch.randn(1, 3)
     >>> a
-    tensor([[ 0.1133, -0.9567,  0.2958]])
+    tensor([[ 1.5410, -0.2934, -2.1788]])
     >>> torch.sum(a)
-    tensor(-0.5475)
+    tensor(-0.9312)
 
 .. function:: sum(input, dim, keepdim=False, *, dtype=None) -> Tensor
    :noindex:
@@ -9325,15 +9190,15 @@ Example::
 
     >>> a = torch.randn(4, 4)
     >>> a
-    tensor([[ 0.0569, -0.2475,  0.0737, -0.3429],
-            [-0.2993,  0.9138,  0.9337, -1.6864],
-            [ 0.1132,  0.7892, -0.1003,  0.5688],
-            [ 0.3637, -0.9906, -0.4752, -1.5197]])
+    tensor([[-0.3561,  0.4372,  0.4913, -0.2041],
+            [-0.0885,  0.5239, -0.6659,  0.8504],
+            [-1.0438, -1.3453,  0.7854,  0.9928],
+            [-0.1932, -0.3090,  0.5026, -0.8594]])
     >>> torch.sum(a, 1)
-    tensor([-0.4598, -0.1381,  1.3708, -2.6217])
+    tensor([ 0.3683,  0.6199, -0.6109, -0.8590])
     >>> b = torch.arange(4 * 5 * 6).view(4, 5, 6)
     >>> torch.sum(b, (2, 1))
-    tensor([  435.,  1335.,  2235.,  3135.])
+    tensor([ 435, 1335, 2235, 3135])
 """.format(**multi_dim_common))
 
 add_docstr(torch.nansum,
@@ -9374,7 +9239,7 @@ Keyword args:
 Example::
 
     >>> torch.nansum(torch.tensor([1., float("nan")]))
-    1.0
+    tensor(1.)
     >>> a = torch.tensor([[1, 2], [3., float("nan")]])
     >>> torch.nansum(a)
     tensor(6.)
@@ -9487,30 +9352,30 @@ Example::
 
     >>> a = torch.randn(5, 3)
     >>> a
-    tensor([[ 0.2364, -0.7752,  0.6372],
-            [ 1.7201,  0.7394, -0.0504],
-            [-0.3371, -1.0584,  0.5296],
-            [ 0.3550, -0.4022,  1.5569],
-            [ 0.2445, -0.0158,  1.1414]])
+    tensor([[ 1.5410, -0.2934, -2.1788],
+            [ 0.5684, -1.0845, -1.3986],
+            [ 0.4033,  0.8380, -0.7193],
+            [-0.4033, -0.5966,  0.1820],
+            [-0.8567,  1.1006, -1.0712]])
     >>> u, s, v = torch.svd(a)
     >>> u
-    tensor([[ 0.4027,  0.0287,  0.5434],
-            [-0.1946,  0.8833,  0.3679],
-            [ 0.4296, -0.2890,  0.5261],
-            [ 0.6604,  0.2717, -0.2618],
-            [ 0.4234,  0.2481, -0.4733]])
+    tensor([[-0.8248,  0.0319,  0.2393],
+            [-0.5029,  0.3445, -0.5204],
+            [-0.2177, -0.4201,  0.3863],
+            [ 0.0848,  0.2249, -0.4748],
+            [-0.1101, -0.8082, -0.5452]])
     >>> s
-    tensor([2.3289, 2.0315, 0.7806])
+    tensor([3.2382, 1.9961, 1.1046])
     >>> v
-    tensor([[-0.0199,  0.8766,  0.4809],
-            [-0.5080,  0.4054, -0.7600],
-            [ 0.8611,  0.2594, -0.4373]])
+    tensor([[-0.4893,  0.3393,  0.8034],
+            [ 0.1338, -0.8811,  0.4536],
+            [ 0.8618,  0.3294,  0.3858]])
     >>> torch.dist(a, torch.mm(torch.mm(u, torch.diag(s)), v.t()))
-    tensor(8.6531e-07)
+    tensor(9.2819e-07)
     >>> a_big = torch.randn(7, 5, 3)
     >>> u, s, v = torch.svd(a_big)
-    >>> torch.dist(a_big, torch.matmul(torch.matmul(u, torch.diag_embed(s)), v.mT))
-    tensor(2.6503e-06)
+    >>> torch.dist(a_big, torch.matmul(torch.matmul(u, torch.diag_embed(s)), v.transpose(-2, -1)))
+    tensor(3.2067e-06)
 
 .. _the resulting vectors will span the same subspace:
        (https://en.wikipedia.org/wiki/Singular_value_decomposition#Singular_values,_singular_vectors,_and_their_relation_to_the_SVD)
@@ -9587,28 +9452,27 @@ Returns:
 
 Examples::
 
-
     >>> a = torch.randn(5, 5)
     >>> a = a + a.t()  # To make a symmetric
     >>> a
-    tensor([[-5.7827,  4.4559, -0.2344, -1.7123, -1.8330],
-            [ 4.4559,  1.4250, -2.8636, -3.2100, -0.1798],
-            [-0.2344, -2.8636,  1.7112, -5.5785,  7.1988],
-            [-1.7123, -3.2100, -5.5785, -2.6227,  3.1036],
-            [-1.8330, -0.1798,  7.1988,  3.1036, -5.1453]])
+    tensor([[-2.2517, -0.4604,  1.1931, -0.5455,  1.4668],
+            [-0.4604, -0.6320, -1.8492, -0.2913, -0.5705],
+            [ 1.1931, -1.8492,  0.3329,  2.1334, -0.9845],
+            [-0.5455, -0.2913,  2.1334,  4.0100, -2.2623],
+            [ 1.4668, -0.5705, -0.9845, -2.2623, -0.2046]])
     >>> e, v = torch.symeig(a, eigenvectors=True)
     >>> e
-    tensor([-13.7012,  -7.7497,  -2.3163,   5.2477,   8.1050])
+    tensor([-3.7445, -1.9196, -0.9460,  1.7781,  6.0865])
     >>> v
-    tensor([[ 0.1643,  0.9034, -0.0291,  0.3508,  0.1817],
-            [-0.2417, -0.3071, -0.5081,  0.6534,  0.4026],
-            [-0.5176,  0.1223, -0.0220,  0.3295, -0.7798],
-            [-0.4850,  0.2695, -0.5773, -0.5840,  0.1337],
-            [ 0.6415, -0.0447, -0.6381, -0.0193, -0.4230]])
+    tensor([[-0.7369,  0.4882, -0.2446, -0.3945, -0.0561],
+            [ 0.2361,  0.7557, -0.1255,  0.5876, -0.1102],
+            [ 0.4494,  0.4274,  0.3470, -0.5819,  0.3954],
+            [-0.0368, -0.0836, -0.5178,  0.1680,  0.8338],
+            [ 0.4449, -0.0310, -0.7320, -0.3636, -0.3648]])
     >>> a_big = torch.randn(5, 2, 2)
-    >>> a_big = a_big + a_big.mT  # To make a_big symmetric
+    >>> a_big = a_big + a_big.transpose(-2, -1)  # To make a_big symmetric
     >>> e, v = a_big.symeig(eigenvectors=True)
-    >>> torch.allclose(torch.matmul(v, torch.matmul(e.diag_embed(), v.mT)), a_big)
+    >>> torch.allclose(torch.matmul(v, torch.matmul(e.diag_embed(), v.transpose(-2, -1))), a_big)
     True
 """)
 
@@ -9629,22 +9493,22 @@ Example::
 
     >>> x = torch.randn(())
     >>> x
-    tensor(0.1995)
+    tensor(1.5410)
     >>> torch.t(x)
-    tensor(0.1995)
+    tensor(1.5410)
     >>> x = torch.randn(3)
     >>> x
-    tensor([ 2.4320, -0.4608,  0.7702])
+    tensor([-0.2934, -2.1788,  0.5684])
     >>> torch.t(x)
-    tensor([ 2.4320, -0.4608,  0.7702])
+    tensor([-0.2934, -2.1788,  0.5684])
     >>> x = torch.randn(2, 3)
     >>> x
-    tensor([[ 0.4875,  0.9158, -0.5872],
-            [ 0.3938, -0.6929,  0.6932]])
+    tensor([[-1.0845, -1.3986,  0.4033],
+            [ 0.8380, -0.7193, -0.4033]])
     >>> torch.t(x)
-    tensor([[ 0.4875,  0.3938],
-            [ 0.9158, -0.6929],
-            [-0.5872,  0.6932]])
+    tensor([[-1.0845,  0.8380],
+            [-1.3986, -0.7193],
+            [ 0.4033, -0.4033]])
 
 See also :func:`torch.transpose`.
 """.format(**common_args))
@@ -9668,17 +9532,17 @@ Example::
 
     >>> x = torch.arange(8).view(2, 2, 2)
     >>> x
-    tensor([[[ 0,  1],
-             [ 2,  3]],
+    tensor([[[0, 1],
+             [2, 3]],
 
-            [[ 4,  5],
-             [ 6,  7]]])
+            [[4, 5],
+             [6, 7]]])
     >>> torch.flip(x, [0, 1])
-    tensor([[[ 6,  7],
-             [ 4,  5]],
+    tensor([[[6, 7],
+             [4, 5]],
 
-            [[ 2,  3],
-             [ 0,  1]]])
+            [[2, 3],
+             [0, 1]]])
 """.format(**common_args))
 
 add_docstr(torch.fliplr,
@@ -9839,7 +9703,7 @@ Example::
     >>> src = torch.tensor([[4, 3, 5],
     ...                     [6, 7, 8]])
     >>> torch.take(src, torch.tensor([0, 2, 5]))
-    tensor([ 4,  5,  8])
+    tensor([4, 5, 8])
 """.format(**common_args))
 
 add_docstr(torch.take_along_dim,
@@ -9894,9 +9758,9 @@ Example::
 
     >>> a = torch.randn(4)
     >>> a
-    tensor([-1.2027, -1.7687,  0.4412, -1.3856])
+    tensor([ 1.5410, -0.2934, -2.1788,  0.5684])
     >>> torch.tan(a)
-    tensor([-2.5930,  4.9859,  0.4722, -5.3366])
+    tensor([33.5468, -0.3022,  1.4369,  0.6388])
 """.format(**common_args))
 
 add_docstr(torch.tanh,
@@ -9919,9 +9783,9 @@ Example::
 
     >>> a = torch.randn(4)
     >>> a
-    tensor([ 0.8986, -0.7279,  1.1745,  0.2611])
+    tensor([ 1.5410, -0.2934, -2.1788,  0.5684])
     >>> torch.tanh(a)
-    tensor([ 0.7156, -0.6218,  0.8257,  0.2553])
+    tensor([ 0.9123, -0.2853, -0.9747,  0.5142])
 """.format(**common_args))
 
 add_docstr(torch.topk,
@@ -9959,10 +9823,12 @@ Example::
 
     >>> x = torch.arange(1., 6.)
     >>> x
-    tensor([ 1.,  2.,  3.,  4.,  5.])
+    tensor([1., 2., 3., 4., 5.])
     >>> torch.topk(x, 3)
-    torch.return_types.topk(values=tensor([5., 4., 3.]), indices=tensor([4, 3, 2]))
-""".format(**common_args))
+    torch.return_types.topk(
+    values=tensor([5., 4., 3.]),
+    indices=tensor([4, 3, 2]))"""
+           .format(**common_args))
 
 add_docstr(torch.trace,
            r"""
@@ -9974,9 +9840,9 @@ Example::
 
     >>> x = torch.arange(1., 10.).view(3, 3)
     >>> x
-    tensor([[ 1.,  2.,  3.],
-            [ 4.,  5.,  6.],
-            [ 7.,  8.,  9.]])
+    tensor([[1., 2., 3.],
+            [4., 5., 6.],
+            [7., 8., 9.]])
     >>> torch.trace(x)
     tensor(15.)
 """)
@@ -10005,12 +9871,12 @@ Example::
 
     >>> x = torch.randn(2, 3)
     >>> x
-    tensor([[ 1.0028, -0.9893,  0.5809],
-            [-0.1669,  0.7299,  0.4942]])
+    tensor([[ 1.5410, -0.2934, -2.1788],
+            [ 0.5684, -1.0845, -1.3986]])
     >>> torch.transpose(x, 0, 1)
-    tensor([[ 1.0028, -0.1669],
-            [-0.9893,  0.7299],
-            [ 0.5809,  0.4942]])
+    tensor([[ 1.5410,  0.5684],
+            [-0.2934, -1.0845],
+            [-2.1788, -1.3986]])
 
 See also :func:`torch.t`.
 """.format(**common_args))
@@ -10034,7 +9900,7 @@ If the diagonal of :attr:`A` contains zeros or elements that are very close to z
 the result may contain `NaN` s.
 
 Supports input of float, double, cfloat and cdouble data types.
-
+ 
 .. warning::
 
     :func:`torch.triangular_solve` is deprecated in favor of :func:`torch.linalg.solve_triangular`
@@ -10073,18 +9939,18 @@ Examples::
 
     >>> A = torch.randn(2, 2).triu()
     >>> A
-    tensor([[ 1.1527, -1.0753],
-            [ 0.0000,  0.7986]])
+    tensor([[ 1.5410, -0.2934],
+            [ 0.0000,  0.5684]])
     >>> b = torch.randn(2, 3)
     >>> b
-    tensor([[-0.0210,  2.3513, -1.5492],
-            [ 1.5429,  0.7403, -1.0243]])
+    tensor([[-1.0845, -1.3986,  0.4033],
+            [ 0.8380, -0.7193, -0.4033]])
     >>> torch.triangular_solve(b, A)
     torch.return_types.triangular_solve(
-    solution=tensor([[ 1.7841,  2.9046, -2.5405],
-            [ 1.9320,  0.9270, -1.2826]]),
-    cloned_coefficient=tensor([[ 1.1527, -1.0753],
-            [ 0.0000,  0.7986]]))
+    solution=tensor([[-0.4231, -1.1485,  0.1266],
+            [ 1.4743, -1.2653, -0.7096]]),
+    cloned_coefficient=tensor([[ 1.5410, -0.2934],
+            [ 0.0000,  0.5684]]))
 """)
 
 add_docstr(torch.tril,
@@ -10116,30 +9982,30 @@ Example::
 
     >>> a = torch.randn(3, 3)
     >>> a
-    tensor([[-1.0813, -0.8619,  0.7105],
-            [ 0.0935,  0.1380,  2.2112],
-            [-0.3409, -0.9828,  0.0289]])
+    tensor([[ 1.5410, -0.2934, -2.1788],
+            [ 0.5684, -1.0845, -1.3986],
+            [ 0.4033,  0.8380, -0.7193]])
     >>> torch.tril(a)
-    tensor([[-1.0813,  0.0000,  0.0000],
-            [ 0.0935,  0.1380,  0.0000],
-            [-0.3409, -0.9828,  0.0289]])
+    tensor([[ 1.5410,  0.0000,  0.0000],
+            [ 0.5684, -1.0845,  0.0000],
+            [ 0.4033,  0.8380, -0.7193]])
 
     >>> b = torch.randn(4, 6)
     >>> b
-    tensor([[ 1.2219,  0.5653, -0.2521, -0.2345,  1.2544,  0.3461],
-            [ 0.4785, -0.4477,  0.6049,  0.6368,  0.8775,  0.7145],
-            [ 1.1502,  3.2716, -1.1243, -0.5413,  0.3615,  0.6864],
-            [-0.0614, -0.7344, -1.3164, -0.7648, -1.4024,  0.0978]])
+    tensor([[ 0.5988, -1.5551, -0.3414,  1.8530,  0.4681, -0.1577],
+            [ 1.4437,  0.2660, -0.1740, -0.6787,  0.9383,  0.4889],
+            [-0.6731,  0.8728,  1.0554,  0.1778, -0.5181, -0.3067],
+            [-1.5810,  1.7066, -0.4462,  0.7440,  1.5210,  3.4105]])
     >>> torch.tril(b, diagonal=1)
-    tensor([[ 1.2219,  0.5653,  0.0000,  0.0000,  0.0000,  0.0000],
-            [ 0.4785, -0.4477,  0.6049,  0.0000,  0.0000,  0.0000],
-            [ 1.1502,  3.2716, -1.1243, -0.5413,  0.0000,  0.0000],
-            [-0.0614, -0.7344, -1.3164, -0.7648, -1.4024,  0.0000]])
+    tensor([[ 0.5988, -1.5551,  0.0000,  0.0000,  0.0000,  0.0000],
+            [ 1.4437,  0.2660, -0.1740,  0.0000,  0.0000,  0.0000],
+            [-0.6731,  0.8728,  1.0554,  0.1778,  0.0000,  0.0000],
+            [-1.5810,  1.7066, -0.4462,  0.7440,  1.5210,  0.0000]])
     >>> torch.tril(b, diagonal=-1)
     tensor([[ 0.0000,  0.0000,  0.0000,  0.0000,  0.0000,  0.0000],
-            [ 0.4785,  0.0000,  0.0000,  0.0000,  0.0000,  0.0000],
-            [ 1.1502,  3.2716,  0.0000,  0.0000,  0.0000,  0.0000],
-            [-0.0614, -0.7344, -1.3164,  0.0000,  0.0000,  0.0000]])
+            [ 1.4437,  0.0000,  0.0000,  0.0000,  0.0000,  0.0000],
+            [-0.6731,  0.8728,  0.0000,  0.0000,  0.0000,  0.0000],
+            [-1.5810,  1.7066, -0.4462,  0.0000,  0.0000,  0.0000]])
 """.format(**common_args))
 
 # docstr is split in two parts to avoid format mis-captureing :math: braces '{}'
@@ -10227,38 +10093,38 @@ Example::
 
     >>> a = torch.randn(3, 3)
     >>> a
-    tensor([[ 0.2309,  0.5207,  2.0049],
-            [ 0.2072, -1.0680,  0.6602],
-            [ 0.3480, -0.5211, -0.4573]])
+    tensor([[ 1.5410, -0.2934, -2.1788],
+            [ 0.5684, -1.0845, -1.3986],
+            [ 0.4033,  0.8380, -0.7193]])
     >>> torch.triu(a)
-    tensor([[ 0.2309,  0.5207,  2.0049],
-            [ 0.0000, -1.0680,  0.6602],
-            [ 0.0000,  0.0000, -0.4573]])
+    tensor([[ 1.5410, -0.2934, -2.1788],
+            [ 0.0000, -1.0845, -1.3986],
+            [ 0.0000,  0.0000, -0.7193]])
     >>> torch.triu(a, diagonal=1)
-    tensor([[ 0.0000,  0.5207,  2.0049],
-            [ 0.0000,  0.0000,  0.6602],
+    tensor([[ 0.0000, -0.2934, -2.1788],
+            [ 0.0000,  0.0000, -1.3986],
             [ 0.0000,  0.0000,  0.0000]])
     >>> torch.triu(a, diagonal=-1)
-    tensor([[ 0.2309,  0.5207,  2.0049],
-            [ 0.2072, -1.0680,  0.6602],
-            [ 0.0000, -0.5211, -0.4573]])
+    tensor([[ 1.5410, -0.2934, -2.1788],
+            [ 0.5684, -1.0845, -1.3986],
+            [ 0.0000,  0.8380, -0.7193]])
 
     >>> b = torch.randn(4, 6)
     >>> b
-    tensor([[ 0.5876, -0.0794, -1.8373,  0.6654,  0.2604,  1.5235],
-            [-0.2447,  0.9556, -1.2919,  1.3378, -0.1768, -1.0857],
-            [ 0.4333,  0.3146,  0.6576, -1.0432,  0.9348, -0.4410],
-            [-0.9888,  1.0679, -1.3337, -1.6556,  0.4798,  0.2830]])
+    tensor([[ 0.5988, -1.5551, -0.3414,  1.8530,  0.4681, -0.1577],
+            [ 1.4437,  0.2660, -0.1740, -0.6787,  0.9383,  0.4889],
+            [-0.6731,  0.8728,  1.0554,  0.1778, -0.5181, -0.3067],
+            [-1.5810,  1.7066, -0.4462,  0.7440,  1.5210,  3.4105]])
     >>> torch.triu(b, diagonal=1)
-    tensor([[ 0.0000, -0.0794, -1.8373,  0.6654,  0.2604,  1.5235],
-            [ 0.0000,  0.0000, -1.2919,  1.3378, -0.1768, -1.0857],
-            [ 0.0000,  0.0000,  0.0000, -1.0432,  0.9348, -0.4410],
-            [ 0.0000,  0.0000,  0.0000,  0.0000,  0.4798,  0.2830]])
+    tensor([[ 0.0000, -1.5551, -0.3414,  1.8530,  0.4681, -0.1577],
+            [ 0.0000,  0.0000, -0.1740, -0.6787,  0.9383,  0.4889],
+            [ 0.0000,  0.0000,  0.0000,  0.1778, -0.5181, -0.3067],
+            [ 0.0000,  0.0000,  0.0000,  0.0000,  1.5210,  3.4105]])
     >>> torch.triu(b, diagonal=-1)
-    tensor([[ 0.5876, -0.0794, -1.8373,  0.6654,  0.2604,  1.5235],
-            [-0.2447,  0.9556, -1.2919,  1.3378, -0.1768, -1.0857],
-            [ 0.0000,  0.3146,  0.6576, -1.0432,  0.9348, -0.4410],
-            [ 0.0000,  0.0000, -1.3337, -1.6556,  0.4798,  0.2830]])
+    tensor([[ 0.5988, -1.5551, -0.3414,  1.8530,  0.4681, -0.1577],
+            [ 1.4437,  0.2660, -0.1740, -0.6787,  0.9383,  0.4889],
+            [ 0.0000,  0.8728,  1.0554,  0.1778, -0.5181, -0.3067],
+            [ 0.0000,  0.0000, -0.4462,  0.7440,  1.5210,  3.4105]])
 """.format(**common_args))
 
 # docstr is split in two parts to avoid format mis-capturing :math: braces '{}'
@@ -10317,7 +10183,8 @@ Example::
             [1, 2, 2]])
 """.format(**factory_common_args))
 
-add_docstr(torch.true_divide, r"""
+add_docstr(torch.true_divide,
+           r"""
 true_divide(dividend, divisor, *, out) -> Tensor
 
 Alias for :func:`torch.div` with ``rounding_mode=None``.
@@ -10340,9 +10207,9 @@ Example::
 
     >>> a = torch.randn(4)
     >>> a
-    tensor([ 3.4742,  0.5466, -0.8008, -0.9079])
+    tensor([ 1.5410, -0.2934, -2.1788,  0.5684])
     >>> torch.trunc(a)
-    tensor([ 3.,  0., -0., -0.])
+    tensor([ 1., -0., -2.,  0.])
 """.format(**common_args))
 
 add_docstr(torch.fake_quantize_per_tensor_affine,
@@ -10375,11 +10242,11 @@ Example::
 
     >>> x = torch.randn(4)
     >>> x
-    tensor([ 0.0552,  0.9730,  0.3973, -1.0780])
+    tensor([ 1.5410, -0.2934, -2.1788,  0.5684])
     >>> torch.fake_quantize_per_tensor_affine(x, 0.1, 0, 0, 255)
-    tensor([0.1000, 1.0000, 0.4000, 0.0000])
+    tensor([1.5000, 0.0000, 0.0000, 0.6000])
     >>> torch.fake_quantize_per_tensor_affine(x, torch.tensor(0.1), torch.tensor(0), 0, 255)
-    tensor([0.6000, 0.4000, 0.0000, 0.0000])
+    tensor([1.5000, 0.0000, 0.0000, 0.6000])
 """)
 
 add_docstr(torch.fake_quantize_per_channel_affine,
@@ -10413,23 +10280,23 @@ Example::
 
     >>> x = torch.randn(2, 2, 2)
     >>> x
-    tensor([[[-0.2525, -0.0466],
-             [ 0.3491, -0.2168]],
+    tensor([[[ 1.5410, -0.2934],
+             [-2.1788,  0.5684]],
 
-            [[-0.5906,  1.6258],
-             [ 0.6444, -0.0542]]])
+            [[-1.0845, -1.3986],
+             [ 0.4033,  0.8380]]])
     >>> scales = (torch.randn(2) + 1) * 0.05
     >>> scales
-    tensor([0.0475, 0.0486])
-    >>> zero_points = torch.zeros(2).to(torch.long)
+    tensor([0.0140, 0.0298])
+    >>> zero_points = torch.zeros(2).to(torch.int)
     >>> zero_points
-    tensor([0, 0])
+    tensor([0, 0], dtype=torch.int32)
     >>> torch.fake_quantize_per_channel_affine(x, scales, zero_points, 1, 0, 255)
-    tensor([[[0.0000, 0.0000],
-             [0.3405, 0.0000]],
+    tensor([[[1.5441, 0.0000],
+             [0.0000, 0.5668]],
 
-            [[0.0000, 1.6134],
-            [0.6323, 0.0000]]])
+            [[0.0000, 0.0000],
+             [0.4177, 0.8353]]])
 """)
 
 add_docstr(torch.fix,
@@ -10460,12 +10327,12 @@ Example::
 
     >>> x = torch.tensor([1, 2, 3, 4])
     >>> torch.unsqueeze(x, 0)
-    tensor([[ 1,  2,  3,  4]])
+    tensor([[1, 2, 3, 4]])
     >>> torch.unsqueeze(x, 1)
-    tensor([[ 1],
-            [ 2],
-            [ 3],
-            [ 4]])
+    tensor([[1],
+            [2],
+            [3],
+            [4]])
 """.format(**common_args))
 
 add_docstr(torch.var, r"""
@@ -10566,11 +10433,11 @@ Keyword args:
 Example::
 
     >>> torch.zeros(2, 3)
-    tensor([[ 0.,  0.,  0.],
-            [ 0.,  0.,  0.]])
+    tensor([[0., 0., 0.],
+            [0., 0., 0.]])
 
     >>> torch.zeros(5)
-    tensor([ 0.,  0.,  0.,  0.,  0.])
+    tensor([0., 0., 0., 0., 0.])
 """.format(**factory_common_args))
 
 add_docstr(torch.zeros_like,
@@ -10600,8 +10467,8 @@ Example::
 
     >>> input = torch.empty(2, 3)
     >>> torch.zeros_like(input)
-    tensor([[ 0.,  0.,  0.],
-            [ 0.,  0.,  0.]])
+    tensor([[0., 0., 0.],
+            [0., 0., 0.]])
 """.format(**factory_like_common_args))
 
 add_docstr(torch.empty,
@@ -10627,9 +10494,10 @@ Keyword args:
 
 Example::
 
-    >>> torch.empty((2,3), dtype=torch.int64)
-    tensor([[ 9.4064e+13,  2.8000e+01,  9.3493e+13],
-            [ 7.5751e+18,  7.1428e+18,  7.5955e+18]])
+    >>> a=torch.empty((2,3), dtype=torch.int32, device = 'cuda')
+    >>> torch.empty_like(a)
+    tensor([[0, 0, 1],
+            [0, 1, 0]], device='cuda:0', dtype=torch.int32)
 """.format(**factory_common_args))
 
 add_docstr(torch.empty_like,
@@ -10652,10 +10520,9 @@ Keyword args:
 
 Example::
 
-    >>> a=torch.empty((2,3), dtype=torch.int32, device = 'cuda')
-    >>> torch.empty_like(a)
-    tensor([[0, 0, 0],
-            [0, 0, 0]], device='cuda:0', dtype=torch.int32)
+    >>> torch.empty((2,3), dtype=torch.int64)  # doctest: +SKIP
+    tensor([[139710277368960, 139710277368960,              32],
+            [             80,        94397984,               0]])
 """.format(**factory_like_common_args))
 
 add_docstr(torch.empty_strided,
@@ -10682,9 +10549,9 @@ Keyword args:
 Example::
 
     >>> a = torch.empty_strided((2, 3), (1, 2))
-    >>> a
-    tensor([[8.9683e-44, 4.4842e-44, 5.1239e+07],
-            [0.0000e+00, 0.0000e+00, 3.0705e-41]])
+    >>> a  # doctest: +SKIP
+    tensor([[-1.6784e+13,  4.9403e-36,  4.4842e-44],
+            [ 4.5581e-41,  0.0000e+00,  0.0000e+00]])
     >>> a.stride()
     (1, 2)
     >>> a.size()
@@ -10712,8 +10579,8 @@ Keyword args:
 Example::
 
     >>> torch.full((2, 3), 3.141592)
-    tensor([[ 3.1416,  3.1416,  3.1416],
-            [ 3.1416,  3.1416,  3.1416]])
+    tensor([[3.1416, 3.1416, 3.1416],
+            [3.1416, 3.1416, 3.1416]])
 """.format(**factory_common_args))
 
 add_docstr(torch.full_like,
@@ -10781,19 +10648,19 @@ Example::
     >>> x = torch.randn(3, 2)
     >>> y = torch.ones(3, 2)
     >>> x
-    tensor([[-0.4620,  0.3139],
-            [ 0.3898, -0.7197],
-            [ 0.0478, -0.1657]])
+    tensor([[ 1.5410, -0.2934],
+            [-2.1788,  0.5684],
+            [-1.0845, -1.3986]])
     >>> torch.where(x > 0, x, y)
-    tensor([[ 1.0000,  0.3139],
-            [ 0.3898,  1.0000],
-            [ 0.0478,  1.0000]])
+    tensor([[1.5410, 1.0000],
+            [1.0000, 0.5684],
+            [1.0000, 1.0000]])
     >>> x = torch.randn(2, 2, dtype=torch.double)
     >>> x
-    tensor([[ 1.0779,  0.0383],
-            [-0.8785, -1.1089]], dtype=torch.float64)
+    tensor([[ 0.4033,  0.8380],
+            [-0.7193, -0.4033]], dtype=torch.float64)
     >>> torch.where(x > 0, x, 0.)
-    tensor([[1.0779, 0.0383],
+    tensor([[0.4033, 0.8380],
             [0.0000, 0.0000]], dtype=torch.float64)
 
 .. function:: where(condition) -> tuple of LongTensor
@@ -10830,22 +10697,18 @@ Example::
 
     >>> A = torch.randn(3, 3)
     >>> torch.det(A)
-    tensor(0.2611)
+    tensor(1.0628)
     >>> torch.logdet(A)
-    tensor(-1.3430)
+    tensor(0.0609)
     >>> A
-    tensor([[[ 0.9254, -0.6213],
-             [-0.5787,  1.6843]],
+    tensor([[ 1.5410, -0.2934, -2.1788],
+            [ 0.5684, -1.0845, -1.3986],
+            [ 0.4033,  0.8380, -0.7193]])
 
-            [[ 0.3242, -0.9665],
-             [ 0.4539, -0.0887]],
-
-            [[ 1.1336, -0.4025],
-             [-0.7089,  0.9032]]])
     >>> A.det()
-    tensor([1.1990, 0.4099, 0.7386])
+    tensor(1.0628)
     >>> A.det().log()
-    tensor([ 0.1815, -0.8917, -0.3031])
+    tensor(0.0609)
 """)
 
 add_docstr(torch.slogdet, r"""
@@ -10902,7 +10765,6 @@ Returns:
 
 """.format(**factory_common_args))
 
-
 add_docstr(torch.hamming_window,
            """
 hamming_window(window_length, periodic=True, alpha=0.54, beta=0.46, *, dtype=None, \
@@ -10949,7 +10811,6 @@ Returns:
 
 """.format(**factory_common_args))
 
-
 add_docstr(torch.bartlett_window,
            """
 bartlett_window(window_length, periodic=True, *, dtype=None, \
@@ -10994,7 +10855,6 @@ Returns:
 
 """.format(**factory_common_args))
 
-
 add_docstr(torch.blackman_window,
            """
 blackman_window(window_length, periodic=True, *, dtype=None, \
@@ -11036,7 +10896,6 @@ Returns:
 
 """.format(**factory_common_args))
 
-
 add_docstr(torch.kaiser_window, """
 kaiser_window(window_length, periodic=True, beta=12.0, *, dtype=None, \
 layout=torch.strided, device=None, requires_grad=False) -> Tensor
@@ -11074,9 +10933,8 @@ Keyword args:
 
 """.format(**factory_common_args))
 
-
 add_docstr(torch.vander,
-           """
+           r"""
 vander(x, N=None, increasing=False) -> Tensor
 """ + r"""
 Generates a Vandermonde matrix.
@@ -11118,7 +10976,6 @@ Example::
 
 """.format(**factory_common_args))
 
-
 add_docstr(torch.unbind,
            r"""
 unbind(input, dim=0) -> seq
@@ -11134,11 +10991,11 @@ Arguments:
 Example::
 
     >>> torch.unbind(torch.tensor([[1, 2, 3],
-    >>>                            [4, 5, 6],
-    >>>                            [7, 8, 9]]))
+    ...                            [4, 5, 6],
+    ...                            [7, 8, 9]]))
     (tensor([1, 2, 3]), tensor([4, 5, 6]), tensor([7, 8, 9]))
-""")
 
+""")
 
 add_docstr(torch.combinations,
            r"""
@@ -11193,7 +11050,6 @@ Computes the `trapezoidal rule <https://en.wikipedia.org/wiki/Trapezoidal_rule>`
 :attr:`dx` can be used to specify a different constant spacing, and :attr:`x` can be
 used to specify arbitrary spacing along :attr:`dim`.
 
-
 Assuming :attr:`y` is a one-dimensional tensor with elements :math:`{y_0, y_1, ..., y_n}`,
 the default computation is
 
@@ -11246,7 +11102,7 @@ Examples::
     >>> # Computes the trapezoidal rule in 1D, spacing is implicitly 1
     >>> y = torch.tensor([1, 5, 10])
     >>> torch.trapezoid(y)
-    tensor(10.5)
+    tensor(10.5000)
 
     >>> # Computes the same trapezoidal rule directly to verify
     >>> (1 + 10 + 10) / 2
@@ -11255,12 +11111,12 @@ Examples::
     >>> # Computes the trapezoidal rule in 1D with constant spacing of 2
     >>> # NOTE: the result is the same as before, but multiplied by 2
     >>> torch.trapezoid(y, dx=2)
-    21.0
+    tensor(21.)
 
     >>> # Computes the trapezoidal rule in 1D with arbitrary spacing
     >>> x = torch.tensor([1, 3, 6])
     >>> torch.trapezoid(y, x)
-    28.5
+    tensor(28.5000)
 
     >>> # Computes the same trapezoidal rule directly to verify
     >>> ((3 - 1) * (1 + 5) + (6 - 3) * (5 + 10)) / 2
@@ -11268,29 +11124,26 @@ Examples::
 
     >>> # Computes the trapezoidal rule for each row of a 3x3 matrix
     >>> y = torch.arange(9).reshape(3, 3)
-    tensor([[0, 1, 2],
-            [3, 4, 5],
-            [6, 7, 8]])
     >>> torch.trapezoid(y)
-    tensor([ 2., 8., 14.])
+    tensor([ 2.,  8., 14.])
 
     >>> # Computes the trapezoidal rule for each column of the matrix
     >>> torch.trapezoid(y, dim=0)
-    tensor([ 6., 8., 10.])
+    tensor([ 6.,  8., 10.])
 
     >>> # Computes the trapezoidal rule for each row of a 3x3 ones matrix
     >>> #   with the same arbitrary spacing
     >>> y = torch.ones(3, 3)
     >>> x = torch.tensor([1, 3, 6])
     >>> torch.trapezoid(y, x)
-    array([5., 5., 5.])
+    tensor([5., 5., 5.])
 
     >>> # Computes the trapezoidal rule for each row of a 3x3 ones matrix
     >>> #   with different arbitrary spacing per row
     >>> y = torch.ones(3, 3)
     >>> x = torch.tensor([[1, 2, 3], [1, 3, 5], [1, 4, 7]])
     >>> torch.trapezoid(y, x)
-    array([2., 4., 6.])
+    tensor([2., 4., 6.])
 """)
 
 add_docstr(torch.trapz,
@@ -11329,7 +11182,7 @@ Examples::
     >>> # Cumulatively computes the trapezoidal rule in 1D, spacing is implicitly 1.
     >>> y = torch.tensor([1, 5, 10])
     >>> torch.cumulative_trapezoid(y)
-    tensor([3., 10.5])
+    tensor([ 3.0000, 10.5000])
 
     >>> # Computes the same trapezoidal rule directly up to each element to verify
     >>> (1 + 5) / 2
@@ -11340,12 +11193,12 @@ Examples::
     >>> # Cumulatively computes the trapezoidal rule in 1D with constant spacing of 2
     >>> # NOTE: the result is the same as before, but multiplied by 2
     >>> torch.cumulative_trapezoid(y, dx=2)
-    tensor([6., 21.])
+    tensor([ 6., 21.])
 
     >>> # Cumulatively computes the trapezoidal rule in 1D with arbitrary spacing
     >>> x = torch.tensor([1, 3, 6])
     >>> torch.cumulative_trapezoid(y, x)
-    tensor([6., 28.5])
+    tensor([ 6.0000, 28.5000])
 
     >>> # Computes the same trapezoidal rule directly up to each element to verify
     >>> ((3 - 1) * (1 + 5)) / 2
@@ -11355,18 +11208,15 @@ Examples::
 
     >>> # Cumulatively computes the trapezoidal rule for each row of a 3x3 matrix
     >>> y = torch.arange(9).reshape(3, 3)
-    tensor([[0, 1, 2],
-            [3, 4, 5],
-            [6, 7, 8]])
     >>> torch.cumulative_trapezoid(y)
-    tensor([[ 0.5,  2.],
-            [ 3.5,  8.],
-            [ 6.5, 14.]])
+    tensor([[ 0.5000,  2.0000],
+            [ 3.5000,  8.0000],
+            [ 6.5000, 14.0000]])
 
     >>> # Cumulatively computes the trapezoidal rule for each column of the matrix
     >>> torch.cumulative_trapezoid(y, dim=0)
-    tensor([[ 1.5,  2.5,  3.5],
-            [ 6.0,  8.0, 10.0]])
+    tensor([[ 1.5000,  2.5000,  3.5000],
+            [ 6.0000,  8.0000, 10.0000]])
 
     >>> # Cumulatively computes the trapezoidal rule for each row of a 3x3 ones matrix
     >>> #   with the same arbitrary spacing
@@ -11442,7 +11292,7 @@ If the `repeats` is `tensor([n1, n2, n3, ...])`, then the output will be
 """.format(**common_args))
 
 add_docstr(torch.tile, r"""
-tile(input, dims) -> Tensor
+tile(input, dims) -> Tensortor
 
 Constructs a tensor by repeating the elements of :attr:`input`.
 The :attr:`dims` argument specifies the number of repetitions
@@ -11505,14 +11355,44 @@ Example::
     >>> torch.quantize_per_tensor(torch.tensor([-1.0, 0.0, 1.0, 2.0]), 0.1, 10, torch.quint8).int_repr()
     tensor([ 0, 10, 20, 30], dtype=torch.uint8)
     >>> torch.quantize_per_tensor([torch.tensor([-1.0, 0.0]), torch.tensor([-2.0, 2.0])],
-    >>> torch.tensor([0.1, 0.2]), torch.tensor([10, 20]), torch.quint8)
+    ... torch.tensor([0.1, 0.2]), torch.tensor([10, 20]), torch.quint8)
     (tensor([-1.,  0.], size=(2,), dtype=torch.quint8,
-        quantization_scheme=torch.per_tensor_affine, scale=0.1, zero_point=10),
-        tensor([-2.,  2.], size=(2,), dtype=torch.quint8,
-        quantization_scheme=torch.per_tensor_affine, scale=0.2, zero_point=20))
+           quantization_scheme=torch.per_tensor_affine, scale=0.10000000149011612,
+           zero_point=10), tensor([-2.,  2.], size=(2,), dtype=torch.quint8,
+           quantization_scheme=torch.per_tensor_affine, scale=0.20000000298023224,
+           zero_point=20))
     >>> torch.quantize_per_tensor(torch.tensor([-1.0, 0.0, 1.0, 2.0]), torch.tensor(0.1), torch.tensor(10), torch.quint8)
     tensor([-1.,  0.,  1.,  2.], size=(4,), dtype=torch.quint8,
-       quantization_scheme=torch.per_tensor_affine, scale=0.10, zero_point=10)
+           quantization_scheme=torch.per_tensor_affine, scale=0.10000000149011612,
+           zero_point=10)
+""")
+
+add_docstr(torch.quantize_per_tensor_dynamic,
+           r"""
+quantize_per_tensor_dynamic(input, dtype, reduce_range) -> Tensor
+
+Converts a float tensor to a quantized tensor with scale and zero_point calculated
+dynamically based on the input.
+
+Arguments:
+    input (Tensor): float tensor or list of tensors to quantize
+    dtype (:class:`torch.dtype`): the desired data type of returned tensor.
+        Has to be one of the quantized dtypes: ``torch.quint8``, ``torch.qint8``
+    reduce_range (bool): a flag to indicate whether to reduce the range of quantized
+    data by 1 bit, it's required to avoid instruction overflow for some hardwares
+
+Returns:
+    Tensor: A newly (dynamically) quantized tensor
+
+Example::
+
+    >>> t = torch.quantize_per_tensor_dynamic(torch.tensor([-1.0, 0.0, 1.0, 2.0]), torch.quint8, False)
+    >>> print(t)
+    tensor([-1.,  0.,  1.,  2.], size=(4,), dtype=torch.quint8,
+           quantization_scheme=torch.per_tensor_affine, scale=0.011764705882352941,
+           zero_point=85)
+    >>> t.int_repr()
+    tensor([  0,  85, 170, 255], dtype=torch.uint8)
 """)
 
 add_docstr(torch.quantize_per_channel,
@@ -11546,7 +11426,6 @@ Example::
             [100, 200]], dtype=torch.uint8)
 """)
 
-
 add_docstr(torch.quantized_batch_norm,
            r"""
 quantized_batch_norm(input, weight=None, bias=None, mean, var, eps, output_scale, output_zero_point) -> Tensor
@@ -11574,21 +11453,20 @@ Example::
 
     >>> qx = torch.quantize_per_tensor(torch.rand(2, 2, 2, 2), 1.5, 3, torch.quint8)
     >>> torch.quantized_batch_norm(qx, torch.ones(2), torch.zeros(2), torch.rand(2), torch.rand(2), 0.00001, 0.2, 2)
-    tensor([[[[-0.2000, -0.2000],
-          [ 1.6000, -0.2000]],
+    tensor([[[[-0.4000,  2.0000],
+              [-0.4000, -0.4000]],
 
-         [[-0.4000, -0.4000],
-          [-0.4000,  0.6000]]],
+             [[-0.4000, -0.4000],
+              [-0.4000,  1.4000]]],
 
 
-        [[[-0.2000, -0.2000],
-          [-0.2000, -0.2000]],
+            [[[-0.4000, -0.4000],
+              [-0.4000, -0.4000]],
 
-         [[ 0.6000, -0.4000],
-          [ 0.6000, -0.4000]]]], size=(2, 2, 2, 2), dtype=torch.quint8,
-       quantization_scheme=torch.per_tensor_affine, scale=0.2, zero_point=2)
+             [[-0.4000, -0.4000],
+              [-0.4000, -0.4000]]]], size=(2, 2, 2, 2), dtype=torch.quint8,
+           quantization_scheme=torch.per_tensor_affine, scale=0.2, zero_point=2)
 """)
-
 
 add_docstr(torch.quantized_max_pool1d,
            r"""
@@ -11605,7 +11483,6 @@ Arguments:
     ceil_mode (bool, optional):  If True, will use ceil instead of floor to compute the output shape.
         Defaults to False.
 
-
 Returns:
     Tensor: A quantized tensor with max_pool1d applied.
 
@@ -11613,11 +11490,10 @@ Example::
 
     >>> qx = torch.quantize_per_tensor(torch.rand(2, 2), 1.5, 3, torch.quint8)
     >>> torch.quantized_max_pool1d(qx, [2])
-    tensor([[0.0000],
-            [1.5000]], size=(2, 1), dtype=torch.quint8,
-        quantization_scheme=torch.per_tensor_affine, scale=1.5, zero_point=3)
+    tensor([[1.5000],
+            [0.0000]], size=(2, 1), dtype=torch.quint8,
+           quantization_scheme=torch.per_tensor_affine, scale=1.5, zero_point=3)
 """)
-
 
 add_docstr(torch.quantized_max_pool2d,
            r"""
@@ -11634,7 +11510,6 @@ Arguments:
     ceil_mode (bool, optional):  If True, will use ceil instead of floor to compute the output shape.
         Defaults to False.
 
-
 Returns:
     Tensor: A quantized tensor with max_pool2d applied.
 
@@ -11644,15 +11519,14 @@ Example::
     >>> torch.quantized_max_pool2d(qx, [2,2])
     tensor([[[[1.5000]],
 
-            [[1.5000]]],
+             [[1.5000]]],
 
 
             [[[0.0000]],
 
-            [[0.0000]]]], size=(2, 2, 1, 1), dtype=torch.quint8,
-        quantization_scheme=torch.per_tensor_affine, scale=1.5, zero_point=3)
+             [[0.0000]]]], size=(2, 2, 1, 1), dtype=torch.quint8,
+           quantization_scheme=torch.per_tensor_affine, scale=1.5, zero_point=3)
 """)
-
 
 add_docstr(torch.Generator,
            r"""
@@ -11674,7 +11548,6 @@ Example::
     >>> g_cuda = torch.Generator(device='cuda')
 """)
 
-
 add_docstr(torch.Generator.set_state,
            r"""
 Generator.set_state(new_state) -> void
@@ -11689,8 +11562,8 @@ Example::
     >>> g_cpu = torch.Generator()
     >>> g_cpu_other = torch.Generator()
     >>> g_cpu.set_state(g_cpu_other.get_state())
+    <torch._C.Generator object at 0x...>
 """)
-
 
 add_docstr(torch.Generator.get_state,
            r"""
@@ -11706,8 +11579,8 @@ Example::
 
     >>> g_cpu = torch.Generator()
     >>> g_cpu.get_state()
+    tensor([  1, 209, 156,  ...,   0,   0,   0], dtype=torch.uint8)
 """)
-
 
 add_docstr(torch.Generator.manual_seed,
            r"""
@@ -11729,9 +11602,9 @@ Returns:
 Example::
 
     >>> g_cpu = torch.Generator()
-    >>> g_cpu.manual_seed(2147483647)
+    >>> g_cpu.manual_seed(2147483647)  # doctest: +SKIP
+    <torch._C.Generator object at 0x7f1049822e50>
 """)
-
 
 add_docstr(torch.Generator.initial_seed,
            r"""
@@ -11743,9 +11616,8 @@ Example::
 
     >>> g_cpu = torch.Generator()
     >>> g_cpu.initial_seed()
-    2147483647
+    67280421310721
 """)
-
 
 add_docstr(torch.Generator.seed,
            r"""
@@ -11757,10 +11629,9 @@ time and uses it to seed a Generator.
 Example::
 
     >>> g_cpu = torch.Generator()
-    >>> g_cpu.seed()
-    1516516984916
+    >>> g_cpu.seed()  # doctest: +SKIP
+    13325466311719426453
 """)
-
 
 add_docstr(torch.Generator.device,
            r"""
@@ -11845,9 +11716,6 @@ Keyword args:
                             and "right" corresponds to True for :attr:`right`. It will error if this is set to
                             "left" while :attr:`right` is True.
     out (Tensor, optional): the output tensor, must be the same size as :attr:`values` if provided.
-    sorter (LongTensor, optional): if provided, a tensor matching the shape of the unsorted
-                            :attr:`sorted_sequence` containing a sequence of indices that sort it in the
-                            ascending order on the innermost dimension
 
 
 Example::
@@ -11863,7 +11731,7 @@ Example::
     >>> torch.searchsorted(sorted_sequence, values)
     tensor([[1, 3, 4],
             [1, 2, 4]])
-    >>> torch.searchsorted(sorted_sequence, values, side='right')
+    >>> torch.searchsorted(sorted_sequence, values, right=True)
     tensor([[2, 3, 5],
             [1, 3, 4]])
 
