@@ -719,11 +719,11 @@ def _run_step_closures():
     return devctx
 
 
-def mark_step():
+def mark_step(device: torch.device = lazy_tensor_core._LAZYC._ltc_get_default_device()):
     if xu.getenv_as('LTC_EMIT_STEPLOG', bool, False):
         print('lazy_tensor_core.core.lazy_model::mark_step', file=sys.stderr, flush=True)
     lazy_tensor_core._LAZYC._ltc_step_marker(
-        lazy_tensor_core._LAZYC._ltc_get_default_device(), [],
+        device, [],
         wait=xu.getenv_as('LTC_SYNC_WAIT', bool, False))
     # Only emit metrics from the first local device index, to avoid emitting the
     # same values from different threads.
