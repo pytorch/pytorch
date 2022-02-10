@@ -1270,6 +1270,7 @@ def script(obj, optimize=None, _frames_up=0, _rcb=None,
         return create_script_dict(obj)
     if isinstance(obj, list):
         return create_script_list(obj)
+
     if inspect.isclass(obj):
         qualified_name = _qualified_name(obj)
         # If this type is a `nn.Module` subclass, they probably meant to pass
