@@ -124,6 +124,46 @@ class HalfRewriter : public IRMutator {
     return v;
   }
 
+  template <typename T>
+  ExprPtr mutateArithmetic(T v) {
+    IRMutator::mutate(v);
+    if (v->dtype().scalar_type() == c10::kHalf) {
+      v->set_dtype(v->dtype().cloneWithScalarType(c10::kFloat));
+    }
+    return v;
+  }
+
+  ExprPtr mutate(AddPtr v) override {
+    return mutateArithmetic(v);
+  }
+  ExprPtr mutate(SubPtr v) override {
+    return mutateArithmetic(v);
+  }
+  ExprPtr mutate(MulPtr v) override {
+    return mutateArithmetic(v);
+  }
+  ExprPtr mutate(DivPtr v) override {
+    return mutateArithmetic(v);
+  }
+  ExprPtr mutate(MaxPtr v) override {
+    return mutateArithmetic(v);
+  }
+  ExprPtr mutate(MinPtr v) override {
+    return mutateArithmetic(v);
+  }
+  ExprPtr mutate(CompareSelectPtr v) override {
+    return mutateArithmetic(v);
+  }
+  ExprPtr mutate(BroadcastPtr v) override {
+    return mutateArithmetic(v);
+  }
+  ExprPtr mutate(IfThenElsePtr v) override {
+    return mutateArithmetic(v);
+  }
+  ExprPtr mutate(IntrinsicsPtr v) override {
+    return mutateArithmetic(v);
+  }
+
  private:
   std::unordered_set<const Expr*> inserted_half_casts_;
   std::unordered_map<const Var*, const Var*> var_map;
