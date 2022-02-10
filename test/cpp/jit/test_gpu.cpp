@@ -20844,15 +20844,6 @@ TEST_F(NVFuserTest, FusionIndexHoist1_CUDA) {
   GpuLower gpulw(&fusion);
   auto kernel = gpulw.kernel();
 
-  auto is_index_times_one = [](Val* val, Val* index) -> bool {
-    auto def = dynamic_cast<BinaryOp*>(val->definition());
-    if (def == nullptr) {
-      return false;
-    }
-    return def->getBinaryOpType() == BinaryOpType::Mul &&
-        def->rhs()->isOneInt() && def->lhs() == index;
-  };
-
   auto is_index_times_ns = [](Val* val, Val* index, std::string name) -> bool {
     auto def = dynamic_cast<BinaryOp*>(val->definition());
     if (def == nullptr) {
@@ -20882,10 +20873,10 @@ TEST_F(NVFuserTest, FusionIndexHoist1_CUDA) {
         auto arith_expr = expr->as<kir::IfThenElse>()->thenBody().exprs().at(0);
         auto out_ti = arith_expr->outputs()[0]->as<kir::TensorIndex>();
         if (out_ti->view()->name() == 1) {
-          // Ref: T1[*, hoisted_index * 1] = T0[*, hoisted_index * T0.stride];
+          // Ref: T1[*, hoisted_index] = T0[*, hoisted_index * T0.stride];
           auto t1_index = out_ti->index(1);
           TORCH_CHECK(
-              is_index_times_one(t1_index, hoisted_index),
+              t1_index == hoisted_index,
               "Invalid index: ",
               t1_index->toInlineString());
           // Pred: hoisted_index < T0.size[1]
@@ -20904,10 +20895,10 @@ TEST_F(NVFuserTest, FusionIndexHoist1_CUDA) {
               "Invalid index: ",
               t0_index->toInlineString());
         } else if (out_ti->view()->name() == 2) {
-          // Ref: T3[*, hoisted_index * 1] = T2[*, hoisted_index * 1];
+          // Ref: T3[*, hoisted_index] = T2[*, hoisted_index];
           auto out_index = out_ti->index(1);
           TORCH_CHECK(
-              is_index_times_one(out_index, hoisted_index),
+              out_index == hoisted_index,
               "Invalid index: ",
               out_index->toInlineString());
           TORCH_CHECK(
@@ -20920,14 +20911,14 @@ TEST_F(NVFuserTest, FusionIndexHoist1_CUDA) {
           TORCH_CHECK(in0->view()->name() == 1);
           auto in0_index = in0->index(1);
           TORCH_CHECK(
-              is_index_times_one(in0_index, hoisted_index),
+              in0_index == hoisted_index,
               "Invalid index: ",
               in0_index->toInlineString());
         } else if (out_ti->view()->name() == 3) {
-          // Ref: T3[hoisted_index * 1] = T2[hoisted_index * 1];
+          // Ref: T3[hoisted_index] = T2[hoisted_index];
           auto out_index = out_ti->index(0);
           TORCH_CHECK(
-              is_index_times_one(out_index, hoisted_index),
+              out_index == hoisted_index,
               "Invalid index: ",
               out_index->toInlineString());
           TORCH_CHECK(
@@ -20940,11 +20931,11 @@ TEST_F(NVFuserTest, FusionIndexHoist1_CUDA) {
           TORCH_CHECK(in0->view()->name() == 2);
           auto in0_index = in0->index(0);
           TORCH_CHECK(
-              is_index_times_one(in0_index, hoisted_index),
+              in0_index == hoisted_index,
               "Invalid index: ",
               in0_index->toInlineString());
         } else if (out_ti->view()->name() == 4) {
-          // Ref: T4[0] = T3[hoisted_index * 1];
+          // Ref: T4[0] = T3[hoisted_index];
           TORCH_CHECK(
               pred->value()->definition()->as<BinaryOp>()->lhs() ==
                   hoisted_index,
@@ -20955,14 +20946,14 @@ TEST_F(NVFuserTest, FusionIndexHoist1_CUDA) {
           TORCH_CHECK(in0->view()->name() == 3);
           auto in0_index = in0->index(0);
           TORCH_CHECK(
-              is_index_times_one(in0_index, hoisted_index),
+              in0_index == hoisted_index,
               "Invalid index: ",
               in0_index->toInlineString());
         } else if (out_ti->view()->name() == 5) {
-          // Ref: T5[hoisted_index * 1] = T4[0]
+          // Ref: T5[hoisted_index] = T4[0]
           auto out_index = out_ti->index(0);
           TORCH_CHECK(
-              is_index_times_one(out_index, hoisted_index),
+              out_index == hoisted_index,
               "Invalid index: ",
               out_index->toInlineString());
           TORCH_CHECK(
