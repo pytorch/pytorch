@@ -251,7 +251,7 @@ RegisterOperators reg({
 
           auto result = at::split_with_sizes(
               (std::move(peek(stack, 0, 3))).toTensor(),
-              (std::move(peek(stack, 1, 3))).toIntVector(),
+              (std::move(peek(stack, 1, 3))).toDimVector(),
               (std::move(peek(stack, 2, 3))).toInt());
           drop(stack, 3);
           pack(stack, std::move(result));
@@ -322,7 +322,7 @@ RegisterOperators reg({
         [](Stack& stack) {
           auto a = pop(stack);
           auto b = pop(stack);
-          push(stack, at::infer_size(a.toIntVector(), b.toIntVector()));
+          push(stack, at::infer_size(a.toDimVector(), b.toDimVector()));
         },
         aliasAnalysisFromSchema()),
     OperatorGenerator(

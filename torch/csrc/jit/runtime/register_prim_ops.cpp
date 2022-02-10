@@ -406,7 +406,8 @@ static const std::vector<OperatorGeneratorArgs> opGenArgs{
         numToTensorScalar,
         aliasAnalysisFromSchema()),
     OperatorGeneratorArgs(
-        TORCH_SELECTIVE_SCHEMA("prim::RaiseException(str msg) -> ()"),
+        TORCH_SELECTIVE_SCHEMA(
+            "prim::RaiseException(str msg, str? cls=None) -> ()"),
         raiseException,
         aliasAnalysisFromSchema()),
     OperatorGeneratorArgs(
@@ -2350,7 +2351,7 @@ static const std::vector<OperatorGeneratorArgs> opGenArgs1{
           size.reserve(8);
           for (const auto i : c10::irange(num_inputs)) {
             size =
-                at::infer_size(size, peek(stack, i, num_inputs).toIntVector());
+                at::infer_size(size, peek(stack, i, num_inputs).toDimVector());
           }
           drop(stack, num_inputs);
           push(stack, IValue(size));
@@ -2453,8 +2454,22 @@ static const std::vector<OperatorGeneratorArgs> opGenArgs1{
     OperatorGeneratorArgs(
         TORCH_SELECTIVE_SCHEMA("prim::AutogradAdd(Any a, Any b) -> Any"),
         [](Stack& stack) {
-          at::Tensor a, b;
-          pop(stack, a, b);
+          IValue i_a = pop(stack);
+          IValue i_b = pop(stack);
+          if (i_a.isNone() && i_b.isNone()) {
+            stack.emplace_back(at::Tensor{});
+            return;
+          }
+          if (i_a.isNone()) {
+            stack.emplace_back(i_b.toTensor());
+            return;
+          }
+          if (i_b.isNone()) {
+            stack.emplace_back(i_a.toTensor());
+            return;
+          }
+          at::Tensor a = i_a.toTensor();
+          at::Tensor b = i_b.toTensor();
           // NOLINTNEXTLINE(bugprone-branch-clone)
           if (!a.defined() && !b.defined()) {
             // undef + undef == undef
@@ -2474,12 +2489,12 @@ static const std::vector<OperatorGeneratorArgs> opGenArgs1{
         [](Stack& stack) {
           IValue self_size, other_size;
           pop(stack, self_size, other_size);
-          auto s = self_size.toIntVector();
-          auto o = other_size.toIntVector();
+          auto s = self_size.toDimVector();
+          auto o = other_size.toDimVector();
           if (s == o) {
-            push(stack, IValue());
+            stack.emplace_back();
           } else {
-            push(stack, s);
+            stack.emplace_back(std::move(self_size));
           }
         },
         aliasAnalysisFromSchema()),

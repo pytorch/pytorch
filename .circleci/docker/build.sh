@@ -298,15 +298,6 @@ fi
 
 tmp_tag=$(basename "$(mktemp -u)" | tr '[:upper:]' '[:lower:]')
 
-# If we are trying to use nvidia cuda image make sure it exists, otherwise use IMAGE from ghcr.io
-# this logic currently only exists for ubuntu
-if [[ "$image" == *cuda*  && ${OS} == "ubuntu" ]]; then
-  IMAGE_NAME="nvidia/cuda:${CUDA_VERSION}-cudnn${CUDNN_VERSION}-devel-ubuntu${UBUNTU_VERSION}"
-  if ! DOCKER_CLI_EXPERIMENTAL=enabled docker manifest inspect "${IMAGE_NAME}" >/dev/null 2>/dev/null; then
-    IMAGE_NAME="ghcr.io/pytorch/nvidia/cuda:${CUDA_VERSION}-devel-ubuntu${UBUNTU_VERSION}"
-    INSTALL_CUDNN="True"
-  fi
-fi
 
 # Build image
 # TODO: build-arg THRIFT is not turned on for any image, remove it once we confirm
@@ -345,8 +336,6 @@ docker build \
        --build-arg "KATEX=${KATEX:-}" \
        --build-arg "ROCM_VERSION=${ROCM_VERSION:-}" \
        --build-arg "PYTORCH_ROCM_ARCH=${PYTORCH_ROCM_ARCH:-gfx900;gfx906}" \
-       --build-arg "IMAGE_NAME=${IMAGE_NAME}" \
-       --build-arg "INSTALL_CUDNN=${INSTALL_CUDNN}" \
        -f $(dirname ${DOCKERFILE})/Dockerfile \
        -t "$tmp_tag" \
        "$@" \

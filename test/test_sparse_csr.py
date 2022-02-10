@@ -11,8 +11,9 @@ from torch.testing._internal.common_utils import \
 from torch.testing._internal.common_device_type import \
     (ops, instantiate_device_type_tests, dtypes, dtypesIfCUDA, onlyCPU, onlyCUDA, skipCUDAIfNoCusparseGeneric,
      precisionOverride, skipMeta, skipCUDAIf, skipCUDAIfRocm, skipCPUIfNoMklSparse)
-from torch.testing._internal.common_methods_invocations import (sparse_csr_unary_ufuncs, )
-from torch.testing._internal.common_cuda import _get_torch_cuda_version
+from torch.testing._internal.common_methods_invocations import \
+    (op_db, sparse_csr_unary_ufuncs, )
+from torch.testing._internal.common_cuda import _get_torch_cuda_version, CUDA11OrLater
 from torch.testing._internal.common_dtype import floating_types, get_all_dtypes
 from test_sparse import CUSPARSE_SPMM_COMPLEX128_SUPPORTED
 
@@ -40,6 +41,8 @@ def _check_cusparse_sddmm_available():
     # cusparseSDDMM was added in 11.2.1 but we don't have access to patch version
     min_supported_version = (11, 3)
     return version >= min_supported_version
+
+_sparse_csr_ops = list(filter(lambda op: op.supports_sparse_csr, op_db))
 
 # This should be just an import from test_linalg instead of code duplication
 # but https://github.com/pytorch/pytorch/pull/63511#discussion_r733989701
@@ -600,6 +603,72 @@ class TestSparseCSR(TestCase):
             with self.assertRaisesRegex(RuntimeError, err_msg):
                 csr.matmul(bad_vec)
 
+    @onlyCUDA
+    @unittest.skipIf(not CUDA11OrLater, "Only CUDA 11+ is supported")
+    @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
+    def test_baddbmm(self, device, dtype):
+        def run_test(c, a, a_batched, b, op_b=False, op_out=False, *, dtype=None, device=None):
+            alpha = complex(random.random(), random.random()) if dtype.is_complex else random.random()
+            beta = complex(random.random(), random.random()) if dtype.is_complex else random.random()
+            b = b.mH if (op_b and a.shape == b.shape) else b
+
+            actual = torch.baddbmm(c, a_batched, b, alpha=alpha, beta=beta)
+
+            out = torch.empty_like(c.mH if op_out and a.shape == b.shape else c)
+            torch.baddbmm(c, a_batched, b, alpha=alpha, beta=beta, out=out)
+
+            expected = [torch.addmm(c[i], a, b[i], alpha=alpha, beta=beta) for i in range(c.shape[0])]
+            expected = torch.stack(expected, 0)
+
+            self.assertEqual(actual, out)
+            self.assertEqual(actual, expected)
+
+        for index_dtype in [torch.int32, torch.int64]:
+            for (m, n, k), batch_size, noncontiguous in zip(itertools.product([1, 5], repeat=3), [1, 3], [True, False]):
+                nnz = random.randint(0, m * k)
+                a = self.genSparseCSRTensor((m, k), nnz, dtype=dtype, device=device, index_dtype=index_dtype)
+
+                # a_batched is a regular CSR tensor but with a batch dimension in the shape
+                a_batched = torch._sparse_csr_tensor_unsafe(
+                    a.crow_indices(), a.col_indices(), a.values(), (batch_size, m, k))
+
+                b = make_tensor((batch_size, k, n), dtype=dtype, device=device, noncontiguous=noncontiguous)
+                c = make_tensor((batch_size, m, n), dtype=dtype, device=device, noncontiguous=noncontiguous)
+                for op_b, op_out in itertools.product([True, False], repeat=2):
+                    run_test(c, a, a_batched, b, op_b, op_out, dtype=dtype, device=device)
+
+    @onlyCUDA
+    @unittest.skipIf(not CUDA11OrLater, "Only CUDA 11+ is supported")
+    @skipCUDAIfNoCusparseGeneric
+    @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
+    def test_bmm(self, device, dtype):
+        def run_test(a, a_batched, b, op_b=False, op_out=False, *, dtype=None, device=None):
+            b = b.mH if (op_b and a.shape == b.shape) else b
+
+            actual = torch.bmm(a_batched, b)
+
+            out = torch.empty_like(actual.mH if op_out and a.shape == b.shape else actual)
+            torch.bmm(a_batched, b, out=out)
+
+            expected = [torch.mm(a, b[i]) for i in range(b.shape[0])]
+            expected = torch.stack(expected, 0)
+
+            self.assertEqual(actual, out)
+            self.assertEqual(actual, expected)
+
+        for index_dtype in [torch.int32, torch.int64]:
+            for (m, n, k), batch_size, noncontiguous in zip(itertools.product([1, 5], repeat=3), [1, 3], [True, False]):
+                nnz = random.randint(0, m * k)
+                a = self.genSparseCSRTensor((m, k), nnz, dtype=dtype, device=device, index_dtype=index_dtype)
+
+                # a_batched is a regular CSR tensor but with a batch dimension in the shape
+                a_batched = torch._sparse_csr_tensor_unsafe(
+                    a.crow_indices(), a.col_indices(), a.values(), (batch_size, m, k))
+
+                b = make_tensor((batch_size, k, n), dtype=dtype, device=device, noncontiguous=noncontiguous)
+                for op_b, op_out in itertools.product([True, False], repeat=2):
+                    run_test(a, a_batched, b, op_b, op_out, dtype=dtype, device=device)
+
     def run_test_block_addmm_addmv(self, addmv_addmm, c, a, b, op_b=False, op_out=False, *, dtype=None, device=None):
         alpha = complex(random.random(), random.random()) if dtype.is_complex else random.random()
         beta = complex(random.random(), random.random()) if dtype.is_complex else random.random()
@@ -656,7 +725,7 @@ class TestSparseCSR(TestCase):
                 c = make_tensor((m * block_size,), dtype=dtype, device=device, noncontiguous=noncontiguous)
                 self.run_test_block_addmm_addmv(torch.addmv, c, a, b, dtype=dtype, device=device)
 
-    @onlyCUDA
+    @skipCPUIfNoMklSparse
     @skipCUDAIfRocm
     @unittest.skipIf(not TEST_SCIPY, "SciPy not found")
     @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
@@ -757,7 +826,6 @@ class TestSparseCSR(TestCase):
             test_shape(7, 8, 9, 20, False, index_dtype)
             test_shape(7, 8, 9, 20, True, index_dtype)
 
-    @skipCPUIfNoMklSparse
     @dtypes(*floating_and_complex_types())
     @dtypesIfCUDA(*get_all_complex_dtypes(),
                   *get_all_fp_dtypes(include_half=SM53OrLater and TEST_CUSPARSE_GENERIC,
@@ -1010,9 +1078,10 @@ class TestSparseCSR(TestCase):
                         torch.float64: 1e-8, torch.complex128: 1e-8})
     def test_sparse_triangular_solve(self, device, dtype):
 
-        def run_test(n, k, upper, unitriangular, transpose):
+        def run_test(n, k, upper, unitriangular, transpose, zero):
             triangle_function = torch.triu if upper else torch.tril
-            A = make_tensor((n, n), dtype=dtype, device=device)
+            make_A = torch.zeros if zero else make_tensor
+            A = make_A((n, n), dtype=dtype, device=device)
             A = triangle_function(A)
             A_sparse = A.to_sparse_csr()
             B = make_tensor((n, k), dtype=dtype, device=device)
@@ -1024,6 +1093,9 @@ class TestSparseCSR(TestCase):
             actual_X = actual.solution
             actual_A_clone = actual.cloned_coefficient
             self.assertTrue(actual_A_clone.numel() == 0)
+            if A_sparse._nnz() == 0:
+                self.assertTrue(actual_X.isnan().all())
+                return
             self.assertEqual(actual_X, expected_X)
 
             # test out with C contiguous strides
@@ -1058,9 +1130,9 @@ class TestSparseCSR(TestCase):
 
         ks = [0, 1, 3]
         ns = [5, 3, 0]
-        for (k, n), (upper, unitriangular, transpose) in itertools.product(itertools.product(ks, ns),
-                                                                           itertools.product([True, False], repeat=3)):
-            run_test(n, k, upper, unitriangular, transpose)
+        for (k, n), (upper, unitriangular, transpose, zero) in itertools.product(itertools.product(ks, ns),
+                                                                                 itertools.product([True, False], repeat=4)):
+            run_test(n, k, upper, unitriangular, transpose, zero)
 
     @skipCUDAIfRocm
     @onlyCUDA
@@ -1110,6 +1182,7 @@ class TestSparseCSR(TestCase):
 
     @skipCUDAIfRocm
     @onlyCUDA
+    @skipCUDAIf(True, "Causes CUDA memory exception, see https://github.com/pytorch/pytorch/issues/72177")
     @skipCUDAIf(
         not _check_cusparse_sddmm_available(),
         "cuSparse Generic API SDDMM is not available"
@@ -1182,16 +1255,20 @@ class TestSparseCSR(TestCase):
 
             self.assertEqual(csr_sparse.to_dense(), dense)
 
-    @ops(sparse_csr_unary_ufuncs)
-    def test_sparse_csr_unary_consistency(self, device, dtype, op):
+    @ops(_sparse_csr_ops)
+    def test_sparse_csr_consistency(self, device, dtype, op):
         samples = op.sample_inputs(device, dtype)
+
+        # Fail early to prevent silent success with this test
+        ndims_equals_2d = (s.input.ndim == 2 for s in samples)
+        if not any(ndims_equals_2d):
+            raise ValueError("Expected at least one 2D tensor in samples.")
 
         for sample in samples:
             assert torch.is_tensor(sample.input)
             # Sparse CSR only supports 2D tensors as inputs
-            # Fail early to prevent silent success with this test
             if sample.input.ndim != 2:
-                raise ValueError("Expected 2D tensor but got tensor with dimension: {sample.input.ndim}.")
+                continue
 
             expected = op(sample.input)
             assert torch.is_tensor(expected)
@@ -1199,6 +1276,33 @@ class TestSparseCSR(TestCase):
             assert torch.is_tensor(output)
 
             self.assertEqual(output.to_dense(), expected)
+
+    # Currently, there is no rule in PyTorch for filling zeros in the outputs
+    #   from operations on Sparse CSR tensors. Hence only those operators are supported
+    #   which have 0->0 correspondence, example: sin(0) = 0, tan(0) = 0 but
+    #   cos(0) = 1 (and hence it's not supported).
+    # Note: here, we do this test only for unary operators
+    @ops(sparse_csr_unary_ufuncs)
+    def test_zero_to_zero_correspondence_unary(self, device, dtype, op):
+        zero = torch.zeros((1, 2), dtype=dtype, device=device)
+        tensor_explicit_zeros = torch.sparse_csr_tensor([0, 1], [1], [0], dtype=dtype, device=device)
+
+        output_zero = op(zero)
+        expected_zero = zero.to(output_zero.dtype)
+
+        output_explicit_zeros = op(tensor_explicit_zeros).to_dense()
+        expected_explicit_zeros = tensor_explicit_zeros.to_dense().to(output_explicit_zeros.dtype)
+
+        for (output, expected) in [
+                (output_zero, expected_zero),
+                (output_explicit_zeros, expected_explicit_zeros)
+        ]:
+            self.assertEqual(output, expected, f"This operator ({op.name}) should not be supported for "
+                             "Sparse CSR as it breaks 0->0 correspondence.")
+
+        for inp in [zero.to_sparse_csr(), tensor_explicit_zeros]:
+            self.assertEqual(op(inp).values().numel(), inp.values().numel(),
+                             f"{op.name} fails to preserve sparsity pattern.")
 
     @ops(sparse_csr_unary_ufuncs)
     def test_sparse_csr_unary_out(self, device, dtype, op):
@@ -1289,6 +1393,21 @@ class TestSparseCSR(TestCase):
             run_test(shape, 0, index_dtype, dim0, dim1)
             run_test(shape, max(shape), index_dtype, dim0, dim1)
             run_test(shape, shape[0] * shape[1], index_dtype, dim0, dim1)
+
+    # TODO: This is a stopgap for a rigorous extension of our autograd tests
+    # to test the functionality of detach
+    @skipMeta
+    @dtypes(*get_all_dtypes())
+    def test_exercise_detach(self, device, dtype):
+        shape = (3, 3)
+        nnz = 4
+        for index_dtype in [torch.int32, torch.int64]:
+            inp = self.genSparseCSRTensor(shape, nnz, dtype=dtype, device=device, index_dtype=index_dtype)
+            detached_inp = inp.detach()
+            self.assertEqual(inp.values(), detached_inp.values())
+            self.assertEqual(inp.crow_indices(), detached_inp.crow_indices())
+            self.assertEqual(inp.col_indices(), detached_inp.col_indices())
+
 
 
 # e.g., TestSparseCSRCPU and TestSparseCSRCUDA
