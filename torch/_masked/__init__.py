@@ -414,7 +414,7 @@ def _input_mask(input: Tensor, *args, **kwargs) -> Tensor:
             raise IndexError("_input_mask expected broadcastable mask (got mask dimensionality higher than of the input)")
         if mask.layout == torch.strided:
             mask = torch.broadcast_to(mask.clone(), input.shape).to(dtype=torch.bool)
-        elif input.layout == torch.sparse_coo:
+        elif mask.layout == torch.sparse_coo:
             mask = torch._sparse_broadcast_to(mask, input.shape)
         else:
             assert mask.layout == torch.sparse_csr
@@ -431,7 +431,7 @@ def _input_mask(input: Tensor, *args, **kwargs) -> Tensor:
     # multiplication of tensors with different layouts are supported.
     if mask.layout != input.layout:
         if input.layout == torch.strided:
-            if mask.dtype == torch.bool and not mask.is_coalesced():
+            if mask.layout == torch.sparse_coo and mask.dtype == torch.bool and not mask.is_coalesced():
                 # to_dense calls coalesce but coalesce not implemented for Bool
                 mask = mask.to(torch.uint8).coalesce().to(torch.bool)
             mask = mask.to_dense()
@@ -557,7 +557,6 @@ def sum(input: Tensor,
                 torch._convert_indices_from_csr_to_coo(mask.crow_indices(), mask.col_indices()),
                 mask.values(), mask.shape)._coalesced_(True)
             mask_input = (coo_input * coo_mask).to_sparse_csr()
-
         result = torch._sparse_csr_sum(mask_input, dim=list(dim_), keepdim=bool(keepdim), dtype=dtype)
         return result
     else:

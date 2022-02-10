@@ -4888,8 +4888,6 @@
     SparseCPU: _sparse_sum_backward_cpu
     SparseCUDA: _sparse_sum_backward_cuda
 
-- func: _sparse_csr_sum.dtype(Tensor self, *, ScalarType? dtype=None) -> Tensor
-
 - func: _sparse_csr_sum.dim_dtype(Tensor self, int[1] dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor
   dispatch:
     SparseCsrCPU: _sparse_csr_sum

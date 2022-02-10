@@ -1063,14 +1063,16 @@ def sample_inputs_mixed_masked_reduction(op_info, device, dtype, requires_grad, 
                 # keepdim is True.
                 if not (sample_input.input.ndim == 2 and sample_input.kwargs.get('keepdim')):
                     continue
-
+                # TODO: implement cuda support for reductions on CSR tensors
+                if device != 'cpu':
+                    continue
             # input has given layout, mask is strided or None:
             inputs.append(SampleInput(to_layout(sample_input.input),
                                       args=sample_input.args, kwargs=sample_input.kwargs))
             mask = sample_input.kwargs.get('mask')
             if mask is not None:
                 sample_input_kwargs = sample_input.kwargs.copy()
-                sample_input_kwargs = sample_input_kwargs.update(mask=to_layout(mask))
+                sample_input_kwargs.update(mask=to_layout(mask))
                 # input is strided, mask has given layout:
                 inputs.append(SampleInput(sample_input.input.detach().clone().requires_grad_(requires_grad),
                                           args=sample_input.args, kwargs=sample_input_kwargs))

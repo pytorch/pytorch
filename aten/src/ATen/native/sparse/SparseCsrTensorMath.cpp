@@ -688,8 +688,30 @@ TORCH_IMPL_FUNC(_convert_indices_from_csr_to_coo_structured_cpu) (
   /*
     Reductions on sparse CSR tensors using masked semantics.
 
-    A CSR tensor is a 2D tensor that is specified by a 3-tuple
-    (crow_indices, col_indices, values).
+    - A CSR tensor is a 2D tensor that is specified by a 3-tuple
+      (crow_indices, col_indices, values).
+
+    - To support a reduction operator op on CSR tensors, define the
+      following functions:
+
+        template <typename scalar_t>
+        scalar_t reduce_op(const scalar_t& lhs, const scalar_t& rhs) { return lhs op rhs; }
+
+        Tensor _sparse_csr_op(const Tensor& input, IntArrayRef dims_to_sum, bool keepdim, c10::optional<ScalarType> dtype) { ... }
+
+      and add the following lines
+
+        - func: _sparse_csr_op.dim_dtype(Tensor self, int[1] dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor
+          dispatch:
+            SparseCsrCPU: _sparse_csr_op
+
+      to native_functions.yaml file.
+
+      Use reduce_plus and _sparse_csr_sum implementations as templates.
+
+    - Since a CSR tensor dimensionality is always 2, only reductions
+      with keepdim=True can be supported.
+
   */
 
 namespace {
@@ -891,13 +913,15 @@ Tensor reduce_sparse_csr_dim01_cpu_template(const Tensor& sparse, scalar_t ident
   auto numel = values.numel();
   auto nnz = std::min<int64_t>(1, numel);
 
-  /* TODO: we can likely do 3x better than parallel_reduce:
+  /* TODO: we can likely do about 3x better than parallel_reduce:
 
-In [6]: t=torch.randn(5000, 5000).to_sparse_csr()
-In [7]: %timeit torch._sparse_csr_sum(t, dim=(0, 1), keepdim=True)
-3.39 ms ± 340 ns per loop (mean ± std. dev. of 7 runs, 100 loops each)
-In [8]: %timeit torch._sparse_csr_sum(t)
-1.07 ms ± 825 ns per loop (mean ± std. dev. of 7 runs, 1000 loops each)
+In [2]: t=torch.randn(5000, 5000).to_sparse_csr()
+
+In [3]: %timeit torch._sparse_csr_sum(t, dim=(0, 1), keepdim=True)
+3.39 ms ± 898 ns per loop (mean ± std. dev. of 7 runs, 100 loops each)
+
+In [4]: %timeit torch.sum(t.values())
+1.07 ms ± 291 ns per loop (mean ± std. dev. of 7 runs, 1000 loops each)
   */
   scalar_t* values_ptr = values.data_ptr<scalar_t>();
   scalar_t value = at::parallel_reduce(
@@ -952,6 +976,7 @@ Tensor reduce_sparse_csr_cpu_template(const Tensor& sparse, std::vector<int64_t>
 template <typename scalar_t>
 Tensor reduce_sparse_csr_cpu_template(const Tensor& sparse, IntArrayRef dims_to_sum, bool keepdim, scalar_t identity, scalar_t (*rop)(const scalar_t& a, const scalar_t& b)) {
   TORCH_INTERNAL_ASSERT(sparse.is_sparse_csr());
+  TORCH_CHECK(keepdim, "reduction operations on CSR tensors with keepdim=False is unsupported");
   TORCH_INTERNAL_ASSERT(sparse.device() == kCPU);
 
   const int64_t input_dim = sparse.dim();
@@ -963,21 +988,7 @@ Tensor reduce_sparse_csr_cpu_template(const Tensor& sparse, IntArrayRef dims_to_
     dims.emplace_back(0);
     dims.emplace_back(1);
   }
-  if (dims.size() == 2 && !keepdim) {
-    Tensor values = reduce_sparse_csr_cpu_template(sparse, dims, identity, rop).values();
-    if (values.numel() == 0) {
-      Tensor result = at::empty({1}, values.options());
-      result.fill_(identity);
-      return result[0];
-      //return at::tensor(ArrayRef<scalar_t>{identity}, values.options());
-    } else {
-      TORCH_INTERNAL_ASSERT(values.numel() == 1);
-      return values[0];
-    }
-  } else {
-    TORCH_CHECK(keepdim, "reductions on CSR tensors along one dimension requires keepdim=True");
-    return reduce_sparse_csr_cpu_template(sparse, dims, identity, rop);
-  }
+  return reduce_sparse_csr_cpu_template(sparse, dims, identity, rop);
 }
 
 template <typename scalar_t>
@@ -986,7 +997,6 @@ scalar_t reduce_plus(const scalar_t& lhs, const scalar_t& rhs) {
 }
 
 }  // namespace
-
 
 Tensor _sparse_csr_sum(const Tensor& input, IntArrayRef dims_to_sum, bool keepdim, c10::optional<ScalarType> dtype) {
   ScalarType dtype_ = dtype.value_or(input.scalar_type());
@@ -999,26 +1009,6 @@ Tensor _sparse_csr_sum(const Tensor& input, IntArrayRef dims_to_sum, bool keepdi
     });
   return result;
 }
-
-Tensor _sparse_csr_sum(const Tensor& input, c10::optional<ScalarType> dtype) {
-  TORCH_INTERNAL_ASSERT(input.is_sparse_csr());
-  return input.values().sum(dtype);
-}
-
-  /*
-
-    To add a new reduction operator op for CSR tensors, define
-
-      template <typename scalar_t>
-      scalar_t reduce_op(const scalar_t& lhs, const scalar_t& rhs) { return lhs op rhs; }
-
-      Tensor _sparse_csr_op(const Tensor& input, IntArrayRef dims_to_sum, bool keepdim, c10::optional<ScalarType> dtype) { ... }
-
-      Tensor _sparse_csr_op(const Tensor& input, c10::optional<ScalarType> dtype) { ... }
-
-    Use reduce_plus and sparse_csr_sum as examples.
-
-   */
 
 } // namespace native
 } // namespace at
