@@ -14,7 +14,6 @@ from typing import (
     Any,
     Callable,
     Dict,
-    Iterable,
     List,
     Optional,
     Set,
@@ -294,7 +293,8 @@ class ZeroRedundancyOptimizer(Optimizer, Joinable):
 
     Arguments:
         params (``Iterable``): an ``Iterable`` of :class:`torch.Tensor` s
-            giving all parameters, which will be sharded across ranks.
+            or :class:`dict` giving all parameters, which will be sharded
+            across ranks.
 
     Keyword Args:
         optimizer_class (:class:`torch.nn.Optimizer`): the class of the local
@@ -1298,7 +1298,7 @@ class ZeroRedundancyOptimizer(Optimizer, Joinable):
 
     def _verify_and_init_params(
         self, params: Any,
-    ) -> Union[Iterable[torch.Tensor], Iterable[dict]]:
+    ) -> Union[List[torch.Tensor], List[dict]]:
         r"""
         Verifies the type of ``params`` and initializes ``self._all_params``
         as a :class:`list` of all parameters if ``params`` is valid.
@@ -1314,9 +1314,7 @@ class ZeroRedundancyOptimizer(Optimizer, Joinable):
         Returns:
             The persistent form of ``params`` to be passed into the parent
             :class:`Optimizer` constructor -- i.e. returns ``params`` as a
-            :class:`list` if it is originally any iterable of
-            :class:`torch.Tensor` to ensure it can be iterated over again, and
-            returns ``params`` as is if it is an iterable of ``dict``.
+            :class:`list` to ensure that it can be iterated over again.
         """
         if isinstance(params, torch.Tensor):
             raise TypeError("`params` argument should be an iterable of "
@@ -1340,7 +1338,6 @@ class ZeroRedundancyOptimizer(Optimizer, Joinable):
         # Ensure that `self._all_params` contains a list of all parameters
         if all_tensors:
             self._all_params = all_params
-            return self._all_params
         elif all_dicts:
             self._all_params = []
             # `all_params` contains parameter groups (not parameters)
@@ -1352,7 +1349,7 @@ class ZeroRedundancyOptimizer(Optimizer, Joinable):
                         "the group"
                     )
                 self._all_params.extend(param_group["params"])
-            return params
+        return all_params
 
     def _verify_same_dense_param_type(self) -> None:
         r"""
