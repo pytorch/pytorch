@@ -122,40 +122,57 @@ class TestQuantizeDBRIndividualOps(QuantizeDBRTestCase):
     Tests that DBR quantization covers individual ops
     """
     def test_conv(self):
+        convs = {1: nn.Conv1d, 2: nn.Conv2d, 3: nn.Conv3d}
+
         class M(torch.nn.Module):
-            def __init__(self):
+            def __init__(self, dim):
                 super().__init__()
-                self.conv = torch.nn.Conv2d(1, 1, 1)
+                self.conv = convs[dim](3, 3, 3)
 
             def forward(self, x):
                 x1 = self.conv(x)
                 return x1
 
-        m = M().eval()
-        qconfig = torch.quantization.default_qconfig
-        self._test_auto_tracing(m, qconfig, (torch.randn(1, 1, 2, 2),))
+        data = {
+            1: torch.randn(1, 3, 10),
+            2: torch.randn(1, 3, 10, 10),
+            3: torch.randn(1, 3, 5, 5, 5)
+        }
+        for dim in range(1, 4):
+            m = M(dim).eval()
+            qconfig = torch.quantization.default_qconfig
+            self._test_auto_tracing(m, qconfig, (data[dim],))
 
     def test_conv_functional(self):
+        convs = {1: F.conv1d, 2: F.conv2d, 3: F.conv3d}
 
         class M(torch.nn.Module):
-            def __init__(self, weight2d, bias2d):
+            def __init__(self, dim, weight, bias):
                 super().__init__()
-                self.weight2d = torch.nn.Parameter(weight2d)
-                self.bias2d = torch.nn.Parameter(bias2d)
-                self.stride2d = (1, 1)
-                self.padding2d = (0, 0)
-                self.dilation2d = (1, 1)
+                self.conv_func = convs[dim]
+                self.weight = torch.nn.Parameter(weight)
+                self.bias = torch.nn.Parameter(bias)
+                self.stride = (1,) * dim
+                self.padding = (0,) * dim
+                self.dilation = (1,) * dim
                 self.groups = 1
 
             def forward(self, x):
-                x = F.conv2d(
-                    x, self.weight2d, self.bias2d, self.stride2d, self.padding2d,
-                    self.dilation2d, self.groups)
+                x = self.conv_func(
+                    x, self.weight, self.bias, self.stride, self.padding,
+                    self.dilation, self.groups)
                 return x
 
-        model_fp32 = M(torch.randn(1, 1, 1, 1), torch.randn(1)).eval()
-        qconfig = torch.quantization.default_qconfig
-        self._test_auto_tracing(model_fp32, qconfig, (torch.randn(1, 1, 2, 2),))
+        data = {
+            1: torch.randn(1, 3, 10),
+            2: torch.randn(1, 3, 10, 10),
+            3: torch.randn(1, 3, 5, 5, 5)
+        }
+        bias = torch.randn(1)
+        for dim in range(1, 4):
+            model_fp32 = M(dim, data[dim], bias).eval()
+            qconfig = torch.quantization.default_qconfig
+            self._test_auto_tracing(model_fp32, qconfig, (data[dim],))
 
     def test_linear_dynamic(self):
         class M(torch.nn.Module):
