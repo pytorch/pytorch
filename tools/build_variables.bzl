@@ -1140,6 +1140,7 @@ aten_native_source_non_codegen_list = [
     "aten/src/ATen/native/quantized/cpu/qmatmul.cpp",
     "aten/src/ATen/native/quantized/cpu/qmul.cpp",
     "aten/src/ATen/native/quantized/cpu/qnormalization.cpp",
+    "aten/src/ATen/native/quantized/cpu/qpixel_shuffle.cpp",
     "aten/src/ATen/native/quantized/cpu/qpool.cpp",
     "aten/src/ATen/native/quantized/cpu/qreduction.cpp",
     "aten/src/ATen/native/quantized/cpu/qrelu.cpp",
