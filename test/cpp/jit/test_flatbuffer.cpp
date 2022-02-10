@@ -6,16 +6,16 @@
 #include <torch/csrc/autograd/generated/variable_factories.h>
 #include <torch/csrc/jit/api/module.h>
 #include <torch/csrc/jit/frontend/resolver.h>
-#include <torch/csrc/jit/mobile/backport.h>
-#include <torch/csrc/jit/mobile/backport_manager.h>
+#include <torch/csrc/jit/mobile/compatibility/backport.h>
+#include <torch/csrc/jit/mobile/compatibility/backport_manager.h>
+#include <torch/csrc/jit/mobile/compatibility/model_compatibility.h>
+#include <torch/csrc/jit/mobile/compatibility/runtime_compatibility.h>
 #include <torch/csrc/jit/mobile/flatbuffer_loader.h>
 #include <torch/csrc/jit/mobile/import.h>
 #include <torch/csrc/jit/mobile/interpreter.h>
-#include <torch/csrc/jit/mobile/model_compatibility.h>
 #include <torch/csrc/jit/mobile/module.h>
 #include <torch/csrc/jit/mobile/parse_bytecode.h>
 #include <torch/csrc/jit/mobile/parse_operators.h>
-#include <torch/csrc/jit/mobile/runtime_compatibility.h>
 #include <torch/csrc/jit/serialization/export.h>
 #include <torch/csrc/jit/serialization/export_bytecode.h>
 #include <torch/csrc/jit/serialization/flatbuffer_serializer.h>
@@ -1038,6 +1038,28 @@ TEST(FlatbufferTest, OperatorSize1) {
   ASSERT_EQ(
       func2.get_code().operator_input_sizes_.size(),
       func2.get_code().operators_.size());
+}
+
+TEST(FlatbufferTest, BoolAndDoubleList) {
+  Module m("m");
+  c10::List<bool> boollist;
+  boollist.push_back(false);
+  IValue boollist_ival = boollist;
+  IValue doublelist = std::vector<double>{2.0};
+  m.register_attribute("bool_list", boollist_ival.type(), boollist_ival);
+  m.register_attribute("double_list", doublelist.type(), doublelist);
+
+  CompilationOptions options;
+  mobile::Module bc = jitModuleToMobile(m, options);
+  auto buff = save_mobile_module_to_bytes(bc);
+  mobile::Module bc2 = parse_mobile_module(buff.data(), buff.size());
+
+  // if the variables read are wrong type the conversion will raise exception
+  auto boolval = bc2.attr("bool_list", {}).toBoolList().get(0);
+  auto doubleval = bc2.attr("double_list", {}).toDoubleList().get(0);
+
+  ASSERT_EQ(boolval, false);
+  ASSERT_EQ(doubleval, 2.0);
 }
 
 TEST(FlatbufferTest, OperatorTest2) { // NOLINT (use =delete in gtest)

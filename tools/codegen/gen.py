@@ -508,7 +508,8 @@ def compute_meta_function_declaration(g: NativeFunctionsGroup) -> Optional[str]:
             # Generate the template declaration with one bool parameter for each
             # precomputed element. Each parameter is true if the corresponding (in
             # terms of position) precomputed element has been set.
-            precomputed_elements = [elem for replace_list in precomputed.replace.values() for elem in replace_list]
+            precomputed_values = [*precomputed.replace.values(), precomputed.add]
+            precomputed_elements = [elem for replace_list in precomputed_values for elem in replace_list]
             precomputed_template_parameters = [elem.name.upper() for elem in precomputed_elements]
             precomputed_template_params_str = ", ".join(f"bool {param} = false" for param in precomputed_template_parameters)
             precompute_template_decl = f"template <{precomputed_template_params_str}>"
@@ -596,6 +597,16 @@ struct TORCH_API structured_{name} : public {parent_class} {{
 }};
 """
 
+
+def needs_backend_select(f: NativeFunction, selector: SelectiveBuilder) -> bool:
+    name = str(f.func.name.name)
+    if name.endswith('_like') or name.startswith('new_'):
+        return False
+    if f.func.arguments.tensor_options is None:
+        return False
+    return selector.is_native_function_selected(f)
+
+
 # Generates RegisterBackendSelect.cpp, a series of kernels which provide
 # specialized computation of dispatch key for operator signatures which cannot
 # be easily done automatically using templating.
@@ -612,17 +623,11 @@ class ComputeBackendSelect:
 
     @method_with_native_function
     def __call__(self, f: NativeFunction) -> Optional[str]:
-        if str(f.func.name.name).endswith('_like') or str(f.func.name.name).startswith('new_'):
+        if not needs_backend_select(f, self.selector):
             return None
 
         name = native.name(f.func)
         native_sig = NativeSignature(f.func)
-
-        if not any(isinstance(a.argument, TensorOptionsArguments) for a in native_sig.arguments()):
-            return None
-
-        if not self.selector.is_native_function_selected(f):
-            return None
 
         native_tensor_args = [
             a for a in native_sig.arguments()
@@ -653,11 +658,9 @@ DispatchKeySet _dk_set = c10::DispatchKeySet({dispatch_key}) | c10::detail::mult
 // aten::{f.func}
 C10_ALWAYS_INLINE
 {sig.defn(name)} {{
-  static auto op = c10::Dispatcher::singleton()
-    .findSchemaOrThrow("aten::{f.func.name.name}", "{f.func.name.overload_name}")
-    .typed<{dispatcher_sig.type()}>();
   {compute_dk}
-  return op.redispatch(_dk, {', '.join(a.expr for a in dispatcher_exprs)});
+  return at::_ops::{f.func.name.unambiguous_name()}::redispatch(
+      _dk, {', '.join(a.expr for a in dispatcher_exprs)});
 }}
 """
         elif self.target is Target.REGISTRATION:
@@ -1372,7 +1375,7 @@ def gen_source_files(
         fm.write_with_template(f'Register{dispatch_key}.cpp', 'RegisterDispatchKey.cpp', lambda: {
             'extra_cuda_headers': extra_cuda_headers if is_cuda_dispatch_key(dispatch_key) else '',
             'external_backend_headers': '',
-            'dispatch_headers': dest.gen_registration_headers(backend_index, per_operator_headers),
+            'dispatch_headers': dest.gen_registration_headers(backend_index, per_operator_headers, rocm),
             'ops_headers': operator_headers(),
             'DispatchKey': dispatch_key,
             'dispatch_namespace': dispatch_key.lower(),
@@ -1410,12 +1413,16 @@ def gen_source_files(
         })
 
     # BackendSelect is generated specially
-    cpu_fm.write('RegisterBackendSelect.cpp', lambda: {
-        'backend_select_method_definitions':
-            list(mapMaybe(ComputeBackendSelect(Target.DEFINITION, selector), native_functions)),
-        'backend_select_function_registrations':
-            list(mapMaybe(ComputeBackendSelect(Target.REGISTRATION, selector), native_functions)),
-    })
+    def gen_backend_select() -> Dict[str, List[str]]:
+        relevant_fns = [fn for fn in native_functions if needs_backend_select(fn, selector)]
+        return {
+            'ops_headers': [f'#include <ATen/ops/{fn.root_name}_ops.h>' for fn in relevant_fns],
+            'backend_select_method_definitions':
+                list(mapMaybe(ComputeBackendSelect(Target.DEFINITION, selector), relevant_fns)),
+            'backend_select_function_registrations':
+                list(mapMaybe(ComputeBackendSelect(Target.REGISTRATION, selector), relevant_fns)),
+        }
+    cpu_fm.write('RegisterBackendSelect.cpp', gen_backend_select)
 
     schema_selector = selector
     if force_schema_registration:
