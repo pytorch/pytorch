@@ -459,6 +459,18 @@ class TestReductions(TestCase):
             with self.assertRaisesRegex(RuntimeError, "only tensors with up to 64 dims are supported"):
                 op(x, -1)
 
+    @onlyCPU
+    @dtypes(torch.float, torch.bfloat16)
+    def test_dim_reduction_lastdim(self, device, dtype):
+        x = torch.randn(3, 5, 40, device=device, dtype=dtype)
+        x = x[:, :, 0:40:2]
+        x2 = x.contiguous()
+        ops = [torch.norm, torch.argmax, torch.argmin]
+        for op in ops:
+            y = op(x, dim=-1)
+            y2 = op(x2, dim=-1)
+            self.assertEqual(y, y2)
+
     @skipIfNoSciPy
     def test_logsumexp(self, device):
         from scipy.special import logsumexp
@@ -1039,16 +1051,18 @@ class TestReductions(TestCase):
     def test_aminmax(self, device, dtype):
 
         def _amin_wrapper(x, dim=None, keepdims=False):
-            if dim is None:
-                return torch._aminmax(x)[0]
-            else:
-                return torch._aminmax(x, dim, keepdims)[0]
+            with self.assertWarnsOnceRegex(UserWarning, "_aminmax is deprecated"):
+                if dim is None:
+                    return torch._aminmax(x)[0]
+                else:
+                    return torch._aminmax(x, dim, keepdims)[0]
 
         def _amax_wrapper(x, dim=None, keepdims=False):
-            if dim is None:
-                return torch._aminmax(x)[1]
-            else:
-                return torch._aminmax(x, dim, keepdims)[1]
+            with self.assertWarnsOnceRegex(UserWarning, "_aminmax is deprecated"):
+                if dim is None:
+                    return torch._aminmax(x)[1]
+                else:
+                    return torch._aminmax(x, dim, keepdims)[1]
 
         self._test_minmax_helper(_amin_wrapper, np.amin, device, dtype)
         self._test_minmax_helper(_amax_wrapper, np.amax, device, dtype)

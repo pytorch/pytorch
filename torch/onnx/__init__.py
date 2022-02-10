@@ -3,14 +3,12 @@ import torch._C as _C
 TensorProtoDataType = _C._onnx.TensorProtoDataType
 OperatorExportTypes = _C._onnx.OperatorExportTypes
 TrainingMode = _C._onnx.TrainingMode
-PYTORCH_ONNX_CAFFE2_BUNDLE = _C._onnx.PYTORCH_ONNX_CAFFE2_BUNDLE
+_CAFFE2_ATEN_FALLBACK = _C._onnx._CAFFE2_ATEN_FALLBACK
 
 ONNX_ARCHIVE_MODEL_PROTO_NAME = "__MODEL_PROTO"
 
 producer_name = "pytorch"
 producer_version = _C._onnx.PRODUCER_VERSION
-constant_folding_opset_versions = [9, 10, 11, 12, 13, 14]
-
 
 class ExportTypes:
     r""""Specifies how the ONNX model is stored."""
@@ -34,7 +32,7 @@ def _export(*args, **kwargs):
 
 
 def export(model, args, f, export_params=True, verbose=False, training=TrainingMode.EVAL,
-           input_names=None, output_names=None, operator_export_type=None,
+           input_names=None, output_names=None, operator_export_type=OperatorExportTypes.ONNX,
            opset_version=None, do_constant_folding=True, dynamic_axes=None,
            keep_initializers_as_inputs=None, custom_opsets=None,
            export_modules_as_functions=False):
@@ -121,11 +119,7 @@ def export(model, args, f, export_params=True, verbose=False, training=TrainingM
             input nodes of the graph, in order.
         output_names (list of str, default empty list): names to assign to the
             output nodes of the graph, in order.
-        operator_export_type (enum, default None):
-
-            None usually means ``OperatorExportTypes.ONNX``.
-            However if PyTorch was built with ``-DPYTORCH_ONNX_CAFFE2_BUNDLE``, None means
-            ``OperatorExportTypes.ONNX_ATEN_FALLBACK``.
+        operator_export_type (enum, default OperatorExportTypes.ONNX):
 
             * ``OperatorExportTypes.ONNX``: Export all ops as regular ONNX ops
               (in the default opset domain).
@@ -186,7 +180,7 @@ def export(model, args, f, export_params=True, verbose=False, training=TrainingM
         opset_version (int, default 9): The version of the
             `default (ai.onnx) opset <https://github.com/onnx/onnx/blob/master/docs/Operators.md>`_
             to target. Must be >= 7 and <= 15.
-        do_constant_folding (bool, default False): Apply the constant-folding optimization.
+        do_constant_folding (bool, default True): Apply the constant-folding optimization.
             Constant-folding will replace some of the ops that have all constant inputs
             with pre-computed constant nodes.
         dynamic_axes (dict<string, dict<int, string>> or dict<string, list(int)>, default empty dict):
@@ -287,9 +281,11 @@ def export(model, args, f, export_params=True, verbose=False, training=TrainingM
             the opset version is set to 1. Only custom opset domain name and version should be
             indicated through this argument.
 
-        export_modules_as_functions (bool or set of str, type or nn.Module, default False): Flag to enable
+        export_modules_as_functions (bool or set of type of nn.Module, default False): Flag to enable
             exporting all ``nn.Module`` forward calls as local functions in ONNX. Or a set to indicate the
-            particular modules to export as local functions in ONNX.
+            particular types of modules to export as local functions in ONNX.
+            This feature requires ``opset_version`` >= 15, otherwise the export will fail. This is because
+            ``opset_version`` < 15 implies IR version < 8, which means no local function support.
 
             * ``False``(default): export ``nn.Module`` forward calls as fine grained nodes.
             * ``True``: export all ``nn.Module`` forward calls as local function nodes.

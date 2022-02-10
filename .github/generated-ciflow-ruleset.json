@@ -16,6 +16,7 @@
       "libtorch-linux-xenial-cuda11.3-py3.7-gcc7",
       "linux-bionic-cuda10.2-py3.9-gcc7",
       "linux-bionic-py3.7-clang9",
+      "linux-bionic-rocm4.5-py3.7",
       "linux-docs",
       "linux-docs-push",
       "linux-vulkan-bionic-py3.7-clang9",
@@ -58,17 +59,35 @@
       "linux-binary-conda",
       "linux-binary-libtorch-cxx11-abi",
       "linux-binary-libtorch-pre-cxx11",
-      "linux-binary-manywheel"
+      "linux-binary-manywheel",
+      "macos-arm64-binary-conda",
+      "macos-arm64-binary-wheel",
+      "macos-binary-conda",
+      "macos-binary-libtorch-cxx11-abi",
+      "macos-binary-libtorch-pre-cxx11",
+      "macos-binary-wheel",
+      "windows-binary-libtorch-cxx11-abi",
+      "windows-binary-libtorch-pre-cxx11",
+      "windows-binary-wheel"
     ],
-    "ciflow/binaries/conda": [
-      "linux-binary-conda"
+    "ciflow/binaries_conda": [
+      "linux-binary-conda",
+      "macos-arm64-binary-conda",
+      "macos-binary-conda"
     ],
-    "ciflow/binaries/libtorch": [
+    "ciflow/binaries_libtorch": [
       "linux-binary-libtorch-cxx11-abi",
-      "linux-binary-libtorch-pre-cxx11"
+      "linux-binary-libtorch-pre-cxx11",
+      "macos-binary-libtorch-cxx11-abi",
+      "macos-binary-libtorch-pre-cxx11",
+      "windows-binary-libtorch-cxx11-abi",
+      "windows-binary-libtorch-pre-cxx11"
     ],
-    "ciflow/binaries/wheel": [
-      "linux-binary-manywheel"
+    "ciflow/binaries_wheel": [
+      "linux-binary-manywheel",
+      "macos-arm64-binary-wheel",
+      "macos-binary-wheel",
+      "windows-binary-wheel"
     ],
     "ciflow/cpu": [
       "caffe2-linux-xenial-py3.7-gcc5.4",
@@ -104,7 +123,12 @@
       "win-vs2019-cuda11.3-py3"
     ],
     "ciflow/default": [
+      "linux-binary-conda",
+      "linux-binary-libtorch-cxx11-abi",
+      "linux-binary-libtorch-pre-cxx11",
+      "linux-binary-manywheel",
       "linux-bionic-py3.7-clang9",
+      "linux-bionic-rocm4.5-py3.7",
       "linux-docs",
       "linux-vulkan-bionic-py3.7-clang9",
       "linux-xenial-cuda11.3-py3.7-gcc7",
@@ -116,10 +140,19 @@
       "linux-xenial-py3.7-gcc5.4",
       "linux-xenial-py3.7-gcc7",
       "linux-xenial-py3.7-gcc7-no-ops",
+      "macos-arm64-binary-conda",
+      "macos-arm64-binary-wheel",
+      "macos-binary-conda",
+      "macos-binary-libtorch-cxx11-abi",
+      "macos-binary-libtorch-pre-cxx11",
+      "macos-binary-wheel",
       "pytorch-linux-xenial-py3-clang5-android-ndk-r19c-gradle-custom-build-single",
       "pytorch-linux-xenial-py3-clang5-android-ndk-r19c-gradle-custom-build-single-full-jit",
       "win-vs2019-cpu-py3",
-      "win-vs2019-cuda11.3-py3"
+      "win-vs2019-cuda11.3-py3",
+      "windows-binary-libtorch-cxx11-abi",
+      "windows-binary-libtorch-pre-cxx11",
+      "windows-binary-wheel"
     ],
     "ciflow/docs": [
       "linux-docs"
@@ -146,6 +179,7 @@
       "libtorch-linux-xenial-cuda11.3-py3.7-gcc7",
       "linux-bionic-cuda10.2-py3.9-gcc7",
       "linux-bionic-py3.7-clang9",
+      "linux-bionic-rocm4.5-py3.7",
       "linux-docs",
       "linux-docs-push",
       "linux-vulkan-bionic-py3.7-clang9",
@@ -192,6 +226,9 @@
     "ciflow/onnx": [
       "linux-xenial-py3.7-clang7-onnx"
     ],
+    "ciflow/rocm": [
+      "linux-bionic-rocm4.5-py3.7"
+    ],
     "ciflow/sanitizers": [
       "linux-xenial-py3.7-clang7-asan"
     ],
@@ -227,6 +264,7 @@
       "libtorch-linux-xenial-cuda11.3-py3.7-gcc7",
       "linux-bionic-cuda10.2-py3.9-gcc7",
       "linux-bionic-py3.7-clang9",
+      "linux-bionic-rocm4.5-py3.7",
       "linux-docs",
       "linux-vulkan-bionic-py3.7-clang9",
       "linux-xenial-cuda11.3-py3.7-gcc7",
@@ -259,7 +297,7 @@
       "win-vs2019-cuda11.3-py3"
     ],
     "ciflow/xla": [
-      "linux-bionic-py3.6-clang9"
+      "linux-bionic-py3.7-clang9"
     ]
   },
   "version": "v1"
