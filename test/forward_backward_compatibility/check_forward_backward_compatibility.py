@@ -78,6 +78,7 @@ ALLOW_LIST = [
     ("aten::slow_conv_transpose2d_backward", datetime.date(2022, 1, 31)),
     ("aten::slow_conv_transpose3d", datetime.date(2022, 1, 31)),
     ("aten::slow_conv_transpose3d_backward", datetime.date(2022, 1, 31)),
+    ("aten::_index_copy_", datetime.date(2022, 5, 31)),
     ("aten::_svd_helper", datetime.date(2022, 3, 31)),
     ("aten::linalg_svdvals", datetime.date(2022, 3, 31)),
     ("aten::linalg_svdvals_out", datetime.date(2022, 3, 31)),
@@ -159,21 +160,9 @@ def has_valid_upgraders(schema, version_map):
 
     # let's make sure this existing schema is part of possible
     # schemas
-    found = False
     for old_schema in possible_schemas:
         if old_schema == schema:
-            found = True
-
-    if found:
-        return True
-
-    # this existing schema can be up to date
-    if not found:
-        current_version = torch._C._get_max_operator_version()
-        for overload in possible_overloads:
-            if not torch._C._is_op_symbol_current(overload, current_version):
-                return False
-        return True
+            return True
 
     return False
 
@@ -204,9 +193,9 @@ def process_version_map(version_map):
 
     output = defaultdict(dict)
     for (key, entries) in version_map.items():
-        new_key = key.split(".")[0]
+        operator_name = key.split(".")[0]
         schema_entries = [parse_schema(entry.old_schema) for entry in entries]
-        output[new_key][key] = schema_entries
+        output[operator_name][key] = schema_entries
     return output
 
 def check_bc(existing_schemas):
