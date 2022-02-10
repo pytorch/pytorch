@@ -847,6 +847,10 @@ jobs:
     - setup_linux_system_environment
     - setup_ci_environment
     - run:
+        name: Check bash env
+        no_output_timeout: "1h"
+        command: cat $BASH_ENV
+    - run:
         <<: *binary_checkout
     - run:
         <<: *binary_populate_env
