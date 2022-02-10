@@ -76,6 +76,14 @@ enum DimFlags {
   STRIDE_AS_ARG = 1 << 7,
 };
 
+/// Unique hasher id values to uniquely identify the type of hash. NONE_HASH is
+/// used when a tensor is undefined.
+enum HasherFlags {
+  NONE_HASH,
+  STATIC_HASH,
+  DYNAMIC_HASH,
+};
+
 std::vector<int> genDimFlags(c10::IntArrayRef sizes, c10::IntArrayRef strides) {
   // Pack all the properties for each dimension into a uint8.
   int nDims = sizes.size();
@@ -103,7 +111,7 @@ std::vector<int> genDimFlags(c10::IntArrayRef sizes, c10::IntArrayRef strides) {
 }
 
 hash_key_t dynamic_hasher(const LocalState &state, const at::Tensor &v) {
-  hash_key_t hash = {0, static_cast<int>(packFlags(state, v)),
+  hash_key_t hash = {DYNAMIC_HASH, static_cast<int>(packFlags(state, v)),
                      static_cast<int>(state.apply(v.key_set()).raw_repr()),
                      static_cast<int>(v.ndimension())};
   auto dimFlags = genDimFlags(v.sizes(), v.strides());
@@ -114,7 +122,7 @@ hash_key_t dynamic_hasher(const LocalState &state, const at::Tensor &v) {
 /// Per-tensor cache specialization key targetting static shapes. Recordsdtype,
 /// dispatch options, aliasing, and full shapes and strides.
 hash_key_t static_hasher(const LocalState &state, const at::Tensor &v) {
-  hash_key_t hash = {1, static_cast<int>(packFlags(state, v)),
+  hash_key_t hash = {STATIC_HASH, static_cast<int>(packFlags(state, v)),
                      static_cast<int>(state.apply(v.key_set()).raw_repr()),
                      static_cast<int>(v.ndimension())};
   hash.insert(hash.end(), v.sizes().begin(), v.sizes().end());
@@ -154,12 +162,18 @@ public:
     LocalState state;
     hash_key_t cacheKey;
     for (int i = 0; i < numTensorArgs; ++i) {
-      if (hasherType == "StaticShapeHasher") {
-        auto res = static_hasher(state, tensorArgs[i]);
-        cacheKey.insert(cacheKey.end(), res.begin(), res.end());
-      } else if (hasherType == "DynamicShapeHasher") {
-        auto res = dynamic_hasher(state, tensorArgs[i]);
-        cacheKey.insert(cacheKey.end(), res.begin(), res.end());
+      if (tensorArgs[i].defined()) {
+        // Only hash the tensor when its defined.
+        if (hasherType == "StaticShapeHasher") {
+          auto res = static_hasher(state, tensorArgs[i]);
+          cacheKey.insert(cacheKey.end(), res.begin(), res.end());
+        } else if (hasherType == "DynamicShapeHasher") {
+          auto res = dynamic_hasher(state, tensorArgs[i]);
+          cacheKey.insert(cacheKey.end(), res.begin(), res.end());
+        }
+      } else {
+        // Add a value to the cacheKey to indicate a None tensor.
+        cacheKey.push_back(NONE_HASH);
       }
     }
     cacheKey.push_back(id);
@@ -181,7 +195,11 @@ public:
     std::vector<at::Tensor> tensorArgs(numTensorArgs);
     for (int i = 0; i < numTensorArgs; ++i) {
       PyObject *arg = PyTuple_GET_ITEM(args, i);
-      if (!THPVariable_Check(arg)) {
+      if (arg == Py_None) {
+        // If an input tensor is None, add it as an undefined tensor.
+        tensorArgs[i] = at::Tensor();
+      } else if (!THPVariable_Check(arg)) {
+        // Fail if its a non-tensor arg. It should be marked static.
         std::string dtype = Py_TYPE(arg)->tp_name;
         std::string index = std::to_string(i);
         throw std::runtime_error("Found an argument of type " + dtype +
@@ -190,8 +208,9 @@ public:
                                  " Please set the static_argnums correctly to "
                                  "mark the argument at index " +
                                  index + " static.");
+      } else {
+        tensorArgs[i] = THPVariable_Unpack(arg);
       }
-      tensorArgs[i] = THPVariable_Unpack(arg);
     }
     return tensorArgs;
   }
