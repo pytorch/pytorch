@@ -53,7 +53,7 @@ static inline void vectorized_reduction(char** data, int64_t n, int64_t stride,
     scalar_t buffer[Vec::size()];
     acc[0] = vop(vop(acc[0], acc[1]), vop(acc[2], acc[3]));
     acc[0].store(buffer);
-    for (int j = 1; j < Vec::size(); j++) {
+    for (const auto j : c10::irange(1, Vec::size())) {
       buffer[0] = op(buffer[0], buffer[j]);
     }
     auto dst = (scalar_t*)out_ptr;
