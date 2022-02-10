@@ -4,8 +4,7 @@ from typing import Tuple, Optional
 # Some primTorch source files are available at both build and runtime. This
 #   allows them to be used as datasources when building and be available
 #   for programmatic inspection after PyTorch is installed.
-# To do this, PyTorch's build system copies some primTorch files
-#   from tools/codegen/prim to torch/_prim, where they override placeholders.
+# To do this, this file is symlinked from torch/_prim.
 # Because of this, this file can only import Python packages and other
 #   primTorch components that are also available at both build and run time.
 

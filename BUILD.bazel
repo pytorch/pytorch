@@ -25,17 +25,22 @@ COMMON_COPTS = [
     "-DUSE_CUDNN",
 ])
 
+py_library(
+    name = "tools_codegen",
+    srcs = glob(["tools/codegen/**/*.py"]),
+)
+
 # TODO: refactor this into its own library (but how to make
 # a binary based off of a module in a library?)
 py_binary(
     name = "gen",
     srcs = ["tools/setup_helpers/gen.py"],
     deps = [
-        ":tools_codegen"
+        ":tools_codegen",
     ],
 )
 
-aten_generation_srcs = ["aten/src/ATen/native/native_functions.yaml"] + ["aten/src/ATen/native/Aliases.cpp.in"] + glob(["aten/src/ATen/templates/**"])
+aten_generation_srcs = ["aten/src/ATen/native/native_functions.yaml"] + glob(["aten/src/ATen/templates/**"])
 
 generated_cpu_cpp = [
     "aten/src/ATen/RegisterBackendSelect.cpp",
@@ -80,7 +85,6 @@ generated_cpu_cpp = [
     "aten/src/ATen/core/TensorBody.h",
     "aten/src/ATen/core/TensorMethods.cpp",
     "aten/src/ATen/core/ATenOpList.cpp",
-    "aten/src/ATen/native/Aliases.cpp",
 ]
 
 generated_cuda_cpp = [
@@ -99,11 +103,6 @@ generate_aten(
          "aten/src/ATen/Declarations.yaml",
     ],
     generator=":gen",
-)
-
-py_library(
-    name = "tools_codegen",
-    srcs = glob(["tools/codegen/**/*.py"]),
 )
 
 py_library(
@@ -1633,13 +1632,6 @@ genrule(
     outs = ["torch/csrc/api/include/torch/version.h"],
     cmd = "$(location :gen_version_header) --template-path $(location torch/csrc/api/include/torch/version.h.in) --version-path $(location version.txt) --output-path $@",
     tools = [':gen_version_header'],
-)
-
-genrule(
-    name = "copy_primtorch_aliases",
-    srcs = ["tools/codegen/prim/aliases.py"],
-    outs = ["torch/_prim/aliases.py"],
-    cmd = "cp $< $@",
 )
 
 py_binary(
