@@ -546,4 +546,3 @@ kaiming_uniform = _make_deprecate(kaiming_uniform_)
 kaiming_normal = _make_deprecate(kaiming_normal_)
 orthogonal = _make_deprecate(orthogonal_)
 sparse = _make_deprecate(sparse_)
-
