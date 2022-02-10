@@ -62,7 +62,6 @@ elif [[ ${BUILD_ENVIRONMENT} == *"parallelnative"* ]]; then
 elif [[ ${BUILD_ENVIRONMENT} == *"deploy"* ]]; then
   export USE_DEPLOY=1
 fi
-fi
 
 # TODO: Don't run this...
 pip_install -r requirements.txt || true
