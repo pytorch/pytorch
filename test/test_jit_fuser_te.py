@@ -2281,6 +2281,32 @@ class TestTEFuser(JitTestCase):
                     torch._C._jit_pass_dce(g)
                     FileCheck().check_count("TensorExprDynamicGuard", len(gen_tensor), exactly=True).run(g)
 
+    @unittest.skipIf(not RUN_CUDA, "half-precision NNC fusion requires CUDA")
+    def test_autocast_up(self):
+        def f(x):
+            y = x._autocast_to_full_precision(True, True)
+            z = torch.exp(y)
+            return z
+
+        x = torch.rand((2, 2), dtype=torch.half, device="cuda")
+        scr = torch.jit.script(f)
+        scr(x)
+        scr(x)
+        self.assertLastGraphAllFused()
+
+    @unittest.skipIf(not RUN_CUDA, "half-precision NNC fusion requires CUDA")
+    def test_autocast_down(self):
+        def f(x):
+            y = torch.sigmoid(x)
+            z = y._autocast_to_reduced_precision(True, True, torch.half, torch.half)
+            return z
+
+        x = torch.rand((2, 2), dtype=torch.float, device="cuda")
+        scr = torch.jit.script(f)
+        scr(x)
+        scr(x)
+        self.assertLastGraphAllFused()
+
 class TestTEFuserStatic(TestTEFuser):
     dynamic_shapes = False
 
