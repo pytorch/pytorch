@@ -85,20 +85,19 @@ def main():
     )
 
     # Create a vanilla PyTorch neural network.
-    # TODO: The prototype doesn't support in-place relu (and some other
-    # in-place operations. That can be fixed.)
-    inplace_relu = False
+    # TODO (samdow): fix batch norm support
+    inplace_relu = True
     net = nn.Sequential(
         nn.Conv2d(1, 64, 3),
-        nn.BatchNorm2d(64, momentum=1, affine=True),
+        nn.GroupNorm(32, 64, affine=True),
         nn.ReLU(inplace=inplace_relu),
         nn.MaxPool2d(2, 2),
         nn.Conv2d(64, 64, 3),
-        nn.BatchNorm2d(64, momentum=1, affine=True),
+        nn.GroupNorm(32, 64, affine=True),
         nn.ReLU(inplace=inplace_relu),
         nn.MaxPool2d(2, 2),
         nn.Conv2d(64, 64, 3),
-        nn.BatchNorm2d(64, momentum=1, affine=True),
+        nn.GroupNorm(32, 64, affine=True),
         nn.ReLU(inplace=inplace_relu),
         nn.MaxPool2d(2, 2),
         Flatten(),
