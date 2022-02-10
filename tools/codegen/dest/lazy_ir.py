@@ -1,4 +1,5 @@
-from typing import List, Union
+from abc import ABC, abstractmethod
+from typing import Callable, List, Union
 from dataclasses import dataclass
 from tools.codegen.context import method_with_native_function
 from tools.codegen.model import (BackendIndex, NativeFunction,
@@ -74,14 +75,21 @@ def aten_symbol(schema: LazyIrSchema) -> str:
     return f'at::aten::{schema.aten_name}'
 
 @dataclass(frozen=True)
-class LazyIR:
+class LazyIR(ABC):
     backend_index: BackendIndex
     node_base: str
+    lowering_function_type: str
+    lowering_context_type: str
+    lowering_return_type: str
 
     @method_with_native_function
     def __call__(self, f: Union[NativeFunctionsGroup, NativeFunction]) -> List[str]:
         func = f.functional.func if isinstance(f, NativeFunctionsGroup) else f.func
         return self.gen(f)
+
+    @abstractmethod
+    def lowering_body(self, f):
+        pass
 
     def gen(self, f: Union[NativeFunctionsGroup, NativeFunction]) -> List[str]:
         # for now, we just want one IR class decl and soon after also the method defs
@@ -138,14 +146,14 @@ class {schema.node_name} : public {self.node_base} {{
 
   std::string ToString() const override {{
     std::stringstream ss;
-    ss << TsNode::ToString();
+    ss << {self.node_base}::ToString();
     {members_to_string_str}
     return ss.str();
   }}
 
-  torch::lazy::TSOpVector Lower(std::shared_ptr<torch::jit::GraphFunction> function,
-                   torch::lazy::TSLoweringContext* loctx) const override {{
-    {ts_lowering_body(f)}
+  {self.lowering_return_type} Lower({self.lowering_function_type} function,
+                   {self.lowering_context_type} loctx) const override {{
+    {self.lowering_body(f)}
   }}
 
   {scalar_decls}
@@ -154,6 +162,16 @@ class {schema.node_name} : public {self.node_base} {{
 }};
 
 """, ]
+
+
+@dataclass(frozen=True)
+class TSLazyIR(LazyIR):
+    lowering_function_type: str = "std::shared_ptr<torch::jit::GraphFunction>"
+    lowering_context_type: str = "torch::lazy::TSLoweringContext*"
+    lowering_return_type: str = "torch::lazy::TSOpVector"
+
+    def lowering_body(self, f):
+        return ts_lowering_body(f)
 
 
 def lazy_tensor_decls(value_types: List[NamedCType], tensor_class: str, schema: LazyIrSchema) -> str:
