@@ -722,6 +722,9 @@ def prelu(g, self, weight):
             # make weight unidirectional broadcastable
             weight = sym_help._unsqueeze_helper(g, weight, list(range(1, self_rank - 1)))
         elif self_rank == 0:
+            # weight is always rank 1. torch allows scalar self, and ONNX is ambiguous
+            # about whether this is allowed, but some implementations enforce
+            # rank(self) >= rank(weight), which makes sense.
             self = sym_help._unsqueeze_helper(g, self, [0])
             self_rank = 1
 
