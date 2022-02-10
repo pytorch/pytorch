@@ -216,6 +216,7 @@ binary_op_supported_dtypes : Dict[Union[Callable, str], List[Tuple[torch.dtype, 
     operator.sub: fp16_dtypes,
     torch.div: fp16_dtypes,
     operator.truediv: fp16_dtypes,
+    torch.matmul: int8_dtypes,
 }
 
 default_op_supported_dtypes = {
@@ -313,6 +314,7 @@ def _to_reference(float_module, weight_qparams):
 @register_quant_pattern((torch.nn.functional.relu, torch.mul))
 @register_quant_pattern((torch.relu, operator.add))
 @register_quant_pattern((torch.relu, operator.mul))
+@register_quant_pattern(torch.matmul)
 class BinaryOpQuantizeHandler(QuantizeHandler):
     def __init__(
             self,
@@ -348,6 +350,7 @@ class BinaryOpQuantizeHandler(QuantizeHandler):
             torch.add: torch.ops.quantized.add,
             operator.mul: torch.ops.quantized.mul,
             torch.mul: torch.ops.quantized.mul,
+            torch.matmul: torch.ops.quantized.matmul,
         }
         qbin_relu_op_mapping: Dict[Union[Callable, str], Callable] = {
             operator.add: torch.ops.quantized.add_relu,
@@ -538,30 +541,27 @@ class CatQuantizeHandler(QuantizeHandler):
                 convert_custom_config_dict: Dict[str, Any] = None) -> Node:
         if not self.all_node_args_are_tensors:
             return NotImplemented
-        if is_reference:
-            act_dtype = activation_dtype(qconfig)
-            if act_dtype == torch.float:
-                op_out = quantized_graph.node_copy(node, load_arg(quantized=torch.float))
-                return op_out
-            else:
-                activation_post_process = \
-                    self._maybe_get_last_node_only_observer(modules)
-                assert activation_post_process is not None
-                # make sure the first argument is quantized to act_dtype
-                load_arg(quantized={0: act_dtype})(node.args)
-                args = list(load_arg(quantized=torch.float)(node.args))
-                kwargs = load_arg(quantized=torch.float)(node.kwargs)
-                op_out = quantized_graph.node_copy(node, load_arg(quantized=torch.float))
-                return quantize_node(
-                    op_out,
-                    activation_post_process,
-                    node,
-                    modules,
-                    quantized_graph,
-                    node_name_to_scope,
-                    is_input=False)
+        act_dtype = activation_dtype(qconfig)
+        if act_dtype == torch.float:
+            op_out = quantized_graph.node_copy(node, load_arg(quantized=torch.float))
+            return op_out
         else:
-            return quantized_graph.node_copy(node, load_arg(quantized=torch.quint8))
+            activation_post_process = \
+                self._maybe_get_last_node_only_observer(modules)
+            assert activation_post_process is not None
+            # make sure the first argument is quantized to act_dtype
+            load_arg(quantized={0: act_dtype})(node.args)
+            args = list(load_arg(quantized=torch.float)(node.args))
+            kwargs = load_arg(quantized=torch.float)(node.kwargs)
+            op_out = quantized_graph.node_copy(node, load_arg(quantized=torch.float))
+            return quantize_node(
+                op_out,
+                activation_post_process,
+                node,
+                modules,
+                quantized_graph,
+                node_name_to_scope,
+                is_input=False)
 
 # handle conv, maybe followed by relu
 # NB: matching order is reversed, that is we match from the bottom of this list to the beginning
