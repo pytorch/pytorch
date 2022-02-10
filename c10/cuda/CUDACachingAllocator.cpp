@@ -1562,7 +1562,9 @@ static inline void assertValidDevice(int device) {
   const auto device_num = caching_allocator.device_allocator.size();
   TORCH_CHECK(
       0 <= device && device < static_cast<int64_t>(device_num),
-      "Invalid device argument.");
+      "Invalid device argument ",
+      device,
+      ": did you call init?");
 }
 
 DeviceStats getDeviceStats(int device) {
