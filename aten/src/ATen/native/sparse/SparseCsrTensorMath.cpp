@@ -22,6 +22,7 @@
 #include <ATen/ops/_convert_indices_from_coo_to_csr_native.h>
 #include <ATen/ops/_convert_indices_from_csr_to_coo_native.h>
 #include <ATen/ops/_sparse_csr_tensor_unsafe_native.h>
+#include <ATen/ops/_unique.h>
 #include <ATen/ops/abs.h>
 #include <ATen/ops/abs_native.h>
 #include <ATen/ops/add.h>
@@ -89,13 +90,11 @@
 #include <ATen/ops/tan_native.h>
 #include <ATen/ops/tanh.h>
 #include <ATen/ops/tanh_native.h>
+#include <ATen/ops/tensor.h>
 #include <ATen/ops/trunc.h>
 #include <ATen/ops/trunc_native.h>
 #include <ATen/ops/zeros.h>
 #endif
-
-#include <ATen/ops/_unique.h>
-#include <ATen/ops/tensor.h>
 
 #include <algorithm>
 
