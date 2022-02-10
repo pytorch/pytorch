@@ -205,6 +205,7 @@ private:
   : dispatch_arg_indices_reverse_(dispatch_arg_indices_reverse)
   , nonFallthroughKeys_(DispatchKeySet::FULL)
   , requiresBitsetPerBackend_(false) {
+    nonFallthroughKeysPerBackend_.reserve(num_backends);
     for (const auto i : c10::irange(nonFallthroughKeysPerBackend_.size())) {
       nonFallthroughKeysPerBackend_[i] = DispatchKeySet::FULL;
     }
@@ -224,7 +225,8 @@ private:
   DispatchKeySet nonFallthroughKeys_;
   // Set of functionality keys for which the operator does NOT have fallthrough kernel, defined PER BACKEND.
   // This is only needed if we know that the operator has a different set of fallthroughs defined for some backends.
-  std::array<DispatchKeySet, num_backends> nonFallthroughKeysPerBackend_;
+  //std::array<DispatchKeySet, num_backends> nonFallthroughKeysPerBackend_;
+  std::vector<DispatchKeySet> nonFallthroughKeysPerBackend_;
   // Flag to tell us if we can use the single set of nonFallthroughKeys_ (fast path),
   // or if we need to fall back to the slower path and check nonFallthroughKeysPerBackend_
   bool requiresBitsetPerBackend_;
