@@ -7656,7 +7656,7 @@ class TestONNXRuntime(unittest.TestCase):
                 self,
                 input1: Tuple[Tensor, Tensor],
                 input2: Tuple[Tensor, Tensor],
-            ) -> Tuple[Tensor, Tensor]:
+            ) -> Tuple[Tuple[Tensor, Tensor], Tuple[Tensor, Tensor]]:
                 a = input1
                 b = input2
                 for x in range(5):
