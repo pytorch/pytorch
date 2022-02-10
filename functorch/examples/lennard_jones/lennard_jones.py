@@ -21,7 +21,7 @@ def lennard_jones_force(r):
 
 
 training_size = 1000
-r = torch.linspace(0.5, 2 * sigma, requires_grad=True)
+r = torch.linspace(0.5, 2 * sigma, steps=training_size, requires_grad=True)
 
 # Create a bunch of vectors that point along positive-x
 drs = torch.outer(r, torch.tensor([1.0, 0, 0]))
