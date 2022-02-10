@@ -305,13 +305,17 @@ class TestZeroRedundancyOptimizerDistributed(TestZeroRedundancyOptimizer):
                 ZeroRedundancyOptimizer(ctor_input, optimizer_class=SGD, lr=0.01)
 
         # Test constructing with multiple parameter groups more thoroughly
+        weight_decay = 0.01
+        lr = 0.01
+        betas = (0.9, 0.999)
+        eps = 1e-8
         params = [
             {"params": [l.weight for l in m], "weight_decay": 0.},
-            {"params": [l.bias for l in m], "weight_decay": 0.01},
+            {"params": [l.bias for l in m], "weight_decay": weight_decay},
         ]
         o = ZeroRedundancyOptimizer(
             params, optimizer_class=AdamW,
-            lr=0.01, betas=(0.9, 0.999), eps=1e-8,
+            lr=lr, betas=betas, eps=eps,
         )
         assert len(o.param_groups) == 2, \
             f"Expected 2 ZeRO param groups, but got {len(o.param_groups)}"
@@ -507,28 +511,30 @@ class TestZeroRedundancyOptimizerDistributed(TestZeroRedundancyOptimizer):
         inputs = [
             torch.randn(batch_size, 5).to(self.device) for _ in range(num_iters)
         ]
+        wd = 0.01
+        lr = 0.01
         # Construct `optim1` with both parameter groups upfront
         optim1 = ZeroRedundancyOptimizer(
             [
                 {"params": [l.weight for l in model1], "weight_decay": 0.},
-                {"params": [l.bias for l in model1], "weight_decay": 0.01},
+                {"params": [l.bias for l in model1], "weight_decay": wd},
             ],
-            optimizer_class=AdamW, lr=0.01,
+            optimizer_class=AdamW, lr=lr,
         )
         # Construct `optim2` by adding the second parameter after
         optim2 = ZeroRedundancyOptimizer(
             [l.weight for l in model2],
-            optimizer_class=AdamW, lr=0.01, weight_decay=0.,
+            optimizer_class=AdamW, lr=lr, weight_decay=0.,
         )
         optim2.add_param_group(
-            {"params": [l.bias for l in model2], "weight_decay": 0.01}
+            {"params": [l.bias for l in model2], "weight_decay": wd}
         )
         # Construct `optim3` as a non-sharded optimizer
         optim3 = AdamW(
             [
                 {"params": [l.weight for l in model3], "weight_decay": 0.},
-                {"params": [l.bias for l in model3], "weight_decay": 0.01},
-            ], lr=0.01,
+                {"params": [l.bias for l in model3], "weight_decay": wd},
+            ], lr=lr,
         )
 
         # Check parity over a few iterations
