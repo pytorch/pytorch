@@ -205,7 +205,7 @@ private:
   : dispatch_arg_indices_reverse_(dispatch_arg_indices_reverse)
   , nonFallthroughKeys_(DispatchKeySet::FULL)
   , requiresBitsetPerBackend_(false) {
-    for (const auto i : c10::irange(num_backends)) {
+    for (const auto i : c10::irange(nonFallthroughKeysPerBackend_.size())) {
       nonFallthroughKeysPerBackend_[i] = DispatchKeySet::FULL;
     }
   }

@@ -1,4 +1,5 @@
 #include <ATen/core/dispatch/DispatchKeyExtractor.h>
+#include <c10/util/irange.h>
 
 #include <sstream>
 
@@ -19,6 +20,7 @@ void DispatchKeyExtractor::setOperatorHasFallthroughForKey(DispatchKey k, bool h
     // subtracting 1 because the first backend should have index 0 (CPU),
     // But the enum starts with BackendComponent::InvalidBit.
     auto backend_idx = static_cast<uint8_t>(toBackendComponent(k)) - 1;
+    TORCH_INTERNAL_ASSERT(backend_idx >= 0 && backend_idx < nonFallthroughKeysPerBackend_.size());
     if (has_fallthrough) {
       nonFallthroughKeysPerBackend_[backend_idx] = nonFallthroughKeysPerBackend_[backend_idx].remove(k);
     } else {
@@ -26,7 +28,7 @@ void DispatchKeyExtractor::setOperatorHasFallthroughForKey(DispatchKey k, bool h
     }
 
     // Set requiresBitsetPerBackend_ accordingly
-    for (const auto i : c10::irange(num_backends - 1)) {
+    for (const auto i : c10::irange(nonFallthroughKeysPerBackend_.size() - 1)) {
       if (nonFallthroughKeysPerBackend_[i] != nonFallthroughKeysPerBackend_[i+1]) {
         requiresBitsetPerBackend_ = true;
         return;
@@ -41,11 +43,11 @@ void DispatchKeyExtractor::setOperatorHasFallthroughForKey(DispatchKey k, bool h
     // the first time that we see requiresBitsetPerBackend_ = true
     // (which should almost never happen)
     if (has_fallthrough) {
-      for (size_t i = 0; i <= num_backends; ++i) {
+      for (const auto i : c10::irange(nonFallthroughKeysPerBackend_.size())) {
         nonFallthroughKeysPerBackend_[i] = nonFallthroughKeysPerBackend_[i].remove(k);
       }
     } else {
-      for (size_t i = 0; i <= num_backends; ++i) {
+      for (const auto i : c10::irange(nonFallthroughKeysPerBackend_.size())) {
         nonFallthroughKeysPerBackend_[i] = nonFallthroughKeysPerBackend_[i].add(k);
       }
     }
@@ -54,7 +56,7 @@ void DispatchKeyExtractor::setOperatorHasFallthroughForKey(DispatchKey k, bool h
 
 std::string DispatchKeyExtractor::dumpState() const {
   std::ostringstream oss;
-  for (size_t i=0; i < c10::utils::bitset::NUM_BITS(); ++i) {
+  for (const auto i : c10::irange(c10::utils::bitset::NUM_BITS())) {
     if (dispatch_arg_indices_reverse_.get(i)) {
       oss << "1";
     } else {
