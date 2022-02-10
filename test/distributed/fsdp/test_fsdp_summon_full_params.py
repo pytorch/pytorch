@@ -1,4 +1,5 @@
 # Owner(s): ["oncall: distributed"]
+import itertools
 import math
 import sys
 
@@ -285,6 +286,17 @@ class TestSummonFullParams(FSDPTest):
             a = model.weight.flatten().detach()
             b = flattened_param.detach()
             self.assertTrue(torch.equal(a, b))
+
+    def test_params_count_and_value(self):
+        model = nn.Sequential(
+            nn.Linear(5, 5, bias=False), nn.Linear(5, 1, bias=False)
+        ).cuda(self.rank)
+        fsdp_model = FSDP(model)
+        with fsdp_model._summon_full_params():
+            for p1, p2 in itertools.zip_longest(
+                fsdp_model.parameters(), model.parameters()
+            ):
+                self.assertEqual(p1, p2)
 
 
 instantiate_parametrized_tests(TestSummonFullParams)

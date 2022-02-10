@@ -744,6 +744,8 @@ class FullyShardedDataParallel(nn.Module):
             currently_local_params = self._collect_local_params()
             self._rebuild_full_params()
 
+            # FSDP now has the full flattened parameter. Unflatten it to get the
+            # full parameters.
             with contextlib.ExitStack() as stack:
                 stack.enter_context(self.module.unflatten_params())
                 try:
