@@ -3632,6 +3632,9 @@ def sample_inputs_max_pool(op_info, device, dtype, requires_grad, **kwargs):
     for (shape, memory_format), kwargs in params_generator.gen_input_params():
         arg = make_arg(shape).to(memory_format=memory_format).requires_grad_(requires_grad)
         yield SampleInput(arg, kwargs=kwargs)
+        for ceil_mode in [True, False]:
+            kwargs['ceil_mode'] = ceil_mode
+            yield SampleInput(arg, kwargs=kwargs)
 
 def sample_inputs_normalize(self, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, low=-1, high=1, device=device, dtype=dtype, requires_grad=requires_grad)
@@ -11233,8 +11236,6 @@ op_db: List[OpInfo] = [
            skips=(
                # Pre-existing condition; Needs to be fixed
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_composite_compliance'),
-               # RuntimeError: torch.jit.frontend.UnsupportedNodeError: global variables aren't supported
-               DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
            ),
            sample_inputs_func=sample_inputs_max_pool),
     OpInfo('nn.functional.max_pool2d',
@@ -11251,10 +11252,6 @@ op_db: List[OpInfo] = [
            dtypes=floating_types(),
            dtypesIfCPU=floating_types_and(torch.bfloat16),
            dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
-           skips=(
-               # RuntimeError: torch.jit.frontend.UnsupportedNodeError: global variables aren't supported
-               DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
-           ),
            sample_inputs_func=sample_inputs_max_pool),
     OpInfo('nn.functional.max_pool3d',
            aten_name='max_pool3d',
@@ -11270,10 +11267,6 @@ op_db: List[OpInfo] = [
            dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
            # TODO: investigate nondeterminism
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
-           skips=(
-               # RuntimeError: torch.jit.frontend.UnsupportedNodeError: global variables aren't supported
-               DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
-           ),
            sample_inputs_func=sample_inputs_max_pool),
     OpInfo('nn.functional.linear',
            aten_name='linear',
