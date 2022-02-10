@@ -103,7 +103,7 @@ for it in range(20000):
 
     if it % 100 == 0:
         print('Iteration %d -- Outer Loss: %.4f' % (it, loss2))
-    losses.append(loss2)
+    losses.append(loss2.detach())
 
 t_A = torch.tensor(0.0).uniform_(0.1, 0.5)
 t_b = torch.tensor(0.0).uniform_(0.0, math.pi)
@@ -115,7 +115,7 @@ opt.zero_grad()
 
 t_params = params
 for k in range(5):
-    t_f = net(t_x, t_params)
+    t_f = net(t_params, t_x)
     t_loss = F.l1_loss(t_f, t_y)
 
     grads = torch.autograd.grad(t_loss, t_params, create_graph=True)
@@ -125,7 +125,7 @@ for k in range(5):
 test_x = torch.arange(-2 * math.pi, 2 * math.pi, step=0.01).unsqueeze(1)
 test_y = t_A * torch.sin(test_x + t_b)
 
-test_f = net(test_x, t_params)
+test_f = net(t_params, test_x)
 
 plt.plot(test_x.data.numpy(), test_y.data.numpy(), label='sin(x)')
 plt.plot(test_x.data.numpy(), test_f.data.numpy(), label='net(x)')
