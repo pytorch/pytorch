@@ -3410,8 +3410,13 @@
   variants: function, method
 
 - func: pixel_shuffle(Tensor self, int upscale_factor) -> Tensor
+  dispatch:
+    CompositeExplicitAutograd: pixel_shuffle
+    QuantizedCPU: pixel_shuffle_quantized_cpu
 
 - func: pixel_unshuffle(Tensor self, int downscale_factor) -> Tensor
+  dispatch:
+    CompositeExplicitAutograd: pixel_unshuffle
 
 - func: channel_shuffle(Tensor self, int groups) -> Tensor
   dispatch:
