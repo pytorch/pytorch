@@ -206,19 +206,24 @@ Tensor embedding_backward_cuda_kernel(
   // spawn a warp per index. In this context, a segment is a number of rows that should
   // be summarized.
   // Unit: index in `sorted_indices` and `orig_indices`
-  AT_DISPATCH_INDEX_TYPES(orig_indices.scalar_type(), "embedding_backward_cuda_kernel", [&] () {
-    auto segment_offsets = at::empty({numel}, orig_indices.options());
+  auto segment_offsets = at::empty({numel}, orig_indices.options());
+  int64_t num_of_segments;
 #if !CUB_SUPPORTS_UNIQUE_BY_KEY()
-    int64_t num_of_segments = embedding_backward_cuda_kernel_unique_by_key<index_t>(sorted_indices, segment_offsets);
+  AT_DISPATCH_INDEX_TYPES(orig_indices.scalar_type(), "embedding_backward_cuda_kernel", [&] () {
+    num_of_segments = embedding_backward_cuda_kernel_unique_by_key<index_t>(sorted_indices, segment_offsets);
+  });
 #else
+  AT_DISPATCH_INDEX_TYPES(orig_indices.scalar_type(), "embedding_backward_cuda_kernel", [&] () {
     auto num_of_segments_tensor = at::empty({}, grad.options().dtype(kLong));
     cuda::cub::unique_by_key(
       sorted_indices.data_ptr<index_t>(), thrust::make_counting_iterator(0),
       nullptr, segment_offsets.data_ptr<index_t>(),
       num_of_segments_tensor.data_ptr<int64_t>(), sorted_indices.numel());
-    int64_t num_of_segments = num_of_segments_tensor.item<int64_t>();
+    num_of_segments = num_of_segments_tensor.item<int64_t>();
+  });
 #endif
 
+  AT_DISPATCH_INDEX_TYPES(orig_indices.scalar_type(), "embedding_backward_cuda_kernel", [&] () {
     // We split the segments up into sizes of `NROWS_PER_THREAD`
     // Compute the number partial-segments per segment (some partial-segments
     // may not be the full `NROWS_PER_THREAD` number of rows)
