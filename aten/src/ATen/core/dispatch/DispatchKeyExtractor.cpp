@@ -20,7 +20,6 @@ void DispatchKeyExtractor::setOperatorHasFallthroughForKey(DispatchKey k, bool h
     // subtracting 1 because the first backend should have index 0 (CPU),
     // But the enum starts with BackendComponent::InvalidBit.
     auto backend_idx = static_cast<uint8_t>(toBackendComponent(k)) - 1;
-    TORCH_INTERNAL_ASSERT(backend_idx >= 0 && backend_idx < nonFallthroughKeysPerBackend_.size());
     if (has_fallthrough) {
       nonFallthroughKeysPerBackend_[backend_idx] = nonFallthroughKeysPerBackend_[backend_idx].remove(k);
     } else {
