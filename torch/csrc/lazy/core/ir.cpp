@@ -6,6 +6,19 @@ C10_DEFINE_bool(ltc_enable_dynamic_shapes, false, "Whether dynamic shape is enab
 namespace torch {
 namespace lazy {
 
+hash_t OperandHashes(const OpList& operands, const hash_t& seed, bool bakeInSizes) {
+  hash_t hash = seed;
+  for (auto& operand : operands) {
+    if (!operand) {
+      hash = HashCombine(hash, static_cast<uint64_t>(kNullOpt));
+      continue;
+    }
+    auto operand_hash = bakeInSizes ? operand.hash_with_sizes() : operand.hash_without_sizes();
+    hash = HashCombine(hash, operand_hash);
+  }
+  return hash;
+}
+
 size_t Output::Hasher::operator()(const Output& output) const {
   return StdHashCombine(
       reinterpret_cast<std::ptrdiff_t>(output.node), output.index);
