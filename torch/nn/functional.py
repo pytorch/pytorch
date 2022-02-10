@@ -640,8 +640,7 @@ def _deprecate_positional_args_max_pool(f):
                 warnings.warn("Pass {} as keyword args. In the later versions "
                               "passing these as positional arguments will "
                               "result in an error".format(", ".join(args_msg)), DeprecationWarning)
-        kwargs.update({k: arg for k, arg in zip(kwonly_args_future[:extra_args], args[-extra_args:])})
-        return f(*args[:-extra_args], **kwargs)
+        return f(*args, **kwargs)
     return inner_f
 
 
