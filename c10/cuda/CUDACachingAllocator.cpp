@@ -91,8 +91,6 @@ namespace Native {
  *                  notifyCaptureDestroy.
  */
 
-namespace {
-
 constexpr size_t kMinBlockSize =
     512; // all sizes are rounded to at least 512 bytes
 constexpr size_t kSmallSize = 1048576; // largest "small" allocation is 1 MiB

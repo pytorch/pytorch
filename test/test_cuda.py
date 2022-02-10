@@ -378,6 +378,7 @@ class TestCuda(TestCase):
         self.assertTrue((tensor == 1).all())
 
     def test_out_of_memory_retry(self):
+        torch.cuda.empty_cache()
         total_memory = torch.cuda.get_device_properties(0).total_memory
         oom_regex = "would exceed allowed memory" if TEST_CUDAMALLOCASYNC else \
                     "Tried to allocate"
@@ -387,6 +388,10 @@ class TestCuda(TestCase):
             b = torch.empty(size, dtype=torch.int8, device='cuda')
         del a
         b = torch.empty(size, dtype=torch.int8, device='cuda')
+        del b
+        # We used a lot of memory here, clean up so we don't affect other tests too much
+        torch.cuda.empty_cache()
+        torch.cuda.reset_peak_memory_stats()
 
     def test_set_per_process_memory_fraction(self):
         # test invalid fraction value.
