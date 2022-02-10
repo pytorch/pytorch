@@ -775,7 +775,7 @@ void setMemoryFraction(double fraction, int device) {
 void emptyCache() {
   NOT_AVAILABLE("emptyCache")
 }
-void cacheInfo(int dev_id, size_t* cachedAndFree, size_t* largestBlock) {
+void cacheInfo(int device, size_t* maxWorkspaceGuess) {
   NOT_AVAILABLE("cacheInfo")
 }
 void* getBaseAllocation(void* ptr, size_t* size) {
