@@ -1,20 +1,21 @@
 import contextlib
 import functools
 import traceback
+from contextlib import contextmanager
 from dataclasses import dataclass
 from enum import Enum, auto
 from typing import (
     TYPE_CHECKING,
     Any,
     Callable,
-    cast,
     Dict,
+    Generator,
     List,
     Optional,
-    Generator,
     Set,
     Tuple,
     Union,
+    cast,
 )
 
 import torch
@@ -27,9 +28,7 @@ from torch.distributed.distributed_c10d import _get_default_group
 from torch.nn.parameter import Parameter
 
 from .flatten_params_wrapper import FlatParameter, FlattenParamsWrapper
-from .utils import (
-    _apply_to_tensors,
-)
+from .utils import _apply_to_tensors
 from .wrap import _recursive_wrap
 
 if TYPE_CHECKING:
@@ -261,6 +260,10 @@ class FullyShardedDataParallel(nn.Module):
                     f"found unsharded parameter: {n} ; {p.size()} {p.__class__}"
                 )
         self._reset_lazy_init()
+
+        # Flag indicating if we require gradient reduction in the backward
+        # pass (set to `False` in the `no_sync()` context manager)
+        self._require_backward_grad_sync: bool = True
 
         # Enum to indicate if we're in the forward/backward pass, idle, etc.
         self.training_state = TrainingState_.IDLE
@@ -690,8 +693,6 @@ class FullyShardedDataParallel(nn.Module):
             p._local_shard.copy_(chunk)  # type: ignore[attr-defined]
 
     def _collect_local_params(self):
-
-
         def _is_full_param_in_use(p: Parameter):
             return p._is_sharded and p._full_param_padded.storage().size() > 0  # type: ignore[attr-defined]
 
@@ -900,6 +901,7 @@ class FullyShardedDataParallel(nn.Module):
             )
 
         self._free_full_params(cast(List[FlatParameter], [param]))
+
         # Switch to local shard after backward.
         self._use_param_local_shard(cast(List[FlatParameter], [param]))
 
@@ -912,6 +914,9 @@ class FullyShardedDataParallel(nn.Module):
             # Next layer's computation will start right after this all_gather,
             # Wait for all_gather to finish before computation.
             torch.cuda.current_stream().wait_stream(self._streams["all_gather"])
+
+        if not self._require_backward_grad_sync:
+            return
 
         # Wait for all work in the current stream to finish, then start the
         # reductions in post_backward stream.
@@ -997,14 +1002,15 @@ class FullyShardedDataParallel(nn.Module):
         else:
             self._assert_state(TrainingState_.BACKWARD_PRE)
 
-        torch.cuda.current_stream().wait_stream(self._streams["post_backward"])
-        if self.cpu_offload.offload_params:
-            # We need to wait for the non-blocking GPU ->
-            # CPU grad transfers to finish. We need to do this for GPU -> CPU
-            # copies because when grad is on CPU, it won't wait for any CUDA
-            # stream to finish GPU -> CPU copies unless we explicitly block the
-            # host-side with synchronize().
-            torch.cuda.current_stream().synchronize()
+        if self._require_backward_grad_sync:
+            torch.cuda.current_stream().wait_stream(self._streams["post_backward"])
+            if self.cpu_offload.offload_params:
+                # We need to wait for the non-blocking GPU ->
+                # CPU grad transfers to finish. We need to do this for GPU -> CPU
+                # copies because when grad is on CPU, it won't wait for any CUDA
+                # stream to finish GPU -> CPU copies unless we explicitly block the
+                # host-side with synchronize().
+                torch.cuda.current_stream().synchronize()
 
         # A backward pass is done, clean up below.
 
@@ -1174,6 +1180,38 @@ class FullyShardedDataParallel(nn.Module):
                 print(f"ERROR: {msg}")
                 traceback.print_stack()
             raise ValueError(msg)
+
+    @contextmanager
+    def no_sync(self) -> Generator:
+        """
+        A context manager to disable gradient synchronizations across FSDP
+        instances. Within this context, gradients will be accumulated in module
+        variables, which will later be synchronized in the first
+        forward-backward pass after exiting the context. This should only be
+        used on the root FSDP instance and will recursively apply to all
+        children FSDP instances.
+
+        .. note:: This likely results in higher memory usage because FSDP will
+            accumulate the full model gradients (instead of gradient shards)
+            until the eventual sync.
+        """
+        self._lazy_init()
+        assert self._is_root, \
+            "`no_sync()` on inner FSDP instances is not supported"
+        self._assert_state(TrainingState_.IDLE)
+        old_flags = []
+        for m in self.modules():
+            if isinstance(m, FullyShardedDataParallel):
+                old_flags.append((m, m._require_backward_grad_sync))
+                m._require_backward_grad_sync = False
+        try:
+            yield
+        finally:
+            for m, old_flag in old_flags:
+                assert not m._require_backward_grad_sync, \
+                    "`_require_backward_grad_sync` was incorrectly set to " \
+                    "`True` while in the `no_sync()` context manager"
+                m._require_backward_grad_sync = old_flag
 
 
 def _get_default_cuda_device(module: nn.Module) -> torch.device:
