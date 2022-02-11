@@ -31,6 +31,11 @@ from ._src.make_functional import (
     FunctionalModuleWithBuffers,
 )
 
+try:
+    from .version import __version__  # noqa: F401
+except ImportError:
+    pass
+
 # Monkeypatching lol
 _old_cross_entropy = torch.nn.functional.cross_entropy
 
