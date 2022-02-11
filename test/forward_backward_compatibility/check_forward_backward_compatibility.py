@@ -28,7 +28,6 @@ MAX_ALLOWED_PERIOD = datetime.timedelta(days=30)
 # [
 #   0: function name regex
 #   1: date until which the allowlist entry is valid
-#   2: (optional) function argument regex
 # ]
 #
 # NB: function name DOES NOT include overload name!
@@ -130,7 +129,7 @@ def compile_temp_allow_list(temp_allow_list):
         today = datetime.date.today()
         interval = deadline - today
         if deadline > today and deadline - today < MAX_ALLOWED_PERIOD:
-            output.append((re.compile(item[0]), deadline, re.compile(item[2]) if len(item) > 2 else None))
+            output.append((re.compile(item[0]), deadline))
         if interval >= MAX_ALLOWED_PERIOD:
             print("Operator foo will skip BC and FC schema checks for {} days, but only "
                   "{} days of skipping the checks are permitted. It's recommended that the skip date be "
@@ -143,18 +142,18 @@ def compile_temp_allow_list(temp_allow_list):
 TEMPORARY_BC_ALLOW_LIST_COMPILED = compile_temp_allow_list(TEMPORARY_BC_ALLOW_LIST)
 TEMPORARY_FC_ALLOW_LIST_COMPILED = compile_temp_allow_list(TEMPORARY_FC_ALLOW_LIST)
 
+INDEFINITE_BC_ALLOW_LIST_COMPILED = [re.compile(item) for item in INDEFINITE_BC_ALLOW_LIST]
+INDEFINITE_FC_ALLOW_LIST_COMPILED = [re.compile(item) for item in INDEFINITE_FC_ALLOW_LIST]
+
 def temp_allow_listed(schema, compiled_allow_list):
     for item in compiled_allow_list:
         if item[0].search(str(schema)):
-            if len(item) > 2 and item[2] is not None:
-                # if arguments regex is present, use it
-                return bool(item[2].search(str(schema)))
             return True
     return False
 
-def indefinite_allow_listed(schema, allow_list):
-    for item in allow_list:
-        if re.compile(item).search(str(schema)):
+def indefinite_allow_listed(schema, compiled_allow_list):
+    for item in compiled_allow_list:
+        if item.search(str(schema)):
             return True
     return False
 
@@ -166,6 +165,33 @@ dont_parse_list = [
     ("dist_c10d", datetime.date(2099, 9, 17)),
 ]
 
+def has_valid_upgraders(schema, version_map):
+    # we want to parse through the map to find if
+    # the schema has valid upgraders. Since the
+    # version map has entry for each overload
+    # we need to do some ugly parsing.
+
+    # the name of the operator
+    schema_name = schema.name
+
+    if schema_name not in version_map:
+        return False
+
+    entries = version_map[schema_name]
+
+    possible_overloads = []
+    possible_schemas = []
+    for key, upgrader_schema_entries in entries.items():
+        possible_overloads.append(key)
+        possible_schemas.extend(upgrader_schema_entries)
+
+    # let's make sure this existing schema is part of possible
+    # schemas
+    for old_schema in possible_schemas:
+        if old_schema == schema:
+            return True
+
+    return False
 
 def dont_parse(schema_line):
     for item in dont_parse_list:
@@ -184,15 +210,33 @@ def load_schemas_to_dict():
         new_schema_dict[s.name].append(s)
     return new_schema_dict
 
+def process_version_map(version_map):
+    # version map maps full schema name to
+    # list of upgraders. Since we only have
+    # the name of the schema (aka no overload)
+    # we want to first process the map to make
+    # the key lookup easier. After this it will be:
+    # Dict[schema_name, Dict[overload, List[schema]]]
+
+    output = defaultdict(dict)
+    for (key, entries) in version_map.items():
+        operator_name = key.split(".")[0]
+        schema_entries = [parse_schema(entry.old_schema) for entry in entries]
+        output[operator_name][key] = schema_entries
+    return output
+
 def check_bc(existing_schemas):
     new_schema_dict = load_schemas_to_dict()
+    version_map = process_version_map(torch._C._get_operator_version_map())
     is_bc = True
     broken_ops = []
     for existing_schema in existing_schemas:
         if temp_allow_listed(existing_schema, TEMPORARY_BC_ALLOW_LIST_COMPILED):
             print("schema: ", str(existing_schema), " found on allowlist, skipping")
             continue
-        if indefinite_allow_listed(existing_schema, INDEFINITE_BC_ALLOW_LIST):
+        if has_valid_upgraders(existing_schema, version_map):
+            print("schema: ", str(existing_schema), " has valid upgrader, skipping")
+        if indefinite_allow_listed(existing_schema, INDEFINITE_BC_ALLOW_LIST_COMPILED):
             print("schema: {} is in allowlist for BC-breaking evolution without deadline."
                   "This is dangerous, do not use unless you are sure there will not be "
                   "downstream consequences".format(str(existing_schema)))
@@ -233,7 +277,7 @@ def check_fc(existing_schemas):
         if temp_allow_listed(existing_schema, TEMPORARY_FC_ALLOW_LIST_COMPILED):
             print("schema: ", str(existing_schema), " found on allowlist, skipping")
             continue
-        if indefinite_allow_listed(existing_schema, INDEFINITE_FC_ALLOW_LIST):
+        if indefinite_allow_listed(existing_schema, INDEFINITE_FC_ALLOW_LIST_COMPILED):
             print("schema: {} is in allowlist for FC-breaking evolution without deadline."
                   "This is dangerous, do not use unless you are sure there will not be "
                   "downstream consequences".format(str(existing_schema)))
