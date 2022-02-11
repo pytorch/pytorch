@@ -644,6 +644,7 @@ void initPythonIRBindings(PyObject* module_) {
       .CREATE_ACCESSOR(Ints, is)
       .CREATE_ACCESSOR(Graph, g)
       .CREATE_ACCESSOR(Graphs, gs)
+      .CREATE_ACCESSOR(IValue, ival)
 #undef CREATE_ACCESSOR
       // Tensor (t_) -- manually written to unwrap the variable into a tensor.
       .def(
