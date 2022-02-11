@@ -92,22 +92,39 @@ CommonIndexKey::CommonIndexKey(
       used_loops_.size(),
       ", loops.size() == ",
       loops.size());
-
-  // If the inner-most loop is vectorized, that loop is not
-  // materialized. It is sufficient to check only the other loops.
-  if (used_loops_.back()->vectorize()) {
-    used_loops_.pop_back();
-    loop_index_vals_.pop_back();
-  }
 }
 
 bool CommonIndexKey::operator==(const CommonIndexKey& other) const {
-  if (!(concrete_indexed_id_ == other.concrete_indexed_id_ &&
-        used_loops_ == other.used_loops_)) {
+  auto gpu_lower = GpuLower::current();
+
+  if (concrete_indexed_id_ != other.concrete_indexed_id_) {
+    return false;
+  }
+
+  if (used_loops_.size() != other.used_loops_.size()) {
+    return false;
+  }
+
+  for (const auto i : c10::irange(used_loops_.size())) {
+    auto lhs_loop = used_loops_.at(i);
+    auto rhs_loop = other.used_loops_.at(i);
+    if (lhs_loop == rhs_loop) {
+      continue;
+    }
+    if (gpu_lower->caLoopMap().areMapped(
+            lhs_loop->iter_domain(), rhs_loop->iter_domain()) &&
+        lhs_loop->isTrivial() && rhs_loop->isTrivial()) {
+      continue;
+    }
     return false;
   }
 
   for (const auto i : c10::irange(loop_index_vals_.size())) {
+    auto lhs_index = loop_index_vals_.at(i);
+    auto rhs_index = other.loop_index_vals_.at(i);
+    if (lhs_index == rhs_index) {
+      continue;
+    }
     // Initial index variables can have some additions such as magic
     // zero and "1" when used in producer indexing for double buffered
     // tensors. Thus, the initial variables themselves may be
@@ -115,9 +132,11 @@ bool CommonIndexKey::operator==(const CommonIndexKey& other) const {
     // is to flatten them to strings as follows.
     auto lhs_str = loop_index_vals_.at(i)->toInlineString();
     auto rhs_str = other.loop_index_vals_.at(i)->toInlineString();
-    if (lhs_str != rhs_str) {
-      return false;
+    if (lhs_str == rhs_str) {
+      continue;
     }
+
+    return false;
   }
 
   return true;
@@ -129,7 +148,7 @@ std::string CommonIndexKey::toString() const {
   ss << "CommonIndexKey: " << concrete_indexed_id_->toString();
   ss << ", { ";
   for (auto loop : used_loops_) {
-    ss << loop->index()->toString() << " ";
+    ss << loop->iter_domain()->toString() << " ";
   }
   ss << "}";
   ss << ", { ";
@@ -176,6 +195,12 @@ std::pair<Val*, bool> CommonIndexMap::insert(
 
 namespace {
 
+//! Insertion point of allocation
+struct CommonIndexInsertionInfo {
+  Expr* ref = nullptr;
+  kir::Scope* scope = nullptr;
+};
+
 // Inserts allocations of hoisted indices
 class CommonIndexInserter : private kir::ExprMutator {
  public:
@@ -191,53 +216,78 @@ class CommonIndexInserter : private kir::ExprMutator {
       const std::vector<Expr*>& exprs,
       const CommonIndexMap& common_index_map)
       : common_index_map_(common_index_map) {
-    // Create a map from innermost loops to the keys for fast lookup
+    // Create a map to keys from loops where they should be inserted
     for (const auto& kv : common_index_map.commonIndexMap()) {
       const auto& key = kv.first;
       // Only consider indices used multiple times
       if (!usedMultipleTimes(key)) {
         continue;
       }
-      const auto index_def = kv.second->definition();
       TORCH_INTERNAL_ASSERT(!key.usedLoops().empty());
-      auto innermost_loop = key.usedLoops().back();
-      innermost_loop_map_.emplace(innermost_loop, key);
+      auto insertion_loop = key.usedLoops().back();
+      innermost_used_loop_map_[insertion_loop].push_back(key);
     }
 
     traverseAndInsert(exprs);
   }
 
+  CommonIndexInsertionInfo findInsertionPoint(
+      const CommonIndexKey& key,
+      kir::ForLoop* current_loop) const {
+    CommonIndexInsertionInfo info;
+
+    // Allocation must be inside any used non-trivial loop. Since the
+    // loop index value is constant if a loop is trivial, allocation
+    // does not need to be inside trivial loops.
+    for (const auto loop : key.usedLoops()) {
+      if (!loop->isTrivial()) {
+        info.ref = loop->body()[0];
+        info.scope = &(loop->body());
+      }
+    }
+
+    // If no non-trivial used loop is found, insert at the top-level
+    // scope just before the outer-most loop.
+    if (info.ref == nullptr) {
+      info.ref = scope_exprs_.empty() ? current_loop : scope_exprs_.at(0);
+      info.scope = nullptr;
+    }
+
+    return info;
+  }
+
   using kir::ExprMutator::handle;
 
   void handle(kir::ForLoop* loop) final {
-    auto innermost_loop_map_it = innermost_loop_map_.find(loop);
-    if (innermost_loop_map_it == innermost_loop_map_.end()) {
+    auto innermost_loop_map_it = innermost_used_loop_map_.find(loop);
+    if (innermost_loop_map_it == innermost_used_loop_map_.end()) {
       kir::ExprMutator::handle(loop);
       return;
     }
 
-    const auto& key = innermost_loop_map_it->second;
-    const auto common_index = common_index_map_.commonIndexMap().at(key);
+    for (const auto& key : innermost_loop_map_it->second) {
+      const auto common_index = common_index_map_.commonIndexMap().at(key);
 
-    // Insert only when the index is used multiple times and is not
-    // yet inserted.
-    if (usedMultipleTimes(key) &&
-        inserted_indices_.find(common_index) == inserted_indices_.end()) {
+      // Insert only when the index is used multiple times and is not
+      // yet inserted.
+      if (inserted_indices_.find(common_index) != inserted_indices_.end()) {
+        continue;
+      }
+
       auto alloc = IrBuilder::create<kir::Allocate>(
           common_index,
           MemoryType::Local,
           GpuLower::current()->kernel()->oneVal());
-
-      // Insert the allocation and its definition the top of this loop body
-      TORCH_INTERNAL_ASSERT(!loop->body().empty());
-      registerInsertBefore(loop->body()[0], alloc, &(loop->body()));
-
       const auto common_index_def = common_index->definition();
       TORCH_INTERNAL_ASSERT(
           common_index_def != nullptr,
           "Hosted index must have a definition. ",
           common_index->toString());
-      registerInsertBefore(loop->body()[0], common_index_def, &(loop->body()));
+
+      const auto insertion_info = findInsertionPoint(key, loop);
+      registerInsertBefore(insertion_info.ref, alloc, insertion_info.scope);
+      registerInsertBefore(
+          insertion_info.ref, common_index_def, insertion_info.scope);
 
       // Track inserted index
       inserted_indices_.emplace(common_index);
@@ -257,8 +307,9 @@ class CommonIndexInserter : private kir::ExprMutator {
 
  private:
   const CommonIndexMap& common_index_map_;
-  //! Map to CommonIndexKeys from their innermost loops
-  std::unordered_map<kir::ForLoop*, CommonIndexKey> innermost_loop_map_;
+  //! Map to CommonIndexKeys from their innermost used loops
+  std::unordered_map<kir::ForLoop*, std::vector<CommonIndexKey>>
+      innermost_used_loop_map_;
   //! Keep track of inserted indices
   std::unordered_set<Val*> inserted_indices_;
 };

@@ -17,15 +17,18 @@ std::vector<Expr*> IrVisitor::handle(const std::vector<Expr*>& exprs) {
 void IrVisitor::handle(ForLoop* fl) {
   for_loops_.push_back(fl);
   scope_.push_back(&fl->body());
+  scope_exprs_.push_back(fl);
   auto body_exprs = std::vector<Expr*>(fl->body().exprs());
   for (auto expr : body_exprs) {
     handle(expr);
   }
+  scope_exprs_.pop_back();
   scope_.pop_back();
   for_loops_.pop_back();
 }
 
 void IrVisitor::handle(IfThenElse* ite) {
+  scope_exprs_.push_back(ite);
   scope_.push_back(&ite->thenBody());
   auto then_exprs = std::vector<Expr*>(ite->thenBody().exprs());
   for (auto expr : then_exprs) {
@@ -39,6 +42,7 @@ void IrVisitor::handle(IfThenElse* ite) {
     handle(expr);
   }
   scope_.pop_back();
+  scope_exprs_.pop_back();
 }
 
 std::vector<Expr*> ExprMutator::mutate(bool reverse_order) {

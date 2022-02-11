@@ -69,7 +69,7 @@ class IndexCompute : public BackwardVisitor {
   void handle(Expr*) override;
 
   // return extent_map_[id] if exists, else return id->extent()
-  Val* getExtent(IterDomain* id);
+  Val* getExtent(IterDomain* id) const;
 
   //! True if a domain is not used to index
   bool isZero(IterDomain* id) const;
@@ -155,7 +155,7 @@ class IndexCompute : public BackwardVisitor {
       const std::unordered_map<IterDomain*, IterDomain*>& id_map,
       const std::vector<bool>& _root_contiguity,
       const std::unordered_map<IterDomain*, Val*>& reference_halo_extent_map =
-          {});
+          {}) const;
 
   virtual void run();
 };

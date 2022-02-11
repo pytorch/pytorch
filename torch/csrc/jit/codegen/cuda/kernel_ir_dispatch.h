@@ -41,6 +41,7 @@ class TORCH_CUDA_CU_API IrVisitor : public OptOutDispatch {
  protected:
   std::vector<ForLoop*> for_loops_;
   std::vector<Scope*> scope_;
+  std::vector<Expr*> scope_exprs_;
   std::vector<Expr*> exprs_;
 };
 

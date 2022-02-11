@@ -40,7 +40,7 @@ IterDomain* IndexReferenceReplay::idCopy(IterDomain* id) {
   // reduction. All we care about are the transformations, and trying to make
   // sure we track correctly a replaying with consistent reduction/broadcast
   // domains is challenging and unnecessary.
-  auto copied_id = IrBuilder::create<IterDomain>(
+  auto copied_id = SimplifyingIrBuilder::create<IterDomain>(
       id->container(), id->start(), id->extent(), id->getParallelType());
   replayed_ids_.emplace_back(copied_id);
   return copied_id;
@@ -65,7 +65,7 @@ void IndexReferenceReplay::handle(Split* split) {
   }
 
   // Replay the provided split operation and add it to the reference DAG
-  IrBuilder::create<Split>(
+  SimplifyingIrBuilder::create<Split>(
       split->container(),
       ref_outer,
       ref_inner,
@@ -97,7 +97,8 @@ void IndexReferenceReplay::handle(Merge* merge) {
   }
 
   // Replay the provided merge operation and add it to the reference DAG
-  IrBuilder::create<Merge>(merge->container(), ref_out, ref_outer, ref_inner);
+  SimplifyingIrBuilder::create<Merge>(
+      merge->container(), ref_out, ref_outer, ref_inner);
 
   // Mark producers and consumers
   ref_id_consumed_.emplace(ref_outer);
@@ -218,7 +219,7 @@ TensorDomain* IndexReferenceReplay::computeReplay() {
           loops_replayed_domain.begin(),
           loops_replayed_domain.end(),
           [](IterDomain* id) { return id->definition() != nullptr; })) {
-    auto domain = IrBuilder::create<TensorDomain>(
+    auto domain = SimplifyingIrBuilder::create<TensorDomain>(
         // If there was no replay only return a domain with a root domain.
         loops_replayed_domain);
     return domain;
@@ -253,7 +254,7 @@ TensorDomain* IndexReferenceReplay::computeReplay() {
     }
 
     // Create and return the reference.
-    auto domain = IrBuilder::create<TensorDomain>(
+    auto domain = SimplifyingIrBuilder::create<TensorDomain>(
         std::vector<IterDomain*>(
             root_domain_ids.begin(), root_domain_ids.end()),
         loops_replayed_domain);

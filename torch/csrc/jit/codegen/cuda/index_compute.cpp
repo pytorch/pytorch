@@ -765,7 +765,7 @@ void IndexCompute::run() {
   traverseFrom(td_->fusion(), domain_vals, false);
 }
 
-Val* IndexCompute::getExtent(IterDomain* id) {
+Val* IndexCompute::getExtent(IterDomain* id) const {
   // Pick from extent_map_ if available. Previously parallel
   // dimensions were ued (e.g., blockDim.x), however, it would result
   // in out-of-bounds errors when the extent of IterDomain is smaller
@@ -789,7 +789,8 @@ IndexCompute IndexCompute::updateIndexCompute(
     const TensorDomain* new_td,
     const std::unordered_map<IterDomain*, IterDomain*>& id_map,
     const std::vector<bool>& root_contiguity,
-    const std::unordered_map<IterDomain*, Val*>& reference_halo_extent_map) {
+    const std::unordered_map<IterDomain*, Val*>& reference_halo_extent_map)
+    const {
   FUSER_PERF_SCOPE("GpuLower::Lower::updateIndexCompute");
 
   std::unordered_map<IterDomain*, Val*> updated_index_map;
@@ -3086,39 +3087,47 @@ std::pair<Val*, Val*> hoistPredicates(
     IterDomain* predicated_consumer_id,
     TensorView* predicated_consumer_tv,
     TensorDomain* ref_td,
-    const std::unordered_map<IterDomain*, Val*>& ref_index_map) {
+    const std::unordered_map<IterDomain*, Val*>& ref_start_index_map,
+    const std::unordered_map<IterDomain*, Val*>& ref_stop_index_map) {
   const std::pair<Val*, Val*> same_indices{start_index, stop_index};
-
-  // Don't hoist unswitch predicates. Would need to differentiate
-  // start and stop indices. Skip for now as probably not worth for
-  // extra complexity.
-  if (unswitch_or_vec_loop != nullptr &&
-      unswitch_or_vec_loop->iter_domain()->getParallelType() !=
-          ParallelType::Vectorize) {
-    return same_indices;
-  }
 
   const auto start_is_same_as_stop = stop_index == start_index;
 
-  // If the index doens't have an expression, nothing to hoist
+  Val* hoisted_stop_index = nullptr;
+
   if (stop_index->definition() == nullptr) {
-    return same_indices;
+    // If the index doens't have an expression, nothing to hoist
+    hoisted_stop_index = stop_index;
+  } else {
+    bool inserted = false;
+    std::tie(hoisted_stop_index, inserted) =
+        GpuLower::current()->commonIndexMap().insert(
+            predicated_consumer_id,
+            predicated_consumer_tv->domain(),
+            ref_td,
+            ref_stop_index_map,
+            loops,
+            stop_index);
   }
 
-  Val* hoisted_stop_index = nullptr;
-  bool inserted = false;
-  std::tie(hoisted_stop_index, inserted) =
-      GpuLower::current()->commonIndexMap().insert(
-          predicated_consumer_id,
-          predicated_consumer_tv->domain(),
-          ref_td,
-          ref_index_map,
-          loops,
-          stop_index);
+  Val* hoisted_start_index = nullptr;
+  if (start_is_same_as_stop) {
+    hoisted_start_index = hoisted_stop_index;
+  } else if (start_index->definition() == nullptr) {
+    hoisted_start_index = start_index;
+  } else {
+    bool inserted = false;
+    std::tie(hoisted_start_index, inserted) =
+        GpuLower::current()->commonIndexMap().insert(
+            predicated_consumer_id,
+            predicated_consumer_tv->domain(),
+            ref_td,
+            ref_start_index_map,
+            loops,
+            start_index);
+  }
 
-  return {
-      start_is_same_as_stop ? hoisted_stop_index : start_index,
-      hoisted_stop_index};
+  return {hoisted_start_index, hoisted_stop_index};
 }
 
 } // namespace
@@ -3171,10 +3180,13 @@ std::pair<std::vector<RootPredicateInfo>, ReferenceTensor> Index::
 
   // If not unswitch, share the same indexing map as the stop index
   // map
+  const auto& ref_start_indexing = is_unswitch
+      ? getPredicateReferenceIndexing(
+            loops, reference, unswitch_or_vec_loop, db_axis, true)
+      : ref_stop_indexing;
+
   std::unordered_map<IterDomain*, Val*> consumer_start_index_map;
   if (is_unswitch) {
-    auto ref_start_indexing = getPredicateReferenceIndexing(
-        loops, reference, unswitch_or_vec_loop, db_axis, true);
     const auto consumer_start_indexing = ref_start_indexing.updateIndexCompute(
         consumer_tv->domain(),
         ref_2_consumer,
@@ -3257,6 +3269,7 @@ std::pair<std::vector<RootPredicateInfo>, ReferenceTensor> Index::
         contig_id,
         consumer_tv,
         reference.domain,
+        ref_start_indexing.indexMap(),
         ref_stop_indexing.indexMap());
 
     // Build predicates for start positions as:

@@ -71,11 +71,8 @@ class CommonIndexKey {
 struct CommonIndexKeyHash {
   std::size_t operator()(const CommonIndexKey& key) const {
     auto h = std::hash<const IterDomain*>{}(key.concrete_indexed_id_);
-    for (auto loop : key.used_loops_) {
-      h = h ^ std::hash<const kir::ForLoop*>{}(loop);
-    }
-    // NOTE: do not hash loop_index_vals_. Their pointer addresses can
-    // be different.
+    // NOTE: do not use other fields as the pointers can be different
+    // even when two keys can share the same index
     return h;
   }
 };
