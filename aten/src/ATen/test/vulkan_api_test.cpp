@@ -2,6 +2,7 @@
 
 #include <gtest/gtest.h>
 #include <ATen/ATen.h>
+#include <c10/util/irange.h>
 
 // TODO: These functions should move to a common place.
 
@@ -46,9 +47,9 @@ void showRtol(const at::Tensor& a, const at::Tensor& b) {
   const float maxDiff = maxValue * tolerance;
   std::cout << "Max Diff allowed: " << maxDiff << std::endl;
   if (diff.sizes().size() == 2) {
-    for (int y = 0; y < diff.sizes()[0]; y++) {
+    for (const auto y : c10::irange(diff.sizes()[0])) {
       std::cout << y << ":";
-      for (int x = 0; x < diff.sizes()[1]; x++) {
+      for (const auto x : c10::irange(diff.sizes()[1])) {
         float diff_xy = diff[y][x].item<float>();
         if (diff_xy > maxDiff) {
           std::cout << std::setw(5) << x;
@@ -69,7 +70,7 @@ static void gen_allpermutations(std::vector<std::vector<int64_t>>& out, std::vec
     out.push_back(in);
   }
   else {
-    for (int j = i; j < in.size(); ++j) {
+    for (const auto j : c10::irange(i, in.size())) {
       std::swap(in[i], in[j]);
       gen_allpermutations(out, in, i + 1);
     }
