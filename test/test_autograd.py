@@ -3658,6 +3658,22 @@ class TestAutograd(TestCase):
         check(fast_mode=True)
         check(fast_mode=False)
 
+    @unittest.expectedFailure
+    def test_gradcheck_sparse_csr_input(self):
+        def check(fast_mode):
+            def fn(sparse_csr):
+                return torch.clone(sparse_csr).to_dense()
+
+            # Fails because gradcheck can't work with sparse csr inputs yet
+            gradcheck(fn, torch.rand(2, 2, dtype=torch.double).to_sparse_csr().requires_grad_(True), check_sparse_nnz=True,
+                      check_batched_grad=False, fast_mode=fast_mode)
+
+            with self.assertRaisesRegex(RuntimeError, 'gradcheck expects all tensor inputs are dense'):
+                gradcheck(fn, torch.rand(2, 2, dtype=torch.double).to_sparse_csr().requires_grad_(True), check_sparse_nnz=False,
+                          check_batched_grad=False, fast_mode=fast_mode)
+        # check(fast_mode=True) # Segmentation fault
+        check(fast_mode=False)
+
     def test_gradcheck_nondeterministic(self):
         class NonDetFunc(Function):
             @staticmethod
