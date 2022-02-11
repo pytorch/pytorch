@@ -2894,7 +2894,11 @@ class TestReductions(TestCase):
             self._test_histogram_numpy(values, bin_edges, None, weights, density)
 
             # Tests with input equal to bin_edges
-            weights = make_tensor(bin_ct + 1, dtype=dtype, device=device, low=0, high=9, non_contiguous=not contig) if weighted else None
+            weights = (
+                make_tensor(bin_ct + 1, dtype=dtype, device=device, low=0, high=9, non_contiguous=not contig)
+                if weighted
+                else None
+            )
             self._test_histogram_numpy(bin_edges, bin_edges, None, weights, density)
 
         # Tests values of default args
@@ -2984,7 +2988,11 @@ class TestReductions(TestCase):
             D = shape[-1]
 
             values = make_tensor(shape, dtype=dtype, device=device, low=-9, high=9, non_contiguous=not contig)
-            weights = make_tensor(shape[:-1], dtype=dtype, device=device, low=0, high=9, non_contiguous=not contig) if weighted else None
+            weights = (
+                make_tensor(shape[:-1], dtype=dtype, device=device, low=0, high=9, non_contiguous=not contig)
+                if weighted
+                else None
+            )
 
             # Tests passing a single bin count
             bin_ct = random.randint(1, 5)
@@ -3008,7 +3016,10 @@ class TestReductions(TestCase):
             bin_edges = [make_tensor(ct + 1, dtype=dtype, device=device, low=-9, high=9).msort() for ct in bin_ct]
             if not bins_contig:
                 # Necessary because msort always produces contiguous output
-                bin_edges_noncontig = [make_tensor(ct + 1, dtype=dtype, device=device, non_contiguous=not bins_contig) for ct in bin_ct]
+                bin_edges_noncontig = [
+                    make_tensor(ct + 1, dtype=dtype, device=device, non_contiguous=not bins_contig)
+                    for ct in bin_ct
+                ]
                 for dim in range(D):
                     bin_edges_noncontig[dim].copy_(bin_edges[dim])
                 bin_edges = bin_edges_noncontig
