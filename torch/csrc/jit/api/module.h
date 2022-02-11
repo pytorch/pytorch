@@ -304,8 +304,8 @@ TORCH_API Module optimize_for_inference(
 enum class FusionBehavior { STATIC, DYNAMIC };
 
 using FusionStrategy = std::vector<std::pair<FusionBehavior, size_t>>;
-/*
 // clang-format off
+/*
 Sets the type and number of specializations that can occur during fusion.
 
 Usage: provide a list of pairs (type, depth) where type is one of STATIC or DYNAMIC
@@ -334,8 +334,8 @@ unfused implementation.
 
 NB: in the future, if more as more fusion backends are added there may be more granular
 apis for specific fusers.
-// clang-format on
 */
+// clang-format on
 TORCH_API FusionStrategy getFusionStrategy();
 // returns previous strategy
 TORCH_API FusionStrategy setFusionStrategy(FusionStrategy& fusion_strategy);
