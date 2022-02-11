@@ -2,22 +2,20 @@ import torch
 import torch.nn.functional as F
 from .expanded_weights_impl import implements_per_sample_grads
 from .expanded_weights_utils import \
-    forward_helper, set_grad_sample_if_exists, grad_if_exists_for_input, unpack_expanded_weight_or_tensor
+    forward_helper, set_grad_sample_if_exists, unpack_expanded_weight_or_tensor
 
 @implements_per_sample_grads(F.linear)
 class LinearPerSampleGrad(torch.autograd.Function):
     @staticmethod
-    def forward(ctx, *expanded_args):
-        if len(expanded_args[0].shape) <= 1:
-            raise RuntimeError("Input does not have a batch dimension. Expanded Weights "
-                               f"expected input of at least rank 2, got of rank {len(expanded_args[0].shape)}")
-        expanded_args = expanded_args[:-1]
-        expanded_kwargs = {'bias': expanded_args[2] if len(expanded_args) == 3 else None}
-        expanded_args_without_kwargs = expanded_args[:2]
-        output, aux_outputs = forward_helper(F.linear, expanded_args_without_kwargs, expanded_kwargs, 1)
-        ctx.args = expanded_args_without_kwargs
+    def forward(ctx, _, *expanded_args_and_kwargs):
+        if len(expanded_args_and_kwargs[0].shape) <= 1:
+            raise RuntimeError("Input does not have a batch dimension. Expanded Weights expected input "
+                               f"of at least rank 2, got of rank {len(expanded_args_and_kwargs[0].shape)}")
+        expanded_kwargs = {'bias': expanded_args_and_kwargs[2] if len(expanded_args_and_kwargs) == 3 else None}
+        expanded_args = expanded_args_and_kwargs[:2]
+        output = forward_helper(F.linear, expanded_args, expanded_kwargs)
+        ctx.args = expanded_args
         ctx.kwargs = expanded_kwargs
-        ctx.aux_outputs = aux_outputs
         return output
 
     @staticmethod
@@ -25,11 +23,15 @@ class LinearPerSampleGrad(torch.autograd.Function):
         input, weight = ctx.args
         bias = ctx.kwargs['bias']
         results = []
+        results.append(None)  # for kwarg_names
 
-        results.append(grad_if_exists_for_input(input, lambda: grad_output.matmul(unpack_expanded_weight_or_tensor(weight))))
-        results.extend([None] * 3)  # weight and bias don't compute batched gradients
+        if input.requires_grad:
+            results.append(grad_output.matmul(unpack_expanded_weight_or_tensor(weight)))
+        else:
+            results.append(None)
+        results.extend([None] * 2)  # weight and bias don't compute batched gradients
 
-        # weight and bias have their grad_sample fields set directly
+        # weight and bias get their grad_sample fields set directly if they exist
         set_grad_sample_if_exists(weight, lambda _: torch.einsum("n...i,n...j->nij", grad_output, input))
         set_grad_sample_if_exists(bias, lambda _: torch.einsum("n...k->nk", grad_output))
         return tuple(results)
