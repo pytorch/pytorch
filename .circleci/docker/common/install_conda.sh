@@ -13,12 +13,7 @@ if [ -n "$ANACONDA_PYTHON_VERSION" ]; then
       CONDA_FILE="Miniconda2-latest-Linux-x86_64.sh"
     ;;
     3)
-      if [ "$ANACONDA_PYTHON_VERSION" = "3.6" ]; then
-        # Latest release of Conda that still supports python-3.6
-        CONDA_FILE="Miniconda3-py37_4.10.3-Linux-x86_64.sh"
-      else
-        CONDA_FILE="Miniconda3-latest-Linux-x86_64.sh"
-      fi
+      CONDA_FILE="Miniconda3-latest-Linux-x86_64.sh"
     ;;
     *)
       echo "Unsupported ANACONDA_PYTHON_VERSION: $ANACONDA_PYTHON_VERSION"
@@ -61,9 +56,7 @@ if [ -n "$ANACONDA_PYTHON_VERSION" ]; then
   pushd /opt/conda
 
   # Track latest conda update
-  if [ "$ANACONDA_PYTHON_VERSION" != "3.6" ]; then
-    as_jenkins conda update -y -n base conda
-  fi
+  as_jenkins conda update -y -n base conda
 
   # Install correct Python version
   as_jenkins conda install -y python="$ANACONDA_PYTHON_VERSION"
@@ -120,9 +113,9 @@ if [ -n "$ANACONDA_PYTHON_VERSION" ]; then
   # Install numba only on python-3.8 or below
   # For numba issue see https://github.com/pytorch/pytorch/issues/51511
   if [[ $(python -c "import sys; print(int(sys.version_info < (3, 9)))") == "1" ]]; then
-    as_jenkins pip install --progress-bar off numba==0.54.1 librosa>=0.6.2
+    as_jenkins pip install --progress-bar off numba==0.54.1 "librosa>=0.6.2,<0.9.0"
   else
-    as_jenkins pip install --progress-bar off numba==0.49.0 librosa>=0.6.2
+    as_jenkins pip install --progress-bar off numba==0.49.0 "librosa>=0.6.2,<0.9.0"
   fi
 
   # Update scikit-learn to a python-3.8 compatible version
