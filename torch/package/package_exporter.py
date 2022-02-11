@@ -37,7 +37,6 @@ from .glob_group import GlobGroup, GlobPattern
 from .importer import Importer, OrderedImporter, sys_importer
 from ._zip_file_torchscript import TorchScriptPackageZipFileWriter
 from ._zip_file import PackageZipFileWriter
-import inspect
 from torch.serialization import location_tag
 
 _gate_torchscript_serialization = True
@@ -222,7 +221,6 @@ class PackageExporter:
         self._extern_hooks: OrderedDict = OrderedDict()
         self._mock_hooks: OrderedDict = OrderedDict()
         self._intern_hooks: OrderedDict = OrderedDict()
-        self.external_registry = {}
         if isinstance(importer, Importer):
             self.importer = importer
         else:

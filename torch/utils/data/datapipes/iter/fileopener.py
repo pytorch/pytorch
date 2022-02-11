@@ -7,7 +7,7 @@ from torch.utils.data.datapipes.utils.common import get_file_binaries_from_pathn
 
 class FileOpenerIterDataPipe(IterDataPipe[Tuple[str, IOBase]]):
     r"""
-    Given pathnames, open files and yield pathname and file stream in a tuple.
+    Given pathnames, opens files and yield pathname and file stream in a tuple.
 
     Args:
         datapipe: Iterable datapipe that provides pathnames
