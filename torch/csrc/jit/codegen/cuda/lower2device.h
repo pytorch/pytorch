@@ -22,6 +22,7 @@
 
 #include <memory>
 #include <ostream>
+#include <unordered_map>
 
 namespace torch {
 namespace jit {
@@ -133,6 +134,10 @@ class TORCH_CUDA_CU_API GpuLower : public NonCopyable {
     return common_index_map_;
   }
 
+  const auto& vectorizedAccesses() const {
+    return vectorized_accesses_;
+  }
+
  private:
   void lower(Fusion* fusion, DataType index_type);
 
@@ -140,6 +145,8 @@ class TORCH_CUDA_CU_API GpuLower : public NonCopyable {
   //  the parallel dimensions that need to be padded to a multiples of
   //  warp size.
   void collectPaddedParallelDims();
+
+  void fillVectorizeInfo();
 
  private:
   // Lowered Kernel IR
@@ -161,6 +168,10 @@ class TORCH_CUDA_CU_API GpuLower : public NonCopyable {
   NonDivisibleSplitInfo non_divisible_split_info_;
   DoubleBufferInfo double_buffer_info_;
   CommonIndexMap common_index_map_;
+
+  // Track which tensor views are inputs or outputs of a vectorized operation
+  // and their maximum vectorized access size
+  std::unordered_map<TensorView*, int> vectorized_accesses_;
 
   Fusion* fusion_ = nullptr;
 };

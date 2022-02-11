@@ -958,6 +958,7 @@ if(USE_CUDA OR USE_ROCM)
 
   # The list of NVFUSER runtime files
   list(APPEND NVFUSER_RUNTIME_FILES
+    ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/runtime/array.cu
     ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/runtime/block_reduction.cu
     ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/runtime/block_sync_atomic.cu
     ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/runtime/block_sync_default.cu

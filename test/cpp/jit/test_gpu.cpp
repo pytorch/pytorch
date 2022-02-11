@@ -20414,7 +20414,7 @@ TEST_F(NVFuserTest, FusionSmemBlockGemmCacheDoubleBuffer_CUDA) {
 }
 
 TEST_F(NVFuserTest, FusionIntermediateTensorVectorize_CUDA) {
-  auto mem_types = {MemoryType::Shared, MemoryType::Local};
+  std::vector<MemoryType> mem_types = {MemoryType::Shared, MemoryType::Local};
 
   for (auto mem_type : mem_types) {
     Fusion fusion;

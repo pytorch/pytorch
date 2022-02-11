@@ -284,8 +284,10 @@ class VectorizeValidator : public OptInDispatch {
       }
     }
 
-    // If no vectorized id's found simply return;
-    if (v_id == nullptr) {
+    // If no vectorized ids found simply return. If vectorized access is
+    // broadcast, it won't generate an actual vector instruction, so can safely
+    // be ignore
+    if (v_id == nullptr || v_id->isBroadcast()) {
       return;
     }
 

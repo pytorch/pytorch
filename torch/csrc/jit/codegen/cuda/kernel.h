@@ -78,6 +78,10 @@ struct KernelSummary {
   //! Effective ParallelTypes of broadcast ops
   std::unordered_map<const BroadcastOp*, ParallelTypeBitmap>
       broadcast_parallel_types;
+
+  // Track which tensor views are inputs or outputs of a vectorized operation
+  // and their maximum vectorized access size
+  std::unordered_map<TensorView*, int> vectorized_accesses;
 };
 
 class KernelInternalProxy;
@@ -108,9 +112,13 @@ class TORCH_CUDA_CU_API Kernel final : public Fusion {
   //! Finalize a kernel definition
   //!
   //! At this point we have a complete kernel definition and we can
-  //! run analysis passes to build a KernelSummary
+  //! run analysis passes to build a KernelSummary. Manually send in vectorized
+  //! info so it doesn't have to be rebuilt.
   //!
-  void finalize(std::vector<Expr*> top_level_exprs);
+
+  void finalize(
+      std::vector<Expr*> top_level_exprs,
+      const std::unordered_map<TensorView*, int>& vectorized_info);
 
   const std::vector<Expr*>& topLevelExprs() const {
     return top_level_exprs_;

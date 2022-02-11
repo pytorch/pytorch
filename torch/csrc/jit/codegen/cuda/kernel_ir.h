@@ -143,7 +143,7 @@ class TORCH_CUDA_CU_API TensorIndex final : public Val {
  public:
   TensorIndex(
       IrBuilderPasskey,
-      const fuser::cuda::TensorView* view,
+      const TensorView* view,
       std::vector<Val*> indices);
 
   std::vector<Val*>::size_type nDims() const {

@@ -206,7 +206,8 @@ ForLoop::ForLoop(IrBuilderPasskey passkey, IterDomain* iter_domain)
           nullptr,
           nullptr,
           nullptr,
-          isParallelTypeVectorize(iter_domain->getParallelType()),
+          !iter_domain->isBroadcast() &&
+              isParallelTypeVectorize(iter_domain->getParallelType()),
           nullptr,
           false) {
   TORCH_INTERNAL_ASSERT(

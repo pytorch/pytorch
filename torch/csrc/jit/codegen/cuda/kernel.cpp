@@ -270,12 +270,16 @@ class ValidateAllocation : private OptOutConstDispatch {
 } // namespace
 
 // TODO(kir): Kernel IR validation
-void Kernel::finalize(std::vector<Expr*> top_level_exprs) {
+void Kernel::finalize(
+    std::vector<Expr*> top_level_exprs,
+    const std::unordered_map<TensorView*, int>& vectorized_info) {
   TORCH_INTERNAL_ASSERT(top_level_exprs_.empty());
   top_level_exprs_ = std::move(top_level_exprs);
   warp_padded_parallel_info_ = GpuLower::current()->getWarpPaddedParallelInfo();
   ValidateAllocation::validate(this);
   analyze();
+  // Make sure this is after analyze as it sets summary_
+  summary_.vectorized_accesses = vectorized_info;
 }
 
 void Kernel::analyze() {

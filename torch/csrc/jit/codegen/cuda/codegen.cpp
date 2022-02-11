@@ -375,26 +375,48 @@ class CudaKernelGenerator : private OptOutConstDispatch {
             uop->out()->dtype() == uop->in()->dtype(),
             "Vectorized store/load requires input and output datatypes match.");
       }
-    }
 
-    if (is_vector_op) {
-      if (uop->in()->isScalar()) {
-        indent() << "reinterpret_cast<"
-                 << "Array<" << uop->out()->dtype() << ", " << vector_word_size
-                 << ">*>"
-                 << "(&" << gen(uop->out()) << ")->set(" << gen(uop->in())
-                 << ");\n";
-      } else {
-        indent() << "*reinterpret_cast<"
-                 << "Array<" << uop->out()->dtype() << ", " << vector_word_size
-                 << ">*>"
-                 << "(&" << gen(uop->out()) << ")"
-                 << " = *reinterpret_cast<"
-                 << "Array<" << uop->in()->dtype() << ", " << vector_word_size
-                 << ">*>"
-                 << "(&" << gen(uop->in()) << ");\n";
+      if (is_vector_op) {
+        auto out_tv = uop->out()->as<kir::TensorIndex>()->view();
+        if (uop->in()->isScalar()) {
+          if (out_tv->getMemoryType() == MemoryType::Local) {
+            // Vectorized initialization
+            indent() << varName(out_tv) << ".set(" << gen(uop->in()) << ");\n";
+          } else {
+            indent() << "arraySet<" << out_tv->getMemoryType() << ", "
+                     << vector_word_size << ">(" << gen(uop->out()) << ", "
+                     << gen(uop->in()) << ");\n";
+          }
+        } else {
+          // Vectorized load
+          TORCH_INTERNAL_ASSERT(
+              uop->in()->isA<kir::TensorIndex>(),
+              "Invalid input to unary op with tensor output, found: ",
+              uop->in()->toString());
+
+          auto in_tv = uop->in()->as<kir::TensorIndex>()->view();
+          bool localToGlobal = out_tv->getMemoryType() == MemoryType::Global &&
+              in_tv->getMemoryType() == MemoryType::Local;
+
+          bool globalToLocal = out_tv->getMemoryType() == MemoryType::Local &&
+              in_tv->getMemoryType() == MemoryType::Global;
+
+          if (localToGlobal) {
+            indent() << "loadLocalToGlobal<" << uop->out()->dtype() << ", "
+                     << vector_word_size << ">(&" << gen(uop->out()) << ", &"
+                     << gen(uop->in()) << ");\n";
+          } else if (globalToLocal) {
+            indent() << "loadGlobalToLocal<" << uop->out()->dtype() << ", "
+                     << vector_word_size << ">(&" << gen(uop->out()) << ", &"
+                     << gen(uop->in()) << ");\n";
+          } else {
+            indent() << "loadGeneric<" << uop->out()->dtype() << ", "
+                     << vector_word_size << ">(&" << gen(uop->out()) << ", &"
+                     << gen(uop->in()) << ");\n";
+          }
+        }
+        return;
       }
-      return;
     }
 
     if (uop->out()->isA<NamedScalar>()) {
@@ -1281,8 +1303,9 @@ class CudaKernelGenerator : private OptOutConstDispatch {
       // Allocate alias another Allocate stmt
       const auto alias_tv = alloc->alias()->buffer()->as<TensorView>();
       indent() << "// Alias Allocation - " << alloc->memoryType() << "\n";
-      indent() << buffer_dtype << "* " << varName(tv) << " = "
-               << varName(alias_tv) << ";\n";
+      indent() << "auto& " << varName(tv) << " = " << varName(alias_tv)
+               << ";\n";
+
     } else {
       // Standard Memory Allocation
       switch (tv->getMemoryType()) {
@@ -1307,10 +1330,16 @@ class CudaKernelGenerator : private OptOutConstDispatch {
                      << buffer_dtype << "));\n";
           }
           break;
-        case MemoryType::Local:
-          indent() << buffer_dtype << " " << varName(tv) << "["
-                   << genInline(size) << "];\n";
-          break;
+        case MemoryType::Local: {
+          auto va = kernel_->summary().vectorized_accesses;
+          if (va.find(tv) != va.end()) {
+            indent() << "Array<" << buffer_dtype << ", " << genInline(size)
+                     << ", " << va.at(tv) << "> " << varName(tv) << ";\n";
+          } else {
+            indent() << buffer_dtype << " " << varName(tv) << "["
+                     << genInline(size) << "];\n";
+          }
+        } break;
         default:
           TORCH_INTERNAL_ASSERT(false, "Unexpected memory type");
       }

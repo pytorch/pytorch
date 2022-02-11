@@ -13,6 +13,7 @@
 #include <torch/csrc/jit/resource_guard.h>
 
 #include <nvfuser_resources/PhiloxCudaStateRaw.h>
+#include <nvfuser_resources/array.h>
 #include <nvfuser_resources/bf16_support.h>
 #include <nvfuser_resources/block_reduction.h>
 #include <nvfuser_resources/block_sync_atomic.h>
@@ -43,6 +44,8 @@ namespace executor_utils {
 
 std::string kernelPreamble() {
   std::stringstream ss;
+
+  ss << nvfuser_resources::array_cu;
 
 #ifndef __HIP_PLATFORM_HCC__
   ss << nvfuser_resources::fp16_support_cu;
