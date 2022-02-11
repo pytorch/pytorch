@@ -20,7 +20,7 @@ from torch._six import string_classes
 from torch.jit import _unique_state_dict
 from torch.onnx import ONNX_ARCHIVE_MODEL_PROTO_NAME, ExportTypes, OperatorExportTypes, SymbolicContext, TrainingMode, CheckerError
 from torch._C import ListType, OptionalType, _propagate_and_assign_input_shapes, _check_onnx_proto
-from typing import List, Tuple, Union
+from typing import Dict, List, Tuple, Union
 
 # the flag to tell the user whether it's in the middle of ONNX export or not
 __IN_ONNX_EXPORT = False
@@ -345,7 +345,7 @@ def _decide_input_format(model, args: Union[torch.Tensor, Tuple]) -> Union[torch
         ordered_list_keys = list(sig.parameters.keys())
         if ordered_list_keys[0] == "self":
             ordered_list_keys = ordered_list_keys[1:]
-        args_dict = {}
+        args_dict: Dict = {}
         if isinstance(args, torch.Tensor):
             args_list = [args]
         else:
