@@ -58,7 +58,7 @@ def parse_backend_yaml(
     assert isinstance(supported, list), f'expected "supported" to be a list, but got: {supported} (of type {type(supported)})'
 
     supported_autograd = yaml_values.pop('autograd', [])
-    assert isinstance(supported, list), f'expected "autograd" to be a list, but got: {supported_autograd}'
+    assert isinstance(supported_autograd, list), f'expected "autograd" to be a list, but got: {supported_autograd}'
 
     # full_codegen is ignored by parse_backend_yaml, and re-parsed in gen_lazy_tensor.py
     full_codegen = yaml_values.pop('full_codegen', [])
@@ -247,7 +247,7 @@ def gen_dispatcher_registrations(
         'ops_headers': '#include <ATen/Functions.h>',
         'DispatchKey': dispatch_key,
         'dispatch_namespace': dispatch_key.lower(),
-        'dispatch_headers': dest.gen_registration_headers(backend_index, per_operator_headers=False),
+        'dispatch_headers': dest.gen_registration_headers(backend_index, per_operator_headers=False, rocm=False),
         'dispatch_helpers': dest.gen_registration_helpers(backend_index),
         'dispatch_namespaced_definitions': list(concatMap(
             dest.RegisterDispatchKey(
