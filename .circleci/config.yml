@@ -3397,7 +3397,7 @@ workflows:
             - binary_linux_manywheel_3_6m_cu101_devtoolset7_nightly_build
           docker_image: "pytorch/manylinux-cuda101"
           use_cuda_docker_runtime: "1"
-          resource_class: gpu.nvidia.medium
+          resource_class: gpu.nvidia.small
       - binary_linux_test:
           name: binary_linux_manywheel_3_7m_cu101_devtoolset7_nightly_test
           build_environment: "manywheel 3.7m cu101 devtoolset7"
@@ -3412,7 +3412,7 @@ workflows:
             - binary_linux_manywheel_3_7m_cu101_devtoolset7_nightly_build
           docker_image: "pytorch/manylinux-cuda101"
           use_cuda_docker_runtime: "1"
-          resource_class: gpu.nvidia.medium
+          resource_class: gpu.nvidia.small
       - binary_linux_test:
           name: binary_linux_manywheel_3_8m_cu101_devtoolset7_nightly_test
           build_environment: "manywheel 3.8m cu101 devtoolset7"
@@ -3427,7 +3427,7 @@ workflows:
             - binary_linux_manywheel_3_8m_cu101_devtoolset7_nightly_build
           docker_image: "pytorch/manylinux-cuda101"
           use_cuda_docker_runtime: "1"
-          resource_class: gpu.nvidia.medium
+          resource_class: gpu.nvidia.small
       - binary_linux_test:
           name: binary_linux_manywheel_3_9m_cu101_devtoolset7_nightly_test
           build_environment: "manywheel 3.9m cu101 devtoolset7"
@@ -3442,7 +3442,7 @@ workflows:
             - binary_linux_manywheel_3_9m_cu101_devtoolset7_nightly_build
           docker_image: "pytorch/manylinux-cuda101"
           use_cuda_docker_runtime: "1"
-          resource_class: gpu.nvidia.medium
+          resource_class: gpu.nvidia.small
       - binary_linux_test:
           name: binary_linux_manywheel_3_6m_cu102_devtoolset7_nightly_test
           build_environment: "manywheel 3.6m cu102 devtoolset7"
@@ -3457,7 +3457,7 @@ workflows:
             - binary_linux_manywheel_3_6m_cu102_devtoolset7_nightly_build
           docker_image: "pytorch/manylinux-cuda102"
           use_cuda_docker_runtime: "1"
-          resource_class: gpu.nvidia.medium
+          resource_class: gpu.nvidia.small
       - binary_linux_test:
           name: binary_linux_manywheel_3_7m_cu102_devtoolset7_nightly_test
           build_environment: "manywheel 3.7m cu102 devtoolset7"
@@ -3472,7 +3472,7 @@ workflows:
             - binary_linux_manywheel_3_7m_cu102_devtoolset7_nightly_build
           docker_image: "pytorch/manylinux-cuda102"
           use_cuda_docker_runtime: "1"
-          resource_class: gpu.nvidia.medium
+          resource_class: gpu.nvidia.small
       - binary_linux_test:
           name: binary_linux_manywheel_3_8m_cu102_devtoolset7_nightly_test
           build_environment: "manywheel 3.8m cu102 devtoolset7"
@@ -3487,7 +3487,7 @@ workflows:
             - binary_linux_manywheel_3_8m_cu102_devtoolset7_nightly_build
           docker_image: "pytorch/manylinux-cuda102"
           use_cuda_docker_runtime: "1"
-          resource_class: gpu.nvidia.medium
+          resource_class: gpu.nvidia.small
       - binary_linux_test:
           name: binary_linux_manywheel_3_9m_cu102_devtoolset7_nightly_test
           build_environment: "manywheel 3.9m cu102 devtoolset7"
@@ -3502,7 +3502,7 @@ workflows:
             - binary_linux_manywheel_3_9m_cu102_devtoolset7_nightly_build
           docker_image: "pytorch/manylinux-cuda102"
           use_cuda_docker_runtime: "1"
-          resource_class: gpu.nvidia.medium
+          resource_class: gpu.nvidia.small
       - binary_linux_test:
           name: binary_linux_manywheel_3_6m_cu111_devtoolset7_nightly_test
           build_environment: "manywheel 3.6m cu111 devtoolset7"
@@ -3517,7 +3517,7 @@ workflows:
             - binary_linux_manywheel_3_6m_cu111_devtoolset7_nightly_build
           docker_image: "pytorch/manylinux-cuda111"
           use_cuda_docker_runtime: "1"
-          resource_class: gpu.nvidia.medium
+          resource_class: gpu.nvidia.small
       - binary_linux_test:
           name: binary_linux_manywheel_3_7m_cu111_devtoolset7_nightly_test
           build_environment: "manywheel 3.7m cu111 devtoolset7"
@@ -3532,7 +3532,7 @@ workflows:
             - binary_linux_manywheel_3_7m_cu111_devtoolset7_nightly_build
           docker_image: "pytorch/manylinux-cuda111"
           use_cuda_docker_runtime: "1"
-          resource_class: gpu.nvidia.medium
+          resource_class: gpu.nvidia.small
       - binary_linux_test:
           name: binary_linux_manywheel_3_8m_cu111_devtoolset7_nightly_test
           build_environment: "manywheel 3.8m cu111 devtoolset7"
@@ -3547,7 +3547,7 @@ workflows:
             - binary_linux_manywheel_3_8m_cu111_devtoolset7_nightly_build
           docker_image: "pytorch/manylinux-cuda111"
           use_cuda_docker_runtime: "1"
-          resource_class: gpu.nvidia.medium
+          resource_class: gpu.nvidia.small
       - binary_linux_test:
           name: binary_linux_manywheel_3_9m_cu111_devtoolset7_nightly_test
           build_environment: "manywheel 3.9m cu111 devtoolset7"
@@ -3562,7 +3562,7 @@ workflows:
             - binary_linux_manywheel_3_9m_cu111_devtoolset7_nightly_build
           docker_image: "pytorch/manylinux-cuda111"
           use_cuda_docker_runtime: "1"
-          resource_class: gpu.nvidia.medium
+          resource_class: gpu.nvidia.small
       - binary_linux_test:
           name: binary_linux_manywheel_3_6m_rocm3_10_devtoolset7_nightly_test
           build_environment: "manywheel 3.6m rocm3.10 devtoolset7"
@@ -3577,7 +3577,7 @@ workflows:
             - binary_linux_manywheel_3_6m_rocm3_10_devtoolset7_nightly_build
           docker_image: "pytorch/manylinux-rocm:3.10"
           use_cuda_docker_runtime: "1"
-          resource_class: gpu.nvidia.medium
+          resource_class: gpu.nvidia.small
       - binary_linux_test:
           name: binary_linux_manywheel_3_7m_rocm3_10_devtoolset7_nightly_test
           build_environment: "manywheel 3.7m rocm3.10 devtoolset7"
@@ -3592,7 +3592,7 @@ workflows:
             - binary_linux_manywheel_3_7m_rocm3_10_devtoolset7_nightly_build
           docker_image: "pytorch/manylinux-rocm:3.10"
           use_cuda_docker_runtime: "1"
-          resource_class: gpu.nvidia.medium
+          resource_class: gpu.nvidia.small
       - binary_linux_test:
           name: binary_linux_manywheel_3_8m_rocm3_10_devtoolset7_nightly_test
           build_environment: "manywheel 3.8m rocm3.10 devtoolset7"
@@ -3607,7 +3607,7 @@ workflows:
             - binary_linux_manywheel_3_8m_rocm3_10_devtoolset7_nightly_build
           docker_image: "pytorch/manylinux-rocm:3.10"
           use_cuda_docker_runtime: "1"
-          resource_class: gpu.nvidia.medium
+          resource_class: gpu.nvidia.small
       - binary_linux_test:
           name: binary_linux_manywheel_3_9m_rocm3_10_devtoolset7_nightly_test
           build_environment: "manywheel 3.9m rocm3.10 devtoolset7"
@@ -3622,7 +3622,7 @@ workflows:
             - binary_linux_manywheel_3_9m_rocm3_10_devtoolset7_nightly_build
           docker_image: "pytorch/manylinux-rocm:3.10"
           use_cuda_docker_runtime: "1"
-          resource_class: gpu.nvidia.medium
+          resource_class: gpu.nvidia.small
       - binary_linux_test:
           name: binary_linux_manywheel_3_6m_rocm4_0_1_devtoolset7_nightly_test
           build_environment: "manywheel 3.6m rocm4.0.1 devtoolset7"
@@ -3637,7 +3637,7 @@ workflows:
             - binary_linux_manywheel_3_6m_rocm4_0_1_devtoolset7_nightly_build
           docker_image: "pytorch/manylinux-rocm:4.0.1"
           use_cuda_docker_runtime: "1"
-          resource_class: gpu.nvidia.medium
+          resource_class: gpu.nvidia.small
       - binary_linux_test:
           name: binary_linux_manywheel_3_7m_rocm4_0_1_devtoolset7_nightly_test
           build_environment: "manywheel 3.7m rocm4.0.1 devtoolset7"
@@ -3652,7 +3652,7 @@ workflows:
             - binary_linux_manywheel_3_7m_rocm4_0_1_devtoolset7_nightly_build
           docker_image: "pytorch/manylinux-rocm:4.0.1"
           use_cuda_docker_runtime: "1"
-          resource_class: gpu.nvidia.medium
+          resource_class: gpu.nvidia.small
       - binary_linux_test:
           name: binary_linux_manywheel_3_8m_rocm4_0_1_devtoolset7_nightly_test
           build_environment: "manywheel 3.8m rocm4.0.1 devtoolset7"
@@ -3667,7 +3667,7 @@ workflows:
             - binary_linux_manywheel_3_8m_rocm4_0_1_devtoolset7_nightly_build
           docker_image: "pytorch/manylinux-rocm:4.0.1"
           use_cuda_docker_runtime: "1"
-          resource_class: gpu.nvidia.medium
+          resource_class: gpu.nvidia.small
       - binary_linux_test:
           name: binary_linux_manywheel_3_9m_rocm4_0_1_devtoolset7_nightly_test
           build_environment: "manywheel 3.9m rocm4.0.1 devtoolset7"
@@ -3682,7 +3682,7 @@ workflows:
             - binary_linux_manywheel_3_9m_rocm4_0_1_devtoolset7_nightly_build
           docker_image: "pytorch/manylinux-rocm:4.0.1"
           use_cuda_docker_runtime: "1"
-          resource_class: gpu.nvidia.medium
+          resource_class: gpu.nvidia.small
       - binary_linux_test:
           name: binary_linux_conda_3_6_cpu_devtoolset7_nightly_test
           build_environment: "conda 3.6 cpu devtoolset7"
@@ -3749,7 +3749,7 @@ workflows:
             - binary_linux_conda_3_6_cu101_devtoolset7_nightly_build
           docker_image: "pytorch/conda-cuda"
           use_cuda_docker_runtime: "1"
-          resource_class: gpu.nvidia.medium
+          resource_class: gpu.nvidia.small
       - binary_linux_test:
           name: binary_linux_conda_3_7_cu101_devtoolset7_nightly_test
           build_environment: "conda 3.7 cu101 devtoolset7"
@@ -3764,7 +3764,7 @@ workflows:
             - binary_linux_conda_3_7_cu101_devtoolset7_nightly_build
           docker_image: "pytorch/conda-cuda"
           use_cuda_docker_runtime: "1"
-          resource_class: gpu.nvidia.medium
+          resource_class: gpu.nvidia.small
       - binary_linux_test:
           name: binary_linux_conda_3_8_cu101_devtoolset7_nightly_test
           build_environment: "conda 3.8 cu101 devtoolset7"
@@ -3779,7 +3779,7 @@ workflows:
             - binary_linux_conda_3_8_cu101_devtoolset7_nightly_build
           docker_image: "pytorch/conda-cuda"
           use_cuda_docker_runtime: "1"
-          resource_class: gpu.nvidia.medium
+          resource_class: gpu.nvidia.small
       - binary_linux_test:
           name: binary_linux_conda_3_9_cu101_devtoolset7_nightly_test
           build_environment: "conda 3.9 cu101 devtoolset7"
@@ -3794,7 +3794,7 @@ workflows:
             - binary_linux_conda_3_9_cu101_devtoolset7_nightly_build
           docker_image: "pytorch/conda-cuda"
           use_cuda_docker_runtime: "1"
-          resource_class: gpu.nvidia.medium
+          resource_class: gpu.nvidia.small
       - binary_linux_test:
           name: binary_linux_conda_3_6_cu102_devtoolset7_nightly_test
           build_environment: "conda 3.6 cu102 devtoolset7"
@@ -3809,7 +3809,7 @@ workflows:
             - binary_linux_conda_3_6_cu102_devtoolset7_nightly_build
           docker_image: "pytorch/conda-cuda"
           use_cuda_docker_runtime: "1"
-          resource_class: gpu.nvidia.medium
+          resource_class: gpu.nvidia.small
       - binary_linux_test:
           name: binary_linux_conda_3_7_cu102_devtoolset7_nightly_test
           build_environment: "conda 3.7 cu102 devtoolset7"
@@ -3824,7 +3824,7 @@ workflows:
             - binary_linux_conda_3_7_cu102_devtoolset7_nightly_build
           docker_image: "pytorch/conda-cuda"
           use_cuda_docker_runtime: "1"
-          resource_class: gpu.nvidia.medium
+          resource_class: gpu.nvidia.small
       - binary_linux_test:
           name: binary_linux_conda_3_8_cu102_devtoolset7_nightly_test
           build_environment: "conda 3.8 cu102 devtoolset7"
@@ -3839,7 +3839,7 @@ workflows:
             - binary_linux_conda_3_8_cu102_devtoolset7_nightly_build
           docker_image: "pytorch/conda-cuda"
           use_cuda_docker_runtime: "1"
-          resource_class: gpu.nvidia.medium
+          resource_class: gpu.nvidia.small
       - binary_linux_test:
           name: binary_linux_conda_3_9_cu102_devtoolset7_nightly_test
           build_environment: "conda 3.9 cu102 devtoolset7"
@@ -3854,7 +3854,7 @@ workflows:
             - binary_linux_conda_3_9_cu102_devtoolset7_nightly_build
           docker_image: "pytorch/conda-cuda"
           use_cuda_docker_runtime: "1"
-          resource_class: gpu.nvidia.medium
+          resource_class: gpu.nvidia.small
       - binary_linux_test:
           name: binary_linux_conda_3_6_cu111_devtoolset7_nightly_test
           build_environment: "conda 3.6 cu111 devtoolset7"
@@ -3869,7 +3869,7 @@ workflows:
             - binary_linux_conda_3_6_cu111_devtoolset7_nightly_build
           docker_image: "pytorch/conda-cuda"
           use_cuda_docker_runtime: "1"
-          resource_class: gpu.nvidia.medium
+          resource_class: gpu.nvidia.small
       - binary_linux_test:
           name: binary_linux_conda_3_7_cu111_devtoolset7_nightly_test
           build_environment: "conda 3.7 cu111 devtoolset7"
@@ -3884,7 +3884,7 @@ workflows:
             - binary_linux_conda_3_7_cu111_devtoolset7_nightly_build
           docker_image: "pytorch/conda-cuda"
           use_cuda_docker_runtime: "1"
-          resource_class: gpu.nvidia.medium
+          resource_class: gpu.nvidia.small
       - binary_linux_test:
           name: binary_linux_conda_3_8_cu111_devtoolset7_nightly_test
           build_environment: "conda 3.8 cu111 devtoolset7"
@@ -3899,7 +3899,7 @@ workflows:
             - binary_linux_conda_3_8_cu111_devtoolset7_nightly_build
           docker_image: "pytorch/conda-cuda"
           use_cuda_docker_runtime: "1"
-          resource_class: gpu.nvidia.medium
+          resource_class: gpu.nvidia.small
       - binary_linux_test:
           name: binary_linux_conda_3_9_cu111_devtoolset7_nightly_test
           build_environment: "conda 3.9 cu111 devtoolset7"
@@ -3914,7 +3914,7 @@ workflows:
             - binary_linux_conda_3_9_cu111_devtoolset7_nightly_build
           docker_image: "pytorch/conda-cuda"
           use_cuda_docker_runtime: "1"
-          resource_class: gpu.nvidia.medium
+          resource_class: gpu.nvidia.small
       - binary_linux_test:
           name: binary_linux_libtorch_3_7m_cpu_devtoolset7_nightly_shared-with-deps_test
           build_environment: "libtorch 3.7m cpu devtoolset7"
@@ -3986,7 +3986,7 @@ workflows:
             - binary_linux_libtorch_3_7m_cu101_devtoolset7_nightly_shared-with-deps_build
           docker_image: "pytorch/manylinux-cuda101"
           use_cuda_docker_runtime: "1"
-          resource_class: gpu.nvidia.medium
+          resource_class: gpu.nvidia.small
       - binary_linux_test:
           name: binary_linux_libtorch_3_7m_cu101_devtoolset7_nightly_shared-without-deps_test
           build_environment: "libtorch 3.7m cu101 devtoolset7"
@@ -4002,7 +4002,7 @@ workflows:
             - binary_linux_libtorch_3_7m_cu101_devtoolset7_nightly_shared-without-deps_build
           docker_image: "pytorch/manylinux-cuda101"
           use_cuda_docker_runtime: "1"
-          resource_class: gpu.nvidia.medium
+          resource_class: gpu.nvidia.small
       - binary_linux_test:
           name: binary_linux_libtorch_3_7m_cu101_devtoolset7_nightly_static-with-deps_test
           build_environment: "libtorch 3.7m cu101 devtoolset7"
@@ -4018,7 +4018,7 @@ workflows:
             - binary_linux_libtorch_3_7m_cu101_devtoolset7_nightly_static-with-deps_build
           docker_image: "pytorch/manylinux-cuda101"
           use_cuda_docker_runtime: "1"
-          resource_class: gpu.nvidia.medium
+          resource_class: gpu.nvidia.small
       - binary_linux_test:
           name: binary_linux_libtorch_3_7m_cu101_devtoolset7_nightly_static-without-deps_test
           build_environment: "libtorch 3.7m cu101 devtoolset7"
@@ -4034,7 +4034,7 @@ workflows:
             - binary_linux_libtorch_3_7m_cu101_devtoolset7_nightly_static-without-deps_build
           docker_image: "pytorch/manylinux-cuda101"
           use_cuda_docker_runtime: "1"
-          resource_class: gpu.nvidia.medium
+          resource_class: gpu.nvidia.small
       - binary_linux_test:
           name: binary_linux_libtorch_3_7m_cu102_devtoolset7_nightly_shared-with-deps_test
           build_environment: "libtorch 3.7m cu102 devtoolset7"
@@ -4050,7 +4050,7 @@ workflows:
             - binary_linux_libtorch_3_7m_cu102_devtoolset7_nightly_shared-with-deps_build
           docker_image: "pytorch/manylinux-cuda102"
           use_cuda_docker_runtime: "1"
-          resource_class: gpu.nvidia.medium
+          resource_class: gpu.nvidia.small
       - binary_linux_test:
           name: binary_linux_libtorch_3_7m_cu102_devtoolset7_nightly_shared-without-deps_test
           build_environment: "libtorch 3.7m cu102 devtoolset7"
@@ -4066,7 +4066,7 @@ workflows:
             - binary_linux_libtorch_3_7m_cu102_devtoolset7_nightly_shared-without-deps_build
           docker_image: "pytorch/manylinux-cuda102"
           use_cuda_docker_runtime: "1"
-          resource_class: gpu.nvidia.medium
+          resource_class: gpu.nvidia.small
       - binary_linux_test:
           name: binary_linux_libtorch_3_7m_cu102_devtoolset7_nightly_static-with-deps_test
           build_environment: "libtorch 3.7m cu102 devtoolset7"
@@ -4082,7 +4082,7 @@ workflows:
             - binary_linux_libtorch_3_7m_cu102_devtoolset7_nightly_static-with-deps_build
           docker_image: "pytorch/manylinux-cuda102"
           use_cuda_docker_runtime: "1"
-          resource_class: gpu.nvidia.medium
+          resource_class: gpu.nvidia.small
       - binary_linux_test:
           name: binary_linux_libtorch_3_7m_cu102_devtoolset7_nightly_static-without-deps_test
           build_environment: "libtorch 3.7m cu102 devtoolset7"
@@ -4098,7 +4098,7 @@ workflows:
             - binary_linux_libtorch_3_7m_cu102_devtoolset7_nightly_static-without-deps_build
           docker_image: "pytorch/manylinux-cuda102"
           use_cuda_docker_runtime: "1"
-          resource_class: gpu.nvidia.medium
+          resource_class: gpu.nvidia.small
       - binary_linux_test:
           name: binary_linux_libtorch_3_7m_cu111_devtoolset7_nightly_shared-with-deps_test
           build_environment: "libtorch 3.7m cu111 devtoolset7"
@@ -4114,7 +4114,7 @@ workflows:
             - binary_linux_libtorch_3_7m_cu111_devtoolset7_nightly_shared-with-deps_build
           docker_image: "pytorch/manylinux-cuda111"
           use_cuda_docker_runtime: "1"
-          resource_class: gpu.nvidia.medium
+          resource_class: gpu.nvidia.small
       - binary_linux_test:
           name: binary_linux_libtorch_3_7m_cu111_devtoolset7_nightly_shared-without-deps_test
           build_environment: "libtorch 3.7m cu111 devtoolset7"
@@ -4130,7 +4130,7 @@ workflows:
             - binary_linux_libtorch_3_7m_cu111_devtoolset7_nightly_shared-without-deps_build
           docker_image: "pytorch/manylinux-cuda111"
           use_cuda_docker_runtime: "1"
-          resource_class: gpu.nvidia.medium
+          resource_class: gpu.nvidia.small
       - binary_linux_test:
           name: binary_linux_libtorch_3_7m_cu111_devtoolset7_nightly_static-with-deps_test
           build_environment: "libtorch 3.7m cu111 devtoolset7"
@@ -4146,7 +4146,7 @@ workflows:
             - binary_linux_libtorch_3_7m_cu111_devtoolset7_nightly_static-with-deps_build
           docker_image: "pytorch/manylinux-cuda111"
           use_cuda_docker_runtime: "1"
-          resource_class: gpu.nvidia.medium
+          resource_class: gpu.nvidia.small
       - binary_linux_test:
           name: binary_linux_libtorch_3_7m_cu111_devtoolset7_nightly_static-without-deps_test
           build_environment: "libtorch 3.7m cu111 devtoolset7"
@@ -4162,7 +4162,7 @@ workflows:
             - binary_linux_libtorch_3_7m_cu111_devtoolset7_nightly_static-without-deps_build
           docker_image: "pytorch/manylinux-cuda111"
           use_cuda_docker_runtime: "1"
-          resource_class: gpu.nvidia.medium
+          resource_class: gpu.nvidia.small
       - binary_linux_test:
           name: binary_linux_libtorch_3_7m_cpu_gcc5_4_cxx11-abi_nightly_shared-with-deps_test
           build_environment: "libtorch 3.7m cpu gcc5.4_cxx11-abi"
@@ -4234,7 +4234,7 @@ workflows:
             - binary_linux_libtorch_3_7m_cu101_gcc5_4_cxx11-abi_nightly_shared-with-deps_build
           docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
           use_cuda_docker_runtime: "1"
-          resource_class: gpu.nvidia.medium
+          resource_class: gpu.nvidia.small
       - binary_linux_test:
           name: binary_linux_libtorch_3_7m_cu101_gcc5_4_cxx11-abi_nightly_shared-without-deps_test
           build_environment: "libtorch 3.7m cu101 gcc5.4_cxx11-abi"
@@ -4250,7 +4250,7 @@ workflows:
             - binary_linux_libtorch_3_7m_cu101_gcc5_4_cxx11-abi_nightly_shared-without-deps_build
           docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
           use_cuda_docker_runtime: "1"
-          resource_class: gpu.nvidia.medium
+          resource_class: gpu.nvidia.small
       - binary_linux_test:
           name: binary_linux_libtorch_3_7m_cu101_gcc5_4_cxx11-abi_nightly_static-with-deps_test
           build_environment: "libtorch 3.7m cu101 gcc5.4_cxx11-abi"
@@ -4266,7 +4266,7 @@ workflows:
             - binary_linux_libtorch_3_7m_cu101_gcc5_4_cxx11-abi_nightly_static-with-deps_build
           docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
           use_cuda_docker_runtime: "1"
-          resource_class: gpu.nvidia.medium
+          resource_class: gpu.nvidia.small
       - binary_linux_test:
           name: binary_linux_libtorch_3_7m_cu101_gcc5_4_cxx11-abi_nightly_static-without-deps_test
           build_environment: "libtorch 3.7m cu101 gcc5.4_cxx11-abi"
@@ -4282,7 +4282,7 @@ workflows:
             - binary_linux_libtorch_3_7m_cu101_gcc5_4_cxx11-abi_nightly_static-without-deps_build
           docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
           use_cuda_docker_runtime: "1"
-          resource_class: gpu.nvidia.medium
+          resource_class: gpu.nvidia.small
       - binary_linux_test:
           name: binary_linux_libtorch_3_7m_cu102_gcc5_4_cxx11-abi_nightly_shared-with-deps_test
           build_environment: "libtorch 3.7m cu102 gcc5.4_cxx11-abi"
@@ -4298,7 +4298,7 @@ workflows:
             - binary_linux_libtorch_3_7m_cu102_gcc5_4_cxx11-abi_nightly_shared-with-deps_build
           docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
           use_cuda_docker_runtime: "1"
-          resource_class: gpu.nvidia.medium
+          resource_class: gpu.nvidia.small
       - binary_linux_test:
           name: binary_linux_libtorch_3_7m_cu102_gcc5_4_cxx11-abi_nightly_shared-without-deps_test
           build_environment: "libtorch 3.7m cu102 gcc5.4_cxx11-abi"
@@ -4314,7 +4314,7 @@ workflows:
             - binary_linux_libtorch_3_7m_cu102_gcc5_4_cxx11-abi_nightly_shared-without-deps_build
           docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
           use_cuda_docker_runtime: "1"
-          resource_class: gpu.nvidia.medium
+          resource_class: gpu.nvidia.small
       - binary_linux_test:
           name: binary_linux_libtorch_3_7m_cu102_gcc5_4_cxx11-abi_nightly_static-with-deps_test
           build_environment: "libtorch 3.7m cu102 gcc5.4_cxx11-abi"
@@ -4330,7 +4330,7 @@ workflows:
             - binary_linux_libtorch_3_7m_cu102_gcc5_4_cxx11-abi_nightly_static-with-deps_build
           docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
           use_cuda_docker_runtime: "1"
-          resource_class: gpu.nvidia.medium
+          resource_class: gpu.nvidia.small
       - binary_linux_test:
           name: binary_linux_libtorch_3_7m_cu102_gcc5_4_cxx11-abi_nightly_static-without-deps_test
           build_environment: "libtorch 3.7m cu102 gcc5.4_cxx11-abi"
@@ -4346,7 +4346,7 @@ workflows:
             - binary_linux_libtorch_3_7m_cu102_gcc5_4_cxx11-abi_nightly_static-without-deps_build
           docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
           use_cuda_docker_runtime: "1"
-          resource_class: gpu.nvidia.medium
+          resource_class: gpu.nvidia.small
       - binary_linux_test:
           name: binary_linux_libtorch_3_7m_cu111_gcc5_4_cxx11-abi_nightly_shared-with-deps_test
           build_environment: "libtorch 3.7m cu111 gcc5.4_cxx11-abi"
@@ -4362,7 +4362,7 @@ workflows:
             - binary_linux_libtorch_3_7m_cu111_gcc5_4_cxx11-abi_nightly_shared-with-deps_build
           docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
           use_cuda_docker_runtime: "1"
-          resource_class: gpu.nvidia.medium
+          resource_class: gpu.nvidia.small
       - binary_linux_test:
           name: binary_linux_libtorch_3_7m_cu111_gcc5_4_cxx11-abi_nightly_shared-without-deps_test
           build_environment: "libtorch 3.7m cu111 gcc5.4_cxx11-abi"
@@ -4378,7 +4378,7 @@ workflows:
             - binary_linux_libtorch_3_7m_cu111_gcc5_4_cxx11-abi_nightly_shared-without-deps_build
           docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
           use_cuda_docker_runtime: "1"
-          resource_class: gpu.nvidia.medium
+          resource_class: gpu.nvidia.small
       - binary_linux_test:
           name: binary_linux_libtorch_3_7m_cu111_gcc5_4_cxx11-abi_nightly_static-with-deps_test
           build_environment: "libtorch 3.7m cu111 gcc5.4_cxx11-abi"
@@ -4394,7 +4394,7 @@ workflows:
             - binary_linux_libtorch_3_7m_cu111_gcc5_4_cxx11-abi_nightly_static-with-deps_build
           docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
           use_cuda_docker_runtime: "1"
-          resource_class: gpu.nvidia.medium
+          resource_class: gpu.nvidia.small
       - binary_linux_test:
           name: binary_linux_libtorch_3_7m_cu111_gcc5_4_cxx11-abi_nightly_static-without-deps_test
           build_environment: "libtorch 3.7m cu111 gcc5.4_cxx11-abi"
@@ -4410,7 +4410,7 @@ workflows:
             - binary_linux_libtorch_3_7m_cu111_gcc5_4_cxx11-abi_nightly_static-without-deps_build
           docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
           use_cuda_docker_runtime: "1"
-          resource_class: gpu.nvidia.medium
+          resource_class: gpu.nvidia.small
       - binary_windows_test:
           name: binary_windows_wheel_3_6_cpu_nightly_test
           build_environment: "wheel 3.6 cpu"
