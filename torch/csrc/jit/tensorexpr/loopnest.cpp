@@ -1050,14 +1050,14 @@ class LoadOrStoreUseFinder : public IRVisitor {
   }
 
   void visit(ExternalCall2Ptr v) override {
-    for (BufPtr out_buf : v->buf_out_args()) {
+    for (const auto& out_buf : v->buf_out_args()) {
       if (stores_[out_buf].insert(last_stmt_).second) {
         uses_[out_buf].push_back({(StmtPtr)v, true});
       }
     }
     last_stmt_ = (StmtPtr)v;
 
-    for (BufPtr input_buf : v->buf_args()) {
+    for (const auto& input_buf : v->buf_args()) {
       if (loads_[input_buf].insert(last_stmt_).second) {
         uses_[input_buf].push_back({last_stmt_, false});
       }

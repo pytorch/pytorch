@@ -141,19 +141,19 @@ void IRVisitor::visit(ExternalCallPtr v) {
 }
 
 void IRVisitor::visit(ExternalCall2Ptr v) {
-  for (BufPtr buf_out_arg : v->buf_out_args()) {
+  for (const auto& buf_out_arg : v->buf_out_args()) {
     buf_out_arg->accept(this);
   }
-  for (BufPtr buf_arg : v->buf_args()) {
+  for (const auto& buf_arg : v->buf_args()) {
     buf_arg->accept(this);
   }
-  for (ExprPtr arg : v->args()) {
+  for (const auto& arg : v->args()) {
     arg->accept(this);
   }
 }
 
 void IRVisitor::visit(FreeExtPtr v) {
-  for (BufPtr buf : v->bufs()) {
+  for (const auto& buf : v->bufs()) {
     buf->accept(this);
   }
 }

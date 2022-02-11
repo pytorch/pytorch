@@ -13,7 +13,7 @@ CodeGen::CodeGen(
     std::vector<BufferArg> buffer_args,
     at::Device device,
     std::string kernel_func_name)
-    : stmt_(stmt),
+    : stmt_(std::move(stmt)),
       buffer_args_(std::move(buffer_args)),
       device_(device),
       kernel_func_name_(std::move(kernel_func_name)) {

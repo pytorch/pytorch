@@ -479,7 +479,7 @@ StmtPtr IRMutator::mutate(ExternalCall2Ptr v) {
   bool buf_out_args_changed = false;
   std::vector<BufPtr> buf_out_args_new;
   buf_out_args_new.reserve(v->buf_out_args().size());
-  for (BufPtr buf_out_arg : v->buf_out_args()) {
+  for (const auto& buf_out_arg : v->buf_out_args()) {
     BufPtr buf_out_arg_new = to<Buf>(buf_out_arg->accept_mutator(this));
     TORCH_INTERNAL_ASSERT(
         buf_out_arg_new, buildErrorMessage("IRMutator produced null for Buf."));
@@ -490,7 +490,7 @@ StmtPtr IRMutator::mutate(ExternalCall2Ptr v) {
   bool buf_args_changed = false;
   std::vector<BufPtr> buf_args_new;
   buf_args_new.reserve(v->buf_args().size());
-  for (BufPtr buf_arg : v->buf_args()) {
+  for (const auto& buf_arg : v->buf_args()) {
     BufPtr buf_arg_new = to<Buf>(buf_arg->accept_mutator(this));
     TORCH_INTERNAL_ASSERT(
         buf_arg_new, buildErrorMessage("IRMutator produced null for Buf."));
@@ -501,7 +501,7 @@ StmtPtr IRMutator::mutate(ExternalCall2Ptr v) {
   bool args_changed = false;
   std::vector<ExprPtr> args_new;
   args_new.reserve(v->args().size());
-  for (ExprPtr arg : v->args()) {
+  for (const auto& arg : v->args()) {
     ExprPtr arg_new = arg->accept_mutator(this);
     args_new.push_back(arg_new);
     args_changed |= arg_new != arg;
@@ -545,7 +545,7 @@ StmtPtr IRMutator::mutate(FreeExtPtr v) {
   bool bufs_changed = false;
   std::vector<BufPtr> bufs_new;
   bufs_new.reserve(v->bufs().size());
-  for (BufPtr buf : v->bufs()) {
+  for (const auto& buf : v->bufs()) {
     BufPtr buf_new = to<Buf>(buf->accept_mutator(this));
     TORCH_INTERNAL_ASSERT(
         buf_new, buildErrorMessage("IRMutator produced null for Buf."));

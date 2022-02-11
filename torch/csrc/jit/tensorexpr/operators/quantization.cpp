@@ -749,9 +749,8 @@ Tensor computeUpsampleNearest2d(
     return A.load(newAxes);
   };
   auto e = body_func(args);
-  auto strides = 
-      isNHWC(A) || isNLC(A) ? make_channels_last_strides(outputShape)
-                            : make_contiguous_strides(outputShape);
+  auto strides = isNHWC(A) || isNLC(A) ? make_channels_last_strides(outputShape)
+                                       : make_contiguous_strides(outputShape);
   BufHandle buf = Buf::make(
       "upsample_nearest2d",
       outputShape,
@@ -759,8 +758,7 @@ Tensor computeUpsampleNearest2d(
       c10::nullopt, // initializer
       fmap(strides, [&](ExprPtr stride) { return ExprHandle(stride); }),
       ExprHandle(A.node()->qscale()),
-      ExprHandle(A.node()->qzero())
-  );
+      ExprHandle(A.node()->qzero()));
   return Tensor(buf, args, e);
 }
 

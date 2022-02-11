@@ -324,18 +324,18 @@ StmtPtr IRCloner::mutate(ExternalCallPtr v) {
 StmtPtr IRCloner::mutate(ExternalCall2Ptr v) {
   std::vector<BufPtr> buf_out_args_new;
   buf_out_args_new.reserve(v->buf_out_args().size());
-  for (BufPtr buf_out_arg : v->buf_out_args()) {
+  for (const auto& buf_out_arg : v->buf_out_args()) {
     buf_out_args_new.push_back(to<Buf>(buf_out_arg->accept_mutator(this)));
   }
 
   std::vector<BufPtr> buf_args_new;
   buf_args_new.reserve(v->buf_args().size());
-  for (BufPtr buf_arg : v->buf_args()) {
+  for (const auto& buf_arg : v->buf_args()) {
     buf_args_new.push_back(to<Buf>(buf_arg->accept_mutator(this)));
   }
   std::vector<ExprPtr> args_new;
   args_new.reserve(v->args().size());
-  for (ExprPtr arg : v->args()) {
+  for (const auto& arg : v->args()) {
     args_new.push_back(arg->accept_mutator(this));
   }
 

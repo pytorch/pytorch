@@ -486,7 +486,7 @@ void IRPrinter::visit(FreePtr v) {
 void IRPrinter::visit(FreeExtPtr v) {
   os() << "FreeExt(bufs={";
   int i = 0;
-  for (BufPtr buf : v->bufs()) {
+  for (const auto& buf : v->bufs()) {
     if (i++ > 0) {
       os() << ", ";
     }
@@ -567,7 +567,7 @@ void IRPrinter::visit(ExternalCallPtr v) {
 
 void IRPrinter::visit(ExternalCall2Ptr v) {
   int i = 0;
-  for (BufPtr buf_out_arg : v->buf_out_args()) {
+  for (const auto& buf_out_arg : v->buf_out_args()) {
     if (i++ > 0) {
       os() << ", ";
     }
@@ -578,7 +578,7 @@ void IRPrinter::visit(ExternalCall2Ptr v) {
 
   os() << "buf_args={";
   i = 0;
-  for (BufPtr buf_arg : v->buf_args()) {
+  for (const auto& buf_arg : v->buf_args()) {
     if (i++ > 0) {
       os() << ", ";
     }
@@ -587,7 +587,7 @@ void IRPrinter::visit(ExternalCall2Ptr v) {
 
   os() << "}, args={";
   i = 0;
-  for (ExprPtr arg : v->args()) {
+  for (const auto& arg : v->args()) {
     if (i++ > 0) {
       os() << ", ";
     }
