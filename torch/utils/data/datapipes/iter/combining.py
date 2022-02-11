@@ -16,7 +16,7 @@ T_co = TypeVar('T_co', covariant=True)
 @functional_datapipe('concat')
 class ConcaterIterDataPipe(IterDataPipe):
     r"""
-    Concatenate multiple Iterable DataPipes (functional name: ``concat``). The resulting DataPipe will
+    Concatenates multiple Iterable DataPipes (functional name: ``concat``). The resulting DataPipe will
     yield all the elements from the first input DataPipe, before yielding from the subsequent ones.
 
     Args:
@@ -53,7 +53,7 @@ class ConcaterIterDataPipe(IterDataPipe):
 @functional_datapipe('fork')
 class ForkerIterDataPipe(IterDataPipe):
     r"""
-    Create multiple instances of the same Iterable DataPipe (functional name: ``fork``).
+    Creates multiple instances of the same Iterable DataPipe (functional name: ``fork``).
 
     Args:
         datapipe: Iterable DataPipe being copied
@@ -176,7 +176,7 @@ class _ChildDataPipe(IterDataPipe):
 @functional_datapipe('demux')
 class DemultiplexerIterDataPipe(IterDataPipe):
     r"""
-    Split the input DataPipe into multiple child DataPipes, using the given
+    Splits the input DataPipe into multiple child DataPipes, using the given
     classification function (functional name: ``demux``). A list of the child DataPipes is returned from this operation.
 
     Args:
