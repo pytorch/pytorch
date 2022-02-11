@@ -220,9 +220,17 @@ void FixupONNXSubblockOutputs(Node* n) {
   for (Block* block : n->blocks()) {
     for (Value* output : block->outputs()) {
       if (output->node()->owningBlock() != block) {
-        Node* id_node = block->owningGraph()->create(onnx::Identity);
+        Node* id_node;
+        // Simplify graph by creating an empty optional rather than
+        // Identity(None). Also enables shape inference later on, since
+        // ONNX shape inference doesn't handle None.
+        if (output->type()->cast<NoneType>()) {
+          id_node = block->owningGraph()->create(onnx::Optional);
+        } else {
+          id_node = block->owningGraph()->create(onnx::Identity);
+          id_node->addInput(output);
+        }
         id_node->insertBefore(block->return_node());
-        id_node->addInput(output);
         id_node->output()->copyMetadata(output);
         id_node->copyMetadata(n);
         block->return_node()->replaceInputWith(output, id_node->output());
@@ -408,13 +416,12 @@ void InferShapeTypeForUninitializedOutput(
       const_node->output()->setType(other_output->type());
     }
   } else if (auto output_type = other_output->type()->cast<OptionalType>()) {
-    // TODO: Find a test that triggers this code path.
     const_node = ONNXOptionalNode(output_type, graph);
-  } else {
-    std::cerr << "Warning: Inferring type for prim::Uninitialized node from "
-              << other_output->type()->repr_str() << " not supported."
-              << std::endl;
   }
+  TORCH_CHECK(
+      const_node,
+      "Inferring type for prim::Uninitialized node from " +
+          other_output->type()->repr_str() + " not supported.")
   const ParamMap empty_params_dict = {};
   ONNXShapeTypeInference(const_node, empty_params_dict, opset_version);
   const_node->insertBefore(block->return_node());
