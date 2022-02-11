@@ -232,7 +232,7 @@ class TestShapeOps(TestCase):
     @dtypesIfCUDA(*get_all_dtypes(include_complex=False, include_bool=False, include_bfloat16=False))
     def test_trace(self, device, dtype):
         def test(shape):
-            tensor = make_tensor(shape, device, dtype, low=-9, high=9)
+            tensor = make_tensor(shape, dtype=dtype, device=device, low=-9, high=9)
             expected_dtype = tensor.sum().dtype
             expected_dtype = torch_to_numpy_dtype_dict[expected_dtype]
 

@@ -3372,7 +3372,7 @@ class TestSparse(TestCase):
             (), (1,), (2,), (1, 1), (3, 1), (3, 2), (4, 1, 1), (4, 3, 2)
         )
         for s0, s1 in itertools.combinations(sizes, r=2):
-            t = make_tensor(s0, device, dtype, low=-9, high=9)
+            t = make_tensor(s0, dtype=dtype, device=device, low=-9, high=9)
             for sparse_dims in range(1, len(s0) + 1):
                 s = t.to_sparse(sparse_dims)
                 if can_broadcast(s0, s1):
