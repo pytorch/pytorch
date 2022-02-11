@@ -3,7 +3,7 @@ This module contains tensor creation utilities.
 """
 
 import torch
-from typing import Optional, List, Tuple, Union, cast, Sequence
+from typing import Optional, List, Tuple, Union, cast
 import math
 import collections.abc
 
