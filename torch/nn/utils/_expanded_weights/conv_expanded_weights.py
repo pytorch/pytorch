@@ -10,15 +10,15 @@ THRESHOLD = 257
 @implements_per_sample_grads(F.conv1d)
 class Conv1dPerSampleGrad(torch.autograd.Function):
     @staticmethod
-    def forward(ctx, *expanded_args_and_kwargs):
+    def forward(ctx, kwarg_names, *expanded_args_and_kwargs):
         if any([isinstance(i, str) for i in expanded_args_and_kwargs]):
             raise RuntimeError("Expanded Weights does not support convolution padding as a string. "
                                "Please file an issue to prioritize support")
-        expanded_args, expanded_kwargs = conv_args_and_kwargs(expanded_args_and_kwargs)
-        output, aux_outputs = forward_helper(F.conv1d, expanded_args, expanded_kwargs, 1)
-        ctx.args = expanded_args
-        ctx.kwargs = expanded_kwargs
-        ctx.aux_outputs = aux_outputs
+        expanded_args, expanded_kwargs = conv_args_and_kwargs(kwarg_names, expanded_args_and_kwargs)
+        output = forward_helper(F.conv1d, expanded_args, expanded_kwargs, 1)
+        ctx.input, ctx.weight = expanded_args
+        ctx.bias = expanded_kwargs['bias']
+        ctx.stride, ctx.padding, ctx.dilation, ctx.groups = expanded_kwargs['stride'], expanded_kwargs['padding'], expanded_kwargs['dilation'], expanded_kwargs['groups']
         return output
 
     @staticmethod
@@ -29,15 +29,15 @@ class Conv1dPerSampleGrad(torch.autograd.Function):
 @implements_per_sample_grads(F.conv2d)
 class Conv2dPerSampleGrad(torch.autograd.Function):
     @staticmethod
-    def forward(ctx, *expanded_args_and_kwargs):
+    def forward(ctx, kwarg_names, *expanded_args_and_kwargs):
         if any([isinstance(i, str) for i in expanded_args_and_kwargs]):
             raise RuntimeError("Expanded Weights does not support convolution padding as a string. "
                                "Please file an issue to prioritize support")
-        expanded_args, expanded_kwargs = conv_args_and_kwargs(expanded_args_and_kwargs)
-        output, aux_outputs = forward_helper(F.conv2d, expanded_args, expanded_kwargs, 1)
-        ctx.args = expanded_args
-        ctx.kwargs = expanded_kwargs
-        ctx.aux_outputs = aux_outputs
+        expanded_args, expanded_kwargs = conv_args_and_kwargs(kwarg_names, expanded_args_and_kwargs)
+        output = forward_helper(F.conv2d, expanded_args, expanded_kwargs, 1)
+        ctx.input, ctx.weight = expanded_args
+        ctx.bias = expanded_kwargs['bias']
+        ctx.stride, ctx.padding, ctx.dilation, ctx.groups = expanded_kwargs['stride'], expanded_kwargs['padding'], expanded_kwargs['dilation'], expanded_kwargs['groups']
         return output
 
     @staticmethod
@@ -48,15 +48,15 @@ class Conv2dPerSampleGrad(torch.autograd.Function):
 @implements_per_sample_grads(F.conv3d)
 class Conv3dPerSampleGrad(torch.autograd.Function):
     @staticmethod
-    def forward(ctx, *expanded_args_and_kwargs):
+    def forward(ctx, kwarg_names, *expanded_args_and_kwargs):
         if any([isinstance(i, str) for i in expanded_args_and_kwargs]):
             raise RuntimeError("Expanded Weights does not support convolution padding as a string. "
                                "Please file an issue to prioritize support")
-        expanded_args, expanded_kwargs = conv_args_and_kwargs(expanded_args_and_kwargs)
-        output, aux_outputs = forward_helper(F.conv3d, expanded_args, expanded_kwargs, 1)
-        ctx.args = expanded_args
-        ctx.kwargs = expanded_kwargs
-        ctx.aux_outputs = aux_outputs
+        expanded_args, expanded_kwargs = conv_args_and_kwargs(kwarg_names, expanded_args_and_kwargs)
+        output = forward_helper(F.conv3d, expanded_args, expanded_kwargs, 1)
+        ctx.input, ctx.weight = expanded_args
+        ctx.bias = expanded_kwargs['bias']
+        ctx.stride, ctx.padding, ctx.dilation, ctx.groups = expanded_kwargs['stride'], expanded_kwargs['padding'], expanded_kwargs['dilation'], expanded_kwargs['groups']
         return output
 
     @staticmethod

@@ -4,7 +4,7 @@ import torch.nn.functional as F
 import numpy as np
 
 from .expanded_weights_utils import \
-    set_grad_sample_if_exists, grad_if_exists_for_input, unpack_expanded_weight_or_tensor
+    set_grad_sample_if_exists, unpack_expanded_weight_or_tensor
 
 THRESHOLD = 32
 
@@ -18,10 +18,7 @@ def conv_picker(func, conv1dOpt, conv2dOpt, conv3dOpt):
         return conv3dOpt
 
 conv_kwarg_defaults = {'bias': None, 'stride': 1, 'padding': 0, 'dilation': 1, 'groups': 1}
-def conv_args_and_kwargs(expanded_args_and_kwargs):
-    kwarg_names = expanded_args_and_kwargs[-1]
-    expanded_args_and_kwargs = expanded_args_and_kwargs[:-1]
-
+def conv_args_and_kwargs(kwarg_names, expanded_args_and_kwargs):
     args = expanded_args_and_kwargs[:len(expanded_args_and_kwargs) - len(kwarg_names)]
     named_kwargs = expanded_args_and_kwargs[len(expanded_args_and_kwargs) - len(kwarg_names):]
     unnamed_kwargs = args[2:]  # input and weight are the only two that can't be kwargs
@@ -32,15 +29,6 @@ def conv_args_and_kwargs(expanded_args_and_kwargs):
     return args[:2], kwargs
 
 def conv_backward(func, ctx, grad_output):
-    def compute_input_grad():
-        output_padding = []
-        input_dims = conv_picker(func, 1, 2, 3)
-        for i in range(input_dims):
-            input_dim = input.shape[2 + i]
-            output_padding.append((2 * padding[i] + input_dim - (kernel_size[i] * dilation[i] - dilation[i] + 1)) % stride[i])
-        weight_ = unpack_expanded_weight_or_tensor(weight)
-        transpose_func = conv_picker(func, F.conv_transpose1d, F.conv_transpose2d, F.conv_transpose3d)
-        return transpose_func(grad_output, weight_, None, stride, padding, tuple(output_padding), groups, dilation)
 
     def weight_grad_sample(weight):
         if (batch_size < THRESHOLD and groups == 1):
@@ -66,10 +54,21 @@ def conv_backward(func, ctx, grad_output):
 
     batch_size = input.shape[0]
     results = []
+    results.append(None)
 
-    results.append(grad_if_exists_for_input(input, compute_input_grad))
+    if input.requires_grad:
+        output_padding = []
+        input_dims = conv_picker(func, 1, 2, 3)
+        for i in range(input_dims):
+            input_dim = input.shape[2 + i]
+            output_padding.append((2 * padding[i] + input_dim - (kernel_size[i] * dilation[i] - dilation[i] + 1)) % stride[i])
+        weight_ = unpack_expanded_weight_or_tensor(weight)
+        transpose_func = conv_picker(func, F.conv_transpose1d, F.conv_transpose2d, F.conv_transpose3d)
+        results.append(transpose_func(grad_output, weight_, None, stride, padding, tuple(output_padding), groups, dilation))
+    else:
+        results.append(None)
     # weight and bias don't compute batched gradients; no other arguments are differentiable
-    results = results + [None] * (len(ctx.args) + len(ctx.kwargs))
+    results = results + [None] * (len(ctx.args) + len(ctx.kwargs) - 1)
 
     # set grad_sample field for weight and bias with per sample gradients
     set_grad_sample_if_exists(weight, weight_grad_sample)

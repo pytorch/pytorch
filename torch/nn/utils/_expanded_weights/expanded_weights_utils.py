@@ -1,18 +1,16 @@
 import torch
 from .expanded_weights_impl import ExpandedWeight
 
-def standard_kwargs(expanded_args):
+def standard_kwargs(kwarg_names, expanded_args_and_kwargs):
     r'''Most `__torch_function__`s standardize the kwargs that they give, so this will separate
     the args and kwargs they pass. Functions that don't are linear and convND
     '''
-    kwarg_names = expanded_args[-1]
-    expanded_args = expanded_args[:-1]
-    kwarg_values = expanded_args[len(expanded_args) - len(kwarg_names):]
-    expanded_args_without_kwargs = expanded_args[:len(expanded_args) - len(kwarg_names)]
+    kwarg_values = expanded_args_and_kwargs[len(expanded_args_and_kwargs) - len(kwarg_names):]
+    expanded_args_without_kwargs = expanded_args_and_kwargs[:len(expanded_args_and_kwargs) - len(kwarg_names)]
     expanded_kwargs = {name: value for (name, value) in zip(kwarg_names, kwarg_values)}
     return expanded_args_without_kwargs, expanded_kwargs
 
-def forward_helper(func, expanded_args, expanded_kwargs, num_true_outs):
+def forward_helper(func, expanded_args, expanded_kwargs):
     r'''Forward helper computes the forward pass for a function that has expanded weight(s)
     passed to it. It will run the forward pass where all ExpandedWeights are their original
     weight. It runs checks on the given arguments and detaches the outputs.
@@ -32,9 +30,7 @@ def forward_helper(func, expanded_args, expanded_kwargs, num_true_outs):
           return auxillary data that is only used in the backward pass
     '''
     unexpanded_args, unexpanded_kwargs = _check_and_unexpand_args(func, expanded_args, expanded_kwargs)
-    output = func(*unexpanded_args, **unexpanded_kwargs)
-    output, aux_outputs = _check_and_detach_output(output, num_true_outs)
-    return (output, aux_outputs)
+    return func(*unexpanded_args, **unexpanded_kwargs)
 
 def _check_and_unexpand_args(func, expanded_args, expanded_kwargs):
     # input must be the first argument passed
@@ -61,20 +57,6 @@ def _check_and_unexpand_args(func, expanded_args, expanded_kwargs):
                          for (name, arg) in expanded_kwargs.items()}
     return unexpanded_args, unexpanded_kwargs
 
-def _check_and_detach_output(output, num_true_outs):
-    aux_outputs = None
-    # separates differentiable outputs from outputs only needed for the backwards computation
-    if isinstance(output, tuple):
-        if len(output) < num_true_outs:
-            raise RuntimeError(f"Got fewer outputs ({len(output)}) than expected ({num_true_outs}). "
-                               "Issues in ExpandedWeights' autograd.Function")
-        aux_outputs = output[num_true_outs:]
-        output = output[:num_true_outs]
-    elif num_true_outs != 1:
-        raise RuntimeError(f"Got single output but expected at least {num_true_outs} outputs. "
-                           "Issues in ExpandedWeights' autograd.Function")
-    return (output, aux_outputs)
-
 def set_grad_sample_if_exists(maybe_expanded_weight, per_sample_grad_fn):
     unpacked = unpack_expanded_weight_or_tensor(maybe_expanded_weight)
     if isinstance(maybe_expanded_weight, ExpandedWeight):
@@ -82,12 +64,6 @@ def set_grad_sample_if_exists(maybe_expanded_weight, per_sample_grad_fn):
             unpacked.grad_sample = unpacked.grad_sample + per_sample_grad_fn(unpacked)
         else:
             unpacked.grad_sample = per_sample_grad_fn(unpacked)
-
-def grad_if_exists_for_input(input, grad_fn):
-    if isinstance(input, torch.Tensor) and input.requires_grad:
-        return grad_fn()
-    else:
-        return None
 
 def unpack_expanded_weight_or_tensor(maybe_expanded_weight, func=lambda x: x):
     if isinstance(maybe_expanded_weight, ExpandedWeight):

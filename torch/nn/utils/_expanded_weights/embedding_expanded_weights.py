@@ -1,14 +1,14 @@
 import torch
 import torch.nn.functional as F
 from .expanded_weights_impl import implements_per_sample_grads
-from .expanded_weights_utils import standard_kwargs, forward_helper, set_grad_sample_if_exists, grad_if_exists_for_input
+from .expanded_weights_utils import standard_kwargs, forward_helper, set_grad_sample_if_exists
 from functools import partial
 
 @implements_per_sample_grads(F.embedding)
 class EmbeddingPerSampleGrad(torch.autograd.Function):
     @staticmethod
-    def forward(ctx, *expanded_args_and_kwargs):
-        expanded_args, expanded_kwargs = standard_kwargs(expanded_args_and_kwargs)
+    def forward(ctx, kwarg_names, *expanded_args_and_kwargs):
+        expanded_args, expanded_kwargs = standard_kwargs(kwarg_names, expanded_args_and_kwargs)
         if len(expanded_args[0].shape) == 1:
             raise RuntimeError(f"Expanded Weights needs an input with a batch size, got a 1D tensor, {expanded_args[0]}")
         output, aux_outputs = forward_helper(F.embedding, expanded_args, expanded_kwargs, 1)
@@ -34,7 +34,6 @@ class EmbeddingPerSampleGrad(torch.autograd.Function):
                     padding_idx = weight.shape[0] + padding_idx
             else:
                 padding_idx = -1
-            return torch.ops.aten.embedding_backward(grad_output, input, weight.shape[0], padding_idx, scale_grad_by_freq, sparse)
 
         def weight_per_sample_grad(weight):
             batch_size = input.shape[0]
@@ -50,9 +49,13 @@ class EmbeddingPerSampleGrad(torch.autograd.Function):
             return grad_sample.scatter_add_(1, index, grad_output.reshape(batch_size, -1, embedding_dim))
 
         results = []
-        results.append(grad_if_exists_for_input(input, partial(input_grad, padding_idx)))
+        results.append(None)
+        if input.requires_grad:
+            results.append(torch.ops.aten.embedding_backward(grad_output, input, weight.shape[0], padding_idx, scale_grad_by_freq, sparse))
+        else:
+            results.append(None)
         # weight doesn't compute batched gradients; no other arguments nor was_expanded are differentiable
-        results = results + [None] * (len(ctx.args) + len(ctx.kwargs))
+        results = results + [None] * (len(ctx.args) + len(ctx.kwargs) - 1)
 
         # set grad_sample field for weight with per sample gradients
         set_grad_sample_if_exists(weight, weight_per_sample_grad)
