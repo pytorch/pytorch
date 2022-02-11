@@ -215,7 +215,6 @@ class PackageExporter:
         self._extern_hooks: OrderedDict = OrderedDict()
         self._mock_hooks: OrderedDict = OrderedDict()
         self._intern_hooks: OrderedDict = OrderedDict()
-        self.external_registry = {}
         if isinstance(importer, Importer):
             self.importer = importer
         else:
