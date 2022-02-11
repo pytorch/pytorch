@@ -971,7 +971,7 @@ def sample_inputs_reduction(op_info, device, dtype, requires_grad, **kwargs):
     supports_multiple_dims: bool = kwargs.get('supports_multiple_dims', True)
 
     # TODO(@heitorschueroff) Once all reduction operators are using ReductionOpInfo
-    # use op_info.genearte_args_kwargs directly.
+    # use op_info.generate_args_kwargs directly.
     generate_args_kwargs = kwargs.get('generate_args_kwargs', lambda *args, **kwargs: (yield tuple(), {}))
 
     inputs: List[SampleInput] = []
@@ -6057,7 +6057,6 @@ def sample_inputs_softmax_variant(op_info, device, dtype, requires_grad, with_dt
         for shape, dim in cases
     ]
 
-
 def sample_inputs_masked_softmax(op_info, device, dtype, requires_grad, with_dtype=False, **kwargs):
     """Sample inputs for masked softmax, log_softmax, and softmin.
 
@@ -6072,6 +6071,23 @@ def sample_inputs_masked_softmax(op_info, device, dtype, requires_grad, with_dty
             sample_input_args, sample_input_kwargs = sample_input.args, dict(mask=mask, **sample_input.kwargs)
             inputs.append(SampleInput(sample_input.input.clone().requires_grad_(requires_grad),
                                       args=sample_input_args, kwargs=sample_input_kwargs))
+    return inputs
+
+def sample_inputs_masked_cumops(op_info, device, dtype, requires_grad, **kwargs):
+    """Sample inputs for masked cumsum and cumprod.
+    """
+    inputs: List[SampleInput] = []
+    for sample_input in sample_inputs_masked_reduction(op_info, device, dtype, requires_grad, **kwargs):
+        sample_input_args, sample_input_kwargs = sample_input.args, sample_input.kwargs.copy()
+        # dimension is required
+        if sample_input_args:
+            dim = sample_input.args[0]
+        else:
+            dim = sample_input.kwargs.get('dim')
+            if not dim: continue
+        inputs.append(SampleInput(sample_input.input.clone().requires_grad_(requires_grad),
+                                  args=sample_input_args, kwargs=sample_input_kwargs))
+
     return inputs
 
 
@@ -15079,6 +15095,42 @@ op_db: List[OpInfo] = [
                          'TestReductions', 'test_ref_duplicate_values'),
         ],
         sample_inputs_func=sample_inputs_masked_reduction
+    ),
+    ReductionOpInfo(
+        '_masked.cumsum',
+        ref=reference_reduction_numpy(np.cumsum),
+        dtypes=all_types_and_complex(),
+        method_variant=None,
+        identity=0,
+        nan_policy='propagate',
+        supports_out=False,
+        supports_forward_ad=True,
+        supports_fwgrad_bwgrad=True,
+        supports_multiple_dims=False,
+        skips=(
+            # NotSupportedError: Compiled functions can't ... use keyword-only arguments with defaults
+            DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
+        ),
+        # Can reuse the same inputs; dim is required in both
+        sample_inputs_func=sample_inputs_softmax_variant
+    ),
+    ReductionOpInfo(
+        '_masked.cumprod',
+        ref=reference_reduction_numpy(np.cumprod),
+        dtypes=all_types_and_complex(),
+        method_variant=None,
+        nan_policy='propagate',
+        supports_out=False,
+        supports_forward_ad=True,
+        supports_fwgrad_bwgrad=True,
+        promotes_int_to_int64=False,
+        supports_multiple_dims=False,
+        skips=(
+            # NotSupportedError: Compiled functions can't ... use keyword-only arguments with defaults
+            DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
+        ),
+        # Can reuse the same inputs; dim is required in both
+        sample_inputs_func=sample_inputs_softmax_variant
     ),
     ReductionOpInfo(
         '_masked.amax',
