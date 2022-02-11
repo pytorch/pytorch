@@ -3,7 +3,7 @@ This module contains tensor creation utilities.
 """
 
 import torch
-from typing import Optional, List, Tuple, Union, cast
+from typing import Optional, List, Tuple, Union, cast, Sequence
 import math
 import collections.abc
 
@@ -103,7 +103,8 @@ def make_tensor(
         return low, high
 
     if len(shape) == 1 and isinstance(shape[0], collections.abc.Sequence):
-        shape = shape[0]
+        shape = shape[0]  # type: ignore[assignment]
+    shape = cast(Tuple[int, ...], tuple(shape))
 
     _integral_types = [torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64]
     _floating_types = [torch.float16, torch.bfloat16, torch.float32, torch.float64]
