@@ -7552,8 +7552,9 @@ class DistributedTest:
 
         @require_backend(DistTestCases.backend_feature["gpu"])
         @require_backends_available(DistTestCases.backend_feature["gpu"])
+        @with_dist_debug_levels(levels=["INFO"])
         @skip_if_lt_x_gpu(2)
-        def test_ddp_build_param_to_name_mapping(self):
+        def test_ddp_build_debug_param_to_name_mapping(self):
             model = TwoLinLayerNet()
             net = torch.nn.parallel.DistributedDataParallel(
                 model.cuda(self.rank),
@@ -7561,7 +7562,7 @@ class DistributedTest:
             )
             expected_mapping = {0: "a.weight", 1: "b.weight"}
             net_params, _ = net._build_params_for_reducer()
-            param_to_name_mapping = net._build_param_to_name_mapping(net_params)
+            param_to_name_mapping = net._build_debug_param_to_name_mapping(net_params)
             self.assertDictEqual(expected_mapping, param_to_name_mapping)
 
             # Test when DDP is used with ignored parameters.
@@ -7577,7 +7578,7 @@ class DistributedTest:
             )
             expected_mapping = {0: "b.weight"}
             net_params, _ = net._build_params_for_reducer()
-            param_to_name_mapping = net._build_param_to_name_mapping(net_params)
+            param_to_name_mapping = net._build_debug_param_to_name_mapping(net_params)
             self.assertDictEqual(expected_mapping, param_to_name_mapping)
 
             # Test errors are raised when DDP and module parameters mismatch.
@@ -7600,11 +7601,11 @@ class DistributedTest:
             )
 
             with self.assertRaisesRegex(ValueError, "Expected param to name mapping"):
-                net._build_param_to_name_mapping(net_params)
+                net._build_debug_param_to_name_mapping(net_params)
 
             net_params = net_params[:-3]
             with self.assertRaisesRegex(ValueError, "Param with name"):
-                net._build_param_to_name_mapping(net_params)
+                net._build_debug_param_to_name_mapping(net_params)
 
             net_params.extend(
                 [
@@ -7617,8 +7618,9 @@ class DistributedTest:
             BACKEND not in DistTestCases.backend_feature["ddp"],
             f"The {BACKEND} backend does not support DistributedDataParallel"
         )
+        @with_dist_debug_levels(levels=["INFO"])
         @skip_if_lt_x_gpu(2)
-        def test_ddp_build_param_to_name_mapping_requires_grad(self):
+        def test_ddp_build_debug_param_to_name_mapping_requires_grad(self):
             class Net(nn.Module):
                 def __init__(self):
                     super().__init__()
@@ -7638,7 +7640,7 @@ class DistributedTest:
                 0: "lin.weight",
             }
             net_params, _ = net._build_params_for_reducer()
-            param_to_name_mapping = net._build_param_to_name_mapping(net_params)
+            param_to_name_mapping = net._build_debug_param_to_name_mapping(net_params)
             self.assertEqual(param_to_name_mapping, expected_mapping)
 
         def _test_ddp_multiple_nested_unused_params_error(self, ignore_sparse):
