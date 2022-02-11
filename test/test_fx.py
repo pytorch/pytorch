@@ -3169,7 +3169,7 @@ class TestFX(JitTestCase):
 
     def test_custom_codegen(self):
         class ListCodeGen(CodeGen):
-            def generate_prologue(self, free_vars, maybe_return_annotation):
+            def gen_fn_def(self, free_vars, maybe_return_annotation):
                 lst_unpack = f"""
 def forward(self, args_list: List[torch.Tensor]){maybe_return_annotation}:
     {', '.join(free_vars)} = args_list"""

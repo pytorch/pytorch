@@ -257,10 +257,10 @@ class CodeGen(object):
     def __init__(self):
         self._body_transformer: Optional[TransformCodeFunc] = None
 
-    def generate_prologue(self, free_vars: List[str], maybe_return_annotation: str) -> str:
+    def gen_fn_def(self, free_vars: List[str], maybe_return_annotation: str) -> str:
         """
         Given the free variables and a return annotation, generates the beginning of the FX function.
-        By default, `generate_prologue(['a', 'b'], '') == 'def forward(a, b):'`
+        By default, `gen_fn_def(['a', 'b'], '') == 'def forward(a, b):'`
         """
         # If the original function didn't have self as its first argument, we
         # would have added it.
@@ -271,6 +271,7 @@ class CodeGen(object):
     def generate_output(self, output_args: Argument) -> str:
         """
         Given the output arguments, generates the return statement of the FX function.
+        Note: The returned statement should not be indented.
         """
         return f'return {repr(output_args)}'
 
@@ -281,7 +282,7 @@ class CodeGen(object):
         different from the inputs to the graph.
 
         If the graph was directly runnable, this invariant should hold true
-        `f.process_outputs(f.graph(*f.process_inputs(*inputs))) == f(*inputs)`
+        `f.graph.process_outputs(f.graph(*f.graph.process_inputs(*inputs))) == f(*inputs)`
         """
         return args
 
@@ -295,12 +296,12 @@ class CodeGen(object):
 
     def additional_globals(self) -> List[Tuple[str, Any]]:
         """
-        If your codegen uses extra global values, add them here.
+        If your codegen uses extra global values, add tuples of (identifier,reference to the value) here.
         For example, return ['List', typing.List] if you need ``List`` in the global context.
         """
         return []
 
-    def _python_code_func(self, nodes, root_module: str, namespace: _Namespace) -> PythonCode:
+    def _gen_python_code(self, nodes, root_module: str, namespace: _Namespace) -> PythonCode:
         free_vars: List[str] = []
         body: List[str] = []
         globals_: Dict[str, Any] = {}
@@ -428,10 +429,10 @@ class CodeGen(object):
                 # special case for getattr: node.args could be 2-argument or 3-argument
                 # 2-argument: attribute access; 3-argument: fall through to attrib function call with default value
                 if global_name == 'getattr' and \
-                    isinstance(node.args, tuple) and \
-                    isinstance(node.args[1], str) and \
-                    node.args[1].isidentifier() and \
-                    len(node.args) == 2:
+                   isinstance(node.args, tuple) and \
+                   isinstance(node.args[1], str) and \
+                   node.args[1].isidentifier() and \
+                   len(node.args) == 2:
                     body.append(f'{repr(node)}{maybe_type_annotation} = {_format_target(repr(node.args[0]), node.args[1])}')
                     return
                 body.append(f'{repr(node)}{maybe_type_annotation} = {global_name}({_format_args(node.args, node.kwargs)})')
@@ -480,7 +481,7 @@ class CodeGen(object):
         for name, value in self.additional_globals():
             add_global(name, value)
 
-        prologue = self.generate_prologue(free_vars, maybe_return_annotation[0])
+        prologue = self.gen_fn_def(free_vars, maybe_return_annotation[0])
 
         code = ''.join(body)
         code = '\n'.join('    ' + line for line in code.split('\n'))
@@ -515,14 +516,11 @@ class _PyTreeCodeGen(CodeGen):
         assert(self.pytree_info.out_spec is not None)
         return pytree.tree_unflatten(out, self.pytree_info.out_spec)
 
-    def generate_prologue(self, free_vars, maybe_return_annotation):
+    def gen_fn_def(self, free_vars, maybe_return_annotation):
         if self.pytree_info is None:
-            return super().generate_prologue(free_vars, maybe_return_annotation)
+            return super().gen_fn_def(free_vars, maybe_return_annotation)
         function_args = self.pytree_info.orig_args
-        has_orig_self = (function_args[0] == 'self')
-        if has_orig_self:
-            free_vars.insert(0, 'self')
-        function_definition = super().generate_prologue(function_args[:], maybe_return_annotation)
+        function_definition = super().gen_fn_def(function_args[:], maybe_return_annotation)
         if len(free_vars) > 0:  # pytree has placeholders in it
             function_definition += f"""
     {', '.join(free_vars)}, = fx_pytree.tree_flatten_spec([{', '.join(function_args)}], self._in_spec)"""
@@ -1130,7 +1128,7 @@ class Graph:
             return self._python_code(root_module, namespace)
 
     def _python_code(self, root_module: str, namespace: _Namespace) -> PythonCode:
-        return self._codegen._python_code_func(self.nodes, root_module, namespace)
+        return self._codegen._gen_python_code(self.nodes, root_module, namespace)
 
 
     def __str__(self) -> str:
