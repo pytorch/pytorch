@@ -1053,7 +1053,6 @@ auto Engine::execute(const edge_list& roots,
 }
 
 void Engine::initialize_device_threads_pool() {
-  track_bad_autograd_forks();
   TORCH_CHECK(!in_bad_autograd_fork,
               "Unable to handle autograd's threading in combination with fork-based multiprocessing. "
               "See https://github.com/pytorch/pytorch/wiki/Autograd-and-Fork");
@@ -1204,6 +1203,10 @@ auto Engine::ready_queue_by_index(std::shared_ptr<ReadyQueue> cpu_ready_queue, i
 }
 
 auto Engine::start_device_threads() -> void {
+  // First always initialize the thread pool for re-entrant threads
+  thread_pool_shared_ = std::make_shared<ThreadPoolShared>();
+
+  // Second, create special threads for each non-CPU device
   // See Note [Allocating GPUs to autograd threads]
   c10::DeviceIndex num_devices = 0;
   for (const auto& impl_atomic : c10::impl::device_guard_impl_registry) {
@@ -1215,14 +1218,20 @@ auto Engine::start_device_threads() -> void {
     }
   }
 
+  // If there are no device except cpu, no need to create worker threads
+  if (num_devices == 0) {
+    return;
+  }
+
+  // Since we're about to create threads, forking is not possible anymore
+  track_bad_autograd_forks();
+
   // allocate one thread for every GPU device (but colocate GPUs of different
   // types), and pre-allocate the device_ready_queues_ to ensure safe reading on it.
   device_ready_queues_ = std::vector<std::shared_ptr<ReadyQueue>>(num_devices);
   for (auto& queue : device_ready_queues_)    {
     queue = std::make_shared<ReadyQueue>();
   }
-
-  thread_pool_shared_ = std::make_shared<ThreadPoolShared>();
 
   for (const auto i : c10::irange(num_devices)) {
     std::thread t(&Engine::thread_init, this, i, device_ready_queues_[i], true);
@@ -1247,6 +1256,8 @@ void Engine::add_thread_pool_task(const std::weak_ptr<GraphTask>& graph_task) {
   // Don't need to be holding the lock while actually creating the thread
   lck.unlock();
   if (create_thread) {
+    // If we're creating a new thread, forking is not allowed anymore
+    track_bad_autograd_forks();
     std::thread t(&Engine::reentrant_thread_init, this);
     t.detach();
   }
