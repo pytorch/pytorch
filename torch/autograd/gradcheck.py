@@ -1521,16 +1521,19 @@ def gradgradcheck(
     tupled_inputs = _as_tuple(inputs)
 
     if grad_outputs is None:
-        # If grad_outputs is not specified, create random Tensors of the same
-        # shape, type, and device as the outputs
-        def randn_like(x):
-            y = torch.randn_like(
-                x if (x.is_floating_point() or x.is_complex()) else x.double(), memory_format=torch.legacy_contiguous_format)
-            if gen_non_contig_grad_outputs:
-                y = torch.testing.make_non_contiguous(y)
-            return y.requires_grad_()
+        # If grad_outputs is not specified, create random Tensors of the same shape, type, and device as the outputs
+        def make_tensor_like(x):
+            return torch.testing.make_tensor(
+                x.shape,
+                dtype=x.dtype if x.is_floating_point() or x.is_complex() else torch.double,
+                layout=x.layout,
+                device=x.device,
+                requires_grad=True,
+                non_contiguous=gen_non_contig_grad_outputs,
+            ).clone(memory_format=torch.legacy_contiguous_format)
+
         outputs = _as_tuple(func(*tupled_inputs))
-        tupled_grad_outputs = tuple(randn_like(x) for x in outputs)
+        tupled_grad_outputs = tuple(make_tensor_like(x) for x in outputs)
     else:
         tupled_grad_outputs = _as_tuple(grad_outputs)
 

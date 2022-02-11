@@ -15698,7 +15698,10 @@ def create_input(call_args, requires_grad=True, non_contiguous=False, call_kwarg
 
     def map_arg(arg):
         def maybe_non_contig(tensor):
-            return tensor if not non_contiguous else make_non_contiguous(tensor)
+            if not non_contiguous or tensor.numel() < 2:
+                return tensor.clone()
+
+            return tensor.repeat_interleave(2, dim=-1)[..., ::2]
 
         def conjugate(tensor):
             return tensor.conj()
