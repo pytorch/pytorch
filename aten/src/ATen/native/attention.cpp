@@ -41,7 +41,7 @@ void transform_bias_rescale_qkv_inner_loop(
     auto V = vec::Vectorized<scalar_t>::size();
     auto dh = 0;
     auto d = nh * dim_per_head;
-    for (; V < dim_per_head && dh + V <= dim_per_head; dh += V, d += V) {
+    for (; dh + V <= dim_per_head; dh += V, d += V) {
       // load
       auto q_bias_data = Vec::loadu(&qkv_bias_data[d + 0 * D]);
       auto k_bias_data = Vec::loadu(&qkv_bias_data[d + 1 * D]);
@@ -75,29 +75,27 @@ void transform_bias_rescale_qkv_inner_loop(
                     nh * T * dim_per_head +
                     t * dim_per_head + dh]);
     }
-    if (dh != dim_per_head) {
-      for (dh = std::max(0, dh - V); dh < dim_per_head; dh++) {
-        auto d = nh * dim_per_head + dh;
-        auto q_bias = qkv_bias_data[d + 0 * D];
-        auto k_bias = qkv_bias_data[d + 1 * D];
-        auto v_bias = qkv_bias_data[d + 2 * D];
-        auto q_data = qkv_data[b * _3D * T + t * _3D + d + 0 * D] + q_bias;
-        auto k_data = qkv_data[b * _3D * T + t * _3D + d + 1 * D] + k_bias;
-        auto v_data = qkv_data[b * _3D * T + t * _3D + d + 2 * D] + v_bias;
-        q_data = q_data / sqrt_dim_per_head;
-        q_k_v_data[0 * B * num_head * T * dim_per_head +
-                   b * num_head * T * dim_per_head +
-                   nh * T * dim_per_head +
-                   t * dim_per_head + dh] = q_data;
-        q_k_v_data[1 * B * num_head * T * dim_per_head +
-                   b * num_head * T * dim_per_head +
-                   nh * T * dim_per_head +
-                   t * dim_per_head + dh] = k_data;
-        q_k_v_data[2 * B * num_head * T * dim_per_head +
-                   b * num_head * T * dim_per_head +
-                   nh * T * dim_per_head +
-                   t * dim_per_head + dh] = v_data;
-      }
+    for (; dh < dim_per_head; dh++) {
+      auto d = nh * dim_per_head + dh;
+      auto q_bias = qkv_bias_data[d + 0 * D];
+      auto k_bias = qkv_bias_data[d + 1 * D];
+      auto v_bias = qkv_bias_data[d + 2 * D];
+      auto q_data = qkv_data[b * _3D * T + t * _3D + d + 0 * D] + q_bias;
+      auto k_data = qkv_data[b * _3D * T + t * _3D + d + 1 * D] + k_bias;
+      auto v_data = qkv_data[b * _3D * T + t * _3D + d + 2 * D] + v_bias;
+      q_data = q_data / sqrt_dim_per_head;
+      q_k_v_data[0 * B * num_head * T * dim_per_head +
+                 b * num_head * T * dim_per_head +
+                 nh * T * dim_per_head +
+                 t * dim_per_head + dh] = q_data;
+      q_k_v_data[1 * B * num_head * T * dim_per_head +
+                 b * num_head * T * dim_per_head +
+                 nh * T * dim_per_head +
+                 t * dim_per_head + dh] = k_data;
+      q_k_v_data[2 * B * num_head * T * dim_per_head +
+                 b * num_head * T * dim_per_head +
+                 nh * T * dim_per_head +
+                 t * dim_per_head + dh] = v_data;
     }
   }
 }
