@@ -1525,6 +1525,16 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(2, 1, 4)
         self.run_test(Squeeze(), x)
 
+    @skipIfUnsupportedMinOpsetVersion(13)
+    def test_squeeze_dynamic_dim(self):
+        class Squeeze(torch.nn.Module):
+            def forward(self, x, dim: int):
+                return torch.squeeze(x, dim)
+
+        x = torch.randn(2, 1, 4)
+        dim = 1
+        self.run_test(Squeeze(), (x, dim))
+
     def test_unsqueeze(self):
         class Unsqueeze(torch.nn.Module):
             def forward(self, x):
@@ -1532,6 +1542,16 @@ class TestONNXRuntime(unittest.TestCase):
 
         x = torch.randn(2, 3, 4)
         self.run_test(Unsqueeze(), x)
+
+    @skipIfUnsupportedMinOpsetVersion(13)
+    def test_unsqueeze_dynamic_dim(self):
+        class Unsqueeze(torch.nn.Module):
+            def forward(self, x, dim: int):
+                return torch.unsqueeze(x, dim)
+
+        x = torch.randn(2, 1, 4)
+        dim = -1
+        self.run_test(Unsqueeze(), (x, dim))
 
     def test_maxpool_default_stride(self):
         class MaxPoolModel(torch.nn.Module):
