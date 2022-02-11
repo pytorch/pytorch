@@ -6,8 +6,9 @@ from sys import version_info
 from textwrap import dedent
 from unittest import skipIf
 
-from torch.package import EmptyMatchError, Importer, PackageExporter, PackageImporter
-from torch.package.package_exporter import PackagingError
+from torch.package import Importer
+from torch.package.package_importer_oss import PackageImporter
+from torch.package.package_exporter_oss import PackageExporter, PackagingError, EmptyMatchError
 from torch.testing._internal.common_utils import IS_WINDOWS, run_tests
 
 try:

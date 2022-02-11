@@ -178,11 +178,8 @@ class PackageImporter(Importer):
             Any: The unpickled object.
         """
         pickle_file = self._zipfile_path(package, resource)
-        restore_location = _get_restore_location(map_location)
-        self.restore_location = _get_restore_location(map_location)
         loaded_storages = {}
         loaded_reduces = {}
-        storage_context = torch._C.DeserializationStorageContext()
 
         def persistent_load(saved_id):
             assert isinstance(saved_id, tuple)

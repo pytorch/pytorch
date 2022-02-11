@@ -6,10 +6,14 @@ import torch
 from torch.package import (
     Importer,
     OrderedImporter,
-    PackageExporter,
-    PackageImporter,
     sys_importer,
 )
+from torch.package.package_exporter_oss import PackageExporter
+from torch.package.package_importer_oss import PackageImporter
+
+from torch.package import PackageExporter as PackageExporter_fb
+from torch.package import PackageImporter as PackageImporter_fb
+
 from torch.testing._internal.common_utils import run_tests
 
 try:
@@ -137,21 +141,21 @@ class TestImporter(PackageTestCase):
 
         # Set up a PackageImporter which has a torch.float16 object pickled:
         buffer = BytesIO()
-        with PackageExporter(buffer) as exporter:
+        with PackageExporter_fb(buffer) as exporter:
             exporter.save_pickle("foo", "foo.pkl", my_dtype)
         buffer.seek(0)
 
-        importer = PackageImporter(buffer)
+        importer = PackageImporter_fb(buffer)
         my_loaded_dtype = importer.load_pickle("foo", "foo.pkl")
 
         # Re-save a package with only our PackageImporter as the importer
         buffer2 = BytesIO()
-        with PackageExporter(buffer2, importer=importer) as exporter:
+        with PackageExporter_fb(buffer2, importer=importer) as exporter:
             exporter.save_pickle("foo", "foo.pkl", my_loaded_dtype)
 
         buffer2.seek(0)
 
-        importer2 = PackageImporter(buffer2)
+        importer2 = PackageImporter_fb(buffer2)
         my_loaded_dtype2 = importer2.load_pickle("foo", "foo.pkl")
         self.assertIs(my_dtype, my_loaded_dtype)
         self.assertIs(my_dtype, my_loaded_dtype2)

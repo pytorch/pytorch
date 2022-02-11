@@ -154,20 +154,3 @@ class PackageImporter(PI):
         torch._utils._validate_loaded_sparse_tensors()
 
         return result
-
-
-        """Returns a file structure representation of package's zipfile.
-
-        Args:
-            include (Union[List[str], str]): An optional string e.g. ``"my_package.my_subpackage"``, or optional list of strings
-                for the names of the files to be inluded in the zipfile representation. This can also be
-                a glob-style pattern, as described in :meth:`PackageExporter.mock`
-
-            exclude (Union[List[str], str]): An optional pattern that excludes files whose name match the pattern.
-
-        Returns:
-            :class:`Directory`
-        """
-        return _create_directory_from_file_list(
-            self.filename, self.zip_reader.get_all_records(), include, exclude
-        )

@@ -6,7 +6,8 @@ from sys import version_info
 from textwrap import dedent
 from unittest import skipIf
 
-from torch.package import PackageExporter, PackageImporter
+from torch.package.package_exporter_oss import PackageExporter
+from torch.package.package_importer_oss import PackageImporter
 from torch.testing._internal.common_utils import run_tests
 
 try:
@@ -57,7 +58,7 @@ class TestResources(PackageTestCase):
         self.assertEqual(reader_one.open_resource("a.txt").getbuffer(), b"hello, a!")
         self.assertFalse(reader_one.is_resource("three"))
         reader_one_contents = list(reader_one.contents())
-        self.assertSequenceEqual(
+        self.assertCountEqual(
             reader_one_contents, ["a.txt", "b.txt", "c.txt", "three"]
         )
 
@@ -65,7 +66,7 @@ class TestResources(PackageTestCase):
         self.assertTrue(reader_two.is_resource("f.txt"))
         self.assertEqual(reader_two.open_resource("f.txt").getbuffer(), b"hello, f!")
         reader_two_contents = list(reader_two.contents())
-        self.assertSequenceEqual(reader_two_contents, ["f.txt", "g.txt"])
+        self.assertCountEqual(reader_two_contents, ["f.txt", "g.txt"])
 
         reader_one_three = importer.get_resource_reader("one.three")
         self.assertTrue(reader_one_three.is_resource("d.txt"))
@@ -73,7 +74,7 @@ class TestResources(PackageTestCase):
             reader_one_three.open_resource("d.txt").getbuffer(), b"hello, d!"
         )
         reader_one_three_contenst = list(reader_one_three.contents())
-        self.assertSequenceEqual(reader_one_three_contenst, ["d.txt", "e.txt"])
+        self.assertCountEqual(reader_one_three_contenst, ["d.txt", "e.txt"])
 
         self.assertIsNone(importer.get_resource_reader("nonexistent_package"))
 
