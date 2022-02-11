@@ -1,4 +1,3 @@
-import copy
 from typing import List, cast
 
 import torch
@@ -11,9 +10,7 @@ from torch.distributed.nn.functional import (
 from torch.distributed._shard.sharded_tensor import (
     sharded_op_impl,
     _PartialTensor,
-    Shard,
     ShardedTensor,
-    ShardMetadata,
 )
 from torch.distributed._shard.sharding_spec import ChunkShardingSpec
 from torch.distributed._shard.sharding_spec._internals import (
@@ -227,7 +224,7 @@ def _handle_col_wise_sharding(input, world_size, weight, rank, local_shard_t, bi
     return ShardedTensor._init_from_local_tensor(
         result,
         new_sharding_spec,
-        *st_size,
+        *st_size,  # type: ignore[arg-type]
         process_group=pg,
     )
 

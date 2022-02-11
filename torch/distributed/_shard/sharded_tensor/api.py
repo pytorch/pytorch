@@ -446,14 +446,14 @@ class ShardedTensor(object):
 
         global_tensor_size = _flatten_tensor_size(global_size)
         sharding_dim = sharding_spec.dim
-        split_size = get_split_size(global_tensor_size[sharding_dim], world_size)
+        split_size = get_split_size(global_tensor_size[sharding_dim], world_size)  # type: ignore[index]
         current_offsets = [0] * len(global_tensor_size)
         gathered_metadatas = [None] * world_size
         local_shards = []
 
         for idx, placement in enumerate(sharding_spec.placements):
             chunked_dim_size = get_chunked_dim_size(
-                global_tensor_size[sharding_dim], split_size, idx
+                global_tensor_size[sharding_dim], split_size, idx  # type: ignore[index]
             )
             shard_size = copy.deepcopy(global_tensor_size)
             shard_size[sharding_spec.dim] = chunked_dim_size  # type: ignore[index]
@@ -467,7 +467,7 @@ class ShardedTensor(object):
             else:
                 local_shard = torch.empty(
                     shard_size,
-                    device=placement.device(),
+                    device=placement.device(),  # type: ignore[union-attr]
                     requires_grad=local_tensor.requires_grad,
                 )
             shards = [
@@ -478,8 +478,8 @@ class ShardedTensor(object):
             ]
             if current_rank == placement.rank():  # type: ignore[union-attr]
                 local_shards = shards
-            gathered_metadatas[placement.rank()] = build_metadata_from_local_shards(
-                shards, global_tensor_size, placement.rank(), process_group
+            gathered_metadatas[placement.rank()] = build_metadata_from_local_shards(  # type: ignore[call-overload, union-attr]
+                shards, global_tensor_size, placement.rank(), process_group  # type: ignore[union-attr, arg-type]
             )
             current_offsets[sharding_spec.dim] += chunked_dim_size  # type: ignore[index]
 
