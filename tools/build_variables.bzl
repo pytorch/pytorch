@@ -1039,7 +1039,6 @@ aten_cpu_source_non_codegen_list = [
     "aten/src/ATen/nnapi/nnapi_bind.cpp",
     "aten/src/ATen/nnapi/nnapi_wrapper.cpp",
     "aten/src/ATen/nnapi/nnapi_model_loader.cpp",
-    "aten/src/ATen/native/prim_native_functions.cpp",
 ]
 
 aten_cpu_source_codegen_list = [
@@ -1168,6 +1167,7 @@ aten_native_source_non_codegen_list = [
     "aten/src/ATen/native/AdaptiveMaxPooling2d.cpp",
     "aten/src/ATen/native/AdaptiveMaxPooling3d.cpp",
     "aten/src/ATen/native/AffineGridGenerator.cpp",
+    "aten/src/ATen/native/Aliases.cpp",
     "aten/src/ATen/native/AveragePool2d.cpp",
     "aten/src/ATen/native/AveragePool3d.cpp",
     "aten/src/ATen/native/BatchLinearAlgebra.cpp",

@@ -85,6 +85,7 @@ generated_cpu_cpp = [
     "aten/src/ATen/core/TensorBody.h",
     "aten/src/ATen/core/TensorMethods.cpp",
     "aten/src/ATen/core/ATenOpList.cpp",
+    "aten/src/ATen/native/Aliases.cpp",
 ]
 
 generated_cuda_cpp = [

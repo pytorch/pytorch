@@ -1,3 +1,15 @@
+# Generates primTorch sources
+# NOTE: primTorch is generated before anything else occurs because
+#   it may create source files that later steps roll-up or consume.
+# NOTE: for CMake builds, primTorch writes directly to the aten/src/ATen source directory.
+execute_process(
+  COMMAND "${PYTHON_EXECUTABLE}" -m tools.codegen.gen
+    --generate "primtorch"
+    --source-path "aten/src/ATen"
+    --install_dir "aten/src/ATen"
+  WORKING_DIRECTORY ${CMAKE_CURRENT_LIST_DIR}/..
+)
+
 # ---[ Generate and install header and cpp files
 include(../cmake/Codegen.cmake)
 
@@ -396,6 +408,8 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     ${GENERATED_H_PYTHON}
     ${GENERATED_TESTING_PYTHON}
     )
+
+
 
   add_custom_command(
     OUTPUT

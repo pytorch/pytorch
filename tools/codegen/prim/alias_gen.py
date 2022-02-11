@@ -22,6 +22,32 @@ def has_out(args: Arguments) -> bool:
 def has_self(args: Arguments) -> bool:
     return args.self_arg is not None
 
+# Returns True when FunctionSchema specifies an inplace function, False otherwise
+def is_inplace(fs: FunctionSchema) -> bool:
+    return fs.name.name.inplace
+
+# Generates the C++ for name of a function as it appears in a C++ definition
+# Note: this is distinct from the name used when calling the function
+# Signature name is ...
+    #   <base name>__<overload name> when <overload name>
+    #     is nonempty and the operation is inplace
+    #   <base_name>_<overload name> when <overload name> is
+    #     is nonempty and the operation is not inplace
+    #   <base name>_ when <overload name> is empty and
+    #     the operation is inplace
+    #   <base name> otherwise
+def generate_signature_name_cpp(fs: FunctionSchema) -> str:
+    on = fs.name
+    has_overload_name = True if on.overload_name else False
+
+    fn_name = on.name.base
+    if is_inplace(fs):
+        fn_name += "_"
+    if has_overload_name:
+        fn_name += "_" + on.overload_name
+
+    return fn_name
+
 # Constructs the C++ for a method call
 def generate_method_call_cpp(fn_cpp: str, args: Arguments) -> str:
     assert has_self(args), "Request to generate method call C++ with Arguments containing no self arg!"
@@ -152,15 +178,16 @@ def native_functions_callback(rs: List[NativeFunction],
             continue
 
         # Generates signature, reusing dispatcher API logic
-        # TODO: This is extremely similar to compute_registration_declarations
-        #   in tools/codegen/gen.py -- maybe that could be refactored and the two merged?
+        # NOTE: This is similar to compute_registration_declarations
+        #   in tools/codegen/gen.py, but the computation of the function's name
+        #   is slightly different.
         signature_cpp: str
         with native_function_manager(alias_nf):
-            dispatcher_name = dispatcher.name(alias_nf.func)
+            signature_name = generate_signature_name_cpp(fs)
             returns_type = dispatcher.returns_type(alias_nf.func.returns).cpp_type_registration_declarations()
             dispatcher_args = dispatcher.arguments(alias_nf.func)
             dispatcher_args_str = ', '.join(a.no_default().decl_registration_declarations() for a in dispatcher_args)
-            signature_cpp = f"""{returns_type} {dispatcher_name}({dispatcher_args_str}) """
+            signature_cpp = f"""{returns_type} {signature_name}({dispatcher_args_str}) """
 
         # Validates function arguments
         args = alias_nf.func.arguments
@@ -187,6 +214,8 @@ def native_functions_callback(rs: List[NativeFunction],
         cpp += "\treturn " + call_cpp + ";\n"
         cpp += "}\n"
 
+        # iteration over native functions and their aliases ends here
+
     # Debug mode prints the C++
     if debug:
         print(cpp)
@@ -194,6 +223,6 @@ def native_functions_callback(rs: List[NativeFunction],
     # Writes C++
     if fm is not None:
         env = {'alias_definitions': cpp}
-        fm.write_with_template('Aliases.cpp', 'Aliases.cpp.in', lambda: env)
+        fm.write_with_template('Aliases.cpp', 'Aliases.cpp', lambda: env)
 
     return pairs

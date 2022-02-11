@@ -1569,8 +1569,8 @@ def main() -> None:
         '--generate',
         type=str,
         nargs='*',
-        choices=['headers', 'sources', 'declarations_yaml'],
-        default=['headers', 'sources', 'declarations_yaml'],
+        choices=['headers', 'sources', 'declarations_yaml', 'primtorch'],
+        default=['headers', 'sources', 'declarations_yaml', 'primtorch'],
         help='Generate only a subset of files')
     parser.add_argument(
         '--primtorch-debug',
@@ -1601,23 +1601,22 @@ def main() -> None:
     ops_install_dir = f'{options.install_dir}/ops'
     pathlib.Path(ops_install_dir).mkdir(parents=True, exist_ok=True)
     native_install_dir = f'{options.install_dir}/native'
-    pathlib.Path(ops_install_dir).mkdir(parents=True, exist_ok=True)
+    pathlib.Path(native_install_dir).mkdir(parents=True, exist_ok=True)
 
-    # Note parsing the native yaml triggers a callback to primTorch, which extends
+    # Requests too parse native_functions.yaml trigger a callback to primTorch, which extends
     #   the native_function.yaml entries and may produce relevant soure code for them.
-    #   In a bit of an oddity, the "dry_run" setting here just controls whether primTorch
-    #   should print its sources or not.
-    # TODO: we could consider trying to explicitly generate primTorch sources once
-    primtorch_fm = FileManager(install_dir=native_install_dir, template_dir=template_dir, dry_run=options.dry_run)
+    # If primTorch is also requested to be generated (or debugged) then the callback
+    #   may also write the primTorch sources.
+    primtorch_fm: Optional[FileManager] = None
+    if 'primtorch' in options.generate or options.primtorch_debug:
+        primtorch_fm = FileManager(install_dir=native_install_dir, template_dir=template_dir, dry_run=options.dry_run)
+
     parsed_yaml = parse_native_yaml(native_yaml_path,
                                     primtorch_fm=primtorch_fm,
                                     debug=options.primtorch_debug)
+
     native_functions, backend_indices = parsed_yaml.native_functions, parsed_yaml.backend_indices
     grouped_native_functions = get_grouped_native_functions(native_functions)
-
-    # Short-circuits if just debugging primtorch
-    if options.primtorch_debug:
-        return
 
     def make_file_manager(install_dir: str) -> FileManager:
         return FileManager(install_dir=install_dir, template_dir=template_dir, dry_run=options.dry_run)
