@@ -295,7 +295,7 @@ class ComputeShapeSignature:
 
     @property
     def shape_call(self) -> str:
-        return f"torch_lazy_tensors::ir::ops::compute_shape_{self.__call_suffix()}"
+        return f"torch::lazy::compute_shape_{self.__call_suffix()}"
 
 
 @dataclass(frozen=True)

@@ -43,22 +43,19 @@
  *
  */
 
-// #include <functional>
-#include "torch/csrc/lazy/core/shape.h"
+#include <torch/csrc/lazy/core/shape_inference.h>
+
+#include <torch/csrc/lazy/core/shape.h>
 #include <ATen/native/ConvUtils.h>
 #include <ATen/AccumulateType.h>
 #include <ATen/WrapDimUtils.h>
-#include "aten/src/ATen/native/ReduceOpsUtils.h"
-#include "lazy_tensor_core/csrc/ts_backend/LazyShapeInference.h"
-#include "torch/csrc/api/include/torch/enum.h"
+#include <aten/src/ATen/native/ReduceOpsUtils.h>
+#include <torch/csrc/api/include/torch/enum.h>
 #include <iostream>
 #include <vector>
 
-namespace torch_lazy_tensors {
-namespace ir {
-namespace ops {
-using Shape = torch::lazy::Shape;
-
+namespace torch{
+namespace lazy {
 
 // Copied from ATen/native/utils/ParamUtils.h, which aparently I can't include from here?
 std::vector<int64_t> expand_param_if_needed(
@@ -528,6 +525,5 @@ std::vector<Shape> compute_shape_clamp_min(const at::Tensor & self, const at::Sc
 }
 
 
-} // namespace ops
-} // namespace ir
-} // namespace torch_lazy_tensors
+} // namespace lazy
+} // namespace torch
