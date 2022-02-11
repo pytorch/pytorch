@@ -1728,7 +1728,7 @@ else:
         yield make_tensor((2, 2), device, dtype)
         yield make_tensor((2, 3), device, dtype)
         yield make_tensor((5, 10), device, dtype)
-        yield make_tensor((5, 10), device, dtype, noncontiguous=True)
+        yield make_tensor((5, 10), device, dtype, non_contiguous=True)
         if dtype != torch.int:
             yield torch.tensor([0, -2, nan, 10.2, inf], dtype=dtype, device=device)
 
@@ -2474,7 +2474,7 @@ else:
             filtered_shape = filter_shape(shape, dims)
 
             spacing = space_fn(filtered_shape)
-            t = make_tensor(shape, device=device, dtype=dtype, noncontiguous=not contig)
+            t = make_tensor(shape, device=device, dtype=dtype, non_contiguous=not contig)
             t_np = t.cpu().numpy()
 
             actual = torch.gradient(t, spacing=spacing, dim=dims, edge_order=edge_order)
@@ -2820,7 +2820,7 @@ else:
 
         def make_arg(batch_sizes, n, dim, contig):
             size_arg = batch_sizes[:dim] + (n,) + batch_sizes[dim:]
-            return make_tensor(size_arg, device, dtype, low=None, high=None, noncontiguous=not contig)
+            return make_tensor(size_arg, device, dtype, low=None, high=None, non_contiguous=not contig)
 
         def ref_index_copy(tgt, dim, idx, src):
             for i in range(idx.size(0)):
@@ -2981,7 +2981,7 @@ else:
 
         def make_arg(batch_sizes, n, dim, contig):
             size_arg = batch_sizes[:dim] + (n,) + batch_sizes[dim:]
-            return make_tensor(size_arg, device, dtype, low=None, high=None, noncontiguous=not contig)
+            return make_tensor(size_arg, device, dtype, low=None, high=None, non_contiguous=not contig)
 
         def ref_index_select(src, dim, idx):
             # bfloat16 is just used on GPU, so it's not supported on numpy
@@ -2996,7 +2996,7 @@ else:
             for other_sizes in ((), (4, 5)):
                 for dim in range(len(other_sizes)):
                     src = make_arg(other_sizes, num_src, dim, src_contig)
-                    idx = make_tensor((num_out,), device, dtype=torch.int64, low=0, high=num_src, noncontiguous=not idx_contig)
+                    idx = make_tensor((num_out,), device, dtype=torch.int64, low=0, high=num_src, non_contiguous=not idx_contig)
                     out = torch.index_select(src, dim, idx)
                     out2 = ref_index_select(src, dim, idx)
                     self.assertEqual(out, out2)
@@ -3005,7 +3005,7 @@ else:
             other_sizes = (3, 2)
             dim = 1
             src = make_arg(other_sizes, num_src, dim, True)
-            idx = make_tensor((num_out,), device, dtype=idx_type, low=0, high=num_src, noncontiguous=False)
+            idx = make_tensor((num_out,), device, dtype=idx_type, low=0, high=num_src, non_contiguous=False)
             out = torch.index_select(src, dim, idx)
             out2 = ref_index_select(src, dim, idx)
             self.assertEqual(out, out2)
@@ -5446,11 +5446,11 @@ class TestDevicePrecision(TestCase):
 
         for shape, noncontig in test_args:
             x = make_tensor(shape, device=device, dtype=dtype,
-                            noncontiguous=noncontig)
+                            non_contiguous=noncontig)
             ub = make_tensor(shape, device=device, dtype=dtype,
-                             noncontiguous=noncontig)
+                             non_contiguous=noncontig)
             lb = make_tensor(shape, device=device, dtype=dtype,
-                             noncontiguous=noncontig)
+                             non_contiguous=noncontig)
 
             expect = x.max(lb).min(ub)
             actual = x.clamp(lb, ub)
@@ -5625,7 +5625,7 @@ class TestTorch(TestCase):
                         num_copy, num_dest = 3, 3
                         dest = torch.randn(num_dest, *other_sizes, device=device)
                         if not dest_contig:
-                            dest = make_tensor(dest.shape, device=device, dtype=dest.dtype, noncontiguous=True)
+                            dest = make_tensor(dest.shape, device=device, dtype=dest.dtype, non_contiguous=True)
                         src = torch.randn(num_copy, *other_sizes, device=device)
                         if not src_contig:
                             src = torch.testing.make_non_contiguous(src)

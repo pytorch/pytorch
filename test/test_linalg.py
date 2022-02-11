@@ -4106,8 +4106,8 @@ class TestLinalg(TestCase):
         self._check_einsum('i...j, ij... -> ...ij', C, make_tensor((2, 5, 2, 3), device, dtype))
 
         # torch.bilinear with noncontiguous tensors
-        l = make_tensor((5, 10), device, dtype, noncontiguous=True)
-        r = make_tensor((5, 20), device, dtype, noncontiguous=True)
+        l = make_tensor((5, 10), device, dtype, non_contiguous=True)
+        r = make_tensor((5, 20), device, dtype, non_contiguous=True)
         w = make_tensor((15, 10, 20), device, dtype)
         self._check_einsum("bn,anm,bm->ba", l, w, r)
 
@@ -4135,8 +4135,8 @@ class TestLinalg(TestCase):
         self._check_einsum(A.t(), [0, Ellipsis], B, [1, 0], [Ellipsis])
 
         # torch.bilinear with noncontiguous tensors
-        l = make_tensor((5, 10), device, dtype, noncontiguous=True)
-        r = make_tensor((5, 20), device, dtype, noncontiguous=True)
+        l = make_tensor((5, 10), device, dtype, non_contiguous=True)
+        r = make_tensor((5, 20), device, dtype, non_contiguous=True)
         w = make_tensor((15, 10, 20), device, dtype)
         self._check_einsum(l, [40, 41], w, [2, 41, 50], r, [40, 50], [40, 2])
 

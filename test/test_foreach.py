@@ -158,7 +158,7 @@ class TestForeach(TestCase):
         inputs = [
             opinfo.sample_inputs(device, dtype, N, noncontiguous=not is_fastpath),
             [
-                make_tensor((N - i , 1), device=device, dtype=dtype, noncontiguous=not is_fastpath) for i in range(N)
+                make_tensor((N - i , 1), device=device, dtype=dtype, non_contiguous=not is_fastpath) for i in range(N)
             ],
         ]
         self._binary_test(dtype, op, ref, inputs, is_fastpath and disable_fastpath, is_inplace=False)
@@ -292,10 +292,10 @@ class TestForeach(TestCase):
         inputs = [
             opinfo.sample_inputs(device, dtype, N, noncontiguous=not is_fastpath, same_size=True),
             [
-                make_tensor((N - i, 1), device=device, dtype=dtype, noncontiguous=not is_fastpath) for i in range(N)
+                make_tensor((N - i, 1), device=device, dtype=dtype, non_contiguous=not is_fastpath) for i in range(N)
             ],
             [
-                make_tensor((1, N - i), device=device, dtype=dtype, noncontiguous=not is_fastpath) for i in range(N)
+                make_tensor((1, N - i), device=device, dtype=dtype, non_contiguous=not is_fastpath) for i in range(N)
             ],
         ]
         self._pointwise_test(dtype, op, ref, inputs, is_fastpath and disable_fastpath, is_inplace=False, values=values)
@@ -565,8 +565,8 @@ class TestForeach(TestCase):
         self._binary_test(dtype, foreach_op_, native_op_, inputs, is_fastpath=False, is_inplace=True)
 
         # non contiguous
-        tensor1 = make_tensor((5, 2, 1, 3), device=device, dtype=dtype, noncontiguous=True)
-        tensor2 = make_tensor((5, 2, 1, 3), device=device, dtype=dtype, noncontiguous=True)
+        tensor1 = make_tensor((5, 2, 1, 3), device=device, dtype=dtype, non_contiguous=True)
+        tensor2 = make_tensor((5, 2, 1, 3), device=device, dtype=dtype, non_contiguous=True)
         self.assertFalse(tensor1.is_contiguous())
         self.assertFalse(tensor2.is_contiguous())
         inputs = ([tensor1], [tensor2])

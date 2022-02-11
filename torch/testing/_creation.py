@@ -15,7 +15,7 @@ def make_tensor(
     low: Optional[float] = None,
     high: Optional[float] = None,
     requires_grad: bool = False,
-    noncontiguous: bool = False,
+    non_contiguous: bool = False,
     exclude_zero: bool = False
 ) -> torch.Tensor:
     r"""Creates a tensor with the given :attr:`shape`, :attr:`device`, and :attr:`dtype`, and filled with
@@ -51,7 +51,7 @@ def make_tensor(
             clamped to the greatest representable finite value of the given dtype. When ``None`` (default) this value
             is determined based on the :attr:`dtype` (see the table above). Default: ``None``.
         requires_grad (Optional[bool]): If autograd should record operations on the returned tensor. Default: ``False``.
-        noncontiguous (Optional[bool]): If `True`, the returned tensor will be noncontiguous. This argument is
+        non_contiguous (Optional[bool]): If `True`, the returned tensor will be noncontiguous. This argument is
             ignored if the constructed tensor has fewer than two elements.
         exclude_zero (Optional[bool]): If ``True`` then zeros are replaced with the dtype's small positive value
             depending on the :attr:`dtype`. For bool and integer types zero is replaced with one. For floating
@@ -137,7 +137,7 @@ def make_tensor(
         raise TypeError(f"The requested dtype '{dtype}' is not supported by torch.testing.make_tensor()."
                         " To request support, file an issue at: https://github.com/pytorch/pytorch/issues")
 
-    if noncontiguous and result.numel() > 1:
+    if non_contiguous and result.numel() > 1:
         result = torch.repeat_interleave(result, 2, dim=-1)
         result = result[..., ::2]
 

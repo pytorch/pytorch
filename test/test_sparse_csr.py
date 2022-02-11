@@ -632,8 +632,8 @@ class TestSparseCSR(TestCase):
                 a_batched = torch._sparse_csr_tensor_unsafe(
                     a.crow_indices(), a.col_indices(), a.values(), (batch_size, m, k))
 
-                b = make_tensor((batch_size, k, n), dtype=dtype, device=device, noncontiguous=noncontiguous)
-                c = make_tensor((batch_size, m, n), dtype=dtype, device=device, noncontiguous=noncontiguous)
+                b = make_tensor((batch_size, k, n), dtype=dtype, device=device, non_contiguous=noncontiguous)
+                c = make_tensor((batch_size, m, n), dtype=dtype, device=device, non_contiguous=noncontiguous)
                 for op_b, op_out in itertools.product([True, False], repeat=2):
                     run_test(c, a, a_batched, b, op_b, op_out, dtype=dtype, device=device)
 
@@ -665,7 +665,7 @@ class TestSparseCSR(TestCase):
                 a_batched = torch._sparse_csr_tensor_unsafe(
                     a.crow_indices(), a.col_indices(), a.values(), (batch_size, m, k))
 
-                b = make_tensor((batch_size, k, n), dtype=dtype, device=device, noncontiguous=noncontiguous)
+                b = make_tensor((batch_size, k, n), dtype=dtype, device=device, non_contiguous=noncontiguous)
                 for op_b, op_out in itertools.product([True, False], repeat=2):
                     run_test(a, a_batched, b, op_b, op_out, dtype=dtype, device=device)
 
@@ -702,8 +702,8 @@ class TestSparseCSR(TestCase):
                 a_data = make_tensor((nnz, block_size, block_size), dtype=dtype, device=device)
                 a_data = a_data.mT if noncontiguous else a_data   # Test column-major blocks
                 a = torch._sparse_csr_tensor_unsafe(a.crow_indices(), a.col_indices(), a_data, (m * block_size, k * block_size))
-                b = make_tensor((k * block_size, n * block_size), dtype=dtype, device=device, noncontiguous=noncontiguous)
-                c = make_tensor((m * block_size, n * block_size), dtype=dtype, device=device, noncontiguous=noncontiguous)
+                b = make_tensor((k * block_size, n * block_size), dtype=dtype, device=device, non_contiguous=noncontiguous)
+                c = make_tensor((m * block_size, n * block_size), dtype=dtype, device=device, non_contiguous=noncontiguous)
                 for op_b, op_out in itertools.product([True, False], repeat=2):
                     self.run_test_block_addmm_addmv(torch.addmm, c, a, b, op_b, op_out, dtype=dtype, device=device)
 
@@ -721,8 +721,8 @@ class TestSparseCSR(TestCase):
                 a_data = make_tensor((nnz, block_size, block_size), dtype=dtype, device=device)
                 a_data = a_data.mT if noncontiguous else a_data  # Test column-major blocks
                 a = torch._sparse_csr_tensor_unsafe(a.crow_indices(), a.col_indices(), a_data, (m * block_size, k * block_size))
-                b = make_tensor((k * block_size,), dtype=dtype, device=device, noncontiguous=noncontiguous)
-                c = make_tensor((m * block_size,), dtype=dtype, device=device, noncontiguous=noncontiguous)
+                b = make_tensor((k * block_size,), dtype=dtype, device=device, non_contiguous=noncontiguous)
+                c = make_tensor((m * block_size,), dtype=dtype, device=device, non_contiguous=noncontiguous)
                 self.run_test_block_addmm_addmv(torch.addmv, c, a, b, dtype=dtype, device=device)
 
     @skipCPUIfNoMklSparse
@@ -771,7 +771,7 @@ class TestSparseCSR(TestCase):
                 a_data = make_tensor((nnz, block_size, block_size), dtype=dtype, device=device)
                 a_data = a_data.mT if noncontiguous else a_data  # Test column-major blocks
                 a = torch._sparse_csr_tensor_unsafe(a.crow_indices(), a.col_indices(), a_data, (m * block_size, m * block_size))
-                b = make_tensor((m * block_size, k), dtype=dtype, device=device, noncontiguous=noncontiguous)
+                b = make_tensor((m * block_size, k), dtype=dtype, device=device, non_contiguous=noncontiguous)
 
                 for (upper, unitriangular, transpose, op_out) in itertools.product([True, False], repeat=4):
                     run_test(a, b, upper, unitriangular, transpose, op_out)
@@ -1175,8 +1175,8 @@ class TestSparseCSR(TestCase):
             for (m, n, k), noncontiguous in zip(itertools.product([1, 5], repeat=3), [True, False]):
                 nnz = random.randint(0, m * n)
                 c = self.genSparseCSRTensor((m, n), nnz, dtype=dtype, device=device, index_dtype=index_dtype)
-                a = make_tensor((m, k), dtype=dtype, device=device, noncontiguous=noncontiguous)
-                b = make_tensor((k, n), dtype=dtype, device=device, noncontiguous=noncontiguous)
+                a = make_tensor((m, k), dtype=dtype, device=device, non_contiguous=noncontiguous)
+                b = make_tensor((k, n), dtype=dtype, device=device, non_contiguous=noncontiguous)
                 for op_a, op_b in itertools.product([True, False], repeat=2):
                     run_test(c, a, b, op_a, op_b)
 

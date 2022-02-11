@@ -367,9 +367,9 @@ class TestBinaryUfuncs(TestCase):
         for shape, noncontiguous in product(shapes, [True, False]):
             shape_lhs, shape_rhs = shape
             lhs = make_tensor(shape_lhs, device=device, dtype=dtype,
-                              noncontiguous=noncontiguous, **op.lhs_make_tensor_kwargs)
+                              non_contiguous=noncontiguous, **op.lhs_make_tensor_kwargs)
             rhs = make_tensor(shape_rhs, device=device, dtype=dtype,
-                              noncontiguous=noncontiguous, **op.rhs_make_tensor_kwargs)
+                              non_contiguous=noncontiguous, **op.rhs_make_tensor_kwargs)
 
             actual = op(lhs, rhs)
             expected = op.ref(lhs.cpu().numpy(), rhs.cpu().numpy())
@@ -1382,13 +1382,13 @@ class TestBinaryUfuncs(TestCase):
                 self._test_pow(base_tensor, exp_tensor)
                 # test non-contiguous tensors as well
                 base_tensor = make_tensor(base_shape, dtype=dt, device=dev, low=low, high=high,
-                                          noncontiguous=True)
+                                          non_contiguous=True)
                 if dt in [torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64]:
                     exp_tensor = make_tensor(exp_shape, dtype=dt, device=dev, low=0, high=high,
-                                             noncontiguous=True)
+                                             non_contiguous=True)
                 else:
                     exp_tensor = make_tensor(exp_shape, dtype=dt, device=dev, low=low, high=high,
-                                             noncontiguous=True)
+                                             non_contiguous=True)
                 self._test_pow(base_tensor, exp_scalar)
                 self._test_pow(base_tensor, exp_tensor)
 
@@ -1489,7 +1489,7 @@ class TestBinaryUfuncs(TestCase):
     def test_complex_scalar_pow_tensor(self, device, dtype):
         complexes = [0.5j, 1. + 1.j, -1.5j, 2.2 - 1.6j, 1 + 0j]
         first_exp = make_tensor((100,), device, dtype, low=-2, high=2)
-        second_exp = make_tensor((100,), device, dtype, low=-2, high=2, noncontiguous=True)
+        second_exp = make_tensor((100,), device, dtype, low=-2, high=2, non_contiguous=True)
         first_exp[0] = first_exp[10] = first_exp[20] = 0
         second_exp[0] = second_exp[10] = second_exp[20] = 0
         for base in complexes:

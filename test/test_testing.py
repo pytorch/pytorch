@@ -256,7 +256,7 @@ class TestTesting(TestCase):
             if dtype not in [torch.float, torch.cfloat]:
                 requires_grad = False
             t = make_tensor(size, device, dtype, low=low, high=high,
-                            requires_grad=requires_grad, noncontiguous=noncontiguous)
+                            requires_grad=requires_grad, non_contiguous=noncontiguous)
 
             self.assertEqual(t.shape, size)
             self.assertEqual(t.device, torch.device(device))

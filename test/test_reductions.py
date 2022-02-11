@@ -1427,7 +1427,7 @@ class TestReductions(TestCase):
             # Randomly scale the values
             scale = random.randint(10, 100)
             x = make_tensor((17, 17), device=device, dtype=dtype,
-                            low=-scale, high=scale, noncontiguous=noncontiguous)
+                            low=-scale, high=scale, non_contiguous=noncontiguous)
 
             if dtype.is_floating_point:
                 nan_mask = x < 0.2 * scale
@@ -2835,9 +2835,9 @@ class TestReductions(TestCase):
 
         # Test passing non-contiguous output tensors
         hist_out = make_tensor(expected_hist.shape, device=expected_hist.device, dtype=expected_hist.dtype,
-                               noncontiguous=True)
+                               non_contiguous=True)
         bin_edges_out = make_tensor(expected_bin_edges.shape, device=expected_bin_edges.device, dtype=expected_bin_edges.dtype,
-                                    noncontiguous=True)
+                                    non_contiguous=True)
 
         # Doesn't pass a 'range' kwarg unless necessary because the override of histogram with Tensor bins doesn't accept one
         if bin_range:
@@ -2862,8 +2862,8 @@ class TestReductions(TestCase):
 
         for contig, bins_contig, bin_ct, weighted, density, shape in \
                 product([True, False], [True, False], range(1, 10), [True, False], [True, False], shapes):
-            values = make_tensor(shape, device, dtype, low=-9, high=9, noncontiguous=not contig)
-            weights = make_tensor(shape, device, dtype, low=0, high=9, noncontiguous=not contig) if weighted else None
+            values = make_tensor(shape, device, dtype, low=-9, high=9, non_contiguous=not contig)
+            weights = make_tensor(shape, device, dtype, low=0, high=9, non_contiguous=not contig) if weighted else None
 
             # Tests passing just the bin_ct
             self._test_histogram_numpy(values, bin_ct, None, weights, density)
@@ -2880,7 +2880,7 @@ class TestReductions(TestCase):
             bin_edges = make_tensor(bin_ct + 1, device, dtype, low=-9, high=9).msort()
             if not bins_contig:
                 # Necessary because msort always produces contiguous output
-                bin_edges_noncontig = make_tensor(bin_ct + 1, device, dtype, noncontiguous=not bins_contig)
+                bin_edges_noncontig = make_tensor(bin_ct + 1, device, dtype, non_contiguous=not bins_contig)
                 bin_edges_noncontig.copy_(bin_edges)
                 bin_edges = bin_edges_noncontig
             self.assertEqual(bin_edges.is_contiguous(), bins_contig)
@@ -2888,12 +2888,12 @@ class TestReductions(TestCase):
 
             # Tests with input tensor in which all elements are equal
             elt = random.uniform(-9, 9)
-            values = make_tensor(shape, device, dtype, low=elt, high=elt, noncontiguous=not contig)
+            values = make_tensor(shape, device, dtype, low=elt, high=elt, non_contiguous=not contig)
             self._test_histogram_numpy(values, bin_ct, bin_range, weights, density)
             self._test_histogram_numpy(values, bin_edges, None, weights, density)
 
             # Tests with input equal to bin_edges
-            weights = make_tensor(bin_ct + 1, device, dtype, low=0, high=9, noncontiguous=not contig) if weighted else None
+            weights = make_tensor(bin_ct + 1, device, dtype, low=0, high=9, non_contiguous=not contig) if weighted else None
             self._test_histogram_numpy(bin_edges, bin_edges, None, weights, density)
 
         # Tests values of default args
@@ -2982,8 +2982,8 @@ class TestReductions(TestCase):
                 product([True, False], [True, False], [True, False], [True, False], shapes):
             D = shape[-1]
 
-            values = make_tensor(shape, device, dtype, low=-9, high=9, noncontiguous=not contig)
-            weights = make_tensor(shape[:-1], device, dtype, low=0, high=9, noncontiguous=not contig) if weighted else None
+            values = make_tensor(shape, device, dtype, low=-9, high=9, non_contiguous=not contig)
+            weights = make_tensor(shape[:-1], device, dtype, low=0, high=9, non_contiguous=not contig) if weighted else None
 
             # Tests passing a single bin count
             bin_ct = random.randint(1, 5)
@@ -3007,7 +3007,7 @@ class TestReductions(TestCase):
             bin_edges = [make_tensor(ct + 1, device, dtype, low=-9, high=9).msort() for ct in bin_ct]
             if not bins_contig:
                 # Necessary because msort always produces contiguous output
-                bin_edges_noncontig = [make_tensor(ct + 1, device, dtype, noncontiguous=not bins_contig) for ct in bin_ct]
+                bin_edges_noncontig = [make_tensor(ct + 1, device, dtype, non_contiguous=not bins_contig) for ct in bin_ct]
                 for dim in range(D):
                     bin_edges_noncontig[dim].copy_(bin_edges[dim])
                 bin_edges = bin_edges_noncontig
