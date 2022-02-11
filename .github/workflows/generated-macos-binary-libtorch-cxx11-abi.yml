@@ -123,7 +123,7 @@ jobs:
   libtorch-cpu-shared-with-deps-cxx11-abi-upload:  # Uploading
     runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: libtorch-cpu-shared-with-deps-cxx11-abi-test
+    needs: libtorch-cpu-shared-with-deps-cxx11-abi-build
     env:
       PACKAGE_TYPE: libtorch
       # TODO: This is a legacy variable that we eventually want to get rid of in
@@ -324,7 +324,7 @@ jobs:
   libtorch-cpu-shared-without-deps-cxx11-abi-upload:  # Uploading
     runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: libtorch-cpu-shared-without-deps-cxx11-abi-test
+    needs: libtorch-cpu-shared-without-deps-cxx11-abi-build
     env:
       PACKAGE_TYPE: libtorch
       # TODO: This is a legacy variable that we eventually want to get rid of in
@@ -525,7 +525,7 @@ jobs:
   libtorch-cpu-static-with-deps-cxx11-abi-upload:  # Uploading
     runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: libtorch-cpu-static-with-deps-cxx11-abi-test
+    needs: libtorch-cpu-static-with-deps-cxx11-abi-build
     env:
       PACKAGE_TYPE: libtorch
       # TODO: This is a legacy variable that we eventually want to get rid of in
@@ -726,7 +726,7 @@ jobs:
   libtorch-cpu-static-without-deps-cxx11-abi-upload:  # Uploading
     runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: libtorch-cpu-static-without-deps-cxx11-abi-test
+    needs: libtorch-cpu-static-without-deps-cxx11-abi-build
     env:
       PACKAGE_TYPE: libtorch
       # TODO: This is a legacy variable that we eventually want to get rid of in

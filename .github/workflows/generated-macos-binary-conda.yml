@@ -118,7 +118,7 @@ jobs:
   conda-py3_7-cpu-upload:  # Uploading
     runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: conda-py3_7-cpu-test
+    needs: conda-py3_7-cpu-build
     env:
       PACKAGE_TYPE: conda
       # TODO: This is a legacy variable that we eventually want to get rid of in
@@ -313,7 +313,7 @@ jobs:
   conda-py3_8-cpu-upload:  # Uploading
     runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: conda-py3_8-cpu-test
+    needs: conda-py3_8-cpu-build
     env:
       PACKAGE_TYPE: conda
       # TODO: This is a legacy variable that we eventually want to get rid of in
@@ -508,7 +508,7 @@ jobs:
   conda-py3_9-cpu-upload:  # Uploading
     runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: conda-py3_9-cpu-test
+    needs: conda-py3_9-cpu-build
     env:
       PACKAGE_TYPE: conda
       # TODO: This is a legacy variable that we eventually want to get rid of in
@@ -703,7 +703,7 @@ jobs:
   conda-py3_10-cpu-upload:  # Uploading
     runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: conda-py3_10-cpu-test
+    needs: conda-py3_10-cpu-build
     env:
       PACKAGE_TYPE: conda
       # TODO: This is a legacy variable that we eventually want to get rid of in
