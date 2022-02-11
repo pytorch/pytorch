@@ -22,7 +22,7 @@ except ImportError:
 @functional_datapipe('filter')
 class FilterIterDataPipe(IterDataPipe[T_co]):
     r"""
-    Filter out elements from the source datapipe according to input ``filter_fn`` (functional name: ``filter``).
+    Filters out elements from the source datapipe according to input ``filter_fn`` (functional name: ``filter``).
 
     Args:
         datapipe: Iterable DataPipe being filtered
