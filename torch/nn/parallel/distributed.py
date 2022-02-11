@@ -644,7 +644,9 @@ class DistributedDataParallel(Module, Joinable):
         # In debug mode, build a mapping of parameter index -> parameter.
         param_to_name_mapping = self._build_debug_param_to_name_mapping(parameters)
         # Builds reducer.
-        self._ddp_init_helper(parameters, expect_sparse_gradient, param_to_name_mapping)
+        self._ddp_init_helper(
+            parameters, expect_sparse_gradient, param_to_name_mapping, static_graph
+        )
         self._has_rebuilt_buckets = False
 
         if static_graph:
@@ -671,14 +673,15 @@ class DistributedDataParallel(Module, Joinable):
         raise err_type(err_msg)
 
     def _ddp_init_helper(
-        self, parameters, expect_sparse_gradient, param_to_name_mapping
+        self, parameters, expect_sparse_gradient, param_to_name_mapping,
+        static_graph
     ):
         """
         Initialization helper function that does the following:
         (1) bucketing the parameters for reductions
         (2) resetting the bucketing states
         (3) registering the grad hooks
-        (4) Logging constructin-time DDP logging data
+        (4) Logging construction-time DDP logging data
         (5) passing a handle of DDP to SyncBatchNorm Layer
         """
         self.num_iterations = 0
@@ -728,7 +731,8 @@ class DistributedDataParallel(Module, Joinable):
             [] if self.device_ids is None else self.device_ids,
             -1 if self.output_device is None else self.output_device,
             self.broadcast_buffers,
-            has_sync_bn
+            has_sync_bn,
+            static_graph,
         )
 
         # passing a handle to torch.nn.SyncBatchNorm layer
@@ -752,7 +756,9 @@ class DistributedDataParallel(Module, Joinable):
         # In debug mode, build a mapping of parameter index -> parameter.
         param_to_name_mapping = self._build_debug_param_to_name_mapping(parameters)
         # Builds reducer.
-        self._ddp_init_helper(parameters, expect_sparse_gradient, param_to_name_mapping)
+        self._ddp_init_helper(
+            parameters, expect_sparse_gradient, param_to_name_mapping, self.static_graph
+        )
         if self.static_graph:
             self.reducer._set_static_graph()
             self.logger._set_static_graph()
