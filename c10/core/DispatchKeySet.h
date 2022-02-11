@@ -717,6 +717,7 @@ constexpr DispatchKeySet backend_bitset_mask =
 constexpr auto inplace_or_view_ks =
     DispatchKeySet(DispatchKey::ADInplaceOrView);
 constexpr auto autograd_cpu_ks = DispatchKeySet(DispatchKey::AutogradCPU);
+constexpr auto autograd_ipu_ks = DispatchKeySet(DispatchKey::AutogradIPU);
 constexpr auto autograd_xpu_ks = DispatchKeySet(DispatchKey::AutogradXPU);
 constexpr auto autograd_cuda_ks = DispatchKeySet(DispatchKey::AutogradCUDA);
 constexpr auto autograd_xla_ks = DispatchKeySet(DispatchKey::AutogradXLA);
@@ -766,6 +767,8 @@ inline DispatchKeySet getAutogradRelatedKeySetFromBackend(BackendComponent t) {
   switch (t) {
     case BackendComponent::CPUBit:
       return inplace_or_view_ks | autograd_cpu_ks;
+    case BackendComponent::IPUBit:
+      return inplace_or_view_ks | autograd_ipu_ks;
     case BackendComponent::XPUBit:
       return inplace_or_view_ks | autograd_xpu_ks;
     case BackendComponent::CUDABit:

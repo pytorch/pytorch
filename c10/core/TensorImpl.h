@@ -900,6 +900,10 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     return key_set_.has_all(xpu_ks);
   }
 
+  bool is_ipu() const {
+    return key_set_.has_backend(BackendComponent::IPUBit);
+  }
+
   bool is_xla() const {
     constexpr auto xla_ks = DispatchKeySet(BackendComponent::XLABit);
     return key_set_.has_all(xla_ks);

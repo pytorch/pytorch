@@ -32,6 +32,7 @@ enum class Backend {
   HIP,
   VE,
   FPGA,
+  IPU,
   XPU,
   SparseCPU,
   SparseCUDA,
@@ -96,6 +97,8 @@ static inline Backend dispatchKeyToBackend(DispatchKey t) {
     return Backend::QuantizedCPU;
   } else if (t == DispatchKey::QuantizedCUDA) {
     return Backend::QuantizedCUDA;
+  } else if (t == DispatchKey::IPU || t == DispatchKey::AutogradIPU) {
+    return Backend::IPU;
   } else if (t == DispatchKey::XPU || t == DispatchKey::AutogradXPU) {
     return Backend::XPU;
   } else if (t == DispatchKey::SparseXPU) {
@@ -129,6 +132,8 @@ static inline DispatchKey backendToDispatchKey(Backend b) {
       return DispatchKey::XLA;
     case Backend::Lazy:
       return DispatchKey::Lazy;
+    case Backend::IPU:
+      return DispatchKey::IPU;
     case Backend::XPU:
       return DispatchKey::XPU;
     case Backend::SparseXPU:
@@ -196,6 +201,8 @@ static inline DeviceType backendToDeviceType(Backend b) {
       return DeviceType::CPU;
     case Backend::SparseCsrCUDA:
       return DeviceType::CUDA;
+    case Backend::IPU:
+      return DeviceType::IPU;
     case Backend::XPU:
     case Backend::SparseXPU:
     case Backend::QuantizedXPU:
@@ -235,6 +242,8 @@ static inline const char* toString(Backend b) {
       return "FPGA";
     case Backend::XPU:
       return "XPU";
+    case Backend::IPU:
+      return "IPU";
     case Backend::ORT:
       return "ORT";
     case Backend::XLA:
