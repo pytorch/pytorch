@@ -6,8 +6,6 @@ from typing import NoReturn, Callable, Sequence, List, Union, Optional, Type, Tu
 
 import torch
 
-from ._core import _unravel_index
-
 try:
     import numpy as np
 
