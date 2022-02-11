@@ -13,7 +13,7 @@ T_co = TypeVar("T_co", covariant=True)
 @functional_datapipe("map")
 class MapperIterDataPipe(IterDataPipe[T_co]):
     r"""
-    Apply a function over each item from the source DataPipe (functional name: ``map``).
+    Applies a function over each item from the source DataPipe (functional name: ``map``).
     The function can be any regular Python function or partial object. Lambda
     function is not recommended as it is not supported by pickle.
 
@@ -137,7 +137,7 @@ class MapperIterDataPipe(IterDataPipe[T_co]):
 @functional_datapipe("collate")
 class CollatorIterDataPipe(MapperIterDataPipe):
     r"""
-    Collate samples from DataPipe to Tensor(s) by a custom collate function (functional name: ``collate``).
+    Collates samples from DataPipe to Tensor(s) by a custom collate function (functional name: ``collate``).
     By default, it uses :func:`torch.utils.data.default_collate`.
 
     .. note::
