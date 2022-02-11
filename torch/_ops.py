@@ -44,20 +44,17 @@ class OpOverload:
     def __call__(self, *args, **kwargs):
         return self._op(*args, **kwargs or {})
 
-    def __getattr__(self, key):
-        return getattr(self._op, key)
-
     # `my_namespace::my_op`
     @property
     def name(self):
         return "{}.{}".format(*self._schema.name.split("::"))
 
     @property
-    def overload_name(self):
+    def overloadname(self):
         return self._schema.overload_name
 
     @property
-    def overload_packet(self):
+    def overloadpacket(self):
         return self._overloadpacket
 
     @property
@@ -67,10 +64,12 @@ class OpOverload:
     # returns a list of torch._C.Argument class objects
     # users can query the following on each Argument object:
     # name, type, N, kwarg_only, has_default_value, default_value, is_mutable
+    @property
     def inputs(self):
         return self._schema.arguments
 
     # returns a list of Argument class objects
+    @property
     def returns(self):
         return self._schema.returns
 

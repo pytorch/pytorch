@@ -1471,7 +1471,11 @@ void initJITBindings(PyObject* module) {
     py::class_<Argument>(m, "Argument")
       .def("__repr__", [](Argument& self) {
         std::ostringstream s;
-        s << "(" << self.type() << " " << self.name() << ")";
+        s << *self.type();
+        if (self.is_out()) {
+          s << "&";
+        }
+        s << " " << self.name();
         return s.str();})
       .def_property_readonly("name", [](Argument& self) { return self.name(); })
       .def_property_readonly("type", [](Argument& self) { return self.type(); })
