@@ -1,6 +1,4 @@
 import os
-import sys
-import tempfile
 import torch
 import torch.distributed as dist
 import torch.nn as nn
@@ -11,6 +9,10 @@ from torch.nn.parallel import DistributedDataParallel as DDP
 
 import lazy_tensor_core
 lazy_tensor_core._LAZYC._ltc_init_ts_backend()
+import lazy_tensor_core.core.lazy_model as ltm
+
+from caffe2.python import workspace
+workspace.GlobalInit(['caffe2', '--caffe2_log_level=-4'])
 
 def setup(rank, world_size):
     os.environ['MASTER_ADDR'] = 'localhost'
@@ -38,10 +40,13 @@ def demo_basic(rank, world_size):
     print(f"Running basic DDP example on rank {rank}, and process id: {os.getpid()}", flush=True)
     setup(rank, world_size)
 
+    # device = f"cuda:{rank}"
+    device = f"lazy:{rank}"
+
     try:
         # create model and move it to GPU with id rank
-        # model = ToyModel().to(f"cuda:{rank}")
-        model = ToyModel().to(f"lazy:{rank}")
+        # model = ToyModel().to(device)
+        model = ToyModel().to(device)
         ddp_model = DDP(model, device_ids=[rank])
         # ddp_model = model
 
@@ -50,12 +55,12 @@ def demo_basic(rank, world_size):
 
         optimizer.zero_grad()
         # outputs = ddp_model(torch.randn(20, 10))
-        outputs = ddp_model(torch.randn(20, 10).to(f"lazy:{rank}"))
-        # labels = torch.randn(20, 5).to(f"cuda:{rank}")
-        labels = torch.randn(20, 5).to(f"lazy:{rank}")
+        outputs = ddp_model(torch.randn(20, 10).to(device))
+        # labels = torch.randn(20, 5).to(device)
+        labels = torch.randn(20, 5).to(device)
         loss_fn(outputs, labels).backward()
         optimizer.step()
-        print(f"Outputs: \n{outputs.to('cpu')}\n")
+        ltm.mark_step(device)
     except Exception as e:
         print(f"exception: {e}", flush=True)
 
