@@ -1060,7 +1060,8 @@ class TestCaffe2Backend_opset9(unittest.TestCase):
         x = torch.randn(*shape)
         y = torch.randn(*shape)
         self.run_model_test(torch.nn.CosineSimilarity(dim=1, eps=1e-6), train=False,
-                            input=(x, y), batch_size=BATCH_SIZE, use_gpu=False, rtol=1e-2)
+                            input=(x, y), batch_size=BATCH_SIZE, use_gpu=False,
+                            operator_export_type=torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK)
 
     @unittest.skip("Disabled due to onnx optimizer deprecation")
     @skipIfUnsupportedOpsetVersion([10])
