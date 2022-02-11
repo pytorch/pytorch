@@ -1755,7 +1755,7 @@ else:
             num_observations = x.numel() if x.ndim < 2 else x.size(1)
             if num_observations > 0:
                 fweights = torch.randint(1, 10, (num_observations,), device=device)
-                aweights = make_tensor((num_observations,), device, torch.float, low=1)
+                aweights = make_tensor((num_observations,), dtype=torch.float, device=device low=1)
                 for correction, fw, aw in product([0, 1, 2], [None, fweights], [None, aweights]):
                     check(x, correction, fweights, aweights)
 
@@ -4580,7 +4580,7 @@ else:
     @skipMeta
     @onlyNativeDeviceTypes
     def test_dlpack_shared_storage(self, device):
-        x = make_tensor((5,), device, torch.float64)
+        x = make_tensor((5,), dtype=torch.float64, device=device)
         z = from_dlpack(to_dlpack(x))
         z[0] = z[0] + 20.0
         self.assertEqual(z, x)
@@ -4643,7 +4643,7 @@ else:
 
         # CUDA-based tests runs on non-default streams
         with torch.cuda.stream(torch.cuda.default_stream()):
-            x = DLPackTensor(make_tensor((5,), device, torch.float32))
+            x = DLPackTensor(make_tensor((5,), dtype=torch.float32, device=device))
             from_dlpack(x)
 
     @skipMeta

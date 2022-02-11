@@ -4251,7 +4251,7 @@ class TestLinalg(TestCase):
     def test_einsum_corner_cases(self, device):
         def check(equation, *operands, expected_output):
             tensors = [torch.tensor(operand, device=device, dtype=torch.float32) if not isinstance(operand, tuple)
-                       else make_tensor(operand, device, torch.float32) for operand in operands]
+                       else make_tensor(operand, dtype=torch.float32, device=device) for operand in operands]
             output = torch.einsum(equation, tensors)
             self.assertEqual(output, torch.tensor(expected_output, dtype=torch.float32, device=device))
 
@@ -4293,8 +4293,8 @@ class TestLinalg(TestCase):
             with self.assertRaisesRegex(exception, r'einsum\(\):.*' + regex):
                 torch.einsum(*args)
 
-        x = make_tensor((2,), device, torch.float32)
-        y = make_tensor((2, 3), device, torch.float32)
+        x = make_tensor((2,), dtype=torch.float32, device=device)
+        y = make_tensor((2, 3), dtype=torch.float32, device=device)
 
         check('', [], regex=r'at least one operand', exception=ValueError)
         check('. ..', [x], regex=r'found \'.\' for operand 0 that is not part of any ellipsis')
