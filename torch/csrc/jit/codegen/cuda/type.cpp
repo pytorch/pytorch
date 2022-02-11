@@ -106,7 +106,7 @@ DataType promote_type(const DataType& t1, const DataType& t2) {
       (DataType::BFloat16 == t1 || DataType::BFloat16 == t2 ||
        DataType::ComplexFloat == t1 || DataType::ComplexFloat == t2 ||
        DataType::ComplexDouble == t1 || DataType::ComplexDouble == t2);
-  TORCH_INTERNAL_ASSERT(
+  TORCH_CHECK(
       !is_unsupported,
       "type promotion for ",
       t1,

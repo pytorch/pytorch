@@ -2035,8 +2035,13 @@ class IrParser {
                 dims_list.has_value(),
                 "aten::sum cannot be fused with dynamic axes");
             std::vector<int> dims;
-            for (const auto dim : dims_list->vec()) {
-              dims.emplace_back(static_cast<int>(dim));
+            if (!dims_list->empty()) {
+              for (const auto dim : dims_list->vec()) {
+                dims.emplace_back(static_cast<int>(dim));
+              }
+            } else {
+              dims.resize(self->as<TensorView>()->nDims());
+              std::iota(dims.begin(), dims.end(), 0);
             }
             auto keepdim = constant_as<bool>(node->input(2));
             TORCH_INTERNAL_ASSERT(
@@ -2095,8 +2100,13 @@ class IrParser {
                 dims_list.has_value(),
                 "aten::mean cannot be fused with dynamic axes");
             std::vector<int> dims;
-            for (const auto dim : dims_list->vec()) {
-              dims.emplace_back(static_cast<int>(dim));
+            if (!dims_list->empty()) {
+              for (const auto dim : dims_list->vec()) {
+                dims.emplace_back(static_cast<int>(dim));
+              }
+            } else {
+              dims.resize(self->as<TensorView>()->nDims());
+              std::iota(dims.begin(), dims.end(), 0);
             }
             auto keepdim = constant_as<bool>(node->input(2));
             TORCH_INTERNAL_ASSERT(
@@ -2445,8 +2455,13 @@ class IrParser {
                 dims_list.has_value(),
                 "aten::amax cannot be fused with dynamic axes");
             std::vector<int> dims;
-            for (const auto dim : dims_list->vec()) {
-              dims.emplace_back(static_cast<int>(dim));
+            if (!dims_list->empty()) {
+              for (const auto dim : dims_list->vec()) {
+                dims.emplace_back(static_cast<int>(dim));
+              }
+            } else {
+              dims.resize(self->as<TensorView>()->nDims());
+              std::iota(dims.begin(), dims.end(), 0);
             }
             auto keepdim = constant_as<bool>(node->input(2));
             TORCH_INTERNAL_ASSERT(
