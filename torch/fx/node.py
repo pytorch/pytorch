@@ -49,11 +49,7 @@ def _type_repr(obj):
     typically enough to uniquely identify a type.  For everything
     else, we fall back on repr(obj).
     """
-    # HACK: In Python 3.6, type aliases from ``typing`` are instances of ``type``, but in
-    # later Python versions, type aliases are not instances of ``type``!! We want
-    # all type aliases to fall through to ``repr``, so if we have a type that is
-    # in the module typing, don't go down this path.
-    if isinstance(obj, type) and obj.__module__ != 'typing':
+    if isinstance(obj, type):
         if obj.__module__ == 'builtins':
             return obj.__qualname__
         return f'{obj.__module__}.{obj.__qualname__}'
@@ -244,8 +240,8 @@ class Node:
     @compatibility(is_backward_compatible=True)
     def append(self, x: 'Node') -> None:
         """
-        Insert x after this node in the list of nodes in the graph.
-        Equvalent to ``self.next.prepend(x)``
+        Insert ``x`` after this node in the list of nodes in the graph.
+        Equivalent to ``self.next.prepend(x)``
 
         Args:
             x (Node): The node to put after this node. Must be a member of the same graph.
