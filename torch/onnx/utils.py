@@ -335,7 +335,7 @@ def _signature(model) -> inspect.Signature:
     raise ValueError("model has no forward method and is not callable")
 
 
-def _decide_input_format(model, args):
+def _decide_input_format(model, args: Union[torch.Tensor, Tuple]) -> Union[torch.Tensor, Tuple]:
     try:
         sig = _signature(model)
     except ValueError as e:
@@ -346,7 +346,10 @@ def _decide_input_format(model, args):
         if ordered_list_keys[0] == "self":
             ordered_list_keys = ordered_list_keys[1:]
         args_dict = {}
-        args = list(args)
+        if isinstance(args, torch.Tensor):
+            args = [args]
+        else:
+            args = list(args)
         if isinstance(args[-1], dict):
             args_dict = args[-1]
             args = args[:-1]
