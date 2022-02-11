@@ -113,11 +113,11 @@ def make_tensor(
         raise ValueError("make_tensor: requires_grad must be False for integral dtype")
 
     if dtype is torch.bool:
-        result = torch.randint(0, 2, shape, device=device, dtype=dtype, layout=layout)
+        result = torch.randint(0, 2, shape, device=device, dtype=dtype, layout=layout)  # type: ignore[call-overload]
     elif dtype is torch.uint8:
         ranges = (torch.iinfo(dtype).min, torch.iinfo(dtype).max)
         low, high = cast(Tuple[int, int], _modify_low_high(low, high, ranges[0], ranges[1], 0, 10, dtype))
-        result = torch.randint(low, high, shape, device=device, dtype=dtype, layout=layout)
+        result = torch.randint(low, high, shape, device=device, dtype=dtype, layout=layout)   # type: ignore[call-overload]
     elif dtype in _integral_types:
         ranges = (torch.iinfo(dtype).min, torch.iinfo(dtype).max)
         low, high = _modify_low_high(low, high, ranges[0], ranges[1], -9, 10, dtype)
