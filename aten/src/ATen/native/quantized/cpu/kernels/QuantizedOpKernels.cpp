@@ -2938,7 +2938,7 @@ void quantize_tensor_per_tensor_affine_cpu(
     int64_t zero_point) {
   check_tensor_memory_format(rtensor, qtensor);
   const float* rdata = rtensor.data_ptr<float>();
-  int numel = rtensor.numel();
+  auto numel = rtensor.numel();
 #if defined(__ARM_NEON__) || defined(__aarch64__)
   AT_DISPATCH_QINT_TYPES(
       qtensor.scalar_type(), "quantize_tensor_per_tensor_affine_cpu", [&]() {

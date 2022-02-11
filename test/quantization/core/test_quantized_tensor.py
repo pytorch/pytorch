@@ -140,6 +140,19 @@ def _compress_uniform_simplified(X, bit_rate, xmin, xmax, fp16_scale_bias=True):
     return Xq, loss
 
 class TestQuantizedTensor(TestCase):
+    def test_big_qtensor(self):
+        torch.backends.quantized.engine = "fbgemm"
+        n = 128
+        m = math.ceil(torch.iinfo(torch.int32).max / n)
+        orig = torch.ones((m, n), dtype=torch.float32)
+        observer_symmetric = torch.quantization.MinMaxObserver(qscheme=torch.per_tensor_symmetric, dtype=torch.qint8)
+
+        observer_symmetric(orig)
+        scale, zero = observer_symmetric.calculate_qparams()
+
+        quant = torch.quantize_per_tensor(orig, scale=scale, zero_point=zero, dtype=torch.qint8)
+        self.assertTrue(quant.int_repr().max() > 0)
+
     @unittest.skipIf(not TEST_CUDA, "No gpu is available.")
     def test_qtensor_cuda(self):
         self._test_qtensor(torch.device('cuda'))
