@@ -5,16 +5,13 @@ This module contains tensor creation utilities.
 import torch
 from typing import Optional, List, Tuple, Union, cast
 import math
+import collections.abc
 
-__all__ = [
-    "make_tensor",
-]
 
 def make_tensor(
-    shape: Union[torch.Size, List[int], Tuple[int, ...]],
-    device: Union[str, torch.device],
+    *shape: Union[int, torch.Size, List[int], Tuple[int, ...]],
     dtype: torch.dtype,
-    *,
+    device: Union[str, torch.device],
     low: Optional[float] = None,
     high: Optional[float] = None,
     requires_grad: bool = False,
@@ -45,8 +42,8 @@ def make_tensor(
 
     Args:
         shape (Tuple[int, ...]): A sequence of integers defining the shape of the output tensor.
-        device (Union[str, torch.device]): The device of the returned tensor.
         dtype (:class:`torch.dtype`): The data type of the returned tensor.
+        device (Union[str, torch.device]): The device of the returned tensor.
         low (Optional[Number]): Sets the lower limit (inclusive) of the given range. If a number is provided it is
             clamped to the least representable finite value of the given dtype. When ``None`` (default),
             this value is determined based on the :attr:`dtype` (see the table above). Default: ``None``.
@@ -102,6 +99,9 @@ def make_tensor(
             return math.floor(low), math.ceil(high)
 
         return low, high
+
+    if len(shape) == 1 and isinstance(shape[0], collections.abc.Sequence):
+        shape = shape[0]
 
     _integral_types = [torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64]
     _floating_types = [torch.float16, torch.bfloat16, torch.float32, torch.float64]
