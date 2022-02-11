@@ -54,13 +54,13 @@ void pythonFallback(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
   TORCH_INTERNAL_ASSERT(0, "Hit Python dispatch key but no arguments had PyInterpreter (no tensor args?)");
 }
 
-void pythonTLSSnapshotFallback(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
+void pythonTLSSnapshotFallback(const c10::OperatorHandle& op, c10::DispatchKeySet dispatch_keys, torch::jit::Stack* stack) {
   // It is ok for the tls to be already set here.
   // A CompositeImplicitAutograd function may have been called just before this and so the tls here were never cleared
 
   tls_on_entry = c10::impl::tls_local_dispatch_key_set();
 
-  op.redispatchBoxed(c10::DispatchKeySet(c10::DispatchKeySet::FULL_AFTER, c10::DispatchKey::PythonTLSSnapshot), stack);
+  op.redispatchBoxed(dispatch_keys & c10::DispatchKeySet(c10::DispatchKeySet::FULL_AFTER, c10::DispatchKey::PythonTLSSnapshot), stack);
 
   tls_on_entry = c10::nullopt;
 }
