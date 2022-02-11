@@ -48,7 +48,7 @@ class ShardingFilterIterDataPipe(IterDataPipe):
 @functional_datapipe('batch')
 class BatcherIterDataPipe(IterDataPipe[DataChunk]):
     r"""
-    Create mini-batches of data (functional name: ``batch``). An outer dimension will be added as
+    Creates mini-batches of data (functional name: ``batch``). An outer dimension will be added as
     ``batch_size`` if ``drop_last`` is set to ``True``, or ``length % batch_size`` for the
     last batch if ``drop_last`` is set to ``False``.
 
@@ -104,7 +104,7 @@ class BatcherIterDataPipe(IterDataPipe[DataChunk]):
 @functional_datapipe('unbatch')
 class UnBatcherIterDataPipe(IterDataPipe):
     r"""
-    Undo batching of data (functional name: ``unbatch``). In other words, it flattens the data up to the specified level
+    Undoes batching of data (functional name: ``unbatch``). In other words, it flattens the data up to the specified level
     within a batched DataPipe.
 
     Args:
@@ -148,8 +148,8 @@ class UnBatcherIterDataPipe(IterDataPipe):
 @functional_datapipe('groupby')
 class GrouperIterDataPipe(IterDataPipe[DataChunk]):
     r"""
-    Group data from input IterDataPipe by keys which are generated from ``group_key_fn``,
-    and yield a ``DataChunk`` with size ranging from ``guaranteed_group_size``
+    Groups data from input IterDataPipe by keys which are generated from ``group_key_fn``,
+    and yields a ``DataChunk`` with size ranging from ``guaranteed_group_size``
     to ``group_size`` (functional name: ``groupby``).
 
     Args:
