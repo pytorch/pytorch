@@ -989,18 +989,18 @@ def sample_inputs_reduction(op_info, device, dtype, requires_grad, **kwargs):
 
 def _generate_masked_op_mask(input_shape, device, **kwargs):
     yield None
-    yield make_tensor(input_shape, device, torch.bool, requires_grad=False)
+    yield make_tensor(input_shape, dtype=torch.bool, device=device, requires_grad=False)
     if len(input_shape) > 2:
         # broadcast last mask dimension:
-        yield make_tensor(input_shape[:-1] + (1,), device, torch.bool, requires_grad=False)
+        yield make_tensor(input_shape[:-1] + (1,), dtype=torch.bool, device=device, requires_grad=False)
         # broadcast middle mask dimension:
-        yield make_tensor(input_shape[:1] + (1,) + input_shape[2:], device, torch.bool, requires_grad=False)
+        yield make_tensor(input_shape[:1] + (1,) + input_shape[2:], dtype=torch.bool, device=device, requires_grad=False)
         # broadcast first mask dimension:
-        yield make_tensor((1,) + input_shape[1:], device, torch.bool, requires_grad=False)
+        yield make_tensor((1,) + input_shape[1:], dtype=torch.bool, device=device, requires_grad=False)
         # mask.ndim < input.ndim
-        yield make_tensor(input_shape[1:], device, torch.bool, requires_grad=False)
+        yield make_tensor(input_shape[1:], dtype=torch.bool, device=device, requires_grad=False)
         # mask.ndim == 1
-        yield make_tensor(input_shape[-1:], device, torch.bool, requires_grad=False)
+        yield make_tensor(input_shape[-1:], dtype=torch.bool, device=device, requires_grad=False)
         # masks that require broadcasting of inputs (mask.ndim >
         # input.ndim) will not be supported, however, we may
         # reconsider this if there will be demand on this kind of
@@ -5450,8 +5450,8 @@ def sample_inputs_cov(op_info, device, dtype, requires_grad, **kwargs):
     for t in _generate_correlation_inputs(device, dtype, requires_grad):
         inputs.append(SampleInput(t))
         num_observations = t.numel() if t.ndimension() < 2 else t.size(1)
-        fweights = make_tensor((num_observations,), device, torch.int, low=1, high=10)
-        aweights = make_tensor((num_observations,), device, torch.float, low=0, high=1, requires_grad=requires_grad)
+        fweights = make_tensor((num_observations,), dtype=torch.int, device=device, low=1, high=10)
+        aweights = make_tensor((num_observations,), dtype=torch.float, device=device, low=0, high=1, requires_grad=requires_grad)
         for correction, fw, aw in product(range(num_observations), [None, fweights], [None, aweights]):
             inputs.append(SampleInput(t.clone().requires_grad_(requires_grad),
                                       kwargs={'correction': correction, 'fweights': fw, 'aweights': aw}))
