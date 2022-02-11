@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 #include <torch/csrc/lazy/core/helpers.h>
 #include <torch/csrc/lazy/core/metrics.h>
+#include <torch/csrc/lazy/core/debug_util.h>
 #include <torch/csrc/lazy/core/permutation_util.h>
 #include <torch/torch.h>
 
@@ -14,6 +15,7 @@
 namespace torch_lazy_tensors {
 namespace cpp_test {
 namespace {
+using torch::lazy::DebugUtil;
 
 class AtenLtcTsTensorTest : public AtenLtcTsTensorTestBase {};
 

@@ -1,11 +1,14 @@
-#include "lazy_tensor_core/csrc/python_util.h"
+#include <torch/csrc/lazy/python/python_util.h>
 
 #include <Python.h>
 #include <frameobject.h>
 #include <pybind11/pybind11.h>
 #include <torch/csrc/utils/python_strings.h>
+#include <torch/csrc/lazy/core/debug_util.h>
 
-namespace torch_lazy_tensors {
+namespace torch {
+namespace lazy {
+
 
 c10::optional<SourceLocation> GetPythonFrameTop() {
   if (!Py_IsInitialized()) {
@@ -40,14 +43,5 @@ std::vector<SourceLocation> GetPythonFrames() {
   return frames;
 }
 
-std::ostream& operator<<(std::ostream& stream,
-                         const std::vector<SourceLocation>& frames) {
-  stream << "Python Frames:\n";
-  for (auto& location : frames) {
-    stream << "  " << location.function << " (" << location.file << ":"
-           << location.line << ")\n";
-  }
-  return stream;
-}
-
-}  // namespace torch_lazy_tensors
+}  // namespace lazy
+}  // namespace torch
