@@ -27,9 +27,10 @@
 #include <unordered_set>
 
 struct DisableTorchDispatch {
-  DisableTorchDispatch() : guard_(c10::DispatchKey::Python) {
-  }
+  DisableTorchDispatch() : guard_(c10::DispatchKey::Python),
+                           guard_tls_snapshot_(c10::DispatchKey::PythonTLSSnapshot) {}
   c10::impl::ExcludeDispatchKeyGuard guard_;
+  c10::impl::ExcludeDispatchKeyGuard guard_tls_snapshot_;
 };
 
 PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject *unused) {
