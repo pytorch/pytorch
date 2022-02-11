@@ -220,7 +220,7 @@ void FixupONNXSubblockOutputs(Node* n) {
   for (Block* block : n->blocks()) {
     for (Value* output : block->outputs()) {
       if (output->node()->owningBlock() != block) {
-        Node* id_node;
+        Node* id_node = nullptr;
         // Simplify graph by creating an empty optional rather than
         // Identity(None). Also enables shape inference later on, since
         // ONNX shape inference doesn't handle None.

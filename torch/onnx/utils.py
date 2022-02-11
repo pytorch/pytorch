@@ -347,22 +347,22 @@ def _decide_input_format(model, args: Union[torch.Tensor, Tuple]) -> Union[torch
             ordered_list_keys = ordered_list_keys[1:]
         args_dict = {}
         if isinstance(args, torch.Tensor):
-            args = [args]
+            args_list = [args]
         else:
-            args = list(args)
-        if isinstance(args[-1], dict):
-            args_dict = args[-1]
-            args = args[:-1]
-        n_nonkeyword = len(args)
+            args_list = list(args)
+        if isinstance(args_list[-1], dict):
+            args_dict = args_list[-1]
+            args_list = args_list[:-1]
+        n_nonkeyword = len(args_list)
         for optional_arg in ordered_list_keys[n_nonkeyword:]:
             if optional_arg in args_dict:
-                args.append(args_dict[optional_arg])
+                args_list.append(args_dict[optional_arg])
             # Check if this arg has a default value
             else:
                 param = sig.parameters[optional_arg]
                 if param.default != param.empty:
-                    args.append(param.default)
-        args = tuple(args)
+                    args_list.append(param.default)
+        args = tuple(args_list)
     # Cases of models with no input args
     except IndexError:
         warnings.warn("No input args, skipping _decide_input_format")
