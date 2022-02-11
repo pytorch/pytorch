@@ -222,7 +222,7 @@ class CommonIndexInserter : private kir::ExprMutator {
     // Insert only when the index is used multiple times and is not
     // yet inserted.
     if (usedMultipleTimes(key) &&
-        inserted_indices_.find(key) == inserted_indices_.end()) {
+        inserted_indices_.find(common_index) == inserted_indices_.end()) {
       auto alloc = IrBuilder::create<kir::Allocate>(
           common_index,
           MemoryType::Local,
@@ -239,8 +239,8 @@ class CommonIndexInserter : private kir::ExprMutator {
           common_index->toString());
       registerInsertBefore(loop->body()[0], common_index_def, &(loop->body()));
 
-      // Track inserted keys
-      inserted_indices_.emplace(key);
+      // Track inserted index
+      inserted_indices_.emplace(common_index);
     }
 
     kir::ExprMutator::handle(loop);
@@ -260,7 +260,7 @@ class CommonIndexInserter : private kir::ExprMutator {
   //! Map to CommonIndexKeys from their innermost loops
   std::unordered_map<kir::ForLoop*, CommonIndexKey> innermost_loop_map_;
   //! Keep track of inserted indices
-  std::unordered_set<CommonIndexKey, CommonIndexKeyHash> inserted_indices_;
+  std::unordered_set<Val*> inserted_indices_;
 };
 
 } // namespace

@@ -408,6 +408,9 @@ class TORCH_CUDA_CU_API ForLoop final : public Expr {
     unroll_required_ = true;
   }
 
+  //! True if no actual for-loop is materialized
+  bool isTrivial() const;
+
  private:
   //! Returns if a loop could be unrolled.
   bool isUnrollable() const;

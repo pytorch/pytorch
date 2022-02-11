@@ -1101,14 +1101,17 @@ indexMapFromTV(
         // Similarly for local memory tensors, zero replacement can be
         // only done when there's a matching domain with the same
         // parallel type
-        (loop->iter_domain()->isThread() && is_local && same_parallel_type) ||
-        loop->vectorize()) {
+        (loop->iter_domain()->isThread() && is_local && same_parallel_type)) {
       idx = GpuLower::current()->kernel()->zeroVal();
-      if (!loop->vectorize()) {
-        zero_loops.insert(loop);
-      }
+      zero_loops.insert(loop);
     } else {
       idx = loop->index();
+    }
+
+    // If the loop is trivial, the loop index can only be the loop
+    // start value.
+    if (idx == loop->index() && loop->isTrivial()) {
+      idx = loop->start();
     }
 
     if (loop == double_buffer_loop) {
@@ -1879,8 +1882,10 @@ std::vector<Val*> Index::getNonGlobalProducerStridedIndices(
     auto db_loop = gpu_lower->doubleBufferInfo().getDoubleBufferLoop(
         producer_tv, loops, true);
     if (db_loop != nullptr) {
+      auto loop_index =
+          db_loop->isTrivial() ? db_loop->start() : db_loop->index();
       auto db_switch_index = SimplifyingIrBuilder::modExpr(
-          db_loop->index(), SimplifyingIrBuilder::create<Int>(2));
+          loop_index, SimplifyingIrBuilder::create<Int>(2));
       auto original_alloc_size =
           gpu_lower->doubleBufferInfo().getOriginalAllocSize(producer_tv);
       auto db_strided_index =
@@ -2825,6 +2830,15 @@ auto getPredicateReferenceIndexing(
       if (vectorized_pred && within_unswitch) {
         break;
       }
+    }
+  }
+
+  for (const auto loop : loops) {
+    auto& idx = loop_to_ind_map.at(loop);
+    // If the loop is trivial, the loop index can only be the loop
+    // start value.
+    if (idx == loop->index() && loop->isTrivial()) {
+      idx = loop->start();
     }
   }
 

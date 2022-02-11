@@ -213,10 +213,6 @@ class CudaKernelGenerator : private OptOutConstDispatch {
   std::string gen(const Statement* stmt) {
     std::stringstream tmp_code;
     std::swap(tmp_code, code_);
-    auto replacement = replacement_map_.find(stmt);
-    if (replacement != replacement_map_.end()) {
-      stmt = replacement->second;
-    }
     OptOutConstDispatch::handle(stmt);
     std::swap(tmp_code, code_);
     return tmp_code.str();
@@ -1152,70 +1148,19 @@ class CudaKernelGenerator : private OptOutConstDispatch {
     }
   }
 
-  void handle(const kir::ForLoop* loop) final {
-    if (loop->iter_domain()->isBroadcast()) {
-      handleScope(loop->body());
-      return;
-    } else if (loop->vectorize()) {
+  void handleTrivialLoop(const kir::ForLoop* loop) {
+    if (loop->vectorize()) {
       vectorize_scope_ = loop->vectorize();
-      handleScope(loop->body());
+    }
+    handleScope(loop->body());
+    if (loop->vectorize()) {
       vectorize_scope_ = false;
-      return;
-    } else if (loop->iter_domain()->isStride()) {
-      // A stride domain only executes the loop body with the loop
-      // index being zero.
-      indent() << "constexpr "
-               << "nvfuser_index_t"
-               << " " << gen(loop->index()) << " = 0;\n";
-      handleScope(loop->body());
-      return;
     }
+  }
 
-    // By default, a parallelized loop would look like:
-    //
-    //   for (int x = threadIdx.x; x < stop; x += blockDim.x) {
-    //     do_some_comp(x);
-    //   }
-    //
-    // When stop is guaranteed to be smaller or equal to the number of
-    // threads, the for-loop is not necessary. In the above case, we
-    // would just generate the loop body without the for clause but
-    // references to the loop index replaced by the loop start value.
-    //
-    // When the loop end is the same as the IterDomain extent, the
-    // assumption can be safely made. This is more conservative than
-    // necessary since the loop stop value just needs to be <= the
-    // IterDomain extent. However, at this point, this conservative
-    // analysis seems sufficient.
-    if (loop->stop() == loop->iter_domain()->extent() &&
-        loop->iter_domain()->isThread()) {
-      // Register a replacement of references to the loop index with
-      // the loop start value.
-      replacement_map_.insert({loop->index(), loop->start()});
-      handleScope(loop->body());
-      replacement_map_.erase(loop->index());
-      return;
-    }
-
-    if (loop->start()->isZeroInt() && loop->stop()->isOneInt()) {
-      indent() << "constexpr "
-               << "nvfuser_index_t"
-               << " " << gen(loop->index()) << " = 0;\n";
-      handleScope(loop->body());
-      return;
-    } else if (
-        // Special case handling for a pattern where start == end - 1.
-        loop->start()->definition() != nullptr &&
-        loop->start()->definition()->isA<BinaryOp>() &&
-        loop->start()->definition()->as<BinaryOp>()->getBinaryOpType() ==
-            BinaryOpType::Sub &&
-        loop->start()->definition()->as<BinaryOp>()->lhs() == loop->stop() &&
-        loop->start()->definition()->as<BinaryOp>()->rhs()->isOneInt()) {
-      indent() << "const "
-               << "nvfuser_index_t"
-               << " " << gen(loop->index()) << " = " << genInline(loop->start())
-               << ";\n";
-      handleScope(loop->body());
+  void handle(const kir::ForLoop* loop) final {
+    if (loop->isTrivial()) {
+      handleTrivialLoop(loop);
       return;
     }
 
@@ -1372,9 +1317,6 @@ class CudaKernelGenerator : private OptOutConstDispatch {
 
   // Mark when we are inside of a vectorized for-loop
   bool vectorize_scope_ = false;
-
-  //! Holds active replacement mappings during codegen
-  std::unordered_map<const Statement*, const Statement*> replacement_map_;
 
   //! Keep track of Allocate node for Val. Used to determine if Val
   //! should be inlined.

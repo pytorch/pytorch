@@ -1264,31 +1264,24 @@ TEST_F(NVFuserTest, FusionParser_CUDA) {
   const std::string expected_kernel = R"(
 __global__ void CUDAGeneratedKernel(Tensor<float, 1> T0, Tensor<float, 1> T1, Tensor<float, 1> T3) {
   if ((((((nvfuser_index_t)blockIdx.x) * 128) + ((nvfuser_index_t)threadIdx.x)) < T0.size[0])) {
-    constexpr nvfuser_index_t i33 = 0;
     float T5[1];
-    constexpr nvfuser_index_t i45 = 0;
-    T5[i45] = 0;
-    constexpr nvfuser_index_t i41 = 0;
-    T5[i41]
-       = T1[((((((nvfuser_index_t)blockIdx.x) + i33) + i41) * 128) + ((nvfuser_index_t)threadIdx.x))];
+    T5[0] = 0;
+    T5[0]
+       = T1[((((nvfuser_index_t)blockIdx.x) * 128) + ((nvfuser_index_t)threadIdx.x))];
     float T4[1];
-    constexpr nvfuser_index_t i47 = 0;
-    T4[i47] = 0;
-    constexpr nvfuser_index_t i39 = 0;
-    T4[i39]
-       = T0[((((((nvfuser_index_t)blockIdx.x) + i33) + i39) * 128) + ((nvfuser_index_t)threadIdx.x))];
+    T4[0] = 0;
+    T4[0]
+       = T0[((((nvfuser_index_t)blockIdx.x) * 128) + ((nvfuser_index_t)threadIdx.x))];
     float T6[1];
-    constexpr nvfuser_index_t i37 = 0;
     float T2[1];
     T2[0]
-      = T4[i37]
-      * T5[i37];
-    T6[i37]
+      = T4[0]
+      * T5[0];
+    T6[0]
       = T2[0]
-      * T4[i37];
-    constexpr nvfuser_index_t i35 = 0;
-    T3[((((((nvfuser_index_t)blockIdx.x) + i33) + i35) * 128) + ((nvfuser_index_t)threadIdx.x))]
-       = T6[i35];
+      * T4[0];
+    T3[((((nvfuser_index_t)blockIdx.x) * 128) + ((nvfuser_index_t)threadIdx.x))]
+       = T6[0];
   }
 }
 )";
@@ -18714,30 +18707,24 @@ TEST_F(NVFuserTest, FusionChannelsLastParser_CUDA) {
   const std::string expected_kernel = R"(
 __global__ void CUDAGeneratedKernel(Tensor<__half, 4> T0, Tensor<__half, 4> T2, Tensor<__half, 4> T7) {
   if ((((((nvfuser_index_t)blockIdx.x) * 128) + ((nvfuser_index_t)threadIdx.x)) < (T0.size[0] * (T0.size[1] * (T0.size[2] * T0.size[3]))))) {
-    constexpr nvfuser_index_t i120 = 0;
     __half T9[1];
-    constexpr nvfuser_index_t i132 = 0;
-    T9[i132] = 0;
-    constexpr nvfuser_index_t i128 = 0;
-    T9[i128]
-       = T2[((((((((nvfuser_index_t)blockIdx.x) + i120) + i128) * 128) + ((nvfuser_index_t)threadIdx.x)) / (T0.size[1] * (T0.size[2] * T0.size[3]))) * ((T0.size[2] * T0.size[1]) * T0.size[3])) + ((((((((((nvfuser_index_t)blockIdx.x) + i120) + i128) * 128) + ((nvfuser_index_t)threadIdx.x)) % (T0.size[1] * (T0.size[2] * T0.size[3]))) % (T0.size[2] * T0.size[3])) % T0.size[3]) * (T0.size[2] * T0.size[1])) + (((((((((nvfuser_index_t)blockIdx.x) + i120) + i128) * 128) + ((nvfuser_index_t)threadIdx.x)) % (T0.size[1] * (T0.size[2] * T0.size[3]))) / (T0.size[2] * T0.size[3])) * T0.size[2]) + (((((((((nvfuser_index_t)blockIdx.x) + i120) + i128) * 128) + ((nvfuser_index_t)threadIdx.x)) % (T0.size[1] * (T0.size[2] * T0.size[3]))) % (T0.size[2] * T0.size[3])) / T0.size[3])];
+    T9[0] = 0;
+    T9[0]
+       = T2[((((((nvfuser_index_t)blockIdx.x) * 128) + ((nvfuser_index_t)threadIdx.x)) / (T0.size[1] * (T0.size[2] * T0.size[3]))) * ((T0.size[2] * T0.size[1]) * T0.size[3])) + ((((((((nvfuser_index_t)blockIdx.x) * 128) + ((nvfuser_index_t)threadIdx.x)) % (T0.size[1] * (T0.size[2] * T0.size[3]))) % (T0.size[2] * T0.size[3])) % T0.size[3]) * (T0.size[2] * T0.size[1])) + (((((((nvfuser_index_t)blockIdx.x) * 128) + ((nvfuser_index_t)threadIdx.x)) % (T0.size[1] * (T0.size[2] * T0.size[3]))) / (T0.size[2] * T0.size[3])) * T0.size[2]) + (((((((nvfuser_index_t)blockIdx.x) * 128) + ((nvfuser_index_t)threadIdx.x)) % (T0.size[1] * (T0.size[2] * T0.size[3]))) % (T0.size[2] * T0.size[3])) / T0.size[3])];
     __half T8[1];
-    constexpr nvfuser_index_t i134 = 0;
-    T8[i134] = 0;
-    constexpr nvfuser_index_t i126 = 0;
-    T8[i126]
-       = T0[((((((nvfuser_index_t)blockIdx.x) + i120) + i126) * 128) + ((nvfuser_index_t)threadIdx.x))];
+    T8[0] = 0;
+    T8[0]
+       = T0[((((nvfuser_index_t)blockIdx.x) * 128) + ((nvfuser_index_t)threadIdx.x))];
     __half T10[1];
-    constexpr nvfuser_index_t i124 = 0;
     float T3[1];
     T3[0]
-       = __half2float(T9[i124]);
+       = __half2float(T9[0]);
     float T4[1];
     T4[0]
        = T3[0];
     float T1[1];
     T1[0]
-       = __half2float(T8[i124]);
+       = __half2float(T8[0]);
     float T5[1];
     T5[0]
       = T1[0]
@@ -18745,11 +18732,10 @@ __global__ void CUDAGeneratedKernel(Tensor<__half, 4> T0, Tensor<__half, 4> T2, 
     float T6[1];
     T6[0]
        = relu(T5[0]);
-    T10[i124]
+    T10[0]
        = __float2half(T6[0]);
-    constexpr nvfuser_index_t i122 = 0;
-    T7[((((((nvfuser_index_t)blockIdx.x) + i120) + i122) * 128) + ((nvfuser_index_t)threadIdx.x))]
-       = T10[i122];
+    T7[((((nvfuser_index_t)blockIdx.x) * 128) + ((nvfuser_index_t)threadIdx.x))]
+       = T10[0];
   }
 }
 )";

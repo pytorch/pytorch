@@ -276,17 +276,23 @@ IndexCompute getReferenceIndexing(
     auto loop = loop_structure[loop_i];
     auto ind = loop->index();
 
-    initial_index_map[ref_axis] = ind;
-    if (loop->vectorize()) {
-      initial_index_map[ref_axis] = GpuLower::current()->kernel()->zeroVal();
-    } else if (double_buffer_loop == loop) {
+    // If the loop is trivial, only the start value is used
+    if (loop->isTrivial()) {
+      initial_index_map[ref_axis] = loop->start();
+    } else {
+      initial_index_map[ref_axis] = ind;
+    }
+
+    if (double_buffer_loop == loop) {
+      TORCH_INTERNAL_ASSERT(
+          !loop->isTrivial(), "The double buffer loop must be materialized");
       // This version of getReferenceIndexing is only used for
       // indexing global tensors. When indexing global producers, the
       // index for a double buffered loop needs to be incremented. The
       // parameter double_buffer_loop should be nullptr when indexing
       // global consumers tensors.
-      initial_index_map[ref_axis] =
-          IrBuilder::addExpr(ind, GpuLower::current()->kernel()->oneVal());
+      initial_index_map[ref_axis] = SimplifyingIrBuilder::addExpr(
+          initial_index_map[ref_axis], GpuLower::current()->kernel()->oneVal());
     }
 
     if (Index::protectWithMagicZero(loop, ref_axis, ind)) {
@@ -297,7 +303,7 @@ IndexCompute getReferenceIndexing(
   // Add magic zero to a fairly inner most index
   if (magic_zero_loop >= 0) {
     auto ref_id = reference_tensor->axis(magic_zero_loop);
-    initial_index_map[ref_id] = IrBuilder::addExpr(
+    initial_index_map[ref_id] = SimplifyingIrBuilder::addExpr(
         initial_index_map[ref_id], FusionGuard::getCurFusion()->magicZeroVal());
   }
 
