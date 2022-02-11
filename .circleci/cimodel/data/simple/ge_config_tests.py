@@ -37,7 +37,7 @@ class GeConfigTestJob:
 
     def gen_tree(self):
 
-        resource_class = "gpu.medium" if self.use_cuda_docker else "large"
+        resource_class = "gpu.nvidia.small" if self.use_cuda_docker else "large"
         docker_image = DOCKER_IMAGE_CUDA_10_2 if self.use_cuda_docker else DOCKER_IMAGE_BASIC
         full_name = "_".join(self.get_all_parts(False))
         build_env = self.build_env_override or "-".join(self.get_all_parts(True))
