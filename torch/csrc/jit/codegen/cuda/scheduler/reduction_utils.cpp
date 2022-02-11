@@ -489,10 +489,8 @@ void multiReductionInliner(
     }
     for (auto out : ir_utils::filterByType<TensorView>(fusion->outputs())) {
       // only terminating outputs
-      if (out->uses().size()) {
-        continue;
-      }
-      if (outs_of_reds.find(out) != outs_of_reds.end()) {
+      if (out->uses().size() || outs_of_reds.find(out) != outs_of_reds.end() ||
+          out->isFusionInput()) {
         continue;
       }
       compute_to.push_back(out);

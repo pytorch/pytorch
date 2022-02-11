@@ -221,6 +221,9 @@ void computeAtInputs(TensorView* consumer, int pos, ComputeAtMode mode) {
 
 void computeWithOutputs(TensorView* producer, int pos, ComputeAtMode mode) {
   for (auto out_tv : ir_utils::outputTvsOf(producer)) {
+    if (out_tv == producer) {
+      continue;
+    }
     producer->computeWith(out_tv, pos, mode);
   }
 }
@@ -1014,7 +1017,7 @@ std::vector<TensorView*> cacheInputs(Fusion* fusion, bool unroll) {
   // If we're going to unroll, make a cache of the inputs
   auto in_tvs = ir_utils::filterByType<TensorView>(fusion->inputs());
   for (auto tv : in_tvs) {
-    if (tv->uses().empty()) {
+    if (tv->uses().empty() || tv->isFusionOutput()) {
       continue;
     }
     auto cached_tv = tv->cache_after();

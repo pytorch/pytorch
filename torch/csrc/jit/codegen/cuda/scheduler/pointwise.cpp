@@ -386,7 +386,7 @@ class DomainMap {
   TensorView* findReferenceTensorView() const {
     auto fusion_outputs = fusion_->outputs();
     for (auto output_tv : ir_utils::filterByType<TensorView>(fusion_outputs)) {
-      if (isValidReference(output_tv)) {
+      if (isValidReference(output_tv) && !output_tv->isFusionInput()) {
         return output_tv;
       }
     }
@@ -590,7 +590,7 @@ void schedulePointwise(Fusion* fusion, const PointwiseParams& params) {
 
   // Figure out which inputs to cache for unrolling or vectorization
   for (auto inp : input_tvs) {
-    if (inp->uses().empty()) {
+    if (inp->uses().empty() || inp->isFusionOutput()) {
       continue;
     }
     cached_inputs.emplace_back(inp->cache_after());

@@ -165,6 +165,7 @@ class TORCH_CUDA_CU_API FusionExecutor : public NonCopyable {
   // skip allocating real storage for those, but still maintain its spot to
   // maintain the indexing from output aliases to inputs
   std::vector<at::Tensor> allocOutputs(
+      const at::ArrayRef<IValue>& inputs,
       kir::ExpressionEvaluator& expr_eval,
       const std::unordered_set<int>& alias_indices = {});
 

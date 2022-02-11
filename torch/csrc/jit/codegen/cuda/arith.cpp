@@ -187,7 +187,7 @@ Val* newValLike(Val* val, DataType dtype) {
 
 Val* castOp(DataType dtype, Val* v1) {
   if (v1->getDataType().value() == dtype) {
-    return v1;
+    return set(v1);
   }
 
   if (cast_func_str(std::make_pair(v1->getDataType().value(), dtype)) ==

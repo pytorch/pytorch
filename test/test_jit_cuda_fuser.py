@@ -3912,6 +3912,31 @@ class TestCudaFuser(JitTestCase):
             t_jit = torch.jit.script(t)
             self._run_helper(t_jit, t, x, y)
 
+
+
+    @unittest.skipIf(not RUN_CUDA, "requires CUDA")
+    @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
+                     "Requires fusion optimization pass to be effective")
+    def test_input_output_passthrough(self):
+        def t(t0, t1, t2):
+            mask = t1.to(dtype=torch.bool)
+            masked_input = torch.where(t0, mask, t2)
+            return masked_input, mask
+
+        t_jit = torch.jit.script(t)
+        # stick to integers, this avoid the numerical difference due to our
+        # promotion
+        x = torch.randn(4, 4, device='cuda').to(dtype=torch.bool)
+        y = torch.randn(4, 4, device='cuda').to(dtype=torch.bool)
+        z = torch.tensor(1.0, device='cuda').to(dtype=torch.bool)
+        jit_o = t_jit(x, y, z)
+        jit_o = t_jit(x, y, z)
+        o = t(x, y, z)
+        for oo, jit_oo in zip(o, jit_o):
+            self.assertEqual(oo.dtype, jit_oo.dtype)
+            self.assertEqual(oo, jit_oo)
+        self.assertGraphContains(t_jit.graph_for(x, y, z), FUSION_GUARD)
+
 class TestPassManagerCudaFuser(JitTestCase):
 
     @unittest.skipIf(not RUN_CUDA, "requires CUDA")

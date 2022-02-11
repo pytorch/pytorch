@@ -46,6 +46,8 @@ class CudaKernelGenerator : private OptOutConstDispatch {
 
     code_ << "__global__ void " << kernel_name << "(";
 
+    std::unordered_set<Val*> unique_args;
+
     std::vector<Val*> params;
 
     // Inputs & Outputs
@@ -59,23 +61,38 @@ class CudaKernelGenerator : private OptOutConstDispatch {
     }
 
     // Generate parameter declarations
-    for (Val* val : params) {
-      if (const auto tv = dynamic_cast<TensorView*>(val)) {
-        if (tv->isCpuScalar()) {
-          code_ << " CpuScalarTensor<" << val->dtype() << "> " << varName(tv);
-        } else {
-          code_
-              << "Tensor<" << val->dtype() << ", "
-              << TensorDomain::noReductions(tv->getMaybeRFactorDomain()).size()
-              << "> " << varName(tv);
-        }
+    unsigned int duplicate_counter = 0;
+    for (auto i : c10::irange(params.size())) {
+      std::stringstream var_name_ss;
+      if (params[i]->isA<TensorView>()) {
+        var_name_ss << varName(params[i]->as<TensorView>());
       } else {
-        TORCH_INTERNAL_ASSERT(val->isScalar()); // NOLINT (LLVM bug 48525)
-        TORCH_INTERNAL_ASSERT(val->definition() == nullptr);
-        code_ << val->dtype() << " " << gen(val);
+        var_name_ss << gen(params[i]);
       }
 
-      if (val != params.back()) {
+      // If value is duplicate in arguments change the name to avoid name
+      // conflicts in args.
+      if (!unique_args.emplace(params[i]).second) {
+        var_name_ss << "_duplicate_" << duplicate_counter++;
+      }
+
+      if (const auto tv = dynamic_cast<TensorView*>(params[i])) {
+        if (tv->isCpuScalar()) {
+          code_ << " CpuScalarTensor<" << params[i]->dtype() << "> "
+                << var_name_ss.str();
+        } else {
+          code_
+              << "Tensor<" << params[i]->dtype() << ", "
+              << TensorDomain::noReductions(tv->getMaybeRFactorDomain()).size()
+              << "> " << var_name_ss.str();
+        }
+      } else {
+        TORCH_INTERNAL_ASSERT(params[i]->isScalar()); // NOLINT (LLVM bug 48525)
+        TORCH_INTERNAL_ASSERT(params[i]->definition() == nullptr);
+        code_ << params[i]->dtype() << " " << var_name_ss.str();
+      }
+
+      if (i + 1 != params.size()) {
         code_ << ", ";
       }
     }
