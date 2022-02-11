@@ -727,9 +727,7 @@ Tensor computeUpsampleNearest2d(
   auto input_height = ExprHandle(A.dim(2));
   auto input_width = ExprHandle(A.dim(3));
 
-  std::vector<ExprHandle> dims;
-  std::vector<VarHandle> args;
-  unpack_dim_args(c10::fmap<DimArg>(outputShape), &dims, &args);
+  std::vector<VarHandle> args = create_index_vars(outputShape);
   // Handle separately when scale is specified? as in 'scalar_t
   // compute_scales_value' in UpSample.h
   auto scale_h =
