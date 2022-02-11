@@ -3040,7 +3040,6 @@ class TestCudaFuser(JitTestCase):
             [False, True]]
         for training_and_track, affine in itertools.product(setups, [True, False]):
             training, track_running_stats = training_and_track
-            print("running: {} {} {}".format(affine, track_running_stats, training))
             self._test_batch_norm_impl_index_helper(2, 1, 1, affine, track_running_stats, training)
 
     @unittest.skipIf(is_pre_volta(), "reduction not supported in pre volta device")
