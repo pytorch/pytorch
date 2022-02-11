@@ -26,6 +26,8 @@ Tensor gemm_nt(const Tensor& a, const Tensor& b) {
   return at::native::matmul(a, b.t());
 }
 
+static constexpr int TRANSFORM_BIAS_RESCALE_VEC = 4;
+
 template <typename scalar_t, typename accscalar_t, bool assume_aligned>
 __global__ void transform_bias_rescale_qkv_kernel(
     // [B, T, 3 * D]
@@ -47,7 +49,7 @@ __global__ void transform_bias_rescale_qkv_kernel(
   const scalar_t sqrt_dim_per_head = std::sqrt(static_cast<scalar_t>(DH));
 
   if (assume_aligned) {
-    constexpr int VEC = 4;
+    constexpr int VEC = TRANSFORM_BIAS_RESCALE_VEC;
     using LoadT = memory::aligned_vector<scalar_t, VEC>;
     for (int32_t d_v = threadIdx.x; d_v < D / VEC; d_v += blockDim.x) {
       auto d = d_v * VEC;
@@ -152,9 +154,14 @@ std::tuple<Tensor, Tensor, Tensor> transform_bias_rescale_qkv(
       "transform_bias_rescale_qkv",
       [&] {
         using accscalar_t = acc_type<scalar_t, true>;
-        auto threads = std::max(std::min<int32_t>(1024, D / 4), 1);
+        auto threads = std::max(std::min<int32_t>(1024, D / TRANSFORM_BIAS_RESCALE_VEC), 1);
         auto blocks = B * T;
-        if (D % 4 == 0 && dim_per_head % 4 == 0) {
+        if (dim_per_head % TRANSFORM_BIAS_RESCALE_VEC == 0) {
+          TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+              D % TRANSFORM_BIAS_RESCALE_VEC == 0,
+              "D = num_heads * dim_per_head, so we should have dim_per_head % "
+              "TRANSFORM_BIAS_RESCALE_VEC == 0 => "
+              "D % TRANSFORM_BIAS_RESCALE_VEC == 0");
           CALL_KERNEL(true);
         } else {
           CALL_KERNEL(false);
