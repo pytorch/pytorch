@@ -1917,7 +1917,7 @@ class TestExamplesCorrectness(TestCase):
                 x = self.fc3(x)
                 return x
 
-        # The prototype doesn't like F.mse_loss.
+        # TODO: should replace with F.mse_loss
         def mse_loss(x, y):
             return torch.mean((x - y) ** 2)
 
@@ -1984,8 +1984,7 @@ class TestExamplesCorrectness(TestCase):
         # TODO: there appears to be precision issues for float32
         dtype = torch.double
 
-        # TODO: The prototype doesn't support in-place relu (and some other
-        # in-place operations. That can be fixed.)
+        # TODO: We don't support inplace relu?
         inplace_relu = False
         n_way = 5
         n_inner_iter = 2

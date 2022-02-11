@@ -42,7 +42,7 @@ params = [
     torch.Tensor(1).zero_().requires_grad_(),
 ]
 
-# The prototype doesn't like F.mse_loss.
+# TODO: use F.mse_loss
 
 
 def mse_loss(x, y):
