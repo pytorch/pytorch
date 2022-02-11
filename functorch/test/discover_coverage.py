@@ -431,7 +431,7 @@ def print_coverage_info(th=100, nn=25):
     pprint.pprint(statuses)
 
 
-print_coverage_info(100, 25)
+# print_coverage_info(100, 25)
 # print_coverage_info(200, 50)
 
 # pprint.pprint(get_top_ops(100, 25))

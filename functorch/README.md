@@ -6,18 +6,20 @@
 | [**Documentation**](#documentation)
 | [**Future Plans**](#future-plans)
 
-**This library is currently under heavy development - if you have suggestions on the API or use-cases you'd like to be covered, please open an github issue or reach out. We'd love to hear about how you're using the library.**
+**This library is currently under heavy development - if you have suggestions
+on the API or use-cases you'd like to be covered, please open an github issue
+or reach out. We'd love to hear about how you're using the library.**
 
-`functorch` is a prototype of [JAX-like](https://github.com/google/jax)
-composable FUNCtion transforms for pyTORCH.
+`functorch` is [JAX-like](https://github.com/google/jax) composable function
+transforms for PyTorch.
 
 It aims to provide composable `vmap` and `grad` transforms that work with
-PyTorch modules and PyTorch autograd with good eager-mode performance. Because
-this project requires some investment, we'd love to hear from and work with
-early adopters to shape the design. Please reach out on the issue tracker
-if you're interested in using this for your project.
+PyTorch modules and PyTorch autograd with good eager-mode performance.
 
-In addition, there is experimental functionality to trace through these transformations using FX in order to capture the results of these transforms ahead of time. This would allow us to compile the results of vmap or grad to improve performance.
+In addition, there is experimental functionality to trace through these
+transformations using FX in order to capture the results of these transforms
+ahead of time. This would allow us to compile the results of vmap or grad
+to improve performance.
 
 ## Why composable function transforms?
 
@@ -111,18 +113,18 @@ pytest test/test_eager_transforms.py -v
 ```
 
 To do devel install:
-    
+
 ```
 pip install -e .
 ```
-    
+
 To install with optional dependencies, e.g. for AOTAutograd:
-    
+
 ```
 pip install -e .[aot]
 ```
-    
-    
+
+
 </p>
 </details>
 
@@ -378,8 +380,8 @@ For more documentation, see [our docs website](https://pytorch.org/functorch).
 
 In the end state, we'd like to upstream this into PyTorch once we iron out the
 design details. To figure out the details, we need your help -- please send us
-your use cases by starting a conversation in the issue tracker or try out the
-prototype.
+your use cases by starting a conversation in the issue tracker or trying our
+project out.
 
 ## License
 Functorch has a BSD-style license, as found in the [LICENSE](LICENSE) file.
