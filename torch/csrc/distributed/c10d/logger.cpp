@@ -21,7 +21,7 @@ std::ostream& operator<<(std::ostream& output, const Logger& logger) {
   auto& ddp_logging_data = (*logger.ddp_logging_data_);
 
   std::string loggerInfo = fmt::format(
-      "[Rank {} / {}] [iteration {}] Training {} unused_parameter_size={} \n "
+      "[Rank {} / {}] [before iteration {}] Training {} unused_parameter_size={} \n "
       "Avg forward compute time: {} \n Avg backward compute time: {} \n"
       "Avg backward comm. time: {} \n Avg backward comm/comp overlap time: {}",
       ddp_logging_data.ints_map["rank"],
