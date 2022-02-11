@@ -207,6 +207,7 @@ std::vector<at::Tensor> constructTensors2(
 
   std::vector<at::Tensor> tensors;
   for (const auto i : c10::irange(bufs_out_num)) {
+    // @lint-ignore CLANGTIDY
     tensors.push_back({});
   }
   if (!qdataArg.has_value()) {
