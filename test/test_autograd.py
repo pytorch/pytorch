@@ -4064,6 +4064,82 @@ class TestAutograd(TestCase):
             with self.assertRaisesRegex(RuntimeError, err_msg):
                 gradcheck(bad_fn, (x, y), check_forward_ad=True, fast_mode=fast_mode)
 
+    def test_gradcheck_forward_ad_runs_with_no_requires_grad(self):
+        # Currently requires_grad is used as a easy way for gradcheck to know
+        # which inputs of the function are meant to be differentiable
+        # This test checks that when the inputs are passed to the function they should not have
+        # requires_grad=True even though they may have requires_grad=True when passed
+        # to gradcheck
+        class UserFn(Function):
+            @staticmethod
+            def forward(ctx, x, y):
+                if fwAD._current_level >= 0:
+                    self.assertFalse(x.requires_grad)
+                    self.assertFalse(y.requires_grad)
+                return x.clone(), y.clone()
+
+            @staticmethod
+            def jvp(ctx, x_t, y_t):
+                return x_t, y_t
+
+        x = torch.rand(2, dtype=torch.double, requires_grad=True)
+        y = torch.rand(2, dtype=torch.double, requires_grad=True)
+
+        gradcheck(UserFn.apply, (x, y), check_forward_ad=True, check_undefined_grad=False, check_backward_ad=False,
+                  check_batched_grad=False, check_batched_forward_grad=False)
+
+        gradcheck(UserFn.apply, (x, y), check_forward_ad=True, check_undefined_grad=True, check_backward_ad=False,
+                  check_batched_grad=False, check_batched_forward_grad=False)
+
+        gradcheck(UserFn.apply, (x, y), check_forward_ad=True, check_undefined_grad=True, check_backward_ad=False,
+                  check_batched_grad=False, check_batched_forward_grad=True)
+
+        x = torch.rand(2, dtype=torch.double, requires_grad=True)
+        y = torch.rand(2, dtype=torch.double, requires_grad=False)
+        gradcheck(UserFn.apply, (x, y), check_forward_ad=True, check_undefined_grad=True, check_backward_ad=False,
+                  check_batched_grad=False, check_batched_forward_grad=True)
+
+    def test_gradcheck_forward_ad_respects_requires_grad(self):
+        # Currently requires_grad is used as a easy way for gradcheck to know
+        # which inputs of the function are meant to be differentiable
+        jvp_count = [0]
+
+        class UserFn(Function):
+            @staticmethod
+            def forward(ctx, x, y):
+                return x.clone(), y.clone()
+
+            @staticmethod
+            def jvp(ctx, x_t, y_t):
+                jvp_count[0] += 1
+                return x_t, y_t
+
+        x = torch.rand(2, dtype=torch.double, requires_grad=True)
+        y = torch.rand(2, dtype=torch.double, requires_grad=True)
+        gradcheck(UserFn.apply, (x, y), check_forward_ad=True, check_undefined_grad=False, check_backward_ad=False,
+                  check_batched_grad=False, check_batched_forward_grad=False)
+        self.assertEqual(jvp_count[0], 2)  # (2) once per input
+        jvp_count = [0]
+
+        gradcheck(UserFn.apply, (x, y), check_forward_ad=True, check_undefined_grad=True, check_backward_ad=False,
+                  check_batched_grad=False, check_batched_forward_grad=False)
+        self.assertEqual(jvp_count[0], 6)  # (+4): (once with normal ZT (+1), once with efficient ZT (+1)) for each input (x2)
+        jvp_count = [0]
+
+        gradcheck(UserFn.apply, (x, y), check_forward_ad=True, check_undefined_grad=True, check_backward_ad=False,
+                  check_batched_grad=False, check_batched_forward_grad=True)
+        self.assertEqual(jvp_count[0], 12)  # (+6): (compute batch of 2 with vmap (+1), with a loop (+2)) for each input (x2)
+        jvp_count = [0]
+
+        # Repeat the previous test except we mark one input with requires_grad=False
+        # NB: _test_undefined_forward_mode is only (+1), when function has single differentiable input, not (+2)!
+        #     Otherwise, other counts are halved.
+        x = torch.rand(2, dtype=torch.double, requires_grad=True)
+        y = torch.rand(2, dtype=torch.double, requires_grad=False)
+        gradcheck(UserFn.apply, (x, y), check_forward_ad=True, check_undefined_grad=True, check_backward_ad=False,
+                  check_batched_grad=False, check_batched_forward_grad=True)
+        self.assertEqual(jvp_count[0], 5)  # 1 + 1 + 3
+
     def test_gradcheck_check_forward_or_backward_only(self):
         """Depending on settings for check_forward_ad and check_backward_ad, the
         correct codepaths should be reached (or not reached)
