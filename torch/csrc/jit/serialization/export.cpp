@@ -102,6 +102,10 @@ void validateBlock(
             "\n\nDefined at:\n" + getNodeStackTraceString(node))
       }
     } else {
+#ifdef BUILD_CAFFE2
+      // Assuming this is a Caffe2 change as it only modifies an aten op
+      // for operator_export_type == ONNX_ATEN_FALLBACK, which is a common
+      // pattern for Caffe2-specific scenarios.
       if (node->kind() == aten::expand) {
         if (operator_export_type ==
             onnx_torch::OperatorExportTypes::ONNX_ATEN_FALLBACK) {
@@ -117,6 +121,7 @@ void validateBlock(
           new_node->s_(Symbol::fromQualString("attr::operator"), "expand");
         }
       }
+#endif
       if (node->kind() == prim::PackPadded || node->kind() == prim::PadPacked) {
         if (operator_export_type !=
             onnx_torch::OperatorExportTypes::ONNX_FALLTHROUGH) {

@@ -353,13 +353,15 @@ concurrency:
           ./build_docker.sh
 {%- endmacro -%}
 
-{%- macro setup_miniconda(python_version) -%}
+{%- macro setup_miniconda(python_version, activate_environment=True) -%}
       - name: Setup miniconda
         uses: conda-incubator/setup-miniconda@v2
         with:
           auto-update-conda: true
           python-version: !{{ python_version }}
+{%- if activate_environment %}
           activate-environment: build
+{%- endif %}
 {%- endmacro -%}
 
 {%- macro set_xcode_version(xcode_version) -%}

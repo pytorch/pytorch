@@ -79,10 +79,7 @@ class DefaultPackageZipFileReader(zipfile.ZipFile, PackageZipFileReader):
         return super().read(name)
 
     def has_record(self, path):
-        return path in records
-
-    def write_record(self, file_name, str_or_bytes, size=None):
-        super().writestr(file_name, str_or_bytes)
+        return path in self.records
 
     def get_all_records(self):
         return list(self.records)
