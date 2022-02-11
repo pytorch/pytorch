@@ -251,7 +251,7 @@ if(INTERN_BUILD_ATEN_OPS)
         ${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/native/native_functions.yaml
         WORKING_DIRECTORY ${CMAKE_CURRENT_LIST_DIR}/..
     )
-  else(): # Otherwise do not generate or include sources into build.
+  else() # Otherwise do not generate or include sources into build.
     set(generated_unboxing_sources "")
   endif()
 
