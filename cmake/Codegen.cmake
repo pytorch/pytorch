@@ -251,6 +251,8 @@ if(INTERN_BUILD_ATEN_OPS)
         ${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/native/native_functions.yaml
         WORKING_DIRECTORY ${CMAKE_CURRENT_LIST_DIR}/..
     )
+  else(): # Otherwise do not generate or include sources into build.
+    set(generated_unboxing_sources "")
   endif()
 
   foreach(gen_type "headers" "sources" "declarations_yaml")
@@ -304,9 +306,6 @@ if(INTERN_BUILD_ATEN_OPS)
     )
   endforeach()
 
-  if(NOT USE_LIGHTWEIGHT_DISPATCH)
-    set(generated_unboxing_sources "")
-  endif()
   # Generated headers used from a CUDA (.cu) file are
   # not tracked correctly in CMake. We make the libATen.so depend explicitly
   # on building the generated ATen files to workaround.
