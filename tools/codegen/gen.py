@@ -1603,8 +1603,8 @@ def main() -> None:
     native_install_dir = f'{options.install_dir}/native'
     pathlib.Path(native_install_dir).mkdir(parents=True, exist_ok=True)
 
-    # Requests too parse native_functions.yaml trigger a callback to primTorch, which extends
-    #   the native_function.yaml entries and may produce relevant soure code for them.
+    # Requests to parse native_functions.yaml trigger a callback to primTorch, which extends
+    #   the native_function.yaml entries.
     # If primTorch is also requested to be generated (or debugged) then the callback
     #   may also write the primTorch sources.
     primtorch_fm: Optional[FileManager] = None

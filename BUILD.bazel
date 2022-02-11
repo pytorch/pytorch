@@ -1635,6 +1635,14 @@ genrule(
     tools = [':gen_version_header'],
 )
 
+# Copies primTorch sources that must be available both at build and run time
+genrule(
+    name = "copy_primtorch_aliases",
+    srcs = ["tools/codegen/prim/aliases.py"],
+    outs = ["torch/_prim/aliases.py"],
+    cmd = "cp $< $@",
+)
+
 py_binary(
     name = "stringify_file",
     srcs = ["torch/csrc/jit/codegen/cuda/tools/stringify_file.py"],

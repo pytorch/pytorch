@@ -37,6 +37,10 @@ add_subdirectory(${LIBSHM_SRCDIR})
 # Generate files
 set(TOOLS_PATH "${TORCH_ROOT}/tools")
 
+# copies primTorch files that should be available to PyTorch from tools/codegen/prim
+#   to torch/_prim.
+configure_file(${TOOLS_PATH}/codegen/prim/aliases.py ${TORCH_SRC_DIR}/_prim/aliases.py COPYONLY)
+
 set(TORCH_PYTHON_SRCS
     ${GENERATED_THNN_CXX}
     ${GENERATED_CXX_PYTHON}
