@@ -251,7 +251,7 @@ bool MutationRemover::RemoveTensorMutation(Block* block) {
     // If tranpose is inplace, then it should not be converted to its
     // functional equivalent if the input tensor to it has more than
     // one use.
-    if (node->kind() == Symbol::fromQualString(aten::transpose_)) {
+    if (node->kind() == Symbol::fromQualString("aten::transpose_")) {
       if (mutated_value->uses().size() != 1) {
         continue;
       }
