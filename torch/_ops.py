@@ -99,39 +99,63 @@ class OpOverloadPacket:
         if key == '__file__':
             return 'torch.ops'
 
+        # ensure that query for dunder attributes that does not exist on
+        # opoverloadpacket but instead exists on the self._op object does not unnecessarily call
+        # `_get_operation_overload` (which is an expensive operation).
+        # This is done to prevent any potential slowdown. This list can be extended
+        # if there exists other attributes like `__name__` that only exist on self._op and not on the
+        # opoverloadpacket.
+        # This is ok since we are guaranteed that an overload name for an aten op can't start with '__'
         try:
+            if key.startswith('__'):
+                return getattr(self._op, key)
+        except AttributeError:
+            # for consistency because it seems weird to
+            # throw an attribute error with a message containing
+            # an object name different from the one the attribute
+            # query was performed on.
+            raise AttributeError("'{}' can't have an overload name beginning with '__' and the "
+                                 "underlying op {} has no attribute {} either."
+                                 .format(str(self), str(self._op), key)) from None
+
+        try:
+            # This is ok since we are guaranteed that an overload name for an aten op can't be 'default'
             use_key = '' if key == 'default' else key
             # TODO: disallow access to overloads registered by JIT
-            op_ = torch._C._get_operation_overload(self._qualified_op_name, use_key)
+            op_ = torch._C._get_operation_overload(
+                self._qualified_op_name, use_key)
             schema = torch._C._get_schema(self._qualified_op_name, use_key)
             overload = OpOverload(self, op_, schema)
             # cache the overload object
             setattr(self, key, overload)
             return overload
         except RuntimeError:
-            try:
-                # This is added to maintain bc in case the user queries an attribute that exists on `self._op`
-                # which used to be returned before instead of the OpOverloadPacket
-                out = getattr(self._op, key)
-                return out
-            except AttributeError:
-                raise AttributeError("'{}' object has no attribute '{}'".format(str(self), key)) from None
+            raise AttributeError(
+                "The underlying op of '{}' has no overload name '{}'".format(str(self), key)
+            ) from None
 
     def __call__(self, *args, **kwargs):
-        # overloading __call__ to ensure torch.ops.foo.bar() is still callable from JIT
-        # We save the function ptr as the `op` attribute on OpOverloadPacket to access it here.
+        # overloading __call__ to ensure torch.ops.foo.bar()
+        # is still callable from JIT
+        # We save the function ptr as the `op` attribute on
+        # OpOverloadPacket to access it here.
         return self._op(*args, **kwargs or {})
 
 # Resolution of torch.fn is different from torch.ops.aten.fn
-# torch.fn uses the Python argparser, matches with the appropriate schema, and calls into the unboxed version of the method
-# torch.ops.aten.fn resolution is done via the mechanism defined in JIT. JIT creates a stack of all the overloads and
-# then tries to match the correct one at runtime and always calls into the boxed version of the method
-# Autograd codegen creates VariableType, TracerType, inplace or view type and python bindings
-# Aten codegen generates tensor methods for the the tensor class
+# torch.fn uses the Python argparser, matches with the
+# appropriate schema, and calls into the unboxed version of the method
+# torch.ops.aten.fn resolution is done via the mechanism defined in JIT.
+# JIT creates a stack of all the overloads and then tries to match the
+# correct one at runtime and always calls into the boxed version of the method
+# Autograd codegen creates VariableType, TracerType,
+# inplace or view type and python bindings.
+# Aten codegen generates tensor methods for the the tensor class.
 
 # _OpNamespace is a subclass of ModuleType because the torch script
 # allows attribute lookups on modules only. Since we want torch.ops.foo.bar()
 # to work from script, we need to ensure ops and foo are modules
+
+
 class _OpNamespace(types.ModuleType):
     """
     An op namespace to dynamically bind Operators into Python.
@@ -170,13 +194,13 @@ class _OpNamespace(types.ModuleType):
         # with qualified_op_name
         torch.jit._builtins._register_builtin(op, qualified_op_name)
         op.__module__ = self.__module__ + "." + namespace_name
-        # opoverloadpacket = OpOverloadPacket(qualified_op_name, op_name, op)
-        # opoverloadpacket.__module__ = self.__module__ + "." + namespace_name
+        opoverloadpacket = OpOverloadPacket(qualified_op_name, op_name, op)
+        opoverloadpacket.__module__ = self.__module__ + "." + namespace_name
         # cache the opoverloadpacket to ensure that each op corresponds to
         # a unique OpOverloadPacket object
-        # setattr(self, op_name, opoverloadpacket)
-        setattr(self, op_name, op)
-        return op
+        setattr(self, op_name, opoverloadpacket)
+        return opoverloadpacket
+
 
 class _Ops(types.ModuleType):
     __file__ = '_ops.py'
@@ -219,6 +243,7 @@ class _Ops(types.ModuleType):
             # operators with the JIT.
             ctypes.CDLL(path)
         self.loaded_libraries.add(path)
+
 
 # The ops "namespace"
 ops = _Ops()

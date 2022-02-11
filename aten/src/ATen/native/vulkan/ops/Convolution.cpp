@@ -100,7 +100,7 @@ vTensor pack_weights_dw(
   float* const dst_weight_ptr = v_weight_payload.get();
   memset(dst_weight_ptr, 0, v_weight.nbytes());
 
-  for (int64_t src_oc = 0; src_oc < src_filter[Layout::Filter::output]; ++src_oc) {
+  for (const auto src_oc : c10::irange(src_filter[Layout::Filter::output])) {
     /* Source */
     const float* const src_weight_oc_ptr = src_weight_ptr + src_oc * src_block_sz;
 
@@ -112,7 +112,7 @@ vTensor pack_weights_dw(
                                     dst_c * dst_kernel_sz +
                                     dst_oh * dst_kw_sz;
 
-    for (int64_t src_ih = 0; src_ih < src_filter[Layout::Filter::height]; ++src_ih) {
+    for (const auto src_ih : c10::irange(src_filter[Layout::Filter::height])) {
       memcpy(
           dst_weight_c_ptr + src_ih * src_kw_sz,
           src_weight_oc_ptr + src_ih * src_kw_sz,
@@ -161,7 +161,7 @@ vTensor pack_weights_2d(
   float* const dst_weight_ptr = v_weight_payload.get();
   memset(dst_weight_ptr, 0, v_weight.nbytes());
 
-  for (int64_t src_oc = 0; src_oc < src_filter[Layout::Filter::output]; ++src_oc) {
+  for (const auto src_oc : c10::irange(src_filter[Layout::Filter::output])) {
     /* Source */
     const float* const src_weight_oc_ptr = src_weight_ptr + src_oc * src_block_sz;
 
@@ -171,7 +171,7 @@ vTensor pack_weights_2d(
 
     float* const dst_weight_c_ptr = dst_weight_ptr + dst_c * dst_kernel_sz;
 
-    for (int64_t src_ic = 0; src_ic < src_filter[Layout::Filter::input]; ++src_ic) {
+    for (const auto src_ic : c10::irange(src_filter[Layout::Filter::input])) {
       const int64_t dst_ic4 = src_ic / 4;
 
       for (const auto src_ih : c10::irange(src_kh_sz)) {
