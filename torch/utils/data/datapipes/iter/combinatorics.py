@@ -8,7 +8,7 @@ T_co = TypeVar('T_co', covariant=True)
 
 class SamplerIterDataPipe(IterDataPipe[T_co]):
     r"""
-    Generate sample elements using the provided ``Sampler`` (defaults to :class:`SequentialSampler`).
+    Generates sample elements using the provided ``Sampler`` (defaults to :class:`SequentialSampler`).
 
     Args:
         datapipe: IterDataPipe to sample from
@@ -46,7 +46,7 @@ class SamplerIterDataPipe(IterDataPipe[T_co]):
 @functional_datapipe('shuffle')
 class ShufflerIterDataPipe(IterDataPipe[T_co]):
     r"""
-    Shuffle the input DataPipe with a buffer (functional name: ``shuffle``). The buffer
+    Shuffles the input DataPipe with a buffer (functional name: ``shuffle``). The buffer
     with ``buffer_size`` is filled with elements from the datapipe first. Then,
     each item will be yielded from the buffer by reservoir sampling via iterator.
 
