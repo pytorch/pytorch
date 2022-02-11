@@ -111,6 +111,7 @@ jobs:
         with:
           submodules: recursive
           repository: pytorch/builder
+          ref: release/1.11
           path: builder
       - name: Clean pytorch/builder checkout
         run: |
@@ -501,6 +502,7 @@ jobs:
         with:
           submodules: recursive
           repository: pytorch/builder
+          ref: release/1.11
           path: builder
       - name: Clean pytorch/builder checkout
         run: |
@@ -898,6 +900,7 @@ jobs:
         with:
           submodules: recursive
           repository: pytorch/builder
+          ref: release/1.11
           path: builder
       - name: Clean pytorch/builder checkout
         run: |
@@ -1298,6 +1301,7 @@ jobs:
         with:
           submodules: recursive
           repository: pytorch/builder
+          ref: release/1.11
           path: builder
       - name: Clean pytorch/builder checkout
         run: |
@@ -1698,6 +1702,7 @@ jobs:
         with:
           submodules: recursive
           repository: pytorch/builder
+          ref: release/1.11
           path: builder
       - name: Clean pytorch/builder checkout
         run: |
@@ -2098,6 +2103,7 @@ jobs:
         with:
           submodules: recursive
           repository: pytorch/builder
+          ref: release/1.11
           path: builder
       - name: Clean pytorch/builder checkout
         run: |
@@ -2490,6 +2496,7 @@ jobs:
         with:
           submodules: recursive
           repository: pytorch/builder
+          ref: release/1.11
           path: builder
       - name: Clean pytorch/builder checkout
         run: |
@@ -2881,6 +2888,7 @@ jobs:
         with:
           submodules: recursive
           repository: pytorch/builder
+          ref: release/1.11
           path: builder
       - name: Clean pytorch/builder checkout
         run: |
@@ -3271,6 +3279,7 @@ jobs:
         with:
           submodules: recursive
           repository: pytorch/builder
+          ref: release/1.11
           path: builder
       - name: Clean pytorch/builder checkout
         run: |
@@ -3668,6 +3677,7 @@ jobs:
         with:
           submodules: recursive
           repository: pytorch/builder
+          ref: release/1.11
           path: builder
       - name: Clean pytorch/builder checkout
         run: |
@@ -4068,6 +4078,7 @@ jobs:
         with:
           submodules: recursive
           repository: pytorch/builder
+          ref: release/1.11
           path: builder
       - name: Clean pytorch/builder checkout
         run: |
@@ -4468,6 +4479,7 @@ jobs:
         with:
           submodules: recursive
           repository: pytorch/builder
+          ref: release/1.11
           path: builder
       - name: Clean pytorch/builder checkout
         run: |
@@ -4868,6 +4880,7 @@ jobs:
         with:
           submodules: recursive
           repository: pytorch/builder
+          ref: release/1.11
           path: builder
       - name: Clean pytorch/builder checkout
         run: |
@@ -5260,6 +5273,7 @@ jobs:
         with:
           submodules: recursive
           repository: pytorch/builder
+          ref: release/1.11
           path: builder
       - name: Clean pytorch/builder checkout
         run: |
@@ -5651,6 +5665,7 @@ jobs:
         with:
           submodules: recursive
           repository: pytorch/builder
+          ref: release/1.11
           path: builder
       - name: Clean pytorch/builder checkout
         run: |
@@ -6041,6 +6056,7 @@ jobs:
         with:
           submodules: recursive
           repository: pytorch/builder
+          ref: release/1.11
           path: builder
       - name: Clean pytorch/builder checkout
         run: |
@@ -6438,6 +6454,7 @@ jobs:
         with:
           submodules: recursive
           repository: pytorch/builder
+          ref: release/1.11
           path: builder
       - name: Clean pytorch/builder checkout
         run: |
@@ -6838,6 +6855,7 @@ jobs:
         with:
           submodules: recursive
           repository: pytorch/builder
+          ref: release/1.11
           path: builder
       - name: Clean pytorch/builder checkout
         run: |
@@ -7238,6 +7256,7 @@ jobs:
         with:
           submodules: recursive
           repository: pytorch/builder
+          ref: release/1.11
           path: builder
       - name: Clean pytorch/builder checkout
         run: |
@@ -7638,6 +7657,7 @@ jobs:
         with:
           submodules: recursive
           repository: pytorch/builder
+          ref: release/1.11
           path: builder
       - name: Clean pytorch/builder checkout
         run: |
@@ -8030,6 +8050,7 @@ jobs:
         with:
           submodules: recursive
           repository: pytorch/builder
+          ref: release/1.11
           path: builder
       - name: Clean pytorch/builder checkout
         run: |
@@ -8421,6 +8442,7 @@ jobs:
         with:
           submodules: recursive
           repository: pytorch/builder
+          ref: release/1.11
           path: builder
       - name: Clean pytorch/builder checkout
         run: |
@@ -8811,6 +8833,7 @@ jobs:
         with:
           submodules: recursive
           repository: pytorch/builder
+          ref: release/1.11
           path: builder
       - name: Clean pytorch/builder checkout
         run: |
@@ -9208,6 +9231,7 @@ jobs:
         with:
           submodules: recursive
           repository: pytorch/builder
+          ref: release/1.11
           path: builder
       - name: Clean pytorch/builder checkout
         run: |
@@ -9608,6 +9632,7 @@ jobs:
         with:
           submodules: recursive
           repository: pytorch/builder
+          ref: release/1.11
           path: builder
       - name: Clean pytorch/builder checkout
         run: |
@@ -10008,6 +10033,7 @@ jobs:
         with:
           submodules: recursive
           repository: pytorch/builder
+          ref: release/1.11
           path: builder
       - name: Clean pytorch/builder checkout
         run: |
@@ -10408,6 +10434,7 @@ jobs:
         with:
           submodules: recursive
           repository: pytorch/builder
+          ref: release/1.11
           path: builder
       - name: Clean pytorch/builder checkout
         run: |
@@ -10800,6 +10827,7 @@ jobs:
         with:
           submodules: recursive
           repository: pytorch/builder
+          ref: release/1.11
           path: builder
       - name: Clean pytorch/builder checkout
         run: |
