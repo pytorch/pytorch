@@ -543,8 +543,7 @@ TEST(MemDependency, MemDependencyCheckerLoopReduce) {
    */
 
   StorePtr aInit = Store::make(a, {0}, 0);
-  ExprHandle reduce =
-      ExprHandle(Sum()(a.node(), ExprHandle(1), {x.node()}, {x.node()}));
+  ExprHandle reduce = Sum()(a, 1, {x}, {x});
   StorePtr aReduce = Store::make(a, {0}, reduce);
   StmtPtr loop = For::make(x, 0, 10, aReduce);
   StorePtr bStore = Store::make(b, {0}, Load::make(a, {0}));

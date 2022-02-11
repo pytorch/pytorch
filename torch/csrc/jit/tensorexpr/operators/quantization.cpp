@@ -727,8 +727,8 @@ Tensor computeUpsampleNearest2d(
   auto input_height = ExprHandle(A.dim(2));
   auto input_width = ExprHandle(A.dim(3));
 
-  std::vector<ExprPtr> dims;
-  std::vector<VarPtr> args;
+  std::vector<ExprHandle> dims;
+  std::vector<VarHandle> args;
   unpack_dim_args(c10::fmap<DimArg>(outputShape), &dims, &args);
   // Handle separately when scale is specified? as in 'scalar_t
   // compute_scales_value' in UpSample.h
@@ -749,16 +749,16 @@ Tensor computeUpsampleNearest2d(
     newAxes[3] = compute_nearest_idx(scale_w, axes[3], input_width);
     return A.load(newAxes);
   };
-  auto e = body_func(VarVectorToVarHandleVector(args));
-  BufPtr buf = alloc<Buf>(
+  auto e = body_func(args);
+  BufHandle buf = Buf::make(
       "quantize_upsample_nearest2d",
-      ExprHandleVectorToExprVector(outputShape),
+      outputShape,
       Dtype(*outputType),
-      nullptr,
       c10::nullopt,
-      A.node()->qscale(),
-      A.node()->qzero());
-  return Tensor(buf, args, e.node());
+      c10::nullopt,
+      ExprHandle(A.node()->qscale()),
+      ExprHandle(A.node()->qzero()));
+  return Tensor(buf, args, e);
 }
 
 Tensor computeUpsampleNearest2dExternalCall(
