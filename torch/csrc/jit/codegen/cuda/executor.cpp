@@ -474,8 +474,12 @@ LaunchParams FusionExecutor::computeLaunchParams(
       }
       maximum_value = std::max(maximum_value, *val);
     }
-    expr_eval.bind(p_type, maximum_value);
-    launch_params.bind(maximum_value, p_type);
+    // Protect for size-0 tensors, they still have a value so would prefer to
+    // bind nothing than 0
+    if (maximum_value > 0) {
+      expr_eval.bind(p_type, maximum_value);
+      launch_params.bind(maximum_value, p_type);
+    }
   }
 
   // Re-run the integer machine with all

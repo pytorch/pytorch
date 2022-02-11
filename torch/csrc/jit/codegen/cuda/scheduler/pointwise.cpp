@@ -63,29 +63,6 @@ c10::optional<PointwiseParams> getPointwiseHeuristics(
 
   TORCH_INTERNAL_ASSERT(largest_out != nullptr);
 
-  // If zero dimensional, return default parameters
-  if (TensorDomain::noReductions(
-          TensorDomain::noBroadcasts(largest_out->domain()->domain()))
-          .size() == 0) {
-    auto vectorizable_inputs_outputs_entry = HeuristicSummaryEntry<
-        HeuristicCompileTime::VectorizableInputsAndOutputs>(data_cache, []() {
-      return std::make_unique<std::vector<TensorView*>>();
-    });
-    vectorizable_inputs_outputs_entry.get();
-
-    auto broadcast_byte_multiples_entry =
-        HeuristicSummaryEntry<HeuristicCompileTime::BroadcastMultiples>(
-            data_cache, []() {
-              return std::make_unique<
-                  std::vector<scheduler_utils::BroadcastMultiple>>();
-            });
-    broadcast_byte_multiples_entry.get();
-
-    PointwiseParams params;
-    params.tag = "Pointwise heuristics";
-    return params;
-  }
-
   const int64_t device_multiprocessor_count =
       (int64_t)at::cuda::getCurrentDeviceProperties()->multiProcessorCount;
 
@@ -118,9 +95,34 @@ c10::optional<PointwiseParams> getPointwiseHeuristics(
         runtime_info.expressionEvaluator().evaluate(ref_root[ref_i]->extent());
     TORCH_INTERNAL_ASSERT(
         inferred_val.has_value(),
-        "Error inferring size for pointwise scheduler.");
+        "Error inferring size for pointwise scheduler: ",
+        ref_root[ref_i]->extent()->toInlineString());
     elem_counts[ref_i] = inferred_val.value();
     n_elems *= inferred_val.value();
+  }
+
+  // If zero dimensional or zero size, return default parameters
+  if (TensorDomain::noReductions(
+          TensorDomain::noBroadcasts(largest_out->domain()->domain()))
+              .size() == 0 ||
+      n_elems == 0) {
+    auto vectorizable_inputs_outputs_entry = HeuristicSummaryEntry<
+        HeuristicCompileTime::VectorizableInputsAndOutputs>(data_cache, []() {
+      return std::make_unique<std::vector<TensorView*>>();
+    });
+    vectorizable_inputs_outputs_entry.get();
+
+    auto broadcast_byte_multiples_entry =
+        HeuristicSummaryEntry<HeuristicCompileTime::BroadcastMultiples>(
+            data_cache, []() {
+              return std::make_unique<
+                  std::vector<scheduler_utils::BroadcastMultiple>>();
+            });
+    broadcast_byte_multiples_entry.get();
+
+    PointwiseParams params;
+    params.tag = "Pointwise heuristics";
+    return params;
   }
 
   // Don't unroll at the cost of getting a full wave on the GPU

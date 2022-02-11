@@ -705,6 +705,10 @@ kir::ExpressionEvaluator bindKernelInputs(
       for (const auto dim : c10::irange(root_domain.size())) {
         const auto extent = root_domain[dim]->extent();
         const auto value = aten_tensor.sizes()[dim];
+        if (value == 0 && extent->isOneInt()) {
+          // don't bind 0 to a dimension if it's marked as broadcast
+          continue;
+        }
         bool should_bind = true;
         if (check_consistency) {
           const auto prev_value = expr_eval.evaluate(extent);
@@ -768,6 +772,10 @@ ExpressionEvaluator bindFusionInputs(
       for (const auto dim : c10::irange(root_dom.size())) {
         const auto extent = root_dom[dim]->extent();
         const auto value = aten_tensor.sizes()[dim];
+        if (value == 0 && extent->isOneInt()) {
+          // don't bind 0 to a dimension if it's marked as broadcast
+          continue;
+        }
         const auto prev_value = evaluator.evaluate(extent);
         if (prev_value.has_value()) {
           TORCH_CHECK(

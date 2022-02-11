@@ -3028,6 +3028,25 @@ class TestCudaFuser(JitTestCase):
     @unittest.skipIf(not RUN_CUDA, "requires CUDA")
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
                      "Requires fusion optimization pass to be effective")
+    def test_batch_norm_impl_index_inner_bcast(self):
+        # the repro
+        self._test_batch_norm_impl_index_helper(2, 1, 1, False, True, True)
+
+        # running the full set
+        setups = [
+            [True, True],
+            [False, False],
+            [True, False],
+            [False, True]]
+        for training_and_track, affine in itertools.product(setups, [True, False]):
+            training, track_running_stats = training_and_track
+            print("running: {} {} {}".format(affine, track_running_stats, training))
+            self._test_batch_norm_impl_index_helper(2, 1, 1, affine, track_running_stats, training)
+
+    @unittest.skipIf(is_pre_volta(), "reduction not supported in pre volta device")
+    @unittest.skipIf(not RUN_CUDA, "requires CUDA")
+    @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
+                     "Requires fusion optimization pass to be effective")
     def test_batch_norm_impl_index_correctness(self):
         with torch.backends.cudnn.flags(enabled=True):
             batch = [2, 7, 16]
@@ -3926,7 +3945,6 @@ class TestPassManagerCudaFuser(JitTestCase):
         self.assertTrue(torch._C._jit_nvfuser_enabled())
         self.assertTrue(torch._C._jit_set_nvfuser_enabled(False))
         self.assertFalse(torch._C._jit_nvfuser_enabled())
-
 
 if __name__ == '__main__':
     run_tests()

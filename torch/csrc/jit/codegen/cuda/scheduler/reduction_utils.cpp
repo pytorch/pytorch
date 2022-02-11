@@ -535,12 +535,6 @@ int idPos(const IterDomain* id) {
   }
   inner_most--;
 
-  // Broadcast
-  if (id->isBroadcast() || id->isImplicitBroadcast()) {
-    return inner_most;
-  }
-  inner_most--;
-
   // Reduction and unrolled
   if (id->isReduction() &&
       (id->getParallelType() == ParallelType::Unroll ||
@@ -564,6 +558,12 @@ int idPos(const IterDomain* id) {
 
   // Reduction and thread
   if (id->isReduction() && id->isThread()) {
+    return inner_most;
+  }
+  inner_most--;
+
+  // Broadcast
+  if (id->isBroadcast() || id->isImplicitBroadcast()) {
     return inner_most;
   }
   inner_most--;
