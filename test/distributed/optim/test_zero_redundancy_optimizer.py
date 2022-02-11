@@ -555,6 +555,7 @@ class TestZeroRedundancyOptimizerDistributed(TestZeroRedundancyOptimizer):
                 assert torch.allclose(layer1.bias, layer3.bias)
 
     @common_distributed.skip_if_lt_x_gpu(2)
+    @common_distributed.skip_if_rocm
     def test_collect_shards(self):
         """ Check the state consolidation mechanism, and the state dict exposed by ZeroRedundancyOptimizer"""
         self.dist_init(self.rank)

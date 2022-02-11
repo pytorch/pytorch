@@ -53,12 +53,12 @@ Tensor computeSum(
     std::iota(axes.begin(), axes.end(), 0);
   }
   // Axes go into reduction dimensions.
-  std::vector<DimArg> reductionDims;
+  std::vector<ExprHandle> reductionDims;
   reductionDims.reserve(rank);
   for (size_t axis : axes) {
     reductionDims.emplace_back(sizes[axis]);
   }
-  std::vector<DimArg> outputDims;
+  std::vector<ExprHandle> outputDims;
   // Output dimensions are the complement of axes. When keepdim is set, a
   // one-sized dimension is inserted for each axis.
   for (size_t dim = 0; dim < rank; ++dim) {
