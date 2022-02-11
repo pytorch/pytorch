@@ -197,7 +197,7 @@ concurrency:
       {%- if repository != "pytorch/pytorch" %}
           repository: !{{ repository }}
       {%- endif %}
-      {%- if branch != "master" %}
+      {%- if branch %}
           ref: !{{ branch }}
       {%- endif %}
       {%- if directory %}
