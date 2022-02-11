@@ -291,6 +291,7 @@ class TestSummonFullParams(FSDPTest):
             b = flattened_param.detach()
             self.assertTrue(torch.equal(a, b))
 
+    @skip_if_lt_x_gpu(2)
     def test_params_count_and_value(self):
         fsdp_model = FSDP(
             NestedWrappedModule(
