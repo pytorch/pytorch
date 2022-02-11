@@ -335,7 +335,7 @@ def _signature(model) -> inspect.Signature:
     raise ValueError("model has no forward method and is not callable")
 
 
-def _decide_input_format(model, args: Union[torch.Tensor, Tuple]) -> Union[torch.Tensor, Tuple]:
+def _decide_input_format(model, args):
     try:
         sig = _signature(model)
     except ValueError as e:
@@ -346,10 +346,10 @@ def _decide_input_format(model, args: Union[torch.Tensor, Tuple]) -> Union[torch
         if ordered_list_keys[0] == "self":
             ordered_list_keys = ordered_list_keys[1:]
         args_dict: Dict = {}
-        if isinstance(args, torch.Tensor):
-            args_list = [args]
-        else:
+        if isinstance(args, tuple):
             args_list = list(args)
+        else:
+            args_list = [args]
         if isinstance(args_list[-1], dict):
             args_dict = args_list[-1]
             args_list = args_list[:-1]
@@ -416,7 +416,7 @@ def _get_param_count_list(method_graph, args_params):
     return param_count_list
 
 
-def _check_flattened_did_not_remove(original, jit_flattened):
+def _check_flatten_did_not_remove(original, jit_flattened):
     """torch.jit._flatten removes None. Check if it did so in this case."""
     def flatten(x):
         if isinstance(x, (list, tuple)):
@@ -434,8 +434,8 @@ def _check_flattened_did_not_remove(original, jit_flattened):
     assert num_none >= 0
     if num_none:
         raise ValueError(
-            f"example_inputs contained {num_none} None's after flattening. "
-            "When exporting a ScriptModule or ScriptFunction, no example_inputs may "
+            f"args contained {num_none} None's after flattening. "
+            "When exporting a ScriptModule or ScriptFunction, no args may "
             "be None because that breaks type propagation.")
 
 
@@ -443,6 +443,10 @@ def _check_flattened_did_not_remove(original, jit_flattened):
 def _create_jit_graph(model, args):
     torch_out = None
     params: Union[List, Tuple]
+    if isinstance(model, (torch.jit.ScriptFunction, torch.jit.ScriptModule)):
+        flattened_args, unused_desc = torch.jit._flatten(tuple(args))
+        flattened_args = tuple(flattened_args)
+        _check_flatten_did_not_remove(args, flattened_args)
     if isinstance(model, torch.jit.ScriptModule):
         try:
             graph = model.forward.graph
@@ -455,19 +459,16 @@ def _create_jit_graph(model, args):
         args_params = tuple(args) + tuple(params)
         param_count_list = _get_param_count_list(method_graph, args_params)
         in_vars, _ = torch.jit._flatten(args_params)
-        _check_flattened_did_not_remove(args_params, in_vars)
         graph = _propagate_and_assign_input_shapes(
             method_graph, tuple(in_vars), param_count_list, False, False)
         return graph, params, torch_out, module
     elif isinstance(model, torch.jit.ScriptFunction):
         params = ()
-        in_vars, in_desc = torch.jit._flatten(tuple(args))
         graph = model.graph
         torch._C._jit_pass_onnx_function_substitution(graph)
         param_count_list = _get_param_count_list(graph, args)
-        _check_flattened_did_not_remove(args_params, in_vars)
         graph = _propagate_and_assign_input_shapes(
-            graph, tuple(in_vars), param_count_list, False, False)
+            graph, flattened_args, param_count_list, False, False)
         return graph, params, torch_out, None
     else:
         graph, torch_out = _trace_and_get_graph_from_model(model, args)
