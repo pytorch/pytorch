@@ -826,6 +826,7 @@ PyObject *THPFunction_saved_tensors(THPFunction *self, void *_unused)
 {
   HANDLE_TH_ERRORS
   if (self->saved_for_forward) {
+    Py_INCREF(self->saved_for_forward);
     return self->saved_for_forward;
   } else {
     return unpack_saved_variables(self, [](const Variable& var) {
