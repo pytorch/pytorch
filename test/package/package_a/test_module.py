@@ -18,7 +18,6 @@ class ModWithSubmod(torch.nn.Module):
 class ModWithTensor(torch.nn.Module):
     def __init__(self, tensor):
         super().__init__()
-        self.name = 'ModWithTensor'
         self.tensor = tensor
 
     def forward(self, x):
