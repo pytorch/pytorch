@@ -99,7 +99,7 @@ class TestReductions(TestCase):
     def _test_dim_keepdim(self, op: ReductionOpInfo, device, *, ndim, **dim_keepdim):
         """Tests output shape for input with ndim and dim and keepdim kwargs"""
         shape = torch.randint(2, 5, (ndim,)).tolist()
-        t = make_tensor(shape, device, torch.float)
+        t = make_tensor(shape, dtype=torch.float, device=device)
         args, kwargs = next(op.generate_args_kwargs(t, **dim_keepdim))
         result = op(t, *args, **dim_keepdim, **kwargs)
         expected_shape = _reduced_shape(shape, **dim_keepdim)
@@ -275,7 +275,7 @@ class TestReductions(TestCase):
 
         See discussion here https://github.com/pytorch/pytorch/issues/61901
         """
-        t = make_tensor((0, 2, 3), device, torch.float)
+        t = make_tensor((0, 2, 3), dtype=torch.float, device=device)
         for dim in [0] + [[0, 2]] if op.supports_multiple_dims else []:
             args, kwargs = next(op.generate_args_kwargs(t, dim=dim))
             if op.identity is not None:
@@ -295,7 +295,7 @@ class TestReductions(TestCase):
     def test_empty_tensor_nonempty_slice(self, device, op: ReductionOpInfo):
         """Tests that reducing a nonempty slice of an empty tensor returns an
         empty tensor with the dimensions reduced."""
-        t = make_tensor((0, 2, 3), device, torch.float)
+        t = make_tensor((0, 2, 3), dtype=torch.float, device=device)
         for dim in [1] + [[1, 2]] if op.supports_multiple_dims else []:
             args, kwargs = next(op.generate_args_kwargs(t, dim=dim))
             result = op(t, *args, dim=dim, **kwargs)

@@ -3944,7 +3944,7 @@ class TestAsArray(TestCase):
     def _test_copy_mult_devices(self, devices, dtype, cvt):
         cuda1 = devices[0]
         cuda2 = devices[1]
-        original = make_tensor((5, 5), cuda1, dtype)
+        original = make_tensor((5, 5), dtype=dtype, device=cuda1)
 
         def check(**kwargs):
             self._check(original, cvt, is_alias=False, same_device=False, device=cuda2, **kwargs)
@@ -4001,7 +4001,7 @@ class TestAsArray(TestCase):
     @dtypes(torch.float32)
     def test_unsupported_alias_mult_devices(self, devices, dtype):
         dev1, dev2 = devices[:2]
-        original = make_tensor((5, 5), dev1, dtype)
+        original = make_tensor((5, 5), dtype=dtype, device=dev1)
         with self.assertRaisesRegex(ValueError,
                                     f"from device '{dev1}' to '{dev2}'"):
             torch.asarray(original, device=dev2, copy=False)
