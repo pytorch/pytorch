@@ -509,7 +509,6 @@ void nnc_aten_quantized_conv2d_out(
   const double x_qscale = ((double*)extra_args)[0];
   const int64_t x_qzero = extra_args[1];
   const c10::ScalarType x_qdtype = static_cast<c10::ScalarType>(extra_args[2]);
-  // TODO: optimize constructTensors to skip creating tensor for out tensors
   auto tensors = constructTensors2(
       bufs_in_num,
       buf_data,

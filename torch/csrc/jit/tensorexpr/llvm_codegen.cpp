@@ -2088,7 +2088,6 @@ void LLVMCodeGenImpl::visit(ExternalCall2Ptr v) {
   int stride_idx = 0;
   for (BufPtr b : bufs_in) {
     llvm::Value* gep;
-    // TODO: Fill buf_ptrs for for out bufs with nullptr?
     // Store value for buf pointer
     gep = irb_.CreateInBoundsGEP(
         Int8PtrTy_,
