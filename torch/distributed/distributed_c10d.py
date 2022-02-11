@@ -1566,10 +1566,12 @@ def _tensor_to_object(tensor, tensor_size):
 
 def _check_for_nccl_backend(group):
     pg = group or _get_default_group()
-    # It is not expected for PG to be wrapped many times, but support it just
-    # in case
-    while isinstance(pg, _ProcessGroupWrapper):
-        pg = pg.wrapped_pg
+    # Gate PG wrapper check on Gloo availability.
+    if _GLOO_AVAILABLE:
+        # It is not expected for PG to be wrapped many times, but support it just
+        # in case
+        while isinstance(pg, _ProcessGroupWrapper):
+            pg = pg.wrapped_pg
 
     return (
         is_nccl_available() and
