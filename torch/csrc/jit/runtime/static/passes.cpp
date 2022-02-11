@@ -834,20 +834,15 @@ void EnableStaticRuntimeLayerNorm(std::shared_ptr<torch::jit::Graph>& graph) {
   }
 }
 
-namespace {
-void RemoveImmutableInputDictLookupsHelper(
-    Block* block,
-    std::shared_ptr<torch::jit::Graph>& graph,
-    const AliasDb& db) {
-  auto nodes = block->nodes();
+void RemoveImmutableInputDictLookups(
+    std::shared_ptr<torch::jit::Graph>& graph) {
+  auto nodes = graph->nodes();
+  AliasDb db(graph);
   // Gather all dict -> getitems where dict is immutable and getitems use
   // constant keys.
   std::unordered_map<Value*, std::vector<Node*>> dict_to_getitems;
   std::unordered_set<Node*> keys;
   for (Node* node : nodes) {
-    for (auto* sub_block : node->blocks()) {
-      RemoveImmutableInputDictLookupsHelper(sub_block, graph, db);
-    }
     // Find aten::__getitem__(%dict, %constant_key).
     if (node->kind() != aten::__getitem__) {
       continue;
@@ -859,7 +854,7 @@ void RemoveImmutableInputDictLookupsHelper(
       continue;
     }
     if (dict->type()->kind() != TypeKind::DictType ||
-        dict->node() != block->param_node()) {
+        dict->node() != graph->param_node()) {
       continue;
     }
     DCHECK(getitem_node->inputs().size() == 2);
@@ -881,7 +876,7 @@ void RemoveImmutableInputDictLookupsHelper(
   // Move all keys to the beginning of the graph and insert new dict_unpack
   // nodes after that.
   auto* marker = graph->create(prim::Constant);
-  block->prependNode(marker);
+  graph->prependNode(marker);
   graph->setInsertPoint(marker);
   for (Node* key : keys) {
     DCHECK(key->inputs().size() == 0);
@@ -908,13 +903,6 @@ void RemoveImmutableInputDictLookupsHelper(
   }
   graph->setInsertPoint(graph->block());
   marker->destroy();
-}
-} // namespace
-
-void RemoveImmutableInputDictLookups(
-    std::shared_ptr<torch::jit::Graph>& graph) {
-  AliasDb db(graph);
-  RemoveImmutableInputDictLookupsHelper(graph->block(), graph, db);
 }
 
 void UseVariadicGroupedAccessor(const std::shared_ptr<Graph>& graph) {
