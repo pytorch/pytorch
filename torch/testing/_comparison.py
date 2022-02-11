@@ -105,11 +105,6 @@ def get_tolerances(
     else:
         return default_tolerances(*inputs)
 
-import operator
-
-
-
-
 
 def _make_mismatch_msg(
     *,
@@ -231,7 +226,6 @@ def make_tensor_mismatch_msg(
             inverse_index.append(mod)
 
         return tuple(inverse_index[::-1])
-
 
     number_of_elements = mismatches.numel()
     total_mismatches = torch.sum(mismatches).item()
