@@ -19,6 +19,8 @@ class TORCH_API Tensor {
       : buf_(buf) {
     stmt_ = constructStmt(args, body, {}, {});
   }
+  Tensor(BufHandle buf, const std::vector<VarHandle>& args, ExprHandle body)
+      : Tensor(buf.node(), VarHandleVectorToVarVector(args), body.node()) {}
 
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   Tensor(
@@ -30,6 +32,18 @@ class TORCH_API Tensor {
       : buf_(buf) {
     stmt_ = constructStmt(args, body, reduce_dims, reduce_args);
   }
+  Tensor(
+      BufHandle buf,
+      const std::vector<VarHandle>& args,
+      const std::vector<ExprHandle>& reduce_dims,
+      const std::vector<VarHandle>& reduce_args,
+      ExprHandle body)
+      : Tensor(
+            buf.node(),
+            VarHandleVectorToVarVector(args),
+            ExprHandleVectorToExprVector(reduce_dims),
+            VarHandleVectorToVarVector(reduce_args),
+            body.node()) {}
 
   Tensor(BufPtr buf, StmtPtr stmt) : buf_(buf), stmt_(stmt) {}
 
@@ -87,16 +101,16 @@ TORCH_API Tensor Compute(
 
 inline void unpack_dim_args(
     const std::vector<DimArg>& dim_args,
-    std::vector<ExprPtr>* dims,
-    std::vector<VarPtr>* vars) {
+    std::vector<ExprHandle>* dims,
+    std::vector<VarHandle>* vars) {
   dims->clear();
   vars->clear();
   for (const DimArg& dim_arg : dim_args) {
-    ExprPtr expr = dim_arg.dim().node();
+    ExprHandle expr = dim_arg.dim();
     dims->push_back(expr);
-    vars->push_back(alloc<Var>(
+    vars->push_back(VarHandle(alloc<Var>(
         dim_arg.name_hint(),
-        expr->dtype().scalar_type() == ScalarType::Long ? kLong : kInt));
+        expr.dtype().scalar_type() == ScalarType::Long ? kLong : kInt)));
   }
 }
 
@@ -109,47 +123,31 @@ Tensor Reduce(
     const InitFunc& init_func,
     const BodyFunc& body_func,
     const std::vector<DimArg>& reduce_args) {
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  std::vector<ExprPtr> dims;
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  std::vector<VarPtr> vars;
+  std::vector<ExprHandle> dims;
+  std::vector<VarHandle> vars;
   unpack_dim_args(dim_args, &dims, &vars);
 
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  std::vector<ExprPtr> reduce_dims;
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  std::vector<VarPtr> reduce_vars;
+  std::vector<ExprHandle> reduce_dims;
+  std::vector<VarHandle> reduce_vars;
   unpack_dim_args(reduce_args, &reduce_dims, &reduce_vars);
 
   // If reduce_vars is empty, then it's not a reduction, but rather a simple
   // copy
   if (reduce_vars.empty()) {
-    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-    ExprPtr body =
-        Reducer::getReduceBody(body_func, VarVectorToVarHandleVector(vars))
-            .node();
-    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-    BufPtr func_result = alloc<Buf>(func_name, dims, body->dtype());
+    ExprHandle body = Reducer::getReduceBody(body_func, vars);
+    BufHandle func_result = Buf::make(func_name, dims, body.dtype());
     return Tensor(func_result, vars, body);
   }
 
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  std::vector<VarPtr> all_vars;
+  std::vector<VarHandle> all_vars;
   all_vars.insert(all_vars.end(), vars.begin(), vars.end());
   all_vars.insert(all_vars.end(), reduce_vars.begin(), reduce_vars.end());
 
-  ExprHandle body =
-      Reducer::getReduceBody(body_func, VarVectorToVarHandleVector(all_vars));
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  std::vector<ExprPtr> output_args(vars.begin(), vars.end());
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  ExprPtr init_expr = alloc<Cast>(
-      body.dtype(), init_func(VarVectorToVarHandleVector(vars)).node());
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  BufPtr func_result = alloc<Buf>(func_name, dims, body.dtype(), init_expr);
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  ReduceOpPtr reduce_op = reducer(func_result, body, output_args, reduce_vars);
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
+  ExprHandle body = Reducer::getReduceBody(body_func, all_vars);
+  std::vector<ExprHandle> output_args(vars.begin(), vars.end());
+  ExprHandle init_expr = Cast::make(body.dtype(), init_func(vars));
+  BufHandle func_result = Buf::make(func_name, dims, body.dtype(), init_expr);
+  ExprHandle reduce_op = reducer(func_result, body, output_args, reduce_vars);
   Tensor t = Tensor(func_result, vars, reduce_dims, reduce_vars, reduce_op);
   return t;
 }

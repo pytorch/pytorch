@@ -53,11 +53,11 @@ Tensor Compute(
     const std::string& name,
     const std::vector<DimArg>& dim_args,
     const std::function<ExprHandle(const std::vector<VarHandle>&)>& body_func) {
-  std::vector<ExprPtr> dims;
-  std::vector<VarPtr> args;
+  std::vector<ExprHandle> dims;
+  std::vector<VarHandle> args;
   unpack_dim_args(dim_args, &dims, &args);
-  ExprPtr body = body_func(VarVectorToVarHandleVector(args)).node();
-  BufPtr buf = alloc<Buf>(name, dims, body->dtype());
+  ExprHandle body = body_func(args);
+  BufHandle buf = Buf::make(name, dims, body.dtype());
   return Tensor(buf, args, body);
 }
 
@@ -69,11 +69,11 @@ Tensor Compute(
     throw malformed_input("mismatch between body and arg size (1)");
   }
 
-  std::vector<ExprPtr> dims;
-  std::vector<VarPtr> args;
+  std::vector<ExprHandle> dims;
+  std::vector<VarHandle> args;
   unpack_dim_args(dim_args, &dims, &args);
-  ExprPtr body = body_func(VarHandle(args[0])).node();
-  BufPtr buf = alloc<Buf>(name, dims, body->dtype());
+  ExprHandle body = body_func(args[0]);
+  BufHandle buf = Buf::make(name, dims, body.dtype());
   return Tensor(buf, args, body);
 }
 
@@ -85,11 +85,11 @@ Tensor Compute(
   if (dim_args.size() != 2) {
     throw malformed_input("mismatch between body and arg size (2)");
   }
-  std::vector<ExprPtr> dims;
-  std::vector<VarPtr> args;
+  std::vector<ExprHandle> dims;
+  std::vector<VarHandle> args;
   unpack_dim_args(dim_args, &dims, &args);
-  ExprPtr body = body_func(VarHandle(args[0]), VarHandle(args[1])).node();
-  BufPtr buf = alloc<Buf>(name, dims, body->dtype());
+  ExprHandle body = body_func(args[0], args[1]);
+  BufHandle buf = Buf::make(name, dims, body.dtype());
   return Tensor(buf, args, body);
 }
 
@@ -102,13 +102,11 @@ Tensor Compute(
   if (dim_args.size() != 3) {
     throw malformed_input("mismatch between body and arg size (3)");
   }
-  std::vector<ExprPtr> dims;
-  std::vector<VarPtr> args;
+  std::vector<ExprHandle> dims;
+  std::vector<VarHandle> args;
   unpack_dim_args(dim_args, &dims, &args);
-  ExprPtr body =
-      body_func(VarHandle(args[0]), VarHandle(args[1]), VarHandle(args[2]))
-          .node();
-  BufPtr buf = alloc<Buf>(name, dims, body->dtype());
+  ExprHandle body = body_func(args[0], args[1], args[2]);
+  BufHandle buf = Buf::make(name, dims, body.dtype());
   return Tensor(buf, args, body);
 }
 
@@ -123,16 +121,11 @@ Tensor Compute(
   if (dim_args.size() != 4) {
     throw malformed_input("mismatch between body and arg size (4)");
   }
-  std::vector<ExprPtr> dims;
-  std::vector<VarPtr> args;
+  std::vector<ExprHandle> dims;
+  std::vector<VarHandle> args;
   unpack_dim_args(dim_args, &dims, &args);
-  ExprPtr body = body_func(
-                     VarHandle(args[0]),
-                     VarHandle(args[1]),
-                     VarHandle(args[2]),
-                     VarHandle(args[3]))
-                     .node();
-  BufPtr buf = alloc<Buf>(name, dims, body->dtype());
+  ExprHandle body = body_func(args[0], args[1], args[2], args[3]);
+  BufHandle buf = Buf::make(name, dims, body.dtype());
   return Tensor(buf, args, body);
 }
 
