@@ -54,7 +54,8 @@ Take the following steps:
 1. Subclass :class:`~Function` and implement the :meth:`~Function.forward` and
 :meth:`~Function.backward` methods.
 2. Call the proper methods on the `ctx` argument.
-3. Declare whether your function supports double backward.
+3. Declare whether your function supports
+`double backward <https://pytorch.org/tutorials/intermediate/custom_function_double_backward_tutorial.html>`_.
 4. Validate whether your gradients are correct using gradcheck.
 
 **Step 1:** After subclassing :class:`Function`, you'll need to define 2 methods:
