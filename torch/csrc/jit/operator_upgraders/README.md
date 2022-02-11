@@ -24,8 +24,32 @@ The steps to write upgrader:
 
 2. Make changes to the operator and write an upgrader.
     1. Make the operator change.
-    2. Write an upgrader in `caffe2/torch/csrc/jit/operator_upgraders/upgraders_entry.cpp` file inside a map `kUpgradersEntryMap`. The softly enforced naming format is `<operator_name>_<operator_overload>_<start>_<end>`. The start and end means the upgrader can be applied to the operator exported during when [the global operator version](https://github.com/pytorch/pytorch/blob/master/caffe2/serialize/versions.h#L82) within the range `[start, end]`. For example, the below example means that the operator `linspace.out `and the operator ` linspace` exported at version from 0 to 7 can be replaced by these upgraders.
+    2. Write an upgrader in `caffe2/torch/csrc/jit/operator_upgraders/upgraders_entry.cpp` file inside a map `kUpgradersEntryMap`. The softly enforced naming format is `<operator_name>_<operator_overload>_<start>_<end>`. The start and end means the upgrader can be applied to the operator exported during when [the global operator version](https://github.com/pytorch/pytorch/blob/master/caffe2/serialize/versions.h#L82) within the range `[start, end]`. Let's take an operator operator `linspace` with the overloaded name `out` as an example. The first thing is to check if the upgrader exists in in [upgraders_entry.cpp](https://github.com/pytorch/pytorch/blob/master/torch/csrc/jit/operator_upgraders/upgraders_entry.cpp).
+        1. If the upgrader doesn't exist in `upgraders_entry.cpp`, the upgrader name can be `linspace_out_0_{kProducedFileFormatVersion}`, where [`kProducedFileFormatVersion`](https://github.com/pytorch/pytorch/blob/master/caffe2/serialize/versions.h#L82) can found in [versions.h](https://github.com/pytorch/pytorch/blob/master/caffe2/serialize/versions.h).
+        2. If the upgrader exist in `upgraders_entry.cpp`, for example `linspace_out_0_7` (means `linspace.out` operator is changed when operator version is bumped from 7 to 8),
+            1. If it's possible to write an upgrader valid for `linspace` before versioning bumping to 8, after versioning bumping to 8, write an upgrader `linspace_out_0_{kProducedFileFormatVersion}`
+            2. If it's imporssible to write an upgrader valid for `linspace` before versiioning bumping to 8, check the date when the version is bumped to 8  at [`versions.h`](https://github.com/pytorch/pytorch/blob/master/caffe2/serialize/versions.h#L82). If it has been 180 days, write an upgrader `linspace_out_8_{kProducedFileFormatVersion}` for `linspace.out` after bumping to 8, and deprecate the old upgrader. If it hasn't been 180 days, wait until 180 days and do the same changes as above.
 
+    To write an upgrader, you would need to know how the new runtime with the new `linspace` operator can handle an old model with the old `linspace` operator. When `linspace` is bumped to 8, the change is to make `step` a required argument, instead of an optional argument. The old schema is:
+    ```
+    linspace(start: Union[int, float, complex], end: Union[int, float, complex], steps: Optional[int], dtype: Optional[int], layout: Optional[int],
+                     device: Optional[Device], pin_memory: Optional[bool]):
+    ```
+    And the new schema is:
+    ```
+    linspace(start: Union[int, float, complex], end: Union[int, float, complex], steps: int, dtype: Optional[int], layout: Optional[int],
+                     device: Optional[Device], pin_memory: Optional[bool]):
+    ```
+    upgrader will only be applied to old model and it won't be applied to new model. The upgrader can be written with the following logic:
+    ```
+    def linspace_0_7(start: Union[int, float, complex], end: Union[int, float, complex], steps: Optional[int], *, dtype: Optional[int], layout: Optional[int],
+                     device: Optional[Device], pin_memory: Optional[bool]):
+      if (steps is None):
+        return torch.linspace(start=start, end=end, steps=100, dtype=dtype, layout=layout, device=device, pin_memory=pin_memory)
+      return torch.linspace(start=start, end=end, steps=steps, dtype=dtype, layout=layout, device=device, pin_memory=pin_memory)
+    ```
+
+    The actual upgrader need to be written as TorchScript, and the below example is the actual upgrader of the operator `linspace.out `and the operator ` linspace` exported at version from 0 to 7.
     ```
     static std::unordered_map<std::string, std::string> kUpgradersEntryMap(
         {
@@ -38,9 +62,14 @@ The steps to write upgrader:
     )SCRIPT"},
         }
     ```
+    With the upgrader, when new runtime loads an old model, it will first check the operator version of the old model. If it's older than the current runtime, it will replace the operator from the old model with the upgrader above.
 
-    2. Bump the `kProducedFileFormatVersion` by 1 and provide the reasons under `caffe2/caffe2/versions.h `
+    2. Bump [`kMaxSupportedFileFormatVersion`](https://github.com/pytorch/pytorch/blob/master/caffe2/serialize/versions.h#L15) the [`kProducedFileFormatVersion`](https://github.com/pytorch/pytorch/blob/master/caffe2/serialize/versions.h#L82) by 1 and provide the reasons under [`versions.h`](https://github.com/pytorch/pytorch/blob/master/caffe2/serialize/versions.h#L73-L81)
     ```
+
+    constexpr uint64_t kMaxSupportedFileFormatVersion = 0x9L;
+
+    ...
     // We describe new operator version bump reasons here:
     // 1) [01/24/2022]
     //     We bump the version number to 8 to update aten::linspace
