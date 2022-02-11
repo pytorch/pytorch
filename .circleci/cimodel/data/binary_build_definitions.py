@@ -100,7 +100,7 @@ class Conf(object):
                 if self.os == "windows":
                     job_def["executor"] = "windows-with-nvidia-gpu"
                 else:
-                    job_def["resource_class"] = "gpu.nvidia.medium"
+                    job_def["resource_class"] = "gpu.nvidia.small"
 
         os_name = miniutils.override(self.os, {"macos": "mac"})
         job_name = "_".join([self.get_name_prefix(), os_name, phase])
