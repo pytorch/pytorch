@@ -52,7 +52,9 @@ CUDA_GCC_VERSIONS = {
     '11.1': (MINIMUM_GCC_VERSION, (10, 0, 0)),
     '11.2': (MINIMUM_GCC_VERSION, (10, 0, 0)),
     '11.3': (MINIMUM_GCC_VERSION, (10, 0, 0)),
-    '11.4': ((6, 0, 0), (10, 0, 0))
+    '11.4': ((6, 0, 0), (11, 0, 0)),
+    '11.5': ((6, 0, 0), (11, 0, 0)),
+    '11.6': ((6, 0, 0), (11, 0, 0))
 }
 
 CUDA_CLANG_VERSIONS = {
@@ -60,7 +62,9 @@ CUDA_CLANG_VERSIONS = {
     '11.1': ((6, 0, 0), (10, 0, 0)),
     '11.2': ((6, 0, 0), (10, 0, 0)),
     '11.3': ((6, 0, 0), (10, 0, 0)),
-    '11.4': ((6, 0, 0), (10, 0, 0))
+    '11.4': ((6, 0, 0), (11, 0, 0)),
+    '11.5': ((3, 2, 0), (12, 0, 0)),
+    '11.6': ((3, 2, 0), (13, 0, 0))
 }
 
 
@@ -298,6 +302,21 @@ def check_compiler_ok_for_platform(compiler: str) -> bool:
         # Check for 'clang' or 'clang++'
         return version_string.startswith("Apple clang")
     return False
+
+
+def check_compiler_abi_compatibility(compiler) -> bool:
+    """
+    Verifies that the given compiler is ABI-compatible with PyTorch.
+
+    Args:
+        compiler (str): The compiler executable name to check (e.g. ``g++``).
+            Must be executable in a shell process.
+
+    Returns
+        False if the compiler is (likely) ABI-incompatible with PyTorch,
+        else True.
+    """
+    return get_compiler_abi_compatibility_and_version(compiler)[0]
 
 
 def get_compiler_abi_compatibility_and_version(compiler) -> Tuple[bool, TorchVersion]:
