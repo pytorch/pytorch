@@ -593,8 +593,7 @@ void nnc_aten_quantized_conv2d_relu_out(
 
 void nnc_aten_free(int64_t bufs_num, void** ptrs) noexcept {
   for (const auto i : c10::irange(bufs_num)) {
-    void* ptr = ptrs[i];
-    c10::raw::intrusive_ptr::decref((c10::TensorImpl*)ptr);
+    c10::raw::intrusive_ptr::decref((c10::TensorImpl*)ptrs[i]);
   }
 }
 
@@ -859,7 +858,6 @@ void nnc_aten_quantized_sigmoid_out(
 
   // NOLINTNEXTLINE
   auto r = at::sigmoid(tensors[1]);
-  // memcpy(buf_data[0], r.data_ptr(), r.element_size() * r.numel());
   buf_data[0] = r.data_ptr();
   c10::raw::intrusive_ptr::incref(r.getIntrusivePtr().get());
   buf_data[bufs_in_num + bufs_out_num] = r.getIntrusivePtr().get();

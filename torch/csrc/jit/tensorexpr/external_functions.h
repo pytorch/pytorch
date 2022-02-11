@@ -85,7 +85,7 @@ void DispatchParallel(
 
 FOR_ALL_EXTERNAL_FUNCTIONS(DECLARE_EXTERNAL_FUNCTION)
 
-void nnc_aten_free(int64_t bufs_num, void** ptrs) noexcept;
+TORCH_API void nnc_aten_free(int64_t bufs_num, void** ptrs) noexcept;
 
 #ifdef C10_MOBILE
 } // extern "C"
