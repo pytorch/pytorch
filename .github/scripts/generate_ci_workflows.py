@@ -290,13 +290,15 @@ class BinaryBuildWorkflow:
     abi_version: str = ''
     ciflow_config: CIFlowConfig = field(default_factory=CIFlowConfig)
     is_scheduled: str = ''
+    # Mainly for macos
+    cross_compile_arm64: bool = False
+    xcode_version: str = ''
 
     def __post_init__(self) -> None:
         if self.abi_version:
             self.build_environment = f"{self.os}-binary-{self.package_type}-{self.abi_version}"
         else:
             self.build_environment = f"{self.os}-binary-{self.package_type}"
-
 
     def generate_workflow_file(self, workflow_template: jinja2.Template) -> None:
         output_file_path = GITHUB_DIR / f"workflows/generated-{self.build_environment}.yml"
@@ -853,6 +855,8 @@ DOCKER_WORKFLOWS = [
 class OperatingSystem:
     LINUX = "linux"
     WINDOWS = "windows"
+    MACOS = "macos"
+    MACOS_ARM64 = "macos-arm64"
 
 LINUX_BINARY_BUILD_WORFKLOWS = [
     BinaryBuildWorkflow(
@@ -946,6 +950,71 @@ WINDOWS_BINARY_BUILD_WORKFLOWS = [
     ),
 ]
 
+MACOS_BINARY_BUILD_WORKFLOWS = [
+    BinaryBuildWorkflow(
+        os=OperatingSystem.MACOS,
+        package_type="wheel",
+        build_configs=generate_binary_build_matrix.generate_wheels_matrix(OperatingSystem.MACOS),
+        ciflow_config=CIFlowConfig(
+            labels={LABEL_CIFLOW_DEFAULT, LABEL_CIFLOW_BINARIES, LABEL_CIFLOW_BINARIES_WHEEL},
+            isolated_workflow=True,
+        ),
+    ),
+    BinaryBuildWorkflow(
+        os=OperatingSystem.MACOS,
+        package_type="conda",
+        build_configs=generate_binary_build_matrix.generate_conda_matrix(OperatingSystem.MACOS),
+        ciflow_config=CIFlowConfig(
+            labels={LABEL_CIFLOW_DEFAULT, LABEL_CIFLOW_BINARIES, LABEL_CIFLOW_BINARIES_CONDA},
+            isolated_workflow=True,
+        ),
+    ),
+    BinaryBuildWorkflow(
+        os=OperatingSystem.MACOS,
+        package_type="libtorch",
+        abi_version=generate_binary_build_matrix.CXX11_ABI,
+        build_configs=generate_binary_build_matrix.generate_libtorch_matrix(
+            OperatingSystem.MACOS, generate_binary_build_matrix.CXX11_ABI
+        ),
+        ciflow_config=CIFlowConfig(
+            labels={LABEL_CIFLOW_DEFAULT, LABEL_CIFLOW_BINARIES, LABEL_CIFLOW_BINARIES_LIBTORCH},
+            isolated_workflow=True,
+        ),
+    ),
+    BinaryBuildWorkflow(
+        os=OperatingSystem.MACOS,
+        package_type="libtorch",
+        abi_version=generate_binary_build_matrix.PRE_CXX11_ABI,
+        build_configs=generate_binary_build_matrix.generate_libtorch_matrix(
+            OperatingSystem.MACOS, generate_binary_build_matrix.PRE_CXX11_ABI
+        ),
+        ciflow_config=CIFlowConfig(
+            labels={LABEL_CIFLOW_DEFAULT, LABEL_CIFLOW_BINARIES, LABEL_CIFLOW_BINARIES_LIBTORCH},
+            isolated_workflow=True,
+        ),
+    ),
+    BinaryBuildWorkflow(
+        os=OperatingSystem.MACOS_ARM64,
+        package_type="wheel",
+        build_configs=generate_binary_build_matrix.generate_wheels_matrix(OperatingSystem.MACOS),
+        cross_compile_arm64=True,
+        ciflow_config=CIFlowConfig(
+            labels={LABEL_CIFLOW_DEFAULT, LABEL_CIFLOW_BINARIES, LABEL_CIFLOW_BINARIES_WHEEL},
+            isolated_workflow=True,
+        ),
+    ),
+    BinaryBuildWorkflow(
+        os=OperatingSystem.MACOS_ARM64,
+        package_type="conda",
+        cross_compile_arm64=True,
+        build_configs=generate_binary_build_matrix.generate_conda_matrix(OperatingSystem.MACOS_ARM64),
+        ciflow_config=CIFlowConfig(
+            labels={LABEL_CIFLOW_DEFAULT, LABEL_CIFLOW_BINARIES, LABEL_CIFLOW_BINARIES_CONDA},
+            isolated_workflow=True,
+        ),
+    ),
+]
+
 def main() -> None:
     jinja_env = jinja2.Environment(
         variable_start_string="!{{",
@@ -963,6 +1032,7 @@ def main() -> None:
         (jinja_env.get_template("android_ci_workflow.yml.j2"), ANDROID_SHORT_WORKFLOWS),
         (jinja_env.get_template("linux_binary_build_workflow.yml.j2"), LINUX_BINARY_BUILD_WORFKLOWS),
         (jinja_env.get_template("windows_binary_build_workflow.yml.j2"), WINDOWS_BINARY_BUILD_WORKFLOWS),
+        (jinja_env.get_template("macos_binary_build_workflow.yml.j2"), MACOS_BINARY_BUILD_WORKFLOWS),
     ]
     # Delete the existing generated files first, this should align with .gitattributes file description.
     existing_workflows = GITHUB_DIR.glob("workflows/generated-*")

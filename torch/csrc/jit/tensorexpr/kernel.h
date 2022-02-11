@@ -198,7 +198,6 @@ class TORCH_API TensorExprKernel {
   void genInputDebugNames();
   void runKernel(Stack& stack);
 
-  std::vector<DimArg> dimsFromSizes(const std::vector<ExprHandle>& sizes);
   std::vector<ExprHandle> sizesForValue(const torch::jit::Value* v);
 
   // These functions broadcast shape and also store a `hasBroadcast_` variable.
