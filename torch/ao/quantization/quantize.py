@@ -10,6 +10,7 @@ from torch.nn.intrinsic import _FusedModule
 from torch.ao.quantization.quantization_mappings import (
     get_default_dynamic_quant_module_mappings,
     get_default_static_quant_module_mappings,
+    get_default_static_quant_reference_module_mappings,
     get_default_qat_module_mappings,
     get_default_qconfig_propagation_list,
     no_observer_set,
@@ -472,7 +473,7 @@ def quantize_qat(model, run_fn, run_args, inplace=False):
 
 def convert(
         module, mapping=None, inplace=False, remove_qconfig=True,
-        convert_custom_config_dict=None):
+        is_reference=False, convert_custom_config_dict=None):
     r"""Converts submodules in input module to a different module according to `mapping`
     by calling `from_float` method on the target module class. And remove qconfig at the
     end if remove_qconfig is set to True.
@@ -500,6 +501,8 @@ def convert(
 
     """
     torch._C._log_api_usage_once("quantization_api.quantize.convert")
+    if is_reference:
+        mapping = get_default_static_quant_reference_module_mappings()
     if not inplace:
         module = copy.deepcopy(module)
     _convert(

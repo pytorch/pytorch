@@ -138,17 +138,7 @@ class TestQuantizeEagerOps(QuantizationTestCase):
 
         ref_m = prepare(original_ref_m)
         ref_m(data)
-        reference_module_mapping = {
-            QuantStub: nnq.Quantize,
-            DeQuantStub: nnq.DeQuantize,
-            nn.Conv1d: nnqr.Conv1d,
-            nn.Conv2d: nnqr.Conv2d,
-            nn.Conv3d: nnqr.Conv3d,
-            nn.ConvTranspose1d: nnqr.ConvTranspose1d,
-            nn.ConvTranspose2d: nnqr.ConvTranspose2d,
-            nn.ConvTranspose3d: nnqr.ConvTranspose3d,
-        }
-        ref_m = convert(ref_m, mapping=reference_module_mapping)
+        ref_m = convert(ref_m, is_reference=True)
         ref_res = ref_m(data)
         self.assertEqual(res, ref_res)
 
