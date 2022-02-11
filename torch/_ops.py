@@ -105,17 +105,21 @@ class OpOverloadPacket:
         # This is done to prevent any potential slowdown. This list can be extended
         # if there exists other attributes like `__name__` that only exist on self._op and not on the
         # opoverloadpacket.
+        # This is ok since we are guaranteed that an overload name for an aten op can't start with '__'
         try:
-            if key.startswith('__') and key.endswith('__'):
+            if key.startswith('__'):
                 return getattr(self._op, key)
         except AttributeError:
             # for consistency because it seems weird to
             # throw an attribute error with a message containing
             # an object name different from the one the attribute
             # query was performed on.
-            raise AttributeError("'{}' object has no attribute '{}'".format(str(self), key)) from None
+            raise AttributeError("'{}' can't have an overload name beginning with '__' and the "
+                                 "underlying op {} has no attribute {} either."
+                                 .format(str(self), str(self._op), key)) from None
 
         try:
+            # This is ok since we are guaranteed that an overload name for an aten op can't be 'default'
             use_key = '' if key == 'default' else key
             # TODO: disallow access to overloads registered by JIT
             op_ = torch._C._get_operation_overload(
@@ -127,7 +131,7 @@ class OpOverloadPacket:
             return overload
         except RuntimeError:
             raise AttributeError(
-                "'{}' object has no attribute '{}'".format(str(self), key)
+                "The underlying op of '{}' has no overload name '{}'".format(str(self), key)
             ) from None
 
     def __call__(self, *args, **kwargs):
