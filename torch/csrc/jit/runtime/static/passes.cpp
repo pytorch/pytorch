@@ -746,8 +746,6 @@ void FuseListUnpack(std::shared_ptr<torch::jit::Graph>& graph) {
   AliasDb alias_db(
       graph,
       /*isFrozen=*/false);
-  const std::vector<Value*> graph_outputs(
-      graph->outputs().begin(), graph->outputs().end());
   auto nodes = graph->nodes();
   std::vector<Node*> to_remove;
   for (auto* node : nodes) {
@@ -769,20 +767,6 @@ void FuseListUnpack(std::shared_ptr<torch::jit::Graph>& graph) {
     auto list_unpack_outputs = list_unpack_node->outputs();
     if (list_unpack_outputs.empty()) {
       continue;
-    }
-
-    const bool is_equally_split =
-        node->kind() == fromQualString("fb::equally_split");
-    if (!is_equally_split) {
-      // If any output of the ListUnpack node is unmanaged, disable fusion
-      // since the fused op assumes all outputs are either managed or not.
-      // "fb::equally_split" is excluded here since it does doublecheck
-      // individual outputs without having this assumption.
-      const std::vector<Value*> list_unpack_outputs_vec(
-          list_unpack_outputs.begin(), list_unpack_outputs.end());
-      if (alias_db.mayContainAlias(list_unpack_outputs_vec, graph_outputs)) {
-        continue;
-      }
     }
 
     const auto& new_sym = unfused_to_fused_it->second;
