@@ -258,6 +258,9 @@ def rearrange(tensor_args, static_args, static_argnums):
     return args
 
 
+KNOWN_TYPES = [torch.Tensor, int, str, float, bool]
+
+
 def aot_function(
     fn: Callable,
     fw_compiler: Callable,
@@ -404,9 +407,21 @@ def aot_function(
                     args = tensor_args
                 else:
                     args = rearrange(tensor_args, static_args, static_argnums)
-
                 tree_out = fn(*args, **kwargs)
                 flat_out, spec = pytree.tree_flatten(tree_out)
+                for i in flat_out:
+                    is_known_type = False
+                    for j in KNOWN_TYPES:
+                        if isinstance(i, j):
+                            is_known_type = True
+                            break
+                    if not is_known_type:
+                        raise RuntimeError(f"Found {type(i)} in output, which is not a known type. "
+                                           "If this type holds tensors, you need to register a pytree for it. "
+                                           "See https://github.com/pytorch/functorch/issues/475 for a brief "
+                                           "explanation why. If you don't need to register a pytree, please "
+                                           "leave a comment explaining your use case and we'll make this more "
+                                           "ergonomic to deal with")
                 out_spec.set(spec)
                 return flat_out
 

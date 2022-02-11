@@ -91,11 +91,10 @@ class PythonTensor(torch.Tensor):
     def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
         if func in CURRENT_DECOMPOSITION_TABLE:
             return CURRENT_DECOMPOSITION_TABLE[func](*args, **kwargs)
-
         # Commenting this out for now since it causes some spurious failures (such as error checking)
-        # if func == aten._local_scalar_dense:
-        #     raise RuntimeError("It appears that you're trying to get value out of a tracing tensor - erroring out! "
-        #                        "It's likely that this is caused by data-dependent control flow or similar.")
+        if func == aten._local_scalar_dense:
+            raise RuntimeError("It appears that you're trying to get value out of a tracing tensor - erroring out! "
+                               "It's likely that this is caused by data-dependent control flow or similar.")
 
         def unwrap_proxy(e):
             return e.proxy if isinstance(e, PythonTensor) else e
