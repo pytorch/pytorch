@@ -126,7 +126,7 @@ if __name__ == '__main__':
         version=version,
         author='PyTorch Core Team',
         url="https://github.com/pytorch/functorch",
-        description='prototype of composable function transforms for PyTorch',
+        description='JAX-like composable function transforms for PyTorch',
         license='BSD',
 
         # Package info
