@@ -108,6 +108,8 @@ class DefaultFuseHandler(FuseHandler):
         def get_matched_types(m):
             if isinstance(m, tuple):
                 return tuple(map(get_matched_types, m))
+            if m is MatchAllNode:
+                return MatchAllNode
             return type(m)
 
         matched_module_types = get_matched_types(matched_modules)
