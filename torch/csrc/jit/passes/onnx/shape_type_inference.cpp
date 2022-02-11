@@ -795,8 +795,9 @@ void SetShapeValueFromListConstructNode(Node* lc_node) {
   }
 }
 
-std::vector<::c10::ShapeSymbol> Broadcast(const std::vector<::c10::ShapeSymbol> &input_shape_value_0,
-                                          const std::vector<::c10::ShapeSymbol> &input_shape_value_1) {
+std::vector<::c10::ShapeSymbol> Broadcast(
+    const std::vector<::c10::ShapeSymbol>& input_shape_value_0,
+    const std::vector<::c10::ShapeSymbol>& input_shape_value_1) {
   size_t rank_0 = input_shape_value_0.size();
   size_t rank_1 = input_shape_value_1.size();
   size_t rank_max = std::max(rank_0, rank_1);
@@ -807,10 +808,8 @@ std::vector<::c10::ShapeSymbol> Broadcast(const std::vector<::c10::ShapeSymbol> 
     final_shape.emplace_back(::c10::ShapeSymbol::newSymbol());
   }
   for (auto idx = 0; idx < rank_min; idx++) {
-    const c10::ShapeSymbol& ss_shape_0 =
-        input_shape_value_0[rank_0 - 1 - idx];
-    const c10::ShapeSymbol& ss_shape_1 =
-        input_shape_value_1[rank_1 - 1 - idx];
+    const c10::ShapeSymbol& ss_shape_0 = input_shape_value_0[rank_0 - 1 - idx];
+    const c10::ShapeSymbol& ss_shape_1 = input_shape_value_1[rank_1 - 1 - idx];
     bool is_static_0 = ss_shape_0.is_static();
     bool is_static_1 = ss_shape_1.is_static();
     if (is_static_0 && is_static_1) {
@@ -971,14 +970,17 @@ void ProcessMatMulNode(Node* n) {
       is_rank_1_1 = true;
     }
     // Per https://pytorch.org/docs/stable/generated/torch.matmul.html
-    // the broadcasting logic only applies to the batch dimensions, and not the matrix dimensions
-    // so we remove the matrix dimensions which are the last 2 dimensions before broadcasting
+    // the broadcasting logic only applies to the batch dimensions, and not the
+    // matrix dimensions so we remove the matrix dimensions which are the last 2
+    // dimensions before broadcasting
     auto final_shape = Broadcast(
-      std::vector<::c10::ShapeSymbol>(input_shape_value_0.begin(), input_shape_value_0.end() - 2),
-      std::vector<::c10::ShapeSymbol>(input_shape_value_1.begin(), input_shape_value_1.end() - 2)
-    );
-    // add the last 2 dimensions back, unless they do not exist in the first place and inserted by this function
-    // Then apply [n,k]X[k,m]=[n,m], where n=input_shape_value_0[rank_0 - 2], m=input_shape_value_1[rank_1 - 1]
+        std::vector<::c10::ShapeSymbol>(
+            input_shape_value_0.begin(), input_shape_value_0.end() - 2),
+        std::vector<::c10::ShapeSymbol>(
+            input_shape_value_1.begin(), input_shape_value_1.end() - 2));
+    // add the last 2 dimensions back, unless they do not exist in the first
+    // place and inserted by this function Then apply [n,k]X[k,m]=[n,m], where
+    // n=input_shape_value_0[rank_0 - 2], m=input_shape_value_1[rank_1 - 1]
     if (!is_rank_0_1) {
       final_shape.emplace_back(input_shape_value_0[rank_0 - 2]);
     }
@@ -1822,14 +1824,6 @@ void SpecialPostProcess(Node* n) {
         auto onnx_dtype = n->i(attr::to);
         auto aten_dtype = ONNXTypeToATenType(onnx_dtype);
         n->output()->setType(t_type->withScalarType(aten_dtype));
-      }
-      break;
-    }
-    case ::c10::onnx::Optional: {
-      if (TensorTypePtr t_type = n->output()->type()->cast<TensorType>()) {
-        n->output()->setType(OptionalType::create(t_type));
-      } else if (ListTypePtr l_type = n->output()->type()->cast<ListType>()) {
-        n->output()->setType(OptionalType::create(l_type));
       }
       break;
     }
