@@ -26,7 +26,7 @@ def get_workflow_jobs(images=IMAGE_NAMES, only_slow_gradcheck=False):
             "name": quote(f"docker-{image_name}"),
             "image_name": quote(image_name),
         })
-        if image_name == "pytorch-linux-xenial-py3.6-gcc5.4":
+        if image_name == "pytorch-linux-xenial-py3.7-gcc5.4":
             # pushing documentation on tags requires CircleCI to also
             # build all the dependencies on tags, including this docker image
             parameters['filters'] = gen_filter_dict(branches_list=r"/.*/",
