@@ -953,9 +953,7 @@ int nnc_lowerings_lazy_registration() {
           auto const& shape =
               broadcastShapes(valueShape(inputs[0]), valueShape(inputs[1]));
           return Compute(
-              "aten_remainder",
-              c10::fmap<DimArg>(shape),
-              [&](const std::vector<VarHandle>& axes) {
+              "aten_remainder", shape, [&](const std::vector<VarHandle>& axes) {
                 std::vector<ExprHandle> indices(axes.begin(), axes.end());
                 std::vector<ExprHandle> exprInputs = {
                     tensorOrConstant(inputs[0], indices),
@@ -1454,7 +1452,7 @@ int nnc_lowerings_lazy_registration() {
   //        at::Device device) {
   //       return Compute(
   //           "aten_slice",
-  //           c10::fmap<DimArg>(outputShape),
+  //           outputShape,
   //           [&](const std::vector<VarHandle>& axes) {
   //             int64_t dim =
   //                 at::maybe_wrap_dim(c10::get<int64_t>(inputs[1]),
@@ -1475,7 +1473,7 @@ int nnc_lowerings_lazy_registration() {
          at::Device device) {
         return Compute(
             "aten_unsqueeze",
-            c10::fmap<DimArg>(outputShape),
+            outputShape,
             [&](const std::vector<VarHandle>& axes) {
               int64_t dim = c10::get<int64_t>(inputs[1]);
               if (dim < 0) {
@@ -1525,7 +1523,7 @@ int nnc_lowerings_lazy_registration() {
         if (A.ndim() == 0) {
           auto tensor = Compute(
               "aten_permute",
-              c10::fmap<DimArg>(outputShape),
+              outputShape,
               [&](const std::vector<VarHandle>& axes) {
                 std::vector<ExprHandle> empty_indices;
                 return A.load(empty_indices);
@@ -1539,7 +1537,7 @@ int nnc_lowerings_lazy_registration() {
         auto permute_dims = c10::get<IntList>(inputs[1]);
         auto tensor = Compute(
             "aten_permute",
-            c10::fmap<DimArg>(outputShape),
+            outputShape,
             [&](const std::vector<VarHandle>& axes) {
               std::vector<VarHandle> new_axes;
               new_axes.resize(axes.size());
