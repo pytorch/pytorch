@@ -252,7 +252,7 @@ bool MutationRemover::RemoveTensorMutation(Block* block) {
     // their functional equivalents if the input tensor to them has more than
     // one use.
     auto kind_of_node = node->kind();
-    if (kind_of_node == aten::permute || kind_of_node == aten::transpose) {
+    if (kind_of_node == aten::permute_ || kind_of_node == aten::transpose_) {
       if (mutated_value->uses().size() != 1) {
         continue;
       }
