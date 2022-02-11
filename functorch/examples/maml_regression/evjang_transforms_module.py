@@ -38,7 +38,7 @@ class ThreeLayerNet(nn.Module):
         x = self.fc3(x)
         return x
 
-# The prototype doesn't like F.mse_loss.
+# TODO: Use F.mse_loss
 
 
 def mse_loss(x, y):
