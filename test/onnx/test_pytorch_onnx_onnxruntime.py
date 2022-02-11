@@ -7611,8 +7611,7 @@ class TestONNXRuntime(unittest.TestCase):
 
     def test_lower_tuple(self):
         class TupleModule(torch.nn.Module):
-            def forward(self, input1, input2, input3):
-                # type: (Tensor, Tensor, Tensor) -> Tensor
+            def forward(self, input1: Tensor, input2: Tensor, input3: Tensor) -> Tensor:
                 a = (input1, input2)
                 b = a
                 c = (input1, input2, input3)
@@ -7640,8 +7639,7 @@ class TestONNXRuntime(unittest.TestCase):
 
     def test_lower_tuple_2(self):
         class TupleModule(torch.nn.Module):
-            def forward(self, input1, input2):
-                # type: (Tensor, Tensor) -> Tuple[Tensor, Tensor]
+            def forward(self, input1: Tensor, input2: Tensor) -> Tuple[Tensor, Tensor]:
                 a = (input1, input2)
                 for x in range(5):
                     c, d = a
@@ -7654,8 +7652,11 @@ class TestONNXRuntime(unittest.TestCase):
 
     def test_lower_tuple_3(self):
         class TupleModule(torch.nn.Module):
-            def forward(self, input1, input2):
-                # type: (Tuple[Tensor, Tensor], Tuple[Tensor, Tensor])
+            def forward(
+                self,
+                input1: Tuple[Tensor, Tensor],
+                input2: Tuple[Tensor, Tensor],
+            ) -> Tuple[Tuple[Tensor, Tensor], Tuple[Tensor, Tensor]]:
                 a = input1
                 b = input2
                 for x in range(5):
@@ -8519,12 +8520,10 @@ class TestONNXRuntime(unittest.TestCase):
 
     def test_script_custom_class_error(self):
         class BoxCoder(object):
-            def __init__(self, bbox_xform_clip: float):
-                # type: (float) -> None
+            def __init__(self, bbox_xform_clip: float) -> None:
                 self.bbox_xform_clip = bbox_xform_clip
 
-            def decode(self, rel_codes, boxes):
-                # type: (Tensor, List[Tensor]) -> Tensor
+            def decode(self, rel_codes: Tensor, boxes: List[Tensor]) -> Tensor:
                 boxes = torch.cat(boxes, dim=0)
                 pred_ctr_x = torch.clamp(rel_codes[:, 0::4], max=self.bbox_xform_clip) * boxes[:, 2]
                 return pred_ctr_x
@@ -8795,8 +8794,7 @@ class TestONNXRuntime(unittest.TestCase):
                 self.model = ops.MultiScaleRoIAlign(["feat1", "feat2"], 3, 2)
                 self.image_sizes = [(512, 512)]
 
-            def forward(self, input, boxes):
-                # type: (Dict[str, torch.Tensor], List[torch.Tensor]) -> torch.Tensor
+            def forward(self, input: Dict[str, Tensor], boxes: List[Tensor]) -> Tensor:
                 return self.model(input, boxes, self.image_sizes)
 
         i = OrderedDict()
@@ -9140,7 +9138,7 @@ class TestONNXRuntime(unittest.TestCase):
                         self.conv.weight = anchors * i
                         self.boxes.append(torch.ones(3, 3))
 
-            def forward(self, anchors) -> Tuple[torch.Tensor, List[torch.Tensor]]:
+            def forward(self, anchors) -> Tuple[Tensor, List[Tensor]]:
                 self.boxes = []
                 self.set_cell_anchors(anchors)
                 if self.conv.bias is not None:
@@ -9154,8 +9152,7 @@ class TestONNXRuntime(unittest.TestCase):
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_index_put_if(self):
         @torch.jit.script
-        def check_init(input_data, hidden_size, prev_state):
-            # type: (torch.Tensor, int, torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]
+        def check_init(input_data: Tensor, hidden_size: int, prev_state: Tensor) -> Tuple[Tensor, Tensor]:
             batch_size = input_data.size(0)
             spatial_size_0 = input_data.size(2)
             spatial_size_1 = input_data.size(3)
@@ -9191,8 +9188,7 @@ class TestONNXRuntime(unittest.TestCase):
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_index_put_if_2(self):
         @torch.jit.script
-        def check_init(input_data, hidden_size, prev_state):
-            # type: (torch.Tensor, int, torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]
+        def check_init(input_data: Tensor, hidden_size: int, prev_state: Tensor) -> Tuple[Tensor, Tensor]:
             batch_size = input_data.size(0)
             spatial_size_0 = input_data.size(2)
             spatial_size_1 = input_data.size(3)
@@ -9238,8 +9234,7 @@ class TestONNXRuntime(unittest.TestCase):
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_index_put_if_3(self):
         @torch.jit.script
-        def check_init(input_data, hidden_size, prev_state):
-            # type: (torch.Tensor, int, torch.Tensor) -> torch.Tensor
+        def check_init(input_data: Tensor, hidden_size: int, prev_state: Tensor) -> Tensor:
             batch_size = input_data.size(0)
             spatial_size_0 = input_data.size(2)
             spatial_size_1 = input_data.size(3)
@@ -9275,8 +9270,7 @@ class TestONNXRuntime(unittest.TestCase):
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_index_put_if_4(self):
         @torch.jit.script
-        def check_init(input_data, hidden_size, prev_state):
-            # type: (torch.Tensor, int, torch.Tensor) -> torch.Tensor
+        def check_init(input_data: Tensor, hidden_size: int, prev_state: Tensor) -> Tensor:
             batch_size = input_data.size(0)
             spatial_size_0 = input_data.size(2)
             spatial_size_1 = input_data.size(3)
@@ -9313,8 +9307,7 @@ class TestONNXRuntime(unittest.TestCase):
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_index_put_if_5(self):
         @torch.jit.script
-        def check_init(input_data, hidden_size, prev_state):
-            # type: (torch.Tensor, int, torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]
+        def check_init(input_data: Tensor, hidden_size: int, prev_state: Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
             batch_size = input_data.size(0)
             spatial_size_0 = input_data.size(2)
             spatial_size_1 = input_data.size(3)
@@ -9436,8 +9429,7 @@ class TestONNXRuntime(unittest.TestCase):
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_index_put_inplace_ops(self):
         @torch.jit.script
-        def check_init(input_data, hidden_size):
-            # type: (torch.Tensor, int) -> torch.Tensor
+        def check_init(input_data: Tensor, hidden_size: int) -> Tensor:
             batch_size = input_data.size(0)
             spatial_size_0 = input_data.size(2)
             spatial_size_1 = input_data.size(3)

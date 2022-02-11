@@ -82,7 +82,14 @@ The steps to write upgrader:
     constexpr uint64_t kProducedFileFormatVersion = 0x9L;
     ```
 
-    3. In `caffe2/torch/csrc/jit/operator_upgraders/version_map.cpp`, add changes like below. You will need to make sure that the entry is **SORTED** according to the version bump number.
+    3. In `caffe2/torch/csrc/jit/operator_upgraders/version_map.cpp`, add changes like below. You will need to make sure that the entry is **SORTED** by the bumped to version number.
+    ```
+    {{${operator_name.overloaded_name},
+      {{${bump_to_version},
+        "${upgrader_name}",
+        "${old operator schema}"}}},
+    ```
+    For the example operator `linspace`, it will be
     ```
     {{"aten::linspace",
       {{8,
@@ -90,17 +97,70 @@ The steps to write upgrader:
         "aten::linspace(Scalar start, Scalar end, int? steps=None, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor"}}},
     ```
 
-    4. After rebuild PyTorch, run the following command and it will auto generate a change to `caffe2/torch/csrc/jit/mobile/upgrader_mobile.cpp`. After rebuild PyTorch from source (`python setup.py`), run
+    4. After rebuilding PyTorch, run the following command and it will auto generate a change to `caffe2/torch/csrc/jit/mobile/upgrader_mobile.cpp`. After rebuild PyTorch from source (`python setup.py`), run
 
     ```
     python pytorch/tools/codegen/operator_versions/gen_mobile_upgraders.py
     ```
 
-    5. Add test:
-        1. Using the model generated from step 1, you will need to add tests in following places:
-            1. For mobile tests: `test/test_save_load_for_op_versions.py`
-            2. For server tests: `test/jit/test_upgraders.py`
-    6. Commit  changes made in all changes in step 2 in a single PR
+    5. Add tests. Using the model generated from step 1, you will need to add tests in `test/test_save_load_for_op_versions.py`. Follwing is an example to write a test
+        ```
+        @settings(max_examples=10, deadline=200000)  # A total of 10 examples will be generated
+        @given(
+            sample_input=st.tuples(st.integers(min_value=5, max_value=199), st.floats(min_value=5.0, max_value=199.0))
+        )  # Generate a pair (integer, float)
+        @example((2, 3, 2.0, 3.0))  # Ensure this example will be covered
+        def test_versioned_div_scalar(self, sample_input):
+            # Step 1. Write down the old behavior of this operator, if possible
+            def historic_div_scalar_float(self, other: float):
+                return torch.true_divide(self, other)
+
+            # Step 2. Write down how curent module should look like
+            class MyModuleFloat(torch.nn.Module):
+                def __init__(self):
+                    super(MyModuleFloat, self).__init__()
+
+                def forward(self, a, b: float):
+                    return a / b
+            try:
+                # Step 3. Load the old model and it will apply upgrader
+                v3_mobile_module_float = _load_for_lite_interpreter(
+                    pytorch_test_dir + "/jit/fixtures/test_versioned_div_scalar_float_v2.ptl")
+                v3_server_module_float = torch.jit.load(
+                    pytorch_test_dir + "/jit/fixtures/test_versioned_div_scalar_float_v2.ptl")
+            except Exception as e:
+                self.skipTest("Failed to load fixture!")
+
+            # Step4. Load the new model and it won't apply the ugprader
+            current_mobile_module_float = self._save_load_mobile_module(MyModuleFloat)
+            current_server_module_float = self._save_load_module(MyModuleFloat)
+
+            for val_a, val_b in product(sample_input, sample_input):
+                a = torch.tensor((val_a,))
+                b = val_b
+
+                def _helper(m, fn):
+                    m_result = self._try_fn(m, a, b)
+                    fn_result = self._try_fn(fn, a, b)
+
+                    if isinstance(m_result, Exception):
+                        self.assertTrue(fn_result, Exception)
+                    else:
+                        self.assertEqual(m_result, fn_result)
+
+                # Ensure the module loaded from the old model with upgrader
+                # has the same result as the module loaded from the new model
+                _helper(v3_mobile_module_float, current_mobile_module_float)
+                _helper(v3_mobile_module_float, current_server_module_float)
+
+                # Ensure the module loaded from the new model with upgrader
+                # has the same result as the module loaded from the new model
+                _helper(current_mobile_module_float, torch.div)
+                _helper(current_server_module_float, torch.div)
+
+        ```
+
+    6. Commit all changes made in step 2 in a single PR and submit it.
 
 You can look at following PRs to get the rough idea of what needs to be done:
 1. [PR that adds `logspace` test modules](https://github.com/pytorch/pytorch/pull/72052)
