@@ -953,9 +953,7 @@ int nnc_lowerings_lazy_registration() {
           auto const& shape =
               broadcastShapes(valueShape(inputs[0]), valueShape(inputs[1]));
           return Compute(
-              "aten_remainder",
-              c10::fmap<DimArg>(shape),
-              [&](const std::vector<VarHandle>& axes) {
+              "aten_remainder", shape, [&](const std::vector<VarHandle>& axes) {
                 std::vector<ExprHandle> indices(axes.begin(), axes.end());
                 std::vector<ExprHandle> exprInputs = {
                     tensorOrConstant(inputs[0], indices),
@@ -1335,7 +1333,9 @@ int nnc_lowerings_lazy_registration() {
        "aten::to.dtype_layout(Tensor(a) self, *, int? dtype=None, int? layout=None, Device? device=None, bool? pin_memory=None, bool non_blocking=False, bool copy=False, int? memory_format=None) -> (Tensor(a))",
        "aten::to.device(Tensor(a) self, Device device, int dtype, bool non_blocking=False, bool copy=False, int? memory_format=None) -> (Tensor(a))",
        "aten::to.prim_Device(Tensor(a) self, Device? device, int? dtype=None, bool non_blocking=False, bool copy=False) -> Tensor(a|b)",
-       "aten::to.prim_dtype(Tensor(a) self, int? dtype=None, bool non_blocking=False, bool copy=False) -> Tensor(a|b)"},
+       "aten::to.prim_dtype(Tensor(a) self, int? dtype=None, bool non_blocking=False, bool copy=False) -> Tensor(a|b)",
+       "aten::_autocast_to_reduced_precision(Tensor(a) self, bool cuda_enabled, bool cpu_enabled, ScalarType cuda_dtype, ScalarType cpu_dtype) -> Tensor(a)",
+       "aten::_autocast_to_full_precision(Tensor(a) self, bool cuda_enabled, bool cpu_enabled) -> Tensor(a)"},
       [](const std::vector<ArgValue>& inputs,
          const std::vector<ExprHandle>& outputShape,
          const c10::optional<ScalarType>& outputType,
@@ -1452,7 +1452,7 @@ int nnc_lowerings_lazy_registration() {
   //        at::Device device) {
   //       return Compute(
   //           "aten_slice",
-  //           c10::fmap<DimArg>(outputShape),
+  //           outputShape,
   //           [&](const std::vector<VarHandle>& axes) {
   //             int64_t dim =
   //                 at::maybe_wrap_dim(c10::get<int64_t>(inputs[1]),
@@ -1473,7 +1473,7 @@ int nnc_lowerings_lazy_registration() {
          at::Device device) {
         return Compute(
             "aten_unsqueeze",
-            c10::fmap<DimArg>(outputShape),
+            outputShape,
             [&](const std::vector<VarHandle>& axes) {
               int64_t dim = c10::get<int64_t>(inputs[1]);
               if (dim < 0) {
@@ -1523,7 +1523,7 @@ int nnc_lowerings_lazy_registration() {
         if (A.ndim() == 0) {
           auto tensor = Compute(
               "aten_permute",
-              c10::fmap<DimArg>(outputShape),
+              outputShape,
               [&](const std::vector<VarHandle>& axes) {
                 std::vector<ExprHandle> empty_indices;
                 return A.load(empty_indices);
@@ -1537,7 +1537,7 @@ int nnc_lowerings_lazy_registration() {
         auto permute_dims = c10::get<IntList>(inputs[1]);
         auto tensor = Compute(
             "aten_permute",
-            c10::fmap<DimArg>(outputShape),
+            outputShape,
             [&](const std::vector<VarHandle>& axes) {
               std::vector<VarHandle> new_axes;
               new_axes.resize(axes.size());

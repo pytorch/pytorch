@@ -11,7 +11,8 @@ class _BatchNorm(torch.nn.modules.batchnorm._BatchNorm):
         self.register_buffer('zero_point', torch.tensor(0, **factory_kwargs))
 
     def forward(self, input: Tensor) -> Tensor:
-        self._check_input_dim(input)
+        # disabling this since it is not symbolically traceable
+        # self._check_input_dim(input)
         return torch.ops.quantized.batch_norm(
             input, self.weight, self.bias, self.running_mean,
             self.running_var, self.eps, self.scale, self.zero_point)
