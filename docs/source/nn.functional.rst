@@ -76,7 +76,6 @@ Non-linear activation functions
     glu
     gelu
     logsigmoid
-    multi_head_attention_forward
     hardshrink
     tanhshrink
     softsign
