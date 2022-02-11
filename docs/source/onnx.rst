@@ -587,8 +587,12 @@ Q: Are lists of Tensors exportable to ONNX?
   Yes, for ``opset_version`` >= 11, since ONNX introduced the Sequence type in opset 11.
 
 
+Contributing / developing
+-------------------------
+`Developer docs <https://github.com/pytorch/pytorch/wiki/PyTorch-ONNX-exporter>`_.
+
 Functions
---------------------------
+---------
 .. autofunction:: export
 .. autofunction:: export_to_pretty_string
 .. autofunction:: register_custom_op_symbolic
@@ -596,7 +600,7 @@ Functions
 .. autofunction:: is_in_onnx_export
 
 Classes
-----------------------------------
+-------
 
 .. autosummary::
     :toctree: generated
@@ -604,7 +608,3 @@ Classes
     :template: classtemplate.rst
 
     SymbolicContext
-
-Contributing / developing
---------------------------------------------
-`Developer docs <https://github.com/pytorch/pytorch/wiki/Guide-for-developing-PyTorch-ONNX-exporter>`_.
