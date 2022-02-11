@@ -47,7 +47,7 @@ try:
     from torch._C._distributed_c10d import ProcessGroupMPI
 except ImportError:
     _MPI_AVAILABLE = False
-f
+
 try:
     from torch._C._distributed_c10d import ProcessGroupNCCL
 except ImportError:
