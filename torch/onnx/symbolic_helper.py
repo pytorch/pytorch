@@ -485,9 +485,7 @@ def _unsqueeze_helper(g, input, axes_i):
         return g.op("Unsqueeze", input, axes_i=axes_i)
     # Tensor type
     if _export_onnx_opset_version < 13:
-        input_rank = _get_tensor_rank(input)
-        raise ValueError("Opset version must be >= 13 for Unsqueeze with dynamic axes. " +
-                         f"And accepted input axes range is [{-input_rank}, {input_rank-1}].")
+        raise ValueError(f"Opset version must be >= 13 for Unsqueeze with dynamic axes. {input.node().sourceRange()}")
     return g.op("Unsqueeze", input, axes_i[0])
 
 
@@ -498,11 +496,8 @@ def _squeeze_helper(g, input, axes_i):
             return g.op("Squeeze", input, axes)
         return g.op("Squeeze", input, axes_i=axes_i)
     # Tensor type
-    input_rank = _get_tensor_rank(input)
     if _export_onnx_opset_version < 13:
-        print("_get_tensor_rank(axes_t):", input_rank)
-        raise ValueError("Opset version must be >= 13 for Squeeze with dynamic axes. " +
-                         f"And accepted input axes range is [{-input_rank}, {input_rank-1}].")
+        raise ValueError(f"Opset version must be >= 13 for Squeeze with dynamic axes. {input.node().sourceRange()}")
     axes_t = axes_i[0]
     axes_rank = _get_tensor_rank(axes_t)
     if axes_rank > 1:
