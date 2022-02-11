@@ -248,11 +248,11 @@ bool MutationRemover::RemoveTensorMutation(Block* block) {
     }
 
     Value* mutated_value = node->inputs().at(0);
-    // If permute or tranpose are inplace, then they should not be converted to
-    // their functional equivalents if the input tensor to them has more than
+    // If tranpose is inplace, then it should not be converted to its
+    // functional equivalents if the input tensor to them has more than
     // one use.
     auto kind_of_node = node->kind();
-    if (kind_of_node == aten::permute_ || kind_of_node == aten::transpose_) {
+    if (kind_of_node == Symbol::fromQualString(aten::permute_)) {
       if (mutated_value->uses().size() != 1) {
         continue;
       }
