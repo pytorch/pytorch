@@ -65,7 +65,7 @@ query ($owner: String!, $name: String!, $number: Int!) {
           path
         }
       }
-      latestReviews(last: 100) {
+      reviews(last: 100) {
         nodes {
           author {
             login
@@ -204,10 +204,17 @@ class GitHubPR:
         return rc
 
     def _get_reviewers(self) -> List[Tuple[str, str]]:
-        reviews_count = int(self.info["latestReviews"]["totalCount"])
-        if len(self.info["latestReviews"]["nodes"]) != reviews_count:
+        reviews_count = int(self.info["reviews"]["totalCount"])
+        nodes = self.info["reviews"]["nodes"]
+        if len(nodes) != reviews_count:
             raise RuntimeError("Can't fetch all PR reviews")
-        return [(x["author"]["login"], x["state"]) for x in self.info["latestReviews"]["nodes"]]
+        reviews = {}
+        for node in nodes:
+            author = node["author"]["login"]
+            state = node["state"]
+            if state != "COMMENTED":
+                reviews[author] = state
+        return list(reviews.items())
 
     def get_approved_by(self) -> List[str]:
         return [login for (login, state) in self._get_reviewers() if state == "APPROVED"]
