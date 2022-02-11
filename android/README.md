@@ -14,9 +14,16 @@ repositories {
     jcenter()
 }
 
+# lite interpreter build
 dependencies {
-    implementation 'org.pytorch:pytorch_android:1.6.0'
-    implementation 'org.pytorch:pytorch_android_torchvision:1.6.0'
+    implementation 'org.pytorch:pytorch_android_lite:1.10.0'
+    implementation 'org.pytorch:pytorch_android_torchvision_lite:1.10.0'
+}
+
+# full jit build
+dependencies {
+    implementation 'org.pytorch:pytorch_android:1.10.0'
+    implementation 'org.pytorch:pytorch_android_torchvision:1.10.0'
 }
 ```
 
@@ -32,6 +39,15 @@ repositories {
     }
 }
 
+# lite interpreter build
+dependencies {
+    ...
+    implementation 'org.pytorch:pytorch_android_lite:1.12.0-SNAPSHOT'
+    implementation 'org.pytorch:pytorch_android_torchvision_lite:1.12.0-SNAPSHOT'
+    ...
+}
+
+# full jit build
 dependencies {
     ...
     implementation 'org.pytorch:pytorch_android:1.12.0-SNAPSHOT'
@@ -53,6 +69,11 @@ git submodule update --init --recursive --jobs 0
 sh ./scripts/build_pytorch_android.sh
 ```
 
+The default build is lite interpreter. If you want to use full jit, run
+```
+BUILD_LITE_INTERPRETER=0 ./scripts/build_pytorch_android.sh
+```
+
 The workflow contains several steps:
 
 1\. Build libtorch for android for all 4 android abis (armeabi-v7a, arm64-v8a, x86, x86_64)
@@ -68,7 +89,7 @@ They are specified as environment variables:
 
 `ANDROID_HOME` - path to [Android SDK](https://developer.android.com/studio/command-line/sdkmanager.html)
 
-`ANDROID_NDK` - path to [Android NDK](https://developer.android.com/studio/projects/install-ndk)
+`ANDROID_NDK` - path to [Android NDK](https://developer.android.com/studio/projects/install-ndk). It's recommended to use NDK version 21.x.
 
 `GRADLE_HOME` - path to [gradle](https://gradle.org/releases/)
 
@@ -219,6 +240,20 @@ To load torchscript model for mobile we need some special setup which is placed 
 
 [Example of linking to libtorch from aar](https://github.com/pytorch/pytorch/tree/master/android/test_app)
 
+## Running Test
+The current test is built with full jit, so we have to manually disable lite interpreter
+```
+BUILD_LITE_INTERPRETER=0 ./scripts/build_pytorch_android.sh x86
+BUILD_LITE_INTERPRETER=0 ./android/run_tests.sh
+```
+
+If the test model is missing or outdated, use this script to regenerate it
+```
+cd android/pytorch_android
+python generate_test_torchscripts.py
+```
+
 ## PyTorch Android API Javadoc
 
 You can find more details about the PyTorch Android API in the [Javadoc](https://pytorch.org/javadoc/).
+
