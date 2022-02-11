@@ -452,10 +452,7 @@ class Tracer(TracerBase):
             # In the case that we have pytree-flattened inputs in
             # `concrete_args`, generate a flattening wrapper around the
             # original root function and return that.
-            pytree_orig_args = orig_args[:total_args]
-            if len(pytree_orig_args) > 0 and pytree_orig_args[0] == 'self':
-                pytree_orig_args = pytree_orig_args[1:]
-            self.graph._codegen = _PyTreeCodeGen(_PyTreeInfo(pytree_orig_args, in_spec, None))
+            self.graph._codegen = _PyTreeCodeGen(_PyTreeInfo(orig_args[:total_args], in_spec, None))
 
             def flatten_fn(*args):
                 tree_args = pytree.tree_unflatten(list(args), in_spec)

@@ -520,6 +520,9 @@ class _PyTreeCodeGen(CodeGen):
         if self.pytree_info is None:
             return super().gen_fn_def(free_vars, maybe_return_annotation)
         function_args = self.pytree_info.orig_args
+        has_orig_self = (function_args[0] == 'self')
+        if has_orig_self:
+            free_vars.insert(0, 'self')
         function_definition = super().gen_fn_def(function_args[:], maybe_return_annotation)
         if len(free_vars) > 0:  # pytree has placeholders in it
             function_definition += f"""

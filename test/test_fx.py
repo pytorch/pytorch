@@ -3199,7 +3199,8 @@ def forward(self, args_list: List[torch.Tensor]){maybe_return_annotation}:
         self.assertEqual(nf(vals), f(*vals))
         self.assertEqual(nf.graph.process_outputs(bare_fx(*nf.graph.process_inputs(vals))), f(*vals))
 
-
+        ts_f = torch.jit.script(nf)
+        self.assertEqual(nf(vals), ts_f(vals))
 
 
     def test_imul_code_print(self):
