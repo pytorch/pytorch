@@ -8010,6 +8010,17 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randint(4, (4, 3, 2))
         self.run_test(model, (x,))
 
+    @skipIfUnsupportedMinOpsetVersion(11)
+    def test_embedding_renorm(self):
+        n, d = 7, 5
+        embedding = torch.nn.Embedding(n, d, max_norm=0.2)
+        idx = torch.tensor([2, 1])
+        self.run_test(embedding, idx)
+
+        embedding = torch.nn.Embedding(n, d, max_norm=0.5, norm_type=1.)
+        idx = torch.tensor([4, 3, 4, 2])
+        self.run_test(embedding, idx)
+
     def _dispatch_rnn_test(self, name, *args, **kwargs):
         if name == "elman":
             self._elman_rnn_test(*args, **kwargs)
