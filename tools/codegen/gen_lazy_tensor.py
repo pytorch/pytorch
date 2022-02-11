@@ -1,12 +1,13 @@
 import pathlib
 import argparse
 import os
+import re
 import yaml
-from collections import namedtuple
+from collections import namedtuple, Counter
 from typing import List, Dict, Union, Sequence, Optional, Callable, Iterable, Iterator, Tuple, Type
 from tools.codegen.dest.lazy_ir import LazyIR, TSLazyIR
 from tools.codegen.gen import get_grouped_native_functions, parse_native_yaml
-from tools.codegen.model import (FunctionSchema,
+from tools.codegen.model import (FunctionSchema, DispatchKey, BackendIndex,
                                  NativeFunction, NativeFunctionsGroup, OperatorName)
 from tools.codegen.selective_build.selector import SelectiveBuilder
 from tools.codegen.utils import concatMap, YamlLoader, FileManager
@@ -28,7 +29,9 @@ def parse_full_codegen_ops(
 
     native_functions_map: Dict[OperatorName, NativeFunction] = {
         f.func.name: f
-        for f in concatMap(lambda f: [f] if isinstance(f, NativeFunction) else list(f.functions()), grouped_native_functions)
+        for f in concatMap(
+            lambda f: [f] if isinstance(f, NativeFunction) else list(f.functions()), grouped_native_functions
+        )
     }
 
     with open(backend_yaml_path, 'r') as f:
@@ -41,6 +44,23 @@ def parse_full_codegen_ops(
 
     return full_codegen
 
+def validate_shape_inference_header(shape_inference_hdr: str, expected_shape_infr_decls: List[str]) -> None:
+    try:
+        with open(shape_inference_hdr, 'r') as f:
+            shape_infr_decls = f.read()
+            shape_infr_decl_lines = set(shape_infr_decls.split("\n"))
+    except IOError:
+        raise AssertionError(f'Unable to read from the specified shape_inference_hdr file: {shape_inference_hdr}')
+
+    shape_infr_regex = rf'compute_shape_(\w+)'
+    actual_shape_infr_name_counts = Counter(re.findall(shape_infr_regex, shape_infr_decls))
+    # TODO(whc) add a check for shape inference functions that have meta kernels implement and should be retired.
+
+    for f in expected_shape_infr_decls:
+        assert f in shape_infr_decl_lines, f"""Missing shape inference function.\n
+Please add declare this function in {shape_inference_hdr}:\n
+and implement it in the the corresponding shape_inference.cpp file.\n
+{f}"""
 
 def main() -> None:
     parser = argparse.ArgumentParser(description='Generate Lazy Tensor backend files')
@@ -55,15 +75,18 @@ def main() -> None:
     parser.add_argument(
         '--impl_path', type=str, default=None, help='path to the source C++ file containing kernel definitions')
     parser.add_argument(
-        '--gen_ts_lowerings', action="store_true", help='Generate TorchScript lowerings in addition to Lazy IR and NativeFunctions')
+        '--gen_ts_lowerings', action="store_true",
+        help='Generate TorchScript lowerings in addition to Lazy IR and NativeFunctions')
     parser.add_argument(
         '--node_base', type=str, default="Node", help='Name of backend specific custom Lazy IR Node base class')
     parser.add_argument(
         '--node_base_hdr', type=str, default=None, help='Path to header file defining custom Lazy IR Node base class')
     parser.add_argument(
-        '--shape_inference_hdr', type=str, default=None, help='Path to header file defining custom Lazy shape inference functions')
+        '--shape_inference_hdr', type=str, default=None,
+        help='Path to header file defining custom Lazy shape inference functions')
     parser.add_argument(
-        '--tensor_class', type=str, default="torch::lazy::LazyTensor", help='Name of backend specific custom Lazy Tensor class')
+        '--tensor_class', type=str, default="torch::lazy::LazyTensor",
+        help='Name of backend specific custom Lazy Tensor class')
     parser.add_argument(
         '--tensor_class_hdr', type=str, default="torch/csrc/lazy/core/tensor.h",
         help='Path to header file defining custom Lazy Tensor class')
@@ -149,7 +172,14 @@ def run(source_yaml: str, output_dir: str, dry_run: bool, impl_path: Optional[st
     if impl_path is not None:
         error_on_missing_kernels(native_functions, backend_indices, backend_key,
                                  autograd_key, impl_path, full_codegen)
-
+    if shape_inference_hdr is not None:
+        expected_shape_infr_decls = list(
+            concat_map_codegen(
+                dest.GenLazyShapeInferenceDefinition(backend_indices[backend_key], tensor_class),
+                grouped_native_functions,
+                codegenInplaceVariant=True
+        ))
+        validate_shape_inference_header(shape_inference_hdr, expected_shape_infr_decls)
     assert class_name is not None
 
     # Generate nativefunction declarations
@@ -187,27 +217,6 @@ def run(source_yaml: str, output_dir: str, dry_run: bool, impl_path: Optional[st
             codegenInplaceVariant=True
         )),
     })
-
-    # # Generate headers for shape/dtype funcs for non-meta kernels
-    # fm.write_with_template(f'{backend_key}ShapeInference.h', 'ShapeInference.h', lambda: {
-    #     'lazy_ir_sysinc': [f'#include <{path}>' for path in [
-    #         "ATen/Tensor.h",
-    #         "c10/core/ScalarType.h",
-    #         "c10/util/Optional.h",
-    #         "torch/csrc/lazy/core/ir.h",
-    #         "torch/csrc/lazy/core/shape.h",
-    #         "vector",
-    #     ]],
-    #     'lazy_ir_inc': [],
-    #     'DispatchKey': backend_key,
-    #     'dispatch_namespace': backend_key.lower(),
-    #     'func_declarations': list(concat_map_codegen(
-    #         dest.GenLazyShapeInferenceDefinition(backend_indices[backend_key],
-    #                                              tensor_class),
-    #         grouped_native_functions,
-    #         codegenInplaceVariant=True,
-    #     )),
-    # })
 
     # Generate IR node classes
     fm.write_with_template(f'{backend_key}LazyIr.h', 'LazyIr.h', lambda: {

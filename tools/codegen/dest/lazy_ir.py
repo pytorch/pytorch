@@ -291,7 +291,7 @@ class ComputeShapeSignature:
 
     @property
     def shape_decl(self) -> str:
-        return f"std::vector<Shape> compute_shape_{self.__decl_suffix()}"
+        return f"TORCH_API std::vector<Shape> compute_shape_{self.__decl_suffix()}"
 
     @property
     def shape_call(self) -> str:
