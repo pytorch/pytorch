@@ -1167,16 +1167,6 @@ void Engine::init_local_ready_queue(std::shared_ptr<ReadyQueue> ready_queue) {
   }
 }
 
-size_t Engine::ready_queue_size(const std::shared_ptr<GraphTask>& graph_task, at::Device device) {
-  if (device_ready_queues_.empty()) {
-    // The vector device_ready_queues_ is initialized in start_device_threads, but this method
-    // can be called before start_device_threads. Adding this check to avoid index
-    // out of bound error.
-    return 0;
-  }
-  return ready_queue(graph_task->cpu_ready_queue_, device)->size();
-}
-
 // CPU ready queue is per GraphTask, but CUDA device ready queues are shared across all graph tasks
 auto Engine::ready_queue(std::shared_ptr<ReadyQueue> cpu_ready_queue, at::Device device) -> std::shared_ptr<ReadyQueue>{
   if (device.type() == at::kCPU || device.type() == at::DeviceType::Meta) {
