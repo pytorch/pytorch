@@ -6,8 +6,13 @@ if "%REBUILD%"=="" (
     taskkill /im sccache.exe /f /t || ver > nul
     del %TMP_DIR_WIN%\bin\sccache.exe || ver > nul
     del %TMP_DIR_WIN%\bin\sccache-cl.exe || ver > nul
-    curl --retry 3 -k https://s3.amazonaws.com/ossci-windows/sccache-20220208.exe --output %TMP_DIR_WIN%\bin\sccache.exe
-    curl --retry 3 -k https://s3.amazonaws.com/ossci-windows/sccache-cl.exe --output %TMP_DIR_WIN%\bin\sccache-cl.exe
+    if "%BUILD_ENVIRONMENT%"=="" (
+      curl --retry 3 -k https://s3.amazonaws.com/ossci-windows/sccache-20220211 --output %TMP_DIR_WIN%\bin\sccache.exe
+      curl --retry 3 -k https://s3.amazonaws.com/ossci-windows/sccache-cl.exe --output %TMP_DIR_WIN%\bin\sccache-cl.exe
+    ) else (
+      aws s3 cp s3://ossci-windows/sccache-20220211 %TMP_DIR_WIN%\bin\sccache.exe
+      aws s3 cp s3://ossci-windows/sccache-cl.exe %TMP_DIR_WIN%\bin\sccache-cl.exe
+    )
     goto :check_sccache
   )
 )
