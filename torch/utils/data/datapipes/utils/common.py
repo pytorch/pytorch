@@ -72,6 +72,9 @@ def get_file_pathnames_from_root(
             if not recursive:
                 break
             if not non_deterministic:
+                # Note that this is in-place modifying the internal list from `os.walk`
+                # This only works because `os.walk` doesn't shallow copy before turn
+                # https://github.com/python/cpython/blob/f4c03484da59049eb62a9bf7777b963e2267d187/Lib/os.py#L407
                 dirs.sort()
 
 

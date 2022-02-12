@@ -111,6 +111,13 @@ struct SchemaParser {
     if (L.nextIf('.')) {
       overload_name = L.expect(TK_IDENT).text();
     }
+    // default is used as an attribute on the `OpOverloadPacket`
+    // (obtained using `torch.ops.aten.foo`) to get the operator
+    // overload with overload name as an empty string
+    // and so shouldn't be used as an overload name
+    // also disallow dunder attribute names to be overload names
+    bool is_a_valid_overload_name = !((overload_name == "default") || (overload_name.rfind("__", 0) == 0));
+    TORCH_CHECK(is_a_valid_overload_name, overload_name, " is not a legal overload name for aten operators");
     return {name, overload_name};
   }
 
