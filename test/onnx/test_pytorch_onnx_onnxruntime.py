@@ -4114,6 +4114,28 @@ class TestONNXRuntime(unittest.TestCase):
         for model, input in models_and_inputs:
             self.run_test(model, input)
 
+    @skipIfUnsupportedMinOpsetVersion(9)
+    def test_lstm_sequence(self):
+        class LstmNet(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.rnn1 = torch.nn.LSTM(8, 8, bidirectional=True, batch_first=True)
+                self.linear1 = torch.nn.Linear(8 * 2, 8)
+                self.rnn2 = torch.nn.LSTM(8, 8, bidirectional=True, batch_first=True)
+                self.linear2 = torch.nn.Linear(8 * 2, 8)
+
+            def forward(self, input):
+                rnn_output1, _ = self.rnn1(input)
+                linear_output1 = self.linear1(rnn_output1)
+                rnn_output2, _ = self.rnn2(linear_output1)
+                linear_output2 = self.linear2(rnn_output2)
+                return linear_output2
+
+        input = torch.zeros((1, 100, 8), dtype=torch.float32)
+        self.run_test(LstmNet(), input, input_names=['input'], output_names=['output'],
+                      dynamic_axes={'input' : {0 : 'batch_size', 1: 'w', 2: 'h'},
+                                    'output' : {0 : 'batch_size', 1: 'w', 2: 'h'}, })
+
     @disableScriptTest()
     def test_rnn_no_bias(self):
         def make_model(layers, packed_sequence):
