@@ -1,12 +1,12 @@
 # Guidance for Operator Developer
 
-PyTorch’s operators sometimes require changes to maintain the high quality user experience (UX) that PyTorch is known for. These changes can be backward compatibility (BC) breaking, where older programs will no longer run as expected on the latest version of PyTorch (an old writer / new reader problem) or forward compatibility (FC) breaking, where new programs will not run on older versions of PyTorch (a new writer / old reader problem). An upgrader is a method to use the new operator to mimic the old operator behavior. When a new runtime loads an old model with the old operator, the upgrader will replace the old operator in the model with the new operator. The replacement will only happen for old models, and it does not need to consider the new models.
+PyTorch’s operators sometimes require changes to maintain the high quality user experience (UX) that PyTorch is known for. These changes can be backward compatibility (BC) breaking, where older programs will no longer run as expected on the latest version of PyTorch (an old writer / new reader problem) or forward compatibility (FC) breaking, where new programs will not run on older versions of PyTorch (a new writer / old reader problem). An upgrader is a method to use the new operator to mimic the old operator behavior. When a new runtime loads an old model with the old operator, the upgrader will replace the old operator in the model with the new operator. The replacement will only happen for old models, and it does not need to consider the new models. Please refer to the documentation [PyTorch Operator Versioning](https://github.com/pytorch/rfcs/blob/master/RFC-0017-PyTorch-Operator-Versioning.md) for more details.
 
 After you change to operator either the operator schema is BC-breaking way or the semantics of the operator, you will need to write an “upgrader” to make the change non-BC breaking iff they are used in TorchScript or mobile. In general, you can know your operator is BC breaking, if it fails `test/forward_backward_compatibility/check_forward_backward_compatibility.py `
 
 The steps to write upgrader:
 
-1. Prepare a test model before making changes to the operator, following the process below. A test model before making the operator changes is needed to test the upgrader. Otherwise, after the change to operator, the new runtime will no longer be able to produce a model with the historic operator and can't test it anymore.
+1. [Build PyTorch from souce](https://github.com/pytorch/pytorch#from-source) and prepare a test model before making changes to the operator, following the process below. A test model before making the operator changes is needed to test the upgrader. Otherwise, after the change to operator, the new runtime will no longer be able to produce a model with the historic operator and can't test it anymore.
      1. Add a test module in `test/jit/fixtures_srcs/fixtures_src.py`. In `test/jit/fixtures_srcs/generate_models.py`, add a module
         ```
         class TestVersionedLinspaceV7(torch.nn.Module):
@@ -115,7 +115,7 @@ The steps to write upgrader:
         "aten::linspace(Scalar start, Scalar end, int? steps=None, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor"}}},
     ```
 
-    1. After rebuilding PyTorch, run the following command to auto generate a change to [`torch/csrc/jit/mobile/upgrader_mobile.cpp`](https://github.com/pytorch/pytorch/blob/8757e21c6a4fc00e83539aa7f9c28eb11eff53c1/torch/csrc/jit/mobile/upgrader_mobile.cpp). After rebuild PyTorch from source (`python setup.py`), run
+    1. After [rebuilding PyTorch](https://github.com/pytorch/pytorch#from-source), run the following command to auto update the file [`torch/csrc/jit/mobile/upgrader_mobile.cpp`](https://github.com/pytorch/pytorch/blob/8757e21c6a4fc00e83539aa7f9c28eb11eff53c1/torch/csrc/jit/mobile/upgrader_mobile.cpp). After rebuild PyTorch from source (`python setup.py`), run
 
     ```
     python pytorch/tools/codegen/operator_versions/gen_mobile_upgraders.py
