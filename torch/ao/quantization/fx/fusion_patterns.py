@@ -108,9 +108,9 @@ class DefaultFuseHandler(FuseHandler):
         def get_matched_types(m):
             if isinstance(m, tuple):
                 return tuple(map(get_matched_types, m))
-            if m is MatchAllNode:
-                return MatchAllNode
-            return type(m)
+            if isinstance(m, torch.nn.Module):
+                return type(m)
+            return m
 
         matched_module_types = get_matched_types(matched_modules)
         module_parent_name, module_name = _parent_name(root_node.target)
