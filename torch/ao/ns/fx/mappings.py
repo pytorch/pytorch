@@ -383,6 +383,11 @@ def get_base_name_to_sets_of_related_ops() -> Dict[str, Set[NSNodeTargetType]]:
             F.dropout,
             toq.dropout,
         ]),
+        # matmul
+        set([
+            torch.matmul,
+            toq.matmul,
+        ]),
     ]
 
     base_name_to_sets_of_related_ops: Dict[str, Set[NSNodeTargetType]] = {}

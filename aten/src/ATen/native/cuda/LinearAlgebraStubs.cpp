@@ -9,11 +9,12 @@
 #include <ATen/native/Resize.h>
 #include <ATen/native/LinearAlgebra.h>
 #include <ATen/native/BatchLinearAlgebra.h>
+#if defined(BUILD_LAZY_CUDA_LINALG)
+#include <ATen/native/cuda/linalg/BatchLinearAlgebraLib.h>
+
 #if AT_MAGMA_ENABLED()
 #include <ATen/cuda/detail/CUDAHooks.h>
-#include <iostream>
 
-#if defined(BUILD_LAZY_CUDA_LINALG)
 namespace {
 struct MagmaInitializer {
   MagmaInitializer() {
@@ -22,21 +23,16 @@ struct MagmaInitializer {
 } initializer;
 }  // namespace (anonymous)
 #endif
-
 #endif
 namespace at {
 namespace native {
 #if defined(BUILD_LAZY_CUDA_LINALG)
 namespace {
+cuda::detail::LinalgDispatch disp = {nullptr, nullptr, nullptr, nullptr, nullptr, nullptr};
 
 at::DynamicLibrary& getTorchLinalgLibrary() {
   static at::DynamicLibrary lib("libtorch_cuda_linalg.so", nullptr, true);
   return lib;
-}
-
-template<typename T>
-T getTorchLinalgFunc(const char *fname) {
-  return reinterpret_cast<T>(getTorchLinalgLibrary().sym(fname));
 }
 
 // Lazy dispatches do nothing but load linalg library and call the stub
@@ -132,37 +128,52 @@ REGISTER_CUDA_DISPATCH(lu_solve_stub, &lazy_lu_solve);
 REGISTER_CUDA_DISPATCH(lstsq_stub, &lazy_lstsq_kernel);
 } // anonymous namespace
 
-// Old style dispatch
+// Old style dispatches
+// torch_cuda_linalg dynamic library should have a global constructor
+// that calls regiserLinaglDispatch so in order ot lazy bind
+// old style dispatch all one have to do is to load library and call disp.func_name
+
+namespace cuda {
+namespace detail {
+void registerLinalgDispatch(const LinalgDispatch& disp_) {
+  disp = disp_;
+}
+}} //namespace cuda::detail
+
 Tensor& _linalg_inv_out_helper_cuda(Tensor &result, Tensor& infos_lu, Tensor& infos_getri) {
-    static auto impl = getTorchLinalgFunc<decltype(&_linalg_inv_out_helper_cuda)>("_ZN2at6native27_linalg_inv_out_helper_cudaERNS_6TensorES2_S2_");
-    TORCH_CHECK(impl != nullptr, "Can't find _linalg_inv_out_helper_cuda");
-    return impl(result, infos_lu, infos_getri);
+    getTorchLinalgLibrary();
+    TORCH_CHECK(disp.inv_out_helper != nullptr, "Can't find _linalg_inv_out_helper_cuda");
+    return disp.inv_out_helper(result, infos_lu, infos_getri);
 }
 
 std::tuple<Tensor, Tensor> legacy_lstsq_cuda(const Tensor &B, const Tensor &A) {
-    static auto impl = getTorchLinalgFunc<decltype(&legacy_lstsq_cuda)>("_ZN2at6native17legacy_lstsq_cudaERKNS_6TensorES3_");
-    TORCH_CHECK(impl != nullptr, "Can't find legacy_lstsq_cuda");
-    return impl(B, A);
+    getTorchLinalgLibrary();
+    TORCH_CHECK(disp.legacy_lstsq != nullptr, "Can't find legacy_lstsq_cuda");
+    return disp.legacy_lstsq(B, A);
 }
 
 Tensor _cholesky_solve_helper_cuda(const Tensor& self, const Tensor& A, bool upper) {
-    static auto impl = getTorchLinalgFunc<decltype(&_cholesky_solve_helper_cuda)>("_ZN2at6native27_cholesky_solve_helper_cudaERKNS_6TensorES3_b");
-    return impl(self, A, upper);
+    getTorchLinalgLibrary();
+    TORCH_CHECK(disp.cholesky_solve_helper != nullptr, "Can't find _cholesky_solve_helper_cuda");
+    return disp.cholesky_solve_helper(self, A, upper);
 }
 
 std::tuple<Tensor, Tensor> _linalg_qr_helper_cuda(const Tensor& input, c10::string_view mode) {
-    static auto impl = getTorchLinalgFunc<decltype(&_linalg_qr_helper_cuda)>("_ZN2at6native22_linalg_qr_helper_cudaERKNS_6TensorEN3c1017basic_string_viewIcEE");
-    return impl(input, mode);
+    getTorchLinalgLibrary();
+    TORCH_CHECK(disp.qr_helper != nullptr, "Can't find _linalg_qr_helper_cuda");
+    return disp.qr_helper(input, mode);
 }
 
 std::tuple<Tensor, Tensor> _symeig_helper_cuda(const Tensor& self, bool eigenvectors, bool upper) {
-    static auto impl = getTorchLinalgFunc<decltype(&_symeig_helper_cuda)>("_ZN2at6native19_symeig_helper_cudaERKNS_6TensorEbb");
-    return impl(self, eigenvectors, upper);
+    getTorchLinalgLibrary();
+    TORCH_CHECK(disp.symeig_helper != nullptr, "Can't find _symeig_helper_cuda");
+    return disp.symeig_helper(self, eigenvectors, upper);
 }
 
 std::tuple<Tensor, Tensor> _solve_helper_cuda(const Tensor& self, const Tensor& A) {
-    static auto impl = getTorchLinalgFunc<decltype(&_solve_helper_cuda)>("_ZN2at6native18_solve_helper_cudaERKNS_6TensorES3_");
-    return impl(self, A);
+    getTorchLinalgLibrary();
+    TORCH_CHECK(disp.solve_helper != nullptr, "Can't find _solve_helper_cuda");
+    return disp.solve_helper(self, A);
 }
 
 #endif /*defined(BUILD_LAZY_CUDA_LINALG)*/

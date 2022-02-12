@@ -29,7 +29,7 @@ struct MagmaInitializer {
 #else
     ::at::cuda::detail::set_magma_init_fn([]{ magma_init(); });
 #endif
-  };
+  }
 } initializer;
 }  // namespace (anonymous)
 
@@ -3248,6 +3248,21 @@ std::tuple<Tensor, Tensor> legacy_lstsq_cuda(const Tensor &B, const Tensor &A) {
 }
 
 
+#if defined(BUILD_LAZY_CUDA_LINALG)
+namespace {
+struct DispatchInitializer {
+  DispatchInitializer() {
+    cuda::detail::LinalgDispatch disp{ _solve_helper_cuda,
+                                       _symeig_helper_cuda,
+                                       _linalg_qr_helper_cuda,
+                                       _cholesky_solve_helper_cuda,
+                                       legacy_lstsq_cuda,
+                                       _linalg_inv_out_helper_cuda};
+    cuda::detail::registerLinalgDispatch(disp);
+  };
+} initializer;
+}  // namespace (anonymous)
+#endif
 }}  // namespace at::native
 
 #undef ALLOCATE_ARRAY
