@@ -346,7 +346,9 @@ def _decide_input_format(model, args):
         if ordered_list_keys[0] == "self":
             ordered_list_keys = ordered_list_keys[1:]
         args_dict: Dict = {}
-        if isinstance(args, tuple):
+        if isinstance(args, list):
+            args_list = args
+        elif isinstance(args, tuple):
             args_list = list(args)
         else:
             args_list = [args]
@@ -444,8 +446,7 @@ def _create_jit_graph(model, args):
     torch_out = None
     params: Union[List, Tuple]
     if isinstance(model, (torch.jit.ScriptFunction, torch.jit.ScriptModule)):
-        flattened_args, unused_desc = torch.jit._flatten(tuple(args))
-        flattened_args = tuple(flattened_args)
+        flattened_args = tuple(torch.jit._flatten(tuple(args))[0])
         _check_flatten_did_not_remove(args, flattened_args)
     if isinstance(model, torch.jit.ScriptModule):
         try:
