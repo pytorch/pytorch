@@ -1,4 +1,5 @@
 from torch.testing._internal.common_utils import TestCase, run_tests
+from torch import _torch_docs
 import doctest
 import torch
 import torch.nn.functional as F
@@ -7,10 +8,6 @@ import numpy
 import itertools
 import ast
 import re
-
-
-ALWAYS_PASS = "__always_pass__"
-_TORCH_DOCS = "../torch/_torch_docs.py"
 
 
 def joinattr(a):
@@ -51,11 +48,8 @@ def find_docstring_node(node):
 
 class AlwaysPassManualSeed(doctest.OutputChecker):
     def check_output(self, want, got, optionflags):
-        if want == F"{ALWAYS_PASS}\n":
-            return True
-        else:
-            got = re.sub(r"\n\n", "\n", got)
-            return super().check_output(want, got, optionflags)
+        got = re.sub(r"\n\n", "\n", got)
+        return super().check_output(want, got, optionflags)
 
 
 class DoctTestVisitor(ast.NodeVisitor):
@@ -94,12 +88,12 @@ class DoctTestVisitor(ast.NodeVisitor):
                 docstring_node.s,
                 globs=globs,
                 name=documented_function,
-                filename=_TORCH_DOCS,
+                filename=_torch_docs.__file__,
                 lineno=docstring_node.lineno
             )
             if test.examples:
                 test.examples = [
-                    doctest.Example(source="torch.manual_seed(0);\n", want=ALWAYS_PASS)
+                    doctest.Example(source="torch.manual_seed(0)\n", want="<torch._C.Generator object at 0x...>")
                 ] + test.examples
             results = self.runner.run(test)
             self.num_attempted += results.attempted
@@ -109,8 +103,7 @@ class DoctTestVisitor(ast.NodeVisitor):
 class TestDocs(TestCase):
 
     def test_docs(self):
-        torch_docs_fn = _TORCH_DOCS
-        txt = open(torch_docs_fn).read()
+        txt = open(_torch_docs.__file__).read()
         tree = ast.parse(txt)
         doctest_visitor = DoctTestVisitor()
         doctest_visitor.visit(tree)
