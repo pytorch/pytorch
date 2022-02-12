@@ -1,6 +1,6 @@
 import torch
-from torch import *
-from typing import *
+from torch import Tensor
+from typing import Dict, List, Tuple, Optional
 
 OUTPUT_DIR = "src/androidTest/assets/"
 
