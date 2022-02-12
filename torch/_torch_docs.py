@@ -1096,7 +1096,7 @@ Example::
     True
     >>> # Copies memory due to dtype mismatch
     >>> t2 = torch.asarray(array, dtype=torch.float32)
-    >>> array.__array_interface__['data'][0] == t1.data_ptr()
+    >>> array.__array_interface__['data'][0] == t2.data_ptr()
     False
 """)
 
@@ -2271,7 +2271,7 @@ Example::
     tensor([[-0.4033, -0.5966],
             [ 0.1820, -0.8567],
             [ 1.1006, -1.0712]])
-    >>> torch.cholesky_solve(b, u)
+    >>> torch.cholesky_solve(b, u)  # doctest: +SKIP
     tensor([[-7.7027,  6.5527],
             [ 8.6018, -7.5159],
             [ 9.5911, -8.2100]])
@@ -4309,14 +4309,14 @@ Example::
     ...                   [-1.56,  4.00, -8.67,  1.75,  2.86],
     ...                   [9.81, -4.09, -4.57, -8.61,  8.99]]).t()
     >>> X, LU = torch.solve(B, A)
-    >>> torch.dist(B, torch.mm(A, X))
+    >>> torch.dist(B, torch.mm(A, X))  # doctest: +SKIP
     tensor(7.0977e-06)
 
     >>> # Batched solver example
     >>> A = torch.randn(2, 3, 1, 4, 4)
     >>> B = torch.randn(2, 3, 1, 4, 6)
     >>> X, LU = torch.solve(B, A)
-    >>> torch.dist(B, A.matmul(X))
+    >>> torch.dist(B, A.matmul(X))  # doctest: +SKIP
     tensor(2.5960e-06)
 """)
 
@@ -5645,7 +5645,7 @@ Examples::
             [[-1.2427, -0.4762],
              [ 0.0000, -1.2423]]])
     >>> A_ = torch.bmm(P, torch.bmm(A_L, A_U))
-    >>> torch.norm(A_ - A)
+    >>> torch.norm(A_ - A)  # doctest: +SKIP
     tensor(8.4294e-08)
 """.format(**common_args))
 
@@ -5683,7 +5683,7 @@ Example::
     >>> b = torch.randn(2, 3, 1)
     >>> A_LU = torch.lu(A)
     >>> x = torch.lu_solve(b, *A_LU)
-    >>> torch.norm(torch.bmm(A, x) - b)
+    >>> torch.norm(torch.bmm(A, x) - b)  # doctest: +SKIP
     tensor(6.4300e-07)
 """.format(**common_args))
 
@@ -9415,11 +9415,11 @@ Example::
     tensor([[-0.4893,  0.3393,  0.8034],
             [ 0.1338, -0.8811,  0.4536],
             [ 0.8618,  0.3294,  0.3858]])
-    >>> torch.dist(a, torch.mm(torch.mm(u, torch.diag(s)), v.t()))
+    >>> torch.dist(a, torch.mm(torch.mm(u, torch.diag(s)), v.t()))  # doctest: +SKIP
     tensor(9.2819e-07)
     >>> a_big = torch.randn(7, 5, 3)
     >>> u, s, v = torch.svd(a_big)
-    >>> torch.dist(a_big, torch.matmul(torch.matmul(u, torch.diag_embed(s)), v.transpose(-2, -1)))
+    >>> torch.dist(a_big, torch.matmul(torch.matmul(u, torch.diag_embed(s)), v.transpose(-2, -1)))  # doctest: +SKIP
     tensor(3.2067e-06)
 
 .. _the resulting vectors will span the same subspace:
