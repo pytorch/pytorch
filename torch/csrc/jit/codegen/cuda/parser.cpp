@@ -1862,6 +1862,10 @@ class IrParser {
               value_map.emplace(node->output()->unique(), output);
             },
             [](const Node* node) -> bool {
+              if (is_zero_dim_tensor(
+                      node->input(0)->type()->cast<TensorType>())) {
+                return false;
+              }
               if (node->inputs()[1]->node()->kind() != prim::Constant) {
                 return false;
               }
@@ -1902,6 +1906,10 @@ class IrParser {
             value_map.emplace(node->output()->unique(), output);
           },
           [](const Node* node) -> bool {
+            if (is_zero_dim_tensor(
+                    node->input(0)->type()->cast<TensorType>())) {
+              return false;
+            }
             if (node->inputs()[1]->node()->kind() != prim::Constant) {
               return false;
             }
@@ -1955,6 +1963,10 @@ class IrParser {
               value_map.emplace(node->output()->unique(), grad_input);
             },
             [](const Node* node) -> bool {
+              if (is_zero_dim_tensor(
+                      node->input(0)->type()->cast<TensorType>())) {
+                return false;
+              }
               if (node->inputs()[2]->node()->kind() != prim::Constant) {
                 return false;
               }
@@ -2051,20 +2063,20 @@ class IrParser {
             value_map.emplace(node->output()->unique(), out);
           },
           [](const Node* node) -> bool {
+            if (is_zero_dim_tensor(
+                    node->input(0)->type()->cast<TensorType>())) {
+              return false;
+            }
             // TODO: support cast of output types
             if (!node->inputs()[3]->type()->isSubtypeOf(
                     static_cast<c10::TypePtr>(NoneType::get()))) {
               // We can only handle output as half, float, and double;
               if (const auto opt_ivalue = toIValue(node->input(3))) {
                 const auto scalar_type = opt_ivalue->toScalarType();
-                if (scalar_type == at::ScalarType::Double ||
-                    scalar_type == at::ScalarType::Float ||
-                    scalar_type == at::ScalarType::BFloat16 ||
-                    scalar_type == at::ScalarType::Half) {
-                  return true;
+                if (!at::isFloatingType(scalar_type)) {
+                  return false;
                 }
               }
-              return false;
             }
             // we don't support dynamic reduction axes;
             if (node->inputs()[1]->node()->kind() != prim::Constant) {
@@ -2125,20 +2137,20 @@ class IrParser {
             value_map.emplace(node->output()->unique(), out);
           },
           [](const Node* node) -> bool {
+            if (is_zero_dim_tensor(
+                    node->input(0)->type()->cast<TensorType>())) {
+              return false;
+            }
             // TODO: support cast of output types
             if (!node->inputs()[3]->type()->isSubtypeOf(
                     static_cast<c10::TypePtr>(NoneType::get()))) {
               // We can only handle output as half, float, and double;
               if (const auto opt_ivalue = toIValue(node->input(3))) {
                 const auto scalar_type = opt_ivalue->toScalarType();
-                if (scalar_type == at::ScalarType::Double ||
-                    scalar_type == at::ScalarType::Float ||
-                    scalar_type == at::ScalarType::BFloat16 ||
-                    scalar_type == at::ScalarType::Half) {
-                  return true;
+                if (!at::isFloatingType(scalar_type)) {
+                  return false;
                 }
               }
-              return false;
             }
             // we don't support dynamic reduction axes;
             if (node->inputs()[1]->node()->kind() != prim::Constant) {
@@ -2183,13 +2195,15 @@ class IrParser {
               }
             },
             [](const Node* node) -> bool {
+              if (is_zero_dim_tensor(
+                      node->input(0)->type()->cast<TensorType>())) {
+                return false;
+              }
               // we don't support dynamic reduction axes;
               if (node->inputs()[1]->node()->kind() != prim::Constant) {
                 return false;
               }
               return true;
-              // auto size_to = constant_as<c10::List<int64_t>>(node->input(1));
-              // return size_to.has_value() && !size_to->empty();
             },
             [](const Node* node) -> OperatorType {
               auto size_to = constant_as<c10::List<int64_t>>(node->input(1));
@@ -2472,6 +2486,10 @@ class IrParser {
             value_map.emplace(node->output()->unique(), out);
           },
           [](const Node* node) -> bool {
+            if (is_zero_dim_tensor(
+                    node->input(0)->type()->cast<TensorType>())) {
+              return false;
+            }
             // we don't support dynamic reduction axes;
             if (node->inputs()[1]->node()->kind() != prim::Constant) {
               return false;
@@ -2725,7 +2743,6 @@ class IrParser {
           nhwc_stride_vec[i]->stride_index_ = n_dim - i - 1;
         }
 
-        // auto updated_tensor_type = c10::TensorType::create(
         tensor_type = c10::TensorType::create(
             tensor_type->scalarType(),
             tensor_type->device(),

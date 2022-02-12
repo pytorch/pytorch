@@ -3858,6 +3858,27 @@ class TestCudaFuser(JitTestCase):
     @unittest.skipIf(not RUN_CUDA, "requires CUDA")
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
                      "Requires fusion optimization pass to be effective")
+    def test_scalar_cuda_tensor(self):
+        x = torch.tensor(2.0, device="cuda")
+
+        with nvfuser_singleton_fusion(True):
+            def t(x):
+                return x + 1.0
+
+            t_jit = torch.jit.script(t)
+            self._run_helper(t_jit, t, x)
+
+            @torch.jit.script
+            def t_jitted(x):
+                return x.sum(0)
+
+            for i in range(5):
+                t_jitted(x)
+            self.assertGraphContainsExactly(t_jitted.graph_for(x), FUSION_GUARD, 0)
+
+    @unittest.skipIf(not RUN_CUDA, "requires CUDA")
+    @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
+                     "Requires fusion optimization pass to be effective")
     def test_reduction_empty_axes(self):
         x = torch.randn(4, 2, 3, device="cuda").permute([1, 2, 0])
 

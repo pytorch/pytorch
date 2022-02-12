@@ -143,6 +143,11 @@ void debugPrint(const c10::TensorTypePtr& type) {
 }
 #pragma clang diagnostic pop
 
+bool is_zero_dim_tensor(const std::shared_ptr<c10::TensorType>& tensor_type) {
+  return tensor_type && tensor_type->dim().has_value() &&
+      tensor_type->dim().value() == 0;
+}
+
 bool is_cpu_scalar(const at::Tensor& tensor) {
   return tensor.device().is_cpu() && tensor.numel() == 1 && tensor.dim() == 0;
 }
