@@ -17,6 +17,7 @@
     - [Mixing eager mode and scripting autocast](#mixing-eager-mode-and-scripting-autocast)
     - [Mixing tracing and scripting autocast (script calling traced)](#mixing-tracing-and-scripting-autocast-script-calling-traced)
     - [Mixing tracing and scripting autocast (traced calling script)](#mixing-tracing-and-scripting-autocast-traced-calling-script)
+    - [Mixing eager autocast and scripting](#mixing-eager-autocast-and-scripting)
 - [References](#references)
 
 <!-- /code_chunk_output -->
@@ -167,6 +168,32 @@ def traced(a, b):
 
 # running TorchScript with Autocast enabled is not supported
 torch.jit.trace(traced, (x, y))
+```
+
+#### Mixing eager autocast and scripting
+
+Calling un-autocast scripted functions while using eager autocast has some
+limitations:
+
+```python
+import torch
+
+x = torch.rand(5, dtype=torch.float, device='cuda', requires_grad=True)
+A = torch.rand((5, 5), dtype=torch.float, device='cuda', requires_grad=True)
+b = torch.rand(5, dtype=torch.float, device='cuda', requires_grad=True)
+target = torch.rand(5, dtype=torch.float, device='cuda')
+
+@torch.jit.script
+def f(x, A, b):
+    y = torch.nn.functional.layer_norm(x, (5,))
+    z = torch.nn.functional.linear(y, A, b)
+    return z.mean()
+
+with torch.cuda.amp.autocast():
+    res = f(x, A, b)
+    res.backward()
+    res = f(x, A, b)
+    res.backward()
 ```
 
 ## References
