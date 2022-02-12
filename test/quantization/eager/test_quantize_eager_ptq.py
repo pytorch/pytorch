@@ -3,7 +3,6 @@
 import torch
 import torch.nn as nn
 import torch.nn.quantized as nnq
-import torch.nn.quantized._reference as nnqr
 from torch.nn.utils.rnn import PackedSequence
 from torch.ao.quantization import (
     quantize,
