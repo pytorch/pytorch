@@ -340,7 +340,7 @@ def instantiate_configs():
 
         gpu_resource = None
         if cuda_version and cuda_version != "10":
-            gpu_resource = "nvidia.medium"
+            gpu_resource = "nvidia.small"
 
         c = Conf(
             distro_name,
