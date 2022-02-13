@@ -1076,7 +1076,7 @@ Example::
     >>> c = torch.asarray(a, copy=True)
     >>> a.data_ptr() == c.data_ptr()
     False
-    >>> a = torch.tensor([1, 2, 3], requires_grad=True, dtype=torch.float).float()
+    >>> a = torch.tensor([1, 2, 3], requires_grad=True, dtype=torch.float)
     >>> b = a + 2
     >>> b
     tensor([3., 4., 5.], grad_fn=<AddBackward0>)
@@ -3177,15 +3177,19 @@ Examples::
 add_docstr(torch.diagonal_scatter,
            r"""
 diagonal_scatter(input, src, offset=0, dim1=0, dim2=1) -> Tensor
+
 Embeds the values of the :attr:`src` tensor into :attr:`input` along
 the diagonal elements of :attr:`input`, with respect to :attr:`dim1`
 and :attr:`dim2`.
+
 This function returns a tensor with fresh storage; it does not
 return a view.
+
 The argument :attr:`offset` controls which diagonal to consider:
 - If :attr:`offset` = 0, it is the main diagonal.
 - If :attr:`offset` > 0, it is above the main diagonal.
 - If :attr:`offset` < 0, it is below the main diagonal.
+
 Args:
     {input} Must be at least 2-dimensional.
     src (Tensor): the tensor to embed into :attr:`input`.
@@ -3195,10 +3199,12 @@ Args:
         take diagonal. Default: 0.
     dim2 (int, optional): second dimension with respect to which to
         take diagonal. Default: 1.
+
 .. note::
     :attr:`src` must be of the proper size in order to be embedded
     into :attr:`input`. Specifically, it should have the same shape as
     ``torch.diagonal(input, offset, dim1, dim2)``
+
 Examples::
     >>> a = torch.zeros(3, 3)
     >>> a
@@ -3661,6 +3667,7 @@ quotient towards zero. Equivalently, it truncates the quotient(s):
     \text{{out}}_i = \text{trunc} \left( \frac{{\text{{input}}_i}}{{\text{{other}}_i}} \right)
 
 """ + r"""
+
 Supports broadcasting to a common shape, type promotion, and integer and float inputs.
 
 Args:
@@ -3693,11 +3700,6 @@ This function may be defined in terms of :func:`torch.div` as
 .. code:: python
 
     torch.fmod(a, b) == a - a.div(b, rounding_mode="trunc") * b
-
-.. seealso::
-
-    :func:`torch.remainder` which implements Python's modulus operator.
-    This one is defined using division rounding down the result.
 
 Supports :ref:`broadcasting to a common shape <broadcasting-semantics>`,
 :ref:`type promotion <type-promotion-doc>`, and integer and float inputs.
@@ -6015,11 +6017,15 @@ Example::
 
 add_docstr(torch.mean, r"""
 mean(input, *, dtype=None) -> Tensor
+
 Returns the mean value of all elements in the :attr:`input` tensor.
+
 Args:
     {input}
+
 Keyword args:
     {dtype}
+
 Example::
     >>> a = torch.randn(1, 3)
     >>> a
@@ -6028,19 +6034,24 @@ Example::
     tensor(-0.3104)
 .. function:: mean(input, dim, keepdim=False, *, dtype=None, out=None) -> Tensor
    :noindex:
+
 Returns the mean value of each row of the :attr:`input` tensor in the given
 dimension :attr:`dim`. If :attr:`dim` is a list of dimensions,
 reduce over all of them.
 {keepdim_details}
+
 Args:
     {input}
     {dim}
     {keepdim}
+
 Keyword args:
     {dtype}
     {out}
+
 .. seealso::
     :func:`torch.nanmean` computes the mean value of `non-NaN` elements.
+
 Example::
     >>> a = torch.randn(4, 4)
     >>> a
@@ -6057,8 +6068,7 @@ Example::
             [-0.2148]])
 """.format(**multi_dim_common))
 
-add_docstr(torch.nanmean,
-           r"""
+add_docstr(torch.nanmean, r"""
 nanmean(input, dim=None, keepdim=False, *, dtype=None, out=None) -> Tensor
 
 Computes the mean of all `non-NaN` elements along the specified dimensions.
@@ -6319,6 +6329,9 @@ Args:
     {keepdim}
 
 Keyword arguments:
+    interpolation (string): interpolation method to use when the desired quantile lies between two data points.
+                            Can be ``linear``, ``lower``, ``higher``, ``midpoint`` and ``nearest``.
+                            Default is ``linear``.
     {out}
 
 Example::
@@ -11335,7 +11348,7 @@ If the `repeats` is `tensor([n1, n2, n3, ...])`, then the output will be
 """.format(**common_args))
 
 add_docstr(torch.tile, r"""
-tile(input, dims) -> Tensortor
+tile(input, dims) -> Tensor
 
 Constructs a tensor by repeating the elements of :attr:`input`.
 The :attr:`dims` argument specifies the number of repetitions
