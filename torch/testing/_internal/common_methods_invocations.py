@@ -1618,7 +1618,6 @@ op_db: List[OpInfo] = [
                      supports_tensor_out=True,
                      check_batched_gradgrad=False,
                      test_inplace_grad=False,
-                     check_batched_gradgrad=False,
                      decorators=[
                          DecorateInfo(
                              precisionOverride({torch.float: 1e-4, torch.cfloat: 1e-4}),
