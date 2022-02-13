@@ -167,7 +167,7 @@ def skip_if_win32():
     )
 
 TIMEOUT_DEFAULT = 100
-TIMEOUT_OVERRIDE = {"test_ddp_uneven_inputs": 400}
+TIMEOUT_OVERRIDE = {"test_ddp_uneven_inputs": 400, "test_multiple_backward": 400}
 
 
 def create_device(interface=None):
