@@ -2830,6 +2830,28 @@ TEST(TestConstant, TensorGrad) {
   ASSERT_TRUE(con == c10::nullopt);
 }
 
+// The illustratory change in RemoveTensorMutation shows that even if
+// transpose_ shouldn't have been changed to transpose, the current
+// code is changing it to transpose, so the last add would've read a
+// stale value of x.3
+TEST(TestMutation, Basic) {
+  auto graph = std::make_shared<Graph>();
+  std::unordered_map<std::string, Value*> vmap;
+  parseIR(
+      R"IR(
+graph(%x.1 : Tensor):
+  %2 : int = prim::Constant[value=0]()
+  %9 : int = prim::Constant[value=1]()
+  %x.3 : Tensor = aten::add(%x.1, %2, %2)
+  %7 : Tensor = aten::transpose_(%x.3, %2, %9)
+  %y.1 : Tensor = aten::add(%x.3, %9, %2)
+  return (%y.1))IR",
+      &*graph,
+      vmap);
+  RemoveTensorMutation(graph, [](Node*) { return true; });
+  testing::FileCheck().check_not("aten::transpose_")->run(*graph);
+}
+
 TEST(TestMutation, Basic) {
   auto graph = std::make_shared<Graph>();
   std::unordered_map<std::string, Value*> vmap;
