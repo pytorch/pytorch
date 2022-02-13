@@ -862,6 +862,41 @@ def sum_mapper(node: torch.fx.Node, mod: torch.fx.GraphModule) -> torch.fx.Node:
 
 @register_acc_op_properties(AccOpProperty.unary)
 @register_acc_op
+def prod(*, input, dim=None, keepdim=False, dtype=None):
+    if dim is not None:
+        return torch.prod(input, dim=dim, keepdim=keepdim, dtype=dtype)
+    else:
+        return input.prod(dtype=dtype)
+
+@register_custom_acc_mapper_fn(
+    op_and_target=("call_method", "prod"),
+    arg_replacement_tuples=[
+        ("input", "input"),
+        ("dim", "dim", this_arg_is_optional),
+        ("keepdim", "keepdim", this_arg_is_optional),
+        ("dtype", "dtype", this_arg_is_optional),
+    ],
+)
+@register_custom_acc_mapper_fn(
+    op_and_target=("call_function", torch.prod),
+    arg_replacement_tuples=[
+        ("input", "input"),
+        ("dim", "dim", this_arg_is_optional),
+        ("keepdim", "keepdim", this_arg_is_optional),
+        ("dtype", "dtype", this_arg_is_optional),
+    ],
+)
+def prod_mapper(node: torch.fx.Node, mod: torch.fx.GraphModule) -> torch.fx.Node:
+    func = prod
+    with node.graph.inserting_before(node):
+        kwargs = dict(node.kwargs)
+        new_node = node.graph.call_function(func, kwargs=kwargs)
+        new_node.meta = node.meta.copy()
+        return new_node
+
+
+@register_acc_op_properties(AccOpProperty.unary)
+@register_acc_op
 def mean(*, input, dim=None, keepdim=False, dtype=None):
     if dim is not None:
         return torch.mean(input, dim=dim, keepdim=keepdim, dtype=dtype)
@@ -1099,6 +1134,7 @@ def abs(*, input):
 
 
 @register_acc_op_properties(AccOpProperty.pointwise, AccOpProperty.unary)
+@register_acc_op_mapping(op_and_target=("call_function", operator.neg))
 @register_acc_op_mapping(op_and_target=("call_function", torch.neg))
 @register_acc_op
 def neg(*, input):
@@ -1508,6 +1544,13 @@ def topk(*, input, k, dim, largest, sorted):
 @register_acc_op
 def getitem(*, input, idx):
     return input[idx]
+
+
+@register_acc_op_mapping(op_and_target=("call_function", torch.nan_to_num))
+@register_acc_op_mapping(op_and_target=("call_method", "nan_to_num"))
+@register_acc_op
+def nan_to_num(*, input, nan=0.0, posinf=None, neginf=None):
+    return torch.nan_to_num(input, nan=nan, posinf=posinf, neginf=neginf)
 
 
 @register_acc_op_properties(AccOpProperty.unary)
