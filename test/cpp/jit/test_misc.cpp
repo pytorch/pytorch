@@ -2849,7 +2849,7 @@ graph(%x.1 : Tensor):
       &*graph,
       vmap);
   RemoveTensorMutation(graph, [](Node*) { return true; });
-  testing::FileCheck().check_not("aten::transpose_")->run(*graph);
+  testing::FileCheck().check("aten::transpose_")->run(*graph);
 }
 
 TEST(TestMutation, Basic) {
