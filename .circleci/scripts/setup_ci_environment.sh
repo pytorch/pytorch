@@ -78,7 +78,7 @@ if [[ "${BUILD_ENVIRONMENT}" == *-build ]]; then
   add_to_env_file MAX_JOBS "${MAX_JOBS}"
 
   if [ -n "${USE_CUDA_DOCKER_RUNTIME:-}" ]; then
-    add_to_env_file TORCH_CUDA_ARCH_LIST 6.1
+    add_to_env_file TORCH_CUDA_ARCH_LIST 5.2
   fi
 
   if [[ "${BUILD_ENVIRONMENT}" == *xla* ]]; then
