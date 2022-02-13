@@ -1,3 +1,5 @@
+# Owner(s): ["module: tests"]
+
 from torch.testing._internal.common_utils import TestCase, run_tests
 from torch import _torch_docs
 import doctest
