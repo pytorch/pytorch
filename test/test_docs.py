@@ -2,7 +2,6 @@ from torch.testing._internal.common_utils import TestCase, run_tests
 from torch import _torch_docs
 import doctest
 import torch
-import torch.nn.functional as F
 import math
 import numpy
 import itertools
@@ -66,9 +65,12 @@ class DoctTestVisitor(ast.NodeVisitor):
             (?:\n           [ ]*  \.\.\. .*)*)  # PS2 lines
         \n?
         # Want consists of any non-blank lines that do not start with PS1.
-        (?P<want> (?:(?!\.\.[ ])  # Not the start of a new section
-                     (?![ ]*>>>)  # Not a line starting with PS1 (including blanklines)
-                     .+$\n?       # But any other line
+        (?P<want> (?:(?!\.\.[ ])        # Not the start of a new section
+                     (?![ ]*>>>)        # Not a line starting with PS1
+                     # But any other line that startswith some whitespace, including empty
+                     # lines to allow for tensors with many axes as these tend to include
+                     # empty lines when printed. 
+                     ([ ]+.+$\n?|\n)?   
                   )*)
         ''', re.MULTILINE | re.VERBOSE)
         self.runner = doctest.DocTestRunner(
@@ -82,8 +84,8 @@ class DoctTestVisitor(ast.NodeVisitor):
         docstring_node = find_docstring_node(node)
         if docstring_node is not None:
             documented_function = joinattr(node.args[0])
-            globs = {'torch': torch, 'math': math, 'F': torch.nn.functional,
-                'numpy': numpy, 'itertools': itertools}
+            globs = {"torch": torch, "math": math, "F": torch.nn.functional,
+                     "numpy": numpy, "itertools": itertools}
             test = self.parser.get_doctest(
                 docstring_node.s,
                 globs=globs,
@@ -93,7 +95,10 @@ class DoctTestVisitor(ast.NodeVisitor):
             )
             if test.examples:
                 test.examples = [
-                    doctest.Example(source="torch.manual_seed(0)\n", want="<torch._C.Generator object at 0x...>")
+                    doctest.Example(
+                        source="torch.manual_seed(0)\n",
+                        want="<torch._C.Generator object at 0x...>"
+                    )
                 ] + test.examples
             results = self.runner.run(test)
             self.num_attempted += results.attempted

@@ -3003,8 +3003,7 @@ Get the square matrix where the input vector is the diagonal::
             [ 0.0000,  0.0000,  0.0000, -2.1788],
             [ 0.0000,  0.0000,  0.0000,  0.0000]])
 
-Get the k-th diagonal of a given matrix::
-
+    >>> # Get the k-th diagonal of a given matrix:
     >>> a = torch.randn(3, 3)
     >>> a
     tensor([[ 0.5684, -1.0845, -1.3986],
@@ -3058,7 +3057,7 @@ Example::
     tensor([[[ 1.5410,  0.0000,  0.0000],
              [ 0.0000, -0.2934,  0.0000],
              [ 0.0000,  0.0000, -2.1788]],
-    
+
             [[ 0.5684,  0.0000,  0.0000],
              [ 0.0000, -1.0845,  0.0000],
              [ 0.0000,  0.0000, -1.3986]]])
@@ -3066,13 +3065,13 @@ Example::
     >>> torch.diag_embed(a, offset=1, dim1=0, dim2=2)
     tensor([[[ 0.0000,  1.5410,  0.0000,  0.0000],
              [ 0.0000,  0.5684,  0.0000,  0.0000]],
-    
+
             [[ 0.0000,  0.0000, -0.2934,  0.0000],
              [ 0.0000,  0.0000, -1.0845,  0.0000]],
-    
+
             [[ 0.0000,  0.0000,  0.0000, -2.1788],
              [ 0.0000,  0.0000,  0.0000, -1.3986]],
-    
+
             [[ 0.0000,  0.0000,  0.0000,  0.0000],
              [ 0.0000,  0.0000,  0.0000,  0.0000]]])
 """.format(**common_args))
@@ -3484,7 +3483,7 @@ Example::
             [3., 0.]], dtype=torch.float64)
     >>> v
     tensor([], dtype=torch.float64)
-    
+
     >>> # Compute also the eigenvectors:
     >>> e, v = torch.eig(a, eigenvectors=True)
     >>> e
@@ -6096,7 +6095,7 @@ Example::
     >>> x.nanmean(dim=0)
     tensor([1.0000, 1.5000, 2.5000])
 
-    # If all elements in the reduced dimensions are NaN then the result is NaN
+    >>> # If all elements in the reduced dimensions are NaN then the result is NaN
     >>> torch.tensor([torch.nan]).nanmean()
     tensor(nan)
 """.format(**multi_dim_common))
@@ -6279,10 +6278,10 @@ Example::
     >>> torch.quantile(a, q, dim=1, keepdim=True)
     tensor([[[-1.2361],
              [-1.2416]],
-     
+
             [[-0.2934],
              [-1.0845]],
-    
+
             [[ 0.6238],
              [-0.2580]]])
     >>> torch.quantile(a, q, dim=1, keepdim=True).shape
@@ -6904,10 +6903,10 @@ Examples::
     >>> t
     tensor([[[ 1.5410],
              [-0.2934]],
-    
+
             [[-2.1788],
              [ 0.5684]],
-    
+
             [[-1.0845],
              [-1.3986]]])
     >>> torch.movedim(t, 1, 0).shape
@@ -6916,7 +6915,7 @@ Examples::
     tensor([[[ 1.5410],
              [-2.1788],
              [-1.0845]],
-    
+
             [[-0.2934],
              [ 0.5684],
              [-1.3986]]])
@@ -6924,7 +6923,7 @@ Examples::
     torch.Size([2, 1, 3])
     >>> torch.movedim(t, (1, 2), (0, 1))
     tensor([[[ 1.5410, -2.1788, -1.0845]],
-    
+
             [[-0.2934,  0.5684, -1.3986]]])
 """.format(**common_args))
 
@@ -6941,10 +6940,10 @@ Examples::
     >>> t
     tensor([[[ 1.5410],
              [-0.2934]],
-    
+
             [[-2.1788],
              [ 0.5684]],
-    
+
             [[-1.0845],
              [-1.3986]]])
     >>> torch.moveaxis(t, 1, 0).shape
@@ -6953,7 +6952,7 @@ Examples::
     tensor([[[ 1.5410],
              [-2.1788],
              [-1.0845]],
-    
+
             [[-0.2934],
              [ 0.5684],
              [-1.3986]]])
@@ -6961,7 +6960,7 @@ Examples::
     torch.Size([2, 1, 3])
     >>> torch.moveaxis(t, (1, 2), (0, 1))
     tensor([[[ 1.5410, -2.1788, -1.0845]],
-    
+
             [[-0.2934,  0.5684, -1.3986]]])
 """.format(**common_args))
 
@@ -6978,19 +6977,19 @@ Examples::
     >>> x
     tensor([[[0, 1],
              [2, 3]],
-    
+
             [[4, 5],
              [6, 7]]])
     >>> torch.swapdims(x, 0, 1)
     tensor([[[0, 1],
              [4, 5]],
-    
+
             [[2, 3],
              [6, 7]]])
     >>> torch.swapdims(x, 0, 2)
     tensor([[[0, 4],
              [2, 6]],
-    
+
             [[1, 5],
              [3, 7]]])
 """.format(**common_args))
@@ -7008,19 +7007,19 @@ Examples::
     >>> x
     tensor([[[0, 1],
              [2, 3]],
-    
+
             [[4, 5],
              [6, 7]]])
     >>> torch.swapaxes(x, 0, 1)
     tensor([[[0, 1],
              [4, 5]],
-    
+
             [[2, 3],
              [6, 7]]])
     >>> torch.swapaxes(x, 0, 2)
     tensor([[[0, 4],
              [2, 6]],
-    
+
             [[1, 5],
              [3, 7]]])
 """.format(**common_args))
@@ -8969,20 +8968,20 @@ Example::
            device='cuda:0', size=(2, 4), nnz=3, dtype=torch.float64,
            layout=torch.sparse_coo)
 
-    # Create an empty sparse tensor with the following invariants:
-    #   1. sparse_dim + dense_dim = len(SparseTensor.shape)
-    #   2. SparseTensor._indices().shape = (sparse_dim, nnz)
-    #   3. SparseTensor._values().shape = (nnz, SparseTensor.shape[sparse_dim:])
-    #
-    # For instance, to create an empty sparse tensor with nnz = 0, dense_dim = 0 and
-    # sparse_dim = 1 (hence indices is a 2D tensor of shape = (1, 0))
+    >>> # Create an empty sparse tensor with the following invariants:
+    >>> #   1. sparse_dim + dense_dim = len(SparseTensor.shape)
+    >>> #   2. SparseTensor._indices().shape = (sparse_dim, nnz)
+    >>> #   3. SparseTensor._values().shape = (nnz, SparseTensor.shape[sparse_dim:])
+    >>> #
+    >>> # For instance, to create an empty sparse tensor with nnz = 0, dense_dim = 0 and
+    >>> # sparse_dim = 1 (hence indices is a 2D tensor of shape = (1, 0))
     >>> torch.sparse_coo_tensor(torch.empty([1, 0]), [], [1])
     tensor(indices=tensor([], size=(1, 0)),
            values=tensor([], size=(0,)),
            size=(1,), nnz=0, layout=torch.sparse_coo)
 
-    # and to create an empty sparse tensor with nnz = 0, dense_dim = 1 and
-    # sparse_dim = 1
+    >>> # and to create an empty sparse tensor with nnz = 0, dense_dim = 1 and
+    >>> # sparse_dim = 1
     >>> torch.sparse_coo_tensor(torch.empty([1, 0]), torch.empty([0, 2]), [1, 2])
     tensor(indices=tensor([], size=(1, 0)),
            values=tensor([], size=(0, 2)),
@@ -9579,13 +9578,13 @@ Example::
     >>> x
     tensor([[[0, 1],
              [2, 3]],
-    
+
             [[4, 5],
              [6, 7]]])
     >>> torch.flip(x, [0, 1])
     tensor([[[6, 7],
              [4, 5]],
-    
+
             [[2, 3],
              [0, 1]]])
 """.format(**common_args))
@@ -9720,13 +9719,13 @@ Example::
     >>> x
     tensor([[[0, 1],
              [2, 3]],
-    
+
             [[4, 5],
              [6, 7]]])
     >>> torch.rot90(x, 1, [1, 2])
     tensor([[[1, 3],
              [0, 2]],
-    
+
             [[5, 7],
              [4, 6]]])
 """.format(**common_args))
@@ -10326,7 +10325,7 @@ Example::
     >>> x
     tensor([[[ 1.5410, -0.2934],
              [-2.1788,  0.5684]],
-    
+
             [[-1.0845, -1.3986],
              [ 0.4033,  0.8380]]])
     >>> scales = (torch.randn(2) + 1) * 0.05
@@ -10338,7 +10337,7 @@ Example::
     >>> torch.fake_quantize_per_channel_affine(x, scales, zero_points, 1, 0, 255)
     tensor([[[1.5441, 0.0000],
              [0.0000, 0.5668]],
-    
+
             [[0.0000, 0.0000],
              [0.4177, 0.8353]]])
 """)
@@ -11499,14 +11498,14 @@ Example::
     >>> torch.quantized_batch_norm(qx, torch.ones(2), torch.zeros(2), torch.rand(2), torch.rand(2), 0.00001, 0.2, 2)
     tensor([[[[-0.4000,  2.0000],
               [-0.4000, -0.4000]],
-    
+
              [[-0.4000, -0.4000],
               [-0.4000,  1.4000]]],
-    
-    
+
+
             [[[-0.4000, -0.4000],
               [-0.4000, -0.4000]],
-    
+
              [[-0.4000, -0.4000],
               [-0.4000, -0.4000]]]], size=(2, 2, 2, 2), dtype=torch.quint8,
            quantization_scheme=torch.per_tensor_affine, scale=0.2, zero_point=2)
@@ -11562,12 +11561,12 @@ Example::
     >>> qx = torch.quantize_per_tensor(torch.rand(2, 2, 2, 2), 1.5, 3, torch.quint8)
     >>> torch.quantized_max_pool2d(qx, [2,2])
     tensor([[[[1.5000]],
-    
+
              [[1.5000]]],
-    
-    
+
+
             [[[0.0000]],
-    
+
              [[0.0000]]]], size=(2, 2, 1, 1), dtype=torch.quint8,
            quantization_scheme=torch.per_tensor_affine, scale=1.5, zero_point=3)
 """)
