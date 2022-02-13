@@ -2386,6 +2386,10 @@ std::tuple<Tensor, Tensor, Tensor> linalg_svd_jvp(const Tensor& dA,
   //      dX = dP - dS
   //      E_{jk} = S_k^2 - S_j^2 if j != k
   //               1             otherwise
+
+  // Checks compute_uv=true
+  TORCH_INTERNAL_ASSERT(U_.dim() >= 2 && Vh_.dim() >= 2);
+
   const auto is_complex = dA.is_complex();
   const auto m = dA.size(-2);
   const auto n = dA.size(-1);
@@ -2396,53 +2400,47 @@ std::tuple<Tensor, Tensor, Tensor> linalg_svd_jvp(const Tensor& dA,
   const auto V = Vh.mH();
 
   // dP = U^H dA V
-  const auto dP = m >= n ? at::matmul(U.mH(), at::matmul(dA, V))
-                         : at::matmul(at::matmul(U.mH(), dA), V);
+  auto dP = m >= n ? at::matmul(U.mH(), at::matmul(dA, V))
+                   : at::matmul(at::matmul(U.mH(), dA), V);
 
-  // We don't want dS to be a view into a larger tensor so we clone it
-  auto dS = is_complex ? at::real(dP.diagonal(0, -2, -1)).clone()
-                       : dP.diagonal(0, -2, -1).clone();
+  auto dS = is_complex ? at::real(dP.diagonal(0, -2, -1))
+                       : dP.diagonal(0, -2, -1);
 
   // dX = dP - dS
-  // Here we update dP in-place rather than
-  if (is_complex) {
-    at::real(dP.diagonal(0, -2, -1)).zero_();
-  } else {
-    dP.diagonal(0, -2, -1).zero_();
-  }
+  dP = dP - dS.diag_embed();
 
   auto E = [&S]{
     const auto S2 = S * S;
     auto ret = S2.unsqueeze(-2) - S2.unsqueeze(-1);
-    // Any number a != 0 would, as we are going to compute 0 / a
+    // Any number a != 0 would, as we are just going to use it to compute 0 / a later on
     ret.diagonal(0, -2, -1).fill_(1);
     return ret;
   }();
 
   const auto sym = [](const Tensor& X) { return X + X.mH(); };
 
-  // Im(diag(dP)) / (2S)
-  auto ImdiagdP2S = is_complex ? at::imag(dP.diagonal(0, -2, -1)).div(2. * S)
-                               : Tensor{};
+  // diag(dP) / (2S)
+  auto diagdP2S = is_complex ? dP.diagonal(0, -2, -1).div(2. * S)
+                             : Tensor{};
 
   // dU = U (sym(dP S) / E) + i Im(diag(dP)) / (2S)
   auto dU = [&] {
     auto dUaux = sym(dP * S.unsqueeze(-2)) / E;
     if (is_complex) {
-      at::imag(dUaux.diagonal(0, -2, -1)).copy_(ImdiagdP2S);
+      dUaux = dUaux + diagdP2S.diag_embed();
     }
     return at::matmul(U, dUaux);
   }();
   if (m > n) {
     // dU += (I_m - UU^H) dA V S^{-1}
     const auto dAVSinv = at::matmul(dA, V / S.unsqueeze(-2)) ;
-    dU += dAVSinv - at::matmul(U, at::matmul(U.mH(), dAVSinv));
+    dU = dU + dAVSinv - at::matmul(U, at::matmul(U.mH(), dAVSinv));
 
     // To "fix" the full_matrices case (the full_matrices case should not be differentiable...)
     if (full_matrices) {
       auto shape = dU.sizes().vec();
       shape.end()[-1] = m - n;
-      dU = at::cat({dU, at::zeros(shape, dU.options())}, /*dim=*/-1);
+      dU = at::cat({dU, dU.new_zeros(shape)}, /*dim=*/-1);
     }
   }
 
@@ -2451,20 +2449,20 @@ std::tuple<Tensor, Tensor, Tensor> linalg_svd_jvp(const Tensor& dA,
   auto dVh = [&] {
     auto dVhaux = sym(dP * (-S).unsqueeze(-1)) / E;
     if (is_complex) {
-      at::imag(dVhaux.diagonal(0, -2, -1)).copy_(ImdiagdP2S);
+      dVhaux = dVhaux + diagdP2S.diag_embed();
     }
     return at::matmul(dVhaux, Vh);
   }();
   if (m < n) {
     // dVh += S^{-1} U^H dA (I_n - VV^H)
     const auto UHdASinv = at::matmul(U.mH() / S.unsqueeze(-1), dA) ;
-    dVh += UHdASinv - at::matmul(at::matmul(UHdASinv, V), Vh);
+    dVh = dVh + UHdASinv - at::matmul(at::matmul(UHdASinv, V), Vh);
 
     // To "fix" the full_matrices case (the full_matrices case should not be differentiable...)
     if (full_matrices) {
       auto shape = dVh.sizes().vec();
       shape.end()[-2] = n - m;
-      dVh = at::cat({dVh, at::zeros(shape, dVh.options())}, /*dim=*/-2);
+      dVh = at::cat({dVh, dVh.new_zeros(shape)}, /*dim=*/-2);
     }
   }
 
@@ -2589,6 +2587,9 @@ Tensor svd_backward(const Tensor& gU,
   // where we have used that Im(diag(U^H gU)) = - Im(diag(V^h gV)) to group the diagonal imaginary terms into one
   // that just depends on U^H gU.
 
+  // Checks compute_uv=true
+  TORCH_INTERNAL_ASSERT(U.dim() >= 2 && Vh.dim() >= 2);
+
   // Trivial case
   if (!gS.defined() && !gU.defined() && !gVh.defined()) {
     return {};
@@ -2605,8 +2606,9 @@ Tensor svd_backward(const Tensor& gU,
   // At this point, at least one of gU, gVh is defined
 
   const bool is_complex = U.is_complex();
-  const auto UhgU = gU.defined() ? at::matmul(U.mH(), gU) : Tensor{};
-  const auto VhgV = gVh.defined() ? at::matmul(Vh, gVh.mH()) : Tensor{};
+  const auto skew = [](const Tensor& A) { return A - A.mH(); };
+  const auto UhgU = gU.defined() ? skew(at::matmul(U.mH(), gU)) : Tensor{};
+  const auto VhgV = gVh.defined() ? skew(at::matmul(Vh, gVh.mH())) : Tensor{};
 
   // Check for the invariance of the loss function, i.e.
   // Im(diag(U^H gU)) + Im(diag(V^H gV)) = 0
@@ -2622,12 +2624,10 @@ Tensor svd_backward(const Tensor& gU,
                 "it ill-defined.");
   }
 
-  // gA = (skew(U^H gU) / E) S +  S ((skew(V^H gV) / E) + I o (gS + i Im(diag(U^H gU)) / S)
+  // gA = ((U^H gU) / E) S +  S (((V^H gV) / E) + I o (gS + diag(U^H gU) / (2 * S))
   Tensor gA = [&] {
     // ret holds everything but the diagonal of gA
     auto ret = [&] {
-      const auto skew = [](const Tensor& A) { return A - A.mH(); };
-
       const auto E = [&S]{
         const auto S2 = S * S;
         auto ret = S2.unsqueeze(-2) - S2.unsqueeze(-1);
@@ -2638,31 +2638,20 @@ Tensor svd_backward(const Tensor& gU,
 
       if (gU.defined()) {
         if (gVh.defined()) {
-          return (skew(UhgU) * S.unsqueeze(-2) + S.unsqueeze(-1) * skew(VhgV)) / E;
+          return (UhgU * S.unsqueeze(-2) + S.unsqueeze(-1) * VhgV) / E;
         } else {
-          return (skew(UhgU) / E) * S.unsqueeze(-2);
+          return (UhgU / E) * S.unsqueeze(-2);
         }
       } else { // gVh.defined();
-        return S.unsqueeze(-1) * (skew(VhgV) / E);
+        return S.unsqueeze(-1) * (VhgV / E);
       }
     }();
     // Fill the diagonal
-    const auto diag = ret.diagonal(0, -2, -1);
+    if (gS.defined()) {
+      ret = ret + gS.diag_embed();
+    }
     if (is_complex && gU.defined() && gVh.defined()) {
-      if (gS.defined()) {
-        at::real(diag).copy_(gS);
-      } else {
-        // Not strictly necessary, but we do it for good measure
-        at::real(diag).zero_();
-      }
-      at::imag(diag).copy_(at::imag(UhgU.diagonal(0, -2, -1)) / S);
-    } else {
-      if (gS.defined()) {
-        diag.copy_(gS);
-      } else {
-        // Not strictly necessary, but we do it for good measure
-        diag.zero_();
-      }
+      ret = ret + (UhgU.diagonal(0, -2, -1) / (2. * S)).diag_embed();
     }
     return ret;
   }();

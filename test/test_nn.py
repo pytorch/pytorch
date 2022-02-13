@@ -44,7 +44,7 @@ from torch.testing._internal.common_cuda import TEST_CUDA, TEST_MULTIGPU, TEST_C
 from torch.testing._internal.common_nn import NNTestCase, NewModuleTest, CriterionTest, \
     module_tests, criterion_tests, loss_reference_fns, \
     ctcloss_reference, new_module_tests, single_batch_reference_fn
-from torch.testing._internal.common_device_type import instantiate_device_type_tests, dtypes, \
+from torch.testing._internal.common_device_type import expectedFailureXLA, instantiate_device_type_tests, dtypes, \
     dtypesIfCUDA, precisionOverride, skipCUDAIfNoCudnn, skipCUDAIfCudnnVersionLessThan, onlyCUDA, onlyCPU, \
     skipCUDAIfRocm, skipCUDAIf, skipCUDAIfNotRocm, skipCUDAIfRocmVersionLessThan, skipCUDAIfNotMiopenSuggestNHWC, \
     onlyNativeDeviceTypes, deviceCountAtLeast, largeTensorTest, expectedFailureMeta, skipMeta, get_all_device_types, \
@@ -137,6 +137,21 @@ class PackedSequenceTest(TestCase):
         self.assertRaises(
             RuntimeError,
             lambda: rnn_utils.pack_padded_sequence(b_a, [22, 25], enforce_sorted=True))
+
+    def test_pad_sequence_with_tensor_sequences(self):
+        seq_tuple_input = torch.nn.utils.rnn.pad_sequence(
+            (torch.tensor([[7, 6]]), torch.tensor([[-7, -1]]))
+        )
+        seq_tensor_input = torch.nn.utils.rnn.pad_sequence(
+            torch.tensor([[[7, 6]], [[-7, -1]]])
+        )
+        self.assertEqual(seq_tuple_input, seq_tensor_input)
+        self.assertEqual(seq_tuple_input.shape, torch.Size([1, 2, 2]))
+
+    def test_pad_sequence_with_non_iterable_sequences(self):
+        msg = r"Expected iterable for input sequences, but got arg of type"
+        with self.assertRaisesRegex(RuntimeError, msg):
+            torch.nn.utils.rnn.pad_sequence(5)
 
     def test_total_length(self):
         padded, lengths = self._padded_sequence(torch.FloatTensor)
@@ -1521,6 +1536,17 @@ class TestNN(NNTestCase):
         del n[1::2]
         self.assertEqual(n, nn.Sequential(l1, l3))
 
+    def test_Sequential_append(self):
+        l1 = nn.Linear(10, 20)
+        l2 = nn.Linear(20, 30)
+        l3 = nn.Linear(30, 40)
+        l4 = nn.Linear(40, 50)
+        n = nn.Sequential(l1, l2, l3)
+        n2 = n.append(l4)
+        self.assertEqual(n, nn.Sequential(l1, l2, l3, l4))
+        self.assertEqual(n2, nn.Sequential(l1, l2, l3, l4))
+        self.assertEqual(nn.Sequential(l1).append(l2).append(l4), nn.Sequential(l1, l2, l4))
+
     def test_ModuleList(self):
         modules = [nn.ReLU(), nn.Linear(5, 5)]
         module_list = nn.ModuleList(modules)
@@ -1699,7 +1725,7 @@ class TestNN(NNTestCase):
 
     def test_ParameterList(self):
         def make_param():
-            return Parameter(torch.randn(10, 10))
+            return Parameter(torch.randn(2, 2))
         parameters = [make_param(), make_param()]
         param_list = nn.ParameterList(parameters)
 
@@ -1707,7 +1733,7 @@ class TestNN(NNTestCase):
             self.assertEqual(len(parameters), len(param_list))
             for p1, p2 in zip(parameters, param_list):
                 self.assertIs(p1, p2)
-            for p1, p2 in zip(parameters, param_list.parameters()):
+            for p1, p2 in zip(filter(lambda x: isinstance(x, Parameter), parameters), param_list.parameters()):
                 self.assertIs(p1, p2)
             for i in range(len(parameters)):
                 self.assertIs(parameters[i], param_list[i])
@@ -1764,6 +1790,39 @@ class TestNN(NNTestCase):
         param_list.extend(s.parameters())
         check()
 
+        param_list.append(torch.rand(2, 2))
+        self.assertIsInstance(param_list[-1], Parameter)
+        parameters.append(param_list[-1])
+
+        param_list.extend([torch.rand(2, 2), "foo"])
+        self.assertIsInstance(param_list[-2], Parameter)
+        self.assertIsInstance(param_list[-1], str)
+        parameters.extend(param_list[-2:])
+
+        param_list += ["bar", torch.rand(2, 2)]
+        self.assertIsInstance(param_list[-2], str)
+        self.assertIsInstance(param_list[-1], Parameter)
+        parameters += param_list[-2:]
+        check()
+
+    def test_ParameterList_replication(self):
+        # The actual replication code from DP cannot be used on CPU so doing it manually here
+        def make_param():
+            return Parameter(torch.randn(2, 2))
+        parameters = [make_param(), make_param()]
+        param_list = nn.ParameterList(parameters)
+
+        new_param_list = param_list._replicate_for_data_parallel()
+
+        for n, p in param_list.named_parameters():
+            # Do a view here so that we can check the base later
+            setattr(new_param_list, n, p.view_as(p))
+
+        for p, p2 in zip(param_list, new_param_list):
+            self.assertEqual(p, p2)
+            self.assertIsNotNone(p2.grad_fn)
+            self.assertIs(p2._base, p)
+
     def test_ParameterDict(self):
         parameters = OrderedDict([
             ('p1', Parameter(torch.randn(10, 10))),
@@ -1775,7 +1834,8 @@ class TestNN(NNTestCase):
 
         def check():
             self.assertEqual(len(parameter_dict), len(parameters))
-            for k1, m2 in zip(parameters, parameter_dict.parameters()):
+            for i, (k1, (k2, m2)) in enumerate(zip(parameters, parameter_dict.named_parameters())):
+                self.assertEqual(k1, k2)
                 self.assertIs(parameters[k1], m2)
             for k1, k2 in zip(parameters, parameter_dict):
                 self.assertIs(parameters[k1], parameter_dict[k2])
@@ -1841,9 +1901,6 @@ class TestNN(NNTestCase):
         with self.assertRaises(ValueError):
             parameter_dict.update(Parameter(torch.randn(10, 10)))
 
-        with self.assertRaises(TypeError):
-            parameter_dict[1] = Parameter(torch.randn(10, 10))
-
         p_pop = parameter_dict.pop('p4')
         self.assertIs(p_pop, parameters['p4'])
         parameters.pop('p4')
@@ -1883,18 +1940,23 @@ class TestNN(NNTestCase):
         p_popitem = parameter_dict.popitem()
         self.assertEqual(p_popitem[0], 'p12')
         self.assertIs(p_popitem[1], p)
+        check()
 
         # Unit test for set_default
         # 1. Ensure parameter is correctly inserted when
         #    the key is not present in `ParameterDict`
         assert 'p11' not in parameter_dict
+        assert 'p11' not in parameters
         parameters['p11'] = Parameter(torch.randn(10, 10))
         p_setdefault = parameter_dict.setdefault('p11', parameters['p11'])
         self.assertIs(p_setdefault, parameters['p11'])
+        self.assertIs(p_setdefault, parameter_dict['p11'])
+        check()
         # 2. Ensure parameter is NOT inserted when the
         #    key is already present in `ParameterDict`
         p = Parameter(torch.randn(10, 10))
         self.assertFalse(parameter_dict.setdefault('p11', p) is p)
+        check()
         # 3. Ensure `None` is inserted when the key is not
         #    present in `Parameter` and parameter is not specified
         self.assertIs(parameter_dict.setdefault('p26'), None)
@@ -1970,6 +2032,37 @@ class TestNN(NNTestCase):
         parameter_dict2 = parameter_dict.fromkeys(['p19', 'p20'], temp_param)
         self.assertEqual({'p19': temp_param, 'p20': temp_param}, parameter_dict2)
         check()
+
+        parameter_dict['p21'] = torch.rand(2, 2)
+        self.assertIsInstance(parameter_dict['p21'], Parameter)
+        parameters['p21'] = parameter_dict['p21']
+
+        parameter_dict.update({'p22': torch.rand(2, 2), 'foo': 'bar'})
+        self.assertIsInstance(parameter_dict['p22'], Parameter)
+        self.assertIsInstance(parameter_dict['foo'], str)
+        parameters['p22'] = parameter_dict['p22']
+        parameters['foo'] = parameter_dict['foo']
+
+    def test_ParameterDict_replication(self):
+        # The actual replication code from DP cannot be used on CPU so doing it manually here
+        def make_param():
+            return Parameter(torch.randn(2, 2))
+        parameters = {"foo": make_param(), "bar": make_param()}
+        param_dict = nn.ParameterDict(parameters)
+
+        new_param_dict = param_dict._replicate_for_data_parallel()
+
+        for n, p in param_dict.named_parameters():
+            # Do a view here so that we can check the base later
+            setattr(new_param_dict, n, p.view_as(p))
+
+        for (k, p), (k2, p2) in zip(param_dict.items(), new_param_dict.items()):
+            self.assertEqual(k, k2)
+            self.assertEqual(p, p2)
+            self.assertIsNotNone(p2.grad_fn)
+            self.assertIs(p2._base, p)
+
+        self.assertEqual(param_dict["foo"], new_param_dict["foo"])
 
     def test_add_module(self):
         methods_to_test = ['add_module', 'register_module']
@@ -4095,10 +4188,6 @@ class TestNN(NNTestCase):
             mod.eval()
         self.assertTrue(len(w) == 0)
 
-        with self.assertWarnsRegex(UserWarning,
-                                   r"Setting attributes on ParameterList is not supported"):
-            torch.nn.utils.weight_norm(mod, "0")
-
         with warnings.catch_warnings(record=True) as w:
             mod = nn.ParameterDict({"a": nn.Parameter(torch.rand(2)), "b": nn.Parameter(torch.rand(2))})
         self.assertTrue(len(w) == 0)
@@ -4108,18 +4197,8 @@ class TestNN(NNTestCase):
             mod.eval()
         self.assertTrue(len(w) == 0)
 
-        with self.assertWarnsRegex(UserWarning,
-                                   r"Setting attributes on ParameterDict is not supported"):
-            torch.nn.utils.weight_norm(mod, "b")
-
     def test_parameterlistdict_pickle(self):
         m = nn.ParameterList(map(nn.Parameter, [torch.rand(2), torch.rand(2)]))
-        with warnings.catch_warnings(record=True) as w:
-            m = pickle.loads(pickle.dumps(m))
-        self.assertTrue(len(w) == 0)
-
-        m = nn.ParameterList(map(nn.Parameter, [torch.rand(2), torch.rand(2)]))
-        del m._initialized
         with warnings.catch_warnings(record=True) as w:
             m = pickle.loads(pickle.dumps(m))
         self.assertTrue(len(w) == 0)
@@ -4132,12 +4211,6 @@ class TestNN(NNTestCase):
         self.assertTrue(len(w) == 0)
 
         m = nn.ParameterDict({"a": nn.Parameter(torch.rand(2)), "b": nn.Parameter(torch.rand(2))})
-        with warnings.catch_warnings(record=True) as w:
-            m = pickle.loads(pickle.dumps(m))
-        self.assertTrue(len(w) == 0)
-
-        m = nn.ParameterDict({"a": nn.Parameter(torch.rand(2)), "b": nn.Parameter(torch.rand(2))})
-        del m._initialized
         with warnings.catch_warnings(record=True) as w:
             m = pickle.loads(pickle.dumps(m))
         self.assertTrue(len(w) == 0)
@@ -13773,6 +13846,29 @@ class TestNNDeviceType(NNTestCase):
             input = input.bfloat16()
             self._test_dropout(nn.Dropout, device, input)
 
+    def _test_dropoutNd_no_batch(self, dropout, input):
+        input_clone = input.clone()
+        with freeze_rng_state():
+            res_no_batch = dropout(input)
+
+        with freeze_rng_state():
+            res_batched = dropout(input_clone.unsqueeze(0)).squeeze(0)
+
+        self.assertEqual(res_no_batch, res_batched)
+
+    def _test_dropoutNd_channel_zero(self, dropout, input):
+        # Verify the number of zeros in a channel is 0 or the number of elements in the channel
+        # for a fully positive input tensor
+        shape = input.shape
+        B = shape[0]
+        C = shape[1]
+        channel_numel = torch.tensor(shape[2:]).prod()
+        result = dropout(input)
+
+        for b, c in product(range(B), range(C)):
+            self.assertTrue(result[b, c].count_nonzero() in (0, channel_numel))
+
+    @expectedFailureXLA  # seems like freeze_rng_state is not honoured by XLA
     def test_Dropout2d(self, device):
         b = random.randint(1, 5)
         w = random.randint(1, 5)
@@ -13785,10 +13881,23 @@ class TestNNDeviceType(NNTestCase):
         self._test_dropout_discontiguous(nn.Dropout2d, device)
         self._test_dropout_discontiguous(nn.Dropout2d, device, memory_format=torch.channels_last)
 
-        # no batch dims
-        input = torch.empty(20, 64, 64)
-        self._test_dropout(nn.Dropout2d, device, input)
+        with self.assertWarnsRegex(UserWarning, "Received a 5-D input to dropout2d"):
+            nn.Dropout2d(p=0.5)(torch.rand(1, 2, 2, 2, 2, device=device))
 
+        with self.assertWarnsRegex(UserWarning, "Received a 2-D input to dropout2d"):
+            nn.Dropout2d(p=0.5)(torch.rand(1, 2, device=device))
+
+        # no batch dims
+        input = torch.rand(50, 2, 2, device=device)
+        self._test_dropoutNd_no_batch(nn.Dropout2d(p=0.5), input)
+        self._test_dropoutNd_no_batch(nn.Dropout2d(p=0.5, inplace=True), input)
+
+        # check that complete channels are dropped
+        input = torch.ones(10, 4, 2, 2, device=device)
+        self._test_dropoutNd_channel_zero(nn.Dropout2d(p=0.5), input)
+        self._test_dropoutNd_channel_zero(nn.Dropout2d(p=0.5, inplace=True), input)
+
+    @expectedFailureXLA  # seems like freeze_rng_state is not honoured by XLA
     def test_Dropout3d(self, device):
         b = random.randint(1, 5)
         w = random.randint(1, 5)
@@ -13801,9 +13910,21 @@ class TestNNDeviceType(NNTestCase):
         self._test_dropout_discontiguous(nn.Dropout3d, device)
         self._test_dropout_discontiguous(nn.Dropout3d, device, memory_format=torch.channels_last)
 
+        with self.assertWarnsRegex(UserWarning, "Received a 6-D input to dropout3d"):
+            nn.Dropout3d(p=0.5)(torch.rand(1, 2, 2, 2, 2, 2, device=device))
+
+        with self.assertWarnsRegex(UserWarning, "Received a 3-D input to dropout3d"):
+            nn.Dropout3d(p=0.5)(torch.rand(1, 2, 2, device=device))
+
         # no batch dims
-        input = torch.empty(50, 20, 64, 64)
-        self._test_dropout(nn.Dropout3d, device, input)
+        input = torch.rand(50, 2, 2, 2, device=device)
+        self._test_dropoutNd_no_batch(nn.Dropout3d(p=0.5), input)
+        self._test_dropoutNd_no_batch(nn.Dropout3d(p=0.5, inplace=True), input)
+
+        # check that complete channels are dropped
+        input = torch.ones(10, 4, 2, 2, 2, device=device)
+        self._test_dropoutNd_channel_zero(nn.Dropout3d(p=0.5), input)
+        self._test_dropoutNd_channel_zero(nn.Dropout3d(p=0.5, inplace=True), input)
 
     def test_InstanceNorm1d_general(self, device):
         b = random.randint(3, 5)
@@ -15252,6 +15373,7 @@ class TestNNDeviceType(NNTestCase):
             with warnings.catch_warnings(record=True) as w:
                 out_t = F.interpolate(in_t, size=4, mode=mode)
                 out_uint8_t = F.interpolate(in_uint8_t, size=4, mode=mode)
+                self.assertEqual(len(w), 0)
             self.assertEqual(torch.ones(1, 2, 4, 4, device=device), out_t)
             self.assertEqual(torch.ones(1, 2, 4, 4, dtype=torch.uint8, device=device), out_uint8_t)
             # Assert that memory format is carried through to the output
@@ -15259,8 +15381,7 @@ class TestNNDeviceType(NNTestCase):
 
             # test forward when input's height is not same as width
             in_t = torch.ones(1, 2, 2, 1, device=device).contiguous(memory_format=memory_format).requires_grad_()
-            with warnings.catch_warnings(record=True) as w:
-                out_t = F.interpolate(in_t, size=(4, 2), mode=mode)
+            out_t = F.interpolate(in_t, size=(4, 2), mode=mode)
             self.assertEqual(torch.ones(1, 2, 4, 2, device=device), out_t)
             self.assertTrue(out_t.is_contiguous(memory_format=memory_format))
 
@@ -15288,9 +15409,8 @@ class TestNNDeviceType(NNTestCase):
                     a_cuda = torch.randn(*shapes, device=device).contiguous(memory_format=memory_format).requires_grad_()
                     a_cpu = a_cuda.detach().cpu().requires_grad_()
 
-                    with warnings.catch_warnings(record=True):
-                        out_cuda = F.interpolate(a_cuda, scale_factor=scale_factor, mode=mode)
-                        out_cpu = F.interpolate(a_cpu, scale_factor=scale_factor, mode=mode)
+                    out_cuda = F.interpolate(a_cuda, scale_factor=scale_factor, mode=mode)
+                    out_cpu = F.interpolate(a_cpu, scale_factor=scale_factor, mode=mode)
 
                     self.assertEqual(out_cpu.cuda(), out_cuda)
 
@@ -16923,6 +17043,31 @@ class TestNNDeviceType(NNTestCase):
 
             output = Embed(input=x, offsets=torch.tensor([0, 0], device=device, dtype=dtypes[1]))
             self.assertEqual(output, torch.zeros_like(output))
+
+    @skipCUDAIf(True, "cuda assert is not recovarable.")
+    @dtypes(*itertools.product((torch.float, torch.double), (torch.int, torch.long)))
+    @parametrize_test("padding_idx", [None, 0])
+    @parametrize_test("mode", ["sum", "mean", "max"])
+    def test_embedding_bag_out_of_bounds_idx(self, device, dtypes, padding_idx, mode):
+        padding_idx = 0
+        w_dtype, idx_dtype = dtypes
+        # negative out-of-bound
+        idx1 = torch.tensor([[-1, 1]], device=device, dtype=idx_dtype)
+        # positive out-of-bound
+        idx2 = torch.tensor([[11, 8]], device=device, dtype=idx_dtype)
+        weight = torch.randn(10, 2, device=device, dtype=w_dtype)
+        if mode == 'sum':
+            # Only `sum` supports per_sample_weight
+            per_sample_weights = (None, torch.randn_like(idx1, device=device, dtype=w_dtype))
+        else:
+            per_sample_weights = (None,)
+
+        for p_s_weights, idx in itertools.product(per_sample_weights, (idx1, idx2)):
+            msg = "Expected idx >= 0 && idx < num_embeddings"
+            with self.assertRaisesRegex(RuntimeError, msg):
+                torch.nn.functional.embedding_bag(idx, weight,
+                                                  per_sample_weights=p_s_weights, padding_idx=padding_idx,
+                                                  mode=mode)
 
     @dtypes(*itertools.product((torch.int, torch.long), (torch.int, torch.long)))
     def test_EmbeddingBag_per_sample_weights_failures(self, device, dtypes):

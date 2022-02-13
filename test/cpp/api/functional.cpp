@@ -2622,35 +2622,31 @@ TEST_F(FunctionalTest, Dropout) {
 }
 
 TEST_F(FunctionalTest, Dropout2d) {
-  auto input = torch::randn({50, 100});
+  auto input = torch::randn({2, 2, 50, 100});
   auto input_mean = input.mean();
   auto input_std = input.std();
 
   for (const auto rate : {0.2, 0.5, 0.8}) {
     auto output = F::dropout2d(input, F::Dropout2dFuncOptions().p(rate));
     ASSERT_TRUE(torch::allclose(input_mean, output.mean(), 0.01, 0.05));
-    ASSERT_TRUE((input_std <= output.std()).all().item<bool>());
   }
   auto output = F::dropout2d(input);
   ASSERT_TRUE(torch::allclose(input_mean, output.mean(), 0.01, 0.05));
-  ASSERT_TRUE((input_std <= output.std()).all().item<bool>());
-  ASSERT_TRUE(F::dropout2d(torch::randn({50, 100})).defined());
+  ASSERT_TRUE(F::dropout2d(torch::randn({2, 50, 100})).defined());
 }
 
 TEST_F(FunctionalTest, Dropout3d) {
-  auto input = torch::randn({50, 10, 10});
+  auto input = torch::randn({2, 2, 50, 10, 10});
   auto input_mean = input.mean();
   auto input_std = input.std();
 
   for (const auto rate : {0.2, 0.5, 0.8}) {
     auto output = F::dropout3d(input, F::Dropout3dFuncOptions().p(rate));
     ASSERT_TRUE(torch::allclose(input_mean, output.mean(), 0.01, 0.05));
-    ASSERT_TRUE((input_std <= output.std()).all().item<bool>());
   }
   auto output = F::dropout3d(input);
   ASSERT_TRUE(torch::allclose(input_mean, output.mean(), 0.01, 0.05));
-  ASSERT_TRUE((input_std <= output.std()).all().item<bool>());
-  ASSERT_TRUE(F::dropout3d(torch::randn({50, 100})).defined());
+  ASSERT_TRUE(F::dropout3d(torch::randn({2, 50, 10, 10})).defined());
 }
 
 template<c10::ScalarType S, typename T>
