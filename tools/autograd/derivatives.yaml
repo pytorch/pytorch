@@ -744,19 +744,13 @@
   # See: https://github.com/pytorch/pytorch/pull/65993#discussion_r729912376 for the discussion
 - name: index_add(Tensor self, int dim, Tensor index, Tensor source, *, Scalar alpha=1) -> Tensor
   self: grad
-  # The case source.dim() == 0  is necessary to support scalar tensors of the form
-  # source.dim() == 0 and index.dim() == 1 and index.size() == (1,),
-  # This is because source is not broadcastable to index, as source.dim() < index.dim()
-  source: "maybe_multiply(source.dim() > 0 ? grad.index_select(dim, index).expand_as(source) : grad.index_select(dim, index.squeeze(0)), alpha)"
+  source: index_add_source_backward(grad, dim, index, source.sizes(), alpha)
   index: non_differentiable
   result: at::index_add(self_t, dim, index, maybe_multiply(source_t, alpha))
 
 - name: index_add_(Tensor(a!) self, int dim, Tensor index, Tensor source, *, Scalar alpha=1) -> Tensor(a!)
   self: grad
-  # The case source.dim() == 0 is necessary to support scalar tensors of the form
-  # source.dim() == 0 and index.dim() == 1 and index.size() == (1,),
-  # This is because source is not broadcastable to index, as source.dim() < index.dim()
-  source: "maybe_multiply(source.dim() > 0 ? grad.index_select(dim, index).expand_as(source) : grad.index_select(dim, index.squeeze(0)), alpha)"
+  source: index_add_source_backward(grad, dim, index, source.sizes(), alpha)
   index: non_differentiable
   result: self_t.index_add_(dim, index, maybe_multiply(source_t, alpha))
 

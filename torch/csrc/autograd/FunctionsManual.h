@@ -469,6 +469,12 @@ Tensor scatter_reduce_backward(
   const Tensor& result
 );
 
+Tensor index_add_source_backward(
+    const Tensor& grad,
+    int64_t dim,
+    const Tensor& index,
+    IntArrayRef source_size,
+    Scalar alpha);
 
 } // namespace details
 } // namespace generated

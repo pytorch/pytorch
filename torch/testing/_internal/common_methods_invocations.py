@@ -4406,6 +4406,16 @@ def sample_inputs_index(op_info, device, dtype, requires_grad, **kwargs):
 
         yield SampleInput(t, args=args, kwargs=kwargs)
 
+    if add and torch.device(device).type != 'cuda':
+        # Case where `tensor` argument is broadcasted
+        # For skipping CUDA, check https://github.com/pytorch/pytorch/issues/72055
+        # Dim 0
+        yield SampleInput(make_arg((4, 4)), args=(0, make_permutation(4), make_arg((4,))))
+        yield SampleInput(make_arg((4, 4)), args=(0, make_permutation(4), make_arg((4,))), kwargs={'alpha': 0.5})
+        # Dim 1
+        yield SampleInput(make_arg((4, 4, 4)), args=(1, make_permutation(4), make_arg((1, 4))))
+        yield SampleInput(make_arg((4, 4, 4)), args=(1, make_permutation(4), make_arg((4, 4))), kwargs={'alpha': 2.0})
+
 def sample_inputs_mode(op_info, device, dtype, requires_grad, **kwargs):
     inputs = []
     args = (
