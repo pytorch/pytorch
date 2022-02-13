@@ -69,8 +69,8 @@ class DoctTestVisitor(ast.NodeVisitor):
                      (?![ ]*>>>)        # Not a line starting with PS1
                      # But any other line that startswith some whitespace, including empty
                      # lines to allow for tensors with many axes as these tend to include
-                     # empty lines when printed. 
-                     ([ ]+.+$\n?|\n)?   
+                     # empty lines when printed.
+                     ([ ]+.+$\n?|\n)?
                   )*)
         ''', re.MULTILINE | re.VERBOSE)
         self.runner = doctest.DocTestRunner(
