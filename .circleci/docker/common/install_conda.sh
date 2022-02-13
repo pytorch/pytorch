@@ -122,7 +122,8 @@ if [ -n "$ANACONDA_PYTHON_VERSION" ]; then
     coverage \
     hypothesis==4.53.2 \
     mypy==0.770 \
-    tb-nightly
+    tb-nightly \
+    "numpy==1.18.5"
 
   # Update scikit-learn to a python-3.8 compatible version
   if [[ $(python -c "import sys; print(int(sys.version_info >= (3, 8)))") == "1" ]]; then
