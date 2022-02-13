@@ -721,6 +721,49 @@ Tensor computeUpsampleNearest2d(
     const std::vector<ExprHandle>& outputShape,
     const c10::optional<ScalarType>& outputType,
     at::Device) {
+  auto A = c10::get<BufHandle>(inputs[0]);
+  auto output_height = outputShape[2];
+  auto output_width = outputShape[3];
+  auto input_height = ExprHandle(A.dim(2));
+  auto input_width = ExprHandle(A.dim(3));
+
+  std::vector<VarHandle> args = create_index_vars(outputShape);
+  // Handle separately when scale is specified? as in 'scalar_t
+  // compute_scales_value' in UpSample.h
+  auto scale_h =
+      promoteToDtype(input_height, ScalarType::Double) / output_height;
+  auto scale_w = promoteToDtype(input_width, ScalarType::Double) / output_width;
+  // TODO: will repetetive if in idx calculation will be taken out of the loop?
+  auto compute_nearest_idx =
+      [](ExprHandle scale, ExprHandle dst_index, ExprHandle input_size) {
+        return Min::make(
+            promoteToDtype(floor(dst_index * scale), ScalarType::Long),
+            input_size - 1,
+            true);
+      };
+  auto body_func = [&](std::vector<VarHandle> axes) {
+    std::vector<ExprHandle> newAxes(axes.begin(), axes.end());
+    newAxes[2] = compute_nearest_idx(scale_h, axes[2], input_height);
+    newAxes[3] = compute_nearest_idx(scale_w, axes[3], input_width);
+    return A.load(newAxes);
+  };
+  auto e = body_func(args);
+  BufHandle buf = Buf::make(
+      "quantize_upsample_nearest2d",
+      outputShape,
+      Dtype(*outputType),
+      c10::nullopt,
+      c10::nullopt,
+      ExprHandle(A.node()->qscale()),
+      ExprHandle(A.node()->qzero()));
+  return Tensor(buf, args, e);
+}
+
+Tensor computeUpsampleNearest2dExternalCall(
+    const std::vector<ArgValue>& inputs,
+    const std::vector<ExprHandle>& outputShape,
+    const c10::optional<ScalarType>& outputType,
+    at::Device) {
   Dtype dtype = kFloat;
   if (outputType) {
     dtype = Dtype(*outputType);

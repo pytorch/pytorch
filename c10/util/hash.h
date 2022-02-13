@@ -1,9 +1,9 @@
 #pragma once
 
-#include <iomanip>
 #include <functional>
-#include <vector>
+#include <iomanip>
 #include <sstream>
+#include <vector>
 
 #include <c10/util/ArrayRef.h>
 #include <c10/util/complex.h>
@@ -52,7 +52,7 @@ inline size_t hash_combine(size_t seed, size_t value) {
 struct sha1 {
   typedef unsigned int(digest_type)[5];
 
-  sha1(const std::string &s = "") {
+  sha1(const std::string& s = "") {
     if (!s.empty()) {
       reset();
       process_bytes(s.c_str(), s.size());
@@ -83,7 +83,7 @@ struct sha1 {
     return buf.str();
   }
 
-private:
+ private:
   unsigned int left_rotate(unsigned int x, std::size_t n) {
     return (x << n) ^ (x >> (32 - n));
   }
@@ -92,14 +92,14 @@ private:
     unsigned int w[80];
 
     for (std::size_t i = 0; i < 16; ++i) {
-      w[i]  = (block_[i*4 + 0] << 24);
-      w[i] |= (block_[i*4 + 1] << 16);
-      w[i] |= (block_[i*4 + 2] << 8);
-      w[i] |= (block_[i*4 + 3]);
+      w[i] = (block_[i * 4 + 0] << 24);
+      w[i] |= (block_[i * 4 + 1] << 16);
+      w[i] |= (block_[i * 4 + 2] << 8);
+      w[i] |= (block_[i * 4 + 3]);
     }
 
     for (std::size_t i = 16; i < 80; ++i) {
-      w[i] = left_rotate((w[i-3] ^ w[i-8] ^ w[i-14] ^ w[i-16]), 1);
+      w[i] = left_rotate((w[i - 3] ^ w[i - 8] ^ w[i - 14] ^ w[i - 16]), 1);
     }
 
     unsigned int a = h_[0];
@@ -112,13 +112,13 @@ private:
       unsigned int f;
       unsigned int k;
 
-      if (i<20) {
+      if (i < 20) {
         f = (b & c) | (~b & d);
         k = 0x5A827999;
-      } else if (i<40) {
+      } else if (i < 40) {
         f = b ^ c ^ d;
         k = 0x6ED9EBA1;
-      } else if (i<60) {
+      } else if (i < 60) {
         f = (b & c) | (b & d) | (c & d);
         k = 0x8F1BBCDC;
       } else {
@@ -154,8 +154,8 @@ private:
     process_byte_impl(byte);
 
     // size_t max value = 0xFFFFFFFF
-    //if (bit_count_low + 8 >= 0x100000000) { // would overflow
-    //if (bit_count_low >= 0x100000000-8) {
+    // if (bit_count_low + 8 >= 0x100000000) { // would overflow
+    // if (bit_count_low >= 0x100000000-8) {
     if (bit_count_low < 0xFFFFFFF8) {
       bit_count_low += 8;
     } else {
@@ -172,7 +172,7 @@ private:
   void process_block(void const* bytes_begin, void const* bytes_end) {
     unsigned char const* begin = static_cast<unsigned char const*>(bytes_begin);
     unsigned char const* end = static_cast<unsigned char const*>(bytes_end);
-    for(; begin != end; ++begin) {
+    for (; begin != end; ++begin) {
       process_byte(*begin);
     }
   }
@@ -181,7 +181,6 @@ private:
     unsigned char const* b = static_cast<unsigned char const*>(buffer);
     process_block(b, b + byte_count);
   }
-
 
   void get_digest(digest_type& digest) {
     // append the bit '1' to the message
@@ -208,14 +207,16 @@ private:
 
     // append length of message (before pre-processing)
     // as a 64-bit big-endian integer
-    process_byte_impl( static_cast<unsigned char>((bit_count_high>>24) & 0xFF) );
-    process_byte_impl( static_cast<unsigned char>((bit_count_high>>16) & 0xFF) );
-    process_byte_impl( static_cast<unsigned char>((bit_count_high>>8 ) & 0xFF) );
-    process_byte_impl( static_cast<unsigned char>((bit_count_high)     & 0xFF) );
-    process_byte_impl( static_cast<unsigned char>((bit_count_low>>24) & 0xFF) );
-    process_byte_impl( static_cast<unsigned char>((bit_count_low>>16) & 0xFF) );
-    process_byte_impl( static_cast<unsigned char>((bit_count_low>>8 ) & 0xFF) );
-    process_byte_impl( static_cast<unsigned char>((bit_count_low)     & 0xFF) );
+    process_byte_impl(
+        static_cast<unsigned char>((bit_count_high >> 24) & 0xFF));
+    process_byte_impl(
+        static_cast<unsigned char>((bit_count_high >> 16) & 0xFF));
+    process_byte_impl(static_cast<unsigned char>((bit_count_high >> 8) & 0xFF));
+    process_byte_impl(static_cast<unsigned char>((bit_count_high)&0xFF));
+    process_byte_impl(static_cast<unsigned char>((bit_count_low >> 24) & 0xFF));
+    process_byte_impl(static_cast<unsigned char>((bit_count_low >> 16) & 0xFF));
+    process_byte_impl(static_cast<unsigned char>((bit_count_low >> 8) & 0xFF));
+    process_byte_impl(static_cast<unsigned char>((bit_count_low)&0xFF));
 
     // get final digest
     digest[0] = h_[0];

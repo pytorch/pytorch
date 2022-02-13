@@ -19,16 +19,25 @@
 name: !{{ build_environment }}
 
 on:
+{%- if is_default %}
   pull_request:
-    types: [opened, synchronize, reopened, !{{ ciflow_config.trigger_action }}]
-{%- if is_scheduled %}
-  schedule:
-    - cron: !{{ is_scheduled }}
-{%- else %}
+{%- endif %}
   push:
+{%- for label in ciflow_config.labels | sort %}
+  {%- if loop.first %}
+    tags:
+  {%- endif %}
+  {%- if label != "ciflow/default" %}
+      - '!{{ label }}/*'
+  {%- endif %}
+{%- endfor %}
+{%- if not is_scheduled %}
     branches:
       - master
       - release/*
+{%- else %}
+  schedule:
+    - cron: !{{ is_scheduled }}
 {%- endif %}
   workflow_dispatch:
 
@@ -71,9 +80,6 @@ jobs:
       JOB_BASE_NAME: !{{ build_environment }}-build
       http_proxy: "!{{ common. squid_proxy }}"
       https_proxy: "!{{ common.squid_proxy }}"
-      IS_PROBOT_TRIGGER_EVENT: ${{ (github.event.action == '!{{ ciflow_config.trigger_action }}') && (github.event.assigneed.login == '!{{ ciflow_config.trigger_actor }}') }}
-      LABEL_CONDITIONS: ${{ !{{ ciflow_config.label_conditions }} }}
-    if: !{{ ciflow_config.root_job_condition }}
     steps:
       - name: print labels
         run: echo "${PR_LABELS}"
@@ -81,7 +87,7 @@ jobs:
         uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      !{{ common.checkout_pytorch("recursive") }}
+      !{{ common.checkout() }}
       !{{ common.display_ec2_information() }}
       - name: Install Visual Studio 2019 toolchain
         shell: powershell
@@ -113,7 +119,7 @@ jobs:
           if-no-files-found: error
           name: ${{ env.BUILD_ENVIRONMENT }}
           path: C:\${{ github.run_id }}\build-results
-      !{{ wait_and_kill_ssh() }}
+      !{{ common.wait_and_kill_ssh_windows() }}
       - name: Cleanup build-results and workspaces
         if: always()
         shell: bash
@@ -172,7 +178,7 @@ jobs:
         uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      !{{ common.checkout_pytorch("recursive") }}
+      !{{ common.checkout() }}
       - name: Install Visual Studio 2019 toolchain
         shell: powershell
         run: |
@@ -214,7 +220,7 @@ jobs:
       !{{ common.upload_downloaded_files(name='windows') }}
       !{{ common.upload_test_reports(name='windows') }}
       !{{ common.render_test_results() }}
-      !{{ wait_and_kill_ssh() }}
+      !{{ common.wait_and_kill_ssh_windows() }}
       !{{ common.parse_ref() }}
       !{{ common.upload_test_statistics(build_environment) }}
       - name: Cleanup workspace

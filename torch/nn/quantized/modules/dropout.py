@@ -17,6 +17,6 @@ class Dropout(torch.nn.Dropout):
     def _get_name(self):
         return 'QuantizedDropout'
 
-    @staticmethod
-    def from_float(mod):
-        return Dropout(mod.p, mod.inplace)
+    @classmethod
+    def from_float(cls, mod):
+        return cls(mod.p, mod.inplace)

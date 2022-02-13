@@ -7,6 +7,7 @@
 #include <torch/csrc/jit/frontend/ir_emitter.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/operator_upgraders/upgraders.h>
+#include <torch/csrc/jit/serialization/export_bytecode.h>
 #include <string>
 #include <unordered_map>
 
@@ -14,7 +15,33 @@ namespace torch {
 namespace jit {
 
 static std::unordered_map<std::string, std::string> kUpgradersEntryMap(
-    {{"div_Tensor_0_3", R"SCRIPT(
+    {{"logspace_0_8", R"SCRIPT(
+def logspace_0_8(start: Union[int, float, complex], end: Union[int, float, complex], steps: Optional[int], base: float, *, dtype: Optional[int], layout: Optional[int],
+                 device: Optional[Device], pin_memory: Optional[bool]):
+  if (steps is None):
+    return torch.logspace(start=start, end=end, steps=100, base=base, dtype=dtype, layout=layout, device=device, pin_memory=pin_memory)
+  return torch.logspace(start=start, end=end, steps=steps, base=base, dtype=dtype, layout=layout, device=device, pin_memory=pin_memory)
+)SCRIPT"},
+     {"logspace_out_0_8", R"SCRIPT(
+def logspace_out_0_8(start: Union[int, float, complex], end: Union[int, float, complex], steps: Optional[int], base: float, *, out: Tensor):
+  if (steps is None):
+    return torch.logspace(start=start, end=end, steps=100, base=base, out=out)
+  return torch.logspace(start=start, end=end, steps=steps, base=base, out=out)
+)SCRIPT"},
+     {"linspace_0_7", R"SCRIPT(
+def linspace_0_7(start: Union[int, float, complex], end: Union[int, float, complex], steps: Optional[int], *, dtype: Optional[int], layout: Optional[int],
+                 device: Optional[Device], pin_memory: Optional[bool]):
+  if (steps is None):
+    return torch.linspace(start=start, end=end, steps=100, dtype=dtype, layout=layout, device=device, pin_memory=pin_memory)
+  return torch.linspace(start=start, end=end, steps=steps, dtype=dtype, layout=layout, device=device, pin_memory=pin_memory)
+)SCRIPT"},
+     {"linspace_out_0_7", R"SCRIPT(
+def linspace_out_0_7(start: Union[int, float, complex], end: Union[int, float, complex], steps: Optional[int], *, out: Tensor):
+  if (steps is None):
+    return torch.linspace(start=start, end=end, steps=100, out=out)
+  return torch.linspace(start=start, end=end, steps=steps, out=out)
+)SCRIPT"},
+     {"div_Tensor_0_3", R"SCRIPT(
 def div_Tensor_0_3(self: Tensor, other: Tensor) -> Tensor:
   if (self.is_floating_point() or other.is_floating_point()):
     return self.true_divide(other)
@@ -57,20 +84,30 @@ def full_out_0_4(size:List[int], fill_value:number, *, out:Tensor) -> Tensor:
   return torch.full(size, fill_value, out=out)
 )SCRIPT"}});
 
-using UpgraderMap = std::unordered_map<std::string, std::shared_ptr<Graph>>;
+std::shared_ptr<Graph> create_upgrader_graph(
+    const std::string& upgrader_name,
+    const std::string& upgrader_body) {
+  auto cu = std::make_shared<CompilationUnit>();
+  cu->define(c10::nullopt, upgrader_body, nativeResolver(), nullptr);
+  Function& jitFunc = cu->get_function(upgrader_name);
+  GraphFunction& graphFunction = toGraphFunction(jitFunc);
+  return graphFunction.graph();
+}
+
+std::unordered_map<std::string, std::shared_ptr<Graph>>
+generate_upgraders_graph() {
+  std::unordered_map<std::string, std::shared_ptr<Graph>> populate_content;
+  for (const auto& entry : kUpgradersEntryMap) {
+    auto upgrader_graph = create_upgrader_graph(entry.first, entry.second);
+    populate_content.insert(std::make_pair(entry.first, upgrader_graph));
+  }
+  return populate_content;
+}
+
 void populate_upgraders_graph_map() {
   if (!is_upgraders_map_populated()) {
-    UpgraderMap populate_content;
-    for (const auto& entry : kUpgradersEntryMap) {
-      auto cu = std::make_shared<CompilationUnit>();
-      cu->define(c10::nullopt, entry.second, nativeResolver(), nullptr);
-      Function& jitFunc = cu->get_function(entry.first);
-      GraphFunction& graphFunction = toGraphFunction(jitFunc);
-      populate_content.insert(
-          std::make_pair(entry.first, graphFunction.graph()));
-    }
-
-    populate_upgraders_map(std::forward<UpgraderMap>(populate_content));
+    auto graphs = generate_upgraders_graph();
+    populate_upgraders_map(std::move(graphs));
   }
 }
 

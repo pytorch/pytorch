@@ -189,8 +189,6 @@ __global__ void LpPoolBackwardNHWC(
     for (int ph = phstart; ph < phend; ++ph) {
       for (int pw = pwstart; pw < pwend; ++pw) {
         // figure out the pooling size
-        const int hstart = max(ph * stride_h - pad_t, 0);
-        const int wstart = max(pw * stride_w - pad_l, 0);
         gradient += top_diff_slice[(ph * pooled_width + pw) * channels] *
             bottom_data[index] * pow(abs(bottom_data[index]), p - 2) /
             pow(top_data_slice[(ph * pooled_width + pw) * channels], p - 1);

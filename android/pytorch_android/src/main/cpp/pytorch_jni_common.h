@@ -1,5 +1,6 @@
 #pragma once
 
+#include <c10/util/FunctionRef.h>
 #include <fbjni/fbjni.h>
 #include <torch/csrc/api/include/torch/types.h>
 #include "caffe2/serialize/read_adapter_interface.h"
@@ -93,6 +94,9 @@ class MemoryReadAdapter final : public caffe2::serialize::ReadAdapterInterface {
 };
 
 class JIValue : public facebook::jni::JavaClass<JIValue> {
+  using DictCallback = c10::function_ref<facebook::jni::local_ref<JIValue>(
+      c10::Dict<c10::IValue, c10::IValue>)>;
+
  public:
   constexpr static const char* kJavaDescriptor = "Lorg/pytorch/IValue;";
 
@@ -115,10 +119,18 @@ class JIValue : public facebook::jni::JavaClass<JIValue> {
   constexpr static int kTypeCodeDictLongKey = 14;
 
   static facebook::jni::local_ref<JIValue> newJIValueFromAtIValue(
-      const at::IValue& ivalue);
+      const at::IValue& ivalue,
+      DictCallback stringDictCallback = newJIValueFromStringDict,
+      DictCallback intDictCallback = newJIValueFromIntDict);
 
   static at::IValue JIValueToAtIValue(
       facebook::jni::alias_ref<JIValue> jivalue);
+
+ private:
+  static facebook::jni::local_ref<JIValue> newJIValueFromStringDict(
+      c10::Dict<c10::IValue, c10::IValue>);
+  static facebook::jni::local_ref<JIValue> newJIValueFromIntDict(
+      c10::Dict<c10::IValue, c10::IValue>);
 };
 
 void common_registerNatives();

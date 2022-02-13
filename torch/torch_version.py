@@ -1,12 +1,35 @@
 from typing import Any, Iterable
-
-from pkg_resources import packaging  # type: ignore[attr-defined]
-
-Version = packaging.version.Version
-InvalidVersion = packaging.version.InvalidVersion
-
 from .version import __version__ as internal_version
 
+class _LazyImport:
+    """Wraps around classes lazy imported from packaging.version
+    Output of the function v in following snippets are identical:
+       from packaging.version import Version
+       def v():
+           return Version('1.2.3')
+    and
+       Versoin = _LazyImport('Version')
+       def v():
+           return Version('1.2.3')
+    The difference here is that in later example imports
+    do not happen until v is called
+    """
+    def __init__(self, cls_name: str) -> None:
+        self._cls_name = cls_name
+
+    def get_cls(self):
+        from pkg_resources import packaging  # type: ignore[attr-defined]
+        return getattr(packaging.version, self._cls_name)
+
+    def __call__(self, *args, **kwargs):
+        return self.get_cls()(*args, **kwargs)
+
+    def __instancecheck__(self, obj):
+        return isinstance(obj, self.get_cls())
+
+
+Version = _LazyImport("Version")
+InvalidVersion = _LazyImport("InvalidVersion")
 
 class TorchVersion(str):
     """A string with magic powers to compare to both Version and iterables!
@@ -25,8 +48,9 @@ class TorchVersion(str):
             TorchVersion('1.10.0a') > '1.2'
             TorchVersion('1.10.0a') > '1.2.1'
     """
+    # fully qualified type names here to appease mypy
     def _convert_to_version(self, inp: Any) -> Any:
-        if isinstance(inp, Version):
+        if isinstance(inp, Version.get_cls()):
             return inp
         elif isinstance(inp, str):
             return Version(inp)
@@ -44,7 +68,9 @@ class TorchVersion(str):
     def _cmp_wrapper(self, cmp: Any, method: str) -> bool:
         try:
             return getattr(Version(self), method)(self._convert_to_version(cmp))
-        except InvalidVersion:
+        except BaseException as e:
+            if not isinstance(e, InvalidVersion.get_cls()):
+                raise
             # Fall back to regular string comparison if dealing with an invalid
             # version like 'parrot'
             return getattr(super(), method)(cmp)

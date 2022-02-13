@@ -181,6 +181,10 @@ class TORCH_API TensorExprKernel {
     return codegen_->kernel_func_name();
   }
 
+  const std::vector<int64_t>& getSymbolicShapeInputs() const {
+    return symbolic_shape_inputs_;
+  }
+
  private:
   enum BackendType {
     kUninitialized,
@@ -194,7 +198,6 @@ class TORCH_API TensorExprKernel {
   void genInputDebugNames();
   void runKernel(Stack& stack);
 
-  std::vector<DimArg> dimsFromSizes(const std::vector<ExprHandle>& sizes);
   std::vector<ExprHandle> sizesForValue(const torch::jit::Value* v);
 
   // These functions broadcast shape and also store a `hasBroadcast_` variable.
@@ -206,10 +209,6 @@ class TORCH_API TensorExprKernel {
 
   ArgValue toArg(const torch::jit::Value* v) const;
   ExprHandle constant(const torch::jit::Value* v);
-
-  ExprHandle tensorOrConstant(
-      const torch::jit::Value* v,
-      const std::vector<ExprHandle>& axes);
 
   Tensor computeValue(const torch::jit::Value* v);
 
@@ -230,7 +229,7 @@ class TORCH_API TensorExprKernel {
 
   Tensor convertSymbolicOutputToCorrectStrides(torch::jit::Value* v);
   Tensor convertStaticShapeOutputToCorrectStrides(torch::jit::Value* v);
-  Tensor convertOutputToCorrectStrides(
+  Tensor convertSymbolicOutputToCorrectStrides(
       const std::vector<ExprHandle>& sizes,
       const std::vector<size_t>& sorted_stride_indices_descending,
       const std::vector<ExprPtr>& strides,
@@ -271,6 +270,8 @@ class TORCH_API TensorExprKernel {
   std::vector<ExprHandle> getInputStrides(
       const torch::jit::Value* input,
       const std::vector<ExprHandle>& inputTensorDims);
+  std::vector<torch::jit::StrideInput>& getSymbolicInputStrideDesc(
+      const torch::jit::Value* value);
 
   int64_t nInputs_ = 0;
   int64_t nOutputs_ = 0;
@@ -278,6 +279,7 @@ class TORCH_API TensorExprKernel {
   std::vector<std::vector<int64_t>> tensorOutputSizes_;
   std::vector<std::vector<int64_t>> tensorOutputStrides_;
   std::vector<torch::jit::StrideInput> tensorOutputStrideDesc_;
+  std::vector<bool> isOutputScalar_;
   std::vector<UnpackedTensorOptions> tensorOutputTensorOptions_;
   std::unordered_set<BufPtr> bufOutputs_;
   std::unordered_map<const torch::jit::Value*, BufPtr> bufs_;
@@ -318,10 +320,9 @@ class TORCH_API TensorExprKernel {
   // map from <input index, tensor dimension> to stride as arg VarHandle
   std::unordered_map<std::pair<size_t, size_t>, VarHandle, SmallSizeTPairHash>
       strideArgToVar_;
-  std::unordered_map<
-      const torch::jit::Value*,
-      std::vector<torch::jit::StrideInput>>
-      symbolic_strides_;
+  std::unordered_map<size_t, std::vector<torch::jit::StrideInput>>
+      sym_stride_inputs_;
+  std::unordered_map<size_t, torch::jit::StrideInput> sym_stride_outputs_;
 };
 
 TORCH_API int& getTECudaPointwiseLoopLevels();

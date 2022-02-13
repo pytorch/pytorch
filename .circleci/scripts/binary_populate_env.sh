@@ -5,15 +5,19 @@ export TZ=UTC
 tagged_version() {
   # Grabs version from either the env variable CIRCLE_TAG
   # or the pytorch git described version
-  if [[ "$OSTYPE" == "msys" ]]; then
-    GIT_DESCRIBE="git --git-dir ${workdir}/p/.git describe"
+  if [[ "$OSTYPE" == "msys" &&  -z "${IS_GHA:-}" ]]; then
+    GIT_DIR="${workdir}/p/.git"
   else
-    GIT_DESCRIBE="git --git-dir ${workdir}/pytorch/.git describe"
+    GIT_DIR="${workdir}/pytorch/.git"
   fi
+  GIT_DESCRIBE="git --git-dir ${GIT_DIR} describe --tags --match v[0-9]*.[0-9]*.[0-9]*"
   if [[ -n "${CIRCLE_TAG:-}" ]]; then
     echo "${CIRCLE_TAG}"
-  elif ${GIT_DESCRIBE} --exact --tags >/dev/null; then
-    ${GIT_DESCRIBE} --tags
+  elif [[ ! -d "${GIT_DIR}" ]]; then
+    echo "Abort, abort! Git dir ${GIT_DIR} does not exists!"
+    kill $$
+  elif ${GIT_DESCRIBE} --exact >/dev/null; then
+    ${GIT_DESCRIBE}
   else
     return 1
   fi
@@ -57,7 +61,12 @@ if [[ -z ${IS_GHA:-} ]]; then
   fi
 else
   envfile=${BINARY_ENV_FILE:-/tmp/env}
-  workdir="/pytorch"
+  if [[ -n "${PYTORCH_ROOT}"  ]]; then
+    workdir=$(dirname "${PYTORCH_ROOT}")
+  else
+    # docker executor (binary builds)
+    workdir="/"
+  fi
 fi
 
 if [[ "$PACKAGE_TYPE" == 'libtorch' ]]; then
@@ -93,7 +102,7 @@ PIP_UPLOAD_FOLDER='nightly/'
 # We put this here so that OVERRIDE_PACKAGE_VERSION below can read from it
 export DATE="$(date -u +%Y%m%d)"
 #TODO: We should be pulling semver version from the base version.txt
-BASE_BUILD_VERSION="1.11.0.dev$DATE"
+BASE_BUILD_VERSION="1.12.0.dev$DATE"
 # Change BASE_BUILD_VERSION to git tag when on a git tag
 # Use 'git -C' to make doubly sure we're in the correct directory for checking
 # the git tag
@@ -156,7 +165,7 @@ if [[ "${BUILD_FOR_SYSTEM:-}" == "windows" ]]; then
 fi
 
 export DATE="$DATE"
-export NIGHTLIES_DATE_PREAMBLE=1.11.0.dev
+export NIGHTLIES_DATE_PREAMBLE=1.12.0.dev
 export PYTORCH_BUILD_VERSION="$PYTORCH_BUILD_VERSION"
 export PYTORCH_BUILD_NUMBER="$PYTORCH_BUILD_NUMBER"
 export OVERRIDE_PACKAGE_VERSION="$PYTORCH_BUILD_VERSION"

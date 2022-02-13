@@ -91,7 +91,7 @@ void TraceWrapper::addMemoryUsageActivity(
 #ifdef USE_KINETO
   TORCH_CHECK((bool)(*this), "Cannot add event to non-existent trace.");
   cpu_trace_->activities.emplace_back(libkineto::GenericTraceActivity(
-    cpu_trace_->span, libkineto::ActivityType::CPU_OP, name));
+    cpu_trace_->span, libkineto::ActivityType::CPU_INSTANT_EVENT, name));
   auto& act = cpu_trace_->activities.back();
   act.device = device_and_resource.device;
   act.resource = device_and_resource.resource;

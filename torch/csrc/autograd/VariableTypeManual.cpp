@@ -316,11 +316,11 @@ namespace ADInplaceOrView {
   Tensor detach(c10::DispatchKeySet ks, const Tensor & self) {
     auto out = ([&]() {
       at::AutoDispatchBelowADInplaceOrView guard;
-      // Make an empty shallow copy, the as_view call below will fill in the proper fields
-      return Tensor(self.getIntrusivePtr()->shallow_copy_and_detach(
-        /*version_counter=*/0,
-        /*allow_tensor_metadata_change=*/false));
+      return at::_ops::detach::redispatch(ks & c10::after_ADInplaceOrView_keyset, self);
     })();
+    // NB: we can't make detach() a normal view operator because the codegen generates
+    // allow_tensor_metadata_change = True for them. In the future we should have an
+    // option for this in the codegen.
     std::function<at::Tensor(const at::Tensor&)> func=nullptr;
     auto result = as_view(/* base */ self, /* output */ out, /* is_bw_differentiable */ false,
                           /* is_fw_differentiable */ false, /* view_func */ func,
