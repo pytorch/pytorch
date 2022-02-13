@@ -17568,6 +17568,29 @@ class TestNNDeviceType(NNTestCase):
         self._test_EmbeddingBag(device, 'sum', True, wdtype=torch.bfloat16, dtype=dtypes[0], odtype=dtypes[1], test_backward=True)
         self._test_EmbeddingBag(device, 'mean', True, wdtype=torch.bfloat16, dtype=dtypes[0], odtype=dtypes[1], test_backward=True)
 
+    # TODO current baddbmm does not support fp16
+    # But we would like it to be supported in native FFN
+    @dtypes(torch.float, torch.double)
+    def test_ffn(self, device, dtype):
+        B = 10
+        N = 12
+        M = 14
+        K = 16
+        L = 18
+        # B * N * M
+        x = torch.randn(B, N, M, dtype=dtype, device=device)
+        # B * M * K
+        w1 = torch.randn(B, M, K, dtype=dtype, device=device)
+        # B * K * L
+        w2 = torch.randn(B, K, L, dtype=dtype, device=device)
+        # N * K
+        b1 = torch.randn(N, K, dtype=dtype, device=device)
+        # N * L
+        b2 = torch.randn(N, L, dtype=dtype, device=device)
+
+        res = torch.baddbmm(b2, torch.relu(torch.baddbmm(b1, x, w1)), w2)
+        res_pt = torch._ffn(x, w1, b1, w2, b2)
+        self.assertEqual(res_pt, res)
 
     @onlyCUDA
     @dtypes(torch.half, torch.float, torch.double)

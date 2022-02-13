@@ -1271,6 +1271,7 @@ aten_native_source_non_codegen_list = [
     "aten/src/ATen/native/TensorShape.cpp",
     "aten/src/ATen/native/TensorTransformations.cpp",
     "aten/src/ATen/native/TestOps.cpp",
+    "aten/src/ATen/native/Transformer.cpp",
     "aten/src/ATen/native/TriangularOps.cpp",
     "aten/src/ATen/native/TypeProperties.cpp",
     "aten/src/ATen/native/UnaryOps.cpp",
