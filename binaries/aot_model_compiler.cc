@@ -97,6 +97,10 @@ int main(int argc, char** argv) {
       split(';', FLAGS_input_dims).size() ==
           split(';', FLAGS_input_types).size(),
       "Number of input_dims and input_types should be the same");
+  if (FLAGS_output_llvm.empty()) {
+    FLAGS_output_llvm =
+        FLAGS_model.substr(0, FLAGS_model.find('.')) + ".compiled.ll";
+  }
 
   std::string output_model_name = FLAGS_output_model;
   if (output_model_name.empty()) {

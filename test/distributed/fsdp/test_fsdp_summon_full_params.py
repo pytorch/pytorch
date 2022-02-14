@@ -1,4 +1,5 @@
 # Owner(s): ["oncall: distributed"]
+import itertools
 import math
 import sys
 
@@ -10,7 +11,9 @@ from torch.distributed.fsdp import FlatParameter
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import (
+    FSDPInitMode,
     FSDPTest,
+    NestedWrappedModule,
 )
 from torch.testing._internal.common_utils import (
     TEST_WITH_DEV_DBG_ASAN,
@@ -285,6 +288,26 @@ class TestSummonFullParams(FSDPTest):
             a = model.weight.flatten().detach()
             b = flattened_param.detach()
             self.assertTrue(torch.equal(a, b))
+
+    @skip_if_lt_x_gpu(2)
+    def test_params_count_and_value(self):
+        fsdp_model = FSDP(
+            NestedWrappedModule(
+                group=dist.distributed_c10d._get_default_group(),
+                wrap_fsdp=True,
+                fsdp_init_mode=FSDPInitMode.CUDA_BEFORE,
+            )
+        )
+        model = NestedWrappedModule(
+            group=dist.distributed_c10d._get_default_group(),
+            wrap_fsdp=False,
+            fsdp_init_mode=FSDPInitMode.CUDA_BEFORE,
+        )
+        with fsdp_model._summon_full_params():
+            for p1, p2 in itertools.zip_longest(
+                fsdp_model.parameters(), model.module.parameters()
+            ):
+                self.assertEqual(p1, p2)
 
 
 instantiate_parametrized_tests(TestSummonFullParams)

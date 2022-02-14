@@ -19,6 +19,7 @@ from typing import (
     Optional,
     Sequence,
     Tuple,
+    TYPE_CHECKING,
     Union,
 )
 
@@ -27,6 +28,9 @@ import torch.nn as nn
 from torch import Tensor
 
 from .utils import _replace_by_prefix
+
+if TYPE_CHECKING:
+    from collections import OrderedDict  # noqa: F401
 
 ParamOffset = Tuple[int, int]
 SharedParamInfo = Tuple[str, str, nn.Module, str, nn.Module, str]
@@ -126,10 +130,13 @@ class FlatParameter(nn.Parameter):
     def __init__(self, params: Sequence[nn.Parameter], requires_grad: bool = True):
         self._is_sharded = False
         self._param_numels = [p.numel() for p in params]
-        assert self.numel() <= sum(self._param_numels), (
+        # The total element numbers. This is equal to the summation of the
+        # ``numel()`` of all the parameters.
+        self.full_numel = sum(self._param_numels)
+        assert self.numel() <= self.full_numel, (
             "Parameter numbers mismatched. "
             f"The number of elements in FlatParameter: {self.numel()} vs. "
-            f"the number of elements in original parameters: {sum(self._param_numels)}."
+            f"the number of elements in original parameters: {self.full_numel}."
         )
         # The shapes of each individual parameter.
         self._param_shapes = [p.size() for p in params]
@@ -191,13 +198,13 @@ class FlatParameter(nn.Parameter):
     ) -> Iterator[Tensor]:
         """Return a generator of views that map to the original parameters."""
         # Note, self.data could be sharded, so its numel is <= to the sum.
-        assert self.data.numel() <= sum(
-            self._param_numels
-        ), f"Incorrect internal state {self.data.numel()} vs. {sum(self._param_numels)}"
+        assert (
+            self.data.numel() <= self.full_numel
+        ), f"Incorrect internal state {self.data.numel()} vs. {self.full_numel}"
         data = external_data if external_data is not None else self
-        if data.numel() != sum(self._param_numels):
+        if data.numel() != self.full_numel:
             raise ValueError(
-                f"Incorrect numel of supplied data: got {data.numel()} but expected {sum(self._param_numels)}"
+                f"Incorrect numel of supplied data: got {data.numel()} but expected {self.full_numel}"
             )
         return (
             t.view(s)
@@ -226,10 +233,6 @@ class FlatParameter(nn.Parameter):
             self._param_numels[self._offset_to_slice()],
             self._sharded_param_offsets[:],
         )
-
-    @property
-    def param_info(self) -> Tuple[ParamInfo]:
-        return tuple(self._param_infos)
 
 
 class FlattenParamsWrapper(nn.Module):
@@ -277,11 +280,11 @@ class FlattenParamsWrapper(nn.Module):
         self.flat_param = FlatParameter(params, params[0].requires_grad)
         self.flat_param._param_infos = param_infos
         self.flat_param._shared_param_infos = shared_param_infos
-        # This attribute is used to remember the flat_param inside the
-        # unflatten_params() context. Using an attribute instead of a
-        # local variable allows us to access the flat_param metadata
+        # This attribute is used to remember the flat_param inside the unflatten_params()
+        # context. With this attribute, FSDP can access the flat parameter metadata
         # even if flat_param is temporarily deleted.
-        self._orig_flat_param = [None]
+        # ``_orig_flat_param` is a list to avoid being tracked by ``state_dict()``.
+        self._orig_flat_param: List[Optional[FlatParameter]] = [None]
         self._flatten_params()
 
         # Register hook to be called after state_dict() to remove the
@@ -333,17 +336,18 @@ class FlattenParamsWrapper(nn.Module):
 
     def _flatten_params(self, external_data: Optional[FlatParameter] = None) -> None:
         """Flatten the managed parameters and replaced the original
-        attributes with views to the flat param.
+        attributes with views to the flat param. If `external_data`
+        is passed, it will be used as the flat_param.
         """
         # register the flatten one
         assert (
             getattr(self, "flat_param", None) is not None or external_data is not None
         ), "Can not flatten params when both flat_param and external_data are None."
-        self.flat_param = (
-            external_data if external_data is not None else self.flat_param
-        )
+        if external_data is not None:
+            self.flat_param = external_data
         self.register_parameter("flat_param", self.flat_param)
 
+        assert self.flat_param is not None  # avoid mypy complain.
         # deregister the names as parameters
         for _, m, n in self.flat_param._param_infos:
             delattr(m, n)
@@ -392,17 +396,16 @@ class FlattenParamsWrapper(nn.Module):
         Unflatten params. If the current instance is already unflattened, then
         it will remain unflattened after the context manager exits.
         """
-        orig_flattened = self.flat_param is not None
-        if orig_flattened:
+        if getattr(self, "flat_param", None) is None:
+            yield
+        else:
             self._orig_flat_param[0] = self.flat_param
             self._unflatten_params()
-
-        # Put yield in a try...finally in case the caller catches the exception and handles
-        # it. In that case, we need to properly handle the undoing of state here.
-        try:
-            yield
-        finally:
-            if orig_flattened:
+            # Put yield in a try...finally in case the caller catches the exception and handles
+            # it. In that case, we need to properly handle the undoing of state here.
+            try:
+                yield
+            finally:
                 self._flatten_params(self._orig_flat_param[0])
                 self._orig_flat_param[0] = None
 
@@ -424,7 +427,7 @@ class FlattenParamsWrapper(nn.Module):
         """Forward indexing calls in case the module is a nn.Sequential."""
         return self.module.__getitem__(key)
 
-    def flat_state_dict(self, *args: Any, **kwargs: Any) -> Dict[str, Any]:
+    def flat_state_dict(self, *args: Any, **kwargs: Any) -> "OrderedDict[str, Tensor]":
         """Return the flattened state_dict."""
         assert getattr(self, "flat_param", None) is not None
         assert isinstance(self.flat_param, FlatParameter)
