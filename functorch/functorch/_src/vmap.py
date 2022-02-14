@@ -203,7 +203,11 @@ def _get_name(func: Callable):
 # on BatchedTensors perform the batched operations that the user is asking for.
 
 
-def vmap(func: Callable, in_dims: in_dims_t = 0, out_dims: out_dims_t = 0) -> Callable:
+def vmap(
+        func: Callable,
+        in_dims: in_dims_t = 0,
+        out_dims: out_dims_t = 0,
+        randomness: str = 'error') -> Callable:
     """
     vmap is the vectorizing map; ``vmap(func)`` returns a new function that
     maps :attr:`func` over some dimension of the inputs. Semantically, vmap
@@ -226,6 +230,11 @@ def vmap(func: Callable, in_dims: in_dims_t = 0, out_dims: out_dims_t = 0) -> Ca
         out_dims (int or Tuple[int]): Specifies where the mapped dimension
             should appear in the outputs. If :attr:`out_dims` is a Tuple, then
             it should have one element per output. Default: 0.
+        use_batched_random (str): Specifies whether the randomness in this
+            vmap should be the same or different across batches. If 'different',
+            the randomness for each batch will be different. If 'same', the
+            randomness will be the same across batches. If 'error', any calls to
+            random functions will error. Default: True.
 
     Returns:
         Returns a new "batched" function. It takes the same inputs as
@@ -343,11 +352,14 @@ def vmap(func: Callable, in_dims: in_dims_t = 0, out_dims: out_dims_t = 0) -> Ca
         vmap does not provide general autobatching or handle variable-length
         sequences out of the box.
     """
+    if randomness not in ['error', 'different', 'same']:
+        raise RuntimeError(f"Only allowed values for randomness are 'error', 'different', or 'same'. Got {randomness}")
+
     @functools.wraps(func)
     def wrapped(*args, **kwargs):
         _check_out_dims_is_int_or_int_pytree(out_dims, func)
         batch_size, flat_in_dims, flat_args, args_spec = _process_batched_inputs(in_dims, args, func)
-        vmap_level = _vmap_increment_nesting(batch_size)
+        vmap_level = _vmap_increment_nesting(batch_size, randomness)
         try:
             batched_inputs = _create_batched_inputs(flat_in_dims, flat_args, vmap_level, args_spec)
             batched_outputs = func(*batched_inputs, **kwargs)

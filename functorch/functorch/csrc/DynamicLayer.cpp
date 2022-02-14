@@ -50,11 +50,13 @@ DynamicLayer::DynamicLayer(
     DispatchKey key,
     int64_t layerId,
     optional<int64_t> batchSize,
+    optional<std::string> randomness,
     optional<bool> prev_grad_mode)
   :
     key_(key),
     layerId_(layerId),
     batchSize_(batchSize),
+    randomness_(randomness),
     prevGradMode_(prev_grad_mode)
 {
   if (key_ == DispatchKey::Autograd) {
@@ -73,6 +75,11 @@ int64_t DynamicLayer::layerId() const {
 int64_t DynamicLayer::batchSize() const {
   TORCH_INTERNAL_ASSERT(batchSize_);
   return *batchSize_;
+}
+
+std::string DynamicLayer::randomness() const {
+  TORCH_INTERNAL_ASSERT(randomness_);
+  return *randomness_;
 }
 
 optional<bool> DynamicLayer::prevGradMode() const {
@@ -110,7 +117,7 @@ class FuncTorchTLS : public FuncTorchTLSBase {
 
   // Initial autograd layer, because autograd is always "on"
   // TODO: Get rid of this, it is bad for composability
-  std::vector<DynamicLayer> dynamicLayerStack = { DynamicLayer(DispatchKey::Autograd, 1, nullopt, true) };
+  std::vector<DynamicLayer> dynamicLayerStack = { DynamicLayer(DispatchKey::Autograd, 1, nullopt, nullopt, true) };
 };
 
 static FuncTorchTLS* getRawFunctorchTLS() {
@@ -191,11 +198,12 @@ static int64_t pushDynamicLayer(DynamicLayer&& dynamic_layer) {
 int64_t initAndPushDynamicLayer(
     DispatchKey key,
     optional<int64_t> batch_size,
+    optional<std::string> randomness,
     optional<bool> prev_grad_mode) {
   TORCH_INTERNAL_ASSERT(key == DispatchKey::Autograd || key == kBatchedKey);
   const auto& dynamicLayerStack = dynamicLayerStackAccessor();
   const auto layerId = 1 + dynamicLayerStack.size();
-  DynamicLayer new_layer(key, layerId, batch_size, prev_grad_mode);
+  DynamicLayer new_layer(key, layerId, batch_size, randomness, prev_grad_mode);
   pushDynamicLayer(std::move(new_layer));
 
   auto& data = getGlobalDynmetaData();

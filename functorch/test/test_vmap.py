@@ -2592,7 +2592,6 @@ class TestVmapOperators(Namespace.TestVmapBase):
              (torch.rand(B1, B2, B0, 3, 2, 5), torch.rand(B0, 3 * 2 * 5)),
              in_dims=(2, 0))
 
-    # TODO: reenable the random op failures
     def test_no_random_op_support(self):
         B0 = 2
 
@@ -2650,8 +2649,6 @@ class TestVmapOperators(Namespace.TestVmapBase):
             (lambda t: captured.uniform_(), (torch.randn(B0),)),
 
             # factory functions
-            (lambda t: torch.rand(1), (torch.randn(B0),)),
-            # (lambda t: torch.randn(1), (torch.randn(B0),)),
             (lambda t: torch.randint(5, [1]), (torch.randn(B0),)),
             (lambda t: torch.randperm(5), (torch.randn(B0),)),
         ]
@@ -2716,14 +2713,14 @@ class TestVmapOperators(Namespace.TestVmapBase):
             return x + torch.randn(shape)
 
         torch.manual_seed(0)
-        out1 = vmap(vmap(vmap_f))(torch.ones(2, 3))
+        out1 = vmap(vmap(vmap_f, randomness='different'), randomness='different')(torch.ones(2, 3))
 
         torch.manual_seed(0)
         out2 = naive_f(torch.ones(2, 3), (2, 3))
         self.assertEqual(out1, out2)
 
         torch.manual_seed(0)
-        out1 = vmap(vmap(vmap_f))(torch.ones(2, 3, 4))
+        out1 = vmap(vmap(vmap_f, randomness='different'), randomness='different')(torch.ones(2, 3, 4))
 
         torch.manual_seed(0)
         out2 = naive_f(torch.ones(2, 3, 4), (2, 3, 1))
@@ -3427,6 +3424,42 @@ class TestVmapOperatorsOpInfo(TestCase):
         x = torch.randn(2, 5, device=device)
         y = torch.randn(2, 3, device=device)
         self.assertTrue(isinstance(vmap(f)(x, y), Point))
+
+    @parametrize('randomness', ['same', 'different', 'error'])
+    @parametrize('use_generator', [True, False])
+    def test_random_behavior(self, device, randomness, use_generator):
+        def reset_random():
+            return generator.set_state(orig_state) if use_generator else torch.manual_seed(seed)
+
+        generator = torch.Generator(device=device)
+        orig_state = generator.get_state()
+        kwargs = {'device': device, 'generator': generator} if use_generator else {'device': device}
+        supported_random_ops = [
+            lambda _, shape: torch.randn(shape, **kwargs),
+            lambda _, shape: torch.rand(shape, **kwargs),
+        ]
+
+        B0 = 4
+        seed = 1234567
+        passed = torch.randn(B0, device=device)
+
+        for op in supported_random_ops:
+            if randomness == 'error':
+                with self.assertRaisesRegex(RuntimeError, r"called random operation while in randomness error mode"):
+                    vmap(op, in_dims=(0, None), randomness=randomness)(passed, [B0])
+                return
+
+            generator = reset_random()
+            vmap_result = vmap(op, in_dims=(0, None), randomness=randomness)(passed, [B0])
+
+            generator = reset_random()
+            if randomness == 'different':
+                expected = op(passed, [B0, B0])
+                assert torch.allclose(vmap_result, expected)
+            else:
+                expected = op(passed, [B0])
+                for i in range(B0):
+                    assert torch.allclose(vmap_result[i], expected)
 
 
 only_for = ("cpu", "cuda")

@@ -901,10 +901,10 @@ class TestOperators(TestCase):
         xfail('nn.functional.gaussian_nll_loss'),
         xfail('double', 'channels_last'),
         xfail('masked_select'),
-        xfail('nn.functional.fractional_max_pool3d'),
+        skip('nn.functional.fractional_max_pool3d'),  # generator works on cpu, fails on cuda
         xfail('nn.functional.glu'),
         xfail('as_strided'),
-        xfail('nn.functional.fractional_max_pool2d'),
+        skip('nn.functional.fractional_max_pool2d'),  # generator works on cpu, fails on cuda
         skip('solve'),
         xfail('linalg.cond'),
         xfail('linalg.svdvals'),
