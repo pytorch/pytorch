@@ -148,8 +148,7 @@ TensorImpl::TensorImpl(
       numel_(0),
       data_type_(data_type),
       device_opt_(storage_.device()),
-      key_set_(key_set.remove(
-          DispatchKey::Python)) { // See [Note: Python key removal]
+      key_set_(key_set - c10::python_ks) { // See [Note: Python key removal]
   init_bitfields();
   // Inference tensor doesn't have version counter.
   if (!is_inference()) {
@@ -194,8 +193,8 @@ TensorImpl::TensorImpl(
 
   key_set = key_set | getAutocastRelatedKeySetFromBackend(k);
 
-  key_set =
-      key_set.remove(DispatchKey::Python); // See [Note: Python key removal]
+  // See [Note: Python key removal]
+  key_set = key_set - c10::python_ks;
 
   // Inference tensor doesn't have autograd related keys.
   if (inference_mode) {
