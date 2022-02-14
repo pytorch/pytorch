@@ -120,11 +120,11 @@ TensorImpl::TensorImpl(
 
 // [Note: Python key removal]
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-// In most constructors for TensorImpl, you will see Python and PythonTLSSnapshot
-// keys are removed from the passed in DispatchKeySet.  Why?
+// In most constructors for TensorImpl, you will see Python key is removed from
+// the passed in DispatchKeySet.  Why?
 //
-// INVARIANT: Python and PythonTLSSnapshot dispatch keys are set iff PyObject for
-// the Tensor has a nontrivial __torch_dispatch__ implementation.
+// INVARIANT: Python dispatch key is set iff PyObject for the Tensor has a
+// nontrivial __torch_dispatch__ implementation.
 //
 // When a fresh TensorImpl is created, there is *no* PyObject (this only gets
 // initialized lazily at the first point in time the Tensor passes into Python).
@@ -132,8 +132,8 @@ TensorImpl::TensorImpl(
 //
 // In practice, what will happen shortly afterwards is that the TensorImpl
 // will get its PyObject initialized by Tensor._make_subclass; at this point
-// the Python and PythonTLSSnapshot dispatch keys will be set and all is well.
-// The point is to delay the dispatch key setting until that point.
+// the Python dispatch key will be set and all is well.  The point is to delay
+// the dispatch key setting until that point.
 
 // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 TensorImpl::TensorImpl(
@@ -552,7 +552,7 @@ void TensorImpl::copy_tensor_metadata_except_version_counter(
   dest_impl->storage_offset_ = src_impl->storage_offset_;
   dest_impl->data_type_ = src_impl->data_type_;
   dest_impl->device_opt_ = src_impl->device_opt_;
-  dest_impl->key_set_ = src_impl->key_set_.remove(DispatchKey::Python).remove(DispatchKey::PythonTLSSnapshot);
+  dest_impl->key_set_ = src_impl->key_set_.remove(DispatchKey::Python);
   dest_impl->is_contiguous_ = src_impl->is_contiguous_;
   dest_impl->has_contiguity_ = src_impl->has_contiguity_;
   dest_impl->is_channels_last_contiguous_ =
