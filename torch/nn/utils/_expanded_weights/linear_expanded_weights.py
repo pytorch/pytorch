@@ -3,6 +3,7 @@ import torch.nn.functional as F
 from .expanded_weights_impl import implements_per_sample_grads
 from .expanded_weights_utils import \
     forward_helper, set_grad_sample_if_exists, unpack_expanded_weight_or_tensor
+from typing import List, Optional
 
 @implements_per_sample_grads(F.linear)
 class LinearPerSampleGrad(torch.autograd.Function):
@@ -22,7 +23,7 @@ class LinearPerSampleGrad(torch.autograd.Function):
     def backward(ctx, grad_output):
         input, weight = ctx.args
         bias = ctx.kwargs['bias']
-        results = []
+        results: List[Optional[torch.Tensor]] = []
         results.append(None)  # for kwarg_names
 
         if input.requires_grad:
