@@ -127,8 +127,8 @@ class TestOptimizeForMobilePreserveDebugInfo(JitTestCase):
                 ),
             ),
             replacements={
-                "prepacked::linear_clamp_prepack": "prim::CallFunction",
-                "prepacked::linear_clamp_run": "prim::CallFunction",
+                "prepacked::linear_clamp_prepack": "aten::linear",
+                "prepacked::linear_clamp_run": "aten::linear",
                 "prepacked::conv2d_clamp_prepack": "aten::conv2d",
                 "prepacked::conv2d_clamp_run": "aten::conv2d",
                 "prepacked::conv2d_transpose_clamp_prepack":
