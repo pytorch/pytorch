@@ -256,4 +256,3 @@ python generate_test_torchscripts.py
 ## PyTorch Android API Javadoc
 
 You can find more details about the PyTorch Android API in the [Javadoc](https://pytorch.org/javadoc/).
-
