@@ -7,19 +7,23 @@ def _test_large_cum_fn_helper(x, fn):
     torch.allclose(expected, actual, rtol=1.3e-06, atol=1e-05, equal_nan=True)
     print(" Pass")
 
-def test_large_cumprod():
+def test_large_cumprod(val):
     device = "cuda:0"
     dtype = torch.float16
     print("----------------------")
     print("test_large")
+    print(val)
     print("----------------------")
 
-    for p in [5, 10, 15, 20, 25, 26, 27, 28, 29, 30]:
-        x = torch.empty(2**p + 200, device=device, dtype=dtype)
-        print(x.shape[0])
-        x[::3] = 8
-        x[1::3] = .25
-        x[2::3] = .5
-        _test_large_cum_fn_helper(x, lambda x: torch.cumprod(x, 0))
+    p = int(val)
 
-test_large_cumprod()
+    x = torch.empty(2**p + 200, device=device, dtype=dtype)
+    print(x.shape[0])
+    x[::3] = 8
+    x[1::3] = .25
+    x[2::3] = .5
+    _test_large_cum_fn_helper(x, lambda x: torch.cumprod(x, 0))
+
+import sys
+
+test_large_cumprod(sys.argv[1])
