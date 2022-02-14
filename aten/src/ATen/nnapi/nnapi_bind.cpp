@@ -150,7 +150,7 @@ void NnapiCompilation::get_operand_type(const at::Tensor& t, ANeuralNetworksOper
   TORCH_CHECK(operand->dimensionCount == t.dim()); // Check for overflow.
   dims->resize(t.dim());
   operand->dimensions = dims->data();
-  for (size_t i = 0; i < dims->size(); i++) {
+  for (const auto i : c10::irange(dims->size())) {
     (*dims)[i] = t.sizes()[i];
     TORCH_CHECK((*dims)[i] == t.sizes()[i]); // Check for overflow.
   }
