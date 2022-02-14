@@ -957,6 +957,7 @@ class AllocateReuseModifier {
 
   void handle(const kir::IfThenElse* for_loop) {
     TORCH_INTERNAL_ASSERT(
+        false,
         "lower_alias_memory: IfThenElse before unrolling is not yet supported");
   }
 

@@ -104,6 +104,9 @@ void topk_impl_loop(
     const bool largest,
     const bool sorted,
     char** data, const int64_t* strides, const int64_t n) {
+
+  using elem_t = std::pair<accscalar_t, int64_t>;
+  std::vector<elem_t> queue(dim_size);
   for (const auto i : c10::irange(n)) {
     TensorAccessor<scalar_t, 1> mode_values(
         reinterpret_cast<scalar_t*>(data[0] + i * strides[0]),
@@ -118,8 +121,6 @@ void topk_impl_loop(
     auto n = dim_size;
     auto use_partial_sort = k * 64 <= n;
 
-    using elem_t = std::pair<accscalar_t, int64_t>;
-    std::vector<elem_t> queue(n);
     for (const auto j : c10::irange(n)) {
       queue[j].first = tmp_values[j];
       queue[j].second = j;
