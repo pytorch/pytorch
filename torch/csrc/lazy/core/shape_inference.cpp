@@ -76,7 +76,7 @@ std::vector<int64_t> expand_param_if_needed(
 }
 
 std::vector<Shape> compute_shape_arange_out(const at::Scalar & start, const at::Scalar & end, const at::Scalar & step, at::Tensor & out) {
-  double size_d;
+  double size_d = 0;
   // shape inference code copied from RangeFactories.cpp arange_out function
   // Note: AT_DISPATCH_ALL_TYPES_AND is just a macro that defines the correct c++ scalar_t type depending on out tensor
   AT_DISPATCH_ALL_TYPES_AND(c10::kBFloat16, out.scalar_type(), "compute_shape_arange_out", [&]() {
@@ -306,20 +306,20 @@ std::vector<Shape> compute_shape_native_layer_norm(const at::Tensor & input,
     stat_shape.emplace_back(1);
   }
 
-  return {Shape(input.scalar_type(), std::move(input_shape)),
+  return {Shape(input.scalar_type(), input_shape),
           Shape(input.scalar_type(), stat_shape),
-          Shape(input.scalar_type(), std::move(stat_shape))};
+          Shape(input.scalar_type(), stat_shape)};
 }
 
 std::vector<Shape> compute_shape_native_layer_norm_backward(const at::Tensor& grad_out,
     const at::Tensor& input, at::IntArrayRef normalized_shape, const at::Tensor& mean, const at::Tensor& rstd,
     const c10::optional<at::Tensor>& weight, const c10::optional<at::Tensor>& bias, ::std::array<bool,3> output_mask) {
   std::vector<Shape> shapes;
-  shapes.push_back(Shape(input.scalar_type(),
+  shapes.emplace_back(Shape(input.scalar_type(),
                          output_mask[0] ? input.sizes().vec() : std::vector<int64_t>{}));
-  shapes.push_back(Shape(weight && weight->defined() ? weight->scalar_type() : input.scalar_type(),
+  shapes.emplace_back(Shape(weight && weight->defined() ? weight->scalar_type() : input.scalar_type(),
                          output_mask[1] && weight ? weight->sizes().vec() : std::vector<int64_t>{}));
-  shapes.push_back(Shape(bias && weight->defined() ? bias->scalar_type() : input.scalar_type(),
+  shapes.emplace_back(Shape(bias && weight->defined() ? bias->scalar_type() : input.scalar_type(),
                          output_mask[2] && bias ? bias->sizes().vec() : std::vector<int64_t>{}));
   return shapes;
 }
