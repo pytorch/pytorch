@@ -4610,7 +4610,7 @@ else:
     @onlyNativeDeviceTypes
     @dtypes(*get_all_dtypes(include_bool=False))
     def test_from_dlpack(self, device, dtype):
-        x = make_tensor((5,), device, dtype)
+        x = make_tensor((5,), dtype=dtype, device=device)
         y = torch.from_dlpack(x)
         self.assertEqual(x, y)
 
@@ -4618,7 +4618,7 @@ else:
     @onlyNativeDeviceTypes
     @dtypes(*get_all_dtypes(include_bool=False))
     def test_from_dlpack_noncontinguous(self, device, dtype):
-        x = make_tensor((25,), device, dtype).reshape(5, 5)
+        x = make_tensor((25,), dtype=dtype, device=device).reshape(5, 5)
 
         y1 = x[0]
         y1_dl = torch.from_dlpack(y1)
@@ -4661,7 +4661,7 @@ else:
     @onlyNativeDeviceTypes
     @dtypes(*get_all_dtypes(include_bool=False))
     def test_from_dlpack_dtype(self, device, dtype):
-        x = make_tensor((5,), device, dtype)
+        x = make_tensor((5,), dtype=dtype, device=device)
         y = torch.from_dlpack(x)
         assert x.dtype == y.dtype
 
