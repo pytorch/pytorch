@@ -113,6 +113,7 @@ jobs:
         with:
           submodules: recursive
           repository: pytorch/builder
+          ref: malfet-patch-1
           path: builder
       - name: Clean pytorch/builder checkout
         run: |
@@ -505,6 +506,7 @@ jobs:
         with:
           submodules: recursive
           repository: pytorch/builder
+          ref: malfet-patch-1
           path: builder
       - name: Clean pytorch/builder checkout
         run: |
@@ -897,6 +899,7 @@ jobs:
         with:
           submodules: recursive
           repository: pytorch/builder
+          ref: malfet-patch-1
           path: builder
       - name: Clean pytorch/builder checkout
         run: |
@@ -1289,6 +1292,7 @@ jobs:
         with:
           submodules: recursive
           repository: pytorch/builder
+          ref: malfet-patch-1
           path: builder
       - name: Clean pytorch/builder checkout
         run: |
@@ -1682,6 +1686,7 @@ jobs:
         with:
           submodules: recursive
           repository: pytorch/builder
+          ref: malfet-patch-1
           path: builder
       - name: Clean pytorch/builder checkout
         run: |
@@ -2082,6 +2087,7 @@ jobs:
         with:
           submodules: recursive
           repository: pytorch/builder
+          ref: malfet-patch-1
           path: builder
       - name: Clean pytorch/builder checkout
         run: |
@@ -2482,6 +2488,7 @@ jobs:
         with:
           submodules: recursive
           repository: pytorch/builder
+          ref: malfet-patch-1
           path: builder
       - name: Clean pytorch/builder checkout
         run: |
@@ -2882,6 +2889,7 @@ jobs:
         with:
           submodules: recursive
           repository: pytorch/builder
+          ref: malfet-patch-1
           path: builder
       - name: Clean pytorch/builder checkout
         run: |
@@ -3282,6 +3290,7 @@ jobs:
         with:
           submodules: recursive
           repository: pytorch/builder
+          ref: malfet-patch-1
           path: builder
       - name: Clean pytorch/builder checkout
         run: |
@@ -3685,6 +3694,7 @@ jobs:
         with:
           submodules: recursive
           repository: pytorch/builder
+          ref: malfet-patch-1
           path: builder
       - name: Clean pytorch/builder checkout
         run: |
@@ -4088,6 +4098,7 @@ jobs:
         with:
           submodules: recursive
           repository: pytorch/builder
+          ref: malfet-patch-1
           path: builder
       - name: Clean pytorch/builder checkout
         run: |
@@ -4491,6 +4502,7 @@ jobs:
         with:
           submodules: recursive
           repository: pytorch/builder
+          ref: malfet-patch-1
           path: builder
       - name: Clean pytorch/builder checkout
         run: |
@@ -4894,6 +4906,7 @@ jobs:
         with:
           submodules: recursive
           repository: pytorch/builder
+          ref: malfet-patch-1
           path: builder
       - name: Clean pytorch/builder checkout
         run: |
@@ -5297,6 +5310,7 @@ jobs:
         with:
           submodules: recursive
           repository: pytorch/builder
+          ref: malfet-patch-1
           path: builder
       - name: Clean pytorch/builder checkout
         run: |
@@ -5700,6 +5714,7 @@ jobs:
         with:
           submodules: recursive
           repository: pytorch/builder
+          ref: malfet-patch-1
           path: builder
       - name: Clean pytorch/builder checkout
         run: |
@@ -6103,6 +6118,7 @@ jobs:
         with:
           submodules: recursive
           repository: pytorch/builder
+          ref: malfet-patch-1
           path: builder
       - name: Clean pytorch/builder checkout
         run: |
@@ -6506,6 +6522,7 @@ jobs:
         with:
           submodules: recursive
           repository: pytorch/builder
+          ref: malfet-patch-1
           path: builder
       - name: Clean pytorch/builder checkout
         run: |
@@ -6909,6 +6926,7 @@ jobs:
         with:
           submodules: recursive
           repository: pytorch/builder
+          ref: malfet-patch-1
           path: builder
       - name: Clean pytorch/builder checkout
         run: |
@@ -7312,6 +7330,7 @@ jobs:
         with:
           submodules: recursive
           repository: pytorch/builder
+          ref: malfet-patch-1
           path: builder
       - name: Clean pytorch/builder checkout
         run: |
@@ -7715,6 +7734,7 @@ jobs:
         with:
           submodules: recursive
           repository: pytorch/builder
+          ref: malfet-patch-1
           path: builder
       - name: Clean pytorch/builder checkout
         run: |
