@@ -83,26 +83,6 @@ class LinearPackedParams(torch.nn.Module):
         super(LinearPackedParams, self)._load_from_state_dict(state_dict, prefix, local_metadata, False,
                                                               missing_keys, unexpected_keys, error_msgs)
 
-    @torch.jit.export
-    def __getstate__(self):
-        qweight, bias = self._weight_bias()
-        return qweight, bias, self.training, self.dtype
-
-    @torch.jit.export
-    def __setstate__(self, state):
-        self.dtype = state[3]
-        self.set_weight_bias(state[0], state[1])
-        self.training = state[2]
-
-    def __deepcopy__(self, memo):
-        new_instance = type(self).__new__(type(self))
-        torch.nn.Module.__init__(new_instance)
-        state = self.__getstate__()
-        new_instance.__setstate__(state)
-        return new_instance
-
-    def __copy__(self):
-        return self.__deepcopy__({})
 
     def __repr__(self):
         return self._weight_bias().__repr__()
