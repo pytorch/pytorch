@@ -541,6 +541,32 @@ $6 = torch._ops.aten.add_($1, $5)''')
             z = LoggingTensor(torch.empty([]))
             z.set_(s)
 
+    def test_autograd_in_attr(self):
+        # We want the wrapped Tensor to require gradients!
+        true_t = torch.rand(2, requires_grad=True)
+        t = LoggingTensor(true_t)
+
+        out = t + 2
+
+        self.assertFalse(out.requires_grad)
+        self.assertIsNone(out.grad_fn)
+
+        # TODO: this should be True
+        self.assertFalse(out.elem.requires_grad)
+        # TODO: this should be not None
+        self.assertIsNone(out.elem.grad_fn)
+
+        with self.assertRaisesRegex(RuntimeError, "does not require grad"):
+            out.backward()
+
+        # TODO: this should not raise
+        with self.assertRaisesRegex(RuntimeError, "does not require grad"):
+            out.elem.backward()
+
+        self.assertIsNone(t.grad)
+        # TODO: this should not be None
+        self.assertIsNone(t.elem.grad)
+
 
 if __name__ == '__main__':
     run_tests()
