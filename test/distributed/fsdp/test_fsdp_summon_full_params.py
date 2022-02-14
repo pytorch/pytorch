@@ -1,15 +1,19 @@
 # Owner(s): ["oncall: distributed"]
-import sys
+import itertools
 import math
+import sys
 
 import torch
 import torch.nn as nn
 from torch import distributed as dist
-from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.distributed.fsdp import CPUOffload
+from torch.distributed.fsdp import FlatParameter
+from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import (
+    FSDPInitMode,
     FSDPTest,
+    NestedWrappedModule,
 )
 from torch.testing._internal.common_utils import (
     TEST_WITH_DEV_DBG_ASAN,
@@ -44,27 +48,26 @@ class TestSummonFullParams(FSDPTest):
         return int(math.ceil(global_size / self.world_size))
 
     @skip_if_lt_x_gpu(2)
-    @parametrize(
-        "writeback",
-        [True, False]
-    )
+    @parametrize("writeback", [True, False])
     @parametrize(
         "cpu_offload",
-        [CPUOffload(offload_params=True), CPUOffload(offload_params=False)]
+        [CPUOffload(offload_params=True), CPUOffload(offload_params=False)],
     )
-    @parametrize(
-        "modify_outer",
-        [True, False]
-    )
-    def test_summon_full_param_writeback(self, writeback, cpu_offload, modify_outer):
-        model = FSDP(nn.Sequential(
-            FSDP(nn.Linear(5, 5, bias=False)),
-            nn.Linear(5, 3, bias=False)
-        )).cuda(self.rank)
+    @parametrize("modify_outer", [True, False])
+    def test_summon_full_param_writeback(
+        self, writeback, cpu_offload, modify_outer
+    ):
+        model = FSDP(
+            nn.Sequential(
+                FSDP(nn.Linear(5, 5, bias=False)), nn.Linear(5, 3, bias=False)
+            )
+        ).cuda(self.rank)
 
         # set the value
         outer_param = model.get_parameter("_fsdp_wrapped_module.flat_param")
-        inner_param = model.get_parameter("_fsdp_wrapped_module._fpw_module.0._fsdp_wrapped_module.flat_param")
+        inner_param = model.get_parameter(
+            "_fsdp_wrapped_module._fpw_module.0._fsdp_wrapped_module.flat_param"
+        )
         p = outer_param if modify_outer else inner_param
 
         with torch.no_grad():
@@ -97,27 +100,25 @@ class TestSummonFullParams(FSDPTest):
 
         with model._summon_full_params():
             self.assertEqual(raw_model_size, self.get_model_param_count(model))
-            all_shards = next(model.parameters())
+            parameters = list(model.parameters())
+            all_shards = FlatParameter(parameters, requires_grad=False)
             my_slice = torch.chunk(all_shards, self.world_size)[self.rank]
 
             # shards are padded but the full_param tensor is not
-            a, b = my_shard[0: my_slice.numel()], my_slice
-            self.assertTrue(torch.equal(my_shard[0: my_slice.numel()].cpu(), my_slice.cpu()))
+            a, b = my_shard[0 : my_slice.numel()], my_slice
+            self.assertTrue(
+                torch.equal(my_shard[0 : my_slice.numel()].cpu(), my_slice.cpu())
+            )
 
     @skip_if_lt_x_gpu(2)
-    @parametrize(
-        "recurse",
-        [True, False]
-    )
-    @parametrize(
-        "summon_outer",
-        [True, False]
-    )
+    @parametrize("recurse", [True, False])
+    @parametrize("summon_outer", [True, False])
     def test_summon_full_param_recursive(self, recurse, summon_outer):
-        model = FSDP(nn.Sequential(
-            FSDP(nn.Linear(5, 5, bias=False)),
-            nn.Linear(5, 3, bias=False)
-        )).cuda(self.rank)
+        model = FSDP(
+            nn.Sequential(
+                FSDP(nn.Linear(5, 5, bias=False)), nn.Linear(5, 3, bias=False)
+            )
+        ).cuda(self.rank)
 
         global_inner_numel = self.get_model_param_count(nn.Linear(5, 5, bias=False))
         global_outer_numel = self.get_model_param_count(nn.Linear(5, 3, bias=False))
@@ -126,7 +127,9 @@ class TestSummonFullParams(FSDPTest):
         shard_outer_numel = int(math.ceil(global_outer_numel / self.world_size))
 
         outer_param = model.get_parameter("_fsdp_wrapped_module.flat_param")
-        inner_param = model.get_parameter("_fsdp_wrapped_module._fpw_module.0._fsdp_wrapped_module.flat_param")
+        inner_param = model.get_parameter(
+            "_fsdp_wrapped_module._fpw_module.0._fsdp_wrapped_module.flat_param"
+        )
         self.assertEqual(shard_outer_numel, outer_param.numel())
         self.assertEqual(shard_inner_numel, inner_param.numel())
 
@@ -135,7 +138,9 @@ class TestSummonFullParams(FSDPTest):
         expected_outer_numel = global_outer_numel if summon_outer else shard_outer_numel
 
         # inner is summoned if _summon_full_param is called with recursion or on the inner FSDP module
-        expected_inner_numel = global_inner_numel if recurse or not summon_outer else shard_inner_numel
+        expected_inner_numel = (
+            global_inner_numel if recurse or not summon_outer else shard_inner_numel
+        )
 
         with model_to_summon._summon_full_params(recurse=recurse):
             self.assertEqual(expected_outer_numel, outer_param.numel())
@@ -153,9 +158,10 @@ class TestSummonFullParams(FSDPTest):
                     pass
 
         model = FSDP(MyModule()).cuda(self.rank)
-        with self.assertRaisesRegex(ValueError, "current state is TrainingState_.FORWARD"):
+        with self.assertRaisesRegex(
+            ValueError, "current state is TrainingState_.FORWARD"
+        ):
             model(model)
-
 
     @skip_if_lt_x_gpu(2)
     def test_cannot_summon_full_params_from_backward(self):
@@ -171,32 +177,40 @@ class TestSummonFullParams(FSDPTest):
         self.assertTrue(output.requires_grad)
         output.register_hook(bad_backwards_hook)
 
-        with self.assertRaisesRegex(ValueError, "current state is TrainingState_.BACKWARD_PRE"):
+        with self.assertRaisesRegex(
+            ValueError, "current state is TrainingState_.BACKWARD_PRE"
+        ):
             output.backward()
-
 
     @skip_if_lt_x_gpu(2)
     def test_summon_full_params_respects_reshard_after_forward(self):
-        model = FSDP(nn.Sequential(
-            FSDP(nn.Linear(5, 5, bias=False)),
-            nn.Linear(5, 3, bias=False)
-        )).cuda(self.rank)
+        model = FSDP(
+            nn.Sequential(
+                FSDP(nn.Linear(5, 5, bias=False)), nn.Linear(5, 3, bias=False)
+            )
+        ).cuda(self.rank)
 
         outer_param = model.get_parameter("_fsdp_wrapped_module.flat_param")
-        inner_param = model.get_parameter("_fsdp_wrapped_module._fpw_module.0._fsdp_wrapped_module.flat_param")
+        inner_param = model.get_parameter(
+            "_fsdp_wrapped_module._fpw_module.0._fsdp_wrapped_module.flat_param"
+        )
         outer_full_param_size = outer_param.numel() * self.world_size
 
         # trigger lazy init
         model(torch.zeros(5).cuda(self.rank))
 
         # the root FSDP module keeps all params around
-        self.assertEqual(outer_full_param_size, outer_param._full_param_padded.storage().size())
+        self.assertEqual(
+            outer_full_param_size, outer_param._full_param_padded.storage().size()
+        )
         self.assertEqual(0, inner_param._full_param_padded.storage().size())
 
         # similarly _summon_full_params should have the same behavior
         with model._summon_full_params():
             pass
-        self.assertEqual(outer_full_param_size, outer_param._full_param_padded.storage().size())
+        self.assertEqual(
+            outer_full_param_size, outer_param._full_param_padded.storage().size()
+        )
         self.assertEqual(0, inner_param._full_param_padded.storage().size())
 
     @skip_if_lt_x_gpu(2)
@@ -223,20 +237,25 @@ class TestSummonFullParams(FSDPTest):
 
     @skip_if_lt_x_gpu(2)
     def test_reshard_outside_forward_backward_iteration(self):
-        model = FSDP(nn.Sequential(
-            FSDP(nn.Linear(5, 5, bias=False)),
-            nn.Linear(5, 1, bias=False)
-        )).cuda(self.rank)
+        model = FSDP(
+            nn.Sequential(
+                FSDP(nn.Linear(5, 5, bias=False)), nn.Linear(5, 1, bias=False)
+            )
+        ).cuda(self.rank)
 
         outer_param = model.get_parameter("_fsdp_wrapped_module.flat_param")
-        inner_param = model.get_parameter("_fsdp_wrapped_module._fpw_module.0._fsdp_wrapped_module.flat_param")
+        inner_param = model.get_parameter(
+            "_fsdp_wrapped_module._fpw_module.0._fsdp_wrapped_module.flat_param"
+        )
         outer_full_param_size = outer_param.numel() * self.world_size
 
         # First lets validate our assumption about resharding
 
         output = model(torch.zeros(5).cuda(self.rank))
         # the root FSDP module keeps all params around
-        self.assertEqual(outer_full_param_size, outer_param._full_param_padded.storage().size())
+        self.assertEqual(
+            outer_full_param_size, outer_param._full_param_padded.storage().size()
+        )
         self.assertEqual(0, inner_param._full_param_padded.storage().size())
 
         output.backward()
@@ -249,7 +268,9 @@ class TestSummonFullParams(FSDPTest):
         output = model(torch.zeros(5).cuda(self.rank))
         with model._summon_full_params():
             pass
-        self.assertEqual(outer_full_param_size, outer_param._full_param_padded.storage().size())
+        self.assertEqual(
+            outer_full_param_size, outer_param._full_param_padded.storage().size()
+        )
         self.assertEqual(0, inner_param._full_param_padded.storage().size())
 
         output.backward()
@@ -257,7 +278,6 @@ class TestSummonFullParams(FSDPTest):
             pass
         self.assertEqual(0, outer_param._full_param_padded.storage().size())
         self.assertEqual(0, inner_param._full_param_padded.storage().size())
-
 
     @skip_if_lt_x_gpu(2)
     def test_params_are_unflatenned(self):
@@ -270,6 +290,27 @@ class TestSummonFullParams(FSDPTest):
             a = model.weight.flatten().detach()
             b = flattened_param.detach()
             self.assertTrue(torch.equal(a, b))
+
+    @skip_if_lt_x_gpu(2)
+    def test_params_count_and_value(self):
+        fsdp_model = FSDP(
+            NestedWrappedModule(
+                group=dist.distributed_c10d._get_default_group(),
+                wrap_fsdp=True,
+                fsdp_init_mode=FSDPInitMode.CUDA_BEFORE,
+            )
+        )
+        model = NestedWrappedModule(
+            group=dist.distributed_c10d._get_default_group(),
+            wrap_fsdp=False,
+            fsdp_init_mode=FSDPInitMode.CUDA_BEFORE,
+        )
+        with fsdp_model._summon_full_params():
+            for p1, p2 in itertools.zip_longest(
+                fsdp_model.parameters(), model.module.parameters()
+            ):
+                self.assertEqual(p1, p2)
+
 
 instantiate_parametrized_tests(TestSummonFullParams)
 
