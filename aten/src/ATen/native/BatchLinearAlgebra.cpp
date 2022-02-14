@@ -794,7 +794,8 @@ void _linalg_check_errors(
 
 bool _requires_fw_or_bw_grad(const Tensor& input) {
   return ((at::GradMode::is_enabled() && input.requires_grad())
-          || input._fw_grad(/*level */ 0).defined());
+          || input._fw_grad(/*level */ 0).defined()
+          || isTensorSubclassLike(input));
 }
 
 // Below of the definitions of the functions operating on a batch that are going to be dispatched
