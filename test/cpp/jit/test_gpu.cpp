@@ -3897,7 +3897,6 @@ TEST_F(NVFuserTest, FusionUnaryOps_CUDA) {
       OpTuple{at::expm1, UnaryOpType::Expm1, "expm1"},
       OpTuple{at::floor, UnaryOpType::Floor, "floor"},
       OpTuple{at::frac, UnaryOpType::Frac, "frac"},
-      OpTuple{at::gelu, UnaryOpType::Gelu, "gelu"},
       OpTuple{at::lgamma, UnaryOpType::Lgamma, "lgamma"},
       OpTuple{at::log, UnaryOpType::Log, "log"},
       OpTuple{at::log10, UnaryOpType::Log10, "log10"},
