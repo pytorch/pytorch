@@ -10,13 +10,6 @@ class _BatchNorm(torch.nn.modules.batchnorm._BatchNorm):
         self.register_buffer('scale', torch.tensor(1.0, **factory_kwargs))
         self.register_buffer('zero_point', torch.tensor(0, **factory_kwargs))
 
-    def forward(self, input: Tensor) -> Tensor:
-        # disabling this since it is not symbolically traceable
-        # self._check_input_dim(input)
-        return torch.ops.quantized.batch_norm(
-            input, self.weight, self.bias, self.running_mean,
-            self.running_var, self.eps, self.scale, self.zero_point)
-
     @staticmethod
     def from_float(cls, mod):
         activation_post_process = mod.activation_post_process
@@ -51,6 +44,13 @@ class BatchNorm2d(_BatchNorm):
         if len(input.shape) != 4:
             raise ValueError("Input shape must be `(N, C, H, W)`!")
 
+    def forward(self, input: Tensor) -> Tensor:
+        # disabling this since this is not symbolically traceable
+        # self._check_input_dim(input)
+        return torch.ops.quantized.batch_norm2d(
+            input, self.weight, self.bias, self.running_mean,
+            self.running_var, self.eps, self.scale, self.zero_point)
+
     @classmethod
     def from_float(cls, mod):
         return _BatchNorm.from_float(cls, mod)
@@ -73,6 +73,13 @@ class BatchNorm3d(_BatchNorm):
         # https://github.com/pytorch/pytorch/issues/23890
         if len(input.shape) != 5:
             raise ValueError("Input shape must be `(N, C, H, W)`!")
+
+    def forward(self, input: Tensor) -> Tensor:
+        # disabling this since this is not symbolically traceable
+        # self._check_input_dim(input)
+        return torch.ops.quantized.batch_norm3d(
+            input, self.weight, self.bias, self.running_mean,
+            self.running_var, self.eps, self.scale, self.zero_point)
 
     @classmethod
     def from_float(cls, mod):
