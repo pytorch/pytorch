@@ -4246,7 +4246,7 @@ class TestTorchDeviceType(TestCase):
     @dtypesIfCUDA(torch.half)  # only small dtype not to get oom
     def test_large_cumsum(self, device, dtype):
         # initialization to avoid overflow and half caveats
-        x = torch.empty(2**29 + 200, device=device, dtype=dtype)
+        x = torch.empty(2**28 + 200, device=device, dtype=dtype)
         x[::3] = -3
         x[1::3] = 2
         x[2::3] = 1
@@ -4256,11 +4256,13 @@ class TestTorchDeviceType(TestCase):
     @dtypesIfCUDA(torch.half)  # only small dtype not to get oom
     def test_large_cumprod(self, device, dtype):
         # initialization to avoid overflow and half caveats
-        x = torch.empty(2**29 + 200, device=device, dtype=dtype)
-        x[::3] = 8
-        x[1::3] = .25
-        x[2::3] = .5
-        self._test_large_cum_fn_helper(x, lambda x: torch.cumprod(x, 0))
+        for p in [5, 10, 15, 20, 25, 26, 27, 28, 29, 30]:
+            x = torch.empty(2**p + 200, device=device, dtype=dtype)
+            print(x.shape)
+            x[::3] = 8
+            x[1::3] = .25
+            x[2::3] = .5
+            self._test_large_cum_fn_helper(x, lambda x: torch.cumprod(x, 0))
 
     def test_discontiguous_out_cumsum(self, device):
         x = torch.randn(4, 8, device=device)
