@@ -387,6 +387,7 @@ lazy_tensor_core_sources = [
     "torch/csrc/lazy/backend/backend_interface.cpp",
     "torch/csrc/lazy/backend/lowering_context.cpp",
     "torch/csrc/lazy/core/config.cpp",
+    "torch/csrc/lazy/core/debug_util.cpp",
     "torch/csrc/lazy/core/hash.cpp",
     "torch/csrc/lazy/core/helpers.cpp",
     "torch/csrc/lazy/core/ir.cpp",
@@ -424,6 +425,11 @@ lazy_tensor_core_sources = [
     "torch/csrc/lazy/ts_backend/ops/generic.cpp",
     "torch/csrc/lazy/ts_backend/ops/scalar.cpp",
     "torch/csrc/lazy/ts_backend/ts_node.cpp",
+]
+
+lazy_tensor_core_python_sources = [
+    "torch/csrc/lazy/python/init.cpp",
+    "torch/csrc/lazy/python/python_util.cpp",
 ]
 
 libtorch_core_sources = sorted(
@@ -827,6 +833,7 @@ libtorch_python_core_sources = [
     "torch/csrc/jit/python/init.cpp",
     "torch/csrc/jit/passes/onnx.cpp",
     "torch/csrc/jit/passes/onnx/cast_all_constant_to_floating.cpp",
+    "torch/csrc/jit/passes/onnx/deduplicate_initializers.cpp",
     "torch/csrc/jit/passes/onnx/eval_peephole.cpp",
     "torch/csrc/jit/passes/onnx/constant_fold.cpp",
     "torch/csrc/jit/passes/onnx/constant_map.cpp",
@@ -885,7 +892,7 @@ libtorch_python_core_sources = [
     "torch/csrc/utils/tensor_numpy.cpp",
     "torch/csrc/utils/tensor_types.cpp",
     "torch/csrc/utils/disable_torch_function.cpp",
-]
+] + lazy_tensor_core_python_sources
 
 libtorch_python_distributed_core_sources = [
     "torch/csrc/distributed/c10d/init.cpp",
