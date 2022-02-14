@@ -1389,19 +1389,22 @@ TEST_F(ModulesTest, Dropout) {
 }
 
 TEST_F(ModulesTest, Dropout2d) {
+  auto p = 0.5;
   for (const auto inplace : {false, true}) {
-    Dropout2d dropout(Dropout2dOptions(0.5).inplace(inplace));
-    torch::Tensor x = torch::ones({10, 10});
+    Dropout2d dropout(Dropout2dOptions(p).inplace(inplace));
+    torch::Tensor x = torch::empty({50, 50, 2, 2}).fill_(1 - p);
     if (!inplace) {
       x.requires_grad_(true);
     }
     torch::Tensor y = dropout(x);
 
-    ASSERT_EQ(y.ndimension(), 2);
-    ASSERT_EQ(y.size(0), 10);
-    ASSERT_EQ(y.size(1), 10);
-    ASSERT_LT(y.sum().item<float>(), 130); // Probably
-    ASSERT_GT(y.sum().item<float>(), 70); // Probably
+    ASSERT_EQ(y.ndimension(), 4);
+    ASSERT_EQ(y.size(0), 50);
+    ASSERT_EQ(y.size(1), 50);
+    ASSERT_EQ(y.size(2), 2);
+    ASSERT_EQ(y.size(3), 2);
+    ASSERT_LT((y.mean() - (1 - p)).abs().item<float>(), 0.05);
+
     if (inplace) {
       ASSERT_TRUE(y.allclose(x));
     } else {
@@ -1409,26 +1412,29 @@ TEST_F(ModulesTest, Dropout2d) {
     }
 
     dropout->eval();
-    y = dropout(torch::ones({10, 10}));
-    ASSERT_EQ(y.sum().item<float>(), 100);
+    y = dropout(torch::ones({2, 2, 10, 10}));
+    ASSERT_EQ(y.sum().item<float>(), 400);
   }
 }
 
 TEST_F(ModulesTest, Dropout3d) {
   for (const auto inplace : {false, true}) {
-    Dropout3d dropout(Dropout3dOptions(0.5).inplace(inplace));
-    torch::Tensor x = torch::ones({4, 5, 5});
+    auto p = 0.5;
+    Dropout3d dropout(Dropout3dOptions(p).inplace(inplace));
+    torch::Tensor x = torch::empty({50, 50, 2, 2, 2}).fill_(1 - p);
     if (!inplace) {
       x.requires_grad_(true);
     }
     torch::Tensor y = dropout(x);
 
-    ASSERT_EQ(y.ndimension(), 3);
-    ASSERT_EQ(y.size(0), 4);
-    ASSERT_EQ(y.size(1), 5);
-    ASSERT_EQ(y.size(1), 5);
-    ASSERT_LT(y.sum().item<float>(), 130); // Probably
-    ASSERT_GT(y.sum().item<float>(), 70); // Probably
+    ASSERT_EQ(y.ndimension(), 5);
+    ASSERT_EQ(y.size(0), 50);
+    ASSERT_EQ(y.size(1), 50);
+    ASSERT_EQ(y.size(2), 2);
+    ASSERT_EQ(y.size(3), 2);
+    ASSERT_EQ(y.size(4), 2);
+    ASSERT_LT((y.mean() - (1 - p)).abs().item<float>(), 0.05);
+
     if (inplace) {
       ASSERT_TRUE(y.allclose(x));
     } else {
@@ -1436,8 +1442,8 @@ TEST_F(ModulesTest, Dropout3d) {
     }
 
     dropout->eval();
-    y = dropout(torch::ones({4, 5, 5}));
-    ASSERT_EQ(y.sum().item<float>(), 100);
+    y = dropout(torch::ones({4, 4, 5, 5}));
+    ASSERT_EQ(y.sum().item<float>(), 400);
   }
 }
 
