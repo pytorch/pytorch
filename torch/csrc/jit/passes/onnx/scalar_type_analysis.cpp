@@ -56,6 +56,7 @@ static const std::unordered_set<NodeKind> standardOps = {
     onnx::Gemm,
     onnx::Pow,
     onnx::Mod,
+    onnx::Concat,
 };
 
 // For these operators, all inputs share the same scalar type.

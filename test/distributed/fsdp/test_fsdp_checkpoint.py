@@ -6,7 +6,7 @@ from functools import partial
 
 import torch
 import torch.nn as nn
-from torch.distributed._fsdp.fully_sharded_data_parallel import (
+from torch.distributed.fsdp.fully_sharded_data_parallel import (
     FullyShardedDataParallel as FSDP,
     CPUOffload,
 )

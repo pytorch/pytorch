@@ -1602,7 +1602,7 @@ Tensor lowerNanToNum(
   auto input_buf = c10::get<BufHandle>(inputs[0]);
   auto e = Compute(
       "custom_nan_to_num",
-      c10::fmap<DimArg>(outputShape),
+      outputShape,
       [&](const std::vector<VarHandle>& axes) {
         std::vector<ExprHandle> indices(axes.begin(), axes.end());
         auto load = input_buf.load(indices);
@@ -1752,6 +1752,88 @@ TEST_F(Kernel, InputAsOutput) {
   k.run(stack);
   CHECK(at::allclose(x, stack[0].toTensor()));
   CHECK(at::allclose(y, stack[1].toTensor()));
+}
+
+TEST_F(Kernel, ScalarOut) {
+  auto ir = R"IR(
+graph(%x : int, %y : int):
+  %z : int = aten::mul(%x, %y)
+  %r : int = aten::mul(%z, %x)
+  return (%r, %z))IR";
+  auto graph = std::make_shared<Graph>();
+  std::unordered_map<std::string, Value*> vmap;
+  parseIR(ir, graph.get(), vmap);
+  TensorExprKernel k(graph);
+
+  auto stmt = k.getCodeGenStmt();
+  std::ostringstream oss;
+  oss << *stmt;
+
+  // Verify the generated IR. We expect to see a scalar variable (Let) followed
+  // by a store to a 0-dim buffer.
+  const std::string& verification_pattern = R"IR(
+# CHECK: int64_t
+# CHECK-NEXT: [0ll] =
+# CHECK-NEXT: int64_t
+# CHECK-NEXT: [0ll] =
+)IR";
+  torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
+
+  int64_t x = 2, y = 3, r = 0, z = 0;
+
+  // Verify that TEK::runFast works correctly with scalar outputs
+  std::vector<void*> inputs = {&x, &y};
+  std::vector<void*> outputs = {&r, &z};
+  k.runFast(inputs, outputs);
+  CHECK_EQ(z, x * y);
+  CHECK_EQ(r, z * x);
+
+  // Verify that TEK::run works correctly with scalar outputs
+  std::vector<IValue> stack = {x, y};
+  k.run(stack);
+  CHECK_EQ(stack[0], x * y * x);
+  CHECK_EQ(stack[1], x * y);
+}
+
+TEST_F(Kernel, ScalarTensorOut) {
+  auto ir = R"IR(
+graph(%x : int,
+      %xt : Long(3, strides=[1], device=cpu),
+      %y : int,
+      %yt : Long(3, strides=[1], device=cpu)):
+  %z : int = aten::mul(%x, %y)
+  %r : int = aten::mul(%z, %x)
+  %zt : Long(3, strides=[1], device=cpu) = aten::mul(%xt, %y)
+  %rt : Long(3, strides=[1], device=cpu) = aten::mul(%zt, %xt)
+  return (%r, %rt, %z, %zt))IR";
+  auto graph = std::make_shared<Graph>();
+  std::unordered_map<std::string, Value*> vmap;
+  parseIR(ir, graph.get(), vmap);
+  TensorExprKernel k(graph);
+  int64_t x = 2, y = 3, r = 0, z = 0;
+  auto xt = at::ones({3}, TensorOptions(kCPU).dtype(at::kLong)) * 2;
+  auto yt = at::ones({3}, TensorOptions(kCPU).dtype(at::kLong)) * 3;
+  auto zt = at::zeros({3}, TensorOptions(kCPU).dtype(at::kLong));
+  auto rt = at::zeros({3}, TensorOptions(kCPU).dtype(at::kLong));
+
+  // Verify that TEK::runFast works correctly with mixed scalar and tensor
+  // inputs/utputs
+  std::vector<void*> inputs = {&x, xt.data_ptr(), &y, yt.data_ptr()};
+  std::vector<void*> outputs = {&r, rt.data_ptr(), &z, zt.data_ptr()};
+  k.runFast(inputs, outputs);
+  CHECK_EQ(z, x * y);
+  CHECK_EQ(r, z * x);
+  ASSERT_TRUE(at::equal(zt, xt * yt));
+  ASSERT_TRUE(at::equal(rt, zt * xt));
+
+  // Verify that TEK::run works correctly with mixed scalar and tensor
+  // inputs/utputs
+  std::vector<IValue> stack = {x, xt, y, yt};
+  k.run(stack);
+  CHECK_EQ(stack[0], x * y * x);
+  ASSERT_TRUE(at::equal(stack[1].toTensor(), xt * yt * xt));
+  CHECK_EQ(stack[2], x * y);
+  ASSERT_TRUE(at::equal(stack[3].toTensor(), xt * yt));
 }
 
 } // namespace jit

@@ -16,6 +16,9 @@ namespace torch {
 namespace jit {
 
 static inline TypePtr unwrapOptional(TypePtr opt_type) {
+  if (auto dyn = opt_type->castRaw<c10::DynamicType>()) {
+    return unwrapOptional(dyn->fallback());
+  }
   if (auto unwrap_list_type = opt_type->cast<OptionalType>()) {
     return unwrap_list_type->getElementType();
   }
@@ -282,12 +285,17 @@ static bool varargsCanBeUsedAsList(
   bool is_last_argument = arg_index + 1 == schema.arguments().size() ||
       schema.arguments()[arg_index + 1].kwarg_only();
 
+  auto arg_type = arg.type();
+  if (auto dyn = arg_type->castRaw<c10::DynamicType>()) {
+    arg_type = dyn->fallback();
+  }
+
   // The formal must be a list
-  bool argument_is_list = arg.type()->kind() == TypeKind::ListType;
+  bool argument_is_list = arg_type->kind() == TypeKind::ListType;
 
   // matching varargs of typevar list nyi
   bool typevar_list = argument_is_list &&
-      arg.type()->castRaw<ListType>()->getElementType()->cast<VarType>();
+      arg_type->castRaw<ListType>()->getElementType()->cast<VarType>();
 
   // it must not be a broadcasting list like int[3],
   // otherwise a single int is a valid input

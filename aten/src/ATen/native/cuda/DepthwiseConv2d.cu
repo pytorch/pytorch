@@ -451,6 +451,14 @@ void conv_depthwise2d_backward_out(
   });
 }
 
+// Crude benchmarks suggest 256 is better than 512 and 1024
+// TODO: Autotune/use better heuristics, improve speed more.
+int getGradParamsNumThreads(int batchSize) {
+  //warp per item in a batch, up to a maximum
+  constexpr int MAX_BLOCK_SIZE = 256;
+  return std::min(batchSize * at::cuda::warp_size(), MAX_BLOCK_SIZE);
+}
+
 void conv_depthwise2d_grad_weight_out(
                   const Tensor &input,
                   const Tensor &grad_output,
@@ -504,8 +512,9 @@ void conv_depthwise2d_grad_weight_out(
     const auto input_a = input.packed_accessor32<scalar_t, 4>();
     const auto grad_weight_a = grad_weight.packed_accessor32<scalar_t, 4>();
     using acc_t = at::acc_type<scalar_t, true>;
-    TORCH_INTERNAL_ASSERT(block.x % C10_WARP_SIZE == 0);
-    int smem = (block.x  / C10_WARP_SIZE) * sizeof(acc_t);
+    int warp_size = at::cuda::warp_size();
+    TORCH_INTERNAL_ASSERT(block.x % warp_size == 0);
+    int smem = (block.x  / warp_size) * sizeof(acc_t);
     conv_depthwise2d_grad_weight_kernel<<<grid, block, smem, stream>>>(
         grad_output_a, input_a, grad_weight_a, batchSize, inputChannels, outputChannels, depthwiseMultiplier,
         width, height, outputWidth, outputHeight, kW, kH, dW, dH, padW, padH, dilationW, dilationH);
