@@ -4607,10 +4607,43 @@ else:
         self.assertEqual(z, x)
 
     @skipMeta
+    @onlyNativeDeviceTypes
+    @dtypes(*get_all_dtypes(include_bool=False))
+    def test_from_dlpack(self, device, dtype):
+        x = make_tensor((5,), device, dtype)
+        y = torch.from_dlpack(x)
+        self.assertEqual(x, y)
+
+    @skipMeta
+    @onlyNativeDeviceTypes
+    @dtypes(*get_all_dtypes(include_bool=False))
+    def test_from_dlpack_noncontinguous(self, device, dtype):
+        x = make_tensor((25,), device, dtype).reshape(5, 5)
+
+        y1 = x[0]
+        y1_dl = torch.from_dlpack(y1)
+        self.assertEqual(y1, y1_dl)
+
+        y2 = x[:, 0]
+        y2_dl = torch.from_dlpack(y2)
+        self.assertEqual(y2, y2_dl)
+
+        y3 = x[1, :]
+        y3_dl = torch.from_dlpack(y3)
+        self.assertEqual(y3, y3_dl)
+
+        y4 = x[1]
+        y4_dl = torch.from_dlpack(y4)
+        self.assertEqual(y4, y4_dl)
+
+        y5 = x.t()
+        y5_dl = torch.from_dlpack(y5)
+        self.assertEqual(y5, y5_dl)
+
+    @skipMeta
     @onlyCUDA
     @dtypes(*get_all_dtypes(include_bool=False))
     def test_dlpack_conversion_with_diff_streams(self, device, dtype):
-        from torch._C import _from_dlpack
         stream_a = torch.cuda.Stream()
         stream_b = torch.cuda.Stream()
         # DLPack protocol helps establish a correct stream order
@@ -4618,11 +4651,24 @@ else:
         # the `tensor.__dlpack__` method will insert a synchronization event
         # in the current stream to make sure that it was correctly populated.
         with torch.cuda.stream(stream_a):
+<<<<<<< HEAD
+            x = make_tensor((5,), device, dtype) + 1
+            z = torch.from_dlpack(x.__dlpack__(stream_b.cuda_stream))
+=======
             x = make_tensor((5,), dtype=dtype, device=device) + 1
             z = _from_dlpack(x.__dlpack__(stream_b.cuda_stream))
+>>>>>>> e949c7a741 (align signature of make_tensor with other creation ops)
             stream_a.synchronize()
         stream_b.synchronize()
         self.assertEqual(z, x)
+
+    @skipMeta
+    @onlyNativeDeviceTypes
+    @dtypes(*get_all_dtypes(include_bool=False))
+    def test_from_dlpack_dtype(self, device, dtype):
+        x = make_tensor((5,), device, dtype)
+        y = torch.from_dlpack(x)
+        assert x.dtype == y.dtype
 
     @skipMeta
     @onlyCUDA
