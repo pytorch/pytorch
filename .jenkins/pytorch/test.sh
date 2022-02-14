@@ -391,17 +391,7 @@ elif [[ "${BUILD_ENVIRONMENT}" == *-test1 || "${JOB_BASE_NAME}" == *-test1 ]]; t
     test_torch_deploy
   fi
   install_torchvision
-  python test/test_large.py 0
-  python test/test_large.py 5
-  python test/test_large.py 10
-  python test/test_large.py 15
-  python test/test_large.py 20
-  python test/test_large.py 25
-  python test/test_large.py 26
-  python test/test_large.py 27
-  python test/test_large.py 28
-  python test/test_large.py 29
-  python test/test_large.py 30
+  test_large
   test_python_shard1
 elif [[ "${BUILD_ENVIRONMENT}" == *-test2 || "${JOB_BASE_NAME}" == *-test2 ]]; then
   install_torchvision
