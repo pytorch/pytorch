@@ -4309,7 +4309,13 @@ for shape in [(1,), ()]:
     MyFunction.apply(v).backward()
 """
         s = TestCase.runWithPytorchAPIUsageStderr(code)
-        self.assertRegex(s, "PYTORCH_API_USAGE torch.autograd.thread_shutdown")
+        # The autograd engine creates worker threads only when GPU devices are present.
+        # So make sure that we do shutdown threads when we're testing cuda and make sure
+        # that there is no thread to shutdown when we're not using cuda.
+        if TEST_CUDA:
+            self.assertRegex(s, "PYTORCH_API_USAGE torch.autograd.thread_shutdown")
+        else:
+            self.assertNotRegex(s, "PYTORCH_API_USAGE torch.autograd.thread_shutdown")
 
     @unittest.skipIf(IS_MACOS, "Fails with SIGBUS on macOS; https://github.com/pytorch/pytorch/issues/25941")
     def test_deep_reentrant(self):
