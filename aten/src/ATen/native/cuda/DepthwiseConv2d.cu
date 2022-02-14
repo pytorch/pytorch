@@ -276,7 +276,6 @@ void conv_depthwise2d_forward_out(
 
   // Following the behavior of other THCUNN functions, we shape the output
   // Tensor ourselves
-  int64_t batchSize = in_sizes[0];
   int64_t height = in_sizes[2];
   int64_t width = in_sizes[3];
   int64_t outputChannels = w_sizes[0];
