@@ -1033,12 +1033,7 @@ Tensor TensorExprKernel::bindInput(const torch::jit::Value* input) {
       // if the input isn't contiguous or is an output,
       // write strided input into  contiguous buffer that is
       // then used in all further compute
-      std::vector<DimArg> inputTensorDims;
       auto size_handles = sizesFromSymbolicShape(tt->symbolic_sizes());
-      for (size_t i = 0; i < size_handles.size(); i++) {
-        auto size = size_handles[i];
-        inputTensorDims.emplace_back(DimArg(size, "i" + c10::to_string(i)));
-      }
       auto inputTensorStrides = getInputStrides(input, size_handles);
       ExprHandle flat_size = 1;
       for (size_t i = 0; i < size_handles.size(); ++i) {
@@ -1057,7 +1052,7 @@ Tensor TensorExprKernel::bindInput(const torch::jit::Value* input) {
 
       result = Compute(
           "input" + c10::to_string(bufs_.size() + 1),
-          inputTensorDims,
+          size_handles,
           [&](const std::vector<VarHandle>& axes) {
             ExprHandle idx = 0;
             for (size_t i = 0; i < axes.size(); i++) {
@@ -1144,11 +1139,10 @@ Tensor TensorExprKernel::convertSymbolicOutputToCorrectStrides(
   // for stride in strides_from_largest_to_smallest:
   //     cur_idx = absolute // stride
   //     absolute = absolute % stride
-  auto dims = c10::fmap<DimArg>(sizes);
   std::vector<ExprPtr> default_strides = make_contiguous_strides(sizes);
   auto zero = LongImm::make(0);
   return Compute(
-      "output_1", dims, [&](const std::vector<VarHandle>& axes_input) {
+      "output_1", sizes, [&](const std::vector<VarHandle>& axes_input) {
         std::vector<ExprHandle> axes(axes_input.begin(), axes_input.end());
         auto absolute_position = ExprHandle(immLike(axes[0], 0));
         for (size_t i = 0; i < axes.size(); ++i) {
@@ -1191,7 +1185,6 @@ Tensor TensorExprKernel::convertSymbolicOutputToCorrectStrides(
       tensorOutputStrideDesc_[v->offset()] ==
       torch::jit::StrideInput::TENSOR_CONT_CHANNELS_LAST);
   auto sizes = sizesFromSymbolicShape(tt->symbolic_sizes());
-  auto dims = c10::fmap<DimArg>(sizes);
   auto strides = make_channels_last_strides(sizes);
   // For a tensor with dimensions N C H W, channels last
   // format will is in format N H W C,
@@ -1243,7 +1236,7 @@ Tensor TensorExprKernel::convertStaticShapeOutputToCorrectStrides(
     return Tensor(buf, nullptr);
   }
 
-  auto dims = c10::fmap<DimArg>(sizesForValue(v));
+  auto dims = sizesForValue(v);
   auto zero = LongImm::make(0);
   std::vector<size_t> sorted_stride_indices = reverse_sort_indices(strides);
 
