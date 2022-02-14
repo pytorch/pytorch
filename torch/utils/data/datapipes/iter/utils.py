@@ -4,20 +4,18 @@ from torch.utils.data import IterDataPipe
 
 
 class IterableWrapperIterDataPipe(IterDataPipe):
-    r""":class:`IterableWrapperIterDataPipe`.
-
-    Iterable datapipe that wraps an iterable object.
+    r"""
+    Wraps an iterable object to create an IterDataPipe.
 
     Args:
         iterable: Iterable object to be wrapped into an IterDataPipe
         deepcopy: Option to deepcopy input iterable object for each
-            iterator. The copy is made when the first element is read in iter().
+            iterator. The copy is made when the first element is read in ``iter()``.
 
     .. note::
-      If `deepcopy` is set to False explicitly, users should ensure
-      that data pipeline doesn't contain any in-place operations over
-      the iterable instance, in order to prevent data inconsistency
-      across iterations.
+      If ``deepcopy`` is explicitly set to ``False``, users should ensure
+      that the data pipeline doesn't contain any in-place operations over
+      the iterable instance to prevent data inconsistency across iterations.
     """
     def __init__(self, iterable, deepcopy=True):
         self.iterable = iterable
