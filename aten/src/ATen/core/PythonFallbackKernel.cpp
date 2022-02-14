@@ -9,16 +9,13 @@ namespace {
 thread_local c10::optional<c10::impl::LocalDispatchKeySet> tls_on_entry;
 
 void pythonFallback(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
-  c10::impl::LocalDispatchKeySet keyset_on_dispatch_entry = c10::impl::tls_local_dispatch_key_set();
-
   TORCH_INTERNAL_ASSERT(tls_on_entry.has_value());
-  c10::impl::_force_tls_local_dispatch_key_set(tls_on_entry.value());
+  c10::impl::ForceDispatchKeyGuard guard(tls_on_entry.value());
 
   // If Python Mode is active, use its PyInterpreter for dispatch
   const auto& maybe_python_mode_state = at::impl::PythonModeTLS::get_state();
   if (maybe_python_mode_state) {
     maybe_python_mode_state->pyinterpreter()->dispatch(op, stack, maybe_python_mode_state);
-    c10::impl::_force_tls_local_dispatch_key_set(keyset_on_dispatch_entry);
     return;
   }
 
@@ -35,7 +32,6 @@ void pythonFallback(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
       auto* interpreter = ivalue.unsafeToTensorImpl()->pyobj_interpreter();
       if (interpreter) {
         interpreter->dispatch(op, stack, nullptr);
-        c10::impl::_force_tls_local_dispatch_key_set(keyset_on_dispatch_entry);
         return;
       }
     } else if (ivalue.isTensorList()) {
@@ -45,7 +41,6 @@ void pythonFallback(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
         auto* interpreter = nv.unsafeToTensorImpl()->pyobj_interpreter();
         if (interpreter) {
           interpreter->dispatch(op, stack, nullptr);
-          c10::impl::_force_tls_local_dispatch_key_set(keyset_on_dispatch_entry);
           return;
         }
       }
@@ -57,6 +52,7 @@ void pythonFallback(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
 void pythonTLSSnapshotFallback(const c10::OperatorHandle& op, c10::DispatchKeySet dispatch_keys, torch::jit::Stack* stack) {
   // It is ok for the tls to be already set here.
   // A CompositeImplicitAutograd function may have been called just before this and so the tls here were never cleared
+  // This is also why we don't need an RAII to ensure the tls is reset when exceptions happen
 
   tls_on_entry = c10::impl::tls_local_dispatch_key_set();
 
