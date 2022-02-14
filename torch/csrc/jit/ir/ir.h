@@ -1627,11 +1627,14 @@ TORCH_API std::vector<Node*> findAllNodes(
 struct OperatorSet {
   OperatorSet(std::initializer_list<const char*> sig_literals);
   std::vector<std::shared_ptr<Operator>> getOps() const;
+  void AddOperator(const char* sig_literal);
 
  private:
   friend struct Node;
   std::unordered_map<Symbol, std::vector<std::shared_ptr<Operator>>> ops;
 };
+
+TORCH_API void AddOperatorSet(struct OperatorSet& op, const char *sig);
 
 template <typename T>
 // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)

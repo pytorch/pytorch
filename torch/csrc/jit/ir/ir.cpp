@@ -2284,11 +2284,19 @@ TypePtr NamedValue::type() const {
 const Symbol ProfileOp::Kind = ::c10::prim::profile;
 const Symbol ProfileIValueOp::Kind = ::c10::prim::profile_ivalue;
 
+TORCH_API void AddOperatorSet(struct OperatorSet& op, const char *sig) {
+  op.AddOperator(sig);
+}
+
 OperatorSet::OperatorSet(std::initializer_list<const char*> sig_literals) {
   for (const char* sig : sig_literals) {
-    auto op = getOperatorForLiteral(sig);
-    ops[Symbol::fromQualString(op->schema().name())].push_back(op);
+    AddOperator(sig);
   }
+}
+
+void OperatorSet::AddOperator(const char* sig_literal) {
+  auto op = getOperatorForLiteral(sig_literal);
+  ops[Symbol::fromQualString(op->schema().name())].push_back(op);
 }
 
 std::vector<std::shared_ptr<Operator>> OperatorSet::getOps() const {
