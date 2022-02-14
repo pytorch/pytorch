@@ -3038,8 +3038,8 @@ else:
 
         for src_contig, idx_contig, idx_reshape in product([True, False], repeat=3):
             for src_size in ((5,), (4, 5)):
-                src = make_arg(src_size, noncontiguous=not src_contig)
-                idx = make_idx(idx_size, high=src.numel(), noncontiguous=not idx_contig)
+                src = make_arg(src_size, non_contiguous=not src_contig)
+                idx = make_idx(idx_size, high=src.numel(), non_contiguous=not idx_contig)
                 if idx_reshape:
                     idx = idx.reshape(2, 2)
                 out = torch.take(src, idx)
@@ -3072,8 +3072,8 @@ else:
 
         for dst_contig, src_contig, idx_contig, idx_reshape, accumulate in product([True, False], repeat=5):
             for dst_size in ((5,), (4, 5)):
-                dst = make_arg(dst_size, noncontiguous=not dst_contig)
-                src = make_arg(src_size, noncontiguous=not src_contig)
+                dst = make_arg(dst_size, non_contiguous=not dst_contig)
+                src = make_arg(src_size, non_contiguous=not src_contig)
 
                 # If accumulate=True, `put_` should be deterministic regardless of the inputs on CPU
                 # On CUDA it may not be, but the test has enough tolerance to account for this

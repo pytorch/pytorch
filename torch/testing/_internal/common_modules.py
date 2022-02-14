@@ -474,7 +474,7 @@ def module_inputs_torch_nn_ConvNd(module_info, device, dtype, requires_grad, **k
         ModuleInput(constructor_input=(FunctionInput(C_out, kernel_size, **conv_kwargs) if lazy else
                                        FunctionInput(C_in, C_out, kernel_size, **conv_kwargs)),
                     forward_input=FunctionInput(make_input(
-                        shape=(input_batch_shape if with_batch else input_no_batch_shape))),
+                        input_batch_shape if with_batch else input_no_batch_shape)),
                     desc=('' if with_batch else 'no_batch_dim'),
                     reference_fn=(None if with_batch else no_batch_dim_reference_fn))
         for with_batch, conv_kwargs in itertools.product([True, False], conv_kwargs_list)
@@ -558,23 +558,23 @@ def module_inputs_torch_nn_CrossEntropyLoss(module_info, device, dtype, requires
     for reduction in reductions:
         samples.append(
             ModuleInput(constructor_input=FunctionInput(reduction=reduction),
-                        forward_input=FunctionInput(make_input((9,)), make_target(shape=(), low=0, high=9)),
+                        forward_input=FunctionInput(make_input((9,)), make_target((), low=0, high=9)),
                         reference_fn=partial(no_batch_dim_reference_fn, is_criterion=True))
         )
         samples.append(
-            ModuleInput(constructor_input=FunctionInput(reduction=reduction, weight=make_weight(shape=(9,))),
-                        forward_input=FunctionInput(make_input((9,)), make_target(shape=(), low=0, high=9)),
+            ModuleInput(constructor_input=FunctionInput(reduction=reduction, weight=make_weight((9,))),
+                        forward_input=FunctionInput(make_input((9,)), make_target((), low=0, high=9)),
                         reference_fn=partial(no_batch_dim_reference_fn, is_criterion=True))
         )
         samples.append(
             ModuleInput(constructor_input=FunctionInput(reduction=reduction, label_smoothing=0.5),
-                        forward_input=FunctionInput(make_input((9,)), make_target(shape=(), low=0, high=9)),
+                        forward_input=FunctionInput(make_input((9,)), make_target((), low=0, high=9)),
                         reference_fn=partial(no_batch_dim_reference_fn, is_criterion=True))
         )
         samples.append(
             ModuleInput(constructor_input=FunctionInput(reduction=reduction, label_smoothing=0.5,
-                                                        weight=make_weight(shape=(9,))),
-                        forward_input=FunctionInput(make_input((9,)), make_target(shape=(), low=0, high=9)),
+                                                        weight=make_weight((9,))),
+                        forward_input=FunctionInput(make_input((9,)), make_target((), low=0, high=9)),
                         reference_fn=partial(no_batch_dim_reference_fn, is_criterion=True))
         )
 
