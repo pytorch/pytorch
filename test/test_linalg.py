@@ -3854,11 +3854,11 @@ class TestLinalg(TestCase):
         check([a, a, a], None, "tensor 1 must be 2D")
         check([a, make_tensor((2, 2, 2), dtype=dtype, device=device), a], None, "tensor 1 must be 2D")
 
-        check([a, make_tensor(2, device, torch.double)], None, "all tensors must have be the same dtype")
+        check([a, make_tensor(2, dtype=torch.double, device=device)], None, "all tensors must have be the same dtype")
         check([a, a], torch.empty(0, device=device, dtype=torch.double), "expected out tensor to have dtype")
 
         if self.device_type == 'cuda':
-            check([a, make_tensor(2, 'cpu', dtype)], None, "all tensors must be on the same device")
+            check([a, make_tensor(2, dtype=dtype, device="cpu")], None, "all tensors must be on the same device")
             check([a, a], torch.empty(0, dtype=dtype), "expected out tensor to be on device")
 
         check([a, make_tensor(3, dtype=dtype, device=device)], None, "cannot be multiplied")
