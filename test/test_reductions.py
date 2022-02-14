@@ -207,7 +207,7 @@ class TestReductions(TestCase):
     def test_dim_ndim_limit(self, device, op: ReductionOpInfo):
         """Tests that an exception is raised when reducing a tensor with more
         than 64 dims along some specific dimensions. dim=None is ok"""
-        t = make_tensor([1] * 65, device, torch.float)
+        t = make_tensor([1] * 65, dtype=torch.float, device=device)
         with self.assertRaisesRegex(RuntimeError, "only tensors with up to 64 dims are supported"):
             op(t, dim=0)
 
