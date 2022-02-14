@@ -165,19 +165,18 @@ masked_ops_with_references = [op for op in masked_ops if op.name.rsplit('.', 1)[
 masked_ops_with_mixed_layouts_support = [op for op in masked_ops if op.supports_sparse or op.supports_sparse_csr]
 
 
+def _tensor_to_strided(obj):
+    # after gh-59958 is resolved, replace the usage of this function
+    # with torch.Tensor.to_dense
+    if obj.layout == torch.strided:
+        return obj
+    return obj.to_dense()
+
+
 def to_strided(obj):
     """Convert the tensor content of object to strided tensor content.
     """
-    if isinstance(obj, torch.Tensor):
-        if obj.layout == torch.strided:
-            return obj
-        return obj.to_dense()
-    elif isinstance(obj, (tuple, list)):
-        return type(obj)(list(map(to_strided, obj)))
-    elif isinstance(obj, dict):
-        return dict([(k, to_strided(v)) for k, v in obj.items()])
-    else:
-        return obj
+    return torch.utils._pytree.tree_map(_tensor_to_strided, obj)
 
 
 class TestMasked(TestCase):
