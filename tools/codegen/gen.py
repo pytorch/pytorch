@@ -1375,7 +1375,7 @@ def gen_source_files(
         fm.write_with_template(f'Register{dispatch_key}.cpp', 'RegisterDispatchKey.cpp', lambda: {
             'extra_cuda_headers': extra_cuda_headers if is_cuda_dispatch_key(dispatch_key) else '',
             'external_backend_headers': '',
-            'dispatch_headers': dest.gen_registration_headers(backend_index, per_operator_headers),
+            'dispatch_headers': dest.gen_registration_headers(backend_index, per_operator_headers, rocm),
             'ops_headers': operator_headers(),
             'DispatchKey': dispatch_key,
             'dispatch_namespace': dispatch_key.lower(),

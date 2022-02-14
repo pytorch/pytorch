@@ -798,7 +798,7 @@ embedding_bag(const Tensor &weight, const Tensor &indices,
     padding_idx = maybe_wrap_dim(padding_idx, weight.size(0));
   }
   std::tuple<Tensor, Tensor, Tensor, Tensor> out;
-  if (!weight.requires_grad()) {
+  if (!weight.requires_grad() && !weight._fw_grad(/*level=*/0).defined()) {
     out = at::_embedding_bag_forward_only(
       weight, indices.contiguous(), offsets.contiguous(), scale_grad_by_freq,
       mode, sparse, per_sample_weights, include_last_offset, padding_idx);
