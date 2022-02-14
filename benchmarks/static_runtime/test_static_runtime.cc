@@ -388,6 +388,13 @@ TEST(StaticRuntime, Binary) {
         return (c.clone())
   )JIT";
 
+  const auto add_script_ints = R"JIT(
+    def forward(self, a: int, b: int):
+        c = a + b
+        d = c + 1
+        return d
+  )JIT";
+
   const auto add_list_script = R"JIT(
     def forward(self, a: List[int], b: List[int]):
         c = a + b
@@ -446,6 +453,7 @@ TEST(StaticRuntime, Binary) {
   std::vector<IValue> args{a, b};
 
   testStaticRuntime(add_script, args);
+  testStaticRuntime(add_script_ints, {1, 2});
   testStaticRuntime(add_script, args, {c, d});
   testStaticRuntime(list_construct_script, args);
   testStaticRuntime(list_construct_script_2, args);
@@ -2188,7 +2196,7 @@ TEST(StaticRuntime, View) {
 }
 
 TEST(StaticRuntime, Size) {
-  const auto src = R"JIT(
+  const auto src_with_dim = R"JIT(
       def forward(self, x, dim: int):
           return x.size(dim)
   )JIT";
@@ -2203,9 +2211,9 @@ TEST(StaticRuntime, Size) {
   std::vector<IValue> args3{at::randn({2, 4}), 1};
   std::vector<IValue> args_no_dim{at::randn({2, 4})};
 
-  testStaticRuntime(src, args1);
-  testStaticRuntime(src, args2);
-  testStaticRuntime(src, args1, args3);
+  testStaticRuntime(src_with_dim, args1);
+  testStaticRuntime(src_with_dim, args2);
+  testStaticRuntime(src_with_dim, args1, args3);
   testStaticRuntime(src_no_dim, args_no_dim);
 }
 
