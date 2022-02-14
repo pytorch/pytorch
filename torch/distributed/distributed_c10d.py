@@ -3231,6 +3231,6 @@ def new_subgroups_by_enumeration(
             rank_to_ranks_dict[rank] = ranks
             if my_rank == rank:
                 cur_subgroup = subgroup
-                logging.info("Rank {} is assigned to subgroup {}".format(rank, ranks))
+                logger.info("Rank {} is assigned to subgroup {}".format(rank, ranks))
 
     return cur_subgroup, subgroups
