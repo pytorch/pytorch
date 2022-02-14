@@ -1,7 +1,9 @@
-from typing import Dict, List, Tuple, Union, Any, Callable, Set
+from typing import Dict, List, Tuple, Union, Any, Callable, Set, TYPE_CHECKING
 
 import torch
 
+if TYPE_CHECKING:
+    from collections import OrderedDict  # noqa: F401
 
 """Useful functions to deal with tensor types with other python container types."""
 

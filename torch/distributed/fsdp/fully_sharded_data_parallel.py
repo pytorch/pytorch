@@ -745,21 +745,6 @@ class FullyShardedDataParallel(nn.Module):
             raise ValueError(f"Unknown StateDictType {self.state_dict_type}.")
         return state_dict
 
-    @overload
-    def state_dict(
-        self,
-        destination: Mapping[str, torch.Tensor],
-        prefix: str = ...,
-        keep_vars: bool = ...,
-    ) -> Mapping[str, torch.Tensor]:
-        ...
-
-    @overload
-    def state_dict(
-        self, prefix: str = ..., keep_vars: bool = ...
-    ) -> "OrderedDict[str, torch.Tensor]":
-        ...
-
     def state_dict(self, destination=None, prefix="", keep_vars=False):
         """
         The entry point of all three FSDP state_dict APIs.
@@ -831,7 +816,7 @@ class FullyShardedDataParallel(nn.Module):
 
     def load_state_dict(
         self,
-        state_dict: Union[Dict[str, torch.Tensor], "OrderedDict[str, torch.Tensor]"],
+        state_dict: "OrderedDict[str, torch.Tensor]",
         strict: bool = True,
     ) -> NamedTuple:
         """
@@ -853,7 +838,7 @@ class FullyShardedDataParallel(nn.Module):
 
     def load_local_state_dict(
         self,
-        state_dict: Union[Dict[str, torch.Tensor], "OrderedDict[str, torch.Tensor]"],
+        state_dict: "OrderedDict[str, torch.Tensor]",
         strict: bool = True,
     ) -> NamedTuple:
         """
