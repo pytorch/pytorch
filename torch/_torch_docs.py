@@ -10556,7 +10556,7 @@ Keyword args:
 Example::
 
     >>> a=torch.empty((2,3), dtype=torch.int32, device = 'cuda')
-    >>> torch.empty_like(a)
+    >>> torch.empty_like(a)  # doctest: +SKIP
     tensor([[0, 0, 1],
             [0, 1, 0]], device='cuda:0', dtype=torch.int32)
 """.format(**factory_common_args))

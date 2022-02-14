@@ -55,12 +55,6 @@ def find_docstring_node(node):
     return docstring_node
 
 
-class AlwaysPassManualSeed(doctest.OutputChecker):
-    def check_output(self, want, got, optionflags):
-        got = re.sub(r"\n\n", "\n", got)
-        return super().check_output(want, got, optionflags)
-
-
 class DoctTestVisitor(ast.NodeVisitor):
     def __init__(self):
         super().__init__()
@@ -83,12 +77,7 @@ class DoctTestVisitor(ast.NodeVisitor):
                      ([ ]+.+$\n?|\n)?
                   )*)
         ''', re.MULTILINE | re.VERBOSE)
-        self.runner = doctest.DocTestRunner(
-            checker=AlwaysPassManualSeed(),
-            optionflags=doctest.NORMALIZE_WHITESPACE | doctest.ELLIPSIS
-        )
-        self.num_attempted = 0
-        self.num_failed = 0
+        self.tests = {}
 
     def visit_Call(self, node):
         docstring_node = find_docstring_node(node)
@@ -110,24 +99,39 @@ class DoctTestVisitor(ast.NodeVisitor):
                         want="<torch._C.Generator object at 0x...>"
                     )
                 ] + test.examples
-            results = self.runner.run(test)
-            self.num_attempted += results.attempted
-            self.num_failed += results.failed
+
+                self.tests[documented_function] = test
 
 
 class TestDocs(TestCase):
+    pass
 
-    def test_docs(self):
-        txt = open(_torch_docs.__file__).read()
-        tree = ast.parse(txt)
-        doctest_visitor = DoctTestVisitor()
-        doctest_visitor.visit(tree)
-        print("Total attempted: {}, total failed: {}".format(
-            doctest_visitor.num_attempted,
-            doctest_visitor.num_failed
-        ))
-        self.assertEqual(doctest_visitor.num_failed, 0)
 
+def make_test(doctest_runner: doctest.DocTestRunner, doc_test: doctest.DocTest):
+    def test_docstring_example(self):
+        result: doctest.TestResults = doctest_runner.run(doc_test)
+        self.assertEqual(result.failed, 0)
+
+    return test_docstring_example
+
+
+# Generates tests
+# Note: test generation must be done at file scope, not within main, or
+# pytest will fail.
+txt = open(_torch_docs.__file__).read()
+tree = ast.parse(txt)
+doctest_visitor = DoctTestVisitor()
+doctest_visitor.visit(tree)
+runner = doctest.DocTestRunner(
+    optionflags=doctest.NORMALIZE_WHITESPACE | doctest.ELLIPSIS
+)
+cuda_available = torch.cuda.is_available()
+for name, test in doctest_visitor.tests.items():
+    want = [ex.want for ex in test.examples]
+    needs_cuda = any("device='cuda" in w for w in want)
+    if needs_cuda and not cuda_available:
+        continue
+    setattr(TestDocs, f"test_{name.replace(',', '_')}", make_test(runner, test))
 
 if __name__ == '__main__':
     run_tests()
