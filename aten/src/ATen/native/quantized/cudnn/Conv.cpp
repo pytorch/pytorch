@@ -184,7 +184,8 @@ void raw_cudnn_convolution_forward_out(
     return;
   }
 
-  Tensor conv_output = at::empty_like(output, output.options().dtype(at::kFloat));
+  Tensor conv_output = at::empty(output.sizes(), at::device(at::kCUDA).dtype(at::kChar), at::MemoryFormat::ChannelsLast);
+  //Tensor conv_output = at::empty_like(output, output.options().dtype(at::kFloat));
   Tensor requantize_multiplier_tensor = at::empty_like(output, output.options().dtype(at::kFloat));
   requantize_multiplier_tensor.fill_(requantize_multiplier);
   cudnnHandle_t handle = getCudnnHandle();
