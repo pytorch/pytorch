@@ -8,7 +8,15 @@ import math
 import numpy
 import itertools
 import ast
+import sys
 import re
+
+
+# ast.Str deprecated in 3.8
+if sys.version_info >= (3, 8):
+    AstStrType = ast.Constant
+else:
+    AstStrType = ast.Str
 
 
 def joinattr(a):
@@ -23,19 +31,19 @@ def find_docstring_node(node):
 
     if getattr(getattr(node, 'func', None), 'id', None) == 'add_docstr':
         documented_function = joinattr(node.args[0])
-        if type(node.args[1]) == ast.Constant:
+        if type(node.args[1]) == AstStrType:
             # Handles hardcoded docstring case
             docstring_node = node.args[1]
         elif (type(node.args[1]) == ast.Call and
               type(node.args[1].func) == ast.Attribute and
-              type(node.args[1].func.value) == ast.Constant):
+              type(node.args[1].func.value) == AstStrType):
             # This handles the "docstring".format(**kwargs) case
             docstring_node = node.args[1].func.value
         elif (type(node.args[1]) == ast.BinOp and
               type(node.args[1].op) == ast.Add):
             # Handles compound docstrings with two parts
             # Here I assume that the second part contains examples
-            if type(node.args[1].right) == ast.Constant:
+            if type(node.args[1].right) == AstStrType:
                 # Both parts are constants
                 docstring_node = node.args[1].right
             else:

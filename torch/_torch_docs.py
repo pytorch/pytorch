@@ -6027,17 +6027,20 @@ Keyword args:
     {dtype}
 
 Example::
+
     >>> a = torch.randn(1, 3)
     >>> a
     tensor([[ 1.5410, -0.2934, -2.1788]])
     >>> torch.mean(a)
     tensor(-0.3104)
+
 .. function:: mean(input, dim, keepdim=False, *, dtype=None, out=None) -> Tensor
    :noindex:
 
 Returns the mean value of each row of the :attr:`input` tensor in the given
 dimension :attr:`dim`. If :attr:`dim` is a list of dimensions,
 reduce over all of them.
+
 {keepdim_details}
 
 Args:
@@ -6050,9 +6053,11 @@ Keyword args:
     {out}
 
 .. seealso::
+
     :func:`torch.nanmean` computes the mean value of `non-NaN` elements.
 
 Example::
+
     >>> a = torch.randn(4, 4)
     >>> a
     tensor([[-0.3561,  0.4372,  0.4913, -0.2041],
