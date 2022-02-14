@@ -123,12 +123,14 @@ tree = ast.parse(txt)
 doctest_visitor = DoctTestVisitor()
 doctest_visitor.visit(tree)
 runner = doctest.DocTestRunner(
-    optionflags=doctest.NORMALIZE_WHITESPACE | doctest.ELLIPSIS
+    optionflags=doctest.NORMALIZE_WHITESPACE | doctest.ELLIPSIS | doctest.FAIL_FAST
 )
 cuda_available = torch.cuda.is_available()
 for name, test in doctest_visitor.tests.items():
     want = [ex.want for ex in test.examples]
-    needs_cuda = any("device='cuda" in w for w in want)
+    want_needs_cuda = any("device='cuda" in ex.want for ex in test.examples)
+    source_needs_cuda = any("device='cuda" in ex.source for ex in test.examples)
+    needs_cuda = source_needs_cuda or want_needs_cuda
     if needs_cuda and not cuda_available:
         continue
     setattr(TestDocs, f"test_{name.replace(',', '_')}", make_test(runner, test))
