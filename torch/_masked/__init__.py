@@ -436,7 +436,15 @@ def _input_mask(input: Tensor, *args, **kwargs) -> Tensor:
                 mask = mask.to(torch.uint8).coalesce().to(torch.bool)
             mask = mask.to_dense()
         elif input.layout == torch.sparse_coo:
-            mask = mask.to_sparse(input.sparse_dim())
+            if mask.layout == torch.strided:
+                mask = mask.to_sparse(input.sparse_dim())
+            elif mask.layout == torch.sparse_csr:
+                # TODO: remove this elif-block when sparse csr supports to_sparse
+                mask = torch.sparse_coo_tensor(
+                    torch._convert_indices_from_csr_to_coo(mask.crow_indices(), mask.col_indices()),
+                    mask.values(), mask.shape)._coalesced_(True)
+            else:
+                mask = mask.to_sparse()
         else:
             assert input.layout == torch.sparse_csr
             mask = mask.to_sparse_csr()
