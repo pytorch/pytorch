@@ -540,9 +540,10 @@ class OpInfo(object):
 
                  # the following are pointers to functions to generate certain classes
                  #   of inputs
-                 sample_inputs_func=None,  # function to generate sample inputs with strided-only layouts
+                 sample_inputs_func=None,  # function to generate sample inputs with strided layouts
                  error_inputs_func=None,  # function to generate inputs that will throw errors
-                 sample_inputs_mixed_func=None,  # function to generate sample inputs with mixed layouts
+                 sample_inputs_sparse_coo_func=None,  # function to generate sample inputs with sparse coo layouts
+                 sample_inputs_sparse_csr_func=None,  # function to generate sample inputs with sparse csr layouts
 
                  # the following metadata relates to dtype support and is tested for correctness in test_ops.py
                  dtypes,  # dtypes this function works with on the CPU,
@@ -690,7 +691,8 @@ class OpInfo(object):
         # We run the sampling functions without tracking the gradiends of the creation of inputs
         self.sample_inputs_func = torch.no_grad()(sample_inputs_func)
         self.error_inputs_func = error_inputs_func
-        self.sample_inputs_mixed_func = torch.no_grad()(sample_inputs_mixed_func)
+        self.sample_inputs_sparse_coo_func = torch.no_grad()(sample_inputs_sparse_coo_func)
+        self.sample_inputs_sparse_csr_func = torch.no_grad()(sample_inputs_sparse_csr_func)
 
         self.assert_autodiffed = assert_autodiffed
         self.autodiff_fusible_nodes = autodiff_fusible_nodes if autodiff_fusible_nodes else []
@@ -864,12 +866,17 @@ class OpInfo(object):
         """
         return self.error_inputs_func(self, device, **kwargs)
 
-    def sample_inputs_mixed(self, device, dtype, requires_grad=False, **kwargs):
-        """Returns an iterable of SampleInputs that contain inputs with
-        non-strided layout.
+    def sample_inputs_sparse_coo(self, device, dtype, requires_grad=False, **kwargs):
+        """Returns an iterable of SampleInputs that contain inputs with sparse
+        coo layout.
         """
-        samples = self.sample_inputs_mixed_func(self, device, dtype, requires_grad, **kwargs)
-        return samples
+        return self.sample_inputs_sparse_coo_func(self, device, dtype, requires_grad, **kwargs)
+
+    def sample_inputs_sparse_csr(self, device, dtype, requires_grad=False, **kwargs):
+        """Returns an iterable of SampleInputs that contain inputs with sparse
+        csr layout.
+        """
+        return self.sample_inputs_sparse_csr_func(self, device, dtype, requires_grad, **kwargs)
 
     def get_decorators(self, test_class, test_name, device, dtype):
         '''Returns the decorators targeting the given test.'''
@@ -1045,32 +1052,47 @@ def sample_inputs_masked_reduction(op_info, device, dtype, requires_grad, **kwar
     return inputs
 
 
-def sample_inputs_mixed_masked_reduction(op_info, device, dtype, requires_grad, **kwargs):
+def sample_inputs_sparse_coo_masked_reduction(op_info, device, dtype, requires_grad, **kwargs):
     """Sample inputs for masked reduction operators that support inputs
-    with mixed layouts.
+    with sparse coo layouts.
     """
     inputs: List[SampleInput] = []
 
-    for sample_input in sample_inputs_masked_reduction(op_info, device, dtype, requires_grad, **kwargs):
-        for (supports_layout, to_layout) in [
-                (op_info.supports_sparse, torch.Tensor.to_sparse),
-                (op_info.supports_sparse_csr, torch.Tensor.to_sparse_csr),
-        ]:
-            if not supports_layout:
-                continue
-            # input has given layout, mask is strided or None:
-            inputs.append(SampleInput(to_layout(sample_input.input),
-                                      args=sample_input.args, kwargs=sample_input.kwargs))
+    if op_info.supports_sparse:
+        for sample_input in sample_inputs_masked_reduction(op_info, device, dtype, requires_grad, **kwargs):
             mask = sample_input.kwargs.get('mask')
             if mask is not None:
                 sample_input_kwargs = sample_input.kwargs.copy()
-                sample_input_kwargs = sample_input_kwargs.update(mask=to_layout(mask))
-                # input is strided, mask has given layout:
-                inputs.append(SampleInput(sample_input.input.detach().clone().requires_grad_(requires_grad),
+                sample_input_kwargs.update(mask=mask.to_sparse())
+                inputs.append(SampleInput(sample_input.input.to_sparse(),
                                           args=sample_input.args, kwargs=sample_input_kwargs))
-                # input and mask have given layout
-                inputs.append(SampleInput(to_layout(sample_input.input),
+            else:
+                inputs.append(SampleInput(sample_input.input.to_sparse(),
+                                          args=sample_input.args, kwargs=sample_input.kwargs))
+    return inputs
+
+
+def sample_inputs_sparse_csr_masked_reduction(op_info, device, dtype, requires_grad, **kwargs):
+    """Sample inputs for masked reduction operators that support inputs
+    with sparse csr layouts.
+    """
+    inputs: List[SampleInput] = []
+
+    if op_info.supports_sparse_csr:
+        for sample_input in sample_inputs_masked_reduction(op_info, device, dtype, requires_grad, **kwargs):
+            if not (sample_input.input.ndim == 2 and sample_input.kwargs.get('keepdim')):
+                # - sparse CSR tensors are always 2-D tensors
+                # - masked reduction on CSR tensors are defined only if keepdim is True.
+                continue
+            mask = sample_input.kwargs.get('mask')
+            if mask is not None:
+                sample_input_kwargs = sample_input.kwargs.copy()
+                sample_input_kwargs.update(mask=mask.to_sparse_csr())
+                inputs.append(SampleInput(sample_input.input.to_sparse_csr(),
                                           args=sample_input.args, kwargs=sample_input_kwargs))
+            else:
+                inputs.append(SampleInput(sample_input.input.to_sparse_csr(),
+                                          args=sample_input.args, kwargs=sample_input.kwargs))
 
     return inputs
 
@@ -15134,7 +15156,8 @@ op_db: List[OpInfo] = [
                          'TestReductions', 'test_ref_small_input'),
         ],
         sample_inputs_func=sample_inputs_masked_reduction,
-        sample_inputs_mixed_func=sample_inputs_mixed_masked_reduction
+        sample_inputs_sparse_coo_func=sample_inputs_sparse_coo_masked_reduction,
+        sample_inputs_sparse_csr_func=sample_inputs_sparse_csr_masked_reduction
     ),
     ReductionOpInfo(
         '_masked.prod',
