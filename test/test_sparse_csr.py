@@ -7,9 +7,9 @@ import unittest
 from torch.testing import get_all_complex_dtypes, get_all_fp_dtypes, floating_and_complex_types, make_tensor
 from torch.testing._internal.common_cuda import SM53OrLater, SM80OrLater, TEST_CUSPARSE_GENERIC
 from torch.testing._internal.common_utils import \
-    (TEST_WITH_ROCM, TEST_SCIPY, TestCase, run_tests, load_tests, coalescedonoff)
+    (TEST_WITH_ROCM, TEST_SCIPY, TEST_MKL, IS_WINDOWS, TestCase, run_tests, load_tests, coalescedonoff)
 from torch.testing._internal.common_device_type import \
-    (ops, instantiate_device_type_tests, dtypes, dtypesIfCUDA, onlyCPU, onlyCUDA, skipCUDAIfNoCusparseGeneric,
+    (ops, instantiate_device_type_tests, dtypes, OpDTypes, dtypesIfCUDA, onlyCPU, onlyCUDA, skipCUDAIfNoCusparseGeneric,
      precisionOverride, skipMeta, skipCUDAIf, skipCUDAIfRocm, skipCPUIfNoMklSparse)
 from torch.testing._internal.common_methods_invocations import \
     (op_db, sparse_csr_unary_ufuncs, )
@@ -23,6 +23,8 @@ if TEST_SCIPY:
 # load_tests from torch.testing._internal.common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
 load_tests = load_tests
+
+no_mkl_sparse = IS_WINDOWS or not TEST_MKL
 
 def _check_cusparse_triangular_solve_available():
     version = _get_torch_cuda_version()
@@ -43,6 +45,8 @@ def _check_cusparse_sddmm_available():
     return version >= min_supported_version
 
 _sparse_csr_ops = list(filter(lambda op: op.supports_sparse_csr, op_db))
+binary_functions_with_dense_output = ['mm', 'mv', ]
+binary_ops_with_dense_output = list(filter(lambda op: op.name in binary_functions_with_dense_output, op_db))
 
 # This should be just an import from test_linalg instead of code duplication
 # but https://github.com/pytorch/pytorch/pull/63511#discussion_r733989701
@@ -1257,7 +1261,7 @@ class TestSparseCSR(TestCase):
 
     @ops(_sparse_csr_ops)
     def test_sparse_csr_consistency(self, device, dtype, op):
-        samples = op.sample_inputs(device, dtype)
+        samples = list(op.sample_inputs(device, dtype))
 
         # Fail early to prevent silent success with this test
         ndims_equals_2d = (s.input.ndim == 2 for s in samples)
@@ -1365,6 +1369,122 @@ class TestSparseCSR(TestCase):
             self.assertEqual(actual.crow_indices(), expect.crow_indices())
             self.assertEqual(actual.col_indices(), expect.col_indices())
             self.assertEqual(actual._nnz(), expect._nnz())
+
+
+    @unittest.expectedFailure
+    @ops(sparse_csr_unary_ufuncs, dtypes=OpDTypes.supported, allowed_dtypes=[torch.double, torch.cdouble])
+    def test_autograd_sparse_csr_unary(self, device, dtype, op):
+        samples = list(op.sample_inputs(device, dtype))
+
+        # Fail early to prevent silent success with this test
+        ndims_equals_2d = (s.input.ndim == 2 for s in samples)
+        if not any(ndims_equals_2d):
+            raise ValueError("Expected at least one 2D tensor in samples.")
+
+        for sample in samples:
+            sparse_input = sample.input.to_sparse_csr().requires_grad_(True)
+
+            def fn(input):
+                output = op.gradcheck_wrapper(op.get_op(), input, *sample.args, **sample.kwargs)
+                output = output.to_dense()
+                if sample.output_process_fn_grad is not None:
+                    return sample.output_process_fn_grad(output)
+                return output
+
+            # NotImplementedError inside gradcheck when computing numerical Jacobian
+            self.assertTrue(torch.autograd.gradcheck(fn, (sparse_input,), fast_mode=False, check_sparse_nnz=True))
+
+            # RuntimeError: Unsupported input layout: SparseCsr
+            output = fn(sparse_input)
+            output.backward(torch.ones_like(output))
+            assert torch.is_tensor(sparse_input.grad)
+
+    @dtypes(torch.float64)
+    def test_autograd_dense_output_addmm(self, device, dtype):
+        from torch.testing._internal.common_methods_invocations import sample_inputs_addmm
+
+        samples = list(sample_inputs_addmm(None, device, dtype, requires_grad=True))
+
+        # Fail early to prevent silent success with this test
+        ndims_equals_2d = (s.args[0].ndim == 2 for s in samples)
+        if not any(ndims_equals_2d):
+            raise ValueError("Expected at least one 2D tensor in samples to convert to sparse.")
+
+        for sample in samples:
+            a = sample.args[0].to_sparse_csr()
+
+            def fn(c, b):
+                output = torch.addmm(c, a, b, **sample.kwargs)
+                if sample.output_process_fn_grad is not None:
+                    return sample.output_process_fn_grad(output)
+                return output
+
+            self.assertTrue(torch.autograd.gradcheck(fn, [sample.input, sample.args[1]], fast_mode=True))
+
+            # noncontiguous
+            c = make_tensor(sample.input.shape, device=device, dtype=dtype, noncontiguous=True, requires_grad=True)
+            b = make_tensor(sample.args[1].shape, device=device, dtype=dtype, noncontiguous=True, requires_grad=True)
+            self.assertTrue(torch.autograd.gradcheck(fn, [c, b], fast_mode=True))
+
+    @skipCUDAIfRocm
+    @skipCPUIfNoMklSparse
+    @dtypes(torch.float64)
+    def test_autograd_dense_output_addmv(self, device, dtype):
+        from torch.testing._internal.common_methods_invocations import sample_inputs_addmv
+
+        samples = list(sample_inputs_addmv(None, device, dtype, requires_grad=True))
+
+        # Fail early to prevent silent success with this test
+        ndims_equals_2d = (s.args[0].ndim == 2 for s in samples)
+        if not any(ndims_equals_2d):
+            raise ValueError("Expected at least one 2D tensor in samples to convert to sparse.")
+
+        for sample in samples:
+            a = sample.args[0].to_sparse_csr()
+
+            def fn(c, b):
+                output = torch.addmv(c, a, b, **sample.kwargs)
+                if sample.output_process_fn_grad is not None:
+                    return sample.output_process_fn_grad(output)
+                return output
+
+            self.assertTrue(torch.autograd.gradcheck(fn, [sample.input, sample.args[1]], fast_mode=True))
+
+            # noncontiguous
+            c = make_tensor(sample.input.shape, device=device, dtype=dtype, noncontiguous=True, requires_grad=True)
+            b = make_tensor(sample.args[1].shape, device=device, dtype=dtype, noncontiguous=True, requires_grad=True)
+            self.assertTrue(torch.autograd.gradcheck(fn, [c, b], fast_mode=True))
+
+    @ops(binary_ops_with_dense_output, dtypes=OpDTypes.supported, allowed_dtypes=[torch.double, ])
+    def test_autograd_dense_output(self, device, dtype, op):
+        if op.name == "mv" and no_mkl_sparse and self.device_type == 'cpu':
+            self.skipTest("MKL Sparse is not available")
+        if op.name == "mv" and TEST_WITH_ROCM and self.device_type == 'cuda':
+            # mv currently work only on CUDA
+            self.skipTest("ROCm is not supported")
+
+        samples = list(op.sample_inputs(device, dtype, requires_grad=True))
+
+        # Fail early to prevent silent success with this test
+        ndims_equals_2d = (s.input.ndim == 2 for s in samples)
+        if not any(ndims_equals_2d):
+            raise ValueError("Expected at least one 2D tensor in samples.")
+
+        # Here we assume that the signature is op(sparse_input, dense_input) -> dense_output
+        for sample in samples:
+            sparse_input = sample.input.to_sparse_csr()
+
+            def fn(*args):
+                output = op.gradcheck_wrapper(op.get_op(), sparse_input, *args, **sample.kwargs)
+                if sample.output_process_fn_grad is not None:
+                    return sample.output_process_fn_grad(output)
+                return output
+
+            self.assertTrue(torch.autograd.gradcheck(fn, sample.args, fast_mode=True))
+
+            # noncontiguous
+            args = [make_tensor(a.shape, device=device, dtype=dtype, noncontiguous=True, requires_grad=True) for a in sample.args]
+            self.assertTrue(torch.autograd.gradcheck(fn, args, fast_mode=True))
 
     @dtypes(*get_all_dtypes(include_bool=False, include_half=False, include_bfloat16=False))
     def test_direct_coo_csr_conversion(self, device, dtype):
