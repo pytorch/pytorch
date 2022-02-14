@@ -664,17 +664,26 @@ REGISTER_NATIVE_OPERATOR_FUNCTOR(
     aten::add,
     aten_add,
     [](Node* n) -> SROperator {
-      if (!n->matches(torch::schema("aten::add.t(t[] a, t[] b) -> (t[])"))) {
-        LogAndDumpSchema(n);
-        return nullptr;
+      if (n->matches(torch::schema("aten::add.t(t[] a, t[] b) -> (t[])"))) {
+        return [](ProcessedNode* pnode) {
+          const auto& a = pnode->Input(0).toList();
+          const auto& b = pnode->Input(1).toList();
+          auto ret = a.copy();
+          ret.append(b);
+          pnode->Output(0) = ret;
+        };
       }
-      return [](ProcessedNode* pnode) {
-        const auto& a = pnode->Input(0).toList();
-        const auto& b = pnode->Input(1).toList();
-        auto ret = a.copy();
-        ret.append(b);
-        pnode->Output(0) = ret;
-      };
+
+      if (n->matches(torch::schema("aten::add.int(int a, int b) -> (int)"))) {
+        return [](ProcessedNode* pnode) {
+          const auto a = pnode->Input(0).toInt();
+          const auto b = pnode->Input(1).toInt();
+          pnode->Output(0) = a + b;
+        };
+      }
+
+      LogAndDumpSchema(n);
+      return nullptr;
     });
 
 REGISTER_NATIVE_OPERATOR_FUNCTOR(
