@@ -299,24 +299,18 @@ class TestSparse(TestCase):
             RuntimeError,
             lambda: self.sparse_tensor(indices, values, torch.Size([2, 4, 2, 1])))
 
-    @dtypes(*floating_and_complex_types_and(torch.float16))
+    @dtypes(*floating_and_complex_types_and(torch.float16, torch.bfloat16))
     def test_to_dense(self, device, dtype):
         def test_tensor(x, res):
             x.to_dense()  # Tests triple to_dense for memory corruption
             x.to_dense()
             x.to_dense()
-            # We dont have to_dense for half types, so we don't request
-            # exact_dtype if res.type is torch.float16.
             dense_x = x.to_dense()
             safe_dense_x = self.safeToDense(x)
-            if (res.dtype == torch.float16):
-                exact_dtype = False
-            else:
-                exact_dtype = True
-                dense_x = dense_x.to(res.dtype)
-                safe_dense_x = safe_dense_x.to(res.dtype)
-            self.assertEqual(res, dense_x, exact_dtype=exact_dtype)
-            self.assertEqual(res, safe_dense_x, exact_dtype=exact_dtype)
+            dense_x = dense_x.to(res.dtype)
+            safe_dense_x = safe_dense_x.to(res.dtype)
+            self.assertEqual(res, dense_x)
+            self.assertEqual(res, safe_dense_x)
 
             def fn(x):
                 return x.to_dense()
@@ -360,16 +354,9 @@ class TestSparse(TestCase):
             res = torch.empty((3, 4, 5, 0), dtype=dtype, device=device)
             test_tensor(x, res)
 
-    # half tensors on cpu don't implement to_dense, so need to convert to float
-    def _to_dense_half_safe(self, tensor):
-        if(tensor.dtype == torch.half and tensor.device.type == 'cpu'):
-            return tensor.to(torch.float).to_dense().to(torch.half)
-        else:
-            return tensor.to_dense()
-
     @coalescedonoff
     @skipIfRocm
-    @dtypes(torch.float16, torch.float64, torch.int, torch.cfloat, torch.cdouble)
+    @dtypes(torch.float16, torch.bfloat16, torch.float64, torch.int, torch.cfloat, torch.cdouble)
     def test_to_sparse(self, device, dtype, coalesced):
         shape = [5, 2, 10, 4]
         max_nnz = 1
@@ -382,9 +369,9 @@ class TestSparse(TestCase):
                                                       coalesced=coalesced)
                     expected = expected.to(dtype)
 
-                    d = self._to_dense_half_safe(expected)
+                    d = expected.to_dense()
                     result = d.to_sparse(dim)
-                    self.assertEqual(d, self._to_dense_half_safe(result))  # == not implemented for sparse tensors yet
+                    self.assertEqual(d, result.to_dense())
                     self.assertEqual(expected.size(), result.size())
                     self.assertEqual(dim, result.sparse_dim())
 
@@ -1991,8 +1978,7 @@ class TestSparse(TestCase):
                 sparse_tensor.requires_grad_()
 
     @coalescedonoff
-    @dtypes(*get_all_dtypes(include_bool=False, include_half=False,
-                            include_bfloat16=False, include_complex=False))
+    @dtypes(*get_all_dtypes(include_bool=False, include_half=False, include_complex=False))
     def test_log1p(self, device, dtype, coalesced):
         if coalesced:
             input_coalesced = torch.sparse_coo_tensor(
@@ -2135,8 +2121,7 @@ class TestSparse(TestCase):
                     op(sparse_tensor)
 
     @coalescedonoff
-    @dtypes(*get_all_dtypes(include_bool=False, include_half=False,
-                            include_bfloat16=False, include_complex=False))
+    @dtypes(*get_all_dtypes(include_bool=False, include_half=False, include_complex=False))
     def test_asin_arcsin(self, device, dtype, coalesced):
         if coalesced:
             input_coalesced = torch.sparse_coo_tensor(
@@ -3234,7 +3219,7 @@ class TestSparse(TestCase):
                   *get_all_fp_dtypes(
                       include_half=(CUDA11OrLater and SM53OrLater),
                       include_bfloat16=(CUDA11OrLater and SM80OrLater)))
-    @precisionOverride({torch.bfloat16: 1e-2, torch.float16: 1e-2, torch.complex64: 1e-2, torch.float32: 1e-2})
+    @precisionOverride({torch.bfloat16: 5e-2, torch.float16: 5e-2, torch.complex64: 1e-2, torch.float32: 1e-2})
     def test_sparse_matmul(self, device, dtype, coalesced):
         """
         This function test `torch.sparse.mm` when both the mat1 and mat2 are sparse tensors.
