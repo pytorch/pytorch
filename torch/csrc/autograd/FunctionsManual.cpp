@@ -5204,11 +5204,11 @@ Tensor index_add_source_backward(const Tensor& grad, int64_t dim, const Tensor& 
   }
 
   auto source_grad = grad.index_select(dim, index);
-  auto shape_diff = source_grad.dim() - source_size.size();
-  if (shape_diff > 0) {
+  auto broadcasted_dims = source_grad.dim() - source_size.size();
+  if (broadcasted_dims > 0) {
     // source was broadcasted
     // Thus we sum the gradient values from the broadcasted dims
-    at::DimVector reduce_dims(shape_diff);
+    at::DimVector reduce_dims(broadcasted_dims);
     std::iota(reduce_dims.begin(), reduce_dims.end(), 1);
     source_grad = source_grad.movedim(dim, 0).sum(reduce_dims).movedim(0, dim);
   }
