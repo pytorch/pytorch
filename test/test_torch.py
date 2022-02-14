@@ -4651,13 +4651,8 @@ else:
         # the `tensor.__dlpack__` method will insert a synchronization event
         # in the current stream to make sure that it was correctly populated.
         with torch.cuda.stream(stream_a):
-<<<<<<< HEAD
-            x = make_tensor((5,), device, dtype) + 1
-            z = torch.from_dlpack(x.__dlpack__(stream_b.cuda_stream))
-=======
             x = make_tensor((5,), dtype=dtype, device=device) + 1
-            z = _from_dlpack(x.__dlpack__(stream_b.cuda_stream))
->>>>>>> e949c7a741 (align signature of make_tensor with other creation ops)
+            z = torch.from_dlpack(x.__dlpack__(stream_b.cuda_stream))
             stream_a.synchronize()
         stream_b.synchronize()
         self.assertEqual(z, x)
