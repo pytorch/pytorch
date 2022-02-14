@@ -986,14 +986,16 @@ class TestQuantizeEagerQATNumerics(QuantizationTestCase):
             qat_op_optim.step()
             qat_ref_op_optim.step()
 
-    def test_linear_bn(self):
+    @override_qengines
+    def test_linear_bn_numerics(self):
+        qengine = torch.backends.quantized.engine
         m_ref = nn.Sequential(
             nn.Linear(4, 4),
             nn.BatchNorm1d(4),
         )
         m_ref_copy = copy.deepcopy(m_ref)
         m_ref_copy = torch.ao.quantization.fuse_modules_qat(m_ref_copy, [['0', '1']])
-        qconfig = torch.ao.quantization.get_default_qat_qconfig('fbgemm')
+        qconfig = torch.ao.quantization.get_default_qat_qconfig(qengine)
         m_ref_copy[0].qconfig = qconfig
         m = nniqat.LinearBn1d.from_float(m_ref_copy[0])
 
