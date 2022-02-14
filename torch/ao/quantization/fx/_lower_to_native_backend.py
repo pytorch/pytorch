@@ -11,7 +11,34 @@ from .quantized_fusion_patterns_and_replacements import get_fbgemm_patterns_and_
 from .match_utils import is_match
 from .match_utils import MatchAllNode
 from ..utils import _parent_name, check_node
-from typing import Dict, Tuple, Type
+from typing import Dict, Tuple, Type, List
+from torch.fx import Node
+
+
+def is_fixed_qparams_node(node, modules):
+    func_list = [
+        torch.nn.functional.hardsigmoid,
+        torch.nn.functional.sigmoid,
+        torch.sigmoid,
+        torch.tanh,
+    ]
+    method_list = [
+        'hardsigmoid',
+        'hardsigmoid_',
+        'sigmoid',
+        'sigmoid_',
+        'tanh',
+        'tanh_',
+    ]
+    module_type_list = [
+        torch.nn.Hardsigmoid,
+        torch.nn.Sigmoid,
+        torch.nn.Tanh,
+    ]
+    is_call_function = node.op == "call_function" and node.target in func_list
+    is_call_method = node.op == "call_method" and node.target in method_list
+    is_call_module = node.op == "call_module" and type(modules[str(node.target)]) in module_type_list
+    return is_call_function, is_call_method, is_call_module
 
 # Mapping from reference module class to the replacement quantized module class for lowering
 LOWER_MODULE_MAP: Dict[Type[nn.Module], Type[ReferenceableQuantizedModule]] = {
@@ -100,34 +127,69 @@ def special_pattern_replacement(model: QuantizedGraphModule) -> QuantizedGraphMo
     nodes = list(model.graph.nodes)
     for n in model.graph.nodes:
         q_node = n
-        if q_node.target == torch.quantize_per_tensor:
-            # get output scale/zero_point/dtype from the quantize node
-            ref_node, scale_node, zero_point_node, dtype = q_node.args
+        is_quantize = q_node.target == torch.quantize_per_tensor
+        is_to_fp16 = q_node.op == "call_method" and q_node.target == "to" and q_node.args[1] == torch.float16
+        if not (is_quantize or is_to_fp16):
+            continue
+        ref_node = q_node.args[0]
+        # get output scale/zero_point/dtype from the quantize node
+        # ref_node, scale_node, zero_point_node, dtype = q_node.args
+        # TODO: add safety checks that users for the ref_node and dq_node needs to be one
 
-            is_call_function, is_call_method, is_call_module = check_node(ref_node, modules)
-            if is_call_module or is_call_function or is_call_method:
-                dq_node = ref_node.args[0]
-                if dq_node.target == 'dequantize':
-                    if is_call_module:
-                        ref_module = modules[ref_node.target]
-                        # change this pattern to use the corresponding quantized module
-                        # replace reference module with quantized module
-                        parent_name, module_name = _parent_name(ref_node.target)
-                        setattr(modules[parent_name], module_name, ref_module)
-                    else:
-                        dq_node.target = ref_node
+        is_call_function, is_call_method, is_call_module = is_fixed_qparams_node(ref_node, modules)
+        if is_to_fp16 and (is_call_function or is_call_method or is_call_module):
+            # TODO: add a warning or error out here? (bc-breaking if error out)
+            continue
 
-                    # remove dq node:
-                    dq_node_input = dq_node.args[0]
-                    dq_node.replace_all_uses_with(dq_node_input)
-                    model.graph.erase_node(dq_node)
+        is_call_function, is_call_method, is_call_module = check_node(ref_node, modules)
+        if not (is_call_module or is_call_function or is_call_method):
+            continue
+        dq_node_or_nodes = ref_node.args[0]
+        assert isinstance(dq_node_or_nodes, Node) or isinstance(dq_node_or_nodes, (tuple, list))
+        is_dequantize = False
+        if isinstance(dq_node_or_nodes, Node):
+            is_dequantize = dq_node_or_nodes.op == 'call_method' and \
+                dq_node_or_nodes.target == 'dequantize'
+        elif isinstance(dq_node_or_nodes, (tuple, list)):
+            is_dequantize = all(
+                x.op == 'call_method' and x.target == 'dequantize'
+                for x in dq_node_or_nodes)
 
-                    # remove q node and args:
-                    q_node_input = q_node.args[0]
-                    q_node.replace_all_uses_with(q_node_input)
-                    model.graph.erase_node(q_node)
-                    model.graph.erase_node(scale_node)
-                    model.graph.erase_node(zero_point_node)
+        if not is_dequantize:
+            continue
+
+        # TODO: enable we have patterns that needs to swap the modules
+        # if is_call_module:
+        #     ref_module = modules[ref_node.target]
+        #     # change this pattern to use the corresponding quantized module
+        #     # replace reference module with quantized module
+        #     parent_name, module_name = _parent_name(ref_node.target)
+        #     setattr(modules[parent_name], module_name, ref_module)
+
+        # remove dq node:
+        dq_nodes: List[Node] = []
+        if isinstance(dq_node_or_nodes, Node):
+            dq_nodes = [dq_node_or_nodes]
+        elif isinstance(dq_node_or_nodes, (tuple, list)):
+            dq_nodes = list(dq_node_or_nodes)
+
+        for dq_node in dq_nodes:
+            dn_input = dq_node.args[0]
+            dq_node.replace_all_uses_with(dn_input)
+            model.graph.erase_node(dq_node)
+
+        # store q node args
+        q_node_args = list(q_node.args)[1:]
+
+        # replace uses of q node with input and remove q node
+        q_node_input = q_node.args[0]
+        q_node.replace_all_uses_with(q_node_input)
+        model.graph.erase_node(q_node)
+
+        # remove q node args
+        for n in q_node_args:
+            if isinstance(n, Node):
+                model.graph.erase_node(n)
 
 
     model.recompile()
