@@ -77,6 +77,7 @@ DEFAULT_STATIC_QUANT_MODULE_MAPPINGS : Dict[Callable, Any] = {
     nniqat.ConvReLU2d: nniq.ConvReLU2d,
     nniqat.ConvReLU3d: nniq.ConvReLU3d,
     nniqat.LinearReLU: nniq.LinearReLU,
+    nniqat.LinearBn1d: nnq.Linear,
     # QAT modules:
     nnqat.Linear: nnq.Linear,
     nnqat.Conv2d: nnq.Conv2d,

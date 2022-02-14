@@ -1006,6 +1006,22 @@ class TestQuantizeEagerQATNumerics(QuantizationTestCase):
         r2 = m(data)
         self.assertTrue(torch.allclose(r1, r2))
 
+    @override_qengines
+    def test_linear_bn_workflow(self):
+        qengine = torch.backends.quantized.engine
+        m = nn.Sequential(
+            QuantStub(),
+            nn.Linear(4, 4),
+            nn.BatchNorm1d(4),
+        )
+        data = torch.randn(4, 4)
+        m.qconfig = torch.ao.quantization.get_default_qat_qconfig(qengine)
+        m = torch.ao.quantization.fuse_modules_qat(m, [['1', '2']])
+        mp = prepare_qat(m)
+        mp(data)
+        mq = convert(mp)
+        self.assertTrue(type(mq[1]) == nnq.Linear)
+        self.assertTrue(type(mq[2]) == nn.Identity)
 
 if __name__ == '__main__':
     raise RuntimeError("This test file is not meant to be run directly, use:\n\n"
