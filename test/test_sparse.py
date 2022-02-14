@@ -3219,7 +3219,7 @@ class TestSparse(TestCase):
                   *get_all_fp_dtypes(
                       include_half=(CUDA11OrLater and SM53OrLater),
                       include_bfloat16=(CUDA11OrLater and SM80OrLater)))
-    @precisionOverride({torch.bfloat16: 5e-2, torch.float16: 5e-2, torch.complex64: 1e-2, torch.float32: 1e-2})
+    @precisionOverride({torch.bfloat16: 1e-2, torch.float16: 1e-2, torch.complex64: 1e-2, torch.float32: 1e-2})
     def test_sparse_matmul(self, device, dtype, coalesced):
         """
         This function test `torch.sparse.mm` when both the mat1 and mat2 are sparse tensors.
@@ -3395,21 +3395,21 @@ class TestSparseOneOff(TestCase):
     def test_cuda_from_cpu(self):
         with self.assertRaisesRegex(
                 RuntimeError,
-                "backend of indices \\(CUDA\\) must match backend of values \\(CPU\\)"):
+                "Expected all tensors to be on the same device, but found at least two devices, cuda:0 and cpu!"):
             torch.sparse.FloatTensor(torch.zeros(1, 4).long().cuda(),
                                      torch.randn(4, 4, 4),
                                      [3, 4, 4])
 
         with self.assertRaisesRegex(
                 RuntimeError,
-                "backend of indices \\(CUDA\\) must match backend of values \\(CPU\\)"):
+                "Expected all tensors to be on the same device, but found at least two devices, cuda:0 and cpu!"):
             torch.sparse.FloatTensor(torch.zeros(1, 4).long().cuda(),
                                      torch.randn(4, 4, 4, 0),
                                      [3, 4, 4, 0])
 
         with self.assertRaisesRegex(
                 RuntimeError,
-                "backend of indices \\(CUDA\\) must match backend of values \\(CPU\\)"):
+                "Expected all tensors to be on the same device, but found at least two devices, cuda:0 and cpu!"):
             torch.sparse.FloatTensor(torch.LongTensor(1, 0).cuda(),
                                      torch.randn(0, 4, 4, 0),
                                      [0, 4, 4, 0])
