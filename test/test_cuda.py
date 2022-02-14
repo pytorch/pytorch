@@ -1519,6 +1519,7 @@ except RuntimeError as e:
         self.assertTrue(any([msg in out or msg in err for msg in expected_messages]))
 
     @slowTest
+    @skipIfRocm
     @unittest.skipIf(NO_MULTIPROCESSING_SPAWN, "Disabled for environments that \
                      don't support multiprocessing with spawn start method")
     def test_multinomial_invalid_probs_cuda(self):
@@ -1956,6 +1957,7 @@ t1.start()
 t2.start()
 """])
 
+    @skipIfRocm
     def test_fixed_cuda_assert_async(self):
         with self.assertRaisesRegex(RuntimeError, "Boolean value of Tensor with no values is ambiguous"):
             torch._assert_async(torch.tensor([], device="cuda"))
