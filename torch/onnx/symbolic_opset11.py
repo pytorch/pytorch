@@ -882,22 +882,29 @@ def embedding_bag(g,
     return loop.node().output(), None, None, None
 
 
-def prim_ConstantChunk(g, self, chunks, dim):
-    input_shape = g.op("Shape", self)
-    axis = g.op("Constant", value_t=torch.tensor([dim], dtype=torch.long))
-    input_shape_dim = g.op("Gather", input_shape, axis, axis_i=0)
-    start = g.op("Constant", value_t=torch.tensor([0], dtype=torch.long))
-    chunk_size = g.op("Constant", value_t=torch.tensor([chunks], dtype=torch.long))
-    chunk_size_minus_1 = g.op("Constant", value_t=torch.tensor([chunks - 1], dtype=torch.long))
-    input_shape_dim_shift = g.op("Add", input_shape_dim, chunk_size_minus_1)
-    chunk_dim = g.op("Div", input_shape_dim_shift, chunk_size)
-    res = []
-    for i in range(chunks):
-        index = g.op("Constant", value_t=torch.tensor([i + 1], dtype=torch.long))
-        end = g.op("Mul", chunk_dim, index)
-        res.append(g.op("Slice", self, start, end, axis))
-        start = end
-    return res
+@parse_args("v", "v", "f", "f")
+def embedding_renorm(g, weight, indices, max_norm, norm_type):
+    unique_indices = g.op("Unique", indices)
+    partial_weight = g.op("Gather", weight, unique_indices)
+    norm_type = int(norm_type)
+    if norm_type == 1:
+        norm_type = "ReduceL1"
+    elif norm_type == 2:
+        norm_type = "ReduceL2"
+    else:
+        raise RuntimeError(f"Unsupported: ONNX export of embedding_renorm with norm: {norm_type}. "
+                           "Only 1. and 2. are supported.")
+    partial_weight_norm = g.op(norm_type, partial_weight, axes_i=[1], keepdims_i=1)
+    # https://github.com/pytorch/pytorch/blob/0a07488ed2c47765e337e290bd138c0e6e459cbd/aten/src/ATen/native/Embedding.cpp#L177
+    # Add 1e-7 to prevent division by zero.
+    partial_weight_norm_ = g.op("Add", partial_weight_norm, g.op("Constant", value_t=torch.tensor(1e-7)))
+    max_norm = torch.tensor(max_norm)
+    scales = g.op("Div", max_norm, partial_weight_norm_)
+    partial_weight_renorm = g.op("Mul", partial_weight, scales)
+    partial_weight_renorm = g.op("Where", g.op("Greater", partial_weight_norm, max_norm),
+                                 partial_weight_renorm, partial_weight)
+    return g.op("ScatterND", weight, sym_help._unsqueeze_helper(g, unique_indices, [1]), partial_weight_renorm)
+
 
 def chunk(g, self, chunks, dim):
     # Calculate chunk size for dynamic chunk
@@ -919,3 +926,25 @@ def normal(g, loc, scale, seed):
     # is a sample with mean μ and variance σ's square.
     result = mul(g, scale, g.op("RandomNormalLike", loc))
     return add(g, result, loc)
+
+
+class Prim:
+    domain = "prim"
+
+    @staticmethod
+    def ConstantChunk(g, self, chunks, dim):
+        input_shape = g.op("Shape", self)
+        axis = g.op("Constant", value_t=torch.tensor([dim], dtype=torch.long))
+        input_shape_dim = g.op("Gather", input_shape, axis, axis_i=0)
+        start = g.op("Constant", value_t=torch.tensor([0], dtype=torch.long))
+        chunk_size = g.op("Constant", value_t=torch.tensor([chunks], dtype=torch.long))
+        chunk_size_minus_1 = g.op("Constant", value_t=torch.tensor([chunks - 1], dtype=torch.long))
+        input_shape_dim_shift = g.op("Add", input_shape_dim, chunk_size_minus_1)
+        chunk_dim = g.op("Div", input_shape_dim_shift, chunk_size)
+        res = []
+        for i in range(chunks):
+            index = g.op("Constant", value_t=torch.tensor([i + 1], dtype=torch.long))
+            end = g.op("Mul", chunk_dim, index)
+            res.append(g.op("Slice", self, start, end, axis))
+            start = end
+        return res

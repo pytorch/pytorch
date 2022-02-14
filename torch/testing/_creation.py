@@ -41,7 +41,7 @@ def make_tensor(
     +---------------------------+------------+----------+
 
     Args:
-        shape (Tuple[int, ...]): A sequence of integers defining the shape of the output tensor.
+        shape (Tuple[int, ...]): Single integer or a sequence of integers defining the shape of the output tensor.
         dtype (:class:`torch.dtype`): The data type of the returned tensor.
         device (Union[str, torch.device]): The device of the returned tensor.
         low (Optional[Number]): Sets the lower limit (inclusive) of the given range. If a number is provided it is
