@@ -1,3 +1,7 @@
+// LinearAlgebraStubs.cpp
+// Mostly a no-op unless BUILD_LAZY_CUDA_LINALG is defined
+// In that case load library is dynamically loaded when first linalg call is made
+// This helps reduce size of GPU memory context if linear algebra functions are not used
 #include <ATen/Context.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/CUDAConfig.h>
