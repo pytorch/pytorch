@@ -144,8 +144,7 @@ struct ProfilerLegacyThreadLocalState : public ProfilerThreadLocalStateBase {
   void pushRange(
       const at::RecordFunction& fn,
       const bool record_cuda,
-      std::vector<std::vector<int64_t>>&& shapes = {},
-      std::vector<std::pair<int, int>>&& input_op_ids = {});
+      std::vector<std::vector<int64_t>>&& shapes = {});
 
   void popRange(const at::RecordFunction& fn, const bool record_cuda);
 
@@ -221,14 +220,13 @@ void ProfilerLegacyThreadLocalState::setOrAddRemoteProfiledEvents(
 void ProfilerLegacyThreadLocalState::pushRange(
     const at::RecordFunction& fn,
     const bool record_cuda,
-    std::vector<std::vector<int64_t>>&& shapes,
-    std::vector<std::pair<int, int>>&& input_op_ids) {
+    std::vector<std::vector<int64_t>>&& shapes) {
   if (config_.state == torch::profiler::impl::ProfilerState::Disabled) {
     return;
   }
   if (config_.state == torch::profiler::impl::ProfilerState::NVTX) {
     torch::profiler::impl::cudaStubs()->nvtxRangePushA(torch::profiler::impl::getNvtxStr(
-        fn.name(), fn.seqNr(), fn.handle(), shapes, input_op_ids).c_str());
+        fn.name(), fn.seqNr(), shapes).c_str());
   } else {
     LegacyEvent evt(
         EventKind::PushRange,
@@ -371,8 +369,7 @@ void pushProfilingCallbacksLegacy() {
 
         if (state_ptr->config().report_input_shapes) {
           auto sizes = torch::profiler::impl::inputSizes(fn);
-          auto input_op_ids = torch::profiler::impl::inputOpIds(fn);
-          state_ptr->pushRange(fn, record_cuda, std::move(sizes), std::move(input_op_ids));
+          state_ptr->pushRange(fn, record_cuda, std::move(sizes));
         } else {
           state_ptr->pushRange(fn, record_cuda);
         }
@@ -392,7 +389,6 @@ void pushProfilingCallbacksLegacy() {
         state_ptr->popRange(fn, record_cuda);
       })
     .needsInputs(registration_state_ptr->config().report_input_shapes)
-    .needsOutputs(registration_state_ptr->config().report_input_shapes)
     .needsIds(true));
   registration_state_ptr->setCallbackHandle(handle);
 }

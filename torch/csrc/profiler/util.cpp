@@ -20,8 +20,8 @@ namespace impl {
 std::string getNvtxStr(
     const char* name,
     int64_t sequence_nr,
-    at::RecordFunctionHandle op_id,
     const std::vector<std::vector<int64_t>>& shapes,
+    at::RecordFunctionHandle op_id,
     const std::vector<std::pair<int, int>>& input_op_ids) {
   if (sequence_nr >= -1 || shapes.size() > 0) {
     std::string str;

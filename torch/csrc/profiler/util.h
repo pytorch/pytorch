@@ -54,9 +54,9 @@ inline int64_t getTime(bool allow_monotonic = false) {
 std::string getNvtxStr(
     const char* name,
     int64_t sequence_nr,
-    at::RecordFunctionHandle op_id,
     const std::vector<std::vector<int64_t>>& shapes,
-    const std::vector<std::pair<int, int>>& input_op_ids);
+    at::RecordFunctionHandle op_id = ~0,
+    const std::vector<std::pair<int, int>>& input_op_ids = {});
 
 struct TORCH_API FileLineFunc {
   std::string filename;

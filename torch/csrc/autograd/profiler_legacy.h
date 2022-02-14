@@ -38,16 +38,14 @@ struct TORCH_API LegacyEvent {
       at::RecordFunctionHandle handle = 0,
       std::vector<std::vector<int64_t>>&& shapes = {},
       int node_id = -1,
-      bool is_async = false,
-      std::vector<std::pair<int, int>>&& input_op_ids = {})
+      bool is_async = false)
       : name_(std::move(name)),
         kind_(kind),
         thread_id_(thread_id),
         handle_(handle),
         shapes_(shapes),
         node_id_(node_id),
-        is_async_(is_async),
-        input_op_ids_(input_op_ids) {
+        is_async_(is_async) {
     record(record_cuda);
   }
 
@@ -66,8 +64,7 @@ struct TORCH_API LegacyEvent {
       bool cuda_recorded,
       int64_t cuda_memory_usage = 0,
       int device = -1,
-      double cuda_us = -1,
-      std::vector<std::pair<int, int>>&& input_op_ids = {})
+      double cuda_us = -1)
       : cpu_ns_(cpu_ns),
         name_(std::move(name)),
         kind_(kind),
@@ -79,8 +76,7 @@ struct TORCH_API LegacyEvent {
         device_(device),
         node_id_(node_id),
         is_remote_(is_remote),
-        cuda_us_(cuda_us),
-        input_op_ids_(input_op_ids) {
+        cuda_us_(cuda_us) {
     // Sanity check values that were deserialized
     TORCH_INTERNAL_ASSERT(cpu_ns_ > 0);
     if (cuda_recorded) {
@@ -122,10 +118,6 @@ struct TORCH_API LegacyEvent {
 
   std::vector<std::vector<int64_t>> shapes() const {
     return shapes_;
-  }
-
-  std::vector<std::pair<int, int>> inputOpIds() const {
-    return input_op_ids_;
   }
 
   double cpuElapsedUs(const LegacyEvent& e) const {
@@ -277,7 +269,6 @@ struct TORCH_API LegacyEvent {
   int64_t sequence_nr_ = -1;
   bool is_async_ = false;
 
-  std::vector<std::pair<int, int>> input_op_ids_;
   std::vector<std::string> stack_;
   uint8_t scope_;
   uint64_t correlation_id_;
