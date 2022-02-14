@@ -1,8 +1,50 @@
 # Guidance for Operator Developer
 
-PyTorch’s operators sometimes require changes to maintain the high quality user experience (UX) that PyTorch is known for. These changes can be backward compatibility (BC) breaking, where older programs will no longer run as expected on the latest version of PyTorch (an old writer / new reader problem) or forward compatibility (FC) breaking, where new programs will not run on older versions of PyTorch (a new writer / old reader problem). An upgrader is a method to use the new operator to mimic the old operator behavior. When a new runtime loads an old model with the old operator, the upgrader will replace the old operator in the model with the new operator. The replacement will only happen for old models, and it does not need to consider the new models. Please refer to the documentation [PyTorch Operator Versioning](https://github.com/pytorch/rfcs/blob/master/RFC-0017-PyTorch-Operator-Versioning.md) for more details.
+PyTorch’s operators sometimes require changes to maintain the high quality user experience (UX) that PyTorch is known for. These changes can be backward compatibility (BC) breaking, where older programs will no longer run as expected on the latest version of PyTorch (an old program / new runtime problem) or forward compatibility (FC) breaking, where new programs will not run on older versions of PyTorch (a new writer / old reader problem). This guidance is just for making BC breaking changes to operator. An upgrader is a method to use the new operator to mimic the old operator behavior. When a new runtime loads an old model with the old operator, the upgrader will replace the old operator in the model with the new operator. Upgraders only apply to instances of old operators to make sure they comply with the new operator contract. Please refer to the documentation [PyTorch Operator Versioning](https://github.com/pytorch/rfcs/blob/master/RFC-0017-PyTorch-Operator-Versioning.md) for more details.
 
-After you change to operator either the operator schema is BC-breaking way or the semantics of the operator, you will need to write an “upgrader” to make the change non-BC breaking iff they are used in TorchScript or mobile. In general, you can know your operator is BC breaking, if it fails `test/forward_backward_compatibility/check_forward_backward_compatibility.py `
+If the change to the operator is BC-breaking in either the schema or the semantics way, you will need to write an upgrader to make the change non-BC breaking. In general, you can know your operator is BC breaking, if it fails `test/forward_backward_compatibility/check_forward_backward_compatibility.py `.
+
+### Some examples BC/FC breaking changes
+
+When making changes to the operators, the first thing to identify is if it's BC/FC breaking. Again, we only targetting for BC breaking changes on this guidance. Here are some examples to help understanding what a BC/FC changes may look like:
+
+#### Backward Compatibility Breakage:
+
+- Return types are more generic than the older version
+  - Old: `foo(Tensor self, int a) -> int`
+  - New: `foo(Tensor self, int a) -> Scalar`
+- Argument types are more specific than the older version
+  - Old: `foo(Tensor self, Scalar a) -> int`
+  - New: `foo(Tensor self, int a) -> int`
+- Added new arguments don’t have associated default values
+  - Old: `foo(Tensor self, int a) -> int`
+  - New: `foo(Tensor self, int a, int b) -> int`
+- Internal implementation change even when the schema remains the same
+- Deprecating an operator
+
+#### Forward Compatibility Breakage:
+
+- Adding new default argument:
+- Adding a new default argument not RIGHT BEFORE the out arguments which can be 0 or more.
+  - Old: `foo(Tensor self, int a, int b=1, Tensor(a!) out) -> (Tensor(a!))`
+  - New: `foo(Tensor self, int a, int c=1, int b=1, Tensor(a!) out) -> (Tensor(a!))`
+
+- Adding out argument NOT at the end of the schema.
+  - Old: `foo(Tensor self, int a, int b=1, Tensor(a!) out) -> (Tensor(a!))`
+  - New: `foo(Tensor self, int a, Tensor(d!), int b=1, Tensor(a!) out) -> (Tensor(a!), Tensor(d!))`
+
+- Adding default arguments with container types such as ListType or DictType (list or dict).
+  - Old: `foo(Tensor self, int a, int b=1, Tensor(a!) out) -> (Tensor(a!))`
+  - New: `foo(Tensor self, int a, int b=1, int[2] c=1, Tensor(a!) out) -> (Tensor(a!))`
+- Changing default argument’s name
+  - This will only work when the default argument always uses the default value (so that serialization will ignore it). In all other cases, it will fail.
+  - Old: `foo(Tensor self, int a, int b=1, Tensor(a!) out) -> (Tensor(a!))`
+  - New: `foo(Tensor self, int a, int c=1, Tensor(a!) out) -> (Tensor(a!))`
+- Changing default argument’s default value. This will break when this argument is saved with the default value in newer runtime. Older runtime will use its old default value which will lead to wrong output.
+  - Old: `foo(Tensor self, int a, int b=1, Tensor(a!) out) -> (Tensor(a!))`
+  - New: `foo(Tensor self, int a, int b=4, Tensor(a!) out) -> (Tensor(a!))`
+- Adding new operator
+
 
 The steps to write upgrader:
 
