@@ -617,9 +617,6 @@ jobs:
             echo "pip install click mock tabulate networkx==2.0" >> docker_commands.sh
             echo "pip -q install --user \"file:///var/lib/jenkins/workspace/third_party/onnx#egg=onnx\"" >> docker_commands.sh
             echo ".jenkins/caffe2/test.sh" >> docker_commands.sh
-          elif [[ ${BUILD_ENVIRONMENT} == pytorch-linux-xenial-cuda10.2-cudnn7-py3-gcc7-test1 ]]; then
-            echo "python test/test_torch.py -v TestTorchDeviceTypeCUDA.test_large_cumprod_cuda_float16" >> docker_commands.sh
-            echo ".jenkins/pytorch/test.sh" >> docker_commands.sh
           else
             echo ".jenkins/pytorch/test.sh" >> docker_commands.sh
           fi
