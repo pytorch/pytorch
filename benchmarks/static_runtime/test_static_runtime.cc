@@ -388,6 +388,13 @@ TEST(StaticRuntime, Binary) {
         return (c.clone())
   )JIT";
 
+  const auto add_script_ints = R"JIT(
+    def forward(self, a: int, b: int):
+        c = a + b
+        d = c + 1
+        return d
+  )JIT";
+
   const auto add_list_script = R"JIT(
     def forward(self, a: List[int], b: List[int]):
         c = a + b
@@ -446,6 +453,7 @@ TEST(StaticRuntime, Binary) {
   std::vector<IValue> args{a, b};
 
   testStaticRuntime(add_script, args);
+  testStaticRuntime(add_script_ints, {1, 2});
   testStaticRuntime(add_script, args, {c, d});
   testStaticRuntime(list_construct_script, args);
   testStaticRuntime(list_construct_script_2, args);
@@ -1645,6 +1653,13 @@ TEST(StaticRuntime, Slice) {
 
   testStaticRuntime(slice_script, args_a);
   testStaticRuntime(slice_script, args_a, args_b);
+
+  const auto slice_script2 = R"JIT(
+    def forward(self, a: Tensor, dim: int, step: int):
+      return a.slice(dim, None, None, step).clone()
+  )JIT";
+  std::vector<IValue> args_c{b, dim_b, step_b};
+  testStaticRuntime(slice_script2, args_c);
 }
 
 TEST(StaticRuntime, Narrow) {
@@ -2181,18 +2196,25 @@ TEST(StaticRuntime, View) {
 }
 
 TEST(StaticRuntime, Size) {
-  const auto src = R"JIT(
+  const auto src_with_dim = R"JIT(
       def forward(self, x, dim: int):
           return x.size(dim)
+  )JIT";
+
+  const auto src_no_dim = R"JIT(
+      def forward(self, x):
+          return x.size()
   )JIT";
 
   std::vector<IValue> args1{at::randn({1}), 0};
   std::vector<IValue> args2{at::randn({1}), -1};
   std::vector<IValue> args3{at::randn({2, 4}), 1};
+  std::vector<IValue> args_no_dim{at::randn({2, 4})};
 
-  testStaticRuntime(src, args1);
-  testStaticRuntime(src, args2);
-  testStaticRuntime(src, args1, args3);
+  testStaticRuntime(src_with_dim, args1);
+  testStaticRuntime(src_with_dim, args2);
+  testStaticRuntime(src_with_dim, args1, args3);
+  testStaticRuntime(src_no_dim, args_no_dim);
 }
 
 TEST(StaticRuntime, Squeeze) {
@@ -2577,4 +2599,124 @@ TEST(StaticRuntime, NestedLoops) {
   std::vector<IValue> args2{at::randn({3, 3, 3}), 10};
 
   testStaticRuntime(src, args1, args2);
+}
+
+TEST(StaticRuntime, TupleIndex) {
+  const auto src = R"JIT(
+    def forward(self, idx: int, tup: Tuple[int, int]):
+        a = tup[idx]
+        return a * a
+  )JIT";
+  const auto tuple = c10::ivalue::Tuple::create({1, 2});
+  testStaticRuntime(src, {1, tuple}, {-1, tuple});
+
+  torch::jit::Module mod("module");
+  mod.define(src);
+  StaticModule smod(mod);
+  EXPECT_THROW(smod({100, tuple}), std::out_of_range);
+}
+
+TEST(StaticRuntime, RaiseException) {
+  const auto src = R"IR(
+    graph(%str: str):
+        %none: NoneType = prim::Constant()
+        prim::RaiseException(%str, %none)
+        return (%none)
+  )IR";
+  auto graph = getGraphFromIR(src);
+  StaticModule smod(graph);
+  const auto msg = "exception message";
+  EXPECT_THROW(
+      {
+        try {
+          smod({msg});
+        } catch (const std::runtime_error& e) {
+          EXPECT_STREQ(msg, e.what());
+          throw;
+        }
+      },
+      std::runtime_error);
+}
+
+TEST(StaticRuntime, Uninitialized) {
+  const auto src = R"IR(
+    graph():
+      %0: int = prim::Uninitialized()
+      return (%0)
+  )IR";
+  auto graph = getGraphFromIR(src);
+  StaticModule smod(graph);
+  const auto ret = smod({});
+  // If a and b are both uninitialized, then a != b. So just check that the type
+  // is Any
+  EXPECT_EQ(ret.type()->kind(), c10::TypeKind::AnyType);
+}
+
+TEST(StaticRuntime, Format) {
+  const auto src = R"JIT(
+    def forward(self, arg1: int, arg2: Tensor, arg3: str):
+        a = "arg1: {}, arg2: {}, arg3: {}".format(arg1, arg2, arg3)
+        return a[::]
+  )JIT";
+  testStaticRuntime(src, {1, at::randn({3}), "str"});
+}
+
+TEST(StaticRuntime, Device) {
+  const auto src = R"JIT(
+    def forward(self, x):
+        return x.device, x.device
+  )JIT";
+  testStaticRuntime(src, {at::tensor({1})});
+}
+
+TEST(StaticRuntime, Dtype) {
+  const auto src = R"JIT(
+    def forward(self, x, y):
+        return x.dtype, y.dtype
+  )JIT";
+  testStaticRuntime(
+      src, {at::tensor({1}, at::kLong), at::tensor({1}, at::kFloat)});
+}
+
+TEST(StaticRuntime, Dim) {
+  const auto src = R"JIT(
+    def forward(self, x, y):
+        return x.dim(), y.dim()
+  )JIT";
+  testStaticRuntime(src, {at::randn({2, 2}), at::randn({1})});
+}
+
+TEST(StaticRuntime, Not) {
+  const auto src = R"JIT(
+    def forward(self, x: bool, y: bool):
+        return not x, not y
+  )JIT";
+  testStaticRuntime(src, {true, false});
+}
+
+TEST(StaticRuntime, Bool) {
+  const auto src = R"JIT(
+      def forward(self, x: Tensor, y: int, z: float):
+          return bool(x), bool(y), bool(z)
+  )JIT";
+  testStaticRuntime(src, {at::randn({1}), 0, 1.151}, {at::zeros({1}), 1, 0.0});
+}
+
+TEST(StaticRuntime, IsCuda) {
+  const auto src = R"JIT(
+      def forward(self, x: Tensor, y: Tensor):
+          return x.is_cuda, y.is_cuda
+  )JIT";
+  testStaticRuntime(src, {at::randn({1}), at::randn({1})});
+}
+
+TEST(StaticRuntime, ToList) {
+  const auto src = R"JIT(
+      graph(%x: Tensor):
+          %type: int = prim::Constant[value=1]()
+          %dim: int = aten::dim(%x)
+          %ret: float[] = prim::tolist(%x, %dim, %type)
+          return (%ret)
+  )JIT";
+  testStaticRuntime(src, {at::randn({2, 2})});
 }
