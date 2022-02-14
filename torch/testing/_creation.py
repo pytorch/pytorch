@@ -42,7 +42,7 @@ def make_tensor(
     +---------------------------+------------+----------+
 
     Args:
-        shape (Tuple[int, ...]): A sequence of integers defining the shape of the output tensor.
+        shape (Tuple[int, ...]): Single integer or a sequence of integers defining the shape of the output tensor.
         dtype (:class:`torch.dtype`): The data type of the returned tensor.
         device (Union[str, torch.device]): The device of the returned tensor.
         layout (torch.layout): The layout of the returned tensor. Default: `torch.strided``.
