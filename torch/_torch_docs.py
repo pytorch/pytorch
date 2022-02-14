@@ -7808,10 +7808,8 @@ Example::
     tensor([[  12.,  -51.,    4.],
             [   6.,  167.,  -68.],
             [  -4.,   24.,  -41.]])
-    >>> torch.mm(q.t(), q).round()
-    tensor([[1., 0., 0.],
-            [0., 1., 0.],
-            [0., 0., 1.]])
+    >>> torch.allclose(torch.mm(q.t(), q).round(), torch.eye(3), atol=1e-7)
+    True
     >>> a = torch.randn(3, 4, 5)
     >>> q, r = torch.qr(a, some=False)
     >>> torch.allclose(torch.matmul(q, r), a)
