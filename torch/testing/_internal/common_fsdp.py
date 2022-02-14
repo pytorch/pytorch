@@ -9,8 +9,8 @@ from unittest import mock
 import torch
 import torch.distributed as dist
 import torch.nn as nn
-from torch.distributed._fsdp import FullyShardedDataParallel, CPUOffload
-from torch.distributed._fsdp.fully_sharded_data_parallel import (
+from torch.distributed.fsdp import FullyShardedDataParallel, CPUOffload
+from torch.distributed.fsdp.fully_sharded_data_parallel import (
     TrainingState_,
 )
 from torch.testing._internal.common_distributed import (
@@ -332,6 +332,9 @@ class FSDPTest(MultiProcessTestCase):
 
     def _check_cpu_offload(self, fsdp_model, cpu_offload):
         self.assertEqual(cpu_offload, fsdp_model.cpu_offload)
+
+    def _check_backward_prefetch(self, fsdp_model, backward_prefetch):
+        self.assertEqual(backward_prefetch, fsdp_model.backward_prefetch)
 
     @classmethod
     def _run(cls, rank, test_name, file_name, pipe):
