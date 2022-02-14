@@ -139,6 +139,7 @@ def _infer_sharding_spec_from_shards_metadata(shards_metadata):
         if len(shard_dims) == 0:
             continue
         if len(shard_dims) != 1:
+            chunk_sharding_dim = None
             break
         if not chunk_sharding_dim:
             chunk_sharding_dim = shard_dims[0]
@@ -148,7 +149,9 @@ def _infer_sharding_spec_from_shards_metadata(shards_metadata):
 
     if chunk_sharding_dim is not None:
         # Ensure we infer the correct placement order from offsets
-        placements = [x for _, x in sorted(zip(chunk_offset_list, placements))]
+        placements = [
+            x for _, x in sorted(zip(chunk_offset_list, placements), key=lambda e: e[0])
+        ]
         chunk_spec = ChunkShardingSpec(
             dim=chunk_sharding_dim,
             placements=placements,

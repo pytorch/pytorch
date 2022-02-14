@@ -185,7 +185,7 @@ concurrency:
           docker system prune -af
 {%- endmacro -%}
 
-{%- macro checkout(submodules="recursive", deep_clone=True, directory="", repository="pytorch/pytorch") -%}
+{%- macro checkout(submodules="recursive", deep_clone=True, directory="", repository="pytorch/pytorch", branch="") -%}
       - name: Checkout !{{ 'PyTorch' if repository == "pytorch/pytorch" else repository }}
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
@@ -196,6 +196,9 @@ concurrency:
           submodules: !{{ submodules }}
       {%- if repository != "pytorch/pytorch" %}
           repository: !{{ repository }}
+      {%- endif %}
+      {%- if branch %}
+          ref: !{{ branch }}
       {%- endif %}
       {%- if directory %}
           path: !{{ directory }}

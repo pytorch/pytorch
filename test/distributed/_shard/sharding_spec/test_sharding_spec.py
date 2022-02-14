@@ -294,7 +294,32 @@ class TestShardingSpec(TestCase):
                 placement="cuda:1",
             )
         ]
+        spec = _infer_sharding_spec_from_shards_metadata(shards_metadata)
+        self.assertTrue(isinstance(spec, EnumerableShardingSpec))
+        self.assertEqual(spec.shards, shards_metadata)
 
+        shards_metadata = [
+            ShardMetadata(
+                shard_offsets=[0, 0],
+                shard_sizes=[5, 5],
+                placement="rank:0/cuda:0",
+            ),
+            ShardMetadata(
+                shard_offsets=[5, 0],
+                shard_sizes=[5, 5],
+                placement="rank:1/cuda:1",
+            ),
+            ShardMetadata(
+                shard_offsets=[0, 5],
+                shard_sizes=[5, 5],
+                placement="rank:2/cuda:2",
+            ),
+            ShardMetadata(
+                shard_offsets=[5, 5],
+                shard_sizes=[5, 5],
+                placement="rank:3/cuda:3",
+            ),
+        ]
         spec = _infer_sharding_spec_from_shards_metadata(shards_metadata)
         self.assertTrue(isinstance(spec, EnumerableShardingSpec))
         self.assertEqual(spec.shards, shards_metadata)

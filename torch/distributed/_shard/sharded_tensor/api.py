@@ -377,11 +377,11 @@ class ShardedTensor(object):
         init_rrefs=False,
     ) -> "ShardedTensor":
         """
-        Initialize a ShardedTensor with only one local tensor with global sharded tensor
+        Initialize a ShardedTensor given only one local tensor, global sharded tensor
         size and sharding spec on each rank.
 
         Args:
-            local_tensor (Tensor): Partial result stored in each rank.
+            local_tensor (Tensor): Single tensor of local shard stored in each rank.
             sharding_spec (:class:`torch.distributed._shard.sharding_spec.ShardingSpec`):
                 The specification describing how to shard the Tensor.
             global_size (Sequence[int]): Size of the sharded tensor.
