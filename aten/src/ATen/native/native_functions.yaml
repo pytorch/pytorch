@@ -6867,7 +6867,8 @@
   dispatch:
     CPU: index_select_cpu_
     QuantizedCPU: index_select_quantized_cpu_
-    CUDA, QuantizedCUDA: index_select_cuda
+    CUDA: index_select_cuda
+    QuantizedCUDA: index_select_quantized_cuda
     SparseCPU: index_select_sparse
     SparseCUDA: index_select_sparse
 
