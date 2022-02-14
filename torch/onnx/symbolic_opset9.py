@@ -1537,7 +1537,8 @@ def type_as(g, self, other):
 @parse_args("v", "v", "i", "f")
 def cosine_similarity(g, x1, x2, dim, eps):
     # preserve legacy behavior for Caffe2
-    if sym_help._operator_export_type == torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK:
+    if sym_help._operator_export_type == torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK and \
+       torch.onnx._CAFFE2_ATEN_FALLBACK:
         return g.at("cosine_similarity", x1, x2, dim_i=dim, eps_f=eps)
     cross = sym_help._reducesum_helper(g, mul(g, x1, x2),
                                        axes_i=[dim], keepdims_i=0)
