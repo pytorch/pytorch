@@ -606,7 +606,10 @@ constexpr DispatchKeySet default_excluded_set = DispatchKeySet({
 constexpr DispatchKeySet autograd_dispatch_keyset_with_ADInplaceOrView =
     autograd_dispatch_keyset | DispatchKeySet(DispatchKey::ADInplaceOrView);
 
-constexpr DispatchKeySet python_ks = DispatchKeySet(DispatchKey::Python);
+constexpr DispatchKeySet python_ks = DispatchKeySet({
+    DispatchKey::Python,
+    DispatchKey::PythonTLSSnapshot,
+});
 
 constexpr DispatchKeySet sparse_ks = DispatchKeySet(DispatchKey::Sparse);
 

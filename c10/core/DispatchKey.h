@@ -354,6 +354,11 @@ enum class DispatchKey : uint16_t {
   Functionalize,
   FuncTorchDynamicLayerFrontMode, // See Note [Out-of-tree vmap+grad prototype]
 
+  // Used by Python key logic to know the set of tls on entry to the dispatcher
+  // This kernel assumes it is at the very top of the dispatcher. If you add
+  // a key above, make sure to update the fallback implementation for this.
+  PythonTLSSnapshot,
+
   // TESTING: This is intended to be a generic testing tensor type id.
   // Don't use it for anything real; its only acceptable use is within a single
   // process test.  Use it by creating a TensorImpl with this DispatchKey, and
