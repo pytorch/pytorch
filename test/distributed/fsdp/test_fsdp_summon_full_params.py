@@ -69,6 +69,7 @@ class TestSummonFullParamsNoShard(FSDPTest):
     def world_size(self):
         return 1  # does not shard
 
+    @skip_if_lt_x_gpu(2)
     @parametrize("writeback", [True, False])
     @parametrize(
         "cpu_offload",
