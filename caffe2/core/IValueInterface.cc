@@ -1,6 +1,10 @@
 #define TORCH_ASSERT_NO_OPERATORS
 #include <caffe2/core/IValueInterface.h>
 #undef TORCH_ASSERT_NO_OPERATORS
+
+#if defined(EXPOSE_C2_OPS) ||                               \
+  !defined(CAFFE2_IS_XPLAT_BUILD) && !defined(C10_MOBILE)
+
 #include <ATen/core/ivalue.h>
 #include <c10/util/irange.h>
 
@@ -177,3 +181,5 @@ INSTANTIATE_TO_VEC(bool);
 INSTANTIATE_TO_VEC(std::string);
 
 }}  // namespace caffe2::detail
+
+#endif

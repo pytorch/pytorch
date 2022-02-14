@@ -315,15 +315,15 @@ class CudaKernelGenerator : private kir::IrVisitor {
   }
 
   void visit(const kir::IterDomain* node) final {
-    TORCH_INTERNAL_ASSERT(!"Unreachable");
+    TORCH_INTERNAL_ASSERT(false && "Unreachable");
   }
 
   void visit(const kir::TensorDomain* node) final {
-    TORCH_INTERNAL_ASSERT(!"Unreachable");
+    TORCH_INTERNAL_ASSERT(false && "Unreachable");
   }
 
   void visit(const kir::TensorView* tv) final {
-    TORCH_INTERNAL_ASSERT(!"Unreachable");
+    TORCH_INTERNAL_ASSERT(false && "Unreachable");
   }
 
   void visit(const kir::UnaryOp* node) final {

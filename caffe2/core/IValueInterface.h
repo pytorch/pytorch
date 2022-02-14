@@ -3,6 +3,8 @@
 #include <c10/util/ArrayRef.h>
 #include <caffe2/core/tensor.h>
 
+#if defined(EXPOSE_C2_OPS) ||                               \
+  !defined(CAFFE2_IS_XPLAT_BUILD) && !defined(C10_MOBILE)
 
 namespace c10 {
 struct IValue;
@@ -60,3 +62,5 @@ private:
 };
 
 }}  // namespace caffe2::detail
+
+#endif
