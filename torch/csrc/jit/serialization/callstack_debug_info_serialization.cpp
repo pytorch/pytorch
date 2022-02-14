@@ -82,7 +82,7 @@ c10::IValue InlinedCallStackSerializer::serialize_module_instance_info(
   return serialized_module_instance_info_[key_val];
 }
 
-std::vector<char> CallStackDebugInfoPickler::pickle(
+c10::IValue CallStackDebugInfoPickler::getMobileDebugInfo(
     const std::unordered_map<int64_t, DebugInfoTuple>& callstack_ptrs,
     const SourceRangeTagMap& source_range_tags) {
   std::vector<c10::IValue> ivalues;
@@ -113,8 +113,16 @@ std::vector<char> CallStackDebugInfoPickler::pickle(
     elements.emplace_back(css_.serialize(inlined_cs_ptr, source_range_tags));
     ivalues.emplace_back(c10::ivalue::Tuple::create(elements));
   }
-  std::vector<at::Tensor> table;
   c10::IValue ivalue = c10::ivalue::Tuple::create(std::move(ivalues));
+
+  return ivalue;
+}
+
+std::vector<char> CallStackDebugInfoPickler::pickle(
+    const std::unordered_map<int64_t, DebugInfoTuple>& callstack_ptrs,
+    const SourceRangeTagMap& source_range_tags) {
+  c10::IValue ivalue = getMobileDebugInfo(callstack_ptrs, source_range_tags);
+  std::vector<at::Tensor> table;
   auto result = jit::pickle(ivalue, &table);
   TORCH_CHECK(table.size() == 0, "Expected 0 tensors to be written");
   return result;

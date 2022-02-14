@@ -3,6 +3,7 @@
 #include <caffe2/serialize/inline_container.h>
 #include <torch/csrc/jit/api/module.h>
 #include <torch/csrc/jit/ir/ir.h>
+#include <torch/csrc/jit/serialization/export_utils.h>
 #include <torch/csrc/jit/serialization/pickler.h>
 #include <torch/csrc/jit/serialization/python_print.h>
 #include <torch/csrc/jit/serialization/storage_context.h>

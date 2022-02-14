@@ -52,6 +52,10 @@ class TORCH_API CallStackDebugInfoPickler {
       const std::unordered_map<int64_t, DebugInfoTuple>& callstack_ptrs,
       const SourceRangeTagMap& source_range_tags);
 
+  c10::IValue getMobileDebugInfo(
+      const std::unordered_map<int64_t, DebugInfoTuple>& callstack_ptrs,
+      const SourceRangeTagMap& source_range_tags);
+
  private:
   InlinedCallStackSerializer css_;
 };

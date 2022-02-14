@@ -18,7 +18,7 @@
 #include <torch/csrc/jit/mobile/method.h>
 #include <torch/csrc/jit/mobile/module.h>
 #include <torch/csrc/jit/passes/inliner.h>
-#include <torch/csrc/jit/serialization/callstack_debug_info_serialization.h>
+// #include <torch/csrc/jit/serialization/callstack_debug_info_serialization.h>
 #include <torch/csrc/jit/serialization/import_export_constants.h>
 #include <torch/csrc/jit/serialization/import_export_functions.h>
 #include <torch/csrc/jit/serialization/import_export_helpers.h>
@@ -308,21 +308,6 @@ void checkSchema(const c10::FunctionSchema& schema) {
       "A variable number of return values is not supported in mobile modules.");
 }
 
-bool isLoweredModule(const Module& m) {
-  c10::QualifiedName type_name;
-  if (m.type()->name()) {
-    type_name = m.type()->name().value();
-  }
-  bool isLoweredModule = false;
-  for (const auto& atom : type_name.atoms()) {
-    if (atom == "LoweredModule") {
-      isLoweredModule = true;
-      break;
-    }
-  }
-  return isLoweredModule;
-}
-
 // Check if the global static map of backend debug info
 // contains debug info for this module and any of its children.
 // If so combine all the maps together and return one.
@@ -376,6 +361,14 @@ mobile::Module jitModuleToMobile(
       backend_debug_info_map.begin(), backend_debug_info_map.end());
   m.setDebugTable(MobileDebugTable(
       debug_handle_cs_ptr_map.begin(), debug_handle_cs_ptr_map.end()));
+  auto backend_source_range_records = getBackendSourceRanges(module);
+  SourceRangeTagMap m_source_range_tags;
+  int64_t m_current_source_range_tag_ = 0;
+  updateSourceRangeTags(
+      backend_source_range_records,
+      m_source_range_tags,
+      &m_current_source_range_tag_);
+  m.setSourceRangeTags(m_source_range_tags);
   return m;
 }
 

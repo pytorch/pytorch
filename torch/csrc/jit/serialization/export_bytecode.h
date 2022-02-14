@@ -11,6 +11,7 @@
 #include <torch/csrc/jit/mobile/function.h>
 #include <torch/csrc/jit/mobile/module.h>
 #include <torch/csrc/jit/runtime/interpreter.h>
+#include <torch/csrc/jit/serialization/export_utils.h>
 #include <torch/csrc/jit/serialization/type_name_uniquer.h>
 
 namespace torch {

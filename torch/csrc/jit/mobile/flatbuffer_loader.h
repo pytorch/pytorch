@@ -111,6 +111,12 @@ class FlatbufferLoader {
       ivalue_parsers_;
   TypeResolver type_resolver_ = nullptr;
   mobile::serialization::Module* module_ = nullptr;
+  static InlinedCallStackPtr parseInlinedCallStack(
+      const mobile::serialization::InlinedCallStack* inlinedCallStack);
+  ska::flat_hash_map<int64_t, DebugInfoTuple> parseMobileDebugInfo(
+      const flatbuffers::Vector<flatbuffers::Offset<
+          torch::jit::mobile::serialization::MobileDebugInfo>>* pVector,
+      ska::flat_hash_map<int64_t, SourceRange> srMap);
 };
 
 } // namespace jit
