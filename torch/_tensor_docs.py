@@ -3300,7 +3300,9 @@ Keyword arguments:
         ``src`` are guaranteed not to overlap with each other. If true, this
         operation will avoid throwing a nondeterministic error due to
         overlapping indices while :func:``torch.use_deterministic_algorithms``
-        is enabled.  Default: ``False``.
+        is enabled. It is the user's responsibility to ensure that this
+        argument is set correctly, because this function does not check if the
+        indices are actually overlapping. Default: ``False``.
 
 Example::
 
@@ -3371,7 +3373,9 @@ Keyword arguments:
         ``src`` are guaranteed not to overlap with each other. If true, this
         operation will avoid throwing a nondeterministic error due to
         overlapping indices while :func:``torch.use_deterministic_algorithms``
-        is enabled.  Default: ``False``.
+        is enabled. It is the user's responsibility to ensure that this
+        argument is set correctly, because this function does not check if the
+        indices are actually overlapping. Default: ``False``.
 
 Example::
 

@@ -3996,11 +3996,13 @@ Args:
 
 Keyword arguments:
     sparse_grad (bool, optional): If ``True``, gradient w.r.t. :attr:`input` will be a sparse tensor.
-    unique_indice (bool, optional): whether the indices to be updated in
-        ``src`` are guaranteed not to overlap with each other. If true, this
+    unique_indices (bool, optional): whether the indices given in ``index``
+        are guaranteed not to overlap with each other. If true, this
         operation will avoid throwing a nondeterministic error due to
         overlapping indices while :func:``torch.use_deterministic_algorithms``
-        is enabled.  Default: ``False``.
+        is enabled. It is the user's responsibility to ensure that this
+        argument is set correctly, because this function does not check if the
+        indices are actually overlapping. Default: ``False``.
     out (Tensor, optional): the destination tensor
 
 Example::
