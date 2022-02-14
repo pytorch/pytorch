@@ -43,6 +43,7 @@ from distutils.version import LooseVersion
 
 has_scipy_fft = False
 if TEST_SCIPY:
+    from scipy import stats
     import scipy.special
     try:
         import scipy.fft
@@ -3903,7 +3904,6 @@ def sample_inputs_layer_norm(opinfo, device, dtype, requires_grad, **kwargs):
     # With `None` weight and bias (tests failing for this, see the link above)
     # yield SampleInput(make_arg((1, 2)), args=((2,), None, make_arg((2,))))
 
-
 def sample_inputs_local_response_norm(opinfo, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
 
@@ -3924,7 +3924,6 @@ def sample_inputs_local_response_norm(opinfo, device, dtype, requires_grad, **kw
 
     for input_shape, size, kwargs in cases:
         yield SampleInput(make_arg(input_shape), args=(size,), kwargs=kwargs)
-
 
 def sample_inputs_hardswish(self, device, dtype, requires_grad, **kwargs):
     N = 5
@@ -4080,10 +4079,16 @@ def sample_inputs_upsample(mode, self, device, dtype, requires_grad, **kwargs):
 
     return sample_inputs
 
+
 def sample_inputs_gelu(self, device, dtype, requires_grad, **kwargs):
     N = 5
-    tensors = [SampleInput(make_tensor((N * 2, N * 2), device=device, dtype=dtype,
-               requires_grad=requires_grad, low=-3, high=3)) for _ in range(1, N)]
+    tensors = []
+    for _ in range(1, N):
+        for approximate in ['none', 'tanh']:
+            tensors.append(SampleInput(
+                make_tensor((N * 2, N * 2), device=device, dtype=dtype,
+                            requires_grad=requires_grad, low=-3, high=3),
+                kwargs=dict(approximate=approximate)))
     return tensors
 
 def sample_inputs_max_min_reduction_with_dim(op_info, device, dtype, requires_grad, **kwargs):
@@ -7965,6 +7970,20 @@ def reference_softplus(input, beta=1, threshold=20):
     output[non_linear] = np.log(1 + np.exp(beta * input[non_linear])) / beta
     return output
 
+def reference_gelu(X, *, approximate='none'):
+    def _gelu_ref(X):
+        return X * stats.norm.cdf(X)
+
+    def _tanh_gelu_ref(X):
+        M_SQRT_2_PI = math.sqrt(2 / math.pi)
+        Z = M_SQRT_2_PI * (X + 0.044715 * np.power(X, 3.0))
+        return 0.5 * X * (1.0 + np.tanh(Z))
+
+    if approximate == 'tanh':
+        return _tanh_gelu_ref(X)
+    else:
+        return _gelu_ref(X)
+
 
 def reference_one_hot(a: np.ndarray, num_classes: int = -1) -> np.ndarray:
     if num_classes == -1:
@@ -11772,6 +11791,7 @@ op_db: List[OpInfo] = [
            ),
     OpInfo('nn.functional.gelu',
            aten_name="gelu",
+           ref=reference_gelu if TEST_SCIPY else _NOTHING,
            supports_autograd=True,
            assert_autodiffed=True,
            sample_inputs_func=sample_inputs_gelu,
