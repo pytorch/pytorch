@@ -15,9 +15,9 @@ keys for a single example of each use case. These use cases are listed below:
 - CPU/AutogradCPU: represents in-tree backends which we usually have dedicated inference &
     autograd kernel in pytorch core library.
     E.g. CPU, CUDA
-- FPGA/AutogradOther: represents in-tree backends which we usually have backend specific
+- QuantizedCPU/AutogradOther: represents in-tree backends which we usually have backend specific
     inference kernels, but they share the same autograd kernel specified in AutogradOther.
-    E.g. FPGA, SparseCsrCPU
+    E.g. QuantizedCPU, QuantizedCUDA
 - XLA/AutogradXLA: represents out-of-tree backends which we don't have either inference or autograd
     kernel defined in pytorch core library. Backend owner is responsible for registering both
     inference & autograd kernels in their extensions(e.g. torch-xla) for the operators they support.
@@ -53,7 +53,7 @@ class PythonDispatcher:
     name = "foo"
     runtime_keys = [
         "CPU", "AutogradCPU",
-        "FPGA", "AutogradOther",
+        "QuantizedCPU", "AutogradOther",
         "XLA", "AutogradXLA",
         "Lazy", "AutogradLazy",
     ]
