@@ -32,17 +32,25 @@
 {%- endmacro %}
 
 
-{%- macro upload_binaries(config, is_windows=False) -%}
+{%- macro upload_binaries(config, is_windows=False, has_test=True, use_s3=True) -%}
 !{{ config["build_name"] }}-upload:  # Uploading
     runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
+{%- if has_test %}
     needs: !{{ config["build_name"] }}-test
+{%- else %}
+    needs: !{{ config["build_name"] }}-build
+{%- endif %}
     !{{ binary_env(config, is_windows) }}
     steps:
       !{{ common.setup_ec2_linux() }}
       - name: Clone pytorch/pytorch
         uses: actions/checkout@v2
+{%- if use_s3 %}
       - uses: seemethere/download-artifact-s3@0504774707cbc8603d7dca922e8026eb8bf3b47b
+{%- else %}
+      - uses: actions/download-artifact@v2
+{%- endif %}
         name: Download Build Artifacts
         with:
           name: !{{ config["build_name"] }}

@@ -897,7 +897,7 @@ class ConvTranspose2d(_ConvTransposeNd):
         output_padding: _size_2_t = 0,
         groups: int = 1,
         bias: bool = True,
-        dilation: int = 1,
+        dilation: _size_2_t = 1,
         padding_mode: str = 'zeros',
         device=None,
         dtype=None
