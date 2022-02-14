@@ -65,7 +65,7 @@ query ($owner: String!, $name: String!, $number: Int!) {
           path
         }
       }
-      latestReviews(last: 100) {
+      reviews(last: 100) {
         nodes {
           author {
             login
@@ -204,10 +204,17 @@ class GitHubPR:
         return rc
 
     def _get_reviewers(self) -> List[Tuple[str, str]]:
-        reviews_count = int(self.info["latestReviews"]["totalCount"])
-        if len(self.info["latestReviews"]["nodes"]) != reviews_count:
+        reviews_count = int(self.info["reviews"]["totalCount"])
+        nodes = self.info["reviews"]["nodes"]
+        if len(nodes) != reviews_count:
             raise RuntimeError("Can't fetch all PR reviews")
-        return [(x["author"]["login"], x["state"]) for x in self.info["latestReviews"]["nodes"]]
+        reviews = {}
+        for node in nodes:
+            author = node["author"]["login"]
+            state = node["state"]
+            if state != "COMMENTED":
+                reviews[author] = state
+        return list(reviews.items())
 
     def get_approved_by(self) -> List[str]:
         return [login for (login, state) in self._get_reviewers() if state == "APPROVED"]
@@ -303,7 +310,9 @@ class GitHubPR:
         if not self.is_ghstack_pr():
             msg = self.get_title() + "\n\n" + self.get_body()
             msg += f"\nPull Request resolved: {self.get_pr_url()}\n"
-            repo._run_git("merge", "--squash", f"{repo.remote}/{self.head_ref()}")
+            pr_branch_name = f"__pull-request-{self.pr_num}__init__"
+            repo.fetch(f"pull/{self.pr_num}/head", pr_branch_name)
+            repo._run_git("merge", "--squash", pr_branch_name)
             repo._run_git("commit", f"--author=\"{self.get_author()}\"", "-m", msg)
         else:
             self.merge_ghstack_into(repo)
@@ -422,8 +431,8 @@ def main() -> None:
         gh_post_comment(org, project, args.pr_num, f"Can't merge closed PR #{args.pr_num}", dry_run=args.dry_run)
         return
 
-    if pr.is_cross_repo():
-        gh_post_comment(org, project, args.pr_num, "Cross-repo merges are not supported at the moment", dry_run=args.dry_run)
+    if pr.is_cross_repo() and pr.is_ghstack_pr():
+        gh_post_comment(org, project, args.pr_num, "Cross-repo ghstack merges are not supported", dry_run=args.dry_run)
         return
 
     try:
