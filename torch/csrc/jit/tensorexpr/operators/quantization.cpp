@@ -141,9 +141,9 @@ bool isNLC(const BufHandle& buf) {
   }
   auto dims1 = to<LongImm>(IRSimplifier::simplify(dims[1]))->value();
   auto strides1 = to<LongImm>(IRSimplifier::simplify(strides[1]))->value();
-  auto strides3 = to<LongImm>(IRSimplifier::simplify(strides[3]))->value();
+  auto strides2 = to<LongImm>(IRSimplifier::simplify(strides[2]))->value();
 
-  return ((strides3 == dims1) && (strides1 == 1));
+  return ((strides2 == dims1) && (strides1 == 1));
 }
 
 ExprHandle quant(
