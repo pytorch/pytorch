@@ -3967,7 +3967,7 @@ class TestAsArray(TestCase):
 
     @dtypes(*get_all_dtypes())
     def test_copy_list(self, device, dtype):
-        original = make_tensor((5, 5), torch.device("cpu"), dtype)
+        original = make_tensor((5, 5), dtype=dtype, device=torch.device("cpu"))
 
         def check(**kwargs):
             self._check(original, torch.Tensor.tolist, is_alias=False, **kwargs)
