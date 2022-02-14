@@ -532,8 +532,8 @@ AutogradXLA: fn_math [math kernel]
             lambda m: m.def_("foo(Tensor x) -> Tensor"),
             # m.impl("foo", torch::kCompositeImplicitAutograd, [](const Tensor & x) { return x })
             lambda m: m.impl_t_t("foo", "CompositeImplicitAutograd", debug="fn_math"),
-            # m.impl("foo", torch::kFPGA, [](const Tensor & x) { return x })
-            lambda m: m.impl_t_t("foo", "FPGA", debug="fn_fpga"),
+            # m.impl("foo", torch::kQuantizedCPU, [](const Tensor & x) { return x })
+            lambda m: m.impl_t_t("foo", "QuantizedCPU", debug="fn_quantizedcpu"),
         ])
         state, table = result.state, result.table
         self.assertExpectedInline(state, '''\
@@ -541,12 +541,12 @@ name: test::foo
 schema: test::foo(Tensor x) -> (Tensor)
 debug: registered at /dev/null:0
 alias analysis kind: FROM_SCHEMA
-FPGA: fn_fpga :: (Tensor _0) -> (Tensor _0) [ boxed unboxed ]
+QuantizedCPU: fn_quantizedcpu :: (Tensor _0) -> (Tensor _0) [ boxed unboxed ]
 CompositeImplicitAutograd[alias]: fn_math :: (Tensor _0) -> (Tensor _0) [ boxed unboxed ]
 ''')
 
         # computed dispatch table is too big, so we only check on a few entries we're interested in.
-        extracted_table = extract_dispatch_table_with_keys(table, dispatch_keys_to_check + ('FPGA',))
+        extracted_table = extract_dispatch_table_with_keys(table, dispatch_keys_to_check + ('QuantizedCPU',))
 
         self.assertExpectedInline(extracted_table, '''\
 Undefined: fn_math [math kernel]
@@ -557,7 +557,7 @@ AutogradOther: ambiguous_autogradother [ambiguous autogradother]
 AutogradCPU: fn_math [math kernel]
 AutogradCUDA: fn_math [math kernel]
 AutogradXLA: fn_math [math kernel]
-FPGA: fn_fpga [kernel]
+QuantizedCPU: fn_quantizedcpu [kernel]
 ''')
 
     def test_computed_table_with_cpu_defaultbackend(self):
@@ -616,7 +616,7 @@ CompositeExplicitAutograd[alias]: fn_defaultbackend :: (Tensor _0) -> (Tensor _0
 ''')
 
         # computed dispatch table is too big, so we only check on a few entries we're interested in.
-        extracted_table = extract_dispatch_table_with_keys(table, dispatch_keys_to_check + ('FPGA',))
+        extracted_table = extract_dispatch_table_with_keys(table, dispatch_keys_to_check + ('QuantizedCPU',))
 
         self.assertExpectedInline(extracted_table, '''\
 Undefined: fn_defaultbackend [default backend kernel]
@@ -627,7 +627,7 @@ AutogradOther: fn_autograd [autograd kernel]
 AutogradCPU: fn_autograd [autograd kernel]
 AutogradCUDA: fn_autograd [autograd kernel]
 AutogradXLA: fn_autograd [autograd kernel]
-FPGA: fn_defaultbackend [default backend kernel]
+QuantizedCPU: fn_defaultbackend [default backend kernel]
 ''')
 
     def test_computed_table_with_cpu_autograd_math_defaultbackend(self):
@@ -808,7 +808,7 @@ key             kernel
 CPU             fn_CPU [kernel]
 XLA             fn_XLA [kernel]
 Lazy            fn_Lazy [kernel]
-FPGA            fn_CompositeImplicitAutograd [math kernel]
+QuantizedCPU    fn_CompositeImplicitAutograd [math kernel]
 AutogradOther   fn_CompositeImplicitAutograd [math kernel]
 AutogradCPU     fallthrough [backend fallback]
 AutogradXLA     fallthrough [backend fallback]
@@ -829,7 +829,7 @@ key             kernel
 CPU             fn_CPU [kernel]
 XLA             fn_XLA [kernel]
 Lazy            fn_Lazy [kernel]
-FPGA            fn_CompositeImplicitAutograd [math kernel]
+QuantizedCPU    fn_CompositeImplicitAutograd [math kernel]
 AutogradOther   fn_CompositeImplicitAutograd [math kernel]
 AutogradCPU     fn_AutogradCPU [kernel]
 AutogradXLA     fallthrough [backend fallback]
@@ -864,7 +864,7 @@ key             kernel
 CPU             fn_CPU [kernel]
 XLA             fn_XLA [kernel]
 Lazy            fn_Lazy [kernel]
-FPGA            fn_CompositeExplicitAutograd [default backend kernel]
+QuantizedCPU    fn_CompositeExplicitAutograd [default backend kernel]
 AutogradOther   fallthrough [backend fallback]
 AutogradCPU     fn_AutogradCPU [kernel]
 AutogradXLA     fallthrough [backend fallback]
@@ -889,7 +889,7 @@ CompositeExplicitAutograd[alias] fn_CompositeExplicitAutograd
 
     def test_autogradother(self):
         dispatcher = PythonDispatcher()
-        dispatcher.register(["CPU", "FPGA", "CompositeImplicitAutograd"])
+        dispatcher.register(["CPU", "QuantizedCPU", "CompositeImplicitAutograd"])
         self.assertExpectedInline(
             dispatcher.dispatchTable(),
             '''\
@@ -900,7 +900,7 @@ key             kernel
 CPU             fn_CPU [kernel]
 XLA             fn_CompositeImplicitAutograd [math kernel]
 Lazy            fn_CompositeImplicitAutograd [math kernel]
-FPGA            fn_FPGA [kernel]
+QuantizedCPU    fn_QuantizedCPU [kernel]
 AutogradOther   ambiguous_autogradother [ambiguous autogradother]
 AutogradCPU     fallthrough [backend fallback]
 AutogradXLA     fn_CompositeImplicitAutograd [math kernel]
@@ -915,8 +915,8 @@ AutogradLazy    fn_CompositeImplicitAutograd [math kernel]
 Registered Kernels
 key             kernel
 ---------------------------
-FPGA            fn_FPGA
 CPU             fn_CPU
+QuantizedCPU    fn_QuantizedCPU
 CompositeImplicitAutograd[alias] fn_CompositeImplicitAutograd
 '''
         )
