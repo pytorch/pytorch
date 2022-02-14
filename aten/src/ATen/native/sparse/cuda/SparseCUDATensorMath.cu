@@ -1,8 +1,9 @@
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/native/sparse/cuda/SparseCUDATensorMath.cuh>
 
-#include <ATen/ATen.h>
+#include <ATen/core/Tensor.h>
+#include <ATen/Dispatch.h>
 #include <ATen/cuda/CUDAContext.h>
-#include <ATen/NativeFunctions.h>
 #include <ATen/SparseTensorUtils.h>
 #include <ATen/native/sparse/SparseTensorMath.h>
 #include <ATen/native/sparse/cuda/SparseBlasLegacy.h>
@@ -14,6 +15,25 @@
 #include <ATen/WrapDimUtilsMulti.h>
 #include <ATen/ExpandUtils.h>
 #include <c10/cuda/CUDACachingAllocator.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/_sparse_coo_tensor_with_dims_and_tensors.h>
+#include <ATen/ops/_sparse_sum_native.h>
+#include <ATen/ops/add_native.h>
+#include <ATen/ops/addmm_native.h>
+#include <ATen/ops/bmm_native.h>
+#include <ATen/ops/cat.h>
+#include <ATen/ops/copy_sparse_to_sparse.h>
+#include <ATen/ops/empty.h>
+#include <ATen/ops/empty_like.h>
+#include <ATen/ops/hspmm_native.h>
+#include <ATen/ops/mul.h>
+#include <ATen/ops/result_type.h>
+#include <ATen/ops/scalar_tensor.h>
+#endif
 
 #include <thrust/device_ptr.h>
 #include <thrust/sequence.h>
