@@ -3640,7 +3640,7 @@ class TestBufferProtocol(TestCase):
         if offset is None:
             offset = first * get_dtype_size(dtype)
 
-        numpy_original = make_tensor(shape, torch.device("cpu"), dtype).numpy()
+        numpy_original = make_tensor(shape, dtype=dtype, device="cpu").numpy()
         original = memoryview(numpy_original)
         # First call PyTorch's version in case of errors.
         # If this call exits successfully, the NumPy version must also do so.
