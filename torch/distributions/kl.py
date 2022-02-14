@@ -166,7 +166,7 @@ def kl_divergence(p, q):
         fun = _dispatch_kl(type(p), type(q))
         _KL_MEMOIZE[type(p), type(q)] = fun
     if fun is NotImplemented:
-        raise NotImplementedError("No KL(p || q) is implemented for p type {} and q type {}".format(p.__class__, q.__class__))
+        raise NotImplementedError("No KL(p || q) is implemented for p type {} and q type {}".format(p.__class__.__name__, q.__class__.__name__))
     return fun(p, q)
 
 
