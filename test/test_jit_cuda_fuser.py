@@ -2181,18 +2181,21 @@ class TestCudaFuser(JitTestCase):
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
                      "Requires fusion optimization pass to be effective")
     def test_gelu(self):
+        old_guard = torch._C._jit_set_nvfuser_guard_mode(True)
         dtype = torch.float
         device = "cuda"
         x = torch.randn([1024, 1024], dtype=dtype, device=device, requires_grad=True)
         grads = torch.randn([1024, 1024], dtype=dtype, device=device, requires_grad=False)
 
-        def t(x: torch.Tensor):
-            o = torch.nn.functional.gelu(x)
+        def t(x: torch.Tensor, mode : str):
+            o = torch.nn.functional.gelu(x, approximate=mode)
             o = o * 2.0
             return o
 
         t_jit = torch.jit.script(t)
-        self._run_training_helper(t_jit, t, grads, x)
+        self._run_training_helper(t_jit, t, grads, x, 'none')
+        self._run_training_helper(t_jit, t, grads, x, 'tanh')
+        torch._C._jit_set_nvfuser_guard_mode(old_guard)
 
     @unittest.skipIf(not RUN_CUDA, "requires CUDA")
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
