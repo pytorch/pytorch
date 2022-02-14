@@ -2,6 +2,7 @@ import torch
 import torch.nn.functional as F
 
 import numpy as np
+from typing import List, Optional
 
 from .expanded_weights_utils import \
     set_grad_sample_if_exists, unpack_expanded_weight_or_tensor
@@ -43,17 +44,15 @@ def conv_backward(func, ctx, grad_output):
         else:
             return param
 
-    input, weight = ctx.args
-    bias = ctx.kwargs['bias']
-    stride, padding, dilation, groups = ctx.kwargs['stride'], ctx.kwargs['padding'], ctx.kwargs['dilation'], ctx.kwargs['groups']
-    stride, padding, dilation = expand(stride), expand(padding), expand(dilation)
+    input, weight, bias = ctx.input, ctx.weight, ctx.bias
+    stride, padding, dilation, groups = expand(ctx.stride), expand(ctx.padding), expand(ctx.dilation), ctx.groups
 
     kernel_size = []
     for i in range(2, conv_picker(func, 3, 4, 5)):
         kernel_size.append(weight.shape[i])
 
     batch_size = input.shape[0]
-    results = []
+    results: List[Optional[torch.Tensor]] = []
     results.append(None)
 
     if input.requires_grad:
@@ -68,7 +67,7 @@ def conv_backward(func, ctx, grad_output):
     else:
         results.append(None)
     # weight and bias don't compute batched gradients; no other arguments are differentiable
-    results = results + [None] * (len(ctx.args) + len(ctx.kwargs) - 1)
+    results = results + [None] * 6
 
     # set grad_sample field for weight and bias with per sample gradients
     set_grad_sample_if_exists(weight, weight_grad_sample)

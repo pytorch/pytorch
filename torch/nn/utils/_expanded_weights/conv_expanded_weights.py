@@ -15,10 +15,11 @@ class Conv1dPerSampleGrad(torch.autograd.Function):
             raise RuntimeError("Expanded Weights does not support convolution padding as a string. "
                                "Please file an issue to prioritize support")
         expanded_args, expanded_kwargs = conv_args_and_kwargs(kwarg_names, expanded_args_and_kwargs)
-        output = forward_helper(F.conv1d, expanded_args, expanded_kwargs, 1)
+        output = forward_helper(F.conv1d, expanded_args, expanded_kwargs)
         ctx.input, ctx.weight = expanded_args
         ctx.bias = expanded_kwargs['bias']
-        ctx.stride, ctx.padding, ctx.dilation, ctx.groups = expanded_kwargs['stride'], expanded_kwargs['padding'], expanded_kwargs['dilation'], expanded_kwargs['groups']
+        ctx.stride, ctx.padding = expanded_kwargs['stride'], expanded_kwargs['padding']
+        ctx.dilation, ctx.groups = expanded_kwargs['dilation'], expanded_kwargs['groups']
         return output
 
     @staticmethod
@@ -34,10 +35,11 @@ class Conv2dPerSampleGrad(torch.autograd.Function):
             raise RuntimeError("Expanded Weights does not support convolution padding as a string. "
                                "Please file an issue to prioritize support")
         expanded_args, expanded_kwargs = conv_args_and_kwargs(kwarg_names, expanded_args_and_kwargs)
-        output = forward_helper(F.conv2d, expanded_args, expanded_kwargs, 1)
+        output = forward_helper(F.conv2d, expanded_args, expanded_kwargs)
         ctx.input, ctx.weight = expanded_args
         ctx.bias = expanded_kwargs['bias']
-        ctx.stride, ctx.padding, ctx.dilation, ctx.groups = expanded_kwargs['stride'], expanded_kwargs['padding'], expanded_kwargs['dilation'], expanded_kwargs['groups']
+        ctx.stride, ctx.padding = expanded_kwargs['stride'], expanded_kwargs['padding']
+        ctx.dilation, ctx.groups = expanded_kwargs['dilation'], expanded_kwargs['groups']
         return output
 
     @staticmethod
@@ -53,10 +55,11 @@ class Conv3dPerSampleGrad(torch.autograd.Function):
             raise RuntimeError("Expanded Weights does not support convolution padding as a string. "
                                "Please file an issue to prioritize support")
         expanded_args, expanded_kwargs = conv_args_and_kwargs(kwarg_names, expanded_args_and_kwargs)
-        output = forward_helper(F.conv3d, expanded_args, expanded_kwargs, 1)
+        output = forward_helper(F.conv3d, expanded_args, expanded_kwargs)
         ctx.input, ctx.weight = expanded_args
         ctx.bias = expanded_kwargs['bias']
-        ctx.stride, ctx.padding, ctx.dilation, ctx.groups = expanded_kwargs['stride'], expanded_kwargs['padding'], expanded_kwargs['dilation'], expanded_kwargs['groups']
+        ctx.stride, ctx.padding = expanded_kwargs['stride'], expanded_kwargs['padding']
+        ctx.dilation, ctx.groups = expanded_kwargs['dilation'], expanded_kwargs['groups']
         return output
 
     @staticmethod

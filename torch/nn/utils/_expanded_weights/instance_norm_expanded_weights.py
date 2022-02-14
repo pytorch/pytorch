@@ -5,6 +5,7 @@ import torch.nn.functional as F
 from .expanded_weights_impl import implements_per_sample_grads
 from .expanded_weights_utils import \
     forward_helper, set_grad_sample_if_exists, standard_kwargs, unpack_expanded_weight_or_tensor
+from typing import List, Optional
 
 @implements_per_sample_grads(F.instance_norm)
 class InstanceNormPerSampleGrad(torch.autograd.Function):
@@ -12,7 +13,7 @@ class InstanceNormPerSampleGrad(torch.autograd.Function):
     def forward(ctx, kwarg_names, *expanded_args_and_kwargs):
         instance_norm = partial(torch._instance_norm_all_outputs, cudnn_enabled=True)
         expanded_args, expanded_kwargs = standard_kwargs(kwarg_names, expanded_args_and_kwargs)
-        output, mean, rstd, reserve, idx = forward_helper(instance_norm, expanded_args, expanded_kwargs, 1)
+        output, mean, rstd, reserve, idx = forward_helper(instance_norm, expanded_args, expanded_kwargs)
         ctx.input = expanded_args[0]
         ctx.running_mean, ctx.running_var = expanded_kwargs['running_mean'], expanded_kwargs['running_var']
         ctx.weight, ctx.bias, ctx.eps = expanded_kwargs['weight'], expanded_kwargs['bias'], expanded_kwargs['eps']
@@ -26,7 +27,7 @@ class InstanceNormPerSampleGrad(torch.autograd.Function):
         weight, bias, eps = ctx.weight, ctx.bias, ctx.eps
         mean, rstd, reserve, idx = ctx.mean, ctx.rstd, ctx.reserve, ctx.idx
 
-        results = []
+        results: List[Optional[torch.Tensor]] = []
         results.append(None)
         if input.requires_grad:
             b = input.shape[0]
@@ -45,8 +46,8 @@ class InstanceNormPerSampleGrad(torch.autograd.Function):
         else:
             results.append(None)
 
-        # weight and bias don't compute batched gradients; no other arguments are differentiable
-        results = results + [None] * (len(ctx.args) + len(ctx.kwargs) - 1)
+        # weight and bias don't compute batched gradients; no other arguments are differentiable (2 are not saved from the forward)
+        results = results + [None] * 7
 
         # set grad_sample field for weight and bias with per sample gradients
         set_grad_sample_if_exists(weight,
