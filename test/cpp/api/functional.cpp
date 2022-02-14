@@ -973,10 +973,17 @@ TEST_F(FunctionalTest, GLU) {
 }
 
 TEST_F(FunctionalTest, GELU) {
-  GELU model;
   const auto x = torch::linspace(-3.0, 3.0, 100);
   const auto y_exp = x * 0.5 * (1.0 + torch::erf(x / std::sqrt(2.0)));
-  const auto y = F::gelu(x);
+  const auto y = F::gelu(x, F::GELUFuncOptions().approximate("none"));
+  ASSERT_TRUE(torch::allclose(y, y_exp, 1.4e-06, 1e-05));
+}
+
+TEST_F(FunctionalTest, TanhGELU) {
+  const auto x = torch::linspace(-3.0, 3.0, 100);
+  const auto inner = std::sqrt(2 / M_PI) * (x + 0.044715 * x.pow(3.0));
+  const auto y_exp = 0.5 * x * (1.0 + inner.tanh());
+  const auto y = F::gelu(x, F::GELUFuncOptions().approximate("tanh"));
   ASSERT_TRUE(torch::allclose(y, y_exp, 1.4e-06, 1e-05));
 }
 
