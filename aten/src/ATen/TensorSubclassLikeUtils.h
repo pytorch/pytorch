@@ -28,8 +28,7 @@ constexpr auto kFunctorchWrappedTensors = DispatchKeySet({
 
 constexpr auto kTensorSubclassLike = kFunctorchWrappedTensors | DispatchKeySet({
     DispatchKey::Batched,
-    DispatchKey::SparseCPU,
-    DispatchKey::SparseCUDA,
+    DispatchKey::Sparse,
     DispatchKey::SparseCsrCPU,
     DispatchKey::SparseCsrCUDA,
     DispatchKey::Meta,
