@@ -94,6 +94,14 @@ class TestONNXShapeInference(unittest.TestCase):
         shape = g.op("Reshape", constant, constant_2)
         self.run_test(g, shape.node(), expect_tensor("Float", shape=(8, 16, 5)))
 
+    def test_reshape_symbolic(self):
+        g = self.create_empty_graph()
+        input = g.addInput()
+        input.setType(input.type().with_sizes([None, None, 2, 8]))
+        constant = self.insert_tensor_constant(g, torch.tensor([0, 0, -1]))
+        output = g.op("Reshape", input, constant)
+        self.run_test(g, output.node(), expect_tensor(None, shape=(None, None, 16)))
+
     def test_slice(self):
         g = self.create_empty_graph()
         input = g.addInput()
