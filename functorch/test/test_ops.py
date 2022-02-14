@@ -913,6 +913,8 @@ class TestOperators(TestCase):
         xfail('as_strided'),
         xfail('nn.functional.fractional_max_pool2d'),
         skip('solve'),
+        xfail('linalg.cond'),
+        xfail('linalg.svdvals'),
     }))
     def test_vjpvmap(self, device, dtype, op):
         # NB: there is no vjpvmap_has_batch_rule test because that is almost
