@@ -235,7 +235,6 @@ def _check_repo(repo_owner, repo_name, repo_branch, trust_repo, calling_fn="load
                 if _repo != "checkpoints":
                     file.write(_repo + "\n")
 
-    # load list
     with open(filepath, 'r') as file:
         trusted_repos = tuple(line.strip() for line in file if len(line.strip()))
     with open(filepath_legacy, 'r') as file:
