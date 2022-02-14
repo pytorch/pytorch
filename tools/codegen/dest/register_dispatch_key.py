@@ -26,6 +26,7 @@ from tools.codegen.selective_build.selector import SelectiveBuilder
 def gen_registration_headers(
         backend_index: BackendIndex,
         per_operator_headers: bool,
+        rocm: bool,
 ) -> List[str]:
     if per_operator_headers:
         headers = ["#include <ATen/ops/as_strided_native.h>"]
@@ -35,7 +36,10 @@ def gen_registration_headers(
     if backend_index.dispatch_key in (DispatchKey.CPU, DispatchKey.Meta):
         headers.append("#include <ATen/EmptyTensor.h>")
     elif backend_index.dispatch_key == DispatchKey.CUDA:
-        headers.append("#include <ATen/cuda/EmptyTensor.h>")
+        if rocm:
+            headers.append("#include <ATen/hip/EmptyTensor.h>")
+        else:
+            headers.append("#include <ATen/cuda/EmptyTensor.h>")
     elif per_operator_headers:
         headers += [
             "#include <ATen/ops/empty.h>",
