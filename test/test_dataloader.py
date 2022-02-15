@@ -62,6 +62,13 @@ except ImportError:
     HAS_DILL = False
 skipIfNoDill = unittest.skipIf(not HAS_DILL, "no dill")
 
+
+try:
+    import numpy as np
+except ImportError:
+    np = None
+
+
 # load_tests from torch.testing._internal.common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
 load_tests = load_tests
@@ -1365,6 +1372,29 @@ except RuntimeError as e:
                 ctx = mp.get_context(ctx)
                 self.assertEqual(
                     reference, list(self._get_data_loader(ds_cls(counting_ds_n), multiprocessing_context=ctx, **dl_common_args)))
+
+    def test_multiprocessing_iterdatapipe(self):
+        # Testing to make sure that function from global scope (e.g. imported from library) can be serialized
+        # and used with multi-process DataLoader
+        def row_processer(row):
+            if np:
+                return np.add(row, 1)
+            else:
+                return [i + 1 for i in row]
+
+        reference = [torch.as_tensor([[2, 3, 4, 5], [2, 3, 4, 5]]), torch.as_tensor([[2, 3, 4, 5], [2, 3, 4, 5]])]
+        datapipe = IterableWrapper([[1, 2, 3, 4], [1, 2, 3, 4]])
+        datapipe = datapipe.map(row_processer)
+
+        dl_common_args = dict(num_workers=2, batch_size=2, shuffle=True, pin_memory=(not TEST_CUDA))
+        for ctx in supported_multiprocessing_contexts:
+            self.assertEqual(reference,
+                             list(self._get_data_loader(datapipe, multiprocessing_context=ctx, **dl_common_args)))
+            if ctx is not None:
+                # test ctx object
+                ctx = mp.get_context(ctx)
+                self.assertEqual(reference,
+                                 list(self._get_data_loader(datapipe, multiprocessing_context=ctx, **dl_common_args)))
 
     def test_worker_seed(self):
         num_workers = 6

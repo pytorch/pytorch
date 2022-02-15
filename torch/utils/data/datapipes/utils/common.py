@@ -1,7 +1,9 @@
 import os
 import fnmatch
+import pickle
 import warnings
 
+from enum import Enum
 from io import IOBase
 from typing import Iterable, List, Tuple, Union, Optional
 
@@ -18,6 +20,11 @@ except ImportError:
     DILL_AVAILABLE = False
 
 
+class SerializationType(Enum):
+    PICKLE = "pickle"
+    DILL = "dill"
+
+
 def check_lambda_fn(fn):
     # Partial object has no attribute '__name__', but can be pickled
     if hasattr(fn, "__name__") and fn.__name__ == "<lambda>" and not DILL_AVAILABLE:
@@ -25,6 +32,31 @@ def check_lambda_fn(fn):
             "Lambda function is not supported for pickle, please use "
             "regular python function or functools.partial instead."
         )
+
+
+def serialize_fn(fn, is_dill_available):
+    """
+    Try to serialize ``fn`` using `pickle`, falls back to `dill` if `pickle` fails and DILL_AVAILABLE.
+    Returns a tuple of serialized function and SerializationType indicating the serialization method.
+    """
+    try:
+        return pickle.dumps(fn), SerializationType("pickle")
+    except (pickle.PickleError, AttributeError):
+        if is_dill_available:
+            return dill.dumps(fn, recurse=True), SerializationType("dill")
+    return pickle.dumps(fn), SerializationType("pickle")
+
+
+def deserialize_fn(serialized_fn, method, is_dill_available):
+    if method == SerializationType("pickle"):
+        return pickle.loads(serialized_fn)
+    elif method == SerializationType("dill"):
+        if is_dill_available:
+            return dill.loads(serialized_fn)
+        else:
+            raise RuntimeError("`dill` is not avaliable but it is needed to deserialize the function.")
+    else:
+        raise TypeError(f"Expect valid SerializationType in deserialize_fn, got {method} instead.")
 
 
 def match_masks(name : str, masks : Union[str, List[str]]) -> bool:

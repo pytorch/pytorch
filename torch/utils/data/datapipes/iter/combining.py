@@ -4,7 +4,7 @@ from collections import deque
 from typing import Any, Callable, Iterator, List, Optional, Set, Sized, Tuple, TypeVar, Deque
 
 from torch.utils.data import IterDataPipe, functional_datapipe
-from torch.utils.data.datapipes.utils.common import DILL_AVAILABLE, check_lambda_fn
+from torch.utils.data.datapipes.utils.common import DILL_AVAILABLE, check_lambda_fn, serialize_fn, deserialize_fn
 
 if DILL_AVAILABLE:
     import dill
@@ -285,15 +285,13 @@ class _DemultiplexerIterDataPipe(IterDataPipe):
         if IterDataPipe.getstate_hook is not None:
             return IterDataPipe.getstate_hook(self)
 
-        if DILL_AVAILABLE:
-            dill_function = dill.dumps(self.classifier_fn)
-        else:
-            dill_function = self.classifier_fn
+        serialized_fn, method = serialize_fn(self.classifier_fn, DILL_AVAILABLE)
         state = (
             self.main_datapipe,
             self.num_instances,
             self.buffer_size,
-            dill_function,
+            serialized_fn,
+            method,
             self.drop_none,
         )
         return state
@@ -303,13 +301,11 @@ class _DemultiplexerIterDataPipe(IterDataPipe):
             self.main_datapipe,
             self.num_instances,
             self.buffer_size,
-            dill_function,
+            serialized_fn,
+            method,
             self.drop_none,
         ) = state
-        if DILL_AVAILABLE:
-            self.classifier_fn = dill.loads(dill_function)  # type: ignore[assignment]
-        else:
-            self.classifier_fn = dill_function  # type: ignore[assignment]
+        self.classifier_fn = deserialize_fn(serialized_fn, method, DILL_AVAILABLE)
         self._datapipe_iterator = None
         self.current_buffer_usage = 0
         self.child_buffers = [deque() for _ in range(self.num_instances)]

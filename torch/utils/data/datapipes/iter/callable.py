@@ -1,7 +1,7 @@
 from typing import Callable, Iterator, Sized, TypeVar
 
 from torch.utils.data import IterDataPipe, _utils, functional_datapipe
-from torch.utils.data.datapipes.utils.common import DILL_AVAILABLE, check_lambda_fn
+from torch.utils.data.datapipes.utils.common import DILL_AVAILABLE, check_lambda_fn, serialize_fn, deserialize_fn
 
 if DILL_AVAILABLE:
     import dill
@@ -109,13 +109,11 @@ class MapperIterDataPipe(IterDataPipe[T_co]):
         if IterDataPipe.getstate_hook is not None:
             return IterDataPipe.getstate_hook(self)
 
-        if DILL_AVAILABLE:
-            dill_function = dill.dumps(self.fn)
-        else:
-            dill_function = self.fn
+        serialized_fn, method = serialize_fn(self.fn, DILL_AVAILABLE)
         state = (
             self.datapipe,
-            dill_function,
+            serialized_fn,
+            method,
             self.input_col,
             self.output_col,
         )
@@ -124,14 +122,12 @@ class MapperIterDataPipe(IterDataPipe[T_co]):
     def __setstate__(self, state):
         (
             self.datapipe,
-            dill_function,
+            serialized_fn,
+            method,
             self.input_col,
             self.output_col,
         ) = state
-        if DILL_AVAILABLE:
-            self.fn = dill.loads(dill_function)  # type: ignore[assignment]
-        else:
-            self.fn = dill_function  # type: ignore[assignment]
+        self.fn = deserialize_fn(serialized_fn, method, DILL_AVAILABLE)  # type: ignore[assignment]
 
 
 @functional_datapipe("collate")
