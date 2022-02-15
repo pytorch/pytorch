@@ -3136,8 +3136,7 @@ void SegmentedFusion::annotateFP16IntermediateTensors() {
   }
 }
 
-std::string toString(
-    const SegmentCandidateFinderOptions& segment_options) {
+std::string toString(const SegmentCandidateFinderOptions& segment_options) {
   std::stringstream ss;
   ss << "segmentation phases {\n";
   if (segment_options.run_combine_reductions) {
