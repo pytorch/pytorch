@@ -2570,6 +2570,7 @@ static Tensor& linalg_vector_norm_impl(const Tensor& self, const Scalar& scalar_
   TORCH_CHECK(!result.defined() || out_dtype == result.scalar_type(),
     "linalg.vector_norm expected out tensor dtype ", out_dtype,
     " but got: ", result.scalar_type());
+  std::cout << "---- ERROR PASSED ----\n";
   // omit in_dtype in the following call, to avoid make_reduction explicitly casting input to out_dtype
   auto iter = isComplexType(self.scalar_type()) ?
       make_reduction("vector_norm", result, self_, dim, keepdim, in_dtype, out_dtype) :
@@ -2582,6 +2583,7 @@ static Tensor& linalg_vector_norm_impl(const Tensor& self, const Scalar& scalar_
 Tensor linalg_vector_norm(const Tensor& self, const Scalar& ord, optional<IntArrayRef> opt_dim, bool keepdim, optional<ScalarType> opt_dtype) {
   ScalarType out_dtype = opt_dtype.value_or(toValueType(self.scalar_type()));
   Tensor result = create_reduction_result(self, opt_dim.value_or(IntArrayRef{}), keepdim, out_dtype);
+  std::cout << "CALL FROM VECTOR NORM\n";
   return at::native::linalg_vector_norm_impl(self, ord, opt_dim, keepdim, opt_dtype, result);
 }
 

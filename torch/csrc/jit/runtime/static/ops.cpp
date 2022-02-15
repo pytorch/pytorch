@@ -40,6 +40,8 @@
 #include <mutex>
 #include <unordered_map>
 
+#include <iostream>
+
 C10_DEFINE_bool(
     static_runtime_enable_fast_math,
     true,
@@ -2285,6 +2287,7 @@ REGISTER_OPERATOR_FUNCTOR(aten::linalg_norm, aten_linalg_norm, [](Node* n) -> SR
       }
       auto& output = p_node->Output(0).toTensor();
       fastResizeToZero(output);
+      std::cout << "CALLING FROM JIT 1\n";
       at::native::linalg_norm_out(
           input,
           p_node->Input(1).toOptional<at::Scalar>(),
@@ -2307,6 +2310,7 @@ REGISTER_OPERATOR_FUNCTOR(aten::linalg_norm, aten_linalg_norm, [](Node* n) -> SR
         return;
       }
       auto& output = p_node->Output(0).toTensor();
+      std::cout << "CALLING FROM JIT 2\n";
       fastResizeToZero(output);
       at::native::linalg_norm_out(
           input, p_node->Input(1).toStringRef(), dim, keepdim, dtype, output);
