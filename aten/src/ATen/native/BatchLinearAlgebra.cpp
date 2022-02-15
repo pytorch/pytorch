@@ -794,8 +794,7 @@ void _linalg_check_errors(
 
 bool _requires_fw_or_bw_grad(const Tensor& input) {
   return ((at::GradMode::is_enabled() && input.requires_grad())
-          || input._fw_grad(/*level */ 0).defined()
-          || isTensorSubclassLike(input));
+          || input._fw_grad(/*level */ 0).defined());
 }
 
 // Below of the definitions of the functions operating on a batch that are going to be dispatched
@@ -3069,7 +3068,11 @@ Tensor& linalg_svdvals_out(const Tensor& A, Tensor & S) {
 }
 
 Tensor linalg_svdvals(const Tensor& A) {
-  return std::get<1>(at::_linalg_svd(A, /*full_matrices=*/false, /*comptue_uv=*/_requires_fw_or_bw_grad(A)));
+  // NB: Why do we need isTensorSubclassLike check for linalg_svdvals but not linalg_eigvals?
+  //     svdvals is decomposed at the vmap level in functorch so A can be a BatchedTensor wrapping
+  //     a TensorWrapper requiring fw or bw grad.
+  return std::get<1>(at::_linalg_svd(A, /*full_matrices=*/false,
+                     /*comptue_uv=*/_requires_fw_or_bw_grad(A) || isTensorSubclassLike(A)));
 }
 
 std::tuple<Tensor&, Tensor&, Tensor&> svd_out(const Tensor& self, bool some, bool compute_uv, Tensor& U, Tensor& S, Tensor& V) {
