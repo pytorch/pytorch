@@ -1436,9 +1436,7 @@ has_torch_function_variadic = _add_docstr(
     _has_torch_function_variadic,
     r"""Special case of `has_torch_function` that skips tuple creation.
 
-    This uses the METH_FASTCALL protocol introduced in Python 3.7; for 3.6
-    and before it has roughly equivilent performance compared to
-    `has_torch_function`.
+    This uses the METH_FASTCALL protocol introduced in Python 3.7
 
     Instead of:
       `has_torch_function((a, b))`
