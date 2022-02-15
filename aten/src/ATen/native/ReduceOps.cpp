@@ -841,13 +841,17 @@ void pre_check_gradient(const Tensor& self, c10::optional<int64_t> spacing_size,
     "torch.gradient expected spacing to be unspecified, a scalar or it's spacing and dim arguments to have the same length, but got a spacing argument of length ", spacing_size.value(), " and a dim argument of length ", dim.value().size(), "." );
   }
   TORCH_CHECK(edge_order == 1 || edge_order == 2, "torch.gradient only supports edge_order=1 and edge_order=2.");
-  for (const auto i : c10::irange(self.dim())) {
-    TORCH_CHECK(self.size(i) >= edge_order + 1, "torch.gradient expected each dimension size to be at least edge_order+1");
-  }
   if (dim.has_value()) {
     // The following function get called to check whether dim argument satisfies prerequisites.
     // The output of the function is not used for the computation of gradient.
     dim_list_to_bitset(dim.value(), self.dim());
+    for (const auto i : c10::irange(dim.value().size())) {
+      TORCH_CHECK(self.size(dim.value()[i]) >= edge_order + 1, "torch.gradient expected each dimension size to be at least edge_order+1");
+    }
+  } else {
+    for (const auto i : c10::irange(self.dim())) {
+      TORCH_CHECK(self.size(i) >= edge_order + 1, "torch.gradient expected each dimension size to be at least edge_order+1");
+    }
   }
 }
 

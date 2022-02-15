@@ -150,11 +150,6 @@ void _process_forward_mode_AD(const variable_list &inputs,
     } else {
       // At this point, outputs[i] cannot be one of the input (raw_outputs[i] might be but was changed by the backward code)
       TORCH_INTERNAL_ASSERT(inputs_mapping.count(out.unsafeGetTensorImpl()) == 0);
-      if (is_input && !is_modified) {
-        // If the forward return an input as-is, since backward code performed a view without the
-        // forward no-grad guard, we are done.
-        continue;
-      }
 
       if (out.is_view() && impl::get_view_autograd_meta(out)->has_fw_view()) {
         // If the output is a view
@@ -169,8 +164,8 @@ void _process_forward_mode_AD(const variable_list &inputs,
           // If the matching input has a forward grad, the user should have returned a view of that Tensor
           if (matching_input_grad.defined()) {
             TORCH_CHECK(out_grad.is_view() && impl::get_view_autograd_meta(out_grad)->has_fw_view(),
-                        "A custom Function's forward is returning a view but the jvp is not returning a view.");
-
+                        "A custom Function's forward is returning a view (or an input as-is) but the jvp is not "
+                        "returning a view.");
             const auto& out_grad_base = impl::get_view_autograd_meta(out_grad)->get_forward_view().base_;
             if (matching_input_grad.is_view() && impl::get_view_autograd_meta(matching_input_grad)->has_fw_view()) {
               // If the matching input's grad is a view, ensure that the out_grad is a view of the same base
@@ -200,6 +195,26 @@ void _process_forward_mode_AD(const variable_list &inputs,
   }
 }
 
+at::Tensor _view_as_self_with_no_grad(at::Tensor self) {
+  // This is called below in _process_backward_mode_ad in two places:
+  //
+  // (1) An input has been returned, but it wasn't modified. Return it as a view
+  // so that we can attach a new grad_fn to the Variable.
+  // Run in no_grad mode to mimic the behavior of the forward.
+  //
+  // (2) Though it is not necessary for the purposes of attaching grad_fn, we also call
+  // this function when an output is non-differentiable (and does not require grad).
+  // to help custom forward AD UX more consistent. We'd like to uniformly say
+  // that returning an input as-is is treated as if `self.view_as(self)` were
+  // returned for that output.
+  //
+  // Alternatively, we could have not disabled forward grad while performing this
+  // view, but it would mean that the user defined jvp may be silently ignored.
+  at::AutoFwGradMode fw_grad_mode(false);
+  AutoGradMode grad_mode(false);
+  return self.view_as(self);
+}
+
 optional_variable_list _process_backward_mode_ad(
   const std::unordered_map<at::TensorImpl*, size_t> &inputs_mapping,
   const std::unordered_set<at::TensorImpl*> &non_differentiable,
@@ -215,6 +230,9 @@ optional_variable_list _process_backward_mode_ad(
                          bool is_differentiable) {
     if (!is_differentiable) {
       if (!var.requires_grad()) {
+        if (is_input) {
+          var = _view_as_self_with_no_grad(var);
+        }
         return;
       }
       // Return detached aliases of inputs, instead of changing their requires_grad
@@ -262,13 +280,7 @@ optional_variable_list _process_backward_mode_ad(
         impl::rebase_history(var, {cdata, output_nr});
       }
     } else if (is_input) {
-      // An input has been returned, but it wasn't modified. Return it as a view
-      // so that we can attach a new grad_fn to the Variable.
-      // Run in no_grad mode to mimic the behavior of the forward.
-      {
-        AutoGradMode grad_mode(false);
-        var = var.view_as(var);
-      }
+      var = _view_as_self_with_no_grad(var);
       impl::set_gradient_edge(var, {cdata, output_nr});
     } else if (cdata) {
       impl::set_gradient_edge(var, {cdata, output_nr});

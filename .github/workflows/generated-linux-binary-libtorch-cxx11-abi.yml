@@ -1,15 +1,10 @@
 # @generated DO NOT EDIT MANUALLY
+
 # Template is at:    .github/templates/linux_binary_build_workflow.yml.j2
 # Generation script: .github/scripts/generate_ci_workflows.py
 name: linux-binary-libtorch-cxx11-abi
 
 on:
-  pull_request:
-    # NOTE: This workflow should only trigger when changes are made to binary builds
-    # Should catch most of the binary build / test scripts
-    paths:
-      - '.github/workflows/generated-linux-binary-*.yml'
-      - '.circleci/scripts/binary_*.sh'
   push:
     # NOTE: Meta Employees can trigger new nightlies using: https://fburl.com/trigger_pytorch_nightly_build
     branches:
@@ -387,11 +382,11 @@ jobs:
           name: libtorch-cpu-shared-with-deps-cxx11-abi
           path: "${{ runner.temp }}/artifacts/"
       - name: Set DRY_RUN (only for tagged pushes)
-        if: ${{ github.event_name == 'push' && (github.event.ref == 'refs/heads/nightly' || startsWith(github.event.ref, 'refs/tags/'))}}
+        if: ${{ github.event_name == 'push' && (github.event.ref == 'refs/heads/nightly' || (startsWith(github.event.ref, 'refs/tags/') && !startsWith(github.event.ref, 'refs/tags/ciflow/'))) }}
         run: |
           echo "DRY_RUN=disabled" >> "$GITHUB_ENV"
       - name: Set UPLOAD_CHANNEL (only for tagged pushes)
-        if: ${{ github.event_name == 'push' && startsWith(github.event.ref, 'refs/tags/')}}
+        if: ${{ github.event_name == 'push' && startsWith(github.event.ref, 'refs/tags/') && !startsWith(github.event.ref, 'refs/tags/ciflow/') }}
         run: |
           # reference ends with an RC suffix
           if [[ ${GITHUB_REF_NAME} = *-rc[0-9]* ]]; then
@@ -779,11 +774,11 @@ jobs:
           name: libtorch-cpu-shared-without-deps-cxx11-abi
           path: "${{ runner.temp }}/artifacts/"
       - name: Set DRY_RUN (only for tagged pushes)
-        if: ${{ github.event_name == 'push' && (github.event.ref == 'refs/heads/nightly' || startsWith(github.event.ref, 'refs/tags/'))}}
+        if: ${{ github.event_name == 'push' && (github.event.ref == 'refs/heads/nightly' || (startsWith(github.event.ref, 'refs/tags/') && !startsWith(github.event.ref, 'refs/tags/ciflow/'))) }}
         run: |
           echo "DRY_RUN=disabled" >> "$GITHUB_ENV"
       - name: Set UPLOAD_CHANNEL (only for tagged pushes)
-        if: ${{ github.event_name == 'push' && startsWith(github.event.ref, 'refs/tags/')}}
+        if: ${{ github.event_name == 'push' && startsWith(github.event.ref, 'refs/tags/') && !startsWith(github.event.ref, 'refs/tags/ciflow/') }}
         run: |
           # reference ends with an RC suffix
           if [[ ${GITHUB_REF_NAME} = *-rc[0-9]* ]]; then
@@ -1171,11 +1166,11 @@ jobs:
           name: libtorch-cpu-static-with-deps-cxx11-abi
           path: "${{ runner.temp }}/artifacts/"
       - name: Set DRY_RUN (only for tagged pushes)
-        if: ${{ github.event_name == 'push' && (github.event.ref == 'refs/heads/nightly' || startsWith(github.event.ref, 'refs/tags/'))}}
+        if: ${{ github.event_name == 'push' && (github.event.ref == 'refs/heads/nightly' || (startsWith(github.event.ref, 'refs/tags/') && !startsWith(github.event.ref, 'refs/tags/ciflow/'))) }}
         run: |
           echo "DRY_RUN=disabled" >> "$GITHUB_ENV"
       - name: Set UPLOAD_CHANNEL (only for tagged pushes)
-        if: ${{ github.event_name == 'push' && startsWith(github.event.ref, 'refs/tags/')}}
+        if: ${{ github.event_name == 'push' && startsWith(github.event.ref, 'refs/tags/') && !startsWith(github.event.ref, 'refs/tags/ciflow/') }}
         run: |
           # reference ends with an RC suffix
           if [[ ${GITHUB_REF_NAME} = *-rc[0-9]* ]]; then
@@ -1563,11 +1558,11 @@ jobs:
           name: libtorch-cpu-static-without-deps-cxx11-abi
           path: "${{ runner.temp }}/artifacts/"
       - name: Set DRY_RUN (only for tagged pushes)
-        if: ${{ github.event_name == 'push' && (github.event.ref == 'refs/heads/nightly' || startsWith(github.event.ref, 'refs/tags/'))}}
+        if: ${{ github.event_name == 'push' && (github.event.ref == 'refs/heads/nightly' || (startsWith(github.event.ref, 'refs/tags/') && !startsWith(github.event.ref, 'refs/tags/ciflow/'))) }}
         run: |
           echo "DRY_RUN=disabled" >> "$GITHUB_ENV"
       - name: Set UPLOAD_CHANNEL (only for tagged pushes)
-        if: ${{ github.event_name == 'push' && startsWith(github.event.ref, 'refs/tags/')}}
+        if: ${{ github.event_name == 'push' && startsWith(github.event.ref, 'refs/tags/') && !startsWith(github.event.ref, 'refs/tags/ciflow/') }}
         run: |
           # reference ends with an RC suffix
           if [[ ${GITHUB_REF_NAME} = *-rc[0-9]* ]]; then
@@ -1963,11 +1958,11 @@ jobs:
           name: libtorch-cuda10_2-shared-with-deps-cxx11-abi
           path: "${{ runner.temp }}/artifacts/"
       - name: Set DRY_RUN (only for tagged pushes)
-        if: ${{ github.event_name == 'push' && (github.event.ref == 'refs/heads/nightly' || startsWith(github.event.ref, 'refs/tags/'))}}
+        if: ${{ github.event_name == 'push' && (github.event.ref == 'refs/heads/nightly' || (startsWith(github.event.ref, 'refs/tags/') && !startsWith(github.event.ref, 'refs/tags/ciflow/'))) }}
         run: |
           echo "DRY_RUN=disabled" >> "$GITHUB_ENV"
       - name: Set UPLOAD_CHANNEL (only for tagged pushes)
-        if: ${{ github.event_name == 'push' && startsWith(github.event.ref, 'refs/tags/')}}
+        if: ${{ github.event_name == 'push' && startsWith(github.event.ref, 'refs/tags/') && !startsWith(github.event.ref, 'refs/tags/ciflow/') }}
         run: |
           # reference ends with an RC suffix
           if [[ ${GITHUB_REF_NAME} = *-rc[0-9]* ]]; then
@@ -2363,11 +2358,11 @@ jobs:
           name: libtorch-cuda10_2-shared-without-deps-cxx11-abi
           path: "${{ runner.temp }}/artifacts/"
       - name: Set DRY_RUN (only for tagged pushes)
-        if: ${{ github.event_name == 'push' && (github.event.ref == 'refs/heads/nightly' || startsWith(github.event.ref, 'refs/tags/'))}}
+        if: ${{ github.event_name == 'push' && (github.event.ref == 'refs/heads/nightly' || (startsWith(github.event.ref, 'refs/tags/') && !startsWith(github.event.ref, 'refs/tags/ciflow/'))) }}
         run: |
           echo "DRY_RUN=disabled" >> "$GITHUB_ENV"
       - name: Set UPLOAD_CHANNEL (only for tagged pushes)
-        if: ${{ github.event_name == 'push' && startsWith(github.event.ref, 'refs/tags/')}}
+        if: ${{ github.event_name == 'push' && startsWith(github.event.ref, 'refs/tags/') && !startsWith(github.event.ref, 'refs/tags/ciflow/') }}
         run: |
           # reference ends with an RC suffix
           if [[ ${GITHUB_REF_NAME} = *-rc[0-9]* ]]; then
@@ -2763,11 +2758,11 @@ jobs:
           name: libtorch-cuda10_2-static-with-deps-cxx11-abi
           path: "${{ runner.temp }}/artifacts/"
       - name: Set DRY_RUN (only for tagged pushes)
-        if: ${{ github.event_name == 'push' && (github.event.ref == 'refs/heads/nightly' || startsWith(github.event.ref, 'refs/tags/'))}}
+        if: ${{ github.event_name == 'push' && (github.event.ref == 'refs/heads/nightly' || (startsWith(github.event.ref, 'refs/tags/') && !startsWith(github.event.ref, 'refs/tags/ciflow/'))) }}
         run: |
           echo "DRY_RUN=disabled" >> "$GITHUB_ENV"
       - name: Set UPLOAD_CHANNEL (only for tagged pushes)
-        if: ${{ github.event_name == 'push' && startsWith(github.event.ref, 'refs/tags/')}}
+        if: ${{ github.event_name == 'push' && startsWith(github.event.ref, 'refs/tags/') && !startsWith(github.event.ref, 'refs/tags/ciflow/') }}
         run: |
           # reference ends with an RC suffix
           if [[ ${GITHUB_REF_NAME} = *-rc[0-9]* ]]; then
@@ -3163,11 +3158,11 @@ jobs:
           name: libtorch-cuda10_2-static-without-deps-cxx11-abi
           path: "${{ runner.temp }}/artifacts/"
       - name: Set DRY_RUN (only for tagged pushes)
-        if: ${{ github.event_name == 'push' && (github.event.ref == 'refs/heads/nightly' || startsWith(github.event.ref, 'refs/tags/'))}}
+        if: ${{ github.event_name == 'push' && (github.event.ref == 'refs/heads/nightly' || (startsWith(github.event.ref, 'refs/tags/') && !startsWith(github.event.ref, 'refs/tags/ciflow/'))) }}
         run: |
           echo "DRY_RUN=disabled" >> "$GITHUB_ENV"
       - name: Set UPLOAD_CHANNEL (only for tagged pushes)
-        if: ${{ github.event_name == 'push' && startsWith(github.event.ref, 'refs/tags/')}}
+        if: ${{ github.event_name == 'push' && startsWith(github.event.ref, 'refs/tags/') && !startsWith(github.event.ref, 'refs/tags/ciflow/') }}
         run: |
           # reference ends with an RC suffix
           if [[ ${GITHUB_REF_NAME} = *-rc[0-9]* ]]; then
@@ -3566,11 +3561,11 @@ jobs:
           name: libtorch-cuda11_1-shared-with-deps-cxx11-abi
           path: "${{ runner.temp }}/artifacts/"
       - name: Set DRY_RUN (only for tagged pushes)
-        if: ${{ github.event_name == 'push' && (github.event.ref == 'refs/heads/nightly' || startsWith(github.event.ref, 'refs/tags/'))}}
+        if: ${{ github.event_name == 'push' && (github.event.ref == 'refs/heads/nightly' || (startsWith(github.event.ref, 'refs/tags/') && !startsWith(github.event.ref, 'refs/tags/ciflow/'))) }}
         run: |
           echo "DRY_RUN=disabled" >> "$GITHUB_ENV"
       - name: Set UPLOAD_CHANNEL (only for tagged pushes)
-        if: ${{ github.event_name == 'push' && startsWith(github.event.ref, 'refs/tags/')}}
+        if: ${{ github.event_name == 'push' && startsWith(github.event.ref, 'refs/tags/') && !startsWith(github.event.ref, 'refs/tags/ciflow/') }}
         run: |
           # reference ends with an RC suffix
           if [[ ${GITHUB_REF_NAME} = *-rc[0-9]* ]]; then
@@ -3969,11 +3964,11 @@ jobs:
           name: libtorch-cuda11_1-shared-without-deps-cxx11-abi
           path: "${{ runner.temp }}/artifacts/"
       - name: Set DRY_RUN (only for tagged pushes)
-        if: ${{ github.event_name == 'push' && (github.event.ref == 'refs/heads/nightly' || startsWith(github.event.ref, 'refs/tags/'))}}
+        if: ${{ github.event_name == 'push' && (github.event.ref == 'refs/heads/nightly' || (startsWith(github.event.ref, 'refs/tags/') && !startsWith(github.event.ref, 'refs/tags/ciflow/'))) }}
         run: |
           echo "DRY_RUN=disabled" >> "$GITHUB_ENV"
       - name: Set UPLOAD_CHANNEL (only for tagged pushes)
-        if: ${{ github.event_name == 'push' && startsWith(github.event.ref, 'refs/tags/')}}
+        if: ${{ github.event_name == 'push' && startsWith(github.event.ref, 'refs/tags/') && !startsWith(github.event.ref, 'refs/tags/ciflow/') }}
         run: |
           # reference ends with an RC suffix
           if [[ ${GITHUB_REF_NAME} = *-rc[0-9]* ]]; then
@@ -4372,11 +4367,11 @@ jobs:
           name: libtorch-cuda11_1-static-with-deps-cxx11-abi
           path: "${{ runner.temp }}/artifacts/"
       - name: Set DRY_RUN (only for tagged pushes)
-        if: ${{ github.event_name == 'push' && (github.event.ref == 'refs/heads/nightly' || startsWith(github.event.ref, 'refs/tags/'))}}
+        if: ${{ github.event_name == 'push' && (github.event.ref == 'refs/heads/nightly' || (startsWith(github.event.ref, 'refs/tags/') && !startsWith(github.event.ref, 'refs/tags/ciflow/'))) }}
         run: |
           echo "DRY_RUN=disabled" >> "$GITHUB_ENV"
       - name: Set UPLOAD_CHANNEL (only for tagged pushes)
-        if: ${{ github.event_name == 'push' && startsWith(github.event.ref, 'refs/tags/')}}
+        if: ${{ github.event_name == 'push' && startsWith(github.event.ref, 'refs/tags/') && !startsWith(github.event.ref, 'refs/tags/ciflow/') }}
         run: |
           # reference ends with an RC suffix
           if [[ ${GITHUB_REF_NAME} = *-rc[0-9]* ]]; then
@@ -4775,11 +4770,11 @@ jobs:
           name: libtorch-cuda11_1-static-without-deps-cxx11-abi
           path: "${{ runner.temp }}/artifacts/"
       - name: Set DRY_RUN (only for tagged pushes)
-        if: ${{ github.event_name == 'push' && (github.event.ref == 'refs/heads/nightly' || startsWith(github.event.ref, 'refs/tags/'))}}
+        if: ${{ github.event_name == 'push' && (github.event.ref == 'refs/heads/nightly' || (startsWith(github.event.ref, 'refs/tags/') && !startsWith(github.event.ref, 'refs/tags/ciflow/'))) }}
         run: |
           echo "DRY_RUN=disabled" >> "$GITHUB_ENV"
       - name: Set UPLOAD_CHANNEL (only for tagged pushes)
-        if: ${{ github.event_name == 'push' && startsWith(github.event.ref, 'refs/tags/')}}
+        if: ${{ github.event_name == 'push' && startsWith(github.event.ref, 'refs/tags/') && !startsWith(github.event.ref, 'refs/tags/ciflow/') }}
         run: |
           # reference ends with an RC suffix
           if [[ ${GITHUB_REF_NAME} = *-rc[0-9]* ]]; then
@@ -5178,11 +5173,11 @@ jobs:
           name: libtorch-cuda11_3-shared-with-deps-cxx11-abi
           path: "${{ runner.temp }}/artifacts/"
       - name: Set DRY_RUN (only for tagged pushes)
-        if: ${{ github.event_name == 'push' && (github.event.ref == 'refs/heads/nightly' || startsWith(github.event.ref, 'refs/tags/'))}}
+        if: ${{ github.event_name == 'push' && (github.event.ref == 'refs/heads/nightly' || (startsWith(github.event.ref, 'refs/tags/') && !startsWith(github.event.ref, 'refs/tags/ciflow/'))) }}
         run: |
           echo "DRY_RUN=disabled" >> "$GITHUB_ENV"
       - name: Set UPLOAD_CHANNEL (only for tagged pushes)
-        if: ${{ github.event_name == 'push' && startsWith(github.event.ref, 'refs/tags/')}}
+        if: ${{ github.event_name == 'push' && startsWith(github.event.ref, 'refs/tags/') && !startsWith(github.event.ref, 'refs/tags/ciflow/') }}
         run: |
           # reference ends with an RC suffix
           if [[ ${GITHUB_REF_NAME} = *-rc[0-9]* ]]; then
@@ -5581,11 +5576,11 @@ jobs:
           name: libtorch-cuda11_3-shared-without-deps-cxx11-abi
           path: "${{ runner.temp }}/artifacts/"
       - name: Set DRY_RUN (only for tagged pushes)
-        if: ${{ github.event_name == 'push' && (github.event.ref == 'refs/heads/nightly' || startsWith(github.event.ref, 'refs/tags/'))}}
+        if: ${{ github.event_name == 'push' && (github.event.ref == 'refs/heads/nightly' || (startsWith(github.event.ref, 'refs/tags/') && !startsWith(github.event.ref, 'refs/tags/ciflow/'))) }}
         run: |
           echo "DRY_RUN=disabled" >> "$GITHUB_ENV"
       - name: Set UPLOAD_CHANNEL (only for tagged pushes)
-        if: ${{ github.event_name == 'push' && startsWith(github.event.ref, 'refs/tags/')}}
+        if: ${{ github.event_name == 'push' && startsWith(github.event.ref, 'refs/tags/') && !startsWith(github.event.ref, 'refs/tags/ciflow/') }}
         run: |
           # reference ends with an RC suffix
           if [[ ${GITHUB_REF_NAME} = *-rc[0-9]* ]]; then
@@ -5984,11 +5979,11 @@ jobs:
           name: libtorch-cuda11_3-static-with-deps-cxx11-abi
           path: "${{ runner.temp }}/artifacts/"
       - name: Set DRY_RUN (only for tagged pushes)
-        if: ${{ github.event_name == 'push' && (github.event.ref == 'refs/heads/nightly' || startsWith(github.event.ref, 'refs/tags/'))}}
+        if: ${{ github.event_name == 'push' && (github.event.ref == 'refs/heads/nightly' || (startsWith(github.event.ref, 'refs/tags/') && !startsWith(github.event.ref, 'refs/tags/ciflow/'))) }}
         run: |
           echo "DRY_RUN=disabled" >> "$GITHUB_ENV"
       - name: Set UPLOAD_CHANNEL (only for tagged pushes)
-        if: ${{ github.event_name == 'push' && startsWith(github.event.ref, 'refs/tags/')}}
+        if: ${{ github.event_name == 'push' && startsWith(github.event.ref, 'refs/tags/') && !startsWith(github.event.ref, 'refs/tags/ciflow/') }}
         run: |
           # reference ends with an RC suffix
           if [[ ${GITHUB_REF_NAME} = *-rc[0-9]* ]]; then
@@ -6387,11 +6382,11 @@ jobs:
           name: libtorch-cuda11_3-static-without-deps-cxx11-abi
           path: "${{ runner.temp }}/artifacts/"
       - name: Set DRY_RUN (only for tagged pushes)
-        if: ${{ github.event_name == 'push' && (github.event.ref == 'refs/heads/nightly' || startsWith(github.event.ref, 'refs/tags/'))}}
+        if: ${{ github.event_name == 'push' && (github.event.ref == 'refs/heads/nightly' || (startsWith(github.event.ref, 'refs/tags/') && !startsWith(github.event.ref, 'refs/tags/ciflow/'))) }}
         run: |
           echo "DRY_RUN=disabled" >> "$GITHUB_ENV"
       - name: Set UPLOAD_CHANNEL (only for tagged pushes)
-        if: ${{ github.event_name == 'push' && startsWith(github.event.ref, 'refs/tags/')}}
+        if: ${{ github.event_name == 'push' && startsWith(github.event.ref, 'refs/tags/') && !startsWith(github.event.ref, 'refs/tags/ciflow/') }}
         run: |
           # reference ends with an RC suffix
           if [[ ${GITHUB_REF_NAME} = *-rc[0-9]* ]]; then
@@ -6790,11 +6785,11 @@ jobs:
           name: libtorch-cuda11_5-shared-with-deps-cxx11-abi
           path: "${{ runner.temp }}/artifacts/"
       - name: Set DRY_RUN (only for tagged pushes)
-        if: ${{ github.event_name == 'push' && (github.event.ref == 'refs/heads/nightly' || startsWith(github.event.ref, 'refs/tags/'))}}
+        if: ${{ github.event_name == 'push' && (github.event.ref == 'refs/heads/nightly' || (startsWith(github.event.ref, 'refs/tags/') && !startsWith(github.event.ref, 'refs/tags/ciflow/'))) }}
         run: |
           echo "DRY_RUN=disabled" >> "$GITHUB_ENV"
       - name: Set UPLOAD_CHANNEL (only for tagged pushes)
-        if: ${{ github.event_name == 'push' && startsWith(github.event.ref, 'refs/tags/')}}
+        if: ${{ github.event_name == 'push' && startsWith(github.event.ref, 'refs/tags/') && !startsWith(github.event.ref, 'refs/tags/ciflow/') }}
         run: |
           # reference ends with an RC suffix
           if [[ ${GITHUB_REF_NAME} = *-rc[0-9]* ]]; then
@@ -7193,11 +7188,11 @@ jobs:
           name: libtorch-cuda11_5-shared-without-deps-cxx11-abi
           path: "${{ runner.temp }}/artifacts/"
       - name: Set DRY_RUN (only for tagged pushes)
-        if: ${{ github.event_name == 'push' && (github.event.ref == 'refs/heads/nightly' || startsWith(github.event.ref, 'refs/tags/'))}}
+        if: ${{ github.event_name == 'push' && (github.event.ref == 'refs/heads/nightly' || (startsWith(github.event.ref, 'refs/tags/') && !startsWith(github.event.ref, 'refs/tags/ciflow/'))) }}
         run: |
           echo "DRY_RUN=disabled" >> "$GITHUB_ENV"
       - name: Set UPLOAD_CHANNEL (only for tagged pushes)
-        if: ${{ github.event_name == 'push' && startsWith(github.event.ref, 'refs/tags/')}}
+        if: ${{ github.event_name == 'push' && startsWith(github.event.ref, 'refs/tags/') && !startsWith(github.event.ref, 'refs/tags/ciflow/') }}
         run: |
           # reference ends with an RC suffix
           if [[ ${GITHUB_REF_NAME} = *-rc[0-9]* ]]; then
@@ -7596,11 +7591,11 @@ jobs:
           name: libtorch-cuda11_5-static-with-deps-cxx11-abi
           path: "${{ runner.temp }}/artifacts/"
       - name: Set DRY_RUN (only for tagged pushes)
-        if: ${{ github.event_name == 'push' && (github.event.ref == 'refs/heads/nightly' || startsWith(github.event.ref, 'refs/tags/'))}}
+        if: ${{ github.event_name == 'push' && (github.event.ref == 'refs/heads/nightly' || (startsWith(github.event.ref, 'refs/tags/') && !startsWith(github.event.ref, 'refs/tags/ciflow/'))) }}
         run: |
           echo "DRY_RUN=disabled" >> "$GITHUB_ENV"
       - name: Set UPLOAD_CHANNEL (only for tagged pushes)
-        if: ${{ github.event_name == 'push' && startsWith(github.event.ref, 'refs/tags/')}}
+        if: ${{ github.event_name == 'push' && startsWith(github.event.ref, 'refs/tags/') && !startsWith(github.event.ref, 'refs/tags/ciflow/') }}
         run: |
           # reference ends with an RC suffix
           if [[ ${GITHUB_REF_NAME} = *-rc[0-9]* ]]; then
@@ -7999,11 +7994,11 @@ jobs:
           name: libtorch-cuda11_5-static-without-deps-cxx11-abi
           path: "${{ runner.temp }}/artifacts/"
       - name: Set DRY_RUN (only for tagged pushes)
-        if: ${{ github.event_name == 'push' && (github.event.ref == 'refs/heads/nightly' || startsWith(github.event.ref, 'refs/tags/'))}}
+        if: ${{ github.event_name == 'push' && (github.event.ref == 'refs/heads/nightly' || (startsWith(github.event.ref, 'refs/tags/') && !startsWith(github.event.ref, 'refs/tags/ciflow/'))) }}
         run: |
           echo "DRY_RUN=disabled" >> "$GITHUB_ENV"
       - name: Set UPLOAD_CHANNEL (only for tagged pushes)
-        if: ${{ github.event_name == 'push' && startsWith(github.event.ref, 'refs/tags/')}}
+        if: ${{ github.event_name == 'push' && startsWith(github.event.ref, 'refs/tags/') && !startsWith(github.event.ref, 'refs/tags/ciflow/') }}
         run: |
           # reference ends with an RC suffix
           if [[ ${GITHUB_REF_NAME} = *-rc[0-9]* ]]; then
