@@ -3800,7 +3800,7 @@ and ``numpy.bool``.
 
 Example::
 
-    >>> a = numpy.array([1, 2, 3])
+    >>> a = numpy.array([1, 2, 3], dtype=numpy.int64)
     >>> t = torch.from_numpy(a)
     >>> t
     tensor([1, 2, 3])
@@ -6761,7 +6761,7 @@ Example::
     >>> a
     tensor([4, 9, 3, 0, 3])
     >>> b = a + (torch.randn(50, 1) * 5).long()
-    >>> torch.mode(b, 0)
+    >>> torch.mode(b, 0)  # doctest: +SKIP
     torch.return_types.mode(
     values=tensor([4, 9, 3, 0, 3]),
     indices=tensor([44, 44, 44, 44, 44]))"""
@@ -8811,7 +8811,7 @@ Example::
             [2, 2, 2, 0],
             [0, 0, 1, 1]])
     >>> x = torch.tensor([0, 1] * 9)
-    >>> x.sort()
+    >>> x.sort()  # doctest: +SKIP
     torch.return_types.sort(
     values=tensor([0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1]),
     indices=tensor([ 2, 16,  4,  6, 14,  8,  0, 10, 12,  9, 17, 15, 13, 11,  7,  5,  3,  1]))
