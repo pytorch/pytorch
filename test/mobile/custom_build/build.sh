@@ -65,9 +65,9 @@ build_predictor() {
   cd "${PREDICTOR_BUILD_ROOT}"
 
   cmake "${TEST_SRC_ROOT}" \
-    -DCMAKE_PREFIX_PATH="${LIBTORCH_INSTALL_PREFIX}" \
-    -DCMAKE_BUILD_TYPE=Release \
-    $1
+   -DCMAKE_PREFIX_PATH="${LIBTORCH_INSTALL_PREFIX}" \
+   -DCMAKE_BUILD_TYPE=Release \
+   $1
 
   make
 }
@@ -83,6 +83,12 @@ run_predictor() {
     diff output.txt "${TEST_SRC_ROOT}/expected_output.txt"
     exit 1
   fi
+}
+
+# Test codegen unboxing with static dispatch
+test_codegen_unboxing_lite_interpreter() {
+  cd "${PREDICTOR_BUILD_ROOT}"
+  ./test_codegen_unboxing
 }
 
 test_default_build() {
@@ -105,4 +111,5 @@ fi
 
 if [ -n "${TEST_CUSTOM_BUILD_STATIC}" ]; then
   test_custom_build_with_static_dispatch
+  test_codegen_unboxing_lite_interpreter
 fi
