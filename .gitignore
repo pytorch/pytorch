@@ -61,6 +61,7 @@ tools/coverage_plugins_package/pip-wheel-metadata/
 tools/shared/_utils_internal.py
 tools/fast_nvcc/wrap_nvcc.sh
 tools/fast_nvcc/tmp/
+tools/bazel
 torch.egg-info/
 torch/_C/__init__.pyi
 torch/_C/_nn.pyi
