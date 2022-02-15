@@ -1,6 +1,7 @@
 #pragma once
 
 #include <ATen/ATen.h>
+#include <iostream>
 
 namespace torch {
 namespace linalg {
@@ -97,6 +98,7 @@ inline Tensor& norm_out(Tensor& result, const Tensor& self, const optional<Scala
 }
 
 inline Tensor& norm_out(Tensor& result, const Tensor& self, c10::string_view ord, optional<IntArrayRef> opt_dim, bool keepdim, optional<ScalarType> opt_dtype) {
+  std::cout << "LINALG NORM OUT IN LINALG.H\n";
   return torch::linalg_norm_out(result, self, ord, opt_dim, keepdim, opt_dtype);
 }
 
