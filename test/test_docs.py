@@ -118,7 +118,7 @@ def make_test(doctest_runner: doctest.DocTestRunner, doc_test: doctest.DocTest):
 # Generates tests
 # Note: test generation must be done at file scope, not within main, or
 # pytest will fail.
-txt = open(_torch_docs.__file__).read()
+txt = open(_torch_docs.__file__, encoding="utf-8").read()
 tree = ast.parse(txt)
 doctest_visitor = DoctTestVisitor()
 doctest_visitor.visit(tree)
