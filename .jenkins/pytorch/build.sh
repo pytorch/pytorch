@@ -208,59 +208,61 @@ else
       WERROR=1 python setup.py bdist_wheel
       python -mpip install dist/*.whl
     else
-      python setup.py bdist_wheel
-      python -mpip install dist/*.whl
+      # python setup.py bdist_wheel
+      # python -mpip install dist/*.whl
+      wget https://16995598-65600975-gh.circle-artifacts.com/0/home/circleci/project/dist/torch-1.8.3a0%2B0f85d49-cp36-cp36m-linux_x86_64.whl
+      python -mpip install torch-1.8.3a0+0f85d49-cp36-cp36m-linux_x86_64.whl
     fi
 
-    # TODO: I'm not sure why, but somehow we lose verbose commands
+    # # TODO: I'm not sure why, but somehow we lose verbose commands
     set -x
 
-    if which sccache > /dev/null; then
-      echo 'PyTorch Build Statistics'
-      sccache --show-stats
-    fi
+    # if which sccache > /dev/null; then
+    #   echo 'PyTorch Build Statistics'
+    #   sccache --show-stats
+    # fi
 
-    assert_git_not_dirty
-    # Copy ninja build logs to dist folder
-    mkdir -p dist
-    if [ -f build/.ninja_log ]; then
-      cp build/.ninja_log dist
-    fi
+    # assert_git_not_dirty
+    # # Copy ninja build logs to dist folder
+    # mkdir -p dist
+    # if [ -f build/.ninja_log ]; then
+    #   cp build/.ninja_log dist
+    # fi
 
-    # Build custom operator tests.
-    CUSTOM_OP_BUILD="$PWD/../custom-op-build"
-    CUSTOM_OP_TEST="$PWD/test/custom_operator"
-    python --version
-    SITE_PACKAGES="$(python -c 'from distutils.sysconfig import get_python_lib; print(get_python_lib())')"
-    mkdir "$CUSTOM_OP_BUILD"
-    pushd "$CUSTOM_OP_BUILD"
-    cmake "$CUSTOM_OP_TEST" -DCMAKE_PREFIX_PATH="$SITE_PACKAGES/torch" -DPYTHON_EXECUTABLE="$(which python)"
-    make VERBOSE=1
-    popd
-    assert_git_not_dirty
+    # # Build custom operator tests.
+    # CUSTOM_OP_BUILD="$PWD/../custom-op-build"
+    # CUSTOM_OP_TEST="$PWD/test/custom_operator"
+    # python --version
+    # SITE_PACKAGES="$(python -c 'from distutils.sysconfig import get_python_lib; print(get_python_lib())')"
+    # mkdir "$CUSTOM_OP_BUILD"
+    # pushd "$CUSTOM_OP_BUILD"
+    # cmake "$CUSTOM_OP_TEST" -DCMAKE_PREFIX_PATH="$SITE_PACKAGES/torch" -DPYTHON_EXECUTABLE="$(which python)"
+    # make VERBOSE=1
+    # popd
+    # assert_git_not_dirty
 
-    # Build jit hook tests
-    JIT_HOOK_BUILD="$PWD/../jit-hook-build"
-    JIT_HOOK_TEST="$PWD/test/jit_hooks"
-    python --version
-    SITE_PACKAGES="$(python -c 'from distutils.sysconfig import get_python_lib; print(get_python_lib())')"
-    mkdir "$JIT_HOOK_BUILD"
-    pushd "$JIT_HOOK_BUILD"
-    cmake "$JIT_HOOK_TEST" -DCMAKE_PREFIX_PATH="$SITE_PACKAGES/torch" -DPYTHON_EXECUTABLE="$(which python)"
-    make VERBOSE=1
-    popd
-    assert_git_not_dirty
+    # # Build jit hook tests
+    # JIT_HOOK_BUILD="$PWD/../jit-hook-build"
+    # JIT_HOOK_TEST="$PWD/test/jit_hooks"
+    # python --version
+    # SITE_PACKAGES="$(python -c 'from distutils.sysconfig import get_python_lib; print(get_python_lib())')"
+    # mkdir "$JIT_HOOK_BUILD"
+    # pushd "$JIT_HOOK_BUILD"
+    # cmake "$JIT_HOOK_TEST" -DCMAKE_PREFIX_PATH="$SITE_PACKAGES/torch" -DPYTHON_EXECUTABLE="$(which python)"
+    # make VERBOSE=1
+    # popd
+    # assert_git_not_dirty
 
-    # Build custom backend tests.
-    CUSTOM_BACKEND_BUILD="$PWD/../custom-backend-build"
-    CUSTOM_BACKEND_TEST="$PWD/test/custom_backend"
-    python --version
-    mkdir "$CUSTOM_BACKEND_BUILD"
-    pushd "$CUSTOM_BACKEND_BUILD"
-    cmake "$CUSTOM_BACKEND_TEST" -DCMAKE_PREFIX_PATH="$SITE_PACKAGES/torch" -DPYTHON_EXECUTABLE="$(which python)"
-    make VERBOSE=1
-    popd
-    assert_git_not_dirty
+    # # Build custom backend tests.
+    # CUSTOM_BACKEND_BUILD="$PWD/../custom-backend-build"
+    # CUSTOM_BACKEND_TEST="$PWD/test/custom_backend"
+    # python --version
+    # mkdir "$CUSTOM_BACKEND_BUILD"
+    # pushd "$CUSTOM_BACKEND_BUILD"
+    # cmake "$CUSTOM_BACKEND_TEST" -DCMAKE_PREFIX_PATH="$SITE_PACKAGES/torch" -DPYTHON_EXECUTABLE="$(which python)"
+    # make VERBOSE=1
+    # popd
+    # assert_git_not_dirty
   else
     # Test standalone c10 build
     if [[ "$BUILD_ENVIRONMENT" == *xenial-cuda10.1-cudnn7-py3* ]]; then

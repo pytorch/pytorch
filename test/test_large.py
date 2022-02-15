@@ -10,27 +10,27 @@ def _compare_large_tensors(expected, actual, num_splits):
 
 def _test_large_cum_fn_helper(x, fn, num_splits):
     x_cpu = x.cpu().float()
-    print(" Point 2")
+    print(" Point 2", flush=True)
     expected = fn(x_cpu)
-    print(" Point 3")
+    print(" Point 3", flush=True)
     actual = fn(x).cpu().float()
-    print(" Point 4")
+    print(" Point 4", flush=True)
     _compare_large_tensors(expected, actual, num_splits)
-    print(" Pass")
+    print(" Pass", flush=True)
 
 def test_large_cumprod(p, num_splits):
     device = "cuda:0"
     dtype = torch.float16
-    print("----------------------")
-    print("test_large")
-    print(p)
-    print("----------------------")
+    print("----------------------", flush=True)
+    print("test_large", flush=True)
+    print(p, flush=True)
+    print("----------------------", flush=True)
 
     x = torch.empty(2**p + 200, device=device, dtype=dtype)
     x[::3] = 8
     x[1::3] = .25
     x[2::3] = .5
-    print(" Point 1")
+    print(" Point 1", flush=True)
     _test_large_cum_fn_helper(x, lambda x: torch.cumprod(x, 0), num_splits)
 
 import sys
