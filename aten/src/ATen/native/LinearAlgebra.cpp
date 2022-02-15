@@ -1627,8 +1627,7 @@ Tensor matmul(
     Tensor t2 = dim_tensor2 == 1 ? tensor2.unsqueeze(-1) : tensor2;
     auto size1 = tensor1.sizes();
     auto size2 = t2.sizes();
-    std::vector<int64_t> output_size;
-    output_size.insert(output_size.end(), size1.begin(), size1.end() - 1);
+    DimVector output_size(size1.begin(), size1.end() - 1);
     if (dim_tensor2 > 1) {
       output_size.push_back(size2[dim_tensor2 - 1]);
     }
@@ -1660,7 +1659,8 @@ Tensor matmul(
       return has_out ? out.set_(res) : res;
     }
     else {
-      std::vector<int64_t> shape = tensor2.sizes().slice(0, dim_tensor2 - 2).vec();
+      c10::IntArrayRef shape_array = tensor2.sizes().slice(0, dim_tensor2 - 2);
+      DimVector shape(shape_array.begin(), shape_array.end());
       shape.push_back(p);
 
       Tensor res = res_T.reshape(shape).contiguous();
@@ -1677,29 +1677,29 @@ Tensor matmul(
     IntArrayRef batch_tensor2(tensor2.sizes().data(), std::max<int64_t>(dim_tensor2 - 2, 0));
 
     // expand the batch portion (i.e. cut off matrix dimensions and expand rest)
-    std::vector<int64_t> expand_batch_portion = infer_size(batch_tensor1, batch_tensor2);
+    DimVector expand_batch_portion = infer_size_dimvector(batch_tensor1, batch_tensor2);
 
-    std::vector<int64_t> tensor1_expand_size(expand_batch_portion);
-    tensor1_expand_size.insert(tensor1_expand_size.end(), {n, m1});
+    DimVector tensor1_expand_size(expand_batch_portion);
+    tensor1_expand_size.push_back(n);
+    tensor1_expand_size.push_back(m1);
 
-    std::vector<int64_t> tensor2_expand_size(expand_batch_portion);
-    tensor2_expand_size.insert(tensor2_expand_size.end(), {m2, p});
+    DimVector tensor2_expand_size(expand_batch_portion);
+    tensor2_expand_size.push_back(m2);
+    tensor2_expand_size.push_back(p);
 
     const int64_t expand_batch_product =
         c10::multiply_integers(expand_batch_portion);
 
-    std::vector<int64_t> tensor1_bmm_view({expand_batch_product});
-    tensor1_bmm_view.insert(tensor1_bmm_view.end(), {n, m1});
+    std::array<int64_t, 3> tensor1_bmm_view = {expand_batch_product, n, m1};
 
-    std::vector<int64_t> tensor2_bmm_view({expand_batch_product});
-    tensor2_bmm_view.insert(tensor2_bmm_view.end(), {m2, p});
+    std::array<int64_t, 3> tensor2_bmm_view = {expand_batch_product, m2, p};
 
     // flatten expanded batches
     Tensor tensor1_expanded = tensor1.expand(tensor1_expand_size).reshape(tensor1_bmm_view);
     Tensor tensor2_expanded = tensor2.expand(tensor2_expand_size).reshape(tensor2_bmm_view);
 
     // reshape batches back into result
-    std::vector<int64_t> output_shape(expand_batch_portion);
+    DimVector output_shape(expand_batch_portion);
     if (dim_tensor1 > 1) {
       output_shape.push_back(n);
     }
