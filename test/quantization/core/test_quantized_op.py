@@ -4281,8 +4281,8 @@ class TestQuantizedConv(TestCase):
 
         print("int8 benchmark result:")
         print(prof.key_averages().table(sort_by="self_cpu_time_total", row_limit=10))
-    """Tests the correctness of quantized convolution op."""
 
+    """Tests the correctness of quantized convolution op."""
     @given(batch_size=st.integers(1, 3),
            input_channels_per_group=st.sampled_from([2, 4, 5, 8, 16, 32]),
            width=st.integers(7, 14),
