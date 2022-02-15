@@ -1042,7 +1042,7 @@ class TestONNXRuntime(unittest.TestCase):
                                (x, None, z),
                                (x, {"y": y, "z": None}),
                                (x, {"y": None, "z": z})):
-            with self.assertRaisesRegex(ValueError, "example_inputs contained 1 None's after flattening."):
+            with self.assertRaisesRegex(ValueError, "args contained 1 None's after flattening."):
                 self.run_test(model, example_inputs, input_names=("x", "y", "z"))
 
 
@@ -1183,7 +1183,7 @@ class TestONNXRuntime(unittest.TestCase):
         model = torch.jit.script(Model())
         with self.assertRaisesRegex(
                 ValueError,
-                "example_inputs contained 1 None's after flattening."):
+                "args contained 1 None's after flattening."):
             self.run_test(model, (x, (None, y1)))
         self.run_test(model, (x, (y0, y1)))
         # export succeeds, but running ORT through run_test would fail because the exported model
