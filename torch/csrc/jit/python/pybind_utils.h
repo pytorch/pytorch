@@ -972,7 +972,8 @@ inline py::object runAndInsertCall(
   auto stack =
       createStackForSchema(callee.getSchema(), args, kwargs, std::move(self));
   const auto& tracing_state = tracer::getTracingState();
-  if (!tracing_state) {
+  //if (!tracing_state) {
+  if (true) {
     pybind11::gil_scoped_release no_gil_guard;
     // If we're not tracing, just run the callee as normal.
     callee.run(stack);

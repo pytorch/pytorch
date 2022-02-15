@@ -12,12 +12,12 @@
 namespace c10 {
 
 void ClassType::addMethod(torch::jit::Function* method) {
-  TORCH_CHECK(
-      findMethod(method->name()) == nullptr,
-      "Can't redefine method: ",
-      method->name(),
-      " on class: ",
-      repr_str());
+//  TORCH_CHECK(
+//      findMethod(method->name()) == nullptr,
+//      "Can't redefine method: ",
+//      method->name(),
+//      " on class: ",
+//      repr_str());
   methods_.push_back(method);
 }
 

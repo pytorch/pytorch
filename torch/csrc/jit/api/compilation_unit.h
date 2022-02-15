@@ -307,11 +307,11 @@ struct TORCH_API CompilationUnit {
       bool shouldMangle = false) const;
 
   Function& register_function(std::unique_ptr<Function> fn) {
-    TORCH_CHECK(
-        0 == dict_.count(fn->qualname().qualifiedName()),
-        "method '",
-        fn->qualname().qualifiedName(),
-        "' already defined.");
+//    TORCH_CHECK(
+//        0 == dict_.count(fn->qualname().qualifiedName()),
+//        "method '",
+//        fn->qualname().qualifiedName(),
+//        "' already defined.");
     functions_.emplace_back(std::move(fn));
     dict_[functions_.back()->qualname()] = functions_.size() - 1;
     return *functions_.back();

@@ -1191,6 +1191,8 @@ void initJitScriptBindings(PyObject* module) {
                     &self,
                     argument_names));
             const auto method_name = QualifiedName(*self.type()->name(), name);
+            std::cout<<"ycao_debug, retraced graph:" <<std::endl;
+            graph->dump();
             auto fn = self._ivalue()->compilation_unit()->create_function(
                 method_name, graph);
             self.type()->addMethod(fn);
