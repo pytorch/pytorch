@@ -113,7 +113,7 @@ class TestQuantizeEagerOps(QuantizationTestCase):
         data = torch.randn(*input_size, dtype=torch.float)
         original_m = M()
         original_ref_m = RefM()
-        torch.quantization.engine = 'qnnpack'
+        torch.backends.quantized.engine = 'qnnpack'
 
         original_ref_m.conv.weight = torch.nn.Parameter(original_m.conv.weight.detach())
         original_ref_m.conv.bias = torch.nn.Parameter(original_m.conv.bias.detach())
