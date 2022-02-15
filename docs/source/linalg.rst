@@ -20,6 +20,7 @@ Matrix Properties
     vector_norm
     matrix_norm
     diagonal
+    trace
     det
     slogdet
     cond
