@@ -23,6 +23,8 @@ Functions
 .. autofunction:: expm1
 .. autofunction:: exp2
 .. autofunction:: gammaln
+.. autofunction:: gammainc
+.. autofunction:: gammaincc
 .. autofunction:: polygamma
 .. autofunction:: digamma
 .. autofunction:: psi
@@ -39,6 +41,7 @@ Functions
 .. autofunction:: ndtri
 .. autofunction:: round
 .. autofunction:: sinc
+.. autofunction:: softmax
 .. autofunction:: xlog1py
 .. autofunction:: xlogy
 .. autofunction:: zeta

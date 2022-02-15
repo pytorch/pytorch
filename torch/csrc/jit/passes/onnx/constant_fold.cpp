@@ -1,9 +1,10 @@
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/onnx/constant_fold.h>
-
-#include <c10/util/Exception.h>
 #include <torch/csrc/jit/passes/onnx/helper.h>
 
+#include <ATen/Functions.h>
+
+#include <c10/util/Exception.h>
 #include <c10/util/Optional.h>
 #include <c10/util/irange.h>
 #include <algorithm>
@@ -328,9 +329,7 @@ c10::optional<at::Tensor> runTorchBackendForOnnx(
         updated_val = at::unsqueeze(updated_val, axes[i]);
       }
       return c10::optional<at::Tensor>(updated_val);
-    } else if (
-        opset_version == ONNX_OPSET_9 || opset_version == ONNX_OPSET_10 ||
-        opset_version == ONNX_OPSET_11 || opset_version == ONNX_OPSET_12) {
+    } else if (opset_version >= ONNX_OPSET_9) {
       assert(inputTensorValues.size() == 1);
       if (!node->hasAttributeS("axes")) {
         return c10::nullopt;
@@ -374,9 +373,7 @@ c10::optional<at::Tensor> runTorchBackendForOnnx(
         }
       }
       return c10::optional<at::Tensor>(updated_val);
-    } else if (
-        opset_version == ONNX_OPSET_9 || opset_version == ONNX_OPSET_10 ||
-        opset_version == ONNX_OPSET_11 || opset_version == ONNX_OPSET_12) {
+    } else if (opset_version >= ONNX_OPSET_9) {
       assert(inputTensorValues.size() == 1);
       updated_val = inputTensorValues[0];
       if (node->hasAttributeS("axes")) {
@@ -462,21 +459,22 @@ c10::optional<at::Tensor> runTorchBackendForOnnx(
     // It needs to be adjusted (+= dim sizes) for aten op
     axis += axis < 0 ? inputTensorValues[0].sizes().size() : 0;
     at::Tensor indices = inputTensorValues[1];
+    auto q = indices.dim();
+    // at::index_select only supports indices with rank <= 1.
+    // See https://pytorch.org/docs/master/generated/torch.index_select.html
+    if (q > 1) {
+      return c10::nullopt;
+    }
     // If indices input for onnx::Gather has a value less than 0,
     // It needs to be adjusted (+= dim value) for aten op
     auto less_mask = at::lt(indices, 0);
     auto indices_corr = at::add(indices, inputTensorValues[0].sizes()[axis]);
     auto indices_masked = at::where(less_mask, indices_corr, indices);
     updated_val = at::index_select(inputTensorValues[0], axis, indices_masked);
-    auto q = indices.dim();
-    // Cases where rank of indices > 1 are not currently supported.
-    if (q > 1) {
-      return c10::nullopt;
-    }
     // If rank of indices is 0, rank of output tensor should be
     // rank_of_input - 1.
     if (q < 1) {
-      updated_val = updated_val.squeeze();
+      updated_val = updated_val.squeeze(axis);
     }
     return c10::optional<at::Tensor>(updated_val);
   } else if (node->kind() == onnx::Range) {
@@ -488,6 +486,12 @@ c10::optional<at::Tensor> runTorchBackendForOnnx(
     return c10::optional<at::Tensor>(updated_val);
   } else if (node->kind() == onnx::Equal) {
     updated_val = at::eq(inputTensorValues[0], inputTensorValues[1]);
+    return c10::optional<at::Tensor>(updated_val);
+  } else if (node->kind() == onnx::Greater) {
+    updated_val = at::greater(inputTensorValues[0], inputTensorValues[1]);
+    return c10::optional<at::Tensor>(updated_val);
+  } else if (node->kind() == onnx::Less) {
+    updated_val = at::less(inputTensorValues[0], inputTensorValues[1]);
     return c10::optional<at::Tensor>(updated_val);
   } else if (node->kind() == onnx::Neg) {
     updated_val = at::neg(inputTensorValues[0]);

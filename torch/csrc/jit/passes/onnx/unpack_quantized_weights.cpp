@@ -8,6 +8,14 @@
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/onnx/helper.h>
 #include <torch/csrc/jit/passes/subgraph_rewrite.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#else
+#include <ATen/ops/quantize_per_tensor.h>
+#include <ATen/ops/zeros.h>
+#endif
+
 #include <stack>
 
 using ::c10::Dispatcher;
@@ -192,7 +200,7 @@ void unpackQuantizedWeightsHelper(
 
       if (params_type == QuantizedParamsType::CONV &&
           ser_tup->elements()[0].isInt()) {
-        auto elements = ser_tup->elements();
+        const auto& elements = ser_tup->elements();
         auto version = elements[0].toInt();
         TORCH_INTERNAL_ASSERT(version == 3, "Unknown serialization version");
         TORCH_INTERNAL_ASSERT(elements.size() == 3, "Wrong tuple size.");
@@ -253,7 +261,7 @@ void unpackQuantizedWeightsHelper(
       } else if (
           params_type == QuantizedParamsType::CONV &&
           ser_tup->elements()[0].isString()) {
-        auto elements = ser_tup->elements();
+        const auto& elements = ser_tup->elements();
         auto version = elements[0].toStringRef();
         TORCH_INTERNAL_ASSERT(version == "2", "Unknown serialization version");
         std::vector<at::Tensor> non_optional = elements[1].toTensorVector();
@@ -389,7 +397,7 @@ void unpackQuantizedWeightsHelper(
 
     auto input_val = match_vmap.at(vmap.at("r"))->node()->inputs()[0];
     TORCH_INTERNAL_ASSERT(
-        input_val->type()->isSubtypeOf(TensorType::get()),
+        input_val->type()->isSubtypeOf(*TensorType::get()),
         "Unsupported input type. Expected TensorType, got ",
         input_val->type()->str());
 

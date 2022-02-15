@@ -19,13 +19,20 @@ void CompilationUnit::register_function(std::unique_ptr<Function> fn) {
   methods_.emplace_back(std::move(fn));
 }
 
-Function* CompilationUnit::find_function(const c10::QualifiedName& qn) {
+const Function* CompilationUnit::find_function(
+    const c10::QualifiedName& qn) const {
   for (auto& fn : methods_) {
     if (fn->qualname() == qn) {
       return fn.get();
     }
   }
   return nullptr;
+}
+
+Function* CompilationUnit::find_function(const c10::QualifiedName& qn) {
+  // NOLINTNEXTLINE
+  return const_cast<Function*>(
+      static_cast<const CompilationUnit*>(this)->find_function(qn));
 }
 
 Method Module::get_method(const std::string& name) const {
@@ -36,7 +43,7 @@ Method Module::get_method(const std::string& name) const {
 }
 
 c10::optional<Method> Module::find_method(const std::string& basename) const {
-  for (auto& fn : cu_->methods()) {
+  for (const auto& fn : cu_->methods()) {
     if (fn->name() == basename) {
       return c10::make_optional<Method>(Method(this, fn.get()));
     }
@@ -51,7 +58,10 @@ void set_train_recurse(
   if (auto slot = obj->type()->findAttributeSlot("training")) {
     obj->setSlot(*slot, on);
   } else {
-    TORCH_INTERNAL_ASSERT(false, "'training' attribute not found");
+    TORCH_INTERNAL_ASSERT(
+        false,
+        "'training' attribute not found. Did you accidentally "
+        "call .eval() before saving your model?");
   }
   for (const auto& slot : obj->slots()) {
     if (slot.isObject()) {
@@ -186,8 +196,7 @@ void Method::run(Stack& stack) const {
       owner_->getMetadata();
 
   if (observer) {
-    observer->onEnterRunMethod(
-        copied_metadata, instance_key, function_->name());
+    observer->onEnterRunMethod(instance_key);
   }
 
   auto debug_info = std::make_shared<MobileDebugInfo>();
@@ -205,11 +214,13 @@ void Method::run(Stack& stack) const {
 #if defined(SYMBOLICATE_MOBILE_DEBUG_HANDLE)
     if (error_message.empty()) {
       error_message = owner_->getDebugTable().getSourceDebugString(
-          function_->getExceptionDebugHandle(), getTopModuleTypeName(*owner_));
+          function_->getExceptionDebugHandles(), getTopModuleTypeName(*owner_));
     }
 #endif
 
     observer->onFailRunMethod(
+        copied_metadata,
+        function_->name(),
         instance_key,
         error_message.empty() ? "Unknown exception" : error_message.c_str());
   });
@@ -218,13 +229,16 @@ void Method::run(Stack& stack) const {
     stack.insert(stack.begin(), owner_->_ivalue()); // self
     function_->run(stack);
     if (observer) {
-      observer->onExitRunMethod(instance_key);
+      observer->onExitRunMethod(
+          copied_metadata, function_->name(), instance_key);
     }
     failure_guard.release();
     // This exception must be caught first as it derived from c10::Error
   } catch (c10::BackendRuntimeException& e) {
 #if defined(SYMBOLICATE_MOBILE_DEBUG_HANDLE)
-    e.pushDebugHandle(function_->getExceptionDebugHandle());
+    for (auto handle : function_->getExceptionDebugHandles()) {
+      e.pushDebugHandle(handle);
+    }
     // symbolicate all handles
     auto debug_string = owner_->getDebugTable().getSourceDebugString(
         e.getDebugHandles(), getTopModuleTypeName(*owner_));
@@ -235,7 +249,7 @@ void Method::run(Stack& stack) const {
   } catch (c10::Error& error) {
 #if defined(SYMBOLICATE_MOBILE_DEBUG_HANDLE)
     auto debug_string = owner_->getDebugTable().getSourceDebugString(
-        function_->getExceptionDebugHandle(), getTopModuleTypeName(*owner_));
+        function_->getExceptionDebugHandles(), getTopModuleTypeName(*owner_));
     error.add_context(debug_string);
 #endif
     error_message = error.what();

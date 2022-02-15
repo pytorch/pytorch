@@ -1,3 +1,4 @@
+#include <torch/csrc/jit/tensorexpr/operators/misc.h>
 #include <torch/csrc/jit/tensorexpr/operators/norm.h>
 
 namespace torch {
@@ -7,7 +8,8 @@ namespace tensorexpr {
 Tensor computeBatchNorm(
     const std::vector<ArgValue>& inputs,
     const std::vector<ExprHandle>& outputShape,
-    const c10::optional<ScalarType>& outputType) {
+    const c10::optional<ScalarType>& outputType,
+    at::Device device) {
   bool hasWeight = true;
   bool hasBias = true;
 
@@ -20,9 +22,7 @@ Tensor computeBatchNorm(
   }
 
   return Compute(
-      "aten_batch_norm",
-      c10::fmap<DimArg>(outputShape),
-      [&](const std::vector<VarHandle>& axes) {
+      "aten_batch_norm", outputShape, [&](const std::vector<VarHandle>& axes) {
         TORCH_INTERNAL_ASSERT(axes.size() >= 2);
         // axes: N, C, H, W
         std::vector<ExprHandle> indices(axes.begin(), axes.end());

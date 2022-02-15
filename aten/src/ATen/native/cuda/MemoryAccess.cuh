@@ -8,6 +8,7 @@
 #include <ATen/core/Array.h>
 #include <ATen/detail/FunctionTraits.h>
 #include <ATen/cuda/detail/OffsetCalculator.cuh>
+#include <ATen/native/cuda/thread_constants.h>
 
 #include <thrust/tuple.h>
 
@@ -59,7 +60,7 @@ struct vectorized_load_helper {
     using arg_t = std::tuple_element_t<arg_index, args_t>;
     // `data` hold the data_ptr for tensors [output, input0, input1, ...], so we
     // need a +1 offset to get the input
-    auto ptr = reinterpret_cast<arg_t *>(self.data[arg_index + 1]) + block_work_size * idx;
+    auto ptr = reinterpret_cast<arg_t *>(self.data[arg_index + 1]) + block_work_size() * idx;
     auto args_accessor = [&args] __device__ (int thread_unroll_idx) -> arg_t & { return std::get<arg_index>(args[thread_unroll_idx]); };
     self.load_single_arg(args_accessor, ptr);
   }
@@ -164,7 +165,7 @@ struct unroll {
     data(data), remaining(remaining), input_offset_calculator(ic), output_offset_calculator(oc), loader(l), storer(s) {}
 
   __device__ inline bool check_inbounds(int thread_work_elem) {
-    return ((threadIdx.x  + thread_work_elem*num_threads) < remaining);
+    return ((threadIdx.x  + thread_work_elem*num_threads()) < remaining);
   }
 
   template<typename args_t>
@@ -172,30 +173,30 @@ struct unroll {
     constexpr int arity = std::tuple_size<args_t>::value;
     int thread_idx = threadIdx.x;
     #pragma unroll
-    for (int i = 0; i < thread_work_size; i++) {
+    for (int i = 0; i < thread_work_size(); i++) {
       if (thread_idx >= remaining) {
         return;
       }
-      int linear_idx = thread_idx + block_work_size * idx;
+      int linear_idx = thread_idx + block_work_size() * idx;
       auto offset = input_offset_calculator.get(linear_idx);
       detail::static_unroll<detail::unroll_load_helper, arity>::with_args(*this, args, offset, loader, i, num_outputs);
-      thread_idx += num_threads;
+      thread_idx += num_threads();
     }
   }
 
   template<typename scalar_t>
   __device__ inline void store(scalar_t *from, int idx) {
     int thread_idx = threadIdx.x;
-    scalar_t *to = reinterpret_cast<scalar_t *>(data[0]) + block_work_size * idx;
+    scalar_t *to = reinterpret_cast<scalar_t *>(data[0]) + block_work_size() * idx;
     #pragma unroll
-    for (int i = 0; i < thread_work_size; i++) {
+    for (int i = 0; i < thread_work_size(); i++) {
       if (thread_idx >= remaining) {
         return;
       }
-      int linear_idx = thread_idx + block_work_size * idx;
+      int linear_idx = thread_idx + block_work_size() * idx;
       int offset = output_offset_calculator.get(linear_idx)[0];
       storer.store(from[i], data[0], offset);
-      thread_idx += num_threads;
+      thread_idx += num_threads();
     }
   }
 };
@@ -208,8 +209,8 @@ struct unroll {
 template <int vec_size, typename data_t>  // vec_size: number of scalars, can be 1, 2, or 4.
 struct vectorized {
 
-  static_assert(thread_work_size % vec_size == 0, "The workload per thread must be a multiple of vec_size");
-  static constexpr int loop_size = thread_work_size / vec_size;
+  static_assert(thread_work_size() % vec_size == 0, "The workload per thread must be a multiple of vec_size");
+  static constexpr int loop_size = thread_work_size() / vec_size;
 
   data_t data;
 
@@ -226,7 +227,7 @@ struct vectorized {
     int thread_idx = threadIdx.x;
     #pragma unroll
     for (int i = 0; i < loop_size; i++) {
-      int index = thread_idx + i * num_threads;
+      int index = thread_idx + i * num_threads();
       vec_t v = from_[index];
       #pragma unroll
       for (int j = 0; j < vec_size; j++) {
@@ -244,12 +245,12 @@ struct vectorized {
   template<typename scalar_t>
   __device__ inline void store(scalar_t *from, int idx) {
     using vec_t = aligned_vector<scalar_t, vec_size>;
-    scalar_t *to = reinterpret_cast<scalar_t *>(data[0]) + block_work_size * idx;
+    scalar_t *to = reinterpret_cast<scalar_t *>(data[0]) + block_work_size() * idx;
     vec_t *to_ = reinterpret_cast<vec_t *>(to);
     int thread_idx = threadIdx.x;
     #pragma unroll
     for (int i = 0; i < loop_size; i++) {
-      int index = thread_idx + i * num_threads;
+      int index = thread_idx + i * num_threads();
       vec_t v;
       for (int j = 0; j < vec_size; j++) {
         v.val[j] = from[vec_size * i + j];
@@ -274,7 +275,7 @@ struct multi_outputs_unroll {
   data(data), remaining(remaining), input_offset_calculator(ic), output_offset_calculator(oc) {}
 
   __device__ inline bool check_inbounds(int thread_work_elem) {
-    return ((threadIdx.x  + thread_work_elem*num_threads) < remaining);
+    return ((threadIdx.x  + thread_work_elem*num_threads()) < remaining);
   }
 
   template<typename args_t>
@@ -282,14 +283,14 @@ struct multi_outputs_unroll {
     constexpr int arity = std::tuple_size<args_t>::value;
     int thread_idx = threadIdx.x;
     #pragma unroll
-    for (int i = 0; i < thread_work_size; i++) {
+    for (int i = 0; i < thread_work_size(); i++) {
       if (thread_idx >= remaining) {
         return;
       }
-      int linear_idx = thread_idx + block_work_size * idx;
+      int linear_idx = thread_idx + block_work_size() * idx;
       auto offset = input_offset_calculator.get(linear_idx);
       detail::static_unroll<detail::unroll_load_helper, arity>::with_args(*this, args, offset, loader, i, num_outputs);
-      thread_idx += num_threads;
+      thread_idx += num_threads();
     }
   }
 
@@ -298,14 +299,14 @@ struct multi_outputs_unroll {
   __device__ inline void store(return_t *from, int idx) {
     int thread_idx = threadIdx.x;
     #pragma unroll
-    for (int i = 0; i < thread_work_size; i++) {
+    for (int i = 0; i < thread_work_size(); i++) {
       if (thread_idx >= this->remaining) {
         return;
       }
-      int linear_idx = thread_idx + block_work_size * idx;
+      int linear_idx = thread_idx + block_work_size() * idx;
       auto offsets = this->output_offset_calculator.get(linear_idx);
       memory::detail::static_unroll<detail::multi_outputs_store_helper, num_outputs>::with_args(this->data, offsets, from[i]);
-      thread_idx += num_threads;
+      thread_idx += num_threads();
     }
   }
 };
@@ -348,6 +349,21 @@ inline int can_vectorize_up_to(array_t pointers) {
   // We need to get the type for each argument of `func_t`, this can only
   // be done at compile time.
   detail::static_unroll<can_vectorize_up_to_helper, arity>::with_args(result, pointers, traits());
+  return result;
+}
+
+// jitted version of the above
+// See Note [Jiterator], this relies on the assumptions enumerated there
+template<typename result_type, typename common_type, int arity, typename array_t>
+inline int jitted_can_vectorize_up_to(array_t pointers) {
+  // Deals with output
+  int result = can_vectorize_up_to<result_type>(pointers[0]);
+
+  // Incorporates input(s)
+  for (auto i = decltype(arity){1}; i < (arity + 1); ++i) {
+    result = std::min<int>(result, can_vectorize_up_to<common_type>(pointers[i]));
+  }
+
   return result;
 }
 

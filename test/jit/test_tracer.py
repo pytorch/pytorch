@@ -1,3 +1,5 @@
+# Owner(s): ["oncall: jit"]
+
 import unittest
 import io
 import os
@@ -1115,9 +1117,8 @@ class TestTracer(JitTestCase):
             def forward(self, x, w):
                 return torch.matmul(x, w).detach()
 
-        f = io.BytesIO()
         torch.onnx.export_to_pretty_string(
-            Mod(), (torch.rand(3, 4), torch.rand(4, 5)), f)
+            Mod(), (torch.rand(3, 4), torch.rand(4, 5)))
 
     def test_trace_slice_full_dim(self):
         def foo(x):

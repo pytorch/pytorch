@@ -14,6 +14,26 @@ Automatic differentiation package - torch.autograd
     backward
     grad
 
+.. _forward-mode-ad:
+
+Forward-mode Automatic Differentiation
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+.. warning::
+    This API is in beta. Even though the function signatures are very unlikely to change, improved
+    operator coverage is planned before we consider this stable.
+
+Please see the `forward-mode AD tutorial <https://pytorch.org/tutorials/intermediate/forward_ad_usage.html>`__
+for detailed steps on how to use this API.
+
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    forward_ad.dual_level
+    forward_ad.make_dual
+    forward_ad.unpack_dual
+
 .. _functional-api:
 
 Functional higher level API
@@ -178,8 +198,9 @@ Tensor autograd functions
     :toctree: generated
     :nosignatures:
 
-    Function.backward
     Function.forward
+    Function.backward
+    Function.jvp
 
 Context method mixins
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^

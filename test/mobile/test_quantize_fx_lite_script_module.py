@@ -1,14 +1,16 @@
+# Owner(s): ["oncall: mobile"]
+
 import torch
 import torch.nn as nn
 import torch.nn.quantized as nnq
 import torch.utils.bundled_inputs
-from torch.quantization import (
+from torch.ao.quantization import (
     default_qconfig,
     float_qparams_weight_only_qconfig,
 )
 
 # graph mode quantization based on fx
-from torch.quantization.quantize_fx import (
+from torch.ao.quantization.quantize_fx import (
     prepare_fx,
     convert_fx,
 )
@@ -79,7 +81,7 @@ class TestLiteFuseFx(QuantizationLiteTestCase):
         for config in configs:
             model = LinearModelWithSubmodule().eval()
             qconfig_dict = {
-                "": torch.quantization.get_default_qconfig("qnnpack"),
+                "": torch.ao.quantization.get_default_qconfig("qnnpack"),
                 **config,
             }
             model = prepare_fx(model, qconfig_dict)

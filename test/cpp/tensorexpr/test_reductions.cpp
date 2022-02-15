@@ -8,6 +8,7 @@
 
 #include <test/cpp/tensorexpr/test_base.h>
 
+#include <c10/util/irange.h>
 #include <test/cpp/tensorexpr/padded_buffer.h>
 #include <torch/csrc/jit/tensorexpr/analysis.h>
 #include <torch/csrc/jit/tensorexpr/eval.h>
@@ -26,15 +27,15 @@ using namespace torch::jit::tensorexpr;
 TEST(Reductions, ReduceSum0D_1) {
   const int M = 10;
 
-  Placeholder b(BufHandle("b", {M}, kFloat));
+  BufHandle b("b", {M}, kFloat);
   std::vector<float> in(M);
-  for (int j = 0; j < M; ++j) {
+  for (const auto j : c10::irange(M)) {
     in[j] = j;
   }
 
   std::vector<float> out(M, -1.f);
 
-  Tensor c = Reduce("sum", {{M, "m"}}, Sum(), b, {});
+  Tensor c = Reduce("sum", {M}, Sum(), b, {});
   LoopNest loop({c});
   loop.prepareForCodegen();
   StmtPtr s = loop.root_stmt();
@@ -43,7 +44,7 @@ TEST(Reductions, ReduceSum0D_1) {
   SimpleIREvaluator cg(s, {b, c});
 
   cg.call({in, out});
-  for (int i = 0; i < M; ++i) {
+  for (const auto i : c10::irange(M)) {
     ASSERT_EQ(out[i], in[i]);
   }
 }
@@ -51,7 +52,7 @@ TEST(Reductions, ReduceSum0D_1) {
 TEST(Reductions, ReduceSum0D_2) {
   const int M = 10;
 
-  Placeholder b(BufHandle("b", {}, kFloat));
+  BufHandle b("b", {}, kFloat);
   std::vector<float> in(1);
   in[0] = 77.7;
 
@@ -71,15 +72,15 @@ TEST(Reductions, ReduceSum0D_2) {
 
 // Sum an array to a single value.
 TEST(Reductions, ReduceSum1D) {
-  Placeholder b(BufHandle("b", {10}, kFloat));
+  BufHandle b("b", {10}, kFloat);
   std::vector<float> in(10);
-  for (int j = 0; j < 10; ++j) {
+  for (const auto j : c10::irange(10)) {
     in[j] = j;
   }
 
   std::vector<float> out(1, -1.f);
 
-  Tensor c = Reduce("sum", {}, Sum(), b, {{10, "m"}});
+  Tensor c = Reduce("sum", {}, Sum(), b, {10});
   LoopNest loop({c});
   loop.prepareForCodegen();
   StmtPtr s = loop.root_stmt();
@@ -98,17 +99,17 @@ TEST(Reductions, ReduceSum2D) {
   VarHandle m("m", kInt);
   VarHandle n("n", kInt);
 
-  Placeholder b(BufHandle("b", {m, n}, kFloat));
+  BufHandle b("b", {m, n}, kFloat);
   std::vector<float> in(M * N);
-  for (int i = 0; i < M; ++i) {
-    for (int j = 0; j < N; ++j) {
+  for (const auto i : c10::irange(M)) {
+    for (const auto j : c10::irange(N)) {
       in[i * N + j] = j;
     }
   }
 
   std::vector<float> out(M, -1.f);
 
-  Tensor c = Reduce("sum", {{M, "m"}}, Sum(), b, {{N, "n"}});
+  Tensor c = Reduce("sum", {M}, Sum(), b, {N});
   LoopNest loop({c});
   loop.prepareForCodegen();
   StmtPtr s = loop.root_stmt();
@@ -119,12 +120,12 @@ TEST(Reductions, ReduceSum2D) {
   cg.call({in, out, 5, 7});
 
   float expected = 0;
-  for (int i = 0; i < N; ++i) {
+  for (const auto i : c10::irange(N)) {
     // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
     expected += i;
   }
 
-  for (int i = 0; i < M; ++i) {
+  for (const auto i : c10::irange(M)) {
     ASSERT_EQ(out[i], expected);
   }
 }
@@ -135,9 +136,9 @@ TEST(Reductions, ReduceSum3D) {
   const int M = 10;
   VarHandle m("m", kInt);
 
-  Placeholder b(BufHandle("b", {2, 3, m}, kFloat));
+  BufHandle b("b", {2, 3, m}, kFloat);
 
-  Tensor c = Reduce("sum", {{2, "l"}, {3, "n"}}, Sum(), b, {{m, "m"}});
+  Tensor c = Reduce("sum", {2, 3}, Sum(), b, {m});
   LoopNest loop({c});
   loop.prepareForCodegen();
   StmtPtr s = loop.root_stmt();
@@ -151,14 +152,14 @@ TEST(Reductions, ReduceSum3D) {
   std::vector<float> eData(2, 1.0f);
 
   for (int i = 0; i < 2 * 3; ++i) {
-    for (int j = 0; j < M; ++j) {
+    for (const auto j : c10::irange(M)) {
       bData[i * M + j] = j;
     }
   }
 
   cg.call({bData, cData, M});
   float expected = 0;
-  for (int i = 0; i < M; ++i) {
+  for (const auto i : c10::irange(M)) {
     // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
     expected += i;
   }
@@ -167,7 +168,7 @@ TEST(Reductions, ReduceSum3D) {
     ASSERT_EQ(cData[i], expected);
   }
 
-  Tensor d = Reduce("sum2", {{2, "l"}}, Sum(), b, {{3, "n"}, {m, "m"}});
+  Tensor d = Reduce("sum2", {2}, Sum(), b, {3, m});
   LoopNest loop2({d});
   loop2.prepareForCodegen();
   StmtPtr s2 = loop2.root_stmt();
@@ -179,13 +180,13 @@ TEST(Reductions, ReduceSum3D) {
   // We're combining an additional dimension of 3, so the sum is 3x.
   expected = expected * 3;
 
-  for (int i = 0; i < 2; ++i) {
+  for (const auto i : c10::irange(2)) {
     ASSERT_EQ(dData[i], expected);
   }
 
   // This is the same as just reducing the original result across that axis.
-  Placeholder c_buf(BufHandle(c.buf()));
-  Tensor e = Reduce("sum3", {{2, "l"}}, Sum(), c_buf, {{3, "m"}});
+  BufHandle c_buf(c.buf());
+  Tensor e = Reduce("sum3", {2}, Sum(), c_buf, {3});
   LoopNest loop3({e});
   loop3.prepareForCodegen();
   StmtPtr s3 = loop3.root_stmt();
@@ -194,27 +195,22 @@ TEST(Reductions, ReduceSum3D) {
   SimpleIREvaluator cg3(s3, {c, e});
   cg3.call({cData, eData});
 
-  for (int i = 0; i < 2; ++i) {
+  for (const auto i : c10::irange(2)) {
     ASSERT_EQ(eData[i], expected);
   }
 }
 
 // Sum a large (10 D) Tensor 5 dimensions in.
 TEST(Reductions, ReduceSum10D) {
-  Placeholder in_(BufHandle("in_", {2, 3, 2, 3, 2, 3, 2, 3, 2, 3}, kFloat));
+  BufHandle in_("in_", {2, 3, 2, 3, 2, 3, 2, 3, 2, 3}, kFloat);
   const int InputSize = 2 * 3 * 2 * 3 * 2 * 3 * 2 * 3 * 2 * 3;
-  Placeholder out_(BufHandle("out_", {2, 3, 2, 3, 2}, kFloat));
+  BufHandle out_("out_", {2, 3, 2, 3, 2}, kFloat);
   const int OutputSize = 2 * 3 * 2 * 3 * 2;
 
   std::vector<float> in(InputSize, 1.f);
   std::vector<float> out(OutputSize, -1.f);
 
-  Tensor c = Reduce(
-      "sum",
-      {{2, "a"}, {3, "b"}, {2, "c"}, {3, "d"}, {2, "e"}},
-      Sum(),
-      in_,
-      {{3, "f"}, {2, "g"}, {3, "h"}, {2, "i"}, {3, "j"}});
+  Tensor c = Reduce("sum", {2, 3, 2, 3, 2}, Sum(), in_, {3, 2, 3, 2, 3});
   LoopNest loop({c});
   loop.prepareForCodegen();
   StmtPtr s = loop.root_stmt();
@@ -226,7 +222,7 @@ TEST(Reductions, ReduceSum10D) {
 
   // NOLINTNEXTLINE(bugprone-integer-division)
   float expected = InputSize / OutputSize;
-  for (int i = 0; i < OutputSize; ++i) {
+  for (const auto i : c10::irange(OutputSize)) {
     ASSERT_EQ(out[i], expected);
   }
 }
@@ -236,10 +232,10 @@ TEST(Reductions, ReduceProduct) {
   const int M = 4;
   const int N = 4;
 
-  Placeholder b(BufHandle("b", {M, N}, kFloat));
+  BufHandle b("b", {M, N}, kFloat);
   std::vector<float> in(M * N);
-  for (int i = 0; i < M; ++i) {
-    for (int j = 0; j < N; ++j) {
+  for (const auto i : c10::irange(M)) {
+    for (const auto j : c10::irange(N)) {
       in[i * N + j] = 2 + j;
     }
   }
@@ -249,7 +245,7 @@ TEST(Reductions, ReduceProduct) {
   Reducer product(
       ExprHandle(1.f), [](ExprHandle a, ExprHandle b) { return a * b; });
 
-  Tensor c = Reduce("product", {{M, "m"}}, product, b, {{N, "n"}});
+  Tensor c = Reduce("product", {M}, product, b, {N});
   LoopNest loop({c});
   loop.prepareForCodegen();
   StmtPtr s = loop.root_stmt();
@@ -260,27 +256,27 @@ TEST(Reductions, ReduceProduct) {
   cg.call({in, out});
 
   float expected = 1;
-  for (int i = 0; i < N; ++i) {
+  for (const auto i : c10::irange(N)) {
     // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
     expected *= 2 + i;
   }
 
-  for (int i = 0; i < M; ++i) {
+  for (const auto i : c10::irange(M)) {
     ASSERT_EQ(out[i], expected);
   }
 }
 
 // Maximum reductions.
 TEST(Reductions, ReduceMax) {
-  Placeholder in_(BufHandle("b", {10}, kFloat));
+  BufHandle in_("b", {10}, kFloat);
 
   std::vector<float> in(10);
   std::vector<float> out(1, -1.f);
-  for (int j = 0; j < 10; ++j) {
+  for (const auto j : c10::irange(10)) {
     in[j] = j;
   }
 
-  Tensor dm1 = Reduce("max", {}, Maximum(kFloat), in_, {{10, "m"}});
+  Tensor dm1 = Reduce("max", {}, Maximum(kFloat), in_, {10});
 
   LoopNest loop({dm1});
   loop.prepareForCodegen();
@@ -292,10 +288,10 @@ TEST(Reductions, ReduceMax) {
 
   ASSERT_EQ(out[0], 9);
 
-  Placeholder in2_(BufHandle("b", {2, 5}, kFloat));
+  BufHandle in2_("b", {2, 5}, kFloat);
   std::vector<float> out2(2, -1.f);
 
-  Tensor m2d = Reduce("max", {{2, "n"}}, Maximum(kFloat), in2_, {{5, "m"}});
+  Tensor m2d = Reduce("max", {2}, Maximum(kFloat), in2_, {5});
 
   LoopNest loop2({m2d});
   loop2.prepareForCodegen();
@@ -312,11 +308,11 @@ TEST(Reductions, ReduceMax) {
 // Minimum reduction, with custom initialization.
 TEST(Reductions, ReduceMinCustomInitializer) {
   VarHandle minInit("minInit", kFloat);
-  Placeholder in_(BufHandle("b", {10}, kFloat));
+  BufHandle in_("b", {10}, kFloat);
 
   std::vector<float> in(10);
   std::vector<float> out(1, -1.f);
-  for (int j = 0; j < 10; ++j) {
+  for (const auto j : c10::irange(10)) {
     in[j] = 10 + j;
   }
 
@@ -325,7 +321,7 @@ TEST(Reductions, ReduceMinCustomInitializer) {
       {},
       Minimum(ExprHandle(minInit)),
       [&](ParameterList& v) { return in_.load(v); },
-      {{10, "m"}});
+      {10});
 
   LoopNest loop({min});
   loop.prepareForCodegen();
@@ -348,7 +344,7 @@ TEST(Reductions, ReduceMinCustomInitializer) {
 // TODO: this is very awkward without logical And/Or operators.
 TEST(Reductions, ReduceAnyAll) {
   VarHandle searchValue("searchValue", kInt);
-  Placeholder b(BufHandle("b", {4, 10}, kInt));
+  BufHandle b("b", {4, 10}, kInt);
 
   Reducer anyEqSV(ExprHandle(0), [](ExprHandle a, ExprHandle b) {
     return CompareSelect::make(a, 1, 1, b, kEQ);
@@ -356,12 +352,12 @@ TEST(Reductions, ReduceAnyAll) {
 
   Tensor any = Reduce(
       "anyEqual",
-      {{4, "i"}},
+      {4},
       anyEqSV,
       [&](const auto& i, const auto& j) {
         return CompareSelect::make(b.load(i, j), searchValue, kEQ);
       },
-      {{10, "j"}});
+      {10});
 
   LoopNest loop({any});
   loop.prepareForCodegen();
@@ -374,7 +370,7 @@ TEST(Reductions, ReduceAnyAll) {
   std::vector<int> out(4, 0);
 
   // input has 0-39 in 4 rows.
-  for (int i = 0; i < 40; ++i) {
+  for (const auto i : c10::irange(40)) {
     in[i] = i;
   }
   cg.call({in, out, 1});
@@ -399,12 +395,12 @@ TEST(Reductions, ReduceAnyAll) {
 
   Tensor allGreaterThan = Reduce(
       "allGreaterThan",
-      {{4, "i"}},
+      {4},
       allGTSV,
       [&](const auto& i, const auto& j) {
         return CompareSelect::make(b.load(i, j), searchValue, kGT);
       },
-      {{10, "j"}});
+      {10});
 
   LoopNest loop2({allGreaterThan});
   loop2.prepareForCodegen();
@@ -431,15 +427,15 @@ TEST(Reductions, ReduceAnyAll) {
 }
 
 TEST(Reductions, ReduceMatmul2D) {
-  Placeholder tA(BufHandle("tA", {3, 2}, kFloat));
-  Placeholder tB(BufHandle("tB", {2, 3}, kFloat));
+  BufHandle tA("tA", {3, 2}, kFloat);
+  BufHandle tB("tB", {2, 3}, kFloat);
 
   std::vector<float> tA_(6);
   std::vector<float> tB_(6);
 
   std::vector<float> out(9, -1.f);
-  for (int i = 0; i < 3; ++i) {
-    for (int j = 0; j < 2; ++j) {
+  for (const auto i : c10::irange(3)) {
+    for (const auto j : c10::irange(2)) {
       tA_[i * 2 + j] = i * 2 + j;
       tB_[j * 3 + i] = i * 2 + j;
     }
@@ -447,12 +443,12 @@ TEST(Reductions, ReduceMatmul2D) {
 
   Tensor mm = Reduce(
       "mm",
-      {{3, "m"}, {3, "n"}},
+      {3, 3},
       Sum(),
       [&](const ExprHandle& m, const ExprHandle& n, const ExprHandle& k) {
         return tA.load(m, k) * tB.load(k, n);
       },
-      {{2, "k"}});
+      {2});
 
   LoopNest loop({mm});
   loop.prepareForCodegen();
@@ -465,24 +461,24 @@ TEST(Reductions, ReduceMatmul2D) {
   std::vector<float> expected(
       {1.f, 3.f, 5.f, 3.f, 13.f, 23.f, 5.f, 23.f, 41.f});
 
-  for (int i = 0; i < 9; ++i) {
+  for (const auto i : c10::irange(9)) {
     ASSERT_EQ(out[i], expected[i]);
   }
 }
 
 TEST(Reductions, ReduceRfactorLike) {
-  Placeholder in(BufHandle("in", {10, 10}, kFloat));
+  BufHandle in("in", {10, 10}, kFloat);
   std::vector<float> in_(100);
-  for (int i = 0; i < 100; ++i) {
+  for (const auto i : c10::irange(100)) {
     in_[i] = i;
   }
   std::vector<float> in_rf_(10, -2.f);
   std::vector<float> out(1, -1.f);
 
-  Tensor l1 = Reduce("l1", {{10, "i"}}, Sum(), in, {{10, "j"}});
-  Placeholder in_rf(BufHandle(l1.buf()));
+  Tensor l1 = Reduce("l1", {10}, Sum(), in, {10});
+  BufHandle in_rf(l1.buf());
 
-  Tensor l2 = Reduce("l2", {}, Sum(), in_rf, {{10, "i"}});
+  Tensor l2 = Reduce("l2", {}, Sum(), in_rf, {10});
 
   LoopNest loop({l1, l2});
   loop.prepareForCodegen();
@@ -499,14 +495,12 @@ TEST(Reductions, ReduceAsProducer) {
   const int M = 10;
   VarHandle m("m", kInt);
 
-  Placeholder a(BufHandle("a", {2, 3}, kFloat));
-  Placeholder b(BufHandle("b", {2, 3, m}, kFloat));
+  BufHandle a("a", {2, 3}, kFloat);
+  BufHandle b("b", {2, 3, m}, kFloat);
 
-  Tensor c = Reduce("sum", {{2, "l1"}, {3, "n1"}}, Sum(), b, {{m, "m1"}});
-  Tensor d = Compute(
-      "scale",
-      {{2, "l2"}, {3, "n1"}},
-      [&](const VarHandle& l, const VarHandle& n) {
+  Tensor c = Reduce("sum", {2, 3}, Sum(), b, {m});
+  Tensor d =
+      Compute("scale", {2, 3}, [&](const VarHandle& l, const VarHandle& n) {
         return c.load(l, n) * a.load(l, n);
       });
   LoopNest loop({d}, {c, d});
@@ -522,14 +516,14 @@ TEST(Reductions, ReduceAsProducer) {
 
   for (int i = 0; i < 2 * 3; ++i) {
     aData[i] = 6 - i;
-    for (int j = 0; j < M; ++j) {
+    for (const auto j : c10::irange(M)) {
       bData[i * M + j] = j;
     }
   }
 
   cg.call({aData, bData, dData, M});
   float expected = 0;
-  for (int i = 0; i < M; ++i) {
+  for (const auto i : c10::irange(M)) {
     // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
     expected += i;
   }
@@ -542,16 +536,16 @@ TEST(Reductions, ReduceAsConsumer) {
   const int M = 10;
   VarHandle m("m", kInt);
 
-  Placeholder a(BufHandle("a", {2, 3, m}, kFloat));
-  Placeholder b(BufHandle("b", {2, 3, m}, kFloat));
+  BufHandle a("a", {2, 3, m}, kFloat);
+  BufHandle b("b", {2, 3, m}, kFloat);
 
   Tensor c = Compute(
       "scale",
-      {{2, "l2"}, {3, "n1"}, {m, "m1"}},
+      {2, 3, m},
       [&](const VarHandle& l, const VarHandle& n, const VarHandle& m) {
         return b.load(l, n, m) * a.load(l, n, m);
       });
-  Tensor d = Reduce("sum", {{2, "l1"}}, Sum(), c, {{3, "n1"}, {m, "m1"}});
+  Tensor d = Reduce("sum", {2}, Sum(), c, {3, m});
   LoopNest loop({d}, {c, d});
   loop.prepareForCodegen();
   StmtPtr s = loop.root_stmt();
@@ -564,7 +558,7 @@ TEST(Reductions, ReduceAsConsumer) {
   std::vector<float> dData(2, 6.0f);
 
   for (int i = 0; i < 2 * 3; ++i) {
-    for (int j = 0; j < M; ++j) {
+    for (const auto j : c10::irange(M)) {
       bData[i * M + j] = j + 1;
       aData[i * M + j] = 6 - i;
     }
@@ -573,32 +567,32 @@ TEST(Reductions, ReduceAsConsumer) {
   cg.call({aData, bData, dData, M});
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
   float expected[2] = {0, 0};
-  for (int i = 0; i < 2; ++i) {
-    for (int j = 0; j < 3; ++j) {
-      for (int k = 0; k < M; ++k) {
+  for (const auto i : c10::irange(2)) {
+    for (const auto j : c10::irange(3)) {
+      for (const auto k : c10::irange(M)) {
         // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers,bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
         expected[i] += (k + 1) * (6 - (i * 3 + j));
       }
     }
   }
 
-  for (int i = 0; i < 2; ++i) {
+  for (const auto i : c10::irange(2)) {
     ASSERT_EQ(dData[i], expected[i]);
   }
 }
 
 TEST(Reductions, SplitReduceAxis) {
-  Placeholder in(BufHandle("in", {16, 8}, kFloat));
+  BufHandle in("in", {16, 8}, kFloat);
 
   std::vector<float> in_(16 * 8);
-  for (int i = 0; i < 16; ++i) {
-    for (int j = 0; j < 8; ++j) {
+  for (const auto i : c10::irange(16)) {
+    for (const auto j : c10::irange(8)) {
       in_[i * 8 + j] = i;
     }
   }
   std::vector<float> out(16, -1.f);
 
-  Tensor tensor = Reduce("sum", {{16, "m"}}, Sum(), in, {{8, "n"}});
+  Tensor tensor = Reduce("sum", {16}, Sum(), in, {8});
   LoopNest l({tensor});
   std::vector<ForPtr> loops = l.getLoopStmtsFor(tensor);
   LoopNest::splitWithTail(loops[1], 2);
@@ -611,22 +605,22 @@ TEST(Reductions, SplitReduceAxis) {
   SimpleIREvaluator cg(s, {in, tensor});
   cg.call({in_, out});
 
-  for (int i = 0; i < 16; ++i) {
+  for (const auto i : c10::irange(16)) {
     ASSERT_EQ(out[i], i * 8);
   }
 }
 
 TEST(Reductions, SplitNonReduceAxis) {
-  Placeholder in(BufHandle("in", {16, 8}, kFloat));
+  BufHandle in("in", {16, 8}, kFloat);
 
   std::vector<float> in_(16 * 8);
-  for (int i = 0; i < 16; ++i) {
-    for (int j = 0; j < 8; ++j) {
+  for (const auto i : c10::irange(16)) {
+    for (const auto j : c10::irange(8)) {
       in_[i * 8 + j] = i;
     }
   }
   std::vector<float> out(16, -1.f);
-  Tensor tensor = Reduce("sum", {{16, "m"}}, Sum(), in, {{8, "n"}});
+  Tensor tensor = Reduce("sum", {16}, Sum(), in, {8});
   LoopNest l({tensor});
   std::vector<ForPtr> loops = l.getLoopStmtsFor(tensor);
   LoopNest::splitWithTail(loops[0], 2);
@@ -640,7 +634,7 @@ TEST(Reductions, SplitNonReduceAxis) {
   SimpleIREvaluator cg(s, {in, tensor});
   cg.call({in_, out});
 
-  for (int i = 0; i < 16; ++i) {
+  for (const auto i : c10::irange(16)) {
     ASSERT_EQ(out[i], i * 8);
   }
 }
@@ -653,17 +647,17 @@ TEST(Reductions, ReorderedReductionInitializer) {
         SumOp(c(k, n), 0, a(k, m, n), {m})
   */
 
-  Placeholder in(BufHandle("in", {1, 12, 6}, kFloat));
+  BufHandle in("in", {1, 12, 6}, kFloat);
   std::vector<float> in_(12 * 6, 1.f);
 
-  Tensor tensor_ = Reduce("sum", {{1, "k"}, {12, "n"}}, Sum(), in, {{6, "m"}});
+  Tensor tensor_ = Reduce("sum", {1, 12}, Sum(), in, {6});
   LoopNest l_({tensor_});
 
   l_.prepareForCodegen();
   StmtPtr s_ = Stmt::clone(l_.root_stmt());
   s_ = IRSimplifier::simplify(s_);
 
-  Tensor tensor = Reduce("sum", {{1, "k"}, {12, "n"}}, Sum(), in, {{6, "m"}});
+  Tensor tensor = Reduce("sum", {1, 12}, Sum(), in, {6});
   LoopNest l({tensor});
 
   auto loops = l.getLoopStmtsFor(tensor);
@@ -689,7 +683,7 @@ TEST(Reductions, ReorderedReductionInitializer) {
   SimpleIREvaluator cg2(s, {in, tensor});
   cg2.call({in_, out2});
 
-  for (int i = 0; i < 16; ++i) {
+  for (const auto i : c10::irange(16)) {
     ASSERT_EQ(out1[i], out2[i]);
   }
 }
@@ -700,7 +694,7 @@ TEST(Reductions, ReduceRfactor) {
   VarHandle m("m", kInt);
   VarHandle n("n", kInt);
 
-  Placeholder b(BufHandle("b", {m, n}, kFloat));
+  BufHandle b("b", {m, n}, kFloat);
   std::vector<float> in(M * N);
   for (int j = 0; j < M * N; ++j) {
     in[j] = j;
@@ -708,7 +702,7 @@ TEST(Reductions, ReduceRfactor) {
 
   std::vector<float> out(1, -1.f);
 
-  Tensor c = Reduce("sum", {}, Sum(), b, {{m, "m"}, {n, "n"}});
+  Tensor c = Reduce("sum", {}, Sum(), b, {m, n});
   LoopNest loop({c});
   std::vector<ForPtr> loops = loop.getLoopStmtsFor(c);
   auto c_body = loop.getAllWritesToBuf(c.buf())[1];
@@ -733,7 +727,7 @@ TEST(Reductions, Reduce3DRfactorInner) {
   VarHandle n("n", kInt);
   VarHandle k("k", kInt);
 
-  Placeholder b(BufHandle("b", {m, n, k}, kFloat));
+  BufHandle b("b", {m, n, k}, kFloat);
   std::vector<float> in(M * N * K);
   for (int j = 0; j < M * N * K; ++j) {
     in[j] = j;
@@ -741,7 +735,7 @@ TEST(Reductions, Reduce3DRfactorInner) {
 
   std::vector<float> out(1, -1.f);
 
-  Tensor c = Reduce("sum", {}, Sum(), b, {{m, "m"}, {n, "n"}, {k, "k"}});
+  Tensor c = Reduce("sum", {}, Sum(), b, {m, n, k});
   LoopNest loop({c});
   std::vector<ForPtr> loops = loop.getLoopStmtsFor(c);
   auto c_body = loop.getAllWritesToBuf(c.buf())[1];
@@ -766,7 +760,7 @@ TEST(Reductions, Reduce3DRfactorOuter) {
   VarHandle n("n", kInt);
   VarHandle k("k", kInt);
 
-  Placeholder b(BufHandle("b", {m, n, k}, kFloat));
+  BufHandle b("b", {m, n, k}, kFloat);
   std::vector<float> in(M * N * K);
   for (int j = 0; j < M * N * K; ++j) {
     in[j] = j;
@@ -774,7 +768,7 @@ TEST(Reductions, Reduce3DRfactorOuter) {
 
   std::vector<float> out(1, -1.f);
 
-  Tensor c = Reduce("sum", {}, Sum(), b, {{m, "m"}, {n, "n"}, {k, "k"}});
+  Tensor c = Reduce("sum", {}, Sum(), b, {m, n, k});
   LoopNest loop({c});
   std::vector<ForPtr> loops = loop.getLoopStmtsFor(c);
   auto c_body = loop.getAllWritesToBuf(c.buf())[1];
@@ -791,23 +785,18 @@ TEST(Reductions, Reduce3DRfactorOuter) {
 }
 
 TEST(Reductions, ReduceRepeatedInternalRfactor) {
-  Placeholder in_(BufHandle("in_", {2, 3, 4, 5, 6}, kFloat));
+  BufHandle in_("in_", {2, 3, 4, 5, 6}, kFloat);
   const int InputSize = 2 * 3 * 4 * 5 * 6;
 
   std::vector<float> in(InputSize, 1.f);
   std::vector<float> out(1, -1.f);
   std::vector<float> ref(1, -1.f);
 
-  Tensor c = Reduce(
-      "sum",
-      {},
-      Sum(),
-      in_,
-      {{2, "a"}, {3, "b"}, {4, "c"}, {5, "d"}, {6, "e"}});
+  Tensor c = Reduce("sum", {}, Sum(), in_, {2, 3, 4, 5, 6});
   LoopNest orig_loop({c});
 
   // Try rfactoring N outer loops
-  for (int rfac_number = 1; rfac_number < 5; rfac_number++) {
+  for (const auto rfac_number : c10::irange(1, 5)) {
     LoopNest refloop(orig_loop);
     LoopNest loop(orig_loop);
     refloop.prepareForCodegen();
@@ -817,7 +806,7 @@ TEST(Reductions, ReduceRepeatedInternalRfactor) {
 
     BufPtr tmp_buf = c.buf();
 
-    for (int idx = 0; idx < rfac_number; idx++) {
+    for (const auto idx : c10::irange(rfac_number)) {
       auto reduce = loop.getAllWritesToBuf(tmp_buf)[1];
       ASSERT_TRUE(loop.rfactor(
           reduce, loop.getLoopStmtsFor(tmp_buf).at(idx), &tmp_buf));
@@ -840,16 +829,16 @@ TEST(Reductions, ReduceSplitTail) {
   const int N = 10;
   const int K = 10;
 
-  Placeholder b(BufHandle("b", {M, N, K}, kFloat));
+  BufHandle b("b", {M, N, K}, kFloat);
   std::vector<float> in(M * N * K);
   for (int j = 0; j < M * N * K; ++j) {
     in[j] = j;
   }
 
-  for (int i = 0; i < 3; ++i) {
+  for (const auto i : c10::irange(3)) {
     std::vector<float> out(M, -1.f);
 
-    Tensor c = Reduce("sum", {{M, "m"}}, Sum(), b, {{N, "n"}, {K, "k"}});
+    Tensor c = Reduce("sum", {M}, Sum(), b, {N, K});
     LoopNest loop({c});
     std::vector<ForPtr> loops = loop.getLoopStmtsFor(c);
     LoopNest::splitWithTail(loops[i], 8);
@@ -870,16 +859,16 @@ TEST(Reductions, ReduceSplitNoTail) {
   const int M = 10;
   const int N = 10;
   const int K = 10;
-  Placeholder b(BufHandle("b", {M, N, K}, kFloat));
+  BufHandle b("b", {M, N, K}, kFloat);
   std::vector<float> in(M * N * K);
   for (int j = 0; j < M * N * K; ++j) {
     in[j] = j;
   }
 
-  for (int i = 0; i < 3; ++i) {
+  for (const auto i : c10::irange(3)) {
     std::vector<float> out(M, -1.f);
 
-    Tensor c = Reduce("sum", {{M, "m"}}, Sum(), b, {{N, "n"}, {K, "k"}});
+    Tensor c = Reduce("sum", {M}, Sum(), b, {N, K});
     LoopNest loop({c});
     std::vector<ForPtr> loops = loop.getLoopStmtsFor(c);
     LoopNest::splitWithTail(loops[i], 5);
@@ -902,16 +891,16 @@ TEST(Reductions, ReduceOverSplitTail) {
   const int N = 10;
   const int K = 10;
 
-  Placeholder b(BufHandle("b", {M, N, K}, kFloat));
+  BufHandle b("b", {M, N, K}, kFloat);
   std::vector<float> in(M * N * K);
   for (int j = 0; j < M * N * K; ++j) {
     in[j] = j;
   }
 
-  for (int i = 0; i < 3; ++i) {
+  for (const auto i : c10::irange(3)) {
     std::vector<float> out(M, -1.f);
 
-    Tensor c = Reduce("sum", {{M, "m"}}, Sum(), b, {{N, "n"}, {K, "k"}});
+    Tensor c = Reduce("sum", {M}, Sum(), b, {N, K});
     LoopNest loop({c});
     std::vector<ForPtr> loops = loop.getLoopStmtsFor(c);
     LoopNest::splitWithTail(loops[i], 16);
@@ -933,16 +922,16 @@ TEST(Reductions, ReduceSplitMask) {
   const int N = 10;
   const int K = 10;
 
-  Placeholder b(BufHandle("b", {M, N, K}, kFloat));
+  BufHandle b("b", {M, N, K}, kFloat);
   std::vector<float> in(M * N * K);
   for (int j = 0; j < M * N * K; ++j) {
     in[j] = j;
   }
 
-  for (int i = 0; i < 3; ++i) {
+  for (const auto i : c10::irange(3)) {
     std::vector<float> out(M, -1.f);
 
-    Tensor c = Reduce("sum", {{M, "m"}}, Sum(), b, {{N, "n"}, {K, "k"}});
+    Tensor c = Reduce("sum", {M}, Sum(), b, {N, K});
     LoopNest loop({c});
     std::vector<ForPtr> loops = loop.getLoopStmtsFor(c);
     LoopNest::splitWithMask(loops[i], 8);
@@ -963,16 +952,16 @@ TEST(Reductions, ReduceSplitNoMask) {
   const int M = 10;
   const int N = 10;
   const int K = 10;
-  Placeholder b(BufHandle("b", {M, N, K}, kFloat));
+  BufHandle b("b", {M, N, K}, kFloat);
   std::vector<float> in(M * N * K);
   for (int j = 0; j < M * N * K; ++j) {
     in[j] = j;
   }
 
-  for (int i = 0; i < 3; ++i) {
+  for (const auto i : c10::irange(3)) {
     std::vector<float> out(M, -1.f);
 
-    Tensor c = Reduce("sum", {{M, "m"}}, Sum(), b, {{N, "n"}, {K, "k"}});
+    Tensor c = Reduce("sum", {M}, Sum(), b, {N, K});
     LoopNest loop({c});
     std::vector<ForPtr> loops = loop.getLoopStmtsFor(c);
     LoopNest::splitWithMask(loops[i], 5);
@@ -994,16 +983,16 @@ TEST(Reductions, ReduceOverSplitMask) {
   const int N = 10;
   const int K = 10;
 
-  Placeholder b(BufHandle("b", {M, N, K}, kFloat));
+  BufHandle b("b", {M, N, K}, kFloat);
   std::vector<float> in(M * N * K);
   for (int j = 0; j < M * N * K; ++j) {
     in[j] = j;
   }
 
-  for (int i = 0; i < 3; ++i) {
+  for (const auto i : c10::irange(3)) {
     std::vector<float> out(M, -1.f);
 
-    Tensor c = Reduce("sum", {{M, "m"}}, Sum(), b, {{N, "n"}, {K, "k"}});
+    Tensor c = Reduce("sum", {M}, Sum(), b, {N, K});
     LoopNest loop({c});
     std::vector<ForPtr> loops = loop.getLoopStmtsFor(c);
     LoopNest::splitWithMask(loops[i], 16);
@@ -1027,9 +1016,9 @@ TEST(Reductions, ReduceSplitRfactor) {
   const int K = 10;
   const int SPLIT_FACTOR = 4;
 
-  Placeholder b(BufHandle("b", {M, N, K}, kFloat));
+  BufHandle b("b", {M, N, K}, kFloat);
   std::vector<float> in(M * N * K);
-  for (int m = 0; m < M; ++m) {
+  for (const auto m : c10::irange(M)) {
     for (int j = 0; j < N * K; ++j) {
       in[m * N * K + j] = j;
     }
@@ -1037,7 +1026,7 @@ TEST(Reductions, ReduceSplitRfactor) {
 
   std::vector<float> out(M, -1.f);
 
-  Tensor c = Reduce("sum", {{M, "m"}}, Sum(), b, {{N, "n"}, {K, "k"}});
+  Tensor c = Reduce("sum", {M}, Sum(), b, {N, K});
   LoopNest loop({c});
   std::vector<ForPtr> loops = loop.getLoopStmtsFor(c);
   LoopNest::splitWithTail(loops[2], SPLIT_FACTOR);
@@ -1056,7 +1045,8 @@ TEST(Reductions, ReduceSplitRfactor) {
   SimpleIREvaluator cg(s, {b, c});
 
   cg.call({in, out});
-  for (int i = 0; i < M; ++i) {
+  for (const auto i : c10::irange(M)) {
+    (void)i; // Suppress unused variable warning
     ASSERT_EQ(out[0], 4950);
   }
 }
@@ -1068,7 +1058,7 @@ TEST(Reductions, ReduceOverSplitRfactor) {
   const int K = 10;
   const int SPLIT_FACTOR = 16;
 
-  Placeholder b(BufHandle("b", {N, K}, kFloat));
+  BufHandle b("b", {N, K}, kFloat);
   std::vector<float> in(N * K);
   for (int j = 0; j < N * K; ++j) {
     in[j] = j;
@@ -1076,7 +1066,7 @@ TEST(Reductions, ReduceOverSplitRfactor) {
 
   std::vector<float> out(1, -1.f);
 
-  Tensor c = Reduce("sum", {}, Sum(), b, {{N, "n"}, {K, "k"}});
+  Tensor c = Reduce("sum", {}, Sum(), b, {N, K});
   LoopNest loop({c});
   std::vector<ForPtr> loops = loop.getLoopStmtsFor(c);
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
@@ -1100,7 +1090,7 @@ TEST(Reductions, ReduceOverSplitRfactor) {
   ASSERT_EQ(out[0], 4950);
 
   std::ostringstream oss;
-  oss << *s;
+  oss << *cg.stmt();
 
   // Check the IR to verify the rfactored reduce is eliminated.
   // TODO: The alloc free should be eliminated here since it is size 0.
@@ -1123,23 +1113,22 @@ TEST(Reductions, ReduceInlineReduction) {
   const int N = 5;
   const int K = 6;
 
-  Placeholder a_buf("a", kFloat, {M});
-  Placeholder b_buf("b", kFloat, {M, N, K});
+  BufHandle a_buf("a", {M}, kFloat);
+  BufHandle b_buf("b", {M, N, K}, kFloat);
 
-  Tensor x = Reduce("x", {{M, "m1"}}, Sum(), b_buf, {{N, "n1"}, {K, "k1"}});
-  Tensor y = Compute("y", {{M, "m2"}}, [&](const VarHandle& m) {
-    return a_buf.load(m) + x.load(m);
-  });
+  Tensor x = Reduce("x", {M}, Sum(), b_buf, {N, K});
+  Tensor y = Compute(
+      "y", {M}, [&](const VarHandle& m) { return a_buf.load(m) + x.load(m); });
 
   PaddedBuffer<float> a_v(M);
   PaddedBuffer<float> b_v(M, N, K);
 
-  for (int i = 0; i < M; i++) {
+  for (const auto i : c10::irange(M)) {
     a_v(i) = i * i;
   }
-  for (int i = 0; i < M; i++) {
-    for (int j = 0; j < N; j++) {
-      for (int k = 0; k < K; k++) {
+  for (const auto i : c10::irange(M)) {
+    for (const auto j : c10::irange(N)) {
+      for (const auto k : c10::irange(K)) {
         b_v(i, j, k) = j * j * k;
       }
     }
@@ -1155,23 +1144,23 @@ TEST(Reductions, ReduceInlineConsumer) {
   const int N = 5;
   const int K = 6;
 
-  Placeholder a_buf("a", kFloat, {M, N, K});
-  Placeholder b_buf("b", kFloat, {M, N, K});
+  BufHandle a_buf("a", {M, N, K}, kFloat);
+  BufHandle b_buf("b", {M, N, K}, kFloat);
 
   Tensor x = Compute(
       "x",
-      {{M, "m1"}, {N, "n1"}, {K, "k1"}},
+      {M, N, K},
       [&](const VarHandle& m, const VarHandle& n, const VarHandle& k) {
         return a_buf.load(m, n, k) + b_buf.load(m, n, k);
       });
-  Tensor y = Reduce("y", {{M, "m2"}}, Sum(), x, {{N, "n2"}, {K, "k2"}});
+  Tensor y = Reduce("y", {M}, Sum(), x, {N, K});
 
   PaddedBuffer<float> a_v(M, N, K);
   PaddedBuffer<float> b_v(M, N, K);
 
-  for (int i = 0; i < M; i++) {
-    for (int j = 0; j < N; j++) {
-      for (int k = 0; k < K; k++) {
+  for (const auto i : c10::irange(M)) {
+    for (const auto j : c10::irange(N)) {
+      for (const auto k : c10::irange(K)) {
         a_v(i, j, k) = i * i + k;
         b_v(i, j, k) = j * j + k;
       }
@@ -1208,12 +1197,12 @@ TEST(Reductions, ReduceInlineReducerInternal) {
   const int N = 5;
   const int K = 6;
 
-  Placeholder a_buf("a", kFloat, {M, N, K});
-  Placeholder b_buf("b", kFloat, {M, N, K});
+  BufHandle a_buf("a", {M, N, K}, kFloat);
+  BufHandle b_buf("b", {M, N, K}, kFloat);
 
   Tensor x = Compute(
       "x",
-      {{M, "m1"}, {N, "n1"}, {K, "k1"}},
+      {M, N, K},
       [&](const VarHandle& m, const VarHandle& n, const VarHandle& k) {
         return a_buf.load(m, n, k) + b_buf.load(m, n, k);
       });
@@ -1221,14 +1210,14 @@ TEST(Reductions, ReduceInlineReducerInternal) {
   Reducer minimum(ExprHandle(0.f), [&](ExprHandle a, ExprHandle b) {
     return Add::make(ExprHandle(1.f), Min::make(a, b, false));
   });
-  Tensor y = Reduce("y", {{M, "m2"}}, minimum, x, {{N, "n2"}, {K, "k2"}});
+  Tensor y = Reduce("y", {M}, minimum, x, {N, K});
 
   PaddedBuffer<float> a_v(M, N, K);
   PaddedBuffer<float> b_v(M, N, K);
 
-  for (int i = 0; i < M; i++) {
-    for (int j = 0; j < N; j++) {
-      for (int k = 0; k < K; k++) {
+  for (const auto i : c10::irange(M)) {
+    for (const auto j : c10::irange(N)) {
+      for (const auto k : c10::irange(K)) {
         a_v(i, j, k) = i * i + k;
         b_v(i, j, k) = j * j + k;
       }
@@ -1265,48 +1254,50 @@ TEST(Reductions, ReductionCacheAccessesOperatorAxis) {
   int N = 3;
   int M = 2;
 
-  Placeholder a(BufHandle("a", {L, N, M}, kFloat));
-  Placeholder b(BufHandle("b", {L, N, M}, kFloat));
+  BufHandle a("a", {L, N, M}, kFloat);
+  BufHandle b("b", {L, N, M}, kFloat);
 
   Tensor c = Compute(
       "scale",
-      {{L, "l2"}, {N, "n1"}, {M, "m1"}},
+      {L, N, M},
       [&](const VarHandle& l, const VarHandle& n, const VarHandle& m) {
         return b.load(l, n, m) * a.load(l, n, m);
       });
-  Tensor d = Reduce("sum", {{L, "l1"}}, Sum(), c, {{N, "n1"}, {M, "m1"}});
+  Tensor d = Reduce("sum", {L}, Sum(), c, {N, M});
 
-  Tensor e = Compute("scale", {{L, "l"}}, [&](const VarHandle& l) {
+  Tensor e = Compute("scale", {L}, [&](const VarHandle& l) {
     return b.load(0, 0, l) * d.load(l);
   });
 
   LoopNest l({e}, {c, d, e});
   LoopNest l_before(l);
   l_before.prepareForCodegen();
-  SimpleIREvaluator cg_before(l_before.root_stmt(), {a, b, e});
+  SimpleIREvaluator cg_before(
+      LoopNest::sanitizeNames(l_before.root_stmt()), {a, b, e});
 
   StmtPtr d_loop = l.getLoopStmtsFor(d)[0];
   l.cacheAccesses(d.buf(), "d_local", d_loop);
   l.prepareForCodegen();
 
-  StmtPtr result = IRSimplifier::simplify(l.root_stmt());
+  StmtPtr result =
+      LoopNest::sanitizeNames(IRSimplifier::simplify(l.root_stmt()));
   SimpleIREvaluator cg_after(result, {a, b, e});
 
   std::ostringstream oss;
-  oss << *result;
+  oss << *cg_after.stmt();
   const std::string& expected_ir =
       R"IR(
 #CHECK: Allocate(d_local); // dtype=float, dims=[4]
-#CHECK: for (int l1
-#CHECK:   d_local[l1] = 0.f
-#CHECK:   for (int n1
-#CHECK:     for (int m1
-#CHECK:       d_local[l1] = (d_local[l1]) + (scale[
+#CHECK: for (int i_2
+#CHECK:   d_local[i_2] = 0.f
+#CHECK:   for (int
+#CHECK:     for (int
+#CHECK:       d_local[i_2] = (d_local[i_2]) + (scale[
 #CHECK:     }
 #CHECK:   }
 #CHECK: }
-#CHECK: for (int i
-#CHECK:   sum[i] = d_local[i]
+#CHECK: for (int i_3
+#CHECK:   sum[i_3] = d_local[i_3]
 #CHECK: Free(d_local);
 #CHECK-NOT: d_local
       )IR";
@@ -1319,9 +1310,9 @@ TEST(Reductions, ReductionCacheAccessesOperatorAxis) {
   PaddedBuffer<float> e_before(L, "e_before");
   PaddedBuffer<float> e_after(L, "e_after");
 
-  for (int l = 0; l < L; l++) {
-    for (int m = 0; m < M; m++) {
-      for (int n = 0; n < N; n++) {
+  for (const auto l : c10::irange(L)) {
+    for (const auto m : c10::irange(M)) {
+      for (const auto n : c10::irange(N)) {
         a_v(l, m, n) = at::randn({1}).item().to<float>();
         b_v(l, m, n) = at::randn({1}).item().to<float>();
       }
@@ -1340,18 +1331,18 @@ TEST(Reductions, ReductionCacheAccessesOuterReduceAxis) {
   int N = 3;
   int M = 2;
 
-  Placeholder a(BufHandle("a", {L, N, M}, kFloat));
-  Placeholder b(BufHandle("b", {L, N, M}, kFloat));
+  BufHandle a("a", {L, N, M}, kFloat);
+  BufHandle b("b", {L, N, M}, kFloat);
 
   Tensor c = Compute(
       "scale",
-      {{L, "l2"}, {N, "n1"}, {M, "m1"}},
+      {L, N, M},
       [&](const VarHandle& l, const VarHandle& n, const VarHandle& m) {
         return b.load(l, n, m) * a.load(l, n, m);
       });
-  Tensor d = Reduce("sum", {{L, "l1"}}, Sum(), c, {{N, "n1"}, {M, "m1"}});
+  Tensor d = Reduce("sum", {L}, Sum(), c, {N, M});
 
-  Tensor e = Compute("scale", {{L, "l"}}, [&](const VarHandle& l) {
+  Tensor e = Compute("scale", {L}, [&](const VarHandle& l) {
     return b.load(0, 0, l) * d.load(l);
   });
 
@@ -1364,22 +1355,23 @@ TEST(Reductions, ReductionCacheAccessesOuterReduceAxis) {
   l.cacheAccesses(d.buf(), "d_local", d_loop);
   l.prepareForCodegen();
 
-  StmtPtr result = IRSimplifier::simplify(l.root_stmt());
+  StmtPtr result =
+      LoopNest::sanitizeNames(IRSimplifier::simplify(l.root_stmt()));
   SimpleIREvaluator cg_after(result, {a, b, e});
 
   std::ostringstream oss;
-  oss << *result;
+  oss << *cg_after.stmt();
   const std::string& expected_ir =
       R"IR(
 #CHECK: Allocate(d_local); // dtype=float, dims=[1]
-#CHECK: sum[l1] = 0
-#CHECK: d_local[0] = sum[l1]
-#CHECK: for (int n1
-#CHECK:   for (int m1
+#CHECK: sum[i_1] = 0
+#CHECK: d_local[0] = sum[i_1]
+#CHECK: for (int j_1
+#CHECK:   for (int k_1
 #CHECK: d_local[0] = (d_local[0]) + (scale[
 #CHECK:   }
 #CHECK: }
-#CHECK: sum[l1] = d_local[0]
+#CHECK: sum[i_1] = d_local[0]
 #CHECK: Free(d_local);
 #CHECK-NOT: d_local
       )IR";
@@ -1392,9 +1384,9 @@ TEST(Reductions, ReductionCacheAccessesOuterReduceAxis) {
   PaddedBuffer<float> e_before(L, "e_before");
   PaddedBuffer<float> e_after(L, "e_after");
 
-  for (int l = 0; l < L; l++) {
-    for (int m = 0; m < M; m++) {
-      for (int n = 0; n < N; n++) {
+  for (const auto l : c10::irange(L)) {
+    for (const auto m : c10::irange(M)) {
+      for (const auto n : c10::irange(N)) {
         a_v(l, m, n) = at::randn({1}).item().to<float>();
         b_v(l, m, n) = at::randn({1}).item().to<float>();
       }
@@ -1413,18 +1405,18 @@ TEST(Reductions, ReductionCacheAccessesInnerReduceAxis) {
   int N = 3;
   int M = 2;
 
-  Placeholder a(BufHandle("a", {L, N, M}, kFloat));
-  Placeholder b(BufHandle("b", {L, N, M}, kFloat));
+  BufHandle a("a", {L, N, M}, kFloat);
+  BufHandle b("b", {L, N, M}, kFloat);
 
   Tensor c = Compute(
       "scale",
-      {{L, "l2"}, {N, "n1"}, {M, "m1"}},
+      {L, N, M},
       [&](const VarHandle& l, const VarHandle& n, const VarHandle& m) {
         return b.load(l, n, m) * a.load(l, n, m);
       });
-  Tensor d = Reduce("sum", {{L, "l1"}}, Sum(), c, {{N, "n1"}, {M, "m1"}});
+  Tensor d = Reduce("sum", {L}, Sum(), c, {N, M});
 
-  Tensor e = Compute("scale", {{L, "l"}}, [&](const VarHandle& l) {
+  Tensor e = Compute("scale", {L}, [&](const VarHandle& l) {
     return b.load(0, 0, l) * d.load(l);
   });
 
@@ -1437,21 +1429,22 @@ TEST(Reductions, ReductionCacheAccessesInnerReduceAxis) {
   l.cacheAccesses(d.buf(), "d_local", d_loop);
   l.prepareForCodegen();
 
-  StmtPtr result = IRSimplifier::simplify(l.root_stmt());
+  StmtPtr result =
+      LoopNest::sanitizeNames(IRSimplifier::simplify(l.root_stmt()));
   SimpleIREvaluator cg_after(result, {a, b, e});
 
   std::ostringstream oss;
-  oss << *result;
+  oss << *cg_after.stmt();
   const std::string& expected_ir =
       R"IR(
 #CHECK: Allocate(d_local); // dtype=float, dims=[1]
-#CHECK: sum[l1] = 0
-#CHECK: for (int n1
+#CHECK: sum[i_1] = 0
+#CHECK: for (int
 #CHECK:   d_local[0] = 0
-#CHECK:   for (int m1
+#CHECK:   for (int
 #CHECK:     d_local[0] = (d_local[0]) + (scale[
 #CHECK:   }
-#CHECK:   sum[l1] = (sum[l1]) + (d_local[0])
+#CHECK:   sum[i_1] = (sum[i_1]) + (d_local[0])
 #CHECK: }
 #CHECK: Free(d_local);
 #CHECK-NOT: d_local
@@ -1465,9 +1458,9 @@ TEST(Reductions, ReductionCacheAccessesInnerReduceAxis) {
   PaddedBuffer<float> e_before(L, "e_before");
   PaddedBuffer<float> e_after(L, "e_after");
 
-  for (int l = 0; l < L; l++) {
-    for (int m = 0; m < M; m++) {
-      for (int n = 0; n < N; n++) {
+  for (const auto l : c10::irange(L)) {
+    for (const auto m : c10::irange(M)) {
+      for (const auto n : c10::irange(N)) {
         a_v(l, m, n) = at::randn({1}).item().to<float>();
         b_v(l, m, n) = at::randn({1}).item().to<float>();
       }
@@ -1482,18 +1475,18 @@ TEST(Reductions, ReductionCacheAccessesInnerReduceAxis) {
 }
 
 TEST(Reductions, ReductionCacheBodyAccess) {
-  Placeholder a(BufHandle("a", {24, 32, 12}, kFloat));
-  Placeholder b(BufHandle("b", {24, 32, 12}, kFloat));
+  BufHandle a("a", {24, 32, 12}, kFloat);
+  BufHandle b("b", {24, 32, 12}, kFloat);
 
   Tensor c = Compute(
       "scale",
-      {{24, "l2"}, {32, "n1"}, {12, "m1"}},
+      {24, 32, 12},
       [&](const VarHandle& l, const VarHandle& n, const VarHandle& m) {
         return b.load(l, n, m) * a.load(l, n, m);
       });
-  Tensor d = Reduce("sum", {{24, "l1"}}, Sum(), c, {{32, "n1"}, {12, "m1"}});
+  Tensor d = Reduce("sum", {24}, Sum(), c, {32, 12});
 
-  Tensor e = Compute("scale", {{24, "l"}}, [&](const VarHandle& l) {
+  Tensor e = Compute("scale", {24}, [&](const VarHandle& l) {
     return b.load(0, 0, l) * d.load(l);
   });
 
@@ -1503,36 +1496,38 @@ TEST(Reductions, ReductionCacheBodyAccess) {
   l.cacheAccesses(c.buf(), "scale_local", d_loop);
 
   l.prepareForCodegen();
-  StmtPtr result = IRSimplifier::simplify(l.root_stmt());
+  StmtPtr result =
+      LoopNest::sanitizeNames(IRSimplifier::simplify(l.root_stmt()));
+  SimpleIREvaluator cg(result, {a, b, e});
 
   std::ostringstream oss;
-  oss << *result;
+  oss << *cg.stmt();
   const std::string& expected_ir =
       R"IR(
 #CHECK: Allocate(scale_local); // dtype=float, dims=[1, 32, 12]
-#CHECK: for (int j = 0; j < 32; j++) {
-#CHECK:   for (int k = 0; k < 12; k++) {
-#CHECK:     scale_local[k + 12 * j] = scale[(k + 12 * j) + 384 * l1];
-#CHECK: sum[l1] = (sum[l1]) + (scale_local[m1_1 + 12 * n1_1]);
-#CHECK: scale_1[l] = (b[l]) * (sum[l]);
+#CHECK: for (int j_1 = 0; j_1 < 32; j_1++) {
+#CHECK:   for (int k_1 = 0; k_1 < 12; k_1++) {
+#CHECK:     scale_local[k_1 + 12 * j_1] = scale[(k_1 + 12 * j_1) + 384 * i_1];
+#CHECK: sum[i_1] = (sum[i_1]) + (scale_local[k_2 + 12 * j_2]);
+#CHECK: scale_1[i_2] = (b[i_2]) * (sum[i_2]);
 #CHECK: Free(scale_local);
       )IR";
   torch::jit::testing::FileCheck().run(expected_ir, oss.str());
 }
 
 TEST(Reductions, ReductionCacheConsumerAccess) {
-  Placeholder a(BufHandle("a", {24, 32, 12}, kFloat));
-  Placeholder b(BufHandle("b", {24, 32, 12}, kFloat));
+  BufHandle a("a", {24, 32, 12}, kFloat);
+  BufHandle b("b", {24, 32, 12}, kFloat);
 
   Tensor c = Compute(
       "scale",
-      {{24, "l2"}, {32, "n1"}, {12, "m1"}},
+      {24, 32, 12},
       [&](const VarHandle& l, const VarHandle& n, const VarHandle& m) {
         return b.load(l, n, m) * a.load(l, n, m);
       });
-  Tensor d = Reduce("sum", {{24, "l1"}}, Sum(), c, {{32, "n1"}, {12, "m1"}});
+  Tensor d = Reduce("sum", {24}, Sum(), c, {32, 12});
 
-  Tensor e = Compute("scale", {{24, "l"}}, [&](const VarHandle& l) {
+  Tensor e = Compute("scale", {24}, [&](const VarHandle& l) {
     return b.load(0, 0, l) * d.load(l);
   });
 
@@ -1544,34 +1539,36 @@ TEST(Reductions, ReductionCacheConsumerAccess) {
   l.cacheAccesses(d.buf(), "sum_local", e_loop);
   l.prepareForCodegen();
 
-  StmtPtr result = IRSimplifier::simplify(l.root_stmt());
+  StmtPtr result =
+      LoopNest::sanitizeNames(IRSimplifier::simplify(l.root_stmt()));
+  SimpleIREvaluator cg(result, {a, b, e});
 
   std::ostringstream oss;
-  oss << *result;
+  oss << *cg.stmt();
   const std::string& expected_ir =
       R"IR(
-#CHECK: Allocate(sum_local); // dtype=float, dims=[4]
-#CHECK: sum[l1] = (sum[l1]) + (scale[
-#CHECK: for (int i = 0; i < 4
-#CHECK:   sum_local[i] = sum[i + 4 * l_outer];
-#CHECK:   scale_1[l_inner + 4 * l_outer] = (b[l_inner + 4 * l_outer]) * (sum_local[l_inner]);
+#CHECK: Alias(sum_local,scale);
+#CHECK: sum[i_1] = (sum[i_1]) + (scale[
+#CHECK: for (int j_2 = 0; j_2 < 4
+#CHECK:   sum_local[j_2] = sum[j_2 + 4 * i_2];
+#CHECK:   scale_1[j_3 + 4 * i_2] = (b[j_3 + 4 * i_2]) * (sum_local[j_3]);
       )IR";
   torch::jit::testing::FileCheck().run(expected_ir, oss.str());
 }
 
 TEST(Reductions, ReductionSplitCacheConsumerAccess) {
-  Placeholder a(BufHandle("a", {24, 32, 12}, kFloat));
-  Placeholder b(BufHandle("b", {24, 32, 12}, kFloat));
+  BufHandle a("a", {24, 32, 12}, kFloat);
+  BufHandle b("b", {24, 32, 12}, kFloat);
 
   Tensor c = Compute(
       "scale",
-      {{24, "l2"}, {32, "n1"}, {12, "m1"}},
+      {24, 32, 12},
       [&](const VarHandle& l, const VarHandle& n, const VarHandle& m) {
         return b.load(l, n, m) * a.load(l, n, m);
       });
-  Tensor d = Reduce("sum", {{24, "l1"}}, Sum(), c, {{32, "n1"}, {12, "m1"}});
+  Tensor d = Reduce("sum", {24}, Sum(), c, {32, 12});
 
-  Tensor e = Compute("scale", {{24, "l"}}, [&](const VarHandle& l) {
+  Tensor e = Compute("scale", {24}, [&](const VarHandle& l) {
     return b.load(0, 0, l) * d.load(l);
   });
 
@@ -1589,35 +1586,39 @@ TEST(Reductions, ReductionSplitCacheConsumerAccess) {
   l.cacheAccesses(d.buf(), "sum_local", inner);
   l.prepareForCodegen();
 
-  StmtPtr result = IRSimplifier::simplify(l.root_stmt());
+  StmtPtr result =
+      LoopNest::sanitizeNames(IRSimplifier::simplify(l.root_stmt()));
+  SimpleIREvaluator cg(result, {a, b, e});
 
   // reduction changes but cache does not.
   std::ostringstream oss;
-  oss << *result;
+  oss << *cg.stmt();
   const std::string& expected_ir =
       R"IR(
-#CHECK: Allocate(sum_local); // dtype=float, dims=[4]
-#CHECK: sum[l1_inner + 4 * l1_outer] = (sum[l1_inner + 4 * l1_outer]) + (scale[((m1_1 + 12 * n1_1) + 1536 * l1_outer) + 384 * l1_inner]);
-#CHECK: for (int i = 0; i < 4
-#CHECK:   sum_local[i] = sum[i + 4 * l_outer];
-#CHECK:   scale_1[l_inner + 4 * l_outer] = (b[l_inner + 4 * l_outer]) * (sum_local[l_inner]);
+#CHECK: Alias(sum_local,scale);
+#CHECK:         sum[j_1 + 4 * i_1] = (sum[j_1 + 4 * i_1]) + (scale[((l + 12 * k_1) + 1536 * i_1) + 384 * j_1]);
+#CHECK: for (int i_2 = 0; i_2 < 6
+#CHECK:   for (int j_2 = 0; j_2 < 4
+#CHECK:     sum_local[j_2] = sum[j_2 + 4 * i_2];
+#CHECK:   for (int j_3 = 0; j_3 < 4
+#CHECK:     scale_1[j_3 + 4 * i_2] = (b[j_3 + 4 * i_2]) * (sum_local[j_3]);
       )IR";
   torch::jit::testing::FileCheck().run(expected_ir, oss.str());
 }
 
 TEST(Reductions, ReductionReorderCacheConsumerAccess) {
-  Placeholder a(BufHandle("a", {24, 32, 12}, kFloat));
-  Placeholder b(BufHandle("b", {24, 32, 12}, kFloat));
+  BufHandle a("a", {24, 32, 12}, kFloat);
+  BufHandle b("b", {24, 32, 12}, kFloat);
 
   Tensor c = Compute(
       "scale",
-      {{24, "l2"}, {32, "n1"}, {12, "m1"}},
+      {24, 32, 12},
       [&](const VarHandle& l, const VarHandle& n, const VarHandle& m) {
         return b.load(l, n, m) * a.load(l, n, m);
       });
-  Tensor d = Reduce("sum", {{24, "l1"}}, Sum(), c, {{32, "n1"}, {12, "m1"}});
+  Tensor d = Reduce("sum", {24}, Sum(), c, {32, 12});
 
-  Tensor e = Compute("scale", {{24, "l"}}, [&](const VarHandle& l) {
+  Tensor e = Compute("scale", {24}, [&](const VarHandle& l) {
     return b.load(0, 0, l) * d.load(l);
   });
 
@@ -1636,18 +1637,21 @@ TEST(Reductions, ReductionReorderCacheConsumerAccess) {
   l.cacheAccesses(d.buf(), "sum_local", inner);
   l.prepareForCodegen();
 
-  StmtPtr result = IRSimplifier::simplify(l.root_stmt());
+  StmtPtr result =
+      LoopNest::sanitizeNames(IRSimplifier::simplify(l.root_stmt()));
+  SimpleIREvaluator cg(result, {a, b, e});
 
   // neither reduction body not cache changes.
   std::ostringstream oss;
-  oss << *result;
+  oss << *cg.stmt();
   const std::string& expected_ir =
       R"IR(
-#CHECK: Allocate(sum_local); // dtype=float, dims=[4]
-#CHECK: sum[l1] = (sum[l1]) + (scale[(m1_1 + 12 * n1_1) + 384 * l1]);
-#CHECK: for (int i = 0; i < 4
-#CHECK:   sum_local[i] = sum[i + 4 * l_outer];
-#CHECK: scale_1[l_inner + 4 * l_outer] = (b[l_inner + 4 * l_outer]) * (sum_local[l_inner]);
+#CHECK:        sum[j_1] = (sum[j_1]) + (scale[(k_1 + 12 * i_2) + 384 * j_1]);
+#CHECK:  for (int i_3 = 0; i_3 < 6;
+#CHECK:    for (int j_2 = 0; j_2 < 4;
+#CHECK:      sum_local[j_2] = sum[j_2 + 4 * i_3];
+#CHECK:    for (int j_3 = 0; j_3 < 4;
+#CHECK:      scale_1[j_3 + 4 * i_3] = (b[j_3 + 4 * i_3]) * (sum_local[j_3]);
       )IR";
   torch::jit::testing::FileCheck().run(expected_ir, oss.str());
 }
@@ -1660,7 +1664,7 @@ TEST(Reductions, ReductionRfactorCacheTempOuter) {
   VarHandle n("n", kInt);
   VarHandle k("k", kInt);
 
-  Placeholder b(BufHandle("B", {m, n, k}, kFloat));
+  BufHandle b("B", {m, n, k}, kFloat);
   std::vector<float> in(M * N * K);
   for (int j = 0; j < M * N * K; ++j) {
     in[j] = j;
@@ -1668,7 +1672,7 @@ TEST(Reductions, ReductionRfactorCacheTempOuter) {
 
   std::vector<float> out(1, -1.f);
 
-  Tensor c = Reduce("sum", {}, Sum(), b, {{m, "a"}, {n, "b"}, {k, "c"}});
+  Tensor c = Reduce("sum", {}, Sum(), b, {m, n, k});
   LoopNest loop({c});
 
   std::vector<ForPtr> loops = loop.getLoopStmtsFor(c);
@@ -1688,31 +1692,31 @@ TEST(Reductions, ReductionRfactorCacheTempOuter) {
   LoopNest::cacheAccesses(rfac_buf, "tmp", all_loops[1][1]);
   loop.simplify();
   loop.prepareForCodegen();
-  StmtPtr s = loop.root_stmt();
+  StmtPtr s = LoopNest::sanitizeNames(loop.root_stmt());
+  SimpleIREvaluator cg(s, {b, c, m, n, k});
 
   std::ostringstream oss;
-  oss << *s;
+  oss << *cg.stmt();
   const std::string& expected_ir =
       R"IR(
 #CHECK: Allocate(sum_rfac); // dtype=float, dims=[n]
 #CHECK: Allocate(tmp); // dtype=float, dims=[n]
-#CHECK: for (int a = 0; a < m
-#CHECK:   for (int i = 0; i < n
-#CHECK:     tmp[i] = 0
+#CHECK: for (int i_1 = 0; i_1 < m
+#CHECK:   for (int j = 0; j < n
+#CHECK:     tmp[j] = 0
 #CHECK:   }
-#CHECK:   for (int b = 0; b < n
-#CHECK:     for (int c
-#CHECK:       tmp[b] = (tmp[b]) + (B[
+#CHECK:   for (int j_1 = 0; j_1 < n
+#CHECK:     for (int k
+#CHECK:       tmp[j_1] = (tmp[j_1]) + (B[
 #CHECK:     }
 #CHECK:   }
-#CHECK:   for (int i = 0; i < n
-#CHECK:     sum_rfac[i] = (sum_rfac[i]) + (tmp[i]);
+#CHECK:   for (int j_2 = 0; j_2 < n
+#CHECK:     sum_rfac[j_2] = (sum_rfac[j_2]) + (tmp[j_2]);
 #CHECK:   }
 #CHECK:   Free(tmp);
 #CHECK-NOT: tmp
       )IR";
   torch::jit::testing::FileCheck().run(expected_ir, oss.str());
-  SimpleIREvaluator cg(s, {b, c, m, n, k});
 
   cg.call({in, out, M, N, K});
   ASSERT_EQ(out[0], 499500);
@@ -1726,7 +1730,7 @@ TEST(Reductions, ReductionRfactorCacheTempInner) {
   VarHandle n("n", kInt);
   VarHandle k("k", kInt);
 
-  Placeholder b(BufHandle("B", {m, n, k}, kFloat));
+  BufHandle b("B", {m, n, k}, kFloat);
   std::vector<float> in(M * N * K);
   for (int j = 0; j < M * N * K; ++j) {
     in[j] = j;
@@ -1734,7 +1738,7 @@ TEST(Reductions, ReductionRfactorCacheTempInner) {
 
   std::vector<float> out(1, -1.f);
 
-  Tensor c = Reduce("sum", {}, Sum(), b, {{m, "a"}, {n, "b"}, {k, "c"}});
+  Tensor c = Reduce("sum", {}, Sum(), b, {m, n, k});
   LoopNest loop({c});
   std::vector<ForPtr> loops = loop.getLoopStmtsFor(c);
   auto c_body = loop.getAllWritesToBuf(c.buf())[1];
@@ -1754,27 +1758,26 @@ TEST(Reductions, ReductionRfactorCacheTempInner) {
   LoopNest::cacheAccesses(rfac_buf, "tmp", all_loops[1][2]);
   loop.prepareForCodegen();
   loop.simplify();
-  StmtPtr s = loop.root_stmt();
+  StmtPtr s = LoopNest::sanitizeNames(loop.root_stmt());
+  SimpleIREvaluator cg(s, {b, c, m, n, k});
 
   std::ostringstream oss;
-  oss << *s;
+  oss << *cg.stmt();
   const std::string& expected_ir =
       R"IR(
 #CHECK: Allocate(sum_rfac); // dtype=float, dims=[n]
 #CHECK: Allocate(tmp); // dtype=float, dims=[1]
-#CHECK: for (int a = 0; a < m
-#CHECK:   for (int b = 0; b < n
+#CHECK: for (int i_1 = 0; i_1 < m
+#CHECK:   for (int j = 0; j < n
 #CHECK:     tmp[0] = 0
-#CHECK:     for (int c
+#CHECK:     for (int k
 #CHECK:       tmp[0] = (tmp[0]) + (B[
 #CHECK:     }
-#CHECK:   sum_rfac[b] = (sum_rfac[b]) + (tmp[0]);
+#CHECK:   sum_rfac[j] = (sum_rfac[j]) + (tmp[0]);
 #CHECK:   Free(tmp);
 #CHECK-NOT: tmp
       )IR";
   torch::jit::testing::FileCheck().run(expected_ir, oss.str());
-
-  SimpleIREvaluator cg(s, {b, c, m, n, k});
 
   cg.call({in, out, M, N, K});
   ASSERT_EQ(out[0], 499500);
@@ -1782,17 +1785,17 @@ TEST(Reductions, ReductionRfactorCacheTempInner) {
 
 TEST(Reductions, ReductionVectorize) {
   std::vector<float> in_(8 * 8);
-  for (int i = 0; i < 8; ++i) {
-    for (int j = 0; j < 8; ++j) {
+  for (const auto i : c10::irange(8)) {
+    for (const auto j : c10::irange(8)) {
       in_[i * 8 + j] = i;
     }
   }
   std::vector<float> out_before(8, -1.f);
   std::vector<float> out_after(8, -1.f);
 
-  Placeholder in(BufHandle("in", {8, 8}, kFloat));
+  BufHandle in("in", {8, 8}, kFloat);
 
-  Tensor tensor = Reduce("sum", {{8, "m"}}, Sum(), in, {{8, "n"}});
+  Tensor tensor = Reduce("sum", {8}, Sum(), in, {8});
   LoopNest l_before({tensor});
   LoopNest l(l_before);
   l_before.prepareForCodegen();
@@ -1802,15 +1805,15 @@ TEST(Reductions, ReductionVectorize) {
   ASSERT_TRUE(LoopNest::vectorize(l.getLoopStmtsFor(tensor)[0]));
 
   StmtPtr s = l.root_stmt();
-  s = IRSimplifier::simplify(s);
+  s = LoopNest::sanitizeNames(IRSimplifier::simplify(s));
 
   std::ostringstream oss;
   oss << *s;
   const std::string& expected_ir =
       R"IR(
 #CHECK: sum[Ramp(0, 1, 8)] = Broadcast(0.f, 8);
-#CHECK: for (int n = 0; n < 8; n++) {
-#CHECK: sum[Ramp(0, 1, 8)] = ReduceOp((sum[Ramp(0, 1, 8)]) + (in[Ramp(n, 8, 8)]), reduce_args={n});
+#CHECK: for (int i = 0; i < 8; i++) {
+#CHECK: sum[Ramp(0, 1, 8)] = ReduceOp((sum[Ramp(0, 1, 8)]) + (in[Ramp(i, 8, 8)]), reduce_args={i});
 #CHECK: }
       )IR";
   torch::jit::testing::FileCheck().run(expected_ir, oss.str());
@@ -1820,15 +1823,15 @@ TEST(Reductions, ReductionVectorize) {
   s = IRSimplifier::simplify(l.root_stmt());
   SimpleIREvaluator cg_after(s, {in, tensor});
   cg_after.call({in_, out_after});
-  for (int i = 0; i < 8; ++i) {
+  for (const auto i : c10::irange(8)) {
     ASSERT_EQ(out_before[i], out_after[i]);
   }
 }
 
 TEST(Reductions, ReductionVectorizeInner) {
-  Placeholder in(BufHandle("in", {8, 8}, kFloat));
+  BufHandle in("in", {8, 8}, kFloat);
 
-  Tensor tensor = Reduce("sum", {{8, "m"}}, Sum(), in, {{8, "n"}});
+  Tensor tensor = Reduce("sum", {8}, Sum(), in, {8});
   LoopNest l({tensor});
 
   ASSERT_FALSE(LoopNest::vectorize(l.getLoopStmtsFor(tensor)[1]));
@@ -1836,17 +1839,17 @@ TEST(Reductions, ReductionVectorizeInner) {
 
 TEST(Reductions, ReductionVectorizeRfactor) {
   std::vector<float> in_(8 * 8);
-  for (int i = 0; i < 8; ++i) {
-    for (int j = 0; j < 8; ++j) {
+  for (const auto i : c10::irange(8)) {
+    for (const auto j : c10::irange(8)) {
       in_[i * 8 + j] = i;
     }
   }
   std::vector<float> out_before(1, -1.f);
   std::vector<float> out_after(1, -1.f);
 
-  Placeholder in(BufHandle("in", {8, 8}, kFloat));
+  BufHandle in("in", {8, 8}, kFloat);
 
-  Tensor tensor = Reduce("sum", {}, Sum(), in, {{8, "m"}, {8, "n"}});
+  Tensor tensor = Reduce("sum", {}, Sum(), in, {8, 8});
 
   LoopNest l_before({tensor});
   LoopNest l(l_before);
@@ -1871,21 +1874,21 @@ TEST(Reductions, ReductionVectorizeRfactor) {
   ASSERT_TRUE(LoopNest::vectorize(rfac_loops[1][0]));
   l.simplify();
 
-  StmtPtr s = l.root_stmt();
+  StmtPtr s = LoopNest::sanitizeNames(l.root_stmt());
 
   std::ostringstream oss;
   oss << *s;
   const std::string& expected_ir =
       R"IR(
 #CHECK: sum = 0.f;
-#CHECK: for (int n = 0; n < 8; n++) {
-#CHECK:   sum_rfac[n] = 0.f;
+#CHECK: for (int i = 0; i < 8; i++) {
+#CHECK:   sum_rfac[i] = 0.f;
 #CHECK: }
-#CHECK: for (int m = 0; m < 8; m++) {
-#CHECK:   sum_rfac[Ramp(0, 1, 8)] = ReduceOp((sum_rfac[Ramp(0, 1, 8)]) + (in[Ramp(8 * m, 1, 8)]), reduce_args={m});
+#CHECK: for (int i_1 = 0; i_1 < 8; i_1++) {
+#CHECK:   sum_rfac[Ramp(0, 1, 8)] = ReduceOp((sum_rfac[Ramp(0, 1, 8)]) + (in[Ramp(8 * i_1, 1, 8)]), reduce_args={i_1});
 #CHECK: }
-#CHECK: for (int n = 0; n < 8; n++) {
-#CHECK:   sum = ReduceOp((sum) + (sum_rfac[n]), reduce_args={n});
+#CHECK: for (int i_2 = 0; i_2 < 8; i_2++) {
+#CHECK:   sum = ReduceOp((sum) + (sum_rfac[i_2]), reduce_args={i_2});
 #CHECK: }
       )IR";
   torch::jit::testing::FileCheck().run(expected_ir, oss.str());
@@ -1902,26 +1905,26 @@ TEST(Reductions, ReductionVectorizeRfactor) {
 TEST(Reductions, InitFunction) {
   constexpr int M = 32;
   constexpr int N = 16;
-  Placeholder A("A", kFloat, {M, N});
-  Placeholder B("B", kFloat, {N});
+  BufHandle A("A", {M, N}, kFloat);
+  BufHandle B("B", {N}, kFloat);
   Tensor C = Reduce(
       "C",
-      {{N, "n"}},
+      {N},
       Sum(),
       [&](const std::vector<VarHandle>& v) { return B.load(v[0]); },
       [&](const std::vector<VarHandle>& v) { return A.load(v[1], v[0]); },
-      {{M, "m"}});
+      {M});
   LoopNest nest({C});
   nest.prepareForCodegen();
-  StmtPtr s = IRSimplifier::simplify(nest.root_stmt());
+  StmtPtr s = LoopNest::sanitizeNames(IRSimplifier::simplify(nest.root_stmt()));
   std::ostringstream oss;
   oss << *s << "\n";
   const std::string& expected_ir =
       R"IR(
-#CHECK:  for (int n = 0; n < 16; n++) {
-#CHECK:    C[n] = B[n];
-#CHECK:    for (int m = 0; m < 32; m++) {
-#CHECK:      C[n] = (C[n]) + (A[n + 16 * m]);
+#CHECK:  for (int i = 0; i < 16; i++) {
+#CHECK:    C[i] = B[i];
+#CHECK:    for (int j = 0; j < 32; j++) {
+#CHECK:      C[i] = (C[i]) + (A[i + 16 * j]);
 #CHECK:    }
 #CHECK:  }
       )IR";

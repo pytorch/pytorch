@@ -3,7 +3,7 @@
 #include <ATen/NativeFunctions.h>
 #include <ATen/cuda/CUDAApplyUtils.cuh>
 #include <ATen/AccumulateType.h>
-#include <ATen/CUDAGeneratorImpl.h>
+#include <ATen/cuda/CUDAGeneratorImpl.h>
 #include <ATen/native/UnaryOps.h>
 #include <ATen/native/cuda/DistributionTemplates.h>
 
@@ -16,10 +16,6 @@
 #include <ATen/native/Distributions.h>
 #include <ATen/native/cuda/Loops.cuh>
 #include <ATen/native/TensorIterator.h>
-
-#include <THC/THCGeneral.h>
-#include <THC/THCApply.cuh>
-#include <THC/THCDeviceUtils.cuh>
 
 #include <cstdint>
 #include <limits>
@@ -91,7 +87,7 @@ void binomial_cuda_kernel(
 
   at::native::distribution_binary_kernel(iter, philox_args,
       [philox_args] GPU_LAMBDA (curandStatePhilox4_32_10_t& state, scalar_t count, scalar_t prob) {
-        #if defined(__CUDA_ARCH__) || defined(__HIP_PLATFORM_HCC__)
+        #if defined(__CUDA_ARCH__) || defined(USE_ROCM)
         auto uniform_lambda = curand_uniform_wrapper(state);
         BaseSampler<accscalar_t, decltype(uniform_lambda)> standard_uniform(uniform_lambda);
         auto sample = sample_binomial<scalar_t, accscalar_t, decltype(uniform_lambda)>(count, prob, standard_uniform);

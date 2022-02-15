@@ -1,6 +1,7 @@
 #include <ATen/Config.h>
 #if AT_PARALLEL_NATIVE_TBB
 #include <ATen/Parallel.h>
+#include <ATen/ParallelFuture.h>
 #include <ATen/PTThreadPool.h>
 
 #include <atomic>
@@ -14,7 +15,7 @@
 #include <omp.h>
 #endif
 
-#ifdef TH_BLAS_MKL
+#if AT_MKL_ENABLED()
 #include <mkl.h>
 #endif
 
@@ -48,7 +49,7 @@ void init_num_threads() {
   omp_set_num_threads(1);
   #endif
 
-  #ifdef TH_BLAS_MKL
+  #if AT_MKL_ENABLED()
   mkl_set_num_threads(1);
   #endif
 
@@ -66,6 +67,7 @@ void set_num_threads(int nthreads) {
 }
 
 int get_num_threads() {
+  at::internal::lazy_init_num_threads();
   return tbb::global_control::active_value(
       tbb::global_control::max_allowed_parallelism);
 }

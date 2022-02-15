@@ -1395,7 +1395,8 @@ ExprPtr PolynomialTransformer::mutate(CompareSelectPtr v) {
   ExprPtr false_branch = v->ret_val2()->accept_mutator(this);
 
   // Constant Folding.
-  if (lhs_new->isConstant() && rhs_new->isConstant()) {
+  if (lhs_new->isConstant() && rhs_new->isConstant() &&
+      true_branch->isConstant() && false_branch->isConstant()) {
     ExprPtr v_new = alloc<CompareSelect>(
         lhs_new,
         rhs_new,
@@ -1865,7 +1866,7 @@ class ModRound {
   ExprPtr mod_divisor;
 };
 
-c10::optional<class ModRound*> isModRound(TermPtr e) {
+c10::optional<class ModRound> isModRound(TermPtr e) {
   DivPtr div{nullptr};
   ModPtr mod{nullptr};
   ExprPtr denom{nullptr};
@@ -1967,8 +1968,7 @@ c10::optional<class ModRound*> isModRound(TermPtr e) {
     scalar = immLike(multiplier, 1);
   }
 
-  // TODO: this leaks memory!
-  return new ModRound(scalar, denom, divisor, mod_divisor);
+  return ModRound(scalar, denom, divisor, mod_divisor);
 }
 
 // Search the polynomial for Terms that can be merged in
@@ -2034,26 +2034,26 @@ ExprPtr simplifyRoundModPattern(PolynomialPtr poly) {
         TermPtr mr = mod_rounds[j];
         auto a = isModRound(mr);
         CHECK(a);
-        ModRound* mod_round = dynamic_cast<ModRound*>(*a);
+        ModRound& mod_round = *a;
 
         // TODO: for now don't attempt partial factorization of this
         // optimization. E.g. it's possible to do: 2 * (x/y%z) * y + (x%y) =>
         // x%(y*z) + (x/y%z) * y
         if (!immediateEquals(
-                evaluateOp(alloc<Sub>(mod_round->scalar, m->scalar())), 0)) {
+                evaluateOp(alloc<Sub>(mod_round.scalar, m->scalar())), 0)) {
           continue;
         }
         // Valid optimization if mod LHS matches denom and mod RHS matches
         // divisor.
-        if (hasher.hash(mod_round->denom) == hasher.hash(mod_lhs) &&
-            hasher.hash(mod_round->divisor) == hasher.hash(mod_rhs)) {
+        if (hasher.hash(mod_round.denom) == hasher.hash(mod_lhs) &&
+            hasher.hash(mod_round.divisor) == hasher.hash(mod_rhs)) {
           // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
           TermPtr merged_m = alloc<Term>(
               hasher,
-              mod_round->scalar,
+              mod_round.scalar,
               IRSimplifier::simplify(alloc<Mod>(
-                  mod_round->denom,
-                  alloc<Mul>(mod_round->divisor, mod_round->mod_divisor))));
+                  mod_round.denom,
+                  alloc<Mul>(mod_round.divisor, mod_round.mod_divisor))));
           mods_merged.push_back(merged_m);
           merged = true;
           repeat = true;
@@ -2875,10 +2875,31 @@ ExprPtr SimplifierUnderContext::mutate(DivPtr v) {
 
   std::ostringstream oss;
   if (auto ret = distributeDiv(lhs, rhs, var_bound_info_)) {
+    GRAPH_DEBUG("SimplifierUnderContext: ", *v, " => ", *ret);
     // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
-    oss << "SimplifierUnderContext: " << *v << " => " << *ret << "\n";
-    GRAPH_DEBUG(oss.str());
     return ret->accept_mutator(this);
+  }
+
+  // i / N -> 0 if the range of i's values is a subset of [0, N)
+  // where N is an integer constant
+  auto lhsVar = to<Var>(lhs);
+  ExprPtr rhsScalar = rhs->isConstant() ? rhs : nullptr;
+  if (lhsVar && rhsScalar && !rhsScalar->dtype().is_floating_point()) {
+    auto got = var_bound_info_.find(lhsVar);
+    if (got != var_bound_info_.end()) {
+      auto start = got->second.first;
+      auto end = got->second.second;
+      ExprPtr check_start = IRSimplifier::simplify(
+          alloc<CompareSelect>(start, immLike(start, 0), kGE));
+      ExprPtr check_end =
+          IRSimplifier::simplify(alloc<CompareSelect>(end, rhsScalar, kLE));
+      if (check_start->isConstant() && check_end->isConstant() &&
+          immediateEquals(check_start, 1) && immediateEquals(check_end, 1)) {
+        GRAPH_DEBUG(
+            "SimplifierUnderContext: ", *v, " => ", *immLike(lhsVar, 0));
+        return immLike(lhsVar, 0);
+      }
+    }
   }
 
   ExprPtr lhs_new = lhs->accept_mutator(this);
@@ -2895,8 +2916,7 @@ ExprPtr SimplifierUnderContext::mutate(ModPtr v) {
 
   std::ostringstream oss;
   if (auto ret = distributeMod(lhs, rhs, var_bound_info_)) {
-    oss << "SimplifierUnderContext: " << *v << " => " << *ret << "\n";
-    GRAPH_DEBUG(oss.str());
+    GRAPH_DEBUG("SimplifierUnderContext: ", *v, " => ", *ret);
     // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
     return ret->accept_mutator(this);
   }
@@ -2916,8 +2936,7 @@ ExprPtr SimplifierUnderContext::mutate(ModPtr v) {
           IRSimplifier::simplify(alloc<CompareSelect>(end, rhsScalar, kLE));
       if (check_start->isConstant() && check_end->isConstant() &&
           immediateEquals(check_start, 1) && immediateEquals(check_end, 1)) {
-        oss << "SimplifierUnderContext: " << *v << " => " << *lhsVar << "\n";
-        GRAPH_DEBUG(oss.str());
+        GRAPH_DEBUG("SimplifierUnderContext: ", *v, " => ", *lhsVar);
         return lhsVar;
       }
     }

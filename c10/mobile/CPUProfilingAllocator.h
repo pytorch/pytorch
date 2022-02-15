@@ -5,7 +5,6 @@
 #include <memory>
 #include <mutex>
 
-#include <c10/core/CPUAllocator.h>
 #include <c10/util/Exception.h>
 #include <c10/util/SmallVector.h>
 #include <c10/util/flat_hash_map.h>
@@ -50,7 +49,7 @@ class C10_API AllocationPlanner {
  private:
   AllocationPlan* allocation_plan_{nullptr};
   // Maps allocated ptr to its allocation id.
-  // This is used when freeing the memory to lookup the allocation id
+  // This is used when freeing the memory to look up the allocation id
   // in order to establish the lifetime of a particular allocation.
   ska::flat_hash_map<const void*, uint64_t> allocation_ptr_to_id_;
   uint64_t allocation_id_{0};

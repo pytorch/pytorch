@@ -1,3 +1,5 @@
+# Owner(s): ["oncall: quantization"]
+
 import numpy as np
 import math
 import torch
@@ -25,7 +27,7 @@ def _calculate_dynamic_qparams(X, dtype, reduce_range=False):
     """Calculate the dynamic quantization parameters (scale, zero_point)
     according to the min and max element of the tensor"""
     if isinstance(X, torch.Tensor):
-        X = X.numpy()
+        X = X.cpu().data.numpy()
     if dtype == torch.qint8:
         if reduce_range:
             qmin, qmax = -64, 63
@@ -141,9 +143,29 @@ class TestQuantizedTensor(TestCase):
     @unittest.skipIf(not TEST_CUDA, "No gpu is available.")
     def test_qtensor_cuda(self):
         self._test_qtensor(torch.device('cuda'))
+        self._test_qtensor_dynamic(torch.device('cuda'))
 
     def test_qtensor_cpu(self):
         self._test_qtensor(torch.device('cpu'))
+        self._test_qtensor_dynamic(torch.device('cpu'))
+
+    def _test_qtensor_dynamic(self, device):
+        # max number of tensor dimensions
+        max_tensor_order = 4
+        # max size for any tensor dimension
+        max_dim_sz = 20
+
+        num_dim = np.random.randint(low=1, high=max_tensor_order)
+        dims = np.random.randint(low=1, high=max_dim_sz, size=num_dim)
+        mat2quant = torch.randn(*dims, dtype=torch.float, device=device)
+        reduce_flag = False
+
+        for dtype in [torch.qint8, torch.quint8]:
+            q_d = torch.quantize_per_tensor_dynamic(mat2quant, dtype, reduce_flag)
+            scale, zero_pt = _calculate_dynamic_qparams(mat2quant, dtype, reduce_flag)
+            q_s = torch.quantize_per_tensor(mat2quant, scale, zero_pt, dtype)
+
+            self.assertEqual(q_d, q_s)
 
     def _test_qtensor(self, device):
         device = str(device)
@@ -180,35 +202,102 @@ class TestQuantizedTensor(TestCase):
                              "quantization_scheme=torch.per_tensor_affine, " +
                              "scale=1.0, zero_point=2)")
 
-    def test_qtensor_sub_byte(self):
-        num_elements = 10
+    def test_qtensor_int_repr(self):
+        # to catch edge case when num elements * bit rate < 8, make sure at lease allocate one byte to hold the int repr
+        num_elements = 1
+        device = torch.device('cpu')
         scale = 1.0
         zero_point = 2
-        for dtype in [torch.quint4x2]:
-            r = torch.ones((5, 2), dtype=torch.float)
-            qr = torch.quantize_per_tensor(r, scale, zero_point, dtype)
-            self.assertEqual(qr.q_scale(), scale)
-            self.assertEqual(qr.q_zero_point(), zero_point)
-            self.assertTrue(qr.is_quantized)
-            self.assertFalse(r.is_quantized)
-            self.assertEqual(qr.storage().size(), 5)
+        dtype = torch.quint2x4
+        r = torch.ones(num_elements, dtype=torch.float, device=device)
+        qr = torch.quantize_per_tensor(r, scale, zero_point, dtype)
+        int_repr = qr.int_repr()
+        self.assertEqual(int_repr.numel(), 1)
+        # Packed one entry looks like 00000011
+        self.assertEqual(int_repr[0], 3)
 
-            int_repr = qr.int_repr()
-            for num in int_repr[0:5]:
-                self.assertEqual(num, 51)  # Packed entries, each of value 3, i.e. 00110011
+    def test_qtensor_sub_byte_aligned_cols(self):
+        # Packed 4 entries, each of value 3, look like 00110011, 00110011 for torch.qunit4x2, or 11111111 for torch.quint2x4
+        self._test_qtensor_sub_byte(1, 4, torch.quint4x2, 2, [51, 51])
+        self._test_qtensor_sub_byte(1, 4, torch.quint2x4, 4, [255])
 
-            # Test tensor creation
-            q = torch._empty_affine_quantized([num_elements], scale=scale, zero_point=zero_point,
-                                              dtype=torch.quint4x2)
-            self.assertEqual(q.storage().size(), 5)
+    def test_qtensor_sub_byte_not_aligned_cols(self):
+        # Packed 5 entries, each of value 3, look like 00110011, 00110011, 00000011 for torch.qunit4x2,
+        # or 11111111, 00000011 for torch.quint2x4
+        self._test_qtensor_sub_byte(1, 5, torch.quint4x2, 2, [51, 51, 3])
+        self._test_qtensor_sub_byte(1, 5, torch.quint2x4, 4, [255, 3])
 
-            # Test save/load
-            with tempfile.NamedTemporaryFile() as f:
-                torch.save(qr, f)
-                f.seek(0)
-                loaded_q = torch.load(f)
-                loaded_int_repr = loaded_q.int_repr()[0:5]
-                self.assertEqual(int_repr[0:5], loaded_int_repr)
+    def _test_qtensor_sub_byte(self, rows, cols, dtype, elements_per_byte, expected_packed_vals):
+        num_elements = rows * cols
+        scale = 1.0
+        zero_point = 2
+
+        r = torch.ones((rows, cols), dtype=torch.float)
+        qr = torch.quantize_per_tensor(r, scale, zero_point, dtype)
+        self.assertEqual(qr.q_scale(), scale)
+        self.assertEqual(qr.q_zero_point(), zero_point)
+        self.assertTrue(qr.is_quantized)
+        self.assertFalse(r.is_quantized)
+        self.assertEqual(qr.storage().size(), rows * math.ceil(cols / elements_per_byte), f"with {dtype}, {elements_per_byte}")
+
+        int_repr = qr.int_repr()
+        self.assertEqual(int_repr.numel(), len(expected_packed_vals))
+        for num, expected in zip(int_repr, expected_packed_vals):
+            self.assertEqual(num, expected, f"with dtype={dtype}, elements_per_byte={elements_per_byte}, rows={rows}, cols={cols}")
+
+        # Test tensor creation
+        q = torch._empty_affine_quantized([num_elements], scale=scale, zero_point=zero_point, dtype=dtype)
+        self.assertEqual(q.storage().size(), math.ceil(num_elements / elements_per_byte), f"with {dtype}, {elements_per_byte}")
+
+        # Test save/load
+        with tempfile.NamedTemporaryFile() as f:
+            torch.save(qr, f)
+            f.seek(0)
+            loaded_q = torch.load(f)
+            loaded_int_repr = loaded_q.int_repr()
+            self.assertEqual(int_repr, loaded_int_repr)
+
+    def test_qtensor_channel_float_assignment(self):
+        t1 = torch.rand(2, 3, 5, 5)
+        t2 = torch.rand(2, 3, 5, 5)
+        for axis in range(t1.ndim):
+            scales = np.random.rand(t1.size()[axis])
+            zero_points = np.random.randint(low=0, high=50, size=t1.size()[axis])
+            for dtype in [torch.qint8, torch.quint8, torch.qint32]:
+                qt1 = torch.quantize_per_channel(t1, scales=torch.tensor(scales),
+                                                 zero_points=torch.tensor(zero_points), dtype=dtype, axis=axis)
+                qt2 = torch.quantize_per_channel(t2, scales=torch.tensor(scales),
+                                                 zero_points=torch.tensor(zero_points), dtype=dtype, axis=axis)
+                i = 0
+                j = 1
+                k = 2
+                l = 4
+                # scalar assignment verification
+                qt1[i][j][k][l] = t2[i][j][k][l]
+                self.assertEqual(qt1[i][j][k][l], qt2[i][j][k][l])
+                # 1D tensor assignment verification
+                qt1[i][j][k][2:l] = t2[i][j][k][2:l]
+                self.assertEqual(qt1[i][j][k][2:l], qt2[i][j][k][2:l])
+                qt1[i][j][k] = t2[i][j][k]
+                self.assertEqual(qt1[i][j][k], qt2[i][j][k])
+                # 2D tensor assignment verification
+                qt1[i][j][k:] = t2[i][j][k:]
+                self.assertEqual(qt1[i][j][k:], qt2[i][j][k:])
+                qt1[i][j] = t2[i][j]
+                self.assertEqual(qt1[i][j], qt2[i][j])
+                # 3D tensor assignment verification
+                qt1[i][j:] = t2[i][j:]
+                self.assertEqual(qt1[i][j:], qt2[i][j:])
+                qt1[i] = t2[i]
+                self.assertEqual(qt1[i], qt2[i])
+                # 4D tensor assignment verification
+                qt1[:1] = t2[:1]
+                self.assertEqual(qt1[:1], qt2[:1])
+                qt1[:] = t2[:]
+                self.assertEqual(qt1[:], qt2[:])
+                # non-contiguous case **this should raise an exception**
+                with self.assertRaisesRegex(RuntimeError, "Quantized copy only works with contiguous Tensors"):
+                    qt1[:, 0] = t2[:, 0]
 
     def test_qtensor_float_assignment(self):
         # Scalar Tensor
@@ -268,6 +357,21 @@ class TestQuantizedTensor(TestCase):
 
     def test_per_channel_qtensor_creation_cpu(self):
         self._test_per_channel_qtensor_creation(torch.device('cpu'))
+
+    def _test_dequantize_fp16(self, device):
+        data_orig = torch.randn(1, 2, 4, 4, dtype=torch.float, device=device)
+        data_fp16 = data_orig.to(torch.float16)
+        data_fp16_dequant = data_fp16.dequantize()
+        data_fp16_fp32 = data_fp16.to(torch.float)
+        self.assertTrue(data_fp16_dequant.dtype == torch.float)
+        self.assertTrue(torch.allclose(data_fp16_fp32, data_fp16_dequant))
+
+    def test_dequantize_fp16_cpu(self):
+        self._test_dequantize_fp16(torch.device('cpu'))
+
+    @unittest.skipIf(not TEST_CUDA, "No gpu is available.")
+    def test_dequantize_fp16_cuda(self):
+        self._test_dequantize_fp16(torch.device('cuda'))
 
     @unittest.skipIf(not TEST_CUDA, "No gpu is available.")
     def test_per_channel_qtensor_creation_cuda(self):
@@ -330,7 +434,7 @@ class TestQuantizedTensor(TestCase):
         r = torch.rand(3, 2, dtype=torch.float) * 4 - 2
         scale = 0.2
         zero_point = 2
-        for dtype in [torch.qint8, torch.quint8, torch.qint32, torch.quint4x2]:
+        for dtype in [torch.qint8, torch.quint8, torch.qint32, torch.quint4x2, torch.quint2x4]:
             qr = torch.quantize_per_tensor(r, scale, zero_point, dtype)
             rqr = qr.dequantize()
             self.assertTrue(np.allclose(r.numpy(), rqr.numpy(), atol=2 / scale))
@@ -751,8 +855,13 @@ class TestQuantizedTensor(TestCase):
                 [numel], scale=scale, zero_point=zero_point,
                 device=device, dtype=dtype)
             per_channel_quantized = torch._empty_per_channel_affine_quantized(
-                [numel], scales=torch.tensor([scale]), zero_points=torch.tensor([zero_point]), axis=0,
-                device=device, dtype=dtype)
+                [numel],
+                scales=torch.tensor([scale] * numel, device=device),
+                zero_points=torch.tensor([zero_point] * numel, device=device),
+                axis=0,
+                device=device,
+                dtype=dtype
+            )
             qtensors = [per_tensor_quantized, per_channel_quantized]
 
             for q in qtensors:

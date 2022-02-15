@@ -1,7 +1,8 @@
 #pragma once
 
 #include <torch/arg.h>
-#include <torch/csrc/WindowsTorchApiMacro.h>
+#include <torch/enum.h>
+#include <torch/csrc/Export.h>
 #include <torch/types.h>
 
 namespace torch {
@@ -91,6 +92,33 @@ namespace functional {
 /// F::glu(input, GLUFuncOptions(1));
 /// ```
 using GLUFuncOptions = GLUOptions;
+} // namespace functional
+
+// ============================================================================
+
+/// Options for the `GELU` module.
+///
+/// Example:
+/// ```
+/// GELU model(GELUOptions().approximate("none"));
+/// ```
+struct TORCH_API GELUOptions {
+  /// Specifies the approximation to apply to the output.
+  TORCH_ARG(std::string, approximate) = "none";
+};
+
+namespace functional {
+/// Options for `torch::nn::functional::gelu`.
+///
+/// See the documentation for `torch::nn::GELUOptions` class to learn what
+/// arguments are supported.
+///
+/// Example:
+/// ```
+/// namespace F = torch::nn::functional;
+/// F::gelu(input, F::GELUFuncOptions().approximate("none"));
+/// ```
+using GELUFuncOptions = GELUOptions;
 } // namespace functional
 
 // ============================================================================
@@ -665,6 +693,8 @@ struct TORCH_API MultiheadAttentionForwardFuncOptions {
   TORCH_ARG(Tensor, static_k) = {};
 
   TORCH_ARG(Tensor, static_v) = {};
+
+  TORCH_ARG(bool, average_attn_weights) = true;
 };
 
 } // namespace functional

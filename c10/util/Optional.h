@@ -12,7 +12,7 @@
 // C10
 // - Move file to `c10` namespace.
 // - Remove macro use in line 478 because the nvcc device compiler cannot handle
-// it it.
+// it.
 // - Revise constructor logic so that it is 1) consistent with c++ 17 standard
 // documented here in (8):
 // https://en.cppreference.com/w/cpp/utility/optional/optional, and 2) able to
@@ -40,6 +40,20 @@
 #include <utility>
 
 #include <c10/util/Metaprogramming.h>
+
+C10_CLANG_DIAGNOSTIC_PUSH()
+#if C10_CLANG_HAS_WARNING("-Wstring-conversion")
+C10_CLANG_DIAGNOSTIC_IGNORE("-Wstring-conversion")
+#endif
+#if C10_CLANG_HAS_WARNING("-Wshorten-64-to-32")
+C10_CLANG_DIAGNOSTIC_IGNORE("-Wshorten-64-to-32")
+#endif
+#if C10_CLANG_HAS_WARNING("-Wimplicit-float-conversion")
+C10_CLANG_DIAGNOSTIC_IGNORE("-Wimplicit-float-conversion")
+#endif
+#if C10_CLANG_HAS_WARNING("-Wimplicit-int-conversion")
+C10_CLANG_DIAGNOSTIC_IGNORE("-Wimplicit-int-conversion")
+#endif
 
 #define TR2_OPTIONAL_REQUIRES(...) \
   typename std::enable_if<__VA_ARGS__::value, bool>::type = false
@@ -499,9 +513,6 @@ template <typename T>
 struct is_arrayref<c10::ArrayRef<T>> : std::true_type {};
 } // namespace detail_
 
-// CUDA 9.2 and below fail while trying to compile default move constructor
-// see https://github.com/pytorch/csprng/issues/84
-#if (!defined(__CUDA_ARCH__) || !defined(CUDA_VERSION) || CUDA_VERSION > 9200)
 template <class T>
 using OptionalBase = std::conditional_t<
     detail_::is_arrayref<T>::value,
@@ -524,23 +535,9 @@ using OptionalBase = std::conditional_t<
                                                              // trivial
                                                              // destructor
             optional_base<std::remove_const_t<T>>>>>;
-#else
-template <class T>
-using OptionalBase = std::conditional_t<
-    detail_::is_arrayref<T>::value,
-    arrayref_optional_base<T>,
-    std::conditional_t<
-        std::is_trivially_destructible<T>::value, // if possible
-        constexpr_optional_base<std::remove_const_t<T>>, // use base with
-                                                         // trivial destructor
-        optional_base<std::remove_const_t<T>>>>;
-#endif
 
 template <class T>
 class optional : private OptionalBase<T> {
-// CUDA 9.2 and below fail while trying to compile default move constructor
-// see https://github.com/pytorch/csprng/issues/84
-#if (!defined(__CUDA_ARCH__) || !defined(CUDA_VERSION) || CUDA_VERSION > 9200)
   template <class U> // re-declaration for nvcc on Windows.
   using OptionalBase = std::conditional_t<
       detail_::is_arrayref<U>::value,
@@ -565,17 +562,6 @@ class optional : private OptionalBase<T> {
                                                                // trivial
                                                                // destructor
               optional_base<std::remove_const_t<U>>>>>;
-#else
-  template <class U>
-  using OptionalBase = std::conditional_t<
-      detail_::is_arrayref<U>::value,
-      arrayref_optional_base<U>,
-      std::conditional_t<
-          std::is_trivially_destructible<U>::value, // if possible
-          constexpr_optional_base<std::remove_const_t<U>>, // use base with
-                                                           // trivial destructor
-          optional_base<std::remove_const_t<U>>>>;
-#endif
 
   static_assert(
       !std::is_same<typename std::decay<T>::type, nullopt_t>::value,
@@ -634,20 +620,7 @@ class optional : private OptionalBase<T> {
   constexpr optional(nullopt_t) noexcept : OptionalBase<T>(){};
 
   optional(const optional& rhs) = default;
-
-// CUDA 9.2 and below fail while trying to compile default move constructor
-// see https://github.com/pytorch/csprng/issues/84
-#if (!defined(__CUDA_ARCH__) || !defined(CUDA_VERSION) || CUDA_VERSION > 9200)
   optional(optional&& rhs) = default;
-#else
-  optional(optional&& rhs) noexcept(
-      std::is_nothrow_move_constructible<T>::value) {
-    if (rhs.initialized()) {
-      ::new (static_cast<void*>(dataptr())) T(std::move(*rhs));
-      OptionalBase<T>::setInitialized(true);
-    }
-  }
-#endif
 
   // see https://github.com/akrzemi1/Optional/issues/16
   // and https://en.cppreference.com/w/cpp/utility/optional/optional,
@@ -1274,5 +1247,7 @@ struct hash<c10::optional<T&>> {
 #undef TR2_OPTIONAL_REQUIRES
 #undef TR2_OPTIONAL_ASSERTED_EXPRESSION
 #undef TR2_OPTIONAL_HOST_CONSTEXPR
+
+C10_CLANG_DIAGNOSTIC_POP()
 
 #endif // C10_UTIL_OPTIONAL_H_

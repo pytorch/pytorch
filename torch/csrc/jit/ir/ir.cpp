@@ -14,6 +14,7 @@
 
 #include <algorithm>
 #include <iostream>
+#include <memory>
 #include <set>
 #include <sstream>
 #include <string>
@@ -75,6 +76,23 @@ std::string normalizeAttrName(c10::string_view field) {
     return "_" + std::string{field};
   }
   return std::string{field};
+}
+
+void findAllNodes(
+    Block& block,
+    Symbol kind,
+    bool recurse,
+    std::vector<Node*>& ret) {
+  for (Node* n : block.nodes()) {
+    if (n->kind() == kind) {
+      ret.push_back(n);
+    }
+    if (recurse) {
+      for (auto b : n->blocks()) {
+        findAllNodes(*b, kind, recurse, ret);
+      }
+    }
+  }
 }
 
 } // namespace
@@ -511,7 +529,7 @@ void Graph::lint() const {
   // - Params and return do NOT occur in nodes
   // - next_unique_ is greater than all uniques in graph
   // - uniques in all_nodes are unique
-  // - every use will occur later in the topsort
+  // - every use will occur later in the toposort
 
   struct LintScope {
     LintScope() = default;
@@ -735,14 +753,24 @@ void Block::destroy() {
   graph_->freeBlock(this);
 }
 
-std::shared_ptr<Graph> Graph::copy() {
-  auto new_g = std::make_shared<Graph>();
+void Graph::cloneFrom(Graph& src) {
   auto env = [](Value* v) -> Value* {
     AT_ERROR(
         "Graph::copy() encountered a use of a value " + v->debugName() +
         " not in scope. Run lint!");
   };
-  new_g->block()->cloneFrom(this->block(), env);
+  block()->cloneFrom(src.block(), env);
+}
+
+std::shared_ptr<Graph> Graph::copy() {
+  auto new_g = std::make_shared<Graph>();
+  new_g->cloneFrom(*this);
+  return new_g;
+}
+
+std::unique_ptr<Graph> Graph::copyUnique() {
+  auto new_g = std::make_unique<Graph>();
+  new_g->cloneFrom(*this);
   return new_g;
 }
 
@@ -787,7 +815,9 @@ bool Value::mustBeNone() const {
 }
 bool Value::mustNotBeNone() const {
   return node_->kind() != prim::AutogradAdd && type() != NoneType::get() &&
-      !type()->cast<OptionalType>();
+      !type()->cast<OptionalType>() &&
+      !(type()->cast<UnionType>() &&
+        type()->expect<UnionType>()->canHoldType(*NoneType::get()));
 }
 
 std::string Value::debugNameBase() const {
@@ -999,7 +1029,7 @@ bool Node::matches(const FunctionSchema& schema) const {
     // we will not succeed at matching T. However None <: Optional[T] so this
     // check can still succeed.
 
-    if (!actuals[i]->type()->isSubtypeOf(formal)) {
+    if (!actuals[i]->type()->isSubtypeOf(*formal)) {
       return false;
     }
   }
@@ -1112,6 +1142,7 @@ bool Node::isNondeterministic() const {
       "aten::bernoulli(Tensor self, *, Generator? generator) -> Tensor",
       "aten::bernoulli(Tensor self, float p, *, Generator? generator) -> Tensor",
       "aten::multinomial(Tensor self, int num_samples, bool replacement, *, Generator? generator) -> Tensor",
+      "aten::native_dropout(Tensor input, float p, bool? train) -> (Tensor, Tensor)",
       "aten::normal(Tensor mean, Tensor std, *, Generator? generator) -> Tensor",
       "aten::normal(float mean, Tensor std, *, Generator? generator) -> Tensor",
       "aten::normal(Tensor mean, float std, *, Generator? generator) -> Tensor",
@@ -1146,7 +1177,6 @@ bool Node::hasSideEffects() const {
     case prim::IgnoredPythonOp:
     case prim::Print:
     case prim::RaiseException:
-    case prim::SetAttr:
     case aten::warn:
     case aten::save:
     case aten::manual_seed:
@@ -1160,7 +1190,7 @@ bool Node::hasSideEffects() const {
     case prim::rpc_sync: // It represents RPC message sent.
     case prim::rpc_remote: // It represents RPC message sent.
     case aten::wait: // It can represent RPC message received.
-#ifndef __HIP_PLATFORM_HCC__
+#if !defined(USE_ROCM)
     case cuda::set_stream:
     case cuda::_set_device:
     case cuda::_current_device:
@@ -1535,6 +1565,14 @@ void Node::removeAllInputs() {
   inputs_.clear();
 }
 
+void Node::removeAllOutputs() {
+  op_ = nullptr;
+  size_t init_osize = outputs_.size();
+  for (auto i : c10::irange(init_osize)) {
+    eraseOutput(init_osize - i - 1);
+  }
+}
+
 void Node::permuteInputs(const std::vector<size_t>& new_order) {
   op_ = nullptr;
   AT_ASSERT(new_order.size() == inputs_.size());
@@ -1639,7 +1677,7 @@ size_t Node::blocksFromGraphBlock() {
 }
 
 inline const SourceRange& fakeRange() {
-  static SourceRange range(std::make_shared<Source>(""), 0, 1);
+  static SourceRange range(std::make_shared<Source>(std::string("")), 0, 1);
   return range;
 }
 
@@ -1765,20 +1803,23 @@ Node* Graph::createEnumValue(Value* e) {
   return n;
 }
 
-Node* Graph::createList(const TypePtr& elem_type, at::ArrayRef<Value*> values) {
+Node* Graph::createList(
+    const TypePtr& contained_type,
+    at::ArrayRef<Value*> values) {
   auto n = create(prim::ListConstruct, values);
   for (const auto& v : values) {
     TORCH_CHECK(
-        v->type()->isSubtypeOf(elem_type),
+        v->type()->isSubtypeOf(*contained_type),
         "Expected a list element that subtypes '",
-        elem_type->repr_str(),
+        contained_type->repr_str(),
         "' but got an element of type '",
         v->type()->repr_str(),
         "'");
   }
-  n->output()->setType(ListType::create(elem_type));
+  n->output()->setType(ListType::create(contained_type));
   return n;
 }
+
 Node* Graph::createListUnpack(Value* v, size_t size) {
   ListTypePtr list_type = v->type()->expect<ListType>();
   TypePtr elem_type = list_type->getElementType();
@@ -1798,8 +1839,8 @@ Node* Graph::createDict(
   AT_ASSERT(keys.size() == values.size());
   auto n = create(prim::DictConstruct, 1);
   for (const auto i : c10::irange(keys.size())) {
-    AT_ASSERT(keys[i]->type()->isSubtypeOf(key_type));
-    AT_ASSERT(values[i]->type()->isSubtypeOf(value_type));
+    AT_ASSERT(keys[i]->type()->isSubtypeOf(*key_type));
+    AT_ASSERT(values[i]->type()->isSubtypeOf(*value_type));
 
     n->addInput(keys[i]);
     n->addInput(values[i]);
@@ -1809,9 +1850,8 @@ Node* Graph::createDict(
 }
 
 Node* Graph::createNumToTensor(Value* value) {
-  auto typ = value->type();
   Node* result = create(prim::NumToTensor, {value});
-  result->output()->setType(TensorType::fromNumberType(std::move(typ)));
+  result->output()->setType(TensorType::fromNumberType(*value->type()));
   return result;
 }
 
@@ -2052,30 +2092,18 @@ void inlineCallStackOfNode(
   }
 }
 
-// inline_optimized_graph argument is used in substitute function call for
-// ONNX conversion
 std::vector<Value*> inlineCallTo(
     Node* to_replace,
-    Function* callee,
-    bool inline_optimized_graph /*=true*/) {
+    GraphFunction* callee,
+    Graph* callee_graph) {
   WithInsertPoint guard(to_replace);
-  TORCH_INTERNAL_ASSERT(callee->isGraphFunction());
   std::unordered_map<Value*, Value*> value_map;
-  std::vector<torch::jit::Value*> new_outputs;
+  std::vector<torch::jit::Value*> new_outputs = insertGraph(
+      *to_replace->owningGraph(),
+      *callee_graph,
+      to_replace->inputs(),
+      value_map);
 
-  if (inline_optimized_graph) {
-    new_outputs = insertGraph(
-        *to_replace->owningGraph(),
-        *(callee->optimized_graph()),
-        to_replace->inputs(),
-        value_map);
-  } else {
-    new_outputs = insertGraph(
-        *to_replace->owningGraph(),
-        *(callee->graph()),
-        to_replace->inputs(),
-        value_map);
-  }
   std::unordered_map<InlinedCallStack*, InlinedCallStackPtr>
       new_callstack_entries;
 
@@ -2112,23 +2140,10 @@ std::vector<Value*> inlineCallTo(
      * callee->optimized_graph()->inputs() or callee->graph()->inputs(), depends
      * on if it is inlined_optimized_graph
      */
-
-    if (inline_optimized_graph) {
-      auto is_graph_input = std::find(
-          callee->optimized_graph()->inputs().begin(),
-          callee->optimized_graph()->inputs().end(),
-          kv.first);
-      if (is_graph_input != callee->optimized_graph()->inputs().end()) {
-        continue;
-      }
-    } else {
-      auto is_graph_input = std::find(
-          callee->graph()->inputs().begin(),
-          callee->graph()->inputs().end(),
-          kv.first);
-      if (is_graph_input != callee->graph()->inputs().end()) {
-        continue;
-      }
+    auto is_graph_input = std::find(
+        callee_graph->inputs().begin(), callee_graph->inputs().end(), kv.first);
+    if (is_graph_input != callee_graph->inputs().end()) {
+      continue;
     }
 
     Node* new_node = kv.second->node();
@@ -2157,6 +2172,17 @@ std::vector<Value*> inlineCallTo(
   return new_outputs;
 }
 
+// inline_optimized_graph argument is used in substitute function call for
+// ONNX conversion
+std::vector<Value*> inlineCallTo(
+    Node* to_replace,
+    GraphFunction* callee,
+    bool inline_optimized_graph /*=true*/) {
+  auto graph =
+      inline_optimized_graph ? callee->optimized_graph() : callee->graph();
+  return inlineCallTo(to_replace, callee, graph.get());
+}
+
 std::vector<Value*> unpackOutputs(const std::vector<Value*>& outputs) {
   std::vector<Value*> new_outputs;
   if (outputs.size() != 1 || outputs.at(0)->type()->kind() != TupleType::Kind) {
@@ -2173,6 +2199,25 @@ std::vector<Value*> unpackOutputs(const std::vector<Value*>& outputs) {
     tup->node()->destroy();
   }
   return new_outputs;
+}
+
+std::vector<Node*> findAllNodes(
+    at::ArrayRef<Block*> array,
+    Symbol kind,
+    bool recurse) {
+  std::vector<Node*> ret;
+  for (auto block : array) {
+    findAllNodes(*block, kind, recurse, ret);
+  }
+  return ret;
+}
+
+std::vector<Node*> findAllNodes(Block& block, Symbol kind, bool recurse) {
+  return findAllNodes({&block}, kind, recurse);
+}
+
+std::vector<Node*> findAllNodes(Graph& g, Symbol kind, bool recurse) {
+  return findAllNodes(*g.block(), kind, recurse);
 }
 
 std::vector<Value*> insertGraph(
@@ -2244,6 +2289,15 @@ OperatorSet::OperatorSet(std::initializer_list<const char*> sig_literals) {
     auto op = getOperatorForLiteral(sig);
     ops[Symbol::fromQualString(op->schema().name())].push_back(op);
   }
+}
+
+std::vector<std::shared_ptr<Operator>> OperatorSet::getOps() const {
+  std::vector<std::shared_ptr<Operator>> result;
+  for (const auto& kv : ops) {
+    auto ops_for_symbol = kv.second;
+    result.insert(result.end(), ops_for_symbol.begin(), ops_for_symbol.end());
+  }
+  return result;
 }
 
 bool Node::isMemberOf(const OperatorSet& os) const {

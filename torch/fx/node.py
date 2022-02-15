@@ -5,12 +5,13 @@ from .immutable_collections import immutable_dict, immutable_list
 import torch
 import builtins
 import types
+import warnings
 from torch.fx.operator_schemas import normalize_function, normalize_module, ArgsKwargsPair
 
 if TYPE_CHECKING:
     from .graph import Graph
 
-BaseArgumentTypes = Union[str, int, float, bool, torch.dtype, torch.Tensor, torch.device, torch.memory_format]
+BaseArgumentTypes = Union[str, int, float, bool, torch.dtype, torch.Tensor, torch.device, torch.memory_format, torch.layout]
 base_types = BaseArgumentTypes.__args__  # type: ignore[attr-defined]
 
 Target = Union[Callable[..., Any], str]
@@ -24,7 +25,9 @@ Argument = Optional[Union[
     BaseArgumentTypes
 ]]
 
-_side_effectful_functions: Set[Callable] = {torch._assert}
+_side_effectful_functions: Set[Callable] = {
+    torch._assert, torch.ops.profiler._record_function_enter,
+    torch.ops.profiler._record_function_exit}
 
 # this is fixed on master, WAR for 1.5
 def _find_module_of_method(orig_method: Callable[..., Any]) -> str:
@@ -46,11 +49,7 @@ def _type_repr(obj):
     typically enough to uniquely identify a type.  For everything
     else, we fall back on repr(obj).
     """
-    # HACK: In Python 3.6, type aliases from ``typing`` are instances of ``type``, but in
-    # later Python versions, type aliases are not instances of ``type``!! We want
-    # all type aliases to fall through to ``repr``, so if we have a type that is
-    # in the module typing, don't go down this path.
-    if isinstance(obj, type) and obj.__module__ != 'typing':
+    if isinstance(obj, type):
         if obj.__module__ == 'builtins':
             return obj.__qualname__
         return f'{obj.__module__}.{obj.__qualname__}'
@@ -189,7 +188,6 @@ class Node:
 
         # If set, use this fn to print this node
         self._repr_fn : Optional[Callable[[Node], str]] = None
-        self._stack_trace : Optional[str] = None
 
         # Dictionary to store metadata passes need to do their
         # transformations. This metadata is preserved across node copies
@@ -231,6 +229,9 @@ class Node:
             x (Node): The node to put before this node. Must be a member of the same graph.
         """
         assert self.graph == x.graph, "Attempting to move a Node into a different Graph"
+        if self == x:
+            warnings.warn("Trying to prepend a node to itself. This behavior has no effect on the graph.")
+            return
         x._remove_from_list()
         p = self._prev
         p._next, x._prev = x, p
@@ -239,8 +240,8 @@ class Node:
     @compatibility(is_backward_compatible=True)
     def append(self, x: 'Node') -> None:
         """
-        Insert x after this node in the list of nodes in the graph.
-        Equvalent to ``self.next.prepend(x)``
+        Insert ``x`` after this node in the list of nodes in the graph.
+        Equivalent to ``self.next.prepend(x)``
 
         Args:
             x (Node): The node to put after this node. Must be a member of the same graph.
@@ -349,11 +350,11 @@ class Node:
         stack traces during tracing for debug purposes, set
         `record_stack_traces = True` on the `Tracer` instance.
         """
-        return self._stack_trace
+        return self.meta.get("stack_trace", None)
 
     @stack_trace.setter
     def stack_trace(self, trace : Optional[str]):
-        self._stack_trace = trace
+        self.meta["stack_trace"] = trace
 
     def __update_args_kwargs(self, new_args : Tuple['Argument', ...], new_kwargs : Dict[str, 'Argument']):
         """
@@ -401,8 +402,8 @@ class Node:
 
     @compatibility(is_backward_compatible=True)
     def format_node(self,
-                    placeholder_names: List[str] = None,
-                    maybe_return_typename: List[str] = None) -> Optional[str]:
+                    placeholder_names: Optional[List[str]] = None,
+                    maybe_return_typename: Optional[List[str]] = None) -> Optional[str]:
         """
         Return a descriptive string representation of ``self``.
 

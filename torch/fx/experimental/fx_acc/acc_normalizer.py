@@ -1,11 +1,10 @@
-# type: ignore[]
 import inspect
 import re
 from typing import NamedTuple, Optional, Callable, Dict, List, Tuple, Union, Any, Set
 
-import torch.fx.experimental.fx_acc.acc_utils as acc_utils
 import torch
 import torch.fx
+import torch.fx.experimental.fx_acc.acc_utils as acc_utils
 from torch.fx.node import _get_qualified_name
 
 # Need to keep up-to-date with https://fburl.com/codesearch/7r2hhh53
@@ -59,7 +58,13 @@ class NormalizationInfo(NamedTuple):
     new_fn_target: Callable
     arg_replacement_tuples: Optional[ArgReplacementTuplesType]
     custom_mapping_fn: Optional[Callable]
-    kwargs_to_move_to_acc_out_ty: Optional[Optional[List[Tuple[str, str]]]]
+    # either (tensor_meta_field_name, original_field_name, move_to_qparams) or
+    # (tensor_meta_field_name, orginal_field_name)
+    # when move_to_qparams is True, we'll move the field to qparams
+    # dictionary, otherwise it will stay in TensorMeta itself
+    kwargs_to_move_to_acc_out_ty: Optional[
+        List[Union[Tuple[str, str, bool], Tuple[str, str]]]
+    ]
     needs_shapes_for_normalization: bool
 
 
@@ -75,7 +80,9 @@ def _insert_fun(
     arg_replacement_tuples: List[Tuple],
     new_fn_target: Optional[Callable] = None,
     custom_mapping_fn: Optional[Callable] = None,
-    kwargs_to_move_to_acc_out_ty: Optional[Optional[List[Tuple[str, str]]]] = None,
+    kwargs_to_move_to_acc_out_ty: Optional[
+        List[Union[Tuple[str, str, bool], Tuple[str, str]]]
+    ] = None,
     needs_shapes_for_normalization=False,
     allow_normalize_from_torch_package=False,
 ):
@@ -114,7 +121,7 @@ def _insert_fun(
 
     assert op_and_target not in _normalization_dict.keys()
     norm_info = NormalizationInfo(
-        new_fn_target=new_fn_target,
+        new_fn_target=new_fn_target,  # type: ignore[arg-type]
         arg_replacement_tuples=final_arg_replacement_tuples,
         custom_mapping_fn=custom_mapping_fn,
         kwargs_to_move_to_acc_out_ty=kwargs_to_move_to_acc_out_ty,
@@ -128,8 +135,8 @@ def _insert_fun(
     # "<torch_package_>" in order to allow for whatever mangling index is used.
     if allow_normalize_from_torch_package:
         torch_package_op_and_target = (
-            op_and_target[0],
-            f"<torch_package_>.{_get_qualified_name(op_and_target[1])}",
+            op_and_target[0],  # type: ignore[]
+            f"<torch_package_>.{_get_qualified_name(op_and_target[1])}",  # type: ignore[arg-type]
         )
         _normalization_dict[torch_package_op_and_target] = norm_info
 
@@ -156,9 +163,16 @@ def register_acc_op(acc_op: Callable):
 def register_acc_op_mapping(
     op_and_target: Tuple[str, Union[str, Callable]],
     arg_replacement_tuples: Optional[
-        List[Tuple[Union[str, Tuple[str, ...]], str]]
+        List[
+            Union[
+                Tuple[Union[str, Tuple[str, ...]], str],
+                Tuple[Union[str, Tuple[str, ...]], str, bool],
+            ]
+        ]
     ] = None,
-    kwargs_to_move_to_acc_out_ty: Optional[List[Tuple[str, str]]] = None,
+    kwargs_to_move_to_acc_out_ty: Optional[
+        List[Union[Tuple[str, str, bool], Tuple[str, str]]]
+    ] = None,
 ):
     """
     Use this decorator to map a non-acc operator to an acc operator.
@@ -175,12 +189,12 @@ def register_acc_op_mapping(
         if arg_replacement_tuples is None:
             final_arg_replacement_tuples = _get_dup_signature_tuples(new_fn_target)
         else:
-            final_arg_replacement_tuples = arg_replacement_tuples
+            final_arg_replacement_tuples = arg_replacement_tuples  # type: ignore[assignment]
 
         _insert_fun(
             op_and_target=op_and_target,
             new_fn_target=new_fn_target,
-            arg_replacement_tuples=final_arg_replacement_tuples,
+            arg_replacement_tuples=final_arg_replacement_tuples,  # type: ignore[arg-type]
             kwargs_to_move_to_acc_out_ty=kwargs_to_move_to_acc_out_ty,
         )
         return new_fn_target
@@ -190,7 +204,12 @@ def register_acc_op_mapping(
 
 def register_custom_acc_mapper_fn(
     op_and_target: Tuple[str, Union[str, Callable]],
-    arg_replacement_tuples: List[Tuple[Union[str, Tuple[str, ...]], str]],
+    arg_replacement_tuples: List[
+        Union[
+            Tuple[Union[str, Tuple[str, ...]], str],
+            Tuple[Union[str, Tuple[str, ...]], str, bool],
+        ]
+    ],
     needs_shapes_for_normalization=False,
     allow_normalize_from_torch_package=False,
 ):
@@ -198,7 +217,7 @@ def register_custom_acc_mapper_fn(
         _insert_fun(
             op_and_target=op_and_target,
             custom_mapping_fn=custom_mapping_fn,
-            arg_replacement_tuples=arg_replacement_tuples,
+            arg_replacement_tuples=arg_replacement_tuples,  # type: ignore[arg-type]
             needs_shapes_for_normalization=needs_shapes_for_normalization,
             allow_normalize_from_torch_package=allow_normalize_from_torch_package,
         )
@@ -216,12 +235,15 @@ def move_kwargs_to_acc_out_ty(
     a node to fetch NormalizationInfo for, check if kwargs_to_move_to_acc_out_ty exists
     in the NormalizationInfo, and if so perform the move of kwargs to acc_out_ty.
     """
+
     if isinstance(node_or_normalization_info, torch.fx.Node):
         node = node_or_normalization_info
         normalization_info = _normalization_dict.get((node.op, node.target))
     else:
+        assert isinstance(node_or_normalization_info, NormalizationInfo)
         normalization_info = node_or_normalization_info
 
+    assert normalization_info is not None
     if normalization_info.kwargs_to_move_to_acc_out_ty is None:
         return
 
@@ -233,15 +255,24 @@ def move_kwargs_to_acc_out_ty(
     # and then remove the kwarg from the new_kwargs since it's passed in via
     # acc_out_ty instead.
     tmd_dict: Dict[str, Any] = {}
-    for (
-        orig_kwarg_name,
-        tmd_field_name,
-    ) in normalization_info.kwargs_to_move_to_acc_out_ty:
-        tmd_dict[tmd_field_name] = new_kwargs[orig_kwarg_name]
+    qparams: Dict[str, Any] = {}
+
+    for kwarg_replacement_tuple in normalization_info.kwargs_to_move_to_acc_out_ty:
+        if len(kwarg_replacement_tuple) == 2:
+            orig_kwarg_name, tmd_field_name, move_to_qparams = *kwarg_replacement_tuple, False  # type: ignore[misc]
+        else:
+            assert len(kwarg_replacement_tuple) == 3
+            orig_kwarg_name, tmd_field_name, move_to_qparams = kwarg_replacement_tuple  # type: ignore[misc]
+        if move_to_qparams:
+            qparams[tmd_field_name] = new_kwargs[orig_kwarg_name]
+        else:
+            tmd_dict[tmd_field_name] = new_kwargs[orig_kwarg_name]
         del new_kwargs[orig_kwarg_name]
+
+    tmd_dict["qparams"] = qparams
     # Note: allow_partial_spec here because we are only using the tensor metadata tuple
     # here to pass specific values into the function. For example, for quantization we
-    # only need to provide dtype/q_scale/q_zero_point, but is_quantized and qscheme are
+    # only need to provide qparams dictionary, but is_quantized is
     # not passed in.
     new_kwargs["acc_out_ty"] = acc_utils.build_raw_tensor_meta(**tmd_dict)
 
@@ -275,7 +306,7 @@ def get_normalized_kwargs(
                 new_kwargs[new_kwarg_name] = node.args[i]
             else:
                 # Verify the arg we're trying to normalize was optional.
-                assert is_optional
+                assert is_optional, f"Cannot normalize {orig_kwargs_names} to {new_kwarg_name} for {node.name}"
         else:
             new_kwargs[new_kwarg_name] = node.kwargs[orig_kwargs_name]
 
@@ -344,6 +375,10 @@ def normalize(mod: torch.fx.GraphModule, expect_nodes_have_shapes: bool = False)
         node.replace_all_uses_with(new_node)
         graph.erase_node(node)
 
+        # Don't wrap the acc_op node just because the original node was wrapped.
+        if "is_wrapped" in new_node.meta:
+            del new_node.meta["is_wrapped"]
+
     for node in graph.nodes:
         if node.op in {"placeholder", "get_attr", "output"}:
             continue
@@ -367,14 +402,22 @@ def normalize(mod: torch.fx.GraphModule, expect_nodes_have_shapes: bool = False)
         # Get the normalized kwargs to be used by normalize_to_acc_op below. If
         # normalization_info.arg_replacement_tuples is empty then assume the function
         # signature must be left as is.
+        assert normalization_info.arg_replacement_tuples is not None
         if len(normalization_info.arg_replacement_tuples) == 0:
             normalized_args = node.args
             normalized_kwargs = node.kwargs
         else:
             normalized_args = ()
-            normalized_kwargs = get_normalized_kwargs(
-                node, normalization_info.arg_replacement_tuples
-            )
+            try:
+                normalized_kwargs = get_normalized_kwargs(
+                    node, normalization_info.arg_replacement_tuples
+                )
+            except Exception:
+                print(
+                    f"Error during kwarg normalization for: {node.format_node()}; "
+                    f"arg_replacement_tuples={normalization_info.arg_replacement_tuples}"
+                )
+                raise
 
         if (
             normalization_info.needs_shapes_for_normalization
