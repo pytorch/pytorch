@@ -1,5 +1,5 @@
 # @generated DO NOT EDIT MANUALLY
-# Template is at:    .github/templates/xla_ci_workflow.yml.j2
+# Template is at:    .github/templates/linux_ci_workflow.yml.j2
 # Generation script: .github/scripts/generate_ci_workflows.py
 name: pytorch-xla-linux-bionic-py3.7-clang8
 
@@ -22,7 +22,6 @@ env:
   SCCACHE_BUCKET: ossci-compiler-cache-circleci-v2
   XLA_CLANG_CACHE_S3_BUCKET_NAME: ossci-compiler-clang-cache-circleci-xla
   TORCH_CUDA_ARCH_LIST: 5.2
-  XLA_CUDA: 0
   IN_CI: 1
   IS_GHA: 1
   # This is used for the phase of adding wheel tests only, will be removed once completed
@@ -36,6 +35,9 @@ env:
   PR_NUMBER: ${{ github.event.pull_request.number }}
   SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
   PYTORCH_RETRY_TEST_CASES: 1
+  # This is used for XLA tests only
+  XLA_CUDA: 0
+  XLA_IMAGE_TAG: v0.2
 concurrency:
   group: pytorch-xla-linux-bionic-py3.7-clang8-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
   cancel-in-progress: true
@@ -108,12 +110,12 @@ jobs:
       - name: Calculate docker image tag
         id: calculate-tag
         run: |
-          echo "XLA workflow uses pre-built test image at :v0.2"
+          echo "XLA workflow uses pre-built test image at ${XLA_IMAGE_TAG}"
           DOCKER_TAG=$(git rev-parse HEAD:.circleci/docker)
           echo "DOCKER_TAG=${DOCKER_TAG}" >> "${GITHUB_ENV}"
-          echo "DOCKER_IMAGE=${DOCKER_IMAGE_BASE}:v0.2" >> "${GITHUB_ENV}"
+          echo "DOCKER_IMAGE=${DOCKER_IMAGE_BASE}:${XLA_IMAGE_TAG}" >> "${GITHUB_ENV}"
           echo "::set-output name=docker_tag::${DOCKER_TAG}"
-          echo "::set-output name=docker_image::${DOCKER_IMAGE_BASE}:v0.2"
+          echo "::set-output name=docker_image::${DOCKER_IMAGE_BASE}:${XLA_IMAGE_TAG}"
       - name: Pull Docker image
         run: |
           retry () {

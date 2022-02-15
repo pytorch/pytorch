@@ -1037,7 +1037,7 @@ def main() -> None:
     )
     template_and_workflows = [
         (jinja_env.get_template("linux_ci_workflow.yml.j2"), LINUX_WORKFLOWS),
-        (jinja_env.get_template("xla_ci_workflow.yml.j2"), XLA_WORKFLOWS),
+        (jinja_env.get_template("linux_ci_workflow.yml.j2"), XLA_WORKFLOWS),
         (jinja_env.get_template("windows_ci_workflow.yml.j2"), WINDOWS_WORKFLOWS),
         (jinja_env.get_template("bazel_ci_workflow.yml.j2"), BAZEL_WORKFLOWS),
         (jinja_env.get_template("ios_ci_workflow.yml.j2"), IOS_WORKFLOWS),
