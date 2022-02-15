@@ -6,7 +6,7 @@
 
 namespace at {
 class Tensor;
-struct TensorIterator;
+class TensorBase;
 struct TensorIteratorBase;
 }
 
@@ -80,7 +80,7 @@ DECLARE_DISPATCH(void(*)(TensorIteratorBase&, const double, c10::optional<Genera
 DECLARE_DISPATCH(void(*)(TensorIteratorBase&, const double, c10::optional<Generator>), geometric_stub);
 DECLARE_DISPATCH(void(*)(TensorIteratorBase&, const double, const double, c10::optional<Generator>), log_normal_stub);
 DECLARE_DISPATCH(void(*)(TensorIteratorBase&, const double, const double, c10::optional<Generator>), uniform_stub);
-DECLARE_DISPATCH(void(*)(Tensor&, const double, const double, c10::optional<Generator>), normal_stub);
+DECLARE_DISPATCH(void(*)(const TensorBase&, const double, const double, c10::optional<Generator>), normal_stub);
 DECLARE_DISPATCH(void(*)(TensorIteratorBase&, const uint64_t, const int64_t, c10::optional<Generator>), random_from_to_stub);
 DECLARE_DISPATCH(void(*)(TensorIteratorBase&, c10::optional<Generator>), random_full_64_bits_range_stub);
 DECLARE_DISPATCH(void(*)(TensorIteratorBase&, c10::optional<Generator>), random_stub);
