@@ -267,15 +267,14 @@ void Dispatcher::cleanup(const OperatorHandle& op, const OperatorName& op_name) 
 RegistrationHandleRAII Dispatcher::registerFallback(DispatchKey dispatchKey, KernelFunction kernel, std::string debug) {
   std::lock_guard<std::mutex> lock(mutex_);
 
-  auto idx = getDispatchTableIndexForDispatchKey(dispatchKey);
   TORCH_CHECK(
-    !backendFallbackKernels_[idx].kernel.isValid(),
+    !backendFallbackKernels_[static_cast<uint8_t>(dispatchKey)].kernel.isValid(),
     "Tried to register multiple backend fallbacks for the same dispatch key ", dispatchKey, "; previous registration ",
-    backendFallbackKernels_[idx].debug, ", new registration ", debug
+    backendFallbackKernels_[static_cast<uint8_t>(dispatchKey)].debug, ", new registration ", debug
   );
   // NB: inferred function schema is always nullptr for fallbacks, as fallbacks
   // cannot be unobxed
-  backendFallbackKernels_[idx] = impl::AnnotatedKernel(std::move(kernel), nullptr, std::move(debug));
+  backendFallbackKernels_[static_cast<uint8_t>(dispatchKey)] = impl::AnnotatedKernel(std::move(kernel), nullptr, std::move(debug));
 
   for (auto& op : operators_) {
     op.op.updateFallback(*this, dispatchKey);
@@ -289,8 +288,7 @@ RegistrationHandleRAII Dispatcher::registerFallback(DispatchKey dispatchKey, Ker
 void Dispatcher::deregisterFallback_(DispatchKey dispatchKey) {
   std::lock_guard<std::mutex> lock(mutex_);
 
-  auto idx = getDispatchTableIndexForDispatchKey(dispatchKey);
-  backendFallbackKernels_[idx] = {};
+  backendFallbackKernels_[static_cast<uint8_t>(dispatchKey)] = {};
 
   for (auto& op : operators_) {
     op.op.updateFallback(*this, dispatchKey);
