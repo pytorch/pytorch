@@ -12,7 +12,7 @@ from .adamw import AdamW
 NAdam = partial(optim.NAdam, foreach=True)
 SGD = partial(optim.SGD, foreach=True)
 RAdam = partial(optim.RAdam, foreach=True)
-from .rmsprop import RMSprop
+RMSprop = partial(optim.RMSprop, foreach=True)
 from .rprop import Rprop
 ASGD = partial(optim.ASGD, foreach=True)
 Adamax = partial(optim.Adamax, foreach=True)
@@ -20,5 +20,4 @@ Adadelta = partial(optim.Adadelta, foreach=True)
 Adagrad = partial(optim.Adagrad, foreach=True)
 
 del adamw
-del rmsprop
 del rprop
