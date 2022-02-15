@@ -207,12 +207,14 @@ else
     if [[ "$BUILD_ENVIRONMENT" != *ppc64le*  && "$BUILD_ENVIRONMENT" != *clang* ]]; then
       # WERROR=1 python setup.py bdist_wheel
       # python -mpip install dist/*.whl
-      wget https://16995598-65600975-gh.circle-artifacts.com/0/home/circleci/project/dist/torch-1.8.3a0%2B0f85d49-cp36-cp36m-linux_x86_64.whl
-      python -mpip install torch-1.8.3a0+0f85d49-cp36-cp36m-linux_x86_64.whl
+      mkdir -p dist
+      wget https://16995598-65600975-gh.circle-artifacts.com/0/home/circleci/project/dist/torch-1.8.3a0%2B0f85d49-cp36-cp36m-linux_x86_64.whl -P dist/
+      python -mpip install dist/*.whl
     else
       # python setup.py bdist_wheel
       # python -mpip install dist/*.whl
-      wget https://16995598-65600975-gh.circle-artifacts.com/0/home/circleci/project/dist/torch-1.8.3a0%2B0f85d49-cp36-cp36m-linux_x86_64.whl
+      mkdir -p dist
+      wget https://16995598-65600975-gh.circle-artifacts.com/0/home/circleci/project/dist/torch-1.8.3a0%2B0f85d49-cp36-cp36m-linux_x86_64.whl -P dist/
       python -mpip install torch-1.8.3a0+0f85d49-cp36-cp36m-linux_x86_64.whl
     fi
 
