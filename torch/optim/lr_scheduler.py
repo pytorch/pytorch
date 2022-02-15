@@ -635,7 +635,20 @@ class SequentialLR(_LRScheduler):
         self._milestones = milestones
         self.last_epoch = last_epoch + 1
         self.optimizer = optimizer
-        self._last_lr = schedulers[0].get_last_lr()
+        self._init_step()
+
+    def _init_step(self):
+        """Call step on the appropriate scheduler once more on initialization
+        in order to correctly set the current learning rate
+        """
+        # decrement the last epoch of the appropriate scheduler, so that it
+        # remains the same after the step
+        idx = bisect_right(self._milestones, self.last_epoch)
+        self._schedulers[idx].last_epoch -= 1
+        # decrement the last epoch, so that it remains the same after the step
+        self.last_epoch -= 1
+        # Call the step
+        self.step()
 
     def step(self):
         self.last_epoch += 1
