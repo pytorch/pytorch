@@ -10,7 +10,7 @@ from torch import optim
 Adam = partial(optim.Adam, foreach=True)
 from .adamw import AdamW
 NAdam = partial(optim.NAdam, foreach=True)
-from .sgd import SGD
+SGD = partial(optim.SGD, foreach=True)
 RAdam = partial(optim.RAdam, foreach=True)
 from .rmsprop import RMSprop
 from .rprop import Rprop
@@ -20,6 +20,5 @@ Adadelta = partial(optim.Adadelta, foreach=True)
 Adagrad = partial(optim.Adagrad, foreach=True)
 
 del adamw
-del sgd
 del rmsprop
 del rprop

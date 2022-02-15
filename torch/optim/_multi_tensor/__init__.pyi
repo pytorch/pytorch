@@ -4,7 +4,7 @@ from torch import optim
 Adam = partial(optim.Adam, foreach=True)
 from .adamw import AdamW as AdamW
 NAdam = partial(optim.NAdam, foreach=True)
-from .sgd import SGD as SGD
+SGD = partial(optim.SGD, foreach=True)
 RAdam = partial(optim.RAdam, foreach=True)
 from .rmsprop import RMSprop as RMSprop
 from .rprop import Rprop as Rprop
