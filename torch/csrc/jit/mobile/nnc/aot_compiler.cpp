@@ -253,6 +253,29 @@ std::vector<at::ScalarType> parseInputTypes(
   return scalarTypes;
 }
 
+std::vector<at::MemoryFormat> parseInputMemoryFormats(
+    const std::string& input_memory_format_str,
+    size_t num) {
+  std::vector<std::string> memFormatsStr = split(';', input_memory_format_str);
+  if (memFormatsStr.size() == 0) {
+    return std::vector<at::MemoryFormat>(num, at::MemoryFormat::Contiguous);
+  }
+
+  std::vector<at::MemoryFormat> memFormats;
+  for (const auto& memFormatStr : memFormatsStr) {
+    at::MemoryFormat memFormat;
+    if (memFormatStr == "contiguous") {
+      memFormat = at::MemoryFormat::Contiguous;
+    } else if (memFormatStr == "channels_last") {
+      memFormat = at::MemoryFormat::ChannelsLast;
+    } else {
+      CAFFE_THROW("Unsupported memory format: ", memFormatStr);
+    }
+    memFormats.push_back(memFormat);
+  }
+  return memFormats;
+}
+
 std::string getNncKernelId(
     const std::string& model_name,
     const std::string& model_version,
@@ -309,12 +332,16 @@ std::shared_ptr<Graph> preprocessGraphPasses(
 
 std::vector<c10::optional<at::Tensor>> generateExampleInputs(
     const std::vector<std::vector<int64_t>>& inputShapes,
-    const std::vector<at::ScalarType>& inputTypes) {
+    const std::vector<at::ScalarType>& inputTypes,
+    const std::vector<at::MemoryFormat>& inputMemoryFormats) {
   std::vector<c10::optional<at::Tensor>> example_inputs;
   example_inputs.reserve(inputShapes.size());
   for (int i = 0; i < inputShapes.size(); ++i) {
+    const auto dtype = at::dtype(inputTypes[i]);
+    const auto memory_format = inputMemoryFormats[i];
     example_inputs.emplace_back(
-        at::rand(inputShapes[i]).to(at::dtype(inputTypes[i])));
+        at::rand(inputShapes[i], at::TensorOptions(dtype))
+            .contiguous(memory_format));
   }
   return example_inputs;
 }
@@ -342,8 +369,10 @@ c10::IValue preprocess(
 
     auto sizes = parseInputShapes(*method_spec.at("sizes").toString());
     auto types = parseInputTypes(*method_spec.at("types").toString());
+    auto memory_formats = parseInputMemoryFormats(
+        *method_spec.at("memory_formats").toString(), sizes.size());
 
-    auto example_inputs = generateExampleInputs(sizes, types);
+    auto example_inputs = generateExampleInputs(sizes, types, memory_formats);
     graph = preprocessGraphPasses(graph, example_inputs);
 
     auto kernel_func_name =
