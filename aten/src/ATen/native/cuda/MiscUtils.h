@@ -1,11 +1,10 @@
 #pragma once
-#include <ATen/ATen.h>
 #include <ATen/cuda/Exceptions.h>
 #include <ATen/cuda/CUDAContext.h>
+#include <ATen/cuda/CUDAConfig.h>
 #include <ATen/cuda/PinnedMemoryAllocator.h>
-#include <THC/THC.h>  // for USE_MAGMA
 
-#ifdef USE_MAGMA
+#if AT_MAGMA_ENABLED()
 #include <magma_types.h>
 #include <magma_v2.h>
 #endif
@@ -13,7 +12,7 @@
 namespace at {
 namespace native {
 
-#ifdef USE_MAGMA
+#if AT_MAGMA_ENABLED()
 
 // RAII for a MAGMA Queue
 struct MAGMAQueue {

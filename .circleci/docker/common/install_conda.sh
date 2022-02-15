@@ -86,14 +86,10 @@ if [ -n "$ANACONDA_PYTHON_VERSION" ]; then
     conda_install numpy=1.18.5 astunparse pyyaml mkl mkl-include setuptools cffi future six dataclasses typing_extensions
   fi
 
-  if [[ "$CUDA_VERSION" == 10.2* ]]; then
-    conda_install magma-cuda102 -c pytorch
-  elif [[ "$CUDA_VERSION" == 11.0* ]]; then
-    conda_install magma-cuda110 -c pytorch
-  elif [[ "$CUDA_VERSION" == 11.1* ]]; then
-    conda_install magma-cuda111 -c pytorch
-  elif [[ "$CUDA_VERSION" == 11.3* ]]; then
-    conda_install magma-cuda113 -c pytorch
+  # Magma package names are concatenation of CUDA major and minor ignoring revision
+  # I.e. magma-cuda102 package corresponds to CUDA_VERSION=10.2 and CUDA_VERSION=10.2.89
+  if [ -n "$CUDA_VERSION" ]; then
+    conda_install magma-cuda$(TMP=${CUDA_VERSION/./};echo ${TMP%.*[0-9]}) -c pytorch
   fi
 
   # TODO: This isn't working atm
@@ -117,9 +113,9 @@ if [ -n "$ANACONDA_PYTHON_VERSION" ]; then
   # Install numba only on python-3.8 or below
   # For numba issue see https://github.com/pytorch/pytorch/issues/51511
   if [[ $(python -c "import sys; print(int(sys.version_info < (3, 9)))") == "1" ]]; then
-    as_jenkins pip install --progress-bar off numba librosa>=0.6.2
+    as_jenkins pip install --progress-bar off numba==0.54.1 "librosa>=0.6.2,<0.9.0"
   else
-    as_jenkins pip install --progress-bar off numba==0.49.0 librosa>=0.6.2
+    as_jenkins pip install --progress-bar off numba==0.49.0 "librosa>=0.6.2,<0.9.0"
   fi
 
   # Update scikit-learn to a python-3.8 compatible version

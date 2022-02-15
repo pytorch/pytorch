@@ -9,6 +9,7 @@
 #include <ATen/NamedTensorUtils.h>
 
 #include <c10/core/TensorOptions.h>
+#include <c10/util/irange.h>
 
 namespace at {
 namespace meta {
@@ -124,54 +125,91 @@ TORCH_META_FUNC(_log_softmax_backward_data)
 namespace native {
 namespace {
 
-template <typename scalar_t, bool LogSoftMax>
-void host_softmax(Tensor output, const Tensor& input, const int64_t dim) {
+template <typename scalar_t, bool LogSoftMax, bool MaskedSoftMax = false>
+void host_softmax(
+    Tensor output,
+    const Tensor& input,
+    const int64_t dim,
+    bool* mask = nullptr) {
   int64_t outer_size = 1;
   int64_t dim_size = input.size(dim);
   int64_t inner_size = 1;
-  for (int64_t i = 0; i < dim; ++i)
+  for (const auto i : c10::irange(dim)) {
     outer_size *= input.size(i);
-  for (int64_t i = dim + 1; i < input.dim(); ++i)
+  }
+  for (int64_t i = dim + 1; i < input.dim(); ++i) {
     inner_size *= input.size(i);
+  }
   int64_t dim_stride = inner_size;
   int64_t outer_stride = dim_size * dim_stride;
   scalar_t* input_data_base = input.data_ptr<scalar_t>();
   scalar_t* output_data_base = output.data_ptr<scalar_t>();
+  bool* mask_data_base = mask;
   int64_t grain_size = std::min(internal::GRAIN_SIZE / dim_size, (int64_t)1);
   parallel_for(
       0, outer_size * inner_size, grain_size,
       [&](int64_t begin, int64_t end) {
-        for (int64_t i = begin; i < end; i++) {
+        for (const auto i : c10::irange(begin, end)) {
           int64_t outer_idx = i / inner_size;
           int64_t inner_idx = i % inner_size;
           scalar_t* input_data =
               input_data_base + outer_idx * outer_stride + inner_idx;
           scalar_t* output_data =
               output_data_base + outer_idx * outer_stride + inner_idx;
-          scalar_t max_input = input_data[0];
-          for (int64_t d = 1; d < dim_size; d++)
-            max_input = std::max(max_input, input_data[d * dim_stride]);
+          bool* mask_data = nullptr;
+          if (MaskedSoftMax) {
+            mask_data = mask_data_base + outer_idx * outer_stride + inner_idx;
+          }
 
+          // Calc max in softmax dim
+          bool is_meaningful_max = false;
+          scalar_t max_input = input_data[0];
+          if (!MaskedSoftMax) {
+            for (const auto d : c10::irange(1, dim_size)) {
+              max_input = std::max(max_input, input_data[d * dim_stride]);
+            }
+          } else {
+            for (const auto d : c10::irange(0, dim_size)) {
+              if (mask_data[d * dim_stride]) {
+                max_input = is_meaningful_max
+                    ? std::max(max_input, input_data[d * dim_stride])
+                    : input_data[d * dim_stride];
+                is_meaningful_max = true;
+              }
+            }
+          }
+
+          // Calc sum in softmax dim
           acc_type<scalar_t, false> tmpsum = 0;
-          for (int64_t d = 0; d < dim_size; d++) {
-            scalar_t z = std::exp(input_data[d * dim_stride] - max_input);
+          for (const auto d : c10::irange(dim_size)) {
+            scalar_t z{};
+            if (!MaskedSoftMax || mask_data[d * dim_stride]) {
+              z = std::exp(input_data[d * dim_stride] - max_input);
+            } else {
+              z = 0;
+            }
             if (!LogSoftMax) {
               output_data[d * dim_stride] = z;
             }
             tmpsum += z;
           }
 
-          if (LogSoftMax)
+          if (LogSoftMax) {
             tmpsum = std::log(tmpsum);
-          else
+          } else {
             tmpsum = 1 / tmpsum;
+          }
 
-          for (int64_t d = 0; d < dim_size; d++)
-            if (LogSoftMax)
+          // update output
+          for (const auto d : c10::irange(dim_size)) {
+            // LogSoftMax and MaskedSoftMax should not both be true
+            if (LogSoftMax) {
               output_data[d * dim_stride] =
                   input_data[d * dim_stride] - max_input - tmpsum;
-            else
+            } else {
               output_data[d * dim_stride] *= tmpsum;
+            }
+          }
         }
       });
 }
@@ -186,10 +224,12 @@ void host_softmax_backward(
   int64_t outer_size = 1;
   int64_t dim_size = grad.size(dim);
   int64_t inner_size = 1;
-  for (int64_t i = 0; i < dim; ++i)
+  for (const auto i : c10::irange(dim)) {
     outer_size *= grad.size(i);
-  for (int64_t i = dim + 1; i < grad.dim(); ++i)
+  }
+  for (int64_t i = dim + 1; i < grad.dim(); ++i) {
     inner_size *= grad.size(i);
+  }
   int64_t dim_stride = inner_size;
   int64_t outer_stride = dim_size * dim_stride;
   scalar_t* gradInput_data_base = gI.data_ptr<scalar_t>();
@@ -198,7 +238,7 @@ void host_softmax_backward(
   int64_t grain_size = std::min(internal::GRAIN_SIZE / dim_size, (int64_t)1);
   parallel_for(
       0, outer_size * inner_size, grain_size, [&](int64_t begin, int64_t end) {
-        for (int64_t i = begin; i < end; i++) {
+        for (const auto i : c10::irange(begin, end)) {
           int64_t outer_idx = i / inner_size;
           int64_t inner_idx = i % inner_size;
           scalar_t* gradInput_data =
@@ -209,14 +249,16 @@ void host_softmax_backward(
               gradOutput_data_base + outer_idx * outer_stride + inner_idx;
 
           acc_type<scalar_t, false> sum = 0;
-          for (int64_t d = 0; d < dim_size; d++)
-            if (LogSoftMax)
+          for (const auto d : c10::irange(dim_size)) {
+            if (LogSoftMax) {
               sum += gradOutput_data[d * dim_stride];
-            else
+            } else {
               sum +=
                   gradOutput_data[d * dim_stride] * output_data[d * dim_stride];
+            }
+          }
 
-          for (int64_t d = 0; d < dim_size; d++) {
+          for (const auto d : c10::irange(dim_size)) {
             if (LogSoftMax) {
               gradInput_data[d * dim_stride] = gradOutput_data[d * dim_stride] -
                   std::exp(output_data[d * dim_stride]) * sum;
@@ -283,7 +325,10 @@ TORCH_IMPL_FUNC(log_softmax_cpu_out)
   } else {
     AT_DISPATCH_FLOATING_TYPES_AND(
         at::ScalarType::BFloat16, input_.scalar_type(), "log_softmax", [&] {
-          host_softmax<scalar_t, true>(output, input_, dim_);
+          host_softmax<
+              scalar_t,
+              true /* LogSoftMax */,
+              false /* MaskedSoftMax */>(output, input_, dim_);
         });
   }
 }
@@ -411,6 +456,7 @@ DEFINE_DISPATCH(softmax_backward_lastdim_kernel);
 DEFINE_DISPATCH(log_softmax_backward_lastdim_kernel);
 
 DEFINE_DISPATCH(softmax_kernel);
+DEFINE_DISPATCH(log_softmax_kernel);
 
 Tensor softmax(const Tensor& self, Dimname dim, optional<ScalarType> dtype) {
   return at::softmax(self, dimname_to_position(self, dim), dtype);
@@ -420,5 +466,23 @@ Tensor log_softmax(const Tensor& self, Dimname dim, optional<ScalarType> dtype) 
   return at::log_softmax(self, dimname_to_position(self, dim), dtype);
 }
 
+Tensor masked_softmax_cpu(const Tensor& input, const Tensor& mask) {
+  Tensor output = at::empty_like(input, input.options());
+  TORCH_CHECK(
+      input.sizes() == mask.sizes(), "Mask shape should match input shape");
+  TORCH_CHECK(mask.is_contiguous(), "Mask should always be contiguous");
+  TORCH_CHECK(
+      mask.scalar_type() == ScalarType::Bool,
+      "Mask should be a boolean tensor");
+  AT_DISPATCH_FLOATING_TYPES_AND(
+      at::ScalarType::BFloat16, input.scalar_type(), "log_softmax", [&] {
+        host_softmax<
+            scalar_t,
+            false /* LogSoftMax */,
+            true /* MaskedSoftMax */>(
+            output, input, input.dim() - 1, mask.data_ptr<bool>());
+      });
+  return output;
+}
 }
 }

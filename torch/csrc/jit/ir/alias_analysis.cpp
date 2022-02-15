@@ -1,5 +1,6 @@
 #include <torch/csrc/jit/ir/alias_analysis.h>
 
+#include <c10/util/flat_hash_map.h>
 #include <c10/util/irange.h>
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/utils/subgraph_utils.h>
@@ -13,9 +14,10 @@ namespace jit {
 
 namespace {
 
-TypePtr toSingleType(AliasTypeSet& mut_types) {
-  return mut_types.size() == 1 ? mut_types[0]
-                               : c10::UnionType::create(mut_types);
+c10::MaybeOwned<TypePtr> toSingleType(const AliasTypeSet& mut_types) {
+  return mut_types.size() == 1
+      ? c10::MaybeOwned<TypePtr>::borrowed(mut_types[0])
+      : c10::MaybeOwned<TypePtr>::owned(c10::UnionType::create(mut_types));
 }
 
 // This class determines whether a type is mutable, and, if so, it maps
@@ -25,7 +27,7 @@ TypePtr toSingleType(AliasTypeSet& mut_types) {
 class MutableTypePtrHelper {
  public:
   explicit MutableTypePtrHelper(
-      std::unordered_map<TypePtr, AliasTypeSet>* mutable_type_cache)
+      ska::flat_hash_map<TypePtr, AliasTypeSet>* mutable_type_cache)
       : mutable_type_cache_(mutable_type_cache) {}
 
   // Map any mutable type to a type such that all other types which the
@@ -53,16 +55,29 @@ class MutableTypePtrHelper {
   //     as a single, homogenous "Tensor" type.
   c10::optional<AliasTypeSet> mapTypeToAliasTypeSet(const TypePtr& type) {
     if (mutable_type_cache_) {
-      auto maybe_type_mapping = mutable_type_cache_->find(type);
-      if (maybe_type_mapping != mutable_type_cache_->end()) {
-        return maybe_type_mapping->second;
+      const AliasTypeSet* result = mapTypeToBorrowedAliasTypeSet(type);
+      if (result) {
+        return *result;
       }
     }
-    auto mutable_types = mapTypeToAliasTypeSetImpl(type);
-    if (mutable_type_cache_ && mutable_types) {
-      mutable_type_cache_->emplace(type, *mutable_types);
+    return mapTypeToAliasTypeSetImpl(type);
+  }
+
+  const AliasTypeSet* mapTypeToBorrowedAliasTypeSet(const TypePtr& type) {
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(mutable_type_cache_ != nullptr);
+    auto maybe_type_mapping = mutable_type_cache_->find(type);
+    if (maybe_type_mapping != mutable_type_cache_->end()) {
+      return &maybe_type_mapping->second;
     }
-    return mutable_types;
+
+    auto mutable_types = mapTypeToAliasTypeSetImpl(type);
+    if (mutable_types) {
+      auto it =
+          mutable_type_cache_->emplace(type, std::move(*mutable_types)).first;
+      return &it->second;
+    } else {
+      return nullptr;
+    }
   }
 
  private:
@@ -80,7 +95,7 @@ class MutableTypePtrHelper {
       case TypeKind::UnionType: {
         AliasTypeSet mutable_types;
         for (const TypePtr& inner :
-             type->expect<UnionType>()->containedTypes()) {
+             type->expectRef<UnionType>().containedTypes()) {
           if (auto maybe_inner_types = mapTypeToAliasTypeSet(inner)) {
             mutable_types.insert(
                 mutable_types.end(),
@@ -102,8 +117,8 @@ class MutableTypePtrHelper {
       case TypeKind::FutureType: {
         if (auto maybe_mut_types = mapTypeToAliasTypeSet(
                 type->castRaw<FutureType>()->getElementType())) {
-          auto mut_type = toSingleType(*maybe_mut_types);
-          return {AliasTypeSet{FutureType::create(mut_type)}};
+          return {AliasTypeSet{
+              FutureType::create(*toSingleType(*maybe_mut_types))}};
         }
         return c10::nullopt;
       }
@@ -126,12 +141,12 @@ class MutableTypePtrHelper {
         return c10::nullopt;
     }
   }
-  std::unordered_map<TypePtr, AliasTypeSet>* mutable_type_cache_;
+  ska::flat_hash_map<TypePtr, AliasTypeSet>* mutable_type_cache_;
 };
 
 bool isMutableTypeImpl(
     const TypePtr& type,
-    std::unordered_map<TypePtr, AliasTypeSet>* mutable_type_cache) {
+    ska::flat_hash_map<TypePtr, AliasTypeSet>* mutable_type_cache) {
   // Check common cases to avoid recursively constructing type in
   // `mapTypeToAliasTypeSetPtrImpl`
   auto kind = type->kind();
@@ -140,7 +155,11 @@ bool isMutableTypeImpl(
     return true;
   }
   MutableTypePtrHelper helper(mutable_type_cache);
-  return helper.mapTypeToAliasTypeSet(type) != c10::nullopt;
+  if (mutable_type_cache) {
+    return helper.mapTypeToBorrowedAliasTypeSet(type) != nullptr;
+  } else {
+    return helper.mapTypeToAliasTypeSet(type).has_value();
+  }
 }
 
 } // namespace
@@ -163,10 +182,10 @@ bool AliasDb::isMutableTypeInternal(const Value* v) const {
   return isMutableTypeInternal(v->type());
 }
 
-c10::optional<AliasTypeSet> AliasDb::mapTypeToAliasTypeSetPtr(
+const AliasTypeSet* AliasDb::mapTypeToAliasTypeSetPtr(
     const TypePtr& type) const {
   MutableTypePtrHelper helper(&mapped_mutable_types_);
-  return helper.mapTypeToAliasTypeSet(type);
+  return helper.mapTypeToBorrowedAliasTypeSet(type);
 }
 
 AliasDb::~AliasDb() = default;
@@ -189,13 +208,9 @@ struct AliasDb::WriteRegistry {
   std::unordered_set<Node*> writesToAllWildcards_;
 };
 
-AliasDb::AliasDb(
-    std::shared_ptr<Graph> graph,
-    bool isFrozen,
-    bool enablePreciseTupleContainerAnalysis)
+AliasDb::AliasDb(std::shared_ptr<Graph> graph, bool isFrozen)
     : graph_(std::move(graph)),
       isFrozen_(isFrozen),
-      enablePreciseTupleContainerAnalysis_(enablePreciseTupleContainerAnalysis),
       memoryDAGBuilder_(std::make_unique<MemoryDAGBuilder>()),
       writeRegistry_(std::make_unique<AliasDb::WriteRegistry>()) {
   analyze(graph_);
@@ -579,6 +594,11 @@ void AliasDb::analyzeImpl(Node* node) {
       for (const auto input : node->inputs()) {
         oss << input->type()->str() << ", ";
       }
+      oss << "\n\nCandidates:";
+      const auto& candidates = getAllOperatorsFor(node->kind());
+      for (const auto& candidate : candidates) {
+        oss << "\n\t" << candidate->schema();
+      }
       TORCH_INTERNAL_ASSERT(
           0,
           "We don't have an op for ",
@@ -609,6 +629,10 @@ void AliasDb::analyzeImpl(Node* node) {
     case prim::rpc_sync:
     case prim::rpc_remote:
       return analyzeRpcAsync(node);
+    case aten::batch_norm:
+      return analyzeBatchNorm(node);
+    case aten::instance_norm:
+      return analyzeInstanceNorm(node);
     case prim::GradOf:
       return analyzeGradOf(node);
     case prim::BroadcastMKLDNNTensors: {
@@ -618,6 +642,7 @@ void AliasDb::analyzeImpl(Node* node) {
     }
     // TODO: think more about TensorExpr alias correctness
     case prim::TensorExprGroup:
+    case prim::TensorExprDynamicGroup:
     case prim::MKLDNNGroup:
     case prim::ConstantMKLDNNTensor:
     case prim::StaticSubgraph:
@@ -982,6 +1007,73 @@ void AliasDb::analyzeRpcAsync(Node* node) {
   }
 }
 
+namespace {
+c10::optional<bool> getConstantBooleanInput(
+    Node* node,
+    const std::string& inputName) {
+  TORCH_INTERNAL_ASSERT(
+      node->hasNamedInput(inputName), inputName + " input is expected");
+  auto value = node->namedInput(inputName);
+  TORCH_INTERNAL_ASSERT(
+      value->type() == BoolType::get(),
+      inputName + "training input is expected to be a bool");
+  return constant_as<bool>(value);
+}
+} // namespace
+
+// custom behavior for batch_norm because (a!)? annotations currently
+// aren't supported, and because behavior differs depending on the value of
+// training
+void AliasDb::analyzeBatchNorm(Node* node) {
+  // we invoking freezing for inference, so we assume training will be folded to
+  // a constant false to avoid needing to invoke freezing multiple times in
+  // order to make batch norm weights constant
+  for (Value* output : node->outputs()) {
+    giveFreshAlias(output);
+  }
+
+  if (isFrozen_) {
+    return;
+  }
+
+  auto isTraining = getConstantBooleanInput(node, "training");
+
+  if (!isTraining.has_value() || *isTraining) {
+    TORCH_INTERNAL_ASSERT(
+        node->hasNamedInput("running_mean"), "running_mean input is expected");
+    auto runningMean = node->namedInput("running_mean");
+    TORCH_INTERNAL_ASSERT(
+        node->hasNamedInput("running_var"), "running_var input is expected");
+    auto runningVar = node->namedInput("running_var");
+
+    registerWrite(runningMean, node);
+    registerWrite(runningVar, node);
+  }
+}
+
+// custom behavior for instance_norm, because (a!)? annotations currently
+// aren't supported, and because behavior differs depending on the value of
+// use_input_stats
+void AliasDb::analyzeInstanceNorm(Node* node) {
+  for (Value* output : node->outputs()) {
+    giveFreshAlias(output);
+  }
+
+  auto useInputStats = getConstantBooleanInput(node, "use_input_stats");
+
+  if (!useInputStats.has_value() || *useInputStats) {
+    TORCH_INTERNAL_ASSERT(
+        node->hasNamedInput("running_mean"), "running_mean input is expected");
+    auto runningMean = node->namedInput("running_mean");
+    TORCH_INTERNAL_ASSERT(
+        node->hasNamedInput("running_var"), "running_var input is expected");
+    auto runningVar = node->namedInput("running_var");
+
+    registerWrite(runningMean, node);
+    registerWrite(runningVar, node);
+  }
+}
+
 // SetAttr: writes to the `self` field
 void AliasDb::analyzeSetAttr(Node* node) {
   const auto self = node->inputs().at(0);
@@ -1033,6 +1125,12 @@ bool AliasDb::functionalNonEscapingListUse(const Use& use) const {
   common ops where the output does not alias the list or the list elements
   */
 
+  // only used in output of graph - no further uses,
+  // so there will be no use of it where the contained element leaks
+  if (use.user->kind() == prim::Return) {
+    return use.user->owningBlock() == graph_->block();
+  }
+
   switch (use.user->kind()) {
     case aten::cat:
     case aten::broadcast_tensors:
@@ -1046,14 +1144,10 @@ bool AliasDb::functionalNonEscapingListUse(const Use& use) const {
   if (op && op->aliasAnalysisKind() == AliasAnalysisKind::PURE_FUNCTION) {
     return true;
   }
-
   return false;
 }
 
 bool AliasDb::functionalNonEscapingTupleUse(const Use& use) const {
-  if (!enablePreciseTupleContainerAnalysis_) {
-    return false;
-  }
   Node* n = use.user;
   size_t offset = use.offset;
   Value* container = n->inputs().at(offset);
@@ -1061,7 +1155,9 @@ bool AliasDb::functionalNonEscapingTupleUse(const Use& use) const {
     return false;
   }
   // TODO(T97387453): Cover more ops that do not let escape tuples' elements.
-  return use.user->kind() == prim::Return;
+  bool in_return_outputs = use.user->kind() == prim::Return;
+  bool not_in_nested_subgraph = use.user->owningBlock() == graph_->block();
+  return in_return_outputs && not_in_nested_subgraph;
 }
 
 // List or dict or tuple construct: create an aliasing element for the actual
@@ -1239,6 +1335,16 @@ bool AliasDb::mayContainAlias(
       : memoryDAG_->mayContainAlias(a_elems, getElements(b));
 }
 
+bool AliasDb::mayContainAlias(Value* a, const at::ArrayRef<Value*> b) const {
+  if (!isMutableTypeInternal(a)) {
+    return false;
+  }
+  auto b_elems = getElements(b);
+  return b_elems.size() == 0
+      ? false
+      : memoryDAG_->mayContainAlias(elementMap_.at(a), b_elems);
+}
+
 // Make each value in the `from` list point to its partner in the `to` list
 void AliasDb::mapAliases(at::ArrayRef<Value*> from, at::ArrayRef<Value*> to) {
   TORCH_INTERNAL_ASSERT(to.size() == from.size());
@@ -1274,7 +1380,7 @@ void AliasDb::giveFreshAlias(
   auto new_elem = memoryDAGBuilder_->makeFreshValue(value);
   elementMap_[value] = new_elem;
   if (add_wildcard_to_contained_elems) {
-    if ((*maybe_mut_types).size() > 1) {
+    if (maybe_mut_types->size() > 1) {
       pointUnionTypeElementToAllContainedTypes(new_elem, *maybe_mut_types);
     } else {
       addContainedTypesToFreshElement(new_elem, *maybe_mut_types);
@@ -1705,14 +1811,14 @@ c10::optional<Element*> AliasDb::tryGetOrCreateWildcard(const TypePtr& type) {
     return c10::nullopt;
   }
   auto mut_type = toSingleType(*maybe_mut_types);
-  auto existing_wildcard = wildcardIndex_.find(mut_type);
+  auto existing_wildcard = wildcardIndex_.find(*mut_type);
   if (existing_wildcard != wildcardIndex_.end()) {
     return existing_wildcard->second;
   }
 
   auto wildcard_elem = memoryDAGBuilder_->makeFreshValue(nullptr);
-  wildcardIndex_.emplace(mut_type, wildcard_elem);
-  if ((*maybe_mut_types).size() > 1) {
+  wildcardIndex_.emplace(*std::move(mut_type), wildcard_elem);
+  if (maybe_mut_types->size() > 1) {
     pointUnionTypeElementToAllContainedTypes(wildcard_elem, *maybe_mut_types);
   } else {
     addContainedTypesToFreshElement(wildcard_elem, *maybe_mut_types);
@@ -1752,7 +1858,7 @@ Element* AliasDb::getWildcard(const TypePtr& type) const {
   if (!maybe_mut_types) {
     return {};
   }
-  if ((*maybe_mut_types).size() > 1) {
+  if (maybe_mut_types->size() > 1) {
     auto union_type = UnionType::create(*maybe_mut_types);
     // Get a <TypePtr, Element*> pair where the TypePtr is this Union
     // type and the Element is the corresponding Wildcard

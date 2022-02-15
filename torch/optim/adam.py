@@ -11,12 +11,17 @@ class Adam(Optimizer):
             &\rule{110mm}{0.4pt}                                                                 \\
             &\textbf{input}      : \gamma \text{ (lr)}, \beta_1, \beta_2
                 \text{ (betas)},\theta_0 \text{ (params)},f(\theta) \text{ (objective)}          \\
-            &\hspace{13mm}      \lambda \text{ (weight decay)},  \: amsgrad                      \\
+            &\hspace{13mm}      \lambda \text{ (weight decay)},  \: \textit{amsgrad},
+                \:\textit{maximize}                                                              \\
             &\textbf{initialize} :  m_0 \leftarrow 0 \text{ ( first moment)},
                 v_0\leftarrow 0 \text{ (second moment)},\: \widehat{v_0}^{max}\leftarrow 0\\[-1.ex]
             &\rule{110mm}{0.4pt}                                                                 \\
             &\textbf{for} \: t=1 \: \textbf{to} \: \ldots \: \textbf{do}                         \\
-            &\hspace{5mm}g_t           \leftarrow   \nabla_{\theta} f_t (\theta_{t-1})           \\
+
+            &\hspace{5mm}\textbf{if} \: \textit{maximize}:                                       \\
+            &\hspace{10mm}g_t           \leftarrow   -\nabla_{\theta} f_t (\theta_{t-1})         \\
+            &\hspace{5mm}\textbf{else}                                                           \\
+            &\hspace{10mm}g_t           \leftarrow   \nabla_{\theta} f_t (\theta_{t-1})          \\
             &\hspace{5mm}\textbf{if} \: \lambda \neq 0                                           \\
             &\hspace{10mm} g_t \leftarrow g_t + \lambda  \theta_{t-1}                            \\
             &\hspace{5mm}m_t           \leftarrow   \beta_1 m_{t-1} + (1 - \beta_1) g_t          \\
@@ -50,6 +55,8 @@ class Adam(Optimizer):
         amsgrad (boolean, optional): whether to use the AMSGrad variant of this
             algorithm from the paper `On the Convergence of Adam and Beyond`_
             (default: False)
+        maximize (bool, optional): maximize the params based on the objective, instead of
+            minimizing (default: False)
 
     .. _Adam\: A Method for Stochastic Optimization:
         https://arxiv.org/abs/1412.6980
@@ -58,7 +65,7 @@ class Adam(Optimizer):
     """
 
     def __init__(self, params, lr=1e-3, betas=(0.9, 0.999), eps=1e-8,
-                 weight_decay=0, amsgrad=False):
+                 weight_decay=0, amsgrad=False, *, maximize: bool = False):
         if not 0.0 <= lr:
             raise ValueError("Invalid learning rate: {}".format(lr))
         if not 0.0 <= eps:
@@ -70,13 +77,19 @@ class Adam(Optimizer):
         if not 0.0 <= weight_decay:
             raise ValueError("Invalid weight_decay value: {}".format(weight_decay))
         defaults = dict(lr=lr, betas=betas, eps=eps,
-                        weight_decay=weight_decay, amsgrad=amsgrad)
+                        weight_decay=weight_decay, amsgrad=amsgrad, maximize=maximize)
         super(Adam, self).__init__(params, defaults)
 
     def __setstate__(self, state):
         super(Adam, self).__setstate__(state)
         for group in self.param_groups:
             group.setdefault('amsgrad', False)
+            group.setdefault('maximize', False)
+        state_values = list(self.state.values())
+        step_is_tensor = (len(state_values) != 0) and torch.is_tensor(state_values[0]['step'])
+        if not step_is_tensor:
+            for s in state_values:
+                s['step'] = torch.tensor(float(s['step']))
 
     @torch.no_grad()
     def step(self, closure=None):
@@ -110,7 +123,7 @@ class Adam(Optimizer):
                     state = self.state[p]
                     # Lazy state initialization
                     if len(state) == 0:
-                        state['step'] = 0
+                        state['step'] = torch.tensor(0.)
                         # Exponential moving average of gradient values
                         state['exp_avg'] = torch.zeros_like(p, memory_format=torch.preserve_format)
                         # Exponential moving average of squared gradient values
@@ -125,9 +138,6 @@ class Adam(Optimizer):
                     if group['amsgrad']:
                         max_exp_avg_sqs.append(state['max_exp_avg_sq'])
 
-                    # update the steps for each param group update
-                    state['step'] += 1
-                    # record the step after step update
                     state_steps.append(state['step'])
 
             F.adam(params_with_grad,
@@ -141,5 +151,6 @@ class Adam(Optimizer):
                    beta2=beta2,
                    lr=group['lr'],
                    weight_decay=group['weight_decay'],
-                   eps=group['eps'])
+                   eps=group['eps'],
+                   maximize=group['maximize'])
         return loss

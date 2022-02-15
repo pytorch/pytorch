@@ -1,15 +1,16 @@
 #version 450 core
 #define PRECISION $precision
+#define FORMAT    $format
 
 layout(std430) buffer;
 
 /* Qualifiers: layout - storage - precision - memory */
 
-layout(set = 0, binding = 0) uniform PRECISION restrict writeonly image3D   uOutput;
-layout(set = 0, binding = 1) uniform PRECISION                    sampler3D uInput;
-layout(set = 0, binding = 2) uniform PRECISION                    sampler2D uKernel;
-layout(set = 0, binding = 3) uniform PRECISION                    sampler1D uBias;
-layout(set = 0, binding = 4) uniform PRECISION restrict           Block {
+layout(set = 0, binding = 0, FORMAT) uniform PRECISION restrict writeonly image3D   uOutput;
+layout(set = 0, binding = 1)         uniform PRECISION                    sampler3D uInput;
+layout(set = 0, binding = 2)         uniform PRECISION                    sampler3D uKernel;
+layout(set = 0, binding = 3)         uniform PRECISION                    sampler3D uBias;
+layout(set = 0, binding = 4)         uniform PRECISION restrict           Block {
   ivec4 size;
   ivec4 kernel;
   ivec2 ikernel;
@@ -35,17 +36,17 @@ void main() {
     const ivec2 ipos01 = pos01.xy * uBlock.stride - uBlock.padding;
     const ivec2 ipos11 = pos11.xy * uBlock.stride - uBlock.padding;
 
-    vec4 sum00 = texelFetch(uBias, pos.z, 0);
+    vec4 sum00 = texelFetch(uBias, ivec3(pos.z, 0, 0), 0);
     vec4 sum10 = sum00;
     vec4 sum01 = sum00;
     vec4 sum11 = sum00;
 
     for (int z = 0, z4 = 0; z < uBlock.size.w; z += 4, ++z4) {
       const ivec4 kxs = z + ivec4(0, 1, 2, 3);
-      const vec4 k1 = texelFetch(uKernel, ivec2(kxs.x, pos.z), 0);
-      const vec4 k2 = texelFetch(uKernel, ivec2(kxs.y, pos.z), 0);
-      const vec4 k3 = texelFetch(uKernel, ivec2(kxs.z, pos.z), 0);
-      const vec4 k4 = texelFetch(uKernel, ivec2(kxs.w, pos.z), 0);
+      const vec4 k1 = texelFetch(uKernel, ivec3(kxs.x, pos.z, 0), 0);
+      const vec4 k2 = texelFetch(uKernel, ivec3(kxs.y, pos.z, 0), 0);
+      const vec4 k3 = texelFetch(uKernel, ivec3(kxs.z, pos.z, 0), 0);
+      const vec4 k4 = texelFetch(uKernel, ivec3(kxs.w, pos.z, 0), 0);
 
       const vec4 In00 = texelFetch(uInput, ivec3(ipos00, z4), 0);
       const vec4 In10 = texelFetch(uInput, ivec3(ipos10, z4), 0);

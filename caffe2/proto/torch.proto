@@ -87,9 +87,7 @@ message LibDef {
   optional RecordRef torchscript_arena = 1;
 }
 
-enum ProtoVersion {
-  PROTO_VERSION_NEWEST = 0x0000000000000006;
-}
+enum ProtoVersion { PROTO_VERSION_NEWEST = 0x0000000000000006; }
 
 message ModelDef {
   // numbers of fields that have been removed. Do not reuse them!

@@ -72,7 +72,8 @@ struct CollectiveFingerPrint {
     for (auto& tensor_shape : tensors_to_verify) {
       std::vector<at::Tensor> outputs;
       outputs.reserve(pg->getSize());
-      for (int i = 0; i < pg->getSize(); ++i) {
+      for (const auto i : c10::irange(pg->getSize())) {
+        (void)i; //Suppress unused variable warning
         outputs.emplace_back(at::zeros_like(tensor_shape));
       }
       output_tensors.emplace_back(outputs);
@@ -332,6 +333,10 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupWrapper::barrier(
     const BarrierOptions& opts) {
   runCollectiveChecks(OpType::BARRIER, {});
   return pg_->barrier(opts);
+}
+
+c10::intrusive_ptr<ProcessGroup> ProcessGroupWrapper::getWrappedPg() const {
+  return pg_;
 }
 
 void ProcessGroupWrapper::runCollectiveChecks(

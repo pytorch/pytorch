@@ -2,6 +2,7 @@ import ast
 import builtins
 import copy
 import inspect
+import logging
 import textwrap
 import warnings
 from types import FunctionType
@@ -10,11 +11,15 @@ from typing import Dict, Optional, Any, Type, Tuple, Set, List
 import torch.fx.experimental.fx_acc.acc_normalizer as acc_normalizer
 import torch.fx.experimental.fx_acc.acc_ops  # noqa: F401
 import torch
+import torch.jit as jit
 import torch.nn as nn
 from torch._sources import normalize_source_lines
 from torch.fx import Graph, Tracer
 from torch.fx.experimental.normalize import NormalizeArgs
 from torch.fx.passes import shape_prop
+
+
+_LOGGER = logging.getLogger(__name__)
 
 
 def _get_exception_wrapper_attr_name(exc_type: Type[Exception]) -> str:
@@ -213,6 +218,8 @@ class AccRewritingTracer(Tracer):
         torch.nn.quantized.Linear,
         torch.nn.quantized.Conv2d,
         torch.nn.intrinsic.quantized.ConvReLU2d,
+        jit.ScriptModule,
+        jit.RecursiveScriptModule,
     }
 
     def is_leaf_module(self, m: nn.Module, mod_qual_name: str) -> bool:
@@ -225,10 +232,10 @@ class AccRewritingTracer(Tracer):
         ast_rewriter_allow_list: Optional[Set] = None,
         leaf_module_list: Optional[Set] = None,
     ) -> Tuple[Graph, nn.Module]:
-        rewritten = _rewrite(root, ast_rewriter_allow_list)
         self.leaf_module_list = self.DEFAULT_LEAF_MODULE_LIST
         if leaf_module_list:
             self.leaf_module_list.update(leaf_module_list)
+        rewritten = _rewrite(root, ast_rewriter_allow_list, self.leaf_module_list)
         return super().trace(rewritten, concrete_args), rewritten
 
 
@@ -240,17 +247,28 @@ DEFAULT_REWRITE_ALLOW_LIST = {
 }
 
 
-def _rewrite(mod_to_rewrite: nn.Module, allow_list: Optional[Set] = None) -> nn.Module:
+def _rewrite(mod_to_rewrite: nn.Module, allow_list: Optional[Set] = None, leaf_module_list: Optional[Set] = None) -> nn.Module:
     if allow_list is None:
         allow_list = DEFAULT_REWRITE_ALLOW_LIST
     else:
-        allow_list.union(DEFAULT_REWRITE_ALLOW_LIST)
+        allow_list = allow_list.union(DEFAULT_REWRITE_ALLOW_LIST)
+
+    if not leaf_module_list:
+        leaf_module_list = set()
 
     # Rewrite this module's functions as well as all recursive modules'
     # functions that are attrs of this moodule. Return the new, rewritten module
     # hierarchy.
     def rewrite_module(m: nn.Module):
-        base_class : Type[nn.Module] = type(m)
+        if isinstance(m, jit.ScriptModule):
+            # ScriptModule cannot be rewritten, so bypass it. The issue is it
+            # requires explicitly calling its `__init__()`, calling
+            # `nn.Module.__init__()` in the derived `RewrittenModule` is not
+            # enough. And even if we init it we can't do much with it.
+            return m
+
+        # If m is an already-rewritten RewrittenModule, then use the original base class.
+        base_class : Type[nn.Module] = getattr(m, "_base_class_origin", type(m))
 
         # Keep track of all the ConditionalExceptionWrappers that the
         # Acc_Rewriter calls into in this module so we can add them in init
@@ -268,7 +286,10 @@ def _rewrite(mod_to_rewrite: nn.Module, allow_list: Optional[Set] = None) -> nn.
             # Write all of the non-dunder or special methods from base_class
             # into RewrittenModule.
             for method_name in dir(base_class):
-                method = getattr(base_class, method_name)
+                method = getattr(base_class, method_name, None)
+                if method is None:
+                    _LOGGER.warning(f"{__qualname__} does not have attribute {method_name}")
+
                 if builtins.type(method) is not FunctionType:
                     continue
 
@@ -287,6 +308,7 @@ def _rewrite(mod_to_rewrite: nn.Module, allow_list: Optional[Set] = None) -> nn.
 
             def __init__(self, orig):
                 nn.Module.__init__(self)
+
                 # Iterate over all added exception wrappers and add
                 # ConditionalExceptionWrapper attrs for each.
                 for exc_type in all_added_wrappers:
@@ -301,7 +323,11 @@ def _rewrite(mod_to_rewrite: nn.Module, allow_list: Optional[Set] = None) -> nn.
                 for k, v in orig.__dict__.items():
                     if k == "_modules":
                         for mod_k, mod_v in v.items():
-                            self._modules[mod_k] = rewrite_module(mod_v)
+                            if getattr(mod_v, "_base_class_origin", type(mod_v)) in leaf_module_list:  # type: ignore[operator]
+                                print(f"Skip rewriting leaf module {type(mod_v)}")
+                                self._modules[mod_k] = mod_v
+                            else:
+                                self._modules[mod_k] = rewrite_module(mod_v)
                     else:
                         self.__dict__[k] = v
 
