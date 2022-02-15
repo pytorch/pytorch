@@ -71,15 +71,6 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchVmapMode, m) {
   UNSUPPORTED_RANDOM2(randperm, out);
   UNSUPPORTED_RANDOM2(randperm, generator_out);
 
-  UNSUPPORTED_RANDOM(randint);
-  UNSUPPORTED_RANDOM2(randint, generator);
-  UNSUPPORTED_RANDOM2(randint, low);
-  UNSUPPORTED_RANDOM2(randint, low_generator);
-  UNSUPPORTED_RANDOM2(randint, out);
-  UNSUPPORTED_RANDOM2(randint, generator_out);
-  UNSUPPORTED_RANDOM2(randint, low_out);
-  UNSUPPORTED_RANDOM2(randint, low_generator_out);
-
   UNSUPPORTED_RANDOM(uniform_);
 }
 
