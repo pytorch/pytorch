@@ -1,3 +1,5 @@
+# Owner(s): ["oncall: fx"]
+
 import unittest
 import torch
 from torch.fx import symbolic_trace
@@ -9,6 +11,8 @@ from torch.fx.experimental.graph_gradual_typechecker import GraphTypeChecker, br
 from torch.fx.experimental.rewriter import RewritingTracer
 from torch.fx import GraphModule
 from torch.fx.passes.shape_prop import ShapeProp
+from torch.testing._internal.common_utils import TestCase
+
 
 try:
     import sympy
@@ -31,7 +35,7 @@ def conv3x3(in_planes, out_planes, stride=1, groups=1, dilation=1):
     return torch.nn.Conv2d(in_planes, out_planes, kernel_size=3, stride=stride,
                            padding=dilation, groups=groups, bias=False, dilation=dilation)
 
-class AnnotationsTest(unittest.TestCase):
+class AnnotationsTest(TestCase):
 
     def test_annotations(self):
         """
@@ -109,7 +113,7 @@ class AnnotationsTest(unittest.TestCase):
         t2 = TensorType((2, 3, 4))
         assert broadcast_types(t1, t2) == (TensorType((1, 2, 3, Dyn)), TensorType((1, 2, 3, 4)))
 
-class TypeCheckerTest(unittest.TestCase):
+class TypeCheckerTest(TestCase):
 
     def test_type_check_add_with_broadcast(self):
         class M(torch.nn.Module):

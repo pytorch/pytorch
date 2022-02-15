@@ -1,6 +1,6 @@
 #pragma once
 
-#include <torch/csrc/WindowsTorchApiMacro.h>
+#include <c10/macros/Export.h>
 
 #include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
 #include <torch/csrc/jit/codegen/cuda/kernel_ir.h>
@@ -16,40 +16,14 @@ namespace cuda {
 //!
 //! WAR race condition occurs when the next iteration of the loop overwrites
 //! shared memory value before a previous operation has finished reading it.
-//!
-//! WAR Race Check:
-//! Track all output shared memory TVs before first sync
-//! Track all input shared memory TVs after last sync
-//! If the intersection is non-empty, then there is a WAR race condition.
-//! Recursively check each nested for-loop
-//!
-//! Parent-Child For-Loop Recursive Relationship
-//! Notation:
-//! None - Zero Syncs
-//!   1+ - One or more Syncs
-//!  End - Sync is last op in for-loop to prevent WAR race condition
-//!
-//! Default: Track all shared memory inputs and outputs
-//!
-//! Parent - None
-//!  Child - None => Append All Child Outputs to Parent Initial
-//!  Child - 1+ => Parent first sync => Inherit Child Initial + Final
-//!  Child - End => Parent first sync => Keep Child Initial / Clear Parent Final
-//!
-//! Parent - 1+
-//!  Child - None => Append All Child to Parent Last
-//!  Child - 1+ => Child Final to Parent Final / Discard Child Initial
-//!  Child - End => Clear Parent Last / Discard Child Initial
-//!
-//! If Child - End and Parent has zero remaining operations, then
-//! Parent inherits Child End.
-//!
-std::vector<kir::Expr*> insertWarThreadSynchronization(
-    const std::vector<kir::Expr*>& exprs);
+std::vector<Expr*> insertWarThreadSynchronization(
+    const std::vector<Expr*>& exprs);
 
 //! Insert syncs between writing to shared memory and then reading it.
-std::vector<kir::Expr*> insertRawThreadSynchronization(
-    const std::vector<kir::Expr*>& exprs);
+//! RAW pass is run before indexing, unrolling (loop duplication), memory
+//! aliasing, and index (grid/block bcast/reduction)
+std::vector<Expr*> insertRawThreadSynchronization(
+    const std::vector<Expr*>& exprs);
 
 } // namespace cuda
 } // namespace fuser

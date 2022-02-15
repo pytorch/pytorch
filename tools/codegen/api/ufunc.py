@@ -1,7 +1,7 @@
 from tools.codegen.model import (Argument, BaseTy, BaseType, ListType,
                                  NativeFunctionsGroup, OptionalType,
                                  SelfArgument, TensorOptionsArguments, Type,
-                                 assert_never, DispatchKey)
+                                 DispatchKey)
 
 import tools.codegen.api.types as api_types
 from tools.codegen.api.types import (ArgName, BaseCType, Binding, ArrayRefCType,
@@ -11,10 +11,10 @@ from tools.codegen.api.types import (ArgName, BaseCType, Binding, ArrayRefCType,
                                      BaseCppType, CType)
 
 from tools.codegen.api import cpp, structured
-from tools.codegen.utils import mapMaybe
+from tools.codegen.utils import (mapMaybe, assert_never)
 
 from dataclasses import dataclass
-from typing import Union, List, Optional
+from typing import Union, List, Optional, cast, Iterable
 
 def kernel_name(g: NativeFunctionsGroup, dispatch_key: DispatchKey) -> str:
     return f"ufunc_{g.functional.func.name.name}_{dispatch_key}"
@@ -29,7 +29,7 @@ def dispatchstub_type(t: Type, *, binds: ArgName) -> Optional[NamedCType]:
     if r is not None:
         return r
 
-    if t == BaseTy(BaseTy.Scalar):
+    if t == BaseType(BaseTy.Scalar):
         return NamedCType(binds, ConstRefCType(BaseCType(scalarT)))
     elif t == BaseType(BaseTy.Tensor):
         return None
@@ -168,6 +168,8 @@ def stub_arguments(g: NativeFunctionsGroup) -> List[Binding]:
     # stubs drop all tensor arguments (they are implicit in the TensorIterator
     # argument and keep everything else)
     return [
-        r for a in g.out.func.arguments.flat_non_out if not a.type.is_tensor_like()
+        r
+        for a in g.out.func.arguments.flat_non_out
+        if not a.type.is_tensor_like()
         for r in structured.argument(a)
     ]

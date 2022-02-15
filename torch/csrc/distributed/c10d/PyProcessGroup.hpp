@@ -58,6 +58,15 @@ class PyProcessGroup : public ProcessGroup {
         opts);
   }
 
+  c10::intrusive_ptr<ProcessGroup::Work> barrier(
+      const BarrierOptions& opts = BarrierOptions()) {
+    PYBIND11_OVERRIDE(
+        c10::intrusive_ptr<ProcessGroup::Work>, /* Return type */
+        ProcessGroup, /* Parent class */
+        barrier, /* Name of function in C++ */
+        opts);
+  }
+
   c10::intrusive_ptr<ProcessGroup::Work> broadcast(
       std::vector<at::Tensor>& tensors,
       const BroadcastOptions& opts = BroadcastOptions()) override {

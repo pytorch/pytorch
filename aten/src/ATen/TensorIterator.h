@@ -4,6 +4,7 @@
 #include <c10/util/MaybeOwned.h>
 #include <c10/util/SmallVector.h>
 #include <c10/util/TypeCast.h>
+#include <c10/util/irange.h>
 #include <ATen/core/Dimname.h>
 #include <ATen/core/Range.h>
 #include <ATen/core/TensorBase.h>
@@ -11,6 +12,14 @@
 
 #include <array>
 #include <bitset>
+
+C10_CLANG_DIAGNOSTIC_PUSH()
+#if C10_CLANG_HAS_WARNING("-Wshorten-64-to-32")
+C10_CLANG_DIAGNOSTIC_IGNORE("-Wshorten-64-to-32")
+#endif
+#if C10_CLANG_HAS_WARNING("-Wdeprecated-copy-dtor")
+C10_CLANG_DIAGNOSTIC_IGNORE("-Wdeprecated-copy-dtor")
+#endif
 
 namespace at {
 class Tensor;
@@ -121,13 +130,14 @@ struct TORCH_API OperandInfo {
   /// but during type promotion target_dtype value can become different from tensor's dtype
   /// also, during type promotion target_dtype and device can be set for an undefined tensor so that tensor can be properly
   /// constructed later.
-  Device device = kCPU;
+  c10::optional<Device> device = c10::nullopt;
   ScalarType target_dtype = ScalarType::Undefined;
   // Caches dtype of the tensor, because scalar_type is an expensive operation
   // If dtype of the tensor is changed (e.g. as a result of type promotion or in allocate_outputs), this
   //value should be changed too.
   ScalarType current_dtype = ScalarType::Undefined;
 
+  bool is_device_defined() const { return device.has_value(); }
   bool is_type_defined() const { return target_dtype != ScalarType::Undefined; }
   TensorOptions options() const {
     return TensorOptions(target_dtype).device(device);
@@ -255,7 +265,7 @@ struct TORCH_API TensorIteratorBase : public impl::MetaBase {
     return common_dtype_;
   }
   ScalarType input_dtype(int arg=0) const { return operands_[num_outputs_ + arg].current_dtype; }
-  Device device(int arg=0) const { return operands_[arg].device; }
+  Device device(int arg=0) const { return operands_[arg].device.value(); }
   DeviceType device_type(int arg=0) const { return device(arg).type(); }
   int64_t element_size(int arg) const { return elementSize(dtype(arg)); }
   bool is_scalar(int arg) const;
@@ -322,9 +332,9 @@ private:
         char** base, const int64_t* strides, int64_t size0, int64_t size1) {
       PtrVector data(base, base + ntensor);
       const int64_t* outer_strides = &strides[ntensor];
-      for (int64_t i = 0; i < size1; i++) {
+      for (const auto i : c10::irange(size1)) {
         if (i > 0) {
-          for (int64_t arg = 0; arg < ntensor; arg++) {
+          for (const auto arg : c10::irange(ntensor)) {
             data[arg] += outer_strides[arg];
           }
         }
@@ -397,7 +407,7 @@ public:
 
   bool has_contiguous_first_dim() const {
     int num_tensors = ntensors();
-    for (int i = 0; i < num_tensors; i++) {
+    for (const auto i : c10::irange(num_tensors)) {
       if (strides(i)[0] != element_size(i)) {
         return false;
       }
@@ -425,9 +435,21 @@ public:
   void build_borrowing_binary_op(const TensorBase& out, const TensorBase& a, const TensorBase& b);
   TORCH_DISALLOW_TEMPORARIES(build_borrowing_binary_op)
   void build_unary_float_op(const TensorBase& out, const TensorBase& a);
+  void build_borrowing_unary_float_op(const TensorBase& out, const TensorBase& a);
+  TORCH_DISALLOW_TEMPORARIES(build_borrowing_unary_float_op)
   void build_unary_op(const TensorBase& out, const TensorBase& a);
-  void build_unary_force_boolean_op(const TensorBase& out, const TensorBase& a);
+  // Odd special case needed for pow. Has to borrow the output because
+  // it's a structured kernel, but the argument is potentially a copy.
+  void build_output_borrowing_argument_owning_unary_op(const TensorBase& out, const TensorBase& a);
+  void build_borrowing_unary_op(const TensorBase& out, const TensorBase& a);
+  TORCH_DISALLOW_TEMPORARIES(build_borrowing_unary_op)
+  void build_borrowing_unary_force_boolean_op(const TensorBase& out, const TensorBase& a);
+  TORCH_DISALLOW_TEMPORARIES(build_borrowing_unary_force_boolean_op)
   void build_comparison_op(const TensorBase& out, const TensorBase& a, const TensorBase& b);
+  void build_borrowing_comparison_op(const TensorBase& out, const TensorBase& a, const TensorBase& b);
+  TORCH_DISALLOW_TEMPORARIES(build_borrowing_comparison_op)
+  // Another special case: we need to own the second argument for comparison ops.
+  void build_borrowing_except_last_argument_comparison_op(const TensorBase& out, const TensorBase& a, const TensorBase& b);
   void build_ternary_op(const TensorBase& out, const TensorBase& a, const TensorBase& b, const TensorBase& c);
 
 #undef TORCH_DISALLOW_TEMPORARIES
@@ -561,7 +583,6 @@ struct TORCH_API TensorIterator final : public TensorIteratorBase {
   static TensorIterator unary_op(TensorBase& out, const TensorBase& a);
   static TensorIterator unary_float_op(TensorBase& out, const TensorBase& a);
   static TensorIterator nullary_op(TensorBase& out);
-  static TensorIterator unary_force_boolean_op(const TensorBase& out, const TensorBase& a);
   static TensorIterator borrowing_nullary_op(const TensorBase& out);
   static TensorIterator borrowing_nullary_op(TensorBase&& out) = delete;
   static TensorIterator reduce_op(TensorBase& out, const TensorBase& a);
@@ -724,6 +745,8 @@ public:
 
   // Bypass output dtype/device computation and fix the dtype/device as specified here.
   TensorIteratorConfig& declare_static_dtype_and_device(ScalarType dtype, Device device);
+  TensorIteratorConfig& declare_static_dtype(ScalarType dtype);
+  TensorIteratorConfig& declare_static_device(Device device);
   TensorIteratorConfig& declare_static_shape(IntArrayRef shape);
   TensorIteratorConfig& declare_static_shape(IntArrayRef shape, IntArrayRef squash_dims);
 
@@ -741,7 +764,8 @@ private:
   int num_inputs_ = 0;
 
   c10::optional<DimVector> static_shape_ = c10::nullopt;
-  c10::optional<std::pair<ScalarType, Device>> static_dtype_and_device_ = c10::nullopt;
+  c10::optional<ScalarType> static_dtype_ = c10::nullopt;
+  c10::optional<Device> static_device_ = c10::nullopt;
   bool check_mem_overlap_ = true;
   bool allow_cpu_scalars_ = false;
   bool is_reduction_ = false;
@@ -790,3 +814,5 @@ private:
 };
 
 }  // namespace at
+
+C10_CLANG_DIAGNOSTIC_POP()

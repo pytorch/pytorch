@@ -1,3 +1,5 @@
+# Owner(s): ["oncall: quantization"]
+
 import torch
 import torch.nn as nn
 from torch.testing._internal.common_quantization import QuantizationTestCase
@@ -19,7 +21,7 @@ from torch.ao.quantization._correct_bias import (
 import copy
 
 
-class TestBiasCorrection(QuantizationTestCase):
+class TestBiasCorrectionEager(QuantizationTestCase):
     def compute_sqnr(self, x, y):
         Ps = torch.norm(x)
         Pn = torch.norm(x - y)

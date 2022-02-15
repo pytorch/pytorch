@@ -59,6 +59,24 @@ void testGetSet(std::string path, std::string prefix = "") {
     c10d::test::check(store, "key0", "value0");
     c10d::test::compareSet(store, "key0", "value0", "newValue");
     c10d::test::check(store, "key0", "newValue");
+
+    // Check deleteKey
+    c10d::test::deleteKey(store, "key1");
+    numKeys = fileStore->getNumKeys();
+    EXPECT_EQ(numKeys, 2);
+    c10d::test::check(store, "key0", "newValue");
+    c10d::test::check(store, "key2", "value2");
+
+    c10d::test::set(store, "-key0", "value-");
+    c10d::test::check(store, "key0", "newValue");
+    c10d::test::check(store, "-key0", "value-");
+    numKeys = fileStore->getNumKeys();
+    EXPECT_EQ(numKeys, 3);
+    c10d::test::deleteKey(store, "-key0");
+    numKeys = fileStore->getNumKeys();
+    EXPECT_EQ(numKeys, 2);
+    c10d::test::check(store, "key0", "newValue");
+    c10d::test::check(store, "key2", "value2");
   }
 
   // Perform get on new instance
@@ -67,9 +85,9 @@ void testGetSet(std::string path, std::string prefix = "") {
     c10d::PrefixStore store(prefix, fileStore);
     c10d::test::check(store, "key0", "newValue");
     auto numKeys = fileStore->getNumKeys();
-    // There will be 4 keys since we still use the same underlying file as the
+    // There will be 3 keys since we still use the same underlying file as the
     // other store above.
-    EXPECT_EQ(numKeys, 4);
+    EXPECT_EQ(numKeys, 3);
   }
 }
 
@@ -81,14 +99,14 @@ void stressTestStore(std::string path, std::string prefix = "") {
   std::vector<std::thread> threads;
   c10d::test::Semaphore sem1, sem2;
 
-  for (const auto i : c10::irange(numThreads)) {
-    threads.push_back(std::thread([&] {
+  for (C10_UNUSED const auto i : c10::irange(numThreads)) {
+    threads.emplace_back(std::thread([&] {
       auto fileStore =
           c10::make_intrusive<c10d::FileStore>(path, numThreads + 1);
       c10d::PrefixStore store(prefix, fileStore);
       sem1.post();
       sem2.wait();
-      for (const auto j : c10::irange(numIterations)) {
+      for (C10_UNUSED const auto j : c10::irange(numIterations)) {
         store.add("counter", 1);
       }
     }));

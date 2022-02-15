@@ -1,10 +1,16 @@
 #include <c10/util/Exception.h>
 #include <torch/csrc/deploy/deploy.h>
+#include <torch/csrc/deploy/elf_file.h>
 #include <torch/cuda.h>
 
 #include <dlfcn.h>
 #include <libgen.h>
 #include <unistd.h>
+
+struct ExeSection {
+  const char* sectionName;
+  bool customLoader;
+};
 
 struct InterpreterSymbol {
   const char* startSym;
@@ -21,6 +27,12 @@ struct InterpreterSymbol {
 namespace torch {
 namespace deploy {
 
+const std::initializer_list<ExeSection> pythonInterpreterSection = {
+    {".torch_deploy_payload.interpreter_all", true},
+    {".torch_deploy_payload.interpreter_cuda", false},
+    {".torch_deploy_payload.interpreter_cpu", false},
+};
+
 const std::initializer_list<InterpreterSymbol> kInterpreterSearchPath = {
     {"_binary_libtorch_deployinterpreter_all_so_start",
      "_binary_libtorch_deployinterpreter_all_so_end",
@@ -35,40 +47,57 @@ const std::initializer_list<InterpreterSymbol> kInterpreterSearchPath = {
 
 static bool writeDeployInterpreter(FILE* dst) {
   TORCH_INTERNAL_ASSERT(dst);
-  const char* libStart = nullptr;
-  const char* libEnd = nullptr;
+  const char* payloadStart = nullptr;
+  size_t size = 0;
   bool customLoader = false;
-  for (const auto& s : kInterpreterSearchPath) {
-    libStart = (const char*)dlsym(nullptr, s.startSym);
-    if (libStart) {
-      libEnd = (const char*)dlsym(nullptr, s.endSym);
+  std::string exePath;
+  std::ifstream("/proc/self/cmdline") >> exePath;
+  ElfFile elfFile(exePath.c_str());
+  for (const auto& s : pythonInterpreterSection) {
+    at::optional<Section> payloadSection = elfFile.findSection(s.sectionName);
+    if (payloadSection != at::nullopt) {
+      payloadStart = payloadSection->start;
       customLoader = s.customLoader;
+      size = payloadSection->len;
+      TORCH_CHECK(payloadSection.has_value(), "Missing the payload section");
       break;
     }
   }
-  TORCH_CHECK(
-      libStart != nullptr && libEnd != nullptr,
-      "torch::deploy requires a build-time dependency on embedded_interpreter or embedded_interpreter_cuda, neither of which were found.  torch::cuda::is_available()=",
-      torch::cuda::is_available());
+  if (payloadStart == nullptr) {
+    const char* libStart = nullptr;
+    const char* libEnd = nullptr;
+    for (const auto& s : kInterpreterSearchPath) {
+      libStart = (const char*)dlsym(nullptr, s.startSym);
+      if (libStart) {
+        libEnd = (const char*)dlsym(nullptr, s.endSym);
+        customLoader = s.customLoader;
+        break;
+      }
+    }
+    TORCH_CHECK(
+        libStart != nullptr && libEnd != nullptr,
+        "torch::deploy requires a build-time dependency on embedded_interpreter or embedded_interpreter_cuda, neither of which were found.  torch::cuda::is_available()=",
+        torch::cuda::is_available());
 
-  size_t size = libEnd - libStart;
-  size_t written = fwrite(libStart, 1, size, dst);
+    size = libEnd - libStart;
+    payloadStart = libStart;
+  }
+  size_t written = fwrite(payloadStart, 1, size, dst);
   TORCH_INTERNAL_ASSERT(size == written, "expected written == size");
   return customLoader;
 }
 
 InterpreterManager::InterpreterManager(
     size_t nInterp,
-    const c10::optional<std::string>& pythonPath)
+    std::shared_ptr<Environment> env)
     : resources_(nInterp) {
   TORCH_DEPLOY_TRY
   for (const auto i : c10::irange(nInterp)) {
-    instances_.emplace_back(this);
+    instances_.emplace_back(this, env);
     auto I = instances_.back().acquireSession();
     // make torch.version.interp be the interpreter id
     // can be used for balancing work across GPUs
     I.global("torch", "version").attr("__setattr__")({"interp", int(i)});
-    // std::cerr << "Interpreter " << i << " initialized\n";
     instances_.back().pImpl_->setFindModule(
         [this](const std::string& name) -> at::optional<std::string> {
           auto it = registeredModuleSource_.find(name);
@@ -78,10 +107,6 @@ InterpreterManager::InterpreterManager(
             return at::nullopt;
           }
         });
-
-    if (pythonPath) {
-      I.global("sys", "path").attr("append")({pythonPath.value()});
-    }
   }
 
   // Pre-registered modules.
@@ -195,8 +220,10 @@ static dlopen_t find_real_dlopen() {
   return dlopen_;
 }
 
-Interpreter::Interpreter(InterpreterManager* manager)
-    : handle_(nullptr), manager_(manager) {
+Interpreter::Interpreter(
+    InterpreterManager* manager,
+    std::shared_ptr<Environment> env)
+    : handle_(nullptr), manager_(manager), env_(env) {
   // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
   char libraryName[] = "/tmp/torch_deployXXXXXX";
   int fd = mkstemp(libraryName);
@@ -205,6 +232,7 @@ Interpreter::Interpreter(InterpreterManager* manager)
   FILE* dst = fdopen(fd, "wb");
 
   customLoader_ = writeDeployInterpreter(dst);
+
   fclose(dst);
   int flags = RTLD_LOCAL | RTLD_LAZY;
   if (customLoader_) {
@@ -237,10 +265,13 @@ Interpreter::Interpreter(InterpreterManager* manager)
     deploySetSelfPtr(handle_);
   }
 
+  auto extra_python_paths = env->getExtraPythonPaths();
   void* newInterpreterImpl = dlsym(handle_, "newInterpreterImpl");
   AT_ASSERT(newInterpreterImpl);
   pImpl_ = std::unique_ptr<InterpreterImpl>(
-      ((InterpreterImpl * (*)()) newInterpreterImpl)());
+      ((InterpreterImpl * (*)(const std::vector<std::string>&))
+           newInterpreterImpl)(extra_python_paths));
+  env->configureInterpreter(this);
 }
 
 Interpreter::~Interpreter() {

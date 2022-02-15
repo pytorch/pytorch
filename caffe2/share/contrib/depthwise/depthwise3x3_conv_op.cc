@@ -167,9 +167,8 @@ void runDepthwise3x3Conv(
       // fast-path, all accesses in-bounds
       if (C10_LIKELY(
               ih >= 0 && iw >= 0 && ih + 3 < args.in_rows &&
-                  iw + 3 < args.in_cols && 2 * oth + 1 < args.out_rows &&
-                  2 * otw + 1 < args.out_cols
-              )) {
+              iw + 3 < args.in_cols && 2 * oth + 1 < args.out_rows &&
+              2 * otw + 1 < args.out_cols)) {
         float32x4x4_t input_tile;
         for (int row = 0; row < 4; ++row) {
           input_tile.val[row] =

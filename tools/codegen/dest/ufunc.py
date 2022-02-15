@@ -285,7 +285,7 @@ class StubSignature:
         return f"using {self.type_name} = {self.type()}";
 
     # must be called from context where this is TensorIteratorBase*
-    def call(self, ctx: Sequence[Binding]):
+    def call(self, ctx: Sequence[Binding]) -> str:
         return f"{self.name}(device_type(), *this, {', '.join(a.expr for a in translate(ctx, self.arguments()))})"
 
 @with_native_function

@@ -42,6 +42,16 @@ def set_printoptions(
             None (default) is specified, the value is defined by
             `torch._tensor_str._Formatter`. This value is automatically chosen
             by the framework.
+
+    Example::
+
+        >>> torch.set_printoptions(precision=2)
+        >>> torch.tensor([1.12345])
+        tensor([1.12])
+        >>> torch.set_printoptions(threshold=5)
+        >>> torch.arange(10)
+        tensor([0, 1, 2, ..., 7, 8, 9])
+
     """
     if profile is not None:
         if profile == "default":
@@ -234,6 +244,9 @@ def _tensor_str(self, indent):
 
     summarize = self.numel() > PRINT_OPTS.threshold
 
+    if self._is_zerotensor():
+        self = self.clone()
+
     # handle the negative bit
     if self.is_neg():
         self = self.resolve_neg()
@@ -304,6 +317,12 @@ def _str_intern(inp):
     if self.device.type != torch._C._get_default_device()\
             or (self.device.type == 'cuda' and torch.cuda.current_device() != self.device.index):
         suffixes.append('device=\'' + str(self.device) + '\'')
+
+    # Tensor printing performs tensor operations like slice, indexing, etc to make it in a
+    # representable format. These operations on xla/lazy tensor results in compilations. Hence,
+    # to avoid compilations, copying the tensor to cpu before printing.
+    if self.device.type == 'xla' or self.device.type == 'lazy':
+        self = self.to('cpu')
 
     # TODO: add an API to map real -> complex dtypes
     _default_complex_dtype = torch.cdouble if torch.get_default_dtype() == torch.double else torch.cfloat
