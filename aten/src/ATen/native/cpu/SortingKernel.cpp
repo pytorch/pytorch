@@ -1,33 +1,23 @@
-#include <ATen/ATen.h>
+#define TORCH_ASSERT_NO_OPERATORS
+#include <ATen/native/Sorting.h>
+#include <ATen/core/TensorBase.h>
 #include <ATen/Dispatch.h>
 #include <ATen/Parallel.h>
 #include <ATen/NumericUtils.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/StridedRandomAccessor.h>
 #include <ATen/native/CompositeRandomAccessor.h>
-#include <ATen/native/Sorting.h>
-#include <ATen/native/SortingUtils.h>
+#include <ATen/native/TopKImpl.h>
 #include <c10/util/irange.h>
 
 namespace at { namespace native {
 
 namespace {
 
-void _fill_indices(Tensor& indices, int64_t dim) {
-  auto dim_size = indices.size(dim);
-  auto idx_dim = at::arange(0, dim_size, indices.options().dtype(at::kLong));
-  auto idx_dim_sizes = std::vector<int64_t>(indices.dim(), 1);
-  auto idx_dim_strides = std::vector<int64_t>(indices.dim(), 0);
-  idx_dim_sizes[dim] = dim_size;
-  idx_dim_strides[dim] = 1;
-  auto idx_dim_restrided = idx_dim.as_strided(idx_dim_sizes, idx_dim_strides);
-  indices.copy_(idx_dim_restrided);
-}
-
 template <typename func_t>
 void _dim_apply(
-    Tensor& values,
-    Tensor& indices,
+    const TensorBase &values,
+    const TensorBase &indices,
     int64_t dim,
     const std::string& method_name,
     const func_t& f) {
@@ -95,8 +85,8 @@ struct KeyValueCompDesc {
 };
 
 static void sort_kernel(
-    Tensor& values,
-    Tensor& indices,
+    const TensorBase &values,
+    const TensorBase &indices,
     int64_t dim,
     bool descending,
     bool stable) {
@@ -143,9 +133,9 @@ static void sort_kernel(
 }
 
 static void topk_kernel(
-    const Tensor& values,
-    const Tensor& indices,
-    const Tensor& self,
+    const TensorBase &values,
+    const TensorBase &indices,
+    const TensorBase &self,
     int64_t k,
     int64_t dim,
     bool largest,
