@@ -7,7 +7,7 @@ is functional.
 
 import os
 
-def main():
+def main() -> None:
 
     target = os.path.join('torch', '_masked', '_docs.py')
 
@@ -23,8 +23,9 @@ def main():
     else:
         current_content = ''
 
-    new_content = []
-    new_content.append('''\
+    _new_content = []
+    _new_content.append('''\
+# -*- coding: utf-8 -*-
 # This file is generated, do not modify it!
 #
 # To update this file, run the update masked docs script as follows:
@@ -39,9 +40,9 @@ def main():
     for func_name in sorted(torch._masked.__all__):
         func = getattr(torch._masked, func_name)
         func_doc = torch._masked._generate_docstring(func)
-        new_content.append(f'{func_name}_docstring = """{func_doc}"""\n')
+        _new_content.append(f'{func_name}_docstring = """{func_doc}"""\n')
 
-    new_content = '\n'.join(new_content)
+    new_content = '\n'.join(_new_content)
 
     if new_content == current_content:
         print(f'Nothing to update in {target}')
