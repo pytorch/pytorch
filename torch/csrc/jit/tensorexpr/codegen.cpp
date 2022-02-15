@@ -240,6 +240,7 @@ std::unordered_map<std::string, std::string> ExtCallMemoryReuse::
       {"nnc_aten_quantized_conv2d_relu", "nnc_aten_quantized_conv2d_relu_out"},
       {"nnc_aten_quantized_mul", "nnc_aten_quantized_mul_out"},
       {"nnc_aten_quantized_sigmoid", "nnc_aten_quantized_sigmoid_out"},
+      {"nnc_aten_upsample_nearest2d", "nnc_aten_upsample_nearest2d_out"},
   };
 }
 

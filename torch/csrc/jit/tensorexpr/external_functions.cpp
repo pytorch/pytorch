@@ -939,6 +939,58 @@ void nnc_aten_upsample_nearest2d(
   memcpy(buf_data[0], r.data_ptr(), r.element_size() * r.numel());
 }
 
+void nnc_aten_upsample_nearest2d_out(
+    int64_t bufs_in_num,
+    void** buf_data,
+    int64_t* buf_ranks,
+    int64_t* buf_dims,
+    int64_t* buf_strides,
+    int8_t* buf_dtypes,
+    int64_t,
+    int64_t* extra_args) {
+  const size_t bufs_out_num = 1u;
+  // NOLINTNEXTLINE(facebook-hte-LocalUncheckedArrayBounds)
+  const double x_qscale = ((double*)extra_args)[0];
+  const int64_t x_qzero = extra_args[1];
+  const int64_t x_qdtype = extra_args[2];
+  const auto is_quantized = x_qdtype != -1;
+  c10::optional<std::vector<std::pair<size_t, QIData>>> qdata;
+  if (is_quantized) {
+    qdata = {
+        {1u,
+         {x_qscale,
+          x_qzero,
+          at::toQIntType(static_cast<c10::ScalarType>(x_qdtype))}}};
+  }
+  auto tensors = constructTensors2(
+      bufs_in_num,
+      buf_data,
+      buf_ranks,
+      buf_dims,
+      buf_strides,
+      buf_dtypes,
+      qdata,
+      bufs_out_num);
+  auto x = tensors[1];
+
+  int64_t output_size_h = extra_args[3];
+  int64_t output_size_w = extra_args[4];
+  double scale_factor_h = ((double*)extra_args)[5];
+  double scale_factor_w = ((double*)extra_args)[6];
+
+  auto r = at::upsample_nearest2d(
+      x,
+      (output_size_h != -1)
+          ? c10::optional<at::IntArrayRef>({output_size_h, output_size_w})
+          : c10::nullopt,
+      (scale_factor_h != -1.f) ? c10::optional<at::ArrayRef<double>>(
+                                     {scale_factor_h, scale_factor_w})
+                               : c10::nullopt);
+  buf_data[0] = r.data_ptr();
+  c10::raw::intrusive_ptr::incref(r.getIntrusivePtr().get());
+  buf_data[bufs_in_num + bufs_out_num] = r.getIntrusivePtr().get();
+}
+
 void nnc_aten_quantize_per_tensor(
     int64_t bufs_num,
     void** buf_data,
@@ -1343,6 +1395,9 @@ const static RegisterNNCExternalFunction nnc_dequantize_out(
 const static RegisterNNCExternalFunction nnc_upsample_nearest2d(
     "nnc_aten_upsample_nearest2d",
     nnc_aten_upsample_nearest2d);
+const static RegisterNNCExternalFunction nnc_upsample_nearest2d_out(
+    "nnc_aten_upsample_nearest2d_out",
+    nnc_aten_upsample_nearest2d_out);
 const static RegisterNNCExternalFunction nnc_conv1d(
     "nnc_aten_conv1d",
     nnc_aten_conv1d);

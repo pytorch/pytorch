@@ -32,7 +32,8 @@
   _(nnc_aten_quantize_per_tensor_out)   \
   _(nnc_aten_dequantize)                \
   _(nnc_aten_dequantize_out)            \
-  _(nnc_aten_upsample_nearest2d)
+  _(nnc_aten_upsample_nearest2d)        \
+  _(nnc_aten_upsample_nearest2d_out)
 
 #define DECLARE_EXTERNAL_FUNCTION(NAME) \
   TORCH_API void NAME(                  \
