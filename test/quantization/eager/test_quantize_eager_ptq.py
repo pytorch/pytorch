@@ -189,6 +189,14 @@ class TestQuantizeEagerOps(QuantizationTestCase):
             (16, 1, 10, 10, 10)
         )
 
+    def test_linear(self):
+        self._test_reference_module_impl(
+            nn.Linear,
+            nnq.Linear,
+            {'in_features': 5, 'out_features': 10},
+            (16, 5)
+        )
+
     def _test_activation_op_impl(
             self, float_module_class, quantized_module_class, extra_module_kwargs):
         """ Implementation for testing common activation ops like leaky relu
