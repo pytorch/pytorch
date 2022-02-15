@@ -26,6 +26,7 @@
 #include <numeric>
 #include <string>
 #include <tuple>
+#include <iostream>
 
 namespace at {
 namespace meta {
@@ -2475,7 +2476,7 @@ static Tensor& linalg_norm_out_impl(Tensor& result, const Tensor& self, const op
   }
 
   if (str_ord_non_matrix_norm) {
-    std::string str_ord = opt_str_ord.value();
+    auto str_ord = opt_str_ord.value();
     Tensor self_ = opt_dtype.has_value() ? self.to(opt_dtype.value()) : self;
     if (str_ord == "fro") {
       at::frobenius_norm_out(result, self_, opt_dim.value_or(IntArrayRef({0, 1})), keepdim);
@@ -2518,16 +2519,21 @@ static Tensor& linalg_vector_norm_impl(const Tensor& self, const Scalar& scalar_
   TORCH_CHECK(self.layout() == Layout::Strided,
               "linalg.vector_norm only supports strided layout, but got: ", self.layout());
 
+  std::cout << "VEC NORM 1\n";
   if (opt_dtype.has_value() && isComplexType(self.scalar_type())) {
     TORCH_CHECK(isComplexType(opt_dtype.value()),
       "linalg.vector_norm expected complex 'dtype', since input is complex, ",
       "but got ", opt_dtype.value());
   }
 
+  std::cout << "VEC NORM 2\n";
+
   checkFloatingOrComplex(self, "linalg.vector_norm");
   ScalarType in_dtype = opt_dtype.value_or(self.scalar_type());
 
   IntArrayRef dim = opt_dim.value_or(IntArrayRef{});
+
+  std::cout << "VEC NORM 3\n";
 
   if (self.numel() == 0) {
     // TODO: The question about how to handle negative orders when the input
@@ -2558,6 +2564,7 @@ static Tensor& linalg_vector_norm_impl(const Tensor& self, const Scalar& scalar_
     }
   }
   Tensor self_;
+  std::cout << "VEC NORM 3\n";
   if (self.device().type() == c10::kCPU && isComplexType(self.scalar_type()) && std::abs(ord) == INFINITY) {
     // TODO: This at::abs() call is used so that the at::abs() call in the
     // backward function produces an identical result for complex inputs.
@@ -2569,6 +2576,7 @@ static Tensor& linalg_vector_norm_impl(const Tensor& self, const Scalar& scalar_
   } else {
     self_ = self;
   }
+  std::cout << "VEC NORM 4\n";
   ScalarType out_dtype = opt_dtype.value_or(toValueType(self.scalar_type()));
   TORCH_CHECK(!result.defined() || out_dtype == result.scalar_type(),
     "linalg.vector_norm expected out tensor dtype ", out_dtype,
@@ -2577,6 +2585,7 @@ static Tensor& linalg_vector_norm_impl(const Tensor& self, const Scalar& scalar_
   auto iter = isComplexType(self.scalar_type()) ?
       make_reduction("vector_norm", result, self_, dim, keepdim, in_dtype, out_dtype) :
       make_reduction("vector_norm", result, self_, dim, keepdim, out_dtype);
+  std::cout << "VEC NORM 5\n";
 
   linalg_vector_norm_stub(iter.device_type(), iter, ord);
   return result;
@@ -2668,8 +2677,31 @@ Tensor linalg_norm(const Tensor& self, const optional<Scalar>& opt_ord, optional
 Tensor linalg_norm(const Tensor& self, c10::string_view ord, optional<IntArrayRef> opt_dim, bool keepdim, optional<ScalarType> opt_dtype) {
   auto options = TensorOptions().dtype(opt_dtype.has_value() ? opt_dtype.value() : toValueType(self.scalar_type())).device(self.device());
   Tensor result = at::empty({0}, options);
-  return at::native::linalg_norm_out(
-      self, ord, opt_dim, keepdim, opt_dtype, result);
+  check_str_ord_valid(ord, opt_dim, self.dim());
+
+  if (ord == "fro") {
+    // at::frobenius_norm_out(result, self_, opt_dim.value_or(IntArrayRef({0, 1})), keepdim);
+    Tensor result_ = at::linalg_vector_norm(self, 2, opt_dim.value_or(IntArrayRef({0, 1})),
+                                  keepdim, opt_dtype);
+    at::native::resize_output(result, result_.sizes());
+    result.copy_(result_);
+  }
+
+  Tensor self_ = opt_dtype.has_value() ? self.to(opt_dtype.value()) : self;
+
+
+  if (ord == "nuc") {
+    if (opt_dim.has_value()) {
+      at::nuclear_norm_out(result, self_, opt_dim.value(), keepdim);
+    }
+    else {
+      at::nuclear_norm_out(result, self_, keepdim);
+    }
+  }
+
+   // return at::native::linalg_norm_out(
+   //    self, ord, opt_dim, keepdim, opt_dtype, result);
+    return result;
 }
 
 // Numerical or None norms
