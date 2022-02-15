@@ -8,6 +8,7 @@
 #include <ATen/core/Array.h>
 #include <ATen/detail/FunctionTraits.h>
 #include <ATen/cuda/detail/OffsetCalculator.cuh>
+#include <ATen/native/cuda/thread_constants.h>
 
 #include <thrust/tuple.h>
 

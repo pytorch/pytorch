@@ -325,14 +325,14 @@ void launch_stable_sort_kernel(
   TORCH_CHECK(nbatch > 0, "Cannot sort dimension of length ", nsort);
   int64_t *indices_ptr = indices.data_ptr<int64_t>();
 
-#if defined(USE_ROCM)
-  constexpr bool is_rocm = true;
+#if (defined(USE_ROCM) && ROCM_VERSION < 40500)
+  constexpr bool is_rocm_bf16_sort_unsupported = true;
 #else
-  constexpr bool is_rocm = false;
+  constexpr bool is_rocm_bf16_sort_unsupported = false;
 #endif
 
   AT_DISPATCH_ALL_TYPES_AND3(kBool, kHalf, kBFloat16, self.scalar_type(), "sort", [&]{
-    c10::guts::if_constexpr<!(is_rocm && std::is_same<scalar_t, c10::BFloat16>::value)>([&](auto _){
+    c10::guts::if_constexpr<!(is_rocm_bf16_sort_unsupported && std::is_same<scalar_t, c10::BFloat16>::value)>([&](auto _){
       const scalar_t *self_ptr = self.data_ptr<scalar_t>();
       scalar_t *values_ptr = values.data_ptr<scalar_t>();
       int64_t remaining = _(numel);
@@ -353,7 +353,7 @@ void launch_stable_sort_kernel(
         values_ptr += n;
         indices_ptr += n;
       }
-    }, [&](auto _){ TORCH_CHECK(_(false), "BFloat16 is not supported on ROCm"); });
+    }, [&](auto _){ TORCH_CHECK(_(false), "BFloat16 is not supported on ROCm < 4.5"); });
   });
 }
 

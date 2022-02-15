@@ -1,0 +1,122 @@
+namespace torch.embedded.serialization;
+
+table StorageData {
+  data:[ubyte] (force_align:16);
+}
+
+table QuantizedSchema {
+  qscheme:byte;
+  scale:double;
+  zero_point:int;
+  scales:Tensor;
+  zero_points:Tensor;
+  axis:int;
+}
+
+table Tensor {
+  // torch._utils _rebuild_tensor_v2
+  storage_location_index:uint;
+  // enum ScalarType
+  scalar_type:byte;
+  storage_offset:int;
+  sizes:[int];
+  requires_grad:bool;
+
+  // only set for quantized tensors
+  quantized_schema:QuantizedSchema;
+}
+
+// Reason for basic struct: union value type can only be table/struct/string
+struct Int {
+  int_val:long;
+}
+
+struct Bool {
+  bool_val:bool;
+}
+
+struct Double{
+  double_val:double;
+}
+
+table IntList {
+  items:[long];
+  // Q: Would it need to be RW like input/output/intermediate?
+  // If so, do we need to assign 0 buffer offset, and include in memory planning?
+}
+
+table DoubleList {
+  items:[double];
+}
+
+table BoolList {
+  items:[bool];
+}
+
+union ValueUnion {
+  Int,
+  Bool,
+  Double,
+  Tensor,
+  IntList,
+  DoubleList,
+  BoolList,
+  // Device, // To verify
+}
+
+table Operator {
+  name:string;
+  overload_name:string;
+}
+
+// flatbuffer does not allow
+table Value {
+  val:ValueUnion;
+}
+
+table Operation {
+  // Index to the operators table in the program.
+  op_index:int;
+
+  // Index to the values table
+  inputs:[int];
+
+  // Index to the values table. It includes inputs, outsputs and
+  // other args (like configs) required by the operator.
+  args:[int];
+
+  // separation of inputs/outputs may be needed, for lifespan
+  outputs:[int];
+}
+
+table Graph {
+  // A list of all values used in this graph.
+  values:[Value];
+
+  // Indices of the values that are inputs into this subgraph.
+  inputs:[int];
+
+  // Indices of the values that are outputs out of this subgraph.
+  outputs:[int];
+
+  // All operators, in execution order.
+  operations:[Operation];
+
+  // Name of this graph (like "forward", for debugging purpose).
+  name:string;
+}
+
+table Program {
+  version:uint;
+
+  graphs:[Graph];
+
+  operators:[Operator];
+
+  // data buffers
+  storage_data:[StorageData];
+
+  //metadata:[Metadata];
+}
+
+root_type Program;
