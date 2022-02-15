@@ -212,7 +212,10 @@ void raw_cudnn_convolution_forward_out(
   auto run = [&](cudnn_frontend::ManagedOpaqueDescriptor plan_desc) {
     auto workspace_size = 0;
     auto workspace = at::empty({workspace_size}, input.options().dtype(kByte));
-    void *data_ptrs[] = {reinterpret_cast<int8_t*>(input.data_ptr()), conv_output.data_ptr(), reinterpret_cast<int8_t*>(weight.data_ptr()), requantize_multiplier_tensor.data_ptr(), quantized_output.data_ptr()};
+    void *data_ptrs[] = {reinterpret_cast<int8_t*>(input.data_ptr()), conv_output.data_ptr(),
+                         reinterpret_cast<int8_t*>(weight.data_ptr()),
+                         requantize_multiplier_tensor.data_ptr(),
+                         reinterpret_cast<int8_t*>(quantized_output.data_ptr())};
     // std::cout << plan.describe() << " requires workspace " << workspace_size << std::endl;
     int64_t uids[] = {'x', 'y', 'w', 's', 'r'};
     auto variantPack = cudnn_frontend::VariantPackBuilder()
@@ -244,8 +247,6 @@ void raw_cudnn_convolution_forward_out(
     .setxDesc(conv_op.getOutputTensor())
     .setbDesc(getTensorDescriptor(requantize_multiplier_tensor, 's', getAlignment(requantize_multiplier_tensor)))
     .setyDesc(getTensorDescriptor(quantized_output.sizes(), quantized_output.strides(), CUDNN_DATA_INT8, 'r', getAlignment(quantized_output)))
-    // I think this is inefficient. it makes a copy I believe. The above one can be used instead
-    // .setyDesc(getTensorDescriptor(quantized_output.int_repr(), 'r', getAlignment(quantized_output)))
     .setpwDesc(getPointWiseMulDescriptor(getCudnnDataType(requantize_multiplier_tensor)))
     .build();
   // std::cout << "operator:" << requant_op.describe() << std::endl;
