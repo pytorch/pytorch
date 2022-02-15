@@ -7,7 +7,7 @@ NAdam = partial(optim.NAdam, foreach=True)
 SGD = partial(optim.SGD, foreach=True)
 RAdam = partial(optim.RAdam, foreach=True)
 RMSprop = partial(optim.RMSprop, foreach=True)
-from .rprop import Rprop as Rprop
+Rprop = partial(optim.Rprop, foreach=True)
 ASGD = partial(optim.ASGD, foreach=True)
 Adamax = partial(optim.Adamax, foreach=True)
 Adadelta = partial(optim.Adadelta, foreach=True)
