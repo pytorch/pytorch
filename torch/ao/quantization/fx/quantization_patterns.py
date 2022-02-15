@@ -1031,7 +1031,7 @@ class LinearReLUQuantizeHandler(QuantizeHandler):
                     self.linear_node)
         else:  # call_function
             assert self.linear_node.op == 'call_function'
-            if is_reference:
+            if is_reference or self.linear_node.target == torch.nn.functional.linear and dtypes in [(torch.quint8, torch.qint8, None)]:
                 quantized_input_dtypes = [torch.float, torch.float]
                 if activation_int8_quantized:
                     quantized_input_dtypes[0] = torch.quint8
