@@ -17,6 +17,7 @@
 #include <torch/csrc/jit/passes/utils/subgraph_utils.h>
 #include <torch/csrc/jit/runtime/autodiff.h>
 #include <torch/csrc/jit/runtime/custom_operator.h>
+#include <torch/csrc/jit/runtime/graph_iterator.h>
 #include <torch/csrc/jit/runtime/operator.h>
 
 #include <torch/csrc/jit/passes/tensorexpr_fuser.h>
@@ -1994,6 +1995,20 @@ bool removeInplaceOperations(const std::shared_ptr<Graph>& graph) {
       graph, [&](Node* node) { return inplace_ops.count(node->kind()) != 0; });
 }
 
+void printFusionGroupsForDebug(std::shared_ptr<Graph>& graph) {
+  if (!GRAPH_DEBUG_ENABLED) {
+    return;
+  }
+
+  DepthFirstGraphNodeIterator it(graph);
+  Node *node = nullptr;
+  while ((node = it.next()) != nullptr) {
+    if (node->kind() == prim::CudaFusionGroup) {
+      GRAPH_EXPORT("", node->g(attr::Subgraph));
+    }
+  }
+}
+
 } // anonymous namespace
 
 void CudaFuseGraph(std::shared_ptr<Graph>& graph) {
@@ -2063,6 +2078,9 @@ void CudaFuseGraph(std::shared_ptr<Graph>& graph) {
   // TODO: we need to properly restore shape information after fusion.
   // shamelessly use tool from NNC.
   RemoveTensorTypeSpecializations(graph);
+
+  GRAPH_DEBUG("EXTRACT ALL FUSION GROUPS");
+  printFusionGroupsForDebug(graph);
 
   GRAPH_DUMP("Before Compilation: ", graph);
   // Compile CudaFusionGroup
