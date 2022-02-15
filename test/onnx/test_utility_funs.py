@@ -612,7 +612,7 @@ class TestUtilityFuns_opset9(_BaseTestCase):
         script_model = torch.jit.script(model)
         x = torch.randn(2, 3)
 
-        # Case 1: varying dimension size.
+        # Case 1: dynamic axis
         f = io.BytesIO()
         y = torch.randn(2, 3)
         torch.onnx.export(script_model, (x, y), f, opset_version=self.opset_version,
