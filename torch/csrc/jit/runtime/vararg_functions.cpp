@@ -102,8 +102,8 @@ void addFormattedArg(
 } // namespace
 
 void tupleUnpack(Stack& stack) {
-  auto tuple = pop(stack).toTuple();
-  stack.insert(stack.end(), tuple->elements().begin(), tuple->elements().end());
+  const auto& tuple = pop(stack).toTupleRef();
+  stack.insert(stack.end(), tuple.elements().begin(), tuple.elements().end());
 }
 
 void format(Stack& stack, size_t num_inputs) {
