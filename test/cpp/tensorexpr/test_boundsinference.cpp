@@ -5,6 +5,7 @@
 
 #include <gtest/gtest.h>
 
+#include <c10/util/irange.h>
 #include <test/cpp/tensorexpr/padded_buffer.h>
 #include <torch/csrc/jit/tensorexpr/analysis.h>
 #include <torch/csrc/jit/tensorexpr/bounds_inference.h>
@@ -26,7 +27,7 @@ static void verifyConstBounds(
   size_t ndim = ref.size();
   ASSERT_EQ(access_info.start.size(), ndim);
   ASSERT_EQ(access_info.stop.size(), ndim);
-  for (size_t i = 0; i < ndim; i++) {
+  for (const auto i : c10::irange(ndim)) {
     if (ref[i].first >= 0) { // Negative values are used to skip the check
       ASSERT_TRUE(access_info.start[i]->isConstant());
       int start_i = immediateAs<int>(access_info.start[i]);
@@ -48,8 +49,7 @@ TEST(BoundsInference, _1) {
   // {{b, kStore, 0, 99}, {a, kLoad, 0, 99}}
   ExprHandle n(100);
   BufHandle a("a", {n}, kFloat);
-  Tensor b =
-      Compute("b", {{n, "i"}}, [&](const VarHandle& i) { return a.load(i); });
+  Tensor b = Compute("b", {n}, [&](const VarHandle& i) { return a.load(i); });
   LoopNest l({b});
   auto bounds_info = inferBounds(l.root_stmt());
 
@@ -72,8 +72,7 @@ TEST(BoundsInference, _2) {
   // {{b, kStore, 0, n-1}, {a, kLoad, 0, n-1}}
   VarHandle n("n", kInt);
   BufHandle a("a", {n}, kFloat);
-  Tensor b =
-      Compute("b", {{n, "i"}}, [&](const VarHandle& i) { return a.load(i); });
+  Tensor b = Compute("b", {n}, [&](const VarHandle& i) { return a.load(i); });
   LoopNest l({b});
   auto bounds_info = inferBounds(l.root_stmt());
 
@@ -96,9 +95,8 @@ TEST(BoundsInference, _3) {
   // {{b, kStore, 0, 99}, {a, kLoad, 0, 109}}
   ExprHandle n(100);
   BufHandle a("a", {n + 10}, kFloat);
-  Tensor b = Compute("b", {{n, "i"}}, [&](const VarHandle& i) {
-    return a.load(i) * a.load(i + 10);
-  });
+  Tensor b = Compute(
+      "b", {n}, [&](const VarHandle& i) { return a.load(i) * a.load(i + 10); });
   LoopNest l({b});
   auto bounds_info = inferBounds(l.root_stmt());
 
@@ -125,14 +123,12 @@ TEST(BoundsInference, _4) {
   ExprHandle W(320);
   ExprHandle H(200);
   BufHandle a("a", {H, W}, kFloat);
-  Tensor b = Compute(
-      "b", {{H, "y"}, {W, "x"}}, [&](const VarHandle& y, const VarHandle& x) {
-        return x * y;
-      });
-  Tensor c = Compute(
-      "c", {{H, "y"}, {W, "x"}}, [&](const VarHandle& y, const VarHandle& x) {
-        return a.load(y, x) * b.load(y, x);
-      });
+  Tensor b = Compute("b", {H, W}, [&](const VarHandle& y, const VarHandle& x) {
+    return x * y;
+  });
+  Tensor c = Compute("c", {H, W}, [&](const VarHandle& y, const VarHandle& x) {
+    return a.load(y, x) * b.load(y, x);
+  });
   LoopNest l({c});
   std::vector<ForPtr> loops = l.getLoopStmtsFor(c);
   StmtPtr body = l.getLoopBodyFor(c);
@@ -203,8 +199,7 @@ TEST(BoundsInference, _5) {
   //   b[i_tail + (100/16)*16] = a[i_tail + (100/16)*16];
   ExprHandle n(100);
   BufHandle a("a", {n}, kFloat);
-  Tensor b =
-      Compute("b", {{n, "i"}}, [&](const VarHandle& i) { return a.load(i); });
+  Tensor b = Compute("b", {n}, [&](const VarHandle& i) { return a.load(i); });
   LoopNest l({b});
 
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
@@ -257,12 +252,11 @@ TEST(BoundsInference, _6) {
   ExprHandle CW(32);
   ExprHandle CH(20);
   BufHandle a("a", {H, W}, kFloat);
-  Tensor b = Compute(
-      "b", {{H, "y"}, {W, "x"}}, [&](const VarHandle& y, const VarHandle& x) {
-        return x * y;
-      });
-  Tensor c = Compute(
-      "c", {{CH, "y"}, {CW, "x"}}, [&](const VarHandle& y, const VarHandle& x) {
+  Tensor b = Compute("b", {H, W}, [&](const VarHandle& y, const VarHandle& x) {
+    return x * y;
+  });
+  Tensor c =
+      Compute("c", {CH, CW}, [&](const VarHandle& y, const VarHandle& x) {
         return a.load(y + 100, x + 100) * b.load(y * 2, x * 5);
       });
   LoopNest l({c});
@@ -324,10 +318,9 @@ TEST(BoundsInference, _6) {
 TEST(BoundsInference, Adjacent) {
   ExprHandle H(6);
   BufHandle a("a", {20}, kFloat);
-  Tensor b =
-      Compute("b", {{H, "x"}}, [&](const VarHandle& x) { return a.load(x); });
-  Tensor c = Compute(
-      "c", {{H, "x"}}, [&](const VarHandle& x) { return a.load(x + H); });
+  Tensor b = Compute("b", {H}, [&](const VarHandle& x) { return a.load(x); });
+  Tensor c =
+      Compute("c", {H}, [&](const VarHandle& x) { return a.load(x + H); });
   LoopNest l({b, c});
   std::vector<ForPtr> loops = NodeFinder<For>::find(l.root_stmt());
 
@@ -382,12 +375,11 @@ TEST(BoundsInference, Adjacent) {
 
 TEST(BoundsInference, MultipleTopLoopLoad) {
   BufHandle a("a", {100}, kFloat);
-  Tensor b =
-      Compute("b", {{64, "x"}}, [&](const VarHandle& x) { return a.load(x); });
-  Tensor c = Compute(
-      "c", {{32, "x"}}, [&](const VarHandle& x) { return a.load(x + 10); });
-  Tensor d = Compute(
-      "d", {{96, "x"}}, [&](const VarHandle& x) { return a.load(x + 2); });
+  Tensor b = Compute("b", {64}, [&](const VarHandle& x) { return a.load(x); });
+  Tensor c =
+      Compute("c", {32}, [&](const VarHandle& x) { return a.load(x + 10); });
+  Tensor d =
+      Compute("d", {96}, [&](const VarHandle& x) { return a.load(x + 2); });
   LoopNest l({b, c, d});
 
   auto bounds_info = inferBounds(l.root_stmt());
@@ -495,16 +487,15 @@ TEST(BoundsInference, MultipleTopLoopStore) {
 }
 
 TEST(BoundsInference, CacheReads) {
-  Tensor A = Compute(
-      "A", {{64, "i"}, {64, "j"}}, [](const VarHandle& i, const VarHandle& j) {
-        return i * j;
-      });
-  Tensor B = Compute(
-      "B", {{20, "i"}, {10, "j"}}, [&](const VarHandle& i, const VarHandle& j) {
+  Tensor A = Compute("A", {64, 64}, [](const VarHandle& i, const VarHandle& j) {
+    return i * j;
+  });
+  Tensor B =
+      Compute("B", {20, 10}, [&](const VarHandle& i, const VarHandle& j) {
         return A.load(i + 30, j + 3);
       });
-  Tensor C = Compute(
-      "C", {{20, "i"}, {10, "j"}}, [&](const VarHandle& i, const VarHandle& j) {
+  Tensor C =
+      Compute("C", {20, 10}, [&](const VarHandle& i, const VarHandle& j) {
         return A.load(i + 10, j + 20) + A.load(i + 30, j + 40);
       });
 
@@ -524,14 +515,14 @@ TEST(BoundsInference, CacheReads) {
       // Same number of TensorAccessBoundInfos.
       ASSERT_EQ(pair.second.size(), beforeIt->second.size());
 
-      for (size_t i = 0; i < pair.second.size(); ++i) {
+      for (const auto i : c10::irange(pair.second.size())) {
         TensorAccessBoundsInfo& after = pair.second[i];
         TensorAccessBoundsInfo& before = beforeIt->second[i];
         // Same number of dimensions.
         ASSERT_EQ(before.start.size(), after.start.size());
 
         // Bounds are equal.
-        for (size_t j = 0; j < before.start.size(); ++j) {
+        for (const auto j : c10::irange(before.start.size())) {
           ASSERT_TRUE(exprEquals(before.start[j], after.start[j]));
           ASSERT_TRUE(exprEquals(before.stop[j], after.stop[j]));
         }
@@ -550,7 +541,7 @@ TEST(BoundsInference, CacheReads) {
       ASSERT_EQ(first.start.size(), 2);
 
       // bounds for load and store are equal.
-      for (size_t j = 0; j < first.start.size(); ++j) {
+      for (const auto j : c10::irange(first.start.size())) {
         ASSERT_TRUE(exprEquals(first.start[j], second.start[j]));
         ASSERT_TRUE(exprEquals(first.stop[j], second.stop[j]));
       }
@@ -561,7 +552,7 @@ TEST(BoundsInference, CacheReads) {
 TEST(BoundsInference, Flattened) {
   Tensor b = Compute(
       "b",
-      {{3, "z"}, {4, "y"}, {5, "x"}},
+      {3, 4, 5},
       [&](const VarHandle& z, const VarHandle& y, const VarHandle& x) {
         return x * y + z;
       });
@@ -636,14 +627,12 @@ TEST(BoundsInference, GetPotentialHazards) {
 }
 
 TEST(BoundsInference, GetPotentialHazardsLoopNoHazard) {
-  Tensor A = Compute(
-      "A", {{64, "i"}, {64, "j"}}, [](const VarHandle& i, const VarHandle& j) {
-        return i * j;
-      });
-  Tensor B = Compute(
-      "B", {{64, "i"}, {64, "j"}}, [](const VarHandle& i, const VarHandle& j) {
-        return (i + 1) * (j + 1);
-      });
+  Tensor A = Compute("A", {64, 64}, [](const VarHandle& i, const VarHandle& j) {
+    return i * j;
+  });
+  Tensor B = Compute("B", {64, 64}, [](const VarHandle& i, const VarHandle& j) {
+    return (i + 1) * (j + 1);
+  });
 
   LoopNest l({A, B});
 
@@ -662,12 +651,11 @@ TEST(BoundsInference, GetPotentialHazardsLoopNoHazard) {
 }
 
 TEST(BoundsInference, GetPotentialHazardsLoopCall) {
-  Tensor A = Compute(
-      "A", {{64, "i"}, {64, "j"}}, [](const VarHandle& i, const VarHandle& j) {
-        return i * j;
-      });
-  Tensor B = Compute(
-      "B", {{64, "i"}, {64, "j"}}, [&](const VarHandle& i, const VarHandle& j) {
+  Tensor A = Compute("A", {64, 64}, [](const VarHandle& i, const VarHandle& j) {
+    return i * j;
+  });
+  Tensor B =
+      Compute("B", {64, 64}, [&](const VarHandle& i, const VarHandle& j) {
         return A.load(i, j) + 5;
       });
 
@@ -687,10 +675,9 @@ TEST(BoundsInference, GetPotentialHazardsLoopCall) {
 }
 
 TEST(BoundsInference, GetPotentialHazardsLoopSplit) {
-  Tensor A = Compute(
-      "A", {{64, "i"}, {64, "j"}}, [](const VarHandle& i, const VarHandle& j) {
-        return i * j;
-      });
+  Tensor A = Compute("A", {64, 64}, [](const VarHandle& i, const VarHandle& j) {
+    return i * j;
+  });
 
   LoopNest l({A});
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
@@ -713,10 +700,10 @@ TEST(BoundsInference, GetPotentialHazardsLoopSplit) {
 
 TEST(BoundsInference, HasConflictingOverlapSameBufferWithPartialOverlap) {
   // Input IR:
-  //   for (int j = 10; j < 100; j++) {
+  //   for (const auto j : c10::irange(10, 100)) {
   //     A[j] = 10 * j;
   //   }
-  //   for (int k = 10; k < 100; k++) {
+  //   for (const auto k : c10::irange(10, 100)) {
   //     A[k-1] = 20 * k;
   //   }
   BufHandle a_buf("A", {200}, kInt);
@@ -735,10 +722,10 @@ TEST(BoundsInference, HasConflictingOverlapSameBufferWithPartialOverlap) {
 
 TEST(BoundsInference, HasConflictingOverlapSameBufferWithFullOverlap) {
   // Input IR:
-  //   for (int j = 10; j < 100; j++) {
+  //   for (const auto j : c10::irange(10, 100)) {
   //     A[j] = 10 * j;
   //   }
-  //   for (int k = 10; k < 100; k++) {
+  //   for (const auto k : c10::irange(10, 100)) {
   //     A[k] = 20 * k;
   //   }
   BufHandle a_buf("A", {200}, kInt);
@@ -756,10 +743,10 @@ TEST(BoundsInference, HasConflictingOverlapSameBufferWithFullOverlap) {
 
 TEST(BoundsInference, HasConflictingOverlapSameBufferWithFullOverlapRAW) {
   // Input IR:
-  //   for (int j = 10; j < 100; j++) {
+  //   for (const auto j : c10::irange(10, 100)) {
   //     A[j] = 10 * j;
   //   }
-  //   for (int k = 10; k < 100; k++) {
+  //   for (const auto k : c10::irange(10, 100)) {
   //     B[k] = A[k];
   //   }
   BufHandle a_buf("A", {200}, kInt);
@@ -779,10 +766,10 @@ TEST(BoundsInference, HasConflictingOverlapSameBufferWithFullOverlapRAW) {
 
 TEST(BoundsInference, HasConflictingOverlapSameBufferNotOverlapping) {
   // Input IR:
-  //   for (int j = 10; j < 100; j++) {
+  //   for (const auto j : c10::irange(10, 100)) {
   //     A[j] = 10 * j;
   //   }
-  //   for (int k = 10; k < 100; k++) {
+  //   for (const auto k : c10::irange(10, 100)) {
   //     A[k+100] = 20 * k;
   //   }
   BufHandle a_buf("A", {200}, kInt);
@@ -801,13 +788,13 @@ TEST(BoundsInference, HasConflictingOverlapSameBufferNotOverlapping) {
 
 TEST(BoundsInference, HasConflictingOverlap2DBufferWithOverlap) {
   // Input IR:
-  //   for (int i = 0; i < 20; i++) {
-  //     for (int j = 0; j < 100; j++) {
+  //   for (const auto i : c10::irange(20)) {
+  //     for (const auto j : c10::irange(100)) {
   //       A[i,j] = i * j * 500;
   //     }
   //   }
-  //   for (int m = 0; m < 20; m++) {
-  //     for (int n = 0; n < 50; n++) {
+  //   for (const auto m : c10::irange(20)) {
+  //     for (const auto n : c10::irange(50)) {
   //       A[m+1,n] = m + n * 100;
   //     }
   //   }
@@ -840,13 +827,13 @@ TEST(BoundsInference, HasConflictingOverlap2DBufferWithOverlap) {
 
 TEST(BoundsInference, HasConflictingOverlap2DBufferWithNoOverlap) {
   // Input IR:
-  //   for (int i = 0; i < 20; i++) {
-  //     for (int j = 0; j < 100; j++) {
+  //   for (const auto i : c10::irange(20)) {
+  //     for (const auto j : c10::irange(100)) {
   //       A[i,j] = i * j * 500;
   //     }
   //   }
-  //   for (int m = 0; m < 20; m++) {
-  //     for (int n = 0; n < 50; n++) {
+  //   for (const auto m : c10::irange(20)) {
+  //     for (const auto n : c10::irange(50)) {
   //       A[m+20,n+100] = m + n * 100;
   //     }
   //   }
@@ -879,13 +866,13 @@ TEST(BoundsInference, HasConflictingOverlap2DBufferWithNoOverlap) {
 
 TEST(BoundsInference, HasConflictingOverlapDifferentBuffers) {
   // Input IR:
-  //   for (int i = 0; i < 20; i++) {
-  //     for (int j = 0; j < 100; j++) {
+  //   for (const auto i : c10::irange(20)) {
+  //     for (const auto j : c10::irange(100)) {
   //       A[i,j] = i * j * 500;
   //     }
   //   }
-  //   for (int m = 0; m < 20; m++) {
-  //     for (int n = 0; n < 50; n++) {
+  //   for (const auto m : c10::irange(20)) {
+  //     for (const auto n : c10::irange(50)) {
   //       B[m,n] = m + n * 100;
   //     }
   //   }
@@ -917,10 +904,10 @@ TEST(BoundsInference, HasConflictingOverlapDifferentBuffers) {
 
 TEST(BoundsInference, HasConflictingOverlapDueToRAWDependence) {
   // Input IR:
-  //   for (int j = 0; j < 100; j++) {
+  //   for (const auto j : c10::irange(100)) {
   //     A[j] = 10 * j;
   //   }
-  //   for (int k = 0; k < 100; k++) {
+  //   for (const auto k : c10::irange(100)) {
   //     B[k] = 20 * A[99-k];
   //   }
   BufHandle a_buf("A", {100}, kInt);
@@ -944,10 +931,10 @@ TEST(BoundsInference, HasConflictingOverlapDueToRAWDependence) {
 
 TEST(BoundsInference, HasConflictingOverlapDueToWARDependence) {
   // Input IR:
-  //   for (int k = 0; k < 100; k++) {
+  //   for (const auto k : c10::irange(100)) {
   //     B[k] = 20 * A[99-k];
   //   }
-  //   for (int j = 0; j < 100; j++) {
+  //   for (const auto j : c10::irange(100)) {
   //     A[j] = 10 * j;
   //   }
   BufHandle a_buf("A", {100}, kInt);
@@ -971,10 +958,10 @@ TEST(BoundsInference, HasConflictingOverlapDueToWARDependence) {
 
 TEST(BoundsInference, HasConflictingOverlapWithLoads) {
   // Input IR:
-  //   for (int k = 10; k < 100; k++) {
+  //   for (const auto k : c10::irange(10, 100)) {
   //     B[k] = 20 * A[99-k];
   //   }
-  //   for (int j = 10; j < 100; j++) {
+  //   for (const auto j : c10::irange(10, 100)) {
   //     C[j] = 10 * A[j];
   //   }
   BufHandle a_buf("A", {100}, kInt);
@@ -1003,7 +990,7 @@ TEST(BoundsInference, HasConflictingOverlapWithLoads) {
 
 TEST(BoundsInference, IsOverlapping) {
   // Input IR:
-  //   for (int i = 0; i < 100; i++) {
+  //   for (const auto i : c10::irange(100)) {
   //     A[i] = i * 10;               // storeA1
   //     B[i] = A[99-i] * 20;         // loadA1
   //     C[i] = A[i + 100] * 10;      // loadA2

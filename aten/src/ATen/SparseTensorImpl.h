@@ -3,6 +3,13 @@
 #include <ATen/Tensor.h>
 #include <c10/core/TensorImpl.h>
 #include <c10/util/Exception.h>
+#include <c10/util/irange.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#else
+#include <ATen/ops/empty.h>
+#endif
 
 namespace at {
 struct TORCH_API SparseTensorImpl : public TensorImpl {
@@ -109,7 +116,7 @@ public:
       bool shrinking_dense_dim = false;
       auto sparse_size_original = sizes().slice(0, sparse_dim);
       auto sparse_size_new = size.slice(0, sparse_dim);
-      for (int64_t i = 0; i < sparse_dim; i++) {
+      for (const auto i : c10::irange(sparse_dim)) {
         if (sparse_size_new[i] < sparse_size_original[i]) {
           shrinking_sparse_dims = true;
           break;
@@ -117,7 +124,7 @@ public:
       }
       auto dense_size_original = sizes().slice(sparse_dim);
       auto dense_size_new = size.slice(sparse_dim);
-      for (int64_t i = 0; i < dense_dim; i++) {
+      for (const auto i : c10::irange(dense_dim)) {
         if (dense_size_new[i] < dense_size_original[i]) {
           shrinking_dense_dim = true;
           break;

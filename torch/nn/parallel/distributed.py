@@ -1,6 +1,7 @@
+import collections.abc
 import copy
 from dataclasses import dataclass
-from typing import Callable, Any
+from typing import Callable, Any, Type
 from enum import Enum, auto
 import inspect
 import itertools
@@ -32,6 +33,8 @@ from ..modules import Module
 from ._functions import _get_stream
 from .scatter_gather import gather, is_namedtuple, scatter_kwargs
 
+
+logger = logging.getLogger(__name__)
 
 def _tree_flatten_with_rref(output):
     output_is_rref = RPC_AVAILABLE and isinstance(output, RRef)
@@ -319,12 +322,23 @@ class DistributedDataParallel(Module, Joinable):
         :class:`torch.distributed.optim.DistributedOptimizer` for optimizing
         parameters.
 
+    .. note::
+        DistributedDataParallel currently offers limited support for gradient
+        checkpointing with :meth:`torch.utils.checkpoint`. DDP will work as
+        expected when there are no unused parameters in the model and each layer
+        is checkpointed at most once (make sure you are not passing
+        `find_unused_parameters=True` to DDP). We currently do not support the
+        case where a layer is checkpointed multiple times, or when there unused
+        parameters in the checkpointed model.
+
         Example::
 
             >>> import torch.distributed.autograd as dist_autograd
             >>> from torch.nn.parallel import DistributedDataParallel as DDP
+            >>> import torch
             >>> from torch import optim
             >>> from torch.distributed.optim import DistributedOptimizer
+            >>> import torch.distributed.rpc as rpc
             >>> from torch.distributed.rpc import RRef
             >>>
             >>> t1 = torch.rand((3, 3), requires_grad=True)
@@ -345,9 +359,9 @@ class DistributedDataParallel(Module, Joinable):
             >>>
             >>> with dist_autograd.context() as context_id:
             >>>     pred = ddp_model(rref.to_here())
-            >>>     loss = loss_func(pred, loss)
-            >>>     dist_autograd.backward(context_id, loss)
-            >>>     dist_optim.step()
+            >>>     loss = loss_func(pred, target)
+            >>>     dist_autograd.backward(context_id, [loss])
+            >>>     dist_optim.step(context_id)
 
     .. note::
         To let a non-DDP model load a state dict from a DDP model,
@@ -466,6 +480,35 @@ class DistributedDataParallel(Module, Joinable):
                       gradients. If hitting such errors, please fix it by
                       referring to the :meth:`~torch.optim.Optimizer.zero_grad`
                       function in ``torch/optim/optimizer.py`` as a solution.
+                      Note that gradients will be views after first iteration, so
+                      the peak memory saving should be checked after first iteration.
+        static_graph (bool): When set to ``True``, DDP knows the trained graph is
+                     static. Static graph means 1) The set of used and unused
+                     parameters will not change during the whole training loop; in
+                     this case, it does not matter whether users set
+                     ``find_unused_parameters = True`` or not. 2) How the graph is trained
+                     will not change during the whole training loop (meaning there is
+                     no control flow depending on iterations).
+                     When static_graph is set to be ``True``, DDP will support cases that
+                     can not be supported in the past:
+                     1) Reentrant backwards.
+                     2) Activation checkpointing multiple times.
+                     3) Activation checkpointing when model has unused parameters.
+                     4) There are model parameters that are outside of forward function.
+                     5) Potentially improve performance when there are unused parameters,
+                     as DDP will not search graph in each iteraton to detect unused
+                     parameters when static_graph is set to be ``True``.
+                     To check whether you can set static_graph to be ``True``, one way is to
+                     check ddp logging data at the end of your previous model training,
+                     if ``ddp_logging_data.get("can_set_static_graph") == True``, mostly you
+                     can set ``static_graph = True`` as well.
+
+                     Example::
+                         >>> model_DDP = torch.nn.parallel.DistributedDataParallel(model)
+                         >>> # Training loop
+                         >>> .....
+                         >>> ddp_logging_data = model_DDP._get_ddp_logging_data()
+                         >>> static_graph = ddp_logging_data.get("can_set_static_graph")
 
 
     Attributes:
@@ -489,6 +532,7 @@ class DistributedDataParallel(Module, Joinable):
         find_unused_parameters=False,
         check_reduction=False,
         gradient_as_bucket_view=False,
+        static_graph=False,
     ):
 
         super(DistributedDataParallel, self).__init__()
@@ -600,13 +644,15 @@ class DistributedDataParallel(Module, Joinable):
         # Sync params and buffers. Ensures all DDP models start off at the same value.
         self._sync_params_and_buffers(authoritative_rank=0)
         # In debug mode, build a mapping of parameter index -> parameter.
-        if dist._get_debug_mode() != dist._DistributedDebugLevel.OFF:
-            param_to_name_mapping = self._build_param_to_name_mapping(parameters)
-        else:
-            param_to_name_mapping = {}
+        param_to_name_mapping = self._build_debug_param_to_name_mapping(parameters)
         # Builds reducer.
-        self._ddp_init_helper(parameters, expect_sparse_gradient, param_to_name_mapping)
+        self._ddp_init_helper(
+            parameters, expect_sparse_gradient, param_to_name_mapping, static_graph
+        )
         self._has_rebuilt_buckets = False
+
+        if static_graph:
+            self._set_static_graph()
 
     def _sync_params_and_buffers(self, authoritative_rank=0):
         module_states = []
@@ -629,14 +675,15 @@ class DistributedDataParallel(Module, Joinable):
         raise err_type(err_msg)
 
     def _ddp_init_helper(
-        self, parameters, expect_sparse_gradient, param_to_name_mapping
+        self, parameters, expect_sparse_gradient, param_to_name_mapping,
+        static_graph
     ):
         """
         Initialization helper function that does the following:
         (1) bucketing the parameters for reductions
         (2) resetting the bucketing states
         (3) registering the grad hooks
-        (4) Logging constructin-time DDP logging data
+        (4) Logging construction-time DDP logging data
         (5) passing a handle of DDP to SyncBatchNorm Layer
         """
         self.num_iterations = 0
@@ -674,12 +721,20 @@ class DistributedDataParallel(Module, Joinable):
         # logger and reducer.
         self.reducer.set_logger(self.logger)
 
+        has_sync_bn = False
+        for submodule in self.module.modules():
+            if isinstance(submodule, torch.nn.SyncBatchNorm):
+                has_sync_bn = True
+                break
+
         # Set logging data that can be got during construction time.
         self.logger.set_construction_data_and_log(
             self.module.__class__.__name__,
             [] if self.device_ids is None else self.device_ids,
             -1 if self.output_device is None else self.output_device,
             self.broadcast_buffers,
+            has_sync_bn,
+            static_graph,
         )
 
         # passing a handle to torch.nn.SyncBatchNorm layer
@@ -701,14 +756,14 @@ class DistributedDataParallel(Module, Joinable):
         self.__dict__.setdefault("require_backward_grad_sync", True)
         parameters, expect_sparse_gradient = self._build_params_for_reducer()
         # In debug mode, build a mapping of parameter index -> parameter.
-        if dist._get_debug_mode() != dist._DistributedDebugLevel.OFF:
-            param_to_name_mapping = self._build_param_to_name_mapping(parameters)
-        else:
-            param_to_name_mapping = {}
-        # Builds reducer
-        self._ddp_init_helper(parameters, expect_sparse_gradient, param_to_name_mapping)
+        param_to_name_mapping = self._build_debug_param_to_name_mapping(parameters)
+        # Builds reducer.
+        self._ddp_init_helper(
+            parameters, expect_sparse_gradient, param_to_name_mapping, self.static_graph
+        )
         if self.static_graph:
-            self._set_static_graph()
+            self.reducer._set_static_graph()
+            self.logger._set_static_graph()
 
     def _build_params_for_reducer(self):
         # Build tuple of (module, parameter) for all parameters that require grads.
@@ -778,7 +833,10 @@ class DistributedDataParallel(Module, Joinable):
             buffer_name: buffer for (buffer, buffer_name) in named_module_buffers
         }
 
-    def _build_param_to_name_mapping(self, parameters):
+    def _build_debug_param_to_name_mapping(self, parameters):
+        if dist._get_debug_mode() == dist._DistributedDebugLevel.OFF:
+            return {}
+
         param_to_param_index = {parameters[i]: i for i in range(len(parameters))}
         param_set = set(parameters)
         param_index_to_param_fqn = {}
@@ -892,7 +950,7 @@ class DistributedDataParallel(Module, Joinable):
             # during forward computation.
             # This should be called only once during whole training period.
             if torch.is_grad_enabled() and self.reducer._rebuild_buckets():
-                logging.info("Reducer buckets have been rebuilt in this iteration.")
+                logger.info("Reducer buckets have been rebuilt in this iteration.")
                 self._has_rebuilt_buckets = True
 
             # sync params according to location (before/after forward) user
@@ -1004,10 +1062,22 @@ class DistributedDataParallel(Module, Joinable):
                 return [type(obj)(*args) for args in zip(*map(to_map, obj))]
             if isinstance(obj, tuple) and len(obj) > 0:
                 return list(zip(*map(to_map, obj)))
-            if isinstance(obj, list) and len(obj) > 0:
-                return [list(i) for i in zip(*map(to_map, obj))]
-            if isinstance(obj, dict) and len(obj) > 0:
-                return [type(obj)(i) for i in zip(*map(to_map, obj.items()))]
+            if isinstance(obj, str):
+                # Needs to be checked, otherwise it's taken as a sequence infinitely.
+                # This is because the elements of a string are also strings, and so on.
+                return [obj]
+            if isinstance(obj, collections.abc.Sequence) and len(obj) > 0:
+                try:
+                    return [type(obj)(i) for i in zip(*map(to_map, obj))]
+                except TypeError:
+                    # The sequence type may not support `__init__(iterable)` (e.g., `range`).
+                    return [list(i) for i in zip(*map(to_map, obj))]
+            if isinstance(obj, collections.abc.Mapping) and len(obj) > 0:
+                try:
+                    return [type(obj)(i) for i in zip(*map(to_map, obj.items()))]
+                except TypeError:
+                    # The mapping type may not support `__init__(iterable)`.
+                    return [dict(i) for i in zip(*map(to_map, obj.items()))]
             return [obj]
 
         # Avoid reference cycle
@@ -1386,8 +1456,7 @@ class DistributedDataParallel(Module, Joinable):
         which might not be as efficient if implemented in Python using a Python communication hook.
 
         Args:
-            comm_hook_type (dist.BuiltinCommHookType): type of communication hook, such as
-            ALLREDUCE, FP16_COMPRESS, etc.
+            comm_hook_type (dist.BuiltinCommHookType): type of communication hook, such as ALLREDUCE, FP16_COMPRESS, etc.
 
         .. warning ::
             DDP communication hook can only be registered once and should be registered
@@ -1403,6 +1472,75 @@ class DistributedDataParallel(Module, Joinable):
         """
         self.logger._set_comm_hook_name(str(comm_hook_type))
         dist._register_builtin_comm_hook(self.reducer, comm_hook_type)
+
+    def _register_fused_optim(self, optim: Type, *args, optim_params=None, **kwargs):
+        r"""
+        Registers an optimizer with DDP such that the optimization for a
+        parameter will run immediately when that parameter's gradient is
+        finished with reduction, instead of waiting for all parameters'
+        gradients to finish reduction. This can result in a training speedup
+        depending on your workload since the optimizer can run while gradient
+        reduction for other parameters are still ongoing. In addition, this has
+        the potential to reduce peak memory consumption during training, as it
+        only needs to load the per-parameter optimizer states of a single
+        parameter at a time, instead of loading all per-parameter optimizer
+        states at once.
+
+        Args:
+            optim_cls (Type): a ``torch.optim.Optimizer`` class to be registered
+            as a fused optimizer.
+            *args (Sequence[Any]): Arguments to forward to `optim_cls`.
+            optim_params (Optional[Iterable[torch.Tensor]]): Set of parameters
+            to optimize, similar to `params` argument of traditional `torch.optim`
+            Optimizers. If this is omitted, all DDP model parameters will be
+            optimized.
+            **kwargs: (Dict[str, Any]): Keyword arguments to forward to `optim_cls`.
+
+    .. warning ::
+        _register_fused_optim should only be called once on a DDP instance,
+        and registering multiple fused optimizers for the same DDP model
+        is not currently supported. Please ping
+        https://github.com/pytorch/pytorch/issues/71595 if this is necessary
+        for your use case.
+
+    .. warning ::
+        _register_fused_optim and register_comm_hook currently do not
+        compose together, meaning that custom DDP communication hooks are
+        not supported with overlapped optimizers. Please ping
+        https://github.com/pytorch/pytorch/issues/71595 if this is necessary
+        for your use case.
+
+    .. warning ::
+        Gradient accumulation and DDP `no_sync` are currently not supported
+        with overlapped optimizer. Please ping
+        https://github.com/pytorch/pytorch/issues/71595 if this is necessary
+        for your use case.
+
+    Example::
+
+        >>> torch.distributed.init_process_group(backend='nccl', world_size=4, init_method='...')
+        >>> net = torch.nn.parallel.DistributedDataParallel(model, pg)
+        >>> lr = 1e-2
+        >>> betas = (0.9, 0.99)
+        >>> eps = 1e-6
+        >>> net._register_fused_optim(torch.optim.Adam, lr, betas=betas, eps=eps)
+        >>> # Example with subset of parameters
+        >>> params_to_opt = [list(net.parameters())[0]]
+        >>> net._register_fused_optim(
+            torch.optim.Adam, lr, optim_params=params_to_opt,  betas=betas, eps=eps
+        )
+        """
+        # Note: importing in function, otherwise this will cause a circular
+        # import as optimizer_overlap module needs to import DistributedDataParallel.
+        from torch.distributed.algorithms._optimizer_overlap import _as_overlapped_optim
+
+        overlapped_optim = _as_overlapped_optim(optim, optim_params, *args, **kwargs)
+        try:
+            overlapped_optim.register_ddp(self)
+        except NotImplementedError:
+            raise RuntimeError(
+                f"{optim} does not support overlapped DDP. Please file an issue to PyTorch or the respective owner of {optim}."
+            )
 
     def _distributed_broadcast_coalesced(
         self, tensors, buffer_size, authoritative_rank=0
@@ -1536,10 +1674,10 @@ class DistributedDataParallel(Module, Joinable):
                 or int(torch.version.cuda.split('.')[0]) < 11
                 or not dist.is_available()
                 or not dist.is_nccl_available()
-                or torch.cuda.nccl.version() < (2, 9, 7)
+                or torch.cuda.nccl.version() < (2, 10)
             )
         ):
-            self._log_and_throw(TypeError, "BF16 all reduce communication hook required CUDA 11+ and NCCL 2.9.7+.")
+            self._log_and_throw(TypeError, "BF16 all reduce communication hook required CUDA 11+ and NCCL 2.10+.")
 
     @property
     def _distributed_rank(self):
@@ -1579,7 +1717,7 @@ class DistributedDataParallel(Module, Joinable):
         constructor input parameters, some internal states of DistributedDataParallel
         and performance metrics. Simply print the dictorinary and see what
         these metrics are.
-        THis is a prototype interface and subject to change in the future.
+        This is a prototype interface and subject to change in the future.
         """
         ddp_logging_data = self.logger._get_ddp_logging_data()
         return {**ddp_logging_data.strs_map, **ddp_logging_data.ints_map}
@@ -1604,30 +1742,15 @@ class DistributedDataParallel(Module, Joinable):
 
     def _set_static_graph(self):
         """
-        Users can explicitly let DDP know the trained graph is static,
-        when 1) the set of used and unused parameters will not change
-        during the whole training loop; in this case, it does not matter
-        whether users set find_unsued_parameters = true or not.
-        2) how the graph is trained will not change during the whole training
-        loop (meaning there is no control flow depending on iterations).
-        When graph is set to be static, DDP will support cases that can not
-        be supported in the past: 1) reentrant backwards
-        2) activation checkpointing multiple times 3)
-        activation checkpointing with find_unused_parameters = true.
-        4) not all output tensors are used in loss calculation.
-        5) there is model parameter that is outside of forward function.
-        6) potentially improve performance when find_unsued_parameters = true
-        or there are unused parameters, as DDP will not search graph in each
-        iteraton to detect unused parameters when static_graph is set to be True.
-
-        This API should be called after DistributedDataParallel construction, and
-        before training loops starts. Also it should be called in the same way for
-        all ranks. For example:
-            ddp_model = DistributedDataParallel(model)
-            ddp_model._set_static_graph()
-            for i in range(n):
-                .....
+        It is recommended to set static graph in the DDP constructor, which will
+        call this private API internally.
         """
+        # If self.static_graph has been set, no need to set it again
+        if self.static_graph:
+            warnings.warn(
+                "You've set static_graph to be True, no need to set it again."
+            )
+            return
         self.static_graph = True
         self.reducer._set_static_graph()
         self.logger._set_static_graph()

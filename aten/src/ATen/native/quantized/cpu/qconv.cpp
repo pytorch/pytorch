@@ -95,7 +95,7 @@ at::SmallVector<int64_t, kSpatialDim + 2> MakeDeConvOutputShape(
   output_shape.resize(kSpatialDim + 2);
   output_shape[0] = N;  // Batch size
   output_shape[1] = M;  // Output channels
-  for (int64_t idx = 0; idx < kSpatialDim; ++idx) {
+  for (const auto idx : c10::irange(kSpatialDim)) {
     output_shape[idx + 2] = compute_deconv_shape(input_shape[idx],
                                                  kernel[idx],
                                                  stride[idx],
@@ -250,7 +250,7 @@ void PackedConvWeight<kSpatialDim>::GetQuantizationParams(
     const int M = w->outputChannels();
     output_multiplier_float->resize(M);
     act_times_w_scale->resize(M);
-    for (int i = 0; i < M; ++i) {
+    for (const auto i : c10::irange(M)) {
       act_times_w_scale->at(i) = (act_scale * w_scale[i]);
       output_multiplier_float->at(i) = act_times_w_scale->at(i) / out_scale;
     }
@@ -294,6 +294,13 @@ at::Tensor PackedConvWeight<kSpatialDim>::apply_impl(
                                             : "quantized::conv";
   TORCH_CHECK(
       fbgemm::fbgemmSupportedCPU(), "Your CPU does not support FBGEMM.");
+  TORCH_CHECK(act.scalar_type() == c10::kQUInt8,
+                func_name,
+                "(FBGEMM): Expected activation data type ",
+                toString(c10::kQUInt8),
+                " but got ",
+                toString(act.scalar_type()));
+
   ConvDimChecks<kSpatialDim>(
       act.ndimension(), stride().size(), padding().size(),
       output_padding().size(), dilation().size(), func_name, transpose());
@@ -435,6 +442,21 @@ at::Tensor PackedConvWeight<kSpatialDim>::apply_impl(
         padding(),
         output_padding(),
         dilation());
+
+    // if use direct convolution implementation, compute the col_offsets
+    // of the weight matrix at model initialization stage.
+    // We need to know the shape of output matrix
+    // to compute col_offsets for direct convolution.
+    // Hence it cannot be called from inside weight packing function
+    // like other quantized conv implementation
+    if (pack_w->getPackedWForDirectconv().get() &&
+        pack_w->getPackedWForDirectconv().get()->is_first_call()) {
+          pack_w->getPackedWForDirectconv().get()->col_offsets_with_zero_pt_s8acc32_DirectConvT(
+              conv_p,
+              w_zp.data(),
+              col_offsets,
+              M);
+    }
   } else {
     output_shape = MakeConvOutputShape<kSpatialDim>(N, M, conv_p.OUT_DIM);
   }
@@ -552,6 +574,16 @@ template at::Tensor PackedConvWeight<3>::apply_relu(
     double output_scale,
     int64_t output_zero_point);
 
+template at::Tensor PackedConvWeight<2>::apply_impl<false>(
+    const at::Tensor& act,
+    double output_scale,
+    int64_t output_zero_point);
+
+template at::Tensor PackedConvWeight<3>::apply_impl<false>(
+  const at::Tensor& act,
+  double output_scale,
+  int64_t output_zero_point);
+
 #endif // USE_FBGEMM
 
 #ifdef USE_PYTORCH_QNNPACK
@@ -586,6 +618,12 @@ at::Tensor PackedConvWeightsQnnp<kSpatialDim>::apply_impl(
               kSpatialDim == 2,
               func_name, kSpatialDim,
               "d (qnnpack): ConvTranspose cannot be fused with ReLU.");
+  TORCH_CHECK(act.scalar_type() == c10::kQUInt8,
+              func_name,
+              "(qnnpack): Expected activation data type ",
+              toString(c10::kQUInt8),
+              "but got ",
+              toString(act.scalar_type()));
   ConvDimChecks<kSpatialDim>(
       act.ndimension(), stride().size(), padding().size(),
       output_padding().size(), dilation().size(), func_name, transpose());
@@ -611,12 +649,12 @@ at::Tensor PackedConvWeightsQnnp<kSpatialDim>::apply_impl(
 
   auto output_min = kReluFused
       // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
-      ? activationLimits(output_scale, output_zero_point, Activation::RELU)
+      ? activationLimits<uint8_t>(output_scale, output_zero_point, Activation::RELU)
             .first
       : std::numeric_limits<uint8_t>::min();
   auto output_max = kReluFused
       // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
-      ? activationLimits(output_scale, output_zero_point, Activation::RELU)
+      ? activationLimits<uint8_t>(output_scale, output_zero_point, Activation::RELU)
             .second
       : std::numeric_limits<uint8_t>::max();
 
@@ -653,7 +691,7 @@ at::Tensor PackedConvWeightsQnnp<kSpatialDim>::apply_impl(
         c10::nullopt);
     auto* qnnp_w_data = qnnp_weight.template data_ptr<c10::quint8>();
     auto wt_numel = weight_contig.numel();
-    for (int i = 0; i < wt_numel; ++i) {
+    for (const auto i : c10::irange(wt_numel)) {
       qnnp_w_data[i] = static_cast<c10::quint8>(w_data[i] + 128);
     }
     at::Tensor qbias;
@@ -801,6 +839,16 @@ template at::Tensor PackedConvWeightsQnnp<3>::apply_relu(
     const at::Tensor& act,
     double output_scale,
     int64_t output_zero_point);
+
+template at::Tensor PackedConvWeightsQnnp<2>::apply_impl<false>(
+    const at::Tensor& act,
+    double output_scale,
+    int64_t output_zero_point);
+
+template at::Tensor PackedConvWeightsQnnp<3>::apply_impl<false>(
+  const at::Tensor& act,
+  double output_scale,
+  int64_t output_zero_point);
 
 #endif // USE_PYTORCH_QNNPACK
 

@@ -1,3 +1,5 @@
+# Owner(s): ["module: named tensor"]
+
 import unittest
 from torch.testing._internal.common_utils import TestCase, run_tests, TEST_NUMPY
 from torch.testing._internal.common_cuda import TEST_CUDA
@@ -1742,7 +1744,7 @@ class TestNamedTensor(TestCase):
         for device in get_all_device_types():
             self._test_name_inference(
                 Tensor.expand, device=device,
-                args=(create('D:1'), [3]), expected_names=('D'))
+                args=(create('D:1'), [3]), expected_names=('D',))
 
             self._test_name_inference(
                 Tensor.expand, device=device,

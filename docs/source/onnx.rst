@@ -183,6 +183,25 @@ Using the Tensor.data field can produce an incorrect trace and therefore an inco
 Use :func:`torch.Tensor.detach` instead. (Work is ongoing to
 `remove Tensor.data entirely <https://github.com/pytorch/pytorch/issues/30987>`_).
 
+Avoid in-place operations when using tensor.shape in tracing mode
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+In tracing mode, shape values obtained from tensor.shape are traced as tensors,
+and share the same memory. This might cause a mismatch in values of the final outputs.
+As a workaround, avoid use of inplace operations in these scenarios.
+For example, in the model::
+
+    class Model(torch.nn.Module):
+      def forward(self, states):
+          batch_size, seq_length = states.shape[:2]
+          real_seq_length = seq_length
+          real_seq_length += 2
+          return real_seq_length + seq_length
+
+``real_seq_length`` and ``seq_length`` share the same memory in tracing mode.
+This could be avoided by rewriting the inplace operation::
+
+    real_seq_length = real_seq_length + 2
 
 Limitations
 -----------
@@ -323,9 +342,12 @@ If the operator is an ATen operator (shows up in the TorchScript graph with the 
   Make sure the function has the same name as the ATen function, which may be declared in
   ``torch/_C/_VariableFunctions.pyi`` or ``torch/nn/functional.pyi`` (these files are generated at
   build time, so will not appear in your checkout until you build PyTorch).
-* The first arg is always the ONNX graph that is being built for export.
+* By default, the first arg is the ONNX graph.
   Other arg names must EXACTLY match the names in the ``.pyi`` file,
   because dispatch is done with keyword arguments.
+* A symbolic function that has a first arg (before the Graph object) with the
+  type annotation of torch.onnx.SymbolicContext will be called with that additional context.
+  See examples below.
 * In the symbolic function, if the operator is in the
   `ONNX standard operator set <https://github.com/onnx/onnx/blob/master/docs/Operators.md>`_,
   we only need to create a node to represent the ONNX operator in the graph.
@@ -402,8 +424,8 @@ PythonOp Symbolic
 
 Alternatively, you can register a custom symbolic function.
 This gives the symbolic function access to more info through the
-TorchScript ``Node`` object for the original operation, which gets passed in as the second
-argument (after the ``Graph`` object).
+``torch.onnx.SymbolicContext`` object, which gets passed in as the first
+argument (before the ``Graph`` object).
 
 All autograd ``Function``\ s appear in the TorchScript graph as ``prim::PythonOp`` nodes.
 In order to differentiate between different ``Function`` subclasses, the
@@ -430,7 +452,8 @@ The example below shows how you can access ``requires_grad`` via the ``Node`` ob
             ctx.save_for_backward(input)
             return input.clamp(min=0)
 
-    def symbolic_python_op(g: torch._C.Graph, n: torch._C.Node, *args, **kwargs):
+    def symbolic_python_op(ctx: torch.onnx.SymbolicContext, g: torch._C.Graph, *args, **kwargs):
+        n = ctx.cur_node
         print("original node: ", n)
         for i, out in enumerate(n.outputs()):
             print("original output {}: {}, requires grad: {}".format(i, out, out.requiresGrad()))
@@ -497,9 +520,26 @@ When exporting a custom operator, you can specify the custom domain version usin
 ``custom_opsets`` dictionary at export. If not specified, the custom opset version defaults to 1.
 The runtime that consumes the model needs to support the custom op. See
 `Caffe2 custom ops <https://caffe2.ai/docs/custom-operators.html>`_,
-`ONNX Runtime custom ops <https://github.com/microsoft/onnxruntime/blob/master/docs/AddingCustomOp.md>`_,
+`ONNX Runtime custom ops <https://onnxruntime.ai/docs/reference/operators/add-custom-op.html>`_,
 or your runtime of choice's documentation.
 
+
+Discovering all unconvertible ATen ops at once
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+When export fails due to an unconvertible ATen op, there may in fact be more
+than one such op but the error message only mentions the first. To discover
+all of the unconvertible ops in one go you can::
+
+    from torch.onnx import utils as onnx_utils
+
+    # prepare model, args, opset_version
+    ...
+
+    torch_script_graph, unconvertible_ops = onnx_utils.unconvertible_ops(
+        model, args, opset_version=opset_version)
+
+    print(set(unconvertible_ops))
 
 Frequently Asked Questions
 --------------------------
@@ -546,10 +586,25 @@ Q: Are lists of Tensors exportable to ONNX?
 
   Yes, for ``opset_version`` >= 11, since ONNX introduced the Sequence type in opset 11.
 
+
+Contributing / developing
+-------------------------
+`Developer docs <https://github.com/pytorch/pytorch/wiki/PyTorch-ONNX-exporter>`_.
+
 Functions
---------------------------
+---------
 .. autofunction:: export
 .. autofunction:: export_to_pretty_string
 .. autofunction:: register_custom_op_symbolic
 .. autofunction:: select_model_mode_for_export
 .. autofunction:: is_in_onnx_export
+
+Classes
+-------
+
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+    :template: classtemplate.rst
+
+    SymbolicContext

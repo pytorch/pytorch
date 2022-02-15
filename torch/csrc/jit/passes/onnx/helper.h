@@ -14,6 +14,8 @@ static const int OPSET_VERSION_10 = 10;
 static const int OPSET_VERSION_11 = 11;
 static const int OPSET_VERSION_12 = 12;
 static const int OPSET_VERSION_13 = 13;
+static const int OPSET_VERSION_14 = 14;
+static const int OPSET_VERSION_15 = 15;
 
 using ValueToParamPairMap = std::map<Value*, std::pair<std::string, IValue>>;
 
@@ -41,6 +43,8 @@ TORCH_API c10::optional<at::ScalarType> ONNXTypeToATenType(int32_t onnx_type);
 
 // Use int return type as no sable way exists to forward declare protobuf enum
 TORCH_API int ATenTypeToOnnxType(at::ScalarType at_type);
+
+TORCH_API void ONNXLintGraph(const std::shared_ptr<Graph>& graph);
 
 Node* createONNXUnsqueeze(
     Graph* graph,

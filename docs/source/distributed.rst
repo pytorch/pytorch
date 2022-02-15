@@ -37,7 +37,7 @@ MPI supports CUDA only if the implementation used to build PyTorch supports it.
 +----------------+-----+-----+-----+-----+-----+-----+
 | all_gather     | ✓   | ✘   | ✓   | ?   | ✘   | ✓   |
 +----------------+-----+-----+-----+-----+-----+-----+
-| gather         | ✓   | ✘   | ✓   | ?   | ✘   | ✘   |
+| gather         | ✓   | ✘   | ✓   | ?   | ✘   | ✓   |
 +----------------+-----+-----+-----+-----+-----+-----+
 | scatter        | ✓   | ✘   | ✓   | ?   | ✘   | ✘   |
 +----------------+-----+-----+-----+-----+-----+-----+
@@ -271,6 +271,7 @@ Once :func:`torch.distributed.init_process_group` was run, the following functio
 check whether the process group has already been initialized use :func:`torch.distributed.is_initialized`.
 
 .. autoclass:: Backend
+    :members:
 
 .. autofunction:: get_backend
 
@@ -449,25 +450,6 @@ Note that you can use ``torch.profiler`` (recommended, only available after 1.8.
 
 Please refer to the `profiler documentation <https://pytorch.org/docs/master/profiler.html>`__ for a full overview of profiler features.
 
-Autograd-enabled communication primitives
------------------------------------------
-
-If you want to use collective communication functions supporting autograd
-you can find an implementation of those in the `torch.distributed.nn.*` module.
-
-Functions here are synchronous and will be inserted in the autograd graph, so
-you need to ensure that all the processes that participated in the collective operation
-will do the backward pass for the backward communication to effectively happen and
-don't cause a deadlock.
-
-Please notice that currently the only backend where all the functions are guaranteed to work is ``gloo``.
-.. autofunction:: torch.distributed.nn.broadcast
-.. autofunction:: torch.distributed.nn.gather
-.. autofunction:: torch.distributed.nn.scatter
-.. autofunction:: torch.distributed.nn.reduce
-.. autofunction:: torch.distributed.nn.all_gather
-.. autofunction:: torch.distributed.nn.all_to_all
-.. autofunction:: torch.distributed.nn.all_reduce
 
 Multi-GPU collective functions
 ------------------------------
@@ -543,19 +525,21 @@ of 16
 Third-party backends
 --------------------
 
-Besides the GLOO/MPI/NCCL backends, PyTorch distributed supports third-party backends
-through a run-time register mechanism.
+Besides the builtin GLOO/MPI/NCCL backends, PyTorch distributed supports
+third-party backends through a run-time register mechanism.
 For references on how to develop a third-party backend through C++ Extension,
 please refer to `Tutorials - Custom C++ and CUDA Extensions <https://pytorch.org/
-tutorials/advanced/cpp_extension.html>`_ and `test/cpp_extensions/cpp_c10d_extension.cpp`.
-The capability of third-party backends are decided by their own implementations.
+tutorials/advanced/cpp_extension.html>`_ and
+``test/cpp_extensions/cpp_c10d_extension.cpp``. The capability of third-party
+backends are decided by their own implementations.
 
-The new backend derives from `c10d.ProcessGroup` and registers the backend name and the
-instantiating interface through :func:`torch.distributed.Backend.register_backend` when
-imported.
+The new backend derives from ``c10d::ProcessGroup`` and registers the backend
+name and the instantiating interface through :func:`torch.distributed.Backend.register_backend`
+when imported.
 
 When manually importing this backend and invoking :func:`torch.distributed.init_process_group`
-with the corresponding backend name, the `torch.distributed` package runs on the new backend.
+with the corresponding backend name, the ``torch.distributed`` package runs on
+the new backend.
 
 .. warning::
     The support of third-party backend is experimental and subject to change.

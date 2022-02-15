@@ -1,15 +1,15 @@
+import argparse
 import collections
 from pprint import pformat
-
-import argparse
 
 from tools.codegen.model import Variant
 from tools.codegen.api.python import (PythonSignatureGroup,
                                       PythonSignatureNativeFunctionPair)
-from tools.codegen.gen import FileManager, parse_native_yaml
+from tools.codegen.gen import parse_native_yaml
+from tools.codegen.utils import FileManager
 from typing import Sequence, List, Dict
 
-from ..autograd.gen_python_functions import should_generate_py_binding, load_signatures, group_overloads
+from tools.autograd.gen_python_functions import should_generate_py_binding, load_signatures, group_overloads
 
 """
 This module implements generation of type stubs for PyTorch,
@@ -95,7 +95,6 @@ blocklist = [
     'norm',
     'chain_matmul',
     'stft',
-    'istft',
     'tensordot',
     'split',
     'unique_consecutive',
@@ -282,6 +281,9 @@ def gen_pyi(native_yaml_path: str, deprecated_yaml_path: str, fm: FileManager) -
     unsorted_function_hints.update({
         'set_flush_denormal': ['def set_flush_denormal(mode: _bool) -> _bool: ...'],
         'get_default_dtype': ['def get_default_dtype() -> _dtype: ...'],
+        'asarray': ['def asarray(obj: Any, *, dtype: Optional[_dtype]=None, '
+                    'device: Union[_device, str, None]=None, copy: Optional[_bool]=None, '
+                    'requires_grad: _bool=False) -> Tensor: ...'],
         'from_numpy': ['def from_numpy(ndarray) -> Tensor: ...'],
         'frombuffer': ['def frombuffer(buffer: Any, *, dtype: _dtype, count: int=-1, '
                        'offset: int=0, device: Union[_device, str, None]=None, '

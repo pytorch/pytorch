@@ -5,6 +5,7 @@
 #include <ATen/TensorUtils.h>
 #include <ATen/native/cpu/utils.h>
 #include <ATen/native/Resize.h>
+#include <c10/util/irange.h>
 
 namespace at {
 namespace native {
@@ -109,9 +110,9 @@ static void nll_loss2d_forward_out_frame(
     auto target_acc = target.accessor<int64_t, 3>();
 
     at::parallel_for(0, batch_size, 0, [&](int64_t start, int64_t end) {
-      for (int64_t b = start; b < end; b++) {
-        for (int64_t h = 0; h < H; h++) {
-          for (int64_t w = 0; w < W; w++) {
+      for (const auto b : c10::irange(start, end)) {
+        for (const auto h : c10::irange(H)) {
+          for (const auto w : c10::irange(W)) {
             const int64_t cur_target = (int64_t)target_acc[b][h][w];
 
             if (cur_target == ignore_index) {
@@ -176,8 +177,8 @@ static void nll_loss2d_forward_out_frame(
   const int64_t level_mask = level_step - 1;
 
   int64_t num_ignored = 0;
-  for (int64_t b = 0; b < batch_size; b++) {
-    for (int64_t elem = 0; elem < map_size; elem++) {
+  for (const auto b : c10::irange(batch_size)) {
+    for (const auto elem : c10::irange(map_size)) {
       const int64_t cur_target = target_data[b * map_size + elem];
       if (cur_target == ignore_index) {
         ++num_ignored;
@@ -286,9 +287,9 @@ static void nll_loss2d_backward_out_frame(
     auto target_acc = target.accessor<int64_t, 3>();
 
     at::parallel_for(0, batch_size, 0, [&](int64_t start, int64_t end) {
-      for (int64_t b = start; b < end; b++) {
-        for (int64_t h = 0; h < H; h++) {
-          for (int64_t w = 0; w < W; w++) {
+      for (const auto b : c10::irange(start, end)) {
+        for (const auto h : c10::irange(H)) {
+          for (const auto w : c10::irange(W)) {
             const int64_t cur_target = target_acc[b][h][w];
             if (cur_target == ignore_index) {
               continue;
@@ -329,8 +330,8 @@ static void nll_loss2d_backward_out_frame(
                                                    : grad_output_value);
 
   at::parallel_for(0, batch_size, 0, [&](int64_t start, int64_t end) {
-    for (int64_t b = start; b < end; b++) {
-      for (int64_t elem = 0; elem < map_size; elem++) {
+    for (const auto b : c10::irange(start, end)) {
+      for (const auto elem : c10::irange(map_size)) {
         const int64_t t = target_data[b * map_size + elem];
 
         if (t != ignore_index) {

@@ -1,6 +1,8 @@
 #include <ATen/core/Tensor.h>
 #include <ATen/core/Formatting.h>
 #include <ATen/core/VariableHooksInterface.h>
+#include <ATen/core/LegacyTypeDispatch.h>
+#include <ATen/FunctionalTensorWrapper.h>
 
 #include <iostream>
 
@@ -42,7 +44,7 @@ void TensorBase::enforce_invariants() {
         !impl_->is_sparse(),
         "Sparse Tensors are supported by Tensor, but invariant checking isn't implemented.  Please file a bug.");
     TORCH_INTERNAL_ASSERT(
-        impl_->storage_initialized(),
+        !impl_->has_storage() || impl_->is_meta() || impl_->storage_initialized(),
         "Partially-initialized tensor not supported by Tensor");
   }
 }
@@ -113,7 +115,7 @@ const TensorBase& TensorBase::requires_grad_(bool _requires_grad) const {
   return *this;
 }
 
-// View Variables
+// View Methods
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 bool TensorBase::is_view() const {
