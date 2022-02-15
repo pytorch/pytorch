@@ -973,10 +973,17 @@ TEST_F(FunctionalTest, GLU) {
 }
 
 TEST_F(FunctionalTest, GELU) {
-  GELU model;
   const auto x = torch::linspace(-3.0, 3.0, 100);
   const auto y_exp = x * 0.5 * (1.0 + torch::erf(x / std::sqrt(2.0)));
-  const auto y = F::gelu(x);
+  const auto y = F::gelu(x, F::GELUFuncOptions().approximate("none"));
+  ASSERT_TRUE(torch::allclose(y, y_exp, 1.4e-06, 1e-05));
+}
+
+TEST_F(FunctionalTest, TanhGELU) {
+  const auto x = torch::linspace(-3.0, 3.0, 100);
+  const auto inner = std::sqrt(2 / M_PI) * (x + 0.044715 * x.pow(3.0));
+  const auto y_exp = 0.5 * x * (1.0 + inner.tanh());
+  const auto y = F::gelu(x, F::GELUFuncOptions().approximate("tanh"));
   ASSERT_TRUE(torch::allclose(y, y_exp, 1.4e-06, 1e-05));
 }
 
@@ -2622,35 +2629,31 @@ TEST_F(FunctionalTest, Dropout) {
 }
 
 TEST_F(FunctionalTest, Dropout2d) {
-  auto input = torch::randn({50, 100});
+  auto input = torch::randn({2, 2, 50, 100});
   auto input_mean = input.mean();
   auto input_std = input.std();
 
   for (const auto rate : {0.2, 0.5, 0.8}) {
     auto output = F::dropout2d(input, F::Dropout2dFuncOptions().p(rate));
     ASSERT_TRUE(torch::allclose(input_mean, output.mean(), 0.01, 0.05));
-    ASSERT_TRUE((input_std <= output.std()).all().item<bool>());
   }
   auto output = F::dropout2d(input);
   ASSERT_TRUE(torch::allclose(input_mean, output.mean(), 0.01, 0.05));
-  ASSERT_TRUE((input_std <= output.std()).all().item<bool>());
-  ASSERT_TRUE(F::dropout2d(torch::randn({50, 100})).defined());
+  ASSERT_TRUE(F::dropout2d(torch::randn({2, 50, 100})).defined());
 }
 
 TEST_F(FunctionalTest, Dropout3d) {
-  auto input = torch::randn({50, 10, 10});
+  auto input = torch::randn({2, 2, 50, 10, 10});
   auto input_mean = input.mean();
   auto input_std = input.std();
 
   for (const auto rate : {0.2, 0.5, 0.8}) {
     auto output = F::dropout3d(input, F::Dropout3dFuncOptions().p(rate));
     ASSERT_TRUE(torch::allclose(input_mean, output.mean(), 0.01, 0.05));
-    ASSERT_TRUE((input_std <= output.std()).all().item<bool>());
   }
   auto output = F::dropout3d(input);
   ASSERT_TRUE(torch::allclose(input_mean, output.mean(), 0.01, 0.05));
-  ASSERT_TRUE((input_std <= output.std()).all().item<bool>());
-  ASSERT_TRUE(F::dropout3d(torch::randn({50, 100})).defined());
+  ASSERT_TRUE(F::dropout3d(torch::randn({2, 50, 10, 10})).defined());
 }
 
 template<c10::ScalarType S, typename T>

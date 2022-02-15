@@ -80,7 +80,8 @@ TORCH_PRECOMPUTE_META_FUNC(fractional_max_pool3d)(
     set_output(1, {numBatch, numPlanes, outputT, outputH, outputW}, input_.options().dtype(kLong));
   }
 
-  return TORCH_PRECOMPUTE_STRUCT(fractional_max_pool3d)().set_poolSizeT(poolSizeT).set_poolSizeH(poolSizeH).set_poolSizeW(poolSizeW)
+  return TORCH_PRECOMPUTE_STRUCT(fractional_max_pool3d)().set_numBatch(numBatch).set_numPlanes(numPlanes).set_inputT(inputT).set_inputH(inputH).set_inputW(inputW)
+                                                         .set_poolSizeT(poolSizeT).set_poolSizeH(poolSizeH).set_poolSizeW(poolSizeW)
                                                          .set_outputT(outputT).set_outputH(outputH).set_outputW(outputW);
 }
 
@@ -230,29 +231,13 @@ TORCH_IMPL_FUNC(fractional_max_pool3d_out_cpu)(
   int64_t outputH,
   int64_t outputW,
   const at::Tensor& randomSamples,
+  int64_t numBatch,
+  int64_t numPlanes,
+  int64_t inputT,
+  int64_t inputH,
+  int64_t inputW,
   const at::Tensor& output,
   const at::Tensor& indices) {
-
-  int64_t numBatch = 1;
-  int64_t planeDim = 0;
-  int64_t timeDim = 1;
-  int64_t heightDim = 2;
-  int64_t widthDim = 3;
-
-  int64_t ndims = input_.ndimension();
-  if (ndims == 5) {
-    numBatch = input_.size(0);
-    planeDim++;
-    timeDim++;
-    heightDim++;
-    widthDim++;
-  }
-
-  /* sizes */
-  int64_t numPlanes = input_.size(planeDim);
-  int64_t inputT = input_.size(timeDim);
-  int64_t inputH = input_.size(heightDim);
-  int64_t inputW = input_.size(widthDim);
 
   /* get contiguous input */
   auto input = input_.contiguous();

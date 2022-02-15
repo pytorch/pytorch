@@ -48,6 +48,7 @@
 #include <torch/csrc/jit/passes/onnx.h>
 #include <torch/csrc/jit/passes/onnx/cast_all_constant_to_floating.h>
 #include <torch/csrc/jit/passes/onnx/constant_fold.h>
+#include <torch/csrc/jit/passes/onnx/deduplicate_initializers.h>
 #include <torch/csrc/jit/passes/onnx/eliminate_unused_items.h>
 #include <torch/csrc/jit/passes/onnx/eval_peephole.h>
 #include <torch/csrc/jit/passes/onnx/fixup_onnx_controlflow.h>
@@ -117,6 +118,7 @@
 #include <pybind11/iostream.h>
 #include <pybind11/operators.h>
 
+#include <torch/csrc/jit/runtime/profiling_graph_executor_impl.h>
 #include <memory>
 #include <sstream>
 #include <stdexcept>
@@ -219,6 +221,15 @@ void initJITBindings(PyObject* module) {
             return PeepholeOptimizeONNX(graph, opset_version, fixed_batch_size);
           })
       .def("_jit_pass_onnx_preprocess", PreprocessForONNX)
+      .def(
+          "_jit_pass_onnx_deduplicate_initializers",
+          [](std::shared_ptr<Graph>& graph,
+             std::map<std::string, IValue> params_dict,
+             bool is_train) {
+            DeduplicateInitializers(graph, params_dict, is_train);
+            return params_dict;
+          },
+          pybind11::return_value_policy::move)
       .def(
           "_jit_pass_onnx_eval_peephole",
           [](std::shared_ptr<Graph>& graph,
@@ -752,9 +763,40 @@ void initJITBindings(PyObject* module) {
       .def(
           "_jit_set_bailout_depth",
           [](size_t depth) {
+            TORCH_WARN(
+                "Use _jit_set_fusion_strategy, bailout depth is deprecated. Setting to (STATIC, ",
+                depth,
+                ")");
             size_t old_depth = getBailoutDepth();
-            getBailoutDepth() = depth;
+            FusionStrategy strat = {{FusionBehavior::STATIC, depth}};
+            setFusionStrategy(strat);
             return old_depth;
+          })
+      .def(
+          "_jit_set_fusion_strategy",
+          [](std::vector<std::pair<std::string, size_t>> strategy) {
+            FusionStrategy vec_conv;
+            for (const auto& pair : strategy) {
+              if (pair.first == "STATIC") {
+                vec_conv.emplace_back(FusionBehavior::STATIC, pair.second);
+              } else if (pair.first == "DYNAMIC") {
+                vec_conv.emplace_back(FusionBehavior::DYNAMIC, pair.second);
+              } else {
+                TORCH_INTERNAL_ASSERT(
+                    "FusionBehavior only supported 'STATIC' or 'DYNAMIC', got: ",
+                    pair.first);
+              }
+            }
+            auto old_strategy = getFusionStrategy();
+            auto strat =
+                fmap(old_strategy, [](std::pair<FusionBehavior, size_t> behav) {
+                  return std::pair<std::string, size_t>(
+                      behav.first == FusionBehavior::STATIC ? "STATIC"
+                                                            : "DYNAMIC",
+                      behav.second);
+                });
+            setFusionStrategy(vec_conv);
+            return strat;
           })
       .def(
           "_jit_set_inline_everything_mode",

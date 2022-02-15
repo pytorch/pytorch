@@ -4,8 +4,12 @@
 name: periodic-linux-xenial-cuda11.1-py3.7-gcc7-debug
 
 on:
-  pull_request:
-    types: [opened, synchronize, reopened, unassigned]
+  push:
+    tags:
+      - 'ciflow/all/*'
+      - 'ciflow/cuda/*'
+      - 'ciflow/linux/*'
+      - 'ciflow/scheduled/*'
   schedule:
     - cron: 45 0,4,8,12,16,20 * * *
   workflow_dispatch:
@@ -39,16 +43,8 @@ jobs:
   build:
     runs-on: linux.2xlarge
     timeout-minutes: 240
-    if: ${{ (github.repository == 'pytorch/pytorch') && (
-            (github.event_name == 'push') ||
-            (github.event_name == 'schedule') ||
-            (contains(github.event.pull_request.labels.*.name, 'ciflow/all') || contains(github.event.pull_request.labels.*.name, 'ciflow/cuda') || contains(github.event.pull_request.labels.*.name, 'ciflow/linux') || contains(github.event.pull_request.labels.*.name, 'ciflow/scheduled')) ||
-            (false))
-         }}
     env:
       JOB_BASE_NAME: periodic-linux-xenial-cuda11.1-py3.7-gcc7-debug-build
-      IS_PROBOT_TRIGGER_EVENT: ${{ (github.event.action == 'unassigned') && (github.event.assigneed.login == 'pytorchbot') }}
-      LABEL_CONDITIONS: ${{ contains(github.event.pull_request.labels.*.name, 'ciflow/all') || contains(github.event.pull_request.labels.*.name, 'ciflow/cuda') || contains(github.event.pull_request.labels.*.name, 'ciflow/linux') || contains(github.event.pull_request.labels.*.name, 'ciflow/scheduled') }}
     outputs:
       docker_image: ${{ steps.calculate-tag.outputs.docker_image }}
     steps:
@@ -73,7 +69,10 @@ jobs:
           AWS_MAX_ATTEMPTS: 5
         run: |
           AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
-          aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
+          retry () {
+              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
+          }
+          retry aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
               --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
       - name: Chown workspace
         run: |
@@ -258,7 +257,6 @@ jobs:
       TEST_RUNNER_TYPE: linux.4xlarge.nvidia.gpu
       ENABLE_DISTRIBUTED_TEST: 1
       ENABLE_JIT_LEGACY_TEST: ''
-      ENABLE_FX2TRT_TEST: ''
       ENABLE_MULTIGPU_TEST: ''
       ENABLE_NOGPU_NO_AVX_TEST: ''
       ENABLE_NOGPU_NO_AVX2_TEST: ''
@@ -321,7 +319,10 @@ jobs:
           AWS_MAX_ATTEMPTS: 5
         run: |
           AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
-          aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
+          retry () {
+              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
+          }
+          retry aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
               --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
       - name: Chown workspace
         run: |

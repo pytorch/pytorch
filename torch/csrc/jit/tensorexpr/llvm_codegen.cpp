@@ -631,14 +631,14 @@ void LLVMCodeGenImpl::emitKernel(
 
   optimize(*module_);
 
-  asmBuffer.set_size(0);
+  asmBuffer.clear();
   module_->print(asmStream, nullptr);
   llvmCode_ = asmStream.str().str();
   GRAPH_DEBUG(
       "\nLLVM module after optimizations\n\n", asmStream.str().str(), "\n");
 
   // print graph debug info after optimization
-  asmBuffer.set_size(0);
+  asmBuffer.clear();
   llvm::legacy::PassManager PM;
   jit_->getTargetMachine().addPassesToEmitFile(
       PM,
