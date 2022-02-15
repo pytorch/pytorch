@@ -72,6 +72,7 @@ class TestShardedTensorOpsLinear(ShardedTensorTestBase):
             _reshard_output(sharded_linear, reshard_spec)
         )
         sharded_output = sharded_linear(inp)
+        torch.cuda.synchronize()
 
         # Run local computation
         local_output = local_linear(inp)

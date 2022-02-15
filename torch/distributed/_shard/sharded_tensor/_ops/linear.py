@@ -200,6 +200,7 @@ def _handle_col_wise_sharding(input, world_size, weight, rank, local_shard_t, bi
     """
     # allgather the inputs first.
     gathered_inputs = all_gather(input, group=pg)
+    torch.cuda.synchronize()
     (start_pos, chunk_size) = get_chunk_sharding_params(
         bias.size(0), world_size, weight._sharding_spec, rank
     )
