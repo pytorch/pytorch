@@ -1,4 +1,5 @@
 import torch._C as _C
+from typing import Dict, Optional
 
 TensorProtoDataType = _C._onnx.TensorProtoDataType
 OperatorExportTypes = _C._onnx.OperatorExportTypes
@@ -24,6 +25,23 @@ class CheckerError(Exception):
 
     pass
 
+
+class SymbolicContext:
+    r"""Provides extra context for symbolic functions.
+
+    Args:
+        params_dict (Dict[str, _C.IValue]): Mapping from graph initializer name to IValue.
+        env (Dict[_C.Value, _C.Value]): Mapping from Torch domain graph Value to ONNX domain graph Value.
+        cur_node (_C.Node): Current node being converted to ONNX domain.
+        onnx_block (_C.Block): Current ONNX block that converted nodes are being appended to.
+    """
+    def __init__(self, params_dict, env, cur_node, onnx_block):
+        self.params_dict: Dict[str, _C.IValue] = params_dict
+        self.env: Dict[_C.Value, _C.Value] = env
+        # Current node that is being converted.
+        self.cur_node: _C.Node = cur_node
+        # Current onnx block that converted nodes are being appended to.
+        self.onnx_block: _C.Block = onnx_block
 
 def _export(*args, **kwargs):
     from torch.onnx import utils
