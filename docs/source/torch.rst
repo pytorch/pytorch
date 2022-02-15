@@ -118,7 +118,6 @@ Indexing, Slicing, Joining, Mutating Ops
     select_scatter
     slice_scatter
     scatter_add
-    scatter_reduce
     split
     squeeze
     stack
