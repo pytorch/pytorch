@@ -27,6 +27,7 @@ def no_dispatch() -> Iterator[None]:
 #    can require gradients if the user asks for it as a constructor kwarg.
 #  - The wrapped Tensor can require gradients. In that case autograd will be tracked
 #    for the wrapped Tensor and the LoggingTensor itself cannot require gradients.
+#    Note that this second one is not possible today as dispatcher exclude keys are not properly reset
 # WARNING: We allow these two possibilities for testing purposes. You should NEVER use both in a single
 # test or you might get surprising behavior.
 
