@@ -7,7 +7,7 @@ future.
 from functools import partial
 from torch import optim
 
-from .adam import Adam
+Adam = partial(optim.Adam, foreach=True)
 from .adamw import AdamW
 NAdam = partial(optim.NAdam, foreach=True)
 from .sgd import SGD
@@ -19,7 +19,6 @@ Adamax = partial(optim.Adamax, foreach=True)
 Adadelta = partial(optim.Adadelta, foreach=True)
 Adagrad = partial(optim.Adagrad, foreach=True)
 
-del adam
 del adamw
 del sgd
 del rmsprop
