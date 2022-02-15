@@ -1,7 +1,7 @@
 from functools import partial
 from torch import optim
 
-from .adam import Adam as Adam
+Adam = partial(optim.Adam, foreach=True)
 from .adamw import AdamW as AdamW
 NAdam = partial(optim.NAdam, foreach=True)
 from .sgd import SGD as SGD
