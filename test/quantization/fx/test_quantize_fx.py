@@ -5783,8 +5783,9 @@ class TestQuantizeFxModels(QuantizationTestCase):
         prepared = prepare_fx_fn(model, qconfig_dict)
 
         if mode == 'ddp':
+            criterion = nn.CrossEntropyLoss()
             mp.spawn(run_ddp,
-                     args=(world_size, prepared),
+                     args=(world_size, prepared, criterion, [(input_value, output_value)]),
                      nprocs=world_size,
                      join=True)
         elif mode == 'qat':
@@ -5830,7 +5831,7 @@ class TestQuantizeFxModels(QuantizationTestCase):
             # calibration
             if mode == 'ddp':
                 mp.spawn(run_ddp,
-                         args=(world_size, qeager),
+                         args=(world_size, qeager, criterion, [(input_value, output_value)]),
                          nprocs=world_size,
                          join=True)
             elif mode == 'qat':
@@ -5991,7 +5992,6 @@ class TestQuantizeFxModels(QuantizationTestCase):
 
     @skip_if_no_torchvision
     @skipIfNoFBGEMM
-    @unittest.skip("TODO: Test is always failing - https://github.com/pytorch/pytorch/issues/54979")
     def test_resnet18_ddp(self):
         from torchvision import models
         from torchvision.models import quantization as quantized_models

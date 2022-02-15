@@ -192,7 +192,7 @@ def ddp_setup(rank, world_size):
 def ddp_cleanup():
     dist.destroy_process_group()
 
-def run_ddp(rank, world_size, prepared):
+def run_ddp(rank, world_size, prepared, criterion, dataset):
     ddp_setup(rank, world_size)
     prepared.cuda()
     prepared = torch.nn.parallel.DistributedDataParallel(prepared, device_ids=[rank])

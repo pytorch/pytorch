@@ -329,7 +329,7 @@ class NativeFunction:
         assert isinstance(structured, bool), f'not a bool: {structured}'
 
         structured_delegate_s = e.pop('structured_delegate', None)
-        assert structured_delegate_s is None or isinstance(structured_delegate_s, str), f'not a str: {structured_delegate}'
+        assert structured_delegate_s is None or isinstance(structured_delegate_s, str), f'not a str: {structured_delegate_s}'
         structured_delegate: Optional[OperatorName] = None
         if structured_delegate_s is not None:
             structured_delegate = OperatorName.parse(structured_delegate_s)
