@@ -117,7 +117,7 @@ void uniform_kernel(TensorIteratorBase& iter, double from, double to, c10::optio
   templates::cpu::uniform_kernel(iter, from, to, generator);
 }
 
-void normal_kernel(Tensor& self, double mean, double std, c10::optional<Generator> gen) {
+void normal_kernel(const TensorBase &self, double mean, double std, c10::optional<Generator> gen) {
   CPUGeneratorImpl* generator = get_generator_or_default<CPUGeneratorImpl>(gen, detail::getDefaultCPUGenerator());
   templates::cpu::normal_kernel(self, mean, std, generator);
 }
