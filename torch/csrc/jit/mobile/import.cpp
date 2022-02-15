@@ -3,18 +3,22 @@
 #include <torch/csrc/jit/mobile/parse_operators.h>
 
 #include <ATen/core/ivalue.h>
+#include <ATen/core/qualified_name.h>
+#include <c10/util/Exception.h>
 #include <c10/util/ScopeExit.h>
 #include <c10/util/irange.h>
 #include <caffe2/serialize/inline_container.h>
+#include <caffe2/serialize/versions.h>
 #include <torch/csrc/jit/api/compilation_unit.h>
 #include <torch/csrc/jit/mobile/interpreter.h>
 #include <torch/csrc/jit/mobile/observer.h>
+#include <torch/csrc/jit/mobile/type_parser.h>
+#include <torch/csrc/jit/mobile/upgrader_mobile.h>
 #include <torch/csrc/jit/runtime/instruction.h>
 #include <torch/csrc/jit/serialization/import_export_constants.h>
 #include <torch/csrc/jit/serialization/import_export_functions.h>
 #include <torch/csrc/jit/serialization/import_read.h>
 #include <torch/custom_class.h>
-
 #include <exception>
 #include <fstream>
 #include <string>
@@ -74,11 +78,6 @@
 // Note that the following function-schema fields are not supported:
 //  - Argument::{known_length_,kwarg_only_}
 //  - FunctionSchema::{overload_name_, is_vararg_, is_varret_}
-
-namespace c10 {
-// std::string serializeType(const Type &t);
-TypePtr parseType(const std::string& pythonStr);
-} // namespace c10
 
 namespace torch {
 namespace jit {
@@ -171,6 +170,19 @@ bool isTensorInBytecodeArchive(
 
 namespace {
 
+void tryRegisterMethod(const std::vector<c10::Argument>& args, Function& func) {
+  if (args.empty() || args[0].name() != "self") {
+    return;
+  }
+
+  if (auto cls = args[0].type()->castRaw<ClassType>()) {
+    if (C10_UNLIKELY(cls->findMethod(func.name()))) {
+      return;
+    }
+    cls->addMethod(&func);
+  }
+}
+
 // The deserializer class which loads the bytecode package from bc files.
 class BytecodeDeserializer final {
  public:
@@ -187,9 +199,10 @@ class BytecodeDeserializer final {
 
  private:
   TypePtr resolveTypeName(const c10::QualifiedName& qn);
+  void init_upgrader(mobile::Function* function);
   void parseMethods(
-      std::vector<IValue>&& vals,
-      c10::optional<std::vector<IValue>>&& debug_handles,
+      c10::ivalue::TupleElements&& vals,
+      c10::optional<c10::ivalue::TupleElements>&& debug_handles,
       mobile::CompilationUnit& mcu);
   c10::IValue readArchive(
       const std::string& archive_name,
@@ -204,6 +217,11 @@ class BytecodeDeserializer final {
   std::unique_ptr<PyTorchStreamReader> reader_{};
   c10::optional<at::Device> device_;
   uint64_t module_load_options_;
+  // From `version` or `.data/version` in model.ptl and it's compute
+  // dynamically. It's used for finding the minimum required runtime to run all
+  // operators from the given model. If it's less than the current runtime,
+  // upgrader will be applied at loading stage.
+  uint64_t operator_version_;
 };
 
 BytecodeDeserializer::BytecodeDeserializer(
@@ -227,7 +245,8 @@ void BytecodeDeserializer::parseFunctionSchema(
     mobile::Function* function) {
   // function schema
   if (schemaTable) { // (schema is optional for back compat)
-    auto parseArgList = [this](std::vector<IValue>&& argTables) {
+    auto parseArgList = [this,
+                         function](c10::ivalue::TupleElements&& argTables) {
       std::vector<c10::Argument> args;
       for (auto&& argTable : std::move(argTables)) {
         auto argTableElements =
@@ -249,18 +268,18 @@ void BytecodeDeserializer::parseFunctionSchema(
             c10::nullopt /*N*/,
             std::move(default_value));
       }
+      tryRegisterMethod(args, *function);
       return args;
     };
     auto schemaTableElements =
         std::move(*std::move(*schemaTable).toTuple()).elements();
-    std::vector<IValue> arg_list =
-        std::move(*expect_field(
-                       schemaTableElements,
-                       "arguments",
-                       BYTECODE_INDEX_SCHEMA_ARGUMENTS)
-                       .toTuple())
-            .elements();
-    std::vector<IValue> ret_list =
+    auto arg_list = std::move(*expect_field(
+                                   schemaTableElements,
+                                   "arguments",
+                                   BYTECODE_INDEX_SCHEMA_ARGUMENTS)
+                                   .toTuple())
+                        .elements();
+    auto ret_list =
         std::move(
             *expect_field(
                  schemaTableElements, "returns", BYTECODE_INDEX_SCHEMA_RETURNS)
@@ -277,9 +296,15 @@ void BytecodeDeserializer::parseFunctionSchema(
   }
 }
 
+void BytecodeDeserializer::init_upgrader(mobile::Function* function) {
+  for (auto& byteCodeFunctionWithOperator : getUpgraderBytecodeList()) {
+    function->append_function(byteCodeFunctionWithOperator.function);
+  }
+}
+
 void BytecodeDeserializer::parseMethods(
-    std::vector<IValue>&& vals,
-    c10::optional<std::vector<IValue>>&& debug_handles,
+    c10::ivalue::TupleElements&& vals,
+    c10::optional<c10::ivalue::TupleElements>&& debug_handles,
     mobile::CompilationUnit& mcu) {
   TORCH_CHECK(vals.size() > 0, "Bytecode has no elements. ");
   // Initialized with the version number when kProducedBytecodeVersion was
@@ -324,23 +349,23 @@ void BytecodeDeserializer::parseMethods(
     auto function =
         std::make_unique<mobile::Function>(c10::QualifiedName(function_name));
 
-    std::vector<IValue> ins_list =
+    auto ins_list =
         std::move(
             *expect_field(
                  codeTableElements, "instructions", BYTECODE_INDEX_INSTRUCTION)
                  .toTuple())
             .elements();
-    std::vector<IValue> ops_list =
+    auto ops_list =
         std::move(*expect_field(
                        codeTableElements, "operators", BYTECODE_INDEX_OPERATOR)
                        .toTuple())
             .elements();
-    std::vector<IValue> consts_list =
+    auto consts_list =
         std::move(*expect_field(
                        codeTableElements, "constants", BYTECODE_INDEX_CONSTANT)
                        .toTuple())
             .elements();
-    std::vector<IValue> types_list =
+    auto types_list =
         std::move(*expect_field(codeTableElements, "types", BYTECODE_INDEX_TYPE)
                        .toTuple())
             .elements();
@@ -349,17 +374,35 @@ void BytecodeDeserializer::parseMethods(
             codeTableElements, "register_size", BYTECODE_INDEX_REGISTER_SIZE)
             .toInt();
 
-    std::vector<IValue> debug_handles_m_tuple;
+    c10::ivalue::TupleElements debug_handles_m_tuple;
     if (debug_handles) {
       debug_handles_m_tuple =
           std::move(*std::move((*debug_handles)[i]).toTuple()).elements();
     }
+    init_upgrader(function.get());
+    // 1. First pass all operators from models
+    parseOperators(
+        std::move(ops_list),
+        model_version,
+        module_load_options_,
+        function.get());
+
+    // 2. Decides if upgrader is needed
+    bool use_upgrader =
+        (operator_version_ < caffe2::serialize::kProducedFileFormatVersion);
 
     parseInstructions(
-        function_name, ins_list, debug_handles_m_tuple, function.get());
+        function_name,
+        std::move(ins_list),
+        debug_handles_m_tuple,
+        function.get());
 
-    parseOperators(
-        ops_list, model_version, module_load_options_, function.get());
+    // 3. If upgrader is needed, change change the OP instrunction to CALL
+    // instruction (In next PR, use_upgrader will be parsed to parseInstruction
+    // function and do the actual change)
+    if (use_upgrader) {
+      applyUpgrader(function.get(), operator_version_);
+    }
 
     parseConstants(consts_list, function.get());
 
@@ -413,7 +456,7 @@ mobile::Module BytecodeDeserializer::deserialize(
   //
   auto bvals = std::move(*readArchive("bytecode", mcu).toTuple()).elements();
 
-  c10::optional<std::vector<IValue>> debug_handles;
+  c10::optional<c10::ivalue::TupleElements> debug_handles;
   bool has_debug_handles{false};
   if (reader_->hasRecord("mobile_debug_handles.pkl")) {
     debug_handles =
@@ -421,6 +464,7 @@ mobile::Module BytecodeDeserializer::deserialize(
             .elements();
     has_debug_handles = true;
   }
+  operator_version_ = reader_->version();
   parseMethods(std::move(bvals), std::move(debug_handles), *mcu);
   auto m = mobile::Module(readArchive("data", mcu).toObject(), mcu);
   m.setHasDebugHandles(has_debug_handles);
@@ -454,7 +498,8 @@ c10::IValue BytecodeDeserializer::readArchive(
       type_resolver,
       obj_loader,
       device_,
-      *reader_.get());
+      *reader_.get(),
+      nullptr);
   return ivalues;
 }
 
@@ -607,12 +652,12 @@ std::set<std::string> _export_operator_list(
   std::set<std::string> operator_list;
   for (Method func : module.get_methods()) {
     const Function& function = func.function();
-    const std::shared_ptr<Code> cptr = function.get_code();
+    const auto& code = function.get_code();
     // op_names below isn't a list of unique operator names. In fact
     // it can contain the same operator name many many times, so we need
     // to de-dup the list by adding all the operator names into
     // an std::set<std::string>.
-    std::vector<c10::OperatorName> const& op_names = cptr->op_names_;
+    std::vector<c10::OperatorName> const& op_names = code.op_names_;
     for (auto& op_name : op_names) {
       operator_list.insert(toString(op_name));
     }

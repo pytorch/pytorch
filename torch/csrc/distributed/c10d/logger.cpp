@@ -21,7 +21,7 @@ std::ostream& operator<<(std::ostream& output, const Logger& logger) {
   auto& ddp_logging_data = (*logger.ddp_logging_data_);
 
   std::string loggerInfo = fmt::format(
-      "[Rank {} / {}] [iteration {}] Training {} unused_parameter_size={} \n "
+      "[Rank {} / {}] [before iteration {}] Training {} unused_parameter_size={} \n "
       "Avg forward compute time: {} \n Avg backward compute time: {} \n"
       "Avg backward comm. time: {} \n Avg backward comm/comp overlap time: {}",
       ddp_logging_data.ints_map["rank"],
@@ -49,6 +49,17 @@ std::ostream& operator<<(std::ostream& output, const Logger& logger) {
 Logger::Logger(std::shared_ptr<c10d::Reducer> reducer) {
   reducer_ = reducer;
   ddp_logging_data_ = std::make_unique<at::DDPLoggingData>();
+}
+
+std::once_flag log_graph_static_flag;
+
+void Logger::log_if_graph_static(bool is_static) {
+  std::call_once(log_graph_static_flag, [this, is_static]() {
+    ddp_logging_data_->ints_map["can_set_static_graph"] = is_static;
+    // It is useful to report the iteration that training finished at.
+    ddp_logging_data_->ints_map["iteration"] = reducer_->num_iterations_;
+    at::LogPyTorchDDPUsage(*ddp_logging_data_);
+  });
 }
 
 // Environment variables
@@ -155,9 +166,14 @@ void Logger::set_construction_data_and_log(
     const std::string& module_name,
     const std::vector<int>& device_ids,
     int output_device,
-    bool broadcast_buffers) {
+    bool broadcast_buffers,
+    bool has_sync_bn,
+    bool static_graph) {
   // No lock is needed, as it will be called in DistributedDataParallel
   // constructor.
+  if (static_graph) {
+    set_static_graph();
+  }
   ddp_logging_data_->strs_map["module_name"] = module_name;
   ddp_logging_data_->ints_map["world_size"] =
       reducer_->process_group_->getSize();
@@ -182,6 +198,7 @@ void Logger::set_construction_data_and_log(
   ddp_logging_data_->strs_map["device_ids"] = c10::Join(", ", device_ids);
   ddp_logging_data_->ints_map["output_device"] = output_device;
   ddp_logging_data_->ints_map["broadcast_buffers"] = broadcast_buffers;
+  ddp_logging_data_->ints_map["has_sync_bn"] = has_sync_bn;
   ddp_logging_data_->ints_map["bucket_cap_bytes"] = reducer_->bucket_bytes_cap_;
   ddp_logging_data_->ints_map["find_unused_parameters"] =
       reducer_->find_unused_parameters_;
@@ -262,6 +279,11 @@ void Logger::set_runtime_stats_and_log() {
   // If unused_parameters_ is not empty, calculate its sizes.
   // unused_parameters_ is calculated in forward call of
   // each iteration.
+  if (reducer_->unused_parameters_.size() == 0 &&
+      reducer_->find_unused_parameters_) {
+    // No unused params in this iteration
+    ddp_logging_data_->ints_map["unused_parameter_size"] = 0;
+  }
   for (const auto& unused_index : reducer_->unused_parameters_) {
     const auto& v = reducer_->params_[unused_index];
     ddp_logging_data_->ints_map["unused_parameter_size"] +=

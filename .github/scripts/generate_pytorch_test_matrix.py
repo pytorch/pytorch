@@ -16,7 +16,7 @@ from typing_extensions import TypedDict
 
 
 BUILD_ENVIRONMENT = os.getenv('BUILD_ENVIRONMENT')
-
+assert BUILD_ENVIRONMENT is not None
 
 class Config(TypedDict):
     num_shards: int
@@ -70,6 +70,7 @@ def main() -> None:
     if not run_as_if_on_trunk() and NUM_TEST_SHARDS_ON_PULL_REQUEST:
         NUM_TEST_SHARDS = int(NUM_TEST_SHARDS_ON_PULL_REQUEST)
     MULTIGPU_RUNNER_TYPE = os.getenv('MULTIGPU_RUNNER_TYPE')
+    DISTRIBUTED_GPU_RUNNER_TYPE = os.getenv('DISTRIBUTED_GPU_RUNNER_TYPE', TEST_RUNNER_TYPE)
     NOGPU_RUNNER_TYPE = os.getenv('NOGPU_RUNNER_TYPE')
     configs: Dict[str, Config] = {}
     if os.getenv('ENABLE_JIT_LEGACY_TEST'):
@@ -84,7 +85,10 @@ def main() -> None:
         if os.getenv('ENABLE_FORCE_ON_CPU_TEST'):
             configs['force_on_cpu'] = {'num_shards': 1, 'runner': NOGPU_RUNNER_TYPE}
     if os.getenv('ENABLE_DISTRIBUTED_TEST'):
-        configs['distributed'] = {'num_shards': 1, 'runner': TEST_RUNNER_TYPE}
+        configs['distributed'] = {
+            'num_shards': 1,
+            'runner': DISTRIBUTED_GPU_RUNNER_TYPE if "cuda" in str(BUILD_ENVIRONMENT) else TEST_RUNNER_TYPE
+        }
     if os.getenv('ENABLE_SLOW_TEST'):
         configs['slow'] = {'num_shards': 1, 'runner': TEST_RUNNER_TYPE}
     if os.getenv('ENABLE_DOCS_TEST'):

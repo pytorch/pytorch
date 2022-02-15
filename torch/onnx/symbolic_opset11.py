@@ -7,7 +7,7 @@ import torch
 import torch.onnx.symbolic_helper as sym_help
 import warnings
 
-from torch.onnx.symbolic_helper import parse_args, _unimplemented, _is_tensor_list
+from torch.onnx.symbolic_helper import parse_args, _unimplemented, _is_tensor_list, ScalarType
 from torch.onnx.symbolic_opset9 import expand, unused, mul
 from torch.nn.modules.utils import _single, _pair, _triple
 from torch.onnx.utils import _add_block, _add_input_to_block, _add_output_to_block
@@ -22,7 +22,7 @@ from torch.onnx.utils import _add_block, _add_input_to_block, _add_output_to_blo
 def hardtanh(g, self, min_val, max_val):
     dtype = self.type().scalarType()
     if dtype is None:
-        dtype = 6  # float
+        dtype = ScalarType.FLOAT
     else:
         dtype = sym_help.scalar_type_to_onnx.index(sym_help.cast_pytorch_to_onnx[dtype])
     min_val = g.op("Constant", value_t=torch.tensor(min_val, dtype=sym_help.scalar_type_to_pytorch_type[dtype]))
@@ -54,7 +54,7 @@ def clamp(g, self, min, max):
             return clamp_max(g, clamp_min(g, self, min), max)
 
 
-@parse_args('v', 'v')
+@parse_args("v", "v")
 def clamp_min(g, self, min):
     dtype = self.type().scalarType()
     min = g.op("Cast", min, to_i=sym_help.cast_pytorch_to_onnx[dtype])
@@ -65,7 +65,7 @@ def clamp_min(g, self, min):
         return g.op("Max", self, min)
 
 
-@parse_args('v', 'v')
+@parse_args("v", "v")
 def clamp_max(g, self, max):
     dtype = self.type().scalarType()
     max = g.op("Cast", max, to_i=sym_help.cast_pytorch_to_onnx[dtype])
@@ -80,7 +80,7 @@ def relu6(g, input):
     relu = g.op("Relu", input)
     dtype = input.type().scalarType()
     if dtype is None:
-        dtype = 6  # float
+        dtype = ScalarType.FLOAT
     else:
         dtype = sym_help.scalar_type_to_onnx.index(sym_help.cast_pytorch_to_onnx[dtype])
     min_val = g.op("Constant", value_t=torch.tensor(0, dtype=sym_help.scalar_type_to_pytorch_type[dtype]))
@@ -111,7 +111,7 @@ def index_put(g, self, indices_list_value, values, accumulate=False):
 
     if len(indices_list) > 1:
         for idx_ in range(len(indices_list)):
-            if indices_list[idx_].type().scalarType() == 'Bool':
+            if indices_list[idx_].type().scalarType() == "Bool":
                 indices_list[idx_] = g.op("NonZero", indices_list[idx_])
         index = indices_list[0]
 
@@ -217,7 +217,7 @@ upsample_trilinear3d = _interpolate("upsample_trilinear3d", 5, "linear")
 upsample_bicubic2d = _interpolate("upsample_bicubic2d", 4, "cubic")
 
 
-def __interpolate(g, input, size, scale_factor, mode, align_corners, recompute_scale_factor):
+def __interpolate(g, input, size, scale_factor, mode, align_corners, recompute_scale_factor, antialias):
     return sym_help.__interpolate_helper(g, input, size, scale_factor, mode, align_corners, recompute_scale_factor)
 
 @parse_args("v", "i", "v", "v")
@@ -550,7 +550,10 @@ def arange(g, *args):
 def _dim_arange(g, like, dim):
     like_shape = g.op("Shape", like)
     stop = g.op("Gather", like_shape, g.op("Constant", value_t=torch.tensor(dim)), axis_i=0)
-    if sym_help._operator_export_type == torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK:
+    # Caffe2-specific op
+    is_caffe2_aten_fallback = (sym_help._operator_export_type == torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK and
+                               torch.onnx._CAFFE2_ATEN_FALLBACK)
+    if is_caffe2_aten_fallback:
         return g.op("_caffe2::Range", stop)
     return arange(g, stop, 4, None, None, None)
 
@@ -879,22 +882,29 @@ def embedding_bag(g,
     return loop.node().output(), None, None, None
 
 
-def prim_ConstantChunk(g, self, chunks, dim):
-    input_shape = g.op("Shape", self)
-    axis = g.op("Constant", value_t=torch.tensor([dim], dtype=torch.long))
-    input_shape_dim = g.op("Gather", input_shape, axis, axis_i=0)
-    start = g.op("Constant", value_t=torch.tensor([0], dtype=torch.long))
-    chunk_size = g.op("Constant", value_t=torch.tensor([chunks], dtype=torch.long))
-    chunk_size_minus_1 = g.op("Constant", value_t=torch.tensor([chunks - 1], dtype=torch.long))
-    input_shape_dim_shift = g.op("Add", input_shape_dim, chunk_size_minus_1)
-    chunk_dim = g.op("Div", input_shape_dim_shift, chunk_size)
-    res = []
-    for i in range(chunks):
-        index = g.op("Constant", value_t=torch.tensor([i + 1], dtype=torch.long))
-        end = g.op("Mul", chunk_dim, index)
-        res.append(g.op("Slice", self, start, end, axis))
-        start = end
-    return res
+@parse_args("v", "v", "f", "f")
+def embedding_renorm(g, weight, indices, max_norm, norm_type):
+    unique_indices = g.op("Unique", indices)
+    partial_weight = g.op("Gather", weight, unique_indices)
+    norm_type = int(norm_type)
+    if norm_type == 1:
+        norm_type = "ReduceL1"
+    elif norm_type == 2:
+        norm_type = "ReduceL2"
+    else:
+        raise RuntimeError(f"Unsupported: ONNX export of embedding_renorm with norm: {norm_type}. "
+                           "Only 1. and 2. are supported.")
+    partial_weight_norm = g.op(norm_type, partial_weight, axes_i=[1], keepdims_i=1)
+    # https://github.com/pytorch/pytorch/blob/0a07488ed2c47765e337e290bd138c0e6e459cbd/aten/src/ATen/native/Embedding.cpp#L177
+    # Add 1e-7 to prevent division by zero.
+    partial_weight_norm_ = g.op("Add", partial_weight_norm, g.op("Constant", value_t=torch.tensor(1e-7)))
+    max_norm = torch.tensor(max_norm)
+    scales = g.op("Div", max_norm, partial_weight_norm_)
+    partial_weight_renorm = g.op("Mul", partial_weight, scales)
+    partial_weight_renorm = g.op("Where", g.op("Greater", partial_weight_norm, max_norm),
+                                 partial_weight_renorm, partial_weight)
+    return g.op("ScatterND", weight, sym_help._unsqueeze_helper(g, unique_indices, [1]), partial_weight_renorm)
+
 
 def chunk(g, self, chunks, dim):
     # Calculate chunk size for dynamic chunk
@@ -916,3 +926,25 @@ def normal(g, loc, scale, seed):
     # is a sample with mean μ and variance σ's square.
     result = mul(g, scale, g.op("RandomNormalLike", loc))
     return add(g, result, loc)
+
+
+class Prim:
+    domain = "prim"
+
+    @staticmethod
+    def ConstantChunk(g, self, chunks, dim):
+        input_shape = g.op("Shape", self)
+        axis = g.op("Constant", value_t=torch.tensor([dim], dtype=torch.long))
+        input_shape_dim = g.op("Gather", input_shape, axis, axis_i=0)
+        start = g.op("Constant", value_t=torch.tensor([0], dtype=torch.long))
+        chunk_size = g.op("Constant", value_t=torch.tensor([chunks], dtype=torch.long))
+        chunk_size_minus_1 = g.op("Constant", value_t=torch.tensor([chunks - 1], dtype=torch.long))
+        input_shape_dim_shift = g.op("Add", input_shape_dim, chunk_size_minus_1)
+        chunk_dim = g.op("Div", input_shape_dim_shift, chunk_size)
+        res = []
+        for i in range(chunks):
+            index = g.op("Constant", value_t=torch.tensor([i + 1], dtype=torch.long))
+            end = g.op("Mul", chunk_dim, index)
+            res.append(g.op("Slice", self, start, end, axis))
+            start = end
+        return res

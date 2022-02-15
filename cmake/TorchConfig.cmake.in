@@ -127,6 +127,10 @@ if(@USE_KINETO@)
   append_torchlib_if_found(kineto)
 endif()
 
+if(@USE_DEPLOY@)
+  append_torchlib_if_found(torch_deploy)
+endif()
+
 if(@USE_CUDA@)
   if(MSVC)
     if(NOT NVTOOLEXT_HOME)
@@ -162,8 +166,8 @@ if(@USE_CUDA@)
   list(APPEND TORCH_LIBRARIES ${TORCH_CUDA_LIBRARIES})
 endif()
 
-# When we build libtorch with the old GCC ABI, dependent libraries must too.
-if("${CMAKE_CXX_COMPILER_ID}" STREQUAL "GNU")
+# When we build libtorch with the old libstdc++ ABI, dependent libraries must too.
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
   set(TORCH_CXX_FLAGS "-D_GLIBCXX_USE_CXX11_ABI=@GLIBCXX_USE_CXX11_ABI@")
 endif()
 

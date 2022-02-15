@@ -1,0 +1,73 @@
+load("@bazel_skylib//rules:common_settings.bzl", "bool_flag")
+load("@rules_cc//cc:defs.bzl", "cc_library")
+load("//tools/config:defs.bzl", "if_cuda")
+
+# The bool_flag targets allow configuring the build from the
+# command-line, e.g. --//c10:use_gflags or --no//c10:use_gflags to
+# disable.
+
+bool_flag(
+    name = "use_gflags",
+    build_setting_default = True,
+)
+
+bool_flag(
+    name = "use_glog",
+    build_setting_default = True,
+)
+
+config_setting(
+    name = "using_gflags",
+    flag_values = {":use_gflags": "true"},
+)
+
+config_setting(
+    name = "using_glog",
+    flag_values = {":use_glog": "true"},
+)
+
+cc_library(
+    name = "headers",
+    hdrs = [
+        "//c10/core:headers",
+        "//c10/cuda:headers",
+        "//c10/mobile:headers",
+        "//c10/util:headers",
+    ],
+    deps = [
+        "//c10/core:alignment",
+        "//c10/cuda:Macros",
+        "//c10/macros",
+    ] + select({
+        ":using_gflags": ["@com_github_gflags_gflags//:gflags"],
+        "//conditions:default": [],
+    }) + select({
+        ":using_glog": ["@com_github_glog//:glog"],
+        "//conditions:default": [],
+    }),
+    visibility = ["//:__pkg__"],
+)
+
+cc_library(
+    name = "c10",
+    deps = [
+        "//c10/core:CPUAllocator",
+        "//c10/core:ScalarType",
+        "//c10/core:alignment",
+        "//c10/core:alloc_cpu",
+        "//c10/core:base",
+        "//c10/macros",
+        "//c10/mobile:CPUCachingAllocator",
+        "//c10/mobile:CPUProfilingAllocator",
+        "//c10/util:TypeCast",
+        "//c10/util:base",
+        "//c10/util:typeid",
+    ] + if_cuda(
+        [
+            "//c10/cuda",
+            "//c10/cuda:Macros",
+        ],
+        [],
+    ),
+    visibility = ["//:__pkg__"],
+)

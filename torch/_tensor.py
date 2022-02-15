@@ -254,6 +254,17 @@ class Tensor(torch._C._TensorBase):
                 raise NotImplementedError(
                     'sparse tensor __reduce_ex__ for layout `%s`' % (self.layout))
             return (torch._utils._rebuild_sparse_tensor, args_sparse)
+        elif self.is_sparse_csr:
+            if self.layout == torch.sparse_csr:
+                args_sparse_csr = (self.layout,
+                                   (self.crow_indices(),
+                                    self.col_indices(),
+                                    self.values(),
+                                    self.size()))
+            else:
+                raise NotImplementedError(
+                    'sparse csr tensor __reduce_ex__ for layout `%s`' % (self.layout))
+            return (torch._utils._rebuild_sparse_csr_tensor, args_sparse_csr)
         else:
             # TODO: Once we decide to break serialization FC, no longer
             # need to wrap with TypedStorage
@@ -700,8 +711,6 @@ class Tensor(torch._C._TensorBase):
     def __dir__(self):
         if has_torch_function_unary(self):
             return handle_torch_function(Tensor.__dir__, (self,), self)
-        if self.is_quantized:
-            warnings.warn('Only a small subset of methods are supported for quantized tensors.')
         tensor_methods = dir(self.__class__)
         tensor_methods.remove('volatile')  # deprecated
         attrs = list(self.__dict__.keys())
@@ -1011,6 +1020,32 @@ class Tensor(torch._C._TensorBase):
         # See Note [rename_ / rename API]
         return update_names(self, names, rename_map, inplace=False)
 
+    def to_sparse_coo(self):
+        """ Convert a tensor to :ref:`coordinate format <sparse-coo-docs>`.
+
+       Examples::
+
+            >>> dense = torch.randn(5, 5)
+            >>> sparse = dense.to_sparse_coo()
+            >>> sparse._nnz()
+            25
+
+       """
+        if self.is_sparse:
+            return self
+        if self.is_sparse_csr:
+            crow_indices = self.crow_indices()
+            col_indices = self.col_indices()
+            indices = torch._convert_indices_from_csr_to_coo(crow_indices, col_indices,
+                                                             out_int32=crow_indices.dtype == torch.int32)
+            return torch.sparse_coo_tensor(indices,
+                                           self.values(),
+                                           size=self.shape,
+                                           dtype=self.dtype,
+                                           device=self.device)
+        else:
+            return self.to_sparse()
+
     def to_sparse_csr(self):
         """ Convert a tensor to compressed row storage format. Only works with 2D tensors.
 
@@ -1145,7 +1180,7 @@ class Tensor(torch._C._TensorBase):
             raise TypeError('stream must be ``int`` or ``none``')
         elif stream is not None and stream != -1:
             if self.device.type == 'cuda':
-                stream = torch.cuda.streams.ExternalStream(stream)
+                stream = torch.cuda.ExternalStream(stream)
                 # Only synchronize on different streams
                 if stream != torch.cuda.current_stream:
                     event = torch.cuda.Event()

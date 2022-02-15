@@ -1,3 +1,4 @@
+
 // Default block synchronization. Just use __barrier_sync
 namespace block_sync {
 

@@ -1,6 +1,6 @@
 #pragma once
 
-#include <torch/csrc/WindowsTorchApiMacro.h>
+#include <c10/macros/Export.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/runtime/profiling_record.h>
 
@@ -42,6 +42,7 @@ TORCH_CUDA_CU_API bool isElementWiseNode(const Node* node);
 
 // returns whether or not a parsing function exists for the given node type.
 TORCH_CUDA_CU_API bool isNodeParsible(const Node* node);
+TORCH_CUDA_CU_API bool shouldProfileNode(const Node* node);
 
 void InsertProfileNodes(ProfilingRecord* pr);
 

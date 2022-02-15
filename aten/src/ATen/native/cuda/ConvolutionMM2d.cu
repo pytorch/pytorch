@@ -116,7 +116,6 @@ void slow_conv2d_forward(
            const Tensor &output,
            const Tensor &weight_,
            const Tensor &bias,
-           const Tensor &columns,
            int64_t kH, int64_t kW,
            int64_t dH, int64_t dW,
            int64_t padH, int64_t padW) {
@@ -124,7 +123,6 @@ void slow_conv2d_forward(
   slow_conv2d_shape_check(
       input, {}, weight, bias, kH, kW, dH, dW, padH, padW, /*weight_nullable*/false);
 
-  constexpr int ndim = 4;
   constexpr int dimf = 1;
   constexpr int dimh = 2;
   constexpr int dimw = 3;
@@ -141,8 +139,8 @@ void slow_conv2d_forward(
   // Resize output
   resize_output(output, {batchSize, nOutputPlane, outputHeight, outputWidth});
 
-  // Resize temporary columns
-  resize_output(columns, {nInputPlane * kW * kH, outputHeight * outputWidth});
+  // Create temporary columns
+  auto columns = at::empty({nInputPlane * kW * kH, outputHeight * outputWidth}, input.options());
 
   const bool requires_columns = (
       kW != 1 || kH != 1 || dW != 1 || dH != 1 || padH != 0 || padW != 0);
@@ -359,15 +357,14 @@ void slow_conv2d_grad_weight(
 }  // namespace (anonymous)
 
 
-std::tuple<Tensor&, Tensor&> slow_conv2d_forward_out_cuda(
+Tensor& slow_conv2d_forward_out_cuda(
     const Tensor &self_,
     const Tensor &weight_,
     IntArrayRef kernel_size,
     const c10::optional<Tensor> &bias_,
     IntArrayRef stride,
     IntArrayRef padding,
-    Tensor &output,
-    Tensor &finput) {
+    Tensor &output) {
   TORCH_CHECK(kernel_size.size() == 2);
   TORCH_CHECK(stride.size() == 2);
   TORCH_CHECK(padding.size() == 2);
@@ -386,15 +383,14 @@ std::tuple<Tensor&, Tensor&> slow_conv2d_forward_out_cuda(
       output,
       *weight,
       *bias,
-      finput,
       kernel_size[0], kernel_size[1],
       stride[0], stride[1],
       padding[0], padding[1]
     );
-  return std::tuple<Tensor&, Tensor&>{output, finput};
+  return output;
 }
 
-std::tuple<Tensor, Tensor> slow_conv2d_forward_cuda(
+Tensor slow_conv2d_forward_cuda(
     const Tensor &self,
     const Tensor &weight,
     IntArrayRef kernel_size,
@@ -402,9 +398,8 @@ std::tuple<Tensor, Tensor> slow_conv2d_forward_cuda(
     IntArrayRef stride,
     IntArrayRef padding) {
   auto output = at::empty({0}, self.options());
-  auto finput = at::empty({0}, self.options());
   return slow_conv2d_forward_out_cuda(
-      self, weight, kernel_size, bias, stride, padding, output, finput);
+      self, weight, kernel_size, bias, stride, padding, output);
 }
 
 std::tuple<Tensor&, Tensor&, Tensor&> slow_conv2d_backward_out_cuda(
@@ -414,11 +409,12 @@ std::tuple<Tensor&, Tensor&, Tensor&> slow_conv2d_backward_out_cuda(
     IntArrayRef kernel_size,
     IntArrayRef stride,
     IntArrayRef padding,
-    const Tensor& finput,
     Tensor& grad_input,
     Tensor& grad_weight,
     Tensor& grad_bias) {
   auto grad_output = grad_output_.expect_contiguous();
+
+  Tensor columns = at::empty({0}, self_.options());
   if (grad_input.defined()) {
     resize_output(grad_input, self_.sizes());
     auto weight = weight_.expect_contiguous();
@@ -426,7 +422,7 @@ std::tuple<Tensor&, Tensor&, Tensor&> slow_conv2d_backward_out_cuda(
     slow_conv2d_backward(
         self_, *grad_output,
         grad_input, *weight,
-        finput,
+        columns,
         kernel_size[0], kernel_size[1],
         stride[0], stride[1],
         padding[0], padding[1]);
@@ -442,7 +438,7 @@ std::tuple<Tensor&, Tensor&, Tensor&> slow_conv2d_backward_out_cuda(
         *self,
         *grad_output,
         grad_weight,
-        finput,
+        columns,
         kernel_size[0], kernel_size[1],
         stride[0], stride[1],
         padding[0], padding[1]
@@ -459,7 +455,6 @@ std::tuple<Tensor, Tensor, Tensor> slow_conv2d_backward_cuda(
     IntArrayRef kernel_size,
     IntArrayRef stride,
     IntArrayRef padding,
-    const Tensor& finput,
     std::array<bool, 3> output_mask) {
   Tensor grad_input;
   Tensor grad_weight;
@@ -484,7 +479,6 @@ std::tuple<Tensor, Tensor, Tensor> slow_conv2d_backward_cuda(
       kernel_size,
       stride,
       padding,
-      finput,
       grad_input,
       grad_weight,
       grad_bias);

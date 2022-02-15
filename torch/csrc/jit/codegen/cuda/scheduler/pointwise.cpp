@@ -67,25 +67,23 @@ c10::optional<PointwiseParams> getPointwiseHeuristics(
   if (TensorDomain::noReductions(
           TensorDomain::noBroadcasts(largest_out->domain()->domain()))
           .size() == 0) {
-    if (data_cache && data_cache->isRecording()) {
-      data_cache->setVectorizableInputsOutputs(std::vector<TensorView*>());
-      data_cache->setMappedInputOutputDims(std::vector<int64_t>());
-    }
-    return PointwiseParams();
-  }
+    auto vectorizable_inputs_outputs_entry = HeuristicSummaryEntry<
+        HeuristicCompileTime::VectorizableInputsAndOutputs>(data_cache, []() {
+      return std::make_unique<std::vector<TensorView*>>();
+    });
+    vectorizable_inputs_outputs_entry.get();
 
-  auto ref_root = largest_out->getMaybeRFactorDomain();
+    auto broadcast_byte_multiples_entry =
+        HeuristicSummaryEntry<HeuristicCompileTime::BroadcastMultiples>(
+            data_cache, []() {
+              return std::make_unique<
+                  std::vector<scheduler_utils::BroadcastMultiple>>();
+            });
+    broadcast_byte_multiples_entry.get();
 
-  std::vector<int64_t> elem_counts(ref_root.size(), 1);
-  int64_t n_elems = 1;
-  for (size_t ref_i = 0; ref_i < ref_root.size(); ref_i++) {
-    auto inferred_val =
-        runtime_info.expressionEvaluator().evaluate(ref_root[ref_i]->extent());
-    TORCH_INTERNAL_ASSERT(
-        inferred_val.has_value(),
-        "Error inferring size for pointwise scheduler.");
-    elem_counts[ref_i] = inferred_val.value();
-    n_elems *= inferred_val.value();
+    PointwiseParams params;
+    params.tag = "Pointwise heuristics";
+    return params;
   }
 
   const int64_t device_multiprocessor_count =
@@ -112,6 +110,19 @@ c10::optional<PointwiseParams> getPointwiseHeuristics(
       std::max(
           (scheduler_utils::lastPow2((int64_t)n_tensors) >> 2), (int64_t)1));
 
+  auto ref_root = largest_out->getMaybeRFactorDomain();
+  std::vector<int64_t> elem_counts(ref_root.size(), 1);
+  int64_t n_elems = 1;
+  for (size_t ref_i = 0; ref_i < ref_root.size(); ref_i++) {
+    auto inferred_val =
+        runtime_info.expressionEvaluator().evaluate(ref_root[ref_i]->extent());
+    TORCH_INTERNAL_ASSERT(
+        inferred_val.has_value(),
+        "Error inferring size for pointwise scheduler.");
+    elem_counts[ref_i] = inferred_val.value();
+    n_elems *= inferred_val.value();
+  }
+
   // Don't unroll at the cost of getting a full wave on the GPU
   if (n_elems < device_multiprocessor_count * kThreadX &&
       max_unroll_factor > 1) {
@@ -134,24 +145,15 @@ c10::optional<PointwiseParams> getPointwiseHeuristics(
   // Vectorize as much as we can
   size_t vectorize_factor = max_unroll_factor;
 
-  HeuristicCacheAccessor<std::vector<TensorView*>>
-      vectorizable_inputs_outputs_data;
+  auto vectorizable_inputs_outputs_entry =
+      HeuristicSummaryEntry<HeuristicCompileTime::VectorizableInputsAndOutputs>(
+          data_cache, [&largest_out]() {
+            return std::make_unique<std::vector<TensorView*>>(
+                scheduler_utils::getInputsOutputsWithInnerDim(
+                    largest_out, true));
+          });
 
-  // TODO: move all these boilerplate code into the accessor class
-  // (follow up)
-  if (data_cache && !data_cache->isRecording()) {
-    vectorizable_inputs_outputs_data.writeTemporary(
-        data_cache->getVectorizableInputsOutputs());
-  } else {
-    vectorizable_inputs_outputs_data.writeNew(
-        scheduler_utils::getVectorizableInputsOutputs(largest_out));
-    if (data_cache && data_cache->isRecording()) {
-      data_cache->setVectorizableInputsOutputs(
-          vectorizable_inputs_outputs_data.read());
-    }
-  }
-
-  auto& vectorizable_inputs_outputs = vectorizable_inputs_outputs_data.read();
+  auto& vectorizable_inputs_outputs = vectorizable_inputs_outputs_entry.get();
 
   for (auto tv : vectorizable_inputs_outputs) {
     const auto tv_vectorize_factor = runtime_info.getVectorizableWidth(tv);
@@ -207,45 +209,41 @@ c10::optional<PointwiseParams> getPointwiseHeuristics(
   // break point with gdimx and use gdimy for the left side of the break point.
   int64_t gdimy = 1;
 
-  HeuristicCacheAccessor<std::vector<int64_t>> mapping_count_accessor;
-  // TODO: move all these boilerplate code into the accessor class
-  // (follow up)
-  if (data_cache && !data_cache->isRecording()) {
-    mapping_count_accessor.writeTemporary(
-        data_cache->getMappedInputOutputDims());
-  } else {
-    mapping_count_accessor.writeNew(
-        scheduler_utils::mappedInputsOutputs(largest_out));
-    if (data_cache && data_cache->isRecording()) {
-      data_cache->setMappedInputOutputDims(mapping_count_accessor.read());
-    }
-  }
+  auto broadcast_byte_multiples_entry = HeuristicSummaryEntry<
+      HeuristicCompileTime::BroadcastMultiples>(data_cache, [&largest_out]() {
+    return std::make_unique<std::vector<scheduler_utils::BroadcastMultiple>>(
+        scheduler_utils::getBroadcastMultiples(largest_out));
+  });
 
-  auto mapping_count = mapping_count_accessor.read();
+  auto& broadcast_byte_multiples = broadcast_byte_multiples_entry.get();
+
+  TORCH_INTERNAL_ASSERT(broadcast_byte_multiples.size() == ref_root.size());
+
+  int64_t dtype_sum = 0;
+  for (auto inp : ir_utils::filterByType<TensorView>(fusion->inputs())) {
+    dtype_sum += dataTypeSize(inp->getDataType().value());
+  }
+  for (auto out : ir_utils::filterByType<TensorView>(fusion->outputs())) {
+    dtype_sum += dataTypeSize(out->getDataType().value());
+  }
 
   {
     // How much would this transfer cost if it was done as a 1-D schedule
     int64_t transfer_size_1d = 1;
 
-    auto max_dims =
-        std::max_element(mapping_count.begin(), mapping_count.end());
-
-    for (int64_t i = 0; i < (int64_t)ref_root.size(); i++) {
-      transfer_size_1d = transfer_size_1d * elem_counts[i] * (*max_dims);
+    for (const auto i : c10::irange(ref_root.size())) {
+      transfer_size_1d = transfer_size_1d * elem_counts[i] * dtype_sum;
     }
 
     // If there isn't very much parallelism available, just use 1D scheduler
     if (true || n_elems * 2 > device_multiprocessor_count * kThreadX) {
       int64_t min_total_transfer = std::numeric_limits<int64_t>::max();
 
-      for (int64_t break_point_i = 0; break_point_i < (int64_t)ref_root.size();
-           break_point_i++) {
+      for (const auto break_point_i : c10::irange(ref_root.size())) {
         // Number of elements in the right side of reference tv with
         // break_point_i
         int64_t cur_right_elem_count = 1;
-        for (int64_t right_i = break_point_i;
-             right_i < (int64_t)ref_root.size();
-             right_i++) {
+        for (const auto right_i : c10::irange(break_point_i, ref_root.size())) {
           cur_right_elem_count = cur_right_elem_count * elem_counts[right_i];
         }
 
@@ -258,25 +256,22 @@ c10::optional<PointwiseParams> getPointwiseHeuristics(
           continue;
         }
 
-        auto left_max_dims = std::max_element(
-            mapping_count.begin(), mapping_count.begin() + break_point_i);
-
-        auto right_max_dims = std::max_element(
-            mapping_count.begin() + break_point_i, mapping_count.end());
+        auto lhs_byte_multiple =
+            broadcast_byte_multiples[break_point_i].lhs_multiple;
+        auto rhs_byte_multiple =
+            broadcast_byte_multiples[break_point_i].rhs_multiple;
 
         // Estimate transfer cost with this break point
         int64_t cur_transfer_size = 1;
 
-        for (int64_t left_i = 0; left_i < break_point_i; left_i++) {
+        for (const auto left_i : c10::irange(break_point_i)) {
           cur_transfer_size =
-              cur_transfer_size * elem_counts[left_i] * (*left_max_dims);
+              cur_transfer_size * elem_counts[left_i] * lhs_byte_multiple;
         }
 
-        for (int64_t right_i = break_point_i;
-             right_i < (int64_t)ref_root.size();
-             right_i++) {
+        for (const auto right_i : c10::irange(break_point_i, ref_root.size())) {
           cur_transfer_size =
-              cur_transfer_size * elem_counts[right_i] * (*right_max_dims);
+              cur_transfer_size * elem_counts[right_i] * rhs_byte_multiple;
         }
 
         //  Continue if this break point doesn't save at least 10% of 1D
@@ -334,11 +329,16 @@ c10::optional<PointwiseParams> getPointwiseHeuristics(
   if (isDebugDumpEnabled(DebugDumpOption::SchedulerDebug)) {
     std::cerr << "\n===== Pointwise Stats ========\n"
               << "num_elems: " << n_elems << "\n"
-              << "mapping_count: " << mapping_count << "\n"
               << "elem_counts: " << elem_counts << "\n"
               << "n_tensor_inputs: " << n_tensors << "\n"
               << "max_input_dtype_size: " << max_input_dtype_size << "\n"
               << "vectorize_factor: " << vectorize_factor << std::endl;
+    std::cerr << "broadcast_byte_multiples: ";
+    for (auto multiple : broadcast_byte_multiples) {
+      std::cerr << "(" << multiple.lhs_multiple << ", " << multiple.rhs_multiple
+                << "), ";
+    }
+    std::cerr << std::endl;
     std::cerr << params.toString() << std::endl;
   }
 
@@ -369,13 +369,144 @@ size_t nRootDims(const TensorView* tv) {
   }
   return tv_n_dims;
 }
+
+// DomainMap uses the ComputeAtMap to find a reference TensorView
+// that maps to all iterDomains in the fusion.
+class DomainMap {
+ public:
+  DomainMap(Fusion* fusion)
+      : fusion_(fusion),
+        ca_index_map_(ComputeAtMap(ComputeAtMap::MappingMode::INDEX)) {
+    ca_index_map_.build(fusion);
+    view_tvs_ = scheduler_utils::getViewTVs(fusion);
+  }
+
+  TensorView* findReferenceTensorView() const {
+    auto fusion_outputs = fusion_->outputs();
+    for (auto output_tv : ir_utils::filterByType<TensorView>(fusion_outputs)) {
+      if (isValidReference(output_tv)) {
+        return output_tv;
+      }
+    }
+    return nullptr;
+  }
+
+  static bool hasReferenceTensorView(Fusion* fusion) {
+    FusionGuard fg(fusion);
+    DomainMap domain_map(fusion);
+    return domain_map.findReferenceTensorView() != nullptr;
+  }
+
+ private:
+  // Determine if output TensorView is a valid reference tensor for this fusion.
+  // The reference tensor must map to all the iterDomains in each input.
+  bool isValidReference(TensorView* output_tv) const {
+    auto fusion_inputs = fusion_->inputs();
+    for (auto input_tv : ir_utils::filterByType<TensorView>(fusion_inputs)) {
+      if (input_tv->uses().empty()) {
+        continue;
+      }
+
+      if (fusion_->getOutputAlias(output_tv) == input_tv) {
+        continue;
+      }
+
+      if (!areAllMapped(input_tv, output_tv)) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  // Determine if all iterDomains are mapped between input and output tvs
+  bool areAllMapped(TensorView* input_tv, TensorView* output_tv) const {
+    // Get concrete IDs for input root or rfactor domain
+    std::unordered_set<IterDomain*> in_concrete_ids;
+    for (auto in_id : input_tv->getMaybeRFactorDomain()) {
+      if (!ca_index_map_.getConcreteMappedID(in_id)->isBroadcast() &&
+          !in_id->isReduction()) {
+        in_concrete_ids.insert(ca_index_map_.getConcreteMappedID(in_id));
+      }
+    }
+
+    // Erase all input concrete IDs mapped to the output domain
+    for (auto out_id : output_tv->getMaybeRFactorDomain()) {
+      if (!out_id->isBroadcast() && !out_id->isReduction()) {
+        if (!eraseIfMapped(in_concrete_ids, out_id)) {
+          eraseIfMappedThroughView(in_concrete_ids, out_id);
+        }
+      }
+    }
+    return in_concrete_ids.empty();
+  }
+
+  // Erase input concrete ID if it is mapped to output ID
+  bool eraseIfMapped(
+      std::unordered_set<IterDomain*>& in_concrete_ids,
+      IterDomain* out_id) const {
+    auto out_concrete_id = ca_index_map_.getConcreteMappedID(out_id);
+    auto in_concrete_id_iter = in_concrete_ids.find(out_concrete_id);
+    bool found_match = in_concrete_id_iter != in_concrete_ids.end();
+    if (found_match) {
+      in_concrete_ids.erase(in_concrete_id_iter);
+    }
+    return found_match;
+  }
+
+  // Check if in_id is mapped to out_id through any view rfactor domain
+  void eraseIfMappedThroughView(
+      std::unordered_set<IterDomain*>& in_concrete_ids,
+      IterDomain* out_id) const {
+    for (auto view : view_tvs_) {
+      // Find any ID in view rfactor domain that is mapped to output ID
+      auto view_rfactor_id = anyMapped(view->getRFactorDomain(), out_id);
+      if (view_rfactor_id == nullptr) {
+        continue;
+      }
+
+      if (view_rfactor_id->isRFactorProduct()) {
+        // Check if input ID is mapped to any input IDs of the view rfactor ID
+        auto root_inputs = InputsOf::outputs(fusion_, {view_rfactor_id});
+        auto filtered_root_ids =
+            ir_utils::filterByType<IterDomain>(root_inputs);
+        for (auto view_root_id : filtered_root_ids) {
+          eraseIfMapped(in_concrete_ids, view_root_id);
+        }
+      } else {
+        // Otherwise, the input ID must map to the view rfactor ID
+        eraseIfMapped(in_concrete_ids, view_rfactor_id);
+      }
+    }
+  }
+
+  // Find any id in domain that maps with target id
+  IterDomain* anyMapped(
+      const std::vector<IterDomain*> domain,
+      IterDomain* target) const {
+    for (auto id : domain) {
+      if (ca_index_map_.areMapped(id, target)) {
+        return id;
+      }
+    }
+    return nullptr;
+  }
+
+  Fusion* fusion_ = nullptr;
+  ComputeAtMap ca_index_map_;
+  std::vector<TensorView*> view_tvs_;
+};
+
 } // namespace
+
+bool hasReferenceTensorView(Fusion* fusion) {
+  return DomainMap::hasReferenceTensorView(fusion);
+}
 
 // TODO: Inline intermediate operations (avoid inlining unrolled/vectorized
 // input/output caches)
 void schedulePointwise(Fusion* fusion, const PointwiseParams& params) {
   FusionGuard fg(fusion);
-  // fusion->printMath();
+
   // Make sure we don't have global memory set on intermediate tensors from
   // fusion segmentation
   scheduler_utils::clearMemorySpace(fusion);
@@ -383,7 +514,8 @@ void schedulePointwise(Fusion* fusion, const PointwiseParams& params) {
   // maybe has_reduction for scheduling should be done on a per output tensor
   // basis.
   TORCH_INTERNAL_ASSERT(
-      !fusion->hasReduction(), "This scheduler only handles pointwise ops.");
+      ir_utils::getReductionOps(fusion).empty(),
+      "This scheduler only handles pointwise ops.");
 
   // For intermediate outputs, apply cache_fork
   auto outs = fusion->outputs();
@@ -422,16 +554,8 @@ void schedulePointwise(Fusion* fusion, const PointwiseParams& params) {
     return;
   }
 
-  TensorView* reference_tv = nullptr;
-  for (auto out : output_tvs) {
-    if (out->definition() == nullptr) {
-      continue;
-    }
-    if (nRootDims(out) == max_dims) {
-      reference_tv = out;
-      break;
-    }
-  }
+  DomainMap domain_map(fusion);
+  TensorView* reference_tv = domain_map.findReferenceTensorView();
 
   TORCH_INTERNAL_ASSERT(
       reference_tv != nullptr,
@@ -452,8 +576,6 @@ void schedulePointwise(Fusion* fusion, const PointwiseParams& params) {
   }
 
   TORCH_INTERNAL_ASSERT(inner_most_id != nullptr);
-  auto vectorizable_dims =
-      scheduler_utils::FindAllMappedDims::from(reference_tv, inner_most_id);
 
   // Caches of inputs
   std::vector<TensorView*> cached_inputs;
@@ -469,13 +591,7 @@ void schedulePointwise(Fusion* fusion, const PointwiseParams& params) {
     if (inp->uses().empty()) {
       continue;
     }
-    // Need to check before caching.
-    bool vectorize = params.vectorize &&
-        scheduler_utils::shouldVectorize(inp, vectorizable_dims);
     cached_inputs.emplace_back(inp->cache_after());
-    if (vectorize) {
-      vectorized_tensor.emplace(cached_inputs.back());
-    }
   }
 
   // Figure out which outputs to cache for unrolling or vectorization
@@ -483,13 +599,7 @@ void schedulePointwise(Fusion* fusion, const PointwiseParams& params) {
     if (out->definition() == nullptr) {
       continue;
     }
-    // Need to check before caching.
-    bool vectorize = params.vectorize &&
-        scheduler_utils::shouldVectorize(out, vectorizable_dims);
     cached_outputs.emplace_back(std::make_pair(out, out->cache_before()));
-    if (vectorize) {
-      vectorized_tensor.emplace(out);
-    }
   }
 
   auto all_tvs = ir_utils::allTvs(fusion);
@@ -530,13 +640,13 @@ void schedulePointwise(Fusion* fusion, const PointwiseParams& params) {
     }
   }
 
-  // Right (inner merged) dimension is at inner most position, left (outer
-  // merged) dimension is at lhs_i. Order as [lhs_i, rhs_i, unmerged...]
-  reference_tv->reorder({{lhs_i, 0}, {-1, 1}});
-
   if (params.break_point) {
     // 2D parallelization scheme
     TORCH_INTERNAL_ASSERT(rhs_i >= 0 && lhs_i >= 0);
+
+    // Right (inner merged) dimension is at inner most position, left (outer
+    // merged) dimension is at lhs_i. Order as [lhs_i, rhs_i, unmerged...]
+    reference_tv->reorder({{lhs_i, 0}, {-1, 1}});
 
     if (params.vectorize) {
       reference_tv->split(1, params.inner_factor);
@@ -591,8 +701,9 @@ void schedulePointwise(Fusion* fusion, const PointwiseParams& params) {
   } else {
     // 1D Scheduler
     TORCH_INTERNAL_ASSERT(rhs_i >= 0 && lhs_i == -1);
+
     // right hand side exists and is the only axis we care to schedule, move it
-    // from the inner most position to left most.
+    // from the inner most position to left most. Order as [rhs_i, unmerged...]
     reference_tv->reorder({{-1, 0}});
 
     if (params.vectorize) {
@@ -608,7 +719,7 @@ void schedulePointwise(Fusion* fusion, const PointwiseParams& params) {
       reference_tv->axis(2)->parallelize(ParallelType::Unswitch);
       // Aggressively mark with vectorized and cleanup later. That way we don't
       // have to manually specify parallelization outside the reference.
-      reference_tv->axis(-1)->parallelize(ParallelType::Vectorize);
+      reference_tv->axis(3)->parallelize(ParallelType::Vectorize);
 
       //[BIDx, TIDx, Unswitch, Vectorization]
       // To make consistent with unrolling:
@@ -632,9 +743,15 @@ void schedulePointwise(Fusion* fusion, const PointwiseParams& params) {
   scheduler_utils::parallelizeAllLike(reference_tv, all_tvs);
 
   if (params.vectorize) {
+    // Grab all tensor views that should be vectorized
+    auto vectorizable_inputs_outputs =
+        scheduler_utils::getInputsOutputsWithInnerDim(reference_tv, true);
     // Clear vectorize on tensors that shouldn't have it
     for (auto tv : all_tvs) {
-      if (!vectorized_tensor.count(tv)) {
+      if (std::find(
+              vectorizable_inputs_outputs.begin(),
+              vectorizable_inputs_outputs.end(),
+              tv) == vectorizable_inputs_outputs.end()) {
         for (auto id : tv->domain()->domain()) {
           if (id->getParallelType() == ParallelType::Vectorize) {
             id->parallelize(ParallelType::Serial);
@@ -655,7 +772,7 @@ void schedulePointwise(Fusion* fusion, const PointwiseParams& params) {
       auto consumer_tvs = ir_utils::consumerTvsOf(cached_input);
       TORCH_INTERNAL_ASSERT(
           consumer_tvs.size(),
-          "Input was not successfully filtered out for scheduling but wasn't used.");
+          "Input was not succesfully filtered out for scheduling but wasn't used.");
 
       // Grab a consumer which will be used for computeAt structure of cached
       // input into a consumer
