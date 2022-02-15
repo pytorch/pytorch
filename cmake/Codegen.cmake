@@ -194,11 +194,12 @@ if(INTERN_BUILD_ATEN_OPS)
     target_compile_definitions(ATEN_CUDA_FILES_GEN_LIB INTERFACE AT_PER_OPERATOR_HEADERS)
   endif()
 
+  # Handle source files that need to be compiled multiple times for
+  # different vectorization options
   file(GLOB cpu_kernel_cpp_in "${PROJECT_SOURCE_DIR}/aten/src/ATen/native/cpu/*.cpp" "${PROJECT_SOURCE_DIR}/aten/src/ATen/native/quantized/cpu/kernels/*.cpp")
 
   list(APPEND CPU_CAPABILITY_NAMES "DEFAULT")
   list(APPEND CPU_CAPABILITY_FLAGS "${OPT_FLAG}")
-
 
   if(CXX_AVX512_FOUND)
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DHAVE_AVX512_CPU_DEFINITION")
@@ -261,12 +262,11 @@ if(INTERN_BUILD_ATEN_OPS)
   # The sources list might get reordered later based on the capabilites.
   # See NOTE [ Linking AVX and non-AVX files ]
   foreach(i RANGE ${NUM_CPU_CAPABILITY_NAMES})
-    foreach(IMPL ${cpu_kernel_cpp_in})
-      file(RELATIVE_PATH NAME "${PROJECT_SOURCE_DIR}/aten/src/ATen/" "${IMPL}")
+    function(process_vec NAME)
       list(GET CPU_CAPABILITY_NAMES ${i} CPU_CAPABILITY)
       set(NEW_IMPL ${CMAKE_BINARY_DIR}/aten/src/ATen/${NAME}.${CPU_CAPABILITY}.cpp)
       configure_file("${PROJECT_SOURCE_DIR}/cmake/IncludeSource.cpp.in" ${NEW_IMPL})
-      set(cpu_kernel_cpp ${NEW_IMPL} ${cpu_kernel_cpp}) # Create list of copies
+      set(cpu_kernel_cpp ${NEW_IMPL} ${cpu_kernel_cpp} PARENT_SCOPE) # Create list of copies
       list(GET CPU_CAPABILITY_FLAGS ${i} FLAGS)
       if(MSVC)
         set(EXTRA_FLAGS "/DCPU_CAPABILITY=${CPU_CAPABILITY} /DCPU_CAPABILITY_${CPU_CAPABILITY}")
@@ -285,10 +285,17 @@ if(INTERN_BUILD_ATEN_OPS)
         endif()
       endif()
       set_source_files_properties(${NEW_IMPL} PROPERTIES COMPILE_FLAGS "${FLAGS} ${EXTRA_FLAGS}")
+    endfunction()
+    foreach(IMPL ${cpu_kernel_cpp_in})
+      file(RELATIVE_PATH NAME "${PROJECT_SOURCE_DIR}/aten/src/ATen/" "${IMPL}")
+      process_vec("${NAME}")
+    endforeach()
+    foreach(IMPL ${cpu_vec_generated_sources})
+      file(RELATIVE_PATH NAME "${CMAKE_BINARY_DIR}/aten/src/ATen/" "${IMPL}")
+      process_vec("${NAME}")
     endforeach()
   endforeach()
   list(APPEND ATen_CPU_SRCS ${cpu_kernel_cpp})
-
 endif()
 
 function(append_filelist name outputvar)
