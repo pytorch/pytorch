@@ -131,13 +131,16 @@ Tensor bmm_nt(const Tensor& a, const Tensor& b) {
 }
 
 void masked_softmax_dropout(
-    const Tensor& attn_scores,
+    Tensor& attn_scores,
     const c10::optional<Tensor>& attn_mask) {
   auto B = attn_scores.size(0);
   auto num_heads = attn_scores.size(1);
   auto T = attn_scores.size(2);
   if (attn_mask) {
     TORCH_CHECK(attn_mask->is_contiguous());
+  } else {
+    at::_softmax_out(attn_scores, attn_scores, 3, false);
+    return;
   }
   AT_DISPATCH_FLOATING_TYPES_AND2(
       ScalarType::Half,
