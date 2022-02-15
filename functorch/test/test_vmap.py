@@ -2649,7 +2649,6 @@ class TestVmapOperators(Namespace.TestVmapBase):
             (lambda t: captured.uniform_(), (torch.randn(B0),)),
 
             # factory functions
-            (lambda t: torch.randint(5, [1]), (torch.randn(B0),)),
             (lambda t: torch.randperm(5), (torch.randn(B0),)),
         ]
         for op, args in random_ops:
@@ -3437,6 +3436,8 @@ class TestVmapOperatorsOpInfo(TestCase):
         supported_random_ops = [
             lambda _, shape: torch.randn(shape, **kwargs),
             lambda _, shape: torch.rand(shape, **kwargs),
+            lambda _, shape: torch.randint(100, shape, **kwargs),
+            lambda _, shape: torch.randint(5, 100, shape, **kwargs),
         ]
 
         B0 = 4
