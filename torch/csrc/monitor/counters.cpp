@@ -9,22 +9,23 @@ namespace monitor {
 
 const char* aggregationName(Aggregation agg) {
   switch (agg) {
-    case NONE:
+    case Aggregation::NONE:
       return "none";
-    case VALUE:
+    case Aggregation::VALUE:
       return "value";
-    case MEAN:
+    case Aggregation::MEAN:
       return "mean";
-    case COUNT:
+    case Aggregation::COUNT:
       return "count";
-    case SUM:
+    case Aggregation::SUM:
       return "sum";
-    case MAX:
+    case Aggregation::MAX:
       return "max";
-    case MIN:
+    case Aggregation::MIN:
       return "min";
     default:
-      throw std::runtime_error("unknown aggregation: " + std::to_string(agg));
+      throw std::runtime_error(
+          "unknown aggregation: " + std::to_string(static_cast<int>(agg)));
   }
 }
 

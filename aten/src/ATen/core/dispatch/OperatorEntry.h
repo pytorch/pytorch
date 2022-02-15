@@ -173,11 +173,8 @@ public:
 
   [[noreturn]] void reportError(DispatchKey dispatchKey) const;
 
-  const KernelFunction& lookup(DispatchKey k) const {
-    const auto idx = getDispatchTableIndexForDispatchKey(k);
-    if (C10_UNLIKELY(idx == -1)) {
-      reportError(k);
-    }
+  const KernelFunction& lookup(DispatchKeySet ks) const {
+    const auto idx = ks.getDispatchTableIndexForDispatchKeySet();
     const auto& kernel = dispatchTable_[idx];
     // A valid kernel *always* has a boxed kernel and *may* have an
     // unboxed kernel. However, we typically do unboxed calls in at::
@@ -187,7 +184,7 @@ public:
     // in the common case.
     if (C10_UNLIKELY(!kernel.isValidUnboxed())) {
       if (!kernel.isValid()) {
-        reportError(k);
+        reportError(ks.highestPriorityTypeId());
       }
     }
     return kernel;
@@ -211,7 +208,7 @@ private:
   OperatorName name_;
   c10::optional<AnnotatedSchema> schema_;
 
-  std::array<KernelFunction, c10::getDispatchTableIndexForDispatchKey(DispatchKey::NumDispatchKeys)> dispatchTable_;
+  std::array<KernelFunction, c10::num_runtime_entries> dispatchTable_;
   DispatchKeyExtractor dispatchKeyExtractor_;
 
   // kernels_ stores all registered kernels for the corresponding dispatch key

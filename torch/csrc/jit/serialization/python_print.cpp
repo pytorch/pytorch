@@ -6,6 +6,7 @@
 #include <c10/util/Exception.h>
 #include <c10/util/StringUtil.h>
 #include <c10/util/irange.h>
+#include <caffe2/serialize/versions.h>
 #include <torch/csrc/jit/api/function_impl.h>
 #include <torch/csrc/jit/api/module.h>
 #include <torch/csrc/jit/frontend/error_report.h>
@@ -13,6 +14,7 @@
 #include <torch/csrc/jit/ir/attributes.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/ir/ir_views.h>
+#include <torch/csrc/jit/operator_upgraders/version_map.h>
 #include <torch/csrc/jit/resource_guard.h>
 #include <torch/csrc/jit/runtime/calculate_necessary_args.h>
 
@@ -741,9 +743,27 @@ struct PythonPrintImpl {
     }
   }
 
-  void checkVersion(const Node* const node) {
+  void checkVersion(Node* node) {
+#if ENABLE_UPGRADERS
+    if (auto schema = node->maybeSchema()) {
+      auto schema_name = getFullSchemaName(*schema);
+      auto version_entry = get_operator_version_map().find(schema_name);
+      if (version_entry != get_operator_version_map().end()) {
+        const auto& entry = version_entry->second;
+        // TODO (tugsuu) move this calculation into a seperate step.
+        min_version_ = std::max(
+            min_version_, uint64_t(entry[entry.size() - 1].bumped_at_version));
+      }
+    }
+    // We want to manually bump the minimum versions for
+    // other variants of aten::div and aten::full which
+    // are not covered by the new upgraders
     min_version_ =
         std::max(min_version_, get_min_version_for_kind(node->kind()));
+#else
+    min_version_ =
+        std::max(min_version_, get_min_version_for_kind(node->kind()));
+#endif
   }
 
   void printNode(Node* node, bool print_const) {
@@ -902,15 +922,19 @@ struct PythonPrintImpl {
   void printConstant(TaggedStringStream& stmt, const IValue& v) {
     const auto customFormatter = [&](std::ostream& ss, const IValue& v) {
       if (v.isTensor() || containsNonASCIIString(v) || v.isObject()) {
-        TORCH_INTERNAL_ASSERT(!v.type()->is_module());
+        TORCH_INTERNAL_ASSERT(!v.type<c10::Type>()->is_module());
         ss << "CONSTANTS.c" << getOrAddConstant(v);
         return true;
       }
 
-      if (v.isTuple() && v.type()->expectRef<TupleType>().schema()) {
+      auto type = v.type();
+      if (auto dyn = type->castRaw<c10::DynamicType>()) {
+        type = dyn->fallback();
+      }
+      if (v.isTuple() && type->expectRef<TupleType>().schema()) {
         // print the namedtuple constructor and let rest of tuple printing
         // continue
-        ss << v.type()->expectRef<TupleType>().annotation_str(type_printer_);
+        ss << type->expectRef<TupleType>().annotation_str(type_printer_);
       }
       return false;
     };
@@ -1594,7 +1618,11 @@ struct PythonPrintImpl {
   bool enforce_importable_;
 
   // The least version that supports all printed ops
+#if ENABLE_UPGRADERS
+  uint64_t min_version_ = caffe2::serialize::kMinSupportedFileFormatVersion;
+#else
   uint64_t min_version_ = 0;
+#endif
 };
 
 PythonPrint::PythonPrint(

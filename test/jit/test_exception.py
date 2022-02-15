@@ -6,26 +6,6 @@ r"""
 Test TorchScript exception handling.
 """
 class TestException(TestCase):
-    def test_assertions(self):
-        cu = torch.jit.CompilationUnit('''
-            def foo(cond):
-                assert bool(cond), "hi"
-                return 0
-        ''')
-
-        cu.foo(torch.tensor(1))
-        with self.assertRaisesRegex(torch.jit.Error, "AssertionError: hi"):
-            cu.foo(torch.tensor(0))
-
-        @torch.jit.script
-        def foo(cond):
-            assert bool(cond), "hi"
-
-        foo(torch.tensor(1))
-        # we don't currently validate the name of the exception
-        with self.assertRaisesRegex(torch.jit.Error, "AssertionError: hi"):
-            foo(torch.tensor(0))
-
     def test_pyop_exception_message(self):
         class Foo(torch.jit.ScriptModule):
             def __init__(self):
@@ -37,7 +17,7 @@ class TestException(TestCase):
                 return self.conv(x)
         foo = Foo()
         # testing that the correct error message propagates
-        with self.assertRaisesRegex(RuntimeError, "Expected 4-dimensional input for 4-dimensional weight"):
+        with self.assertRaisesRegex(RuntimeError, r"Expected 3D \(unbatched\) or 4D \(batched\) input to conv2d"):
             foo(torch.ones([123]))  # wrong size
 
     def test_builtin_error_messsage(self):
@@ -131,6 +111,26 @@ class TestException(TestCase):
 
         with self.assertRaisesRegex(torch.jit.Error, "RuntimeError"):
             no_message()
+
+    def test_assertions(self):
+        cu = torch.jit.CompilationUnit('''
+            def foo(cond):
+                assert bool(cond), "hi"
+                return 0
+        ''')
+
+        cu.foo(torch.tensor(1))
+        with self.assertRaisesRegex(torch.jit.Error, "AssertionError: hi"):
+            cu.foo(torch.tensor(0))
+
+        @torch.jit.script
+        def foo(cond):
+            assert bool(cond), "hi"
+
+        foo(torch.tensor(1))
+        # we don't currently validate the name of the exception
+        with self.assertRaisesRegex(torch.jit.Error, "AssertionError: hi"):
+            foo(torch.tensor(0))
 
     def test_python_op_exception(self):
         @torch.jit.ignore

@@ -449,22 +449,38 @@ class TestSymbolicShapeAnalysis(JitTestCase):
         self.assertEqual(list(output_shape[0:4]), list(tensor.size()))
         self.assertEqual(list(output_shape[4:]), output_tensor[2:])
 
+    def test_sym_ir_parsing(self):
+        graph_str1 = """graph(%x.1 : Float(SS(-2), SS(-3))):
+                        %3 : int = prim::Constant[value=1]()
+                        %4 : Tensor = aten::add(%x.1, %x.1, %3)
+                        return (%4)"""
+        g = torch._C.parse_ir(graph_str1)
+        inp = next(g.inputs())
+        out = inp.type().symbolic_sizes()
+        self.assertEqual(out, [-2, -3])
+
     def test_stitching_concat(self):
+
         @torch.jit.script
-        def foo(a, b, x, y):
+        def foo1(a, b, x, y):
             return (a / b) + torch.cat([x, y])
 
-        g = foo.graph
-        for inp in foo.graph.inputs():
-            inp.setType(inp.type().with_sizes([None, None]))
+        @torch.jit.script
+        def foo2(a, b, x, y):
+            return (a / b) + torch.cat([x, y], dim=-2)
 
-        shape_compute_graph = torch._C._jit_pass_propagate_shapes_on_graph_and_build_compute(foo.graph)
-        nodes = [g.findNode("aten::div")] + [g.findNode("aten::add")] + [g.findNode("aten::cat")]
+        for foo in [foo1, foo2]:
+            g = foo.graph
+            for inp in foo.graph.inputs():
+                inp.setType(inp.type().with_sizes([None, None]))
 
-        inps = [1, 10], [20, 10], [15, 1], [5, 1]
-        output_shapes = [[20, 10], [20, 10], [20, 1]]
+            shape_compute_graph = torch._C._jit_pass_propagate_shapes_on_graph_and_build_compute(foo.graph)
+            nodes = [g.findNode("aten::div")] + [g.findNode("aten::add")] + [g.findNode("aten::cat")]
 
-        self.checkSymShapeCompute(shape_compute_graph, nodes, output_shapes, inps)
+            inps = [1, 10], [20, 10], [15, 1], [5, 1]
+            output_shapes = [[20, 10], [20, 10], [20, 1]]
+
+            self.checkSymShapeCompute(shape_compute_graph, nodes, output_shapes, inps)
 
     @unittest.skipIf(not hasattr(torch.jit, "_shapes"), "shape functions not loaded in python")
     def test_shape_function_includes(self):

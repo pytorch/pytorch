@@ -330,8 +330,12 @@ class TestTypePromotion(TestCase):
         expected = torch.ones(0, dtype=torch.int64, device=device)
         self.assertEqual(torch.arange(False, False, device=device), expected)
 
-        self.assertEqual(torch.linspace(False, True, device=device), torch.linspace(0, 1, device=device))
-        self.assertEqual(torch.logspace(False, True, device=device), torch.logspace(0, 1, device=device))
+        bool_tensor_lin = torch.linspace(False, True, steps=100, device=device)
+        int_tensor_lin = torch.linspace(0, 1, steps=100, device=device)
+        self.assertEqual(bool_tensor_lin, int_tensor_lin)
+        bool_tensor_log = torch.linspace(False, True, steps=100, device=device)
+        int_tensor_log = torch.linspace(0, 1, steps=100, device=device)
+        self.assertEqual(bool_tensor_log, int_tensor_log)
 
         # this seems like odd behavior but ints also create float tensors, numpy doesn't have this function.
         self.assertEqual(torch.scalar_tensor(False, device=device), torch.tensor(0., device=device))

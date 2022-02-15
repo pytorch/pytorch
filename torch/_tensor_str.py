@@ -318,6 +318,12 @@ def _str_intern(inp):
             or (self.device.type == 'cuda' and torch.cuda.current_device() != self.device.index):
         suffixes.append('device=\'' + str(self.device) + '\'')
 
+    # Tensor printing performs tensor operations like slice, indexing, etc to make it in a
+    # representable format. These operations on xla/lazy tensor results in compilations. Hence,
+    # to avoid compilations, copying the tensor to cpu before printing.
+    if self.device.type == 'xla' or self.device.type == 'lazy':
+        self = self.to('cpu')
+
     # TODO: add an API to map real -> complex dtypes
     _default_complex_dtype = torch.cdouble if torch.get_default_dtype() == torch.double else torch.cfloat
     has_default_dtype = self.dtype in (torch.get_default_dtype(), _default_complex_dtype, torch.int64, torch.bool)

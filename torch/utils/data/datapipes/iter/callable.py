@@ -1,41 +1,37 @@
-import warnings
-from torch.utils.data import IterDataPipe, _utils, functional_datapipe
 from typing import Callable, Iterator, Sized, TypeVar
 
-try:
-    import dill
+from torch.utils.data import IterDataPipe, _utils, functional_datapipe
+from torch.utils.data.datapipes.utils.common import DILL_AVAILABLE, check_lambda_fn
 
-    # XXX: By default, dill writes the Pickler dispatch table to inject its
-    # own logic there. This globally affects the behavior of the standard library
-    # pickler for any user who transitively depends on this module!
-    # Undo this extension to avoid altering the behavior of the pickler globally.
+if DILL_AVAILABLE:
+    import dill
     dill.extend(use_dill=False)
-    DILL_AVAILABLE = True
-except ImportError:
-    DILL_AVAILABLE = False
 
 T_co = TypeVar("T_co", covariant=True)
 
 
 @functional_datapipe("map")
 class MapperIterDataPipe(IterDataPipe[T_co]):
-    r""":class:`MapperIterDataPipe`.
-
-    Iterable DataPipe to run a function over each item from the source DataPipe.
-    The function can be any regular python function or partial object. Lambda
+    r"""
+    Applies a function over each item from the source DataPipe (functional name: ``map``).
+    The function can be any regular Python function or partial object. Lambda
     function is not recommended as it is not supported by pickle.
 
     Args:
         datapipe: Source Iterable DataPipe
-        fn: Function called over each item
-        input_col: Index or indices of data which `fn` is applied
-            - None as default to apply `fn` to the data directly.
+        fn: Function being applied over each item
+        input_col: Index or indices of data which ``fn`` is applied, such as:
+
+            - ``None`` as default to apply ``fn`` to the data directly.
             - Integer(s) is used for list/tuple.
             - Key(s) is used for dict.
-        output_col: Index of data where result of `fn` is placed. `output_col` can be specified only when `input_col` is not None
-            - None as default to replace the index that `input_col` specified;
-              For `input_col` with multiple indices, the left-most one is used, and other indices will be removed.
-            - Integer is used for list/tuple. -1 represents to append result at the end.
+
+        output_col: Index of data where result of ``fn`` is placed. ``output_col`` can be specified
+            only when ``input_col`` is not ``None``
+
+            - ``None`` as default to replace the index that ``input_col`` specified; For ``input_col`` with
+              multiple indices, the left-most one is used, and other indices will be removed.
+            - Integer is used for list/tuple. ``-1`` represents to append result at the end.
             - Key is used for dict. New key is acceptable.
     """
     datapipe: IterDataPipe
@@ -50,13 +46,10 @@ class MapperIterDataPipe(IterDataPipe[T_co]):
     ) -> None:
         super().__init__()
         self.datapipe = datapipe
-        # Partial object has no attribute '__name__', but can be pickled
-        if hasattr(fn, "__name__") and fn.__name__ == "<lambda>" and not DILL_AVAILABLE:
-            warnings.warn(
-                "Lambda function is not supported for pickle, please use "
-                "regular python function or functools.partial instead."
-            )
+
+        check_lambda_fn(fn)
         self.fn = fn  # type: ignore[assignment]
+
         self.input_col = input_col
         if input_col is None and output_col is not None:
             raise ValueError("`output_col` must be None when `input_col` is None.")
@@ -143,13 +136,12 @@ class MapperIterDataPipe(IterDataPipe[T_co]):
 
 @functional_datapipe("collate")
 class CollatorIterDataPipe(MapperIterDataPipe):
-    r""":class:`CollatorIterDataPipe`.
-
-    Iterable DataPipe to collate samples from DataPipe to Tensor(s) by a custom collate function,
-    which defaults to `torch.utils.data.default_collate` if it is not specified.
+    r"""
+    Collates samples from DataPipe to Tensor(s) by a custom collate function (functional name: ``collate``).
+    By default, it uses :func:`torch.utils.data.default_collate`.
 
     .. note::
-        While writing a custom collate function, you can import `torch.utils.data.default_collate` for the
+        While writing a custom collate function, you can import :func:`torch.utils.data.default_collate` for the
         default behavior and `functools.partial` to specify any additional arguments.
 
     Args:

@@ -5,17 +5,21 @@ name: linux-docs
 
 on:
   pull_request:
-    types: [opened, synchronize, reopened, unassigned]
   push:
+    tags:
+      - 'ciflow/all/*'
+      - 'ciflow/cpu/*'
+      - 'ciflow/docs/*'
+      - 'ciflow/linux/*'
+      - 'ciflow/trunk/*'
     branches:
       - master
       - release/*
-      - fbsync
   workflow_dispatch:
 
 env:
   BUILD_ENVIRONMENT: linux-docs
-  DOCKER_IMAGE_BASE: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3.6-gcc5.4
+  DOCKER_IMAGE_BASE: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3.7-gcc5.4
   SCCACHE_BUCKET: ossci-compiler-cache-circleci-v2
   XLA_CLANG_CACHE_S3_BUCKET_NAME: ossci-compiler-clang-cache-circleci-xla
   TORCH_CUDA_ARCH_LIST: 5.2
@@ -41,16 +45,8 @@ jobs:
   build:
     runs-on: linux.2xlarge
     timeout-minutes: 240
-    if: ${{ (github.repository == 'pytorch/pytorch') && (
-            (github.event_name == 'push') ||
-            (github.event_name == 'schedule') ||
-            (contains(github.event.pull_request.labels.*.name, 'ciflow/all') || contains(github.event.pull_request.labels.*.name, 'ciflow/cpu') || contains(github.event.pull_request.labels.*.name, 'ciflow/default') || contains(github.event.pull_request.labels.*.name, 'ciflow/docs') || contains(github.event.pull_request.labels.*.name, 'ciflow/linux') || contains(github.event.pull_request.labels.*.name, 'ciflow/trunk')) ||
-            ((github.event_name == 'pull_request' && github.event.action != 'unassigned') && !contains(join(github.event.pull_request.labels.*.name), 'ciflow/')))
-         }}
     env:
       JOB_BASE_NAME: linux-docs-build
-      IS_PROBOT_TRIGGER_EVENT: ${{ (github.event.action == 'unassigned') && (github.event.assigneed.login == 'pytorchbot') }}
-      LABEL_CONDITIONS: ${{ contains(github.event.pull_request.labels.*.name, 'ciflow/all') || contains(github.event.pull_request.labels.*.name, 'ciflow/cpu') || contains(github.event.pull_request.labels.*.name, 'ciflow/default') || contains(github.event.pull_request.labels.*.name, 'ciflow/docs') || contains(github.event.pull_request.labels.*.name, 'ciflow/linux') || contains(github.event.pull_request.labels.*.name, 'ciflow/trunk') }}
     outputs:
       docker_image: ${{ steps.calculate-tag.outputs.docker_image }}
     steps:
@@ -75,7 +71,10 @@ jobs:
           AWS_MAX_ATTEMPTS: 5
         run: |
           AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
-          aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
+          retry () {
+              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
+          }
+          retry aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
               --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
       - name: Chown workspace
         run: |
@@ -87,8 +86,8 @@ jobs:
           docker run --pull=never --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
       - name: Clean workspace
         run: |
-          rm -rf "${GITHUB_WORKSPACE:?}/*"
-          rm -f ~/.ssh/authorized_keys
+          rm -rf "${GITHUB_WORKSPACE}"
+          mkdir "${GITHUB_WORKSPACE}"
       - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
         uses: seemethere/add-github-ssh-key@v1
         with:
@@ -202,7 +201,7 @@ jobs:
           SCRIBE_GRAPHQL_ACCESS_TOKEN: ${{ secrets.SCRIBE_GRAPHQL_ACCESS_TOKEN }}
           BRANCH: ${{ steps.parse-ref.outputs.branch }}
           TAG: ${{ steps.parse-ref.outputs.tag }}
-          WORKFLOW_ID: '${{ github.run_id }}_${{ github.run_number }}'
+          WORKFLOW_ID: '${{ github.run_id }}'
         run: |
           COMMIT_TIME=$(git log --max-count=1 --format=%ct || echo 0)
           export COMMIT_TIME
@@ -259,7 +258,7 @@ jobs:
     env:
       DOCKER_IMAGE: ${{ needs.build.outputs.docker_image }}
       DOCS_TYPE: ${{ matrix.docs_type }}
-      WITH_PUSH: ${{ github.event_name == 'schedule' }}
+      WITH_PUSH: ${{ github.event_name == 'schedule' || startsWith(github.event.ref, 'refs/tags/v') }}
     steps:
       - name: Display EC2 information
         shell: bash
@@ -280,7 +279,10 @@ jobs:
           AWS_MAX_ATTEMPTS: 5
         run: |
           AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
-          aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
+          retry () {
+              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
+          }
+          retry aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
               --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
       - name: Chown workspace
         run: |
@@ -292,8 +294,8 @@ jobs:
           docker run --pull=never --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
       - name: Clean workspace
         run: |
-          rm -rf "${GITHUB_WORKSPACE:?}/*"
-          rm -f ~/.ssh/authorized_keys
+          rm -rf "${GITHUB_WORKSPACE}"
+          mkdir "${GITHUB_WORKSPACE}"
       - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
         uses: seemethere/add-github-ssh-key@v1
         with:
@@ -328,9 +330,12 @@ jobs:
         run: |
           set -ex
           time docker pull "${DOCKER_IMAGE}" > /dev/null
-          echo "${GITHUB_REF}"
-          # TODO: Set it correctly when workflows are scheduled on tags
-          target="master"
+          # Convert refs/tags/v1.12.0rc3 into 1.12
+          if [[ "${GITHUB_REF}" =~ ^refs/tags/v([0-9]+\.[0-9]+)\.* ]]; then
+            target="${BASH_REMATCH[1]}"
+          else
+            target="master"
+          fi
           # detached container should get cleaned up by teardown_ec2_linux
           container_name=$(docker run \
             -e BUILD_ENVIRONMENT \

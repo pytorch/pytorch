@@ -418,8 +418,15 @@ class TORCH_API LoopNest {
   // Returns true if the given loop has a loop-carried dependence.
   static bool hasLoopCarriedDependence(ForPtr loop);
 
-  static void unroll(ForPtr f, StmtPtr* unrolled);
-  static void unroll(ForPtr f);
+  // Unrolls all the iterations of the given loop.
+  // Requires that the loop bounds are constant.
+  static void fullUnroll(ForPtr f, StmtPtr* unrolled);
+  static void fullUnroll(ForPtr f);
+
+  // Unrolls the given loop for the specified factor.
+  // This does not require constant bounds for the loop being unrolled.
+  static void unroll(ForPtr f, int factor, ForPtr* tail);
+  static void unroll(ForPtr f, int factor);
 
   static bool normalize(ForPtr f);
   static bool isNormalized(ForPtr f);
@@ -557,6 +564,10 @@ class TORCH_API LoopNest {
     return output_bufs_;
   }
   std::vector<BufPtr> getIntermediateBufs() const;
+
+  // Finds which is the outer For between a and b for loops. If neither of the 2
+  // Fors is an ancestor of the other, it returns nullptr.
+  static ForPtr findOuterFor(ForPtr a, ForPtr b);
 
  private:
   void initialize(

@@ -1516,7 +1516,7 @@ class TestSparse(TestCase):
 
         # sum an empty tensor
         empty_S = torch.sparse_coo_tensor(size=with_size, dtype=dtype, device=device)
-        self.assertRaises(RuntimeError, lambda: torch.sparse.sum(empty_S, [0]))
+        self.assertEqual(torch.sparse.sum(empty_S, [0]).to_dense(), torch.sum(empty_S.to_dense(), [0]))
         self.assertEqual(torch.sparse.sum(empty_S), torch.tensor(0, dtype=dtype, device=device))
         empty_S.requires_grad_(True)
         empty_S_sum = torch.sparse.sum(empty_S)
@@ -1622,6 +1622,7 @@ class TestSparse(TestCase):
             self._test_basic_ops_shape(9, 0, [10, 10, 10], [], dtype, device, coalesced)
             self._test_basic_ops_shape(0, 0, [10, 10, 10], [], dtype, device, coalesced)
             self._test_basic_ops_shape(0, 0, [10, 10, 0], [], dtype, device, coalesced)
+            self._test_basic_ops_shape(0, 0, [], [], dtype, device, coalesced)
 
         def _test_basic_ops_hybrid():
             self._test_basic_ops_shape(9, 12, [5, 6], [2, 3], dtype, device, coalesced)
@@ -3358,27 +3359,72 @@ class TestSparse(TestCase):
             with self.assertRaisesRegex(NotImplementedError, "CUDA"):
                 t23 * s
 
+    @dtypes(torch.double, torch.cdouble)
+    def test_full_broadcast_to(self, device, dtype):
+        def can_broadcast(s0, s1):
+            s0 = tuple(reversed(s0))
+            s1 = tuple(reversed(s1))
+            for i in range(len(s0)):
+                if s0[i] != 1 and s0[i] != s1[i]:
+                    return False
+            return True
+        sizes = (
+            (), (1,), (2,), (1, 1), (3, 1), (3, 2), (4, 1, 1), (4, 3, 2)
+        )
+        for s0, s1 in itertools.combinations(sizes, r=2):
+            t = make_tensor(s0, device, dtype, low=-9, high=9)
+            for sparse_dims in range(1, len(s0) + 1):
+                s = t.to_sparse(sparse_dims)
+                if can_broadcast(s0, s1):
+                    t_res = torch.broadcast_to(t, s1)
+                    s_res = torch._sparse_broadcast_to(s, s1)
+                    torch._validate_sparse_coo_tensor_args(s_res._indices(), s_res._values(), s_res.shape)
+                    if s_res.is_coalesced():
+                        # ensure that is_coalesced is estimated correctly
+                        self.assertEqual(s_res, torch.sparse_coo_tensor(s_res._indices(), s_res._values(), s_res.shape).coalesce())
+                    self.assertEqual(s_res.to_dense(), t_res)
+                else:
+                    with self.assertRaisesRegex(RuntimeError,
+                                                r"The expanded size of the tensor \(\d\) "
+                                                r"must match the existing size \(\d\)"):
+                        torch._sparse_broadcast_to(s, s1)
+
+    @coalescedonoff
+    @dtypes(torch.double, torch.cdouble)
+    def test_sparse_broadcast_to(self, device, dtype, coalesced):
+        def test(sparse_dims, nnz, with_size, new_size):
+            x = self._gen_sparse(sparse_dims, nnz, with_size, dtype, device, coalesced)[0]
+            y = self.safeToDense(x)
+            x1 = torch._sparse_broadcast_to(x, new_size)
+            y1 = y.broadcast_to(new_size)
+            self.assertEqual(self.safeToDense(x1), y1)
+
+        test(4, 6, [7, 3, 1, 3, 0], [7, 3, 4, 3, 0])
+        test(4, 6, [7, 3, 1, 3, 0], [2, 7, 3, 1, 3, 0])
+        test(4, 6, [7, 3, 1, 3, 1, 3], [7, 3, 1, 3, 2, 3])
+        test(4, 6, [7, 3, 1, 3, 2, 1], [7, 3, 1, 3, 2, 3])
+
 
 class TestSparseOneOff(TestCase):
     @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
     def test_cuda_from_cpu(self):
         with self.assertRaisesRegex(
                 RuntimeError,
-                "backend of indices \\(CUDA\\) must match backend of values \\(CPU\\)"):
+                "Expected all tensors to be on the same device, but found at least two devices, cuda:0 and cpu!"):
             torch.sparse.FloatTensor(torch.zeros(1, 4).long().cuda(),
                                      torch.randn(4, 4, 4),
                                      [3, 4, 4])
 
         with self.assertRaisesRegex(
                 RuntimeError,
-                "backend of indices \\(CUDA\\) must match backend of values \\(CPU\\)"):
+                "Expected all tensors to be on the same device, but found at least two devices, cuda:0 and cpu!"):
             torch.sparse.FloatTensor(torch.zeros(1, 4).long().cuda(),
                                      torch.randn(4, 4, 4, 0),
                                      [3, 4, 4, 0])
 
         with self.assertRaisesRegex(
                 RuntimeError,
-                "backend of indices \\(CUDA\\) must match backend of values \\(CPU\\)"):
+                "Expected all tensors to be on the same device, but found at least two devices, cuda:0 and cpu!"):
             torch.sparse.FloatTensor(torch.LongTensor(1, 0).cuda(),
                                      torch.randn(0, 4, 4, 0),
                                      [0, 4, 4, 0])

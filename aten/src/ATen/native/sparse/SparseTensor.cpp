@@ -1,9 +1,10 @@
 // Basic functions on sparse tensors
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 
-#include <ATen/ATen.h>
+#include <ATen/core/Tensor.h>
+#include <ATen/Dispatch.h>
 #include <ATen/InitialTensorOptions.h>
 #include <ATen/Layout.h>
-#include <ATen/NativeFunctions.h>
 #include <ATen/Parallel.h>
 #include <ATen/SparseTensorImpl.h>
 #include <ATen/SparseTensorUtils.h>
@@ -13,6 +14,52 @@
 #include <ATen/native/Copy.h>
 #include <ATen/native/CPUBlas.h>
 #include <c10/util/irange.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/_coalesce.h>
+#include <ATen/ops/_coalesce_native.h>
+#include <ATen/ops/_coalesced_native.h>
+#include <ATen/ops/_dimI_native.h>
+#include <ATen/ops/_dimV_native.h>
+#include <ATen/ops/_indices_native.h>
+#include <ATen/ops/_nnz_native.h>
+#include <ATen/ops/_sparse_coo_tensor_unsafe_native.h>
+#include <ATen/ops/_sparse_coo_tensor_with_dims.h>
+#include <ATen/ops/_sparse_coo_tensor_with_dims_and_tensors.h>
+#include <ATen/ops/_sparse_coo_tensor_with_dims_and_tensors_native.h>
+#include <ATen/ops/_sparse_coo_tensor_with_dims_native.h>
+#include <ATen/ops/_sparse_mask_helper_native.h>
+#include <ATen/ops/_validate_sparse_coo_tensor_args_native.h>
+#include <ATen/ops/_values_native.h>
+#include <ATen/ops/clone_native.h>
+#include <ATen/ops/coalesce_native.h>
+#include <ATen/ops/copy_native.h>
+#include <ATen/ops/copy_sparse_to_sparse.h>
+#include <ATen/ops/copy_sparse_to_sparse_native.h>
+#include <ATen/ops/dense_dim_native.h>
+#include <ATen/ops/empty.h>
+#include <ATen/ops/empty_like_native.h>
+#include <ATen/ops/empty_native.h>
+#include <ATen/ops/index_select.h>
+#include <ATen/ops/indices_native.h>
+#include <ATen/ops/is_coalesced_native.h>
+#include <ATen/ops/resize_as_sparse.h>
+#include <ATen/ops/resize_as_sparse_native.h>
+#include <ATen/ops/sparse_coo_tensor.h>
+#include <ATen/ops/sparse_coo_tensor_native.h>
+#include <ATen/ops/sparse_dim_native.h>
+#include <ATen/ops/sparse_mask_native.h>
+#include <ATen/ops/sparse_resize_and_clear_native.h>
+#include <ATen/ops/sparse_resize_native.h>
+#include <ATen/ops/to_dense_native.h>
+#include <ATen/ops/to_sparse_native.h>
+#include <ATen/ops/unique_dim.h>
+#include <ATen/ops/values_native.h>
+#include <ATen/ops/zeros.h>
+#endif
 
 namespace at {
 namespace native {
@@ -817,6 +864,40 @@ Tensor sparse_mask_helper_cpu(
     }
   });
   return r_values;
+}
+
+Tensor empty_like_sparse_coo(
+    const Tensor& self,
+    c10::optional<ScalarType> dtype,
+    c10::optional<Layout> layout,
+    c10::optional<Device> device,
+    c10::optional<bool> pin_memory,
+    c10::optional<c10::MemoryFormat> optional_memory_format) {
+  TensorOptions options_ = TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory);
+
+  TORCH_CHECK(
+    !(options_.has_memory_format() && optional_memory_format.has_value()),
+    "Cannot set memory_format both in TensorOptions and explicit argument; please delete "
+    "the redundant setter.");
+
+  TensorOptions options =
+      self.options()
+          .merge_in(options_)
+          .merge_memory_format(optional_memory_format);
+
+  TORCH_CHECK(
+      !(options.layout() != kStrided &&
+          optional_memory_format.has_value()),
+      "memory format option is only supported by strided tensors");
+
+  if (options.layout() == kSparse) {
+    auto result = at::empty({0}, options);
+    result.sparse_resize_and_clear_(
+        self.sizes(), self.sparse_dim(), self.dense_dim());
+    return result;
+  } else {
+    return at::native::empty_like(self, dtype, layout, device, pin_memory, optional_memory_format);
+  }
 }
 
 } // namespace native

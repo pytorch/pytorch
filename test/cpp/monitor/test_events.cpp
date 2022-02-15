@@ -14,13 +14,12 @@ struct AggregatingEventHandler : public EventHandler {
 
 TEST(EventsTest, EventHandler) {
   Event e;
-  e.type = "test";
-  e.message = "test message";
+  e.name = "test";
   e.timestamp = std::chrono::system_clock::now();
-  e.metadata["string"] = "asdf";
-  e.metadata["double"] = 1234.5678;
-  e.metadata["int"] = 1234L;
-  e.metadata["bool"] = true;
+  e.data["string"] = "asdf";
+  e.data["double"] = 1234.5678;
+  e.data["int"] = 1234L;
+  e.data["bool"] = true;
 
   // log to nothing
   logEvent(e);

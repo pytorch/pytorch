@@ -1389,19 +1389,22 @@ TEST_F(ModulesTest, Dropout) {
 }
 
 TEST_F(ModulesTest, Dropout2d) {
+  auto p = 0.5;
   for (const auto inplace : {false, true}) {
-    Dropout2d dropout(Dropout2dOptions(0.5).inplace(inplace));
-    torch::Tensor x = torch::ones({10, 10});
+    Dropout2d dropout(Dropout2dOptions(p).inplace(inplace));
+    torch::Tensor x = torch::empty({50, 50, 2, 2}).fill_(1 - p);
     if (!inplace) {
       x.requires_grad_(true);
     }
     torch::Tensor y = dropout(x);
 
-    ASSERT_EQ(y.ndimension(), 2);
-    ASSERT_EQ(y.size(0), 10);
-    ASSERT_EQ(y.size(1), 10);
-    ASSERT_LT(y.sum().item<float>(), 130); // Probably
-    ASSERT_GT(y.sum().item<float>(), 70); // Probably
+    ASSERT_EQ(y.ndimension(), 4);
+    ASSERT_EQ(y.size(0), 50);
+    ASSERT_EQ(y.size(1), 50);
+    ASSERT_EQ(y.size(2), 2);
+    ASSERT_EQ(y.size(3), 2);
+    ASSERT_LT((y.mean() - (1 - p)).abs().item<float>(), 0.05);
+
     if (inplace) {
       ASSERT_TRUE(y.allclose(x));
     } else {
@@ -1409,26 +1412,29 @@ TEST_F(ModulesTest, Dropout2d) {
     }
 
     dropout->eval();
-    y = dropout(torch::ones({10, 10}));
-    ASSERT_EQ(y.sum().item<float>(), 100);
+    y = dropout(torch::ones({2, 2, 10, 10}));
+    ASSERT_EQ(y.sum().item<float>(), 400);
   }
 }
 
 TEST_F(ModulesTest, Dropout3d) {
   for (const auto inplace : {false, true}) {
-    Dropout3d dropout(Dropout3dOptions(0.5).inplace(inplace));
-    torch::Tensor x = torch::ones({4, 5, 5});
+    auto p = 0.5;
+    Dropout3d dropout(Dropout3dOptions(p).inplace(inplace));
+    torch::Tensor x = torch::empty({50, 50, 2, 2, 2}).fill_(1 - p);
     if (!inplace) {
       x.requires_grad_(true);
     }
     torch::Tensor y = dropout(x);
 
-    ASSERT_EQ(y.ndimension(), 3);
-    ASSERT_EQ(y.size(0), 4);
-    ASSERT_EQ(y.size(1), 5);
-    ASSERT_EQ(y.size(1), 5);
-    ASSERT_LT(y.sum().item<float>(), 130); // Probably
-    ASSERT_GT(y.sum().item<float>(), 70); // Probably
+    ASSERT_EQ(y.ndimension(), 5);
+    ASSERT_EQ(y.size(0), 50);
+    ASSERT_EQ(y.size(1), 50);
+    ASSERT_EQ(y.size(2), 2);
+    ASSERT_EQ(y.size(3), 2);
+    ASSERT_EQ(y.size(4), 2);
+    ASSERT_LT((y.mean() - (1 - p)).abs().item<float>(), 0.05);
+
     if (inplace) {
       ASSERT_TRUE(y.allclose(x));
     } else {
@@ -1436,8 +1442,8 @@ TEST_F(ModulesTest, Dropout3d) {
     }
 
     dropout->eval();
-    y = dropout(torch::ones({4, 5, 5}));
-    ASSERT_EQ(y.sum().item<float>(), 100);
+    y = dropout(torch::ones({4, 4, 5, 5}));
+    ASSERT_EQ(y.sum().item<float>(), 400);
   }
 }
 
@@ -2668,6 +2674,15 @@ TEST_F(ModulesTest, AdaptiveLogSoftmaxWithLoss) {
       ASSERT_TRUE(torch::allclose(out, logprob_out.gather(1, y.unsqueeze(1)).squeeze()));
     }
   }
+  {
+    // test no batch dim
+    AdaptiveLogSoftmaxWithLoss asfm(AdaptiveLogSoftmaxWithLossOptions(16, 20, {4, 10, 15}).div_value(2.));
+    auto x = torch::randn({1, 16});
+    auto y = torch::tensor({17});
+    auto x2 = x.squeeze(0);
+    auto y2 = y.squeeze(0);
+    ASSERT_TRUE(torch::allclose(asfm(x, y).output.squeeze(0), asfm(x2, y2).output));
+  }
 }
 
 TEST_F(ModulesTest, Softmax2d) {
@@ -2845,13 +2860,23 @@ TEST_F(ModulesTest, GLU) {
 }
 
 TEST_F(ModulesTest, GELU) {
-  GELU model;
+  GELU model(GELUOptions().approximate("none"));
   const auto x = torch::linspace(-3.0, 3.0, 100);
   const auto y_exp = x * 0.5 * (1.0 + torch::erf(x / std::sqrt(2.0)));
   const auto y = model(x);
   ASSERT_TRUE(torch::allclose(y, y_exp, 1.4e-06, 1e-05));
 }
 
+TEST_F(ModulesTest, TanhGELU) {
+  GELU model(GELUOptions().approximate("tanh"));
+  const auto x = torch::linspace(-3.0, 3.0, 100);
+  const auto inner = std::sqrt(2 / M_PI) * (x + 0.044715 * x.pow(3.0));
+  const auto y_exp = 0.5 * x * (1.0 + inner.tanh());
+  const auto y = model(x);
+  ASSERT_TRUE(torch::allclose(y, y_exp, 1.4e-06, 1e-05));
+}
+
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, Mish) {
   Mish model;
   auto x = torch::randn(100) * 10;
@@ -3415,7 +3440,8 @@ namespace detail {
   std::tuple<torch::Tensor, torch::Tensor> _scaled_dot_attn_ref(
     const torch::Tensor& Q, const torch::Tensor& K, const torch::Tensor& V,
     at::IntArrayRef dims, const torch::Tensor& unseen_mask = {},
-    const torch::Tensor& key_padding_mask = {}) {
+    const torch::Tensor& key_padding_mask = {},
+    bool average_attn_weights = true) {
     auto QKT = _batchmatmul(
       Q,
       K.permute({0, 1, 3, 2}) / std::sqrt(dims[3])
@@ -3442,8 +3468,10 @@ namespace detail {
     }
     auto reference = _softmax(QKT);
     auto ref_attn_weight = reference;
-    // NOLINTNEXTLINE(bugprone-argument-comment)
-    ref_attn_weight = torch::sum(ref_attn_weight, /*axis=*/1) / b2;
+    if (average_attn_weights) {
+      // NOLINTNEXTLINE(bugprone-argument-comment)
+      ref_attn_weight = torch::sum(ref_attn_weight, /*axis=*/1) / b2;
+    }
     reference = _batchmatmul(reference, V);
     return std::tie(reference, ref_attn_weight);
   }
@@ -3470,7 +3498,8 @@ namespace detail {
 
   void _multihead_attn_test_helper(bool add_key_padding_mask = false,
     bool add_bias_kv = false, bool add_zero_attn = false,
-    bool saved_kv = false, bool same_embed_dim = false) {
+    bool saved_kv = false, bool same_embed_dim = false,
+    bool average_attn_weights = true) {
     std::random_device device;
     std::mt19937 generator(device());
     std::uniform_int_distribution<int> d_2_10(2, 10);
@@ -3593,6 +3622,7 @@ namespace detail {
           .attn_mask(attn_mask_tensor)
           .static_k(saved_k_tensor)
           .static_v(saved_v_tensor)
+          .average_attn_weights(average_attn_weights)
         );
       } else {
         std::tie(result, result_weight) = F::multi_head_attention_forward(
@@ -3619,6 +3649,7 @@ namespace detail {
           .v_proj_weight(multihead_attn_module->v_proj_weight)
           .static_k(saved_k_tensor)
           .static_v(saved_v_tensor)
+          .average_attn_weights(average_attn_weights)
         );
       }
       result = result.squeeze(0).detach();
@@ -3689,7 +3720,8 @@ namespace detail {
           V_split,
           Q_split.sizes(),
           attn_mask,
-          key_padding_mask
+          key_padding_mask,
+          average_attn_weights
       );
       const auto combined_attn_heads = _combine_heads_ref(attn_heads, {batch_sz, 1}, nheads, d_head);
       auto reference = _fc(combined_attn_heads, multihead_attn_module->out_proj->weight, multihead_attn_module->out_proj->bias);
@@ -3711,83 +3743,93 @@ namespace detail {
 TEST_F(ModulesTest, MultiheadAttention) {
   using namespace ::detail;
 
-  // test_multihead_attn_add_zero_attn
-  _multihead_attn_test_helper(
-    /*add_key_padding_mask=*/false,
-    /*add_bias_kv=*/false,
-    /*add_zero_attn=*/true,
-    /*saved_kv=*/false,
-    /*same_embed_dim=*/false
-  );
+  for (auto average_attn_weights : {false, true}) {
+    // test_multihead_attn_add_zero_attn
+    _multihead_attn_test_helper(
+      /*add_key_padding_mask=*/false,
+      /*add_bias_kv=*/false,
+      /*add_zero_attn=*/true,
+      /*saved_kv=*/false,
+      /*same_embed_dim=*/false,
+      /*average_attn_weights=*/average_attn_weights
+    );
 
-  // test_multihead_attn_add_bias_kv
-  _multihead_attn_test_helper(
-    /*add_key_padding_mask=*/false,
-    /*add_bias_kv=*/true,
-    /*add_zero_attn=*/false,
-    /*saved_kv=*/false,
-    /*same_embed_dim=*/false
-  );
+    // test_multihead_attn_add_bias_kv
+    _multihead_attn_test_helper(
+      /*add_key_padding_mask=*/false,
+      /*add_bias_kv=*/true,
+      /*add_zero_attn=*/false,
+      /*saved_kv=*/false,
+      /*same_embed_dim=*/false,
+      /*average_attn_weights=*/average_attn_weights
+    );
 
-  // test_multihead_attn_no_masking():
-  _multihead_attn_test_helper();
+    // test_multihead_attn_no_masking():
+    _multihead_attn_test_helper();
 
-  // test_multihead_attn_key_padding_mask
-  _multihead_attn_test_helper(
-    /*add_key_padding_mask=*/true,
-    /*add_bias_kv=*/false,
-    /*add_zero_attn=*/false,
-    /*saved_kv=*/false,
-    /*same_embed_dim=*/false
-  );
+    // test_multihead_attn_key_padding_mask
+    _multihead_attn_test_helper(
+      /*add_key_padding_mask=*/true,
+      /*add_bias_kv=*/false,
+      /*add_zero_attn=*/false,
+      /*saved_kv=*/false,
+      /*same_embed_dim=*/false,
+      /*average_attn_weights=*/average_attn_weights
+    );
 
-  // test_multihead_attn_saved_kv
-  _multihead_attn_test_helper(
-    /*add_key_padding_mask=*/false,
-    /*add_bias_kv=*/false,
-    /*add_zero_attn=*/false,
-    /*saved_kv=*/true,
-    /*same_embed_dim=*/false
-  );
+    // test_multihead_attn_saved_kv
+    _multihead_attn_test_helper(
+      /*add_key_padding_mask=*/false,
+      /*add_bias_kv=*/false,
+      /*add_zero_attn=*/false,
+      /*saved_kv=*/true,
+      /*same_embed_dim=*/false,
+      /*average_attn_weights=*/average_attn_weights
+    );
 
-  // test_multihead_attn_add_bias_kv_zero_attn
-  _multihead_attn_test_helper(
-    /*add_key_padding_mask=*/true,
-    /*add_bias_kv=*/true,
-    /*add_zero_attn=*/true,
-    /*saved_kv=*/false,
-    /*same_embed_dim=*/false
-  );
-
-  // test_multihead_attn_all_arguments1
-  _multihead_attn_test_helper(
-    /*add_key_padding_mask=*/true,
-    /*add_bias_kv=*/false,
-    /*add_zero_attn=*/true,
-    /*saved_kv=*/true,
-    /*same_embed_dim=*/false
-  );
-
-  ASSERT_THROWS_WITH(
-    // test_multihead_attn_all_arguments2
+    // test_multihead_attn_add_bias_kv_zero_attn
     _multihead_attn_test_helper(
       /*add_key_padding_mask=*/true,
       /*add_bias_kv=*/true,
       /*add_zero_attn=*/true,
-      /*saved_kv=*/true,
-      /*same_embed_dim=*/false
-    ),
-    "bias cannot be added to static key"
-  );
+      /*saved_kv=*/false,
+      /*same_embed_dim=*/false,
+      /*average_attn_weights=*/average_attn_weights
+    );
 
-  // test_multihead_attn_all_arguments3
-  _multihead_attn_test_helper(
-    /*add_key_padding_mask=*/true,
-    /*add_bias_kv=*/false,
-    /*add_zero_attn=*/true,
-    /*saved_kv=*/true,
-    /*same_embed_dim=*/true
-  );
+    // test_multihead_attn_all_arguments1
+    _multihead_attn_test_helper(
+      /*add_key_padding_mask=*/true,
+      /*add_bias_kv=*/false,
+      /*add_zero_attn=*/true,
+      /*saved_kv=*/true,
+      /*same_embed_dim=*/false,
+      /*average_attn_weights=*/average_attn_weights
+    );
+
+    ASSERT_THROWS_WITH(
+      // test_multihead_attn_all_arguments2
+      _multihead_attn_test_helper(
+        /*add_key_padding_mask=*/true,
+        /*add_bias_kv=*/true,
+        /*add_zero_attn=*/true,
+        /*saved_kv=*/true,
+        /*same_embed_dim=*/false,
+        /*average_attn_weights=*/average_attn_weights
+      ),
+      "bias cannot be added to static key"
+    );
+
+    // test_multihead_attn_all_arguments3
+    _multihead_attn_test_helper(
+      /*add_key_padding_mask=*/true,
+      /*add_bias_kv=*/false,
+      /*add_zero_attn=*/true,
+      /*saved_kv=*/true,
+      /*same_embed_dim=*/true,
+      /*average_attn_weights=*/average_attn_weights
+    );
+  }
 }
 
 TEST_F(ModulesTest, PrettyPrintIdentity) {
