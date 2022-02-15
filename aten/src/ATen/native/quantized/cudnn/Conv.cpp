@@ -45,6 +45,16 @@ cudnn_frontend::Tensor getTensorDescriptor(const Tensor &t, int64_t id, uint8_t 
     .build();
 }
 
+cudnn_frontend::Tensor getTensorDescriptor(const IntArrayRef& shape, const IntArrayRef& strides, cudnnDataType_t cudnn_dtype, int64_t id, uint8_t alignment) {
+  return cudnn_frontend::TensorBuilder()
+    .setDim(shape.size(), shape.data())
+    .setStrides(strides.size(), strides.data())
+    .setId(id)
+    .setAlignment(alignment)
+    .setDataType(cudnn_dtype)
+    .build();
+}
+
 // TODO: there is a table from input dtype and weight dtype to operator dtype,
 // we can derive the operator dtype based on input dtype
 cudnn_frontend::ConvDesc_v8 getConvDescriptor(cudnnDataType_t dataType, IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation) {
@@ -166,6 +176,7 @@ at::SmallVector<int64_t, 4> MakeConvOutputShape<2>(
   return {N, M, Y_H, Y_W};
 }
 
+// the parameter quantized_output is a quantized tensor
 void raw_cudnn_convolution_forward_out(
     const Tensor& quantized_output,
     const Tensor& input,
@@ -184,8 +195,10 @@ void raw_cudnn_convolution_forward_out(
     return;
   }
 
-  Tensor conv_output = at::empty_like(quantized_output, quantized_output.options().dtype(at::kFloat));
-  Tensor requantize_multiplier_tensor = at::full_like(quantized_output, requantize_multiplier);
+  Tensor conv_output = at::empty(quantized_output.sizes(), at::device(at::kCUDA).dtype(at::kFloat), at::MemoryFormat::ChannelsLast);
+  // TODO: compile empty & fill_ using full_like or full
+  Tensor requantize_multiplier_tensor = at::empty(quantized_output.sizes(), at::device(at::kCUDA).dtype(at::kFloat), at::MemoryFormat::ChannelsLast);
+  requantize_multiplier_tensor.fill_(requantize_multiplier);
   cudnnHandle_t handle = getCudnnHandle();
   CacheKey key;
   setConvolutionParams(&key.params, input, weight, padding, stride, dilation, groups, deterministic, allow_tf32);
@@ -230,7 +243,9 @@ void raw_cudnn_convolution_forward_out(
   auto requant_op = cudnn_frontend::OperationBuilder(CUDNN_BACKEND_OPERATION_POINTWISE_DESCRIPTOR)
     .setxDesc(conv_op.getOutputTensor())
     .setbDesc(getTensorDescriptor(requantize_multiplier_tensor, 's', getAlignment(requantize_multiplier_tensor)))
-    .setyDesc(getTensorDescriptor(quantized_output, 'r', getAlignment(quantized_output)))
+    // .setyDesc(getTensorDescriptor(quantized_output.sizes(), quantized_output.strides(), CUDNN_DATA_INT8, 'r', getAlignment(quantized_output)))
+    // I think this is inefficient. it makes a copy I believe. The above one can be used instead
+    .setyDesc(getTensorDescriptor(quantized_output.int_repr(), 'r', getAlignment(quantized_output)))
     .setpwDesc(getPointWiseMulDescriptor(getCudnnDataType(requantize_multiplier_tensor)))
     .build();
   // std::cout << "operator:" << requant_op.describe() << std::endl;
@@ -272,8 +287,6 @@ void raw_cudnn_convolution_forward_out(
     } catch (cudnn_frontend::cudnnException &e) {std::cout << "cudnn error:" << e.what() << std::endl;} catch(CuDNNError &e) { std::cout << "other error" << e.what() << std::endl;}
   }
 
-  // add quantization step here, so we need to pass in output scale & zp in to this func?
-
   TORCH_CHECK(false, "Unable to find an engine to execute this computation");
 }
 
@@ -306,11 +319,10 @@ Tensor raw_cudnn_convolution_forward(
   kernel_size, stride, padding, dilation)};
   Tensor quantized_output = at::_empty_affine_quantized(
       output_shape,
-      // i'm not sure if this chaining is correct
-      TensorOptions().dtype(ScalarType::QInt8).device(c10::kCUDA).layout(Layout::Strided),
+      at::device(at::kCUDA).dtype(ScalarType::QInt8),
       output_scale,
-      output_zero_point);
-
+      output_zero_point,
+      at::MemoryFormat::ChannelsLast);
   raw_cudnn_convolution_forward_out(
       quantized_output, act, weight,
       padding, stride, dilation, groups,

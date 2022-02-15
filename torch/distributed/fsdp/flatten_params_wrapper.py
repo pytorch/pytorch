@@ -6,10 +6,12 @@
 # Copyright (c) Tongzhou Wang
 # Licensed under the MIT License.
 
+import contextlib
 from itertools import accumulate
 from typing import (
     Any,
     Dict,
+    Generator,
     Iterator,
     List,
     NamedTuple,
@@ -243,6 +245,11 @@ class FlattenParamsWrapper(nn.Module):
         self.flat_param = FlatParameter(params, params[0].requires_grad)
         self.flat_param._param_infos = param_infos
         self.flat_param._shared_param_infos = shared_param_infos
+        # This attribute is used to remember the flat_param inside the unflatten_params()
+        # context. With this attribute, FSDP can access the flat parameter metadata
+        # even if flat_param is temporarily deleted.
+        # ``_orig_flat_param` is a list to avoid being tracked by ``state_dict()``.
+        self._orig_flat_param: List[Optional[FlatParameter]] = [None]
         self._flatten_params()
 
     @property
@@ -287,16 +294,20 @@ class FlattenParamsWrapper(nn.Module):
 
         return params, param_infos, shared_param_infos
 
-    def _flatten_params(self) -> None:
+    def _flatten_params(self, external_data: Optional[FlatParameter] = None) -> None:
         """Flatten the managed parameters and replaced the original
-        attributes with views to the flat param.
+        attributes with views to the flat param. If `external_data`
+        is passed, it will be used as the flat_param.
         """
         # register the flatten one
         assert (
-            self.flat_param is not None
-        ), "Can not flatten params when flat_param is None"
+            getattr(self, "flat_param", None) is not None or external_data is not None
+        ), "Can not flatten params when both flat_param and external_data are None."
+        if external_data is not None:
+            self.flat_param = external_data
         self.register_parameter("flat_param", self.flat_param)
 
+        assert self.flat_param is not None  # avoid mypy complain.
         # deregister the names as parameters
         for _, m, n in self.flat_param._param_infos:
             delattr(m, n)
@@ -338,6 +349,25 @@ class FlattenParamsWrapper(nn.Module):
             m.register_parameter(n, getattr(shared_m, shared_n))
 
         del self.flat_param
+
+    @contextlib.contextmanager
+    def unflatten_params(self) -> Generator:
+        """
+        Unflatten params. If the current instance is already unflattened, then
+        it will remain unflattened after the context manager exits.
+        """
+        if getattr(self, "flat_param", None) is None:
+            yield
+        else:
+            self._orig_flat_param[0] = self.flat_param
+            self._unflatten_params()
+            # Put yield in a try...finally in case the caller catches the exception and handles
+            # it. In that case, we need to properly handle the undoing of state here.
+            try:
+                yield
+            finally:
+                self._flatten_params(self._orig_flat_param[0])
+                self._orig_flat_param[0] = None
 
     def _get_param_views(
         self, external_data: Optional[Tensor] = None
