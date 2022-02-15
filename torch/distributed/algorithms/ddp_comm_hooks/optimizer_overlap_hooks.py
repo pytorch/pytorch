@@ -2,7 +2,6 @@ from typing import Any, Callable
 
 import torch
 import torch.distributed as dist
-from torch.distributed.optim import create_functional_optim
 
 _FUNCTIONAL_OPTIM_STEP_METHOD_NAME = "step_param"
 
@@ -12,31 +11,16 @@ class _OptimizerHookState(object):
     Currently contains only optimizer class which must have a method `step_param`.
     """
 
-    __slots__ = ["functional_optimizer"]
+    __slots__ = ["functional_optimizer", "params_to_optimize"]
 
-    def __init__(
-        self, functional_optim_cls, *functional_optim_args, **functional_optim_kwargs
-    ):
-        self.functional_optimizer = create_functional_optim(
-            functional_optim_cls,
-            *functional_optim_args,
-            **functional_optim_kwargs,
-        )
+    def __init__(self, functional_optim, params=None):
+        self.functional_optimizer = functional_optim
         self._check_valid_functional_optim()
+        self._set_params_to_optimize(params)
 
-    @classmethod
-    def from_functional_optim(cls, functional_optim):
-        r"""
-        Create a `_OptimizerHookState`, which simply
-        holds a functional optimizer, directly from a
-        functional optimizer given by `functional_optim`.
-        Note that the `functional_optim` must implement
-        `step_param` to support per-parameter optimization.
-        """
-        opt_hook_state_inst = cls.__new__(cls)  # Does not call __init__
-        opt_hook_state_inst.functional_optimizer = functional_optim
-        opt_hook_state_inst._check_valid_functional_optim()
-        return opt_hook_state_inst
+    def _set_params_to_optimize(self, params):
+        if params is not None:
+            self.params_to_optimize = set(params)
 
     def _check_valid_functional_optim(self):
         if not hasattr(self.functional_optimizer, _FUNCTIONAL_OPTIM_STEP_METHOD_NAME):
@@ -57,6 +41,10 @@ def _hook_then_optimizer(
     .. warning ::
         This API is experimental adn subject to change.
     """
+    has_set_params = (
+        hasattr(optimizer_state, 'params_to_optimize')
+        and optimizer_state.params_to_optimize is not None
+    )
 
     def hook_then_optimizer_wrapper(
         hook_state, bucket: dist.GradBucket
@@ -68,10 +56,11 @@ def _hook_then_optimizer(
             gradient_tensors = bucket.gradients()
             model_params = bucket.parameters()
             for grad_tensor, model_param in zip(gradient_tensors, model_params):
-                optimizer_state.functional_optimizer.step_param(
-                    model_param,
-                    grad_tensor,
-                )
+                if not has_set_params or model_param in optimizer_state.params_to_optimize:
+                    optimizer_state.functional_optimizer.step_param(
+                        model_param,
+                        grad_tensor,
+                    )
             return bucket.buffer()
 
         return fut.then(optimizer_step)

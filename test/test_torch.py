@@ -4605,10 +4605,43 @@ else:
         self.assertEqual(z, x)
 
     @skipMeta
+    @onlyNativeDeviceTypes
+    @dtypes(*get_all_dtypes(include_bool=False))
+    def test_from_dlpack(self, device, dtype):
+        x = make_tensor((5,), device, dtype)
+        y = torch.from_dlpack(x)
+        self.assertEqual(x, y)
+
+    @skipMeta
+    @onlyNativeDeviceTypes
+    @dtypes(*get_all_dtypes(include_bool=False))
+    def test_from_dlpack_noncontinguous(self, device, dtype):
+        x = make_tensor((25,), device, dtype).reshape(5, 5)
+
+        y1 = x[0]
+        y1_dl = torch.from_dlpack(y1)
+        self.assertEqual(y1, y1_dl)
+
+        y2 = x[:, 0]
+        y2_dl = torch.from_dlpack(y2)
+        self.assertEqual(y2, y2_dl)
+
+        y3 = x[1, :]
+        y3_dl = torch.from_dlpack(y3)
+        self.assertEqual(y3, y3_dl)
+
+        y4 = x[1]
+        y4_dl = torch.from_dlpack(y4)
+        self.assertEqual(y4, y4_dl)
+
+        y5 = x.t()
+        y5_dl = torch.from_dlpack(y5)
+        self.assertEqual(y5, y5_dl)
+
+    @skipMeta
     @onlyCUDA
     @dtypes(*get_all_dtypes(include_bool=False))
     def test_dlpack_conversion_with_diff_streams(self, device, dtype):
-        from torch._C import _from_dlpack
         stream_a = torch.cuda.Stream()
         stream_b = torch.cuda.Stream()
         # DLPack protocol helps establish a correct stream order
@@ -4617,10 +4650,18 @@ else:
         # in the current stream to make sure that it was correctly populated.
         with torch.cuda.stream(stream_a):
             x = make_tensor((5,), device, dtype) + 1
-            z = _from_dlpack(x.__dlpack__(stream_b.cuda_stream))
+            z = torch.from_dlpack(x.__dlpack__(stream_b.cuda_stream))
             stream_a.synchronize()
         stream_b.synchronize()
         self.assertEqual(z, x)
+
+    @skipMeta
+    @onlyNativeDeviceTypes
+    @dtypes(*get_all_dtypes(include_bool=False))
+    def test_from_dlpack_dtype(self, device, dtype):
+        x = make_tensor((5,), device, dtype)
+        y = torch.from_dlpack(x)
+        assert x.dtype == y.dtype
 
     @skipMeta
     @onlyCUDA
@@ -5477,6 +5518,10 @@ class TestDevicePrecision(TestCase):
             actual = x[..., :1].clamp(lb, ub)
             self.assertEqual(expect, actual)
 
+    def test_cuda_device_idx(self, device):
+        x = torch.zeros(3, device=device)
+        y = torch._efficientzerotensor(3, device=device)
+        self.assertEqual(x.device, y.device)
 
 # we implemented custom deallocation for subclasses, so it behooves
 # us to make sure all of these bits work.  We'll use __del__ to
@@ -5713,38 +5758,53 @@ class TestTorch(TestCase):
     # FIXME: move to test_scatter_gather_ops.py
     def test_scatter_reduce(self):
         dtype = device = None
-
         output_size = 10
         shape = [5, 10, 20]
+        reduces = ["sum", "prod", "mean", "amax", "amin"]
+        fills = {"sum": 0, "prod": 1, "mean": 0, "amax": -(2 ** 31), "amin": 2 ** 31 - 1}
+        fns = {"sum": lambda t, v: t.add_(v),
+               "prod": lambda t, v: t.mul_(v),
+               "mean": lambda t, v, n: t.mul_(n).add_(v).div_(n + 1),
+               "amax": lambda t, v: torch.max(t, v, out=t),
+               "amin": lambda t, v: torch.min(t, v, out=t)}
 
         index = torch.randint(0, output_size, shape, dtype=torch.long, device=device)
         input = torch.randn(shape, dtype=dtype, device=device)
 
-        for dim in range(len(shape)):
-            output = input._scatter_reduce(dim, index, "sum", output_size=output_size)
+        for reduce in reduces:
+            for dim in range(len(shape)):
+                output = input._scatter_reduce(dim, index, reduce, output_size=output_size)
 
-            output_shape = copy.copy(shape)
-            output_shape[dim] = output_size
-            self.assertEqual(output.shape, output_shape)
+                # Check that output is of the correct size
+                output_shape = copy.copy(shape)
+                output_shape[dim] = output_size
+                self.assertEqual(output.shape, output_shape)
 
-            expected = torch.zeros(output_shape, dtype=dtype, device=device)
-            for i, j, k in itertools.product(range(shape[0]), range(shape[1]), range(shape[2])):
-                v = input[i, j, k]
-                m = index[i, j, k]
+                expected = torch.zeros(output_shape, dtype=dtype, device=device)
+                expected.fill_(fills[reduce])
+                counts = torch.zeros(output_shape, dtype=dtype, device=device)
+                for i, j, k in itertools.product(range(shape[0]), range(shape[1]), range(shape[2])):
+                    v = input[i, j, k]
+                    m = index[i, j, k]
 
-                if dim == 0:
-                    i = m
-                elif dim == 1:
-                    j = m
-                else:
-                    k = m
+                    if dim == 0:
+                        i = m
+                    elif dim == 1:
+                        j = m
+                    else:
+                        k = m
 
-                expected[i, j, k] += v
+                    op = fns[reduce]
+                    if (reduce == "mean"):
+                        op(expected[i, j, k], v, counts[i, j, k])
+                    else:
+                        op(expected[i, j, k], v)
+                    counts[i, j, k] += 1
 
-            self.assertTrue(torch.allclose(output, expected))
+                if (reduce == "amin" or reduce == "amax"):
+                    expected.masked_fill_(counts == 0, 0)
 
-            torch._scatter_reduce(input, dim, index, "sum", out=output)
-            self.assertTrue(torch.allclose(output, expected))
+                self.assertTrue(torch.allclose(output, expected))
 
         with self.assertRaisesRegex(RuntimeError, "Expected `dim` to be in range -3 to 2"):
             torch._scatter_reduce(input, 4, index, "sum")
@@ -5752,9 +5812,6 @@ class TestTorch(TestCase):
         with self.assertRaisesRegex(RuntimeError, "Shape mismatch"):
             index2 = torch.randint(0, output_size, (10, ), dtype=torch.long, device=device)
             torch._scatter_reduce(input, 0, index2, "sum")
-
-        with self.assertRaisesRegex(RuntimeError, "`reduce` argument must be 'sum'"):
-            torch._scatter_reduce(input, 2, index, "mean")
 
         with self.assertRaisesRegex(RuntimeError, "Expected `index` values to be in range 0 to 2"):
             input2 = torch.randn(10, dtype=dtype, device=device)

@@ -16,11 +16,7 @@ from .functional_adadelta import _FunctionalAdadelta
 from .functional_rmsprop import _FunctionalRMSprop
 from .functional_rprop import _FunctionalRprop
 from .functional_adamax import _FunctionalAdamax
-from .utils import (
-    functional_optim_map,
-    create_functional_optim,
-    as_functional_optim,
-)
+from .utils import as_functional_optim
 
 
 # DistributedOptimizer imports torch.distributed.rpc names, so gate availability
