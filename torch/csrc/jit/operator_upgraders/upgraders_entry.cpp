@@ -15,6 +15,27 @@ namespace torch {
 namespace jit {
 
 static std::unordered_map<std::string, std::string> kUpgradersEntryMap({
+    {"istft_0_10", R"SCRIPT(
+def istft_0_10(self: Tensor, n_fft: int, hop_length: Optional[int] = None,
+              win_length: Optional[int] = None, window: Optional[Tensor] = None,
+              center: bool = True, normalized: bool = False,
+              onesided: Optional[bool] = None, length: Optional[int] = None,
+              return_complex: bool = False) -> Tensor:
+  if not self.is_complex():
+    self = torch.view_as_complex(self.contiguous())
+  return torch.istft(self, n_fft=n_fft, hop_length=hop_length, win_length=win_length,
+                     window=window, center=center, normalized=normalized, onesided=onesided,
+                     length=length, return_complex=return_complex)
+)SCRIPT"},
+    {"stft_0_10", R"SCRIPT(
+def stft_0_10(self: Tensor, n_fft: int, hop_length: Optional[int]=None, win_length: Optional[int]=None,
+             window: Optional[Tensor]=None, normalized: bool=False, onesided: Optional[bool]=None,
+             return_complex: Optional[bool]=None) -> Tensor:
+  if return_complex is None:
+    return_complex = self.is_complex() or (window is not None and window.is_complex())
+  return torch.stft(self, n_fft=n_fft, hop_length=hop_length, win_length=win_length, window=window,
+                    normalized=normalized, onesided=onesided, return_complex=return_complex)
+)SCRIPT"},
     {"logspace_0_8", R"SCRIPT(
 def logspace_0_8(start: Union[int, float, complex], end: Union[int, float, complex], steps: Optional[int], base: float, *, dtype: Optional[int], layout: Optional[int],
                  device: Optional[Device], pin_memory: Optional[bool]):

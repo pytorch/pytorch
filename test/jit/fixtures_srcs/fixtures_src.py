@@ -57,3 +57,17 @@ class TestVersionedGeluOutV9(torch.nn.Module):
     def forward(self, x):
         out = torch.zeros_like(x)
         return torch._C._nn.gelu(x, out=out)
+
+class TestVersionedStftV10(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+
+    def forward(self, x, n_fft: int, window):
+        return torch.stft(x, n_fft=n_fft, window=window)
+
+class TestVersionedIstftV10(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+
+    def forward(self, x, n_fft: int, window):
+        return torch.istft(x, n_fft=n_fft, window=window)

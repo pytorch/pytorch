@@ -540,3 +540,39 @@ class TestSaveLoadForOpVersion(JitTestCase):
             self.assertTrue(output.size(dim=0) == 100)
             # "Upgraded" model should match the new version output
             self.assertEqual(output, output_current)
+
+    def test_versioned_stft(self):
+        model_path = pytorch_test_dir + "/jit/fixtures/test_versioned_stft_v10.ptl"
+        loaded_model = torch.jit.load(model_path)
+        buffer = io.BytesIO(loaded_model._save_to_buffer_for_lite_interpreter())
+        buffer.seek(0)
+        v10_mobile_module = _load_for_lite_interpreter(buffer)
+
+        for in_dtype, window_dtype in product(
+                [torch.float32, torch.complex64], repeat=2):
+            input = torch.rand((100,), dtype=in_dtype)
+            window = torch.rand((10,), dtype=window_dtype)
+            output = v10_mobile_module(input, 10, window)
+            output_current = torch.stft(input, n_fft=10, window=window, return_complex=True)
+
+            if input.is_complex() or window.is_complex():
+                self.assertEqual(output, output_current)
+            else:
+                self.assertEqual(torch.view_as_complex(output), output_current)
+
+    def test_versioned_istft(self):
+        model_path = pytorch_test_dir + "/jit/fixtures/test_versioned_istft_v10.ptl"
+        loaded_model = torch.jit.load(model_path)
+        buffer = io.BytesIO(loaded_model._save_to_buffer_for_lite_interpreter())
+        buffer.seek(0)
+        v10_mobile_module = _load_for_lite_interpreter(buffer)
+
+        for real_input in [True, False]:
+            input = torch.rand((10, 10,), dtype=torch.complex64)
+            old_input = torch.view_as_real(input) if real_input else input
+
+            window = torch.rand((10,))
+            output = v10_mobile_module(old_input, 10, window)
+            output_current = torch.istft(input, n_fft=10, window=window)
+
+            self.assertEqual(output, output_current)
