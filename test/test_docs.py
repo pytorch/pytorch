@@ -133,7 +133,7 @@ for name, test in doctest_visitor.tests.items():
     needs_cuda = source_needs_cuda or want_needs_cuda
     if needs_cuda and not cuda_available:
         continue
-    setattr(TestDocs, f"test_{name.replace(',', '_')}", make_test(runner, test))
+    setattr(TestDocs, f"test_{name.replace('.', '_')}", make_test(runner, test))
 
 if __name__ == '__main__':
     run_tests()

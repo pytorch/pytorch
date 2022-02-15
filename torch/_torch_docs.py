@@ -3805,7 +3805,7 @@ Example::
     >>> t
     tensor([1, 2, 3])
     >>> t[0] = -1
-    >>> a
+    >>> a  # doctest: +SKIP
     array([-1,  2,  3])
 """)
 
