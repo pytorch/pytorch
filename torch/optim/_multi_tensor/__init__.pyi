@@ -2,7 +2,7 @@ from functools import partial
 from torch import optim
 
 Adam = partial(optim.Adam, foreach=True)
-from .adamw import AdamW as AdamW
+AdamW = partial(optim.AdamW, foreach=True)
 NAdam = partial(optim.NAdam, foreach=True)
 SGD = partial(optim.SGD, foreach=True)
 RAdam = partial(optim.RAdam, foreach=True)
