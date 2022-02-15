@@ -501,12 +501,10 @@ def convert(
 
     """
     torch._C._log_api_usage_once("quantization_api.quantize.convert")
-    if is_reference:
-        mapping = get_default_static_quant_reference_module_mappings()
     if not inplace:
         module = copy.deepcopy(module)
     _convert(
-        module, mapping, inplace=True,
+        module, mapping, inplace=True, is_reference=is_reference,
         convert_custom_config_dict=convert_custom_config_dict)
     if remove_qconfig:
         _remove_qconfig(module)
@@ -514,7 +512,7 @@ def convert(
 
 def _convert(
         module, mapping=None, inplace=False,
-        convert_custom_config_dict=None):
+        is_reference=False, convert_custom_config_dict=None):
     r"""Converts submodules in input module to a different module according to `mapping`
     by calling `from_float` method on the target module class
 
@@ -527,6 +525,8 @@ def _convert(
                  is mutated
 
     """
+    if is_reference:
+        mapping = get_default_static_quant_reference_module_mappings()
     if mapping is None:
         mapping = get_default_static_quant_module_mappings()
     if convert_custom_config_dict is None:
