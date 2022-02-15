@@ -2284,6 +2284,7 @@ class TestDistributions(TestCase):
     def test_wishart_log_prob(self):
         ndim = 3
         df = torch.rand([], requires_grad=True) + ndim - 1
+        # SciPy allowed ndim -1 < df < ndim for Wishar distribution after version 1.7.0
         if version.parse(scipy.__version__) < version.parse("1.7.0"):
             df += 1.
         tmp = torch.randn(ndim, 10)
@@ -2325,6 +2326,7 @@ class TestDistributions(TestCase):
         set_rng_seed(0)  # see Note [Randomized statistical tests]
         ndim = 3
         df = torch.rand([], requires_grad=True) + ndim - 1
+        # SciPy allowed ndim -1 < df < ndim for Wishar distribution after version 1.7.0
         if version.parse(scipy.__version__) < version.parse("1.7.0"):
             df += 1.
         tmp = torch.randn(ndim, 10)
@@ -4632,6 +4634,7 @@ class TestAgainstScipy(TestCase):
             ),
             (
                 # scipy var for Wishart only supports scalars
+                # SciPy allowed ndim -1 < df < ndim for Wishar distribution after version 1.7.0
                 Wishart(
                     (20 if version.parse(scipy.__version__) < version.parse("1.7.0") else 19) + positive_var[0],
                     cov_tensor,
