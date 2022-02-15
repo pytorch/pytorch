@@ -4201,6 +4201,7 @@ class TestQuantizedConv(TestCase):
             Y_scale, Y_zero_point, use_bias, use_relu, use_channelwise, False,
             device=torch.device("cuda"),
             input_dtype=torch.qint8, weight_dtype=torch.qint8, output_dtype=torch.qint8)
+
     @unittest.skip("used for local benchmarking, comment when we want to run it")
     def test_benchmark(self):
         batch_size = 16
@@ -4281,6 +4282,7 @@ class TestQuantizedConv(TestCase):
         print("int8 benchmark result:")
         print(prof.key_averages().table(sort_by="self_cpu_time_total", row_limit=10))
     """Tests the correctness of quantized convolution op."""
+
     @given(batch_size=st.integers(1, 3),
            input_channels_per_group=st.sampled_from([2, 4, 5, 8, 16, 32]),
            width=st.integers(7, 14),
