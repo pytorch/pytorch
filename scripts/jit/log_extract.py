@@ -53,7 +53,6 @@ def run_test(graph, inputs, *, warmup_runs=20, test_runs=20) -> float:
     for _ in range(warmup_runs):
         graph(*inputs)
 
-    
     start_event = torch.cuda.Event(enable_timing=True)
     end_event = torch.cuda.Event(enable_timing=True)
     torch.cuda.synchronize()
@@ -84,7 +83,7 @@ def test_nvfuser(graphs: List[str]):
         nvfuser = run_nvfuser(graph, inputs)
         improvement = (baseline / nvfuser - 1) * 100
         print(f"Graph {i}; baseline: {baseline:.2f} ms; nvfuser: {nvfuser:.2f} ms; improvement: {improvement:.2f}%")
-        
+
 
 def run():
     parser = argparse.ArgumentParser()
