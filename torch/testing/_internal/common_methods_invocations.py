@@ -1316,7 +1316,7 @@ def sample_inputs_linalg_det(op_info, device, dtype, requires_grad, **kwargs):
     return [SampleInput(t) for t in inputs]
 
 def sample_inputs_linalg_det_singular(op_info, device, dtype, requires_grad, **kwargs):
-    make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+    make_arg = partial(make_tensor, device=device, dtype=dtype)
 
     def make_singular_matrix_batch_base(size, rank):
         assert size[-1] == size[-2]
@@ -1332,7 +1332,7 @@ def sample_inputs_linalg_det_singular(op_info, device, dtype, requires_grad, **k
         u_diag_abs_largest = u_diag_abs.max(dim=-1, keepdim=True).values
         u_diag_abs_smallest_idxs = torch.topk(u_diag_abs, k=(n - rank), largest=False).indices
         u.diagonal(0, -2, -1).div_(u_diag_abs_largest)
-        u[..., u_diag_abs_smallest_idxs] = torch.finfo(dtype).eps
+        u.diagonal(0, -2, -1)[..., u_diag_abs_smallest_idxs] = torch.finfo(dtype).eps
         matrix = p @ l @ u
 
         matrix.requires_grad_(requires_grad)
@@ -9732,7 +9732,7 @@ op_db: List[OpInfo] = [
                     sample_inputs_func=sample_inputs_comparison_ops),
     OpInfo('linalg.det',
            op=torch.linalg.det,
-           aliases=('det', ),
+           aliases=('det',),
            dtypes=floating_and_complex_types(),
            backward_dtypes=floating_and_complex_types(),
            aten_name='linalg_det',
@@ -9744,7 +9744,7 @@ op_db: List[OpInfo] = [
     OpInfo('linalg.det',
            op=torch.linalg.det,
            variant_test_name='singular',
-           aliases=('det', ),
+           aliases=('det',),
            dtypes=double_types(),
            backward_dtypes=double_types(),
            aten_name='linalg_det',
@@ -9757,14 +9757,9 @@ op_db: List[OpInfo] = [
                # These tests started breaking after touching the SVD.
                DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', 'test_fn_grad', device_type='cpu',
                             dtypes=(torch.complex128,), active_if=IS_WINDOWS),
-               # For complex dtypes: Will be removed once https://github.com/pytorch/pytorch/issues/62328 is fixed
-               # Probable fix (open PR): https://github.com/pytorch/pytorch/pull/62570
-               # Illegal Memory Access failure: https://github.com/pytorch/pytorch/issues/72203
-               DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', 'test_fn_grad', device_type='cuda'),
-               # Illegal Memory Access failure: https://github.com/pytorch/pytorch/issues/72204
-               DecorateInfo(unittest.skip("Skipped!"), 'TestMathBits', 'test_neg_view', device_type='cuda'),
-               DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_dtypes'),
                DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', 'test_fn_gradgrad'),
+               # dtypes are tested in the suite above, no need to repeat it for singular
+               DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_dtypes'),
            )),
     OpInfo('linalg.cholesky',
            aten_name='linalg_cholesky',
