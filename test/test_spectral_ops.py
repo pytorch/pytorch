@@ -882,7 +882,7 @@ class TestFFT(TestCase):
 
             # NOTE: librosa 0.9 changed default pad_mode to 'constant' (zero padding)
             # however, we use the pre-0.9 default ('reflect')
-            pad_mode='reflect'
+            pad_mode = 'reflect'
 
             result = []
             for xi in x:
