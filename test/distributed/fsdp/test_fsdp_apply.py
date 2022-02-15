@@ -12,6 +12,9 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_DEV_DBG_ASAN,
     run_tests,
 )
+from torch.testing._internal.common_distributed import (
+    skip_if_lt_x_gpu,
+)
 
 if not dist.is_available():
     print("Distributed not available, skipping tests", file=sys.stderr)
@@ -61,6 +64,7 @@ class TestApply(FSDPTest):
         # Ensure all weights are 1.0
         self.check_weights(fsdp, lambda param: torch.ones_like(param), self.assertEqual)
 
+    @skip_if_lt_x_gpu(2)
     def test_nested_module_apply(self):
         """
         Checks apply() modifies weights appropriately on a nested FSDP instance.
@@ -71,6 +75,7 @@ class TestApply(FSDPTest):
         fsdp_module = FSDP(nested_module, self.process_group).cuda(self.rank)
         self._check_apply(fsdp_module)
 
+    @skip_if_lt_x_gpu(2)
     def test_transformer_module_apply(self):
         """
         Checks apply() modifiees weights appropriately on a wrapped Transformer
@@ -87,6 +92,7 @@ class TestApply(FSDPTest):
             transformer, lambda param: torch.ones_like(param), self.assertEqual
         )
 
+    @skip_if_lt_x_gpu(2)
     def test_apply_in_summon_raises_error(self):
         """
         Ensures that if user calls apply() on FSDP instance within full param
