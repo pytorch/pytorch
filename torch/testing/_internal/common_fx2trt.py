@@ -3,7 +3,7 @@ from typing import Callable, List, Tuple
 
 import torch
 import torch.fx
-import torch.fx.experimental.fx_acc.acc_tracer as acc_tracer
+import fx2trt_oss.tracer.acc_tracer.acc_tracer as acc_tracer
 from fx2trt_oss.fx import (
     TRTInterpreter,
     InputTensorSpec,
