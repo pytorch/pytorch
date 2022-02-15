@@ -152,9 +152,9 @@ def _lower_weighted_ref_functional(model: QuantizedGraphModule) -> QuantizedGrap
             bias = func_node.kwargs.get("bias", None)
             prepack_args = (quantized_weight, bias)
             if ref_func == torch.nn.functional.linear:
-              prepack_op = get_linear_prepack_op_for_dtype(weight_dtype)
+                prepack_op = get_linear_prepack_op_for_dtype(weight_dtype)
             else:
-              raise ValueError("Lowering for functional currently only supports linear op")
+                raise ValueError("Lowering for functional currently only supports linear op")
             with model.graph.inserting_after(quantized_weight):
                 packed_weight = model.graph.create_node("call_function", prepack_op, prepack_args, {})
 
@@ -162,7 +162,7 @@ def _lower_weighted_ref_functional(model: QuantizedGraphModule) -> QuantizedGrap
             # corresponding quantized op
             #     Args are: (quantized input, packed weight, scale, zero point)
             with model.graph.inserting_after(packed_weight):
-                args = (dq_node.args[0], packed_weight, 0.015106300823390484, 0) # TODO(andrew): don't hardcode
+                args = (dq_node.args[0], packed_weight, 0.015106300823390484, 0)  # TODO(andrew): don't hardcode
                 new_func_node = create_node_from_old_node_preserve_meta(
                     model.graph,
                     ("call_function", LOWER_FUNCTIONAL_MAP[ref_func], args, {}),
