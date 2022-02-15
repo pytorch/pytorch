@@ -4235,18 +4235,11 @@ class TestTorchDeviceType(TestCase):
             scalar = torch.tensor(2, device=device, dtype=dtype)
             torch.diff(scalar)
 
-    def _compare_large_tensors(self, expected, actual, num_splits):
-        length = expected.shape[0]
-        for i in range(num_splits):
-            start = (i * length) // num_splits
-            end = ((i + 1) * length) // num_splits
-            self.assertEqual(expected[start:end], actual[start:end])
-
     def _test_large_cum_fn_helper(self, x, fn):
         x_cpu = x.cpu().float()
         expected = fn(x_cpu)
         actual = fn(x).cpu().float()
-        self._compare_large_tensors(expected, actual.cpu().float(), 3)
+        self.assertEqual(expected, actual.cpu().float())
 
     @unittest.skipIf(IS_FBCODE and IS_REMOTE_GPU, "sandcastle OOM with current tpx gpu/re configuration")
     @onlyCUDA
@@ -5032,7 +5025,7 @@ class TestTorchDeviceType(TestCase):
             x = torch.randn(50000, 1, dtype=torch.float32)
             expected_cpu = torch.pdist(x, p=2)
             actual_gpu = torch.pdist(x.to(device), p=2)
-            self._compare_large_tensors(expected_cpu, actual_gpu.cpu(), 3)
+            self.assertEqual(expected_cpu, actual_gpu.cpu())
 
     @onlyOnCPUAndCUDA
     @dtypesIfCUDA(*set(torch.testing.get_all_math_dtypes('cuda')))
