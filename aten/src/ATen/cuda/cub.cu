@@ -57,7 +57,10 @@ AT_INSTANTIATE_SORT_PAIRS(int64_t, 4)
 
 AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, AT_INSTANTIATE_SORT_PAIRS_8)
 
+// BFloat16 is not supported by ROCm's radix sort
+#if !AT_ROCM_ENABLED()
 AT_INSTANTIATE_SORT_PAIRS(c10::BFloat16, 8)
+#endif
 
 }  // namespace detail
 
