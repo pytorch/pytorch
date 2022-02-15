@@ -148,7 +148,7 @@ def kl_divergence(p, q):
     .. math::
 
         KL(p \| q) = \int p(x) \log\frac {p(x)} {q(x)} \,dx
-        
+
     Built-in KL(p || q) implementations:
                                        p || q
     ====================================================================================
@@ -161,7 +161,6 @@ def kl_divergence(p, q):
                                             + Normal
                                             + Pareto
                                             + Uniform
-                                            
                                 Binomial || Binomial
                              Categorical || Categorical
                                   Cauchy || Cauchy
@@ -170,7 +169,6 @@ def kl_divergence(p, q):
                                             + Normal
                                             + Pareto
                                             + Uniform
-                                            
                                Dirichlet || Dirichlet
                              Exponential || Exponential
                                             + Beta
@@ -210,13 +208,12 @@ def kl_divergence(p, q):
                LowRankMultivariateNormal || LowRankMultivariateNormal
                     + MulrivariateNormal
                       MultivariateNormal || MultivariateNormal
-                                            + LowRankMultivariateNormal                                  
+                                            + LowRankMultivariateNormal
                                   Normal || Normal
                                             + Beta
                                             + ContinuousBernoulli
                                             + Exponential
                                             + Gamma
-                                            
                                             + Gumbel
                                             + Laplace
                                             + Pareto
@@ -242,7 +239,7 @@ def kl_divergence(p, q):
                                             + Gumbel
                                             + Normal
                                             + Pareto
-                                                                            
+
     Args:
         p (Distribution): A :class:`~torch.distributions.Distribution` object.
         q (Distribution): A :class:`~torch.distributions.Distribution` object.
@@ -260,7 +257,8 @@ def kl_divergence(p, q):
         fun = _dispatch_kl(type(p), type(q))
         _KL_MEMOIZE[type(p), type(q)] = fun
     if fun is NotImplemented:
-        raise NotImplementedError("No KL(p || q) is implemented for p type {} and q type {}".format(p.__class__.__name__, q.__class__.__name__))
+        raise NotImplementedError("No KL(p || q) is implemented for p type {} and q type {}"
+                                  .format(p.__class__.__name__, q.__class__.__name__))
     return fun(p, q)
 
 
