@@ -26,7 +26,6 @@ using ArgValue = c10::variant<
     BufList,
     DoubleList,
     IntList,
-    std::string,
     ArgNone>;
 
 using NNCLoweringFunction = std::function<Tensor(
