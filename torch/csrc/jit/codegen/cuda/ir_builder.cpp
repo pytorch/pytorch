@@ -1,35 +1,97 @@
-#include <torch/csrc/jit/codegen/cuda/kernel_ir_builder.h>
+#include <torch/csrc/jit/codegen/cuda/fusion.h>
+#include <torch/csrc/jit/codegen/cuda/ir_builder.h>
+#include <torch/csrc/jit/codegen/cuda/ir_cloner.h>
+#include <torch/csrc/jit/codegen/cuda/kernel.h>
 
 namespace torch {
 namespace jit {
 namespace fuser {
 namespace cuda {
-namespace kir {
+
+//! Clone an IR node, forwarding the arguments to the IrCloner constructor.
+template <class T>
+T* IrBuilder::clone(const T* src, IrCloner* ir_cloner) {
+  TORCH_INTERNAL_ASSERT(
+      ir_cloner != nullptr,
+      "Cannot use create when a cloner object is set. Use clone.");
+
+  TORCH_INTERNAL_ASSERT(
+      ir_cloner->container() != nullptr,
+      "Cloner doesn't have a valid container to store cloned object.");
+
+  T* dest = new T(src, ir_cloner);
+  const Statement* src_stmt = dynamic_cast<const Statement*>(src);
+  Statement* dest_stmt = dynamic_cast<Statement*>(dest);
+
+  auto dest_container = ir_cloner->container();
+  auto src_container = src_stmt->container();
+
+  dest_container->registerStmt(IrBuilderPasskey(dest_container), dest_stmt);
+
+  if (src_container != dest_container) {
+    dest_stmt->setName(IrBuilderPasskey(dest_container), src_stmt->name());
+  }
+
+  ir_cloner->registerClone(src_stmt, dest_stmt);
+
+  return dest;
+}
+
+#define IR_BUILDER_INSTANTIATE(T) \
+  template T* IrBuilder::clone(const T* src, IrCloner* ir_cloner);
+
+// Vals
+IR_BUILDER_INSTANTIATE(IterDomain)
+IR_BUILDER_INSTANTIATE(TensorDomain)
+IR_BUILDER_INSTANTIATE(TensorView)
+IR_BUILDER_INSTANTIATE(Bool)
+IR_BUILDER_INSTANTIATE(Double)
+IR_BUILDER_INSTANTIATE(Int)
+IR_BUILDER_INSTANTIATE(NamedScalar)
+
+// Exprs
+IR_BUILDER_INSTANTIATE(Split)
+IR_BUILDER_INSTANTIATE(Merge)
+IR_BUILDER_INSTANTIATE(TransposeOp)
+IR_BUILDER_INSTANTIATE(ShiftOp)
+IR_BUILDER_INSTANTIATE(GatherOp)
+IR_BUILDER_INSTANTIATE(ViewOp)
+IR_BUILDER_INSTANTIATE(UnaryOp)
+IR_BUILDER_INSTANTIATE(BinaryOp)
+IR_BUILDER_INSTANTIATE(TernaryOp)
+IR_BUILDER_INSTANTIATE(ReductionOp)
+IR_BUILDER_INSTANTIATE(WelfordOp)
+IR_BUILDER_INSTANTIATE(BroadcastOp)
 
 Val* IrBuilder::newResult(DataType dtype) {
   switch (dtype) {
     case DataType::Bool:
-      return create<Bool>(c10::nullopt);
+      return IrBuilder::create<Bool>(c10::nullopt);
     case DataType::Double:
-      return create<Double>(c10::nullopt);
+      return IrBuilder::create<Double>(c10::nullopt);
     case DataType::Int:
-      return create<Int>(c10::nullopt);
+      return IrBuilder::create<Int>(c10::nullopt);
     default:
       TORCH_CHECK(false, "Unexpected data type");
   }
 }
 
 Val* IrBuilder::newArithmeticExpr(BinaryOpType op_type, Val* lhs, Val* rhs) {
-  TORCH_CHECK(lhs->dtype() == rhs->dtype(), "Incompatible operand types");
+  TORCH_CHECK(
+      lhs->dtype() == rhs->dtype(),
+      "Incompatible operand types: ",
+      lhs->dtype(),
+      " and ",
+      rhs->dtype());
   auto result = newResult(lhs->dtype());
-  create<BinaryOp>(op_type, result, lhs, rhs);
+  IrBuilder::create<BinaryOp>(op_type, result, lhs, rhs);
   // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
   return result;
 }
 
 Val* IrBuilder::newLogicExpr(BinaryOpType op_type, Val* lhs, Val* rhs) {
-  auto result = create<Bool>(c10::nullopt);
-  create<BinaryOp>(op_type, result, lhs, rhs);
+  auto result = IrBuilder::create<Bool>(c10::nullopt);
+  IrBuilder::create<BinaryOp>(op_type, result, lhs, rhs);
   // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
   return result;
 }
@@ -37,37 +99,37 @@ Val* IrBuilder::newLogicExpr(BinaryOpType op_type, Val* lhs, Val* rhs) {
 Val* IrBuilder::whereExpr(Val* pred, Val* lhs, Val* rhs) {
   TORCH_CHECK(lhs->dtype() == rhs->dtype(), "Incompatible operand types");
   auto result = newResult(lhs->dtype());
-  create<TernaryOp>(TernaryOpType::Where, result, pred, lhs, rhs);
+  IrBuilder::create<TernaryOp>(TernaryOpType::Where, result, pred, lhs, rhs);
   return result;
 }
 
 Val* IrBuilder::negExpr(Val* val) {
   auto result = newResult(val->dtype());
-  create<UnaryOp>(UnaryOpType::Neg, result, val);
+  IrBuilder::create<UnaryOp>(UnaryOpType::Neg, result, val);
   return result;
 }
 
 Val* IrBuilder::notExpr(Val* val) {
   auto result = newResult(val->dtype());
-  create<UnaryOp>(UnaryOpType::Not, result, val);
+  IrBuilder::create<UnaryOp>(UnaryOpType::Not, result, val);
   return result;
 }
 
 Val* IrBuilder::setExpr(Val* val) {
   auto result = newResult(val->dtype());
-  create<UnaryOp>(UnaryOpType::Set, result, val);
+  IrBuilder::create<UnaryOp>(UnaryOpType::Set, result, val);
   return result;
 }
 
 Val* IrBuilder::setExprNamedScalar(const std::string& name, Val* val) {
-  auto result = create<NamedScalar>(name, val->dtype());
-  create<UnaryOp>(UnaryOpType::Set, result, val);
+  auto result = IrBuilder::create<NamedScalar>(name, val->dtype());
+  IrBuilder::create<UnaryOp>(UnaryOpType::Set, result, val);
   return result;
 }
 
 Val* IrBuilder::addressExprNamedScalar(const std::string& name, Val* val) {
-  auto result = create<NamedScalar>(name, DataType::Int);
-  create<UnaryOp>(UnaryOpType::Address, result, val);
+  auto result = IrBuilder::create<NamedScalar>(name, DataType::Int);
+  IrBuilder::create<UnaryOp>(UnaryOpType::Address, result, val);
   return result;
 }
 
@@ -127,45 +189,10 @@ Val* IrBuilder::minExpr(Val* lhs, Val* rhs) {
   return newArithmeticExpr(BinaryOpType::Min, lhs, rhs);
 }
 
-Int* IrBuilder::zeroVal() {
-  if (zero_ == nullptr) {
-    zero_ = create<kir::Int>(0);
-  }
-  return zero_;
-}
-
-Int* IrBuilder::oneVal() {
-  if (one_ == nullptr) {
-    one_ = create<kir::Int>(1);
-  }
-  return one_;
-}
-
-Bool* IrBuilder::falseVal() {
-  if (false_ == nullptr) {
-    false_ = create<kir::Bool>(false);
-  }
-  return false_;
-}
-
-Bool* IrBuilder::trueVal() {
-  if (true_ == nullptr) {
-    true_ = create<kir::Bool>(true);
-  }
-  return true_;
-}
-
-NamedScalar* IrBuilder::magicZeroVal() {
-  if (magic_zero_ == nullptr) {
-    magic_zero_ = create<kir::NamedScalar>(kMagicZeroName, DataType::Int);
-  }
-  return magic_zero_;
-}
-
 Val* SimplifyingIrBuilder::negExpr(Val* val) {
-  if (auto int_val = dynamic_cast<kir::Int*>(val)) {
+  if (auto int_val = dynamic_cast<Int*>(val)) {
     if (int_val->isConst()) {
-      return create<Int>(-int_val->value().value());
+      return IrBuilder::create<Int>(-int_val->value().value());
     }
   }
   return IrBuilder::negExpr(val);
@@ -175,9 +202,9 @@ Val* SimplifyingIrBuilder::notExpr(Val* val) {
   if (auto bool_val = dynamic_cast<Bool*>(val)) {
     if (bool_val->isConst()) {
       if (bool_val->value().value()) {
-        return falseVal();
+        return FusionGuard::getCurFusion()->falseVal();
       } else {
-        return trueVal();
+        return FusionGuard::getCurFusion()->trueVal();
       }
     }
   }
@@ -188,13 +215,13 @@ Val* SimplifyingIrBuilder::addExpr(Int* lhs, Int::ScalarType rhs) {
   if (rhs == 0) {
     return lhs;
   } else if (lhs == nullptr) {
-    return IrBuilder::create<kir::Int>(rhs);
+    return IrBuilder::IrBuilder::create<Int>(rhs);
   } else if (lhs->isConst()) {
-    return IrBuilder::create<kir::Int>(lhs->value().value() + rhs);
+    return IrBuilder::IrBuilder::create<Int>(lhs->value().value() + rhs);
   } else if (rhs > 0) {
-    return IrBuilder::addExpr(lhs, IrBuilder::create<kir::Int>(rhs));
+    return IrBuilder::addExpr(lhs, IrBuilder::IrBuilder::create<Int>(rhs));
   } else {
-    return IrBuilder::subExpr(lhs, IrBuilder::create<kir::Int>(-rhs));
+    return IrBuilder::subExpr(lhs, IrBuilder::IrBuilder::create<Int>(-rhs));
   }
 }
 
@@ -228,6 +255,15 @@ Val* SimplifyingIrBuilder::addExpr(Val* lhs, Val* rhs) {
   }
 }
 
+Val* SimplifyingIrBuilder::addExpr(Val* lhs, Int::ScalarType rhs) {
+  auto lhs_int = dynamic_cast<Int*>(lhs);
+  if (lhs_int != nullptr) {
+    return addExpr(lhs_int, rhs);
+  } else {
+    return addExpr(lhs, IrBuilder::create<Int>(rhs));
+  }
+}
+
 Val* SimplifyingIrBuilder::subExpr(Val* lhs, Val* rhs) {
   return addExpr(lhs, negExpr(rhs));
 }
@@ -257,9 +293,9 @@ Val* SimplifyingIrBuilder::andExpr(Val* lhs, Val* rhs) {
   }
 
   if (lhs_definitely_true && rhs_definitely_true) {
-    return trueVal();
+    return FusionGuard::getCurFusion()->trueVal();
   } else if (lhs_definitely_false || rhs_definitely_false) {
-    return falseVal();
+    return FusionGuard::getCurFusion()->falseVal();
   } else if (lhs_definitely_true) {
     return rhs;
   } else if (rhs_definitely_true) {
@@ -269,7 +305,65 @@ Val* SimplifyingIrBuilder::andExpr(Val* lhs, Val* rhs) {
   return IrBuilder::andExpr(lhs, rhs);
 }
 
-} // namespace kir
+namespace {
+
+template <typename IrBuilderFunc, typename IntFunc>
+Val* minOrMaxExpr(
+    Int* lhs,
+    Int* rhs,
+    IrBuilderFunc ir_builder_func,
+    IntFunc int_func) {
+  if (rhs == nullptr) {
+    return lhs;
+  } else if (lhs == nullptr) {
+    return rhs;
+  } else if (lhs->isConst() && rhs->isConst()) {
+    return IrBuilder::create<Int>(
+        int_func(lhs->value().value(), rhs->value().value()));
+  } else {
+    return ir_builder_func(lhs, rhs);
+  }
+}
+
+template <typename IrBuilderFunc, typename IntFunc>
+Val* minOrMaxExpr(
+    Val* lhs,
+    Val* rhs,
+    IrBuilderFunc ir_builder_func,
+    IntFunc int_func) {
+  TORCH_INTERNAL_ASSERT(lhs != nullptr || rhs != nullptr);
+  if (lhs == nullptr) {
+    return rhs;
+  } else if (rhs == nullptr || lhs == rhs) {
+    return lhs;
+  }
+  auto lhs_int = dynamic_cast<Int*>(lhs);
+  auto rhs_int = dynamic_cast<Int*>(rhs);
+  if (lhs_int != nullptr && rhs_int != nullptr) {
+    return minOrMaxExpr(lhs_int, rhs_int, ir_builder_func, int_func);
+  } else {
+    return ir_builder_func(lhs, rhs);
+  }
+}
+
+} // namespace
+
+Val* SimplifyingIrBuilder::maxExpr(Val* lhs, Val* rhs) {
+  return minOrMaxExpr(
+      lhs,
+      rhs,
+      [](Val* lhs, Val* rhs) { return IrBuilder::maxExpr(lhs, rhs); },
+      [](int64_t lhs, int64_t rhs) { return std::max(lhs, rhs); });
+}
+
+Val* SimplifyingIrBuilder::minExpr(Val* lhs, Val* rhs) {
+  return minOrMaxExpr(
+      lhs,
+      rhs,
+      [](Val* lhs, Val* rhs) { return IrBuilder::minExpr(lhs, rhs); },
+      [](int64_t lhs, int64_t rhs) { return std::min(lhs, rhs); });
+}
+
 } // namespace cuda
 } // namespace fuser
 } // namespace jit
