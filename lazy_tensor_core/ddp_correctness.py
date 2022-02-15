@@ -11,8 +11,8 @@ import lazy_tensor_core
 lazy_tensor_core._LAZYC._ltc_init_ts_backend()
 import lazy_tensor_core.core.lazy_model as ltm
 
-from caffe2.python import workspace
-workspace.GlobalInit(['caffe2', '--caffe2_log_level=-4'])
+# from caffe2.python import workspace
+# workspace.GlobalInit(['caffe2', '--caffe2_log_level=-4'])
 
 def setup(rank, world_size):
     os.environ['MASTER_ADDR'] = 'localhost'
@@ -21,8 +21,10 @@ def setup(rank, world_size):
     # initialize the process group
     dist.init_process_group("nccl", rank=rank, world_size=world_size)
 
+
 def cleanup():
     dist.destroy_process_group()
+
 
 class ToyModel(nn.Module):
     def __init__(self):
@@ -35,30 +37,41 @@ class ToyModel(nn.Module):
         return self.net2(self.relu(self.net1(x)))
 
 
+def step(model, input, labels, device, rank):
+    model = model.to(device)
+    model = DDP(model, device_ids=[rank])
+    input = input.to(device)
+    labels = labels.to(device)
+
+    loss_fn = nn.MSELoss()
+    optimizer = optim.SGD(model.parameters(), lr=0.001)
+    optimizer.zero_grad()
+
+    output = model(input)
+
+    loss_fn(output, labels).backward()
+    optimizer.step()
+
+    return model.parameters()
+
+
 def demo_basic(rank, world_size):
     # without flushing, mp won't print this message if crash.
     print(f"Running basic DDP example on rank {rank}, and process id: {os.getpid()}", flush=True)
     setup(rank, world_size)
 
-    # device = f"cuda:{rank}"
-    device = f"lazy:{rank}"
+    model = ToyModel()
 
-    try:
-        # create model and move it to GPU with id rank
-        model = ToyModel().to(device)
-        ddp_model = DDP(model, device_ids=[rank])
+    for i in range(10):
+        input = torch.randn(20, 10)
+        labels = torch.randn(20, 5)
 
-        loss_fn = nn.MSELoss()
-        optimizer = optim.SGD(ddp_model.parameters(), lr=0.001)
+        lazy_parameters = step(model, input, labels, f"lazy:{rank}", rank)
+        cuda_parameters = step(model, input, labels, f"cuda:{rank}", rank)
 
-        optimizer.zero_grad()
-        outputs = ddp_model(torch.randn(20, 10).to(device))
-        labels = torch.randn(20, 5).to(device)
-        loss_fn(outputs, labels).backward()
-        optimizer.step()
-        ltm.mark_step(device)
-    except Exception as e:
-        print(f"exception: {e}", flush=True)
+        for lazy_param, cuda_param in zip(lazy_parameters, cuda_parameters):
+            assert torch.allclose(lazy_param, cuda_param)
+        print(f"{os.getpid()}: iteration {i} lazy_parameters ~= cuda_parameters")
 
     cleanup()
 
@@ -69,6 +82,7 @@ def run_demo(demo_fn, world_size):
              args=(world_size,),
              nprocs=world_size,
              join=True)
+
 
 if __name__ == "__main__":
     print(f"main process id: {os.getpid()}")
