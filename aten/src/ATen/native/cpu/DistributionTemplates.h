@@ -106,7 +106,7 @@ static void normal_fill_16_AVX2(float *data,
 }
 
 template<typename RNG>
-void normal_fill_AVX2(Tensor& self, const float mean, const float std, RNG generator) {
+void normal_fill_AVX2(const TensorBase &self, const float mean, const float std, RNG generator) {
   float *data = self.data_ptr<float>();
   auto size = self.numel();
   std::lock_guard<std::mutex> lock(generator->mutex_);
@@ -149,7 +149,7 @@ static void normal_fill_16(scalar_t *data, const scalar_t mean, const scalar_t s
 }
 
 template <typename scalar_t, typename RNG>
-void normal_fill(Tensor& self, const scalar_t mean, const scalar_t std, RNG generator) {
+void normal_fill(const TensorBase &self, const scalar_t mean, const scalar_t std, RNG generator) {
   scalar_t *data = self.data_ptr<scalar_t>();
   auto size = self.numel();
   std::lock_guard<std::mutex> lock(generator->mutex_);
@@ -173,7 +173,7 @@ void normal_fill(Tensor& self, const scalar_t mean, const scalar_t std, RNG gene
 }
 
 template<typename RNG>
-void normal_kernel(Tensor& self, double mean, double std, RNG generator) {
+void normal_kernel(const TensorBase &self, double mean, double std, RNG generator) {
   auto size = self.numel();
   if (self.scalar_type() == ScalarType::Float && size >= 16 && self.is_contiguous()) {
 #ifdef CPU_CAPABILITY_AVX2
