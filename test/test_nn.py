@@ -17549,7 +17549,14 @@ class TestNNDeviceType(NNTestCase):
                 def simple_transform_bias_rescale_qkv(qkv, bias):
                     (q, k, v) = torch.split(qkv, embed_dim, dim=-1)
                     (q_bias, k_bias, v_bias) = torch.split(bias, embed_dim, dim=-1)
-                    return tuple(x.reshape((sl, bs, num_heads, embed_dim // num_heads)).transpose(2, 1) for x in ((q + q_bias) / math.sqrt(embed_dim // num_heads), (k + k_bias), (v + v_bias)))
+                    return tuple(
+                        x.reshape((sl, bs, num_heads, embed_dim // num_heads)).transpose(2, 1)
+                        for x in (
+                                (q + q_bias) / math.sqrt(embed_dim // num_heads),
+                                (k + k_bias),
+                                (v + v_bias)
+                        )
+                    )
                 correct_q, correct_k, correct_v = simple_transform_bias_rescale_qkv(x @ qkv.weight.t(), qkv.bias)
 
             self.assertEqual(q.size(), correct_q.size())
