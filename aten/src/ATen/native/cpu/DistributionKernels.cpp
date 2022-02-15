@@ -1,9 +1,9 @@
 #include <ATen/CPUGeneratorImpl.h>
 #include <ATen/Dispatch.h>
+#include <ATen/Functions.h>
 #include <ATen/Generator.h>
 #include <ATen/core/DistributionsHelper.h>
 #include <ATen/native/Distributions.h>
-#include <ATen/native/TensorFactories.h>
 #include <ATen/native/cpu/DistributionTemplates.h>
 
 #include <ATen/native/UnaryOps.h>
@@ -25,22 +25,22 @@ static void cauchy_kernel(TensorIteratorBase& iter, double median, double sigma,
   templates::cpu::cauchy_kernel(iter, median, sigma, generator);
 }
 
-void bernoulli_tensor_kernel(Tensor& self, const Tensor& p_, c10::optional<Generator> gen) {
+void bernoulli_tensor_kernel(const TensorBase &self, const TensorBase &p_, c10::optional<Generator> gen) {
   CPUGeneratorImpl* generator = get_generator_or_default<CPUGeneratorImpl>(gen, detail::getDefaultCPUGenerator());
   templates::cpu::bernoulli_kernel(self, p_, generator);
 }
 
-void bernoulli_scalar_kernel_default(Tensor& self, double p, c10::optional<Generator> gen) {
+void bernoulli_scalar_kernel_default(const TensorBase &self, double p, c10::optional<Generator> gen) {
   CPUGeneratorImpl* generator = get_generator_or_default<CPUGeneratorImpl>(gen, detail::getDefaultCPUGenerator());
   templates::cpu::bernoulli_kernel(self, p, generator);
 }
 
 #if !AT_MKL_ENABLED()
-void bernoulli_scalar_kernel(Tensor& self, double p, c10::optional<Generator> gen) {
+void bernoulli_scalar_kernel(const TensorBase &self, double p, c10::optional<Generator> gen) {
   bernoulli_scalar_kernel_default(self, p, gen);
 }
 #else
-void bernoulli_scalar_kernel(Tensor &self, double p, c10::optional<Generator> gen) {
+void bernoulli_scalar_kernel(const TensorBase &self, double p, c10::optional<Generator> gen) {
   if (cpuinfo_initialize() && cpuinfo_vendor_intel == cpuinfo_get_processor(0)->core->vendor) {
     CPUGeneratorImpl* generator = get_generator_or_default<CPUGeneratorImpl>(gen, detail::getDefaultCPUGenerator());
     int64_t seed;
@@ -87,7 +87,7 @@ void bernoulli_scalar_kernel(Tensor &self, double p, c10::optional<Generator> ge
 
       // copy_ if using buffer and non contiguous
       if (!contig) {
-        self.copy_(tmp_int_tensor);
+        OptionalTensorRef(self)->copy_(tmp_int_tensor);
       }
     });
   } else {
