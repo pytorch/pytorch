@@ -4,7 +4,7 @@ from torch.utils.data import IterDataPipe
 
 class StreamReaderIterDataPipe(IterDataPipe[Tuple[str, bytes]]):
     r"""
-    Given IO streams and their label names, yield bytes with label name in a tuple.
+    Given IO streams and their label names, yields bytes with label name in a tuple.
 
     Args:
         datapipe: Iterable DataPipe provides label/URL and byte stream
