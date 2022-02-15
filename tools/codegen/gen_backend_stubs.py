@@ -58,7 +58,7 @@ def parse_backend_yaml(
     assert isinstance(supported, list), f'expected "supported" to be a list, but got: {supported} (of type {type(supported)})'
 
     supported_autograd = yaml_values.pop('autograd', [])
-    assert isinstance(supported, list), f'expected "autograd" to be a list, but got: {supported_autograd}'
+    assert isinstance(supported_autograd, list), f'expected "autograd" to be a list, but got: {supported_autograd}'
 
     # full_codegen is ignored by parse_backend_yaml, and re-parsed in gen_lazy_tensor.py
     full_codegen = yaml_values.pop('full_codegen', [])

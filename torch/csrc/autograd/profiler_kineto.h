@@ -11,27 +11,6 @@ namespace torch {
 namespace autograd {
 namespace profiler {
 
-// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
-struct KinetoObserverContext : public at::ObserverContext {
-  int64_t startUs;
-  int64_t endUS;
-  uint64_t correlationId;
-  uint64_t startThreadId;
-  uint64_t endThreadId;
-  c10::optional<std::vector<std::vector<int64_t>>> shapes;
-  c10::optional<std::vector<std::string>> dtypes;
-  int64_t sequenceNr;
-  uint64_t fwdThreadId;
-  uint8_t recFunScope;
-  c10::optional<std::vector<std::string>> stack;
-  c10::optional<std::vector<std::string>> module_hierarchy;
-  // Extra arguments for computing op flops
-  c10::optional<std::unordered_map<std::string, c10::IValue>> extraArgs;
-  torch::profiler::impl::CUDAEventStub cuda_event_start_ = nullptr;
-  torch::profiler::impl::CUDAEventStub cuda_event_end_ = nullptr;
-  int64_t debug_handle;
-};
-
 struct TORCH_API KinetoEvent {
   uint64_t startThreadId() const {
     return start_thread_id_;

@@ -692,5 +692,112 @@ REGISTER_NATIVE_OPERATOR_FUNCTOR(
       };
     });
 
+// See [Create owned refs for special values]
+REGISTER_NATIVE_OPERATOR_FUNCTOR(
+    static_runtime::create_owned_ref,
+    static_runtime_create_owned_ref,
+    [](Node*) -> SROperator {
+      return
+          [](ProcessedNode* p_node) { p_node->Output(0) = p_node->Input(0); };
+    });
+
+REGISTER_NATIVE_OPERATOR_FUNCTOR(prim::If, prim_If, [](Node*) -> SROperator {
+  return [](ProcessedNode* p_node) {
+    auto condition = p_node->Input(0).toBool();
+    auto* block_runners = p_node->block_runners();
+    DCHECK(block_runners);
+    DCHECK_EQ(block_runners->size(), 2);
+    auto& runner = (*block_runners)[!condition];
+
+    auto output = runner({});
+    if (!output.isTuple()) {
+      p_node->Output(0) = std::move(output);
+      return;
+    }
+    auto& elems = output.toTupleRef().elements();
+    DCHECK_EQ(elems.size(), p_node->num_outputs());
+    for (const auto i : c10::irange(elems.size())) {
+      p_node->Output(i) = elems[i];
+    }
+  };
+});
+
+namespace {
+
+std::vector<IValue> collectLoopSubBlockInputs(const ProcessedNode& p_node) {
+  const auto num_inputs = p_node.num_inputs();
+  DCHECK_GE(num_inputs, 2);
+  // The first two inputs to the loop node are the max trip count
+  // and initial condition. We don't collect them here, since those
+  // are not inputs for the sub-block.
+  const auto num_args = num_inputs - 2;
+
+  std::vector<IValue> result;
+  result.reserve(num_args + 1);
+  // First argument to the loop sub-block is always the loop counter, initially
+  // zero.
+  result.emplace_back(0);
+
+  for (const auto i : c10::irange(num_args)) {
+    result.push_back(p_node.Input(2 + i));
+  }
+
+  return result;
+}
+
+} // namespace
+
+REGISTER_NATIVE_OPERATOR_FUNCTOR(
+    prim::Loop,
+    prim_Loop,
+    [](Node*) -> SROperator {
+      return [](ProcessedNode* p_node) {
+        const auto max_trip_count = p_node->Input(0).toInt();
+        auto condition = p_node->Input(1).toBool();
+
+        auto* block_runners = p_node->block_runners();
+        DCHECK(block_runners);
+        DCHECK_EQ(block_runners->size(), 1);
+        auto& runner = (*block_runners)[0];
+
+        auto args = collectLoopSubBlockInputs(*p_node);
+        int64_t loop_count = 0;
+
+        while (condition && loop_count < max_trip_count) {
+          auto output = runner(args);
+
+          if (output.isTuple()) {
+            auto& elems = output.toTupleRef().elements();
+            DCHECK(elems.size() == args.size());
+            for (const auto i : c10::irange(1, args.size())) {
+              args[i] = elems[i];
+            }
+            condition = elems[0].toBool();
+          } else {
+            condition = output.toBool();
+          }
+          args[0] = ++loop_count;
+        }
+
+        const auto num_outputs = p_node->num_outputs();
+        DCHECK_EQ(args.size(), num_outputs + 1);
+        for (const auto i : c10::irange(num_outputs)) {
+          p_node->Output(i) = std::move(args[i + 1]);
+        }
+      };
+    });
+
+REGISTER_NATIVE_OPERATOR_FUNCTOR(
+    prim::CreateObject,
+    prim_CreateObject,
+    [](Node* node) -> SROperator {
+      auto class_type = node->output()->type()->expect<ClassType>();
+      return [class_type = std::move(class_type)](ProcessedNode* pnode) {
+        pnode->Output(0) = c10::ivalue::Object::create(
+            c10::StrongTypePtr(class_type->compilation_unit(), class_type),
+            class_type->numAttributes());
+      };
+    });
+
 } // namespace jit
 } // namespace torch

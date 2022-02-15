@@ -258,34 +258,47 @@ class TestCommon(TestCase):
 
             self.assertEqual(actual, expected)
 
-            # validates backward
-            # NOTE: only handles single tensor outputs and the first tensor
-            #   of ops that output a sequence
-
+            # Validate backward
             # Short-circuits if the op doesn't support grad in this device x dtype
             if not test_grad:
                 continue
 
+            expected = sample_input.output_process_fn_grad(expected)
+            actual = sample_input.output_process_fn_grad(actual)
+
             if isinstance(expected, torch.Tensor):
-                expected_backward_tensor = expected
-                actual_backward_tensor = actual
-            elif isinstance(expected, Sequence) and isinstance(expected[0], torch.Tensor):
-                expected_backward_tensor = expected[0]
-                actual_backward_tensor = actual[0]
+                grad_for_expected = torch.randn_like(expected)
+                grad_for_actual = noncontiguous_like(grad_for_expected)
+            elif isinstance(expected, Sequence):
+                # Filter output elements that do not require grad
+                expected = [t for t in expected
+                            if isinstance(t, torch.Tensor) and t.requires_grad]
+                actual = [n for n in actual
+                          if isinstance(n, torch.Tensor) and n.requires_grad]
+                grad_for_expected = [torch.randn_like(t) for t in expected]
+                grad_for_actual = [noncontiguous_like(n) for n in grad_for_expected]
             else:
+                # Nothing to do if it returns a scalar or things like that
                 continue
 
-            grad_for_expected = torch.randn_like(expected_backward_tensor)
-            grad_for_actual = noncontiguous_like(grad_for_expected)
-            expected_backward_tensor.backward(grad_for_expected)
-            actual_backward_tensor.backward(grad_for_actual)
+            # Concatenate inputs into a tuple
+            t_inputs = (t_inp,) + t_args if isinstance(t_inp, torch.Tensor) else tuple(t_inp) + t_args
+            n_inputs = (n_inp,) + n_args if isinstance(n_inp, torch.Tensor) else tuple(n_inp) + n_args
 
-            # Acquires grad (which may be on the first element in a list)
-            expected_grad = t_inp.grad if isinstance(t_inp, torch.Tensor) else t_inp[0].grad
-            actual_grad = n_inp.grad if isinstance(n_inp, torch.Tensor) else n_inp[0].grad
+            # Filter the elemnts that are tensors that require grad
+            t_input_tensors = [t for t in t_inputs if isinstance(t, torch.Tensor) and t.requires_grad]
+            n_input_tensors = [n for n in n_inputs if isinstance(n, torch.Tensor) and n.requires_grad]
 
-            # TODO: FIXME: only validates grad on first tensor input
-            self.assertEqual(actual_grad, expected_grad)
+            self.assertEqual(len(t_input_tensors), len(n_input_tensors))
+
+            # Some functions may not use all the inputs to generate gradients. One of the
+            # few examples of this "odd" behaviour is F.hinge_embedding_loss
+            t_grads = torch.autograd.grad(expected, t_input_tensors, grad_for_expected, allow_unused=True)
+            n_grads = torch.autograd.grad(actual, n_input_tensors, grad_for_actual, allow_unused=True)
+
+            msg = "Got different gradients for contiguous / non-contiguous inputs wrt input {}."
+            for i, (t, n) in enumerate(zip(t_grads, n_grads)):
+                self.assertEqual(t, n, msg=msg.format(i))
 
     # Separates one case from the following test_out because many ops don't properly implement the
     #   incorrectly sized out parameter warning properly yet
@@ -687,6 +700,30 @@ class TestCommon(TestCase):
             args = [sample.input] + list(sample.args)
             kwargs = sample.kwargs
             _check_composite_compliance(op, args, kwargs)
+
+    @onlyCPU
+    @ops(op_db, allowed_dtypes=(torch.float,))
+    def test_floating_inputs_are_differentiable(self, device, dtype, op):
+        # Nothing to check if the operation it's not differentiable
+        if not op.supports_autograd:
+            return
+
+        floating_dtypes = list(floating_and_complex_types_and(torch.bfloat16, torch.float16))
+
+        def check_tensor_floating_is_differentiable(t):
+            if isinstance(t, torch.Tensor) and t.dtype in floating_dtypes:
+                msg = (f"Found a sampled tensor of floating-point dtype {t.dtype} sampled with "
+                       "requires_grad=False. If this is intended, please skip/xfail this test. "
+                       "Remember that sampling operations are executed under a torch.no_grad contextmanager.")
+                self.assertTrue(t.requires_grad, msg)
+
+        samples = op.sample_inputs(device, dtype, requires_grad=True)
+        for sample in samples:
+            check_tensor_floating_is_differentiable(sample.input)
+            for arg in sample.args:
+                check_tensor_floating_is_differentiable(arg)
+            for arg in sample.kwargs.values():
+                check_tensor_floating_is_differentiable(arg)
 
 
 # gradcheck requires double precision

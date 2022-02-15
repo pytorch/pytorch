@@ -357,6 +357,10 @@ Tensor dot_cuda(const Tensor& self, const Tensor& other) {
     incy = 1;
   }
 
+if (self._is_zerotensor() || other._is_zerotensor()) {
+  return at::_efficientzerotensor({}, self.options());
+}
+
 return AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(
       ScalarType::Half, ScalarType::BFloat16,
       self.scalar_type(), "dot",
@@ -395,6 +399,10 @@ Tensor vdot_cuda(const Tensor& self, const Tensor& other) {
 
   at::NoNamesGuard guard;
   dot_check(self, other);
+
+  if (self._is_zerotensor() || other._is_zerotensor()) {
+    return at::_efficientzerotensor({}, self.options());
+  }
 
   const int n = static_cast<int>(self.numel());
   int incx = static_cast<int>(self.stride(0));

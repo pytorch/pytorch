@@ -532,7 +532,8 @@ def _model_to_graph(model, args, verbose=False,
     if training is None or training == TrainingMode.EVAL:
         params_dict = torch._C._jit_pass_onnx_eval_peephole(graph, params_dict)
 
-    if do_constant_folding and _export_onnx_opset_version in torch.onnx.constant_folding_opset_versions:
+    from torch.onnx.symbolic_helper import _constant_folding_opset_versions
+    if do_constant_folding and _export_onnx_opset_version in _constant_folding_opset_versions:
         params_dict = torch._C._jit_pass_onnx_constant_fold(graph, params_dict,
                                                             _export_onnx_opset_version)
         torch._C._jit_pass_dce_allow_deleting_nodes_with_side_effects(graph)
@@ -661,6 +662,10 @@ def _export(model, args, f, export_params=True, verbose=False, training=None,
             fixed_batch_size=False, custom_opsets=None, add_node_names=True,
             onnx_shape_inference=True, export_modules_as_functions=False):
 
+    if export_modules_as_functions and opset_version < 15:
+        raise ValueError("`export_modules_as_functions` is not supported for `opset_version` < 15."
+                         "This is because `opset_version` < 15 implies IR version < 8, which means "
+                         "no local function support. ")
     export_modules_as_functions = _setup_trace_module_map(model, export_modules_as_functions)
 
     if isinstance(model, torch.nn.DataParallel):

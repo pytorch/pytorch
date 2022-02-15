@@ -627,7 +627,7 @@ class TestUtilityFuns_opset9(_BaseTestCase):
         # verify that the model state is preserved
         self.assertEqual(model.training, old_state)
 
-    @skipIfUnsupportedMinOpsetVersion(12)
+    @skipIfUnsupportedMinOpsetVersion(15)
     def test_local_function(self):
         class N(torch.nn.Module):
             def __init__(self, prob):
@@ -717,6 +717,7 @@ class TestUtilityFuns_opset9(_BaseTestCase):
         funcs = onnx_model.functions
         self.assertEqual(len(funcs), 3)
 
+    @skipIfUnsupportedMinOpsetVersion(15)
     def test_local_function_overloads(self):
         class NWithOverloads(torch.nn.Module):
             def forward(self, x, y=None, z=None):
@@ -750,6 +751,24 @@ class TestUtilityFuns_opset9(_BaseTestCase):
         self.assertIn("NWithOverloads", func_names)
         self.assertIn("NWithOverloads.1", func_names)
         self.assertIn("NWithOverloads.2", func_names)
+
+    @skipIfUnsupportedMinOpsetVersion(15)
+    def test_local_function_infer_scopes(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                # Concatenation of scalars inserts unscoped tensors in IR graph.
+                new_tensor_shape = x.size()[:-1] + (1, 1, -1)
+                tensor = x.view(*new_tensor_shape)
+                return tensor
+
+        x = torch.randn(4, 5)
+        f = io.BytesIO()
+        torch.onnx.export(M(), (x,), f, export_modules_as_functions=True,
+                          opset_version=self.opset_version, do_constant_folding=False)
+
+        onnx_model = onnx.load(io.BytesIO(f.getvalue()))
+        funcs = onnx_model.functions
+        self.assertIn("M", [f.name for f in funcs])
 
     def test_aten_fallthrough(self):
         # Test aten export of op with no symbolic
@@ -1219,6 +1238,10 @@ class TestUtilityFuns_opset13(TestUtilityFuns_opset9):
 
 class TestUtilityFuns_opset14(TestUtilityFuns_opset9):
     opset_version = 14
+
+
+class TestUtilityFuns_opset15(TestUtilityFuns_opset9):
+    opset_version = 15
 
 
 if __name__ == "__main__":

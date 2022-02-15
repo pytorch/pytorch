@@ -52,11 +52,7 @@ CONFIG_TREE_DATA = OrderedDict(
         # Stop building Win+CU102, see https://github.com/pytorch/pytorch/issues/65648
         [v for v in dimensions.GPU_VERSIONS if v not in dimensions.ROCM_VERSION_LABELS and v != "cuda102"],
         OrderedDict(
-            wheel=dimensions.STANDARD_PYTHON_VERSIONS,
             conda=dimensions.STANDARD_PYTHON_VERSIONS,
-            libtorch=[
-                "3.7",
-            ],
         )
     ),
 )

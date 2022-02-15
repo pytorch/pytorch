@@ -3,7 +3,7 @@ import operator
 import warnings
 
 import torch  # isort:skip
-from typing import Sequence, Optional, List, cast
+from typing import Sequence, List, cast
 
 import torch.fx.experimental.fx_acc.acc_utils as acc_utils
 import torch.nn as nn
@@ -862,6 +862,41 @@ def sum_mapper(node: torch.fx.Node, mod: torch.fx.GraphModule) -> torch.fx.Node:
 
 @register_acc_op_properties(AccOpProperty.unary)
 @register_acc_op
+def prod(*, input, dim=None, keepdim=False, dtype=None):
+    if dim is not None:
+        return torch.prod(input, dim=dim, keepdim=keepdim, dtype=dtype)
+    else:
+        return input.prod(dtype=dtype)
+
+@register_custom_acc_mapper_fn(
+    op_and_target=("call_method", "prod"),
+    arg_replacement_tuples=[
+        ("input", "input"),
+        ("dim", "dim", this_arg_is_optional),
+        ("keepdim", "keepdim", this_arg_is_optional),
+        ("dtype", "dtype", this_arg_is_optional),
+    ],
+)
+@register_custom_acc_mapper_fn(
+    op_and_target=("call_function", torch.prod),
+    arg_replacement_tuples=[
+        ("input", "input"),
+        ("dim", "dim", this_arg_is_optional),
+        ("keepdim", "keepdim", this_arg_is_optional),
+        ("dtype", "dtype", this_arg_is_optional),
+    ],
+)
+def prod_mapper(node: torch.fx.Node, mod: torch.fx.GraphModule) -> torch.fx.Node:
+    func = prod
+    with node.graph.inserting_before(node):
+        kwargs = dict(node.kwargs)
+        new_node = node.graph.call_function(func, kwargs=kwargs)
+        new_node.meta = node.meta.copy()
+        return new_node
+
+
+@register_acc_op_properties(AccOpProperty.unary)
+@register_acc_op
 def mean(*, input, dim=None, keepdim=False, dtype=None):
     if dim is not None:
         return torch.mean(input, dim=dim, keepdim=keepdim, dtype=dtype)
@@ -1099,6 +1134,7 @@ def abs(*, input):
 
 
 @register_acc_op_properties(AccOpProperty.pointwise, AccOpProperty.unary)
+@register_acc_op_mapping(op_and_target=("call_function", operator.neg))
 @register_acc_op_mapping(op_and_target=("call_function", torch.neg))
 @register_acc_op
 def neg(*, input):
@@ -1278,6 +1314,14 @@ def linalg_norm(*, input, ord, dim, keepdim):
     ],
 )
 @register_custom_acc_mapper_fn(
+    op_and_target=("call_method", "split_with_sizes"),
+    arg_replacement_tuples=[
+        ("tensor", "input"),
+        ("split_sizes", "split_size_or_sections"),
+        ("dim", "dim"),
+    ],
+)
+@register_custom_acc_mapper_fn(
     op_and_target=("call_function", torch.split),
     arg_replacement_tuples=[
         ("tensor", "input"),
@@ -1310,10 +1354,10 @@ def torch_split_mapper(node: torch.fx.Node, mod: nn.Module) -> torch.fx.Node:
             assert isinstance(i, int)
             new_kwargs = {
                 "input": node.kwargs["input"],
-                "dims": (node.kwargs["dim"],),
-                "starts": (start,),
-                "stops": (start + i,),
-                "steps": (1,),
+                "dim": node.kwargs["dim"],
+                "start": start,
+                "stop": start + i,
+                "step": 1,
             }
             new_node = node.graph.call_function(slice_tensor, kwargs=new_kwargs)
             new_node.meta["type"] = torch.Tensor
@@ -1502,21 +1546,25 @@ def getitem(*, input, idx):
     return input[idx]
 
 
+@register_acc_op_mapping(op_and_target=("call_function", torch.nan_to_num))
+@register_acc_op_mapping(op_and_target=("call_method", "nan_to_num"))
+@register_acc_op
+def nan_to_num(*, input, nan=0.0, posinf=None, neginf=None):
+    return torch.nan_to_num(input, nan=nan, posinf=posinf, neginf=neginf)
+
+
 @register_acc_op_properties(AccOpProperty.unary)
 @register_acc_op
-def slice_tensor(*, input, dims, starts, stops, steps):
-    slices: List[Optional[slice]] = [None for _ in range(input.dim())]
+def slice_tensor(*, input, dim, start, stop, step):
+    slc = slice(start, stop, step)
+    if dim >= 0:
+        slices: List[slice] = [slice(None, None, None) for _ in range(dim)]
+        slices.append(slc)
+    else:
+        slices = [Ellipsis, slc]  # type: ignore[list-item]
+        slices.extend([slice(None, None, None) for _ in range(-dim - 1)])
 
-    # For all provided dims, extract out a slice for starts/stops/steps.
-    for idx, dim in enumerate(dims):
-        slices[dim] = slice(starts[idx], stops[idx], steps[idx])
-
-    # For all unspecified dims, default to the full slice.
-    for idx, s in enumerate(slices):
-        if s is None:
-            slices[idx] = slice(None, None, None)
-
-    return input[slices]
+    return input[tuple(slices)]
 
 
 @register_custom_acc_mapper_fn(
@@ -1543,10 +1591,10 @@ def custom_narrow_mapper(node: torch.fx.Node, mod: nn.Module) -> torch.fx.Node:
     )
     kwargs = {
         "input": node.kwargs["input"],
-        "dims": (node.kwargs["dim"],),
-        "starts": (node.kwargs["start"],),
-        "stops": (node.kwargs["start"] + node.kwargs["length"],),
-        "steps": (1,),
+        "dim": node.kwargs["dim"],
+        "start": node.kwargs["start"],
+        "stop": node.kwargs["start"] + node.kwargs["length"],
+        "step": 1,
     }
     with node.graph.inserting_before(node):
         new_node = node.graph.call_function(slice_tensor, kwargs=kwargs)

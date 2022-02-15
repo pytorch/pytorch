@@ -125,5 +125,23 @@ class TestBinaryOpConverters(AccTestCase):
 
         self.run_test_with_dynamic_shape(Op(), input_specs, expected_ops={expected_op})
 
+    def test_elementwise_ops_with_scalar_lhs(self):
+        def orig_op(x, y):
+            return x + y
+
+        class TestModule(nn.Module):
+            def __init__(self, orig_op):
+                super().__init__()
+                self.constant = torch.randn(1)
+                self.orig_op = orig_op
+
+            def forward(self, x):
+                return self.orig_op(x, self.constant)
+
+        m = TestModule(orig_op)
+        inputs = [torch.randn(10)]
+        self.run_test(m, inputs, expected_ops={acc_ops.add}, test_explicit_batch_dim=False, test_implicit_batch_dim=True)
+
+
 if __name__ == '__main__':
     run_tests()
