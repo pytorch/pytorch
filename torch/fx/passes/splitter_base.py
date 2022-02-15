@@ -1,7 +1,7 @@
 import argparse
 from collections import defaultdict
 from dataclasses import dataclass
-from typing import List, Dict, Optional, Tuple
+from typing import NamedTuple, Sequence, Iterable, Any, List, Dict, Optional, Tuple
 import logging
 
 import torch
@@ -24,6 +24,7 @@ from .tools_common import (
     NodeSet,
     is_node_output_tensor,
 )
+import warnings
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -63,7 +64,6 @@ class _SplitterSettingBase:
         self.allow_non_tensor: bool = args.allow_non_tensor
 
 
-# TODO: this can probably be optimized
 @compatibility(is_backward_compatible=False)
 class FxNetAccNodesFinder:
     """
@@ -176,6 +176,61 @@ class Subgraph:
     nodes: NodeList
 
 
+@compatibility(is_backward_compatible=False)
+class SplitResult(NamedTuple):
+    """
+    Stores the results of the splitter.
+
+    Attributes:
+        split_module: root module after splitting.
+        submodule_inputs: a dict that maps submodule name to its inputs.
+        non_acc_submodule_prefix: the prefix for non acc submodules. For
+            acc submodule the prefix is alwasy "_run_on_acc_".
+    """
+
+    split_module: torch.fx.GraphModule
+    submodule_inputs: Dict[str, Any]
+    non_acc_submodule_prefix: str
+
+
+@compatibility(is_backward_compatible=False)
+def generate_inputs_for_submodules(
+    model: torch.nn.Module,
+    inputs: Sequence[Any],
+    target_submodules: Iterable[str]
+) -> Dict[str, Any]:
+    """
+    Generate inputs for targeting submdoules in the given model. Note that if two submodules refer to the same obj, this
+    function doesn't work.
+
+    Args:
+        model: root model.
+        inputs: inputs to the root model.
+        target_submodules: submodules that we want to generate inputs for.
+
+    Returns:
+        A dict that maps from submodule name to its inputs.
+    """
+
+    handles = []
+    results = {}
+    submodule_to_names = dict((mod, name) for name, mod in model.named_modules())
+
+    def pre_forward(module, module_inputs):
+        results[submodule_to_names[module]] = module_inputs
+    try:
+        for name, mod in model.named_modules():
+            if name in target_submodules:
+                handles.append(mod.register_forward_pre_hook(pre_forward))
+        model(*inputs)
+    except Exception as e:
+        warnings.warn(f"Failed to generate submodule inputs because of the following error:\n{e}")
+    finally:
+        for h in handles:
+            h.remove()
+    return results
+
+
 class _SplitterBase:
     """
     Splits a GraphModule into sub-GraphModules for execution on CPU or the accelerator.
@@ -225,7 +280,7 @@ class _SplitterBase:
     def __init__(
         self,
         module: torch.fx.GraphModule,
-        sample_input: Tensors,
+        sample_input: Sequence[Any],
         operator_support: OperatorSupportBase,
         settings: _SplitterSettingBase,
         non_acc_submodule_name: str = "_run_on_cpu_",
@@ -770,3 +825,11 @@ class _SplitterBase:
         subgraphs = self.remove_small_acc_subgraphs(subgraphs)
         self.tag(subgraphs)
         return self.split()
+
+    def generate_split_results(self) -> SplitResult:
+        split_module = self()
+        submodule_names = []
+        for name, mod in split_module.named_children():
+            submodule_names.append(name)
+        submodule_inputs = generate_inputs_for_submodules(split_module, self.sample_input, submodule_names)
+        return SplitResult(split_module, submodule_inputs, self.non_acc_submodule_name)
