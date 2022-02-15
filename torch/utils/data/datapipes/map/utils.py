@@ -4,16 +4,15 @@ from torch.utils.data import MapDataPipe
 
 
 class SequenceWrapperMapDataPipe(MapDataPipe):
-    r""":class:`SequenceWrapperMapDataPipe`.
-
-    Map DataPipe that wraps a sequence object.
+    r"""
+    Wraps a sequence object into a MapDataPipe.
 
     Args:
-        sequence: Sequence object to be wrapped into an IterDataPipe
+        sequence: Sequence object to be wrapped into an MapDataPipe
         deepcopy: Option to deepcopy input sequence object
 
     .. note::
-      If `deepcopy` is set to False explicitly, users should ensure
+      If ``deepcopy`` is set to False explicitly, users should ensure
       that data pipeline doesn't contain any in-place operations over
       the iterable instance, in order to prevent data inconsistency
       across iterations.
