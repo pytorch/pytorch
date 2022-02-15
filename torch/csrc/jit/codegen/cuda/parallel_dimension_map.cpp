@@ -58,18 +58,6 @@ void ParallelDimensionMap::registerConstantExtent(IterDomain* id) {
 
   auto const_extent = extent_int.value();
 
-  // Ignore if this is derived from a size-1 domain that is later concretizedas
-  // as that does not represent the actual dimension even if it's constant.
-  auto id_input_vals = InputsOf::output(id->fusion(), id);
-  auto id_inputs = ir_utils::filterByType<IterDomain>(id_input_vals);
-  if (std::any_of(id_inputs.begin(), id_inputs.end(), [](IterDomain* input_id) {
-        return input_id->extent()->isOneInt() &&
-            GpuLower::current()->concretizedBroadcastDomains().isConcretized(
-                input_id);
-      })) {
-    return;
-  }
-
   // Uses index map
   auto concrete_id = getCAMappedConcreteDomain(id);
 
