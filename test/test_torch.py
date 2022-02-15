@@ -5029,7 +5029,7 @@ class TestTorchDeviceType(TestCase):
         # https://github.com/pytorch/pytorch/issues/30583
         # Compare output using GPU with the CPU implementation, as brute_pdist uses too much memory
         if 'cuda' in device:
-            x = torch.randn(50000, 1, dtype=torch.float32)
+            x = torch.randn(46342, 1, dtype=torch.float32)
             expected_cpu = torch.pdist(x, p=2)
             actual_gpu = torch.pdist(x.to(device), p=2)
             self._compare_large_tensors(expected_cpu, actual_gpu.cpu(), 4)
