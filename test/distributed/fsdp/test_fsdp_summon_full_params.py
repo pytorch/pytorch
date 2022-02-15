@@ -1,5 +1,6 @@
 # Owner(s): ["oncall: distributed"]
 import itertools
+from copy import deepcopy
 import math
 import sys
 
@@ -308,15 +309,15 @@ class TestSummonFullParams(FSDPTest):
 
     @skip_if_lt_x_gpu(2)
     def test_params_are_unflattenned(self):
-        model = FSDP(nn.Linear(self.world_size, 1, bias=False)).cuda(self.rank)
+        layer_shape = (10, 12)
+        model = nn.Linear(*layer_shape, bias=False).cuda(self.rank)
+        fsdp_model = FSDP(deepcopy(model)).cuda(self.rank)
 
-        flattened_param = model.get_parameter("_fsdp_wrapped_module.flat_param")
-        self.assertEqual(1, flattened_param.numel())
+        flattened_param = fsdp_model.get_parameter("_fsdp_wrapped_module.flat_param")
+        self.assertEqual(layer_shape[0] * layer_shape[1] / 2, flattened_param.numel())
 
-        with model._summon_full_params():
-            a = model.weight.flatten().detach()
-            b = flattened_param.detach()
-            self.assertTrue(torch.equal(a, b))
+        with fsdp_model._summon_full_params():
+            self.assertEqual(fsdp_model.weight.shape, model.weight.shape)
 
     @skip_if_lt_x_gpu(2)
     def test_params_count_and_value(self):
