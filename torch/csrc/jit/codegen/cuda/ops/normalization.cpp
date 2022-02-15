@@ -1,4 +1,5 @@
 #include <torch/csrc/jit/codegen/cuda/arith.h>
+#include <torch/csrc/jit/codegen/cuda/ir_builder.h>
 #include <torch/csrc/jit/codegen/cuda/ops/normalization.h>
 
 namespace torch {
@@ -23,7 +24,7 @@ TensorView* softmax(TensorView* x, int dim) {
   auto exp_val = exp(x_max_sub);
   auto sum_exp = sum(exp_val, {kReductionAxis});
   auto bcast_sum = broadcast(sum_exp, broadcast_mask);
-  auto y = div(exp_val, bcast_sum);
+  auto y = mul(exp_val, reciprocal(bcast_sum));
 
   return y;
 }
@@ -88,7 +89,7 @@ ForwardNormResult layer_norm(
 
   std::vector<int> inner_reduction_axes(kNormShapeNumDims);
   std::vector<bool> inner_broadcast_mask(kNumberOfDims, false);
-  Val* num_features = new Double(1);
+  Val* num_features = IrBuilder::create<Double>(x->container(), 1);
   for (const auto idx : c10::irange(kNormShapeNumDims)) {
     const size_t axis = kNumberOfDims - 1 - idx;
     inner_reduction_axes[idx] = axis;
@@ -102,7 +103,7 @@ ForwardNormResult layer_norm(
   auto x_sub_mean = sub(x, mean_bcast);
 
   auto var_sum_bcast = broadcast(welford_out.var_sum, inner_broadcast_mask);
-  auto var = div(var_sum_bcast, num_features);
+  auto var = mul(var_sum_bcast, reciprocal(num_features));
   auto var_eps = add(var, eps);
   auto invstd = rsqrt(var_eps);
 
@@ -156,7 +157,7 @@ BackwardNormResult layer_norm_backward(
 
   std::vector<int> inner_reduction_axes(kNormShapeNumDims);
   std::vector<bool> inner_broadcast_mask(kNumberOfDims, false);
-  Val* num_features = new Double(1);
+  Val* num_features = IrBuilder::create<Double>(x->container(), 1);
   for (const auto idx : c10::irange(kNormShapeNumDims)) {
     const size_t axis = kNumberOfDims - 1 - idx;
     inner_reduction_axes[idx] = axis;
@@ -243,7 +244,7 @@ ForwardNormResult batch_norm(
 
   std::vector<int> reduction_axes;
   std::vector<bool> broadcast_mask(kNumberOfDims, false);
-  Val* num_features = new Double(1);
+  Val* num_features = IrBuilder::create<Double>(x->container(), 1);
 
   for (const auto axis : c10::irange(kNumberOfDims)) {
     if (axis != c_axis) {
@@ -267,13 +268,15 @@ ForwardNormResult batch_norm(
           kTraining,
           "When running stats are provided, batch stats should only be computed during training");
 
-      auto rev_momentum = sub(new Double(1.0), momentum);
+      auto rev_momentum =
+          sub(IrBuilder::create<Double>(x->container(), 1.0), momentum);
       auto current_mean_hat = mul(welford_out.avg, momentum);
       auto mean_hat = mul(running_mean, rev_momentum);
       auto new_mean_hat = add(mean_hat, current_mean_hat);
 
-      auto num_feature_decrement = sub(num_features, new Int(1));
-      auto unbiased_var = div(welford_out.var_sum, num_feature_decrement);
+      auto num_feature_decrement = sub(num_features, x->container()->oneVal());
+      auto unbiased_var =
+          mul(welford_out.var_sum, reciprocal(num_feature_decrement));
       auto current_var_hat = mul(unbiased_var, momentum);
       auto var_hat = mul(running_var, rev_momentum);
       auto new_var_hat = add(var_hat, current_var_hat);
@@ -301,14 +304,14 @@ ForwardNormResult batch_norm(
         fusion->aliasOutputToInput(casted_output, input_to_cast);
       };
 
-      if (fusion->hasInput(running_mean)) {
+      if (running_mean->isFusionInput()) {
         fusion->addOutput(new_mean_hat);
         fusion->aliasOutputToInput(new_mean_hat, running_mean);
       } else {
         cast_to_input_dtype(running_mean, new_mean_hat);
       }
 
-      if (fusion->hasInput(running_var)) {
+      if (running_var->isFusionInput()) {
         fusion->addOutput(new_var_hat);
         fusion->aliasOutputToInput(new_var_hat, running_var);
       } else {
@@ -320,7 +323,7 @@ ForwardNormResult batch_norm(
     auto mean_bcast = broadcast(mean, broadcast_mask);
     auto x_sub_mean = sub(x, mean_bcast);
 
-    auto var = div(welford_out.var_sum, num_features);
+    auto var = mul(welford_out.var_sum, reciprocal(num_features));
     auto var_eps = add(var, eps);
     invstd = rsqrt(var_eps);
     auto invstd_bcast = broadcast(invstd, broadcast_mask);
@@ -414,19 +417,6 @@ BackwardNormResult batch_norm_backward(
 
   mean = broadcast(mean, broadcast_mask);
 
-  TensorView* weight_val = nullptr;
-  if (weight == nullptr) {
-    weight_val = TensorViewBuilder()
-                     .ndims(kNumberOfDims)
-                     .dtype(input->getDataType().value())
-                     .shape(std::vector<int64_t>(kNumberOfDims, 1))
-                     .build();
-    new UnaryOp(
-        UnaryOpType::Set, weight_val->as<Val>(), (new Double(1.0))->as<Val>());
-  } else {
-    weight_val = broadcast(weight, broadcast_mask);
-  }
-
   auto norm = reciprocal(num_features);
 
   auto grad_output_sum = sum(grad_output, reduction_axes);
@@ -435,7 +425,16 @@ BackwardNormResult batch_norm_backward(
   auto grad_mean = broadcast(mul(grad_output_sum, norm), broadcast_mask);
   auto proj_scale =
       broadcast(mul(mul(dot_p, norm), mul(invstd, invstd)), broadcast_mask);
-  auto grad_scale = mul(broadcast(invstd, broadcast_mask), weight_val);
+  TensorView* grad_scale = nullptr;
+
+  if (weight == nullptr) {
+    grad_scale =
+        mul(broadcast(invstd, broadcast_mask),
+            IrBuilder::create<Double>(input->container(), 1));
+  } else {
+    grad_scale = mul(
+        broadcast(invstd, broadcast_mask), broadcast(weight, broadcast_mask));
+  }
 
   TensorView* grad_input = nullptr;
   if (kTraining) {
@@ -496,7 +495,7 @@ ForwardNormResult instance_norm(
 
   std::vector<int> x_reduction_axes;
   std::vector<bool> x_broadcast_mask(kNumberOfDims, false);
-  Val* N = new Double(1);
+  Val* N = IrBuilder::create<Double>(x->container(), 1);
   for (const auto axis : c10::irange(kNumberOfDims)) {
     if (axis != kBatchDim && axis != kChannelsDim) {
       x_reduction_axes.push_back(axis);
@@ -504,7 +503,7 @@ ForwardNormResult instance_norm(
       N = mul(N, x->domain()->domain()[axis]->extent());
     }
   }
-  Val* B = new Double(1);
+  Val* B = IrBuilder::create<Double>(x->container(), 1);
   B = mul(B, x->domain()->domain()[kBatchDim]->extent());
 
   std::vector<bool> channels_only_broadcast_mask(kNumberOfDims, false);
@@ -523,7 +522,8 @@ ForwardNormResult instance_norm(
 
     // updating running mean and running var
     if (running_mean != nullptr && running_var != nullptr) {
-      auto rev_momentum = sub(new Double(1.0), momentum);
+      auto rev_momentum =
+          sub(IrBuilder::create<Double>(x->container(), 1.0), momentum);
       auto current_mean_hat = mul(welford_out.avg, momentum);
       auto mean_hat = mul(running_mean, rev_momentum);
       auto new_mean_hat = add(mean_hat, current_mean_hat);
@@ -531,12 +531,13 @@ ForwardNormResult instance_norm(
       // NS: static_cast to workaround VC++ error, see
       // https://godbolt.org/z/6Prd77xYs
       auto new_mean_sum = sum(new_mean_hat, {static_cast<int>(kBatchDim)});
-      auto new_mean_channels_only = div(new_mean_sum, B);
+      auto new_mean_channels_only = mul(new_mean_sum, reciprocal(B));
       fusion->addOutput(new_mean_channels_only);
       fusion->aliasOutputToInput(new_mean_channels_only, running_mean);
 
-      auto num_feature_decrement = sub(N, new Int(1));
-      auto unbiased_var = div(welford_out.var_sum, num_feature_decrement);
+      auto num_feature_decrement = sub(N, x->container()->oneVal());
+      auto unbiased_var =
+          mul(welford_out.var_sum, reciprocal(num_feature_decrement));
       auto current_var_hat = mul(unbiased_var, momentum);
       auto var_hat = mul(running_var, rev_momentum);
       auto new_var_hat = add(var_hat, current_var_hat);
@@ -544,7 +545,7 @@ ForwardNormResult instance_norm(
       // NS: static_cast to workaround VC++ error, see
       // https://godbolt.org/z/6Prd77xYs
       auto new_var_sum = sum(new_var_hat, {static_cast<int>(kBatchDim)});
-      auto new_var_channels_only = div(new_var_sum, B);
+      auto new_var_channels_only = mul(new_var_sum, reciprocal(B));
       fusion->addOutput(new_var_channels_only);
       fusion->aliasOutputToInput(new_var_channels_only, running_var);
     }
@@ -553,7 +554,7 @@ ForwardNormResult instance_norm(
     auto mean_bcast = broadcast(mean, x_broadcast_mask);
     auto x_sub_mean = sub(x, mean_bcast);
 
-    auto var = div(welford_out.var_sum, N);
+    auto var = mul(welford_out.var_sum, reciprocal(N));
     auto var_eps = add(var, eps);
     invstd = rsqrt(var_eps);
     auto invstd_bcast = broadcast(invstd, x_broadcast_mask);
