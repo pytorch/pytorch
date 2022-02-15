@@ -386,7 +386,6 @@ elif [[ "${BUILD_ENVIRONMENT}" == *-test1 || "${JOB_BASE_NAME}" == *-test1 ]]; t
   # if [[ "${BUILD_ENVIRONMENT}" == pytorch-linux-xenial-cuda10.2-cudnn7-py3-gcc7-test1 ]]; then
   #   test_torch_deploy
   # fi
-  python -c "import os; print(os.getenv('IN_CI') == '1')"
   install_torchvision
   python test/test_large.py 5 4
   python test/test_large.py 10 4
@@ -400,7 +399,6 @@ elif [[ "${BUILD_ENVIRONMENT}" == *-test1 || "${JOB_BASE_NAME}" == *-test1 ]]; t
   python test/test_large.py 30 4
   test_python_shard1
 elif [[ "${BUILD_ENVIRONMENT}" == *-test2 || "${JOB_BASE_NAME}" == *-test2 ]]; then
-  python -c "import os; print(os.getenv('IN_CI') == '1')"
   install_torchvision
   python test/test_large_pdist.py 5000 4
   python test/test_large_pdist.py 10000 4
