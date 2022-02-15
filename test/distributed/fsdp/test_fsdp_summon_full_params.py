@@ -34,6 +34,54 @@ if TEST_WITH_DEV_DBG_ASAN:
     )
     sys.exit(0)
 
+def _run_test_summon_full_param_writeback(cls, writeback, cpu_offload, modify_outer):
+    model = FSDP(
+        nn.Sequential(
+            FSDP(nn.Linear(5, 5, bias=False)), nn.Linear(5, 3, bias=False)
+        )
+    ).cuda(cls.rank)
+
+    # set the value
+    outer_param = model.get_parameter("_fsdp_wrapped_module.flat_param")
+    inner_param = model.get_parameter(
+        "_fsdp_wrapped_module._fpw_module.0._fsdp_wrapped_module.flat_param"
+    )
+    p = outer_param if modify_outer else inner_param
+
+    with torch.no_grad():
+        # This sets the local shard value
+        p[0] = cls.rank + 2
+
+    with model._summon_full_params(writeback=writeback):
+        with torch.no_grad():
+            p.copy_(torch.zeros_like(p))
+
+    if writeback or cls.world_size == 1:
+        # When world_size = 1, FSDP does not shard and parameter is not set to
+        # a local shard, so write is always reflected.
+        cls.assertEqual(p.cpu()[0], 0)
+    else:
+        cls.assertEqual(p.cpu()[0], cls.rank + 2)
+
+class TestSummonFullParamsNoShard(FSDPTest):
+    @property
+    def world_size(self):
+        return 1  # does not shard
+
+    @skip_if_lt_x_gpu(2)
+    @parametrize("writeback", [True, False])
+    @parametrize(
+        "cpu_offload",
+        [CPUOffload(offload_params=True), CPUOffload(offload_params=False)],
+    )
+    @parametrize("modify_outer", [True, False])
+    def test_summon_full_param_writeback(self, writeback, cpu_offload, modify_outer):
+        return _run_test_summon_full_param_writeback(
+            self,
+            writeback,
+            cpu_offload,
+            modify_outer,
+        )
 
 class TestSummonFullParams(FSDPTest):
     @property
@@ -54,34 +102,13 @@ class TestSummonFullParams(FSDPTest):
         [CPUOffload(offload_params=True), CPUOffload(offload_params=False)],
     )
     @parametrize("modify_outer", [True, False])
-    def test_summon_full_param_writeback(
-        self, writeback, cpu_offload, modify_outer
-    ):
-        model = FSDP(
-            nn.Sequential(
-                FSDP(nn.Linear(5, 5, bias=False)), nn.Linear(5, 3, bias=False)
-            )
-        ).cuda(self.rank)
-
-        # set the value
-        outer_param = model.get_parameter("_fsdp_wrapped_module.flat_param")
-        inner_param = model.get_parameter(
-            "_fsdp_wrapped_module._fpw_module.0._fsdp_wrapped_module.flat_param"
+    def test_summon_full_param_writeback(self, writeback, cpu_offload, modify_outer):
+        return _run_test_summon_full_param_writeback(
+            self,
+            writeback,
+            cpu_offload,
+            modify_outer
         )
-        p = outer_param if modify_outer else inner_param
-
-        with torch.no_grad():
-            # This sets the local shard value
-            p[0] = self.rank + 2
-
-        with model._summon_full_params(writeback=writeback):
-            with torch.no_grad():
-                p.copy_(torch.zeros_like(p))
-
-        if writeback:
-            self.assertEqual(p.cpu()[0], 0)
-        else:
-            self.assertEqual(p.cpu()[0], self.rank + 2)
 
     @skip_if_lt_x_gpu(2)
     def test_summon_full_param_shard_value(self):
@@ -280,7 +307,7 @@ class TestSummonFullParams(FSDPTest):
         self.assertEqual(0, inner_param._full_param_padded.storage().size())
 
     @skip_if_lt_x_gpu(2)
-    def test_params_are_unflatenned(self):
+    def test_params_are_unflattenned(self):
         model = FSDP(nn.Linear(self.world_size, 1, bias=False)).cuda(self.rank)
 
         flattened_param = model.get_parameter("_fsdp_wrapped_module.flat_param")
@@ -313,6 +340,7 @@ class TestSummonFullParams(FSDPTest):
 
 
 instantiate_parametrized_tests(TestSummonFullParams)
+instantiate_parametrized_tests(TestSummonFullParamsNoShard)
 
 
 if __name__ == "__main__":
