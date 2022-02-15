@@ -4979,7 +4979,7 @@ class TestQuantizeFxOps(QuantizationTestCase):
         # observers and also successfully fused two quantized::conv2d
         # patterns
         # one quantize_per_tensor for input
-        # check exact counts of quantize and dequantiz
+        # check exact counts of quantize and dequantize
         count_check = {
             # input of conv and two outputs of getitem
             ns.call_function(torch.quantize_per_tensor) : 2,
