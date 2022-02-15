@@ -2894,6 +2894,7 @@ class TestLinalg(TestCase):
     @slowTest
     @skipCUDAIfNoMagmaAndNoCusolver
     @skipCPUIfNoLapack
+    @skipCUDAIfRocm
     @dtypes(*floating_and_complex_types())
     @precisionOverride({torch.float32: 2e-3, torch.complex64: 2e-3,
                         torch.float64: 1e-5, torch.complex128: 1e-5})

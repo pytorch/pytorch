@@ -283,6 +283,7 @@ class TestTesting(TestCase):
     # when CUDA assert was thrown. Because all subsequent test will fail if that happens.
     # These tests are slow because it spawn another process to run test suite.
     # See: https://github.com/pytorch/pytorch/issues/49019
+    @skipIfRocm
     @onlyCUDA
     @slowTest
     def test_cuda_assert_should_stop_common_utils_test_suite(self, device):
@@ -316,6 +317,7 @@ if __name__ == '__main__':
         self.assertIn('errors=1', stderr)
 
 
+    @skipIfRocm
     @onlyCUDA
     @slowTest
     def test_cuda_assert_should_stop_common_device_type_test_suite(self, device):
@@ -356,6 +358,7 @@ if __name__ == '__main__':
         self.assertIn('errors=1', stderr)
 
 
+    @skipIfRocm
     @onlyCUDA
     @slowTest
     def test_cuda_assert_should_not_stop_common_distributed_test_suite(self, device):
