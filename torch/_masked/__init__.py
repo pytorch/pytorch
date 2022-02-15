@@ -30,7 +30,6 @@ def _apply_docstring_templates(func):
     and returns the function instance.
     """
 
-
     doc_string = getattr(_docs, f'{func.__name__}_docstring', None)
     if doc_string is None:
         warnigns.warn(
@@ -39,6 +38,7 @@ def _apply_docstring_templates(func):
             ' to generate the missing docstrings.')
     else:
         func.__doc__ = doc_string
+
     # Expose function as public symbol
     __all__.append(func.__name__)
 
@@ -46,7 +46,7 @@ def _apply_docstring_templates(func):
 
 
 def _generate_docstring(func):
-    """An utility function called from scripts/update_masked_docs.py
+    """An utility function called from tools/update_masked_docs.py
     script to update the module torch._masked._docs.py
     """
     docstring_templates = dict(
