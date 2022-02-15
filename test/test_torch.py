@@ -4235,18 +4235,11 @@ class TestTorchDeviceType(TestCase):
             scalar = torch.tensor(2, device=device, dtype=dtype)
             torch.diff(scalar)
 
-    def _compare_large_tensors(self, expected, actual):
-        first_third = expected.shape[0] // 3
-        second_third = 2 * expected.shape[0] // 3
-        self.assertEqual(expected[:first_third], actual[:first_third])
-        self.assertEqual(expected[first_third:second_third], actual[first_third:second_third])
-        self.assertEqual(expected[second_third:], actual[second_third:])
-
     def _test_large_cum_fn_helper(self, x, fn):
         x_cpu = x.cpu().float()
         expected = fn(x_cpu)
         actual = fn(x).cpu().float()
-        self._compare_large_tensors(expected, actual.cpu().float())
+        self.assertEqual(expected, actual.cpu().float())
 
     @unittest.skipIf(IS_FBCODE and IS_REMOTE_GPU, "sandcastle OOM with current tpx gpu/re configuration")
     @onlyCUDA
@@ -5032,7 +5025,7 @@ class TestTorchDeviceType(TestCase):
             x = torch.randn(50000, 1, dtype=torch.float32)
             expected_cpu = torch.pdist(x, p=2)
             actual_gpu = torch.pdist(x.to(device), p=2)
-            self._compare_large_tensors(expected_cpu, actual_gpu.cpu())
+            self.assertEqual(expected_cpu, actual_gpu.cpu())
 
     @onlyOnCPUAndCUDA
     @dtypesIfCUDA(*set(torch.testing.get_all_math_dtypes('cuda')))
