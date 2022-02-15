@@ -481,7 +481,8 @@ jobs:
           else
             export COMMIT_DOCKER_IMAGE=$output_image
           fi
-          export COMMIT_DOCKER_IMAGE=DOCKER_IMAGE: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda10.2-cudnn7-py3-gcc7:3dde924a9729b91a5ad6cf767bdc69285183cd6c-4dc909cf09ce8b374a2e3903c5fc3110ef29abab
+          export COMMIT_DOCKER_IMAGE=308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda10.2-cudnn7-py3-gcc7:3dde924a9729b91a5ad6cf767bdc69285183cd6c-b1775e2b72f7623e65fbae63c80062e5e2691ded
+
           echo "DOCKER_IMAGE: "${COMMIT_DOCKER_IMAGE}
 
           if [[ ${BUILD_ENVIRONMENT} == *"paralleltbb"* ]]; then
