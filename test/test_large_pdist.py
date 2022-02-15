@@ -5,25 +5,25 @@ def _compare_large_tensors(expected, actual, num_splits):
     for i in range(num_splits):
         start = (i * length) // num_splits
         end = ((i + 1) * length) // num_splits
-        sys.stdout.write("  " + str(i) + "\n")
+        print("  " + str(i), flush=True)
         torch.allclose(expected[start:end], actual[start:end], rtol=1.3e-06, atol=1e-05, equal_nan=True)
 
 def test_pdist_norm_large(size, num_splits):
     device = "cuda:0"
 
-    sys.stdout.write("----------------------" + "\n")
-    sys.stdout.write("test_pdist" + "\n")
-    sys.stdout.write(str(size) + "\n")
-    sys.stdout.write("----------------------" + "\n")
+    print("----------------------", flush=True)
+    print("test_pdist", flush=True)
+    print(size, flush=True)
+    print("----------------------", flush=True)
 
     x = torch.randn(size, 1, dtype=torch.float32)
-    sys.stdout.write(" Point 1" + "\n")
+    print(" Point 1", flush=True)
     expected_cpu = torch.pdist(x, p=2)
-    sys.stdout.write(" Point 2" + "\n")
+    print(" Point 2", flush=True)
     actual_gpu = torch.pdist(x.to(device), p=2)
-    sys.stdout.write(" Point 3" + "\n")
+    print(" Point 3", flush=True)
     _compare_large_tensors(expected_cpu, actual_gpu.cpu(), num_splits)
-    sys.stdout.write(" Pass" + "\n")
+    print(" Pass", flush=True)
             
 
 import sys
