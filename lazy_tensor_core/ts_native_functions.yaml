@@ -171,5 +171,6 @@ supported:
   - sub.Scalar
   - view
   - alias
+  - _unsafe_view
 autograd:
   - max_pool3d

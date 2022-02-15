@@ -600,6 +600,14 @@ at::Tensor LazyNativeFunctions::view(const at::Tensor& self,
       lazy_tensor_aten_ops::view(self_tensor, torch::lazy::ToI64Vector(size)));
 }
 
+at::Tensor LazyNativeFunctions::_unsafe_view(const at::Tensor& self,
+                                     at::IntArrayRef size) {
+  TORCH_LAZY_FN_COUNTER("lazy::");
+  torch::lazy::LazyTensor self_tensor = torch::lazy::TryGetLtcTensor(self);
+  return torch::lazy::CreateAtenFromLtcTensor(
+      lazy_tensor_aten_ops::view(self_tensor, torch::lazy::ToI64Vector(size)));
+}
+
 void InitializeAtenBindings() {}
 
 }  // namespace torch_lazy_tensors
