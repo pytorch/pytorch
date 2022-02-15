@@ -838,103 +838,103 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   bool is_sparse() const {
     // NB: This method is not virtual and avoid dispatches for performance
     // reasons.
-    return key_set_.has_all(c10::sparse_ks);
+    return key_set_.has(DispatchKey::SparseCPU) ||
+        key_set_.has(DispatchKey::SparseCUDA) ||
+        key_set_.has(DispatchKey::SparseHIP) ||
+        key_set_.has(DispatchKey::SparseXPU);
   }
 
   // Whether a tensor is sparse COO or not. Use is_sparse_csr for checking CSR
   // format.
   bool is_sparse_csr() const {
-    return key_set_.has_any(c10::sparse_csr_ks);
+    return key_set_.has(DispatchKey::SparseCsrCPU) ||
+        key_set_.has(DispatchKey::SparseCsrCUDA);
   }
 
   bool is_quantized() const {
     // NB: This method is not virtual and avoid dispatches for performance
     // reasons.
-    constexpr auto quantized_ks = DispatchKeySet(DispatchKey::Quantized);
-    return key_set_.has_all(quantized_ks);
+    return key_set_.has(DispatchKey::QuantizedCPU) ||
+        key_set_.has(DispatchKey::QuantizedCUDA) ||
+        key_set_.has(DispatchKey::QuantizedXPU);
   }
 
   bool is_meta() const {
     // NB: This method is not virtual and avoid dispatches for performance
     // reasons.
-    constexpr auto meta_ks = DispatchKeySet(DispatchKey::Meta);
-    return key_set_.has_all(meta_ks);
+    return key_set_.has(DispatchKey::Meta);
   }
 
   bool is_cpu() const {
     // NB: This method is not virtual and avoid dispatches for performance
     // reasons.
-    constexpr auto cpu_bits_ks = DispatchKeySet(BackendComponent::CPUBit) |
-        DispatchKeySet({DispatchKey::SparseCsrCPU, DispatchKey::MkldnnCPU});
-    return key_set_.has_any(cpu_bits_ks);
+    return key_set_.has(DispatchKey::CPU) ||
+        key_set_.has(DispatchKey::SparseCPU) ||
+        key_set_.has(DispatchKey::SparseCsrCPU) ||
+        key_set_.has(DispatchKey::QuantizedCPU) ||
+        key_set_.has(DispatchKey::MkldnnCPU);
   }
 
   bool is_cuda() const {
     // NB: This method is not virtual and avoid dispatches for performance
     // reasons.
-    constexpr auto cuda_bits_ks = DispatchKeySet(BackendComponent::CUDABit) |
-        DispatchKeySet(DispatchKey::SparseCsrCUDA);
-    return key_set_.has_any(cuda_bits_ks);
+    return key_set_.has(DispatchKey::CUDA) ||
+        key_set_.has(DispatchKey::SparseCUDA) ||
+        key_set_.has(DispatchKey::SparseCsrCUDA) ||
+        key_set_.has(DispatchKey::QuantizedCUDA);
   }
 
   bool is_xpu() const {
     // NB: This method is not virtual and avoid dispatches for performance
     // reasons.
-    constexpr auto xpu_ks = DispatchKeySet(BackendComponent::XPUBit);
-    return key_set_.has_all(xpu_ks);
+    return key_set_.has(DispatchKey::XPU) ||
+        key_set_.has(DispatchKey::SparseXPU) ||
+        key_set_.has(DispatchKey::QuantizedXPU);
   }
 
   bool is_xla() const {
-    constexpr auto xla_ks = DispatchKeySet(BackendComponent::XLABit);
-    return key_set_.has_all(xla_ks);
+    return key_set_.has(DispatchKey::XLA);
   }
 
   bool is_hpu() const {
-    constexpr auto hpu_ks = DispatchKeySet(BackendComponent::HPUBit);
-    return key_set_.has_all(hpu_ks);
+    return key_set_.has(DispatchKey::HPU);
   }
 
   bool is_lazy() const {
-    constexpr auto lazy_ks = DispatchKeySet(BackendComponent::LazyBit);
-    return key_set_.has_all(lazy_ks);
+    return key_set_.has(DispatchKey::Lazy);
   }
 
   bool is_hip() const {
     // NB: This method is not virtual and avoid dispatches for performance
     // reasons.
-    constexpr auto hip_ks = DispatchKeySet(BackendComponent::HIPBit);
-    return key_set_.has_all(hip_ks);
+    return key_set_.has(DispatchKey::HIP) ||
+        key_set_.has(DispatchKey::SparseHIP);
   }
 
   bool is_ve() const {
     // NB: This method is not virtual and avoid dispatches for performance
     // reasons.
-    constexpr auto ve_ks = DispatchKeySet(BackendComponent::VEBit);
-    return key_set_.has_all(ve_ks);
+    return key_set_.has(DispatchKey::VE) || key_set_.has(DispatchKey::SparseVE);
   }
 
   bool is_mkldnn() const {
-    return key_set_.has_all(c10::mkldnn_ks);
+    return key_set_.has(DispatchKey::MkldnnCPU);
   }
 
   bool is_vulkan() const {
-    constexpr auto vulkan_ks = DispatchKeySet(DispatchKey::Vulkan);
-    return key_set_.has_all(vulkan_ks);
+    return key_set_.has(DispatchKey::Vulkan);
   }
 
   bool is_metal() const {
-    constexpr auto metal_ks = DispatchKeySet(DispatchKey::Metal);
-    return key_set_.has_all(metal_ks);
+    return key_set_.has(DispatchKey::Metal);
   }
 
   bool is_mlc() const {
-    constexpr auto mls_ks = DispatchKeySet(DispatchKey::MLC);
-    return key_set_.has_all(mls_ks);
+    return key_set_.has(DispatchKey::MLC);
   }
 
   bool is_ort() const {
-    constexpr auto ort_ks = DispatchKeySet(DispatchKey::ORT);
-    return key_set_.has_all(ort_ks);
+    return key_set_.has(DispatchKey::ORT);
   }
 
   // TODO: remove this once we don't automatically enabled Autograd dispatch
@@ -950,8 +950,8 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   // Invariant:
   //   Inference tensor has version_counter_.enabled() == false
   bool is_inference() {
-    bool no_ADInplaceOrView = !key_set_.has_any(c10::inplace_or_view_ks);
-    bool no_Autograd = !key_set_.has_any(c10::autograd_dispatch_keyset);
+    bool no_ADInplaceOrView = !key_set_.has(c10::DispatchKey::ADInplaceOrView);
+    bool no_Autograd = (key_set_ & c10::autograd_dispatch_keyset).empty();
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
         no_ADInplaceOrView == no_Autograd,
         "ADInplaceOrView and Autograd keys must be on/off at the same time.");
@@ -972,22 +972,14 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
 
   Layout layout() const {
     // NB: This method is not virtual and avoid dispatches for perf.
-    // strided is also the most common layout type, so we check for
-    // strided case first.
-    // This keyset must also be kept in sync with the logic in
-    // is_sparse() / is_sparse_csr() / is_mkldnn()
-    constexpr auto sparse_and_sparsecsr_and_mkldnn_ks =
-        c10::sparse_ks | c10::sparse_csr_ks | c10::mkldnn_ks;
-    if (!key_set_.has_any(sparse_and_sparsecsr_and_mkldnn_ks)) {
-      return kStrided;
-    } else if (is_sparse()) {
+    if (is_sparse()) {
       return kSparse;
     } else if (is_sparse_csr()) {
       return kSparseCsr;
-    } else {
-      TORCH_INTERNAL_ASSERT(
-          is_mkldnn(), "There is an error in the layout calculation logic.");
+    } else if (is_mkldnn()) {
       return kMkldnn;
+    } else {
+      return kStrided;
     }
   }
 
@@ -1073,8 +1065,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * Whether or not the imaginary part of the tensor should be negated
    */
   inline bool is_conj() const {
-    constexpr auto conjugate_ks = DispatchKeySet(DispatchKey::Conjugate);
-    return key_set_.has_all(conjugate_ks);
+    return key_set_.has(DispatchKey::Conjugate);
   }
 
   /**
@@ -1094,8 +1085,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * Whether or not the tensor is a zerotensor
    */
   inline bool _is_zerotensor() const {
-    constexpr auto zerotensor_ks = DispatchKeySet(DispatchKey::ZeroTensor);
-    return key_set_.has_all(zerotensor_ks);
+    return key_set_.has(DispatchKey::ZeroTensor);
   }
 
   /**
@@ -1115,8 +1105,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * Whether or not the tensor should be negated
    */
   inline bool is_neg() const {
-    constexpr auto negative_ks = DispatchKeySet(DispatchKey::Negative);
-    return key_set_.has_all(negative_ks);
+    return key_set_.has(DispatchKey::Negative);
   }
 
   /**
@@ -1487,14 +1476,14 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
 
   void set_python_dispatch(bool k) {
     if (k) {
-      key_set_ = key_set_.add(c10::python_ks);
+      key_set_ = key_set_.add(DispatchKey::Python);
     } else {
-      key_set_ = key_set_ - c10::python_ks;
+      key_set_ = key_set_.remove(DispatchKey::Python);
     }
   }
 
   bool is_python_dispatch() const {
-    return key_set_.has_all(c10::python_ks);
+    return key_set_.has(DispatchKey::Python);
   }
 
   /**
@@ -1559,22 +1548,13 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    */
   inline bool has_compatible_shallow_copy_type(DispatchKeySet from) {
     auto is_dense = [](DispatchKeySet ts) {
-      constexpr auto dense_backends = DispatchKeySet(
-          {BackendComponent::CPUBit,
-           BackendComponent::CUDABit,
-           BackendComponent::HIPBit,
-           BackendComponent::XPUBit});
-      constexpr auto dense_k = DispatchKeySet(DispatchKey::Dense);
-      return ts.has_any(dense_k) && ts.has_any(dense_backends);
+      return ts.has(DispatchKey::CPU) || ts.has(DispatchKey::CUDA) ||
+          ts.has(DispatchKey::HIP) || ts.has(DispatchKey::XPU);
     };
     auto is_sparse = [](DispatchKeySet ts) {
-      constexpr auto sparse_backends = DispatchKeySet(
-          {BackendComponent::CPUBit,
-           BackendComponent::CUDABit,
-           BackendComponent::HIPBit,
-           BackendComponent::XPUBit});
-      constexpr auto sparse_k = DispatchKeySet(DispatchKey::Sparse);
-      return ts.has_any(sparse_k) && ts.has_any(sparse_backends);
+      return ts.has(DispatchKey::SparseCPU) ||
+          ts.has(DispatchKey::SparseCUDA) || ts.has(DispatchKey::SparseHIP) ||
+          ts.has(DispatchKey::SparseXPU);
     };
     return (key_set_ == from) || (is_dense(key_set_) && is_dense(from)) ||
         (is_sparse(key_set_) && is_sparse(from));
@@ -2741,6 +2721,8 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
 // We use a templatized class to both contain the logic of checking the sizes
 // as well as to provide compile-time information that might be useful in
 // figuring out why sizes may have changed.
+// All the compile time information is given by the template fields that are
+// always printed by the compiler when the static_assert fails.
 template <
     size_t cplusplus = __cplusplus,
     size_t clang_ver_major = C10_CLANG_MAJOR_VERSION,
@@ -2751,6 +2733,44 @@ template <
     size_t cuda_version_major = C10_CUDA_VERSION_MAJOR,
     size_t ptr_size = sizeof(void*)>
 class C10_TensorImpl_Size_Check_Dummy_Class : private TensorImpl {
+  // Names of (non-bitfield) fields in TensorImpl; used to provide
+  // compile-time info about fields whose size changes unexpectedly.
+  enum class FieldNameEnum {
+    storage_,
+    autograd_meta_,
+    named_tensor_meta_,
+    version_counter_,
+    pyobj_interpreter_,
+    pyobj_,
+    sizes_and_strides_,
+    storage_offset_,
+    numel_,
+    data_type_,
+    device_opt_,
+    key_set_,
+    TOTAL_SIZE
+  };
+
+  // Provides compile-time equality check that reveals what numbers
+  // were used and on which quantity
+  template <size_t Actual, size_t Expected, FieldNameEnum FiledName>
+  constexpr static bool are_equal() {
+    static_assert(
+        Actual == Expected,
+        "Actual and Expected sizes of a field did not match!");
+    return true;
+  }
+
+  // Provides compile-time <= check that reveals what numbers
+  // were used and on which quantity
+  template <size_t Actual, size_t Expected, FieldNameEnum FiledName>
+  constexpr static bool is_le() {
+    static_assert(
+        Actual <= Expected,
+        "Actual and Expected sizes of a field did not match!");
+    return true;
+  }
+
  public:
   // Compile-time check that TensorImpl field sizes are as expected
   //
@@ -2773,19 +2793,19 @@ class C10_TensorImpl_Size_Check_Dummy_Class : private TensorImpl {
     constexpr size_t tsize = 20 * sizeof(int64_t);
 
     // clang-format off
-    static_assert(sizeof(storage_)            == 4, "Size of storage_ changed!");
-    static_assert(sizeof(autograd_meta_)      == 4, "Size of autograd_meta_ changed!");
-    static_assert(sizeof(named_tensor_meta_)  == 4, "Size of named_tensor_meta_ changed!");
-    static_assert(sizeof(version_counter_)    == 4, "Size of version_counter_ changed!");
-    static_assert(sizeof(pyobj_interpreter_)  == 4, "Size of pyobj_interpreter_ changed!");
-    static_assert(sizeof(pyobj_)              == 4, "Size of pyobj_ changed!");
-    static_assert(sizeof(sizes_and_strides_)  <= 88,"Size of sizes_and_strides_ changed!");
-    static_assert(sizeof(storage_offset_)     == 8, "Size of storage_offset_ changed!");
-    static_assert(sizeof(numel_)              == 8, "Size of numel_ changed!");
-    static_assert(sizeof(data_type_)          == 2, "Size of data_type_ changed!");
-    static_assert(sizeof(device_opt_)         == 3, "Size of device_opt_ changed!");
-    static_assert(sizeof(key_set_)            == 8, "Size of key_set_ changed!");
-    static_assert(sizeof(TensorImpl)          <= tsize, "Total size changed!");
+    are_equal<sizeof(storage_),            4,  FieldNameEnum::storage_>();
+    are_equal<sizeof(autograd_meta_),      4,  FieldNameEnum::autograd_meta_>();
+    are_equal<sizeof(named_tensor_meta_),  4,  FieldNameEnum::named_tensor_meta_>();
+    are_equal<sizeof(version_counter_),    4,  FieldNameEnum::version_counter_>();
+    are_equal<sizeof(pyobj_interpreter_),  4,  FieldNameEnum::pyobj_interpreter_>();
+    are_equal<sizeof(pyobj_),              4,  FieldNameEnum::pyobj_>();
+    is_le<sizeof(sizes_and_strides_),     88, FieldNameEnum::sizes_and_strides_>();
+    are_equal<sizeof(storage_offset_),     8,  FieldNameEnum::storage_offset_>();
+    are_equal<sizeof(numel_),              8,  FieldNameEnum::numel_>();
+    are_equal<sizeof(data_type_),          2,  FieldNameEnum::data_type_>();
+    are_equal<sizeof(device_opt_),         3,  FieldNameEnum::device_opt_>();
+    are_equal<sizeof(key_set_),            8,  FieldNameEnum::key_set_>();
+    is_le<sizeof(TensorImpl),          tsize,  FieldNameEnum::TOTAL_SIZE>();
     // clang-format on
 
     return true;
@@ -2796,22 +2816,22 @@ class C10_TensorImpl_Size_Check_Dummy_Class : private TensorImpl {
     constexpr size_t tsize = 26 * sizeof(int64_t);
 
     // clang-format off
-    static_assert(sizeof(storage_)            == 8, "Size of storage_ changed!");
+    are_equal<sizeof(storage_),            8,  FieldNameEnum::storage_>();
     // On some systems involving NVCC the size of unique_ptr is 16 bytes. We haven't
     // figured out how to detect those via macro preprocessors yet, so we use <=
     // comparisons for the relevant fields.
-    static_assert(sizeof(autograd_meta_)      <= 16,"Size of autograd_meta_ changed!");
-    static_assert(sizeof(named_tensor_meta_)  <= 16,"Size of named_tensor_meta_ changed!");
-    static_assert(sizeof(version_counter_)    == 8, "Size of version_counter_ changed!");
-    static_assert(sizeof(pyobj_interpreter_)  == 8, "Size of pyobj_interpreter_ changed!");
-    static_assert(sizeof(pyobj_)              == 8, "Size of pyobj_ changed!");
-    static_assert(sizeof(sizes_and_strides_)  == 88,"Size of sizes_and_strides_ changed!");
-    static_assert(sizeof(storage_offset_)     == 8, "Size of storage_offset_ changed!");
-    static_assert(sizeof(numel_)              == 8, "Size of numel_ changed!");
-    static_assert(sizeof(data_type_)          == 2, "Size of data_type_ changed!");
-    static_assert(sizeof(device_opt_)         == 3, "Size of device_opt_ changed!");
-    static_assert(sizeof(key_set_)            == 8, "Size of key_set_ changed!");
-    static_assert(sizeof(TensorImpl)          <= tsize, "Total size changed!");
+    is_le<sizeof(autograd_meta_),         16,  FieldNameEnum::autograd_meta_>();
+    is_le<sizeof(named_tensor_meta_),     16,  FieldNameEnum::named_tensor_meta_>();
+    are_equal<sizeof(version_counter_),    8,  FieldNameEnum::version_counter_>();
+    are_equal<sizeof(pyobj_interpreter_),  8,  FieldNameEnum::pyobj_interpreter_>();
+    are_equal<sizeof(pyobj_),              8,  FieldNameEnum::pyobj_>();
+    are_equal<sizeof(sizes_and_strides_), 88,  FieldNameEnum::sizes_and_strides_>();
+    are_equal<sizeof(storage_offset_),     8,  FieldNameEnum::storage_offset_>();
+    are_equal<sizeof(numel_),              8,  FieldNameEnum::numel_>();
+    are_equal<sizeof(data_type_),          2,  FieldNameEnum::data_type_>();
+    are_equal<sizeof(device_opt_),         3,  FieldNameEnum::device_opt_>();
+    are_equal<sizeof(key_set_),            8,  FieldNameEnum::key_set_>();
+    is_le<sizeof(TensorImpl),          tsize,  FieldNameEnum::TOTAL_SIZE>();
     // clang-format on
 
     return true;
@@ -2824,7 +2844,7 @@ class C10_TensorImpl_Size_Check_Dummy_Class : private TensorImpl {
 // a static assert to prove there is no run-time behaviour.
 // Since the methods we call return either true or fail their
 // own static_asserts, we should never see the error messages
-// below.
+// below. We have to provide it though for c++ <17.
 static_assert(
     C10_TensorImpl_Size_Check_Dummy_Class<>::check_sizes(),
     "You should not see this message.");

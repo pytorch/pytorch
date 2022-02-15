@@ -24,6 +24,10 @@ module_type_list = {
     torch.nn.MaxPool1d,
     torch.nn.MaxPool2d,
     torch.nn.MaxPool3d,
+    torch.nn.Identity,
+    torch.nn.Hardsigmoid,
+    torch.nn.Sigmoid,
+    torch.nn.Tanh,
 }
 func_list = {
     torch.nn.functional.adaptive_avg_pool1d,
@@ -35,14 +39,47 @@ func_list = {
     torch.nn.functional.relu,
     torch.nn.functional.hardtanh,
     torch.nn.functional.hardtanh_,
+    torch.nn.functional.hardsigmoid,
+    torch.nn.functional.sigmoid,
+    torch.transpose,
+    torch.repeat_interleave,
+    torch.sigmoid,
+    torch.squeeze,
+    torch.stack,
+    torch.tanh,
+    torch.unsqueeze,
+    torch.cat,
 }
 method_list = {
     torch.mean,
     'relu',
     'relu_',
+    'contiguous',
+    'detach',
+    'detach_',
+    'hardsigmoid',
+    'hardsigmoid_',
+    'permute',
+    'repeat',
+    'repeat_interleave',
+    'reshape',
+    'resize_',
+    'shape',
+    'sigmoid',
+    'sigmoid_',
+    'size',
+    'squeeze',
+    'squeeze_',
+    'tanh',
+    'tanh_',
+    'transpose',
+    'unsqueeze',
+    'unsqueeze_',
+    'view',
 }
 
 def check_node(node, modules):
+    # TODO: reuse is_fixed_qparam_node after we move this function to _lower_to_native_backend.py
     is_call_function = node.op == "call_function" and node.target in func_list
     is_call_method = node.op == "call_method" and node.target in method_list
     is_call_module = node.op == "call_module" and type(modules[str(node.target)]) in module_type_list

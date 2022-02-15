@@ -11,7 +11,7 @@ import logging
 class TestPythonDispatch(TestCase):
     def test_basic(self) -> None:
         with capture_logs() as logs:
-            x = LoggingTensor(torch.tensor([3.0], requires_grad=True))
+            x = LoggingTensor(torch.tensor([3.0]), requires_grad=True)
             log_input("x", x)
             y = x * x
             saved_x = y.grad_fn._saved_self
@@ -141,7 +141,7 @@ $5 = torch._ops.aten.kl_div($0, $1, 2, log_target=True)''')
 
     def test_detach_appears_twice_when_called_once(self) -> None:
         with capture_logs() as logs:
-            x = LoggingTensor(torch.tensor([3.0], requires_grad=True))
+            x = LoggingTensor(torch.tensor([3.0]), requires_grad=True)
             log_input("x", x)
             x.detach()
         # FIXME: We actually want this to emit a single detach. However,
@@ -240,7 +240,7 @@ $2 = torch._ops.aten.detach($1)''')
                 return grad_output * 2 * x
 
         with capture_logs() as logs:
-            x = LoggingTensor(torch.ones(1, requires_grad=True))
+            x = LoggingTensor(torch.ones(1), requires_grad=True)
             log_input("x", x)
             x.grad = LoggingTensor(torch.zeros(1))
             log_input("x.grad", x.grad)
@@ -540,6 +540,32 @@ $6 = torch._ops.aten.add_($1, $5)''')
             s = torch.Storage()
             z = LoggingTensor(torch.empty([]))
             z.set_(s)
+
+    def test_autograd_in_attr(self):
+        # We want the wrapped Tensor to require gradients!
+        true_t = torch.rand(2, requires_grad=True)
+        t = LoggingTensor(true_t)
+
+        out = t + 2
+
+        self.assertFalse(out.requires_grad)
+        self.assertIsNone(out.grad_fn)
+
+        # TODO: this should be True
+        self.assertFalse(out.elem.requires_grad)
+        # TODO: this should be not None
+        self.assertIsNone(out.elem.grad_fn)
+
+        with self.assertRaisesRegex(RuntimeError, "does not require grad"):
+            out.backward()
+
+        # TODO: this should not raise
+        with self.assertRaisesRegex(RuntimeError, "does not require grad"):
+            out.elem.backward()
+
+        self.assertIsNone(t.grad)
+        # TODO: this should not be None
+        self.assertIsNone(t.elem.grad)
 
 
 if __name__ == '__main__':
