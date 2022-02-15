@@ -30,6 +30,8 @@ bool copy_transpose_valid(const Tensor& self, const Tensor& src) {
       src.stride(0) == 1 && src.stride(1) == src.size(0) &&
       self.scalar_type() == src.scalar_type() &&
       self.sizes().equals(src.sizes()) &&
+      self.is_neg() == src.is_neg() &&
+      self.is_conj() == src.is_conj() &&
       self.numel() >= MIN_SZ;
 }
 

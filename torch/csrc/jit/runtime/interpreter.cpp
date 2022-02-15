@@ -15,6 +15,7 @@
 #include <torch/csrc/jit/ir/constants.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/jit_log.h>
+#include <torch/csrc/jit/mobile/promoted_prim_ops.h>
 #include <torch/csrc/jit/runtime/exception_message.h>
 #include <torch/csrc/jit/runtime/graph_executor.h>
 #include <torch/csrc/jit/runtime/instruction.h>
@@ -632,6 +633,81 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
                 &frame.function->type_table_[inst.X],
                 &frame.function->type_table_[inst.X] + inst.N);
             isinstance(stack, types);
+          }
+            INST_NEXT;
+          case INST(TUPLE_INDEX): {
+            INST_GUARD;
+            tupleIndex(stack);
+          }
+            INST_NEXT;
+          case INST(RAISE_EXCEPTION): {
+            INST_GUARD;
+            raiseExceptionWithMessage(stack);
+          }
+            INST_NEXT;
+          case INST(UNCHECKED_CAST): {
+            INST_GUARD;
+            noop(stack);
+          }
+            INST_NEXT;
+          case INST(__IS__): {
+            INST_GUARD;
+            is(stack);
+          }
+            INST_NEXT;
+          case INST(UN_INITIALIZED): {
+            INST_GUARD;
+            unInitialized(stack);
+          }
+            INST_NEXT;
+          case INST(__ISNOT__): {
+            INST_GUARD;
+            isNot(stack);
+          }
+            INST_NEXT;
+          case INST(FORMAT): {
+            INST_GUARD;
+            format(stack, inst.X);
+          }
+            INST_NEXT;
+          case INST(DEVICE): {
+            INST_GUARD;
+            device(stack);
+          }
+            INST_NEXT;
+          case INST(DTYPE): {
+            INST_GUARD;
+            dtype(stack);
+          }
+            INST_NEXT;
+          case INST(DIM): {
+            INST_GUARD;
+            dim(stack);
+          }
+            INST_NEXT;
+          case INST(__NOT__): {
+            INST_GUARD;
+            _not(stack);
+          }
+            INST_NEXT;
+          case INST(DICT_INDEX): {
+            INST_GUARD;
+            dictIndex(stack);
+          }
+            INST_NEXT;
+          case INST(TO_LIST): {
+            INST_GUARD;
+            toList(stack);
+          }
+            INST_NEXT;
+          case INST(NUM_TO_TENSOR): {
+            INST_GUARD;
+            numToTensorScalar(stack);
+          }
+            INST_NEXT;
+          case INST(IS_CUDA): {
+            INST_GUARD;
+            isCuda(stack);
           }
             INST_NEXT;
           case INST(FORK): {
