@@ -16,8 +16,8 @@ std::string toString(ReductionParams rparams) {
   if (rparams.schedule_3D) {
     ss << "3D Schedule // "
        << "Outer Reduction: "
-       << (rparams.cross_block_outer_reduce ? "cross block / " : "")
-       << (rparams.cross_grid_outer_reduce ? "cross grid / " : "")
+       << (rparams.cross_block_outer_reduction ? "cross block / " : "")
+       << (rparams.cross_grid_outer_reduction ? "cross grid / " : "")
        << (rparams.split_grid_dim_outer_reduction ? "split grid dim / " : "");
     if (rparams.batches_per_block_outer_reduction > 1 ||
         rparams.persistent_kernel) {
@@ -38,9 +38,9 @@ std::string toString(ReductionParams rparams) {
   }
 
   ss << " // Inner Reduction Domain: "
-     << (rparams.cross_block_inner_reduce ? "cross block reduction / " : "")
+     << (rparams.cross_block_inner_reduction ? "cross block reduction / " : "")
      << (rparams.pad_inner_reduction_to_warp ? "pad to warp / " : "")
-     << (rparams.cross_grid_inner_reduce ? "cross grid reduction / " : "");
+     << (rparams.cross_grid_inner_reduction ? "cross grid reduction / " : "");
 
   if (rparams.batches_per_block_inner_reduction > 1 ||
       rparams.persistent_kernel) {
@@ -48,7 +48,7 @@ std::string toString(ReductionParams rparams) {
        << " / ";
   }
 
-  ss << (rparams.cross_grid_inner_reduce &&
+  ss << (rparams.cross_grid_inner_reduction &&
                  rparams.split_grid_dim_inner_reduction
              ? "split grid dimension / "
              : "")
