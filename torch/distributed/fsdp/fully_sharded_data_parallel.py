@@ -290,45 +290,6 @@ class FullyShardedDataParallel(nn.Module):
         assert isinstance(self._fsdp_wrapped_module, FlattenParamsWrapper)
         return self._fsdp_wrapped_module
 
-    def fsdp_modules(self) -> List["FullyShardedDataParallel"]:
-        """
-        Helper function to return all nested FSDP instances, including self.
-        """
-        fsdp_modules = []
-        for module in self.modules():
-            if isinstance(module, FullyShardedDataParallel):
-                fsdp_modules.append(module)
-
-        return fsdp_modules
-
-    def apply(self, fn: Callable[[nn.Module], None]) -> "FullyShardedDataParallel":
-        r"""Applies ``fn`` recursively to every submodule (as returned by ``.children()``)
-        as well as self. Typical use includes initializing the parameters of a model
-        (see also :ref:`nn-init-doc`).
-
-        Compared to ``torch.nn.Module.apply``, this version additionally gathers
-        the full parameters before applying ``fn``. It should not be called from
-        within another ``summon_full_params`` context.
-
-        Args:
-            fn (:class:`Module` -> None): function to be applied to each submodule
-
-        Returns:
-            Module: self
-        """
-        uninitialized = self._is_root is None
-        self._assert_state(TrainingState_.IDLE)
-        with self._summon_full_params(recurse=False):
-            ret = super().apply(fn)
-
-        # Reset lazy init that might be called by summon_full_params, since
-        # it could have set is_root incorrectly for non-root FSDP instances.
-        if uninitialized and self._is_root:
-            for module in self.fsdp_modules():
-                module._reset_lazy_init()
-
-        return ret
-
     # setting two factors 'self.gradient_predivide_factor'
     # and 'self.gradient_postdivide_factor' to avoid underflow and overflow
     def _get_gradient_predivide_factor(self, world_size: int) -> float:
