@@ -87,7 +87,7 @@ master_doc = 'index'
 project = 'functorch'
 copyright = 'functorch Contributors'
 author = 'functorch Contributors'
-torch_version = str(torch.__version__)
+functorch_version = str(functorch.__version__)
 
 # The version info for the project you're documenting, acts as replacement for
 # |version| and |release|, also used in various other places throughout the
@@ -95,7 +95,7 @@ torch_version = str(torch.__version__)
 #
 # The short X.Y version.
 # TODO: change to [:2] at v1.0
-version = 'main (' + torch_version + ')'
+version = 'main (' + functorch_version + ')'
 # The full version, including alpha/beta/rc tags.
 # TODO: verify this works as expected
 release = 'preview'
