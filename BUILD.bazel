@@ -1880,6 +1880,9 @@ cc_test(
         "test/cpp/jit/*.h",
         "test/cpp/tensorexpr/*.cpp",
         "test/cpp/tensorexpr/*.h",
+    ], exclude=[
+        # skip this since <pybind11/embed.h> is not found in OSS build
+        "test/cpp/jit/test_exception.cpp",
     ]),
     linkstatic = True,
     tags = [
