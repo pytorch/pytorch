@@ -165,6 +165,7 @@ class CIWorkflow:
     only_run_smoke_tests_on_pull_request: bool = False
     num_test_shards_on_pull_request: int = -1
     distributed_test: bool = True
+    deploy_test: bool = False
     fx2trt_test: bool = False
     timeout_after: int = 240
     xcode_version: str = ''
@@ -197,6 +198,9 @@ class CIWorkflow:
 
         if self.fx2trt_test:
             self.enable_fx2trt_test = 1
+
+        if self.deploy_test:
+            self.enable_deploy_test = 1
 
         self.multigpu_runner_type = LINUX_MULTIGPU_RUNNERS.get(self.test_runner_type, "linux.16xlarge.nvidia.gpu")
         self.distributed_gpu_runner_type = LINUX_DISTRIBUTED_GPU_RUNNERS.get(self.test_runner_type, "linux.8xlarge.nvidia.gpu")
@@ -448,6 +452,7 @@ LINUX_WORKFLOWS = [
         ciflow_config=CIFlowConfig(
             labels={LABEL_CIFLOW_LINUX, LABEL_CIFLOW_CPU},
         ),
+        deploy_test=True,
     ),
     # Build PyTorch with BUILD_CAFFE2=ON
     CIWorkflow(
