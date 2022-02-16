@@ -88,6 +88,7 @@ class Cache {
   }
 
   int Numel() const {
+    std::lock_guard<std::mutex> g(lock_);
     TORCH_CHECK(element_map_.size() == element_list_.size());
     return element_map_.size();
   }
@@ -118,7 +119,7 @@ class Cache {
     element_list_.splice(element_list_.begin(), element_list_, it);
   }
 
-  std::mutex lock_;
+  mutable std::mutex lock_;
   size_t max_size_ = 0;
   ElementList element_list_;
   ElementMap element_map_;

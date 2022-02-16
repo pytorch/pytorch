@@ -465,15 +465,20 @@ void InitLtcModuleBindings(py::module m) {
           }
           auto post_order = Util::ComputePostOrder(roots);
           std::vector<int64_t> tensor_ids;
+          std::vector<at::Tensor> eager_tensors;
           for (auto nodeptr : post_order) {
             if (nodeptr->op() == *torch::lazy::ltc_device_data) {
               const auto* device_data_node = torch::lazy::NodeCast<torch::lazy::DeviceData>(nodeptr, *torch::lazy::ltc_device_data);
               auto infoptr = device_data_node->data()->info();
               auto deviceDataInfoPtr = (torch::lazy::LazyGraphExecutor::DeviceDataInfo*) infoptr;
               tensor_ids.push_back(deviceDataInfoPtr->tensor_id);
+
+              auto* tsDataPtr = (torch_lazy_tensors::compiler::TSData*) device_data_node->data().get();
+              CHECK(tsDataPtr->HasValue());
+              eager_tensors.push_back(tsDataPtr->data());
             }
           }
-          return tensor_ids;
+          return std::make_pair(tensor_ids, eager_tensors);
         });
   m.def("_run_cached_graph", [](const std::vector<at::Tensor>& tensors) {
     // XXX this demo assumes the computation cache contains a single computation
