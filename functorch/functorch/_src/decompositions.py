@@ -240,15 +240,17 @@ def _log_softmax(x: Tensor, dim: int, half_to_float: bool):
 
 
 @register_decomposition(aten.addcdiv)
-def addcdiv(self: Tensor, tensor1: Tensor, tensor2: Tensor, value: float=1):
+def addcdiv(self: Tensor, tensor1: Tensor, tensor2: Tensor, value: float = 1):
     return self + value * (tensor1 / tensor2)
 
+
 @register_decomposition(aten.addcmul)
-def addcmul(self: Tensor, tensor1: Tensor, tensor2: Tensor, value: float=1):
+def addcmul(self: Tensor, tensor1: Tensor, tensor2: Tensor, value: float = 1):
     if self.is_floating_point():
         return self + value * tensor1 * tensor2
     else:
         return self + int(value) * tensor1 * tensor2
+
 
 @register_decomposition(aten.embedding_dense_backward)
 def embedding_dense_backward(grad_output: Tensor, indices: Tensor, num_weights: int, padding_idx: int, scale_grad_by_freq: bool):
@@ -286,6 +288,7 @@ def clamp_min(self: Tensor, min: float):
 @register_decomposition(aten.clamp_max)
 def clamp_max(self: Tensor, min: float):
     return aten.clamp(self, max=max)
+
 
 @register_decomposition(aten._fused_dropout)
 def _fused_dropout_decomposition(input, p, generator=None):
