@@ -46,34 +46,29 @@ static void upsample_nearest2d_out_frame(
     return;
   }
 
-  // safe check for int32 indexing
-  TORCH_CHECK(input_height * input_width <= std::numeric_limits<int32_t>::max());
+  std::unique_ptr<int64_t []> input_offset_arr(new int64_t[output_width]);
+  int64_t* input_offset = input_offset_arr.get();
 
-  // pre calculate input offset for each output index in the feature map plane
-  std::unique_ptr<int32_t []> input_offset_arr(new int32_t[output_height * output_width]);
-  int32_t* input_offset = input_offset_arr.get();
-
-  for (const auto h2 : c10::irange(output_height)) {
-    const int64_t h1 =
-        nn_compute_source_index_fn(height_scale, h2, input_height);
-    for (const auto w2 : c10::irange(output_width)) {
-      const int64_t w1 =
-          nn_compute_source_index_fn(width_scale, w2, input_width);
-
-      input_offset[h2 * output_width + w2] = static_cast<int32_t>(h1 * input_width + w1);
-    }
+  for (const auto w2 : c10::irange(output_width)) {
+    const int64_t w1 = nn_compute_source_index_fn(width_scale, w2, input_width);
+    input_offset[w2] = w1;
   }
 
-  // treat output shape as {nbatch * channels, output_height * output_width}
-  at::parallel_for(0, channels * output_height * output_width, 0, [&](int64_t begin, int64_t end) {
-    int64_t nc{0}, hw{0};
-    data_index_init(begin, nc, channels, hw, output_height * output_width);
+  at::parallel_for(0, channels * output_height, 0, [&](int64_t begin, int64_t end) {
+    int64_t nc{0}, h2{0};
+    data_index_init(begin, nc, channels, h2, output_height);
 
     for (const auto i : c10::irange(begin, end)) {
-      const auto* pos1 = &i_p[nc * input_height * input_width];
-      o_p[i] = pos1[input_offset[hw]];
+      const int64_t h1 = nn_compute_source_index_fn(height_scale, h2, input_height);
+      const auto* pos1 = &i_p[nc * input_height * input_width + h1 * input_width];
+      auto* pos2 = &o_p[i * output_width];
 
-      data_index_step(nc, channels, hw, output_height * output_width);
+      for (const auto w2 : c10::irange(output_width)) {
+        const int64_t w1 = input_offset[w2];
+        pos2[w2] = pos1[w1];
+      }
+
+      data_index_step(nc, channels, h2, output_height);
     }
   });
 }
