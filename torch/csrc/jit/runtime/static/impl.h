@@ -166,10 +166,12 @@ struct TORCH_API StaticModuleOptions {
   // Gates the ReplaceWithCopy pass, which replaces ops that
   // sometimes alias their outputs with out variants that
   // always copy (so the output may participate in memory planning)
+  // This will be turned off if TensorExpr fusion is enabled.
   bool use_copy_variants{true};
   // Gates the ReplaceWithMaybeCopy pass, which replaces ops that
   // sometimes alias their outputs with subgraphs that include an out
   // variant.
+  // This will be turned off if TensorExpr fusion is enabled.
   bool use_maybe_copy_variants{true};
   // enable TensorExpr fusion of ops at model loading time
   bool enable_tensorexpr_fusion{false};
