@@ -936,10 +936,14 @@ grid_sampler_2d_backward_cpu(const Tensor& grad_output, const Tensor& input, con
     }
   }
 
-  Tensor grad_input;
-  if (output_mask[0]) {
-    grad_input = at::zeros_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
-  }
+  auto input_requires_grad = output_mask[0];
+  Tensor grad_input = ([&]() {
+    if (input_requires_grad) {
+      return at::zeros_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+    } else {
+      return Tensor();
+    }
+  })();
   auto grad_grid = at::empty_like(grid, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   grid_sampler_2d_backward_cpu_kernel(
       kCPU, grad_input, grad_grid, grad_output, input, grid,
