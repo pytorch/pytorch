@@ -158,7 +158,7 @@ class ShardedTensor(object):
         self._sharding_spec = sharding_spec
 
         sharded_tensor_metadata = sharding_spec.build_metadata(
-            dims, tensor_properties=tensor_properties, process_group=self._process_group)
+            dims, tensor_properties=tensor_properties)
 
         current_rank = dist.get_rank(self._process_group)
 

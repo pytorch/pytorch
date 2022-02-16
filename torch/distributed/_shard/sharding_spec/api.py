@@ -18,7 +18,6 @@ from torch.distributed._shard.sharded_tensor.utils import (
 )
 
 import torch.distributed as dist
-from torch.distributed import distributed_c10d
 import torch.distributed._shard.sharded_tensor.metadata as sharded_tensor_meta
 from torch.distributed._shard.sharded_tensor.shard import Shard
 
@@ -59,17 +58,37 @@ class ShardingSpec(object):
     def build_metadata(self,
                        tensor_sizes: torch.Size,
                        tensor_properties: sharded_tensor_meta.TensorProperties,
-                       process_group=None) -> sharded_tensor_meta.ShardedTensorMetadata:
+                       ) -> sharded_tensor_meta.ShardedTensorMetadata:
         """
-        Given a global tensor size list, define how to shard a tensor like this shape
+        Given a global tensor size, define how to shard a tensor like this shape
         across ranks, return ShardedTensorMetadata
+        Args:
+            tensor_sizes (:class:`torch.Size`):
+                The tensor shape to shard on, a `torch.Size` object that represents the
+                tensor shape to be sharded according to the ShardingSpec.
+            tensor_properties(:class:`torch.distributed._shard.sharded_tensor.TensorProperties):
+                Tensor properties used to create a ShardedTensor.
+        Returns:
+            A :class:`ShardedTensorMetadata` object that encodes the information about
+            the layout of the ShardedTensor and its properties.
         """
 
     @abstractmethod
     def shard(self, tensor: torch.Tensor, src_rank: int = 0, process_group=None) -> "ShardedTensor":
         """
         Given a global tensor on src_rank, shard this tensor
-        across ranks, return a ShardedTensor.
+        across ranks within the process group, return a ShardedTensor.
+        Args:
+            tensor (:class:`torch.Tensor`): Tensor needs to be sharded.
+        Keyword args:
+            src_rank (int, optional): The source rank which is used as the ground truth of
+                the data for the parameter that would be sharded and scattered
+                across the rest of the ranks.
+                Default: 0.
+            process_group (ProcessGroup, optional): The process group to work on. If None,
+                the default process group will be used.
+        Returns:
+            A :class:`ShardedTensor` sharded from the given tensor.
         """
 
 @dataclass
@@ -88,7 +107,7 @@ class ChunkShardingSpec(ShardingSpec):
         dim (int or str):
             The dimension to shard on, could be an integer representing the
             dimension or a string in case of named tensors where dimensions are
-            named.
+            named. Note that named tensor support is not added yet.
         placement(List[Union[_remote_device, str]]):
             Specifies the placement of each shard of the Tensor. The size of
             the list represents the number of shards to be created. This could
@@ -127,20 +146,15 @@ class ChunkShardingSpec(ShardingSpec):
     def build_metadata(self,
                        tensor_sizes: torch.Size,
                        tensor_properties: sharded_tensor_meta.TensorProperties,
-                       process_group=None) -> sharded_tensor_meta.ShardedTensorMetadata:
-        """
-        Given a global tensor size list, define how to shard a tensor like this shape
-        across ranks, return ShardedTensorMetadata.
-        """
-        pg = process_group if process_group is not None else distributed_c10d._get_default_group()
+                       ) -> sharded_tensor_meta.ShardedTensorMetadata:
         tensor_num_dim = len(tensor_sizes)
 
         self._verify_dim(self.dim)
-        if self.dim >= tensor_num_dim or self.dim < -tensor_num_dim:
+        if self.dim >= tensor_num_dim or self.dim < -tensor_num_dim:  # type: ignore
             raise ValueError(f"Invalid sharding dim: {self.dim}")
 
         shards_metadata = []
-        sharding_dim_size = tensor_sizes[self.dim]
+        sharding_dim_size = tensor_sizes[self.dim]  # type: ignore[index]
         chunks = len(self.placements)
         split_size = get_split_size(sharding_dim_size, chunks)
         for idx, placement in enumerate(self.placements):
@@ -151,7 +165,7 @@ class ChunkShardingSpec(ShardingSpec):
             if chunked_dim_size > 0:
                 shard_size = list(tensor_sizes)
                 current_offsets = [0] * tensor_num_dim
-                current_offsets[self.dim] = split_size * idx
+                current_offsets[self.dim] = split_size * idx  # type: ignore[index]
                 shard_size[self.dim] = chunked_dim_size  # type: ignore[index]
 
                 shard_metadata = ShardMetadata(
@@ -171,10 +185,7 @@ class ChunkShardingSpec(ShardingSpec):
 
 
     def shard(self, tensor: torch.Tensor, src_rank: int = 0, process_group=None) -> "ShardedTensor":
-        """
-        Given a global tensor on src_rank, shard this tensor
-        across ranks, return a ShardedTensor.
-        """
+        # relative imports to avoid circular dependency
         from torch.distributed._shard.sharded_tensor import (
             ShardedTensor
         )
@@ -253,7 +264,7 @@ class EnumerableShardingSpec(ShardingSpec):
     def build_metadata(self,
                        tensor_sizes: torch.Size,
                        tensor_properties: sharded_tensor_meta.TensorProperties,
-                       process_group=None) -> sharded_tensor_meta.ShardedTensorMetadata:
+                       ) -> sharded_tensor_meta.ShardedTensorMetadata:
         # check if shards form a valid tensor
         check_tensor(self.shards, tensor_sizes)
         return sharded_tensor_meta.ShardedTensorMetadata(

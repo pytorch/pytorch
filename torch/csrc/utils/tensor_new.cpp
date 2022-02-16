@@ -266,7 +266,10 @@ Tensor internal_new_from_data(
   }
 #endif
 
+  auto device = device_opt.has_value() ? *device_opt : options.device();
+
   auto sizes = compute_sizes(data, scalar_type);
+
   ScalarType inferred_scalar_type = type_inference ? infer_scalar_type(data) : scalar_type;
   // This exists to prevent us from tracing the call to empty().  The actual
   // autograd code doesn't really matter, because requires_grad is always false
@@ -276,6 +279,7 @@ Tensor internal_new_from_data(
     at::AutoDispatchBelowADInplaceOrView guard;  // TODO: remove
     at::tracer::impl::NoTracerDispatchMode tracer_guard;
     c10::impl::ExcludeDispatchKeyGuard pythonmode_guard(c10::DispatchKey::Python);
+    c10::impl::ExcludeDispatchKeyGuard pythonmode_snapshot_guard(c10::DispatchKey::PythonTLSSnapshot);
     // functorch uses FuncTorchDynamicLayerBackMode as a mode key to wrap all
     // tensors returned from operators in special TensorWrapper tensor extension
     // The problem with this is that TensorWrapper does not have storage so
@@ -298,15 +302,21 @@ Tensor internal_new_from_data(
       tensor.set_(storage);
 
     } else {
-      tensor = at::empty(sizes, at::initialTensorOptions().dtype(inferred_scalar_type).pinned_memory(pin_memory));
-      if (c10::multiply_integers(tensor.sizes()) !=0 ) {
+      TensorOptions opts = at::initialTensorOptions().dtype(inferred_scalar_type);
+
+      // If the device is Meta, take the shortcut. We don't want to allocate an
+      // empty CPU tensor which would break our contract for meta tensors.
+      if (device == at::kMeta) {
+        return at::empty(sizes, opts.device(device));
+      }
+      tensor = at::empty(sizes, opts.pinned_memory(pin_memory));
+      if (c10::multiply_integers(tensor.sizes()) != 0) {
         recursive_store(
             (char*)tensor.data_ptr(), tensor.sizes(), tensor.strides(), 0,
             inferred_scalar_type, tensor.dtype().itemsize(), data);
       }
     }
   }
-  auto device = device_opt.has_value() ? *device_opt : options.device();
   pybind11::gil_scoped_release no_gil;
   maybe_initialize_cuda(device);
   // However, it is VERY important that we trace the to() call here (even
