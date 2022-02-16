@@ -475,6 +475,42 @@ class TestFuseFx(QuantizationTestCase):
         })
         self.checkGraphModuleNodes(m, expected_node=ns.call_module(MyConvReLU))
 
+    def test_fuse_custom_pattern(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv = torch.nn.Conv2d(3, 3, 3)
+                self.bn = torch.nn.BatchNorm2d(3)
+                self.relu = torch.nn.ReLU()
+
+            def forward(self, x):
+                y = x
+                x = self.conv(x)
+                x = self.bn(x)
+                x = torch.add(y, x)
+                x = self.relu(x)
+                return x
+
+        m = M().eval()
+        def fuse_conv_bn_relu(is_qat, relu, add_pattern):
+            _, _, bn_pattern = add_pattern
+            bn, conv = bn_pattern
+            return conv
+
+        conv_bn_res_relu_config = {
+            "pattern": (nn.ReLU, (torch.add, MatchAllNode, (nn.BatchNorm2d, nn.Conv2d))),
+            "fuser_method": fuse_conv_bn_relu,
+        }
+
+        backend_config_dict = {
+            "configs": [conv_bn_res_relu_config]
+        }
+        m = fuse_fx(m, backend_config_dict=backend_config_dict)
+        self.assertEqual(type(m.conv), torch.nn.Conv2d)
+        # check bn and relu are gone since we replaced the whole pattern to conv
+        self.assertFalse(hasattr(m, "bn"))
+        self.assertFalse(hasattr(m, "relu"))
+
 @skipIfNoFBGEMM
 class TestQuantizeFx(QuantizationTestCase):
     def test_pattern_match(self):
