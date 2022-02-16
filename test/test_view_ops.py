@@ -808,8 +808,7 @@ class TestViewOps(TestCase):
             idx_nv = (0,) * nv.ndim
             self.assertTrue(not nv._is_view())
             nv[idx_nv] = 0
-            if device != "meta":
-                self.assertNotEqual(t[idx_t], nv[idx_nv])
+            self.assertDataNotEqual(t[idx_t], nv[idx_nv])
         t = torch.ones(2, 3, 2, 3, device=device).transpose(2, 3)
         nv = t.flatten(1, 3)
         assert_is_nonview(t, nv)

@@ -2150,6 +2150,21 @@ class TestCase(expecttest.TestCase):
         with self.assertRaises(AssertionError, msg=msg):
             self.assertEqual(x, y, msg, atol=atol, rtol=rtol, **kwargs)
 
+    def assertDataNotEqual(
+            self,
+            x: torch.Tensor,
+            y: torch.Tensor,
+            msg: Optional[str] = None,
+            *,
+            atol: Optional[float] = None,
+            rtol: Optional[float] = None,
+            **kwargs
+    ):
+        if any(t.device.type == "meta" for t in (x, y)):
+            self.assertEqual(x, y, msg, atol=atol, rtol=rtol, **kwargs)
+        else:
+            self.assertNotEqual(x, y, msg, atol=atol, rtol=rtol, **kwargs)
+
     def assertEqualTypeString(self, x, y) -> None:
         # This API is used simulate deprecated x.type() == y.type()
         self.assertEqual(x.device, y.device)
