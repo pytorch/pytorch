@@ -284,17 +284,17 @@ FlatbufferSerializer::storeExtraFilesAndGetOffset(
     FlatBufferBuilder& fbb,
     const ExtraFilesMap& extra_files) {
   std::vector<flatbuffers::Offset<mobile::serialization::ExtraFile>>
-      jit_file_offsets;
+      extra_file_offsets;
 
   for (const auto& extra_file : extra_files) {
-    flatbuffers::Offset<mobile::serialization::ExtraFile> jit_file =
+    flatbuffers::Offset<mobile::serialization::ExtraFile> extra_file_offset =
         mobile::serialization::CreateExtraFile(
             fbb,
             fbb.CreateSharedString(extra_file.first),
             fbb.CreateString(extra_file.second));
-    jit_file_offsets.emplace_back(jit_file);
+    extra_file_offsets.emplace_back(extra_file_offset);
   }
-  return fbb.CreateVector(jit_file_offsets);
+  return fbb.CreateVector(extra_file_offsets);
 }
 
 flatbuffers::DetachedBuffer FlatbufferSerializer::serializeModule(
