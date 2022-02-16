@@ -11,8 +11,8 @@ import lazy_tensor_core
 lazy_tensor_core._LAZYC._ltc_init_ts_backend()
 import lazy_tensor_core.core.lazy_model as ltm
 
-from caffe2.python import workspace
-workspace.GlobalInit(['caffe2', '--caffe2_log_level=-4'])
+# from caffe2.python import workspace
+# workspace.GlobalInit(['caffe2', '--caffe2_log_level=-4'])
 
 def setup(rank, world_size):
     os.environ['MASTER_ADDR'] = 'localhost'
@@ -43,22 +43,22 @@ def demo_basic(rank, world_size):
     # device = f"cuda:{rank}"
     device = f"lazy:{rank}"
 
-    try:
-        # create model and move it to GPU with id rank
-        model = ToyModel().to(device)
-        ddp_model = DDP(model, device_ids=[rank])
+    # create model and move it to GPU with id rank
+    model = ToyModel().to(device)
+    model = DDP(model, device_ids=[rank])
 
-        loss_fn = nn.MSELoss()
-        optimizer = optim.SGD(ddp_model.parameters(), lr=0.001)
+    loss_fn = nn.MSELoss()
+    optimizer = optim.SGD(model.parameters(), lr=0.001)
 
+    for i in range(10):
         optimizer.zero_grad()
-        outputs = ddp_model(torch.randn(20, 10).to(device))
+        outputs = model(torch.randn(20, 10).to(device))
         labels = torch.randn(20, 5).to(device)
-        loss_fn(outputs, labels).backward()
+        loss = loss_fn(outputs, labels)
+        loss.backward()
         optimizer.step()
         ltm.mark_step(device)
-    except Exception as e:
-        print(f"exception: {e}", flush=True)
+        print(f"{os.getpid()}: iteration {i}, loss {loss}")
 
     cleanup()
 
