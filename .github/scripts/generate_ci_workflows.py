@@ -453,6 +453,7 @@ LINUX_WORKFLOWS = [
             labels={LABEL_CIFLOW_LINUX, LABEL_CIFLOW_CPU},
         ),
         deploy_test=True,
+        distributed_test=False,
     ),
     # Build PyTorch with BUILD_CAFFE2=ON
     CIWorkflow(

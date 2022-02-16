@@ -253,7 +253,7 @@ jobs:
     timeout-minutes: 240
     env:
       TEST_RUNNER_TYPE: linux.2xlarge
-      ENABLE_DISTRIBUTED_TEST: 1
+      ENABLE_DISTRIBUTED_TEST: ''
       ENABLE_JIT_LEGACY_TEST: ''
       ENABLE_FX2TRT_TEST: ''
       ENABLE_MULTIGPU_TEST: ''
