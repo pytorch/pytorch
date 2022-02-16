@@ -215,6 +215,13 @@ void debug_assert_shape(const Tensor& t, c10::IntArrayRef shape) {
 
 
 } // namespace
+std::tuple<Tensor, Tensor, Tensor> transform_bias_rescale_qkv_op_cuda(
+    const Tensor& qkv,
+    const Tensor& qkv_bias,
+    const int64_t num_head) {
+  auto result = transform_bias_rescale_qkv(qkv, qkv_bias, num_head);
+  return std::make_tuple(std::get<0>(result).clone(), std::get<1>(result).clone(), std::get<2>(result).clone());
+}
 
 Tensor multi_head_self_attention_cuda(
     const Tensor& query,
