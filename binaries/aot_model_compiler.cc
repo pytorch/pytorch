@@ -32,7 +32,7 @@ C10_DEFINE_string(
     "Supported dtypes: float, int64, uint8");
 C10_DEFINE_string(
     input_memory_formats,
-    "contiguous",
+    "",
     "Input memory format."
     "If multiple inputs needed, use semicolon to separate."
     "Supported values: contiguous, channels_last");

@@ -254,13 +254,8 @@ std::vector<at::ScalarType> parseInputTypes(
 }
 
 std::vector<at::MemoryFormat> parseInputMemoryFormats(
-    const std::string& input_memory_format_str,
-    size_t num) {
+    const std::string& input_memory_format_str) {
   std::vector<std::string> memFormatsStr = split(';', input_memory_format_str);
-  if (memFormatsStr.size() == 0) {
-    return std::vector<at::MemoryFormat>(num, at::MemoryFormat::Contiguous);
-  }
-
   std::vector<at::MemoryFormat> memFormats;
   for (const auto& memFormatStr : memFormatsStr) {
     at::MemoryFormat memFormat;
@@ -369,8 +364,14 @@ c10::IValue preprocess(
 
     auto sizes = parseInputShapes(*method_spec.at("sizes").toString());
     auto types = parseInputTypes(*method_spec.at("types").toString());
-    auto memory_formats = parseInputMemoryFormats(
-        *method_spec.at("memory_formats").toString(), sizes.size());
+
+    std::string memory_formats_str = method_spec.contains("memory_formats")
+        ? (*method_spec.at("memory_formats").toString()).string()
+        : "";
+    auto memory_formats = memory_formats_str.empty()
+        ? std::vector<at::MemoryFormat>(
+              sizes.size(), at::MemoryFormat::Contiguous)
+        : parseInputMemoryFormats(memory_formats_str);
 
     auto example_inputs = generateExampleInputs(sizes, types, memory_formats);
     graph = preprocessGraphPasses(graph, example_inputs);
