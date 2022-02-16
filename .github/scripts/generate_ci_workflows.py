@@ -590,7 +590,6 @@ LINUX_WORKFLOWS = [
         enable_jit_legacy_test=1,
         enable_multigpu_test=1,
         enable_slow_test=1,
-        num_test_shards=2,
         ciflow_config=CIFlowConfig(
             run_on_canary=True,
             labels={LABEL_CIFLOW_SLOW, LABEL_CIFLOW_LINUX, LABEL_CIFLOW_ROCM}

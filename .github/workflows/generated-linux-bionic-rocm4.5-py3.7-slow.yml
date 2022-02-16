@@ -264,7 +264,7 @@ jobs:
       ENABLE_BACKWARDS_COMPAT_TEST: ''
       ENABLE_XLA_TEST: ''
       ENABLE_NOARCH_TEST: ''
-      NUM_TEST_SHARDS: 2
+      NUM_TEST_SHARDS: 1
       MULTIGPU_RUNNER_TYPE: linux.rocm.gpu
       DISTRIBUTED_GPU_RUNNER_TYPE: linux.rocm.gpu
       NOGPU_RUNNER_TYPE: linux.2xlarge
