@@ -2077,8 +2077,11 @@ def sample_inputs_mm(op_info, device, dtype, requires_grad, **kwargs):
 
 
 def sample_inputs_addmm(op_info, device, dtype, requires_grad, **kwargs):
-    alpha_val = kwargs.get('alpha', 2 + 3j if dtype.is_complex else 0.6)
-    beta_val = kwargs.get('beta', 1 + 2j if dtype.is_complex else 0.2)
+    alpha_val = kwargs.get('alpha', 2 + 3j if dtype.is_complex else 2.6)
+    beta_val = kwargs.get('beta', 1 + 2j if dtype.is_complex else 3.2)
+    if not dtype.is_floating_point:
+        alpha_val = int(alpha_val)
+        beta_val = int(beta_val)
     tests_list = [
         ((2, 3), (2, 2), (2, 3), False)
     ]
