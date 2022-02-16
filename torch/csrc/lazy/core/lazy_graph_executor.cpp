@@ -462,7 +462,7 @@ void LazyGraphExecutor::SyncTensorsGraph(
   config.sync_ltc_data = sync_ltc_data;
 
   auto async = SyncTensorsGraphInternal(tensors, devices, config);
-  if (FLAGS_torch_lazy_use_thread_pool && wait && async != nullptr) {
+  if (wait && async != nullptr) {
     async->mwait.Wait();
   }
 }
@@ -972,11 +972,7 @@ std::shared_ptr<LazyGraphExecutor::Async> LazyGraphExecutor::
     }
   };
 
-  if (FLAGS_torch_lazy_use_thread_pool) {
-    ScheduleIoClosure(async->mwait.Completer(std::move(syncfn)));
-  } else {
-    syncfn();
-  }
+  ScheduleIoClosure(async->mwait.Completer(std::move(syncfn)));
   return async;
 }
 
@@ -999,7 +995,7 @@ std::vector<at::Tensor> LazyGraphExecutor::GetTensorsFused(
   SyncTensorsConfig config;
   config.force_ltc_data = false;
   auto async = SyncTensorsGraphInternal(tensors, {}, config);
-  if (FLAGS_torch_lazy_use_thread_pool && async != nullptr) {
+  if (async != nullptr) {
     async->mwait.Wait();
   }
   std::vector<BackendDataPtr> tensors_data = GatherTensorsData(
