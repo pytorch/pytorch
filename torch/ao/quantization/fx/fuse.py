@@ -95,7 +95,9 @@ class Fuser:
             patterns: Dict[Pattern, Callable]
     ) -> Dict[str, Tuple[Node, Pattern, NodePattern, FuseHandler, Dict[Node, Any]]]:
         modules = dict(root.named_modules())
-        match_map : Dict[str, Tuple[Node, Pattern, NodePattern, FuseHandler, Dict[Node, Any]]] = {}  # node name -> (root_node, match_value)
+        # node name -> (root_node, match_value)
+        match_map : Dict[
+            str, Tuple[Node, Pattern, NodePattern, FuseHandler, Dict[Node, Any]]] = {}
         # a map from node to the matched subpattern
         node_to_subpattern: Dict[Node, Any] = {}
 

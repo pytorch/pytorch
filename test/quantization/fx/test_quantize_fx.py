@@ -492,6 +492,7 @@ class TestFuseFx(QuantizationTestCase):
                 return x
 
         m = M().eval()
+
         def fuse_conv_bn_relu(is_qat, relu, add_pattern):
             _, _, bn_pattern = add_pattern
             bn, conv = bn_pattern
