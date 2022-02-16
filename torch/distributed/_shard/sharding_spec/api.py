@@ -196,7 +196,7 @@ class ChunkShardingSpec(ShardingSpec):
             memory_format=torch.contiguous_format,
             pin_memory=tensor.is_pinned()
         )
-        tensor_meta = self.build_metadata(tensor.size(), tensor_properties, process_group=process_group)
+        tensor_meta = self.build_metadata(tensor.size(), tensor_properties)
         local_shards = []
 
         current_rank = dist.get_rank(process_group)
