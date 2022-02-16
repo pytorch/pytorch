@@ -1476,9 +1476,11 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
 
   void set_python_dispatch(bool k) {
     if (k) {
-      key_set_ = key_set_.add(DispatchKey::Python).add(DispatchKey::PythonTLSSnapshot);
+      key_set_ =
+          key_set_.add(DispatchKey::Python).add(DispatchKey::PythonTLSSnapshot);
     } else {
-      key_set_ = key_set_.remove(DispatchKey::Python).remove(DispatchKey::PythonTLSSnapshot);
+      key_set_ = key_set_.remove(DispatchKey::Python)
+                     .remove(DispatchKey::PythonTLSSnapshot);
     }
   }
 

@@ -66,9 +66,10 @@ skipIfNoDill = unittest.skipIf(not HAS_DILL, "no dill")
 
 try:
     import numpy as np
+    HAS_NUMPY = True
 except ImportError:
-    np = None
-
+    HAS_NUMPY = False
+skipIfNoNumpy = unittest.skipIf(not HAS_NUMPY, "no NumPy")
 
 # load_tests from torch.testing._internal.common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
@@ -1374,14 +1375,12 @@ except RuntimeError as e:
                 self.assertEqual(
                     reference, list(self._get_data_loader(ds_cls(counting_ds_n), multiprocessing_context=ctx, **dl_common_args)))
 
+    @skipIfNoNumpy
     def test_multiprocessing_iterdatapipe(self):
         # Testing to make sure that function from global scope (e.g. imported from library) can be serialized
         # and used with multiprocess DataLoader
         def row_processer(row):
-            if np:
-                return np.add(row, 1)
-            else:
-                return [i + 1 for i in row]
+            return np.add(row, 1)
 
         def filter_len(row):
             return len(row) == 4
