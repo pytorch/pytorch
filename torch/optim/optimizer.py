@@ -53,13 +53,6 @@ class Optimizer(object):
         for param_group in param_groups:
             self.add_param_group(param_group)
 
-    def __getstate__(self):
-        return {
-            'defaults': self.defaults,
-            'state': self.state,
-            'param_groups': self.param_groups,
-        }
-
     def __setstate__(self, state):
         self.__dict__.update(state)
         self._hook_for_profile()  # To support multiprocessing pickle/unpickle.
