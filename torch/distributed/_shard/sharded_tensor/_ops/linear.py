@@ -219,7 +219,7 @@ def _handle_col_wise_sharding(input, world_size, weight, rank, local_shard_t, bi
     st_size[-1] = weight.size(0)
     new_sharding_spec = ChunkShardingSpec(
         dim=-1,
-        placements=weight._sharding_spec.placements
+        placements=weight.sharding_spec().placements
     )
     return ShardedTensor._init_from_local_tensor(
         result,

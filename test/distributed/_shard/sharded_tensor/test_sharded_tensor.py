@@ -1790,6 +1790,8 @@ class TestShardedTensorFromLocalTensor(ShardedTensorTestBase):
         chunk_sharding_dim = sharding_spec.dim
         world_size = len(sharding_spec.placements)
         split_size = get_split_size(st_size[chunk_sharding_dim], world_size)
+        # TODO: To use an easier way to generate the ShardedMetadatas
+        # for sharding spec after https://github.com/pytorch/pytorch/pull/72130.
         shards_metadata = [None] * world_size
         local_shard_meta = None
         for idx, placement in enumerate(sharding_spec.placements):
