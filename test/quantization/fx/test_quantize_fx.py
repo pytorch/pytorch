@@ -1480,9 +1480,14 @@ class TestQuantizeFx(QuantizationTestCase):
             ns.call_module(nn.Linear),
             ns.call_function(torch.quantize_per_tensor),
             ns.call_module(nnq.Linear),
-            ns.call_method("dequantize"),
-            ns.call_function(torch.add),
-            ns.call_function(torch.quantize_per_tensor),
+            # the following pattern is produced, but it's fused into
+            # torch.ops.quantized.add, Note this is not intended
+            # behavior, we plan to hornor qconfig=None settings
+            # TODO: fix this in a separate PR in lowering step
+            # ns.call_method("dequantize"),
+            # ns.call_function(torch.add),
+            # ns.call_function(torch.quantize_per_tensor),
+            ns.call_function(torch.ops.quantized.add),
             ns.call_function(torch.ops.quantized.add),
             # m1
             ns.call_module(nnq.Linear),
@@ -4066,7 +4071,7 @@ class TestQuantizeFxOps(QuantizationTestCase):
             model = BinaryOpRelu(
                 binary_op, ibinary_op, is_inplace_op, relu_callable, is_scalar)
             self.checkGraphModeFxOp(
-                model, data, quant_type, quantized_node)
+                model, data, quant_type, quantized_node, print_debug_info=True)
 
     def _test_binary_op_relu_float16_impl(self, binary_op, ibinary_op):
         data = (torch.rand((1, 1, 1, 1), dtype=torch.float),

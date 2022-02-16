@@ -47,7 +47,7 @@ def is_match(modules, node, pattern, max_uses=sys.maxsize):
     if isinstance(self_match, type) and issubclass(self_match, MatchAllNode):
         return True
 
-    if len(node.users) > max_uses:
+    if isinstance(node, Node) and len(node.users) > max_uses:
         return False
 
     if isinstance(self_match, type) and issubclass(self_match, torch.nn.Module):
@@ -62,9 +62,9 @@ def is_match(modules, node, pattern, max_uses=sys.maxsize):
             if node.args[1] != pattern[1]:
                 return False
     elif isinstance(self_match, str):
-        if node.op != 'call_method' or node.target != self_match:
+        if isinstance(node, Node) and (node.op != 'call_method' or node.target != self_match):
             return False
-    elif node.target != self_match:
+    elif isinstance(node, Node) and node.target != self_match:
         return False
 
     if not arg_matches:

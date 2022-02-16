@@ -10,9 +10,12 @@ from .graph_module import QuantizedGraphModule
 from .quantized_fusion_patterns_and_replacements import get_fbgemm_patterns_and_replacements
 from .match_utils import is_match
 from .match_utils import MatchAllNode
+from .quantization_types import Pattern
 from ..utils import _parent_name, check_node
-from typing import Dict, Tuple, Type, List
+from .utils import create_node_from_old_node_preserve_meta
+from typing import Dict, Tuple, Type, List, Callable
 from torch.fx import Node
+import operator
 
 
 def is_fixed_qparams_node(node, modules):
@@ -39,6 +42,9 @@ def is_fixed_qparams_node(node, modules):
     is_call_method = node.op == "call_method" and node.target in method_list
     is_call_module = node.op == "call_module" and type(modules[str(node.target)]) in module_type_list
     return is_call_function, is_call_method, is_call_module
+
+def is_dequantize_node(node):
+    return isinstance(node, Node) and node.op == 'call_method' and node.target == 'dequantize'
 
 # Mapping from reference module class to the replacement quantized module class for lowering
 # TODO: fix typing, the key is reference module
@@ -130,9 +136,132 @@ def _lower_weighted_ref_module(model: QuantizedGraphModule) -> QuantizedGraphMod
         model.recompile()
     return model
 
+def _lower_quantized_binary_op(model: QuantizedGraphModule) -> QuantizedGraphModule:
+    modules = dict(model.named_modules(remove_duplicate=False))
+    def get_bop_patterns(bop: Callable) -> Pattern:
+        return [
+            (torch.quantize_per_tensor,
+             (bop, "dequantize", "dequantize"),
+             MatchAllNode, MatchAllNode, MatchAllNode)
+            for bop_pattern in [
+                (bop, "dequantize", "dequantize"),
+                (bop, MatchAllNode, "dequantize"),
+                (bop, "dequantize", MatchAllNode)
+            ]
+        ]
+
+    def get_bop_relu_patterns(bop: Callable) -> List[Pattern]:
+        return [
+            (torch.quantize_per_tensor,
+             (relu_op, bop_pattern),
+             MatchAllNode, MatchAllNode, MatchAllNode)
+            for relu_op in [torch.relu, torch.nn.functional.relu, torch.nn.ReLU]
+            for bop_pattern in [
+                (bop, "dequantize", "dequantize"),
+                (bop, MatchAllNode, "dequantize"),
+                (bop, "dequantize", MatchAllNode),
+            ]
+        ]
+
+    patterns = []
+    for bop in [operator.add, torch.add]:
+        patterns.extend(get_bop_relu_patterns(bop))
+        patterns.extend(get_bop_patterns(bop))
+
+    qbin_op_mapping: Dict[Union[Callable, str], Callable] = {
+        operator.add: torch.ops.quantized.add,
+        torch.add: torch.ops.quantized.add,
+        operator.mul: torch.ops.quantized.mul,
+        torch.mul: torch.ops.quantized.mul,
+        torch.matmul: torch.ops.quantized.matmul,
+    }
+    qbin_relu_op_mapping: Dict[Union[Callable, str], Callable] = {
+        operator.add: torch.ops.quantized.add_relu,
+        torch.add: torch.ops.quantized.add_relu,
+        operator.mul: torch.ops.quantized.mul_relu,
+        torch.mul: torch.ops.quantized.mul_relu,
+    }
+    for n in model.graph.nodes:
+        for pattern in patterns:
+            if not is_match(modules, n, pattern):
+                continue
+            print("matched:", pattern)
+            q_node = n
+            is_quantize = q_node.target == torch.quantize_per_tensor
+            is_to_fp16 = q_node.op == "call_method" and q_node.target == "to" and q_node.args[1] == torch.float16
+            if not (is_quantize or is_to_fp16):
+                continue
+
+            # start tracing back from quantize node
+            node = q_node.args[0]
+            if not isinstance(node, Node):
+                continue
+            relu_node = None
+            if (
+                node.op == 'call_function' and
+                    node.target in (torch.nn.functional.relu, torch.relu)
+            ) or (
+                node.op == 'call_module' and
+                    isinstance(modules[str(node.target)], torch.nn.ReLU)
+            ):
+                relu_node = node
+
+            # binary operator node, e.g. torch.add(x, y)
+            bop_node = node.args[0]
+            if bop_node.op != "call_function" or \
+               bop_node.target not in set([torch.add, operator.add, torch.mul, operator.mul]):
+                print("bop node:", bop_node)
+                continue
+
+            # remove dequant node
+            arg0 = bop_node.args[0]
+            arg1 = bop_node.args[1]
+            dq_node0, dq_node1 = None, None
+            if is_dequantize_node(arg0):
+                dq_node0 = arg0
+            if is_dequantize_node(arg1):
+                dq_node1 = arg1
+            assert dq_node0 is not None or dq_node1 is not None
+            for dq_node in [dq_node0, dq_node1]:
+                if dq_node is None:
+                    continue
+                # dequantize node is only used once, this is enforced by `is_match`
+                dn_input = dq_node.args[0]
+                dq_node.replace_all_uses_with(dn_input)
+                model.graph.erase_node(dq_node)
+
+            # swap binary op to quantized binary op
+            assert bop_node.target in qbin_op_mapping
+            binop_to_qbinop = qbin_op_mapping if relu_node is None else qbin_relu_op_mapping
+            qbin_op = binop_to_qbinop[bop_node.target]
+            # prepare the args for quantized bianry op
+            # (x, y)
+            qop_node_args = list(bop_node.args)
+            # (x, y, scale, zero_point)
+            # add scale and zero_point arguments for Tensor - Tensor operation
+            if dq_node0 is not None and dq_node1 is not None:
+                qop_node_args.extend([q_node.args[1], q_node.args[2]])
+
+            # insert a call to quantized binary op and remove the original binary op
+            with model.graph.inserting_after(q_node):
+                qop_node = create_node_from_old_node_preserve_meta(
+                    model.graph,
+                    ("call_function", qbin_op, tuple(qop_node_args), {}),
+                    bop_node)
+                q_node.replace_all_uses_with(qop_node)
+
+            # remove quantize node
+            model.graph.erase_node(q_node)
+            # remove relu node if any
+            if relu_node is not None:
+                model.graph.erase_node(relu_node)
+            # remove binary op node
+            model.graph.erase_node(bop_node)
+
+    return model
+
 def special_pattern_replacement(model: QuantizedGraphModule) -> QuantizedGraphModule:
     modules = dict(model.named_modules(remove_duplicate=False))
-    nodes = list(model.graph.nodes)
     for n in model.graph.nodes:
         q_node = n
         is_quantize = q_node.target == torch.quantize_per_tensor
@@ -218,6 +347,7 @@ def _lower_to_native_backend(model: QuantizedGraphModule) -> QuantizedGraphModul
     model = _lower_weighted_ref_module(model)
     for pattern, replacement in get_fbgemm_patterns_and_replacements():
         subgraph_rewriter_FORKED_DO_NOT_USE.replace_pattern(model, pattern, replacement)
+    _lower_quantized_binary_op(model)
     special_pattern_replacement(model)
     model.graph.lint()
     return model
