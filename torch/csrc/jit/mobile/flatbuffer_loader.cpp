@@ -147,7 +147,8 @@ void FlatbufferLoader::internal_registerTypeResolver(
 }
 
 mobile::Module FlatbufferLoader::parseModule(
-    mobile::serialization::Module* module) {
+    mobile::serialization::Module* module,
+    ExtraFilesMap& extra_files) {
   module_ = module;
   all_ivalues_.clear();
   all_types_.clear();
@@ -171,6 +172,12 @@ mobile::Module FlatbufferLoader::parseModule(
     }
   }
   IValue& module_ivalue = getIValue(module->state_obj());
+
+  auto extra_files_offsets = module_->extra_files();
+  for (uint32_t i = 0; i < extra_files_offsets->size(); ++i) {
+    const auto* extra_file = extra_files_offsets->Get(i);
+    extra_files[extra_file->name()->str()] = extra_file->content()->str();
+  }
 
   // register functions
   for (const auto& f : all_functions_) {
@@ -543,22 +550,36 @@ TypePtr FlatbufferLoader::getOrCreateTypeAnnotations(
 mobile::Module parse_and_initialize_mobile_module(
     std::shared_ptr<char> data,
     size_t,
-    c10::optional<at::Device>) {
+    c10::optional<at::Device> device,
+    ExtraFilesMap& extra_files) {
   auto* flatbuffer_module = mobile::serialization::GetMutableModule(data.get());
-  mobile::Module m = FlatbufferLoader().parseModule(flatbuffer_module);
+  mobile::Module m =
+      FlatbufferLoader().parseModule(flatbuffer_module, extra_files);
   m.set_delete_memory(std::move(data));
   return m;
 }
 
 mobile::Module initialize_mobile_module(
     mobile::serialization::Module* flatbuffer_module,
-    c10::optional<at::Device>) {
-  mobile::Module m = FlatbufferLoader().parseModule(flatbuffer_module);
+    ExtraFilesMap& extra_files,
+    c10::optional<at::Device> device) {
+  mobile::Module m =
+      FlatbufferLoader().parseModule(flatbuffer_module, extra_files);
+  return m;
+}
+
+mobile::Module initialize_mobile_module(
+    mobile::serialization::Module* flatbuffer_module,
+    c10::optional<at::Device> device) {
+  ExtraFilesMap extra_files;
+  mobile::Module m =
+      FlatbufferLoader().parseModule(flatbuffer_module, extra_files);
   return m;
 }
 
 mobile::Module load_mobile_module_from_file(
     const std::string& filename,
+    ExtraFilesMap& extra_files,
     c10::optional<c10::Device> device) {
 #if defined(HAVE_MMAP)
   int fd = open(filename.c_str(), O_RDONLY);
@@ -578,7 +599,15 @@ mobile::Module load_mobile_module_from_file(
   fread(data.get(), size, 1, f);
   fclose(f);
 #endif
-  return parse_and_initialize_mobile_module(std::move(data), size, device);
+  return parse_and_initialize_mobile_module(
+      std::move(data), size, device, extra_files);
+}
+
+mobile::Module load_mobile_module_from_file(
+    const std::string& filename,
+    c10::optional<c10::Device> device) {
+  ExtraFilesMap extra_files;
+  return load_mobile_module_from_file(filename, extra_files, device);
 }
 
 } // namespace jit

@@ -37,7 +37,8 @@ class FlatbufferSerializer {
 
   flatbuffers::DetachedBuffer serializeModule(
       const mobile::Module& module,
-      bool include_tensor_data_in_flatbuffer);
+      bool include_tensor_data_in_flatbuffer,
+      const ExtraFilesMap& extra_files = ExtraFilesMap());
 
  private:
   template <typename It>
@@ -102,6 +103,12 @@ class FlatbufferSerializer {
   uint32_t storeClassTypeAndGetIndex(
       flatbuffers::FlatBufferBuilder& fbb,
       ClassTypePtr class_type);
+
+  flatbuffers::Offset<flatbuffers::Vector<
+      flatbuffers::Offset<mobile::serialization::ExtraFile>>>
+  storeExtraFilesAndGetOffset(
+      FlatBufferBuilder& fbb,
+      const ExtraFilesMap& extra_files);
 
   uint32_t insertIValue(
       flatbuffers::Offset<mobile::serialization::IValue> ivalue) {
@@ -271,9 +278,29 @@ flatbuffers::Offset<mobile::serialization::Function> FlatbufferSerializer::
   return function_offset;
 }
 
+flatbuffers::Offset<
+    flatbuffers::Vector<flatbuffers::Offset<mobile::serialization::ExtraFile>>>
+FlatbufferSerializer::storeExtraFilesAndGetOffset(
+    FlatBufferBuilder& fbb,
+    const ExtraFilesMap& extra_files) {
+  std::vector<flatbuffers::Offset<mobile::serialization::ExtraFile>>
+      jit_file_offsets;
+
+  for (const auto& extra_file : extra_files) {
+    flatbuffers::Offset<mobile::serialization::ExtraFile> jit_file =
+        mobile::serialization::CreateExtraFile(
+            fbb,
+            fbb.CreateSharedString(extra_file.first),
+            fbb.CreateString(extra_file.second));
+    jit_file_offsets.emplace_back(jit_file);
+  }
+  return fbb.CreateVector(jit_file_offsets);
+}
+
 flatbuffers::DetachedBuffer FlatbufferSerializer::serializeModule(
     const mobile::Module& module,
-    bool include_tensor_data_in_flatbuffer) {
+    bool include_tensor_data_in_flatbuffer,
+    const ExtraFilesMap& extra_files) {
   FlatBufferBuilder fbb;
 
   mcu_ = &module.compilation_unit();
@@ -323,10 +350,12 @@ flatbuffers::DetachedBuffer FlatbufferSerializer::serializeModule(
     storage_data_offset = fbb.CreateVector(storage_data);
   }
 
+  auto extra_files_offset = storeExtraFilesAndGetOffset(fbb, extra_files);
+
   auto mod = CreateModule(
       fbb,
       0, /* version */
-      0, /* extra_files */
+      extra_files_offset, /* extra_files */
       functions_offset,
       ivalue_index,
       fbb.CreateVector(ivalue_offsets_),
@@ -675,9 +704,13 @@ void save_mobile_module(
 }
 
 flatbuffers::DetachedBuffer save_mobile_module_to_bytes(
-    const mobile::Module& module) {
+    const mobile::Module& module,
+    const ExtraFilesMap& extra_files) {
   FlatbufferSerializer fb_serializer;
-  return fb_serializer.serializeModule(module, true);
+  return fb_serializer.serializeModule(
+      module,
+      /*include_tensor_data_in_flatbuffer*/ true,
+      extra_files);
 }
 
 } // namespace jit

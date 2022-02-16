@@ -15,6 +15,7 @@
 namespace torch {
 namespace jit {
 
+using ExtraFilesMap = std::unordered_map<std::string, std::string>;
 // On high level, to produce a Module from a file on disk, we need to go
 // through the follow steps:
 // 1. Read: Read the file from disk -> memory
@@ -30,6 +31,11 @@ namespace jit {
 // This function does step 3 described above.
 TORCH_API mobile::Module initialize_mobile_module(
     mobile::serialization::Module* flatbuffer_module,
+    ExtraFilesMap& extra_files,
+    c10::optional<at::Device> device = c10::nullopt);
+
+TORCH_API mobile::Module initialize_mobile_module(
+    mobile::serialization::Module* flatbuffer_module,
     c10::optional<at::Device> device = c10::nullopt);
 
 // Parse a mobile::Module from raw bytes.
@@ -39,6 +45,7 @@ TORCH_API mobile::Module initialize_mobile_module(
 TORCH_API mobile::Module parse_and_initialize_mobile_module(
     std::shared_ptr<char> data,
     size_t size,
+    ExtraFilesMap& extra_files,
     c10::optional<at::Device> device = c10::nullopt);
 
 // Load a mobile::Module from a filepath.
@@ -46,6 +53,11 @@ TORCH_API mobile::Module parse_and_initialize_mobile_module(
 // We need to have this as a convienience because Python
 // API will need to wrap this. C++ clients should use one
 // versions above.
+TORCH_API mobile::Module load_mobile_module_from_file(
+    const std::string& filename,
+    ExtraFilesMap& extra_files,
+    c10::optional<at::Device> device = c10::nullopt);
+
 TORCH_API mobile::Module load_mobile_module_from_file(
     const std::string& filename,
     c10::optional<at::Device> device = c10::nullopt);
@@ -59,7 +71,9 @@ class FlatbufferLoader {
   void registerIValueParser(
       mobile::serialization::IValueUnion ivalue_type,
       IValueParser parser);
-  mobile::Module parseModule(mobile::serialization::Module* module);
+  mobile::Module parseModule(
+      mobile::serialization::Module* module,
+      ExtraFilesMap& extra_files);
 
   typedef TypePtr (*TypeResolver)(
       const std::string& type_str,
