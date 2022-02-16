@@ -28,15 +28,14 @@ void TsNodeSetShapeDeferred(
   throw std::runtime_error("Expected TsNode but could not dynamic cast");
 }
 
-hash_t OperandHashes(const OpList& operands, const hash_t& seed, bool bakeInSizes) {
+hash_t OperandHashes(const OpList& operands, const hash_t& seed) {
   hash_t hash = seed;
   for (auto& operand : operands) {
     if (!operand) {
       hash = HashCombine(hash, static_cast<uint64_t>(kNullOpt));
       continue;
     }
-    auto operand_hash = bakeInSizes ? operand.hash_with_sizes() : operand.hash_without_sizes();
-    hash = HashCombine(hash, operand_hash);
+    hash = HashCombine(hash, operand.hash());
   }
   return hash;
 }
@@ -49,7 +48,7 @@ TsNode::TsNode(OpKind op, OpList operands, std::vector<Shape>&& shapes,
            // initialization to a separate function?
            /* node_hash */ HashCombine(op.hash(), hash_seed),
            /* dag_hash */
-           [&](bool bakeInSizes) { return OperandHashes(operands, HashCombine(op.hash(), hash_seed), bakeInSizes); }),
+           OperandHashes(operands, HashCombine(op.hash(), hash_seed))),
       shapes_(shapes) {
   for (auto& operand : operands) {
     // Ideally, optional operands should be filtered by the leaf node classes,
@@ -81,7 +80,7 @@ void TsNode::SetShapeDeferred(
 }
 
 TsNode::TsNode(OpKind op, Shape shape, size_t num_outputs, hash_t hash_seed)
-    : Node(op, num_outputs, [&](bool bakeInSizes) -> hash_t { return GetOpHash(op, shape, hash_seed, bakeInSizes); })
+    : Node(op, num_outputs, GetOpHash(op, shape, hash_seed))
 {
   shapes_.push_back(std::move(shape));
 }
@@ -99,11 +98,10 @@ ShapeCache* GetShapeCache() {
 
 Shape TsNode::GetOpShape(
     const std::function<Shape()>& shape_fn) const {
-  auto hash = hash_with_sizes();
   ShapeCache* shape_cache = GetShapeCache();
-  auto shape = shape_cache->Get(hash);
+  auto shape = shape_cache->Get(hash());
   if (shape == nullptr) {
-    shape = shape_cache->Add(hash,
+    shape = shape_cache->Add(hash(),
                              std::make_shared<Shape>(shape_fn()));
   }
   return *shape;
@@ -122,8 +120,8 @@ std::string TsNode::ToString() const {
   return ss.str();
 }
 
-hash_t TsNode::GetOpHash(OpKind op, const Shape& shape, hash_t hash_seed, bool bakeInSizes) {
-  hash_t h = HashCombine(op.hash(), shape.hash(bakeInSizes));
+hash_t TsNode::GetOpHash(OpKind op, const Shape& shape, hash_t hash_seed) {
+  hash_t h = HashCombine(op.hash(), shape.hash());
   return HashCombine(h, hash_seed);
 }
 
