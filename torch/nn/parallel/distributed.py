@@ -1105,14 +1105,6 @@ class DistributedDataParallel(Module, Joinable):
         super(DistributedDataParallel, self).train(mode)
         return self
 
-    # When running in join mode, schedules an allreduce to match the one in the
-    # forward pass to determine the no. of currently active processes and whether
-    # all processes have joined.
-    def _schedule_shadow_all_reduce_for_fwd_pass(self):
-        all_active_procs = torch.zeros(1, device=self.device)
-        dist.all_reduce(all_active_procs, group=self.process_group)
-        return all_active_procs.item()
-
     # When running in join mode, schedules an allreduce to notify joined ranks
     # of whether backwards pass synchronization will run this iteraton or not.
     def _check_global_requires_backward_grad_sync(self, is_joined_rank):
