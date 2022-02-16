@@ -368,7 +368,7 @@ struct KinetoThreadLocalState : public ProfilerThreadLocalStateBase {
         activity.addMetadata(
             "Sequence number", std::to_string(kineto_event.sequenceNr()));
 
-        // From the time being, we need disable the forward/backward correlation feature to 
+        // From the time being, we need disable the forward/backward correlation feature to
         // workaround the crash bug.
         // TODO: by Mike Guo
         // reenable the forward/backward correlation when kineto fix the following raw pointer
