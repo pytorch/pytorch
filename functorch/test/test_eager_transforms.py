@@ -520,6 +520,48 @@ class TestGradTransform(TestCase):
         self.assertEqual(gy, torch.tensor(2., device=device))
         self.assertEqual(gz['foo'], torch.tensor(3., device=device))
 
+    def test_grad_aux_tensor(self, device):
+
+        x = torch.randn(3, device=device)
+
+        with self.assertRaisesRegex(
+            RuntimeError,
+            r'grad_and_value\(f\)\(\*args\): output of function f should be a tuple'
+        ):
+            grad(lambda t: [t, t], has_aux=True)(x)
+
+        with self.assertRaisesRegex(
+            RuntimeError,
+            r'grad_and_value\(f\)\(\*args\): output of function f should be a tuple'
+        ):
+            grad(lambda t: (t, t + 2, t + 3), has_aux=True)(x)
+
+        def f(t):
+            y = t.sin()
+            return y.sum(), t.cos()
+
+        out, aux = grad(f, has_aux=True)(x)
+        self.assertEqual(aux, x.cos())
+        self.assertEqual(out, x.cos())
+
+    def test_grad_aux_pytree(self, device):
+        def f(x):
+            y = x.sin()
+            return y.sum(), {'a': x.cos(), 'b': [x.tan()]}
+
+        x = torch.randn(3, device=device)
+
+        out, aux = grad(f, has_aux=True)(x)
+        _, expected_aux = f(x)
+        self.assertEqual(aux, expected_aux)
+        self.assertEqual(out, x.cos())
+
+        for aux in [1, 1.0, "abc"]:
+            with self.assertRaisesRegex(RuntimeError, r"Expected tensors, got unsupported type"):
+                _ = grad(lambda x: (x.sum(), aux), has_aux=True)(x)
+            with self.assertRaisesRegex(RuntimeError, r"Expected tensors, got unsupported type"):
+                _ = grad(lambda x: (x.sum(), [x, aux]), has_aux=True)(x)
+
     def test_zero_grad(self, device):
         def f(x):
             return (x['a']**2.0).sum()
@@ -694,6 +736,12 @@ class TestGradTransform(TestCase):
         v = torch.randn(3, device=device)
         grad_x, = vjp_fn(v)
         self.assertEqual(grad_x, v * x.cos())
+
+        for aux in [1, 1.0, "abc"]:
+            with self.assertRaisesRegex(RuntimeError, r"Expected tensors, got unsupported type"):
+                _ = vjp(lambda x: (x, aux), x, has_aux=True)
+            with self.assertRaisesRegex(RuntimeError, r"Expected tensors, got unsupported type"):
+                _ = vjp(lambda x: (x, [x, aux]), x, has_aux=True)
 
     def test_functional_init(self, device):
         class MLPClassifier(nn.Module):
@@ -1254,18 +1302,16 @@ class TestJac(TestCase):
 
         x = torch.randn(3, device=device)
 
-        # TODO: Remove when https://github.com/pytorch/functorch/issues/392
-        # is fixed
-        if jacapi == jacrev:
-            result, aux = jacapi(f, has_aux=True)(x)
-            self.assertEqual(result, torch.eye(3, 3, device=device))
-            expected_aux = {'a': x.cos(), 'b': [x.tan()]}
-            self.assertEqual(aux, expected_aux)
-        else:
-            result, aux = jacapi(f)(x)
-            self.assertEqual(result, torch.eye(3, 3, device=device))
-            expected_aux = {'a': -torch.diag(x.sin()), 'b': [torch.diag(1.0 + x.tan() ** 2)]}
-            self.assertEqual(aux, expected_aux)
+        result, aux = jacapi(f, has_aux=True)(x)
+        self.assertEqual(result, torch.eye(3, 3, device=device))
+        _, expected_aux = f(x)
+        self.assertEqual(aux, expected_aux)
+
+        for aux in [1, 1.0, "abc"]:
+            with self.assertRaisesRegex(RuntimeError, r"Expected tensors, got unsupported type"):
+                _ = jacapi(lambda x: (x, aux), has_aux=True)(x)
+            with self.assertRaisesRegex(RuntimeError, r"Expected tensors, got unsupported type"):
+                _ = jacapi(lambda x: (x, [x, aux]), has_aux=True)(x)
 
     @jacrev_and_jacfwd
     def test_outputs_can_any_pytree(self, device, jacapi):
@@ -1743,7 +1789,7 @@ class TestJvp(TestCase):
         with self.assertRaisesRegex(RuntimeError, 'only contain Tensors'):
             jvp(torch.sin, (x,), (1.,))
 
-    def test_jvp_outputs_can_any_pytree(self, device):
+    def test_outputs_can_any_pytree(self, device):
         x = torch.randn(2, 3, device=device)
         t = torch.randn(2, 3, device=device)
 
@@ -1780,6 +1826,50 @@ class TestJvp(TestCase):
             assert isinstance(out[i], list)
             assert isinstance(out[i][0], tuple) and \
                 isinstance(out[i][0][1], dict)
+
+    def test_aux_tensor(self, device):
+
+        x = torch.randn(3, device=device)
+        t = torch.randn(3, device=device)
+
+        with self.assertRaisesRegex(
+            RuntimeError, r'jvp\(f, primals, tangents\): output of function f should be a tuple'
+        ):
+            jvp(lambda t: [t, t], (x, ), (t, ), has_aux=True)
+
+        with self.assertRaisesRegex(
+            RuntimeError, r'jvp\(f, primals, tangents\): output of function f should be a tuple'
+        ):
+            jvp(lambda t: (t, t + 2, t + 3), (x, ), (t, ), has_aux=True)
+
+        def f(z):
+            y = z.sin()
+            return y, z.cos()
+
+        out, jvp_out, aux = jvp(f, (x, ), (t, ), has_aux=True)
+        self.assertEqual(aux, x.cos())
+        self.assertEqual(out, x.sin())
+        self.assertEqual(jvp_out, t * x.cos())
+
+    def test_aux_pytree(self, device):
+        def f(x):
+            y = x.sin()
+            return y, {'a': x.cos(), 'b': [x.tan()]}
+
+        x = torch.randn(3, device=device)
+        t = torch.randn(3, device=device)
+
+        out, jvp_out, aux = jvp(f, (x, ), (t, ), has_aux=True)
+        expected_out, expected_aux = f(x)
+        self.assertEqual(out, expected_out)
+        self.assertEqual(aux, expected_aux)
+        self.assertEqual(jvp_out, t * x.cos())
+
+        for aux in [1, 1.0, "abc"]:
+            with self.assertRaisesRegex(RuntimeError, r"Expected tensors, got unsupported type"):
+                _ = jvp(lambda x: (x, aux), (x, ), (t, ), has_aux=True)
+            with self.assertRaisesRegex(RuntimeError, r"Expected tensors, got unsupported type"):
+                _ = jvp(lambda x: (x, [x, aux]), (x, ), (t, ), has_aux=True)
 
 
 class TestCustomFunction(TestCase):
