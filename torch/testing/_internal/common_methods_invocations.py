@@ -10156,7 +10156,7 @@ op_db: List[OpInfo] = [
            skips=(
                DecorateInfo(unittest.skip("Tests different backward implementations"),
                             "TestCommon", "test_floating_inputs_are_differentiable"),),
-           decorators=[skipCUDAIfNoMagma, skipCUDAIfRocm, skipCPUIfNoLapack]),
+           decorators=[skipCPUIfNoLapack, skipCUDAIfNoMagmaAndNoCusolver]),
     OpInfo('masked_fill',
            dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
            sample_inputs_func=sample_inputs_masked_fill,

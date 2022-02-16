@@ -896,24 +896,24 @@ void lu_factor_kernel(const Tensor& input, const Tensor& pivots, const Tensor& i
   For further details, please see the LAPACK documentation for GETRS.
 */
 template <typename scalar_t>
-void apply_lu_solve(const Tensor& b, const Tensor& lu, const Tensor& pivots, TransposeType transpose) {
+void apply_lu_solve(const Tensor& LU, const Tensor& pivots, const Tensor& B, TransposeType transpose) {
 #if !AT_BUILD_WITH_LAPACK()
   TORCH_CHECK(
       false,
-      "Calling torch.lu_solve on a CPU tensor requires compiling ",
+      "Calling linalg.lu_solve on a CPU tensor requires compiling ",
       "PyTorch with LAPACK. Please use PyTorch built with LAPACK support.");
 #else
-  auto b_data = b.data_ptr<scalar_t>();
-  auto lu_data = lu.data_ptr<scalar_t>();
+  auto b_data = B.data_ptr<scalar_t>();
+  auto lu_data = LU.data_ptr<scalar_t>();
   const auto trans = to_blas(transpose);
   auto pivots_data = pivots.data_ptr<int>();
-  auto b_stride = matrixStride(b);
-  auto lu_stride = matrixStride(lu);
+  auto b_stride = matrixStride(B);
+  auto lu_stride = matrixStride(LU);
   auto pivots_stride = pivots.size(-1);
-  auto batch_size = batchCount(b);
+  auto batch_size = batchCount(B);
 
-  auto n = lu.size(-2);
-  auto nrhs = b.size(-1);
+  auto n = LU.size(-2);
+  auto nrhs = B.size(-1);
   auto leading_dimension = std::max<int64_t>(1, n);
 
   int info = 0;
@@ -933,14 +933,10 @@ void apply_lu_solve(const Tensor& b, const Tensor& lu, const Tensor& pivots, Tra
 }
 
 // This is a type dispatching helper function for 'apply_lu_solve'
-void lu_solve_trans_kernel(const Tensor& b, const Tensor& lu, const Tensor& pivots, TransposeType trans) {
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(b.scalar_type(), "lu_solve_cpu", [&]{
-    apply_lu_solve<scalar_t>(b, lu, pivots, trans);
+void lu_solve_kernel(const Tensor& LU, const Tensor& pivots, const Tensor& B, TransposeType trans) {
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(LU.scalar_type(), "linalg.lu_solve_cpu", [&]{
+    apply_lu_solve<scalar_t>(LU, pivots, B, trans);
   });
-}
-
-void lu_solve_kernel(const Tensor& b, const Tensor& lu, const Tensor& pivots) {
-  lu_solve_trans_kernel(b, lu, pivots, TransposeType::NoTranspose);
 }
 
 template <typename scalar_t>
@@ -1114,12 +1110,6 @@ REGISTER_AVX512_DISPATCH(lu_factor_stub, &lu_factor_kernel);
 REGISTER_AVX2_DISPATCH(lu_factor_stub, &lu_factor_kernel);
 REGISTER_VSX_DISPATCH(lu_factor_stub, &lu_factor_kernel);
 REGISTER_ZVECTOR_DISPATCH(lu_factor_stub, &lu_factor_kernel);
-
-REGISTER_ARCH_DISPATCH(lu_solve_trans_stub, DEFAULT, &lu_solve_trans_kernel);
-REGISTER_AVX512_DISPATCH(lu_solve_trans_stub, &lu_solve_trans_kernel);
-REGISTER_AVX2_DISPATCH(lu_solve_trans_stub, &lu_solve_trans_kernel);
-REGISTER_VSX_DISPATCH(lu_solve_trans_stub, &lu_solve_trans_kernel);
-REGISTER_ZVECTOR_DISPATCH(lu_solve_trans_stub, &lu_solve_trans_kernel);
 
 REGISTER_ARCH_DISPATCH(lu_solve_stub, DEFAULT, &lu_solve_kernel);
 REGISTER_AVX512_DISPATCH(lu_solve_stub, &lu_solve_kernel);

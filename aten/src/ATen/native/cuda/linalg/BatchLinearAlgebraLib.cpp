@@ -91,21 +91,21 @@ void geqrf_batched_cublas(const Tensor& input, const Tensor& tau) {
 }
 
 template <typename scalar_t>
-static void apply_lu_solve_batched_cublas(const Tensor& b, const Tensor& lu, const Tensor& pivots, TransposeType transpose) {
+static void apply_lu_solve_batched_cublas(const Tensor& LU, const Tensor& pivots, const Tensor& B, TransposeType transpose) {
 #ifndef CUDART_VERSION
   TORCH_CHECK(false, "lu_solve: cuBLAS backend for lu_solve is not available.")
 #else
   const auto trans = to_cublas(transpose);
 
   auto pivots_data = pivots.data_ptr<int>();
-  auto batch_size = cuda_int_cast(batchCount(lu), "batch_size");;
-  auto m = cuda_int_cast(lu.size(-2), "m");
-  auto nrhs = cuda_int_cast(b.size(-1), "nrhs");
+  auto batch_size = cuda_int_cast(batchCount(LU), "batch_size");;
+  auto m = cuda_int_cast(LU.size(-2), "m");
+  auto nrhs = cuda_int_cast(B.size(-1), "nrhs");
   auto lda = cuda_int_cast(std::max<int>(1, m), "lda");
   int info = 0;
 
-  Tensor lu_ptr_array = get_device_pointers<scalar_t>(lu);
-  Tensor b_ptr_array = get_device_pointers<scalar_t>(b);
+  Tensor lu_ptr_array = get_device_pointers<scalar_t>(LU);
+  Tensor b_ptr_array = get_device_pointers<scalar_t>(B);
   auto lu_ptr_array_data = reinterpret_cast<scalar_t**>(lu_ptr_array.data_ptr());
   auto b_ptr_array_data = reinterpret_cast<scalar_t**>(b_ptr_array.data_ptr());
 
@@ -116,9 +116,9 @@ static void apply_lu_solve_batched_cublas(const Tensor& b, const Tensor& lu, con
 #endif
 }
 
-void lu_solve_batched_cublas(const Tensor& b, const Tensor& lu, const Tensor& pivots, TransposeType trans) {
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(lu.scalar_type(), "lu_solve_cublas", [&]{
-    apply_lu_solve_batched_cublas<scalar_t>(b, lu, pivots, trans);
+void lu_solve_batched_cublas(const Tensor& LU, const Tensor& pivots, const Tensor& B, TransposeType trans) {
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(LU.scalar_type(), "lu_solve_cublas", [&]{
+    apply_lu_solve_batched_cublas<scalar_t>(LU, pivots, B, trans);
   });
 }
 
@@ -1440,20 +1440,20 @@ void lu_factor_looped_cusolver(const Tensor& self, const Tensor& pivots, const T
   }
 }
 
-void lu_solve_looped_cusolver(const Tensor& b, const Tensor& lu, const Tensor& pivots, TransposeType transpose) {
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(b.scalar_type(), "lu_solve_cusolver", [&] {
+void lu_solve_looped_cusolver(const Tensor& LU, const Tensor& pivots, const Tensor& B, TransposeType transpose) {
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(LU.scalar_type(), "lu_solve_cusolver", [&] {
     const auto trans = to_cublas(transpose);
-    int n = cuda_int_cast(lu.size(-2), "n");
-    int nrhs = cuda_int_cast(b.size(-1), "nrhs");
-    auto batch_size = batchCount(lu);
-    auto info = at::zeros({1}, lu.options().dtype(kInt));
+    int n = cuda_int_cast(LU.size(-2), "n");
+    int nrhs = cuda_int_cast(B.size(-1), "nrhs");
+    auto batch_size = batchCount(LU);
+    auto info = at::zeros({1}, LU.options().dtype(kInt));
     auto info_data = info.data_ptr<int>();
-    auto b_data = b.data_ptr<scalar_t>();
-    auto lu_data = lu.data_ptr<scalar_t>();
+    auto b_data = B.data_ptr<scalar_t>();
+    auto lu_data = LU.data_ptr<scalar_t>();
     auto pivots_data = pivots.data_ptr<int>();
     auto pivots_stride = pivots.size(-1);
-    auto lu_stride = matrixStride(lu);
-    auto b_stride = matrixStride(b);
+    auto lu_stride = matrixStride(LU);
+    auto b_stride = matrixStride(B);
     int leading_dimension = cuda_int_cast(std::max<int>(1, n), "leading_dimension");
 
     auto handle = at::cuda::getCurrentCUDASolverDnHandle();
