@@ -34,7 +34,6 @@ env:
   SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
   PYTORCH_RETRY_TEST_CASES: 1
   DEBUG: 1
-  ENABLE_DEPLOY_TEST: 1
 concurrency:
   group: periodic-linux-xenial-cuda11.1-py3.7-gcc7-debug-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
   cancel-in-progress: true
@@ -263,6 +262,7 @@ jobs:
       ENABLE_SLOW_TEST: ''
       ENABLE_DOCS_TEST: ''
       ENABLE_BACKWARDS_COMPAT_TEST: ''
+      ENABLE_DEPLOY_TEST: ''
       ENABLE_XLA_TEST: ''
       ENABLE_NOARCH_TEST: ''
       NUM_TEST_SHARDS: 2

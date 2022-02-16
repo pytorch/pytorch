@@ -166,7 +166,6 @@ class CIWorkflow:
     num_test_shards_on_pull_request: int = -1
     distributed_test: bool = True
     fx2trt_test: bool = False
-    deploy_test: bool = False
     timeout_after: int = 240
     xcode_version: str = ''
     only_on_pr: bool = False
