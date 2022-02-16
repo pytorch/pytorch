@@ -371,13 +371,6 @@ core_sources_full_mobile = core_sources_full_mobile_no_backend_interface + [
 ]
 
 core_sources_full = core_sources_full_mobile + [
-    "torch/csrc/jit/runtime/static/fusion.cpp",
-    "torch/csrc/jit/runtime/static/impl.cpp",
-    "torch/csrc/jit/runtime/static/memory_planner.cpp",
-    "torch/csrc/jit/runtime/static/native_ops.cpp",
-    "torch/csrc/jit/runtime/static/ops.cpp",
-    "torch/csrc/jit/runtime/static/passes.cpp",
-    "torch/csrc/jit/runtime/static/te_wrapper.cpp",
     "torch/csrc/jit/tensorexpr/external_functions.cpp",
     "torch/csrc/jit/tensorexpr/external_functions_codegen.cpp",
 ]
@@ -872,7 +865,6 @@ libtorch_python_core_sources = [
     "torch/csrc/jit/frontend/tree_views.cpp",
     "torch/csrc/jit/python/python_sugared_value.cpp",
     "torch/csrc/jit/python/python_tree_views.cpp",
-    "torch/csrc/jit/runtime/static/init.cpp",
     "torch/csrc/jit/tensorexpr/tensorexpr_init.cpp",
     "torch/csrc/monitor/python_init.cpp",
     "torch/csrc/multiprocessing/init.cpp",

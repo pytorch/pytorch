@@ -11,7 +11,6 @@
 #include <torch/csrc/jit/passes/utils/subgraph_utils.h>
 #include <torch/csrc/jit/runtime/graph_iterator.h>
 #include <torch/csrc/jit/runtime/register_ops_utils.h>
-#include <torch/csrc/jit/runtime/static/ops.h>
 #include <sstream>
 
 namespace torch {
@@ -509,7 +508,7 @@ Operation StaticRuntimeCopyOuts(const Node* node) {
       for (size_t i = 0; i < inputs.size(); ++i) {
         IValue out = outputs[i];
         at::Tensor& out_t = out.toTensor();
-        fastResizeToZero(out_t);
+        out_t.unsafeGetTensorImpl()->set_sizes_contiguous({0});
         out_t.resize_as_(inputs[i].toTensor());
         out_t.copy_(inputs[i].toTensor());
       }
