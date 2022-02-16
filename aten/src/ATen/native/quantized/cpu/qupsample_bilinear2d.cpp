@@ -88,7 +88,8 @@ static void upsample_bilinear2d_out_frame(
     params_w.emplace_back(w1, w1p, w0lambda, w1lambda);
   }
 
-  at::parallel_for(0, channels * output_height, 0, [&](int64_t begin, int64_t end) {
+  int64_t grain_size = internal::GRAIN_SIZE / std::max(int64_t{1}, output_width);
+  at::parallel_for(0, channels * output_height, grain_size, [&](int64_t begin, int64_t end) {
     int64_t nc{0}, h2{0};
     data_index_init(begin, nc, channels, h2, output_height);
 
