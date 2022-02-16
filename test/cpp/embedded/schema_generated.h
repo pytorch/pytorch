@@ -831,8 +831,7 @@ struct Operation FLATBUFFERS_FINAL_CLASS : private flatbuffers::Table {
   enum FlatBuffersVTableOffset FLATBUFFERS_VTABLE_UNDERLYING_TYPE {
     VT_OP_INDEX = 4,
     VT_INPUTS = 6,
-    VT_ARGS = 8,
-    VT_OUTPUTS = 10
+    VT_OUTPUTS = 8
   };
   int32_t op_index() const {
     return GetField<int32_t>(VT_OP_INDEX, 0);
@@ -846,12 +845,6 @@ struct Operation FLATBUFFERS_FINAL_CLASS : private flatbuffers::Table {
   flatbuffers::Vector<int32_t> *mutable_inputs() {
     return GetPointer<flatbuffers::Vector<int32_t> *>(VT_INPUTS);
   }
-  const flatbuffers::Vector<int32_t> *args() const {
-    return GetPointer<const flatbuffers::Vector<int32_t> *>(VT_ARGS);
-  }
-  flatbuffers::Vector<int32_t> *mutable_args() {
-    return GetPointer<flatbuffers::Vector<int32_t> *>(VT_ARGS);
-  }
   const flatbuffers::Vector<int32_t> *outputs() const {
     return GetPointer<const flatbuffers::Vector<int32_t> *>(VT_OUTPUTS);
   }
@@ -863,8 +856,6 @@ struct Operation FLATBUFFERS_FINAL_CLASS : private flatbuffers::Table {
            VerifyField<int32_t>(verifier, VT_OP_INDEX) &&
            VerifyOffset(verifier, VT_INPUTS) &&
            verifier.VerifyVector(inputs()) &&
-           VerifyOffset(verifier, VT_ARGS) &&
-           verifier.VerifyVector(args()) &&
            VerifyOffset(verifier, VT_OUTPUTS) &&
            verifier.VerifyVector(outputs()) &&
            verifier.EndTable();
@@ -880,9 +871,6 @@ struct OperationBuilder {
   }
   void add_inputs(flatbuffers::Offset<flatbuffers::Vector<int32_t>> inputs) {
     fbb_.AddOffset(Operation::VT_INPUTS, inputs);
-  }
-  void add_args(flatbuffers::Offset<flatbuffers::Vector<int32_t>> args) {
-    fbb_.AddOffset(Operation::VT_ARGS, args);
   }
   void add_outputs(flatbuffers::Offset<flatbuffers::Vector<int32_t>> outputs) {
     fbb_.AddOffset(Operation::VT_OUTPUTS, outputs);
@@ -902,11 +890,9 @@ inline flatbuffers::Offset<Operation> CreateOperation(
     flatbuffers::FlatBufferBuilder &_fbb,
     int32_t op_index = 0,
     flatbuffers::Offset<flatbuffers::Vector<int32_t>> inputs = 0,
-    flatbuffers::Offset<flatbuffers::Vector<int32_t>> args = 0,
     flatbuffers::Offset<flatbuffers::Vector<int32_t>> outputs = 0) {
   OperationBuilder builder_(_fbb);
   builder_.add_outputs(outputs);
-  builder_.add_args(args);
   builder_.add_inputs(inputs);
   builder_.add_op_index(op_index);
   return builder_.Finish();
@@ -916,16 +902,13 @@ inline flatbuffers::Offset<Operation> CreateOperationDirect(
     flatbuffers::FlatBufferBuilder &_fbb,
     int32_t op_index = 0,
     const std::vector<int32_t> *inputs = nullptr,
-    const std::vector<int32_t> *args = nullptr,
     const std::vector<int32_t> *outputs = nullptr) {
   auto inputs__ = inputs ? _fbb.CreateVector<int32_t>(*inputs) : 0;
-  auto args__ = args ? _fbb.CreateVector<int32_t>(*args) : 0;
   auto outputs__ = outputs ? _fbb.CreateVector<int32_t>(*outputs) : 0;
   return torch::embedded::serialization::CreateOperation(
       _fbb,
       op_index,
       inputs__,
-      args__,
       outputs__);
 }
 

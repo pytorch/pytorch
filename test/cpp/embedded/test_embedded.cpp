@@ -4,7 +4,6 @@
 #include <c10/core/impl/SizesAndStrides.h>
 #include <c10/core/ScalarType.h>
 #include <c10/util/Registry.h>
-// HACK: use existing ff schema before the final embedded schema is set.
 #include <test/cpp/embedded/schema_generated.h>
 
 #ifndef ACTIVATION_BUF_SZ
@@ -22,6 +21,7 @@ int main(int argc, char* argv[]) {
 // Tests go in torch::jit
 namespace torch {
 namespace embedded {
+static uint8_t  scratch_space[ACTIVATION_BUF_SZ];
 
 void error_with_message(char* message) {
   // A hacky error function before we have a good convention,
@@ -66,6 +66,7 @@ struct Tensor {
   c10::ScalarType type;
   void* data = nullptr;
   int dim;
+  int nbytes = 0;
   int* sizes;
   // Strides
   // Quantizer
@@ -156,8 +157,11 @@ class MemoryManager {
 };
 
 class Interpreter {
-  serialization::Program module;
-  MemoryManager memoryManager;
+  serialization::Program* module;
+  MemoryManager* memoryManager;
+
+  Interpreter(serialization::Program* module, MemoryManager* memoryManager)
+      : module(module), memoryManager(memoryManager) {}
 
   int Init() {
     // Allocate scratch buffers
@@ -175,23 +179,23 @@ class Graph {
 };
 
 
-//// Operators
-//using Operator = std::function<void(ValueList*)>;
-//C10_DECLARE_REGISTRY(OperatorRegistry, Operator);
-//
-//void Op_add_int(ValueList* args) {
-//  // Unboxing, can be code-gen. and the kernel.
-//  args->values[2].payload.as_int = args->values[0].toInt() + args->values[1].toInt();
-//}
+// Operators
+using Operator = std::function<void(ValueList*)>;
+C10_DECLARE_REGISTRY(OperatorRegistry, Operator);
+
+void Op_add_int(ValueList* args) {
+  // Unboxing, can be code-gen. and the kernel.
+  args->values[2].payload.as_int = args->values[0].toInt() + args->values[1].toInt();
+}
 
 //C10_REGISTER_CLASS(OperatorRegistry, ATen::Add.int, Op_add_int);
-struct serializer {
 
-
+struct Serializer {
 flatbuffers::Offset<serialization::Tensor> tensorToFB(
     flatbuffers::FlatBufferBuilder& fbb,
     const Value& ivalue) {
   auto tensor = ivalue.toTensor();
+  tensor_data_.push_back(tensor);
 
   std::vector<int> sizes{tensor->sizes[0], tensor->sizes[0] + tensor->dim};
 
@@ -216,42 +220,58 @@ flatbuffers::Offset<serialization::Value> valueToFB(flatbuffers::FlatBufferBuild
     // TODO: Support other types.
     error_with_message("Type not supported yet.");
   }
+  return CreateValue(fbb, ivalue_type, offset);
+}
+
+uint32_t insertValue(
+    flatbuffers::Offset<serialization::Value> offset) {
+  uint32_t size = value_offsets_.size();
+  value_offsets_.push_back(offset);
+  return size;
 }
 
 uint32_t storeValueAndGetIndex(
     flatbuffers::FlatBufferBuilder& fbb,
     const Value& ivalue) {
   auto offset = valueToFB(fbb, ivalue);
-  uint32_t index = insertIValue(offset);
+  uint32_t index = insertValue(offset);
   return index;
 }
 
-int storage_index_;
-};
+void serializeValues(flatbuffers::FlatBufferBuilder& fbb, const std::vector<Value>& values) {
+  for (const auto& v : values) {
+    auto index = storeValueAndGetIndex(fbb, v);
+  }
+  for (auto td : tensor_data_) {
+    fbb.ForceVectorAlignment(
+        td->nbytes, sizeof(uint8_t), FLATBUFFERS_MAX_ALIGNMENT);
+    auto storage_offset = serialization::CreateStorageData(
+        fbb,
+        fbb.CreateVector(
+            reinterpret_cast<const uint8_t*>(td->data),
+            td->nbytes));
+    storage_data_offsets_.push_back(storage_offset);
+  }
+}
 
-TEST(EmbeddedTest, Simple) {
-
-  // Prepare for the flatbuffer program
-  flatbuffers::FlatBufferBuilder fbb;
-  serialization::ProgramBuilder pb(fbb);
-  pb.add_version(1);
-
+flatbuffers::DetachedBuffer serializeModule(flatbuffers::FlatBufferBuilder& fbb) {
   // Prepare for a graph
   // It has two operations, mul and add to finish
   // z = a * x
   // y = z * b
+
+  // values
   // TODO: Add other types like IntList or BoolList
-  serialization::GraphBuilder gb(fbb);
   // Values: a, b, x, y and intermediate z (ax), all tensors
   // Constant tensors a and b have data.
   std::vector<Value> values; // TODO: use values;
-
   Tensor a;
   a.type = c10::ScalarType::Int;
   a.dim = 2;
   a.sizes = new int[a.dim]{2, 2};
   int a_data[4]{1, 1, 1, 1};
   a.data = a_data;
+  a.nbytes = 2 * 2 * sizeof(int);
   values.emplace_back(&a);
 
   Tensor b;
@@ -260,6 +280,7 @@ TEST(EmbeddedTest, Simple) {
   b.sizes = new int[b.dim]{2, 2};
   int b_data[4]{2, 2, 2, 2};
   b.data = b_data;
+  b.nbytes = 2 * 2 * sizeof(int);
   values.emplace_back(&b);
 
   // Rest of tensors (x, z, y) don't have data
@@ -282,21 +303,89 @@ TEST(EmbeddedTest, Simple) {
   values.emplace_back(&y);
   values.emplace_back(&z);
 
-  for (const auto& v : values) {
-    auto index = storeValueAndGetIndex(fbb, v);
-  }
-  auto value_type = serialization::ValueUnion::Int;
-  auto offset = fbb.CreateStruct(serialization::Int(2)).Union();
+  serializeValues(fbb, values);
 
-//  flatbuffers::Vector<
+  // operators
+  std::vector<flatbuffers::Offset<serialization::Operator>>
+      operator_vector;
+  operator_vector.push_back(serialization::CreateOperator(
+      fbb,
+      fbb.CreateSharedString("aten::mul"),
+      fbb.CreateSharedString("")));
+  operator_vector.push_back(serialization::CreateOperator(
+    fbb,
+    fbb.CreateSharedString("aten::add"),
+    fbb.CreateSharedString("")));
 
-  auto p = pb.Finish();
-  fbb.Finish(p);
+  // 0: a,
+  // 1: b,
+  // 2: x,
+  // 3: y,
+  // 4: z
+
+  // Operations
+  std::vector<flatbuffers::Offset<serialization::Operation>> operation_vector;
+  std::vector<int> op0_inputs{0, 2};
+  std::vector<int> op0_outputs{4};
+  operation_vector.push_back(serialization::CreateOperationDirect(
+      fbb,
+      0, /* op index, 0 for mul */
+      &op0_inputs,
+      &op0_outputs
+      ));
+
+  std::vector<int> op1_inputs{4, 1};
+  std::vector<int> op1_outputs{3};
+  operation_vector.push_back(serialization::CreateOperationDirect(
+      fbb,
+      1, /* op index, 0 for add */
+      &op1_inputs,
+      &op1_outputs
+      ));
+
+  std::vector<flatbuffers::Offset<serialization::Graph>> graph_vector;
+  std::vector<int> inputs{2}; // x. Q: would a and b counted inputs?
+  std::vector<int> outputs{3}; // y.
+  graph_vector.push_back(serialization::CreateGraphDirect(
+      fbb,
+      &value_offsets_,
+      &inputs,
+      &outputs,
+      &operation_vector,
+      "forward"
+      ));
+
+
+  auto program_offset = serialization::CreateProgramDirect(
+      fbb,
+      1,
+      &graph_vector,
+      &operator_vector,
+      &storage_data_offsets_
+      );
+  fbb.Finish(program_offset);
+  return fbb.Release();
+}
+
+int storage_index_;
+std::vector<flatbuffers::Offset<serialization::Value>> value_offsets_;
+std::vector<flatbuffers::Offset<serialization::StorageData>>
+    storage_data_offsets_;
+std::vector<Tensor*> tensor_data_;
+};
+
+TEST(EmbeddedTest, Simple) {
+  // Prepare for the flatbuffer program
+  flatbuffers::FlatBufferBuilder fbb;
+  Serializer serializer;
+  serializer.serializeModule(fbb);
   uint8_t* buff = fbb.GetBufferPointer();
   auto program = serialization::GetProgram(buff);
 
+  MemoryManager mm;
+  Interpreter interpreter(&program, &mm);
 
-//  node.inputs = new ValueList
+
 }
 } // namespace embedded
 } // namespace torch

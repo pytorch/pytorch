@@ -82,8 +82,9 @@ table Operation {
   inputs:[int];
 
   // Index to the values table. It includes inputs, outsputs and
-  // other args (like configs) required by the operator.
-  args:[int];
+  // other args (like configs) required by the operator?
+  // Another option is to have all configs in inputs. It could mean a long input vector.
+  // args:[int];
 
   // separation of inputs/outputs may be needed, for lifespan
   outputs:[int];
