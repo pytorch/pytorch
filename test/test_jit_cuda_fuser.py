@@ -692,7 +692,7 @@ class TestCudaFuser(JitTestCase):
             return o
         # Omit both scalar cases and swap cases
         assert category1 == "scalar" and category2 != "scalar"
-        if dtype_arg1 == torch.float64 or dtype_arg1 == torch.float32:
+        if dtype_arg1.is_floating_point:
             return t_doublex_tensory
         if dtype_arg1 == torch.int64 or dtype_arg1 == torch.int32:
             return t_intx_tensory
@@ -744,6 +744,11 @@ class TestCudaFuser(JitTestCase):
             if category1 == "scalar":
                 return
 
+        # operators that does not support bfloat16
+        if operation in [torch.fmod]:
+            if dtype_arg1 == torch.bfloat16 or dtype_arg2 == torch.bfloat16:
+                return
+
         def t(x: torch.Tensor, y: torch.Tensor, z: torch.Tensor):
             o = operation(x, y)
             o = o + z
@@ -786,6 +791,12 @@ class TestCudaFuser(JitTestCase):
         if operation in div_like and (dtype_arg2 == torch.int32 or dtype_arg2 == torch.int64):
             y[y == 0] = 1
 
+        test_value = True
+        if dtype_arg1 == torch.half or dtype_arg2 == torch.half:
+            test_value = False
+        if dtype_arg1 == torch.bfloat16 or dtype_arg2 == torch.bfloat16:
+            test_value = False
+
         if not has_scalar:
             o = t(x, y, z)
             t_jit = torch.jit.script(t)
@@ -794,7 +805,8 @@ class TestCudaFuser(JitTestCase):
             jit_o = t_jit(x, y, z)
 
             self.assertEqual(o.dtype, jit_o.dtype)
-            self.assertEqual(o, jit_o)
+            if test_value:
+                self.assertEqual(o, jit_o)
             self.assertGraphContains(t_jit.graph_for(x, y, z), FUSION_GUARD)
 
         elif category2 != "scalar":  # only test the case where first is scalar
@@ -806,8 +818,8 @@ class TestCudaFuser(JitTestCase):
             jit_o = t_jit(x, y)
 
             self.assertEqual(o.dtype, jit_o.dtype)
-            self.assertEqual(o, jit_o)
-
+            if test_value:
+                self.assertEqual(o, jit_o)
             self.assertGraphContains(t_jit.graph_for(x, y), FUSION_GUARD)
 
     @unittest.skipIf(not RUN_CUDA, "requires CUDA")
@@ -818,14 +830,12 @@ class TestCudaFuser(JitTestCase):
         data_types = [
             torch.int32,
             torch.int64,
-            # torch.float16,
+            torch.float16,
             torch.float32,
             torch.float64
         ]
-        '''
         if TEST_BF16:
             data_types.append(torch.bfloat16)
-        '''
         operations = [torch.mul,
                       torch.div,
                       torch.atan2,
