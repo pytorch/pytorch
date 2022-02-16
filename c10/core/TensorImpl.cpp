@@ -120,11 +120,11 @@ TensorImpl::TensorImpl(
 
 // [Note: Python key removal]
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-// In most constructors for TensorImpl, you will see Python and PythonTLSSnapshot
-// keys are removed from the passed in DispatchKeySet.  Why?
+// In most constructors for TensorImpl, you will see Python and
+// PythonTLSSnapshot keys are removed from the passed in DispatchKeySet.  Why?
 //
-// INVARIANT: Python and PythonTLSSnapshot dispatch keys are set iff PyObject for
-// the Tensor has a nontrivial __torch_dispatch__ implementation.
+// INVARIANT: Python and PythonTLSSnapshot dispatch keys are set iff PyObject
+// for the Tensor has a nontrivial __torch_dispatch__ implementation.
 //
 // When a fresh TensorImpl is created, there is *no* PyObject (this only gets
 // initialized lazily at the first point in time the Tensor passes into Python).
@@ -148,9 +148,10 @@ TensorImpl::TensorImpl(
       numel_(0),
       data_type_(data_type),
       device_opt_(storage_.device()),
-      key_set_(key_set.remove(
-          DispatchKey::Python).remove(
-          DispatchKey::PythonTLSSnapshot)) { // See [Note: Python key removal]
+      key_set_(
+          key_set.remove(DispatchKey::Python)
+              .remove(DispatchKey::PythonTLSSnapshot)) { // See [Note: Python
+                                                         // key removal]
   init_bitfields();
   // Inference tensor doesn't have version counter.
   if (!is_inference()) {
@@ -196,7 +197,9 @@ TensorImpl::TensorImpl(
   key_set = key_set | getAutocastRelatedKeySetFromBackend(k);
 
   key_set =
-      key_set.remove(DispatchKey::Python).remove(DispatchKey::PythonTLSSnapshot); // See [Note: Python key removal]
+      key_set.remove(DispatchKey::Python)
+          .remove(
+              DispatchKey::PythonTLSSnapshot); // See [Note: Python key removal]
 
   // Inference tensor doesn't have autograd related keys.
   if (inference_mode) {
@@ -554,7 +557,8 @@ void TensorImpl::copy_tensor_metadata_except_version_counter(
   dest_impl->storage_offset_ = src_impl->storage_offset_;
   dest_impl->data_type_ = src_impl->data_type_;
   dest_impl->device_opt_ = src_impl->device_opt_;
-  dest_impl->key_set_ = src_impl->key_set_.remove(DispatchKey::Python).remove(DispatchKey::PythonTLSSnapshot);
+  dest_impl->key_set_ = src_impl->key_set_.remove(DispatchKey::Python)
+                            .remove(DispatchKey::PythonTLSSnapshot);
   dest_impl->is_contiguous_ = src_impl->is_contiguous_;
   dest_impl->has_contiguity_ = src_impl->has_contiguity_;
   dest_impl->is_channels_last_contiguous_ =
