@@ -13330,6 +13330,41 @@ class TestNNDeviceType(NNTestCase):
                                                batch_size, inp_size, dilation,
                                                no_weight)
 
+    @onlyCPU
+    def test_conv1d_complex_input(self, device):
+        x = torch.rand(1, 1, 12, dtype=torch.complex64, device=device)
+        y = torch.rand(1, 1, 3, dtype=torch.complex64, device=device)
+        actual = F.conv1d(x, y)
+
+        x1 = x.real
+        x2 = x.imag
+        y1 = y.real
+        y2 = y.imag
+
+        expected = F.conv1d(x1, y1) - F.conv1d(x2, y2) + \
+            (F.conv1d(x1, y2) + F.conv1d(x2, y1)) * 1j
+
+        self.assertEqual(actual, expected)
+
+    @onlyCPU
+    def test_conv1d_complex_input_with_bias(self, device):
+        C_in, C_out = 1, 1
+        x = torch.rand(C_in, 1, 12, dtype=torch.complex64, device=device)
+        y = torch.rand(C_out, 1, 3, dtype=torch.complex64, device=device)
+        bias = torch.rand(C_out, dtype=torch.complex64, device=device)
+        actual = F.conv1d(x, y, bias=bias)
+
+        x1 = x.real
+        x2 = x.imag
+        y1 = y.real
+        y2 = y.imag
+        b1 = bias.real
+        b2 = bias.imag
+
+        expected = F.conv1d(x1, y1) - F.conv1d(x2, y2) + \
+            (F.conv1d(x1, y2, bias=b1) + F.conv1d(x2, y1, bias=b2)) * 1j
+
+        self.assertEqual(actual, expected)
 
     def test_conv1d_same_padding(self, device):
         # Test padding='same' outputs the correct shape
