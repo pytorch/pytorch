@@ -150,7 +150,7 @@ class ChunkShardingSpec(ShardingSpec):
         tensor_num_dim = len(tensor_sizes)
 
         self._verify_dim(self.dim)
-        if self.dim >= tensor_num_dim or self.dim < -tensor_num_dim:  # type: ignore
+        if self.dim >= tensor_num_dim or self.dim < -tensor_num_dim:  # type: ignore[operator]
             raise ValueError(f"Invalid sharding dim: {self.dim}")
 
         shards_metadata = []
