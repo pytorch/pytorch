@@ -26,7 +26,6 @@
 #include <numeric>
 #include <string>
 #include <tuple>
-#include <iostream>
 
 namespace at {
 namespace meta {
@@ -2483,15 +2482,11 @@ static Tensor& linalg_norm_out_impl(Tensor& result, const Tensor& self, const op
     // 'ord' is int or None
     std::vector<int64_t> dim_ = opt_dim.has_value() ? opt_dim.value().vec() : make_dim_list(ndim);
     if (!opt_num_ord.has_value() || dim_.size() == 1) {
-      std::cout << "CALL THIS VEC NORM.\n";
-      std::cout << "result dtype: " << result.scalar_type()
-                << " self dtype: " << self.scalar_type()
-                << " self_ dtype: " << self_.scalar_type() << std::endl;
-      // result = result.to(self_.scalar_type());
-      at::linalg_vector_norm_out(result, self_, opt_num_ord.value_or(2), opt_dim, keepdim, opt_dtype);
-      std::cout << "POST CALLING type: " << result.scalar_type() << std::endl;
-      // at::native::resize_output(result, result_.sizes());
-      // result.copy_(result_);
+      Tensor result_ = at::linalg_vector_norm(self_, opt_num_ord.value_or(2), opt_dim, keepdim, opt_dtype);
+      // TODO: Resize and copy should be avoided with
+      //       https://github.com/pytorch/pytorch/issues/52712
+      at::native::resize_output(result, result_.sizes());
+      result.copy_(result_);
     } else if (dim_.size() == 2) {
       _linalg_norm_matrix_out(result, self, opt_num_ord.value(), dim_, keepdim, opt_dtype);
     } else {
@@ -2570,7 +2565,6 @@ static Tensor& linalg_vector_norm_impl(const Tensor& self, const Scalar& scalar_
   TORCH_CHECK(!result.defined() || out_dtype == result.scalar_type(),
     "linalg.vector_norm expected out tensor dtype ", out_dtype,
     " but got: ", result.scalar_type());
-  std::cout << "---- ERROR PASSED ----\n";
   // omit in_dtype in the following call, to avoid make_reduction explicitly casting input to out_dtype
   auto iter = isComplexType(self.scalar_type()) ?
       make_reduction("vector_norm", result, self_, dim, keepdim, in_dtype, out_dtype) :
@@ -2583,7 +2577,6 @@ static Tensor& linalg_vector_norm_impl(const Tensor& self, const Scalar& scalar_
 Tensor linalg_vector_norm(const Tensor& self, const Scalar& ord, optional<IntArrayRef> opt_dim, bool keepdim, optional<ScalarType> opt_dtype) {
   ScalarType out_dtype = opt_dtype.value_or(toValueType(self.scalar_type()));
   Tensor result = create_reduction_result(self, opt_dim.value_or(IntArrayRef{}), keepdim, out_dtype);
-  std::cout << "CALL FROM VECTOR NORM\n";
   return at::native::linalg_vector_norm_impl(self, ord, opt_dim, keepdim, opt_dtype, result);
 }
 
@@ -2631,7 +2624,6 @@ Tensor& linalg_matrix_norm_out(
     optional<ScalarType> dtype,
     Tensor& result) {
   check_linalg_matrix_norm_args(self, dim, dtype);
-  std::cout << "1 CALLING LINALG NORM OUT\n";
   return at::native::linalg_norm_out(self, ord, dim, keepdim, dtype, result);
 }
 
@@ -2653,7 +2645,6 @@ Tensor& linalg_matrix_norm_out(
     optional<ScalarType> dtype,
     Tensor& result) {
   check_linalg_matrix_norm_args(self, dim, dtype);
-  std::cout << "2 CALLING LINALG NORM OUT\n";
   return at::native::linalg_norm_out(self, ord, dim, keepdim, dtype, result);
 }
 
@@ -2691,15 +2682,13 @@ Tensor linalg_norm(const Tensor& self, c10::string_view ord, optional<IntArrayRe
   Tensor result = at::empty({0}, options);
   Tensor self_ = opt_dtype.has_value() ? self.to(opt_dtype.value()) : self;
 
-  if (ord == "nuc") {
-    // These _out functions need to be called since some of the tests expect the result to be of a particular dtype,
-    // which the non-out functions don't support.
-    if (opt_dim.has_value()) {
-      at::nuclear_norm_out(result, self_, opt_dim.value(), keepdim);
-    }
-    else {
-      at::nuclear_norm_out(result, self_, keepdim);
-    }
+  // These _out functions need to be called since some of the tests expect the result to be of a particular dtype,
+  // which the non-out functions don't support.
+  if (opt_dim.has_value()) {
+    at::nuclear_norm_out(result, self_, opt_dim.value(), keepdim);
+  }
+  else {
+    at::nuclear_norm_out(result, self_, keepdim);
   }
 
   return result;
@@ -2707,13 +2696,11 @@ Tensor linalg_norm(const Tensor& self, c10::string_view ord, optional<IntArrayRe
 
 // Numerical or None norms
 Tensor& linalg_norm_out(const Tensor& self, const optional<Scalar>& opt_ord, optional<IntArrayRef> opt_dim, bool keepdim, optional<ScalarType> opt_dtype, Tensor& result) {
-  std::cout << "CALLING LINALG NORM OUT NONE NUMERICAL IMPL\n";
   return linalg_norm_out_impl(result, self, opt_ord, c10::nullopt, opt_dim, keepdim, opt_dtype);
 }
 
 // Frobenius and nuclear norms
 Tensor& linalg_norm_out(const Tensor& self, c10::string_view ord, optional<IntArrayRef> opt_dim, bool keepdim, optional<ScalarType> opt_dtype, Tensor& result) {
-  std::cout << "CALLING LINALG NORM OUT IMPL\n";
   return linalg_norm_out_impl(result, self, c10::nullopt, ord, opt_dim, keepdim, opt_dtype);
 }
 
