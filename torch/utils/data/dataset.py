@@ -130,6 +130,22 @@ class MapDataPipe(Dataset[T_co], metaclass=_DataPipeMeta):
         function = functools.partial(class_function, cls_to_register)
         cls.functions[function_name] = function
 
+    def __getstate__(self):
+        state_dict = {}
+        for k, v in self.__dict__.items():
+            if callable(v):
+                state_dict[k] = serialize_fn(v)
+            else:
+                state_dict[k] = v
+        return state_dict
+
+    def __setstate__(self, state_dict):
+        for k, v in state_dict.items():
+            if isinstance(v, tuple) and len(v) == 2 and isinstance(v[1], SerializationType):
+                self.__dict__[k] = deserialize_fn(v)
+            else:
+                self.__dict__[k] = v
+
 
 class IterableDataset(Dataset[T_co]):
     r"""An iterable Dataset.

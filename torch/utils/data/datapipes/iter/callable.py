@@ -105,11 +105,6 @@ class MapperIterDataPipe(IterDataPipe[T_co]):
             "{} instance doesn't have valid length".format(type(self).__name__)
         )
 
-    def __getstate__(self):
-        if IterDataPipe.getstate_hook is not None:
-            return IterDataPipe.getstate_hook(self)
-        return super().__getstate__()
-
 
 @functional_datapipe("collate")
 class CollatorIterDataPipe(MapperIterDataPipe):

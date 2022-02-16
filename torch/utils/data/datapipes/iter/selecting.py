@@ -69,8 +69,3 @@ class FilterIterDataPipe(IterDataPipe[T_co]):
         r = data is not None and \
             not (isinstance(data, list) and len(data) == 0 and self.drop_empty_batches)
         return r
-
-    def __getstate__(self):
-        if IterDataPipe.getstate_hook is not None:
-            return IterDataPipe.getstate_hook(self)
-        return super().__getstate__()
