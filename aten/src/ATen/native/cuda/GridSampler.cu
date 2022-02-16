@@ -1,10 +1,13 @@
-#include <ATen/ATen.h>
+#define TORCH_ASSERT_NO_OPERATORS
+#include <ATen/native/cuda/GridSampler.h>
 #include <ATen/native/cuda/GridSampler.cuh>
 #include <ATen/native/cuda/UpSample.cuh>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/detail/TensorInfo.cuh>
 #include <ATen/cuda/detail/IndexUtils.cuh>
 #include <ATen/cuda/detail/KernelUtils.h>
+#include <ATen/core/TensorBase.h>
+#include <ATen/Dispatch.h>
 #include <c10/macros/Macros.h>
 
 namespace at { namespace native {
@@ -737,14 +740,12 @@ namespace {
 }  // namespace
 
 // No shape checking needed here. See # NOTE [ grid_sampler Native Functions ].
-Tensor grid_sampler_2d_cuda(const Tensor& input, const Tensor& grid,
-                            int64_t interpolation_mode, int64_t padding_mode,
-                            bool align_corners) {
+void launch_grid_sampler_2d_forward_kernel(
+    const TensorBase &output, const TensorBase &input, const TensorBase &grid,
+    int64_t interpolation_mode, int64_t padding_mode, bool align_corners) {
   auto N = input.size(0);
-  auto C = input.size(1);
   auto H = grid.size(1);
   auto W = grid.size(2);
-  auto output = at::empty({N, C, H, W}, input.options());
   int64_t count = N * H * W;
   if (count > 0) {
     AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.scalar_type(), "grid_sampler_2d_cuda", [&] {
@@ -774,18 +775,16 @@ Tensor grid_sampler_2d_cuda(const Tensor& input, const Tensor& grid,
       }
     });
   }
-  return output;
 }
 
 // No shape checking needed here. See # NOTE [ grid_sampler Native Functions ].
-Tensor grid_sampler_3d_cuda(const Tensor& input, const Tensor& grid,
-                            int64_t interpolation_mode, int64_t padding_mode,
-                            bool align_corners) {
+void launch_grid_sampler_3d_forward_kernel(
+    const TensorBase &output, const TensorBase &input, const TensorBase &grid,
+    int64_t interpolation_mode, int64_t padding_mode, bool align_corners) {
   auto N = input.size(0);
   auto D = grid.size(1);
   auto H = grid.size(2);
   auto W = grid.size(3);
-  auto output = at::empty({N, input.size(1), D, H, W}, input.options());
   int64_t count = N * D * H * W;
   if (count > 0) {
     AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.scalar_type(), "grid_sampler_3d_cuda", [&] {
@@ -815,15 +814,14 @@ Tensor grid_sampler_3d_cuda(const Tensor& input, const Tensor& grid,
       }
     });
   }
-  return output;
 }
 
 // No shape checking needed here. See # NOTE [ grid_sampler Native Functions ].
-std::tuple<Tensor, Tensor>
-grid_sampler_2d_backward_cuda(const Tensor& grad_output, const Tensor& input,
-                              const Tensor& grid, int64_t interpolation_mode,
-                              int64_t padding_mode, bool align_corners,
-                              std::array<bool,2> output_mask) {
+void launch_grid_sampler_2d_backward_kernel(
+    const TensorBase &grad_input, const TensorBase &grad_grid,
+    const TensorBase &grad_output, const TensorBase &input,
+    const TensorBase &grid, int64_t interpolation_mode, int64_t padding_mode,
+    bool align_corners, std::array<bool,2> output_mask) {
   // See Note [Writing Nondeterministic Operations]
   // Nondeterministic because of atomicAdd usage
   globalContext().alertNotDeterministic("grid_sampler_2d_backward_cuda");
@@ -881,15 +879,14 @@ grid_sampler_2d_backward_cuda(const Tensor& grad_output, const Tensor& input,
       }
     });
   }
-  return std::make_tuple(grad_input, grad_grid);
 }
 
 // No shape checking needed here. See # NOTE [ grid_sampler Native Functions ].
-std::tuple<Tensor, Tensor>
-grid_sampler_3d_backward_cuda(const Tensor& grad_output, const Tensor& input,
-                              const Tensor& grid, int64_t interpolation_mode, int64_t padding_mode,
-                              bool align_corners,
-                              std::array<bool,2> output_mask) {
+void launch_grid_sampler_3d_backward_kernel(
+    const TensorBase &grad_input, const TensorBase &grad_grid,
+    const TensorBase& grad_output, const TensorBase& input,
+    const TensorBase& grid, int64_t interpolation_mode, int64_t padding_mode,
+    bool align_corners, std::array<bool,2> output_mask) {
   // See Note [Writing Nondeterministic Operations]
   // Nondeterministic because of atomicAdd usage
   globalContext().alertNotDeterministic("grid_sampler_3d_backward_cuda");
@@ -897,17 +894,8 @@ grid_sampler_3d_backward_cuda(const Tensor& grad_output, const Tensor& input,
   auto D = grid.size(1);
   auto H = grid.size(2);
   auto W = grid.size(3);
-
-  auto input_requires_grad = output_mask[0];
-  Tensor grad_input = ([&]() {
-    if (input_requires_grad) {
-      return at::zeros_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
-    } else {
-      return Tensor();
-    }
-  })();
-  auto grad_grid = at::empty_like(grid, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   int64_t count = N * D * H * W;
+  auto input_requires_grad = output_mask[0];
   if (count > 0) {
     AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.scalar_type(), "grid_sampler_3d_backward_cuda", [&] {
       if (canUse32BitIndexMath(input) && canUse32BitIndexMath(grid) &&
@@ -944,7 +932,6 @@ grid_sampler_3d_backward_cuda(const Tensor& grad_output, const Tensor& input,
       }
     });
   }
-  return std::make_tuple(grad_input, grad_grid);
 }
 
 }}  // namespace at::native
