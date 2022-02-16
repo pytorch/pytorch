@@ -36,4 +36,3 @@ jobs:
           days-before-stale: 150
           days-before-close: 180
           ascending: true
-
