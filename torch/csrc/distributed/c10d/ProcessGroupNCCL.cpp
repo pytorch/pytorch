@@ -2213,17 +2213,151 @@ void ProcessGroupNCCL::groupEnd() {
 }
 
 c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::gather(
-    std::vector<std::vector<at::Tensor>>& /* unused */,
-    std::vector<at::Tensor>& /* unused */,
-    const GatherOptions& /* unused */) {
-  TORCH_CHECK(false, "ProcessGroupNCCL does not support gather");
+    std::vector<std::vector<at::Tensor>>& outputTensors,
+    std::vector<at::Tensor>& inputTensors,
+    const GatherOptions& opts) {
+  static auto invalidArgument = [](const std::string& msg) {
+    TORCH_CHECK(false, "ProcessGroupNCCL::gather: " + msg);
+  };
+
+  assertRootRank(invalidArgument, opts.rootRank, size_);
+  check_gpu_tensors_different_devices(inputTensors);
+  assertSingleElementInput(invalidArgument, inputTensors);
+
+  // @lint-ignore CLANGTIDY
+  auto tensor = inputTensors.back();
+  RECORD_PARAM_COMMS(
+      rank_,                    // rank
+      "gather",                 // colName
+      tensor.numel(),           // inSize
+      tensor.numel() *
+        this->getSize(),        // outSize
+      tensor.scalar_type(),     // dType
+      std::vector<int64_t>(),   // inSplitSizes
+      std::vector<int64_t>());  // outSplitSize
+
+  std::vector<at::Tensor> outputs;
+
+  if (getRank() == opts.rootRank) {
+    if (outputTensors.size() != 1) {
+      std::stringstream ss;
+      ss << "requires a single-element output list containing a list with "
+         << getSize() << " tensors.";
+      invalidArgument(ss.str());
+    } else if (outputTensors[0].size() != static_cast<size_t>(getSize())) {
+      std::stringstream ss;
+      ss << "Incorrect output list size " << outputTensors[0].size()
+         << ". Output list size should be " << getSize()
+         << ", same as size of the process group.";
+      invalidArgument(ss.str());
+    }
+
+    const auto& options = inputTensors[0].options();
+    const auto& sizes = inputTensors[0].sizes();
+    assertTypeAndSizesMatch(invalidArgument, outputTensors[0], options, sizes);
+    outputs = outputTensors[0];
+  } else {
+    // if not in the root rank, initialize outputs as empty list
+    if (outputTensors.size() != 0) {
+      invalidArgument("requires empty output on non-root");
+    }
+    outputs = {};
+  }
+
+  return collective(
+      inputTensors,
+      outputs,
+      [&](at::Tensor& /* unused */,
+          at::Tensor& /* unused */,
+          ncclComm_t comm,
+          at::cuda::CUDAStream& stream) {
+        const auto root = opts.rootRank;
+        if (getRank() == root) {
+          for(auto output: outputs) {
+            c10::cuda::CUDACachingAllocator::recordStream(
+                output.storage().data_ptr(), stream);
+          }
+        }
+        torch::cuda::nccl::gather(inputTensors[0], outputs, comm, stream, root);
+        return ncclSuccess;
+      },
+      OpType::GATHER,
+      "nccl:gather");
 }
 
 c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::scatter(
-    std::vector<at::Tensor>& /* unused */,
-    std::vector<std::vector<at::Tensor>>& /* unused */,
-    const ScatterOptions& /* unused */) {
-  TORCH_CHECK(false, "ProcessGroupNCCL does not support scatter");
+    std::vector<at::Tensor>& outputTensors,
+    std::vector<std::vector<at::Tensor>>& inputTensors,
+    const ScatterOptions& opts) {
+
+  static auto invalidArgument = [](const std::string& msg) {
+    TORCH_CHECK(false, "ProcessGroupNCCL::scatter: " + msg);
+  };
+
+  assertRootRank(invalidArgument, opts.rootRank, size_);
+  check_gpu_tensors_different_devices(outputTensors);
+  assertSingleElementInput(invalidArgument, outputTensors);
+
+  // @lint-ignore CLANGTIDY
+  auto tensor = outputTensors.back();
+  RECORD_PARAM_COMMS(
+      rank_,                    // rank
+      "scatter",                // colName
+      tensor.numel(),           // inSize
+      tensor.numel() *
+        this->getSize(),        // outSize
+      tensor.scalar_type(),     // dType
+      std::vector<int64_t>(),   // inSplitSizes
+      std::vector<int64_t>());  // outSplitSize
+
+  std::vector<at::Tensor> inputs;
+
+  if (getRank() == opts.rootRank) {
+    if (inputTensors.size() != 1) {
+      std::stringstream ss;
+      ss << "requires a single-element input list containing a list with "
+         << getSize() << " tensors.";
+      invalidArgument(ss.str());
+    } else if (inputTensors[0].size() != static_cast<size_t>(getSize())) {
+      std::stringstream ss;
+      ss << "Incorrect input list size " << inputTensors[0].size()
+         << ". Input list size should be " << getSize()
+         << ", same as size of the process group.";
+      invalidArgument(ss.str());
+    }
+
+    const auto& options = outputTensors[0].options();
+    const auto& sizes = outputTensors[0].sizes();
+    assertTypeAndSizesMatch(invalidArgument, inputTensors[0], options, sizes);
+    inputs = inputTensors[0];
+  } else {
+    // if not in the root rank, initialize inputTensors as empty place holder
+    // with an empty list
+    if (inputTensors.size() != 0) {
+      invalidArgument("requires empty input on non-root");
+    }
+    inputs = {};
+  }
+
+  return collective(
+      outputTensors,
+      inputs,
+      [&](at::Tensor& /* unused */,
+          at::Tensor& /* unused */,
+          ncclComm_t comm,
+          at::cuda::CUDAStream& stream) {
+        const auto root = opts.rootRank;
+        if (getRank() == root) {
+          for(auto input: inputs) {
+            c10::cuda::CUDACachingAllocator::recordStream(
+                input.storage().data_ptr(), stream);
+          }
+        }
+        torch::cuda::nccl::scatter(inputs, outputTensors[0], comm, stream, root);
+        return ncclSuccess;
+      },
+      OpType::SCATTER,
+      "nccl:scatter");
 }
 
 c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::recvAnysource(

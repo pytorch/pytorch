@@ -4945,11 +4945,10 @@ Alias for :func:`adjoint`
 
 add_docstr_all('real',
                r"""
-Returns a new tensor containing real values of the :attr:`self` tensor.
+Returns a new tensor containing real values of the :attr:`self` tensor for a complex-valued input tensor.
 The returned tensor and :attr:`self` share the same underlying storage.
 
-.. warning::
-    :func:`real` is only supported for tensors with complex dtypes.
+Returns :attr:`self` if :attr:`self` is a real-valued tensor tensor.
 
 Example::
     >>> x=torch.randn(4, dtype=torch.cfloat)

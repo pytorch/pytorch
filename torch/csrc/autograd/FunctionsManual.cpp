@@ -2386,6 +2386,10 @@ std::tuple<Tensor, Tensor, Tensor> linalg_svd_jvp(const Tensor& dA,
   //      dX = dP - dS
   //      E_{jk} = S_k^2 - S_j^2 if j != k
   //               1             otherwise
+
+  // Checks compute_uv=true
+  TORCH_INTERNAL_ASSERT(U_.dim() >= 2 && Vh_.dim() >= 2);
+
   const auto is_complex = dA.is_complex();
   const auto m = dA.size(-2);
   const auto n = dA.size(-1);
@@ -2396,53 +2400,47 @@ std::tuple<Tensor, Tensor, Tensor> linalg_svd_jvp(const Tensor& dA,
   const auto V = Vh.mH();
 
   // dP = U^H dA V
-  const auto dP = m >= n ? at::matmul(U.mH(), at::matmul(dA, V))
-                         : at::matmul(at::matmul(U.mH(), dA), V);
+  auto dP = m >= n ? at::matmul(U.mH(), at::matmul(dA, V))
+                   : at::matmul(at::matmul(U.mH(), dA), V);
 
-  // We don't want dS to be a view into a larger tensor so we clone it
-  auto dS = is_complex ? at::real(dP.diagonal(0, -2, -1)).clone()
-                       : dP.diagonal(0, -2, -1).clone();
+  auto dS = is_complex ? at::real(dP.diagonal(0, -2, -1))
+                       : dP.diagonal(0, -2, -1);
 
   // dX = dP - dS
-  // Here we update dP in-place rather than
-  if (is_complex) {
-    at::real(dP.diagonal(0, -2, -1)).zero_();
-  } else {
-    dP.diagonal(0, -2, -1).zero_();
-  }
+  dP = dP - dS.diag_embed();
 
   auto E = [&S]{
     const auto S2 = S * S;
     auto ret = S2.unsqueeze(-2) - S2.unsqueeze(-1);
-    // Any number a != 0 would, as we are going to compute 0 / a
+    // Any number a != 0 would, as we are just going to use it to compute 0 / a later on
     ret.diagonal(0, -2, -1).fill_(1);
     return ret;
   }();
 
   const auto sym = [](const Tensor& X) { return X + X.mH(); };
 
-  // Im(diag(dP)) / (2S)
-  auto ImdiagdP2S = is_complex ? at::imag(dP.diagonal(0, -2, -1)).div(2. * S)
-                               : Tensor{};
+  // diag(dP) / (2S)
+  auto diagdP2S = is_complex ? dP.diagonal(0, -2, -1).div(2. * S)
+                             : Tensor{};
 
   // dU = U (sym(dP S) / E) + i Im(diag(dP)) / (2S)
   auto dU = [&] {
     auto dUaux = sym(dP * S.unsqueeze(-2)) / E;
     if (is_complex) {
-      at::imag(dUaux.diagonal(0, -2, -1)).copy_(ImdiagdP2S);
+      dUaux = dUaux + diagdP2S.diag_embed();
     }
     return at::matmul(U, dUaux);
   }();
   if (m > n) {
     // dU += (I_m - UU^H) dA V S^{-1}
     const auto dAVSinv = at::matmul(dA, V / S.unsqueeze(-2)) ;
-    dU += dAVSinv - at::matmul(U, at::matmul(U.mH(), dAVSinv));
+    dU = dU + dAVSinv - at::matmul(U, at::matmul(U.mH(), dAVSinv));
 
     // To "fix" the full_matrices case (the full_matrices case should not be differentiable...)
     if (full_matrices) {
       auto shape = dU.sizes().vec();
       shape.end()[-1] = m - n;
-      dU = at::cat({dU, at::zeros(shape, dU.options())}, /*dim=*/-1);
+      dU = at::cat({dU, dU.new_zeros(shape)}, /*dim=*/-1);
     }
   }
 
@@ -2451,20 +2449,20 @@ std::tuple<Tensor, Tensor, Tensor> linalg_svd_jvp(const Tensor& dA,
   auto dVh = [&] {
     auto dVhaux = sym(dP * (-S).unsqueeze(-1)) / E;
     if (is_complex) {
-      at::imag(dVhaux.diagonal(0, -2, -1)).copy_(ImdiagdP2S);
+      dVhaux = dVhaux + diagdP2S.diag_embed();
     }
     return at::matmul(dVhaux, Vh);
   }();
   if (m < n) {
     // dVh += S^{-1} U^H dA (I_n - VV^H)
     const auto UHdASinv = at::matmul(U.mH() / S.unsqueeze(-1), dA) ;
-    dVh += UHdASinv - at::matmul(at::matmul(UHdASinv, V), Vh);
+    dVh = dVh + UHdASinv - at::matmul(at::matmul(UHdASinv, V), Vh);
 
     // To "fix" the full_matrices case (the full_matrices case should not be differentiable...)
     if (full_matrices) {
       auto shape = dVh.sizes().vec();
       shape.end()[-2] = n - m;
-      dVh = at::cat({dVh, at::zeros(shape, dVh.options())}, /*dim=*/-2);
+      dVh = at::cat({dVh, dVh.new_zeros(shape)}, /*dim=*/-2);
     }
   }
 
@@ -2589,6 +2587,9 @@ Tensor svd_backward(const Tensor& gU,
   // where we have used that Im(diag(U^H gU)) = - Im(diag(V^h gV)) to group the diagonal imaginary terms into one
   // that just depends on U^H gU.
 
+  // Checks compute_uv=true
+  TORCH_INTERNAL_ASSERT(U.dim() >= 2 && Vh.dim() >= 2);
+
   // Trivial case
   if (!gS.defined() && !gU.defined() && !gVh.defined()) {
     return {};
@@ -2605,8 +2606,9 @@ Tensor svd_backward(const Tensor& gU,
   // At this point, at least one of gU, gVh is defined
 
   const bool is_complex = U.is_complex();
-  const auto UhgU = gU.defined() ? at::matmul(U.mH(), gU) : Tensor{};
-  const auto VhgV = gVh.defined() ? at::matmul(Vh, gVh.mH()) : Tensor{};
+  const auto skew = [](const Tensor& A) { return A - A.mH(); };
+  const auto UhgU = gU.defined() ? skew(at::matmul(U.mH(), gU)) : Tensor{};
+  const auto VhgV = gVh.defined() ? skew(at::matmul(Vh, gVh.mH())) : Tensor{};
 
   // Check for the invariance of the loss function, i.e.
   // Im(diag(U^H gU)) + Im(diag(V^H gV)) = 0
@@ -2622,12 +2624,10 @@ Tensor svd_backward(const Tensor& gU,
                 "it ill-defined.");
   }
 
-  // gA = (skew(U^H gU) / E) S +  S ((skew(V^H gV) / E) + I o (gS + i Im(diag(U^H gU)) / S)
+  // gA = ((U^H gU) / E) S +  S (((V^H gV) / E) + I o (gS + diag(U^H gU) / (2 * S))
   Tensor gA = [&] {
     // ret holds everything but the diagonal of gA
     auto ret = [&] {
-      const auto skew = [](const Tensor& A) { return A - A.mH(); };
-
       const auto E = [&S]{
         const auto S2 = S * S;
         auto ret = S2.unsqueeze(-2) - S2.unsqueeze(-1);
@@ -2638,31 +2638,20 @@ Tensor svd_backward(const Tensor& gU,
 
       if (gU.defined()) {
         if (gVh.defined()) {
-          return (skew(UhgU) * S.unsqueeze(-2) + S.unsqueeze(-1) * skew(VhgV)) / E;
+          return (UhgU * S.unsqueeze(-2) + S.unsqueeze(-1) * VhgV) / E;
         } else {
-          return (skew(UhgU) / E) * S.unsqueeze(-2);
+          return (UhgU / E) * S.unsqueeze(-2);
         }
       } else { // gVh.defined();
-        return S.unsqueeze(-1) * (skew(VhgV) / E);
+        return S.unsqueeze(-1) * (VhgV / E);
       }
     }();
     // Fill the diagonal
-    const auto diag = ret.diagonal(0, -2, -1);
+    if (gS.defined()) {
+      ret = ret + gS.diag_embed();
+    }
     if (is_complex && gU.defined() && gVh.defined()) {
-      if (gS.defined()) {
-        at::real(diag).copy_(gS);
-      } else {
-        // Not strictly necessary, but we do it for good measure
-        at::real(diag).zero_();
-      }
-      at::imag(diag).copy_(at::imag(UhgU.diagonal(0, -2, -1)) / S);
-    } else {
-      if (gS.defined()) {
-        diag.copy_(gS);
-      } else {
-        // Not strictly necessary, but we do it for good measure
-        diag.zero_();
-      }
+      ret = ret + (UhgU.diagonal(0, -2, -1) / (2. * S)).diag_embed();
     }
     return ret;
   }();
@@ -4112,7 +4101,10 @@ Tensor embedding_dense_double_backward(const Tensor & grad, const Tensor & indic
 }
 
 Tensor index_backward(Tensor zeros_like_self, const torch::List<c10::optional<Tensor>>& indices, const Tensor& grad) {
-  return at::_index_put_impl_(zeros_like_self, indices, grad, true, true);
+  return (areAnyTensorSubclassLike({zeros_like_self, grad}) ||
+          areAnyOptionalTensorSubclassLike(indices))
+      ? zeros_like_self.index_put(indices, grad, true)
+      : at::_index_put_impl_(zeros_like_self, indices, grad, true, true);
 }
 
 Tensor _cudnn_ctc_loss_backward(const Tensor& grad_out, const Tensor& loss, const Tensor& raw_grad, bool zero_infinity) {
@@ -4836,21 +4828,6 @@ Tensor batch_norm_jvp(
       bias_t.defined() ? bias_t.view(view_size) : bias_t);
 }
 
-Tensor batch_norm_jvp_saved_var(
-    const Tensor& input_p, const Tensor& input_t,
-    const Tensor& weight_p, const Tensor& weight_t,
-    const Tensor& bias_p, const Tensor& bias_t,
-    const c10::optional<Tensor>& running_mean,
-    const c10::optional<Tensor>& running_var,
-    const Tensor& saved_mean, const Tensor& saved_var,
-    bool train,
-    double eps) {
-  auto saved_invstd = (1 / at::sqrt(saved_var + at::Scalar(eps)));
-  return batch_norm_jvp(
-      input_p, input_t, weight_p, weight_t, bias_p, bias_t, running_mean, running_var,
-      saved_mean, saved_invstd, train, eps);
-}
-
 Tensor layer_norm_jvp(
     const Tensor& input_p, const Tensor& input_t,
     const Tensor& weight_p, const Tensor& weight_t,
@@ -5041,110 +5018,79 @@ Tensor linalg_lu_backward(
   auto n = U.size(-1);
   auto k = std::min(m, n);
 
-  // Get principal part of L / U or their gradients
-  const auto get_L1 = [m, k](const Tensor& L) {
-    return m == k ? L : L.narrow(-2, 0, k);
-  };
-  const auto get_U1 = [n, k](const Tensor& U) {
-    return n == k ? U : U.narrow(-1, 0, k);
-  };
-
-  // We need to take care of the fact that L_grad or U_grad may not
-  // be defined, but otherwise we compute
-  // phi = (L1^H L1_grad) o 1_L + (U1_grad U1^H) o 1_U
-  // where L1_grad is strictly lower triangular and U1_grad is upper triangular
-  const auto phi = [&] {
-    // Compute L1^H @ L1_grad lazily
-    const auto get_phi_L = [&L, &L_grad, get_L1]{
-      return get_L1(L).mH().matmul(get_L1(L_grad).tril(-1)).tril(-1);
-    };
-    const auto get_phi_U = [&U, &U_grad, get_U1]{
-      return get_U1(U_grad).triu().matmul(get_U1(U).mH()).triu();
-    };
-
-    // It would be fantastic to have semantics for 'EmptyTensor's
-    if (U_grad.defined()) {
-      if (L_grad.defined()) {
-        return get_phi_L() + get_phi_U();
-      } else {
-        return get_phi_U();
-      }
-    } else {
-      return get_phi_L();
-    }
-  }();
-
   if (m == n) {
     // A_grad = P L^{-H} [L^H L_grad o 1_L + U_grad U^H o 1_U] U^{-H},
-    //        = P L^{-H} phi U^{-H}
-    auto psi = at::linalg_solve_triangular(U.mH(), std::move(phi),
-                                           /*upper=*/false,
-                                           /*left=*/false);
-    auto A_grad = at::linalg_solve_triangular(L.mH(), std::move(psi),
-                                             /*upper=*/true,
-                                             /*left=*/true,
-                                             /*unitriangular=*/true);
+    auto A_grad = L_grad.defined() ? L.mH().matmul(L_grad).tril(-1) : Tensor{};
+    if (U_grad.defined()) {
+      A_grad = A_grad.defined() ? A_grad + U_grad.matmul(U.mH()).triu()
+                                :          U_grad.matmul(U.mH()).triu();
+    }
+    A_grad = at::linalg_solve_triangular(U.mH(), A_grad,
+                                         /*upper=*/false,
+                                         /*left=*/false);
+    A_grad = at::linalg_solve_triangular(L.mH(), A_grad,
+                                         /*upper=*/true,
+                                         /*left=*/true,
+                                         /*unitriangular=*/true);
 
     return pivot ? P.matmul(std::move(A_grad)) : A_grad;
   } else if (m < n) {
     // Wide case
-    // A1_grad = P L^{-H} [L^H L_grad o 1_L + U1_grad U1^H o 1_U - U2_grad U2^H o 1_L] U1^{-H},
-    //         = P L^{-H} [phi - U2_grad U2^H o 1_L] U1^{-H}
-    // A2_grad = P L^{-H} U2_grad
+    // A1_grad = P L^{-H} [U1_grad + (L^H L_grad o 1_L - U_grad U^H o 1_U) U1^{-H}) U^{-H}]
+    // A2_grad = P L^{-H}  U2_grad
+    const auto get_U1 = [n, k] (const Tensor& U) { return n == k ? U : U.narrow(-1, 0, k); };
     const auto get_U2 = [n, k] (const Tensor& U) { return U.narrow(-1, k, n - k); };
 
-    // Denote psi1 = [inner bracket in A1_grad] U1^{-H} = [phi - U2_grad U2^H o 1_L] U1^{-H}
-    // and    psi2 = U2_grad
-    // so     A_grad = P L^{-H} psi
-
-    auto psi = at::linalg_solve_triangular(
-                 get_U1(U).mH(),
-                 U_grad.defined() ? std::move(phi) - get_U2(U_grad).matmul(get_U2(U).mH()).tril(-1)
-                                  : std::move(phi),
-                 /*upper=*/false,
-                 /*left=*/false);
+    auto A_grad = L_grad.defined() ? L.mH().matmul(L_grad) : Tensor{};
+    if (U_grad.defined()) {
+      A_grad = A_grad.defined() ? A_grad - U_grad.triu().matmul(U.mH())
+                                :        - U_grad.triu().matmul(U.mH());
+    }
+    A_grad = at::linalg_solve_triangular(get_U1(U).mH(), A_grad.tril(-1),
+                                         /*upper=*/false,
+                                         /*left=*/false);
 
     if (U_grad.defined()) {
-      psi = at::cat({psi, get_U2(U_grad)}, /*dim=*/-1);
+      A_grad = at::cat({A_grad + get_U1(U_grad).triu(), get_U2(U_grad)}, /*dim=*/-1);
     }
 
-    // L^{-H} psi
-    auto A_grad = at::linalg_solve_triangular(L.mH(), std::move(psi),
-                                             /*upper=*/true,
-                                             /*left=*/true,
-                                             /*unitriangular=*/true);
+    A_grad = at::linalg_solve_triangular(L.mH(), A_grad,
+                                         /*upper=*/true,
+                                         /*left=*/true,
+                                         /*unitriangular=*/true);
 
-    // We can multiply first by P before appending the zeros as shufling the rows of the zeros doesn't do anything
-    if (pivot) {
-      A_grad = P.matmul(A_grad);
-    }
     if (!U_grad.defined()) {
       A_grad = at::cat({A_grad, at::zeros_like(get_U2(U))}, /*dim=*/-1);
     }
-
+    if (pivot) {
+      A_grad = P.matmul(A_grad);
+    }
     return A_grad;
   } else {
-    // A1_grad = P L1^{-H} [L1^H L1_grad o 1_L + U_grad U^H o 1_U - L2^H L2_grad o 1_U] U^{-H},
-    // A2_grad = P L2_grad U^{-H}
+    // Tall case
+    // A1_grad = P [L1_grad + L^{-H} (U_grad U^H o 1_U - L^H L_grad o 1_L)]U^{-H}
+    // A2_grad = P  L2_grad U^{-H}
 
-    // We compute the quantities as before, but (roughly) interchanging the roles of U and L
+    const auto get_L1 = [m, k] (const Tensor& L) { return m == k ? L : L.narrow(-2, 0, k); };
     const auto get_L2 = [m, k] (const Tensor& L) { return L.narrow(-2, k, m - k); };
 
-    auto psi = at::linalg_solve_triangular(
-                   get_L1(L).mH(),
-                   L_grad.defined() ? std::move(phi) - get_L2(L).mH().matmul(get_L2(L_grad)).triu()
-                                    : std::move(phi),
-                   /*upper=*/true,
-                   /*left=*/true,
-                   /*unitriangular=*/true);
+    auto A_grad = U_grad.defined() ? U_grad.matmul(U.mH()) : Tensor{};
+    if (L_grad.defined()) {
+      A_grad = A_grad.defined() ? A_grad - L.mH().matmul(L_grad.tril(-1))
+                                :        - L.mH().matmul(L_grad.tril(-1));
+    }
+    A_grad = at::linalg_solve_triangular(get_L1(L).mH(), A_grad.triu(),
+                                         /*upper=*/true,
+                                         /*left=*/true,
+                                         /*unitriangular=*/true);
 
     if (L_grad.defined()) {
-      psi = at::cat({psi, get_L2(L_grad)}, /*dim=*/-2);
+      A_grad = at::cat({A_grad + get_L1(L_grad).tril(-1), get_L2(L_grad)}, /*dim=*/-2);
     }
 
-    auto A_grad = at::linalg_solve_triangular(U.mH(), std::move(psi),
-                                              /*upper=*/false,
-                                              /*left=*/false);
+    A_grad = at::linalg_solve_triangular(U.mH(), A_grad,
+                                         /*upper=*/false,
+                                         /*left=*/false);
 
     if (!L_grad.defined()) {
       A_grad = at::cat({A_grad, at::zeros_like(get_L2(L))}, /*dim=*/-2);

@@ -895,8 +895,8 @@ jobs:
           set -ex
           export COMMIT_DOCKER_IMAGE=${DOCKER_IMAGE}:build-${DOCKER_TAG}-${CIRCLE_SHA1}
           echo "DOCKER_IMAGE: "${COMMIT_DOCKER_IMAGE}
-          # turn v1.12.0rc3 into 1.12.0
-          tag=$(echo $CIRCLE_TAG | sed -e 's/v*\([0-9.]*\).*/\1/')
+          # turn v1.12.0rc3 into 1.12
+          tag=$(echo $CIRCLE_TAG | sed -e 's/v*\([0-9]*\.[0-9]*\).*/\1/')
           target=${tag:-master}
           echo "building for ${target}"
           time docker pull ${COMMIT_DOCKER_IMAGE} >/dev/null
@@ -941,9 +941,8 @@ jobs:
           set -ex
           export COMMIT_DOCKER_IMAGE=${DOCKER_IMAGE}:build-${DOCKER_TAG}-${CIRCLE_SHA1}
           echo "DOCKER_IMAGE: "${COMMIT_DOCKER_IMAGE}
-          # turn v1.12.0rc3 into 1.12.0
-          tag=$(echo $CIRCLE_TAG | sed -e 's/v*\([0-9.]*\).*/\1/')
-          tag=${CIRCLE_TAG:1:5}
+          # turn v1.12.0rc3 into 1.12
+          tag=$(echo $CIRCLE_TAG | sed -e 's/v*\([0-9]*\.[0-9]*\).*/\1/')
           target=${tag:-master}
           echo "building for ${target}"
           time docker pull ${COMMIT_DOCKER_IMAGE} >/dev/null

@@ -607,11 +607,18 @@ void initTensorExprBindings(PyObject* module) {
           },
           py::return_value_policy::reference)
       .def(
-          "unroll",
-          [](const LoopNest& self, ForPtr f) {
+          "fullUnroll",
+          [](ForPtr f) {
             StmtPtr unrolled = nullptr;
-            self.unroll(f, &unrolled);
+            LoopNest::fullUnroll(f, &unrolled);
             return unrolled;
+          },
+          py::return_value_policy::reference)
+      .def(
+          "unroll",
+          [](ForPtr f, int factor) {
+            LoopNest::unroll(f, factor);
+            return f;
           },
           py::return_value_policy::reference)
       .def(

@@ -636,8 +636,8 @@ Tensor computeCat(
         std::vector<ExprHandle> newAxes(axes.begin(), axes.end());
         ExprHandle load = promoteToDtype(
             tensorOrConstant(nonEmptyInputs[0], newAxes), highType);
-        auto offset = *intValue(nonEmptyInputs[0].node()->dim(dim));
-        newAxes[dim] = newAxes[dim] - ExprHandle(immLike(newAxes[dim], offset));
+        auto offset = ExprHandle(nonEmptyInputs[0].node()->dim(dim));
+        newAxes[dim] = newAxes[dim] - offset;
 
         for (size_t ii = 1; ii < nonEmptyInputs.size(); ++ii) {
           auto input = nonEmptyInputs[ii];
@@ -646,8 +646,8 @@ Tensor computeCat(
               load,
               promoteToDtype(tensorOrConstant(input, newAxes), highType));
 
-          offset += *intValue(input.node()->dim(dim));
-          newAxes[dim] = axes[dim] - ExprHandle(immLike(axes[dim], offset));
+          offset = offset + ExprHandle(input.node()->dim(dim));
+          newAxes[dim] = axes[dim] - offset;
         }
 
         return load;

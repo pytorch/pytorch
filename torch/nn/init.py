@@ -190,6 +190,8 @@ def constant_(tensor: Tensor, val: float) -> Tensor:
         >>> w = torch.empty(3, 5)
         >>> nn.init.constant_(w, 0.3)
     """
+    if has_torch_function_variadic(tensor):
+        return handle_torch_function(constant_, (tensor,), tensor=tensor, val=val)
     return _no_grad_fill_(tensor, val)
 
 

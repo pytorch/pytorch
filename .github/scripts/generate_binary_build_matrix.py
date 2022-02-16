@@ -121,7 +121,7 @@ def generate_libtorch_matrix(os: str, abi_version: str) -> List[Dict[str, str]]:
     elif os == "windows":
         # We don't build CUDA 10.2 for window see https://github.com/pytorch/pytorch/issues/65648
         arches += list_without(CUDA_ARCHES, ["10.2"])
-    for arch_version in ["cpu"] + CUDA_ARCHES:
+    for arch_version in arches:
         for libtorch_variant in libtorch_variants:
             # We don't currently build libtorch for rocm
             # one of the values in the following list must be exactly

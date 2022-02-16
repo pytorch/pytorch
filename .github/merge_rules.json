@@ -2,7 +2,7 @@
    {
     "name": "ONNX exporter",
     "patterns": ["torch/onnx/**", "torch/csrc/jit/passes/onnx/**", "torch/csrc/jit/passes/onnx.*", "test/onnx/**", "docs/source/onnx.rst"],
-    "approved_by": ["garymm"],
+    "approved_by": ["BowenBao", "garymm"],
     "mandatory_app_id": 12274
    },
    {

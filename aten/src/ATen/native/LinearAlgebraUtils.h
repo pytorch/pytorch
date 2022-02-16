@@ -3,8 +3,7 @@
 #include <c10/core/ScalarType.h>
 #include <c10/util/irange.h>
 #include <c10/util/Exception.h>
-#include <ATen/ATen.h>
-#include <ATen/core/DimVector.h>
+#include <ATen/core/Tensor.h>
 #include <ATen/ExpandUtils.h>
 #include <ATen/TensorUtils.h>
 #include <ATen/native/TensorIterator.h>
@@ -14,6 +13,15 @@
 #include <cstring>
 #include <cctype>
 
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#else
+#include <ATen/ops/arange.h>
+#include <ATen/ops/empty.h>
+#include <ATen/ops/empty_like.h>
+#include <ATen/ops/empty_strided.h>
+#include <ATen/ops/zeros.h>
+#endif
 
 namespace at { namespace native {
 
@@ -306,6 +314,16 @@ static inline void singleCheckErrors(int64_t info, const c10::string_view name, 
     batch_string = ": (Batch element " + std::to_string(batch_id) + ")";
   }
   if (info < 0) {
+    // Reference LAPACK 3.10+ changed `info` behavior for inputs with non-finite values
+    // Previously, it would return `info` > 0, but now it returns `info` = -4
+    // OpenBLAS 0.3.15+ uses the Reference LAPACK 3.10+.
+    // MKL 2022.0+ uses the Reference LAPACK 3.10+.
+    // Older version of MKL and OpenBLAS follow the old behavior (return `info` > 0).
+    // Here we check for the case where `info` is -4 and raise an error
+    if (name.find("svd") != name.npos) {
+      TORCH_CHECK_LINALG(info != -4, name, batch_string,
+          ": The algorithm failed to converge because the input matrix contained non-finite values.");
+    }
     TORCH_INTERNAL_ASSERT(false, name, batch_string,
         ": Argument ", -info, " has illegal value. Most certainly there is a bug in the implementation calling the backend library.");
   } else if (info > 0) {
@@ -609,20 +627,36 @@ static inline bool is_blas_compatible_column_major_order(const Tensor& input) {
   IntArrayRef input_strides = input.strides();
   IntArrayRef input_sizes = input.sizes();
   auto ndim = input.dim();
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(ndim == 2);
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(ndim == 2 || ndim == 3);
   auto leading_dimension = input_strides[ndim - 1];
   auto rows = input_sizes[ndim - 2];
-  return (input_strides[ndim - 2] == 1) && (leading_dimension >= std::max<int64_t>(1, rows));
+  bool batch_stride_compatible = true;
+  if (ndim == 3) {
+    auto cols = input_sizes[ndim - 1];
+    batch_stride_compatible =
+        input_strides[ndim - 3] >= leading_dimension * cols;
+  }
+  return (input_strides[ndim - 2] == 1) &&
+      (leading_dimension >= std::max<int64_t>(1, rows)) &&
+      batch_stride_compatible;
 }
 
 static inline bool is_blas_compatible_row_major_order(const Tensor& input) {
   IntArrayRef input_strides = input.strides();
   IntArrayRef input_sizes = input.sizes();
   auto ndim = input.dim();
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(ndim == 2);
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(ndim == 2 || ndim == 3);
   auto leading_dimension = input_strides[ndim - 2];
   auto cols = input_sizes[ndim - 1];
-  return (input_strides[ndim - 1] == 1) && (leading_dimension >= std::max<int64_t>(1, cols));
+  bool batch_stride_compatible = true;
+  if (ndim == 3) {
+    auto rows = input_sizes[ndim - 2];
+    batch_stride_compatible =
+        input_strides[ndim - 3] >= leading_dimension * rows;
+  }
+  return (input_strides[ndim - 1] == 1) &&
+      (leading_dimension >= std::max<int64_t>(1, cols)) &&
+      batch_stride_compatible;
 }
 
 }}  // namespace at::native
