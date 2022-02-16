@@ -14,6 +14,23 @@ class TensorBase;
 
 namespace at { namespace native {
 
+// These constants control the approximation behavior of gelu function.
+enum GeluType {
+  None,             // Baseline Gelu
+  Tanh,             // Tahn Gelu Approximation
+  END
+};
+
+static GeluType get_gelutype_enum(const c10::string_view approximate) {
+  if (approximate == "none") {
+    return GeluType::None;
+  } else if (approximate == "tanh") {
+    return GeluType::Tanh;
+  } else {
+    TORCH_CHECK(false, "approximate argument must be either none or tanh.");
+  }
+}
+
 using structured_activation_fn = void (*)(TensorIteratorBase&);
 using structured_activation_backward_fn = void (*)(TensorIteratorBase&);
 
@@ -35,8 +52,8 @@ using elu_backward_fn = void (*)(TensorIteratorBase&, const c10::Scalar&, const 
 using leaky_relu_fn = void (*)(TensorIteratorBase&, const c10::Scalar&);
 using leaky_relu_backward_fn = void (*)(TensorIteratorBase&, const c10::Scalar&);
 using log_sigmoid_cpu_fn = void (*)(TensorBase&, TensorBase&, const TensorBase&);
-using gelu_fn = void (*)(TensorIteratorBase&, bool);
-using gelu_backward_fn = void (*)(TensorIteratorBase&, bool);
+using gelu_fn = void (*)(TensorIteratorBase&, GeluType);
+using gelu_backward_fn = void (*)(TensorIteratorBase&, GeluType);
 
 DECLARE_DISPATCH(elu_fn, elu_stub);
 DECLARE_DISPATCH(elu_backward_fn, elu_backward_stub);

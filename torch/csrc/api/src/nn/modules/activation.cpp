@@ -284,16 +284,16 @@ void GLUImpl::pretty_print(std::ostream& stream) const {
 
 // ============================================================================
 
-GELUImpl::GELUImpl(const GELUOptions& options_) : options(options_) {}
+GELUImpl::GELUImpl(GELUOptions options_) : options(std::move(options_)) {}
 
 Tensor GELUImpl::forward(const Tensor& input) {
-  return F::gelu(input, options.approximate());
+  return F::detail::gelu(input, options.approximate());
 }
 
 void GELUImpl::reset() {}
 
 void GELUImpl::pretty_print(std::ostream& stream) const {
-  stream << "torch::nn::GELU(approximate=" << options.approximate() << ")";
+  stream << "torch::nn::GELU()";
 }
 
 // ============================================================================
