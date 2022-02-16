@@ -1610,11 +1610,10 @@ Examples::
 """)
 
 svd_rank_restricted = _add_docstr(_linalg.linalg_svd_rank_restricted, r"""
-linalg.svd_rank_restricted(A, *, atol=None, rtol=None, full_matrices=True, out=None) -> (Tensor, Tensor, Tensor, Tensor)
+linalg.svd_rank_restricted(A, *, atol=None, rtol=None, out=None) -> (Tensor, Tensor, Tensor, Tensor)
 
 Computes a singular value decomposition (SVD) and the numerial rank of a matrix.
-This function is similar to :func:`torch.linalg.svd_rank_revealing`, but the computed
-SVD decomposition will be of the numerical rank of :attr:`A` with the non-rank
+The SVD decomposition will be of the numerical rank of :attr:`A` with the non-rank
 contributing rows/columns/entries set to zero.
 
 The matrix rank is computed as the number of singular values
@@ -1649,10 +1648,6 @@ Keyword args:
                                     Default: `None`.
     rtol (float, Tensor, optional): the relative tolerance value. See above for the value it takes when `None`.
                                     Default: `None`.
-    full_matrices (bool, optional): controls whether to compute the full or reduced
-                                    SVD, and consequently,
-                                    the shape of the returned tensors
-                                    `U` and `Vh`. Default: `True`.
     out (tuple, optional): output tuple of four tensors. Ignored if `None`.
 
 Returns:
@@ -1672,43 +1667,25 @@ Returns:
 Examples::
 
     >>> A = torch.rand(3, 2, 2)
-    >>> A[:, 0, :] = 0
-    >>> torch.linalg.svd_rank_revealing(A)
-    torch.return_types.linalg_svd_rank_revealing(
-    U=tensor([[[ 0.0000e+00, -1.0000e+00],
+    >>> A[:, 0, :] = 0  # set rows to 0 to make matrices of rank 1
+    >>> torch.linalg.svd_rank_restricted(A)
+    torch.return_types.linalg_svd_rank_restricted(
+    U=tensor([[[ 0.0000e+00, -0.0000e+00],
                [-1.0000e+00,  0.0000e+00]],
-              [[ 0.0000e+00, -1.0000e+00],
-               [-1.0000e+00,  1.1921e-07]],
-              [[ 0.0000e+00, -1.0000e+00],
-               [-1.0000e+00,  0.0000e+00]]]),
-    S=tensor([[3.0911e-01, 0.0000e+00],
-              [7.3807e-01, 2.9284e-08],
-              [7.3014e-01, 0.0000e+00]]),
-    Vh=tensor([[[-0.7884, -0.6152],
-                [-0.6152,  0.7884]],
-               [[-0.9826, -0.1856],
-                [-0.1856,  0.9826]],
-               [[-0.9997, -0.0244],
-                [-0.0244,  0.9997]]]),
+             [[ 0.0000e+00, -0.0000e+00],
+              [-1.0000e+00,  0.0000e+00]],
+             [[ 1.1921e-07, -0.0000e+00],
+              [-1.0000e+00,  0.0000e+00]]]),
+    S=tensor([[1.0489, 0.0000],
+              [1.0952, 0.0000],
+              [0.8030, 0.0000]]),
+    Vh=tensor([[[-0.7720, -0.6356],
+                [-0.0000,  0.0000]],
+               [[-0.7093, -0.7049],
+                [-0.0000,  0.0000]],
+               [[-0.0983, -0.9952],
+                [-0.0000,  0.0000]]]),
     rank=tensor([1, 1, 1]))
-    >>> torch.linalg.svd_rank_revealing(A, atol=1.0, rtol=0.0)
-    torch.return_types.linalg_svd_rank_revealing(
-    U=tensor([[[ 0.0000e+00, -1.0000e+00],
-               [-1.0000e+00,  0.0000e+00]],
-              [[ 0.0000e+00, -1.0000e+00],
-               [-1.0000e+00,  1.1921e-07]],
-              [[ 0.0000e+00, -1.0000e+00],
-               [-1.0000e+00,  0.0000e+00]]]),
-    S=tensor([[3.0911e-01, 0.0000e+00],
-              [7.3807e-01, 2.9284e-08],
-              [7.3014e-01, 0.0000e+00]]),
-    Vh=tensor([[[-0.7884, -0.6152],
-                [-0.6152,  0.7884]],
-               [[-0.9826, -0.1856],
-                [-0.1856,  0.9826]],
-               [[-0.9997, -0.0244],
-                [-0.0244,  0.9997]]]),
-    rank=tensor([0, 0, 0]))
 """)
 
 cond = _add_docstr(_linalg.linalg_cond, r"""

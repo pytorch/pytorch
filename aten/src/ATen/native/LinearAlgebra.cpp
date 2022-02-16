@@ -674,7 +674,7 @@ _linalg_svd_rank_restricted_helper(
     bool full_matrices,
     bool compute_unique_rank) {
   auto U = at::empty({0}, input.options());
-  const auto real_dtype = at::toValueType(input.scalar_type());
+  const auto real_dtype = toRealValueType(input.scalar_type());
   auto S = at::empty({0}, input.options().dtype(real_dtype));
   auto Vh = at::empty({0}, input.options());
   auto rank = at::empty({0}, input.options().dtype(ScalarType::Long));
