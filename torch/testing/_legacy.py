@@ -1,3 +1,5 @@
+# Owner(s): ["<owner: label>"]
+
 """This module exist to be able to deprecate functions publicly without doing so internally. The deprecated
 public versions are defined in torch.testing._deprecated and exposed from torch.testing. The non-deprecated internal
 versions should be imported from torch.testing._internal
