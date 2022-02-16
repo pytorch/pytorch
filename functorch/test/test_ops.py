@@ -1106,9 +1106,10 @@ class TestDecompositionOpInfo(TestCase):
                     def upcast_tensor(x, dtype=torch.float32):
                         if isinstance(x, Tensor) and (x.dtype == torch.bfloat16 or x.dtype == torch.float16):
                             x = x.to(dtype=dtype)
+                        FLOAT16_DTYPE = 5
                         BFLOAT16_DTYPE = 15
                         FLOAT64_DTYPE = 7
-                        if isinstance(x, int) and func in dtype_arg_table and x == BFLOAT16_DTYPE:
+                        if isinstance(x, int) and func in dtype_arg_table and x in [FLOAT16_DTYPE, BFLOAT16_DTYPE]:
                             x = FLOAT64_DTYPE
                         return x
 
@@ -1143,7 +1144,7 @@ class TestDecompositionOpInfo(TestCase):
                 wrapped_out = tree_map(wrap_tensor, real_out)
                 return wrapped_out
 
-        if TEST_DTYPE not in op.supported_dtypes(TEST_DTYPE):
+        if TEST_DTYPE not in op.supported_dtypes(self.device_type):
             self.skipTest("Dtype not in op's supported dtypes")
             return
         if is_inplace(op, op.get_op()):
