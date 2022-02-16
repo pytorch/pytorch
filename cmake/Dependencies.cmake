@@ -1909,10 +1909,11 @@ if(USE_KINETO)
         ${CUDA_SOURCE_DIR}/lib64)
 
     find_path(CUPTI_INCLUDE_DIR cupti.h PATHS
+        ${CUDA_SOURCE_DIR}/extras/CUPTI/include
         ${CUDA_INCLUDE_DIRS}
         ${CUDA_SOURCE_DIR}
-        ${CUDA_SOURCE_DIR}/extras/CUPTI/include
-        ${CUDA_SOURCE_DIR}/include)
+        ${CUDA_SOURCE_DIR}/include
+        NO_DEFAULT_PATH)
 
     if(CUPTI_LIBRARY_PATH AND CUPTI_INCLUDE_DIR)
       message(STATUS "  CUPTI_INCLUDE_DIR = ${CUPTI_INCLUDE_DIR}")
