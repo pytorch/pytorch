@@ -66,6 +66,8 @@ class AliasDb {
   // hold in memory any element that exists in the other
   TORCH_API bool mayContainAlias(Value* a, Value* b) const;
 
+  TORCH_API bool mayContainAlias(Value* a, const at::ArrayRef<Value*> b) const;
+
   // Do any values in group `a` share a memory location or hold in memory
   // any element that exists in group `b`
   TORCH_API bool mayContainAlias(
@@ -150,11 +152,14 @@ class AliasDb {
    * this.
    */
   // Copy `existing`s aliasing info to `new_value`, and remove `existing`.
-  void replaceWithNewValue(Value* existing, Value* new_value);
+  TORCH_API void replaceWithNewValue(Value* existing, Value* new_value);
   // Copy `from`s aliasing info to `to`.
-  void copyValue(Value* from, Value* to);
+  TORCH_API void copyValue(Value* from, Value* to);
   // Create a new `value` that does not alias anything else.
-  void createValue(const Value* value);
+  TORCH_API void createValue(const Value* value);
+
+  // Enable more precise treatment of prim::TupleConstruct.
+  void enablePreciseTupleContainerAnalysis();
 
   friend struct MutationRemover;
 
@@ -211,6 +216,8 @@ class AliasDb {
   void analyzeFork(Node* node);
   void analyzeWait(Node* node);
   void analyzeRpcAsync(Node* node);
+  void analyzeBatchNorm(Node* node);
+  void analyzeInstanceNorm(Node* node);
   void analyzeGradOf(Node* node);
   void analyzeSetAttr(Node* node);
   void analyzeConservative(Node* node);
@@ -231,9 +238,9 @@ class AliasDb {
       bool add_wildcard_to_contained_elems = true);
   Element* getOrCreateElement(const Value* value);
 
-  c10::optional<AliasTypeSet> mapTypeToAliasTypeSetPtr(
-      const TypePtr& type) const;
+  const AliasTypeSet* mapTypeToAliasTypeSetPtr(const TypePtr& type) const;
   bool functionalNonEscapingListUse(const Use& use) const;
+  bool functionalNonEscapingTupleUse(const Use& use) const;
 
   std::shared_ptr<Graph> graph_;
 
@@ -249,7 +256,7 @@ class AliasDb {
   // Mapping of values to MemoryDAG elements
   ska::flat_hash_map<const Value*, Element*> elementMap_;
   // All wildcard Elements (one for each unique mutable type)
-  std::unordered_map<TypePtr, Element*, HashType, EqualType> wildcardIndex_;
+  ska::flat_hash_map<TypePtr, Element*, HashType, EqualType> wildcardIndex_;
   Element* getWildcard(const TypePtr& type) const;
   c10::optional<Element*> tryGetOrCreateWildcard(const TypePtr& type);
   void addContainedTypesToFreshElement(
@@ -265,7 +272,7 @@ class AliasDb {
   bool hasWriters(const at::ArrayRef<Value*>& values) const;
 
   // Cached mapping of type ptrs to their mutable types
-  mutable std::unordered_map<TypePtr, AliasTypeSet> mapped_mutable_types_;
+  mutable ska::flat_hash_map<TypePtr, AliasTypeSet> mapped_mutable_types_;
 
   /**
    * State for tracking write info.

@@ -1,0 +1,26 @@
+[
+   {
+    "name": "ONNX exporter",
+    "patterns": ["torch/onnx/**", "torch/csrc/jit/passes/onnx/**", "torch/csrc/jit/passes/onnx.*", "test/onnx/**", "docs/source/onnx.rst"],
+    "approved_by": ["BowenBao", "garymm"],
+    "mandatory_app_id": 12274
+   },
+   {
+    "name": "NVFuser",
+    "patterns": ["torch/csrc/jit/codegen/fuser/cuda/**", "torch/csrc/jit/codegen/cuda/**", "benchmarks/cpp/nvfuser/**"],
+    "approved_by": ["csarofeen", "ngimel"],
+    "mandatory_app_id": 12274
+   },
+   {
+    "name": "OSS CI",
+    "patterns": [".github/**", ".circleci/**", ".jenkins/**", "scripts/**"],
+    "approved_by": ["seemethere", "malfet", "suo", "janeyx99"],
+    "mandatory_app_id": 12274
+   },
+   {
+      "name": "Documentation",
+      "patterns": ["docs/**", "torch/*docs.py"],
+      "approved_by": ["mruberry", "ngimel", "albanD", "janeyx99"],
+      "mandatory_app_id": 12274
+   }
+]

@@ -31,7 +31,6 @@ python -m tools.codegen.gen \
 
 # torch codegen
 python -m tools.setup_helpers.generate_code \
-  --declarations-path "$OUT"/torch/share/ATen/Declarations.yaml \
   --install_dir "$OUT"
 
 # pyi codegen

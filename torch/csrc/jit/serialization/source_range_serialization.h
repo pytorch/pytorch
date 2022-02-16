@@ -38,10 +38,10 @@ class SourceRangeDeserializer {
   SourceRange deserialize(const c10::IValue& iv);
 
  private:
-  std::shared_ptr<Source> deserialize_source(const c10::IValue& iv);
+  std::shared_ptr<SourceView> deserialize_source(const c10::IValue& iv);
   std::unordered_map<
       c10::intrusive_ptr<c10::ivalue::Tuple>,
-      std::shared_ptr<Source>>
+      std::shared_ptr<SourceView>>
       cached_sources;
 };
 

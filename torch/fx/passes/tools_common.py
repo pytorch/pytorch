@@ -1,9 +1,10 @@
-from typing import List, Tuple, Union, Dict, Any, Set
+from typing import List, Tuple, Union, Dict, Any, Set, Mapping
 from dataclasses import dataclass
 
 import torch
 import torch.fx
 from torch.fx.node import _get_qualified_name
+from torch.fx._compatibility import compatibility
 
 
 Tensors = Union[Tuple[torch.Tensor], List[torch.Tensor]]
@@ -14,7 +15,19 @@ Names = List[str]
 CALLABLE_NODE_OPS = {"call_module", "call_function", "call_method"}
 
 
-def get_node_target(submodules: Dict[str, torch.nn.Module], node: torch.fx.Node) -> str:
+@compatibility(is_backward_compatible=False)
+def get_acc_ops_name(k):
+    if isinstance(k, str):
+        return k
+    elif k.__module__ and "acc_ops" in k.__module__:
+        return f"acc_ops.{k.__name__}"
+    else:
+        module = k.__module__
+        return f"{module if module else ''}.{k.__name__}"
+
+
+@compatibility(is_backward_compatible=False)
+def get_node_target(submodules: Mapping[str, torch.nn.Module], node: torch.fx.Node) -> str:
     """
     Given a `node` returns its target typename.
 
@@ -35,7 +48,9 @@ def get_node_target(submodules: Dict[str, torch.nn.Module], node: torch.fx.Node)
 
     if node.op == "call_module":
         assert isinstance(node.target, str)
-        return torch.typename(submodules[node.target])
+        submod = submodules[node.target]
+        submod_type = getattr(submod, "_base_class_origin", type(submod))
+        return get_acc_ops_name(submod_type)
     elif node.op == "call_function":
         target: Any = node.target
         return (
@@ -47,7 +62,7 @@ def get_node_target(submodules: Dict[str, torch.nn.Module], node: torch.fx.Node)
         assert isinstance(node.target, str)
         return node.target
 
-
+@compatibility(is_backward_compatible=False)
 def is_node_output_tensor(node: torch.fx.Node) -> bool:
     """Checks if the node output produces a Tensor or not.
 
@@ -58,7 +73,7 @@ def is_node_output_tensor(node: torch.fx.Node) -> bool:
     type_ = node.meta.get("type", None)
     return type_ is not None and issubclass(type_, torch.Tensor)
 
-
+@compatibility(is_backward_compatible=False)
 class FxNetAccFusionsFinder:
     """
     Finds groups of connected ACC nodes that pass non-tensor data between each other.

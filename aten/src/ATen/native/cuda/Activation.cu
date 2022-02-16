@@ -1,3 +1,4 @@
+#define TORCH_ASSERT_NO_OPERATORS
 #define _USE_MATH_DEFINES
 
 #include <ATen/native/Activation.h>
@@ -6,21 +7,14 @@
 
 #include <thrust/tuple.h>
 
-#include <ATen/ATen.h>
 #include <ATen/AccumulateType.h>
-#include <ATen/CUDAGeneratorImpl.h>
 #include <ATen/Dispatch.h>
-#include <ATen/NativeFunctions.h>
-#include <ATen/TensorUtils.h>
-#include <ATen/core/Array.h>
-#include <ATen/cuda/CUDAApplyUtils.cuh>
-#include <ATen/cuda/detail/IndexUtils.cuh>
+#include <ATen/core/TensorBase.h>
+#include <ATen/cuda/ApplyGridUtils.cuh>
 #include <ATen/cuda/detail/OffsetCalculator.cuh>
-#include <ATen/cuda/detail/KernelUtils.h>
 #include <ATen/native/cuda/Loops.cuh>
-#include <ATen/native/cuda/DistributionTemplates.h>
-#include <ATen/native/Resize.h>
 #include <c10/cuda/CUDAMathCompat.h>
+#include <c10/core/Scalar.h>
 
 namespace at {
 namespace native {
@@ -106,81 +100,22 @@ void launch_glu_backward_kernel(const TensorIteratorBase& iter,
   });
 }
 
-Tensor& glu_backward_cuda_out(const Tensor& grad_output, const Tensor& input,
-                              int64_t dim, Tensor& grad_input) {
-  TORCH_CHECK(input.dim() > 0, "glu does not support 0-dimensional tensors");
-  auto wrap_dim = maybe_wrap_dim(dim, input.dim());
-  auto input_sizes = input.sizes();
-  const int64_t nIn = input_sizes[wrap_dim];
-  TORCH_CHECK(nIn % 2 == 0, "Halving dimension must be even, but dimension ",
-              wrap_dim, " is size ", nIn);
-
-  resize_output(grad_input, input_sizes);
-
-  DimVector iter_shape(input_sizes);
-  const auto dim_size = nIn / 2;
-  iter_shape[wrap_dim] = dim_size;
-  TORCH_CHECK(grad_output.sizes() == IntArrayRef{iter_shape});
-
-  const auto iter = at::TensorIteratorConfig()
-    .add_output(grad_input)
-    .add_input(input)
-    .add_input(grad_output)
-    .resize_outputs(false)
-    .declare_static_shape(iter_shape)
-    .build();
-
-  if (iter.numel() == 0) {
-    return grad_input;
-  }
-
-  const auto I_stride = input.strides()[wrap_dim] * dim_size;
-  const auto gI_stride = grad_input.strides()[wrap_dim] * dim_size;
-
-  if (iter.can_use_32bit_indexing()) {
-    launch_glu_backward_kernel(iter, gI_stride, I_stride);
-  } else {
-    for (auto sub_iter: iter.with_32bit_indexing()) {
-      launch_glu_backward_kernel(sub_iter, gI_stride, I_stride);
-    }
-  }
-  return grad_input;
-}
-
-Tensor glu_backward_cuda(const Tensor& grad_output, const Tensor& input, int64_t dim) {
-  auto grad_input = at::empty({0}, input.options());
-  return glu_backward_cuda_out(grad_output, input, dim, grad_input);
-}
-
 // -----------------------------------
 // log_sigmoid forward
 // -----------------------------------
 
-std::tuple<Tensor&, Tensor&> log_sigmoid_forward_out_cuda(const Tensor& input, Tensor& result, Tensor& buffer) {
-  // NOTE: buffer is only used by CPU dispatch, we just ignore it here
-  auto iter = TensorIteratorConfig()
-    .add_output(result)
-    .add_input(input)
-    .build();
+void launch_log_sigmoid_forward_kernel(TensorIteratorBase& iter) {
   AT_DISPATCH_FLOATING_TYPES_AND(kHalf, iter.common_dtype(),
                                  "log_sigmoid_forward_cuda", [&] {
     using acc_t = acc_type<scalar_t, true>;
     gpu_kernel(iter,
         [] GPU_LAMBDA (scalar_t in_) -> scalar_t {
           const acc_t in = in_;
-          const auto max = std::max(acc_t(0), -in);
-          const auto z = std::exp(-max) + std::exp(-in - max);
-          return -(max + std::log(z));
+          const auto min = std::min(acc_t(0), in);
+          const auto z = std::exp(-std::abs(in));
+          return min - std::log1p(z);
         });
   });
-  return std::forward_as_tuple(result, buffer);
-}
-
-std::tuple<Tensor, Tensor> log_sigmoid_forward_cuda(const Tensor& input) {
-  auto result = at::empty_like(input);
-  auto buffer = at::empty({0}, input.options());
-  log_sigmoid_forward_out_cuda(input, result, buffer);
-  return std::forward_as_tuple(result, buffer);
 }
 
 // -----------------------------------
@@ -195,13 +130,12 @@ void log_sigmoid_backward_kernel(TensorIterator& iter) {
         [] GPU_LAMBDA (scalar_t in_, scalar_t grad_out_) -> scalar_t {
           const acc_t in = in_;
           const acc_t grad_out = grad_out_;
-          const auto max = std::max(acc_t(0), -in);
-          const auto z = std::exp(-max) + std::exp(-in - max);
 
           auto in_negative = in < acc_t(0);
           auto max_deriv = in_negative ? acc_t(1) : acc_t(0);
           auto sign = in_negative ? acc_t(1) : -acc_t(1);
-          return grad_out * (max_deriv - sign * (acc_t(1) - acc_t(1) / z));
+          const auto z = std::exp(-std::abs(in));
+          return grad_out * (max_deriv - sign * (z / (acc_t(1) + z)));
         });
   });
 }
@@ -209,18 +143,14 @@ void log_sigmoid_backward_kernel(TensorIterator& iter) {
 // -----------------------------------
 // prelu forward
 // -----------------------------------
-template <typename scalar_t>
-void prelu_cuda_kernel_share_weights(
-  const Tensor& input,
-  Tensor& result,
-  const scalar_t* weight_data)
-{
-  auto iter = TensorIterator::unary_op(result, input);
-
-  at::native::gpu_kernel(iter,
-    [weight_data] GPU_LAMBDA (scalar_t input_val) {
-        return (input_val > 0) ? input_val : *weight_data * input_val;
-    });
+void launch_prelu_cuda_kernel_share_weights(TensorIteratorBase &iter, const TensorBase &weight) {
+  AT_DISPATCH_FLOATING_TYPES_AND(at::ScalarType::Half, iter.input_dtype(), "prelu_cuda", [&] {
+    const auto *weight_data = weight.data_ptr<scalar_t>();
+    at::native::gpu_kernel(iter,
+        [weight_data] GPU_LAMBDA (scalar_t input_val) {
+          return (input_val > 0) ? input_val : *weight_data * input_val;
+        });
+  });
 }
 
 template <typename scalar_t>
@@ -241,91 +171,60 @@ __global__ void prelu_cuda_kernel_multi_weights(
   result_data[linearId] = (input_data_val > 0) ? input_data_val : weight_data[channel] * input_data_val;
 }
 
-Tensor prelu_cuda(const Tensor& self, const Tensor& weight_) {
-  TORCH_CHECK(self.is_cuda());
-  TORCH_CHECK(weight_.is_cuda());
+void launch_prelu_cuda_kernel_multi_weights(
+    const TensorBase &result, const TensorBase &input, const TensorBase &weight) {
+  int64_t input_ndim = input.dim();
+  TORCH_CHECK(input_ndim > 0, "Not allow zero-dim input tensor.");
 
-  auto input = self.contiguous();
-  auto weight = weight_.contiguous();
+  int64_t channel_size = 1; // channel_size default to 1
+  int64_t input_stride0 = 1, input_stride1 = 1;
 
-  TORCH_CHECK(input.is_contiguous());
-  TORCH_CHECK(weight.is_contiguous());
-
-  int64_t weight_num = weight.numel();
-  Tensor result = at::empty_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
-  auto strides = input.strides();
-
-  // case1: shared weight for all channels
-  if (weight_num == 1) {
-    AT_DISPATCH_FLOATING_TYPES_AND(at::ScalarType::Half, input.scalar_type(), "prelu_cuda", [&] {
-      prelu_cuda_kernel_share_weights<scalar_t>(
-        input,
-        result,
-        weight.data_ptr<scalar_t>());
-    });
+  if (input_ndim > 1) {
+    channel_size = input.size(1); // channel is the 2nd dim of input
+    auto strides = input.strides();
+    input_stride0 = strides[0];
+    input_stride1 = strides[1];
   }
-  else { // case2: multiple weights, one for each channel
-    int64_t input_ndim = input.dim();
-    TORCH_CHECK(input_ndim > 0, "Not allow zero-dim input tensor.");
+  const int64_t weight_num = weight.numel();
+  TORCH_CHECK(channel_size == weight_num,
+    "Mismatch of parameter numbers and input channel size. Found parameter numbers = ", weight_num,
+    " and channel size = ", channel_size, ".");
 
-    int64_t channel_size = 1; // channel_size default to 1
-    int64_t input_stride0 = 1, input_stride1 = 1;
+  // config to run cuda kernel
+  int64_t input_numel = input.numel();
+  const dim3 block = dim3(std::min(static_cast<int64_t>(cuda::getApplyBlock().x), input_numel));
+  dim3 grid;
+  int curDevice = -1;
+  cudaGetDevice(&curDevice);
+  cudaStream_t stream = at::cuda::getCurrentCUDAStream(curDevice);
+  TORCH_CHECK(cuda::getApplyGrid(input_numel, grid, curDevice), "prelu: input too large or too many dimensions");
 
-    if (input_ndim > 1) {
-      channel_size = input.size(1); // channel is the 2nd dim of input
-      input_stride0 = strides[0];
-      input_stride1 = strides[1];
-    }
-    TORCH_CHECK(channel_size == weight_num,
-      "Mismatch of parameter numbers and input channel size. Found parameter numbers = ", weight_num,
-      " and channel size = ", channel_size, ".");
-
-    // config to run cuda kernel
-    int64_t input_numel = input.numel();
-    const dim3 block = dim3(std::min(static_cast<int64_t>(cuda::getApplyBlock().x), input_numel));
-    dim3 grid;
-    int curDevice = -1;
-    cudaGetDevice(&curDevice);
-    cudaStream_t stream = at::cuda::getCurrentCUDAStream(curDevice);
-    TORCH_CHECK(cuda::getApplyGrid(input_numel, grid, curDevice), "prelu: input too large or too many dimensions");
-
-    AT_DISPATCH_FLOATING_TYPES_AND(at::ScalarType::Half, input.scalar_type(), "prelu_cuda", [&] {
-      prelu_cuda_kernel_multi_weights<scalar_t>
-      <<<grid, block, 0, stream>>>(
-        result.data_ptr<scalar_t>(),
-        input.data_ptr<scalar_t>(),
-        weight.data_ptr<scalar_t>(),
-        input_stride0,
-        input_stride1,
-        input_numel);
-      C10_CUDA_KERNEL_LAUNCH_CHECK();
-    });
-  }
-  return result;
+  AT_DISPATCH_FLOATING_TYPES_AND(at::ScalarType::Half, input.scalar_type(), "prelu_cuda", [&] {
+    prelu_cuda_kernel_multi_weights<scalar_t>
+    <<<grid, block, 0, stream>>>(
+      result.data_ptr<scalar_t>(),
+      input.data_ptr<scalar_t>(),
+      weight.data_ptr<scalar_t>(),
+      input_stride0,
+      input_stride1,
+      input_numel);
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
+  });
 }
 
 // -----------------------------------
 // prelu backward
 // -----------------------------------
-template <typename scalar_t>
-void prelu_cuda_backward_kernel_share_weights(
-  const Tensor& input,
-  const Tensor& grad_out,
-  Tensor& input_grad,
-  Tensor& weight_grad_collector,
-  const scalar_t* weight_data) {
-  at::TensorIterator iter = TensorIteratorConfig()
-      .add_output(input_grad)
-      .add_output(weight_grad_collector)
-      .add_input(input)
-      .add_input(grad_out)
-      .build();
-
+void launch_prelu_cuda_backward_kernel_share_weights(
+    TensorIteratorBase &iter, const TensorBase &weight) {
   // N.B. `std::tuple` does not support `::operator=` on device code.
-  gpu_kernel_multiple_outputs(iter, [=] GPU_LAMBDA (scalar_t input, scalar_t grad_out) -> thrust::tuple<scalar_t, scalar_t> {
-    scalar_t input_grad = input > 0 ? grad_out : (*weight_data) * grad_out;
-    scalar_t weight_grad_collector = input > 0 ? scalar_t(0) : input * grad_out;
-    return {input_grad, weight_grad_collector};
+  AT_DISPATCH_FLOATING_TYPES_AND(at::ScalarType::Half, iter.input_dtype(), "prelu_backward_cuda", [&] {
+    const auto *weight_data = weight.data_ptr<scalar_t>();
+    gpu_kernel_multiple_outputs(iter, [=] GPU_LAMBDA (scalar_t input, scalar_t grad_out) -> thrust::tuple<scalar_t, scalar_t> {
+        scalar_t input_grad = input > 0 ? grad_out : (*weight_data) * grad_out;
+        scalar_t weight_grad_collector = input > 0 ? scalar_t(0) : input * grad_out;
+        return {input_grad, weight_grad_collector};
+      });
   });
 }
 
@@ -349,257 +248,48 @@ __global__ void prelu_cuda_backward_kernel_multi_weights(
   weight_grad_collector[linearId] = (input_data_val > 0) ? scalar_t(0) : input_data_val * grad_out_data_val;
 }
 
-std::tuple<Tensor, Tensor> prelu_backward_cuda(const Tensor& grad_out_, const Tensor& self, const Tensor& weight_) {
-  TORCH_CHECK(grad_out_.is_cuda());
-  TORCH_CHECK(self.is_cuda());
-  TORCH_CHECK(weight_.is_cuda());
+void launch_prelu_cuda_backward_kernel_multi_weights(
+    const TensorBase &input, const TensorBase &weight, const TensorBase &grad_out,
+    const TensorBase &input_grad, const TensorBase &weight_grad_collector) {
+  int64_t input_ndim = input.dim();
+  TORCH_CHECK(input_ndim > 0, "Not allow zero-dim input tensor.");
 
-  auto input = self.contiguous();
-  auto grad_out = grad_out_.contiguous();
-  auto weight = weight_.contiguous();
+  int64_t channel_size = 1; // channel_size default to 1
+  int64_t input_stride0 = 1, input_stride1 = 1;
 
-  TORCH_CHECK(input.is_contiguous());
-  TORCH_CHECK(weight.is_contiguous());
-  TORCH_CHECK(grad_out.is_contiguous());
-
-  int64_t weight_num = weight.numel();
-  auto strides = input.strides();
-  auto dims = input.dim();
-  Tensor input_grad = at::empty_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
-  Tensor weight_grad = at::empty_like(weight, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
-  Tensor weight_grad_collector = at::empty_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
-  // case1: shared parameter for all channels
-  if (weight_num == 1) {
-    AT_DISPATCH_FLOATING_TYPES_AND(at::ScalarType::Half, input.scalar_type(), "prelu_backward_cuda", [&] {
-      prelu_cuda_backward_kernel_share_weights<scalar_t>(
-        input,
-        grad_out,
-        input_grad,
-        weight_grad_collector,
-        weight.data_ptr<scalar_t>());
-    });
-    weight_grad.fill_(weight_grad_collector.sum());
+  if (input_ndim > 1) {
+    channel_size = input.size(1); // channel is the 2nd dim of input
+    auto strides = input.strides();
+    input_stride0 = strides[0];
+    input_stride1 = strides[1];
   }
-  else { // case2: multiple parameters, one for each channel
-    int64_t input_ndim = input.dim();
-    TORCH_CHECK(input_ndim > 0, "Not allow zero-dim input tensor.");
+  const int64_t weight_num = weight.numel();
+  TORCH_CHECK(channel_size == weight_num,
+    "Mismatch of parameter numbers and input channel size. Found parameter numbers = ", weight_num,
+    " and channel size = ", channel_size, ".");
 
-    int64_t channel_size = 1; // channel_size default to 1
-    int64_t input_stride0 = 1, input_stride1 = 1;
+  // config to run cuda kernel
+  int64_t input_numel = input.numel();
+  const dim3 block = dim3(std::min(static_cast<int64_t>(cuda::getApplyBlock().x), input_numel));
+  dim3 grid;
+  int curDevice = -1;
+  cudaGetDevice(&curDevice);
+  cudaStream_t stream = at::cuda::getCurrentCUDAStream(curDevice);
+  TORCH_CHECK(cuda::getApplyGrid(input_numel, grid, curDevice), "prelu_backward_cuda: input too large or too many dimensions");
 
-    if (input_ndim > 1) {
-      channel_size = input.size(1); // channel is the 2nd dim of input
-      input_stride0 = strides[0];
-      input_stride1 = strides[1];
-    }
-    TORCH_CHECK(channel_size == weight_num,
-      "Mismatch of parameter numbers and input channel size. Found parameter numbers = ", weight_num,
-      " and channel size = ", channel_size, ".");
-
-    // config to run cuda kernel
-    int64_t input_numel = input.numel();
-    const dim3 block = dim3(std::min(static_cast<int64_t>(cuda::getApplyBlock().x), input_numel));
-    dim3 grid;
-    int curDevice = -1;
-    cudaGetDevice(&curDevice);
-    cudaStream_t stream = at::cuda::getCurrentCUDAStream(curDevice);
-    TORCH_CHECK(cuda::getApplyGrid(input_numel, grid, curDevice), "prelu_backward_cuda: input too large or too many dimensions");
-
-    AT_DISPATCH_FLOATING_TYPES_AND(at::ScalarType::Half, input.scalar_type(), "prelu_backward_cuda", [&] {
-      prelu_cuda_backward_kernel_multi_weights<scalar_t>
-      <<<grid, block, 0, stream>>>(
-        input.data_ptr<scalar_t>(),
-        weight.data_ptr<scalar_t>(),
-        grad_out.data_ptr<scalar_t>(),
-        input_grad.data_ptr<scalar_t>(),
-        weight_grad_collector.data_ptr<scalar_t>(),
-        input_stride0,
-        input_stride1,
-        input_numel);
-      C10_CUDA_KERNEL_LAUNCH_CHECK();
-    });
-    // update weight_grad
-    std::vector<int64_t> reduce_dims;
-    reduce_dims.push_back(0);
-    if (dims > 2) {
-      for(int64_t i = 2; i < dims; i++) reduce_dims.push_back(i);
-    }
-    weight_grad = weight_grad_collector.sum(reduce_dims);
-  }
-  return std::tuple<Tensor, Tensor>{input_grad, weight_grad};
-}
-
-// -----------------------------------
-// rrelu
-// -----------------------------------
-template <typename scalar_t, int unroll_factor, typename F>
-#if __CUDA_ARCH__ >= 350 || defined __HIP_PLATFORM_HCC__
-C10_LAUNCH_BOUNDS_2(256, 4)
-#endif
-__global__ void rrelu_with_noise_cuda_kernel(
-    int numel,
-    PhiloxCudaState philox_args,
-    scalar_t* output,
-    scalar_t* input,
-    scalar_t* noise,
-    double lower,
-    double upper,
-    const F& random_func) {
-  auto seeds = at::cuda::philox::unpack(philox_args);
-  int idx = blockIdx.x * blockDim.x + threadIdx.x;
-  curandStatePhilox4_32_10_t state;
-  curand_init(std::get<0>(seeds),
-              idx,
-              std::get<1>(seeds),
-              &state);
-
-  int grid_stride = blockDim.x * gridDim.x * unroll_factor;
-  int rounded_size = ((numel - 1) / grid_stride + 1) * grid_stride;
-  double range = upper - lower;
-
-  for (int linear_index = idx; linear_index < rounded_size; linear_index += grid_stride) {
-    auto rand = random_func(&state);
-
-    // ensure that (&rand.x)[ii] is safe
-    static_assert(sizeof(rand)/sizeof(rand.x) == unroll_factor, "");
-
-    #pragma unroll
-    for (int ii = 0; ii < unroll_factor; ii++) {
-      int li = linear_index + blockDim.x * gridDim.x * ii;
-      if (li >= numel) {
-        continue;
-      }
-      scalar_t r = static_cast<scalar_t>((&rand.x)[ii]);
-      r = r * range + lower;
-      if (input[li] <= 0) {
-        output[li] = input[li] * r;
-        noise[li] = r;
-      } else {
-        output[li] = input[li];
-        noise[li] = static_cast<scalar_t>(0);
-      }
-    }
-    __syncthreads();
-  }
-}
-
-template <typename scalar_t>
-inline void _rrelu_with_noise_cuda_train(
-    Tensor& output,
-    const Tensor& input_,
-    const Tensor& noise_,
-    const Scalar& lower_,
-    const Scalar& upper_,
-    c10::optional<Generator> generator) {
-  auto input = input_.contiguous();
-  auto noise = noise_.contiguous();
-  Tensor tmp_output = output.contiguous();
-
-  int64_t numel = input.numel();
-  auto execution_policy = calc_execution_policy(numel);
-
-  auto counter_offset = std::get<0>(execution_policy);
-  auto grid = std::get<1>(execution_policy);
-  auto block = std::get<2>(execution_policy);
-
-  auto gen = get_generator_or_default<CUDAGeneratorImpl>(
-      generator, cuda::detail::getDefaultCUDAGenerator());
-  PhiloxCudaState rng_engine_inputs;
-  {
-    // See Note [Acquire lock when using random generators]
-    std::lock_guard<std::mutex> lock(gen->mutex_);
-    rng_engine_inputs = gen->philox_cuda_state(counter_offset);
-  }
-
-  scalar_t* input_data = input.data_ptr<scalar_t>();
-  scalar_t* noise_data = noise.data_ptr<scalar_t>();
-  scalar_t* output_data = tmp_output.data_ptr<scalar_t>();
-
-  double lower = lower_.to<double>();
-  double upper = upper_.to<double>();
-
-  auto stream = at::cuda::getCurrentCUDAStream();
-
-  if (std::is_same<scalar_t, double>::value) {
-    rrelu_with_noise_cuda_kernel<scalar_t, 2><<<grid, block, 0, stream>>>(
-        numel,
-        rng_engine_inputs,
-        output_data,
-        input_data,
-        noise_data,
-        lower,
-        upper,
-        [] __device__ (curandStatePhilox4_32_10_t* state) {
-          return curand_uniform2_double(state);
-        });
-        C10_CUDA_KERNEL_LAUNCH_CHECK();
-  } else {
-    // half and float
-    rrelu_with_noise_cuda_kernel<scalar_t, 4><<<grid, block, 0, stream>>>(
-        numel,
-        rng_engine_inputs,
-        output_data,
-        input_data,
-        noise_data,
-        lower, upper,
-        [] __device__ (curandStatePhilox4_32_10_t* state) {
-          return curand_uniform4(state);
-        });
-        C10_CUDA_KERNEL_LAUNCH_CHECK();
-  }
-
-  if (!output.is_contiguous()) {
-    output.copy_(tmp_output);
-  }
-}
-
-Tensor& rrelu_with_noise_out_cuda(const Tensor& self,
-    const Tensor& noise,
-    const Scalar& lower,
-    const Scalar& upper,
-    bool training,
-    c10::optional<Generator> generator,
-    Tensor& output) {
-  TensorArg self_arg{self, "self", 1}, noise_arg{noise, "noise", 2},
-      output_arg{output, "output", 3};
-  checkAllSameGPU("rrelu_with_noise_out_cuda", {self_arg, noise_arg, output_arg});
-
-  if (training) {
-    AT_DISPATCH_FLOATING_TYPES_AND_HALF(
-        self.scalar_type(), "rrelu_with_noise_out_cuda", [&] {
-          _rrelu_with_noise_cuda_train<scalar_t>(
-              output, self, noise, lower, upper, generator);
-        });
-  }
-  else {
-    auto lower_tensor = lower.to<double>();
-    auto upper_tensor = upper.to<double>();
-    Scalar negative_slope = (lower_tensor + upper_tensor) / 2;
-    at::leaky_relu_out(output, self, negative_slope);
-  }
-  return output;
-}
-
-Tensor rrelu_with_noise_cuda(
-    const Tensor& self,
-    const Tensor& noise,
-    const Scalar& lower,
-    const Scalar& upper,
-    bool training,
-    c10::optional<Generator> generator) {
-  Tensor output = at::empty_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
-  return at::native::rrelu_with_noise_out_cuda(self, noise, lower, upper, training, generator, output);
-}
-
-Tensor& rrelu_with_noise_cuda_(
-    Tensor& self,
-    const Tensor& noise,
-    const Scalar& lower,
-    const Scalar& upper,
-    bool training,
-    c10::optional<Generator> generator) {
-  return at::native::rrelu_with_noise_out_cuda(
-      self, noise, lower, upper, training, generator, self);
+  AT_DISPATCH_FLOATING_TYPES_AND(at::ScalarType::Half, input.scalar_type(), "prelu_backward_cuda", [&] {
+    prelu_cuda_backward_kernel_multi_weights<scalar_t>
+    <<<grid, block, 0, stream>>>(
+      input.data_ptr<scalar_t>(),
+      weight.data_ptr<scalar_t>(),
+      grad_out.data_ptr<scalar_t>(),
+      input_grad.data_ptr<scalar_t>(),
+      weight_grad_collector.data_ptr<scalar_t>(),
+      input_stride0,
+      input_stride1,
+      input_numel);
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
+  });
 }
 
 // -----------------------------------
@@ -702,33 +392,74 @@ void elu_backward_kernel(TensorIteratorBase& iter, const Scalar& alpha, const Sc
   });
 }
 
-namespace {
-
-void GeluCUDAKernelImpl(TensorIteratorBase& it) {
-  AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, it.dtype(), "GeluCUDAKernelImpl", [&]() {
-    using T_ACC = acc_type<scalar_t, true>;
-    gpu_kernel(it, [] GPU_LAMBDA(scalar_t x) -> scalar_t {
-      return static_cast<T_ACC>(x) *
-          c10::cuda::compat::normcdf(static_cast<T_ACC>(x));
+void GeluCUDAKernelImpl(TensorIteratorBase& it, GeluType approximate) {
+  if (approximate == GeluType::Tanh) {
+    AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, it.dtype(), "GeluCUDAKernelImpl", [&]() {
+      gpu_kernel(it, [] GPU_LAMBDA(scalar_t x) -> scalar_t {
+        using opmath_t = at::opmath_type<scalar_t>;
+        constexpr opmath_t kBeta = M_SQRT2 * M_2_SQRTPI * opmath_t(0.5);
+        constexpr opmath_t kKappa = 0.044715;
+        auto x_cube = static_cast<opmath_t>(x) * static_cast<opmath_t>(x) * static_cast<opmath_t>(x);
+        auto inner = kBeta * (static_cast<opmath_t>(x) + kKappa * x_cube);
+        return opmath_t(0.5) * static_cast<opmath_t>(x) * (opmath_t(1) + c10::cuda::compat::tanh(inner));
+      });
     });
-  });
+  } else {
+    AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, it.dtype(), "GeluCUDAKernelImpl", [&]() {
+      gpu_kernel(it, [] GPU_LAMBDA(scalar_t x) -> scalar_t {
+        using opmath_t = at::opmath_type<scalar_t>;
+        constexpr opmath_t kAlpha = M_SQRT1_2;
+        return static_cast<opmath_t>(x) * opmath_t(0.5) * (opmath_t(1) + ::erf(static_cast<opmath_t>(x) * kAlpha));
+      });
+    });
+  }
 }
 
-void GeluBackwardCUDAKernelImpl(TensorIteratorBase& it) {
-  AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16,
-      it.dtype(), "GeluBackwardCUDAKernelImpl", [&]() {
-        using T_ACC = acc_type<scalar_t, true>;
-        gpu_kernel(it, [] GPU_LAMBDA(scalar_t dy, scalar_t x) -> scalar_t {
-          constexpr T_ACC kBeta = M_2_SQRTPI * M_SQRT1_2 * T_ACC(0.5);
-          const T_ACC cdf = c10::cuda::compat::normcdf(static_cast<T_ACC>(x));
-          const T_ACC pdf =
-              c10::cuda::compat::exp(
-                  T_ACC(-0.5) * static_cast<T_ACC>(x) * static_cast<T_ACC>(x)) *
-              kBeta;
-          return static_cast<T_ACC>(dy) * (cdf + static_cast<T_ACC>(x) * pdf);
+void GeluBackwardCUDAKernelImpl(TensorIteratorBase& it, GeluType approximate) {
+  if (approximate == GeluType::Tanh) {
+    AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16,
+        it.dtype(), "GeluBackwardCUDAKernelImpl", [&]() {
+          gpu_kernel(it, [] GPU_LAMBDA(scalar_t dy, scalar_t x) -> scalar_t {
+            using opmath_t = at::opmath_type<scalar_t>;
+            constexpr opmath_t kBeta = M_SQRT2 * M_2_SQRTPI * opmath_t(0.5);
+            constexpr opmath_t kKappa = 0.044715;
+            auto x_sq = static_cast<opmath_t>(x) * static_cast<opmath_t>(x);
+            auto x_cube = x_sq * static_cast<opmath_t>(x);
+            auto inner = kBeta * (static_cast<opmath_t>(x) + kKappa * x_cube);
+            auto tanh_inner = c10::cuda::compat::tanh(inner);
+
+            auto left = opmath_t(0.5) * static_cast<opmath_t>(x);
+            auto right = opmath_t(1) + tanh_inner;
+
+            auto left_derivative = 0.5 * right;
+
+            auto tanh_derivative = opmath_t(1) - tanh_inner * tanh_inner;
+            auto inner_derivative = kBeta * (opmath_t(1) + opmath_t(3) * kKappa * x_sq);
+            auto right_derivative = left * tanh_derivative * inner_derivative;
+
+            return static_cast<opmath_t>(dy) * (left_derivative + right_derivative);
         });
       });
+  } else {
+    AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16,
+        it.dtype(), "GeluBackwardCUDAKernelImpl", [&]() {
+          gpu_kernel(it, [] GPU_LAMBDA(scalar_t dy, scalar_t x) -> scalar_t {
+            using opmath_t = at::opmath_type<scalar_t>;
+            constexpr opmath_t kBeta = M_2_SQRTPI * M_SQRT1_2 * opmath_t(0.5);
+            constexpr opmath_t kAlpha = M_SQRT1_2;
+            const opmath_t cdf =
+                opmath_t(0.5) * (opmath_t(1) + ::erf(static_cast<opmath_t>(x) * kAlpha));
+            const opmath_t pdf =
+                c10::cuda::compat::exp(
+                    opmath_t(-0.5) * static_cast<opmath_t>(x) * static_cast<opmath_t>(x)) *
+                kBeta;
+            return static_cast<opmath_t>(dy) * (cdf + static_cast<opmath_t>(x) * pdf);
+          });
+        });
+  }
 }
+
+namespace {
 
 void leaky_relu_kernel(TensorIteratorBase& iter, const Scalar& negval_) {
   AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.dtype(), "leaky_relu_cuda", [&]() {
@@ -895,18 +626,6 @@ void mish_backward_kernel(TensorIterator& iter) {
 }
 
 } // namespace
-
-TORCH_IMPL_FUNC(gelu_out_cuda) (
-  const Tensor& self, const Tensor& result
-) {
-  GeluCUDAKernelImpl(*this);
-}
-
-TORCH_IMPL_FUNC(gelu_backward_out_cuda) (
-  const Tensor& grad, const Tensor& self, const Tensor& grad_input
-) {
-  GeluBackwardCUDAKernelImpl(*this);
-}
 
 REGISTER_DISPATCH(hardtanh_backward_stub, &hardtanh_backward_kernel);
 REGISTER_DISPATCH(hardshrink_stub, &hardshrink_kernel);

@@ -1,9 +1,15 @@
 #pragma once
 
-#include <ATen/ATen.h>
 #include <ATen/native/DispatchStub.h>
 #include <c10/util/Optional.h>
-#include <ATen/native/TensorIterator.h>
+
+namespace c10 {
+class Scalar;
+}
+
+namespace at {
+struct TensorIterator;
+}
 
 namespace at { namespace native {
 

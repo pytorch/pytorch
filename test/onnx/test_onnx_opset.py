@@ -1,3 +1,5 @@
+# Owner(s): ["module: onnx"]
+
 from test_pytorch_common import TestCase, run_tests
 
 import torch
@@ -9,15 +11,15 @@ import onnx
 import io
 
 from torch.onnx.symbolic_helper import _export_onnx_opset_version
-from torch.onnx import ir_version, producer_name, producer_version
+from torch.onnx import producer_name, producer_version
 
 
 def check_onnx_opset_operator(model, ops, opset_version=_export_onnx_opset_version):
     # check_onnx_components
-    assert model.ir_version == ir_version and \
-        model.producer_name == producer_name and \
-        model.producer_version == producer_version and \
-        model.opset_import[0].version == opset_version
+    assert (
+        model.producer_name == producer_name and
+        model.producer_version == producer_version and
+        model.opset_import[0].version == opset_version)
 
     # check the schema with the onnx checker
     onnx.checker.check_model(model)
@@ -40,14 +42,13 @@ def check_onnx_opset_operator(model, ops, opset_version=_export_onnx_opset_versi
                     assert attributes[j][attribute_field] == getattr(graph.node[i].attribute[j], attribute_field)
 
 
-def check_onnx_opsets_operator(module, x, ops, opset_versions, training=torch.onnx.TrainingMode.EVAL, example_outputs=None,
+def check_onnx_opsets_operator(module, x, ops, opset_versions, training=torch.onnx.TrainingMode.EVAL,
                                input_names=None, dynamic_axes=None):
     for opset_version in opset_versions:
         f = io.BytesIO()
         torch.onnx.export(module, x, f,
                           opset_version=opset_version,
                           training=training,
-                          example_outputs=example_outputs,
                           input_names=input_names,
                           dynamic_axes=dynamic_axes)
         model = onnx.load(io.BytesIO(f.getvalue()))
@@ -91,10 +92,8 @@ class TestONNXOpset(TestCase):
         x = torch.arange(1., 6., requires_grad=True)
         k = torch.tensor(3)
         module = MyModuleDynamic()
-        example_output = module(x, k)
         check_onnx_opsets_operator(module, [x, k], ops,
-                                   opset_versions=[10],
-                                   example_outputs=example_output)
+                                   opset_versions=[10])
 
     def test_maxpool(self):
         module = torch.nn.MaxPool1d(2, stride=1)
@@ -191,7 +190,6 @@ class TestONNXOpset(TestCase):
 
         module = DynamicSliceModel()
         x = torch.rand(1, 2)
-        example_output = module(x)
         ops_10 = [{"op_name" : "Shape"},
                   {"op_name" : "Constant"},
                   {"op_name" : "Gather",
@@ -202,7 +200,7 @@ class TestONNXOpset(TestCase):
                   {"op_name" : "Slice",
                    "attributes" : []}]
         ops = {10 : ops_10}
-        check_onnx_opsets_operator(module, x, ops, opset_versions=[10], example_outputs=example_output,
+        check_onnx_opsets_operator(module, x, ops, opset_versions=[10],
                                    input_names=['x'], dynamic_axes={"x": [0, 1]})
 
         ops_10 = [{"op_name" : "Constant"},
@@ -212,7 +210,7 @@ class TestONNXOpset(TestCase):
                   {"op_name" : "Slice",
                    "attributes" : []}]
         ops = {10 : ops_10}
-        check_onnx_opsets_operator(module, x, ops, opset_versions=[10], example_outputs=example_output)
+        check_onnx_opsets_operator(module, x, ops, opset_versions=[10])
 
     def test_flip(self):
         class MyModule(Module):
@@ -285,12 +283,12 @@ class TestONNXOpset(TestCase):
                  {"op_name" : "Unsqueeze"},
                  {"op_name" : "Unsqueeze"},
                  {"op_name" : "Concat"},
-                 {"op_name" : "Constant"},
                  {"op_name" : "Cast"},
                  {"op_name" : "Shape"},
                  {"op_name" : "Slice"},
                  {"op_name" : "Cast"},
                  {"op_name" : "Div"},
+                 {"op_name" : "Constant"},
                  {"op_name" : "Concat"},
                  {"op_name" : "Upsample",
                   "attributes" :
@@ -308,7 +306,6 @@ class TestONNXOpset(TestCase):
                   {"op_name" : "Unsqueeze"},
                   {"op_name" : "Unsqueeze"},
                   {"op_name" : "Concat"},
-                  {"op_name" : "Constant"},
                   {"op_name" : "Cast"},
                   {"op_name" : "Shape"},
                   {"op_name" : "Constant"},
@@ -317,6 +314,7 @@ class TestONNXOpset(TestCase):
                   {"op_name" : "Slice"},
                   {"op_name" : "Cast"},
                   {"op_name" : "Div"},
+                  {"op_name" : "Constant"},
                   {"op_name" : "Concat"},
                   {"op_name" : "Resize",
                    "attributes" :
@@ -327,23 +325,23 @@ class TestONNXOpset(TestCase):
         check_onnx_opsets_operator(MyModel(), x, ops, opset_versions=[9, 10],
                                    input_names=["x"], dynamic_axes={"x": [0, 1, 2, 3]})
 
-        ops_9 = [{"op_name" : "Constant"},
-                 {"op_name" : "Shape"},
+        ops_9 = [{"op_name" : "Shape"},
                  {"op_name" : "Slice"},
                  {"op_name" : "Cast"},
                  {"op_name" : "Div"},
+                 {"op_name" : "Constant"},
                  {"op_name" : "Concat"},
                  {"op_name" : "Upsample",
                   "attributes" :
                   [{"name": "mode", "s": ("nearest").encode(), "type": 3}]}]
-        ops_10 = [{"op_name" : "Constant"},
-                  {"op_name" : "Shape"},
+        ops_10 = [{"op_name" : "Shape"},
                   {"op_name" : "Constant"},
                   {"op_name" : "Constant"},
                   {"op_name" : "Constant"},
                   {"op_name" : "Slice"},
                   {"op_name" : "Cast"},
                   {"op_name" : "Div"},
+                  {"op_name" : "Constant"},
                   {"op_name" : "Concat"},
                   {"op_name" : "Resize"}]
 

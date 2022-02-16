@@ -1,4 +1,5 @@
 #include <ATen/ATen.h>
+#include <c10/util/irange.h>
 
 namespace at {
 namespace native {
@@ -10,7 +11,7 @@ inline void check_cat_shape_except_dim(const Tensor & first, const Tensor & seco
    int64_t second_dims = second.dim();
    TORCH_CHECK(first_dims == second_dims, "Tensors must have same number of dimensions: got ",
                first_dims, " and ", second_dims);
-   for (int64_t dim = 0; dim < first_dims; dim++) {
+   for (const auto dim : c10::irange(first_dims)) {
      if (dim == dimension) {
        continue;
      }
@@ -20,5 +21,13 @@ inline void check_cat_shape_except_dim(const Tensor & first, const Tensor & seco
                  dimension, ". Expected size ", static_cast<long long>(first_dim_size), " but got size ", static_cast<long long>(second_dim_size), " for tensor number ", index, " in the list.");
    }
  }
+
+inline void check_cat_no_zero_dim(at::ArrayRef<Tensor> tensors) {
+  for(const auto i : c10::irange(tensors.size())) {
+    auto& t = tensors[i];
+    TORCH_CHECK(t.dim() > 0,
+             "zero-dimensional tensor (at position ", i, ") cannot be concatenated");
+  }
+}
 
 }} // namespace at::native

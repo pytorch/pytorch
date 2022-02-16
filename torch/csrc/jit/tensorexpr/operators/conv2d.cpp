@@ -1,5 +1,7 @@
+#include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/tensorexpr/loopnest.h>
 #include <torch/csrc/jit/tensorexpr/operators/conv2d.h>
+#include <torch/csrc/jit/tensorexpr/operators/misc.h>
 #include <torch/csrc/jit/tensorexpr/tensor.h>
 
 namespace torch {
@@ -47,7 +49,7 @@ Tensor conv2d_depthwise_static(
 
   Tensor conv = Reduce(
       "conv2d_depthwise",
-      {{N, "n"}, {K, "k"}, {OH, "oh"}, {OW, "ow"}},
+      {N, K, OH, OW},
       Sum(),
       [&](const std::vector<VarHandle>& v) { return init_func(v); },
       [&](const std::vector<VarHandle>& v) {
@@ -68,7 +70,7 @@ Tensor conv2d_depthwise_static(
             input.load(n, k, oh * stride - pad + r, ow * stride - pad + s));
         return in * weight.load(k, c, r, s);
       },
-      {{C / groups, "c"}, {R, "r"}, {S, "s"}});
+      {C / groups, R, S});
 
   LoopNest nest({conv});
 
@@ -118,7 +120,7 @@ Tensor conv2d_depthwise_dynamic(
 
   return Reduce(
       "conv2d_depthwise",
-      {{N, "n"}, {K, "k"}, {OH, "oh"}, {OW, "ow"}},
+      {N, K, OH, OW},
       Sum(),
       [&](const std::vector<VarHandle>& v) { return init_func(v); },
       [&](const std::vector<VarHandle>& v) {
@@ -139,7 +141,7 @@ Tensor conv2d_depthwise_dynamic(
             input.load(n, k, oh * stride - pad + r, ow * stride - pad + s));
         return in * weight.load(k, c, r, s);
       },
-      {{C / groups, "c"}, {R, "r"}, {S, "s"}});
+      {C / groups, R, S});
 }
 
 } // namespace
@@ -238,6 +240,185 @@ Tensor conv2d_depthwise(
       stride,
       pad,
       groups);
+}
+
+std::vector<int64_t> _pair_int(ArgValue v) {
+  if (auto t = c10::get_if<IntList>(&v)) {
+    return {(*t)[0], (*t)[1]};
+  }
+  auto i = c10::get<int64_t>(v);
+  return {i, i};
+}
+
+std::vector<int64_t> _single_int_list(ArgValue v) {
+  if (auto t = c10::get_if<IntList>(&v)) {
+    return {(*t)[0]};
+  }
+  auto i = c10::get<int64_t>(v);
+  return {i};
+}
+
+bool conv2dIsSupported(
+    const TensorInfo& input,
+    const TensorInfo& weight,
+    const TensorInfo& bias,
+    const std::vector<int64_t>& stride,
+    const std::vector<int64_t>& pad,
+    const std::vector<int64_t>& dilation,
+    int64_t groups) {
+  if (input.dtype != c10::ScalarType::Float ||
+      weight.dtype != c10::ScalarType::Float ||
+      bias.dtype != c10::ScalarType::Float) {
+    GRAPH_DEBUG("conv2dIsSupported: only float32 allowed");
+    return false;
+  }
+  if (input.dims.size() != 4 || weight.dims.size() != 4 ||
+      bias.dims.size() != 1) {
+    GRAPH_DEBUG("conv2dIsSupported: inputs are the wrong size");
+    return false;
+  }
+  auto Cin = input.dims[1];
+  auto Cout = weight.dims[0];
+  auto CperG = weight.dims[1];
+  if (Cin != Cout || Cin != groups || CperG != 1) {
+    GRAPH_DEBUG("conv2dIsSupported: not depthwise");
+    return false;
+  }
+  auto KH = weight.dims[2];
+  auto KW = weight.dims[3];
+  if (KH != 3 || KW != 3) {
+    GRAPH_DEBUG("conv2dIsSupported: not 3x3");
+    return false;
+  }
+  if (stride.size() != 2 || stride[0] != stride[1]) {
+    GRAPH_DEBUG("conv2dIsSupported: unsupported stride");
+    return false;
+  }
+  if (pad.size() != 2 || pad[0] != pad[1]) {
+    GRAPH_DEBUG("conv2dIsSupported: unsupported pad");
+    return false;
+  }
+  if (dilation.size() != 2 || dilation[0] != 1 || dilation[1] != 1) {
+    GRAPH_DEBUG("conv2dIsSupported: unsupported dilation");
+    return false;
+  }
+  return true;
+}
+
+Tensor computeConv2d(
+    const std::vector<ArgValue>& inputs,
+    const std::vector<ExprHandle>& outputShape,
+    const c10::optional<ScalarType>& outputType,
+    at::Device device) {
+  Dtype dtype = kFloat;
+  if (outputType) {
+    dtype = Dtype(*outputType);
+  }
+
+  BufHandle ResultBuf("conv", outputShape, dtype);
+  const BufHandle& inp = c10::get<BufHandle>(inputs[0]);
+  const BufHandle& w = c10::get<BufHandle>(inputs[1]);
+  const BufHandle& b = c10::get<BufHandle>(inputs[2]);
+
+  auto strides = _pair_int(inputs[3]);
+  auto padding = _pair_int(inputs[4]);
+  auto dilation = _pair_int(inputs[5]);
+
+  int groups = c10::get<int64_t>(inputs[6]);
+
+  auto inpInfo = getTensorInfo(inp);
+  auto wInfo = getTensorInfo(w);
+  auto bInfo = getTensorInfo(b);
+  // Generate TE for depthwise convolutions.
+  if (inpInfo && wInfo && bInfo &&
+      conv2dIsSupported(
+          *inpInfo, *wInfo, *bInfo, strides, padding, dilation, groups)) {
+    return conv2d_depthwise(inp, w, b, strides[0], padding[0], groups);
+  }
+
+  // Once we have a performant TE representation for conv2d, we could use it
+  // here instead of the external call!
+  StmtPtr s = ExternalCall::make(
+      ResultBuf,
+      "nnc_aten_conv2d",
+      {inp, w, b},
+      {strides[0],
+       strides[1],
+       padding[0],
+       padding[1],
+       dilation[0],
+       dilation[1],
+       groups});
+  return Tensor(ResultBuf.node(), s);
+}
+
+Tensor computeConv1d(
+    const std::vector<ArgValue>& inputs,
+    const std::vector<ExprHandle>& outputShape,
+    const c10::optional<ScalarType>& outputType,
+    at::Device device) {
+  Dtype dtype = kFloat;
+  if (outputType) {
+    dtype = Dtype(*outputType);
+  }
+
+  BufHandle ResultBuf("conv", outputShape, dtype);
+  const BufHandle& inp = c10::get<BufHandle>(inputs[0]);
+  const BufHandle& w = c10::get<BufHandle>(inputs[1]);
+  const BufHandle& b = c10::get<BufHandle>(inputs[2]);
+
+  auto strides = _single_int_list(inputs[3]);
+  auto padding = _single_int_list(inputs[4]);
+  auto dilation = _single_int_list(inputs[5]);
+
+  int groups = c10::get<int64_t>(inputs[6]);
+
+  auto inpInfo = getTensorInfo(inp);
+  auto wInfo = getTensorInfo(w);
+  auto bInfo = getTensorInfo(b);
+
+  StmtPtr s = ExternalCall::make(
+      ResultBuf,
+      "nnc_aten_conv1d",
+      {inp, w, b},
+      {strides[0], padding[0], dilation[0], groups});
+  return Tensor(ResultBuf.node(), s);
+}
+
+Tensor computePrepackedConv2dClampRun(
+    const std::vector<ArgValue>& inputs,
+    const std::vector<ExprHandle>& outputShape,
+    const c10::optional<ScalarType>& outputType,
+    at::Device device) {
+  Dtype dtype = kFloat;
+  if (outputType) {
+    dtype = Dtype(*outputType);
+  }
+
+  BufHandle ResultBuf("prepacked_conv2d_clamp_run", outputShape, dtype);
+  const BufHandle& inp = c10::get<BufHandle>(inputs[0]);
+  const BufHandle& prepacked = c10::get<BufHandle>(inputs[1]);
+  StmtPtr s = ExternalCall::make(
+      ResultBuf, "nnc_prepacked_conv2d_clamp_run", {inp, prepacked}, {});
+  return Tensor(ResultBuf.node(), s);
+}
+
+Tensor computePrepackedLinearClampRun(
+    const std::vector<ArgValue>& inputs,
+    const std::vector<ExprHandle>& outputShape,
+    const c10::optional<ScalarType>& outputType,
+    at::Device device) {
+  Dtype dtype = kFloat;
+  if (outputType) {
+    dtype = Dtype(*outputType);
+  }
+
+  BufHandle ResultBuf("prepacked_linear_clamp_run", outputShape, dtype);
+  const BufHandle& inp = c10::get<BufHandle>(inputs[0]);
+  const BufHandle& prepacked = c10::get<BufHandle>(inputs[1]);
+  StmtPtr s = ExternalCall::make(
+      ResultBuf, "nnc_prepacked_linear_clamp_run", {inp, prepacked}, {});
+  return Tensor(ResultBuf.node(), s);
 }
 
 } // namespace tensorexpr

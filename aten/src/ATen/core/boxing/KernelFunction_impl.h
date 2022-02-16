@@ -6,7 +6,7 @@
 namespace c10 {
 
 inline KernelFunction::KernelFunction()
-: functor_(nullptr)
+    : functor_()
 , boxed_kernel_func_(nullptr)
 , unboxed_kernel_func_(nullptr)
 {}

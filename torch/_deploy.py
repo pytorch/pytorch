@@ -17,14 +17,18 @@ def _save_storages(importer, obj):
         importers = sys_importer
 
     def persistent_id(obj):
-        # FIXME: the docs say that persistent_id should only return a string
-        # but torch store returns tuples. This works only in the binary protocol
-        # see
-        # https://docs.python.org/2/library/pickle.html#pickling-and-unpickling-external-objects
-        # https://github.com/python/cpython/blob/master/Lib/pickle.py#L527-L537
-        if torch.is_storage(obj):
+        if torch.is_storage(obj) or isinstance(obj, torch.storage._TypedStorage):
+            if isinstance(obj, torch.storage._TypedStorage):
+                # TODO: Once we decide to break serialization FC, we can
+                # remove this case
+                storage = obj._storage
+                dtype = obj.dtype
+            else:
+                storage = obj
+                dtype = torch.uint8
+
             serialized_storages.append(obj)
-            serialized_dtypes.append(obj.dtype)
+            serialized_dtypes.append(dtype)
             return ('storage', len(serialized_storages) - 1)
 
         if hasattr(obj, "__reduce_deploy__"):
@@ -46,7 +50,7 @@ def _save_storages(importer, obj):
     data_value = data_buf.getvalue()
     return data_value, serialized_storages, serialized_dtypes, importer.zip_reader if importer else None
 
-def _load_storages(id, zip_reader, obj_bytes, serialized_storages):
+def _load_storages(id, zip_reader, obj_bytes, serialized_storages, serialized_dtypes):
 
     def persistent_load(saved_id):
         assert isinstance(saved_id, tuple)
@@ -54,7 +58,13 @@ def _load_storages(id, zip_reader, obj_bytes, serialized_storages):
         data = saved_id[1:]
 
         if typename == 'storage':
-            return serialized_storages[data[0]]
+            # TODO: Once we decide to break serialization FC, we can
+            # stop wrapping with _TypedStorage
+            storage = serialized_storages[data[0]]
+            dtype = serialized_dtypes[data[0]]
+            return torch.storage._TypedStorage(
+                wrap_storage=storage._untyped(),
+                dtype=dtype)
 
         if typename == 'reduce_deploy':
             reduce_id, func, args = data

@@ -68,8 +68,20 @@ inline Tensor& householder_product_out(Tensor& result, const Tensor& input, cons
   return torch::linalg_householder_product_out(result, input, tau);
 }
 
+inline std::tuple<Tensor, Tensor> lu_factor(const Tensor& self, const bool pivot) {
+  return torch::linalg_lu_factor(self, pivot);
+}
+
+inline std::tuple<Tensor&, Tensor&> lu_factor_out(Tensor& LU, Tensor& pivots, const Tensor& self, const bool pivot) {
+  return torch::linalg_lu_factor_out(LU, pivots, self, pivot);
+}
+
 inline std::tuple<Tensor, Tensor, Tensor, Tensor> lstsq(const Tensor& self, const Tensor& b, c10::optional<double> cond, c10::optional<c10::string_view> driver) {
   return torch::linalg_lstsq(self, b, cond, driver);
+}
+
+inline Tensor matrix_exp(const Tensor& self) {
+  return torch::linalg_matrix_exp(self);
 }
 
 inline Tensor norm(const Tensor& self, const optional<Scalar>& opt_ord, optional<IntArrayRef> opt_dim, bool keepdim, optional<ScalarType> opt_dtype) {
@@ -120,12 +132,36 @@ inline Tensor& matrix_power_out(const Tensor& self, int64_t n, Tensor& result) {
   return torch::linalg_matrix_power_out(result, self, n);
 }
 
-inline Tensor matrix_rank(const Tensor input, optional<double> tol, bool hermitian) {
+inline Tensor matrix_rank(const Tensor& input, double tol, bool hermitian) {
   return torch::linalg_matrix_rank(input, tol, hermitian);
 }
 
-inline Tensor& matrix_rank_out(Tensor& result, const Tensor input, optional<double> tol, bool hermitian) {
+inline Tensor matrix_rank(const Tensor& input, const Tensor& tol, bool hermitian) {
+  return torch::linalg_matrix_rank(input, tol, hermitian);
+}
+
+inline Tensor matrix_rank(const Tensor& input, c10::optional<double> atol, c10::optional<double> rtol, bool hermitian) {
+  return torch::linalg_matrix_rank(input, atol, rtol, hermitian);
+}
+
+inline Tensor matrix_rank(const Tensor& input, const c10::optional<Tensor>& atol, const c10::optional<Tensor>& rtol, bool hermitian) {
+  return torch::linalg_matrix_rank(input, atol, rtol, hermitian);
+}
+
+inline Tensor& matrix_rank_out(Tensor& result, const Tensor& input, double tol, bool hermitian) {
   return torch::linalg_matrix_rank_out(result, input, tol, hermitian);
+}
+
+inline Tensor& matrix_rank_out(Tensor& result, const Tensor& input, const Tensor& tol, bool hermitian) {
+  return torch::linalg_matrix_rank_out(result, input, tol, hermitian);
+}
+
+inline Tensor& matrix_rank_out(Tensor& result, const Tensor& input, c10::optional<double> atol, c10::optional<double> rtol, bool hermitian) {
+  return torch::linalg_matrix_rank_out(result, input, atol, rtol, hermitian);
+}
+
+inline Tensor& matrix_rank_out(Tensor& result, const Tensor& input, const c10::optional<Tensor>& atol, const c10::optional<Tensor>& rtol, bool hermitian) {
+  return torch::linalg_matrix_rank_out(result, input, atol, rtol, hermitian);
 }
 
 inline Tensor multi_dot(TensorList tensors) {
@@ -158,6 +194,14 @@ inline Tensor solve(const Tensor& input, const Tensor& other) {
 
 inline Tensor& solve_out(Tensor& result, const Tensor& input, const Tensor& other) {
   return torch::linalg_solve_out(result, input, other);
+}
+
+inline Tensor solve_triangular(const Tensor& input, const Tensor& other, bool upper, bool left, bool unitriangular) {
+  return torch::linalg_solve_triangular(input, other, upper, left, unitriangular);
+}
+
+inline Tensor& solve_triangular_out(Tensor& result, const Tensor& input, const Tensor& other, bool upper, bool left, bool unitriangular) {
+  return torch::linalg_solve_triangular_out(result, input, other, upper, left, unitriangular);
 }
 
 inline std::tuple<Tensor, Tensor, Tensor> svd(const Tensor& input, bool full_matrices) {
@@ -302,6 +346,13 @@ inline std::tuple<Tensor, Tensor, Tensor, Tensor> lstsq(const Tensor& self, cons
   return detail::lstsq(self, b, cond, driver);
 }
 
+/// Computes the matrix exponential
+///
+/// See https://pytorch.org/docs/master/linalg.html#torch.linalg.matrix_exp
+inline Tensor matrix_exp(const Tensor& input) {
+  return detail::matrix_exp(input);
+}
+
 // C10_DEPRECATED_MESSAGE("linalg_norm is deprecated, use norm instead.")
 inline Tensor linalg_norm(const Tensor& self, const optional<Scalar>& opt_ord, optional<IntArrayRef> opt_dim, bool keepdim, optional<ScalarType> opt_dtype) {
   return detail::norm(self, opt_ord, opt_dim, keepdim, opt_dtype);
@@ -320,6 +371,17 @@ inline Tensor& linalg_norm_out(Tensor& result, const Tensor& self, const optiona
 // C10_DEPRECATED_MESSAGE("linalg_norm_out is deprecated, use norm_out instead.")
 inline Tensor& linalg_norm_out(Tensor& result, const Tensor& self, c10::string_view ord, optional<IntArrayRef> opt_dim, bool keepdim, optional<ScalarType> opt_dtype) {
   return detail::norm_out(result, self, ord, opt_dim, keepdim, opt_dtype);
+}
+
+/// Computes the pivoted LU factorization
+///
+/// See https://pytorch.org/docs/master/linalg.html#torch.linalg.lu_factor
+inline std::tuple<Tensor, Tensor> lu_factor(const Tensor& input, const bool pivot=true) {
+  return detail::lu_factor(input, pivot);
+}
+
+inline std::tuple<Tensor&, Tensor&> lu_factor_out(Tensor& LU, Tensor& pivots, const Tensor& self, const bool pivot=true) {
+  return detail::lu_factor_out(LU, pivots, self, pivot);
 }
 
 inline Tensor norm(const Tensor& self, const optional<Scalar>& opt_ord, optional<IntArrayRef> opt_dim, bool keepdim, optional<ScalarType> opt_dtype) {
@@ -374,12 +436,36 @@ inline Tensor& matrix_power_out(const Tensor& self, int64_t n, Tensor& result) {
 }
 
 /// See https://pytorch.org/docs/master/linalg.html#torch.linalg.matrix_rank
-inline Tensor matrix_rank(const Tensor input, optional<double> tol, bool hermitian) {
+inline Tensor matrix_rank(const Tensor& input, double tol, bool hermitian) {
   return detail::matrix_rank(input, tol, hermitian);
 }
 
-inline Tensor& matrix_rank_out(Tensor& result, const Tensor input, optional<double> tol, bool hermitian) {
+inline Tensor matrix_rank(const Tensor& input, const Tensor& tol, bool hermitian) {
+  return detail::matrix_rank(input, tol, hermitian);
+}
+
+inline Tensor matrix_rank(const Tensor& input, c10::optional<double> atol, c10::optional<double> rtol, bool hermitian) {
+  return detail::matrix_rank(input, atol, rtol, hermitian);
+}
+
+inline Tensor matrix_rank(const Tensor& input, const c10::optional<Tensor>& atol, const c10::optional<Tensor>& rtol, bool hermitian) {
+  return detail::matrix_rank(input, atol, rtol, hermitian);
+}
+
+inline Tensor& matrix_rank_out(Tensor& result, const Tensor& input, double tol, bool hermitian) {
   return detail::matrix_rank_out(result, input, tol, hermitian);
+}
+
+inline Tensor& matrix_rank_out(Tensor& result, const Tensor& input, const Tensor& tol, bool hermitian) {
+  return detail::matrix_rank_out(result, input, tol, hermitian);
+}
+
+inline Tensor& matrix_rank_out(Tensor& result, const Tensor& input, c10::optional<double> atol, c10::optional<double> rtol, bool hermitian) {
+  return detail::matrix_rank_out(result, input, atol, rtol, hermitian);
+}
+
+inline Tensor& matrix_rank_out(Tensor& result, const Tensor& input, const c10::optional<Tensor>& atol, const c10::optional<Tensor>& rtol, bool hermitian) {
+  return detail::matrix_rank_out(result, input, atol, rtol, hermitian);
 }
 
 /// See https://pytorch.org/docs/master/linalg.html#torch.linalg.multi_dot
@@ -391,7 +477,7 @@ inline Tensor& multi_dot_out(TensorList tensors, Tensor& result) {
   return detail::multi_dot_out(tensors, result);
 }
 
-/// Computes pseudo-inverse
+/// Computes the pseudo-inverse
 ///
 /// See https://pytorch.org/docs/master/linalg.html#torch.linalg.pinv
 inline Tensor pinv(const Tensor& input, double rcond=1e-15, bool hermitian=false) {
@@ -424,6 +510,18 @@ inline Tensor solve(const Tensor& input, const Tensor& other) {
 
 inline Tensor& solve_out(Tensor& result, const Tensor& input, const Tensor& other) {
   return detail::solve_out(result, input, other);
+}
+
+/// Computes a solution of a linear system AX = B for input = A and other = B whenever A is square
+/// upper or lower triangular and does not have zeros in the diagonal
+///
+/// See https://pytorch.org/docs/master/linalg.html#torch.linalg.solve_triangular
+inline Tensor solve_triangular(const Tensor& input, const Tensor& other, bool upper, bool left, bool unitriangular) {
+  return detail::solve_triangular(input, other, upper, left, unitriangular);
+}
+
+inline Tensor& solve_triangular_out(Tensor& result, const Tensor& input, const Tensor& other, bool upper, bool left, bool unitriangular) {
+  return detail::solve_triangular_out(result, input, other, upper, left, unitriangular);
 }
 
 /// Computes the singular values and singular vectors

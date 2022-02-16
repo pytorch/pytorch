@@ -37,7 +37,6 @@
 #include <typeinfo>
 #include <sstream>
 #include <queue>
-#include <TH/TH.h>
 
 namespace torch { namespace autograd {
 
@@ -51,11 +50,19 @@ static void forked_autograd_child() { in_bad_autograd_fork = true; }
 
 // Should be called before unsafe for forks (thread pool) calls
 static void track_bad_autograd_forks() {
-#ifndef WIN32
+#if !defined(WIN32) && !defined(__XROS__)
   static std::once_flag flag;
   std::call_once(
       flag, [&] { pthread_atfork(nullptr, nullptr, forked_autograd_child); });
 #endif
+}
+
+inline bool should_run_in_cpu_ready_queue(c10::DeviceType device) {
+  if (device == c10::kCPU || device == c10::kMeta || device == c10::kLazy) {
+    return true;
+  } else {
+    return false;
+  }
 }
 }
 
@@ -93,9 +100,10 @@ C10_DEFINE_TLS_static(std::shared_ptr<GraphTask>, tls_current_graph_task);
 // Engine::init_local_ready_queue() call in each corresponding thread before execution.
 //
 // The CUDA, XLA threads are shared among all invocations of backwards via
-// device_ready_queues_, while CPU threads are dedicated to processing CPU work for
-// the backward they invoked. So any given graph task maintains its own cpu_ready_queue_
-// where you should send work for it to be done
+// device_ready_queues_, while the caller thread is dedicated to processing work for
+// devices returning true in should_run_in_cpu_ready_queue (most notably the CPU device).
+// So any given graph task maintains its own cpu_ready_queue_ where you should send work
+// for it to be done.
 //
 // For reentrant backward calls, if we spawn new thread from the current thread
 // because we reached the maximum depth, the new thread will just reuse the same
@@ -411,6 +419,7 @@ auto Engine::thread_main(const std::shared_ptr<GraphTask>& graph_task) -> void {
         // NB: The ThreadLocalStateGuard doesn't set the grad_mode because GraphTask
         // always saves ThreadLocalState without grad_mode.
         at::ThreadLocalStateGuard tls_guard(local_graph_task->thread_locals_);
+        c10::Warning::WarningHandlerGuard warnings_guard(&local_graph_task->warning_handler_);
 
         try {
           // The guard sets the thread_local current_graph_task on construction
@@ -634,12 +643,6 @@ static variable_list call_post_hooks(Node& fn, variable_list outputs, const vari
   return outputs;
 }
 
-static bool is_compatible_type(const at::TensorOptions& expected, const at::TensorOptions& actual) {
-  // Types are compatible if they exactly match or if the gradient is a sparse
-  // version of the expected type.
-  return expected.type_equal(actual) || (actual.is_sparse() && expected.device().type() == actual.device().type());
-}
-
 void set_device(int device) {
   // NB: We MUST NOT construct the guard for device CPU,
   // as in some settings we compile with cuda, but
@@ -701,22 +704,37 @@ void validate_outputs(
     if (c10::typeMetaToScalarType(metadata.options().dtype()) != grad.scalar_type()) {
       grad = grad.to(c10::typeMetaToScalarType(metadata.options().dtype()));
     }
-    if (grad.device() != metadata.device() &&
-        grad.dim() == 0) {
-      grad = grad.to(metadata.device());
-    }
-    if (!is_compatible_type(metadata.options(), grad.options())) {
+    if (grad.dtype() != metadata.dtype()) {
        std::stringstream ss;
-       ss << "invalid gradient at index " << i << " - expected type ";
-       ss << metadata.options() << " but got " << grad.options();
+       ss << "invalid gradient at index " << i << " - expected dtype ";
+       ss << metadata.dtype() << " but got " << grad.dtype();
        AT_ERROR(format_error(ss.str()));
     }
-    auto grad_device = grad.device();
-    if (grad_device != metadata.device()) {
-      std::stringstream ss;
-      ss << "invalid gradient at index " << i << " - expected device ";
-      ss << metadata.device() << " but got " << grad_device;
-      AT_ERROR(format_error(ss.str()));
+    if (grad.layout() != metadata.layout()) {
+       // TODO: Currently we only support (*, Sparse) combination for (tensor.layout(), tensor.grad.layout())
+       // In future, there will be an oppportunity to support more combinations of layouts if they are composable
+       // (example., operations like addition etc., are well defined between tensors of different layouts.),
+       // as well as all parts of autograd like AccumulateGrad correctly handle this.
+       if (!grad.is_sparse()) {
+        std::stringstream ss;
+        ss << "invalid gradient at index " << i << " - expected layout ";
+        ss << metadata.layout() << " but got " << grad.layout();
+        AT_ERROR(format_error(ss.str()));
+       }
+    }
+
+    if (grad.device() != metadata.device()) {
+      // quick hack for: https://github.com/pytorch/pytorch/issues/65016 but should be eventually removed
+      if (!(metadata.is_tensor_subclass() || grad.unsafeGetTensorImpl()->is_python_dispatch())) {
+        if (grad.dim() == 0) {
+          grad = grad.to(metadata.device());
+        } else {
+          std::stringstream ss;
+          ss << "invalid gradient at index " << i << " - expected device ";
+          ss << metadata.device() << " but got " << grad.device();
+          AT_ERROR(format_error(ss.str()));
+        }
+      }
     }
     // We should not build graph for Tensors that are not differentiable
     TORCH_INTERNAL_ASSERT(isDifferentiableType(grad.scalar_type()));
@@ -1030,11 +1048,11 @@ auto Engine::execute(const edge_list& roots,
   // in dist_engine.cpp).
   auto& fut = graph_task->future_result_;
   fut->wait();
+  graph_task->warning_handler_.replay_warnings();
   return fut->value().toTensorVector();
 }
 
 void Engine::initialize_device_threads_pool() {
-  track_bad_autograd_forks();
   TORCH_CHECK(!in_bad_autograd_fork,
               "Unable to handle autograd's threading in combination with fork-based multiprocessing. "
               "See https://github.com/pytorch/pytorch/wiki/Autograd-and-Fork");
@@ -1157,23 +1175,14 @@ void Engine::init_local_ready_queue(std::shared_ptr<ReadyQueue> ready_queue) {
   }
 }
 
-size_t Engine::ready_queue_size(const std::shared_ptr<GraphTask>& graph_task, at::Device device) {
-  if (device_ready_queues_.empty()) {
-    // The vector device_ready_queues_ is initialized in start_device_threads, but this method
-    // can be called before start_device_threads. Adding this check to avoid index
-    // out of bound error.
-    return 0;
-  }
-  return ready_queue(graph_task->cpu_ready_queue_, device)->size();
-}
-
 // CPU ready queue is per GraphTask, but CUDA device ready queues are shared across all graph tasks
 auto Engine::ready_queue(std::shared_ptr<ReadyQueue> cpu_ready_queue, at::Device device) -> std::shared_ptr<ReadyQueue>{
-  if (device.type() == at::kCPU || device.type() == at::DeviceType::Meta) {
+  if (should_run_in_cpu_ready_queue(device.type())) {
     // return the cpu ready queue passed in
     TORCH_INTERNAL_ASSERT(cpu_ready_queue);
     return cpu_ready_queue;
   } else {
+    TORCH_INTERNAL_ASSERT(0 <= device.index() && device.index() < static_cast<c10::DeviceIndex>(device_ready_queues_.size()));
     // See Note [Allocating GPUs to autograd threads]
     return device_ready_queues_.at(device.index());
   }
@@ -1185,8 +1194,7 @@ auto Engine::ready_queue_by_index(std::shared_ptr<ReadyQueue> cpu_ready_queue, i
     TORCH_INTERNAL_ASSERT(cpu_ready_queue);
     return cpu_ready_queue;
   } else {
-    // Static cast is ok here as the number of device should never overflow an int.
-    TORCH_INTERNAL_ASSERT(0 <= device_index && device_index < static_cast<int>(device_ready_queues_.size()));
+    TORCH_INTERNAL_ASSERT(0 <= device_index && device_index < static_cast<c10::DeviceIndex>(device_ready_queues_.size()));
     // See Note [Allocating GPUs to autograd threads]
     // NB: This function would become obsolete if we truly allocated a CPU thread
     // per device, rather than colocate.
@@ -1195,14 +1203,28 @@ auto Engine::ready_queue_by_index(std::shared_ptr<ReadyQueue> cpu_ready_queue, i
 }
 
 auto Engine::start_device_threads() -> void {
+  // First always initialize the thread pool for re-entrant threads
+  thread_pool_shared_ = std::make_shared<ThreadPoolShared>();
+
+  // Second, create special threads for each non-CPU device
   // See Note [Allocating GPUs to autograd threads]
   c10::DeviceIndex num_devices = 0;
   for (const auto& impl_atomic : c10::impl::device_guard_impl_registry) {
     auto* impl = impl_atomic.load();
-    if (impl) {
+    // Only record the number of devices for device that don't run on the
+    // cpu ready queue.
+    if (impl && !should_run_in_cpu_ready_queue(impl->type())) {
       num_devices = std::max(num_devices, impl->deviceCount());
     }
   }
+
+  // If there are no device except cpu, no need to create worker threads
+  if (num_devices == 0) {
+    return;
+  }
+
+  // Since we're about to create threads, forking is not possible anymore
+  track_bad_autograd_forks();
 
   // allocate one thread for every GPU device (but colocate GPUs of different
   // types), and pre-allocate the device_ready_queues_ to ensure safe reading on it.
@@ -1210,8 +1232,6 @@ auto Engine::start_device_threads() -> void {
   for (auto& queue : device_ready_queues_)    {
     queue = std::make_shared<ReadyQueue>();
   }
-
-  thread_pool_shared_ = std::make_shared<ThreadPoolShared>();
 
   for (const auto i : c10::irange(num_devices)) {
     std::thread t(&Engine::thread_init, this, i, device_ready_queues_[i], true);
@@ -1236,6 +1256,8 @@ void Engine::add_thread_pool_task(const std::weak_ptr<GraphTask>& graph_task) {
   // Don't need to be holding the lock while actually creating the thread
   lck.unlock();
   if (create_thread) {
+    // If we're creating a new thread, forking is not allowed anymore
+    track_bad_autograd_forks();
     std::thread t(&Engine::reentrant_thread_init, this);
     t.detach();
   }
@@ -1252,7 +1274,7 @@ void GraphTask::stash_current_streams() {
   caller_current_streams_.resize(num_gpus);
   if (num_gpus > 0) {
     for (c10::DeviceIndex idx = 0; idx < num_gpus;  idx++) {
-#ifdef __HIP_PLATFORM_HCC__
+#if defined(USE_ROCM) && (ROCM_VERSION < 50000)
       // If the build targets ROCM, stash streams for all visible devices unconditionally, to work around
       // https://github.com/pytorch/pytorch/issues/59750.
       // TODO: Remove ROCM-specific behavior when https://github.com/pytorch/pytorch/issues/59750 is fixed.

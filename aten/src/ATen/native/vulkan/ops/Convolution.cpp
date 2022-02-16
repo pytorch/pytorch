@@ -2,8 +2,8 @@
 #include <ATen/native/ConvUtils.h>
 #include <ATen/native/utils/ParamUtils.h>
 #include <ATen/native/vulkan/ops/Common.h>
-#include <ATen/native/vulkan/ops/Persistent.h>
 #include <ATen/native/vulkan/api/Utils.h>
+#include <c10/util/irange.h>
 
 namespace at {
 namespace native {
@@ -33,7 +33,7 @@ inline bool is_pointwise(const IntArrayRef filter) {
 
 bool all_lessthan(const IntArrayRef arr, const int t) {
   bool retval = true;
-  for (size_t i = 0; i < arr.size(); i++) {
+  for (const auto i : c10::irange(arr.size())) {
     retval = retval && (arr[i] < t);
   }
   return retval;
@@ -67,7 +67,6 @@ Conv2dMethod determine_method(
 vTensor pack_weights_dw(
     api::Context* const context,
     api::Command::Buffer& command_buffer,
-    api::Resource::Pool& pool,
     const Tensor& weight) {
   /* Source */
   const IntArrayRef src_filter = weight.sizes();
@@ -86,7 +85,6 @@ vTensor pack_weights_dw(
 
   vTensor v_weight{
       context,
-      &pool,
       {
           4,
           dst_kh_sz,
@@ -102,7 +100,7 @@ vTensor pack_weights_dw(
   float* const dst_weight_ptr = v_weight_payload.get();
   memset(dst_weight_ptr, 0, v_weight.nbytes());
 
-  for (int64_t src_oc = 0; src_oc < src_filter[Layout::Filter::output]; ++src_oc) {
+  for (const auto src_oc : c10::irange(src_filter[Layout::Filter::output])) {
     /* Source */
     const float* const src_weight_oc_ptr = src_weight_ptr + src_oc * src_block_sz;
 
@@ -114,7 +112,7 @@ vTensor pack_weights_dw(
                                     dst_c * dst_kernel_sz +
                                     dst_oh * dst_kw_sz;
 
-    for (int64_t src_ih = 0; src_ih < src_filter[Layout::Filter::height]; ++src_ih) {
+    for (const auto src_ih : c10::irange(src_filter[Layout::Filter::height])) {
       memcpy(
           dst_weight_c_ptr + src_ih * src_kw_sz,
           src_weight_oc_ptr + src_ih * src_kw_sz,
@@ -128,7 +126,6 @@ vTensor pack_weights_dw(
 vTensor pack_weights_2d(
     api::Context* const context,
     api::Command::Buffer& command_buffer,
-    api::Resource::Pool& pool,
     const Tensor& weight) {
   /* Source */
   const IntArrayRef src_filter = weight.sizes();
@@ -149,7 +146,6 @@ vTensor pack_weights_2d(
 
   vTensor v_weight{
       context,
-      &pool,
       {
           4,
           dst_kh_sz,
@@ -165,7 +161,7 @@ vTensor pack_weights_2d(
   float* const dst_weight_ptr = v_weight_payload.get();
   memset(dst_weight_ptr, 0, v_weight.nbytes());
 
-  for (int64_t src_oc = 0; src_oc < src_filter[Layout::Filter::output]; ++src_oc) {
+  for (const auto src_oc : c10::irange(src_filter[Layout::Filter::output])) {
     /* Source */
     const float* const src_weight_oc_ptr = src_weight_ptr + src_oc * src_block_sz;
 
@@ -175,11 +171,11 @@ vTensor pack_weights_2d(
 
     float* const dst_weight_c_ptr = dst_weight_ptr + dst_c * dst_kernel_sz;
 
-    for (int64_t src_ic = 0; src_ic < src_filter[Layout::Filter::input]; ++src_ic) {
+    for (const auto src_ic : c10::irange(src_filter[Layout::Filter::input])) {
       const int64_t dst_ic4 = src_ic / 4;
 
-      for (int64_t src_ih = 0; src_ih < src_kh_sz; ++src_ih) {
-        for (int64_t src_iw = 0; src_iw < src_kw_sz; ++src_iw) {
+      for (const auto src_ih : c10::irange(src_kh_sz)) {
+        for (const auto src_iw : c10::irange(src_kw_sz)) {
           memcpy(
               dst_weight_c_ptr + (dst_oh * src_kh_sz + src_ih) * dst_kw_sz +
                 dst_ic4 * src_kw_sz * 4 + src_iw * 4 + src_ic % 4,
@@ -196,7 +192,6 @@ vTensor pack_weights_2d(
 vTensor pack_weights_2d_winograd_2_3(
     api::Context* const context,
     api::Command::Buffer& command_buffer,
-    api::Resource::Pool& pool,
     const Tensor& weight) {
   /* Source */
   const IntArrayRef src_filter = weight.sizes();
@@ -216,7 +211,6 @@ vTensor pack_weights_2d_winograd_2_3(
 
   vTensor v_weight{
       context,
-      &pool,
       {
         4,
         4*dst_oh_sz,
@@ -232,11 +226,11 @@ vTensor pack_weights_2d_winograd_2_3(
   float* const dst_weight_ptr = v_weight_payload.get();
   memset(dst_weight_ptr, 0, v_weight.nbytes());
 
-  for (int64_t src_oc = 0; src_oc < src_oc_sz; ++src_oc) {
+  for (const auto src_oc : c10::irange(src_oc_sz)) {
     const int64_t dst_oh = src_oc / 4;
     const int64_t dst_iw = src_oc % 4;
 
-    for (int64_t src_ic = 0; src_ic < src_ic_sz; ++src_ic) {
+    for (const auto src_ic : c10::irange(src_ic_sz)) {
       const int64_t dst_ow = src_ic / 4;
       const int64_t dst_c = src_ic % 4;
 
@@ -289,7 +283,6 @@ vTensor pack_weights_2d_winograd_2_3(
 }
 
 vTensor pack_weights(
-    api::Resource::Pool& pool,
     const Tensor& weight_arg,
     const Conv2dMethod conv_method) {
   if (weight_arg.is_vulkan()) {
@@ -305,7 +298,6 @@ vTensor pack_weights(
     return pack_weights_dw(
         context,
         command_buffer,
-        pool,
         weight);
   }
 
@@ -313,19 +305,16 @@ vTensor pack_weights(
     return pack_weights_2d_winograd_2_3(
         context,
         command_buffer,
-        pool,
         weight);
   }
 
   return pack_weights_2d(
       context,
       command_buffer,
-      pool,
       weight);
 }
 
 vTensor pack_biases(
-    api::Resource::Pool& pool,
     const c10::optional<Tensor>& bias,
     const Tensor& weight) {
   if (bias && bias->is_vulkan()) {
@@ -339,7 +328,6 @@ vTensor pack_biases(
   const int64_t packed_w = div_up(src_w, INT64_C(4));
   vTensor v_bias{
     context,
-    &pool,
     {
       4,
       1,
@@ -357,7 +345,7 @@ vTensor pack_biases(
     float* const dst_bias_ptr = v_bias_payload.get();
 
     memset(dst_bias_ptr, 0, v_bias.nbytes());
-    for (int64_t i = 0; i < src_w; ++i) {
+    for (const auto i : c10::irange(src_w)) {
       const int64_t c = i % 4;
       const int64_t x = i / 4;
       dst_bias_ptr[c * packed_w + x] = src_bias_ptr[i];
@@ -470,42 +458,9 @@ bool usable(const Tensor& input) {
          true;
 }
 
-
-Tensor convolution(
-    const Tensor& input,
-    const Tensor& weight,
-    const c10::optional<Tensor>& bias,
-    const IntArrayRef stride,
-    const IntArrayRef padding,
-    const IntArrayRef dilation,
-    const bool transposed,
-    const IntArrayRef output_padding,
-    const int64_t groups) {
-  return Conv2dOpContext::create(
-      api::context()->resource().pool,
-      weight,
-      bias,
-      stride,
-      padding,
-      dilation,
-      transposed,
-      output_padding,
-      groups
-  ).run(input);
-}
-
-#ifdef USE_VULKAN_API
-
-TORCH_LIBRARY_IMPL(aten, Vulkan, m) {
-  m.impl("convolution_overrideable", convolution);
-}
-
-#endif /* USE_VULKAN_API */
-
 } // namespace
 
 Conv2dOpContext::Conv2dOpContext(
-    api::Resource::Pool& pool,
     const Tensor& weight,
     const c10::optional<Tensor>& bias,
     const IntArrayRef stride,
@@ -518,8 +473,8 @@ Conv2dOpContext::Conv2dOpContext(
     const c10::optional<Scalar>& output_min,
     const c10::optional<Scalar>& output_max)
   : packed_{
-      pack_weights(pool, weight, method),
-      pack_biases(pool, bias, weight),
+      pack_weights(weight, method),
+      pack_biases(bias, weight),
       pack_filter(weight, expand_param_if_needed(dilation, "dilation", 2)),
       pack_params(expand_param_if_needed(stride, "stride", 2)),
       pack_params(expand_param_if_needed(padding, "padding", 2)),
@@ -543,7 +498,6 @@ Conv2dOpContext::Conv2dOpContext(
 }
 
 Conv2dOpContext Conv2dOpContext::create(
-    api::Resource::Pool& pool,
     const Tensor& weight,
     const c10::optional<Tensor>& bias,
     const IntArrayRef stride_arg,
@@ -585,7 +539,6 @@ Conv2dOpContext Conv2dOpContext::create(
 
   // Pass in the originals
   return Conv2dOpContext{
-    pool,
     weight,
     bias,
     stride_arg,
@@ -887,7 +840,6 @@ c10::intrusive_ptr<Conv2dOpContext> conv2d_clamp_prepack(
     const c10::optional<Scalar>& output_max) {
   return c10::make_intrusive<Conv2dOpContext>(
       Conv2dOpContext::create(
-          persistent()->pool,
           std::move(weight),
           std::move(bias),
           std::move(stride),

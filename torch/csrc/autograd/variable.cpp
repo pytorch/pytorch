@@ -14,6 +14,7 @@
 
 #include <ATen/ATen.h>
 #include <ATen/MemoryOverlap.h>
+#include <ATen/FuncTorchTLS.h>
 #include <c10/util/Exception.h>
 
 #include <list>
@@ -436,6 +437,13 @@ int64_t VariableHooks::_version(const at::TensorBase & self) const {
 
 void VariableHooks::retain_grad(const at::TensorBase& self) const {
   TORCH_CHECK(self.requires_grad(), "can't retain_grad on Tensor that has requires_grad=False");
+
+  // temporary hack to improve functorch UX.
+  const auto& functorch_tls = at::functorch::functorchTLSAccessor();
+  if (functorch_tls) {
+    functorch_tls->checkSupportsRetainGrad();
+  }
+
   if (self.is_leaf()) {  // no-op for leaves
     return;
   }
@@ -587,7 +595,7 @@ const std::shared_ptr<torch::autograd::Node>& VariableHooks::grad_fn(const at::T
         fn->add_input_metadata(
           view_info.base_.options(),
           self.sizes(), // Note: sizes(), not base_.sizes(), is intentional
-          view_info.base_.device());
+          self.unsafeGetTensorImpl()->is_python_dispatch());
         diff_view_meta->grad_fn_ = std::move(fn);
       }
       diff_view_meta->set_attr_version(current_version);

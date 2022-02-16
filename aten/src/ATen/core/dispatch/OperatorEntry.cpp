@@ -198,14 +198,14 @@ bool OperatorEntry::hasKernelForDispatchKey(DispatchKey k) const {
   return false;
 }
 
-c10::optional<const AnnotatedKernel*> OperatorEntry::getKernelForDispatchKey(DispatchKey dispatch_key) const{
+const AnnotatedKernel* OperatorEntry::getKernelForDispatchKey(DispatchKey dispatch_key) const{
   auto kern_it = kernels_.find(dispatch_key);
   if (kern_it != kernels_.end()) {
-    TORCH_INTERNAL_ASSERT(!kernels_.at(dispatch_key).empty());
-    TORCH_INTERNAL_ASSERT(kernels_.at(dispatch_key).front().kernel.isValid());
-    return c10::make_optional(&kernels_.at(dispatch_key).front());
+    TORCH_INTERNAL_ASSERT(!kern_it->second.empty());
+    TORCH_INTERNAL_ASSERT(kern_it->second.front().kernel.isValid());
+    return &kern_it->second.front();
   }
-  return c10::nullopt;
+  return nullptr;
 }
 
 std::pair<const AnnotatedKernel&, const char*> OperatorEntry::computeDispatchTableEntryWithDebug(const c10::Dispatcher& dispatcher, DispatchKey dispatch_key) const {
@@ -241,14 +241,14 @@ std::pair<const AnnotatedKernel&, const char*> OperatorEntry::computeDispatchTab
 
   // 1. Operator registration
   if (auto direct_registration = getKernelForDispatchKey(dispatch_key)) {
-    return {*direct_registration.value(), "kernel"};
+    return {*direct_registration, "kernel"};
   }
 
   // 2.1 Use CompositeExplicitAutograd kernel if available.
   //     See Note [Undefined in dispatchTable_] for the special handling for Undefined.
   if (dispatch_key == DispatchKey::Undefined || isIncludedInAlias(dispatch_key, DispatchKey::CompositeExplicitAutograd)) {
     if (auto default_backend_registration = getKernelForDispatchKey(DispatchKey::CompositeExplicitAutograd)) {
-      return {*default_backend_registration.value(), "default backend kernel"};
+      return {*default_backend_registration, "default backend kernel"};
     }
   }
 
@@ -270,7 +270,7 @@ std::pair<const AnnotatedKernel&, const char*> OperatorEntry::computeDispatchTab
           && hasKernelForAnyDispatchKey(c10::autogradother_backends)) {
         return {ambiguousAutogradOtherKernel(), "ambiguous autogradother"};
       } else if (!has_backend_kernel) {
-        return {*math_registration.value(), "math kernel"};
+        return {*math_registration, "math kernel"};
       }
     }
   }
@@ -278,7 +278,7 @@ std::pair<const AnnotatedKernel&, const char*> OperatorEntry::computeDispatchTab
   // 2.3. For autograd backend keys, use kernel from DispatchKey::Autograd if available
   if (isIncludedInAlias(dispatch_key, DispatchKey::Autograd)) {
     if (auto autograd_registration = getKernelForDispatchKey(DispatchKey::Autograd)) {
-      return {*autograd_registration.value(), "autograd kernel"};
+      return {*autograd_registration, "autograd kernel"};
     }
   }
 
@@ -299,7 +299,10 @@ std::pair<const AnnotatedKernel&, const char*> OperatorEntry::computeDispatchTab
 // or alias keys and their associated keysets).
 // This function should be considered a private helper for updateDispatchTable_()
 void OperatorEntry::updateDispatchTableEntry_(const c10::Dispatcher& dispatcher, DispatchKey dispatch_key) {
-  auto dispatch_ix = static_cast<uint8_t>(dispatch_key);
+  const auto dispatch_ix = c10::getDispatchTableIndexForDispatchKey(dispatch_key);
+  if (C10_UNLIKELY(dispatch_ix == -1)) {
+    return;
+  }
   dispatchTable_[dispatch_ix] = computeDispatchTableEntry(dispatcher, dispatch_key);
   dispatchKeyExtractor_.setOperatorHasFallthroughForKey(dispatch_key, dispatchTable_[dispatch_ix].isFallthrough());
 }
@@ -395,14 +398,14 @@ std::string OperatorEntry::listAllDispatchKeys() const {
   return str.str();
 }
 
-void OperatorEntry::reportSignatureError(std::string name) const {
+void OperatorEntry::reportSignatureError(const CppSignature call_signature) const {
   TORCH_CHECK(false,
         "\nTried to access or call an operator with a wrong signature.\n",
         "  operator: ", (schema_.has_value() ? toString(schema_->schema) : toString(name_)), "\n",
         "    ", (schema_.has_value() ? schema_->debug : "unknown debug info"), "\n",
         "  correct signature:  ", cpp_signature_->signature.name(), "\n",
         "    ", cpp_signature_->debug, "\n",
-        "  accessed/called as: ", name, "\n",
+        "  accessed/called as: ", call_signature.name(), "\n",
         "This likely happened in a call to OperatorHandle::typed<Return (Args...)>(). ",
         "Please make sure that the function signature matches the signature in the operator registration call."
   );

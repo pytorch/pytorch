@@ -1,6 +1,7 @@
 import torch
-from . import _functional as F
+from torch import Tensor
 from .optimizer import Optimizer, required
+from typing import List, Optional
 
 
 class SGD(Optimizer):
@@ -11,7 +12,8 @@ class SGD(Optimizer):
             &\rule{110mm}{0.4pt}                                                                 \\
             &\textbf{input}      : \gamma \text{ (lr)}, \: \theta_0 \text{ (params)}, \: f(\theta)
                 \text{ (objective)}, \: \lambda \text{ (weight decay)},                          \\
-            &\hspace{13mm} \:\mu \text{ (momentum)}, \:\tau \text{ (dampening)},\:nesterov\\[-1.ex]
+            &\hspace{13mm} \:\mu \text{ (momentum)}, \:\tau \text{ (dampening)},
+            \:\textit{ nesterov,}\:\textit{ maximize}                                     \\[-1.ex]
             &\rule{110mm}{0.4pt}                                                                 \\
             &\textbf{for} \: t=1 \: \textbf{to} \: \ldots \: \textbf{do}                         \\
             &\hspace{5mm}g_t           \leftarrow   \nabla_{\theta} f_t (\theta_{t-1})           \\
@@ -22,11 +24,14 @@ class SGD(Optimizer):
             &\hspace{15mm} \textbf{b}_t \leftarrow \mu \textbf{b}_{t-1} + (1-\tau) g_t           \\
             &\hspace{10mm}\textbf{else}                                                          \\
             &\hspace{15mm} \textbf{b}_t \leftarrow g_t                                           \\
-            &\hspace{10mm}\textbf{if} \: nesterov                                                \\
+            &\hspace{10mm}\textbf{if} \: \textit{nesterov}                                       \\
             &\hspace{15mm} g_t \leftarrow g_{t-1} + \mu \textbf{b}_t                             \\
             &\hspace{10mm}\textbf{else}                                                   \\[-1.ex]
             &\hspace{15mm} g_t  \leftarrow  \textbf{b}_t                                         \\
-            &\hspace{5mm}\theta_t \leftarrow \theta_{t-1} - \gamma g_t                    \\[-1.ex]
+            &\hspace{5mm}\textbf{if} \: \textit{maximize}                                          \\
+            &\hspace{10mm}\theta_t \leftarrow \theta_{t-1} + \gamma g_t                   \\[-1.ex]
+            &\hspace{5mm}\textbf{else}                                                    \\[-1.ex]
+            &\hspace{10mm}\theta_t \leftarrow \theta_{t-1} - \gamma g_t                   \\[-1.ex]
             &\rule{110mm}{0.4pt}                                                          \\[-1.ex]
             &\bf{return} \:  \theta_t                                                     \\[-1.ex]
             &\rule{110mm}{0.4pt}                                                          \\[-1.ex]
@@ -43,6 +48,10 @@ class SGD(Optimizer):
         weight_decay (float, optional): weight decay (L2 penalty) (default: 0)
         dampening (float, optional): dampening for momentum (default: 0)
         nesterov (bool, optional): enables Nesterov momentum (default: False)
+        maximize (bool, optional): maximize the params based on the objective, instead of
+            minimizing (default: False)
+        foreach (bool, optional): whether foreach implementation of optimizer
+            is used (default: None)
 
     Example:
         >>> optimizer = torch.optim.SGD(model.parameters(), lr=0.1, momentum=0.9)
@@ -80,7 +89,7 @@ class SGD(Optimizer):
     """
 
     def __init__(self, params, lr=required, momentum=0, dampening=0,
-                 weight_decay=0, nesterov=False):
+                 weight_decay=0, nesterov=False, *, maximize=False, foreach: Optional[bool] = None):
         if lr is not required and lr < 0.0:
             raise ValueError("Invalid learning rate: {}".format(lr))
         if momentum < 0.0:
@@ -89,15 +98,18 @@ class SGD(Optimizer):
             raise ValueError("Invalid weight_decay value: {}".format(weight_decay))
 
         defaults = dict(lr=lr, momentum=momentum, dampening=dampening,
-                        weight_decay=weight_decay, nesterov=nesterov)
+                        weight_decay=weight_decay, nesterov=nesterov,
+                        maximize=maximize, foreach=foreach)
         if nesterov and (momentum <= 0 or dampening != 0):
             raise ValueError("Nesterov momentum requires a momentum and zero dampening")
         super(SGD, self).__init__(params, defaults)
 
     def __setstate__(self, state):
-        super(SGD, self).__setstate__(state)
+        super().__setstate__(state)
         for group in self.param_groups:
             group.setdefault('nesterov', False)
+            group.setdefault('maximize', False)
+            group.setdefault('foreach', None)
 
     @torch.no_grad()
     def step(self, closure=None):
@@ -116,16 +128,14 @@ class SGD(Optimizer):
             params_with_grad = []
             d_p_list = []
             momentum_buffer_list = []
-            weight_decay = group['weight_decay']
-            momentum = group['momentum']
-            dampening = group['dampening']
-            nesterov = group['nesterov']
-            lr = group['lr']
+            has_sparse_grad = False
 
             for p in group['params']:
                 if p.grad is not None:
                     params_with_grad.append(p)
                     d_p_list.append(p.grad)
+                    if p.grad.is_sparse:
+                        has_sparse_grad = True
 
                     state = self.state[p]
                     if 'momentum_buffer' not in state:
@@ -133,14 +143,17 @@ class SGD(Optimizer):
                     else:
                         momentum_buffer_list.append(state['momentum_buffer'])
 
-            F.sgd(params_with_grad,
-                  d_p_list,
-                  momentum_buffer_list,
-                  weight_decay=weight_decay,
-                  momentum=momentum,
-                  lr=lr,
-                  dampening=dampening,
-                  nesterov=nesterov)
+            sgd(params_with_grad,
+                d_p_list,
+                momentum_buffer_list,
+                weight_decay=group['weight_decay'],
+                momentum=group['momentum'],
+                lr=group['lr'],
+                dampening=group['dampening'],
+                nesterov=group['nesterov'],
+                maximize=group['maximize'],
+                has_sparse_grad=has_sparse_grad,
+                foreach=group['foreach'])
 
             # update momentum_buffers in state
             for p, momentum_buffer in zip(params_with_grad, momentum_buffer_list):
@@ -148,3 +161,141 @@ class SGD(Optimizer):
                 state['momentum_buffer'] = momentum_buffer
 
         return loss
+
+
+def sgd(params: List[Tensor],
+        d_p_list: List[Tensor],
+        momentum_buffer_list: List[Optional[Tensor]],
+        # kwonly args with defaults are not supported by functions compiled with torchscript issue #70627
+        # setting this as kwarg for now as functional API is compiled by torch/distributed/optim
+        has_sparse_grad: bool = None,
+        foreach: bool = None,
+        *,
+        weight_decay: float,
+        momentum: float,
+        lr: float,
+        dampening: float,
+        nesterov: bool,
+        maximize: bool):
+    r"""Functional API that performs SGD algorithm computation.
+
+    See :class:`~torch.optim.SGD` for details.
+    """
+
+    if foreach is None:
+        # Placeholder for more complex foreach logic to be added when value is not set
+        foreach = False
+
+    if foreach and torch.jit.is_scripting():
+        raise RuntimeError('torch.jit.script not supported with foreach optimizers')
+
+    if foreach and not torch.jit.is_scripting():
+        func = _multi_tensor_sgd
+    else:
+        func = _single_tensor_sgd
+
+    func(params,
+         d_p_list,
+         momentum_buffer_list,
+         weight_decay=weight_decay,
+         momentum=momentum,
+         lr=lr,
+         dampening=dampening,
+         nesterov=nesterov,
+         has_sparse_grad=has_sparse_grad,
+         maximize=maximize)
+
+def _single_tensor_sgd(params: List[Tensor],
+                       d_p_list: List[Tensor],
+                       momentum_buffer_list: List[Optional[Tensor]],
+                       *,
+                       weight_decay: float,
+                       momentum: float,
+                       lr: float,
+                       dampening: float,
+                       nesterov: bool,
+                       maximize: bool,
+                       has_sparse_grad: bool):
+
+    for i, param in enumerate(params):
+
+        d_p = d_p_list[i]
+        if weight_decay != 0:
+            d_p = d_p.add(param, alpha=weight_decay)
+
+        if momentum != 0:
+            buf = momentum_buffer_list[i]
+
+            if buf is None:
+                buf = torch.clone(d_p).detach()
+                momentum_buffer_list[i] = buf
+            else:
+                buf.mul_(momentum).add_(d_p, alpha=1 - dampening)
+
+            if nesterov:
+                d_p = d_p.add(buf, alpha=momentum)
+            else:
+                d_p = buf
+
+        alpha = lr if maximize else -lr
+        param.add_(d_p, alpha=alpha)
+
+
+def _multi_tensor_sgd(params: List[Tensor],
+                      grads: List[Tensor],
+                      momentum_buffer_list: List[Optional[Tensor]],
+                      *,
+                      weight_decay: float,
+                      momentum: float,
+                      lr: float,
+                      dampening: float,
+                      nesterov: bool,
+                      maximize: bool,
+                      has_sparse_grad: bool):
+
+    if len(params) == 0:
+        return
+
+    if has_sparse_grad is None:
+        has_sparse_grad = any([grad.is_sparse for grad in grads])
+
+    if weight_decay != 0:
+        grads = torch._foreach_add(grads, params, alpha=weight_decay)
+
+    if momentum != 0:
+        bufs = []
+
+        all_states_with_momentum_buffer = True
+        for i in range(len(momentum_buffer_list)):
+            if momentum_buffer_list[i] is None:
+                all_states_with_momentum_buffer = False
+                break
+            else:
+                bufs.append(momentum_buffer_list[i])
+
+        if all_states_with_momentum_buffer:
+            torch._foreach_mul_(bufs, momentum)
+            torch._foreach_add_(bufs, grads, alpha=1 - dampening)
+        else:
+            bufs = []
+            for i in range(len(momentum_buffer_list)):
+                if momentum_buffer_list[i] is None:
+                    buf = momentum_buffer_list[i] = torch.clone(grads[i]).detach()
+                else:
+                    buf = momentum_buffer_list[i]
+                    buf.mul_(momentum).add_(grads[i], alpha=1 - dampening)
+
+                bufs.append(buf)
+
+        if nesterov:
+            torch._foreach_add_(grads, bufs, alpha=momentum)
+        else:
+            grads = bufs
+
+    alpha = lr if maximize else -lr
+    if not has_sparse_grad:
+        torch._foreach_add_(params, grads, alpha=alpha)
+    else:
+        # foreach APIs dont support sparse
+        for i in range(len(params)):
+            params[i].add_(grads[i], alpha=alpha)

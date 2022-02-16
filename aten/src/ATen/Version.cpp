@@ -6,7 +6,7 @@
 #endif
 
 #if AT_MKLDNN_ENABLED()
-#include <mkldnn.hpp>
+#include <dnnl.hpp>
 #include <ideep.hpp>
 #endif
 
@@ -42,7 +42,7 @@ std::string get_mkldnn_version() {
     // Apparently no way to get ideep version?
     // https://github.com/intel/ideep/issues/29
     {
-      const mkldnn_version_t* ver = mkldnn_version();
+      const dnnl_version_t* ver = dnnl_version();
       ss << "Intel(R) MKL-DNN v" << ver->major << "." << ver->minor << "." << ver->patch
          << " (Git Hash " << ver->hash << ")";
     }
@@ -97,12 +97,19 @@ std::string used_cpu_capability() {
   ss << "CPU capability usage: ";
   auto capability = native::get_cpu_capability();
   switch (capability) {
-#ifdef HAVE_VSX_CPU_DEFINITION
+#if defined(HAVE_VSX_CPU_DEFINITION)
     case native::CPUCapability::DEFAULT:
       ss << "DEFAULT";
       break;
     case native::CPUCapability::VSX:
       ss << "VSX";
+      break;
+#elif defined(HAVE_ZVECTOR_CPU_DEFINITION)
+    case native::CPUCapability::DEFAULT:
+      ss << "DEFAULT";
+      break;
+    case native::CPUCapability::ZVECTOR:
+      ss << "Z VECTOR";
       break;
 #else
     case native::CPUCapability::DEFAULT:
