@@ -147,7 +147,7 @@ jobs:
       !{{ common.render_test_results() }}
       !{{ common.upload_downloaded_files(name='macos', artifact_name="test-jsons", use_s3=False) }}
       !{{ common.upload_test_reports("macos", artifact_name="test-reports", use_s3=False) }}
-      !{{ common.upload_test_statistics(build_environment) }}
+      !{{ common.upload_test_statistics(build_environment, needs_credentials=True) }}
 {% endblock +%}
 {%- endif %}
 
