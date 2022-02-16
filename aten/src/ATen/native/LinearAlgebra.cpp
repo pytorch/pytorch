@@ -2464,9 +2464,7 @@ static Tensor& linalg_norm_out_impl(Tensor& result, const Tensor& self, const op
       "dtype = ", dtype, ", out.dtype = ", result.scalar_type());
   }
   int64_t ndim = self.dim();
-
   if (opt_str_ord.has_value()) {
-    // 'ord' is string
     auto str_ord = opt_str_ord.value();
     check_str_ord_valid(str_ord, opt_dim, ndim);
     Tensor self_ = opt_dtype.has_value() ? self.to(opt_dtype.value()) : self;
@@ -2574,7 +2572,6 @@ static Tensor& linalg_vector_norm_impl(const Tensor& self, const Scalar& scalar_
     self_ = self;
   }
   ScalarType out_dtype = opt_dtype.value_or(toRealValueType(self.scalar_type()));
-
   TORCH_CHECK(!result.defined() || out_dtype == result.scalar_type(),
     "linalg.vector_norm expected out tensor dtype ", out_dtype,
     " but got: ", result.scalar_type());
