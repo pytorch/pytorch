@@ -23,6 +23,7 @@ from torch.utils.data import (
     DataLoader2,
     Dataset,
     IterableDataset,
+    IterDataPipe,
     Subset,
     TensorDataset,
     communication,
@@ -1382,10 +1383,13 @@ except RuntimeError as e:
             else:
                 return [i + 1 for i in row]
 
+        def filter_len(row):
+            return len(row) == 4
+
         reference = [torch.as_tensor([[2, 3, 4, 5]]), torch.as_tensor([[2, 3, 4, 5]])]
-        datapipe = IterableWrapper([[1, 2, 3, 4], [1, 2, 3, 4, 5, 6]])
+        datapipe: IterDataPipe = IterableWrapper([[1, 2, 3, 4], [1, 2, 3, 4, 5, 6]])
         datapipe = datapipe.map(row_processer)
-        datapipe = datapipe.filter(lambda ls: len(ls) == 4)
+        datapipe = datapipe.filter(lambda row: len(row) == 4) if HAS_DILL else datapipe.filter(filter_len)
 
         dl_common_args = dict(num_workers=2, batch_size=2, shuffle=True, pin_memory=(not TEST_CUDA))
         for ctx in supported_multiprocessing_contexts:

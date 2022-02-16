@@ -582,12 +582,23 @@ class TestFunctionalIterDataPipe(TestCase):
             (dp.iter.Sampler, (), {}),
             (dp.iter.Shuffler, (), {}),
             (dp.iter.StreamReader, (), {}),
-            (dp.iter.UnBatcher, (), {}),
+            (dp.iter.UnBatcher, (0,), {}),
             (dp.iter.Zipper, (input_dp,), {}),
         ]
+        # Skipping comparison for these DataPipes
+        dp_skip_comparison = {dp.iter.FileLister, dp.iter.FileOpener, dp.iter.StreamReader, dp.iter.Shuffler}
+        # These DataPipes produce multiple DataPipes as outputs and those should be compared
+        dp_compare_children = {dp.iter.Demultiplexer, dp.iter.Forker}
         for dpipe, dp_args, dp_kwargs in picklable_datapipes:
-            print(dpipe)
-            _ = pickle.dumps(dpipe(input_dp, *dp_args, **dp_kwargs))  # type: ignore[call-arg]
+            datapipe = dpipe(input_dp, *dp_args, **dp_kwargs)  # type: ignore[call-arg]
+            serialized_dp = pickle.dumps(datapipe)
+            deserialized_dp = pickle.loads(serialized_dp)
+            if dpipe not in dp_skip_comparison:
+                if dpipe in dp_compare_children:
+                    for c1, c2 in zip(list(datapipe), list(deserialized_dp)):
+                        self.assertEqual(list(c1), list(c2))
+                else:
+                    self.assertEqual(list(datapipe), list(deserialized_dp))
 
     def test_serializable_with_dill(self):
         """Only for DataPipes that take in a function or buffer as argument"""
