@@ -1036,7 +1036,6 @@ class TestDecompositionOpInfo(TestCase):
                        f" than original. Original max diff: {orig_diff}, Decomp max diff: {decomp_diff}")
                 raise RuntimeError(msg)
 
-
         def op_assert_equal(op, a, b):
             assert a.dtype == b.dtype
             rtol, atol = _getDefaultRtolAndAtol(a.dtype, b.dtype)
@@ -1122,7 +1121,8 @@ class TestDecompositionOpInfo(TestCase):
                     else:
                         decomp_out = call_op(decomposition, lambda x: x, *args, **kwargs)
 
-                    real_out_double = call_op(func, lambda x: upcast_tensor(unwrap_tensor(x), dtype=torch.float64), *args, **kwargs)
+                    real_out_double = call_op(func, lambda x: upcast_tensor(unwrap_tensor(x), dtype=torch.float64),
+                                              *args, **kwargs)
 
                     real_out = call_op(func, unwrap_tensor, *args, **kwargs)
                     assert(len(real_out) == len(decomp_out))
