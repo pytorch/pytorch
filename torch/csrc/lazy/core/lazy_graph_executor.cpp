@@ -741,6 +741,12 @@ LazyGraphExecutor::PostOrderData LazyGraphExecutor::RunPostOrder(
   return po_data;
 }
 
+static void printComputation(Computation* comp, bool created) {
+  LOG(ERROR) << "Print computation: created " << created << std::endl;
+  TSComputation* tscomp = (TSComputation*) comp;
+  LOG(ERROR) << *tscomp->graph() << std::endl;
+}
+
 std::shared_ptr<LazyGraphExecutor::Async> LazyGraphExecutor::TryRunCachedSync(
     std::vector<LazyTensor>* tensors,
     SyncTensorCollection* coll,
@@ -750,6 +756,7 @@ std::shared_ptr<LazyGraphExecutor::Async> LazyGraphExecutor::TryRunCachedSync(
   if (cached_computation == nullptr) {
     return nullptr;
   }
+  printComputation(cached_computation->computation.get(), false);
   TORCH_LAZY_VALUE_METRIC("TensorsGraphSize", po_data->post_order.size());
   VLOG(5) << "TensorsGraphSize=" << po_data->post_order.size();
 
@@ -905,6 +912,7 @@ std::shared_ptr<LazyGraphExecutor::Async> LazyGraphExecutor::
   }
 
   CompilationResult compile_result = Compile(*tensors, devices, coll, &po_data);
+  printComputation(compile_result.computation.get(), true);
 
   TORCH_LAZY_VALUE_METRIC("TensorsGraphSize", compile_result.emitted_nodes);
   VLOG(5) << "TensorsGraphSize=" << compile_result.emitted_nodes;

@@ -63,6 +63,12 @@ class Cache {
     return it->second->second;
   }
 
+  TypePtr GetLatest() {
+    std::lock_guard<std::mutex> g(lock_);
+    TORCH_CHECK(element_list_.size() > 0);
+    return element_list_.front().second;
+  }
+
   bool Erase(const K& key) {
     std::lock_guard<std::mutex> slock(lock_);
     auto it = element_map_.find(&key);
@@ -79,6 +85,11 @@ class Cache {
     std::lock_guard<std::mutex> slock(lock_);
     element_map_.clear();
     element_list_.clear();
+  }
+
+  int Numel() const {
+    TORCH_CHECK(element_map_.size() == element_list_.size());
+    return element_map_.size();
   }
 
  private:

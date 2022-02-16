@@ -6,6 +6,8 @@
 #include <torch/csrc/lazy/core/ir_dump_util.h>
 #include <torch/csrc/lazy/core/ir_util.h>
 #include <torch/csrc/lazy/core/lazy_graph_executor.h>
+#include <torch/csrc/lazy/core/ir.h>
+#include <torch/csrc/lazy/core/tensor.h>
 #include <torch/csrc/lazy/core/metrics.h>
 #include <torch/csrc/lazy/core/multi_wait.h>
 #include <torch/csrc/lazy/core/tensor_impl.h>
@@ -13,6 +15,8 @@
 #include <torch/csrc/lazy/core/thread_pool.h>
 #include <torch/csrc/lazy/core/util.h>
 #include <torch/csrc/lazy/python/python_util.h>
+#include <torch/csrc/lazy/core/internal_ops/ltc_ops.h>
+#include <torch/csrc/lazy/ts_backend/ops/device_data.h>
 
 #include <cstring>
 #include <sstream>
@@ -423,6 +427,13 @@ std::vector<at::Tensor> LtcCreateTensorList(const at::TensorList& tensors) {
 //   return py_dict;
 // }
 
+void shunting_explore() {
+  auto* cacheptr = torch::lazy::LazyGraphExecutor::Get()->GetComputationCache();
+  LOG(ERROR) << "Cache contains " << cacheptr->Numel() << " computations" << std::endl;
+  // TODO
+}
+
+using namespace torch::lazy;
 void InitLtcModuleBindings(py::module m) {
   m.def("_prepare_to_exit", []() { PrepareToExit(); });
   m.def("_get_git_revs", []() { return GetRevisions(); });
@@ -445,6 +456,42 @@ void InitLtcModuleBindings(py::module m) {
           };
           return GetTensorsDump(tensors, coverter);
         });
+  m.def("_get_ltc_tensors_ts_device_data_node",
+        [](const std::vector<at::Tensor>& tensors) {
+          std::vector<Node*> roots;
+          for (auto& tensor : tensors) {
+            auto xtensor = TryGetLtcTensor(tensor);
+            roots.push_back(xtensor.GetIrValue().node.get());
+          }
+          auto post_order = Util::ComputePostOrder(roots);
+          std::vector<int64_t> tensor_ids;
+          for (auto nodeptr : post_order) {
+            if (nodeptr->op() == *torch::lazy::ltc_device_data) {
+              const auto* device_data_node = torch::lazy::NodeCast<torch::lazy::DeviceData>(nodeptr, *torch::lazy::ltc_device_data);
+              auto infoptr = device_data_node->data()->info();
+              auto deviceDataInfoPtr = (torch::lazy::LazyGraphExecutor::DeviceDataInfo*) infoptr;
+              tensor_ids.push_back(deviceDataInfoPtr->tensor_id);
+            }
+          }
+          return tensor_ids;
+        });
+  m.def("_run_cached_graph", [](const std::vector<at::Tensor>& tensors) {
+    // XXX this demo assumes the computation cache contains a single computation
+    // which is the one we want to reuse. This will be enhanced 
+    auto computationPtr = (TSComputation*) LazyGraphExecutor::Get()->GetComputationCache()->GetLatest()->computation.get();
+
+    TORCH_CHECK(computationPtr);
+    std::vector<torch::jit::IValue> stack;
+    for (auto arg : tensors) {
+      stack.emplace_back(arg);
+    }
+    computationPtr->graph_executor().run(stack);
+    std::vector<at::Tensor> result;
+    for (torch::jit::IValue elem : stack) {
+      result.push_back(elem.toTensor());
+    }
+    return result;
+  });
   m.def("_get_ltc_tensors_backend",
         [](const std::vector<at::Tensor>& tensors) -> std::string {
           return GetTensorsBackendGraph(tensors);
@@ -687,6 +734,7 @@ void InitLtcModuleBindings(py::module m) {
   m.def("_ltc_enable_thread_pool", []() {
     FLAGS_torch_lazy_use_thread_pool = true;
   });
+  m.def("shunting_explore", []() { shunting_explore(); });
 }  // namespace
 
 }  // namespace
