@@ -50,7 +50,7 @@ DynamicLayer::DynamicLayer(
     DispatchKey key,
     int64_t layerId,
     optional<int64_t> batchSize,
-    optional<std::string> randomness,
+    optional<RandomnessType> randomness,
     optional<bool> prev_grad_mode)
   :
     key_(key),
@@ -77,7 +77,7 @@ int64_t DynamicLayer::batchSize() const {
   return *batchSize_;
 }
 
-std::string DynamicLayer::randomness() const {
+RandomnessType DynamicLayer::randomness() const {
   TORCH_INTERNAL_ASSERT(randomness_);
   return *randomness_;
 }
@@ -198,7 +198,7 @@ static int64_t pushDynamicLayer(DynamicLayer&& dynamic_layer) {
 int64_t initAndPushDynamicLayer(
     DispatchKey key,
     optional<int64_t> batch_size,
-    optional<std::string> randomness,
+    optional<RandomnessType> randomness,
     optional<bool> prev_grad_mode) {
   TORCH_INTERNAL_ASSERT(key == DispatchKey::Autograd || key == kBatchedKey);
   const auto& dynamicLayerStack = dynamicLayerStackAccessor();
