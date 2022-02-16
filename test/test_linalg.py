@@ -1615,7 +1615,6 @@ class TestLinalg(TestCase):
             for input_size, ord_settings, dim, error_type, error_regex in error_test_cases:
                 input = torch.randn(*input_size, dtype=dtype, device=device)
                 for ord in ord_settings:
-                    print("ord =", ord, " dim=", dim, " keepdim=", keepdim, " error_regex=", error_regex)
                     run_error_test_case(input, ord, dim, keepdim, error_type, error_regex)
 
     # Test complex number inputs for linalg.norm
