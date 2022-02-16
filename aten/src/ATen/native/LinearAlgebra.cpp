@@ -696,11 +696,10 @@ std::tuple<Tensor, Tensor, Tensor, Tensor>
 linalg_svd_rank_restricted(
     const Tensor& input,
     const c10::optional<Tensor>& atol,
-    const c10::optional<Tensor>& rtol,
-    bool full_matrices) {
+    const c10::optional<Tensor>& rtol) {
   Tensor U, S, Vh, rank, unique_rank;
   std::tie(U, S, Vh, rank, unique_rank) = at::_linalg_svd_rank_restricted_helper(
-      input, atol, rtol, full_matrices,
+      input, atol, rtol, /*full_matrices=*/false,
       /*compute_unique_rank=*/input.numel() ? true : false
   );
 
@@ -775,28 +774,25 @@ std::tuple<Tensor, Tensor, Tensor, Tensor>
 linalg_svd_rank_restricted(
     const Tensor& input,
     c10::optional<double> atol,
-    c10::optional<double> rtol,
-    bool full_matrices) {
+    c10::optional<double> rtol) {
   Tensor atol_tensor, rtol_tensor;
   std::tie(atol_tensor, rtol_tensor) = get_atol_rtol(input, atol, rtol);
-  return at::linalg_svd_rank_restricted(input, atol_tensor, rtol_tensor, full_matrices);
+  return at::linalg_svd_rank_restricted(input, atol_tensor, rtol_tensor);
 }
 
 std::tuple<Tensor, Tensor, Tensor, Tensor>
 linalg_svd_rank_restricted(
     const Tensor& input,
-    double tol,
-    bool full_matrices) {
-  return at::linalg_svd_rank_restricted(input, tol, /*rtol=*/0.0, full_matrices);
+    double tol) {
+  return at::linalg_svd_rank_restricted(input, tol, /*rtol=*/0.0);
 }
 
 std::tuple<Tensor, Tensor, Tensor, Tensor>
 linalg_svd_rank_restricted(
     const Tensor& input,
-    const Tensor& tol,
-    bool full_matrices) {
+    const Tensor& tol) {
   const auto rtol = at::zeros({}, tol.options());
-  return at::linalg_svd_rank_restricted(input, tol, rtol, full_matrices);
+  return at::linalg_svd_rank_restricted(input, tol, rtol);
 }
 
 std::tuple<Tensor&, Tensor&, Tensor&, Tensor&>
@@ -804,7 +800,6 @@ linalg_svd_rank_restricted_out(
     const Tensor& input,
     const c10::optional<Tensor>& atol_opt,
     const c10::optional<Tensor>& rtol_opt,
-    bool full_matrices,
     Tensor& U,
     Tensor& S,
     Tensor& Vh,
@@ -828,7 +823,7 @@ linalg_svd_rank_restricted_out(
   checkNotComplexTolerance(rtol, "torch.linalg.svd_rank_restricted", "rtol");
 
   at::_linalg_svd_rank_restricted_helper_outf(
-      input, atol_opt, rtol_opt, full_matrices,
+      input, atol_opt, rtol_opt, /*full_matrices=*/false,
       /*compute_unique_rank=*/false,
       U, S, Vh, rank, rank
   );
@@ -840,7 +835,6 @@ linalg_svd_rank_restricted_out(
     const Tensor& input,
     c10::optional<double> atol,
     c10::optional<double> rtol,
-    bool full_matrices,
     Tensor& U,
     Tensor& S,
     Tensor& Vh,
@@ -848,7 +842,7 @@ linalg_svd_rank_restricted_out(
   Tensor atol_tensor, rtol_tensor;
   std::tie(atol_tensor, rtol_tensor) = get_atol_rtol(input, atol, rtol);
   return at::linalg_svd_rank_restricted_outf(
-      input, atol_tensor, rtol_tensor, full_matrices,
+      input, atol_tensor, rtol_tensor,
       U, S, Vh, rank
   );
 }
@@ -857,14 +851,13 @@ std::tuple<Tensor&, Tensor&, Tensor&, Tensor&>
 linalg_svd_rank_restricted_out(
     const Tensor& input,
     const Tensor& tol,
-    bool full_matrices,
     Tensor& U,
     Tensor& S,
     Tensor& Vh,
     Tensor& rank) {
   const auto rtol = at::zeros({}, tol.options());
   return at::linalg_svd_rank_restricted_outf(
-      input, tol, rtol, full_matrices,
+      input, tol, rtol,
       U, S, Vh, rank
   );
 }
@@ -873,13 +866,12 @@ std::tuple<Tensor&, Tensor&, Tensor&, Tensor&>
 linalg_svd_rank_restricted_out(
     const Tensor& input,
     double tol,
-    bool full_matrices,
     Tensor& U,
     Tensor& S,
     Tensor& Vh,
     Tensor& rank) {
   return at::linalg_svd_rank_restricted_outf(
-      input, tol, /*rtol=*/0.0, full_matrices,
+      input, tol, /*rtol=*/0.0,
       U, S, Vh, rank
   );
 }

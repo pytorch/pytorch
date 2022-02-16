@@ -3795,11 +3795,6 @@ class TestLinalg(TestCase):
 
         # match to linalg.matrix_rank
         def matrix_rank(x, *args, **kwargs):
-            if 'full_matrices' in kwargs:
-                full_matrices = kwargs['full_matrices']
-            else:
-                full_matrices = True
-
             if len(args):
                 tol = args[0]
             elif 'tol' in kwargs:
@@ -3808,7 +3803,7 @@ class TestLinalg(TestCase):
                 tol = None
 
             if 'out' in kwargs:
-                svd = torch.linalg.svd(x, full_matrices=full_matrices)
+                svd = torch.linalg.svd(x, full_matrices=False)
                 out = {
                     'out': (
                         torch.empty_like(svd[0]),
@@ -3821,22 +3816,20 @@ class TestLinalg(TestCase):
                 out = {}
 
             if tol is not None:
-                return op(x, tol=tol, full_matrices=full_matrices, **out)[-1]
+                return op(x, tol=tol, **out)[-1]
             else:
                 atol = kwargs['atol'] if 'atol' in kwargs else None
                 rtol = kwargs['rtol'] if 'rtol' in kwargs else None
-                return op(x, atol=atol, rtol=rtol, full_matrices=full_matrices, **out)[-1]
+                return op(x, atol=atol, rtol=rtol, **out)[-1]
 
         for op in (torch.linalg.svd_rank_restricted,):
-            for full_matrices in (True, False):
+            def matrix_rank_fn(*args, **kwargs):
+                return matrix_rank(*args, **kwargs)
 
-                def matrix_rank_fn(*args, **kwargs):
-                    return matrix_rank(*args, full_matrices=full_matrices, **kwargs)
-
-                for attr in dir(self):
-                    if attr.startswith('_test_matrix_rank'):
-                        test = getattr(self, attr)
-                        test(device, dtype, matrix_rank=matrix_rank_fn)
+            for attr in dir(self):
+                if attr.startswith('_test_matrix_rank'):
+                    test = getattr(self, attr)
+                    test(device, dtype, matrix_rank=matrix_rank_fn)
 
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
@@ -3862,6 +3855,7 @@ class TestLinalg(TestCase):
                 self.assertEqual(ur, torch.zeros_like(ur))
                 self.assertEqual(sr, torch.zeros_like(sr))
                 self.assertEqual(vhr, torch.zeros_like(vhr))
+                self.assertEqual(input, (u * s.unsqueeze(-2)) @ vh, atol=1e-4, rtol=1e-4)
 
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack

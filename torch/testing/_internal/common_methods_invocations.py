@@ -5622,9 +5622,9 @@ def sample_inputs_linalg_svd_rank_restricted(op_info, device, dtype, requires_gr
 
     fns = (fn_U, fn_S, fn_Vh, fn_UVh)
 
-    for batch, n, k, fullmat_val, fn in product(batches, ns, ns, (True, False), fns):
+    for batch, n, k, fn in product(batches, ns, ns, fns):
         shape = batch + (n, k)
-        sample = SampleInput(make_arg(*shape), kwargs={'full_matrices': fullmat_val}, output_process_fn_grad=fn)
+        sample = SampleInput(make_arg(*shape), output_process_fn_grad=fn)
         # such tol to make equivalent to linalg_svd
         tol = -1e-10
         tol_tensor = torch.tensor(tol, dtype=tol_dtype, device=device)
@@ -12991,7 +12991,6 @@ op_db: List[OpInfo] = [
                #     (t @ t.mT if t.shape[-2] > t.shape[-1] else t.mT @ t) / 100,
                # RuntimeError: Expected all tensors to be on the same device, but found at least two devices, cuda:0 and cpu!
                (t @ t.mT if t.shape[-2] > t.shape[-1] else t.mT @ t) / (torch.tensor(100, dtype=t.dtype, device=t.device)),
-               full_matrices=not kwargs['some'] if 'some' in kwargs else True
            ),
            aten_name='linalg_svd_rank_restricted',
            dtypes=floating_and_complex_types(),
