@@ -209,7 +209,7 @@ std::tuple<Tensor&, Tensor&> linalg_slogdet_out(const Tensor& input, Tensor& sig
   checkSameDevice("linalg.slogdet", sign, input, "sign");
   checkSameDevice("linalg.slogdet", logabsdet, input, "logabsdet");
   checkLinalgCompatibleDtype("linalg.slogdet", sign, input, "sign");
-  ScalarType real_dtype = toValueType(input.scalar_type());
+  ScalarType real_dtype = toRealValueType(input.scalar_type());
   // logabsdet is always real-valued here
   checkLinalgCompatibleDtype("linalg.slogdet", logabsdet.scalar_type(), real_dtype, "logabsdet");
 
@@ -248,7 +248,7 @@ std::tuple<Tensor, Tensor> get_atol_rtol(
     rtol = rtol_opt.value();
     checkNotComplexTolerance(rtol, function_name, "rtol");
   } else {
-    ScalarType real_dtype = toValueType(input.scalar_type());
+    ScalarType real_dtype = toRealValueType(input.scalar_type());
     auto default_rtol = at::full({}, _get_epsilon(real_dtype) * std::max(input.size(-1), input.size(-2)), options);
     rtol = atol_opt.has_value()
            ? at::where(atol_opt.value() > 0, at::zeros({}, options), default_rtol)
@@ -266,7 +266,7 @@ std::tuple<Tensor, Tensor> get_atol_rtol(
   if (rtol_opt.has_value()) {
     rtol = rtol_opt.value();
   } else {
-    ScalarType real_dtype = toValueType(input.scalar_type());
+    ScalarType real_dtype = toRealValueType(input.scalar_type());
     auto default_rtol = _get_epsilon(real_dtype) * std::max(input.size(-1), input.size(-2));
     rtol = (atol_opt.has_value() && atol_opt.value() > 0.0)
            ? 0.0
@@ -1847,7 +1847,7 @@ inline Tensor _blob_to_Tensor(
   // we also insert a fake dimension so that the result could directly
   // be used in _compute_linear_combination
   auto tensor = at::from_blob((void*)blob.begin(), blob.size(),
-    c10::toValueType(in.scalar_type())).unsqueeze(0);
+    c10::toRealValueType(in.scalar_type())).unsqueeze(0);
   return _move_memory_if_cuda_input(tensor, in);
 }
 
@@ -1980,7 +1980,7 @@ Tensor compute_T12(const Tensor& A) {
     reinterpret_cast<void*>(&b),
     {num_prods, num_prods},
     {num_prods, 1},
-    c10::toValueType(A.scalar_type())
+    c10::toRealValueType(A.scalar_type())
   );
   bs = _move_memory_if_cuda_input(bs, A);
 
@@ -2052,7 +2052,7 @@ Tensor compute_T18(const Tensor& A) {
     reinterpret_cast<void*>(&b),
     {num_prods, num_prods},
     {num_prods, 1},
-    c10::toValueType(A.scalar_type())
+    c10::toRealValueType(A.scalar_type())
   );
   bs = _move_memory_if_cuda_input(bs, A);
 
@@ -2287,7 +2287,7 @@ Tensor frobenius_norm(const Tensor& self) {
 Tensor frobenius_norm(const Tensor& self, IntArrayRef dim, bool keepdim) {
   // NOTE: As frobenius_norm_out is currently implemented, it will always produce a
   //    strided tensor result, even if the input is sparse.
-  auto options = self.options().layout(c10::Layout::Strided).dtype(toValueType(self.scalar_type()));
+  auto options = self.options().layout(c10::Layout::Strided).dtype(toRealValueType(self.scalar_type()));
   Tensor result = at::empty({0}, options);
   return at::native::frobenius_norm_out(self, dim, keepdim, result);
 }
@@ -2339,7 +2339,7 @@ Tensor &nuclear_norm_out(const Tensor& self, bool keepdim, Tensor& result) {
 }
 
 Tensor nuclear_norm(const Tensor& self, IntArrayRef dim, bool keepdim) {
-  Tensor result = at::empty({0}, self.options().dtype(toValueType(self.scalar_type())));
+  Tensor result = at::empty({0}, self.options().dtype(toRealValueType(self.scalar_type())));
   return at::native::nuclear_norm_out(self, dim, keepdim, result);
 }
 
@@ -2557,11 +2557,11 @@ static Tensor& linalg_vector_norm_impl(const Tensor& self, const Scalar& scalar_
     // linalg_vector_norm_stub. See issue:
     // https://github.com/pytorch/pytorch/issues/52648
     self_ = self.to(in_dtype).abs();
-    in_dtype = toValueType(in_dtype);
+    in_dtype = toRealValueType(in_dtype);
   } else {
     self_ = self;
   }
-  ScalarType out_dtype = opt_dtype.value_or(toValueType(self.scalar_type()));
+  ScalarType out_dtype = opt_dtype.value_or(toRealValueType(self.scalar_type()));
   TORCH_CHECK(!result.defined() || out_dtype == result.scalar_type(),
     "linalg.vector_norm expected out tensor dtype ", out_dtype,
     " but got: ", result.scalar_type());
@@ -2575,7 +2575,7 @@ static Tensor& linalg_vector_norm_impl(const Tensor& self, const Scalar& scalar_
 }
 
 Tensor linalg_vector_norm(const Tensor& self, const Scalar& ord, optional<IntArrayRef> opt_dim, bool keepdim, optional<ScalarType> opt_dtype) {
-  ScalarType out_dtype = opt_dtype.value_or(toValueType(self.scalar_type()));
+  ScalarType out_dtype = opt_dtype.value_or(toRealValueType(self.scalar_type()));
   Tensor result = create_reduction_result(self, opt_dim.value_or(IntArrayRef{}), keepdim, out_dtype);
   return at::native::linalg_vector_norm_impl(self, ord, opt_dim, keepdim, opt_dtype, result);
 }
@@ -2650,7 +2650,7 @@ Tensor& linalg_matrix_norm_out(
 
 // Numerical or None norms
 Tensor linalg_norm(const Tensor& self, const optional<Scalar>& opt_ord, optional<IntArrayRef> opt_dim, bool keepdim, optional<ScalarType> opt_dtype) {
-  auto options = TensorOptions().dtype(opt_dtype.has_value() ? opt_dtype.value() : toValueType(self.scalar_type())).device(self.device());
+  auto options = TensorOptions().dtype(opt_dtype.has_value() ? opt_dtype.value() : toRealValueType(self.scalar_type())).device(self.device());
   Tensor result = at::empty({0}, options);
   return at::native::linalg_norm_out(
       self, opt_ord, opt_dim, keepdim, opt_dtype, result);
@@ -2658,7 +2658,7 @@ Tensor linalg_norm(const Tensor& self, const optional<Scalar>& opt_ord, optional
 
 // Frobenius and nuclear norms
 Tensor linalg_norm(const Tensor& self, c10::string_view ord, optional<IntArrayRef> opt_dim, bool keepdim, optional<ScalarType> opt_dtype) {
-  auto options = TensorOptions().dtype(opt_dtype.has_value() ? opt_dtype.value() : toValueType(self.scalar_type())).device(self.device());
+  auto options = TensorOptions().dtype(opt_dtype.has_value() ? opt_dtype.value() : toRealValueType(self.scalar_type())).device(self.device());
   Tensor result = at::empty({0}, options);
   return at::native::linalg_norm_out(
       self, ord, opt_dim, keepdim, opt_dtype, result);
@@ -2694,7 +2694,7 @@ Tensor _linalg_cond_helper(const Tensor& self, c10::variant<Scalar, c10::string_
 // Return zero for each matrix in the batch
 Tensor _linalg_cond_empty_matrix(const Tensor& self, c10::ScalarType dtype) {
   auto result_shape = IntArrayRef(self.sizes().cbegin(), self.sizes().cend()-2);
-  TensorOptions options = self.options().dtype(toValueType(self.scalar_type()));
+  TensorOptions options = self.options().dtype(toRealValueType(self.scalar_type()));
   return at::zeros(result_shape, options);
 }
 
@@ -2726,7 +2726,7 @@ Tensor linalg_cond(const Tensor& self, const optional<Scalar>& opt_ord) {
 
   // NumPy doesn't define the condition number for 0x0 matrices, we return 0.0 for such input
   if (self.numel() == 0) {
-    auto real_dtype = toValueType(typeMetaToScalarType(self.dtype()));
+    auto real_dtype = toRealValueType(typeMetaToScalarType(self.dtype()));
     return _linalg_cond_empty_matrix(self, real_dtype);
   }
 
@@ -2757,7 +2757,7 @@ Tensor linalg_cond(const Tensor& self, const optional<Scalar>& opt_ord) {
 
 Tensor& linalg_cond_out(const Tensor& self, const optional<Scalar>& opt_ord, Tensor& result) {
   checkSameDevice("linalg.cond", result, self);
-  ScalarType real_dtype = toValueType(self.scalar_type());
+  ScalarType real_dtype = toRealValueType(self.scalar_type());
   checkLinalgCompatibleDtype("linalg.cond", result.scalar_type(), real_dtype);
 
   Tensor result_tmp = at::linalg_cond(self, opt_ord);
@@ -2791,7 +2791,7 @@ Tensor linalg_cond(const Tensor& self, c10::string_view ord) {
 // TODO: implement _out variant avoiding copy and using already allocated storage directly
 Tensor& linalg_cond_out(const Tensor& self, c10::string_view ord, Tensor& result) {
   checkSameDevice("linalg.cond", result, self);
-  ScalarType real_dtype = toValueType(self.scalar_type());
+  ScalarType real_dtype = toRealValueType(self.scalar_type());
   checkLinalgCompatibleDtype("linalg.cond", result.scalar_type(), real_dtype);
 
   Tensor result_tmp = at::linalg_cond(self, ord);
