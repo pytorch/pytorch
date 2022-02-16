@@ -702,7 +702,7 @@ static const std::vector<OperatorGeneratorArgs> opGenArgs{
         aliasAnalysisFromSchema()),
     OperatorGeneratorArgs(
         TORCH_SELECTIVE_SCHEMA(
-            "prim::IfThenElse(bool cond, t(a) x, t(b) y) -> t(a|b)"),
+            "prim::IfThenElse(bool cond, Any(a) x, Any(b) y) -> Any(a|b)"),
         [](Stack& stack) {
           const auto cond = stack[stack.size() - 3].toBool();
           stack[stack.size() - 3] =
