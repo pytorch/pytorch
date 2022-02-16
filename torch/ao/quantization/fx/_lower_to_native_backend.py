@@ -9,7 +9,7 @@ from . import subgraph_rewriter_FORKED_DO_NOT_USE
 from .graph_module import QuantizedGraphModule
 from .quantized_fusion_patterns_and_replacements import get_fbgemm_patterns_and_replacements
 from .match_utils import is_match, MatchAllNode
-from .utils import get_linear_prepack_op_for_dtype, create_node_from_old_node_preserve_meta
+from .utils import create_node_from_old_node_preserve_meta, get_linear_prepack_op_for_dtype
 from ..utils import _parent_name, check_node
 from typing import Dict, Tuple, Type, List
 from torch.fx import Node
@@ -155,7 +155,7 @@ def _lower_weighted_ref_functional(model: QuantizedGraphModule) -> QuantizedGrap
 
             # Step 1: Replace quantized weights with packed weights
             quantized_weight = dq_node2.args[0]
-            (_, weight_scale_node, weight_zp_node, _, weight_dtype) = quantized_weight.args
+            weight_dtype = quantized_weight.args[4]
             bias = func_node.kwargs.get("bias", None)
             prepack_args = (quantized_weight, bias)
             if ref_func == torch.nn.functional.linear:
