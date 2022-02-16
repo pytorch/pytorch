@@ -698,16 +698,15 @@ void FixupONNXControlflowNodeOutputs(Node* n) {
               loop_block->inputs().at(i + 2)->type();
           const TypePtr block_output_type =
               loop_block->outputs().at(i + 1)->type();
-          // Get the type from the input rather than the output
-          // to handle the case where a block input is Optional but the
+          TypePtr type = block_output_type;
+          // Handle the case where a block input is Optional but the
           // output is not (i.e. if the loop executes > 0 times, the
           // output will not be None).
           if (block_input_type->cast<OptionalType>() &&
               !block_output_type->cast<OptionalType>()) {
-            n->output(i)->setType(block_input_type);
-          } else {
-            n->output(i)->setType(block_output_type);
+            type = OptionalType::create(block_output_type);
           }
+          n->output(i)->setType(type);
         } else {
           // scan output, should be a Tensor type
           TypePtr type = loop_block->outputs().at(i + 1)->type();
