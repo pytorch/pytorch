@@ -239,15 +239,43 @@ def _log_softmax(x: Tensor, dim: int, half_to_float: bool):
     return shifted - shifted_logsumexp
 
 
-@register_decomposition(aten.addmm)
-def addmm(self: Tensor, mat1: Tensor, mat2: Tensor, beta=1, alpha=1):
-    if not self.is_floating_point():
-        beta = int(beta)
-        alpha = int(alpha)
-    out = alpha * aten.mm(mat1, mat2)
-    if beta == 0:
-        return out
-    return beta * self + out
+@register_decomposition(aten.addcdiv)
+def addcdiv(self: Tensor, tensor1: Tensor, tensor2: Tensor, value: float=1):
+    return self + value * (tensor1 / tensor2)
+
+@register_decomposition(aten.addcmul)
+def addcmul(self: Tensor, tensor1: Tensor, tensor2: Tensor, value: float=1):
+    if self.is_floating_point():
+        return self + value * tensor1 * tensor2
+    else:
+        return self + int(value) * tensor1 * tensor2
+
+@register_decomposition(aten.embedding_dense_backward)
+def embedding_dense_backward(grad_output: Tensor, indices: Tensor, num_weights: int, padding_idx: int, scale_grad_by_freq: bool):
+    numel = indices.numel()
+    grad = grad_output.view(numel, grad_output.size(-1))
+    grad_weight = aten.new_zeros(grad_output, (num_weights, grad_output.shape[-1]))
+    indices_rank1 = indices.view(numel)
+    if scale_grad_by_freq:
+        counts = aten.new_zeros(indices, (num_weights,))
+        ones = aten.new_ones(indices, (numel,))
+        counts = aten.index_put(counts, [indices_rank1], ones, accumulate=True)
+        grad_weights_scale = aten.index(counts, [indices_rank1])
+        grad = grad / grad_weights_scale.unsqueeze(1)
+    skip_padding = (indices_rank1 != padding_idx).unsqueeze(1)
+    skip_padding = skip_padding.expand_as(grad)
+    zero_grad = aten.full_like(grad, 0)
+    return aten.index_put(grad_weight, [indices_rank1], aten.where(skip_padding, grad, zero_grad), accumulate=True)
+
+# @register_decomposition(aten.addmm)
+# def addmm(self: Tensor, mat1: Tensor, mat2: Tensor, beta=1, alpha=1):
+#     if not self.is_floating_point():
+#         beta = int(beta)
+#         alpha = int(alpha)
+#     out = alpha * aten.mm(mat1, mat2)
+#     if beta == 0:
+#         return out
+#     return beta * self + out
 
 
 @register_decomposition(aten.clamp_min)
@@ -259,11 +287,11 @@ def clamp_min(self: Tensor, min: float):
 def clamp_max(self: Tensor, min: float):
     return aten.clamp(self, max=max)
 
-# @register_decomposition(aten._fused_dropout)
-# def _fused_dropout_decomposition(input, p, generator=None):
-#     mask = aten.to(aten.rand_like(input) < p, dtype=torch.uint8)
-#     res = mask.type_as(input) * input * (1./p)
-#     return [res, mask]
+@register_decomposition(aten._fused_dropout)
+def _fused_dropout_decomposition(input, p, generator=None):
+    mask = aten.to(aten.rand_like(input) < p, dtype=torch.uint8)
+    res = mask.type_as(input) * input * (1./p)
+    return [res, mask]
 
 
 # Questionable decompositions
