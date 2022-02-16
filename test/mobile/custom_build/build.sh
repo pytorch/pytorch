@@ -85,12 +85,6 @@ run_predictor() {
   fi
 }
 
-# Test codegen unboxing with static dispatch
-test_codegen_unboxing_lite_interpreter() {
-  cd "${PREDICTOR_BUILD_ROOT}"
-  ./test_codegen_unboxing
-}
-
 test_default_build() {
   prepare_model_and_dump_root_ops "--server"
   run_default_build
@@ -111,5 +105,4 @@ fi
 
 if [ -n "${TEST_CUSTOM_BUILD_STATIC}" ]; then
   test_custom_build_with_static_dispatch
-  test_codegen_unboxing_lite_interpreter
 fi
