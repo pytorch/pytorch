@@ -367,8 +367,14 @@ struct KinetoThreadLocalState : public ProfilerThreadLocalStateBase {
             "Fwd thread id", std::to_string(kineto_event.fwdThreadId()));
         activity.addMetadata(
             "Sequence number", std::to_string(kineto_event.sequenceNr()));
-        generateForwardBackwardLink(
-            kineto_event, fwd_bwd_link_id, activity, tidSeq2activity);
+
+        // From the time being, we need disable the forward/backward correlation feature to 
+        // workaround the crash bug.
+        // TODO: by Mike Guo
+        // reenable the forward/backward correlation when kineto fix the following raw pointer
+        //    GenericTraceActivity.flow.linkedActivity
+        // generateForwardBackwardLink(
+        //     kineto_event, fwd_bwd_link_id, activity, tidSeq2activity);
       }
     }
 
