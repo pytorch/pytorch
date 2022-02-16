@@ -2663,17 +2663,13 @@ Tensor& linalg_matrix_norm_out(
 
 // Numerical or None norms
 Tensor linalg_norm(const Tensor& self, const optional<Scalar>& opt_ord, optional<IntArrayRef> opt_dim, bool keepdim, optional<ScalarType> opt_dtype) {
-<<<<<<< HEAD
   int64_t ndim = self.dim();
   std::vector<int64_t> dim_ = opt_dim.has_value() ? opt_dim.value().vec() : make_dim_list(ndim);
   if (!opt_ord.has_value() || dim_.size() == 1) {
     return at::linalg_vector_norm(self, opt_ord.value_or(2), opt_dim, keepdim, opt_dtype);
   }
 
-  auto options = TensorOptions().dtype(opt_dtype.has_value() ? opt_dtype.value() : toValueType(self.scalar_type())).device(self.device());
-=======
   auto options = TensorOptions().dtype(opt_dtype.has_value() ? opt_dtype.value() : toRealValueType(self.scalar_type())).device(self.device());
->>>>>>> d79aec91f759acb00d9af4bf92f57ec752dd65b7
   Tensor result = at::empty({0}, options);
 
  if (dim_.size() == 2) {
@@ -2688,7 +2684,6 @@ Tensor linalg_norm(const Tensor& self, const optional<Scalar>& opt_ord, optional
 
 // Frobenius and nuclear norms
 Tensor linalg_norm(const Tensor& self, c10::string_view ord, optional<IntArrayRef> opt_dim, bool keepdim, optional<ScalarType> opt_dtype) {
-<<<<<<< HEAD
   check_str_ord_valid(ord, opt_dim, self.dim());
 
   if (ord == "fro") {
@@ -2696,10 +2691,7 @@ Tensor linalg_norm(const Tensor& self, c10::string_view ord, optional<IntArrayRe
                                   keepdim, opt_dtype);
   }
 
-  auto options = TensorOptions().dtype(opt_dtype.has_value() ? opt_dtype.value() : toValueType(self.scalar_type())).device(self.device());
-=======
   auto options = TensorOptions().dtype(opt_dtype.has_value() ? opt_dtype.value() : toRealValueType(self.scalar_type())).device(self.device());
->>>>>>> d79aec91f759acb00d9af4bf92f57ec752dd65b7
   Tensor result = at::empty({0}, options);
   Tensor self_ = opt_dtype.has_value() ? self.to(opt_dtype.value()) : self;
 
