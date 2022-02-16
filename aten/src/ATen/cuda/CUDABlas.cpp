@@ -4,6 +4,8 @@
 
 #include <ATen/cuda/CUDABlas.h>
 #include <ATen/cuda/Exceptions.h>
+#include <c10/util/irange.h>
+#include <c10/macros/Export.h>
 
 #ifdef __HIP_PLATFORM_HCC__
 #define PYTORCH_ROCBLAS_VERSION_DECIMAL (ROCBLAS_VERSION_MAJOR * 100 + ROCBLAS_VERSION_MINOR)
@@ -100,7 +102,7 @@ namespace at {
 namespace cuda {
 namespace blas {
 
-const char* _cublasGetErrorEnum(cublasStatus_t error) {
+C10_EXPORT const char* _cublasGetErrorEnum(cublasStatus_t error) {
   if (error == CUBLAS_STATUS_SUCCESS) {
     return "CUBLAS_STATUS_SUCCESS";
   }
