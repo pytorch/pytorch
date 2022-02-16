@@ -917,7 +917,7 @@ class ShapePropagator : public PropertyPropBase {
           if (input_type->scalarType()) {
             const auto scalar_type = *(input_type->scalarType());
             if (isComplexType(scalar_type)) {
-              const auto out_type = c10::toValueType(scalar_type);
+              const auto out_type = c10::toRealValueType(scalar_type);
               return type_vec_t{
                   input_type->dimensionedOnly()->withScalarType(out_type)};
             }

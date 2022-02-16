@@ -289,7 +289,7 @@ TORCH_META_FUNC(_linalg_svd)(const Tensor& A,
   // Prepare sizes for S. S is always real, even when A is complex.
   sizes.pop_back();
   sizes.end()[-1] = k;
-  set_output(1, sizes, {}, A.options().dtype(c10::toValueType(A.scalar_type())), {});
+  set_output(1, sizes, {}, A.options().dtype(c10::toRealValueType(A.scalar_type())), {});
 }
 } // namespace meta
 
@@ -2307,7 +2307,7 @@ void linalg_eigh_out_info(
 
   // eigenvalues are always real-valued
   // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores)
-  ScalarType real_dtype = toValueType(input.scalar_type());
+  ScalarType real_dtype = toRealValueType(input.scalar_type());
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(values.scalar_type() == real_dtype);
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(input.scalar_type() == vectors.scalar_type());
 
@@ -2354,7 +2354,7 @@ void linalg_eigh_out_info(
 std::tuple<Tensor, Tensor> linalg_eigh(const Tensor& input, c10::string_view uplo) {
   squareCheckInputs(input, "linalg.eigh");
   checkUplo(uplo);
-  ScalarType real_dtype = toValueType(input.scalar_type());
+  ScalarType real_dtype = toRealValueType(input.scalar_type());
   Tensor values = at::empty({0}, input.options().dtype(real_dtype));
   Tensor vectors = at::empty({0}, input.options());
   Tensor infos = at::zeros({std::max<int64_t>(1, batchCount(input))}, input.options().dtype(kInt));
@@ -2370,7 +2370,7 @@ std::tuple<Tensor&, Tensor&> linalg_eigh_out(const Tensor& input, c10::string_vi
   checkLinalgCompatibleDtype("torch.linalg.eigh", eigvecs, input, "eigenvectors");
 
   // eigenvalues are always real-valued here
-  ScalarType real_dtype = toValueType(input.scalar_type());
+  ScalarType real_dtype = toRealValueType(input.scalar_type());
   checkLinalgCompatibleDtype("torch.linalg.eigh", eigvals.scalar_type(), real_dtype, "eigenvalues");
 
   Tensor eigvals_tmp, eigvecs_tmp;
@@ -2393,14 +2393,14 @@ Tensor linalg_eigvalsh(const Tensor& input, c10::string_view uplo) {
     return values;
   }
 
-  ScalarType real_dtype = toValueType(input.scalar_type());
+  ScalarType real_dtype = toRealValueType(input.scalar_type());
   Tensor values = at::empty({0}, input.options().dtype(real_dtype));
   values = at::linalg_eigvalsh_outf(input, uplo, values);
   return values;
 }
 
 Tensor& linalg_eigvalsh_out(const Tensor& input, c10::string_view uplo, Tensor& result) {
-  ScalarType real_dtype = toValueType(input.scalar_type());
+  ScalarType real_dtype = toRealValueType(input.scalar_type());
   checkLinalgCompatibleDtype("torch.linalg.eigvalsh", result.scalar_type(), real_dtype);
 
   squareCheckInputs(input, "linalg.eigvalsh");
@@ -2461,7 +2461,7 @@ static void apply_symeig(Tensor& self, Tensor& eigvals, bool eigenvectors, bool 
   value_t* rwork_data = nullptr;
   if (isComplexType(at::typeMetaToScalarType(self.dtype()))) {
     int64_t lrwork = std::max(int64_t(1), 3 * n - 2);
-    ScalarType dtype = toValueType(typeMetaToScalarType(self.dtype()));
+    ScalarType dtype = toRealValueType(typeMetaToScalarType(self.dtype()));
     rwork = at::empty({lrwork}, self.options().dtype(dtype));
     rwork_data = rwork.data_ptr<value_t>();
   }
@@ -2489,7 +2489,7 @@ std::tuple<Tensor, Tensor> _symeig_helper_cpu(const Tensor& self, bool eigenvect
 
   auto self_sizes = self.sizes().vec();
   self_sizes.pop_back();
-  ScalarType dtype = toValueType(typeMetaToScalarType(self.dtype()));
+  ScalarType dtype = toRealValueType(typeMetaToScalarType(self.dtype()));
   auto eigvals = at::empty(self_sizes, self.options().dtype(dtype));
 
   if (self.numel() == 0) {
@@ -2549,7 +2549,7 @@ std::tuple<Tensor&, Tensor&> symeig_out(const Tensor& self, bool eigenvectors, b
   checkSameDevice("symeig", vecs, self, "eigenvectors");
   checkLinalgCompatibleDtype("symeig", vecs, self, "eigenvectors");
   // eigenvalues are always real-valued here
-  ScalarType real_dtype = toValueType(self.scalar_type());
+  ScalarType real_dtype = toRealValueType(self.scalar_type());
   checkLinalgCompatibleDtype("symeig", vals.scalar_type(), real_dtype, "eigenvalues");
 
   Tensor vals_tmp, vecs_tmp;
@@ -3199,7 +3199,7 @@ static void linalg_lstsq_out_info(
   TORCH_INTERNAL_ASSERT(rank.scalar_type() == at::kLong);
   TORCH_INTERNAL_ASSERT(rank.device() == input.device());
 
-  auto real_dtype = toValueType(input.scalar_type());
+  auto real_dtype = toRealValueType(input.scalar_type());
   TORCH_INTERNAL_ASSERT(singular_values.scalar_type() == real_dtype);
   TORCH_INTERNAL_ASSERT(singular_values.device() == input.device());
 
@@ -3397,7 +3397,7 @@ std::tuple<Tensor&, Tensor&, Tensor&, Tensor&> linalg_lstsq_out(
   checkLinalgCompatibleDtype("torch.linalg.lstsq", solution, input, "solution");
 
   // 'residuals' is expected to have real float dtype
-  ScalarType real_dtype = c10::toValueType(input.scalar_type());
+  ScalarType real_dtype = c10::toRealValueType(input.scalar_type());
   checkLinalgCompatibleDtype("torch.linalg.lstsq", residuals.scalar_type(), real_dtype, "solution");
 
   // 'rank' is expected to have integer dtype
@@ -3414,7 +3414,7 @@ std::tuple<Tensor&, Tensor&, Tensor&, Tensor&> linalg_lstsq_out(
   // set default rcond value
   double rcond_value = rcond.has_value()
     ? rcond.value()
-    : _get_epsilon(c10::toValueType(input.scalar_type())) * std::max<int64_t>(input.size(-2), input.size(-1));
+    : _get_epsilon(c10::toRealValueType(input.scalar_type())) * std::max<int64_t>(input.size(-2), input.size(-1));
 
   auto infos = at::zeros({std::max<int64_t>(1, batchCount(input))}, input.options().dtype(kInt));
 
@@ -3528,9 +3528,9 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> linalg_lstsq(
     c10::optional<double> rcond,
     c10::optional<c10::string_view> driver) {
   Tensor solution = at::empty({0}, input.options());
-  Tensor residuals = at::empty({0}, input.options().dtype(toValueType(input.scalar_type())));
+  Tensor residuals = at::empty({0}, input.options().dtype(toRealValueType(input.scalar_type())));
   Tensor rank = at::empty({0}, input.options().dtype(at::kLong));
-  Tensor singular_values = at::empty({0}, input.options().dtype(toValueType(input.scalar_type())));
+  Tensor singular_values = at::empty({0}, input.options().dtype(toRealValueType(input.scalar_type())));
   std::tie(solution, residuals, rank, singular_values) =
       at::linalg_lstsq_outf(input, other, rcond, driver, solution, residuals, rank, singular_values);
   return std::make_tuple(solution, residuals, rank, singular_values);
@@ -3704,7 +3704,7 @@ Tensor _det_lu_based_helper_backward_helper(
   const Tensor& lu,
   const Tensor& pivs
 ) {
-  auto eps = at::native::_get_epsilon(c10::toValueType(self.scalar_type()));
+  auto eps = at::native::_get_epsilon(c10::toRealValueType(self.scalar_type()));
   auto n = self.size(-1);
   auto eps_tensor = at::tensor(eps, self.options());
   auto condition_diagonal = [&](const Tensor& x) {
