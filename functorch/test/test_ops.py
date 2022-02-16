@@ -1003,10 +1003,12 @@ class TestDecompositionOpInfo(TestCase):
         skip('resize_'),
     })
     def test_decomposition(self, device, dtype, op):
+        # dtype is too confusing of a name for how we're using it
+        TEST_DTYPE = dtype
         # copied from common_utils.py
         dtype_precisions = {
             torch.float16: (0.001, 1e-5),
-            torch.bfloat16: (0.016, 1e-4),  # zzzz bfloat16 precision
+            torch.bfloat16: (0.016, 1e-4),
             torch.float32: (1.3e-6, 1e-5),
             torch.float64: (1e-7, 1e-7),
             torch.complex32: (0.001, 1e-5),
@@ -1023,21 +1025,21 @@ class TestDecompositionOpInfo(TestCase):
                        dtype_precisions.get(dtype1, (0, 0))[1])
             return rtol, atol
 
+        def op_assert_ref(op, orig, decomp, ref):
+            if orig.numel() == 0:
+                return
+            orig_diff = (orig - ref).abs().max()
+            decomp_diff = (decomp - ref).abs().max()
+            atol = 1e-10
+            if decomp_diff > orig_diff + atol:
+                msg = (f"Difference from float64 is larger with decomposition {op.__name__}" +
+                       f" than original. Original max diff: {orig_diff}, Decomp max diff: {decomp_diff}")
+                raise RuntimeError(msg)
+
+
         def op_assert_equal(op, a, b):
             assert a.dtype == b.dtype
-            # Some ops, like those involving reductions, are fundamentally non-decomposable with precision guarantees
-            tol_table = {
-                # aggghhhhhhhhhh I hate reductions and floating point
-                (torch.float16, aten.huber_loss_backward): (0.002, 1e-5),
-                (torch.bfloat16, aten.tanh_backward): (0.03, 1e-4),
-                (torch.bfloat16, aten._log_softmax): (0.05, 1e-2),
-                (torch.bfloat16, aten._softmax_backward_data): (0.016, 5e-3),
-                (torch.bfloat16, aten._log_softmax_backward_data): (0.016, 5e-3),
-            }
-            if (b.dtype, op) in tol_table:
-                rtol, atol = tol_table[(b.dtype, op)]
-            else:
-                rtol, atol = _getDefaultRtolAndAtol(a.dtype, b.dtype)
+            rtol, atol = _getDefaultRtolAndAtol(a.dtype, b.dtype)
             if not torch.allclose(a, b, rtol=rtol, atol=atol):
                 atol_diff = (a - b).abs().max()
                 rtol_diff = ((a - b).abs()/b.abs()).nan_to_num(0).max()
@@ -1081,39 +1083,58 @@ class TestDecompositionOpInfo(TestCase):
                         return e.elem
                     return e
 
-                real_out = func(*tree_map(unwrap_tensor, args), **tree_map(unwrap_tensor, kwargs))
-
+                # We take 2 main strategies for verifying correctness/numerical stability of decompositions
+                # The first one is simply tolerance checking between decomp_out and pytorch_out
+                # However, for fp16/bf16 and reductions, this becomes very
+                # finicky, as there are not many guarantees we can make.
+                # So, for fp16/bf16, we instead compare the difference of
+                # {decomp_out, pytorch_out_64} and {pytorch_out,
+                # pytorch_out_64}. In other words, we compare how far the
+                # decomposition and pytorch are from the "ground truth" (i.e.
+                # fp64). If the decomposition results in more error, we error
                 if func in decomposition_table and func != torch.ops.aten.detach:
-                    upcast_table = set([
-                        aten.tanh_backward,
-                        aten._log_softmax,
-                        aten._log_softmax_backward_data,
+                    # Some functions take a dtype as argument, so we need to
+                    # manually change that dtype in order to run it with a
+                    # higher precision
+                    dtype_arg_table = set([
                         aten._softmax_backward_data,
+                        aten._log_softmax_backward_data,
                     ])
                     decomposition = decomposition_table[func]
                     global run_decompositions
                     run_decompositions.add(func)
-                    input_dtypes = set()
 
-                    def upcast_tensor(x):
+                    def upcast_tensor(x, dtype=torch.float32):
                         if isinstance(x, Tensor) and (x.dtype == torch.bfloat16 or x.dtype == torch.float16):
-                            input_dtypes.add(x.dtype)
-                            x = x.to(dtype=torch.float32)
+                            x = x.to(dtype=dtype)
+                        BFLOAT16_DTYPE = 15
+                        FLOAT64_DTYPE = 7
+                        if isinstance(x, int) and func in dtype_arg_table and x == BFLOAT16_DTYPE:
+                            x = FLOAT64_DTYPE
                         return x
+
+                    def call_op(func, map_fn, *args, **kwargs):
+                        return tree_flatten(func(*tree_map(map_fn, args), **tree_map(map_fn, kwargs)))[0]
+
                     # Theoretically, most PyTorch ops compute intermediates as fp32. But this breaks some ops...
-                    if func in upcast_table:
-                        args = tree_map(upcast_tensor, args)
-                        kwargs = tree_map(upcast_tensor, kwargs)
-                    decomp_out = decomposition(*args, **kwargs)
-                    real_out_flat = tree_flatten(real_out)[0]
-                    decomp_out_flat = tree_flatten(decomp_out)[0]
-                    assert(len(real_out_flat) == len(decomp_out_flat))
-                    assert(len(input_dtypes) <= 1)
-                    input_dtypes = list(input_dtypes)
-                    for a, b in zip(real_out_flat, decomp_out_flat):
-                        if len(input_dtypes) > 0:
-                            b = b.to(dtype=input_dtypes[0])
-                        op_assert_equal(func, a, b)
+                    if TEST_DTYPE in [torch.float16, torch.bfloat16]:
+                        decomp_out = call_op(decomposition, upcast_tensor, *args, **kwargs)
+                    else:
+                        decomp_out = call_op(decomposition, lambda x: x, *args, **kwargs)
+
+                    real_out_double = call_op(func, lambda x: upcast_tensor(unwrap_tensor(x), dtype=torch.float64), *args, **kwargs)
+
+                    real_out = call_op(func, unwrap_tensor, *args, **kwargs)
+                    assert(len(real_out) == len(decomp_out))
+                    for orig, decomp, ref in zip(real_out, decomp_out, real_out_double):
+                        orig = orig.to(dtype=TEST_DTYPE)
+                        decomp = decomp.to(dtype=TEST_DTYPE)
+                        if TEST_DTYPE in [torch.float16, torch.bfloat16]:
+                            op_assert_ref(func, orig, decomp, ref)
+                        else:
+                            op_assert_equal(func, orig, decomp)
+
+                real_out = func(*tree_map(unwrap_tensor, args), **tree_map(unwrap_tensor, kwargs))
 
                 def wrap_tensor(e):
                     if e is None:
@@ -1122,15 +1143,15 @@ class TestDecompositionOpInfo(TestCase):
                 wrapped_out = tree_map(wrap_tensor, real_out)
                 return wrapped_out
 
-        if dtype not in op.supported_dtypes(dtype):
+        if TEST_DTYPE not in op.supported_dtypes(TEST_DTYPE):
             self.skipTest("Dtype not in op's supported dtypes")
             return
         if is_inplace(op, op.get_op()):
             self.skipTest("op is inplace")
             return
-        _requires_grad = op.supports_autograd and dtype.is_floating_point
+        _requires_grad = op.supports_autograd and TEST_DTYPE.is_floating_point
 
-        samples = op.sample_inputs(device, dtype, requires_grad=_requires_grad)
+        samples = op.sample_inputs(device, TEST_DTYPE, requires_grad=_requires_grad)
 
         # Acquires variants to test
         def wrap_tensor(x):
