@@ -2464,11 +2464,12 @@ static Tensor& linalg_norm_out_impl(Tensor& result, const Tensor& self, const op
       "dtype = ", dtype, ", out.dtype = ", result.scalar_type());
   }
   int64_t ndim = self.dim();
-  Tensor self_ = opt_dtype.has_value() ? self.to(opt_dtype.value()) : self;
+
   if (opt_str_ord.has_value()) {
     // 'ord' is string
     auto str_ord = opt_str_ord.value();
     check_str_ord_valid(str_ord, opt_dim, ndim);
+    Tensor self_ = opt_dtype.has_value() ? self.to(opt_dtype.value()) : self;
     if (str_ord == "fro") {
       at::frobenius_norm_out(result, self_, opt_dim.value_or(IntArrayRef({0, 1})), keepdim);
     } else if (str_ord == "nuc") {
@@ -2482,11 +2483,23 @@ static Tensor& linalg_norm_out_impl(Tensor& result, const Tensor& self, const op
     // 'ord' is int or None
     std::vector<int64_t> dim_ = opt_dim.has_value() ? opt_dim.value().vec() : make_dim_list(ndim);
     if (!opt_num_ord.has_value() || dim_.size() == 1) {
-      Tensor result_ = at::linalg_vector_norm(self_, opt_num_ord.value_or(2), opt_dim, keepdim, opt_dtype);
-      // TODO: Resize and copy should be avoided with
-      //       https://github.com/pytorch/pytorch/issues/52712
-      at::native::resize_output(result, result_.sizes());
-      result.copy_(result_);
+      // The linalg_vector_norm() function must ensure that the result is the same dtype as
+      // opt_dtype. This check is done so that the _out variant can be called and copying
+      // can be avoided in case the opt_dtype is not supplied. linalg_vector_norm() also
+      // handles complex tensors separately using abs() and hence we use isComplexType().
+      if (isComplexType(self.scalar_type()) ||
+          self.scalar_type() != result.scalar_type()) {
+        Tensor result_ = at::linalg_vector_norm(self, opt_num_ord.value_or(2), opt_dim,
+                                                keepdim, opt_dtype);
+        // TODO: Resize and copy should be avoided with
+        //       https://github.com/pytorch/pytorch/issues/52712
+        at::native::resize_output(result, result_.sizes());
+        result.copy_(result_);
+      }
+      else {
+        at::linalg_vector_norm_out(result, self, opt_num_ord.value_or(2), opt_dim,
+                                   keepdim, opt_dtype);
+      }
     } else if (dim_.size() == 2) {
       _linalg_norm_matrix_out(result, self, opt_num_ord.value(), dim_, keepdim, opt_dtype);
     } else {
@@ -2562,6 +2575,7 @@ static Tensor& linalg_vector_norm_impl(const Tensor& self, const Scalar& scalar_
   }
 
   ScalarType out_dtype = opt_dtype.value_or(toValueType(self.scalar_type()));
+
   TORCH_CHECK(!result.defined() || out_dtype == result.scalar_type(),
     "linalg.vector_norm expected out tensor dtype ", out_dtype,
     " but got: ", result.scalar_type());
