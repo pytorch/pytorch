@@ -17,26 +17,15 @@
 #include <cmath>
 #include <limits>
 #include <unordered_set>
+#include <utility>
 
 namespace torch {
 namespace jit {
 
-// Return a new TypePtr, merging ONNX inferred type with existing type.
-// The inferred type will take higher precedence, since it is produced by ONNX
-// shape inference, and is more compatible with ONNX. In cases where ONNX shape
-// inference fails to produce an inferred type, or produces inferred type that
-// is incomplete, refer to existing type and fill in the gap that is missing.
-// Currently the following cases are supported.
-//  1. existing type: Tensor[], inferred type: Tensor[]
-//    For list of tensors, existing type does not store datatype nor shape for
-//    inner tensor. Thus inferred type always contain more information, and is
-//    returned.
-//  2. existing type: Tensor, inferred type: Tensor
-//    Fill in missing info (shape, data type) for inferred type from existing
-//    type.
-//  3. existing type: Scalar[], inferred type: Tensor
-//    ONNX represents list of scalars by 1-d Tensor. Return inferred type since
-//    it is more compatible with ONNX.
+inline bool PyNone_Check(PyObject* o) {
+  return o == Py_None;
+}
+
 std::pair<TypePtr, bool> MergeInferredType(
     TypePtr existing_type,
     TypePtr inferred_type) {
@@ -237,6 +226,12 @@ bool IsValidONNXNode(const Node* n) {
     }
   }
 
+  for (auto inp : n->inputs()) {
+    if (inp->type() == NoneType::get()) {
+      return false;
+    }
+  }
+
   return true;
 }
 
@@ -331,27 +326,27 @@ Node* CloneNodeToGraph(
   return clone_node;
 }
 
-bool IsGraphValidForInference(std::shared_ptr<Graph> graph) {
-  // Verify if every input has type(either Tensor or Sequence) and scalar type.
-  // This is a requirement for ONNX graph inputs.
-  for (auto in : graph->inputs()) {
-    if (auto t_type = in->type()->cast<TensorType>()) {
-      if (!t_type->scalarType().has_value()) {
-        GRAPH_UPDATE(
-            "Input ", in->debugName(), " is tensor type, but miss datatype.");
-        return false;
-      }
-    } else if (auto s_type = in->type()->cast<ListType>()) {
-      auto e_type = s_type->getElementType();
-      if (auto t_type = e_type->cast<TensorType>()) {
-        if (t_type->scalarType().has_value()) {
-          continue;
-        }
-      }
-      GRAPH_UPDATE(
-          "Input ", in->debugName(), " is sequence type, but miss datatype.");
+bool HasValidType(TypePtr type, std::string name) {
+  if (auto t_type = type->cast<TensorType>()) {
+    if (!t_type->scalarType().has_value()) {
+      GRAPH_UPDATE("Input ", name, " is missing tensor datatype.");
       return false;
     }
+  } else if (auto s_type = type->cast<ListType>()) {
+    auto e_type = s_type->getElementType();
+    return HasValidType(e_type, name);
+  } else if (auto o_type = type->cast<OptionalType>()) {
+    auto e_type = o_type->getElementType();
+    return HasValidType(e_type, name);
+  }
+  return true;
+}
+
+bool IsGraphValidForInference(std::shared_ptr<Graph> graph) {
+  // Verify if every input has type (either Tensor, Sequence or Optional) and
+  // scalar type. This is a requirement for ONNX graph inputs.
+  for (auto in : graph->inputs()) {
+    return HasValidType(in->type(), in->debugName());
   }
   return true;
 }
@@ -800,8 +795,9 @@ void SetShapeValueFromListConstructNode(Node* lc_node) {
   }
 }
 
-std::vector<::c10::ShapeSymbol> Broadcast(const std::vector<::c10::ShapeSymbol> &input_shape_value_0,
-                                          const std::vector<::c10::ShapeSymbol> &input_shape_value_1) {
+std::vector<::c10::ShapeSymbol> Broadcast(
+    const std::vector<::c10::ShapeSymbol>& input_shape_value_0,
+    const std::vector<::c10::ShapeSymbol>& input_shape_value_1) {
   size_t rank_0 = input_shape_value_0.size();
   size_t rank_1 = input_shape_value_1.size();
   size_t rank_max = std::max(rank_0, rank_1);
@@ -812,10 +808,8 @@ std::vector<::c10::ShapeSymbol> Broadcast(const std::vector<::c10::ShapeSymbol> 
     final_shape.emplace_back(::c10::ShapeSymbol::newSymbol());
   }
   for (auto idx = 0; idx < rank_min; idx++) {
-    const c10::ShapeSymbol& ss_shape_0 =
-        input_shape_value_0[rank_0 - 1 - idx];
-    const c10::ShapeSymbol& ss_shape_1 =
-        input_shape_value_1[rank_1 - 1 - idx];
+    const c10::ShapeSymbol& ss_shape_0 = input_shape_value_0[rank_0 - 1 - idx];
+    const c10::ShapeSymbol& ss_shape_1 = input_shape_value_1[rank_1 - 1 - idx];
     bool is_static_0 = ss_shape_0.is_static();
     bool is_static_1 = ss_shape_1.is_static();
     if (is_static_0 && is_static_1) {
@@ -976,14 +970,17 @@ void ProcessMatMulNode(Node* n) {
       is_rank_1_1 = true;
     }
     // Per https://pytorch.org/docs/stable/generated/torch.matmul.html
-    // the broadcasting logic only applies to the batch dimensions, and not the matrix dimensions
-    // so we remove the matrix dimensions which are the last 2 dimensions before broadcasting
+    // the broadcasting logic only applies to the batch dimensions, and not the
+    // matrix dimensions so we remove the matrix dimensions which are the last 2
+    // dimensions before broadcasting
     auto final_shape = Broadcast(
-      std::vector<::c10::ShapeSymbol>(input_shape_value_0.begin(), input_shape_value_0.end() - 2),
-      std::vector<::c10::ShapeSymbol>(input_shape_value_1.begin(), input_shape_value_1.end() - 2)
-    );
-    // add the last 2 dimensions back, unless they do not exist in the first place and inserted by this function
-    // Then apply [n,k]X[k,m]=[n,m], where n=input_shape_value_0[rank_0 - 2], m=input_shape_value_1[rank_1 - 1]
+        std::vector<::c10::ShapeSymbol>(
+            input_shape_value_0.begin(), input_shape_value_0.end() - 2),
+        std::vector<::c10::ShapeSymbol>(
+            input_shape_value_1.begin(), input_shape_value_1.end() - 2));
+    // add the last 2 dimensions back, unless they do not exist in the first
+    // place and inserted by this function Then apply [n,k]X[k,m]=[n,m], where
+    // n=input_shape_value_0[rank_0 - 2], m=input_shape_value_1[rank_1 - 1]
     if (!is_rank_0_1) {
       final_shape.emplace_back(input_shape_value_0[rank_0 - 2]);
     }
@@ -2133,7 +2130,7 @@ void ONNXShapeTypeInference(
   }
   UpdateReliable(n);
 
-  // For the node type that does nott have ComputeConstant logic, it may have
+  // For the node type that does not have ComputeConstant logic, it may have
   // reliable shape but its shape is not in ConstantValueMap. So we need this
   // logic to update ConstantValueMap.
   for (auto node_output : n->outputs()) {
@@ -2240,10 +2237,11 @@ size_t ONNXAssignOutputShape(
     std::shared_ptr<Graph>& graph,
     size_t outputs_index,
     PyObject* output_obj,
-    bool onnx_shape_inference) {
+    bool onnx_shape_inference,
+    bool is_script) {
   auto index_check = [&]() {
     TORCH_INTERNAL_ASSERT(
-        outputs_index >= 0 && outputs_index <= graph->outputs().size(),
+        outputs_index <= graph->outputs().size(),
         "Incorrect number of elements provided as example outputs.");
   };
 
@@ -2261,7 +2259,8 @@ size_t ONNXAssignOutputShape(
           graph,
           outputs_index,
           PyTuple_GET_ITEM(output_obj, i),
-          onnx_shape_inference);
+          onnx_shape_inference,
+          is_script);
     }
   } else if (PyList_Check(output_obj)) {
     const auto list_len = PyList_GET_SIZE(output_obj);
@@ -2308,7 +2307,8 @@ size_t ONNXAssignOutputShape(
             graph,
             outputs_index,
             PyList_GET_ITEM(output_obj, i),
-            onnx_shape_inference);
+            onnx_shape_inference,
+            is_script);
       }
     }
   } else if (PyDict_Check(output_obj)) {
@@ -2323,15 +2323,26 @@ size_t ONNXAssignOutputShape(
           graph,
           outputs_index,
           PyList_GET_ITEM(unrolled_dict.ptr(), i),
-          onnx_shape_inference);
+          onnx_shape_inference,
+          is_script);
     }
   } else if (THPUtils_checkString(output_obj)) {
     // Ignore string, since they are not supported as output in ONNX.
-  } else if (strcmp(THPUtils_typename(output_obj), "NoneType") == 0) {
-    // For cases with tracing, simply ignore NoneType outputs
-    // For cases with scripting, TODO: Add logic to handle NoneType outputs
-    // when such output types are supported. For now test cases with NoneType
-    // outputs have been disabled.
+  } else if (PyNone_Check(output_obj)) {
+    // TODO: Currently there's no one thing to do here that works for
+    // both tracing and scripting.
+    // If we don't increment outputs_index here, then scripting fails
+    // for
+    // `python test/onnx/test_pytorch_onnx_no_runtime.py`.
+    // If we do increment it, then tracing fails for
+    // `python test/onnx/test_pytorch_onnx_onnxruntime.py
+    //  TestONNXRuntime.test_tuple_with_none_outputs`.
+    // Cause: in tracing we flatten the outputs in ONNXTracedModule.forward
+    // in torch/jit/_trace.py while tracing. This means the output has None
+    // objects omitted. But then the outputs passed in here are un-flattened,
+    // which means they contain None objects.
+    // Ideally we'd remove this difference.
+    outputs_index += static_cast<size_t>(is_script);
   } else {
     std::string msg =
         ("Model output has unsupported type. See "
@@ -2349,13 +2360,14 @@ void ONNXAssignOutputShape(
     std::shared_ptr<Graph>& graph,
     at::ArrayRef<at::Tensor> outputs,
     const python::IODescriptor& desc,
-    bool onnx_shape_inference) {
+    bool onnx_shape_inference,
+    bool is_script) {
   size_t outputs_index = 0;
   PyObject* py_obj = unflatten(outputs, desc);
   TORCH_INTERNAL_ASSERT(PyTuple_Check(py_obj));
 
-  outputs_index =
-      ONNXAssignOutputShape(graph, outputs_index, py_obj, onnx_shape_inference);
+  outputs_index = ONNXAssignOutputShape(
+      graph, outputs_index, py_obj, onnx_shape_inference, is_script);
 
   TORCH_INTERNAL_ASSERT(
       outputs_index == graph->outputs().size(),

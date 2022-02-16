@@ -173,8 +173,10 @@ void initJITBindings(PyObject* module) {
           [](std::shared_ptr<Graph>& graph,
              const std::vector<at::Tensor>& tensors,
              const python::IODescriptor& desc,
-             bool onnx_shape_inference = false) {
-            ONNXAssignOutputShape(graph, tensors, desc, onnx_shape_inference);
+             bool onnx_shape_inference,
+             bool is_script) {
+            ONNXAssignOutputShape(
+                graph, tensors, desc, onnx_shape_inference, is_script);
           })
       .def("_jit_pass_lower_all_tuples", LowerAllTuples)
       .def(

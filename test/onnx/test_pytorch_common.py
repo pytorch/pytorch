@@ -75,21 +75,11 @@ def skipForAllOpsetVersions():
         return wrapper
     return skip_dec
 
-# Enables tests for scripting, instead of only tracing the model.
-def enableScriptTest():
+# skips tests for scripting.
+def skipScriptTest(min_opset_version=float("inf")):
     def script_dec(func):
         def wrapper(self):
-            self.is_script_test_enabled = True
-            return func(self)
-        return wrapper
-    return script_dec
-
-
-# Disable tests for scripting.
-def disableScriptTest():
-    def script_dec(func):
-        def wrapper(self):
-            self.is_script_test_enabled = False
+            self.is_script_test_enabled = self.opset_version >= min_opset_version
             return func(self)
         return wrapper
     return script_dec
@@ -111,7 +101,7 @@ def skipIfONNXShapeInference(onnx_shape_inference):
     def skip_dec(func):
         def wrapper(self):
             if self.onnx_shape_inference is onnx_shape_inference:
-                raise unittest.SkipTest("Skip verify test for unsupported opset_version")
+                raise unittest.SkipTest("Skip test due to onnx_shape_inference")
             return func(self)
         return wrapper
     return skip_dec
