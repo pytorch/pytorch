@@ -1,5 +1,6 @@
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 import torch.nn.intrinsic as nni
 import torch.nn.intrinsic.quantized as nniq
 import torch.nn.quantized as nnq
@@ -63,9 +64,11 @@ LOWER_FUSED_MODULE_MAP: Dict[Type[nn.Module], Tuple[Type[nn.Module], Type[Refere
     nni.LinearReLU: (nnqr.Linear, nniq.LinearReLU)
 }
 
-# Mapping from a functional to lower to its quantized version
+# Mapping from a functional to lower to a 2-tuple of
+#   1) The quantized version of the op
+#   2) The quantized version of the op fused with relu, if it exists, else None
 LOWER_FUNCTIONAL_MAP = {
-    torch.nn.functional.linear: torch.ops.quantized.linear,
+    F.linear: (torch.ops.quantized.linear, torch.ops.quantized.linear_relu),
 }
 
 def _lower_weighted_ref_module(model: QuantizedGraphModule) -> QuantizedGraphModule:
@@ -140,52 +143,61 @@ def _lower_weighted_ref_functional(model: QuantizedGraphModule) -> QuantizedGrap
     Traverse the graph and replace functional reference patterns with their quantized versions.
     """
     for ref_func in LOWER_FUNCTIONAL_MAP.keys():
-        # First dequantize is for the inputs, second dequantize is for the weights
-        pattern = (torch.quantize_per_tensor,
-                   (ref_func, "dequantize", "dequantize"),
-                   MatchAllNode, MatchAllNode, MatchAllNode)
-        modules = dict(model.named_modules(remove_duplicate=False))
-        nodes = list(model.graph.nodes)
-        for n in model.graph.nodes:
-            if not is_match(modules, n, pattern):
-                continue
-            q_node = n
-            (func_node, output_scale_node, output_zp_node, dtype) = q_node.args
-            (dq_node, dq_node2) = func_node.args
+        for is_relu in [False, True]:
+            # First dequantize is for the inputs, second dequantize is for the weights
+            inner_pattern = (ref_func, "dequantize", "dequantize")
+            if is_relu:
+                inner_pattern = (F.relu, inner_pattern)
+            pattern = (torch.quantize_per_tensor, inner_pattern, MatchAllNode, MatchAllNode, MatchAllNode)
+            modules = dict(model.named_modules(remove_duplicate=False))
+            nodes = list(model.graph.nodes)
 
-            # Step 1: Replace quantized weights with packed weights
-            quantized_weight = dq_node2.args[0]
-            weight_dtype = quantized_weight.args[4]
-            bias = func_node.kwargs.get("bias", None)
-            prepack_args = (quantized_weight, bias)
-            if ref_func == torch.nn.functional.linear:
-                prepack_op = get_linear_prepack_op_for_dtype(weight_dtype)
-            else:
-                raise ValueError("Lowering for functional currently only supports linear op")
-            with model.graph.inserting_after(quantized_weight):
-                packed_weight = model.graph.create_node("call_function", prepack_op, prepack_args, {})
+            for n in model.graph.nodes:
+                if not is_match(modules, n, pattern):
+                    continue
+                q_node = n
+                (func_node, output_scale_node, output_zp_node, dtype) = q_node.args
+                if is_relu:
+                    relu_node = func_node
+                    func_node = relu_node.args[0]
+                (dq_node, dq_node2) = func_node.args
 
-            # Step 2: Replace reference pattern (dequantize - functional op - quantize) with the
-            # corresponding quantized op
-            #     Args are: (quantized input, packed weight, scale, zero point)
-            with model.graph.inserting_after(output_zp_node):
-                args = (dq_node.args[0], packed_weight, output_scale_node, output_zp_node)
-                new_func_node = create_node_from_old_node_preserve_meta(
-                    model.graph,
-                    ("call_function", LOWER_FUNCTIONAL_MAP[ref_func], args, {}),
-                    func_node)
-                q_node.replace_all_uses_with(new_func_node)
+                # Step 1: Replace quantized weights with packed weights
+                quantized_weight = dq_node2.args[0]
+                weight_dtype = quantized_weight.args[4]
+                bias = func_node.kwargs.get("bias", None)
+                prepack_args = (quantized_weight, bias)
+                if ref_func == F.linear:
+                    prepack_op = get_linear_prepack_op_for_dtype(weight_dtype)
+                else:
+                    raise ValueError("Lowering for functional currently only supports linear op")
+                with model.graph.inserting_after(quantized_weight):
+                    packed_weight = model.graph.create_node("call_function", prepack_op, prepack_args, {})
 
-            # Clean up
-            for dqn in [dq_node, dq_node2]:
-                dqn_input = dqn.args[0]
-                dqn.replace_all_uses_with(dqn_input)
-                model.graph.erase_node(dqn)
-            model.graph.erase_node(q_node)
-            model.graph.erase_node(func_node)
+                # Step 2: Replace reference pattern (dequantize - functional op - quantize) with the
+                # corresponding quantized op
+                with model.graph.inserting_after(output_zp_node):
+                    args = (dq_node.args[0], packed_weight, output_scale_node, output_zp_node)
+                    q_func, q_relu_func = LOWER_FUNCTIONAL_MAP[ref_func]
+                    new_func = q_relu_func if is_relu else q_func
+                    new_func_node = create_node_from_old_node_preserve_meta(
+                        model.graph,
+                        ("call_function", new_func, args, {}),
+                        func_node)
+                    q_node.replace_all_uses_with(new_func_node)
 
-            # Step 3: TODO(andrew) Fold weights
-        model.recompile()
+                # Clean up
+                for dqn in [dq_node, dq_node2]:
+                    dqn_input = dqn.args[0]
+                    dqn.replace_all_uses_with(dqn_input)
+                    model.graph.erase_node(dqn)
+                model.graph.erase_node(q_node)
+                if is_relu:
+                    model.graph.erase_node(relu_node)
+                model.graph.erase_node(func_node)
+
+                # Step 3: TODO(andrew) Fold weights
+            model.recompile()
     return model
 
 def special_pattern_replacement(model: QuantizedGraphModule) -> QuantizedGraphModule:

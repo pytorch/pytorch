@@ -3669,9 +3669,10 @@ class TestQuantizeFxOps(QuantizationTestCase):
             (True, False),  # has_relu
             (True, False),  # functional relu
         )
-        # TODO(andrew): Make this work for other combinations too
-        options = [(QuantType.STATIC, False, False, False)]
         for quant_type, use_bias, has_relu, f_relu in options:
+            # TODO(andrew): Make this work for other combinations too
+            if quant_type == QuantType.DYNAMIC or use_bias:
+                continue
             # when has_relu is False, we are using an nn.Identity and
             # we will insert observer/fake_quant for the output of nn.Identity since
             # it is a copy node, that's why we have extra observer/fake_quant
