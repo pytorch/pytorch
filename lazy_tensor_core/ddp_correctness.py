@@ -66,27 +66,30 @@ def print_param(param_a, param_b):
     print("=====cuda=====")
     print(param_b.cpu())
 
+def init(model, device, rank):
+    model = copy.deepcopy(model).to(device)
+    model = DDP(model, device_ids=[rank])
+
+    loss_fn = nn.MSELoss()
+    optimizer = optim.SGD(model.parameters(), lr=0.001)
+
+    return model, loss_fn, optimizer
+
 
 def demo_basic(rank, world_size):
     # without flushing, mp won't print this message if crash.
     print(f"Running basic DDP example on rank {rank}, and process id: {os.getpid()}", flush=True)
     setup(rank, world_size)
 
+    torch._C._jit_set_bailout_depth(0)
+
     model = ToyModel()
 
     device_lazy = f"lazy:{rank}"
-    model_lazy = copy.deepcopy(model).to(device_lazy)
-    model_lazy = DDP(model_lazy, device_ids=[rank])
+    model_lazy, loss_fn_lazy, optimizer_lazy = init(model, device_lazy, rank)
 
     device_cuda = f"cuda:{rank}"
-    model_cuda = copy.deepcopy(model).to(device_cuda)
-    model_cuda = DDP(model_cuda, device_ids=[rank])
-
-    loss_fn_lazy = nn.MSELoss()
-    optimizer_lazy = optim.SGD(model_lazy.parameters(), lr=0.001)
-
-    loss_fn_cuda = nn.MSELoss()
-    optimizer_cuda = optim.SGD(model_cuda.parameters(), lr=0.001)
+    model_cuda, loss_fn_cuda, optimizer_cuda = init(model, device_cuda, rank)
 
     assert all_close(model_lazy.parameters(), model_cuda.parameters())
     for i in range(10):
