@@ -572,6 +572,7 @@ def get_node_type_to_io_type_map() -> Dict[str, Set[NSNodeTargetType]]:
         nniqat.ConvReLU2d,
         nniqat.ConvReLU3d,
         nniqat.LinearReLU,
+        nniqat.LinearBn1d,
         nniqd.LinearReLU,
     ])
 
