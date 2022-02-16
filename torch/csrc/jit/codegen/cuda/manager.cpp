@@ -186,16 +186,29 @@ void compileCudaFusionGroup(Node* fusion_node) {
   }
 }
 
+bool shouldVerifyResult() {
+  static const auto env = std::getenv("TORCH_NVFUSER_VERIFICATION");
+  return env;
+}
+
 void runCudaFusionGroup(const Node* fusion_node, Stack& stack) {
   FUSER_PERF_SCOPE("nvFuser::Manager::runCudaFusionGroup");
 
   // Fallback to use if anything goes wrong
-  auto take_fallback = [&]() {
+  auto take_fallback = [&](Stack& stack) {
     // copying graph here since we are eliminating shape information;
     auto copied_graph = fusion_node->g(attr::Subgraph)->copy();
     EraseShapeInformation(copied_graph);
     InterpreterState{Code(copied_graph, "fallback_cuda_fuser")}.run(stack);
   };
+
+  c10::optional<Stack> stack_copy;
+  if (shouldVerifyResult()) {
+    stack_copy = Stack();
+    for (const auto& v : stack) {
+      stack_copy->emplace_back(v.deepcopy());
+    }
+  }
 
   auto run_fusion = [&]() {
     TORCH_CHECK(
@@ -233,10 +246,33 @@ void runCudaFusionGroup(const Node* fusion_node, Stack& stack) {
           "Failed for some reason. To debug try disable codegen fallback path"
           "via setting the env variable"
           "`export PYTORCH_NVFUSER_DISABLE_FALLBACK=1`");
-      take_fallback();
+      take_fallback(stack);
     }
   } else {
     run_fusion();
+  }
+
+  if (stack_copy) {
+    take_fallback(*stack_copy);
+    TORCH_CHECK(
+        stack_copy->size() == stack.size(),
+        "Fallback & fused graph produce different size stacks");
+    for (auto i : c10::irange(stack.size())) {
+      TORCH_CHECK(
+          (*stack_copy)[i].isTensor() == stack[i].isTensor(),
+          i,
+          "-th stack element differs in type between fused & fallback output");
+      if (stack[i].isTensor()) {
+        if (!at::allclose((*stack_copy)[i].toTensor(), stack[i].toTensor())) {
+          TORCH_WARN(
+              i,
+              "-th element on the stack differs in value. Expected: ",
+              stack[i].toTensor(),
+              "; Actual: ",
+              (*stack_copy)[i].toTensor());
+        }
+      }
+    }
   }
 }
 
