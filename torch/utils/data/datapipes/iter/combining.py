@@ -4,12 +4,8 @@ from collections import deque
 from typing import Any, Callable, Iterator, List, Optional, Set, Sized, Tuple, TypeVar, Deque
 
 from torch.utils.data import IterDataPipe, functional_datapipe
-from torch.utils.data.datapipes.utils.common import DILL_AVAILABLE, check_lambda_fn
+from torch.utils.data.datapipes.utils.common import check_lambda_fn
 from torch.utils.data._utils.serialization import serialize_fn, deserialize_fn
-
-if DILL_AVAILABLE:
-    import dill
-    dill.extend(use_dill=False)
 
 T_co = TypeVar('T_co', covariant=True)
 

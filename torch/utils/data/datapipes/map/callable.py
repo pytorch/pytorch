@@ -1,10 +1,6 @@
-from torch.utils.data.datapipes.utils.common import DILL_AVAILABLE, check_lambda_fn
+from torch.utils.data.datapipes.utils.common import check_lambda_fn
 from typing import Callable, TypeVar
 from torch.utils.data import MapDataPipe, functional_datapipe
-
-if DILL_AVAILABLE:
-    import dill
-    dill.extend(use_dill=False)
 
 T_co = TypeVar('T_co', covariant=True)
 

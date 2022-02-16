@@ -1,11 +1,7 @@
 from typing import Callable, Iterator, Sized, TypeVar
 
 from torch.utils.data import IterDataPipe, _utils, functional_datapipe
-from torch.utils.data.datapipes.utils.common import DILL_AVAILABLE, check_lambda_fn
-
-if DILL_AVAILABLE:
-    import dill
-    dill.extend(use_dill=False)
+from torch.utils.data.datapipes.utils.common import check_lambda_fn
 
 T_co = TypeVar("T_co", covariant=True)
 
