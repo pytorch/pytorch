@@ -1422,8 +1422,8 @@ class TestSparseCSR(TestCase):
             self.assertTrue(torch.autograd.gradcheck(fn, [sample.input, sample.args[1]], fast_mode=True))
 
             # noncontiguous
-            c = make_tensor(sample.input.shape, device=device, dtype=dtype, noncontiguous=True, requires_grad=True)
-            b = make_tensor(sample.args[1].shape, device=device, dtype=dtype, noncontiguous=True, requires_grad=True)
+            c = make_tensor(sample.input.shape, device=device, dtype=dtype, non_contiguous=True, requires_grad=True)
+            b = make_tensor(sample.args[1].shape, device=device, dtype=dtype, non_contiguous=True, requires_grad=True)
             self.assertTrue(torch.autograd.gradcheck(fn, [c, b], fast_mode=True))
 
     @skipCUDAIfRocm
@@ -1451,8 +1451,8 @@ class TestSparseCSR(TestCase):
             self.assertTrue(torch.autograd.gradcheck(fn, [sample.input, sample.args[1]], fast_mode=True))
 
             # noncontiguous
-            c = make_tensor(sample.input.shape, device=device, dtype=dtype, noncontiguous=True, requires_grad=True)
-            b = make_tensor(sample.args[1].shape, device=device, dtype=dtype, noncontiguous=True, requires_grad=True)
+            c = make_tensor(sample.input.shape, device=device, dtype=dtype, non_contiguous=True, requires_grad=True)
+            b = make_tensor(sample.args[1].shape, device=device, dtype=dtype, non_contiguous=True, requires_grad=True)
             self.assertTrue(torch.autograd.gradcheck(fn, [c, b], fast_mode=True))
 
     @ops(binary_ops_with_dense_output, dtypes=OpDTypes.supported, allowed_dtypes=[torch.double, ])
