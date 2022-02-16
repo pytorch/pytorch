@@ -3670,9 +3670,6 @@ class TestQuantizeFxOps(QuantizationTestCase):
             (True, False),  # functional relu
         )
         for quant_type, use_bias, has_relu, f_relu in options:
-            # TODO(andrew): Make this work for other combinations too
-            if quant_type == QuantType.DYNAMIC or use_bias:
-                continue
             # when has_relu is False, we are using an nn.Identity and
             # we will insert observer/fake_quant for the output of nn.Identity since
             # it is a copy node, that's why we have extra observer/fake_quant
@@ -3707,7 +3704,8 @@ class TestQuantizeFxOps(QuantizationTestCase):
                 model, data, quant_type, qlinear_fun,
                 prepare_expected_node_occurrence=prepare_expected_node_occurrence,
                 expected_node_occurrence=convert_node_occurrence)
-            self.assertEqual(result_dict["quantized_output"], result_dict["quantized_reference_output"])
+            if quant_type != QuantType.DYNAMIC:
+                self.assertEqual(result_dict["quantized_output"], result_dict["quantized_reference_output"])
 
     def test_linear_dynamic_fp16(self):
         class FuncLinear(torch.nn.Module):
