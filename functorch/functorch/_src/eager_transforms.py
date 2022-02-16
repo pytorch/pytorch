@@ -139,7 +139,7 @@ def _autograd_grad(outputs, inputs, grad_outputs=None, retain_graph=False, creat
 
 
 # How do we increment and decrement the nesting? I don't think we can.
-def vjp(func: Callable, *primals, has_aux=False):
+def vjp(func: Callable, *primals, has_aux: bool = False):
     """
     Standing for the vector-Jacobian product, returns a tuple containing the
     results of :attr:`func` applied to :attr:`primals` and a function that, when
@@ -314,7 +314,7 @@ def jacrev(func: Callable, argnums: Union[int, Tuple[int]] = 0, *, has_aux=False
         returns the Jacobian of :attr:`func` with respect to the arg(s) at
         :attr:`argnums`. If ``has_aux is True``, then the returned function
         instead returns a ``(jacobian, aux)`` tuple where ``jacobian``
-        is the Jacobian and ``aux`` is auxiliary objects returned by ``func``.
+        is the Jacobian and ``aux`` is auxiliary objects returned by :attr:`func`.
 
     A basic usage with a pointwise, unary operation will give a diagonal array
     as the Jacobian
@@ -670,7 +670,7 @@ def safe_unpack_dual(dual, strict):
     return primal, tangent
 
 
-def jvp(func, primals, tangents, *, strict=False):
+def jvp(func: Callable, primals: Any, tangents: Any, *, strict: bool = False, has_aux: bool = False):
     """
     Standing for the Jacobian-vector product, returns a tuple containing
     the output of `func(*primals)` and the "Jacobian of ``func`` evaluated at
@@ -685,10 +685,16 @@ def jvp(func, primals, tangents, *, strict=False):
         tangents (Tensors): The "vector" for which Jacobian-vector-product is
             computed. Must be the same structure and sizes as the inputs to
             ``func``.
+        has_aux (bool): Flag indicating that :attr:`func` returns a
+            ``(output, aux)`` tuple where the first element is the output of
+            the function to be differentiated and the second element is
+            other auxiliary objects that will not be differentiated.
+            Default: False.
 
     Returns:
         Returns a ``(output, jvp_out)`` tuple containing the output of ``func``
         evaluated at ``primals`` and the Jacobian-vector product.
+        If ``has_aux is True``, then instead returns a ``(output, jvp_out, aux)`` tuple.
 
     .. warning::
         PyTorch's forward-mode AD coverage on operators is not very good at the
@@ -745,6 +751,15 @@ def jvp(func, primals, tangents, *, strict=False):
                                for p, t in zip(flat_primals, flat_tangents))
             duals = tree_unflatten(flat_duals, primals_spec)
             result_duals = func(*duals)
+            if has_aux:
+                if not (isinstance(result_duals, tuple) and len(result_duals) == 2):
+                    raise RuntimeError(
+                        f"{jvp_str}: output of function f should be a tuple: (output, aux) "
+                        "if has_aux is True"
+                    )
+                result_duals, aux = result_duals
+                aux = _undo_create_differentiable(aux, level)
+
             result_duals, spec = tree_flatten(result_duals)
             assert_non_empty_tensor_output(result_duals, jvp_str)
 
@@ -754,7 +769,13 @@ def jvp(func, primals, tangents, *, strict=False):
                 partial(_undo_create_differentiable, level=level), primals_out)
             tangents_out = tree_map(
                 partial(_undo_create_differentiable, level=level), tangents_out)
-            return tree_unflatten(primals_out, spec), tree_unflatten(tangents_out, spec)
+
+            primals_out_unflatten = tree_unflatten(primals_out, spec)
+            tangents_out_unflatten = tree_unflatten(tangents_out, spec)
+            if has_aux:
+                return primals_out_unflatten, tangents_out_unflatten, aux
+
+            return primals_out_unflatten, tangents_out_unflatten
     finally:
         _grad_decrement_nesting()
         JVP_NESTING -= 1
@@ -767,7 +788,7 @@ def safe_unflatten(tensor, dim, shape):
     return tensor.unflatten(dim, shape)
 
 
-def jacfwd(func, argnums=0):
+def jacfwd(func: Callable, argnums: argnums_t = 0, has_aux: bool = False):
     """
     Computes the Jacobian of :attr:`func` with respect to the arg(s) at index
     :attr:`argnum` using forward-mode autodiff
@@ -778,11 +799,18 @@ def jacfwd(func, argnums=0):
         argnums (int or Tuple[int]): Optional, integer or tuple of integers,
             saying which arguments to get the Jacobian with respect to.
             Default: 0.
+        has_aux (bool): Flag indicating that :attr:`func` returns a
+            ``(output, aux)`` tuple where the first element is the output of
+            the function to be differentiated and the second element is
+            auxiliary objects that will not be differentiated.
+            Default: False.
 
     Returns:
         Returns a function that takes in the same inputs as :attr:`func` and
         returns the Jacobian of :attr:`func` with respect to the arg(s) at
-        :attr:`argnums`.
+        :attr:`argnums`. If ``has_aux is True``, then the returned function
+        instead returns a ``(jacobian, aux)`` tuple where ``jacobian``
+        is the Jacobian and ``aux`` is auxiliary objects returned by :attr:`func`.
 
     .. warning::
         PyTorch's forward-mode AD coverage on operators is not very good at the
@@ -854,11 +882,26 @@ def jacfwd(func, argnums=0):
         basis = tree_unflatten(flat_basis, primals_spec)
 
         def push_jvp(basis):
-            _, jvp_out = jvp(f_wrapper, primals, basis)
+            output = jvp(f_wrapper, primals, basis, has_aux=has_aux)
+            if has_aux:
+                _, jvp_out, aux = output
+                return jvp_out, aux
+            _, jvp_out = output
             return jvp_out
 
         results = vmap(push_jvp)(basis)
+        if has_aux:
+            results, aux = results
+            # aux is in the standard basis format, e.g. NxN matrix
+            # We need to fetch the first element as original `func` output
+            flat_aux, aux_spec = tree_flatten(aux)
+            flat_aux = [value[0] for value in flat_aux]
+            aux = tree_unflatten(flat_aux, aux_spec)
+
         jac_outs, spec = tree_flatten(results)
+        # Most probably below output check can never raise an error
+        # as jvp should test the output before
+        # assert_non_empty_output(jac_outs, 'jacfwd(f, ...)(*args)')
 
         jac_outs_ins = tuple(
             tuple(
@@ -872,6 +915,8 @@ def jacfwd(func, argnums=0):
 
         if isinstance(argnums, int):
             jac_outs_ins = tuple(jac_ins[0] for jac_ins in jac_outs_ins)
+        if has_aux:
+            return tree_unflatten(jac_outs_ins, spec), aux
         return tree_unflatten(jac_outs_ins, spec)
     return wrapper_fn
 
@@ -949,8 +994,8 @@ def grad_and_value(func: Callable, argnums: argnums_t = 0, has_aux: bool = False
     @wraps(func)
     def wrapper(*args, **kwargs):
         level = _grad_increment_nesting()
-        output, aux, grad_input = None, None, None
         try:
+            output, aux, grad_input = None, None, None
             # See NOTE [grad and vjp interaction with no_grad]
             with torch.enable_grad():
                 args = _wrap_all_tensors(args, level)
@@ -960,6 +1005,11 @@ def grad_and_value(func: Callable, argnums: argnums_t = 0, has_aux: bool = False
 
                 output = func(*args, **kwargs)
                 if has_aux:
+                    if not (isinstance(output, tuple) and len(output) == 2):
+                        raise RuntimeError(
+                            "grad_and_value(f)(*args): output of function f should be a tuple: (output, aux) "
+                            "if has_aux is True"
+                        )
                     output, aux = output
 
                 if not isinstance(output, torch.Tensor):
@@ -978,17 +1028,16 @@ def grad_and_value(func: Callable, argnums: argnums_t = 0, has_aux: bool = False
                 flat_grad_input = _autograd_grad(flat_outputs, flat_diff_args, create_graph=True)
                 grad_input = tree_unflatten(flat_grad_input, spec)
 
-        finally:
-            if grad_input is not None:
                 grad_input = _undo_create_differentiable(grad_input, level)
-            if output is not None:
                 output = _undo_create_differentiable(output, level)
-            if aux is not None:
-                aux = _undo_create_differentiable(aux, level)
+                if aux is not None:
+                    aux = _undo_create_differentiable(aux, level)
+
+            if has_aux:
+                return grad_input, (output, aux)
+            return grad_input, output
+        finally:
             _grad_decrement_nesting()
-        if has_aux:
-            return grad_input, (output, aux)
-        return grad_input, output
     return wrapper
 
 
