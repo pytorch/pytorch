@@ -6,19 +6,18 @@ from torch.utils.data.datapipes.utils.common import get_file_binaries_from_pathn
 
 
 class FileOpenerIterDataPipe(IterDataPipe[Tuple[str, IOBase]]):
-    r""" :class:`FileOpenerIterDataPipe`.
-
-    Iterable Datapipe to load file streams from given pathnames,
-    yield pathname and file stream in a tuple.
+    r"""
+    Given pathnames, opens files and yield pathname and file stream in a tuple.
 
     Args:
         datapipe: Iterable datapipe that provides pathnames
         mode: An optional string that specifies the mode in which
-            the file is opened by `open()`. It defaults to 'b' which
+            the file is opened by ``open()``. It defaults to ``b`` which
             means open for reading in binary mode. Another option is
-            to use 't' for text mode
+            to use ``t`` for text mode
         encoding: An optional string that specifies the encoding of the
             underlying file. It defaults to ``None`` to match the default encoding of ``open``.
+        length: Nominal length of the datapipe
 
     Note:
         The opened file handles will be closed by Python's GC periodically. Users can choose
