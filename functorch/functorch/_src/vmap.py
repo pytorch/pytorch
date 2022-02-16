@@ -201,6 +201,9 @@ def _get_name(func: Callable):
 # vmap(func)(inputs) wraps all Tensor inputs to be batched in BatchedTensors,
 # sends those into func, and then unwraps the output BatchedTensors. Operations
 # on BatchedTensors perform the batched operations that the user is asking for.
+#
+# vmap's randomness behavior differs from JAX's, which would require a PRNG key
+# to be passed everywhere.
 
 
 def vmap(
@@ -230,11 +233,11 @@ def vmap(
         out_dims (int or Tuple[int]): Specifies where the mapped dimension
             should appear in the outputs. If :attr:`out_dims` is a Tuple, then
             it should have one element per output. Default: 0.
-        use_batched_random (str): Specifies whether the randomness in this
+        randomness (str): Specifies whether the randomness in this
             vmap should be the same or different across batches. If 'different',
             the randomness for each batch will be different. If 'same', the
             randomness will be the same across batches. If 'error', any calls to
-            random functions will error. Default: True.
+            random functions will error. Default: 'error'.
 
     Returns:
         Returns a new "batched" function. It takes the same inputs as
