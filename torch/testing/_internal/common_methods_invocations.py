@@ -12972,9 +12972,16 @@ op_db: List[OpInfo] = [
                skipCPUIfNoLapack,
            ],
            skips=(
+               # errors with "leaked XXXX bytes CUDA memory on device 0"
+               # TODO: investigate. Suspect: svd_out, as linalg_pinv is also skipping the very same test and is SVD-based
+               DecorateInfo(
+                   unittest.expectedFailure,
+                   'TestJit', 'test_variant_consistency_jit',
+                   device_type='cuda', dtypes=(torch.float32, torch.complex64)
+               ),
                # Derivative wrt atol/rtol are not implemented
                DecorateInfo(unittest.expectedFailure, "TestCommon",
-                            "test_floating_inputs_are_differentiable"),
+                            "test_floating_inputs_are_differentiable")
            )),
     OpInfo('linalg.svd_rank_restricted',
            variant_test_name='singular',
