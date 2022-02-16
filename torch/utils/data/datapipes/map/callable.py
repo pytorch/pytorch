@@ -1,4 +1,4 @@
-from torch.utils.data.datapipes.utils.common import check_lambda_fn, DILL_AVAILABLE, serialize_fn, deserialize_fn
+from torch.utils.data.datapipes.utils.common import DILL_AVAILABLE, check_lambda_fn
 from typing import Callable, TypeVar
 from torch.utils.data import MapDataPipe, functional_datapipe
 
@@ -45,12 +45,3 @@ class MapperMapDataPipe(MapDataPipe[T_co]):
 
     def __getitem__(self, index) -> T_co:
         return self.fn(self.datapipe[index])
-
-    def __getstate__(self):
-        serialized_fn, method = serialize_fn(self.fn, DILL_AVAILABLE)
-        state = (self.datapipe, serialized_fn, method)
-        return state
-
-    def __setstate__(self, state):
-        (self.datapipe, serialized_fn, method) = state
-        self.fn = deserialize_fn(serialized_fn, method, DILL_AVAILABLE)  # type: ignore[assignment]

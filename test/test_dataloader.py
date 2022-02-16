@@ -1375,16 +1375,17 @@ except RuntimeError as e:
 
     def test_multiprocessing_iterdatapipe(self):
         # Testing to make sure that function from global scope (e.g. imported from library) can be serialized
-        # and used with multi-process DataLoader
+        # and used with multiprocess DataLoader
         def row_processer(row):
             if np:
                 return np.add(row, 1)
             else:
                 return [i + 1 for i in row]
 
-        reference = [torch.as_tensor([[2, 3, 4, 5], [2, 3, 4, 5]]), torch.as_tensor([[2, 3, 4, 5], [2, 3, 4, 5]])]
-        datapipe = IterableWrapper([[1, 2, 3, 4], [1, 2, 3, 4]])
+        reference = [torch.as_tensor([[2, 3, 4, 5]]), torch.as_tensor([[2, 3, 4, 5]])]
+        datapipe = IterableWrapper([[1, 2, 3, 4], [1, 2, 3, 4, 5, 6]])
         datapipe = datapipe.map(row_processer)
+        datapipe = datapipe.filter(lambda ls: len(ls) == 4)
 
         dl_common_args = dict(num_workers=2, batch_size=2, shuffle=True, pin_memory=(not TEST_CUDA))
         for ctx in supported_multiprocessing_contexts:

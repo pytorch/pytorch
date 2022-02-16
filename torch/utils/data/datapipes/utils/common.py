@@ -1,23 +1,12 @@
 import os
 import fnmatch
-import pickle
 import warnings
 
 from enum import Enum
 from io import IOBase
 from typing import Iterable, List, Tuple, Union, Optional
 
-try:
-    import dill
-
-    # XXX: By default, dill writes the Pickler dispatch table to inject its
-    # own logic there. This globally affects the behavior of the standard library
-    # pickler for any user who transitively depends on this module!
-    # Undo this extension to avoid altering the behavior of the pickler globally.
-    dill.extend(use_dill=False)
-    DILL_AVAILABLE = True
-except ImportError:
-    DILL_AVAILABLE = False
+from torch.utils.data._utils.serialization import DILL_AVAILABLE
 
 
 class SerializationType(Enum):
@@ -32,31 +21,6 @@ def check_lambda_fn(fn):
             "Lambda function is not supported for pickle, please use "
             "regular python function or functools.partial instead."
         )
-
-
-def serialize_fn(fn, is_dill_available):
-    """
-    Try to serialize ``fn`` using `pickle`, falls back to `dill` if `pickle` fails and DILL_AVAILABLE.
-    Returns a tuple of serialized function and SerializationType indicating the serialization method.
-    """
-    try:
-        return pickle.dumps(fn), SerializationType("pickle")
-    except (pickle.PickleError, AttributeError):
-        if is_dill_available:
-            return dill.dumps(fn, recurse=True), SerializationType("dill")
-    return pickle.dumps(fn), SerializationType("pickle")
-
-
-def deserialize_fn(serialized_fn, method, is_dill_available):
-    if method == SerializationType("pickle"):
-        return pickle.loads(serialized_fn)
-    elif method == SerializationType("dill"):
-        if is_dill_available:
-            return dill.loads(serialized_fn)
-        else:
-            raise RuntimeError("`dill` is not avaliable but it is needed to deserialize the function.")
-    else:
-        raise TypeError(f"Expect valid SerializationType in deserialize_fn, got {method} instead.")
 
 
 def match_masks(name : str, masks : Union[str, List[str]]) -> bool:

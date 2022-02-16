@@ -1,7 +1,7 @@
 from collections import defaultdict
 
 from torch.utils.data import IterDataPipe, functional_datapipe, DataChunk
-from torch.utils.data.datapipes.utils.common import DILL_AVAILABLE, check_lambda_fn, serialize_fn, deserialize_fn
+from torch.utils.data.datapipes.utils.common import DILL_AVAILABLE, check_lambda_fn
 from typing import Any, Callable, DefaultDict, Iterator, List, Optional, Sized, TypeVar
 
 if DILL_AVAILABLE:
@@ -231,28 +231,4 @@ class GrouperIterDataPipe(IterDataPipe[DataChunk]):
     def __getstate__(self):
         if IterDataPipe.getstate_hook is not None:
             return IterDataPipe.getstate_hook(self)
-
-        serialized_fn, method = serialize_fn(self.group_key_fn, DILL_AVAILABLE)
-        state = (
-            self.datapipe,
-            serialized_fn,
-            method,
-            self.buffer_size,
-            self.group_size,
-            self.guaranteed_group_size,
-            self.drop_remaining,
-        )
-        return state
-
-    def __setstate__(self, state):
-        (
-            self.datapipe,
-            serialized_fn,
-            method,
-            self.buffer_size,
-            self.group_size,
-            self.guaranteed_group_size,
-            self.drop_remaining,
-        ) = state
-        self.group_key_fn = deserialize_fn(serialized_fn, method, DILL_AVAILABLE)
-        self.wrapper_class = DataChunk
+        return super().__getstate__()
