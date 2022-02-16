@@ -139,7 +139,7 @@ class OpOverloadPacket:
             return overload
         except RuntimeError:
             raise AttributeError(
-                "The underlying op of '{}' has no overload name '{}'".format(str(self), key)
+                "The underlying op of '{}' has no overload name '{}'".format(str(self), use_key)
             ) from None
 
     def __call__(self, *args, **kwargs):
@@ -203,7 +203,7 @@ class _OpNamespace(types.ModuleType):
         torch.jit._builtins._register_builtin(op, qualified_op_name)
         op.__module__ = self.__module__ + "." + namespace_name
         opoverloadpacket = OpOverloadPacket(qualified_op_name, op_name, op)
-        # opoverloadpacket.__module__ = self.__module__ + "." + namespace_name
+        opoverloadpacket.__module__ = self.__module__ + "." + namespace_name
         # cache the opoverloadpacket to ensure that each op corresponds to
         # a unique OpOverloadPacket object
         setattr(self, op_name, opoverloadpacket)

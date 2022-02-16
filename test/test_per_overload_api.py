@@ -37,8 +37,8 @@ class TestPerOverloadAPI(TestCase):
 
         # class attributes
         self.assertEqual(add_tensoroverload.name, 'aten.add')
-        self.assertEqual(add_tensoroverload.overload_name, 'Tensor')
-        self.assertEqual(add_tensoroverload.overload_packet, add_packet)
+        self.assertEqual(add_tensoroverload.overloadname, 'Tensor')
+        self.assertEqual(add_tensoroverload.overloadpacket, add_packet)
 
         # deepcopy is a no-op
         self.assertEqual(id(add_tensoroverload), id(copy.deepcopy(add_tensoroverload)))

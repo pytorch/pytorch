@@ -1467,77 +1467,76 @@ void initJITBindings(PyObject* module) {
     }
     return type.value();
   });
-
-    py::class_<Argument>(m, "Argument")
-      .def("__repr__", [](Argument& self) {
-        std::ostringstream s;
-        s << *self.type();
-        if (self.is_out()) {
-          s << "&";
-        }
-        s << " " << self.name();
-        return s.str();})
-      .def_property_readonly("name", [](Argument& self) { return self.name(); })
-      .def_property_readonly("type", [](Argument& self) { return self.type(); })
-      .def_property_readonly(
-          "N",
-          [](Argument& self) -> py::object {
-            return (self.N()) ? py::cast(*self.N()) : py::none();
-          })
-      .def_property_readonly(
-          "default_value",
-          [](Argument& self) -> py::object {
-            if (!self.default_value()) {
-              return py::none();
-            }
-            IValue v = *self.default_value();
-            return toPyObject(std::move(v));
-          })
-      .def(
-          "has_default_value",
-          [](Argument& self) -> py::bool_ {
-            return self.default_value().has_value();
-          })
-      .def_property_readonly("kwarg_only", [](Argument& self) -> bool {
-        return self.kwarg_only();})
-      .def_property_readonly(
-          "is_mutable", [](Argument& self) -> bool { return self.is_out(); });
-    py::class_<FunctionSchema>(m, "FunctionSchema")
-      .def_property_readonly(
-          "name", [](FunctionSchema& self) { return self.name(); })
-      .def_property_readonly(
-          "overload_name",
-          [](FunctionSchema& self) { return self.overload_name(); })
-      .def_property_readonly(
-          "arguments", [](FunctionSchema& self) { return py::list(py::cast(self.arguments())); })
-      .def_property_readonly(
-          "returns", [](FunctionSchema& self) { return py::list(py::cast(self.returns())); })
-      .def(
-          "is_backward_compatible_with",
-          [](const FunctionSchema& self, const FunctionSchema& old_schema) {
-            return self.isBackwardCompatibleWith(old_schema);
-          })
-      .def(
-          "check_forward_compatible_with",
-          [](const FunctionSchema& self, const FunctionSchema& old_schema) {
-            std::ostringstream out;
-            auto result = self.isForwardCompatibleWith(old_schema, out);
-            return std::make_pair(result, out.str());
-          })
-      .def(
-          "__eq__",
-          [](const FunctionSchema& self, const FunctionSchema& other) {
-            return self == other;
-          })
-      .def(
-          "__str__",
-          [](FunctionSchema& self) {
-            std::stringstream ss;
-            ss << self;
-            return ss.str();
-          })
-      .def_property_readonly(
-          "is_mutable", [](FunctionSchema& self) { return self.is_mutable(); });
+  py::class_<FunctionSchema>(m, "FunctionSchema")
+    .def_property_readonly(
+        "name", [](FunctionSchema& self) { return self.name(); })
+    .def_property_readonly(
+        "overload_name",
+        [](FunctionSchema& self) { return self.overload_name(); })
+    .def_property_readonly(
+        "arguments", [](FunctionSchema& self) { return self.arguments(); })
+    .def_property_readonly(
+        "returns", [](FunctionSchema& self) { return self.returns(); })
+    .def(
+        "is_backward_compatible_with",
+        [](const FunctionSchema& self, const FunctionSchema& old_schema) {
+          return self.isBackwardCompatibleWith(old_schema);
+        })
+    .def(
+        "check_forward_compatible_with",
+        [](const FunctionSchema& self, const FunctionSchema& old_schema) {
+          std::ostringstream out;
+          auto result = self.isForwardCompatibleWith(old_schema, out);
+          return std::make_pair(result, out.str());
+        })
+    .def(
+        "__eq__",
+        [](const FunctionSchema& self, const FunctionSchema& other) {
+          return self == other;
+        })
+    .def(
+        "__str__",
+        [](FunctionSchema& self) {
+          std::stringstream ss;
+          ss << self;
+          return ss.str();
+        })
+    .def_property_readonly(
+        "is_mutable", [](FunctionSchema& self) { return self.is_mutable(); });
+  py::class_<Argument>(m, "Argument")
+    .def("__repr__", [](Argument& self) {
+      std::ostringstream s;
+      s << *self.type();
+      if (self.alias_info()) {
+        s << "&";
+      }
+      s << " " << self.name();
+      return s.str();})
+    .def_property_readonly("name", [](Argument& self) { return self.name(); })
+    .def_property_readonly("type", [](Argument& self) { return self.type(); })
+    .def_property_readonly(
+        "N",
+        [](Argument& self) -> py::object {
+          return (self.N()) ? py::cast(*self.N()) : py::none();
+        })
+    .def_property_readonly(
+        "default_value",
+        [](Argument& self) -> py::object {
+          if (!self.default_value()) {
+            return py::none();
+          }
+          IValue v = *self.default_value();
+          return toPyObject(std::move(v));
+        })
+    .def(
+        "has_default_value",
+        [](Argument& self) -> py::bool_ {
+          return self.default_value().has_value();
+        })
+    .def_property_readonly("kwarg_only", [](Argument& self) -> bool {
+      return self.kwarg_only();})
+    .def_property_readonly(
+        "is_mutable", [](Argument& self) -> bool { return self.alias_info() && self.alias_info()->isWrite(); });
   m.def("_jit_get_all_schemas", []() {
     const std::vector<std::shared_ptr<Operator>>& operations =
         getAllOperators();
