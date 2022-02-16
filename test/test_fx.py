@@ -24,7 +24,7 @@ from torch.testing._internal.common_methods_invocations import op_db
 from torch.testing._internal.common_device_type import ops, onlyCPU, instantiate_device_type_tests
 import torch.utils._pytree as pytree
 import torch.fx._pytree as fx_pytree
-from torch.fx import symbolic_trace, Proxy, Node, GraphModule, Interpreter, Tracer, Transformer, Graph, wrap, PH
+from torch.fx import symbolic_trace, Proxy, Node, GraphModule, Interpreter, Tracer, Transformer, Graph, wrap, PH, CodeGen
 from torch.fx.node import Target, Argument
 from torch.fx.passes import shape_prop
 from torch.fx.immutable_collections import immutable_dict, immutable_list
@@ -1613,6 +1613,33 @@ class TestFX(JitTestCase):
         env_key_names = set(n.name for n in interp.env.keys())
         self.assertEqual(env_key_names, set(['output']))
 
+    def test_interpreter_default_args(self):
+        class Model(torch.nn.Module):
+            def forward(self, x, y=3.14159):
+                return x + y
+
+        model = Model()
+        gm = torch.fx.symbolic_trace(model)
+
+        interp = Interpreter(gm)
+        x = torch.randn(5, 3)
+        out = interp.run(x)
+        torch.testing.assert_allclose(out, x + 3.14159)
+
+    def test_interpreter_not_enough_args(self):
+        class Model(torch.nn.Module):
+            def forward(self, x, y):
+                return x + y
+
+        model = Model()
+        gm = torch.fx.symbolic_trace(model)
+
+        interp = Interpreter(gm)
+        x = torch.randn(5, 3)
+        with self.assertRaisesRegex(RuntimeError,
+                                    'Expected positional argument for parameter y, but one was not passed in'):
+            out = interp.run(x)
+
     def test_transformer_noop(self):
         class MyModule(torch.nn.Module):
             def __init__(self):
@@ -3099,6 +3126,12 @@ class TestFX(JitTestCase):
             orig_out = f(val)
             nf = symbolic_trace(f, concrete_args={'x': inp})
             self.assertEqual(nf(val), orig_out)
+
+            bare_fx = GraphModule({}, copy.deepcopy(nf.graph))
+            bare_fx.graph.set_codegen(CodeGen())
+            bare_fx.recompile()
+            self.assertEqual(nf.graph.process_outputs(bare_fx(*nf.graph.process_inputs(val))), orig_out)
+
             assert num_flat_args == 0 or "tree_flatten_spec" in nf.code
             assert(sum([i.op == 'placeholder' for i in nf.graph.nodes]) == num_flat_args)
 
@@ -3133,6 +3166,42 @@ class TestFX(JitTestCase):
 
         nf = symbolic_trace(nf)
         self.assertEqual(nf(**val), f(**val))
+
+    def test_custom_codegen(self):
+        class ListCodeGen(CodeGen):
+            def gen_fn_def(self, free_vars, maybe_return_annotation):
+                lst_unpack = f"""
+def forward(self, args_list: List[torch.Tensor]){maybe_return_annotation}:
+    {', '.join(free_vars)} = args_list"""
+                return lst_unpack
+
+            def additional_globals(self):
+                return [('List', typing.List)]
+
+            def process_inputs(self, *inputs):
+                assert(len(inputs) == 1)
+                return inputs[0]
+
+        def f(a, b):
+            return a + b
+
+        nf = symbolic_trace(f)
+        vals = [torch.randn(3), torch.randn(3)]
+        self.assertEqual(nf(*vals), f(*vals))
+
+        nf.graph.set_codegen(ListCodeGen())
+        nf.recompile()
+
+        bare_fx = GraphModule({}, copy.deepcopy(nf.graph))
+        bare_fx.graph.set_codegen(CodeGen())
+        bare_fx.recompile()
+
+        self.assertEqual(nf(vals), f(*vals))
+        self.assertEqual(nf.graph.process_outputs(bare_fx(*nf.graph.process_inputs(vals))), f(*vals))
+
+        ts_f = torch.jit.script(nf)
+        self.assertEqual(nf(vals), ts_f(vals))
+
 
     def test_imul_code_print(self):
         graph = torch.fx.Graph()
@@ -3466,6 +3535,7 @@ class TestFunctionalTracing(JitTestCase):
         "avg_pool1d": BUILT_IN_FUNC,
         "avg_pool2d": BUILT_IN_FUNC,
         "avg_pool3d": BUILT_IN_FUNC,
+        "bilinear": BUILT_IN_FUNC,
         "celu_": BUILT_IN_FUNC,
         "channel_shuffle": BUILT_IN_FUNC,
         "conv1d": BUILT_IN_FUNC,
@@ -3477,13 +3547,18 @@ class TestFunctionalTracing(JitTestCase):
         "conv_transpose3d": BUILT_IN_FUNC,
         "cosine_similarity": BUILT_IN_FUNC,
         "elu_": BUILT_IN_FUNC,
+        "gelu": BUILT_IN_FUNC,
+        "hardshrink": BUILT_IN_FUNC,
         "hardtanh_": BUILT_IN_FUNC,
         "leaky_relu_": BUILT_IN_FUNC,
+        "linear": BUILT_IN_FUNC,
         "logsigmoid": BUILT_IN_FUNC,
         "one_hot": BUILT_IN_FUNC,
+        "pairwise_distance": BUILT_IN_FUNC,
         "pdist": BUILT_IN_FUNC,
         "pixel_shuffle": BUILT_IN_FUNC,
         "pixel_unshuffle": BUILT_IN_FUNC,
+        "prelu": BUILT_IN_FUNC,
         "relu_": BUILT_IN_FUNC,
         "rrelu_": BUILT_IN_FUNC,
         "selu_": BUILT_IN_FUNC,
@@ -3516,10 +3591,8 @@ class TestFunctionalTracing(JitTestCase):
         "adaptive_max_pool1d_with_indices": ARG_TYPE_MISMATCH,
         "fractional_max_pool2d_with_indices": ARG_TYPE_MISMATCH,
         "fractional_max_pool3d_with_indices": ARG_TYPE_MISMATCH,
-        "hardshrink": ARG_TYPE_MISMATCH,
         "layer_norm": ARG_TYPE_MISMATCH,
         "lp_pool1d": ARG_TYPE_MISMATCH,
-        "pairwise_distance": ARG_TYPE_MISMATCH,
 
         "affine_grid": CONTROL_FLOW,
         "alpha_dropout": CONTROL_FLOW,

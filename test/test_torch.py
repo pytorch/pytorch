@@ -4605,10 +4605,43 @@ else:
         self.assertEqual(z, x)
 
     @skipMeta
+    @onlyNativeDeviceTypes
+    @dtypes(*get_all_dtypes(include_bool=False))
+    def test_from_dlpack(self, device, dtype):
+        x = make_tensor((5,), device, dtype)
+        y = torch.from_dlpack(x)
+        self.assertEqual(x, y)
+
+    @skipMeta
+    @onlyNativeDeviceTypes
+    @dtypes(*get_all_dtypes(include_bool=False))
+    def test_from_dlpack_noncontinguous(self, device, dtype):
+        x = make_tensor((25,), device, dtype).reshape(5, 5)
+
+        y1 = x[0]
+        y1_dl = torch.from_dlpack(y1)
+        self.assertEqual(y1, y1_dl)
+
+        y2 = x[:, 0]
+        y2_dl = torch.from_dlpack(y2)
+        self.assertEqual(y2, y2_dl)
+
+        y3 = x[1, :]
+        y3_dl = torch.from_dlpack(y3)
+        self.assertEqual(y3, y3_dl)
+
+        y4 = x[1]
+        y4_dl = torch.from_dlpack(y4)
+        self.assertEqual(y4, y4_dl)
+
+        y5 = x.t()
+        y5_dl = torch.from_dlpack(y5)
+        self.assertEqual(y5, y5_dl)
+
+    @skipMeta
     @onlyCUDA
     @dtypes(*get_all_dtypes(include_bool=False))
     def test_dlpack_conversion_with_diff_streams(self, device, dtype):
-        from torch._C import _from_dlpack
         stream_a = torch.cuda.Stream()
         stream_b = torch.cuda.Stream()
         # DLPack protocol helps establish a correct stream order
@@ -4617,10 +4650,18 @@ else:
         # in the current stream to make sure that it was correctly populated.
         with torch.cuda.stream(stream_a):
             x = make_tensor((5,), device, dtype) + 1
-            z = _from_dlpack(x.__dlpack__(stream_b.cuda_stream))
+            z = torch.from_dlpack(x.__dlpack__(stream_b.cuda_stream))
             stream_a.synchronize()
         stream_b.synchronize()
         self.assertEqual(z, x)
+
+    @skipMeta
+    @onlyNativeDeviceTypes
+    @dtypes(*get_all_dtypes(include_bool=False))
+    def test_from_dlpack_dtype(self, device, dtype):
+        x = make_tensor((5,), device, dtype)
+        y = torch.from_dlpack(x)
+        assert x.dtype == y.dtype
 
     @skipMeta
     @onlyCUDA
@@ -5477,6 +5518,10 @@ class TestDevicePrecision(TestCase):
             actual = x[..., :1].clamp(lb, ub)
             self.assertEqual(expect, actual)
 
+    def test_cuda_device_idx(self, device):
+        x = torch.zeros(3, device=device)
+        y = torch._efficientzerotensor(3, device=device)
+        self.assertEqual(x.device, y.device)
 
 # we implemented custom deallocation for subclasses, so it behooves
 # us to make sure all of these bits work.  We'll use __del__ to
@@ -5728,7 +5773,7 @@ class TestTorch(TestCase):
 
         for reduce in reduces:
             for dim in range(len(shape)):
-                output = input.scatter_reduce(dim, index, reduce, output_size=output_size)
+                output = input._scatter_reduce(dim, index, reduce, output_size=output_size)
 
                 # Check that output is of the correct size
                 output_shape = copy.copy(shape)
@@ -5762,16 +5807,16 @@ class TestTorch(TestCase):
                 self.assertTrue(torch.allclose(output, expected))
 
         with self.assertRaisesRegex(RuntimeError, "Expected `dim` to be in range -3 to 2"):
-            torch.scatter_reduce(input, 4, index, "sum")
+            torch._scatter_reduce(input, 4, index, "sum")
 
         with self.assertRaisesRegex(RuntimeError, "Shape mismatch"):
             index2 = torch.randint(0, output_size, (10, ), dtype=torch.long, device=device)
-            torch.scatter_reduce(input, 0, index2, "sum")
+            torch._scatter_reduce(input, 0, index2, "sum")
 
         with self.assertRaisesRegex(RuntimeError, "Expected `index` values to be in range 0 to 2"):
             input2 = torch.randn(10, dtype=dtype, device=device)
             index2 = torch.tensor([0, 1, 0, 1, 2, 3, 3, 4, 4, 3])
-            torch.scatter_reduce(input2, 0, index2, "sum", output_size=2)
+            torch._scatter_reduce(input2, 0, index2, "sum", output_size=2)
 
     def test_structseq_repr(self):
         a = torch.arange(250).reshape(5, 5, 10)

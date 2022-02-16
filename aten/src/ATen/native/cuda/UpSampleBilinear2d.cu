@@ -727,7 +727,9 @@ static void upsample_gen2d_aa_out_cuda_template(
         size_t shmem_size = weights_per_block * sizeof(scalar_t);
         TORCH_CHECK(
             shmem_size <= sharedMemPerBlock,
-            "Too much shared memory required: ", shmem_size, " vs ", sharedMemPerBlock);
+            "Provided interpolation parameters can not be handled with current algorithm implementation. ",
+            "Please reduce the scale factor. Too much shared memory required: ",
+            shmem_size, " vs ", sharedMemPerBlock);
 
         upsample_gen2d_aa_out_frame<scalar_t, accscalar_t>
             <<<grid,
@@ -809,7 +811,9 @@ static void upsample_gen2d_aa_backward_out_cuda_template(
         size_t sharedMemPerBlock = at::cuda::getCurrentDeviceProperties()->sharedMemPerBlock;
         TORCH_CHECK(
             shmem_size <= sharedMemPerBlock,
-            "Too much shared memory required: ", shmem_size, " vs ", sharedMemPerBlock);
+            "Provided interpolation parameters can not be handled with current algorithm implementation. ",
+            "Please reduce the scale factor. Too much shared memory required: ",
+            shmem_size, " vs ", sharedMemPerBlock);
 
         upsample_gen2d_aa_backward_out_frame<scalar_t, accscalar_t>
             <<<grid,

@@ -98,7 +98,9 @@ Performs a matrix multiplication of the dense matrices :attr:`mat1` and :attr:`m
 specified by the sparsity pattern of :attr:`input`. The matrix :attr:`input` is added to the final result.
 
 Mathematically this performs the following operation:
+
 .. math::
+
     \text{out} = \alpha\ (\text{mat1} \mathbin{@} \text{mat2})*\text{spy}(\text{input}) + \beta\ \text{input}
 
 where :math:`\text{spy}(\text{input})` is the sparsity pattern matrix of :attr:`input`, :attr:`alpha`
