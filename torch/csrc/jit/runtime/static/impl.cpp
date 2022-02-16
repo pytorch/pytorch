@@ -174,8 +174,6 @@ void OptimizeGraph(
   UseVariadicGroupedAccessor(graph);
   EliminateNoOps(
       graph, /* custom_ops */ {fromQualString("fb::scale_gradient")});
-  // NB: This pass is a part of freezing, but we invoke it again here to
-  // optimize prim::If nodes that are added during the fusion pass.
   AddIfThenElseOp(graph);
   GRAPH_DUMP("Final graph after optimizations: ", graph);
 }
