@@ -1,3 +1,4 @@
+import copy
 import os
 import torch
 import torch.distributed as dist
@@ -37,22 +38,33 @@ class ToyModel(nn.Module):
         return self.net2(self.relu(self.net1(x)))
 
 
-def step(model, input, labels, device, rank):
-    model = model.to(device)
-    model = DDP(model, device_ids=[rank])
+def step(model, input, labels, device, loss_fn, optimizer):
     input = input.to(device)
     labels = labels.to(device)
-
-    loss_fn = nn.MSELoss()
-    optimizer = optim.SGD(model.parameters(), lr=0.001)
     optimizer.zero_grad()
 
     output = model(input)
 
-    loss_fn(output, labels).backward()
+    loss = loss_fn(output, labels)
+    loss.backward()
     optimizer.step()
+    return loss
 
-    return model.parameters()
+
+def all_close(parameters_a, parameters_b):
+    for param_a, param_b in zip(parameters_a, parameters_b):
+        # The precision is quite low.
+        if not torch.allclose(param_a.cpu(), param_b.cpu(), atol=1e-02):
+            print_param(param_a, param_b)
+            return False
+    return True
+
+
+def print_param(param_a, param_b):
+    print("=====lazy=====")
+    print(param_a.cpu())
+    print("=====cuda=====")
+    print(param_b.cpu())
 
 
 def demo_basic(rank, world_size):
@@ -62,16 +74,31 @@ def demo_basic(rank, world_size):
 
     model = ToyModel()
 
+    device_lazy = f"lazy:{rank}"
+    model_lazy = copy.deepcopy(model).to(device_lazy)
+    model_lazy = DDP(model_lazy, device_ids=[rank])
+
+    device_cuda = f"cuda:{rank}"
+    model_cuda = copy.deepcopy(model).to(device_cuda)
+    model_cuda = DDP(model_cuda, device_ids=[rank])
+
+    loss_fn_lazy = nn.MSELoss()
+    optimizer_lazy = optim.SGD(model_lazy.parameters(), lr=0.001)
+
+    loss_fn_cuda = nn.MSELoss()
+    optimizer_cuda = optim.SGD(model_cuda.parameters(), lr=0.001)
+
+    assert all_close(model_lazy.parameters(), model_cuda.parameters())
     for i in range(10):
         input = torch.randn(20, 10)
         labels = torch.randn(20, 5)
 
-        lazy_parameters = step(model, input, labels, f"lazy:{rank}", rank)
-        cuda_parameters = step(model, input, labels, f"cuda:{rank}", rank)
+        loss_lazy = step(model_lazy, input, labels, device_lazy, loss_fn_lazy, optimizer_lazy)
+        loss_cuda = step(model_cuda, input, labels, device_cuda, loss_fn_cuda, optimizer_cuda)
 
-        for lazy_param, cuda_param in zip(lazy_parameters, cuda_parameters):
-            assert torch.allclose(lazy_param, cuda_param)
-        print(f"{os.getpid()}: iteration {i} lazy_parameters ~= cuda_parameters")
+        if not all_close(model_lazy.parameters(), model_cuda.parameters()):
+            break
+        print(f"{os.getpid()}: iteration {i} lazy_parameters ~= cuda_parameters, loss_lazy={loss_lazy}, loss_cuda={loss_cuda}")
 
     cleanup()
 
