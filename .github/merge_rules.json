@@ -14,7 +14,13 @@
    {
     "name": "OSS CI",
     "patterns": [".github/**", ".circleci/**", ".jenkins/**", "scripts/**"],
-    "approved_by": ["seemethere", "malfet", "suo"],
+    "approved_by": ["seemethere", "malfet", "suo", "janeyx99"],
     "mandatory_app_id": 12274
+   },
+   {
+      "name": "Documentation",
+      "patterns": ["docs/**", "torch/*docs.py"],
+      "approved_by": ["mruberry", "ngimel", "albanD", "janeyx99"],
+      "mandatory_app_id": 12274
    }
 ]
