@@ -141,6 +141,15 @@ class Sequential(Module):
             input = module(input)
         return input
 
+    def append(self, module: Module) -> 'Sequential':
+        r"""Appends a given module to the end.
+
+        Args:
+            module (nn.Module): module to append
+        """
+        self.add_module(str(len(self)), module)
+        return self
+
 
 class ModuleList(Module):
     r"""Holds submodules in a list.

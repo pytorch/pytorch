@@ -127,21 +127,34 @@ void sigmoid_kernel_cuda(TensorIteratorBase& iter) {
   });
 }
 
+const char sinc_name[] = "sinc";
 void sinc_kernel_cuda(TensorIteratorBase& iter) {
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(
+  #ifdef USE_JITERATOR
+    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(
       ScalarType::Half, ScalarType::BFloat16,
       iter.common_dtype(), "sinc_cuda",
       [&]() {
-        gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
-          if (a == scalar_t(0)) {
-            return scalar_t(1);
-          } else {
-            // NVCC says constexpr var is not accessible from device
-            scalar_t product = c10::detail::pi<scalar_t>() * a;
-            return std::sin(product) / product;
-          }
-        });
+        jitted_gpu_kernel</*name=*/sinc_name,
+                          /*return_dtype=*/ scalar_t,
+                          /*common_dtype=*/ scalar_t,
+                          /*arity=*/ 1>(iter, sinc_string);
       });
+  #else
+    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(
+        ScalarType::Half, ScalarType::BFloat16,
+        iter.common_dtype(), "sinc_cuda",
+        [&]() {
+          gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
+            if (a == scalar_t(0)) {
+              return scalar_t(1);
+            } else {
+              // NVCC says constexpr var is not accessible from device
+              scalar_t product = c10::detail::pi<scalar_t>() * a;
+              return std::sin(product) / product;
+            }
+          });
+        });
+  #endif
 }
 
 void logit_kernel_cuda(TensorIteratorBase& iter, const Scalar& eps_scalar) {

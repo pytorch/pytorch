@@ -839,6 +839,7 @@ _default_onnx_opset_version = 9
 _onnx_main_opset = 15
 _onnx_stable_opsets = [7, 8, 9, 10, 11, 12, 13, 14]
 _export_onnx_opset_version = _default_onnx_opset_version
+_constant_folding_opset_versions = list(range(9, _onnx_main_opset + 1))
 
 
 def _set_opset_version(opset_version):

@@ -72,6 +72,26 @@ template <> inline std::string typeName<ctype>(){ \
     return std::string(#ctype);    \
 }
 
-AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_AND_QINTS(TYPE_NAME_FN)
+AT_FORALL_SCALAR_TYPES(TYPE_NAME_FN)
+#undef TYPE_NAME_FN
+// JIT uses std::complex directly, because nvRTC compile programs
+// with -default-device, so there is no such issue like:
+//   "std::sin(complex) is __host__ only"
+template <> inline std::string typeName<c10::complex<float>>(){
+    return "std::complex<float>";
+}
+template <> inline std::string typeName<c10::complex<double>>(){
+    return "std::complex<double>";
+}
+template <> inline std::string typeName<c10::complex<c10::Half>>(){
+    TORCH_INTERNAL_ASSERT(false, "torch.complex32 is not supported");
+    return "std::complex<at::Half>";
+}
+template <> inline std::string typeName<at::Half>(){
+    return "at::Half";
+}
+template <> inline std::string typeName<at::BFloat16>(){
+    return "at::BFloat16";
+}
 
 }}}  // namespace at::cuda::jit

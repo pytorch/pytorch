@@ -230,7 +230,7 @@ BENCHMARK_DEFINE_F(Gemm, TensorExprTile4x16VecUnroll)(benchmark::State& state) {
     te::ForPtr ni = loops[4];
     te::StmtPtr unrolled;
     loop.vectorize(ni);
-    loop.unroll(mi, &unrolled);
+    loop.fullUnroll(mi, &unrolled);
   }
 
   loop.prepareForCodegen();

@@ -170,7 +170,7 @@ std::pair<IValue, IValue> getFunctionTuple(
     } else if (type_str.find(torch_prefix) == 0) {
       TORCH_CHECK(
           type_str.find(class_prefix) == 0,
-          "__torch__ types other than torchbind (__torch__.torch.classes)"
+          "__torch__ types other than custom c++ classes (__torch__.torch.classes)"
           "are not supported in lite interpreter. ",
           "Workaround: instead of using arbitrary class type (class Foo()), ",
           "define a pytorch class (class Foo(torch.nn.Module)). The problematic type is: ",
@@ -706,6 +706,24 @@ void ScriptModuleSerializer::writeByteCode(
   }
 }
 
+namespace {
+
+c10::optional<std::string> type_printer(
+    const c10::Type& type,
+    torch::jit::TypeNameUniquer& type_name_uniquer) {
+  if (auto dyn = type.castRaw<c10::DynamicType>()) {
+    return dyn->fallback()->annotation_str(
+        [&](auto&& t) { return type_printer(t, type_name_uniquer); });
+  }
+  auto namedType = type.cast<c10::NamedType>();
+  if (namedType && namedType->name()) {
+    return type_name_uniquer.getUniqueName(namedType).qualifiedName();
+  }
+  return c10::nullopt;
+}
+
+} // namespace
+
 void ScriptModuleSerializer::convertNamedType(
     const c10::NamedTypePtr& class_type) {
   if (converted_types_.count(class_type)) {
@@ -716,20 +734,15 @@ void ScriptModuleSerializer::convertNamedType(
   std::string qualifier = qualname.prefix();
   PythonPrint* pp = file_streams_.find(qualifier);
 
-  auto type_printer = [&](const c10::Type& t) -> c10::optional<std::string> {
-    auto namedType = t.cast<c10::NamedType>();
-    if (namedType && namedType->name()) {
-      return type_name_uniquer_.getUniqueName(namedType).qualifiedName();
-    }
-    return c10::nullopt;
-  };
   if (!pp) {
     pp = &file_streams_.insert(
         std::move(qualifier),
         PythonPrint(
             constant_table_,
             class_deps_,
-            type_printer,
+            [&](const c10::Type& t) {
+              return type_printer(t, type_name_uniquer_);
+            },
             /*enforce_importable=*/true));
   }
   pp->printNamedType(class_type);

@@ -10,6 +10,7 @@
 #include <ATen/native/Resize.h>
 #include <ATen/native/cpu/zmath.h>
 #include <ATen/Parallel.h>
+#include <ATen/TensorSubclassLikeUtils.h>
 
 #include <c10/util/irange.h>
 
@@ -3062,7 +3063,9 @@ Tensor& linalg_svdvals_out(const Tensor& A, Tensor & S) {
 }
 
 Tensor linalg_svdvals(const Tensor& A) {
-  const bool A_requires_grad = (at::GradMode::is_enabled() && A.requires_grad());
+  const bool A_requires_grad = (at::GradMode::is_enabled() && A.requires_grad())
+                               || A._fw_grad(/*level */ 0).defined()
+                               || isTensorSubclassLike(A);
   return std::get<1>(at::_linalg_svd(A, /*full_matrices=*/false, /*comptue_uv=*/A_requires_grad));
 }
 

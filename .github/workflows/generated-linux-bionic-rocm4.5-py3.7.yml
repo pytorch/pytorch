@@ -4,10 +4,16 @@
 name: linux-bionic-rocm4.5-py3.7
 
 on:
+  pull_request:
   push:
     tags:
+      - 'ciflow/all/*'
       - 'ciflow/linux/*'
       - 'ciflow/rocm/*'
+      - 'ciflow/trunk/*'
+    branches:
+      - master
+      - release/*
   workflow_dispatch:
 
 env:
@@ -319,8 +325,8 @@ jobs:
         if: always()
         run: |
           ngpu=$(rocminfo | grep -c -E 'Name:.*\sgfx')
-          if [[ "x$ngpu" != "x4" ]]; then
-              echo "Failed to detect 4 GPUs on the runner"
+          if [[ "x$ngpu" != "x2" && "x$ngpu" != "x4" ]]; then
+              echo "Failed to detect GPUs on the runner"
               exit 1
           fi
       - name: Runner health check disconnect on failure

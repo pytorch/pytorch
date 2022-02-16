@@ -30,6 +30,8 @@ def prepare(model, qconfig_dict, example_inputs, inplace=False, allow_list=None,
 
     Supported `prepare_custom_config_dict` keys:
       * `non_traceable_module_class` - same meaning as in prepare_fx
+      * `output_dtypes` - expected dtypes of model outputs, must match actual
+        output structure.
 
     TODO(future PR): better docblock
     """

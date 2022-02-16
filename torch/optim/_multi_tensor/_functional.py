@@ -15,7 +15,7 @@ def adagrad(
     params: List[Tensor],
     grads: List[Tensor],
     state_sums: List[Tensor],
-    state_steps: List[int],
+    state_steps: List[Tensor],
     has_sparse_grad: bool,
     *,
     lr: float,
@@ -28,6 +28,12 @@ def adagrad(
     See :class:`~torch.optim.Adagrad` for details.
     """
 
+    if not all([isinstance(t, torch.Tensor) for t in state_steps]):
+        raise RuntimeError("API has changed, `state_steps` argument must contain a list of singleton tensors")
+
+    # Update steps
+    torch._foreach_add_(state_steps, 1)
+
     if weight_decay != 0:
         if has_sparse_grad:
             raise RuntimeError(
@@ -35,7 +41,7 @@ def adagrad(
             )
         torch._foreach_add_(grads, params, alpha=weight_decay)
 
-    minus_clr = [-lr / (1 + (step - 1) * lr_decay) for step in state_steps]
+    minus_clr = [-lr / (1 + (step.item() - 1) * lr_decay) for step in state_steps]
 
     if has_sparse_grad:
         # sparse is not supported by multi_tensor. Fall back to optim.adagrad
@@ -70,7 +76,7 @@ def adamax(params: List[Tensor],
            grads: List[Tensor],
            exp_avgs: List[Tensor],
            exp_infs: List[Tensor],
-           states: List[Dict],
+           state_steps: List[Tensor],
            *,
            beta1: float,
            beta2: float,
@@ -81,6 +87,12 @@ def adamax(params: List[Tensor],
 
     See :class:`~torch.optim.Adamax` for details.
     """
+
+    if not all([isinstance(t, torch.Tensor) for t in state_steps]):
+        raise RuntimeError("API has changed, `state_steps` argument must contain a list of singleton tensors")
+
+    # Update steps
+    torch._foreach_add_(state_steps, 1)
 
     if weight_decay != 0:
         torch._foreach_add_(grads, params, alpha=weight_decay)
@@ -99,7 +111,7 @@ def adamax(params: List[Tensor],
         ], 0)
         torch.max(norm_buf, 0, keepdim=False, out=(exp_inf, exp_inf.new().long()))
 
-    bias_corrections = [1 - beta1 ** state['step'] for state in states]
+    bias_corrections = [1 - beta1 ** step.item() for step in state_steps]
     clr = [-1 * (lr / bias_correction) for bias_correction in bias_corrections]
     torch._foreach_addcdiv_(params, exp_avgs, exp_infs, clr)
 
@@ -178,7 +190,7 @@ def radam(params: List[Tensor],
           grads: List[Tensor],
           exp_avg: List[Tensor],
           exp_avg_sq: List[Tensor],
-          states: List[Dict],
+          state_steps: List[Tensor],
           *,
           beta1: float,
           beta2: float,
@@ -190,13 +202,19 @@ def radam(params: List[Tensor],
     See :class:`~torch.optim.RAdam` for details.
     """
 
+    if not all([isinstance(t, torch.Tensor) for t in state_steps]):
+        raise RuntimeError("API has changed, `state_steps` argument must contain a list of singleton tensors")
+
+    # Update steps
+    torch._foreach_add_(state_steps, 1)
+
     # maximum length of the approximated SMA
     rho_inf = 2 / (1 - beta2) - 1
     # compute the length of the approximated SMA
-    rho_t_list = [rho_inf - 2 * state['step'] * (beta2 ** state['step']) / (1 - beta2 ** state['step']) for state in states]
+    rho_t_list = [rho_inf - 2 * step.item() * (beta2 ** step.item()) / (1 - beta2 ** step.item()) for step in state_steps]
 
-    bias_correction1 = [1 - beta1 ** state['step'] for state in states]
-    bias_correction2 = [1 - beta2 ** state['step'] for state in states]
+    bias_correction1 = [1 - beta1 ** step.item() for step in state_steps]
+    bias_correction2 = [1 - beta2 ** step.item() for step in state_steps]
     if weight_decay != 0:
         torch._foreach_add_(grads, params, alpha=weight_decay)
 
