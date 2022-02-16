@@ -28,7 +28,8 @@ class FuseHandler(ABC):
              root_node: Node,
              matched_node_pattern: NodePattern,
              fuse_custom_config_dict: Dict[str, Any],
-             fuser_method_mapping: Optional[Dict[Pattern, Union[torch.nn.Sequential, Callable]]]) -> Node:
+             fuser_method_mapping: Optional[Dict[Pattern, Union[torch.nn.Sequential, Callable]]],
+             is_qat: bool) -> Node:
         pass
 
 @register_fusion_pattern((torch.nn.ReLU, torch.nn.Conv1d))
@@ -69,7 +70,8 @@ class DefaultFuseHandler(FuseHandler):
              root_node: Node,
              matched_node_pattern: NodePattern,
              fuse_custom_config_dict: Dict[str, Any],
-             fuser_method_mapping: Optional[Dict[Pattern, Union[torch.nn.Sequential, Callable]]]) -> Node:
+             fuser_method_mapping: Optional[Dict[Pattern, Union[torch.nn.Sequential, Callable]]],
+             is_qat: bool) -> Node:
         additional_fuser_method_mapping = fuse_custom_config_dict.get("additional_fuser_method_mapping", {})
         assert root_node.op == "call_module", "Expecting module node to be a call_module Node"
         root_module = quantizer.modules[root_node.target]
@@ -113,7 +115,7 @@ class DefaultFuseHandler(FuseHandler):
         fuser_method = get_fuser_method_new(matched_module_types, fuser_method_mapping)
         # TODO: change the signature for fuser_method to take matched module patterns
         # as input
-        fused_module = fuser_method(*matched_modules)
+        fused_module = fuser_method(is_qat, *matched_modules)
         # TODO: maybe add a pass to cleanup bn modules?
         setattr(quantizer.modules[module_parent_name], module_name, fused_module)
         return quantizer.fused_graph.node_copy(root_node, load_arg)
