@@ -41,11 +41,19 @@ def is_fixed_qparams_node(node, modules):
     return is_call_function, is_call_method, is_call_module
 
 # Mapping from reference module class to the replacement quantized module class for lowering
-LOWER_MODULE_MAP: Dict[Type[nn.Module], Type[ReferenceableQuantizedModule]] = {
+# TODO: fix typing, the key is reference module
+LOWER_MODULE_MAP: Dict[Type[torch.nn.Module], Type[ReferenceableQuantizedModule]] = {
     nnqr.Linear: nnq.Linear,
     nnqr.Conv1d: nnq.Conv1d,
     nnqr.Conv2d: nnq.Conv2d,
     nnqr.Conv3d: nnq.Conv3d,
+}
+
+# TODO: merge with LOWER_MODULE_MAP after we merge
+# _lower_weighted_ref_module and special_pattern_replacement
+SPECIAL_PATTERN_LOWER_MODULE_MAP = {
+    nn.BatchNorm2d: nnq.BatchNorm2d,
+    nn.BatchNorm3d: nnq.BatchNorm3d,
 }
 
 # Mapping from fused module class to a 2-tuple of:
@@ -131,7 +139,6 @@ def _lower_weighted_ref_functional(model: QuantizedGraphModule) -> QuantizedGrap
     """
     Traverse the graph and replace functional reference patterns with their quantized versions.
     """
-    print("=========== BEFORE: ", model)
     for ref_func in LOWER_FUNCTIONAL_MAP.keys():
         # First dequantize is for the inputs, second dequantize is for the weights
         pattern = (torch.quantize_per_tensor,
@@ -143,7 +150,7 @@ def _lower_weighted_ref_functional(model: QuantizedGraphModule) -> QuantizedGrap
             if not is_match(modules, n, pattern):
                 continue
             q_node = n
-            (func_node, input_scale_node, input_zp_node, dtype) = q_node.args
+            (func_node, output_scale_node, output_zp_node, dtype) = q_node.args
             (dq_node, dq_node2) = func_node.args
 
             # Step 1: Replace quantized weights with packed weights
@@ -161,8 +168,8 @@ def _lower_weighted_ref_functional(model: QuantizedGraphModule) -> QuantizedGrap
             # Step 2: Replace reference pattern (dequantize - functional op - quantize) with the
             # corresponding quantized op
             #     Args are: (quantized input, packed weight, scale, zero point)
-            with model.graph.inserting_after(packed_weight):
-                args = (dq_node.args[0], packed_weight, 0.015106300823390484, 0)  # TODO(andrew): don't hardcode
+            with model.graph.inserting_after(output_zp_node):
+                args = (dq_node.args[0], packed_weight, output_scale_node, output_zp_node)
                 new_func_node = create_node_from_old_node_preserve_meta(
                     model.graph,
                     ("call_function", LOWER_FUNCTIONAL_MAP[ref_func], args, {}),
@@ -176,12 +183,9 @@ def _lower_weighted_ref_functional(model: QuantizedGraphModule) -> QuantizedGrap
                 model.graph.erase_node(dqn)
             model.graph.erase_node(q_node)
             model.graph.erase_node(func_node)
-            model.graph.erase_node(input_scale_node)
-            model.graph.erase_node(input_zp_node)
 
-            # Step 3: TODO Fold weights
+            # Step 3: TODO(andrew) Fold weights
         model.recompile()
-    print("=========== AFTER: ", model)
     return model
 
 def special_pattern_replacement(model: QuantizedGraphModule) -> QuantizedGraphModule:
@@ -221,12 +225,19 @@ def special_pattern_replacement(model: QuantizedGraphModule) -> QuantizedGraphMo
             continue
 
         # TODO: enable we have patterns that needs to swap the modules
-        # if is_call_module:
-        #     ref_module = modules[ref_node.target]
-        #     # change this pattern to use the corresponding quantized module
-        #     # replace reference module with quantized module
-        #     parent_name, module_name = _parent_name(ref_node.target)
-        #     setattr(modules[parent_name], module_name, ref_module)
+        if is_call_module:
+            ref_module = modules[ref_node.target]
+            if type(ref_module) in SPECIAL_PATTERN_LOWER_MODULE_MAP and is_quantize:
+                qmodule_cls = SPECIAL_PATTERN_LOWER_MODULE_MAP.get(type(ref_module))
+                scale_node = q_node.args[1]
+                zero_point_node = q_node.args[2]
+                output_scale = getattr(model, scale_node.target)
+                output_zero_point = getattr(model, zero_point_node.target)
+
+                qmodule = qmodule_cls.from_reference(ref_module, output_scale, output_zero_point)  # type:ignore[union-attr]
+                # replace reference module with quantized module
+                parent_name, module_name = _parent_name(ref_node.target)
+                setattr(modules[parent_name], module_name, qmodule)
 
         # remove dq node:
         dq_nodes: List[Node] = []

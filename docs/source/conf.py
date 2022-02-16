@@ -153,7 +153,6 @@ coverage_ignore_classes = [
     "LongTensor",
     "ShortStorage",
     "ShortTensor",
-    "UntypedStorage",
     "cudaStatus",
     # torch.distributed.elastic.multiprocessing.errors
     "ChildFailedError",
@@ -243,7 +242,6 @@ coverage_missing_automodule = [
     "torch.fft",
     "torch.for_onnx",
     "torch.fx.experimental",
-    "torch.fx.experimental.fx_acc",
     "torch.fx.experimental.unification",
     "torch.fx.experimental.unification.multipledispatch",
     "torch.fx.passes",
