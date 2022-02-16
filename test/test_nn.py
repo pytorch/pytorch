@@ -17532,13 +17532,12 @@ class TestNNDeviceType(NNTestCase):
         tests = [
             (64, 4, 16, 8),
             # dim_per_head = 12 does not divide evenly by CPU vectorization length of 8
-            (24, 2, 4, 2)
+            (24, 2, 4, 2),
+            # Make sure CUDA can handle small input sizes
+            (2, 2, 2, 2),
+            # dim_per_head = 6 does not divide evenly by CUDA vectorization length of 4, causes alignment issues
+            (24, 4, 4, 2)
         ]
-        if "cuda" not in str(device):
-            # TODO: CUDA implementation doesn't work if size is too small.
-            tests.append((2, 2, 2, 2))
-        print(tests)
-        print(device)
         for (embed_dim, num_heads, sl, bs) in tests:
             x = torch.randn(sl, bs, embed_dim, device=device, dtype=dtype) * 10
             qkv = torch.nn.Linear(embed_dim, 3 * embed_dim, device=device, dtype=dtype)
