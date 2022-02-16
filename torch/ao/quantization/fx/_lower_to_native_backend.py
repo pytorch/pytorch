@@ -13,7 +13,7 @@ from .quantized_fusion_patterns_and_replacements import get_fbgemm_patterns_and_
 from .match_utils import is_match, MatchAllNode
 from .utils import create_node_from_old_node_preserve_meta, get_linear_prepack_op_for_dtype
 from ..utils import _parent_name, check_node
-from typing import Dict, Tuple, Type, List
+from typing import Dict, Tuple, Type, List, Any
 from torch.fx import Node
 
 
@@ -155,7 +155,7 @@ def _lower_weighted_ref_functional(model: QuantizedGraphModule) -> QuantizedGrap
             # Set up match pattern: (dequantize - [relu_op - ] func_op - quantize)
             # Func args: (dequantized inputs, dequantized weights[, bias])
             # Quantize args: (func, scale, zp, dtype)
-            func_pattern = (ref_func, "dequantize", "dequantize")
+            func_pattern: Tuple[Any, ...] = (ref_func, "dequantize", "dequantize")
             if has_bias:
                 func_pattern = tuple(list(func_pattern) + [MatchAllNode])
             if is_relu:
