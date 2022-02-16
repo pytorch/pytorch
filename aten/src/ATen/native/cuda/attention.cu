@@ -26,7 +26,9 @@ Tensor gemm_nt(const Tensor& a, const Tensor& b) {
   return at::native::matmul(a, b.t());
 }
 
-template <typename scalar_t, typename accscalar_t>
+static constexpr int TRANSFORM_BIAS_RESCALE_VEC = 4;
+
+template <typename scalar_t, typename accscalar_t, bool assume_aligned>
 __global__ void transform_bias_rescale_qkv_kernel(
     // [B, T, 3 * D]
     const PackedTensorAccessor64<scalar_t, 3, RestrictPtrTraits> qkv,
@@ -44,57 +46,86 @@ __global__ void transform_bias_rescale_qkv_kernel(
   auto b = blockIdx.x / T;
 
   auto D = NH * DH;
-  constexpr int VEC = 4;
   const scalar_t sqrt_dim_per_head = std::sqrt(static_cast<scalar_t>(DH));
-  using LoadT = memory::aligned_vector<scalar_t, VEC>;
 
-  // FIXME: assert ((D % VEC) == 0)
+  if (assume_aligned) {
+    constexpr int VEC = TRANSFORM_BIAS_RESCALE_VEC;
+    using LoadT = memory::aligned_vector<scalar_t, VEC>;
+    for (int32_t d_v = threadIdx.x; d_v < D / VEC; d_v += blockDim.x) {
+      auto d = d_v * VEC;
+      auto nh = d / DH;
+      auto dh = d % DH;
+      scalar_t qkv_bias_q[VEC];
+      scalar_t qkv_bias_k[VEC];
+      scalar_t qkv_bias_v[VEC];
+      scalar_t qkv_q[VEC];
+      scalar_t qkv_k[VEC];
+      scalar_t qkv_v[VEC];
 
-  for (int32_t d_v = threadIdx.x; d_v < D / VEC; d_v += blockDim.x) {
-    auto d = d_v * VEC;
-    auto nh = d / DH;
-    auto dh = d % DH;
-    scalar_t qkv_bias_q[VEC];
-    scalar_t qkv_bias_k[VEC];
-    scalar_t qkv_bias_v[VEC];
-    scalar_t qkv_q[VEC];
-    scalar_t qkv_k[VEC];
-    scalar_t qkv_v[VEC];
-
-    *reinterpret_cast<LoadT*>(&qkv_bias_q) =
+      // Here we require D % VEC == 0 for these vectorized loads.
+      *reinterpret_cast<LoadT*>(&qkv_bias_q) =
         *reinterpret_cast<const LoadT*>(&qkv_bias[d + 0 * D]);
-    *reinterpret_cast<LoadT*>(&qkv_bias_k) =
+      *reinterpret_cast<LoadT*>(&qkv_bias_k) =
         *reinterpret_cast<const LoadT*>(&qkv_bias[d + 1 * D]);
-    *reinterpret_cast<LoadT*>(&qkv_bias_v) =
+      *reinterpret_cast<LoadT*>(&qkv_bias_v) =
         *reinterpret_cast<const LoadT*>(&qkv_bias[d + 2 * D]);
 
-    *reinterpret_cast<LoadT*>(&qkv_q) =
+      *reinterpret_cast<LoadT*>(&qkv_q) =
         *reinterpret_cast<const LoadT*>(&qkv[b][t][d + 0 * D]);
-    *reinterpret_cast<LoadT*>(&qkv_k) =
+      *reinterpret_cast<LoadT*>(&qkv_k) =
         *reinterpret_cast<const LoadT*>(&qkv[b][t][d + 1 * D]);
-    *reinterpret_cast<LoadT*>(&qkv_v) =
+      *reinterpret_cast<LoadT*>(&qkv_v) =
         *reinterpret_cast<const LoadT*>(&qkv[b][t][d + 2 * D]);
 
 #pragma unroll
-    // TODO: specialize for float2half2/half2float2?
-    for (auto ii = 0; ii < VEC; ++ii) {
-      qkv_q[ii] = static_cast<scalar_t>(
-          (static_cast<accscalar_t>(qkv_q[ii]) +
-           static_cast<accscalar_t>(qkv_bias_q[ii])) /
-          static_cast<accscalar_t>(sqrt_dim_per_head));
-      qkv_k[ii] = static_cast<scalar_t>(
-          (static_cast<accscalar_t>(qkv_k[ii]) +
-           static_cast<accscalar_t>(qkv_bias_k[ii])));
-      qkv_v[ii] = static_cast<scalar_t>(
-          (static_cast<accscalar_t>(qkv_v[ii]) +
-           static_cast<accscalar_t>(qkv_bias_v[ii])));
-    }
-    *reinterpret_cast<LoadT*>(&q_k_v[0][b][nh][t][dh]) =
+      // TODO: specialize for float2half2/half2float2?
+      for (auto ii = 0; ii < VEC; ++ii) {
+        qkv_q[ii] = static_cast<scalar_t>(
+            (static_cast<accscalar_t>(qkv_q[ii]) +
+             static_cast<accscalar_t>(qkv_bias_q[ii])) /
+            static_cast<accscalar_t>(sqrt_dim_per_head));
+        qkv_k[ii] = static_cast<scalar_t>(
+            (static_cast<accscalar_t>(qkv_k[ii]) +
+             static_cast<accscalar_t>(qkv_bias_k[ii])));
+        qkv_v[ii] = static_cast<scalar_t>(
+            (static_cast<accscalar_t>(qkv_v[ii]) +
+             static_cast<accscalar_t>(qkv_bias_v[ii])));
+      }
+
+      // Here we require DH % VEC == 0 for these vectorized stores.
+      *reinterpret_cast<LoadT*>(&q_k_v[0][b][nh][t][dh]) =
         *reinterpret_cast<const LoadT*>(&qkv_q);
-    *reinterpret_cast<LoadT*>(&q_k_v[1][b][nh][t][dh]) =
+      *reinterpret_cast<LoadT*>(&q_k_v[1][b][nh][t][dh]) =
         *reinterpret_cast<const LoadT*>(&qkv_k);
-    *reinterpret_cast<LoadT*>(&q_k_v[2][b][nh][t][dh]) =
+      *reinterpret_cast<LoadT*>(&q_k_v[2][b][nh][t][dh]) =
         *reinterpret_cast<const LoadT*>(&qkv_v);
+    }
+  } else {
+    // Same as above, but we can't vectorize memory access.
+    for (int32_t d = threadIdx.x; d < D; d += blockDim.x) {
+      auto nh = d / DH;
+      auto dh = d % DH;
+      scalar_t qkv_bias_q = qkv_bias[d + 0 * D];
+      scalar_t qkv_bias_k = qkv_bias[d + 1 * D];
+      scalar_t qkv_bias_v = qkv_bias[d + 2 * D];
+      scalar_t qkv_q = qkv[b][t][d + 0 * D];
+      scalar_t qkv_k = qkv[b][t][d + 1 * D];
+      scalar_t qkv_v = qkv[b][t][d + 2 * D];
+      qkv_q = static_cast<scalar_t>(
+          (static_cast<accscalar_t>(qkv_q) +
+           static_cast<accscalar_t>(qkv_bias_q)) /
+          static_cast<accscalar_t>(sqrt_dim_per_head));
+      qkv_k = static_cast<scalar_t>(
+          (static_cast<accscalar_t>(qkv_k) +
+           static_cast<accscalar_t>(qkv_bias_k)));
+      qkv_v = static_cast<scalar_t>(
+          (static_cast<accscalar_t>(qkv_v) +
+           static_cast<accscalar_t>(qkv_bias_v)));
+
+      q_k_v[0][b][nh][t][dh] = qkv_q;
+      q_k_v[1][b][nh][t][dh] = qkv_k;
+      q_k_v[2][b][nh][t][dh] = qkv_v;
+    }
   }
 }
 
@@ -110,6 +141,12 @@ std::tuple<Tensor, Tensor, Tensor> transform_bias_rescale_qkv(
   TORCH_CHECK(D % num_head == 0);
   const auto dim_per_head = D / num_head;
   auto q_k_v = at::empty({3, B, num_head, T, dim_per_head}, qkv.options());
+#define CALL_KERNEL(assume_aligned)             \
+        transform_bias_rescale_qkv_kernel<scalar_t, accscalar_t, assume_aligned> \
+          <<<blocks, threads, 0, at::cuda::getCurrentCUDAStream()>>>(   \
+              qkv.packed_accessor64<scalar_t, 3, RestrictPtrTraits>(),  \
+              qkv_bias.packed_accessor64<scalar_t, 1, RestrictPtrTraits>(), \
+              q_k_v.packed_accessor64<scalar_t, 5, RestrictPtrTraits>())
   AT_DISPATCH_FLOATING_TYPES_AND2(
       ScalarType::Half,
       ScalarType::BFloat16,
@@ -117,15 +154,21 @@ std::tuple<Tensor, Tensor, Tensor> transform_bias_rescale_qkv(
       "transform_bias_rescale_qkv",
       [&] {
         using accscalar_t = acc_type<scalar_t, true>;
-        auto threads = std::min<int32_t>(1024, D / 4);
+        auto threads = std::max(std::min<int32_t>(1024, D / TRANSFORM_BIAS_RESCALE_VEC), 1);
         auto blocks = B * T;
-        transform_bias_rescale_qkv_kernel<scalar_t, accscalar_t>
-            <<<blocks, threads, 0, at::cuda::getCurrentCUDAStream()>>>(
-                qkv.packed_accessor64<scalar_t, 3, RestrictPtrTraits>(),
-                qkv_bias.packed_accessor64<scalar_t, 1, RestrictPtrTraits>(),
-                q_k_v.packed_accessor64<scalar_t, 5, RestrictPtrTraits>());
+        if (dim_per_head % TRANSFORM_BIAS_RESCALE_VEC == 0) {
+          TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+              D % TRANSFORM_BIAS_RESCALE_VEC == 0,
+              "D = num_heads * dim_per_head, so we should have dim_per_head % "
+              "TRANSFORM_BIAS_RESCALE_VEC == 0 => "
+              "D % TRANSFORM_BIAS_RESCALE_VEC == 0");
+          CALL_KERNEL(true);
+        } else {
+          CALL_KERNEL(false);
+        }
         C10_CUDA_KERNEL_LAUNCH_CHECK();
       });
+#undef CALL_KERNEL
   auto q_k_v_s =
       at::native::split(q_k_v.view({3 * B, num_head, T, dim_per_head}), B, 0);
   return std::make_tuple(q_k_v_s[0], q_k_v_s[1], q_k_v_s[2]);
