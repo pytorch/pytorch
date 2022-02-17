@@ -1092,16 +1092,10 @@ if __name__ == '__main__':
     except Exception as e:
         print(f"ERROR ENCOUNTERED WHEN UPLOADING TO SCRIBE: {e}")
 
-    # longest_tests can contain duplicates as the same tests can be spawned from different files
-    longest_tests: List[TestCase] = []
     total_time = 0.0
     for filename, test_filename in reports_by_file.items():
         for suite_name, test_suite in test_filename.test_suites.items():
             total_time += test_suite.total_time
-            if test_suite.total_time >= args.class_print_threshold:
-                test_suite.print_report(args.longest_of_class)
-                longest_tests.extend(test_suite.test_cases.values())
-    longest_tests = sorted(longest_tests, key=lambda x: x.time)[-args.longest_of_run:]
 
     obj = assemble_s3_object(reports_by_file, total_seconds=total_time)
 
@@ -1110,14 +1104,6 @@ if __name__ == '__main__':
             send_report_to_s3(obj)
         except Exception as e:
             print(f"ERROR ENCOUNTERED WHEN UPLOADING TO S3: {e}")
-
-    print(f"Total runtime is {datetime.timedelta(seconds=total_time)}")
-    print(
-        f"{len(longest_tests)} longest tests of entire run"
-        f" (ignoring suites totaling less than {args.class_print_threshold} seconds):"
-    )
-    for test_case in reversed(longest_tests):
-        print(f"    {test_case.class_name}.{test_case.name}  time: {test_case.time:.2f} seconds")
 
     if args.compare_with_s3:
         head_json = obj
