@@ -814,11 +814,11 @@ def _kl_cauchy_cauchy(p, q):
     t2 = (4 * p.scale * q.scale).log()
     return t1 - t2
 
-def add_kl_info(distributions_module):
-    """Returns a str of implemented KL functions, to append to the doc for kl_divergence."""
+def add_kl_info():
+    """Appends a list of implemented KL functions to the doc for kl_divergence."""
     rows = ["KL divergence is currently implemented for the following distribution pairs:"]
     for p, q in sorted(_KL_REGISTRY,
-                     key=lambda p_q: (p_q[0].__name__, p_q[1].__name__)):
+                        key=lambda p_q: (p_q[0].__name__, p_q[1].__name__)):
         rows.append("* :class:`~torch.distributions.{}` and :class:`~torch.distributions.{}`"
                     .format(p.__name__, q.__name__))
     kl_info = '\n\t'.join(rows)

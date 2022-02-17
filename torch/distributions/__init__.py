@@ -116,11 +116,8 @@ from .weibull import Weibull
 from .wishart import Wishart
 from . import transforms
 
-
-import sys as _sys  # pylint: disable=g-import-not-at-top
-add_kl_info(_sys.modules[__name__])
+add_kl_info()
 del add_kl_info
-del _sys
 
 __all__ = [
     'Bernoulli',
