@@ -4916,10 +4916,7 @@ class TestJit(TestCase):
                 yield Dist, keys, values, sample
 
     def _perturb_tensor(self, value, constraint):
-        if isinstance(constraint, (constraints._IntegerGreaterThan,
-                                   constraints._IntegerGreaterThanEq,
-                                   constraints._GreaterThan,
-                                   constraints._GreaterThanEq)):
+        if isinstance(constraint, (constraints.greater_than, constraints.greater_than_eq)):
             return value + 1
         if isinstance(constraint, (constraints.less_than)):
             return value - 1
