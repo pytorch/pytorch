@@ -799,13 +799,14 @@ def _export(model, args, f, export_params=True, verbose=False, training=None,
             # string in memory.
             if (operator_export_type is OperatorExportTypes.ONNX) and (not val_use_external_data_format):
                 try:
-                    _check_onnx_proto(proto)
+                    _check_onnx_proto(proto, full_check=True)
                 except RuntimeError as e:
                     raise CheckerError(e)
     finally:
         assert __IN_ONNX_EXPORT
         __IN_ONNX_EXPORT = False
         _reset_trace_module_map()
+
     return torch_out
 
 
