@@ -562,6 +562,30 @@ $6 = torch._ops.aten.add_($1, $5)''')
         self.assertIsNone(t.grad)
         self.assertIsNotNone(t.elem.grad)
 
+    def test_multiple_ops_subclass(self):
+        # This is a Direct Subclass, don't do that!
+        class MySubclass(torch.Tensor):
+            @staticmethod
+            def __new__(cls, elem):
+                r = torch.Tensor._make_subclass(cls, elem)
+                return r
+
+            __torch_function__ = torch._C._disabled_torch_function_impl
+
+            @classmethod
+            def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
+                with no_dispatch():
+                    return func(*args, **kwargs)
+
+        x = MySubclass(torch.rand(2, 2, dtype=torch.complex64))
+        y = x.conj()
+        # y has the conj bit set at this point. So any op without a fused conj kernel
+        # will clone y on the way to the backend.
+        # Using exp here as an op that doesn't have a special conjugated implementation
+        # if you just added it, replace exp with any other op that doesn't have one.
+        y.exp()
+
+
 
 if __name__ == '__main__':
     run_tests()
