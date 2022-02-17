@@ -24,7 +24,7 @@ class TestLoadBCPackages(PackageTestCase):
     )
     def test_load_bc_packages_nn_module(self):
         """Tests for backwards compatible nn module"""
-        importer1 = PackageImporter(f"{packaging_directory}/test_nn_module.pt")
+        importer1 = PackageImporter(f"{packaging_directory}/test_nn_module.pt", use_torch=True)
         loaded1 = importer1.load_pickle("nn_module", "nn_module.pkl")
 
     @skipIf(

@@ -105,7 +105,6 @@ class DirectoryReaderTest(PackageTestCase):
     def test_resource_reader(self):
         """Tests DirectoryReader as the base for get_resource_reader."""
         filename = self.temp()
-        print(filename)
         with PackageExporter(filename, use_torch=False) as pe:
             # Layout looks like:
             #    package
@@ -133,7 +132,6 @@ class DirectoryReaderTest(PackageTestCase):
 
         with TemporaryDirectory() as temp_dir:
             zip_file.extractall(path=temp_dir)
-            print(zip_file.infolist())
             importer = PackageImporter(Path(temp_dir) / Path(filename).name)
             reader_one = importer.get_resource_reader("one")
 
