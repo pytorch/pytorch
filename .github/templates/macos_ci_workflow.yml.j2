@@ -87,40 +87,17 @@ jobs:
 {% endblock +%}
 {%- if not exclude_test %}
 {% block test +%}
-  generate-test-matrix:
+  {%- for test_job in test_jobs %}
+  !{{ test_job.id }}:
+    name: !{{ test_job.name }}
     needs: build
-    runs-on: ubuntu-18.04
-    timeout-minutes: !{{ common.timeout_minutes }}
-    env:
-      TEST_RUNNER_TYPE: !{{ test_runner_type }}
-      ENABLE_DISTRIBUTED_TEST: !{{ enable_distributed_test }}
-      NUM_TEST_SHARDS: !{{ num_test_shards }}
-    outputs:
-      matrix: ${{ steps.set-matrix.outputs.matrix }}
-      render-matrix: ${{ steps.set-matrix.outputs.render-matrix }}
-    container:
-      image: python:3.9
-    steps:
-      - name: Install dependencies
-        run: pip install typing-extensions==3.10
-      - name: Clone pytorch/pytorch
-        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
-      - name: Generating test matrix
-        id: set-matrix
-        run: .github/scripts/generate_pytorch_test_matrix.py
-
-  test:
-    needs: [build, generate-test-matrix]
-    strategy:
-      matrix: ${{ fromJson(needs.generate-test-matrix.outputs.matrix) }}
-      fail-fast: false
-    runs-on: ${{ matrix.runner }}
+    runs-on: !{{ test_job.runner }}
     timeout-minutes: !{{ common.timeout_minutes }}
     env:
       JOB_BASE_NAME: !{{ build_environment }}-test
-      TEST_CONFIG: ${{ matrix.config }}
-      SHARD_NUMBER: ${{ matrix.shard }}
-      NUM_TEST_SHARDS: ${{ matrix.num_shards }}
+      TEST_CONFIG: !{{ test_job.config }}
+      SHARD_NUMBER: !{{ test_job.shard }}
+      NUM_TEST_SHARDS: !{{ test_job.num_shards }}
       PR_BODY: ${{ github.event.pull_request.body }}
     steps:
       !{{ common.checkout(submodules="false") }}
@@ -143,9 +120,10 @@ jobs:
           python3 -mpip install dist/*.whl
           .jenkins/pytorch/macos-test.sh
       !{{ common.render_test_results() }}
-      !{{ common.upload_downloaded_files(name='macos', artifact_name="test-jsons", use_s3=False) }}
-      !{{ common.upload_test_reports("macos", artifact_name="test-reports", use_s3=False) }}
+      !{{ common.upload_downloaded_files(name='macos', config=test_job.config, shard=test_job.shard, num_shards=test_job.num_shards, runner=test_job.runner, artifact_name="test-jsons", use_s3=False) }}
+      !{{ common.upload_test_reports("macos", config=test_job.config, shard=test_job.shard, num_shards=test_job.num_shards, runner=test_job.runner, artifact_name="test-reports", use_s3=False) }}
       !{{ common.upload_test_statistics(build_environment, needs_credentials=True) }}
+{%- endfor %}
 {% endblock +%}
 {%- endif %}
 
