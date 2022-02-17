@@ -477,6 +477,8 @@ Tensor TensorExprKernel::computeValue(const torch::jit::Value* v) {
 
   auto outputType = findDtypeForValue(v);
   std::vector<ExprHandle> outputShape = sizesForValue(v);
+  std::vector<ExprHandle> outputStrides =
+      c10::fmap<ExprHandle>(make_channels_last_strides(outputShape));
 
   std::vector<ArgValue> argInputs;
   if (op == prim::ConstantChunk) {
@@ -521,12 +523,14 @@ Tensor TensorExprKernel::computeValue(const torch::jit::Value* v) {
   }
 
   if (NNCLoweringFunction custom_lowering = getCustomLoweringFor(op)) {
-    return custom_lowering(argInputs, outputShape, outputType, device_);
+    return custom_lowering(
+        argInputs, outputShape, outputStrides, outputType, device_);
   }
   if (v->node()->maybeSchema()) {
     if (NNCLoweringFunction lowering =
             getStandardLoweringFor(c10::toString(v->node()->schema()))) {
-      return lowering(argInputs, outputShape, outputType, device_);
+      return lowering(
+          argInputs, outputShape, outputStrides, outputType, device_);
     }
   }
   std::string msg = std::string("Unhandled node kind (in computeValue): ") +
