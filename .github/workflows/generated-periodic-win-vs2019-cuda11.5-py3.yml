@@ -140,14 +140,12 @@ jobs:
       TEST_RUNNER_TYPE: windows.8xlarge.nvidia.gpu
       NUM_TEST_SHARDS: 2
       NUM_TEST_SHARDS_ON_PULL_REQUEST: 2
-      PR_BODY: ${{ github.event.pull_request.body }}
       NOGPU_RUNNER_TYPE: windows.4xlarge
       ENABLE_FORCE_ON_CPU_TEST: 1
       RUN_SMOKE_TESTS_ONLY_ON_PR: False
     outputs:
       matrix: ${{ steps.set-matrix.outputs.matrix }}
       render-matrix: ${{ steps.set-matrix.outputs.render-matrix }}
-      ignore-disabled-issues: ${{ steps.set-matrix.outputs.ignore-disabled-issues }}
     container:
       image: python:3.9
     steps:
@@ -168,7 +166,7 @@ jobs:
       TEST_CONFIG: ${{ matrix.config }}
       http_proxy: "http://internal-tf-lb-20210727220640487900000002-835786077.us-east-1.elb.amazonaws.com:3128"
       https_proxy: "http://internal-tf-lb-20210727220640487900000002-835786077.us-east-1.elb.amazonaws.com:3128"
-      PYTORCH_IGNORE_DISABLED_ISSUES: ${{ needs.generate-test-matrix.outputs.ignore-disabled-issues }}
+      PR_BODY: ${{ github.event.pull_request.body }}
     needs: [build, generate-test-matrix]
     strategy:
       matrix: ${{ fromJson(needs.generate-test-matrix.outputs.matrix) }}
