@@ -1,5 +1,6 @@
 import zipfile
 from abc import ABC, abstractmethod
+from io import BytesIO
 
 class PackageZipFileReader(ABC):
     """
@@ -57,10 +58,14 @@ class DefaultPackageZipFileWriter(zipfile.ZipFile, PackageZipFileWriter):
 
     def __init__(self, file_name):
         super().__init__(file_name, mode='w')
-        super().writestr("archive/.data/version", "6\n")
+        if isinstance(file_name, BytesIO):
+            self.prefix = "archive"
+        else:
+            self.prefix = "/".join(file_name.strip("/").split('/')[1:])
+        super().writestr(f"{self.prefix}/.data/version", "6\n")
 
     def write_record(self, file_name, str_or_bytes, size=None):
-        super().writestr(f"archive/{file_name}", str_or_bytes)
+        super().writestr(f"{self.prefix}/{file_name}", str_or_bytes)
 
     def close(self):
         super().close()
@@ -75,15 +80,20 @@ class DefaultPackageZipFileReader(zipfile.ZipFile, PackageZipFileReader):
     def __init__(self, file_name):
         super().__init__(file_name, mode='r')
         prefixed_records = super().namelist()
-        self.records = set()
+        self.records = []
+        if isinstance(file_name, BytesIO):
+            self.prefix = "archive"
+        else:
+            self.prefix = "/".join(file_name.strip("/").split('/')[1:])
         for record in prefixed_records:
-            self.records.add(record[8:])
+            self.records.append(record[len(self.prefix)+1:])
+
 
     def get_record(self, name):
-        return super().read(f"archive/{name}")
+        return super().read(f"{self.prefix}/{name}")
 
     def has_record(self, path):
-        return f"archive/{path}" in self.records
+        return path in self.records
 
     def get_all_records(self):
         return list(self.records)
