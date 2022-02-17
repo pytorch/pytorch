@@ -1007,14 +1007,13 @@ class DeviceCachingAllocator {
       if (p.err != cudaSuccess) {
         if (p.err == cudaErrorMemoryAllocation) {
           // If this is the first attempt (!isRetry), we can forgive and clear
-          // CUDA's
-          //   internal error state.
+          // CUDA's internal error state.
+          //
           // If this is the second attempt (isRetry), malloc's TORCH_CHECK_WITH
-          // will take
-          //   over to throw a helpful exception. The user can choose to catch
-          //   the exception, free some stuff in their script, and attempt their
-          //   allocation again. In this case, we can also forgive and clear
-          //   CUDA's internal error state.
+          // will take over to throw a helpful exception. The user can choose
+          // to catch the exception, free some stuff in their script, and attempt
+          // the allocation again. In this case, we can also forgive and clear
+          // CUDA's internal error state.
           cudaGetLastError();
         } else {
           // If the error's unrelated to memory allocation, we should throw
