@@ -1,5 +1,6 @@
 import zipfile
 from abc import ABC, abstractmethod
+from io import BytesIO
 
 class PackageZipFileReader(ABC):
     """
@@ -57,7 +58,14 @@ class DefaultPackageZipFileWriter(zipfile.ZipFile, PackageZipFileWriter):
 
     def __init__(self, file_name):
         super().__init__(file_name, mode='w')
+<<<<<<< HEAD
+        if isinstance(file_name, BytesIO):
+            self.prefix = "archive"
+        else:
+            self.prefix = "/".join(file_name.strip("/").split('/')[1:])
+=======
         self.prefix = "archive"
+>>>>>>> 697d086a29 (remove need for torch in torch.package)
         super().writestr(f"{self.prefix}/.data/version", "6\n")
 
     def write_record(self, file_name, str_or_bytes, size=None):
@@ -77,6 +85,10 @@ class DefaultPackageZipFileReader(zipfile.ZipFile, PackageZipFileReader):
         super().__init__(file_name, mode='r')
         prefixed_records = super().namelist()
         self.records = []
+        if isinstance(file_name, BytesIO):
+            self.prefix = "archive"
+        else:
+            self.prefix = "/".join(file_name.strip("/").split('/')[1:])
         self.prefix = "archive"
         for record in prefixed_records:
             self.records.append(record[len(self.prefix)+1:])
