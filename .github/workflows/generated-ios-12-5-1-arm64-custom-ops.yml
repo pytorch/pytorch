@@ -4,15 +4,14 @@
 name: ios-12-5-1-arm64-custom-ops
 
 on:
+  schedule:
+    - cron: 45 4,10,16,22 * * *
   push:
-    branches:
-      - master
-      - release/*
     tags:
       - 'ciflow/all/*'
       - 'ciflow/ios/*'
       - 'ciflow/macos/*'
-      - 'ciflow/trunk/*'
+      - 'ciflow/scheduled/*'
   workflow_dispatch:
 
 env:
