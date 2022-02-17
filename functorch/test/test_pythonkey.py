@@ -366,7 +366,8 @@ class TestEagerFusionOpInfo(TestCase):
         xfail('trapezoid'),
         xfail('trapz'),
         xfail('trace'),
-        skip('nn.functional.binary_cross_entropy_with_logits')  # seems to fail sometimes?
+        skip('nn.functional.binary_cross_entropy_with_logits'),  # seems to fail sometimes?
+        xfail('block_diag'),
     })
     def test_aot_autograd_exhaustive(self, device, dtype, op):
 
