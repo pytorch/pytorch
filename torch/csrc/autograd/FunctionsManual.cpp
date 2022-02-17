@@ -908,7 +908,7 @@ Tensor renorm_backward(const Tensor & grad, const Tensor & self, const Scalar& p
         self, p, reduce_dims, /*keepdim=*/true);
   }
 
-  const auto real_acc_type = c10::toValueType(acc_type);
+  const auto real_acc_type = c10::toRealValueType(acc_type);
   auto grad_output = (self.conj() * grad);
   // vector_norm output is real, so grad_output must also be real
   if (real_acc_type != acc_type) {
@@ -3281,7 +3281,7 @@ Tensor det_backward(const Tensor & grad, const Tensor& self, const Tensor& det) 
     return svd_backward(u_grad, s_grad, vh_grad, u, s, vh);
   };
 
-  auto eps = at::native::_get_epsilon(c10::toValueType(self.scalar_type()));
+  auto eps = at::native::_get_epsilon(c10::toRealValueType(self.scalar_type()));
   auto singular_det_cutoff = eps * at::linalg_matrix_norm(self);
 
   if (self.dim() == 2) {
