@@ -860,7 +860,7 @@ Tensor& reflection_pad1d_out_cpu(const Tensor& input, IntArrayRef padding,
   return output;
 }
 
-// This function is needed because structured_delegate currently does not 
+// This function is needed because structured_delegate currently does not
 // support quantized backends. This function may be able to be omitted in the
 // future if support for quantized backends is enabled for structured_delegate
 Tensor reflection_pad1d_quantized_cpu(const Tensor& input, IntArrayRef padding) {
