@@ -1980,7 +1980,7 @@ This operator supports :ref:`TensorFloat32<tf32_on_ampere>`.
 Shape:
 
     - Input: :math:`(*, in\_features)` where `*` means any number of
-        additional dimensions, including none
+      additional dimensions, including none
     - Weight: :math:`(out\_features, in\_features)` or :math:`(in\_features)`
     - Bias: :math:`(out\_features)` or :math:`()`
     - Output: :math:`(*, out\_features)` or :math:`(*)`, based on the shape of the weight
@@ -3471,8 +3471,7 @@ def multi_margin_loss(
     reduce: Optional[bool] = None,
     reduction: str = "mean",
 ) -> Tensor:
-    r"""multi_margin_loss(input, target, p=1, margin=1, weight=None, size_average=None,
-                          reduce=None, reduction='mean') -> Tensor
+    r"""multi_margin_loss(input, target, p=1, margin=1, weight=None, size_average=None, reduce=None, reduction='mean') -> Tensor
 
     See :class:`~torch.nn.MultiMarginLoss` for details.
     """
