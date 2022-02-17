@@ -568,6 +568,9 @@ constexpr bool isPerBackendFunctionalityKey(DispatchKey k) {
 constexpr uint8_t num_functionality_keys =
     static_cast<uint8_t>(DispatchKey::EndOfFunctionalityKeys);
 
+constexpr uint8_t num_backends =
+    static_cast<uint8_t>(BackendComponent::EndOfBackendKeys);
+
 // Note [No More Than 16 Backends]
 // Search for this note to find places in the code where the "no more than 16
 // backends" invariant is baked in.
@@ -587,11 +590,8 @@ constexpr uint8_t numPerBackendFunctionalityKeys() {
 
 #if defined(C10_MOBILE_TRIM_DISPATCH_KEYS)
 // See [Note: Trimmed Mobile Dispatch Keys]
-constexpr uint8_t num_backends = 1; // Only CPU
 constexpr uint16_t num_runtime_entries = 8;
 #else
-constexpr uint8_t num_backends =
-    static_cast<uint8_t>(BackendComponent::EndOfBackendKeys);
 constexpr uint16_t num_runtime_entries = num_functionality_keys +
     (numPerBackendFunctionalityKeys() * (num_backends - 1));
 #endif

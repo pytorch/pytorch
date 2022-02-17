@@ -216,36 +216,6 @@ initializeFunctionalityOffsetsAndMasks() {
     auto prev_offset_and_mask = offsets_and_masks[functionality_idx - 1];
     auto k = static_cast<DispatchKey>(functionality_idx);
 
-#if defined(C10_MOBILE_TRIM_DISPATCH_KEYS)
-    // [Note: Trimmed Mobile Dispatch Keys]
-    uint16_t mask = 0;
-    uint16_t offset = 0;
-    switch (k) {
-      case DispatchKey::Undefined:
-        offset = 0;
-      case DispatchKey::CPU:
-        offset = 1;
-      case DispatchKey::QuantizedCPU:
-        offset = 2;
-      case DispatchKey::SparseCPU:
-        offset = 3;
-      case DispatchKey::BackendSelect:
-        offset = 4;
-      case DispatchKey::ADInplaceOrView:
-        offset = 5;
-      case DispatchKey::AutogradOther:
-        offset = 6;
-      case DispatchKey::AutogradCPU:
-        offset = 7;
-      default:
-        // All other keys which are unsupported on mobile will get sent
-        // to the undefined kernel, causing them to error.
-        offset = 0;
-    }
-    offsets_and_masks[functionality_idx] =
-        FunctionalityOffsetAndMask(offset, 0);
-  }
-#else
     // If the previous functionality was not per-backend, then we can just
     // increment the previous offset. Otherwise, the next offset =
     // previous_offset + num_backends.
@@ -269,7 +239,6 @@ initializeFunctionalityOffsetsAndMasks() {
       num_runtime_entries,
       "last_offset: ",
       offsets_and_masks[num_functionality_keys - 1].offset);
-#endif
   return offsets_and_masks;
 }
 
