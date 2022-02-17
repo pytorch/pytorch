@@ -637,23 +637,6 @@ class TestSuite:
         self.test_cases[name].unexpected_success |= test_case.unexpected_success
         self.test_cases[name].expected_failure |= test_case.expected_failure
 
-    def print_report(self, num_longest: int = 3) -> None:
-        sorted_tests = sorted(self.test_cases.values(), key=lambda x: x.time)
-        test_count = len(sorted_tests)
-        print(f"class {self.name}:")
-        print(
-            f"    tests: {test_count} failed: {self.failed_count} skipped: {self.skipped_count} "
-            f"errored: {self.errored_count} unexpected_success: {self.unexpected_success_count} "
-            f"expected_failure: {self.expected_failure_count}")
-        print(f"    run_time: {self.total_time:.2f} seconds")
-        print(f"    avg_time: {self.total_time/test_count:.2f} seconds")
-        if test_count >= 2:
-            print(f"    median_time: {statistics.median(x.time for x in sorted_tests):.2f} seconds")
-        sorted_tests = sorted_tests[-num_longest:]
-        print(f"    {len(sorted_tests)} longest tests:")
-        for test in reversed(sorted_tests):
-            print(f"        {test.name} time: {test.time:.2f} seconds")
-        print("")
 
 DuplicatedDict = Dict[str, Dict[str, List[TestCase]]]
 
