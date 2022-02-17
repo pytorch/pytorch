@@ -1,14 +1,6 @@
-# This example code was modified from https://github.com/ericjang/maml-jax .
-#
-# The original code comes with the following license:
-# https://github.com/ericjang/maml-jax/blob/master/LICENSE
-# Copyright Eric Jang
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#       http://www.apache.org/licenses/LICENSE-2.0
-#
+# Eric Jang originally wrote an implementation of MAML in JAX
+# (https://github.com/ericjang/maml-jax).
+# We translated his implementation from JAX to PyTorch.
 
 from functorch import grad, vmap
 import matplotlib.pyplot as plt
