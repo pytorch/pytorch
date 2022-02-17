@@ -752,10 +752,15 @@ class TORCH_API ProcessedFunction {
     return check_memory_overlap_;
   }
 
+  size_t num_outputs() const {
+    return num_outputs_;
+  }
+
  private:
   std::function<void(ProcessedNode*)> f_;
   Kind kind_{ProcessedFunction::Kind::kOutVariant};
   bool check_memory_overlap_{false};
+  size_t num_outputs_{0};
 };
 
 // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
@@ -777,10 +782,9 @@ class TORCH_API ProcessedNode {
   ProcessedNode(const ProcessedNode& other)
       : node_(other.node_),
         fn_(other.fn_),
-        overlap_detected_(other.overlap_detected_),
         inputs_(other.inputs_),
         outputs_offset_(other.outputs_offset_),
-        num_outputs_(other.num_outputs_),
+        overlap_detected_(other.overlap_detected_),
         values_(other.values_),
         // It doesn't really make sense to copy block runners,
         // each processed node needs its own. This is OK to do
@@ -797,10 +801,9 @@ class TORCH_API ProcessedNode {
     }
     node_ = other.node_;
     fn_ = other.fn_;
-    overlap_detected_ = other.overlap_detected_;
     inputs_ = other.inputs_;
     outputs_offset_ = other.outputs_offset_;
-    num_outputs_ = other.num_outputs_;
+    overlap_detected_ = other.overlap_detected_;
     values_ = other.values_;
     block_runners_ = nullptr;
     return *this;
@@ -825,21 +828,23 @@ class TORCH_API ProcessedNode {
 
   // Output is readwrite
   IValue& Output(uint32_t i) {
-    DCHECK(i < num_outputs_);
+    DCHECK(i < num_outputs());
     return values_[outputs_offset_ + i];
   }
 
   C10_NODISCARD const IValue& Output(uint32_t i) const {
-    DCHECK(i < num_outputs_);
+    DCHECK(i < num_outputs());
     return values_[outputs_offset_ + i];
   }
 
-  C10_NODISCARD c10::ArrayRef<const IValue> outputs() const {
-    return c10::ArrayRef<const IValue>(values_ + outputs_offset_, num_outputs_);
+  size_t num_outputs() const {
+    DCHECK(fn_ != nullptr);
+    return fn_->num_outputs();
   }
 
-  C10_NODISCARD auto num_outputs() const {
-    return num_outputs_;
+  C10_NODISCARD c10::ArrayRef<const IValue> outputs() const {
+    return c10::ArrayRef<const IValue>(
+        values_ + outputs_offset_, num_outputs());
   }
 
   C10_NODISCARD uint16_t num_inputs() const {
@@ -885,7 +890,7 @@ class TORCH_API ProcessedNode {
   }
 
   C10_NODISCARD uint16_t output_ivalue_index(uint16_t i) const {
-    DCHECK(i < num_outputs_);
+    DCHECK(i < num_outputs());
     return outputs_offset_ + i;
   }
   // used in debug mode
@@ -907,10 +912,9 @@ class TORCH_API ProcessedNode {
 
   Node* node_;
   const ProcessedFunction* fn_;
-  bool overlap_detected_{false};
   ProcessedNodeInputs inputs_;
   uint16_t outputs_offset_;
-  uint16_t num_outputs_;
+  bool overlap_detected_{false};
   IValue* values_ = nullptr; // unowned
   // For control flow; processed nodes may have sub-blocks which can
   // be executed by op implementations.
