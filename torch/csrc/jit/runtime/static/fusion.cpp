@@ -11,8 +11,8 @@
 #include <torch/csrc/jit/passes/tensorexpr_fuser.h>
 #include <torch/csrc/jit/passes/utils/subgraph_utils.h>
 #include <torch/csrc/jit/runtime/custom_operator.h>
-#include <torch/csrc/jit/runtime/jit_trace.h>
 #include <torch/csrc/jit/runtime/graph_iterator.h>
+#include <torch/csrc/jit/runtime/jit_trace.h>
 #include <torch/csrc/jit/runtime/static/impl.h>
 #include <torch/csrc/jit/runtime/static/ops.h>
 #include <torch/csrc/jit/runtime/static/passes.h>

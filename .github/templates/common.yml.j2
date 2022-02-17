@@ -43,7 +43,7 @@ concurrency:
         run: .github/scripts/parse_ref.py
 {%- endmacro -%}
 
-{%- macro upload_test_statistics(build_environment, when="always()", pytorch_directory="") -%}
+{%- macro upload_test_statistics(build_environment, when="always()", pytorch_directory="", needs_credentials=False) -%}
       - name: Display and upload test statistics (Click Me)
 {%- if pytorch_directory %}
         working-directory: !{{ pytorch_directory }}
@@ -59,6 +59,10 @@ concurrency:
           SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
           TAG: ${{ steps.parse-ref.outputs.tag }}
           WORKFLOW_ID: '${{ github.run_id }}'
+{%- if needs_credentials %}
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_OSSCI_METRICS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_OSSCI_METRICS_SECRET_ACCESS_KEY }}
+{%- endif %}
         shell: bash
         run: |
           python3 -m pip install -r requirements.txt
@@ -185,10 +189,13 @@ concurrency:
           docker system prune -af
 {%- endmacro -%}
 
-{%- macro checkout(submodules="recursive", deep_clone=True, directory="", repository="pytorch/pytorch", branch="") -%}
+{%- macro checkout(submodules="recursive", deep_clone=True, directory="", repository="pytorch/pytorch", branch="", checkout_pr_head=True) -%}
       - name: Checkout !{{ 'PyTorch' if repository == "pytorch/pytorch" else repository }}
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
+      {%- if checkout_pr_head %}
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+      {%- endif %}
       {%- if deep_clone %}
           # deep clone, to allow use of git merge-base
           fetch-depth: 0
@@ -212,13 +219,12 @@ concurrency:
       {%- endif %}
 {%- endmacro -%}
 
-{%- macro upload_downloaded_files(name, artifact_name="", use_s3=True, when="always()") -%}
+{%- macro upload_downloaded_files(name, config=None, shard=None, num_shards=None, runner=None, artifact_name="", use_s3=True, when="always()") -%}
       - name: Zip JSONs for upload
         if: !{{ when }}
         env:
 {%- if name == 'linux' or name == 'windows' or name == 'macos' %}
-          FILE_SUFFIX: '${{ github.job }}-${{ matrix.config }}-${{ matrix.shard }}-${{ matrix.num_shards }}-${{ matrix.runner }}'
-{%- else %}
+          FILE_SUFFIX: '${{ github.job }}-!{{ config }}-!{{ shard }}-!{{ num_shards }}-!{{ runner }}'{%- else %}
           FILE_SUFFIX: '!{{ name }}-${{ github.job }}'
 {%- endif %}
 {%- if name == 'windows' %}
@@ -250,12 +256,12 @@ concurrency:
             test-jsons-*.zip
 {%- endmacro -%}
 
-{%- macro upload_test_reports(name, artifact_name="", use_s3=True) -%}
+{%- macro upload_test_reports(name, config=None, shard=None, num_shards=None, runner=None, artifact_name="", use_s3=True) -%}
       - name: Zip test reports for upload
         if: always()
         env:
 {%- if name == 'linux' or name == 'windows' or name == 'macos' %}
-          FILE_SUFFIX: '${{ github.job }}-${{ matrix.config }}-${{ matrix.shard }}-${{ matrix.num_shards }}-${{ matrix.runner }}'
+          FILE_SUFFIX: '${{ github.job }}-!{{ config }}-!{{ shard }}-!{{ num_shards }}-!{{ runner }}'
 {%- else %}
           FILE_SUFFIX: '!{{ name }}-${{ github.job }}'
 {%- endif %}
