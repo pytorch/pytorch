@@ -2,6 +2,7 @@
 #include <functorch/csrc/Constants.h>
 #include <torch/library.h>
 #include <ATen/ATen.h>
+#include <ATen/WrapDimUtils.h>
 #include <functorch/csrc/TensorWrapper.h>
 #include <functorch/csrc/BatchedTensorImpl.h>
 
