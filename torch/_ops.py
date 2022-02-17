@@ -53,11 +53,11 @@ class OpOverload:
         return "{}.{}".format(*self._schema.name.split("::"))
 
     @property
-    def overloadname(self):
+    def overload_name(self):
         return self._schema.overload_name
 
     @property
-    def overloadpacket(self):
+    def overload_packet(self):
         return self._overloadpacket
 
     @property

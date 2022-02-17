@@ -1533,7 +1533,7 @@ void initJITBindings(PyObject* module) {
             IValue v = *self.default_value();
             return toPyObject(std::move(v));
           })
-      .def(
+      .def_property_readonly(
           "has_default_value",
           [](Argument& self) -> py::bool_ {
             return self.default_value().has_value();

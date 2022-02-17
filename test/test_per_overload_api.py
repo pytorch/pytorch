@@ -32,13 +32,15 @@ class TestPerOverloadAPI(TestCase):
         self.assertRaises(AttributeError, lambda: add_packet.foo)
 
     def test_basics_opoverload(self):
+        # add is ony used as an example here. It is ok to update the test
+        # if the semantics of add are modified in the future.
         add_packet = torch.ops.aten.add
         add_tensoroverload = add_packet.Tensor
 
         # class attributes
         self.assertEqual(add_tensoroverload.name, 'aten.add')
-        self.assertEqual(add_tensoroverload.overloadname, 'Tensor')
-        self.assertEqual(add_tensoroverload.overloadpacket, add_packet)
+        self.assertEqual(add_tensoroverload.overload_name, 'Tensor')
+        self.assertEqual(add_tensoroverload.overload_packet, add_packet)
 
         # deepcopy is a no-op
         self.assertEqual(id(add_tensoroverload), id(copy.deepcopy(add_tensoroverload)))
@@ -59,6 +61,17 @@ class TestPerOverloadAPI(TestCase):
         self.assertEqual(b, torch.tensor(4))
 
         self.assertRaises(RuntimeError, lambda: add_tensoroverload(a, a, out=b))
+
+        add_outoverload = add_packet.out
+        self.assertEqual(str(add_outoverload.inputs), "[Tensor self, Tensor other, Scalar alpha, Tensor& out]")
+        self.assertTrue(add_outoverload.inputs[3].is_mutable)
+        self.assertTrue(not add_outoverload.inputs[2].is_mutable)
+        self.assertTrue(add_outoverload.inputs[3].kwarg_only)
+        self.assertTrue(add_outoverload.inputs[2].has_default_value)
+        self.assertEqual(add_outoverload.inputs[2].default_value, 1)
+        self.assertEqual(add_outoverload.inputs[2].name, "alpha")
+        self.assertEqual(add_outoverload.inputs[2].type, torch._C.NumberType.get())
+        self.assertEqual(add_outoverload.inputs[0].type, torch._C.TensorType.get())
 
 if __name__ == '__main__':
     run_tests()
