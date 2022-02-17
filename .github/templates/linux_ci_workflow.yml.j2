@@ -202,7 +202,6 @@ jobs:
           retry docker pull "${DOCKER_IMAGE}"
 {%- if 'rocm' in test_runner_type and "nogpu" not in test_job.config %}
       - name: ROCm set GPU_FLAG
-        if: ${{ contains(env.BUILD_ENVIRONMENT, 'rocm') && !contains(test_job.config, 'nogpu') }}
         run: |
           echo "GPU_FLAG=--device=/dev/mem --device=/dev/kfd --device=/dev/dri --group-add video --group-add daemon" >> "${GITHUB_ENV}"
 {%- elif "cuda" in build_environment and "nogpu" not in test_job.config %}
