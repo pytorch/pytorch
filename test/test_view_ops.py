@@ -1476,7 +1476,6 @@ class TestOldViewOps(TestCase):
                 with self.assertRaisesRegex(RuntimeError, "Trying to create tensor with negative dimension"):
                     torch.broadcast_shapes(s0, s1)
 
-
     # Skip BFloat16 since numpy does not support it
     @dtypes(*get_all_dtypes(include_bfloat16=False))
     def test_broadcast_to(self, device, dtype):
