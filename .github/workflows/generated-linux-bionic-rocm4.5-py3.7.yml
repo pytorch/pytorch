@@ -316,7 +316,6 @@ jobs:
           }
           retry docker pull "${DOCKER_IMAGE}"
       - name: ROCm set GPU_FLAG
-        if: ${{ contains(env.BUILD_ENVIRONMENT, 'rocm') && !contains(test_job.config, 'nogpu') }}
         run: |
           echo "GPU_FLAG=--device=/dev/mem --device=/dev/kfd --device=/dev/dri --group-add video --group-add daemon" >> "${GITHUB_ENV}"
       - name: Determine shm-size
@@ -541,7 +540,6 @@ jobs:
           }
           retry docker pull "${DOCKER_IMAGE}"
       - name: ROCm set GPU_FLAG
-        if: ${{ contains(env.BUILD_ENVIRONMENT, 'rocm') && !contains(test_job.config, 'nogpu') }}
         run: |
           echo "GPU_FLAG=--device=/dev/mem --device=/dev/kfd --device=/dev/dri --group-add video --group-add daemon" >> "${GITHUB_ENV}"
       - name: Determine shm-size
@@ -766,7 +764,6 @@ jobs:
           }
           retry docker pull "${DOCKER_IMAGE}"
       - name: ROCm set GPU_FLAG
-        if: ${{ contains(env.BUILD_ENVIRONMENT, 'rocm') && !contains(test_job.config, 'nogpu') }}
         run: |
           echo "GPU_FLAG=--device=/dev/mem --device=/dev/kfd --device=/dev/dri --group-add video --group-add daemon" >> "${GITHUB_ENV}"
       - name: Determine shm-size
@@ -991,7 +988,6 @@ jobs:
           }
           retry docker pull "${DOCKER_IMAGE}"
       - name: ROCm set GPU_FLAG
-        if: ${{ contains(env.BUILD_ENVIRONMENT, 'rocm') && !contains(test_job.config, 'nogpu') }}
         run: |
           echo "GPU_FLAG=--device=/dev/mem --device=/dev/kfd --device=/dev/dri --group-add video --group-add daemon" >> "${GITHUB_ENV}"
       - name: Determine shm-size
