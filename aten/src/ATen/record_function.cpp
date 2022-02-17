@@ -11,9 +11,6 @@ namespace at {
 
 namespace {
 
-// Maps the address of an output Tensor to a unique op id and output index of the tensor
-std::unordered_map<at::TensorImpl*, std::pair<RecordFunctionHandle, int>> producer_tensor_map;
-
 // Used to generate unique callback handles
 CallbackHandle next_unique_callback_handle() {
   static std::atomic<uint64_t> unique_cb_id {1};
@@ -582,83 +579,6 @@ uint64_t RecordFunction::currentThreadId() {
   return current_thread_id_;
 }
 
-std::pair<int, int> RecordFunction::get_op_id_from_input(const c10::IValue& input_item) {
-    std::pair<int, int> producer_op_pair(-1, -1);
-    const at::Tensor& tensor = input_item.toTensor();
-    if (tensor.defined()) {
-        auto ten_addr =  tensor.unsafeGetTensorImpl();
-        // See if Address is in the map already
-        if (at::producer_tensor_map.count(ten_addr) > 0) {
-            producer_op_pair  =  at::producer_tensor_map[ten_addr];
-        }
-    }
-    return producer_op_pair;
-}
-
-std::vector<std::pair<int, int>> RecordFunction::flatten_list_op_ids(c10::List<c10::IValue> list, std::string fn_name) {
-  std::pair<int, int> default_pair(-1, -1);
-  std::vector<std::pair<int, int>> input_op_id_list;
-  for (const c10::IValue input : list) {
-    if (input.isTensor()) {
-        auto producer_op_pair = get_op_id_from_input(input);
-        input_op_id_list.push_back(producer_op_pair);
-    }
-    else {
-        input_op_id_list.emplace_back(default_pair);
-    }
-  }
-  return input_op_id_list;
-}
-
-void RecordFunction::check_input_mapping(void) {
-    int num_inputs = inputs().size();
-    std::pair<int, int> undefined_op_pair(-1,-1);
-    state_->input_producer_ops_.reserve(num_inputs);
-    int idx = 0;
-    for (const c10::IValue& input_item : inputs()) {
-        bool tensor_valid = false;
-        if(input_item.isTensor()) {
-            const at::Tensor& tensor = input_item.toTensor();
-            auto producer_pair = get_op_id_from_input(input_item);
-            state_->input_producer_ops_.push_back(producer_pair);
-        } else {
-          if (input_item.isList()) {
-            std::vector<std::pair<int, int>> tmp_op_ids = flatten_list_op_ids(input_item.toList(), std::string(name()));
-            // Extend the current sizes array by the array returned from input sizes
-            if (!tmp_op_ids.empty()) {
-              state_->input_producer_ops_.insert(state_->input_producer_ops_.end(), tmp_op_ids.begin(), tmp_op_ids.end());
-            } else {
-              state_->input_producer_ops_.emplace_back(undefined_op_pair);
-            }
-          }
-        }
-        idx++;
-    }
-}
-
-void RecordFunction::update_output_tensor_tracking(void) {
-    int producer_op_id = int(handle());
-    int output_nr = 0;
-    for (const c10::IValue& s_tensor : outputs()){
-        bool tensor_valid = false;
-        if(s_tensor.isTensor()) {
-            const at::Tensor& tensor = s_tensor.toTensor();
-            if (tensor.defined()) {
-                auto ten_addr =  tensor.unsafeGetTensorImpl();
-                at::producer_tensor_map[ten_addr] = std::pair<int, int> {producer_op_id, output_nr};
-                state_->output_dims_.push_back(tensor.sizes().vec());
-                state_->output_tensor_addr_.push_back(ten_addr);
-                tensor_valid = true;
-            }
-        }
-        if (!tensor_valid) {
-            state_->output_dims_.emplace_back();
-            state_->output_tensor_addr_.emplace_back();
-        }
-        output_nr++;
-    }
-}
-
 void RecordFunction::before(const char* name, int64_t sequence_nr) {
   if (!isActive()) {
     return;
@@ -668,7 +588,6 @@ void RecordFunction::before(const char* name, int64_t sequence_nr) {
   state_->sequence_nr_ = sequence_nr;
   state_->thread_id_ = currentThreadId();
   state_->operator_name_.reset();
-  check_input_mapping();
 
   manager().runStartCallbacks(*this);
 }
@@ -682,7 +601,6 @@ void RecordFunction::before(std::string name, int64_t sequence_nr) {
   state_->sequence_nr_ = sequence_nr;
   state_->thread_id_ = currentThreadId();
   state_->operator_name_.reset();
-  check_input_mapping();
 
   manager().runStartCallbacks(*this);
 }
@@ -699,7 +617,6 @@ void RecordFunction::before(
   state_->op_input_size = op.schema().arguments().size();
   state_->op_output_size = op.schema().returns().size();
   state_->name_ = op.schema().name();
-  check_input_mapping();
 
   manager().runStartCallbacks(*this);
 }

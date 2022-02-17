@@ -21,7 +21,7 @@ std::string getNvtxStr(
     const char* name,
     int64_t sequence_nr,
     const std::vector<std::vector<int64_t>>& shapes,
-    at::RecordFunctionHandle op_id,
+    int op_id,
     const std::vector<std::pair<int, int>>& input_op_ids) {
   if (sequence_nr >= -1 || shapes.size() > 0) {
     std::string str;
@@ -37,7 +37,9 @@ std::string getNvtxStr(
     }
     std::stringstream s;
     s << str;
-    s << ", op_id = " << int(op_id);
+    if (op_id >= 0) {
+      s << ", op_id = " << op_id;
+    }
     if (shapes.size() > 0) {
       s << ", sizes = " << shapesToStr(shapes);
     }
@@ -104,22 +106,15 @@ std::string stacksToStr(
   return "\"" + rc + "\"";
 }
 
-std::pair<at::RecordFunctionHandle, int> get_input_op_id_from_record_fn(const at::RecordFunction& fn, int input_nr) {
-  auto input_producer_pair = fn.inputOpId(input_nr);
-  at::RecordFunctionHandle input_op_id = input_producer_pair.first;
-  int output_nr = input_producer_pair.second;
-  return input_producer_pair;
-}
-
-std::vector<std::vector<int64_t>> flatten_list(c10::List<c10::IValue> list, std::string fn_name) {
+std::vector<std::vector<int64_t>> flattenList(c10::List<c10::IValue> list, std::string fn_name) {
   std::vector<std::vector<int64_t>> tensor_dims;
   int idx = 0;
   for (const c10::IValue input : list) {
     if (input.isTensor()) {
-        const at::Tensor& tensor = input.toTensor();
-        if (tensor.defined()) {
-          tensor_dims.push_back(input.toTensor().sizes().vec());
-        }
+      const at::Tensor& tensor = input.toTensor();
+      if (tensor.defined()) {
+        tensor_dims.push_back(input.toTensor().sizes().vec());
+      }
     }
     idx += 1;
   }
@@ -133,7 +128,7 @@ std::vector<std::vector<int64_t>> inputSizes(const at::RecordFunction& fn) {
   for (const c10::IValue& input : fn.inputs()) {
     if (!input.isTensor()) {
       if (input.isList()) {
-        std::vector<std::vector<int64_t>> tmp_sizes = flatten_list(input.toList(), std::string(fn.name()));
+        std::vector<std::vector<int64_t>> tmp_sizes = flattenList(input.toList(), std::string(fn.name()));
         // Extend the current sizes array by the array returned from input sizes
         if (!tmp_sizes.empty()) {
           sizes.insert(sizes.end(), tmp_sizes.begin(), tmp_sizes.end());
@@ -154,18 +149,6 @@ std::vector<std::vector<int64_t>> inputSizes(const at::RecordFunction& fn) {
     iter++;
   }
   return sizes;
-}
-
-std::vector<std::pair<int, int>> inputOpIds(const at::RecordFunction& fn) {
-  std::vector<std::pair<int, int>> input_op_ids;
-  int num_inputs = fn.inputProducerOps().size();
-  input_op_ids.reserve(num_inputs);
-  int input_nr = 0;
-  for (input_nr = 0; input_nr < num_inputs; input_nr++) {
-    auto op_id_pair = fn.inputOpId(input_nr);
-    input_op_ids.emplace_back(op_id_pair);
-  }
-  return input_op_ids;
 }
 
 std::string shapesToStr(const std::vector<std::vector<int64_t>>& shapes) {

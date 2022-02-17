@@ -55,7 +55,7 @@ std::string getNvtxStr(
     const char* name,
     int64_t sequence_nr,
     const std::vector<std::vector<int64_t>>& shapes,
-    at::RecordFunctionHandle op_id = ~0,
+    int op_id = -1,
     const std::vector<std::pair<int, int>>& input_op_ids = {});
 
 struct TORCH_API FileLineFunc {
@@ -73,7 +73,6 @@ TORCH_API std::string stacksToStr(
     const char* delim);
 TORCH_API std::vector<std::vector<int64_t>> inputSizes(
     const at::RecordFunction& fn);
-TORCH_API std::vector<std::pair<int, int>> inputOpIds(const at::RecordFunction& fn);
 TORCH_API std::string shapesToStr(
     const std::vector<std::vector<int64_t>>& shapes);
 TORCH_API std::string dtypesToStr(const std::vector<std::string>& types);
