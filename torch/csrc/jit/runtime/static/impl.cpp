@@ -1260,9 +1260,6 @@ void BlockRunner::benchmark(
   TORCH_CHECK(
       kwargs_list.size() == 0 || args_list.size() == kwargs_list.size());
   std::cout << "Input size: " << args_list.size() << std::endl;
-  if (args_list.size() == 0) {
-    return;
-  }
   float time_per_iter =
       benchmark_model(args_list, kwargs_list, warmup_runs, main_runs);
   std::cout << "Static runtime ms per iter: " << time_per_iter
@@ -1282,11 +1279,20 @@ void BlockRunner::benchmark(
 
   std::vector<std::pair<std::string, double>> time_per_node_type_vec{
       results.time_per_node_type.begin(), results.time_per_node_type.end()};
-  std::sort(
-      time_per_node_type_vec.begin(),
-      time_per_node_type_vec.end(),
-      [](auto& left, auto& right) { return left.second > right.second; });
-
+  if (args_list.size() == 0) {
+    std::sort(
+        time_per_node_type_vec.begin(),
+        time_per_node_type_vec.end(),
+        [&results](auto& left, auto& right) {
+          return results.instances_per_node_type[left.first] >
+              results.instances_per_node_type[right.first];
+        });
+  } else {
+    std::sort(
+        time_per_node_type_vec.begin(),
+        time_per_node_type_vec.end(),
+        [](auto& left, auto& right) { return left.second > right.second; });
+  }
   std::cout << "Time per node type:" << std::endl;
   for (const auto& p : time_per_node_type_vec) {
     const std::string& kind = p.first;
@@ -1341,13 +1347,14 @@ void BlockRunner::benchmark(
       std::cout << "Total number of reused tensors: "
                 << planner_->total_reused_tensors() << std::endl;
     }
-    std::cout << "Total number of 'out' variant nodes/total number of nodes: "
-              << results.out_nodes_count << "/" << results.total_nodes_count
-              << " ("
-              << 100.0 * (results.out_nodes_count) /
-            static_cast<float>(results.total_nodes_count)
-              << "%)" << std::endl;
   }
+  std::cout << "Total number of 'out' variant nodes/total number of nodes: "
+            << results.out_nodes_count << "/" << results.total_nodes_count
+            << " ("
+            << 100.0 * (results.out_nodes_count) /
+          static_cast<float>(results.total_nodes_count)
+            << "%)" << std::endl;
+
   check_for_memory_leak();
 
 #ifndef NDEBUG
@@ -1468,8 +1475,36 @@ BlockRunner::IndividualMetrics BlockRunner::benchmark_individual_ops(
   TORCH_CHECK(
       kwargs_list.size() == 0 || args_list.size() == kwargs_list.size());
   TORCH_CHECK(warmup_runs >= 1 && main_runs >= 1);
+
+  IndividualMetrics results;
+  results.time_per_node.resize(nodes_.size(), 0);
   if (args_list.size() == 0) {
-    return {};
+    // When the given input is empty, compute the op statistics from the given
+    // graph without executing it.
+    for (const auto i : c10::irange(nodes_.size())) {
+      const Node* node = nodes_[i].node();
+      std::string kind(node->kind().toQualString());
+      // TODO: Collect op statistics from sub-blocks here.
+      results.time_per_node[i] = 0;
+      results.time_per_node_type[kind] = 0;
+      results.instances_per_node_type[kind]++;
+      if (nodes_[i].has_out_variant()) {
+        results.out_nodes.insert(kind);
+        results.out_nodes_count++;
+      } else if (nodes_[i].has_native()) {
+        results.native_nodes.insert(kind);
+      }
+      results.total_time += results.time_per_node[i];
+    }
+    results.total_nodes_count = nodes_.size();
+    results.memory_alloc_time = 0;
+    results.memory_dealloc_time = 0;
+    results.output_dealloc_time = 0;
+    for (const auto& p : results.time_per_node_type) {
+      const std::string& kind = p.first;
+      results.percent_per_node_type[kind] = 0;
+    }
+    return results;
   }
 
   const bool is_kwargs_empty = kwargs_list.size() == 0;
@@ -1478,9 +1513,6 @@ BlockRunner::IndividualMetrics BlockRunner::benchmark_individual_ops(
   // See comment on above use of InferenceMode for
   // explanation.
   c10::InferenceMode mode;
-
-  IndividualMetrics results;
-  results.time_per_node.resize(nodes_.size(), 0);
 
   // setup time
   caffe2::Timer timer;
