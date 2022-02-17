@@ -119,8 +119,9 @@ void initONNXBindings(PyObject* module) {
       .def(
           "_jit_pass_onnx_unpack_quantized_weights",
           [](std::shared_ptr<Graph>& graph,
-             std::map<std::string, IValue>& paramsDict) {
-            UnpackQuantizedWeights(graph, paramsDict);
+             std::map<std::string, IValue>& paramsDict,
+             bool caffe2) {
+            UnpackQuantizedWeights(graph, paramsDict, caffe2);
             return paramsDict;
           },
           pybind11::return_value_policy::move)
