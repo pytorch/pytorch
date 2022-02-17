@@ -56,7 +56,7 @@ commands:
             do
             cd $path/..
             git fetch --depth=1 origin
-            git reset --hard origin/master
+            git reset --hard origin/main
             done
 
             export HOMEBREW_NO_AUTO_UPDATE=1
