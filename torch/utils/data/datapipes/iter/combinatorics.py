@@ -67,6 +67,14 @@ class ShufflerIterDataPipe(IterDataPipe[T_co]):
         buffer_size: The buffer size for shuffling (default to ``10000``)
         unbatch_level: Specifies if it is necessary to unbatch source data before
             applying the shuffle
+
+    Example:
+        >>> import random
+        >>> from torchdata.datapipes.iter import IterableWrapper
+        >>> dp = IterableWrapper(range(10))
+        >>> random.seed(123)
+        >>> shuffle_dp = dp.shuffle()  # [0, 4, 1, 6, 3, 2, 9, 5, 7, 8]
+        >>> list(shuffle_dp)
     """
     datapipe: IterDataPipe[T_co]
     buffer_size: int
