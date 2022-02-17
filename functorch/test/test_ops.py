@@ -569,7 +569,7 @@ class TestOperators(TestCase):
         xfail('index_put', ''),
         xfail('lu_solve'),
         xfail('index_copy'),
-        xfail('nn.functional.gelu'),
+        xfail('nn.functional.gelu', device_type='cpu'),
     })
 
     @ops(functorch_lagging_op_db + additional_op_db, allowed_dtypes=(torch.float,))
@@ -644,7 +644,7 @@ class TestOperators(TestCase):
         xfail('quantile'),
 
         # RuntimeError: vmap: inplace arithmetic(self, *extra_args)
-        xfail('nn.functional.gelu'),
+        xfail('nn.functional.gelu', device_type='cpu'),
 
         # Not implemented
         xfail('scatter'),
@@ -725,7 +725,7 @@ class TestOperators(TestCase):
         xfail('maximum'),
         xfail('linalg.householder_product'),
         xfail('tensor_split'),
-        xfail('nn.functional.gelu'),
+        xfail('nn.functional.gelu', device_type='cpu'),
         xfail('quantile'),
         xfail('var_mean'),
         xfail('as_strided'),
@@ -745,7 +745,6 @@ class TestOperators(TestCase):
         xfail('nn.functional.linear'),
         xfail('view_as_complex'),
         xfail('prod'),
-        xfail('nn.functional.gelu'),
 
         # Some kind of issue with unsymmetric tangent type
         # Runtime Error: The tangent part of the matrix A should also be symmetric.
@@ -820,7 +819,6 @@ class TestOperators(TestCase):
         xfail('masked_select'),
         xfail('matrix_exp'),
         xfail('nanquantile'),
-        xfail('nn.functional.gelu'),
         xfail('norm', 'nuc'),
         xfail('pinverse'),
         xfail('prod'),
