@@ -1,3 +1,4 @@
+from contextlib import contextmanager
 from typing import Any, List, Tuple
 import argparse
 import torch
@@ -49,7 +50,8 @@ def load_graph_and_inputs(ir: str) -> Tuple[Any, List[Any]]:
     return (func, inputs)
 
 
-def run_test(graph, inputs, *, warmup_runs=20, test_runs=20) -> float:
+def run_test(ir, inputs, *, warmup_runs=20, test_runs=20) -> float:
+    graph, _ = load_graph_and_inputs(ir)
     for _ in range(warmup_runs):
         graph(*inputs)
 
@@ -66,40 +68,75 @@ def run_test(graph, inputs, *, warmup_runs=20, test_runs=20) -> float:
     return start_event.elapsed_time(end_event) / test_runs
 
 
-def run_baseline(graph, inputs) -> float:
-    with torch.jit.fuser("fuser0"):
-        return run_test(graph, inputs)
+@contextmanager
+def no_fuser(*args, **kwargs):
+    old_cpu_fuse = torch._C._jit_can_fuse_on_cpu()
+    old_gpu_fuse = torch._C._jit_can_fuse_on_gpu()
+    old_texpr_fuser_state = torch._C._jit_texpr_fuser_enabled()
+    old_nvfuser_state = torch._C._jit_nvfuser_enabled()
+
+    torch._C._jit_override_can_fuse_on_cpu(False)
+    torch._C._jit_override_can_fuse_on_gpu(False)
+    torch._C._jit_set_texpr_fuser_enabled(False)
+    torch._C._jit_set_nvfuser_enabled(False)
+
+    try:
+        yield
+    finally:
+        torch._C._jit_override_can_fuse_on_cpu(old_cpu_fuse)
+        torch._C._jit_override_can_fuse_on_gpu(old_gpu_fuse)
+        torch._C._jit_set_texpr_fuser_enabled(old_texpr_fuser_state)
+        torch._C._jit_set_nvfuser_enabled(old_nvfuser_state)
 
 
-def run_nvfuser(graph, inputs) -> float:
+def run_baseline_no_fusion(ir, inputs) -> float:
+    with no_fuser():
+        return run_test(ir, inputs)
+
+
+def run_nnc(ir, inputs) -> float:
+    with torch.jit.fuser("fuser1"):
+        return run_test(ir, inputs)
+
+
+def run_nvfuser(ir, inputs) -> float:
     with torch.jit.fuser("fuser2"):
-        return run_test(graph, inputs)
+        return run_test(ir, inputs)
 
 
-def test_nvfuser(graphs: List[str]):
+def test_nvfuser(graphs: List[str], baseline_fn, nvfuser_fn):
     for i, ir in enumerate(graphs):
-        graph, inputs = load_graph_and_inputs(ir)
-        baseline = run_baseline(graph, inputs)
-        nvfuser = run_nvfuser(graph, inputs)
+        _, inputs = load_graph_and_inputs(ir)
+        baseline = baseline_fn(ir, inputs)
+        nvfuser = nvfuser_fn(ir, inputs)
         improvement = (baseline / nvfuser - 1) * 100
-        print(f"Graph {i}; baseline: {baseline:.2f} ms; nvfuser: {nvfuser:.2f} ms; improvement: {improvement:.2f}%")
+        print(f"  Graph {i}; baseline: {baseline:.2f} ms; nvfuser: {nvfuser:.2f} ms; improvement: {improvement:.2f}%")
 
 
 def run():
-    parser = argparse.ArgumentParser()
-    parser.add_argument("filename")
-    parser.add_argument("--nvfuser", dest="nvfuser", action="store_true")
-    parser.add_argument("--no-nvfuser", dest="nvfuser", action="store_false")
+    parser = argparse.ArgumentParser(description="Extracts torchscript IR from log files and, optionally, benchmarks it or outputs the IR")
+    parser.add_argument("filename", help="Filename of log file")
+    parser.add_argument("--nvfuser", dest="nvfuser", action="store_true", help="benchmark nvfuser against no fusion")
+    parser.add_argument("--no-nvfuser", dest="nvfuser", action="store_false", help="DON'T benchmark nvfuser against no fusion")
     parser.set_defaults(nvfuser=False)
-    parser.add_argument("--output", dest="output", action="store_true")
-    parser.add_argument("--no-output", dest="output", action="store_false")
-    parser.set_defaults(output=True)
+    parser.add_argument("--nvfuser-nnc", dest="nvfuser_nnc", action="store_true", help="benchmark nvfuser against nnc")
+    parser.add_argument("--no-nvfuser-nnc", dest="nvfuser_nnc", action="store_false", help="DON'T benchmark nvfuser against nnc")
+    parser.set_defaults(nvfuser_nnc=False)
+    parser.add_argument("--output", dest="output", action="store_true", help="Output graph IR")
+    parser.add_argument("--no-output", dest="output", action="store_false", help="DON'T output graph IR")
+    parser.set_defaults(output=False)
 
     args = parser.parse_args()
     graphs = extract_ir(args.filename)
 
     if args.nvfuser:
-        test_nvfuser(graphs)
+        print("NVFuser vs no fusion:")
+        test_nvfuser(graphs, run_baseline_no_fusion, run_nvfuser)
+
+    if args.nvfuser_nnc:
+        print("NVFuser vs NNC:")
+        test_nvfuser(graphs, run_nnc, run_nvfuser)
+        #test_nvfuser(graphs, run_baseline_no_fusion, run_nnc)
 
     if args.output:
         quoted = []
