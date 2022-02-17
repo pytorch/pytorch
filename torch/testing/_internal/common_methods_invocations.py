@@ -3468,6 +3468,9 @@ def sample_inputs_adaptive_avg_pool1d(op_info, device, dtype, requires_grad, **k
     )
 
     for input_shape, output_size in cases:
+        # Unbatched
+        yield SampleInput(make_arg(input_shape[1:]), args=(output_size,))
+        # Batched
         yield SampleInput(make_arg(input_shape), args=(output_size,))
 
 def sample_inputs_adaptive_avg_pool2d(op_info, device, dtype, requires_grad, **kwargs):
@@ -3483,6 +3486,9 @@ def sample_inputs_adaptive_avg_pool2d(op_info, device, dtype, requires_grad, **k
     )
 
     for input_shape, output_size in cases:
+        # Unbatched
+        yield SampleInput(make_arg(input_shape[1:]), args=(output_size,))
+        # Batched
         yield SampleInput(make_arg(input_shape), args=(output_size,))
 
 
@@ -3500,6 +3506,9 @@ def sample_inputs_adaptive_avg_pool3d(op_info, device, dtype, requires_grad, **k
     )
 
     for input_shape, output_size in cases:
+        # Unbatched
+        yield SampleInput(make_arg(input_shape[1:]), args=(output_size,))
+        # Batched
         yield SampleInput(make_arg(input_shape), args=(output_size,))
 
 def sample_inputs_adaptive_max_pool1d(op_info, device, dtype, requires_grad, **kwargs):
@@ -3514,6 +3523,9 @@ def sample_inputs_adaptive_max_pool1d(op_info, device, dtype, requires_grad, **k
     )
 
     for shapes, return_idx in product(cases, (True, False)):
+        # Unbatched
+        yield SampleInput(make_arg(shapes[0][1:]), args=(shapes[1], return_idx))
+        # Batched
         yield SampleInput(make_arg(shapes[0]), args=(shapes[1], return_idx))
 
 def sample_inputs_adaptive_max_pool2d(op_info, device, dtype, requires_grad, **kwargs):
@@ -3532,6 +3544,9 @@ def sample_inputs_adaptive_max_pool2d(op_info, device, dtype, requires_grad, **k
     )
 
     for shapes, return_idx in product(cases, (True, False)):
+        # Unbatched
+        yield SampleInput(make_arg(shapes[0][1:]), args=(shapes[1], return_idx))
+        # Batched
         yield SampleInput(make_arg(shapes[0]), args=(shapes[1], return_idx))
 
 
@@ -3550,6 +3565,9 @@ def sample_inputs_adaptive_max_pool3d(op_info, device, dtype, requires_grad, **k
     )
 
     for shapes, return_idx in product(cases, (True, False)):
+        # Unbatched
+        yield SampleInput(make_arg(shapes[0][1:]), args=(shapes[1], return_idx))
+        # Batched
         yield SampleInput(make_arg(shapes[0]), args=(shapes[1], return_idx))
 
 class _TestParamsMaxPoolBase(object):
@@ -3631,6 +3649,10 @@ def sample_inputs_max_pool(op_info, device, dtype, requires_grad, **kwargs):
 
     params_generator = params_generator_type_dict[op_info.name]()
     for (shape, memory_format), kwargs in params_generator.gen_input_params():
+        # Unbatched
+        arg = make_arg(shape[1:]).to(memory_format=memory_format).requires_grad_(requires_grad)
+        yield SampleInput(arg, kwargs=kwargs)
+        # Batched
         arg = make_arg(shape).to(memory_format=memory_format).requires_grad_(requires_grad)
         yield SampleInput(arg, kwargs=kwargs)
 
