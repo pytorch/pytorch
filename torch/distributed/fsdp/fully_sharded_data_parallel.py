@@ -686,7 +686,7 @@ class FullyShardedDataParallel(nn.Module):
     def _write_back_current_shard(self):
         for p in self.params:
             if not p._is_sharded:  # type: ignore[attr-defined]
-                pass
+                continue  # Already copied because no sharding.
             chunks = p._full_param_padded.chunk(self.world_size)  # type: ignore[attr-defined]
             assert len(chunks) > self.rank
             chunk = chunks[self.rank]
@@ -714,7 +714,9 @@ class FullyShardedDataParallel(nn.Module):
         .. note:: The full parameters can be modified, but only the portion
             corresponding to the local param shard will persist after the
             context manager exits (unless ``writeback=False``, in which case
-            changes will be discarded).
+            changes will be discarded). In the case where FSDP does not shard
+            the parameters, currently only when world_size == 1, the
+            modification is persisted regardless of ``writeback``.
         Args:
             recurse (bool, Optional): recursively summon all params for nested
                 FSDP instances (default: True)
