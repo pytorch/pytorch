@@ -113,6 +113,7 @@
       "win-vs2019-cuda11.3-py3"
     ],
     "ciflow/default": [
+      "deploy-linux-xenial-cuda11.3-py3.7-gcc7",
       "linux-binary-conda",
       "linux-binary-libtorch-cxx11-abi",
       "linux-binary-libtorch-pre-cxx11",

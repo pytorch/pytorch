@@ -4,6 +4,7 @@
 name: deploy-linux-xenial-cuda11.3-py3.7-gcc7
 
 on:
+  pull_request:
   push:
     tags:
       - 'ciflow/all/*'
