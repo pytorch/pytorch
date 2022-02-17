@@ -43,5 +43,5 @@
       "patterns": ["ios/**"],
       "approved_by": ["linbinyu", "kit1980", "xta0", "malfet", "hanton"],
       "mandatory_app_id": 12274
-   }     
+   }
 ]
