@@ -1073,6 +1073,7 @@ class TestDecompositionOpInfo(TestCase):
             def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
                 global run_ops
                 run_ops.add(func)
+
                 def unwrap_tensor(e):
                     if isinstance(e, DecompositionTensor):
                         if not hasattr(e, 'elem'):
