@@ -85,121 +85,7 @@ jobs:
             artifacts.zip
 
 
-  test_smoke_tests_1_1:
-    name: test (smoke_tests, 1, 1, macos-11)
-    needs: build
-    runs-on: macos-11
-    timeout-minutes: 240
-    env:
-      JOB_BASE_NAME: macos-11-py3-x86-64-test
-      TEST_CONFIG: smoke_tests
-      SHARD_NUMBER: 1
-      NUM_TEST_SHARDS: 1
-      PR_BODY: ${{ github.event.pull_request.body }}
-    steps:
-      - name: Checkout PyTorch
-        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
-        with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-          # deep clone, to allow use of git merge-base
-          fetch-depth: 0
-          submodules: false
-      - name: Clean PyTorch checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-      - uses: actions/download-artifact@v2
-        name: Download PyTorch Build Artifacts from GHA
-        with:
-          name: ${{ env.BUILD_ENVIRONMENT }}
-          path: .
-      - name: Unzip artifacts
-        run: |
-          unzip -o artifacts.zip
-      - name: Setup miniconda
-        uses: conda-incubator/setup-miniconda@v2
-        with:
-          auto-update-conda: true
-          python-version: 3.8
-          activate-environment: build
-      - name: Install macOS homebrew dependencies
-        run: |
-          # Install dependencies
-          brew install libomp
-      - name: Parse ref
-        id: parse-ref
-        run: .github/scripts/parse_ref.py
-      - name: Test
-        run: |
-          python3 -mpip install dist/*.whl
-          .jenkins/pytorch/macos-test.sh
-      - name: Install render_test_results dependencies
-        if: always()
-        shell: bash
-        run: |
-          python3 -m pip install junitparser==2.1.1 rich==10.9.0
-      - name: "[[ Click me for rendered test results (useful for finding failing tests) ]]"
-        if: always()
-        shell: bash
-        # Encoding is weird on windows, just try to default to utf-8 if possible
-        env:
-          PYTHONIOENCODING: "utf-8"
-        run: |
-          python3 tools/render_junit.py test/
-      - name: Zip JSONs for upload
-        if: always()
-        env:
-          FILE_SUFFIX: '${{ github.job }}-smoke_tests-1-1-macos-11'
-        run: |
-          # Remove any previous test jsons if they exist
-          rm -f test-jsons-*.zip
-          zip -r "test-jsons-${FILE_SUFFIX}.zip" test -i '*.json'
-      - uses: actions/upload-artifact@v2
-        name: Store Test Downloaded JSONs on Github
-        if: always()
-        with:
-          name: test-jsons
-          retention-days: 14
-          if-no-files-found: warn
-          path:
-            test-jsons-*.zip
-      - name: Zip test reports for upload
-        if: always()
-        env:
-          FILE_SUFFIX: '${{ github.job }}-smoke_tests-1-1-macos-11'
-        run: |
-          # Remove any previous test reports if they exist
-          rm -f test-reports-*.zip
-          zip -r "test-reports-${FILE_SUFFIX}.zip" test -i '*.xml'
-      - uses: actions/upload-artifact@v2
-        name: Store Test Reports on Github
-        if: always()
-        with:
-          name: test-reports
-          retention-days: 14
-          if-no-files-found: error
-          path:
-            test-reports-*.zip
-      - name: Display and upload test statistics (Click Me)
-        if: always()
-        # temporary hack: set CIRCLE_* vars, until we update
-        # tools/stats/print_test_stats.py to natively support GitHub Actions
-        env:
-          AWS_DEFAULT_REGION: us-east-1
-          BRANCH: ${{ steps.parse-ref.outputs.branch }}
-          JOB_BASE_NAME: macos-11-py3-x86-64-test
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-          SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
-          TAG: ${{ steps.parse-ref.outputs.tag }}
-          WORKFLOW_ID: '${{ github.run_id }}'
-          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_OSSCI_METRICS_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_OSSCI_METRICS_SECRET_ACCESS_KEY }}
-        shell: bash
-        run: |
-          python3 -m pip install -r requirements.txt
-          python3 -m pip install boto3==1.19.12
-          python3 -m tools.stats.print_test_stats --upload-to-s3 --compare-with-s3 test
-  test_default_1_1:
+  test_default_1_2:
     name: test (default, 1, 2, macos-11)
     needs: build
     runs-on: macos-11
@@ -313,7 +199,7 @@ jobs:
           python3 -m pip install -r requirements.txt
           python3 -m pip install boto3==1.19.12
           python3 -m tools.stats.print_test_stats --upload-to-s3 --compare-with-s3 test
-  test_default_2_1:
+  test_default_2_2:
     name: test (default, 2, 2, macos-11)
     needs: build
     runs-on: macos-11

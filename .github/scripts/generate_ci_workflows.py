@@ -174,7 +174,7 @@ class CIWorkflow:
     test_jobs: Any = field(default_factory=list)
 
     enable_default_test: bool = True
-    enable_smoke_test: bool = True
+    enable_smoke_test: bool = False
     enable_jit_legacy_test: bool = False
     enable_distributed_test: bool = True
     enable_multigpu_test: bool = False
@@ -313,7 +313,7 @@ class CIWorkflow:
             for shard in range(1, self.num_test_shards + 1):
                 test_jobs.append(
                     {
-                        "id": f"test_default_{shard}_{config['num_shards']}",
+                        "id": f"test_default_{shard}_{self.num_test_shards}",
                         "name": f"test (default, {shard}, {self.num_test_shards}, {self.test_runner_type})",
                         "config": "default",
                         "shard": shard,
