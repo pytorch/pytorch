@@ -4916,8 +4916,13 @@ class TestJit(TestCase):
                 yield Dist, keys, values, sample
 
     def _perturb_tensor(self, value, constraint):
-        if isinstance(constraint, constraints._IntegerGreaterThan):
+        if isinstance(constraint, (constraints._IntegerGreaterThan,
+                                   constraints._IntegerGreaterThanEq,
+                                   constraints._GreaterThan,
+                                   constraints._GreaterThanEq)):
             return value + 1
+        if isinstance(constraint, (constraints.less_than)):
+            return value - 1
         if isinstance(constraint, constraints._PositiveDefinite):
             return value + torch.eye(value.shape[-1])
         if value.dtype in [torch.float, torch.double]:
