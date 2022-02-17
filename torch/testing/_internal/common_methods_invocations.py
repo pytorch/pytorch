@@ -3669,6 +3669,12 @@ def sample_inputs_conv_transpose1d(op_info, device, dtype, requires_grad, **kwar
     )
 
     for input_shape, weight, bias, kwargs in cases:
+        # Unbatched
+        yield SampleInput(make_arg(input_shape[1:]), args=(
+            make_arg(weight),
+            make_arg(bias) if bias is not None else bias
+        ), kwargs=kwargs)
+        # Batched
         yield SampleInput(make_arg(input_shape), args=(
             make_arg(weight),
             make_arg(bias) if bias is not None else bias
@@ -3694,6 +3700,12 @@ def sample_inputs_conv_transpose2d(op_info, device, dtype, requires_grad, **kwar
     )
 
     for input_shape, weight, bias, kwargs in cases:
+        # Unbatched
+        yield SampleInput(make_arg(input_shape[1:]), args=(
+            make_arg(weight),
+            make_arg(bias) if bias is not None else bias
+        ), kwargs=kwargs)
+        # Batched
         yield SampleInput(make_arg(input_shape), args=(
             make_arg(weight),
             make_arg(bias) if bias is not None else bias
@@ -3718,6 +3730,12 @@ def sample_inputs_conv_transpose3d(op_info, device, dtype, requires_grad, **kwar
     )
 
     for input_shape, weight, bias, kwargs in cases:
+        # Unbatched
+        yield SampleInput(make_arg(input_shape[1:]), args=(
+            make_arg(weight),
+            make_arg(bias) if bias is not None else bias
+        ), kwargs=kwargs)
+        # Batched
         yield SampleInput(make_arg(input_shape), args=(
             make_arg(weight),
             make_arg(bias) if bias is not None else bias
@@ -3743,6 +3761,12 @@ def sample_inputs_conv1d(op_info, device, dtype, requires_grad, **kwargs):
     # in test/test_nn.py
 
     for input_shape, weight, bias, kwargs in cases:
+        # Unbatched
+        yield SampleInput(make_arg(input_shape[1:]), args=(
+            make_arg(weight),
+            make_arg(bias) if bias is not None else bias
+        ), kwargs=kwargs)
+        # Batched
         yield SampleInput(make_arg(input_shape), args=(
             make_arg(weight),
             make_arg(bias) if bias is not None else bias
@@ -3782,6 +3806,12 @@ def sample_inputs_conv2d(op_info, device, dtype, requires_grad, jit_fail_sample=
     )
 
     for input_shape, weight, bias, kwargs in cases:
+        # Unbatched
+        yield SampleInput(make_arg(input_shape[1:]), args=(
+            make_arg(weight),
+            make_arg(bias) if bias is not None else bias
+        ), kwargs=kwargs)
+        # Batched
         yield SampleInput(make_arg(input_shape), args=(
             make_arg(weight),
             make_arg(bias) if bias is not None else bias
