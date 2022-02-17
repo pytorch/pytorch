@@ -39,7 +39,6 @@ from .utils import (
     is_get_tensor_info_node,
     node_return_type_is_int,
     quantize_node,
-    get_new_attr_name_with_prefix,
     collect_producer_nodes,
     graph_module_from_producer_nodes,
     get_custom_module_class_keys,
