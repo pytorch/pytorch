@@ -57,9 +57,10 @@ class DefaultPackageZipFileWriter(zipfile.ZipFile, PackageZipFileWriter):
 
     def __init__(self, file_name):
         super().__init__(file_name, mode='w')
+        super().writestr("archive/.data/version", "6\n")
 
     def write_record(self, file_name, str_or_bytes, size=None):
-        super().writestr(file_name, str_or_bytes)
+        super().writestr(f"archive/{file_name}", str_or_bytes)
 
     def close(self):
         super().close()
@@ -73,13 +74,16 @@ class DefaultPackageZipFileReader(zipfile.ZipFile, PackageZipFileReader):
 
     def __init__(self, file_name):
         super().__init__(file_name, mode='r')
-        self.records = set(super().namelist())
+        prefixed_records = super().namelist()
+        self.records = set()
+        for record in prefixed_records:
+            self.records.add(record[8:])
 
     def get_record(self, name):
-        return super().read(name)
+        return super().read(f"archive/{name}")
 
     def has_record(self, path):
-        return path in self.records
+        return f"archive/{path}" in self.records
 
     def get_all_records(self):
         return list(self.records)
