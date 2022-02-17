@@ -864,8 +864,13 @@ Tensor grid_sampler_2d_cpu(const Tensor& input, const Tensor& grid,
     }
   }
 
-  return grid_sampler_2d_cpu_kernel(
-    kCPU, input, grid, interpolation_mode, padding_mode, align_corners);
+  auto in_size = input.sizes();
+  auto grid_size = grid.sizes();
+  auto output = at::empty(
+      {in_size[0], in_size[1], grid_size[1], grid_size[2]}, input.options());
+  grid_sampler_2d_cpu_kernel(
+      kCPU, output, input, grid, interpolation_mode, padding_mode, align_corners);
+  return output;
 }
 
 DEFINE_DISPATCH(grid_sampler_2d_cpu_kernel);
@@ -911,8 +916,15 @@ grid_sampler_2d_backward_cpu(const Tensor& grad_output, const Tensor& input, con
     }
   }
 
-  return grid_sampler_2d_backward_cpu_kernel(
-    kCPU, grad_output, input, grid, interpolation_mode, padding_mode, align_corners, output_mask);
+  Tensor grad_input;
+  if (output_mask[0]) {
+    grad_input = at::zeros_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+  }
+  auto grad_grid = at::empty_like(grid, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+  grid_sampler_2d_backward_cpu_kernel(
+      kCPU, grad_input, grad_grid, grad_output, input, grid,
+      interpolation_mode, padding_mode, align_corners, output_mask);
+  return std::make_tuple(std::move(grad_input), std::move(grad_grid));
 }
 
 DEFINE_DISPATCH(grid_sampler_2d_backward_cpu_kernel);
