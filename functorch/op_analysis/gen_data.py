@@ -153,11 +153,12 @@ def gen_data(special_op_lists, analysis_name):
             if op['name'] in annotated_ops:
                 categorization['core'] += 1
                 op['meta'] = 'core ' + annotated_ops[op['name']]
-            else:
-                categorization['core'] += 1
-                op['meta'] = 'core unknown'
+                continue
+            categorization['core'] += 1
+            op['meta'] = 'core unknown'
         return categorization
 
+    annotate_ops(ops, is_unique=False)
     with open(f"{analysis_name}", 'w') as f:
         for op in ops:
             info = [
@@ -178,9 +179,10 @@ def full_name_check(lst):
 gen_data([full_name_check(get_ops_for_key('FuncTorchBatched'))], 'vmap')
 
 
-if False:
+if True:
     with open('run_ops.txt', 'r') as f:
         opinfo_ops = [i.strip() for i in f.readlines()]
     with open('run_decompositions.txt', 'r') as f:
         decomposed_ops = [i.strip() for i in f.readlines()]
     gen_data([name_check(opinfo_ops), name_check(decomposed_ops)], 'decompositions')
+
