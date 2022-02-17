@@ -23,19 +23,30 @@ def cleanup():
     dist.destroy_process_group()
 
 
+def broadcast(device):
+    x = torch.zeros(20, 5).to(device)
+    if device.index == 0:
+        x = torch.randn(20, 5).to(device)
+    dist.broadcast(x, 0)
+    print(f"{os.getpid()} broadcast: {x.cpu()}")
+
+
+def all_reduce(device):
+    x = torch.full((20, 5), device.index + 1).to(device)
+    dist.all_reduce(x, op=dist.ReduceOp.SUM)
+    print(f"{os.getpid()} broadcast: {x.cpu()}")
+
+
 def demo_basic(rank, world_size):
     # without flushing, mp won't print this message if crash.
     print(f"Running basic DDP example on rank {rank}, and process id: {os.getpid()}", flush=True)
     setup(rank, world_size)
 
-    device = f"lazy:{rank}"
-    # device = f"cuda:{rank}"
+    device = torch.device("lazy", rank)
+    # device = torch.device("cuda", rank)
 
-    x = torch.zeros(20, 5).to(device)
-    if rank == 0:
-        x = torch.randn(20, 5).to(device)
-    dist.broadcast(x, 0)
-    print(f"{os.getpid()}: {x.cpu()}")
+    broadcast(device)
+    all_reduce(device)
 
     cleanup()
 
@@ -54,3 +65,4 @@ if __name__ == "__main__":
     assert n_gpus >= 2, f"Requires at least 2 GPUs to run, but got {n_gpus}"
     world_size = n_gpus
     run_demo(demo_basic, world_size)
+    # demo_basic(0, 1)
