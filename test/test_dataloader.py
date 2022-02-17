@@ -850,6 +850,14 @@ class CustomDict(dict):
     pass
 
 
+def row_processor(row):
+    return np.add(row, 1)
+
+
+def filter_len(row):
+    return len(row) == 4
+
+
 @unittest.skipIf(
     TEST_WITH_TSAN,
     "Fails with TSAN with the following error: starting new threads after multi-threaded "
@@ -1379,15 +1387,10 @@ except RuntimeError as e:
     def test_multiprocessing_iterdatapipe(self):
         # Testing to make sure that function from global scope (e.g. imported from library) can be serialized
         # and used with multiprocess DataLoader
-        def row_processer(row):
-            return np.add(row, 1)
-
-        def filter_len(row):
-            return len(row) == 4
 
         reference = [torch.as_tensor([[2, 3, 4, 5]]), torch.as_tensor([[2, 3, 4, 5]])]
         datapipe: IterDataPipe = IterableWrapper([[1, 2, 3, 4], [1, 2, 3, 4, 5, 6]])
-        datapipe = datapipe.map(row_processer)
+        datapipe = datapipe.map(row_processor)
         datapipe = datapipe.filter(lambda row: len(row) == 4) if HAS_DILL else datapipe.filter(filter_len)
 
         dl_common_args = dict(num_workers=2, batch_size=2, shuffle=True, pin_memory=(not TEST_CUDA))
