@@ -8702,14 +8702,14 @@ op_db: List[OpInfo] = [
            ),
            sample_inputs_func=sample_inputs_broadcast_tensors),
     OpInfo('broadcast_shapes',
-            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
-            supports_out=False,
-            supports_autograd=False,
-            skips=(
-                # JIT does not support variadic tensors.
-                DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit', dtypes=[torch.float32]),
-            ),
-            sample_inputs_func=sample_inputs_broadcast_shapes),
+           dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
+           supports_out=False,
+           supports_autograd=False,
+           skips=(
+               # JIT does not support variadic tensors.
+               DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit', dtypes=[torch.float32]),
+           ),
+           sample_inputs_func=sample_inputs_broadcast_shapes),
     OpInfo('block_diag',
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
            supports_out=False,
