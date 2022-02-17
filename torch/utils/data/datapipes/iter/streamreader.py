@@ -10,6 +10,7 @@ class StreamReaderIterDataPipe(IterDataPipe[Tuple[str, bytes]]):
         datapipe: Iterable DataPipe provides label/URL and byte stream
         chunk: Number of bytes to be read from stream per iteration.
             If ``None``, all bytes will be read util the EOF.
+
     Example:
         >>> from torchdata.datapipes.iter import IterableWrapper, StreamReader
         >>> from io import StringIO

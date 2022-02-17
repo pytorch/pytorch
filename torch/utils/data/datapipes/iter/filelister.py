@@ -21,7 +21,8 @@ class FileListerIterDataPipe(IterDataPipe[str]):
     Example:
         >>> from torchdata.datapipes.iter import FileLister
         >>> dp = FileLister(root=".", recursive=True)
-        >>> list(dp)  # ['example.py', './data/data.tar']
+        >>> list(dp)
+        ['example.py', './data/data.tar']
     """
 
     def __init__(

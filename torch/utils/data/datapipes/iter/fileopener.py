@@ -28,7 +28,8 @@ class FileOpenerIterDataPipe(IterDataPipe[Tuple[str, IOBase]]):
         >>> dp = FileLister(root=".").filter(lambda fname: fname.endswith('.txt'))
         >>> dp = FileOpener(dp)
         >>> dp = StreamReader(dp)
-        >>> list(dp)  # [('./abc.txt', 'abc')]
+        >>> list(dp)
+        [('./abc.txt', 'abc')]
     """
 
     def __init__(

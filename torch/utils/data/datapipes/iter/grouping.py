@@ -63,7 +63,8 @@ class BatcherIterDataPipe(IterDataPipe[DataChunk]):
         >>> from torchdata.datapipes.iter import IterableWrapper
         >>> dp = IterableWrapper(range(10))
         >>> dp = dp.batch(batch_size=3, drop_last=True)
-        >>> list(dp)  # [[0, 1, 2], [3, 4, 5], [6, 7, 8]]
+        >>> list(dp)
+        [[0, 1, 2], [3, 4, 5], [6, 7, 8]]
     """
     datapipe: IterDataPipe
     batch_size: int
@@ -122,9 +123,11 @@ class UnBatcherIterDataPipe(IterDataPipe):
         >>> from torchdata.datapipes.iter import IterableWrapper
         >>> source_dp = IterableWrapper([[[0, 1], [2]], [[3, 4], [5]], [[6]]])
         >>> dp1 = source_dp.unbatch()
-        >>> list(dp1)  # [[0, 1], [2], [3, 4], [5], [6]]
+        >>> list(dp1)
+        [[0, 1], [2], [3, 4], [5], [6]]
         >>> dp2 = source_dp.unbatch(unbatch_level=2)
-        >>> list(dp2)  # [0, 1, 2, 3, 4, 5, 6]
+        >>> list(dp2)
+        [0, 1, 2, 3, 4, 5, 6]
     """
 
     def __init__(self,
@@ -189,13 +192,16 @@ class GrouperIterDataPipe(IterDataPipe[DataChunk]):
         ...    return os.path.basename(file).split(".")[0]
         >>> source_dp = IterableWrapper(["a.png", "b.png", "a.json", "b.json", "a.jpg", "c.json"])
         >>> dp0 = source_dp.groupby(group_key_fn=group_fn)
-        >>> list(dp0)  # [['a.png', 'a.json', 'a.jpg'], ['b.png', 'b.json'], ['c.json']]
+        >>> list(dp0)
+        [['a.png', 'a.json', 'a.jpg'], ['b.png', 'b.json'], ['c.json']]
         >>> # A group is yielded as soon as its size equals to `group_size`
         >>> dp1 = source_dp.groupby(group_key_fn=group_fn, group_size=2)
-        >>> list(dp1)  # [['a.png', 'a.json'], ['b.png', 'b.json'], ['a.jpg'], ['c.json']]
+        >>> list(dp1)
+        [['a.png', 'a.json'], ['b.png', 'b.json'], ['a.jpg'], ['c.json']]
         >>> # Scenario where `buffer` is full, and group 'a' needs to be yielded since its size > `guaranteed_group_size`
         >>> dp2 = source_dp.groupby(group_key_fn=group_fn, buffer_size=3, group_size=3, guaranteed_group_size=2)
-        >>> list(dp2)  # [['a.png', 'a.json'], ['b.png', 'b.json'], ['a.jpg'], ['c.json']]
+        >>> list(dp2)
+        [['a.png', 'a.json'], ['b.png', 'b.json'], ['a.jpg'], ['c.json']]
     """
     def __init__(self,
                  datapipe: IterDataPipe[T_co],

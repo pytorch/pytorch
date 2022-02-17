@@ -40,11 +40,13 @@ class MapperIterDataPipe(IterDataPipe[T_co]):
         ...     return x + 1
         >>> dp = IterableWrapper(range(10))
         >>> map_dp_1 = dp.map(add_one)  # Invocation via functional form is preferred
-        >>> list(map_dp_1)  # [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+        >>> list(map_dp_1)
+        [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
         >>> # We discourage the usage of `lambda` functions as they are not serializable with `pickle`
         >>> # Use `functools.partial` or explicitly define the function instead
         >>> map_dp_2 = Mapper(dp, lambda x: x + 1)
-        >>> list(map_dp_2)  # [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+        >>> list(map_dp_2)
+        [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
     """
     datapipe: IterDataPipe
     fn: Callable
