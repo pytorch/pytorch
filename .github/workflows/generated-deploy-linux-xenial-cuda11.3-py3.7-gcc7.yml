@@ -8,7 +8,7 @@ on:
   push:
     tags:
       - 'ciflow/all/*'
-      - 'ciflow/cpu/*'
+      - 'ciflow/cuda/*'
       - 'ciflow/linux/*'
       - 'ciflow/trunk/*'
     branches:
@@ -253,7 +253,7 @@ jobs:
     runs-on: ubuntu-18.04
     timeout-minutes: 240
     env:
-      TEST_RUNNER_TYPE: linux.2xlarge
+      TEST_RUNNER_TYPE: linux.4xlarge.nvidia.gpu
       ENABLE_DISTRIBUTED_TEST: ''
       ENABLE_JIT_LEGACY_TEST: ''
       ENABLE_FX2TRT_TEST: ''
