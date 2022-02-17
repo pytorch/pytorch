@@ -51,14 +51,16 @@ def is_match(modules, node, pattern, max_uses=sys.maxsize):
         return False
 
     if isinstance(self_match, type) and issubclass(self_match, torch.nn.Module):
+        if not isinstance(node, Node):
+            return False
         if node.op != 'call_module':
             return False
         if not type(modules[node.target]) == self_match:
             return False
     elif callable(self_match):
-        if node.op != 'call_function' or node.target is not self_match:
+        if isinstance(node, Node) and (node.op != 'call_function' or node.target is not self_match):
             return False
-        elif node.target is getattr:
+        elif isinstance(node, Node) and node.target is getattr:
             if node.args[1] != pattern[1]:
                 return False
     elif isinstance(self_match, str):

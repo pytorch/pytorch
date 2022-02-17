@@ -1480,14 +1480,9 @@ class TestQuantizeFx(QuantizationTestCase):
             ns.call_module(nn.Linear),
             ns.call_function(torch.quantize_per_tensor),
             ns.call_module(nnq.Linear),
-            # the following pattern is produced, but it's fused into
-            # torch.ops.quantized.add, Note this is not intended
-            # behavior, we plan to hornor qconfig=None settings
-            # TODO: fix this in a separate PR in lowering step
-            # ns.call_method("dequantize"),
-            # ns.call_function(torch.add),
-            # ns.call_function(torch.quantize_per_tensor),
-            ns.call_function(torch.ops.quantized.add),
+            ns.call_method("dequantize"),
+            ns.call_function(torch.add),
+            ns.call_function(torch.quantize_per_tensor),
             ns.call_function(torch.ops.quantized.add),
             # m1
             ns.call_module(nnq.Linear),
@@ -4071,7 +4066,7 @@ class TestQuantizeFxOps(QuantizationTestCase):
             model = BinaryOpRelu(
                 binary_op, ibinary_op, is_inplace_op, relu_callable, is_scalar)
             self.checkGraphModeFxOp(
-                model, data, quant_type, quantized_node, print_debug_info=True)
+                model, data, quant_type, quantized_node)
 
     def _test_binary_op_relu_float16_impl(self, binary_op, ibinary_op):
         data = (torch.rand((1, 1, 1, 1), dtype=torch.float),
@@ -4178,6 +4173,39 @@ class TestQuantizeFxOps(QuantizationTestCase):
             operator.add, operator.iadd, torch.ops.quantized.add_relu)
         self._test_binary_op_relu_float16_impl(
             operator.add, operator.iadd)
+
+    @skipIfNoFBGEMM
+    def test_add_relu_multiple_uses_of_relu(self):
+        class Sub(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.relu = torch.nn.ReLU(inplace=True)
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.sub = Sub()
+
+            def forward(self, x, y):
+                x = x + y
+                x = self.sub.relu(x)
+                x = x + y
+                x = self.sub.relu(x)
+                return x
+
+        m = M().eval()
+        m = prepare_fx(m, {"": default_qconfig})
+        m = convert_fx(m)
+        node_occurrence = {
+            ns.call_function(torch.quantize_per_tensor): 2,
+            ns.call_function(torch.ops.quantized.add_relu): 2,
+            ns.call_method("dequantize"): 1,
+        }
+        self.checkGraphModuleNodes(m, expected_node_occurrence=node_occurrence)
+        # check the model is scriptable
+        m = torch.jit.script(m)
+        # check the model is runnable
+        m(torch.randn(3), torch.randn(3))
 
     @skipIfNoFBGEMM
     def test_mul_relu(self):
@@ -5639,7 +5667,7 @@ class TestQuantizeFxOps(QuantizationTestCase):
                 return z
 
         m = M().eval()
-        qconfig_dict = {"": torch.quantization.default_qconfig}
+        qconfig_dict = {"": torch.ao.quantization.default_qconfig}
         mp = prepare_fx(m, qconfig_dict)
         mp(torch.randn(2, 2), torch.randn(2, 2))
         mq = convert_fx(mp)

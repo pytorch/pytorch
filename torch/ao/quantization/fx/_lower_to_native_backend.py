@@ -12,6 +12,7 @@ from .match_utils import is_match
 from .match_utils import MatchAllNode
 from .quantization_types import Pattern
 from ..utils import _parent_name, check_node
+from ..qconfig import QConfigAny
 from .utils import create_node_from_old_node_preserve_meta
 from typing import Dict, Tuple, Type, List, Callable
 from torch.fx import Node
@@ -136,7 +137,9 @@ def _lower_weighted_ref_module(model: QuantizedGraphModule) -> QuantizedGraphMod
         model.recompile()
     return model
 
-def _lower_quantized_binary_op(model: QuantizedGraphModule) -> QuantizedGraphModule:
+def _lower_quantized_binary_op(
+    model: QuantizedGraphModule,
+    qconfig_map: Dict[str, QConfigAny]) -> QuantizedGraphModule:
     modules = dict(model.named_modules(remove_duplicate=False))
     def get_bop_patterns(bop: Callable) -> Pattern:
         return [
@@ -164,9 +167,16 @@ def _lower_quantized_binary_op(model: QuantizedGraphModule) -> QuantizedGraphMod
         ]
 
     patterns = []
-    for bop in [operator.add, torch.add]:
+    for bop in [operator.add, torch.add, operator.mul, torch.mul]:
         patterns.extend(get_bop_relu_patterns(bop))
         patterns.extend(get_bop_patterns(bop))
+    patterns.extend(
+        [
+            (torch.quantize_per_tensor,
+             (torch.matmul, "dequantize", "dequantize"),
+             MatchAllNode, MatchAllNode, MatchAllNode)
+        ]
+    )
 
     qbin_op_mapping: Dict[Union[Callable, str], Callable] = {
         operator.add: torch.ops.quantized.add,
@@ -181,11 +191,10 @@ def _lower_quantized_binary_op(model: QuantizedGraphModule) -> QuantizedGraphMod
         operator.mul: torch.ops.quantized.mul_relu,
         torch.mul: torch.ops.quantized.mul_relu,
     }
-    for n in model.graph.nodes:
-        for pattern in patterns:
+    for pattern in patterns:
+        for n in model.graph.nodes:
             if not is_match(modules, n, pattern):
                 continue
-            print("matched:", pattern)
             q_node = n
             is_quantize = q_node.target == torch.quantize_per_tensor
             is_to_fp16 = q_node.op == "call_method" and q_node.target == "to" and q_node.args[1] == torch.float16
@@ -205,12 +214,19 @@ def _lower_quantized_binary_op(model: QuantizedGraphModule) -> QuantizedGraphMod
                     isinstance(modules[str(node.target)], torch.nn.ReLU)
             ):
                 relu_node = node
+                node = node.args[0]
 
             # binary operator node, e.g. torch.add(x, y)
-            bop_node = node.args[0]
+            bop_node = node
             if bop_node.op != "call_function" or \
-               bop_node.target not in set([torch.add, operator.add, torch.mul, operator.mul]):
-                print("bop node:", bop_node)
+               bop_node.target not in set([torch.add, operator.add, torch.mul, operator.mul, torch.matmul]):
+                continue
+
+            # skip lowering for ops that is configured with None qconfig
+            # Note: maybe need to generalize this to also check for the dtype, and we
+            # only lower when dtype matches, but right now fbgemm/qnnpack only support
+            # a single dtype, so it is OK for now
+            if bop_node.name in qconfig_map and qconfig_map[bop_node.name] is None:
                 continue
 
             # remove dequant node
@@ -339,7 +355,10 @@ def special_pattern_replacement(model: QuantizedGraphModule) -> QuantizedGraphMo
     model.recompile()
     return model
 
-def _lower_to_native_backend(model: QuantizedGraphModule) -> QuantizedGraphModule:
+def _lower_to_native_backend(
+    model: QuantizedGraphModule,
+    qconfig_map: Dict[str, QConfigAny]
+) -> QuantizedGraphModule:
     """ Lower a quantized reference model (with reference quantized operator patterns)
     to the native backend in PyTorch (fbgemm/qnnpack), both backends shares the same
     operator signature so they can be lowered with the same function
@@ -347,7 +366,7 @@ def _lower_to_native_backend(model: QuantizedGraphModule) -> QuantizedGraphModul
     model = _lower_weighted_ref_module(model)
     for pattern, replacement in get_fbgemm_patterns_and_replacements():
         subgraph_rewriter_FORKED_DO_NOT_USE.replace_pattern(model, pattern, replacement)
-    _lower_quantized_binary_op(model)
+    _lower_quantized_binary_op(model, qconfig_map)
     special_pattern_replacement(model)
     model.graph.lint()
     return model
