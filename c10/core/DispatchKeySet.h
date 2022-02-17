@@ -160,7 +160,7 @@ class DispatchKeySet final {
   constexpr DispatchKeySet() : repr_(0) {}
 
   constexpr DispatchKeySet(Full)
-      : repr_((1ULL << (static_cast<uint8_t>(BackendComponent::EndOfBackendKeys) + num_functionality_keys - 1)) - 1) {}
+      : repr_((1ULL << (num_backends + num_functionality_keys - 1)) - 1) {}
 
   constexpr DispatchKeySet(FullAfter, DispatchKey t)
       // LSB after t are OK, but not t itself.
@@ -170,7 +170,7 @@ class DispatchKeySet final {
       // "functionality" keys.
       : repr_(
             (1ULL
-             << (static_cast<uint8_t>(BackendComponent::EndOfBackendKeys) + static_cast<uint8_t>(toFunctionalityKey(t)) -
+             << (num_backends + static_cast<uint8_t>(toFunctionalityKey(t)) -
                  1)) -
             1) {}
 
@@ -419,11 +419,45 @@ class DispatchKeySet final {
     return 64 - llvm::countLeadingZeros(repr_);
   }
 
+// [Note: Trimmed Mobile Dispatch Keys]
+/**
+ * The method below maps the dispatch key in the enum DispatchKey to an
+ * integer index in the dispatchTable_ array in OperatorEntry. The array
+ * is trimmed for mobile to reduce peak memory usage since it's
+ * unnecessary to reserve additional space for dispatch keys that will
+ * never be used on mobile.
+ */
+  int getDispatchTableIndexForDispatchKeySet() const {
+    auto dk = highestPriorityTypeId();
+    switch (dk) {
+      case DispatchKey::Undefined:
+        return 0;
+      case DispatchKey::CPU:
+        return 1;
+      case DispatchKey::QuantizedCPU:
+        return 2;
+      case DispatchKey::SparseCPU:
+        return 3;
+      case DispatchKey::BackendSelect:
+        return 4;
+      case DispatchKey::ADInplaceOrView:
+        return 5;
+      case DispatchKey::AutogradOther:
+        return 6;
+      case DispatchKey::AutogradCPU:
+        return 7;
+      case DispatchKey::NumDispatchKeys: // Sentinel, end of runtime keys.
+        return 8;
+      default:
+        return -1;
+    }
+  }
+#else
   // returns the index in the operator table of highest priority key in the the
   // keyset Note that we could in theory implement this using
   // highestPriorityTypeId(), but this code is very hotpath and we can do it
   // faster without it.
-  uint64_t getDispatchTableIndexForDispatchKeySet() const {
+  int getDispatchTableIndexForDispatchKeySet() const {
     auto functionality_idx =
         DispatchKeySet(repr_ >> num_backends).indexOfHighestBit();
     auto offset_and_mask = offsetsAndMasks()[functionality_idx];
@@ -435,6 +469,8 @@ class DispatchKeySet final {
         DispatchKeySet((repr_ & offset_and_mask.mask) >> 1).indexOfHighestBit();
     return offset_and_mask.offset + backend_idx;
   }
+#endif
+
 
   // returns the "index" of the highest priority backend in the keyset.
   // This is pretty similar to getBackendKey(), but:
@@ -565,7 +601,7 @@ class DispatchKeySet final {
 C10_API std::string toString(DispatchKeySet);
 C10_API std::ostream& operator<<(std::ostream&, DispatchKeySet);
 
-C10_API inline uint64_t getDispatchTableIndexForDispatchKey(DispatchKey k) {
+C10_API inline int getDispatchTableIndexForDispatchKey(DispatchKey k) {
   return DispatchKeySet(k).getDispatchTableIndexForDispatchKeySet();
 }
 
