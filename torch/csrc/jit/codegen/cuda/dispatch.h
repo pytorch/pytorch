@@ -64,6 +64,7 @@ class TensorView;
 class Bool;
 class Double;
 class Int;
+class ComplexDouble;
 class NamedScalar;
 
 // Exprs
@@ -120,6 +121,7 @@ class TORCH_CUDA_CU_API OptOutConstDispatch : public PolymorphicBase {
   virtual void handle(const Bool* stmt);
   virtual void handle(const Double* stmt);
   virtual void handle(const Int* stmt);
+  virtual void handle(const ComplexDouble* stmt);
   virtual void handle(const NamedScalar* stmt);
 
   virtual void handle(const kir::Predicate*);
@@ -165,6 +167,7 @@ class TORCH_CUDA_CU_API OptOutDispatch : public PolymorphicBase {
   virtual void handle(Bool* stmt);
   virtual void handle(Double* stmt);
   virtual void handle(Int* stmt);
+  virtual void handle(ComplexDouble* stmt);
   virtual void handle(NamedScalar* stmt);
   virtual void handle(IterDomain* stmt);
   virtual void handle(TensorDomain* stmt);
@@ -254,6 +257,7 @@ class TORCH_CUDA_CU_API OptOutMutator : public PolymorphicBase {
   virtual void mutate(Bool*);
   virtual void mutate(Double*);
   virtual void mutate(Int*);
+  virtual void mutate(ComplexDouble*);
   virtual void mutate(NamedScalar*);
   virtual void mutate(IterDomain*);
   virtual void mutate(TensorDomain*);

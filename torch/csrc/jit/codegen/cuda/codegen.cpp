@@ -297,6 +297,20 @@ class CudaKernelGenerator : private OptOutConstDispatch {
     }
   }
 
+  void handle(const ComplexDouble* c) final {
+    const auto def = c->definition();
+    const bool has_alloc = alloc_map_.find(c) != alloc_map_.end();
+    if (def != nullptr && !has_alloc) {
+      code_ << "(" << gen(def) << ")";
+    } else if (c->isConst()) {
+      const int digits = std::numeric_limits<double>::max_digits10;
+      code_ << "std::complex<double>" << std::setprecision(digits)
+            << *c->value();
+    } else {
+      code_ << varName(c);
+    }
+  }
+
   void handle(const NamedScalar* ns) final {
     // dim3 components are unsigned int. Cast to signed integer to
     // support negative indexing

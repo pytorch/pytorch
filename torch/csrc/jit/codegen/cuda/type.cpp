@@ -98,22 +98,8 @@ DataType promote_type(const DataType& t1, const DataType& t2) {
       t1,
       " and ",
       t2);
-  // FIXME: type promotion is not as simple as (t1 < t2 ? t1 : t2)
-  // hint:
-  // half + bfloat = float
-  // double + complex float = complex double
-  bool is_unsupported =
-      (DataType::BFloat16 == t1 || DataType::BFloat16 == t2 ||
-       DataType::ComplexFloat == t1 || DataType::ComplexFloat == t2 ||
-       DataType::ComplexDouble == t1 || DataType::ComplexDouble == t2);
-  TORCH_CHECK(
-      !is_unsupported,
-      "type promotion for ",
-      t1,
-      " and ",
-      t2,
-      " are not implemented yet");
-  return t1 < t2 ? t1 : t2;
+  return aten_to_data_type(
+      c10::promoteTypes(data_type_to_aten(t1), data_type_to_aten(t2)));
 }
 
 // Return highest on list (smallest enum val)
@@ -628,6 +614,22 @@ static const char* supported_casts2string(
     case supported_switch_pair(DataType::Int32, DataType::Bool):
     case supported_switch_pair(DataType::Int, DataType::Bool):
       return "(bool)";
+    case supported_switch_pair(DataType::Index, DataType::ComplexDouble):
+    case supported_switch_pair(DataType::Int, DataType::ComplexDouble):
+    case supported_switch_pair(DataType::Int32, DataType::ComplexDouble):
+    case supported_switch_pair(DataType::Double, DataType::ComplexDouble):
+    case supported_switch_pair(DataType::Float, DataType::ComplexDouble):
+    case supported_switch_pair(DataType::Bool, DataType::ComplexDouble):
+    case supported_switch_pair(DataType::ComplexFloat, DataType::ComplexDouble):
+      return "(std::complex<double>)";
+    case supported_switch_pair(DataType::Index, DataType::ComplexFloat):
+    case supported_switch_pair(DataType::Int, DataType::ComplexFloat):
+    case supported_switch_pair(DataType::Int32, DataType::ComplexFloat):
+    case supported_switch_pair(DataType::Double, DataType::ComplexFloat):
+    case supported_switch_pair(DataType::Float, DataType::ComplexFloat):
+    case supported_switch_pair(DataType::Bool, DataType::ComplexFloat):
+    case supported_switch_pair(DataType::ComplexDouble, DataType::ComplexFloat):
+      return "(std::complex<float>)";
     case supported_switch_pair(DataType::Float, DataType::Half):
       return "__float2half";
     case supported_switch_pair(DataType::Float, DataType::BFloat16):
@@ -777,6 +779,9 @@ std::string typePrefix(const DataType data_type) {
     case DataType::Int:
     case DataType::Int32:
       return "i";
+    case DataType::ComplexFloat:
+    case DataType::ComplexDouble:
+      return "c";
     default:
       TORCH_INTERNAL_ASSERT(false, "No data type found for scalar type.");
   }

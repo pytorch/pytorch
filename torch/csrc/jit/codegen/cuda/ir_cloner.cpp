@@ -76,6 +76,10 @@ void IrCloner::handle(const Int* i) {
   clone_ = IrBuilder::clone(i, this);
 }
 
+void IrCloner::handle(const ComplexDouble* c) {
+  clone_ = IrBuilder::clone(c, this);
+}
+
 void IrCloner::handle(const NamedScalar* named_scalar) {
   clone_ = IrBuilder::clone(named_scalar, this);
 }

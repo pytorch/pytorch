@@ -79,6 +79,7 @@ class TORCH_CUDA_CU_API IrPrinter : public OptInConstDispatch {
   void handle(const Bool*) final;
   void handle(const Double*) final;
   void handle(const Int*) final;
+  void handle(const ComplexDouble*) final;
   void handle(const NamedScalar*) final;
 
   void handle(const UnaryOp*) final;

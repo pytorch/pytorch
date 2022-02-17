@@ -802,15 +802,35 @@ TEST_F(NVFuserTest, FusionSimpleArith_CUDA) {
       "Error where explicit add nodes don't match implicit add nodes.");
 }
 
-TEST_F(NVFuserTest, FusionSimpleTypePromote_CUDA) {
+TEST_F(NVFuserTest, FusionScalarTypePromote_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
-  Double* d4 = IrBuilder::create<Double>(4.f);
-  Int* i1 = IrBuilder::create<Int>(3);
-  auto d5 = add(d4, i1);
+  Bool* b = IrBuilder::create<Bool>(true);
+  Double* d = IrBuilder::create<Double>(4.f);
+  Int* i = IrBuilder::create<Int>(3);
+  ComplexDouble* c =
+      IrBuilder::create<ComplexDouble>(c10::complex<double>(1, 2));
 
-  TORCH_CHECK(d5->getDataType() == DataType::Double);
+  TORCH_CHECK(add(b, b)->getDataType() == DataType::Bool);
+  TORCH_CHECK(add(b, d)->getDataType() == DataType::Double);
+  TORCH_CHECK(add(b, i)->getDataType() == DataType::Int);
+  TORCH_CHECK(add(b, c)->getDataType() == DataType::ComplexDouble);
+
+  TORCH_CHECK(add(d, b)->getDataType() == DataType::Double);
+  TORCH_CHECK(add(d, d)->getDataType() == DataType::Double);
+  TORCH_CHECK(add(d, i)->getDataType() == DataType::Double);
+  TORCH_CHECK(add(d, c)->getDataType() == DataType::ComplexDouble);
+
+  TORCH_CHECK(add(i, b)->getDataType() == DataType::Int);
+  TORCH_CHECK(add(i, d)->getDataType() == DataType::Double);
+  TORCH_CHECK(add(i, i)->getDataType() == DataType::Int);
+  TORCH_CHECK(add(i, c)->getDataType() == DataType::ComplexDouble);
+
+  TORCH_CHECK(add(c, b)->getDataType() == DataType::ComplexDouble);
+  TORCH_CHECK(add(c, d)->getDataType() == DataType::ComplexDouble);
+  TORCH_CHECK(add(c, i)->getDataType() == DataType::ComplexDouble);
+  TORCH_CHECK(add(c, c)->getDataType() == DataType::ComplexDouble);
 }
 
 TEST_F(NVFuserTest, FusionRegister_CUDA) {
@@ -1516,15 +1536,8 @@ TEST_F(NVFuserTest, FusionSimplePWiseDtypeComplex_CUDA) {
 
   // Do math with it, it returns a `Val*` but can be static_casted back to
   // TensorView
-  //
-  // TODO: define ComplexDouble enable the following
-  // c10::complex<double> scalar(2.0, 3.0);
-  // TensorView* tv2 = add(tv1, IrBuilder::create<ComplexDouble>(scalar));
-  //
-  // Related files:
-  // in torch/csrc/jit/codegen/cuda/dispatch.h
-  // and torch/csrc/jit/codegen/cuda/ir_interface_nodes.h
-  TensorView* tv2 = add(tv0, tv1); // TODO: replace this
+  c10::complex<double> scalar1(2.0, 3.0);
+  TensorView* tv2 = add(tv1, IrBuilder::create<ComplexDouble>(scalar1));
   TensorView* tv3 = add(tv0, tv2);
 
   // Register your outputs
@@ -1560,9 +1573,7 @@ TEST_F(NVFuserTest, FusionSimplePWiseDtypeComplex_CUDA) {
   fe.compileFusion(&fusion, {input1, input2});
   fe.runFusion({input1, input2}, {output});
 
-  // TODO: use the following
-  // at::Tensor tv2_ref = input2 + scalar;
-  at::Tensor tv2_ref = input2 + input1; // TODO: replace this
+  at::Tensor tv2_ref = input2 + scalar1;
   at::Tensor output_ref = input1 + tv2_ref;
 
   TORCH_CHECK(output_ref.equal(output));

@@ -53,9 +53,9 @@ class TORCH_CUDA_CU_API Bool : public Val {
   const c10::optional<bool> maybe_value_;
 };
 
-//! A Float64 value. For now we don't have any other type besides
-//! Float64. This value can be a symbolic value (defined after the kernel
-//! is compiled) or a constant value (inlined into the kernel definition).
+//! A Float64 value. This value can be a symbolic value (defined after the
+//! kernel is compiled) or a constant value (inlined into the kernel
+//! definition).
 class TORCH_CUDA_CU_API Double : public Val {
  public:
   using ScalarType = double;
@@ -97,6 +97,39 @@ class TORCH_CUDA_CU_API Int : public Val {
   explicit Int(IrBuilderPasskey passkey, c10::optional<ScalarType> value);
 
   Int(const Int* src, IrCloner* ir_cloner);
+
+  bool isSymbolic() const {
+    return !(maybe_value_.has_value());
+  }
+  bool isConst() const final {
+    return maybe_value_.has_value();
+  }
+  c10::optional<ScalarType> value() const {
+    return maybe_value_;
+  }
+
+  bool sameAs(const Statement* other) const override;
+
+ private:
+  const c10::optional<ScalarType> maybe_value_;
+};
+
+//! An c10::complex<double> value. This value can be a symbolic value (defined
+//! after the kernel is compiled) or a constant value (inlined into the kernel
+//! definition).
+class TORCH_CUDA_CU_API ComplexDouble : public Val {
+ public:
+  using ScalarType = c10::complex<double>;
+
+  ComplexDouble(IrBuilderPasskey passkey);
+
+  explicit ComplexDouble(IrBuilderPasskey passkey, ScalarType value);
+
+  explicit ComplexDouble(
+      IrBuilderPasskey passkey,
+      c10::optional<ScalarType> value);
+
+  ComplexDouble(const ComplexDouble* src, IrCloner* ir_cloner);
 
   bool isSymbolic() const {
     return !(maybe_value_.has_value());

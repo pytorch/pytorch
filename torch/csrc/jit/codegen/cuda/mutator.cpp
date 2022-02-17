@@ -51,6 +51,8 @@ void OptOutMutator::mutate(Double* d) {}
 
 void OptOutMutator::mutate(Int* i) {}
 
+void OptOutMutator::mutate(ComplexDouble* c) {}
+
 void OptOutMutator::mutate(NamedScalar* ns) {}
 
 void OptOutMutator::mutate(IterDomain* id) {

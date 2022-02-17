@@ -54,6 +54,9 @@ void Val::dispatch(T handler, Val* val) {
         case DataType::Int:
           ptr(handler)->handle(val->as<Int>());
           return;
+        case DataType::ComplexDouble:
+          ptr(handler)->handle(val->as<ComplexDouble>());
+          return;
         default:
           break;
       }
@@ -179,6 +182,9 @@ void Val::constDispatch(T handler, const Val* val) {
           return;
         case DataType::Int:
           ptr(handler)->handle(val->as<Int>());
+          return;
+        case DataType::ComplexDouble:
+          ptr(handler)->handle(val->as<ComplexDouble>());
           return;
         default:
           break;
@@ -316,6 +322,9 @@ void Val::mutatorDispatch(T mutator, Val* val) {
           return;
         case DataType::Int:
           ptr(mutator)->mutate(val->as<Int>());
+          return;
+        case DataType::ComplexDouble:
+          ptr(mutator)->mutate(val->as<ComplexDouble>());
           return;
         default:
           break;
@@ -530,6 +539,9 @@ void OptOutConstDispatch::handle(const Double* stmt) {
 void OptOutConstDispatch::handle(const Int* stmt) {
   unhandled(stmt);
 }
+void OptOutConstDispatch::handle(const ComplexDouble* stmt) {
+  unhandled(stmt);
+}
 void OptOutConstDispatch::handle(const NamedScalar* stmt) {
   unhandled(stmt);
 }
@@ -627,6 +639,9 @@ void OptOutDispatch::handle(Double* stmt) {
   unhandled(stmt);
 }
 void OptOutDispatch::handle(Int* stmt) {
+  unhandled(stmt);
+}
+void OptOutDispatch::handle(ComplexDouble* stmt) {
   unhandled(stmt);
 }
 void OptOutDispatch::handle(NamedScalar* stmt) {
