@@ -148,98 +148,7 @@ def kl_divergence(p, q):
     .. math::
 
         KL(p \| q) = \int p(x) \log\frac {p(x)} {q(x)} \,dx
-
-    Built-in KL(p || q) implementations:
-                                       p || q
-    ====================================================================================
-                               Bernoulli || Bernoulli
-                                            + Poisson
-                                    Beta || Beta
-                                            + ContinuousBernoulli
-                                            + Exponential
-                                            + Gamma
-                                            + Normal
-                                            + Pareto
-                                            + Uniform
-                                Binomial || Binomial
-                             Categorical || Categorical
-                                  Cauchy || Cauchy
-                     ContinuousBernoulli || ContinuousBernoulli
-                                            + Exponential
-                                            + Normal
-                                            + Pareto
-                                            + Uniform
-                               Dirichlet || Dirichlet
-                             Exponential || Exponential
-                                            + Beta
-                                            + ContinuousBernoulli
-                                            + Gamma
-                                            + Gumbel
-                                            + Normal
-                                            + Pareto
-                                            + Uniform
-                       ExponentialFamily || ExponentialFamily
-                                   Gamma || Gamma
-                                            + Beta
-                                            + ContinuousBernoulli
-                                            + Expoential
-                                            + Gumbel
-                                            + Normal
-                                            + Pareto
-                                            + Uniform
-                                  Gumbel || Gumbel
-                                            + Beta
-                                            + ContinuousBernoulli
-                                            + Exponential
-                                            + Gamma
-                                            + Normal
-                                            + Pareto
-                                            + Uniform
-                               Geometric || Geometric
-                              HalfNormal || HalfNormal
-                             Independent || Independent
-                                 Laplace || Laplace
-                                            + Beta
-                                            + ContinuousBernoulli
-                                            + Gamma
-                                            + Normal
-                                            + Pareto
-                                            + Uniform
-               LowRankMultivariateNormal || LowRankMultivariateNormal
-                    + MulrivariateNormal
-                      MultivariateNormal || MultivariateNormal
-                                            + LowRankMultivariateNormal
-                                  Normal || Normal
-                                            + Beta
-                                            + ContinuousBernoulli
-                                            + Exponential
-                                            + Gamma
-                                            + Gumbel
-                                            + Laplace
-                                            + Pareto
-                                            + Uniform
-                       OneHotCategorical || OneHotCategorical
-                                  Pareto || Pareto
-                                            + Beta
-                                            + ContinuousBernoulli
-                                            + Exponential
-                                            + Normal
-                                            + Gamma
-                                            + Uniform
-                                 Poisson || Poisson
-                                           + Bernoulli
-                                           + Beta
-                                           + Binomial
-                 TransformedDistribution || TransformedDistribution
-                                 Uniform || Uniform
-                                            + Beta
-                                            + ContinuousBernoulli
-                                            + Exponential
-                                            + Gamma
-                                            + Gumbel
-                                            + Normal
-                                            + Pareto
-
+    
     Args:
         p (Distribution): A :class:`~torch.distributions.Distribution` object.
         q (Distribution): A :class:`~torch.distributions.Distribution` object.
@@ -904,3 +813,13 @@ def _kl_cauchy_cauchy(p, q):
     t1 = ((p.scale + q.scale).pow(2) + (p.loc - q.loc).pow(2)).log()
     t2 = (4 * p.scale * q.scale).log()
     return t1 - t2
+
+def add_kl_info(distributions_module):
+    """Returns a str of implemented KL functions, to append to the doc for kl_divergence."""
+    rows = ["KL divergence is currently implemented for the following distribution pairs:"]
+    for p, q in sorted(_KL_REGISTRY,
+                     key=lambda p_q: (p_q[0].__name__, p_q[1].__name__)):
+        rows.append("* :class:`~torch.distributions.{}` and :class:`~torch.distributions.{}`"
+                    .format(p.__name__, q.__name__))
+    kl_info = '\n\t'.join(rows)
+    kl_divergence.__doc__ += kl_info
