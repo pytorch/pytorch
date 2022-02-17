@@ -1840,7 +1840,6 @@ void TensorExprKernel::runWithAllocatedOutputs(Stack& stack) {
     getStaticOutputSizesAndStrides(
         stack_inputs, &static_sizes, &static_strides);
 
-
     // add stride args
     for (auto idx : c10::irange(input_stride_args_.size())) {
       const auto& input_stride_arg = input_stride_args_[idx];
