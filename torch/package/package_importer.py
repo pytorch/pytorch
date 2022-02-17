@@ -10,10 +10,6 @@ from pathlib import Path
 from typing import cast, Any, BinaryIO, Callable, Dict, List, Optional, Union, Type
 from weakref import WeakValueDictionary
 
-import torch
-from torch.serialization import _get_restore_location, _maybe_decode_ascii
-from ._directory_reader_torchscript import TorchScriptDirectoryReader
-
 from ._directory_reader import DirectoryReader
 from ._importlib import (
     _calc___package__,
@@ -27,8 +23,19 @@ from ._package_unpickler import PackageUnpickler
 from .file_structure_representation import Directory, _create_directory_from_file_list
 from .glob_group import GlobPattern
 from .importer import Importer
-from ._zip_file import PackageZipFileReader
-from ._zip_file_torchscript import TorchScriptPackageZipFileReader
+from ._zip_file import PackageZipFileReader, DefaultPackageZipFileReader
+
+
+def import_torch():
+    global torch
+    global _get_restore_location
+    global _maybe_decode_ascii
+    global TorchScriptDirectoryReader
+    global TorchScriptPackageZipFileReader
+    import torch
+    from ._directory_reader_torchscript import TorchScriptDirectoryReader
+    from ._zip_file_torchscript import TorchScriptPackageZipFileReader
+    from torch.serialization import _get_restore_location, _maybe_decode_ascii
 
 class PackageImporter(Importer):
     """Importers allow you to load code written to packages by :class:`PackageExporter`.
@@ -48,12 +55,11 @@ class PackageImporter(Importer):
     local to this importer.
     """
     modules: Dict[str, types.ModuleType]
-
     def __init__(
         self,
-        file_or_buffer: Union[str, torch._C.PyTorchFileReader, PackageZipFileReader, Path, BinaryIO],
+        file_or_buffer: Union[str, PackageZipFileReader, Path, BinaryIO],
         module_allowed: Callable[[str], bool] = lambda module_name: True,
-        zip_file_reader_type: Type[PackageZipFileReader] = TorchScriptPackageZipFileReader
+        use_torch: bool = True
     ):
         """Open ``file_or_buffer`` for importing. This checks that the imported package only requires modules
         allowed by ``module_allowed``
@@ -66,8 +72,27 @@ class PackageImporter(Importer):
         Raises:
             ImportError: If the package will use a disallowed module.
         """
+
+        if not use_torch:
+            self.torch_is_available = False
+        else:
+            try:
+                import_torch()
+                self.torch_is_available = True
+                file_or_buffer = self.adjust_torch_filereader(file_or_buffer)
+            except ModuleNotFoundError:
+                pass
+            # self.torch_is_available = torch_is_available
+
+        if self.torch_is_available:
+            zip_file_reader_type = TorchScriptPackageZipFileReader
+            directory_reader_type = TorchScriptDirectoryReader
+        else:
+            zip_file_reader_type = DefaultPackageZipFileReader
+            directory_reader_type = DirectoryReader
+
         self.zip_reader: Any
-        if isinstance(file_or_buffer, torch._C.PyTorchFileReader):
+        if isinstance(file_or_buffer, zip_file_reader_type):
             self.filename = "<pytorch_file_reader>"
             self.zip_reader = file_or_buffer
         elif isinstance(file_or_buffer, (Path, str)):
@@ -75,10 +100,10 @@ class PackageImporter(Importer):
             if not os.path.isdir(self.filename):
                 self.zip_reader = zip_file_reader_type(self.filename)
             else:
-                self.zip_reader = TorchScriptDirectoryReader(self.filename)
+                self.zip_reader = directory_reader_type(self.filename)
         else:
             self.filename = "<binary>"
-            self.zip_reader = TorchScriptPackageZipFileReader(file_or_buffer)
+            self.zip_reader = zip_file_reader_type(file_or_buffer)
         self.root = _PackageNode(None)
         self.modules = {}
         self.extern_modules = self._read_extern()
@@ -107,6 +132,13 @@ class PackageImporter(Importer):
 
         # used for torch.serialization._load
         self.Unpickler = lambda *args, **kwargs: PackageUnpickler(self, *args, **kwargs)
+
+    def adjust_torch_filereader(self, file_or_buffer):
+        if isinstance(file_or_buffer, torch._C.PyTorchFileReader):
+            return TorchScriptPackageZipFileReader(file_or_buffer)
+        else:
+            return file_or_buffer
+
     def import_module(self, name: str, package=None):
         """Load a module from the package if it hasn't already been loaded, and then return
         the module. Modules are loaded locally
@@ -165,6 +197,57 @@ class PackageImporter(Importer):
         data = self.load_binary(package, resource)
         return data.decode(encoding, errors)
 
+    def persistent_id_torch(self, typename, data):
+
+        def load_tensor(dtype, size, key, location, restore_location):
+            name = f"{key}.storage"
+
+            if self.storage_context.has_storage(name):
+                storage = self.storage_context.get_storage(name, dtype).storage()
+            else:
+                tensor = self.zip_reader.get_storage_from_record(
+                    ".data/" + name, size, dtype
+                )
+                if isinstance(self.zip_reader, torch._C.PyTorchFileReader):
+                    self.storage_context.add_storage(name, tensor)
+                storage = tensor.storage()
+            self.loaded_storages[key] = restore_location(storage, location)
+
+        if typename == "storage":
+            storage_type, key, location, size = data
+            dtype = storage_type.dtype
+
+            if key not in self.loaded_storages:
+                load_tensor(
+                    dtype,
+                    size,
+                    key,
+                    _maybe_decode_ascii(location),
+                    self.restore_location,
+                )
+            storage = self.loaded_storages[key]
+            # TODO: Once we decide to break serialization FC, we can
+            # stop wrapping with TypedStorage
+            return torch.storage.TypedStorage(
+                wrap_storage=storage._untyped(), dtype=dtype
+            )
+        return None
+
+    @contextmanager
+    def set_torch_deserialization_context(self, map_location):
+        # to let reduce_package access deserializaiton context
+        self.storage_context = torch._C.DeserializationStorageContext()
+        self.last_map_location = map_location
+        self.restore_location = _get_restore_location(map_location)
+        self.loaded_storages = {}
+        try:
+            yield
+        finally:
+            self.storage_context = None
+            self.last_map_location = None
+            self.restore_location = None
+            self.loaded_storages = None
+
     def load_pickle(self, package: str, resource: str, map_location=None) -> Any:
         """Unpickles the resource from the package, loading any modules that are needed to construct the objects
         using :meth:`import_module`.
@@ -178,49 +261,17 @@ class PackageImporter(Importer):
             Any: The unpickled object.
         """
         pickle_file = self._zipfile_path(package, resource)
-        restore_location = _get_restore_location(map_location)
-        loaded_storages = {}
         loaded_reduces = {}
-        storage_context = torch._C.DeserializationStorageContext()
 
-        def load_tensor(dtype, size, key, location, restore_location):
-            name = f"{key}.storage"
-
-            if storage_context.has_storage(name):
-                storage = storage_context.get_storage(name, dtype).storage()
-            else:
-                tensor = self.zip_reader.get_storage_from_record(
-                    ".data/" + name, size, dtype
-                )
-                if isinstance(self.zip_reader, torch._C.PyTorchFileReader):
-                    storage_context.add_storage(name, tensor)
-                storage = tensor.storage()
-            loaded_storages[key] = restore_location(storage, location)
 
         def persistent_load(saved_id):
             assert isinstance(saved_id, tuple)
             typename = _maybe_decode_ascii(saved_id[0])
             data = saved_id[1:]
-
-            if typename == "storage":
-                storage_type, key, location, size = data
-                dtype = storage_type.dtype
-
-                if key not in loaded_storages:
-                    load_tensor(
-                        dtype,
-                        size,
-                        key,
-                        _maybe_decode_ascii(location),
-                        restore_location,
-                    )
-                storage = loaded_storages[key]
-                # TODO: Once we decide to break serialization FC, we can
-                # stop wrapping with TypedStorage
-                return torch.storage.TypedStorage(
-                    wrap_storage=storage._untyped(), dtype=dtype
-                )
-            elif typename == "reduce_package":
+            module = self.persistent_id_torch(typename, data)
+            if module is not None:
+                return module
+            if typename == "reduce_package":
                 # to fix BC breaking change, objects on this load path
                 # will be loaded multiple times erroneously
                 if len(data) == 2:
@@ -237,26 +288,16 @@ class PackageImporter(Importer):
         data_file = io.BytesIO(self.zip_reader.get_record(pickle_file))
         unpickler = self.Unpickler(data_file)
         unpickler.persistent_load = persistent_load
-
-        @contextmanager
-        def set_deserialization_context():
-            # to let reduce_package access deserializaiton context
-            self.storage_context = storage_context
-            self.last_map_location = map_location
-            try:
-                yield
-            finally:
-                self.storage_context = None
-                self.last_map_location = None
-
-        with set_deserialization_context():
+        if self.torch_is_available:
+            with self.set_torch_deserialization_context(map_location):
+                result = unpickler.load()
+                # TODO from zdevito:
+                #   This stateful weird function will need to be removed in our efforts
+                #   to unify the format. It has a race condition if multiple python
+                #   threads try to read independent files
+                torch._utils._validate_loaded_sparse_tensors()
+        else:
             result = unpickler.load()
-
-        # TODO from zdevito:
-        #   This stateful weird function will need to be removed in our efforts
-        #   to unify the format. It has a race condition if multiple python
-        #   threads try to read independent files
-        torch._utils._validate_loaded_sparse_tensors()
 
         return result
 

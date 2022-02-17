@@ -22,27 +22,39 @@ from typing import (
     DefaultDict,
     Type,
 )
-from torch.types import Storage
-
-import torch
-from torch.utils.hooks import RemovableHandle
 
 from ._digraph import DiGraph
+from ._hooks import RemovableHandle
 from ._importlib import _normalize_path
 from ._mangling import demangle, is_mangled
 from ._package_pickler import create_pickler
 from ._stdlib import is_stdlib_module
+from ._zip_file import PackageZipFileWriter, DefaultPackageZipFileWriter
 from .find_file_dependencies import find_files_source_depends_on
 from .glob_group import GlobGroup, GlobPattern
 from .importer import Importer, OrderedImporter, sys_importer
-from ._zip_file_torchscript import TorchScriptPackageZipFileWriter
-from ._zip_file import PackageZipFileWriter
-from torch.serialization import location_tag
 
 _gate_torchscript_serialization = True
 
 ActionHook = Callable[["PackageExporter", str], None]
 
+
+
+def import_torch():
+    global torch
+    global Storage
+    global TorchScriptPackageZipFileWriter
+    global location_tag
+    import torch
+    from torch.types import Storage
+    from ._zip_file_torchscript import TorchScriptPackageZipFileWriter
+    from torch.serialization import location_tag
+
+try:
+    import_torch()
+    torch_is_available = True
+except ModuleNotFoundError:
+    torch_is_available = False
 
 class _ModuleProviderAction(Enum):
     """Represents one of the actions that :class:`PackageExporter` can take on a module.
@@ -148,7 +160,6 @@ class PackagingError(Exception):
         self.dependency_graph = dependency_graph
         super().__init__(message.getvalue())
 
-
 class PackageExporter:
     """Exporters allow you to write packages of code, pickled Python data, and
     arbitrary binary and text resources into a self-contained package.
@@ -184,7 +195,7 @@ class PackageExporter:
         self,
         f: Union[str, Path, BinaryIO],
         importer: Union[Importer, Sequence[Importer]] = sys_importer,
-        zip_file_reader_type: Type[PackageZipFileWriter] = TorchScriptPackageZipFileWriter
+        use_torch: bool = True,
     ):
         """
         Create an exporter.
@@ -195,14 +206,22 @@ class PackageExporter:
             importer: If a single Importer is passed, use that to search for modules.
                 If a sequence of importers are passsed, an ``OrderedImporter`` will be constructed out of them.
         """
+        if not use_torch:
+            self.torch_is_available = False
+        else:
+            self.torch_is_available = torch_is_available
+
+        if self.torch_is_available:
+            zip_file_reader_type = TorchScriptPackageZipFileWriter
+        else:
+            zip_file_reader_type = DefaultPackageZipFileWriter
+
         if isinstance(f, (Path, str)):
             f = str(f)
             self.buffer: Optional[BinaryIO] = None
         else:  # is a byte buffer
             self.buffer = f
-
         self.zip_file = zip_file_reader_type(f)
-        self.storage_context = self.zip_file.get_storage_context()
 
         self._written_files: Set[str] = set()
 
@@ -233,6 +252,13 @@ class PackageExporter:
 
         self.patterns: Dict[GlobGroup, _PatternInfo] = {}
         self._unique_id = 0
+
+        if self.torch_is_available:
+            self.torch_specific_init()
+
+    def torch_specific_init(self):
+        self.storage_context = self.zip_file.get_storage_context()
+
 
     def save_source_file(
         self, module_name: str, file_or_directory: str, dependencies=True
@@ -849,8 +875,7 @@ class PackageExporter:
         self.patterns[GlobGroup(include, exclude=exclude)] = _PatternInfo(
             _ModuleProviderAction.DENY, allow_empty=True
         )
-
-    def _persistent_id(self, obj):
+    def _persistent_id_with_torch(self, obj):
         if torch.is_storage(obj) or isinstance(obj, torch.storage.TypedStorage):
             if isinstance(obj, torch.storage.TypedStorage):
                 # TODO: Once we decide to break serialization FC, we can
@@ -881,6 +906,13 @@ class PackageExporter:
                     f".data/{storage_id}.storage", storage.data_ptr(), num_bytes
                 )
             return ("storage", storage_type, storage_id, location, storage_numel)
+        return None
+
+    def _persistent_id(self, obj):
+        if self.torch_is_available:
+            ret = self._persistent_id_with_torch(obj)
+            if ret is not None:
+                return ret
 
         if hasattr(obj, "__reduce_package__"):
             if _gate_torchscript_serialization and isinstance(
