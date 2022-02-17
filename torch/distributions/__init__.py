@@ -90,7 +90,7 @@ from .gumbel import Gumbel
 from .half_cauchy import HalfCauchy
 from .half_normal import HalfNormal
 from .independent import Independent
-from .kl import kl_divergence, register_kl, add_kl_info
+from .kl import kl_divergence, register_kl, _add_kl_info
 from .kumaraswamy import Kumaraswamy
 from .laplace import Laplace
 from .lkj_cholesky import LKJCholesky
@@ -116,8 +116,8 @@ from .weibull import Weibull
 from .wishart import Wishart
 from . import transforms
 
-add_kl_info()
-del add_kl_info
+_add_kl_info()
+del _add_kl_info
 
 __all__ = [
     'Bernoulli',
