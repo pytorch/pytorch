@@ -29,13 +29,23 @@ from ._zip_file import PackageZipFileReader, DefaultPackageZipFileReader
 def import_torch():
     global torch
     global _get_restore_location
-    global _maybe_decode_ascii
     global TorchScriptDirectoryReader
     global TorchScriptPackageZipFileReader
     import torch
     from ._directory_reader_torchscript import TorchScriptDirectoryReader
     from ._zip_file_torchscript import TorchScriptPackageZipFileReader
-    from torch.serialization import _get_restore_location, _maybe_decode_ascii
+    from torch.serialization import _get_restore_location
+
+def _maybe_decode_ascii(bytes_str: Union[bytes, str]) -> str:
+    # When using encoding='bytes' in Py3, some **internal** keys stored as
+    # strings in Py2 are loaded as bytes. This function decodes them with
+    # ascii encoding, one that Py3 uses by default.
+    #
+    # NOTE: This should only be used on internal keys (e.g., `typename` and
+    #       `location` in `persistent_load` below!
+    if isinstance(bytes_str, bytes):
+        return bytes_str.decode('ascii')
+    return bytes_str
 
 class PackageImporter(Importer):
     """Importers allow you to load code written to packages by :class:`PackageExporter`.
@@ -59,7 +69,7 @@ class PackageImporter(Importer):
         self,
         file_or_buffer: Union[str, PackageZipFileReader, Path, BinaryIO],
         module_allowed: Callable[[str], bool] = lambda module_name: True,
-        use_torch: bool = True
+        use_torch: bool = False
     ):
         """Open ``file_or_buffer`` for importing. This checks that the imported package only requires modules
         allowed by ``module_allowed``
@@ -198,7 +208,7 @@ class PackageImporter(Importer):
         return data.decode(encoding, errors)
 
     def persistent_id_torch(self, typename, data):
-
+        assert isinstance(self.zip_reader, (TorchScriptDirectoryReader, TorchScriptPackageZipFileReader))
         def load_tensor(dtype, size, key, location, restore_location):
             name = f"{key}.storage"
 
@@ -228,7 +238,7 @@ class PackageImporter(Importer):
             storage = self.loaded_storages[key]
             # TODO: Once we decide to break serialization FC, we can
             # stop wrapping with TypedStorage
-            return torch.storage.TypedStorage(
+            return torch.storage._TypedStorage(
                 wrap_storage=storage._untyped(), dtype=dtype
             )
         return None
@@ -268,9 +278,10 @@ class PackageImporter(Importer):
             assert isinstance(saved_id, tuple)
             typename = _maybe_decode_ascii(saved_id[0])
             data = saved_id[1:]
-            module = self.persistent_id_torch(typename, data)
-            if module is not None:
-                return module
+            if self.torch_is_available:
+                module = self.persistent_id_torch(typename, data)
+                if module is not None:
+                    return module
             if typename == "reduce_package":
                 # to fix BC breaking change, objects on this load path
                 # will be loaded multiple times erroneously

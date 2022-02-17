@@ -105,7 +105,8 @@ class DirectoryReaderTest(PackageTestCase):
     def test_resource_reader(self):
         """Tests DirectoryReader as the base for get_resource_reader."""
         filename = self.temp()
-        with PackageExporter(filename) as pe:
+        print(filename)
+        with PackageExporter(filename, use_torch=False) as pe:
             # Layout looks like:
             #    package
             #    ├── one/
@@ -132,6 +133,7 @@ class DirectoryReaderTest(PackageTestCase):
 
         with TemporaryDirectory() as temp_dir:
             zip_file.extractall(path=temp_dir)
+            print(zip_file.infolist())
             importer = PackageImporter(Path(temp_dir) / Path(filename).name)
             reader_one = importer.get_resource_reader("one")
 
@@ -265,7 +267,7 @@ class DirectoryReaderTest(PackageTestCase):
         scripted_mod = torch.jit.script(ModWithTensor(torch.rand(1, 2, 3)))
 
         filename = self.temp()
-        with PackageExporter(filename) as e:
+        with PackageExporter(filename, use_torch=True) as e:
             e.save_pickle("res", "mod.pkl", scripted_mod)
 
         zip_file = zipfile.ZipFile(filename, "r")
@@ -277,7 +279,7 @@ class DirectoryReaderTest(PackageTestCase):
         ):
             with TemporaryDirectory() as temp_dir:
                 zip_file.extractall(path=temp_dir)
-                dir_importer = PackageImporter(Path(temp_dir) / Path(filename).name)
+                dir_importer = PackageImporter(Path(temp_dir) / Path(filename).name, use_torch=True)
                 dir_mod = dir_importer.load_pickle("res", "mod.pkl")
 
 

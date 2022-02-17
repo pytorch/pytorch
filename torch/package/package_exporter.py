@@ -20,7 +20,6 @@ from typing import (
     Set,
     Union,
     DefaultDict,
-    Type,
 )
 
 from ._digraph import DiGraph
@@ -29,7 +28,7 @@ from ._importlib import _normalize_path
 from ._mangling import demangle, is_mangled
 from ._package_pickler import create_pickler
 from ._stdlib import is_stdlib_module
-from ._zip_file import PackageZipFileWriter, DefaultPackageZipFileWriter
+from ._zip_file import DefaultPackageZipFileWriter
 from .find_file_dependencies import find_files_source_depends_on
 from .glob_group import GlobGroup, GlobPattern
 from .importer import Importer, OrderedImporter, sys_importer
@@ -45,16 +44,11 @@ def import_torch():
     global Storage
     global TorchScriptPackageZipFileWriter
     global location_tag
+    global normalize_storage_type
     import torch
     from torch.types import Storage
     from ._zip_file_torchscript import TorchScriptPackageZipFileWriter
-    from torch.serialization import location_tag
-
-try:
-    import_torch()
-    torch_is_available = True
-except ModuleNotFoundError:
-    torch_is_available = False
+    from torch.serialization import location_tag, normalize_storage_type
 
 class _ModuleProviderAction(Enum):
     """Represents one of the actions that :class:`PackageExporter` can take on a module.
@@ -195,7 +189,7 @@ class PackageExporter:
         self,
         f: Union[str, Path, BinaryIO],
         importer: Union[Importer, Sequence[Importer]] = sys_importer,
-        use_torch: bool = True,
+        use_torch: bool = False,
     ):
         """
         Create an exporter.
@@ -209,7 +203,11 @@ class PackageExporter:
         if not use_torch:
             self.torch_is_available = False
         else:
-            self.torch_is_available = torch_is_available
+            try:
+                import_torch()
+                self.torch_is_available = True
+            except ModuleNotFoundError:
+                self.torch_is_available = False
 
         if self.torch_is_available:
             zip_file_reader_type = TorchScriptPackageZipFileWriter
@@ -876,8 +874,8 @@ class PackageExporter:
             _ModuleProviderAction.DENY, allow_empty=True
         )
     def _persistent_id_with_torch(self, obj):
-        if torch.is_storage(obj) or isinstance(obj, torch.storage.TypedStorage):
-            if isinstance(obj, torch.storage.TypedStorage):
+        if torch.is_storage(obj) or isinstance(obj, torch.storage._TypedStorage):
+            if isinstance(obj, torch.storage._TypedStorage):
                 # TODO: Once we decide to break serialization FC, we can
                 # remove this case
                 storage = obj._storage
