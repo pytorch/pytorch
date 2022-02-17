@@ -60,7 +60,7 @@ if [[ ${BUILD_ENVIRONMENT} == *"paralleltbb"* ]]; then
 elif [[ ${BUILD_ENVIRONMENT} == *"parallelnative"* ]]; then
   export ATEN_THREADING=NATIVE
 elif [[ ${BUILD_ENVIRONMENT} == *"deploy"* ]]; then
-  export USE_DEPLOY=1
+  export USE_DEPLOY=ON
 fi
 
 # TODO: Don't run this...
