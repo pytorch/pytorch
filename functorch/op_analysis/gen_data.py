@@ -185,4 +185,3 @@ if True:
     with open('run_decompositions.txt', 'r') as f:
         decomposed_ops = [i.strip() for i in f.readlines()]
     gen_data([name_check(opinfo_ops), name_check(decomposed_ops)], 'decompositions')
-
