@@ -73,6 +73,10 @@ def verify_reusing_compiled_graph(mod):
     graph_input_tensor_ids, graph_input_tensors = _LAZYC._get_ltc_tensors_ts_device_data_node([lazy_out])
     graph_input_matcher = GraphInputMatcher(tensor_id_to_arg_idx, graph_input_tensor_ids, graph_input_tensors)
 
+    graph_hash = _LAZYC._get_graph_hash(lazy_out)
+
+    print("graph_hash", graph_hash)
+
     print(f"args_tensor_ids {args_tensor_ids}")
     print("tensor ids from device data:", graph_input_tensor_ids)
     print(f"lazy_out {lazy_out.to('cpu')}")
@@ -81,7 +85,7 @@ def verify_reusing_compiled_graph(mod):
 
     def optimized_mod(*args):
         graph_input = graph_input_matcher(args)
-        return _LAZYC._run_cached_graph(graph_input)
+        return _LAZYC._run_cached_graph(graph_hash, graph_input)
 
     print("return value of optimized_mod", optimized_mod(*args))
 

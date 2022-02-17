@@ -125,6 +125,8 @@ class TORCH_API LazyGraphExecutor {
 
   ComputationCache* GetComputationCache();
 
+  hash_t GetGraphHash(const LazyTensor& tensor);
+
  private:
   struct SyncTensorsConfig {
     // Whether we want to force data on the target tensors (hence trimming

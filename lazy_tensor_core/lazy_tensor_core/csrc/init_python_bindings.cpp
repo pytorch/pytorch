@@ -480,10 +480,17 @@ void InitLtcModuleBindings(py::module m) {
           }
           return std::make_pair(tensor_ids, eager_tensors);
         });
-  m.def("_run_cached_graph", [](const std::vector<at::Tensor>& tensors) {
+  m.def("_run_cached_graph", [](const std::string& hash_str, const std::vector<at::Tensor>& tensors) {
+    TORCH_CHECK(hash_str.size() == sizeof(hash_t));
+    hash_t hash = *(hash_t*) (hash_str.c_str());
+    LOG(ERROR) << "_run_cached_graph get a hash " << hash << std::endl;
     // XXX this demo assumes the computation cache contains a single computation
     // which is the one we want to reuse. This will be enhanced 
+    #if 0
     auto computationPtr = (TSComputation*) LazyGraphExecutor::Get()->GetComputationCache()->GetLatest()->computation.get();
+    #endif
+    auto computationPtr = (TSComputation*) LazyGraphExecutor::Get()->GetComputationCache()->Get(hash)->computation.get();
+    TORCH_CHECK(computationPtr, "Failed to get computation by hash. Maybe the entry get kicked out of the LRU cache"); // TODO implement a fallback mechanism, or make sure those entries never get kicked out
 
     TORCH_CHECK(computationPtr);
     std::vector<torch::jit::IValue> stack;
@@ -740,6 +747,12 @@ void InitLtcModuleBindings(py::module m) {
     FLAGS_torch_lazy_use_thread_pool = true;
   });
   m.def("shunting_explore", []() { shunting_explore(); });
+  m.def("_get_graph_hash", [](const at::Tensor& tensor) {
+    auto xtensor = TryGetLtcTensor(tensor);
+    auto hash = LazyGraphExecutor::Get()->GetGraphHash(xtensor);
+    std::string bin((const char*) &hash, sizeof(hash));
+    return py::bytes(bin);
+  });
 }  // namespace
 
 }  // namespace
