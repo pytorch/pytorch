@@ -85,6 +85,9 @@ class OpOverloadPacket:
         self._qualified_op_name = qualified_op_name
         self._op_name = op_name
         self._op = op
+        # Note that we disallow access to overloads registered by JIT to handle operations
+        # between pure python objects
+        self._allowed_overloads = None
 
     # it's a no-op since OpOverloadPacket object is immutable and must be unique for a given op.
     def __deepcopy__(self, memo=None):
@@ -104,6 +107,12 @@ class OpOverloadPacket:
     @property
     def op(self):
         return self._op
+
+    @property
+    def overloads(self):
+        if self._allowed_overloads is None:
+            self._allowed_overloads = torch._C._get_overload_names(self._qualified_op_name)
+        return self._allowed_overloads
 
     def __getattr__(self, key):
         # It is not a valid op_name when __file__ is passed in
@@ -129,10 +138,9 @@ class OpOverloadPacket:
                                  "underlying op {} has no attribute {} either."
                                  .format(str(self), str(self._op), key)) from None
 
-        try:
-            # This is ok since we are guaranteed that an overload name for an aten op can't be 'default'
-            use_key = '' if key == 'default' else key
-            # TODO: disallow access to overloads registered by JIT
+        # This is ok since we are guaranteed that an overload name for an aten op can't be 'default'
+        use_key = '' if key == 'default' else key
+        if use_key in self.overloads:
             op_ = torch._C._get_operation_overload(
                 self._qualified_op_name, use_key)
             schema = torch._C._get_schema(self._qualified_op_name, use_key)
@@ -140,7 +148,7 @@ class OpOverloadPacket:
             # cache the overload object
             setattr(self, key, overload)
             return overload
-        except RuntimeError:
+        else:
             raise AttributeError(
                 "The underlying op of '{}' has no overload name '{}'".format(str(self), use_key)
             ) from None

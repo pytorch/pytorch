@@ -1344,6 +1344,34 @@ void initJITBindings(PyObject* module) {
           throw std::runtime_error(msg);
         }
       });
+  m.def(
+      "_get_overload_names",
+      [](const std::string& op_name) {
+        try {
+          auto symbol = Symbol::fromQualString(op_name);
+          auto operations = getAllOperatorsFor(symbol);
+          std::vector<std::string> overloads;
+          for (const auto& op : operations) {
+            auto inputs = op->schema().arguments();
+            for (const auto& inp : inputs) {
+              auto type = inp.type();
+              // don't expose overload names that don't perform an operation on a tensor or tensorlist
+              // this is done to exclude overloads registered by jit to handle operations between
+              // pure python objects.
+              if (type == TensorType::get() || type->kind() == ListType::Kind || type->kind() == NumberType::Kind) {
+                overloads.push_back(op->schema().overload_name());
+                break;
+              }
+            }
+          }
+          return overloads;
+        } catch (const c10::Error& e) {
+          auto msg = torch::get_cpp_stacktraces_enabled()
+              ? e.what()
+              : e.what_without_backtrace();
+          throw std::runtime_error(msg);
+        }
+      });
 
   m.def(
       "_get_operation_overload",
