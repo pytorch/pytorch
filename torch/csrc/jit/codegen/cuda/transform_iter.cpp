@@ -228,7 +228,7 @@ BestEffortReplay::BestEffortReplay(
   }
 
   // Grab expr history of iter domains in target_domain
-  std::vector<Expr*> target_exprs = ExprSort::getExprs(
+  std::vector<Expr*> target_exprs = StmtSort::getExprs(
       FusionGuard::getCurFusion(),
       std::vector<Val*>(target_domain.begin(), target_domain.end()));
 
@@ -239,7 +239,7 @@ BestEffortReplay::BestEffortReplay(
   // replay_domain map.
 
   // Map replay domain's IterDomains to the Exprs they're used in
-  std::vector<Expr*> replay_exprs = ExprSort::getExprs(
+  std::vector<Expr*> replay_exprs = StmtSort::getExprs(
       FusionGuard::getCurFusion(),
       std::vector<Val*>(replay_domain.begin(), replay_domain.end()));
 
@@ -561,7 +561,7 @@ struct ConsumerForwardingInfo {
     auto consumer_bcast_ids_not_in_producer =
         consumer_bcast_roots_not_in_producer;
 
-    std::vector<Expr*> consumer_history = ExprSort::getExprs(
+    std::vector<Expr*> consumer_history = StmtSort::getExprs(
         FusionGuard::getCurFusion(),
         std::vector<Val*>(
             consumer->domain()->domain().begin(),
@@ -706,7 +706,7 @@ BestEffortReplay BestEffortReplay::replayCasP(
   }
 
   // Grab all exprs used to make the forwarded compliments
-  auto compliment_exprs = ExprSort::getExprs(
+  auto compliment_exprs = StmtSort::getExprs(
       FusionGuard::getCurFusion(), {compliments.begin(), compliments.end()});
 
   // Figure out if there are any leaves in compliment_exprs that aren't
