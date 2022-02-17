@@ -4,15 +4,13 @@
 name: ios-12-5-1-arm64-metal
 
 on:
-  push:
-    branches:
-      - master
-      - release/*
+  schedule:
+    - cron: 45 4,10,16,22 * * *
     tags:
       - 'ciflow/all/*'
       - 'ciflow/ios/*'
       - 'ciflow/macos/*'
-      - 'ciflow/trunk/*'
+      - 'ciflow/scheduled/*'
   workflow_dispatch:
 
 env:
