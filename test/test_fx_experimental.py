@@ -1459,6 +1459,7 @@ class TestNormalizeOperators(JitTestCase):
             # See: https://github.com/pytorch/pytorch/issues/64997
             "as_strided",
             "block_diag",
+            "broadcast_shapes",
             "broadcast_tensors",
             "cartesian_prod",
             "contiguous",
