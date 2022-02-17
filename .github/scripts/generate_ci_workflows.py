@@ -174,7 +174,6 @@ class CIWorkflow:
     test_jobs: Any = field(default_factory=list)
 
     enable_default_test: bool = True
-    enable_smoke_test: bool = True
     enable_jit_legacy_test: bool = False
     enable_distributed_test: bool = True
     enable_multigpu_test: bool = False
@@ -293,9 +292,6 @@ class CIWorkflow:
         if self.enable_noarch_test:
             configs["noarch"] = {"num_shards": 1, "runner": self.test_runner_type}
 
-        if self.enable_smoke_test:
-            configs["smoke_tests"] = {"num_shards": 1, "runner": self.test_runner_type}
-
         for name, config in configs.items():
             for shard in range(1, config["num_shards"] + 1):
                 test_jobs.append(
@@ -313,7 +309,7 @@ class CIWorkflow:
             for shard in range(1, self.num_test_shards + 1):
                 test_jobs.append(
                     {
-                        "id": f"test_default_{shard}_{config['num_shards']}",
+                        "id": f"test_default_{shard}_{self.num_test_shards}",
                         "name": f"test (default, {shard}, {self.num_test_shards}, {self.test_runner_type})",
                         "config": "default",
                         "shard": shard,
@@ -398,20 +394,6 @@ WINDOWS_WORKFLOWS = [
     ),
     CIWorkflow(
         arch="windows",
-        build_environment="win-vs2019-cuda11.3-py3-smoke",
-        cuda_version="11.3",
-        test_runner_type=WINDOWS_CUDA_TEST_RUNNER,
-        enable_default_test=False,
-        enable_smoke_test=True,
-        enable_force_on_cpu_test=True,
-        only_on_pr=True,
-        ciflow_config=CIFlowConfig(
-            run_on_canary=True,
-            labels={LABEL_CIFLOW_DEFAULT, LABEL_CIFLOW_CUDA, LABEL_CIFLOW_WIN}
-        ),
-    ),
-    CIWorkflow(
-        arch="windows",
         build_environment="win-vs2019-cuda11.3-py3",
         cuda_version="11.3",
         test_runner_type=WINDOWS_CUDA_TEST_RUNNER,
@@ -419,7 +401,7 @@ WINDOWS_WORKFLOWS = [
         enable_force_on_cpu_test=True,
         ciflow_config=CIFlowConfig(
             run_on_canary=True,
-            labels={LABEL_CIFLOW_CUDA, LABEL_CIFLOW_WIN}
+            labels={LABEL_CIFLOW_DEFAULT, LABEL_CIFLOW_CUDA, LABEL_CIFLOW_WIN}
         ),
     ),
     CIWorkflow(
