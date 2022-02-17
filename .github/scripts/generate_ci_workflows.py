@@ -727,9 +727,10 @@ IOS_WORKFLOWS = [
         ios_arch="arm64",
         ios_platform="OS",
         test_runner_type=MACOS_TEST_RUNNER_10_15,
+        is_scheduled="45 4,10,16,22 * * *",
         exclude_test=True,
         ciflow_config=CIFlowConfig(
-            labels={LABEL_CIFLOW_IOS, LABEL_CIFLOW_MACOS},
+            labels={LABEL_CIFLOW_SCHEDULED, LABEL_CIFLOW_IOS, LABEL_CIFLOW_MACOS},
         ),
     ),
     CIWorkflow(
@@ -738,20 +739,10 @@ IOS_WORKFLOWS = [
         ios_arch="arm64",
         ios_platform="OS",
         test_runner_type=MACOS_TEST_RUNNER_10_15,
+        is_scheduled="45 4,10,16,22 * * *",
         exclude_test=True,
         ciflow_config=CIFlowConfig(
-            labels={LABEL_CIFLOW_IOS, LABEL_CIFLOW_MACOS},
-        ),
-    ),
-    CIWorkflow(
-        arch="macos",
-        build_environment="ios-12-5-1-arm64-full-jit",
-        ios_arch="arm64",
-        ios_platform="OS",
-        test_runner_type=MACOS_TEST_RUNNER_10_15,
-        exclude_test=True,
-        ciflow_config=CIFlowConfig(
-            labels={LABEL_CIFLOW_IOS, LABEL_CIFLOW_MACOS},
+            labels={LABEL_CIFLOW_SCHEDULED, LABEL_CIFLOW_IOS, LABEL_CIFLOW_MACOS},
         ),
     ),
     CIWorkflow(
@@ -760,9 +751,10 @@ IOS_WORKFLOWS = [
         ios_arch="arm64",
         ios_platform="OS",
         test_runner_type=MACOS_TEST_RUNNER_10_15,
+        is_scheduled="45 4,10,16,22 * * *",
         exclude_test=True,
         ciflow_config=CIFlowConfig(
-            labels={LABEL_CIFLOW_IOS, LABEL_CIFLOW_MACOS},
+            labels={LABEL_CIFLOW_SCHEDULED, LABEL_CIFLOW_IOS, LABEL_CIFLOW_MACOS},
         ),
     ),
     CIWorkflow(
@@ -771,9 +763,10 @@ IOS_WORKFLOWS = [
         ios_arch="arm64",
         ios_platform="OS",
         test_runner_type=MACOS_TEST_RUNNER_10_15,
+        is_scheduled="45 4,10,16,22 * * *",
         exclude_test=True,
         ciflow_config=CIFlowConfig(
-            labels={LABEL_CIFLOW_IOS, LABEL_CIFLOW_MACOS},
+            labels={LABEL_CIFLOW_SCHEDULED, LABEL_CIFLOW_IOS, LABEL_CIFLOW_MACOS},
         ),
     ),
     CIWorkflow(
@@ -790,17 +783,6 @@ IOS_WORKFLOWS = [
     CIWorkflow(
         arch="macos",
         build_environment="ios-12-5-1-x86-64-coreml",
-        ios_arch="x86_64",
-        ios_platform="SIMULATOR",
-        test_runner_type=MACOS_TEST_RUNNER_10_15,
-        exclude_test=True,
-        ciflow_config=CIFlowConfig(
-            labels={LABEL_CIFLOW_IOS, LABEL_CIFLOW_MACOS},
-        ),
-    ),
-    CIWorkflow(
-        arch="macos",
-        build_environment="ios-12-5-1-x86-64-full-jit",
         ios_arch="x86_64",
         ios_platform="SIMULATOR",
         test_runner_type=MACOS_TEST_RUNNER_10_15,

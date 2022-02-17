@@ -93,11 +93,9 @@ jobs:
       TEST_RUNNER_TYPE: macos-11
       ENABLE_DISTRIBUTED_TEST: ''
       NUM_TEST_SHARDS: 2
-      PR_BODY: ${{ github.event.pull_request.body }}
     outputs:
       matrix: ${{ steps.set-matrix.outputs.matrix }}
       render-matrix: ${{ steps.set-matrix.outputs.render-matrix }}
-      ignore-disabled-issues: ${{ steps.set-matrix.outputs.ignore-disabled-issues }}
     container:
       image: python:3.9
     steps:
@@ -121,7 +119,7 @@ jobs:
       TEST_CONFIG: ${{ matrix.config }}
       SHARD_NUMBER: ${{ matrix.shard }}
       NUM_TEST_SHARDS: ${{ matrix.num_shards }}
-      PYTORCH_IGNORE_DISABLED_ISSUES: ${{ needs.generate-test-matrix.outputs.ignore-disabled-issues }}
+      PR_BODY: ${{ github.event.pull_request.body }}
     steps:
       - name: Checkout PyTorch
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
@@ -218,6 +216,8 @@ jobs:
           SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
           TAG: ${{ steps.parse-ref.outputs.tag }}
           WORKFLOW_ID: '${{ github.run_id }}'
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_OSSCI_METRICS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_OSSCI_METRICS_SECRET_ACCESS_KEY }}
         shell: bash
         run: |
           python3 -m pip install -r requirements.txt
