@@ -569,6 +569,7 @@ class TestOperators(TestCase):
         xfail('index_put', ''),
         xfail('lu_solve'),
         xfail('index_copy'),
+        xfail('nn.functional.gelu'),
     })
 
     @ops(functorch_lagging_op_db + additional_op_db, allowed_dtypes=(torch.float,))
@@ -744,6 +745,7 @@ class TestOperators(TestCase):
         xfail('nn.functional.linear'),
         xfail('view_as_complex'),
         xfail('prod'),
+        xfail('nn.functional.gelu'),
 
         # Some kind of issue with unsymmetric tangent type
         # Runtime Error: The tangent part of the matrix A should also be symmetric.
@@ -906,8 +908,6 @@ class TestOperators(TestCase):
         xfail('as_strided'),
         skip('nn.functional.fractional_max_pool2d'),  # generator works on cpu, fails on cuda
         skip('solve'),
-        xfail('linalg.cond'),
-        xfail('linalg.svdvals'),
     }))
     def test_vjpvmap(self, device, dtype, op):
         # NB: there is no vjpvmap_has_batch_rule test because that is almost
@@ -969,10 +969,10 @@ def ref_vjp_no_create(f, *primals):
 run_decompositions = set()
 run_ops = set()
 
-
 class TestDecompositionOpInfo(TestCase):
 
-    @unittest.skipIf(IS_FBCODE, "__torch_dispatch__ is buggy")
+    @unittest.skip("dispatcher bug")
+    # @unittest.skipIf(IS_FBCODE, "__torch_dispatch__ is buggy")
     @ops(
         functorch_lagging_op_db + additional_op_db,
         allowed_dtypes=[torch.float32, torch.float64, torch.float16, torch.bfloat16] + [*integral_types()]
