@@ -57,7 +57,7 @@ here is the basic process.
         open an issue first before implementing a PR.
 
    -  Core changes and refactors can be quite difficult to coordinate,
-      as the pace of development on PyTorch master is quite fast.
+      as the pace of development on PyTorch main is quite fast.
       Definitely reach out about fundamental or cross-cutting changes;
       we can often give guidance about how to stage such changes into
       more easily reviewable pieces.
@@ -287,7 +287,7 @@ Frequently asked questions
    tasks or pull requests with your environment details is helpful and
    appreciated.
 -  **CI tests failed, what does it mean?** Maybe you need to merge with
-   master or rebase with latest changes. Pushing your changes should
+   main or rebase with latest changes. Pushing your changes should
    re-trigger CI tests. If the tests persist, you'll want to trace
    through the error messages and resolve the related issues.
 -  **What are the most high risk changes?** Anything that touches build
@@ -306,14 +306,14 @@ Python Docs
 
 PyTorch documentation is generated from python source using
 `Sphinx <https://www.sphinx-doc.org/en/master/>`__. Generated HTML is
-copied to the docs folder in the master branch of
-`pytorch.github.io <https://github.com/pytorch/pytorch.github.io/tree/master/docs>`__,
+copied to the docs folder in the main branch of
+`pytorch.github.io <https://github.com/pytorch/pytorch.github.io/tree/main/docs>`__,
 and is served via GitHub pages.
 
 -  Site: https://pytorch.org/docs
--  GitHub: https://github.com/pytorch/pytorch/tree/master/docs
+-  GitHub: https://github.com/pytorch/pytorch/tree/main/docs
 -  Served from:
-   `https://github.com/pytorch/pytorch.github.io/tree/master/doc <https://github.com/pytorch/pytorch.github.io/tree/master/docs>`__
+   `https://github.com/pytorch/pytorch.github.io/tree/main/doc <https://github.com/pytorch/pytorch.github.io/tree/main/docs>`__
 
 C++ Docs
 ~~~~~~~~
@@ -324,7 +324,7 @@ https://github.com/pytorch/cppdocs repo, and are served from GitHub
 pages.
 
 -  Site: https://pytorch.org/cppdocs
--  GitHub: https://github.com/pytorch/pytorch/tree/master/docs/cpp
+-  GitHub: https://github.com/pytorch/pytorch/tree/main/docs/cpp
 -  Served from: https://github.com/pytorch/cppdocs
 
 Tutorials

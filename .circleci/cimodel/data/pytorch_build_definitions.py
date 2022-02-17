@@ -161,7 +161,7 @@ class HiddenConf(object):
         return self.name
 
 class DocPushConf(object):
-    def __init__(self, name, parent_build=None, branch="master"):
+    def __init__(self, name, parent_build=None, branch="main"):
         self.name = name
         self.parent_build = parent_build
         self.branch = branch
@@ -185,7 +185,7 @@ def gen_docs_configs(xenial_parent_config):
         HiddenConf(
             "pytorch_python_doc_build",
             parent_build=xenial_parent_config,
-            filters=gen_filter_dict(branches_list=["master", "nightly"],
+            filters=gen_filter_dict(branches_list=["main", "nightly"],
                                     tags_list=RC_PATTERN),
         )
     )
@@ -201,7 +201,7 @@ def gen_docs_configs(xenial_parent_config):
         HiddenConf(
             "pytorch_cpp_doc_build",
             parent_build=xenial_parent_config,
-            filters=gen_filter_dict(branches_list=["master", "nightly"],
+            filters=gen_filter_dict(branches_list=["main", "nightly"],
                                     tags_list=RC_PATTERN),
         )
     )
@@ -209,7 +209,7 @@ def gen_docs_configs(xenial_parent_config):
         DocPushConf(
             "pytorch_cpp_doc_push",
             parent_build="pytorch_cpp_doc_build",
-            branch="master",
+            branch="main",
         )
     )
     return configs

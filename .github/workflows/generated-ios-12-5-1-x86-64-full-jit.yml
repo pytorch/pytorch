@@ -1,7 +1,7 @@
 # @generated DO NOT EDIT MANUALLY
 # Template is at:    .github/templates/ios_ci_workflow.yml.j2
 # Generation script: .github/scripts/generate_ci_workflows.py
-name: ios-12-5-1-x86-64-coreml
+name: ios-12-5-1-x86-64-full-jit
 
 on:
   push:
@@ -16,7 +16,7 @@ on:
   workflow_dispatch:
 
 env:
-  BUILD_ENVIRONMENT: ios-12-5-1-x86-64-coreml
+  BUILD_ENVIRONMENT: ios-12-5-1-x86-64-full-jit
   IN_CI: 1
   IS_GHA: 1
   IOS_PLATFORM: SIMULATOR
@@ -32,7 +32,7 @@ jobs:
     runs-on: macos-10.15
     timeout-minutes: 240
     env:
-      JOB_BASE_NAME: ios-12-5-1-x86-64-coreml-build
+      JOB_BASE_NAME: ios-12-5-1-x86-64-full-jit-build
       IOS_CERT_KEY_2022: ${{ secrets.IOS_CERT_KEY_2022 }}
       IOS_CERT_SECRET: ${{ secrets.IOS_CERT_SECRET }}
       IOS_DEV_TEAM_ID: ${{ secrets.IOS_DEV_TEAM_ID }}
@@ -173,5 +173,5 @@ jobs:
           fi
 
 concurrency:
-  group: ios-12-5-1-x86-64-coreml-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
+  group: ios-12-5-1-x86-64-full-jit-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
   cancel-in-progress: true

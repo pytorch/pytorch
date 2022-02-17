@@ -345,7 +345,7 @@ jobs:
           if [[ "${GITHUB_REF}" =~ ^refs/tags/v([0-9]+\.[0-9]+)\.* ]]; then
             target="${BASH_REMATCH[1]}"
           else
-            target="master"
+            target="main"
           fi
           # detached container should get cleaned up by teardown_ec2_linux
           container_name=$(docker run \
@@ -381,7 +381,7 @@ jobs:
           retention-days: 14
           s3-bucket: doc-previews
           if-no-files-found: error
-          path: pytorch.github.io/docs/master/
+          path: pytorch.github.io/docs/main/
           s3-prefix: pytorch/${{ github.event.pull_request.number }}
       - uses: seemethere/upload-artifact-s3@v3
         name: Upload C++ Docs Preview

@@ -407,12 +407,12 @@ class TestPrintTestStats(unittest.TestCase):
         )
 
     def test_graph(self) -> None:
-        # HEAD is on master
+        # HEAD is on main
         self.assertEqual(
             '''\
-Commit graph (base is most recent master ancestor with at least one S3 report):
+Commit graph (base is most recent main ancestor with at least one S3 report):
 
-    : (master)
+    : (main)
     |
     * aaaaaaaaaa (HEAD)              total time   502.99s
     * bbbbbbbbbb (base)   1 report,  total time    47.84s
@@ -435,9 +435,9 @@ Commit graph (base is most recent master ancestor with at least one S3 report):
 
         self.assertEqual(
             '''\
-Commit graph (base is most recent master ancestor with at least one S3 report):
+Commit graph (base is most recent main ancestor with at least one S3 report):
 
-    : (master)
+    : (main)
     |
     | * aaaaaaaaaa (HEAD)            total time  9988.77s
     |/
@@ -461,9 +461,9 @@ Commit graph (base is most recent master ancestor with at least one S3 report):
 
         self.assertEqual(
             '''\
-Commit graph (base is most recent master ancestor with at least one S3 report):
+Commit graph (base is most recent main ancestor with at least one S3 report):
 
-    : (master)
+    : (main)
     |
     | * aaaaaaaaaa (HEAD)            total time    25.52s
     | |
@@ -490,9 +490,9 @@ Commit graph (base is most recent master ancestor with at least one S3 report):
 
         self.assertEqual(
             '''\
-Commit graph (base is most recent master ancestor with at least one S3 report):
+Commit graph (base is most recent main ancestor with at least one S3 report):
 
-    : (master)
+    : (main)
     |
     | * aaaaaaaaaa (HEAD)            total time     0.08s
     |/|
@@ -519,9 +519,9 @@ Commit graph (base is most recent master ancestor with at least one S3 report):
 
         self.assertEqual(
             '''\
-Commit graph (base is most recent master ancestor with at least one S3 report):
+Commit graph (base is most recent main ancestor with at least one S3 report):
 
-    : (master)
+    : (main)
     |
     | * aaaaaaaaaa (HEAD)            total time     5.98s
     | |
@@ -557,9 +557,9 @@ Commit graph (base is most recent master ancestor with at least one S3 report):
     job: foo_job
     commit: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 
-Commit graph (base is most recent master ancestor with at least one S3 report):
+Commit graph (base is most recent main ancestor with at least one S3 report):
 
-    : (master)
+    : (main)
     |
     | * aaaaaaaaaa (HEAD)            total time     3.02s
     |/
@@ -611,9 +611,9 @@ Added    (across    1 suite)      1 test,  totaling +   3.00s
     job: foo_job
     commit: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 
-Commit graph (base is most recent master ancestor with at least one S3 report):
+Commit graph (base is most recent main ancestor with at least one S3 report):
 
-    : (master)
+    : (main)
     |
     | * aaaaaaaaaa (HEAD)            total time     3.02s
     | |

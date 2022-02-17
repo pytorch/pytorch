@@ -151,7 +151,7 @@ use {pytorch_compiler} to to compile your extension. Alternatively, you may
 compile PyTorch from source using {user_compiler}, and then you can also use
 {user_compiler} to compile your extension.
 
-See https://github.com/pytorch/pytorch/blob/master/CONTRIBUTING.md for help
+See https://github.com/pytorch/pytorch/blob/main/CONTRIBUTING.md for help
 with compiling PyTorch from source.
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
@@ -1165,7 +1165,7 @@ def load_inline(name,
     identical to :func:`load`.
 
     See `the
-    tests <https://github.com/pytorch/pytorch/blob/master/test/test_cpp_extensions_jit.py>`_
+    tests <https://github.com/pytorch/pytorch/blob/main/test/test_cpp_extensions_jit.py>`_
     for good examples of using this function.
 
     Sources may omit two required parts of a typical non-inline C++ extension:

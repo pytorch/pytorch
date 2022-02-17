@@ -56,7 +56,7 @@ commands:
             do
             cd $path/..
             git fetch --depth=1 origin
-            git reset --hard origin/master
+            git reset --hard origin/main
             done
 
             export HOMEBREW_NO_AUTO_UPDATE=1
@@ -111,11 +111,11 @@ commands:
                 git config --global user.email "circleci.ossci@gmail.com"
                 git config --global user.name "CircleCI"
                 git config remote.origin.url https://github.com/pytorch/pytorch.git
-                git config --add remote.origin.fetch +refs/heads/master:refs/remotes/origin/master
-                git fetch --tags --progress https://github.com/pytorch/pytorch.git +refs/heads/master:refs/remotes/origin/master --depth=100 --quiet
+                git config --add remote.origin.fetch +refs/heads/main:refs/remotes/origin/main
+                git fetch --tags --progress https://github.com/pytorch/pytorch.git +refs/heads/main:refs/remotes/origin/main --depth=100 --quiet
                 # PRs generated from ghstack has format CIRCLE_PR_BASE_BRANCH=gh/xxx/1234/base
                 if [[ "${CIRCLE_PR_BASE_BRANCH}" == "gh/"* ]]; then
-                  CIRCLE_PR_BASE_BRANCH=master
+                  CIRCLE_PR_BASE_BRANCH=main
                 fi
                 export GIT_MERGE_TARGET=`git log -n 1 --pretty=format:"%H" origin/$CIRCLE_PR_BASE_BRANCH`
                 echo "GIT_MERGE_TARGET: " ${GIT_MERGE_TARGET}

@@ -37,7 +37,7 @@ extensions = [
 ]
 
 intersphinx_mapping = {
-    'pytorch': ('https://pytorch.org/docs/master', None)
+    'pytorch': ('https://pytorch.org/docs/main', None)
 }
 
 # Setup absolute paths for communicating with breathe / exhale where

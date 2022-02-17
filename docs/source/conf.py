@@ -301,8 +301,8 @@ coverage_missing_automodule = [
 # source_suffix = ['.rst', '.md']
 source_suffix = '.rst'
 
-# The master toctree document.
-master_doc = 'index'
+# The main toctree document.
+main_doc = 'index'
 
 # General information about the project.
 project = 'PyTorch'
@@ -316,10 +316,10 @@ torch_version = str(torch.__version__)
 #
 # The short X.Y version.
 # TODO: change to [:2] at v1.0
-version = 'master (' + torch_version + ' )'
+version = 'main (' + torch_version + ' )'
 # The full version, including alpha/beta/rc tags.
 # TODO: verify this works as expected
-release = 'master'
+release = 'main'
 
 # Customized html_title here.
 # Default is " ".join(project, release, "documentation") if not set
@@ -549,7 +549,7 @@ latex_elements = {
 # (source start file, target name, title,
 #  author, documentclass [howto, manual, or own class]).
 latex_documents = [
-    (master_doc, 'pytorch.tex', 'PyTorch Documentation',
+    (main_doc, 'pytorch.tex', 'PyTorch Documentation',
      'Torch Contributors', 'manual'),
 ]
 
@@ -559,7 +559,7 @@ latex_documents = [
 # One entry per manual page. List of tuples
 # (source start file, name, description, authors, manual section).
 man_pages = [
-    (master_doc, 'PyTorch', 'PyTorch Documentation',
+    (main_doc, 'PyTorch', 'PyTorch Documentation',
      [author], 1)
 ]
 
@@ -570,7 +570,7 @@ man_pages = [
 # (source start file, target name, title, author,
 #  dir menu entry, description, category)
 texinfo_documents = [
-    (master_doc, 'PyTorch', 'PyTorch Documentation',
+    (main_doc, 'PyTorch', 'PyTorch Documentation',
      author, 'PyTorch', 'One line description of project.',
      'Miscellaneous'),
 ]

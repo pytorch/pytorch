@@ -74,7 +74,7 @@ def find_changed_files() -> List[str]:
     cached = git(["diff", "--cached", "--name-only"])
 
     # Committed
-    merge_base = git(["merge-base", "origin/master", "HEAD"])[0]
+    merge_base = git(["merge-base", "origin/main", "HEAD"])[0]
     diff_with_origin = git(["diff", "--name-only", merge_base, "HEAD"])
 
     # De-duplicate

@@ -926,7 +926,7 @@ Examples::
     tensor([2])
 
 .. _condition number:
-    https://pytorch.org/docs/master/linalg.html#torch.linalg.cond
+    https://pytorch.org/docs/main/linalg.html#torch.linalg.cond
 .. _full description of these drivers:
     https://www.netlib.org/lapack/lug/node27.html
 """)

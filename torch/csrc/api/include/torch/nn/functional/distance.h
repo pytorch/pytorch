@@ -22,7 +22,7 @@ inline Tensor cosine_similarity(
 } // namespace detail
 #endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
-/// See https://pytorch.org/docs/master/nn.functional.html#torch.nn.functional.cosine_similarity
+/// See https://pytorch.org/docs/main/nn.functional.html#torch.nn.functional.cosine_similarity
 /// about the exact behavior of this functional.
 ///
 /// See the documentation for `torch::nn::functional::CosineSimilarityFuncOptions` class to learn what
@@ -60,7 +60,7 @@ inline Tensor pairwise_distance(
 } // namespace detail
 #endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
-/// See https://pytorch.org/docs/master/nn.functional.html#torch.nn.functional.pairwise_distance
+/// See https://pytorch.org/docs/main/nn.functional.html#torch.nn.functional.pairwise_distance
 /// about the exact behavior of this functional.
 ///
 /// See the documentation for `torch::nn::functional::PairwiseDistanceFuncOptions` class to learn what

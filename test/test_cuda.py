@@ -2108,9 +2108,9 @@ torch.cuda.synchronize()
         cur = found_inf.device
 
         # As of d0c925f (4/16/20), docs are unclear about best API for sparse cuda tensor construction.
-        # https://pytorch.org/docs/master/tensors.html shows torch.sparse_coo_tensor(...), but it has no docstring.
+        # https://pytorch.org/docs/main/tensors.html shows torch.sparse_coo_tensor(...), but it has no docstring.
         # The same page shows several tensors with layout=torch.sparse_coo, but no constructors using that layout.
-        # Meanwhile, https://pytorch.org/docs/master/sparse.html shows torch.sparse.FloatTensor(...), which looks
+        # Meanwhile, https://pytorch.org/docs/main/sparse.html shows torch.sparse.FloatTensor(...), which looks
         # legacy and does not accept a device="cuda" kwarg.  Going with torch.sparse_coo_tensor.
         i = torch.tensor([[0, 1, 1],
                           [2, 0, 2]], device="cuda", dtype=torch.int64)

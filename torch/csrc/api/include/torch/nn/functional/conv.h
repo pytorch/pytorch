@@ -46,7 +46,7 @@ inline Tensor conv1d(
 } // namespace detail
 #endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
-/// See https://pytorch.org/docs/master/nn.functional.html#torch.nn.functional.conv1d
+/// See https://pytorch.org/docs/main/nn.functional.html#torch.nn.functional.conv1d
 /// about the exact behavior of this functional.
 ///
 /// See the documentation for `torch::nn::functional::Conv1dFuncOptions` class to learn what
@@ -95,7 +95,7 @@ inline Tensor conv2d(
 } // namespace detail
 #endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
-/// See https://pytorch.org/docs/master/nn.functional.html#torch.nn.functional.conv2d
+/// See https://pytorch.org/docs/main/nn.functional.html#torch.nn.functional.conv2d
 /// about the exact behavior of this functional.
 ///
 /// See the documentation for `torch::nn::functional::Conv2dFuncOptions` class to learn what
@@ -144,7 +144,7 @@ inline Tensor conv3d(
 } // namespace detail
 #endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
-/// See https://pytorch.org/docs/master/nn.functional.html#torch.nn.functional.conv3d
+/// See https://pytorch.org/docs/main/nn.functional.html#torch.nn.functional.conv3d
 /// about the exact behavior of this functional.
 ///
 /// See the documentation for `torch::nn::functional::Conv3dFuncOptions` class to learn what
@@ -183,7 +183,7 @@ inline Tensor conv_transpose1d(const Tensor& input, const Tensor& weight,
 } // namespace detail
 #endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
-/// See https://pytorch.org/docs/master/nn.functional.html#torch.nn.functional.conv_transpose1d
+/// See https://pytorch.org/docs/main/nn.functional.html#torch.nn.functional.conv_transpose1d
 /// about the exact behavior of this functional.
 ///
 /// See the documentation for `torch::nn::functional::ConvTranspose1dFuncOptions` class to learn what
@@ -215,7 +215,7 @@ inline Tensor conv_transpose2d(const Tensor& input, const Tensor& weight,
 } // namespace detail
 #endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
-/// See https://pytorch.org/docs/master/nn.functional.html#torch.nn.functional.conv_transpose2d
+/// See https://pytorch.org/docs/main/nn.functional.html#torch.nn.functional.conv_transpose2d
 /// about the exact behavior of this functional.
 ///
 /// See the documentation for `torch::nn::functional::ConvTranspose2dFuncOptions` class to learn what
@@ -247,7 +247,7 @@ inline Tensor conv_transpose3d(const Tensor& input, const Tensor& weight,
 } // namespace detail
 #endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
-/// See https://pytorch.org/docs/master/nn.functional.html#torch.nn.functional.conv_transpose3d
+/// See https://pytorch.org/docs/main/nn.functional.html#torch.nn.functional.conv_transpose3d
 /// about the exact behavior of this functional.
 ///
 /// See the documentation for `torch::nn::functional::ConvTranspose3dFuncOptions` class to learn what

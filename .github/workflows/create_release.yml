@@ -3,7 +3,7 @@ name: Create Release
 on:
   push:
     tags: ['v*']
-    branches: [master]
+    branches: [main]
   release:
     types: [published]
   pull_request:

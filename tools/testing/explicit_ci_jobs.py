@@ -138,6 +138,6 @@ if __name__ == "__main__":
         Filter CircleCI to only run:
         {jobs_str}
 
-        See [Run Specific CI Jobs](https://github.com/pytorch/pytorch/blob/master/CONTRIBUTING.md#run-specific-ci-jobs) for details.
+        See [Run Specific CI Jobs](https://github.com/pytorch/pytorch/blob/main/CONTRIBUTING.md#run-specific-ci-jobs) for details.
         """).strip()
         commit_ci([str(f.relative_to(REPO_ROOT)) for f in touched_files], message)

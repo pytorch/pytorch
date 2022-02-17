@@ -22,7 +22,7 @@ dependencies {
 
 ##### Nightly
 
-Nightly(snapshots) builds are published every night from `master` branch to [nexus sonatype snapshots repository](https://oss.sonatype.org/#nexus-search;quick~pytorch_android)
+Nightly(snapshots) builds are published every night from `main` branch to [nexus sonatype snapshots repository](https://oss.sonatype.org/#nexus-search;quick~pytorch_android)
 
 To use them repository must be specified explicitly:
 ```
@@ -100,10 +100,10 @@ dependencies {
 }
 ```
 We also have to add all transitive dependencies of our aars.
-As `pytorch_android` [depends](https://github.com/pytorch/pytorch/blob/master/android/pytorch_android/build.gradle#L76-L77) on `'com.facebook.soloader:nativeloader:0.10.1'` and `'com.facebook.fbjni:fbjni-java-only:0.2.2'`, we need to add them.
+As `pytorch_android` [depends](https://github.com/pytorch/pytorch/blob/main/android/pytorch_android/build.gradle#L76-L77) on `'com.facebook.soloader:nativeloader:0.10.1'` and `'com.facebook.fbjni:fbjni-java-only:0.2.2'`, we need to add them.
 (In case of using maven dependencies they are added automatically from `pom.xml`).
 
-You can check out [test app example](https://github.com/pytorch/pytorch/blob/master/android/test_app/app/build.gradle) that uses aars directly.
+You can check out [test app example](https://github.com/pytorch/pytorch/blob/main/android/test_app/app/build.gradle) that uses aars directly.
 
 ## Linking to prebuilt libtorch library from gradle dependency
 
@@ -215,9 +215,9 @@ void loadAndForwardModel(const std::string& modelPath) {
 }
 ```
 
-To load torchscript model for mobile we need some special setup which is placed in `struct JITCallGuard` in this example. It may change in future, you can track the latest changes keeping an eye in our [pytorch android jni code]([https://github.com/pytorch/pytorch/blob/master/android/pytorch_android/src/main/cpp/pytorch_jni_jit.cpp#L28)
+To load torchscript model for mobile we need some special setup which is placed in `struct JITCallGuard` in this example. It may change in future, you can track the latest changes keeping an eye in our [pytorch android jni code]([https://github.com/pytorch/pytorch/blob/main/android/pytorch_android/src/main/cpp/pytorch_jni_jit.cpp#L28)
 
-[Example of linking to libtorch from aar](https://github.com/pytorch/pytorch/tree/master/android/test_app)
+[Example of linking to libtorch from aar](https://github.com/pytorch/pytorch/tree/main/android/test_app)
 
 ## PyTorch Android API Javadoc
 

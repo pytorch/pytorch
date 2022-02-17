@@ -334,7 +334,7 @@ int main(int argc, char* argv[]) {
 
     // NNC supports a wide range of loop nest transformations, which we are not
     // listing here. Please refer to documentation in
-    // https://github.com/pytorch/pytorch/blob/master/torch/csrc/jit/tensorexpr/loopnest.h
+    // https://github.com/pytorch/pytorch/blob/main/torch/csrc/jit/tensorexpr/loopnest.h
     // for more details.
   }
 

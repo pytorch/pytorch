@@ -17,7 +17,7 @@ export DEBUG=0
 export OMP_NUM_THREADS=10
 
 # Compile pytorch with the base revision
-git checkout master
+git checkout main
 python setup.py develop
 
 # Run the benchmark for the base

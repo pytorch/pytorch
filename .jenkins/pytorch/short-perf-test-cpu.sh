@@ -18,13 +18,13 @@ pip install -q awscli
 # More info at https://github.com/aws/aws-cli/issues/2321
 aws configure set default.s3.multipart_threshold 5GB
 
-if [[ "$COMMIT_SOURCE" == master ]]; then
-    # Get current master commit hash
+if [[ "$COMMIT_SOURCE" == main ]]; then
+    # Get current main commit hash
     MASTER_COMMIT_ID=$(git log --format="%H" -n 1)
     export MASTER_COMMIT_ID
 fi
 
-# Find the master commit to test against
+# Find the main commit to test against
 git remote add upstream https://github.com/pytorch/pytorch.git
 git fetch upstream
 IFS=$'\n'
@@ -33,10 +33,10 @@ while IFS='' read -r commit_id; do
         LATEST_TESTED_COMMIT=${commit_id}
         break
     fi
-done < <(git rev-list upstream/master)
+done < <(git rev-list upstream/main)
 aws s3 cp s3://ossci-perf-test/pytorch/cpu_runtime/"${LATEST_TESTED_COMMIT}".json cpu_runtime.json
 
-if [[ "$COMMIT_SOURCE" == master ]]; then
+if [[ "$COMMIT_SOURCE" == main ]]; then
     # Prepare new baseline file
     cp cpu_runtime.json new_cpu_runtime.json
     python update_commit_hash.py new_cpu_runtime.json "${MASTER_COMMIT_ID}"
@@ -54,7 +54,7 @@ fi
 
 # Run tests
 export TEST_MODE="compare_with_baseline"
-if [[ "$COMMIT_SOURCE" == master ]]; then
+if [[ "$COMMIT_SOURCE" == main ]]; then
     export TEST_MODE="compare_and_update"
 fi
 
@@ -66,8 +66,8 @@ run_test test_cpu_speed_torch_tensor ${TEST_MODE}
 run_test test_cpu_speed_mini_sequence_labeler 20 ${TEST_MODE}
 run_test test_cpu_speed_mnist 20 ${TEST_MODE}
 
-if [[ "$COMMIT_SOURCE" == master ]]; then
-    # This could cause race condition if we are testing the same master commit twice,
+if [[ "$COMMIT_SOURCE" == main ]]; then
+    # This could cause race condition if we are testing the same main commit twice,
     # but the chance of them executing this line at the same time is low.
     aws s3 cp new_cpu_runtime.json s3://ossci-perf-test/pytorch/cpu_runtime/"${MASTER_COMMIT_ID}".json --acl public-read
 fi

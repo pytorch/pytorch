@@ -78,7 +78,7 @@ v1.8.1-rc1
 
 Pushing a release candidate should trigger the `binary_builds` workflow within CircleCI using [`pytorch/pytorch-probot`](https://github.com/pytorch/pytorch-probot)'s [`trigger-circleci-workflows`](trigger-circleci-workflows) functionality.
 
-This trigger functionality is configured here: [`pytorch-circleci-labels.yml`](https://github.com/pytorch/pytorch/blob/master/.github/pytorch-circleci-labels.yml)
+This trigger functionality is configured here: [`pytorch-circleci-labels.yml`](https://github.com/pytorch/pytorch/blob/main/.github/pytorch-circleci-labels.yml)
 
 ### Release Candidate Storage
 
@@ -104,7 +104,7 @@ An example of this would look like:
 ## Promoting RCs to Stable
 
 Promotion of RCs to stable is done with this script:
-[`pytorch/builder:release/promote.sh`](https://github.com/pytorch/builder/blob/master/release/promote.sh)
+[`pytorch/builder:release/promote.sh`](https://github.com/pytorch/builder/blob/main/release/promote.sh)
 
 Users of that script should take care to update the versions necessary for the specific packages you are attempting to promote.
 

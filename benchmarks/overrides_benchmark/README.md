@@ -33,7 +33,7 @@ Here is a brief overview of what the results should look like, if run correctly:
 * Changing the dispatching mechanism may result in changes that are on the order of 100 ns, which are hard to detect due to noise, but important.
 
 ## Reporting benchmark results
-When modifying any of the machinery around `__torch_function__`, run the benchmark for both the feature branch and the point it diverges from `master`. For each of these:
+When modifying any of the machinery around `__torch_function__`, run the benchmark for both the feature branch and the point it diverges from `main`. For each of these:
 
 * Run `bench.py`, and include the output in your result.
 * For each case where `bench.py` shows a regression, run the commands described above, prefixing the output SVG filename (the input to the `-o` switch) with `base-` or `branch-` depending on the commit you are running the benchmark on.

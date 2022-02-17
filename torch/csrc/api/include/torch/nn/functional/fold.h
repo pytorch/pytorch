@@ -32,7 +32,7 @@ inline Tensor fold(const Tensor& input,
 } // namespace detail
 #endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
-/// See https://pytorch.org/docs/master/nn.functional.html#torch.nn.functional.fold
+/// See https://pytorch.org/docs/main/nn.functional.html#torch.nn.functional.fold
 /// about the exact behavior of this functional.
 ///
 /// See the documentation for `torch::nn::functional::FoldFuncOptions` class to learn what
@@ -79,7 +79,7 @@ inline Tensor unfold(const Tensor& input,
 } // namespace detail
 #endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
-/// See https://pytorch.org/docs/master/nn.functional.html#torch.nn.functional.unfold
+/// See https://pytorch.org/docs/main/nn.functional.html#torch.nn.functional.unfold
 /// about the exact behavior of this functional.
 ///
 /// See the documentation for `torch::nn::functional::UnfoldFuncOptions` class to learn what

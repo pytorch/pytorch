@@ -15,7 +15,7 @@ Element-wise application of the ceil function ($y=ceil(x)$) to the input tensor
 `X`. Output tensor shape is the same as the input tensor.
 
 Github Link:
-- https://github.com/pytorch/pytorch/blob/master/caffe2/operators/ceil_op.cc
+- https://github.com/pytorch/pytorch/blob/main/caffe2/operators/ceil_op.cc
 
 <details>
 

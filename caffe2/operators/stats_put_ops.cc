@@ -36,7 +36,7 @@ OPERATOR_SCHEMA(AveragePut)
     Consume a value and pushes it to the global stat registry as an average.
 
     Github Links:
-    - https://github.com/pytorch/pytorch/blob/master/caffe2/operators/stats_put_ops.cc
+    - https://github.com/pytorch/pytorch/blob/main/caffe2/operators/stats_put_ops.cc
 
         )DOC")
     .Input(
@@ -69,7 +69,7 @@ OPERATOR_SCHEMA(IncrementPut)
     Consume a value and pushes it to the global stat registry as an sum.
 
     Github Links:
-    - https://github.com/pytorch/pytorch/blob/master/caffe2/operators/stats_put_ops.cc
+    - https://github.com/pytorch/pytorch/blob/main/caffe2/operators/stats_put_ops.cc
 
         )DOC")
     .Input(
@@ -102,7 +102,7 @@ OPERATOR_SCHEMA(StdDevPut)
       Consume a value and pushes it to the global stat registry as an standard deviation.
 
       Github Links:
-      - https://github.com/pytorch/pytorch/blob/master/caffe2/operators/stats_put_ops.cc
+      - https://github.com/pytorch/pytorch/blob/main/caffe2/operators/stats_put_ops.cc
 
         )DOC")
     .Input(

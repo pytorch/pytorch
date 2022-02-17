@@ -63,7 +63,7 @@ void AdagradParamState::serialize(torch::serialize::InputArchive& archive) {
 }
 
 /// Adapted from
-/// https://github.com/pytorch/pytorch/blob/master/torch/optim/adagrad.py
+/// https://github.com/pytorch/pytorch/blob/main/torch/optim/adagrad.py
 Tensor Adagrad::step(LossClosure closure) {
   NoGradGuard no_grad;
   Tensor loss = {};

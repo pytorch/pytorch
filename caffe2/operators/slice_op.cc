@@ -20,7 +20,7 @@ Produces a slice of the input tensor.
 - If a negative value is passed for any of the start or end indices, it represents |value| - 1 elements before the end of that dimension. End indices are non-inclusive unless negative (end index -1 means up to and including the last element).
 
 Github Links:
-- https://github.com/pytorch/pytorch/blob/master/caffe2/operators/slice_op.cc
+- https://github.com/pytorch/pytorch/blob/main/caffe2/operators/slice_op.cc
 
 <details>
 

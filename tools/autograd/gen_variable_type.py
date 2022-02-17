@@ -459,7 +459,7 @@ def gen_variable_type_func(
         msg = (f'There\'s a formula for {name}(or its functional variant) in derivatives.yaml. '
                f'It\'s required to add a dispatch section for it with explicit supported backends e.g CPU/CUDA '
                f'or CompositeExplicitAutograd in native_functions.yaml. Please see '
-               f'https://github.com/pytorch/pytorch/tree/master/aten/src/ATen/native#choosing-the-right-dispatch-keyword '
+               f'https://github.com/pytorch/pytorch/tree/main/aten/src/ATen/native#choosing-the-right-dispatch-keyword '
                f'for instructions to choose the right dispatch keyword.')
         assert f.is_abstract, msg
 

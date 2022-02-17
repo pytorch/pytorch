@@ -68,15 +68,15 @@ Here, we set up a simple Module that exercises different language features: fetc
 
 # Internal Structure
 
-## [Graph](https://pytorch.org/docs/master/fx.html#torch.fx.Graph) ##
+## [Graph](https://pytorch.org/docs/main/fx.html#torch.fx.Graph) ##
 TODO
 
-## [GraphModule](https://pytorch.org/docs/master/fx.html#torch.fx.GraphModule) ##
+## [GraphModule](https://pytorch.org/docs/main/fx.html#torch.fx.GraphModule) ##
 TODO
 
 # Symbolic Tracing
 
-## [Tracer](https://pytorch.org/docs/master/fx.html#torch.fx.Tracer) ##
+## [Tracer](https://pytorch.org/docs/main/fx.html#torch.fx.Tracer) ##
 
 `Tracer` is the class that implements the symbolic tracing functionality of `torch.fx.symbolic_trace`. A call to `symbolic_trace(m)` is equivalent to `Tracer().trace(m)`. Tracer can be subclassed to override various behaviors of the tracing process. The different behaviors that can be overridden are described in the docstrings of the methods on the class.
 

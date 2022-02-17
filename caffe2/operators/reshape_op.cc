@@ -126,7 +126,7 @@ np.emtpy(shape=[0, 0])
 
 Github Links:
 
-- https://github.com/pytorch/pytorch/blob/master/caffe2/operators/reshape_op.cc
+- https://github.com/pytorch/pytorch/blob/main/caffe2/operators/reshape_op.cc
 
 <details>
 
