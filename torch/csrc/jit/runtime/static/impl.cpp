@@ -1734,7 +1734,8 @@ ProcessedFunction::ProcessedFunction(
     Node* node,
     bool enable_out_variant,
     bool check_memory_overlap)
-    : check_memory_overlap_(check_memory_overlap) {
+    : check_memory_overlap_(check_memory_overlap),
+      num_outputs_(node->outputs().size()) {
   if (enable_out_variant) {
     f_ = getOutOfPlaceOperation(node);
     if (f_) {
@@ -1791,13 +1792,7 @@ ProcessedNode::ProcessedNode(
       fn_(fn),
       inputs_(std::move(inputs)),
       outputs_offset_(outputs_offset) {
-  TORCH_CHECK(
-      node->outputs().size() < (1 << (sizeof(num_outputs_) * 8)),
-      node->outputs().size(),
-      " outputs to ProcessedNode ",
-      node->kind().toQualString(),
-      " is too many to use 2-byte indexing");
-  num_outputs_ = node->outputs().size();
+  TORCH_CHECK(num_outputs() == node->outputs().size());
 }
 
 std::vector<IValue> ProcessedNode::inputs_ivalue_vec() const {
@@ -1869,12 +1864,12 @@ bool ProcessedNode::verify_no_memory_overlap(bool force_check) const {
 }
 
 bool ProcessedNode::verify_outputs_dont_overlap_each_other() const {
-  for (const auto i : c10::irange(num_outputs_)) {
+  for (const auto i : c10::irange(num_outputs())) {
     if (!Output(i).isTensor()) {
       continue;
     }
     const auto& out0_t = Output(i).toTensor();
-    for (const auto j : c10::irange(i + 1, num_outputs_)) {
+    for (const auto j : c10::irange(i + 1, num_outputs())) {
       if (!Output(j).isTensor()) {
         continue;
       }
@@ -1894,7 +1889,7 @@ bool ProcessedNode::verify_inputs_dont_overlap_outputs(bool force_check) const {
   // skip memory overlap check for mutable or view ops with only one output
   bool skip_check = !schema ||
       ((schema->is_mutable() || !fn_->checkMemoryOverlap()) &&
-       num_outputs_ == 1);
+       num_outputs() == 1);
   if (!force_check && skip_check) {
     if (!schema) {
       VLOG(2) << "Detected that op schema is null";
@@ -1902,7 +1897,7 @@ bool ProcessedNode::verify_inputs_dont_overlap_outputs(bool force_check) const {
     }
     VLOG(2) << "schema->is_mutable: " << schema->is_mutable()
             << ", fn_->checkMemoryOverlap: " << fn_->checkMemoryOverlap()
-            << ", num_outputs_: " << num_outputs_;
+            << ", num_outputs_: " << num_outputs();
     return true;
   }
 
@@ -1912,7 +1907,7 @@ bool ProcessedNode::verify_inputs_dont_overlap_outputs(bool force_check) const {
       continue;
     }
     const auto& in_t = in->toTensor();
-    for (const auto j : c10::irange(num_outputs_)) {
+    for (const auto j : c10::irange(num_outputs())) {
       const IValue& out = Output(j);
       if (!out.isTensor()) {
         continue;
@@ -1949,7 +1944,7 @@ void ProcessedNode::verify_and_correct_memory_overlap() {
       continue;
     }
     const auto& in_t = in.toTensor();
-    for (const auto j : c10::irange(num_outputs_)) {
+    for (const auto j : c10::irange(num_outputs())) {
       auto& output = Output(j);
       if (output.isTensor()) {
         check_and_correct_overlap_with(in_t, output);
