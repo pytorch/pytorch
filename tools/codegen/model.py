@@ -387,7 +387,7 @@ class NativeFunction:
                 for k in ks.split(","):
                     dispatch_key = DispatchKey.parse(k.strip())
                     assert dispatch_key in dispatch_keys, f"Dispatch key {dispatch_key} of kernel {v} " \
-                                                           "is not a supported dispatch key."
+                        "is not a supported dispatch key."
                     # Why is 'structured' included? External backends (e.g.
                     # XLA) opt into which ops are structured independently
                     # of which in-tree ops are structured
