@@ -2875,7 +2875,7 @@ class TestAutograd(TestCase):
 
     @skipCUDAIfRocm
     @onlyCUDA
-    def test_custom_module_input_op_ids(self):
+    def test_custom_module_input_op_ids(self, device):
         class MyFunc(Function):
             @staticmethod
             def forward(ctx, x):
