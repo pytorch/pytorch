@@ -3649,10 +3649,6 @@ def sample_inputs_max_pool(op_info, device, dtype, requires_grad, **kwargs):
 
     params_generator = params_generator_type_dict[op_info.name]()
     for (shape, memory_format), kwargs in params_generator.gen_input_params():
-        # Unbatched
-        arg = make_arg(shape[1:]).to(memory_format=memory_format).requires_grad_(requires_grad)
-        yield SampleInput(arg, kwargs=kwargs)
-        # Batched
         arg = make_arg(shape).to(memory_format=memory_format).requires_grad_(requires_grad)
         yield SampleInput(arg, kwargs=kwargs)
 
