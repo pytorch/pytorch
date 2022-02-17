@@ -694,10 +694,22 @@ def squeeze(g, self, dim=None):
 
 def prelu(g, self, weight):
     self_rank = sym_help._get_tensor_rank(self)
-    if self_rank is not None and self_rank > 2:
-        weight = sym_help._unsqueeze_helper(g, weight, list(range(1, self_rank - 1)))
-    return g.op("PRelu", self, weight)
+    if self_rank is not None:
+        if self_rank > 2:
+            # make weight unidirectional broadcastable
+            weight = sym_help._unsqueeze_helper(g, weight, list(range(1, self_rank - 1)))
+        elif self_rank == 0:
+            # weight is always rank 1. torch allows scalar self, and ONNX is ambiguous
+            # about whether this is allowed, but some implementations enforce
+            # rank(self) >= rank(weight), which makes sense.
+            self = sym_help._unsqueeze_helper(g, self, [0])
+            self_rank = 1
 
+    weight_rank = sym_help._get_tensor_rank(weight)
+    if self_rank is not None and weight_rank is not None:
+        assert self_rank >= weight_rank, \
+            "rank(x) should be >= rank(slope) but got {} < {}".format(self_rank, weight_rank)
+    return g.op("PRelu", self, weight)
 
 def silu(g, input):
     return g.op("Mul", input, g.op("Sigmoid", input))
