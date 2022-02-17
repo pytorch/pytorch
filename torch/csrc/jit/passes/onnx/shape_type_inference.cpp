@@ -1374,12 +1374,31 @@ void ComputeConstant(Node* n, int opset_version) {
         if (input0_shape_size.has_value()) {
           auto input0_shape_value = input0_shape_size.value();
           if (ConstantValueMap::HasValue(n->input(1)->debugName())) {
+            // When value of `shape` is statically known,
+            // output shape can be computed.
             auto shape_temp = ConstantValueMap::GetValueInto1DInt64Vector(
                 n->input(1)->debugName());
             auto final_shape =
                 ComputeShapeFromExpand(input0_shape_value, shape_temp);
             if (final_shape.has_value()) {
               UpdateShape(n->output(), final_shape.value());
+            }
+          } else if (
+              auto expand_shape =
+                  ConstantValueMap::GetShapeInto1DInt64VectorWithOneUnknown(
+                      n->input(1)->debugName())) {
+            // When shape of `shape` is statically known,
+            // output rank can be computed.
+            TORCH_INTERNAL_ASSERT(
+                expand_shape.value().size() == 1,
+                "`Shape` input to `Expand` should be a 1-D tensor. Instead got rank ",
+                expand_shape.value().size());
+            if (expand_shape.value()[0] > 0) {
+              std::vector<c10::ShapeSymbol> final_shape;
+              for (const auto i : c10::irange(expand_shape.value()[0])) {
+                final_shape.emplace_back(c10::ShapeSymbol::newSymbol());
+              }
+              UpdateShape(n->output(), c10::SymbolicShape(final_shape));
             }
           }
         }
