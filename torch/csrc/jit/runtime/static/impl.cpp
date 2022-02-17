@@ -156,7 +156,9 @@ void OptimizeGraph(
     // TODO: we can avoid this guard by moving operations
     // to exposed folders.
 #ifdef FBCODE_CAFFE2
-    ReplaceWithCopy(graph);
+    if (opts.use_copy_variants) {
+      ReplaceWithCopy(graph);
+    }
     if (opts.use_maybe_copy_variants) {
       ReplaceWithMaybeCopy(graph);
     }
@@ -242,7 +244,8 @@ std::pair<std::shared_ptr<Graph>, c10::optional<Module>> PrepareForStaticModule(
   LOG(INFO) << "StaticModuleOptions: enable_out_variant "
             << opts.enable_out_variant << ", optimize_memory "
             << opts.optimize_memory << ", manage_output_tensors "
-            << opts.manage_output_tensors << ", use_maybe_copy_variants "
+            << opts.manage_output_tensors << ", use_copy_variants "
+            << opts.use_copy_variants << ", use_maybe_copy_variants "
             << opts.use_maybe_copy_variants << ", enable_tensorexpr_fusion "
             << opts.enable_tensorexpr_fusion;
 
@@ -1731,7 +1734,8 @@ ProcessedFunction::ProcessedFunction(
     Node* node,
     bool enable_out_variant,
     bool check_memory_overlap)
-    : check_memory_overlap_(check_memory_overlap) {
+    : check_memory_overlap_(check_memory_overlap),
+      num_outputs_(node->outputs().size()) {
   if (enable_out_variant) {
     f_ = getOutOfPlaceOperation(node);
     if (f_) {
@@ -1788,13 +1792,7 @@ ProcessedNode::ProcessedNode(
       fn_(fn),
       inputs_(std::move(inputs)),
       outputs_offset_(outputs_offset) {
-  TORCH_CHECK(
-      node->outputs().size() < (1 << (sizeof(num_outputs_) * 8)),
-      node->outputs().size(),
-      " outputs to ProcessedNode ",
-      node->kind().toQualString(),
-      " is too many to use 2-byte indexing");
-  num_outputs_ = node->outputs().size();
+  TORCH_CHECK(num_outputs() == node->outputs().size());
 }
 
 std::vector<IValue> ProcessedNode::inputs_ivalue_vec() const {
@@ -1866,12 +1864,12 @@ bool ProcessedNode::verify_no_memory_overlap(bool force_check) const {
 }
 
 bool ProcessedNode::verify_outputs_dont_overlap_each_other() const {
-  for (const auto i : c10::irange(num_outputs_)) {
+  for (const auto i : c10::irange(num_outputs())) {
     if (!Output(i).isTensor()) {
       continue;
     }
     const auto& out0_t = Output(i).toTensor();
-    for (const auto j : c10::irange(i + 1, num_outputs_)) {
+    for (const auto j : c10::irange(i + 1, num_outputs())) {
       if (!Output(j).isTensor()) {
         continue;
       }
@@ -1891,7 +1889,7 @@ bool ProcessedNode::verify_inputs_dont_overlap_outputs(bool force_check) const {
   // skip memory overlap check for mutable or view ops with only one output
   bool skip_check = !schema ||
       ((schema->is_mutable() || !fn_->checkMemoryOverlap()) &&
-       num_outputs_ == 1);
+       num_outputs() == 1);
   if (!force_check && skip_check) {
     if (!schema) {
       VLOG(2) << "Detected that op schema is null";
@@ -1899,7 +1897,7 @@ bool ProcessedNode::verify_inputs_dont_overlap_outputs(bool force_check) const {
     }
     VLOG(2) << "schema->is_mutable: " << schema->is_mutable()
             << ", fn_->checkMemoryOverlap: " << fn_->checkMemoryOverlap()
-            << ", num_outputs_: " << num_outputs_;
+            << ", num_outputs_: " << num_outputs();
     return true;
   }
 
@@ -1909,7 +1907,7 @@ bool ProcessedNode::verify_inputs_dont_overlap_outputs(bool force_check) const {
       continue;
     }
     const auto& in_t = in->toTensor();
-    for (const auto j : c10::irange(num_outputs_)) {
+    for (const auto j : c10::irange(num_outputs())) {
       const IValue& out = Output(j);
       if (!out.isTensor()) {
         continue;
@@ -1946,7 +1944,7 @@ void ProcessedNode::verify_and_correct_memory_overlap() {
       continue;
     }
     const auto& in_t = in.toTensor();
-    for (const auto j : c10::irange(num_outputs_)) {
+    for (const auto j : c10::irange(num_outputs())) {
       auto& output = Output(j);
       if (output.isTensor()) {
         check_and_correct_overlap_with(in_t, output);
