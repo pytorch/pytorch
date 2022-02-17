@@ -2873,6 +2873,8 @@ class TestAutograd(TestCase):
         self.assertTrue(found_bwd_sum)
         self.assertTrue(found_empty)
 
+    @skipCUDAIfRocm
+    @onlyCUDA
     def test_custom_module_input_op_ids(self):
         class MyFunc(Function):
             @staticmethod
