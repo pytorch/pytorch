@@ -10533,7 +10533,7 @@ class TestNN(NNTestCase):
                     input = input.requires_grad_(False)
                     self.assertTrue(gradcheck(
                         lambda grid: F.grid_sample(input, grid, mode=mode, padding_mode=padding_mode,
-                                                        align_corners=align_corners),
+                                                   align_corners=align_corners),
                         (grid,)))
 
                     for input_requires_grad in [False, True]:
