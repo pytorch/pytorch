@@ -1,26 +1,25 @@
 # @generated DO NOT EDIT MANUALLY
 # Template is at:    .github/templates/ios_ci_workflow.yml.j2
 # Generation script: .github/scripts/generate_ci_workflows.py
-name: ios-12-5-1-x86-64-metal
+name: ios-12-5-1-arm64-metal
 
 on:
+  schedule:
+    - cron: 45 4,10,16,22 * * *
   push:
-    branches:
-      - master
-      - release/*
     tags:
       - 'ciflow/all/*'
       - 'ciflow/ios/*'
       - 'ciflow/macos/*'
-      - 'ciflow/trunk/*'
+      - 'ciflow/scheduled/*'
   workflow_dispatch:
 
 env:
-  BUILD_ENVIRONMENT: ios-12-5-1-x86-64-metal
+  BUILD_ENVIRONMENT: ios-12-5-1-arm64-metal
   IN_CI: 1
   IS_GHA: 1
   IOS_PLATFORM: OS
-  IOS_ARCH: x86_64
+  IOS_ARCH: arm64
 
 
 jobs:
@@ -32,7 +31,7 @@ jobs:
     runs-on: macos-10.15
     timeout-minutes: 240
     env:
-      JOB_BASE_NAME: ios-12-5-1-x86-64-metal-build
+      JOB_BASE_NAME: ios-12-5-1-arm64-metal-build
       IOS_CERT_KEY_2022: ${{ secrets.IOS_CERT_KEY_2022 }}
       IOS_CERT_SECRET: ${{ secrets.IOS_CERT_SECRET }}
       IOS_DEV_TEAM_ID: ${{ secrets.IOS_DEV_TEAM_ID }}
@@ -140,5 +139,5 @@ jobs:
           fi
 
 concurrency:
-  group: ios-12-5-1-x86-64-metal-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
+  group: ios-12-5-1-arm64-metal-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
   cancel-in-progress: true
