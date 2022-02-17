@@ -197,6 +197,9 @@ void raw_cudnn_convolution_forward_out(
 
   Tensor conv_output = at::empty(quantized_output.sizes(), at::device(at::kCUDA).dtype(at::kFloat), at::MemoryFormat::ChannelsLast);
   // TODO: compile empty & fill_ using full_like or full
+  // std::vector<int64_t> sizes(quantized_output.sizes().size(), 1);
+  // Tensor requantize_multiplier_tensor = at::empty(sizes, at::device(at::kCUDA).dtype(at::kFloat),
+  //                                                 at::MemoryFormat::ChannelsLast);
   Tensor requantize_multiplier_tensor = at::empty(quantized_output.sizes(), at::device(at::kCUDA).dtype(at::kFloat), at::MemoryFormat::ChannelsLast);
   requantize_multiplier_tensor.fill_(requantize_multiplier);
   cudnnHandle_t handle = getCudnnHandle();

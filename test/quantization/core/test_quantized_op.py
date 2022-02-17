@@ -18,6 +18,7 @@ from torch.nn.modules.utils import _single, _pair
 from hypothesis import settings, HealthCheck
 from hypothesis import assume, given, note
 from hypothesis import strategies as st
+from hypothesis.core import seed
 import torch.testing._internal.hypothesis_utils as hu
 hu.assert_deadline_disabled()
 
@@ -4026,6 +4027,10 @@ class TestQuantizedConv(TestCase):
         # For example, the result of round(2.5) + 1 is 3 while
         # round(2.5 + 1) is 4 assuming the rounding mode is
         # round-to-nearest, ties-to-even.
+        print("result numpy array: ", result_ref_q.int_repr().cpu().numpy())
+        print("Y_q numpy array: ", Y_q.int_repr().cpu().numpy())
+        print("diff numpy array: ", np.abs(result_ref_q.int_repr().cpu().numpy().astype(np.int32) - Y_q.int_repr().cpu().numpy()))
+
         np.testing.assert_array_almost_equal(
             result_ref_q.int_repr().cpu().numpy(), Y_q.int_repr().cpu().numpy(), decimal=0,
             err_msg=f'''X: {X_q}, W: {W_q}, b: {bias_float}, strides: {strides},
@@ -4111,6 +4116,7 @@ class TestQuantizedConv(TestCase):
             dilations, X_scale, X_zero_point, W_scale, W_zero_point,
             Y_scale, Y_zero_point, use_bias, use_relu, use_channelwise, False)
 
+    @seed(0)
     @given(batch_size=st.integers(1, 3),
            # only multiples of 16 are supported right now, might be fixed in
            # next release of cudnn
@@ -4147,9 +4153,9 @@ class TestQuantizedConv(TestCase):
            use_channelwise=st.sampled_from([False]))
     @skipIfNoFBGEMM
     @unittest.skipIf(not TEST_CUDNN, "cudnn is not enabled.")
-    @unittest.skip("Local only - currently the qconv2d_cudnn op is bulid "
-                   "with USE_EXPERIMENTAL_CUDNN_V8_API, we can enable the test "
-                   "after it is built by default")
+    # @unittest.skip("Local only - currently the qconv2d_cudnn op is bulid "
+    #                "with USE_EXPERIMENTAL_CUDNN_V8_API, we can enable the test "
+    #                "after it is built by default")
     def test_qconv2d_cudnn(
             self,
             batch_size,
@@ -4175,6 +4181,9 @@ class TestQuantizedConv(TestCase):
             use_relu,
             use_channelwise,
     ):
+        torch.manual_seed(0)
+        random.seed(0)
+        np.random.seed(0)
         input_channels = input_channels_per_group * groups
         output_channels = output_channels_per_group * groups
         kernels = (kernel_h, kernel_w)
@@ -4202,7 +4211,61 @@ class TestQuantizedConv(TestCase):
             device=torch.device("cuda"),
             input_dtype=torch.qint8, weight_dtype=torch.qint8, output_dtype=torch.qint8)
 
-    @unittest.skip("used for local benchmarking, comment when we want to run it")
+    def test_that_breaks_when_broadcasting(self):
+        batch_size=1
+        input_channels_per_group=32
+        height=10
+        width=7
+        output_channels_per_group=16
+        groups=1
+        kernel_h=4
+        kernel_w=7
+        stride_h=1
+        stride_w=1
+        pad_h=0
+        pad_w=0
+        dilation=1
+        X_scale=1.2
+        X_zero_point=0
+        W_scale=[0.4492537267506124]
+        W_zero_point=[0]
+        Y_scale=4.2
+        Y_zero_point=0
+        use_bias=False
+        use_relu=False
+        use_channelwise=False
+        torch.manual_seed(0)
+        random.seed(0)
+        np.random.seed(0)
+        input_channels = input_channels_per_group * groups
+        output_channels = output_channels_per_group * groups
+        kernels = (kernel_h, kernel_w)
+        strides = (stride_h, stride_w)
+        pads = (pad_h, pad_w)
+        dilations = (dilation, dilation)
+
+        qconv = torch.ops.quantized.conv2d_cudnn
+        assert not use_relu, "conv2d_relu_cudnn is not supported yet"
+        conv_op = torch.nn.Conv2d(
+            input_channels,
+            output_channels,
+            kernels,
+            strides,
+            pads,
+            dilations,
+            groups,
+        ).to(torch.device("cuda"))
+        self._test_qconv_impl(
+            qconv, None, conv_op, batch_size,
+            input_channels_per_group, (height, width),
+            output_channels_per_group, groups, kernels, strides, pads, None,
+            dilations, X_scale, X_zero_point, W_scale, W_zero_point,
+            Y_scale, Y_zero_point, use_bias, use_relu, use_channelwise, False,
+            device=torch.device("cuda"),
+            input_dtype=torch.qint8, weight_dtype=torch.qint8, output_dtype=torch.qint8)
+
+
+    # @unittest.skip("used for local benchmarking, comment when we want to run it")
     def test_benchmark(self):
         batch_size = 16
         in_channel = 64
