@@ -202,6 +202,7 @@ at::Tensor LazyNativeFunctions::_copy_from(const at::Tensor& self,
     dst_tensor.UpdateFromTensor(self, /*sync=*/sync_update);
   } else if (!dst_tensor) {
     at::Tensor tensor = self_tensor.ToTensor(/*detached=*/true);
+    //std::cerr << "tensor = " << tensor << " type " << c10::toString(dst.scalar_type()) << std::endl;
     at::Tensor typed_tensor =
         torch::lazy::CopyTensor(tensor, dst.scalar_type(), /*copy=*/false);
     dst.resize_as_(typed_tensor).copy_(typed_tensor);

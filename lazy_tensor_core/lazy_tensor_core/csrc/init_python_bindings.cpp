@@ -18,10 +18,12 @@
 #include <vector>
 
 #include <torch/csrc/lazy/core/lazy_graph_executor.h>
+#include "ATen/core/functional.h"
 #include "lazy_tensor_core/csrc/python_util.h"
 #include "lazy_tensor_core/csrc/tensor_aten_ops.h"
 #include "lazy_tensor_core/csrc/tensor_distributed.h"
 #include <torch/csrc/lazy/core/tensor_impl.h>
+#include <torch/csrc/lazy/core/view_ops/size.h>
 #include "lazy_tensor_core/csrc/ts_backend/backend_impl.h"
 #include "lazy_tensor_core/csrc/version.h"
 #include "lazy_tensors/computation_client/metrics_analysis.h"
@@ -30,6 +32,7 @@
 #include "torch/csrc/autograd/utils/wrap_outputs.h"
 #include "torch/csrc/autograd/variable.h"
 #include "torch/csrc/jit/python/pybind.h"
+#include "torch/csrc/lazy/core/ir.h"
 #include "torch/csrc/utils/cuda_lazy_init.h"
 
 namespace torch_lazy_tensors {
@@ -423,12 +426,39 @@ std::vector<at::Tensor> LtcCreateTensorList(const at::TensorList& tensors) {
 // }
 
 void InitLtcModuleBindings(py::module m) {
+  py::class_<torch::lazy::Node, std::shared_ptr<torch::lazy::Node>>(m, "IrNode");
   m.def("_prepare_to_exit", []() { PrepareToExit(); });
   m.def("_get_git_revs", []() { return GetRevisions(); });
   m.def("_ltc_nms", [](const at::Tensor& boxes, const at::Tensor& scores,
                        const at::Tensor& score_threshold,
                        const at::Tensor& iou_threshold, int64_t output_size) {
     return LtcNms(boxes, scores, score_threshold, iou_threshold, output_size);
+  });
+  m.def("_dynamic_view",
+        [](const at::Tensor& t, std::vector<torch::lazy::NodePtr> dims) -> at::Tensor {
+
+          auto lti = torch::lazy::GetLtcTensor(t);
+          std::vector<torch::lazy::Value> init_dims;
+          init_dims.reserve(t.dim());
+          for (auto i : c10::irange(t.dim())) {
+            init_dims.push_back(torch::lazy::Value(torch::lazy::MakeNode<torch::lazy::Size>(lti.GetIrValue(), i), 0));
+          }
+          auto dim_vals = c10::fmap(dims, [](auto n) {
+            return torch::lazy::Value(n, 0);
+          });
+
+          torch::lazy::ViewInfo view_info(init_dims, dim_vals);
+          view_info.shape = torch::lazy::Shape(t.scalar_type(), {1});
+          auto ltv = lti.CreateViewTensor(std::move(view_info));
+          return torch::lazy::CreateAtenFromLtcTensor(ltv);
+        });
+  //  -> torch::lazy::NodePtr
+  m.def("_dynamic_size", [](const at::Tensor& t, size_t i) {
+    auto lti = torch::lazy::GetLtcTensor(t);
+    auto size_val = torch::lazy::MakeNode<torch::lazy::Size>(lti.GetIrValue(), i);
+    return size_val;
+    // auto stv = torch::lazy::LazyTensor::Create(size_val, lti.GetDevice());
+    // return torch::lazy::CreateAtenFromLtcTensor(stv);
   });
   m.def("_get_ltc_tensors_dot",
         [](const std::vector<at::Tensor>& tensors) -> std::string {

@@ -18,6 +18,7 @@
 #include <algorithm>
 #include <functional>
 #include <numeric>
+#include "lazy/core/view_ops/dynamic_view.h"
 
 namespace torch {
 namespace lazy {
@@ -41,6 +42,8 @@ Value ApplyViewInfo(Value ir_value, const ViewInfo& view_info) {
       return MakeNode<Permute>(ir_value, view_info.permutation);
     case ViewInfo::Type::kReshape:
       return MakeNode<View>(ir_value, view_info.shape.sizes().vec());
+    case ViewInfo::Type::kDynamicReshape:
+      return MakeNode<DynamicView>(ir_value, view_info.tgt_shape_ir_vals_);
     case ViewInfo::Type::kResize:
       return MakeNode<Resize>(ir_value, view_info.shape.sizes().vec());
     case ViewInfo::Type::kAsStrided:
@@ -94,6 +97,9 @@ Value ApplyUpdate(Value ir_value, const Alias::UpdateData& update_data) {
         break;
       case ViewInfo::Type::kReshape:
         result = MakeNode<View>(result, view_info.source_shape.sizes().vec());
+        break;
+      case ViewInfo::Type::kDynamicReshape:
+        result = MakeNode<DynamicView>(ir_value, view_info.src_shape_ir_vals_);
         break;
       case ViewInfo::Type::kResize:
         result = MakeNode<Resize>(result, view_info.source_shape.sizes().vec());
