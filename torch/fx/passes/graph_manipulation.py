@@ -383,7 +383,7 @@ def serialize_module(fx_module: GraphModule, weights: Dict, name_prefix="") -> D
                 # so we check if the users of this get_attr is a quantized EB and this is the weight for the EB.
                 user_targets = {
                     _get_qualified_name(n.target)
-                    .replace("torch.fx.experimental.fx_acc.", "")
+                    .replace("fx2trt_oss.tracer.acc_tracer.", "")
                     .replace("glow.fb.fx.", ""): n
                     for n in node.users.keys()
                 }
@@ -451,9 +451,9 @@ def serialize_module(fx_module: GraphModule, weights: Dict, name_prefix="") -> D
                 get_output_arg_info,
             )
 
-            # If there're multiple outputs then node_rep["args"][0] will be a tuple.
-            # In this case we want to unpack the tuple.
-            if isinstance(node_rep["args"][0], tuple):
+            # If there're multiple outputs then node_rep["args"][0] will be a tuple or
+            # list. In this case we want to unpack the tuple or list.
+            if isinstance(node_rep["args"][0], (tuple, list)):
                 node_rep["args"] = node_rep["args"][0]
         else:
             node_rep["args"] = map_aggregate(node.args, get_arg_info)
