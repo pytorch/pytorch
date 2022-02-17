@@ -61,7 +61,6 @@ tools/coverage_plugins_package/pip-wheel-metadata/
 tools/shared/_utils_internal.py
 tools/fast_nvcc/wrap_nvcc.sh
 tools/fast_nvcc/tmp/
-tools/bazel
 torch.egg-info/
 torch/_C/__init__.pyi
 torch/_C/_nn.pyi
@@ -255,6 +254,9 @@ cmake-build-debug
 # BEGIN NOT-CLEAN-FILES (setup.py handles this marker. Do not change.)
 #
 # Below files are not deleted by "setup.py clean".
+
+# Downloaded bazel
+tools/bazel
 
 # Visual Studio Code files
 .vs
