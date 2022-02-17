@@ -22,8 +22,8 @@
    },
    {
     "name": "OSS CI",
-    "patterns": [".github/**", ".circleci/**", ".jenkins/**", "scripts/**"],
-    "approved_by": ["seemethere", "malfet", "suo", "janeyx99"],
+    "patterns": [".github/**", ".circleci/**", ".jenkins/**", "scripts/**", "tools/**"],
+    "approved_by": ["seemethere", "malfet", "suo", "janeyx99", "ezyang"],
     "mandatory_app_id": 12274
    },
    {
