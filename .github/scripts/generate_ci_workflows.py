@@ -249,9 +249,6 @@ class CIWorkflow:
     def normalized_build_environment(self, suffix: str) -> str:
         return self.build_environment.replace(".", "_") + suffix
 
-    def test_name(self) -> str:
-        return self.normalized_build_environment("-test")
-
     def _gen_test_jobs(self) -> Any:
         if self.arch == "linux":
             MULTIGPU_RUNNER_TYPE = "linux.16xlarge.nvidia.gpu"
@@ -303,6 +300,7 @@ class CIWorkflow:
             for shard in range(1, config["num_shards"] + 1):
                 test_jobs.append(
                     {
+                        "id": f"test_{name}_{shard}_{config['num_shards']}",
                         "name": f"test ({name}, {shard}, {config['num_shards']}, {config['runner']})",
                         "config": name,
                         "shard": shard,
@@ -315,6 +313,7 @@ class CIWorkflow:
             for shard in range(1, self.num_test_shards + 1):
                 test_jobs.append(
                     {
+                        "id": f"test_default_{shard}_{config['num_shards']}",
                         "name": f"test (default, {shard}, {self.num_test_shards}, {self.test_runner_type})",
                         "config": "default",
                         "shard": shard,

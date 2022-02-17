@@ -88,7 +88,8 @@ jobs:
 {%- if not exclude_test %}
 {% block test +%}
   {%- for test_job in test_jobs %}
-  !{{ test_job.name }}:
+  !{{ test_job.id }}:
+    name: !{{ test_job.name }}
     needs: build
     runs-on: !{{ test_job.runner }}
     timeout-minutes: !{{ common.timeout_minutes }}

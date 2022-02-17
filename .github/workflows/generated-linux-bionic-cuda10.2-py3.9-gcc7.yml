@@ -249,7 +249,8 @@ jobs:
           # Prune all of the docker images
           docker system prune -af
 
-  test (jit_legacy, 1, 1, linux.4xlarge.nvidia.gpu):
+  test_jit_legacy_1_1:
+    name: test (jit_legacy, 1, 1, linux.4xlarge.nvidia.gpu)
     needs: build
     runs-on: linux.4xlarge.nvidia.gpu
     timeout-minutes: 240
@@ -500,7 +501,8 @@ jobs:
           docker stop $(docker ps -q) || true
           # Prune all of the docker images
           docker system prune -af
-  test (multigpu, 1, 1, linux.16xlarge.nvidia.gpu):
+  test_multigpu_1_1:
+    name: test (multigpu, 1, 1, linux.16xlarge.nvidia.gpu)
     needs: build
     runs-on: linux.16xlarge.nvidia.gpu
     timeout-minutes: 240
@@ -751,7 +753,8 @@ jobs:
           docker stop $(docker ps -q) || true
           # Prune all of the docker images
           docker system prune -af
-  test (nogpu_NO_AVX, 1, 1, linux.2xlarge):
+  test_nogpu_NO_AVX_1_1:
+    name: test (nogpu_NO_AVX, 1, 1, linux.2xlarge)
     needs: build
     runs-on: linux.2xlarge
     timeout-minutes: 240
@@ -998,7 +1001,8 @@ jobs:
           docker stop $(docker ps -q) || true
           # Prune all of the docker images
           docker system prune -af
-  test (nogpu_NO_AVX2, 1, 1, linux.2xlarge):
+  test_nogpu_NO_AVX2_1_1:
+    name: test (nogpu_NO_AVX2, 1, 1, linux.2xlarge)
     needs: build
     runs-on: linux.2xlarge
     timeout-minutes: 240
@@ -1245,7 +1249,8 @@ jobs:
           docker stop $(docker ps -q) || true
           # Prune all of the docker images
           docker system prune -af
-  test (distributed, 1, 1, linux.8xlarge.nvidia.gpu):
+  test_distributed_1_1:
+    name: test (distributed, 1, 1, linux.8xlarge.nvidia.gpu)
     needs: build
     runs-on: linux.8xlarge.nvidia.gpu
     timeout-minutes: 240
@@ -1496,7 +1501,8 @@ jobs:
           docker stop $(docker ps -q) || true
           # Prune all of the docker images
           docker system prune -af
-  test (slow, 1, 1, linux.4xlarge.nvidia.gpu):
+  test_slow_1_1:
+    name: test (slow, 1, 1, linux.4xlarge.nvidia.gpu)
     needs: build
     runs-on: linux.4xlarge.nvidia.gpu
     timeout-minutes: 240
@@ -1747,7 +1753,8 @@ jobs:
           docker stop $(docker ps -q) || true
           # Prune all of the docker images
           docker system prune -af
-  test (smoke_tests, 1, 1, linux.4xlarge.nvidia.gpu):
+  test_smoke_tests_1_1:
+    name: test (smoke_tests, 1, 1, linux.4xlarge.nvidia.gpu)
     needs: build
     runs-on: linux.4xlarge.nvidia.gpu
     timeout-minutes: 240
@@ -1998,7 +2005,8 @@ jobs:
           docker stop $(docker ps -q) || true
           # Prune all of the docker images
           docker system prune -af
-  test (default, 1, 2, linux.4xlarge.nvidia.gpu):
+  test_default_1_1:
+    name: test (default, 1, 2, linux.4xlarge.nvidia.gpu)
     needs: build
     runs-on: linux.4xlarge.nvidia.gpu
     timeout-minutes: 240
@@ -2249,7 +2257,8 @@ jobs:
           docker stop $(docker ps -q) || true
           # Prune all of the docker images
           docker system prune -af
-  test (default, 2, 2, linux.4xlarge.nvidia.gpu):
+  test_default_2_1:
+    name: test (default, 2, 2, linux.4xlarge.nvidia.gpu)
     needs: build
     runs-on: linux.4xlarge.nvidia.gpu
     timeout-minutes: 240

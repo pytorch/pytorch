@@ -132,7 +132,8 @@ jobs:
           rm -rf ./*
 
   {%- for test_job in test_jobs %}
-  !{{ test_job.name }}:
+  !{{ test_job.id }}:
+    name: !{{ test_job.name }}
     timeout-minutes: !{{ common.timeout_minutes }}
     env:
       JOB_BASE_NAME: !{{ build_environment }}-test

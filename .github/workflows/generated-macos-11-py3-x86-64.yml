@@ -85,7 +85,8 @@ jobs:
             artifacts.zip
 
 
-  test (smoke_tests, 1, 1, macos-11):
+  test_smoke_tests_1_1:
+    name: test (smoke_tests, 1, 1, macos-11)
     needs: build
     runs-on: macos-11
     timeout-minutes: 240
@@ -198,7 +199,8 @@ jobs:
           python3 -m pip install -r requirements.txt
           python3 -m pip install boto3==1.19.12
           python3 -m tools.stats.print_test_stats --upload-to-s3 --compare-with-s3 test
-  test (default, 1, 2, macos-11):
+  test_default_1_1:
+    name: test (default, 1, 2, macos-11)
     needs: build
     runs-on: macos-11
     timeout-minutes: 240
@@ -311,7 +313,8 @@ jobs:
           python3 -m pip install -r requirements.txt
           python3 -m pip install boto3==1.19.12
           python3 -m tools.stats.print_test_stats --upload-to-s3 --compare-with-s3 test
-  test (default, 2, 2, macos-11):
+  test_default_2_1:
+    name: test (default, 2, 2, macos-11)
     needs: build
     runs-on: macos-11
     timeout-minutes: 240

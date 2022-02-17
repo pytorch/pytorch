@@ -249,7 +249,8 @@ jobs:
           # Prune all of the docker images
           docker system prune -af
 
-  test (jit_legacy, 1, 1, linux.2xlarge):
+  test_jit_legacy_1_1:
+    name: test (jit_legacy, 1, 1, linux.2xlarge)
     needs: build
     runs-on: linux.2xlarge
     timeout-minutes: 240
@@ -496,7 +497,8 @@ jobs:
           docker stop $(docker ps -q) || true
           # Prune all of the docker images
           docker system prune -af
-  test (distributed, 1, 1, linux.2xlarge):
+  test_distributed_1_1:
+    name: test (distributed, 1, 1, linux.2xlarge)
     needs: build
     runs-on: linux.2xlarge
     timeout-minutes: 240
@@ -743,7 +745,8 @@ jobs:
           docker stop $(docker ps -q) || true
           # Prune all of the docker images
           docker system prune -af
-  test (docs_test, 1, 1, linux.2xlarge):
+  test_docs_test_1_1:
+    name: test (docs_test, 1, 1, linux.2xlarge)
     needs: build
     runs-on: linux.2xlarge
     timeout-minutes: 240
@@ -990,7 +993,8 @@ jobs:
           docker stop $(docker ps -q) || true
           # Prune all of the docker images
           docker system prune -af
-  test (backwards_compat, 1, 1, linux.2xlarge):
+  test_backwards_compat_1_1:
+    name: test (backwards_compat, 1, 1, linux.2xlarge)
     needs: build
     runs-on: linux.2xlarge
     timeout-minutes: 240
@@ -1237,7 +1241,8 @@ jobs:
           docker stop $(docker ps -q) || true
           # Prune all of the docker images
           docker system prune -af
-  test (smoke_tests, 1, 1, linux.2xlarge):
+  test_smoke_tests_1_1:
+    name: test (smoke_tests, 1, 1, linux.2xlarge)
     needs: build
     runs-on: linux.2xlarge
     timeout-minutes: 240
@@ -1484,7 +1489,8 @@ jobs:
           docker stop $(docker ps -q) || true
           # Prune all of the docker images
           docker system prune -af
-  test (default, 1, 2, linux.2xlarge):
+  test_default_1_1:
+    name: test (default, 1, 2, linux.2xlarge)
     needs: build
     runs-on: linux.2xlarge
     timeout-minutes: 240
@@ -1731,7 +1737,8 @@ jobs:
           docker stop $(docker ps -q) || true
           # Prune all of the docker images
           docker system prune -af
-  test (default, 2, 2, linux.2xlarge):
+  test_default_2_1:
+    name: test (default, 2, 2, linux.2xlarge)
     needs: build
     runs-on: linux.2xlarge
     timeout-minutes: 240

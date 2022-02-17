@@ -124,7 +124,8 @@ jobs:
         run: |
           rm -rf "${PYTORCH_FINAL_PACKAGE_DIR}"
           rm -rf ./*
-  test (distributed, 1, 1, windows.4xlarge):
+  test_distributed_1_1:
+    name: test (distributed, 1, 1, windows.4xlarge)
     timeout-minutes: 240
     env:
       JOB_BASE_NAME: win-vs2019-cpu-py3-test
@@ -273,7 +274,8 @@ jobs:
         # Should remove the entirety of pytorch-${{ github.run_id }}
         run: |
           rm -rf ./*
-  test (smoke_tests, 1, 1, windows.4xlarge):
+  test_smoke_tests_1_1:
+    name: test (smoke_tests, 1, 1, windows.4xlarge)
     timeout-minutes: 240
     env:
       JOB_BASE_NAME: win-vs2019-cpu-py3-test
@@ -422,7 +424,8 @@ jobs:
         # Should remove the entirety of pytorch-${{ github.run_id }}
         run: |
           rm -rf ./*
-  test (default, 1, 2, windows.4xlarge):
+  test_default_1_1:
+    name: test (default, 1, 2, windows.4xlarge)
     timeout-minutes: 240
     env:
       JOB_BASE_NAME: win-vs2019-cpu-py3-test
@@ -571,7 +574,8 @@ jobs:
         # Should remove the entirety of pytorch-${{ github.run_id }}
         run: |
           rm -rf ./*
-  test (default, 2, 2, windows.4xlarge):
+  test_default_2_1:
+    name: test (default, 2, 2, windows.4xlarge)
     timeout-minutes: 240
     env:
       JOB_BASE_NAME: win-vs2019-cpu-py3-test

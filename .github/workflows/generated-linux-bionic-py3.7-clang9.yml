@@ -250,7 +250,8 @@ jobs:
           # Prune all of the docker images
           docker system prune -af
 
-  test (noarch, 1, 1, linux.2xlarge):
+  test_noarch_1_1:
+    name: test (noarch, 1, 1, linux.2xlarge)
     needs: build
     runs-on: linux.2xlarge
     timeout-minutes: 240
@@ -497,7 +498,8 @@ jobs:
           docker stop $(docker ps -q) || true
           # Prune all of the docker images
           docker system prune -af
-  test (smoke_tests, 1, 1, linux.2xlarge):
+  test_smoke_tests_1_1:
+    name: test (smoke_tests, 1, 1, linux.2xlarge)
     needs: build
     runs-on: linux.2xlarge
     timeout-minutes: 240
@@ -744,7 +746,8 @@ jobs:
           docker stop $(docker ps -q) || true
           # Prune all of the docker images
           docker system prune -af
-  test (default, 1, 2, linux.2xlarge):
+  test_default_1_1:
+    name: test (default, 1, 2, linux.2xlarge)
     needs: build
     runs-on: linux.2xlarge
     timeout-minutes: 240
@@ -991,7 +994,8 @@ jobs:
           docker stop $(docker ps -q) || true
           # Prune all of the docker images
           docker system prune -af
-  test (default, 2, 2, linux.2xlarge):
+  test_default_2_1:
+    name: test (default, 2, 2, linux.2xlarge)
     needs: build
     runs-on: linux.2xlarge
     timeout-minutes: 240
