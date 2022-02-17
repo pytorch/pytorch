@@ -12,6 +12,7 @@ from torch.fx.graph import (
 )
 
 from typing import Callable, Optional, List, Dict, Any, Set, Tuple, Union, Type
+from collections import namedtuple
 import operator
 
 # A dictionary for querying the weight index for a given op
@@ -455,6 +456,62 @@ def all_node_args_have_no_tensors(node: Node, modules: Dict[str, torch.nn.Module
         cache[node] = result
     return result
 
+def all_node_args_except_first(node: Node) -> List[int]:
+    """
+    Returns all node arg indexes after first
+    """
+    return [i for i, arg in enumerate(node.args)][1:]
+
+NodeInfo = namedtuple("NodeInfo", "op target")
+
+# this dict identifies which indices of a node are non tensors
+# so that they can be propagated correctly since inserting observers
+# for them would cause errors
+
+NON_TENSOR_ARG_DICT = {
+    NodeInfo("call_method", "masked_fill") : {
+        torch.bool: [1],
+        float: [2]
+    },
+    NodeInfo("call_method", "permute") : {
+        int: all_node_args_except_first
+    },
+    NodeInfo("call_method", "repeat") : {
+        int: all_node_args_except_first
+    },
+    NodeInfo("call_method", "reshape") : {
+        int: all_node_args_except_first
+    },
+        NodeInfo("call_method", "size") : {
+        int: [1]
+    },
+    NodeInfo("call_method", "transpose") : {
+        int: all_node_args_except_first
+    },
+    NodeInfo("call_method", torch.transpose) : {
+        int: all_node_args_except_first
+    },
+    NodeInfo("call_method", "unsqueeze") : {
+        int: [1]
+    },
+    NodeInfo("call_method", "unsqueeze_") : {
+        int: [1]
+    },
+    NodeInfo("call_method", torch.unsqueeze) : {
+        int: [1]
+    },
+    NodeInfo("call_method", "view") : {
+        int: all_node_args_except_first
+    },
+}
+
+def get_non_tensor_arg_indexes_and_types(node: Node) -> Dict[type, Union[Callable[[Node], List[int]], List[int]]]:
+    """
+    Returns a dict with of non float tensor types as keys and values which correspond to their
+    arg indices in a list or a function to retrieve the list (which takes the node as an argument)
+    """
+    info = NodeInfo(node.op, node.target)
+    return NON_TENSOR_ARG_DICT.get(info, {})
 
 def node_return_type_is_int(node: Node) -> bool:
     """
@@ -463,13 +520,6 @@ def node_return_type_is_int(node: Node) -> bool:
     """
     return node.op == 'call_method' and node.target == 'size'
 
-def node_bool_tensor_arg_indexes(node: Node) -> List[int]:
-    """
-    Returns indexes of boolean Tensor args
-    """
-    if node.op == "call_method" and node.target == "masked_fill":
-        return [1]
-    return []
 
 def is_get_tensor_info_node(node: Node) -> bool:
     """ Returns True if this node is a node that takes a Tensor as input and output some
