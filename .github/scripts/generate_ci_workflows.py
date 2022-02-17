@@ -401,7 +401,7 @@ WINDOWS_WORKFLOWS = [
         enable_force_on_cpu_test=True,
         ciflow_config=CIFlowConfig(
             run_on_canary=True,
-            labels={LABEL_CIFLOW_CUDA, LABEL_CIFLOW_WIN}
+            labels={LABEL_CIFLOW_DEFAULT, LABEL_CIFLOW_CUDA, LABEL_CIFLOW_WIN}
         ),
     ),
     CIWorkflow(

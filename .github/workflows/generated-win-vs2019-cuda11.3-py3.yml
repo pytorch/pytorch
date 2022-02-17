@@ -4,6 +4,7 @@
 name: win-vs2019-cuda11.3-py3
 
 on:
+  pull_request:
   push:
     tags:
       - 'ciflow/all/*'
