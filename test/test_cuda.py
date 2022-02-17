@@ -274,6 +274,7 @@ class TestCuda(TestCase):
         self.assertEqual(r, 0)
         self.assertFalse(t.is_pinned())
 
+    @unittest.skipIf(TEST_CUDAMALLOCASYNC, "temporarily disabled")
     def test_memory_stats(self):
         gc.collect()
         torch.cuda.empty_cache()
@@ -325,6 +326,7 @@ class TestCuda(TestCase):
         device_capability_no_argument = torch.cuda.get_device_capability()
         self.assertEqual(current_device_capability, device_capability_no_argument)
 
+    @unittest.skipIf(TEST_CUDAMALLOCASYNC, "temporarily disabled")
     @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
     def test_memory_stats_multigpu(self):
         # advance a generator with a end flag
