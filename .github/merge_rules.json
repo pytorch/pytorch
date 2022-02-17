@@ -31,5 +31,17 @@
       "patterns": ["docs/**", "torch/*docs.py"],
       "approved_by": ["mruberry", "ngimel", "albanD", "janeyx99"],
       "mandatory_app_id": 12274
+   },
+   {
+      "name": "Android",
+      "patterns": ["android/**"],
+      "approved_by": ["linbinyu", "kit1980", "IvanKobzarev", "malfet"],
+      "mandatory_app_id": 12274
+   },
+   {
+      "name": "iOS",
+      "patterns": ["ios/**"],
+      "approved_by": ["linbinyu", "kit1980", "xta0", "malfet", "hanton"],
+      "mandatory_app_id": 12274
    }
 ]
