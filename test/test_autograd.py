@@ -2888,8 +2888,8 @@ class TestAutograd(TestCase):
         def custom_layer(input_ten):
             return MyFunc.apply(input_ten)
 
-        ## Only testing that emit_nvtx runs when
-        ## record_shapes option is enabled.
+        # Only testing that emit_nvtx runs when
+        # record_shapes option is enabled.
         with emit_nvtx(record_shapes=True) as prof:
             x = torch.randn(10, 10, requires_grad=True)
             y = torch.randn(10, 10, requires_grad=True)
