@@ -124,12 +124,19 @@ def softshrink_backward(grad_output: Tensor, self: Tensor, lambd: float) -> Tens
 
 @register_decomposition(aten.prelu_backward)
 def prelu_backward(grad_output: Tensor, self: Tensor, weight: Tensor) -> Tuple[Tensor, Tensor]:
-    spatial_dims = list(range(2, grad_output.dim()))
-    for _ in range(len(spatial_dims)):
-        weight = weight.unsqueeze(-1)
-    input_grad = aten.where(self > 0, grad_output, weight * grad_output)
+    # Logic is more complicated than I would like.  Basically, weight can either
+    # be a scalar or a vector of size [C], and in the forward pass it's
+    # broadcast against [N, C, ...]. So now, we need to do the corresponding
+    # reduction, which is harder than we'd like...
+    cur_weight = weight
+    for _ in range(2, grad_output.dim()):
+        cur_weight = cur_weight.unsqueeze(-1)
+    input_grad = aten.where(self > 0, grad_output, cur_weight * grad_output)
     weight_grad_collector = aten.where(self > 0, aten.new_zeros(grad_output, ()), self * grad_output)
-    return (input_grad, aten.sum(weight_grad_collector, [0] + spatial_dims))
+    out = aten.sum_to_size(weight_grad_collector, cur_weight.shape)
+    while out.dim() > weight.dim():
+        out = out.squeeze(-1)
+    return (input_grad, out)
 
 
 @register_decomposition(aten.rrelu_with_noise_backward)

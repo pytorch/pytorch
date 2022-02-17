@@ -1063,7 +1063,6 @@ class TestDecompositionOpInfo(TestCase):
                     dtype=elem.dtype, layout=elem.layout,
                     device=elem.device, requires_grad=elem.requires_grad
                 )
-
                 r.elem = elem
                 return r
 
@@ -1074,7 +1073,6 @@ class TestDecompositionOpInfo(TestCase):
             def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
                 global run_ops
                 run_ops.add(func)
-
                 def unwrap_tensor(e):
                     if isinstance(e, DecompositionTensor):
                         if not hasattr(e, 'elem'):
@@ -1165,7 +1163,7 @@ class TestDecompositionOpInfo(TestCase):
             for sample_input in samples:
                 if _requires_grad:
                     fn, primals = normalize_op_input_output(func, sample_input)
-                    primals = tree_map(lambda x: x.abs() if isinstance(x, torch.Tensor) else x, primals)
+                    primals = tree_map(lambda x: x if isinstance(x, torch.Tensor) else x, primals)
 
                     decomp_out, decomp_vjp_fn = ref_vjp_no_create(fn, *tree_map(wrap_tensor, primals))
                     cotangents = tree_map(lambda x: torch.randn_like(x), decomp_out)
