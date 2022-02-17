@@ -80,6 +80,7 @@ def get_base_name_to_sets_of_related_ops() -> Dict[str, Set[NSNodeTargetType]]:
             nnqatd.Linear,
             nnqd.Linear,
             nniqat.LinearReLU,
+            nniqat.LinearBn1d,
             nn.modules.linear.NonDynamicallyQuantizableLinear,
         ]),
         # linear functionals
