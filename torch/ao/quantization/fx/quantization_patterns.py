@@ -345,26 +345,6 @@ class BinaryOpQuantizeHandler(QuantizeHandler):
         self.all_node_args_are_tensors = \
             (self.num_tensor_args == len(self.binary_op_node.args))
 
-        qbin_op_mapping: Dict[Union[Callable, str], Callable] = {
-            operator.add: torch.ops.quantized.add,
-            torch.add: torch.ops.quantized.add,
-            operator.mul: torch.ops.quantized.mul,
-            torch.mul: torch.ops.quantized.mul,
-            torch.matmul: torch.ops.quantized.matmul,
-        }
-        qbin_relu_op_mapping: Dict[Union[Callable, str], Callable] = {
-            operator.add: torch.ops.quantized.add_relu,
-            torch.add: torch.ops.quantized.add_relu,
-            operator.mul: torch.ops.quantized.mul_relu,
-            torch.mul: torch.ops.quantized.mul_relu,
-        }
-        # corresponding quantized op
-        self.quantized_binary_op: Optional[Callable] = None
-        if self.binary_op in qbin_op_mapping:
-            self.quantized_binary_op = qbin_relu_op_mapping[self.binary_op] \
-                if self.relu_node is not None \
-                else qbin_op_mapping[self.binary_op]
-
     def should_insert_observer_for_output(
         self,
         qconfig: Any,
