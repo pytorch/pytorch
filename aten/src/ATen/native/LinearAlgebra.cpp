@@ -2684,7 +2684,7 @@ Tensor linalg_norm(const Tensor& self, c10::string_view ord, optional<IntArrayRe
   check_str_ord_valid(ord, opt_dim, self.dim());
 
   if (ord == "fro") {
-    return at::linalg_vector_norm(self, 2, opt_dim.value_or(IntArrayRef({0, 1})),
+    return at::linalg_vector_norm(self, 2, opt_dim.value_or(IntArrayRef({-2, -1})),
                                   keepdim, opt_dtype);
   }
 
@@ -2693,7 +2693,8 @@ Tensor linalg_norm(const Tensor& self, c10::string_view ord, optional<IntArrayRe
   Tensor self_ = opt_dtype.has_value() ? self.to(opt_dtype.value()) : self;
 
   // These _out functions need to be called since some of the tests expect the result to be of a particular dtype,
-  // which the non-out functions don't support.
+  // which the non-out functions don't support. While *_out functions are generally incompatible with autograd,
+  // nuclear_norm_out() functions are composite functions and are usable with autograd.
   if (opt_dim.has_value()) {
     at::nuclear_norm_out(result, self_, opt_dim.value(), keepdim);
   }
