@@ -5,7 +5,9 @@ import torch.nn as nn
 import torch.nn.functional as F
 from functorch import make_functional, grad_and_value, vmap, combine_state_for_ensemble
 
-# Adapted from http://willwhitney.com/parallel-training-jax.html
+# Adapted from http://willwhitney.com/parallel-training-jax.html , which is a
+# tutorial on Model Ensembling with JAX by Will Whitney.
+#
 # The original code comes with the following citation:
 # @misc{Whitney2021Parallelizing,
 #     author = {William F. Whitney},
