@@ -335,8 +335,7 @@ std::vector<c10::optional<at::Tensor>> generateExampleInputs(
     const auto dtype = at::dtype(inputTypes[i]);
     const auto memory_format = inputMemoryFormats[i];
     example_inputs.emplace_back(
-        at::rand(inputShapes[i], at::TensorOptions(dtype))
-            .contiguous(memory_format));
+        at::rand(inputShapes[i]).to(dtype).contiguous(memory_format));
   }
   return example_inputs;
 }
