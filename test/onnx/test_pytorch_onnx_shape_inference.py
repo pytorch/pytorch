@@ -114,6 +114,34 @@ class TestONNXShapeInference(unittest.TestCase):
         slice = g.op("Slice", input, start_input, end, axis, step)
         self.run_test(g, slice.node(), expect_tensor(None, shape=(None, None)))
 
+    def test_broadcast_matmul(self):
+        g = self.create_empty_graph()
+        constant = self.insert_tensor_constant(g, torch.ones(5, 1, 2))
+        constant_2 = self.insert_tensor_constant(g, torch.ones(3, 1, 2, 1))
+        shape = g.op("MatMul", constant, constant_2)
+        self.run_test(g, shape.node(), expect_tensor("Float", shape=(3, 5, 1, 1)))
+
+        # test when first input is of rank 1
+        g = self.create_empty_graph()
+        constant = self.insert_tensor_constant(g, torch.ones(2))
+        constant_2 = self.insert_tensor_constant(g, torch.ones(3, 1, 2, 1))
+        shape = g.op("MatMul", constant, constant_2)
+        self.run_test(g, shape.node(), expect_tensor("Float", shape=(3, 1, 1)))
+
+        # test when second input is of rank 1
+        g = self.create_empty_graph()
+        constant = self.insert_tensor_constant(g, torch.ones(5, 1, 2))
+        constant_2 = self.insert_tensor_constant(g, torch.ones(2))
+        shape = g.op("MatMul", constant, constant_2)
+        self.run_test(g, shape.node(), expect_tensor("Float", shape=(5, 1)))
+
+        # test when both inputs are of rank 1
+        g = self.create_empty_graph()
+        constant = self.insert_tensor_constant(g, torch.ones(2))
+        constant_2 = self.insert_tensor_constant(g, torch.ones(2))
+        shape = g.op("MatMul", constant, constant_2)
+        self.run_test(g, shape.node(), expect_tensor("Float", shape=()))
+
     def test_expand(self):
         g = self.create_empty_graph()
         input = g.addInput()
