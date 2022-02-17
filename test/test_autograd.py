@@ -2873,33 +2873,6 @@ class TestAutograd(TestCase):
         self.assertTrue(found_bwd_sum)
         self.assertTrue(found_empty)
 
-    @skipCUDAIfRocm
-    @onlyCUDA
-    def test_custom_module_input_op_ids(self, device):
-        class MyFunc(Function):
-            @staticmethod
-            def forward(ctx, x):
-                ctx.save_for_backward(x)
-                return x
-
-            @staticmethod
-            def backward(ctx, gO):
-                x, = ctx.saved_tensors
-                return x
-
-        def custom_layer(input_ten):
-            return MyFunc.apply(input_ten)
-
-        # Only testing that emit_nvtx runs when
-        # record_shapes option is enabled.
-        with emit_nvtx(record_shapes=True) as prof:
-            x = torch.randn(10, 10, requires_grad=True)
-            y = torch.randn(10, 10, requires_grad=True)
-            z = x + y
-            s = custom_layer(z)
-            q = s.sum()
-            q.backward()
-
     def test_profiler_unboxed_only(self):
         x = torch.rand(3, 4)
 
@@ -8579,6 +8552,33 @@ class TestAutogradDeviceType(TestCase):
         with torch.cuda.profiler.profile():
             with emit_nvtx():
                 a.add(1.0)
+
+    @skipCUDAIfRocm
+    @onlyCUDA
+    def test_custom_module_input_op_ids(self, device):
+        class MyFunc(Function):
+            @staticmethod
+            def forward(ctx, x):
+                ctx.save_for_backward(x)
+                return x
+
+            @staticmethod
+            def backward(ctx, gO):
+                x, = ctx.saved_tensors
+                return x
+
+        def custom_layer(input_ten):
+            return MyFunc.apply(input_ten)
+
+        # Only testing that emit_nvtx runs when
+        # record_shapes option is enabled.
+        with emit_nvtx(record_shapes=True) as prof:
+            x = torch.randn(10, 10, requires_grad=True)
+            y = torch.randn(10, 10, requires_grad=True)
+            z = x + y
+            s = custom_layer(z)
+            q = s.sum()
+            q.backward()
 
     @onlyCUDA
     def test_rnn_backward_to_input_but_not_parameters(self, device):
