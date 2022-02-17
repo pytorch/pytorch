@@ -139,8 +139,10 @@ def _lower_weighted_ref_module(model: QuantizedGraphModule) -> QuantizedGraphMod
 
 def _lower_quantized_binary_op(
     model: QuantizedGraphModule,
-    qconfig_map: Dict[str, QConfigAny]) -> QuantizedGraphModule:
+    qconfig_map: Dict[str, QConfigAny]
+) -> QuantizedGraphModule:
     modules = dict(model.named_modules(remove_duplicate=False))
+
     def get_bop_patterns(bop: Callable) -> Pattern:
         return [
             (torch.quantize_per_tensor,

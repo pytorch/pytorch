@@ -5,7 +5,8 @@ from typing import Dict
 
 def lower_to_qnnpack(
     model: QuantizedGraphModule,
-    qconfig_map: Dict[str, QConfigAny]) -> QuantizedGraphModule:
+    qconfig_map: Dict[str, QConfigAny]
+) -> QuantizedGraphModule:
     """ Lower a quantized reference model (with reference quantized operator patterns)
     to qnnpack
     """
