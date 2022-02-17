@@ -264,25 +264,6 @@ void * maybe_data_ptr(const TensorArg& tensor) {
   return tensor->defined() ? (void *)tensor->data_ptr() : nullptr;
 }
 
-// See TensorUtils.h on why this is useful now that we cache is_contiguous.
-bool geometry_is_contiguous(IntArrayRef sizes, IntArrayRef strides) {
-  int64_t dim = sizes.size();
-  int64_t expected_stride = 1;
-  bool contig_if_nonempty = true;
-  for (int64_t i = dim - 1; i >= 0; i--) {
-    if (sizes[i] == 0) {
-      return true;
-    }
-    if (contig_if_nonempty) {
-      if (sizes[i] != 1 && strides[i] != expected_stride) {
-        contig_if_nonempty = false;
-      }
-      expected_stride *= sizes[i];
-    }
-  }
-  return contig_if_nonempty;
-}
-
 void check_dim_size(
     const Tensor& tensor,
     int64_t dim,
