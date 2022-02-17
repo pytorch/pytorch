@@ -160,7 +160,7 @@ class DispatchKeySet final {
   constexpr DispatchKeySet() : repr_(0) {}
 
   constexpr DispatchKeySet(Full)
-      : repr_((1ULL << (num_backends + num_functionality_keys - 1)) - 1) {}
+      : repr_((1ULL << (static_cast<uint8_t>(BackendComponent::EndOfBackendKeys) + num_functionality_keys - 1)) - 1) {}
 
   constexpr DispatchKeySet(FullAfter, DispatchKey t)
       // LSB after t are OK, but not t itself.
@@ -170,7 +170,7 @@ class DispatchKeySet final {
       // "functionality" keys.
       : repr_(
             (1ULL
-             << (num_backends + static_cast<uint8_t>(toFunctionalityKey(t)) -
+             << (static_cast<uint8_t>(BackendComponent::EndOfBackendKeys) + static_cast<uint8_t>(toFunctionalityKey(t)) -
                  1)) -
             1) {}
 
@@ -606,7 +606,10 @@ constexpr DispatchKeySet default_excluded_set = DispatchKeySet({
 constexpr DispatchKeySet autograd_dispatch_keyset_with_ADInplaceOrView =
     autograd_dispatch_keyset | DispatchKeySet(DispatchKey::ADInplaceOrView);
 
-constexpr DispatchKeySet python_ks = DispatchKeySet(DispatchKey::Python);
+constexpr DispatchKeySet python_ks = DispatchKeySet({
+    DispatchKey::Python,
+    DispatchKey::PythonTLSSnapshot,
+});
 
 constexpr DispatchKeySet sparse_ks = DispatchKeySet(DispatchKey::Sparse);
 

@@ -123,11 +123,9 @@ std::ostream& operator<<(std::ostream& os, DispatchKeySet ts) {
 }
 
 DispatchKeySet::iterator& DispatchKeySet::iterator::operator++() {
-  std::cout << "next_functionality_=" << next_functionality << std::endl;
-  std::cout << "num_backends=" << num_backends << std::endl;
-  TORCH_INTERNAL_ASSERT(next_functionality_ >= num_backends);
+  TORCH_INTERNAL_ASSERT(next_functionality_ >= num_backends, "nb=", static_cast<uint32_t>(num_backends), "nf=", static_cast<uint32_t>(next_functionality_));
   TORCH_INTERNAL_ASSERT(next_functionality_ <= iterator::end_iter_mask_val);
-  TORCH_INTERNAL_ASSERT(next_backend_ <= num_backends);
+  TORCH_INTERNAL_ASSERT(next_backend_ <= num_backends, next_backend_);
 
   // Create a masked version of the set representation to ignore previous
   // keys that we've iterated through.
