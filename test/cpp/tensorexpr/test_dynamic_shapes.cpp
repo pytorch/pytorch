@@ -657,13 +657,16 @@ TEST(DynamicShapes, MultiThreadedExecution) {
       graph, {}, symbolic_shape_inputs, false, symbolic_strides);
 
   auto run_kernel = [&](int dim1, int dim2) {
-    auto a = at::rand({dim1, dim2}, at::TensorOptions(at::kCPU).dtype(at::kFloat));
-    auto b = at::rand({dim1, dim2}, at::TensorOptions(at::kCPU).dtype(at::kFloat));
+    auto a =
+        at::rand({dim1, dim2}, at::TensorOptions(at::kCPU).dtype(at::kFloat));
+    auto b =
+        at::rand({dim1, dim2}, at::TensorOptions(at::kCPU).dtype(at::kFloat));
+
     auto ref = at::mul(at::erf(at::tanh(a)), b);
 
     std::vector<IValue> stack = fmap<IValue>(std::vector<at::Tensor>({a, b}));
-    stack.push_back(dim1);
-    stack.push_back(dim2);
+    stack.emplace_back(dim1);
+    stack.emplace_back(dim2);
     kernel.run(stack);
 
     auto o = stack[0].toTensor();

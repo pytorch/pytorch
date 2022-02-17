@@ -1682,13 +1682,13 @@ void TensorExprKernel::getStaticOutputSizesAndStrides(
     }
 
     if (tensorOutputStrideDesc_[i] == torch::jit::StrideInput::TENSOR_CONT) {
-      static_strides[i] =
-          TensorType::contiguousStridesOf(static_sizes[i]);
+      static_strides[i] = TensorType::contiguousStridesOf(static_sizes[i]);
+
     } else if (
         tensorOutputStrideDesc_[i] ==
         torch::jit::StrideInput::TENSOR_CONT_CHANNELS_LAST) {
-      static_strides[i] =
-          at::get_channels_last_strides_2d(static_sizes[i]);
+      static_strides[i] = at::get_channels_last_strides_2d(static_sizes[i]);
+
     } else {
       std::string output_desc = toString(tensorOutputStrideDesc_[i]);
       TORCH_INTERNAL_ASSERT(
@@ -1837,7 +1837,9 @@ void TensorExprKernel::runWithAllocatedOutputs(Stack& stack) {
   if (has_symbolic_shapes_) {
     std::vector<std::vector<int64_t>> static_sizes;
     std::vector<std::vector<int64_t>> static_strides;
-    getStaticOutputSizesAndStrides(stack_inputs, &static_sizes, &static_strides);
+    getStaticOutputSizesAndStrides(
+        stack_inputs, &static_sizes, &static_strides);
+
 
     // add stride args
     for (auto idx : c10::irange(input_stride_args_.size())) {
