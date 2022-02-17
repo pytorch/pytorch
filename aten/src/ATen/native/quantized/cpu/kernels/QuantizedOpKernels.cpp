@@ -57,6 +57,9 @@ Tensor qcat_nhwc_kernel(
   std::vector<void*> data_ptrs;
   std::vector<bool> is_fast_path;
 
+  //std::cout << "dim: " << dim << std::endl;
+  //std::cout << "qx0.sizes(): " << qx0.sizes() << "; qx0.strides(): " << qx0.strides() << std::endl;
+
   const int64_t ndim = qx0.dim();
   // NOLINTNEXTLINE(performance-implicit-conversion-in-loop)
   for (const at::Tensor& qx : qxs) {
@@ -115,6 +118,8 @@ Tensor qcat_nhwc_kernel(
       zero_point,
       c10::nullopt);
 
+  void* odata = output.data_ptr();
+
   // N, H, and W are explicitly captured here because there's a bug in GCC5
   // which causes an internal compiler error if they're not
   AT_DISPATCH_QINT_TYPES(output.scalar_type(), "qcat_nhwc", [&, outer_size]() {
@@ -124,7 +129,7 @@ Tensor qcat_nhwc_kernel(
         // loop over input tensors
         for (const auto tidx : c10::irange(Cs_in.size())) {
           scalar_t::underlying* optr =
-              reinterpret_cast<scalar_t::underlying*>(output.data_ptr()) +
+              reinterpret_cast<scalar_t::underlying*>(odata) +
               i * C_out + Cs_sum[tidx];
 
           auto curr_C = Cs_in[tidx];
