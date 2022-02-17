@@ -203,10 +203,10 @@ def _optimize_graph(graph, operator_export_type, _disable_torch_constant_prop=Fa
     # Caffe2-specific optimization
     is_caffe2_aten_fallback = (operator_export_type == OperatorExportTypes.ONNX_ATEN_FALLBACK and
                                torch.onnx._CAFFE2_ATEN_FALLBACK)
+    torch.onnx.symbolic_helper._quantized_ops.clear()
+    # Unpack quantized weights for conv and linear ops and insert into graph.
+    torch._C._jit_pass_onnx_unpack_quantized_weights(graph, params_dict, is_caffe2_aten_fallback)
     if is_caffe2_aten_fallback:
-        torch.onnx.symbolic_helper._quantized_ops.clear()
-        # Unpack quantized weights for conv and linear ops and insert into graph.
-        torch._C._jit_pass_onnx_unpack_quantized_weights(graph, params_dict)
         # Insert permutes before and after each conv op to ensure correct order.
         torch._C._jit_pass_onnx_quantization_insert_permutes(graph, params_dict)
 
@@ -471,6 +471,21 @@ def _get_example_outputs(model, args):
     return example_outputs
 
 
+_qtype_vtype_map = {torch.quint8: torch.uint8, torch.qint8: torch.int8, torch.qint32: torch.int32, torch.quint4x2: torch.int8}
+
+
+def unpack_quantized_tensor(value):
+    if isinstance(value, torch.Tensor) and value.dtype in _qtype_vtype_map:
+        q_value_dequantize = value.dequantize()
+        q_scale = torch.tensor(value.q_scale(), dtype=torch.double)
+        q_zero_point = torch.tensor(value.q_zero_point(), dtype=torch.int64)
+        q_value = q_value_dequantize / q_scale + q_zero_point
+        q_value = q_value.to(dtype=_qtype_vtype_map[value.dtype])
+        return q_value, q_scale, q_zero_point
+    else:
+        return (value,)
+
+
 def _model_to_graph(model, args, verbose=False,
                     input_names=None, output_names=None,
                     operator_export_type=OperatorExportTypes.ONNX,
@@ -505,7 +520,10 @@ def _model_to_graph(model, args, verbose=False,
     from torch.onnx.symbolic_helper import _onnx_shape_inference
     if isinstance(model, torch.jit.ScriptModule) or isinstance(model, torch.jit.ScriptFunction):
         example_outputs = _get_example_outputs(model, args)
-        out_vars, desc = torch.jit._flatten(tuple(example_outputs))
+        example_outputs_final = ()
+        for example_output in example_outputs:
+            example_outputs_final += unpack_quantized_tensor(example_output)
+        out_vars, desc = torch.jit._flatten(example_outputs_final)
         torch._C._jit_pass_onnx_assign_output_shape(graph, out_vars, desc, _onnx_shape_inference)
     else:
         flatten_args, _ = torch._C._jit_flatten(args)
@@ -619,7 +637,7 @@ def unconvertible_ops(model, args, training=TrainingMode.EVAL, opset_version=Non
             # as-is rather than cause a failure.
             operator_export_type=OperatorExportTypes.ONNX_FALLTHROUGH)
     unsupported_ops = list()
-    supported_namespaces = ("onnx", "prim")
+    supported_namespaces = ("onnx", "prim", "quantized")
     for node in graph.nodes():
         if node.kind().split(":")[0] not in supported_namespaces:
             unsupported_ops.append(node.kind())
@@ -1051,11 +1069,8 @@ def _run_symbolic_function(g, block, n, inputs, env, operator_export_type=Operat
         domain = ns
         if ns == "aten":
             domain = ""
-        if ns == "quantized":
-            domain = ""
-            # Caffe2-specific quantized op
-            if is_caffe2_aten_fallback:
-                domain = "caffe2"
+        elif ns == "quantized" and is_caffe2_aten_fallback:
+            domain = "caffe2"
 
         if sym_registry.is_registered_op(op_name, domain, opset_version):
             symbolic_fn = _find_symbolic_in_registry(domain, op_name, opset_version, operator_export_type)
