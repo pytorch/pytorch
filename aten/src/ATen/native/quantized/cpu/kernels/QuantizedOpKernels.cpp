@@ -57,9 +57,6 @@ Tensor qcat_nhwc_kernel(
   std::vector<void*> data_ptrs;
   std::vector<bool> is_fast_path;
 
-  //std::cout << "dim: " << dim << std::endl;
-  //std::cout << "qx0.sizes(): " << qx0.sizes() << "; qx0.strides(): " << qx0.strides() << std::endl;
-
   const int64_t ndim = qx0.dim();
   // NOLINTNEXTLINE(performance-implicit-conversion-in-loop)
   for (const at::Tensor& qx : qxs) {
