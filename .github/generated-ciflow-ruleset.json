@@ -44,7 +44,8 @@
       "pytorch-linux-xenial-py3-clang5-android-ndk-r19c-gradle-custom-build-single-full-jit",
       "pytorch-xla-linux-bionic-py3.7-clang8",
       "win-vs2019-cpu-py3",
-      "win-vs2019-cuda11.3-py3"
+      "win-vs2019-cuda11.3-py3",
+      "win-vs2019-cuda11.3-py3-smoke"
     ],
     "ciflow/android": [
       "pytorch-linux-xenial-py3-clang5-android-ndk-r19c-build",
@@ -120,7 +121,8 @@
       "periodic-linux-xenial-cuda11.1-py3.7-gcc7-debug",
       "periodic-win-vs2019-cuda11.1-py3",
       "periodic-win-vs2019-cuda11.5-py3",
-      "win-vs2019-cuda11.3-py3"
+      "win-vs2019-cuda11.3-py3",
+      "win-vs2019-cuda11.3-py3-smoke"
     ],
     "ciflow/default": [
       "linux-binary-conda",
@@ -149,7 +151,7 @@
       "pytorch-linux-xenial-py3-clang5-android-ndk-r19c-gradle-custom-build-single",
       "pytorch-linux-xenial-py3-clang5-android-ndk-r19c-gradle-custom-build-single-full-jit",
       "win-vs2019-cpu-py3",
-      "win-vs2019-cuda11.3-py3",
+      "win-vs2019-cuda11.3-py3-smoke",
       "windows-binary-libtorch-cxx11-abi",
       "windows-binary-libtorch-pre-cxx11",
       "windows-binary-wheel"
@@ -281,7 +283,8 @@
       "pytorch-linux-xenial-py3-clang5-android-ndk-r19c-gradle-custom-build-single-full-jit",
       "pytorch-xla-linux-bionic-py3.7-clang8",
       "win-vs2019-cpu-py3",
-      "win-vs2019-cuda11.3-py3"
+      "win-vs2019-cuda11.3-py3",
+      "win-vs2019-cuda11.3-py3-smoke"
     ],
     "ciflow/vulkan": [
       "linux-vulkan-bionic-py3.7-clang9"
@@ -290,7 +293,8 @@
       "periodic-win-vs2019-cuda11.1-py3",
       "periodic-win-vs2019-cuda11.5-py3",
       "win-vs2019-cpu-py3",
-      "win-vs2019-cuda11.3-py3"
+      "win-vs2019-cuda11.3-py3",
+      "win-vs2019-cuda11.3-py3-smoke"
     ],
     "ciflow/xla": [
       "pytorch-xla-linux-bionic-py3.7-clang8"
