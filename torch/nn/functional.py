@@ -3471,8 +3471,7 @@ def multi_margin_loss(
     reduce: Optional[bool] = None,
     reduction: str = "mean",
 ) -> Tensor:
-    r"""multi_margin_loss(input, target, p=1, margin=1, weight=None, size_average=None,
-        reduce=None, reduction='mean') -> Tensor
+    r"""multi_margin_loss(input, target, p=1, margin=1, weight=None, size_average=None, reduce=None, reduction='mean') -> Tensor
 
     See :class:`~torch.nn.MultiMarginLoss` for details.
     """
