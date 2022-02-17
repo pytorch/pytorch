@@ -1090,7 +1090,7 @@ class TestDecompositionOpInfo(TestCase):
                 # pytorch_out_64}. In other words, we compare how far the
                 # decomposition and pytorch are from the "ground truth" (i.e.
                 # fp64). If the decomposition results in more error, we error
-                if func in decomposition_table and func != torch.ops.aten.detach:
+                if func in decomposition_table and func not in [torch.ops.aten.detach, torch.ops.aten._s_where]:
                     # Some functions take a dtype as argument, so we need to
                     # manually change that dtype in order to run it with a
                     # higher precision
