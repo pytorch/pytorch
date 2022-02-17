@@ -284,6 +284,7 @@ std::pair<const AnnotatedKernel&, const char*> OperatorEntry::computeDispatchTab
 
   // 3. Backend fallback
   auto dispatch_ix = getDispatchTableIndexForDispatchKey(dispatch_key);
+  TORCH_INTERNAL_ASSERT(dispatch_ix != -1);
   if (dispatcher.backendFallbackKernels_[dispatch_ix].kernel.isValid()) {
     return {dispatcher.backendFallbackKernels_[dispatch_ix], "backend fallback"};
   }
@@ -300,6 +301,9 @@ std::pair<const AnnotatedKernel&, const char*> OperatorEntry::computeDispatchTab
 // This function should be considered a private helper for updateDispatchTable_()
 void OperatorEntry::updateDispatchTableEntry_(const c10::Dispatcher& dispatcher, DispatchKey dispatch_key) {
   const auto dispatch_ix = getDispatchTableIndexForDispatchKey(dispatch_key);
+  if (C10_UNLIKELY(dispatch_ix == -1)) {
+    return;
+  }
   dispatchTable_[dispatch_ix] = computeDispatchTableEntry(dispatcher, dispatch_key);
   dispatchKeyExtractor_.setOperatorHasFallthroughForKey(dispatch_key, dispatchTable_[dispatch_ix].isFallthrough());
 }
@@ -376,6 +380,9 @@ void OperatorEntry::checkInvariants() const {
   for (auto k : DispatchKeySet(DispatchKeySet::FULL)) {
     auto expected_k = computeDispatchTableEntry(c10::Dispatcher::singleton(), k);
     auto idx = getDispatchTableIndexForDispatchKey(k);
+    if (C10_UNLIKELY(idx == -1)) {
+      continue;
+    }
     TORCH_INTERNAL_ASSERT(expected_k._equalsBoxedAndUnboxed(dispatchTable_[idx]),
       "Canonical state\n~~~~~~~~~~~\n", dumpState(), "\n\n"
       "Computed table:\n~~~~~~~~~~~\n", dumpComputedTable());
@@ -389,7 +396,7 @@ std::string OperatorEntry::listAllDispatchKeys() const {
   bool has_kernels = false;
   for (auto k : DispatchKeySet(DispatchKeySet::FULL)) {
     auto iter = getDispatchTableIndexForDispatchKey(k);
-    if (!dispatchTable_[iter].isValid()) {
+    if (iter == -1 || !dispatchTable_[iter].isValid()) {
       continue;
     }
     if (has_kernels) {
