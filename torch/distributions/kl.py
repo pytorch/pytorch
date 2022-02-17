@@ -148,7 +148,7 @@ def kl_divergence(p, q):
     .. math::
 
         KL(p \| q) = \int p(x) \log\frac {p(x)} {q(x)} \,dx
-    
+
     Args:
         p (Distribution): A :class:`~torch.distributions.Distribution` object.
         q (Distribution): A :class:`~torch.distributions.Distribution` object.
