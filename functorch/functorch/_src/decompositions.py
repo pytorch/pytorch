@@ -132,6 +132,15 @@ def prelu_backward(grad_output: Tensor, self: Tensor, weight: Tensor) -> Tuple[T
     return (input_grad, aten.sum(weight_grad_collector, [0] + spatial_dims))
 
 
+@register_decomposition(aten.rrelu_with_noise_backward)
+def rrelu_with_noise_backward(grad_output: Tensor, self: Tensor, noise: Tensor, lower: float, upper: float, training: bool, self_is_result: bool) -> Tensor:
+    if training and upper - lower > 1e-6:
+        return grad_output.mul(noise)
+    else:
+        negative_slope = (lower + upper) / 2
+        return aten.leaky_relu_backward(grad_output, self, negative_slope, self_is_result)
+
+
 @register_decomposition(aten.log_sigmoid_backward)
 def log_sigmoid_backward(grad_output: Tensor, self: Tensor, buffer: Tensor) -> Tensor:
     in_negative = self < 0
