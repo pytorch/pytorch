@@ -9,7 +9,6 @@ dictated by just sharding.
 
 import json
 import os
-import re
 from typing import Dict
 
 from typing_extensions import TypedDict
