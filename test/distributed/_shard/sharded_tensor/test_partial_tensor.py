@@ -17,6 +17,7 @@ from torch.testing._internal.common_distributed import (
 )
 from torch.testing._internal.common_utils import (
     TEST_WITH_DEV_DBG_ASAN,
+    run_tests,
 )
 from torch.testing._internal.distributed._shard.sharded_tensor import (
     ShardedTensorTestBase,
@@ -106,3 +107,7 @@ class TestPartialTensorReshard(ShardedTensorTestBase):
             self._run_partial_tensor_n_reshard(
                 spec, [13, 21], 3, dist.ReduceOp.SUM, dtype=torch.cfloat
             )
+
+
+if __name__ == "__main__":
+    run_tests()
