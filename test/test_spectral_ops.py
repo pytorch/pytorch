@@ -297,6 +297,16 @@ class TestFFT(TestCase):
             op(t)
 
     @onlyNativeDeviceTypes
+    def test_empty_ifft(self, device):
+        t = torch.empty(2, 1, device=device, dtype=torch.complex64)
+        match = r"Invalid number of data points \([-\d]*\) specified"
+
+        for f in [torch.fft.irfft, torch.fft.irfft2, torch.fft.irfftn,
+                  torch.fft.hfft, torch.fft.hfft2, torch.fft.hfftn]:
+            with self.assertRaisesRegex(RuntimeError, match):
+                f(t)
+
+    @onlyNativeDeviceTypes
     def test_fft_invalid_dtypes(self, device):
         t = torch.randn(64, device=device, dtype=torch.complex128)
 
