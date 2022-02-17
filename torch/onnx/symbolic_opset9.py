@@ -2911,6 +2911,93 @@ def index(g, self, index):
             return sym_help._reshape_helper(g, self, final_shape)
 
 
+@parse_args("v", "v", "is", "i", "v")
+def linalg_norm(g, self, ord, dim, keepdim, dtype):
+    # Conditions based on https://pytorch.org/docs/stable/generated/torch.linalg.norm.html
+    ord_value = None
+    if dim is None:
+        if sym_help._is_none(ord):
+            self = sym_help._reshape_helper(g, self, [-1])
+            ord = g.op("Constant", value_t=torch.LongTensor([2]))
+        self_dim = sym_help._get_tensor_rank(self)
+        if self_dim is None:
+            return _unimplemented("dim",
+                                  "Input rank must be known at export time.")
+        if self_dim == 1:
+            ord_value = sym_help._parse_arg(ord, "f")
+        else:
+            dim = [0, 1]
+    else:
+        if len(dim) == 1:
+            if sym_help._is_none(ord):
+                ord = g.op("Constant", value_t=torch.LongTensor([2]))
+            ord_value = sym_help._parse_arg(ord, "f")
+    if ord_value:
+        return linalg_vector_norm(g, self, ord_value, dim, keepdim, dtype)
+    return linalg_matrix_norm(g, self, ord, dim, keepdim, dtype)
+
+
+@parse_args("v", "f", "is", "i", "v")
+def linalg_vector_norm(g, self, ord, dim, keepdim, dtype):
+    # Conditions based on https://pytorch.org/docs/stable/generated/torch.linalg.vector_norm.html
+    if dim is None:
+        self = sym_help._reshape_helper(g, self, [-1])
+        keepdim = None
+
+    if ord == math.inf:
+        result = g.op("ReduceMax", g.op("Abs", self), axes_i=dim, keepdims_i=keepdim)
+    elif ord == -math.inf:
+        result = g.op("ReduceMin", g.op("Abs", self), axes_i=dim, keepdims_i=keepdim)
+    elif ord == 0:
+        return sym_help._onnx_opset_unsupported_detailed("linalg_vector_norm", 9, 11, "ord=0 not supported")
+    else:
+        ord_op = g.op("Constant", value_t=torch.FloatTensor([ord]))
+        result = sym_help._reducesum_helper(g, g.op("Pow", g.op("Abs", self), ord_op),
+                                            axes_i=dim, keepdims_i=keepdim)
+        result = g.op("Pow", result, g.op("Div", g.op("Constant", value_t=torch.FloatTensor([1])), ord_op))
+    return result
+
+
+@parse_args("v", "v", "is", "i", "v")
+def linalg_matrix_norm(g, self, ord, dim, keepdim, dtype):
+    # Conditions based on https://pytorch.org/docs/stable/generated/torch.linalg.matrix_norm.html
+    ord_value = sym_help._parse_arg(ord, "s")
+    if ord_value == 'fro':
+        return frobenius_norm(g, self, dim, keepdim)
+    elif ord_value == 'nuc':
+        return _unimplemented("linalg.matrix_norm", "ord==nuc")
+    else:
+        ord_value = sym_help._parse_arg(ord, "f")
+        if ord_value is None:
+            return frobenius_norm(g, self, dim, keepdim)
+        if ord_value == 2 or ord_value == -2:
+            # ord = 2/-2 unimplemented due to lack of operators
+            # used to calculate singular values
+            return _unimplemented("linalg.matrix_norm", "ord==2")
+        # Wrap the dim vector to handle neagtive dim values
+        self_dim = sym_help._get_tensor_rank(self)
+        if self_dim is None:
+            return _unimplemented("linalg.matrix_norm",
+                                  "Input rank must be known at export time.")
+        # Common implementation for cases with
+        # ord = 1/-1 and ord = inf/-inf
+        if dim[0] < 0:
+            dim[0] += self_dim
+        if dim[1] < 0:
+            dim[1] += self_dim
+
+        if ord_value == math.inf or ord_value == -math.inf:
+            dim[0], dim[1] = dim[1], dim[0]
+        if dim[1] > dim[0] and not keepdim:
+            dim[1] -= 1
+        sum = sym_help._reducesum_helper(g, g.op("Abs", self), axes_i=[dim[0]], keepdims_i=keepdim)
+        if ord_value > 0:
+            result, indices = max(g, sum, dim_or_y=g.op("Constant", value_t=torch.LongTensor([dim[1]])), keepdim=keepdim)
+        else:
+            result, indices = min(g, sum, dim_or_y=g.op("Constant", value_t=torch.LongTensor([dim[1]])), keepdim=keepdim)
+        return result
+
+
 @parse_args("v", "is", "i")
 def frobenius_norm(g, self, dim=None, keepdim=False):
     sqr = g.op("Mul", self, self)
