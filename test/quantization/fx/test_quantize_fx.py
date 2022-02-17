@@ -1770,7 +1770,7 @@ class TestQuantizeFx(QuantizationTestCase):
 
         def assertAttrPreserved(m):
             self.assertTrue(hasattr(m, "preserved_attr"))
-            self.assertTrue(m.preserved_attr, 3)
+            self.assertEqual(m.preserved_attr, 3)
 
         assertAttrPreserved(m)
         convert_custom_config_dict = {
@@ -3706,6 +3706,8 @@ class TestQuantizeFxOps(QuantizationTestCase):
                 expected_node_occurrence=convert_node_occurrence)
             if quant_type != QuantType.DYNAMIC:
                 self.assertEqual(result_dict["quantized_output"], result_dict["quantized_reference_output"])
+                # Ensure packed weights in lowered models are folded
+                self.assertIn("_packed_weight_0", result_dict["quantized"].state_dict().keys())
 
     def test_linear_dynamic_fp16(self):
         class FuncLinear(torch.nn.Module):

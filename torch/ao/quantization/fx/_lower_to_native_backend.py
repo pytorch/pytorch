@@ -1,5 +1,7 @@
 import itertools
 import torch
+from torch.fx import map_arg
+from torch.fx.graph import Graph
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.nn.intrinsic as nni
@@ -11,7 +13,13 @@ from . import subgraph_rewriter_FORKED_DO_NOT_USE
 from .graph_module import QuantizedGraphModule
 from .quantized_fusion_patterns_and_replacements import get_fbgemm_patterns_and_replacements
 from .match_utils import is_match, MatchAllNode
-from .utils import create_node_from_old_node_preserve_meta, get_linear_prepack_op_for_dtype
+from .utils import (
+    collect_producer_nodes,
+    create_node_from_old_node_preserve_meta,
+    get_linear_prepack_op_for_dtype,
+    get_new_attr_name_with_prefix,
+    graph_module_from_producer_nodes,
+)
 from ..utils import _parent_name, check_node
 from typing import Dict, Tuple, Type, List, Any
 from torch.fx import Node
@@ -71,6 +79,70 @@ LOWER_FUSED_MODULE_MAP: Dict[Type[nn.Module], Tuple[Type[nn.Module], Type[Refere
 LOWER_FUNCTIONAL_MAP = {
     F.linear: (torch.ops.quantized.linear, torch.ops.quantized.linear_relu),
 }
+
+WEIGHT_PREPACK_OPS = {
+    torch._ops.ops.quantized.linear_prepack,
+    torch._ops.ops.quantized.linear_prepack_fp16,
+    torch._ops.ops.quantized.conv1d_prepack,
+    torch._ops.ops.quantized.conv2d_prepack,
+    torch._ops.ops.quantized.conv3d_prepack,
+}
+
+def fold_weight(
+        quantized: QuantizedGraphModule,
+        node_name_to_scope: Dict[str, Tuple[str, type]]) -> QuantizedGraphModule:
+    """
+    Trace back from the weight node util we hit getattr, reconstruct the
+    graph module with the traced nodes and run the graph module to pack the
+    weight. then replace the original chain of ops with the packed weight.
+    """
+    packed_weights = dict()
+    # map from folded node name to the prepacked weight name
+    folded_nodes = dict()
+    # get packed weights
+    for node in quantized.graph.nodes:
+        if node.op == 'call_function' and node.target in WEIGHT_PREPACK_OPS:
+            nodes_to_fold = collect_producer_nodes(node)
+            if nodes_to_fold is not None:
+                for node_to_fold in nodes_to_fold:
+                    folded_nodes[node_to_fold.name] = node
+
+                prepacking_module = graph_module_from_producer_nodes(
+                    quantized, nodes_to_fold)
+                packed_weight = prepacking_module()
+                packed_weights[node.name] = packed_weight
+
+    # remove folded nodes and replace the prepacking node with getattr
+    folded_graph = Graph()
+    env: Dict[Any, Any] = {}
+
+    def load_arg(a):
+        return map_arg(a, lambda node: env[node.name])
+    quantized_root = quantized
+    quantized_graph = quantized.graph
+
+    for node in quantized_graph.nodes:
+        prepack_node = folded_nodes.get(node.name, None)
+        if prepack_node is node:
+            packed_weight = packed_weights[node.name]
+            # add a prepacked attribute to root
+            op_node = list(prepack_node.users)[0]
+            module_path, _ = node_name_to_scope.get(op_node.name, ('', None))
+            get_new_packed_weight_name = \
+                get_new_attr_name_with_prefix(module_path + '_packed_weight_')
+            packed_weight_name = get_new_packed_weight_name(quantized_root)
+            setattr(quantized_root, packed_weight_name, packed_weight)
+            # replace prepack node with a getattr node
+            env[node.name] = folded_graph.create_node(
+                'get_attr', packed_weight_name, (), {})
+        elif prepack_node is not None:
+            # remove the foled node
+            continue
+        else:
+            # copy other nodes
+            env[node.name] = folded_graph.node_copy(node, load_arg)
+    quantized = QuantizedGraphModule(quantized_root, folded_graph, quantized_root.preserved_attr_names)
+    return quantized
 
 def _lower_weighted_ref_module(model: QuantizedGraphModule) -> QuantizedGraphModule:
     """
@@ -155,9 +227,11 @@ def _lower_weighted_ref_functional(model: QuantizedGraphModule) -> QuantizedGrap
             # Set up match pattern: (dequantize - [relu_op - ] func_op - quantize)
             # Func args: (dequantized inputs, dequantized weights[, bias])
             # Quantize args: (func, scale, zp, dtype)
-            func_pattern: Tuple[Any, ...] = (ref_func, "dequantize", "dequantize")
+            func_pattern: Tuple[Any, ...] = ()
             if has_bias:
-                func_pattern = tuple(list(func_pattern) + [MatchAllNode])
+                func_pattern = (ref_func, "dequantize", "dequantize", MatchAllNode)
+            else:
+                func_pattern = (ref_func, "dequantize", "dequantize")
             if is_relu:
                 func_pattern = (F.relu, func_pattern)
             pattern = (torch.quantize_per_tensor, func_pattern, MatchAllNode, MatchAllNode, MatchAllNode)
@@ -179,9 +253,9 @@ def _lower_weighted_ref_functional(model: QuantizedGraphModule) -> QuantizedGrap
                 input_dq_node = func_node.args[0]
                 weight_dq_node = func_node.args[1]
 
-                # Step 1: Replace quantized weights with packed weights
+                # Step 1: Replace quantized weights with packed weights, which will be folded later
                 quantized_weight = weight_dq_node.args[0]
-                weight_dtype = quantized_weight.args[4]
+                weight_dtype = quantized_weight.args[-1]
                 if has_bias:
                     bias = func_node.args[2]
                 else:
@@ -214,9 +288,6 @@ def _lower_weighted_ref_functional(model: QuantizedGraphModule) -> QuantizedGrap
                 if is_relu:
                     model.graph.erase_node(relu_node)
                 model.graph.erase_node(func_node)
-
-                # Step 3: TODO(andrew) Fold weights
-            model.recompile()
     return model
 
 def special_pattern_replacement(model: QuantizedGraphModule) -> QuantizedGraphModule:
@@ -294,12 +365,11 @@ def special_pattern_replacement(model: QuantizedGraphModule) -> QuantizedGraphMo
         for n in q_node_args:
             if isinstance(n, Node):
                 model.graph.erase_node(n)
-
-
-    model.recompile()
     return model
 
-def _lower_to_native_backend(model: QuantizedGraphModule) -> QuantizedGraphModule:
+def _lower_to_native_backend(
+        model: QuantizedGraphModule,
+        node_name_to_scope: Dict[str, Tuple[str, type]]) -> QuantizedGraphModule:
     """ Lower a quantized reference model (with reference quantized operator patterns)
     to the native backend in PyTorch (fbgemm/qnnpack), both backends shares the same
     operator signature so they can be lowered with the same function
@@ -309,5 +379,7 @@ def _lower_to_native_backend(model: QuantizedGraphModule) -> QuantizedGraphModul
     for pattern, replacement in get_fbgemm_patterns_and_replacements():
         subgraph_rewriter_FORKED_DO_NOT_USE.replace_pattern(model, pattern, replacement)
     special_pattern_replacement(model)
+    model = fold_weight(model, node_name_to_scope)
+    model.recompile()
     model.graph.lint()
     return model
