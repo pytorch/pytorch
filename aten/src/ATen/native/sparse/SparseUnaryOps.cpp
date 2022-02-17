@@ -1,6 +1,66 @@
+// #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
+#include <ATen/SparseTensorUtils.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
-#include <ATen/SparseTensorUtils.h>
+#else
+#include <ATen/ops/_sparse_coo_tensor_with_dims_and_tensors.h>
+#include <ATen/ops/abs.h>
+#include <ATen/ops/abs_native.h>
+#include <ATen/ops/asin.h>
+#include <ATen/ops/asin_native.h>
+#include <ATen/ops/asinh.h>
+#include <ATen/ops/asinh_native.h>
+#include <ATen/ops/atan.h>
+#include <ATen/ops/atan_native.h>
+#include <ATen/ops/atanh.h>
+#include <ATen/ops/atanh_native.h>
+#include <ATen/ops/ceil.h>
+#include <ATen/ops/ceil_native.h>
+#include <ATen/ops/erf.h>
+#include <ATen/ops/erf_native.h>
+#include <ATen/ops/erfinv.h>
+#include <ATen/ops/erfinv_native.h>
+#include <ATen/ops/expm1.h>
+#include <ATen/ops/expm1_native.h>
+#include <ATen/ops/floor.h>
+#include <ATen/ops/floor_native.h>
+#include <ATen/ops/isinf.h>
+#include <ATen/ops/isinf_native.h>
+#include <ATen/ops/isnan.h>
+#include <ATen/ops/isnan_native.h>
+#include <ATen/ops/isneginf.h>
+#include <ATen/ops/isneginf_native.h>
+#include <ATen/ops/isposinf.h>
+#include <ATen/ops/isposinf_native.h>
+#include <ATen/ops/log1p.h>
+#include <ATen/ops/log1p_native.h>
+#include <ATen/ops/nan_to_num.h>
+#include <ATen/ops/nan_to_num_native.h>
+#include <ATen/ops/round.h>
+#include <ATen/ops/round_native.h>
+#include <ATen/ops/sgn.h>
+#include <ATen/ops/sgn_native.h>
+#include <ATen/ops/sign.h>
+#include <ATen/ops/sign_native.h>
+#include <ATen/ops/signbit.h>
+#include <ATen/ops/signbit_native.h>
+#include <ATen/ops/sin.h>
+#include <ATen/ops/sin_native.h>
+#include <ATen/ops/sinh.h>
+#include <ATen/ops/sinh_native.h>
+#include <ATen/ops/sparse_resize_native.h>
+#include <ATen/ops/sqrt.h>
+#include <ATen/ops/sqrt_native.h>
+#include <ATen/ops/tan.h>
+#include <ATen/ops/tan_native.h>
+#include <ATen/ops/tanh.h>
+#include <ATen/ops/tanh_native.h>
+#include <ATen/ops/trunc.h>
+#include <ATen/ops/trunc_native.h>
+#endif
 
 namespace at {
 namespace native {

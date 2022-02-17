@@ -42,7 +42,6 @@
 #include <torch/csrc/jit/runtime/instruction.h>
 #include <torch/csrc/jit/runtime/interpreter.h>
 #include <torch/csrc/jit/runtime/logging.h>
-#include <torch/csrc/jit/serialization/export.h>
 #include <torch/csrc/jit/serialization/import_source.h>
 #include <torch/csrc/jit/serialization/python_print.h>
 #include <torch/csrc/jit/testing/hooks_for_testing.h>
@@ -1033,6 +1032,15 @@ void initJitScriptBindings(PyObject* module) {
         return self.old_schema;
       });
 
+  py::class_<UpgraderRange>(m, "_UpgraderRange")
+      .def(py::init<int, int>())
+      .def_property_readonly(
+          "min_version",
+          [](const UpgraderRange& self) { return self.min_version; })
+      .def_property_readonly("max_version", [](const UpgraderRange& self) {
+        return self.max_version;
+      });
+
   object_class.def(
       "__deepcopy__", [](const Object& self, const py::dict& memo) {
         return Object(
@@ -1386,7 +1394,12 @@ void initJitScriptBindings(PyObject* module) {
       .def(
           "get_class",
           [](const std::shared_ptr<CompilationUnit>& self,
-             const std::string& name) { return self->get_class(name); });
+             const std::string& name) { return self->get_class(name); })
+      .def(
+          "drop_all_functions",
+          [](const std::shared_ptr<CompilationUnit>& self) {
+            self->drop_all_functions();
+          });
 
   py::class_<StrongFunctionPtr>(m, "ScriptFunction", py::dynamic_attr())
       .def(
@@ -1746,6 +1759,7 @@ void initJitScriptBindings(PyObject* module) {
   m.def("merge_type_from_type_comment", &mergeTypesFromTypeComment);
   m.def("_get_max_operator_version", &getMaxOperatorVersion);
   m.def("_get_operator_version_map", &get_operator_version_map);
+  m.def("_get_upgrader_ranges", &getUpgradersRangeForOp);
   m.def("_test_only_add_entry_to_op_version_map", &test_only_add_entry);
   m.def("_test_only_remove_entry_to_op_version_map", &test_only_remove_entry);
   m.def(
@@ -2196,10 +2210,6 @@ void initJitScriptBindings(PyObject* module) {
       logging::LoggerBase,
       std::shared_ptr<logging::NoopLogger>>(m, "NoopLogger")
       .def(py::init<>());
-  m.def(
-      "_check_onnx_proto",
-      [](const std::string& proto_string) { check_onnx_proto(proto_string); },
-      py::arg("proto_string"));
   m.def("_jit_is_script_object", [](const py::object& obj) {
     return py::isinstance<Object>(obj);
   });

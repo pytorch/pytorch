@@ -97,6 +97,7 @@ jobs:
       - name: Checkout PyTorch
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           # deep clone, to allow use of git merge-base
           fetch-depth: 0
           submodules: recursive
@@ -256,7 +257,6 @@ jobs:
       TEST_RUNNER_TYPE: linux.2xlarge
       ENABLE_DISTRIBUTED_TEST: 1
       ENABLE_JIT_LEGACY_TEST: 1
-      ENABLE_FX2TRT_TEST: ''
       ENABLE_MULTIGPU_TEST: ''
       ENABLE_NOGPU_NO_AVX_TEST: ''
       ENABLE_NOGPU_NO_AVX2_TEST: ''
@@ -346,6 +346,7 @@ jobs:
       - name: Checkout PyTorch
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           # deep clone, to allow use of git merge-base
           fetch-depth: 0
           submodules: recursive
