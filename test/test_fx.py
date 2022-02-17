@@ -3538,6 +3538,7 @@ class TestFunctionalTracing(JitTestCase):
         "bilinear": BUILT_IN_FUNC,
         "celu_": BUILT_IN_FUNC,
         "channel_shuffle": BUILT_IN_FUNC,
+        "native_channel_shuffle": BUILT_IN_FUNC,
         "conv1d": BUILT_IN_FUNC,
         "conv2d": BUILT_IN_FUNC,
         "conv3d": BUILT_IN_FUNC,
