@@ -12,7 +12,6 @@ from typing_extensions import Literal, TypedDict
 
 import generate_binary_build_matrix  # type: ignore[import]
 
-YamlShellBool = Literal["''", 1]
 Arch = Literal["windows", "linux", "macos"]
 
 DOCKER_REGISTRY = "308535385114.dkr.ecr.us-east-1.amazonaws.com"
@@ -167,8 +166,6 @@ class CIWorkflow:
     is_scheduled: str = ''
     is_default: bool = False
     num_test_shards: int = 1
-    only_run_smoke_tests_on_pull_request: bool = False
-    num_test_shards_on_pull_request: int = -1
     timeout_after: int = 240
     xcode_version: str = ''
     only_on_pr: bool = False
@@ -176,6 +173,8 @@ class CIWorkflow:
     ios_platform: str = ''
     test_jobs: Any = field(default_factory=list)
 
+    enable_default_test: bool = True
+    enable_smoke_test: bool = True
     enable_jit_legacy_test: bool = False
     enable_distributed_test: bool = True
     enable_multigpu_test: bool = False
@@ -198,14 +197,6 @@ class CIWorkflow:
         if LABEL_CIFLOW_DEFAULT in self.ciflow_config.labels:
             self.is_default = True
 
-        # If num_test_shards_on_pull_request is not user-defined, default to num_test_shards unless we are
-        # only running smoke tests on the pull request.
-        if self.num_test_shards_on_pull_request == -1:
-            # Don't run the default if we are only running smoke tests
-            if self.only_run_smoke_tests_on_pull_request:
-                self.num_test_shards_on_pull_request = 0
-            else:
-                self.num_test_shards_on_pull_request = self.num_test_shards
         self.test_jobs = self._gen_test_jobs()
         self.assert_valid()
 
@@ -272,10 +263,6 @@ class CIWorkflow:
 
         test_jobs = []
 
-        # TODO: no run_as_if_on_trunk implemented
-        # TODO: no get_disabled_issues implemented
-        num_test_shards = self.num_test_shards_on_pull_request
-
         configs: Dict[str, Config] = {}
         if self.enable_jit_legacy_test:
             configs["jit_legacy"] = {"num_shards": 1, "runner": self.test_runner_type}
@@ -309,8 +296,7 @@ class CIWorkflow:
         if self.enable_noarch_test:
             configs["noarch"] = {"num_shards": 1, "runner": self.test_runner_type}
 
-        run_smoke_tests = self.only_run_smoke_tests_on_pull_request
-        if run_smoke_tests:
+        if self.enable_smoke_test:
             configs["smoke_tests"] = {"num_shards": 1, "runner": self.test_runner_type}
 
         for name, config in configs.items():
@@ -325,15 +311,14 @@ class CIWorkflow:
                     }
                 )
 
-        # skip default tests for xla
-        if not self.enable_xla_test:
-            for shard in range(1, num_test_shards + 1):
+        if self.enable_default_test:
+            for shard in range(1, self.num_test_shards + 1):
                 test_jobs.append(
                     {
-                        "name": f"test (default, {shard}, {num_test_shards}, {self.test_runner_type})",
+                        "name": f"test (default, {shard}, {self.num_test_shards}, {self.test_runner_type})",
                         "config": "default",
                         "shard": shard,
-                        "num_shards": num_test_shards,
+                        "num_shards": self.num_test_shards,
                         "runner": self.test_runner_type,
                     }
                 )
@@ -414,15 +399,28 @@ WINDOWS_WORKFLOWS = [
     ),
     CIWorkflow(
         arch="windows",
+        build_environment="win-vs2019-cuda11.3-py3-smoke",
+        cuda_version="11.3",
+        test_runner_type=WINDOWS_CUDA_TEST_RUNNER,
+        enable_default_test=False,
+        enable_smoke_test=True,
+        enable_force_on_cpu_test=True,
+        only_on_pr=True,
+        ciflow_config=CIFlowConfig(
+            run_on_canary=True,
+            labels={LABEL_CIFLOW_DEFAULT, LABEL_CIFLOW_CUDA, LABEL_CIFLOW_WIN}
+        ),
+    ),
+    CIWorkflow(
+        arch="windows",
         build_environment="win-vs2019-cuda11.3-py3",
         cuda_version="11.3",
         test_runner_type=WINDOWS_CUDA_TEST_RUNNER,
         num_test_shards=2,
-        only_run_smoke_tests_on_pull_request=True,
         enable_force_on_cpu_test=True,
         ciflow_config=CIFlowConfig(
             run_on_canary=True,
-            labels={LABEL_CIFLOW_DEFAULT, LABEL_CIFLOW_CUDA, LABEL_CIFLOW_WIN}
+            labels={LABEL_CIFLOW_CUDA, LABEL_CIFLOW_WIN}
         ),
     ),
     CIWorkflow(
@@ -750,6 +748,7 @@ XLA_WORKFLOWS = [
         num_test_shards=2,
         enable_distributed_test=False,
         enable_xla_test=True,
+        enable_default_test=False,
         ciflow_config=CIFlowConfig(
             labels={LABEL_CIFLOW_LINUX, LABEL_CIFLOW_CPU, LABEL_CIFLOW_XLA},
         ),

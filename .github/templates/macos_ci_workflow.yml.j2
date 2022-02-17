@@ -97,7 +97,7 @@ jobs:
       TEST_CONFIG: !{{ test_job.config }}
       SHARD_NUMBER: !{{ test_job.shard }}
       NUM_TEST_SHARDS: !{{ test_job.num_shards }}
-     {#- PYTORCH_IGNORE_DISABLED_ISSUES: ${{ needs.generate-test-matrix.outputs.ignore-disabled-issues }} #}
+      PR_BODY: ${{ github.event.pull_request.body }}
     steps:
       !{{ common.checkout(submodules="false") }}
       - uses: actions/download-artifact@v2
@@ -119,8 +119,8 @@ jobs:
           python3 -mpip install dist/*.whl
           .jenkins/pytorch/macos-test.sh
       !{{ common.render_test_results() }}
-      !{{ common.upload_downloaded_files(name='macos', artifact_name="test-jsons", use_s3=False) }}
-      !{{ common.upload_test_reports("macos", artifact_name="test-reports", use_s3=False) }}
+      !{{ common.upload_downloaded_files(name='macos', config=test_job.config, shard=test_job.shard, num_shards=test_job.num_shards, runner=test_job.runner, artifact_name="test-jsons", use_s3=False) }}
+      !{{ common.upload_test_reports("macos", config=test_job.config, shard=test_job.shard, num_shards=test_job.num_shards, runner=test_job.runner, artifact_name="test-reports", use_s3=False) }}
       !{{ common.upload_test_statistics(build_environment, needs_credentials=True) }}
 {%- endfor %}
 {% endblock +%}
