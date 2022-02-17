@@ -20,6 +20,7 @@ namespace caffe2 {
 
 using namespace dnnlowp;
 
+// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 template <typename T>
 ElementwiseLinearDNNLowPOp<T>::ElementwiseLinearDNNLowPOp(
     const OperatorDef& operator_def,

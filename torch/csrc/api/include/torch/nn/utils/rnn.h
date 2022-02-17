@@ -1,5 +1,6 @@
 #pragma once
 
+#include <c10/util/irange.h>
 #include <torch/types.h>
 
 namespace torch {
@@ -18,19 +19,19 @@ inline Tensor invert_permutation(const Tensor& permutation) {
 }
 
 /// Holds the data and list of `batch_sizes` of a packed sequence.
-/// 
+///
 /// All RNN modules accept packed sequences as inputs.
-/// 
+///
 /// Note:
 ///     Instances of this class should never be created manually. They are meant
 ///     to be instantiated by functions like `pack_padded_sequence`.
-/// 
+///
 ///     Batch sizes represent the number elements at each sequence step in
 ///     the batch, not the varying sequence lengths passed to
 ///     `pack_padded_sequence`.  For instance, given data ``abc`` and ``x``
 ///     the :class:`PackedSequence` would contain data ``axbc`` with
 ///     ``batch_sizes=[2,1,1]``.
-/// 
+///
 /// Attributes:
 ///     data (Tensor): Tensor containing packed sequence
 ///     batch_sizes (Tensor): Tensor of integers holding
@@ -39,14 +40,14 @@ inline Tensor invert_permutation(const Tensor& permutation) {
 ///         :class:`PackedSequence` is constructed from sequences.
 ///     unsorted_indices (Tensor, optional): Tensor of integers holding how this
 ///         to recover the original sequences with correct order.
-/// 
+///
 /// .. note::
 ///     `data` can be on arbitrary device and of arbitrary dtype.
 ///     `sorted_indices` and `unsorted_indices` must be ``torch::kInt64``
 ///     tensors on the same device as `data`.
-/// 
+///
 ///     However, `batch_sizes` should always be a CPU ``torch::kInt64`` tensor.
-/// 
+///
 ///     This invariant is maintained throughout `PackedSequence` class,
 ///     and all functions that construct a `PackedSequence` in libtorch
 ///     (i.e., they only pass in tensors conforming to this constraint).
@@ -151,23 +152,23 @@ class PackedSequence {
 };
 
 /// Packs a Tensor containing padded sequences of variable length.
-/// 
+///
 /// `input` can be of size ``T x B x *`` where `T` is the length of the
 /// longest sequence (equal to ``lengths[0]``), ``B`` is the batch size, and
 /// ``*`` is any number of dimensions (including 0). If ``batch_first`` is
 /// ``true``, ``B x T x *`` `input` is expected.
-/// 
+///
 /// For unsorted sequences, use `enforce_sorted = false`. If `enforce_sorted` is
 /// ``true``, the sequences should be sorted by length in a decreasing order, i.e.
 /// ``input[:,0]`` should be the longest sequence, and ``input[:,B-1]`` the shortest
 /// one.
-/// 
+///
 /// Note:
 ///     This function accepts any input that has at least two dimensions. You
 ///     can apply it to pack the labels, and use the output of the RNN with
 ///     them to compute the loss directly. A Tensor can be retrieved from
 ///     a `PackedSequence` object by calling its ``.data()`` function.
-/// 
+///
 /// Arguments:
 ///     input (Tensor): padded batch of variable length sequences.
 ///     lengths (Tensor): list of sequences lengths of each batch element.
@@ -176,7 +177,7 @@ class PackedSequence {
 ///     enforce_sorted (bool, optional): if ``true``, the input is expected to
 ///         contain sequences sorted by length in a decreasing order. If
 ///         ``false``, this condition is not checked. Default: ``true``.
-/// 
+///
 /// Returns:
 ///     a `PackedSequence` object
 inline PackedSequence pack_padded_sequence(
@@ -201,15 +202,15 @@ inline PackedSequence pack_padded_sequence(
 }
 
 /// Pads a packed batch of variable length sequences.
-/// 
+///
 /// It is an inverse operation to `pack_padded_sequence`.
-/// 
+///
 /// The returned Tensor's data will be of size ``T x B x *``, where `T` is the length
 /// of the longest sequence and `B` is the batch size. If ``batch_first`` is true,
 /// the data will be transposed into ``B x T x *`` format.
-/// 
+///
 /// Batch elements will be ordered decreasingly by their length.
-/// 
+///
 /// Arguments:
 ///     sequence (PackedSequence): batch to pad
 ///     batch_first (bool, optional): if ``true``, the output will be in ``B x T x *``
@@ -219,7 +220,7 @@ inline PackedSequence pack_padded_sequence(
 ///         have length `total_length`. This method will throw error
 ///         if `total_length` is less than the max sequence length in
 ///         `sequence`.
-/// 
+///
 /// Returns:
 ///     Tuple of Tensor containing the padded sequence, and a Tensor
 ///     containing the list of lengths of each sequence in the batch.
@@ -241,7 +242,7 @@ inline std::tuple<Tensor, Tensor> pad_packed_sequence(
   Tensor padded_output, lengths;
   std::tie(padded_output, lengths) = torch::_pad_packed_sequence(
     sequence.data(), sequence.batch_sizes(), batch_first, padding_value, max_seq_length);
-  Tensor unsorted_indices = sequence.unsorted_indices();
+  const Tensor& unsorted_indices = sequence.unsorted_indices();
   if (unsorted_indices.defined()) {
     int64_t batch_dim = batch_first ? 0 : 1;
     return std::make_tuple(padded_output.index_select(batch_dim, unsorted_indices), lengths.index({unsorted_indices}));
@@ -279,65 +280,34 @@ inline Tensor pad_sequence(
     ArrayRef<Tensor> sequences,
     bool batch_first = false,
     double padding_value = 0) {
-  // assuming trailing dimensions and type of all the Tensors
-  // in sequences are same and fetching those from sequences[0]
-  auto max_size = sequences[0].sizes();
-  auto trailing_dims = max_size.slice(1);
-  auto max_len = std::max_element(
-    sequences.begin(),
-    sequences.end(),
-    [](const Tensor& a, const Tensor& b) {
-      return a.size(0) < b.size(0);
-    }
-  )->size(0);
-
-  std::vector<int64_t> out_dims;
-  if (batch_first) {
-    out_dims = {(int64_t)sequences.size(), max_len};
-  } else {
-    out_dims = {max_len, (int64_t)sequences.size()};
-  }
-  out_dims.insert(out_dims.end(), trailing_dims.begin(), trailing_dims.end());
-
-  auto out_tensor = torch::full({out_dims}, padding_value, sequences[0].options());
-  for (size_t i = 0; i < sequences.size(); i++) {
-    auto tensor = sequences[i];
-    int64_t length = tensor.size(0);
-    // use index notation to prevent duplicate references to the tensor
-    if (batch_first) {
-      out_tensor.select(0, i).narrow(0, 0, length).copy_(tensor);
-    } else {
-      out_tensor.narrow(0, 0, length).select(1, i).copy_(tensor);
-    }
-  }
-  return out_tensor;
+  return at::pad_sequence(sequences, batch_first, padding_value);
 }
 
 /// Packs a list of variable length Tensors
-/// 
+///
 /// ``sequences`` should be a list of Tensors of size ``L x *``, where `L` is
 /// the length of a sequence and `*` is any number of trailing dimensions,
 /// including zero.
-/// 
+///
 /// For unsorted sequences, use `enforce_sorted = false`. If ``enforce_sorted``
 /// is ``true``, the sequences should be sorted in the order of decreasing length.
-/// 
-/// 
+///
+///
 /// Arguments:
 ///     sequences (torch::ArrayRef<Tensor>): A list of sequences of decreasing length.
 ///     enforce_sorted (bool, optional): if ``true``, checks that the input
 ///         contains sequences sorted by length in a decreasing order. If
 ///         ``false``, this condition is not checked. Default: ``true``.
-/// 
+///
 /// Returns:
 ///     a `PackedSequence` object
 inline PackedSequence pack_sequence(ArrayRef<Tensor> sequences, bool enforce_sorted = true) {
   Tensor lengths = torch::empty({(int64_t)sequences.size()}, kInt64);
-  for (size_t i = 0; i < sequences.size(); i++) {
+  for (const auto i : c10::irange(sequences.size())) {
     lengths[i] = sequences[i].size(0);
   }
   return pack_padded_sequence(
-    pad_sequence(sequences), lengths, /*batch_first=*/false, /*enforce_sorted=*/enforce_sorted);
+    at::pad_sequence(sequences), lengths, /*batch_first=*/false, /*enforce_sorted=*/enforce_sorted);
 }
 
 } // namespace rnn

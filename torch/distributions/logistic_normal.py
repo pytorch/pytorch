@@ -31,7 +31,7 @@ class LogisticNormal(TransformedDistribution):
     has_rsample = True
 
     def __init__(self, loc, scale, validate_args=None):
-        base_dist = Normal(loc, scale)
+        base_dist = Normal(loc, scale, validate_args=validate_args)
         if not base_dist.batch_shape:
             base_dist = base_dist.expand([1])
         super(LogisticNormal, self).__init__(base_dist,

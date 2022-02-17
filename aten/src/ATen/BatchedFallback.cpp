@@ -5,6 +5,7 @@
 #include <ATen/core/dispatch/Dispatcher.h>
 #include <c10/util/accumulate.h>
 #include <c10/util/llvmMathExtras.h>
+#include <c10/util/irange.h>
 
 namespace at {
 
@@ -35,7 +36,7 @@ static bool areAnyArgumentsTensorList(const FunctionSchema& schema) {
   return std::any_of(
       schema.arguments().begin(),
       schema.arguments().end(),
-      [] (const Argument& arg) { return arg.type()->isSubtypeOf(ListType::ofTensors()); });
+      [] (const Argument& arg) { return arg.type()->isSubtypeOf(*ListType::ofTensors()); });
 }
 
 // Returns if an operator is in-place. An operator is inplace if:
@@ -49,29 +50,32 @@ static bool isInplaceOp(const c10::FunctionSchema& schema) {
     return false;
   }
   // Check that the first argument is being written to
-  const auto& first_arg_alias_info = schema.arguments().begin()->alias_info();
-  if (!first_arg_alias_info || !first_arg_alias_info.value().isWrite()) {
+  const AliasInfo* first_arg_alias_info = schema.arguments().begin()->alias_info();
+  if (!first_arg_alias_info || !first_arg_alias_info->isWrite()) {
     return false;
   }
   // Check that none of the other args are being aliased
   for (auto it = schema.arguments().begin() + 1; it != schema.arguments().end(); ++it) {
-    const auto& alias_info = it->alias_info();
+    const AliasInfo* alias_info = it->alias_info();
     if (alias_info) {
       return false;
     }
   }
   // Check that the first tensor is being returned (i.e., output has a (a!))
-  const auto& return_alias_info = schema.returns()[0].alias_info();
-  return return_alias_info && return_alias_info.value().isWrite();
+  const AliasInfo* return_alias_info = schema.returns()[0].alias_info();
+  return return_alias_info && return_alias_info->isWrite();
 }
 
-static void warnFallback(const c10::FunctionSchema& schema, bool is_inplace) {
+static void warnFallback(const c10::FunctionSchema& schema) {
   if (!globalContext().areVmapFallbackWarningsEnabled()) {
     return;
   }
-  auto uses_stack = is_inplace ? "" : " and stack";
-  TORCH_WARN("Batching rule not implemented for ", schema.operator_name(), " falling back "
-             "to slow (for loop", uses_stack, ") implementation");
+  TORCH_WARN("There is a performance drop because we have not yet implemented ",
+             "the batching rule for ", schema.operator_name(), ". ",
+             "We've moved development of vmap to to functorch "
+             "(https://github.com/pytorch/functorch), please try functorch.vmap "
+             "instead and/or file ",
+             " an issue on GitHub so that we can prioritize its implementation.");
 }
 
 // The general flow of the algorithm is as follows.
@@ -87,10 +91,9 @@ static void warnFallback(const c10::FunctionSchema& schema, bool is_inplace) {
 //   the operator, and then pop the results off the stack.
 void batchedTensorInplaceForLoopFallback(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
   const auto& schema = op.schema();
-  const auto num_returns = schema.returns().size();
-  warnFallback(schema, /*in_place*/true);
+  warnFallback(schema);
 
-  const auto num_arguments = schema.arguments().size();
+  const auto num_arguments = static_cast<int64_t>(schema.arguments().size());
   const auto arguments = torch::jit::last(stack, num_arguments);
   const auto arguments_begin = stack->size() - num_arguments;
 
@@ -106,7 +109,7 @@ void batchedTensorInplaceForLoopFallback(const c10::OperatorHandle& op, torch::j
   // For each BatchedTensor, also record what position of `arguments` they came from.
   SmallVector<Tensor,kVmapTransformStaticInputSize> batched_tensor_inputs;
   VmapDimVector batched_tensor_inputs_position;
-  for (int64_t idx = 0; idx < arguments.size(); ++idx) {
+  for (const auto idx : c10::irange(arguments.size())) {
     const auto& ivalue = arguments[idx];
     if (!ivalue.isTensor()) {
       continue;
@@ -173,11 +176,11 @@ void batchedTensorInplaceForLoopFallback(const c10::OperatorHandle& op, torch::j
 
   // Strategy: For each batch, we are going to push slices (where applicable)
   // of the arguments onto `stack`, and call `op`.
-  for (int64_t linear_idx = 0; linear_idx < num_batches; ++linear_idx) {
+  for (const auto linear_idx : c10::irange(num_batches)) {
     auto index = computeIndex(linear_idx, batch_sizes);
     auto batched_tensor_inputs_pos_iter = batched_tensor_inputs_position.begin();
     auto input_physical_views_iter = input_physical_views.begin();
-    for (int64_t arg_idx = 0; arg_idx < num_arguments; ++arg_idx) {
+    for (const auto arg_idx : c10::irange(num_arguments)) {
       // We assume that torch::jit::Stack is backed by vector<IValue> for
       // simplicity. When that is not the case, this code should be updated.
       const auto& argument = (*stack)[arguments_begin + arg_idx];
@@ -260,9 +263,9 @@ void batchedTensorForLoopFallback(const c10::OperatorHandle& op, torch::jit::Sta
   TORCH_CHECK(num_returns >= 1,
               "Batching rule not implemented for ", schema.operator_name(), ". ",
               "The fallback path does not support operations with no returns.");
-  warnFallback(schema, /*in_place*/false);
+  warnFallback(schema);
 
-  const auto num_arguments = schema.arguments().size();
+  const auto num_arguments = static_cast<int64_t>(schema.arguments().size());
   const auto arguments = torch::jit::last(stack, num_arguments);
   const auto arguments_begin = stack->size() - num_arguments;
 
@@ -270,7 +273,7 @@ void batchedTensorForLoopFallback(const c10::OperatorHandle& op, torch::jit::Sta
   // For each BatchedTensor, also record what position of `arguments` they came from.
   SmallVector<Tensor,kVmapTransformStaticInputSize> batched_tensor_inputs;
   VmapDimVector batched_tensor_inputs_position;
-  for (int64_t idx = 0; idx < arguments.size(); ++idx) {
+  for (const auto idx : c10::irange(arguments.size())) {
     const auto& ivalue = arguments[idx];
     if (!ivalue.isTensor()) {
       continue;
@@ -316,11 +319,11 @@ void batchedTensorForLoopFallback(const c10::OperatorHandle& op, torch::jit::Sta
   // more easily in the next step.
   std::vector<Tensor> output_shards(num_batches * num_returns);
 
-  for (int64_t linear_idx = 0; linear_idx < num_batches; ++linear_idx) {
+  for (const auto linear_idx : c10::irange(num_batches)) {
     auto index = computeIndex(linear_idx, batch_sizes);
     auto batched_tensor_inputs_pos_iter = batched_tensor_inputs_position.begin();
     auto input_physical_views_iter = input_physical_views.begin();
-    for (int64_t arg_idx = 0; arg_idx < num_arguments; ++arg_idx) {
+    for (const auto arg_idx : c10::irange(num_arguments)) {
       // We assume that torch::jit::Stack is backed by vector<IValue> for
       // simplicity. When that is not the case, this code should be updated.
       const auto& argument = (*stack)[arguments_begin + arg_idx];
@@ -343,7 +346,7 @@ void batchedTensorForLoopFallback(const c10::OperatorHandle& op, torch::jit::Sta
     // Store the result into `output_shards`. See NOTE: [Output shards layout]
     // to learn about the details of how we store the shards.
     const auto returns = torch::jit::last(stack, num_returns);
-    for (int64_t return_idx = 0; return_idx < returns.size(); ++return_idx) {
+    for (const auto return_idx : c10::irange(returns.size())) {
       output_shards[num_batches * return_idx + linear_idx] = returns[return_idx].toTensor();
     }
     torch::jit::drop(stack, num_returns);
@@ -352,7 +355,7 @@ void batchedTensorForLoopFallback(const c10::OperatorHandle& op, torch::jit::Sta
   // For each output Tensor, stack the shards of the tensor together to form a return
   torch::jit::drop(stack, num_arguments);
   auto output_shards_chunks = MatrixRef<Tensor>(output_shards, num_batches);
-  for (int64_t return_idx = 0; return_idx < num_returns; ++return_idx) {
+  for (const auto return_idx : c10::irange(num_returns)) {
     auto shards = output_shards_chunks[return_idx];
     auto flat_output = safeStack(shards);
     // See NOTE [vmap through backward and undefined grad]

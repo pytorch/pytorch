@@ -11,7 +11,7 @@ from torch.utils.data import DataLoader
 
 from torch.distributed.pipeline.sync import Pipe
 from torch.distributed.pipeline.sync.utils import partition_model
-from torch.optim import Adam  # type: ignore
+from torch.optim import Adam
 
 def sizeof_fmt(num, suffix='B'):
     for unit in ['', 'Ki', 'Mi', 'Gi', 'Ti']:
@@ -35,7 +35,7 @@ class EmbeddingLayer(nn.Embedding):
     def __init__(self, ntoken, ninp, initrange):
         super().__init__(ntoken, ninp)
         self.ninp = ninp
-        self.weight.data.uniform_(-initrange, initrange)
+        nn.init.uniform_(self.weight, -initrange, initrange)
 
     def forward(self, src):
         return super().forward(src) * math.sqrt(self.ninp)
@@ -67,18 +67,13 @@ class TransformerDecoderLayer(nn.TransformerEncoderLayer):
         super().__init__(ninp, nhead, nhid, droupout)
         self.src_mask = None
 
-    def _generate_square_subsequent_mask(self, sz):
-        mask = (torch.triu(torch.ones(sz, sz)) == 1).transpose(0, 1)
-        mask = mask.float().masked_fill(mask == 0, float("-inf")).masked_fill(mask == 1, float(0.0))
-        return mask
-
     def forward(self, src):
         global iteration_count
         iteration_count += 1
 
         if self.src_mask is None or self.src_mask.size(0) != len(src):
             device = src.device
-            mask = self._generate_square_subsequent_mask(len(src)).to(device)
+            mask = nn.Transformer.generate_square_subsequent_mask(len(src)).to(device)
             self.src_mask = mask
 
         return super().forward(src, self.src_mask)
@@ -87,8 +82,8 @@ class TransformerDecoderLayer(nn.TransformerEncoderLayer):
 class LinearLayer(nn.Linear):
     def __init__(self, ninp, ntoken, initrange):
         super().__init__(ninp, ntoken)
-        self.bias.data.zero_()
-        self.weight.data.uniform_(-initrange, initrange)
+        nn.init.zeros_(self.bias)
+        nn.init.uniform_(self.weight, -initrange, initrange)
 
 
 class TransformerLMSequential(nn.Sequential):

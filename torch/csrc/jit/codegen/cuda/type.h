@@ -3,8 +3,9 @@
 #include <c10/core/ScalarType.h>
 #include <c10/util/Exception.h>
 
-#include <torch/csrc/WindowsTorchApiMacro.h>
+#include <c10/macros/Export.h>
 
+#include <array>
 #include <cstdint>
 #include <iostream>
 #include <string>
@@ -13,6 +14,8 @@ namespace torch {
 namespace jit {
 namespace fuser {
 namespace cuda {
+
+enum class KernelIndexMode { INT32, INT64 };
 
 // https://stackoverflow.com/questions/18837857/cant-use-enum-class-as-unordered-map-key
 struct TypeHash {
@@ -29,17 +32,34 @@ enum class ValType {
   TensorView,
   Scalar,
   NamedScalar,
-
-  // Temporary: Kernel IR nodes
+  Predicate,
   TensorIndex,
-  KirNamedScalar,
-  KirScalar,
-  KirTensorDomain,
-  KirIterDomain,
-  KirTensorView,
 };
 
-enum class DataType { Bool, Float, Half, Int, Null };
+// Manual - The user provides the Bool value. Predicate generation is bypassed.
+// Inline corresponds with PredicateCompute::getInlinePredicate
+// Unswitch corresponds with UnswitchPredicate::get
+// Misaligned - PredicateCompute::getInlinePredicate + Misaligned flag
+// Shift - ShiftPredicateInserter::getShiftPredicate
+// Padding - ShiftPredicateInserter::getPaddingPredicate
+// ReductionWrite - Same as Inline but without reduction axes
+enum class PredicateType {
+  Manual,
+  Inline,
+  Unswitch,
+  Vectorize,
+  Misaligned,
+  Shift,
+  Padding,
+  ReductionWrite
+};
+
+enum class DataType { Double, Float, Half, Int, Int32, Bool, BFloat16, Null };
+
+// Returns if the datatype is a floating point type
+bool isFloatingPointType(DataType dtype);
+// Returns if the datatype is an integer type
+bool isIntegralType(DataType dtype);
 
 enum class ExprType {
   Invalid,
@@ -48,25 +68,28 @@ enum class ExprType {
   TernaryOp,
   ReductionOp,
   BroadcastOp,
+  WelfordOp,
+  TransposeOp,
+  ShiftOp,
+  GatherOp,
+  ViewOp,
   Split,
   Merge,
-
-  // Temporary: Kernel IR nodes
-  GridReduction,
-  ForLoop,
-  IfThenElse,
   Allocate,
   Sync,
-  KirUnaryOp,
-  KirBinaryOp,
-  KirTernaryOp,
-  KirReductionOp,
-  KirBroadcastOp,
+  InitMagicZero,
+  UpdateMagicZero,
+  ForLoop,
+  IfThenElse,
+  GridReduction,
+  GridBroadcast,
+  GridWelford,
 };
 
 enum class UnaryOpType {
   Abs,
   Acos,
+  Address,
   Asin,
   Atan,
   Atanh,
@@ -81,6 +104,7 @@ enum class UnaryOpType {
   Floor,
   Frac,
   Gelu,
+  Silu,
   Lgamma,
   Log,
   Log10,
@@ -99,8 +123,14 @@ enum class UnaryOpType {
   Sqrt,
   Tan,
   Tanh,
-  Trunc
+  Trunc,
+
+  // Might be a bitwise operator or boolean operator.
+  Not
 };
+
+// Primarily for Not, which could be Not a boolean, or a bitwise not.
+bool alsoBooleanOperator(const UnaryOpType uopt);
 
 // TODO: Order of this list is important as it affects type promotion. it's not
 // in the right order now.
@@ -118,18 +148,39 @@ enum class BinaryOpType {
   Sub,
   // TypeAs,
 
-  // Logical Ops
-  // Int operations, leave position of Mod we depend on its location of first
+  // Integer output ops. If changing modify isIntegerOp
   Mod,
   CeilDiv,
-  And,
+  Lshift,
+  Rshift,
+
+  // Logical Ops
+  // Int operations, leave position of Mod as first logical op see
+  // isLogicalOp(BinaryOpType bopt)
   Eq,
   GE,
   GT,
   LE,
   LT,
-  NE
+  NE,
+
+  // Maybe bitwise or boolean op, leave position of and as first bool/int
+  // op. These are ops that have different operators based on output type. See
+  // is boolean op. These ops also don't work on floating point inputs.
+  And,
+  Or,
+  Xor
 };
+
+// Return if output of operator should be a boolean
+bool isIntegerOp(const BinaryOpType bopt);
+
+// Return if output of operator should be a boolean
+bool isLogicalOp(const BinaryOpType bopt);
+
+// Operations that could be a bitwise operation or a boolean operation depending
+// on input, for example bitwise_and is also used for boolean and in the jit
+bool alsoBooleanOperator(const BinaryOpType bopt);
 
 enum class TernaryOpType { Clamp, Threshold, Where };
 
@@ -141,9 +192,29 @@ enum class ParallelType {
   TIDy,
   TIDx,
   Vectorize,
+  MisalignedVectorize,
   Unroll,
+  Unswitch,
   Serial
 };
+
+static constexpr std::array<ParallelType, 6> kParallelTypeThreads = {
+    ParallelType::BIDx,
+    ParallelType::BIDy,
+    ParallelType::BIDz,
+    ParallelType::TIDx,
+    ParallelType::TIDy,
+    ParallelType::TIDz};
+
+static constexpr std::array<ParallelType, 3> kParallelTypeBIDs = {
+    ParallelType::BIDx,
+    ParallelType::BIDy,
+    ParallelType::BIDz};
+
+static constexpr std::array<ParallelType, 3> kParallelTypeTIDs = {
+    ParallelType::TIDx,
+    ParallelType::TIDy,
+    ParallelType::TIDz};
 
 enum class MemoryType { Local, Shared, Global };
 
@@ -159,15 +230,25 @@ enum class IterType {
   Iteration,
   Reduction,
   BroadcastWithStride,
-  BroadcastWithoutStride
+  BroadcastWithoutStride,
+  Gather,
+  Stride
 };
+
+enum class SwizzleType { NoSwizzle, Transpose };
+
+// Returns if function needs an f suffix on the operator when operating on a
+// float value i.e. sin->sinf
+bool needFloatSuffix(UnaryOpType t);
+bool needFloatSuffix(BinaryOpType t);
 
 ValType promote_type(const ValType& t1, const ValType& t2);
 DataType promote_type(const DataType& t1, const DataType& t2);
-bool is_logical_op(const BinaryOpType& bot);
 
-DataType aten_to_data_type(const at::ScalarType& scalar_type);
-at::ScalarType data_type_to_aten(const DataType& data_type);
+// If type cannot be found (i.e. codegen does not support provided type) returns
+// DataType::Null
+TORCH_CUDA_CU_API DataType aten_to_data_type(const at::ScalarType& scalar_type);
+TORCH_CUDA_CU_API at::ScalarType data_type_to_aten(const DataType& data_type);
 
 TORCH_CUDA_CU_API std::ostream& operator<<(std::ostream&, const ValType);
 TORCH_CUDA_CU_API std::ostream& operator<<(std::ostream&, const DataType);
@@ -179,16 +260,31 @@ TORCH_CUDA_CU_API std::ostream& operator<<(std::ostream&, const ParallelType);
 TORCH_CUDA_CU_API std::ostream& operator<<(std::ostream&, const MemoryType);
 TORCH_CUDA_CU_API std::ostream& operator<<(std::ostream&, const IterType);
 
+std::string stringifyBooleanOp(const UnaryOpType);
+std::string stringifyBooleanOp(const BinaryOpType);
+
 std::string stringifyThreadSize(const ParallelType);
 std::string stringifyThread(const ParallelType);
+std::string typePrefix(const DataType);
+
+// TODO: ThreadDim should be BlockDim and BlockDim should be GridDim
+// Returns if parallel type is TID[x, y, z]
+TORCH_CUDA_CU_API bool isParallelTypeThreadDim(ParallelType);
+// Returns if parallel type is BID[x, y, z]
+TORCH_CUDA_CU_API bool isParallelTypeBlockDim(ParallelType);
+// Returns if parallel type is a grid or block parallelization dimension
+TORCH_CUDA_CU_API bool isParallelTypeThread(ParallelType);
+
+TORCH_CUDA_CU_API bool isParallelTypeVectorize(ParallelType);
 
 TORCH_CUDA_CU_API c10::optional<std::string> inline_op_str(const UnaryOpType);
 TORCH_CUDA_CU_API c10::optional<std::string> inline_op_str(const BinaryOpType);
+TORCH_CUDA_CU_API c10::optional<std::string> integer_op_str(const BinaryOpType);
 
 TORCH_CUDA_CU_API c10::optional<std::string> cast_func_str(
     const std::pair<DataType, DataType>&);
 
-size_t dataTypeSize(DataType type);
+TORCH_CUDA_CU_API size_t dataTypeSize(DataType type);
 
 enum class LaunchConfigType {
   Compatible,
@@ -200,6 +296,8 @@ enum class LaunchConfigType {
   TIDy,
   TIDx
 };
+
+const char* const kMagicZeroName = "nvfuser_zero";
 
 } // namespace cuda
 } // namespace fuser

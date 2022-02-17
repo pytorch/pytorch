@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 # Copyright 2019 Kakao Brain
 #
 # Copyright (c) Facebook, Inc. and its affiliates. All rights reserved.
@@ -20,7 +21,7 @@ from .microbatch import Batch
 from .skip.layout import SkipLayout
 from .skip.tracker import SkipTrackerThroughPotals, use_skip_tracker
 from .stream import AbstractStream, current_stream, use_device
-from .worker import Task, create_workers, join_workers
+from .worker import Task, create_workers
 
 __all__: List[str] = []
 
@@ -41,20 +42,23 @@ else:
 
 
 def _depend(fork_from: Batch, join_to: Batch) -> None:
-    fork_from[0], phony = fork(fork_from[0])
-    join_to[0] = join(join_to[0], phony)
+    fork_from_idx = fork_from.find_tensor_idx()
+    join_to_idx = join_to.find_tensor_idx()
+
+    fork_from[fork_from_idx], phony = fork(fork_from[fork_from_idx])
+    join_to[join_to_idx] = join(join_to[join_to_idx], phony)
 
 
 def _copy(batch: Batch, prev_stream: AbstractStream, next_stream: AbstractStream) -> None:
     batch[:] = Copy.apply(prev_stream, next_stream, *batch)
     # Gradients are only supported for float Tensors.
-    batch[:] = tuple([x if x.is_floating_point() else x.detach() for x in batch])
+    batch[:] = tuple([x.detach() if torch.is_tensor(x) and not x.is_floating_point() else x for x in batch])
 
 
 def _wait(batch: Batch, prev_stream: AbstractStream, next_stream: AbstractStream) -> None:
     batch[:] = Wait.apply(prev_stream, next_stream, *batch)
     # Gradients are only supported for float Tensors.
-    batch[:] = tuple([x if x.is_floating_point() else x.detach() for x in batch])
+    batch[:] = tuple([x.detach() if torch.is_tensor(x) and not x.is_floating_point() else x for x in batch])
 
 
 def _clock_cycles(m: int, n: int) -> Iterable[List[Tuple[int, int]]]:
@@ -93,9 +97,6 @@ class Pipeline:
         self.skip_layout = skip_layout
         self.checkpoint_stop = checkpoint_stop
         (self.in_queues, self.out_queues) = create_workers(devices)
-
-    def __del__(self) -> None:
-        join_workers(self.in_queues, self.out_queues)
 
     def run(self, batches: List[Batch]) -> None:
         """Runs pipeline parallelism.
@@ -196,16 +197,16 @@ class Pipeline:
             if checkpoint:
 
                 def function(
-                    input: TensorOrTensors,
-                    partition: nn.Sequential = partition,
+                    *inputs,
+                    partition: nn.Module = partition,
                     skip_tracker: SkipTrackerThroughPotals = skip_trackers[i],
                     chunk_id: int = i,
                     part_id: int = j,
                 ) -> TensorOrTensors:
                     with use_skip_tracker(skip_tracker), record_function("chunk%d-part%d" % (chunk_id, part_id)):
-                        return partition(input)
+                        return partition(*inputs)
 
-                chk = Checkpointing(function, batch)
+                chk = Checkpointing(function, batch)  # type: ignore[arg-type]
                 task = Task(streams[j], compute=chk.checkpoint, finalize=chk.recompute)
                 del function, chk
 
@@ -213,7 +214,7 @@ class Pipeline:
 
                 def compute(
                     batch: Batch = batch,
-                    partition: nn.Sequential = partition,
+                    partition: nn.Module = partition,
                     skip_tracker: SkipTrackerThroughPotals = skip_trackers[i],
                     chunk_id: int = i,
                     part_id: int = j,

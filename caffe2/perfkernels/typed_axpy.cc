@@ -26,16 +26,24 @@ void TypedAxpyHalffloat__base(
     const at::Half* x,
     float* y) {
   for (int i = 0; i < N; ++i) {
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
     union {
       uint32_t intval;
       float floatval;
     } t1;
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     uint32_t t2, t3;
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     t1.intval = x[i].x & 0x7fff; // Non-sign bits
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     t2 = x[i].x & 0x8000; // Sign bit
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     t3 = x[i].x & 0x7c00; // Exponent
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     t1.intval <<= 13; // Align mantissa on MSB
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     t2 <<= 16; // Shift sign bit into position
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     t1.intval += 0x38000000; // Adjust bias
     t1.intval = (t3 == 0 ? 0 : t1.intval); // Denormals-as-zero
     t1.intval |= t2; // Re-insert sign bit

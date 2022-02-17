@@ -239,7 +239,6 @@ def varlen_lstm_factory(cell, script):
     def dynamic_rnn(sequences: List[Tensor], hiddens: Tuple[Tensor, Tensor], wih: Tensor,
                     whh: Tensor, bih: Tensor, bhh: Tensor
                     ) -> Tuple[List[Tensor], Tuple[List[Tensor], List[Tensor]]]:
-        # noqa
         hx, cx = hiddens
         hxs = hx.unbind(1)
         cxs = cx.unbind(1)

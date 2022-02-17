@@ -27,6 +27,7 @@ PyObject *THPQScheme_reduce(PyObject *_self, PyObject *noargs) {
   return THPUtils_packString(self->name);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,cppcoreguidelines-avoid-non-const-global-variables,modernize-avoid-c-arrays)
 static PyMethodDef THPQScheme_methods[] = {
   {"__reduce__", THPQScheme_reduce, METH_NOARGS, nullptr},
   {nullptr}  /* Sentinel */

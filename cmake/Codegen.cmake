@@ -63,32 +63,25 @@ if(INTERN_BUILD_ATEN_OPS)
     endif()
   endif(MSVC)
 
-  if(C_AVX_FOUND)
-    if(MSVC)
-      set_source_files_properties(${CMAKE_CURRENT_LIST_DIR}/../aten/src/TH/vector/AVX.cpp PROPERTIES COMPILE_FLAGS "${OPT_FLAG}/arch:AVX ${CXX_AVX_FLAGS}")
-    else(MSVC)
-      set_source_files_properties(${CMAKE_CURRENT_LIST_DIR}/../aten/src/TH/vector/AVX.cpp PROPERTIES COMPILE_FLAGS "${OPT_FLAG} ${CXX_AVX_FLAGS}")
-    endif(MSVC)
-  endif(C_AVX_FOUND)
-
   if(NOT MSVC AND NOT "${CMAKE_C_COMPILER_ID}" MATCHES "Clang")
-    set_source_files_properties(${CMAKE_CURRENT_LIST_DIR}/../aten/src/TH/THAllocator.cpp PROPERTIES COMPILE_FLAGS "-fno-openmp")
+    set_source_files_properties(${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/MapAllocator.cpp PROPERTIES COMPILE_FLAGS "-fno-openmp")
   endif()
 
-  file(GLOB cpu_kernel_cpp_in "${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/native/cpu/*.cpp" "${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/native/quantized/cpu/kernels/*.cpp")
+  file(GLOB cpu_kernel_cpp_in "${PROJECT_SOURCE_DIR}/aten/src/ATen/native/cpu/*.cpp" "${PROJECT_SOURCE_DIR}/aten/src/ATen/native/quantized/cpu/kernels/*.cpp")
 
   list(APPEND CPU_CAPABILITY_NAMES "DEFAULT")
   list(APPEND CPU_CAPABILITY_FLAGS "${OPT_FLAG}")
 
-  if(CXX_AVX_FOUND)
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DHAVE_AVX_CPU_DEFINITION")
-    list(APPEND CPU_CAPABILITY_NAMES "AVX")
+
+  if(CXX_AVX512_FOUND)
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DHAVE_AVX512_CPU_DEFINITION")
+    list(APPEND CPU_CAPABILITY_NAMES "AVX512")
     if(MSVC)
-      list(APPEND CPU_CAPABILITY_FLAGS "${OPT_FLAG}/arch:AVX")
+      list(APPEND CPU_CAPABILITY_FLAGS "${OPT_FLAG}/arch:AVX512")
     else(MSVC)
-      list(APPEND CPU_CAPABILITY_FLAGS "${OPT_FLAG} -mavx")
+      list(APPEND CPU_CAPABILITY_FLAGS "${OPT_FLAG} -mavx512f -mavx512bw -mavx512vl -mavx512dq -mfma")
     endif(MSVC)
-  endif(CXX_AVX_FOUND)
+  endif(CXX_AVX512_FOUND)
 
   if(CXX_AVX2_FOUND)
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DHAVE_AVX2_CPU_DEFINITION")
@@ -103,18 +96,37 @@ if(INTERN_BUILD_ATEN_OPS)
     endif(COMPILER_SUPPORTS_NO_AVX256_SPLIT)
 
     list(APPEND CPU_CAPABILITY_NAMES "AVX2")
-    if(MSVC)
-      list(APPEND CPU_CAPABILITY_FLAGS "${OPT_FLAG}/arch:AVX2")
-    else(MSVC)
-      list(APPEND CPU_CAPABILITY_FLAGS "${OPT_FLAG} -mavx2 -mfma ${CPU_NO_AVX256_SPLIT_FLAGS}")
-    endif(MSVC)
+    if(DEFINED ENV{ATEN_AVX512_256})
+      if($ENV{ATEN_AVX512_256} MATCHES "TRUE")
+        if(CXX_AVX512_FOUND)
+          message("-- ATen AVX2 kernels will use 32 ymm registers")
+          if(MSVC)
+            list(APPEND CPU_CAPABILITY_FLAGS "${OPT_FLAG}/arch:AVX512")
+          else(MSVC)
+            list(APPEND CPU_CAPABILITY_FLAGS "${OPT_FLAG} -march=native ${CPU_NO_AVX256_SPLIT_FLAGS}")
+          endif(MSVC)
+        endif(CXX_AVX512_FOUND)
+      endif()
+    else()
+      if(MSVC)
+        list(APPEND CPU_CAPABILITY_FLAGS "${OPT_FLAG}/arch:AVX2")
+      else(MSVC)
+        list(APPEND CPU_CAPABILITY_FLAGS "${OPT_FLAG} -mavx2 -mfma ${CPU_NO_AVX256_SPLIT_FLAGS}")
+      endif(MSVC)
+    endif()
   endif(CXX_AVX2_FOUND)
 
   if(CXX_VSX_FOUND)
     SET(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DHAVE_VSX_CPU_DEFINITION")
     LIST(APPEND CPU_CAPABILITY_NAMES "VSX")
-    LIST(APPEND CPU_CAPABILITY_FLAGS "${OPT_FLAG}  ${CXX_VSX_FLAGS}") 
+    LIST(APPEND CPU_CAPABILITY_FLAGS "${OPT_FLAG}  ${CXX_VSX_FLAGS}")
   endif(CXX_VSX_FOUND)
+
+  if(CXX_ZVECTOR_FOUND)
+    SET(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DHAVE_ZVECTOR_CPU_DEFINITION")
+    LIST(APPEND CPU_CAPABILITY_NAMES "ZVECTOR")
+    LIST(APPEND CPU_CAPABILITY_FLAGS "${OPT_FLAG}  ${CXX_ZVECTOR_FLAGS}")
+  endif(CXX_ZVECTOR_FOUND)
 
   list(LENGTH CPU_CAPABILITY_NAMES NUM_CPU_CAPABILITY_NAMES)
   math(EXPR NUM_CPU_CAPABILITY_NAMES "${NUM_CPU_CAPABILITY_NAMES}-1")
@@ -123,10 +135,10 @@ if(INTERN_BUILD_ATEN_OPS)
   # See NOTE [ Linking AVX and non-AVX files ]
   foreach(i RANGE ${NUM_CPU_CAPABILITY_NAMES})
     foreach(IMPL ${cpu_kernel_cpp_in})
-      string(REPLACE "${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/" "" NAME ${IMPL})
+      file(RELATIVE_PATH NAME "${PROJECT_SOURCE_DIR}/aten/src/ATen/" "${IMPL}")
       list(GET CPU_CAPABILITY_NAMES ${i} CPU_CAPABILITY)
       set(NEW_IMPL ${CMAKE_BINARY_DIR}/aten/src/ATen/${NAME}.${CPU_CAPABILITY}.cpp)
-      configure_file(${IMPL} ${NEW_IMPL} COPYONLY)
+      configure_file("${PROJECT_SOURCE_DIR}/cmake/IncludeSource.cpp.in" ${NEW_IMPL})
       set(cpu_kernel_cpp ${NEW_IMPL} ${cpu_kernel_cpp}) # Create list of copies
       list(GET CPU_CAPABILITY_FLAGS ${i} FLAGS)
       if(MSVC)
@@ -167,69 +179,113 @@ if(INTERN_BUILD_ATEN_OPS)
   endif()
 
   if(SELECTED_OP_LIST)
-    if(NOT OP_DEPENDENCY)
-      message(INFO "Use default op dependency graph .yaml file for custom build with dynamic dispatch.")
-      set(OP_DEPENDENCY ${CMAKE_CURRENT_LIST_DIR}/../tools/code_analyzer/default_op_deps.yaml)
+    if(TRACING_BASED)
+      message(STATUS "Running tracing-based selective build given operator list: ${SELECTED_OP_LIST}")
+      list(APPEND CUSTOM_BUILD_FLAGS
+        --op_selection_yaml_path ${SELECTED_OP_LIST})
+    elseif(NOT STATIC_DISPATCH_BACKEND)
+      message(WARNING
+        "You have to run tracing-based selective build with dynamic dispatch.\n"
+        "Switching to STATIC_DISPATCH_BACKEND=CPU."
+      )
+      set(STATIC_DISPATCH_BACKEND CPU)
     endif()
-    execute_process(
-      COMMAND
-      "${PYTHON_EXECUTABLE}" ${CMAKE_CURRENT_LIST_DIR}/../tools/code_analyzer/gen_op_registration_allowlist.py
-      --op-dependency "${OP_DEPENDENCY}"
-      --root-ops "${SELECTED_OP_LIST}"
-      OUTPUT_VARIABLE OP_REGISTRATION_WHITELIST
-    )
-    separate_arguments(OP_REGISTRATION_WHITELIST)
-    message(STATUS "Custom build with op registration whitelist: ${OP_REGISTRATION_WHITELIST}")
+  endif()
+
+  if(STATIC_DISPATCH_BACKEND)
+    message(STATUS "Custom build with static dispatch backend: ${STATIC_DISPATCH_BACKEND}")
     list(APPEND CUSTOM_BUILD_FLAGS
-      --force_schema_registration
-      --op_registration_whitelist ${OP_REGISTRATION_WHITELIST})
+      --static_dispatch_backend ${STATIC_DISPATCH_BACKEND})
+  endif()
+
+  set(GEN_PER_OPERATOR_FLAG)
+  if(USE_PER_OPERATOR_HEADERS)
+    list(APPEND GEN_PER_OPERATOR_FLAG "--per-operator-headers")
   endif()
 
   set(GEN_COMMAND
       "${PYTHON_EXECUTABLE}" -m tools.codegen.gen
       --source-path ${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen
       --install_dir ${CMAKE_BINARY_DIR}/aten/src/ATen
+      ${GEN_PER_OPERATOR_FLAG}
       ${GEN_ROCM_FLAG}
       ${CUSTOM_BUILD_FLAGS}
       ${GEN_VULKAN_FLAGS}
   )
 
-  execute_process(
-      COMMAND ${GEN_COMMAND}
-        --output-dependencies ${CMAKE_BINARY_DIR}/aten/src/ATen/generated_cpp.txt
-      RESULT_VARIABLE RETURN_VALUE
-      WORKING_DIRECTORY ${CMAKE_CURRENT_LIST_DIR}/..
-  )
-  if(NOT RETURN_VALUE EQUAL 0)
-      message(STATUS ${generated_cpp})
-      message(FATAL_ERROR "Failed to get generated_cpp list")
-  endif()
-  # FIXME: the file/variable name lists cpp, but these list both cpp and .h files
-  file(READ ${CMAKE_BINARY_DIR}/aten/src/ATen/generated_cpp.txt generated_cpp)
-  file(READ ${CMAKE_BINARY_DIR}/aten/src/ATen/generated_cpp.txt-cuda cuda_generated_cpp)
-  file(READ ${CMAKE_BINARY_DIR}/aten/src/ATen/generated_cpp.txt-core core_generated_cpp)
+  file(GLOB_RECURSE headers_templates "${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/templates/*\.h")
+  file(GLOB_RECURSE sources_templates "${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/templates/*\.cpp")
+  set(declarations_yaml_templates "")
 
-  file(GLOB_RECURSE all_templates "${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/templates/*")
+  foreach(gen_type "headers" "sources" "declarations_yaml")
+    # The codegen outputs may change dynamically as PyTorch is
+    # developed, but add_custom_command only supports dynamic inputs.
+    #
+    # We work around this by generating a .cmake file which is
+    # included below to set the list of output files. If that file
+    # ever changes then cmake will be re-run automatically because it
+    # was included and so we get fully dynamic outputs.
 
-  file(MAKE_DIRECTORY ${CMAKE_BINARY_DIR}/aten/src/ATen)
-  file(MAKE_DIRECTORY ${CMAKE_BINARY_DIR}/aten/src/ATen/core)
-
-  add_custom_command(OUTPUT ${generated_cpp} ${cuda_generated_cpp} ${core_generated_cpp}
-    COMMAND ${GEN_COMMAND}
-    DEPENDS ${all_python} ${all_templates}
-      ${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/native/native_functions.yaml
-    WORKING_DIRECTORY ${CMAKE_CURRENT_LIST_DIR}/..
+    set("GEN_COMMAND_${gen_type}"
+        ${GEN_COMMAND}
+        --generate ${gen_type}
+        --output-dependencies ${CMAKE_BINARY_DIR}/aten/src/ATen/generated_${gen_type}.cmake
     )
+
+    # Dry run to bootstrap the output variables
+    execute_process(
+        COMMAND ${GEN_COMMAND_${gen_type}} --dry-run
+        RESULT_VARIABLE RETURN_VALUE
+        WORKING_DIRECTORY ${CMAKE_CURRENT_LIST_DIR}/..
+    )
+
+    if(NOT RETURN_VALUE EQUAL 0)
+      message(FATAL_ERROR "Failed to get generated_${gen_type} list")
+    endif()
+
+    include("${CMAKE_BINARY_DIR}/aten/src/ATen/generated_${gen_type}.cmake")
+    include("${CMAKE_BINARY_DIR}/aten/src/ATen/core_generated_${gen_type}.cmake")
+    include("${CMAKE_BINARY_DIR}/aten/src/ATen/cuda_generated_${gen_type}.cmake")
+    include("${CMAKE_BINARY_DIR}/aten/src/ATen/ops_generated_${gen_type}.cmake")
+
+    message(STATUS "${gen_type} outputs: ${gen_outputs}")
+
+    add_custom_command(
+      COMMENT "Generating ATen ${gen_type}"
+      OUTPUT
+        ${generated_${gen_type}}
+        ${cuda_generated_${gen_type}}
+        ${core_generated_${gen_type}}
+        ${ops_generated_${gen_type}}
+        ${CMAKE_BINARY_DIR}/aten/src/ATen/generated_${gen_type}.cmake
+        ${CMAKE_BINARY_DIR}/aten/src/ATen/ops_generated_${gen_type}.cmake
+        ${CMAKE_BINARY_DIR}/aten/src/ATen/core_generated_${gen_type}.cmake
+        ${CMAKE_BINARY_DIR}/aten/src/ATen/cuda_generated_${gen_type}.cmake
+      COMMAND ${GEN_COMMAND_${gen_type}}
+      DEPENDS ${all_python} ${${gen_type}_templates}
+        ${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/native/native_functions.yaml
+      WORKING_DIRECTORY ${CMAKE_CURRENT_LIST_DIR}/..
+    )
+  endforeach()
 
   # Generated headers used from a CUDA (.cu) file are
   # not tracked correctly in CMake. We make the libATen.so depend explicitly
   # on building the generated ATen files to workaround.
-  add_custom_target(ATEN_CPU_FILES_GEN_TARGET DEPENDS ${generated_cpp} ${core_generated_cpp})
-  add_custom_target(ATEN_CUDA_FILES_GEN_TARGET DEPENDS ${cuda_generated_cpp})
+  add_custom_target(ATEN_CPU_FILES_GEN_TARGET DEPENDS
+      ${generated_headers} ${core_generated_headers} ${ops_generated_headers}
+      ${generated_sources} ${core_generated_sources} ${ops_generated_sources}
+      ${generated_declarations_yaml})
+  add_custom_target(ATEN_CUDA_FILES_GEN_TARGET DEPENDS
+      ${cuda_generated_headers} ${cuda_generated_sources})
   add_library(ATEN_CPU_FILES_GEN_LIB INTERFACE)
   add_library(ATEN_CUDA_FILES_GEN_LIB INTERFACE)
   add_dependencies(ATEN_CPU_FILES_GEN_LIB ATEN_CPU_FILES_GEN_TARGET)
   add_dependencies(ATEN_CUDA_FILES_GEN_LIB ATEN_CUDA_FILES_GEN_TARGET)
+
+  if(USE_PER_OPERATOR_HEADERS)
+    target_compile_definitions(ATEN_CPU_FILES_GEN_LIB INTERFACE AT_PER_OPERATOR_HEADERS)
+    target_compile_definitions(ATEN_CUDA_FILES_GEN_LIB INTERFACE AT_PER_OPERATOR_HEADERS)
+  endif()
 endif()
 
 function(append_filelist name outputvar)
@@ -254,4 +310,3 @@ endfunction()
 
 set(NUM_CPU_CAPABILITY_NAMES ${NUM_CPU_CAPABILITY_NAMES} PARENT_SCOPE)
 set(CPU_CAPABILITY_FLAGS ${CPU_CAPABILITY_FLAGS} PARENT_SCOPE)
-

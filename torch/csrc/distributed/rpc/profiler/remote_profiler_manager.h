@@ -1,6 +1,6 @@
 #pragma once
 #include <c10/util/Optional.h>
-#include <torch/csrc/WindowsTorchApiMacro.h>
+#include <torch/csrc/Export.h>
 #include <torch/csrc/distributed/rpc/types.h>
 #include <mutex>
 #include <unordered_map>
@@ -39,13 +39,14 @@ class TORCH_API RemoteProfilerManager {
   // case that many RPCs are being profiled.
   void eraseKey(const ProfilingId& globallyUniqueId);
 
- private:
-  RemoteProfilerManager();
-  ~RemoteProfilerManager() = default;
   RemoteProfilerManager(const RemoteProfilerManager& other) = delete;
   RemoteProfilerManager operator=(const RemoteProfilerManager& other) = delete;
   RemoteProfilerManager(RemoteProfilerManager&&) = delete;
   RemoteProfilerManager& operator=(RemoteProfilerManager&&) = delete;
+
+ private:
+  RemoteProfilerManager();
+  ~RemoteProfilerManager() = default;
   local_id_t getNextLocalId();
   std::unordered_map<ProfilingId, std::string, ProfilingId::Hash>
       profiledRpcKeys_;

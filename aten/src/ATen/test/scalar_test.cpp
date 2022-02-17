@@ -41,14 +41,17 @@ void test_overflow() {
   ASSERT_EQ(s1.toFloat(), 100000.0);
   ASSERT_EQ(s1.toInt(), 100000);
 
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
   ASSERT_THROW(s1.toHalf(), std::runtime_error);
 
   s1 = Scalar(NAN);
   ASSERT_TRUE(std::isnan(s1.toFloat()));
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
   ASSERT_THROW(s1.toInt(), std::runtime_error);
 
   s1 = Scalar(INFINITY);
   ASSERT_TRUE(std::isinf(s1.toFloat()));
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
   ASSERT_THROW(s1.toInt(), std::runtime_error);
 }
 
@@ -65,6 +68,7 @@ TEST(TestScalar, TestScalar) {
   {
     // See Note [Acquire lock when using random generators]
     std::lock_guard<std::mutex> lock(gen.mutex());
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
     ASSERT_NO_THROW(gen.set_current_seed(std::random_device()()));
   }
   auto&& C = at::globalContext();
@@ -92,6 +96,7 @@ TEST(TestScalar, TestScalar) {
   Tensor next_h = i2h.add(h2h);
   next_h = next_h.tanh();
 
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
   ASSERT_ANY_THROW(Tensor{}.item());
 
   test_overflow();
@@ -100,6 +105,7 @@ TEST(TestScalar, TestScalar) {
     auto r = next_h.to(at::Device(kCUDA), kFloat, /*non_blocking=*/ false, /*copy=*/ true);
     ASSERT_TRUE(r.to(at::Device(kCPU), kFloat, /*non_blocking=*/ false, /*copy=*/ true).equal(next_h));
   }
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
   ASSERT_NO_THROW(randn({10, 10, 2}, options));
 
   // check Scalar.toTensor on Scalars backed by different data types
@@ -111,6 +117,7 @@ TEST(TestScalar, TestScalar) {
     AT_DISPATCH_ALL_TYPES(x.scalar_type(), "foo", [&] {
       scalar_t s = 1;
       std::stringstream ss;
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
       ASSERT_NO_THROW(
           ss << "hello, dispatch" << x.toString() << s << "\n");
       auto data = (scalar_t*)x.data_ptr();
@@ -121,6 +128,7 @@ TEST(TestScalar, TestScalar) {
   // test direct C-scalar type conversions
   {
     auto x = ones({1, 2}, options);
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
     ASSERT_ANY_THROW(x.item<float>());
   }
   auto float_one = ones({}, options);
@@ -157,4 +165,18 @@ TEST(TestScalar, TestEqual) {
   ASSERT_TRUE(Scalar(2).equal(c10::complex<double>{2.0, 0}));
   ASSERT_TRUE(Scalar(2).equal(2));
   ASSERT_TRUE(Scalar(2).equal(2.0));
+}
+
+TEST(TestScalar, TestFormatting) {
+  auto format = [] (Scalar a) {
+    std::ostringstream str;
+    str << a;
+    return str.str();
+  };
+  ASSERT_EQ("3", format(Scalar(3)));
+  ASSERT_EQ("3.1", format(Scalar(3.1)));
+  ASSERT_EQ("true", format(Scalar(true)));
+  ASSERT_EQ("false", format(Scalar(false)));
+  ASSERT_EQ("(2,3.1)", format(Scalar(c10::complex<double>(2.0, 3.1))));
+  ASSERT_EQ("(2,3.1)", format(Scalar(c10::complex<float>(2.0, 3.1))));
 }

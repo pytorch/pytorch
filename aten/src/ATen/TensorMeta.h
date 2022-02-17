@@ -4,6 +4,11 @@
 #include <c10/core/TensorOptions.h>
 #include <ATen/core/Dimname.h>
 
+C10_CLANG_DIAGNOSTIC_PUSH()
+#if C10_CLANG_HAS_WARNING("-Wdeprecated-copy-dtor")
+C10_CLANG_DIAGNOSTIC_IGNORE("-Wdeprecated-copy-dtor")
+#endif
+
 namespace at {
 
 class Tensor;
@@ -23,8 +28,18 @@ namespace impl {
 //      set_output(sizes, options);
 //    }
 //
-#define TORCH_META_FUNC(name) void name::meta
-#define TORCH_META_FUNC2(name, overload) void name##_##overload::meta
+#define TORCH_META_FUNC(name) void structured_##name::meta
+#define TORCH_META_FUNC2(name, overload) void structured_##name##_##overload::meta
+
+// These are versions of TORCH_META_FUNC(2) that include a precompute_out struct as a return value.
+// They should be used when the kernel in question has precomputed values declared in native_functions.yaml and
+// the corresponding implementation should return an instance of the aforementioned struct.
+#define TORCH_PRECOMPUTE_META_FUNC(name) structured_##name::meta_return_ty structured_##name::meta
+#define TORCH_PRECOMPUTE_META_FUNC2(name, overload) structured_##name##_##overload::meta_return_ty structured_##name##_##overload::meta
+
+// Use this to create a precompute struct in a meta function.
+#define TORCH_PRECOMPUTE_STRUCT(name) structured_##name::precompute_out<>
+#define TORCH_PRECOMPUTE_STRUCT2(name, overload) structured_##name##_##overload::precompute_out<>
 
 // Use this to define the prototype for an implementation.  This takes only
 // one argument, which is the name of the dispatch key entry you're
@@ -52,6 +67,9 @@ struct TORCH_API MetaBase {
   void set_output(IntArrayRef sizes, TensorOptions options) {
     set_output(0, sizes, {}, options, {});
   }
+  void set_output(int64_t output_idx, IntArrayRef sizes, TensorOptions options) {
+    set_output(output_idx, sizes, {}, options, {});
+  }
   // Returns a reference to an undefined tensor if there is no presupplied
   // output
   const Tensor& maybe_get_output() { return maybe_get_output(0); }
@@ -61,3 +79,5 @@ struct TORCH_API MetaBase {
 } // namespace impl
 
 } // namespace at
+
+C10_CLANG_DIAGNOSTIC_POP()

@@ -123,29 +123,10 @@ def create_workers(devices: List[torch.device],) -> Tuple[List[InQueue], List[Ou
 
     return (in_queues, out_queues)
 
-
-def join_workers(in_queues: List[InQueue], out_queues: List[OutQueue]) -> None:
-    # Close workers.
-    for in_queue in set(in_queues):
-        in_queue.put(None)
-
-    # Join running workers.
-    running = set(out_queues)
-    while running:
-        out_queue = running.pop()
-        ok, payload = out_queue.get()
-
-        done = (False, None)
-        if (ok, payload) == done:
-            continue
-
-        running.add(out_queue)
-
-
 @contextmanager
 def spawn_workers(devices: List[torch.device],) -> Generator[Tuple[List[InQueue], List[OutQueue]], None, None]:
     try:
         (in_queues, out_queues) = create_workers(devices)
         yield (in_queues, out_queues)
     finally:
-        join_workers(in_queues, out_queues)
+        pass

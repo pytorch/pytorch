@@ -21,6 +21,7 @@ static PyObject *THPVariable_pynew(PyTypeObject* type, PyObject *args, PyObject 
   char requires_grad = 0;
   const char* name = nullptr;
 
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
   const char *accepted_args[] = {"data", "requires_grad", "volatile", "_grad_fn", "name", nullptr};
   if (!PyArg_ParseTupleAndKeywords(args, kwds, "|ObbOz", (char**)accepted_args,
       &data, &requires_grad, &is_volatile, &grad_fn, &name))
@@ -47,14 +48,14 @@ static PyObject *THPVariable_pynew(PyTypeObject* type, PyObject *args, PyObject 
   if (!data || data == Py_None) {
     // For legacy serialization code, create an empty tensor. This is also used
     // by nn.Parameter() with no arguments.
-    auto type_id = torch::tensors::get_default_dispatch_key();
+    auto dispatch_key = torch::tensors::get_default_dispatch_key();
     auto scalar_type = torch::tensors::get_default_scalar_type();
     auto options = TensorOptions(scalar_type)
-        .device(computeDeviceType(type_id))
-        .layout(layout_from_backend(dispatchKeyToBackend(type_id)));
+        .device(dispatchKeyToDeviceType(dispatch_key))
+        .layout(dispatchKeyToLayout(dispatch_key));
     var = at::empty({0}, options);
   } else if (THPVariable_Check(data)) {
-    var = ((THPVariable*)data)->cdata.detach();
+    var = THPVariable_Unpack(data).detach();
   } else {
     throw torch::TypeError("Variable data has to be a tensor, but got %s",
         Py_TYPE(data)->tp_name);
@@ -79,7 +80,7 @@ static PyObject *THPVariable_pynew(PyTypeObject* type, PyObject *args, PyObject 
   }
 
   if (jit::tracer::isTracing() && data && data != Py_None && THPVariable_Check(data)) {
-    if (auto *v = jit::tracer::getValueTrace(((THPVariable*)data)->cdata)) {
+    if (auto *v = jit::tracer::getValueTrace(THPVariable_Unpack(data))) {
       jit::tracer::setValueTrace(var, v);
     }
   }

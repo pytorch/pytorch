@@ -12,9 +12,11 @@ namespace rpc {
 class TORCH_API RequestCallback {
  public:
   // Invoke the callback.
-  std::shared_ptr<JitFuture> operator()(Message& request) const;
+  c10::intrusive_ptr<JitFuture> operator()(
+      Message& request,
+      std::vector<c10::Stream> streams) const;
 
-  virtual ~RequestCallback() {}
+  virtual ~RequestCallback() = default;
 
  protected:
   // RpcAgent implementation should invoke ``RequestCallback`` to process
@@ -24,7 +26,9 @@ class TORCH_API RequestCallback {
   // message containing an exception. Different rpc agent implementations are
   // expected to ensure delivery of the response/exception based on their
   // implementation specific mechanisms.
-  virtual std::shared_ptr<JitFuture> processMessage(Message& request) const = 0;
+  virtual c10::intrusive_ptr<JitFuture> processMessage(
+      Message& request,
+      std::vector<c10::Stream> streams) const = 0;
 };
 
 } // namespace rpc

@@ -16,8 +16,8 @@ def bench(t1, t2):
             torch.add(t1, t2)
         bench_times.append(time.time() - time_start)
 
-    bench_time = float(torch.min(torch.Tensor(bench_times))) / 1000
-    bench_std = float(torch.std(torch.Tensor(bench_times))) / 1000
+    bench_time = float(torch.min(torch.tensor(bench_times))) / 1000
+    bench_std = float(torch.std(torch.tensor(bench_times))) / 1000
 
     return bench_time, bench_std
 
@@ -48,11 +48,11 @@ def main():
     NUM_REPEATS = args.nreps
     NUM_REPEAT_OF_REPEATS = args.nrepreps
 
-    types = torch.Tensor, SubTensor, WithTorchFunction, SubWithTorchFunction
+    types = torch.tensor, SubTensor, WithTorchFunction, SubWithTorchFunction
 
     for t in types:
-        tensor_1 = t(1)
-        tensor_2 = t(2)
+        tensor_1 = t([1.])
+        tensor_2 = t([2.])
 
         bench_min, bench_std = bench(tensor_1, tensor_2)
         print(

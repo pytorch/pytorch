@@ -19,7 +19,7 @@
 # |                     |        Thus Packed A has (K + 4 - 1)/4 * (M + 8 -1)/8 blocks
 # |                     |
 # |---------------------|
-# 
+#
 # Each 8 x 4 blocks is transposed and stored.
 # Each of the (K + 4 - 1)/4 blocks for a given group of 8 m blocks
 # are stored adjacent in memory

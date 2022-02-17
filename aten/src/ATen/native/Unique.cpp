@@ -2,11 +2,22 @@
 
 #include <ATen/ATen.h>
 #include <ATen/Dispatch.h>
+#include <c10/util/irange.h>
 
 #include <set>
 #include <tuple>
 #include <unordered_map>
 #include <unordered_set>
+
+namespace std {
+  template<> struct hash<at::BFloat16>
+    {
+        size_t operator()(const at::BFloat16& v) const noexcept
+        {
+            return std::hash<uint16_t>()(v.x);
+        }
+    };
+}
 
 namespace at {
 namespace native{
@@ -25,11 +36,9 @@ std::tuple<Tensor, Tensor, Tensor> unique_cpu_template(
   Tensor output;
   Tensor inverse_indices = at::empty({0}, self.options().dtype(kLong));
   Tensor counts = at::empty({0}, self.options().dtype(kLong));
-
   std::unordered_set<scalar_t> set(input_data, input_data + numel);
   output = at::empty({static_cast<int64_t>(set.size())}, input.options());
   scalar_t *output_data = output.data_ptr<scalar_t>();
-
   if (sorted) {
     std::vector<scalar_t> vec(set.begin(), set.end());
     std::sort(vec.begin(), vec.end());
@@ -43,25 +52,25 @@ std::tuple<Tensor, Tensor, Tensor> unique_cpu_template(
     int64_t* inverse_indices_data = inverse_indices.data_ptr<int64_t>();
     std::unordered_map<scalar_t, int64_t> inverse_map;
     inverse_map.reserve(output.numel());
-    for (int64_t i = 0; i < output.numel(); ++i) {
+    for (const auto i : c10::irange(output.numel())) {
       inverse_map[output_data[i]] = i;
     }
-    for(int64_t i = 0; i < numel; ++i) {
+    for (const auto i : c10::irange(numel)) {
       inverse_indices_data[i] = inverse_map[input_data[i]];
     }
     if (return_counts) {
       std::unordered_map<scalar_t, int64_t> counts_map;
       counts_map.reserve(output.numel());
-      for (int64_t i = 0; i < output.numel(); ++i) {
+      for (const auto i : c10::irange(output.numel())) {
         counts_map[output_data[i]] = 0;
       }
-      for(int64_t i = 0; i < numel; i++) {
+      for (const auto i : c10::irange(numel)) {
         counts_map[input_data[i]] += 1;
       }
       counts.resize_(output.sizes());
       counts.fill_(0);
       int64_t *counts_data = counts.data_ptr<int64_t>();
-      for(int64_t i = 0; i < output.numel(); i++) {
+      for (const auto i : c10::irange(output.numel())) {
         counts_data[i] = counts_map[output_data[i]];
       }
     }
@@ -98,7 +107,10 @@ std::tuple<Tensor, Tensor, Tensor> unique_consecutive_cpu_template(
     scalar_t *p = output_data;
     int64_t *q = counts_data;
     int64_t last = 0;
-    for (int64_t i = 0; i < numel; i++) {
+    if (return_inverse) {
+      inverse_data[0] = 0;
+    }
+    for (const auto i : c10::irange(1, numel)) {
       if (input_data[i] != *p) {
         *(++p) = input_data[i];
         if (return_counts) {
@@ -127,24 +139,29 @@ ForwardIt _unique_dim_cpu_impl(ForwardIt first, ForwardIt last,
     if (first == last) {
       return last;
     }
-    // save to calculate distance to iterators
-    ForwardIt begin = first;
 
-    // set first inverse index and count
-    inverse_indices_vec[indices[0]] = 0;
-    counts[0] += 1;
+    TORCH_INTERNAL_ASSERT(inverse_indices_vec.is_contiguous(),
+        "_unique_dim_cpu_impl only support contiguous inverse_indices_vec");
+    TORCH_INTERNAL_ASSERT(counts.is_contiguous(),
+        "_unique_dim_cpu_impl only support contiguous counts");
+
+    int64_t *indices_data = indices.data();
+    int64_t *inverse_data = inverse_indices_vec.data_ptr<int64_t>();
+    int64_t *counts_data = counts.data_ptr<int64_t>();
 
     ForwardIt result = first;
-    while (++first != last) {
-      if (!at::equal(*result, *first) && ++result != first) {
-          *result = std::move(*first);
+    ForwardIt previous = first;
+    int64_t *current_counts = counts_data;
+    inverse_data[*(indices_data++)] = 0;
+    for (ForwardIt current = std::next(first); current != last; current++) {
+      if (!at::equal(*current, *result)) {
+        *(++result) = std::move(*current);
+        *(current_counts++) = std::distance(previous, current);
+        previous = current;
       }
-      int64_t idx_result = std::distance(begin, result);
-      int64_t idx_first = std::distance(begin, first);
-      inverse_indices_vec[indices[idx_first]] = idx_result;
-      counts[idx_result] += 1;
+      inverse_data[*(indices_data++)] = std::distance(first, result);
     }
-
+    *current_counts = std::distance(previous, last);
     return ++result;
   }
 
@@ -190,7 +207,7 @@ std::tuple<Tensor, Tensor, Tensor> _unique_dim_cpu_template(
   if (!consecutive) {
     std::sort(indices.begin(), indices.end(),
       [&](int64_t a, int64_t b) -> bool {
-        for (int64_t i = 0; i < numel; ++i) {
+        for (const auto i : c10::irange(numel)) {
           scalar_t lhs = input_flat_ptr[i + a * numel];
           scalar_t rhs = input_flat_ptr[i + b * numel];
           if (lhs < rhs) {
@@ -206,7 +223,7 @@ std::tuple<Tensor, Tensor, Tensor> _unique_dim_cpu_template(
   Tensor input_sorted;
   if (!consecutive) {
     input_sorted = at::empty(input_flat.sizes(), input_flat.options());
-    for (size_t i = 0; i < indices.size(); ++i) {
+    for (const auto i : c10::irange(indices.size())) {
       input_sorted[i] = input_flat[indices[i]];
     }
   } else {
@@ -236,7 +253,7 @@ std::tuple<Tensor, Tensor, Tensor> _unique_dim_cpu_template(
 
 std::tuple<Tensor, Tensor>
 _unique_cpu(const Tensor& self, const bool sorted, const bool return_inverse) {
-  return AT_DISPATCH_ALL_TYPES_AND(at::ScalarType::Bool, self.scalar_type(), "unique", [&] {
+  return AT_DISPATCH_ALL_TYPES_AND2(at::ScalarType::BFloat16, at::ScalarType::Bool, self.scalar_type(), "unique", [&] {
     Tensor output, inverse;
     std::tie(output, inverse, std::ignore) = unique_cpu_template<scalar_t>(self, sorted, return_inverse, false);
     return std::make_tuple(output, inverse);
@@ -245,14 +262,14 @@ _unique_cpu(const Tensor& self, const bool sorted, const bool return_inverse) {
 
 std::tuple<Tensor, Tensor, Tensor>
 _unique2_cpu(const Tensor& self, const bool sorted, const bool return_inverse, const bool return_counts) {
-  return AT_DISPATCH_ALL_TYPES_AND(at::ScalarType::Bool, self.scalar_type(), "unique", [&] {
+  return AT_DISPATCH_ALL_TYPES_AND2(at::ScalarType::BFloat16, at::ScalarType::Bool, self.scalar_type(), "unique", [&] {
     return unique_cpu_template<scalar_t>(self, sorted, return_inverse, return_counts);
   });
 }
 
 std::tuple<Tensor, Tensor, Tensor>
 unique_dim_cpu(const Tensor& self, const int64_t dim, const bool sorted, const bool return_inverse, const bool return_counts) {
-  return AT_DISPATCH_ALL_TYPES_AND(at::ScalarType::Bool, self.scalar_type(), "unique_dim", [&] {
+  return AT_DISPATCH_ALL_TYPES_AND2(at::ScalarType::BFloat16, at::ScalarType::Bool, self.scalar_type(), "unique_dim", [&] {
     // The current implementation using `dim` always sorts due to unhashable tensors
     return _unique_dim_cpu_template<scalar_t>(self, dim, false, return_inverse, return_counts);
   });
@@ -260,15 +277,15 @@ unique_dim_cpu(const Tensor& self, const int64_t dim, const bool sorted, const b
 
 std::tuple<Tensor, Tensor, Tensor>
 unique_dim_consecutive_cpu(const Tensor& self, const int64_t dim, const bool return_inverse, const bool return_counts) {
-  return AT_DISPATCH_ALL_TYPES_AND(at::ScalarType::Bool, self.scalar_type(), "unique_dim", [&] {
+  return AT_DISPATCH_ALL_TYPES_AND2(at::ScalarType::BFloat16, at::ScalarType::Bool, self.scalar_type(), "unique_dim", [&] {
     return _unique_dim_cpu_template<scalar_t>(self, dim, true, return_inverse, return_counts);
   });
 }
 
 std::tuple<Tensor, Tensor, Tensor>
 unique_consecutive_cpu(const Tensor& self, const bool return_inverse, const bool return_counts, c10::optional<int64_t> dim) {
-  if (!dim.has_value()) {
-    return AT_DISPATCH_ALL_TYPES_AND(at::ScalarType::Bool, self.scalar_type(), "unique", [&] {
+  if (!dim.has_value() || (dim.value() == 0 && self.dim() == 1)) {
+    return AT_DISPATCH_ALL_TYPES_AND2(at::ScalarType::BFloat16, at::ScalarType::Bool, self.scalar_type(), "unique", [&] {
       return unique_consecutive_cpu_template<scalar_t>(self, return_inverse, return_counts);
     });
   }

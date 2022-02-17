@@ -65,6 +65,7 @@ bool SpatialSoftmaxWithLossOp<float, CPUContext>::RunOnDevice() {
   auto& X = Input(0); // Logits
   auto& T = Input(1); // Labels / targets
 
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   int N, D;
   N = X.dim32(0);
   D = X.dim32(1);
@@ -143,6 +144,7 @@ bool SpatialSoftmaxWithLossOp<float, CPUContext>::RunOnDevice() {
               " vs ",
               D);
           int idx = i * (H * W * D) + label * (H * W) + y * W + x;
+          // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
           float w = weights ? weights[label_idx] : 1.0;
           total_weight += w;
           sum_label_xent += -log(std::max(Pdata[idx], 1e-20f)) * w;
@@ -167,6 +169,7 @@ bool SpatialSoftmaxWithLossGradientOp<float, CPUContext>::RunOnDevice() {
   auto& d_avg_loss = Input(InputSize() - 1); // Gradient w.r.t. avg loss
 
   const float* weights = (InputSize() > 4 ? Input(2).data<float>() : nullptr);
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   int N, D;
   N = X.dim32(0);
   D = X.dim32(1);
@@ -197,6 +200,7 @@ bool SpatialSoftmaxWithLossGradientOp<float, CPUContext>::RunOnDevice() {
         if (label != DONT_CARE) {
           int idx = i * (H * W * D) + label * (H * W) + y * W + x;
 
+          // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
           dX_data[idx] = (dX_data[idx] - 1.0);
 
           if (weights != nullptr) {

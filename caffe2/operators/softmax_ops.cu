@@ -5,6 +5,7 @@
 #include "caffe2/operators/softmax_op.h"
 #include "caffe2/operators/softmax_with_loss_op.h"
 #include "caffe2/operators/spatial_softmax_with_loss_op.h"
+#include "caffe2/utils/cub_namespace.cuh"
 
 namespace caffe2 {
 
@@ -277,12 +278,14 @@ void Softmax(
         CAFFE_CUDA_NUM_THREADS,
         0,
         context->cuda_stream()>>>(size, D, probs, scales, probs);
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
   } else {
     SoftmaxNormalizeLogsKernel<<<
         CAFFE_GET_BLOCKS(size),
         CAFFE_CUDA_NUM_THREADS,
         0,
         context->cuda_stream()>>>(size, D, logits, rowmax, scales, probs);
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
   }
 }
 
@@ -364,6 +367,8 @@ bool SoftmaxWithLossOp<float, CUDAContext>::RunOnDevice() {
         T.data<int>(),
         weights,
         losses_.mutable_data<float>());
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
+
     // Since we had logarithmic output, we need to exponentiate
     // them again.
     math::Exp<float, CUDAContext>(
@@ -380,6 +385,7 @@ bool SoftmaxWithLossOp<float, CUDAContext>::RunOnDevice() {
         T.data<float>(),
         weights,
         losses_.mutable_data<float>());
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
   }
 
   float total_weight = N;
@@ -459,6 +465,7 @@ bool SpatialSoftmaxWithLossOp<float, CUDAContext>::RunOnDevice() {
       CAFFE_CUDA_NUM_THREADS,
       0,
       context_.cuda_stream()>>>(N, D, W, H, Xdata, Pdata);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
 
   // Cross entropy
   auto* avg_loss =
@@ -484,6 +491,7 @@ bool SpatialSoftmaxWithLossOp<float, CUDAContext>::RunOnDevice() {
       weights,
       losses_.mutable_data<float>(),
       weights_.mutable_data<float>());
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
 
   // Somewhat awkward scalar passing from device to host
   float h_total_weight;
@@ -573,6 +581,7 @@ bool SoftmaxWithLossGradientOp<float, CUDAContext>::RunOnDevice() {
           P.data<float>(),
           T.data<int>(),
           dX->template mutable_data<float>());
+      C10_CUDA_KERNEL_LAUNCH_CHECK();
     } else {
       // Weighted version gets the Pdata values internally
       LabelCrossEntropyGradientKernelWeighted<<<
@@ -586,6 +595,7 @@ bool SoftmaxWithLossGradientOp<float, CUDAContext>::RunOnDevice() {
           T.data<int>(),
           dX->template mutable_data<float>(),
           weights);
+      C10_CUDA_KERNEL_LAUNCH_CHECK();
     }
   } else {
     ProbCrossEntropyGradientKernel<<<
@@ -599,6 +609,7 @@ bool SoftmaxWithLossGradientOp<float, CUDAContext>::RunOnDevice() {
         T.data<float>(),
         dX->template mutable_data<float>(),
         weights);
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
   }
   float total_weight = N;
   if (weights) {
@@ -693,6 +704,7 @@ bool SpatialSoftmaxWithLossGradientOp<float, CUDAContext>::RunOnDevice() {
       0,
       context_.cuda_stream()>>>(
       N, D, W, H, label_data, weights, dX_data, weights_.mutable_data<float>());
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
 
   math::Sum<float, CUDAContext>(
       weights_.numel(),
@@ -832,6 +844,8 @@ bool SoftmaxGradientOp<float, CUDAContext>::RunOnDevice() {
       SOFTMAX_NUM_THREADS,
       0,
       context_.cuda_stream()>>>(D, Y.data<float>(), dY.data<float>(), dX_data);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+
   return true;
 }
 

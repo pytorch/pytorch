@@ -2,8 +2,11 @@
 # for now, I have put it in one place but right now is copied out of cwrap
 
 import copy
+from typing import Any, Dict, Iterable, List, Union
 
-def parse_arguments(args):
+Arg = Dict[str, Any]
+
+def parse_arguments(args: List[Union[str, Arg]]) -> List[Arg]:
     new_args = []
     for arg in args:
         # Simple arg declaration of form "<type> <name>"
@@ -20,13 +23,14 @@ def parse_arguments(args):
     return new_args
 
 
-def set_declaration_defaults(declaration):
+Declaration = Dict[str, Any]
+
+
+def set_declaration_defaults(declaration: Declaration) -> None:
     if 'schema_string' not in declaration:
         # This happens for legacy TH bindings like
         # _thnn_conv_depthwise2d_backward
         declaration['schema_string'] = ''
-    if 'matches_jit_signature' not in declaration:
-        declaration['matches_jit_signature'] = False
     declaration.setdefault('arguments', [])
     declaration.setdefault('return', 'void')
     if 'cname' not in declaration:
@@ -72,19 +76,26 @@ def set_declaration_defaults(declaration):
 # TODO(zach): added option to remove keyword handling for C++ which cannot
 # support it.
 
+Option = Dict[str, Any]
 
-def filter_unique_options(options, allow_kwarg, type_to_signature, remove_self):
-    def exclude_arg(arg):
-        return arg['type'] == 'CONSTANT'
 
-    def exclude_arg_with_self_check(arg):
+def filter_unique_options(
+    options: Iterable[Option],
+    allow_kwarg: bool,
+    type_to_signature: Dict[str, str],
+    remove_self: bool,
+) -> List[Option]:
+    def exclude_arg(arg: Arg) -> bool:
+        return arg['type'] == 'CONSTANT'  # type: ignore[no-any-return]
+
+    def exclude_arg_with_self_check(arg: Arg) -> bool:
         return exclude_arg(arg) or (remove_self and arg['name'] == 'self')
 
-    def signature(option, kwarg_only_count):
-        if kwarg_only_count == 0:
+    def signature(option: Option, num_kwarg_only: int) -> str:
+        if num_kwarg_only == 0:
             kwarg_only_count = None
         else:
-            kwarg_only_count = -kwarg_only_count
+            kwarg_only_count = -num_kwarg_only
         arg_signature = '#'.join(
             type_to_signature.get(arg['type'], arg['type'])
             for arg in option['arguments'][:kwarg_only_count]
@@ -113,40 +124,40 @@ def filter_unique_options(options, allow_kwarg, type_to_signature, remove_self):
     return unique
 
 
-def sort_by_number_of_args(declaration, reverse=True):
-    def num_args(option):
+def sort_by_number_of_args(declaration: Declaration, reverse: bool = True) -> None:
+    def num_args(option: Option) -> int:
         return len(option['arguments'])
     declaration['options'].sort(key=num_args, reverse=reverse)
 
 
 class Function(object):
 
-    def __init__(self, name):
+    def __init__(self, name: str) -> None:
         self.name = name
-        self.arguments = []
+        self.arguments: List['Argument'] = []
 
-    def add_argument(self, arg):
+    def add_argument(self, arg: 'Argument') -> None:
         assert isinstance(arg, Argument)
         self.arguments.append(arg)
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return self.name + '(' + ', '.join(a.__repr__() for a in self.arguments) + ')'
 
 
 class Argument(object):
 
-    def __init__(self, _type, name, is_optional):
+    def __init__(self, _type: str, name: str, is_optional: bool):
         self.type = _type
         self.name = name
         self.is_optional = is_optional
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return self.type + ' ' + self.name
 
 
-def parse_header(path):
+def parse_header(path: str) -> List[Function]:
     with open(path, 'r') as f:
-        lines = f.read().split('\n')
+        lines: Iterable[Any] = f.read().split('\n')
 
     # Remove empty lines and prebackend directives
     lines = filter(lambda l: l and not l.startswith('#'), lines)

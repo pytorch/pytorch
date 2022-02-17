@@ -6,7 +6,7 @@ import caffe2.python.optimizer as optimizer
 from caffe2.python.optimizer import (
     build_sgd, build_multi_precision_sgd, build_ftrl, build_gftrl, build_wngrad,
     build_adagrad, build_adadelta, build_adam, build_yellowfin, build_rms_prop,
-    build_storm, add_weight_decay, SgdOptimizer)
+    build_storm, build_decay_adagrad, add_weight_decay, SgdOptimizer)
 from caffe2.python.optimizer_context import UseOptimizer
 from caffe2.python.optimizer_test_util import (
     OptimizerTestBase, LRModificationTestBase
@@ -241,6 +241,43 @@ class TestAdam(OptimizerTestBase, LRModificationTestBase, TestCase):
         for param in optimizer.get_auxiliary_parameters().local:
             workspace.FetchBlob(param)
 
+class TestSmartDecayAdam(OptimizerTestBase, LRModificationTestBase, TestCase):
+    def build_optimizer(self, model, **kwargs):
+        self._skip_gpu = False
+        kwargs['beta1'] = 0.0
+        return build_adam(model, base_learning_rate=0.1, use_smart_decay=True, **kwargs)
+
+    def check_optimizer(self, optimizer):
+        self.assertTrue(optimizer.get_auxiliary_parameters().shared)
+        self.assertTrue(optimizer.get_auxiliary_parameters().local)
+        self.assertTrue(workspace.HasBlob("optimizer_iteration"))
+        blob_names = workspace.Blobs()
+        self.assertTrue(any((bn.endswith('_last_seen') for bn in blob_names)))
+        for param in optimizer.get_auxiliary_parameters().shared:
+            workspace.FetchBlob(param)
+        for param in optimizer.get_auxiliary_parameters().local:
+            workspace.FetchBlob(param)
+
+class TestDecayAdagrad(OptimizerTestBase, LRModificationTestBase, TestCase):
+    def build_optimizer(self, model, **kwargs):
+        self._skip_gpu = True
+        return build_decay_adagrad(model, base_learning_rate=1.0, **kwargs)
+
+    def check_optimizer(self, optimizer):
+        self.assertTrue(optimizer.get_auxiliary_parameters().shared)
+        self.assertTrue(optimizer.get_auxiliary_parameters().local)
+        self.assertTrue(workspace.HasBlob("optimizer_iteration"))
+        iteration_tensor = workspace.FetchBlob("optimizer_iteration")
+        np.testing.assert_allclose(np.array([2000]),
+                                   iteration_tensor,
+                                   atol=1e-5)
+        for param in optimizer.get_auxiliary_parameters().shared:
+            workspace.FetchBlob(param)
+        for param in optimizer.get_auxiliary_parameters().local:
+            workspace.FetchBlob(param)
+
+    def testSparse(self):
+        raise unittest.SkipTest("no sparse support")
 
 class TestSparseRAdam(OptimizerTestBase, LRModificationTestBase, TestCase):
     def build_optimizer(self, model, **kwargs):

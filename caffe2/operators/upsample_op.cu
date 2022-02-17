@@ -2,6 +2,7 @@
 
 #include "caffe2/core/context_gpu.h"
 #include "caffe2/operators/upsample_op.h"
+#include "caffe2/utils/GpuAtomics.cuh"
 #include "caffe2/utils/math.h"
 
 namespace caffe2 {
@@ -27,8 +28,6 @@ __global__ void UpsampleBilinearKernel(
     const int input_width,
     const int output_height,
     const int output_width,
-    const float height_scale,
-    const float width_scale,
     const float* __restrict__ X,
     float* __restrict__ Y) {
 
@@ -84,8 +83,6 @@ __global__ void UpsampleBilinearGradientKernel(
     const int input_width,
     const int output_height,
     const int output_width,
-    const float height_scale,
-    const float width_scale,
     const float* dY,
     float* dX) {
   CUDA_1D_KERNEL_LOOP(index, input_size) {
@@ -97,9 +94,6 @@ __global__ void UpsampleBilinearGradientKernel(
     const int c = indexTemp % num_channels;
     indexTemp /= num_channels;
     const int n = indexTemp;
-
-    const int out_y = fminf(in_y / height_scale, output_height - 1);
-    const int out_x = fminf(in_x / width_scale, output_width - 1);
 
     const float rheight =
         output_height > 1 ? (output_height - 1.f) / (input_height - 1.f) : 0.f;
@@ -126,16 +120,16 @@ __global__ void UpsampleBilinearGradientKernel(
     const float dYi = dY[index];
 #endif
 
-    atomicAdd(
+    gpu_atomic_add(
         &dX[idx(n, num_channels, c, output_height, output_width, h1, w1)],
         h0lambda * w0lambda * dYi);
-    atomicAdd(
+    gpu_atomic_add(
         &dX[idx(n, num_channels, c, output_height, output_width, h1, w1 + w1p)],
         h0lambda * w1lambda * dYi);
-    atomicAdd(
+    gpu_atomic_add(
         &dX[idx(n, num_channels, c, output_height, output_width, h1 + h1p, w1)],
         h1lambda * w0lambda * dYi);
-    atomicAdd(
+    gpu_atomic_add(
         &dX[idx(
             n,
             num_channels,
@@ -186,10 +180,10 @@ bool UpsampleBilinearOp<float, CUDAContext>::RunOnDevice() {
       input_width,
       output_height,
       output_width,
-      height_scale_,
-      width_scale_,
       X.data<float>(),
       Y->template mutable_data<float>());
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+
   return true;
 }
 template <>
@@ -231,10 +225,10 @@ bool UpsampleBilinearGradientOp<float, CUDAContext>::RunOnDevice() {
       input_width,
       output_height,
       output_width,
-      height_scale_,
-      width_scale_,
       dY.data<float>(),
       dX->template mutable_data<float>());
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+
   return true;
 }
 REGISTER_CUDA_OPERATOR(

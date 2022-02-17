@@ -2,7 +2,6 @@ from datetime import timedelta
 
 from torch._C._distributed_rpc import (
     _DEFAULT_INIT_METHOD,
-    _DEFAULT_NUM_SEND_RECV_THREADS,
     _DEFAULT_NUM_WORKER_THREADS,
     _DEFAULT_RPC_TIMEOUT_SEC,
     _UNSET_RPC_TIMEOUT,
@@ -14,8 +13,6 @@ DEFAULT_RPC_TIMEOUT_SEC: float = _DEFAULT_RPC_TIMEOUT_SEC
 DEFAULT_INIT_METHOD: str = _DEFAULT_INIT_METHOD
 DEFAULT_SHUTDOWN_TIMEOUT: float = 5.0
 
-# For ProcessGroupAgent.
-DEFAULT_NUM_SEND_RECV_THREADS: int = _DEFAULT_NUM_SEND_RECV_THREADS
 # For TensorPipeAgent.
 DEFAULT_NUM_WORKER_THREADS: int = _DEFAULT_NUM_WORKER_THREADS
 # Ensure that we don't time out when there are long periods of time without

@@ -1,6 +1,8 @@
 #include <gtest/gtest.h>
 
 #include <ATen/ATen.h>
+#include <ATen/CPUFunctions.h>
+#include <c10/util/irange.h>
 
 using namespace at;
 
@@ -53,7 +55,6 @@ TEST(MathKernelTest, NativeGroupNorm) {
 TEST(MathKernelTest, NativeLayerNorm) {
   const auto input = rand({20, 10, 10, 10});
   const auto input_shape = input.sizes();
-  const auto input_ndim = input.dim();
 
   double eps = 1e-05;
   for (bool undef_weight: {true, false}) {
@@ -81,12 +82,14 @@ TEST(MathKernelTest, Addr) {
   const auto vec2 = arange(1., 3.);
   const auto M = zeros({3, 2});
 
+  // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
   for (float beta: {1., 1.2, 0.}) {
     // nans and infs are not propagated to the output when beta == 0
     if (beta == 0) {
       M[0][0] = std::numeric_limits<float>::infinity();
       M[2][0] = std::numeric_limits<float>::quiet_NaN();
     }
+    // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
     for (float alpha: {1., 2., 0.}) {
       auto out = at::native::addr(M, vec1, vec2, beta, alpha);
       auto math_out = at::native::math_addr(M, vec1, vec2, beta, alpha);
@@ -98,14 +101,22 @@ TEST(MathKernelTest, Addr) {
 TEST(MathKernelTest, SiluBackward) {
   const auto input = rand({20, 10});
   const auto grad_output = rand({20, 10});
-  auto out = at::native::silu_backward(grad_output, input);
+  auto out = at::cpu::silu_backward(grad_output, input);
   auto math_out = at::native::math_silu_backward(grad_output, input);
+  ASSERT_ALLCLOSE_TOLERANCES(out, math_out, 1e-4, 1e-6);
+}
+
+TEST(MathKernelTest, MishBackward) {
+  const auto input = rand({20, 10});
+  const auto grad_output = rand({20, 10});
+  auto out = at::native::mish_backward(grad_output, input);
+  auto math_out = at::native::math_mish_backward(grad_output, input);
   ASSERT_ALLCLOSE_TOLERANCES(out, math_out, 1e-4, 1e-6);
 }
 
 TEST(MathKernelTest, NarrowCopy)  {
   auto x = rand({5, 8, 7});
-  for (int64_t dim = 0; dim < 3; ++dim) {
+  for (const auto dim : c10::irange(3)) {
     const int64_t start = 1, length = 4;
     auto y_ref = x.narrow(dim, start, length);
     auto y_test = at::native::narrow_copy_dense(x, dim, start, length);
@@ -117,6 +128,7 @@ TEST(MathKernelTest, Bmm)  {
   auto test_bmm = [](int64_t last_dim) {
     auto x = rand({1, 4, 4}, at::kFloat);
     auto y = rand({1, 4, last_dim}, at::kDouble);
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
     EXPECT_THROW(auto z = at::bmm(x, y), std::exception);
   };
 

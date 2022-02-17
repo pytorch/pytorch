@@ -4,7 +4,7 @@
 #include <torch/nn/functional/pixelshuffle.h>
 #include <torch/nn/options/pixelshuffle.h>
 
-#include <torch/csrc/WindowsTorchApiMacro.h>
+#include <torch/csrc/Export.h>
 
 namespace torch {
 namespace nn {
@@ -24,6 +24,7 @@ namespace nn {
 /// ```
 /// PixelShuffle model(PixelShuffleOptions(5));
 /// ```
+// NOLINTNEXTLINE(bugprone-exception-escape)
 struct TORCH_API PixelShuffleImpl : public torch::nn::Cloneable<PixelShuffleImpl> {
   explicit PixelShuffleImpl(const PixelShuffleOptions& options_);
 
@@ -60,6 +61,7 @@ TORCH_MODULE(PixelShuffle);
 /// ```
 /// PixelUnshuffle model(PixelUnshuffleOptions(5));
 /// ```
+// NOLINTNEXTLINE(bugprone-exception-escape)
 struct TORCH_API PixelUnshuffleImpl
     : public torch::nn::Cloneable<PixelUnshuffleImpl> {
   explicit PixelUnshuffleImpl(const PixelUnshuffleOptions& options_);

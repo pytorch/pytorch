@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.5 FATAL_ERROR)
+cmake_minimum_required(VERSION 3.10 FATAL_ERROR)
 project(c10 CXX)
 
 set(CMAKE_CXX_STANDARD 14)
@@ -59,6 +59,7 @@ endif()
 if(${USE_GLOG})
     target_link_libraries(c10 PUBLIC glog::glog)
 endif()
+target_link_libraries(c10 PRIVATE fmt::fmt-header-only)
 
 find_package(Backtrace)
 if(Backtrace_FOUND)

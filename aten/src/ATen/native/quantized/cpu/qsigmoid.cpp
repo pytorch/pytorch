@@ -7,6 +7,7 @@
 #include <ATen/native/quantized/cpu/quantized_ops.h>
 #include <ATen/native/quantized/cpu/init_qnnpack.h>
 #include <ATen/native/quantized/cpu/qnnpack_utils.h>
+#include <c10/util/irange.h>
 #include <caffe2/utils/threadpool/pthreadpool-cpp.h>
 
 #include <algorithm>
@@ -20,13 +21,18 @@ DEFINE_DISPATCH(qsigmoid_stub);
 Tensor qnnpack_sigmoid(
     Tensor input, double output_scale, int64_t output_zero_point) {
   TORCH_CHECK(input.ndimension() > 0, "qnnpack_sigmoid(): Got empty input tensor");
+  TORCH_CHECK(input.scalar_type() == c10::kQUInt8,
+               "qnnpack_sigmoid(): Expected input data type ",
+               toString(c10::kQUInt8),
+               " but got ",
+               toString(input.scalar_type()));
 
   Tensor qy;
   initQNNPACK();
 
   Tensor input_contig = input.contiguous(input.suggest_memory_format());
   size_t num_elems = 1;
-  for (int i = 1; i < input_contig.ndimension(); ++i) {
+  for (const auto i : c10::irange(1, input_contig.ndimension())) {
     num_elems *= input_contig.size(i);
   }
 
@@ -39,6 +45,7 @@ Tensor qnnpack_sigmoid(
     zero_point /* input zero point */,
     scale /* input scale */,
     output_zero_point /* output zero point */,
+    // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
     output_scale /* output scale */,
     std::numeric_limits<uint8_t>::min() /* output min */,
     std::numeric_limits<uint8_t>::max() /* output max */,
@@ -101,6 +108,7 @@ Tensor sigmoid_quantized_cpu(const Tensor& qx) {
     // optimizations
     double output_scale = 0.00390625;  // 1.0 / 2^8
     int64_t output_zero_point = 0;
+    // NOLINTNEXTLINE(clang-analyzer-core.NullDereference)
     if (SCALAR_TYPE == at::kQInt32) {
       output_scale = 2.3283064365386963e-10;  // 1.0 / 2^32
     } else if (SCALAR_TYPE == at::kQInt8) {

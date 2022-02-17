@@ -12,6 +12,11 @@
 #include <c10/util/numa.h>
 #include <c10/util/thread_name.h>
 
+C10_CLANG_DIAGNOSTIC_PUSH()
+#if C10_CLANG_HAS_WARNING("-Wshorten-64-to-32")
+C10_CLANG_DIAGNOSTIC_IGNORE("-Wshorten-64-to-32")
+#endif
+
 namespace c10 {
 
 // TODO: move this to C10 and make it C10_API
@@ -50,14 +55,14 @@ class C10_API ThreadPool : public c10::TaskThreadPoolBase {
     const std::function<void(std::size_t)> with_id;
 
     explicit task_element_t(std::function<void()> f)
-      : run_with_id(false), no_id(std::move(f)), with_id(nullptr) {}
+        : run_with_id(false), no_id(std::move(f)), with_id(nullptr) {}
     explicit task_element_t(std::function<void(std::size_t)> f)
-      : run_with_id(true), no_id(nullptr), with_id(std::move(f)) {}
+        : run_with_id(true), no_id(nullptr), with_id(std::move(f)) {}
   };
 
   std::queue<task_element_t> tasks_;
   std::vector<std::thread> threads_;
-  std::mutex mutex_;
+  mutable std::mutex mutex_;
   std::condition_variable condition_;
   std::condition_variable completed_;
   std::atomic_bool running_;
@@ -74,7 +79,7 @@ class C10_API ThreadPool : public c10::TaskThreadPoolBase {
       int numa_node_id = -1,
       std::function<void()> init_thread = nullptr);
 
-  ~ThreadPool();
+  ~ThreadPool() override;
 
   size_t size() const override;
 
@@ -105,13 +110,11 @@ class C10_API ThreadPool : public c10::TaskThreadPoolBase {
 
 class C10_API TaskThreadPool : public c10::ThreadPool {
  public:
-  explicit TaskThreadPool(
-      std::size_t pool_size,
-      int numa_node_id = -1)
-      : ThreadPool(pool_size, numa_node_id, [numa_node_id](){
-        setThreadName("CaffeTaskThread");
-        NUMABind(numa_node_id);
-      }) {}
+  explicit TaskThreadPool(std::size_t pool_size, int numa_node_id = -1)
+      : ThreadPool(pool_size, numa_node_id, [numa_node_id]() {
+          setThreadName("CaffeTaskThread");
+          NUMABind(numa_node_id);
+        }) {}
 };
 
 C10_DECLARE_SHARED_REGISTRY(
@@ -122,3 +125,5 @@ C10_DECLARE_SHARED_REGISTRY(
     bool);
 
 } // namespace c10
+
+C10_CLANG_DIAGNOSTIC_POP()

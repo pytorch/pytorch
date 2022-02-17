@@ -62,6 +62,7 @@ TEST(GraphExecutorTest, runAsync_executor) {
     at::launch(move(f));
   };
   std::vector<IValue> stack;
+  // NOLINTNEXTLINE(modernize-use-emplace)
   stack.push_back(module._ivalue());
   graphExecutor.runAsync(stack, launcher)->wait();
   ASSERT_TRUE(asyncCounter > 0);

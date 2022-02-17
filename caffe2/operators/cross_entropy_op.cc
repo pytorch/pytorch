@@ -6,32 +6,40 @@ namespace caffe2 {
 namespace {
 
 inline float sigmoid_xent_forward(float lgt, float tgt) {
+  // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
   return lgt * (tgt - (lgt >= 0)) - log(1 + exp(lgt - 2 * lgt * (lgt >= 0)));
 }
 
 inline float sigmoid_xent_backward(float lgt, float tgt) {
+  // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
   return tgt - 1. / (1. + exp(-lgt));
 }
 
 inline float sigmoid_partition(float lgt) {
   // computes log(1 + exp(lgt)) with only exp(x) function when x >= 0
+  // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
   return lgt * (lgt >= 0) + log(1 + exp(lgt - 2 * lgt * (lgt >= 0)));
 }
 
 inline float sigmoid_xent_forward_with_log_d_trick(float lgt, float tgt) {
+  // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
   return (2 * tgt - 1.) * (lgt - sigmoid_partition(lgt));
 }
 
 inline float sigmoid_xent_backward_with_log_d_trick(float lgt, float tgt) {
+  // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
   return (2 * tgt - 1.) / (1. + exp(lgt));
 }
 
 inline float unjoined_sigmoid_xent_forward(float lgt, float tgt) {
+  // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
   return lgt * tgt + (tgt - 1) * lgt * (lgt >= 0) -
+      // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
       (1 - tgt) * log(1 + exp(lgt - 2 * lgt * (lgt >= 0)));
 }
 
 inline float unjoined_sigmoid_xent_backward(float lgt, float tgt) {
+  // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
   return tgt - (1. - tgt) / (1. + exp(-lgt));
 }
 
@@ -42,6 +50,7 @@ bool LabelCrossEntropyOp<float, CPUContext>::RunOnDevice() {
   auto& X = Input(0);
   auto& label = Input(1);
 
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   int N, D;
   if (X.dim() > 1) {
     N = X.dim32(0);
@@ -224,6 +233,7 @@ bool LabelCrossEntropyGradientOp<float, CPUContext>::RunOnDevice() {
   auto& label = Input(1);
   auto& dY = Input(2);
 
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   int N, D;
   if (X.dim() > 1) {
     N = X.dim32(0);
@@ -294,6 +304,7 @@ bool CrossEntropyOp<float, CPUContext>::RunOnDevice() {
   auto& X = Input(0);
   auto& label = Input(1);
 
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   int N, D;
   if (X.dim() > 1) {
     N = X.dim32(0);
@@ -332,6 +343,7 @@ bool CrossEntropyGradientOp<float, CPUContext>::RunOnDevice() {
   auto& label = Input(1);
   auto& dY = Input(2);
 
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   int N, D;
   if (X.dim() > 1) {
     N = X.dim32(0);

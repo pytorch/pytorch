@@ -1,5 +1,5 @@
 #include <ATen/Utils.h>
-#include <ATen/CUDAGeneratorImpl.h>
+#include <ATen/cuda/CUDAGeneratorImpl.h>
 #include <ATen/cuda/CUDAGraphsUtils.cuh>
 #include <c10/core/StreamGuard.h>
 #include <c10/cuda/CUDAFunctions.h>
@@ -193,7 +193,7 @@ void CUDAGeneratorImpl::set_state(const c10::TensorImpl& new_state) {
   } else {
     TORCH_CHECK(new_state_size == total_size, "RNG state is wrong size");
   }
-  
+
   uint64_t input_seed;
   auto new_rng_state = new_state.data<uint8_t>();
   memcpy(&input_seed, new_rng_state + states_size, seed_size);

@@ -20,7 +20,7 @@
 ## Stack
 # 4     a_stride
 # 4     packed_w
-# 4     w_row_ptr 
+# 4     w_row_ptr
 # 4     w_block_ids_ptr
 # 4     b
 # 4     c
@@ -43,7 +43,7 @@
 #  |out ch indx     | 24
 #  |params          | 28
 #  |----------------|
-#  
+#
 
 #  After loading w pointer in ip reg.
 #  And after pushing r4-r9 and d8-d15 on stack
@@ -58,7 +58,7 @@
 #  |out ch indx     | 120
 #  |params          | 124
 #  |----------------|
-#  
+#
 
 # void pytorch_q8gemm_dq_sparse_8x1_ukernel_4x8_packedA__aarch32_neon(
 #     size_t mr,

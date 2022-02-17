@@ -4,8 +4,9 @@
 
 #include "onnx/onnx_pb.h"
 
-#include "c10/util/Exception.h"
-#include "c10/util/SmallVector.h"
+#include <c10/util/Exception.h>
+#include <c10/util/SmallVector.h>
+#include <c10/util/irange.h>
 #include "caffe2/core/context.h"
 #include "caffe2/core/logging.h"
 #include "caffe2/core/operator.h"
@@ -58,7 +59,10 @@ class OnnxifiOp final : public Operator<Context> {
         use_passed_output_shapes_(this->template GetSingleArgument<int>("use_passed_output_shapes", 0)),
         adjust_quantized_offset_(this->template GetSingleArgument<int>(
             "adjust_quantized_offset",
-            128)) {
+            128)),
+        use_onnxifi_batch_size_(this->template GetSingleArgument<int>(
+            "use_onnxifi_batch_size",
+            0)) {
     lib_ = onnx::initOnnxifiLibrary();
     backend_graph_map_ptr_ = onnx::getOnnxBackendGraphMap();
     CAFFE_ENFORCE(lib_, "Cannot initialize ONNXIFI library");
@@ -130,11 +134,12 @@ class OnnxifiOp final : public Operator<Context> {
 
     LOG(INFO) << "use_onnx_=" << use_onnx_
         << ", use_glow_aot_=" << use_glow_aot_
-        << ", use_passed_output_shapes_=" << use_passed_output_shapes_;
+        << ", use_passed_output_shapes_=" << use_passed_output_shapes_
+        << ", use_onnxifi_batch_size_=" << use_onnxifi_batch_size_;
 
     if (use_passed_output_shapes_) {
       // Populate output_shapes_per_bs_
-      for (int bs = 1; bs < max_batch_size_; ++bs) {
+      for (const auto bs : c10::irange(1, max_batch_size_)) {
         auto output_shapes_tp = helper.GetRepeatedArgument<TensorProto>("output_shapes_bs_" + caffe2::to_string(bs));
         auto output_qshapes_tp = helper.GetRepeatedArgument<TensorProto>("output_qshapes_bs_" + caffe2::to_string(bs));
         CAFFE_ENFORCE_EQ(output_names_.size(), output_shapes_tp.size() + output_qshapes_tp.size());
@@ -147,8 +152,8 @@ class OnnxifiOp final : public Operator<Context> {
           name_to_shape.emplace(output_qshape_tp.name(), details::TensorInfo{output_qshape_tp});
         }
 
-        for (output_idx = 0; output_idx < output_names_.size(); ++output_idx) {
-          auto it = name_to_shape.find(output_names_[output_idx]);
+        for (const auto& output : output_names_) {
+          auto it = name_to_shape.find(output);
           CAFFE_ENFORCE(it != name_to_shape.end());
           output_shapes_per_bs_[bs].push_back({});
           auto &output_shapes = output_shapes_per_bs_[bs].back();
@@ -263,8 +268,8 @@ class OnnxifiOp final : public Operator<Context> {
           ONNXIFI_STATUS_SUCCESS);
 
       // Release unused backend ids.
-      for (size_t i = 0; i < num_backends; ++i) {
-        if (i == backend_index) {
+      for (const auto i : c10::irange(num_backends)) {
+        if (i == static_cast<size_t>(backend_index)) {
           continue;
         }
         lib_->onnxReleaseBackendID(backend_ids[i]);
@@ -283,7 +288,7 @@ class OnnxifiOp final : public Operator<Context> {
 
       // Extra weight shapes
       std::unordered_map<std::string, ShapeInfo> weight_shape_info;
-      for (size_t i = 0; i < weight_names.size(); ++i) {
+      for (const auto i : c10::irange(weight_names.size())) {
         TensorShape shape;
         const auto& shape0 = weight_shapes[i];
         for (const auto d : shape0) {
@@ -344,6 +349,7 @@ class OnnxifiOp final : public Operator<Context> {
       decltype(onnxSetIOAndRunGraphPointer_) set;
       decltype(onnxReleaseTraceEventsPointer_) release;
       decltype(onnxWaitEventForPointer_) waitfor;
+      decltype(onnxGetCurrentBatchSizePointer_) currentbatchsize;
     } u;
     if (lib_->onnxGetExtensionFunctionAddress(
             backend_id_, "onnxSetIOAndRunGraphFunction", &u.p) !=
@@ -366,6 +372,13 @@ class OnnxifiOp final : public Operator<Context> {
     } else {
       onnxWaitEventForPointer_ = u.waitfor;
     }
+    if (lib_->onnxGetExtensionFunctionAddress(
+            backend_id_, "onnxGetCurrentBatchSizeFunction", &u.p) !=
+        ONNXIFI_STATUS_SUCCESS) {
+      onnxWaitEventForPointer_ = nullptr;
+    } else {
+      onnxGetCurrentBatchSizePointer_ = u.currentbatchsize;
+    }
 #endif
   }
 
@@ -376,6 +389,9 @@ class OnnxifiOp final : public Operator<Context> {
       c10::ArrayRef<uint64_t> max_shape,
       details::OutputReshapeInfo &output_reshape_info,
       int index);
+
+  /// Helper method for updating output reshape info using provided output shape hints.
+  void extractOutputBatchSizes(int current_batch_size);
 
   /// Extract output batch size. If the output batch size is going to be at
   /// max_batch_size_, return true indicating that no output shape adjustment is
@@ -440,6 +456,8 @@ class OnnxifiOp final : public Operator<Context> {
       char* message,
       size_t* messageLength);
 
+  onnxStatus (*onnxGetCurrentBatchSizePointer_)(int64_t*);
+
   std::shared_ptr<onnxTraceEventList> traces_{nullptr};
 #endif
 
@@ -502,6 +520,9 @@ class OnnxifiOp final : public Operator<Context> {
 
   // Adjust the quantized offset to compensate mismatch of certain backend
   uint8_t adjust_quantized_offset_{0};
+
+  // Whether we should read batch size value from Onnxifi request data
+  const bool use_onnxifi_batch_size_{false};
 };
 
 } // namespace caffe2

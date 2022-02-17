@@ -363,6 +363,48 @@ struct BinaryFunctorWithDefaultCtor {
   Functor functor{};
 };
 
+template <class Functor>
+struct BinaryFunctorWithBroadcastOptionsCtor {
+  explicit BinaryFunctorWithBroadcastOptionsCtor(OperatorBase& op)
+      : functor{op.GetSingleArgument<bool>("allow_broadcast_fastpath", false)} {}
+
+  template <typename TIn, typename TOut, class Context>
+  bool Forward(
+      const std::vector<int>& A_dims,
+      const std::vector<int>& B_dims,
+      const TIn* A_data,
+      const TIn* B_data,
+      TOut* C_data,
+      Context* context) const {
+    return functor.Forward(A_dims, B_dims, A_data, B_data, C_data, context);
+  }
+
+  template <typename TGrad, typename TIn, typename TOut, class Context>
+  bool Backward(
+      const std::vector<int>& A_dims,
+      const std::vector<int>& B_dims,
+      const TGrad* dC_data,
+      const TIn* A_data,
+      const TIn* B_data,
+      const TOut* C_data,
+      TGrad* dA_data,
+      TGrad* dB_data,
+      Context* context) const {
+    return functor.Backward(
+        A_dims,
+        B_dims,
+        dC_data,
+        A_data,
+        B_data,
+        C_data,
+        dA_data,
+        dB_data,
+        context);
+  }
+
+  Functor functor;
+};
+
 // BinaryElementwiseOp is a wrapper around BinaryElementwiseWithArgsOp, with the
 // difference that it takes a functor with default constructor, e.g. that does
 // not need to take into consideration any arguments during operator creation.
@@ -391,6 +433,39 @@ using BinaryElementwiseGradientOp = BinaryElementwiseWithArgsGradientOp<
     InputTypes,
     Context,
     BinaryFunctorWithDefaultCtor<Functor>,
+    OutputTypeMap,
+    GradientTypeMap>;
+
+// BinaryElementwiseBroadcastOp is a wrapper around BinaryElementwiseWithArgsOp,
+// with the difference that it takes a functor with a constructor that accepts
+// broadcast-related arguments (just a single boolean for whether broadcast
+// fastpaths are allowed at the time this comment was written).
+template <
+    typename InputTypes,
+    class Context,
+    class Functor,
+    class TypeMap = SameTypeAsInput>
+using BinaryElementwiseBroadcastOp = BinaryElementwiseWithArgsOp<
+    InputTypes,
+    Context,
+    BinaryFunctorWithBroadcastOptionsCtor<Functor>,
+    TypeMap>;
+
+// BinaryElementwiseGradientBroadcastOp is a wrapper around
+// BinaryElementwiseWithArgsGradientOp, with the difference that it takes a
+// functor with a constructor that accepts broadcast-related arguments (just a
+// single boolean for whether broadcast fastpaths are allowed at the time this
+// comment was written).
+template <
+    typename InputTypes,
+    class Context,
+    class Functor,
+    class OutputTypeMap = SameTypeAsInput,
+    class GradientTypeMap = SameTypeAsInput>
+using BinaryElementwiseGradientBroadcastOp = BinaryElementwiseWithArgsGradientOp<
+    InputTypes,
+    Context,
+    BinaryFunctorWithBroadcastOptionsCtor<Functor>,
     OutputTypeMap,
     GradientTypeMap>;
 

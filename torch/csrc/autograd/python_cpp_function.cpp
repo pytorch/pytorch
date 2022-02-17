@@ -1,3 +1,4 @@
+#include <c10/util/irange.h>
 #include <torch/csrc/autograd/python_cpp_function.h>
 
 #include <torch/csrc/python_headers.h>
@@ -43,7 +44,7 @@ PyObject* THPCppFunction_call(PyObject* self, PyObject* args, PyObject *kwargs)
     if (!THPVariable_Check(arg)) {
       return PyErr_Format(PyExc_TypeError, "argument %d is not a Variable", i);
     }
-    vars[i] = ((THPVariable*)arg)->cdata;
+    vars[i] = THPVariable_Unpack(arg);
   }
 
   variable_list output;
@@ -108,7 +109,7 @@ PyObject* THPCppFunction_next_functions(THPCppFunction* self, PyObject* hook)
   const auto num_next = self->cdata->num_outputs();
   THPObjectPtr py_functions(PyTuple_New(num_next));
   if (!py_functions) return nullptr;
-  for (size_t i = 0; i < num_next; ++i) {
+  for (const auto i : c10::irange(num_next)) {
     auto& c_tuple = self->cdata->next_edge(i);
     THPObjectPtr tuple(PyTuple_New(2));
     if (!tuple) return nullptr;
@@ -143,7 +144,7 @@ PyObject* THPCppFunction_register_hook_dict(PyObject* self, PyObject* _var)
   auto var = (THPVariable*)_var;
   auto& fn = *((THPCppFunction*)self)->cdata;
   std::unique_ptr<FunctionPreHook> hook(
-      new PyFunctionPreHook(var->backward_hooks, var->cdata.output_nr()));
+      new PyFunctionPreHook(var->backward_hooks, THPVariable_Unpack(var).output_nr()));
   fn.add_pre_hook(std::move(hook));
   Py_RETURN_NONE;
 }
@@ -159,11 +160,13 @@ PyObject* THPCppFunction_name(PyObject* self, PyObject *noargs) {
   return THPUtils_packString(fn.name());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,cppcoreguidelines-avoid-non-const-global-variables,modernize-avoid-c-arrays)
 static struct PyMethodDef default_methods[] = {
   THP_FUNCTION_DEFAULT_METHODS,
   {nullptr}
 };
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,cppcoreguidelines-avoid-non-const-global-variables,modernize-avoid-c-arrays)
 static struct PyGetSetDef default_properties[] = {
   THP_FUNCTION_DEFAULT_PROPERTIES,
   {nullptr}
@@ -218,6 +221,7 @@ PyObject* functionToPyObject(const std::shared_ptr<Node>& cdata)
   } else {
     auto& fn = *cdata;
     auto it = cpp_function_types.find(std::type_index(typeid(fn)));
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     PyTypeObject* type;
     if (it == cpp_function_types.end()) {
       type = &default_type.type;

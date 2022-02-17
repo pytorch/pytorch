@@ -27,4 +27,3 @@ class TestCase(unittest.TestCase):
         if hasattr(self, name):
             raise ValueError('Duplicated test name: {}'.format(name))
         setattr(self, name, test_func)
-

@@ -1,3 +1,4 @@
+#include <c10/util/irange.h>
 #include <torch/csrc/Size.h>
 
 #include <string>
@@ -22,7 +23,7 @@ PyObject * THPSize_New(const torch::autograd::Variable& var)
   auto self = THPObjectPtr(THPSizeType.tp_alloc(&THPSizeType, var.dim()));
   if (!self) throw python_error();
 
-  for (int64_t i = 0; i < var.dim(); ++i) {
+  for (const auto i : c10::irange(var.dim())) {
     PyObject *py_size_tensor = THPVariable_Wrap(torch::jit::tracer::getSizeOf(var, i));
     if (!py_size_tensor) throw python_error();
     PyTuple_SET_ITEM(self.get(), i, py_size_tensor);
@@ -41,7 +42,7 @@ PyObject * THPSize_NewFromSizes(int dim, const int64_t *sizes)
 
 static bool isTracedZeroDimVar(PyObject *item) {
   if (!THPVariable_Check(item)) return false;
-  auto & var = reinterpret_cast<THPVariable*>(item)->cdata;
+  auto & var = THPVariable_Unpack(item);
   return var.dim() == 0 && torch::jit::tracer::getValueTrace(var);
 }
 
@@ -170,6 +171,7 @@ static PyObject *THPSize_reduce(PyObject *_self, PyObject *noargs)
   END_HANDLE_TH_ERRORS
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables,modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
 static PyMethodDef THPSize_methods[] = {
   {"numel",       THPSize_numel,       METH_NOARGS,  nullptr},
   {"__reduce__",  THPSize_reduce,      METH_NOARGS,  nullptr},

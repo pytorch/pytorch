@@ -56,6 +56,7 @@ bool test_RNN_xor(Func&& model_maker, bool cuda = false) {
     loss.backward();
     optimizer.step();
 
+    // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,cppcoreguidelines-avoid-magic-numbers,bugprone-narrowing-conversions)
     running_loss = running_loss * 0.99 + loss.item<float>() * 0.01;
     if (epoch > max_epoch) {
       return false;
@@ -204,6 +205,7 @@ TEST_F(RNNTest, CheckOutputValuesMatchPyTorch) {
   ASSERT_EQ(std::get<0>(out).size(2), 2);
 
   auto flat = std::get<0>(out).view(3 * 4 * 2);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers,modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
   float c_out[] = {0.4391, 0.5402, 0.4330, 0.5324, 0.4261, 0.5239,
                    0.4183, 0.5147, 0.6822, 0.8064, 0.6726, 0.7968,
                    0.6620, 0.7860, 0.6501, 0.7741, 0.7889, 0.9003,
@@ -226,6 +228,7 @@ TEST_F(RNNTest, CheckOutputValuesMatchPyTorch) {
   ASSERT_EQ(cx.size(2), 2);
 
   flat = torch::cat({hx, cx}, 0).view(16);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers,modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
   float h_out[] = {0.7889,
                    0.9003,
                    0.7769,

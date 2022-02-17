@@ -4,66 +4,12 @@
 #include <ATen/native/SpectralOpsUtils.h>
 #include <ATen/NativeFunctions.h>
 #include <c10/util/accumulate.h>
+#include <c10/util/irange.h>
 
-#if !AT_MKL_ENABLED()
-
-namespace at { namespace native {
-
-REGISTER_NO_CPU_DISPATCH(fft_fill_with_conjugate_symmetry_stub, fft_fill_with_conjugate_symmetry_fn);
-
-Tensor _fft_c2r_mkl(const Tensor& self, IntArrayRef dim, int64_t normalization, int64_t last_dim_size) {
-  AT_ERROR("fft: ATen not compiled with MKL support");
-}
-
-Tensor _fft_r2c_mkl(const Tensor& self, IntArrayRef dim, int64_t normalization, bool onesided) {
-  AT_ERROR("fft: ATen not compiled with MKL support");
-}
-
-Tensor _fft_c2c_mkl(const Tensor& self, IntArrayRef dim, int64_t normalization, bool forward) {
-  AT_ERROR("fft: ATen not compiled with MKL support");
-}
-
-Tensor& _fft_r2c_mkl_out(Tensor& out, const Tensor& self, IntArrayRef dim, int64_t normalization,
-                         bool onesided) {
-  AT_ERROR("fft: ATen not compiled with MKL support");
-}
-
-Tensor& _fft_c2r_mkl_out(Tensor& out, const Tensor& self, IntArrayRef dim, int64_t normalization,
-                         int64_t last_dim_size) {
-  AT_ERROR("fft: ATen not compiled with MKL support");
-}
-
-Tensor& _fft_c2c_mkl_out(Tensor& out, const Tensor& self, IntArrayRef dim, int64_t normalization,
-                         bool forward) {
-  AT_ERROR("fft: ATen not compiled with MKL support");
-}
-
-}}
-
-#else // AT_MKL_ENABLED
-
-#include <ATen/ATen.h>
-#include <ATen/Config.h>
-#include <ATen/Dispatch.h>
-#include <ATen/NativeFunctions.h>
+#if AT_MKL_ENABLED() || AT_POCKETFFT_ENABLED()
 #include <ATen/Parallel.h>
-#include <ATen/Utils.h>
-
-#include <ATen/native/TensorIterator.h>
-
-#include <algorithm>
-#include <vector>
-#include <numeric>
-#include <cmath>
-
-#include <mkl_dfti.h>
-#include <ATen/mkl/Exceptions.h>
-#include <ATen/mkl/Descriptors.h>
-#include <ATen/mkl/Limits.h>
-
 
 namespace at { namespace native {
-
 // In real-to-complex transform, MKL FFT only fills half of the values due to
 // conjugate symmetry. See native/SpectralUtils.h for more details.
 // The following structs are used to fill in the other half with symmetry in
@@ -83,7 +29,7 @@ void _fft_fill_with_conjugate_symmetry_slice(
   // n-dimensions. This advances iter_index by one row, while updating in_ptr
   // and out_ptr to point to the new row of data.
   auto advance_index = [&] () __ubsan_ignore_undefined__ {
-    for (size_t i = 1; i < iter_index.size(); ++i) {
+    for (const auto i : c10::irange(1, iter_index.size())) {
       if (iter_index[i] + 1 < signal_half_sizes[i]) {
         ++iter_index[i];
         in_ptr += in_strides[i];
@@ -136,7 +82,7 @@ void _fft_fill_with_conjugate_symmetry_slice(
     // Explicitly loop over a Hermitian mirrored dimension
     if (iter_index[0] > 0) {
       auto end = std::min(signal_half_sizes[0], iter_index[0] + numel_remaining);
-      for (int64_t i = iter_index[0]; i < end; ++i) {
+      for (const auto i : c10::irange(iter_index[0], end)) {
         out_ptr[(signal_half_sizes[0] - i) * out_strides[0]] = std::conj(in_ptr[i * in_strides[0]]);
       }
       numel_remaining -= (end - iter_index[0]);
@@ -147,7 +93,7 @@ void _fft_fill_with_conjugate_symmetry_slice(
     while (numel_remaining > 0) {
       auto end = std::min(signal_half_sizes[0], numel_remaining);
       out_ptr[0] = std::conj(in_ptr[0]);
-      for (int64_t i = 1; i < end; ++i) {
+      for (const auto i : c10::irange(1, end)) {
         out_ptr[(signal_half_sizes[0] - i) * out_strides[0]] = std::conj(in_ptr[i * in_strides[0]]);
       }
       numel_remaining -= end;
@@ -176,7 +122,7 @@ static void _fft_fill_with_conjugate_symmetry_cpu_(
   const auto element_size = scalarTypeToTypeMeta(dtype).itemsize();
   const auto ndim = signal_half_sizes.size();
   DimVector in_strides(ndim), out_strides(ndim);
-  for (int64_t i = 0; i < ndim; ++i) {
+  for (const auto i : c10::irange(ndim)) {
     TORCH_INTERNAL_ASSERT(in_strides_bytes[i] % element_size == 0);
     in_strides[i] = in_strides_bytes[i] / element_size;
     TORCH_INTERNAL_ASSERT(out_strides_bytes[i] % element_size == 0);
@@ -203,8 +149,190 @@ static void _fft_fill_with_conjugate_symmetry_cpu_(
 
 // Register this one implementation for all cpu types instead of compiling multiple times
 REGISTER_ARCH_DISPATCH(fft_fill_with_conjugate_symmetry_stub, DEFAULT, &_fft_fill_with_conjugate_symmetry_cpu_)
-REGISTER_AVX_DISPATCH(fft_fill_with_conjugate_symmetry_stub, &_fft_fill_with_conjugate_symmetry_cpu_)
 REGISTER_AVX2_DISPATCH(fft_fill_with_conjugate_symmetry_stub, &_fft_fill_with_conjugate_symmetry_cpu_)
+REGISTER_AVX512_DISPATCH(fft_fill_with_conjugate_symmetry_stub, &_fft_fill_with_conjugate_symmetry_cpu_)
+REGISTER_ZVECTOR_DISPATCH(fft_fill_with_conjugate_symmetry_stub, &_fft_fill_with_conjugate_symmetry_cpu_)
+REGISTER_VSX_DISPATCH(fft_fill_with_conjugate_symmetry_stub, &_fft_fill_with_conjugate_symmetry_cpu_)
+
+// _out variants can be shared between PocketFFT and MKL
+Tensor& _fft_r2c_mkl_out(const Tensor& self, IntArrayRef dim, int64_t normalization,
+                         bool onesided, Tensor& out) {
+  auto result = _fft_r2c_mkl(self, dim, normalization, /*onesided=*/true);
+  if (onesided) {
+    resize_output(out, result.sizes());
+    return out.copy_(result);
+  }
+
+  resize_output(out, self.sizes());
+
+  auto last_dim = dim.back();
+  auto last_dim_halfsize = result.sizes()[last_dim];
+  auto out_slice = out.slice(last_dim, 0, last_dim_halfsize);
+  out_slice.copy_(result);
+  at::native::_fft_fill_with_conjugate_symmetry_(out, dim);
+  return out;
+}
+
+Tensor& _fft_c2r_mkl_out(const Tensor& self, IntArrayRef dim, int64_t normalization,
+                         int64_t last_dim_size, Tensor& out) {
+  auto result = _fft_c2r_mkl(self, dim, normalization, last_dim_size);
+  resize_output(out, result.sizes());
+  return out.copy_(result);
+}
+
+Tensor& _fft_c2c_mkl_out(const Tensor& self, IntArrayRef dim, int64_t normalization,
+                         bool forward, Tensor& out) {
+  auto result = _fft_c2c_mkl(self, dim, normalization, forward);
+  resize_output(out, result.sizes());
+  return out.copy_(result);
+}
+
+}} // namespace at::native
+#endif /* AT_MKL_ENALED() || AT_POCKETFFT_ENABLED() */
+
+#if AT_POCKETFFT_ENABLED()
+#include <pocketfft_hdronly.h>
+
+namespace at { namespace native {
+
+namespace {
+using namespace pocketfft;
+
+stride_t stride_from_tensor(const Tensor& t) {
+  stride_t stride(t.strides().begin(), t.strides().end());
+  for(auto& s: stride) {
+   s *= t.element_size();
+  }
+  return stride;
+}
+
+inline shape_t shape_from_tensor(const Tensor& t) {
+  return shape_t(t.sizes().begin(), t.sizes().end());
+}
+
+template<typename T>
+inline std::complex<T> *tensor_cdata(Tensor& t) {
+  return reinterpret_cast<std::complex<T>*>(t.data_ptr<c10::complex<T>>());
+}
+
+template<typename T>
+inline const std::complex<T> *tensor_cdata(const Tensor& t) {
+  return reinterpret_cast<const std::complex<T>*>(t.data_ptr<c10::complex<T>>());
+}
+
+template<typename T>
+T compute_fct(int64_t size, int64_t normalization) {
+  constexpr auto one = static_cast<T>(1);
+  switch (static_cast<fft_norm_mode>(normalization)) {
+    case fft_norm_mode::none: return one;
+    case fft_norm_mode::by_n: return one / static_cast<T>(size);
+    case fft_norm_mode::by_root_n: return one / std::sqrt(static_cast<T>(size));
+  }
+  AT_ERROR("Unsupported normalization type", normalization);
+}
+
+template<typename T>
+T compute_fct(const Tensor& t, IntArrayRef dim, int64_t normalization) {
+  if (static_cast<fft_norm_mode>(normalization) == fft_norm_mode::none) {
+    return static_cast<T>(1);
+  }
+  const auto& sizes = t.sizes();
+  int64_t n = 1;
+  for(auto idx: dim) {
+    n *= sizes[idx];
+  }
+  return compute_fct<T>(n, normalization);
+}
+
+} // anonymous namespace
+
+Tensor _fft_c2r_mkl(const Tensor& self, IntArrayRef dim, int64_t normalization, int64_t last_dim_size) {
+  auto in_sizes = self.sizes();
+  DimVector out_sizes(in_sizes.begin(), in_sizes.end());
+  out_sizes[dim.back()] = last_dim_size;
+  auto out = at::empty(out_sizes, self.options().dtype(c10::toRealValueType(self.scalar_type())));
+  pocketfft::shape_t axes(dim.begin(), dim.end());
+  if (self.scalar_type() == kComplexFloat) {
+    pocketfft::c2r(shape_from_tensor(out), stride_from_tensor(self), stride_from_tensor(out), axes, false,
+                   tensor_cdata<float>(self),
+                   out.data_ptr<float>(), compute_fct<float>(out, dim, normalization));
+  } else {
+    pocketfft::c2r(shape_from_tensor(out), stride_from_tensor(self), stride_from_tensor(out), axes, false,
+                   tensor_cdata<double>(self),
+                   out.data_ptr<double>(), compute_fct<double>(out, dim, normalization));
+    }
+  return out;
+}
+
+
+Tensor _fft_r2c_mkl(const Tensor& self, IntArrayRef dim, int64_t normalization, bool onesided) {
+  TORCH_CHECK(self.is_floating_point());
+  auto input_sizes = self.sizes();
+  DimVector out_sizes(input_sizes.begin(), input_sizes.end());
+  auto last_dim = dim.back();
+  auto last_dim_halfsize = (input_sizes[last_dim]) / 2 + 1;
+  if (onesided) {
+    out_sizes[last_dim] = last_dim_halfsize;
+  }
+
+  auto out = at::empty(out_sizes, self.options().dtype(c10::toComplexType(self.scalar_type())));
+  pocketfft::shape_t axes(dim.begin(), dim.end());
+  if (self.scalar_type() == kFloat) {
+    pocketfft::r2c(shape_from_tensor(self), stride_from_tensor(self), stride_from_tensor(out), axes, true,
+                   self.data_ptr<float>(),
+                   tensor_cdata<float>(out), compute_fct<float>(self, dim, normalization));
+  } else {
+    pocketfft::r2c(shape_from_tensor(self), stride_from_tensor(self), stride_from_tensor(out), axes, true,
+                   self.data_ptr<double>(),
+                   tensor_cdata<double>(out), compute_fct<double>(self, dim, normalization));
+  }
+
+  if (!onesided) {
+    at::native::_fft_fill_with_conjugate_symmetry_(out, dim);
+  }
+  return out;
+}
+
+Tensor _fft_c2c_mkl(const Tensor& self, IntArrayRef dim, int64_t normalization, bool forward) {
+  TORCH_CHECK(self.is_complex());
+  auto out = at::empty(self.sizes(), self.options());
+  pocketfft::shape_t axes(dim.begin(), dim.end());
+  if (self.scalar_type() == kComplexFloat) {
+    pocketfft::c2c(shape_from_tensor(self), stride_from_tensor(self), stride_from_tensor(out), axes, forward,
+                   tensor_cdata<float>(self),
+                   tensor_cdata<float>(out), compute_fct<float>(self, dim, normalization));
+  } else {
+    pocketfft::c2c(shape_from_tensor(self), stride_from_tensor(self), stride_from_tensor(out), axes, forward,
+                   tensor_cdata<double>(self),
+                   tensor_cdata<double>(out), compute_fct<double>(self, dim, normalization));
+  }
+
+  return out;
+}
+
+}}
+
+#elif AT_MKL_ENABLED()
+#include <ATen/ATen.h>
+#include <ATen/Config.h>
+#include <ATen/Dispatch.h>
+#include <ATen/NativeFunctions.h>
+#include <ATen/Utils.h>
+
+#include <ATen/native/TensorIterator.h>
+
+#include <algorithm>
+#include <vector>
+#include <numeric>
+#include <cmath>
+
+#include <mkl_dfti.h>
+#include <ATen/mkl/Exceptions.h>
+#include <ATen/mkl/Descriptors.h>
+#include <ATen/mkl/Limits.h>
+
+
+namespace at { namespace native {
 
 // Constructs an mkl-fft plan descriptor representing the desired transform
 // For complex types, strides are in units of 2 * element_size(dtype)
@@ -219,7 +347,7 @@ static DftiDescriptor _plan_mkl_fft(
 
   // precision
   const DFTI_CONFIG_VALUE prec = [&]{
-    switch (c10::toValueType(dtype)) {
+    switch (c10::toRealValueType(dtype)) {
       case ScalarType::Float: return DFTI_SINGLE;
       case ScalarType::Double: return DFTI_DOUBLE;
       default: TORCH_CHECK(false, "MKL FFT doesn't support tensors of type: ", dtype);
@@ -322,7 +450,7 @@ static Tensor& _exec_fft(Tensor& out, const Tensor& self, IntArrayRef out_sizes,
   const auto batch_size = input.sizes()[0];
   DimVector signal_size(signal_ndim + 1);
   signal_size[0] = batch_size;
-  for (int64_t i = 0; i < signal_ndim; ++i) {
+  for (const auto i : c10::irange(signal_ndim)) {
     auto in_size = input.sizes()[i + 1];
     auto out_size = out_sizes[dim[i]];
     signal_size[i + 1] = std::max(in_size, out_size);
@@ -334,11 +462,11 @@ static Tensor& _exec_fft(Tensor& out, const Tensor& self, IntArrayRef out_sizes,
 
   batched_sizes[0] = batch_size;
   DimVector batched_out_sizes(batched_sizes.begin(), batched_sizes.end());
-  for (size_t i = 0; i < dim.size(); ++i) {
+  for (const auto i : c10::irange(dim.size())) {
     batched_out_sizes[i + 1] = out_sizes[dim[i]];
   }
 
-  const auto value_type = c10::toValueType(input.scalar_type());
+  const auto value_type = c10::toRealValueType(input.scalar_type());
   out.resize_(batched_out_sizes, MemoryFormat::Contiguous);
 
   auto descriptor = _plan_mkl_fft(
@@ -359,10 +487,11 @@ static Tensor& _exec_fft(Tensor& out, const Tensor& self, IntArrayRef out_sizes,
     out_strides[dim_permute[i]] = batch_numel * out.strides()[0];
     batch_numel *= out_sizes[dim_permute[i]];
   }
-  for (int64_t i = batch_dims; i < ndim; ++i) {
+  for (const auto i : c10::irange(batch_dims, ndim)) {
     out_strides[dim_permute[i]] = out.strides()[1 + (i - batch_dims)];
   }
-  return out.as_strided_(out_sizes, out_strides, out.storage_offset());
+  out.as_strided_(out_sizes, out_strides, out.storage_offset());
+  return out;
 }
 
 // Sort transform dimensions by input layout, for best performance
@@ -387,22 +516,15 @@ Tensor _fft_c2r_mkl(const Tensor& self, IntArrayRef dim, int64_t normalization, 
   auto input = self;
   if (dim.size() > 1) {
     auto c2c_dims = dim.slice(0, dim.size() - 1);
-    input = _fft_c2c_mkl(self, c2c_dims, normalization, /*foward=*/false);
+    input = _fft_c2c_mkl(self, c2c_dims, normalization, /*forward=*/false);
     dim = dim.slice(dim.size() - 1);
   }
 
   auto in_sizes = input.sizes();
   DimVector out_sizes(in_sizes.begin(), in_sizes.end());
   out_sizes[dim.back()] = last_dim_size;
-  auto out = at::empty(out_sizes, self.options().dtype(c10::toValueType(self.scalar_type())));
+  auto out = at::empty(out_sizes, self.options().dtype(c10::toRealValueType(self.scalar_type())));
   return _exec_fft(out, input, out_sizes, dim, normalization, /*forward=*/false);
-}
-
-Tensor& _fft_c2r_mkl_out(Tensor& out, const Tensor& self, IntArrayRef dim, int64_t normalization,
-                         int64_t last_dim_size) {
-  auto result = _fft_c2r_mkl(self, dim, normalization, last_dim_size);
-  resize_output(out, result.sizes());
-  return out.copy_(result);
 }
 
 // n-dimensional real to complex FFT
@@ -426,24 +548,6 @@ Tensor _fft_r2c_mkl(const Tensor& self, IntArrayRef dim, int64_t normalization, 
   return out;
 }
 
-Tensor& _fft_r2c_mkl_out(Tensor& out, const Tensor& self, IntArrayRef dim, int64_t normalization,
-                         bool onesided) {
-  auto result = _fft_r2c_mkl(self, dim, normalization, /*onesided=*/true);
-  if (onesided) {
-    resize_output(out, result.sizes());
-    return out.copy_(result);
-  }
-
-  resize_output(out, self.sizes());
-
-  auto last_dim = dim.back();
-  auto last_dim_halfsize = result.sizes()[last_dim];
-  auto out_slice = out.slice(last_dim, 0, last_dim_halfsize);
-  out_slice.copy_(result);
-  at::native::_fft_fill_with_conjugate_symmetry_(out, dim);
-  return out;
-}
-
 // n-dimensional complex to complex FFT/IFFT
 Tensor _fft_c2c_mkl(const Tensor& self, IntArrayRef dim, int64_t normalization, bool forward) {
   TORCH_CHECK(self.is_complex());
@@ -452,13 +556,39 @@ Tensor _fft_c2c_mkl(const Tensor& self, IntArrayRef dim, int64_t normalization, 
   return _exec_fft(out, self, self.sizes(), sorted_dims, normalization, forward);
 }
 
-Tensor& _fft_c2c_mkl_out(Tensor& out, const Tensor& self, IntArrayRef dim, int64_t normalization,
-                         bool forward) {
-  auto result = _fft_c2c_mkl(self, dim, normalization, forward);
-  resize_output(out, result.sizes());
-  return out.copy_(result);
+}} // namespace at::native
+
+#else
+
+namespace at { namespace native {
+REGISTER_NO_CPU_DISPATCH(fft_fill_with_conjugate_symmetry_stub);
+
+Tensor _fft_c2r_mkl(const Tensor& self, IntArrayRef dim, int64_t normalization, int64_t last_dim_size) {
+  AT_ERROR("fft: ATen not compiled with FFT support");
+}
+
+Tensor _fft_r2c_mkl(const Tensor& self, IntArrayRef dim, int64_t normalization, bool onesided) {
+  AT_ERROR("fft: ATen not compiled with FFT support");
+}
+
+Tensor _fft_c2c_mkl(const Tensor& self, IntArrayRef dim, int64_t normalization, bool forward) {
+  AT_ERROR("fft: ATen not compiled with FFT support");
+}
+
+Tensor& _fft_r2c_mkl_out(const Tensor& self, IntArrayRef dim, int64_t normalization,
+                         bool onesided, Tensor& out) {
+  AT_ERROR("fft: ATen not compiled with FFT support");
+}
+
+Tensor& _fft_c2r_mkl_out(const Tensor& self, IntArrayRef dim, int64_t normalization,
+                         int64_t last_dim_size, Tensor& out) {
+  AT_ERROR("fft: ATen not compiled with FFT support");
+}
+
+Tensor& _fft_c2c_mkl_out(const Tensor& self, IntArrayRef dim, int64_t normalization,
+                         bool forward, Tensor& out) {
+  AT_ERROR("fft: ATen not compiled with FFT support");
 }
 
 }} // namespace at::native
-
 #endif

@@ -7,6 +7,7 @@ namespace caffe2 {
 
 namespace {
 
+// NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
 const char kBroadcastDoc[] = R"DOC(
 If necessary the right-hand-side argument will be broadcasted to match the
 shape of left-hand-side argument. When broadcasting is specified, the second
@@ -31,6 +32,7 @@ Github Links:
 
 )DOC";
 
+// NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
 const char kAddExample[] = R"DOC(
 <details>
 
@@ -77,6 +79,7 @@ C:
 
 )DOC";
 
+// NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
 const char kSubExample[] = R"DOC(
 <details>
 
@@ -123,6 +126,7 @@ C:
 
 )DOC";
 
+// NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
 const char kMulExample[] = R"DOC(
 <details>
 
@@ -169,6 +173,7 @@ C:
 
 )DOC";
 
+// NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
 const char kDivExample[] = R"DOC(
 <details>
 
@@ -320,7 +325,8 @@ OPERATOR_SCHEMA(MulGradient)
     .NumInputs(3)
     .NumOutputs(2)
     .TensorInferenceFunction(ElementwiseGradientOpShapeInference)
-    .AllowInplace({{0, 0}, {0, 1}});
+    .AllowInplace({{0, 0}, {0, 1}})
+    .CostInferenceFunction(PointwiseCostInference<2>);
 
 OPERATOR_SCHEMA(Div)
     .NumInputs(2)
@@ -374,6 +380,7 @@ For example, the following tensor shapes are supported:
         "If broadcasting is disabled it should be of the same size.")
     .Output(0, "C", "Result, has same dimensions and type as B");
 
+// NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
 const char kLTExample[] = R"DOC(
 <details>
 
@@ -413,6 +420,7 @@ C: [False False  True False False  True]
 </details>
 )DOC";
 
+// NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
 const char kLEExample[] = R"DOC(
 <details>
 
@@ -452,6 +460,7 @@ C: [ True False  True  True  True  True]
 </details>
 )DOC";
 
+// NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
 const char kGTExample[] = R"DOC(
 <details>
 
@@ -491,6 +500,7 @@ C: [False  True False False False False]
 </details>
 )DOC";
 
+// NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
 const char kGEExample[] = R"DOC(
 <details>
 
@@ -530,6 +540,7 @@ C: [ True  True False  True  True False]
 </details>
 )DOC";
 
+// NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
 const char kEQExample[] = R"DOC(
 <details>
 
@@ -567,6 +578,7 @@ C: [ True False False  True  True False]
 </details>
 )DOC";
 
+// NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
 const char kNEExample[] = R"DOC(
 <details>
 
@@ -678,6 +690,7 @@ CAFFE2_SCHEMA_FOR_BINARY_COMPARISON_OP(
     "greater or equal than",
     kGEExample);
 
+// NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
 const char kAndExample[] = R"DOC(
 <details>
 
@@ -726,6 +739,7 @@ C:
 </details>
 )DOC";
 
+// NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
 const char kOrExample[] = R"DOC(
 <details>
 
@@ -774,6 +788,7 @@ C:
 </details>
 )DOC";
 
+// NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
 const char kXorExample[] = R"DOC(
 <details>
 

@@ -2,7 +2,7 @@
 
 #include <torch/csrc/autograd/function.h>
 #include <torch/csrc/autograd/variable.h>
-#include <torch/csrc/WindowsTorchApiMacro.h>
+#include <torch/csrc/Export.h>
 
 #include <ATen/TensorGeometry.h>
 #include <ATen/core/DeprecatedTypeProperties.h>
@@ -17,7 +17,6 @@ struct TORCH_API CopyBackwards : public Node {
   variable_list apply(variable_list&& grads) override;
 
   at::TensorOptions src_options;
-  at::Device src_device = at::kCPU;
 };
 
 // Note [View + Inplace update for base tensor]

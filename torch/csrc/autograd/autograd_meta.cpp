@@ -1,4 +1,14 @@
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <c10/util/irange.h>
 #include <torch/csrc/autograd/variable.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#else
+#include <ATen/ops/_has_same_storage_numel.h>
+#include <ATen/ops/_new_zeros_with_same_feature_meta.h>
+#include <ATen/ops/zeros.h>
+#endif
 
 namespace torch {
 namespace autograd {
@@ -76,31 +86,27 @@ namespace {
     if (base.dim() != other.dim()) {
       return false;
     }
-    for (int64_t i=0; i<base.dim(); ++i) {
+    for (const auto i : c10::irange(base.dim())) {
       if (base.sizes()[i] != other.sizes()[i]) {
         return false;
       }
-      if (base.strides()[i] != other.strides()[i]) {
+      if (base.strides()[i] != other.strides()[i] && base.sizes()[i] != 1) {
         return false;
       }
+    }
+    if (!at::_has_same_storage_numel(base, other)) {
+      return false;
     }
     return true;
   }
 
-  Tensor new_with_same_meta(const Variable& base) {
-    // We need to create a storage of the same size to be able to have the same
-    // viewing behavior in all cases
-    // Explicit type here to appease Windows build
-    int64_t nelement_in_storage = base.storage().nbytes() / base.itemsize();
-    auto new_tensor = at::zeros({nelement_in_storage}, base.options());
-    auto res = new_tensor.as_strided(base.sizes(), base.strides(), base.storage_offset());
-    return res;
-  }
 } // anonymous namespace
 
 // This function is will ensure that the fw_grad_ is properly a view of the base for inplace ops on
 // Tensors that do not have forward grad originally.
-void AutogradMeta::set_fw_grad(const Variable& new_grad_, const Variable& self, uint64_t level, bool is_inplace_op) {
+void AutogradMeta::set_fw_grad(const at::TensorBase& new_grad_base, const at::TensorBase& self_base, uint64_t level, bool is_inplace_op) {
+  TORCH_CHECK(!new_grad_base._fw_grad(level).defined(), "Setting a forward grad that "
+              "itself has a forward gradient at the same level", level, " is not supported.");
   // Lazy initialization
   {
     std::lock_guard<std::mutex> lock(mutex_);
@@ -111,17 +117,23 @@ void AutogradMeta::set_fw_grad(const Variable& new_grad_, const Variable& self, 
   if (fw_grad_->contains(level)) {
     // Setting the forward grad again is only allowed if it is a no-op.
     // We do allow this case to simplify writing codegen for inplace ops.
-    TORCH_INTERNAL_ASSERT(new_grad_.defined(), "Cannot set a forward grad that is an undefined Tensor. Use "
+    TORCH_INTERNAL_ASSERT(new_grad_base.defined(), "Cannot set a forward grad that is an undefined Tensor. Use "
                           "_fw_primal(level) to get a new Tensor with this forward grad unset.");
 
     TORCH_INTERNAL_ASSERT(is_inplace_op, "Only inplace operations can re-set the forward grad of a Tensor that "
                           "already has one.");
 
-    TORCH_INTERNAL_ASSERT(fw_grad_->value(level).is_same(new_grad_), "Cannot set a value of a forward grad if it "
+    TORCH_INTERNAL_ASSERT(fw_grad_->value(level).is_same(new_grad_base), "Cannot set a value of a forward grad if it "
                           "already exists. Inplace operations should modify it inplace.");
   } else {
     // TODO(alband) remove this spurious version counter bump
-    auto new_grad = new_grad_;
+    Tensor new_grad(new_grad_base);
+    at::OptionalTensorRef self_ref(self_base);
+    const Tensor &self = *self_ref;
+
+    TORCH_CHECK(self.is_same_size(new_grad), "Trying to set a forward gradient that has a different size than that "
+                "of the original Tensor, this is not supported. Tensor is of size ", self.sizes(), " while the given "
+                "forward gradient is of size ", new_grad.sizes(), ".");
 
     if (is_inplace_op && is_view_) {
       auto this_view_meta = static_cast<DifferentiableViewMeta*>(this);
@@ -139,15 +151,15 @@ void AutogradMeta::set_fw_grad(const Variable& new_grad_, const Variable& self, 
         auto view_info = this_view_meta->get_forward_view();
         auto& base = view_info.base_;
 
-        if (!base.fw_grad(level).defined()) {
+        if (!base._fw_grad(level).defined()) {
           // Enforce same meta here to make sure that the view op below is always valid
           Tensor new_base_fw_grad;
-          if (has_same_meta(new_grad, base)) {
+          if (has_same_meta(new_grad, base) && has_same_meta(new_grad, self)) {
             // TODO extend this special case to when the underlying storage of new_grad
             // can be re-used.
             new_base_fw_grad = new_grad;
           } else {
-            new_base_fw_grad = new_with_same_meta(base);
+            new_base_fw_grad = at::_new_zeros_with_same_feature_meta(new_grad, base);
 
             // Update new_grad to be a view of the base
             Tensor new_fw_grad_value;
@@ -161,23 +173,34 @@ void AutogradMeta::set_fw_grad(const Variable& new_grad_, const Variable& self, 
             new_grad = new_fw_grad_value;
           }
 
-          base.set_fw_grad(new_base_fw_grad, level, /* is_inplace_op */ false);
+          base._set_fw_grad(new_base_fw_grad, level, /* is_inplace_op */ false);
         }
       }
     }
 
     // Enforce the basic layout constraint
     if (!has_same_meta(new_grad, self)) {
-      Tensor new_grad_with_meta = new_with_same_meta(self);
-      new_grad_with_meta.copy_(new_grad);
-      new_grad = new_grad_with_meta;
+      if (is_view_) {
+        auto this_view_meta = static_cast<DifferentiableViewMeta*>(this);
+        TORCH_INTERNAL_ASSERT(!this_view_meta->has_fw_view(),
+            "Expected the output of forward differentiable view operations to have the tangent have the same layout as primal")
+      }
+      auto res = at::_new_zeros_with_same_feature_meta(new_grad, self);
+      res.copy_(new_grad);
+      new_grad = res;
     }
 
     fw_grad_->set_value(new_grad, level);
   }
 }
 
-const Variable& AutogradMeta::fw_grad(uint64_t level, const Variable& self) const {
+const Variable& AutogradMeta::fw_grad(uint64_t level, const at::TensorBase& self) const {
+  // TLS that disables forward AD
+  // This is only used for custom Function implementation
+  if (!c10::AutogradState::get_tls_state().get_fw_grad_mode()) {
+    return ForwardGrad::undef_grad();
+  }
+
   // Ensure that concurent fw_grad() "reads" are thread safe
   std::lock_guard<std::mutex> lock(mutex_);
 
@@ -195,7 +218,7 @@ const Variable& AutogradMeta::fw_grad(uint64_t level, const Variable& self) cons
       const auto& view_info = this_view_meta->get_forward_view();
       const auto& base = view_info.base_;
 
-      const auto& base_val = base.fw_grad(level);
+      const auto& base_val = base._fw_grad(level);
       if (base_val.defined()) {
         // Lazy initialization of fw_grad_
         this_view_meta->fw_grad_ = std::make_shared<ForwardGrad>();

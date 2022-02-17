@@ -7,7 +7,7 @@ from torch.backends import ContextProp, PropModule, __allow_nonbracketed_mutatio
 try:
     from torch._C import _cudnn
 except ImportError:
-    _cudnn = None  # type: ignore
+    _cudnn = None  # type: ignore[assignment]
 
 # Write:
 #
@@ -133,3 +133,4 @@ sys.modules[__name__] = CudnnModule(sys.modules[__name__], __name__)
 enabled: bool
 deterministic: bool
 benchmark: bool
+allow_tf32: bool

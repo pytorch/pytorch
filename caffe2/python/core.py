@@ -40,15 +40,36 @@ NameScope = scope.NameScope
 
 # Bring datatype enums to the main namespace
 class DataType:
-    pass
+    UNDEFINED = 0
+    FLOAT = 1
+    INT32 = 2
+    BYTE = 3
+    STRING = 4
+    BOOL = 5
+    UINT8 = 6
+    INT8 = 7
+    UINT16 = 8
+    INT16 = 9
+    INT64 = 10
+    FLOAT16 = 12
+    DOUBLE = 13
+    ZERO_COLLISION_HASH = 14
+    REBATCHING_BUFFER = 15
 
 
-def _InitDataType():
+def _CheckDataType():
+    # Verify that the DataType values defined above match the ones defined in
+    # the caffe2.proto file
     for name, value in caffe2_pb2.TensorProto.DataType.items():
-        setattr(DataType, name, value)
+        py_value = getattr(DataType, name, None)
+        if py_value != value:
+            raise AssertionError(
+                f"DataType {name} does not match the value defined in "
+                f"caffe2.proto: {py_value} vs {value}"
+            )
 
 
-_InitDataType()
+_CheckDataType()
 
 
 def _GetRegisteredOperators():
@@ -1448,12 +1469,15 @@ class Net(object):
         Net._net_names_used |= set([name])
         return name
 
-    def __init__(self, name_or_proto):
+    def __init__(self, name_or_proto, inplace=False):
         """
         Create a Net.
         Args:
-            name_or_proto:  If a NetDef is provided, clone it. Otherwise,
+            name_or_proto:  If a NetDef is provided, clone it (or take ownership,
+                            depending on the value of `inplace`). Otherwise,
                             create an empty net with the given name.
+            inplace: If a NetDef is provided, take ownership when `inplace` is True;
+                     otherwise, clone it.
         """
         self._input_record = None
         self._output_record = None
@@ -1466,10 +1490,13 @@ class Net(object):
         self._attr_dict = defaultdict(list)
         if type(name_or_proto) is caffe2_pb2.NetDef:
             proto = name_or_proto
-            # We rae initializing a network by a NetDef. In this case, we will
+            # We are initializing a network by a NetDef. In this case, we will
             # initialize our network with the given netdef.
-            self._net = caffe2_pb2.NetDef()
-            self._net.CopyFrom(proto)
+            if inplace:
+                self._net = proto
+            else:
+                self._net = caffe2_pb2.NetDef()
+                self._net.CopyFrom(proto)
 
             existing_outputs = [list(op.output) for op in self._net.op]
 

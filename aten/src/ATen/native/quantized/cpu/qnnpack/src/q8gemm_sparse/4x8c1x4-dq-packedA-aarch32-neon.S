@@ -20,7 +20,7 @@
 ## Stack
 # 4     a_stride
 # 4     packed_w
-# 4     w_row_ptr 
+# 4     w_row_ptr
 # 4     w_block_ids_ptr
 # 4     b
 # 4     c
@@ -43,7 +43,7 @@
 #  |out ch indx     | 24
 #  |params          | 28
 #  |----------------|
-#  
+#
 
 #  After loading w pointer in ip reg.
 #  And after pushing r4-r9 and d8-d15 on stack
@@ -58,7 +58,7 @@
 #  |out ch indx     | 120
 #  |params          | 124
 #  |----------------|
-#  
+#
 
 # void pytorch_q8gemm_dq_sparse_1x4_ukernel_4x8_packedA__aarch32_neon(
 #     size_t mr,
@@ -223,7 +223,7 @@ k_loop:
     # Each iteration produce 4 values each of 4 bytes
     # Thus 4 x 4 = 16 bytes 2^4
     # In this implementation, first value will be stored at
-    # 1st value: sp - 12 - r1 * 16 
+    # 1st value: sp - 12 - r1 * 16
     # 2nd value: sp - 12 - (r1 - 1) * 16
     # and so on.
     SUB r9, r9, r1, LSL #4

@@ -10,8 +10,8 @@ from typing import List
 stack_configs_static_runtime = op_bench.config_list(
     attr_names=['sizes', 'N'],
     attrs=[
-        [(20, 40), 5], # noqa
-        [(1, 40), 5], # noqa
+        [(20, 40), 5],
+        [(1, 40), 5],
     ],
     cross_product_configs={
         'device': ['cpu', 'cuda'],
@@ -23,9 +23,9 @@ stack_configs_static_runtime = op_bench.config_list(
 stack_configs_short = op_bench.config_list(
     attr_names=['sizes', 'N'],
     attrs=[
-        [(1,    1,      1), 2], # noqa
-        [(512,  512,    2), 2], # noqa
-        [(128, 1024,    2), 2], # noqa
+        [(1,    1,      1), 2],  # noqa: E241
+        [(512,  512,    2), 2],  # noqa: E241
+        [(128, 1024,    2), 2],  # noqa: E241
     ],
     cross_product_configs={
         'device': ['cpu', 'cuda'],
@@ -37,9 +37,9 @@ stack_configs_short = op_bench.config_list(
 stack_configs_long = op_bench.config_list(
     attr_names=['sizes', 'N'],
     attrs=[
-        [(2**10,    2**10,      2), 2], # noqa
-        [(2**10+1,  2**10-1,    2), 2], # noqa
-        [(2**10,    2**10,      2), 2], # noqa
+        [(2**10,    2**10,      2), 2],  # noqa: E241
+        [(2**10+1,  2**10-1,    2), 2],  # noqa: E226,E241
+        [(2**10,    2**10,      2), 2],  # noqa: E241
     ],
     cross_product_configs={
         'device': ['cpu', 'cuda'],
@@ -52,9 +52,9 @@ stack_configs_long = op_bench.config_list(
 stack_configs_multidim = op_bench.config_list(
     attr_names=['sizes', 'N'],
     attrs=[
-        [(2**6,     2**5,   2**2,   2**4,   2**5), 2], # noqa
-        [(2**4,     2**5,   2**2,   2**4,   2**5), 8], # noqa
-        [(2**3+1,   2**5-1, 2**2+1, 2**4-1, 2**5+1), 17], # noqa
+        [(2**6,     2**5,   2**2,   2**4,   2**5), 2],  # noqa: E241
+        [(2**4,     2**5,   2**2,   2**4,   2**5), 8],  # noqa: E241
+        [(2**3+1,   2**5-1, 2**2+1, 2**4-1, 2**5+1), 17],  # noqa: E226,E241
     ],
     cross_product_configs={
         'device': ['cpu', 'cuda'],

@@ -36,9 +36,13 @@ TEST(QualifiedNameTest, DottedConstruction) {
 
 TEST(QualifiedNameTest, BadInputRaises) {
   // throw some bad inputs at it
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
   ASSERT_ANY_THROW(QualifiedName("foo..bar"));
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
   ASSERT_ANY_THROW(QualifiedName(".foo.bar"));
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
   ASSERT_ANY_THROW(QualifiedName("foo.bar."));
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
   ASSERT_ANY_THROW(QualifiedName(""));
 }
 

@@ -1,3 +1,5 @@
+# Owner(s): ["oncall: jit"]
+
 import torch
 from torch.testing._internal.jit_utils import JitTestCase
 
@@ -65,3 +67,18 @@ class TestPythonBindings(JitTestCase):
         list(i)
         o = test_iterator_keepalive_fn.inlined_graph.outputs()
         list(o)
+
+    def test_aliasdb(self):
+        @torch.jit.script
+        def test_aliasdb_fn(x: torch.Tensor):
+            return 2 * x
+
+        gr = test_aliasdb_fn.graph.copy()
+        alias_db = gr.alias_db()
+        self.assertTrue("WILDCARD" in str(alias_db))
+        self.assertTrue("digraph alias_db" in alias_db.to_graphviz_str())
+
+    def test_graph_create(self):
+        gr = torch._C.Graph()
+        with self.assertRaises(ValueError):
+            gr.create("prim::Constant", [None])

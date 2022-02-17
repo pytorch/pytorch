@@ -1,10 +1,16 @@
 #pragma once
 
+#include <ATen/core/DimVector.h>
 #include <ATen/core/TensorBody.h>
 #include <ATen/core/blob.h>
+#include <ATen/core/custom_class.h>
+#include <ATen/core/ivalue_to.h>
+#include <ATen/core/jit_type_base.h>
+#include <ATen/core/type_factory.h>
 #include <c10/util/C++17.h>
+#include <c10/util/MaybeOwned.h>
 #include <c10/util/intrusive_ptr.h>
-#include <torch/csrc/WindowsTorchApiMacro.h>
+#include <c10/macros/Export.h>
 #include <typeindex>
 
 namespace torch {
@@ -25,7 +31,6 @@ struct IValue;
 struct ClassType;
 struct Type;
 class RRefInterface;
-using TypePtr = std::shared_ptr<Type>;
 
 struct ClassType;
 using ClassTypePtr = std::shared_ptr<ClassType>;
@@ -169,12 +174,12 @@ struct Capsule {
 ///   std::cout << my_ivalue << "\n";
 ///
 ///   // Unwrap the IValue
-///   int64_t my_int = my_ivalue.toInt()
+///   int64_t my_int = my_ivalue.toInt();
 ///   std::cout << my_int << "\n";
 ///
 ///   // This will throw an error!
 ///   // `my_ivalue` is tagged as an int and cannot be used as another type
-///   torch::Tensor my_tensor = my_ivalue.toTensor()
+///   torch::Tensor my_tensor = my_ivalue.toTensor();
 /// \endrst
 struct TORCH_API IValue final {
   IValue(const IValue& rhs)
@@ -204,7 +209,7 @@ struct TORCH_API IValue final {
   }
 
   IValue& operator=(IValue const& rhs) & {
-    IValue(rhs).swap(*this);
+    *this = IValue(rhs);
     return *this;
   }
 
@@ -273,13 +278,46 @@ struct TORCH_API IValue final {
    * for consistency, because Python does the same thing. This actually
    * provokes user-visible changes in behavior due to quirks in torch:
    *      [tensor1] == [tensor1] -> True (because container equality will first
-   * compare identity) [tensor1] == [tensor1_copy] -> RuntimeError: bool value
-   * of Tensor is ambiguous
+   * compare identity) [tensor1] == [tensor1_copy] -> RuntimeError:
+   * Boolean value of Tensor with more than one value is ambiguous
    */
   TORCH_API friend bool _fastEqualsForContainer(
       const IValue& lhs,
       const IValue& rhs);
 
+private:
+  static bool isAliasOf(const at::Tensor& a, const at::Tensor& b) {
+    if (a.is_sparse()) {
+      return isAliasOf(a._values(), b) || isAliasOf(a._indices(), b);
+    }
+    if (b.is_sparse()) {
+      return isAliasOf(a, b._values()) || isAliasOf(a, b._indices());
+    }
+    if (a.is_sparse_csr()) {
+      return isAliasOf(a.values(), b) ||
+             isAliasOf(a.crow_indices(), b) ||
+             isAliasOf(a.col_indices(), b);
+    }
+    if (b.is_sparse_csr()) {
+      return isAliasOf(a, b.values()) ||
+             isAliasOf(a, b.crow_indices()) ||
+             isAliasOf(a, b.col_indices());
+    }
+
+    // Opaque tensors such as the ones constructed by the MKL-DNN backend
+    // don't have storage so we just compare their TensorImpls.
+    // TODO: Find way to expose alias info for opaque tensors.
+    if (!a.has_storage() || !b.has_storage()) {
+      return a.unsafeGetTensorImpl() == b.unsafeGetTensorImpl();
+    }
+
+    return a.is_alias_of(b);
+  }
+
+  template <typename T>
+  bool isListOf() const;
+
+public:
   /// @private [doxygen private]
   bool isAliasOf(const IValue& rhs) const {
     if (this->tag != rhs.tag) {
@@ -289,9 +327,7 @@ struct TORCH_API IValue final {
 
     // Tensors should be compared based on internal storage
     if (this->isTensor()) {
-      const auto& thisTensor = this->toTensor();
-      const auto& rhsTensor = rhs.toTensor();
-      return thisTensor.is_alias_of(rhsTensor);
+      return isAliasOf(this->toTensor(), rhs.toTensor());
     }
 
     if (!this->is_intrusive_ptr) {
@@ -352,12 +388,18 @@ struct TORCH_API IValue final {
   // While some of these accessors could be generated through templates,
   // we prefer to write them manually for clarity
 
-  IValue(at::Tensor t) : tag(Tag::Tensor), is_intrusive_ptr(false) {
+  IValue(at::TensorBase t) : tag(Tag::Tensor), is_intrusive_ptr(false) {
     new (&payload.as_tensor) at::Tensor(std::move(t));
   }
   bool isTensor() const {
     return Tag::Tensor == tag;
   }
+
+ private:
+  // Outlined error path so that toTensor() can be inlined.
+  [[noreturn]] void reportToTensorTypeError() const;
+
+ public:
   at::Tensor toTensor() &&;
   at::Tensor& toTensor() &;
   const at::Tensor& toTensor() const&;
@@ -439,11 +481,20 @@ struct TORCH_API IValue final {
               guts::negation<std::is_constructible<IValue, Args>>...>::value,
           std::nullptr_t> = nullptr>
   IValue(const std::tuple<Args...>& t);
+  template <
+      typename... Args,
+      std::enable_if_t<
+          !guts::disjunction<
+              std::is_lvalue_reference<Args>...,
+              guts::negation<std::is_constructible<IValue, Args>>...>::value,
+          std::nullptr_t> = nullptr>
+  IValue(std::tuple<Args...>&& t);
   bool isTuple() const {
     return Tag::Tuple == tag;
   }
   c10::intrusive_ptr<ivalue::Tuple> toTuple() &&;
   c10::intrusive_ptr<ivalue::Tuple> toTuple() const&;
+  C10_NODISCARD ivalue::Tuple& toTupleRef() const;
 
   // Double
   IValue(double d) : tag(Tag::Double), is_intrusive_ptr(false) {
@@ -528,11 +579,13 @@ struct TORCH_API IValue final {
   c10::List<int64_t> toIntList() &&;
   c10::List<int64_t> toIntList() const&;
   std::vector<int64_t> toIntVector() const;
+  at::DimVector toDimVector() const;
 
   // ConstantString
   IValue(c10::intrusive_ptr<ivalue::ConstantString> v);
   IValue(std::string v);
   IValue(const char* v) : IValue(std::string(v)) {}
+  IValue(c10::string_view v) : IValue(std::string(v)) {};
   bool isString() const {
     return Tag::String == tag;
   }
@@ -541,6 +594,7 @@ struct TORCH_API IValue final {
   const std::string& toStringRef() const;
   c10::optional<std::reference_wrapper<const std::string>> toOptionalStringRef()
       const;
+  c10::string_view toStringView() const;
 
   // DoubleList
   bool isDoubleList() const;
@@ -581,7 +635,9 @@ struct TORCH_API IValue final {
       std::enable_if_t<std::is_constructible<IValue, T>::value, std::nullptr_t>;
 
   template <class T, enable_if_ivalue_constructible<T> = nullptr>
-  IValue(c10::List<T> v);
+  IValue(c10::List<T>&& v);
+  template <class T, enable_if_ivalue_constructible<T> = nullptr>
+  IValue(const c10::List<T>& v);
   template <class T, enable_if_ivalue_constructible<T> = nullptr>
   IValue(at::ArrayRef<T> v);
   template <class T, enable_if_ivalue_constructible<T> = nullptr>
@@ -619,7 +675,7 @@ struct TORCH_API IValue final {
   }
   c10::intrusive_ptr<ivalue::Object> toObject() &&;
   c10::intrusive_ptr<ivalue::Object> toObject() const&;
-  const ivalue::Object& toObjectRef() const;
+  ivalue::Object& toObjectRef() const;
 
   torch::jit::Module toModule() const;
   bool isModule() const;
@@ -658,18 +714,22 @@ struct TORCH_API IValue final {
   }
 
   // Scalar, which gets encoded as either an Int, a Double or a ComplexDouble
-  IValue(at::Scalar s) : IValue() {
+  IValue(const at::Scalar& s) : IValue() {
     if (s.isFloatingPoint()) {
       *this = s.toDouble();
     } else if (s.isComplex()) {
       *this = s.toComplexDouble();
-    } else {
+    } else if (s.isBoolean()) {
+      *this = s.toBool();
+    } else if (s.isIntegral(false)) {
       *this = s.toLong();
+    } else {
+      TORCH_CHECK(false, "Unknown type in Scalar");
     }
   }
 
   bool isScalar() const {
-    return isDouble() || isInt() || isComplexDouble();
+    return isDouble() || isInt() || isComplexDouble() || isBool();
   }
 
   at::Scalar toScalar() const {
@@ -679,6 +739,8 @@ struct TORCH_API IValue final {
       return toInt();
     else if (isComplexDouble())
       return toComplexDouble();
+    else if (isBool())
+      return toBool();
     throw std::runtime_error("IValue is not a Scalar");
   }
 
@@ -781,7 +843,7 @@ struct TORCH_API IValue final {
   template <typename T>
   T to() &&;
   template <typename T>
-  T to() const&;
+  typename c10::detail::ivalue_to_const_ref_overload_return<T>::type to() const&;
 
   // ToOptional: convert a IValue to the Optional obj that accepts both T and
   // None
@@ -834,14 +896,35 @@ struct TORCH_API IValue final {
     }
   }
 
+  template <typename T = c10::PlatformType>
   TypePtr type() const;
 
   // Detect aliased tensors.
   struct HashAliasedIValue {
+    size_t hashTensor(const at::Tensor& ten) const {
+      if (ten.is_sparse()) {
+        // COO sparse tensors have a "values" tensor and an "indices" tensor
+        // so this will detect overlap of sparse tensors that share a values
+        // tensor, but not sparse tensors that share an indices tensor.
+        return hashTensor(ten._values());
+      } else if (ten.is_sparse_csr()) {
+        // COO sparse tensors have a "values" tensor and an "indices" tensor
+        // so this will detect overlap of sparse tensors that share a values
+        // tensor, but not sparse tensors that share an indices tensor.
+        return hashTensor(ten.values());
+      }  else if (!ten.has_storage()) {
+        // Opaque tensors such as the ones constructed by the MKL-DNN backend
+        // don't have storage so we just use their TensorImpls.
+        // TODO: Find way to expose alias info for opaque tensors.
+        return reinterpret_cast<size_t>(ten.unsafeGetTensorImpl());
+      } else {
+        return reinterpret_cast<size_t>(
+            ten.storage().unsafeGetStorageImpl());
+      }
+    }
     size_t operator()(const IValue& val) const {
       if (val.isTensor()) {
-        return reinterpret_cast<size_t>(
-            val.toTensor().storage().unsafeGetStorageImpl());
+        return hashTensor(val.toTensor());
       }
       // If it is not a Tensor, then two mutable IValues alias each other only
       // if they are the same pointer.
@@ -973,6 +1056,11 @@ struct TORCH_API IValue final {
     }
   }
 
+  template <typename T>
+  struct TagType {};
+
+  friend MaybeOwnedTraits<IValue>;
+
   Payload payload;
   Tag tag;
   bool is_intrusive_ptr;
@@ -1102,37 +1190,83 @@ struct TORCH_API WeakIValue final {
 struct TORCH_API StrongTypePtr {
   StrongTypePtr(
       std::shared_ptr<torch::jit::CompilationUnit> cu,
-      std::shared_ptr<Type> type);
+      TypePtr type);
 
   std::shared_ptr<torch::jit::CompilationUnit> cu_;
-  std::shared_ptr<Type> type_;
+  TypePtr type_;
 };
 
-TORCH_API ska::flat_hash_map<std::type_index, c10::ClassTypePtr>&
-getCustomClassTypeMap();
+// [Constant Object Weak CompilationUnit Reference]
+// A non owning pointer to a type. When a class get inserted as a constant
+// into a graph, if we used a strong pointer we would have a circular reference
+// from Object -> CompilationUnit and CompilationUnit -> Graph (which owns the
+// Constant Object)
+struct TORCH_API WeakTypePtr {
+  WeakTypePtr(
+      std::weak_ptr<torch::jit::CompilationUnit> cu,
+      TypePtr type);
 
-template <typename T>
-c10::ClassTypePtr getCustomClassTypeImpl() {
-  auto& tmap = c10::getCustomClassTypeMap();
-  auto res = tmap.find(std::type_index(typeid(T)));
-  if (res == tmap.end()) {
-    throw c10::Error("Can't find class id in custom class type map", "");
+  std::weak_ptr<torch::jit::CompilationUnit> cu_;
+  TypePtr type_;
+};
+
+// internal build errors with std::variant :/
+struct WeakOrStrongCompilationUnit {
+  explicit WeakOrStrongCompilationUnit(
+      std::shared_ptr<torch::jit::CompilationUnit> shared_cu) {
+    strong_ptr_ = shared_cu;
+    weak_ptr_ = c10::nullopt;
   }
-  return res->second;
-}
 
-template <typename T>
-const c10::ClassTypePtr& getCustomClassType() {
-  // Classes are never unregistered from getCustomClassTypeMap and the
-  // hash lookup can be a hot path, so just cache.
-  // For the same reason, it's fine If this ends up getting duplicated across
-  // DSO boundaries for whatever reason.
-  static c10::ClassTypePtr cache = getCustomClassTypeImpl<T>();
-  return cache;
-}
+  explicit WeakOrStrongCompilationUnit(
+      std::weak_ptr<torch::jit::CompilationUnit> weak_cu) {
+    strong_ptr_ = c10::nullopt;
+    weak_ptr_ = weak_cu;
+  }
 
-TORCH_API std::unordered_map<std::string, std::function<PyObject*(void*)>>&
-getClassConverter();
+  std::shared_ptr<torch::jit::CompilationUnit> getStrongRefOrThrow() const {
+    TORCH_INTERNAL_ASSERT(strong_ptr_ != c10::nullopt);
+    return *strong_ptr_;
+  }
+
+  std::weak_ptr<torch::jit::CompilationUnit> getWeakRefOrThrow() const {
+    TORCH_INTERNAL_ASSERT(weak_ptr_ != c10::nullopt);
+    return *weak_ptr_;
+  }
+
+  bool holdingStrongRef() const {
+    return strong_ptr_ != c10::nullopt;
+  }
+
+  c10::optional<std::shared_ptr<torch::jit::CompilationUnit>> strong_ptr_;
+  c10::optional<std::weak_ptr<torch::jit::CompilationUnit>> weak_ptr_;
+};
+
+// An Object will hold a non-owning Compilation Unit reference if it is a
+// Constant in the graph and a Owning reference otherwise
+struct TORCH_API WeakOrStrongTypePtr {
+  explicit WeakOrStrongTypePtr(WeakTypePtr weak)
+      : cu_(WeakOrStrongCompilationUnit(weak.cu_)) {
+    type_ = weak.type_;
+  }
+  explicit WeakOrStrongTypePtr(StrongTypePtr strong)
+      : cu_(WeakOrStrongCompilationUnit(strong.cu_)) {
+    type_ = strong.type_;
+  }
+  explicit WeakOrStrongTypePtr(WeakOrStrongCompilationUnit cu, TypePtr type)
+      : cu_(cu) {
+    type_ = type;
+  }
+  WeakTypePtr asWeakTypePtr() const;
+
+  WeakOrStrongCompilationUnit cu_;
+  TypePtr type_;
+  bool holds_strong_ref() const {
+    return cu_.holdingStrongRef();
+  }
+};
+
+
 } // namespace c10
 
-#include <ATen/core/ivalue_inl.h>
+#include <ATen/core/ivalue_inl.h>  // IWYU pragma: keep

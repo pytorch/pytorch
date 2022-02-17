@@ -64,7 +64,7 @@ class OpenCLContext final {
     CopyBytes<SrcContext, DstContext>(n * meta.itemsize(), src, dst);
   }
 
-  void SwitchToDevice(int a, ...) {
+  void SwitchToDevice(int64_t a, ...) {
     auto& ctx = GetSingleton();
     CAFFE_ENFORCE(a < ctx.devices.size());
     ctx.device = ctx.devices[a];

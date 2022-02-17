@@ -43,20 +43,24 @@ ComputeLegacyBroadcastSizes(const Tensor& A, const Tensor& B, int axis) {
 }
 
 std::vector<int> ComputeBinaryBroadcastForwardDims(
-    const std::vector<int>& A_dims,
-    const std::vector<int>& B_dims) {
+    const c10::ArrayRef<int>& A_dims,
+    const c10::ArrayRef<int>& B_dims) {
   const int ndim = std::max(A_dims.size(), B_dims.size());
   std::vector<int> C_dims(ndim);
+  // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
   int i = A_dims.size() - 1;
+  // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
   int j = B_dims.size() - 1;
   int k = ndim - 1;
   for (; i >= 0 && j >= 0; --k) {
     const int A_dim = A_dims[i];
     const int B_dim = B_dims[j];
     CAFFE_ENFORCE(
-      A_dim == B_dim || A_dim == 1 || B_dim == 1,
-      "A_dim: ", A_dim , ",B_dim: ", B_dim
-    );
+        A_dim == B_dim || A_dim == 1 || B_dim == 1,
+        "A_dim: ",
+        A_dim,
+        ",B_dim: ",
+        B_dim);
     if (A_dim == 0 || B_dim == 0) {
       C_dims[k] = 0;
     } else {
@@ -82,7 +86,9 @@ void ComputeBinaryBroadcastBackwardAxes(
   A_axes->clear();
   B_axes->clear();
   const int ndim = std::max(A_dims.size(), B_dims.size());
+  // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
   int i = A_dims.size() - 1;
+  // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
   int j = B_dims.size() - 1;
   int k = ndim - 1;
   for (; i >= 0 && j >= 0; --k) {

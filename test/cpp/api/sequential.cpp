@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 
+#include <c10/util/irange.h>
 #include <torch/torch.h>
 
 #include <algorithm>
@@ -42,6 +43,7 @@ TEST_F(SequentialTest, ConstructsFromConcreteType) {
 
   struct M : torch::nn::Module {
     explicit M(int value_) : value(value_) {}
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
     M(const M& other) : torch::nn::Module(other) {
       copy_count++;
     }
@@ -171,7 +173,7 @@ TEST_F(SequentialTest, AccessWithAt) {
   ASSERT_EQ(sequential->size(), 3);
 
   // returns the correct module for a given index
-  for (size_t i = 0; i < modules.size(); ++i) {
+  for (const auto i : c10::irange(modules.size())) {
     ASSERT_EQ(&sequential->at<M>(i), modules[i].get());
   }
 
@@ -200,7 +202,7 @@ TEST_F(SequentialTest, AccessWithPtr) {
   ASSERT_EQ(sequential->size(), 3);
 
   // returns the correct module for a given index
-  for (size_t i = 0; i < modules.size(); ++i) {
+  for (const auto i : c10::irange(modules.size())) {
     ASSERT_EQ(sequential->ptr(i).get(), modules[i].get());
     ASSERT_EQ(sequential[i].get(), modules[i].get());
     ASSERT_EQ(sequential->ptr<M>(i).get(), modules[i].get());
@@ -510,6 +512,7 @@ TEST_F(SequentialTest, ModuleForwardMethodOptionalArg) {
 
     auto query = torch::ones({batch_size, tgt_len, embed_dim});
     auto key = torch::ones({batch_size, src_len, embed_dim});
+    // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
     auto value = key;
 
     Sequential sequential(MultiheadAttention(embed_dim, num_heads));

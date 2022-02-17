@@ -42,6 +42,28 @@ struct C10_EXPORT ConcretePyObjectHolder final : PyObjectHolder {
     return py::str(py_obj_);
   }
 
+  std::vector<at::Tensor> extractTensors() override {
+    // We could implement this entirely in C++ via pybind11 but it turns out to
+    // be substantially slower. Namely, the total time taken by markCompleted on
+    // a CUDAFuture is 21.5us with this implementation, but goes up to 58.7us
+    // when using C++. The reason is unclear.
+    try {
+      pybind11::gil_scoped_acquire ag;
+      static py::object& extractorFn = *new py::object(
+          py::module::import("torch._jit_internal").attr("_extract_tensors"));
+      return extractorFn(py_obj_).cast<std::vector<at::Tensor>>();
+    } catch (py::error_already_set& e) {
+      auto err = std::runtime_error(
+          c10::str("Cannot extract tensors from value: ", e.what()));
+      {
+        pybind11::gil_scoped_acquire ag;
+        e.restore();
+        PyErr_Clear();
+      }
+      throw err;
+    }
+  }
+
   // Note [Destructing py::object]
   // ~~~~~~~~~~~~~~~~~~~~~~~~~~
   //
@@ -55,7 +77,7 @@ struct C10_EXPORT ConcretePyObjectHolder final : PyObjectHolder {
   // nullptr, on destruction, effectively does nothing because of it calls
   // Py_XDECREF(NULL) underlying.
   // https://docs.python.org/3/c-api/refcounting.html#c.Py_XDECREF
-  ~ConcretePyObjectHolder() {
+  ~ConcretePyObjectHolder() override {
     pybind11::gil_scoped_acquire ag;
     py_obj_.dec_ref();
     // explicitly setting PyObject* to nullptr to prevent py::object's dtor to

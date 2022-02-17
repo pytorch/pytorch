@@ -1,7 +1,7 @@
 #pragma once
 
 #include <torch/arg.h>
-#include <torch/csrc/WindowsTorchApiMacro.h>
+#include <torch/csrc/Export.h>
 #include <torch/expanding_array.h>
 #include <torch/types.h>
 
@@ -29,7 +29,8 @@ struct AvgPoolOptions {
   /// when True, will include the zero-padding in the averaging calculation
   TORCH_ARG(bool, count_include_pad) = true;
 
-  /// if specified, it will be used as divisor, otherwise `kernel_size` will be used
+  /// if specified, it will be used as divisor, otherwise size of the pooling region will be used.
+
   TORCH_ARG(c10::optional<int64_t>, divisor_override) = c10::nullopt;
 };
 

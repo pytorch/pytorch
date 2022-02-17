@@ -1,8 +1,9 @@
 #include <cub/block/block_reduce.cuh>
 #include "caffe2/core/context_gpu.h"
 #include "caffe2/operators/reduce_front_back_max_ops.h"
+#include "caffe2/utils/cub_namespace.cuh"
 
-#ifdef __HIP_PLATFORM_HCC__
+#if defined(USE_ROCM)
 #include <cfloat>
 #endif
 
@@ -112,6 +113,7 @@ void MaxReduceDimsOp<float, CUDAContext, true>::Compute(
       CAFFE_CUDA_NUM_THREADS,
       0,
       context_.cuda_stream()>>>(rows, cols, data, lengths_data, out_data);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 
 // ReduceBackMax
@@ -127,6 +129,7 @@ void MaxReduceDimsOp<float, CUDAContext, false>::Compute(
       CAFFE_CUDA_NUM_THREADS,
       0,
       context_.cuda_stream()>>>(rows, cols, data, lengths_data, out_data);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 
 // ReduceFrontMaxGradient
@@ -145,6 +148,7 @@ void MaxReduceDimsGradientOp<float, CUDAContext, true>::Compute(
       0,
       context_.cuda_stream()>>>(
       rows, cols, dYdata, Xdata, Ydata, lengths_data, dXdata);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 
 // ReduceBackMaxGradient
@@ -163,6 +167,7 @@ void MaxReduceDimsGradientOp<float, CUDAContext, false>::Compute(
       0,
       context_.cuda_stream()>>>(
       rows, cols, dYdata, Xdata, Ydata, lengths_data, dXdata);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 
 REGISTER_CUDA_OPERATOR(

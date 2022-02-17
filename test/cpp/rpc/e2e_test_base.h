@@ -28,8 +28,14 @@ class TestE2EBase : public ::testing::Test {
     autogradContainer = getDistAutogradContainer();
 
     // Setup server store.
-    store = c10::make_intrusive<c10d::TCPStore>(
-        serverAddress, 0, numWorkers, true, std::chrono::seconds(10));
+    c10d::TCPStoreOptions opts{
+        /* port */ 0,
+        /* isServer */ true,
+        numWorkers,
+        /* waitWorkers */ true,
+        /* timeout */ std::chrono::seconds(10)};
+
+    store = c10::make_intrusive<c10d::TCPStore>(serverAddress, opts);
 
     buildRpcAgent();
 
@@ -46,7 +52,7 @@ class TestE2EBase : public ::testing::Test {
             return c10::StrongTypePtr(
                 nullptr,
                 c10::DictType::create(
-                    c10::IntType::create(), c10::IntType::create()));
+                    c10::StringType::get(), c10::StringType::get()));
           }
           return c10::StrongTypePtr(
               nullptr, c10::TensorType::create(at::Tensor()));
@@ -82,12 +88,9 @@ class TestE2EBase : public ::testing::Test {
 
     // Builtin operators does not return py::object, and hence does not require
     // GIL for destructing the potentially deleted OwerRRef.
-    std::weak_ptr<JitFuture> wp = jitFuture;
-    jitFuture->addCallback(
-        [wp, ownerRRefId = ownerRRef->rrefId()]() {
-          auto jitFuture = wp.lock();
-          callback::finishCreatingOwnerRRef(*jitFuture, ownerRRefId);
-        });
+    jitFuture->addCallback([ownerRRefId = ownerRRef->rrefId()](JitFuture& jitFuture) {
+      callback::finishCreatingOwnerRRef(jitFuture, ownerRRefId);
+    });
     return ownerRRef;
   }
 

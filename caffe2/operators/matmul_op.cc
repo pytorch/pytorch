@@ -118,9 +118,13 @@ class GetMatMulGradient : public GradientMakerBase {
   vector<OperatorDef> GetGradientDefs() override {
     CAFFE_ENFORCE(def_.input_size() == 2 || def_.input_size() == 3);
 
+    // NOLINTNEXTLINE(modernize-use-bool-literals)
     bool axis_a = 1;
+    // NOLINTNEXTLINE(modernize-use-bool-literals)
     bool axis_b = 1;
+    // NOLINTNEXTLINE(modernize-use-bool-literals)
     bool trans_a = 0;
+    // NOLINTNEXTLINE(modernize-use-bool-literals)
     bool trans_b = 0;
 
     if (ArgumentHelper::HasArgument(Def(), "trans_a")) {

@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 
+#include <c10/util/irange.h>
 #include <torch/torch.h>
 
 #include <test/cpp/api/support.h>
@@ -53,6 +54,7 @@ class CartPole {
     step_ = 0;
   }
 
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   CartPole() {
     reset();
   }
@@ -121,10 +123,14 @@ bool test_mnist(
   torch::Device device(with_cuda ? torch::kCUDA : torch::kCPU);
   model->to(device);
 
-  for (size_t epoch = 0; epoch < number_of_epochs; epoch++) {
+  for (const auto epoch : c10::irange(number_of_epochs)) {
+    (void)epoch; // Suppress unused variable warning
+    // NOLINTNEXTLINE(performance-for-range-copy)
     for (torch::data::Example<> batch : *data_loader) {
-      auto data = batch.data.to(device), targets = batch.target.to(device);
+      auto data = batch.data.to(device);
+      auto targets = batch.target.to(device);
       torch::Tensor prediction = forward_op(std::move(data));
+      // NOLINTNEXTLINE(performance-move-const-arg)
       torch::Tensor loss = torch::nll_loss(prediction, std::move(targets));
       AT_ASSERT(!torch::isnan(loss).any().item<int64_t>());
       optimizer.zero_grad();
@@ -182,6 +188,7 @@ TEST_F(IntegrationTest, CartPole) {
 
   auto finishEpisode = [&] {
     auto R = 0.;
+    // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
     for (int i = rewards.size() - 1; i >= 0; i--) {
       R = rewards[i] + 0.99 * R;
       rewards[i] = R;
@@ -192,7 +199,7 @@ TEST_F(IntegrationTest, CartPole) {
 
     std::vector<torch::Tensor> policy_loss;
     std::vector<torch::Tensor> value_loss;
-    for (auto i = 0U; i < saved_log_probs.size(); i++) {
+    for (const auto i : c10::irange(0U, saved_log_probs.size())) {
       auto advantage = r_t[i] - saved_values[i].item<float>();
       policy_loss.push_back(-advantage * saved_log_probs[i]);
       value_loss.push_back(

@@ -102,33 +102,41 @@ Example::
 
 .. _optimizer-algorithms:
 
-Algorithms
+Base class
 ----------
 
 .. autoclass:: Optimizer
-    :members:
-.. autoclass:: Adadelta
-    :members:
-.. autoclass:: Adagrad
-    :members:
-.. autoclass:: Adam
-    :members:
-.. autoclass:: AdamW
-    :members:
-.. autoclass:: SparseAdam
-    :members:
-.. autoclass:: Adamax
-    :members:
-.. autoclass:: ASGD
-    :members:
-.. autoclass:: LBFGS
-    :members:
-.. autoclass:: RMSprop
-    :members:
-.. autoclass:: Rprop
-    :members:
-.. autoclass:: SGD
-    :members:
+
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    Optimizer.add_param_group
+    Optimizer.load_state_dict
+    Optimizer.state_dict
+    Optimizer.step
+    Optimizer.zero_grad
+
+Algorithms
+----------
+
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    Adadelta
+    Adagrad
+    Adam
+    AdamW
+    SparseAdam
+    Adamax
+    ASGD
+    LBFGS
+    NAdam
+    RAdam
+    RMSprop
+    Rprop
+    SGD
 
 How to adjust learning rate
 ---------------------------
@@ -139,6 +147,45 @@ allows dynamic learning rate reducing based on some validation measurements.
 
 Learning rate scheduling should be applied after optimizer's update; e.g., you
 should write your code this way:
+
+Example::
+
+    model = [Parameter(torch.randn(2, 2, requires_grad=True))]
+    optimizer = SGD(model, 0.1)
+    scheduler = ExponentialLR(optimizer, gamma=0.9)
+
+    for epoch in range(20):
+        for input, target in dataset:
+            optimizer.zero_grad()
+            output = model(input)
+            loss = loss_fn(output, target)
+            loss.backward()
+            optimizer.step()
+        scheduler.step()
+
+Most learning rate schedulers can be called back-to-back (also referred to as
+chaining schedulers). The result is that each scheduler is applied one after the
+other on the learning rate obtained by the one preceding it.
+
+Example::
+
+    model = [Parameter(torch.randn(2, 2, requires_grad=True))]
+    optimizer = SGD(model, 0.1)
+    scheduler1 = ExponentialLR(optimizer, gamma=0.9)
+    scheduler2 = MultiStepLR(optimizer, milestones=[30,80], gamma=0.1)
+
+    for epoch in range(20):
+        for input, target in dataset:
+            optimizer.zero_grad()
+            output = model(input)
+            loss = loss_fn(output, target)
+            loss.backward()
+            optimizer.step()
+        scheduler1.step()
+        scheduler2.step()
+
+In many places in the documentation, we will use the following template to refer to schedulers
+algorithms.
 
     >>> scheduler = ...
     >>> for epoch in range(100):
@@ -155,34 +202,32 @@ should write your code this way:
   if you are calling ``scheduler.step()`` at the wrong time.
 
 
-.. autoclass:: torch.optim.lr_scheduler.LambdaLR
-    :members:
-.. autoclass:: torch.optim.lr_scheduler.MultiplicativeLR
-    :members:
-.. autoclass:: torch.optim.lr_scheduler.StepLR
-    :members:
-.. autoclass:: torch.optim.lr_scheduler.MultiStepLR
-    :members:
-.. autoclass:: torch.optim.lr_scheduler.ExponentialLR
-    :members:
-.. autoclass:: torch.optim.lr_scheduler.CosineAnnealingLR
-    :members:
-.. autoclass:: torch.optim.lr_scheduler.ReduceLROnPlateau
-    :members:
-.. autoclass:: torch.optim.lr_scheduler.CyclicLR
-    :members:
-.. autoclass:: torch.optim.lr_scheduler.OneCycleLR
-    :members:
-.. autoclass:: torch.optim.lr_scheduler.CosineAnnealingWarmRestarts
-    :members:
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    lr_scheduler.LambdaLR
+    lr_scheduler.MultiplicativeLR
+    lr_scheduler.StepLR
+    lr_scheduler.MultiStepLR
+    lr_scheduler.ConstantLR
+    lr_scheduler.LinearLR
+    lr_scheduler.ExponentialLR
+    lr_scheduler.CosineAnnealingLR
+    lr_scheduler.ChainedScheduler
+    lr_scheduler.SequentialLR
+    lr_scheduler.ReduceLROnPlateau
+    lr_scheduler.CyclicLR
+    lr_scheduler.OneCycleLR
+    lr_scheduler.CosineAnnealingWarmRestarts
 
 Stochastic Weight Averaging
 ---------------------------
 
-:mod:`torch.optim.swa_utils` implements Stochastic Weight Averaging (SWA). In particular, 
-:class:`torch.optim.swa_utils.AveragedModel` class implements SWA models, 
-:class:`torch.optim.swa_utils.SWALR` implements the SWA learning rate scheduler and 
-:func:`torch.optim.swa_utils.update_bn` is a utility function used to update SWA batch 
+:mod:`torch.optim.swa_utils` implements Stochastic Weight Averaging (SWA). In particular,
+:class:`torch.optim.swa_utils.AveragedModel` class implements SWA models,
+:class:`torch.optim.swa_utils.SWALR` implements the SWA learning rate scheduler and
+:func:`torch.optim.swa_utils.update_bn` is a utility function used to update SWA batch
 normalization statistics at the end of training.
 
 SWA has been proposed in `Averaging Weights Leads to Wider Optima and Better Generalization`_.
@@ -192,12 +237,12 @@ SWA has been proposed in `Averaging Weights Leads to Wider Optima and Better Gen
 Constructing averaged models
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-`AveragedModel` class serves to compute the weights of the SWA model. You can create an 
+`AveragedModel` class serves to compute the weights of the SWA model. You can create an
 averaged model by running:
 
 >>> swa_model = AveragedModel(model)
 
-Here the model ``model`` can be an arbitrary :class:`torch.nn.Module` object. ``swa_model`` 
+Here the model ``model`` can be an arbitrary :class:`torch.nn.Module` object. ``swa_model``
 will keep track of the running averages of the parameters of the ``model``. To update these
 averages, you can use the :func:`update_parameters` function:
 
@@ -207,15 +252,15 @@ averages, you can use the :func:`update_parameters` function:
 SWA learning rate schedules
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-Typically, in SWA the learning rate is set to a high constant value. :class:`SWALR` is a 
-learning rate scheduler that anneals the learning rate to a fixed value, and then keeps it 
-constant. For example, the following code creates a scheduler that linearly anneals the 
+Typically, in SWA the learning rate is set to a high constant value. :class:`SWALR` is a
+learning rate scheduler that anneals the learning rate to a fixed value, and then keeps it
+constant. For example, the following code creates a scheduler that linearly anneals the
 learning rate from its initial value to 0.05 in 5 epochs within each parameter group:
 
 >>> swa_scheduler = torch.optim.swa_utils.SWALR(optimizer, \
 >>>         anneal_strategy="linear", anneal_epochs=5, swa_lr=0.05)
 
-You can also use cosine annealing to a fixed value instead of linear annealing by setting 
+You can also use cosine annealing to a fixed value instead of linear annealing by setting
 ``anneal_strategy="cos"``.
 
 
@@ -225,13 +270,13 @@ Taking care of batch normalization
 :func:`update_bn` is a utility function that allows to compute the batchnorm statistics for the SWA model
 on a given dataloader ``loader`` at the end of training:
 
->>> torch.optim.swa_utils.update_bn(loader, swa_model) 
+>>> torch.optim.swa_utils.update_bn(loader, swa_model)
 
 :func:`update_bn` applies the ``swa_model`` to every element in the dataloader and computes the activation
 statistics for each batch normalization layer in the model.
 
 .. warning::
-    :func:`update_bn` assumes that each batch in the dataloader ``loader`` is either a tensors or a list of 
+    :func:`update_bn` assumes that each batch in the dataloader ``loader`` is either a tensors or a list of
     tensors where the first element is the tensor that the network ``swa_model`` should be applied to.
     If your dataloader has a different structure, you can update the batch normalization statistics of the
     ``swa_model`` by doing a forward pass with the ``swa_model`` on each element of the dataset.
@@ -240,8 +285,8 @@ statistics for each batch normalization layer in the model.
 Custom averaging strategies
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-By default, :class:`torch.optim.swa_utils.AveragedModel` computes a running equal average of 
-the parameters that you provide, but you can also use custom averaging functions with the 
+By default, :class:`torch.optim.swa_utils.AveragedModel` computes a running equal average of
+the parameters that you provide, but you can also use custom averaging functions with the
 ``avg_fn`` parameter. In the following example ``ema_model`` computes an exponential moving average.
 
 Example:
@@ -255,8 +300,8 @@ Putting it all together
 ^^^^^^^^^^^^^^^^^^^^^^^
 
 In the example below, ``swa_model`` is the SWA model that accumulates the averages of the weights.
-We train the model for a total of 300 epochs and we switch to the SWA learning rate schedule 
-and start to collect SWA averages of the parameters at epoch 160: 
+We train the model for a total of 300 epochs and we switch to the SWA learning rate schedule
+and start to collect SWA averages of the parameters at epoch 160:
 
 >>> loader, optimizer, model, loss_fn = ...
 >>> swa_model = torch.optim.swa_utils.AveragedModel(model)
@@ -274,8 +319,8 @@ and start to collect SWA averages of the parameters at epoch 160:
 >>>           swa_scheduler.step()
 >>>       else:
 >>>           scheduler.step()
->>> 
+>>>
 >>> # Update bn statistics for the swa_model at the end
 >>> torch.optim.swa_utils.update_bn(loader, swa_model)
->>> # Use swa_model to make predictions on test data 
+>>> # Use swa_model to make predictions on test data
 >>> preds = swa_model(test_input)

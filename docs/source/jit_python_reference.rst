@@ -395,8 +395,8 @@ support in TorchScript. The categorizations are as follows:
      - Not Supported
      -
    * - `8.5. The with statement <https://docs.python.org/3/reference/compound_stmts.html#the-with-statement>`_
-     - Supported
-     -
+     - Partially Supported
+     - ``__exit__`` is always called with ``exc_type``, ``exc_value``, and ``traceback`` set to None, even if an exception was raised, and ``__exit__``'s return value is ignored.
    * - `8.6. Function definitions <https://docs.python.org/3/reference/compound_stmts.html#function-definitions>`_
      - Not Supported
      -

@@ -18,6 +18,7 @@ class IDEEPConvTransposeOp final : public IDEEPConvTransposeUnpoolBase {
         pad_l() == pad_r() && pad_t() == pad_b(),
         "Uneven padding not supported.");
   }
+  // NOLINTNEXTLINE(modernize-use-equals-default)
   ~IDEEPConvTransposeOp() override {}
 
   bool RunOnDeviceWithOrderNCHW() override {
@@ -36,6 +37,7 @@ class IDEEPConvTransposeOp final : public IDEEPConvTransposeUnpoolBase {
     bool weights_changed = (cached_weights_descriptor_ != filter.get_descriptor());
     if (!training_mode_ && weights_changed) {
       cached_weights_descriptor_ = filter.dup_descriptor();
+      // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
       auto filter_in = filter;
 
       auto expected_descriptor =
@@ -102,6 +104,7 @@ class IDEEPConvTransposeGradientOp final : public IDEEPConvTransposeUnpoolBase {
         "In order to backward propagate weights correctly, "
         "please set training_mode=1");
   }
+  // NOLINTNEXTLINE(modernize-use-equals-default)
   ~IDEEPConvTransposeGradientOp() override {}
 
   bool RunOnDeviceWithOrderNCHW() override {

@@ -13,7 +13,7 @@ class Foo {
   explicit Foo(int x) {
     // LOG(INFO) << "Foo " << x;
   }
-  virtual ~Foo() {}
+  virtual ~Foo() = default;
 };
 
 C10_DECLARE_REGISTRY(FooRegistry, Foo, int);
@@ -73,6 +73,7 @@ TEST(RegistryTest, RegistryPriorities) {
   RegisterFooDefault();
 
   // throws because Foo is already registered with default priority
+  // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
   EXPECT_THROW(RegisterFooDefaultAgain(), std::runtime_error);
 
 #ifdef __GXX_RTTI

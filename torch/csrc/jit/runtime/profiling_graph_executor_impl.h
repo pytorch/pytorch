@@ -1,10 +1,11 @@
 #pragma once
+#include <torch/csrc/jit/api/module.h>
 #include <torch/csrc/jit/runtime/graph_executor_impl.h>
 
 namespace torch {
 namespace jit {
 
-struct ProfilingGraphExecutorImpl : public GraphExecutorImplBase {
+struct TORCH_API ProfilingGraphExecutorImpl : public GraphExecutorImplBase {
   ProfilingGraphExecutorImpl(
       const std::shared_ptr<Graph>& graph,
       std::string function_name);
@@ -14,12 +15,29 @@ struct ProfilingGraphExecutorImpl : public GraphExecutorImplBase {
   GraphExecutorState getDebugState() override;
   ~ProfilingGraphExecutorImpl() override = default;
 
+  void debugFlushCompilationCache() {
+    std::lock_guard<std::mutex> lock(compile_mutex);
+    pr_.reset();
+    fallback_plan_.reset();
+    profiling_plan_.reset();
+    optimized_plan_.reset();
+    // prevent memory leaks
+    fallback_functions_.clear();
+    remaining_bailout_depth_.reset();
+  }
+
+  bool isOptimized() const override {
+    return optimized_plan_.has_value();
+  }
+
  private:
   const ExecutionPlan& getOptimizedPlanFor(
       Stack& stack,
       size_t remaining_bailout_depth);
   void runProfilingInsensitiveOptimizations(std::shared_ptr<Graph>& graph);
-  void runProfilingOptimizations(std::shared_ptr<Graph>& graph);
+  void runProfilingOptimizations(
+      std::shared_ptr<Graph>& graph,
+      size_t remaining_depth);
   void replaceFallbackGraphWithFallbackFunction(Block* b);
   std::unique_ptr<ProfilingRecord> pr_;
   c10::optional<ExecutionPlan>

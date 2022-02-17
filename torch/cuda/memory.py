@@ -164,6 +164,17 @@ def memory_stats(device: Union[Device, int] = None) -> Dict[str, Any]:
       result in a cache flush and retry.
     - ``"num_ooms"``: number of out-of-memory errors thrown.
 
+    The caching allocator can be configured via ENV to not split blocks larger than a
+    defined size (see Memory Management section of the Cuda Semantics documentation).
+    This helps avoid memory framentation but may have a performance
+    penalty. Additional outputs to assist with tuning and evaluating impact:
+
+    - ``"max_split_size"``: blocks above this size will not be split.
+    - ``"oversize_allocations.{current,peak,allocated,freed}"``:
+      number of over-size allocation requests received by the memory allocator.
+    - ``"oversize_segments.{current,peak,allocated,freed}"``:
+      number of over-size reserved segments from ``cudaMalloc()``.
+
     Args:
         device (torch.device or int, optional): selected device. Returns
             statistics for the current device, given by :func:`~torch.cuda.current_device`,
@@ -313,7 +324,7 @@ def max_memory_allocated(device: Union[Device, int] = None) -> int:
     device.
 
     By default, this returns the peak allocated memory since the beginning of
-    this program. :func:`~torch.cuda.reset_peak_stats` can be used to
+    this program. :func:`~torch.cuda.reset_peak_memory_stats` can be used to
     reset the starting point in tracking this metric. For example, these two
     functions can measure the peak allocated memory usage of each iteration in a
     training loop.
@@ -351,7 +362,7 @@ def max_memory_reserved(device: Union[Device, int] = None) -> int:
     for a given device.
 
     By default, this returns the peak cached memory since the beginning of this
-    program. :func:`~torch.cuda.reset_peak_stats` can be used to reset
+    program. :func:`~torch.cuda.reset_peak_memory_stats` can be used to reset
     the starting point in tracking this metric. For example, these two functions
     can measure the peak cached memory amount of each iteration in a training
     loop.
@@ -490,6 +501,29 @@ def memory_summary(device: Union[Device, int] = None, abbreviated: bool = False)
                 formatter(freed, freed_prefval)),
             )
 
+    metrics_to_display = [
+        ("oversize_allocations", "Oversize allocations", _format_count),
+        ("oversize_segments", "Oversize GPU segments", _format_count),
+    ]
+
+    for metric_key, metric_name, formatter in metrics_to_display:
+        lines.append("-" * 75)
+
+        prefix = metric_key + "."
+
+        current = stats[prefix + "current"]
+        peak = stats[prefix + "peak"]
+        allocated = stats[prefix + "allocated"]
+        freed = stats[prefix + "freed"]
+
+        lines.append(" {:<21} | {} | {} | {} | {} ".format(
+            metric_name,
+            formatter(current, current),
+            formatter(peak, peak),
+            formatter(allocated, allocated),
+            formatter(freed, freed)),
+        )
+
     lines.append("=" * 75)
 
     fmt_dict = {"_": "", "device": device}
@@ -512,7 +546,7 @@ def list_gpu_processes(device: Union[Device, int] = None) -> str:
     """
 
     try:
-        import pynvml  # type: ignore
+        import pynvml  # type: ignore[import]
     except ModuleNotFoundError:
         return("pynvml module not found, please install pynvml")
     from pynvml import NVMLError_DriverNotLoaded
@@ -531,3 +565,21 @@ def list_gpu_processes(device: Union[Device, int] = None) -> str:
         mem = p.usedGpuMemory / (1024 * 1024)
         lines.append(f"process {p.pid:>10d} uses {mem:>12.3f} MB GPU memory")
     return "\n".join(lines)
+
+def mem_get_info(device: Union[Device, int] = None) -> int:
+    r"""Returns the global free and total GPU memory occupied for a given
+    device using cudaMemGetInfo.
+
+    Args:
+        device (torch.device or int, optional): selected device. Returns
+            statistic for the current device, given by :func:`~torch.cuda.current_device`,
+            if :attr:`device` is ``None`` (default).
+
+    .. note::
+        See :ref:`cuda-memory-management` for more
+        details about GPU memory management.
+    """
+    if device is None:
+        device = torch.cuda.current_device()
+    device = _get_device_index(device)
+    return torch.cuda.cudart().cudaMemGetInfo(device)

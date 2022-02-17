@@ -37,6 +37,7 @@ torch::nn::AdaptiveAvgPool2d|Yes|No
 torch::nn::AdaptiveAvgPool3d|Yes|No
 torch::nn::ReflectionPad1d|Yes|No
 torch::nn::ReflectionPad2d|Yes|No
+torch::nn::ReflectionPad3d|Yes|No
 torch::nn::ReplicationPad1d|Yes|No
 torch::nn::ReplicationPad2d|Yes|No
 torch::nn::ReplicationPad3d|Yes|No
@@ -49,6 +50,7 @@ torch::nn::Hardshrink|Yes|No
 torch::nn::Hardtanh|Yes|No
 torch::nn::LeakyReLU|Yes|No
 torch::nn::LogSigmoid|Yes|No
+torch::nn::Mish|Yes|No
 torch::nn::MultiheadAttention|No|No
 torch::nn::PReLU|Yes|No
 torch::nn::ReLU|Yes|No
@@ -97,6 +99,7 @@ torch::nn::Identity|Yes|No
 torch::nn::Linear|Yes|No
 torch::nn::Bilinear|Yes|No
 torch::nn::Flatten|Yes|No
+torch::nn::Unflatten|Yes|No
 torch::nn::Dropout|Yes|No
 torch::nn::Dropout2d|Yes|No
 torch::nn::Dropout3d|Yes|No
@@ -119,6 +122,7 @@ torch::nn::MarginRankingLoss|Yes|No
 torch::nn::HingeEmbeddingLoss|Yes|No
 torch::nn::MultiLabelMarginLoss|Yes|No
 torch::nn::SmoothL1Loss|Yes|No
+torch::nn::HuberLoss|Yes|No
 torch::nn::SoftMarginLoss|Yes|No
 torch::nn::MultiLabelSoftMarginLoss|Yes|No
 torch::nn::CosineEmbeddingLoss|Yes|No
@@ -186,6 +190,7 @@ F::rrelu|Yes|No
 F::glu|Yes|No
 F::gelu|Yes|No
 F::silu|Yes|No
+F::mish|Yes|No
 F::logsigmoid|Yes|No
 F::hardshrink|Yes|No
 F::tanhshrink|Yes|No
@@ -229,6 +234,7 @@ F::multilabel_soft_margin_loss|Yes|No
 F::multi_margin_loss|Yes|No
 F::nll_loss|Yes|No
 F::smooth_l1_loss|Yes|No
+F::huber_loss|Yes|No
 F::soft_margin_loss|Yes|No
 F::triplet_margin_loss|Yes|No
 F::pixel_shuffle|Yes|No

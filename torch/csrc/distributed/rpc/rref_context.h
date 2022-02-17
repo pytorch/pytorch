@@ -6,7 +6,6 @@
 #include <torch/csrc/distributed/rpc/rref_impl.h>
 #include <torch/csrc/distributed/rpc/types.h>
 #include <torch/csrc/distributed/rpc/utils.h>
-#include <torch/csrc/utils/future.h>
 
 #include <atomic>
 
@@ -25,8 +24,6 @@ confirmPendingUser(const JitFuture& jitFuture, const ForkId& expectedForkId);
 c10::intrusive_ptr<RRef> TORCH_API
 finishCreatingOwnerRRef(const JitFuture& jitFuture, const RRefId& rrefId);
 } // namespace callback
-
-using torch::utils::Future;
 
 // Manages RRef lifetime and keeps track of RRef forks.
 class TORCH_API RRefContext {
@@ -105,7 +102,9 @@ class TORCH_API RRefContext {
   // available, e.g., when processing to_here(). The forceCreated flag can be
   // used to ensure that the rref is created on the owner, otherwise throw in
   // cases where the user of this API expects this to return a completed future.
-  std::shared_ptr<Future<c10::intrusive_ptr<OwnerRRef>>> getOwnerRRef(
+  // Note that the return value is a intrusive_ptr to a c10::ivalue::Future that
+  // holds the RRef.
+  c10::intrusive_ptr<JitFuture> getOwnerRRef(
       const RRefId& rrefId,
       bool forceCreated = false);
 
@@ -251,11 +250,9 @@ class TORCH_API RRefContext {
   // RRefContext returns a Future, so that the RPC request processing logic can
   // attach subsequent code as a callback to that Future.
   // NB: the OwnerRRefs in this map must be cleared when the corresponding
-  // OwnerRRef is created.
-  std::unordered_map<
-      RRefId,
-      std::shared_ptr<Future<c10::intrusive_ptr<OwnerRRef>>>,
-      RRefId::Hash>
+  // OwnerRRef is created. Note that the values in this map are intrusive_ptrs
+  // to c10::ivalue::Future that will be marked completed with the owner RRef.
+  std::unordered_map<RRefId, c10::intrusive_ptr<JitFuture>, RRefId::Hash>
       pendingOwners_;
   // Tracks known living UserRRefs of an OwnerRRef
   std::unordered_map<

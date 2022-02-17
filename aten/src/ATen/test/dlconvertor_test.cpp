@@ -4,6 +4,7 @@
 #include <ATen/DLConvertor.h>
 
 #include <iostream>
+// NOLINTNEXTLINE(modernize-deprecated-headers)
 #include <string.h>
 #include <sstream>
 
