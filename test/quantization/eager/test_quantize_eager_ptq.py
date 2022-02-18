@@ -113,7 +113,7 @@ class TestQuantizeEagerOps(QuantizationTestCase):
 
         qengine = torch.backends.quantized.engine
         if qengine not in supported_qengines or qengine == 'qnnpack':
-            return # qnnpack does not support nnq.ConvTranspose3d
+            return   # qnnpack does not support nnq.ConvTranspose3d
 
         data = torch.randn(*input_size, dtype=torch.float)
         original_m = M()
