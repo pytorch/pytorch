@@ -16,6 +16,9 @@ on:
         required: false
         type: number
         default: 240
+      test-matrix:
+        required: true
+        type: string
 
 # TODO xla, rocm
 env:
@@ -159,11 +162,8 @@ jobs:
     needs: build
     strategy:
       matrix:
-        shard: [1, 2]
-        num-shards: [2]
-        runner-type: [linux.2xlarge]
+        ${{ fromJSON(inputs.test-matrix) }}
     runs-on: ${{ matrix.runner-type }}
-    name: test (default, ${{ matrix.shard }})
     steps:
       - name: Checkout PyTorch
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
