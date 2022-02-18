@@ -9,7 +9,8 @@
        "docs/source/onnx.rst",
        "torch/csrc/jit/serialization/export.*",
        "torch/csrc/jit/serialization/onnx.*",
-       "torch/_C/__init__.pyi.in"
+       "torch/_C/__init__.pyi.in",
+       "torch/csrc/onnx/**"
       ],
     "approved_by": ["BowenBao", "garymm"],
     "mandatory_app_id": 12274
