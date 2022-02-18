@@ -32,7 +32,7 @@ target_link_libraries(Predictor
 # Test executable
 add_executable(test_codegen_unboxing
   ${TORCH_ROOT}/test/cpp/common/main.cpp
-  ${TEST_ROOT}/test_lite_interpreter.cpp
+  ${TEST_ROOT}/test_lightweight_dispatch.cpp
 )
 
 target_compile_definitions(test_codegen_unboxing PRIVATE USE_GTEST)
@@ -46,7 +46,7 @@ target_link_libraries(test_codegen_unboxing
   Threads::Threads
   ${CMAKE_DL_LIBS}
 )
-message(STATUS "ATen_CPU_INCLUDE: ${ATen_CPU_INCLUDE}")
+
 target_include_directories(test_codegen_unboxing PRIVATE ${ATen_CPU_INCLUDE})
 
 if(INSTALL_TEST)

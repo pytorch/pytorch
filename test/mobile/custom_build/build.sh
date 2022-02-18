@@ -119,7 +119,7 @@ fi
 COMPACT_JOB_NAME="${BUILD_ENVIRONMENT}"
 
 # shellcheck source=./common.sh
-source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
+source "${SRC_ROOT}/.jenkins/pytorch/common.sh"
 
 echo "Clang version:"
 clang --version
