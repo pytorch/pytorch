@@ -6,10 +6,12 @@ on:
       build-environment:
         required: true
         type: string
-
+      docker-image-base:
+        required: true
+        type: string
 
 jobs:
- build:
+  build:
     runs-on: [self-hosted, linux.2xlarge]
     timeout-minutes: 240
     env:
@@ -28,12 +30,15 @@ jobs:
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
-      - name: test
+      - name: Setup EC2 Linux
         uses: ./.github/workflows/actions/setup-ec2-linux
         with:
           github-secret: ${{ secrets.GITHUB_TOKEN }}
-    #   !{{ common.setup_ec2_linux() }}
-    #   !{{ common.checkout() }}
+      - name: Calculate docker image
+        uses: ./.github/workflows/actions/calculate-docker-image
+        with:
+          always-rebuild: false
+          docker-image-base: ${{ inputs.docker-image-base }}
     # {%- if enable_xla_test == 1 %}
     #   - name: Calculate docker image tag
     #     id: calculate-tag
