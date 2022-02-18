@@ -28,12 +28,8 @@ size_t Shape::numel() const {
   return elts;
 }
 
-hash_t Shape::hash(bool bakeInSizes) const {
-  if (bakeInSizes) {
-    return HashCombine(Hash(scalar_type_), DataHash(sizes_.data(), sizes_.size() * sizeof(int64_t)));
-  } else {
-    return HashCombine(Hash(scalar_type_), Hash(sizes_.size()));
-  }
+hash_t Shape::hash() const {
+  return HashCombine(Hash(scalar_type_), DataHash(sizes_.data(), sizes_.size() * sizeof(int64_t)));
 }
 
 }  // namespace lazy
