@@ -98,8 +98,10 @@ test_custom_build_with_static_dispatch() {
 
 if [ -n "${TEST_DEFAULT_BUILD}" ]; then
   test_default_build
+  exit 0
 elif [ -n "${TEST_CUSTOM_BUILD_STATIC}" ]; then
   test_custom_build_with_static_dispatch
+  exit 0
 elif [ -z "${TEST_LIGHTWEIGHT_DISPATCH}" ]; then
   echo -e "Invalid option $*, supported options are TEST_DEFAULT_BUILD|TEST_CUSTOM_BUILD_STATIC|TEST_LIGHTWEIGHT_DISPATCH."
   exit 1
@@ -122,16 +124,16 @@ CC="clang" CXX="clang++" \
   USE_LIGHTWEIGHT_DISPATCH=1 \
   STATIC_DISPATCH_BACKEND="CPU" \
   BUILD_LITE_INTERPRETER=1 \
-  python "${JENKINS_DIR}/setup.py" bdist_wheel
+  python "${SRC_ROOT}/setup.py" bdist_wheel
   python -mpip install dist/*.whl
 
 # Test building via the sdist source tarball
-python "${JENKINS_DIR}/setup.py" sdist
+python "${SRC_ROOT}/setup.py" sdist
 mkdir -p /tmp/tmp
 pushd /tmp/tmp
 tar zxf "$(dirname "${BASH_SOURCE[0]}")/../../dist/"*.tar.gz
 cd torch-*
-python "${JENKINS_DIR}/setup.py" build --cmake-only
+python "${SRC_ROOT}/setup.py" build --cmake-only
 popd
 
 assert_git_not_dirty
