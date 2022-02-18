@@ -138,12 +138,6 @@ TESTS = discover_tests(
 
 FSDP_TEST = [test for test in TESTS if test.startswith("distributed/fsdp")]
 
-<<<<<<< HEAD
-=======
-FX2TRT_TESTS = [test for test in TESTS if test.startswith("fx2trt/")]
-
-
->>>>>>> 135cc236d5 (Move torch::deploy tests to their own workflow job)
 # Tests need to be run with pytest.
 USE_PYTEST_LIST = [
     "distributed/pipeline/sync/skip/test_api",
