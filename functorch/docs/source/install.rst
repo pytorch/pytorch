@@ -1,5 +1,5 @@
-Install
-=========
+Install functorch
+=================
 
 There are two ways to install functorch:
 
