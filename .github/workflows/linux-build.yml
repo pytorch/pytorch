@@ -30,6 +30,8 @@ jobs:
           git clean -fxd
       - name: test
         uses: ./.github/workflows/actions/setup-ec2-linux
+        with:
+          github-secret: ${{ secrets.GITHUB_TOKEN }}
     #   !{{ common.setup_ec2_linux() }}
     #   !{{ common.checkout() }}
     # {%- if enable_xla_test == 1 %}

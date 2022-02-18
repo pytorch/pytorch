@@ -7,7 +7,8 @@ on:
       - master
 
 jobs:
-  test:
+  linux-xenial-py37-gcc54:
+    name: linux-xenial-py3.7-gcc5.4
     uses: ./.github/workflows/linux-build.yml
     with:
       build-environment: linux-xenial-py3.7-gcc5.4
