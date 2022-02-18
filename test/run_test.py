@@ -86,8 +86,7 @@ TESTS = discover_tests(
         'bottleneck_test',
         'custom_backend',
         'custom_operator',
-        'fx/',        # executed by test_fx.py
-        'fx_acc/',
+        'fx',        # executed by test_fx.py
         'jit',      # executed by test_jit.py
         'mobile',
         'onnx',
@@ -120,7 +119,6 @@ TESTS = discover_tests(
         "distributed/test_c10d_spawn",
         'distributions/test_transforms',
         'distributions/test_utils',
-        "fx2trt/test_quant_trt",
     ],
     extra_tests=[
         "test_cpp_extensions_aot_ninja",
@@ -140,9 +138,12 @@ TESTS = discover_tests(
 
 FSDP_TEST = [test for test in TESTS if test.startswith("distributed/fsdp")]
 
+<<<<<<< HEAD
+=======
 FX2TRT_TESTS = [test for test in TESTS if test.startswith("fx2trt/")]
 
 
+>>>>>>> 135cc236d5 (Move torch::deploy tests to their own workflow job)
 # Tests need to be run with pytest.
 USE_PYTEST_LIST = [
     "distributed/pipeline/sync/skip/test_api",
@@ -217,7 +218,7 @@ WINDOWS_BLOCKLIST = [
     "distributed/_shard/sharded_tensor/ops/test_init",
     "distributed/_shard/sharded_tensor/ops/test_linear",
     "distributed/_shard/sharded_optim/test_sharded_optim",
-] + FSDP_TEST + FX2TRT_TESTS
+] + FSDP_TEST
 
 ROCM_BLOCKLIST = [
     "distributed/nn/jit/test_instantiator",
@@ -379,6 +380,11 @@ DISTRIBUTED_TESTS = [
     "distributed/_shard/sharded_tensor/ops/test_linear",
     "distributed/_shard/sharded_optim/test_sharded_optim",
 ] + [test for test in TESTS if test.startswith("distributed/fsdp")]
+
+TESTS_REQUIRING_LAPACK = [
+    "distributions/test_constraints",
+    "distributions/test_distributions",
+]
 
 # Dictionary matching test modules (in TESTS) to lists of test cases (within that test_module) that would be run when
 # options.run_specified_test_cases is enabled.
@@ -687,12 +693,6 @@ def parse_args():
         help="run all distributed tests",
     )
     parser.add_argument(
-        "--fx2trt-tests",
-        "--fx2trt-tests",
-        action="store_true",
-        help="run all fx2trt tests",
-    )
-    parser.add_argument(
         "-core",
         "--core",
         action="store_true",
@@ -805,11 +805,6 @@ def parse_args():
         help="exclude distributed tests",
     )
     parser.add_argument(
-        "--exclude-fx2trt-tests",
-        action="store_true",
-        help="exclude fx2trt tests",
-    )
-    parser.add_argument(
         "--run-specified-test-cases",
         nargs="?",
         type=str,
@@ -906,14 +901,6 @@ def get_selected_tests(options):
             filter(lambda test_name: test_name in DISTRIBUTED_TESTS, selected_tests)
         )
 
-    # Only run fx2trt test with specified option argument
-    if options.fx2trt_tests:
-        selected_tests = list(
-            filter(lambda test_name: test_name in FX2TRT_TESTS, selected_tests)
-        )
-    else:
-        options.exclude.extend(FX2TRT_TESTS)
-
     # Filter to only run core tests when --core option is specified
     if options.core:
         selected_tests = list(
@@ -941,9 +928,6 @@ def get_selected_tests(options):
 
     if options.exclude_distributed_tests:
         options.exclude.extend(DISTRIBUTED_TESTS)
-
-    if options.exclude_fx2trt_tests:
-        options.exclude.extend(FX2TRT_TESTS)
 
     selected_tests = exclude_tests(options.exclude, selected_tests)
 
@@ -989,6 +973,11 @@ def get_selected_tests(options):
     if not dist.is_available():
         selected_tests = exclude_tests(DISTRIBUTED_TESTS, selected_tests,
                                        "PyTorch is built without distributed support.")
+
+    # skip tests that require LAPACK when it's not available
+    if not torch._C.has_lapack:
+        selected_tests = exclude_tests(TESTS_REQUIRING_LAPACK, selected_tests,
+                                       "PyTorch is built without LAPACK support.")
 
     return selected_tests
 
