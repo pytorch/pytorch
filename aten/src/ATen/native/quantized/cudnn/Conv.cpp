@@ -4,6 +4,7 @@
 #if AT_CUDNN_ENABLED()
 
 #include <ATen/native/cudnn/Macros.h>
+#include "c10/util/ArrayRef.h"
 
 #if HAS_CUDNN_V8()
 
@@ -72,12 +73,22 @@ cudnn_frontend::ConvDesc_v8 getConvDescriptor(cudnnDataType_t dataType, IntArray
 
 // TODO: there is a table from input dtype to operator dtype, we can derive
 // the operator dtype based on input dtype
-cudnn_frontend::PointWiseDesc_v8 getPointWiseDescriptor(cudnnDataType_t dataType, cudnnPointwiseMode_t pw_op_type) {
+cudnn_frontend::PointWiseDesc_v8 getPointWiseMulDescriptor(cudnnDataType_t dataType) {
   return cudnn_frontend::PointWiseDescBuilder()
-    .setMode(pw_op_type)
+    .setMode(cudnnPointwiseMode_t::CUDNN_POINTWISE_MUL)
     .setMathPrecision(dataType)
     .build();
 }
+
+// TODO: there is a table from input dtype to operator dtype, we can derive
+// the operator dtype based on input dtype
+cudnn_frontend::PointWiseDesc_v8 getPointWiseAddDescriptor(cudnnDataType_t dataType) {
+  return cudnn_frontend::PointWiseDescBuilder()
+    .setMode(cudnnPointwiseMode_t::CUDNN_POINTWISE_ADD)
+    .setMathPrecision(dataType)
+    .build();
+}
+
 
 
 void filterEngineConfigs(
@@ -139,6 +150,8 @@ struct CacheKey {
   uint8_t input_alignment;
   uint8_t weight_alignment;
   uint8_t output_alignment;
+  // default to -1 when no bias
+  int8_t bias_alignment;
 };
 
 // FIXME: make this thread-safe by reusing the benchmark cache in Conv_v7.cpp
@@ -182,7 +195,7 @@ void raw_cudnn_convolution_forward_out(
     const Tensor& quantized_output,
     const Tensor& input,
     const Tensor& weight,
-    c10::optional<Tensor> bias,
+    const c10::optional<Tensor> &bias,
     IntArrayRef padding,
     IntArrayRef stride,
     IntArrayRef dilation,
@@ -190,8 +203,8 @@ void raw_cudnn_convolution_forward_out(
     bool benchmark,
     bool deterministic,
     bool allow_tf32,
-    float requantize_multiplier,
-    float bias_multiplier
+    float bias_multiplier,
+    float requantize_multiplier
 ) {
   TORCH_CHECK(!benchmark, "not supported yet");
   if (quantized_output.numel() == 0) {
@@ -205,6 +218,18 @@ void raw_cudnn_convolution_forward_out(
   c10::optional<at::Tensor> bias_multiplier_tensor;
   c10::optional<at::Tensor> after_scales_bias;
   c10::optional<at::Tensor> after_add;
+  c10::optional<at::Tensor> broadcasted_bias;
+  if (bias.has_value()) {
+    std::vector<int64_t> new_size(quantized_output.sizes().size() - 1, 1);
+    new_size[0] = bias.value().size(0);
+    broadcasted_bias = bias.value().reshape(new_size);
+    broadcasted_bias.value() = broadcasted_bias.value().broadcast_to(quantized_output.sizes());
+    broadcasted_bias.value() = broadcasted_bias.value().contiguous(c10::MemoryFormat::ChannelsLast);
+    bias_multiplier_tensor = at::empty(quantized_output.sizes(), at::device(at::kCUDA).dtype(at::kFloat), at::MemoryFormat::ChannelsLast);
+    bias_multiplier_tensor.value().fill_(bias_multiplier);
+    after_scales_bias = at::empty(quantized_output.sizes(), at::device(at::kCUDA).dtype(at::kFloat), at::MemoryFormat::ChannelsLast);
+    after_add = at::empty(quantized_output.sizes(), at::device(at::kCUDA).dtype(at::kFloat), at::MemoryFormat::ChannelsLast);
+  }
 
   cudnnHandle_t handle = getCudnnHandle();
   CacheKey key;
@@ -215,6 +240,8 @@ void raw_cudnn_convolution_forward_out(
   key.input_alignment = getAlignment(input);
   key.output_alignment = getAlignment(conv_output);
   key.weight_alignment = getAlignment(weight);
+  if (bias.has_value()) key.bias_alignment = getAlignment(broadcasted_bias.value());
+  else key.bias_alignment = -1;
 
   auto run = [&](cudnn_frontend::ManagedOpaqueDescriptor plan_desc) {
     auto workspace_size = 0;
@@ -226,7 +253,7 @@ void raw_cudnn_convolution_forward_out(
                                   reinterpret_cast<int8_t*>(weight.data_ptr()),
                                   requantize_multiplier_tensor.data_ptr(),
                                   reinterpret_cast<int8_t*>(quantized_output.data_ptr()),
-                                  bias.value().data_ptr(),
+                                  broadcasted_bias.value().data_ptr(),
                                   bias_multiplier_tensor.value().data_ptr(),
                                   after_scales_bias.value().data_ptr(),
                                   after_add.value().data_ptr(),
@@ -254,7 +281,6 @@ void raw_cudnn_convolution_forward_out(
     run(plan_desc);
     return;
   }
-
   auto conv_op = cudnn_frontend::OperationBuilder(CUDNN_BACKEND_OPERATION_CONVOLUTION_FORWARD_DESCRIPTOR)
       .setxDesc(getTensorDescriptor(input, 'x', key.input_alignment))
       .setyDesc(getTensorDescriptor(conv_output, 'y', key.output_alignment))
@@ -262,34 +288,27 @@ void raw_cudnn_convolution_forward_out(
       .setcDesc(getConvDescriptor(key.params.dataType, padding, stride, dilation))
       .build();
   // std::cout << "operator:" << conv_op.describe() << std::endl;
-  // TODO: add support for bias
 
-  // If bias is present, we scale the bias by the bias multiplier and add it to the output of conv_op,
-  // and store it in after_add
   c10::optional<cudnn_frontend::Operation> bias_mult_op;
   c10::optional<cudnn_frontend::Operation> sum_conv_bias_op;
   if (bias.has_value()) {
-    bias_multiplier_tensor = at::empty(quantized_output.sizes(), at::device(at::kCUDA).dtype(at::kFloat), at::MemoryFormat::ChannelsLast);
-    bias_multiplier_tensor.value().fill_(bias_multiplier);
-    after_scales_bias = at::empty(quantized_output.sizes(), at::device(at::kCUDA).dtype(at::kFloat), at::MemoryFormat::ChannelsLast);
     // we can't directly assign bias_mult_op becauase operator= is deleted for cudnn_frontend::Operation;
     // alternatively, I think we can use std::unique_ptr and dynamically allocate these builder ops
     // but here, we chose to do it statically. c10::optional<T>::emplace() enables this approach
-    // TODO: can we assign the result back into bias and get rid of after_scales_bias?
+    // TODO: can we assign the result back into bias and get rid of after_scales_bias? pending NVIDIA response
     bias_mult_op.emplace(cudnn_frontend::OperationBuilder(CUDNN_BACKEND_OPERATION_POINTWISE_DESCRIPTOR)
-      .setxDesc(getTensorDescriptor(bias.value(), 'b', getAlignment(bias.value())))
+      .setxDesc(getTensorDescriptor(broadcasted_bias.value(), 'b', getAlignment(broadcasted_bias.value())))
       .setbDesc(getTensorDescriptor(bias_multiplier_tensor.value(), 'c', getAlignment(bias_multiplier_tensor.value())))
       .setyDesc(getTensorDescriptor(after_scales_bias.value(), 'd', getAlignment(after_scales_bias.value())))
-      .setpwDesc(getPointWiseDescriptor(getCudnnDataType(bias_multiplier_tensor.value()), cudnnPointwiseMode_t::CUDNN_POINTWISE_MUL))
+      .setpwDesc(getPointWiseMulDescriptor(getCudnnDataType(bias_multiplier_tensor.value())))
       .build());
 
-    after_add = at::empty(quantized_output.sizes(), at::device(at::kCUDA).dtype(at::kFloat), at::MemoryFormat::ChannelsLast);
     // TODO: can we assign the result back into conv_output and get rid of after_add?
     sum_conv_bias_op.emplace(cudnn_frontend::OperationBuilder(CUDNN_BACKEND_OPERATION_POINTWISE_DESCRIPTOR)
-      .setxDesc(getTensorDescriptor(conv_output, 'y', key.output_alignment))
+      .setxDesc(conv_op.getOutputTensor())
       .setbDesc(getTensorDescriptor(after_scales_bias.value(), 'd', getAlignment(after_scales_bias.value())))
       .setyDesc(getTensorDescriptor(after_add.value(), 'e', getAlignment(after_add.value())))
-      .setpwDesc(getPointWiseDescriptor(getCudnnDataType(after_scales_bias.value()), cudnnPointwiseMode_t::CUDNN_POINTWISE_ADD))
+      .setpwDesc(getPointWiseAddDescriptor(getCudnnDataType(after_scales_bias.value())))
       .build());
   }
 
@@ -297,7 +316,7 @@ void raw_cudnn_convolution_forward_out(
     .setxDesc(bias.has_value() ? sum_conv_bias_op.value().getOutputTensor() : conv_op.getOutputTensor())
     .setbDesc(getTensorDescriptor(requantize_multiplier_tensor, 's', getAlignment(requantize_multiplier_tensor)))
     .setyDesc(getTensorDescriptor(quantized_output.sizes(), quantized_output.strides(), CUDNN_DATA_INT8, 'r', getAlignment(quantized_output)))
-    .setpwDesc(getPointWiseDescriptor(getCudnnDataType(requantize_multiplier_tensor), cudnnPointwiseMode_t::CUDNN_POINTWISE_MUL))
+    .setpwDesc(getPointWiseMulDescriptor(getCudnnDataType(requantize_multiplier_tensor)))
     .build();
   // std::cout << "operator:" << requant_op.describe() << std::endl;
 
@@ -360,10 +379,10 @@ Tensor raw_cudnn_convolution_forward(
     bool benchmark,
     bool deterministic,
     bool allow_tf32,
+    float bias_multiplier,
     float requantize_multiplier,
     double output_scale,
-    int64_t output_zero_point,
-    float bias_multiplier) {
+    int64_t output_zero_point) {
   // TODO: add dimension validations for input/weight/bias
   const int N = act.size(0);
   const int D = kSpatialDim == 3 ? act.size(2) : 1;
@@ -385,8 +404,8 @@ Tensor raw_cudnn_convolution_forward(
       benchmark,
       deterministic,
       allow_tf32,
-      requantize_multiplier,
-      bias_multiplier);
+      bias_multiplier,
+      requantize_multiplier);
 
   return quantized_output;
 }
@@ -406,7 +425,6 @@ class QConvInt8 final {
       double output_scale,
       int64_t output_zero_point) {
     TORCH_CHECK(!kReluFused, "conv relu not supported yet");
-    TORCH_CHECK(!bias.has_value(), "bias is not supported yet");
     act = act.contiguous(c10::MemoryFormat::ChannelsLast);
     weight = weight.contiguous(c10::MemoryFormat::ChannelsLast);
     // requantization
@@ -423,10 +441,10 @@ class QConvInt8 final {
         false /* benchmark */,
         true /* deterministic */,
         false /* allow_tf32 */,
+        bias_multiplier,
         requantize_multiplier,
         output_scale,
-        output_zero_point,
-        bias_multiplier
+        output_zero_point
     );
   }
 };
