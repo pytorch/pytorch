@@ -1,8 +1,6 @@
 #include <torch/csrc/lazy/core/ir.h>
 #include <torch/csrc/lazy/core/ir_metadata.h>
 
-C10_DEFINE_bool(ltc_enable_dynamic_shapes, false, "Whether dynamic shape is enabled");
-
 namespace torch {
 namespace lazy {
 
@@ -25,14 +23,6 @@ hash_t Value::hash() const {
   return HashCombine(node->hash(), Hash(index));
 }
 
-hash_t Value::hash_with_sizes() const {
-  return HashCombine(node->hash_with_sizes(), Hash(index));
-}
-
-hash_t Value::hash_without_sizes() const {
-  return HashCombine(node->hash_without_sizes(), Hash(index));
-}
-
 OpKind OpKind::Get(const std::string& name) {
   return OpKind(c10::Symbol::fromQualString(name));
 }
@@ -41,25 +31,18 @@ hash_t OpKind::hash() const {
   return StringHash(op.toQualString());
 }
 
-bool Node::enableDynamicShape() {
-  static bool enabled = std::getenv("LTC_ENABLE_DYNAMIC_SHAPES") != nullptr;
-  return enabled || FLAGS_ltc_enable_dynamic_shapes;
-}
-
-Node::Node(OpKind op, size_t num_outputs, hash_t node_hash, std::function<hash_t(bool)> dag_hash_fn)
+Node::Node(OpKind op, size_t num_outputs, hash_t node_hash, hash_t dag_hash)
     : op_(op),
       num_outputs_(num_outputs),
       node_hash_(node_hash),
-      dag_hash_without_sizes_(dag_hash_fn(false)),
-      dag_hash_with_sizes_(dag_hash_fn(true)),
+      dag_hash_(dag_hash),
       metadata_(GetMetaDataIfDebugging()) {}
 
-Node::Node(OpKind op, size_t num_outputs, std::function<hash_t(bool)> node_hash_fn)
+Node::Node(OpKind op, size_t num_outputs, hash_t node_hash)
     : op_(op),
       num_outputs_(num_outputs),
-      node_hash_(node_hash_fn(!enableDynamicShape())),
-      dag_hash_without_sizes_(node_hash_fn(false)),
-      dag_hash_with_sizes_(node_hash_fn(true)),
+      node_hash_(node_hash),
+      dag_hash_(node_hash),
       metadata_(GetMetaDataIfDebugging()) {}
 
 Node::~Node() = default;
