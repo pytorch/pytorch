@@ -362,6 +362,8 @@ ArgValue TensorExprKernel::toArg(const torch::jit::Value* v) const {
       return val.toIntVector();
     } else if (val.isDoubleList()) {
       return val.toDoubleVector();
+    } else if (val.isString()) {
+      return val.toStringRef();
     } else {
       throw unsupported_dtype(val.type()->str());
     }

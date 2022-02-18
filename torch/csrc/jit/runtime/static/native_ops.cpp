@@ -946,5 +946,17 @@ REGISTER_NATIVE_OPERATOR_FUNCTOR(
       };
     });
 
+// See [Borrowed IValue Outputs]
+REGISTER_NATIVE_OPERATOR_FUNCTOR(
+    prim::IfThenElse,
+    prim_IfThenElse,
+    [](Node*) -> SROperator {
+      return [](ProcessedNode* pnode) {
+        const auto condition = pnode->Input(0).toBool();
+        pnode->Output(0) = condition ? createBorrowedIValue(pnode->Input(1))
+                                     : createBorrowedIValue(pnode->Input(2));
+      };
+    });
+
 } // namespace jit
 } // namespace torch
