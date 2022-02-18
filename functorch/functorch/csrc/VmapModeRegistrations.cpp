@@ -66,11 +66,6 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchVmapMode, m) {
   UNSUPPORTED_RANDOM(randint_like);
   UNSUPPORTED_RANDOM2(randint_like, low_dtype);
 
-  UNSUPPORTED_RANDOM(randperm);
-  UNSUPPORTED_RANDOM2(randperm, generator);
-  UNSUPPORTED_RANDOM2(randperm, out);
-  UNSUPPORTED_RANDOM2(randperm, generator_out);
-
   UNSUPPORTED_RANDOM(uniform_);
 }
 
