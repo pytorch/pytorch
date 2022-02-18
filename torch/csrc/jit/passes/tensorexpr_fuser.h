@@ -60,6 +60,7 @@ TORCH_API Value* broadcastSizes(at::ArrayRef<Value*> sizes, AliasDb* db);
 
 namespace tensorexpr {
 TORCH_API bool isSupported(Node* node);
+TORCH_API OperatorSet& getCustomOperatorSet();
 } // namespace tensorexpr
 } // namespace jit
 } // namespace torch
