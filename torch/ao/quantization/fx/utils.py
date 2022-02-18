@@ -518,7 +518,7 @@ NON_OBSERVABLE_ARG_DICT = {
     },
 }
 
-def get_non_observable_arg_indexes_and_types(node: Node) -> Dict[type, Callable[[Node], List[int]]]:
+def get_non_observable_arg_indexes_and_types(node: Node) -> Dict[Union[type, torch.dtype], Callable[[Node], List[int]]]:
     """
     Returns a dict with of non float tensor types as keys and values which correspond to a
     function to retrieve the list (which takes the node as an argument)

@@ -788,7 +788,7 @@ def maybe_insert_observers_before_graph_output(
 def maybe_propagate_dtype_for_node(
     node: Node,
     target_dtype: Union[torch.dtype, type],
-    node_name_to_target_dtype: Dict[str, Dict[str, Optional[torch.dtype]]],
+    node_name_to_target_dtype: Dict[str, Dict[str, Optional[Union[torch.dtype, type]]]],
     matches: Dict[str, MatchResult],
 ) -> None:
     """
@@ -810,7 +810,7 @@ def maybe_propagate_dtype_for_node(
 
 def propagate_dtypes_for_known_nodes(
     graph: Graph,
-    node_name_to_target_dtype: Dict[str, Dict[str, Optional[torch.dtype]]],
+    node_name_to_target_dtype: Dict[str, Dict[str, Optional[Union[torch.dtype, type]]]],
     matches: Dict[str, MatchResult],
 ) -> None:
     """
@@ -835,7 +835,7 @@ def propagate_dtypes_for_known_nodes(
                 # when an argument is a tuple, it does not show up as another node so we need to go through
                 # all elements of the tuple manually
                 if isinstance(arg, tuple):
-                    arg_list = arg
+                    arg_list = list(arg)
                 else:
                     arg_list = [arg]
 
