@@ -41,6 +41,7 @@ from collections import OrderedDict
 from torch.nn.utils.rnn import PackedSequence
 from torch.onnx import CheckerError, register_custom_op_symbolic, unregister_custom_op_symbolic
 from torch.onnx.symbolic_helper import _unimplemented
+from torch.onnx.utils import unpack_quantized_tensor
 
 
 def flatten_tuples(elem):
@@ -108,9 +109,16 @@ def inline_flatten_list(inputs, res_list):
     return res_list
 
 
+def unpack_to_numpy(value):
+    value_unpacked = []
+    for value_ in value:
+        value_unpacked.extend(unpack_quantized_tensor(value_))
+    value_final = [to_numpy(v) for v in value_unpacked]
+    return value_final
+
+
 def run_ort(ort_sess, input):
-    input = flatten_tuples(input)
-    input = to_numpy(input)
+    input = unpack_to_numpy(flatten_tuples(input))
     ort_inputs = dict((ort_sess.get_inputs()[i].name, input) for i, input in enumerate(input))
     ort_outs = ort_sess.run(None, ort_inputs)
     return inline_flatten_list(ort_outs, [])
@@ -118,7 +126,7 @@ def run_ort(ort_sess, input):
 
 def ort_compare_with_pytorch(ort_outs, output, rtol, atol):
     output, _ = torch.jit._flatten(output)
-    outputs = [to_numpy(outp) for outp in output]
+    outputs = unpack_to_numpy(output)
 
     # compare onnxruntime and PyTorch results
     assert len(outputs) == len(ort_outs), "number of outputs differ"
@@ -10255,6 +10263,18 @@ class TestONNXRuntime(unittest.TestCase):
         torch.onnx.export(RSoftMax(radix, cardinality), (x, ), f, input_names=["x"], dynamic_axes={"x": [0]})
         loaded_model = onnx.load_from_string(f.getvalue())
         self.assertEqual(loaded_model.graph.output[0].type.tensor_type.shape.dim[1].dim_value, 128)
+
+    @skipIfUnsupportedMinOpsetVersion(10)
+    def test_quantized_linear(self):
+        model = torch.nn.quantized.Linear(1, 2)
+        input = torch.rand(1, 1)
+        input_tensor = torch.quantize_per_tensor(input, 1, 0, torch.quint8)
+        # Currently, we need convert the model to ScriptModule before export.
+        # The reason is that PackedParams contains int (not tensor).
+        # Then it fails when the exporter calls _trace_and_get_graph_from_model().
+        # TODO: https://msdata.visualstudio.com/Vienna/_workitems/edit/1547858
+        self.run_test(torch.jit.trace(model, input_tensor), (input_tensor,))
+        self.run_test(torch.jit.script(model), (input_tensor,))
 
 def make_test(name, base, layer, bidirectional, initial_state,
               variable_length, dropout, script_test_min_opset_version,
