@@ -202,6 +202,8 @@ void vulkanFoldPrePackingOps(script::Module& m) {
         (n->kind() ==
          Symbol::fromQualString("vulkan_prepack::linear_prepack")) ||
         (n->kind() ==
+         Symbol::fromQualString("vulkan_prepack::gated_conv2d_module_prepack")) ||
+        (n->kind() ==
          Symbol::fromQualString(
              "vulkan_prepack::conv2d_transpose_clamp_prepack")));
   };
@@ -227,10 +229,11 @@ script::Module vulkanOptimizeForMobile(
   auto cloned_module = m.clone();
   cloned_module.eval();
   cloned_module = FoldConvBatchNorm(cloned_module);
-  vulkanInsertPrePackedOps(cloned_module);
   cloned_module = freeze_module(cloned_module, preserved_methods);
+  vulkanInsertPrePackedOps(cloned_module);
   vulkanFusePrePackedConvWithClamp(cloned_module);
   vulkanFoldPrePackingOps(cloned_module);
+
   removeDropout(cloned_module);
   vulkanRemoveMutation(cloned_module);
   // remove duplicated constants

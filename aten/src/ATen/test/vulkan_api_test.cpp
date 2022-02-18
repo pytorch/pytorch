@@ -3,6 +3,7 @@
 #include <gtest/gtest.h>
 #include <ATen/ATen.h>
 #include <c10/util/irange.h>
+#include <ATen/core/dispatch/Dispatcher.h>
 
 // TODO: These functions should move to a common place.
 
@@ -63,6 +64,30 @@ void showRtol(const at::Tensor& a, const at::Tensor& b) {
   }
 }
 
+template <class... Inputs>
+inline std::vector<c10::IValue> makeStack(Inputs&&... inputs) {
+  return {std::forward<Inputs>(inputs)...};
+}
+
+template <class... Args>
+inline std::vector<c10::IValue> callOpByHandle(
+    const c10::OperatorHandle& op,
+    Args... args) {
+  auto stack = makeStack(std::forward<Args>(args)...);
+  c10::Dispatcher::singleton().callBoxed(op, &stack);
+  return stack;
+}
+
+template <class... Args>
+inline std::vector<c10::IValue> callOpByName(
+    const char* func_name,
+    const char* overload_name,
+    Args... args) {
+  const c10::optional<c10::OperatorHandle> op_handle =
+      c10::Dispatcher::singleton().findSchema({func_name, overload_name});
+  assert(op_handle.has_value());
+  return callOpByHandle(op_handle.value(), std::forward<Args>(args)...);
+}
 
 static void gen_allpermutations(std::vector<std::vector<int64_t>>& out, std::vector<int64_t> in, int i) {
   // generate all permutations of a given dims
@@ -2548,6 +2573,139 @@ TEST(VulkanAPITest, clone_invalidinputs_exceptions) {
   EXPECT_THROW({
     clone_test({2, 3, 5, 161}, c10::MemoryFormat::ChannelsLast3d);
   }, ::c10::Error);
+}
+
+TEST(VulkanAPITest, gated_conv2d_module) {
+  if (!at::is_vulkan_available()) {
+    return;
+  }
+
+  constexpr int64_t groups = 1;
+  constexpr std::array<int64_t, 2u> stride{1, 2};
+  constexpr std::array<int64_t, 2u> padding{0, 0};
+  constexpr std::array<int64_t, 2u> output_padding{0, 0};
+  //TODO: Support conv2d with dilation != 1
+  constexpr std::array<int64_t, 2u> dilation{1, 1};
+
+  const auto padding_cpu = at::rand({1,16,1,161}, at::device(at::kCPU).dtype(at::kFloat))*5;
+  const auto prev_out_cpu = at::rand({1,16,1,161}, at::device(at::kCPU).dtype(at::kFloat))*5;
+
+  const auto weights_a_cpu = at::rand({32,16,2,3}, at::device(at::kCPU).dtype(at::kFloat))*2;
+  const auto bias_a_cpu = at::rand({32}, at::device(at::kCPU).dtype(at::kFloat))*2;
+
+  const auto weights_b_cpu = at::rand({32,16,2,3}, at::device(at::kCPU).dtype(at::kFloat))*2;
+  const auto bias_b_cpu = at::rand({32}, at::device(at::kCPU).dtype(at::kFloat))*2;
+
+  const auto input_cpu = at::cat({padding_cpu, prev_out_cpu}, 2);
+  const auto output_a_cpu = at::conv2d(
+      input_cpu,
+      weights_a_cpu,
+      bias_a_cpu,
+      stride,
+      padding,
+      dilation,
+      groups);
+  const auto output_b_cpu = at::conv2d(
+      input_cpu,
+      weights_b_cpu,
+      bias_b_cpu,
+      stride,
+      padding,
+      dilation,
+      groups);
+  const auto output_cpu = output_a_cpu * at::sigmoid(output_b_cpu);
+
+  auto prepack = callOpByName(
+      "vulkan_prepack::gated_conv2d_module_prepack",
+      "",
+      weights_a_cpu,
+      bias_a_cpu,
+      weights_b_cpu,
+      bias_b_cpu,
+      stride,
+      padding,
+      output_padding,
+      dilation,
+      groups,
+      false);
+
+  auto op_out_ivalues =
+      callOpByName("vulkan_prepack::gated_conv2d_module_run", "", padding_cpu.vulkan(), prev_out_cpu.vulkan(), prepack[0]);
+
+  auto output_vulkan = op_out_ivalues[0].toTensor().cpu();
+
+  const bool check = almostEqual(output_cpu, output_vulkan);
+
+  ASSERT_TRUE(check);
+}
+
+TEST(VulkanAPITest, gated_conv_transpose2d_module) {
+  if (!at::is_vulkan_available()) {
+    return;
+  }
+
+  constexpr int64_t groups = 1;
+  constexpr std::array<int64_t, 2u> stride{1, 2};
+  constexpr std::array<int64_t, 2u> padding{1, 0};
+  constexpr std::array<int64_t, 2u> output_padding{0, 0};
+  //TODO: Support conv2d with dilation != 1
+  constexpr std::array<int64_t, 2u> dilation{1, 1};
+
+  const auto padding_cpu = at::rand({1,32,1,39}, at::device(at::kCPU).dtype(at::kFloat))*5;
+  const auto prev_enc_out_cpu = at::rand({1,32,1,39}, at::device(at::kCPU).dtype(at::kFloat))*5;
+  const auto prev_out_cpu = at::rand({1,32,1,39}, at::device(at::kCPU).dtype(at::kFloat))*5;
+  const auto encoder_out_cpu = at::rand({1,32,1,39}, at::device(at::kCPU).dtype(at::kFloat))*5;
+
+  const auto weights_a_cpu = at::rand({64,32,2,3}, at::device(at::kCPU).dtype(at::kFloat))*2;
+  const auto bias_a_cpu = at::rand({32}, at::device(at::kCPU).dtype(at::kFloat))*2;
+
+  const auto weights_b_cpu = at::rand({64,32,2,3}, at::device(at::kCPU).dtype(at::kFloat))*2;
+  const auto bias_b_cpu = at::rand({32}, at::device(at::kCPU).dtype(at::kFloat))*2;
+
+  const auto top_row_cpu = at::cat({padding_cpu, prev_enc_out_cpu}, 1);
+  const auto bottom_row_cpu = at::cat({prev_out_cpu, encoder_out_cpu}, 1);
+  const auto input_cpu = at::cat({top_row_cpu, bottom_row_cpu}, 2);
+  const auto output_a_cpu = at::conv_transpose2d(
+      input_cpu,
+      weights_a_cpu,
+      bias_a_cpu,
+      stride,
+      padding,
+      output_padding,
+      groups,
+      dilation);
+  const auto output_b_cpu = at::conv_transpose2d(
+      input_cpu,
+      weights_b_cpu,
+      bias_b_cpu,
+      stride,
+      padding,
+      output_padding,
+      groups,
+      dilation);
+  const auto output_cpu = output_a_cpu * at::sigmoid(output_b_cpu);
+
+  auto prepack = callOpByName(
+      "vulkan_prepack::gated_conv2d_module_prepack",
+      "",
+      weights_a_cpu,
+      bias_a_cpu,
+      weights_b_cpu,
+      bias_b_cpu,
+      stride,
+      padding,
+      output_padding,
+      dilation,
+      groups,
+      true);
+
+  auto op_out_ivalues =
+      callOpByName("vulkan_prepack::gated_conv_transpose2d_module_run", "", padding_cpu.vulkan(), prev_enc_out_cpu.vulkan(), prev_out_cpu.vulkan(), encoder_out_cpu.vulkan(), prepack[0]);
+  auto output_vulkan = op_out_ivalues[0].toTensor().cpu();
+
+  const bool check = almostEqual(output_cpu, output_vulkan);
+
+  ASSERT_TRUE(check);
 }
 
 enum class OpType {
