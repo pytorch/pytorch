@@ -9,3 +9,5 @@ on:
 jobs:
   test:
     uses: ./.github/workflows/linux-build.yml
+    with:
+      build-environment: linux-xenial-py3.7-gcc5.4
