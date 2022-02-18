@@ -17,8 +17,17 @@ jobs:
     outputs:
       docker_image: ${{ steps.calculate-tag.outputs.docker_image }}
     steps:
-      - name: print labels
-        run: echo "${PR_LABELS}"
+      - name: Checkout PyTorch
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          # deep clone, to allow use of git merge-base
+          fetch-depth: 0
+          submodules: recursive
+      - name: Clean PyTorch checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
       - name: test
         uses: ./.github/workflows/actions/setup-ec2-linux
     #   !{{ common.setup_ec2_linux() }}
