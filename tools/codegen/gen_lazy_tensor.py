@@ -3,8 +3,7 @@ import argparse
 import os
 import yaml
 from collections import namedtuple
-from typing import List, Dict, Union, Sequence, Optional, Callable, Iterable, Iterator, Tuple, Type
-from tools.codegen.dest.lazy_ir import LazyIR, TSLazyIR
+from typing import List, Dict, Union, Sequence, Optional, Callable, Iterable, Iterator, Tuple
 from tools.codegen.gen import get_grouped_native_functions, parse_native_yaml
 from tools.codegen.model import (FunctionSchema,
                                  NativeFunction, NativeFunctionsGroup, OperatorName)
@@ -61,20 +60,20 @@ def main() -> None:
     parser.add_argument(
         '--node_base_hdr', type=str, default=None, help='Path to header file defining custom Lazy IR Node base class')
     parser.add_argument(
-        '--tensor_class', type=str, default="torch::lazy::LazyTensor", help='Name of backend specific custom Lazy Tensor class')
+        '--tensor_class', type=str, default="LazyTensor", help='Name of backend specific custom Lazy Tensor class')
     parser.add_argument(
-        '--tensor_class_hdr', type=str, default="torch/csrc/lazy/core/tensor.h",
+        '--tensor_class_hdr', type=str, default="lazy_tensor_core/csrc/tensor.h",
         help='Path to header file defining custom Lazy Tensor class')
     options = parser.parse_args()
 
     run(options.source_yaml, options.output_dir, options.dry_run, options.impl_path,
         options.gen_ts_lowerings, options.node_base, options.node_base_hdr,
-        options.tensor_class, options.tensor_class_hdr, TSLazyIR)
+        options.tensor_class, options.tensor_class_hdr)
 
 
 def run(source_yaml: str, output_dir: str, dry_run: bool, impl_path: Optional[str],
         gen_ts_lowerings: bool, node_base: str, node_base_hdr: Optional[str],
-        tensor_class: str, tensor_class_hdr: str, lazy_ir_cls: Type[LazyIR]) -> None:
+        tensor_class: str, tensor_class_hdr: str) -> None:
 
     # Assumes that this file lives at PYTORCH_ROOT/tools/codegen/gen_backend_stubs.py
     pytorch_root = pathlib.Path(__file__).parent.parent.parent.absolute()
@@ -161,13 +160,11 @@ def run(source_yaml: str, output_dir: str, dry_run: bool, impl_path: Optional[st
     fm.write_with_template(f'{backend_key}NativeFunctions.cpp', 'DispatchKeyNativeFunctions.cpp', lambda: {
         'includes': [f'#include <{path}>' for path in [
             tensor_class_hdr,
-            "ATen/Functions.h",
             "ATen/MetaFunctions.h",
-            "ATen/Operators.h",
-            "torch/csrc/lazy/core/lazy_graph_executor.h",
             "torch/csrc/lazy/core/metrics.h",
             "torch/csrc/lazy/core/shape.h",
-            "lazy_tensor_core/csrc/ts_backend/aten_eager_fallback.h",
+            "lazy_tensor_core/csrc/aten_ltc_bridge.h",
+            "lazy_tensor_core/csrc/lazy_graph_executor.h",
             f"{output_dir}/{backend_key}NativeFunctions.h",
             f"{output_dir}/{backend_key}LazyIr.h",
             f"{output_dir}/{backend_key}ShapeInference.h",
@@ -199,8 +196,7 @@ def run(source_yaml: str, output_dir: str, dry_run: bool, impl_path: Optional[st
         'func_declarations': list(concat_map_codegen(
             dest.GenLazyShapeInferenceDefinition(backend_indices[backend_key],
                                                  tensor_class),
-            grouped_native_functions,
-            codegenInplaceVariant=True,
+            grouped_native_functions
         )),
     })
     # Generate IR node classes
@@ -221,7 +217,7 @@ def run(source_yaml: str, output_dir: str, dry_run: bool, impl_path: Optional[st
         'DispatchKey': backend_key,
         'dispatch_namespace': backend_key.lower(),
         'ir_declarations': list(concat_map_codegen(
-            lazy_ir_cls(backend_indices[backend_key], node_base),
+            dest.LazyIR(backend_indices[backend_key], node_base),
             grouped_native_functions
         )),
     })

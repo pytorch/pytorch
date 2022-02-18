@@ -1177,8 +1177,8 @@ def insert_observers_for_model(
                             # for general tensor value ops, we modify the graph
                             # to make all inputs and outputs use the first input's
                             # observer
-                            if (is_general_tensor_value_op and need_remove_observer_) \
-                                or is_general_tensor_shape_op or is_reuse_input_qconfig_:
+                            if (is_general_tensor_value_op and need_remove_observer_) or \
+                                    is_general_tensor_shape_op or is_reuse_input_qconfig_:
                                 if not maybe_make_input_output_share_observers(node, model, modules):
                                     remove_output_observer(node, model, modules)
 
