@@ -6,32 +6,8 @@
 
 import argparse
 from typing import Tuple, List
+from textwrap import dedent
 import re
-
-
-def num_leading_spaces(line: str) -> int:
-    return len(line) - len(line.lstrip())
-
-
-def min_leading_spaces(lines):
-    num_spaces = [num_leading_spaces(line) for line in lines if len(line) > 0]
-    if len(num_spaces) == 0:
-        return None
-    return min(num_spaces)
-
-
-def deindent(code: str) -> str:
-    lines = code.split('\n')
-    mls = min_leading_spaces(lines)
-    lines = [line[mls:] for line in lines]
-    return '\n'.join(lines)
-
-
-def indent(code: str, num) -> str:
-    lines = code.split('\n')
-    indented_lines = [' ' * num + line for line in lines]
-    indented_lines[0] = lines[0]
-    return '\n'.join(indented_lines)
 
 
 def is_tensor(typ: str) -> bool:
@@ -55,33 +31,12 @@ def is_vector_tensor(typ: str) -> bool:
     return (typ == '::std::vector<Tensor>')
 
 
-def add_bdim_after_tensor(types: Tuple[str]) -> Tuple[str]:
-    result = []
-    for typ in types:
-        result.append(typ)
-        if is_tensor(typ) or is_optional_tensor(typ) or is_vector_tensor(typ):
-            result.append('c10::optional<int64_t>')
-    return tuple(result)
-
-
-def batch_rule_type(
-        op_returns: Tuple[str],
-        op_args: Tuple[str],
-        unique_count: int) -> Tuple[str, str]:
-    returns = add_bdim_after_tensor(op_returns)
-    args = add_bdim_after_tensor(op_args)
-    br_t = f'batch_rule_{unique_count}_t'
-
-    result = f"typedef std::tuple<{','.join(returns)}> (*{br_t})({', '.join(args)});"
-    return result, br_t
-
-
 def unwrap_tensor(name: str) -> List[str]:
     result = f"""\
     Tensor {name}_value;
     optional<int64_t> {name}_bdim;
     std::tie({name}_value, {name}_bdim) = unwrapTensorAtLevel({name}, cur_level);"""
-    return deindent(result).split('\n')
+    return dedent(result).split('\n')
 
 
 def unwrap_optional_tensor(name: str) -> List[str]:
@@ -91,7 +46,7 @@ def unwrap_optional_tensor(name: str) -> List[str]:
     if ({name}) {{
         std::tie({name}_value, {name}_bdim) = unwrapTensorAtLevel({name}.value(), cur_level);
     }}"""
-    return deindent(result).split('\n')
+    return dedent(result).split('\n')
 
 
 def gen_unwraps(arg_types, arg_names):
@@ -115,12 +70,15 @@ def gen_unwraps(arg_types, arg_names):
     return unwraps, unwrapped_arg_list
 
 
-def lower(returns: Tuple[str], args: List[Tuple[str, str]], unique_count: int, ops) -> str:
+def gen_plumbing(op: str, returns: Tuple[str], args: List[Tuple[str, str]]) -> str:
     arg_types, arg_names = zip(*args)
-    batch_rule_typedef, batch_rule_t = batch_rule_type(returns, arg_types, unique_count)
+    if '.' in op:
+        name, overload = op.split('.')
+        definition_name = f'{name}_{overload}'
+    else:
+        definition_name = op
 
     return_t = returns[0] if len(returns) == 1 else f'std::tuple<{",".join(returns)}>'
-    args_t = ', '.join(arg_types)
     arg_list = ', '.join([f'{arg[0]} {arg[1]}' for arg in args])
 
     unwraps, unwrapped_arg_list = gen_unwraps(arg_types, arg_names)
@@ -145,13 +103,8 @@ def lower(returns: Tuple[str], args: List[Tuple[str, str]], unique_count: int, o
         wrapped_returns = f'return std::make_tuple({", ".join(wrapped_returns)});'
 
     result = f"""\
-    // {ops}
-    {batch_rule_typedef}
-    template <>
-    {return_t} lowerToNextLayer<{batch_rule_t},{return_t},{args_t}>(
-      {batch_rule_t} batch_rule,
-      {arg_list}
-    ) {{
+    template <typename batch_rule_t, batch_rule_t batch_rule>
+    {return_t} {definition_name}_generated_plumbing({arg_list}) {{
       c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
       auto maybe_layer = maybeCurrentDynamicLayer();
       TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
@@ -160,7 +113,7 @@ def lower(returns: Tuple[str], args: List[Tuple[str, str]], unique_count: int, o
       auto results = batch_rule({', '.join(unwrapped_arg_list)});
       {wrapped_returns}
     }}"""
-    return deindent(result)
+    return dedent(result)
 
 
 def parse_return(return_t):
@@ -226,18 +179,6 @@ def is_schema_outplace(schema):
     return True
 
 
-def get_hash(schema):
-    ret_t, args = schema
-    args_t, _ = tuple(zip(*args))
-    return (ret_t, args_t)
-
-
-class Container:
-    def __init__(self, schema, ops):
-        self.schema = schema
-        self.ops = ops
-
-
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('path',
@@ -247,17 +188,8 @@ if __name__ == '__main__':
 
     schemas = get_signatures(args.path, include_op=True)
     schemas = [schema for schema in schemas if is_schema_outplace(schema)]
-    unique_schemas = {}
-    for schema in schemas:
-        op, *schema = schema
-        unique_id = get_hash(schema)
-        if unique_id in unique_schemas:
-            unique_schemas[unique_id].ops.append(op)
-        else:
-            unique_schemas[unique_id] = Container(schema, [op])
-
-    codes = [lower(*container.schema, i, container.ops)
-             for i, container in enumerate(unique_schemas.values())]
+    codes = [gen_plumbing(*schema) for schema in schemas]
+    print("#pragma once")
     print("#include <functorch/csrc/OutOfPlacePlumbing.h>")
     print("#include <functorch/csrc/PlumbingHelper.h>")
     print("#include <functorch/csrc/Constants.h>")

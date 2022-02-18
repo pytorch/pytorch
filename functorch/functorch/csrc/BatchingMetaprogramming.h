@@ -116,13 +116,5 @@ template <typename batch_rule_t> struct ToOperatorType {
 };
 template <typename batch_rule_t> using to_operator_t = typename ToOperatorType<batch_rule_t>::type;
 
-template<typename br_t, br_t BatchRule, typename func_t> struct PrimBatchRule7 {};
-template<typename br_t, br_t BatchRule, typename Return, typename... Args> struct PrimBatchRule7<
-br_t, BatchRule, Return (Args...)> {
-  static inline Return apply(Args... args) {
-    return lowerToNextLayer<br_t, Return, Args...>(BatchRule, std::forward<Args>(args)...);
-  }
-};
-
 }
 } // namespace at
