@@ -95,7 +95,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple, Union, Set
 from collections import defaultdict
 
 # list of dtypes to not add observers to
-DO_NOT_OBS_DTYPE_LIST = [int, torch.bool, torch.float, None]
+DO_NOT_OBS_DTYPE_LIST = [int, float, torch.bool, None]
 
 def is_activation_post_process_node(node: Node, modules: Dict[str, torch.nn.Module]) -> bool:
     return isinstance(node, torch.fx.Node) and node.op == "call_module" and \
@@ -460,7 +460,7 @@ def maybe_insert_input_observer_for_arg_or_kwarg(
             # TODO(future PR): change this so a placeholder is inserted for
             # future dequants, to make the logic easier to understand
             (arg_as_input_target_dtype != torch.float) and
-            # if arg is a bool tensor or not a tensor, do not insert observer
+            # if arg output dtype is in DO_NOT_OBS_DTYPE_LIST do not insert observer
             (arg_as_output_target_dtype not in DO_NOT_OBS_DTYPE_LIST) and
             # if qconfig is reuse_input qconfig, we won't insert extra observer for input
             not is_reuse_input_qconfig_
@@ -660,7 +660,7 @@ def maybe_insert_output_observer_for_node(
     dtype = node_name_to_target_dtype[node.name]["output_activation_dtype"]
     should_insert_observer = \
         qhandler.should_insert_observer_for_output(
-            qconfig, is_qat) and dtype not in DO_NOT_OBS_DTYPE_LIST
+            qconfig, is_qat) and dtype not in DO_NOT_OBS_DTYPE_LIST # +[torch.float]
     # TODO(future PR): move the following logic to
     # should_insert_observer_for_output
     should_insert_observer = should_insert_observer and \

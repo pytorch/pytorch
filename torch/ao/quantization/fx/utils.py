@@ -464,10 +464,15 @@ def all_node_args_except_first(node: Node) -> List[int]:
 
 def return_arg_list(arg_indices: List[int]) -> Callable[Node, int]:
     """
-    Constructs a function that returns the arg indices
+    Constructs a function that takes a node as arg and returns the arg_indices
+    that are valid for node.args
     """
     def arg_indices_func(node: Node) -> List[int]:
-        return arg_indices
+        result = []
+        for i in arg_indices:
+            if i<len(node.args):
+                result.append(i)
+        return result
     return arg_indices_func
 
 NodeInfo = namedtuple("NodeInfo", "op target")
