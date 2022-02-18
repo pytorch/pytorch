@@ -1,23 +1,48 @@
-name: 'Hello World'
-description: 'Greet someone'
-inputs:
-  who-to-greet:  # id of input
-    description: 'Who to greet'
-    required: true
-    default: 'World'
-outputs:
-  random-number:
-    description: "Random number"
-    value: ${{ steps.random-number-generator.outputs.random-id }}
+name: Setup EC2 Linux
+description: foobarbaz
 runs:
-  using: "composite"
+  using: composite
   steps:
-    - run: echo Hello ${{ inputs.who-to-greet }}.
+    - name: Display EC2 information
       shell: bash
-    - id: random-number-generator
-      run: echo "::set-output name=random-id::$(echo $RANDOM)"
+      run: |
+        set -euo pipefail
+        function get_ec2_metadata() {
+          # Pulled from instance metadata endpoint for EC2
+          # see https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/instancedata-data-retrieval.html
+          category=$1
+          curl -fsSL "http://169.254.169.254/latest/meta-data/${category}"
+        }
+        echo "ami-id: $(get_ec2_metadata ami-id)"
+        echo "instance-id: $(get_ec2_metadata instance-id)"
+        echo "instance-type: $(get_ec2_metadata instance-type)"
+    - name: Log in to ECR
       shell: bash
-    - run: echo "${{ github.action_path }}" >> $GITHUB_PATH
+      env:
+        AWS_RETRY_MODE: standard
+        AWS_MAX_ATTEMPTS: "5"
+      run: |
+        AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
+        !{{ add_retry_to_env() }}
+        retry aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
+            --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
+    - name: Chown workspace
       shell: bash
-    - run: goodbye.sh
+      run: |
+        !{{ add_retry_to_env() }}
+        retry docker pull "${ALPINE_IMAGE}"
+        # Ensure the working directory gets chowned back to the current user
+        docker run --pull=never --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
+    - name: Clean workspace
       shell: bash
+      run: |
+        rm -rf "${GITHUB_WORKSPACE}"
+        mkdir "${GITHUB_WORKSPACE}"
+    - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
+      uses: seemethere/add-github-ssh-key@v1
+      with:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    - name: Preserve github env variables for use in docker
+      shell: bash
+      run: |
+        env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
