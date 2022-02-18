@@ -1,5 +1,6 @@
 # Owner(s): ["high priority"]
 
+import tempfile
 import torch
 from torch.testing._internal.common_utils import TestCase, run_tests
 from torch.testing._internal.logging_tensor import LoggingTensor, log_input, capture_logs, no_dispatch
@@ -7,6 +8,27 @@ from torch.utils._pytree import tree_map
 from torch.utils._python_dispatch import enable_python_mode
 
 import logging
+
+# Simple wrapper tensor used in testing; defined globally so that it can be pickled.
+class SerializableWrapperTensor(torch.Tensor):
+    elem: torch.Tensor
+
+    __slots__ = ['elem']
+
+    @staticmethod
+    def __new__(cls, elem, *args, **kwargs):
+        r = torch.Tensor._make_wrapper_subclass(  # type: ignore[attr-defined]
+            cls, elem.size(),
+            dtype=elem.dtype, layout=elem.layout,
+            device=elem.device, requires_grad=elem.requires_grad,
+            strides=elem.stride(), storage_offset=elem.storage_offset())
+        r.elem = elem
+        return r
+
+    @classmethod
+    def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
+        raise RuntimeError("NYI")
+
 
 class TestPythonDispatch(TestCase):
     def test_basic(self) -> None:
@@ -337,6 +359,16 @@ $6 = torch._ops.aten.add_($1, $5)''')
         self.assertEqual(y.size(), x.size())
         self.assertEqual(y.stride(), x.stride())
         self.assertEqual(y.storage_offset(), x.storage_offset())
+
+    def test_wrapper_subclass_serializes(self) -> None:
+        with tempfile.TemporaryFile() as f:
+            x = SerializableWrapperTensor(torch.randn(3))
+            torch.save(x, f)
+            f.seek(0)
+            x_loaded = torch.load(f)
+            self.assertTrue(type(x_loaded) is type(x))
+            self.assertEqual(x.elem, x_loaded.elem)
+            self.assertFalse(x is x_loaded)
 
     def test_index_put_where_only_index_is_subclass(self) -> None:
         called_funcs = []

@@ -46,7 +46,9 @@ def _rebuild_from_type_v2(func, new_type, args, state):
     if new_type is Tensor:
         return func(*args)
 
-    ret = func(*args).as_subclass(new_type)
+    ret = func(*args)
+    if type(ret) is not new_type:
+        ret = ret.as_subclass(new_type)
     # Tensor does define __setstate__ even though it doesn't define
     # __getstate__. So only use __setstate__ if it is NOT the one defined
     # on Tensor
@@ -92,7 +94,7 @@ class Tensor(torch._C._TensorBase):
             # does accurate alias tracking; however, the code below
             # doesn't work because of
             # https://github.com/pytorch/pytorch/issues/47442
-            if self.is_sparse or self.device.type in ['xla', 'mlc', 'ort', 'meta', 'hpu']:
+            if self.data_ptr() == 0 or self.is_sparse or self.device.type in ['xla', 'mlc', 'ort', 'meta', 'hpu']:
                 new_tensor = self.clone()
             else:
                 new_storage = self.storage().__deepcopy__(memo)
@@ -132,7 +134,8 @@ class Tensor(torch._C._TensorBase):
                 new_tensor.grad = self.grad.__deepcopy__(memo)
 
             if not type(self) is Tensor:
-                new_tensor = new_tensor.as_subclass(type(self))  # type: ignore[arg-type]
+                if not type(new_tensor) is type(self):
+                    new_tensor = new_tensor.as_subclass(type(self))  # type: ignore[arg-type]
 
                 # Plain Tensors don't have slots
                 slots_to_save = copyreg._slotnames(self.__class__)  # type: ignore[attr-defined]
@@ -265,6 +268,19 @@ class Tensor(torch._C._TensorBase):
                 raise NotImplementedError(
                     'sparse csr tensor __reduce_ex__ for layout `%s`' % (self.layout))
             return (torch._utils._rebuild_sparse_csr_tensor, args_sparse_csr)
+        elif self.data_ptr() == 0:
+            # For all other cases where no storage exists, assume the type is a wrapper subclass.
+            arg_wrapper_subclass = (
+                type(self),
+                self.dtype,
+                tuple(self.size()),
+                self.stride(),
+                self.storage_offset(),
+                self.layout,
+                self.device,
+                self.requires_grad
+            )
+            return (torch._utils._rebuild_wrapper_subclass, arg_wrapper_subclass)
         else:
             # TODO: Once we decide to break serialization FC, no longer
             # need to wrap with _TypedStorage
