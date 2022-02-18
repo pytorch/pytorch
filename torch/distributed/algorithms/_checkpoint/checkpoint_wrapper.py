@@ -11,7 +11,7 @@ class CheckpointImpl(Enum):
     NO_REENTRANT = auto()
 
 
-class _CheckpointWrapper(torch.nn.Module):
+class CheckpointWrapper(torch.nn.Module):
     """
     An nn.Module that wraps another nn.Module with checkpointing.
     """
@@ -76,4 +76,4 @@ def checkpoint_wrapper(
             "checkpoint implementation."
         )
 
-    return _CheckpointWrapper(module, checkpoint_impl, offload_to_cpu)
+    return CheckpointWrapper(module, checkpoint_impl, offload_to_cpu)
