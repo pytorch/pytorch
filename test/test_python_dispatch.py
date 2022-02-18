@@ -2,6 +2,7 @@
 
 import tempfile
 import torch
+from copy import deepcopy
 from torch.testing._internal.common_utils import TestCase, run_tests
 from torch.testing._internal.logging_tensor import LoggingTensor, log_input, capture_logs, no_dispatch
 from torch.utils._pytree import tree_map
@@ -369,6 +370,36 @@ $6 = torch._ops.aten.add_($1, $5)''')
             self.assertTrue(type(x_loaded) is type(x))
             self.assertEqual(x.elem, x_loaded.elem)
             self.assertFalse(x is x_loaded)
+
+    def test_deepcopy_wrapper_subclass(self) -> None:
+
+        class CloneableWrapperTensor(torch.Tensor):
+            elem: torch.Tensor
+
+            __slots__ = ['elem']
+
+            @staticmethod
+            def __new__(cls, elem, *args, **kwargs):
+                r = torch.Tensor._make_wrapper_subclass(  # type: ignore[attr-defined]
+                    cls, elem.size(),
+                    dtype=elem.dtype, layout=elem.layout,
+                    device=elem.device, requires_grad=elem.requires_grad,
+                    strides=elem.stride(), storage_offset=elem.storage_offset())
+                r.elem = elem
+                return r
+
+            @classmethod
+            def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
+                # Clone must be implemented for deepcopy to work.
+                if func.__name__ == "clone":
+                    return CloneableWrapperTensor(args[0].elem.clone())
+                raise RuntimeError("NYI")
+
+        x = CloneableWrapperTensor(torch.randn(3))
+        x_copy = deepcopy(x)
+        self.assertTrue(type(x_copy) is type(x))
+        self.assertEqual(x.elem, x_copy.elem)
+        self.assertFalse(x is x_copy)
 
     def test_index_put_where_only_index_is_subclass(self) -> None:
         called_funcs = []
