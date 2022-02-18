@@ -12,6 +12,7 @@
 #include <torch/csrc/lazy/core/view_ops/resize.h>
 #include <torch/csrc/lazy/core/view_ops/select.h>
 #include <torch/csrc/lazy/core/view_ops/squeeze.h>
+#include <torch/csrc/lazy/core/view_ops/unsqueeze.h>
 #include <torch/csrc/lazy/core/view_ops/select_view_update.h>
 #include <torch/csrc/lazy/core/view_ops/view.h>
 
@@ -46,6 +47,8 @@ Value ApplyViewInfo(Value ir_value, const ViewInfo& view_info) {
       return MakeNode<Resize>(ir_value, view_info.shape.sizes().vec());
     case ViewInfo::Type::kSqueeze:
       return MakeNode<torch::lazy::Squeeze>(ir_value, view_info.squeeze_index);
+    case ViewInfo::Type::kUnsqueeze:
+      return MakeNode<torch::lazy::Unsqueeze>(ir_value, view_info.squeeze_index);
     case ViewInfo::Type::kAsStrided:
       return MakeNode<AsStrided>(
           ir_value,
@@ -102,9 +105,11 @@ Value ApplyUpdate(Value ir_value, const Alias::UpdateData& update_data) {
         result = MakeNode<Resize>(result, view_info.source_shape.sizes().vec());
         break;
       case ViewInfo::Type::kSqueeze:
-        // TODO: in the next PR, replace this w/ MakeNode<Unsqueeze>
-        result = MakeNode<View>(result, view_info.source_shape.sizes().vec());
-        break;
+          result = MakeNode<torch::lazy::Unsqueeze>(ir_value, view_info.squeeze_index);
+          break;
+      case ViewInfo::Type::kUnsqueeze:
+          result = MakeNode<torch::lazy::Squeeze>(ir_value, view_info.squeeze_index);
+          break;
       case ViewInfo::Type::kAsStrided:
         result = MakeNode<AsStridedViewUpdate>(
             tmp_values[i - 1],
