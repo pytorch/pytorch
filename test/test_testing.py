@@ -574,11 +574,10 @@ class TestAssertClose(TestCase):
 
     def test_meta(self):
         actual = torch.empty((2, 2), device="meta")
-        expected = actual.clone()
+        expected = torch.empty((2, 2), device="meta")
 
         for fn in assert_close_with_inputs(actual, expected):
-            with self.assertRaisesRegex(NotImplementedError, "meta"):
-                fn()
+            fn()
 
     def test_mismatching_layout(self):
         strided = torch.empty((2, 2))
