@@ -8,4 +8,4 @@ on:
 
 jobs:
   test:
-    uses: ./.github/workflows/linux-build.yml
+    uses: pytorch/pytorch/.github/workflows/linux-build.yml
