@@ -1,5 +1,5 @@
-// This is a simple predictor binary that loads a mobile CV model and runs
-// a forward pass with fixed input `torch::ones({1, 3, 224, 224})` using lite interpreter.
+// This is a simple predictor binary that loads a TorchScript CV model and runs
+// a forward pass with fixed input `torch::ones({1, 3, 224, 224})`.
 // It's used for end-to-end integration test for custom mobile build.
 
 #include <iostream>

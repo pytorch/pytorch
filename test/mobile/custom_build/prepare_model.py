@@ -4,10 +4,9 @@ MobileNetV2 TorchScript model, and dumps root ops used by the model for custom
 build script to create a tailored build which only contains these used ops.
 """
 
-import argparse
+import torch
 import torchvision
 import yaml
-import torch
 
 # Download and trace the model.
 model = torchvision.models.mobilenet_v2(pretrained=True)
@@ -16,21 +15,13 @@ example = torch.rand(1, 3, 224, 224)
 traced_script_module = torch.jit.trace(model, example)
 
 # Save traced TorchScript model.
-parser = argparse.ArgumentParser()
-parser.add_argument("--mobile", dest='is_mobile', action='store_true', help="Indicates a mobile model will be exported.")
-parser.add_argument("--server", dest='is_mobile', action='store_false', help="Indicates a server model will be exported.")
-parser.set_defaults(is_mobile=False)
-args = parser.parse_args()
-if args.is_mobile:
-    traced_script_module._save_for_lite_interpreter("MobileNetV2.pt")
-else:
-    traced_script_module.save("MobileNetV2.pt")
+traced_script_module.save("MobileNetV2.pt")
 
 # Dump root ops used by the model (for custom build optimization).
 ops = torch.jit.export_opnames(traced_script_module)
 
 # Besides the ops used by the model, custom c++ client code might use some extra
-# ops, too. For example, the dummy (lite_)predictor.cpp driver in this test suite calls
+# ops, too. For example, the dummy predictor.cpp driver in this test suite calls
 # `aten::ones` to create all-one-tensor for testing purpose, which is not used
 # by the MobileNetV2 model itself.
 #
