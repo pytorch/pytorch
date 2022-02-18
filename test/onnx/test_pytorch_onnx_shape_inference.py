@@ -114,5 +114,14 @@ class TestONNXShapeInference(unittest.TestCase):
         slice = g.op("Slice", input, start_input, end, axis, step)
         self.run_test(g, slice.node(), expect_tensor(None, shape=(None, None)))
 
+    def test_expand(self):
+        g = self.create_empty_graph()
+        input = g.addInput()
+        constant = self.insert_tensor_constant(g, torch.ones(2, 4))
+        input.setType(constant.type().with_sizes([None, None]))
+        shape = g.op("Shape", input)
+        expand = g.op("Expand", constant, shape)
+        self.run_test(g, expand.node(), expect_tensor("Float", shape=(None, None)))
+
 if __name__ == '__main__':
     unittest.main()
