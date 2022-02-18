@@ -12,11 +12,22 @@ on:
       build-generates-artifacts:
         required: true
         type: boolean
+      test-timeout:
+        required: false
+        type: number
+        default: 240
+
+# TODO xla, rocm
+env:
+  IN_CI: 1
+  IS_GHA: 1  # TODO delete in favor of GITHUB_ACTIONS
 
 jobs:
   build:
     runs-on: [self-hosted, linux.2xlarge]
     timeout-minutes: 240
+    outputs:
+      docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
     steps:
       - name: Clean workspace
         run: |
@@ -39,26 +50,12 @@ jobs:
         uses: ./.github/workflows/actions/calculate-docker-image
         with:
           docker-image-base: ${{ inputs.docker-image-base }}
-    # {%- if enable_xla_test == 1 %}
-    #   - name: Calculate docker image tag
-    #     id: calculate-tag
-    #     run: |
-    #       echo "XLA workflow uses pre-built test image at ${XLA_IMAGE_TAG}"
-    #       DOCKER_TAG=$(git rev-parse HEAD:.circleci/docker)
-    #       echo "DOCKER_TAG=${DOCKER_TAG}" >> "${GITHUB_ENV}"
-    #       echo "DOCKER_IMAGE=${DOCKER_IMAGE_BASE}:${XLA_IMAGE_TAG}" >> "${GITHUB_ENV}"
-    #       echo "::set-output name=docker_tag::${DOCKER_TAG}"
-    #       echo "::set-output name=docker_image::${DOCKER_IMAGE_BASE}:${XLA_IMAGE_TAG}"
-    # {%- else %}
-    #   !{{ common.calculate_docker_image(false) }}
-    # {%- endif %}
       - name: Pull Docker image
         run: |
           retry () {
               "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
           }
           retry docker pull ${{ steps.calculate-docker-image.outputs.docker-image }}
-    #   !{{ common.parse_ref() }}
       - name: Parse ref
         id: parse-ref
         run: .github/scripts/parse_ref.py
@@ -143,8 +140,145 @@ jobs:
           name: ${{ inputs.build-environment }}
           retention-days: 14
           if-no-files-found: error
-          path:
-            artifacts.zip
+          path: artifacts.zip
+      - name: Hold runner for 2 hours or until ssh sessions have drained
+        # TODO working-directory: !{{ pytorch_directory }}
+        # Always hold for active ssh sessions
+        if: always()
+        run: .github/scripts/wait_for_ssh_to_drain.sh
+      - name: Kill containers, clean up images
+        if: always()
+        run: |
+          # ignore expansion of "docker ps -q" since it could be empty
+          # shellcheck disable=SC2046
+          docker stop $(docker ps -q) || true
+          # Prune all of the docker images
+          docker system prune -af
+
+  test:
+    needs: build
+    strategy:
+      matrix:
+        shard: [1, 2]
+        num-shards: [2]
+        runner-type: [linux.2xlarge]
+    runs-on: ${{ matrix.runner-type }}
+    name: test (default, ${{ matrix.shard }})
+    env:
+      JOB_BASE_NAME: ${{ inputs.build-environment }}-test
+      TEST_CONFIG: default
+      SHARD_NUMBER: ${{ matrix.shard }}
+      NUM_TEST_SHARDS: ${{ matrix.num_shards }}
+      PR_BODY: ${{ github.event.pull_request.body }}
+    steps:
+      - name: Checkout PyTorch
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          # deep clone, to allow use of git merge-base
+          fetch-depth: 0
+          submodules: recursive
+      - name: Setup EC2 Linux
+        uses: ./.github/workflows/actions/setup-ec2-linux
+        with:
+          github-secret: ${{ secrets.GITHUB_TOKEN }}
+      - name: Pull Docker image
+        run: |
+          retry () {
+              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
+          }
+          retry docker pull ${{ needs.build.outputs.docker-image }}
+      - name: Determine shm-size
+        run: |
+          shm_size="1g"
+          case "${BUILD_ENVIRONMENT}" in
+            *cuda*)
+              shm_size="2g"
+              ;;
+            *rocm*)
+              shm_size="8g"
+              ;;
+          esac
+          echo "::set-output name=shm-size::${shm_size}"
+      - uses: seemethere/download-artifact-s3@0504774707cbc8603d7dca922e8026eb8bf3b47b
+        name: Download PyTorch Build Artifacts
+        with:
+          name: ${{ inputs.build-environment }}
+      - name: Unzip artifacts
+        run: |
+          unzip -o artifacts.zip
+      - name: Output disk space left
+        run: |
+          sudo df -H
+      - name: Parse ref
+        id: parse-ref
+        run: .github/scripts/parse_ref.py
+      - name: Test
+        env:
+          BUILD_ENVIRONMENT: ${{ inputs.build-environment }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          BRANCH: ${{ steps.parse-ref.outputs.branch }}
+          CUSTOM_TEST_ARTIFACT_BUILD_DIR: build/custom_test_artifacts
+          SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
+          PYTORCH_RETRY_TEST_CASES: 1
+        timeout-minutes: ${{ inputs.test-timeout }}
+        run: |
+          set -x
+
+          if [[ $TEST_CONFIG == 'multigpu' ]]; then
+            TEST_COMMAND=.jenkins/pytorch/multigpu-test.sh
+          elif [[ $BUILD_ENVIRONMENT == *onnx* ]]; then
+            TEST_COMMAND=.jenkins/caffe2/test.sh
+          else
+            TEST_COMMAND=.jenkins/pytorch/test.sh
+          fi
+
+          # detached container should get cleaned up by teardown_ec2_linux
+          # TODO: Stop building test binaries as part of the build phase
+          # Used for GPU_FLAG since that doesn't play nice
+          # shellcheck disable=SC2086,SC2090
+          container_name=$(docker run \
+            ${GPU_FLAG:-} \
+            -e BUILD_ENVIRONMENT \
+            -e PR_NUMBER \
+            -e CUSTOM_TEST_ARTIFACT_BUILD_DIR \
+            -e GITHUB_ACTIONS \
+            -e IN_CI \
+            -e IS_GHA \
+            -e BRANCH \
+            -e SHA1 \
+            -e AWS_DEFAULT_REGION \
+            -e IN_WHEEL_TEST \
+            -e SHARD_NUMBER \
+            -e JOB_BASE_NAME \
+            -e TEST_CONFIG \
+            -e NUM_TEST_SHARDS \
+            -e PR_BODY \
+            -e PYTORCH_RETRY_TEST_CASES \
+            -e PR_LABELS \
+            --env-file="/tmp/github_env_${GITHUB_RUN_ID}" \
+            --ulimit stack=10485760:83886080 \
+            --security-opt seccomp=unconfined \
+            --cap-add=SYS_PTRACE \
+            --ipc=host \
+            --shm-size="${SHM_SIZE}" \
+            --tty \
+            --detach \
+            --name="${container_name}" \
+            --user jenkins \
+            -v "${GITHUB_WORKSPACE}:/var/lib/jenkins/workspace" \
+            -w /var/lib/jenkins/workspace \
+            ${{ needs.build.outputs.docker-image }}
+          )
+          docker exec -t "${container_name}" sh -c "sudo chown -R jenkins . && pip install dist/*.whl && ${TEST_COMMAND}"
+      - name: Chown workspace
+        env:
+          # TODO duplicated
+          ALPINE_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/alpine"
+        run: |
+          # Ensure the working directory gets chowned back to the current user
+          docker run --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
+      # TODO add upload of test stats and stuff
       - name: Hold runner for 2 hours or until ssh sessions have drained
         # TODO working-directory: !{{ pytorch_directory }}
         # Always hold for active ssh sessions
