@@ -17,6 +17,7 @@ on:
   push:
 {%- if not is_scheduled %}
     branches:
+      - master
       - main
       - release/*
 {%- endif %}

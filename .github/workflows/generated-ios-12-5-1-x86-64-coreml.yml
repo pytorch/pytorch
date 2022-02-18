@@ -6,6 +6,7 @@ name: ios-12-5-1-x86-64-coreml
 on:
   push:
     branches:
+      - master
       - main
       - release/*
     tags:
