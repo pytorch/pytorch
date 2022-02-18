@@ -406,7 +406,7 @@ struct KinetoThreadLocalState : public ProfilerThreadLocalStateBase {
         py_event_indices_{
             { nullptr,
               std::string("null") }};
-    for (size_t i = 0; i < py_events.size(); i++) {
+    for (const auto i : c10::irange(py_events.size())) {
       py_event_indices_.insert({py_events[i].get(), std::to_string(i)});
     }
 
