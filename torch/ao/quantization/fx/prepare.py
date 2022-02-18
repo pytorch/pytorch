@@ -162,6 +162,13 @@ def is_output_dtype_supported_by_backend(
     return output_dtype is None or \
         output_dtype == node_name_to_target_dtype[node.name]["output_activation_dtype"]
 
+def is_need_remove_observer(node, modules, node_name_to_target_dtype):
+    node_output_dtype = get_arg_target_dtype_as_output(node, modules, node_name_to_target_dtype)
+    if isinstance(node.args[0], Node):
+        if node_output_dtype == torch.quint8 and node.args[0].op == 'placeholder':
+            return False
+    return True
+
 def is_pattern_dtype_config_supported_by_backend(
     pattern: Optional[Pattern],
     matched_nodes: Optional[List[Node]],
@@ -1165,14 +1172,12 @@ def insert_observers_for_model(
                                     continue
                                 user_node.replace_input_with(node, maybe_output_obs_node)
 
+                            is_need_remove_observer_ = is_need_remove_observer(node, modules, node_name_to_target_dtype)
+
                             # for general tensor value ops, we modify the graph
                             # to make all inputs and outputs use the first input's
                             # observer
-                            if is_general_tensor_value_op or is_general_tensor_shape_op or is_reuse_input_qconfig_:
-                                node_output_dtype = get_arg_target_dtype_as_output(node, modules, node_name_to_target_dtype)
-                                if isinstance(node.args[0], Node):
-                                    if node_output_dtype == torch.quint8 and node.args[0].op == 'placeholder':
-                                        continue
+                            if (is_general_tensor_value_op and is_need_remove_observer_) or is_general_tensor_shape_op or is_reuse_input_qconfig_:
                                 if not maybe_make_input_output_share_observers(node, model, modules):
                                     remove_output_observer(node, model, modules)
 

@@ -4253,7 +4253,7 @@ class TestQuantizeFxOps(QuantizationTestCase):
             m, {'': torch.ao.quantization.get_default_qat_qconfig('fbgemm')},
             prepare_custom_config_dict={"input_quantized_idxs": [0]})
         expected_node_occurrence = {
-            ns.call_module(torch.ao.quantization.FusedMovingAvgObsFakeQuantize): 0,
+            ns.call_module(torch.ao.quantization.FusedMovingAvgObsFakeQuantize): 1,
         }
         self.checkGraphModuleNodes(
             mp, expected_node_occurrence=expected_node_occurrence)
