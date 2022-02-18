@@ -6,7 +6,7 @@ from torch.utils.data.datapipes.utils.common import get_file_pathnames_from_root
 
 class FileListerIterDataPipe(IterDataPipe[str]):
     r"""
-    Given path(s) to the root directory, yield file pathname(s) (path + filename) of files within the root directory.
+    Given path(s) to the root directory, yields file pathname(s) (path + filename) of files within the root directory.
     Multiple root directories can be provided.
 
     Args:
@@ -17,6 +17,12 @@ class FileListerIterDataPipe(IterDataPipe[str]):
         non_deterministic: Whether to return pathname in sorted order or not.
             If ``False``, the results yielded from each root directory will be sorted
         length: Nominal length of the datapipe
+
+    Example:
+        >>> from torchdata.datapipes.iter import FileLister
+        >>> dp = FileLister(root=".", recursive=True)
+        >>> list(dp)
+        ['example.py', './data/data.tar']
     """
 
     def __init__(
