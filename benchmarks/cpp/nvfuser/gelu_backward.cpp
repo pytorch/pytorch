@@ -4,6 +4,7 @@
 #include <torch/csrc/jit/codegen/cuda/arith.h>
 #include <torch/csrc/jit/codegen/cuda/executor.h>
 #include <torch/csrc/jit/codegen/cuda/fusion.h>
+#include <torch/csrc/jit/codegen/cuda/ir_builder.h>
 #include <torch/csrc/jit/codegen/cuda/lower2device.h>
 #include <torch/csrc/jit/codegen/cuda/scheduler/all_schedulers.h>
 
@@ -41,23 +42,23 @@ static void setupFusion(Fusion* fusion) {
   auto t5 = castOp(DataType::Float, t4);
   auto t6 = broadcast(t3, {true, true, false});
   auto t7 = add(t6, t5);
-  auto t8 = mul(t7, new Double(k_079));
-  auto t9 = mul(t7, new Double(k_004));
+  auto t8 = mul(t7, IrBuilder::create<Double>(k_079));
+  auto t9 = mul(t7, IrBuilder::create<Double>(k_004));
   auto t10 = mul(t9, t7);
-  auto t11 = add(t10, new Int(1));
+  auto t11 = add(t10, IrBuilder::create<Int>(1));
   auto t12 = mul(t8, t11);
   auto t13 = unaryOp(UnaryOpType::Tanh, t12);
-  auto t14 = mul(t7, new Double(0.5));
+  auto t14 = mul(t7, IrBuilder::create<Double>(0.5));
   auto t15 = mul(t13, t13);
   auto t16 = unaryOp(UnaryOpType::Neg, t15);
-  auto t17 = add(t16, new Int(1));
-  auto t18 = mul(t7, new Double(k_010));
+  auto t17 = add(t16, IrBuilder::create<Int>(1));
+  auto t18 = mul(t7, IrBuilder::create<Double>(k_010));
   auto t19 = mul(t18, t7);
-  auto t20 = add(t19, new Double(k_079));
+  auto t20 = add(t19, IrBuilder::create<Double>(k_079));
   auto t21 = mul(t17, t20);
   auto t22 = mul(t14, t21);
-  auto t23 = add(t13, new Int(1));
-  auto t24 = mul(t23, new Double(0.5));
+  auto t23 = add(t13, IrBuilder::create<Int>(1));
+  auto t24 = mul(t23, IrBuilder::create<Double>(0.5));
   auto t25 = add(t22, t24);
   auto t26 = mul(t25, t1);
 
