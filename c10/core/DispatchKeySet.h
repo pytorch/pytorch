@@ -419,6 +419,7 @@ class DispatchKeySet final {
     return 64 - llvm::countLeadingZeros(repr_);
   }
 
+#if defined(C10_MOBILE_TRIM_DISPATCH_KEYS)
 // [Note: Trimmed Mobile Dispatch Keys]
 /**
  * The method below maps the dispatch key in the enum DispatchKey to an
@@ -446,8 +447,6 @@ class DispatchKeySet final {
         return 6;
       case DispatchKey::AutogradCPU:
         return 7;
-      case DispatchKey::NumDispatchKeys: // Sentinel, end of runtime keys.
-        return 8;
       default:
         return -1;
     }
