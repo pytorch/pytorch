@@ -75,6 +75,10 @@ class FlatbufferLoader {
       mobile::serialization::Module* module,
       ExtraFilesMap& extra_files);
 
+  void parseExtraFiles(
+      mobile::serialization::Module* module,
+      ExtraFilesMap& extra_files);
+
   typedef TypePtr (*TypeResolver)(
       const std::string& type_str,
       std::shared_ptr<CompilationUnit> cu);

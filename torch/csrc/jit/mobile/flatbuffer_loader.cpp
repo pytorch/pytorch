@@ -146,6 +146,16 @@ void FlatbufferLoader::internal_registerTypeResolver(
   type_resolver_ = type_resolver;
 }
 
+void FlatbufferLoader::parseExtraFiles(
+    mobile::serialization::Module* module,
+    ExtraFilesMap& extra_files) {
+  auto extra_files_offsets = module->extra_files();
+  for (uint32_t i = 0; i < extra_files_offsets->size(); ++i) {
+    const auto* extra_file = extra_files_offsets->Get(i);
+    extra_files[extra_file->name()->str()] = extra_file->content()->str();
+  }
+}
+
 mobile::Module FlatbufferLoader::parseModule(
     mobile::serialization::Module* module,
     ExtraFilesMap& extra_files) {
@@ -173,11 +183,7 @@ mobile::Module FlatbufferLoader::parseModule(
   }
   IValue& module_ivalue = getIValue(module->state_obj());
 
-  auto extra_files_offsets = module_->extra_files();
-  for (uint32_t i = 0; i < extra_files_offsets->size(); ++i) {
-    const auto* extra_file = extra_files_offsets->Get(i);
-    extra_files[extra_file->name()->str()] = extra_file->content()->str();
-  }
+  parseExtraFiles(module, extra_files);
 
   // register functions
   for (const auto& f : all_functions_) {

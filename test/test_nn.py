@@ -14707,6 +14707,21 @@ class TestNNDeviceType(NNTestCase):
         with self.assertRaises(RuntimeError):
             torch.nn.functional.one_hot(torch.tensor([3, 4, 1, 0], device=device), -2)
 
+    def test_nn_empty(self, device):
+        # One off tests to ensure scalars from nn.yaml are properly applied
+        def verify_scalars(input, output):
+            self.assertEqual(input.shape, output.shape)
+            self.assertEqual(0, output.numel())
+
+        for input_shape in [(0), (0, 2)]:
+            for module in [torch.nn.ELU, torch.nn.Hardtanh, torch.nn.LeakyReLU, torch.nn.LogSigmoid,
+                           torch.nn.RReLU, torch.nn.Softshrink, torch.nn.Softplus, torch.nn.Sigmoid,
+                           torch.nn.Tanh]:
+                input = torch.randn(input_shape, device=device, requires_grad=True)
+                m = module()
+                output = m(input)
+                verify_scalars(input, output)
+
     def test_nn_scalars(self, device):
         # One off tests to ensure scalars from nn.yaml are properly applied
         def verify_scalars(input, output):
@@ -17532,13 +17547,12 @@ class TestNNDeviceType(NNTestCase):
         tests = [
             (64, 4, 16, 8),
             # dim_per_head = 12 does not divide evenly by CPU vectorization length of 8
-            (24, 2, 4, 2)
+            (24, 2, 4, 2),
+            # Make sure CUDA can handle small input sizes
+            (2, 2, 2, 2),
+            # dim_per_head = 6 does not divide evenly by CUDA vectorization length of 4, causes alignment issues
+            (24, 4, 4, 2)
         ]
-        if "cuda" not in str(device):
-            # TODO: CUDA implementation doesn't work if size is too small.
-            tests.append((2, 2, 2, 2))
-        print(tests)
-        print(device)
         for (embed_dim, num_heads, sl, bs) in tests:
             x = torch.randn(sl, bs, embed_dim, device=device, dtype=dtype) * 10
             qkv = torch.nn.Linear(embed_dim, 3 * embed_dim, device=device, dtype=dtype)
