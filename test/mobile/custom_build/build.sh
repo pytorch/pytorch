@@ -67,8 +67,6 @@ build_predictor() {
     -DCMAKE_BUILD_TYPE=Release \
     "${TEST_SRC_ROOT}"
   cmake --build . --target Predictor
-
-  make
 }
 
 run_predictor() {
@@ -100,13 +98,9 @@ test_custom_build_with_static_dispatch() {
 
 if [ -n "${TEST_DEFAULT_BUILD}" ]; then
   test_default_build
-fi
-
-if [ -n "${TEST_CUSTOM_BUILD_STATIC}" ]; then
+elif [ -n "${TEST_CUSTOM_BUILD_STATIC}" ]; then
   test_custom_build_with_static_dispatch
-fi
-
-if [ -z "${TEST_LIGHTWEIGHT_DISPATCH}" ]; then
+elif [ -z "${TEST_LIGHTWEIGHT_DISPATCH}" ]; then
   echo -e "Invalid option $*, supported options are TEST_DEFAULT_BUILD|TEST_CUSTOM_BUILD_STATIC|TEST_LIGHTWEIGHT_DISPATCH."
   exit 1
 fi
@@ -117,9 +111,9 @@ fi
 
 # shellcheck disable=SC2034
 COMPACT_JOB_NAME="${BUILD_ENVIRONMENT}"
-
+JENKINS_DIR="${SRC_ROOT}/.jenkins/pytorch"
 # shellcheck source=./common.sh
-source "${SRC_ROOT}/.jenkins/pytorch/common.sh"
+source "${JENKINS_DIR}/common.sh"
 
 echo "Clang version:"
 clang --version
@@ -128,16 +122,16 @@ CC="clang" CXX="clang++" \
   USE_LIGHTWEIGHT_DISPATCH=1 \
   STATIC_DISPATCH_BACKEND="CPU" \
   BUILD_LITE_INTERPRETER=1 \
-  python setup.py bdist_wheel
+  python "${JENKINS_DIR}/setup.py" bdist_wheel
   python -mpip install dist/*.whl
 
 # Test building via the sdist source tarball
-python setup.py sdist
+python "${JENKINS_DIR}/setup.py" sdist
 mkdir -p /tmp/tmp
 pushd /tmp/tmp
 tar zxf "$(dirname "${BASH_SOURCE[0]}")/../../dist/"*.tar.gz
 cd torch-*
-python setup.py build --cmake-only
+python "${JENKINS_DIR}/setup.py" build --cmake-only
 popd
 
 assert_git_not_dirty
