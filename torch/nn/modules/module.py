@@ -1325,6 +1325,31 @@ class Module:
         included. Keys are corresponding parameter and buffer names.
         Parameters and buffers set to ``None`` are not included.
 
+        This can be called as
+
+        .. function:: state_dict(*, prefix='', keep_vars=False)
+           :noindex:
+
+        .. function:: state_dict(destination, prefix='', keep_vars=False)
+           :noindex:
+
+        .. warning::
+            The second signature is deprecated and should not be used. It's only
+            temporarily kept for backward compatibility and will be removed in
+            a future release. Use the first signature instead.
+
+        Args:
+            destination (dict, optional): Deprecated. This dict is returned
+                with the module state saved in it. It should also have an
+                attribute ``_metadata: dict`` to save metadata of the module
+                state. If it's not provided, an ``OrderedDict`` is created and
+                returned. Default: ``None``
+            prefix (str, optional): a prefix added to parameter and buffer
+                names to compose the keys in dict. Default: ``''``
+            keep_vars (bool, optional): by default the :class:`~torch.Tensor` s
+                returned in the state dict are detached from autograd. If it's
+                set to ``True``, detaching is not performed. Default: ``False``
+
         Returns:
             dict:
                 a dictionary containing a whole state of the module
