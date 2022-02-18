@@ -2647,9 +2647,6 @@ class TestVmapOperators(Namespace.TestVmapBase):
             (lambda t: captured.random_(0, 2), (torch.randn(B0),)),
             (lambda t: captured.random_(2), (torch.randn(B0),)),
             (lambda t: captured.uniform_(), (torch.randn(B0),)),
-
-            # factory functions
-            (lambda t: torch.randperm(5), (torch.randn(B0),)),
         ]
         for op, args in random_ops:
             with self.assertRaisesRegex(RuntimeError,
@@ -3461,6 +3458,37 @@ class TestVmapOperatorsOpInfo(TestCase):
                 expected = op(passed, [B0])
                 for i in range(B0):
                     assert torch.allclose(vmap_result[i], expected)
+
+    @parametrize('randomness', ['same', 'different', 'error'])
+    @parametrize('use_generator', [True, False])
+    def test_randperm(self, device, randomness, use_generator):
+        # needs a special case because randperm doesn't take a batch size
+        B0 = 4
+        seed = 1234567
+        passed = torch.randn(B0, device=device)
+
+        torch.manual_seed(seed)
+        generator = torch.Generator(device=device)
+        orig_state = generator.get_state()
+
+        kwargs = {'device': device, 'generator': generator} if use_generator else {'device': device}
+
+        if randomness == 'error':
+            with self.assertRaisesRegex(RuntimeError, r"called random operation while in randomness error mode"):
+                vmap(lambda _: torch.randperm(10, **kwargs), randomness=randomness)(passed)
+            return
+
+        vmap_result = vmap(lambda _: torch.randperm(10, **kwargs), randomness=randomness)(passed)
+        generator = generator.set_state(orig_state)
+        torch.manual_seed(seed)
+        if randomness == 'different':
+            for i in range(B0):
+                expected = torch.randperm(10, **kwargs)
+                assert torch.allclose(vmap_result[i], expected)
+        else:
+            expected = torch.randperm(10, **kwargs)
+            for i in range(B0):
+                assert torch.allclose(vmap_result[i], expected)
 
 
 only_for = ("cpu", "cuda")
