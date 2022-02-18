@@ -211,7 +211,7 @@ if(INTERN_BUILD_ATEN_OPS)
         ${GEN_UNBOXING_COMMAND}
         --output-dependencies ${CMAKE_BINARY_DIR}/aten/src/ATen/generated_unboxing_sources.cmake
         )
-    message("GEN_UNBOXING_COMMAND_sources: ${GEN_UNBOXING_COMMAND_sources}")
+    message(STATUS "Generating sources for lightweight dispatch: ${GEN_UNBOXING_COMMAND_sources}")
     execute_process(
         COMMAND ${GEN_UNBOXING_COMMAND_sources} --dry-run
         RESULT_VARIABLE RETURN_VALUE
