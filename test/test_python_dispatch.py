@@ -579,10 +579,27 @@ $6 = torch._ops.aten.add_($1, $5)''')
 
         x = MySubclass(torch.rand(2, 2, dtype=torch.complex64))
         y = x.conj()
-        # y has the conj bit set at this point. So any op without a fused conj kernel
-        # will clone y on the way to the backend.
-        # Using exp here as an op that doesn't have a special conjugated implementation
-        # if you just added it, replace exp with any other op that doesn't have one.
+        # Details of the bug that this tests for:
+        # Here, y dispatch keys are: {PythonTLSSnapshot, AutogradCPU, Conjugate, Python, CPU}
+        # There are a few calls to the dispatcher that are going to happen here:
+        #  - call_exp: User calling exp on y
+        #    - PythonTLSSnapshot: records the TLS on entry and redispatch
+        #    - AutogradCPU: no input requires grad, so does nothing and redispatch
+        #    - Conjugate: no special implementation for exp: use the fallback that
+        #                 first clone the Tensor (to materialize the conj) then redispatch
+        #      - call_clone: conjugate fallback calling clone on y
+        #        - PythonTLSSnapshot: records the TLS on entry and redispatch
+        #        - AutogradCPU: no input requires grad, so does nothing and redispatch
+        #        - Conjugate: special implementation for clone: just skip this key
+        #        - Python: Reset the TLS based on the snapshot above and call the user implementation (this
+        #                  actually calls into the dispatcher again but since we disable both our keys
+        #                  before, not detailed here)
+        #        - exit Python: restore the TLS and exit
+        #        - exit Conjugate: nothing was inplace so just exit
+        #        - exit AutogradCPU: no gradient so just exit
+        #        - exit PythonTLSSnapshot: done with this call, reset the saved TLS to empty
+        #    - Python: Reset the TLS again based on the snapshot. <- this used to fail
+        #    - More steps....
         y.exp()
 
 
