@@ -34,6 +34,8 @@ from ._functions import _get_stream
 from .scatter_gather import gather, is_namedtuple, scatter_kwargs
 
 
+logger = logging.getLogger(__name__)
+
 def _tree_flatten_with_rref(output):
     output_is_rref = RPC_AVAILABLE and isinstance(output, RRef)
     if output_is_rref:
@@ -948,7 +950,7 @@ class DistributedDataParallel(Module, Joinable):
             # during forward computation.
             # This should be called only once during whole training period.
             if torch.is_grad_enabled() and self.reducer._rebuild_buckets():
-                logging.info("Reducer buckets have been rebuilt in this iteration.")
+                logger.info("Reducer buckets have been rebuilt in this iteration.")
                 self._has_rebuilt_buckets = True
 
             # sync params according to location (before/after forward) user
@@ -1102,14 +1104,6 @@ class DistributedDataParallel(Module, Joinable):
     def train(self, mode=True):
         super(DistributedDataParallel, self).train(mode)
         return self
-
-    # When running in join mode, schedules an allreduce to match the one in the
-    # forward pass to determine the no. of currently active processes and whether
-    # all processes have joined.
-    def _schedule_shadow_all_reduce_for_fwd_pass(self):
-        all_active_procs = torch.zeros(1, device=self.device)
-        dist.all_reduce(all_active_procs, group=self.process_group)
-        return all_active_procs.item()
 
     # When running in join mode, schedules an allreduce to notify joined ranks
     # of whether backwards pass synchronization will run this iteraton or not.
