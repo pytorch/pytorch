@@ -170,7 +170,6 @@ def min_cut_rematerialization_partition(joint_module: fx.GraphModule, _joint_inp
     # draw_graph(joint_module, "joint.svg")
     full_bw_graph = joint_module.graph
 
-    nx_graph = nx.DiGraph()
     tangent_closure = set()
     name_to_node = {}
     for node in full_bw_graph.nodes:
@@ -232,6 +231,7 @@ def min_cut_rematerialization_partition(joint_module: fx.GraphModule, _joint_inp
         else:
             return mem_sz * 2
 
+    nx_graph = nx.DiGraph()
     for node in full_bw_graph.nodes:
         if node in tangent_closure and node.op != 'output':
             nx_graph.add_edge(node.name+"_in", "sink", capacity=math.inf)
