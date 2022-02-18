@@ -15,7 +15,6 @@ from .quantized_fusion_patterns_and_replacements import get_fbgemm_patterns_and_
 from .match_utils import is_match, MatchAllNode
 from .utils import (
     collect_producer_nodes,
-    create_node_from_old_node_preserve_meta,
     get_linear_prepack_op_for_dtype,
     get_new_attr_name_with_prefix,
     graph_module_from_producer_nodes,
