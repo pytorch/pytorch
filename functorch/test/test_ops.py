@@ -970,7 +970,7 @@ run_ops = set()
 
 class TestDecompositionOpInfo(TestCase):
 
-    @unittest.skip("dispatcher bug")
+    # @unittest.skip("dispatcher bug")
     # @unittest.skipIf(IS_FBCODE, "__torch_dispatch__ is buggy")
     @ops(
         functorch_lagging_op_db + additional_op_db,
@@ -980,8 +980,6 @@ class TestDecompositionOpInfo(TestCase):
     # Each one of these is a bug (or needs to be investigated)
     @skipOps('TestDecompositionOpInfo', 'test_decomposition', {
         skip('view_as_complex'),
-        # skip('log_softmax', device_type='cuda'),
-        # skip('nn.functional.softmin', device_type='cuda'),
         xfail('linalg.cholesky'),
         xfail('linalg.inv'),
         skip('linalg.det', 'singular', device_type='cuda'),  # this is nasty and seems to stop the test suite
@@ -1089,7 +1087,7 @@ class TestDecompositionOpInfo(TestCase):
                 # pytorch_out_64}. In other words, we compare how far the
                 # decomposition and pytorch are from the "ground truth" (i.e.
                 # fp64). If the decomposition results in more error, we error
-                if func in decomposition_table and func not in [torch.ops.aten.detach, torch.ops.aten._s_where]:
+                if func in decomposition_table and func not in [torch.ops.aten.detach]:
                     # Some functions take a dtype as argument, so we need to
                     # manually change that dtype in order to run it with a
                     # higher precision
