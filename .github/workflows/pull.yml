@@ -1,0 +1,11 @@
+name: pull
+
+on:
+  pull_request:
+  push:
+    branches:
+      - master
+
+jobs:
+  test:
+    uses: ./.github/workflows/linux-build.yml
