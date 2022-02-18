@@ -149,7 +149,7 @@ void apply_eig(const Tensor& self, bool eigenvectors, Tensor& vals_, Tensor& vec
   Tensor rwork;
   value_t* rwork_data = nullptr;
   if (self.is_complex()) {
-    ScalarType real_dtype = toValueType(typeMetaToScalarType(self.dtype()));
+    ScalarType real_dtype = toRealValueType(typeMetaToScalarType(self.dtype()));
     rwork = at::empty({n*2}, self.options().dtype(real_dtype));
     rwork_data = rwork.data_ptr<value_t>();
   }
@@ -242,7 +242,7 @@ void apply_linalg_eig(Tensor& values, Tensor& vectors, Tensor& input, Tensor& in
   Tensor rwork;
   value_t* rwork_data = nullptr;
   if (input.is_complex()) {
-    ScalarType real_dtype = toValueType(input.scalar_type());
+    ScalarType real_dtype = toRealValueType(input.scalar_type());
     rwork = at::empty({lda * 2}, input.options().dtype(real_dtype));
     rwork_data = rwork.data_ptr<value_t>();
   }
@@ -647,7 +647,7 @@ void apply_lstsq(const Tensor& A, Tensor& B, Tensor& rank, Tensor& singular_valu
       default:
         rwork_len = std::max<int64_t>(1, rwork_opt);
     }
-    rwork = at::empty({rwork_len}, A.options().dtype(c10::toValueType(A.scalar_type())));
+    rwork = at::empty({rwork_len}, A.options().dtype(c10::toRealValueType(A.scalar_type())));
     rwork_data = rwork.data_ptr<value_t>();
   }
 
