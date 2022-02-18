@@ -202,7 +202,8 @@ class PackageExporter:
             self.buffer = f
 
         self.zip_file = zip_file_reader_type(f)
-        self.storage_context = self.zip_file.get_storage_context()
+        self.script_module_serializer = torch._C.ScriptModuleSerializer(self.zip_file.zip_file_writer)
+        self.storage_context = self.script_module_serializer.storage_context()
 
         self._written_files: Set[str] = set()
 
@@ -1015,6 +1016,7 @@ class PackageExporter:
                 ...
         """
         self._execute_dependency_graph()
+        self.script_module_serializer.write_files()
         self._finalize_zip()
 
     def _finalize_zip(self):

@@ -355,7 +355,7 @@ def unpackage_script_module(importer: PackageImporter, script_module_id: str) ->
     cu = torch._C.CompilationUnit()
     cpp_module = torch._C._import_ir_module_from_package(
         cu,
-        importer.zip_reader.get_zip_file_reader(),
+        importer.zip_reader.zip_file_reader,
         importer.storage_context,
         validate_map_location(importer.last_map_location),
         script_module_id,
@@ -541,7 +541,7 @@ if _enabled:
             Pickler's ``persistent_load`` function.
             """
             assert isinstance(exporter.zip_file, TorchScriptPackageZipFileWriter)
-            script_module_serializer = exporter.zip_file.get_serializer()
+            script_module_serializer = exporter.script_module_serializer
             script_module_id = exporter.get_unique_id()
             script_module_serializer.serialize(self._c, int(script_module_id))
             return (unpackage_script_module, (script_module_id,))
