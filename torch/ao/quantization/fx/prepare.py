@@ -1169,8 +1169,10 @@ def insert_observers_for_model(
                             # to make all inputs and outputs use the first input's
                             # observer
                             if is_general_tensor_value_op or is_general_tensor_shape_op or is_reuse_input_qconfig_:
-                                if get_arg_target_dtype_as_output(node, modules, node_name_to_target_dtype) == torch.quint8:
-                                    continue
+                                node_output_dtype = get_arg_target_dtype_as_output(node, modules, node_name_to_target_dtype)
+                                if isinstance(node.args[0], Node):
+                                    if node_output_dtype == torch.quint8 and node.args[0].op == 'placeholder':
+                                        continue
                                 if not maybe_make_input_output_share_observers(node, model, modules):
                                     remove_output_observer(node, model, modules)
 
