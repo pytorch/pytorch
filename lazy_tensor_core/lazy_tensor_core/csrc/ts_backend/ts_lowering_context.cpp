@@ -1,5 +1,6 @@
 #include <torch/csrc/lazy/ts_backend/ts_lowering_context.h>
 #include "c10/core/ScalarType.h"
+#include "lazy/ts_backend/ts_node.h"
 #include "lazy_tensor_core/csrc/ts_backend/backend_impl.h"
 #include "lazy_tensor_core/csrc/ts_backend/ts_shape_inference.h"
 
@@ -28,6 +29,10 @@ TSLoweringContext::TSLoweringContext(const std::string& name,
 
 void TSLoweringContext::AssignOutputOp(const Output& output,
                                        torch::jit::Value* op) {
+  auto ts_node = NodeCast<TsNode>(output.node, output.node->op());
+  if (!ts_node->getPythonStacktrace().empty()) {
+    op->node()->s_(c10::Symbol::attr("source"), ts_node->getPythonStacktrace());
+  }
   emitted_outputs_[output] = std::move(op);
 }
 

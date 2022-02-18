@@ -64,6 +64,10 @@ class TORCH_API TsNode : public lazy::Node {
     return operands_as_outputs_.at(i);
   }
 
+  const std::string& getPythonStacktrace() const {
+         return python_stacktrace_;
+  }
+
   // Lower is a backend-specific method since it returns a backend specific
   // type. hence, it is convenient to define it differently per-backend rather
   // than at Node API
@@ -80,6 +84,7 @@ class TORCH_API TsNode : public lazy::Node {
   // Outputs do not hold references on the nodes, and neither do the uses, since
   // otherwise we get into circular reference counting.
   std::vector<Output> operands_as_outputs_;
+  std::string python_stacktrace_;
 };
 
 }  // namespace lazy
