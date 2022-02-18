@@ -1315,10 +1315,10 @@ class Module:
     # TODO: Remove string escape once Python-3.6 no longer supported
     # See https://github.com/python/mypy/issues/6904#issuecomment-496207426
     @overload
-    def state_dict(self, prefix: str = ..., keep_vars: bool = ...) -> typing.OrderedDict[str, Tensor]:
+    def state_dict(self, *, prefix: str = ..., keep_vars: bool = ...) -> typing.OrderedDict[str, Tensor]:
         ...
 
-    def state_dict(self, destination=None, prefix='', keep_vars=False):
+    def state_dict(self, *args, destination=None, prefix='', keep_vars=False):
         r"""Returns a dictionary containing a whole state of the module.
 
         Both parameters and persistent buffers (e.g. running averages) are
@@ -1335,9 +1335,30 @@ class Module:
             ['bias', 'weight']
 
         """
-        if destination is None:
+
+        # TODO: positional args parsing is just for BC. Remove on transition to kwargs-only
+        warn_msg = []
+        if len(args) > 0:
+            warn_msg.append('positional arguments')
+            if destination is None:
+                destination = args[0]
+            if len(args) > 1 and prefix == '':
+                prefix = args[1]
+            if len(args) > 2 and keep_vars is False:
+                keep_vars = args[2]
+
+        if destination is not None:
+            warn_msg.append('argument "destination"')
+        else:
             destination = OrderedDict()
             destination._metadata = OrderedDict()
+
+        if warn_msg:
+            # DeprecationWarning is ignored by default
+            warnings.warn(
+                " and ".join(warn_msg) + " are deprecated. nn.Module.state_dict will not accept them in the future. "
+                "Refer to https://pytorch.org/docs/master/generated/torch.nn.Module.html#torch.nn.Module.state_dict for details.")
+
         return self._state_dict_impl(destination, prefix, keep_vars)
 
     def _register_load_state_dict_pre_hook(self, hook, with_module=False):
