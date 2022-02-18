@@ -787,7 +787,7 @@ def maybe_insert_observers_before_graph_output(
 
 def maybe_propagate_dtype_for_node(
     node: Node,
-    target_dtype: torch.dtype,
+    target_dtype: Union[torch.dtype, type],
     node_name_to_target_dtype: Dict[str, Dict[str, Optional[torch.dtype]]],
     matches: Dict[str, MatchResult],
 ) -> None:

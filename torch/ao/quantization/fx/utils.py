@@ -462,7 +462,7 @@ def all_node_args_except_first(node: Node) -> List[int]:
     """
     return [i for i, arg in enumerate(node.args)][1:]
 
-def return_arg_list(arg_indices: List[int]) -> Callable[Node, int]:
+def return_arg_list(arg_indices: List[int]) -> Callable[[Node], List[int]]:
     """
     Constructs a function that takes a node as arg and returns the arg_indices
     that are valid for node.args
@@ -518,7 +518,7 @@ NON_OBSERVABLE_ARG_DICT = {
     },
 }
 
-def get_non_observable_arg_indexes_and_types(node: Node) -> Dict[type, Union[Callable[[Node], List[int]], List[int]]]:
+def get_non_observable_arg_indexes_and_types(node: Node) -> Dict[type, Callable[[Node], List[int]]]:
     """
     Returns a dict with of non float tensor types as keys and values which correspond to a
     function to retrieve the list (which takes the node as an argument)
