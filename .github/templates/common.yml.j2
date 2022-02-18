@@ -6,6 +6,10 @@
 {%- set squid_no_proxy = "localhost,127.0.0.1,github.com,amazonaws.com,s3.amazonaws.com,169.254.169.254,169.254.170.2,/var/run/docker.sock" -%}
 {%- set timeout_minutes = 240 -%}
 
+# NOTE: If testing pytorch/builder changes you can change this variable to change what pytorch/builder reference
+#       the binary builds will check out
+{%- set builder_branch = "main" -%}
+
 {%- macro concurrency(build_environment) -%}
 concurrency:
   group: !{{ build_environment }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
@@ -43,14 +47,12 @@ concurrency:
         run: .github/scripts/parse_ref.py
 {%- endmacro -%}
 
-{%- macro upload_test_statistics(build_environment, when="always()", pytorch_directory="") -%}
-      - name: Display and upload test statistics (Click Me)
+{%- macro upload_test_statistics(build_environment, when="always()", pytorch_directory="", needs_credentials=False) -%}
+      - name: Upload test statistics
 {%- if pytorch_directory %}
         working-directory: !{{ pytorch_directory }}
 {%- endif %}
         if: !{{ when }}
-        # temporary hack: set CIRCLE_* vars, until we update
-        # tools/stats/print_test_stats.py to natively support GitHub Actions
         env:
           AWS_DEFAULT_REGION: us-east-1
           BRANCH: ${{ steps.parse-ref.outputs.branch }}
@@ -59,6 +61,10 @@ concurrency:
           SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
           TAG: ${{ steps.parse-ref.outputs.tag }}
           WORKFLOW_ID: '${{ github.run_id }}'
+{%- if needs_credentials %}
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_OSSCI_METRICS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_OSSCI_METRICS_SECRET_ACCESS_KEY }}
+{%- endif %}
         shell: bash
         run: |
           python3 -m pip install -r requirements.txt
@@ -185,10 +191,15 @@ concurrency:
           docker system prune -af
 {%- endmacro -%}
 
-{%- macro checkout(submodules="recursive", deep_clone=True, directory="", repository="pytorch/pytorch", branch="") -%}
+{%- macro checkout(submodules="recursive", deep_clone=True, directory="", repository="pytorch/pytorch", branch="", checkout_pr_head=True) -%}
       - name: Checkout !{{ 'PyTorch' if repository == "pytorch/pytorch" else repository }}
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
+      {%- if branch %}
+          ref: !{{ branch }}
+      {%- elif checkout_pr_head %}
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+      {%- endif %}
       {%- if deep_clone %}
           # deep clone, to allow use of git merge-base
           fetch-depth: 0
@@ -196,9 +207,6 @@ concurrency:
           submodules: !{{ submodules }}
       {%- if repository != "pytorch/pytorch" %}
           repository: !{{ repository }}
-      {%- endif %}
-      {%- if branch %}
-          ref: !{{ branch }}
       {%- endif %}
       {%- if directory %}
           path: !{{ directory }}
@@ -212,13 +220,12 @@ concurrency:
       {%- endif %}
 {%- endmacro -%}
 
-{%- macro upload_downloaded_files(name, artifact_name="", use_s3=True, when="always()") -%}
+{%- macro upload_downloaded_files(name, config=None, shard=None, num_shards=None, runner=None, artifact_name="", use_s3=True, when="always()") -%}
       - name: Zip JSONs for upload
         if: !{{ when }}
         env:
 {%- if name == 'linux' or name == 'windows' or name == 'macos' %}
-          FILE_SUFFIX: '${{ github.job }}-${{ matrix.config }}-${{ matrix.shard }}-${{ matrix.num_shards }}-${{ matrix.runner }}'
-{%- else %}
+          FILE_SUFFIX: '${{ github.job }}-!{{ config }}-!{{ shard }}-!{{ num_shards }}-!{{ runner }}'{%- else %}
           FILE_SUFFIX: '!{{ name }}-${{ github.job }}'
 {%- endif %}
 {%- if name == 'windows' %}
@@ -250,12 +257,12 @@ concurrency:
             test-jsons-*.zip
 {%- endmacro -%}
 
-{%- macro upload_test_reports(name, artifact_name="", use_s3=True) -%}
+{%- macro upload_test_reports(name, config=None, shard=None, num_shards=None, runner=None, artifact_name="", use_s3=True) -%}
       - name: Zip test reports for upload
         if: always()
         env:
 {%- if name == 'linux' or name == 'windows' or name == 'macos' %}
-          FILE_SUFFIX: '${{ github.job }}-${{ matrix.config }}-${{ matrix.shard }}-${{ matrix.num_shards }}-${{ matrix.runner }}'
+          FILE_SUFFIX: '${{ github.job }}-!{{ config }}-!{{ shard }}-!{{ num_shards }}-!{{ runner }}'
 {%- else %}
           FILE_SUFFIX: '!{{ name }}-${{ github.job }}'
 {%- endif %}

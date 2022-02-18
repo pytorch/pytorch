@@ -4,7 +4,7 @@
 #if AT_CUDNN_ENABLED()
 
 #include <ATen/native/cudnn/Macros.h>
-#include "c10/util/ArrayRef.h"
+#include <c10/util/ArrayRef.h
 
 #if HAS_CUDNN_V8()
 
