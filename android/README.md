@@ -69,11 +69,6 @@ git submodule update --init --recursive --jobs 0
 sh ./scripts/build_pytorch_android.sh
 ```
 
-The default build is lite interpreter. If you want to use full jit, run
-```
-BUILD_LITE_INTERPRETER=0 ./scripts/build_pytorch_android.sh
-```
-
 The workflow contains several steps:
 
 1\. Build libtorch for android for all 4 android abis (armeabi-v7a, arm64-v8a, x86, x86_64)
@@ -89,7 +84,7 @@ They are specified as environment variables:
 
 `ANDROID_HOME` - path to [Android SDK](https://developer.android.com/studio/command-line/sdkmanager.html)
 
-`ANDROID_NDK` - path to [Android NDK](https://developer.android.com/studio/projects/install-ndk). It's recommended to use NDK version 21.x.
+`ANDROID_NDK` - path to [Android NDK](https://developer.android.com/studio/projects/install-ndk). It's recommended to use NDK 21.x.
 
 `GRADLE_HOME` - path to [gradle](https://gradle.org/releases/)
 
@@ -154,7 +149,7 @@ android {
 }
 
 dependencies {
-    extractForNativeBuild('org.pytorch:pytorch_android:1.6.0')
+    extractForNativeBuild('org.pytorch:pytorch_android:1.10.0')
 }
 
 task extractAARForNativeBuild {
@@ -239,19 +234,6 @@ void loadAndForwardModel(const std::string& modelPath) {
 To load torchscript model for mobile we need some special setup which is placed in `struct JITCallGuard` in this example. It may change in future, you can track the latest changes keeping an eye in our [pytorch android jni code]([https://github.com/pytorch/pytorch/blob/master/android/pytorch_android/src/main/cpp/pytorch_jni_jit.cpp#L28)
 
 [Example of linking to libtorch from aar](https://github.com/pytorch/pytorch/tree/master/android/test_app)
-
-## Running Test
-The current test is built with full jit, so we have to manually disable lite interpreter
-```
-BUILD_LITE_INTERPRETER=0 ./scripts/build_pytorch_android.sh x86
-BUILD_LITE_INTERPRETER=0 ./android/run_tests.sh
-```
-
-If the test model is missing or outdated, use this script to regenerate it
-```
-cd android/pytorch_android
-python generate_test_torchscripts.py
-```
 
 ## PyTorch Android API Javadoc
 
