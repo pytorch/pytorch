@@ -9,6 +9,10 @@ inputs:
   always-rebuild:
     description: If set, always build a fresh docker image.
     required: true
+outputs:
+  docker-image:
+    description: The docker image to use for the rest of the workflow
+    value: steps.calculate-tag.outputs.docker_image
 
 runs:
   using: composite
