@@ -3,6 +3,7 @@
 #include <ATen/core/ivalue.h>
 #include <caffe2/serialize/inline_container.h>
 #include <torch/csrc/jit/mobile/function.h>
+#include <torch/csrc/jit/mobile/import.h>
 #include <torch/csrc/jit/mobile/interpreter.h>
 #include <torch/csrc/jit/mobile/module.h>
 #include <torch/csrc/jit/runtime/instruction.h>
@@ -15,7 +16,6 @@
 namespace torch {
 namespace jit {
 
-using ExtraFilesMap = std::unordered_map<std::string, std::string>;
 // On high level, to produce a Module from a file on disk, we need to go
 // through the follow steps:
 // 1. Read: Read the file from disk -> memory
