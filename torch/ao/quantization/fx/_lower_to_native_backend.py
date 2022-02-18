@@ -14,7 +14,7 @@ from .quantization_types import Pattern
 from ..utils import _parent_name, check_node
 from ..qconfig import QConfigAny
 from .utils import create_node_from_old_node_preserve_meta
-from typing import Dict, Tuple, Type, List, Callable
+from typing import Dict, Tuple, Type, List, Callable, Any, Union
 from torch.fx import Node
 import operator
 
@@ -143,8 +143,8 @@ def _lower_quantized_binary_op(
 ) -> QuantizedGraphModule:
     modules = dict(model.named_modules(remove_duplicate=False))
 
-    def get_bop_patterns(bop: Callable) -> Pattern:
-        patterns = []
+    def get_bop_patterns(bop: Any) -> List[Pattern]:
+        patterns: List[Pattern] = []
         bop_pattern = (bop, MatchAllNode, MatchAllNode)
         for relu_op in [torch.relu, torch.nn.functional.relu, torch.nn.ReLU]:
             patterns.append(
@@ -157,7 +157,7 @@ def _lower_quantized_binary_op(
              MatchAllNode, MatchAllNode, MatchAllNode))
         return patterns
 
-    patterns = []
+    patterns: List[Pattern] = []
     for bop in [operator.add, torch.add, operator.mul, torch.mul]:
         patterns.extend(get_bop_patterns(bop))
     patterns.extend(

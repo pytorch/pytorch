@@ -14,7 +14,7 @@ from torch.testing import make_tensor
 from torch.testing._internal.common_utils import (
     TestCase, run_tests, do_test_empty_full, TEST_WITH_ROCM, suppress_warnings,
     torch_to_numpy_dtype_dict, slowTest,
-    TEST_SCIPY, IS_MACOS, IS_PPC, IS_WINDOWS)
+    TEST_SCIPY, IS_MACOS, IS_PPC, IS_WINDOWS, parametrize)
 from torch.testing._internal.common_device_type import (
     expectedFailureMeta, instantiate_device_type_tests, deviceCountAtLeast, onlyNativeDeviceTypes,
     onlyCPU, largeTensorTest, precisionOverride, dtypes,
@@ -2786,36 +2786,44 @@ class TestTensorCreation(TestCase):
                                                             sparse_size, dtype=torch.float64)
                 self.assertEqual(sparse_with_dtype.device, torch.device('cpu'))
 
+    def _test_signal_window_functions(self, name, dtype, device, **kwargs):
+        import scipy.signal as signal
+
+        torch_method = getattr(torch, name + '_window')
+        if not dtype.is_floating_point:
+            with self.assertRaisesRegex(RuntimeError, r'floating point'):
+                torch_method(3, dtype=dtype)
+            return
+        for size in [0, 1, 2, 5, 10, 50, 100, 1024, 2048]:
+            for periodic in [True, False]:
+                res = torch_method(size, periodic=periodic, **kwargs, device=device, dtype=dtype)
+                # NB: scipy always returns a float64 result
+                ref = torch.from_numpy(signal.get_window((name, *(kwargs.values())), size, fftbins=periodic))
+                self.assertEqual(res, ref, exact_dtype=False)
+        with self.assertRaisesRegex(RuntimeError, r'not implemented for sparse types'):
+            torch_method(3, layout=torch.sparse_coo)
+        self.assertTrue(torch_method(3, requires_grad=True).requires_grad)
+        self.assertFalse(torch_method(3).requires_grad)
+
     @onlyNativeDeviceTypes
     @precisionOverride({torch.bfloat16: 5e-2, torch.half: 1e-3})
     @unittest.skipIf(not TEST_SCIPY, "Scipy not found")
     @dtypesIfCUDA(torch.float, torch.double, torch.bfloat16, torch.half, torch.long)
     @dtypes(torch.float, torch.double, torch.long)
-    def test_signal_window_functions(self, device, dtype):
-        import scipy.signal as signal
+    @parametrize("window", ['hann', 'hamming', 'bartlett', 'blackman'])
+    def test_signal_window_functions(self, device, dtype, window):
+        self._test_signal_window_functions(window, dtype, device)
 
-        def test(name, kwargs):
-            torch_method = getattr(torch, name + '_window')
-            if not dtype.is_floating_point:
-                with self.assertRaisesRegex(RuntimeError, r'floating point'):
-                    torch_method(3, dtype=dtype)
-                return
-            for size in [0, 1, 2, 5, 10, 50, 100, 1024, 2048]:
-                for periodic in [True, False]:
-                    res = torch_method(size, periodic=periodic, **kwargs, device=device, dtype=dtype)
-                    # NB: scipy always returns a float64 result
-                    ref = torch.from_numpy(signal.get_window((name, *(kwargs.values())), size, fftbins=periodic))
-                    self.assertEqual(res, ref, exact_dtype=False)
-            with self.assertRaisesRegex(RuntimeError, r'not implemented for sparse types'):
-                torch_method(3, layout=torch.sparse_coo)
-            self.assertTrue(torch_method(3, requires_grad=True).requires_grad)
-            self.assertFalse(torch_method(3).requires_grad)
-
-        for window in ['hann', 'hamming', 'bartlett', 'blackman']:
-            test(window, kwargs={})
-
+    @onlyNativeDeviceTypes
+    # See https://github.com/pytorch/pytorch/issues/72630
+    @skipMeta
+    @precisionOverride({torch.bfloat16: 5e-2, torch.half: 1e-3})
+    @unittest.skipIf(not TEST_SCIPY, "Scipy not found")
+    @dtypesIfCUDA(torch.float, torch.double, torch.bfloat16, torch.half, torch.long)
+    @dtypes(torch.float, torch.double, torch.long)
+    def test_kaiser_window(self, device, dtype):
         for num_test in range(50):
-            test('kaiser', kwargs={'beta': random.random() * 30})
+            self._test_signal_window_functions('kaiser', dtype, device, beta=random.random() * 30)
 
     def test_tensor_factories_empty(self, device):
         # ensure we can create empty tensors from each factory function

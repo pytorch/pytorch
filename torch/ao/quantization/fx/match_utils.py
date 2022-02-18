@@ -58,7 +58,7 @@ def is_match(modules, node, pattern, max_uses=sys.maxsize):
     elif callable(self_match):
         if node.op != 'call_function' or node.target is not self_match:
             return False
-        elif isinstance(node, Node) and node.target is getattr:
+        elif node.target is getattr:
             if node.args[1] != pattern[1]:
                 return False
     elif isinstance(self_match, str):
