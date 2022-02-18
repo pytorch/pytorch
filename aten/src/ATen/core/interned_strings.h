@@ -220,6 +220,7 @@ namespace c10 {
   _(onnx, Constant)                  \
   _(onnx, ConstantFill)              \
   _(onnx, Div)                       \
+  _(onnx, Einsum)                    \
   _(onnx, GRU)                       \
   _(onnx, Gather)                    \
   _(onnx, Gemm)                      \
