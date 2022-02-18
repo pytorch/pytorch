@@ -12,8 +12,6 @@ from typing import (
     List,
     Optional,
     Generator,
-    overload,
-    Mapping,
     NamedTuple,
     Set,
     Tuple,
@@ -116,7 +114,7 @@ class StateDictType(Enum):
     """
     This enum indicates that which type of ``state_dict`` the FSDP module is
     currently processing (returning or loading).
-    The default value should be STATE_DICT to comply the PyTorch convention.
+    The default value should be FULL_STATE_DICT to comply the PyTorch convention.
     ..note::
         FSDP currently supports three types of ``state_dict``:
             1. ``state_dict/load_state_dict`: this pair of APIs return and load
@@ -132,7 +130,7 @@ class StateDictType(Enum):
                schemes (resharding may be required).
     """
 
-    STATE_DICT = auto()
+    FULL_STATE_DICT = auto()
     LOCAL_STATE_DICT = auto()
     SHARDED_STATE_DICT = auto()
 
@@ -308,10 +306,17 @@ class FullyShardedDataParallel(nn.Module):
         # Enum to indicate if we're in the forward/backward pass, idle, etc.
         self.training_state = TrainingState_.IDLE
 
-        self._state_dict_type = StateDictType.STATE_DICT
+        self._state_dict_type = StateDictType.FULL_STATE_DICT
+
+        # FSDP currently provides three different state_dicts. The actual
+        # state_dict that will be saved/loaded is decided by
+        # self._state_dict_type. And the main logic of each state_dict is
+        # implemented in the hook. Therefore, for each hook (post-save and
+        # pre-load), there is a dispatcher dictionary to dispatch the execution
+        # flow to the correct implementation.
         self._register_state_dict_hook(self._post_state_dict_hook)
         self._post_state_dict_hook_fn = {
-            StateDictType.STATE_DICT: self._full_post_state_dict_hook,
+            StateDictType.FULL_STATE_DICT: self._full_post_state_dict_hook,
             StateDictType.LOCAL_STATE_DICT: self._local_post_state_dict_hook,
             StateDictType.SHARDED_STATE_DICT: self._sharded_post_state_dict_hook,
         }
@@ -319,7 +324,7 @@ class FullyShardedDataParallel(nn.Module):
             self._pre_load_state_dict_hook, with_module=True
         )
         self._pre_load_state_dict_hook_fn = {
-            StateDictType.STATE_DICT: self._full_pre_load_state_dict_hook,
+            StateDictType.FULL_STATE_DICT: self._full_pre_load_state_dict_hook,
             StateDictType.LOCAL_STATE_DICT: self._local_pre_load_state_dict_hook,
             StateDictType.SHARDED_STATE_DICT: self._sharded_pre_load_state_dict_hook,
         }
@@ -702,7 +707,7 @@ class FullyShardedDataParallel(nn.Module):
         A context manager to set the state_dict_type of this FSDP module and
         its descendant FSDP modules.
         .. note:: This API should be called for only the root FSDP module.
-        .. note:: The default state_dict_type is StateDictTyp.STATE_DICT.
+        .. note:: The default state_dict_type is StateDictTyp.FULL_STATE_DICT.
 
         Args:
             state_dict_type (StateDictType): the desired state_dict_type to set.
@@ -801,7 +806,7 @@ class FullyShardedDataParallel(nn.Module):
         """
         if torch.cuda.is_available():
             torch.cuda.synchronize()
-        if self._state_dict_type == StateDictType.STATE_DICT:
+        if self._state_dict_type == StateDictType.FULL_STATE_DICT:
             raise NotImplementedError("Will be implemented in the next PRs.")
         elif self._state_dict_type == StateDictType.LOCAL_STATE_DICT:
             assert getattr(self.module, FLAT_PARAM, None) is not None
@@ -853,6 +858,7 @@ class FullyShardedDataParallel(nn.Module):
         # Get the metada of the flat_param to decide whether to pad the loaded
         # tensor.
         flat_param = self.module.flat_param
+        assert flat_param is not None
         if flat_param.num_padded not in (0, flat_param.numel()):
             assert load_tensor.numel() < flat_param.numel(), (
                 f"Local shard size = {flat_param.numel()} and the tensor in "
@@ -896,7 +902,7 @@ class FullyShardedDataParallel(nn.Module):
             primitives may be used.
         """
         torch.cuda.synchronize()
-        if self._state_dict_type == StateDictType.STATE_DICT:
+        if self._state_dict_type == StateDictType.FULL_STATE_DICT:
             raise NotImplementedError("Will be implemented in the next PRs.")
         elif self._state_dict_type == StateDictType.LOCAL_STATE_DICT:
             return super().load_state_dict(state_dict, strict)

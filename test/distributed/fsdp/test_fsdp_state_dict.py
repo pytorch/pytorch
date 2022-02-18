@@ -6,6 +6,7 @@ from typing import Any, Dict
 import torch
 from torch import distributed as dist
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
+from torch.distributed.fsdp import StateDictType
 from torch.nn import Linear, Module
 from torch.nn.parallel import DistributedDataParallel
 from torch.optim import SGD
@@ -78,7 +79,9 @@ class TestFSDPStateDict(FSDPTest):
     ):
         getattr(model, f"load_{state_dict_type}")(state_dict)
 
-    def _dist_train(self, wrap_fsdp: bool, state_dict_type: str = ""):
+    def _dist_train(
+        self, wrap_fsdp: bool, state_dict_type: str = "", with_context: bool = False
+    ):
         # TODO: Move this test to common_fsdp.
         model = self._initialize_model(wrap_fsdp)
         optim = SGD(model.parameters(), lr=0.1)
@@ -91,9 +94,20 @@ class TestFSDPStateDict(FSDPTest):
             optim.zero_grad()
 
         if wrap_fsdp:
-            state_dict = self._state_dict(model, state_dict_type)
             blank_model = FSDP(Model(True).cuda())
-            self._load_state_dict(blank_model, state_dict_type, state_dict)
+            if with_context:
+                state_dict_type = {
+                    "full_state_dict": StateDictType.FULL_STATE_DICT,
+                    "local_state_dict": StateDictType.LOCAL_STATE_DICT,
+                    "sharded_state_dict": StateDictType.SHARDED_STATE_DICT,
+                }[state_dict_type]
+                with model.state_dict_type(state_dict_type):
+                    state_dict = model.state_dict()
+                with blank_model.state_dict_type(state_dict_type):
+                    blank_model.load_state_dict(state_dict)
+            else:
+                state_dict = self._state_dict(model, state_dict_type)
+                self._load_state_dict(blank_model, state_dict_type, state_dict)
             get_full_params(blank_model)
             model = blank_model
 
@@ -103,8 +117,12 @@ class TestFSDPStateDict(FSDPTest):
     @parametrize("state_dict_type", ["local_state_dict"])
     def test_state_dict_save_load_flow(self, state_dict_type):
         fsdp_params = self._dist_train(wrap_fsdp=True, state_dict_type=state_dict_type)
+        fsdp_params_using_context = self._dist_train(
+            wrap_fsdp=True, state_dict_type=state_dict_type, with_context=True
+        )
         ddp_params = self._dist_train(wrap_fsdp=False)
         self.assertEqual(ddp_params, fsdp_params)
+        self.assertEqual(ddp_params, fsdp_params_using_context)
 
     @skip_if_lt_x_gpu(2)
     @parametrize("state_dict_type", ["local_state_dict"])
