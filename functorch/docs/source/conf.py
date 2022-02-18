@@ -46,7 +46,7 @@ extensions = [
     # 'sphinxcontrib.katex',
     'sphinx.ext.autosectionlabel',
     'sphinx_copybutton',
-    'nbsphinx',
+    'myst_nb',
 ]
 
 # sys.path.insert(0, os.path.abspath('./notebooks'))
@@ -59,6 +59,9 @@ numpydoc_show_class_members = False
 # The following tells autosectionlabel to not throw a warning for
 # duplicated section names that are in different documents.
 autosectionlabel_prefix_document = True
+
+# tell myst to not execute ipynb tutorials.
+jupyter_execute_notebooks = "off"
 
 # katex options
 #

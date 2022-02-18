@@ -10,7 +10,10 @@ functorch is `JAX-like <https://github.com/google/jax>`_ composable function tra
 It aims to provide composable vmap and grad transforms that work with PyTorch modules
 and PyTorch autograd with good eager-mode performance.
 
-**This library is currently under heavy development - if you have suggestions on the API or use-cases you'd like to be covered, please open an github issue or reach out. We'd love to hear about how you're using the library.**
+.. note::
+   This library is currently under heavy development - if you have suggestions on the API or
+   use-cases you'd like to be covered, please open an github issue or reach out.
+   We'd love to hear about how you're using the library.
 
 Why composable function transforms?
 -----------------------------------
@@ -37,6 +40,12 @@ For a whirlwind tour of how to use the transforms, please check out `this sectio
    :caption: Content
 
    install
-   tutorials
    functorch
 
+.. toctree::
+   :maxdepth: 1
+   :caption: Tutorials
+
+   notebooks/jacobians_hessians.ipynb
+   notebooks/ensembling.ipynb
+   notebooks/per_sample_grads.ipynb
