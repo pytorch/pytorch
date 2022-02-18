@@ -2,5 +2,118 @@ name: build
 
 on:
   workflow_call:
+    inputs:
+      build-environment:
+        required: true
+        type: string
+
 
 jobs:
+ build:
+    runs-on: [self-hosted, linux.2xlarge]
+    timeout-minutes: 240
+    env:
+      JOB_BASE_NAME: ${{ inputs.build-environment }}-build
+    outputs:
+      docker_image: ${{ steps.calculate-tag.outputs.docker_image }}
+    steps:
+      - name: print labels
+        run: echo "${PR_LABELS}"
+      - name: test
+        uses: .github/workflows/actions/setup-ec2-linux.yml
+    #   !{{ common.setup_ec2_linux() }}
+    #   !{{ common.checkout() }}
+    # {%- if enable_xla_test == 1 %}
+    #   - name: Calculate docker image tag
+    #     id: calculate-tag
+    #     run: |
+    #       echo "XLA workflow uses pre-built test image at ${XLA_IMAGE_TAG}"
+    #       DOCKER_TAG=$(git rev-parse HEAD:.circleci/docker)
+    #       echo "DOCKER_TAG=${DOCKER_TAG}" >> "${GITHUB_ENV}"
+    #       echo "DOCKER_IMAGE=${DOCKER_IMAGE_BASE}:${XLA_IMAGE_TAG}" >> "${GITHUB_ENV}"
+    #       echo "::set-output name=docker_tag::${DOCKER_TAG}"
+    #       echo "::set-output name=docker_image::${DOCKER_IMAGE_BASE}:${XLA_IMAGE_TAG}"
+    # {%- else %}
+    #   !{{ common.calculate_docker_image(false) }}
+    # {%- endif %}
+    #   - name: Pull Docker image
+    #     run: |
+    #       !{{ common.add_retry_to_env() }}
+    #       retry docker pull "${DOCKER_IMAGE}"
+    #   !{{ common.parse_ref() }}
+    #   - name: Build
+    #     env:
+    #       BRANCH: ${{ steps.parse-ref.outputs.branch }}
+    #     run: |
+    #       # detached container should get cleaned up by teardown_ec2_linux
+    #       container_name=$(docker run \
+    #         -e BUILD_ENVIRONMENT \
+    #         -e JOB_BASE_NAME \
+    #         -e MAX_JOBS="$(nproc --ignore=2)" \
+    #         -e AWS_DEFAULT_REGION \
+    #         -e IS_GHA \
+    #         -e PR_NUMBER \
+    #         -e SHA1 \
+    #         -e BRANCH \
+    #         -e GITHUB_RUN_ID \
+    #         -e SCCACHE_BUCKET \
+    #       {%- if enable_xla_test == 1 %}
+    #         -e XLA_CUDA \
+    #       {%- endif %}
+    #         -e XLA_CLANG_CACHE_S3_BUCKET_NAME \
+    #         -e CUSTOM_TEST_ARTIFACT_BUILD_DIR \
+    #         -e SKIP_SCCACHE_INITIALIZATION=1 \
+    #         -e TORCH_CUDA_ARCH_LIST \
+    #         -e PR_LABELS \
+    #         -e http_proxy="!{{ common.squid_proxy }}" -e https_proxy="!{{ common.squid_proxy }}" -e no_proxy="!{{ common.squid_no_proxy }}" \
+    #         --env-file="/tmp/github_env_${GITHUB_RUN_ID}" \
+    #         --security-opt seccomp=unconfined \
+    #         --cap-add=SYS_PTRACE \
+    #         --tty \
+    #         --detach \
+    #         --user jenkins \
+    #         -v "${GITHUB_WORKSPACE}:/var/lib/jenkins/workspace" \
+    #         -w /var/lib/jenkins/workspace \
+    #         "${DOCKER_IMAGE}"
+    #       )
+    #       docker exec -t "${container_name}" sh -c 'sudo chown -R jenkins . && .jenkins/pytorch/build.sh'
+    #   - name: Display and upload binary build size statistics (Click Me)
+    #     # temporary hack: set CIRCLE_* vars, until we update
+    #     # tools/stats/print_test_stats.py to natively support GitHub Actions
+    #     env:
+    #       SCRIBE_GRAPHQL_ACCESS_TOKEN: ${{ secrets.SCRIBE_GRAPHQL_ACCESS_TOKEN }}
+    #       BRANCH: ${{ steps.parse-ref.outputs.branch }}
+    #       TAG: ${{ steps.parse-ref.outputs.tag }}
+    #       WORKFLOW_ID: '${{ github.run_id }}'
+    #     run: |
+    #       COMMIT_TIME=$(git log --max-count=1 --format=%ct || echo 0)
+    #       export COMMIT_TIME
+    #       pip3 install requests==2.26 boto3==1.16.34
+    #       python3 -m tools.stats.upload_binary_size_to_scuba || exit 0
+    #   - name: Chown workspace
+    #     run: |
+    #       # Ensure the working directory gets chowned back to the current user
+    #       docker run --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
+    #   {%- if build_generates_artifacts %}
+    #   - name: Archive artifacts into zip
+    #     run: |
+    #       zip -1 -r artifacts.zip dist/ build/custom_test_artifacts build/lib build/bin .pytorch-test-times.json
+    #   - uses: !{{ common.upload_artifact_s3_action }}
+    #     name: Store PyTorch Build Artifacts on S3
+    #     with:
+    #       name: ${{ env.BUILD_ENVIRONMENT }}
+    #       retention-days: 14
+    #       if-no-files-found: error
+    #       path:
+    #         artifacts.zip
+    #   {%- endif %}
+    #   !{{ common.teardown_ec2_linux() }}
+    #   - name: Hold runner for 2 hours or until ssh sessions have drained
+    #     # Always hold for active ssh sessions
+    #     if: always()
+    #     run: .github/scripts/wait_for_ssh_to_drain.sh
+    #   - name: Clean up docker images
+    #     if: always()
+    #     run: |
+    #       # Prune all of the docker images
+    #       docker system prune -af
