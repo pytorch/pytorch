@@ -470,7 +470,7 @@ def return_arg_list(arg_indices: List[int]) -> Callable[[Node], List[int]]:
     def arg_indices_func(node: Node) -> List[int]:
         result = []
         for i in arg_indices:
-            if i<len(node.args):
+            if i < len(node.args):
                 result.append(i)
         return result
     return arg_indices_func
