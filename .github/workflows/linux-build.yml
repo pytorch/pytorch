@@ -48,7 +48,6 @@ jobs:
         id: calculate-docker-image
         uses: ./.github/workflows/actions/calculate-docker-image
         with:
-          always-rebuild: false
           docker-image-base: ${{ inputs.docker-image-base }}
     # {%- if enable_xla_test == 1 %}
     #   - name: Calculate docker image tag
