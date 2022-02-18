@@ -61,7 +61,7 @@ jobs:
         run: .github/scripts/parse_ref.py
       - name: Build
         env:
-          BUILD_ENVIRONMENT: inputs.build-environment
+          BUILD_ENVIRONMENT: ${{ inputs.build-environment }}
           BRANCH: ${{ steps.parse-ref.outputs.branch }}
           JOB_BASE_NAME: ${{ inputs.build-environment }}-build
           # TODO duplicated
@@ -164,12 +164,6 @@ jobs:
         runner-type: [linux.2xlarge]
     runs-on: ${{ matrix.runner-type }}
     name: test (default, ${{ matrix.shard }})
-    env:
-      JOB_BASE_NAME: ${{ inputs.build-environment }}-test
-      TEST_CONFIG: default
-      SHARD_NUMBER: ${{ matrix.shard }}
-      NUM_TEST_SHARDS: ${{ matrix.num_shards }}
-      PR_BODY: ${{ github.event.pull_request.body }}
     steps:
       - name: Checkout PyTorch
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
@@ -215,13 +209,18 @@ jobs:
         run: .github/scripts/parse_ref.py
       - name: Test
         env:
+          JOB_BASE_NAME: ${{ inputs.build-environment }}-test
+          TEST_CONFIG: default
+          SHARD_NUMBER: ${{ matrix.shard }}
+          NUM_TEST_SHARDS: ${{ matrix.num_shards }}
+          PR_BODY: ${{ github.event.pull_request.body }}
           BUILD_ENVIRONMENT: ${{ inputs.build-environment }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
           BRANCH: ${{ steps.parse-ref.outputs.branch }}
           CUSTOM_TEST_ARTIFACT_BUILD_DIR: build/custom_test_artifacts
           SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
           PYTORCH_RETRY_TEST_CASES: 1
-        timeout-minutes: ${{ inputs.test-timeout }}
+        timeout-minutes: 240  # todo
         run: |
           set -x
 
