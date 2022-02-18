@@ -50,7 +50,7 @@ def _convert_node_to_placeholder(node, inps):
             _convert_node_to_placeholder(tuple_user, inps)
 
 
-def minimizer(fail_f: fx.GraphModule, inps, module_fails):
+def minifier(fail_f: fx.GraphModule, inps, module_fails):
     """
     Minimizes a FX graph with given inputs, such that the resulting FX graph still returns True for module_fails.
 
@@ -203,8 +203,14 @@ def minimizer(fail_f: fx.GraphModule, inps, module_fails):
         if not any_succeeded:
             break
     failing_fx = fx.GraphModule(fail_f, failing_graph)
-    print(failing_fx.code)
-    print([(i.shape, i.dtype) for i in inps])
+    print(f"""
+inps = {[(i.shape, i.dtype) for i in inps]}
+inps = [torch.empty(())] + [torch.ones(shape, dtype=dtype, device='cuda') for (shape, dtype) in inps]
+{failing_fx.code}
+f = torch.jit.script(forward)
+with torch.jit.fuser("fuser2"):
+  for _ in range(5):
+    f(*inps)""")
     return failing_fx, inps
 
 
@@ -216,15 +222,17 @@ import torch
 from temp import FxModule
 f = FxModule().cuda()
 inps = {[(i.shape, i.dtype) for i in inps]}
-inps = [torch.randn(shape, dtype=dtype, device='cuda') for shape, dtype in inps]
+inps = [torch.ones(shape, dtype=dtype, device='cuda') for shape, dtype in inps]
 with torch.jit.fuser("fuser2"):
     nf = torch.jit.script(f)
     for _ in range(5):
         nf(*inps)
     ''')
-    try:
-        subprocess.check_call("PYTORCH_NVFUSER_DISABLE_FALLBACK=1 python _temp.py", shell=True)
-    except Exception as e:
-        print(e)
+    p = subprocess.Popen(["PYTORCH_NVFUSER_DISABLE_FALLBACK=1 python _temp.py"],
+                         stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=True)
+    out, err = p.communicate()
+    if p.returncode != 0:
+        err = err.decode('utf-8')
+        print(err)
         return True
     return False

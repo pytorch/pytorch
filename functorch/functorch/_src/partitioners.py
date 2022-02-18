@@ -188,7 +188,7 @@ def min_cut_rematerialization_partition(joint_module: fx.GraphModule, _joint_inp
 
     # Ban reductions for now due to it being unnecessary/running into pathological situations
     # todo(chilli): add a heuristic to allow reduction only if output node is much smaller than input node
-    # reduction_ops = [aten.softmax, aten._softmax, aten._softmax_backward_data, aten.sum, aten.mean, aten._grad_sum_to_size, aten.sum_to_size, aten.amax]  # noqa: E501
+    reduction_ops = [aten.softmax, aten._softmax, aten._softmax_backward_data, aten.sum, aten.mean, aten._grad_sum_to_size, aten.sum_to_size, aten.amax]  # noqa: E501
 
     # not recomputed by default since these are kinda expensive/hard to fuse into
     # norm_ops = [aten.instance_norm, aten._batch_norm_impl_index, aten.native_batch_norm, aten.batch_norm, aten._batch_norm_impl_index_backward, aten.native_layer_norm, aten.layer_norm, aten.native_layer_norm_backward]  # noqa: E501
@@ -213,7 +213,17 @@ def min_cut_rematerialization_partition(joint_module: fx.GraphModule, _joint_inp
         if AGGRESSIVE_RECOMPUTATION:
             return (node.op == 'call_function' and node.target in unrecomputable_ops)
         else:
-            return (node.op == 'call_function' and node.target not in recomputable_ops)
+            if node.op != 'call_function':
+                return False
+            if node.target not in recomputable_ops:
+                return True
+            # If the output of the reduction is 4x smaller (arbitrary choice),
+            # then we don't allow recomputation.
+            if node.target in reduction_ops:
+                input_tensors_size = sum([_size_of(i.meta['tensor_meta']) for i in node.args if isinstance(i, fx.Node)])
+                output_size = _size_of(node.meta['tensor_meta'])
+                return (output_size * 4 < input_tensors_size)
+            return False
 
     def get_node_weight(node):
         mem_sz = _size_of(node.meta['tensor_meta'])
