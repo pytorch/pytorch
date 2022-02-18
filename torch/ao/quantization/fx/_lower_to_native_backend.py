@@ -144,33 +144,21 @@ def _lower_quantized_binary_op(
     modules = dict(model.named_modules(remove_duplicate=False))
 
     def get_bop_patterns(bop: Callable) -> Pattern:
-        return [
+        patterns = []
+        bop_pattern = (bop, MatchAllNode, MatchAllNode)
+        for relu_op in [torch.relu, torch.nn.functional.relu, torch.nn.ReLU]:
+            patterns.append(
+                (torch.quantize_per_tensor,
+                 (relu_op, bop_pattern),
+                 MatchAllNode, MatchAllNode, MatchAllNode))
+        patterns.append(
             (torch.quantize_per_tensor,
-             (bop, "dequantize", "dequantize"),
-             MatchAllNode, MatchAllNode, MatchAllNode)
-            for bop_pattern in [
-                (bop, "dequantize", "dequantize"),
-                (bop, MatchAllNode, "dequantize"),
-                (bop, "dequantize", MatchAllNode)
-            ]
-        ]
-
-    def get_bop_relu_patterns(bop: Callable) -> List[Pattern]:
-        return [
-            (torch.quantize_per_tensor,
-             (relu_op, bop_pattern),
-             MatchAllNode, MatchAllNode, MatchAllNode)
-            for relu_op in [torch.relu, torch.nn.functional.relu, torch.nn.ReLU]
-            for bop_pattern in [
-                (bop, "dequantize", "dequantize"),
-                (bop, MatchAllNode, "dequantize"),
-                (bop, "dequantize", MatchAllNode),
-            ]
-        ]
+             bop_pattern,
+             MatchAllNode, MatchAllNode, MatchAllNode))
+        return patterns
 
     patterns = []
     for bop in [operator.add, torch.add, operator.mul, torch.mul]:
-        patterns.extend(get_bop_relu_patterns(bop))
         patterns.extend(get_bop_patterns(bop))
     patterns.extend(
         [
@@ -239,7 +227,8 @@ def _lower_quantized_binary_op(
                 dq_node0 = arg0
             if is_dequantize_node(arg1):
                 dq_node1 = arg1
-            assert dq_node0 is not None or dq_node1 is not None
+            if dq_node0 is None and dq_node1 is None:
+                continue
             for dq_node in [dq_node0, dq_node1]:
                 if dq_node is None:
                     continue
