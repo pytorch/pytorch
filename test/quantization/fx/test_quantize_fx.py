@@ -5040,6 +5040,7 @@ class TestQuantizeFxOps(QuantizationTestCase):
             ns.call_method('dequantize') : 1
         }
         order_check = [
+            ns.call_module(nn.AvgPool2d),
             ns.call_method('dequantize'),
         ]
         self.checkGraphModuleNodes(
