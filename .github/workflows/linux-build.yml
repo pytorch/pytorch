@@ -67,7 +67,7 @@ jobs:
           retry () {
               "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
           }
-          retry docker pull "${{ steps.calculate-docker-image.outputs.docker-image }}"
+          retry docker pull ${{ steps.calculate-docker-image.outputs.docker-image }}
     #   !{{ common.parse_ref() }}
       - name: Parse ref
         id: parse-ref
@@ -105,7 +105,7 @@ jobs:
             --user jenkins \
             -v "${GITHUB_WORKSPACE}:/var/lib/jenkins/workspace" \
             -w /var/lib/jenkins/workspace \
-            "${{ steps.calculate-docker-image.outputs.docker-image }}"
+            ${{ steps.calculate-docker-image.outputs.docker-image }}
           )
           docker exec -t "${container_name}" sh -c 'sudo chown -R jenkins . && .jenkins/pytorch/build.sh'
     #   - name: Display and upload binary build size statistics (Click Me)

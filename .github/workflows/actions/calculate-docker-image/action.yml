@@ -31,7 +31,7 @@ runs:
     - name: Check if image should be built
       shell: bash
       id: check
-      if: ${{ inputs.always-rebuild }}
+      if: ${{ !inputs.always-rebuild }}
       env:
         DOCKER_IMAGE_BASE: ${{ inputs.docker-image-base }}
         BASE_REVISION: ${{ github.event.pull_request.base.sha || github.sha }}
