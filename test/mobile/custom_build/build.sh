@@ -127,13 +127,16 @@ CC="clang" CXX="clang++" \
   python "${SRC_ROOT}/setup.py" bdist_wheel
   python -mpip install dist/*.whl
 
-# Test building via the sdist source tarball
-python "${SRC_ROOT}/setup.py" sdist
-mkdir -p /tmp/tmp
-pushd /tmp/tmp
-tar zxf "$(dirname "${BASH_SOURCE[0]}")/../../dist/"*.tar.gz
-cd torch-*
-python "${SRC_ROOT}/setup.py" build --cmake-only
+CUSTOM_TEST_ARTIFACT_BUILD_DIR=${CUSTOM_TEST_ARTIFACT_BUILD_DIR:-${SRC_ROOT}/../}
+mkdir -pv "${CUSTOM_TEST_ARTIFACT_BUILD_DIR}"
+SITE_PACKAGES="$(python -c 'from distutils.sysconfig import get_python_lib; print(get_python_lib())')"
+
+LIGHTWEIGHT_DISPATCH_BUILD="${CUSTOM_TEST_ARTIFACT_BUILD_DIR}/lightweight-dispatch-build"
+
+mkdir -p "$LIGHTWEIGHT_DISPATCH_BUILD"
+pushd "$LIGHTWEIGHT_DISPATCH_BUILD"
+cmake "$TEST_SRC_ROOT" -DCMAKE_PREFIX_PATH="$SITE_PACKAGES/torch" -DCMAKE_BUILD_TYPE=Release
+make VERBOSE=1
 popd
 
 assert_git_not_dirty
