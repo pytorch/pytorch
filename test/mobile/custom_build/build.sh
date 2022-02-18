@@ -117,11 +117,9 @@ JENKINS_DIR="${SRC_ROOT}/.jenkins/pytorch"
 # shellcheck source=./common.sh
 source "${JENKINS_DIR}/common.sh"
 
-echo "Clang version:"
-clang --version
+echo "Build lite interpreter with lightweight dispatch."
 
-CC="clang" CXX="clang++" \
-  USE_LIGHTWEIGHT_DISPATCH=1 \
+USE_LIGHTWEIGHT_DISPATCH=1 \
   STATIC_DISPATCH_BACKEND="CPU" \
   BUILD_LITE_INTERPRETER=1 \
   python "${SRC_ROOT}/setup.py" bdist_wheel
