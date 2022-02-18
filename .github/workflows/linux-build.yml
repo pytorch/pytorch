@@ -64,6 +64,7 @@ jobs:
         run: .github/scripts/parse_ref.py
       - name: Build
         env:
+          BUILD_ENVIRONMENT: inputs.build-environment
           BRANCH: ${{ steps.parse-ref.outputs.branch }}
           JOB_BASE_NAME: ${{ inputs.build-environment }}-build
           # TODO duplicated
