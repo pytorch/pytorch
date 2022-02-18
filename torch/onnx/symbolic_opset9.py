@@ -2203,7 +2203,6 @@ def pixel_unshuffle(g, self, downscale_factor):
                                                  g.op("Constant", value_t=torch.tensor([0, -1, 1, 1, 0, 0])),
                                                  allowzero=0)
         return sym_help._squeeze_helper(g, final_reshape, [2, 3])
-    
     else:
         output_channel = dims[1] * downscale_factor * downscale_factor
         after_view = sym_help._reshape_helper(g, self,
