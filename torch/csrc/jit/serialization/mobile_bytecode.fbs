@@ -44,37 +44,52 @@ table String {
   data:string;
 }
 
+// Represents the c10::Device
 table Device {
+  // Stores value like cpu, cuda
   str:string;
 }
 
+// Represents the c10::List
 table List {
   items:[uint];
   annotation_str:string;  // to recover key/val type
 }
 
+// Represents the c10::List<int>
 table IntList {
   items:[long];
 }
 
+// Represents the c10::List<double>
 table DoubleList {
   items:[double];
 }
 
+// Represents the c10::List<bool>
 table BoolList {
   items:[bool];
 }
 
+// Represents the c10::Tuple
 table Tuple {
+  // elements of the tuple
   items:[uint];
 }
 
+// Represents the c10::Dict
 table Dict {
+  // List of keys corresponding to the values
   keys:[uint];
+
+  // List of values corresponding to the keys
   values:[uint];
-  annotation_str:string;  // to recover key/val type
+
+  // to recover key/val type
+  annotation_str:string;
 }
 
+// Types of object types supported
 enum TypeType :ubyte {
   UNSET,
   CLASS_WITH_FIELD,
@@ -84,12 +99,18 @@ enum TypeType :ubyte {
 }
 
 table ObjectType {
+  // Unique name of the type of the object
   type_name:string;
+
+  // Enum to identify the
+  // type of the object type
   type:TypeType;
-  // Below fields are optional
-  attr_names:[string];
+
+  // Names of the attribute available in the object
+  attr_names:[string]; // optional
 }
 
+// Object value
 table Object {
   type_index:uint;
   state:uint;
@@ -97,63 +118,125 @@ table Object {
   setstate_func:uint;
 }
 
+// Complex value
 struct ComplexDouble {
+  // real part of the Complex data
   real:double;
+
+  // real part of the Complex data
   imag:double;
 }
 
+// Table to represent each enum value
+// that can be interpreted as an IValue
 table EnumValue {
+  // Name of the enum value
   type_name:string;
-  value:uint;  // index to ivalues;
+
+  // index to ivalues;
+  value:uint;
 }
 
-
+// Instruction definition
+// Refer ./torch/csrc/jit/runtime/instruction.h
 struct Instruction {
   // Should op be enum instead?
+  // byte value on the enum in the instruction.h file
   op:byte;
+
+  // Number of arguments passed in
   n:ushort;
+
+  // Number of outputs that are stored in the stack
   x:int;
 }
 
+// Operator representation
 table Operator {
+  // Unique name of the operator
   name:string;
+
+  // Overloaded name
+  // like __getitem__.List.Int
+  // where List and Int values are overaloded
   overload_name:string;
+
   num_args_serialized:int = -1;
 }
 
+// Argment use in a function schema
 table Arg {
+  // Name of the argument in the function
   name:string;
   // Why do we use string to represent types
   // rather than index into Code.types?
   type:string;
-  default_value:uint;  // position into ivalues
+  // position into ivalues
+  default_value:uint;
 }
 
+
+// Represents the schema definition of a function
 table Schema {
+  // The input arguments of the function
   arguments:[Arg];
+  // The output values returned by the function
   returns:[Arg];
 }
 
+// Debug Info Handles
 table DebugInfo {
+  // debug handles are unique identifier
+  // that map to source range
+  // to point to code piece that triggers
+  // an operation
   debug_handle:[long];
 }
 
+// Function table
 table Function {
+  // qualified name
+  // unique name to identify the function
   qn:string;
+
+  // Instruction vector which is executed in interpreter
+  // refer ./torch/csrc/jit/runtime/instruction.h
   instructions:[Instruction];
+
+  // Operator list used in the model
+  // the operator name is used to find the kernel
+  // and inputs from the stack are used to run the operator
   operators:[Operator];
+
+  // All constant values are stored as unsigned integers
   constants:[uint];  // index to ivalue
+
+  // the unique identifier for all the objects, methods and values
+  // used in this function
   type_annotations:[string];
+
+
   register_size:int;
+
+  // Schema definition of the function
   schema:Schema;
+
+  // The debug info handles of this function
   debug_info:DebugInfo;
-  class_type:uint; // index into type table
+
+  // Unique id for the class of this function
+  // index into type table
+  class_type:uint;
 }
 
+// StorageData is the container definition to
+// serialize data (constants/tensors)
 table StorageData {
   data:[ubyte] (force_align:16);
 }
 
+// table to contain all possible values
+// that can be represented as IValue
 // Is it needed to represent other types?
 union IValueUnion {
   Int,
@@ -174,23 +257,49 @@ union IValueUnion {
   Function,
 }
 
+// IValue table
 table IValue {
+  // val can be any type defined in IValueUnion
   val:IValueUnion;
 }
 
+// Table to handle extra file name (identifier) and content
 table ExtraFile {
+  // identifier (key) to the extra file
   name:string;
+  // ccontent (value) of the extra file
   content:string;
 }
 
 table Module {
+  // Version of the schema
+  // defined in pytorch/caffe2/serialize/versions.h
   version:int;
+
+  // Extra files written by the user
+  // accepts a map<string, string>
+
+  // vector of pairs containing
+  // extra file name (identifier) and file content
   extra_files:[ExtraFile];
-  methods:[uint];  // index to ivalues
-  state_obj:uint; // index to ivalues
+
+  // index to ivalue of methods
+  methods:[uint];
+
+  // starting index to ivalues
+  state_obj:uint;
+
+  // vector to store all ivalues
   ivalues:[IValue];
-  storage_data_size:int;  // number of storage data;
+
+  // number of storage data
+  storage_data_size:int;
+
+  // Data serialized as usingned byte
   storage_data:[StorageData];
+
+  // Object type table
+  // provides lookup for each unique object to type annotation
   object_types:[ObjectType];
 }
 
