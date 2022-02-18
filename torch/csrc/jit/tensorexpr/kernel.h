@@ -218,7 +218,11 @@ class TORCH_API TensorExprKernel {
 
   std::string getCodeGenName(BackendType backendType);
 
-  void updateOutputSizesAndStrides(const at::ArrayRef<IValue>& inputs);
+  void getStaticOutputSizesAndStrides(
+      const at::ArrayRef<IValue>& inputs,
+      std::vector<std::vector<int64_t>>* static_sizes,
+      std::vector<std::vector<int64_t>>* static_strides);
+
   std::vector<CodeGen::CallArg> prepareRunArgs(
       const at::ArrayRef<IValue>& inputs,
       std::vector<at::Tensor>& outputs);
