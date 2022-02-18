@@ -104,8 +104,6 @@ ALLOW_LIST = [
     ("aten::nanquantile", datetime.date(2022, 9, 30)),
     ("aten::_convolution_double_backward", datetime.date(2022, 3, 31)),
     ("aten::_scatter_reduce", datetime.date(2022, 1, 31)),
-    ("aten::native_multi_head_self_attention", datetime.date(9999, 1, 1)),
-    ("aten::_native_multi_head_self_attention", datetime.date(9999, 1, 1)),
     ("aten::scatter_reduce.two", datetime.date(2022, 3, 15)),
 ]
 
