@@ -14,7 +14,6 @@ from typing import (
     Generator,
     Iterator,
     List,
-    Mapping,
     NamedTuple,
     Optional,
     Sequence,

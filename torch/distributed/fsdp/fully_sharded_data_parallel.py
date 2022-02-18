@@ -886,7 +886,7 @@ class FullyShardedDataParallel(nn.Module):
         is called. ``self._state_dict_type`` is used to decide what preprocessing
         will be done.
         """
-        self = cast(FlatParameter, module)
+        self = cast(FullyShardedDataParallel, module)
         self._pre_load_state_dict_hook_fn[self._state_dict_type](state_dict, prefix)
 
     def load_state_dict(
