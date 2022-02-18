@@ -17,6 +17,7 @@
 #include <functorch/csrc/PlumbingHelper.h>
 #include <ATen/core/dispatch/Dispatcher.h>
 #include <functorch/csrc/Constants.h>
+#include <functorch/csrc/OutOfPlacePlumbing.h>
 
 namespace at { namespace functorch {
 Tensor reshape_dim_into(int64_t src, int64_t dst, const Tensor& x);
@@ -46,14 +47,10 @@ inline Tensor ensure_has_bdim(const Tensor& tensor, bool has_bdim, int64_t batch
 }
 
 #define VMAP_SUPPORT(op, batch_rule) \
-  m.impl(#op, PrimBatchRule7< \
-      decltype(&batch_rule), &batch_rule, to_operator_t<decltype(batch_rule)> \
-      >::apply);
+  m.impl(#op, op ## _generated_plumbing<decltype(&batch_rule), &batch_rule>);
 
 #define VMAP_SUPPORT2(op, overload, batch_rule) \
-  m.impl(#op "." #overload, PrimBatchRule7< \
-      decltype(&batch_rule), &batch_rule, to_operator_t<decltype(batch_rule)> \
-      >::apply);
+  m.impl(#op "." #overload, op ## _ ## overload ## _generated_plumbing<decltype(&batch_rule), &batch_rule>);
 
 // DO NOT USE ME DIRECTLY! Use BASIC_UNARY_BATCH_RULE to save yourself some pain
 template <typename A, A a, typename C>
