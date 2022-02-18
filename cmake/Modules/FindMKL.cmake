@@ -168,6 +168,25 @@ IF (EXISTS ${INTEL_OMP_DIR})
   ENDIF()
 ENDIF()
 
+MACRO(GET_MKL_LIB_NAMES LIBRARIES INTERFACE MKL64)
+    cmake_parse_arguments("" "" "USE_STATIC;THREAD" "" ${ARGN})
+    set(${LIBRARIES} mkl_${INTERFACE}${MKL64}
+        mkl_core
+       )
+    if(_THREAD)
+        LIST(INSERT ${LIBRARIES} 1 ${_THREAD})
+        if(_USE_STATIC)
+            # The thread library defines symbols required by the other MKL libraries so also add it last
+            LIST(APPEND ${LIBRARIES} ${_THREAD})
+        endif()
+    endif()
+
+    if (UNIX AND _USE_STATIC)
+        list(TRANSFORM ${LIBRARIES} PREPEND "lib")
+        list(TRANSFORM ${LIBRARIES} APPEND ".a")
+    endif()
+ENDMACRO()
+
 # Try linking multiple libs
 MACRO(CHECK_ALL_LIBRARIES LIBRARIES OPENMP_TYPE OPENMP_LIBRARY _name _list _flags)
   # This macro checks for the existence of the combination of libraries given by _list.
@@ -304,8 +323,9 @@ IF (NOT "${MKL_THREADING}" STREQUAL "SEQ")
       FOREACH(mkl64 ${mkl64s} "")
         FOREACH(mklthread ${mklthreads})
           IF (NOT MKL_LIBRARIES)
+            GET_MKL_LIB_NAMES(mkl_lib_names "${mkliface}" "${mkl64}" THREAD "${mklthread}" USE_STATIC ${USE_STATIC_MKL})
             CHECK_ALL_LIBRARIES(MKL_LIBRARIES MKL_OPENMP_TYPE MKL_OPENMP_LIBRARY cblas_sgemm
-              "mkl_${mkliface}${mkl64};${mklthread};mkl_core;${mklrtl};${mkl_pthread};${mkl_m};${mkl_dl}" "")
+              "${mkl_lib_names};${mklrtl};${mkl_pthread};${mkl_m};${mkl_dl}" "")
           ENDIF (NOT MKL_LIBRARIES)
         ENDFOREACH(mklthread)
       ENDFOREACH(mkl64)
@@ -317,8 +337,9 @@ ENDIF (NOT "${MKL_THREADING}" STREQUAL "SEQ")
 FOREACH(mkliface ${mklifaces})
   FOREACH(mkl64 ${mkl64s} "")
     IF (NOT MKL_LIBRARIES)
+      GET_MKL_LIB_NAMES(mkl_lib_names "${mkliface}" "${mkl64}" THREAD "mkl_sequential" USE_STATIC ${USE_STATIC_MKL})
       CHECK_ALL_LIBRARIES(MKL_LIBRARIES MKL_OPENMP_TYPE MKL_OPENMP_LIBRARY cblas_sgemm
-        "mkl_${mkliface}${mkl64};mkl_sequential;mkl_core;${mkl_m};${mkl_dl}" "")
+        "${mkl_lib_names};${mkl_m};${mkl_dl}" "")
       IF (MKL_LIBRARIES)
         SET(mklseq "_sequential")
       ENDIF (MKL_LIBRARIES)
@@ -331,8 +352,9 @@ FOREACH(mklrtl ${mklrtls} "")
   FOREACH(mkliface ${mklifaces})
     FOREACH(mkl64 ${mkl64s} "")
       IF (NOT MKL_LIBRARIES)
+        GET_MKL_LIB_NAMES(mkl_lib_names "${mkliface}" "${mkl64}" THREAD "${mklthread}" USE_STATIC ${USE_STATIC_MKL})
         CHECK_ALL_LIBRARIES(MKL_LIBRARIES MKL_OPENMP_TYPE MKL_OPENMP_LIBRARY cblas_sgemm
-          "mkl_${mkliface}${mkl64};${mklthread};mkl_core;${mklrtl};pthread;${mkl_m};${mkl_dl}" "")
+          "${mkl_lib_names};${mklrtl};pthread;${mkl_m};${mkl_dl}" "")
       ENDIF (NOT MKL_LIBRARIES)
     ENDFOREACH(mkl64)
   ENDFOREACH(mkliface)
@@ -341,6 +363,9 @@ ENDFOREACH(mklrtl)
 # Check for older versions
 IF (NOT MKL_LIBRARIES)
   SET(MKL_VERSION 900)
+  if (USE_STATIC_MKL)
+      message(WARNING "Ignoring USE_STATIC_MKL")
+  endif()
   CHECK_ALL_LIBRARIES(MKL_LIBRARIES MKL_OPENMP_TYPE MKL_OPENMP_LIBRARY cblas_sgemm
     "mkl;guide;pthread;m" "")
 ENDIF (NOT MKL_LIBRARIES)
