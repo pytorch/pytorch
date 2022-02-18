@@ -127,7 +127,7 @@ def fold_weight(
             packed_weight = packed_weights[node.name]
             # add a prepacked attribute to root
             op_node = list(prepack_node.users)[0]
-            module_path, _ = node_name_to_scope.get(op_node.name, ('', None))
+            module_path, _ = node_name_to_scope[op_node.name]
             get_new_packed_weight_name = \
                 get_new_attr_name_with_prefix(module_path + '_packed_weight_')
             packed_weight_name = get_new_packed_weight_name(quantized_root)
@@ -208,7 +208,6 @@ def _lower_weighted_ref_module(model: QuantizedGraphModule) -> QuantizedGraphMod
             model.graph.erase_node(q_node)
             model.graph.erase_node(scale_node)
             model.graph.erase_node(zero_point_node)
-        model.recompile()
     return model
 
 def _lower_weighted_ref_functional(model: QuantizedGraphModule) -> QuantizedGraphModule:
@@ -270,14 +269,10 @@ def _lower_weighted_ref_functional(model: QuantizedGraphModule) -> QuantizedGrap
                     packed_weight = model.graph.create_node("call_function", prepack_op, prepack_args, {})
 
                 # Step 2: Replace reference pattern with the corresponding quantized op
-                with model.graph.inserting_after(output_zp_node):
-                    args = (input_dq_node.args[0], packed_weight, output_scale_node, output_zp_node)
-                    new_func = q_relu_func if is_relu else q_func
-                    new_func_node = create_node_from_old_node_preserve_meta(
-                        model.graph,
-                        ("call_function", new_func, args, {}),
-                        func_node)
-                    q_node.replace_all_uses_with(new_func_node)
+                func_node.args = (input_dq_node.args[0], packed_weight, output_scale_node, output_zp_node)
+                func_node.target = q_relu_func if is_relu else q_func
+                q_node.replace_all_uses_with(func_node)
+                output_zp_node.append(func_node)
 
                 # Clean up: Remove dequantize and quantize nodes and the old func node
                 for dqn in [input_dq_node, weight_dq_node]:
@@ -287,7 +282,6 @@ def _lower_weighted_ref_functional(model: QuantizedGraphModule) -> QuantizedGrap
                 model.graph.erase_node(q_node)
                 if is_relu:
                     model.graph.erase_node(relu_node)
-                model.graph.erase_node(func_node)
     return model
 
 def special_pattern_replacement(model: QuantizedGraphModule) -> QuantizedGraphModule:

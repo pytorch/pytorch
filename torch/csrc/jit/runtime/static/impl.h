@@ -166,11 +166,18 @@ struct TORCH_API StaticModuleOptions {
   bool manage_output_tensors{false};
   // Gates the ReplaceWithCopy pass, which replaces ops that
   // sometimes alias their outputs with out variants that
-  // always copy (so the output may participate in memory planning)
+  // always copy (so the output may participate in memory planning).
+  // Since replacing with copies is done after TensorExpr fusion, the
+  // resulting graph does not conform to the assumptions made in the fuser.
+  // So, even if this flag is turned on, the ReplaceWithCopy pass will not
+  // be executed if TensorExpr fusion is enabled.
   bool use_copy_variants{true};
   // Gates the ReplaceWithMaybeCopy pass, which replaces ops that
   // sometimes alias their outputs with subgraphs that include an out
   // variant.
+  // For the same reason as `use_copy_variants`, the ReplaceWithMaybeCopy pass
+  // will not be executed if TensorExpr fusion is enabled, even if this flag
+  // is turned on.
   bool use_maybe_copy_variants{true};
   // enable TensorExpr fusion of ops at model loading time
   bool enable_tensorexpr_fusion{false};
