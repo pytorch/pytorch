@@ -1419,6 +1419,16 @@ class TestFunctionalIterDataPipe(TestCase):
 
 
 class TestFunctionalMapDataPipe(TestCase):
+
+    def _serialization_test_helper(self, datapipe, has_two_children=False):
+        serialized_dp = pickle.dumps(datapipe)
+        deserialized_dp = pickle.loads(serialized_dp)
+        if not has_two_children:
+            self.assertEqual(list(datapipe), list(deserialized_dp))
+        else:
+            for c1, c2 in zip(list(datapipe), list(deserialized_dp)):
+                self.assertEqual(list(c1), list(c2))
+
     def test_serializable(self):
         input_dp = dp.map.SequenceWrapper(range(10))
         picklable_datapipes: List[
@@ -1430,6 +1440,8 @@ class TestFunctionalMapDataPipe(TestCase):
         ]
         for dpipe, dp_args, dp_kwargs in picklable_datapipes:
             _ = pickle.dumps(dpipe(input_dp, *dp_args, **dp_kwargs))  # type: ignore[call-arg]
+            datapipe = dpipe(input_dp, *dp_args, **dp_kwargs)  # type: ignore[call-arg]
+            self._serialization_test_helper(datapipe)
 
     def test_serializable_with_dill(self):
         input_dp = dp.map.SequenceWrapper(range(10))
