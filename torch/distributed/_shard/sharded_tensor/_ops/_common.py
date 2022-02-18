@@ -16,7 +16,6 @@ from torch.distributed.nn.functional import (
 
 def _handle_col_wise_sharding_base(
     op_func,
-    sharding_dim_size,
     col_dim,
     input,
     world_size,
@@ -39,7 +38,6 @@ def _handle_col_wise_sharding_base(
 
     Args:
         op_func: operator which is applied to the input tensor.
-        sharding_dim_size: the max size of the column each rank gets.
         col_dim: dim of result tensor after the operation.
         input: tensor to be applied op on.
         world_size: number of ranks.
@@ -90,7 +88,7 @@ def _handle_col_wise_sharding_base(
 
     # Distribute results to each rank with col rearrangement.
     output = _result_distribute_with_col_rearrange(
-        results, input, sharding_dim_size, world_size, weight, pg
+        results, input, world_size, weight, pg
     )
 
     # transpose the output and return result.
@@ -98,7 +96,7 @@ def _handle_col_wise_sharding_base(
 
 
 def _result_distribute_with_col_rearrange(
-    results, input, sharding_dim_size, world_size, weight, pg
+    results, input, world_size, weight, pg
 ):
     """
     For col-wise sharding of weight, we need to distribute
@@ -111,7 +109,6 @@ def _result_distribute_with_col_rearrange(
         results: results from ops applied to inputs from all ranks.
             We need to distribute them back to their original ranks.
         input: tensor to be applied op to.
-        sharding_dim_size: the max size of the column each rank gets.
         world_size: number of ranks.
         weight: shareded weight tensor.
         pg: process group.
@@ -119,6 +116,8 @@ def _result_distribute_with_col_rearrange(
     Return: column rearranged result.
     """
     # Process results and outputs for all2all.
+    sharding_dim = weight._sharding_spec.dim
+    sharding_dim_size = weight.size(sharding_dim)
     dims = list(results[0].size())
     dims[0] = sharding_dim_size
     output = torch.empty(*dims, device=input.device)
