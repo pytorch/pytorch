@@ -562,6 +562,15 @@ def _worker_init_fn(worker_id):
 
 class TestFunctionalIterDataPipe(TestCase):
 
+    def _serialization_test_helper(self, datapipe, has_two_children=False):
+        serialized_dp = pickle.dumps(datapipe)
+        deserialized_dp = pickle.loads(serialized_dp)
+        if not has_two_children:
+            self.assertEqual(list(datapipe), list(deserialized_dp))
+        else:
+            for c1, c2 in zip(list(datapipe), list(deserialized_dp)):
+                self.assertEqual(list(c1), list(c2))
+
     def test_serializable(self):
         input_dp = dp.iter.IterableWrapper(range(10))
         picklable_datapipes: List[Tuple[Type[IterDataPipe], Tuple, Dict[str, Any]]] = [
@@ -589,19 +598,40 @@ class TestFunctionalIterDataPipe(TestCase):
         dp_skip_comparison = {dp.iter.FileLister, dp.iter.FileOpener, dp.iter.StreamReader, dp.iter.Shuffler}
         # These DataPipes produce multiple DataPipes as outputs and those should be compared
         dp_compare_children = {dp.iter.Demultiplexer, dp.iter.Forker}
+
         for dpipe, dp_args, dp_kwargs in picklable_datapipes:
             datapipe = dpipe(input_dp, *dp_args, **dp_kwargs)  # type: ignore[call-arg]
-            serialized_dp = pickle.dumps(datapipe)
-            deserialized_dp = pickle.loads(serialized_dp)
+            serialized_dp = pickle.dumps(datapipe)  # Making sure dpipe is picklable
+            _ = pickle.loads(serialized_dp)  # Making sure dpipe is loadable
             if dpipe not in dp_skip_comparison:
-                if dpipe in dp_compare_children:
-                    for c1, c2 in zip(list(datapipe), list(deserialized_dp)):
-                        self.assertEqual(list(c1), list(c2))
-                else:
-                    self.assertEqual(list(datapipe), list(deserialized_dp))
+                # 1. Testing for serialization before any iteration starts
+                self._serialization_test_helper(datapipe, dpipe in dp_compare_children)
+
+                # 2. Testing for serialization after DataPipe is partially read
+                if dpipe not in dp_compare_children:
+                    it = iter(datapipe)
+                    _ = next(it)
+                    self._serialization_test_helper(datapipe)
+
+                    # 3. Testing for serialization after DataPipe is fully read
+                    _ = list(it)
+                    self._serialization_test_helper(datapipe)
+                else:  # DataPipes that need to compare children
+                    it1, it2 = iter(datapipe[0]), iter(datapipe[1])
+                    _, _ = next(it1), next(it2)
+                    self._serialization_test_helper(datapipe, has_two_children=True)
+
+                    # 2.5. Testing for serialization after one child DataPipe is fully read
+                    #      (Only for DataPipes with children DataPipes)
+                    _ = list(it1)  # fully read one child
+                    self._serialization_test_helper(datapipe, has_two_children=True)
+
+                    # 3. Testing for serialization after DataPipe is fully read
+                    _ = list(it2)  # fully read the other child
+                    self._serialization_test_helper(datapipe, has_two_children=True)
 
     def test_serializable_with_dill(self):
-        """Only for DataPipes that take in a function or buffer as argument"""
+        """Only for DataPipes that take in a function as argument"""
         input_dp = dp.iter.IterableWrapper(range(10))
         unpicklable_datapipes: List[Tuple[Type[IterDataPipe], Tuple, Dict[str, Any]]] = [
             (dp.iter.Collator, (lambda x: x,), {}),
