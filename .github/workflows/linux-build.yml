@@ -20,7 +20,7 @@ jobs:
       - name: print labels
         run: echo "${PR_LABELS}"
       - name: test
-        uses: ./.github/workflows/actions/setup-ec2-linux.yml
+        uses: ./.github/workflows/actions/setup-ec2-linux
     #   !{{ common.setup_ec2_linux() }}
     #   !{{ common.checkout() }}
     # {%- if enable_xla_test == 1 %}
