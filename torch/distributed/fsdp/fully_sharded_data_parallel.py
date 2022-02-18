@@ -738,7 +738,7 @@ class FullyShardedDataParallel(nn.Module):
         return [p for p in self.params if not _is_full_param_in_use(p)]
 
     @contextlib.contextmanager
-    def _summon_full_params(
+    def summon_full_params(
         self, recurse: bool = True, writeback: bool = True
     ) -> Generator:
         """
@@ -769,7 +769,7 @@ class FullyShardedDataParallel(nn.Module):
                 for module in self.modules():
                     if isinstance(module, FullyShardedDataParallel):
                         stack.enter_context(
-                            module._summon_full_params(
+                            module.summon_full_params(
                                 recurse=False, writeback=writeback
                             )
                         )
