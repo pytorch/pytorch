@@ -9,7 +9,6 @@ dictated by just sharding.
 
 import json
 import os
-import re
 from typing import Dict
 
 from typing_extensions import TypedDict
@@ -22,17 +21,6 @@ class Config(TypedDict):
     num_shards: int
     runner: str
 
-
-def get_disabled_issues() -> str:
-    pr_body = os.getenv('PR_BODY', '')
-    # The below regex is meant to match all *case-insensitive* keywords that
-    # GitHub has delineated would link PRs to issues, more details here:
-    # https://docs.github.com/en/issues/tracking-your-work-with-issues/linking-a-pull-request-to-an-issue.
-    # E.g., "Close #62851", "fixES #62851" and "RESOLVED #62851" would all match, but not
-    # "closes  #62851" --> extra space, "fixing #62851" --> not a keyword, nor "fix 62851" --> no #
-    regex = '(?i)(Close(d|s)?|Resolve(d|s)?|Fix(ed|es)?) #([0-9]+)'
-    issue_numbers = [x[4] for x in re.findall(regex, pr_body)]
-    return ','.join(issue_numbers)
 
 # When the user specifies labels that are NOT ciflow/default, the expectation is
 # that the workflows should be triggered as if they are on trunk. For example, when
@@ -128,7 +116,6 @@ def main() -> None:
     print(json.dumps({'matrix': matrix, 'render-matrix': render_matrix}, indent=2))
     print(f'::set-output name=matrix::{json.dumps(matrix)}')
     print(f'::set-output name=render-matrix::{json.dumps(render_matrix)}')
-    print(f'::set-output name=ignore-disabled-issues::{get_disabled_issues()}')
 
 
 if __name__ == "__main__":
