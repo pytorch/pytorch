@@ -29,7 +29,7 @@ check_gradle() {
 }
 
 parse_abis_list() {
-  ABIS_LIST="x86"
+  ABIS_LIST="armeabi-v7a,arm64-v8a,x86,x86_64"
   CUSTOM_ABIS_LIST=false
   if [ $# -gt 0 ]; then
     ABIS_LIST=$1
