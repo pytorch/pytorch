@@ -1,6 +1,6 @@
 from lazy_tensor_core import _LAZYC
 import dataclasses
-from typing import List, Dict
+from typing import List, Dict, Any
 from torch import Tensor
 import copy
 
@@ -13,15 +13,15 @@ class GraphInputMatcher:
     # most likely const tensors and we can get its content from graph_input_tensors
     # Category 2: those whose id are found in tensor_id_to_arg_idx. We should get
     #  the tensor from method arguments
-    graph_input_tensors: List[Tensor]
+    graph_input_ivalues: List[Any]
 
     # get the real graph input tensors
     def __call__(self, args):
         real_input = []
-        for tensor_id, traced_tensor in zip(self.graph_input_tensor_ids, self.graph_input_tensors):
+        for tensor_id, traced_ivalue in zip(self.graph_input_tensor_ids, self.graph_input_ivalues):
             arg_idx = self.tensor_id_to_arg_idx.get(tensor_id, None)
             if arg_idx is None:
-                inp = traced_tensor
+                inp = traced_ivalue
             else:
                 inp = args[arg_idx]
             real_input.append(inp)
@@ -39,12 +39,15 @@ def optimize(model, example_inputs):
     tensor_id_to_arg_idx = {tensor_id: i for i, tensor_id in enumerate(args_tensor_ids)}
     lazy_model = copy.deepcopy(model).to(device="lazy")
     lazy_out = lazy_model(*lazy_args)
+    # import pdb; pdb.set_trace() # TODO
+    if isinstance(lazy_out, (tuple, list)) and len(lazy_out) == 1:
+        lazy_out = lazy_out[0]
 
     print("LTC IR:", _LAZYC._get_ltc_tensors_text([lazy_out]))
     print("TS IR:", _LAZYC._get_ltc_tensors_backend([lazy_out]))
 
-    graph_input_tensor_ids, graph_input_tensors = _LAZYC._get_ltc_tensors_ts_device_data_node([lazy_out])
-    graph_input_matcher = GraphInputMatcher(tensor_id_to_arg_idx, graph_input_tensor_ids, graph_input_tensors)
+    graph_input_tensor_ids, graph_input_ivalues = _LAZYC._get_ltc_tensors_ts_device_data_node([lazy_out])
+    graph_input_matcher = GraphInputMatcher(tensor_id_to_arg_idx, graph_input_tensor_ids, graph_input_ivalues)
 
     graph_hash = _LAZYC._get_graph_hash(lazy_out)
 

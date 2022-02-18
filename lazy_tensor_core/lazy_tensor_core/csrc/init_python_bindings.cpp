@@ -465,7 +465,7 @@ void InitLtcModuleBindings(py::module m) {
           }
           auto post_order = Util::ComputePostOrder(roots);
           std::vector<int64_t> tensor_ids;
-          std::vector<at::Tensor> eager_tensors;
+          std::vector<at::IValue> ivalues;
           for (auto nodeptr : post_order) {
             if (nodeptr->op() == *torch::lazy::ltc_device_data) {
               const auto* device_data_node = torch::lazy::NodeCast<torch::lazy::DeviceData>(nodeptr, *torch::lazy::ltc_device_data);
@@ -474,13 +474,17 @@ void InitLtcModuleBindings(py::module m) {
               tensor_ids.push_back(deviceDataInfoPtr->tensor_id);
 
               auto* tsDataPtr = (torch_lazy_tensors::compiler::TSData*) device_data_node->data().get();
-              CHECK(tsDataPtr->HasValue());
-              eager_tensors.push_back(tsDataPtr->data());
+              if (tsDataPtr->HasValue()) {
+                ivalues.push_back(tsDataPtr->data());
+              } else {
+                CHECK(tsDataPtr->scalar.has_value());
+                ivalues.push_back(tsDataPtr->scalar.value());
+              }
             }
           }
-          return std::make_pair(tensor_ids, eager_tensors);
+          return std::make_pair(tensor_ids, ivalues);
         });
-  m.def("_run_cached_graph", [](const std::string& hash_str, const std::vector<at::Tensor>& tensors) {
+  m.def("_run_cached_graph", [](const std::string& hash_str, const std::vector<at::IValue>& graph_inputs) {
     TORCH_CHECK(hash_str.size() == sizeof(hash_t));
     hash_t hash = *(hash_t*) (hash_str.c_str());
     LOG(ERROR) << "_run_cached_graph get a hash " << hash << std::endl;
@@ -494,7 +498,7 @@ void InitLtcModuleBindings(py::module m) {
 
     TORCH_CHECK(computationPtr);
     std::vector<torch::jit::IValue> stack;
-    for (auto arg : tensors) {
+    for (auto arg : graph_inputs) {
       stack.emplace_back(arg);
     }
     computationPtr->graph_executor().run(stack);
@@ -746,7 +750,10 @@ void InitLtcModuleBindings(py::module m) {
   m.def("_ltc_enable_thread_pool", []() {
     FLAGS_torch_lazy_use_thread_pool = true;
   });
-  m.def("shunting_explore", []() { shunting_explore(); });
+  m.def("shunting_explore", []() {
+    shunting_explore();
+    return c10::IValue(5);
+  });
   m.def("_get_graph_hash", [](const at::Tensor& tensor) {
     auto xtensor = TryGetLtcTensor(tensor);
     auto hash = LazyGraphExecutor::Get()->GetGraphHash(xtensor);

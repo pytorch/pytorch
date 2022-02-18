@@ -23,6 +23,16 @@ class ModuleSub(nn.Module):
     def forward(self, a, b):
         return a - b
 
+class ModuleAddcmul(nn.Module):
+    """
+    addcmul function takes a at::Scalar which results in a special TSData containing a Scalar rather than a Tensor.
+    """
+    def __init__(self):
+        super(ModuleAddcmul, self).__init__()
+
+    def forward(self, a, b, c):
+        return torch.addcmul(a, b, c, value=5)
+
 def gen_rand_args(mod):
     args = []
     for _ in range(len(inspect.signature(mod.forward).parameters)):
@@ -51,10 +61,13 @@ def verify_reusing_compiled_graph(mod, ncase=10):
     if len(failed_index) > 0:
         raise RuntimeError(f"Failed {len(failed_index)}/{ncase} cases")
 
+def maketest(module_cls):
+    def wrapper(self):
+        verify_reusing_compiled_graph(module_cls())
 
+    return wrapper
+# import pdb; pdb.set_trace()
 class OptimizeTest(unittest.TestCase):
-    def test_sub(self):
-        verify_reusing_compiled_graph(ModuleSub())
-
-    def test_const_scale(self):
-        verify_reusing_compiled_graph(ModuleConstScale())
+    test_sub = maketest(ModuleSub)
+    test_const_scale = maketest(ModuleConstScale)
+    test_addcmul = maketest(ModuleAddcmul)
