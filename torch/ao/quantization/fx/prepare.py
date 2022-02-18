@@ -60,7 +60,7 @@ from .utils import (
     get_custom_module_class_keys,
     all_node_args_have_no_tensors,
     assert_and_get_unique_device,
-    get_non_tensor_arg_indexes_and_types,
+    get_non_observable_arg_indexes_and_types,
     get_new_attr_name_with_prefix,
     NON_QUANTIZABLE_WEIGHT_OPS,
     WEIGHT_INDEX_DICT,
@@ -94,7 +94,7 @@ from .backend_config.utils import (
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union, Set
 from collections import defaultdict
 
-#list of dtypes to not add observers to
+# list of dtypes to not add observers to
 DO_NOT_OBS_DTYPE_LIST = [int, torch.bool, torch.float, None]
 
 def is_activation_post_process_node(node: Node, modules: Dict[str, torch.nn.Module]) -> bool:
@@ -824,20 +824,12 @@ def propagate_dtypes_for_known_nodes(
     replace this with a better way to reason about dtypes of tensors.
     """
     for node in graph.nodes:
-        non_tensor_arg_dict = get_non_tensor_arg_indexes_and_types(node)
+        non_observable_arg_dict = get_non_observable_arg_indexes_and_types(node)
 
-        for arg_type in non_tensor_arg_dict:
-            non_tensor_arg_dict_val = non_tensor_arg_dict[arg_type]
+        for arg_type in non_observable_arg_dict:
+            non_observable_indices = non_observable_arg_dict[arg_type](node)
 
-            # non_tensor_indices can be either a list or a function that takes
-            # the node as an argument and returns a list of node args of the
-            # arg_type
-            if isinstance(non_tensor_arg_dict_val, list):
-                non_tensor_indices = non_tensor_arg_dict_val
-            else:
-                non_tensor_indices = non_tensor_arg_dict_val(node)
-
-            for index in non_tensor_indices:
+            for index in non_observable_indices:
                 arg = node.args[index]
 
                 # when an argument is a tuple, it does not show up as another node so we need to go through

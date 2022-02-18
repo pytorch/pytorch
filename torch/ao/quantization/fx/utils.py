@@ -458,9 +458,17 @@ def all_node_args_have_no_tensors(node: Node, modules: Dict[str, torch.nn.Module
 
 def all_node_args_except_first(node: Node) -> List[int]:
     """
-    Returns all node arg indexes after first
+    Returns all node arg indices after first
     """
     return [i for i, arg in enumerate(node.args)][1:]
+
+def return_arg_list(arg_indices: List[int]) -> Callable[Node, int]:
+    """
+    Constructs a function that returns the arg indices
+    """
+    def arg_indices_func(node: Node) -> List[int]:
+        return arg_indices
+    return arg_indices_func
 
 NodeInfo = namedtuple("NodeInfo", "op target")
 
@@ -468,10 +476,10 @@ NodeInfo = namedtuple("NodeInfo", "op target")
 # so that they can be propagated correctly since inserting observers
 # for them would cause errors
 
-NON_TENSOR_ARG_DICT = {
+NON_OBSERVABLE_ARG_DICT = {
     NodeInfo("call_method", "masked_fill") : {
-        torch.bool: [1],
-        float: [2]
+        torch.bool: return_arg_list([1]),
+        float: return_arg_list([2])
     },
     NodeInfo("call_method", "permute") : {
         int: all_node_args_except_first
@@ -482,8 +490,8 @@ NON_TENSOR_ARG_DICT = {
     NodeInfo("call_method", "reshape") : {
         int: all_node_args_except_first
     },
-        NodeInfo("call_method", "size") : {
-        int: [1]
+    NodeInfo("call_method", "size") : {
+        int: return_arg_list([1])
     },
     NodeInfo("call_method", "transpose") : {
         int: all_node_args_except_first
@@ -492,26 +500,26 @@ NON_TENSOR_ARG_DICT = {
         int: all_node_args_except_first
     },
     NodeInfo("call_method", "unsqueeze") : {
-        int: [1]
+        int: return_arg_list([1])
     },
     NodeInfo("call_method", "unsqueeze_") : {
-        int: [1]
+        int: return_arg_list([1])
     },
     NodeInfo("call_method", torch.unsqueeze) : {
-        int: [1]
+        int: return_arg_list([1])
     },
     NodeInfo("call_method", "view") : {
         int: all_node_args_except_first
     },
 }
 
-def get_non_tensor_arg_indexes_and_types(node: Node) -> Dict[type, Union[Callable[[Node], List[int]], List[int]]]:
+def get_non_observable_arg_indexes_and_types(node: Node) -> Dict[type, Union[Callable[[Node], List[int]], List[int]]]:
     """
-    Returns a dict with of non float tensor types as keys and values which correspond to their
-    arg indices in a list or a function to retrieve the list (which takes the node as an argument)
+    Returns a dict with of non float tensor types as keys and values which correspond to a
+    function to retrieve the list (which takes the node as an argument)
     """
     info = NodeInfo(node.op, node.target)
-    return NON_TENSOR_ARG_DICT.get(info, {})
+    return NON_OBSERVABLE_ARG_DICT.get(info, {})
 
 def node_return_type_is_int(node: Node) -> bool:
     """
