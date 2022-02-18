@@ -7,11 +7,9 @@
       "ios-12-5-1-arm64",
       "ios-12-5-1-arm64-coreml",
       "ios-12-5-1-arm64-custom-ops",
-      "ios-12-5-1-arm64-full-jit",
       "ios-12-5-1-arm64-metal",
       "ios-12-5-1-x86-64",
       "ios-12-5-1-x86-64-coreml",
-      "ios-12-5-1-x86-64-full-jit",
       "libtorch-linux-xenial-cuda10.2-py3.7-gcc7",
       "libtorch-linux-xenial-cuda11.3-py3.7-gcc7",
       "linux-bionic-cuda10.2-py3.9-gcc7",
@@ -44,6 +42,7 @@
       "pytorch-linux-xenial-py3-clang5-android-ndk-r19c-build",
       "pytorch-linux-xenial-py3-clang5-android-ndk-r19c-gradle-custom-build-single",
       "pytorch-linux-xenial-py3-clang5-android-ndk-r19c-gradle-custom-build-single-full-jit",
+      "pytorch-xla-linux-bionic-py3.7-clang8",
       "win-vs2019-cpu-py3",
       "win-vs2019-cuda11.3-py3"
     ],
@@ -60,21 +59,33 @@
       "linux-binary-libtorch-cxx11-abi",
       "linux-binary-libtorch-pre-cxx11",
       "linux-binary-manywheel",
+      "macos-arm64-binary-conda",
+      "macos-arm64-binary-wheel",
+      "macos-binary-conda",
+      "macos-binary-libtorch-cxx11-abi",
+      "macos-binary-libtorch-pre-cxx11",
+      "macos-binary-wheel",
       "windows-binary-libtorch-cxx11-abi",
       "windows-binary-libtorch-pre-cxx11",
       "windows-binary-wheel"
     ],
     "ciflow/binaries_conda": [
-      "linux-binary-conda"
+      "linux-binary-conda",
+      "macos-arm64-binary-conda",
+      "macos-binary-conda"
     ],
     "ciflow/binaries_libtorch": [
       "linux-binary-libtorch-cxx11-abi",
       "linux-binary-libtorch-pre-cxx11",
+      "macos-binary-libtorch-cxx11-abi",
+      "macos-binary-libtorch-pre-cxx11",
       "windows-binary-libtorch-cxx11-abi",
       "windows-binary-libtorch-pre-cxx11"
     ],
     "ciflow/binaries_wheel": [
       "linux-binary-manywheel",
+      "macos-arm64-binary-wheel",
+      "macos-binary-wheel",
       "windows-binary-wheel"
     ],
     "ciflow/cpu": [
@@ -93,6 +104,7 @@
       "pytorch-linux-xenial-py3-clang5-android-ndk-r19c-build",
       "pytorch-linux-xenial-py3-clang5-android-ndk-r19c-gradle-custom-build-single",
       "pytorch-linux-xenial-py3-clang5-android-ndk-r19c-gradle-custom-build-single-full-jit",
+      "pytorch-xla-linux-bionic-py3.7-clang8",
       "win-vs2019-cpu-py3"
     ],
     "ciflow/cuda": [
@@ -128,6 +140,12 @@
       "linux-xenial-py3.7-gcc5.4",
       "linux-xenial-py3.7-gcc7",
       "linux-xenial-py3.7-gcc7-no-ops",
+      "macos-arm64-binary-conda",
+      "macos-arm64-binary-wheel",
+      "macos-binary-conda",
+      "macos-binary-libtorch-cxx11-abi",
+      "macos-binary-libtorch-pre-cxx11",
+      "macos-binary-wheel",
       "pytorch-linux-xenial-py3-clang5-android-ndk-r19c-gradle-custom-build-single",
       "pytorch-linux-xenial-py3-clang5-android-ndk-r19c-gradle-custom-build-single-full-jit",
       "win-vs2019-cpu-py3",
@@ -143,11 +161,9 @@
       "ios-12-5-1-arm64",
       "ios-12-5-1-arm64-coreml",
       "ios-12-5-1-arm64-custom-ops",
-      "ios-12-5-1-arm64-full-jit",
       "ios-12-5-1-arm64-metal",
       "ios-12-5-1-x86-64",
-      "ios-12-5-1-x86-64-coreml",
-      "ios-12-5-1-x86-64-full-jit"
+      "ios-12-5-1-x86-64-coreml"
     ],
     "ciflow/libtorch": [
       "libtorch-linux-xenial-cuda10.2-py3.7-gcc7",
@@ -183,17 +199,16 @@
       "periodic-linux-xenial-cuda11.1-py3.7-gcc7-debug",
       "pytorch-linux-xenial-py3-clang5-android-ndk-r19c-build",
       "pytorch-linux-xenial-py3-clang5-android-ndk-r19c-gradle-custom-build-single",
-      "pytorch-linux-xenial-py3-clang5-android-ndk-r19c-gradle-custom-build-single-full-jit"
+      "pytorch-linux-xenial-py3-clang5-android-ndk-r19c-gradle-custom-build-single-full-jit",
+      "pytorch-xla-linux-bionic-py3.7-clang8"
     ],
     "ciflow/macos": [
       "ios-12-5-1-arm64",
       "ios-12-5-1-arm64-coreml",
       "ios-12-5-1-arm64-custom-ops",
-      "ios-12-5-1-arm64-full-jit",
       "ios-12-5-1-arm64-metal",
       "ios-12-5-1-x86-64",
       "ios-12-5-1-x86-64-coreml",
-      "ios-12-5-1-x86-64-full-jit",
       "macos-10-15-py3-arm64",
       "macos-10-15-py3-lite-interpreter-x86-64",
       "macos-11-py3-x86-64"
@@ -215,6 +230,10 @@
       "linux-xenial-py3.7-clang7-asan"
     ],
     "ciflow/scheduled": [
+      "ios-12-5-1-arm64",
+      "ios-12-5-1-arm64-coreml",
+      "ios-12-5-1-arm64-custom-ops",
+      "ios-12-5-1-arm64-metal",
       "linux-docs-push",
       "periodic-libtorch-linux-bionic-cuda11.5-py3.7-gcc7",
       "periodic-libtorch-linux-xenial-cuda11.1-py3.7-gcc7",
@@ -234,14 +253,8 @@
     "ciflow/trunk": [
       "caffe2-linux-xenial-py3.7-gcc5.4",
       "docker-builds",
-      "ios-12-5-1-arm64",
-      "ios-12-5-1-arm64-coreml",
-      "ios-12-5-1-arm64-custom-ops",
-      "ios-12-5-1-arm64-full-jit",
-      "ios-12-5-1-arm64-metal",
       "ios-12-5-1-x86-64",
       "ios-12-5-1-x86-64-coreml",
-      "ios-12-5-1-x86-64-full-jit",
       "libtorch-linux-xenial-cuda10.2-py3.7-gcc7",
       "libtorch-linux-xenial-cuda11.3-py3.7-gcc7",
       "linux-bionic-cuda10.2-py3.9-gcc7",
@@ -266,6 +279,7 @@
       "pytorch-linux-xenial-py3-clang5-android-ndk-r19c-build",
       "pytorch-linux-xenial-py3-clang5-android-ndk-r19c-gradle-custom-build-single",
       "pytorch-linux-xenial-py3-clang5-android-ndk-r19c-gradle-custom-build-single-full-jit",
+      "pytorch-xla-linux-bionic-py3.7-clang8",
       "win-vs2019-cpu-py3",
       "win-vs2019-cuda11.3-py3"
     ],
@@ -279,7 +293,7 @@
       "win-vs2019-cuda11.3-py3"
     ],
     "ciflow/xla": [
-      "linux-bionic-py3.7-clang9"
+      "pytorch-xla-linux-bionic-py3.7-clang8"
     ]
   },
   "version": "v1"
