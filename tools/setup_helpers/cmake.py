@@ -274,7 +274,8 @@ class CMake:
              'ONNX_NAMESPACE',
              'ATEN_THREADING',
              'WERROR',
-             'OPENSSL_ROOT_DIR')
+             'OPENSSL_ROOT_DIR',
+             'STATIC_DISPATCH_BACKEND')
         })
 
         # Aliases which are lower priority than their canonical option

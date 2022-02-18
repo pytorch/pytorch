@@ -1317,7 +1317,6 @@ def gen_source_files(
         *,
         native_functions: Sequence[NativeFunction],
         grouped_native_functions: Sequence[Union[NativeFunction, NativeFunctionsGroup]],
-        static_dispatch_idx: Optional[BackendIndex],
         selector: SelectiveBuilder,
         backend_indices: Dict[DispatchKey, BackendIndex],
         core_fm: FileManager,
@@ -1328,6 +1327,7 @@ def gen_source_files(
         rocm: bool,
         force_schema_registration: bool,
         per_operator_headers: bool,
+        skip_dispatcher_op_registration: bool,
 ) -> None:
     extra_cuda_headers = '''\
 #include <c10/cuda/CUDAGuard.h>
@@ -1401,7 +1401,7 @@ def gen_source_files(
                     class_method_name=None),
                 grouped_native_functions
             )),
-            'dispatch_registrations': [] if static_dispatch_idx else list(concatMap(
+            'dispatch_registrations': [] if skip_dispatcher_op_registration else list(concatMap(
                 dest.RegisterDispatchKey(
                     backend_index,
                     Target.REGISTRATION,
@@ -1429,7 +1429,8 @@ def gen_source_files(
     if force_schema_registration:
         schema_selector = SelectiveBuilder.get_nop_selector()
     cpu_fm.write('RegisterSchema.cpp', lambda: {
-        'schema_registrations': [] if static_dispatch_idx else list(mapMaybe(RegisterSchema(schema_selector), native_functions)),
+        'schema_registrations': [] if skip_dispatcher_op_registration
+        else list(mapMaybe(RegisterSchema(schema_selector), native_functions)),
     })
 
     def key_func(fn: Union[NativeFunction, NativeFunctionsGroup]) -> str:
@@ -1553,6 +1554,10 @@ def main() -> None:
         '--static_dispatch_backend',
         help='generate static dispatch code for the specific backend (if set)')
     parser.add_argument(
+        '--skip_dispatcher_op_registration',
+        action='store_true',
+        help='Avoid registering operators into the dispatcher.')
+    parser.add_argument(
         '--force_schema_registration',
         action='store_true',
         help='force it to generate schema-only registrations for all ops, including'
@@ -1645,7 +1650,6 @@ def main() -> None:
         gen_source_files(
             native_functions=native_functions,
             grouped_native_functions=grouped_native_functions,
-            static_dispatch_idx=static_dispatch_idx,
             selector=selector,
             backend_indices=backend_indices,
             core_fm=core_fm,
@@ -1656,6 +1660,7 @@ def main() -> None:
             rocm=options.rocm,
             force_schema_registration=options.force_schema_registration,
             per_operator_headers=options.per_operator_headers,
+            skip_dispatcher_op_registration=options.skip_dispatcher_op_registration,
         )
 
     if 'headers' in options.generate:

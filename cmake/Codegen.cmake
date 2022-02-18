@@ -198,29 +198,10 @@ if(INTERN_BUILD_ATEN_OPS)
       --static_dispatch_backend ${STATIC_DISPATCH_BACKEND})
   endif()
 
-  set(GEN_PER_OPERATOR_FLAG)
-  if(USE_PER_OPERATOR_HEADERS)
-    list(APPEND GEN_PER_OPERATOR_FLAG "--per-operator-headers")
-  endif()
-
-  set(GEN_COMMAND
-      "${PYTHON_EXECUTABLE}" -m tools.codegen.gen
-      --source-path ${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen
-      --install_dir ${CMAKE_BINARY_DIR}/aten/src/ATen
-      ${GEN_PER_OPERATOR_FLAG}
-      ${GEN_ROCM_FLAG}
-      ${CUSTOM_BUILD_FLAGS}
-      ${GEN_VULKAN_FLAGS}
-  )
-
-  file(GLOB_RECURSE headers_templates "${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/templates/*\.h")
-  file(GLOB_RECURSE sources_templates "${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/templates/*\.cpp")
-  set(declarations_yaml_templates "")
-
   # Codegen unboxing
   if(USE_LIGHTWEIGHT_DISPATCH)
     file(GLOB_RECURSE all_unboxing_script "${CMAKE_CURRENT_LIST_DIR}/../tools/jit/*.py")
-
+    list(APPEND CUSTOM_BUILD_FLAGS --skip_dispatcher_op_registration)
     set(GEN_UNBOXING_COMMAND
         "${PYTHON_EXECUTABLE}" -m tools.jit.gen_unboxing
         --source-path ${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen
@@ -254,6 +235,25 @@ if(INTERN_BUILD_ATEN_OPS)
   else() # Otherwise do not generate or include sources into build.
     set(generated_unboxing_sources "")
   endif()
+
+  set(GEN_PER_OPERATOR_FLAG)
+  if(USE_PER_OPERATOR_HEADERS)
+    list(APPEND GEN_PER_OPERATOR_FLAG "--per-operator-headers")
+  endif()
+
+  set(GEN_COMMAND
+      "${PYTHON_EXECUTABLE}" -m tools.codegen.gen
+      --source-path ${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen
+      --install_dir ${CMAKE_BINARY_DIR}/aten/src/ATen
+      ${GEN_PER_OPERATOR_FLAG}
+      ${GEN_ROCM_FLAG}
+      ${CUSTOM_BUILD_FLAGS}
+      ${GEN_VULKAN_FLAGS}
+  )
+
+  file(GLOB_RECURSE headers_templates "${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/templates/*\.h")
+  file(GLOB_RECURSE sources_templates "${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/templates/*\.cpp")
+  set(declarations_yaml_templates "")
 
   foreach(gen_type "headers" "sources" "declarations_yaml")
     # The codegen outputs may change dynamically as PyTorch is
