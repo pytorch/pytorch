@@ -215,7 +215,7 @@ class PackageImporter(Importer):
             if self.storage_context.has_storage(name):
                 storage = self.storage_context.get_storage(name, dtype).storage()
             else:
-                tensor = self.zip_reader.get_storage_from_record(
+                tensor = self.zip_reader.zip_file_reader.get_storage_from_record(
                     ".data/" + name, size, dtype
                 )
                 if isinstance(self.zip_reader, torch._C.PyTorchFileReader):
@@ -272,7 +272,6 @@ class PackageImporter(Importer):
         """
         pickle_file = self._zipfile_path(package, resource)
         loaded_reduces = {}
-
 
         def persistent_load(saved_id):
             assert isinstance(saved_id, tuple)

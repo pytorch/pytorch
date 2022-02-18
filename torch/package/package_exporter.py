@@ -255,7 +255,8 @@ class PackageExporter:
             self.torch_specific_init()
 
     def torch_specific_init(self):
-        self.storage_context = self.zip_file.get_storage_context()
+        self.script_module_serializer = torch._C.ScriptModuleSerializer(self.zip_file.zip_file_writer)
+        self.storage_context = self.script_module_serializer.storage_context()
 
 
     def save_source_file(
@@ -1045,6 +1046,8 @@ class PackageExporter:
                 ...
         """
         self._execute_dependency_graph()
+        if self.torch_is_available:
+            self.script_module_serializer.write_files()
         self._finalize_zip()
 
     def _finalize_zip(self):
