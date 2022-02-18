@@ -34,13 +34,21 @@ if TYPE_CHECKING:
 
 ParamOffset = Tuple[int, int]
 SharedParamInfo = Tuple[str, str, nn.Module, str, nn.Module, str]
+FLAT_PARAM = "flat_param"
+FPW_MODULE = "_fpw_module"
 
 
 def _post_state_dict_hook(
     module: nn.Module, state_dict: "OrderedDict[str, Tensor]", prefix: str, *args: Any
 ) -> "OrderedDict[str, Tensor]":
-    # Move everything from .fpw_module up one level.
-    _replace_by_prefix(state_dict, prefix + "_fpw_module.", prefix)
+    """
+    _post_state_dict_hook() is called after the state_dict() is executed
+    and before returning the state_dict to the users.
+    This API post-processes the keys of the state_dict to remove the
+    FlattenParamsWrapper internal prefix.
+    """
+    # Move everything from FPW_MODULE up one level.
+    _replace_by_prefix(state_dict, prefix + f"{FPW_MODULE}.", prefix)
     return state_dict
 
 
@@ -49,14 +57,21 @@ def _pre_load_state_dict_hook(
     prefix: str,
     *args: Any,
 ) -> None:
-    # Push everything down to ._fpw_module level.
-    _replace_by_prefix(state_dict, prefix, prefix + "_fpw_module.")
+    """
+    _post_state_dict_hook() is called before the _load_from_state_dict() is
+    This API pre-processes the keys of the state_dict to add the
+    FlattenParamsWrapper internal prefix
+    """
+    # Push everything down to FPW_MODULE level.
+    _replace_by_prefix(state_dict, prefix, prefix + f"{FPW_MODULE}.")
     # The flat_param_* keys actually needs to move one level up.
-    flat_param_key = prefix + "_fpw_module.flat_param"
+    flat_param_key = prefix + f"{FPW_MODULE}.{FLAT_PARAM}"
     for k in list(state_dict.keys()):
         if k.startswith(flat_param_key):
             last_part = k.split(".")[-1]
-            assert last_part.startswith("flat_param"), last_part
+            assert last_part.startswith(
+                FLAT_PARAM
+            ), f"Expected key to contain flat_param, but key name is {k}"
             _replace_by_prefix(state_dict, k, prefix + last_part)
 
 
@@ -287,6 +302,10 @@ class FlattenParamsWrapper(nn.Module):
         self._orig_flat_param: List[Optional[FlatParameter]] = [None]
         self._flatten_params()
 
+        # Sanity check for the string constants.
+        assert getattr(self, FPW_MODULE) is self._fpw_module
+        assert getattr(self, FLAT_PARAM) is self.flat_param
+
         # Register hook to be called after state_dict() to remove the
         # "_fpw_module." prefix and before load_state_dict() to add it back.
         self._register_state_dict_hook(_post_state_dict_hook)
@@ -426,12 +445,6 @@ class FlattenParamsWrapper(nn.Module):
     def __getitem__(self, key: int) -> Any:
         """Forward indexing calls in case the module is a nn.Sequential."""
         return self.module.__getitem__(key)
-
-    def flat_state_dict(self, *args: Any, **kwargs: Any) -> "OrderedDict[str, Tensor]":
-        """Return the flattened state_dict."""
-        assert getattr(self, "flat_param", None) is not None
-        assert isinstance(self.flat_param, FlatParameter)
-        return self.state_dict(*args, **kwargs)
 
     def _unflatten_params_if_needed(self) -> None:
         if self.flat_param is not None:

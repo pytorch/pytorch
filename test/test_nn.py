@@ -14707,6 +14707,21 @@ class TestNNDeviceType(NNTestCase):
         with self.assertRaises(RuntimeError):
             torch.nn.functional.one_hot(torch.tensor([3, 4, 1, 0], device=device), -2)
 
+    def test_nn_empty(self, device):
+        # One off tests to ensure scalars from nn.yaml are properly applied
+        def verify_scalars(input, output):
+            self.assertEqual(input.shape, output.shape)
+            self.assertEqual(0, output.numel())
+
+        for input_shape in [(0), (0, 2)]:
+            for module in [torch.nn.ELU, torch.nn.Hardtanh, torch.nn.LeakyReLU, torch.nn.LogSigmoid,
+                           torch.nn.RReLU, torch.nn.Softshrink, torch.nn.Softplus, torch.nn.Sigmoid,
+                           torch.nn.Tanh]:
+                input = torch.randn(input_shape, device=device, requires_grad=True)
+                m = module()
+                output = m(input)
+                verify_scalars(input, output)
+
     def test_nn_scalars(self, device):
         # One off tests to ensure scalars from nn.yaml are properly applied
         def verify_scalars(input, output):
@@ -16427,7 +16442,6 @@ class TestNNDeviceType(NNTestCase):
     def test_conv_large(self, device):
         dtype = torch.half if self.device_type == 'cuda' else torch.float
         conv = nn.Conv2d(2, 2, 8, 8, bias=False).to(device).to(dtype)
-        conv.weight = torch.nn.Parameter(torch.randn(2, 2, 8, 8, device=device, dtype=dtype) / 64)
         input_large = torch.randn(4097, 2, 512, 512, dtype=dtype, device=device)
         # forward
         ret = conv(input_large)
@@ -17526,6 +17540,43 @@ class TestNNDeviceType(NNTestCase):
         self._test_EmbeddingBag(device, 'sum', True, wdtype=torch.bfloat16, dtype=dtypes[0], odtype=dtypes[1], test_backward=True)
         self._test_EmbeddingBag(device, 'mean', True, wdtype=torch.bfloat16, dtype=dtypes[0], odtype=dtypes[1], test_backward=True)
 
+    @dtypesIfCUDA(torch.float)
+    @dtypes(torch.float)
+    def test_transform_bias_rescale_qkv(self, device, dtype):
+        # TODO: debug CPU test failure with settings (48, 4, 16, 8) and add that mode
+        tests = [
+            (64, 4, 16, 8),
+            # dim_per_head = 12 does not divide evenly by CPU vectorization length of 8
+            (24, 2, 4, 2),
+            # Make sure CUDA can handle small input sizes
+            (2, 2, 2, 2),
+            # dim_per_head = 6 does not divide evenly by CUDA vectorization length of 4, causes alignment issues
+            (24, 4, 4, 2)
+        ]
+        for (embed_dim, num_heads, sl, bs) in tests:
+            x = torch.randn(sl, bs, embed_dim, device=device, dtype=dtype) * 10
+            qkv = torch.nn.Linear(embed_dim, 3 * embed_dim, device=device, dtype=dtype)
+
+            with torch.no_grad():
+                (q, k, v) = torch._transform_bias_rescale_qkv(x @ qkv.weight.t(), qkv.bias, num_head=num_heads)
+
+                def simple_transform_bias_rescale_qkv(qkv, bias):
+                    (q, k, v) = torch.split(qkv, embed_dim, dim=-1)
+                    (q_bias, k_bias, v_bias) = torch.split(bias, embed_dim, dim=-1)
+                    return tuple(
+                        x.reshape((sl, bs, num_heads, embed_dim // num_heads)).transpose(2, 1)
+                        for x in (
+                                (q + q_bias) / math.sqrt(embed_dim // num_heads),
+                                (k + k_bias),
+                                (v + v_bias)
+                        )
+                    )
+                correct_q, correct_k, correct_v = simple_transform_bias_rescale_qkv(x @ qkv.weight.t(), qkv.bias)
+
+            self.assertEqual(q.size(), correct_q.size())
+            self.assertTrue(torch.allclose(q, correct_q))
+            self.assertTrue(torch.allclose(k, correct_k))
+            self.assertTrue(torch.allclose(v, correct_v))
 
     @onlyCUDA
     @dtypes(torch.half, torch.float, torch.double)

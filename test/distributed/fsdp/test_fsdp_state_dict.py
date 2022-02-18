@@ -69,21 +69,21 @@ class TestFSDPStateDict(FSDPTest):
         return model
 
     @staticmethod
-    def _state_dict(model: Module, state_dict_name: str):
-        return getattr(model, state_dict_name)()
+    def _state_dict(model: Module, state_dict_type: str):
+        return getattr(model, state_dict_type)()
 
     @staticmethod
     def _load_state_dict(
-        model: Module, state_dict_name: str, state_dict: Dict[str, Any]
+        model: Module, state_dict_type: str, state_dict: Dict[str, Any]
     ):
-        getattr(model, f"load_{state_dict_name}")(state_dict)
+        getattr(model, f"load_{state_dict_type}")(state_dict)
 
-    def _dist_train(self, wrap_fsdp: bool, state_dict_name: str = ""):
+    def _dist_train(self, wrap_fsdp: bool, state_dict_type: str = ""):
+        # TODO: Move this test to common_fsdp.
         model = self._initialize_model(wrap_fsdp)
         optim = SGD(model.parameters(), lr=0.1)
 
-        in_data = torch.rand(64, 4).cuda()
-        in_data.requires_grad = True
+        in_data = torch.rand(64, 4, requires_grad=True, device=torch.device("cuda"))
         for _ in range(3):
             out = model(in_data)
             out.sum().backward()
@@ -91,33 +91,26 @@ class TestFSDPStateDict(FSDPTest):
             optim.zero_grad()
 
         if wrap_fsdp:
-            state_dict = self._state_dict(model, state_dict_name)
+            state_dict = self._state_dict(model, state_dict_type)
             blank_model = FSDP(Model(True).cuda())
-            self._load_state_dict(blank_model, state_dict_name, state_dict)
+            self._load_state_dict(blank_model, state_dict_type, state_dict)
             get_full_params(blank_model)
             model = blank_model
 
         return list(model.parameters())
 
     @skip_if_lt_x_gpu(2)
-    @parametrize("state_dict_name", ["local_state_dict"])
-    def test_state_dict_save_load_flow(self, state_dict_name):
-        fsdp_states = self._dist_train(wrap_fsdp=True, state_dict_name=state_dict_name)
-        ddp_states = self._dist_train(wrap_fsdp=False)
-        self.assertEqual(ddp_states, fsdp_states)
+    @parametrize("state_dict_type", ["local_state_dict"])
+    def test_state_dict_save_load_flow(self, state_dict_type):
+        fsdp_params = self._dist_train(wrap_fsdp=True, state_dict_type=state_dict_type)
+        ddp_params = self._dist_train(wrap_fsdp=False)
+        self.assertEqual(ddp_params, fsdp_params)
 
     @skip_if_lt_x_gpu(2)
-    @parametrize("state_dict_name", ["local_state_dict"])
-    def test_fsdp_state_dict_keys(self, state_dict_name):
-        state_dict = self._state_dict(self._initialize_model(True), state_dict_name)
-        if state_dict_name != "local_state_dict":
-            ddp_state_dict = self._initialize_model(False).state_dict(state_dict)
-            self.assertEqual(
-                set(dpp_state_dict.keys()),
-                set(state_dict.keys()),
-                "state_dict/sharded_state_dict should have the same keys as ddp.state_dict()",
-            )
-        else:
+    @parametrize("state_dict_type", ["local_state_dict"])
+    def test_fsdp_state_dict_keys(self, state_dict_type):
+        state_dict = self._state_dict(self._initialize_model(True), state_dict_type)
+        if state_dict_type == "local_state_dict":
             self.assertEqual(set(["flat_param", "inner.flat_param"]), state_dict.keys())
 
 
