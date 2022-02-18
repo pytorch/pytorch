@@ -13,6 +13,7 @@
 #include <ATen/native/LinearAlgebra.h>
 #include <ATen/native/BatchLinearAlgebra.h>
 #include <ATen/native/cuda/linalg/BatchLinearAlgebraLib.h>
+#include <ATen/native/cuda/linalg/MagmaUtils.h>
 #include <ATen/native/cpu/zmath.h>
 
 #if AT_MAGMA_ENABLED()
