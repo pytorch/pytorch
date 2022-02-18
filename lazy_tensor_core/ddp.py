@@ -14,6 +14,8 @@ import lazy_tensor_core.core.lazy_model as ltm
 # from caffe2.python import workspace
 # workspace.GlobalInit(['caffe2', '--caffe2_log_level=-4'])
 
+from torch.distributed.algorithms.ddp_comm_hooks.debugging_hooks import noop_hook
+
 def setup(rank, world_size):
     os.environ['MASTER_ADDR'] = 'localhost'
     os.environ['MASTER_PORT'] = '12356'
@@ -46,11 +48,12 @@ def demo_basic(rank, world_size):
     # create model and move it to GPU with id rank
     model = ToyModel().to(device)
     model = DDP(model, device_ids=[rank])
+    # model.register_comm_hook(None, noop_hook)
 
     loss_fn = nn.MSELoss()
     optimizer = optim.SGD(model.parameters(), lr=0.001)
 
-    for i in range(10):
+    for i in range(100):
         optimizer.zero_grad()
         outputs = model(torch.randn(20, 10).to(device))
         labels = torch.randn(20, 5).to(device)
@@ -58,7 +61,9 @@ def demo_basic(rank, world_size):
         loss.backward()
         optimizer.step()
         ltm.mark_step(device)
-        print(f"{os.getpid()}: iteration {i}, loss {loss}")
+
+        if i % 10 == 0:
+            print(f"{os.getpid()}: iteration {i}, loss {loss}")
 
     cleanup()
 
