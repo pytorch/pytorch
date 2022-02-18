@@ -45,9 +45,6 @@ jobs:
     #       of accessing secrets from forked pull requests and IOS' dependency on secrets for their build/test
     if: ${{ github.event_name == 'push' || (github.event.pull_request.head.repo.full_name == github.repository && github.repository_owner == 'pytorch') }}
     runs-on: macos-10.15
-    timeout-minutes: 240
-    env:
-    runs-on: macos-10.15
     timeout-minutes: !{{ common.timeout_minutes }}
     env:
       JOB_BASE_NAME: !{{ build_environment }}-build
