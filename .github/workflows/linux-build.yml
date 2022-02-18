@@ -78,6 +78,11 @@ jobs:
           TORCH_CUDA_ARCH_LIST: 5.2
           DOCKER_IMAGE: ${{ steps.calculate-docker-image.outputs.docker-image }}
         run: |
+          # TODO XLA
+          # {%- if enable_xla_test == 1 %}
+          #   -e XLA_CUDA \
+          # {%- endif %}
+
           # detached container should get cleaned up by teardown_ec2_linux
           container_name=$(docker run \
             -e BUILD_ENVIRONMENT \
@@ -90,10 +95,6 @@ jobs:
             -e BRANCH \
             -e GITHUB_RUN_ID \
             -e SCCACHE_BUCKET \
-          # TODO XLA
-          # {%- if enable_xla_test == 1 %}
-          #   -e XLA_CUDA \
-          # {%- endif %}
             -e XLA_CLANG_CACHE_S3_BUCKET_NAME \
             -e CUSTOM_TEST_ARTIFACT_BUILD_DIR \
             -e SKIP_SCCACHE_INITIALIZATION=1 \
