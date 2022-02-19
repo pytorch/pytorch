@@ -1406,7 +1406,7 @@ def _jit_compile(name,
                         hipify_result = hipify_python.hipify(
                             project_directory=build_directory,
                             output_directory=build_directory,
-                            header_include_dirs=extra_include_paths,
+                            header_include_dirs=(extra_include_paths if extra_include_paths is not None else []),
                             extra_files=[os.path.abspath(s) for s in sources],
                             ignores=[os.path.join(ROCM_HOME, '*'), os.path.join(_TORCH_PATH, '*')],  # no need to hipify ROCm or PyTorch headers
                             show_detailed=verbose,
