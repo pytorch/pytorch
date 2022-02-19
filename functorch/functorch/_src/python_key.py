@@ -89,6 +89,8 @@ class PythonTensor(torch.Tensor):
 
     @classmethod
     def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
+        if func in CURRENT_DECOMPOSITION_TABLE:
+            return CURRENT_DECOMPOSITION_TABLE[func](*args, **kwargs)
         # Commenting this out for now since it causes some spurious failures (such as error checking)
         # if func == aten._local_scalar_dense:
         #     raise RuntimeError("It appears that you're trying to get value out of a tracing tensor - erroring out! "
@@ -108,10 +110,14 @@ class PythonTensor(torch.Tensor):
         proxy_args = pytree.tree_map(unwrap_proxy, args)
         proxy_kwargs = pytree.tree_map(unwrap_proxy, kwargs)
 
-        if func in CURRENT_DECOMPOSITION_TABLE:
-            proxy_out = CURRENT_DECOMPOSITION_TABLE[func](*proxy_args, **proxy_kwargs)
-        else:
-            proxy_out = func(*proxy_args, **proxy_kwargs)
+        # We can no longer make this a decomposition as we will redispatch to autograd.
+        # todo(chilli): Move this somewhere else
+        canonicalization = {
+            aten._s_where: aten.where
+        }
+        if func in canonicalization:
+            func = canonicalization[func]
+        proxy_out = func(*proxy_args, **proxy_kwargs)
 
         # Kind of a hacky way to test if an op is in-place or not
         if func.__name__[-1] == "_" and func.__name__[0] != "_":
