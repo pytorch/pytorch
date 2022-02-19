@@ -105,11 +105,6 @@ def _reshape_alias(x, shape, strides):
     return aten.view(x, shape)
 
 
-@register_decomposition(aten._s_where, aot_autograd_decompositions)
-def _s_where_canonicalization(a, b, c):
-    return aten.where(a, b, c)
-
-
 def create_aot_autograd_function(
     flat_fn, fw_compiler, bw_compiler, partition_fn, decompositions, grad_state
 ):
