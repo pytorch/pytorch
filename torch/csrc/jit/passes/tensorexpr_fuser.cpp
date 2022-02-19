@@ -70,8 +70,8 @@ Value* broadcastSizes(at::ArrayRef<Value*> sizes, AliasDb* db) {
 namespace tensorexpr {
 
 OperatorSet& getCustomOperatorSet() {
-  static OperatorSet _g_customer_operator_set{};
-  return _g_customer_operator_set;
+  static OperatorSet _g_custom_operator_set{};
+  return _g_custom_operator_set;
 }
 
 static const OperatorSet& supported_non_eltwise_set() {
