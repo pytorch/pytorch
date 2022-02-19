@@ -20,7 +20,7 @@ on:
         required: true
         type: string
     outputs:
-    docker-image:
+      docker-image:
         type: string
         value: ${{ jobs.build.outputs.docker-image }}
 
