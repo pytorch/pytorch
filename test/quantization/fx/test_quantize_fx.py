@@ -5009,8 +5009,7 @@ class TestQuantizeFxOps(QuantizationTestCase):
     @skipIfNoFBGEMM
     def test_ave_pool_with_custom_cfg(self):
         """ A test that checks correct patterns are produced for
-        all supported general value ops like aten::avg_pool2d \
-        without actually checking for execution of these ops
+        avg_pool2d with customized config
         """
         class M(torch.nn.Module):
             def __init__(self):
