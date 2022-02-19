@@ -105,11 +105,14 @@ def broadcast_shapes(*shapes):
     with torch.no_grad():
         scalar = torch.zeros((), device="cpu")
 
+        if isinstance(shapes, int):
+            if shapes < 0:
+                raise RuntimeError(rf"Trying to create tensor with negative dimension {shape}: [{shape}]")
         for shape in shapes:
             if isinstance(shape, tuple):
                 for ele in shape:
                     if ele < 0:
-                        raise RuntimeError(rf"Trying to create tensor with negative dimension {shape}: [{shape}]")
+                        raise RuntimeError(rf"Trying to create tensor with negative dimension {ele}: [{ele}]")
 
         tensors = [scalar.expand(shape) for shape in shapes]
         tensors = broadcast_tensors(*tensors)
