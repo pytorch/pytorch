@@ -182,7 +182,7 @@ class Wishart(ExponentialFamily):
         p = self._event_shape[-1]  # has singleton shape
 
         # Implemented Sampling using Bartlett decomposition
-        noise = _clamp_with_eps(
+        noise = _clamp_above_eps(
             self._dist_chi2.rsample(sample_shape).sqrt()
         ).diag_embed(dim1=-2, dim2=-1)
 
