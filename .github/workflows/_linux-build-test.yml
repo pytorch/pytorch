@@ -127,12 +127,12 @@ jobs:
           # Ensure the working directory gets chowned back to the current user
           docker run --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
       - name: Archive artifacts into zip
-        if: ${{ inputs.build-generates-artifacts }}
+        if: inputs.build-generates-artifacts
         run: |
           zip -1 -r artifacts.zip dist/ build/custom_test_artifacts build/lib build/bin .pytorch-test-times.json
       - uses: seemethere/upload-artifact-s3@v3
         name: Store PyTorch Build Artifacts on S3
-        if: ${{ inputs.build-generates-artifacts }}
+        if: inputs.build-generates-artifacts
         with:
           name: ${{ inputs.build-environment }}
           retention-days: 14
