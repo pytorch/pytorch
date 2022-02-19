@@ -4603,7 +4603,7 @@ else:
 
     @skipMeta
     @onlyNativeDeviceTypes
-    @dtypes(*get_all_dtypes(include_bool=False))
+    @dtypes(*all_types_and_complex_and(torch.half, torch.bfloat16))
     def test_from_dlpack(self, device, dtype):
         x = make_tensor((5,), device, dtype)
         y = torch.from_dlpack(x)
@@ -4611,7 +4611,7 @@ else:
 
     @skipMeta
     @onlyNativeDeviceTypes
-    @dtypes(*get_all_dtypes(include_bool=False))
+    @dtypes(*all_types_and_complex_and(torch.half, torch.bfloat16))
     def test_from_dlpack_noncontinguous(self, device, dtype):
         x = make_tensor((25,), device, dtype).reshape(5, 5)
 
@@ -4654,7 +4654,7 @@ else:
 
     @skipMeta
     @onlyNativeDeviceTypes
-    @dtypes(*get_all_dtypes(include_bool=False))
+    @dtypes(*all_types_and_complex_and(torch.half, torch.bfloat16))
     def test_from_dlpack_dtype(self, device, dtype):
         x = make_tensor((5,), device, dtype)
         y = torch.from_dlpack(x)
