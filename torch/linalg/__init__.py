@@ -2385,7 +2385,7 @@ trace(input, *, offset=0, out=None) -> Tensor
 Computes the trace of a matrix.
 
 Letting :math:`\mathbb{K}` be :math:`\mathbb{R}` or :math:`\mathbb{C}`,
-the **trace ** of a matrix :math:`A \in \mathbb{K}^{n \times m}` is defined as
+the **trace** of a matrix :math:`A \in \mathbb{K}^{n \times m}` is defined as
 
 .. math::
 
