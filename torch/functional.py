@@ -103,8 +103,15 @@ def broadcast_shapes(*shapes):
     # This wrapper exists to support variadic args.
     # TODO Movie this to C++ once the jit has better support for torch.Size.
     with torch.no_grad():
-        scalar = torch.tensor((), device="cpu")
-        tensors = [scalar.new_zeros(shape) for shape in shapes]
+        scalar = torch.zeros((), device="cpu")
+
+        for shape in shapes:
+            if isinstance(shape, tuple):
+                for ele in shape:
+                    if ele < 0:
+                        raise RuntimeError(rf"Trying to create tensor with negative dimension {shape}: [{shape}]")
+
+        tensors = [scalar.expand(shape) for shape in shapes]
         tensors = broadcast_tensors(*tensors)
         return tensors[0].shape
 
