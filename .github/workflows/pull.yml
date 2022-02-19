@@ -33,7 +33,7 @@ jobs:
     needs: [linux-xenial-py3_7-gcc5_4]
     with:
       build-environment: ${{ needs.linux-xenial-py3_7-gcc5_4.inputs.build-environment }}
-      docker-image: ${{ needs.linux-xenial-py3_7-gcc5_4.outputs.docker-image }}
+      docker-image-base: ${{ needs.linux-xenial-py3_7-gcc5_4.inputs.docker-image-base }}
       push: false
 
   linux-xenial-cuda11_3-py3_7-gcc7:
@@ -41,7 +41,7 @@ jobs:
     uses: ./.github/workflows/_linux-build-test.yml
     with:
       build-environment: linux-xenial-cuda11.3-py3.7-gcc7
-      docker-image-base: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda11.3-py3.7-gcc7
+      docker-image-base: 308535385114.dkr.ecr.us-east-1.amazonaws.com//pytorch/pytorch-linux-xenial-cuda11.3-cudnn8-py3-gcc7cc7
       build-generates-artifacts: true
       test-matrix: |
         { include: [

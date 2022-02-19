@@ -19,10 +19,6 @@ on:
       test-matrix:
         required: true
         type: string
-    outputs:
-      docker-image:
-        description: The docker image that the build used.
-        value: ${{ jobs.build.outputs.docker-image }}
 
 # TODO xla, rocm
 jobs:

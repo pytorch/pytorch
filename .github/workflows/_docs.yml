@@ -6,9 +6,6 @@ on:
       build-environment:
         required: true
         type: string
-      docker-image:
-        required: true
-        type: string
       push:
         description: If true, push the docs to
         type: boolean
@@ -20,8 +17,6 @@ jobs:
     strategy:
       matrix:
         docs_type: [cpp, python]
-    env:
-      DOCKER_IMAGE: ${{ inputs.docker-image }}
     steps:
       - name: Checkout PyTorch
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
@@ -34,10 +29,15 @@ jobs:
         uses: ./.github/workflows/actions/setup-ec2-linux
         with:
           github-secret: ${{ secrets.GITHUB_TOKEN }}
+      - name: Calculate docker image
+        id: calculate-docker-image
+        uses: ./.github/workflows/actions/calculate-docker-image
+        with:
+          docker-image-base: ${{ inputs.docker-image-base }}
       - name: Pull Docker image
         run: |
           retry () { "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@") }
-          retry docker pull "${DOCKER_IMAGE}"
+          retry docker pull ${{ steps.calculate-docker-image.outputs.docker-image }}
       - uses: seemethere/download-artifact-s3@0504774707cbc8603d7dca922e8026eb8bf3b47b
         name: Download PyTorch Build Artifacts
         with:
@@ -59,6 +59,7 @@ jobs:
           PR_LABELS: ${{ toJson(github.event.pull_request.labels.*.name) }}
           CUSTOM_TEST_ARTIFACT_BUILD_DIR: build/custom_test_artifacts
           WITH_PUSH: ${{ github.event_name == 'schedule' || startsWith(github.event.ref, 'refs/tags/v') }}
+          DOCKER_IMAGE: ${{ steps.calculate-docker-image.outputs.docker-image }}
         run: |
           set -ex
           time docker pull "${DOCKER_IMAGE}" > /dev/null
