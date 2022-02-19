@@ -20,7 +20,7 @@ def _mvdigamma(x: torch.Tensor, p: int) -> torch.Tensor:
         - torch.arange(p, dtype=x.dtype, device=x.device).div(2).expand(x.shape + (-1,))
     ).sum(-1)
 
-def _clamp_with_eps(x: torch.Tensor) -> torch.Tensor:
+def _clamp_above_eps(x: torch.Tensor) -> torch.Tensor:
     # We assume positive input for this function
     return x.clamp(min=torch.finfo(x.dtype).eps)
 
