@@ -21,7 +21,7 @@ on:
         type: string
     outputs:
       docker-image:
-        type: string
+        description: The docker image that the build used.
         value: ${{ jobs.build.outputs.docker-image }}
 
 # TODO xla, rocm
