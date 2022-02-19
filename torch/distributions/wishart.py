@@ -13,13 +13,6 @@ from torch.distributions.multivariate_normal import _precision_to_scale_tril
 _log_2 = math.log(2)
 
 
-def _mvdigamma(x: torch.Tensor, p: int) -> torch.Tensor:
-    assert x.gt((p - 1) / 2).all(), "Wrong domain for multivariate digamma function."
-    return torch.digamma(
-        x.unsqueeze(-1)
-        - torch.arange(p, dtype=x.dtype, device=x.device).div(2).expand(x.shape + (-1,))
-    ).sum(-1)
-
 def _clamp_above_eps(x: torch.Tensor) -> torch.Tensor:
     # We assume positive input for this function
     return x.clamp(min=torch.finfo(x.dtype).eps)
@@ -269,11 +262,16 @@ class Wishart(ExponentialFamily):
         nu = self.df  # has shape (batch_shape)
         p = self._event_shape[-1]  # has singleton shape
         V = self.covariance_matrix  # has shape (batch_shape x event_shape)
+
+        assert nu.gt(p - 1).all(), "Wrong domain for multivariate digamma function."
         return (
             (p + 1) * self._unbroadcasted_scale_tril.diagonal(dim1=-2, dim2=-1).log().sum(-1)
             + 0.5 * p * (p + 1) * _log_2
             + torch.mvlgamma(0.5 * nu, p=p)
-            - 0.5 * (nu - p - 1) * _mvdigamma(0.5 * nu, p=p)
+            - 0.5 * (nu - p - 1) * torch.digamma(
+                0.5 * nu.unsqueeze(-1)
+                - torch.arange(p, dtype=nu.dtype, device=nu.device).div(2).expand(nu.shape + (-1,))
+            ).sum(-1)
             + 0.5 * nu * p
         )
 
