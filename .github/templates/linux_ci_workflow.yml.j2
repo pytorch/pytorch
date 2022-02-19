@@ -176,53 +176,18 @@ jobs:
 {%- endblock %}
 {%- if not exclude_test %}
 {% block test +%}
-  generate-test-matrix:
+  {%- for test_job in test_jobs %}
+  !{{ test_job.id }}:
+    name: !{{ test_job.name }}
     needs: build
-    runs-on: ubuntu-18.04
-    timeout-minutes: !{{ common.timeout_minutes }}
-    env:
-      TEST_RUNNER_TYPE: !{{ test_runner_type }}
-      ENABLE_DISTRIBUTED_TEST: !{{ enable_distributed_test }}
-      ENABLE_JIT_LEGACY_TEST: !{{ enable_jit_legacy_test }}
-      ENABLE_MULTIGPU_TEST: !{{ enable_multigpu_test }}
-      ENABLE_NOGPU_NO_AVX_TEST: !{{ enable_nogpu_no_avx_test }}
-      ENABLE_NOGPU_NO_AVX2_TEST: !{{ enable_nogpu_no_avx2_test }}
-      ENABLE_SLOW_TEST: !{{ enable_slow_test }}
-      ENABLE_DOCS_TEST: !{{ enable_docs_test }}
-      ENABLE_BACKWARDS_COMPAT_TEST: !{{ enable_backwards_compat_test }}
-      ENABLE_XLA_TEST: !{{ enable_xla_test }}
-      ENABLE_NOARCH_TEST: !{{ enable_noarch_test }}
-      NUM_TEST_SHARDS: !{{ num_test_shards }}
-      MULTIGPU_RUNNER_TYPE: !{{ multigpu_runner_type }}
-      DISTRIBUTED_GPU_RUNNER_TYPE: !{{ distributed_gpu_runner_type }}
-      NOGPU_RUNNER_TYPE: linux.2xlarge
-    outputs:
-      matrix: ${{ steps.set-matrix.outputs.matrix }}
-      render-matrix: ${{ steps.set-matrix.outputs.render-matrix }}
-    container:
-      image: python:3.9
-    steps:
-      - name: Install dependencies
-        run: pip install typing-extensions==3.10
-      - name: Clone pytorch/pytorch
-        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
-      - name: Generating test matrix
-        id: set-matrix
-        run: .github/scripts/generate_pytorch_test_matrix.py
-
-  test:
-    needs: [build, generate-test-matrix]
-    strategy:
-      matrix: ${{ fromJson(needs.generate-test-matrix.outputs.matrix) }}
-      fail-fast: false
-    runs-on: ${{ matrix.runner }}
+    runs-on: !{{ test_job.runner }}
     timeout-minutes: !{{ common.timeout_minutes }}
     env:
       DOCKER_IMAGE: ${{ needs.build.outputs.docker_image }}
       JOB_BASE_NAME: !{{ build_environment }}-test
-      TEST_CONFIG: ${{ matrix.config }}
-      SHARD_NUMBER: ${{ matrix.shard }}
-      NUM_TEST_SHARDS: ${{ matrix.num_shards }}
+      TEST_CONFIG: !{{ test_job.config }}
+      SHARD_NUMBER: !{{ test_job.shard }}
+      NUM_TEST_SHARDS: !{{ test_job.num_shards }}
       PR_BODY: ${{ github.event.pull_request.body }}
     steps:
 {%- if 'rocm' in test_runner_type %}
@@ -235,14 +200,12 @@ jobs:
         run: |
           !{{ common.add_retry_to_env() }}
           retry docker pull "${DOCKER_IMAGE}"
-{%- if 'rocm' in test_runner_type %}
+{%- if 'rocm' in test_runner_type and "nogpu" not in test_job.config %}
       - name: ROCm set GPU_FLAG
-        if: ${{ contains(env.BUILD_ENVIRONMENT, 'rocm') && !contains(matrix.config, 'nogpu') }}
         run: |
           echo "GPU_FLAG=--device=/dev/mem --device=/dev/kfd --device=/dev/dri --group-add video --group-add daemon" >> "${GITHUB_ENV}"
-{%- else %}
+{%- elif "cuda" in build_environment and "nogpu" not in test_job.config %}
       - name: Install nvidia driver, nvidia-docker runtime, set GPU_FLAG
-        if: ${{ contains(env.BUILD_ENVIRONMENT, 'cuda') && !contains(matrix.config, 'nogpu') }}
         run: |
           bash .github/scripts/install_nvidia_utils_linux.sh
           echo "GPU_FLAG=--gpus all" >> "${GITHUB_ENV}"
@@ -365,11 +328,11 @@ jobs:
 {%- endif %}
       !{{ common.render_test_results() }}
 {%- if 'rocm' in test_runner_type %}
-      !{{ common.upload_downloaded_files(name='linux', use_s3=False) }}
-      !{{ common.upload_test_reports(name='linux', artifact_name="test-reports", use_s3=False) }}
+      !{{ common.upload_downloaded_files(name='linux', use_s3=False, config=test_job.config, shard=test_job.shard, num_shards=test_job.num_shards, runner=test_job.runner) }}
+      !{{ common.upload_test_reports(name='linux', artifact_name="test-reports", use_s3=False, config=test_job.config, shard=test_job.shard, num_shards=test_job.num_shards, runner=test_job.runner) }}
 {%- else %}
-      !{{ common.upload_downloaded_files(name='linux') }}
-      !{{ common.upload_test_reports(name='linux') }}
+      !{{ common.upload_downloaded_files(name='linux', config=test_job.config, shard=test_job.shard, num_shards=test_job.num_shards, runner=test_job.runner) }}
+      !{{ common.upload_test_reports(name='linux', config=test_job.config, shard=test_job.shard, num_shards=test_job.num_shards, runner=test_job.runner) }}
 {%- endif %}
       !{{ common.upload_test_statistics(build_environment) }}
 {%- if 'rocm' in test_runner_type %}
@@ -377,6 +340,7 @@ jobs:
 {%- else %}
       !{{ common.teardown_ec2_linux() }}
 {%- endif %}
+{%- endfor %}
 {% endblock %}
 {%- endif -%}
 {%- if enable_doc_jobs %}
