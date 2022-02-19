@@ -1,0 +1,205 @@
+name: win-test
+
+on:
+  workflow_call:
+    inputs:
+      build-environment:
+        required: true
+        type: string
+        description: Top-level label for what's being built/tested.
+      cuda-version:
+        required: true
+        type: string
+        description: What CUDA version to build with, "cpu" for none.
+      test-matrix:
+        required: true
+        type: string
+        description: JSON description of what test configs to run.
+
+env:
+  IN_CI: 1 # TODO delete in favor of GITHUB_ACTIONS
+  IS_GHA: 1 # TODO delete in favor of GITHUB_ACTIONS
+  GIT_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+
+jobs:
+  test:
+    # Don't run on forked repos.
+    if: github.repository_owner == 'pytorch'
+    strategy:
+      matrix: ${{ fromJSON(inputs.test-matrix) }}
+      fail-fast: false
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 300
+    steps:
+      - name: Clean workspace
+        shell: bash
+        run: |
+          echo "${GITHUB_WORKSPACE}"
+          rm -rf "${GITHUB_WORKSPACE}"
+          mkdir "${GITHUB_WORKSPACE}"
+
+      - name: Checkout PyTorch
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          # deep clone, to allow use of git merge-base
+          fetch-depth: 0
+          submodules: recursive
+
+      - name: Display EC2 information
+        shell: bash
+        run: .github/scripts/display_ec2_info.sh
+
+      - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
+        uses: seemethere/add-github-ssh-key@v1
+        with:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # Needed for binary builds, see: https://github.com/pytorch/pytorch/issues/73339#issuecomment-1058981560
+      - name: Enable long paths on Windows
+        shell: powershell
+        run: |
+          Set-ItemProperty -Path "HKLM:\\SYSTEM\CurrentControlSet\Control\FileSystem" -Name "LongPathsEnabled" -Value 1
+
+      - name: Install Visual Studio 2019 toolchain
+        shell: powershell
+        env:
+          VS_VERSION: "16.8.6"
+          INSTALL_WINDOWS_SDK: 1
+        run: |
+          .\.circleci\scripts\vs_install.ps1
+
+      - name: Install CUDA and CuDNN
+        if: inputs.cuda-version != 'cpu' && matrix.config != 'force_on_cpu'
+        shell: bash
+        env:
+          CUDA_VERSION: ${{ inputs.cuda-version }}
+        run: |
+          .circleci/scripts/windows_cuda_install.sh
+          .circleci/scripts/windows_cudnn_install.sh
+
+      - name: Download PyTorch Build Artifacts
+        uses: seemethere/download-artifact-s3@0504774707cbc8603d7dca922e8026eb8bf3b47b
+        with:
+          name: ${{ env.BUILD_ENVIRONMENT }}
+          path: C:\${{ github.run_id }}\build-results
+
+      - name: Check build-results folder
+        shell: powershell
+        run: |
+          tree /F C:\$Env:GITHUB_RUN_ID\build-results
+
+      # Needed for coverage in win-test.sh
+      - uses: actions/setup-python@v2
+        name: Setup Python3
+        with:
+          python-version: "3.x"
+
+      - name: Test
+        shell: bash
+        env:
+          USE_CUDA: ${{ inputs.cuda-version != 'cpu' && '1' || '0' }}
+          INSTALL_WINDOWS_SDK: 1
+          PYTHON_VERSION: 3.8
+          PYTORCH_RETRY_TEST_CASES: 1
+          PR_LABELS: ${{ toJson(github.event.pull_request.labels.*.name) }}
+          VC_PRODUCT: "BuildTools"
+          VC_VERSION: ""
+          VS_VERSION: "16.8.6"
+          VC_YEAR: "2019"
+          AWS_DEFAULT_REGION: us-east-1
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
+          CUDA_VERSION: ${{ inputs.cuda-version }}
+          PYTORCH_FINAL_PACKAGE_DIR: /c/${{ github.run_id }}/build-results/
+          BUILD_ENVIRONMENT: ${{ inputs.build-environment }}
+          ALPINE_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/alpine"
+          SHARD_NUMBER: ${{ matrix.shard }}
+          NUM_TEST_SHARDS: ${{ matrix.num_shards }}
+          TEST_CONFIG: ${{ matrix.config }}
+          JOB_BASE_NAME: ${{ inputs.build-environment }}-test
+          PR_BODY: ${{ github.event.pull_request.body }}
+          TORCH_CUDA_ARCH_LIST: "7.0"
+        run: |
+          .jenkins/pytorch/win-test.sh
+
+      - name: Zip JSONs for upload
+        if: always()
+        env:
+          FILE_SUFFIX: ${{ github.job }}-${{ matrix.config }}-${{ matrix.shard }}-${{ matrix.num_shards }}-${{ matrix.runner }}
+        shell: powershell
+        run: |
+          # -ir => recursive include all files in pattern
+          7z a "test-jsons-$Env:FILE_SUFFIX.zip" -ir'!test\*.json'
+
+      - name: Store Test Downloaded JSONs on S3
+        uses: seemethere/upload-artifact-s3@v3
+        if: always()
+        with:
+          retention-days: 14
+          if-no-files-found: warn
+          path:
+            test-jsons-*.zip
+
+      - name: Zip test reports for upload
+        if: always()
+        env:
+          FILE_SUFFIX: ${{ github.job }}-${{ matrix.config }}-${{ matrix.shard }}-${{ matrix.num_shards }}-${{ matrix.runner }}
+        shell: powershell
+        run: |
+          # -ir => recursive include all files in pattern
+          7z a "test-reports-$Env:FILE_SUFFIX.zip" -ir'!test\*.xml'
+
+      - name: Store Test Reports on S3
+        uses: seemethere/upload-artifact-s3@v3
+        if: always()
+        with:
+          retention-days: 14
+          if-no-files-found: error
+          path:
+            test-reports-*.zip
+
+      - name: Wait until all sessions have drained
+        shell: powershell
+        if: always()
+        timeout-minutes: 120
+        run: |
+          .github\scripts\wait_for_ssh_to_drain.ps1
+
+      - name: Kill active ssh sessions if still around (Useful if workflow was cancelled)
+        shell: powershell
+        if: always()
+        run: |
+          .github\scripts\kill_active_ssh_sessions.ps1
+
+      - name: Parse ref
+        id: parse-ref
+        run: .github/scripts/parse_ref.py
+
+      - name: Upload test statistics
+        if: always()
+        env:
+          AWS_DEFAULT_REGION: us-east-1
+          GIT_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          BRANCH: ${{ steps.parse-ref.outputs.branch }}
+          JOB_BASE_NAME: ${{ inputs.build-environment }}-test
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
+          TAG: ${{ steps.parse-ref.outputs.tag }}
+          WORKFLOW_ID: ${{ github.run_id }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          set -x
+          python3 -m pip install -r requirements.txt
+          python3 -m pip install boto3==1.19.12
+          GHA_WORKFLOW_JOB_ID=$(python3 .github/scripts/get_workflow_job_id.py "${GITHUB_RUN_ID}" "${RUNNER_NAME}")
+          export GHA_WORKFLOW_JOB_ID
+          python3 -m tools.stats.print_test_stats --upload-to-s3 --compare-with-s3 test
+
+      - name: Cleanup workspace
+        if: always()
+        shell: bash
+        # Should remove the entirety of pytorch-${{ github.run_id }}
+        run: |
+          rm -rf ./*

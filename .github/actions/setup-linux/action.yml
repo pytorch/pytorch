@@ -1,0 +1,44 @@
+name: Setup EC2 Linux
+
+description: Set up Docker workspace on EC2
+
+inputs:
+  github-secret:
+    description: GitHub token
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Display EC2 information
+      shell: bash
+      run: .github/scripts/display_ec2_info.sh
+    - name: Start docker if docker deamon is not running
+      shell: bash
+      run: |
+        if systemctl is-active --quiet docker; then
+            echo "Docker daemon is running...";
+        else
+            echo "Starting docker deamon..." && sudo systemctl start docker;
+        fi
+    - name: Log in to ECR
+      shell: bash
+      env:
+        AWS_RETRY_MODE: standard
+        AWS_MAX_ATTEMPTS: "5"
+        AWS_DEFAULT_REGION: us-east-1
+      run: |
+        AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
+        retry () { "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@") }
+        retry aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
+            --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
+
+    - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
+      uses: seemethere/add-github-ssh-key@v1
+      with:
+        GITHUB_TOKEN: ${{ inputs.github-secret }}
+
+    - name: Preserve github env variables for use in docker
+      shell: bash
+      run: |
+        env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"

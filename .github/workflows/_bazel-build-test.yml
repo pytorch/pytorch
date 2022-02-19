@@ -1,0 +1,250 @@
+name: bazel
+
+on:
+  workflow_call:
+    inputs:
+      build-environment:
+        required: true
+        type: string
+        description: Top-level label for what's being built/tested.
+      docker-image-name:
+        required: true
+        type: string
+        description: Name of the base docker image to build with.
+
+env:
+  IN_CI: 1 # TODO delete in favor of GITHUB_ACTIONS
+  IS_GHA: 1 # TODO delete in favor of GITHUB_ACTIONS
+  GIT_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+
+jobs:
+  build-and-test:
+    # Don't run on forked repos.
+    if: github.repository_owner == 'pytorch'
+    runs-on: [self-hosted, linux.2xlarge]
+    steps:
+      - name: Clean workspace
+        shell: bash
+        run: |
+          echo "${GITHUB_WORKSPACE}"
+          sudo rm -rf "${GITHUB_WORKSPACE}"
+          mkdir "${GITHUB_WORKSPACE}"
+
+      - name: Checkout PyTorch
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          # deep clone, to allow use of git merge-base
+          fetch-depth: 0
+          submodules: recursive
+
+      - name: Setup Linux
+        uses: ./.github/actions/setup-linux
+        with:
+          github-secret: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Calculate docker image
+        id: calculate-docker-image
+        uses: ./.github/actions/calculate-docker-image
+        with:
+          docker-image-name: ${{ inputs.docker-image-name }}
+
+      - name: Pull Docker image
+        env:
+          DOCKER_IMAGE: ${{ steps.calculate-docker-image.outputs.docker-image }}
+        run: |
+          retry () { "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@") }
+          retry docker pull "${DOCKER_IMAGE}"
+
+      - name: Determine shm-size
+        id: shm
+        env:
+          BUILD_ENVIRONMENT: ${{ inputs.build-environment }}
+        run: |
+          shm_size="1g"
+          case "${BUILD_ENVIRONMENT}" in
+            *cuda*)
+              shm_size="2g"
+              ;;
+            *rocm*)
+              shm_size="8g"
+              ;;
+          esac
+          echo "::set-output name=shm-size::${shm_size}"
+
+      - name: Output disk space left
+        run: |
+          sudo df -H
+
+      - name: Preserve github env variables for use in docker
+        run: |
+          env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
+
+      - name: Parse ref
+        id: parse-ref
+        run: .github/scripts/parse_ref.py
+
+      - name: Build
+        env:
+          BUILD_ENVIRONMENT: ${{ inputs.build-environment }}
+          BRANCH: ${{ steps.parse-ref.outputs.branch }}
+          JOB_BASE_NAME: ${{ inputs.build-environment }}-build-and-test
+          # TODO duplicated
+          AWS_DEFAULT_REGION: us-east-1
+          SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
+          SCCACHE_BUCKET: ossci-compiler-cache-circleci-v2
+          CUSTOM_TEST_ARTIFACT_BUILD_DIR: build/custom_test_artifacts
+          PR_LABELS: ${{ toJson(github.event.pull_request.labels.*.name) }}
+          TORCH_CUDA_ARCH_LIST: 5.2
+          DOCKER_IMAGE: ${{ steps.calculate-docker-image.outputs.docker-image }}
+        run: |
+          # detached container should get cleaned up by teardown_ec2_linux
+          container_name=$(docker run \
+            -e BUILD_ENVIRONMENT \
+            -e JOB_BASE_NAME \
+            -e MAX_JOBS="$(nproc --ignore=2)" \
+            -e SCCACHE_BUCKET \
+            -e CUSTOM_TEST_ARTIFACT_BUILD_DIR \
+            -e PR_LABELS \
+            -e SKIP_SCCACHE_INITIALIZATION=1 \
+            -e TORCH_CUDA_ARCH_LIST \
+            --env-file="/tmp/github_env_${GITHUB_RUN_ID}" \
+            --security-opt seccomp=unconfined \
+            --cap-add=SYS_PTRACE \
+            --tty \
+            --detach \
+            --user jenkins \
+            -v "${GITHUB_WORKSPACE}:/var/lib/jenkins/workspace" \
+            -w /var/lib/jenkins/workspace \
+            "${DOCKER_IMAGE}"
+          )
+          docker exec -t "${container_name}" sh -c 'sudo chown -R jenkins . && sudo chown -R jenkins /dev && .jenkins/pytorch/build.sh'
+
+      # !{{ common_android.upload_androind_binary_size("", "")}}
+      - name: Test
+        # Time out the test phase after 3.5 hours
+        timeout-minutes: 210
+        env:
+          JOB_BASE_NAME: ${{ inputs.build-environment }}-build-and-test
+          BUILD_ENVIRONMENT: ${{ inputs.build-environment }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          BRANCH: ${{ steps.parse-ref.outputs.branch }}
+          CUSTOM_TEST_ARTIFACT_BUILD_DIR: build/custom_test_artifacts
+          SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
+          PYTORCH_RETRY_TEST_CASES: 1
+          PR_BODY: ${{ github.event.pull_request.body }}
+          SCCACHE_BUCKET: ossci-compiler-cache-circleci-v2
+          SHM_SIZE: ${{ steps.shm.outputs.shm-size }}
+          DOCKER_IMAGE: ${{ steps.calculate-docker-image.outputs.docker-image }}
+        run: |
+          # detached container should get cleaned up by teardown_ec2_linux
+          export SHARD_NUMBER=0
+          # TODO: Stop building test binaries as part of the build phase
+          # Make sure we copy test results from bazel-testlogs symlink to
+          # a regular directory ./test/test-reports
+          container_name=$(docker run \
+            -e BUILD_ENVIRONMENT \
+            -e CUSTOM_TEST_ARTIFACT_BUILD_DIR \
+            -e GITHUB_ACTIONS \
+            -e GIT_DEFAULT_BRANCH="$GIT_DEFAULT_BRANCH" \
+            -e IN_CI \
+            -e SHARD_NUMBER \
+            -e NUM_TEST_SHARDS \
+            -e JOB_BASE_NAME \
+            -e MAX_JOBS="$(nproc --ignore=2)" \
+            -e SCCACHE_BUCKET \
+            -e PR_LABELS \
+            --env-file="/tmp/github_env_${GITHUB_RUN_ID}" \
+            --security-opt seccomp=unconfined \
+            --cap-add=SYS_PTRACE \
+            --shm-size="${SHM_SIZE}" \
+            --tty \
+            --detach \
+            --user jenkins \
+            -v "${GITHUB_WORKSPACE}:/var/lib/jenkins/workspace" \
+            -w /var/lib/jenkins/workspace \
+            "${DOCKER_IMAGE}"
+          )
+          docker exec -t "${container_name}" sh -c 'sudo chown -R jenkins . && sudo chown -R jenkins /dev && .jenkins/pytorch/test.sh && cp -Lr ./bazel-testlogs ./test/test-reports'
+
+      - name: Chown workspace
+        if: always()
+        env:
+          # TODO duplicated
+          ALPINE_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/alpine"
+        run: |
+          # Ensure the working directory gets chowned back to the current user
+          docker run --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
+
+      - name: Zip JSONs for upload
+        if: always()
+        env:
+          FILE_SUFFIX: bazel-${{ github.job }}
+        run: |
+          # Remove any previous test jsons if they exist
+          rm -f test-jsons-*.zip
+          zip -r "test-jsons-${FILE_SUFFIX}.zip" test -i '*.json'
+
+      - name: Store Test Downloaded JSONs on S3
+        uses: seemethere/upload-artifact-s3@v3
+        if: always()
+        with:
+          retention-days: 14
+          if-no-files-found: warn
+          path:
+            test-jsons-*.zip
+
+      - name: Zip test reports for upload
+        if: always()
+        env:
+          FILE_SUFFIX: bazel-${{ github.job }}
+        run: |
+          # Remove any previous test reports if they exist
+          rm -f test-reports-*.zip
+          zip -r "test-reports-${FILE_SUFFIX}.zip" test -i '*.xml'
+
+      - name: Store Test Reports on Github
+        uses: actions/upload-artifact@v2
+        if: always()
+        with:
+          name: test-reports
+          retention-days: 14
+          if-no-files-found: error
+          path:
+            test-reports-*.zip
+
+      - name: Upload test statistics
+        if: always()
+        env:
+          AWS_DEFAULT_REGION: us-east-1
+          GIT_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          BRANCH: ${{ steps.parse-ref.outputs.branch }}
+          JOB_BASE_NAME: ${{ inputs.build-environment }}-test
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
+          TAG: ${{ steps.parse-ref.outputs.tag }}
+          WORKFLOW_ID: ${{ github.run_id }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          set -x
+          python3 -m pip install -r requirements.txt
+          python3 -m pip install boto3==1.19.12
+          GHA_WORKFLOW_JOB_ID=$(python3 .github/scripts/get_workflow_job_id.py "${GITHUB_RUN_ID}" "${RUNNER_NAME}")
+          export GHA_WORKFLOW_JOB_ID
+          python3 -m tools.stats.print_test_stats --upload-to-s3 --compare-with-s3 test
+
+      - name: Hold runner for 2 hours or until ssh sessions have drained
+        # TODO working-directory: !{{ pytorch_directory }}
+        # Always hold for active ssh sessions
+        if: always()
+        run: .github/scripts/wait_for_ssh_to_drain.sh
+
+      - name: Kill containers, clean up images
+        if: always()
+        run: |
+          # ignore expansion of "docker ps -q" since it could be empty
+          # shellcheck disable=SC2046
+          docker stop $(docker ps -q) || true
+          # Prune all of the docker images
+          docker system prune -af

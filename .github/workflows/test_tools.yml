@@ -35,5 +35,5 @@ jobs:
           python3 -m unittest discover -vs .github/scripts -p 'test_*.py'
 
 concurrency:
-  group: test-tools-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
   cancel-in-progress: true
