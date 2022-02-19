@@ -1,0 +1,115 @@
+name: docs
+
+on:
+  workflow_call:
+    inputs:
+      build-environment:
+        required: true
+        type: string
+      docker-image:
+        required: true
+        type: string
+      push:
+        description: If true, push the docs to
+        type: boolean
+        required: true
+
+jobs:
+  build-docs:
+    runs-on: [self-hosted, linux.2xlarge]
+    strategy:
+      matrix:
+        docs_type: [cpp, python]
+    env:
+      DOCKER_IMAGE: ${{ inputs.docker-image }}
+    steps:
+      - name: Checkout PyTorch
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          # deep clone, to allow use of git merge-base
+          fetch-depth: 0
+          submodules: recursive
+      - name: Setup EC2 Linux
+        uses: ./.github/workflows/actions/setup-ec2-linux
+        with:
+          github-secret: ${{ secrets.GITHUB_TOKEN }}
+      - name: Pull Docker image
+        run: |
+          retry () { "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@") }
+          retry docker pull "${DOCKER_IMAGE}"
+      - uses: seemethere/download-artifact-s3@0504774707cbc8603d7dca922e8026eb8bf3b47b
+        name: Download PyTorch Build Artifacts
+        with:
+          name: ${{ inputs.build-environment }}
+      - name: Unzip artifacts
+        run: |
+          unzip -o artifacts.zip
+      - name: Generate netrc (only for docs-push)
+        if: inputs.push
+        env:
+          GITHUB_PYTORCHBOT_TOKEN: ${{ secrets.GH_PYTORCHBOT_TOKEN }}
+        run: |
+          # set credentials for https pushing
+          echo "machine github.com" > "${RUNNER_TEMP}/.netrc"
+          echo "login pytorchbot" >> "${RUNNER_TEMP}/.netrc"
+          echo "password ${GITHUB_PYTORCHBOT_TOKEN}" >> "${RUNNER_TEMP}/.netrc"
+      - name: Build ${{ matrix.docs_type }} docs
+        env:
+          PR_LABELS: ${{ toJson(github.event.pull_request.labels.*.name) }}
+          CUSTOM_TEST_ARTIFACT_BUILD_DIR: build/custom_test_artifacts
+          WITH_PUSH: ${{ github.event_name == 'schedule' || startsWith(github.event.ref, 'refs/tags/v') }}
+        run: |
+          set -ex
+          time docker pull "${DOCKER_IMAGE}" > /dev/null
+          # Convert refs/tags/v1.12.0rc3 into 1.12
+          if [[ "${GITHUB_REF}" =~ ^refs/tags/v([0-9]+\.[0-9]+)\.* ]]; then
+            target="${BASH_REMATCH[1]}"
+          else
+            target="master"
+          fi
+          # detached container should get cleaned up by teardown_ec2_linux
+          container_name=$(docker run \
+            -e BUILD_ENVIRONMENT="${{ inputs.build-environment }}" \
+            -e CUSTOM_TEST_ARTIFACT_BUILD_DIR \
+            -e IN_CI \
+            -e MAX_JOBS="$(nproc --ignore=2)" \
+            -e SHA1="$GITHUB_SHA" \
+            -e DOCS_VERSION="${target}" \
+            -e DOCS_TYPE="${{matrix.docs_type}}" \
+            -e PR_LABELS \
+            -e WITH_PUSH \
+            --env-file="/tmp/github_env_${GITHUB_RUN_ID}" \
+            --security-opt seccomp=unconfined \
+            --cap-add=SYS_PTRACE \
+            --tty \
+            --detach \
+            --user jenkins \
+            ${{ inputs.push && '-v "${RUNNER_TEMP}/.netrc":/var/lib/jenkins/.netrc \' }}
+            -v "${GITHUB_WORKSPACE}:/var/lib/jenkins/workspace" \
+            -w /var/lib/jenkins/workspace \
+            "${DOCKER_IMAGE}"
+          )
+          docker exec -t "${container_name}" bash -c "sudo chown -R jenkins . && pip install dist/*.whl && ./.circleci/scripts/${DOCS_TYPE}_doc_push_script.sh"
+      - name: Chown workspace
+        run: |
+          # Ensure the working directory gets chowned back to the current user
+          docker run --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
+      - uses: seemethere/upload-artifact-s3@v3
+        name: Upload Python Docs Preview
+        if: ${{ github.event_name == 'pull_request' && matrix.docs_type == 'python' }}
+        with:
+          retention-days: 14
+          s3-bucket: doc-previews
+          if-no-files-found: error
+          path: pytorch.github.io/docs/master/
+          s3-prefix: pytorch/${{ github.event.pull_request.number }}
+      - uses: seemethere/upload-artifact-s3@v3
+        name: Upload C++ Docs Preview
+        if: ${{ github.event_name == 'pull_request' && matrix.docs_type == 'cpp' }}
+        with:
+          retention-days: 14
+          if-no-files-found: error
+          s3-bucket: doc-previews
+          path: cppdocs/
+          s3-prefix: pytorch/${{ github.event.pull_request.number }}/cppdocs

@@ -19,12 +19,12 @@ on:
       test-matrix:
         required: true
         type: string
+    outputs:
+      docker-image:
+        type: string
+        value: ${{ jobs.build.outputs.docker-image }}
 
 # TODO xla, rocm
-env:
-  IN_CI: 1
-  IS_GHA: 1 # TODO delete in favor of GITHUB_ACTIONS
-
 jobs:
   build:
     runs-on: [self-hosted, linux.2xlarge]
@@ -55,9 +55,7 @@ jobs:
           docker-image-base: ${{ inputs.docker-image-base }}
       - name: Pull Docker image
         run: |
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
+          retry () { "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@") }
           retry docker pull ${{ steps.calculate-docker-image.outputs.docker-image }}
       - name: Parse ref
         id: parse-ref
@@ -178,9 +176,7 @@ jobs:
           github-secret: ${{ secrets.GITHUB_TOKEN }}
       - name: Pull Docker image
         run: |
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
+          retry () { "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@") }
           retry docker pull ${{ needs.build.outputs.docker-image }}
       - name: Install nvidia driver, nvidia-docker runtime, set GPU_FLAG
         if: contains(inputs.build-environment, "cuda") && !contains(matrix.config, nogpu)

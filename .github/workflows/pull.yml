@@ -6,10 +6,14 @@ on:
     branches:
       - master
 
+env:
+  IN_CI: 1 # TODO delete in favor of GITHUB_ACTIONS
+  IS_GHA: 1 # TODO delete in favor of GITHUB_ACTIONS
+
 jobs:
   linux-xenial-py3_7-gcc5_4:
     name: linux-xenial-py3.7-gcc5.4
-    uses: ./.github/workflows/linux-build.yml
+    uses: ./.github/workflows/_linux-build-test.yml
     with:
       build-environment: linux-xenial-py3.7-gcc5.4
       docker-image-base: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3.7-gcc5.4
@@ -23,10 +27,18 @@ jobs:
           { config: "backwards_compat", shard: 1, num_shards: 1, runner: "linux.2xlarge" },
           { config: "jit_legacy", shard: 1, num_shards: 1, runner: "linux.2xlarge" }
         ]}
+  docs:
+    name: docs
+    uses: ./.github/workflows/_docs.yml
+    needs: [linux-xenial-py3_7-gcc5_4]
+    with:
+      build-environment: ${{ needs.linux-xenial-py3_7-gcc5_4.inputs.build-environment }}
+      docker-image: ${{ needs.linux-xenial-py3_7-gcc5_4.outputs.docker-image }}
+      push: false
 
   linux-xenial-cuda11_3-py3_7-gcc7:
     name: linux-xenial-cuda11.3-py3.7-gcc7
-    uses: ./.github/workflows/linux-build.yml
+    uses: ./.github/workflows/_linux-build-test.yml
     with:
       build-environment: linux-xenial-cuda11.3-py3.7-gcc7
       docker-image-base: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda11.3-py3.7-gcc7
