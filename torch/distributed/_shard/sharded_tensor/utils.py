@@ -3,14 +3,13 @@ from contextlib import contextmanager
 from typing import Optional, List, Sequence
 
 import torch
-import copy
 from torch.distributed import distributed_c10d
 from torch.distributed import rpc
 from torch.distributed._shard.sharding_spec import (
     ShardMetadata,
 )
 from torch.distributed._shard.sharding_spec._internals import (
-    check_tensor,  # noqa
+    check_tensor,
     validate_non_overlapping_shards_metadata,
 )
 
@@ -200,7 +199,7 @@ def build_global_metadata(gathered_metadatas: Sequence[Optional[ShardedTensorMet
             continue
 
         if global_sharded_tensor_metadata is None:
-            global_sharded_tensor_metadata = copy.deepcopy(rank_metadata)
+            global_sharded_tensor_metadata = rank_metadata
             global_metadata_rank = rank
         else:
             _raise_if_mismatch(global_sharded_tensor_metadata.size,
@@ -235,7 +234,7 @@ def build_global_metadata(gathered_metadatas: Sequence[Optional[ShardedTensorMet
         validate_non_overlapping_shards_metadata(global_sharded_tensor_metadata.shards_metadata)
 
         # check if the shards_metadata is compatible with global size of the sharded tensor.
-        # check_tensor(global_sharded_tensor_metadata.shards_metadata, global_sharded_tensor_metadata.size)
+        check_tensor(global_sharded_tensor_metadata.shards_metadata, global_sharded_tensor_metadata.size)
     else:
         raise ValueError("ShardedTensor have no local shards on all ranks!")
 
