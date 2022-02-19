@@ -17,7 +17,7 @@ from distutils.version import LooseVersion
 from torch.testing._internal.common_cuda import \
     (SM53OrLater, SM80OrLater, CUDA11OrLater)
 from torch.testing._internal.common_device_type import \
-    (instantiate_device_type_tests, ops, dtypes, dtypesIfCUDA, onlyCPU, onlyCUDA, precisionOverride,
+    (instantiate_device_type_tests, ops, dtypes, dtypesIfCPU, dtypesIfCUDA, onlyCPU, onlyCUDA, precisionOverride,
      deviceCountAtLeast, OpDTypes)
 from torch.testing._internal.common_methods_invocations import \
     (sparse_unary_ufuncs)
@@ -186,6 +186,7 @@ class TestSparse(TestCase):
 
     @coalescedonoff
     @dtypes(torch.double, torch.cdouble)
+    @dtypesIfCPU(torch.double, torch.cdouble, torch.bfloat16)
     def test_coalesce(self, device, dtype, coalesced):
 
         def _test_coalesce(t):
@@ -660,6 +661,7 @@ class TestSparse(TestCase):
 
     @coalescedonoff
     @dtypes(torch.double, torch.cdouble)
+    @dtypesIfCPU(torch.double, torch.cdouble, torch.bfloat16)
     def test_Sparse_to_Sparse_copy_(self, device, dtype, coalesced):
         # This is for testing torch.copy_(SparseTensor, SparseTensor)
         sparse_dims = 3
@@ -1237,6 +1239,8 @@ class TestSparse(TestCase):
 
     @coalescedonoff
     @dtypes(torch.double, torch.cdouble)
+    @dtypesIfCPU(torch.double, torch.cdouble, torch.bfloat16)
+    @precisionOverride({torch.bfloat16: 1e-1})
     def test_sparse_addmm(self, device, dtype, coalesced):
         def test_shape(m, n, p, nnz, broadcast, alpha_beta=None):
             if alpha_beta is None:
@@ -1258,7 +1262,8 @@ class TestSparse(TestCase):
 
             def fn(S, D1, D2, beta=beta, alpha=alpha):
                 return torch.sparse.addmm(D1, S, D2, beta=beta, alpha=alpha)
-            gradcheck(fn, (S, D1, D2), check_sparse_nnz=True)
+            if dtype == torch.double or dtype == torch.cdouble:
+                gradcheck(fn, (S, D1, D2), check_sparse_nnz=True)
 
         test_shape(7, 8, 9, 20, False, None)
         test_shape(7, 8, 9, 20, True, None)
@@ -1398,15 +1403,17 @@ class TestSparse(TestCase):
         _test_spadd()
         _test_spadd_hybrid()
 
-    @onlyCUDA
     @coalescedonoff
     @dtypes(torch.double, torch.cdouble)
     def test_sparse_add_out_bfloat16(self, device, dtype, coalesced):
         # fp32
         x, _, _ = self._gen_sparse(3, 5, 10, dtype, device, coalesced)
         y, _, _ = self._gen_sparse(3, 5, 10, dtype, device, coalesced)
-        x = x.float().cuda()
-        y = y.float().cuda()
+        x = x.float()
+        y = y.float()
+        if device == 'cuda':
+            x = x.cuda()
+            y = y.cuda()
         res_fp32 = torch.add(x, y)
 
         # bfloat16
@@ -1625,6 +1632,7 @@ class TestSparse(TestCase):
         _test_basic_ops_hybrid()
 
     @dtypes(torch.double, torch.cdouble)
+    @dtypesIfCPU(torch.double, torch.cdouble, torch.bfloat16)
     def test_add_dense_sparse_mismatch(self, device, dtype):
         def test_shape(dense_size, sparse_dims_shape, dense_dims_shape, sparse_size):
             x = torch.zeros(dense_size, dtype=dtype, device=device)
@@ -1663,6 +1671,7 @@ class TestSparse(TestCase):
 
     @coalescedonoff
     @dtypes(torch.double, torch.cdouble)
+    @dtypesIfCPU(torch.double, torch.cdouble, torch.bfloat16)
     def test_sparse_mask(self, device, dtype, coalesced):
         def _test_sparse_mask_fixed():
             i = self.index_tensor([
