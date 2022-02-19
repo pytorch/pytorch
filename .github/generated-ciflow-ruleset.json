@@ -7,11 +7,9 @@
       "ios-12-5-1-arm64",
       "ios-12-5-1-arm64-coreml",
       "ios-12-5-1-arm64-custom-ops",
-      "ios-12-5-1-arm64-full-jit",
       "ios-12-5-1-arm64-metal",
       "ios-12-5-1-x86-64",
       "ios-12-5-1-x86-64-coreml",
-      "ios-12-5-1-x86-64-full-jit",
       "libtorch-linux-xenial-cuda10.2-py3.7-gcc7",
       "libtorch-linux-xenial-cuda11.3-py3.7-gcc7",
       "linux-bionic-cuda10.2-py3.9-gcc7",
@@ -163,11 +161,9 @@
       "ios-12-5-1-arm64",
       "ios-12-5-1-arm64-coreml",
       "ios-12-5-1-arm64-custom-ops",
-      "ios-12-5-1-arm64-full-jit",
       "ios-12-5-1-arm64-metal",
       "ios-12-5-1-x86-64",
-      "ios-12-5-1-x86-64-coreml",
-      "ios-12-5-1-x86-64-full-jit"
+      "ios-12-5-1-x86-64-coreml"
     ],
     "ciflow/libtorch": [
       "libtorch-linux-xenial-cuda10.2-py3.7-gcc7",
@@ -210,11 +206,9 @@
       "ios-12-5-1-arm64",
       "ios-12-5-1-arm64-coreml",
       "ios-12-5-1-arm64-custom-ops",
-      "ios-12-5-1-arm64-full-jit",
       "ios-12-5-1-arm64-metal",
       "ios-12-5-1-x86-64",
       "ios-12-5-1-x86-64-coreml",
-      "ios-12-5-1-x86-64-full-jit",
       "macos-10-15-py3-arm64",
       "macos-10-15-py3-lite-interpreter-x86-64",
       "macos-11-py3-x86-64"
@@ -236,6 +230,10 @@
       "linux-xenial-py3.7-clang7-asan"
     ],
     "ciflow/scheduled": [
+      "ios-12-5-1-arm64",
+      "ios-12-5-1-arm64-coreml",
+      "ios-12-5-1-arm64-custom-ops",
+      "ios-12-5-1-arm64-metal",
       "linux-docs-push",
       "periodic-libtorch-linux-bionic-cuda11.5-py3.7-gcc7",
       "periodic-libtorch-linux-xenial-cuda11.1-py3.7-gcc7",
@@ -255,14 +253,8 @@
     "ciflow/trunk": [
       "caffe2-linux-xenial-py3.7-gcc5.4",
       "docker-builds",
-      "ios-12-5-1-arm64",
-      "ios-12-5-1-arm64-coreml",
-      "ios-12-5-1-arm64-custom-ops",
-      "ios-12-5-1-arm64-full-jit",
-      "ios-12-5-1-arm64-metal",
       "ios-12-5-1-x86-64",
       "ios-12-5-1-x86-64-coreml",
-      "ios-12-5-1-x86-64-full-jit",
       "libtorch-linux-xenial-cuda10.2-py3.7-gcc7",
       "libtorch-linux-xenial-cuda11.3-py3.7-gcc7",
       "linux-bionic-cuda10.2-py3.9-gcc7",
