@@ -20,7 +20,7 @@ on:
         required: true
         type: string
     outputs:
-      docker-image:
+    docker-image:
         type: string
         value: ${{ jobs.build.outputs.docker-image }}
 
@@ -179,7 +179,7 @@ jobs:
           retry () { "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@") }
           retry docker pull ${{ needs.build.outputs.docker-image }}
       - name: Install nvidia driver, nvidia-docker runtime, set GPU_FLAG
-        if: contains(inputs.build-environment, "cuda") && !contains(matrix.config, nogpu)
+        if: contains(inputs.build-environment, 'cuda') && !contains(matrix.config, 'nogpu')
         run: |
           bash .github/scripts/install_nvidia_utils_linux.sh
           echo "GPU_FLAG=--gpus all" >> "${GITHUB_ENV}"
