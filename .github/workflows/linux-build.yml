@@ -163,7 +163,7 @@ jobs:
     strategy:
       matrix:
         ${{ fromJSON(inputs.test-matrix) }}
-    runs-on: ${{ matrix.runner-type }}
+    runs-on: ${{ matrix.runner_type }}
     steps:
       - name: Checkout PyTorch
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9

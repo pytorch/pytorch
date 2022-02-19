@@ -7,7 +7,7 @@ on:
       - master
 
 jobs:
-  linux-xenial-py37-gcc54:
+  linux-xenial-py3_7-gcc5_4:
     name: linux-xenial-py3.7-gcc5.4
     uses: ./.github/workflows/linux-build.yml
     with:
@@ -16,10 +16,27 @@ jobs:
       build-generates-artifacts: true
       test-matrix: |
         { include: [
-          { shard: 1, num-shards: 2, config: "default", runner-type: "linux.2xlarge" },
-          { shard: 2, num-shards: 2, config: "default", runner-type: "linux.2xlarge" },
-          { shard: 1, num-shards: 1, config: "distributed", runner-type: "linux.2xlarge" },
-          { shard: 1, num-shards: 1, config: "docs_test", runner-type: "linux.2xlarge" },
-          { shard: 1, num-shards: 1, config: "backwards_compat", runner-type: "linux.2xlarge" },
-          { shard: 1, num-shards: 1, config: "jit_legacy", runner-type: "linux.2xlarge" }
+          { shard: 1, num_shards: 2, config: "default", runner_type: "linux.2xlarge" },
+          { shard: 2, num_shards: 2, config: "default", runner_type: "linux.2xlarge" },
+          { shard: 1, num_shards: 1, config: "distributed", runner_type: "linux.2xlarge" },
+          { shard: 1, num_shards: 1, config: "docs_test", runner_type: "linux.2xlarge" },
+          { shard: 1, num_shards: 1, config: "backwards_compat", runner_type: "linux.2xlarge" },
+          { shard: 1, num_shards: 1, config: "jit_legacy", runner_type: "linux.2xlarge" }
         ]}
+
+  # linux-xenial-cuda11_3-py3_7-gcc7:
+  #   name: linux-xenial-cuda11.3-py3.7-gcc7
+  #   uses: ./.github/workflows/linux-build.yml
+  #   with:
+  #     build-environment: linux-xenial-cuda11.3-py3.7-gcc7
+  #     docker-image-base: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda11.3-py3.7-gcc7
+  #     build-generates-artifacts: true
+  #     test-matrix: |
+  #       { include: [
+  #         { shard: 1, num_shards: 2, config: "default", runner_type: "linux.2xlarge" },
+  #         { shard: 2, num_shards: 2, config: "default", runner_type: "linux.2xlarge" },
+  #         { shard: 1, num_shards: 1, config: "distributed", runner_type: "linux.2xlarge" },
+  #         { shard: 1, num_shards: 1, config: "docs_test", runner_type: "linux.2xlarge" },
+  #         { shard: 1, num_shards: 1, config: "backwards_compat", runner_type: "linux.2xlarge" },
+  #         { shard: 1, num_shards: 1, config: "jit_legacy", runner_type: "linux.2xlarge" }
+  #       ]}
