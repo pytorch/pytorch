@@ -776,7 +776,7 @@ class FullyShardedDataParallel(nn.Module):
         state_dict: "OrderedDict[str, torch.Tensor]",
         prefix: str,
     ) -> "OrderedDict[str, torch.Tensor]":
-        raise NotImplementedError("Will be implemented in the next PRs.")
+        return state_dict
 
     def _local_post_state_dict_hook(
         self,
@@ -846,7 +846,7 @@ class FullyShardedDataParallel(nn.Module):
         if torch.cuda.is_available():
             torch.cuda.synchronize()
         if self._state_dict_type == StateDictType.FULL_STATE_DICT:
-            raise NotImplementedError("Will be implemented in the next PRs.")
+            return super().state_dict(destination, prefix, keep_vars)
         elif self._state_dict_type == StateDictType.LOCAL_STATE_DICT:
             assert getattr(self.module, FLAT_PARAM, None) is not None
             assert isinstance(self.module.flat_param, FlatParameter)
@@ -870,7 +870,7 @@ class FullyShardedDataParallel(nn.Module):
         state_dict: Union[Dict[str, torch.Tensor], "OrderedDict[str, torch.Tensor]"],
         prefix: str,
     ) -> None:
-        raise NotImplementedError("Will be implemented in the next PRs.")
+        return
 
     def _local_pre_load_state_dict_hook(
         self,
@@ -942,7 +942,7 @@ class FullyShardedDataParallel(nn.Module):
         """
         torch.cuda.synchronize()
         if self._state_dict_type == StateDictType.FULL_STATE_DICT:
-            raise NotImplementedError("Will be implemented in the next PRs.")
+            return super().load_state_dict(state_dict, strict)
         elif self._state_dict_type == StateDictType.LOCAL_STATE_DICT:
             return super().load_state_dict(state_dict, strict)
         elif self._state_dict_type == StateDictType.SHARDED_STATE_DICT:
