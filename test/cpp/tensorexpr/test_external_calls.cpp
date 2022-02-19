@@ -1000,10 +1000,16 @@ TEST(ExternalCall, JitCustomFusionOp) {
   auto graph = std::make_shared<Graph>();
   torch::jit::parseIR(graph_string, graph.get());
   FuseTensorExprs(graph, /* min_group_size= */ 1);
+#ifdef TORCH_ENABLE_LLVM
   torch::jit::testing::FileCheck()
     .check("prim::TensorExprGroup_")
     ->check("nnc_custom::add_mul")
     ->run(*graph);
+#else
+  torch::jit::testing::FileCheck()
+    .check("nnc_custom::add_mul")
+    ->run(*graph);
+#endif
 }
 
 } // namespace jit
