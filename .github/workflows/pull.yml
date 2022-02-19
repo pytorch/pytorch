@@ -16,27 +16,24 @@ jobs:
       build-generates-artifacts: true
       test-matrix: |
         { include: [
-          { shard: 1, num_shards: 2, config: "default", runner_type: "linux.2xlarge" },
-          { shard: 2, num_shards: 2, config: "default", runner_type: "linux.2xlarge" },
-          { shard: 1, num_shards: 1, config: "distributed", runner_type: "linux.2xlarge" },
-          { shard: 1, num_shards: 1, config: "docs_test", runner_type: "linux.2xlarge" },
-          { shard: 1, num_shards: 1, config: "backwards_compat", runner_type: "linux.2xlarge" },
-          { shard: 1, num_shards: 1, config: "jit_legacy", runner_type: "linux.2xlarge" }
+          { config: "default", shard: 1, num_shards: 2, runner: "linux.2xlarge" },
+          { config: "default", shard: 2, num_shards: 2, runner: "linux.2xlarge" },
+          { config: "distributed", shard: 1, num_shards: 1, runner: "linux.2xlarge" },
+          { config: "docs_test", shard: 1, num_shards: 1,  runner: "linux.2xlarge" },
+          { config: "backwards_compat", shard: 1, num_shards: 1, runner: "linux.2xlarge" },
+          { config: "jit_legacy", shard: 1, num_shards: 1, runner: "linux.2xlarge" }
         ]}
 
-  # linux-xenial-cuda11_3-py3_7-gcc7:
-  #   name: linux-xenial-cuda11.3-py3.7-gcc7
-  #   uses: ./.github/workflows/linux-build.yml
-  #   with:
-  #     build-environment: linux-xenial-cuda11.3-py3.7-gcc7
-  #     docker-image-base: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda11.3-py3.7-gcc7
-  #     build-generates-artifacts: true
-  #     test-matrix: |
-  #       { include: [
-  #         { shard: 1, num_shards: 2, config: "default", runner_type: "linux.2xlarge" },
-  #         { shard: 2, num_shards: 2, config: "default", runner_type: "linux.2xlarge" },
-  #         { shard: 1, num_shards: 1, config: "distributed", runner_type: "linux.2xlarge" },
-  #         { shard: 1, num_shards: 1, config: "docs_test", runner_type: "linux.2xlarge" },
-  #         { shard: 1, num_shards: 1, config: "backwards_compat", runner_type: "linux.2xlarge" },
-  #         { shard: 1, num_shards: 1, config: "jit_legacy", runner_type: "linux.2xlarge" }
-  #       ]}
+  linux-xenial-cuda11_3-py3_7-gcc7:
+    name: linux-xenial-cuda11.3-py3.7-gcc7
+    uses: ./.github/workflows/linux-build.yml
+    with:
+      build-environment: linux-xenial-cuda11.3-py3.7-gcc7
+      docker-image-base: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda11.3-py3.7-gcc7
+      build-generates-artifacts: true
+      test-matrix: |
+        { include: [
+          { config: "default", shard: 1, num_shards: 2, runner: "linux.4xlarge.nvidia.gpu" },
+          { config: "default", shard: 2, num_shards: 2, runner: "linux.4xlarge.nvidia.gpu" },
+          { config: "distributed", shard: 1, num_shards: 1, runner: "linux.8xlarge.nvidia.gpu" }
+        ]}
