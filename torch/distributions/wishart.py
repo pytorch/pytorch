@@ -195,7 +195,7 @@ class Wishart(ExponentialFamily):
 
         i, j = torch.tril_indices(p, p, offset=-1)
         noise[..., i, j] = torch.randn(
-            torch.Size(sample_shape) + self._batch_shape + (int(0.5 * p * (p - 1)),),
+            torch.Size(sample_shape) + self._batch_shape + (torch.floor((0.5 * p * (p - 1))),),
             dtype=noise.dtype,
             device=noise.device,
         )
