@@ -185,7 +185,6 @@ class CIWorkflow:
     enable_xla_test: bool = False
     enable_noarch_test: bool = False
     enable_force_on_cpu_test: bool = False
-    enable_deploy_test: bool = False
 
     def __post_init__(self) -> None:
         if not self.build_generates_artifacts:
@@ -513,7 +512,6 @@ LINUX_WORKFLOWS = [
         ciflow_config=CIFlowConfig(
             labels={LABEL_CIFLOW_LINUX, LABEL_CIFLOW_CUDA, LABEL_CIFLOW_DEFAULT},
         ),
-        enable_deploy_test=True,
         enable_distributed_test=False,
     ),
     # Build PyTorch with BUILD_CAFFE2=ON
