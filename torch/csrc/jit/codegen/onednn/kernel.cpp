@@ -31,7 +31,9 @@ LlgaKernel::LlgaKernel(const Node* fusionNode)
       "LLGA subgraph should contain only one partition");
   partition_ = partitions[0];
   nPartitionInputs_ = partition_.get_in_ports().size();
+#ifdef GRAPH_DEBUG_ENABLED
   GRAPH_DEBUG("Initialized ", debugName(), "\n", graph_->toString());
+#endif
 }
 
 bool LlgaKernel::useOpaqueLayout(size_t offset) const {
@@ -80,7 +82,9 @@ std::map<size_t, int64_t> LlgaKernel::initializeTensorIdToOccurence() const {
 ArgSpecs LlgaKernel::initializeInputSpecs(const TensorArgs& inputs) {
   ArgSpecs inputSpecs;
   inputSpecs.reserve(nPartitionInputs_);
+#ifdef GRAPH_DEBUG_ENABLED
   GRAPH_DEBUG("Initializing graph input logical tensors");
+#endif
   std::map<size_t, int64_t> tensorIdToOccurence =
       initializeTensorIdToOccurence();
   for (size_t i = 0; i < nGraphInputs_; i++) {
@@ -90,17 +94,19 @@ ArgSpecs LlgaKernel::initializeInputSpecs(const TensorArgs& inputs) {
     inputSpecs.insert(inputSpecs.end(), occurence, spec);
     runArgsIdx_.insert(runArgsIdx_.end(), occurence, i);
   }
-
+#ifdef GRAPH_DEBUG_ENABLED
   GRAPH_DEBUG("Initializing constant input tensors");
+#endif
   initializeConstantInputs();
 
   TORCH_CHECK(
       inputSpecs.size() + constantValues_.size() == nPartitionInputs_,
       "Partition inputs are missing");
-
+#ifdef GRAPH_DEBUG_ENABLED
   GRAPH_DEBUG(
       "Concatenating constant input logical tensors to graph input "
       "logical tensors");
+#endif
   for (Value* constant_value : constantValues_) {
     inputSpecs.emplace_back(ArgSpec(constant_value));
   }
@@ -198,7 +204,9 @@ compiled_partition LlgaKernel::compile(const partition& partition) {
 }
 
 void LlgaKernel::run(Stack& stack) {
+#ifdef GRAPH_DEBUG_ENABLED
   GRAPH_DEBUG("In ", debugName(), "\n");
+#endif
 
   // Grab input values from stack
   auto stackInputs = last(stack, nGraphInputs_);
@@ -209,32 +217,45 @@ void LlgaKernel::run(Stack& stack) {
   });
 
   // Even in case of concurrent threads, the kernel would be initialized once.
+  // TODO: Try not using an atomic lock
   std::call_once(initialized_flag,
                  [&](const TensorArgs& inputs) {
+#ifdef GRAPH_DEBUG_ENABLED
                    GRAPH_DEBUG("Initializing input logical tensors");
+#endif
                    inputSpecs_ = initializeInputSpecs(inputs);
+#ifdef GRAPH_DEBUG_ENABLED
                    GRAPH_DEBUG("Initializing output logical tensors");
+#endif
                    outputSpecs_ = initializeOutputSpecs();
+#ifdef GRAPH_DEBUG_ENABLED
                    GRAPH_DEBUG("Compiling partition");
+#endif
                    compilation_ = compile(partition_);
                    is_initialized_ = true;
                  },
                 inputs);
-
+#ifdef GRAPH_DEBUG_ENABLED
   GRAPH_DEBUG("Preparing runtime tensors");
+#endif
   TensorArgs outputs;
   RunArgs runInputs, runOutputs;
   std::tie(runInputs, runOutputs) = prepareRunArgs(inputs, outputs);
-
+#ifdef GRAPH_DEBUG_ENABLED
   GRAPH_DEBUG("Executing partition");
+#endif
   compilation_.execute(Stream::getStream(), runInputs, runOutputs);
+#ifdef GRAPH_DEBUG_ENABLED
   GRAPH_DEBUG("Partition executed");
+#endif
 
   // Update the stack.
   drop(stack, nGraphInputs_);
   for (auto &o : outputs)
     push_one(stack, std::move(o));
+#ifdef GRAPH_DEBUG_ENABLED
   GRAPH_DEBUG("Stack updated");
+#endif
 }
 
 } // namespace onednn

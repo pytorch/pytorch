@@ -1,4 +1,5 @@
 #include <torch/csrc/jit/ir/alias_analysis.h>
+#include <torch/csrc/jit/runtime/symbolic_shape_registry_util.h>
 
 namespace torch {
 namespace jit {
@@ -32,12 +33,24 @@ class SizeCheckMover {
     auto& uses = input->uses();
     bool onlyUsedByShapePreserveOp =
         uses.size() > 1 &&
-        std::all_of(uses.begin(), uses.end(), [node](auto& u) {
-          return u.user == node ||
-              // TODO: register more shape preserved op
-              u.user->matches("aten::relu(Tensor self) -> Tensor") ||
-              u.user->matches("aten::sigmoid(Tensor self) -> Tensor");
-        });
+        std::all_of(uses.begin(), uses.end(),
+          [&](auto& u) {
+            if (u.user == node) {
+              return true;
+            }
+            // match with shape-preserving unary ops in
+            // tensorexpr_elementwise_set that's defined in
+            // torch/csrc/jit/runtime/symbolic_shape_registry_util.cpp
+            OperatorMap<std::string> schemaMap =
+                get_tensorexpr_elementwise_set();
+            c10::optional<std::string> mapping =
+                schemaMap.find(u.user->getOperator());
+            if (mapping == "unary") {
+              return true;
+            } else {
+              return false;
+            }
+          });
 
     if (!onlyUsedByShapePreserveOp)
       return false;

@@ -60,10 +60,12 @@ struct LlgaTensorDesc {
         property_type_(t.get_property_type()),
         layout_type_(t.get_layout_type()),
         layout_id_(-1) {
-    if (is_opaque())
+    if (is_opaque()) {
       layout_id_ = t.get_layout_id();
-    if (is_strided())
+    }
+    if (is_strided()) {
       strides_ = t.get_strides();
+    }
   }
 
   // TODO: llga need set input/output type constraints while it seems that we
@@ -80,14 +82,18 @@ struct LlgaTensorDesc {
       auto tt = v->type()->cast<TensorType>();
 
       auto sizes = tt->sizes();
-      if (sizes.sizes())
-        for (auto d : *sizes.sizes())
+      if (sizes.sizes()) {
+        for (auto d : *sizes.sizes()) {
           sizes_.push_back(d.value_or(DNNL_GRAPH_UNKNOWN_DIM));
+        }
+      }
 
       auto strides = tt->strides();
-      if (strides.sizes())
-        for (auto d : *strides.sizes())
+      if (strides.sizes()) {
+        for (auto d : *strides.sizes()) {
           strides_.push_back(d.value_or(DNNL_GRAPH_UNKNOWN_DIM));
+        }
+      }
     }
   }
 

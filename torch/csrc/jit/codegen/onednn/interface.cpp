@@ -42,7 +42,24 @@ void fuseGraph(std::shared_ptr<Graph>& g) {
         "After RemoveProfileNodesAndSpecializeTypes. Before mutation removal",
         g);
 
-    RemoveTensorMutation(g);
+    RemoveTensorMutation(g,
+      [](Node* nodeToFunctionalize) {
+        static std::unordered_set<Symbol> supportedOps = {
+            aten::add_,
+            aten::mul_,
+            aten::tanh_,
+            aten::elu_,
+            aten::relu_,
+            aten::relu6_,
+            aten::gelu_,
+            aten::sqrt_,
+            aten::sigmoid_,
+            aten::hardtanh_,
+            aten::abs_,
+            aten::square_,
+        };
+        return supportedOps.count(nodeToFunctionalize->kind()) != 0;
+      });
     RemoveListMutation(g);
     GRAPH_DUMP("After mutation removal. Before PrepareBinaryForLLGA", g);
     PrepareBinaryForLLGA(g);

@@ -10,7 +10,7 @@ namespace onednn {
 bool compareConstValue(Value* v, double d) {
   auto ival = toIValue(v);
   return ival.has_value() &&
-      ((ival->isInt() && ival->toInt() == static_cast<int>(d)) ||
+      ((ival->isInt() && static_cast<int>(ival->toInt()) == d) ||
        (ival->isDouble() && ival->toDouble() == d));
 }
 

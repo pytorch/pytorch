@@ -119,6 +119,14 @@ Operator createOperator(Node* node) {
           .setAttr("keep_stats", false);
     }
 
+    case aten::addmm: {
+       auto alpha = toIValue(node->namedInput("alpha"));
+       auto beta = toIValue(node->namedInput("beta"));
+       REQUIRE(alpha.has_value() && beta.has_value() &&
+              (alpha->toDouble() == 1.0) && (beta->toDouble() == 1.0));
+       return Operator(node, opkind::MatMul).setInput(1, 2, 0).setOutput(0);
+    }
+
     case aten::add:
       return makeBinaryOp(node, opkind::Add);
 
@@ -471,9 +479,11 @@ size_t LlgaGraphHelper::countSupportedOps(
     const std::shared_ptr<Graph>& graph) const {
   // TODO: count nodes in top-level block for now
   size_t cnt = 0;
-  for (auto* node : graph->block()->nodes())
-    if (isSupported(node))
+  for (auto* node : graph->block()->nodes()) {
+    if (isSupported(node)) {
       cnt++;
+    }
+  }
   return cnt;
 }
 
