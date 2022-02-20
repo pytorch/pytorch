@@ -44,7 +44,7 @@ class BisectPercentileOp final : public Operator<Context> {
         pct_upper_.size(),
         "Feature (raw) data and upper bound dimension should match.");
     n_features = pct_lens_.size();
-    index.reserve(n_features + 1);
+    index.resize(n_features + 1);
     index[0] = 0;
     for (int i = 1; i <= n_features; ++i) {
       index[i] = index[i - 1] + pct_lens_[i - 1];
