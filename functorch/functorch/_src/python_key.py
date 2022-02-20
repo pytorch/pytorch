@@ -110,13 +110,6 @@ class PythonTensor(torch.Tensor):
         proxy_args = pytree.tree_map(unwrap_proxy, args)
         proxy_kwargs = pytree.tree_map(unwrap_proxy, kwargs)
 
-        # We can no longer make this a decomposition as we will redispatch to autograd.
-        # todo(chilli): Move this somewhere else
-        canonicalization = {
-            aten._s_where: aten.where
-        }
-        if func in canonicalization:
-            func = canonicalization[func]
         proxy_out = func(*proxy_args, **proxy_kwargs)
 
         # Kind of a hacky way to test if an op is in-place or not

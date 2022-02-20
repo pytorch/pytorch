@@ -196,6 +196,16 @@ def huber_loss_backward(grad_output: Tensor, self: Tensor, target: Tensor, reduc
     )
 
 
+@register_decomposition(aten.binary_cross_entropy_backward)
+def binary_cross_entropy_backward(grad_output: Tensor, self: Tensor, target: Tensor, weight: Optional[Tensor] = None, reduction: int = Reduction.MEAN) -> Tensor:
+    if weight is None:
+        weight = 1
+    result = weight * (self - target) / self / (1 - self)
+    if reduction == Reduction.MEAN:
+        result = result * (1.0 / self.numel())
+    return result * grad_output
+
+
 @register_decomposition(aten.slice_backward)
 def slice_backward(grad_output: Tensor, input_sizes: List[int], dim: int, start: int, end: int, step: int):
     grad_input = aten.new_zeros(grad_output, input_sizes)
@@ -325,6 +335,50 @@ def embedding_dense_backward(grad_output: Tensor, indices: Tensor, num_weights: 
     skip_padding = skip_padding.expand_as(grad)
     zero_grad = aten.full_like(grad, 0)
     return aten.index_put(grad_weight, [indices_rank1], aten.where(skip_padding, grad, zero_grad), accumulate=True)
+
+
+def prod(x):
+    r = 1
+    for i in x:
+        r *= i
+    return r
+
+
+@register_decomposition(aten.native_layer_norm)
+def native_layer_norm(input: Tensor, normalized_shape: List[int], weight: Optional[Tensor], bias: Optional[Tensor], eps: float) -> Tuple[Tensor, Tensor, Tensor]:
+    input_shape = input.shape
+    input_ndim = input.dim()
+
+    axis = input_ndim - len(normalized_shape)
+    M = prod(input_shape[:axis])
+
+    # Hmm... not sure how I get around this...
+    # Basically, native_batch_norm doesn't support 0-entry tensors, while
+    # native_layer_norm does (and is tested by OpInfos!)
+    if M > 0:
+        input_reshaped = input.view(1, M, -1)
+    else:
+        return (input, aten.new_empty(input, (0,)), aten.new_empty(input, (0,)))
+
+    # Unlike Batch Normalization, which applies scalar scale and bias for each
+    # entire channel/plane with the affine option, Layer Normalization applies
+    # per-element scale and bias. E.g. For input {N, C, H, W}, weight for
+    # batchnorm has shape {C} while weight for layernorm has shape {H, W} or {W}.
+    out, mean, rstd = aten.native_batch_norm(
+        input_reshaped, weight=None, bias=None, running_mean=None,
+        running_var=None, training=True, momentum=0, eps=eps)
+    out = out.view(input_shape)
+    if weight is not None:
+        out = out * weight
+    if bias is not None:
+        out = out + bias
+
+    stat_shape = list(input_shape[:axis])
+    for _ in range(axis, input.dim()):
+        stat_shape.append(1)
+    mean = mean.view(stat_shape)
+    rstd = rstd.view(stat_shape)
+    return (out, mean, rstd)
 
 
 # @register_decomposition(aten.addmm)
