@@ -1,7 +1,4 @@
-
-
-
-
+from typing import List
 
 import hypothesis.strategies as st
 
@@ -126,9 +123,9 @@ class TestBisectPercentileOp(hu.HypothesisTestCase):
         **hu.gcs_cpu_only
     )
     def test_bisect_percentil_op_large(
-        self, N, lengths, max_value, discrete, p, gc, dc
+        self, N: int, lengths_in: List[int], max_value: int, discrete: bool, p: float, gc, dc
     ):
-        lengths = np.array(lengths, dtype=np.int32)
+        lengths = np.array(lengths_in, dtype=np.int32)
         D = len(lengths)
 
         if discrete:
