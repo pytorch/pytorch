@@ -188,8 +188,7 @@ class TestSparse(TestCase):
         self.assertEqual(x._values().numel(), 0)
 
     @coalescedonoff
-    @dtypes(torch.double, torch.cdouble)
-    @dtypesIfCPU(torch.double, torch.cdouble, torch.bfloat16)
+    @dtypes(torch.double, torch.cdouble, torch.bfloat16)
     def test_coalesce(self, device, dtype, coalesced):
 
         def _test_coalesce(t):
