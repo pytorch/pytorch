@@ -18,13 +18,12 @@ def ts_lowering_body(f: Union[NativeFunctionsGroup, NativeFunction]) -> str:
                 continue
             emplace_arguments.append('loctx->GetOutputOp(operand(i++))')
             continue
-        emplace_arguments.append(f'"{value.name}", {value.name}_')
+        emplace_arguments.append(f'"{value.name}", {value.name}')
 
     emplace_arguments_str = "\n    ".join(
         [f"arguments.emplace_back({a});" for a in emplace_arguments])
-    emplace_kwarg_values = [f'loctx->GetOutputOp(operand({i}))' for i in range(len(schema.keyword_values))]
-    emplace_kwarg_scalars = [f'"{t.name}", {t.name}_' for t in schema.keyword_scalars]
-    assert len(schema.keyword_values) == 0, "TODO the logic for operand(i) is broken if there are kw values"
+    emplace_kwarg_values = [f'"{t.name}", loctx->GetOutputOp(operand(i++))' for t in schema.keyword_values]
+    emplace_kwarg_scalars = [f'"{t.name}", {t.name}' for t in schema.keyword_scalars]
     emplace_kwarguments = "\n    ".join(
         [f"kwarguments.emplace_back({a});" for a in emplace_kwarg_values + emplace_kwarg_scalars])
     return f"""\
@@ -38,6 +37,5 @@ def ts_lowering_body(f: Union[NativeFunctionsGroup, NativeFunction]) -> str:
     torch::lazy::TSOpVector {schema.aten_name}_out = torch::lazy::LowerTSBuiltin(function, op().op, arguments, kwarguments);
     CHECK_EQ({schema.aten_name}_out.size(), {len(func.returns)});
 
-    // TODO: need to call GenerateClone sometimes? Or else return LowerBuiltIn() directly
     return {schema.aten_name}_out;
 """

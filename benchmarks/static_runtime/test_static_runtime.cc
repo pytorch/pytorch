@@ -2720,3 +2720,19 @@ TEST(StaticRuntime, ToList) {
   )JIT";
   testStaticRuntime(src, {at::randn({2, 2})});
 }
+
+TEST(StaticRuntime, IfThenElse) {
+  const auto src = R"IR(
+    graph(%cond: bool, %a: Tensor, %b: Tensor):
+        %none: NoneType = prim::Constant()
+        %c: Tensor = prim::IfThenElse(%cond, %a, %b)
+        %d: Tensor = aten::clone(%c, %none)
+        return (%d)
+  )IR";
+
+  std::vector<IValue> args1{true, at::randn({1}), at::randn({1})};
+  std::vector<IValue> args2{false, at::randn({1}), at::randn({1})};
+
+  testStaticRuntime(src, args1);
+  testStaticRuntime(src, args2);
+}
