@@ -43,6 +43,9 @@ ReductionParams innerPersistentHeuristic(
   // Set some targets for parallelization
   const int64_t n_elems = total_reduction_numel * total_iteration_numel;
 
+  const int64_t outer_reduction_numel =
+      total_reduction_numel / inner_most_dimension_numel;
+
   // WARNING: At some point we may want to generate heuristics for another
   // device that is not the current device.
   const int64_t device_max_threads_per_multiprocessor =
@@ -228,7 +231,7 @@ ReductionParams innerPersistentHeuristic(
   bdimz = std::min(
       std::min(
           std::max(max_threads_in_block / (bdimx * bdimy), (int64_t)1),
-          ceilDiv(total_reduction_numel, inner_most_dimension_numel)),
+          outer_reduction_numel),
       scheduler_utils::z_block_limit);
 
   // If 3D doesn't fill out the threads, adjust to add to bdimy
@@ -251,14 +254,12 @@ ReductionParams innerPersistentHeuristic(
 
     bdimz = std::min(
         std::max(max_threads_in_block / (bdimx * bdimy), (int64_t)1),
-        ceilDiv(total_reduction_numel, inner_most_dimension_numel));
+        outer_reduction_numel);
 
     bdimy = std::min(
         std::max(max_threads_in_block / (bdimx * bdimz), (int64_t)1),
         max_multi_reduction_factor);
   }
-
-  godim = ceilDiv(total_iteration_numel, bdimy);
 
   bool vectorize = false;
 
@@ -275,8 +276,7 @@ ReductionParams innerPersistentHeuristic(
   if (inner_reduction_unroll_factor < max_unroll) {
     outer_reduction_unroll_factor = std::min(
         ceilDiv(max_unroll, inner_reduction_unroll_factor),
-        ceilDiv(
-            ceilDiv(total_reduction_numel, inner_most_dimension_numel), bdimz));
+        ceilDiv(outer_reduction_numel, bdimz));
   }
 
   godim = ceilDiv(total_iteration_numel, bdimy);
@@ -304,9 +304,8 @@ ReductionParams innerPersistentHeuristic(
   while (outer_reduction_unroll_factor < max_unroll &&
          batches_per_block_outer_reduction >= 2) {
     outer_reduction_unroll_factor *= 2;
-    batches_per_block_outer_reduction = roundUpPow2Or8(ceilDiv(
-        ceilDiv(total_reduction_numel, inner_most_dimension_numel),
-        bdimz * outer_reduction_unroll_factor));
+    batches_per_block_outer_reduction = roundUpPow2Or8(
+        ceilDiv(outer_reduction_numel, bdimz * outer_reduction_unroll_factor));
   }
 
   // If we haven't gotten to the max_unroll case, try to take it out of the
@@ -334,7 +333,7 @@ ReductionParams innerPersistentHeuristic(
       inner_most_dimension_numel,
       inner_reduction_unroll_factor * batches_per_block_inner_reduction);
   bdimz = ceilDiv(
-      ceilDiv(total_reduction_numel, inner_most_dimension_numel),
+      outer_reduction_numel,
       outer_reduction_unroll_factor * batches_per_block_outer_reduction);
 
   // Try moving persistent buffer factors into threads until we have too many
@@ -368,9 +367,8 @@ ReductionParams innerPersistentHeuristic(
       batches_per_block_outer_reduction =
           roundUpPow2Or8(batches_per_block_outer_reduction / 2);
       bdimz = ceilDiv(
-          ceilDiv(total_reduction_numel, inner_most_dimension_numel),
+          outer_reduction_numel,
           batches_per_block_outer_reduction * outer_reduction_unroll_factor);
-
       continue;
     }
     break;
@@ -410,13 +408,18 @@ ReductionParams innerPersistentHeuristic(
   pad_bdimx = pad_bdimx &&
       bdimx * inner_reduction_unroll_factor != inner_most_dimension_numel;
 
+  // Will be used once supporting inter-block persistence
+  int64_t gdimx = LaunchParams::UNINITIALIZED_VAL;
+  int64_t gdimy = LaunchParams::UNINITIALIZED_VAL;
+  int64_t gdimz = LaunchParams::UNINITIALIZED_VAL;
+
   ReductionParams rparams;
 
   rparams.persistent_kernel = true;
   rparams.fastest_dim = true;
 
   // Inner reduction domain
-  rparams.cross_block_inner_reduce = true;
+  rparams.cross_block_inner_reduction = true;
   rparams.block_dim_inner_reduction = ParallelType::TIDx;
   rparams.pad_inner_reduction_to_warp = pad_bdimx;
   rparams.batches_per_block_inner_reduction = batches_per_block_inner_reduction;
@@ -432,8 +435,15 @@ ReductionParams innerPersistentHeuristic(
   if (rparams.multiple_reds_per_blk) {
     rparams.block_dim_iter_dom = ParallelType::TIDy;
   }
-  rparams.grid_dim_iter_dom = ParallelType::BIDx;
-  rparams.split_grid_dim_iter_dom = godim > scheduler_utils::x_grid_limit;
+
+  if (godim > 1) {
+    rparams.grid_dim_iter_dom = ParallelType::BIDx;
+    if (godim > scheduler_utils::x_grid_limit) {
+      rparams.split_grid_dim_iter_dom = true;
+      gdimx = scheduler_utils::x_grid_limit;
+    }
+  }
+
   if (iter_unroll_factor > 1) {
     rparams.unroll_iter_dom = true;
     rparams.unroll_factor_iter_dom = iter_unroll_factor;
@@ -445,15 +455,15 @@ ReductionParams innerPersistentHeuristic(
     rparams.batches_per_block_outer_reduction =
         batches_per_block_outer_reduction;
     rparams.block_dim_outer_reduction = ParallelType::TIDz;
-    rparams.cross_block_outer_reduce = true;
+    rparams.cross_block_outer_reduction = true;
     rparams.unroll_outer_reduction = outer_reduction_unroll_factor > 1;
     rparams.unroll_factor_outer_reduction = outer_reduction_unroll_factor;
   }
 
   rparams.lparams = LaunchParams(
-      LaunchParams::UNINITIALIZED_VAL,
-      LaunchParams::UNINITIALIZED_VAL,
-      LaunchParams::UNINITIALIZED_VAL,
+      gdimx,
+      gdimy,
+      gdimz,
       LaunchParams::UNINITIALIZED_VAL,
       bdimy,
       LaunchParams::UNINITIALIZED_VAL);
@@ -697,8 +707,8 @@ ReductionParams OuterPersistentHeuristic(
   rparams.persistent_kernel = true;
 
   rparams.fastest_dim = false;
-  rparams.cross_block_inner_reduce = true;
-  rparams.cross_grid_inner_reduce = false;
+  rparams.cross_block_inner_reduction = true;
+  rparams.cross_grid_inner_reduction = false;
   rparams.multiple_reds_per_blk = bdimx > 1;
 
   if (rparams.multiple_reds_per_blk) {

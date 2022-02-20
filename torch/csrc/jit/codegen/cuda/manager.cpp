@@ -141,6 +141,25 @@ class CudaFusionManager {
   int32_t next_unique_id_ = 0;
 };
 
+// Mark string attribute in alias-copy nodes to enable its implementation
+// in the fallback path.
+void enableAliasCopyNodes(const std::shared_ptr<Graph>& graph, Block* block) {
+  static std::unordered_set<Symbol> alias_copy_op(
+      {prim::view_copy,
+       prim::reshape_copy,
+       prim::squeeze_copy,
+       prim::unsqueeze_copy});
+
+  for (Node* n : block->nodes()) {
+    for (Block* b : n->blocks()) {
+      enableAliasCopyNodes(graph, b);
+    }
+    if (alias_copy_op.find(n->kind()) != alias_copy_op.end()) {
+      n->s_(attr::name, "CudaFusionGroup");
+    }
+  }
+}
+
 } // namespace
 
 void compileCudaFusionGroup(Node* fusion_node) {
@@ -194,6 +213,7 @@ void runCudaFusionGroup(const Node* fusion_node, Stack& stack) {
     // copying graph here since we are eliminating shape information;
     auto copied_graph = fusion_node->g(attr::Subgraph)->copy();
     EraseShapeInformation(copied_graph);
+    enableAliasCopyNodes(copied_graph, copied_graph->block());
     InterpreterState{Code(copied_graph, "fallback_cuda_fuser")}.run(stack);
   };
 
