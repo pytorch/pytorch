@@ -21,6 +21,7 @@
 #include <atomic>
 
 #include <onnx/checker.h>
+#include <onnx/shape_inference/implementation.h>
 #include <onnx/onnx_pb.h>
 #include <onnx/proto_utils.h>
 
@@ -1248,13 +1249,18 @@ std::string serialize_model_proto_to_string(
   return model_proto->SerializeAsString();
 }
 
-void check_onnx_proto(const std::string& proto_string) {
+void check_onnx_proto(const std::string& proto_string, bool full_check) {
   onnx::ModelProto model;
   if (!ParseProtoFromBytes(&model, proto_string.c_str(), proto_string.size())) {
     throw std::runtime_error("Invalid ONNX proto string.");
     return;
   }
   onnx::checker::check_model(model);
+
+  if (full_check) {
+    onnx::shape_inference::InferShapes(model);
+  }
+
 }
 
 } // namespace jit
