@@ -1,7 +1,9 @@
+#pragma once
 #include <ATen/core/Tensor.h>
 #include <ATen/Dispatch.h>
+#include <ATen/TensorIterator.h>
+#include <ATen/native/Activation.h>
 #include <ATen/native/DispatchStub.h>
-#include <ATen/native/TensorIterator.h>
 
 namespace at {
 namespace native {
@@ -9,7 +11,7 @@ namespace native {
 using qrelu_fn = void (*)(const at::Tensor& /*qx*/, at::Tensor& /*qy*/);
 using qrelu_leaky_fn = void (*)(Tensor& /*out*/, const Tensor& /*qx*/,
                                 const Scalar& /*negval_*/);
-using qgelu_fn = void (*)(const at::Tensor& /*qx*/, at::Tensor& /*qy*/);
+using qgelu_fn = void (*)(const at::Tensor& /*qx*/, at::Tensor& /*qy*/, GeluType /* approximate */);
 using qsigmoid_fn = void (*)(const at::Tensor& /*qx*/, at::Tensor& /*qy*/, double output_scale, int64_t output_zero_point);
 using qhardsigmoid_fn = void (*)(const at::Tensor& /*qx*/, at::Tensor& /*qy*/);
 using qclamp_fn = void (*)(
