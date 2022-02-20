@@ -22,6 +22,14 @@ class FileOpenerIterDataPipe(IterDataPipe[Tuple[str, IOBase]]):
     Note:
         The opened file handles will be closed by Python's GC periodically. Users can choose
         to close them explicitly.
+
+    Example:
+        >>> from torchdata.datapipes.iter import FileLister, FileOpener, StreamReader
+        >>> dp = FileLister(root=".").filter(lambda fname: fname.endswith('.txt'))
+        >>> dp = FileOpener(dp)
+        >>> dp = StreamReader(dp)
+        >>> list(dp)
+        [('./abc.txt', 'abc')]
     """
 
     def __init__(
