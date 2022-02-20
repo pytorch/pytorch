@@ -72,7 +72,12 @@ class BackendWithCompiler : public PyTorchBackendInterface {
     return true;
   }
 
-  // Since the actual compilation is done AOT,
+  // Since the actual compilation is done AOT for this backend, compile just
+  // forwards everything along. In a non toy setup this could grab information
+  // from that runtime that might be relevant to execute, such as build flags
+  // the resolution of the devices camera, or basically any runtime specific
+  // information that wouldnt be available server side where preprocess is
+  // called.
   c10::impl::GenericDict compile(
       c10::IValue processed,
       c10::impl::GenericDict method_compile_spec) override {
@@ -86,8 +91,14 @@ class BackendWithCompiler : public PyTorchBackendInterface {
     return c10::impl::toGenericDict(handles);
   }
 
+  // Function that actually executes the model in the backend. Here there is
+  // nothing to dispatch to, so the backend is implemented locally within
+  // execute and it only supports add, subtract, and constant. In a non toy
+  // backend you can imagine how this function could be used to actually
+  // dispatch the inputs to the relevant backend/device.
   c10::impl::GenericList execute(
-      c10::IValue handle,
+      c10::IValue
+          handle, // example: [('prim::Constant#1', 14), ('aten::add', 15)]
       c10::impl::GenericList inputs) override {
     TORCH_INTERNAL_ASSERT(inputs.size() == 2);
     c10::IValue val0 = inputs[0];
@@ -107,6 +118,7 @@ class BackendWithCompiler : public PyTorchBackendInterface {
       auto start_time_us = torch::profiler::impl::getTime() / 1000;
       try {
         if (instruction.rfind("prim::Constant", 0) == 0) {
+          // 15 is the length of 'prim::Constant#' the constant val comes after
           TORCH_CHECK(
               instruction.size() > 15,
               "Constant value is expected in ",
