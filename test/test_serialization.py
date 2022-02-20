@@ -621,7 +621,7 @@ class SerializationMixin(object):
             a = torch.tensor([], dtype=dtype, device=device)
 
             for other_dtype in all_types_and_complex_and(torch.half, torch.bfloat16, torch.bool):
-                s = torch.TypedStorage(
+                s = torch._TypedStorage(
                     wrap_storage=a.storage()._untyped(),
                     dtype=other_dtype)
                 save_load_check(a, s)
