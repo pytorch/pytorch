@@ -301,6 +301,45 @@ TORCH_API Module optimize_for_inference(
     Module& module,
     const std::vector<std::string>& other_methods = {});
 
+enum class FusionBehavior { STATIC, DYNAMIC };
+
+using FusionStrategy = std::vector<std::pair<FusionBehavior, size_t>>;
+// clang-format off
+/*
+Sets the type and number of specializations that can occur during fusion.
+
+Usage: provide a list of pairs (type, depth) where type is one of STATIC or DYNAMIC
+and depth is an integer.
+
+Behavior - static vs dynamic:
+    In STATIC fusion, fused ops are compiled to have fixed input shapes. The shape is determined
+    based on some initial profiling runs.
+    In DYNAMIC fusion, fused ops are compiled to have variable input shapes, so that multiple
+    shapes are possible.
+
+In both cases, we also recompile on new striding behavior, device, or dtype.
+
+Behavior - fallback functions & depth:
+    When an input doesn't match the format required by the specialized compiled op, it will run
+    a fallback function. Fallback functions are recursively be compiled and specialized based
+    on the observed tensor shapes. Since compilation can be slow, the "depth" parameter is provided to
+    limit the number of specializations that can be compiled, before giving up on recompiling and
+    falling back to a completely un-fused, un-specialized implementation.
+
+The list of (type, depth) pairs controls the type of specializations and the number of
+specializations. For example: [(STATIC, 2), (DYNAMIC, 2)] indicates that the first
+two specializations will use static fusions, the following two specializations will use
+dynamic fusion, and any inputs that satisfy none of the 4 options will run an
+unfused implementation.
+
+NB: in the future, if more as more fusion backends are added there may be more granular
+apis for specific fusers.
+*/
+// clang-format on
+TORCH_API FusionStrategy getFusionStrategy();
+// returns previous strategy
+TORCH_API FusionStrategy setFusionStrategy(FusionStrategy& fusion_strategy);
+
 namespace detail {
 
 struct TORCH_API SlotCursor {

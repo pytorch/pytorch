@@ -441,8 +441,9 @@ class TestQuantizedOps(TestCase):
         shapes = ((4,), (4, 4), (4, 4, 4), (4, 4, 4, 4))
         dtypes = (torch.quint8, torch.qint8)
         memory_formats = (torch.channels_last, torch.contiguous_format)
-        test_cases = itertools.product(shapes, dtypes, memory_formats)
-        for shape, dtype, memory_format in test_cases:
+        approximation = ['none', 'tanh']
+        test_cases = itertools.product(shapes, dtypes, memory_formats, approximation)
+        for shape, dtype, memory_format, approximate in test_cases:
             if memory_format == torch.channels_last and len(shape) != 4:
                 continue
             X, scale, zero_point, torch_type = \
@@ -454,7 +455,7 @@ class TestQuantizedOps(TestCase):
             dqX = qX.dequantize()
 
             op = torch.nn.functional.gelu
-            dqY = op(dqX)
+            dqY = op(dqX, approximate=approximate)
             qY = torch.quantize_per_tensor(dqY, scale=scale, zero_point=zero_point,
                                            dtype=torch_type)
             qY_hat = op(qX)
@@ -1919,25 +1920,28 @@ class TestQuantizedOps(TestCase):
         X = torch.from_numpy(np.ascontiguousarray(X))
         Y = X.clone()
         Y = torch.from_numpy(np.ascontiguousarray(Y))
-        # Here, we quantize and get quantized tensors in NHWC for both dims and strides. The
-        # permute switches it so that the tensor looks like NCHW but it laid out in memory as
-        # NHWC.
-        qX = torch.quantize_per_tensor(X, scale, zero_point, torch_type).permute([0, 3, 1, 2])
-        qY = torch.quantize_per_tensor(Y, scale, zero_point, torch_type).permute([0, 3, 1, 2])
+        # We add a fast path in qcat: when inputs share the same scale and zero_point,
+        # it will go direct memcpy instead of dequant-cat-quant.
+        for scaleX, scaleY in ((scale, scale), (scale, scale * 1.1)):
+            # Here, we quantize and get quantized tensors in NHWC for both dims and strides. The
+            # permute switches it so that the tensor looks like NCHW but it laid out in memory as
+            # NHWC.
+            qX = torch.quantize_per_tensor(X, scaleX, zero_point, torch_type).permute([0, 3, 1, 2])
+            qY = torch.quantize_per_tensor(Y, scaleY, zero_point, torch_type).permute([0, 3, 1, 2])
 
-        ref = torch.cat([qX.dequantize(), qY.dequantize()], dim=1)
-        if relu:
-            ref[ref < 0] = 0.0
-        ref = torch.quantize_per_tensor(ref, scale=scale, zero_point=zero_point, dtype=torch_type)
+            ref = torch.cat([qX.dequantize(), qY.dequantize()], dim=1)
+            if relu:
+                ref[ref < 0] = 0.0
+            ref = torch.quantize_per_tensor(ref, scale=scale, zero_point=zero_point, dtype=torch_type)
 
-        if relu:
-            out = torch.ops.quantized.cat_relu(
-                [qX, qY], dim=1, scale=scale, zero_point=zero_point)
-        else:
-            out = torch.ops.quantized.cat([qX, qY], dim=1, scale=scale, zero_point=zero_point)
+            if relu:
+                out = torch.ops.quantized.cat_relu(
+                    [qX, qY], dim=1, scale=scale, zero_point=zero_point)
+            else:
+                out = torch.ops.quantized.cat([qX, qY], dim=1, scale=scale, zero_point=zero_point)
 
-        torch.testing.assert_close(out.dequantize(), ref.dequantize())
-        self.assertNotEqual(out.stride(), sorted(out.stride()))
+            torch.testing.assert_close(out.dequantize(), ref.dequantize())
+            self.assertNotEqual(out.stride(), sorted(out.stride()))
 
     @given(X=hu.tensor(shapes=hu.array_shapes(min_dims=1, max_dims=5,
                                               min_side=1, max_side=4),
