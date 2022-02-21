@@ -2119,5 +2119,10 @@ template <typename T>
 static inline typename std::enable_if<std::is_floating_point<T>::value, T>::type
 calc_logerfcx(T x)
 {
-    return std::log(calc_erfcx(x));
+    if (x < 0.0) {
+    	return std::log(std::erfc(x)) + std::pow(x, 2);
+    }
+    else {
+	return std::log(calc_erfcx(x));
+    }
 }

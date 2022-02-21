@@ -10289,11 +10289,12 @@
 - func: special_logerfcx(Tensor self) -> Tensor
   python_module: special
   variants: function
-  dispatch:
-    CPU: special_logerfcx
+  structured_delegate: special_logerfcx.out
 
 - func: special_logerfcx.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   python_module: special
+  structured: True
+  structured_inherits: TensorIteratorBase
   dispatch:
     CPU: special_logerfcx_out
 
