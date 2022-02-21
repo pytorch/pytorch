@@ -4,7 +4,9 @@ import warnings
 import math
 import unittest
 import functools
+import itertools
 from copy import deepcopy
+
 import torch
 from torch._six import inf
 import torch.optim as optim
@@ -20,7 +22,6 @@ from torch.optim.lr_scheduler import LambdaLR, MultiplicativeLR, SequentialLR, S
 from torch.optim.swa_utils import AveragedModel, SWALR, update_bn
 from torch.testing._internal.common_utils import TestCase, run_tests, TEST_WITH_UBSAN, load_tests, \
     skipIfRocm
-
 # load_tests from common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
 load_tests = load_tests
@@ -183,6 +184,31 @@ class TestOptim(TestCase):
         optimizer_c.param_groups.extend(optimizer_c.param_groups)
         self.assertEqual(optimizer.state_dict()['param_groups'][-1],
                          optimizer_c.state_dict()['param_groups'][-1])
+
+        # Make sure that optimizers that support maximize can load older models
+        state_dict = optimizer.state_dict()
+        if 'maximize' in state_dict['param_groups'][0]:
+            for group in state_dict['param_groups']:
+                del group['maximize']
+            optimizer.load_state_dict(state_dict)
+            # Make sure we can still step
+            optimizer.step()
+        # Make sure that optimizers that support foreach can load older models
+        state_dict = optimizer.state_dict()
+        if 'foreach' in state_dict['param_groups'][0]:
+            for group in state_dict['param_groups']:
+                del group['foreach']
+            optimizer.load_state_dict(state_dict)
+            # Make sure we can still step
+            optimizer.step()
+
+        # Make sure that loading optimizers with step not wrapped in tensor can work
+        state_dict = optimizer.state_dict()
+        if 'step' in state_dict['state'][0] and torch.is_tensor(state_dict['state'][0]['step']):
+            for state in state_dict['state'].values():
+                state['step'] = state['step'].item()
+            optimizer.load_state_dict(state_dict)
+            optimizer.step()
 
         # Check that state dict can be loaded even when we cast parameters
         # to a different type and move to a different device.
@@ -432,33 +458,20 @@ class TestOptim(TestCase):
             ((optim.Adagrad, optim._multi_tensor.Adagrad), dict(weight_decay=1)),
         ]
 
-        kIterations = 11
+        kIterations = 4
         device = 'cuda'
 
         for optimizers, params in optimizer_pairs_with_flags:
             res = []
             for opt in optimizers:
-                weight = torch.tensor([[-0.2109, -0.4976], [-0.1413, -0.3420], [-0.2524, 0.6976]],
-                                      dtype=torch.float64, device=device, requires_grad=True)
-                bias = torch.tensor([-0.1085, -0.2979, 0.6892], dtype=torch.float64, device=device, requires_grad=True)
-                weight2 = torch.tensor([[-0.0508, -0.3941, -0.2843]],
-                                       dtype=torch.float64, device=device, requires_grad=True)
-                bias2 = torch.tensor([-0.0711], dtype=torch.float64, device=device, requires_grad=True)
                 input = torch.tensor([0.1, 0.2, 0.3, 0.4, 0.5, 0.6], dtype=torch.float64, device=device).reshape(3, 2)
 
+                torch.manual_seed(1)
                 model = torch.nn.Sequential(torch.nn.Linear(2, 3),
                                             torch.nn.Sigmoid(),
                                             torch.nn.Linear(3, 1),
                                             torch.nn.Sigmoid())
-                model.to(torch.float64).to(device)
-
-                pretrained_dict = model.state_dict()
-                pretrained_dict['0.weight'] = weight
-                pretrained_dict['0.bias'] = bias
-                pretrained_dict['2.weight'] = weight2
-                pretrained_dict['2.bias'] = bias2
-                model.load_state_dict(pretrained_dict)
-
+                model.to(dtype=torch.float64, device=device)
                 optimizer = opt(model.parameters(), **params)
 
                 for _ in range(kIterations):
@@ -467,8 +480,9 @@ class TestOptim(TestCase):
                     loss = output.sum()
                     loss.backward()
 
+                    # Test that step behaves as expected (a no-op) when grads are set to None
                     if iter == 0:
-                        model.parameters().__next__().grad = None
+                        optimizer.zero_grad(set_to_none=True)
 
                     optimizer.step()
 
@@ -480,58 +494,68 @@ class TestOptim(TestCase):
     def test_adam(self):
         for optimizer in [optim.Adam, optim_mt.Adam]:
             self._test_basic_cases(
-                lambda weight, bias: optimizer([weight, bias], lr=1e-3)
+                lambda weight, bias, maximize: optimizer([weight, bias], lr=1e-3, maximize=maximize),
+                constructor_accepts_maximize=True
             )
             self._test_basic_cases(
-                lambda weight, bias: optimizer(
+                lambda weight, bias, maximize: optimizer(
+                    self._build_params_dict(weight, bias, lr=1e-2), lr=1e-3, maximize=maximize),
+                constructor_accepts_maximize=True
+            )
+            self._test_basic_cases(
+                lambda weight, bias, maximize: optimizer([weight, bias], lr=1e-3, amsgrad=True, maximize=maximize),
+                constructor_accepts_maximize=True
+            )
+            self._test_basic_cases(
+                lambda weight, bias, maximize: optimizer([weight, bias], lr=1e-3, weight_decay=0.1, maximize=maximize),
+                constructor_accepts_maximize=True
+            )
+            self._test_basic_cases(
+                lambda weight, bias, maximize: optimizer(
                     self._build_params_dict(weight, bias, lr=1e-2),
-                    lr=1e-3)
+                    lr=1e-3, amsgrad=True, maximize=maximize),
+                constructor_accepts_maximize=True
             )
             self._test_basic_cases(
-                lambda weight, bias: optimizer([weight, bias], lr=1e-3, amsgrad=True)
-            )
-            self._test_basic_cases(
-                lambda weight, bias: optimizer([weight, bias], lr=1e-3, weight_decay=0.1)
-            )
-            self._test_basic_cases(
-                lambda weight, bias: optimizer(
+                lambda weight, bias, maximize: optimizer(
                     self._build_params_dict(weight, bias, lr=1e-2),
-                    lr=1e-3, amsgrad=True)
+                    lr=1e-3, maximize=maximize),
+                [lambda opt: ExponentialLR(opt, gamma=0.9)],
+                constructor_accepts_maximize=True
             )
             self._test_basic_cases(
-                lambda weight, bias: optimizer(
+                lambda weight, bias, maximize: optimizer(
                     self._build_params_dict(weight, bias, lr=1e-2),
-                    lr=1e-3),
-                [lambda opt: ExponentialLR(opt, gamma=0.9)]
+                    lr=1e-3, maximize=maximize),
+                [lambda opt: LinearLR(opt, start_factor=0.4, total_iters=4)],
+                constructor_accepts_maximize=True
             )
             self._test_basic_cases(
-                lambda weight, bias: optimizer(
+                lambda weight, bias, maximize: optimizer(
                     self._build_params_dict(weight, bias, lr=1e-2),
-                    lr=1e-3),
-                [lambda opt: LinearLR(opt, start_factor=0.4, total_iters=4)]
+                    lr=1e-3, maximize=maximize),
+                [lambda opt: ConstantLR(opt, factor=0.4, total_iters=4)],
+                constructor_accepts_maximize=True
             )
             self._test_basic_cases(
-                lambda weight, bias: optimizer(
-                    self._build_params_dict(weight, bias, lr=1e-2),
-                    lr=1e-3),
-                [lambda opt: ConstantLR(opt, factor=0.4, total_iters=4)]
-            )
-            self._test_basic_cases(
-                lambda weight, bias: optimizer([weight, bias], lr=1e-3, amsgrad=True),
+                lambda weight, bias, maximize: optimizer([weight, bias], lr=1e-3, amsgrad=True, maximize=maximize),
                 [lambda opt: ConstantLR(opt, factor=0.4, total_iters=4),
-                 lambda opt: ExponentialLR(opt, gamma=0.9)]
+                 lambda opt: ExponentialLR(opt, gamma=0.9)],
+                constructor_accepts_maximize=True
             )
             self._test_basic_cases(
-                lambda weight, bias: optimizer([weight, bias], lr=1e-3, amsgrad=True),
+                lambda weight, bias, maximize: optimizer([weight, bias], lr=1e-3, amsgrad=True, maximize=maximize),
                 [lambda opt: ExponentialLR(opt, gamma=0.9),
-                 lambda opt: ReduceLROnPlateau(opt)]
+                 lambda opt: ReduceLROnPlateau(opt)],
+                constructor_accepts_maximize=True
             )
             self._test_basic_cases(
-                lambda weight, bias: optimizer(
+                lambda weight, bias, maximize: optimizer(
                     self._build_params_dict(weight, bias, lr=1e-2),
-                    lr=1e-3, amsgrad=True),
+                    lr=1e-3, amsgrad=True, maximize=maximize),
                 [lambda opt: StepLR(opt, gamma=0.9, step_size=10),
-                 lambda opt: ReduceLROnPlateau(opt)]
+                 lambda opt: ReduceLROnPlateau(opt)],
+                constructor_accepts_maximize=True
             )
             with self.assertRaisesRegex(ValueError, "Invalid beta parameter at index 0: 1.0"):
                 optimizer(None, lr=1e-2, betas=(1.0, 0.0))
@@ -557,18 +581,21 @@ class TestOptim(TestCase):
     def test_adamw(self):
         for optimizer in [optim.AdamW, optim_mt.AdamW]:
             self._test_basic_cases(
-                lambda weight, bias: optimizer([weight, bias], lr=1e-3)
+                lambda weight, bias, maximize: optimizer([weight, bias], lr=1e-3, maximize=maximize),
+                constructor_accepts_maximize=True
             )
             self._test_basic_cases(
-                lambda weight, bias: optimizer(
-                    self._build_params_dict(weight, bias, lr=1e-2),
-                    lr=1e-3)
+                lambda weight, bias, maximize: optimizer(
+                    self._build_params_dict(weight, bias, lr=1e-2), lr=1e-3, maximize=maximize),
+                constructor_accepts_maximize=True
             )
             self._test_basic_cases(
-                lambda weight, bias: optimizer([weight, bias], lr=1e-3, weight_decay=1)
+                lambda weight, bias, maximize: optimizer([weight, bias], lr=1e-3, weight_decay=1, maximize=maximize),
+                constructor_accepts_maximize=True
             )
             self._test_basic_cases(
-                lambda weight, bias: optimizer([weight, bias], lr=1e-3, weight_decay=1, amsgrad=True)
+                lambda weight, bias, maximize: optimizer([weight, bias], lr=1e-3, weight_decay=1, amsgrad=True, maximize=maximize),
+                constructor_accepts_maximize=True
             )
             with self.assertRaisesRegex(ValueError, "Invalid weight_decay value: -1"):
                 optimizer(None, lr=1e-2, weight_decay=-1)
@@ -589,6 +616,8 @@ class TestOptim(TestCase):
     # ROCm precision is too low to pass this test
     @skipIfRocm
     def test_adadelta(self):
+        # Handles https://github.com/pytorch/pytorch/issues/69698
+        self.rel_tol = 4e-3
         for optimizer in [optim.Adadelta, optim_mt.Adadelta]:
             self._test_basic_cases(
                 lambda weight, bias: optimizer([weight, bias])
@@ -610,6 +639,8 @@ class TestOptim(TestCase):
                 optimizer(None, lr=1e-2, rho=1.1)
 
     def test_adadelta_complex(self):
+        # Handles https://github.com/pytorch/pytorch/issues/69698
+        self.rel_tol = 2e-2
         for optimizer in [optim.Adadelta]:
             self._test_complex_optimizer(
                 lambda weight: optimizer([weight])
@@ -1406,6 +1437,21 @@ class TestLRScheduler(TestCase):
         scheduler = SequentialLR(self.opt, schedulers=schedulers, milestones=milestones)
         self._test(scheduler, targets, epochs)
 
+    def test_get_last_lr_sequentiallr(self):
+        epochs = 12
+        milestones = [3, 6]
+        schedulers = [None] * 3
+        schedulers[0] = ConstantLR(self.opt, factor=0.1, total_iters=3)
+        schedulers[1] = ExponentialLR(self.opt, gamma=0.8)
+        schedulers[2] = StepLR(self.opt, gamma=0.1, step_size=2)
+        scheduler = SequentialLR(self.opt, schedulers=schedulers, milestones=milestones)
+        constant_lr_target = [0.005] * 3
+        exponential_lr_target = [0.05, 0.04, 0.032]
+        step_lr_target = [0.05, 0.05, 0.005, 0.005, 0.0005, 0.0005]
+        single_targets = constant_lr_target + exponential_lr_target + step_lr_target
+        targets = [single_targets, [x * 10 for x in single_targets]]
+        self._test_get_last_lr(scheduler, targets, epochs)
+
     def test_chained_lr2_get_last_lr_before_step(self):
         schedulers = [
             LinearLR(self.opt, start_factor=0.4, total_iters=3),
@@ -2179,10 +2225,6 @@ class TestLRScheduler(TestCase):
     def _test(self, schedulers, targets, epochs=10):
         if isinstance(schedulers, _LRScheduler):
             schedulers = [schedulers]
-
-        optimizers = set()
-        for scheduler in schedulers:
-            optimizers.add(scheduler.optimizer)
         for epoch in range(epochs):
             for param_group, target in zip(self.opt.param_groups, targets):
                 self.assertEqual(target[epoch], param_group['lr'],
@@ -2438,8 +2480,8 @@ class TestSWAUtils(TestCase):
         for p_avg, p_swa in zip(averaged_params, averaged_dnn.parameters()):
             self.assertEqual(p_avg, p_swa)
 
-    def test_averaged_model_exponential_use_state_dict(self):
-        # Test AveragedModel with EMA as avg_fn and use_state_dict as True.
+    def test_averaged_model_exponential_buffers(self):
+        # Test AveragedModel with EMA as avg_fn and use_buffers as True.
         dnn = torch.nn.Sequential(
             torch.nn.Conv2d(1, 5, kernel_size=3),
             torch.nn.BatchNorm2d(5, momentum=0.3),
@@ -2449,13 +2491,14 @@ class TestSWAUtils(TestCase):
 
         def avg_fn(p_avg, p, n_avg):
             return alpha * p_avg + (1 - alpha) * p
-        averaged_dnn = AveragedModel(dnn, avg_fn=avg_fn, mode='state_dict')
-        averaged_params = [torch.zeros_like(param) for param in dnn.state_dict().values()
+        averaged_dnn = AveragedModel(dnn, avg_fn=avg_fn, use_buffers=True)
+        dnn_params = itertools.chain(dnn.parameters(), dnn.buffers())
+        averaged_params = [torch.zeros_like(param) for param in dnn_params
                            if param.size() != torch.Size([])]
         n_updates = 10
         for i in range(n_updates):
             updated_averaged_params = []
-            for p, p_avg in zip(dnn.state_dict().values(), averaged_params):
+            for p, p_avg in zip(dnn_params, averaged_params):
                 if p.size() == torch.Size([]):
                     continue
                 p.detach().add_(torch.randn_like(p))
@@ -2467,7 +2510,8 @@ class TestSWAUtils(TestCase):
             averaged_dnn.update_parameters(dnn)
             averaged_params = updated_averaged_params
 
-        for p_avg, p_swa in zip(averaged_params, averaged_dnn.module.state_dict().values()):
+        for p_avg, p_swa in zip(
+                averaged_params, itertools.chain(averaged_dnn.module.parameters(), averaged_dnn.module.buffers())):
             self.assertEqual(p_avg, p_swa)
 
     def _test_update_bn(self, dnn, dl_x, dl_xy, cuda):

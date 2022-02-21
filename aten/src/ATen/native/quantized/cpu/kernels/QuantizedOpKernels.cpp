@@ -1,7 +1,8 @@
 #include <ATen/ATen.h>
 #include <ATen/Dispatch.h>
 #include <ATen/Parallel.h>
-#include <ATen/native/SortingUtils.h>
+#include <ATen/native/Activation.h>
+#include <ATen/native/TopKImpl.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/UpSample.h>
 #include <ATen/native/cpu/Loops.h>
@@ -614,6 +615,97 @@ static void leaky_qrelu_out_kernel(Tensor& out, const Tensor& qx,
         });
   });
 }
+
+void qgelu_kernel(const Tensor& qx, Tensor& qy, GeluType approximate) {
+  int64_t zero_point = qx.q_zero_point();
+  // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
+  float scale = qx.q_scale();
+  auto scale_vec = Vectorized<float>(scale);
+  auto zero_point_vec = Vectorized<float>((float)zero_point);
+  auto scale_neg_zp_premul_vec = scale_vec * zero_point_vec.neg();
+  int64_t output_zero_point = zero_point;
+  float output_scale = scale;
+  float inv_output_scale = 1.0 / output_scale;
+  const auto kAlphaVec = Vectorized<float>(M_SQRT1_2);
+  const auto kBetaVec = Vectorized<float>(M_SQRT2 * M_2_SQRTPI * 0.5);
+  const auto kKappaVec = Vectorized<float>(0.044715);
+  const auto kOneVec = Vectorized<float>(1);
+  const auto kPointFiveVec = Vectorized<float>(0.5);
+
+  if (approximate == GeluType::Tanh) {
+    AT_DISPATCH_QINT_TYPES(qx.scalar_type(), "qgelu", [&]() {
+      qy = at::_empty_affine_quantized(
+          qx.sizes(),
+          // NOLINTNEXTLINE(clang-analyzer-core.CallAndMessage)
+          at::device(kCPU).dtype(SCALAR_TYPE).memory_format(qx.suggest_memory_format()),
+          output_scale,
+          output_zero_point,
+          c10::nullopt);
+      auto iter = TensorIterator::unary_op(qy, qx);
+
+      using Vec = Vectorized<scalar_t>;
+      cpu_kernel_vec(
+          iter,
+          [&](scalar_t value_qx) -> scalar_t {
+            const auto value_dx =
+                at::native::dequantize_val(scale, zero_point, value_qx);
+
+            const auto kBeta = M_SQRT2 * M_2_SQRTPI * 0.5;
+            const auto kKappa = 0.044715;
+            const auto x_cube = value_dx * value_dx * value_dx;
+            const auto inner = kBeta * (value_dx + kKappa * x_cube);
+            const auto value_dy = 0.5 * value_dx * (1.0 + std::tanh(inner));
+
+            return at::native::quantize_val<scalar_t>(
+                output_scale, output_zero_point, value_dy);
+          },
+          [&](Vec value_qx) -> Vec {
+            auto value_dx = value_qx.dequantize(
+                scale_vec, zero_point_vec, scale_neg_zp_premul_vec);
+            for (auto & value : value_dx) {
+              auto value_cube = value * value * value;
+              auto inner = kBetaVec * (value + kKappaVec * value_cube);
+              value = kPointFiveVec * value * (kOneVec + inner.tanh());
+            }
+            return Vec::quantize(
+                value_dx, output_scale, output_zero_point, inv_output_scale);
+          });
+    });
+  } else {
+    AT_DISPATCH_QINT_TYPES(qx.scalar_type(), "qgelu", [&]() {
+      qy = at::_empty_affine_quantized(
+          qx.sizes(),
+          // NOLINTNEXTLINE(clang-analyzer-core.CallAndMessage)
+          at::device(kCPU).dtype(SCALAR_TYPE).memory_format(qx.suggest_memory_format()),
+          output_scale,
+          output_zero_point,
+          c10::nullopt);
+      auto iter = TensorIterator::unary_op(qy, qx);
+
+      using Vec = Vectorized<scalar_t>;
+      cpu_kernel_vec(
+          iter,
+          [&](scalar_t value_qx) -> scalar_t {
+            const auto value_dx =
+                at::native::dequantize_val(scale, zero_point, value_qx);
+            const auto value_dy =
+                value_dx * 0.5 * (1 + std::erf(value_dx * M_SQRT1_2));
+            return at::native::quantize_val<scalar_t>(
+                output_scale, output_zero_point, value_dy);
+          },
+          [&](Vec value_qx) -> Vec {
+            auto value_dx = value_qx.dequantize(
+                scale_vec, zero_point_vec, scale_neg_zp_premul_vec);
+            for (auto & value : value_dx) {
+              value = value * kPointFiveVec * (kOneVec + (value * kAlphaVec).erf());
+            }
+            return Vec::quantize(
+                value_dx, output_scale, output_zero_point, inv_output_scale);
+          });
+    });
+  }
+}
+
 
 void qsigmoid_kernel(
     const Tensor& qx, Tensor& qy, double output_scale, int64_t output_zero_point ) {
@@ -1981,6 +2073,9 @@ void qupsample_bilinear2d_nhwc_kernel(
         const auto rwidth = area_pixel_compute_scale<float>(
             input_width, output_width, align_corners, scales_w);
 
+        const int64_t input_q_zero_point = input.q_zero_point();
+        const int64_t output_q_zero_point = output.q_zero_point();
+
         for (const auto b : c10::irange(nbatch)) {
           auto* i_p = reinterpret_cast<typename scalar_t::underlying*>(
               idata + b * input_height * input_width * channels);
@@ -2021,8 +2116,8 @@ void qupsample_bilinear2d_nhwc_kernel(
                   output_height,
                   output_width,
                   channels,
-                  output.q_zero_point(),
-                  input.q_zero_point(),
+                  output_q_zero_point,
+                  input_q_zero_point,
                   inverse_scale,
                   h0lambda,
                   h1lambda,
@@ -2040,8 +2135,8 @@ void qupsample_bilinear2d_nhwc_kernel(
                          w1lambda * pos1[(h1p * input_width + w1p) * channels]);
                 pos2[0] = at::native::quantize_val<scalar_t>(
                               inverse_scale,
-                              output.q_zero_point(),
-                              result - input.q_zero_point())
+                              output_q_zero_point,
+                              result - input_q_zero_point)
                               .val_;
                 pos1 += 1;
                 pos2 += 1;
@@ -3437,63 +3532,49 @@ void dequantize_tensor_per_tensor_affine_sub_byte_cpu(
 // So, until Quantization support for Windows is fixed for AVX512,
 // AVX2 kernels would be used instead. Ref: GH 56992.
 #if defined(CPU_CAPABILITY_AVX512) && defined(_WIN32)
-REGISTER_NO_AVX512_DISPATCH(dequantize_tensor_per_channel_affine_stub,
-                            dequantize_tensor_per_channel_affine_fn);
-REGISTER_NO_AVX512_DISPATCH(dequantize_tensor_per_tensor_affine_stub,
-                            dequantize_tensor_per_tensor_affine_fn);
-REGISTER_NO_AVX512_DISPATCH(dequantize_tensor_per_channel_float_qparams_stub,
-                            dequantize_tensor_per_channel_float_qparams_fn);
-REGISTER_NO_AVX512_DISPATCH(fake_quant_grad_learnable_tensor_stub,
-                            fake_quant_learnable_grad_tensor_fn);
-REGISTER_NO_AVX512_DISPATCH(fake_quant_per_channel_cachemask_stub,
-                            fake_quant_per_channel_cachemask_fn);
-REGISTER_NO_AVX512_DISPATCH(fake_quant_tensor_cachemask_stub,
-                            fake_quant_tensor_cachemask_fn);
-REGISTER_NO_AVX512_DISPATCH(fake_quant_tensor_cachemask_tensor_qparams_stub,
-                            fake_quant_tensor_cachemask_tensor_qparams_fn);
-REGISTER_NO_AVX512_DISPATCH(qadaptive_avg_pool2d_nhwc_stub,
-                            qadaptive_avg_pool2d_fn);
-REGISTER_NO_AVX512_DISPATCH(qadaptive_avg_pool3d_ndhwc_stub,
-                            qadaptive_avg_pool3d_fn);
-REGISTER_NO_AVX512_DISPATCH(qadd_relu_stub, qbinary_fn);
-REGISTER_NO_AVX512_DISPATCH(qadd_scalar_relu_stub, qadd_scalar_fn);
-REGISTER_NO_AVX512_DISPATCH(qadd_scalar_stub, qadd_scalar_fn);
-REGISTER_NO_AVX512_DISPATCH(qadd_stub, qbinary_fn);
-REGISTER_NO_AVX512_DISPATCH(qavg_pool2d_nhwc_stub, qavg_pool2d_fn);
-REGISTER_NO_AVX512_DISPATCH(qavg_pool3d_nhwc_stub, qavg_pool3d_fn);
-REGISTER_NO_AVX512_DISPATCH(qbatch_norm_relu_stub, qbatch_norm_fn);
-REGISTER_NO_AVX512_DISPATCH(qbatch_norm_stub, qbatch_norm_fn);
-REGISTER_NO_AVX512_DISPATCH(qcat_nhwc_stub, qcat_nhwc_fn);
-REGISTER_NO_AVX512_DISPATCH(qcat_relu_nhwc_stub, qcat_nhwc_fn);
-REGISTER_NO_AVX512_DISPATCH(qclamp_stub, qclamp_fn);
-REGISTER_NO_AVX512_DISPATCH(qclamp_min_stub, qclamp_minmax_fn);
-REGISTER_NO_AVX512_DISPATCH(qclamp_max_stub, qclamp_minmax_fn);
-REGISTER_NO_AVX512_DISPATCH(qelu_stub, qelu_fn);
-REGISTER_NO_AVX512_DISPATCH(qhardsigmoid_stub, qhardsigmoid_fn);
-REGISTER_NO_AVX512_DISPATCH(qhardswish_stub, qhardswish_fn);
-REGISTER_NO_AVX512_DISPATCH(qmaxpool_2d_nhwc_stub, qmaxpool_2d_fn);
-REGISTER_NO_AVX512_DISPATCH(qmul_relu_stub, qbinary_fn);
-REGISTER_NO_AVX512_DISPATCH(qmul_stub, qbinary_fn);
-REGISTER_NO_AVX512_DISPATCH(qrelu_leaky_stub, qrelu_leaky_fn);
-REGISTER_NO_AVX512_DISPATCH(qrelu_stub, qrelu_fn);
-REGISTER_NO_AVX512_DISPATCH(qsigmoid_stub, qsigmoid_fn);
-REGISTER_NO_AVX512_DISPATCH(qtanh_stub, qtanh_fn);
-REGISTER_NO_AVX512_DISPATCH(qthreshold_stub, qthreshold_fn);
-REGISTER_NO_AVX512_DISPATCH(qtopk_stub, qtopk_fn);
-REGISTER_NO_AVX512_DISPATCH(fake_quant_grad_learnable_channel_stub,
-                            fake_quant_learnable_per_channel_fn);
-REGISTER_NO_AVX512_DISPATCH(quantize_tensor_per_tensor_affine_stub,
-                            quantize_tensor_per_tensor_affine_fn);
-REGISTER_NO_AVX512_DISPATCH(quantize_tensor_per_channel_affine_stub,
-                            quantize_tensor_per_channel_affine_fn);
-REGISTER_NO_AVX512_DISPATCH(quantize_tensor_per_channel_float_qparams_stub,
-                            quantize_tensor_per_channel_float_qparams_fn);
-REGISTER_NO_AVX512_DISPATCH(quantized_normalize_stub, qnormalize_fn);
-REGISTER_NO_AVX512_DISPATCH(qupsample_bilinear2d_nhwc_stub, qupsample_bilinear2d_fn);
-REGISTER_NO_AVX512_DISPATCH(quantize_tensor_per_tensor_affine_sub_byte_stub,
-                            quantize_tensor_per_tensor_affine_sub_byte_fn);
-REGISTER_NO_AVX512_DISPATCH(dequantize_tensor_per_tensor_affine_sub_byte_stub,
-                            dequantize_tensor_per_tensor_affine_sub_byte_fn);
+REGISTER_NO_AVX512_DISPATCH(dequantize_tensor_per_channel_affine_stub);
+REGISTER_NO_AVX512_DISPATCH(dequantize_tensor_per_tensor_affine_stub);
+REGISTER_NO_AVX512_DISPATCH(dequantize_tensor_per_channel_float_qparams_stub);
+REGISTER_NO_AVX512_DISPATCH(fake_quant_grad_learnable_tensor_stub);
+REGISTER_NO_AVX512_DISPATCH(fake_quant_per_channel_cachemask_stub);
+REGISTER_NO_AVX512_DISPATCH(fake_quant_tensor_cachemask_stub);
+REGISTER_NO_AVX512_DISPATCH(fake_quant_tensor_cachemask_tensor_qparams_stub);
+REGISTER_NO_AVX512_DISPATCH(qadaptive_avg_pool2d_nhwc_stub);
+REGISTER_NO_AVX512_DISPATCH(qadaptive_avg_pool3d_ndhwc_stub);
+REGISTER_NO_AVX512_DISPATCH(qadd_relu_stub);
+REGISTER_NO_AVX512_DISPATCH(qadd_scalar_relu_stub);
+REGISTER_NO_AVX512_DISPATCH(qadd_scalar_stub);
+REGISTER_NO_AVX512_DISPATCH(qadd_stub);
+REGISTER_NO_AVX512_DISPATCH(qavg_pool2d_nhwc_stub);
+REGISTER_NO_AVX512_DISPATCH(qavg_pool3d_nhwc_stub);
+REGISTER_NO_AVX512_DISPATCH(qbatch_norm_relu_stub);
+REGISTER_NO_AVX512_DISPATCH(qbatch_norm_stub);
+REGISTER_NO_AVX512_DISPATCH(qcat_nhwc_stub);
+REGISTER_NO_AVX512_DISPATCH(qcat_relu_nhwc_stub);
+REGISTER_NO_AVX512_DISPATCH(qclamp_stub);
+REGISTER_NO_AVX512_DISPATCH(qclamp_min_stub);
+REGISTER_NO_AVX512_DISPATCH(qclamp_max_stub);
+REGISTER_NO_AVX512_DISPATCH(qelu_stub);
+REGISTER_NO_AVX512_DISPATCH(qhardsigmoid_stub);
+REGISTER_NO_AVX512_DISPATCH(qhardswish_stub);
+REGISTER_NO_AVX512_DISPATCH(qmaxpool_2d_nhwc_stub);
+REGISTER_NO_AVX512_DISPATCH(qmul_relu_stub);
+REGISTER_NO_AVX512_DISPATCH(qmul_stub);
+REGISTER_NO_AVX512_DISPATCH(qrelu_leaky_stub);
+REGISTER_NO_AVX512_DISPATCH(qrelu_stub);
+REGISTER_NO_AVX512_DISPATCH(qgelu_stub);
+REGISTER_NO_AVX512_DISPATCH(qsigmoid_stub);
+REGISTER_NO_AVX512_DISPATCH(qtanh_stub);
+REGISTER_NO_AVX512_DISPATCH(qthreshold_stub);
+REGISTER_NO_AVX512_DISPATCH(qtopk_stub);
+REGISTER_NO_AVX512_DISPATCH(fake_quant_grad_learnable_channel_stub);
+REGISTER_NO_AVX512_DISPATCH(quantize_tensor_per_tensor_affine_stub);
+REGISTER_NO_AVX512_DISPATCH(quantize_tensor_per_channel_affine_stub);
+REGISTER_NO_AVX512_DISPATCH(quantize_tensor_per_channel_float_qparams_stub);
+REGISTER_NO_AVX512_DISPATCH(quantized_normalize_stub);
+REGISTER_NO_AVX512_DISPATCH(qupsample_bilinear2d_nhwc_stub);
+REGISTER_NO_AVX512_DISPATCH(quantize_tensor_per_tensor_affine_sub_byte_stub);
+REGISTER_NO_AVX512_DISPATCH(dequantize_tensor_per_tensor_affine_sub_byte_stub);
 #else
 REGISTER_DISPATCH(dequantize_tensor_per_channel_affine_stub,
                   &dequantize_tensor_per_channel_affine_cpu);
@@ -3533,6 +3614,7 @@ REGISTER_DISPATCH(qmul_relu_stub, &qmul_kernel<true>);
 REGISTER_DISPATCH(qmul_stub, &qmul_kernel<false>);
 REGISTER_DISPATCH(qrelu_leaky_stub, &leaky_qrelu_out_kernel);
 REGISTER_DISPATCH(qrelu_stub, &qrelu_kernel);
+REGISTER_DISPATCH(qgelu_stub, &qgelu_kernel);
 REGISTER_DISPATCH(qsigmoid_stub, &qsigmoid_kernel);
 REGISTER_DISPATCH(qtanh_stub, &qtanh_kernel);
 REGISTER_DISPATCH(qthreshold_stub, &qthreshold_kernel);

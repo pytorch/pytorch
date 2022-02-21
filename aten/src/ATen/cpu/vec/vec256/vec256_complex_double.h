@@ -46,7 +46,7 @@ public:
   template <int64_t mask>
   static Vectorized<c10::complex<double>> blend(const Vectorized<c10::complex<double>>& a, const Vectorized<c10::complex<double>>& b) {
      // convert c10::complex<V> index mask to V index mask: xy -> xxyy
-    // NOLINTNEXTLINE(clang-diagnostic-warning)
+    static_assert (mask > -1 && mask < 4, "Unexpected mask value");
     switch (mask) {
       case 0:
         return a;
@@ -54,6 +54,7 @@ public:
         return _mm256_blend_pd(a.values, b.values, 0x03);
       case 2:
         return _mm256_blend_pd(a.values, b.values, 0x0c);
+      case 3: break;
     }
     return b;
   }
@@ -87,7 +88,7 @@ public:
     // Ensure uninitialized memory does not change the output value See https://github.com/pytorch/pytorch/issues/32502
     // for more details. We do not initialize arrays to zero using "={0}" because gcc would compile it to two
     // instructions while a loop would be compiled to one instruction.
-    for (auto i = 0; i < 2*size(); ++i) {
+    for (const auto i : c10::irange(2*size())) {
       tmp_values[i] = 0.0;
     }
     std::memcpy(

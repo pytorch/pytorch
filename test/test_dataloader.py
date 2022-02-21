@@ -31,6 +31,7 @@ from torch.utils.data import (
 from torch.utils.data._utils import MP_STATUS_CHECK_INTERVAL
 from torch.utils.data.dataset import random_split
 from torch.utils.data.datapipes.iter import IterableWrapper
+from torch.utils.data.datapipes.map import SequenceWrapper
 from torch._utils import ExceptionWrapper
 from torch.testing._internal.common_utils import (TestCase, run_tests, TEST_NUMPY, IS_WINDOWS,
                                                   IS_IN_CI, NO_MULTIPROCESSING_SPAWN, skipIfRocm, slowTest,
@@ -1455,7 +1456,7 @@ except RuntimeError as e:
         self.assertTrue(maxval < len(self.dataset))
         self.assertTrue(count_total == n)
 
-        # test sample without replacement
+        # test sample without replacement and without specified num_samples
         sampler_without_replacement = RandomSampler(self.dataset)
         count_repeated, minval, maxval, count_total = sample_stat(sampler_without_replacement, len(self.dataset))
         self.assertTrue(count_repeated == 0)
@@ -1463,10 +1464,30 @@ except RuntimeError as e:
         self.assertTrue(maxval == len(self.dataset) - 1)
         self.assertTrue(count_total == len(self.dataset))
 
-        # raise error when replacement=False and num_samples is not None
-        self.assertRaises(ValueError, lambda: RandomSampler(self.dataset, num_samples=len(self.dataset)))
+        # test sample without replacement and with specified num_samples
+        n = len(self.dataset) * 2
+        sampler_without_replacement = RandomSampler(self.dataset, num_samples=n)
+        count_repeated, minval, maxval, count_total = sample_stat(sampler_without_replacement, len(self.dataset))
+        self.assertTrue(count_repeated == len(self.dataset))
+        self.assertTrue(minval == 0)
+        self.assertTrue(maxval == len(self.dataset) - 1)
+        self.assertTrue(count_total == n)
 
-        self.assertRaises(ValueError, lambda: RandomSampler(self.dataset, num_samples=0))
+        n = len(self.dataset) - 1
+        sampler_without_replacement = RandomSampler(self.dataset, num_samples=n)
+        count_repeated, minval, maxval, count_total = sample_stat(sampler_without_replacement, len(self.dataset))
+        self.assertTrue(count_repeated == 0)
+        self.assertTrue(minval >= 0)
+        self.assertTrue(maxval < len(self.dataset))
+        self.assertTrue(count_total == n)
+
+        n = len(self.dataset) + 1
+        sampler_without_replacement = RandomSampler(self.dataset, num_samples=n)
+        count_repeated, minval, maxval, count_total = sample_stat(sampler_without_replacement, len(self.dataset))
+        self.assertTrue(count_repeated == 1)
+        self.assertTrue(minval == 0)
+        self.assertTrue(maxval == len(self.dataset) - 1)
+        self.assertTrue(count_total == n)
 
         # raise error when replacement is non-boolean
         with self.assertRaisesRegex(TypeError, "replacement should be a boolean value, but got replacement=0"):
@@ -1497,6 +1518,33 @@ except RuntimeError as e:
         count_num_samples_in_data_loader = len(self._get_data_loader(
             self.dataset, batch_size=batch_size, sampler=sampler))
         self.assertEqual(int(math.ceil(float(num_samples) / batch_size)),
+                         count_num_samples_in_data_loader)
+
+    def test_random_sampler_len_without_replacement(self):
+        from torch.utils.data import RandomSampler
+        # add 5 extra samples
+        num_samples = len(self.dataset) + 5
+        sampler = RandomSampler(self.dataset,
+                                replacement=False,
+                                num_samples=num_samples)
+        # test len method
+        self.assertEqual(num_samples, len(sampler))
+
+        # test with iteration
+        count_num_samples = sum(1 for _ in sampler)
+        self.assertEqual(num_samples, count_num_samples)
+
+        # test with dataloader, batch_size = 1
+        batch_size = 1
+        count_num_samples_in_data_loader = len(self._get_data_loader(
+            self.dataset, batch_size=batch_size, sampler=sampler))
+        self.assertEqual(num_samples, count_num_samples_in_data_loader)
+
+        # test with dataloader, batch_size = 6
+        batch_size = 6
+        count_num_samples_in_data_loader = len(self._get_data_loader(
+            self.dataset, batch_size=batch_size, sampler=sampler))
+        self.assertEqual(num_samples // batch_size + (num_samples % batch_size > 0),
                          count_num_samples_in_data_loader)
 
     def test_distributed_sampler_invalid_rank(self):
@@ -2056,7 +2104,25 @@ class TestDataLoader2(TestCase):
         self.assertEqual(list(dl), list(dl2))
         self.assertEqual(list(dl), list(dl2_threading))
 
+    def test_shuffle(self):
+        items = list(range(1000))
+        dp = IterableWrapper(items).sharding_filter().shuffle()
 
+        dl = DataLoader2(dp, batch_size=None, num_workers=2, shuffle=False)
+        self.assertEqual(items, list(dl))
+
+        dl = DataLoader(dp, batch_size=None, num_workers=2, shuffle=False,
+                        worker_init_fn=torch.utils.data.backward_compatibility.worker_init_fn)
+        self.assertEqual(items, list(dl))
+
+        dl = DataLoader2(dp, batch_size=None, num_workers=2, shuffle=True)
+        self.assertNotEqual(items, list(dl))
+        self.assertEqual(items, sorted(list(dl)))
+
+        dl = DataLoader(dp, batch_size=None, num_workers=2, shuffle=True,
+                        worker_init_fn=torch.utils.data.backward_compatibility.worker_init_fn)
+        self.assertNotEqual(items, list(dl))
+        self.assertEqual(items, sorted(list(dl)))
 
 @unittest.skipIf(
     TEST_WITH_TSAN,
@@ -2082,6 +2148,41 @@ class TestDataLoader2_EventLoop(TestCase):
         clean_me(process, req_queue, res_queue)
 
         self.assertEqual(list(range(100)), actual)
+
+    @skipIfNoDill
+    def test_basic_mapdatapipe_threading(self):
+        def clean_me(process, req_queue, res_queue):
+            req_queue.put(communication.messages.TerminateRequest())
+            _ = res_queue.get()
+            process.join()
+
+        input_len = 100
+        it = list(range(input_len))
+        numbers_dp = SequenceWrapper(it)
+        (process, req_queue, res_queue, _thread_local_datapipe) = communication.eventloop.SpawnThreadForDataPipeline(
+            numbers_dp)
+
+        process.start()
+
+        # Functional Test: Ensure that you can retrieve every element from the Queue and DataPipe
+        local_datapipe = communication.map.QueueWrapperForMap(
+            communication.protocol.MapDataPipeQueueProtocolClient(req_queue, res_queue))
+        actual = list(local_datapipe)
+        self.assertEqual([(x, x) for x in range(100)], actual)
+
+        # Functional Test: raise Error when input
+        local_datapipe = communication.map.QueueWrapperForMap(
+            communication.protocol.MapDataPipeQueueProtocolClient(req_queue, res_queue))
+        with self.assertRaisesRegex(IndexError, "out of bound"):
+            local_datapipe[1000]
+
+        # __len__ Test: Ensure that the correct length is returned
+        local_datapipe = communication.map.QueueWrapperForMap(
+            communication.protocol.MapDataPipeQueueProtocolClient(req_queue, res_queue))
+        self.assertEqual(input_len, len(local_datapipe))
+
+        clean_me(process, req_queue, res_queue)
+
 
 class StringDataset(Dataset):
     def __init__(self):
@@ -2248,6 +2349,42 @@ except RuntimeError as e:
                 # and can cache values safely
                 dataset.start = i
 
+    @unittest.skipIf(IS_SANDCASTLE, "subprocess doesn't work in FB internal CI")
+    @unittest.skipIf(IS_WINDOWS, "Needs fork")
+    def test_early_exit(self):
+        import subprocess
+        proc = subprocess.check_output([sys.executable, '-c', """\
+import torch
+from torch.utils.data import DataLoader, IterableDataset
+
+class RandomDataset(IterableDataset):
+    def __init__(self, len, size):
+        super(RandomDataset).__init__()
+        self.len = len
+        self.size = size
+
+    def __iter__(self):
+        return self
+
+    def __next__(self):
+        if self.len <= 0:
+            raise StopIteration
+        self.len -= 1
+        return torch.randn(self.size)
+
+if __name__ == '__main__':
+    dl = DataLoader(
+        RandomDataset(64, (28, 28)),
+        batch_size=16,
+        num_workers=2,
+        pin_memory=True,
+        persistent_workers=True,
+        multiprocessing_context="fork",
+    )
+
+    for _ in dl:
+        break
+"""])
 
 
 class NamedTupleDataset(Dataset):

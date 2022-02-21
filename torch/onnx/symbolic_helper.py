@@ -17,14 +17,15 @@ from torch._C import OptionalType
 # Note [Edit Symbolic Files]
 # EDITING THIS FILE AND SYMBOLIC_OPSET<VERSION> FILES? READ THIS FIRST!
 #
-# - These files are ONLY for ATen operators (e.g., operators that show up in the
-#   trace as aten::blah).  If you need to special case a primitive operator,
-#   look at _run_symbolic_function
-# - Parameter ordering does NOT necessarily match what is in VariableType.cpp;
-#   tensors are always first, then non-tensor arguments.
-# - Parameter names must *exactly* match the names in VariableType.cpp, because
+# - Module-level functions are called to convert the corresponding op in the `aten` domain.
+#   E.g. symbolic_opset9.foo is called to convert aten::foo.
+#   Symbolic functions for other domains are staticmethods in classes named after the domain.
+#   E.g. symbolic_opset9.Prim.ConstantChunk is called to convert prim::ConstantChunk.
+# - Parameter names must *exactly* match the names in
+#   aten/src/ATen/native/native_functions.yaml, because
 #   dispatch is done with keyword arguments.
-# - Looking for inplace ops?  They're detected by the trailing underscore, and
+# - Looking for inplace ops?  They're detected by
+#   `_jit_pass_onnx_remove_inplace_ops_for_onnx`, and
 #   transparently dispatched to their non inplace versions in
 #   "run_symbolic_function".   See Note [Export inplace]
 #
@@ -42,6 +43,19 @@ from torch._C import OptionalType
 # on the number of dimensions which is better than relying on
 # concrete shapes. Doing so will make the export symbolics
 # more robust to different graphs.
+#
+# ----------------------------------------------------------------------------------
+# Extra context for symbolic functions
+# ----------------------------------------------------------------------------------
+#
+# In general, symbolic functions only require inputs and attributes to
+# the original node. In rare circumstances, extra context may be required.
+# For example, symbolic function for `prim::Loop` needs access to the subblock of
+# the original node.
+# A symbolic function that has a first arg (before the Graph object) with the
+# type annotation of torch.onnx.SymbolicContext will be called with that additional context.
+# During export, it is populated from `utils._run_symbolic_function`
+# to contain the context for each node being converted.
 
 # ---------------------------------------------------------------------------------
 # Helper functions
@@ -118,6 +132,10 @@ def _unpack_list(list_value):
     assert list_node.kind() == "prim::ListConstruct"
     return list(list_node.inputs())
 
+def _unpack_tuple(tuple_value):
+    tuple_node = tuple_value.node()
+    assert tuple_node.kind() == "prim::TupleConstruct"
+    return list(tuple_node.inputs())
 
 # Check if list_value is output from prim::ListConstruct
 # This is usually called before _unpack_list to ensure the list can be unpacked.
@@ -317,18 +335,12 @@ def _slice_helper(g, input, axes, starts, ends, steps=None, dynamic_slice=False)
 def _is_fp(value):
     if value:
         if isinstance(value, torch.Tensor):
-            type = value.dtype
-            return (type == "torch.float32") or (type == "torch.float64") or (type == "torch.float16")
+            return value.dtype in (torch.float16, torch.float32, torch.float64, torch.bfloat16)
         else:
             type = value.type().scalarType()
             if type is None:
                 warnings.warn("Type cannot be inferred, which might cause exported graph to produce incorrect results.")
-            return (type == "Float") or (type == "Double") or (type == "Half")
-    return False
-
-def _dtype_is_fp(type_value):
-    if type_value:
-        return (type_value == torch.float16) or (type_value == torch.float32) or (type_value == torch.float64)
+            return type in ("Float", "Double", "Half", "BFloat16")
     return False
 
 def _generate_wrapped_number(g, scalar):
@@ -845,6 +857,7 @@ _default_onnx_opset_version = 9
 _onnx_main_opset = 15
 _onnx_stable_opsets = [7, 8, 9, 10, 11, 12, 13, 14]
 _export_onnx_opset_version = _default_onnx_opset_version
+_constant_folding_opset_versions = list(range(9, _onnx_main_opset + 1))
 
 
 def _set_opset_version(opset_version):
@@ -893,6 +906,7 @@ cast_pytorch_to_onnx = {
     "Bool": torch.onnx.TensorProtoDataType.BOOL,
     "ComplexFloat": torch.onnx.TensorProtoDataType.COMPLEX64,
     "ComplexDouble": torch.onnx.TensorProtoDataType.COMPLEX128,
+    "BFloat16": torch.onnx.TensorProtoDataType.BFLOAT16,
     "Undefined": torch.onnx.TensorProtoDataType.UNDEFINED,
 }
 
@@ -907,7 +921,11 @@ scalar_name_to_pytorch = {
     "int16_t": "Short",
     "bool": "Bool",
     "complex64": "ComplexFloat",
-    "complex128": "ComplexDouble"
+    "complex128": "ComplexDouble",
+    "qint8": "QInt8",
+    "quint8": "QUInt8",
+    "qint32": "QInt32",
+    "bfloat16": "BFloat16",
 }
 
 
@@ -934,7 +952,7 @@ class ScalarType(enum.IntEnum):
 
 # This indicates each scalar type's corresponding
 # torch type. Related source:
-# https://github.com/pytorch/pytorch/blob/da7468853ae322252270bbb58032668bd21b7457/c10/core/ScalarType.h
+# https://github.com/pytorch/pytorch/blob/344defc9733a45fee8d0c4d3f5530f631e823196/c10/core/ScalarType.h
 scalar_type_to_pytorch_type = [
     torch.uint8,        # 0
     torch.int8,         # 1
@@ -948,6 +966,10 @@ scalar_type_to_pytorch_type = [
     torch.complex64,    # 9
     torch.complex128,   # 10
     torch.bool,         # 11
+    torch.qint8,        # 12
+    torch.quint8,       # 13
+    torch.qint32,       # 14
+    torch.bfloat16,     # 15
 ]
 
 def _cast_func_template(to_i, g, input, non_blocking):
@@ -955,18 +977,22 @@ def _cast_func_template(to_i, g, input, non_blocking):
 
 
 scalar_type_to_onnx = [
-    cast_pytorch_to_onnx["Byte"],
-    cast_pytorch_to_onnx["Char"],
-    cast_pytorch_to_onnx["Short"],
-    cast_pytorch_to_onnx["Int"],
-    cast_pytorch_to_onnx["Long"],
-    cast_pytorch_to_onnx["Half"],
-    cast_pytorch_to_onnx["Float"],
-    cast_pytorch_to_onnx["Double"],
-    cast_pytorch_to_onnx["Undefined"],
-    cast_pytorch_to_onnx["ComplexFloat"],
-    cast_pytorch_to_onnx["ComplexDouble"],
-    cast_pytorch_to_onnx["Bool"],
+    cast_pytorch_to_onnx["Byte"],            # 0
+    cast_pytorch_to_onnx["Char"],            # 1
+    cast_pytorch_to_onnx["Short"],           # 2
+    cast_pytorch_to_onnx["Int"],             # 3
+    cast_pytorch_to_onnx["Long"],            # 4
+    cast_pytorch_to_onnx["Half"],            # 5
+    cast_pytorch_to_onnx["Float"],           # 6
+    cast_pytorch_to_onnx["Double"],          # 7
+    cast_pytorch_to_onnx["Undefined"],       # 8
+    cast_pytorch_to_onnx["ComplexFloat"],    # 9
+    cast_pytorch_to_onnx["ComplexDouble"],   # 10
+    cast_pytorch_to_onnx["Bool"],            # 11
+    cast_pytorch_to_onnx["Char"],            # 12
+    cast_pytorch_to_onnx["Byte"],            # 13
+    cast_pytorch_to_onnx["Int"],             # 14
+    cast_pytorch_to_onnx["BFloat16"],        # 15
 ]
 
 # Global set to store the list of quantized operators in the network.

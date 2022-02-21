@@ -1,7 +1,7 @@
 #include <ATen/Utils.h>
 
+#include <ATen/code_template.h>
 #include <ATen/cuda/CUDAConfig.h>
-#include <torch/csrc/jit/frontend/code_template.h>
 #include <torch/csrc/jit/ir/constants.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/ir/subgraph_matcher.h>
@@ -23,7 +23,7 @@ void fuseFrozenConvAddReluImpl(std::shared_ptr<Graph>& graph) {
   std::array<std::string, 2> add_operators = {"add", "add_"};
   std::array<std::string, 2> relu_operators = {"relu", "relu_"};
 
-  auto conv_relu_rstring = CodeTemplate(R"(
+  auto conv_relu_rstring = at::jit::CodeTemplate(R"(
     graph(%input, %weight, %bias, %stride:int[], %padding:int[], %dilation:int[], %groups:int):
       %x = aten::${conv}(%input, %weight, %bias, %stride, %padding, %dilation, %groups)
       %res = aten::${relu}(%x)
@@ -34,7 +34,7 @@ void fuseFrozenConvAddReluImpl(std::shared_ptr<Graph>& graph) {
         %res = aten::cudnn_convolution_relu(%input, %weight, %bias, %stride, %padding, %dilation, %groups)
         return (%res))";
 
-  auto conv_add_relu_rstring = CodeTemplate(R"(
+  auto conv_add_relu_rstring = at::jit::CodeTemplate(R"(
     graph(%input, %weight, %bias, %z, %alpha, %stride:int[], %padding:int[], %dilation:int[], %groups:int):
       %x = aten::${conv}(%input, %weight, %bias, %stride, %padding, %dilation, %groups)
       %y = aten::${add}(%x, %z, %alpha)
@@ -48,7 +48,7 @@ void fuseFrozenConvAddReluImpl(std::shared_ptr<Graph>& graph) {
 
   for (const auto& conv : conv_operators) {
     for (const auto& relu : relu_operators) {
-      TemplateEnv env;
+      at::jit::TemplateEnv env;
       env.s("conv", conv);
       env.s("relu", relu);
       rewriter.RegisterRewritePattern(

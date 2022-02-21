@@ -141,6 +141,7 @@ class NaiveTypePropagator {
       }
       // binary operations that forward meta info and broadcast shape:
       case aten::gelu_backward:
+      case aten::tanh_backward:
       case aten::mul:
       case aten::div:
       case aten::min:
@@ -148,6 +149,7 @@ class NaiveTypePropagator {
       // TODO: first operand for pow can be Tensor / Scalar
       case aten::pow:
       case aten::remainder:
+      case aten::threshold_backward:
       case aten::fmod:
       case aten::lerp:
       // add/sub could be ternary op and the third argument does not contribute
@@ -212,8 +214,19 @@ class NaiveTypePropagator {
         node->output()->setType(promoted_type);
         break;
       }
+      case aten::native_dropout_backward:
       case aten::dropout: {
         node->output()->setType(getInputTensorType(node, 0));
+        break;
+      }
+      case aten::native_dropout: {
+        auto out_type = getInputTensorType(node, 0);
+        node->output(0)->setType(out_type);
+
+        auto mask_type = TensorType::create(
+            at::ScalarType::Bool, *out_type->device(), c10::nullopt, false);
+
+        node->output(1)->setType(mask_type);
         break;
       }
       case aten::instance_norm:
@@ -351,6 +364,20 @@ class NaiveTypePropagator {
         node->output()->setType(out_type);
         break;
       }
+      case aten::_softmax: {
+        auto out_type = getInputTensorType(node, 0);
+
+        const auto half_to_float = constant_as<bool>(node->input(2));
+        TORCH_CHECK(
+            half_to_float.has_value(),
+            "half_to_float bool doesn't have a value.");
+        if (half_to_float.value()) {
+          out_type = out_type->withScalarType(at::ScalarType::Float);
+        }
+
+        node->output()->setType(out_type);
+        break;
+      }
       case aten::_softmax_backward_data: {
         auto out_type = getInputTensorType(node, 0);
         if (auto opt_ivalue = toIValue(node->input(3))) {
@@ -386,6 +413,14 @@ class NaiveTypePropagator {
       case aten::_grad_sum_to_size: {
         auto out_type = node->input(0)->type()->cast<TensorType>();
         node->output()->setType(out_type->withDim(c10::nullopt));
+        break;
+      }
+      case prim::unsqueeze_copy:
+      case prim::squeeze_copy:
+      case prim::reshape_copy:
+      case prim::view_copy: {
+        auto out_type = node->input(0)->type()->cast<TensorType>();
+        node->output()->setType(out_type);
         break;
       }
       case aten::type_as: {

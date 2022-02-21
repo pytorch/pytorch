@@ -195,6 +195,7 @@ class _ObserverBase(ObserverBase):
             torch.qint8,
             torch.quint8,
             torch.quint4x2,
+            torch.qint32,
         ), "Default Observer only works for qint8, quint8 and quint4x2 data type"
         self.has_customized_qrange = (quant_min is not None) and (quant_max is not None)
         if self.has_customized_qrange:
@@ -389,8 +390,6 @@ class MinMaxObserver(_ObserverBase):
     where :math:`Q_\text{min}` and :math:`Q_\text{max}` are the minimum and
     maximum of the quantized data type.
 
-    .. warning:: Only works with ``torch.per_tensor_symmetric`` quantization scheme
-
     .. warning:: :attr:`dtype` can only take ``torch.qint8`` or ``torch.quint8``.
 
     .. note:: If the running minimum equals to the running maximum, the scale
@@ -446,7 +445,7 @@ class MinMaxObserver(_ObserverBase):
             self.reset_min_max_vals()
         x = x_orig.detach()  # avoid keeping autograd tape
         x = x.to(self.min_val.dtype)
-        min_val_cur, max_val_cur = torch._aminmax(x)
+        min_val_cur, max_val_cur = torch.aminmax(x)
         min_val = torch.min(min_val_cur, self.min_val)
         max_val = torch.max(max_val_cur, self.max_val)
         self.min_val.copy_(min_val)
@@ -540,9 +539,9 @@ class MovingAverageMinMaxObserver(MinMaxObserver):
         min_val = self.min_val
         max_val = self.max_val
         if min_val == float("inf") and max_val == float("-inf"):
-            min_val, max_val = torch._aminmax(x)
+            min_val, max_val = torch.aminmax(x)
         else:
-            min_val_cur, max_val_cur = torch._aminmax(x)
+            min_val_cur, max_val_cur = torch.aminmax(x)
             min_val = min_val + self.averaging_constant * (min_val_cur - min_val)
             max_val = max_val + self.averaging_constant * (max_val_cur - max_val)
         self.min_val.copy_(min_val)
@@ -633,9 +632,9 @@ class PerChannelMinMaxObserver(_ObserverBase):
         y = y.to(self.min_val.dtype)
         y = torch.flatten(y, start_dim=1)
         if min_val.numel() == 0 or max_val.numel() == 0 or self.memoryless:
-            min_val, max_val = torch._aminmax(y, 1)
+            min_val, max_val = torch.aminmax(y, dim=1)
         else:
-            min_val_cur, max_val_cur = torch._aminmax(y, 1)
+            min_val_cur, max_val_cur = torch.aminmax(y, dim=1)
             min_val = torch.min(min_val_cur, min_val)
             max_val = torch.max(max_val_cur, max_val)
         self.min_val.resize_(min_val.shape)
@@ -799,9 +798,9 @@ class MovingAveragePerChannelMinMaxObserver(PerChannelMinMaxObserver):
         y = x.permute(new_axis_list)
         y = torch.flatten(y, start_dim=1)
         if min_val.numel() == 0 or max_val.numel() == 0:
-            min_val, max_val = torch._aminmax(y, 1)
+            min_val, max_val = torch.aminmax(y, dim=1)
         else:
-            min_val_cur, max_val_cur = torch._aminmax(y, 1)
+            min_val_cur, max_val_cur = torch.aminmax(y, dim=1)
             min_val = min_val + self.averaging_constant * (min_val_cur - min_val)
             max_val = max_val + self.averaging_constant * (max_val_cur - max_val)
         self.min_val.resize_(min_val.shape)
@@ -846,6 +845,8 @@ class HistogramObserver(_ObserverBase):
         dtype: torch.dtype = torch.quint8,
         qscheme=torch.per_tensor_affine,
         reduce_range=False,
+        quant_min=None,
+        quant_max=None,
         factory_kwargs=None,
     ) -> None:
         # bins: The number of bins used for histogram calculation.
@@ -853,6 +854,8 @@ class HistogramObserver(_ObserverBase):
             dtype=dtype,
             qscheme=qscheme,
             reduce_range=reduce_range,
+            quant_min=quant_min,
+            quant_max=quant_max,
             factory_kwargs=factory_kwargs,
         )
         factory_kwargs = torch.nn.factory_kwargs(factory_kwargs)
@@ -898,12 +901,12 @@ class HistogramObserver(_ObserverBase):
 
         # which dst_bins the beginning and end of src_bin belong to?
         dst_bin_of_begin = torch.clamp(
-            src_bin_begin // dst_bin_width, 0, self.dst_nbins - 1
+            torch.div(src_bin_begin, dst_bin_width, rounding_mode='floor'), 0, self.dst_nbins - 1
         )
         dst_bin_of_begin_center = (dst_bin_of_begin + 0.5) * dst_bin_width
 
         dst_bin_of_end = torch.clamp(
-            src_bin_end // dst_bin_width, 0, self.dst_nbins - 1
+            torch.div(src_bin_end, dst_bin_width, rounding_mode='floor'), 0, self.dst_nbins - 1
         )
         dst_bin_of_end_center = (dst_bin_of_end + 0.5) * dst_bin_width
 
@@ -1063,7 +1066,7 @@ class HistogramObserver(_ObserverBase):
         same_values = min_val.item() == max_val.item()
         is_uninitialized = min_val == float("inf") and max_val == float("-inf")
         if is_uninitialized or same_values:
-            min_val, max_val = torch._aminmax(x)
+            min_val, max_val = torch.aminmax(x)
             self.min_val.resize_(min_val.shape)
             self.min_val.copy_(min_val)
             self.max_val.resize_(max_val.shape)
@@ -1075,7 +1078,7 @@ class HistogramObserver(_ObserverBase):
                 x, self.bins, min=int(min_val), max=int(max_val), out=self.histogram
             )
         else:
-            new_min, new_max = torch._aminmax(x)
+            new_min, new_max = torch.aminmax(x)
             combined_min = torch.min(new_min, min_val)
             combined_max = torch.max(new_max, max_val)
             # combine the existing histogram and new histogram into 1 histogram
@@ -1410,7 +1413,7 @@ def load_observer_state_dict(mod, obs_dict):
 
 
 # Restrict activations to be in the range (0,127)
-default_observer = MinMaxObserver.with_args(reduce_range=True)
+default_observer = MinMaxObserver.with_args(quant_min=0, quant_max=127)
 """
 Default observer for static quantization, usually used for debugging.
 """
@@ -1432,7 +1435,7 @@ default_weight_observer = MinMaxObserver.with_args(
 Default weight observer.
 """
 
-default_histogram_observer = HistogramObserver.with_args(reduce_range=True)
+default_histogram_observer = HistogramObserver.with_args(quant_min=0, quant_max=127)
 """
 Default histogram observer, usually used for PTQ.
 """

@@ -3,7 +3,7 @@ producer_name: "pytorch"
 producer_version: "CURRENT_VERSION"
 graph {
   node {
-    input: "0"
+    input: "onnx::ReduceMax_0"
     output: "1"
     name: "ReduceMax_0"
     op_type: "ReduceMax"
@@ -15,7 +15,7 @@ graph {
   }
   name: "torch-jit-export"
   input {
-    name: "0"
+    name: "onnx::ReduceMax_0"
     type {
       tensor_type {
         elem_type: 1

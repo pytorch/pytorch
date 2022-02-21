@@ -7,6 +7,7 @@
 #include <torch/csrc/jit/runtime/static/memory_planner.h>
 #include <torch/csrc/jit/runtime/static/ops.h>
 #include <torch/csrc/jit/runtime/static/passes.h>
+#include <memory>
 
 #include "deep_wide_pt.h"
 #include "test_utils.h"
@@ -34,17 +35,6 @@ bool testCanEnableStaticRuntime(const std::string& jit_script) {
 
   // here we do not freeze graph
   return canEnableStaticRuntime(graph);
-}
-
-bool testHasInplaceOp(const std::string& jit_script) {
-  script::Module module("module");
-  module.define(jit_script);
-
-  Method method = module.get_method("forward");
-  auto graph = module.get_method("forward").graph();
-
-  AliasDb alias_db(graph);
-  return HasInplaceOp(graph, alias_db);
 }
 
 bool testModuleHasOp(const std::string& jit_script, const char* op_name) {
@@ -116,7 +106,8 @@ TEST(StaticModule, ValueGroup) {
   torch::jit::StaticModule sm(input_graph);
   const Graph& graph = sm.graph();
   std::vector<const Node*> nodes(graph.nodes().begin(), graph.nodes().end());
-  const auto& value_group = sm.value_group();
+  auto* root_block = sm.root_block();
+  const auto& value_group = sm.block_info(root_block).value_group();
 
   std::vector<const Value*> expected_input_aliases{
       graph.inputs()[0], graph.inputs()[1], nodes[0]->output()};
@@ -148,9 +139,11 @@ TEST(StaticModule, IsOptimizableContainerType_NonOptimizableInputs) {
 
   auto sm = makeStaticModuleFromScript(src);
   const auto& graph = sm.graph();
+  auto* root_block = sm.root_block();
+  const auto& block_info = sm.block_info(root_block);
 
   for (const Node* n : graph.nodes()) {
-    EXPECT_FALSE(sm.is_optimizable_container_type(n));
+    EXPECT_FALSE(block_info.node_is_optimizable_container_type(n));
   }
 }
 
@@ -168,9 +161,11 @@ TEST(StaticModule, IsOptimizableContainerType_WrongType) {
 
   auto sm = makeStaticModuleFromScript(src);
   const auto& graph = sm.graph();
+  auto* root_block = sm.root_block();
+  const auto& block_info = sm.block_info(root_block);
 
   for (const Node* n : graph.nodes()) {
-    EXPECT_FALSE(sm.is_optimizable_container_type(n));
+    EXPECT_FALSE(block_info.node_is_optimizable_container_type(n));
   }
 }
 
@@ -185,12 +180,14 @@ TEST(StaticModule, IsOptimizableContainerType_CanUseOutVariant) {
     )JIT";
   auto sm = makeStaticModuleFromScript(src);
   const auto& graph = sm.graph();
+  auto* root_block = sm.root_block();
+  const auto& block_info = sm.block_info(root_block);
 
   for (const Node* n : graph.nodes()) {
     if (n->kind() == c10::prim::ListConstruct) {
-      EXPECT_TRUE(sm.is_optimizable_container_type(n));
+      EXPECT_TRUE(block_info.node_is_optimizable_container_type(n));
     } else {
-      EXPECT_FALSE(sm.is_optimizable_container_type(n));
+      EXPECT_FALSE(block_info.node_is_optimizable_container_type(n));
     }
   }
 }
@@ -214,18 +211,92 @@ TEST(StaticModule, RValueInputs) {
   EXPECT_TRUE(expected.toTensor().equal(actual.toTensor()));
 }
 
-TEST(StaticRuntime, InPlace) {
-  EXPECT_TRUE(testHasInplaceOp(reshape_inplace_script));
-  EXPECT_TRUE(testHasInplaceOp(reshape_inplace_script_1));
-  EXPECT_TRUE(testHasInplaceOp(sigmoid_inplace_script));
-  EXPECT_FALSE(testHasInplaceOp(sigmoid_out_script));
-}
-
 TEST(StaticRuntime, ModuleHasOp) {
   EXPECT_TRUE(testModuleHasOp(reshape_inplace_script, "aten::sigmoid_"));
   EXPECT_TRUE(testModuleHasOp(reshape_inplace_script_1, "aten::reshape"));
   EXPECT_TRUE(testModuleHasOp(sigmoid_inplace_script, "aten::clone"));
   EXPECT_FALSE(testModuleHasOp(reshape_inplace_script_1, "aten::add_"));
+}
+
+TEST(StaticRuntime, ReplaceWithCopy_replaces_reshape) {
+  auto ExpectToReplaceWithCopy = [](const std::string& jit_script) {
+    auto graph = getGraphFromScript(jit_script);
+    EXPECT_TRUE(graphHasOp(graph, "aten::reshape"));
+    EXPECT_FALSE(graphHasOp(graph, "static_runtime::reshape_copy"));
+
+    ReplaceWithCopy(graph);
+
+    // aten::reshape -> static_runtime::reshape_copy
+    EXPECT_FALSE(graphHasOp(graph, "aten::reshape"));
+    EXPECT_TRUE(graphHasOp(graph, "static_runtime::reshape_copy"));
+  };
+
+  ExpectToReplaceWithCopy(R"JIT(
+    def forward(self, inp: Tensor, shape: List[int]):
+        a = inp.reshape(shape)
+        return (a)
+  )JIT");
+  ExpectToReplaceWithCopy(R"JIT(
+    def forward(self, inp: Tensor, shape: List[int]):
+        a = inp * 2
+        b = inp * 3
+        c = inp.reshape(shape)
+        return (a, b, c)
+  )JIT");
+  ExpectToReplaceWithCopy(R"JIT(
+    def forward(self, cond: bool, x):
+        if cond:
+            y = x.reshape(x.shape)
+        else:
+            y = x.clone()
+        return y.clone()
+  )JIT");
+}
+
+TEST(
+    StaticRuntime,
+    ReplaceWithCopy_does_not_replace_reshape_if_input_has_writters) {
+  auto ExpectNotToReplaceWithCopy = [](const std::string& jit_script) {
+    auto graph = getGraphFromScript(jit_script);
+    EXPECT_TRUE(graphHasOp(graph, "aten::reshape"));
+    EXPECT_FALSE(graphHasOp(graph, "static_runtime::reshape_copy"));
+
+    ReplaceWithCopy(graph);
+
+    // No Replacement
+    EXPECT_TRUE(graphHasOp(graph, "aten::reshape"));
+    EXPECT_FALSE(graphHasOp(graph, "static_runtime::reshape_copy"));
+  };
+
+  ExpectNotToReplaceWithCopy(R"JIT(
+    def forward(self, inp: Tensor, shape: List[int]):
+        a = inp.reshape(shape)
+        inp *= 2
+        return (a)
+  )JIT");
+  ExpectNotToReplaceWithCopy(R"JIT(
+    def forward(self, inp: Tensor, shape: List[int]):
+        a = inp.reshape(shape)
+        a *= 2
+        return (a)
+  )JIT");
+  ExpectNotToReplaceWithCopy(R"JIT(
+    def forward(self, inp: Tensor, inp2: Tensor, shape: List[int]):
+        a = inp.reshape(shape)
+        a *= 2
+        b = a.reshape(shape)
+        return (b)
+  )JIT");
+  ExpectNotToReplaceWithCopy(R"JIT(
+    def forward(self, inp: Tensor, shape: List[int]):
+        a = inp.reshape(shape)
+        b = a.reshape(shape)
+        c = b.reshape(shape)
+        d = c.reshape(shape)
+        e = b.sigmoid_()
+        return (d)
+  )JIT");
+  ExpectNotToReplaceWithCopy(reshape_inplace_script);
 }
 
 TEST(StaticRuntime, CanEnableStaticRuntime) {
@@ -253,22 +324,34 @@ TEST(StaticRuntime, CanEnableStaticRuntime) {
             return a * a
   )JIT";
 
-  const auto is_script = R"JIT(
+  const auto is_script_tensors = R"JIT(
     def forward(self, a: Tensor, b: Tensor):
         return a is b
   )JIT";
 
-  const auto is_not_script = R"JIT(
+  const auto is_script_none = R"JIT(
+    def forward(self, a: Optional[Tensor]):
+        return a is None
+  )JIT";
+
+  const auto is_not_script_tensors = R"JIT(
     def forward(self, a: Tensor, b: Tensor):
         return a is not b
   )JIT";
 
+  const auto is_not_script_none = R"JIT(
+    def forward(self, a: Optional[Tensor]):
+        return a is not None
+  )JIT";
+
   EXPECT_TRUE(testCanEnableStaticRuntime(reshape_inplace_script));
-  EXPECT_FALSE(testCanEnableStaticRuntime(for_script));
-  EXPECT_FALSE(testCanEnableStaticRuntime(while_script));
-  EXPECT_FALSE(testCanEnableStaticRuntime(if_script));
-  EXPECT_FALSE(testCanEnableStaticRuntime(is_script));
-  EXPECT_FALSE(testCanEnableStaticRuntime(is_not_script));
+  EXPECT_TRUE(testCanEnableStaticRuntime(for_script));
+  EXPECT_TRUE(testCanEnableStaticRuntime(while_script));
+  EXPECT_TRUE(testCanEnableStaticRuntime(if_script));
+  EXPECT_FALSE(testCanEnableStaticRuntime(is_script_tensors));
+  EXPECT_TRUE(testCanEnableStaticRuntime(is_script_none));
+  EXPECT_FALSE(testCanEnableStaticRuntime(is_not_script_tensors));
+  EXPECT_TRUE(testCanEnableStaticRuntime(is_not_script_none));
 }
 
 TEST(StaticRuntime, NestedOutput) {
@@ -491,55 +574,48 @@ TEST(StaticRuntime, CleanUpMemory) {
   const int num_features = 50;
   torch::jit::Module mod = getDeepAndWideSciptModel();
 
-  for (auto cleanup_activations : {true, false}) {
-    for (auto enable_out_variant : {true, false}) {
-      for (auto optimize_memory : {true, false}) {
-        for (auto manage_output_tensors : {true, false}) {
-          if (manage_output_tensors && !enable_out_variant) {
-            // when manage_output_tensors is enabled, enable_out_variant
-            // must be enabled too
-            continue;
-          }
-          if (optimize_memory && !enable_out_variant) {
-            // when optimize_memory is enabled, enable_out_variant must be
-            // enabled too
-            continue;
-          }
-          VLOG(1) << "cleanup_activations: " << cleanup_activations
-                  << ", enable_out_variant: " << enable_out_variant
-                  << ", optimize_memory: " << optimize_memory
-                  << ", manage_output_tensors: " << manage_output_tensors;
-          torch::jit::StaticModuleOptions opts{
-              cleanup_activations,
-              enable_out_variant,
-              optimize_memory,
-              manage_output_tensors};
-          torch::jit::StaticModule smod(mod, false, opts);
-          torch::jit::StaticRuntime runtime(smod);
+  for (auto enable_out_variant : {true, false}) {
+    for (auto optimize_memory : {true, false}) {
+      for (auto manage_output_tensors : {true, false}) {
+        if (manage_output_tensors && !enable_out_variant) {
+          // when manage_output_tensors is enabled, enable_out_variant
+          // must be enabled too
+          continue;
+        }
+        if (optimize_memory && !enable_out_variant) {
+          // when optimize_memory is enabled, enable_out_variant must be
+          // enabled too
+          continue;
+        }
+        VLOG(1) << "enable_out_variant: " << enable_out_variant
+                << ", optimize_memory: " << optimize_memory
+                << ", manage_output_tensors: " << manage_output_tensors;
+        torch::jit::StaticModuleOptions opts{
+            enable_out_variant, optimize_memory, manage_output_tensors};
+        torch::jit::StaticModule smod(mod, false, opts);
+        torch::jit::StaticRuntime runtime(smod);
 
-          for (int batch_size : {1, 8, 32}) {
-            for (int i = 0; i < 2; ++i) {
-              auto ad_emb_packed =
-                  torch::randn({batch_size, 1, embedding_size});
-              auto user_emb = torch::randn({batch_size, 1, embedding_size});
-              auto wide = torch::randn({batch_size, num_features});
+        for (int batch_size : {1, 8, 32}) {
+          for (int i = 0; i < 2; ++i) {
+            auto ad_emb_packed = torch::randn({batch_size, 1, embedding_size});
+            auto user_emb = torch::randn({batch_size, 1, embedding_size});
+            auto wide = torch::randn({batch_size, num_features});
 
-              // run jit graph executor
-              std::vector<at::IValue> inputs({ad_emb_packed, user_emb, wide});
-              auto output_1 = getTensor(mod.forward(inputs));
+            // run jit graph executor
+            std::vector<at::IValue> inputs({ad_emb_packed, user_emb, wide});
+            auto output_1 = getTensor(mod.forward(inputs));
 
-              // run static runtime
-              std::vector<c10::IValue> input_tensors(
-                  {ad_emb_packed, user_emb, wide});
-              auto outputs = runtime(input_tensors, {}).toTupleRef().elements();
-              ASSERT_TRUE(outputs.size() > 0);
-              auto output_2 = outputs[0].toTensor();
-              runtime.check_for_memory_leak();
-              EXPECT_TRUE(torch::allclose(output_1, output_2, 1e-6));
-              if (manage_output_tensors) {
-                runtime.deallocateOutputTensors();
-                runtime.checkOutputTensorMemoryLeaks();
-              }
+            // run static runtime
+            std::vector<c10::IValue> input_tensors(
+                {ad_emb_packed, user_emb, wide});
+            auto outputs = runtime(input_tensors, {}).toTupleRef().elements();
+            ASSERT_TRUE(outputs.size() > 0);
+            auto output_2 = outputs[0].toTensor();
+            runtime.check_for_memory_leak();
+            EXPECT_TRUE(torch::allclose(output_1, output_2, 1e-6));
+            if (manage_output_tensors) {
+              runtime.deallocateOutputTensors();
+              runtime.checkOutputTensorMemoryLeaks();
             }
           }
         }
@@ -579,7 +655,6 @@ TEST(
   auto g = std::make_shared<torch::jit::Graph>();
   torch::jit::parseIR(test_graph, g.get());
   torch::jit::StaticModuleOptions opts{
-      /*cleanup_activations=*/true,
       /*enable_out_variant=*/true,
       /*optimize_memory=*/true,
       /*manage_output_tensors=*/true};
@@ -627,7 +702,6 @@ TEST(StaticRuntime, ManageOutputTensorsWithDeallocateOutputTensors) {
   torch::jit::Module mod = getDeepAndWideSciptModel();
 
   torch::jit::StaticModuleOptions opts{
-      /*cleanup_activations=*/true,
       /*enable_out_variant=*/true,
       /*optimize_memory=*/true,
       /*manage_output_tensors=*/true};
@@ -652,7 +726,6 @@ TEST(StaticRuntime, ManageOutputTensorsWithoutDeallocateOutputTensors) {
   torch::jit::Module mod = getDeepAndWideSciptModel();
 
   torch::jit::StaticModuleOptions opts{
-      /*cleanup_activations=*/true,
       /*enable_out_variant=*/true,
       /*optimize_memory=*/true,
       /*manage_output_tensors=*/true};
@@ -690,7 +763,6 @@ TEST(StaticRuntime, DisableManageOutputTensors) {
   auto g = std::make_shared<torch::jit::Graph>();
   torch::jit::parseIR(test_graph, g.get());
   torch::jit::StaticModuleOptions opts{
-      /*cleanup_activations=*/true,
       /*enable_out_variant=*/true,
       /*optimize_memory=*/true,
       /*manage_output_tensors=*/true};
@@ -976,7 +1048,6 @@ TEST(ProcessedFunction, ProcessedFunction) {
       sigmoid_node,
       /*enable_out_variant=*/true,
       /*check_memory_overlap=*/false);
-  EXPECT_TRUE(sigmoid_fn.f());
   EXPECT_EQ(sigmoid_fn.kind(), ProcessedFunction::Kind::kOutVariant);
   EXPECT_FALSE(sigmoid_fn.checkMemoryOverlap());
 
@@ -985,7 +1056,6 @@ TEST(ProcessedFunction, ProcessedFunction) {
       transpose_node,
       /*enable_out_variant=*/true,
       /*check_memory_overlap=*/false);
-  EXPECT_TRUE(transpose_fn.f());
   EXPECT_EQ(transpose_fn.kind(), ProcessedFunction::Kind::kNativeFunction);
   EXPECT_FALSE(transpose_fn.checkMemoryOverlap());
 }
@@ -1006,7 +1076,8 @@ TEST(ManagedTensorRanges, NoAliases) {
   auto* z = vmap["z"];
 
   FastSet<const Value*> managed_tensors = {y, z};
-  ManagedTensorRanges ranges(graph, managed_tensors);
+  AliasDb alias_db(graph);
+  auto ranges = ManagedTensorRanges(*graph->block(), alias_db, managed_tensors);
 
   std::vector<Node*> nodes(
       graph->block()->nodes().begin(), graph->block()->nodes().end());
@@ -1045,7 +1116,8 @@ TEST(ManagedTensorRanges, AliasExtendingLifetimes) {
   auto* z2 = vmap["z2"];
 
   FastSet<const Value*> managed_tensors = {y, z1, z2};
-  ManagedTensorRanges ranges(graph, managed_tensors);
+  AliasDb alias_db(graph);
+  auto ranges = ManagedTensorRanges(*graph->block(), alias_db, managed_tensors);
 
   std::vector<Node*> nodes(
       graph->block()->nodes().begin(), graph->block()->nodes().end());
@@ -1091,7 +1163,8 @@ TEST(ManagedTensorRanges, LifetimeOverlap) {
   auto* d = vmap["d"];
   auto* e = vmap["e"];
 
-  ManagedTensorRanges ranges(graph, {b, c, d, e});
+  AliasDb alias_db(graph);
+  auto ranges = ManagedTensorRanges(*graph->block(), alias_db, {b, c, d, e});
   const std::vector<std::pair<Value*, Value*>> overlapping_values{
       {b, c}, {c, d}, {c, e}};
 
@@ -1125,7 +1198,8 @@ TEST(ManagedTensorRanges, OverlappingLifetimesContainers) {
   auto* c = vmap["c"];
   auto* d = vmap["d"];
 
-  ManagedTensorRanges ranges(graph, {b, c, d});
+  AliasDb alias_db(graph);
+  auto ranges = ManagedTensorRanges(*graph->block(), alias_db, {b, c, d});
 
   EXPECT_TRUE(ranges.lifetimesOverlap(b, c));
   EXPECT_TRUE(ranges.lifetimesOverlap(b, d));
@@ -1145,7 +1219,8 @@ TEST(ManagedTensorRanges, OverlappingLifetimesOutputs) {
   auto* b = vmap["b"];
   auto* output = vmap["output"];
 
-  ManagedTensorRanges ranges(graph, {b, output});
+  AliasDb alias_db(graph);
+  auto ranges = ManagedTensorRanges(*graph->block(), alias_db, {b, output});
 
   EXPECT_TRUE(ranges.lifetimesOverlap(b, output));
 }
@@ -1231,10 +1306,11 @@ void testAssignStorageToManagedTensors(
   }
   ASSERT_EQ(managed_tensor_values.size(), tensor_value_to_tensor.size());
 
-  auto ranges = ManagedTensorRanges(graph, managed_tensor_values);
-  std::vector<StorageGroup> groups;
-  assignStorageToManagedTensors(
-      graph->block()->nodes(), ranges, tensor_value_to_tensor, groups);
+  AliasDb alias_db(graph);
+  auto ranges =
+      ManagedTensorRanges(*graph->block(), alias_db, managed_tensor_values);
+  auto groups = assignStorageToManagedTensors(
+      graph->block()->nodes(), ranges, tensor_value_to_tensor);
 
   checkStorageGroups(
       groups, ranges, tensor_value_to_tensor, min_reused_tensors);
@@ -1307,4 +1383,127 @@ TEST(AssignStorageToManagedTensors, MultipleUnused) {
   const size_t min_reused_tensors = 1;
   testAssignStorageToManagedTensors(
       src, std::move(managed_tensor_name_to_tensor), min_reused_tensors);
+}
+
+namespace {
+void testStaticModuleThrows(
+    const std::string& src,
+    const std::vector<IValue>& args,
+    const std::unordered_map<std::string, IValue>& kwargs) {
+  auto static_module = makeStaticModuleFromScript(src);
+  EXPECT_THROW(static_module(args, kwargs), c10::Error);
+}
+} // namespace
+
+TEST(StaticModule, IncorrectTypesPassed) {
+  const std::string args_bool_script = R"JIT(
+    def forward(self, x: bool):
+        return x
+  )JIT";
+  testStaticModuleThrows(args_bool_script, {at::randn({1})}, {});
+
+  const std::string args_tensor_script = R"JIT(
+    def forward(self, x: Tensor):
+        return x
+  )JIT";
+  testStaticModuleThrows(args_tensor_script, {false}, {});
+
+  const std::string kwargs_int_script = R"JIT(
+    def forward(self, x: bool = True):
+        return x
+  )JIT";
+  testStaticModuleThrows(kwargs_int_script, {}, {{"x", at::randn({1})}});
+
+  const std::string kwargs_tensor_script = R"JIT(
+    def forward(self, x: Tensor = torch.randn((1, ))):
+        return x
+  )JIT";
+  testStaticModuleThrows(kwargs_tensor_script, {}, {{"x", 1.0}});
+}
+
+TEST(StaticModule, TooManyArgs) {
+  const std::string args_src = R"JIT(
+    def forward(self, x: int):
+        return x
+  )JIT";
+  testStaticModuleThrows(args_src, {0, 1}, {});
+
+  const std::string kwargs_src = R"JIT(
+    def forward(self, x: int = 1):
+        return x
+  )JIT";
+  testStaticModuleThrows(kwargs_src, {}, {{"y", 0}, {"x", 1}});
+}
+
+TEST(StaticModule, NotEnoughArgs) {
+  const std::string args_src = R"JIT(
+    def forward(self, x: int):
+        return x
+  )JIT";
+  testStaticModuleThrows(args_src, {}, {});
+
+  const std::string kwargs_src = R"JIT(
+    def forward(self, *, x: int):
+        return x
+  )JIT";
+  testStaticModuleThrows(kwargs_src, {}, {});
+}
+
+TEST(CreateOwnedRefsForSpecialValues, TopLevel) {
+  const auto src = R"IR(
+    graph():
+        %c: int = prim::Constant[value=42]()
+        return (%c)
+  )IR";
+
+  auto graph = getGraphFromIR(src);
+  CreateOwnedRefsForSpecialValues(*graph);
+  EXPECT_TRUE(hasNodeWithKind(graph, "static_runtime::create_owned_ref"));
+}
+
+TEST(CreateOwnedRefsForSpecialValues, ValueFromOuterScope) {
+  const auto src = R"IR(
+    graph(%cond: bool, %1: int):
+        %c: int = aten::add(%1, %1)
+        %x: int = prim::If(%c)
+          block0():
+            -> (%c)
+          block1():
+            -> (%c)
+        return (%x)
+  )IR";
+
+  auto graph = getGraphFromIR(src);
+  CreateOwnedRefsForSpecialValues(*graph);
+  EXPECT_TRUE(hasNodeWithKind(graph, "static_runtime::create_owned_ref"));
+}
+
+TEST(ForceNonEmptyOutputs, TwoSubBlocks) {
+  const auto src = R"IR(
+    graph(%cond: bool):
+        %lst : int[] = prim::ListConstruct()
+        %1 : int = prim::Constant[value=1]()
+        %2 : int = prim::Constant[value=2]()
+        prim::If(%cond)
+          block0():
+            aten::append(%lst, %1)
+            -> ()
+          block1():
+            aten::append(%lst, %2)
+            -> ()
+        return (%lst)
+  )IR";
+
+  auto graph = getGraphFromIR(src);
+  ForceNonEmptyOutputs(*graph);
+
+  for (auto* node : graph->nodes()) {
+    if (node->blocks().empty()) {
+      continue;
+    }
+    EXPECT_EQ(node->outputs().size(), 1);
+    for (auto* sub_block : node->blocks()) {
+      EXPECT_EQ(sub_block->outputs().size(), 1);
+    }
+  }
 }

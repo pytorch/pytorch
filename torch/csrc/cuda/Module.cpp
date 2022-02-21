@@ -1,7 +1,6 @@
-#include <TH/TH.h>
 #include <ATen/ATen.h>
 #include <ATen/cuda/CUDAContext.h>
-#include <ATen/CUDAGeneratorImpl.h>
+#include <ATen/cuda/CUDAGeneratorImpl.h>
 #include <c10/cuda/CUDAFunctions.h>
 #include <c10/cuda/CUDACachingAllocator.h>
 #include <ATen/cuda/CachingHostAllocator.h>
@@ -34,7 +33,6 @@
 
 using namespace torch;
 
-THCState *state = nullptr;
 static bool in_bad_fork = false;  // True for children forked after cuda init
 
 #ifndef WIN32
@@ -42,7 +40,6 @@ static bool in_bad_fork = false;  // True for children forked after cuda init
 static void forked_child() {
   in_bad_fork = true;
   torch::utils::set_run_yet_variable_to_false();
-  state = nullptr;
 }
 #endif
 
@@ -211,7 +208,7 @@ PyObject * THCPModule_cudaCachingAllocator_raw_alloc(PyObject *_unused, PyObject
         "(ssize_t size, intptr_t stream);");
     return nullptr;
   }
-  ssize_t size = PyLong_AsSsize_t(size_o);
+  auto size = PyLong_AsSsize_t(size_o);
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   cudaStream_t stream = static_cast<cudaStream_t>(PyLong_AsVoidPtr(stream_o));
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
@@ -522,7 +519,7 @@ static PyObject * THCPModule_initExtension(PyObject *self, PyObject *noargs)
   HANDLE_TH_ERRORS
   TORCH_INTERNAL_ASSERT(!in_bad_fork);  // Handled at python level
   poison_fork();
-  state = at::globalContext().lazyInitCUDA();
+  at::globalContext().lazyInitCUDA();
 
   auto m = THPObjectPtr(PyImport_ImportModule("torch.cuda"));
   if (!m) throw python_error();
@@ -541,10 +538,6 @@ static PyObject * THCPModule_initExtension(PyObject *self, PyObject *noargs)
 
   set_module_attr("has_magma", at::hasMAGMA() ? Py_True : Py_False);
   set_module_attr("has_half", has_half ? Py_True : Py_False);
-
-  auto _state_cdata = THPObjectPtr(PyLong_FromVoidPtr(state));
-  if (!_state_cdata) throw python_error();
-  set_module_attr("_state_cdata", _state_cdata.get());
 
   auto num_gpus = c10::cuda::device_count();
   auto default_cuda_generators = PyTuple_New(static_cast<Py_ssize_t>(num_gpus));

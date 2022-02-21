@@ -651,7 +651,7 @@ void fmin_kernel(TensorIteratorBase& iter) {
   }
 }
 
-void smooth_l1_kernel(TensorIterator& iter, double beta) {
+void smooth_l1_kernel(TensorIteratorBase& iter, double beta) {
   AT_DISPATCH_FLOATING_TYPES_AND2(
         kBFloat16, kHalf, iter.dtype(), "smooth_l1_cpu", [&]() {
         using Vec = Vectorized<scalar_t>;
@@ -836,7 +836,7 @@ void tanh_backward_kernel(TensorIteratorBase& iter) {
   }
 }
 
-void mse_kernel(TensorIterator& iter) {
+void mse_kernel(TensorIteratorBase& iter) {
   if (iter.dtype() == ScalarType::Half) {
     TORCH_WARN_ONCE("Applying the CPU mse kernel on half-type tensors. "
                     "This may be slower than using float or double-type tensors.");
