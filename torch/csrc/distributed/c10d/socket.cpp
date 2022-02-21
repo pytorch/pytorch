@@ -273,7 +273,7 @@ std::unique_ptr<SocketImpl> SocketImpl::accept() const {
   addr.ai_addr = addr_ptr;
   addr.ai_addrlen = addr_len;
 
-  C10D_INFO("The server socket on {} has accepted a connection from {}.", *this, addr);
+  C10D_DEBUG("The server socket on {} has accepted a connection from {}.", *this, addr);
 
   auto impl = std::make_unique<SocketImpl>(hnd);
 
@@ -414,17 +414,17 @@ SocketListenOp::SocketListenOp(std::uint16_t port, const SocketOptions& opts)
 
 std::unique_ptr<SocketImpl> SocketListenOp::run() {
   if (opts_->prefer_ipv6()) {
-    C10D_INFO("The server socket will attempt to listen on an IPv6 address.");
+    C10D_DEBUG("The server socket will attempt to listen on an IPv6 address.");
     if (tryListen(AF_INET6)) {
       return std::move(socket_);
     }
 
-    C10D_INFO("The server socket will attempt to listen on an IPv4 address.");
+    C10D_DEBUG("The server socket will attempt to listen on an IPv4 address.");
     if (tryListen(AF_INET)) {
       return std::move(socket_);
     }
   } else {
-    C10D_INFO("The server socket will attempt to listen on an IPv4 or IPv6 address.");
+    C10D_DEBUG("The server socket will attempt to listen on an IPv4 or IPv6 address.");
     if (tryListen(AF_UNSPEC)) {
       return std::move(socket_);
     }
@@ -459,7 +459,7 @@ bool SocketListenOp::tryListen(int family) {
   addrinfo_ptr result{naked_result};
 
   for (::addrinfo* addr = naked_result; addr != nullptr; addr = addr->ai_next) {
-    C10D_INFO("The server socket is attempting to listen on {}.", *addr);
+    C10D_DEBUG("The server socket is attempting to listen on {}.", *addr);
     if (tryListen(*addr)) {
       return true;
     }
@@ -577,25 +577,25 @@ SocketConnectOp::SocketConnectOp(const std::string& host,
 
 std::unique_ptr<SocketImpl> SocketConnectOp::run() {
   if (opts_->prefer_ipv6()) {
-    C10D_INFO("The client socket will attempt to connect to an IPv6 address of ({}, {}).",
-              host_,
-              port_);
+    C10D_DEBUG("The client socket will attempt to connect to an IPv6 address of ({}, {}).",
+               host_,
+               port_);
 
     if (tryConnect(AF_INET6)) {
       return std::move(socket_);
     }
 
-    C10D_INFO("The client socket will attempt to connect to an IPv4 address of ({}, {}).",
-              host_,
-              port_);
+    C10D_DEBUG("The client socket will attempt to connect to an IPv4 address of ({}, {}).",
+               host_,
+               port_);
 
     if (tryConnect(AF_INET)) {
       return std::move(socket_);
     }
   } else {
-    C10D_INFO("The client socket will attempt to connect to an IPv4 or IPv6 address of ({}, {}).",
-              host_,
-              port_);
+    C10D_DEBUG("The client socket will attempt to connect to an IPv4 or IPv6 address of ({}, {}).",
+               host_,
+               port_);
 
     if (tryConnect(AF_UNSPEC)) {
       return std::move(socket_);
@@ -646,7 +646,7 @@ bool SocketConnectOp::tryConnect(int family) {
     errors_.clear();
 
     for (::addrinfo* addr = naked_result; addr != nullptr; addr = addr->ai_next) {
-      C10D_INFO("The client socket is attempting to connect to {}.", *addr);
+      C10D_TRACE("The client socket is attempting to connect to {}.", *addr);
 
       ConnectResult cr = tryConnect(*addr);
       if (cr == ConnectResult::Success) {
@@ -660,10 +660,10 @@ bool SocketConnectOp::tryConnect(int family) {
 
     if (retry) {
       if (Clock::now() < deadline_ - delay_duration_) {
-        // Prevent our log output to be too noisy, warn only every 20 seconds.
-        if (retry_attempt == 1) {
-          C10D_WARNING("No socket on ({}, {}) is listening yet, will retry.", host_, port_);
-        } else if (retry_attempt == 20) {
+        // Prevent our log output to be too noisy, warn only every 30 seconds.
+        if (retry_attempt == 30) {
+          C10D_INFO("No socket on ({}, {}) is listening yet, will retry.", host_, port_);
+
           retry_attempt = 0;
         }
 
@@ -707,7 +707,7 @@ SocketConnectOp::ConnectResult SocketConnectOp::tryConnect(const ::addrinfo& add
 
     // Retry if the server is not yet listening or if its backlog is exhausted.
     if (err == std::errc::connection_refused || err == std::errc::connection_reset) {
-      C10D_INFO("The server socket on {} is not yet listening {}, will retry.", addr, err);
+      C10D_TRACE("The server socket on {} is not yet listening {}, will retry.", addr, err);
 
       return ConnectResult::Retry;
     } else {
