@@ -218,7 +218,7 @@ Keyword args:
 Example::
 
     >>> torch.special.logerfcx(torch.tensor([-1., 0, 4., 10.]))
-        tensor([ 1.6112,  0.0000, -1.9878, -2.8799]) 
+        tensor([ 1.6112,  0.0000, -1.9878, -2.8799])
 """.format(**common_args))
 
 erfinv = _add_docstr(_special.special_erfinv,
