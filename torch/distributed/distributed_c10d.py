@@ -631,9 +631,9 @@ def init_process_group(
 
 
 def _new_process_group_helper(
-    world_size,
-    rank,
-    group_ranks,
+    group_size,
+    group_rank,
+    global_ranks_in_group,
     backend,
     store,
     pg_options=None,
@@ -655,7 +655,6 @@ def _new_process_group_helper(
 
     if not group_name:
         group_name = str(_group_count)
-        _group_count += 1
 
     if group_name in _pg_names.values():
         raise RuntimeError(
@@ -669,7 +668,7 @@ def _new_process_group_helper(
         )
 
     # The list of group ranks is empty if we're creating the default group.
-    is_default_group = len(group_ranks) == 0
+    is_default_group = len(global_ranks_in_group) == 0
 
     backend = Backend(backend)
     pg: Union[ProcessGroupGloo, ProcessGroupMPI, ProcessGroupNCCL]
@@ -680,7 +679,7 @@ def _new_process_group_helper(
                 " MPI is only included if you build PyTorch from"
                 " source on a host that has MPI installed."
             )
-        pg = ProcessGroupMPI.create(group_ranks)
+        pg = ProcessGroupMPI.create(global_ranks_in_group)
         if not pg:
             return GroupMember.NON_GROUP_MEMBER
         _pg_map[pg] = (Backend.MPI, None)
@@ -690,7 +689,8 @@ def _new_process_group_helper(
         # we check if the current process is a member of the new group.
         if not is_default_group:
             global_rank = _get_default_group().rank()
-            if global_rank not in group_ranks:
+            if global_rank not in global_ranks_in_group:
+                _group_count += 1
                 return GroupMember.NON_GROUP_MEMBER
 
         # Use the group name as prefix in the default store, such that
@@ -700,7 +700,7 @@ def _new_process_group_helper(
         if backend == Backend.GLOO:
             if pg_options is not None:
                 raise RuntimeError("GLOO options not supported")
-            pg = ProcessGroupGloo(prefix_store, rank, world_size, timeout=timeout)
+            pg = ProcessGroupGloo(prefix_store, group_rank, group_size, timeout=timeout)
             # In debug mode and if GLOO is available, wrap in a wrapper PG that
             # enables enhanced collective checking for debugability.
             if _get_debug_mode() == _DistributedDebugLevel.DETAIL:
@@ -716,8 +716,8 @@ def _new_process_group_helper(
                         wrapped_pg=pg,
                         store_prefix=group_name,
                         store=store,
-                        rank=rank,
-                        world_size=world_size,
+                        rank=group_rank,
+                        world_size=group_size,
                         timeout=timeout,
                     )
             _pg_map[pg] = (Backend.GLOO, store)
@@ -735,7 +735,7 @@ def _new_process_group_helper(
                 pg_options.is_high_priority_stream = False
                 pg_options._timeout = timeout
 
-            pg = ProcessGroupNCCL(prefix_store, rank, world_size, pg_options)
+            pg = ProcessGroupNCCL(prefix_store, group_rank, group_size, pg_options)
             # In debug mode and if GLOO is available, wrap in a wrapper PG that
             # enables enhanced collective checking for debugability.
             if _get_debug_mode() == _DistributedDebugLevel.DETAIL:
@@ -751,8 +751,8 @@ def _new_process_group_helper(
                         wrapped_pg=pg,
                         store_prefix=group_name,
                         store=store,
-                        rank=rank,
-                        world_size=world_size,
+                        rank=group_rank,
+                        world_size=group_size,
                         timeout=timeout,
                     )
             _pg_map[pg] = (Backend.NCCL, store)
@@ -761,11 +761,25 @@ def _new_process_group_helper(
             assert backend.upper() in Backend._plugins, (
                 f"unknown c10d backend type {backend.upper()}"
             )
-            pg = Backend._plugins[backend.upper()](
-                prefix_store, rank, world_size, timeout
+
+            backend_creator_fn = Backend._plugins[backend.upper()]
+
+            if pg_options is None:
+                import inspect
+                backend_module = inspect.getmodule(backend_creator_fn)
+                assert 'Options' in dict(inspect.getmembers(backend_module, inspect.isclass)), (
+                    f"Process group Options not defined in {backend.upper()} implementation"
+                )
+
+                pg_options = backend_module.Options.create()
+
+            pg = backend_creator_fn(
+                _group_count, prefix_store, group_rank, group_size, global_ranks_in_group, pg_options, timeout
             )
             _pg_map[pg] = (backend, store)
             _pg_names[pg] = group_name
+
+    _group_count += 1
 
     return pg
 
