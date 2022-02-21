@@ -258,7 +258,6 @@ class _DataPipeMeta(GenericMeta):
 
         return super().__new__(cls, name, bases, namespace, **kwargs)  # type: ignore[call-overload]
 
-        # For Python > 3.6
         cls.__origin__ = None
         if 'type' in namespace:
             return super().__new__(cls, name, bases, namespace, **kwargs)  # type: ignore[call-overload]
