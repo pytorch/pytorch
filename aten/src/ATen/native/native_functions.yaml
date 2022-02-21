@@ -10318,7 +10318,7 @@
   structured: True
   structured_inherits: TensorIteratorBase
   dispatch:
-    CPU: special_logerfcx_out
+    CPU, CUDA: special_logerfcx_out
 
 - func: special_ndtr(Tensor self) -> Tensor
   python_module: special

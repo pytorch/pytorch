@@ -278,6 +278,23 @@ void kaiser_window_kernel_cuda(TensorIteratorBase& iter, int64_t window_length, 
   });
 }
 
+const char logerfcx_name[] = "logerfcx";
+void logerfcx_kernel_cuda(TensorIteratorBase& iter) {
+  #if AT_USE_JITERATOR()
+    AT_DISPATCH_FLOATING_TYPES(iter.common_dtype(), "logerfcx_cuda", [&]() {
+      jitted_gpu_kernel</*name=*/logerfcx_name,
+                        /*return_dtype=*/ scalar_t,
+                        /*common_dtype=*/ scalar_t,
+                        /*arity=*/ 1>(iter, logerfcx_string);
+    });
+  #else
+    AT_DISPATCH_FLOATING_TYPES(iter.common_dtype(), "logerfcx_cuda", [&]() {
+      gpu_kernel(
+          iter, [] GPU_LAMBDA(scalar_t a) -> scalar_t { return calc_logerfcx(a); });
+    });
+  #endif
+}
+
 const char entr_name[] = "entr";
 void entr_kernel_cuda(TensorIteratorBase& iter) {
   #if AT_USE_JITERATOR()
@@ -323,6 +340,7 @@ REGISTER_DISPATCH(kaiser_window_stub, &kaiser_window_kernel_cuda);
 REGISTER_DISPATCH(special_entr_stub, &entr_kernel_cuda);
 REGISTER_DISPATCH(special_ndtri_stub, &ndtri_kernel_cuda);
 REGISTER_DISPATCH(special_erfcx_stub, &erfcx_kernel_cuda);
+REGISTER_DISPATCH(special_logerfcx_stub, &logerfcx_kernel_cuda);
 
 } // namespace native
 } // namespace at
