@@ -1,11 +1,12 @@
-#include <ATen/ATen.h>
-#include <ATen/Dispatch.h>
-#include <ATen/Parallel.h>
-#include <ATen/TensorUtils.h>
-#include <ATen/NativeFunctions.h>
+#define TORCH_ASSERT_NO_OPERATORS
 #include <ATen/native/GridSampler.h>
 #include <ATen/native/cpu/GridSamplerKernel.h>
-#include <ATen/cpu/vml.h>
+#include <ATen/core/TensorBase.h>
+#include <ATen/Dispatch.h>
+#include <ATen/Parallel.h>
+#include <ATen/TensorGeometry.h>
+#include <ATen/TensorIterator.h>
+#include <ATen/cpu/vec/vec.h>
 #include <c10/util/C++17.h>
 #include <c10/util/irange.h>
 
@@ -1146,13 +1147,12 @@ static inline void grid_sample_2d_grid_slice_iterator(
 // and backward.
 // See NOTE [ Grid Sample CPU Kernels ] for details.
 
-Tensor grid_sampler_2d_cpu_kernel_impl(const Tensor& input, const Tensor& grid,
-                                       int64_t interpolation_mode,
-                                       int64_t padding_mode, bool align_corners) {
+void grid_sampler_2d_cpu_kernel_impl(
+    const TensorBase &output, const TensorBase &input, const TensorBase &grid,
+    int64_t interpolation_mode, int64_t padding_mode, bool align_corners) {
   auto N = input.size(0);
   auto H = grid.size(1);
   auto W = grid.size(2);
-  auto output = at::empty({N, input.size(1), H, W}, input.options());
   auto spatial_size = H * W;
   auto grain_size = spatial_size == 0 ? (N + 1)
                                       : at::divup(at::internal::GRAIN_SIZE, spatial_size * 4 /* 2d * 2 tensors*/);
@@ -1207,18 +1207,18 @@ Tensor grid_sampler_2d_cpu_kernel_impl(const Tensor& input, const Tensor& grid,
   });
 #undef HANDLE_CASE
 #undef HANDLE_INTERP
-
-  return output;
 }
 
-std::tuple<Tensor, Tensor>
-grid_sampler_2d_backward_cpu_kernel_impl(const Tensor& grad_output_,
-                                         const Tensor& input,
-                                         const Tensor& grid,
-                                         int64_t interpolation_mode,
-                                         int64_t padding_mode,
-                                         bool align_corners,
-                                         std::array<bool,2> output_mask) {
+void grid_sampler_2d_backward_cpu_kernel_impl(
+    const TensorBase &grad_input,
+    const TensorBase &grad_grid,
+    const TensorBase &grad_output_,
+    const TensorBase &input,
+    const TensorBase &grid,
+    int64_t interpolation_mode,
+    int64_t padding_mode,
+    bool align_corners,
+    std::array<bool,2> output_mask) {
   // grad_output should be contiguous most of time. Ensuring that it is
   // contiguous can greatly simplify this code.
   auto grad_output = grad_output_.contiguous();
@@ -1228,11 +1228,6 @@ grid_sampler_2d_backward_cpu_kernel_impl(const Tensor& grad_output_,
   // is always computed.)
   auto input_requires_grad = output_mask[0];
 
-  Tensor grad_input;
-  if (input_requires_grad) {
-    grad_input = at::zeros_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
-  }
-  auto grad_grid = at::empty_like(grid, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   auto N = input.size(0);
   auto spatial_size = grid.size(1) * grid.size(2);
   auto grain_size = spatial_size == 0 ? (N + 1)
@@ -1315,8 +1310,6 @@ grid_sampler_2d_backward_cpu_kernel_impl(const Tensor& grad_output_,
   });
 #undef HANDLE_CASE
 #undef HANDLE_INTERP
-
-  return std::make_tuple(grad_input, grad_grid);
 }
 
 }

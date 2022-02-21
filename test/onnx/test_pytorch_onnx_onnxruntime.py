@@ -41,6 +41,7 @@ from collections import OrderedDict
 from torch.nn.utils.rnn import PackedSequence
 from torch.onnx import CheckerError, register_custom_op_symbolic, unregister_custom_op_symbolic
 from torch.onnx.symbolic_helper import _unimplemented
+from torch.onnx.utils import unpack_quantized_tensor
 
 
 def flatten_tuples(elem):
@@ -108,9 +109,16 @@ def inline_flatten_list(inputs, res_list):
     return res_list
 
 
+def unpack_to_numpy(value):
+    value_unpacked = []
+    for value_ in value:
+        value_unpacked.extend(unpack_quantized_tensor(value_))
+    value_final = [to_numpy(v) for v in value_unpacked]
+    return value_final
+
+
 def run_ort(ort_sess, input):
-    input = flatten_tuples(input)
-    input = to_numpy(input)
+    input = unpack_to_numpy(flatten_tuples(input))
     ort_inputs = dict((ort_sess.get_inputs()[i].name, input) for i, input in enumerate(input))
     ort_outs = ort_sess.run(None, ort_inputs)
     return inline_flatten_list(ort_outs, [])
@@ -118,7 +126,7 @@ def run_ort(ort_sess, input):
 
 def ort_compare_with_pytorch(ort_outs, output, rtol, atol):
     output, _ = torch.jit._flatten(output)
-    outputs = [to_numpy(outp) for outp in output]
+    outputs = unpack_to_numpy(output)
 
     # compare onnxruntime and PyTorch results
     assert len(outputs) == len(ort_outs), "number of outputs differ"
@@ -3428,12 +3436,13 @@ class TestONNXRuntime(unittest.TestCase):
                 ctx.save_for_backward(input)
                 return input.clamp(min=0)
 
-        def symbolic_python_op(g: torch._C.Graph, n: torch._C.Node, *args, **kwargs):
+        def symbolic_python_op(ctx: torch.onnx.SymbolicContext, g: torch._C.Graph, *args, **kwargs):
+            n = ctx.cur_node
             name = kwargs["name"]
             if name == "MyClip":
-                return g.op("Clip", args[0], args[1])
+                return g.op("Clip", args[0], args[1], outputs=n.outputsSize())
             elif name == "MyRelu":
-                return g.op("Relu", args[0])
+                return g.op("Relu", args[0], outputs=n.outputsSize())
             else:
                 return _unimplemented("prim::PythonOp", "unknown node kind: " + name)
 
@@ -4112,6 +4121,28 @@ class TestONNXRuntime(unittest.TestCase):
         models_and_inputs = [get_LstmNet_model_and_inputs(n, b) for n, b in zip(num_layers, bidirectional)]
         for model, input in models_and_inputs:
             self.run_test(model, input)
+
+    @skipIfUnsupportedMinOpsetVersion(9)
+    def test_lstm_sequence(self):
+        class LstmNet(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.rnn1 = torch.nn.LSTM(8, 8, bidirectional=True, batch_first=True)
+                self.linear1 = torch.nn.Linear(8 * 2, 8)
+                self.rnn2 = torch.nn.LSTM(8, 8, bidirectional=True, batch_first=True)
+                self.linear2 = torch.nn.Linear(8 * 2, 8)
+
+            def forward(self, input):
+                rnn_output1, _ = self.rnn1(input)
+                linear_output1 = self.linear1(rnn_output1)
+                rnn_output2, _ = self.rnn2(linear_output1)
+                linear_output2 = self.linear2(rnn_output2)
+                return linear_output2
+
+        input = torch.zeros((1, 100, 8), dtype=torch.float32)
+        self.run_test(LstmNet(), input, input_names=['input'], output_names=['output'],
+                      dynamic_axes={'input' : {0 : 'batch_size', 1: 'w', 2: 'h'},
+                                    'output' : {0 : 'batch_size', 1: 'w', 2: 'h'}, })
 
     @disableScriptTest()
     def test_rnn_no_bias(self):
@@ -5872,7 +5903,24 @@ class TestONNXRuntime(unittest.TestCase):
                 return torch.pixel_shuffle(x, upscale_factor=2)
 
         x = torch.randn(2, 16, 4, 3, requires_grad=True)
+        y = torch.randn(4, 32, 8, 4, requires_grad=True)
         self.run_test(PixelShuffle(), x)
+        self.run_test(PixelShuffle(), x, input_names=["x"],
+                      dynamic_axes={"x": [0, 1, 2, 3]},
+                      test_with_inputs=[y])
+
+    @skipIfUnsupportedMinOpsetVersion(9)
+    def test_pixel_unshuffle(self):
+        class PixelUnshuffle(torch.nn.Module):
+            def forward(self, x):
+                return torch.pixel_unshuffle(x, downscale_factor=2)
+
+        x = torch.randn(2, 16, 4, 6, requires_grad=True)
+        y = torch.randn(4, 32, 8, 4, requires_grad=True)
+        self.run_test(PixelUnshuffle(), x)
+        self.run_test(PixelUnshuffle(), x, input_names=["x"],
+                      dynamic_axes={"x": [0, 1, 2, 3]},
+                      test_with_inputs=[y])
 
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_reciprocal(self):
@@ -5925,6 +5973,14 @@ class TestONNXRuntime(unittest.TestCase):
                 return torch.full((3, 4), x)
         x = torch.tensor(12.)
         self.run_test(FullModel(), x)
+
+        class CatModel(torch.nn.Module):
+            def forward(self, fp16, fp32):
+                return torch.cat([fp16, fp32])
+        fp16 = torch.Tensor([0.5])
+        fp16 = fp16.half()
+        fp32 = torch.Tensor([1.5])
+        self.run_test(CatModel(), (fp16, fp32))
 
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_full_like(self):
@@ -6070,6 +6126,10 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(PReluModel(), x, input_names=["x"],
                       dynamic_axes={"x": [1, 2]},
                       test_with_inputs=[y])
+
+    def test_prelu_scalar(self):
+        x = torch.scalar_tensor(1.)
+        self.run_test(torch.nn.PReLU(), x, input_names=["x"])
 
     def test_relu6(self):
         class Relu6Model(torch.nn.Module):
@@ -6225,7 +6285,16 @@ class TestONNXRuntime(unittest.TestCase):
     def test_gelu(self):
         class GeluModel(torch.nn.Module):
             def forward(self, x):
-                return torch.nn.functional.gelu(x)
+                return torch.nn.functional.gelu(x, approximate='none')
+
+        x = torch.randn(2, 4, 5, 6, requires_grad=True)
+        self.run_test(GeluModel(), x)
+
+    @skipIfUnsupportedMinOpsetVersion(9)
+    def test_tanh_gelu(self):
+        class GeluModel(torch.nn.Module):
+            def forward(self, x):
+                return torch.nn.functional.gelu(x, approximate='tanh')
 
         x = torch.randn(2, 4, 5, 6, requires_grad=True)
         self.run_test(GeluModel(), x)
@@ -6879,6 +6948,128 @@ class TestONNXRuntime(unittest.TestCase):
 
         x = torch.randn(2, 3, 5, 5)
         self.run_test(Det(), x)
+
+    def test_linalg_norm(self):
+        class LinalgSingleDimModel(torch.nn.Module):
+            def __init__(self, ord_val):
+                super(LinalgSingleDimModel, self).__init__()
+                self.ord = ord_val
+
+            def forward(self, x):
+                return torch.linalg.norm(x, ord=self.ord, dim=1)
+
+        x = torch.randn(2, 3, 5, 5)
+        self.run_test(LinalgSingleDimModel(None), x)
+        self.run_test(LinalgSingleDimModel(2), x)
+        self.run_test(LinalgSingleDimModel(float('inf')), x)
+        self.run_test(LinalgSingleDimModel(-float('inf')), x)
+        self.run_test(LinalgSingleDimModel(-4), x)
+        self.run_test(LinalgSingleDimModel(1.5), x)
+
+        class LinalgMultiDimModel(torch.nn.Module):
+            def __init__(self, ord_val):
+                super(LinalgMultiDimModel, self).__init__()
+                self.ord = ord_val
+
+            def forward(self, x):
+                return torch.linalg.norm(x, ord=self.ord, dim=(0, 2))
+
+        x = torch.randn(2, 3, 5, 5)
+        self.run_test(LinalgMultiDimModel('fro'), x)
+        self.run_test(LinalgMultiDimModel(float('inf')), x)
+        self.run_test(LinalgMultiDimModel(-float('inf')), x)
+        self.run_test(LinalgMultiDimModel(1), x)
+        self.run_test(LinalgMultiDimModel(-1), x)
+
+        class LinalgNoDimNoOrdModel(torch.nn.Module):
+            def forward(self, x):
+                return torch.linalg.norm(x)
+
+        x = torch.randn(2, 3, 5, 5)
+        self.run_test(LinalgNoDimNoOrdModel(), x)
+        y = torch.randn(2, 3)
+        self.run_test(LinalgNoDimNoOrdModel(), y)
+        z = torch.randn(2)
+        self.run_test(LinalgNoDimNoOrdModel(), z)
+
+        class LinalgNoDim1DModel(torch.nn.Module):
+            def __init__(self, ord_val):
+                super(LinalgNoDim1DModel, self).__init__()
+                self.ord = ord_val
+
+            def forward(self, x):
+                return torch.linalg.norm(x, ord=self.ord)
+
+        x = torch.randn(2)
+        self.run_test(LinalgNoDim1DModel(None), x)
+        self.run_test(LinalgNoDim1DModel(2), x)
+        self.run_test(LinalgNoDim1DModel(float('inf')), x)
+        self.run_test(LinalgNoDim1DModel(-float('inf')), x)
+        self.run_test(LinalgNoDim1DModel(-4), x)
+        self.run_test(LinalgNoDim1DModel(1.5), x)
+
+        class LinalgNoDim2DModel(torch.nn.Module):
+            def __init__(self, ord_val):
+                super(LinalgNoDim2DModel, self).__init__()
+                self.ord = ord_val
+
+            def forward(self, x):
+                return torch.linalg.norm(x, ord=self.ord)
+
+        x = torch.randn(2, 3)
+        self.run_test(LinalgNoDim2DModel('fro'), x)
+        self.run_test(LinalgNoDim2DModel(float('inf')), x)
+        self.run_test(LinalgNoDim2DModel(-float('inf')), x)
+        self.run_test(LinalgNoDim2DModel(1), x)
+        self.run_test(LinalgNoDim2DModel(-1), x)
+
+    @skipIfUnsupportedMinOpsetVersion(11)
+    def test_linalg_vector_norm_zero(self):
+        class LinalgVectorNormModel(torch.nn.Module):
+            def __init__(self, ord_val):
+                super(LinalgVectorNormModel, self).__init__()
+                self.ord = ord_val
+
+            def forward(self, x):
+                return torch.linalg.vector_norm(x, ord=self.ord)
+
+        x = torch.randn(2, 3, 5, 5)
+        self.run_test(LinalgVectorNormModel(0), x)
+
+    def test_linalg_vector_norm(self):
+        class LinalgVectorNormModel(torch.nn.Module):
+            def __init__(self, ord_val, dim_info):
+                super(LinalgVectorNormModel, self).__init__()
+                self.ord = ord_val
+                self.dim, self.keepdim = dim_info
+
+            def forward(self, x):
+                return torch.linalg.vector_norm(x, ord=self.ord, dim=self.dim, keepdim=self.keepdim)
+
+        x = torch.randn(2, 3, 5, 5)
+        ord_options = [2, float('inf'), -float('inf'), -4, 1.5]
+        dim_options = [(None, False), (1, False), ((1, 2), False), ((1, 2), True)]
+        for ord_val in ord_options:
+            for dim_info in dim_options:
+                self.run_test(LinalgVectorNormModel(ord_val, dim_info), x)
+
+    def test_linalg_matrix_norm(self):
+        class LinalgMatrixNormModel(torch.nn.Module):
+            def __init__(self, ord_val, dim_val=(-2, -1), keepdim_val=False):
+                super(LinalgMatrixNormModel, self).__init__()
+                self.ord = ord_val
+                self.dim = dim_val
+                self.keepdim = keepdim_val
+
+            def forward(self, x):
+                return torch.linalg.matrix_norm(x, ord=self.ord, dim=self.dim, keepdim=self.keepdim)
+
+        x = torch.randn(2, 3, 5, 5)
+        ord_options = ['fro', float('inf'), -float('inf'), 1, -1]
+        for ord_val in ord_options:
+            self.run_test(LinalgMatrixNormModel(ord_val), x)
+            self.run_test(LinalgMatrixNormModel(ord_val, (0, 2)), x)
+            self.run_test(LinalgMatrixNormModel(ord_val, (0, 2), True), x)
 
     # This test checks output scalar type in the ONNX graph should not be null
     # https://github.com/pytorch/pytorch/issues/28607
@@ -7986,6 +8177,17 @@ class TestONNXRuntime(unittest.TestCase):
         model = EmbedModelWithoutPaddingIdx()
         x = torch.randint(4, (4, 3, 2))
         self.run_test(model, (x,))
+
+    @skipIfUnsupportedMinOpsetVersion(11)
+    def test_embedding_renorm(self):
+        n, d = 7, 5
+        embedding = torch.nn.Embedding(n, d, max_norm=0.2)
+        idx = torch.tensor([2, 1])
+        self.run_test(embedding, idx)
+
+        embedding = torch.nn.Embedding(n, d, max_norm=0.5, norm_type=1.)
+        idx = torch.tensor([4, 3, 4, 2])
+        self.run_test(embedding, idx)
 
     def _dispatch_rnn_test(self, name, *args, **kwargs):
         if name == "elman":
@@ -10200,6 +10402,18 @@ class TestONNXRuntime(unittest.TestCase):
         torch.onnx.export(RSoftMax(radix, cardinality), (x, ), f, input_names=["x"], dynamic_axes={"x": [0]})
         loaded_model = onnx.load_from_string(f.getvalue())
         self.assertEqual(loaded_model.graph.output[0].type.tensor_type.shape.dim[1].dim_value, 128)
+
+    @skipIfUnsupportedMinOpsetVersion(10)
+    def test_quantized_linear(self):
+        model = torch.nn.quantized.Linear(1, 2)
+        input = torch.rand(1, 1)
+        input_tensor = torch.quantize_per_tensor(input, 1, 0, torch.quint8)
+        # Currently, we need convert the model to ScriptModule before export.
+        # The reason is that PackedParams contains int (not tensor).
+        # Then it fails when the exporter calls _trace_and_get_graph_from_model().
+        # TODO: https://msdata.visualstudio.com/Vienna/_workitems/edit/1547858
+        self.run_test(torch.jit.trace(model, input_tensor), (input_tensor,))
+        self.run_test(torch.jit.script(model), (input_tensor,))
 
 def make_test(name, base, layer, bidirectional, initial_state,
               variable_length, dropout, script_test_min_opset_version,

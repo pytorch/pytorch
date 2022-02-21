@@ -40,8 +40,9 @@ if is_available():
         _compute_bucket_assignment_by_size,
         _verify_params_across_processes,
         _test_python_store,
-        _DistributedDebugLevel,
-        _get_debug_mode,
+        _DebugLevel,
+        _get_debug_level,
+        _set_debug_level,
     )
 
     if sys.platform != "win32":
@@ -65,3 +66,6 @@ if is_available():
     )
 
     from .remote_device import _remote_device
+
+
+torch._C._distributed_c10d._set_debug_level()
