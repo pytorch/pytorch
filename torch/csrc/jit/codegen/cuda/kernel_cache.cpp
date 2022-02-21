@@ -7,6 +7,7 @@
 #include <torch/csrc/jit/runtime/graph_executor.h>
 
 #include <c10/util/irange.h>
+#include <torch/csrc/jit/jit_log.h>
 
 namespace torch {
 namespace jit {
@@ -14,28 +15,6 @@ namespace fuser {
 namespace cuda {
 
 namespace {
-
-// permutes tensor from [N, S0, S1, ..., C] to [N, C, S0, S1, ...]
-at::Tensor revert_channels_last(at::Tensor& v) {
-  auto n_dim = v.dim();
-  std::vector<int64_t> permutation(n_dim);
-  std::iota(permutation.begin(), permutation.end(), -1); // -1, 0, 1, ..., n-2
-  permutation[0] = 0; // 0, 0, 1, ..., n-2
-  permutation[1] = n_dim - 1; // 0, n-1, 1, ..., n-2
-  return v.permute(permutation);
-}
-
-// permutes tensor from [N, C, S0, S1, ...] to [N, S0, S1, ..., C]
-at::Tensor convert_channels_last(IValue& v) {
-  TORCH_CHECK(v.isTensor(), "permutation can only be applied at tensor");
-  auto tensor = v.toTensor();
-  auto n_dim = tensor.dim();
-  std::vector<int64_t> permutation(n_dim);
-  std::iota(permutation.begin(), permutation.end(), 1); // 1, 2, 3, ..., n
-  permutation[0] = 0; // 0, 2, 3, ..., n
-  permutation[n_dim - 1] = 1; // 0, 2, 3, ..., 1
-  return tensor.permute(permutation);
-}
 
 // Check device of TensorType in all inputs ensure all tensors are on cuda
 // devices.
@@ -47,6 +26,10 @@ int getCommonDeviceCUDA(const at::ArrayRef<IValue>& inputs) {
       continue;
     }
     const auto& device = input.toTensor().device();
+    // skip cpu scalar tensor as they'll be promoted to scalar later
+    if (device.is_cpu() && is_cpu_scalar(input.toTensor())) {
+      continue;
+    }
     TORCH_CHECK(device.is_cuda(), "nvfuser only supports cuda device");
     auto cur_index = device.index();
     if (index != -1 && index != cur_index) {
@@ -137,34 +120,33 @@ InputsIdLookup::IdLookupReturn InputsIdLookup::lookupId(
 FusionExecutorCache::FusionExecutorCache(std::unique_ptr<Fusion> fusion)
     : fusion_(std::move(fusion)) {}
 
-// Note [ Channels Last support in nvfuser ]
+// Note [ Permutation support in nvfuser ]
 //
 // Background:
-// To support channels last in nvfuser with optimal performance, we would want
-// to allow dimension collapsing in generated code on channels-last tensors,
-// which greatly simplifies indexing. Current API in codegen only allows
-// dimensional collapsing on neighboring axes. The unfortunate thing is that
-// memory format design in PyTorch is implicitly marked by strides, while the
-// semantics meaning of axes remain unchanged. i.e. A 4d tensor with axes [N, C,
-// H, W] would have the same shape in both format, while contiguous tensor
-// carries strides [C*H*W, H*W, W, 1] and channels-last tensor [H*W*C, 1, W*C,
-// C].
+// To support permutation in nvfuser with optimal performance, we would want to
+// allow dimension collapsing in generated code on channels-last tensors, which
+// greatly simplifies indexing. Current API in codegen only allows dimensional
+// collapsing on neighboring axes. The unfortunate thing is that memory format
+// design in PyTorch is implicitly marked by strides, while the semantics
+// meaning of axes remain unchanged. i.e. A 4d tensor with axes [N, C, H, W]
+// would have the same shape in both format, while contiguous tensor carries
+// strides [C*H*W, H*W, W, 1] and channels-last tensor [H*W*C, 1, W*C, C]
 //
 // Approach:
-// Part_1. To allow axes collapsing for channels-last format in codegen, we can
+// Part_1. To allow axes collapsing for permuted tensor in codegen, we can
 // permute input tensor to have axes in decending order by their strides, so
 // they would be viewed as `contiguous` in codegen, hence collapsed to simple
 // indexing. Part_2. To ensure correct result, we need to ensure computation in
 // nvfuser carries same semantics as with TorchScript graph. We need to
 //   Part_2_1. Maintain a bookkeeping where each codegen tensor is tagged with
-//   either `contiguous` format or `channels_last` format. Part_2_2. Parsing
-//   rule should handle and propagate the tag properly, i.e. having special
-//   rules for `channels_last` input tensor and mark output in its right format.
-// Part_3. Codegen output tensor in `channels_last` format should be permuted
-// back to `contiguous` format before returning to TorchScript
+//   either their permutation. Part_2_2. Parsing rule should handle and
+//   propagate the tag properly, e.g. batch normalization has special rules for
+//   `channels_last` input tensor and mark output in its right permutation.
+// Part_3. Codegen output tensor that has been permuted should be restored to
+// original layout before returning to TorchScript
 //
-// For details  on Part_2, refer to implementation Note [ Format Bookkeeping and
-// Propagation in Parser ]
+// For details  on Part_2, refer to implementation Note [ Permutation
+// Bookkeeping and Propagation in Parser ]
 std::vector<at::Tensor> FusionExecutorCache::runFusionWithInputs(
     const at::ArrayRef<IValue>& inputs) {
   FUSER_PERF_SCOPE("FusionExecutorCache::runFusionWithInputs");
@@ -172,12 +154,16 @@ std::vector<at::Tensor> FusionExecutorCache::runFusionWithInputs(
   // permute input tensor for kernel execution. See Part_1 in Note [ Channels
   // Last support in nvfuser ]
   at::ArrayRef<IValue> perm_inputs = inputs;
-  const auto& c_last_inputs = fusion_->getChannelsLastInputIndices();
+  const auto& to_be_permuted_inputs = fusion_->getPermutationInputMap();
   std::vector<IValue> inputs_vec;
-  if (!c_last_inputs.empty()) {
+  if (!to_be_permuted_inputs.empty()) {
     inputs_vec = inputs.vec();
-    for (const auto i : c_last_inputs) {
-      inputs_vec[i] = convert_channels_last(inputs_vec[i]);
+    for (const auto& pair : to_be_permuted_inputs) {
+      auto v = inputs_vec[pair.first];
+      TORCH_CHECK(
+          v.isTensor(), "input permutation can only be applied at tensor");
+      auto tensor = v.toTensor();
+      inputs_vec[pair.first] = tensor.permute(pair.second);
     }
     perm_inputs = inputs_vec;
   }
@@ -196,9 +182,9 @@ std::vector<at::Tensor> FusionExecutorCache::runFusionWithInputs(
   auto outputs = kernel_runtime->runWithInput(perm_inputs, unique_id);
 
   // permute output tensor returned by kernel execution. See Part_3 in Note [
-  // Channels Last support in nvfuser ]
-  for (const auto i : fusion_->getChannelsLastOutputIndices()) {
-    outputs[i] = revert_channels_last(outputs[i]);
+  // Permutation support in nvfuser ]
+  for (const auto& pair : fusion_->getPermutationOutputMap()) {
+    outputs[pair.first] = outputs[pair.first].permute(pair.second);
   }
 
   return outputs;
@@ -221,9 +207,9 @@ FusionKernelRuntime* FusionExecutorCache::getKernelRuntimeFor(
   }
 
   // Access kernels associated with the common device id
-  auto dev_id = getCommonDeviceCUDA(inputs);
-  TORCH_INTERNAL_ASSERT(dev_id >= 0);
-  auto& kernel_runtimes = kernel_runtimes_[dev_id];
+  auto device_index = getCommonDeviceCUDA(inputs);
+  TORCH_CHECK(device_index >= 0, "device is not coherent for fusion inputs");
+  auto& kernel_runtimes = kernel_runtimes_[device_index];
 
   // Check for re-use hit case
   //  a kernel runtime is re-usable if all the compiled
@@ -296,14 +282,6 @@ FusionKernelRuntime::FusionKernelRuntime(
   } else {
     auto complete_fusion_heuristic = maybe_complete_fusion_heuristic.value();
 
-    // Translate welfords if apply
-    if (fusion_copy->hasWelford()) {
-      bool translated = SegmentCandidateFinder::TranslateWelfordInFusion(
-          fusion_copy.get(), inputs);
-      if (translated) {
-        complete_fusion_heuristic = ScheduleHeuristic::Persistent;
-      }
-    }
     // Take ownership of the transformed fusion
     single_kernel_fusion_ = std::move(fusion_copy);
 
@@ -377,7 +355,7 @@ std::vector<at::Tensor> FusionKernelRuntime::runKernelWithInput(
       launch_params = scheduler_entry->pointwiseParams().lparams;
     }
     executors_[group_id].compileFusion(
-        fusion_to_run.get(), options, inputs, launch_params);
+        fusion_to_run.get(), inputs, launch_params, options);
   } else {
     // Load launch params for reduction and normalization kernels
     if (scheduler_entry->hasReductionParam()) {
@@ -472,6 +450,7 @@ std::vector<at::Tensor> FusionKernelRuntime::runWithInput(
         " inputs but expecting ",
         segmented_fusion_->inputs().size());
 
+    c10::Device device(c10::DeviceType::CUDA, 0);
     int extent_index_ = 0;
     // Bind input in the tensor_map
     for (const auto i : c10::irange(inputs.size())) {
@@ -485,6 +464,7 @@ std::vector<at::Tensor> FusionKernelRuntime::runWithInput(
       //      more convenient and safer than replication
       if (inputs[i].isTensor()) {
         auto aten_tensor = inputs[i].toTensor();
+        device = aten_tensor.device();
         for (auto dim_size : aten_tensor.sizes()) {
           runtime_workspace_.tensor_map.emplace(
               runtime_workspace_.group_extent_binding_order[extent_index_++],
@@ -523,14 +503,30 @@ std::vector<at::Tensor> FusionKernelRuntime::runWithInput(
       if (iter != runtime_workspace_.tensor_map.end()) {
         fusion_outputs.push_back(iter->second);
       } else {
+        bool empty_type_check = output->getDataType().has_value() &&
+            output->getDataType().value() == DataType::Float;
+
+        // Only support two cases of empty tensor here, since
+        //   this is hot path.
+        auto out_tv = output->as<TensorView>();
+
+        // TODO: should be only one of the two once the "empty"
+        //  definition has been unified throughout the ops.
+        bool empty_tensor_check =
+            out_tv->isZeroDim() || out_tv->isEmptyTensor();
+
         // This is the check for an empty tensor;
         TORCH_INTERNAL_ASSERT(
-            output->as<TensorView>()->nDims() == 0 &&
-                output->getDataType().has_value() &&
-                output->getDataType().value() == DataType::Float,
+            empty_tensor_check && empty_type_check,
             "Non empty tensor cannot be found at tensor_map in ",
             __FUNCTION__);
-        fusion_outputs.emplace_back(at::Tensor());
+
+        // TODO: would need to clean up this part when
+        //   we have a unified and consistent way to generate
+        //   size-0 tensors.
+        const auto tensor_options =
+            at::TensorOptions().dtype(at::kFloat).device(device);
+        fusion_outputs.emplace_back(at::empty({0}, tensor_options));
       }
     }
 

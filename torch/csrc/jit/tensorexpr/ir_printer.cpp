@@ -402,7 +402,7 @@ void IRPrinter::visit(ReduceOpPtr v) {
     if (!first) {
       os() << ", ";
     }
-    os() << d->name_hint();
+    os() << *d;
     first = false;
   }
   os() << "})";
@@ -483,10 +483,14 @@ void IRPrinter::visit(FreePtr v) {
   os() << "Free(" << *v->buffer_var() << ");";
 }
 
+void IRPrinter::visit(PlacementAllocatePtr v) {
+  os() << "Alias(" << *v->buf()->base_handle() << ","
+       << *v->buf_to_reuse()->base_handle() << ");";
+}
+
 void IRPrinter::visit(LetPtr v) {
   os() << dtypeToCppString(v->var()->dtype()) << " " << *v->var();
-  os() << " = " << *v->value();
-  os() << ";" << std::endl;
+  os() << " = " << *v->value() << ";";
 }
 
 void IRPrinter::visit(CondPtr v) {

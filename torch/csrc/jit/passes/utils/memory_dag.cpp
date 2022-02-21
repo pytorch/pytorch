@@ -100,6 +100,19 @@ void MemoryDAG::collectAllContainedMemoryLocationsImpl(
 }
 
 bool MemoryDAG::mayContainAlias(
+    const Element* a,
+    const at::ArrayRef<Element*> b) const {
+  if (b.size() == 0) {
+    return false;
+  }
+
+  const auto& a_contained = getAllContainedMemoryLocations(a);
+  return std::any_of(b.begin(), b.end(), [this, &a_contained](Element* b_elem) {
+    return a_contained.intersects(this->getAllContainedMemoryLocations(b_elem));
+  });
+}
+
+bool MemoryDAG::mayContainAlias(
     const at::ArrayRef<Element*> a,
     const at::ArrayRef<Element*> b) const {
   if (a.size() == 0 || b.size() == 0) {

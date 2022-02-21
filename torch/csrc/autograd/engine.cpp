@@ -37,7 +37,6 @@
 #include <typeinfo>
 #include <sstream>
 #include <queue>
-#include <TH/TH.h>
 
 namespace torch { namespace autograd {
 
@@ -56,6 +55,14 @@ static void track_bad_autograd_forks() {
   std::call_once(
       flag, [&] { pthread_atfork(nullptr, nullptr, forked_autograd_child); });
 #endif
+}
+
+inline bool should_run_in_cpu_ready_queue(c10::DeviceType device) {
+  if (device == c10::kCPU || device == c10::kMeta || device == c10::kLazy) {
+    return true;
+  } else {
+    return false;
+  }
 }
 }
 
@@ -93,9 +100,10 @@ C10_DEFINE_TLS_static(std::shared_ptr<GraphTask>, tls_current_graph_task);
 // Engine::init_local_ready_queue() call in each corresponding thread before execution.
 //
 // The CUDA, XLA threads are shared among all invocations of backwards via
-// device_ready_queues_, while CPU threads are dedicated to processing CPU work for
-// the backward they invoked. So any given graph task maintains its own cpu_ready_queue_
-// where you should send work for it to be done
+// device_ready_queues_, while the caller thread is dedicated to processing work for
+// devices returning true in should_run_in_cpu_ready_queue (most notably the CPU device).
+// So any given graph task maintains its own cpu_ready_queue_ where you should send work
+// for it to be done.
 //
 // For reentrant backward calls, if we spawn new thread from the current thread
 // because we reached the maximum depth, the new thread will just reuse the same
@@ -1045,7 +1053,6 @@ auto Engine::execute(const edge_list& roots,
 }
 
 void Engine::initialize_device_threads_pool() {
-  track_bad_autograd_forks();
   TORCH_CHECK(!in_bad_autograd_fork,
               "Unable to handle autograd's threading in combination with fork-based multiprocessing. "
               "See https://github.com/pytorch/pytorch/wiki/Autograd-and-Fork");
@@ -1168,23 +1175,14 @@ void Engine::init_local_ready_queue(std::shared_ptr<ReadyQueue> ready_queue) {
   }
 }
 
-size_t Engine::ready_queue_size(const std::shared_ptr<GraphTask>& graph_task, at::Device device) {
-  if (device_ready_queues_.empty()) {
-    // The vector device_ready_queues_ is initialized in start_device_threads, but this method
-    // can be called before start_device_threads. Adding this check to avoid index
-    // out of bound error.
-    return 0;
-  }
-  return ready_queue(graph_task->cpu_ready_queue_, device)->size();
-}
-
 // CPU ready queue is per GraphTask, but CUDA device ready queues are shared across all graph tasks
 auto Engine::ready_queue(std::shared_ptr<ReadyQueue> cpu_ready_queue, at::Device device) -> std::shared_ptr<ReadyQueue>{
-  if (device.type() == at::kCPU || device.type() == at::DeviceType::Meta) {
+  if (should_run_in_cpu_ready_queue(device.type())) {
     // return the cpu ready queue passed in
     TORCH_INTERNAL_ASSERT(cpu_ready_queue);
     return cpu_ready_queue;
   } else {
+    TORCH_INTERNAL_ASSERT(0 <= device.index() && device.index() < static_cast<c10::DeviceIndex>(device_ready_queues_.size()));
     // See Note [Allocating GPUs to autograd threads]
     return device_ready_queues_.at(device.index());
   }
@@ -1196,8 +1194,7 @@ auto Engine::ready_queue_by_index(std::shared_ptr<ReadyQueue> cpu_ready_queue, i
     TORCH_INTERNAL_ASSERT(cpu_ready_queue);
     return cpu_ready_queue;
   } else {
-    // Static cast is ok here as the number of device should never overflow an int.
-    TORCH_INTERNAL_ASSERT(0 <= device_index && device_index < static_cast<int>(device_ready_queues_.size()));
+    TORCH_INTERNAL_ASSERT(0 <= device_index && device_index < static_cast<c10::DeviceIndex>(device_ready_queues_.size()));
     // See Note [Allocating GPUs to autograd threads]
     // NB: This function would become obsolete if we truly allocated a CPU thread
     // per device, rather than colocate.
@@ -1206,14 +1203,28 @@ auto Engine::ready_queue_by_index(std::shared_ptr<ReadyQueue> cpu_ready_queue, i
 }
 
 auto Engine::start_device_threads() -> void {
+  // First always initialize the thread pool for re-entrant threads
+  thread_pool_shared_ = std::make_shared<ThreadPoolShared>();
+
+  // Second, create special threads for each non-CPU device
   // See Note [Allocating GPUs to autograd threads]
   c10::DeviceIndex num_devices = 0;
   for (const auto& impl_atomic : c10::impl::device_guard_impl_registry) {
     auto* impl = impl_atomic.load();
-    if (impl) {
+    // Only record the number of devices for device that don't run on the
+    // cpu ready queue.
+    if (impl && !should_run_in_cpu_ready_queue(impl->type())) {
       num_devices = std::max(num_devices, impl->deviceCount());
     }
   }
+
+  // If there are no device except cpu, no need to create worker threads
+  if (num_devices == 0) {
+    return;
+  }
+
+  // Since we're about to create threads, forking is not possible anymore
+  track_bad_autograd_forks();
 
   // allocate one thread for every GPU device (but colocate GPUs of different
   // types), and pre-allocate the device_ready_queues_ to ensure safe reading on it.
@@ -1221,8 +1232,6 @@ auto Engine::start_device_threads() -> void {
   for (auto& queue : device_ready_queues_)    {
     queue = std::make_shared<ReadyQueue>();
   }
-
-  thread_pool_shared_ = std::make_shared<ThreadPoolShared>();
 
   for (const auto i : c10::irange(num_devices)) {
     std::thread t(&Engine::thread_init, this, i, device_ready_queues_[i], true);
@@ -1247,6 +1256,8 @@ void Engine::add_thread_pool_task(const std::weak_ptr<GraphTask>& graph_task) {
   // Don't need to be holding the lock while actually creating the thread
   lck.unlock();
   if (create_thread) {
+    // If we're creating a new thread, forking is not allowed anymore
+    track_bad_autograd_forks();
     std::thread t(&Engine::reentrant_thread_init, this);
     t.detach();
   }
@@ -1263,7 +1274,7 @@ void GraphTask::stash_current_streams() {
   caller_current_streams_.resize(num_gpus);
   if (num_gpus > 0) {
     for (c10::DeviceIndex idx = 0; idx < num_gpus;  idx++) {
-#if defined(USE_ROCM)
+#if defined(USE_ROCM) && (ROCM_VERSION < 50000)
       // If the build targets ROCM, stash streams for all visible devices unconditionally, to work around
       // https://github.com/pytorch/pytorch/issues/59750.
       // TODO: Remove ROCM-specific behavior when https://github.com/pytorch/pytorch/issues/59750 is fixed.

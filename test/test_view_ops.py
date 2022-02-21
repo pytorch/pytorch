@@ -14,7 +14,7 @@ from torch.testing._internal.common_utils import (
     torch_to_numpy_dtype_dict,
 )
 from torch.testing._internal.common_device_type import \
-    (instantiate_device_type_tests, onlyCPU, dtypes, onlyNativeDeviceTypes)
+    (instantiate_device_type_tests, onlyCPU, dtypes, onlyNativeDeviceTypes, skipMeta)
 from torch.testing._internal.common_dtype import (
     get_all_dtypes, get_all_int_dtypes, get_all_fp_dtypes, get_all_complex_dtypes
 )
@@ -382,11 +382,8 @@ class TestViewOps(TestCase):
 
     @onlyNativeDeviceTypes
     @dtypes(*(get_all_int_dtypes() + get_all_fp_dtypes()))
-    def test_real_imag_noncomplex(self, device, dtype):
+    def test_imag_noncomplex(self, device, dtype):
         t = torch.ones((5, 5), dtype=dtype, device=device)
-
-        with self.assertRaises(RuntimeError):
-            torch.real(t)
 
         with self.assertRaises(RuntimeError):
             torch.imag(t)
@@ -516,6 +513,9 @@ class TestViewOps(TestCase):
             g_expected = torch.stack([gi if j == i else torch.zeros_like(gi)
                                       for j in range(3)], dim=0)
             self.assertEqual(g, g_expected)
+        # Check with gradcheck
+        stacked = torch.randn(3, 10, 10, dtype=torch.double, requires_grad=True)
+        gradcheck(lambda x: x.unbind(), (stacked,), check_forward_ad=True)
 
     def test_expand_view(self, device) -> None:
         t = torch.ones((5, 1), device=device)
@@ -678,7 +678,7 @@ class TestViewOps(TestCase):
                     x = prepro_fn(x)
                 return x.as_strided(size, strides, offset)
 
-            gradcheck(closure, [x])
+            gradcheck(closure, [x], check_forward_ad=True)
             gradgradcheck(closure, [x])
 
         # test
@@ -729,6 +729,7 @@ class TestViewOps(TestCase):
         s = t.contiguous()
         self.assertTrue(s is t)
 
+    @skipMeta
     def test_contiguous_nonview(self, device):
         t = torch.ones(5, 5, device=device)
         nv = t.t().contiguous()
@@ -754,6 +755,7 @@ class TestViewOps(TestCase):
         v[6] = 0
         self.assertEqual(t[1, 1], v[6])
 
+    @skipMeta
     def test_reshape_nonview(self, device):
         t = torch.ones(5, 5, device=device)
         nv = torch.reshape(t.t(), (25,))
@@ -806,7 +808,8 @@ class TestViewOps(TestCase):
             idx_nv = (0,) * nv.ndim
             self.assertTrue(not nv._is_view())
             nv[idx_nv] = 0
-            self.assertNotEqual(t[idx_t], nv[idx_nv])
+            if device != "meta":
+                self.assertNotEqual(t[idx_t], nv[idx_nv])
         t = torch.ones(2, 3, 2, 3, device=device).transpose(2, 3)
         nv = t.flatten(1, 3)
         assert_is_nonview(t, nv)
@@ -1027,7 +1030,9 @@ class TestOldViewOps(TestCase):
         self.assertRaises(RuntimeError, lambda: x.reshape(-1, -1))
 
         y = torch.randn(4, 4, 4, device=device)[:, 0, :]
-        self.assertNotEqual(y.data_ptr(), y.reshape(-1).data_ptr())
+        # .data_ptr() on meta tensors is always 0 so they are equal regardless of the reshape
+        if device != "meta":
+            self.assertNotEqual(y.data_ptr(), y.reshape(-1).data_ptr())
         self.assertEqual(y.contiguous().view(-1), y.reshape(-1))
         self.assertEqual(y.reshape(2, 2, 4).data_ptr(), y.data_ptr())
 

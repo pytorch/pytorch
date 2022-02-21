@@ -5,7 +5,6 @@
 #include <torch/csrc/jit/codegen/cuda/ir_utils.h>
 #include <torch/csrc/jit/codegen/cuda/iter_visitor.h>
 #include <torch/csrc/jit/codegen/cuda/kernel_expr_evaluator.h>
-#include <torch/csrc/jit/codegen/cuda/kernel_ir_printer.h>
 #include <torch/csrc/jit/codegen/cuda/lower2device.h>
 #include <torch/csrc/jit/codegen/cuda/lower_utils.h>
 #include <torch/csrc/jit/codegen/cuda/transform_replay.h>
@@ -19,7 +18,7 @@ namespace jit {
 namespace fuser {
 namespace cuda {
 
-std::vector<kir::Expr*> LoopNestGenerator::loweredExprs(
+std::vector<Expr*> LoopNestGenerator::loweredExprs(
     const std::vector<Expr*>& exprs) {
   FUSER_PERF_SCOPE("GpuLower::Lower::LoopNestGenerator::loweredExprs");
   TORCH_INTERNAL_ASSERT(FusionGuard::getCurFusion() != nullptr);
@@ -33,22 +32,20 @@ LoopNestGenerator::LoopNestGenerator(const std::vector<Expr*>& exprs) {
 
 namespace {
 
-kir::ForLoop* openForHelper(kir::ForLoop* scope, kir::IterDomain* kir_id) {
-  const auto gpu_lower = GpuLower::current();
-  kir::IrBuilder ir_builder(gpu_lower->kernel());
-  auto extent_with_halo = gpu_lower->haloInfo().getExtent(kir_id);
+kir::ForLoop* openForHelper(kir::ForLoop* scope, IterDomain* id) {
+  auto extent_with_halo = GpuLower::current()->haloInfo().getExtent(id);
   kir::ForLoop* new_scope = nullptr;
   if (extent_with_halo) {
     // When an axis is extended with halo, unrolling and vectorization
     // are assumed to not be used for now.
     TORCH_INTERNAL_ASSERT(
-        kir_id->parallelType() != ParallelType::Unroll &&
-        !isParallelTypeVectorize(kir_id->parallelType()));
+        id->getParallelType() != ParallelType::Unroll &&
+        !isParallelTypeVectorize(id->getParallelType()));
     // Use the extent that's extended by halo
-    new_scope = ir_builder.create<kir::ForLoop>(
-        kir_id,
-        kir_id->isBroadcast() ? ir_builder.zeroVal()
-                              : ir_builder.create<kir::Int>(c10::nullopt),
+    new_scope = IrBuilder::create<kir::ForLoop>(
+        id,
+        id->isBroadcast() ? GpuLower::current()->kernel()->zeroVal()
+                          : IrBuilder::create<Int>(c10::nullopt),
         nullptr,
         extent_with_halo,
         nullptr,
@@ -56,7 +53,7 @@ kir::ForLoop* openForHelper(kir::ForLoop* scope, kir::IterDomain* kir_id) {
         nullptr,
         false);
   } else {
-    new_scope = ir_builder.create<kir::ForLoop>(kir_id);
+    new_scope = IrBuilder::create<kir::ForLoop>(id);
   }
   if (scope != nullptr) {
     scope->body().insert(0, new_scope);
@@ -66,13 +63,13 @@ kir::ForLoop* openForHelper(kir::ForLoop* scope, kir::IterDomain* kir_id) {
 
 } // namespace
 
-void LoopNestGenerator::openFor(kir::IterDomain* kir_iter_domain) {
+void LoopNestGenerator::openFor(IterDomain* id) {
   if (for_loops_.size() > 0) {
-    const auto new_scope = openForHelper(for_loops_.back(), kir_iter_domain);
+    const auto new_scope = openForHelper(for_loops_.back(), id);
     // for_loop_allocations_.insert({new_scope, 0});
     for_loops_.push_back(new_scope);
   } else {
-    for_loops_.push_back(openForHelper(nullptr, kir_iter_domain));
+    for_loops_.push_back(openForHelper(nullptr, id));
     lowered_exprs_.insert(lowered_exprs_.begin(), for_loops_.back());
   }
 }
@@ -82,7 +79,7 @@ void LoopNestGenerator::closeFor() {
   for_loops_.pop_back();
 }
 
-void LoopNestGenerator::pushFront(kir::Expr* expr) {
+void LoopNestGenerator::pushFront(Expr* expr) {
   if (for_loops_.size() == 0) {
     lowered_exprs_.insert(lowered_exprs_.begin(), expr);
   } else {
@@ -91,18 +88,15 @@ void LoopNestGenerator::pushFront(kir::Expr* expr) {
 }
 
 void LoopNestGenerator::handle(Expr* expr) {
-  const auto gpu_lower = GpuLower::current();
-  kir::IrBuilder ir_builder(gpu_lower->kernel());
-
   // Check if it's a tensor view expression we need to place in the loop nest
   // structure
-  if (!ir_utils::isTVOp(expr)) {
+  if (!ir_utils::isTvOp(expr)) {
     // Close all the loops, scalar operations cannot be inside for loops based
     // on expr sorting.
     while (!for_loops_.empty()) {
       closeFor();
     }
-    pushFront(gpu_lower->lowerExpr(expr));
+    pushFront(expr);
 
     for (auto out : expr->outputs()) {
       TORCH_INTERNAL_ASSERT(
@@ -112,10 +106,8 @@ void LoopNestGenerator::handle(Expr* expr) {
           " cannot lower ",
           out->getValType().value());
 
-      pushFront(ir_builder.create<kir::Allocate>(
-          gpu_lower->lowerValue(out),
-          MemoryType::Local,
-          ir_builder.create<kir::Int>(1)));
+      pushFront(IrBuilder::create<kir::Allocate>(
+          out, MemoryType::Local, GpuLower::current()->kernel()->oneVal()));
     }
     return;
   }
@@ -130,27 +122,19 @@ void LoopNestGenerator::handle(Expr* expr) {
 
   // Figure out what the entire loop structure should look like.
   std::vector<IterDomain*> loop_structure = loop_structures_.at(out_tv);
-  std::vector<kir::IterDomain*> kir_loop_structure;
 
-  std::transform(
-      loop_structure.begin(),
-      loop_structure.end(),
-      std::back_inserter(kir_loop_structure),
-      [&gpu_lower](IterDomain* id) {
-        return gpu_lower->lowerValue(id)->as<kir::IterDomain>();
-      });
   // Ordering of loop_structure is global, so simply close loops we don't need,
   // and open the ones we do.
 
   while (!for_loops_.empty() &&
          std::find(
-             kir_loop_structure.begin(),
-             kir_loop_structure.end(),
-             for_loops_.back()->iter_domain()) == kir_loop_structure.end()) {
+             loop_structure.begin(),
+             loop_structure.end(),
+             for_loops_.back()->iter_domain()) == loop_structure.end()) {
     closeFor();
   }
 
-  for (auto loop : kir_loop_structure) {
+  for (auto loop : loop_structure) {
     auto find_it = std::find_if(
         for_loops_.begin(), for_loops_.end(), [loop](kir::ForLoop* fl) {
           return fl->iter_domain() == loop;
@@ -160,7 +144,7 @@ void LoopNestGenerator::handle(Expr* expr) {
     }
   }
 
-  pushFront(gpu_lower->lowerExpr(expr));
+  pushFront(expr);
 }
 
 namespace {
@@ -234,6 +218,52 @@ void LoopNestGenerator::generate(const std::vector<Expr*>& exprs) {
       // Loops after tv_id are dependent on tv_id
       dependencies.emplace(parallel_map.getConcreteMappedID(tv_id));
     }
+  }
+
+  // Fill out dependencies as IDs will have local dependency information, but
+  // it's still not guaranteed to be global.
+
+  // If loop structure is something like:
+  // T0 [I0]
+  // T1 [I0, I1]
+  // T2 [I1, I2]
+  //
+  // I0 will be marked as a dependency of I1
+  // I1 will be marked as a dependency of I2
+  //
+  // However, I0 will not be marked as a dep of I2, so we need to fill out the
+  // dependency analysis. This is done by iterating through IterDomains filling
+  // out all the dependencies of dependencies recursively.
+
+  std::deque<IterDomain*> to_visit;
+  std::unordered_set<IterDomain*> visited;
+
+  std::transform(
+      concrete_id_dependencies.begin(),
+      concrete_id_dependencies.end(),
+      std::back_inserter(to_visit),
+      [](const auto& concrete_dep_entry) { return concrete_dep_entry.first; });
+
+  while (!to_visit.empty()) {
+    auto id = to_visit.front();
+    to_visit.pop_front();
+
+    auto& dependencies = concrete_id_dependencies.at(id);
+    bool ready = std::all_of(
+        dependencies.begin(), dependencies.end(), [&visited](IterDomain* id) {
+          return visited.count(id);
+        });
+
+    if (!ready) {
+      to_visit.push_back(id);
+      continue;
+    }
+
+    for (auto dependency : dependencies) {
+      auto dep_of_dep = concrete_id_dependencies.at(dependency);
+      dependencies.insert(dep_of_dep.begin(), dep_of_dep.end());
+    }
+    visited.emplace(id);
   }
 
   // Generate loop structure for each tensor view

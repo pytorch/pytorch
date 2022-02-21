@@ -278,17 +278,10 @@ void initTensorExprBindings(PyObject* module) {
         self->set_src_value(value.node());
       });
 
-  py::class_<DimArg>(te, "DimArg")
-      .def(py::init<const ExprHandle&>())
-      .def(py::init<const ExprHandle&, const std::string&>());
-  py::implicitly_convertible<ExprHandle, DimArg>();
-  py::implicitly_convertible<int32_t, DimArg>();
-  py::implicitly_convertible<int64_t, DimArg>();
-
   te.def(
       "Compute",
       [](const std::string& func_name,
-         const std::vector<DimArg>& dim_args,
+         const std::vector<ExprHandle>& dim_args,
          py::function func) {
         if (dim_args.size() == 1) {
           return Compute(func_name, dim_args, [&func](const VarHandle& a) {
@@ -329,7 +322,7 @@ void initTensorExprBindings(PyObject* module) {
   te.def(
       "Compute2",
       [](const std::string& func_name,
-         const std::vector<DimArg>& dim_args,
+         const std::vector<ExprHandle>& dim_args,
          py::function func) {
         return Compute(
             func_name, dim_args, [&func](const std::vector<VarHandle>& dims) {
@@ -348,10 +341,10 @@ void initTensorExprBindings(PyObject* module) {
   te.def(
       "Reduce",
       [](const std::string& func_name,
-         const std::vector<DimArg>& dim_args,
+         const std::vector<ExprHandle>& dim_args,
          const Reducer& reducer,
          Tensor buffer,
-         const std::vector<DimArg>& reduce_args) {
+         const std::vector<ExprHandle>& reduce_args) {
         return Reduce(func_name, dim_args, reducer, buffer, reduce_args);
       },
       py::return_value_policy::reference);
@@ -359,34 +352,34 @@ void initTensorExprBindings(PyObject* module) {
   te.def(
       "Reduce",
       [](const std::string& func_name,
-         const std::vector<DimArg>& dim_args,
+         const std::vector<ExprHandle>& dim_args,
          const Reducer& reducer,
          const BufHandle& buffer,
-         const std::vector<DimArg>& reduce_args) {
+         const std::vector<ExprHandle>& reduce_args) {
         return Reduce(func_name, dim_args, reducer, buffer, reduce_args);
       },
       py::return_value_policy::reference);
   te.def(
       "Reduce",
       [](const std::string& func_name,
-         const std::vector<DimArg>& dim_args,
+         const std::vector<ExprHandle>& dim_args,
          const Reducer& reducer,
          const std::function<ExprHandle(const std::vector<VarHandle>&)>&
              body_func,
-         const std::vector<DimArg>& reduce_args) {
+         const std::vector<ExprHandle>& reduce_args) {
         return Reduce(func_name, dim_args, reducer, body_func, reduce_args);
       },
       py::return_value_policy::reference);
   te.def(
       "Reduce",
       [](const std::string& func_name,
-         const std::vector<DimArg>& dim_args,
+         const std::vector<ExprHandle>& dim_args,
          const Reducer& reducer,
          const std::function<ExprHandle(const std::vector<VarHandle>&)>&
              init_func,
          const std::function<ExprHandle(const std::vector<VarHandle>&)>&
              body_func,
-         const std::vector<DimArg>& reduce_args) {
+         const std::vector<ExprHandle>& reduce_args) {
         return Reduce(func_name, dim_args, reducer, body_func, reduce_args);
       },
       py::return_value_policy::reference);
@@ -607,11 +600,18 @@ void initTensorExprBindings(PyObject* module) {
           },
           py::return_value_policy::reference)
       .def(
-          "unroll",
-          [](const LoopNest& self, ForPtr f) {
+          "fullUnroll",
+          [](ForPtr f) {
             StmtPtr unrolled = nullptr;
-            self.unroll(f, &unrolled);
+            LoopNest::fullUnroll(f, &unrolled);
             return unrolled;
+          },
+          py::return_value_policy::reference)
+      .def(
+          "unroll",
+          [](ForPtr f, int factor) {
+            LoopNest::unroll(f, factor);
+            return f;
           },
           py::return_value_policy::reference)
       .def(
@@ -888,6 +888,13 @@ void initTensorExprBindings(PyObject* module) {
   te.def("annotate_input_shapes", &tensorexpr::annotateInputShapes);
   te.def("remove_unused_self_argument", &tensorexpr::removeUnusedSelfArgument);
   te.def("make_shapes_symbolic", &tensorexpr::makeShapesSymbolic);
+  te.def("is_graph_compilable", &tensorexpr::isGraphCompilable);
+  te.def("fixup_missing_shape_info", &tensorexpr::fixupMissingShapeInfo);
+  te.def("remove_graph_output", &tensorexpr::removeGraphOutput);
+  te.def(
+      "replace_list_output_with_tuple",
+      &tensorexpr::replaceListOutputWithTuple);
+  te.def("trim_graph", &tensorexpr::trimGraph);
 #ifdef TORCH_ENABLE_LLVM
   te.def("set_llvm_target_triple", [](const c10::optional<std::string>& val) {
     tensorexpr::LLVMTargetTriple() = val;

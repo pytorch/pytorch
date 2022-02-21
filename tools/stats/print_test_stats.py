@@ -637,23 +637,6 @@ class TestSuite:
         self.test_cases[name].unexpected_success |= test_case.unexpected_success
         self.test_cases[name].expected_failure |= test_case.expected_failure
 
-    def print_report(self, num_longest: int = 3) -> None:
-        sorted_tests = sorted(self.test_cases.values(), key=lambda x: x.time)
-        test_count = len(sorted_tests)
-        print(f"class {self.name}:")
-        print(
-            f"    tests: {test_count} failed: {self.failed_count} skipped: {self.skipped_count} "
-            f"errored: {self.errored_count} unexpected_success: {self.unexpected_success_count} "
-            f"expected_failure: {self.expected_failure_count}")
-        print(f"    run_time: {self.total_time:.2f} seconds")
-        print(f"    avg_time: {self.total_time/test_count:.2f} seconds")
-        if test_count >= 2:
-            print(f"    median_time: {statistics.median(x.time for x in sorted_tests):.2f} seconds")
-        sorted_tests = sorted_tests[-num_longest:]
-        print(f"    {len(sorted_tests)} longest tests:")
-        for test in reversed(sorted_tests):
-            print(f"        {test.name} time: {test.time:.2f} seconds")
-        print("")
 
 DuplicatedDict = Dict[str, Dict[str, List[TestCase]]]
 
@@ -753,27 +736,40 @@ def process_intentional_test_runs(runs: List[TestCase]) -> Tuple[int, int]:
             num_skipped += 1
         else:
             num_pass += 1
-    err_msg = f'Warning: unintentional test case duplicates found for {test_run.name} in suite  {test_run.class_name}.'
-    report_only = os.getenv('PYTORCH_OVERRIDE_FLAKY_SIGNAL') != '1'
-    if report_only and num_fail + num_errored + num_unexpected_success < 1 or not report_only and num_expected_fail < 1:
-        raise RuntimeWarning(f'{err_msg} Intentional reruns are only triggered when the first run fails or errors, but'
-                             ' we found no failures nor errors.')
-    if num_unexpected_success + num_expected_fail < 1:
-        raise RuntimeWarning(f'{err_msg} Intentional reruns should raise at least one unexpected success or expected '
-                             'failure, but none have been found.')
-    if report_only and num_pass != num_unexpected_success:
-        raise RuntimeWarning(f'{err_msg} Every success in an intentional rerun is shadowed by one unexpected success.'
-                             f'However, successes = {num_pass} and unexpected successes = {num_unexpected_success}')
-    if not report_only and num_pass > 1:
-        raise RuntimeWarning(f'{err_msg} There should be at most 1 successful run in an intentional rerun that stops at'
-                             f' first success. The number of successful runs = {num_pass}')
-    if num_skipped > 0:
-        raise RuntimeWarning(f'{err_msg} No skips should occur in intentional reruns, but skips = {num_skipped}')
+
+    REPEAT_TEST_FOR_TYPES_TESTS = [
+        "test_data_parallel_module",
+        "test_data_parallel_module_kwargs_only",
+        "test_data_parallel_module_kwargs_only_empty_list",
+        "test_data_parallel_module_kwargs_only_empty_dict",
+        "test_data_parallel_module_kwargs_only_empty_tuple"
+    ]
+
+    # Do not run checks for tests that use repeat_test_for_types decorator as they do not go well with our retry
+    # functionality. Once issue https://github.com/pytorch/pytorch/issues/69865 is fixed, we should remove the exception
+    if not any([x in test_run.name for x in REPEAT_TEST_FOR_TYPES_TESTS]):
+        err_msg = f'Warning: unintentional test case duplicates found for {test_run.name} in suite {test_run.class_name}.'
+        report_only = os.getenv('PYTORCH_OVERRIDE_FLAKY_SIGNAL') != '1'
+        if report_only and num_fail + num_errored + num_unexpected_success < 1 or not report_only and num_expected_fail < 1:
+            raise RuntimeWarning(f'{err_msg} Intentional reruns are only triggered when the first run fails or errors, but'
+                                 ' we found no failures nor errors.')
+        if num_unexpected_success + num_expected_fail < 1:
+            raise RuntimeWarning(f'{err_msg} Intentional reruns should raise at least one unexpected success or expected '
+                                 'failure, but none have been found.')
+        if report_only and num_pass != num_unexpected_success:
+            raise RuntimeWarning(f'{err_msg} Every success in an intentional rerun is shadowed by one unexpected success.'
+                                 f'However, successes = {num_pass} and unexpected successes = {num_unexpected_success}')
+        if not report_only and num_pass > 1:
+            raise RuntimeWarning(f'{err_msg} There should be at most 1 successful run in an intentional rerun that stops'
+                                 f' at first success. The number of successful runs = {num_pass}')
+        if num_skipped > 0:
+            raise RuntimeWarning(f'{err_msg} No skips should occur in intentional reruns, but skips = {num_skipped}')
     return max(num_unexpected_success, num_pass), num_fail + num_expected_fail + num_errored
 
 
 def assemble_flaky_test_stats(duplicated_tests_by_file: Dict[str, DuplicatedDict]) -> Any:
     flaky_tests = []
+    workflow_id = os.environ.get("GITHUB_RUN_ID", os.environ.get("CIRCLE_WORKFLOW_ID", None))
     for file_name, suite_to_dict in duplicated_tests_by_file.items():
         for suite_name, testcase_to_runs in suite_to_dict.items():
             for testcase_name, list_of_runs in testcase_to_runs.items():
@@ -784,11 +780,20 @@ def assemble_flaky_test_stats(duplicated_tests_by_file: Dict[str, DuplicatedDict
                         "suite": suite_name,
                         "file": file_name,
                         "num_green": num_green,
-                        "num_red": num_red
+                        "num_red": num_red,
                     })
     if len(flaky_tests) > 0:
+        # write to RDS
         register_rds_schema("flaky_tests", schema_from_sample(flaky_tests[0]))
         rds_write("flaky_tests", flaky_tests, only_on_master=False)
+
+        # write to S3 to go to Rockset as well
+        import uuid
+        for flaky_test in flaky_tests:
+            flaky_test["workflow_id"] = workflow_id
+            key = f"flaky_tests/{workflow_id}/{uuid.uuid4()}.json"
+            obj = get_S3_object_from_bucket("ossci-raw-job-status", key)
+            obj.put(Body=json.dumps(flaky_test), ContentType="application/json")
 
 
 def build_info() -> ReportMetaMeta:
@@ -1070,16 +1075,10 @@ if __name__ == '__main__':
     except Exception as e:
         print(f"ERROR ENCOUNTERED WHEN UPLOADING TO SCRIBE: {e}")
 
-    # longest_tests can contain duplicates as the same tests can be spawned from different files
-    longest_tests: List[TestCase] = []
     total_time = 0.0
     for filename, test_filename in reports_by_file.items():
         for suite_name, test_suite in test_filename.test_suites.items():
             total_time += test_suite.total_time
-            if test_suite.total_time >= args.class_print_threshold:
-                test_suite.print_report(args.longest_of_class)
-                longest_tests.extend(test_suite.test_cases.values())
-    longest_tests = sorted(longest_tests, key=lambda x: x.time)[-args.longest_of_run:]
 
     obj = assemble_s3_object(reports_by_file, total_seconds=total_time)
 
@@ -1088,14 +1087,6 @@ if __name__ == '__main__':
             send_report_to_s3(obj)
         except Exception as e:
             print(f"ERROR ENCOUNTERED WHEN UPLOADING TO S3: {e}")
-
-    print(f"Total runtime is {datetime.timedelta(seconds=total_time)}")
-    print(
-        f"{len(longest_tests)} longest tests of entire run"
-        f" (ignoring suites totaling less than {args.class_print_threshold} seconds):"
-    )
-    for test_case in reversed(longest_tests):
-        print(f"    {test_case.class_name}.{test_case.name}  time: {test_case.time:.2f} seconds")
 
     if args.compare_with_s3:
         head_json = obj

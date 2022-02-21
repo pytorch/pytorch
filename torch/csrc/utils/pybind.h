@@ -2,7 +2,7 @@
 
 #include <torch/csrc/python_headers.h>
 
-#include <ATen/ATen.h>
+#include <ATen/core/Tensor.h>
 #include <c10/util/irange.h>
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
@@ -23,6 +23,9 @@ namespace py = pybind11;
 // see
 // https://pybind11.readthedocs.io/en/stable/advanced/smart_ptrs.html#custom-smart-pointers
 PYBIND11_DECLARE_HOLDER_TYPE(T, c10::intrusive_ptr<T>, true);
+
+PYBIND11_DECLARE_HOLDER_TYPE(T, c10::SingletonOrSharedTypePtr<T>);
+PYBIND11_DECLARE_HOLDER_TYPE(T, c10::SingletonTypePtr<T>, true);
 
 namespace pybind11 { namespace detail {
 
@@ -66,11 +69,7 @@ struct type_caster<at::Storage> {
 
   static handle
   cast(const at::Storage& src, return_value_policy /* policy */, handle /* parent */) {
-    TORCH_CHECK(
-        false,
-        "NotImplementedError: pybind conversion of at::Storages from C++ to python not supported.");
-    // Storages are untyped, see: https://github.com/pytorch/pytorch/issues/47442
-    return handle(torch::createPyObject(src, caffe2::TypeMeta()));
+    return handle(torch::createPyObject(src));
   }
 };
 

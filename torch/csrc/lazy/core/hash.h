@@ -12,7 +12,7 @@
 #include <ATen/Tensor.h>
 #include <c10/core/Scalar.h>
 #include <c10/util/int128.h>
-#include <torch/csrc/WindowsTorchApiMacro.h>
+#include <torch/csrc/Export.h>
 
 namespace torch {
 namespace lazy {
@@ -133,7 +133,11 @@ static inline hash_t Hash(const c10::string_view& value) {
 // we want to include a contribution to the hash to distinguish
 // cases where one or another option was null, but we hope it doesn't
 // collide with an actually scalar value.
-static const int64_t kNullOpt = -3333;
+//
+// Use an arbitrary randomly-selected 64-bit integer rather than a
+// small constant that we then hash at runtime so we don't have to
+// repeatedly hash a constant at runtime.
+static const int64_t kNullOpt = 0x8655d738f3678dda;
 
 // Hashing for c10::optional types contributes to hash
 // for optionals with null value, important to distinguish
@@ -143,7 +147,7 @@ hash_t Hash(const c10::optional<T>& value) {
   if (value.has_value()) {
     return Hash(value.value());
   } else {
-    return Hash(kNullOpt);
+    return kNullOpt;
   }
 }
 
@@ -163,7 +167,7 @@ hash_t Hash(const c10::optional<std::vector<T>>& value) {
   if (value.has_value()) {
     return ContainerHash(value.value());
   } else {
-    return Hash(kNullOpt);
+    return kNullOpt;
   }
 }
 

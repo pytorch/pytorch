@@ -1,6 +1,7 @@
 #include <ATen/ATen.h>
-#include <ATen/CUDAGeneratorImpl.h>
+#include <ATen/cuda/CUDAGeneratorImpl.h>
 #include <ATen/native/cuda/DistributionTemplates.h>
+#include <ATen/native/Resize.h>
 
 namespace at { namespace native {
 
@@ -132,6 +133,12 @@ Tensor& rrelu_with_noise_out_cuda(const Tensor& self,
     bool training,
     c10::optional<Generator> generator,
     Tensor& output) {
+  at::native::resize_output(output, self.sizes());
+
+  if (self.numel() == 0) {
+    return output;
+  }
+
   TensorArg self_arg{self, "self", 1}, noise_arg{noise, "noise", 2},
       output_arg{output, "output", 3};
   checkAllSameGPU("rrelu_with_noise_out_cuda", {self_arg, noise_arg, output_arg});

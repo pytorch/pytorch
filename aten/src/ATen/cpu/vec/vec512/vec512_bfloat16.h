@@ -5,6 +5,8 @@
 
 #include <ATen/cpu/vec/intrinsics.h>
 #include <ATen/cpu/vec/vec_base.h>
+#include <c10/util/irange.h>
+
 #if defined(CPU_CAPABILITY_AVX512) && !defined(_MSC_VER)
 #include <sleef.h>
 #endif
@@ -279,6 +281,8 @@ public:
     }
     return b;
   }
+  #pragma clang diagnostic push
+  #pragma clang diagnostic ignored "-Wignored-qualifiers"
   Vectorized<BFloat16> map(const __m512 (*const vop)(__m512)) const {
     __m512 lo, hi;
     cvtbf16_fp32(values, lo, hi);
@@ -286,6 +290,7 @@ public:
     const auto o2 = vop(hi);
     return cvtfp32_bf16(o1, o2);
   }
+  #pragma clang diagnostic pop
   Vectorized<BFloat16> abs() const {
     __m512 lo, hi;
     cvtbf16_fp32(values, lo, hi);
@@ -862,7 +867,7 @@ inline void load_fp32_from_bf16(const c10::BFloat16 *data, Vectorized<float>& ou
 #else // defined(CPU_CAPABILITY_AVX512) && !defined(_MSC_VER)
 inline void load_fp32_from_bf16(const c10::BFloat16 *data, Vectorized<float>& out) {
   __at_align__ float values[Vectorized<float>::size()];
-  for (int k = 0; k < Vectorized<float>::size(); ++k) {
+  for (const auto k : c10::irange(Vectorized<float>::size())) {
     values[k] = data[k];
   }
   out = Vectorized<float>::loadu(values);
