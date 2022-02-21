@@ -184,7 +184,18 @@ class OrderedImporter(Importer):
     def __init__(self, *args):
         self._importers: List[Importer] = list(args)
 
-    def _check_if_fileless_package(self, module):
+    def _is_torchpackage_dummy(self, module):
+        """Returns true iff this module is an empty PackageNode in a torch.package.
+
+        If you intern `a.b` but never use `a` in your code, then `a` will be an
+        empty module with no source. This can break cases where we are trying to
+        re-package an object after adding a real dependency on `a`, since
+        OrderedImportere will resolve `a` to the dummy package and stop there.
+
+        See: https://github.com/pytorch/pytorch/pull/71520#issuecomment-1029603769
+        """
+        if not getattr(module, "__torch_package__", False):
+            return False
         if not hasattr(module, "__path__"):
             return False
         if not hasattr(module, "__file__"):
@@ -201,7 +212,7 @@ class OrderedImporter(Importer):
                 )
             try:
                 module = importer.import_module(module_name)
-                if self._check_if_fileless_package(module):
+                if self._is_torchpackage_dummy(module):
                     continue
                 return module
             except ModuleNotFoundError as err:
