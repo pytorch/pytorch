@@ -45,6 +45,16 @@ cudnn_frontend::Tensor getTensorDescriptor(const Tensor &t, int64_t id, uint8_t 
     .build();
 }
 
+cudnn_frontend::Tensor getTensorDescriptor(const IntArrayRef& shape, const IntArrayRef& strides, cudnnDataType_t cudnn_dtype, int64_t id, uint8_t alignment) {
+  return cudnn_frontend::TensorBuilder()
+    .setDim(shape.size(), shape.data())
+    .setStrides(strides.size(), strides.data())
+    .setId(id)
+    .setAlignment(alignment)
+    .setDataType(cudnn_dtype)
+    .build();
+}
+
 // TODO: there is a table from input dtype and weight dtype to operator dtype,
 // we can derive the operator dtype based on input dtype
 cudnn_frontend::ConvDesc_v8 getConvDescriptor(cudnnDataType_t dataType, IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation) {
@@ -166,8 +176,9 @@ at::SmallVector<int64_t, 4> MakeConvOutputShape<2>(
   return {N, M, Y_H, Y_W};
 }
 
+// the parameter quantized_output is a quantized tensor
 void raw_cudnn_convolution_forward_out(
-    const Tensor& output,
+    const Tensor& quantized_output,
     const Tensor& input,
     const Tensor& weight,
     IntArrayRef padding,
@@ -180,15 +191,15 @@ void raw_cudnn_convolution_forward_out(
     float requantize_multiplier
 ) {
   TORCH_CHECK(!benchmark, "not supported yet");
-  if (output.numel() == 0) {
+  if (quantized_output.numel() == 0) {
     return;
   }
 
-  Tensor conv_output = at::empty_like(output, output.options().dtype(at::kFloat));
-  Tensor requantize_multiplier_tensor = at::empty_like(output, output.options().dtype(at::kFloat));
+  Tensor conv_output = at::empty(quantized_output.sizes(), at::device(at::kCUDA).dtype(at::kFloat), at::MemoryFormat::ChannelsLast);
+  // TODO: compile empty & fill_ using full_like or full
+  Tensor requantize_multiplier_tensor = at::empty(quantized_output.sizes(), at::device(at::kCUDA).dtype(at::kFloat), at::MemoryFormat::ChannelsLast);
   requantize_multiplier_tensor.fill_(requantize_multiplier);
   cudnnHandle_t handle = getCudnnHandle();
-
   CacheKey key;
   setConvolutionParams(&key.params, input, weight, padding, stride, dilation, groups, deterministic, allow_tf32);
   // operator datatype needs to be int32 for int8 convolution, but we can
@@ -201,7 +212,10 @@ void raw_cudnn_convolution_forward_out(
   auto run = [&](cudnn_frontend::ManagedOpaqueDescriptor plan_desc) {
     auto workspace_size = 0;
     auto workspace = at::empty({workspace_size}, input.options().dtype(kByte));
-    void *data_ptrs[] = {reinterpret_cast<int8_t*>(input.data_ptr()), conv_output.data_ptr(), reinterpret_cast<int8_t*>(weight.data_ptr()), requantize_multiplier_tensor.data_ptr(), output.data_ptr()};
+    void *data_ptrs[] = {reinterpret_cast<int8_t*>(input.data_ptr()), conv_output.data_ptr(),
+                         reinterpret_cast<int8_t*>(weight.data_ptr()),
+                         requantize_multiplier_tensor.data_ptr(),
+                         reinterpret_cast<int8_t*>(quantized_output.data_ptr())};
     // std::cout << plan.describe() << " requires workspace " << workspace_size << std::endl;
     int64_t uids[] = {'x', 'y', 'w', 's', 'r'};
     auto variantPack = cudnn_frontend::VariantPackBuilder()
@@ -232,7 +246,7 @@ void raw_cudnn_convolution_forward_out(
   auto requant_op = cudnn_frontend::OperationBuilder(CUDNN_BACKEND_OPERATION_POINTWISE_DESCRIPTOR)
     .setxDesc(conv_op.getOutputTensor())
     .setbDesc(getTensorDescriptor(requantize_multiplier_tensor, 's', getAlignment(requantize_multiplier_tensor)))
-    .setyDesc(getTensorDescriptor(output, 'r', getAlignment(output)))
+    .setyDesc(getTensorDescriptor(quantized_output.sizes(), quantized_output.strides(), CUDNN_DATA_INT8, 'r', getAlignment(quantized_output)))
     .setpwDesc(getPointWiseMulDescriptor(getCudnnDataType(requantize_multiplier_tensor)))
     .build();
   // std::cout << "operator:" << requant_op.describe() << std::endl;
@@ -273,6 +287,7 @@ void raw_cudnn_convolution_forward_out(
       return;
     } catch (cudnn_frontend::cudnnException &e) {std::cout << "cudnn error:" << e.what() << std::endl;} catch(CuDNNError &e) { std::cout << "other error" << e.what() << std::endl;}
   }
+
   TORCH_CHECK(false, "Unable to find an engine to execute this computation");
 }
 
@@ -291,31 +306,33 @@ Tensor raw_cudnn_convolution_forward(
     bool benchmark,
     bool deterministic,
     bool allow_tf32,
-    float requantize_multiplier) {
+    float requantize_multiplier,
+    double output_scale,
+    int64_t output_zero_point) {
   // TODO: add dimension validations for input/weight/bias
   const int N = act.size(0);
-  const int C = act.size(1);
   const int D = kSpatialDim == 3 ? act.size(2) : 1;
   const int H = act.size(kSpatialDim);
   const int W = act.size(kSpatialDim + 1);
   const int M = weight.size(0); // output channels
   std::vector<int64_t> kernel_size = {weight.size(2), weight.size(3)};
-  at::SmallVector<int64_t, kSpatialDim + 2> output_shape;
-  output_shape = MakeConvOutputShape<kSpatialDim>(N, M, {H, W}, kernel_size, stride, padding, dilation);
-  Tensor output_int8 = at::empty(
+  at::SmallVector<int64_t, kSpatialDim + 2> output_shape{MakeConvOutputShape<kSpatialDim>(N, M, {H, W},
+  kernel_size, stride, padding, dilation)};
+  Tensor quantized_output = at::_empty_affine_quantized(
       output_shape,
-      at::device(at::kCUDA).dtype(at::kChar),
-      at::MemoryFormat::ChannelsLast
-  );
-
+      at::device(at::kCUDA).dtype(ScalarType::QInt8),
+      output_scale,
+      output_zero_point,
+      at::MemoryFormat::ChannelsLast);
   raw_cudnn_convolution_forward_out(
-      output_int8, act, weight,
+      quantized_output, act, weight,
       padding, stride, dilation, groups,
       benchmark,
       deterministic,
       allow_tf32,
       requantize_multiplier);
-  return output_int8;
+
+  return quantized_output;
 }
 
 
@@ -343,20 +360,16 @@ class QConvInt8 final {
     auto requantize_multiplier = act_scale * weight_scale / output_scale;
 
     // TODO: check all zero_points are zero/all tensors are symmetrically quantized
-    Tensor output_int8_requant = raw_cudnn_convolution_forward<kSpatialDim>(
+    return raw_cudnn_convolution_forward<kSpatialDim>(
         act.int_repr(), weight.int_repr(),
         IntArrayRef(padding.vec()), IntArrayRef(stride.vec()), IntArrayRef(dilation.vec()), groups,
         false /* benchmark */,
         true /* deterministic */,
         false /* allow_tf32 */,
-        requantize_multiplier
+        requantize_multiplier,
+        output_scale,
+        output_zero_point
     );
-
-    // clamping is done in cudnn kernels, which probably defaults to -128, 127
-    // for int8 dtype, we may need to add new operators to the graph if
-    // we want to change the clamping
-    Tensor quantized_output = at::_make_per_tensor_quantized_tensor(output_int8_requant, output_scale, output_zero_point);
-    return quantized_output;
   }
 };
 
