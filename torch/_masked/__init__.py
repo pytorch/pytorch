@@ -2,8 +2,10 @@
 
 from typing import Optional, Tuple, List, Union, Any
 
+import warnings
 import torch
 from torch import Tensor
+from . import _docs
 
 # A workaround to support both TorchScript and MyPy:
 from typing import TYPE_CHECKING
@@ -26,6 +28,26 @@ __all__ = []
 def _apply_docstring_templates(func):
     """Decorator that applies docstring templates to function docstring
     and returns the function instance.
+    """
+
+    doc_string = getattr(_docs, f'{func.__name__}_docstring', None)
+    if doc_string is None:
+        warnings.warn(
+            f'No documentation string available for {func.__name__}.'
+            ' PyTorch team should run `python tools/update_masked_docs.py`'
+            ' to generate the missing docstrings.')
+    else:
+        func.__doc__ = doc_string
+
+    # Expose function as public symbol
+    __all__.append(func.__name__)
+
+    return func
+
+
+def _generate_docstring(func):
+    """An utility function called from tools/update_masked_docs.py
+    script to update the module torch._masked._docs.py
     """
     docstring_templates = dict(
         reduction_signature='''\
@@ -297,12 +319,7 @@ defined as ``x[i]/max(norm(x, p), eps)``.''')
         doc_template = '\n\n'.join([f'{{{op_kind}_{sec}}}' for sec in doc_sections])
     else:
         doc_template = func.__doc__
-    func.__doc__ = doc_template.format_map(templates)
-
-    # Expose function as public symbol
-    __all__.append(func.__name__)
-
-    return func
+    return doc_template.format_map(templates)
 
 
 def _reduction_identity(op_name: str, input: Tensor, *args):
