@@ -78,5 +78,22 @@ uint64_t getMaxOperatorVersion() {
   return caffe2::serialize::kProducedFileFormatVersion;
 }
 
+std::vector<UpgraderRange> getUpgradersRangeForOp(const std::string& name) {
+  std::vector<UpgraderRange> output;
+  auto it = get_operator_version_map().find(name);
+  if (it == get_operator_version_map().end()) {
+    return output;
+  }
+
+  output.reserve(it->second.size());
+  int cur_min = 0;
+  for (const auto& entry : it->second) {
+    int cur_max = entry.bumped_at_version - 1;
+    output.emplace_back(UpgraderRange{cur_min, cur_max});
+    cur_min = entry.bumped_at_version;
+  }
+  return output;
+}
+
 } // namespace jit
 } // namespace torch
