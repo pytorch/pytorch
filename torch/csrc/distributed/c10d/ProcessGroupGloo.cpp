@@ -2814,7 +2814,7 @@ void ProcessGroupGloo::monitoredBarrier(
           TORCH_INTERNAL_ASSERT(!failedRanks.empty());
           const std::string ranksStr = c10::Join(", ", failedRanks);
           const std::string error = c10::str(
-              "Ranks ",
+              "[Rank 0]: Ranks ",
               ranksStr,
               " failed to pass monitoredBarrier in ",
               monitoredBarrierTimeout.count(),
