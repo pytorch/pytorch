@@ -5093,6 +5093,7 @@ class DistributedTest:
                 return os.environ[var] if var in os.environ else "N/A"
 
             os.environ["TORCH_DISTRIBUTED_DEBUG"] = "INFO"
+            dist._set_debug_level(force=True)
             group, group_id, rank = self._init_global_test()
             model_DDP = self._test_ddp_logging_data(is_gpu=False)
 
