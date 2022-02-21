@@ -6,6 +6,8 @@
 
 #include <c10d/debug.h>
 
+#include <algorithm>
+#include <cctype>
 #include <cstdlib>
 #include <string>
 
@@ -27,11 +29,16 @@ DebugLevel loadDebugLevelFromEnvironment() {
 
   std::string level_str{env_value};
 
-  if (level_str == "OFF" || level_str == "off") {
+  std::transform(level_str.begin(), level_str.end(), level_str.begin(),
+    [](unsigned char c) {
+      return std::toupper(c);
+    });
+
+  if (level_str == "OFF") {
     level = DebugLevel::Off;
-  } else if (level_str == "INFO" || level_str == "info") {
+  } else if (level_str == "INFO") {
     level = DebugLevel::Info;
-  } else if (level_str == "DETAIL" || level_str == "detail") {
+  } else if (level_str == "DETAIL") {
     level = DebugLevel::Detail;
   } else {
     throw C10dError{"The value of TORCH_DISTRIBUTED_DEBUG must be OFF, INFO, or DETAIL."};

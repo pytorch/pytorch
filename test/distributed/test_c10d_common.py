@@ -705,12 +705,15 @@ class CommTest(AbstractCommTest, MultiProcessTestCase):
         mapping = {
             "OFF": dist._DebugLevel.OFF,
             "off": dist._DebugLevel.OFF,
+            "oFf": dist._DebugLevel.OFF,
             "INFO": dist._DebugLevel.INFO,
             "info": dist._DebugLevel.INFO,
+            "INfO": dist._DebugLevel.INFO,
             "DETAIL": dist._DebugLevel.DETAIL,
             "detail": dist._DebugLevel.DETAIL,
+            "DeTaIl": dist._DebugLevel.DETAIL,
         }
-        invalid_debug_modes = ["foo", "oFf", 0, 1, -1]
+        invalid_debug_modes = ["foo", 0, 1, -1]
 
         for mode in mapping.keys():
             os.environ["TORCH_DISTRIBUTED_DEBUG"] = str(mode)
