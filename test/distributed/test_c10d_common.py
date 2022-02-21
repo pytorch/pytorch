@@ -698,20 +698,24 @@ class CommTest(AbstractCommTest, MultiProcessTestCase):
         except OSError:
             pass
 
-    def test_distributed_debug_mode(self):
+    def test_debug_level(self):
         # Default should be off
-        default_debug_mode = dist._get_debug_mode()
-        self.assertEqual(default_debug_mode, dist._DistributedDebugLevel.OFF)
+        default_debug_mode = dist._get_debug_level()
+        self.assertEqual(default_debug_mode, dist._DebugLevel.OFF)
         mapping = {
-            "OFF": dist._DistributedDebugLevel.OFF,
-            "INFO": dist._DistributedDebugLevel.INFO,
-            "DETAIL": dist._DistributedDebugLevel.DETAIL,
+            "OFF": dist._DebugLevel.OFF,
+            "off": dist._DebugLevel.OFF,
+            "INFO": dist._DebugLevel.INFO,
+            "info": dist._DebugLevel.INFO,
+            "DETAIL": dist._DebugLevel.DETAIL,
+            "detail": dist._DebugLevel.DETAIL,
         }
-        invalid_debug_modes = ["foo", 0, 1, -1]
+        invalid_debug_modes = ["foo", "oFf", 0, 1, -1]
 
         for mode in mapping.keys():
             os.environ["TORCH_DISTRIBUTED_DEBUG"] = str(mode)
-            set_debug_mode = dist._get_debug_mode()
+            dist._set_debug_level(force=True)
+            set_debug_mode = dist._get_debug_level()
             self.assertEqual(
                 set_debug_mode,
                 mapping[mode],
@@ -720,8 +724,8 @@ class CommTest(AbstractCommTest, MultiProcessTestCase):
 
         for mode in invalid_debug_modes:
             os.environ["TORCH_DISTRIBUTED_DEBUG"] = str(mode)
-            with self.assertRaisesRegex(RuntimeError, "to be one of"):
-                dist._get_debug_mode()
+            with self.assertRaisesRegex(RuntimeError, "The value of TORCH_DISTRIBUTED_DEBUG must"):
+                dist._set_debug_level(force=True)
 
 
 class DummyWork(dist._Work):
