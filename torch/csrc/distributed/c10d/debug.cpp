@@ -4,13 +4,13 @@
 // This source code is licensed under the BSD-style license found in the
 // LICENSE file in the root directory of this source tree.
 
-#include "debug.h"
+#include <c10d/debug.h>
 
 #include <cstdlib>
 #include <string>
 
-#include "logging.h"
-#include "exception.h"
+#include <c10d/exception.h>
+#include <c10d/logging.h>
 
 namespace c10d {
 namespace detail {
