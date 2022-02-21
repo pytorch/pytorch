@@ -29,6 +29,7 @@
 #include <pybind11/chrono.h>
 
 #include <c10d/comm.hpp>
+#include <c10d/debug.h>
 #include <c10d/logger.hpp>
 #include <c10d/reducer.hpp>
 
@@ -479,20 +480,21 @@ An enum-like class for built-in communication hooks: ``ALLREDUCE`` and ``FP16_CO
           &::c10d::Logger::set_static_graph,
           py::call_guard<py::gil_scoped_release>());
 
-  py::enum_<::c10d::DistributedDebugLevel>(module, "_DistributedDebugLevel", R"(
+  py::enum_<::c10d::DebugLevel>(module, "_DebugLevel", R"(
       An enum whose values correspond to different debug settings of the
       torch.distributed package. Currently supporting settings are OFF, INFO,
       and DETAIL, which can be set via the TORCH_DISTRIBUTED_DEBUG environment
       variable.
   )")
-      .value("OFF", ::c10d::DistributedDebugLevel::OFF)
-      .value("INFO", ::c10d::DistributedDebugLevel::INFO)
-      .value("DETAIL", ::c10d::DistributedDebugLevel::DETAIL);
+      .value("OFF", ::c10d::DebugLevel::Off)
+      .value("INFO", ::c10d::DebugLevel::Info)
+      .value("DETAIL", ::c10d::DebugLevel::Detail);
 
-  module.def(
-      "_get_debug_mode",
-      &::c10d::parseDistDebugLevel,
-      py::call_guard<py::gil_scoped_release>());
+  module
+      .def("_get_debug_level", ::c10d::debug_level)
+      .def("_set_debug_level", [](bool force) {
+        ::c10d::setDebugLevel(at::nullopt, force);
+       }, py::arg("force") = false);
 
   py::enum_<::c10d::ReduceOp>(module, "ReduceOp", R"(
 An enum-like class for available reduction operations: ``SUM``, ``AVG``,
