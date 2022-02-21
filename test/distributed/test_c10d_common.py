@@ -819,9 +819,16 @@ class PythonProcessGroupExtensionTest(MultiProcessTestCase):
             PythonProcessGroupExtensionTest.create_dummy
         )
 
+    class Options:
+        def __init__(self):
+            pass
+
+        def create(self):
+            pass
+
     @staticmethod
-    def create_dummy(store, rank, size, timeout):
-        return DummyProcessGroup(rank, size)
+    def create_dummy(group_id, store, group_rank, group_size, global_ranks_in_group, pg_options, timeout):
+        return DummyProcessGroup(group_rank, group_size)
 
     def test_collectives(self):
         dist.Backend.register_backend("dummy", PythonProcessGroupExtensionTest.create_dummy)
