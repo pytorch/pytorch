@@ -216,6 +216,7 @@ binary_op_supported_dtypes : Dict[Union[Callable, str], List[Tuple[torch.dtype, 
     operator.sub: fp16_dtypes,
     torch.div: fp16_dtypes,
     operator.truediv: fp16_dtypes,
+    torch.matmul: int8_dtypes,
 }
 
 default_op_supported_dtypes = {
@@ -313,6 +314,7 @@ def _to_reference(float_module, weight_qparams):
 @register_quant_pattern((torch.nn.functional.relu, torch.mul))
 @register_quant_pattern((torch.relu, operator.add))
 @register_quant_pattern((torch.relu, operator.mul))
+@register_quant_pattern(torch.matmul)
 class BinaryOpQuantizeHandler(QuantizeHandler):
     def __init__(
             self,
@@ -348,6 +350,7 @@ class BinaryOpQuantizeHandler(QuantizeHandler):
             torch.add: torch.ops.quantized.add,
             operator.mul: torch.ops.quantized.mul,
             torch.mul: torch.ops.quantized.mul,
+            torch.matmul: torch.ops.quantized.matmul,
         }
         qbin_relu_op_mapping: Dict[Union[Callable, str], Callable] = {
             operator.add: torch.ops.quantized.add_relu,
@@ -538,30 +541,27 @@ class CatQuantizeHandler(QuantizeHandler):
                 convert_custom_config_dict: Dict[str, Any] = None) -> Node:
         if not self.all_node_args_are_tensors:
             return NotImplemented
-        if is_reference:
-            act_dtype = activation_dtype(qconfig)
-            if act_dtype == torch.float:
-                op_out = quantized_graph.node_copy(node, load_arg(quantized=torch.float))
-                return op_out
-            else:
-                activation_post_process = \
-                    self._maybe_get_last_node_only_observer(modules)
-                assert activation_post_process is not None
-                # make sure the first argument is quantized to act_dtype
-                load_arg(quantized={0: act_dtype})(node.args)
-                args = list(load_arg(quantized=torch.float)(node.args))
-                kwargs = load_arg(quantized=torch.float)(node.kwargs)
-                op_out = quantized_graph.node_copy(node, load_arg(quantized=torch.float))
-                return quantize_node(
-                    op_out,
-                    activation_post_process,
-                    node,
-                    modules,
-                    quantized_graph,
-                    node_name_to_scope,
-                    is_input=False)
+        act_dtype = activation_dtype(qconfig)
+        if act_dtype == torch.float:
+            op_out = quantized_graph.node_copy(node, load_arg(quantized=torch.float))
+            return op_out
         else:
-            return quantized_graph.node_copy(node, load_arg(quantized=torch.quint8))
+            activation_post_process = \
+                self._maybe_get_last_node_only_observer(modules)
+            assert activation_post_process is not None
+            # make sure the first argument is quantized to act_dtype
+            load_arg(quantized={0: act_dtype})(node.args)
+            args = list(load_arg(quantized=torch.float)(node.args))
+            kwargs = load_arg(quantized=torch.float)(node.kwargs)
+            op_out = quantized_graph.node_copy(node, load_arg(quantized=torch.float))
+            return quantize_node(
+                op_out,
+                activation_post_process,
+                node,
+                modules,
+                quantized_graph,
+                node_name_to_scope,
+                is_input=False)
 
 # handle conv, maybe followed by relu
 # NB: matching order is reversed, that is we match from the bottom of this list to the beginning
@@ -1544,32 +1544,22 @@ class FixedQParamsOpQuantizeHandler(QuantizeHandler):
                 load_arg: Callable,
                 is_reference: bool = False,
                 convert_custom_config_dict: Dict[str, Any] = None) -> Node:
-        if not is_reference:
-            dtypes = get_qconfig_dtypes(qconfig)
-            if dtypes == (torch.float16, torch.float16, None):
-                op_out = quantized_graph.node_copy(node, load_arg(quantized=torch.float))
-                return quantized_graph.create_node(
-                    "call_method", "to", (op_out, torch.float16,), {}
-                )
-            else:
-                return quantized_graph.node_copy(node, load_arg(quantized=None))
+        act_dtype = activation_dtype(qconfig)
+        if act_dtype == torch.float:
+            op_out = quantized_graph.node_copy(node, load_arg(quantized=torch.float))
+            return op_out
         else:
-            act_dtype = activation_dtype(qconfig)
-            if act_dtype == torch.float:
-                op_out = quantized_graph.node_copy(node, load_arg(quantized=torch.float))
-                return op_out
-            else:
-                activation_post_process = \
-                    self._maybe_get_last_node_only_observer(modules)
-                assert activation_post_process is not None
-                # make sure the input is quantized to act_dtype
-                load_arg(quantized={0: act_dtype})(node.args)
-                args = load_arg(quantized=torch.float)(node.args)
-                kwargs = load_arg(quantized=torch.float)(node.kwargs)
-                op_out = quantized_graph.node_copy(node, load_arg(quantized=torch.float))
-                return quantize_node(
-                    op_out, activation_post_process,
-                    node, modules, quantized_graph, node_name_to_scope, is_input=False)
+            activation_post_process = \
+                self._maybe_get_last_node_only_observer(modules)
+            assert activation_post_process is not None
+            # make sure the input is quantized to act_dtype
+            load_arg(quantized={0: act_dtype})(node.args)
+            args = load_arg(quantized=torch.float)(node.args)
+            kwargs = load_arg(quantized=torch.float)(node.kwargs)
+            op_out = quantized_graph.node_copy(node, load_arg(quantized=torch.float))
+            return quantize_node(
+                op_out, activation_post_process,
+                node, modules, quantized_graph, node_name_to_scope, is_input=False)
 
 @register_quant_pattern(torch.nn.AdaptiveAvgPool1d)
 @register_quant_pattern(torch.nn.AdaptiveAvgPool2d)
@@ -1740,22 +1730,17 @@ class GeneralTensorShapeOpQuantizeHandler(QuantizeHandler):
                 load_arg: Callable,
                 is_reference: bool = False,
                 convert_custom_config_dict: Dict[str, Any] = None) -> Node:
-        if is_reference:
-            # when activation dtype is torch.float, the node does not require
-            # observation
-            # e.g. dynamic quantization or weight_only quantization
-            act_dtype = activation_dtype(qconfig)
-            if act_dtype == torch.float:
-                op_out = quantized_graph.node_copy(node, load_arg(quantized=torch.float))
-                return op_out
-            else:
-                activation_post_process = \
-                    self._maybe_get_last_node_only_observer(modules)
-                assert activation_post_process is not None
-                # TODO: remove special case for operator.getitem
-                # make sure the input is quantized to act_dtype if it's not operator.getitem
-                if node.target != operator.getitem:
-                    load_arg(quantized={0: act_dtype})(node.args)
+        # when activation dtype is torch.float, the node does not require
+        # observation
+        # e.g. dynamic quantization or weight_only quantization
+        act_dtype = activation_dtype(qconfig)
+        if act_dtype == torch.float:
+            op_out = quantized_graph.node_copy(node, load_arg(quantized=torch.float))
+            return op_out
+        else:
+            activation_post_process = \
+                self._maybe_get_last_node_only_observer(modules)
+            if activation_post_process is not None:
                 args = list(load_arg(quantized=torch.float)(node.args))
                 kwargs = load_arg(quantized=torch.float)(node.kwargs)
                 op_out = quantized_graph.node_copy(node, load_arg(quantized=torch.float))
@@ -1763,8 +1748,8 @@ class GeneralTensorShapeOpQuantizeHandler(QuantizeHandler):
                     op_out,
                     activation_post_process,
                     node, modules, quantized_graph, node_name_to_scope, is_input=False)
-        else:
-            return quantized_graph.node_copy(node, load_arg(quantized=None))
+            else:
+                return quantized_graph.node_copy(node, load_arg(quantized=torch.float))
 
 class StandaloneModuleQuantizeHandler(QuantizeHandler):
     """ Converts an observed standalone module to quantized standalone module
