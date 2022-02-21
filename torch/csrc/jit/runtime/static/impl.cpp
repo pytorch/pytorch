@@ -157,10 +157,10 @@ void OptimizeGraph(
     // TODO: we can avoid this guard by moving operations
     // to exposed folders.
 #ifdef FBCODE_CAFFE2
-    if (opts.use_copy_variants) {
+    if (opts.use_copy_variants && !opts.enable_tensorexpr_fusion) {
       ReplaceWithCopy(graph);
     }
-    if (opts.use_maybe_copy_variants) {
+    if (opts.use_maybe_copy_variants && !opts.enable_tensorexpr_fusion) {
       ReplaceWithMaybeCopy(graph);
     }
     FuseListUnpack(graph);
