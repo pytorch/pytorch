@@ -334,13 +334,12 @@ def instantiate_configs(only_slow_gradcheck):
             build_only=build_only,
         )
 
-        # run docs builds on "pytorch-linux-xenial-py3.6-gcc5.4". Docs builds
+        # run docs builds on "pytorch-linux-xenial-py3.7-gcc5.4". Docs builds
         # should run on a CPU-only build that runs on all PRs.
-        # XXX should this be updated to a more modern build? Projects are
-        #     beginning to drop python3.6
+        # XXX should this be updated to a more modern build?
         if (
             distro_name == "xenial"
-            and fc.find_prop("pyver") == "3.6"
+            and fc.find_prop("pyver") == "3.7"
             and cuda_version is None
             and parallel_backend is None
             and not is_vulkan
