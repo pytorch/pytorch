@@ -1113,6 +1113,7 @@ class TestQuantizedOps(TestCase):
                          msg="torch.nn.functional.channel_shuffle results are off")
 
     """Tests pixel shuffle operation on quantized tensors."""
+    @skipIfNoFBGEMM
     def test_pixel_shuffle(self):
         upscales = (2, 3)
         shapes = ((4, 4, 4, 4), (1, 17, 3, 4))
