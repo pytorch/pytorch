@@ -441,8 +441,9 @@ class TestQuantizedOps(TestCase):
         shapes = ((4,), (4, 4), (4, 4, 4), (4, 4, 4, 4))
         dtypes = (torch.quint8, torch.qint8)
         memory_formats = (torch.channels_last, torch.contiguous_format)
-        test_cases = itertools.product(shapes, dtypes, memory_formats)
-        for shape, dtype, memory_format in test_cases:
+        approximation = ['none', 'tanh']
+        test_cases = itertools.product(shapes, dtypes, memory_formats, approximation)
+        for shape, dtype, memory_format, approximate in test_cases:
             if memory_format == torch.channels_last and len(shape) != 4:
                 continue
             X, scale, zero_point, torch_type = \
@@ -454,7 +455,7 @@ class TestQuantizedOps(TestCase):
             dqX = qX.dequantize()
 
             op = torch.nn.functional.gelu
-            dqY = op(dqX)
+            dqY = op(dqX, approximate=approximate)
             qY = torch.quantize_per_tensor(dqY, scale=scale, zero_point=zero_point,
                                            dtype=torch_type)
             qY_hat = op(qX)
@@ -1110,30 +1111,6 @@ class TestQuantizedOps(TestCase):
         a_hat = torch.nn.functional.channel_shuffle(qa, groups)
         self.assertEqual(a_ref, a_hat.dequantize(),
                          msg="torch.nn.functional.channel_shuffle results are off")
-
-    """Tests pixel shuffle operation on quantized tensors."""
-    def test_pixel_shuffle(self):
-        upscales = (2, 3)
-        shapes = ((4, 4, 4, 4), (1, 17, 3, 4))
-        memory_formats = (torch.channels_last, torch.contiguous_format)
-        dtype = torch.quint8
-        test_cases = itertools.product(upscales, shapes, memory_formats)
-        for upscale, shape, memory_format in test_cases:
-            n, c, h, w = shape[0], shape[1] * upscale * upscale, shape[2], shape[3]
-            a, scale, zero_point, torch_type = \
-                torch.randn(n, c, h, w), 0.1, 0, dtype
-            a = a.to(memory_format=memory_format)
-            a_out = torch.nn.functional.pixel_shuffle(a, upscale)
-
-            a_ref = torch.quantize_per_tensor(a_out, scale=scale,
-                                              zero_point=zero_point, dtype=torch_type)
-            a_ref = a_ref.dequantize()
-            qa = torch.quantize_per_tensor(a, scale=scale, zero_point=zero_point,
-                                           dtype=dtype)
-
-            a_hat = torch.nn.functional.pixel_shuffle(qa, upscale)
-            self.assertEqual(a_ref, a_hat.dequantize(),
-                             msg="torch.nn.functional.pixel_shuffle results are off")
 
     """Tests 1D max pool operation on quantized tensors."""
     @given(X=hu.tensor(shapes=hu.array_shapes(min_dims=2, max_dims=3,
