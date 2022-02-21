@@ -390,11 +390,38 @@ TEST(ModuleAPITest, Freezing) {
       return self.foo + x + b
   )");
   m.eval();
+  auto forward_g = m.get_method("forward").graph();
+  testing::FileCheck().check("GetAttr")->run(*forward_g);
+
+  // Removal of GetAttr is done by freezing
   auto frozen_mod = torch::jit::freeze(m);
-  auto forward_g = frozen_mod.get_method("forward").graph();
+  forward_g = frozen_mod.get_method("forward").graph();
   testing::FileCheck().check_not("GetAttr")->run(*forward_g);
 
+  // If no training mode is set, the module is NOT frozen by OFI
   auto frozen_mod2 = torch::jit::optimize_for_inference(m);
+  forward_g = frozen_mod2.get_method("forward").graph();
+  testing::FileCheck().check("GetAttr")->run(*forward_g);
+}
+
+TEST(ModuleAPITest, OfiFreezesTraining) {
+  Module m("m");
+  m.register_parameter("foo", torch::ones({}), false);
+  m.define(R"(
+    def forward(self, x, b : int = 4):
+      return self.foo + x + b
+  )");
+  m.register_attribute("training", BoolType::get(), true);
+  m.eval();
+
+  // Before freezing, we have a GetAttr check
+  auto forward_g = m.get_method("forward").graph();
+  testing::FileCheck().check("GetAttr")->run(*forward_g);
+
+  // Demonstrate that freezing happens when OFI is called
+  // Removal of GetAttr is done by freezing, but only when training
+  // attribute is set
+  auto frozen_mod = torch::jit::optimize_for_inference(m);
   forward_g = frozen_mod.get_method("forward").graph();
   testing::FileCheck().check_not("GetAttr")->run(*forward_g);
 }

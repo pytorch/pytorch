@@ -9,7 +9,6 @@
 #include <cstdlib>
 #include <cstring>
 #include <iostream>
-#include <mutex>
 #include <numeric>
 
 // Common code that we use regardless of whether we use glog or not.
@@ -395,49 +394,44 @@ namespace c10 {
 namespace detail {
 namespace {
 
-void unsafeSetLogLevelFlagFromEnv() {
-  const char* level_str = std::getenv("TORCH_CPP_MIN_LOG_LEVEL");
+void setLogLevelFlagFromEnv() {
+  const char* level_str = std::getenv("TORCH_CPP_LOG_LEVEL");
 
   // Not set, fallback to the default level (i.e. WARNING).
-  if (level_str == nullptr) {
-    return;
-  }
-
-  std::string level{level_str};
+  std::string level{level_str != nullptr ? level_str : ""};
   if (level.empty()) {
     return;
   }
 
-  if (level == "0" || level == "INFO" || level == "info") {
+  std::transform(level.begin(), level.end(), level.begin(),
+    [](unsigned char c) {
+      return std::toupper(c);
+    });
+
+  if (level == "0" || level == "INFO") {
     FLAGS_caffe2_log_level = 0;
 
     return;
   }
-  if (level == "1" || level == "WARNING" || level == "warning") {
+  if (level == "1" || level == "WARNING") {
     FLAGS_caffe2_log_level = 1;
 
     return;
   }
-  if (level == "2" || level == "ERROR" || level == "error") {
+  if (level == "2" || level == "ERROR") {
     FLAGS_caffe2_log_level = 2;
 
     return;
   }
-  if (level == "3" || level == "FATAL" || level == "fatal") {
+  if (level == "3" || level == "FATAL") {
     FLAGS_caffe2_log_level = 3;
 
     return;
   }
 
-  std::cerr << "`TORCH_CPP_MIN_LOG_LEVEL` environment variable cannot be parsed. Valid values are "
+  std::cerr << "`TORCH_CPP_LOG_LEVEL` environment variable cannot be parsed. Valid values are "
                "`INFO`, `WARNING`, `ERROR`, and `FATAL` or their numerical equivalents `0`, `1`, "
                "`2`, and `3`." << std::endl;
-}
-
-void setLogLevelFlagFromEnv() {
-  static std::once_flag f{};
-
-  std::call_once(f, unsafeSetLogLevelFlagFromEnv);
 }
 
 } // namespace
