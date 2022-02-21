@@ -26,6 +26,7 @@ from tools.codegen.selective_build.selector import SelectiveBuilder
 def gen_registration_headers(
         backend_index: BackendIndex,
         per_operator_headers: bool,
+        rocm: bool,
 ) -> List[str]:
     if per_operator_headers:
         headers = ["#include <ATen/ops/as_strided_native.h>"]
@@ -35,7 +36,10 @@ def gen_registration_headers(
     if backend_index.dispatch_key in (DispatchKey.CPU, DispatchKey.Meta):
         headers.append("#include <ATen/EmptyTensor.h>")
     elif backend_index.dispatch_key == DispatchKey.CUDA:
-        headers.append("#include <ATen/cuda/EmptyTensor.h>")
+        if rocm:
+            headers.append("#include <ATen/hip/EmptyTensor.h>")
+        else:
+            headers.append("#include <ATen/cuda/EmptyTensor.h>")
     elif per_operator_headers:
         headers += [
             "#include <ATen/ops/empty.h>",
@@ -645,7 +649,8 @@ return {sig.name()}({', '.join(e.expr for e in translate(cpp_sig.arguments(), si
                 # Put all of the contents of the precompute struct into the context
                 # so that translate will be able to return the correct args for the
                 # call to the impl.
-                for precomputed_elems in self.g.out.precomputed.replace.values():
+                precomputed_values = [*self.g.out.precomputed.replace.values(), self.g.out.precomputed.add]
+                for precomputed_elems in precomputed_values:
                     for arg in precomputed_elems:
                         context.append(Expr(
                             expr=f"precompute.{arg.name}",
