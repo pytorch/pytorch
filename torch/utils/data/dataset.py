@@ -87,7 +87,7 @@ class MapDataPipe(Dataset[T_co], metaclass=_DataPipeMeta):
     of :class:`~torch.utils.data.DataLoader`.
 
     These DataPipes can be invoked in two ways, using the class constructor or applying their
-    functional form onto an existing `MapDataPipe` (available to most but not all DataPipes).
+    functional form onto an existing `MapDataPipe` (recommend, available to most but not all DataPipes).
 
     Note:
         :class:`~torch.utils.data.DataLoader` by default constructs an index
@@ -97,12 +97,15 @@ class MapDataPipe(Dataset[T_co], metaclass=_DataPipeMeta):
     Example:
         >>> from torchdata.datapipes.map import SequenceWrapper, Mapper
         >>> dp = SequenceWrapper(range(10))
-        >>> map_dp_1 = dp.map(lambda x: x + 1)  # Using functional form
-        >>> list(map_dp_1)  # [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+        >>> map_dp_1 = dp.map(lambda x: x + 1)  # Using functional form (recommended)
+        >>> list(map_dp_1)
+        [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
         >>> map_dp_2 = Mapper(dp, lambda x: x + 1)  # Using class constructor
-        >>> list(map_dp_2)  # [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+        >>> list(map_dp_2)
+        [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
         >>> batch_dp = map_dp_1.batch(batch_size=2)
-        >>> list(batch_dp)  # [[1, 2], [3, 4], [5, 6], [7, 8], [9, 10]]
+        >>> list(batch_dp)
+        [[1, 2], [3, 4], [5, 6], [7, 8], [9, 10]]
     """
     functions: Dict[str, Callable] = {}
 
@@ -257,7 +260,7 @@ class IterDataPipe(IterableDataset[T_co], metaclass=_DataPipeMeta):
     on its iterator.
 
     These DataPipes can be invoked in two ways, using the class constructor or applying their
-    functional form onto an existing `IterDataPipe` (available to most but not all DataPipes).
+    functional form onto an existing `IterDataPipe` (recommended, available to most but not all DataPipes).
     You can chain multiple `IterDataPipe` together to form a pipeline that will perform multiple
     operations in succession.
 
@@ -276,11 +279,14 @@ class IterDataPipe(IterableDataset[T_co], metaclass=_DataPipeMeta):
         >>> from torchdata.datapipes.iter import IterableWrapper, Mapper
         >>> dp = IterableWrapper(range(10))
         >>> map_dp_1 = Mapper(dp, lambda x: x + 1)  # Using class constructor
-        >>> map_dp_2 = dp.map(lambda x: x + 1)  # Using functional form
-        >>> list(map_dp_1)  # [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
-        >>> list(map_dp_2)  # [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+        >>> map_dp_2 = dp.map(lambda x: x + 1)  # Using functional form (recommended)
+        >>> list(map_dp_1)
+        [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+        >>> list(map_dp_2)
+        [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
         >>> filter_dp = map_dp_1.filter(lambda x: x % 2 == 0)
-        >>> list(filter_dp)  # [2, 4, 6, 8, 10]
+        >>> list(filter_dp)
+        [2, 4, 6, 8, 10]
     """
     functions: Dict[str, Callable] = {}
     reduce_ex_hook : Optional[Callable] = None
