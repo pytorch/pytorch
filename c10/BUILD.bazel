@@ -1,5 +1,6 @@
 load("@bazel_skylib//rules:common_settings.bzl", "bool_flag")
 load("@rules_cc//cc:defs.bzl", "cc_library")
+load("//tools/config:defs.bzl", "if_cuda")
 
 # The bool_flag targets allow configuring the build from the
 # command-line, e.g. --//c10:use_gflags or --no//c10:use_gflags to
@@ -61,12 +62,12 @@ cc_library(
         "//c10/util:TypeCast",
         "//c10/util:base",
         "//c10/util:typeid",
-    ] + select({
-        "@//tools/config:cuda_enabled_and_capable": [
+    ] + if_cuda(
+        [
             "//c10/cuda",
             "//c10/cuda:Macros",
         ],
-        "//conditions:default": [],
-    }),
+        [],
+    ),
     visibility = ["//:__pkg__"],
 )
