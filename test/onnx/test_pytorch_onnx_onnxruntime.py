@@ -7732,6 +7732,36 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.tensor([[1, 2, float("inf")], [2, float("nan"), float("inf")]])
         self.run_test(M(), (x, ))
 
+    @skipIfUnsupportedMinOpsetVersion(10)  # ONNX IsNaN, IsInf op is added in opset 9, 10 respectively.
+    def test_nan_to_num(self):
+        class NoParams(torch.nn.Module):
+            def forward(self, x):
+                return x.nan_to_num()
+
+        x = torch.tensor([[1, 2, float("inf")], [2, float("nan"), -float("inf")]])
+        xint = torch.ones((2, 4), dtype=torch.int)
+        xhalf = torch.ones((2, 4), dtype=torch.half)
+        self.run_test(NoParams(), (x, ))
+        self.run_test(NoParams(), (xint, ))
+        self.run_test(NoParams(), (xhalf, ))
+
+        class WithParams(torch.nn.Module):
+            def forward(self, x):
+                return x.nan_to_num(nan=2.3, posinf=4.5, neginf=6.7)
+
+        x = torch.tensor([[1, 2, float("inf")], [2, float("nan"), -float("inf")]])
+        self.run_test(WithParams(), (x, ))
+
+    @skipIfUnsupportedMinOpsetVersion(9)
+    def test_maximum_minimum(self):
+        class ModelWithNan(torch.nn.Module):
+            def forward(self, x, y):
+                return torch.maximum(x, y), torch.minimum(x, y)
+
+        x = torch.tensor([-2, -2, float("nan")])
+        y = torch.rand(1, 3)
+        self.run_test(ModelWithNan(), (x, y))
+
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_any(self):
         class M(torch.nn.Module):
