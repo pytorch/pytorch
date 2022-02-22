@@ -725,7 +725,7 @@ def mish(g, input):
     return g.op("Mul", input, g.op("Tanh", g.op("Softplus", input)))
 
 
-def op_with_optional_float_cast(g, op_name, self, *args, other_operands=None, opset_before=None, **kwargs):
+def op_with_optional_float_cast(g, op_name, self, *args, other_operands=None, opset_before=None, target_float_t="Float", **kwargs):
     origin_dtype = self.type().scalarType()
     require_cast = not sym_help._is_fp(self) and (opset_before is None or sym_help._export_onnx_opset_version < opset_before)
     if other_operands is None:
@@ -733,11 +733,12 @@ def op_with_optional_float_cast(g, op_name, self, *args, other_operands=None, op
 
     if require_cast:
         warnings.warn(
-            f"{op_name}-{sym_help._export_onnx_opset_version} only support float types. Using cast-{op_name}-cast instead.")
-        self = g.op("Cast", self, to_i=sym_help.cast_pytorch_to_onnx["Float"])
+            f"{op_name}-{sym_help._export_onnx_opset_version} only support float types."
+            f"Using cast<{target_float_t}>-{op_name}-cast-back instead.")
+        self = g.op("Cast", self, to_i=sym_help.cast_pytorch_to_onnx[target_float_t])
         for i in range(len(other_operands)):
             if not sym_help._is_fp(other_operands[i]):
-                other_operands[i] = g.op("Cast", other_operands[i], to_i=sym_help.cast_pytorch_to_onnx["Float"])
+                other_operands[i] = g.op("Cast", other_operands[i], to_i=sym_help.cast_pytorch_to_onnx[target_float_t])
 
     self = g.op(op_name, self, *other_operands, *args, **kwargs)
 
