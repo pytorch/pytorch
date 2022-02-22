@@ -757,6 +757,8 @@ namespace {
                                             const TensorDescriptorListParams& tensors,
                                             bool forward) {
 #if CUDNN_VERSION >= 8201 // 8.2.1
+    if (tensors.is_input_packed()) return false;
+
     cudaDeviceProp* prop = at::cuda::getCurrentDeviceProperties();
     if (prop->major < 6) return false;
 
