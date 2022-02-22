@@ -190,7 +190,6 @@ if __name__ == '__main__':
     schemas = [schema for schema in schemas if is_schema_outplace(schema)]
     codes = [gen_plumbing(*schema) for schema in schemas]
     print("#pragma once")
-    print("#include <functorch/csrc/OutOfPlacePlumbing.h>")
     print("#include <functorch/csrc/PlumbingHelper.h>")
     print("#include <functorch/csrc/Constants.h>")
 
