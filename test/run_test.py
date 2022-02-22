@@ -821,6 +821,11 @@ def parse_args():
         " within a specified test module. For unspecified test modules with the bring-to-front "
         "option, all test cases will be run, as one may expect.",
     )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Only list the test that will run.",
+    )
     return parser.parse_args()
 
 
@@ -1022,7 +1027,10 @@ def main():
     selected_tests = get_selected_tests(options)
 
     if options.verbose:
-        print_to_stderr("Selected tests: {}".format(", ".join(selected_tests)))
+        print_to_stderr("Selected tests:\n {}".format("\n ".join(selected_tests)))
+
+    if options.dry_run:
+        return
 
     if options.coverage and not PYTORCH_COLLECT_COVERAGE:
         shell(["coverage", "erase"])
