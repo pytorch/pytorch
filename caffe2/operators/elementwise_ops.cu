@@ -119,6 +119,9 @@ void device_reduce<at::Half>(
     int N,
     Tensor* buffer,
     CUDAContext* context) {
+  (void)N; // Suppress unused variable warning
+  (void)buffer; // Suppress unused variable warning
+  (void)context; // Suppress unused variable warning
 #if TORCH_HIP_VERSION >= 210
   auto buffer_size = 1;
 
