@@ -727,11 +727,11 @@ def mish(g, input):
 
 def op_with_optional_float_cast(g, op_name, self, *args, other_operands=None, opset_before=None, **kwargs):
     origin_dtype = self.type().scalarType()
-    will_cast = not sym_help._is_fp(self) and (opset_before is None or sym_help._export_onnx_opset_version < opset_before)
+    require_cast = not sym_help._is_fp(self) and (opset_before is None or sym_help._export_onnx_opset_version < opset_before)
     if other_operands is None:
         other_operands = []
 
-    if will_cast:
+    if require_cast:
         warnings.warn(
             f"{op_name}-{sym_help._export_onnx_opset_version} only support float types. Using cast-{op_name}-cast instead.")
         self = g.op("Cast", self, to_i=sym_help.cast_pytorch_to_onnx["Float"])
@@ -741,7 +741,7 @@ def op_with_optional_float_cast(g, op_name, self, *args, other_operands=None, op
 
     self = g.op(op_name, self, *other_operands, *args, **kwargs)
 
-    if will_cast:
+    if require_cast:
         self = g.op(
             "Cast", self, to_i=sym_help.cast_pytorch_to_onnx[origin_dtype])
 
@@ -1659,10 +1659,7 @@ def max(g, self, dim_or_y=None, keepdim=None):
         return g.op("ReduceMax", self, keepdims_i=0)
     # torch.max(input, other)
     if keepdim is None:
-        if sym_help._export_onnx_opset_version < 12:
-            return op_with_optional_float_cast(g, "Max", self, other_operands=[dim_or_y], opset_before=12)
-        else:
-            return g.op("Max", self, dim_or_y)
+        return op_with_optional_float_cast(g, "Max", self, other_operands=[dim_or_y], opset_before=12)
     # torch.max(input, dim, keepdim)
     else:
         dim = sym_help._get_const(dim_or_y, "i", "dim")
