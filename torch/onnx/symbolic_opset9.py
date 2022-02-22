@@ -1629,7 +1629,10 @@ def clamp(g, self, min, max):
         return clamp_min(g, self, min)
     else:
         if sym_help._is_constant(min) and sym_help._is_constant(max):
-            return op_with_optional_float_cast(g, "Clip", self, opset_before=12, min_f=_parse_arg(min, "f"), max_f=_parse_arg(max, "f"))
+            return op_with_optional_float_cast(g, "Clip", self, 
+                                               opset_before=12, 
+                                               min_f=_parse_arg(min, "f"), 
+                                               max_f=_parse_arg(max, "f"))
         else:
             return clamp_max(g, clamp_min(g, self, min), max)
 
