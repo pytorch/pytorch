@@ -4,11 +4,12 @@ import json
 import os
 import pathlib
 from dataclasses import dataclass
+from tools.codegen.api import unboxing
 from tools.codegen.api.translate import translate
 from tools.codegen.api.types import CppSignatureGroup
 from tools.codegen.api.unboxing import convert_arguments
 from tools.codegen.context import method_with_native_function
-from tools.codegen.gen import parse_native_yaml
+from tools.codegen.gen import parse_native_yaml, cpp_string
 from tools.codegen.model import NativeFunction, NativeFunctionsGroup, Variant
 from tools.codegen.utils import Target, FileManager, mapMaybe, make_file_manager
 from typing import Union, Sequence
@@ -88,14 +89,14 @@ class ComputeCodegenUnboxedKernels:
         sig = sig_group.most_faithful_signature()
 
         # escape double quote in schema, get rid of extra double quotes
-        schema = json.dumps(sig.func.__str__())[1:-1]
+        schema = cpp_string(str(sig.func))[1:-1]
 
         return f"""
 OperatorGenerator(
     TORCH_SELECTIVE_SCHEMA("aten::{schema}"),
     [](Stack & stack) {{
         RECORD_FUNCTION("{sig.name()}", std::vector<c10::IValue>());
-        at::unboxing::{f.func.name.unambiguous_name()}(stack);
+        at::unboxing::{unboxing.name(f)}(stack);
     }},
     aliasAnalysisFromSchema()
 ),

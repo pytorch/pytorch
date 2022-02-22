@@ -96,6 +96,11 @@ from tools.codegen.model import (
 connector = "\n\t"
 
 
+# Return unboxing function name for a NativeFunction
+def name(f: NativeFunction) -> str:
+    return f.func.name.unambiguous_name()
+
+
 # Convert all the arguments in a NativeFunction to C++ code
 def convert_arguments(f: NativeFunction) -> Tuple[List[Binding], List[str]]:
     # we need the 'self' argument so method needs to be False
