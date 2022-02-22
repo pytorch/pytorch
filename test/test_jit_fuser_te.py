@@ -21,12 +21,16 @@ torch._C._jit_set_profiling_executor(True)
 torch._C._jit_set_profiling_mode(True)
 
 from torch.testing._internal.common_utils import run_tests, ProfilingMode, GRAPH_EXECUTOR, \
-    enable_profiling_mode_for_profiling_tests, TestCase
+    enable_profiling_mode_for_profiling_tests, slowTest
 from torch.testing._internal.jit_utils import JitTestCase, \
-    RUN_CUDA, RUN_CUDA_HALF, RUN_CUDA_MULTI_GPU, warmup_backward, set_fusion_group_inlining
+    RUN_CUDA, RUN_CUDA_HALF, RUN_CUDA_MULTI_GPU, warmup_backward, set_fusion_group_inlining, \
+    clone_inputs, get_traced_sample_variant_pairs, TensorExprTestOptions
 
 from torch.testing._internal.common_methods_invocations import op_db
-from torch.testing._internal.common_device_type import ops, onlyCPU, instantiate_device_type_tests
+from torch.testing._internal.common_device_type import ops, onlyCPU, instantiate_device_type_tests, \
+    OpDTypes
+from torch.testing._internal.common_jit import JitCommonTestCase
+from torch.testing._internal.jit_metaprogramming_utils import create_traced_fn
 
 from textwrap import dedent
 from itertools import product, permutations, combinations
@@ -78,32 +82,13 @@ def inline_fusion_groups():
 
 class TestTEFuser(JitTestCase):
     def setUp(self):
-        self.old_cpu_fuser_state = torch._C._jit_can_fuse_on_cpu()
-        self.old_must_use_cpu_state = torch._C._jit_get_te_must_use_llvm_cpu()
-        self.old_gpu_fuser_state = torch._C._jit_can_fuse_on_gpu()
-
-        torch._C._jit_override_can_fuse_on_cpu(True)
-        # TODO: force LLVM. need to add it to asan, mac, windows builds + sandcastle
-        # torch._C._jit_set_te_must_use_llvm_cpu(True)
-        torch._C._jit_override_can_fuse_on_gpu(True)
+        self.tensorexpr_options = TensorExprTestOptions()
 
         # note: `self.dynamic_shapes` instatiated in specialization of class
         # defined below
 
-        self.old_profiling_executor = torch._C._jit_set_profiling_executor(True)
-        self.old_profiling_mode = torch._C._jit_set_profiling_mode(True)
-
         fusion_strategy = [("DYNAMIC", 20)] if self.dynamic_shapes else [("STATIC", 20)]
         self.old_fusion_strategy = torch._C._jit_set_fusion_strategy(fusion_strategy)
-
-        self.old_fusion_inlining = torch._C._debug_get_fusion_group_inlining()
-        torch._C._debug_set_fusion_group_inlining(False)
-
-        self.texpr_fuser_state = torch._C._jit_texpr_fuser_enabled()
-        torch._C._jit_set_texpr_fuser_enabled(True)
-
-        self.old_te_must_use_llvm_cpu = torch._C._jit_get_te_must_use_llvm_cpu()
-        torch._C._jit_set_te_must_use_llvm_cpu(False)
 
         self.devices = ['cpu'] if not torch.cuda.is_available() else ['cpu', 'cuda']
         self.int_dtypes = [
@@ -122,17 +107,8 @@ class TestTEFuser(JitTestCase):
         self.dtypes = self.int_dtypes + self.fp_dtypes
 
     def tearDown(self):
-        torch._C._jit_set_profiling_executor(self.old_profiling_executor)
-        torch._C._jit_set_profiling_mode(self.old_profiling_mode)
+        self.tensorexpr_options.restore()
         torch._C._jit_set_fusion_strategy(self.old_fusion_strategy)
-
-        torch._C._jit_override_can_fuse_on_gpu(self.old_gpu_fuser_state)
-        torch._C._jit_override_can_fuse_on_cpu(self.old_cpu_fuser_state)
-        torch._C._jit_set_te_must_use_llvm_cpu(self.old_must_use_cpu_state)
-        torch._C._debug_set_fusion_group_inlining(self.old_fusion_inlining)
-
-        torch._C._jit_set_texpr_fuser_enabled(self.texpr_fuser_state)
-        torch._C._jit_set_te_must_use_llvm_cpu(self.old_te_must_use_llvm_cpu)
 
     def assertAllFused(self, graph, except_for=None):
         except_for = except_for if except_for is not None else set()
@@ -1345,6 +1321,37 @@ class TestTEFuser(JitTestCase):
                     " ".join(["Failed:", str(dtype), 'isnan', device])
                 )
 
+    def test_gelu(self):
+        def apply(fn):
+            return lambda x, approximate: fn(x, approximate)
+
+        unary_ops = [
+            F.gelu,
+        ]
+        sizes = [(1,), (2,), (4, 4)]
+        for dtype, op, device, size in product(self.dtypes, unary_ops, self.devices, sizes):
+            # TODO: Add back when https://github.com/pytorch/pytorch/issues/55905 is closed
+            if dtype in [torch.float16, torch.bfloat16] and device == "cpu":
+                continue
+            try:
+                x = self.data_for(dtype, device, size=size)
+                cond = self.data_for(torch.bool, device)
+                fn = apply(op)
+                ref = fn(x, cond)
+            except Exception:
+                # If eager mode doesn't support a dtype/op/device combo,
+                # neither does the fuser.  Catch everything to avoid needing to
+                # guess what errors might be thrown by eager.
+                continue
+            try:
+                t = torch.jit.trace(fn, (x, cond))
+                torch.testing.assert_close(ref, t(x, cond))
+                self.assertAllFused(t.graph_for(x, cond))
+            except Exception as e:
+                raise RuntimeError(
+                    " ".join(["Failed:", str(dtype), op.__name__, device, str(size)])
+                )
+
     def test_unary_ops(self):
         def apply(fn):
             return lambda x: fn(x)
@@ -1379,7 +1386,6 @@ class TestTEFuser(JitTestCase):
             F.softplus,
             torch.sqrt,
             torch.rsqrt,
-            F.gelu,
             torch.abs,
             torch.ceil,
             torch.floor,
@@ -2100,6 +2106,14 @@ class TestTEFuser(JitTestCase):
             return F.hardsigmoid(x) * 1.01
         self._test_fwd_bwd(eager)
 
+    def test_cat_graph_opt(self):
+        def foo(x, y, z):
+            return torch.log(torch.cat([x, y, z]))
+
+        self.checkScript(foo, (torch.rand([5, 5]), torch.rand([2, 5]), torch.rand([1, 5])))
+        # TODO: not sure why not updated graph isn't reflected in last_optimized_graph
+        self.assertLastGraphAllFused()
+
     def test_dynamic_cat(self):
         with inline_fusion_groups():
             @torch.jit.script
@@ -2297,6 +2311,32 @@ class TestTEFuser(JitTestCase):
                     torch._C._jit_pass_dce(g)
                     FileCheck().check_count("TensorExprDynamicGuard", len(gen_tensor), exactly=True).run(g)
 
+    @unittest.skipIf(not RUN_CUDA, "half-precision NNC fusion requires CUDA")
+    def test_autocast_up(self):
+        def f(x):
+            y = x._autocast_to_full_precision(True, True)
+            z = torch.exp(y)
+            return z
+
+        x = torch.rand((2, 2), dtype=torch.half, device="cuda")
+        scr = torch.jit.script(f)
+        scr(x)
+        scr(x)
+        self.assertLastGraphAllFused()
+
+    @unittest.skipIf(not RUN_CUDA, "half-precision NNC fusion requires CUDA")
+    def test_autocast_down(self):
+        def f(x):
+            y = torch.sigmoid(x)
+            z = y._autocast_to_reduced_precision(True, True, torch.half, torch.half)
+            return z
+
+        x = torch.rand((2, 2), dtype=torch.float, device="cuda")
+        scr = torch.jit.script(f)
+        scr(x)
+        scr(x)
+        self.assertLastGraphAllFused()
+
 class TestTEFuserStatic(TestTEFuser):
     dynamic_shapes = False
 
@@ -2357,7 +2397,6 @@ works_list = [
     'mul',
     'ne',
     'neg',
-    'nn.functional.gelu',
     'nn.functional.hardshrink',
     'nn.functional.hardsigmoid',
     'nn.functional.hardswish',
@@ -2434,7 +2473,13 @@ def get_name(op):
         l.append(op.variant_test_name)
     return '.'.join(l)
 
-class TestNNCOpInfo(TestCase):
+class TestNNCOpInfo(JitCommonTestCase):
+    def setUp(self):
+        self.tensorexpr_options = TensorExprTestOptions()
+
+    def tearDown(self):
+        self.tensorexpr_options.restore()
+
     def te_compile(self, device, dtype, op):
         if op.name in skip_ops:
             return
@@ -2508,6 +2553,27 @@ def f({', '.join(param_names)}):
         else:
             raise RuntimeError("Expected test to fail. If it now works, move op into works_list")
 
+    @slowTest
+    @onlyCPU
+    @ops(op_db, dtypes=OpDTypes.supported)
+    def test_nnc_correctness(self, device, dtype, op):
+        variant_sample_pairs = get_traced_sample_variant_pairs(device, dtype, op)
+
+        for variant, sample in variant_sample_pairs:
+            trace = create_traced_fn(self, variant)
+            ref = variant(*clone_inputs((sample.input, *sample.args)), **sample.kwargs)
+
+            trace(*clone_inputs((sample.input, *sample.args)), **sample.kwargs)
+
+            val = trace(*clone_inputs((sample.input, *sample.args)), **sample.kwargs)
+
+            self.assertEqual(ref, val)
+
+        # https://github.com/pytorch/pytorch/issues/35600
+        # each torch.jit.trace adds state to the _python_cu compilation unit
+        # since this test traces a lot of functions, out-of-memory can occur
+        # if the CU is not cleared.
+        torch.jit._state._python_cu.drop_all_functions()
 
 only_for = ("cpu", "cuda")
 instantiate_device_type_tests(TestNNCOpInfo, globals(), only_for=only_for)
