@@ -449,6 +449,7 @@ An enum-like class for built-in communication hooks: ``ALLREDUCE`` and ``FP16_CO
           py::arg("output_device"),
           py::arg("broadcast_buffers"),
           py::arg("has_sync_bn"),
+          py::arg("static_graph"),
           py::call_guard<py::gil_scoped_release>())
       .def(
           "set_runtime_stats_and_log",
@@ -649,11 +650,13 @@ Example::
           .def(
               "get",
               [](::c10d::Store& store, const std::string& key) -> py::bytes {
-                auto value = store.get(key);
+                auto value = [&]() {
+                  py::gil_scoped_release guard;
+                  return store.get(key);
+                }();
                 return py::bytes(
                     reinterpret_cast<char*>(value.data()), value.size());
               },
-              py::call_guard<py::gil_scoped_release>(),
               R"(
 Retrieves the value associated with the given ``key`` in the store. If ``key`` is not
 present in the store, the function will wait for ``timeout``, which is defined
