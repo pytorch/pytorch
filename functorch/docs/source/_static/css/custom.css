@@ -9,3 +9,12 @@ div.container a.header-logo {
   background-image: url("../images/functorch.svg");
   background-size: 160px;
 }
+
+.highlight pre {
+  border: 1px solid rgba(0,0,0,0.15);
+  border-radius: 4px;
+}
+
+div.cell div.cell_input {
+  border-bottom-width: 0px;
+}
