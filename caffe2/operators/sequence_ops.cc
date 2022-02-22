@@ -328,7 +328,7 @@ only once, at the start and end of data.
 
 Github Links:
 
-- https://github.com/pytorch/pytorch/blob/master/caffe2/operators/sequence_ops.cc
+- https://github.com/pytorch/pytorch/blob/main/caffe2/operators/sequence_ops.cc
 
 <details>
 
@@ -433,7 +433,7 @@ for input and output data format.
 
 Github Links:
 
-- https://github.com/pytorch/pytorch/blob/master/caffe2/operators/sequence_ops.cc
+- https://github.com/pytorch/pytorch/blob/main/caffe2/operators/sequence_ops.cc
 
 <details>
 
