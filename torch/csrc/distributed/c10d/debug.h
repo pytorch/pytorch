@@ -7,7 +7,6 @@
 #pragma once
 
 #include <c10/macros/Macros.h>
-#include <c10/util/Optional.h>
 
 namespace c10d {
 
@@ -17,7 +16,9 @@ enum class DebugLevel {
   Detail
 };
 
-TORCH_API void setDebugLevel(at::optional<DebugLevel> opt_level = {}, bool force = false);
+TORCH_API void setDebugLevel(DebugLevel level);
+
+TORCH_API void setDebugLevelFromEnvironment();
 
 TORCH_API DebugLevel debug_level() noexcept;
 

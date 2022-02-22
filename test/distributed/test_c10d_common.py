@@ -700,25 +700,25 @@ class CommTest(AbstractCommTest, MultiProcessTestCase):
 
     def test_debug_level(self):
         # Default should be off
-        default_debug_mode = dist._get_debug_level()
-        self.assertEqual(default_debug_mode, dist._DebugLevel.OFF)
+        default_debug_mode = dist.get_debug_level()
+        self.assertEqual(default_debug_mode, dist.DebugLevel.OFF)
         mapping = {
-            "OFF": dist._DebugLevel.OFF,
-            "off": dist._DebugLevel.OFF,
-            "oFf": dist._DebugLevel.OFF,
-            "INFO": dist._DebugLevel.INFO,
-            "info": dist._DebugLevel.INFO,
-            "INfO": dist._DebugLevel.INFO,
-            "DETAIL": dist._DebugLevel.DETAIL,
-            "detail": dist._DebugLevel.DETAIL,
-            "DeTaIl": dist._DebugLevel.DETAIL,
+            "OFF": dist.DebugLevel.OFF,
+            "off": dist.DebugLevel.OFF,
+            "oFf": dist.DebugLevel.OFF,
+            "INFO": dist.DebugLevel.INFO,
+            "info": dist.DebugLevel.INFO,
+            "INfO": dist.DebugLevel.INFO,
+            "DETAIL": dist.DebugLevel.DETAIL,
+            "detail": dist.DebugLevel.DETAIL,
+            "DeTaIl": dist.DebugLevel.DETAIL,
         }
         invalid_debug_modes = ["foo", 0, 1, -1]
 
         for mode in mapping.keys():
             os.environ["TORCH_DISTRIBUTED_DEBUG"] = str(mode)
-            dist._set_debug_level(force=True)
-            set_debug_mode = dist._get_debug_level()
+            dist.set_debug_level_from_env()
+            set_debug_mode = dist.get_debug_level()
             self.assertEqual(
                 set_debug_mode,
                 mapping[mode],
@@ -728,7 +728,7 @@ class CommTest(AbstractCommTest, MultiProcessTestCase):
         for mode in invalid_debug_modes:
             os.environ["TORCH_DISTRIBUTED_DEBUG"] = str(mode)
             with self.assertRaisesRegex(RuntimeError, "The value of TORCH_DISTRIBUTED_DEBUG must"):
-                dist._set_debug_level(force=True)
+                dist.set_debug_level_from_env()
 
 
 class DummyWork(dist._Work):
