@@ -4,6 +4,7 @@ from typing import Optional, List, Tuple
 from enum import Enum
 
 aten = torch.ops.aten
+aten.__origin__ = None
 
 decomposition_table = {}
 
@@ -197,11 +198,11 @@ def huber_loss_backward(grad_output: Tensor, self: Tensor, target: Tensor, reduc
 
 
 @register_decomposition(aten.binary_cross_entropy_backward)
-def binary_cross_entropy_backward(grad_output: Tensor, self: Tensor, target: Tensor, weight: Optional[Tensor] = None, reduction: int = Reduction.MEAN) -> Tensor:
+def binary_cross_entropy_backward(grad_output: Tensor, self: Tensor, target: Tensor, weight: Optional[Tensor] = None, reduction: int = Reduction.MEAN.value) -> Tensor:
     if weight is None:
-        weight = 1
+        weight = aten.new_ones(self, ())
     result = weight * (self - target) / self / (1 - self)
-    if reduction == Reduction.MEAN:
+    if reduction == Reduction.MEAN.value:
         result = result * (1.0 / self.numel())
     return result * grad_output
 
@@ -337,7 +338,7 @@ def embedding_dense_backward(grad_output: Tensor, indices: Tensor, num_weights: 
     return aten.index_put(grad_weight, [indices_rank1], aten.where(skip_padding, grad, zero_grad), accumulate=True)
 
 
-def prod(x):
+def prod(x: List[int]):
     r = 1
     for i in x:
         r *= i
@@ -366,7 +367,7 @@ def native_layer_norm(input: Tensor, normalized_shape: List[int], weight: Option
     # batchnorm has shape {C} while weight for layernorm has shape {H, W} or {W}.
     out, mean, rstd = aten.native_batch_norm(
         input_reshaped, weight=None, bias=None, running_mean=None,
-        running_var=None, training=True, momentum=0, eps=eps)
+        running_var=None, training=True, momentum=0.0, eps=eps)
     out = out.view(input_shape)
     if weight is not None:
         out = out * weight
@@ -398,7 +399,7 @@ def clamp_min(self: Tensor, min: float):
 
 
 @register_decomposition(aten.clamp_max)
-def clamp_max(self: Tensor, min: float):
+def clamp_max(self: Tensor, max: float):
     return aten.clamp(self, max=max)
 
 
@@ -419,7 +420,7 @@ def detach_decomposition(x):
 
 
 @register_decomposition(aten.var)
-def var_decomposition(x, dims, correction=0, keepdim=False):
+def var_decomposition(x: Tensor, dims: List[int], correction: int = 0, keepdim: bool = False):
     if dims is None:
         dims = []
 
@@ -442,5 +443,5 @@ def var_decomposition(x, dims, correction=0, keepdim=False):
 
 
 @register_decomposition(aten.std)
-def std_decomposition(x, dims, correction=0, keepdim=False):
+def std_decomposition(x: Tensor, dims: List[int], correction: int = 0, keepdim: bool = False):
     return aten.sqrt(aten.var(x, dims, correction=correction, keepdim=keepdim))
