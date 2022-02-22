@@ -3465,7 +3465,7 @@ class TestONNXRuntime(unittest.TestCase):
     # Clip <= opset 11 does not support non-floats (e.g. ints)
     # We enable such non-float types to avoid generating wrong ONNX file
     # and enhance the compatibility of pytorch.onnx.
-    @skipIfUnsupportedOpsetVersion([12])
+    @skipIfUnsupportedMaxOpsetVersion(11)
     def test_clip_int(self):
         class MyClipInt(torch.nn.Module):
             def forward(self, x):
