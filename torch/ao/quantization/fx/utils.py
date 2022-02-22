@@ -146,7 +146,8 @@ def quantize_node(
         modules: Dict[str, torch.nn.Module],
         quantized_graph: Graph,
         node_name_to_scope: Dict[str, Tuple[str, type]],
-        is_input: bool) -> Node:
+        is_input: bool,
+        output_prefix: str = "_output") -> Node:
     ''' Add quantization nodes (eg. quantize_per_tensor/per_channel) for given node to graph
     with the qparams calculated from activation_post_process (obs_module).
     The observer node (obs_node) is used to find the FQN of the user of act_post_process.
@@ -173,7 +174,7 @@ def quantize_node(
     else:
         # if the quantize function is at the output of the op, we use the observer input node to get the path
         first_linear_use_or_first_use = in_node
-        prefix = "_output"
+        prefix = output_prefix
 
     if first_linear_use_or_first_use and first_linear_use_or_first_use.name in node_name_to_scope:
         module_path, _ = node_name_to_scope[first_linear_use_or_first_use.name]

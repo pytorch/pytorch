@@ -1069,7 +1069,8 @@ class LinearReLUQuantizeHandler(QuantizeHandler):
                         modules,
                         quantized_graph,
                         node_name_to_scope,
-                        is_input=False)
+                        is_input=False,
+                        output_prefix="")
                 else:
                     # output for dynamically quantized linear op is not quantized
                     return op_out

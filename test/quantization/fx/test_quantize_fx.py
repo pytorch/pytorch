@@ -2307,9 +2307,9 @@ class TestQuantizeFx(QuantizationTestCase):
             "Expected the scripted model to preserve the state_dict for non-packed weight attributes")
         for attr_name in [
                 "mods1_0_input_scale_0", "mods1_0_input_zero_point_0",
-                "mods1_0_output_scale_0", "mods1_0_output_zero_point_0",
-                "mods1_1_output_scale_0", "mods1_1_output_zero_point_0",
-                "mods2_output_scale_0", "mods2_output_zero_point_0"]:
+                "mods1_0_scale_0", "mods1_0_zero_point_0",
+                "mods1_1_scale_0", "mods1_1_zero_point_0",
+                "mods2_scale_0", "mods2_zero_point_0"]:
             self.assertTrue(hasattr(m, attr_name))
 
     @skipIfNoFBGEMM
@@ -2700,8 +2700,8 @@ class TestQuantizeFx(QuantizationTestCase):
 
         for attr_name in [
                 "mods1_0_input_scale_0", "mods1_0_input_zero_point_0",
-                "mods1_0_output_scale_0", "mods1_0_output_zero_point_0",
-                "mods1_1_output_scale_0", "mods1_1_output_zero_point_0"]:
+                "mods1_0_scale_0", "mods1_0_zero_point_0",
+                "mods1_1_scale_0", "mods1_1_zero_point_0"]:
             self.assertTrue(hasattr(m, attr_name))
 
     def test_no_obs_between_unmatched_node_and_copy_node(self):
@@ -3303,7 +3303,7 @@ class TestQuantizeFx(QuantizationTestCase):
             # checking result match
             self.assertTrue(torch.equal(out_ref, out))
 
-    # TODO(andrew): figure out why qconfig_dict module_name doesn't work
+    # TODO(andrew): fix this test after https://github.com/pytorch/pytorch/pull/72953 lands
     def skip_test_convert_qconfig_dict(self):
         class Linear(torch.nn.Module):
             def __init__(self):
