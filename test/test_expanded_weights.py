@@ -242,7 +242,7 @@ class TestExpandedWeightFunctional(TestCase):
 
 
 class TestExpandedWeightModule(TestCase):
-    def _do_test(self, module, input, atol=None):
+    def _do_test(self, module, input, kwargs):
         if len(list(module.parameters())) == 0:  # for norms with affine=False
             raise unittest.SkipTest("affine=False, no params")
         batch_size = input.shape[0]
@@ -256,20 +256,17 @@ class TestExpandedWeightModule(TestCase):
                 del param.grad_sample
 
             # get per sample grads with a for loop
-            expected_res = torch.tensor(0.)
+            expected_res = torch.tensor(0., device=input.device, **kwargs)
             expected_grads = []
             for i in range(batch_size):
                 res = module(input[i].unsqueeze(0)).sum()
                 expected_grads.append(torch.autograd.grad(res, module.parameters(), torch.ones_like(res)))
                 expected_res += res
             expected_grads = tuple(torch.stack(grad) for grad in zip(*expected_grads))
-        self.assertEqual(actual_res, expected_res, atol=atol)
-        if atol is not None:
-            assert [torch.allclose(actual, expected, atol=atol) for (actual, expected) in zip(actual_grads, expected_grads)]
-        else:
-            assert [torch.allclose(actual, expected) for (actual, expected) in zip(actual_grads, expected_grads)]
+        self.assertEqual(actual_res, expected_res)
+        assert [torch.allclose(actual, expected) for (actual, expected) in zip(actual_grads, expected_grads)]
 
-    def _do_test_multi_input(self, module, input, atol=None):
+    def _do_test_multi_input(self, module, input):
         class TestModule(nn.Module):
             def __init__(self, module):
                 super().__init__()
@@ -297,10 +294,7 @@ class TestExpandedWeightModule(TestCase):
                 res = module(input[i].unsqueeze(0)).sum()
                 expected_grads.append(torch.autograd.grad(res, module.parameters(), torch.ones_like(res)))
             expected_grads = tuple(torch.stack(grad) for grad in zip(*expected_grads))
-        if atol is not None:
-            assert [torch.allclose(actual, 2 * expected, atol=atol) for (actual, expected) in zip(actual_grads, expected_grads)]
-        else:
-            assert [torch.allclose(actual, 2 * expected) for (actual, expected) in zip(actual_grads, expected_grads)]
+        assert [torch.allclose(actual, 2 * expected) for (actual, expected) in zip(actual_grads, expected_grads)]
 
     def test_per_sample_api_failing(self):
         module = nn.Linear(10, 10)
@@ -324,23 +318,26 @@ class ContextManagerTests(TestBase):
     def constructor_args(self):
         return self._get_arg('constructor_args', False)
 
-    def test_context_manager(self, test_case, atol=None):
-        module = self.constructor(*self.constructor_args)
-        input = self._get_input()
+    def test_context_manager(self, test_case, device):
+        kwargs = {}
+        if device == 'cuda' and 'Embedding' not in self.get_name():  # embedding input is longtensor
+            kwargs['dtype'] = torch.double
+        module = self.constructor(*self.constructor_args, **kwargs).to(device)
+        input = self._get_input().to(device, **kwargs)
         if len(input.shape) == 0 or input.shape[0] == 0:
             raise unittest.SkipTest("Can't get per sample gradients when no batch dim or batch dim is 0")
         if self.constructor == torch.nn.Linear and len(input.shape) == 1:
             raise unittest.SkipTest("Can't get per sample gradients for input of rank 1")
-        test_case._do_test(module, input, atol=atol)
+        test_case._do_test(module, input, kwargs)
 
-    def test_context_manager_multiple_inputs(self, test_case, atol=None):
+    def test_context_manager_multiple_inputs(self, test_case):
         module = self.constructor(*self.constructor_args)
         input = self._get_input()
         if len(input.shape) == 0 or input.shape[0] == 0:
             raise unittest.SkipTest("Can't get per sample gradients when no batch dim or batch dim is 0")
         if self.constructor == torch.nn.Linear and len(input.shape) == 1:
             raise unittest.SkipTest("Can't get per sample gradients for input of rank 1")
-        test_case._do_test_multi_input(module, input, atol=atol)
+        test_case._do_test_multi_input(module, input)
 
 # TODO: Once all of these use ModuleInfo, replace with ModuleInfo tests
 # These currently use the legacy nn tests
@@ -361,12 +358,14 @@ for test_param in supported_tests:
     if decorator is not None:
         fn = decorator(fn)
 
-    atol = None
-    if test_name == "GroupNorm_2d_affine_large_feature":
-        atol = 1e-05
-    setattr(TestExpandedWeightModule, test_name, lambda self, test=test, atol=atol: test.test_context_manager(self, atol=atol))
-    setattr(TestExpandedWeightModule, test_name_multi_input,
-            lambda self, test=test, atol=atol: test.test_context_manager_multiple_inputs(self, atol=atol))
+    if not hasattr(test, 'test_cpu') or test.test_cpu:
+        setattr(TestExpandedWeightModule, test_name, lambda self, test=test: test.test_context_manager(self, 'cpu'))
+        setattr(TestExpandedWeightModule, test_name_multi_input,
+                lambda self, test=test: test.test_context_manager_multiple_inputs(self))
+
+    # since this checks derivatives, only use double for precision
+    setattr(TestExpandedWeightModule, test_name + '_cuda_double',
+            lambda self, test=test: test.test_context_manager(self, 'cuda'))
 
 # ------------- HELPER FUNCTIONS -----------------
 
