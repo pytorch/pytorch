@@ -525,6 +525,7 @@ class DispatchKeySet final {
           current_dispatchkey_idx_(end_iter_key_val),
           current_backendcomponent_idx_(end_iter_key_val) {
       // Go to the first key in the set
+      TORCH_INTERNAL_ASSERT(next_functionality_ >= num_backends, "nb=", static_cast<uint32_t>(num_backends), "nf=", static_cast<uint32_t>(next_functionality_));
       ++(*this);
     }
 
