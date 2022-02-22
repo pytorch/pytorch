@@ -8,7 +8,7 @@ graph {
     name: "IsNaN_0"
     op_type: "IsNaN"
   }
-  name: "torch_jit"
+  name: "torch-jit-export"
   input {
     name: "onnx::IsNaN_0"
     type {
