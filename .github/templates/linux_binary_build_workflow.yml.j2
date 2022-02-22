@@ -53,7 +53,7 @@ jobs:
     steps:
       !{{ common.setup_ec2_linux() }}
       !{{ common.checkout(deep_clone=False, directory="pytorch") }}
-      !{{ common.checkout(deep_clone=False, directory="builder", repository="pytorch/builder", checkout_pr_head=False) }}
+      !{{ common.checkout(deep_clone=False, directory="builder", repository="pytorch/builder", branch=common.builder_branch) }}
 {%- if config["gpu_arch_type"] == 'cuda' and config["gpu_arch_version"].startswith('11') %}
       - name: Set BUILD_SPLIT_CUDA
         run: |
@@ -119,16 +119,8 @@ jobs:
         with:
           name: !{{ config["build_name"] }}
           path: "${{ runner.temp }}/artifacts/"
-      - name: Clone pytorch/pytorch
-        uses: actions/checkout@v2
-        with:
-          path: pytorch
-          submodules: recursive
-      - name: Clone pytorch/builder
-        uses: actions/checkout@v2
-        with:
-          repository: pytorch/builder
-          path: builder
+      !{{ common.checkout(deep_clone=False, directory="pytorch") }}
+      !{{ common.checkout(deep_clone=False, directory="builder", repository="pytorch/builder", branch=common.builder_branch) }}
 {%- if config["gpu_arch_type"] == "cuda" %}
       - name: Install nvidia driver, nvidia-docker runtime, set GPU_FLAG
         working-directory: pytorch/
