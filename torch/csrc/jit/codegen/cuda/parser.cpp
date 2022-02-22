@@ -64,6 +64,11 @@ const auto& boolAttr = Symbol::attr("profiled_bool");
 typedef Val* CgValue;
 typedef Expr* CgOp;
 
+bool is_reduction_non_compatible_tensor(
+    const std::shared_ptr<c10::TensorType>& tensor_type) {
+  return is_zero_dim_tensor(tensor_type) || is_zero_sized_tensor(tensor_type);
+}
+
 // Note [ Permutation Bookkeeping and Propagation in Parser ]
 //
 // The goal in supporting permutation propagation in parser is to:
@@ -1508,7 +1513,13 @@ class IrParser {
                     ValueHolder(result.output, format));
               }
             },
-            [](const Node* node) -> bool { return true; },
+            [](const Node* node) -> bool {
+              if (is_reduction_non_compatible_tensor(
+                      node->input(0)->type()->cast<TensorType>())) {
+                return false;
+              }
+              return true;
+            },
             [](const Node* node) -> OperatorType {
               return OperatorType::Normalization;
             });
@@ -1662,7 +1673,13 @@ class IrParser {
                   node->output(2)->unique(), TensorViewBuilder().build());
             }
           },
-          [](const Node* node) -> bool { return true; },
+          [](const Node* node) -> bool {
+            if (is_reduction_non_compatible_tensor(
+                    node->input(1)->type()->cast<TensorType>())) {
+              return false;
+            }
+            return true;
+          },
           [](const Node* node) -> OperatorType {
             return OperatorType::Normalization;
           });
@@ -1727,7 +1744,13 @@ class IrParser {
               }
             },
             // TODO: #ProfileIValue List should update this
-            [](const Node* node) -> bool { return true; },
+            [](const Node* node) -> bool {
+              if (is_reduction_non_compatible_tensor(
+                      node->input(0)->type()->cast<TensorType>())) {
+                return false;
+              }
+              return true;
+            },
             [](const Node* node) -> OperatorType {
               return OperatorType::Normalization;
             });
@@ -1825,7 +1848,13 @@ class IrParser {
             }
           },
           // TODO: #ProfileIValue List should update this
-          [](const Node* node) -> bool { return true; },
+          [](const Node* node) -> bool {
+            if (is_reduction_non_compatible_tensor(
+                    node->input(0)->type()->cast<TensorType>())) {
+              return false;
+            }
+            return true;
+          },
           [](const Node* node) -> OperatorType {
             return OperatorType::Normalization;
           });
@@ -1862,7 +1891,7 @@ class IrParser {
               value_map.emplace(node->output()->unique(), output);
             },
             [](const Node* node) -> bool {
-              if (is_zero_dim_tensor(
+              if (is_reduction_non_compatible_tensor(
                       node->input(0)->type()->cast<TensorType>())) {
                 return false;
               }
@@ -1906,7 +1935,7 @@ class IrParser {
             value_map.emplace(node->output()->unique(), output);
           },
           [](const Node* node) -> bool {
-            if (is_zero_dim_tensor(
+            if (is_reduction_non_compatible_tensor(
                     node->input(0)->type()->cast<TensorType>())) {
               return false;
             }
@@ -1963,7 +1992,7 @@ class IrParser {
               value_map.emplace(node->output()->unique(), grad_input);
             },
             [](const Node* node) -> bool {
-              if (is_zero_dim_tensor(
+              if (is_reduction_non_compatible_tensor(
                       node->input(0)->type()->cast<TensorType>())) {
                 return false;
               }
@@ -2063,7 +2092,7 @@ class IrParser {
             value_map.emplace(node->output()->unique(), out);
           },
           [](const Node* node) -> bool {
-            if (is_zero_dim_tensor(
+            if (is_reduction_non_compatible_tensor(
                     node->input(0)->type()->cast<TensorType>())) {
               return false;
             }
@@ -2137,7 +2166,7 @@ class IrParser {
             value_map.emplace(node->output()->unique(), out);
           },
           [](const Node* node) -> bool {
-            if (is_zero_dim_tensor(
+            if (is_reduction_non_compatible_tensor(
                     node->input(0)->type()->cast<TensorType>())) {
               return false;
             }
@@ -2195,7 +2224,7 @@ class IrParser {
               }
             },
             [](const Node* node) -> bool {
-              if (is_zero_dim_tensor(
+              if (is_reduction_non_compatible_tensor(
                       node->input(0)->type()->cast<TensorType>())) {
                 return false;
               }
@@ -2486,7 +2515,7 @@ class IrParser {
             value_map.emplace(node->output()->unique(), out);
           },
           [](const Node* node) -> bool {
-            if (is_zero_dim_tensor(
+            if (is_reduction_non_compatible_tensor(
                     node->input(0)->type()->cast<TensorType>())) {
               return false;
             }
