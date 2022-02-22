@@ -80,16 +80,29 @@ jobs:
           echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
           echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
           echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
-      - name: Clone pytorch/pytorch
-        uses: actions/checkout@v2
+      - name: Checkout PyTorch
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
-          path: ${{ env.PYTORCH_ROOT }}
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
-      - name: Clone pytorch/builder
-        uses: actions/checkout@v2
+          path: pytorch
+      - name: Clean PyTorch checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: pytorch
+      - name: Checkout pytorch/builder
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
+          ref: main
+          submodules: recursive
           repository: pytorch/builder
-          path: ${{ env.BUILDER_ROOT }}
+          path: builder
+      - name: Clean pytorch/builder checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: builder
       - name: Populate binary env
         shell: bash
         run: |
@@ -169,16 +182,29 @@ jobs:
         with:
           name: libtorch-cpu-shared-with-deps-cxx11-abi
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
-      - name: Clone pytorch/pytorch
-        uses: actions/checkout@v2
+      - name: Checkout PyTorch
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
-          path: ${{ env.PYTORCH_ROOT }}
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
-      - name: Clone pytorch/builder
-        uses: actions/checkout@v2
+          path: pytorch
+      - name: Clean PyTorch checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: pytorch
+      - name: Checkout pytorch/builder
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
+          ref: main
+          submodules: recursive
           repository: pytorch/builder
-          path: ${{ env.BUILDER_ROOT }}
+          path: builder
+      - name: Clean pytorch/builder checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: builder
       - name: Populate binary env
         shell: bash
         run: |
@@ -364,16 +390,29 @@ jobs:
           echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
           echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
           echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
-      - name: Clone pytorch/pytorch
-        uses: actions/checkout@v2
+      - name: Checkout PyTorch
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
-          path: ${{ env.PYTORCH_ROOT }}
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
-      - name: Clone pytorch/builder
-        uses: actions/checkout@v2
+          path: pytorch
+      - name: Clean PyTorch checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: pytorch
+      - name: Checkout pytorch/builder
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
+          ref: main
+          submodules: recursive
           repository: pytorch/builder
-          path: ${{ env.BUILDER_ROOT }}
+          path: builder
+      - name: Clean pytorch/builder checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: builder
       - name: Populate binary env
         shell: bash
         run: |
@@ -453,16 +492,29 @@ jobs:
         with:
           name: libtorch-cpu-shared-without-deps-cxx11-abi
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
-      - name: Clone pytorch/pytorch
-        uses: actions/checkout@v2
+      - name: Checkout PyTorch
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
-          path: ${{ env.PYTORCH_ROOT }}
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
-      - name: Clone pytorch/builder
-        uses: actions/checkout@v2
+          path: pytorch
+      - name: Clean PyTorch checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: pytorch
+      - name: Checkout pytorch/builder
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
+          ref: main
+          submodules: recursive
           repository: pytorch/builder
-          path: ${{ env.BUILDER_ROOT }}
+          path: builder
+      - name: Clean pytorch/builder checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: builder
       - name: Populate binary env
         shell: bash
         run: |
@@ -648,16 +700,29 @@ jobs:
           echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
           echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
           echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
-      - name: Clone pytorch/pytorch
-        uses: actions/checkout@v2
+      - name: Checkout PyTorch
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
-          path: ${{ env.PYTORCH_ROOT }}
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
-      - name: Clone pytorch/builder
-        uses: actions/checkout@v2
+          path: pytorch
+      - name: Clean PyTorch checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: pytorch
+      - name: Checkout pytorch/builder
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
+          ref: main
+          submodules: recursive
           repository: pytorch/builder
-          path: ${{ env.BUILDER_ROOT }}
+          path: builder
+      - name: Clean pytorch/builder checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: builder
       - name: Populate binary env
         shell: bash
         run: |
@@ -737,16 +802,29 @@ jobs:
         with:
           name: libtorch-cpu-static-with-deps-cxx11-abi
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
-      - name: Clone pytorch/pytorch
-        uses: actions/checkout@v2
+      - name: Checkout PyTorch
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
-          path: ${{ env.PYTORCH_ROOT }}
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
-      - name: Clone pytorch/builder
-        uses: actions/checkout@v2
+          path: pytorch
+      - name: Clean PyTorch checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: pytorch
+      - name: Checkout pytorch/builder
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
+          ref: main
+          submodules: recursive
           repository: pytorch/builder
-          path: ${{ env.BUILDER_ROOT }}
+          path: builder
+      - name: Clean pytorch/builder checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: builder
       - name: Populate binary env
         shell: bash
         run: |
@@ -932,16 +1010,29 @@ jobs:
           echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
           echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
           echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
-      - name: Clone pytorch/pytorch
-        uses: actions/checkout@v2
+      - name: Checkout PyTorch
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
-          path: ${{ env.PYTORCH_ROOT }}
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
-      - name: Clone pytorch/builder
-        uses: actions/checkout@v2
+          path: pytorch
+      - name: Clean PyTorch checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: pytorch
+      - name: Checkout pytorch/builder
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
+          ref: main
+          submodules: recursive
           repository: pytorch/builder
-          path: ${{ env.BUILDER_ROOT }}
+          path: builder
+      - name: Clean pytorch/builder checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: builder
       - name: Populate binary env
         shell: bash
         run: |
@@ -1021,16 +1112,29 @@ jobs:
         with:
           name: libtorch-cpu-static-without-deps-cxx11-abi
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
-      - name: Clone pytorch/pytorch
-        uses: actions/checkout@v2
+      - name: Checkout PyTorch
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
-          path: ${{ env.PYTORCH_ROOT }}
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
-      - name: Clone pytorch/builder
-        uses: actions/checkout@v2
+          path: pytorch
+      - name: Clean PyTorch checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: pytorch
+      - name: Checkout pytorch/builder
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
+          ref: main
+          submodules: recursive
           repository: pytorch/builder
-          path: ${{ env.BUILDER_ROOT }}
+          path: builder
+      - name: Clean pytorch/builder checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: builder
       - name: Populate binary env
         shell: bash
         run: |
@@ -1217,16 +1321,29 @@ jobs:
           echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
           echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
           echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
-      - name: Clone pytorch/pytorch
-        uses: actions/checkout@v2
+      - name: Checkout PyTorch
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
-          path: ${{ env.PYTORCH_ROOT }}
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
-      - name: Clone pytorch/builder
-        uses: actions/checkout@v2
+          path: pytorch
+      - name: Clean PyTorch checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: pytorch
+      - name: Checkout pytorch/builder
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
+          ref: main
+          submodules: recursive
           repository: pytorch/builder
-          path: ${{ env.BUILDER_ROOT }}
+          path: builder
+      - name: Clean pytorch/builder checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: builder
       - name: Populate binary env
         shell: bash
         run: |
@@ -1307,16 +1424,29 @@ jobs:
         with:
           name: libtorch-cuda11_1-shared-with-deps-cxx11-abi
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
-      - name: Clone pytorch/pytorch
-        uses: actions/checkout@v2
+      - name: Checkout PyTorch
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
-          path: ${{ env.PYTORCH_ROOT }}
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
-      - name: Clone pytorch/builder
-        uses: actions/checkout@v2
+          path: pytorch
+      - name: Clean PyTorch checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: pytorch
+      - name: Checkout pytorch/builder
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
+          ref: main
+          submodules: recursive
           repository: pytorch/builder
-          path: ${{ env.BUILDER_ROOT }}
+          path: builder
+      - name: Clean pytorch/builder checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: builder
       - name: Populate binary env
         shell: bash
         run: |
@@ -1504,16 +1634,29 @@ jobs:
           echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
           echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
           echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
-      - name: Clone pytorch/pytorch
-        uses: actions/checkout@v2
+      - name: Checkout PyTorch
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
-          path: ${{ env.PYTORCH_ROOT }}
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
-      - name: Clone pytorch/builder
-        uses: actions/checkout@v2
+          path: pytorch
+      - name: Clean PyTorch checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: pytorch
+      - name: Checkout pytorch/builder
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
+          ref: main
+          submodules: recursive
           repository: pytorch/builder
-          path: ${{ env.BUILDER_ROOT }}
+          path: builder
+      - name: Clean pytorch/builder checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: builder
       - name: Populate binary env
         shell: bash
         run: |
@@ -1594,16 +1737,29 @@ jobs:
         with:
           name: libtorch-cuda11_1-shared-without-deps-cxx11-abi
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
-      - name: Clone pytorch/pytorch
-        uses: actions/checkout@v2
+      - name: Checkout PyTorch
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
-          path: ${{ env.PYTORCH_ROOT }}
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
-      - name: Clone pytorch/builder
-        uses: actions/checkout@v2
+          path: pytorch
+      - name: Clean PyTorch checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: pytorch
+      - name: Checkout pytorch/builder
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
+          ref: main
+          submodules: recursive
           repository: pytorch/builder
-          path: ${{ env.BUILDER_ROOT }}
+          path: builder
+      - name: Clean pytorch/builder checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: builder
       - name: Populate binary env
         shell: bash
         run: |
@@ -1791,16 +1947,29 @@ jobs:
           echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
           echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
           echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
-      - name: Clone pytorch/pytorch
-        uses: actions/checkout@v2
+      - name: Checkout PyTorch
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
-          path: ${{ env.PYTORCH_ROOT }}
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
-      - name: Clone pytorch/builder
-        uses: actions/checkout@v2
+          path: pytorch
+      - name: Clean PyTorch checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: pytorch
+      - name: Checkout pytorch/builder
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
+          ref: main
+          submodules: recursive
           repository: pytorch/builder
-          path: ${{ env.BUILDER_ROOT }}
+          path: builder
+      - name: Clean pytorch/builder checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: builder
       - name: Populate binary env
         shell: bash
         run: |
@@ -1881,16 +2050,29 @@ jobs:
         with:
           name: libtorch-cuda11_1-static-with-deps-cxx11-abi
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
-      - name: Clone pytorch/pytorch
-        uses: actions/checkout@v2
+      - name: Checkout PyTorch
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
-          path: ${{ env.PYTORCH_ROOT }}
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
-      - name: Clone pytorch/builder
-        uses: actions/checkout@v2
+          path: pytorch
+      - name: Clean PyTorch checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: pytorch
+      - name: Checkout pytorch/builder
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
+          ref: main
+          submodules: recursive
           repository: pytorch/builder
-          path: ${{ env.BUILDER_ROOT }}
+          path: builder
+      - name: Clean pytorch/builder checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: builder
       - name: Populate binary env
         shell: bash
         run: |
@@ -2078,16 +2260,29 @@ jobs:
           echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
           echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
           echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
-      - name: Clone pytorch/pytorch
-        uses: actions/checkout@v2
+      - name: Checkout PyTorch
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
-          path: ${{ env.PYTORCH_ROOT }}
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
-      - name: Clone pytorch/builder
-        uses: actions/checkout@v2
+          path: pytorch
+      - name: Clean PyTorch checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: pytorch
+      - name: Checkout pytorch/builder
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
+          ref: main
+          submodules: recursive
           repository: pytorch/builder
-          path: ${{ env.BUILDER_ROOT }}
+          path: builder
+      - name: Clean pytorch/builder checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: builder
       - name: Populate binary env
         shell: bash
         run: |
@@ -2168,16 +2363,29 @@ jobs:
         with:
           name: libtorch-cuda11_1-static-without-deps-cxx11-abi
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
-      - name: Clone pytorch/pytorch
-        uses: actions/checkout@v2
+      - name: Checkout PyTorch
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
-          path: ${{ env.PYTORCH_ROOT }}
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
-      - name: Clone pytorch/builder
-        uses: actions/checkout@v2
+          path: pytorch
+      - name: Clean PyTorch checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: pytorch
+      - name: Checkout pytorch/builder
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
+          ref: main
+          submodules: recursive
           repository: pytorch/builder
-          path: ${{ env.BUILDER_ROOT }}
+          path: builder
+      - name: Clean pytorch/builder checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: builder
       - name: Populate binary env
         shell: bash
         run: |
@@ -2365,16 +2573,29 @@ jobs:
           echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
           echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
           echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
-      - name: Clone pytorch/pytorch
-        uses: actions/checkout@v2
+      - name: Checkout PyTorch
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
-          path: ${{ env.PYTORCH_ROOT }}
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
-      - name: Clone pytorch/builder
-        uses: actions/checkout@v2
+          path: pytorch
+      - name: Clean PyTorch checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: pytorch
+      - name: Checkout pytorch/builder
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
+          ref: main
+          submodules: recursive
           repository: pytorch/builder
-          path: ${{ env.BUILDER_ROOT }}
+          path: builder
+      - name: Clean pytorch/builder checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: builder
       - name: Populate binary env
         shell: bash
         run: |
@@ -2455,16 +2676,29 @@ jobs:
         with:
           name: libtorch-cuda11_3-shared-with-deps-cxx11-abi
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
-      - name: Clone pytorch/pytorch
-        uses: actions/checkout@v2
+      - name: Checkout PyTorch
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
-          path: ${{ env.PYTORCH_ROOT }}
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
-      - name: Clone pytorch/builder
-        uses: actions/checkout@v2
+          path: pytorch
+      - name: Clean PyTorch checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: pytorch
+      - name: Checkout pytorch/builder
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
+          ref: main
+          submodules: recursive
           repository: pytorch/builder
-          path: ${{ env.BUILDER_ROOT }}
+          path: builder
+      - name: Clean pytorch/builder checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: builder
       - name: Populate binary env
         shell: bash
         run: |
@@ -2652,16 +2886,29 @@ jobs:
           echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
           echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
           echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
-      - name: Clone pytorch/pytorch
-        uses: actions/checkout@v2
+      - name: Checkout PyTorch
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
-          path: ${{ env.PYTORCH_ROOT }}
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
-      - name: Clone pytorch/builder
-        uses: actions/checkout@v2
+          path: pytorch
+      - name: Clean PyTorch checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: pytorch
+      - name: Checkout pytorch/builder
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
+          ref: main
+          submodules: recursive
           repository: pytorch/builder
-          path: ${{ env.BUILDER_ROOT }}
+          path: builder
+      - name: Clean pytorch/builder checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: builder
       - name: Populate binary env
         shell: bash
         run: |
@@ -2742,16 +2989,29 @@ jobs:
         with:
           name: libtorch-cuda11_3-shared-without-deps-cxx11-abi
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
-      - name: Clone pytorch/pytorch
-        uses: actions/checkout@v2
+      - name: Checkout PyTorch
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
-          path: ${{ env.PYTORCH_ROOT }}
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
-      - name: Clone pytorch/builder
-        uses: actions/checkout@v2
+          path: pytorch
+      - name: Clean PyTorch checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: pytorch
+      - name: Checkout pytorch/builder
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
+          ref: main
+          submodules: recursive
           repository: pytorch/builder
-          path: ${{ env.BUILDER_ROOT }}
+          path: builder
+      - name: Clean pytorch/builder checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: builder
       - name: Populate binary env
         shell: bash
         run: |
@@ -2939,16 +3199,29 @@ jobs:
           echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
           echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
           echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
-      - name: Clone pytorch/pytorch
-        uses: actions/checkout@v2
+      - name: Checkout PyTorch
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
-          path: ${{ env.PYTORCH_ROOT }}
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
-      - name: Clone pytorch/builder
-        uses: actions/checkout@v2
+          path: pytorch
+      - name: Clean PyTorch checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: pytorch
+      - name: Checkout pytorch/builder
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
+          ref: main
+          submodules: recursive
           repository: pytorch/builder
-          path: ${{ env.BUILDER_ROOT }}
+          path: builder
+      - name: Clean pytorch/builder checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: builder
       - name: Populate binary env
         shell: bash
         run: |
@@ -3029,16 +3302,29 @@ jobs:
         with:
           name: libtorch-cuda11_3-static-with-deps-cxx11-abi
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
-      - name: Clone pytorch/pytorch
-        uses: actions/checkout@v2
+      - name: Checkout PyTorch
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
-          path: ${{ env.PYTORCH_ROOT }}
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
-      - name: Clone pytorch/builder
-        uses: actions/checkout@v2
+          path: pytorch
+      - name: Clean PyTorch checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: pytorch
+      - name: Checkout pytorch/builder
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
+          ref: main
+          submodules: recursive
           repository: pytorch/builder
-          path: ${{ env.BUILDER_ROOT }}
+          path: builder
+      - name: Clean pytorch/builder checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: builder
       - name: Populate binary env
         shell: bash
         run: |
@@ -3226,16 +3512,29 @@ jobs:
           echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
           echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
           echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
-      - name: Clone pytorch/pytorch
-        uses: actions/checkout@v2
+      - name: Checkout PyTorch
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
-          path: ${{ env.PYTORCH_ROOT }}
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
-      - name: Clone pytorch/builder
-        uses: actions/checkout@v2
+          path: pytorch
+      - name: Clean PyTorch checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: pytorch
+      - name: Checkout pytorch/builder
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
+          ref: main
+          submodules: recursive
           repository: pytorch/builder
-          path: ${{ env.BUILDER_ROOT }}
+          path: builder
+      - name: Clean pytorch/builder checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: builder
       - name: Populate binary env
         shell: bash
         run: |
@@ -3316,16 +3615,29 @@ jobs:
         with:
           name: libtorch-cuda11_3-static-without-deps-cxx11-abi
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
-      - name: Clone pytorch/pytorch
-        uses: actions/checkout@v2
+      - name: Checkout PyTorch
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
-          path: ${{ env.PYTORCH_ROOT }}
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
-      - name: Clone pytorch/builder
-        uses: actions/checkout@v2
+          path: pytorch
+      - name: Clean PyTorch checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: pytorch
+      - name: Checkout pytorch/builder
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
+          ref: main
+          submodules: recursive
           repository: pytorch/builder
-          path: ${{ env.BUILDER_ROOT }}
+          path: builder
+      - name: Clean pytorch/builder checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: builder
       - name: Populate binary env
         shell: bash
         run: |
@@ -3513,16 +3825,29 @@ jobs:
           echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
           echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
           echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
-      - name: Clone pytorch/pytorch
-        uses: actions/checkout@v2
+      - name: Checkout PyTorch
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
-          path: ${{ env.PYTORCH_ROOT }}
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
-      - name: Clone pytorch/builder
-        uses: actions/checkout@v2
+          path: pytorch
+      - name: Clean PyTorch checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: pytorch
+      - name: Checkout pytorch/builder
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
+          ref: main
+          submodules: recursive
           repository: pytorch/builder
-          path: ${{ env.BUILDER_ROOT }}
+          path: builder
+      - name: Clean pytorch/builder checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: builder
       - name: Populate binary env
         shell: bash
         run: |
@@ -3603,16 +3928,29 @@ jobs:
         with:
           name: libtorch-cuda11_5-shared-with-deps-cxx11-abi
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
-      - name: Clone pytorch/pytorch
-        uses: actions/checkout@v2
+      - name: Checkout PyTorch
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
-          path: ${{ env.PYTORCH_ROOT }}
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
-      - name: Clone pytorch/builder
-        uses: actions/checkout@v2
+          path: pytorch
+      - name: Clean PyTorch checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: pytorch
+      - name: Checkout pytorch/builder
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
+          ref: main
+          submodules: recursive
           repository: pytorch/builder
-          path: ${{ env.BUILDER_ROOT }}
+          path: builder
+      - name: Clean pytorch/builder checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: builder
       - name: Populate binary env
         shell: bash
         run: |
@@ -3800,16 +4138,29 @@ jobs:
           echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
           echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
           echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
-      - name: Clone pytorch/pytorch
-        uses: actions/checkout@v2
+      - name: Checkout PyTorch
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
-          path: ${{ env.PYTORCH_ROOT }}
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
-      - name: Clone pytorch/builder
-        uses: actions/checkout@v2
+          path: pytorch
+      - name: Clean PyTorch checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: pytorch
+      - name: Checkout pytorch/builder
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
+          ref: main
+          submodules: recursive
           repository: pytorch/builder
-          path: ${{ env.BUILDER_ROOT }}
+          path: builder
+      - name: Clean pytorch/builder checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: builder
       - name: Populate binary env
         shell: bash
         run: |
@@ -3890,16 +4241,29 @@ jobs:
         with:
           name: libtorch-cuda11_5-shared-without-deps-cxx11-abi
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
-      - name: Clone pytorch/pytorch
-        uses: actions/checkout@v2
+      - name: Checkout PyTorch
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
-          path: ${{ env.PYTORCH_ROOT }}
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
-      - name: Clone pytorch/builder
-        uses: actions/checkout@v2
+          path: pytorch
+      - name: Clean PyTorch checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: pytorch
+      - name: Checkout pytorch/builder
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
+          ref: main
+          submodules: recursive
           repository: pytorch/builder
-          path: ${{ env.BUILDER_ROOT }}
+          path: builder
+      - name: Clean pytorch/builder checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: builder
       - name: Populate binary env
         shell: bash
         run: |
@@ -4087,16 +4451,29 @@ jobs:
           echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
           echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
           echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
-      - name: Clone pytorch/pytorch
-        uses: actions/checkout@v2
+      - name: Checkout PyTorch
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
-          path: ${{ env.PYTORCH_ROOT }}
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
-      - name: Clone pytorch/builder
-        uses: actions/checkout@v2
+          path: pytorch
+      - name: Clean PyTorch checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: pytorch
+      - name: Checkout pytorch/builder
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
+          ref: main
+          submodules: recursive
           repository: pytorch/builder
-          path: ${{ env.BUILDER_ROOT }}
+          path: builder
+      - name: Clean pytorch/builder checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: builder
       - name: Populate binary env
         shell: bash
         run: |
@@ -4177,16 +4554,29 @@ jobs:
         with:
           name: libtorch-cuda11_5-static-with-deps-cxx11-abi
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
-      - name: Clone pytorch/pytorch
-        uses: actions/checkout@v2
+      - name: Checkout PyTorch
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
-          path: ${{ env.PYTORCH_ROOT }}
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
-      - name: Clone pytorch/builder
-        uses: actions/checkout@v2
+          path: pytorch
+      - name: Clean PyTorch checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: pytorch
+      - name: Checkout pytorch/builder
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
+          ref: main
+          submodules: recursive
           repository: pytorch/builder
-          path: ${{ env.BUILDER_ROOT }}
+          path: builder
+      - name: Clean pytorch/builder checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: builder
       - name: Populate binary env
         shell: bash
         run: |
@@ -4374,16 +4764,29 @@ jobs:
           echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
           echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
           echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
-      - name: Clone pytorch/pytorch
-        uses: actions/checkout@v2
+      - name: Checkout PyTorch
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
-          path: ${{ env.PYTORCH_ROOT }}
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
-      - name: Clone pytorch/builder
-        uses: actions/checkout@v2
+          path: pytorch
+      - name: Clean PyTorch checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: pytorch
+      - name: Checkout pytorch/builder
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
+          ref: main
+          submodules: recursive
           repository: pytorch/builder
-          path: ${{ env.BUILDER_ROOT }}
+          path: builder
+      - name: Clean pytorch/builder checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: builder
       - name: Populate binary env
         shell: bash
         run: |
@@ -4464,16 +4867,29 @@ jobs:
         with:
           name: libtorch-cuda11_5-static-without-deps-cxx11-abi
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
-      - name: Clone pytorch/pytorch
-        uses: actions/checkout@v2
+      - name: Checkout PyTorch
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
-          path: ${{ env.PYTORCH_ROOT }}
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
-      - name: Clone pytorch/builder
-        uses: actions/checkout@v2
+          path: pytorch
+      - name: Clean PyTorch checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: pytorch
+      - name: Checkout pytorch/builder
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
+          ref: main
+          submodules: recursive
           repository: pytorch/builder
-          path: ${{ env.BUILDER_ROOT }}
+          path: builder
+      - name: Clean pytorch/builder checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: builder
       - name: Populate binary env
         shell: bash
         run: |
