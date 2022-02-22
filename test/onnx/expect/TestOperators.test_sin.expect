@@ -8,7 +8,7 @@ graph {
     name: "Sin_0"
     op_type: "Sin"
   }
-  name: "torch_jit"
+  name: "torch-jit-export"
   input {
     name: "onnx::Sin_0"
     type {
