@@ -449,6 +449,7 @@ An enum-like class for built-in communication hooks: ``ALLREDUCE`` and ``FP16_CO
           py::arg("output_device"),
           py::arg("broadcast_buffers"),
           py::arg("has_sync_bn"),
+          py::arg("static_graph"),
           py::call_guard<py::gil_scoped_release>())
       .def(
           "set_runtime_stats_and_log",

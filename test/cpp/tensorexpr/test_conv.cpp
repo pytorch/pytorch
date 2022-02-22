@@ -191,7 +191,7 @@ TEST(Conv, Conv2D) {
 
   te::Tensor conv = te::Reduce(
       "conv",
-      {{N, "n"}, {K, "k"}, {OH, "oh"}, {OW, "ow"}},
+      {N, K, OH, OW},
       te::Sum(),
       // FIXME: We have to use a `std::vector` parameter here and then unpack
       // it, because we don't have an overload allowing for an arbitrary number
@@ -211,7 +211,7 @@ TEST(Conv, Conv2D) {
       },
       // FIXME: If you forget one of the reduction dims, you get a segfault.
       // Could that be caught by a verifier?
-      {{C, "c"}, {R, "r"}, {S, "s"}});
+      {C, R, S});
 
   // FIXME: It'd be nice to have a single header that pulls in things like
   // LoopNest, IRSimplifier, etc.
