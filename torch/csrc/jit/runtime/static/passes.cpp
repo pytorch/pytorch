@@ -742,7 +742,9 @@ void FuseListUnpack(std::shared_ptr<torch::jit::Graph>& graph) {
           "static_runtime::fused_gather_ranges_to_dense"),
       OP_PAIR(
           "fb::gather_ranges_to_dense_v2",
-          "static_runtime::fused_gather_ranges_to_dense_v2")};
+          "static_runtime::fused_gather_ranges_to_dense_v2"),
+      OP_PAIR(
+          "fb::split_and_squeeze", "static_runtime::fused_split_and_squeeze")};
 
   AliasDb alias_db(
       graph,

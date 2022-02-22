@@ -1880,12 +1880,13 @@ static bool checkNoMemoryOverlap(const at::Tensor& a, const at::Tensor& b) {
 }
 
 bool ProcessedNode::verify_no_memory_overlap(bool force_check) const {
-  const static std::array<c10::Symbol, 6> special_case_ops = {
+  const static std::array<c10::Symbol, 7> special_case_ops = {
       fromQualString("prim::TypeCheck"),
       fromQualString("prim::IfThenElse"),
       fromQualString("static_runtime::select_tensor"),
       fromQualString("static_runtime::VarTupleUnpack"),
       fromQualString("static_runtime::dict_unpack"),
+      fromQualString("static_runtime::fused_split_and_squeeze"),
       fromQualString("static_runtime::create_owned_ref")};
   if (!force_check &&
       std::find(
