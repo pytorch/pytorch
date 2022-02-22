@@ -11,7 +11,7 @@ import logging
 class TestPythonDispatch(TestCase):
     def test_basic(self) -> None:
         with capture_logs() as logs:
-            x = LoggingTensor(torch.tensor([3.0], requires_grad=True))
+            x = LoggingTensor(torch.tensor([3.0]), requires_grad=True)
             log_input("x", x)
             y = x * x
             saved_x = y.grad_fn._saved_self
@@ -141,7 +141,7 @@ $5 = torch._ops.aten.kl_div($0, $1, 2, log_target=True)''')
 
     def test_detach_appears_twice_when_called_once(self) -> None:
         with capture_logs() as logs:
-            x = LoggingTensor(torch.tensor([3.0], requires_grad=True))
+            x = LoggingTensor(torch.tensor([3.0]), requires_grad=True)
             log_input("x", x)
             x.detach()
         # FIXME: We actually want this to emit a single detach. However,
@@ -240,7 +240,7 @@ $2 = torch._ops.aten.detach($1)''')
                 return grad_output * 2 * x
 
         with capture_logs() as logs:
-            x = LoggingTensor(torch.ones(1, requires_grad=True))
+            x = LoggingTensor(torch.ones(1), requires_grad=True)
             log_input("x", x)
             x.grad = LoggingTensor(torch.zeros(1))
             log_input("x.grad", x.grad)
@@ -540,6 +540,67 @@ $6 = torch._ops.aten.add_($1, $5)''')
             s = torch.Storage()
             z = LoggingTensor(torch.empty([]))
             z.set_(s)
+
+    def test_autograd_in_attr(self):
+        # We want the wrapped Tensor to require gradients!
+        true_t = torch.rand(2, requires_grad=True)
+        t = LoggingTensor(true_t)
+
+        out = t + 2
+
+        self.assertFalse(out.requires_grad)
+        self.assertIsNone(out.grad_fn)
+
+        self.assertTrue(out.elem.requires_grad)
+        self.assertIsNotNone(out.elem.grad_fn)
+
+        with self.assertRaisesRegex(RuntimeError, "does not require grad"):
+            out.sum().backward()
+
+        out.elem.sum().backward()
+
+        self.assertIsNone(t.grad)
+        self.assertIsNotNone(t.elem.grad)
+
+    def test_multiple_ops_subclass(self):
+        # This is a Direct Subclass, don't do that!
+        class MySubclass(torch.Tensor):
+            @staticmethod
+            def __new__(cls, elem):
+                r = torch.Tensor._make_subclass(cls, elem)
+                return r
+
+            __torch_function__ = torch._C._disabled_torch_function_impl
+
+            @classmethod
+            def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
+                with no_dispatch():
+                    return func(*args, **kwargs)
+
+        x = MySubclass(torch.rand(2, 2, dtype=torch.complex64))
+        y = x.conj()
+        # Details of the bug that this tests for:
+        # Here, y dispatch keys are: {PythonTLSSnapshot, AutogradCPU, Conjugate, Python, CPU}
+        # There are a few calls to the dispatcher that are going to happen here:
+        #  - call_exp: User calling exp on y
+        #    - PythonTLSSnapshot: records the TLS on entry and redispatch
+        #    - AutogradCPU: no input requires grad, so does nothing and redispatch
+        #    - Conjugate: no special implementation for exp: use the fallback that
+        #                 first clone the Tensor (to materialize the conj) then redispatch
+        #      - call_clone: conjugate fallback calling clone on y
+        #        - PythonTLSSnapshot: records the TLS on entry and redispatch
+        #        - (AutogradCPU: skipped as autograd added itself to the exclude set above)
+        #        - Conjugate: special implementation for clone: just skip this key
+        #        - Python: Reset the TLS based on the snapshot above and call the user implementation (this
+        #                  actually calls into the dispatcher again but since we disable both our keys
+        #                  before, not detailed here)
+        #        - exit Python: restore the TLS and exit
+        #        - exit Conjugate: nothing was inplace so just exit
+        #        - exit PythonTLSSnapshot: done with this call, reset the saved TLS to empty
+        #    - Python: Reset the TLS again based on the snapshot. <- this used to fail
+        #    - More steps....
+        y.exp()
+
 
 
 if __name__ == '__main__':

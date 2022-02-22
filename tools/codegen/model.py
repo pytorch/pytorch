@@ -355,20 +355,27 @@ class NativeFunction:
 
         raw_dispatch = e.pop('dispatch', None)
         assert raw_dispatch is None or isinstance(raw_dispatch, dict), e
-        dispatch: Dict[DispatchKey, str] = {}
+        dispatch: Dict[DispatchKey, BackendMetadata] = {}
         if raw_dispatch is not None:
             assert not manual_kernel_registration, \
                 "cannot specify both manual_kernel_registration and dispatch; with " \
                 "manual registration, dispatch has no effect!"
+            redundant_composite_implicit_autograd = False
             for ks, v in raw_dispatch.items():
                 if ks == '__line__':
                     continue  # not worth tracking line numbers for dispatch entries
                 assert isinstance(ks, str), e
-                assert isinstance(v, str), e
                 for k in ks.split(","):
                     dispatch_key = DispatchKey.parse(k.strip())
-                    dispatch[dispatch_key] = v
-            assert dispatch != {DispatchKey.CompositeImplicitAutograd: cpp.name(func)}, \
+                    # Why is 'structured' included? External backends (e.g.
+                    # XLA) opt into which ops are structured independently
+                    # of which in-tree ops are structured
+                    dispatch[dispatch_key] = BackendMetadata(
+                        v, structured=structured and is_structured_dispatch_key(dispatch_key))
+                    if dispatch_key is DispatchKey.CompositeImplicitAutograd and v == cpp.name(func):
+                        redundant_composite_implicit_autograd = True
+
+            assert not (len(dispatch) == 1 and redundant_composite_implicit_autograd), \
                 "unnecessary dispatch table for this function; just delete the dispatch " \
                 "key entirely"
             # if a function is a structured delegate, deleting the dispatch
@@ -378,7 +385,7 @@ class NativeFunction:
                 f"but got {dispatch[DispatchKey.CompositeImplicitAutograd]}.  Rename your implementation to the expected " \
                 "name, then delete the dispatch table"
         elif not structured and structured_delegate is None:
-            dispatch[DispatchKey.CompositeImplicitAutograd] = cpp.name(func)
+            dispatch[DispatchKey.CompositeImplicitAutograd] = BackendMetadata(cpp.name(func), structured=False)
 
         assert not (DispatchKey.CompositeExplicitAutograd in dispatch and DispatchKey.CompositeImplicitAutograd in dispatch), \
             "cannot specify both CompositeExplicitAutograd and CompositeImplicitAutograd on a single kernel; each " \
@@ -394,12 +401,11 @@ class NativeFunction:
         has_composite_implicit_autograd_kernel = DispatchKey.CompositeImplicitAutograd in dispatch.keys()
         has_composite_explicit_autograd_kernel = DispatchKey.CompositeExplicitAutograd in dispatch.keys()
 
-        # BackendMetadata is used to store any information about a NativeFunction that is backend dependent.
-        # The most obvious information is the kernel name, which usually contains the name of the backend in it for cpu/cuda.
-        # Why is 'structured' included? External backends (e.g. XLA) opt into which ops are structured
-        # independently of which in-tree ops are structured
-        backend_metadata = {k: {func.name: BackendMetadata(
-            kernel=v, structured=structured and is_structured_dispatch_key(k))} for k, v in dispatch.items()}
+        # We aren't going to store dispatch metadata inline in NativeFunctions;
+        # instead it is separately indexed by backend (so other backends can
+        # add more dispatch entries after the fact).  Reindex the individual
+        # metadata by OperatorName!
+        backend_metadata = {k: {func.name: v} for k, v in dispatch.items()}
 
         # don't care if it exists or not; make it easier to use this function
         # with other yaml parsers that aren't setting __line__ in the dict
@@ -1595,6 +1601,8 @@ class Precompute:
     # A map from kernel argument name -> a list of precomputed
     # elements that replaces/supersedes it.
     replace: Dict[str, List[Argument]]
+    # List of precomputed args added without replacement
+    add: List[Argument]
 
     @staticmethod
     def parse(src: object) -> 'Precompute':
@@ -1602,18 +1610,29 @@ class Precompute:
 
         # src is a list of strings of the format:
         #   {kernel param name} -> {replacement decl}[, {replacement decl}, ...]
-        # Parse this list to get the names of which precomputed elements
+        #   [{add decl}[, {add decl}, ...]]
+        # The last line is optional and contains the precomputed parameters that are
+        # added without replacement.
+        # The other lines are parsed to get the names of which precomputed elements
         # should replace which kernel arguments.
+        add_args = []
+        if ' -> ' not in src[-1]:
+            add_list = src[-1].split(',')
+            add_args = [Argument.parse(name.strip()) for name in add_list]
+            src = src[:-1]
+
         replace = {}
         for raw_replace_item in src:
             assert isinstance(raw_replace_item, str)
+            assert ' -> ' in raw_replace_item, 'precomputed parameters without replacement' \
+                                               ' are allowed only in the last line'
 
             arg, with_list_raw = raw_replace_item.split(' -> ')
             with_list = with_list_raw.split(',')
             with_list_args = [Argument.parse(name.strip()) for name in with_list]
             replace[arg] = with_list_args
 
-        r = Precompute(replace=replace)
+        r = Precompute(replace=replace, add=add_args)
         assert r.to_list() == src, 'r.to_list() != src'
         return r
 
