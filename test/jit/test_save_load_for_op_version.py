@@ -541,6 +541,37 @@ class TestSaveLoadForOpVersion(JitTestCase):
             # "Upgraded" model should match the new version output
             self.assertEqual(output, output_current)
 
+    @parametrize("use_out_variant", [False, True])
+    def test_versioned_gelu(self, use_out_variant):
+        class Module(torch.nn.Module):
+            def forward(self, x):
+                return torch.nn.functional.gelu(x, approximate='tanh')
+
+        class ModuleOutVariant(torch.nn.Module):
+            def forward(self, x, out):
+                # torch.nn.functional.gelu doesn't have an out variant so call the underlying op
+                torch._C._nn.gelu(x, approximate=1, out=out)
+
+        serialized_path = ("/jit/fixtures/test_versioned_gelu_out_v9.ptl" if use_out_variant
+                           else "/jit/fixtures/test_versioned_gelu_v9.ptl")
+        scripted_module = torch.jit.load(pytorch_test_dir + serialized_path)
+
+        buffer = io.BytesIO(scripted_module._save_to_buffer_for_lite_interpreter())
+        buffer.seek(0)
+        v9_mobile_module = _load_for_lite_interpreter(buffer)
+        current_mobile_module = self._save_load_mobile_module(ModuleOutVariant if use_out_variant else Module)
+
+        sample_input = torch.randn(3)
+        output_without_approx = v9_mobile_module(sample_input)
+        if use_out_variant:
+            output_with_approx = torch.zeros_like(sample_input)
+            current_mobile_module(sample_input, output_with_approx)
+        else:
+            output_with_approx = current_mobile_module(sample_input)
+        self.assertFalse(torch.allclose(output_without_approx, output_with_approx))
+
+
+instantiate_parametrized_tests(TestSaveLoadForOpVersion)
     @settings(max_examples=10, deadline=200000)  # A total of 10 examples will be generated
     @given(
         vec1=st.lists(

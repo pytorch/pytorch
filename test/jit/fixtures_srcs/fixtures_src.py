@@ -43,16 +43,31 @@ class TestVersionedLogspaceOutV8(torch.nn.Module):
     def forward(self, a: Union[int, float, complex], b: Union[int, float, complex], out: torch.Tensor):
         return torch.logspace(a, b, out=out)
 
-class TestVersionedGerV9(torch.nn.Module):
+class TestVersionedGeluV9(torch.nn.Module):
     def __init__(self):
-        super(TestVersionedGerV9, self).__init__()
+        super().__init__()
+
+    def forward(self, x):
+        return torch._C._nn.gelu(x)
+
+class TestVersionedGeluOutV9(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+
+    def forward(self, x):
+        out = torch.zeros_like(x)
+        return torch._C._nn.gelu(x, out=out)
+
+class TestVersionedGerV10(torch.nn.Module):
+    def __init__(self):
+        super(TestVersionedGerV10, self).__init__()
 
     def forward(self, v1: torch.Tensor, v2: torch.Tensor):
         return torch.ger(v1, v2)
 
-class TestVersionedGerOutV9(torch.nn.Module):
+class TestVersionedGerOutV10(torch.nn.Module):
     def __init__(self):
-        super(TestVersionedGerOutV9, self).__init__()
+        super(TestVersionedGerOutV10, self).__init__()
 
     def forward(self, v1: torch.Tensor, v2: torch.Tensor, out: torch.Tensor):
         return torch.ger(v1, v2, out=out)
