@@ -3539,7 +3539,7 @@ class Prim:
 
     @staticmethod
     def max(g, self, other):
-        return g.op("Max", self, other)
+        return op_with_optional_float_cast(g, "Max", self, other_operands=[other], opset_before=12)
 
     @staticmethod
     def min(g, self, other=None):
