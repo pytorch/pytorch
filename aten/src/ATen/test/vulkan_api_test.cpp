@@ -1551,7 +1551,7 @@ TEST(VulkanAPITest, tanh) {
     return;
   }
 
-  const auto in_cpu = at::rand({17, 197, 302, 5}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto in_cpu = at::rand({17, 197, 302, 5}, at::device(at::kCPU).dtype(at::kFloat)) * 30;
   const auto in_vulkan = in_cpu.vulkan();
 
   const auto out_cpu = at::tanh(in_cpu);
@@ -1570,7 +1570,7 @@ TEST(VulkanAPITest, tanh_) {
     return;
   }
 
-  auto cpu = at::rand({17, 197, 302, 5}, at::device(at::kCPU).dtype(at::kFloat));
+  auto cpu = at::rand({17, 197, 302, 5}, at::device(at::kCPU).dtype(at::kFloat)) * 30;
   auto vulkan = cpu.vulkan();
 
   at::tanh_(cpu);

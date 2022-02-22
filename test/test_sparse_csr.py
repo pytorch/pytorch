@@ -1370,7 +1370,6 @@ class TestSparseCSR(TestCase):
             self.assertEqual(actual.col_indices(), expect.col_indices())
             self.assertEqual(actual._nnz(), expect._nnz())
 
-
     @unittest.expectedFailure
     @ops(sparse_csr_unary_ufuncs, dtypes=OpDTypes.supported, allowed_dtypes=[torch.double, torch.cdouble])
     def test_autograd_sparse_csr_unary(self, device, dtype, op):
@@ -1486,7 +1485,7 @@ class TestSparseCSR(TestCase):
             args = [make_tensor(a.shape, device=device, dtype=dtype, noncontiguous=True, requires_grad=True) for a in sample.args]
             self.assertTrue(torch.autograd.gradcheck(fn, args, fast_mode=True))
 
-    @dtypes(*get_all_dtypes(include_bool=False, include_half=False, include_bfloat16=False))
+    @dtypes(*get_all_dtypes(include_bool=False))
     def test_direct_coo_csr_conversion(self, device, dtype):
         for m, n in itertools.product([5, 2, 0], [5, 2, 0]):
             size = (m, n)
