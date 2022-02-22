@@ -18,7 +18,7 @@ graph {
       type: INT
     }
   }
-  name: "torch_jit"
+  name: "torch-jit-export"
   input {
     name: "onnx::ArgMax_0"
     type {
