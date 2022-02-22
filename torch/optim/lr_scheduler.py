@@ -645,6 +645,7 @@ class SequentialLR(_LRScheduler):
         # remains the same after the step
         idx = bisect_right(self._milestones, self.last_epoch)
         self._schedulers[idx].last_epoch -= 1
+        self._schedulers[idx]._step_count -= 1
         # decrement the last epoch, so that it remains the same after the step
         self.last_epoch -= 1
         # Call the step
