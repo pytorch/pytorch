@@ -31,6 +31,12 @@ executors:
       resource_class: windows.xlarge
       image: windows-server-2019-vs2019:stable
       shell: bash.exe
+  
+  windows-2xlarge-cpu-with-nvidia-cuda:
+    machine:
+      resource_class: windows.2xlarge
+      image: windows-server-2019-vs2019:stable
+      shell: bash.exe
 
   windows-medium-cpu-with-nvidia-cuda:
     machine:
@@ -1082,7 +1088,7 @@ jobs:
         default: ""
       executor:
         type: string
-        default: "windows-xlarge-cpu-with-nvidia-cuda"
+        default: "windows-2xlarge-cpu-with-nvidia-cuda"
     executor: <<parameters.executor>>
     steps:
     # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml

@@ -289,7 +289,7 @@
         default: ""
       executor:
         type: string
-        default: "windows-xlarge-cpu-with-nvidia-cuda"
+        default: "windows-2xlarge-cpu-with-nvidia-cuda"
     executor: <<parameters.executor>>
     steps:
     # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
