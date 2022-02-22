@@ -1,6 +1,7 @@
 # Owner(s): ["oncall: distributed"]
 
 import sys
+from copy import deepcopy
 
 import torch
 from torch import distributed as dist
@@ -11,7 +12,6 @@ from torch.optim import SGD
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import (
     FSDPTest,
-    get_full_params,
 )
 from torch.testing._internal.common_utils import TEST_WITH_DEV_DBG_ASAN, run_tests
 
@@ -66,7 +66,8 @@ class TestMultiForward(FSDPTest):
             optim.zero_grad()
 
         if wrap_fsdp:
-            get_full_params(model)
+            with model._summon_full_params():
+                return deepcopy(list(model.parameters()))
 
         return list(model.parameters())
 

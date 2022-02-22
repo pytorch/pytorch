@@ -10,7 +10,6 @@ from torch.optim import SGD
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import (
     FSDPTest,
-    get_full_params,
 )
 from torch.testing._internal.common_utils import TEST_WITH_DEV_DBG_ASAN, run_tests
 
@@ -61,11 +60,11 @@ class TestUnevenParamShard(FSDPTest):
         out.float().sum().backward()
         optim.step()
         optim.zero_grad()
-        get_full_params(model)
-        weight_out = model.module.weight.T.clone()
+        with model._summon_full_params():
+            weight_out = model.module.weight.T.clone()
 
-        self.assertEqual(ref_forward_output_my_rank, out)
-        self.assertEqual(ref_weight_out, weight_out)
+            self.assertEqual(ref_forward_output_my_rank, out)
+            self.assertEqual(ref_weight_out, weight_out)
 
 
 if __name__ == "__main__":

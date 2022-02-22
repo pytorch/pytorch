@@ -2,6 +2,7 @@
 
 import sys
 from enum import Enum
+from copy import deepcopy
 
 import torch
 import torch.nn as nn
@@ -12,7 +13,6 @@ from torch.nn.parallel import DistributedDataParallel
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import (
     FSDPTest,
-    get_full_params,
 )
 from torch.testing._internal.common_utils import (
     TEST_WITH_DEV_DBG_ASAN,
@@ -143,7 +143,8 @@ class TestFreezingWeights(FSDPTest):
             optimizer.step()
 
         if with_fsdp:
-            get_full_params(model)
+            with model._summon_full_params():
+                return deepcopy(list(model.parameters()))
 
         return list(model.parameters())
 
