@@ -12,6 +12,7 @@
 #include <caffe2/core/timer.h>
 #include <torch/csrc/jit/ir/alias_analysis.h>
 #include <torch/csrc/jit/jit_log.h>
+#include <torch/csrc/jit/passes/add_if_then_else.h>
 #include <torch/csrc/jit/passes/canonicalize.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
 #include <torch/csrc/jit/passes/eliminate_no_ops.h>
@@ -25,6 +26,7 @@
 #include <torch/csrc/jit/runtime/static/ops.h>
 #include <torch/csrc/jit/runtime/static/passes.h>
 #include <torch/csrc/jit/runtime/vararg_functions.h>
+#include <algorithm>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/NativeFunctions.h>
@@ -52,12 +54,37 @@ C10_DEFINE_bool(
 namespace torch {
 namespace jit {
 
+namespace {
+
+bool allArgsAreTensors(Node* node) {
+  const auto& inputs = node->inputs();
+  return std::all_of(inputs.begin(), inputs.end(), [](Value* value) {
+    return value->type()->kind() == TypeKind::TensorType;
+  });
+}
+
+} // namespace
+
 // A manually curated set of ops that are disallowed in static runtime.
 // These are rarely-used ops. Disallowing them typically eliminates
 // corner cases in graph optimizations, allowing for more aggressive
 // optimizations and better performance.
-bool isUnsupportedOp(const NodeKind& kind) {
-  return kind == aten::__is__ || kind == aten::__isnot__;
+bool isUnsupportedOp(Node* node) {
+  auto kind = node->kind();
+  if (kind != aten::__is__ && kind != aten::__isnot__) {
+    return false;
+  }
+
+  // We can't support aten::__is__ (and __isnot__) with tensor arguments.
+  // Consider the following graph:
+  // def forward(x):
+  //     y = x.detach()
+  //     return x is y
+  // We have a graph optimization that removes the `detach` node since it is
+  // a no-op during inference. But this affects the result - we get true
+  // instead of false! There are many other graph passes affected by this
+  // issue.
+  return allArgsAreTensors(node);
 }
 
 // graph must be frozen or canEnableStaticRuntime would return false
@@ -67,26 +94,16 @@ bool canEnableStaticRuntime(const std::shared_ptr<torch::jit::Graph>& graph) {
   bool can_support = true;
   bool has_blocks = false;
   for (auto* node : graph->block()->nodes()) {
-    if (node->blocks().size() > 0) {
-      has_blocks = true;
-      VLOG(1) << "Found nested sub-blocks in graph at node: "
-              << PrintNode(node);
-    }
     const auto kind = node->kind();
     if (kind == prim::Constant) {
       continue;
     }
     // check if can get op from Node
     const Operator* op = node->maybeOperator();
-    if (isUnsupportedOp(kind) || (!op && !nativeOpIsRegistered(kind))) {
+    if (isUnsupportedOp(node) || (!op && !nativeOpIsRegistered(kind))) {
       can_support = false;
       LOG(WARNING) << "Found unsupported op: " << kind.toQualString();
     }
-  }
-  if (has_blocks) {
-    LOG(WARNING)
-        << "Found nested sub-block in graph. Static Runtime doesn't support nested sub-blocks.";
-    can_support = false;
   }
   return can_support;
 }
@@ -140,8 +157,10 @@ void OptimizeGraph(
     // TODO: we can avoid this guard by moving operations
     // to exposed folders.
 #ifdef FBCODE_CAFFE2
-    ReplaceWithCopy(graph);
-    if (opts.use_maybe_copy_variants) {
+    if (opts.use_copy_variants && !opts.enable_tensorexpr_fusion) {
+      ReplaceWithCopy(graph);
+    }
+    if (opts.use_maybe_copy_variants && !opts.enable_tensorexpr_fusion) {
       ReplaceWithMaybeCopy(graph);
     }
     FuseListUnpack(graph);
@@ -155,6 +174,7 @@ void OptimizeGraph(
   UseVariadicGroupedAccessor(graph);
   EliminateNoOps(
       graph, /* custom_ops */ {fromQualString("fb::scale_gradient")});
+  AddIfThenElseOp(graph);
   GRAPH_DUMP("Final graph after optimizations: ", graph);
 }
 
@@ -203,6 +223,19 @@ void PrepareGraphForStaticModule(
     std::vector<IValue> sample_inputs) {
   TORCH_CHECK(canEnableStaticRuntime(graph));
   OptimizeGraph(graph, opts, std::move(sample_inputs));
+
+  // Static runtime moves its outputs out of the runtime
+  // by default. In some rare cases, this is not actually safe to
+  // do - for example, if the value is a constant, static runtime
+  // needs to hold onto a copy. Rather than adding special logic
+  // to handle this rare case, we use this pass to detect it and
+  // create an owned reference that can be safely moved out of the
+  // runtime.
+  CreateOwnedRefsForSpecialValues(*graph);
+
+  // We assume that each sub-block has at least one output. If we
+  // detect any that have 0, force the sub-block to return None.
+  ForceNonEmptyOutputs(*graph);
 }
 
 std::pair<std::shared_ptr<Graph>, c10::optional<Module>> PrepareForStaticModule(
@@ -213,7 +246,8 @@ std::pair<std::shared_ptr<Graph>, c10::optional<Module>> PrepareForStaticModule(
   LOG(INFO) << "StaticModuleOptions: enable_out_variant "
             << opts.enable_out_variant << ", optimize_memory "
             << opts.optimize_memory << ", manage_output_tensors "
-            << opts.manage_output_tensors << ", use_maybe_copy_variants "
+            << opts.manage_output_tensors << ", use_copy_variants "
+            << opts.use_copy_variants << ", use_maybe_copy_variants "
             << opts.use_maybe_copy_variants << ", enable_tensorexpr_fusion "
             << opts.enable_tensorexpr_fusion;
 
@@ -327,18 +361,12 @@ ManagedTensorRanges::ManagedTensorRanges(
   const FastSet<const Value*> graph_inputs(
       block.inputs().begin(), block.inputs().end());
 
-  auto isUntrackedValue = [&alias_db, &graph_inputs](const Value* value) {
-    return !alias_db.isMutableType(value) ||
-        graph_inputs.find(value) != graph_inputs.end();
-  };
-
   const auto num_nodes = nodes.size();
   for (const auto i : c10::irange(num_nodes)) {
     auto* node = nodes[i];
     for (auto* input : node->inputs()) {
       auto* lifetime = getLifetime(input);
       if (!lifetime) {
-        DCHECK(isUntrackedValue(input));
         continue;
       }
       DCHECK(lifetime->end <= i);
@@ -354,7 +382,6 @@ ManagedTensorRanges::ManagedTensorRanges(
   for (auto* graph_output : block.outputs()) {
     auto* lifetime = getLifetime(graph_output);
     if (!lifetime) {
-      DCHECK(isUntrackedValue(graph_output));
       continue;
     }
     lifetime->end = num_nodes;
@@ -1233,9 +1260,6 @@ void BlockRunner::benchmark(
   TORCH_CHECK(
       kwargs_list.size() == 0 || args_list.size() == kwargs_list.size());
   std::cout << "Input size: " << args_list.size() << std::endl;
-  if (args_list.size() == 0) {
-    return;
-  }
   float time_per_iter =
       benchmark_model(args_list, kwargs_list, warmup_runs, main_runs);
   std::cout << "Static runtime ms per iter: " << time_per_iter
@@ -1255,11 +1279,20 @@ void BlockRunner::benchmark(
 
   std::vector<std::pair<std::string, double>> time_per_node_type_vec{
       results.time_per_node_type.begin(), results.time_per_node_type.end()};
-  std::sort(
-      time_per_node_type_vec.begin(),
-      time_per_node_type_vec.end(),
-      [](auto& left, auto& right) { return left.second > right.second; });
-
+  if (args_list.size() == 0) {
+    std::sort(
+        time_per_node_type_vec.begin(),
+        time_per_node_type_vec.end(),
+        [&results](auto& left, auto& right) {
+          return results.instances_per_node_type[left.first] >
+              results.instances_per_node_type[right.first];
+        });
+  } else {
+    std::sort(
+        time_per_node_type_vec.begin(),
+        time_per_node_type_vec.end(),
+        [](auto& left, auto& right) { return left.second > right.second; });
+  }
   std::cout << "Time per node type:" << std::endl;
   for (const auto& p : time_per_node_type_vec) {
     const std::string& kind = p.first;
@@ -1314,13 +1347,14 @@ void BlockRunner::benchmark(
       std::cout << "Total number of reused tensors: "
                 << planner_->total_reused_tensors() << std::endl;
     }
-    std::cout << "Total number of 'out' variant nodes/total number of nodes: "
-              << results.out_nodes_count << "/" << results.total_nodes_count
-              << " ("
-              << 100.0 * (results.out_nodes_count) /
-            static_cast<float>(results.total_nodes_count)
-              << "%)" << std::endl;
   }
+  std::cout << "Total number of 'out' variant nodes/total number of nodes: "
+            << results.out_nodes_count << "/" << results.total_nodes_count
+            << " ("
+            << 100.0 * (results.out_nodes_count) /
+          static_cast<float>(results.total_nodes_count)
+            << "%)" << std::endl;
+
   check_for_memory_leak();
 
 #ifndef NDEBUG
@@ -1441,8 +1475,36 @@ BlockRunner::IndividualMetrics BlockRunner::benchmark_individual_ops(
   TORCH_CHECK(
       kwargs_list.size() == 0 || args_list.size() == kwargs_list.size());
   TORCH_CHECK(warmup_runs >= 1 && main_runs >= 1);
+
+  IndividualMetrics results;
+  results.time_per_node.resize(nodes_.size(), 0);
   if (args_list.size() == 0) {
-    return {};
+    // When the given input is empty, compute the op statistics from the given
+    // graph without executing it.
+    for (const auto i : c10::irange(nodes_.size())) {
+      const Node* node = nodes_[i].node();
+      std::string kind(node->kind().toQualString());
+      // TODO: Collect op statistics from sub-blocks here.
+      results.time_per_node[i] = 0;
+      results.time_per_node_type[kind] = 0;
+      results.instances_per_node_type[kind]++;
+      if (nodes_[i].has_out_variant()) {
+        results.out_nodes.insert(kind);
+        results.out_nodes_count++;
+      } else if (nodes_[i].has_native()) {
+        results.native_nodes.insert(kind);
+      }
+      results.total_time += results.time_per_node[i];
+    }
+    results.total_nodes_count = nodes_.size();
+    results.memory_alloc_time = 0;
+    results.memory_dealloc_time = 0;
+    results.output_dealloc_time = 0;
+    for (const auto& p : results.time_per_node_type) {
+      const std::string& kind = p.first;
+      results.percent_per_node_type[kind] = 0;
+    }
+    return results;
   }
 
   const bool is_kwargs_empty = kwargs_list.size() == 0;
@@ -1451,9 +1513,6 @@ BlockRunner::IndividualMetrics BlockRunner::benchmark_individual_ops(
   // See comment on above use of InferenceMode for
   // explanation.
   c10::InferenceMode mode;
-
-  IndividualMetrics results;
-  results.time_per_node.resize(nodes_.size(), 0);
 
   // setup time
   caffe2::Timer timer;
@@ -1709,7 +1768,8 @@ ProcessedFunction::ProcessedFunction(
     Node* node,
     bool enable_out_variant,
     bool check_memory_overlap)
-    : check_memory_overlap_(check_memory_overlap) {
+    : check_memory_overlap_(check_memory_overlap),
+      num_outputs_(node->outputs().size()) {
   if (enable_out_variant) {
     f_ = getOutOfPlaceOperation(node);
     if (f_) {
@@ -1766,13 +1826,7 @@ ProcessedNode::ProcessedNode(
       fn_(fn),
       inputs_(std::move(inputs)),
       outputs_offset_(outputs_offset) {
-  TORCH_CHECK(
-      node->outputs().size() < (1 << (sizeof(num_outputs_) * 8)),
-      node->outputs().size(),
-      " outputs to ProcessedNode ",
-      node->kind().toQualString(),
-      " is too many to use 2-byte indexing");
-  num_outputs_ = node->outputs().size();
+  TORCH_CHECK(num_outputs() == node->outputs().size());
 }
 
 std::vector<IValue> ProcessedNode::inputs_ivalue_vec() const {
@@ -1826,11 +1880,13 @@ static bool checkNoMemoryOverlap(const at::Tensor& a, const at::Tensor& b) {
 }
 
 bool ProcessedNode::verify_no_memory_overlap(bool force_check) const {
-  const static std::array<c10::Symbol, 4> special_case_ops = {
+  const static std::array<c10::Symbol, 6> special_case_ops = {
       fromQualString("prim::TypeCheck"),
+      fromQualString("prim::IfThenElse"),
       fromQualString("static_runtime::select_tensor"),
       fromQualString("static_runtime::VarTupleUnpack"),
-      fromQualString("static_runtime::dict_unpack")};
+      fromQualString("static_runtime::dict_unpack"),
+      fromQualString("static_runtime::create_owned_ref")};
   if (!force_check &&
       std::find(
           begin(special_case_ops), end(special_case_ops), node()->kind()) !=
@@ -1843,12 +1899,12 @@ bool ProcessedNode::verify_no_memory_overlap(bool force_check) const {
 }
 
 bool ProcessedNode::verify_outputs_dont_overlap_each_other() const {
-  for (const auto i : c10::irange(num_outputs_)) {
+  for (const auto i : c10::irange(num_outputs())) {
     if (!Output(i).isTensor()) {
       continue;
     }
     const auto& out0_t = Output(i).toTensor();
-    for (const auto j : c10::irange(i + 1, num_outputs_)) {
+    for (const auto j : c10::irange(i + 1, num_outputs())) {
       if (!Output(j).isTensor()) {
         continue;
       }
@@ -1868,7 +1924,7 @@ bool ProcessedNode::verify_inputs_dont_overlap_outputs(bool force_check) const {
   // skip memory overlap check for mutable or view ops with only one output
   bool skip_check = !schema ||
       ((schema->is_mutable() || !fn_->checkMemoryOverlap()) &&
-       num_outputs_ == 1);
+       num_outputs() == 1);
   if (!force_check && skip_check) {
     if (!schema) {
       VLOG(2) << "Detected that op schema is null";
@@ -1876,7 +1932,7 @@ bool ProcessedNode::verify_inputs_dont_overlap_outputs(bool force_check) const {
     }
     VLOG(2) << "schema->is_mutable: " << schema->is_mutable()
             << ", fn_->checkMemoryOverlap: " << fn_->checkMemoryOverlap()
-            << ", num_outputs_: " << num_outputs_;
+            << ", num_outputs_: " << num_outputs();
     return true;
   }
 
@@ -1886,7 +1942,7 @@ bool ProcessedNode::verify_inputs_dont_overlap_outputs(bool force_check) const {
       continue;
     }
     const auto& in_t = in->toTensor();
-    for (const auto j : c10::irange(num_outputs_)) {
+    for (const auto j : c10::irange(num_outputs())) {
       const IValue& out = Output(j);
       if (!out.isTensor()) {
         continue;
@@ -1923,7 +1979,7 @@ void ProcessedNode::verify_and_correct_memory_overlap() {
       continue;
     }
     const auto& in_t = in.toTensor();
-    for (const auto j : c10::irange(num_outputs_)) {
+    for (const auto j : c10::irange(num_outputs())) {
       auto& output = Output(j);
       if (output.isTensor()) {
         check_and_correct_overlap_with(in_t, output);
