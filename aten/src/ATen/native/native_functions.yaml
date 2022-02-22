@@ -1071,6 +1071,8 @@
 
 # alias for broadcast_tensors
 - func: broadcast_arrays(Tensor[] tensors) -> Tensor[]
+  device_check: NoCheck
+  device_guard: False
 
 - func: broadcast_to(Tensor(a) self, int[] size) -> Tensor(a)
   variants: function, method
