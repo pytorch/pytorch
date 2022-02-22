@@ -637,15 +637,22 @@ class SequentialLR(_LRScheduler):
         self.optimizer = optimizer
         self._init_step()
 
+    def get_scheduler(self):
+        """
+        Get the current scheduler and its index
+        """
+        idx = bisect_right(self._milestones, self.last_epoch)
+        return idx, self._schedulers[idx]
+
     def _init_step(self):
         """Call step on the appropriate scheduler once more on initialization
         in order to correctly set the current learning rate
         """
+        _, scheduler = self.get_scheduler()
         # decrement the last epoch of the appropriate scheduler, so that it
         # remains the same after the step
-        idx = bisect_right(self._milestones, self.last_epoch)
-        self._schedulers[idx].last_epoch -= 1
-        self._schedulers[idx]._step_count -= 1
+        scheduler.last_epoch -= 1
+        scheduler._step_count -= 1
         # decrement the last epoch, so that it remains the same after the step
         self.last_epoch -= 1
         # Call the step
@@ -653,12 +660,13 @@ class SequentialLR(_LRScheduler):
 
     def step(self):
         self.last_epoch += 1
-        idx = bisect_right(self._milestones, self.last_epoch)
+        idx, scheduler = self.get_scheduler()
         if idx > 0 and self._milestones[idx - 1] == self.last_epoch:
-            self._schedulers[idx].step(0)
+            scheduler.step(0)
         else:
-            self._schedulers[idx].step()
-        self._last_lr = self._schedulers[idx].get_last_lr()
+            scheduler.step()
+
+        self._last_lr = scheduler.get_last_lr()
 
     def state_dict(self):
         """Returns the state of the scheduler as a :class:`dict`.
