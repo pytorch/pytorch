@@ -319,11 +319,11 @@ def run(source_yaml: str, output_dir: str, dry_run: bool, impl_path: Optional[st
         error_on_missing_kernels(native_functions, backend_indices, backend_key, autograd_key, impl_path)
 
 
-        gen_dispatchkey_nativefunc_headers(fm, class_name, cpp_namespace, backend_indices,
-                                           grouped_native_functions, backend_key, autograd_key)
+    gen_dispatchkey_nativefunc_headers(fm, class_name, cpp_namespace, backend_indices,
+                                       grouped_native_functions, backend_key, autograd_key)
 
-        for dispatch_key in [backend_key] if autograd_key is None else [backend_key, autograd_key]:
-            gen_dispatcher_registrations(fm, output_dir, cpp_namespace, backend_indices, grouped_native_functions,
-                                         backend_key, dispatch_key, selector)
+    for dispatch_key in [backend_key] if autograd_key is None else [backend_key, autograd_key]:
+        gen_dispatcher_registrations(fm, output_dir, cpp_namespace, backend_indices, grouped_native_functions,
+                                     backend_key, dispatch_key, selector)
 if __name__ == '__main__':
     main()
