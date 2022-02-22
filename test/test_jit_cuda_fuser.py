@@ -785,6 +785,20 @@ class TestCudaFuser(JitTestCase):
             y = y.to(device="cpu")
 
         z = torch.tensor([2], device="cuda").to(dtype_arg1)
+        is_dtype_arg1_int = dtype_arg1 == torch.int32 or dtype_arg1 == torch.int64
+        is_dtype_arg2_int = dtype_arg2 == torch.int32 or dtype_arg2 == torch.int64
+
+        if operation in [torch.pow]:
+            if is_dtype_arg1_int and is_dtype_arg2_int:
+                if category2 == "scalar":
+                    # RuntimeError: Integers to negative integer powers are not allowed
+                    y = abs(y)
+                if category2 == "0dimcpu" and y == -1:
+                    # https://github.com/pytorch/pytorch/issues/73196
+                    y = y - 1
+                if category2 == "0dimcpu" and y == -2:
+                    # avoid pow(0, -2), which gives inconsistent results on integer tensor
+                    y = y - 1
 
         # Avoid division by zero for integer tensors
         div_like = [torch.div, torch.fmod, torch.remainder]
@@ -797,30 +811,37 @@ class TestCudaFuser(JitTestCase):
         if dtype_arg1 == torch.bfloat16 or dtype_arg2 == torch.bfloat16:
             test_value = False
 
-        if not has_scalar:
-            o = t(x, y, z)
-            t_jit = torch.jit.script(t)
-            jit_o = t_jit(x, y, z)
-            jit_o = t_jit(x, y, z)
-            jit_o = t_jit(x, y, z)
+        try:
+            if not has_scalar:
+                o = t(x, y, z)
+                t_jit = torch.jit.script(t)
+                jit_o = t_jit(x, y, z)
+                jit_o = t_jit(x, y, z)
+                jit_o = t_jit(x, y, z)
 
-            self.assertEqual(o.dtype, jit_o.dtype)
-            if test_value:
-                self.assertEqual(o, jit_o)
-            self.assertGraphContains(t_jit.graph_for(x, y, z), FUSION_GUARD)
+                self.assertEqual(o.dtype, jit_o.dtype)
+                if test_value:
+                    self.assertEqual(o, jit_o)
+                self.assertGraphContains(t_jit.graph_for(x, y, z), FUSION_GUARD)
 
-        elif category2 != "scalar":  # only test the case where first is scalar
-            test_fn = self._get_scalar_binary_test_fn((category1, dtype_arg1), (category2, dtype_arg2), operation)
-            o = test_fn(x, y)
-            t_jit = torch.jit.script(test_fn)
-            jit_o = t_jit(x, y)
-            jit_o = t_jit(x, y)
-            jit_o = t_jit(x, y)
+            elif category2 != "scalar":  # only test the case where first is scalar
+                test_fn = self._get_scalar_binary_test_fn((category1, dtype_arg1), (category2, dtype_arg2), operation)
+                o = test_fn(x, y)
+                t_jit = torch.jit.script(test_fn)
+                jit_o = t_jit(x, y)
+                jit_o = t_jit(x, y)
+                jit_o = t_jit(x, y)
 
-            self.assertEqual(o.dtype, jit_o.dtype)
-            if test_value:
-                self.assertEqual(o, jit_o)
-            self.assertGraphContains(t_jit.graph_for(x, y), FUSION_GUARD)
+                self.assertEqual(o.dtype, jit_o.dtype)
+                if test_value:
+                    self.assertEqual(o, jit_o)
+                self.assertGraphContains(t_jit.graph_for(x, y), FUSION_GUARD)
+        except Exception as e:
+            print("failing test for op: ", operation.__name__)
+            print("with input\n\tx: ", x)
+            print("\ty: ", y)
+            print("\tz: ", z)
+            raise e
 
     @unittest.skipIf(not RUN_CUDA, "requires CUDA")
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
