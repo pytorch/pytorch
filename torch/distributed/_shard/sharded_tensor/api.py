@@ -10,7 +10,6 @@ from typing import (
 )
 import weakref
 
-import copy
 import threading
 import torch
 import torch.distributed as dist
@@ -24,7 +23,6 @@ from torch.distributed._shard.sharding_spec._internals import (
 from torch.distributed.nn.functional import (
     reduce_scatter,
 )
-from ..metadata import ShardMetadata
 from .metadata import TensorProperties, ShardedTensorMetadata
 from .shard import Shard
 from .reshard import reshuffle_local_shard, reshard_local_shard
