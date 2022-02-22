@@ -64,7 +64,7 @@ def make_sparse_tensor(t, n, *sizes):
         torch.cat([torch.LongTensor(1, n).random_(s) for s in sizes], 0))
     v = tensor._values()
     v = v.new(n).copy_(torch.randn(n))
-    return t(i, v, torch.Size(sizes))
+    return t(i, v, torch.Size(sizes)).coalesce()
 
 _cycles_per_ms = None
 
@@ -568,8 +568,8 @@ class TestCuda(TestCase):
         self.assertTrue(isinstance(q_copy[0], torch.cuda.FloatTensor))
         self.assertTrue(isinstance(q_copy[1], torch.cuda.IntTensor))
         self.assertTrue(isinstance(q_copy[2], torch.cuda.FloatTensor))
-        self.assertTrue(isinstance(q_copy[3], torch.storage.TypedStorage))
-        self.assertTrue(isinstance(q_copy[3]._storage, torch.cuda.UntypedStorage))
+        self.assertTrue(isinstance(q_copy[3], torch.storage._TypedStorage))
+        self.assertTrue(isinstance(q_copy[3]._storage, torch.cuda._UntypedStorage))
         q_copy[1].fill_(10)
         self.assertEqual(q_copy[3], torch.cuda.IntStorage(10).fill_(10))
 
@@ -1565,6 +1565,8 @@ except RuntimeError as e:
         torch.cuda.nvtx.range_push("foo")
         torch.cuda.nvtx.mark("bar")
         torch.cuda.nvtx.range_pop()
+        range_handle = torch.cuda.nvtx.range_start("range_start")
+        torch.cuda.nvtx.range_end(range_handle)
 
     def test_bincount_ext(self):
         # ensure CUDA code coverage

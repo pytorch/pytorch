@@ -1,6 +1,6 @@
 #pragma once
 
-#include <torch/csrc/Export.h>
+#include <c10/macros/Export.h>
 
 #include <torch/csrc/jit/codegen/cuda/ir_interface_nodes.h>
 #include <torch/csrc/jit/codegen/cuda/type.h>
@@ -114,7 +114,9 @@ TORCH_CUDA_CU_API WelfordResult Welford(
     const std::vector<int>& axes,
     TensorView* init_avg = nullptr,
     TensorView* init_var = nullptr,
-    Int* init_N = new Int(0));
+    // Initializes to 0 in function definition, doing this so we don't have to
+    // import IrBuilder just for this one interface.
+    Int* init_N = nullptr);
 
 // UNARY OPERATIONS
 // abs
@@ -484,19 +486,27 @@ TORCH_CUDA_CU_API TensorView* sum_to(
 //!     t1[i, j] = 0, otherwise
 //!
 //! The pad option controls how out-of-boundary accesses are
-//! handled. When pad is true, shifting works as if the source tensor
-//! is padded by zero. Otherwise, it does not modify the output tensor
-//! region whose source coordinates are out-of-boundry. In both cases,
-//! the size of output tensor does not change. However, when pad is
-//! false, the start or stop value of the shifted axis is adjusted
-//! accordingly. For example, when a shift offset is one, the axis start
-//! value would be incremented by one.
+//! handled. It specifies how many zeros are logically padded. If no
+//! pad option is given, it automatically pads the input tensor so
+//! that the output tensor has the same extent for each axis.
 //!
-//! \param pad If true, out-of-boundary access returns zero.
+//! When a padding value is smaller than the absolute value of a shift
+//! offset, the output axis still has the same extent but its start or
+//! stop offset is moved inward to signify those outside of the offset
+//! are invalid.
+//!
+//! It is not allowed to use padding values that are larger than shift
+//! offsets, which would mean output extentes would be larger than
+//! input extents
 TORCH_CUDA_CU_API TensorView* shift(
     TensorView* inp,
     const std::vector<int>& offsets,
-    bool pad = true);
+    const std::vector<int>& pad_width = {});
+
+TORCH_CUDA_CU_API TensorView* shift(
+    TensorView* inp,
+    const std::vector<int>& offsets,
+    bool pad);
 
 //! Gather a window of nearby elements for each element.
 //!
@@ -508,8 +518,13 @@ TORCH_CUDA_CU_API TensorView* shift(
 //! implemented with strided split, whose outer output domain becomes
 //! the root domain for subsequent consumers. The inner output domain
 //! becomes a Stride domain, which is ignored by subsequent consumers.
+//! Only valid input ranges are fed into strided splits.
 //!
-//! Example:
+//! When trim_out_of_bounds is true, the values at the first and last
+//! ends that are outside of the start and stop offsets are
+//! effetively trimmed by partial split by 1.
+//!
+//! Example 1:
 //!   t0: 2D tensor of [N, M]
 //!   t1 = gather(t0, {1, 3}, {{0, 0}, {1, 1}});
 //!
@@ -517,23 +532,34 @@ TORCH_CUDA_CU_API TensorView* shift(
 //!     t1: [N, M, 1, 3]
 //!     t1[i, j, k, l] = The value at the window position of [k, l]
 //!                      for t0[i, j]
+//!
+//! Example 2.1 (without trimming):
+//!   t0: 2D tensor of [N, M]
+//!   t1 = gather(t0, {2, 2}, {{0, 0}, {0, 0}});
+//!
+//!   then:
+//!     t1: [N (stop offset: 1), M (stop offset: 1, 2, 2)]
+//!
+//! Example 2.1 (with trimming)
+//!   t0: 2D tensor of [N, M]
+//!   t1 = gather(t0, {2, 2}, {{0, 0}, {0, 0}}, true);
+//!
+//!   then:
+//!     t1: [ceilDiv(N - 1, 1), ceilDiv(M - 1, 1), 2, 2]
+//!
+//! Example 3:
+//!   t0: 2D tensor of [N, M]
+//!   t1 = gather(t0, {3, 3}, {{0, 0}, {0, 0}}, {3, 3});
+//!
+//!   then:
+//!     t1: [ceilDiv(N - 2, 3), ceilDiv(M - 2, 3), 2, 2]
+//!
 TORCH_CUDA_CU_API TensorView* gather(
     TensorView* inp,
     const std::vector<int>& window_shape,
     const std::vector<std::vector<int>>& pad_width,
-    const std::vector<int>& strides = {});
-
-//! Gather a window of nearby elements for each element.
-//!
-//! Same as the another gather interface but with Int* parameters.
-//!
-//! TODO: Remove this interface as we do not intend to support dynamic
-//! window shapes at this moment.
-TORCH_CUDA_CU_API TensorView* gather(
-    TensorView* inp,
-    const std::vector<Int*>& window_shape,
-    const std::vector<std::vector<Int*>>& pad_width,
-    const std::vector<int>& strides = {});
+    const std::vector<int>& strides = {},
+    bool trim_out_of_bounds = false);
 
 } // namespace cuda
 } // namespace fuser
