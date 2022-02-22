@@ -63,7 +63,7 @@ graph {
     }
     domain: "org.pytorch._caffe2"
   }
-  name: "torch_jit"
+  name: "torch-jit-export"
   input {
     name: "_caffe2::GenerateProposals_0"
     type {

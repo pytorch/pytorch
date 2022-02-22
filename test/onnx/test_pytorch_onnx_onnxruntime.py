@@ -5903,7 +5903,24 @@ class TestONNXRuntime(unittest.TestCase):
                 return torch.pixel_shuffle(x, upscale_factor=2)
 
         x = torch.randn(2, 16, 4, 3, requires_grad=True)
+        y = torch.randn(4, 32, 8, 4, requires_grad=True)
         self.run_test(PixelShuffle(), x)
+        self.run_test(PixelShuffle(), x, input_names=["x"],
+                      dynamic_axes={"x": [0, 1, 2, 3]},
+                      test_with_inputs=[y])
+
+    @skipIfUnsupportedMinOpsetVersion(9)
+    def test_pixel_unshuffle(self):
+        class PixelUnshuffle(torch.nn.Module):
+            def forward(self, x):
+                return torch.pixel_unshuffle(x, downscale_factor=2)
+
+        x = torch.randn(2, 16, 4, 6, requires_grad=True)
+        y = torch.randn(4, 32, 8, 4, requires_grad=True)
+        self.run_test(PixelUnshuffle(), x)
+        self.run_test(PixelUnshuffle(), x, input_names=["x"],
+                      dynamic_axes={"x": [0, 1, 2, 3]},
+                      test_with_inputs=[y])
 
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_reciprocal(self):

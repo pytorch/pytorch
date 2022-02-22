@@ -22,7 +22,7 @@ graph {
       type: FLOAT
     }
   }
-  name: "torch_jit"
+  name: "torch-jit-export"
   initializer {
     dims: 2
     data_type: 1
