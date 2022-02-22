@@ -7,14 +7,14 @@ namespace jit {
 namespace fuser {
 namespace cuda {
 
-int positiveAxis(int axis, int ndims) {
-  return (axis > 0) ? axis : (ndims + axis);
+int nonNegativeAxis(int axis, int ndims) {
+  return (axis >= 0) ? axis : (ndims + axis);
 }
 
 Val* numFeatures(TensorView* x, const std::vector<int>& dims, int ndims) {
   Val* num_features = IrBuilder::create<Double>(x->container(), 1);
   for (const auto dim : dims) {
-    const int axis = positiveAxis(dim, ndims);
+    const int axis = nonNegativeAxis(dim, ndims);
     num_features = mul(num_features, x->domain()->domain()[axis]->extent());
   }
   return num_features;

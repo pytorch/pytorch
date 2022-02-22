@@ -267,7 +267,7 @@ class TestCudaFuser(JitTestCase):
 
         for op in [torch.sum, torch.mean, torch.amax, torch.var, torch.std]:
             for dtype in [torch.float16, torch.float32, torch.double]:
-                for axis in [-1, 2]:
+                for axis in [-1, 2, 0]:
                     def make_func(op):
                         def func(x: torch.Tensor):
                             o = torch.mul(x, 2.0)
