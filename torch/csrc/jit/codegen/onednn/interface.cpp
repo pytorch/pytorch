@@ -111,20 +111,26 @@ RegisterOperators oneDNNFusionGroupOp({
 // would have to be changed.
 Operation createLlgaGuardKernel(const Node* node) {
   return [node](Stack* stack) {
+#ifdef GRAPH_DEBUG_ENABLED
     GRAPH_DEBUG("Guarding node: ", node->kind().toQualString());
+#endif
     std::vector<TypePtr> types = node->tys(attr::types);
     const auto num_inputs = types.size();
-
+#ifdef GRAPH_DEBUG_ENABLED
     GRAPH_DEBUG("num_inputs to guard: ", num_inputs);
-
+#endif
     for (size_t i = 0; i < num_inputs; i++) {
+#ifdef GRAPH_DEBUG_ENABLED
       GRAPH_DEBUG("checking input ", i);
+#endif
       auto& input = peek(stack, i, num_inputs);
       const c10::TensorTypePtr& guard_tensor_type =
           types[i]->cast<TensorType>();
 
       if (!input.isTensor()) {
+#ifdef GRAPH_DEBUG_ENABLED
         GRAPH_DEBUG("input ", i, " is not a tensor, return false");
+#endif
         push(stack, IValue(false));
         return;
       }
@@ -135,18 +141,23 @@ Operation createLlgaGuardKernel(const Node* node) {
       // It is valid to continue here as long as the output shapes from
       // oneDNN graph partitions are determined by the input shapes.
       if (tensor.is_mkldnn()) {
+#ifdef GRAPH_DEBUG_ENABLED
         GRAPH_DEBUG("input ", i, " is_mkldnn, continue");
+#endif
         continue;
       }
 
       if (!guard_tensor_type->matchTensor(tensor)) {
+#ifdef GRAPH_DEBUG_ENABLED
         GRAPH_DEBUG("input ", i, " check failed, return false");
+#endif
         push(stack, IValue(false));
         return;
       }
     }
-
+#ifdef GRAPH_DEBUG_ENABLED
     GRAPH_DEBUG("all check done, return true");
+#endif
     push(stack, IValue(true));
     return;
   };
