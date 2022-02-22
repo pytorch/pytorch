@@ -90,6 +90,38 @@ TEST_F(Quantization, QuantDequantUInt8) {
   CHECK_EQ(check, 1);
 }
 
+TEST_F(Quantization, QuantDequantUInt8_NLC) {
+  const auto graph_string = R"IR(
+      graph(%x.1 : Float(1, 2, 2, strides=[4, 1, 2], device=cpu)):
+        %2 : int = prim::Constant[value=13]()
+        %3 : int = prim::Constant[value=122]()
+        %4 : float = prim::Constant[value=0.1]()
+        %q.1 : QUInt8(1, 2, 2) = aten::quantize_per_tensor(%x.1, %4, %3, %2)
+        %6 : Float(1, 2, 2) = aten::dequantize(%q.1)
+        return (%6))IR";
+  auto graph = std::make_shared<Graph>();
+  parseIR(graph_string, &*graph);
+
+  auto x = 2 * at::rand({1, 2, 2}, TensorOptions(kCPU).dtype(at::kFloat));
+  x.unsafeGetTensorImpl()->set_sizes_and_strides({1, 2, 2}, {4, 1, 2});
+  auto q = at::quantize_per_tensor(x, 0.1f, 122, at::kQUInt8);
+  auto y_expected = at::dequantize(q);
+  TensorExprKernel k(graph);
+  std::vector<at::Tensor> inputs = {x};
+  StmtPtr s = k.getCodeGenStmt();
+
+  std::vector<IValue> stack = fmap<IValue>(inputs);
+  k.run(stack);
+  auto y = stack[0].toTensor();
+  bool check = at::allclose(y_expected, y);
+  if (!check) {
+    std::cout << "x:\n" << x << std::endl;
+    std::cout << "y_expected:\n" << y_expected << std::endl;
+    std::cout << "y:\n" << y << std::endl;
+  }
+  CHECK_EQ(check, 1);
+}
+
 at::Tensor quantized_add(
     at::Tensor x1,
     at::Tensor x2,

@@ -11,26 +11,12 @@ def extract_ir(filename: str) -> List[str]:
     current = ""
     graphs = []
     with open(filename, "r") as f:
-        for line in f.readlines():
-            begin_loc = line.find(BEGIN)
-            if begin_loc != -1:
-                pfx = line[:begin_loc]
+        split_strs = f.read().split(BEGIN)
+        for split_str in split_strs:
+            end_loc = split_str.find(END)
+            if end_loc == -1:
                 continue
-
-            end_loc = line.find(END)
-            if end_loc != -1:
-                graphs.append(current)
-                current=""
-                pfx = None
-                continue
-
-            if not pfx:
-                continue
-
-            if len(line) < len(pfx) or line[:len(pfx)] != pfx:
-                raise RuntimeError("Expected prefix of '" + pfx + "'")
-
-            current += line[len(pfx):]
+            graphs.append(split_str[:end_loc])
 
     return graphs
 
@@ -42,15 +28,21 @@ def load_graph_and_inputs(ir: str) -> Tuple[Any, List[Any]]:
     for inp in graph.inputs():
         if isinstance(inp.type(), torch._C.FloatType):
             inputs.append(.5)
-        else:
+        else if isinstance(inp.type(), torch._C.IntType):
+            inputs.append(2)
+        else if isinstance(inp.type(), torch._C.TensorType):
+            assert(inp.requires_grad == 0)
             inputs.append(torch._C._representative_tensor(inp.type()))
+        else:
+            raise NotImplementederror(f"A default value is not implemented for type {inp.type()}")
 
     func = torch._C._create_function_from_graph("forward", graph)
     torch._C._jit_pass_erase_shape_information(func.graph)
     return (func, inputs)
 
 
-def run_test(ir, inputs, *, warmup_runs=20, test_runs=20) -> float:
+# TODO add support for timing on CPU
+def run_test(ir, inputs, *, warmup_runs=10, test_runs=20) -> float:
     graph, _ = load_graph_and_inputs(ir)
     for _ in range(warmup_runs):
         graph(*inputs)
