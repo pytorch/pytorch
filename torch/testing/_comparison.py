@@ -598,29 +598,12 @@ class TensorLikePair(Pair):
     def compare(self) -> None:
         actual, expected = self.actual, self.expected
 
-        with self._handle_meta_tensor_data_access():
-            self._compare_attributes(actual, expected)
-            actual, expected = self._equalize_attributes(actual, expected)
+        self._compare_attributes(actual, expected)
+        if any(input.device.type == "meta" for input in (actual, expected)):
+            return
 
-            self._compare_values(actual, expected)
-
-    @contextlib.contextmanager
-    def _handle_meta_tensor_data_access(self):
-        """Turns a vanilla :class:`NotImplementedError` stemming from data access on a meta tensor into an expressive
-        :class:`ErrorMeta`.
-
-        Although it looks like meta tensors could be handled upfront, we need to do it lazily: there are use cases
-        where a meta tensor wraps a data tensors and dispatches all operator calls to it. Thus, although the tensor is
-        a meta tensor, it behaves like a regular one.
-        """
-        try:
-            yield
-        except NotImplementedError as error:
-            if "meta" not in str(error).lower():
-                raise error
-
-            # TODO: See https://github.com/pytorch/pytorch/issues/68592
-            raise self._make_error_meta(NotImplementedError, "Comparing meta tensors is currently not supported.")
+        actual, expected = self._equalize_attributes(actual, expected)
+        self._compare_values(actual, expected)
 
     def _compare_attributes(
         self,
@@ -1103,10 +1086,15 @@ def assert_close(
 
         \lvert \text{actual} - \text{expected} \rvert \le \texttt{atol} + \texttt{rtol} \cdot \lvert \text{expected} \rvert
 
-    and they have the same :attr:`~torch.Tensor.device` (if ``check_device`` is ``True``), same ``dtype`` (if
-    ``check_dtype`` is ``True``), and the same stride (if ``check_stride`` is ``True``). Non-finite values
-    (``-inf`` and ``inf``) are only considered close if and only if they are equal. ``NaN``'s are only considered equal
-    to each other if ``equal_nan`` is ``True``.
+    Non-finite values (``-inf`` and ``inf``) are only considered close if and only if they are equal. ``NaN``'s are
+    only considered equal to each other if ``equal_nan`` is ``True``.
+
+    In addition, they are only considered close if they have the same
+    - :attr:`~torch.Tensor.device` (if ``check_device`` is ``True``),
+    - ``dtype`` (if ``check_dtype`` is ``True``),
+    - ``layout`` (if ``check_layout`` is ``True``), and
+    - stride (if ``check_stride`` is ``True``).
+    If either ``actual`` or ``expected`` is a meta tensor, only the attribute checks will be performed.
 
     If ``actual`` and ``expected`` are sparse (either having COO or CSR layout), their strided members are
     checked individually. Indices, namely ``indices`` for COO or ``crow_indices``  and ``col_indices`` for CSR layout,

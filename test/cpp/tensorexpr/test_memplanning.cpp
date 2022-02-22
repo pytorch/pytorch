@@ -95,30 +95,24 @@ TEST(MemPlanning, SameBufSizeMemReuse) {
 
   Tensor CT = Reduce(
       "gemm",
-      {{M, "M"}, {N, "N"}},
+      {M, N},
       Sum(),
       [&](const ExprHandle& m, const ExprHandle& n, const ExprHandle& k) {
         return AP.load(m, k) * BP.load(k, n);
       },
-      {{K, "K"}});
-  Tensor DT = Compute(
-      "relu",
-      {{M, "M"}, {N, "N"}},
-      [&](const ExprHandle& m, const ExprHandle& n) {
+      {K});
+  Tensor DT =
+      Compute("relu", {M, N}, [&](const ExprHandle& m, const ExprHandle& n) {
         auto zero = Cast::make(CT.buf()->dtype(), 0);
         return CompareSelect::make(
             CT.load(m, n), zero, zero, CT.load(m, n), kLT);
       });
-  Tensor ET = Compute(
-      "add",
-      {{M, "M"}, {N, "N"}},
-      [&](const ExprHandle& m, const ExprHandle& n) {
+  Tensor ET =
+      Compute("add", {M, N}, [&](const ExprHandle& m, const ExprHandle& n) {
         return DT.load(m, n) + DT.load(m, n);
       });
-  Tensor FT = Compute(
-      "mul",
-      {{M, "M"}, {N, "N"}},
-      [&](const ExprHandle& m, const ExprHandle& n) {
+  Tensor FT =
+      Compute("mul", {M, N}, [&](const ExprHandle& m, const ExprHandle& n) {
         return ET.load(m, n) * ET.load(m, n);
       });
   auto stmt = Block::make({CT.stmt(), DT.stmt(), ET.stmt(), FT.stmt()});
@@ -188,36 +182,28 @@ TEST(MemPlanning, SameBufSizeMultiMemReuses) {
 
   Tensor CT = Reduce(
       "gemm",
-      {{M, "M"}, {N, "N"}},
+      {M, N},
       Sum(),
       [&](const ExprHandle& m, const ExprHandle& n, const ExprHandle& k) {
         return AP.load(m, k) * BP.load(k, n);
       },
-      {{K, "K"}});
-  Tensor DT = Compute(
-      "relu",
-      {{M, "M"}, {N, "N"}},
-      [&](const ExprHandle& m, const ExprHandle& n) {
+      {K});
+  Tensor DT =
+      Compute("relu", {M, N}, [&](const ExprHandle& m, const ExprHandle& n) {
         auto zero = Cast::make(CT.buf()->dtype(), 0);
         return CompareSelect::make(
             CT.load(m, n), zero, zero, CT.load(m, n), kLT);
       });
-  Tensor ET = Compute(
-      "add",
-      {{M, "M"}, {N, "N"}},
-      [&](const ExprHandle& m, const ExprHandle& n) {
+  Tensor ET =
+      Compute("add", {M, N}, [&](const ExprHandle& m, const ExprHandle& n) {
         return DT.load(m, n) + DT.load(m, n);
       });
-  Tensor FT = Compute(
-      "mul",
-      {{M, "M"}, {N, "N"}},
-      [&](const ExprHandle& m, const ExprHandle& n) {
+  Tensor FT =
+      Compute("mul", {M, N}, [&](const ExprHandle& m, const ExprHandle& n) {
         return ET.load(m, n) * ET.load(m, n);
       });
-  Tensor GT = Compute(
-      "sub",
-      {{M, "M"}, {N, "N"}},
-      [&](const ExprHandle& m, const ExprHandle& n) {
+  Tensor GT =
+      Compute("sub", {M, N}, [&](const ExprHandle& m, const ExprHandle& n) {
         return FT.load(m, n) - ET.load(m, n);
       });
 
@@ -296,42 +282,32 @@ TEST(MemPlanning, SameBufSizeMultiMemReusesOfOneBuf) {
 
   Tensor CT = Reduce(
       "gemm",
-      {{M, "M"}, {N, "N"}},
+      {M, N},
       Sum(),
       [&](const ExprHandle& m, const ExprHandle& n, const ExprHandle& k) {
         return AP.load(m, k) * BP.load(k, n);
       },
-      {{K, "K"}});
-  Tensor DT = Compute(
-      "relu",
-      {{M, "M"}, {N, "N"}},
-      [&](const ExprHandle& m, const ExprHandle& n) {
+      {K});
+  Tensor DT =
+      Compute("relu", {M, N}, [&](const ExprHandle& m, const ExprHandle& n) {
         auto zero = Cast::make(CT.buf()->dtype(), 0);
         return CompareSelect::make(
             CT.load(m, n), zero, zero, CT.load(m, n), kLT);
       });
-  Tensor ET = Compute(
-      "add",
-      {{M, "M"}, {N, "N"}},
-      [&](const ExprHandle& m, const ExprHandle& n) {
+  Tensor ET =
+      Compute("add", {M, N}, [&](const ExprHandle& m, const ExprHandle& n) {
         return DT.load(m, n) + DT.load(m, n);
       });
-  Tensor FT = Compute(
-      "mul",
-      {{M, "M"}, {N, "N"}},
-      [&](const ExprHandle& m, const ExprHandle& n) {
+  Tensor FT =
+      Compute("mul", {M, N}, [&](const ExprHandle& m, const ExprHandle& n) {
         return ET.load(m, n) * ET.load(m, n);
       });
-  Tensor GT = Compute(
-      "sub",
-      {{M, "M"}, {N, "N"}},
-      [&](const ExprHandle& m, const ExprHandle& n) {
+  Tensor GT =
+      Compute("sub", {M, N}, [&](const ExprHandle& m, const ExprHandle& n) {
         return FT.load(m, n) - 1;
       });
-  Tensor HT = Compute(
-      "div",
-      {{M, "M"}, {N, "N"}},
-      [&](const ExprHandle& m, const ExprHandle& n) {
+  Tensor HT =
+      Compute("div", {M, N}, [&](const ExprHandle& m, const ExprHandle& n) {
         return GT.load(m, n) / 2;
       });
 
@@ -418,30 +394,24 @@ TEST(MemPlanning, SmallerBufSizeNonMemReuse) {
 
   Tensor CT = Reduce(
       "gemm",
-      {{M, "M"}, {N, "N"}},
+      {M, N},
       Sum(),
       [&](const ExprHandle& m, const ExprHandle& n, const ExprHandle& k) {
         return AP.load(m, k) * BP.load(k, n);
       },
-      {{K, "K"}});
-  Tensor DT = Compute(
-      "relu",
-      {{M, "M"}, {N, "N"}},
-      [&](const ExprHandle& m, const ExprHandle& n) {
+      {K});
+  Tensor DT =
+      Compute("relu", {M, N}, [&](const ExprHandle& m, const ExprHandle& n) {
         auto zero = Cast::make(CT.buf()->dtype(), 0);
         return CompareSelect::make(
             CT.load(m, n), zero, zero, CT.load(m, n), kLT);
       });
   Tensor ET = Compute(
-      "add",
-      {{M * 2, "EM"}, {N * 2, "EN"}},
-      [&](const ExprHandle& em, const ExprHandle& en) {
+      "add", {M * 2, N * 2}, [&](const ExprHandle& em, const ExprHandle& en) {
         return DT.load(em / 2, en / 2) + DT.load(em / 2, en / 2);
       });
   Tensor FT = Compute(
-      "mul",
-      {{M * 2, "FM"}, {N * 2, "FN"}},
-      [&](const ExprHandle& fm, const ExprHandle& fn) {
+      "mul", {M * 2, N * 2}, [&](const ExprHandle& fm, const ExprHandle& fn) {
         return ET.load(fm, fn) * ET.load(fm, fn);
       });
   auto stmt = Block::make({CT.stmt(), DT.stmt(), ET.stmt(), FT.stmt()});

@@ -500,8 +500,7 @@ Module optimize_for_inference(
   Module frozen_mod;
   if (module._ivalue()->type()->hasAttribute("training")) {
     frozen_mod = freeze(module, {}, true);
-  }
-  else {
+  } else {
     frozen_mod = module;
   }
 
