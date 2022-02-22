@@ -62,7 +62,7 @@ __global__ void LpPoolForwardNCHW(
 template <typename T>
 __global__ void LpPoolForwardNHWC(
     const int nthreads,
-    const T* bottom_data,
+    const T *const bottom_data,
     const int height,
     const int width,
     const int channels,
@@ -74,7 +74,7 @@ __global__ void LpPoolForwardNHWC(
     const int stride_w,
     const int pad_t,
     const int pad_l,
-    T* top_data,
+    T *const top_data,
     const T p) {
   CUDA_1D_KERNEL_LOOP(index, nthreads) {
     int c = index % channels;
@@ -189,8 +189,6 @@ __global__ void LpPoolBackwardNHWC(
     for (int ph = phstart; ph < phend; ++ph) {
       for (int pw = pwstart; pw < pwend; ++pw) {
         // figure out the pooling size
-        const int hstart = max(ph * stride_h - pad_t, 0);
-        const int wstart = max(pw * stride_w - pad_l, 0);
         gradient += top_diff_slice[(ph * pooled_width + pw) * channels] *
             bottom_data[index] * pow(abs(bottom_data[index]), p - 2) /
             pow(top_data_slice[(ph * pooled_width + pw) * channels], p - 1);

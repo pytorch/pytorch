@@ -4,7 +4,7 @@ import sys
 
 import torch
 from torch import distributed as dist
-from torch.distributed._fsdp import FullyShardedDataParallel as FSDP, CPUOffload
+from torch.distributed.fsdp import FullyShardedDataParallel as FSDP, CPUOffload
 from torch.nn import Linear, Module
 from torch.nn.parallel import DistributedDataParallel
 from torch.optim import SGD

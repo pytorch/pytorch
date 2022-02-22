@@ -126,7 +126,6 @@ const Tensor& indices) {
   }
 
   /* sizes */
-  const int64_t nbatch = input.ndimension() == 4 ? input.size(-4) : 1;
   const int64_t nInputPlane = input.size(-3);
   const int64_t inputHeight = input.size(-2);
   const int64_t inputWidth = input.size(-1);
@@ -139,7 +138,6 @@ const Tensor& indices) {
     input,
     gradOutput,
     indices,
-    nbatch,
     kH, kW, dH, dW, padH, padW, dilationH, dilationW,
     nInputPlane,
     inputHeight, inputWidth,

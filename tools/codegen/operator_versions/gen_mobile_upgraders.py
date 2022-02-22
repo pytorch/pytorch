@@ -6,7 +6,8 @@ from typing import Any, Dict, List
 
 import torch
 from tools.codegen.code_template import CodeTemplate
-from torch.jit.operator_upgraders import generate_bytecode
+from torch.jit.generate_bytecode import generate_upgraders_bytecode
+from tools.codegen.operator_versions.gen_mobile_upgraders_constant import MOBILE_UPGRADERS_HEADER_DESCRIPTION
 
 class ByteCode(Enum):
     instructions = 1
@@ -30,17 +31,22 @@ INSTRUCTION_LIST = CodeTemplate("""std::vector<Instruction>({
         ${instruction_list}
     }), // instructions list""")
 
-ONE_CONSTANT = CodeTemplate("""c10::IValue(${constant}),""")
+ONE_CONSTANT = CodeTemplate("""
+    c10::IValue(${constant}),""")
 
 CONSTANT_LIST = CodeTemplate("""std::vector<c10::IValue>({
         ${constant_list}
     }), // constants list""")
+
+CONSTANTS_LIST_EMPTY = """std::vector<c10::IValue>(), // constants list"""
 
 ONE_TYPE = CodeTemplate("""c10::parseType("${type_str}"),""")
 
 TYPE_LIST = CodeTemplate("""std::vector<c10::TypePtr>({
         ${type_list}
     }), // types list""")
+
+TYPE_LIST_EMPTY = """std::vector<c10::TypePtr>(), // types list"""
 
 ONE_OPERATOTR_STRING = CodeTemplate("""
     OperatorString({"${operator_name}", "${overload_name}", ${num_of_args}}),""")
@@ -74,12 +80,6 @@ ONE_OPERATOR_IN_VERSION_MAP = CodeTemplate("""
             ${upgrader_list_in_version_map}
         })},""")
 
-# OPERATOR_VERSION_MAP = CodeTemplate("""
-# const std::unordered_map<std::string, std::vector<Upgrader>> kOperatorVersionMap(
-#     {
-#         ${operator_list_in_version_map}
-#     });
-# """)
 
 OPERATOR_VERSION_MAP = CodeTemplate("""
 const std::unordered_map<std::string, std::vector<Upgrader>>
@@ -93,22 +93,18 @@ getOperatorVersionMapForMobile() {
 """)
 
 
-
-UPGRADER_CPP_SRC = CodeTemplate("""/**
- * @generated
- * This is an auto-generated file. Please do not modify it by hand.
- * To re-generate, please run:
- * cd ~/pytorch && python torch/csrc/jit/mobile/upgrader_mobile.cpp
- */
-
+UPGRADER_CPP_SRC = CodeTemplate(MOBILE_UPGRADERS_HEADER_DESCRIPTION + """
+#include <caffe2/serialize/versions.h>
 #include <torch/csrc/jit/mobile/upgrader_mobile.h>
 
-#include <ATen/core/ivalue.h>
-#include <caffe2/serialize/versions.h>
-#include <torch/csrc/jit/mobile/type_parser.h>
+namespace c10 {
+TypePtr parseType(const std::string& pythonStr);
+} // namespace c10
 
 namespace torch {
 namespace jit {
+
+// clang-format off
 
 // From operator_versions_map
 ${operator_version_map}
@@ -134,9 +130,10 @@ const std::vector<ByteCodeFunctionWithOperator>& getUpgraderBytecodeList() {
   return upgraderBytecodeList;
 }
 
+// clang-format on
+
 } // namespace jit
 } // namespace torch
-
 """)
 
 UPGRADER_MOBILE_FILE_NAME = "upgrader_mobile.cpp"
@@ -162,7 +159,7 @@ def construct_instruction(instruction_list_from_yaml: List[Any]) -> str:
                 N=instruction[2],
             )
         )
-    return INSTRUCTION_LIST.substitute(instruction_list="".join(instruction_list_part))
+    return INSTRUCTION_LIST.substitute(instruction_list="".join(instruction_list_part).lstrip("\n"))
 
 def construct_constants(constants_list_from_yaml: List[Any]) -> str:
     constants_list_part = []
@@ -186,7 +183,9 @@ def construct_constants(constants_list_from_yaml: List[Any]) -> str:
                 constant=convert_constant
             )
         )
-    return CONSTANT_LIST.substitute(constant_list="".join(constants_list_part))
+    if len(constants_list_part) == 0:
+        return CONSTANTS_LIST_EMPTY
+    return CONSTANT_LIST.substitute(constant_list="".join(constants_list_part).lstrip("\n"))
 
 def construct_operators(operator_list_from_yaml: List[Any]) -> str:
     operator_list_part = []
@@ -198,7 +197,7 @@ def construct_operators(operator_list_from_yaml: List[Any]) -> str:
                 num_of_args=operator[2],
             )
         )
-    return OPERATOR_STRING_LIST.substitute(operator_string_list="".join(operator_list_part))
+    return OPERATOR_STRING_LIST.substitute(operator_string_list="".join(operator_list_part).lstrip("\n"))
 
 def construct_types(types_tr_list_from_yaml: List[Any]) -> str:
     types_tr_list_part = []
@@ -208,7 +207,9 @@ def construct_types(types_tr_list_from_yaml: List[Any]) -> str:
                 type_str=types_tr
             )
         )
-    return TYPE_LIST.substitute(type_list="".join(types_tr_list_part))
+    if len(types_tr_list_part) == 0:
+        return TYPE_LIST_EMPTY
+    return TYPE_LIST.substitute(type_list="".join(types_tr_list_part).lstrip("\n"))
 
 def construct_register_size(register_size_from_yaml: int) -> str:
     if (not isinstance(register_size_from_yaml, int)):
@@ -217,28 +218,10 @@ def construct_register_size(register_size_from_yaml: int) -> str:
             "it's type is {type(register_size_from_yaml)}. An int type is expected.")
     return str(register_size_from_yaml)
 
-def construct_one_operator_in_version_map(operator_name: str, upgrader_list: List[Any]) -> str:
-    upgraders_in_version_map_part = []
-    for one_upgrader in upgrader_list:
-        upgraders_in_version_map_part.append(
-            ONE_UPGRADER_IN_VERSION_MAP.substitute(
-                upgrader_min_version=one_upgrader[0],
-                upgrader_max_version=one_upgrader[1],
-                upgrader_name=one_upgrader[2],
-                bytecode_func_index=one_upgrader[3]
-            )
-        )
-    return ONE_OPERATOR_IN_VERSION_MAP.substitute(
-        operator_name=operator_name,
-        upgrader_list_in_version_map="".join(upgraders_in_version_map_part)
-    )
-
 def construct_version_maps(upgrader_bytecode_function_to_index_map: Dict[str, Any]) -> str:
     version_map = torch._C._get_operator_version_map()
     sorted_version_map_ = sorted(version_map.items(), key=lambda item: item[0])  # type: ignore[no-any-return]
-    sorted_version_map = {
-        name: sorted(lst, key=lambda e: e.upgrader_name) for name, lst in sorted_version_map_  # type: ignore[no-any-return]
-    }
+    sorted_version_map = {name: lst for name, lst in sorted_version_map_}
 
     operator_list_in_version_map_part = []
     for op_name in sorted_version_map:
@@ -246,19 +229,16 @@ def construct_version_maps(upgrader_bytecode_function_to_index_map: Dict[str, An
         # TODO: remove the skip after these two operators schemas are fixed
         if op_name in EXCLUDED_OP_SET:
             continue
-        for upgrader_entry in sorted_version_map[op_name]:
-            # Split a string by "_" and filter empty string in the list
-            # For example: "div__Scalar_0_3" => ['div', 'Scalar', '0', '3']
-            upgrader_info = list(filter(lambda token: token != "", upgrader_entry.upgrader_name.split('_')))
-            upgrader_min_version = upgrader_info[2]
-            upgrader_max_version = upgrader_info[3]
+        upgrader_ranges = torch._C._get_upgrader_ranges(op_name)
+        upgrader_entries = sorted_version_map[op_name]
+        assert len(upgrader_ranges) == len(upgrader_entries)
+        for idx, upgrader_entry in enumerate(upgrader_entries):
             upgrader_name = upgrader_entry.upgrader_name
-
             bytecode_function_index = upgrader_bytecode_function_to_index_map[upgrader_name]
             upgraders_in_version_map_part.append(
                 ONE_UPGRADER_IN_VERSION_MAP.substitute(
-                    upgrader_min_version=upgrader_min_version,
-                    upgrader_max_version=upgrader_max_version,
+                    upgrader_min_version=upgrader_ranges[idx].min_version,
+                    upgrader_max_version=upgrader_ranges[idx].max_version,
                     upgrader_name=upgrader_name,
                     bytecode_func_index=bytecode_function_index,
                 )
@@ -270,7 +250,7 @@ def construct_version_maps(upgrader_bytecode_function_to_index_map: Dict[str, An
             )
         )
     return OPERATOR_VERSION_MAP.substitute(
-        operator_list_in_version_map="".join(operator_list_in_version_map_part)
+        operator_list_in_version_map="".join(operator_list_in_version_map_part).lstrip("\n")
     )
 
 def get_upgrader_bytecode_function_to_index_map(upgrader_dict: List[Dict[str, Any]]) -> Dict[str, Any]:
@@ -278,6 +258,8 @@ def get_upgrader_bytecode_function_to_index_map(upgrader_dict: List[Dict[str, An
     index = 0
     for upgrader_bytecode in upgrader_dict:
         for upgrader_name, bytecode in upgrader_bytecode.items():
+            if upgrader_name in EXCLUE_UPGRADER_SET:
+                continue
             upgrader_bytecode_function_to_index_map[upgrader_name] = index
             index += 1
     return upgrader_bytecode_function_to_index_map
@@ -319,14 +301,14 @@ def write_cpp(cpp_path: str, upgrader_dict: List[Dict[str, Any]]) -> None:
                 register_size=register_size_str,
             )
             one_upgrader_src_string = ONE_UPGRADER_SRC.substitute(
-                bytecode_function=one_upgrader_function_string,
-                operator_string_list=operator_list_str,
+                bytecode_function=one_upgrader_function_string.lstrip("\n"),
+                operator_string_list=operator_list_str.lstrip("\n"),
             )
             all_upgrader_src_string.append(one_upgrader_src_string)
 
     upgrader_file_content = UPGRADER_CPP_SRC.substitute(
         operator_version_map=version_map_src,
-        upgrader_bytecode="".join(all_upgrader_src_string))
+        upgrader_bytecode="".join(all_upgrader_src_string).lstrip("\n"))
     body_parts.append(upgrader_file_content)
     print("writing file to : ", cpp_path + "/" + UPGRADER_MOBILE_FILE_NAME)
     with open(
@@ -341,7 +323,7 @@ def sort_upgrader(upgrader_list: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
 
 def main() -> None:
 
-    upgrader_list = generate_bytecode()
+    upgrader_list = generate_upgraders_bytecode()
     sorted_upgrader_list = sort_upgrader(upgrader_list)
     for up in sorted_upgrader_list:
         print("after sort upgrader : ", next(iter(up)))

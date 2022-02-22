@@ -91,9 +91,8 @@ __global__ void length_sum_gradient_kernel(
     const T* __restrict__ grad_in,
     T* __restrict__ grad_out,
     const int* __restrict__ prefix_sum_length_data,
-    int N,
-    int post,
-    int len_length) {
+    const int N,
+    const int post) { //DESTROY
   // len_length blocks
   int group = blockIdx.x;
 
@@ -134,7 +133,6 @@ __global__ void length_max_kernel(
     const int* __restrict__ prefix_sum_length_data,
     int N,
     int post,
-    int len_length,
     const T numeric_min) {
   // len_length blocks
   int group = blockIdx.x;
@@ -317,9 +315,7 @@ __global__ void sparse_length_weighted_sum_kernel(
     T* __restrict__ out,
     const int* __restrict__ prefix_sum_length_data,
     const IndexType* __restrict__ indices,
-    int N,
     int post,
-    int len_length,
     int len_indices) {
   // len_length blocks
   int group = blockIdx.x;
@@ -749,7 +745,6 @@ class CUDASparseLengthsMaxOp : public Operator<CUDAContext> {
                 prefix_sum_length_data,
                 N,
                 post,
-                len_length,
                 numeric_min);
         C10_CUDA_KERNEL_LAUNCH_CHECK();
       } else {
@@ -760,7 +755,6 @@ class CUDASparseLengthsMaxOp : public Operator<CUDAContext> {
                 prefix_sum_length_data,
                 N,
                 post,
-                len_length,
                 numeric_min);
         C10_CUDA_KERNEL_LAUNCH_CHECK();
       }
@@ -830,7 +824,6 @@ class CUDASparseLengthsWeightedSumOp : public Operator<CUDAContext> {
     const T* in_weights = weightsInput.template data<T>();
     auto* prefix_sum_length_data =
         inclusive_scan_length_buffer_.template data<int>();
-    int N = dataSize;
     int post = dataInput.size_from_dim(1);
 
     auto maxThreads =
@@ -847,9 +840,7 @@ class CUDASparseLengthsWeightedSumOp : public Operator<CUDAContext> {
               out_data,
               prefix_sum_length_data,
               indices,
-              N,
               post,
-              len_length,
               dataToReduceSize);
       C10_CUDA_KERNEL_LAUNCH_CHECK();
     } else {
@@ -860,9 +851,7 @@ class CUDASparseLengthsWeightedSumOp : public Operator<CUDAContext> {
               out_data,
               prefix_sum_length_data,
               indices,
-              N,
               post,
-              len_length,
               dataToReduceSize);
       C10_CUDA_KERNEL_LAUNCH_CHECK();
     }
@@ -1353,13 +1342,13 @@ class CUDASparseLengthsSumGradientWithIndicesOp : public Operator<CUDAContext> {
       length_sum_gradient_kernel<T, true, false>
           <<<len_length, block, 0, context_.cuda_stream()>>>(
 
-              in_data, out_data, prefix_sum_length_data, N, post, len_length);
+              in_data, out_data, prefix_sum_length_data, N, post);
       C10_CUDA_KERNEL_LAUNCH_CHECK();
     } else {
       // calling cuda kernel with ExactBlock = false, Average = false
       length_sum_gradient_kernel<T, false, false>
           <<<len_length, maxThreads, 0, context_.cuda_stream()>>>(
-              in_data, out_data, prefix_sum_length_data, N, post, len_length);
+              in_data, out_data, prefix_sum_length_data, N, post);
       C10_CUDA_KERNEL_LAUNCH_CHECK();
     }
 
@@ -1434,13 +1423,13 @@ class CUDASparseLengthsMeanGradientWithIndicesOp
       length_sum_gradient_kernel<T, true, true>
           <<<len_length, block, 0, context_.cuda_stream()>>>(
 
-              in_data, out_data, prefix_sum_length_data, N, post, len_length);
+              in_data, out_data, prefix_sum_length_data, N, post);
       C10_CUDA_KERNEL_LAUNCH_CHECK();
     } else {
       // calling cuda kernel with ExactBlock = false, Average = true
       length_sum_gradient_kernel<T, false, true>
           <<<len_length, maxThreads, 0, context_.cuda_stream()>>>(
-              in_data, out_data, prefix_sum_length_data, N, post, len_length);
+              in_data, out_data, prefix_sum_length_data, N, post);
       C10_CUDA_KERNEL_LAUNCH_CHECK();
     }
 

@@ -30,6 +30,8 @@ bool copy_transpose_valid(const Tensor& self, const Tensor& src) {
       src.stride(0) == 1 && src.stride(1) == src.size(0) &&
       self.scalar_type() == src.scalar_type() &&
       self.sizes().equals(src.sizes()) &&
+      self.is_neg() == src.is_neg() &&
+      self.is_conj() == src.is_conj() &&
       self.numel() >= MIN_SZ;
 }
 
@@ -256,7 +258,7 @@ Tensor& copy_(Tensor& self, const Tensor& src, bool non_blocking) {
   return self;
 }
 
-void copy_ignoring_overlaps(const Tensor &dst, const Tensor &src) {
+void copy_ignoring_overlaps(const TensorBase &dst, const TensorBase &src) {
   // Called when we are copying into an overlapping index `dst`, but we don't
   // care which writer wins. Hacky but it works. This is only used by
   // CUDA_tensor_apply2 in case that there are write overlaps.

@@ -586,6 +586,12 @@ struct TORCH_API TupleTypeFactory<TupleType> {
   static TupleTypePtr fallback(const Type& type);
 };
 
+template <>
+struct TORCH_API TupleTypeFactory<c10::DynamicType> {
+  static DynamicTypePtr create(std::vector<TypePtr> elemTypes);
+  static DynamicTypePtr fallback(const Type&);
+};
+
 struct TORCH_API Tuple : c10::intrusive_ptr_target {
  private:
   TupleElements elements_;
@@ -1661,13 +1667,18 @@ c10::List<Elem> generic_to(IValue ivalue, _fake_type<c10::List<Elem>>) {
 }
 
 template <typename T>
-static std::vector<T> createVectorFromList(const c10::detail::ListImpl* impl) {
-  std::vector<T> result;
+static T createVectorLikeFromList(const c10::detail::ListImpl* impl) {
+  T result;
   result.reserve(impl->list.size());
   for (size_t i = 0, N = impl->list.size(); i < N; ++i) {
-    result.push_back(impl->list[i].to<T>());
+    result.push_back(impl->list[i].to<typename T::value_type>());
   }
   return result;
+}
+
+template <typename T>
+static std::vector<T> createVectorFromList(const c10::detail::ListImpl* impl) {
+  return createVectorLikeFromList<std::vector<T>>(impl);
 }
 
 template <typename T>
@@ -1805,6 +1816,14 @@ inline std::vector<int64_t> IValue::toIntVector() const {
   return createVectorFromList<int64_t>(
       static_cast<const c10::detail::ListImpl*>(payload.u.as_intrusive_ptr));
 }
+inline at::DimVector IValue::toDimVector() const {
+  AT_ASSERT(isIntList(), "Expected IntList but got ", tagKind());
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+      payload.u.as_intrusive_ptr != c10::UndefinedTensorImpl::singleton(),
+      "called toDimVector on null intrusive_ptr IValue");
+  return createVectorLikeFromList<at::DimVector>(
+      static_cast<const c10::detail::ListImpl*>(payload.u.as_intrusive_ptr));
+}
 inline c10::List<double> IValue::toDoubleList() && {
   AT_ASSERT(isDoubleList(), "Expected DoubleList but got ", tagKind());
   return c10::List<double>(moveToIntrusivePtr<c10::detail::ListImpl>());
@@ -1900,39 +1919,6 @@ inline ivalue::Tuple& IValue::toTupleRef() const {
       "called toTupleRef on null intrusive_ptr IValue");
   return *static_cast<c10::ivalue::Tuple*>(
       payload.u.as_intrusive_ptr);
-}
-
-template <typename T>
-inline bool IValue::isListOf() const {
-  // note: avoids calling type() to avoid extra referencing counting for the returned type.
-  if (!isList()) {
-    return false;
-  }
-  const auto& ty = static_cast<detail::ListImpl*>(payload.u.as_intrusive_ptr)->elementType;
-  if (ty->kind() == T::Kind) {
-    return true;
-  }
-  return *ty == *T::get();
-}
-
-inline bool IValue::isDoubleList() const {
-  return isListOf<c10::FloatType>();
-}
-
-inline bool IValue::isComplexDoubleList() const {
-  return isListOf<c10::ComplexType>();
-}
-
-inline bool IValue::isTensorList() const {
-  return isListOf<c10::TensorType>();
-}
-
-inline bool IValue::isIntList() const {
-  return isListOf<c10::IntType>();
-}
-
-inline bool IValue::isBoolList() const {
-  return isListOf<c10::BoolType>();
 }
 
 inline IValue::IValue(c10::intrusive_ptr<ivalue::Tuple> v)
@@ -2272,8 +2258,13 @@ struct IValue::TagType<c10::Type> {
   static TORCH_API c10::TypePtr get(const IValue&);
 };
 
+template <>
+struct IValue::TagType<c10::DynamicType> {
+  static TORCH_API c10::TypePtr get(const IValue&);
+};
+
 template <typename T>
-typename T::Ptr IValue::type() const {
+TypePtr IValue::type() const {
   return IValue::TagType<T>::get(*this);
 }
 

@@ -89,6 +89,8 @@ class TORCH_API MemoryDAG {
   // Does `a` hold reference to any memory that is stored in `b`, or vice versa?
   bool mayContainAlias(const Element* a, const Element* b) const;
 
+  bool mayContainAlias(const Element* a, const at::ArrayRef<Element*> b) const;
+
   bool mayContainAlias(
       const at::ArrayRef<Element*> a,
       const at::ArrayRef<Element*> b) const;

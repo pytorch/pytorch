@@ -5,6 +5,7 @@
 #include <ATen/core/TensorBody.h>
 #include <ATen/core/functional.h>
 #include <ATen/core/symbol.h>
+#include <ATen/core/type_factory.h>
 #include <ATen/core/qualified_name.h>
 #include <c10/util/TypeList.h>
 #include <c10/util/Optional.h>
@@ -32,6 +33,26 @@ using OptNameList = c10::optional<std::vector<std::string>>;
 
 void standardizeVectorForUnion(std::vector<TypePtr>& reference, std::vector<TypePtr>* to_fill);
 void standardizeVectorForUnion(std::vector<TypePtr>* to_flatten);
+
+inline bool is_contiguous_strides(
+    const IntArrayRef sizes,
+    const IntArrayRef strides) {
+  int n_dim = static_cast<int>(sizes.size());
+  if (n_dim == 0) {
+    return true;
+  }
+
+  if (strides[n_dim - 1] != 1) {
+    return false;
+  }
+
+  for (int i = n_dim - 2; i >= 0; i--) {
+    if (strides[i] != strides[i + 1] * sizes[i + 1]) {
+      return false;
+    }
+  }
+  return true;
+}
 
 struct AnyType;
 using AnyTypePtr = SingletonTypePtr<AnyType>;
@@ -117,7 +138,7 @@ struct TORCH_API UnionType : public SharedType {
 
   bool equals(const Type& rhs) const override;
 
-  bool isUnionType() const {
+  bool isUnionType() const override {
     return true;
   }
 
@@ -200,12 +221,12 @@ struct TORCH_API OptionalType : public UnionType {
 
   bool isSubtypeOfExt(const Type& rhs, std::ostream* why_not) const override;
 
-  bool isUnionType() const {
+  bool isUnionType() const override {
     return true;
   }
 
   // common cast Optional[Tensor] for undefined tensor type
-  static OptionalTypePtr ofTensor();
+  static TypePtr ofTensor();
 
  private:
   explicit OptionalType(TypePtr contained);
@@ -629,7 +650,6 @@ struct TORCH_API TensorType : public SharedType {
     return copy;
   }
 
-
   TensorTypePtr withDim(c10::optional<size_t> d) {
     auto copy = clone();
     // withDim is only used by the legacy executor
@@ -637,6 +657,12 @@ struct TORCH_API TensorType : public SharedType {
     copy->sizes_ = SymbolicShape(d);
     copy->strides_ = VaryingShape<Stride>(d);
     return copy;
+  }
+
+  TensorTypePtr withStrides(VaryingShape<Stride> sstrides) const {
+    auto cloned = clone();
+    cloned->strides_ = sstrides;
+    return cloned;
   }
 
   TensorTypePtr withSizesStrides(
@@ -660,7 +686,7 @@ struct TORCH_API TensorType : public SharedType {
         sizes, contiguousStridesOf(sizes));
   }
 
-  TensorTypePtr withDevice(at::Device device) const {
+  TensorTypePtr withDevice(const c10::optional<at::Device> device) const {
     auto copy = clone();
     copy->device_ = device;
     return copy;
@@ -1705,7 +1731,8 @@ struct getTypePtr_<c10::QScheme> final {
 template <>
 struct getTypePtr_<at::Generator> final {
   static decltype(auto) call() {
-    return OptionalType::create(GeneratorType::get());
+    return TypeFactory::create<OptionalType>(
+        TypeFactory::get<GeneratorType>());
   }
 };
 template <>
@@ -1773,7 +1800,8 @@ struct getTypePtr_<c10::Dict<K, V>> final {
 template <class T>
 struct getTypePtr_<at::optional<T>> final {
   static const auto& call() {
-    static auto type = OptionalType::create(getTypePtr_<T>::call());
+    static auto type = TypeFactory::create<OptionalType>(
+        getTypePtr_<T>::call());
     return type;
   }
 };
