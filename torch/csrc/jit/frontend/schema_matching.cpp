@@ -352,7 +352,7 @@ static c10::optional<MatchedSchema> tryMatchSchema(
   auto schema_namespace = schema.operator_name().getNamespace();
   bool is_aten = false;
   if (schema_namespace.has_value()) {
-    if (schema_namespace.value() == "aten"){
+    if (schema_namespace.value() == "aten") {
       is_aten = true;
     }
   }
@@ -400,7 +400,8 @@ static c10::optional<MatchedSchema> tryMatchSchema(
       // used
       actual_named_value = args[used_args];
       used_args++;
-    } else if (auto kwarg_idx = findInputWithName(arg.name(), kwargs, is_aten)) {
+    } else if (
+        auto kwarg_idx = findInputWithName(arg.name(), kwargs, is_aten)) {
       const NamedValue& nv = kwargs[*kwarg_idx];
       if (used_kwarg[*kwarg_idx]) {
         if (failure_messages) {
