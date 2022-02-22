@@ -29,7 +29,7 @@ graph {
       type: FLOAT
     }
   }
-  name: "torch_jit"
+  name: "torch-jit-export"
   input {
     name: "onnx::Shape_0"
     type {

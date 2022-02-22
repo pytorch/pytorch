@@ -21,9 +21,9 @@
 #include <atomic>
 
 #include <onnx/checker.h>
+#include <onnx/shape_inference/implementation.h>
 #include <onnx/onnx_pb.h>
 #include <onnx/proto_utils.h>
-#include <onnx/shape_inference/implementation.h>
 
 #include <fstream>
 #include <memory>
@@ -650,7 +650,7 @@ void GraphEncoder::EncodeBlock(
     bool use_external_data_format,
     const std::string& onnx_file_path) {
   AT_ASSERT(graph_proto != nullptr);
-  std::string block_name = "torch_jit";
+  std::string block_name = "torch-jit-export";
   if (num_blocks_) {
     block_name += std::to_string(num_blocks_);
   }
@@ -1260,6 +1260,7 @@ void check_onnx_proto(const std::string& proto_string, bool full_check) {
   if (full_check) {
     onnx::shape_inference::InferShapes(model);
   }
+
 }
 
 } // namespace jit
