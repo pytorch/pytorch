@@ -441,8 +441,9 @@ class TestQuantizedOps(TestCase):
         shapes = ((4,), (4, 4), (4, 4, 4), (4, 4, 4, 4))
         dtypes = (torch.quint8, torch.qint8)
         memory_formats = (torch.channels_last, torch.contiguous_format)
-        test_cases = itertools.product(shapes, dtypes, memory_formats)
-        for shape, dtype, memory_format in test_cases:
+        approximation = ['none', 'tanh']
+        test_cases = itertools.product(shapes, dtypes, memory_formats, approximation)
+        for shape, dtype, memory_format, approximate in test_cases:
             if memory_format == torch.channels_last and len(shape) != 4:
                 continue
             X, scale, zero_point, torch_type = \
@@ -454,7 +455,7 @@ class TestQuantizedOps(TestCase):
             dqX = qX.dequantize()
 
             op = torch.nn.functional.gelu
-            dqY = op(dqX)
+            dqY = op(dqX, approximate=approximate)
             qY = torch.quantize_per_tensor(dqY, scale=scale, zero_point=zero_point,
                                            dtype=torch_type)
             qY_hat = op(qX)
@@ -989,6 +990,50 @@ class TestQuantizedOps(TestCase):
             mul_relu_out(qA, qB, out=qCrelu_out_hat)
             self.assertEqual(qCrelu_hat, qCrelu_out_hat,
                              msg="mulReLU.out failed")
+
+    """Tests the correctness of the matmul op."""
+    def test_qmatmul(self):
+        A = torch.randn(size=(3, 4), dtype=torch.float32) * 3
+        B = torch.randn(size=(4, 5), dtype=torch.float32) * 3
+
+        scale_A = 3.1
+        zero_point_A = 7
+        scale_B = 5.3
+        zero_point_B = 127
+
+        scale_C = 1.3
+        zero_point_C = 5
+
+        qA = torch.quantize_per_tensor(A, scale=scale_A, zero_point=zero_point_A,
+                                       dtype=torch.qint8)
+        qB = torch.quantize_per_tensor(B, scale=scale_B, zero_point=zero_point_B,
+                                       dtype=torch.qint8)
+
+        # matmul ground truth
+        C = torch.matmul(qA.dequantize(), qB.dequantize()).numpy()
+        qC = _quantize(C, scale_C, zero_point_C, dtype=np.int8)
+        qC_hat = torch.ops.quantized.matmul(qA, qB, scale=scale_C, zero_point=zero_point_C)
+        np.testing.assert_equal(qC, qC_hat.int_repr(),
+                                "Quantized multiplication failed.")
+
+        # Using per channel quantization fails
+        axis = 0
+        scales_A = torch.rand(size=(A.shape[axis],))
+        zero_points_A = torch.randint(low=0, high=5, size=(A.shape[axis],))
+        scales_B = torch.rand(size=(B.shape[axis],))
+        zero_points_B = torch.randint(low=0, high=5, size=(B.shape[axis],))
+
+        qA = torch.quantize_per_channel(A, scales=scales_A, zero_points=zero_points_A,
+                                        axis=axis, dtype=torch.qint8)
+        qB = torch.quantize_per_channel(B, scales=scales_B, zero_points=zero_points_B,
+                                        axis=axis, dtype=torch.qint8)
+        np.testing.assert_raises_regex(RuntimeError,
+                                       ".*per-tensor.*",
+                                       torch.ops.quantized.matmul,
+                                       qA,
+                                       qB,
+                                       scale_C,
+                                       zero_point_C)
 
     """Tests the correctness of the mul and mul_relu op."""
     def test_qmul_broadcast(self):

@@ -10,7 +10,7 @@ from torch.distributed.fsdp.fully_sharded_data_parallel import (
     FullyShardedDataParallel as FSDP,
     CPUOffload,
 )
-from torch.distributed.algorithms._checkpoint._checkpoint_wrapper import (
+from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
     checkpoint_wrapper,
 )
 from torch.testing._internal.common_distributed import (
