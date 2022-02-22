@@ -480,7 +480,7 @@ An enum-like class for built-in communication hooks: ``ALLREDUCE`` and ``FP16_CO
           &::c10d::Logger::set_static_graph,
           py::call_guard<py::gil_scoped_release>());
 
-  py::enum_<::c10d::DebugLevel>(module, "_DebugLevel", R"(
+  py::enum_<::c10d::DebugLevel>(module, "DebugLevel", R"(
       An enum whose values correspond to different debug settings of the
       torch.distributed package. Currently supporting settings are OFF, INFO,
       and DETAIL, which can be set via the TORCH_DISTRIBUTED_DEBUG environment
@@ -491,10 +491,9 @@ An enum-like class for built-in communication hooks: ``ALLREDUCE`` and ``FP16_CO
       .value("DETAIL", ::c10d::DebugLevel::Detail);
 
   module
-      .def("_get_debug_level", ::c10d::debug_level)
-      .def("_set_debug_level", [](bool force) {
-        ::c10d::setDebugLevel(at::nullopt, force);
-       }, py::arg("force") = false);
+      .def("get_debug_level", ::c10d::debug_level)
+      .def("set_debug_level", ::c10d::setDebugLevel)
+      .def("set_debug_level_from_env", ::c10d::setDebugLevelFromEnvironment);
 
   py::enum_<::c10d::ReduceOp>(module, "ReduceOp", R"(
 An enum-like class for available reduction operations: ``SUM``, ``AVG``,
