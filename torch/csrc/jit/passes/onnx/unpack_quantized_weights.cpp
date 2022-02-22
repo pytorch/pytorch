@@ -136,7 +136,9 @@ std::vector<Node*> CreateQuantizedWeights(
     float scale,
     int64_t zero_point) {
   Node* const_node_1 = graph->create(prim::Constant);
-  auto const_value = at::from_blob(data.data(), c10::IntArrayRef(shapes), at::kFloat).to(at::kCPU);
+  auto const_value =
+      at::from_blob(data.data(), c10::IntArrayRef(shapes), at::kFloat)
+          .to(at::kCPU);
   auto options = c10::TensorOptions().dtype(at::kFloat).device(at::kCPU);
   at::Tensor const_value_copy = at::empty(c10::IntArrayRef(shapes), options);
   const_value.copy_(const_value);
@@ -145,16 +147,23 @@ std::vector<Node*> CreateQuantizedWeights(
   Node* const_node_2 = graph->create(prim::Constant);
   std::vector<float> scale_v{scale};
   std::vector<int64_t> scale_shapes{1};
-  auto const_shape = at::from_blob(scale_v.data(), c10::IntArrayRef(scale_shapes), at::kFloat).to(at::kCPU);
-  at::Tensor const_shape_copy = at::empty(c10::IntArrayRef(scale_shapes), options);
+  auto const_shape =
+      at::from_blob(scale_v.data(), c10::IntArrayRef(scale_shapes), at::kFloat)
+          .to(at::kCPU);
+  at::Tensor const_shape_copy =
+      at::empty(c10::IntArrayRef(scale_shapes), options);
   const_shape_copy.copy_(const_shape);
   const_node_2->t_(Symbol::attr("value"), const_shape_copy);
 
   Node* const_node_3 = graph->create(prim::Constant);
   std::vector<int64_t> zero_point_v{zero_point};
   std::vector<int64_t> zero_shapes{1};
-  auto const_zero = at::from_blob(zero_point_v.data(), c10::IntArrayRef(zero_shapes), at::kInt).to(at::kCPU);
-  at::Tensor const_zero_copy = at::empty(c10::IntArrayRef(zero_shapes), options);
+  auto const_zero =
+      at::from_blob(
+          zero_point_v.data(), c10::IntArrayRef(zero_shapes), at::kInt)
+          .to(at::kCPU);
+  at::Tensor const_zero_copy =
+      at::empty(c10::IntArrayRef(zero_shapes), options);
   const_zero_copy.copy_(const_zero);
   const_node_3->t_(Symbol::attr("value"), const_zero_copy);
 
@@ -166,7 +175,9 @@ Node* CreateQuantizedBias(
     std::shared_ptr<Graph>& graph,
     std::vector<int64_t> shapes) {
   Node* const_node_1 = graph->create(prim::Constant);
-  auto const_bias = at::from_blob(data.data(), c10::IntArrayRef(shapes), at::kFloat).to(at::kCPU);
+  auto const_bias =
+      at::from_blob(data.data(), c10::IntArrayRef(shapes), at::kFloat)
+          .to(at::kCPU);
   auto options = c10::TensorOptions().dtype(at::kFloat).device(at::kCPU);
   at::Tensor const_bias_copy = at::empty(c10::IntArrayRef(shapes), options);
   const_bias_copy.copy_(const_bias);
@@ -201,7 +212,7 @@ void unpackQuantizedWeightsHelper(
     const std::string& pattern,
     const std::string& unpack_fn,
     QuantizedParamsType params_type,
-    bool caffe2=true) {
+    bool caffe2 = true) {
   Graph pattern_graph;
   std::unordered_map<std::string, Value*> vmap;
   parseIR(pattern, &pattern_graph, vmap);
@@ -425,12 +436,18 @@ void unpackQuantizedWeightsHelper(
     } else {
       std::vector<float> unpacked_weight_values;
       unpacked_weight_values.reserve(unpacked_weight.numel());
-      auto unpacked_weight_data = reinterpret_cast<int8_t*>(unpacked_weight.data_ptr<c10::qint8>());
+      auto unpacked_weight_data =
+          reinterpret_cast<int8_t*>(unpacked_weight.data_ptr<c10::qint8>());
       for (const auto i : c10::irange(unpacked_weight.numel())) {
-        unpacked_weight_values.push_back(static_cast<float>(unpacked_weight_data[i]));
+        unpacked_weight_values.push_back(
+            static_cast<float>(unpacked_weight_data[i]));
       }
       std::vector<Node*> c2_weight = CreateQuantizedWeights(
-          unpacked_weight_values, graph, wt_sizes, static_cast<float>(unpacked_weight.q_scale()), weight_zp);
+          unpacked_weight_values,
+          graph,
+          wt_sizes,
+          static_cast<float>(unpacked_weight.q_scale()),
+          weight_zp);
       graph->setInsertPoint(qlinear_node);
       c2_weight[0]->insertBefore(qlinear_node);
       qlinear_node->insertInput(1, c2_weight[0]->output());
@@ -464,7 +481,8 @@ void unpackQuantizedWeightsHelper(
 
     if (caffe2) {
       auto input_scale = getScaleFromInput(input_node);
-      q_bias = at::quantize_per_tensor(original_bias, weight_scale * input_scale, 0, at::kQInt32);
+      q_bias = at::quantize_per_tensor(
+          original_bias, weight_scale * input_scale, 0, at::kQInt32);
       std::vector<int64_t> bias_values;
       bias_values.reserve(q_bias.numel());
       auto bias_data = (int32_t*)q_bias.data_ptr<c10::qint32>();
@@ -485,10 +503,8 @@ void unpackQuantizedWeightsHelper(
       for (const auto i : c10::irange(original_bias.numel())) {
         bias_values[i] = bias_data[i];
       }
-      Node* bias = CreateQuantizedBias(
-          bias_values,
-          graph,
-          original_bias.sizes().vec());
+      Node* bias =
+          CreateQuantizedBias(bias_values, graph, original_bias.sizes().vec());
       bias->insertBefore(qlinear_node);
       // For quantized_linear inputs, the order is input, weight, bias, ....
       // We unpack weight into 3 values. then it is
@@ -521,11 +537,13 @@ void unpackQuantizedWeightsHelper(
   }
 }
 
-static std::unordered_map<c10::ScalarType, c10::ScalarType, ScalarTypeHashFunction> qTypeToValType = {
-  {c10::ScalarType::QInt8, c10::ScalarType::Char},
-  {c10::ScalarType::QUInt8, c10::ScalarType::Byte},
-  {c10::ScalarType::QInt32, c10::ScalarType::Int},
-  {c10::ScalarType::QUInt4x2, c10::ScalarType::Byte},
+static std::
+    unordered_map<c10::ScalarType, c10::ScalarType, ScalarTypeHashFunction>
+        qTypeToValType = {
+            {c10::ScalarType::QInt8, c10::ScalarType::Char},
+            {c10::ScalarType::QUInt8, c10::ScalarType::Byte},
+            {c10::ScalarType::QInt32, c10::ScalarType::Int},
+            {c10::ScalarType::QUInt4x2, c10::ScalarType::Byte},
 };
 
 // Unpack quantized tensor inputs into {value, scale, zero_point},
@@ -544,14 +562,21 @@ void UnpackQuantizedTensorInputs(std::shared_ptr<Graph>& graph) {
       continue;
     }
     std::string input_name = g_input->debugName();
-    auto input_value = graph->insertInput(index, input_name + "_value")->setType(shape_type->withScalarType(qTypeToValType[scalar_type]));
+    auto input_value =
+        graph->insertInput(index, input_name + "_value")
+            ->setType(shape_type->withScalarType(qTypeToValType[scalar_type]));
     // scale and zero_point type can be found at torch/include/ATen/Operators.h
-    auto input_scale = graph->insertInput(index + 1, input_name + "_scale")->setType(TensorType::create(
-      at::kDouble, at::kCPU, 0, /*requires_grad=*/c10::nullopt));
-    auto input_zero_point = graph->insertInput(index + 2, input_name + "_zero_point")->setType(TensorType::create(
-      at::kLong, at::kCPU, 0, /*requires_grad=*/c10::nullopt));
+    auto input_scale =
+        graph->insertInput(index + 1, input_name + "_scale")
+            ->setType(TensorType::create(
+                at::kDouble, at::kCPU, 0, /*requires_grad=*/c10::nullopt));
+    auto input_zero_point =
+        graph->insertInput(index + 2, input_name + "_zero_point")
+            ->setType(TensorType::create(
+                at::kLong, at::kCPU, 0, /*requires_grad=*/c10::nullopt));
     std::vector<Value*> converted{input_value, input_scale, input_zero_point};
-    auto input_tuple = graph->prependNode(graph->createTuple(converted))->output();
+    auto input_tuple =
+        graph->prependNode(graph->createTuple(converted))->output();
     g_input->replaceAllUsesWith(input_tuple);
     // Erase the original quantized tensor input.
     graph->eraseInput(index + converted.size());
