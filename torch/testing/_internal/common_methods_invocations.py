@@ -43,6 +43,7 @@ from distutils.version import LooseVersion
 
 has_scipy_fft = False
 if TEST_SCIPY:
+    from scipy import stats
     import scipy.special
     try:
         import scipy.fft
@@ -1315,7 +1316,7 @@ def sample_inputs_linalg_det(op_info, device, dtype, requires_grad, **kwargs):
     return [SampleInput(t) for t in inputs]
 
 def sample_inputs_linalg_det_singular(op_info, device, dtype, requires_grad, **kwargs):
-    make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+    make_arg = partial(make_tensor, device=device, dtype=dtype)
 
     def make_singular_matrix_batch_base(size, rank):
         assert size[-1] == size[-2]
@@ -1331,7 +1332,7 @@ def sample_inputs_linalg_det_singular(op_info, device, dtype, requires_grad, **k
         u_diag_abs_largest = u_diag_abs.max(dim=-1, keepdim=True).values
         u_diag_abs_smallest_idxs = torch.topk(u_diag_abs, k=(n - rank), largest=False).indices
         u.diagonal(0, -2, -1).div_(u_diag_abs_largest)
-        u[..., u_diag_abs_smallest_idxs] = torch.finfo(dtype).eps
+        u.diagonal(0, -2, -1)[..., u_diag_abs_smallest_idxs] = torch.finfo(dtype).eps
         matrix = p @ l @ u
 
         matrix.requires_grad_(requires_grad)
@@ -3903,7 +3904,6 @@ def sample_inputs_layer_norm(opinfo, device, dtype, requires_grad, **kwargs):
     # With `None` weight and bias (tests failing for this, see the link above)
     # yield SampleInput(make_arg((1, 2)), args=((2,), None, make_arg((2,))))
 
-
 def sample_inputs_local_response_norm(opinfo, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
 
@@ -3924,7 +3924,6 @@ def sample_inputs_local_response_norm(opinfo, device, dtype, requires_grad, **kw
 
     for input_shape, size, kwargs in cases:
         yield SampleInput(make_arg(input_shape), args=(size,), kwargs=kwargs)
-
 
 def sample_inputs_hardswish(self, device, dtype, requires_grad, **kwargs):
     N = 5
@@ -4080,10 +4079,16 @@ def sample_inputs_upsample(mode, self, device, dtype, requires_grad, **kwargs):
 
     return sample_inputs
 
+
 def sample_inputs_gelu(self, device, dtype, requires_grad, **kwargs):
     N = 5
-    tensors = [SampleInput(make_tensor((N * 2, N * 2), device=device, dtype=dtype,
-               requires_grad=requires_grad, low=-3, high=3)) for _ in range(1, N)]
+    tensors = []
+    for _ in range(1, N):
+        for approximate in ['none', 'tanh']:
+            tensors.append(SampleInput(
+                make_tensor((N * 2, N * 2), device=device, dtype=dtype,
+                            requires_grad=requires_grad, low=-3, high=3),
+                kwargs=dict(approximate=approximate)))
     return tensors
 
 def sample_inputs_max_min_reduction_with_dim(op_info, device, dtype, requires_grad, **kwargs):
@@ -7965,6 +7970,20 @@ def reference_softplus(input, beta=1, threshold=20):
     output[non_linear] = np.log(1 + np.exp(beta * input[non_linear])) / beta
     return output
 
+def reference_gelu(X, *, approximate='none'):
+    def _gelu_ref(X):
+        return X * stats.norm.cdf(X)
+
+    def _tanh_gelu_ref(X):
+        M_SQRT_2_PI = math.sqrt(2 / math.pi)
+        Z = M_SQRT_2_PI * (X + 0.044715 * np.power(X, 3.0))
+        return 0.5 * X * (1.0 + np.tanh(Z))
+
+    if approximate == 'tanh':
+        return _tanh_gelu_ref(X)
+    else:
+        return _gelu_ref(X)
+
 
 def reference_one_hot(a: np.ndarray, num_classes: int = -1) -> np.ndarray:
     if num_classes == -1:
@@ -8382,6 +8401,7 @@ op_db: List[OpInfo] = [
                # https://github.com/pytorch/pytorch/issues/71784
                DecorateInfo(unittest.skip('Skipped!'), 'TestNNCOpInfo', 'test_nnc_correctness',
                             device_type='cpu', dtypes=(torch.float16,)),
+               DecorateInfo(unittest.skip('Skipped!'), 'TestCudaFuserOpInfo', 'test_nvfuser_correctness', dtypes=(torch.float16,)),
            )),
     OpInfo('addmv',
            dtypes=all_types_and_complex_and(torch.bfloat16),
@@ -8914,6 +8934,8 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.expectedFailure, "TestCommon", "test_noncontiguous_samples"),
                # RuntimeError: "eq_cpu" not implemented for 'ComplexHalf'
                DecorateInfo(unittest.skip("Skipped!"), 'TestNNCOpInfo', 'test_nnc_correctness', dtypes=(torch.half,)),
+               # RuntimeError: "eq_cpu" not implemented for 'ComplexHalf'
+               DecorateInfo(unittest.skip("Skipped!"), 'TestCudaFuserOpInfo', 'test_nvfuser_correctness', dtypes=(torch.half,)),
            )),
     BinaryUfuncInfo('complex',
                     dtypes=floating_types(),
@@ -9715,7 +9737,7 @@ op_db: List[OpInfo] = [
                     sample_inputs_func=sample_inputs_comparison_ops),
     OpInfo('linalg.det',
            op=torch.linalg.det,
-           aliases=('det', ),
+           aliases=('det',),
            dtypes=floating_and_complex_types(),
            backward_dtypes=floating_and_complex_types(),
            aten_name='linalg_det',
@@ -9727,7 +9749,7 @@ op_db: List[OpInfo] = [
     OpInfo('linalg.det',
            op=torch.linalg.det,
            variant_test_name='singular',
-           aliases=('det', ),
+           aliases=('det',),
            dtypes=double_types(),
            backward_dtypes=double_types(),
            aten_name='linalg_det',
@@ -9740,14 +9762,9 @@ op_db: List[OpInfo] = [
                # These tests started breaking after touching the SVD.
                DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', 'test_fn_grad', device_type='cpu',
                             dtypes=(torch.complex128,), active_if=IS_WINDOWS),
-               # For complex dtypes: Will be removed once https://github.com/pytorch/pytorch/issues/62328 is fixed
-               # Probable fix (open PR): https://github.com/pytorch/pytorch/pull/62570
-               # Illegal Memory Access failure: https://github.com/pytorch/pytorch/issues/72203
-               DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', 'test_fn_grad', device_type='cuda'),
-               # Illegal Memory Access failure: https://github.com/pytorch/pytorch/issues/72204
-               DecorateInfo(unittest.skip("Skipped!"), 'TestMathBits', 'test_neg_view', device_type='cuda'),
-               DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_dtypes'),
                DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', 'test_fn_gradgrad'),
+               # dtypes are tested in the suite above, no need to repeat it for singular
+               DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_dtypes'),
            )),
     OpInfo('linalg.cholesky',
            aten_name='linalg_cholesky',
@@ -11269,6 +11286,7 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_composite_compliance'),
                # RuntimeError: "max_pool1d_impl" not implemented for 'BFloat16'
                DecorateInfo(unittest.skip("Skipped!"), 'TestNNCOpInfo', 'test_nnc_correctness', dtypes=(torch.bfloat16,)),
+               DecorateInfo(unittest.skip("Skipped!"), 'TestCudaFuserOpInfo', 'test_nvfuser_correctness', dtypes=(torch.bfloat16,)),
            ),
            sample_inputs_func=sample_inputs_max_pool),
     OpInfo('nn.functional.max_pool2d',
@@ -11774,6 +11792,7 @@ op_db: List[OpInfo] = [
            ),
     OpInfo('nn.functional.gelu',
            aten_name="gelu",
+           ref=reference_gelu if TEST_SCIPY else _NOTHING,
            supports_autograd=True,
            assert_autodiffed=True,
            sample_inputs_func=sample_inputs_gelu,
@@ -13330,6 +13349,7 @@ op_db: List[OpInfo] = [
                # RuntimeError: attribute lookup is not defined on builtin
                DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
                DecorateInfo(unittest.skip("Skipped!"), 'TestNNCOpInfo', 'test_nnc_correctness'),
+               DecorateInfo(unittest.skip("Skipped!"), 'TestCudaFuserOpInfo', 'test_nvfuser_correctness'),
            )),
     OpInfo('bfloat16',
            op=lambda x, *args, **kwargs: x.bfloat16(*args, **kwargs),
@@ -13343,6 +13363,7 @@ op_db: List[OpInfo] = [
                # RuntimeError: attribute lookup is not defined on builtin
                DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
                DecorateInfo(unittest.skip("Skipped!"), 'TestNNCOpInfo', 'test_nnc_correctness'),
+               DecorateInfo(unittest.skip("Skipped!"), 'TestCudaFuserOpInfo', 'test_nvfuser_correctness'),
            )),
     OpInfo('bool',
            op=lambda x, *args, **kwargs: x.bool(*args, **kwargs),
@@ -14037,21 +14058,13 @@ op_db: List[OpInfo] = [
            supports_out=False,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
-           sample_inputs_func=sample_trapezoid,
-           skips=(
-               # Dispatch stub: unsupported device typemeta
-               DecorateInfo(unittest.expectedFailure, 'TestGradients', 'test_fn_fwgrad_bwgrad', device_type='meta'),
-           )),
+           sample_inputs_func=sample_trapezoid),
     OpInfo('trapezoid',
            dtypes=all_types_and_complex_and(torch.float16, torch.bfloat16),
            supports_out=False,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
-           sample_inputs_func=sample_trapezoid,
-           skips=(
-               # Dispatch stub: unsupported device typemeta
-               DecorateInfo(unittest.expectedFailure, 'TestGradients', 'test_fn_fwgrad_bwgrad', device_type='meta'),
-           )),
+           sample_inputs_func=sample_trapezoid),
     OpInfo('cumulative_trapezoid',
            dtypes=all_types_and_complex_and(),
            dtypesIfCUDA=all_types_and_complex_and(torch.bfloat16, torch.float16),
@@ -14479,9 +14492,21 @@ op_db: List[OpInfo] = [
     # These paths have different dtype support. Also JIT supports,
     # most variants but not all of them. So we split the OpInfo entries,
     # for `norm` based on the code-paths and JIT support.
-    OpInfo('norm',
-           sample_inputs_func=sample_inputs_norm,
-           dtypes=floating_and_complex_types_and(torch.float16, torch.bfloat16)),
+    OpInfo(
+        "norm",
+        sample_inputs_func=sample_inputs_norm,
+        dtypes=floating_and_complex_types_and(torch.float16, torch.bfloat16),
+        skips=(
+            # AssertionError: RuntimeError not raised : Expected RuntimeError when doing an unsafe cast from a result
+            # of dtype torch.float32 into an out= with dtype torch.long
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestCommon",
+                "test_out",
+                device_type="meta",
+            ),
+        ),
+    ),
     OpInfo('norm',
            variant_test_name='nuc',
            sample_inputs_func=sample_inputs_norm_nuc,
@@ -14516,19 +14541,40 @@ op_db: List[OpInfo] = [
                # Arguments for call are not valid.
                DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit', dtypes=(torch.complex64, torch.float32,)),  # noqa: B950
            )),
-    OpInfo('norm',
-           variant_test_name='inf',
-           sample_inputs_func=sample_inputs_norm_inf,
-           dtypes=floating_and_complex_types_and(torch.float16, torch.bfloat16),
-           backward_dtypesIfCPU=floating_and_complex_types_and(torch.float16, torch.bfloat16),
-           skips=(
-               # https://github.com/pytorch/pytorch/issues/67517
-               DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_noncontiguous_samples'),
-               # following 2 tests failed intermittenly
-               DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', 'test_fn_grad', device_type='cpu', dtypes=(torch.complex128,)),  # noqa: B950
-               DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', 'test_fn_gradgrad', device_type='cpu', dtypes=(torch.complex128,)),  # noqa: B950
-           )
-           ),
+    OpInfo(
+        "norm",
+        variant_test_name="inf",
+        sample_inputs_func=sample_inputs_norm_inf,
+        dtypes=floating_and_complex_types_and(torch.float16, torch.bfloat16),
+        backward_dtypesIfCPU=floating_and_complex_types_and(torch.float16, torch.bfloat16),
+        skips=(
+            # https://github.com/pytorch/pytorch/issues/67517
+            DecorateInfo(unittest.skip("Skipped!"), "TestCommon", "test_noncontiguous_samples"),
+            # following 2 tests failed intermittenly
+            DecorateInfo(
+                unittest.skip("Skipped!"),
+                "TestGradients",
+                "test_fn_grad",
+                device_type="cpu",
+                dtypes=(torch.complex128,),
+            ),
+            DecorateInfo(
+                unittest.skip("Skipped!"),
+                "TestGradients",
+                "test_fn_gradgrad",
+                device_type="cpu",
+                dtypes=(torch.complex128,),
+            ),
+            # AssertionError: RuntimeError not raised : Expected RuntimeError when doing an unsafe cast from a result
+            # of dtype torch.float32 into an out= with dtype torch.long
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestCommon",
+                "test_out",
+                device_type="meta",
+            ),
+        ),
+    ),
     OpInfo('t',
            sample_inputs_func=sample_inputs_t,
            supports_out=False,
@@ -15503,7 +15549,7 @@ op_db: List[OpInfo] = [
         supports_fwgrad_bwgrad=True,
     ),
     OpInfo(
-        'scatter_reduce',
+        '_scatter_reduce',
         dtypes=all_types_and(torch.float16, torch.bfloat16),
         sample_inputs_func=sample_inputs_scatter_reduce,
         supports_out=False,
