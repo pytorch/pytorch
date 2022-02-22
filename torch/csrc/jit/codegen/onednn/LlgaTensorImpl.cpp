@@ -10,7 +10,8 @@ namespace fuser {
 namespace onednn {
 
 dnnl::graph::engine& Engine::getEngine() {
-  static dnnl::graph::engine cpu_engine(dnnl::graph::engine::kind::cpu, 0);
+  static dnnl::graph::engine cpu_engine(
+      dnnl::graph::engine::kind::cpu, /* device_id = */ 0);
   return cpu_engine;
 }
 

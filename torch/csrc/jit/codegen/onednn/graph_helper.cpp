@@ -308,6 +308,30 @@ void mayAddListConstructIntoConcatPartition(
   }
 }
 
+// Verify that input tensors are compatible with oneDNN Graph.
+// Scalars would be converted to 1-D tensors later anyway,
+// but they shouldn't be complex-double
+void checkInputs(Node* node) {
+  auto allInputs = node->inputs();
+  for(auto input : allInputs) {
+    c10::IValue inputIValue = toIValue(input);
+    if (inputIValue.isTensor()) {
+      const at::Tensor& tensor = inputIValue.toTensor();
+      TORCH_CHECK(tensor.device() == at::kCPU,
+          "oneDNN Graph currently only supports CPU device, but encountered",
+          " a non-CPU tensor");
+      auto dtype = tensor.scalar_type();
+      TORCH_CHECK(((dtype == at::ScalarType::Float) ||
+          (dtype == at::ScalarType::Long)),
+          "oneDNN Graph currently only supports Float dtype",
+          ", but encountered ", toString(dtype));
+    } else if (inputIValue.isScalar()) {
+      TORCH_CHECK(!inputIValue.isComplexDouble(),
+          "complex dtype is unsupported by oneDNN Graph");
+    }
+  }
+}
+
 LlgaGraphHelper::LlgaGraphHelper(
     const std::shared_ptr<Graph>& graph,
     dnnl::graph::partition::policy policy) {
@@ -318,15 +342,10 @@ LlgaGraphHelper::LlgaGraphHelper(
   GRAPH_DEBUG("Constructing LLGA graph");
   // TODO: select nodes in top-level block for now
   for (auto* node : graph->block()->nodes()) {
+    checkInputs(node);
     auto op = createLlgaOp(node);
-    try {
-      g.add_op(op);
-      GRAPH_DEBUG("  Added node ", node->kind().toQualString());
-    } catch (std::exception& e) {
-      GRAPH_DEBUG(
-          "The backend failed to add node ", node->kind().toQualString());
-      g.add_op(makeWildcardOp(node).llgaOp());
-    }
+    g.add_op(op);
+    GRAPH_DEBUG("  Added node ", node->kind().toQualString());
 
     for (Value* input : node->inputs()) {
       tensorIdToValue_.emplace(input->unique(), input);
@@ -480,7 +499,8 @@ size_t LlgaGraphHelper::countSupportedOps(
   // TODO: count nodes in top-level block for now
   size_t cnt = 0;
   for (auto* node : graph->block()->nodes()) {
-    if (isSupported(node)) {
+    auto nodeKind = node->kind();
+    if ((nodeKind != prim::Constant) && (nodeKind != prim::ListConstruct)) {
       cnt++;
     }
   }
