@@ -49,6 +49,6 @@ target_link_libraries(test_codegen_unboxing
 
 target_include_directories(test_codegen_unboxing PRIVATE ${ATen_CPU_INCLUDE})
 
-if(INSTALL_TEST)
+if(INSTALL_LITE_INTERPRETER_TEST)
   install(TARGETS test_codegen_unboxing DESTINATION bin)
 endif()

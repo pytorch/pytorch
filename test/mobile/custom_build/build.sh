@@ -122,6 +122,10 @@ echo "Build lite interpreter with lightweight dispatch."
 USE_LIGHTWEIGHT_DISPATCH=1 \
   STATIC_DISPATCH_BACKEND="CPU" \
   BUILD_LITE_INTERPRETER=1 \
+  BUILD_TEST=0 \
+  INSTALL_TEST=0 \
+  BUILD_MOBILE_TEST=1 \
+  INSTALL_MOBILE_TEST=1 \
   python "${SRC_ROOT}/setup.py" bdist_wheel
   python -mpip install dist/*.whl
 
