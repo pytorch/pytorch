@@ -106,9 +106,10 @@ Features described in this documentation are classified by release status:
    :caption: Libraries
 
    torchaudio <https://pytorch.org/audio/stable>
+   TorchRec <https://pytorch.org/torchrec>
+   TorchServe <https://pytorch.org/serve>
    torchtext <https://pytorch.org/text/stable>
    torchvision <https://pytorch.org/vision/stable>
-   TorchServe <https://pytorch.org/serve>
    PyTorch on XLA Devices <http://pytorch.org/xla/>
 
 .. toctree::
