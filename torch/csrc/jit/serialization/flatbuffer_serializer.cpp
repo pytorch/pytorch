@@ -236,6 +236,7 @@ flatbuffers::Offset<mobile::serialization::Function> FlatbufferSerializer::
   };
 
   flatbuffers::Offset<mobile::serialization::Schema> schema_offset = 0;
+  uint32_t class_index = 0;
   if (func.hasSchema()) {
     const auto& schema = func.getSchema();
     TORCH_CHECK(
@@ -249,13 +250,12 @@ flatbuffers::Offset<mobile::serialization::Function> FlatbufferSerializer::
         "A variable number of return values is not supported in mobile modules.");
     schema_offset =
         CreateFBSchema(fbb, schema.arguments(), schema.returns(), type_printer);
+    auto classtype = schema.arguments()[0].type()->cast<ClassType>();
+    class_index = storeClassTypeAndGetIndex(fbb, classtype);
   }
 
   auto debug_info_offset =
       CreateDebugInfo(fbb, fbb.CreateVector(code.debug_handles_));
-
-  // auto classtype = schema.arguments()[0].type()->cast<ClassType>();
-  // uint32_t class_type = storeClassTypeAndGetIndex(fbb, classtype);
 
   auto function_offset = CreateFunctionDirect(
       fbb,
@@ -267,7 +267,7 @@ flatbuffers::Offset<mobile::serialization::Function> FlatbufferSerializer::
       register_size,
       schema_offset,
       debug_info_offset,
-      0);
+      class_index);
   return function_offset;
 }
 

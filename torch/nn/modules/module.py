@@ -8,6 +8,7 @@ from ..parameter import Parameter
 import torch.utils.hooks as hooks
 
 from torch import Tensor, device, dtype
+import typing
 from typing import Union, Tuple, Any, Callable, Iterator, Set, Optional, overload, TypeVar, Mapping, Dict, List
 from ...utils.hooks import RemovableHandle
 
@@ -236,6 +237,7 @@ class Module:
 
     dump_patches: bool = False
 
+    _version: int = 1
     r"""This allows better BC support for :meth:`load_state_dict`. In
     :meth:`state_dict`, the version number will be saved as in the attribute
     `_metadata` of the returned state dict, and thus pickled. `_metadata` is a
@@ -246,7 +248,6 @@ class Module:
     be bumped, and the module's `_load_from_state_dict` method can compare the
     version number and do appropriate changes if the state dict is from before
     the change."""
-    _version: int = 1
 
     training: bool
     _is_full_backward_hook: Optional[bool]
@@ -403,7 +404,7 @@ class Module:
         For example, let's say you have an ``nn.Module`` ``A`` that
         looks like this:
 
-        .. code-block::text
+        .. code-block:: text
 
             A(
                 (net_b): Module(
@@ -1288,7 +1289,7 @@ class Module:
     # TODO: Remove string escape once Python-3.6 no longer supported
     # See https://github.com/python/mypy/issues/6904#issuecomment-496207426
     @overload
-    def state_dict(self, prefix: str = ..., keep_vars: bool = ...) -> 'OrderedDict[str, Tensor]':
+    def state_dict(self, prefix: str = ..., keep_vars: bool = ...) -> typing.OrderedDict[str, Tensor]:
         ...
 
     def state_dict(self, destination=None, prefix='', keep_vars=False):
@@ -1498,17 +1499,16 @@ class Module:
                                self.__class__.__name__, "\n\t".join(error_msgs)))
         return _IncompatibleKeys(missing_keys, unexpected_keys)
 
-    def _named_members(self, get_members_fn, prefix='', recurse=True, remove_duplicate=True):
+    def _named_members(self, get_members_fn, prefix='', recurse=True):
         r"""Helper method for yielding various names + members of modules."""
         memo = set()
-        modules = self.named_modules(prefix=prefix, remove_duplicate=remove_duplicate) if recurse else [(prefix, self)]
+        modules = self.named_modules(prefix=prefix) if recurse else [(prefix, self)]
         for module_prefix, module in modules:
             members = get_members_fn(module)
             for k, v in members:
                 if v is None or v in memo:
                     continue
-                if remove_duplicate:
-                    memo.add(v)
+                memo.add(v)
                 name = module_prefix + ('.' if module_prefix else '') + k
                 yield name, v
 
@@ -1536,10 +1536,7 @@ class Module:
         for name, param in self.named_parameters(recurse=recurse):
             yield param
 
-    def named_parameters(self,
-                         prefix: str = '',
-                         recurse: bool = True,
-                         remove_duplicate: bool = True) -> Iterator[Tuple[str, Parameter]]:
+    def named_parameters(self, prefix: str = '', recurse: bool = True) -> Iterator[Tuple[str, Parameter]]:
         r"""Returns an iterator over module parameters, yielding both the
         name of the parameter as well as the parameter itself.
 
@@ -1548,9 +1545,6 @@ class Module:
             recurse (bool): if True, then yields parameters of this module
                 and all submodules. Otherwise, yields only parameters that
                 are direct members of this module.
-            remove_duplicate (bool): if True, then removes parameters
-                that are duplicates of each other. For example, if two
-                parameters are tied, it'll only return one.
 
         Yields:
             (string, Parameter): Tuple containing the name and parameter
@@ -1564,7 +1558,7 @@ class Module:
         """
         gen = self._named_members(
             lambda module: module._parameters.items(),
-            prefix=prefix, recurse=recurse, remove_duplicate=remove_duplicate)
+            prefix=prefix, recurse=recurse)
         for elem in gen:
             yield elem
 
@@ -1590,7 +1584,7 @@ class Module:
         for _, buf in self.named_buffers(recurse=recurse):
             yield buf
 
-    def named_buffers(self, prefix: str = '', recurse: bool = True, remove_duplicate: bool = True) -> Iterator[Tuple[str, Tensor]]:
+    def named_buffers(self, prefix: str = '', recurse: bool = True) -> Iterator[Tuple[str, Tensor]]:
         r"""Returns an iterator over module buffers, yielding both the
         name of the buffer as well as the buffer itself.
 
@@ -1599,9 +1593,6 @@ class Module:
             recurse (bool): if True, then yields buffers of this module
                 and all submodules. Otherwise, yields only buffers that
                 are direct members of this module.
-            remove_duplicate (bool): if True, then removes buffers
-                that are duplicates of each other. For example, if two
-                buffers are tied, it'll only return one.
 
         Yields:
             (string, torch.Tensor): Tuple containing the name and buffer
@@ -1615,7 +1606,7 @@ class Module:
         """
         gen = self._named_members(
             lambda module: module._buffers.items(),
-            prefix=prefix, recurse=recurse, remove_duplicate=remove_duplicate)
+            prefix=prefix, recurse=recurse)
         for elem in gen:
             yield elem
 
