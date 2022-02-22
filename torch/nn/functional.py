@@ -5030,7 +5030,7 @@ def _scaled_dot_product_attention(
             have shape :math:`(B, Nt, Ns)`
     """
     B, Nt, E = q.shape
-    q = q / math.sqrt(E)
+    q /= math.sqrt(E)
     # (B, Nt, E) x (B, E, Ns) -> (B, Nt, Ns)
     if attn_mask is not None:
         attn = torch.baddbmm(attn_mask, q, k.transpose(-2, -1))
