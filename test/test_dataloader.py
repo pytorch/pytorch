@@ -1397,12 +1397,15 @@ except RuntimeError as e:
         dl_common_args = dict(num_workers=2, batch_size=2, shuffle=True, pin_memory=(not TEST_CUDA))
         for ctx in supported_multiprocessing_contexts:
             self.assertEqual(reference,
-                             list(self._get_data_loader(datapipe, multiprocessing_context=ctx, **dl_common_args)))
+                             [t.type(torch.int64)
+                              for t in self._get_data_loader(datapipe, multiprocessing_context=ctx, **dl_common_args)])
             if ctx is not None:
                 # test ctx object
                 ctx = mp.get_context(ctx)
                 self.assertEqual(reference,
-                                 list(self._get_data_loader(datapipe, multiprocessing_context=ctx, **dl_common_args)))
+                                 [t.type(torch.int64)
+                                  for t in
+                                  self._get_data_loader(datapipe, multiprocessing_context=ctx, **dl_common_args)])
 
     def test_worker_seed(self):
         num_workers = 6
