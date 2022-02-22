@@ -1,6 +1,6 @@
 #pragma once
-#include <torch/csrc/jit/runtime/graph_executor_impl.h>
 #include <torch/csrc/jit/api/module.h>
+#include <torch/csrc/jit/runtime/graph_executor_impl.h>
 
 namespace torch {
 namespace jit {
@@ -39,6 +39,7 @@ struct TORCH_API ProfilingGraphExecutorImpl : public GraphExecutorImplBase {
       std::shared_ptr<Graph>& graph,
       size_t remaining_depth);
   void replaceFallbackGraphWithFallbackFunction(Block* b);
+  void runFinalOptimizations(std::shared_ptr<Graph>& graph);
   std::unique_ptr<ProfilingRecord> pr_;
   c10::optional<ExecutionPlan>
       profiling_plan_; // plan to run in order to profiling the code
