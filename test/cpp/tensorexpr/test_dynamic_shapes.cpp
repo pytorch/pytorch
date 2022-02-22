@@ -10,6 +10,7 @@
 #include <cmath>
 #include <sstream>
 #include <stdexcept>
+#include <thread>
 
 namespace torch {
 namespace jit {
@@ -622,6 +623,65 @@ TEST(DynamicShapes, GraphFromModel) {
     k.runWithAllocatedOutputs(stack);
 
     ASSERT_TRUE(at::allclose(out, ref));
+  }
+#endif
+}
+
+TEST(DynamicShapes, MultiThreadedExecution) {
+#ifdef TORCH_ENABLE_LLVM
+  std::shared_ptr<Graph> graph = std::make_shared<Graph>();
+  const auto graph_string = R"IR(
+      graph(%x : Float(SS(-2), SS(-3), requires_grad=0, device=cpu),
+            %y : Float(SS(-2), SS(-3), requires_grad=0, device=cpu),
+            %SS_2 : int,
+            %SS_3 : int):
+        %3 : Float(SS(-2), SS(-3), requires_grad=0, device=cpu) = aten::tanh(%x)
+        %4 : Float(SS(-2), SS(-3), requires_grad=0, device=cpu) = aten::erf(%3)
+        %5 : Float(SS(-2), SS(-3), requires_grad=0, device=cpu) = aten::mul(%4, %y)
+        return (%5))IR";
+  torch::jit::parseIR(graph_string, graph.get());
+
+  std::vector<int64_t> symbolic_shape_inputs = {-2, -3};
+
+  std::vector<torch::jit::StrideInput> input_desc = {
+      torch::jit::StrideInput::TENSOR_CONT};
+  std::unordered_map<
+      const torch::jit::Value*,
+      std::vector<torch::jit::StrideInput>>
+      symbolic_strides;
+  symbolic_strides[graph->inputs().at(0)] = input_desc;
+  symbolic_strides[graph->inputs().at(1)] = input_desc;
+  symbolic_strides[graph->outputs().at(0)] = input_desc;
+
+  TensorExprKernel kernel(
+      graph, {}, symbolic_shape_inputs, false, symbolic_strides);
+
+  auto run_kernel = [&](int dim1, int dim2) {
+    auto a =
+        at::rand({dim1, dim2}, at::TensorOptions(at::kCPU).dtype(at::kFloat));
+    auto b =
+        at::rand({dim1, dim2}, at::TensorOptions(at::kCPU).dtype(at::kFloat));
+
+    auto ref = at::mul(at::erf(at::tanh(a)), b);
+
+    std::vector<IValue> stack = fmap<IValue>(std::vector<at::Tensor>({a, b}));
+    stack.emplace_back(dim1);
+    stack.emplace_back(dim2);
+    kernel.run(stack);
+
+    auto o = stack[0].toTensor();
+    ASSERT_TRUE(at::allclose(o, ref));
+  };
+
+  // Run the kernel in parallel to ensure that the run() method calls in
+  // TensorExprKernel are not changing any state.
+  constexpr size_t kNumThreads = 4;
+  std::vector<std::thread> threads;
+  for (size_t id = 0; id < kNumThreads; ++id) {
+    threads.emplace_back(run_kernel, id + 5, id + 20);
+  }
+  for (auto& t : threads) {
+    t.join();
   }
 #endif
 }

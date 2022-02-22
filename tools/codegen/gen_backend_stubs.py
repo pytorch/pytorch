@@ -247,18 +247,9 @@ def gen_dispatcher_registrations(
         'ops_headers': '#include <ATen/Functions.h>',
         'DispatchKey': dispatch_key,
         'dispatch_namespace': dispatch_key.lower(),
-        'dispatch_headers': dest.gen_registration_headers(backend_index, per_operator_headers=False),
+        'dispatch_headers': dest.gen_registration_headers(backend_index, per_operator_headers=False, rocm=False),
         'dispatch_helpers': dest.gen_registration_helpers(backend_index),
-        'dispatch_namespaced_definitions': list(concatMap(
-            dest.RegisterDispatchKey(
-                backend_index,
-                Target.NAMESPACED_DEFINITION,
-                selector,
-                rocm=False,
-                cpp_namespace=cpp_namespace,
-                class_method_name=f'{backend_dispatch_key}NativeFunctions'),
-            grouped_native_functions
-        )),
+        'dispatch_namespaced_definitions': '',
         'dispatch_anonymous_definitions': list(concatMap(
             dest.RegisterDispatchKey(
                 backend_index,
