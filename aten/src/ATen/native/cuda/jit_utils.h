@@ -6,14 +6,8 @@
 #include <vector>
 
 #include <c10/util/irange.h>
+#include <ATen/jit_macros.h>
 #include <ATen/cuda/detail/LazyNVRTC.h>
-
-#ifdef __HIP_PLATFORM_HCC__
-    // pass -- jiterator not supported on HIP platforms
-    #define jiterator_stringify(...) std::string("USE_JITERATOR is undefined");
-#else
-    #define jiterator_stringify(...) std::string(#__VA_ARGS__);
-#endif
 
 namespace at { namespace cuda { namespace jit {
 
