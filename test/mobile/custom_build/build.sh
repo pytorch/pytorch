@@ -119,7 +119,14 @@ source "${JENKINS_DIR}/common.sh"
 
 echo "Build lite interpreter with lightweight dispatch."
 
-USE_LIGHTWEIGHT_DISPATCH=1 \
+USE_DISTRIBUTED=0 \
+  USE_MKLDNN=0 \
+  USE_CUDA=0 \
+  USE_FBGEMM=0 \
+  USE_NNPACK=0 \
+  USE_QNNPACK=0 \
+  USE_XNNPACK=0 \
+  USE_LIGHTWEIGHT_DISPATCH=1 \
   STATIC_DISPATCH_BACKEND="CPU" \
   BUILD_LITE_INTERPRETER=1 \
   BUILD_TEST=0 \
@@ -131,13 +138,13 @@ USE_LIGHTWEIGHT_DISPATCH=1 \
 
 CUSTOM_TEST_ARTIFACT_BUILD_DIR=${CUSTOM_TEST_ARTIFACT_BUILD_DIR:-${SRC_ROOT}/../}
 mkdir -pv "${CUSTOM_TEST_ARTIFACT_BUILD_DIR}"
-SITE_PACKAGES="$(python -c 'from distutils.sysconfig import get_python_lib; print(get_python_lib())')"
 
 LIGHTWEIGHT_DISPATCH_BUILD="${CUSTOM_TEST_ARTIFACT_BUILD_DIR}/lightweight-dispatch-build"
 
 mkdir -p "$LIGHTWEIGHT_DISPATCH_BUILD"
 pushd "$LIGHTWEIGHT_DISPATCH_BUILD"
-cmake "$TEST_SRC_ROOT" -DCMAKE_PREFIX_PATH="$SITE_PACKAGES/torch" -DCMAKE_BUILD_TYPE=Release
+cmake "$TEST_SRC_ROOT" -DCMAKE_PREFIX_PATH="${SITE_PACKAGES}/torch" -DCMAKE_BUILD_TYPE=Release
+cmake --build . --target test_codegen_unboxing
 make VERBOSE=1
 popd
 
