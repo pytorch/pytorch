@@ -913,6 +913,20 @@ def CUDAExtension(name, sources, *args, **kwargs):
     Note that while it's possible to include all supported archs, the more archs get included the
     slower the building process will be, as it will build a separate kernel image for each arch.
 
+    Note that CUDA-11.5 nvcc will hit internal compiler error while parsing torch/extension.h on Windows.
+    To workaround the issue, move python binding logic to pure C++ file.
+
+    Example use:
+        >>> #include <ATen/ATen.h>
+        >>> at::Tensor SigmoidAlphaBlendForwardCuda(....)
+
+    Instead of:
+        >>> #include <torch/extension.h>
+        >>> torch::Tensor SigmoidAlphaBlendForwardCuda(...)
+
+    Currently open issue for nvcc bug: https://github.com/pytorch/pytorch/issues/69460
+    Complete workaround code example: https://github.com/facebookresearch/pytorch3d/commit/cb170ac024a949f1f9614ffe6af1c38d972f7d48
+
     '''
     library_dirs = kwargs.get('library_dirs', [])
     library_dirs += library_paths(cuda=True)
