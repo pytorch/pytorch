@@ -12,7 +12,6 @@ from ..observer import (
 from ..quantization_mappings import (
     get_static_quant_module_class,
     get_dynamic_quant_module_class,
-    get_quantized_operator,
 )
 from ..utils import (
     get_swapped_custom_module_class,
@@ -1344,12 +1343,12 @@ class DefaultNodeQuantizeHandler(QuantizeHandler):
             args = load_arg(quantized=torch.float)(node.args)
             kwargs = load_arg(quantized=torch.float)(node.kwargs)
             # swap float module to reference module (ConvTranspose)
-            float_module = modules[node.target] if node.op == "call_module" else None
+            float_module = modules[str(node.target)] if node.op == "call_module" else None
             if type(float_module) in [torch.nn.ConvTranspose1d, torch.nn.ConvTranspose2d]:
                 ref_module_cls = get_static_quant_module_class(type(float_module), is_reference=True)
 
-                weight_post_process = qconfig.weight()
-                weight_post_process(float_module.weight)
+                weight_post_process = qconfig.weight()  # type: ignore[union-attr]
+                weight_post_process(float_module.weight)  # type: ignore[union-attr]
                 weight_qparams = get_qparam_dict(weight_post_process)
                 ref_module = ref_module_cls.from_float(float_module, weight_qparams)  # type: ignore[attr-defined]
                 parent_name, name = _parent_name(node.target)

@@ -18,7 +18,6 @@ from .utils import create_node_from_old_node_preserve_meta
 from typing import Dict, Tuple, Type, List, Callable, Any, Union
 from torch.fx import Node
 import operator
-import warnings
 
 ARGS_TO_SKIP = {
     torch._ops.ops.quantized.hardswish: ['inplace'],
@@ -158,10 +157,8 @@ def is_other_node(node, modules):
     func_list = [
         torch.cat,
     ]
-    method_list = [
-    ]
-    module_type_list = [
-    ]
+    method_list: List[Any] = []
+    module_type_list: List[Any] = []
     return _is_node(node, modules, func_list, method_list, module_type_list)
 
 def is_special_pattern_node(node, modules):

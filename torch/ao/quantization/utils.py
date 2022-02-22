@@ -6,7 +6,6 @@ import functools
 import torch
 from torch.ao.quantization.quant_type import QuantType, quant_type_to_str
 from typing import Tuple, Any, Union, Callable
-import torch.nn.quantized._reference as nnqr
 
 # Type for fusion patterns, it can be more complicated than the following actually,
 # see pattern.md for docs
@@ -29,20 +28,6 @@ module_type_list = {
     torch.nn.Hardsigmoid,
     torch.nn.Sigmoid,
     torch.nn.Tanh,
-    torch.nn.ConvTranspose1d,
-    torch.nn.ConvTranspose2d,
-    nnqr.ConvTranspose1d,
-    nnqr.ConvTranspose2d,
-    torch.nn.ELU,
-    torch.nn.LeakyReLU,
-    torch.nn.Hardswish,
-    torch.nn.InstanceNorm1d,
-    torch.nn.InstanceNorm2d,
-    torch.nn.InstanceNorm3d,
-    torch.nn.LayerNorm,
-    torch.nn.SiLU,
-    torch.nn.Mish,
-    torch.nn.Dropout,
 }
 func_list = {
     torch.nn.functional.adaptive_avg_pool1d,
