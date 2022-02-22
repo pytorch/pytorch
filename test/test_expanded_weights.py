@@ -263,7 +263,7 @@ class TestExpandedWeightModule(TestCase):
                 expected_grads.append(torch.autograd.grad(res, module.parameters(), torch.ones_like(res)))
                 expected_res += res
             expected_grads = tuple(torch.stack(grad) for grad in zip(*expected_grads))
-        self.assertEqual(actual_res, expected_res)
+        self.assertEqual(actual_res, expected_res, atol=atol)
         if atol is not None:
             assert [torch.allclose(actual, expected, atol=atol) for (actual, expected) in zip(actual_grads, expected_grads)]
         else:

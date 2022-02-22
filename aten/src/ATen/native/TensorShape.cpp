@@ -1109,15 +1109,21 @@ Tensor alias_with_sizes_and_strides(
     const Tensor& self,
     const Vec& sizes,
     const Vec& strides) {
+  //caller should make sure that sizes and strides are valid for self
+  //(storage is sufficient, strides are non-negative, strides and sizes array size is the same)
   Tensor self_;
   if (self.is_quantized()) {
     self_ = at::detail::make_tensor<QTensorImpl>(
       c10::TensorImpl::VIEW, Storage(self.storage()), self.key_set(), self.dtype(), get_qtensorimpl(self)->quantizer());
-    setStrided(self_, sizes, strides, self.storage_offset());
+    auto* self_tmp_ = self_.unsafeGetTensorImpl();
+    self_tmp_->set_storage_offset(self.storage_offset());
+    self_tmp_->set_sizes_and_strides(sizes, strides);
   } else {
     self_ = at::detail::make_tensor<TensorImpl>(
       c10::TensorImpl::VIEW, Storage(self.storage()), self.key_set(), self.dtype());
-    setStrided(self_, sizes, strides, self.storage_offset());
+    auto* self_tmp_ = self_.unsafeGetTensorImpl();
+    self_tmp_->set_storage_offset(self.storage_offset());
+    self_tmp_->set_sizes_and_strides(sizes, strides);
   }
   namedinference::propagate_names(self_, self);
   return self_;
@@ -1345,7 +1351,7 @@ Tensor index_select_sparse(const Tensor& self, int64_t dim, const Tensor& index)
     std::vector<int64_t> zindices;
     std::vector<int64_t> iindices;
     int64_t new_nnz = 0;
-    for (int64_t i = 0; i < new_sizes[dim]; i++) {
+    for (const auto i : c10::irange(new_sizes[dim])) {
       int64_t idx = cpu_index_ptr[i];
       if (idx < -size || idx >= size) {
         TORCH_CHECK_INDEX(false, "index_select(): index contains ", idx, " that is out of range for tensor of size ",
@@ -1354,7 +1360,7 @@ Tensor index_select_sparse(const Tensor& self, int64_t dim, const Tensor& index)
       if (idx < 0) {
         idx += size;
       }
-      for (int64_t j = 0; j < nnz; j++) {
+      for (const auto j : c10::irange(nnz)) {
         int64_t jdx = cpu_dim_indices_ptr[j];
         if (idx == jdx) {
           new_nnz++;
@@ -2073,8 +2079,22 @@ Tensor & squeeze_(Tensor& self, int64_t dim) {
 //
 // This is a hack because in-place operations on tensors treated like views
 // can be much more expensive than the same operations on non-view tensors.
+
+inline Tensor view_impl(const Tensor& self, IntArrayRef size) {
+
+  at::DimVector inferred_size = at::infer_size_dv(size, self.numel());
+  auto stride = at::detail::computeStride(self.sizes(),
+                                          self.strides(),
+                                          inferred_size);
+  TORCH_CHECK(stride.has_value(), "view size is "
+    "not compatible with input tensor's size and stride (at least one dimension"
+    " spans across two contiguous subspaces). Use .reshape(...) instead.");
+  return alias_with_sizes_and_strides(self, inferred_size, *stride);
+
+}
+
 Tensor _unsafe_view(const Tensor& self, IntArrayRef size) {
-  return self.view(size);
+  return view_impl(self, size);
 }
 
 Tensor unsqueeze(const Tensor& self, int64_t dim) {
@@ -2427,16 +2447,7 @@ Tensor adjoint(const Tensor &self) {
 
 Tensor view(const Tensor& self,
             IntArrayRef size) {
-
-  at::DimVector inferred_size = at::infer_size_dv(size, self.numel());
-  auto stride = at::detail::computeStride(self.sizes(),
-                                        self.strides(),
-                                        inferred_size);
-  TORCH_CHECK(stride.has_value(), "view size is "
-    "not compatible with input tensor's size and stride (at least one dimension"
-    " spans across two contiguous subspaces). Use .reshape(...) instead.");
-  auto stride_value = *stride;
-  return alias_with_sizes_and_strides(self, inferred_size, stride_value);
+  return view_impl(self, size);
 }
 
 Tensor alias(const Tensor& self) {

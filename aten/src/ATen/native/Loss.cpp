@@ -497,7 +497,7 @@ Tensor& mse_loss_backward_out(const Tensor& grad_output,
 }
 
 Tensor l1_loss(const Tensor& input, const Tensor& target, int64_t reduction) {
-  const auto float_type = c10::toValueType(input.scalar_type());
+  const auto float_type = c10::toRealValueType(input.scalar_type());
   Tensor result = at::empty({0}, input.options().dtype(float_type));
   return at::l1_loss_out(result, input, target, reduction);
 }

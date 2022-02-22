@@ -35,7 +35,7 @@ class GroupNormPerSampleGrad(torch.autograd.Function):
             for s in input.shape[2:]:
                 HxW *= s
             bw_fn = torch.ops.aten.native_group_norm_backward
-            results.append(bw_fn(grad_output_c, input_c, 
+            results.append(bw_fn(grad_output_c, input_c,
                                  mean, rstd, weight_c, N, C, HxW, num_groups, (True, False, False))[0])
         else:
             results.append(None)
