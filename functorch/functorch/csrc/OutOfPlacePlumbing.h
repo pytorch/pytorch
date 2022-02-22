@@ -1,5 +1,4 @@
 #pragma once
-#include <functorch/csrc/OutOfPlacePlumbing.h>
 #include <functorch/csrc/PlumbingHelper.h>
 #include <functorch/csrc/Constants.h>
 
