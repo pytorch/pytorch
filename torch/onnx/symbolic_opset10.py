@@ -10,7 +10,7 @@ import torch.onnx.utils
 import torch.onnx.symbolic_helper as sym_help
 from torch.onnx.symbolic_helper import parse_args, _unimplemented
 import torch.onnx.symbolic_opset9
-from torch.onnx.symbolic_opset9 import _compatible_float_cast, linear
+from torch.onnx.symbolic_opset9 import op_with_optional_float_cast, linear
 
 from sys import maxsize
 
@@ -129,7 +129,7 @@ def _avg_pool(name, tuple_fn):
             stride = kernel_size
         padding = sym_help._avgpool_helper(tuple_fn, padding, kernel_size, stride, divisor_override, name)
         if count_include_pad:
-            input = _compatible_float_cast(g, "Pad", input, opset_before=11,
+            input = op_with_optional_float_cast(g, "Pad", input, opset_before=11,
                                            pads_i=((0,) * 2 + padding) * 2, mode_s="constant", value_f=0.)
             padding = (0,) * len(padding)
         output = g.op("AveragePool", input,
