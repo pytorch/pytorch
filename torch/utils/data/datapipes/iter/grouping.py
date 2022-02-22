@@ -58,6 +58,13 @@ class BatcherIterDataPipe(IterDataPipe[DataChunk]):
         drop_last: Option to drop the last batch if it's not full
         wrapper_class: wrapper to apply onto each batch (type ``List``) before yielding,
             defaults to ``DataChunk``
+
+    Example:
+        >>> from torchdata.datapipes.iter import IterableWrapper
+        >>> dp = IterableWrapper(range(10))
+        >>> dp = dp.batch(batch_size=3, drop_last=True)
+        >>> list(dp)
+        [[0, 1, 2], [3, 4, 5], [6, 7, 8]]
     """
     datapipe: IterDataPipe
     batch_size: int
@@ -111,6 +118,16 @@ class UnBatcherIterDataPipe(IterDataPipe):
         datapipe: Iterable DataPipe being un-batched
         unbatch_level: Defaults to ``1`` (only flattening the top level). If set to ``2``,
             it will flatten the top two levels, and ``-1`` will flatten the entire DataPipe.
+
+    Example:
+        >>> from torchdata.datapipes.iter import IterableWrapper
+        >>> source_dp = IterableWrapper([[[0, 1], [2]], [[3, 4], [5]], [[6]]])
+        >>> dp1 = source_dp.unbatch()
+        >>> list(dp1)
+        [[0, 1], [2], [3, 4], [5], [6]]
+        >>> dp2 = source_dp.unbatch(unbatch_level=2)
+        >>> list(dp2)
+        [0, 1, 2, 3, 4, 5, 6]
     """
 
     def __init__(self,
@@ -149,16 +166,42 @@ class UnBatcherIterDataPipe(IterDataPipe):
 class GrouperIterDataPipe(IterDataPipe[DataChunk]):
     r"""
     Groups data from input IterDataPipe by keys which are generated from ``group_key_fn``,
-    and yields a ``DataChunk`` with size ranging from ``guaranteed_group_size``
-    to ``group_size`` (functional name: ``groupby``).
+    and yields a ``DataChunk`` with batch size up to ``group_size`` if defined (functional name: ``groupby``).
+
+    The samples are read sequentially from the source ``datapipe``, and a batch of samples belonging to the same group
+    will be yielded as soon as the size of the batch reaches ``group_size``. When the buffer is full,
+    the DataPipe will yield the largest batch with the same key, provided that its size is larger
+    than ``guaranteed_group_size``. If its size is smaller, it will be dropped if ``drop_remaining=True``.
+
+    After iterating through the entirety of source ``datapipe``, everything not dropped due to the buffer capacity
+    will be yielded from the buffer, even if the group sizes are smaller than ``guaranteed_group_size``.
 
     Args:
         datapipe: Iterable datapipe to be grouped
         group_key_fn: Function used to generate group key from the data of the source datapipe
         buffer_size: The size of buffer for ungrouped data
-        group_size: The size of each group
-        guaranteed_group_size: The guaranteed minimum group size
-        drop_remaining: Specifies if the group smaller than `guaranteed_group_size` will be dropped from buffer
+        group_size: The max size of each group, a batch is yielded as soon as it reaches this size
+        guaranteed_group_size: The guaranteed minimum group size to be yielded in case the buffer is full
+        drop_remaining: Specifies if the group smaller than ``guaranteed_group_size`` will be dropped from buffer
+            when the buffer is full
+
+    Example:
+        >>> import os
+        >>> from torchdata.datapipes.iter import IterableWrapper
+        >>> def group_fn(file):
+        ...    return os.path.basename(file).split(".")[0]
+        >>> source_dp = IterableWrapper(["a.png", "b.png", "a.json", "b.json", "a.jpg", "c.json"])
+        >>> dp0 = source_dp.groupby(group_key_fn=group_fn)
+        >>> list(dp0)
+        [['a.png', 'a.json', 'a.jpg'], ['b.png', 'b.json'], ['c.json']]
+        >>> # A group is yielded as soon as its size equals to `group_size`
+        >>> dp1 = source_dp.groupby(group_key_fn=group_fn, group_size=2)
+        >>> list(dp1)
+        [['a.png', 'a.json'], ['b.png', 'b.json'], ['a.jpg'], ['c.json']]
+        >>> # Scenario where `buffer` is full, and group 'a' needs to be yielded since its size > `guaranteed_group_size`
+        >>> dp2 = source_dp.groupby(group_key_fn=group_fn, buffer_size=3, group_size=3, guaranteed_group_size=2)
+        >>> list(dp2)
+        [['a.png', 'a.json'], ['b.png', 'b.json'], ['a.jpg'], ['c.json']]
     """
     def __init__(self,
                  datapipe: IterDataPipe[T_co],
