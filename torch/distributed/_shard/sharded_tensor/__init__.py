@@ -9,7 +9,6 @@ from typing import List
 from .api import (
     _register_sharded_op,
     Shard,
-    ShardMetadata,
     ShardedTensor,
     ShardedTensorMetadata,
     TensorProperties,
