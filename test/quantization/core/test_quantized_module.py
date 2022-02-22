@@ -13,6 +13,7 @@ from torch.ao.quantization import (
     default_float_qparams_observer,
     PerChannelMinMaxObserver,
 )
+from torch.package import PackageExporter, PackageImporter
 from torch.testing._internal.common_quantization import (
     QuantizationTestCase,
     prepare_dynamic,
@@ -107,6 +108,8 @@ class TestStaticQuantizedModule(QuantizationTestCase):
         qlinear = class_map[use_fused](in_features, out_features)
 
         qlinear_copy = copy.deepcopy(qlinear)
+        # set random quantized weight and bias before test torch scriptable
+        qlinear_copy.set_weight_bias(W_q, B)
         self.checkScriptable(qlinear_copy, [[X_q]], check_save_load=True)
         # Run module with default-initialized parameters.
         # This tests that the constructor is correct.
@@ -174,6 +177,22 @@ class TestStaticQuantizedModule(QuantizationTestCase):
         self.assertEqual(qlinear.weight(), loaded.weight())
         self.assertEqual(qlinear.scale, loaded.scale)
         self.assertEqual(qlinear.zero_point, loaded.zero_point)
+
+        # Test torch.package
+        buffer = io.BytesIO()
+        with PackageExporter(buffer) as pe:
+            pe.save_pickle("module", "qlinear.pkl", qlinear)
+        buffer.seek(0)
+
+        importer = PackageImporter(buffer)
+        loaded_from_package = importer.load_pickle("module", "qlinear.pkl")
+        self.assertEqual(qlinear.weight(), loaded_from_package.weight())
+        self.assertEqual(qlinear.scale, loaded_from_package.scale)
+        self.assertEqual(qlinear.zero_point, loaded_from_package.zero_point)
+
+        for name, module in loaded_from_package.named_modules():
+            # noop, just make sure attribute "_modules" is restored correctly during torch.package import
+            assert(name is not None)
 
         # Test copy and deepcopy
         copied_linear = copy.copy(qlinear)
@@ -914,23 +933,27 @@ class TestStaticQuantizedModule(QuantizationTestCase):
         obs = default_float_qparams_observer()
         obs(weights)
         qparams = obs.calculate_qparams()
-        # Quantize the weights to 8bits
-        qweight = torch.quantize_per_channel(weights, qparams[0], qparams[1], axis=0, dtype=torch.quint8)
-        qemb = nnq.Embedding(num_embeddings=num_embeddings, embedding_dim=embedding_dim)
-        qemb.set_weight(qweight)
-        qemb(indices)
 
-        # Ensure the module has the correct weights
-        self.assertEqual(qweight, qemb.weight())
+        dtypes = [torch.quint4x2, torch.quint8]
+        embedding_funcs = [torch.ops.quantized.embedding_4bit, torch.ops.quantized.embedding_byte]
 
-        w_packed = qemb._packed_params._packed_weight
-        module_out = qemb(indices)
+        for dtype, embedding_func in zip(dtypes, embedding_funcs):
+            # Quantize the weights
+            qweight = torch.quantize_per_channel(weights, qparams[0], qparams[1], axis=0, dtype=dtype)
+            qemb = nnq.Embedding(num_embeddings=num_embeddings, embedding_dim=embedding_dim, dtype=dtype)
+            qemb.set_weight(qweight)
+            qemb(indices)
 
-        # Call the qembedding operator directly
-        ref = torch.ops.quantized.embedding_byte(w_packed, indices, pruned_weights=False)
-        self.assertEqual(module_out, ref)
-        self.checkEmbeddingSerialization(qemb, num_embeddings, embedding_dim, indices, None, set_qconfig=False, is_emb_bag=False)
+            # Ensure the module has the correct weights
+            self.assertEqual(qweight, qemb.weight())
+            w_packed = qemb._packed_params._packed_weight
+            module_out = qemb(indices)
 
+            # Call the bit qembedding operator directly
+            ref = embedding_func(w_packed, indices, pruned_weights=False)
+            self.assertEqual(module_out, ref)
+            self.checkEmbeddingSerialization(qemb, num_embeddings, embedding_dim, indices, None, set_qconfig=False,
+                                             is_emb_bag=False, dtype=dtype)
 
     @given(
         num_embeddings=st.integers(10, 50),

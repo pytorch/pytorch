@@ -13,12 +13,12 @@ def define_targets(rules):
             "//c10/util:TypeCast",
             "//c10/util:base",
             "//c10/util:typeid",
-        ] + rules.select({
-            "@//tools/config:cuda_enabled_and_capable": [
+        ] + rules.if_cuda(
+            [
                 "//c10/cuda",
                 "//c10/cuda:Macros",
             ],
-            "//conditions:default": [],
-        }),
+            [],
+        ),
         visibility = ["//visibility:public"],
     )
