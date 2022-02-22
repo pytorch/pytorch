@@ -15472,7 +15472,7 @@ op_db: List[OpInfo] = [
         supports_fwgrad_bwgrad=True,
     ),
     OpInfo(
-        '_scatter_reduce',
+        'scatter_reduce',
         dtypes=all_types_and(torch.float16, torch.bfloat16),
         sample_inputs_func=sample_inputs_scatter_reduce,
         supports_out=False,
