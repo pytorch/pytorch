@@ -52,7 +52,7 @@ graph {
       type: STRING
     }
   }
-  name: "torch_jit"
+  name: "torch-jit-export"
   initializer {
     data_type: 1
     name: "onnx::Pow_11"
