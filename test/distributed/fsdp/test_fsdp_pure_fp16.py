@@ -11,6 +11,7 @@ from torch.optim import SGD
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import (
     FSDPTest,
+    get_full_params,
 )
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -73,9 +74,7 @@ class TestPureFP16(FSDPTest):
             optim.zero_grad()
 
         if wrap_fsdp:
-            from copy import deepcopy
-            with model._summon_full_params():
-                return deepcopy(list(model.parameters()))
+            return get_full_params(model)
 
         return list(model.parameters())
 
