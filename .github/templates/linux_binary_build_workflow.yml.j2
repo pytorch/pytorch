@@ -47,7 +47,7 @@ jobs:
 {%- for config in build_configs %}
   !{{ config["build_name"] }}-build:
     if: ${{ github.repository_owner == 'pytorch' }}
-    runs-on: linux.4xlarge
+    runs-on: linux.2xlarge
     timeout-minutes: !{{ common.timeout_minutes }}
     !{{ upload.binary_env(config) }}
     steps:
@@ -108,7 +108,7 @@ jobs:
 {%- if config["gpu_arch_type"] == "cuda" %}
     runs-on: linux.4xlarge.nvidia.gpu
 {%- else %}
-    runs-on: linux.4xlarge
+    runs-on: linux.2xlarge
 {%- endif %}
     timeout-minutes: !{{ common.timeout_minutes }}
     !{{ upload.binary_env(config) }}
