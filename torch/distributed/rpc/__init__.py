@@ -195,7 +195,8 @@ if is_available():
             store: dist.Store,
             name: str,
             rank: numbers.Integral,
-            world_size: numbers.Integral,
+            # world_size can be None for a dynamic group
+            world_size: (numbers.Integral, type(None)),
             rpc_backend_options: RpcBackendOptions,
         }
         for arg, arg_type in type_mapping.items():
@@ -211,7 +212,7 @@ if is_available():
         store=None,
         name=None,
         rank=-1,
-        world_size=-1,
+        world_size=None,
         rpc_backend_options=None,
     ):
 
