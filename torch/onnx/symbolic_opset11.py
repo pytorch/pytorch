@@ -569,6 +569,10 @@ def squeeze(g, self, dim=None):
     if dim is None:
         return g.op("Squeeze", self)
 
+    # dim as a tensor
+    if not sym_help._is_constant(dim):
+        return sym_help._squeeze_helper(g, self, [dim])
+
     dim = sym_help._get_const(dim, "i", "dim")
 
     input_rank = sym_help._get_tensor_rank(self)
@@ -606,8 +610,10 @@ def squeeze(g, self, dim=None):
     return sym_help._squeeze_helper(g, self, [dim])
 
 
-@parse_args("v", "i")
 def unsqueeze(g, self, dim):
+    if sym_help._is_constant(dim):
+        dim = sym_help._get_const(dim, "i", "dim")
+
     return sym_help._unsqueeze_helper(g, self, [dim])
 
 def mm(g, self, other):
