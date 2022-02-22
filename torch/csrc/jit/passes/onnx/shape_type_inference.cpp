@@ -702,54 +702,59 @@ void SetShapeValueFromListConstructNode(Node* lc_node) {
   }
 }
 
+std::vector<::c10::ShapeSymbol> Broadcast(const std::vector<::c10::ShapeSymbol> &input_shape_value_0,
+                                          const std::vector<::c10::ShapeSymbol> &input_shape_value_1) {
+  size_t rank_0 = input_shape_value_0.size();
+  size_t rank_1 = input_shape_value_1.size();
+  size_t rank_max = std::max(rank_0, rank_1);
+  size_t rank_min = std::min(rank_0, rank_1);
+  std::vector<::c10::ShapeSymbol> final_shape;
+  final_shape.reserve(rank_max);
+  for (auto idx = 0; idx < rank_max; idx++) {
+    final_shape.emplace_back(::c10::ShapeSymbol::newSymbol());
+  }
+  for (auto idx = 0; idx < rank_min; idx++) {
+    const c10::ShapeSymbol& ss_shape_0 =
+        input_shape_value_0[rank_0 - 1 - idx];
+    const c10::ShapeSymbol& ss_shape_1 =
+        input_shape_value_1[rank_1 - 1 - idx];
+    bool is_static_0 = ss_shape_0.is_static();
+    bool is_static_1 = ss_shape_1.is_static();
+    if (is_static_0 && is_static_1) {
+      int64_t static_0_sz = ss_shape_0.static_size();
+      int64_t static_1_sz = ss_shape_1.static_size();
+      final_shape[rank_max - 1 - idx] = ::c10::ShapeSymbol::fromStaticSize(
+          std::max(static_0_sz, static_1_sz));
+    } else if (!is_static_0 && !is_static_1) {
+      if (ss_shape_0.value() == ss_shape_1.value()) {
+        final_shape[rank_max - 1 - idx] = ss_shape_0;
+      }
+    }
+  }
+
+  if (rank_0 < rank_1) {
+    for (size_t idx = rank_min; idx < rank_max; idx++) {
+      size_t shape_idx = rank_max - 1 - idx;
+      final_shape[shape_idx] = input_shape_value_1[shape_idx];
+    }
+  } else {
+    for (size_t idx = rank_min; idx < rank_max; idx++) {
+      size_t shape_idx = rank_max - 1 - idx;
+      final_shape[shape_idx] = input_shape_value_0[shape_idx];
+    }
+  }
+  return final_shape;
+}
+
 void ProcessBroadcastNode(Node* n) {
   TORCH_INTERNAL_ASSERT(n->inputs().size() == 2);
   if (ConstantValueMap::HasShape(n->input(0)->debugName()) &&
       ConstantValueMap::HasShape(n->input(1)->debugName())) {
     auto input_shape_0 = ConstantValueMap::GetShape(n->input(0)->debugName());
-    auto input_shape_value_0 = input_shape_0.value().sizes();
+    auto input_shape_value_0 = input_shape_0.value().sizes().value();
     auto input_shape_1 = ConstantValueMap::GetShape(n->input(1)->debugName());
-    auto input_shape_value_1 = input_shape_1.value().sizes();
-    size_t rank_0 = input_shape_value_0.value().size();
-    size_t rank_1 = input_shape_value_1.value().size();
-    size_t rank_max = std::max(rank_0, rank_1);
-    size_t rank_min = std::min(rank_0, rank_1);
-    std::vector<::c10::ShapeSymbol> final_shape;
-    final_shape.reserve(rank_max);
-    for (auto idx = 0; idx < rank_max; idx++) {
-      final_shape.emplace_back(::c10::ShapeSymbol::newSymbol());
-    }
-    for (auto idx = 0; idx < rank_min; idx++) {
-      const c10::ShapeSymbol& ss_shape_0 =
-          input_shape_value_0.value()[rank_0 - 1 - idx];
-      const c10::ShapeSymbol& ss_shape_1 =
-          input_shape_value_1.value()[rank_1 - 1 - idx];
-      bool is_static_0 = ss_shape_0.is_static();
-      bool is_static_1 = ss_shape_1.is_static();
-      if (is_static_0 && is_static_1) {
-        int64_t static_0_sz = ss_shape_0.static_size();
-        int64_t static_1_sz = ss_shape_1.static_size();
-        final_shape[rank_max - 1 - idx] = ::c10::ShapeSymbol::fromStaticSize(
-            std::max(static_0_sz, static_1_sz));
-      } else if (!is_static_0 && !is_static_1) {
-        if (ss_shape_0.value() == ss_shape_1.value()) {
-          final_shape[rank_max - 1 - idx] = ss_shape_0;
-        }
-      }
-    }
-
-    if (rank_0 < rank_1) {
-      for (auto idx = rank_min; idx < rank_max; idx++) {
-        auto shape_idx = rank_max - 1 - idx;
-        final_shape[shape_idx] = input_shape_value_1.value()[shape_idx];
-      }
-    } else {
-      for (auto idx = rank_min; idx < rank_max; idx++) {
-        auto shape_idx = rank_max - 1 - idx;
-        final_shape[shape_idx] = input_shape_value_0.value()[shape_idx];
-      }
-    }
-
+    auto input_shape_value_1 = input_shape_1.value().sizes().value();
+    auto final_shape = Broadcast(input_shape_value_0, input_shape_value_1);
     UpdateShape(n->output(0), c10::SymbolicShape(final_shape));
   }
 }
@@ -857,6 +862,8 @@ void ProcessMatMulNode(Node* n) {
     auto input_shape_value_1 = input_shape_1.sizes().value();
     size_t rank_0 = input_shape_value_0.size();
     size_t rank_1 = input_shape_value_1.size();
+    // Handle inputs of rank 1 just like numpy.matmul:
+    // https://numpy.org/doc/stable/reference/generated/numpy.matmul.html
     auto is_rank_0_1 = false;
     if (rank_0 == 1) {
       input_shape_value_0.insert(
@@ -870,25 +877,20 @@ void ProcessMatMulNode(Node* n) {
       rank_1 = 2;
       is_rank_1_1 = true;
     }
-    size_t rank = std::max(rank_0, rank_1);
-    std::vector<::c10::ShapeSymbol> final_shape;
-    final_shape.reserve(rank);
-    if (rank_0 >= rank_1) {
-      for (auto idx = 0; idx < rank_0 - 2; idx++) {
-        final_shape.emplace_back(input_shape_value_0[idx]);
-      }
-    } else {
-      for (auto idx = 0; idx < rank_1 - 2; idx++) {
-        final_shape.emplace_back(input_shape_value_1[idx]);
-      }
+    // Per https://pytorch.org/docs/stable/generated/torch.matmul.html
+    // the broadcasting logic only applies to the batch dimensions, and not the matrix dimensions
+    // so we remove the matrix dimensions which are the last 2 dimensions before broadcasting
+    auto final_shape = Broadcast(
+      std::vector<::c10::ShapeSymbol>(input_shape_value_0.begin(), input_shape_value_0.end() - 2),
+      std::vector<::c10::ShapeSymbol>(input_shape_value_1.begin(), input_shape_value_1.end() - 2)
+    );
+    // add the last 2 dimensions back, unless they do not exist in the first place and inserted by this function
+    // Then apply [n,k]X[k,m]=[n,m], where n=input_shape_value_0[rank_0 - 2], m=input_shape_value_1[rank_1 - 1]
+    if (!is_rank_0_1) {
+      final_shape.emplace_back(input_shape_value_0[rank_0 - 2]);
     }
-    final_shape.emplace_back(input_shape_value_0[rank_0 - 2]);
-    final_shape.emplace_back(input_shape_value_1[rank_1 - 1]);
-    if (is_rank_0_1) {
-      final_shape.erase(final_shape.begin());
-    }
-    if (is_rank_1_1) {
-      final_shape.pop_back();
+    if (!is_rank_1_1) {
+      final_shape.emplace_back(input_shape_value_1[rank_1 - 1]);
     }
     UpdateShape(n->output(0), c10::SymbolicShape(final_shape));
   }
