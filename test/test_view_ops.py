@@ -1462,14 +1462,14 @@ class TestOldViewOps(TestCase):
                 actual = torch.broadcast_shapes(s0, s1)
                 self.assertEqual(expected, actual)
 
-        non_iterable_inputs = [1, 4]
-        res1 = torch.broadcast_shapes(*non_iterable_inputs)
-        res2 = torch.broadcast_tensors(*map(torch.empty, non_iterable_inputs))[0].shape
+        integral_inputs = [1, 4]
+        res1 = torch.broadcast_shapes(*integral_inputs)
+        res2 = torch.broadcast_tensors(*map(torch.empty, integral_inputs))[0].shape
         self.assertEqual(res1, res2)
 
-        non_iterable_inputs_with_neg_vals = [1, 1, -12]
+        integral_inputs_with_neg_vals = [1, 1, -12]
         with self.assertRaisesRegex(RuntimeError, "Trying to create tensor with negative dimension"):
-            torch.broadcast_shapes(*non_iterable_inputs_with_neg_vals)
+            torch.broadcast_shapes(*integral_inputs_with_neg_vals)
 
         negative_inputs = [(-1,), (1, -12), (4, -11), (-4, 1), (1, 1, -2)]
         for s0 in negative_inputs:

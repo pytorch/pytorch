@@ -102,21 +102,37 @@ def broadcast_shapes(*shapes):
     """
     # This wrapper exists to support variadic args.
     # TODO Movie this to C++ once the jit has better support for torch.Size.
-    with torch.no_grad():
-        scalar = torch.zeros((), device="cpu")
+    for shape in shapes:
+        if isinstance(shape, int) and shape < 0:
+            raise RuntimeError(rf"Trying to create tensor with negative dimension {shape}: [{shape}]")
+        if isinstance(shape, tuple):
+            for ele in shape:
+                if ele < 0:
+                    raise RuntimeError(rf"Trying to create tensor with negative dimension {ele}: [{ele}]")
 
-        for shape in [*shapes]:
-            if isinstance(shape, int) and shape < 0:
-                raise RuntimeError(rf"Trying to create tensor with negative dimension {shape}: [{shape}]")
-            if isinstance(shape, tuple):
-                for ele in shape:
-                    if ele < 0:
-                        raise RuntimeError(rf"Trying to create tensor with negative dimension {ele}: [{ele}]")
+    try:
+        result = [1] * max(map(len, shapes))
+    except Exception:
+        result = max(shapes)
+        for shape in shapes:
+            if shape == 1 or shape == result:
+                continue
+            else:
+                raise RuntimeError("The size of shape a ({}) must match the "
+                                   "size of shape b ({}) at non-singleton dimension"
+                                   .format(shape, result))
+        return torch.Size([result])
 
-        tensors = [scalar.expand(shape) for shape in shapes]
-        tensors = broadcast_tensors(*tensors)
-        return tensors[0].shape
-
+    for shape in shapes:
+        for i in range(-1, -1 - len(shape), -1):
+            if shape[i] == 1 or shape[i] == result[i]:
+                continue
+            if result[i] != 1:
+                raise RuntimeError("The size of shape a ({}) must match the "
+                                   "size of shape b ({}) at non-singleton dimension {}"
+                                   .format(result[i], shape[i], i))
+            result[i] = shape[i]
+    return torch.Size(result)
 
 def split(tensor, split_size_or_sections, dim=0):
     r"""Splits the tensor into chunks. Each chunk is a view of the original tensor.
