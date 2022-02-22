@@ -399,7 +399,7 @@ class TORCH_API Reducer {
     // bucket contents into the participating variables after reduction has
     // completed.
     std::vector<at::Tensor> variables;
-    
+
     // Per-variable offset/length into the flattened `contents` tensor and
     // the corresponding `GradBucket` instance for communication hooks
     std::vector<size_t> offsets;
