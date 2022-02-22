@@ -1,21 +1,24 @@
 package org.pytorch;
 
 import android.content.Context;
+
 import androidx.test.InstrumentationRegistry;
 import androidx.test.runner.AndroidJUnit4;
+
+import org.junit.runner.RunWith;
+
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
-import org.junit.runner.RunWith;
 
 @RunWith(AndroidJUnit4.class)
-public class PytorchInstrumentedTests extends PytorchTestBase {
+public class PytorchLiteInstrumentedTests extends PytorchTestBase {
 
   @Override
   protected Module loadModel(String path) throws IOException {
-    return Module.load(assetFilePath(path));
+    return LiteModuleLoader.load(assetFilePath(path));
   }
 
   private String assetFilePath(String assetName) throws IOException {
