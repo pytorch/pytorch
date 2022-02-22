@@ -187,13 +187,15 @@ def floor_divide(g, self, other):
 def floordiv(g, self, other):
     return floor_divide(g, self, other)
 
-# Division where both inputs are cast to floating types
-# If both inputs are floating, performs div as usual
-# If only one input is a floating type, the other input is cast to its type
-# If neither input is a floating type, both inputs are cast to the default scalar type
-
 
 def true_divide(g, self, other):
+    """
+    Division where both inputs are cast to floating types
+    If both inputs are floating, performs div as usual
+    If only one input is a floating type, the other input is cast to its type
+    If neither input is a floating type, both inputs are cast to the default scalar type
+    """
+
     # Case 1: either values are floating
     # Performs div as usual.
     # Implicit casting will be handled in scalar type analysis pass.
@@ -2734,26 +2736,6 @@ def log2(g, self):
     return g.op("Div", log(g, self), g.op("Constant", value_t=torch.tensor([_ln2])))
 
 
-def prim_shape(g, self):
-    return g.op("Shape", self)
-
-
-def prim_max(g, self, other):
-    return op_with_optional_float_cast(g, "Max", self, other_operands=[other], opset_before=12)
-
-
-def prim_min(g, self, other=None):
-    if not other:
-        if (sym_help._is_packed_list(self)):
-            self = stack(g, self, g.op("Constant", value_t=torch.tensor([0])))
-        return min(g, self)
-    return min(g, self, other)
-
-
-def prim_data(g, self):
-    return self
-
-
 def is_floating_point(g, self):
     if sym_help._is_fp(self):
         return g.op("Constant", value_t=torch.BoolTensor([1]))
@@ -2771,33 +2753,6 @@ def __is_(g, self, other):
 @wrap_logical_op_with_negation
 def __isnot_(g, self, other):
     return __is_(g, self, other)
-
-# exists to refine the type of the Value
-# if x is an optional Tensor, unchecked_cast will cast
-# x to Tensor, so the rest of the graph knows that x is a Tensor
-# this doesn't do anything in runtime and is a noop in ONNX
-
-
-def prim_unchecked_cast(g, self):
-    return self
-
-
-def prim_dtype(g, self):
-    dtype = sym_help._try_get_scalar_type(self)
-    if dtype is None:
-        dtype = "Float"
-    dtype = sym_help.scalar_type_to_onnx.index(sym_help.cast_pytorch_to_onnx[dtype])
-    return g.op("Constant", value_t=torch.tensor(dtype))
-
-
-# tolist is currently supported only for 1D input tensors.
-# dim_val and elem_ty_val represent dimension and type annotations
-# that need to match dimension and type of the input tensor.
-def prim_tolist(g, input, dim_val, elem_ty_val):
-    dim = sym_help._maybe_get_const(dim_val, "i")
-    if dim > 1:
-        return _unimplemented("prim_tolist", "dim_val > 1")
-    return input
 
 
 def one_hot(g, self, num_classes):
