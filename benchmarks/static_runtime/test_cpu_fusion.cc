@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 #include <torch/csrc/jit/runtime/static/impl.h>
 #include <torch/torch.h>
+#include <thread>
 
 #include "test_utils.h"
 
@@ -79,5 +80,45 @@ TEST(CpuFusion, FallbackGraph) {
     auto expect = at::tanh(at::relu(input1 + input2));
     auto actual = runtime({input1, input2}, {});
     EXPECT_TRUE(at::allclose(expect, actual.toTensor()));
+  }
+}
+
+TEST(CpuFusion, ParallelRuntimes) {
+  const auto simple_script = R"JIT(
+    def forward(self, a, b):
+        return (a + b).relu().tanh()
+  )JIT";
+
+  Module m("module");
+  m.define(simple_script);
+
+  StaticModuleOptions opts; // start with the defaults.
+  opts.enable_tensorexpr_fusion = true;
+
+  auto sample_input1 = at::randn({2, 3});
+  auto sample_input2 = at::ones({2, 3});
+  auto smodule = StaticModule(
+      m, /* is_frozen */ false, opts, {sample_input1, sample_input2});
+
+  auto exec_runtime = [&](const std::vector<std::pair<int, int>> inputs) {
+    StaticRuntime runtime(smodule);
+    for (auto inp : inputs) {
+      auto a = at::randn({inp.first, inp.second});
+      auto b = at::randn({inp.first, inp.second});
+      auto expect = at::tanh(at::relu(a + b));
+      auto actual = runtime({a, b}, {});
+      EXPECT_TRUE(at::allclose(expect, actual.toTensor()));
+    }
+  };
+
+  constexpr size_t kNumThreads = 4;
+  std::vector<std::thread> threads;
+  for (size_t id = 0; id < kNumThreads; ++id) {
+    std::vector<std::pair<int, int>> inputs = {
+        {id + 10, id + 11}, {id + 20, id + 21}, {id + 30, id + 31}};
+    threads.emplace_back(exec_runtime, inputs);
+  }
+  for (auto& t : threads) {
+    t.join();
   }
 }
