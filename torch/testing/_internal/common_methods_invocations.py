@@ -619,6 +619,8 @@ class OpInfo(object):
                  test_conjugated_samples=True,
                  test_neg_view=True,
                  assert_jit_shape_analysis=False,  # assert that jit shape analysis fully propagates shape
+                 # the following metadata relates to ExpandedWeights support and is checked in test_expanded_weights.py
+                 supports_expanded_weight=False,
                  ):
 
         dtypes_args = (dtypes, dtypesIfCPU, dtypesIfCUDA, dtypesIfROCM)
@@ -778,6 +780,7 @@ class OpInfo(object):
 
         self.test_conjugated_samples = test_conjugated_samples
         self.test_neg_view = test_neg_view
+        self.supports_expanded_weight = supports_expanded_weight
 
     def __call__(self, *args, **kwargs):
         """Calls the function variant of the operator."""
@@ -11330,6 +11333,7 @@ op_db: List[OpInfo] = [
            supports_fwgrad_bwgrad=True,
            # See https://github.com/pytorch/pytorch/issues/66357
            check_batched_forward_grad=False,
+           supports_expanded_weight=True,
            supports_out=False),
     OpInfo('nn.functional.bilinear',
            aten_name='bilinear',
