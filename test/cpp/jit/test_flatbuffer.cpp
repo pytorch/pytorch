@@ -161,8 +161,8 @@ TEST(FlatbufferTest, ExtraFiles) {
   loaded_extra_files["metadata.json"] = "";
   auto* flatbuffer_module =
       mobile::serialization::GetMutableModule(buff.data());
-  mobile::Module bc2 =
-      initialize_mobile_module(flatbuffer_module, loaded_extra_files);
+
+  parseExtraFiles(flatbuffer_module, loaded_extra_files);
 
   ASSERT_EQ(loaded_extra_files["metadata.json"], "abc");
   ASSERT_EQ(loaded_extra_files["mobile_info.json"], "{\"key\": 23}");
