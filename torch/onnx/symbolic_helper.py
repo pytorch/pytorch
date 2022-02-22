@@ -173,7 +173,12 @@ def parse_args(*arg_descriptors):
         @wraps(fn)
         def wrapper(g, *args, **kwargs):
             # some args may be optional, so the length may be smaller
-            assert len(arg_descriptors) >= len(args)
+            # if fn.__name__ == 'cat':
+            #     import pdb; pdb.set_trace()
+            assert len(arg_descriptors) >= len(args),\
+                f"A mismatch between the number of arguments ({len(args)}) and"\
+                f" their descriptors ({len(arg_descriptors)}) was found at function '{fn.__name__}'"
+
             try:
                 sig = inspect.signature(fn)
                 arg_names = list(sig.parameters.keys())[1:]
@@ -184,9 +189,12 @@ def parse_args(*arg_descriptors):
             args = [_parse_arg(arg, arg_desc, arg_name, fn_name)  # type: ignore[assignment]
                     for arg, arg_desc, arg_name in zip(args, arg_descriptors, arg_names)]
             # only support _outputs in kwargs
-            assert len(kwargs) <= 1
+            assert len(kwargs) <= 1,\
+                f"Function {fn.__name__}'s '**kwargs' can contain a single key/value entry."
+
             if len(kwargs) == 1:
-                assert "_outputs" in kwargs
+                assert "_outputs" in kwargs,\
+                    f"Function {fn.__name__}'s '**kwargs' can only contain '_outputs' key at '**kwargs'."
             return fn(g, *args, **kwargs)
 
         return wrapper
