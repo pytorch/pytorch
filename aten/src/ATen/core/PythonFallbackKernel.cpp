@@ -2,27 +2,15 @@
 #include <ATen/core/dispatch/Dispatcher.h>
 #include <ATen/core/PythonModeTLS.h>
 
-#include <stack>
-
 namespace {
 
 // TLS saving the state of the include/exclude sets on entry to the dispatcher
 // This is set in the pythonTLSSnapshot fallback and used by the Python fallback.
-thread_local std::stack<c10::impl::LocalDispatchKeySet> tls_on_entry;
-
-struct C10_API StashTLSStateGuard {
- public:
-  StashTLSStateGuard(const c10::impl::LocalDispatchKeySet& key_set) {
-    tls_on_entry.push(key_set);
-  }
-  ~StashTLSStateGuard() {
-    tls_on_entry.pop();
-  }
-};
+thread_local c10::optional<c10::impl::LocalDispatchKeySet> tls_on_entry;
 
 void pythonFallback(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
-  TORCH_INTERNAL_ASSERT(tls_on_entry.size() > 0);
-  c10::impl::ForceDispatchKeyGuard guard(tls_on_entry.top());
+  TORCH_INTERNAL_ASSERT(tls_on_entry.has_value());
+  c10::impl::ForceDispatchKeyGuard guard(tls_on_entry.value());
 
   // If Python Mode is active, use its PyInterpreter for dispatch
   const auto& maybe_python_mode_state = at::impl::PythonModeTLS::get_state();
@@ -66,9 +54,11 @@ void pythonTLSSnapshotFallback(const c10::OperatorHandle& op, c10::DispatchKeySe
   // A CompositeImplicitAutograd function may have been called just before this and so the tls here were never cleared
   // This is also why we don't need an RAII to ensure the tls is reset when exceptions happen
 
-  StashTLSStateGuard guard(c10::impl::tls_local_dispatch_key_set());
+  tls_on_entry = c10::impl::tls_local_dispatch_key_set();
 
   op.redispatchBoxed(dispatch_keys & c10::DispatchKeySet(c10::DispatchKeySet::FULL_AFTER, c10::DispatchKey::PythonTLSSnapshot), stack);
+
+  tls_on_entry = c10::nullopt;
 }
 
 

@@ -85,9 +85,6 @@ class TORCH_API ScriptModuleSerializer {
   void convertNamedType(const c10::NamedTypePtr& class_type);
   void convertTypes(const at::NamedTypePtr& root_type);
   void writeExtraFiles(const Module& module, const ExtraFilesMap& extra_files);
-  void writeMobileMetadata(
-      const Module& module,
-      const ExtraFilesMap& extra_files);
   void writeByteCode(const Module& module, bool save_mobile_debug_info);
   void writeArchive(
       const IValue& value,
