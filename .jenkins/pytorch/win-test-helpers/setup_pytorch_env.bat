@@ -34,7 +34,7 @@ popd
 
 :: The version is fixed to avoid flakiness: https://github.com/pytorch/pytorch/issues/31136
 =======
-pip install "ninja==1.10.0.post1" future "hypothesis==4.53.2" "expecttest==0.1.3" "librosa>=0.6.2" psutil pillow unittest-xml-reporting pytest
+pip install "ninja==1.10.0.post1" future "hypothesis==4.53.2" "expecttest==0.1.3" "librosa>=0.6.2,<0.9.0" psutil pillow unittest-xml-reporting pytest
 if errorlevel 1 exit /b
 if not errorlevel 0 exit /b
 
