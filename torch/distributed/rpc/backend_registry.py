@@ -392,47 +392,60 @@ def _tensorpipe_init_backend_handler(store, name, rank, world_size, rpc_backend_
     # initialization for dynamic rpc (ranks can join and leave)
     else:
         # TODO: retrieve token from store to signal start of rank join/leave critical section
+        token = f"TokenOnWorker{rank}"
 
-        if torch.cuda.is_available():
-            # It's necessary to initialize PyTorch CUDA states here (e.g.,
-            # CUDACachingAllocator). If this is missing, we could hit errors like
-            # "allocator not initialized", because other processes might send
-            # CUDA-related RPC request to this process before user code in this
-            # process initializes its PyTorch CUDA states.
-            torch.cuda.init()
-            device_count = torch.cuda.device_count()
-        else:
-            device_count = 0
+        while True:
+            returned = store.compare_set("init_rpc_token", "", token).decode()
+            if returned == token:
+                print(f"{rank} got token")
+                if torch.cuda.is_available():
+                    # It's necessary to initialize PyTorch CUDA states here (e.g.,
+                    # CUDACachingAllocator). If this is missing, we could hit errors like
+                    # "allocator not initialized", because other processes might send
+                    # CUDA-related RPC request to this process before user code in this
+                    # process initializes its PyTorch CUDA states.
+                    torch.cuda.init()
+                    device_count = torch.cuda.device_count()
+                else:
+                    device_count = 0
 
-        # Validate devices and device_maps locally for current rank
-        _tensorpipe_check_local_device_maps(name, rpc_backend_options)
+                # Validate devices and device_maps locally for current rank
+                _tensorpipe_check_local_device_maps(name, rpc_backend_options)
 
-        # Construct TPAgent with empty reverse_device_map and devices
-        # these two properties will be updated after construction
-        agent = TensorPipeAgent(
-            store,
-            name,
-            rank,
-            world_size,
-            rpc_backend_options,
-            {},
-            [],
-        )
+                # Construct TPAgent with empty reverse_device_map and devices
+                # these two properties will be updated after construction
+                print(f"{rank}: begin construct TPAgent")
+                agent = TensorPipeAgent(
+                    store,
+                    name,
+                    rank,
+                    world_size,
+                    rpc_backend_options,
+                    {},
+                    [],
+                )
+                print(f"{rank}: finish construct TPAgent")
 
-        try:
-            # TODO: Notify all workers in group this rank has joined and set devices and reverse_device_map
-            # This is a synchronous operation that completes once all existing ranks are updated
-            # _tensorpipe_check_remote_device_maps(agent, rpc_backend_options)
-            pass
-        except Exception:
-            api.shutdown()
-            raise
+                try:
+                    # TODO: Notify all workers in group this rank has joined and set devices and reverse_device_map
+                    # This is a synchronous operation that completes once all existing ranks are updated
+                    # _tensorpipe_check_remote_device_maps(agent, rpc_backend_options)
+                    pass
+                except Exception:
+                    api.shutdown()
+                    raise
+
+                # finish initialization
+                break
+            else:
+                from datetime import timedelta
+                store.wait([returned], timedelta(seconds=15))
 
         # TODO: update from store to signal end of rank join/leave critical section
+        store.set("init_rpc_token", "")
+        store.set(token, "1")
 
         return agent
-
-        
 
 register_backend(
     "TENSORPIPE",

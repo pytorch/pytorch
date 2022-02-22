@@ -63,7 +63,7 @@ def rendezvous(url: str, rank: int = -1, world_size: Optional[int] = None, **kwa
 
     # Append node-specific arguments.
     result = urlparse(url)
-    if rank != -1 or world_size != -1:
+    if rank != -1 or world_size:
         query_dict: Dict[str, Union[int, str]] = dict(
             pair.split("=") for pair in filter(None, result.query.split("&"))
         )
@@ -204,7 +204,7 @@ def _env_rendezvous_handler(
     def _env_error(var):
         return _error("environment variable %s expected, but not set" % var)
 
-    def _get_env(env_var: str) -> str:
+    def _get_env(env_var: str) -> Optional[str]:
         env_val = os.environ.get(env_var, None)
         return env_val
 
