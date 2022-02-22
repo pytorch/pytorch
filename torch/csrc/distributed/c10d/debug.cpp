@@ -58,22 +58,12 @@ DebugLevel g_debug_level = DebugLevel::Off;
 
 } // namespace
 
-void setDebugLevel(at::optional<DebugLevel> opt_level, bool force) {
-  static bool is_set = false;
+void setDebugLevel(DebugLevel level) {
+  g_debug_level = level;
+}
 
-  if (is_set && !force) {
-    C10D_WARNING("The debug level is already set.");
-
-    return;
-  }
-
-  if (opt_level) {
-    g_debug_level = opt_level.value();
-  } else {
-    g_debug_level = detail::loadDebugLevelFromEnvironment();
-  }
-
-  is_set = true;
+void setDebugLevelFromEnvironment() {
+  g_debug_level = detail::loadDebugLevelFromEnvironment();
 }
 
 DebugLevel debug_level() noexcept {
