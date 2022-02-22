@@ -28,7 +28,7 @@ inline Tensor normalize(
 } // namespace detail
 #endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
-/// See https://pytorch.org/docs/master/nn.functional.html#torch.nn.functional.normalize
+/// See https://pytorch.org/docs/main/nn.functional.html#torch.nn.functional.normalize
 /// about the exact behavior of this functional.
 ///
 /// See the documentation for `torch::nn::functional::NormalizeFuncOptions` class to learn what
@@ -59,7 +59,7 @@ inline Tensor layer_norm(const Tensor& input,
 } // namespace detail
 #endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
-/// See https://pytorch.org/docs/master/nn.functional.html#torch.nn.functional.layer_norm
+/// See https://pytorch.org/docs/main/nn.functional.html#torch.nn.functional.layer_norm
 /// about the exact behavior of this functional.
 ///
 /// See the documentation for `torch::nn::functional::LayerNormFuncOptions` class to learn what
@@ -118,7 +118,7 @@ inline Tensor local_response_norm(
 } // namespace detail
 #endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
-/// See https://pytorch.org/docs/master/nn.functional.html#torch.nn.functional.local_response_norm
+/// See https://pytorch.org/docs/main/nn.functional.html#torch.nn.functional.local_response_norm
 /// about the exact behavior of this functional.
 ///
 /// See the documentation for `torch::nn::functional::LocalResponseNormFuncOptions` class to learn what
@@ -151,7 +151,7 @@ inline Tensor group_norm(
 } // namespace detail
 #endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
-/// See https://pytorch.org/docs/master/nn.functional.html#torch.nn.functional.group_norm
+/// See https://pytorch.org/docs/main/nn.functional.html#torch.nn.functional.group_norm
 /// about the exact behavior of this functional.
 ///
 /// See the documentation for `torch::nn::functional::GroupNormFuncOptions` class to learn what

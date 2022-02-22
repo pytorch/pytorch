@@ -358,7 +358,7 @@ NumericsFilter = collections.namedtuple('NumericsFilter', ['condition', 'safe_va
 #   the operator's output (when given the input, args, and kwargs) to the
 #   portion of the output to gradcheck. For example, consider an operator
 #   like torch.linalg.slogdet
-#   (https://pytorch.org/docs/master/generated/torch.linalg.slogdet.html).
+#   (https://pytorch.org/docs/main/generated/torch.linalg.slogdet.html).
 #   This operator returns a tuple of two tensors, but the first tensor
 #   cannot be backwarded through. Its "output_process_fn_grad" filters
 #   this output tuple to just the second argument, which we can call backward
@@ -8240,7 +8240,7 @@ op_db: List[OpInfo] = [
                                     dtypes=[torch.int8], active_if=TEST_WITH_ASAN),
                        # TODO: Fix test_out_arg_all_dtypes as torch.empty_like(expected_output) where expected_output=op(input)
                        # We can break the logic of the loop over all possible types but it is OK.
-                       # https://github.com/pytorch/pytorch/blob/master/test/test_unary_ufuncs.py#L440-L449
+                       # https://github.com/pytorch/pytorch/blob/main/test/test_unary_ufuncs.py#L440-L449
                        DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_out_arg_all_dtypes',
                                     dtypes=[torch.cfloat, torch.cdouble]),
                        # The complex formula might be wrong

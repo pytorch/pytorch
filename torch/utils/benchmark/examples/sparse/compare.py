@@ -83,7 +83,7 @@ def main():
         benchmark_utils.Timer(
             stmt=stmt,
             globals={
-                "torch": torch if branch == "master" else FauxTorch(torch, overhead_ns),
+                "torch": torch if branch == "main" else FauxTorch(torch, overhead_ns),
                 "x": gen_sparse(size=size, density=density, dtype=torch.float32),
                 "y": torch.rand(size, dtype=torch.float32),
                 "zero": torch.zeros(()),
@@ -94,7 +94,7 @@ def main():
             env=branch,
             num_threads=num_threads,
         )
-        for branch, overhead_ns in [("master", None), ("my_branch", 1), ("severe_regression", 10)]
+        for branch, overhead_ns in [("main", None), ("my_branch", 1), ("severe_regression", 10)]
         for label, sub_label, stmt in tasks
         for density in [0.05, 0.1]
         for size in [(8, 8), (32, 32), (64, 64), (128, 128)]

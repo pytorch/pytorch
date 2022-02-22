@@ -410,7 +410,7 @@ class Tensor(torch._C._TensorBase):
 
         raise RuntimeError(trim(r"""reinforce() was removed.
             Use torch.distributions instead.
-            See https://pytorch.org/docs/master/distributions.html
+            See https://pytorch.org/docs/main/distributions.html
 
             Instead of:
 

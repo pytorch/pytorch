@@ -28,7 +28,7 @@ inline Tensor avg_pool1d(const Tensor& input,
 } // namespace detail
 #endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
-/// See https://pytorch.org/docs/master/nn.functional.html#torch.nn.functional.avg_pool1d
+/// See https://pytorch.org/docs/main/nn.functional.html#torch.nn.functional.avg_pool1d
 /// about the exact behavior of this functional.
 ///
 /// See the documentation for `torch::nn::functional::AvgPool1dFuncOptions` class to learn what
@@ -70,7 +70,7 @@ inline Tensor avg_pool2d(const Tensor& input,
 } // namespace detail
 #endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
-/// See https://pytorch.org/docs/master/nn.functional.html#torch.nn.functional.avg_pool2d
+/// See https://pytorch.org/docs/main/nn.functional.html#torch.nn.functional.avg_pool2d
 /// about the exact behavior of this functional.
 ///
 /// See the documentation for `torch::nn::functional::AvgPool2dFuncOptions` class to learn what
@@ -113,7 +113,7 @@ inline Tensor avg_pool3d(const Tensor& input,
 } // namespace detail
 #endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
-/// See https://pytorch.org/docs/master/nn.functional.html#torch.nn.functional.avg_pool3d
+/// See https://pytorch.org/docs/main/nn.functional.html#torch.nn.functional.avg_pool3d
 /// about the exact behavior of this functional.
 ///
 /// See the documentation for `torch::nn::functional::AvgPool3dFuncOptions` class to learn what
@@ -156,7 +156,7 @@ inline Tensor max_pool1d(const Tensor& input,
 } // namespace detail
 #endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
-/// See https://pytorch.org/docs/master/nn.functional.html#torch.nn.functional.max_pool1d
+/// See https://pytorch.org/docs/main/nn.functional.html#torch.nn.functional.max_pool1d
 /// about the exact behavior of this functional.
 ///
 /// See the documentation for `torch::nn::functional::MaxPool1dFuncOptions` class to learn what
@@ -234,7 +234,7 @@ inline Tensor max_pool2d(const Tensor& input,
 } // namespace detail
 #endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
-/// See https://pytorch.org/docs/master/nn.functional.html#torch.nn.functional.max_pool2d
+/// See https://pytorch.org/docs/main/nn.functional.html#torch.nn.functional.max_pool2d
 /// about the exact behavior of this functional.
 ///
 /// See the documentation for `torch::nn::functional::MaxPool2dFuncOptions` class to learn what
@@ -312,7 +312,7 @@ inline Tensor max_pool3d(const Tensor& input,
 } // namespace detail
 #endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
-/// See https://pytorch.org/docs/master/nn.functional.html#torch.nn.functional.max_pool3d
+/// See https://pytorch.org/docs/main/nn.functional.html#torch.nn.functional.max_pool3d
 /// about the exact behavior of this functional.
 ///
 /// See the documentation for `torch::nn::functional::MaxPool3dFuncOptions` class to learn what
@@ -402,7 +402,7 @@ inline Tensor adaptive_max_pool1d(const Tensor& input,
 } // namespace detail
 #endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
-/// See https://pytorch.org/docs/master/nn.functional.html#torch.nn.functional.adaptive_max_pool1d
+/// See https://pytorch.org/docs/main/nn.functional.html#torch.nn.functional.adaptive_max_pool1d
 /// about the exact behavior of this functional.
 ///
 /// See the documentation for `torch::nn::functional::AdaptiveMaxPool1dFuncOptions` class to learn what
@@ -450,7 +450,7 @@ inline Tensor adaptive_max_pool2d(const Tensor& input,
 } // namespace detail
 #endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
-/// See https://pytorch.org/docs/master/nn.functional.html#torch.nn.functional.adaptive_max_pool2d
+/// See https://pytorch.org/docs/main/nn.functional.html#torch.nn.functional.adaptive_max_pool2d
 /// about the exact behavior of this functional.
 ///
 /// See the documentation for `torch::nn::functional::AdaptiveMaxPool2dFuncOptions` class to learn what
@@ -498,7 +498,7 @@ inline Tensor adaptive_max_pool3d(const Tensor& input,
 } // namespace detail
 #endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
-/// See https://pytorch.org/docs/master/nn.functional.html#torch.nn.functional.adaptive_max_pool3d
+/// See https://pytorch.org/docs/main/nn.functional.html#torch.nn.functional.adaptive_max_pool3d
 /// about the exact behavior of this functional.
 ///
 /// See the documentation for `torch::nn::functional::AdaptiveMaxPool3dFuncOptions` class to learn what
@@ -525,7 +525,7 @@ inline Tensor adaptive_avg_pool1d(const Tensor& input,
 } // namespace detail
 #endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
-/// See https://pytorch.org/docs/master/nn.functional.html#torch.nn.functional.adaptive_avg_pool1d
+/// See https://pytorch.org/docs/main/nn.functional.html#torch.nn.functional.adaptive_avg_pool1d
 /// about the exact behavior of this functional.
 ///
 /// See the documentation for `torch::nn::functional::AdaptiveAvgPool1dFuncOptions` class to learn what
@@ -551,7 +551,7 @@ inline Tensor adaptive_avg_pool2d(const Tensor& input,
 } // namespace detail
 #endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
-/// See https://pytorch.org/docs/master/nn.functional.html#torch.nn.functional.adaptive_avg_pool2d
+/// See https://pytorch.org/docs/main/nn.functional.html#torch.nn.functional.adaptive_avg_pool2d
 /// about the exact behavior of this functional.
 ///
 /// See the documentation for `torch::nn::functional::AdaptiveAvgPool2dFuncOptions` class to learn what
@@ -577,7 +577,7 @@ inline Tensor adaptive_avg_pool3d(const Tensor& input,
 } // namespace detail
 #endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
-/// See https://pytorch.org/docs/master/nn.functional.html#torch.nn.functional.adaptive_avg_pool3d
+/// See https://pytorch.org/docs/main/nn.functional.html#torch.nn.functional.adaptive_avg_pool3d
 /// about the exact behavior of this functional.
 ///
 /// See the documentation for `torch::nn::functional::AdaptiveAvgPool3dFuncOptions` class to learn what
@@ -648,7 +648,7 @@ inline Tensor max_unpool1d(
 } // namespace detail
 #endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
-/// See https://pytorch.org/docs/master/nn.functional.html#torch.nn.functional.max_unpool1d
+/// See https://pytorch.org/docs/main/nn.functional.html#torch.nn.functional.max_unpool1d
 /// about the exact behavior of this functional.
 ///
 /// See the documentation for `torch::nn::functional::MaxUnpool1dFuncOptions` class to learn what
@@ -688,7 +688,7 @@ inline Tensor max_unpool2d(
 } // namespace detail
 #endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
-/// See https://pytorch.org/docs/master/nn.functional.html#torch.nn.functional.max_unpool2d
+/// See https://pytorch.org/docs/main/nn.functional.html#torch.nn.functional.max_unpool2d
 /// about the exact behavior of this functional.
 ///
 /// See the documentation for `torch::nn::functional::MaxUnpool2dFuncOptions` class to learn what
@@ -729,7 +729,7 @@ inline Tensor max_unpool3d(
 } // namespace detail
 #endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
-/// See https://pytorch.org/docs/master/nn.functional.html#torch.nn.functional.max_unpool3d
+/// See https://pytorch.org/docs/main/nn.functional.html#torch.nn.functional.max_unpool3d
 /// about the exact behavior of this functional.
 ///
 /// See the documentation for `torch::nn::functional::MaxUnpool3dFuncOptions` class to learn what
@@ -934,7 +934,7 @@ inline Tensor lp_pool1d(
 } // namespace detail
 #endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
-/// See https://pytorch.org/docs/master/nn.functional.html#torch.nn.functional.lp_pool1d
+/// See https://pytorch.org/docs/main/nn.functional.html#torch.nn.functional.lp_pool1d
 /// about the exact behavior of this functional.
 ///
 /// See the documentation for `torch::nn::functional::LPPool1dFuncOptions` class to learn what
@@ -978,7 +978,7 @@ inline Tensor lp_pool2d(
 } // namespace detail
 #endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
-/// See https://pytorch.org/docs/master/nn.functional.html#torch.nn.functional.lp_pool2d
+/// See https://pytorch.org/docs/main/nn.functional.html#torch.nn.functional.lp_pool2d
 /// about the exact behavior of this functional.
 ///
 /// See the documentation for `torch::nn::functional::LPPool2dFuncOptions` class to learn what

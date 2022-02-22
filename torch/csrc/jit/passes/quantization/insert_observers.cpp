@@ -80,7 +80,7 @@ class ModuleCloneHelper {
    *  where we have two module instances sharing the same ClassType
    *  but configured with different QConfig
    *  code is copied and modified from
-   * https://github.com/pytorch/pytorch/blob/master/torch/csrc/jit/api/module.cpp
+   * https://github.com/pytorch/pytorch/blob/main/torch/csrc/jit/api/module.cpp
    * inplace option means if the copy of the Tensor is deepcopy or not
    * if inplace is true, the cloned module will share the tensors with
    * original model instead of deepcopy them

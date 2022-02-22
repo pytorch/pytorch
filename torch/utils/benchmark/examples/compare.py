@@ -56,7 +56,7 @@ def main():
         benchmark_utils.Timer(
             stmt=stmt,
             globals={
-                "torch": torch if branch == "master" else FauxTorch(torch, overhead_ns),
+                "torch": torch if branch == "main" else FauxTorch(torch, overhead_ns),
                 "x": torch.ones((size, 4)),
                 "y": torch.ones((1, 4)),
                 "zero": torch.zeros(()),
@@ -67,7 +67,7 @@ def main():
             env=branch,
             num_threads=num_threads,
         )
-        for branch, overhead_ns in [("master", None), ("my_branch", 1), ("severe_regression", 5)]
+        for branch, overhead_ns in [("main", None), ("my_branch", 1), ("severe_regression", 5)]
         for label, sub_label, stmt in tasks
         for size in [1, 10, 100, 1000, 10000, 50000]
         for num_threads in [1, 4]

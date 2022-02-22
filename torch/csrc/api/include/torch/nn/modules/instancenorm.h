@@ -51,7 +51,7 @@ class InstanceNormImpl : public torch::nn::NormImplBase<D, Derived, InstanceNorm
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ InstanceNorm1d ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 /// Applies the InstanceNorm1d function.
-/// See https://pytorch.org/docs/master/nn.html#torch.nn.InstanceNorm1d to learn
+/// See https://pytorch.org/docs/main/nn.html#torch.nn.InstanceNorm1d to learn
 /// about the exact behavior of this module.
 ///
 /// See the documentation for `torch::nn::InstanceNorm1dOptions` class to learn what
@@ -80,7 +80,7 @@ TORCH_MODULE(InstanceNorm1d);
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ InstanceNorm2d ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 /// Applies the InstanceNorm2d function.
-/// See https://pytorch.org/docs/master/nn.html#torch.nn.InstanceNorm2d to learn
+/// See https://pytorch.org/docs/main/nn.html#torch.nn.InstanceNorm2d to learn
 /// about the exact behavior of this module.
 ///
 /// See the documentation for `torch::nn::InstanceNorm2dOptions` class to learn what
@@ -109,7 +109,7 @@ TORCH_MODULE(InstanceNorm2d);
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ InstanceNorm3d ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 /// Applies the InstanceNorm3d function.
-/// See https://pytorch.org/docs/master/nn.html#torch.nn.InstanceNorm3d to learn
+/// See https://pytorch.org/docs/main/nn.html#torch.nn.InstanceNorm3d to learn
 /// about the exact behavior of this module.
 ///
 /// See the documentation for `torch::nn::InstanceNorm3dOptions` class to learn what

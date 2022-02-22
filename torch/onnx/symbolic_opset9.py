@@ -1420,7 +1420,7 @@ def instance_norm(g, input, weight, bias, running_mean, running_var, use_input_s
         input_size = sym_help._get_tensor_sizes(input)
         # If input shape is [N, C, H, W], reshape to [1, N * C, H, W] and call batch_norm.
         # For more information instance_norm():
-        # https://github.com/pytorch/pytorch/blob/master/aten/src/ATen/native/Normalization.cpp#L542
+        # https://github.com/pytorch/pytorch/blob/main/aten/src/ATen/native/Normalization.cpp#L542
         input_size_reshape = input_size.copy()
         n = input_size[0]
         if n is None:
@@ -1704,7 +1704,7 @@ def conv_tbc(g, input, weight, bias, pad):
         return g.op("ATen", input, weight, bias, operator_s="conv_tbc", pad_i=pad)
     else:
         # input must have 3 dimensions, see:
-        # https://github.com/pytorch/pytorch/blob/master/aten/src/ATen/native/ConvolutionTBC.cpp#L8-L10
+        # https://github.com/pytorch/pytorch/blob/main/aten/src/ATen/native/ConvolutionTBC.cpp#L8-L10
         # input = (time, batch, in_channels)
         # weight = (kernel_width, in_channels, out_channels)
         # bias = (out_channels,)

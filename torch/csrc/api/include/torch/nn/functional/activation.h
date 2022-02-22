@@ -25,7 +25,7 @@ inline Tensor elu(Tensor input, double alpha, bool inplace) {
 } // namespace detail
 #endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
-/// See https://pytorch.org/docs/master/nn.functional.html#torch.nn.functional.elu
+/// See https://pytorch.org/docs/main/nn.functional.html#torch.nn.functional.elu
 /// about the exact behavior of this functional.
 ///
 /// See the documentation for `torch::nn::functional::ELUFuncOptions` class to learn what
@@ -54,7 +54,7 @@ inline Tensor selu(Tensor input, bool inplace) {
 } // namespace detail
 #endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
-/// See https://pytorch.org/docs/master/nn.functional.html#torch.nn.functional.selu
+/// See https://pytorch.org/docs/main/nn.functional.html#torch.nn.functional.selu
 /// about the exact behavior of this functional.
 ///
 /// See the documentation for `torch::nn::functional::SELUFuncOptions` class to learn what
@@ -80,7 +80,7 @@ inline Tensor hardshrink(const Tensor& input,
 } // namespace detail
 #endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
-/// See https://pytorch.org/docs/master/nn.functional.html#torch.nn.functional.hardshrink
+/// See https://pytorch.org/docs/main/nn.functional.html#torch.nn.functional.hardshrink
 /// about the exact behavior of this functional.
 ///
 /// See the documentation for `torch::nn::functional::HardshrinkFuncOptions` class to learn what
@@ -113,7 +113,7 @@ inline Tensor hardtanh(Tensor input,
 } // namespace detail
 #endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
-/// See https://pytorch.org/docs/master/nn.functional.html#torch.nn.functional.hardtanh
+/// See https://pytorch.org/docs/main/nn.functional.html#torch.nn.functional.hardtanh
 /// about the exact behavior of this functional.
 ///
 /// See the documentation for `torch::nn::functional::HardtanhFuncOptions` class to learn what
@@ -144,7 +144,7 @@ inline Tensor leaky_relu(Tensor input,
 } // namespace detail
 #endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
-/// See https://pytorch.org/docs/master/nn.functional.html#torch.nn.functional.leaky_relu
+/// See https://pytorch.org/docs/main/nn.functional.html#torch.nn.functional.leaky_relu
 /// about the exact behavior of this functional.
 ///
 /// See the documentation for `torch::nn::functional::LeakyReLUFuncOptions` class to learn what
@@ -191,7 +191,7 @@ inline Tensor gumbel_softmax(const Tensor& logits,
 } // namespace detail
 #endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
-/// See https://pytorch.org/docs/master/nn.functional.html#torch.nn.functional.gumbel_softmax
+/// See https://pytorch.org/docs/main/nn.functional.html#torch.nn.functional.gumbel_softmax
 /// about the exact behavior of this functional.
 ///
 /// See the documentation for `torch::nn::functional::GumbelSoftmaxFuncOptions` class to learn what
@@ -225,7 +225,7 @@ inline Tensor softmax(const Tensor& input, int64_t dim,
 } // namespace detail
 #endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
-/// See https://pytorch.org/docs/master/nn.functional.html#torch.nn.functional.softmax
+/// See https://pytorch.org/docs/main/nn.functional.html#torch.nn.functional.softmax
 /// about the exact behavior of this functional.
 ///
 /// See the documentation for `torch::nn::functional::SoftmaxFuncOptions` class to learn what
@@ -259,7 +259,7 @@ inline Tensor softmin(const Tensor& input, int64_t dim,
 } // namespace detail
 #endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
-/// See https://pytorch.org/docs/master/nn.functional.html#torch.nn.functional.softmin
+/// See https://pytorch.org/docs/main/nn.functional.html#torch.nn.functional.softmin
 /// about the exact behavior of this functional.
 ///
 /// See the documentation for `torch::nn::functional::SoftminFuncOptions` class to learn what
@@ -293,7 +293,7 @@ inline Tensor log_softmax(const Tensor& input, int64_t dim,
 } // namespace detail
 #endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
-/// See https://pytorch.org/docs/master/nn.functional.html#torch.nn.functional.log_softmax
+/// See https://pytorch.org/docs/main/nn.functional.html#torch.nn.functional.log_softmax
 /// about the exact behavior of this functional.
 ///
 /// See the documentation for `torch::nn::functional::LogSoftmaxFuncOptions` class to learn what
@@ -319,7 +319,7 @@ inline Tensor glu(const Tensor& input, int64_t dim) {
 } // namespace detail
 #endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
-/// See https://pytorch.org/docs/master/nn.functional.html#torch.nn.functional.glu
+/// See https://pytorch.org/docs/main/nn.functional.html#torch.nn.functional.glu
 /// about the exact behavior of this functional.
 ///
 /// See the documentation for `torch::nn::functional::GLUFuncOptions` class to learn what
@@ -380,7 +380,7 @@ inline Tensor relu(Tensor input, bool inplace) {
 } // namespace detail
 #endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
-/// See https://pytorch.org/docs/master/nn.functional.html#torch.nn.functional.relu
+/// See https://pytorch.org/docs/main/nn.functional.html#torch.nn.functional.relu
 /// about the exact behavior of this functional.
 ///
 /// See the documentation for `torch::nn::functional::ReLUFuncOptions` class to learn what
@@ -409,7 +409,7 @@ inline Tensor relu6(Tensor input, bool inplace) {
 } // namespace detail
 #endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
-/// See https://pytorch.org/docs/master/nn.functional.html#torch.nn.functional.relu6
+/// See https://pytorch.org/docs/main/nn.functional.html#torch.nn.functional.relu6
 /// about the exact behavior of this functional.
 ///
 /// See the documentation for `torch::nn::functional::ReLU6FuncOptions` class to learn what
@@ -442,7 +442,7 @@ inline Tensor rrelu(Tensor input,
 } // namespace detail
 #endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
-/// See https://pytorch.org/docs/master/nn.functional.html#torch.nn.functional.rrelu
+/// See https://pytorch.org/docs/main/nn.functional.html#torch.nn.functional.rrelu
 /// about the exact behavior of this functional.
 ///
 /// See the documentation for `torch::nn::functional::RReLUFuncOptions` class to learn what
@@ -473,7 +473,7 @@ inline Tensor celu(Tensor input,
 } // namespace detail
 #endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
-/// See https://pytorch.org/docs/master/nn.functional.html#torch.nn.functional.celu
+/// See https://pytorch.org/docs/main/nn.functional.html#torch.nn.functional.celu
 /// about the exact behavior of this functional.
 ///
 /// See the documentation for `torch::nn::functional::CELUFuncOptions` class to learn what
@@ -500,7 +500,7 @@ inline Tensor softplus(const Tensor& input,
 } // namespace detail
 #endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
-/// See https://pytorch.org/docs/master/nn.functional.html#torch.nn.functional.softplus
+/// See https://pytorch.org/docs/main/nn.functional.html#torch.nn.functional.softplus
 /// about the exact behavior of this functional.
 ///
 /// See the documentation for `torch::nn::functional::SoftplusFuncOptions` class to learn what
@@ -528,7 +528,7 @@ inline Tensor softshrink(const Tensor& input,
 } // namespace detail
 #endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
-/// See https://pytorch.org/docs/master/nn.functional.html#torch.nn.functional.softshrink
+/// See https://pytorch.org/docs/main/nn.functional.html#torch.nn.functional.softshrink
 /// about the exact behavior of this functional.
 ///
 /// See the documentation for `torch::nn::functional::SoftshrinkFuncOptions` class to learn what
@@ -573,7 +573,7 @@ inline Tensor threshold(Tensor input,
 } // namespace detail
 #endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
-/// See https://pytorch.org/docs/master/nn.functional.html#torch.nn.functional.threshold
+/// See https://pytorch.org/docs/main/nn.functional.html#torch.nn.functional.threshold
 /// about the exact behavior of this functional.
 ///
 /// See the documentation for `torch::nn::functional::ThresholdFuncOptions` class to learn what
