@@ -1,6 +1,8 @@
 #include <torch/csrc/jit/python/python_ir.h>
 
+#include <aten/src/ATen/core/jit_type.h>
 #include <pybind11/pybind11.h>
+#include <torch/csrc/Device.h>
 #include <torch/csrc/Dtype.h>
 #include <torch/csrc/api/include/torch/python.h>
 #include <torch/csrc/jit/ir/alias_analysis.h>
@@ -430,6 +432,7 @@ void initPythonIRBindings(PyObject* module_) {
           "insertConstant",
           [](Graph& g, const IValue& ival) { return g.insertConstant(ival); })
       .GS(lint)
+      .def("block", [](Graph& g) { return g.block(); })
       .GS(insertNode);
 #undef GS
 
@@ -538,6 +541,7 @@ void initPythonIRBindings(PyObject* module_) {
       .def("inputsSize", [](Node& n) { return n.inputs().size(); })
       .def("outputsSize", [](Node& n) { return n.outputs().size(); })
       .NS(kind)
+      .def("prev", [](Node& n) { return n.prev(); })
       .def("owningBlock", [](Node& n) { return n.owningBlock(); })
       .def("inputsAt", [](Node& n, size_t i) { return n.inputs().at(i); })
       .def(
@@ -640,6 +644,7 @@ void initPythonIRBindings(PyObject* module_) {
       .CREATE_ACCESSOR(Ints, is)
       .CREATE_ACCESSOR(Graph, g)
       .CREATE_ACCESSOR(Graphs, gs)
+      .CREATE_ACCESSOR(IValue, ival)
 #undef CREATE_ACCESSOR
       // Tensor (t_) -- manually written to unwrap the variable into a tensor.
       .def(
@@ -815,6 +820,26 @@ void initPythonIRBindings(PyObject* module_) {
           [](Type& t) {
             auto scalar_type = t.expectRef<TensorType>().scalarType();
             return (scalar_type) ? toString(*scalar_type) : nullptr;
+          })
+      .def(
+          "device",
+          [](Type& t) -> py::object {
+            auto device = t.expectRef<TensorType>().device();
+            if (!device) {
+              return py::none();
+            }
+            PyObject* thp_device = THPDevice_New(device.value());
+            return py::reinterpret_borrow<py::object>(thp_device);
+            // return toPyObject(device.value());
+          })
+      .def(
+          "with_device",
+          [](Type& t, py::object device) -> py::object {
+            at::Device c_device = python::detail::py_object_to_device(device);
+            if (auto ptt = t.expect<TensorType>()) {
+              return py::cast(ptt->withDevice(c_device));
+            }
+            return py::none();
           })
       .def(
           "dtype",

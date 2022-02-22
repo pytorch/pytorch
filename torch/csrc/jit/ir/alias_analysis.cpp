@@ -1,5 +1,6 @@
 #include <torch/csrc/jit/ir/alias_analysis.h>
 
+#include <c10/util/flat_hash_map.h>
 #include <c10/util/irange.h>
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/utils/subgraph_utils.h>
@@ -26,7 +27,7 @@ c10::MaybeOwned<TypePtr> toSingleType(const AliasTypeSet& mut_types) {
 class MutableTypePtrHelper {
  public:
   explicit MutableTypePtrHelper(
-      std::unordered_map<TypePtr, AliasTypeSet>* mutable_type_cache)
+      ska::flat_hash_map<TypePtr, AliasTypeSet>* mutable_type_cache)
       : mutable_type_cache_(mutable_type_cache) {}
 
   // Map any mutable type to a type such that all other types which the
@@ -140,12 +141,12 @@ class MutableTypePtrHelper {
         return c10::nullopt;
     }
   }
-  std::unordered_map<TypePtr, AliasTypeSet>* mutable_type_cache_;
+  ska::flat_hash_map<TypePtr, AliasTypeSet>* mutable_type_cache_;
 };
 
 bool isMutableTypeImpl(
     const TypePtr& type,
-    std::unordered_map<TypePtr, AliasTypeSet>* mutable_type_cache) {
+    ska::flat_hash_map<TypePtr, AliasTypeSet>* mutable_type_cache) {
   // Check common cases to avoid recursively constructing type in
   // `mapTypeToAliasTypeSetPtrImpl`
   auto kind = type->kind();
@@ -1332,6 +1333,16 @@ bool AliasDb::mayContainAlias(
   return a_elems.size() == 0
       ? false
       : memoryDAG_->mayContainAlias(a_elems, getElements(b));
+}
+
+bool AliasDb::mayContainAlias(Value* a, const at::ArrayRef<Value*> b) const {
+  if (!isMutableTypeInternal(a)) {
+    return false;
+  }
+  auto b_elems = getElements(b);
+  return b_elems.size() == 0
+      ? false
+      : memoryDAG_->mayContainAlias(elementMap_.at(a), b_elems);
 }
 
 // Make each value in the `from` list point to its partner in the `to` list

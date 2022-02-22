@@ -64,8 +64,6 @@ def get_tensorrt_backend_config_dict():
             weighted_op_qint8_dtype_config,
         ],
         "fuser_method": reverse2(nni.LinearReLU),
-        "root_module": torch.nn.Linear,
-        "reference_quantized_module_for_root": torch.nn.quantized._reference.Linear,
     }
     linear_relu_mf_config = {
         "pattern": (torch.nn.functional.relu, torch.nn.Linear),
@@ -74,8 +72,6 @@ def get_tensorrt_backend_config_dict():
             weighted_op_qint8_dtype_config,
         ],
         "fuser_method": reverse2(nni.LinearReLU),
-        "root_module": torch.nn.Linear,
-        "reference_quantized_module_for_root": torch.nn.quantized._reference.Linear,
     }
 
     linear_relu_fused_config = {
@@ -161,8 +157,6 @@ def get_tensorrt_backend_config_dict():
             weighted_op_qint8_dtype_config,
         ],
         "fuser_method": reverse2(nni.ConvReLU2d),
-        "root_module": torch.nn.Conv2d,
-        "reference_quantized_module_for_root": torch.nn.quantized._reference.Conv2d,
     }
     conv2d_relu_mm_config = {
         "pattern": (torch.nn.ReLU, torch.nn.Conv2d),
@@ -171,8 +165,6 @@ def get_tensorrt_backend_config_dict():
             weighted_op_qint8_dtype_config,
         ],
         "fuser_method": reverse2(nni.ConvReLU2d),
-        "root_module": torch.nn.Conv2d,
-        "reference_quantized_module_for_root": torch.nn.quantized._reference.Conv2d,
     }
     addmm_config = {
         "pattern": torch.addmm,

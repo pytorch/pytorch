@@ -23,7 +23,7 @@ PrePackConvWeights::PrePackConvWeights(
   if (convolution->transpose &&
       ukernel_type != pytorch_qnnp_ukernel_type_conv) {
     pytorch_qnnp_log_error("Wrong micro-kernel for deconvolution");
-    assert("QNNPACK Runtime Error.");
+    assert(false && "QNNPACK Runtime Error.");
   }
 
   const size_t kernel_size = kernel_height * kernel_width * kernel_depth;
@@ -38,7 +38,7 @@ PrePackConvWeights::PrePackConvWeights(
         pytorch_qnnp_log_error(
             "failed to allocate %zu bytes for packed weights",
             packed_weights_size);
-        assert("QNNPACK Runtime Error.");
+        assert(false && "QNNPACK Runtime Error.");
       }
 
       switch (kernel_size) {
@@ -174,7 +174,7 @@ PrePackConvWeights::PrePackConvWeights(
         pytorch_qnnp_log_error(
             "failed to allocate %zu bytes for packed weights",
             packed_group_weights_size * groups);
-        assert("QNNPACK Runtime Error.");
+        assert(false && "QNNPACK Runtime Error.");
       }
       /* The XZP ukernel needs the padding to be 0 */
       memset(packed_weights_, 0, packed_group_weights_size * groups);
@@ -211,7 +211,7 @@ PrePackConvWeights::PrePackConvWeights(
         pytorch_qnnp_log_error(
             "failed to allocate %zu bytes for packed weights",
             packed_group_weights_size * groups);
-        assert("QNNPACK Runtime Error.");
+        assert(false && "QNNPACK Runtime Error.");
       }
       // We likely won't needs this once packing functions are appropriately
       // modified. Remove it then.

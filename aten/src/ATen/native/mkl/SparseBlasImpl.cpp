@@ -419,6 +419,8 @@ void triangular_solve_out_sparse_csr(
       "Please use PyTorch built with MKL on Linux.");
 #else
   if (B.numel() == 0 || X.numel() == 0 || A._nnz() == 0) {
+    // If A has no nnz, then A is singular and we can't solve.
+    X.fill_(NAN);
     return;
   }
 

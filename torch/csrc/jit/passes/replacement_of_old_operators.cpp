@@ -28,20 +28,28 @@ struct OldOpsReplacerWithUpgraders {
     DepthFirstGraphNodeIterator graph_it(graph_);
     Node* node = graph_it.next();
     while (node) {
-      if (auto schema = node->maybeSchema()) {
-        auto schema_name = getFullSchemaName(*schema);
+      // load the schema name for this op
+      c10::optional<std::string> schema_name = c10::nullopt;
+      if (auto op_schema = node->maybeSchema()) {
+        schema_name = getFullSchemaName(*op_schema);
+      } else {
+        schema_name = node->getHistoricSchemaName();
+      }
+
+      if (schema_name.has_value()) {
         // this implies there was a version bump because of this operator
-        auto version_entry = get_operator_version_map().find(schema_name);
+        auto version_entry =
+            get_operator_version_map().find(schema_name.value());
         if (version_entry != get_operator_version_map().end()) {
           const auto& entry = version_entry->second;
           auto upgrader_entry =
               findUpgrader(version_entry->second, current_version);
           if (!upgrader_entry.has_value()) {
-            if (!isOpSymbolCurrent(schema_name, current_version)) {
+            if (!isOpSymbolCurrent(schema_name.value(), current_version)) {
               TORCH_INTERNAL_ASSERT(
                   false,
                   "Upgrader must be present for ",
-                  schema_name,
+                  schema_name.value(),
                   ". The upgrader might have deprecated");
             }
             node = graph_it.next();
