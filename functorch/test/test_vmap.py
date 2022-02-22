@@ -2630,10 +2630,6 @@ class TestVmapOperators(Namespace.TestVmapBase):
             (lambda t: t.exponential_(), (torch.randn(B0, 1),)),
             (lambda t: t.geometric_(0.5), (torch.randn(B0, 1),)),
             (lambda t: t.log_normal_(), (torch.randn(B0, 1),)),
-            (lambda t: t.normal_(), (torch.randn(B0, 1),)),
-            (lambda t: t.random_(), (torch.randn(B0, 1),)),
-            (lambda t: t.random_(0, 2), (torch.randn(B0, 1),)),
-            (lambda t: t.random_(2), (torch.randn(B0, 1),)),
             (lambda t: t.uniform_(), (torch.randn(B0, 1),)),
 
             # in-place on captured tensor
@@ -2642,10 +2638,6 @@ class TestVmapOperators(Namespace.TestVmapBase):
             (lambda t: captured.exponential_(), (torch.randn(B0),)),
             (lambda t: captured.geometric_(0.5), (torch.randn(B0),)),
             (lambda t: captured.log_normal_(), (torch.randn(B0),)),
-            (lambda t: captured.normal_(), (torch.randn(B0),)),
-            (lambda t: captured.random_(), (torch.randn(B0),)),
-            (lambda t: captured.random_(0, 2), (torch.randn(B0),)),
-            (lambda t: captured.random_(2), (torch.randn(B0),)),
             (lambda t: captured.uniform_(), (torch.randn(B0),)),
         ]
         for op, args in random_ops:
@@ -3430,11 +3422,13 @@ class TestVmapOperatorsOpInfo(TestCase):
         generator = torch.Generator(device=device)
         orig_state = generator.get_state()
         kwargs = {'device': device, 'generator': generator} if use_generator else {'device': device}
+        only_gen_kwarg = {'generator': generator} if use_generator else {}
         supported_random_ops = [
             lambda _, shape: torch.randn(shape, **kwargs),
             lambda _, shape: torch.rand(shape, **kwargs),
             lambda _, shape: torch.randint(100, shape, **kwargs),
             lambda _, shape: torch.randint(5, 100, shape, **kwargs),
+            lambda t, _: t.random_(**only_gen_kwarg),
         ]
 
         B0 = 4
@@ -3447,14 +3441,17 @@ class TestVmapOperatorsOpInfo(TestCase):
                     vmap(op, in_dims=(0, None), randomness=randomness)(passed, [B0])
                 return
 
+            passed = torch.randn(B0, B0, device=device)
             generator = reset_random()
             vmap_result = vmap(op, in_dims=(0, None), randomness=randomness)(passed, [B0])
-
-            generator = reset_random()
-            if randomness == 'different':
+            if randomness == "different":
+                passed = torch.randn([B0, B0], device=device)  # reset for in place operation
+                generator = reset_random()
                 expected = op(passed, [B0, B0])
                 assert torch.allclose(vmap_result, expected)
             else:
+                passed = torch.randn(B0, device=device)  # reset for in place operation
+                generator = reset_random()
                 expected = op(passed, [B0])
                 for i in range(B0):
                     assert torch.allclose(vmap_result[i], expected)
@@ -3489,6 +3486,45 @@ class TestVmapOperatorsOpInfo(TestCase):
             expected = torch.randperm(10, **kwargs)
             for i in range(B0):
                 assert torch.allclose(vmap_result[i], expected)
+
+    @parametrize('use_generator', [True, False])
+    @parametrize('randomness', ['error', 'same', 'different'])
+    def test_random_inplace_not_batched(self, device, use_generator, randomness):
+        # tests that when in place random ops are being called during vmap but not with a batched tensor,
+        # it behaves like a normal random_ when using same random and errors during different random
+        supported_ops = [
+            lambda t, _: t.random_(**kwargs),
+            lambda t, _: t.random_(100, **kwargs),
+            lambda t, _: t.random_(-5, 100, **kwargs),
+            lambda t, _: t.normal_(**kwargs),
+        ]
+
+        B0 = 4
+        seed = 1234567
+        generator = torch.Generator(device=device)
+        orig_state = generator.get_state()
+        kwargs = {'generator': generator} if use_generator else {}
+
+        for op in supported_ops:
+            vmaped_value, unvmaped_value = torch.randn(B0, B0, device=device), torch.randn(B0, B0, device=device)
+            generator = generator.set_state(orig_state)
+            torch.manual_seed(seed)
+            if randomness == 'error' or randomness == 'different':
+                error_regex = r"called random operation while in randomness error mode"
+                different_random_regex = r"different inplace randomness on an unbatched tensor"
+                regex = error_regex if randomness == 'error' else different_random_regex
+
+                with self.assertRaisesRegex(RuntimeError, regex):
+                    vmap(op, in_dims=(None, 0), randomness=randomness)(unvmaped_value, vmaped_value)
+                return
+
+            vmap(op, in_dims=(None, 0), randomness=randomness)(unvmaped_value, vmaped_value)
+
+            passed = torch.randn([B0, B0], device=device)  # reset for in place operation
+            generator = generator.set_state(orig_state)
+            torch.manual_seed(seed)
+            op(passed, vmaped_value)
+            assert torch.allclose(unvmaped_value, passed)
 
 
 only_for = ("cpu", "cuda")
