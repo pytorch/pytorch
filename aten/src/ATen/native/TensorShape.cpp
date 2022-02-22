@@ -2152,7 +2152,6 @@ Tensor flatten(const Tensor& self, DimnameList dims, Dimname out_dim) {
 }
 
 Tensor ravel(const Tensor& self) {
-  // If self is contiguous, `contiguous()` is a no-op
   return self.contiguous().view(-1);
 }
 
