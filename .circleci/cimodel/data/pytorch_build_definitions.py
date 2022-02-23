@@ -102,7 +102,7 @@ class Conf:
         if Conf.is_test_phase(phase) and self.gpu_resource:
             parameters["use_cuda_docker_runtime"] = miniutils.quote("1")
         if Conf.is_test_phase(phase):
-            resource_class = "large"
+            resource_class = "xlarge"
             if self.gpu_resource:
                 resource_class = "gpu." + self.gpu_resource
             if self.rocm_version is not None:
