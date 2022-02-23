@@ -115,13 +115,10 @@ class BisectPercentileOp final : public Operator<Context> {
       int lo,
       int hi,
       float val) {
-    int mid;
-    bool low_cond, high_cond;
-
     while (lo < hi) {
-      mid = (lo + hi) >> 1;
-      low_cond = (data[mid] <= val);
-      high_cond = (val < data[mid + 1]);
+      const auto mid = lo + (hi - lo) / 2;
+      const bool low_cond = (data[mid] <= val);
+      const bool high_cond = (val < data[mid + 1]);
       if (low_cond && high_cond) {
         return mid;
       } else if (!low_cond) {
