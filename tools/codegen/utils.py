@@ -196,11 +196,14 @@ class FileManager:
                 else:
                     shard[key] = []
 
-
         def merge_env(into: Dict[str, List[str]], from_: Dict[str, List[str]]) -> None:
             for k, v in from_.items():
                 assert k in sharded_keys, f"undeclared sharded key {k}"
                 into[k] += v
+
+        if self.dry_run:
+            # Dry runs don't write any templates, so incomplete environments are fine
+            items = ()
 
         for item in items:
             key = key_fn(item)

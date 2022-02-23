@@ -1,16 +1,15 @@
 import torch._C as _C
+from typing import Dict, Optional
 
 TensorProtoDataType = _C._onnx.TensorProtoDataType
 OperatorExportTypes = _C._onnx.OperatorExportTypes
 TrainingMode = _C._onnx.TrainingMode
-PYTORCH_ONNX_CAFFE2_BUNDLE = _C._onnx.PYTORCH_ONNX_CAFFE2_BUNDLE
+_CAFFE2_ATEN_FALLBACK = _C._onnx._CAFFE2_ATEN_FALLBACK
 
 ONNX_ARCHIVE_MODEL_PROTO_NAME = "__MODEL_PROTO"
 
 producer_name = "pytorch"
 producer_version = _C._onnx.PRODUCER_VERSION
-constant_folding_opset_versions = [9, 10, 11, 12, 13, 14]
-
 
 class ExportTypes:
     r""""Specifies how the ONNX model is stored."""
@@ -27,6 +26,23 @@ class CheckerError(Exception):
     pass
 
 
+class SymbolicContext:
+    r"""Provides extra context for symbolic functions.
+
+    Args:
+        params_dict (Dict[str, _C.IValue]): Mapping from graph initializer name to IValue.
+        env (Dict[_C.Value, _C.Value]): Mapping from Torch domain graph Value to ONNX domain graph Value.
+        cur_node (_C.Node): Current node being converted to ONNX domain.
+        onnx_block (_C.Block): Current ONNX block that converted nodes are being appended to.
+    """
+    def __init__(self, params_dict, env, cur_node, onnx_block):
+        self.params_dict: Dict[str, _C.IValue] = params_dict
+        self.env: Dict[_C.Value, _C.Value] = env
+        # Current node that is being converted.
+        self.cur_node: _C.Node = cur_node
+        # Current onnx block that converted nodes are being appended to.
+        self.onnx_block: _C.Block = onnx_block
+
 def _export(*args, **kwargs):
     from torch.onnx import utils
     result = utils._export(*args, **kwargs)
@@ -34,7 +50,7 @@ def _export(*args, **kwargs):
 
 
 def export(model, args, f, export_params=True, verbose=False, training=TrainingMode.EVAL,
-           input_names=None, output_names=None, operator_export_type=None,
+           input_names=None, output_names=None, operator_export_type=OperatorExportTypes.ONNX,
            opset_version=None, do_constant_folding=True, dynamic_axes=None,
            keep_initializers_as_inputs=None, custom_opsets=None,
            export_modules_as_functions=False):
@@ -121,11 +137,7 @@ def export(model, args, f, export_params=True, verbose=False, training=TrainingM
             input nodes of the graph, in order.
         output_names (list of str, default empty list): names to assign to the
             output nodes of the graph, in order.
-        operator_export_type (enum, default None):
-
-            None usually means ``OperatorExportTypes.ONNX``.
-            However if PyTorch was built with ``-DPYTORCH_ONNX_CAFFE2_BUNDLE``, None means
-            ``OperatorExportTypes.ONNX_ATEN_FALLBACK``.
+        operator_export_type (enum, default OperatorExportTypes.ONNX):
 
             * ``OperatorExportTypes.ONNX``: Export all ops as regular ONNX ops
               (in the default opset domain).
