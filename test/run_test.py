@@ -373,6 +373,11 @@ DISTRIBUTED_TESTS = [
     "distributed/_shard/sharded_optim/test_sharded_optim",
 ] + [test for test in TESTS if test.startswith("distributed/fsdp")]
 
+TESTS_REQUIRING_LAPACK = [
+    "distributions/test_constraints",
+    "distributions/test_distributions",
+]
+
 # Dictionary matching test modules (in TESTS) to lists of test cases (within that test_module) that would be run when
 # options.run_specified_test_cases is enabled.
 # For example:
@@ -816,6 +821,11 @@ def parse_args():
         " within a specified test module. For unspecified test modules with the bring-to-front "
         "option, all test cases will be run, as one may expect.",
     )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Only list the test that will run.",
+    )
     return parser.parse_args()
 
 
@@ -961,6 +971,11 @@ def get_selected_tests(options):
         selected_tests = exclude_tests(DISTRIBUTED_TESTS, selected_tests,
                                        "PyTorch is built without distributed support.")
 
+    # skip tests that require LAPACK when it's not available
+    if not torch._C.has_lapack:
+        selected_tests = exclude_tests(TESTS_REQUIRING_LAPACK, selected_tests,
+                                       "PyTorch is built without LAPACK support.")
+
     return selected_tests
 
 
@@ -1012,7 +1027,10 @@ def main():
     selected_tests = get_selected_tests(options)
 
     if options.verbose:
-        print_to_stderr("Selected tests: {}".format(", ".join(selected_tests)))
+        print_to_stderr("Selected tests:\n {}".format("\n ".join(selected_tests)))
+
+    if options.dry_run:
+        return
 
     if options.coverage and not PYTORCH_COLLECT_COVERAGE:
         shell(["coverage", "erase"])
