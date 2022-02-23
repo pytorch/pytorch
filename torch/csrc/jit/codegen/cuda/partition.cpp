@@ -51,6 +51,26 @@ static c10::optional<c10::Device> getDevice(const Value* value) {
   return tensor_type.device();
 }
 
+static bool hasBfloat(const Node* node) {
+  auto has_bfloat = [](const Value* value) {
+    if (!value->type()->isSubtypeOf(*TensorType::get())) {
+      return false;
+    }
+    auto opt_scalar_type = value->type()->expectRef<TensorType>().scalarType();
+    if (opt_scalar_type.has_value() &&
+        opt_scalar_type.value() == at::ScalarType::BFloat16) {
+      return true;
+    }
+    return false;
+  };
+
+  if (std::any_of(node->inputs().begin(), node->inputs().end(), has_bfloat) ||
+      std::any_of(node->outputs().begin(), node->outputs().end(), has_bfloat)) {
+    return true;
+  }
+  return false;
+}
+
 static c10::optional<c10::Device> getDevice(const Node* node) {
   c10::optional<c10::Device> ret = c10::nullopt;
   auto merge_devices = [&ret](const c10::optional<c10::Device>& device) {
@@ -87,7 +107,24 @@ static c10::optional<c10::Device> getDevice(const Node* node) {
   return ret;
 }
 
-static bool isFusibleDevice(const Node* node, const c10::Device device) {
+static bool isDeviceCompatible(const Node* node, const c10::Device& device) {
+  // only fuses cuda device
+  if (!device.is_cuda()) {
+    return false;
+  }
+  const auto major = at::cuda::getDeviceProperties(device.index())->major;
+  // disable non-elementwise fusion on pre-volta devices
+  if (major < 7 && hasNonElementWiseOperation(node)) {
+    return false;
+  }
+  // disable bfloat fusion on pre-ampere devices
+  if (major < 8 && hasBfloat(node)) {
+    return false;
+  }
+  return true;
+}
+
+static bool isFusibleDevice(const Node* node, const c10::Device& device) {
   TORCH_INTERNAL_ASSERT(
       device.index() != INVALID_INDEX, "fusible device needs to be validate");
   auto opt_device = getDevice(node);
@@ -95,6 +132,9 @@ static bool isFusibleDevice(const Node* node, const c10::Device device) {
   // node into an existing `device`
   if (opt_device.has_value() &&
       (opt_device->index() == INVALID_INDEX || opt_device != device)) {
+    return false;
+  }
+  if (!isDeviceCompatible(node, device)) {
     return false;
   }
   return true;
@@ -105,12 +145,10 @@ static bool isFusibleDevice(const Node* node) {
   auto device = getDevice(node);
   // be conservative and only fuse cuda operations, this avoids us initializing
   // operations that produces cpu scalar outputs
-  if (!device.has_value()) {
+  if (!device.has_value() || device->index() == INVALID_INDEX) {
     return false;
   }
-  return device->index() != INVALID_INDEX && device->is_cuda() &&
-      (at::cuda::getDeviceProperties(device->index())->major >= 7 ||
-       !hasNonElementWiseOperation(node));
+  return isDeviceCompatible(node, device.value());
 }
 
 bool compatibleType(const torch::jit::Value* val) {

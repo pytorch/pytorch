@@ -177,7 +177,8 @@ class NaiveTypePropagator {
       // to neither type promotion nor shape.
       // TODO: Include alpha check for add/sub
       case aten::add:
-      case aten::sub: {
+      case aten::sub:
+      case aten::rsub: {
         binary_type(node);
         break;
       }
