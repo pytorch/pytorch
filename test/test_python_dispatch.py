@@ -383,7 +383,7 @@ $6 = torch._ops.aten.add_($1, $5)''')
 
         x = MyWrapperTensor(torch.randn(3))
         with self.assertRaisesRegex(RuntimeError,
-                                    f"for which cloning returns another instance of the same subclass"):
+                                    "for which cloning returns another instance of the same subclass"):
             x_copy = deepcopy(x)
 
     def test_deepcopy_non_wrapper_subclass(self) -> None:
@@ -401,7 +401,7 @@ $6 = torch._ops.aten.add_($1, $5)''')
         for error_cls in [SubTensorError1, SubTensorError2]:
             x = error_cls(3)
             with self.assertRaisesRegex(RuntimeError,
-                                        f"for which that function returns another instance of the same subclass"):
+                                        "for which that function returns another instance of the same subclass"):
                 x_copy = deepcopy(x)
 
         # Ensure a correctly implemented new_empty() causes deepcopy() to work.
