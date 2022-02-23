@@ -15,6 +15,7 @@ from torch.testing._internal.common_methods_invocations import SampleInput, op_d
 from torch.nn.utils._expanded_weights import ExpandedWeight
 from torch.nn.utils._expanded_weights.expanded_weights_utils import forward_helper, set_grad_sample_if_exists, \
     unpack_expanded_weight_or_tensor, sum_over_all_but_batch_and_last_n, standard_kwargs
+from torch.testing._internal.common_cuda import TEST_CUDA
 
 class TestContext:
     pass
@@ -312,6 +313,8 @@ class TestExpandedWeightModule(TestCase):
 
 class ContextManagerTests(TestBase):
     def __init__(self, *args, **kwargs):
+        self.test_cpu = kwargs.get('test_cpu', True)
+        self.test_cuda = kwargs.get('test_cuda', True)
         super().__init__(*args, **kwargs)
 
     @property
@@ -358,14 +361,15 @@ for test_param in supported_tests:
     if decorator is not None:
         fn = decorator(fn)
 
-    if not hasattr(test, 'test_cpu') or test.test_cpu:
+    if test.test_cpu:
         setattr(TestExpandedWeightModule, test_name, lambda self, test=test: test.test_context_manager(self, 'cpu'))
         setattr(TestExpandedWeightModule, test_name_multi_input,
                 lambda self, test=test: test.test_context_manager_multiple_inputs(self))
 
-    # since this checks derivatives, only use double for precision
-    setattr(TestExpandedWeightModule, test_name + '_cuda_double',
-            lambda self, test=test: test.test_context_manager(self, 'cuda'))
+    if TEST_CUDA and test.test_cuda:
+        # since this checks derivatives, only use double for precision
+        setattr(TestExpandedWeightModule, test_name + '_cuda_double',
+                lambda self, test=test: test.test_context_manager(self, 'cuda'))
 
 # ------------- HELPER FUNCTIONS -----------------
 
