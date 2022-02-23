@@ -6308,6 +6308,16 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(4, 2, 3, requires_grad=True)
         self.run_test(InplaceAddModel(), x)
 
+    def test_addcmul(self):
+        class AddcmulModel(torch.nn.Module):
+            def forward(self, x, t1, t2):
+                return torch.addcmul(x, t1, t2), torch.addcmul(x, t1, t2, value=2.2)
+
+        x = torch.randn(1, 3)
+        t1 = torch.randn(3, 1)
+        t2 = torch.randn(1, 3)
+        self.run_test(AddcmulModel(), (x, t1, t2))
+
     def test_rsqrt(self):
         class RsqrtModel(torch.nn.Module):
             def forward(self, x):
