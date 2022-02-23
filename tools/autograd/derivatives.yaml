@@ -1799,9 +1799,14 @@
 - name: celu_(Tensor(a!) self, Scalar alpha=1.0) -> Tensor(a!)
   self: elu_backward(grad, alpha, 1, 1.0/alpha.toFloat(), /* is_result */ true, result)
 
-- name: gelu(Tensor self) -> Tensor
-  self: "GradMode::is_enabled() ? infinitely_differentiable_gelu_backward(grad, self) : gelu_backward(grad, self)"
+- name: gelu(Tensor self, *, str approximate='none') -> Tensor
+  self: gelu_backward(grad, self, approximate)
   result: auto_element_wise
+
+- name: gelu_backward(Tensor grad_output, Tensor self, *, str approximate='none') -> Tensor
+  grad_output: gelu_backward(grad, self, approximate)
+  self: gelu_double_backward(grad, grad_output, self, approximate)
+  result: gelu_backward(grad_output_t, self_p, approximate) + gelu_double_backward(self_t, grad_output_p, self_p, approximate)
 
 - name: glu(Tensor self, int dim=-1) -> Tensor
   self: glu_backward(grad, self, dim)
