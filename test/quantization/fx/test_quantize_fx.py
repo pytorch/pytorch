@@ -3035,7 +3035,6 @@ class TestQuantizeFx(QuantizationTestCase):
 
         m = M().eval()
         m = prepare_fx(m, {"": default_qconfig})
-        print(m)
         m = convert_fx(m)
         # Make sure this runs without error
         m = torch.fx.Transformer(m).transform()
