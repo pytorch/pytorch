@@ -1,5 +1,6 @@
 #include <torch/csrc/jit/mobile/model_tracer/KernelDTypeTracer.h>
 #include <map>
+#include <mutex>
 #include <set>
 #include <string>
 
@@ -14,6 +15,7 @@ KernelDTypeTracer::KernelDTypeTracer() {
     std::string kernel_tag = name.substr(0, dollar_pos);
     std::string dtype = name.substr(dollar_pos + 1);
 
+    std::lock_guard<std::mutex> guard(getMutex());
     getCalledKernelTags()[kernel_tag].insert(dtype);
     return nullptr;
   };
@@ -27,6 +29,12 @@ KernelDTypeTracer::kernel_tags_type& KernelDTypeTracer::getCalledKernelTags() {
   static kernel_tags_type called_kernel_tags;
   return called_kernel_tags;
 }
+
+std::mutex& KernelDTypeTracer::getMutex() {
+  static std::mutex m;
+  return m;
+}
+
 } // namespace mobile
 } // namespace jit
 } // namespace torch
