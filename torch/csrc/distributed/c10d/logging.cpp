@@ -12,15 +12,15 @@ namespace c10d {
 namespace detail {
 
 bool isLogLevelEnabled(LogLevel level) noexcept {
-  // c10d logger does not support debug and verbose levels. In order to map the
-  // remaining levels we adjust our ordinal value.
+  // c10 logger does not support debug and trace levels. In order to map higher
+  // levels we adjust our ordinal value.
   int level_int = static_cast<int>(level) - 2;
 
   if (level_int >= 0) {
     return FLAGS_caffe2_log_level <= level_int;
   }
 
-  // Debug and verbose levels are only enabled when c10 log level is INFO.
+  // Debug and trace levels are only enabled when c10 log level is set to INFO.
   if (FLAGS_caffe2_log_level != 0) {
     return false;
   }
