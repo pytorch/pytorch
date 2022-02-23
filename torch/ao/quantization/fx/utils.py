@@ -481,7 +481,7 @@ NodeInfo = namedtuple("NodeInfo", "op target")
 # so that they can be propagated correctly since inserting observers
 # for them would cause errors
 
-NON_OBSERVABLE_ARG_DICT = {
+NON_OBSERVABLE_ARG_DICT: Dict[NodeInfo, Dict[Union[type, torch.dtype], Callable[[Node], List[int]]]] = {
     NodeInfo("call_method", "masked_fill") : {
         torch.bool: return_arg_list([1]),
         float: return_arg_list([2])
@@ -518,13 +518,16 @@ NON_OBSERVABLE_ARG_DICT = {
     },
 }
 
+EMPTY_ARG_DICT: Dict[Union[type, torch.dtype], Callable[[Node], List[int]]] = {}
+
 def get_non_observable_arg_indexes_and_types(node: Node) -> Dict[Union[type, torch.dtype], Callable[[Node], List[int]]]:
     """
     Returns a dict with of non float tensor types as keys and values which correspond to a
     function to retrieve the list (which takes the node as an argument)
     """
     info = NodeInfo(node.op, node.target)
-    return NON_OBSERVABLE_ARG_DICT.get(info, {})
+
+    return NON_OBSERVABLE_ARG_DICT.get(info, EMPTY_ARG_DICT)
 
 def node_return_type_is_int(node: Node) -> bool:
     """
