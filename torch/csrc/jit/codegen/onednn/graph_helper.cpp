@@ -126,8 +126,8 @@ Operator createOperator(Node* node) {
       auto alpha = toIValue(node->namedInput("alpha"));
       auto beta = toIValue(node->namedInput("beta"));
       REQUIRE(
-          alpha.has_value() && beta.has_value() && (alpha->toDouble() == 1.0)
-          && (beta->toDouble() == 1.0));
+          alpha.has_value() && beta.has_value() && (alpha->toDouble() == 1.0) &&
+          (beta->toDouble() == 1.0));
       return Operator(node, opkind::MatMul).setInput(1, 2, 0).setOutput(0);
     }
 
