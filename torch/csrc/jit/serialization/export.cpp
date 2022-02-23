@@ -21,9 +21,9 @@
 #include <atomic>
 
 #include <onnx/checker.h>
-#include <onnx/shape_inference/implementation.h>
 #include <onnx/onnx_pb.h>
 #include <onnx/proto_utils.h>
+#include <onnx/shape_inference/implementation.h>
 
 #include <fstream>
 #include <memory>
@@ -1260,7 +1260,6 @@ void check_onnx_proto(const std::string& proto_string, bool full_check) {
   if (full_check) {
     onnx::shape_inference::InferShapes(model);
   }
-
 }
 
 } // namespace jit
