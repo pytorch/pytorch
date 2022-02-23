@@ -1992,6 +1992,66 @@ TEST(ProfilerTest, Basic) {
   checkShape(tanh_n->inputs().at(0)->node()->ty(attr::profiled_type), eltwise);
 }
 
+TEST(ProfilerTest, OptionalProfiling) {
+  auto graph = std::make_shared<Graph>();
+  std::unordered_map<std::string, Value*> vmap;
+  parseIR(
+      R"IR(
+graph(%inp : Tensor,
+      %weight : Tensor,
+      %bias : Tensor?):
+  %1 : Tensor = aten::linear(%inp, %weight, %bias)
+  return (%1))IR",
+      &*graph,
+      vmap);
+
+  auto pr = ProfilingRecord::instrumentGraph(graph);
+  pr->profiling_count_ = 2;
+
+  auto input = torch::randn({1, 2});
+  auto weight = torch::randn({2, 2});
+  auto bias = torch::randn({1, 2});
+
+  auto stack = createStack({input, weight, bias});
+  Code cd(pr->profiled_graph_, "");
+  InterpreterState is{cd};
+  is.run(stack);
+
+  testing::FileCheck()
+      .check_count("Tensor? = prim::profile[profiled_type", 1, true)
+      ->run(*pr->profiled_graph_);
+
+  // make sure we recorded the shape
+  auto begin = pr->profiled_graph_->block()->nodes().begin();
+  auto end = pr->profiled_graph_->block()->nodes().end();
+  auto linear = std::find_if(
+      begin, end, [](Node* n) { return n->kind() == aten::linear; });
+  ASSERT_NE(linear, end);
+  std::vector<int64_t> bias_expected_shape = {1, 2};
+  auto profiled_bias = linear->namedInput("bias")->node();
+  checkShape(profiled_bias->ty(attr::profiled_type), bias_expected_shape);
+  ASSERT_EQ(0, profiled_bias->i(attr::seen_none));
+
+  auto none_bias = c10::IValue();
+
+  stack.clear();
+  stack.emplace_back(input);
+  stack.emplace_back(weight);
+  stack.emplace_back(none_bias);
+  is = InterpreterState{cd};
+  is.run(stack);
+
+  // make sure we recorded that "None" was seen.
+  begin = pr->profiled_graph_->block()->nodes().begin();
+  end = pr->profiled_graph_->block()->nodes().end();
+  linear = std::find_if(
+      begin, end, [](Node* n) { return n->kind() == aten::linear; });
+  ASSERT_NE(linear, end);
+  profiled_bias = linear->namedInput("bias")->node();
+  checkShape(profiled_bias->ty(attr::profiled_type), bias_expected_shape);
+  ASSERT_EQ(1, profiled_bias->i(attr::seen_none));
+}
+
 TEST(CallStackTest, Basic) {
   const auto text = R"(
 def ham(x):
@@ -2865,11 +2925,13 @@ TEST_F(Composed, ComposedOp) {
   auto ref1 = a * (a * b);
   auto ref2 = a * ref1;
   WithCPUFuser g(true);
-  bool dynamic_enabled = tensorExprFuserEnabled();
   bool fusable_on_device = torch::jit::tensorexpr::getTEMustUseLLVMOnCPU();
   torch::jit::tensorexpr::getTEMustUseLLVMOnCPU() = false;
-  setTensorExprDynamicShapeFusionEnabled(true);
-  FuseTensorExprs(graph, /*min_group_size*/ 2, /*add_composed_op*/ true);
+  FuseTensorExprs(
+      graph,
+      /*min_group_size*/ 2,
+      /*add_composed_op*/ true,
+      /*fuse_to_dynamic_shapes*/ true);
   Code code(graph, "");
   InterpreterState interpreter{code};
   std::vector<IValue> stack = {a, b};
@@ -2892,7 +2954,6 @@ TEST_F(Composed, ComposedOp) {
   // to the second output. inp_2 is on the top corresponds to first output
   ASSERT_TRUE(at::allclose(inp_1, ref2));
   ASSERT_TRUE(at::allclose(inp_2, ref1));
-  setTensorExprDynamicShapeFusionEnabled(dynamic_enabled);
   torch::jit::tensorexpr::getTEMustUseLLVMOnCPU() = fusable_on_device;
 #endif
 }
