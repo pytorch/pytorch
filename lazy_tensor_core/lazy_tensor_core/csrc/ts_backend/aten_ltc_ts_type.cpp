@@ -61,8 +61,8 @@ at::Tensor DoBinaryOp(const at::Tensor& self, const at::Tensor& other,
 template <typename B>
 at::Tensor DoBinaryOp(const at::Tensor& self, const at::Scalar& other,
                       const B& bin_op) {
-  torch::lazy::LazyTensor self_tensor = torch::lazy::GetLtcTensor(self);
-  torch::lazy::LazyTensor result = bin_op(self_tensor, other);
+  torch::lazy::LazyTensorPtr self_tensor = torch::lazy::GetLtcTensor(self);
+  torch::lazy::LazyTensor result = bin_op(*self_tensor, other);
   return torch::lazy::CreateAtenFromLtcTensor(result);
 }
 
@@ -244,7 +244,7 @@ at::Tensor LazyNativeFunctions::_copy_from_and_resize(const at::Tensor& self,
     // at this point we know dst is a lazy tensor
     auto* dest_impl =
         dynamic_cast<torch::lazy::LTCTensorImpl*>(dst.unsafeGetTensorImpl());
-    dest_impl->tensor().UpdateFromTensorOut(self_tensor);
+    dest_impl->tensor()->UpdateFromTensorOut(self_tensor);
     dest_impl->force_refresh_sizes();
   }
   return dst;

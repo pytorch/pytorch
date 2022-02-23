@@ -1,5 +1,6 @@
 #pragma once
 
+#include <c10/util/intrusive_ptr.h>
 #include <torch/csrc/lazy/backend/backend_device.h>
 #include <torch/csrc/lazy/backend/backend_interface.h>
 #include <torch/csrc/lazy/core/ir.h>
@@ -9,7 +10,10 @@
 namespace torch {
 namespace lazy {
 
-class TORCH_API LazyTensor {
+class LazyTensor;
+using LazyTensorPtr = c10::intrusive_ptr<LazyTensor>;
+
+class TORCH_API LazyTensor : public c10::intrusive_ptr_target {
  public:
   // This is the core lazy tensor data structure where all the tensor data is
   // held. The lazy tensor is nothing more than a shared pointer to a Data
@@ -72,7 +76,7 @@ class TORCH_API LazyTensor {
 
   at::Tensor ToTensor(bool detached);
 
-  void ShallowCopyTo(LazyTensor* dest) const;
+  void ShallowCopyTo(LazyTensorPtr dest) const;
 
   // Assigns the tensor value to the lazy tensor.
   void SetTensor(at::Tensor tensor);
@@ -185,7 +189,7 @@ TORCH_API LazyTensor TryGetLtcTensor(const at::Tensor& tensor);
 
 // Extracts the LazyTensor out of an at::Tensor. Throws an exception
 // if the tensor is not a lazy tensor.
-TORCH_API LazyTensor GetLtcTensor(const at::Tensor& tensor);
+TORCH_API LazyTensorPtr GetLtcTensor(const at::Tensor& tensor);
 
 // Same as above, applied to a list of tensors.
 TORCH_API std::vector<LazyTensor> GetLtcTensors(c10::ArrayRef<at::Tensor> tensors);

@@ -379,7 +379,7 @@ at::Tensor LazyTensor::ToTensor(bool detached) {
   return tensor;
 }
 
-void LazyTensor::ShallowCopyTo(LazyTensor* dest) const {
+void LazyTensor::ShallowCopyTo(LazyTensorPtr dest) const {
   dest->SetIrValue(GetIrValue());
 }
 
@@ -464,13 +464,13 @@ LazyTensor TryGetLtcTensor(const at::Tensor& tensor) {
   if (impl == nullptr) {
     return LazyTensor();
   }
-  return impl->tensor();
+  return *impl->tensor();
 }
 
-LazyTensor GetLtcTensor(const at::Tensor& tensor) {
+LazyTensorPtr GetLtcTensor(const at::Tensor& tensor) {
   auto lazy_tensor = TryGetLtcTensor(tensor);
   CHECK(lazy_tensor) << "Input tensor is not a lazy tensor: " << tensor.toString();
-  return lazy_tensor;
+  return c10::make_intrusive<LazyTensor>(std::move(lazy_tensor));
 }
 
 std::vector<LazyTensor> GetLtcTensors(c10::ArrayRef<at::Tensor> tensors) {
@@ -493,7 +493,7 @@ LazyTensor GetLtcTensorOrCreateForWrappedNumber(const at::Tensor& tensor, const 
   return (tensor.unsafeGetTensorImpl()->is_wrapped_number() ||
           (tensor.dim() == 0 && tensor.numel() == 1))
              ? GetOrCreateLtcTensor(tensor, device)
-             : GetLtcTensor(tensor);
+             : *GetLtcTensor(tensor);
 }
 
 at::Tensor CreateAtenFromLtcTensor(const LazyTensor& ltc_tensor) {
