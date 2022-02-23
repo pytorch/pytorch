@@ -337,10 +337,11 @@ void Reducer::mark_variable_ready_dense(size_t variable_index) {
   auto& variable = bucket.variables[bucket_index.intra_bucket_index];
   auto& bucket_view = bucket.bucket_views_in[bucket_index.intra_bucket_index];
 
-  // Copy contents of gradient tensor to bucket tensor.
-  // If the gradient is not set, we assume it wasn't computed
-  // as part of the current backwards pass, and zero the part
-  // of the bucket it would otherwise hold.
+  // Copy the contents of the gradient tensor to the corresponding part of the
+  // bucket's flattened gradient tensor.
+  // If the gradient is not set, we assume it wasn't computed as part of the
+  // current backwards pass, and we zero the part of the bucket it would
+  // otherwise hold.
   runGradCallbackForVariable(variable, [&](auto& grad) {
     if (grad.defined()) {
       this->check_grad_layout(grad, bucket_view);
@@ -428,12 +429,12 @@ void Reducer::mark_variable_ready_sparse(size_t variable_index) {
     // single reduction operation like we can for dense tensors. Therefore, the
     // `offsets` and `lengths` vectors in the bucket struct are empty, and
     // there is no pre-existing accumulation tensor.
-    // Directly assign the sparse tensor to the `contents` field.
-    bucket.contents = grad;
+    // Directly assign the sparse tensor to the `gradients` field.
+    bucket.gradients = grad;
     // If no DDP comm hook is registered, the allreduce only sums up the
     // value, and a separate division is required.
     if (comm_hook_ == nullptr) {
-      bucket.contents.div_(div_factor_);
+      bucket.gradients.div_(div_factor_);
     }
     // The grad is modified in place and needs to be written back.
     return true;
@@ -451,8 +452,8 @@ std::vector<c10d::GradBucket> Reducer::get_grad_buckets(
     gradBuckets.emplace_back(
         i,
         buckets_.size(),
-        return_zero_tensors ? at::zeros_like(bucket.contents)
-                            : bucket.contents,
+        return_zero_tensors ? at::zeros_like(bucket.gradients)
+                            : bucket.gradients,
         bucket.offsets,
         bucket.lengths,
         bucket.sizes_vec,
@@ -841,14 +842,14 @@ c10::intrusive_ptr<c10::ivalue::Future> Reducer::run_comm_hook(
 void Reducer::all_reduce_bucket(Bucket& bucket) {
   auto variables_for_bucket = get_variables_for_bucket(next_bucket_, bucket);
   // TODO(@pietern): Ensure proper synchronization with the CUDA events
-  // that recorded copies into this contents tensor. If these copies are
+  // that recorded copies into this `gradients` tensor. If these copies are
   // executed on non-default streams, the current stream for the device
-  // that holds the contents tensor must wait on these events.
+  // that holds the `gradients` tensor must wait on these events.
   //
   // As long as autograd uses the default stream for every device,
   // these operations are implicitly sequenced, and we don't need to
   // do any extra synchronization here.
-  const auto& tensor = bucket.contents;
+  const auto& tensor = bucket.gradients;
 
   GradBucket grad_bucket(
       next_bucket_,
@@ -1035,14 +1036,14 @@ void Reducer::initialize_buckets(
         offset += length;
       }
 
-      // Allocate bucket contents tensor.
-      bucket.contents = at::empty({static_cast<long>(offset)}, options);
+      // Allocate the bucket's flattened `gradients` tensor.
+      bucket.gradients = at::empty({static_cast<long>(offset)}, options);
 
       // Note:  "Gradient Layout Contract"
       //
-      // Here, create views into the contents tensor for each variable's grad.
-      // Views serve as entry points to copy_ each grad's data in/out of the
-      // flat contents tensor.
+      // Here, create views into the `gradients` tensor for each variable's
+      // grad. Views serve as entry points to `copy_()` each grad's data in/out
+      // of the flattened `gradients` tensor.
       //
       // Gradients may have dense memory but non-row-major-contiguous strides
       // (e.g. channels_last or channels_last_3d). For coalesced accesses
@@ -1076,7 +1077,7 @@ void Reducer::initialize_buckets(
       // Checking just once won't catch if someone messes with
       // param layouts over time, but not messing with params after DDP
       // construction is already a documented constraint.
-      initialize_bucket_views(bucket, bucket.contents);
+      initialize_bucket_views(bucket);
     }
 
     // Map participating variables to this bucket.
@@ -1095,9 +1096,8 @@ void Reducer::initialize_buckets(
 }
 
 // (see Note:  "Gradient Layout Contract" in initialize_buckets).
-void Reducer::initialize_bucket_views(
-    Reducer::Bucket& bucket,
-    at::Tensor& contents) {
+void Reducer::initialize_bucket_views(Reducer::Bucket& bucket) {
+  const auto &gradients = bucket.gradients;
   for (const auto i : c10::irange(bucket.variables.size())) {
     auto& v = bucket.variables[i];
     const auto offset = bucket.offsets[i];
@@ -1107,13 +1107,13 @@ void Reducer::initialize_bucket_views(
       // the autograd engine (AccumulateGrad) will also create gradients
       // matching its layout.
       bucket.bucket_views_in.push_back(
-          contents.as_strided(v.sizes(), v.strides(), offset));
+          gradients.as_strided(v.sizes(), v.strides(), offset));
     } else {
       // Fall back to a C-style contiguous view, again anticipating
       // AccumulateGrad will do the same when stashing grads for non-dense
       // params.
       bucket.bucket_views_in.push_back(
-          contents.narrow(0, offset, length).view(v.sizes()));
+          gradients.narrow(0, offset, length).view(v.sizes()));
     }
     // By default `bucket_views_out` and `bucket_views_in` are
     // essentially the same thing.
@@ -1411,10 +1411,9 @@ void Reducer::finalize_bucket_dense(Bucket& bucket) {
       const auto& bucket_view_out =
           bucket.bucket_views_out[intra_bucket_index];
       auto& bucket_view_in = bucket.bucket_views_in[intra_bucket_index];
-      // If communication_hook is registered, bucket_view_out stores
-      // allreduced results in a newly allocated tensor, copy bucket_view_out
-      // back to bucket_view_in that referring to bucket.content tensor and
-      // grad.
+      // If a communication hook is registered, then `bucket_view_out` stores
+      // the allreduced results in a newly allocated tensor, so we copy
+      // `bucket_view_out` back to `bucket_view_in` for this gradient.
       if (!bucket_view_in.is_alias_of(bucket_view_out)) {
         bucket_view_in.copy_(bucket_view_out);
       }
@@ -1456,7 +1455,8 @@ void Reducer::finalize_backward() {
   TORCH_INTERNAL_ASSERT(require_finalize_);
   require_finalize_ = false;
 
-  // Wait for asynchronous reduction to complete and unflatten contents.
+  // Wait for asynchronous reduction to complete, and unflatten the bucket's
+  // flattened `gradients` tensor.
   for (auto& bucket : buckets_) {
     // See Note [DDP Communication Hook]
     TORCH_INTERNAL_ASSERT(
@@ -1468,7 +1468,7 @@ void Reducer::finalize_backward() {
         ? detail::parseCppCommHookResult(bucket.future_work->value())
         : comm_hook_->parseHookResult(bucket.future_work->value());
     if (bucket.expect_sparse_gradient) {
-      bucket.contents.copy_(future_result);
+      bucket.gradients.copy_(future_result);
     } else {
       // Reinitialize only `bucket_views_out` with the future_result by
       // following the same logic in `initialize_buckets`.

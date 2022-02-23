@@ -345,11 +345,12 @@ class TORCH_API Reducer {
 #endif
   void runGradCallbackForVariable(at::Tensor& variable, GradCallback&& cb);
 
-  // This function is called inside `initialize_buckets`, it initializes both
-  // bucket_views_in and bucket_views_out into the contents tensor for each
-  // variable's grad. Views serve as entry points to copy_ each grad's data
-  // in/out of the flat contents tensor.
-  void initialize_bucket_views(Bucket& bucket, at::Tensor& contents);
+  // This function is called inside `initialize_buckets()`. It initializes both
+  // `bucket_views_in` and `bucket_views_out` with views for each variable's
+  // gradient into the bucket's flattened `gradients` tensor. Views serve as
+  // entry points to `copy_()` each grad's data in/out of the flattened
+  // `gradients` tensor.
+  void initialize_bucket_views(Bucket& bucket);
 
   // This function is called inside `finalize_backward`, it happens only if
   // DDP communication hook was registered to recreate just bucket_views_out
@@ -371,41 +372,41 @@ class TORCH_API Reducer {
   // Coalescing gradients together before reducing can result in lower overhead
   // and/or faster time to completion. Coalescing requires the constituent
   // gradients to have the same dtype and device, and the resulting flattened
-  // tensor uses that common dtype and device. The bucket's contents are filled
-  // as their corresponding gradients are computed (triggered by autograd
-  // hooks), and the buckets are reduced in a predetermined order consistent
-  // across processes.
+  // tensor uses that common dtype and device. The flattened tensor is filled
+  // as the corresponding gradients are computed (triggered by autograd hooks),
+  // and the buckets are reduced in a predetermined order consistent across
+  // processes.
   struct Bucket {
-    // Flattened (1-dimensional) contents of the bucket
-    at::Tensor contents;
+    // Gradients of the bucket flattened into a 1-dimensional tensor
+    at::Tensor gradients;
 
-    // Views into the contents for each gradient
+    // Views into the `gradients` tensor for each individual gradient
     // Each view is created with layout (size and stride) matching the
     // gradient's expected layout (see the "Gradient Layout Contract" in
     // torch/csrc/autograd/functions/accumulate_grad.h).
     // `bucket_views_in[i].copy_(grad)` and `grad.copy_(bucket_views_out[i])`
-    // provide convenient ways to copy gradient data in/out of `contents`,
+    // provide convenient ways to copy gradient data in/out of `gradients`,
     // respectively.
-    // We keep both `bucket_views_in` and `bucket_views_out` because if a
-    // DDP communication hook is registered, then `bucket_views_out` may be
-    // re-initialized with the value of the hook's `future_work` but we still
-    // need a separate view reference to the bucket's original contents to copy
-    // in gradient data.
+    // We keep both `bucket_views_in` and `bucket_views_out` because
+    // registering a DDP communication hook may re-initialize
+    // `bucket_views_out` with the value of the hook's `future_work` but we
+    // still need separate views into the bucket's original flattened gradient
+    // to copy in gradient data.
     std::vector<at::Tensor> bucket_views_in;
     std::vector<at::Tensor> bucket_views_out;
 
     // Variables whose gradients are held in this bucket
     // We use refcounted tensors here so that we can easily unflatten the
-    // bucket contents into the participating variables after reduction has
-    // completed.
+    // bucket's flattened `gradients` tensor into the participating variables
+    // after reduction has completed.
     std::vector<at::Tensor> variables;
 
-    // Per-variable offset/length into the flattened `contents` tensor and
+    // Per-variable offset/length into the flattened `gradients` tensor and
     // the corresponding `GradBucket` instance for communication hooks
     std::vector<size_t> offsets;
     std::vector<size_t> lengths;
 
-    // Per-variable sizes slicing into the bucket contents
+    // Per-variable sizes slicing into the bucket's `gradients` tensor
     std::vector<c10::IntArrayRef> sizes_vec;
 
     // Number of gradients left to be computed before the bucket is ready to
@@ -442,7 +443,9 @@ class TORCH_API Reducer {
   struct VariableLocator {
     // Index of the bucket containing the variable in the `buckets_` vector
     size_t bucket_index;
-    // Index of the variable in the bucket
+    // Index of the variable in the bucket, which may be used consistently
+    // across `bucket_views_in`, `bucket_views_out`, `variables`, `offsets`,
+    // `lengths`, `sizes_vec`, and `variable_indices` in `Bucket`
     size_t intra_bucket_index;
 
     VariableLocator() = default;
