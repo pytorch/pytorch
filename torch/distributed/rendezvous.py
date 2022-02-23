@@ -63,7 +63,7 @@ def rendezvous(url: str, rank: int = -1, world_size: Optional[int] = None, **kwa
 
     # Append node-specific arguments.
     result = urlparse(url)
-    if rank != -1 or world_size:
+    if rank != -1 or (world_size and world_size != -1):
         query_dict: Dict[str, Union[int, str]] = dict(
             pair.split("=") for pair in filter(None, result.query.split("&"))
         )
