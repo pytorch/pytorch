@@ -68,7 +68,7 @@ class HierarchicalModelAverager:
         >>>  subgroup, subgroups = dist.new_subgroups()
         >>>  state = PostLocalSGDState(subgroup=subgroup, start_localSGD_iter=100)
         >>>  model.register_comm_hook(state, post_localSGD_hook)
-        >>> 
+        >>>
         >>>  # Average parameters among each group of 8 processes every 4 iterations, and among all
         >>>  # the 16 processes every 16 iterations.
         >>>  averager = hierarchicalSGD.HierarchicalModelAverager(
