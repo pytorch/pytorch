@@ -118,20 +118,20 @@ struct RandIntBatchRuleHelper<F, Func, typelist<T1, T2, T...>> {
   }
 };
 
-template <typename F, F Func, typename... T>
-Tensor rand_int_low_wrapper(IntArrayRef shape, int64_t high, int64_t low, T... extra_args) {
-  return Func(high, low, shape, std::forward<T>(extra_args)...);
+template <typename F, F Func, typename T0, typename T1, typename... T>
+Tensor rand_int_low_wrapper(IntArrayRef shape, T0 scalar0, T1 scalar1, T... extra_args) {
+  return Func(scalar0, scalar1, shape, std::forward<T>(extra_args)...);
 }
 
 template <typename A, A a, typename C>
-struct RandIntLowBatchRuleHelper;
+struct RandTwoLeadingScalarsBatchRuleHelper;
 
-template <typename F, F Func, typename T1, typename T2, typename T3, typename... T>
-struct RandIntLowBatchRuleHelper<F, Func, typelist<T1, T2, T3, T...>> {
-  static Tensor apply(int64_t high, int64_t low, IntArrayRef shape, T... extra_args) {
-    return random_batching_rule<decltype(&rand_int_low_wrapper<F, Func, T...>),
-                                &rand_int_low_wrapper<F, Func, T...>,
-                                int64_t, int64_t, T...>(shape, high, low, std::forward<T>(extra_args)...);
+template <typename F, F Func, typename T0, typename T1, typename T2, typename... T>
+struct RandTwoLeadingScalarsBatchRuleHelper<F, Func, typelist<T0, T1, T2, T...>> {
+  static Tensor apply(T0 scalar0, T1 scalar1, IntArrayRef shape, T... extra_args) {
+    return random_batching_rule<decltype(&rand_int_low_wrapper<F, Func, T0, T1, T...>),
+                                &rand_int_low_wrapper<F, Func, T0, T1, T...>,
+                                int64_t, int64_t, T...>(shape, scalar0, scalar1, std::forward<T>(extra_args)...);
   }
 };
 
@@ -176,9 +176,9 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchVmapMode, m) {
       RandIntBatchRuleHelper<decltype(&ATEN_FN2(op, overload)), &ATEN_FN2(op, overload), \
                             c10::guts::function_traits<decltype(ATEN_FN2(op, overload))>::parameter_types>::apply))
 
-  #define RANDINT_LOW_BATCH_RULE(op, overload) \
+  #define RAND_TWO_LEADING_SCALARS_BATCH_RULE(op, overload) \
     m.impl(#op"."#overload, SINGLE_ARG(\
-      RandIntLowBatchRuleHelper<decltype(&ATEN_FN2(op, overload)), &ATEN_FN2(op, overload), \
+      RandTwoLeadingScalarsBatchRuleHelper<decltype(&ATEN_FN2(op, overload)), &ATEN_FN2(op, overload), \
                                 c10::guts::function_traits<decltype(ATEN_FN2(op, overload))>::parameter_types>::apply))
   #define RANDPERM_BATCH_RULE(op) \
     m.impl(#op, SINGLE_ARG(\
@@ -208,11 +208,13 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchVmapMode, m) {
 
   RANDINT_BATCH_RULE(randint);
   RANDINT_BATCH_RULE2(randint, generator);
-  RANDINT_LOW_BATCH_RULE(randint, low);
-  RANDINT_LOW_BATCH_RULE(randint, low_generator);
+  RAND_TWO_LEADING_SCALARS_BATCH_RULE(randint, low);
+  RAND_TWO_LEADING_SCALARS_BATCH_RULE(randint, low_generator);
 
   RANDPERM_BATCH_RULE(randperm);
   RANDPERM_BATCH_RULE2(randperm, generator);
+
+  RAND_TWO_LEADING_SCALARS_BATCH_RULE(normal, float_float);
 
   #undef RANDOM_BATCH_RULE
   #undef RANDOM_BATCH_RULE2
@@ -220,7 +222,7 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchVmapMode, m) {
   #undef RANDOM_INPLACE_BATCH_RULE2
   #undef RANDINT_BATCH_RULE
   #undef RANDINT_BATCH_RULE2
-  #undef RANDINT_LOW_BATCH_RULE
+  #undef RAND_TWO_LEADING_SCALARS_BATCH_RULE
   #undef RANDPERM_BATCH_RULE
   #undef RANDPERM_BATCH_RULE2
 }
