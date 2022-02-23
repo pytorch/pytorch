@@ -163,8 +163,10 @@ def is_output_dtype_supported_by_backend(
         output_dtype == node_name_to_target_dtype[node.name]["output_activation_dtype"]
 
 def need_remove_observer(node, modules, node_name_to_target_dtype):
-    """ remove output observer when the node output is quint8
-    and input is 'placeholder'
+    """ Check if observer need to be removed
+    when the node output is not fp32 and input is 'placeholder'
+    the input is assumed to be quantized, so it is observed
+    in a different place rather than not observed.
     """
     node_output_dtype = get_arg_target_dtype_as_output(node, modules, node_name_to_target_dtype)
     if isinstance(node.args[0], Node):
