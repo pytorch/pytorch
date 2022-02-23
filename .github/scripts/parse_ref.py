@@ -19,4 +19,5 @@ def main() -> None:
 
 
 if __name__ == '__main__':
+    print("HELLO I AM PRINTING. PRINTING WORKS.")
     main()

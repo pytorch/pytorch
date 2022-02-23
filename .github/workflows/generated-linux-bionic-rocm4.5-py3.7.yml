@@ -160,7 +160,7 @@ jobs:
           retry docker pull "${DOCKER_IMAGE}"
       - name: Parse ref
         id: parse-ref
-        run: python .github/scripts/parse_ref.py
+        run: echo $GITHUB_REF && .github/scripts/parse_ref.py
       - name: Build
         env:
           BRANCH: ${{ steps.parse-ref.outputs.branch }}
@@ -342,7 +342,7 @@ jobs:
           df -H
       - name: Parse ref
         id: parse-ref
-        run: python .github/scripts/parse_ref.py
+        run: echo $GITHUB_REF && .github/scripts/parse_ref.py
       - name: Test
         env:
           PR_NUMBER: ${{ github.event.pull_request.number }}
@@ -564,7 +564,7 @@ jobs:
           df -H
       - name: Parse ref
         id: parse-ref
-        run: python .github/scripts/parse_ref.py
+        run: echo $GITHUB_REF && .github/scripts/parse_ref.py
       - name: Test
         env:
           PR_NUMBER: ${{ github.event.pull_request.number }}
@@ -786,7 +786,7 @@ jobs:
           df -H
       - name: Parse ref
         id: parse-ref
-        run: python .github/scripts/parse_ref.py
+        run: echo $GITHUB_REF && .github/scripts/parse_ref.py
       - name: Test
         env:
           PR_NUMBER: ${{ github.event.pull_request.number }}
