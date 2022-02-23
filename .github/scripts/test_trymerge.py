@@ -8,6 +8,7 @@ from unittest import TestCase, main, mock
 
 def mocked_gh_graphql(query: str, **kwargs: Any) -> Any:
     gql_db_fname = os.path.join(os.path.dirname(__file__), "gql_mocks.json")
+
     def get_mocked_queries() -> Any:
         if not os.path.exists(gql_db_fname):
             return {}
