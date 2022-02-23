@@ -106,7 +106,8 @@ ALLOW_LIST = [
     ("aten::_scatter_reduce", datetime.date(2022, 1, 31)),
     ("aten::native_multi_head_self_attention", datetime.date(9999, 1, 1)),
     ("aten::_native_multi_head_self_attention", datetime.date(9999, 1, 1)),
-    ("aten::scatter_reduce.two", datetime.date(2022, 3, 15)),
+    ("aten::_transform_bias_rescale_qkv", datetime.date(9999, 1, 1)),
+    ("aten::_scatter_reduce.two", datetime.date(9999, 1, 1)),
 ]
 
 ALLOW_LIST_COMPILED = [
