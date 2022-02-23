@@ -2265,7 +2265,7 @@ class TestQuantizeFx(QuantizationTestCase):
         mq = torch.ao.quantization.quantize_fx.convert_fx(mp)
         self.checkGraphModuleNodes(mq, expected_node_occurrence=convert_count_check)
 
-    def test_quantized_multiple_input_quantized_output(self):
+    def test_quantized_input_quantized_multiple_output(self):
         prepare_custom_config_dict = {
             'input_quantized_idxs': [0], 'output_quantized_idxs': [0, 1]}
         prepare_count_check = {
