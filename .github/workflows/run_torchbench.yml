@@ -37,7 +37,7 @@ jobs:
           . "${HOME}"/anaconda3/etc/profile.d/conda.sh
           conda activate pr-ci
           conda install -y numpy requests ninja pyyaml mkl mkl-include setuptools cmake cffi typing_extensions \
-                           future six dataclasses pillow pytest tabulate gitpython git-lfs tqdm
+                           future six dataclasses pillow pytest tabulate gitpython git-lfs tqdm psutil
           # install magma
           conda install -y -c pytorch "${MAGMA_VERSION}"
       - name: Setup TorchBench branch
