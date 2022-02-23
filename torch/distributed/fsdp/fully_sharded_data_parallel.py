@@ -745,6 +745,7 @@ class FullyShardedDataParallel(nn.Module):
         A context manager to expose full params for the current FSDP instance.
         Can be useful *after* forward/backward for a model to get the params for
         additional processing or checking.
+
         .. note:: This can be used on inner FSDPs.
         .. note:: This can *not* be used within a forward or backward pass. Nor
             can forward and backward be started from within this context.
@@ -756,6 +757,7 @@ class FullyShardedDataParallel(nn.Module):
             changes will be discarded). In the case where FSDP does not shard
             the parameters, currently only when world_size == 1, the
             modification is persisted regardless of ``writeback``.
+
         Args:
             recurse (bool, Optional): recursively summon all params for nested
                 FSDP instances (default: True)
