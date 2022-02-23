@@ -33,14 +33,9 @@ class HierarchicalModelAverager:
                                 At the 4th iteration, only the second process group will run
                                 averaging, because the first process group should be a
                                 subset of the second process group, and no need to execute the first
-                                process proup redundantly.
+                                process group redundantly.
                                 On the other hand, the third process group can only be triggered
                                 every 8 iterations, so it will not be triggered at the 4th iteration.
-                                If ``None``, the default process group,
-                                which is created by :func:`torch.distributed.init_process_group`
-                                will be used, and it will run averaging every iteration, which is
-                                normally equivalent to the vanilla gradient averaging just like
-                                :class:`~torch.nn.DistributedDataParallel` (DDP). (default: ``None``)
         warmup_steps (int): The number of warm-up steps. During this stage, model averaging is skipped.
         process_group (ProcessGroup, optional): The overall process group containing all the processes that runs model averaging.
                                                 If ``None``, the default process group, which is created
@@ -66,7 +61,7 @@ class HierarchicalModelAverager:
         >>>  )
         >>>  # Register a post-localSGD communication hook.
         >>>  # Assume that each machine has 4 GPUs, then each intra-machine subgroup has a size of 4.
-        >>>  subgroup, subgroups = dist.new_subgroups()
+        >>>  subgroup, _ = dist.new_subgroups()
         >>>  state = PostLocalSGDState(subgroup=subgroup, start_localSGD_iter=100)
         >>>  model.register_comm_hook(state, post_localSGD_hook)
         >>>
@@ -99,7 +94,7 @@ class HierarchicalModelAverager:
         if not period_group_size_dict:
             raise ValueError("Arg ``period_group_size_dict`` must not be empty.")
         self._periods = list(period_group_size_dict.keys())
-        if self._periods[0] < 0:
+        if self._periods[0] <= 0:
             raise ValueError("The minimum period in arg ``period_group_size_dict`` must be a positive value.")
         elif self._periods[-1] == 1:
             warnings.warn(
@@ -125,7 +120,7 @@ class HierarchicalModelAverager:
                 f"\tEach group that has {group_size} processes average parameters every {period} iterations, "
                 "if no higher-level averaging.")
             if group_size != overall_group_size:
-                self.period_process_group_dict[period], subgroups = dist.new_subgroups(
+                self.period_process_group_dict[period], _ = dist.new_subgroups(
                     group_size=group_size, group=ovall_group)
             else:
                 self.period_process_group_dict[period] = ovall_group
@@ -134,20 +129,19 @@ class HierarchicalModelAverager:
             raise ValueError("Arg ``warmup_steps`` must be a non-negative number.")
         self.warmup_steps = warmup_steps
         self.step = 0
-        self.group = ovall_group  # The process group used for averaging parameters.
 
-    def _is_process_group_found(self):
+    def _find_process_group(self):
         """
-        Returns whether ``step`` can be divided by a period in the keys of ``period_process_group_dict``.
+        Returns a tuple consisting of whether ``step`` can be divided by
+        a period in the keys of ``period_process_group_dict`` and the associated process group if any.
         If ``step`` can be divided by multiple periods in the keys of ``period_process_group_dict``,
-        then sets set ``_group`` as the process group corresponding to the largest period,
+        then the returned process group is the one corresponding to the largest period,
         since this process group will be used for averaging parameters at this ``step``.
         """
         for period in reversed(self._periods):
             if self.step % period == 0:
-                self.group = self.period_process_group_dict[period]
-                return True
-        return False
+                return (True, self.period_process_group_dict[period])
+        return (False, None)
 
     def average_parameters(self, params):
         r"""
@@ -157,9 +151,8 @@ class HierarchicalModelAverager:
         If ``step`` can be divided by multiple periods in the keys of ``period_process_group_dict``,
         only the largest period is used, and the corresponding process group is used for averaging parameters.
         """
-        if (
-            self.step >= self.warmup_steps
-            and self._is_process_group_found()
-        ):
-            utils.average_parameters(iter(params), self.group)
+        if self.step >= self.warmup_steps:
+            found, group = self._find_process_group()
+            if found:
+                utils.average_parameters(iter(params), group)
         self.step += 1
