@@ -44,7 +44,7 @@ concurrency:
         working-directory: !{{ pytorch_directory }}
 {%- endif %}
         id: parse-ref
-        run: python3 .github/scripts/parse_ref.py
+        run: python .github/scripts/parse_ref.py
 {%- endmacro -%}
 
 {%- macro upload_test_statistics(build_environment, when="always()", pytorch_directory="", needs_credentials=False) -%}
