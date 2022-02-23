@@ -97,6 +97,13 @@ class Tensor(torch._C._TensorBase):
             if self.is_sparse or self.device.type in ['xla', 'mlc', 'ort', 'meta', 'hpu'] or \
                     (type(self) is not Tensor and self.data_ptr() == 0):
                 new_tensor = self.clone()
+                if type(new_tensor) is not type(self):
+                    raise RuntimeError("The default implementation of __deepcopy__() for wrapper subclasses "
+                                       "only works for subclass types that implement clone() and for which "
+                                       "cloning returns another instance of the same subclass. You should either "
+                                       "properly implement clone() for your subclass or override __deepcopy__() "
+                                       "if it is intended behavior for clone() to return an instance of a "
+                                       "different type.")
             else:
                 new_storage = self.storage().__deepcopy__(memo)
                 if self.is_quantized:
@@ -123,8 +130,20 @@ class Tensor(torch._C._TensorBase):
                         quantizer_params,
                         self.requires_grad,
                         self._backward_hooks)
+                    if type(new_tensor) is not type(self):
+                        raise RuntimeError("The default implementation of __deepcopy__() for quantized tensors "
+                                           "expects the tensor returned by torch._utils._rebuild_qtensor() to "
+                                           "match the type of the instance being copied. If you encounter this, "
+                                           "please open an issue on PyTorch's GitHub.")
                 else:
                     new_tensor = self.new_empty([])
+                    if type(new_tensor) is not type(self):
+                        raise RuntimeError("The default implementation of __deepcopy__() for non-wrapper subclasses "
+                                           "only works for subclass types that implement new_empty() and for which "
+                                           "that function returns another instance of the same subclass. You should "
+                                           "either properly implement new_empty() for your subclass or override "
+                                           "__deepcopy__() if it is intended behavior for new_empty() to return "
+                                           "an instance of a different type.")
                     new_tensor.set_(new_storage, self.storage_offset(), self.size(), self.stride())
                     if self.is_conj():
                         new_tensor = new_tensor.conj_physical()
@@ -135,8 +154,7 @@ class Tensor(torch._C._TensorBase):
                 new_tensor.grad = self.grad.__deepcopy__(memo)
 
             if not type(self) is Tensor:
-                if not type(new_tensor) is type(self):
-                    new_tensor = new_tensor.as_subclass(type(self))  # type: ignore[arg-type]
+                assert type(new_tensor) is type(self)
 
                 # Plain Tensors don't have slots
                 slots_to_save = copyreg._slotnames(self.__class__)  # type: ignore[attr-defined]
