@@ -1,5 +1,6 @@
 #pragma once
 
+#include <torch/csrc/jit/api/module.h>
 #include <torch/csrc/jit/mobile/module.h>
 
 namespace torch {
