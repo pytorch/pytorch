@@ -1998,11 +1998,11 @@ class TestCaffe2Backend_opset9(unittest.TestCase):
             bias=has_bias,
             num_layers=num_layers,
         )
-        lstm_in = [
+        lstm_in = ([
             torch.from_numpy(inputs),
             torch.from_numpy(hx),
             torch.from_numpy(hx),
-        ] + [param.detach() for param in torch_lstm._flat_weights]
+        ] + [param.detach() for param in torch_lstm._flat_weights],)
 
         self.run_model_test(MyModel(), train=False, input=lstm_in, batch_size=3, use_gpu=False)
 

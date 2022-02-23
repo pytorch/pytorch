@@ -3596,7 +3596,10 @@ class Prim:
             for i, b_in in enumerate(b.inputs()):
                 if i == 0 and i < len(inputs):
                     b_in.setType(inputs[i].type())
-                if i > 0 and (i + 1) < len(inputs):
+                # For optional block inputs, they may switch between None not-None inside
+                # the loop body, so if the loop input is not optional, the block input may
+                # still need to be optional.
+                if i > 0 and (i + 1) < len(inputs) and not isinstance(b_in.type(), OptionalType):
                     b_in.setType(inputs[i + 1].type())
             torch._C._jit_pass_onnx_block(b, new_block, operator_export_type, env, False)  # type:ignore[arg-type]
         new_op_outputs = torch._C._jit_pass_fixup_onnx_controlflow_node(new_node, opset_version)
