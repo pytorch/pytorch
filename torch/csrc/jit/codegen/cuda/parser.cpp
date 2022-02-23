@@ -1347,9 +1347,6 @@ class IrParser {
                       static_cast<c10::TypePtr>(NoneType::get()))) {
                 running_mean =
                     value_map[node->input(3)->unique()]->as<TensorView>();
-                TORCH_INTERNAL_ASSERT(
-                    running_mean->isFusionInput(),
-                    "IO_tensor `instance_norm::running_mean` can only be input tensor to fusion");
               }
 
               TensorView* running_var = nullptr;
@@ -1357,9 +1354,6 @@ class IrParser {
                       static_cast<c10::TypePtr>(NoneType::get()))) {
                 running_var =
                     value_map[node->input(4)->unique()]->as<TensorView>();
-                TORCH_INTERNAL_ASSERT(
-                    running_var->isFusionInput(),
-                    "IO_tensor `instance_norm::running_var` can only be input tensor to fusion");
               }
 
               // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)

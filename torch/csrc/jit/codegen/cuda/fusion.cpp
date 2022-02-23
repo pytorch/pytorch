@@ -571,6 +571,32 @@ bool Fusion::isAliasCompatible(Val* left, Val* right) {
 }
 
 void Fusion::aliasOutputToInput(Val* output, Val* input) {
+  // Because we could cast output when input is casted.
+  TORCH_INTERNAL_ASSERT(
+      !output->isFusionOutput(),
+      "Do NOT add aliased output to fusion output outside of `aliasOutputToInput");
+
+  if (!input->isFusionInput()) {
+    auto input_expr = input->definition();
+    // TORCH_INTERNAL_ASSERT(input_def.etype() == ExprType::UnaryOp, "expected
+    // unary op for aliased input");
+    TORCH_INTERNAL_ASSERT(
+        input_expr->isA<UnaryOp>(), "expected unary op for aliased input");
+    auto input_uop = input_expr->as<UnaryOp>();
+    TORCH_INTERNAL_ASSERT(
+        input_uop->getUnaryOpType() == UnaryOpType::Cast,
+        "expected aliased input to be output of cast op");
+    input = input_uop->in();
+  }
+  TORCH_INTERNAL_ASSERT(
+      input->getDataType().has_value() && output->getDataType().has_value(),
+      "requires DataType to be available for aliased output to input");
+
+  if (input->getDataType().value() != output->getDataType().value()) {
+    output = castOp(input->getDataType().value(), output);
+  }
+  addOutput(output);
+
   TORCH_INTERNAL_ASSERT(
       isAliasCompatible(input, output),
       "The input and output values are not alias-compatible.");

@@ -16352,9 +16352,10 @@ TEST_F(NVFuserTest, FusionSegmentIoAlias_CUDA) {
                                    //  keeps normalization scheduler away)
   TensorView* tv6 = add(tv5, tv2); //  Group 1 (Broadcast after reduce)
 
-  fusion->addOutput(tv6);
   // Note: test alias;
   fusion->aliasOutputToInput(tv6, tv0);
+  // we need to add this back after we merge #1471
+  // fusion->addOutput(tv6);
 
   auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
   at::Tensor t0 = at::randn({128, 65}, options);

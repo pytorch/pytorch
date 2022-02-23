@@ -1509,7 +1509,15 @@ class TestCudaFuser(JitTestCase):
                 norm_shape = [input_shape[idx] for idx in range(dims - offset, dims)]
                 self._native_layer_norm_helper(input_shape, norm_shape, torch.bfloat16, "cuda", 1e-1)
 
-    def _norm_helper(self, shape, dtype, device, error, is_batch_norm_else_instance_norm, memory_format=torch.contiguous_format):
+    def _norm_helper(self,
+                     shape,
+                     dtype,
+                     device,
+                     error,
+                     is_batch_norm_else_instance_norm,
+                     memory_format=torch.contiguous_format,
+                     *,
+                     layer_dtype=torch.float32):
         class MyBatchNorm(torch.nn.Module):
             def __init__(self):
                 super(MyBatchNorm, self).__init__()
@@ -1531,8 +1539,8 @@ class TestCudaFuser(JitTestCase):
         t = MyBatchNorm() if is_batch_norm_else_instance_norm else MyInstanceNorm()
 
         x = torch.randn(shape, dtype=dtype, device=device).to(memory_format=memory_format)
-        running_mean = torch.zeros(shape[1], dtype=torch.float32, device=device)
-        running_var = torch.ones(shape[1], dtype=torch.float32, device=device)
+        running_mean = torch.zeros(shape[1], dtype=layer_dtype, device=device)
+        running_var = torch.ones(shape[1], dtype=layer_dtype, device=device)
         t_jit = torch.jit.script(t)
 
         eager_running_mean = running_mean.clone()
@@ -1555,6 +1563,18 @@ class TestCudaFuser(JitTestCase):
         self.assertTrue(self._compare("comparing running_mean failed", eager_running_mean, jit_running_mean, error))
         self.assertTrue(self._compare("comparing running_var failed", eager_running_var, jit_running_var, error))
         self.assertGraphContains(t_jit.graph_for(x, running_mean, running_var), FUSION_GUARD)
+
+    @unittest.skipIf(is_pre_volta(), "reduction not supported in pre volta device")
+    @unittest.skipIf(not RUN_CUDA, "requires CUDA")
+    @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
+                     "Requires fusion optimization pass to be effective")
+    def test_norm_half_layer(self):
+        size = [2, 4, 2, 2]
+
+        for is_batch_norm_else_instance_norm in [False, True]:
+            for mf in [torch.channels_last, torch.contiguous_format]:
+                self._norm_helper(size, torch.float16, "cuda", 1e-3, is_batch_norm_else_instance_norm,
+                                  memory_format=mf, layer_dtype=torch.float16)
 
     @unittest.skipIf(is_pre_volta(), "reduction not supported in pre volta device")
     @unittest.skipIf(not RUN_CUDA, "requires CUDA")
