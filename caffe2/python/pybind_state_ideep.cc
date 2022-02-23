@@ -65,10 +65,17 @@ class IDeepFetcher : public BlobFetcherBase {
         numpy_type != -1,
         "Unsupported ideep memory data type? This usually should not happen "
         "since ideep memory usually only do float and double.");
-    itensor::dims dims = atensor.get_public_format_dims();
+    itensor::dims dims;
+    bool need_reorder = atensor.need_reorder();
+    if (atensor.get_data_type() == idtype::f32) {
+      dims = atensor.get_dims();
+      need_reorder = need_reorder || atensor.get_desc().is_nhwc();
+    } else {
+      dims = atensor.get_public_format_dims();
+    }
     std::vector<npy_intp> npy_dims(dims.begin(), dims.end());
 
-    result.copied = force_copy || atensor.need_reorder();
+    result.copied = force_copy || need_reorder;
     // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     void* outPtr;
     if (result.copied) {
@@ -85,9 +92,13 @@ class IDeepFetcher : public BlobFetcherBase {
     if (numpy_type == NPY_OBJECT) {
       CAFFE_THROW("We don't support strings.");
     }
-
     if (result.copied) {
-      atensor.to_public(outPtr);
+      if (atensor.get_data_type() == idtype::f32) {
+        itensor temp_ten(atensor.get_desc().to_default_format(), outPtr);
+        atensor.reorder_to(temp_ten);
+      } else {
+        atensor.to_public(outPtr);
+      }
     }
 
     return result;

@@ -64,7 +64,10 @@ class CopyIDEEPToCPUOp final : public IDEEPOperator {
         }
         auto* Y =
             OperatorBase::OutputTensor(0, dims, at::dtype<float>().device(CPU));
-        X.to_public(Y->template mutable_data<float>());
+        itensor temp_ten(
+            X.get_desc().to_default_format(),
+            Y->template mutable_data<float>());
+        X.reorder_to(temp_ten);
       } else {
         CAFFE_THROW("Unsupported ideep type: ",
                     static_cast<int>(X.get_data_type()));
