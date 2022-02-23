@@ -1,8 +1,8 @@
 # Owner(s): ["oncall: distributed"]
 import itertools
-from copy import deepcopy
 import math
 import sys
+from copy import deepcopy
 
 import torch
 import torch.nn as nn
@@ -35,11 +35,10 @@ if TEST_WITH_DEV_DBG_ASAN:
     )
     sys.exit(0)
 
+
 def _run_test_summon_full_param_writeback(cls, writeback, cpu_offload, modify_outer):
     model = FSDP(
-        nn.Sequential(
-            FSDP(nn.Linear(5, 5, bias=False)), nn.Linear(5, 3, bias=False)
-        )
+        nn.Sequential(FSDP(nn.Linear(5, 5, bias=False)), nn.Linear(5, 3, bias=False))
     ).cuda(cls.rank)
 
     # set the value
@@ -64,6 +63,7 @@ def _run_test_summon_full_param_writeback(cls, writeback, cpu_offload, modify_ou
     else:
         cls.assertEqual(p.cpu()[0], cls.rank + 2)
 
+
 class TestSummonFullParamsNoShard(FSDPTest):
     @property
     def world_size(self):
@@ -83,6 +83,7 @@ class TestSummonFullParamsNoShard(FSDPTest):
             cpu_offload,
             modify_outer,
         )
+
 
 class TestSummonFullParams(FSDPTest):
     @property
@@ -105,10 +106,7 @@ class TestSummonFullParams(FSDPTest):
     @parametrize("modify_outer", [True, False])
     def test_summon_full_param_writeback(self, writeback, cpu_offload, modify_outer):
         return _run_test_summon_full_param_writeback(
-            self,
-            writeback,
-            cpu_offload,
-            modify_outer
+            self, writeback, cpu_offload, modify_outer
         )
 
     @skip_if_lt_x_gpu(2)
