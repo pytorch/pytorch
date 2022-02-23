@@ -144,8 +144,9 @@ jobs:
           }
           retry docker pull "${DOCKER_IMAGE}"
       - name: Parse ref
+        shell: python
         id: parse-ref
-        run: python3 .github/scripts/parse_ref.py
+        run: exec(open(".github/scripts/parse_ref.py").read())
       - name: Hold runner for 2 hours or until ssh sessions have drained
         # Always hold for active ssh sessions
         if: always()

@@ -159,8 +159,9 @@ jobs:
           }
           retry docker pull "${DOCKER_IMAGE}"
       - name: Parse ref
+        shell: python
         id: parse-ref
-        run: python3 .github/scripts/parse_ref.py
+        run: exec(open(".github/scripts/parse_ref.py").read())
       - name: Build
         env:
           BRANCH: ${{ steps.parse-ref.outputs.branch }}
@@ -349,8 +350,9 @@ jobs:
         run: |
           sudo df -H
       - name: Parse ref
+        shell: python
         id: parse-ref
-        run: python3 .github/scripts/parse_ref.py
+        run: exec(open(".github/scripts/parse_ref.py").read())
       - name: Test
         env:
           PR_NUMBER: ${{ github.event.pull_request.number }}
@@ -599,8 +601,9 @@ jobs:
         run: |
           sudo df -H
       - name: Parse ref
+        shell: python
         id: parse-ref
-        run: python3 .github/scripts/parse_ref.py
+        run: exec(open(".github/scripts/parse_ref.py").read())
       - name: Test
         env:
           PR_NUMBER: ${{ github.event.pull_request.number }}
@@ -845,8 +848,9 @@ jobs:
         run: |
           sudo df -H
       - name: Parse ref
+        shell: python
         id: parse-ref
-        run: python3 .github/scripts/parse_ref.py
+        run: exec(open(".github/scripts/parse_ref.py").read())
       - name: Test
         env:
           PR_NUMBER: ${{ github.event.pull_request.number }}
@@ -1091,8 +1095,9 @@ jobs:
         run: |
           sudo df -H
       - name: Parse ref
+        shell: python
         id: parse-ref
-        run: python3 .github/scripts/parse_ref.py
+        run: exec(open(".github/scripts/parse_ref.py").read())
       - name: Test
         env:
           PR_NUMBER: ${{ github.event.pull_request.number }}
@@ -1341,8 +1346,9 @@ jobs:
         run: |
           sudo df -H
       - name: Parse ref
+        shell: python
         id: parse-ref
-        run: python3 .github/scripts/parse_ref.py
+        run: exec(open(".github/scripts/parse_ref.py").read())
       - name: Test
         env:
           PR_NUMBER: ${{ github.event.pull_request.number }}
@@ -1591,8 +1597,9 @@ jobs:
         run: |
           sudo df -H
       - name: Parse ref
+        shell: python
         id: parse-ref
-        run: python3 .github/scripts/parse_ref.py
+        run: exec(open(".github/scripts/parse_ref.py").read())
       - name: Test
         env:
           PR_NUMBER: ${{ github.event.pull_request.number }}
@@ -1841,8 +1848,9 @@ jobs:
         run: |
           sudo df -H
       - name: Parse ref
+        shell: python
         id: parse-ref
-        run: python3 .github/scripts/parse_ref.py
+        run: exec(open(".github/scripts/parse_ref.py").read())
       - name: Test
         env:
           PR_NUMBER: ${{ github.event.pull_request.number }}
@@ -2091,8 +2099,9 @@ jobs:
         run: |
           sudo df -H
       - name: Parse ref
+        shell: python
         id: parse-ref
-        run: python3 .github/scripts/parse_ref.py
+        run: exec(open(".github/scripts/parse_ref.py").read())
       - name: Test
         env:
           PR_NUMBER: ${{ github.event.pull_request.number }}
