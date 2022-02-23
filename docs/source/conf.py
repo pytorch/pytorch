@@ -129,6 +129,8 @@ coverage_ignore_functions = [
 
 coverage_ignore_classes = [
     # torch.cuda
+    "ComplexDoubleTensor",
+    "ComplexFloatTensor",
     "BFloat16Storage",
     "BFloat16Tensor",
     "BoolStorage",
