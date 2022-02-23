@@ -1310,7 +1310,25 @@ def dropout2d(input: Tensor, p: float = 0.5, training: bool = True, inplace: boo
         return handle_torch_function(dropout2d, (input,), input, p=p, training=training, inplace=inplace)
     if p < 0.0 or p > 1.0:
         raise ValueError("dropout probability has to be between 0 and 1, " "but got {}".format(p))
-    return _VF.feature_dropout_(input, p, training) if inplace else _VF.feature_dropout(input, p, training)
+    inp_dim = input.dim()
+    if inp_dim not in (3, 4):
+        warn_msg = (f"dropout2d: Received a {inp_dim}-D input to dropout2d, which is deprecated "
+                    "and will result in an error in a future release. To retain the behavior "
+                    "and silence this warning, please use dropout instead. Note that dropout2d "
+                    "exists to provide channel-wise dropout on inputs with 2 spatial dimensions, "
+                    "a channel dimension, and an optional batch dimension (i.e. 3D or 4D inputs).")
+        warnings.warn(warn_msg)
+
+    is_batched = inp_dim == 4
+    if not is_batched:
+        input = input.unsqueeze_(0) if inplace else input.unsqueeze(0)
+
+    result = _VF.feature_dropout_(input, p, training) if inplace else _VF.feature_dropout(input, p, training)
+
+    if not is_batched:
+        result = result.squeeze_(0) if inplace else result.squeeze(0)
+
+    return result
 
 
 def dropout3d(input: Tensor, p: float = 0.5, training: bool = True, inplace: bool = False) -> Tensor:
@@ -1328,13 +1346,28 @@ def dropout3d(input: Tensor, p: float = 0.5, training: bool = True, inplace: boo
         training: apply dropout if is ``True``. Default: ``True``
         inplace: If set to ``True``, will do this operation in-place. Default: ``False``
     """
-    # This is 100% the same code as dropout2d. We duplicate this code so that
-    # stack traces are not confusing.
     if has_torch_function_unary(input):
         return handle_torch_function(dropout3d, (input,), input, p=p, training=training, inplace=inplace)
     if p < 0.0 or p > 1.0:
         raise ValueError("dropout probability has to be between 0 and 1, " "but got {}".format(p))
-    return _VF.feature_dropout_(input, p, training) if inplace else _VF.feature_dropout(input, p, training)
+    inp_dim = input.dim()
+    if inp_dim not in (4, 5):
+        warn_msg = (f"dropout3d: Received a {inp_dim}-D input to dropout3d, which is deprecated "
+                    "and will result in an error in a future release. To retain the behavior "
+                    "and silence this warning, please use dropout instead. Note that dropout3d "
+                    "exists to provide channel-wise dropout on inputs with 3 spatial dimensions, "
+                    "a channel dimension, and an optional batch dimension (i.e. 4D or 5D inputs).")
+        warnings.warn(warn_msg)
+
+    is_batched = inp_dim == 5
+    if not is_batched:
+        input = input.unsqueeze_(0) if inplace else input.unsqueeze(0)
+
+    result = _VF.feature_dropout_(input, p, training) if inplace else _VF.feature_dropout(input, p, training)
+
+    if not is_batched:
+        result = result.squeeze_(0) if inplace else result.squeeze(0)
+    return result
 
 
 def feature_alpha_dropout(input: Tensor, p: float = 0.5, training: bool = False, inplace: bool = False) -> Tensor:
@@ -1648,20 +1681,21 @@ See :class:`~torch.nn.LogSigmoid` for more details.
 """,
 )
 
-
 gelu = _add_docstr(
     torch._C._nn.gelu,
     r"""
-gelu(input) -> Tensor
+gelu(input, approximate = 'none') -> Tensor
 
-Applies element-wise the function
+When the approximate argument is 'none', it applies element-wise the function
 :math:`\text{GELU}(x) = x * \Phi(x)`
 
 where :math:`\Phi(x)` is the Cumulative Distribution Function for Gaussian Distribution.
 
+When the approximate argument is 'tanh', Gelu is estimated with:
+    :math::  \text{GELU}(x) = 0.5 * x * (1 + \text{Tanh}(\sqrt(2 / \pi) * (x + 0.044715 * x^3)))
+
 See `Gaussian Error Linear Units (GELUs) <https://arxiv.org/abs/1606.08415>`_.
 """)
-
 
 hardshrink = _add_docstr(
     torch.hardshrink,
@@ -1946,7 +1980,7 @@ This operator supports :ref:`TensorFloat32<tf32_on_ampere>`.
 Shape:
 
     - Input: :math:`(*, in\_features)` where `*` means any number of
-        additional dimensions, including none
+      additional dimensions, including none
     - Weight: :math:`(out\_features, in\_features)` or :math:`(in\_features)`
     - Bias: :math:`(out\_features)` or :math:`()`
     - Output: :math:`(*, out\_features)` or :math:`(*)`, based on the shape of the weight
@@ -3437,8 +3471,7 @@ def multi_margin_loss(
     reduce: Optional[bool] = None,
     reduction: str = "mean",
 ) -> Tensor:
-    r"""multi_margin_loss(input, target, p=1, margin=1, weight=None, size_average=None,
-                          reduce=None, reduction='mean') -> Tensor
+    r"""multi_margin_loss(input, target, p=1, margin=1, weight=None, size_average=None, reduce=None, reduction='mean') -> Tensor
 
     See :class:`~torch.nn.MultiMarginLoss` for details.
     """
@@ -3557,6 +3590,50 @@ Examples::
 """,
 )
 
+native_channel_shuffle = _add_docstr(
+    torch.native_channel_shuffle,
+    r"""
+native_channel_shuffle(input, groups) -> Tensor
+
+Native kernel level implementation of the `channel_shuffle`.
+This function might become private in future releases, use with caution.
+
+Divide the channels in a tensor of shape :math:`(*, C , H, W)`
+into g groups and rearrange them as :math:`(*, C \frac g, g, H, W)`,
+while keeping the original tensor shape.
+
+See :class:`~torch.nn.ChannelShuffle` for details.
+
+Args:
+    input (Tensor): the input tensor
+    groups (int): number of groups to divide channels in and rearrange.
+
+Examples::
+
+    >>> input = torch.randn(1, 4, 2, 2)
+    >>> print(input)
+    [[[[1, 2],
+       [3, 4]],
+      [[5, 6],
+       [7, 8]],
+      [[9, 10],
+       [11, 12]],
+      [[13, 14],
+       [15, 16]],
+     ]]
+    >>> output = torch.nn.functional.native_channel_shuffle(input, 2)
+    >>> print(output)
+    [[[[1, 2],
+       [3, 4]],
+      [[9, 10],
+       [11, 12]],
+      [[5, 6],
+       [7, 8]],
+      [[13, 14],
+       [15, 16]],
+     ]]
+""",
+)
 
 @_overload  # noqa: F811
 def upsample(input: Tensor, size: Optional[int] = None, scale_factor: Optional[float] = None, mode: str = "nearest", align_corners: Optional[bool] = None) -> Tensor:  # noqa: F811
@@ -3700,7 +3777,7 @@ def interpolate(input: Tensor, size: Optional[int] = None, scale_factor: Optiona
             the interpolation. Note that when `scale_factor` is floating-point, it may differ
             from the recomputed `scale_factor` due to rounding and precision issues.
             If `recompute_scale_factor` is ``False``, then `size` or `scale_factor` will
-            be used directly for interpolation.
+            be used directly for interpolation. Default: ``None``.
         antialias (bool, optional): flag to apply anti-aliasing. Default: ``False``. Using anti-alias
             option together with ``align_corners=False``, interpolation result would match Pillow
             result for downsampling operation. Supported modes: ``'bilinear'``, ``'bicubic'``.
@@ -3716,23 +3793,6 @@ def interpolate(input: Tensor, size: Optional[int] = None, scale_factor: Optiona
         algorithms and fixes known issues with ``mode='nearest'``. This mode is introduced to keep
         backward compatibility.
         Mode ``mode='nearest'`` matches buggy OpenCV's ``INTER_NEAREST`` interpolation algorithm.
-
-    .. warning::
-        With ``align_corners = True``, the linearly interpolating modes
-        (`linear`, `bilinear`, and `trilinear`) don't proportionally align the
-        output and input pixels, and thus the output values can depend on the
-        input size. This was the default behavior for these modes up to version
-        0.3.1. Since then, the default behavior is ``align_corners = False``.
-        See :class:`~torch.nn.Upsample` for concrete examples on how this
-        affects the outputs.
-
-    .. warning::
-        When scale_factor is specified, if recompute_scale_factor=True,
-        scale_factor is used to compute the output_size which will then
-        be used to infer new scales for the interpolation.
-        The default behavior for recompute_scale_factor changed to False
-        in 1.6.0, and scale_factor is used in the interpolation
-        calculation.
 
     Note:
         {backward_reproducibility_note}
@@ -3758,12 +3818,6 @@ def interpolate(input: Tensor, size: Optional[int] = None, scale_factor: Optiona
             )
     else:
         if align_corners is None:
-            warnings.warn(
-                "Default upsampling behavior when mode={} is changed "
-                "to align_corners=False since 0.4.0. Please specify "
-                "align_corners=True if the old behavior is desired. "
-                "See the documentation of nn.Upsample for details.".format(mode)
-            )
             align_corners = False
 
     dim = input.dim() - 2  # Number of spatial dimensions.
@@ -3807,21 +3861,7 @@ def interpolate(input: Tensor, size: Optional[int] = None, scale_factor: Optiona
     else:
         raise ValueError("either size or scale_factor should be defined")
 
-    if recompute_scale_factor is None:
-        # only warn when the scales have floating values since
-        # the result for ints is the same with/without recompute_scale_factor
-        if scale_factors is not None:
-            for scale in scale_factors:
-                if math.floor(scale) != scale:
-                    warnings.warn(
-                        "The default behavior for interpolate/upsample with float scale_factor changed "
-                        "in 1.6.0 to align with other frameworks/libraries, and now uses scale_factor directly, "
-                        "instead of relying on the computed output size. "
-                        "If you wish to restore the old behavior, please set recompute_scale_factor=True. "
-                        "See the documentation of nn.Upsample for details. "
-                    )
-                    break
-    elif recompute_scale_factor and size is not None:
+    if recompute_scale_factor is not None and recompute_scale_factor and size is not None:
         raise ValueError("recompute_scale_factor is not meaningful with an explicit size.")
 
     # "area" mode always requires an explicit size rather than scale factor.
@@ -5317,8 +5357,9 @@ def multi_head_attention_forward(
     # (deep breath) calculate attention and out projection
     #
     attn_output, attn_output_weights = _scaled_dot_product_attention(q, k, v, attn_mask, dropout_p)
-    attn_output = attn_output.transpose(0, 1).contiguous().view(tgt_len, bsz, embed_dim)
+    attn_output = attn_output.transpose(0, 1).contiguous().view(tgt_len * bsz, embed_dim)
     attn_output = linear(attn_output, out_proj_weight, out_proj_bias)
+    attn_output = attn_output.view(tgt_len, bsz, attn_output.size(1))
 
     if need_weights:
         # optionally average attention weights over heads

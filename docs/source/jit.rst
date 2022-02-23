@@ -63,6 +63,7 @@ Creating TorchScript Code
     optimize_for_inference
     enable_onednn_fusion
     onednn_fusion_enabled
+    set_fusion_strategy
     save
     load
     ignore

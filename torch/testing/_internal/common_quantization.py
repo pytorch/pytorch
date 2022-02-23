@@ -872,13 +872,12 @@ class QuantizationTestCase(TestCase):
                 prepare_expected_node_occurrence, prepare_expected_node_list)
 
             prepared_copy = copy.deepcopy(prepared)
-            result_prepared = copy.deepcopy(prepared)
             qgraph = convert_fx(prepared)
             qgraph_reference = convert_fx(prepared_copy, is_reference=True)
             result = qgraph(*inputs)
-            result_quantized = copy.deepcopy(qgraph)
             result_reference = qgraph_reference(*inputs)
-            result_quantized_reference = copy.deepcopy(qgraph_reference)
+            qgraph_copy = copy.deepcopy(qgraph)
+            qgraph_reference_copy = copy.deepcopy(qgraph_reference)
 
             qgraph_to_check = qgraph_reference if is_reference else qgraph
             if print_debug_info:
@@ -888,10 +887,11 @@ class QuantizationTestCase(TestCase):
                 print()
             self.checkGraphModuleNodes(
                 qgraph_to_check, expected_node, expected_node_occurrence, expected_node_list)
-            return {"prepared": result_prepared,
-                    "quantized": result_quantized,
-                    "quantized_reference": result_quantized_reference,
-                    "result": result}
+            return {"prepared": prepared_copy,
+                    "quantized": qgraph_copy,
+                    "quantized_reference": qgraph_reference_copy,
+                    "quantized_output": result,
+                    "quantized_reference_output": result_reference}
 
 
     def checkEmbeddingSerialization(self, qemb, num_embeddings, embedding_dim, indices, offsets,

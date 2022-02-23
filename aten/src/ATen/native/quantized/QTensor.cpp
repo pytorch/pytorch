@@ -94,7 +94,6 @@ Tensor quantize_per_channel(
 }
 
 Tensor dequantize_cpu_or_cuda(const Tensor& self) {
-  TORCH_CHECK(!self.is_quantized());
   return self.to(at::kFloat);
 }
 

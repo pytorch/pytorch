@@ -559,7 +559,7 @@ static PyObject * THPVariable_logspace(PyObject* self_, PyObject* args, PyObject
 {
   HANDLE_TH_ERRORS
   static PythonArgParser parser({
-    "logspace(Scalar start, Scalar end, int64_t? steps=None, double base=10.0, *, Tensor out=None, ScalarType dtype=None, Layout layout=torch.strided, Device device=None, bool pin_memory=False, bool requires_grad=False)",
+    "logspace(Scalar start, Scalar end, int64_t steps, double base=10.0, *, Tensor out=None, ScalarType dtype=None, Layout layout=torch.strided, Device device=None, bool pin_memory=False, bool requires_grad=False)",
   }, /*traceable=*/true);
 
   ParsedArgs<10> parsed_args;
@@ -568,7 +568,7 @@ static PyObject * THPVariable_logspace(PyObject* self_, PyObject* args, PyObject
     return handle_torch_function(_r, nullptr, args, kwargs, THPVariableFunctionsModule, "torch");
   }
   if (_r.isNone(4)) {
-    // aten::logspace(Scalar start, Scalar end, int? steps=None, float base=10.0, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
+    // aten::logspace(Scalar start, Scalar end, int steps, float base=10.0, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
 
     // NOTE: r.scalartype(X) gives the default dtype if r.isNone(X)
     // This leads to problem in the operator argument checks,
@@ -581,22 +581,22 @@ static PyObject * THPVariable_logspace(PyObject* self_, PyObject* args, PyObject
         .pinned_memory(_r.toBool(8));
     torch::utils::maybe_initialize_cuda(options);
 
-    auto dispatch_logspace = [](Scalar start, Scalar end, c10::optional<int64_t> steps, double base, TensorOptions options) -> Tensor {
+    auto dispatch_logspace = [](Scalar start, Scalar end, int64_t steps, double base, TensorOptions options) -> Tensor {
       pybind11::gil_scoped_release no_gil;
       return torch::logspace(start, end, steps, base, options);
     };
-    return wrap(dispatch_logspace(_r.scalar(0), _r.scalar(1), _r.toInt64Optional(2), _r.toDouble(3), options));
+    return wrap(dispatch_logspace(_r.scalar(0), _r.scalar(1), _r.toInt64(2), _r.toDouble(3), options));
   } else {
-    // aten::logspace.out(Scalar start, Scalar end, int? steps=None, float base=10.0, *, Tensor(a!) out) -> Tensor(a!)
+    // aten::logspace.out(Scalar start, Scalar end, int steps, float base=10.0, *, Tensor(a!) out) -> Tensor(a!)
     check_out_type_matches(_r.tensor(4), _r.scalartype(5),
                            _r.isNone(5), _r.layoutOptional(6),
                            _r.device(7), _r.isNone(7));
 
-    auto dispatch_logspace_out = [](Tensor out, Scalar start, Scalar end, c10::optional<int64_t> steps, double base) -> Tensor {
+    auto dispatch_logspace_out = [](Tensor out, Scalar start, Scalar end, int64_t steps, double base) -> Tensor {
       pybind11::gil_scoped_release no_gil;
       return at::logspace_out(out, start, end, steps, base);
     };
-    return wrap(dispatch_logspace_out(_r.tensor(4), _r.scalar(0), _r.scalar(1), _r.toInt64Optional(2), _r.toDouble(3)).set_requires_grad(_r.toBool(9)));
+    return wrap(dispatch_logspace_out(_r.tensor(4), _r.scalar(0), _r.scalar(1), _r.toInt64(2), _r.toDouble(3)).set_requires_grad(_r.toBool(9)));
   }
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS

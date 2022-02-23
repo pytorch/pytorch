@@ -61,7 +61,7 @@ on:
       !{{ common_android.build_android("pytorch-linux-xenial-py3-clang5-android-ndk-r19c-arm-v8a-build", "arm-v8a") }}
       !{{ common_android.build_android("pytorch-linux-xenial-py3-clang5-android-ndk-r19c-x86_32-build", "x86_32") }}
       !{{ common_android.build_android("pytorch-linux-xenial-py3-clang5-android-ndk-r19c-x86_64-build", "x86_64") }}
-      - name: Build-Final-Artifcact
+      - name: Build final artifact
         env:
           BRANCH: ${{ steps.parse-ref.outputs.branch }}
         run: |

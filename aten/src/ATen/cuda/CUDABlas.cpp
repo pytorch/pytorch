@@ -105,42 +105,6 @@ namespace at {
 namespace cuda {
 namespace blas {
 
-C10_EXPORT const char* _cublasGetErrorEnum(cublasStatus_t error) {
-  if (error == CUBLAS_STATUS_SUCCESS) {
-    return "CUBLAS_STATUS_SUCCESS";
-  }
-  if (error == CUBLAS_STATUS_NOT_INITIALIZED) {
-    return "CUBLAS_STATUS_NOT_INITIALIZED";
-  }
-  if (error == CUBLAS_STATUS_ALLOC_FAILED) {
-    return "CUBLAS_STATUS_ALLOC_FAILED";
-  }
-  if (error == CUBLAS_STATUS_INVALID_VALUE) {
-    return "CUBLAS_STATUS_INVALID_VALUE";
-  }
-  if (error == CUBLAS_STATUS_ARCH_MISMATCH) {
-    return "CUBLAS_STATUS_ARCH_MISMATCH";
-  }
-  if (error == CUBLAS_STATUS_MAPPING_ERROR) {
-    return "CUBLAS_STATUS_MAPPING_ERROR";
-  }
-  if (error == CUBLAS_STATUS_EXECUTION_FAILED) {
-    return "CUBLAS_STATUS_EXECUTION_FAILED";
-  }
-  if (error == CUBLAS_STATUS_INTERNAL_ERROR) {
-    return "CUBLAS_STATUS_INTERNAL_ERROR";
-  }
-  if (error == CUBLAS_STATUS_NOT_SUPPORTED) {
-    return "CUBLAS_STATUS_NOT_SUPPORTED";
-  }
-#ifdef CUBLAS_STATUS_LICENSE_ERROR
-  if (error == CUBLAS_STATUS_LICENSE_ERROR) {
-    return "CUBLAS_STATUS_LICENSE_ERROR";
-  }
-#endif
-  return "<unknown>";
-}
-
 /* LEVEL 3 BLAS FUNCTIONS */
 
 #ifndef USE_ROCM
@@ -621,7 +585,7 @@ class CuBlasLtMatmulDescriptor : public CuBlasLtDescriptor<
   CuBlasLtMatmulDescriptor(
       cublasComputeType_t compute_type,
       cudaDataType_t scale_type) {
-    cublasLtMatmulDesc_t raw_descriptor;
+    cublasLtMatmulDesc_t raw_descriptor = nullptr;
     TORCH_CUDABLAS_CHECK(
         cublasLtMatmulDescCreate(&raw_descriptor, compute_type, scale_type));
     descriptor_.reset(raw_descriptor);
@@ -637,7 +601,7 @@ class CuBlasLtMatrixLayout : public CuBlasLtDescriptor<
       uint64_t rows,
       uint64_t cols,
       int64_t ld) {
-    cublasLtMatrixLayout_t raw_descriptor;
+    cublasLtMatrixLayout_t raw_descriptor = nullptr;
     TORCH_CUDABLAS_CHECK(
         cublasLtMatrixLayoutCreate(&raw_descriptor, type, rows, cols, ld));
     descriptor_.reset(raw_descriptor);
@@ -649,7 +613,7 @@ class CuBlasLtMatmulPreference : public CuBlasLtDescriptor<
                                      &cublasLtMatmulPreferenceDestroy> {
  public:
   CuBlasLtMatmulPreference() {
-    cublasLtMatmulPreference_t raw_descriptor;
+    cublasLtMatmulPreference_t raw_descriptor = nullptr;
     TORCH_CUDABLAS_CHECK(cublasLtMatmulPreferenceCreate(&raw_descriptor));
     descriptor_.reset(raw_descriptor);
   }
@@ -674,7 +638,7 @@ void gemm_and_bias(
   using opmath_t = at::opmath_type<Dtype>;
   opmath_t beta_val = 0; // bias is added in epilogue
 
-  cudaDataType_t abcType;
+  cudaDataType_t abcType = CUDA_R_32F;
   cublasComputeType_t computeType = CUBLAS_COMPUTE_32F;
   cudaDataType_t scaleType = CUDA_R_32F;
   if (std::is_same<Dtype, double>::value) {
@@ -682,7 +646,9 @@ void gemm_and_bias(
     computeType = CUBLAS_COMPUTE_64F;
     scaleType = CUDA_R_64F;
   } else if (std::is_same<Dtype, float>::value) {
-    // Should set computeType = CUBLAS_COMPUTE_32F_FAST_TF32 ?
+    if (at::globalContext().allowTF32CuBLAS()) {
+      computeType = CUBLAS_COMPUTE_32F_FAST_TF32;
+    }
     abcType = CUDA_R_32F;
   } else if (std::is_same<Dtype, at::Half>::value) {
     abcType = CUDA_R_16F;
