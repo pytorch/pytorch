@@ -128,7 +128,7 @@ def node_arg_is_bias(node: Node, arg: Any) -> bool:
 def is_input_arg_dtype_supported_by_backend(
     arg: Argument,
     node: Node,
-    node_name_to_target_dtype:Dict[str, Dict[str, Optional[Union[torch.dtype, type]]]],
+    node_name_to_target_dtype: Dict[str, Dict[str, Optional[Union[torch.dtype, type]]]],
     dtype_config: Dict[str, torch.dtype],
 ) -> bool:
     """ Check if the configured qconfig for the argument
@@ -155,7 +155,7 @@ def is_input_arg_dtype_supported_by_backend(
 
 def is_output_dtype_supported_by_backend(
     node: Node,
-    node_name_to_target_dtype:Dict[str, Dict[str, Optional[Union[torch.dtype, type]]]],
+    node_name_to_target_dtype: Dict[str, Dict[str, Optional[Union[torch.dtype, type]]]],
     dtype_config: Dict[str, torch.dtype],
 ) -> bool:
     """ Check if the configured qconfig for the output
@@ -363,8 +363,8 @@ def get_target_activation_dtype_for_node(
 def get_arg_target_dtype_as_output(
     arg: Node,
     modules: Dict[str, torch.nn.Module],
-    node_name_to_target_dtype:Dict[str, Dict[str, Optional[Union[torch.dtype, type]]]],
-) -> Optional[torch.dtype]:
+    node_name_to_target_dtype: Dict[str, Dict[str, Optional[Union[torch.dtype, type]]]],
+) -> Optional[Union[torch.dtype, type]]:
     """ Get the target output activation dtype for
     the argumnet in the original graph, skipping inserted observers
     We are assuming that the observers are inserted correctly, and the dtype for
@@ -382,8 +382,8 @@ def get_arg_target_dtype_as_input_to_node(
     arg: Node,
     node: Node,
     modules: Dict[str, torch.nn.Module],
-    node_name_to_target_dtype:Dict[str, Dict[str, Optional[Union[torch.dtype, type]]]],
-) -> Optional[torch.dtype]:
+    node_name_to_target_dtype: Dict[str, Dict[str, Optional[Union[torch.dtype, type]]]],
+) -> Optional[Union[torch.dtype, type]]:
     """ Get the target argument dtype for the argument `arg`, as input
     to node `node`
     """
@@ -409,7 +409,7 @@ def maybe_insert_input_observer_for_arg_or_kwarg(
     model: torch.nn.Module,
     modules: Dict[str, torch.nn.Module],
     graph: Graph,
-    node_name_to_target_dtype:Dict[str, Dict[str, Optional[Union[torch.dtype, type]]]],
+    node_name_to_target_dtype: Dict[str, Dict[str, Optional[Union[torch.dtype, type]]]],
     qhandler: Optional[QuantizeHandler],
     prepare_custom_config_dict: Dict[str, Any],
     backend_config_dict: Optional[Dict[str, Any]],
@@ -716,7 +716,7 @@ def maybe_insert_observers_before_graph_output(
     def _recursive_maybe_replace_node_with_obs(
         maybe_node: Argument,
         target_dtype: torch.dtype,
-        node_name_to_target_dtype:Dict[str, Dict[str, Optional[Union[torch.dtype, type]]]],
+        node_name_to_target_dtype: Dict[str, Dict[str, Optional[Union[torch.dtype, type]]]],
         qconfig_map: Dict[str, QConfigAny],
         model: torch.nn.Module,
         modules: Dict[str, torch.nn.Module],
