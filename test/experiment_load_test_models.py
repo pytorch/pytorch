@@ -7,14 +7,21 @@ from textwrap import dedent
 import_template = "import torch\n"
 
 model_template = dedent('''
-    class Foo{class_name}(torch.nn.Module):
+    class Foo_{class_name}(torch.nn.Module):
         def __init__(self):
-            super(Foo{class_name}, self).__init__()
+            super(Foo_{class_name}, self).__init__()
 
         def forward(self, inp):
             return torch.{op_name}(inp)
+
+    foo_{class_name}_instance = torch.jit.script(Foo_{class_name}())
     ''')
 
+end_template = dedent('''
+    if __name__ == "__main__":
+        for key, val in dict(globals()):
+            print(key, val)
+    ''')
 # for op in op_db:
 #     if isinstance(op, OpInfo):
 #         is_errored = False
@@ -64,7 +71,6 @@ model_template = dedent('''
 #             #     print(op_class().op_name)
 
 def main():
-
     dump_file = import_template
     models = []
     for op in op_db:
@@ -85,12 +91,13 @@ def main():
                     inputs_for_dtype = op.sample_inputs(device="cpu", dtype=dtype)
                     possible_inputs.extend(inputs_for_dtype)
 
-                model_str = model_template.format(class_name=op.name, op_name=op.name)
+                model_str = model_template.format(class_name=op.name.replace(".", "_"), op_name=op.name)
                 models.append(model_str)
 
     models_str = "\n".join(models)
 
     dump_file += models_str
+    dump_file += end_template
 
     with open("./test_models.py", "w") as f:
         f.write(dump_file)

@@ -1366,7 +1366,7 @@
   device_guard: False
   dispatch:
     MkldnnCPU: copy_mkldnn_
-    SparseCPU, SparseCUDA, SparseHIP: copy_sparse_wrapper_
+    SparseCPU, SparseCUDA: copy_sparse_wrapper_
     CompositeExplicitAutograd: copy_
     SparseCsrCPU, SparseCsrCUDA: copy_sparse_csr_
 
