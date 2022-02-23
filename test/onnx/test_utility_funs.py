@@ -891,39 +891,6 @@ class TestUtilityFuns_opset9(_BaseTestCase):
         self.assertEqual(next(iter).kind(), "onnx::Constant")
         self.assertEqual(next(iter).kind(), "aten::cosine_similarity")
 
-    def test_quantized_fallthrough(self):
-        # Test Quantized op
-        class QModule(torch.nn.Module):
-            def __init__(self):
-                super(QModule, self).__init__()
-                self.quant1 = torch.ao.quantization.QuantStub()
-                self.dequant = torch.ao.quantization.DeQuantStub()
-
-            def forward(self, x):
-                res = self.quant1(x)
-                return self.dequant(res)
-
-        model = QModule()
-        torch.backends.quantized.engine = "qnnpack"
-        pt_inputs = (torch.randn(1, 2, 3, 4))
-        model.qconfig = torch.ao.quantization.default_qconfig
-        q_model = torch.ao.quantization.prepare(model, inplace=False)
-        q_model = torch.ao.quantization.convert(q_model, inplace=False)
-
-        q_model.eval()
-
-        graph, _, __ = self._model_to_graph(q_model, pt_inputs,
-                                            operator_export_type=OperatorExportTypes.ONNX_FALLTHROUGH,
-                                            input_names=["pt_inputs"],
-                                            dynamic_axes={"pt_inputs": [0, 1, 2, 3]})
-
-        iter = graph.nodes()
-        self.assertEqual(next(iter).kind(), "onnx::Constant")
-        self.assertEqual(next(iter).kind(), "onnx::Constant")
-        self.assertEqual(next(iter).kind(), "onnx::Constant")
-        self.assertEqual(next(iter).kind(), "aten::quantize_per_tensor")
-        self.assertEqual(next(iter).kind(), "aten::dequantize")
-
     # prim::ListConstruct is exported as onnx::SequenceConstruct for opset >= 11
     @skipIfUnsupportedMaxOpsetVersion(10)
     def test_prim_fallthrough(self):
