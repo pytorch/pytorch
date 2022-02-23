@@ -853,9 +853,10 @@ class TestQuantizeDBR(QuantizeDBRTestCase):
         qconfig = torch.quantization.default_qconfig
         self._test_auto_tracing(model_fp32, qconfig, (torch.randn(1, 1, 2, 2),))
 
-    @unittest.skip('this depends on unsupported syntax detection, currently disabled')
     def test_vovnet_sequential(self):
-
+        # We cannot quantize SequentialAppendList directly because
+        # AutoQuantizationStateModuleDict would appear in self.items.
+        # However, we can wrap it and quantize the wrapper.
         class SequentialAppendList(nn.Sequential):
             def __init__(self, *args):
                 super(SequentialAppendList, self).__init__(*args)
@@ -870,7 +871,16 @@ class TestQuantizeDBR(QuantizeDBRTestCase):
                 x = torch.cat(concat_list, dim=1)
                 return x
 
-        m = SequentialAppendList(torch.nn.Conv2d(1, 1, 1)).eval()
+        class Wrapper(nn.Module):
+            def __init__(self, *args):
+                super().__init__()
+                self.append_list = SequentialAppendList(*args)
+
+            def forward(self, x):
+                x = self.append_list(x)
+                return x
+
+        m = Wrapper(torch.nn.Conv2d(1, 1, 1)).eval()
         qconfig = torch.quantization.default_qconfig
         self._test_auto_tracing(m, qconfig, (torch.randn(1, 1, 1, 1),))
 
@@ -922,10 +932,11 @@ class TestQuantizeDBR(QuantizeDBRTestCase):
             model_fp32, qconfig, (torch.randn(1, 1, 2, 2),),
             fuse_modules=False)
 
-    # this is broken because AutoQuantizationState appears in self.items
-    @unittest.skip('TODO fix this')
     def test_module_calls_items(self):
-        class M(torch.nn.ModuleDict):
+        # We cannot quantize M1 directly because
+        # AutoQuantizationStateModuleDict would appear in self.items.
+        # However, we can wrap it and quantize the wrapper.
+        class M1(torch.nn.ModuleDict):
             def __init__(self):
                 super().__init__()
                 for i in range(2):
@@ -938,10 +949,22 @@ class TestQuantizeDBR(QuantizeDBRTestCase):
                     layers.append(layer(x))
                 return torch.cat(layers, dim=1)
 
-        model_fp32 = M().eval()
+        class M2(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.m1 = M1()
+
+            def forward(self, x):
+                x = self.m1(x)
+                return x
+
+        model_fp32 = M2().eval()
         qconfig = torch.quantization.default_qconfig
         self._test_auto_tracing(
-            model_fp32, qconfig, (torch.randn(1, 1, 2, 2),))
+            model_fp32, qconfig, (torch.randn(1, 1, 2, 2),),
+            # TODO(future PR): implement observer sharing for torch.cat
+            # in DBR quant, to ensure that numerical behavior matches
+            do_fx_comparison=False)
 
     def test_subclass_of_quantizeable_module(self):
         """
