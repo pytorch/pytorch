@@ -24,7 +24,7 @@ def div(a : ${Scalar}, b : Tensor) -> Tensor:
   return torch.reciprocal(b) * a
 )SCRIPT");
 
-auto scalar_comparator_operators_source = at::jit::CodeTemplate(
+auto scalar_operators_no_complex_source = at::jit::CodeTemplate(
     R"SCRIPT(
 def lt(a : ${Scalar}, b : Tensor) -> Tensor:
   return b > a
@@ -225,7 +225,7 @@ struct BuiltinFunctionRegistry {
     for (auto scalar : {"float", "int"}) {
       at::jit::TemplateEnv env;
       env.s("Scalar", scalar);
-      loadSource(scalar_comparator_operators_source.format(env), "aten");
+      loadSource(scalar_operators_no_complex_source.format(env), "aten");
     }
 
     using str_pair = std::pair<std::string, std::string>;
