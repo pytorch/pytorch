@@ -696,6 +696,11 @@ def maybe_insert_observers_before_graph_output(
     for those nodes.
     """
 
+    # TODO(future PR): update the output_quantized_idxs API to match
+    # arbitrary data structures. There is always a single output, and
+    # that output can have arbitrary nesting of values. List[int] is
+    # not the right data type for this.
+
     # Currently dequants are inserted in the convert step. So, we only
     # have to do anything if the output is hardcoded to be quantized
     if output_quantized_idxs == []:
