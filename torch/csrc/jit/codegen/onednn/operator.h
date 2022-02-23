@@ -1,8 +1,8 @@
 #pragma once
 
 #include <oneapi/dnnl/dnnl_graph.hpp>
-#include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/codegen/onednn/LlgaTensorImpl.h>
+#include <torch/csrc/jit/ir/ir.h>
 
 namespace torch {
 namespace jit {

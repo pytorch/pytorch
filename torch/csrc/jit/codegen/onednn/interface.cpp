@@ -1,4 +1,3 @@
-#include <torch/csrc/jit/jit_log.h>
 #include <oneapi/dnnl/dnnl_graph.hpp>
 #include <torch/csrc/jit/codegen/onednn/defer_size_check.h>
 #include <torch/csrc/jit/codegen/onednn/graph_fuser.h>
@@ -7,6 +6,7 @@
 #include <torch/csrc/jit/codegen/onednn/kernel.h>
 #include <torch/csrc/jit/codegen/onednn/layout_propagation.h>
 #include <torch/csrc/jit/codegen/onednn/prepare_binary.h>
+#include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/decompose_ops.h>
 #include <torch/csrc/jit/passes/pass_manager.h>
 #include <torch/csrc/jit/passes/remove_mutation.h>

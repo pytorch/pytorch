@@ -184,7 +184,7 @@ struct LlgaTensorDesc {
     return tid_ == desc.tid_ && sizes_ == desc.sizes_ &&
         dtype_ == desc.dtype_ && layout_type_ == desc.layout_type_ &&
         ((is_opaque() && layout_id_ == desc.layout_id_) ||
-        strides_ == desc.strides_);
+         strides_ == desc.strides_);
   }
 
   bool operator!=(const LlgaTensorDesc& desc) const {

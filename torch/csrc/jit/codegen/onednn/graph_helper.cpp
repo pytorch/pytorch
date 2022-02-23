@@ -222,7 +222,8 @@ Operator createOperator(Node* node) {
       REQUIRE(
           node->namedInput("kernel_size")->node()->kind() == prim::Constant);
 
-      auto rounding_type = toIValue(node->namedInput("ceil_mode"))->toBool() ? "ceil" : "floor";
+      auto rounding_type =
+          toIValue(node->namedInput("ceil_mode"))->toBool() ? "ceil" : "floor";
       auto divisor_override = toIValue(node->namedInput("divisor_override"));
       REQUIRE(divisor_override->isNone());
       return Operator(node, opkind::AvgPool)

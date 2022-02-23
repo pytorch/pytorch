@@ -89,7 +89,6 @@ const LlgaTensorDesc& get_llga_desc(const at::Tensor& tensor) {
   return static_cast<LlgaTensorImpl*>(tensor.unsafeGetTensorImpl())->desc();
 }
 
-
 dnnl::graph::tensor llga_from_aten_tensor(const at::Tensor& tensor) {
   return {
       get_llga_desc(tensor).logical_tensor(),

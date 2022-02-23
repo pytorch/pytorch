@@ -34,13 +34,12 @@ class SizeCheckMover {
     bool onlyUsedByShapePreserveOp =
         uses.size() > 1 && std::all_of(uses.begin(), uses.end(), [&](auto& u) {
           if (u.user == node) {
-              return true;
+            return true;
           }
           // match with shape-preserving unary ops in
           // tensorexpr_elementwise_set that's defined in
           // torch/csrc/jit/runtime/symbolic_shape_registry_util.cpp
-          OperatorMap<std::string> schemaMap =
-              get_tensorexpr_elementwise_set();
+          OperatorMap<std::string> schemaMap = get_tensorexpr_elementwise_set();
           c10::optional<std::string> mapping =
               schemaMap.find(u.user->getOperator());
           if (mapping == "unary") {

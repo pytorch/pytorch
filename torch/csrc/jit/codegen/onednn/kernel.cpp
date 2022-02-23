@@ -124,26 +124,25 @@ ArgSpecs LlgaKernel::initializeOutputSpecs() const {
 }
 
 std::tuple<RunArgs, RunArgs> LlgaKernel::prepareRunArgs(
-    const TensorArgs &inputs,
-    TensorArgs &outputs) const {
+    const TensorArgs& inputs,
+    TensorArgs& outputs) const {
   RunArgs runInputs, runOutputs;
   auto numInputs = runArgsIdx_.size();
   for (size_t i = 0; i < numInputs; i++) {
     auto spec = inputSpecs_[i];
     auto input = inputs[runArgsIdx_[i]];
     runInputs.push_back(
-        {spec.logical_tensor(),
-         Engine::getEngine(),
-         input.data_ptr()});
+        {spec.logical_tensor(), Engine::getEngine(), input.data_ptr()});
   }
   auto numConstantInputs = constantInputs_.size();
   for (size_t i = 0; i < numConstantInputs; i++) {
     // constantInputSpecs are placed after graphInputSpecs
     auto constantInputSpecIdx = nGraphInputs_ + i;
     auto constantInputSpec = inputSpecs_[constantInputSpecIdx];
-    runInputs.push_back({constantInputSpec.logical_tensor(),
-                         Engine::getEngine(),
-                         constantInputs_[i].data_ptr()});
+    runInputs.push_back(
+        {constantInputSpec.logical_tensor(),
+         Engine::getEngine(),
+         constantInputs_[i].data_ptr()});
   }
 
   for (size_t i = 0; i < nOutputs_; i++) {
