@@ -541,7 +541,7 @@ ExprGroup* ExprSegmentationSorter::makeEmptyGroup() {
 ExprGroup* ExprSegmentationSorter::makeEmptyGroup(Expr* expr) {
   auto group = makeEmptyGroup();
   group->exprs().push_back(expr);
-  if (ir_utils::isTVOp(expr)) {
+  if (ir_utils::isTvOp(expr)) {
     auto out_tv = expr->outputs()[0]->as<TensorView>();
     // Grab all id's that are shared with other tensors.
     for (const auto tv_i : c10::irange(out_tv->getComputeAtPosition())) {
@@ -721,7 +721,7 @@ std::vector<IterDomain*> getLocalDomainOrdering(
   std::unordered_set<IterDomain*> domains;
 
   for (auto expr : exprs) {
-    if (!ir_utils::isTVOp(expr)) {
+    if (!ir_utils::isTvOp(expr)) {
       continue;
     }
 

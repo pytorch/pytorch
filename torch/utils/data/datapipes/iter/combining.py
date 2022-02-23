@@ -21,6 +21,14 @@ class ConcaterIterDataPipe(IterDataPipe):
 
     Args:
         datapipes: Iterable DataPipes being concatenated
+
+    Example:
+        >>> import random
+        >>> from torchdata.datapipes.iter import IterableWrapper
+        >>> dp1 = IterableWrapper(range(3))
+        >>> dp2 = IterableWrapper(range(5))
+        >>> list(dp1.concat(dp2))
+        [0, 1, 2, 0, 1, 2, 3, 4]
     """
     datapipes: Tuple[IterDataPipe]
     length: Optional[int]
@@ -61,6 +69,15 @@ class ForkerIterDataPipe(IterDataPipe):
         buffer_size: this restricts how far ahead the leading child DataPipe
            can read relative to the slowest child DataPipe.
            Defaults to ``1000``. Use ``-1`` for the unlimited buffer.
+
+    Example:
+        >>> from torchdata.datapipes.iter import IterableWrapper
+        >>> source_dp = IterableWrapper(range(5))
+        >>> dp1, dp2 = source_dp.fork(num_instances=2)
+        >>> list(dp1)
+        [0, 1, 2, 3, 4]
+        >>> list(dp2)
+        [0, 1, 2, 3, 4]
     """
     def __new__(cls, datapipe: IterDataPipe, num_instances: int, buffer_size: int = 1000):
         if num_instances < 1:
@@ -187,6 +204,25 @@ class DemultiplexerIterDataPipe(IterDataPipe):
         buffer_size: this defines the maximum number of inputs that the buffer can hold across all child
             DataPipes while waiting for their values to be yielded.
             Defaults to ``1000``. Use ``-1`` for the unlimited buffer.
+
+    Examples:
+        >>> from torchdata.datapipes.iter import IterableWrapper
+        >>> def odd_or_even(n):
+        ...     return n % 2
+        >>> source_dp = IterableWrapper(range(5))
+        >>> dp1, dp2 = source_dp.demux(num_instances=2, classifier_fn=odd_or_even)
+        >>> list(dp1)
+        [0, 2, 4]
+        >>> list(dp2)
+        [1, 3]
+        >>> # It can also filter out any element that gets `None` from the `classifier_fn`
+        >>> def odd_or_even_no_zero(n):
+        ...     return n % 2 if n != 0 else None
+        >>> dp1, dp2 = source_dp.demux(num_instances=2, classifier_fn=odd_or_even_no_zero, drop_none=True)
+        >>> list(dp1)
+        [2, 4]
+        >>> list(dp2)
+        [1, 3]
     """
     def __new__(cls, datapipe: IterDataPipe, num_instances: int,
                 classifier_fn: Callable[[T_co], Optional[int]], drop_none: bool = False, buffer_size: int = 1000):
@@ -326,6 +362,12 @@ class MultiplexerIterDataPipe(IterDataPipe):
 
     Args:
         datapipes: Iterable DataPipes that will take turn to yield their elements, until they are all exhausted
+
+    Example:
+        >>> from torchdata.datapipes.iter import IterableWrapper
+        >>> dp1, dp2, dp3 = IterableWrapper(range(5)), IterableWrapper(range(10, 15)), IterableWrapper(range(20, 25))
+        >>> list(dp1.mux(dp2, dp3))
+        [0, 10, 20, 1, 11, 21, 2, 12, 22, 3, 13, 23, 4, 14, 24]
     """
     def __init__(self, *datapipes):
         self.datapipes = datapipes
@@ -363,6 +405,12 @@ class ZipperIterDataPipe(IterDataPipe[Tuple[T_co]]):
 
     Args:
         *datapipes: Iterable DataPipes being aggregated
+
+    Example:
+        >>> from torchdata.datapipes.iter import IterableWrapper
+        >>> dp1, dp2, dp3 = IterableWrapper(range(5)), IterableWrapper(range(10, 15)), IterableWrapper(range(20, 25))
+        >>> list(dp1.zip(dp2, dp3))
+        [(0, 10, 20), (1, 11, 21), (2, 12, 22), (3, 13, 23), (4, 14, 24)]
     """
     datapipes: Tuple[IterDataPipe]
     length: Optional[int]
