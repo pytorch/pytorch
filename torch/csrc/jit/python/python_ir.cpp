@@ -200,6 +200,11 @@ void initPythonIRBindings(PyObject* module_) {
           [&](AliasDb& db, Value* v1, Value* v2) {
             return db.mayContainAlias(v1, v2);
           })
+      .def(
+        "has_writers",
+        [&](AliasDb& db, Value* v1) {
+          return db.hasWriters(v1);
+        })
       .def("__str__", &AliasDb::toString);
 
 #define GS(name) def(#name, &Graph ::name)
@@ -217,8 +222,8 @@ void initPythonIRBindings(PyObject* module_) {
           py::arg("enabled") = true)
       .def(
           "alias_db",
-          [](std::shared_ptr<Graph> g) {
-            return std::make_shared<AliasDb>(std::move(g));
+          [](std::shared_ptr<Graph> g, bool isFrozen = false, bool descend_function_calls = false) {
+            return std::make_shared<AliasDb>(std::move(g), isFrozen, descend_function_calls);
           })
       .def(
           "dump_alias_db",
