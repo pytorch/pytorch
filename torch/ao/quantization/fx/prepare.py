@@ -700,8 +700,6 @@ def maybe_insert_observers_before_graph_output(
     # arbitrary data structures. There is always a single output, and
     # that output can have arbitrary nesting of values. List[int] is
     # not the right data type for this.
-    assert output_quantized_idxs == [0] or output_quantized_idxs == [], \
-        'unrecognized format of output_quantized_idxs'
 
     # Currently dequants are inserted in the convert step. So, we only
     # have to do anything if the output is hardcoded to be quantized

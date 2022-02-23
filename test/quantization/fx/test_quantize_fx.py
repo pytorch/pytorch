@@ -2235,6 +2235,49 @@ class TestQuantizeFx(QuantizationTestCase):
         self._test_quantized_inputs_outputs(
             prepare_custom_config_dict, prepare_count_check, convert_count_check)
 
+
+    def _test_quantized_multiple_inputs_outputs(
+            self, prepare_custom_config_dict, prepare_count_check,
+            convert_count_check):
+        """
+        Test the option to have inputs and outputs of the graph quantized
+        """
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv1 = torch.nn.Conv2d(1, 1, 1)
+                self.conv2 = torch.nn.Conv2d(1, 1, 1)
+
+            def forward(self, x):
+                c1 = self.conv1(x)
+                c2 = self.conv2(x)
+                return c1, c2
+
+        # quantized input, quantized output
+        m = M()
+        qconfig_dict = {'': torch.ao.quantization.default_qconfig}
+        m.eval()
+        mp = torch.ao.quantization.quantize_fx.prepare_fx(
+            m, qconfig_dict,
+            prepare_custom_config_dict=prepare_custom_config_dict)
+        self.checkGraphModuleNodes(mp, expected_node_occurrence=prepare_count_check)
+        mp(torch.randn(1, 1, 4, 4))
+        mq = torch.ao.quantization.quantize_fx.convert_fx(mp)
+        self.checkGraphModuleNodes(mq, expected_node_occurrence=convert_count_check)
+
+    def test_quantized_multiple_input_quantized_output(self):
+        prepare_custom_config_dict = {
+            'input_quantized_idxs': [0], 'output_quantized_idxs': [0, 1]}
+        prepare_count_check = {
+            ns.call_module(torch.ao.quantization.MinMaxObserver): 2,
+        }
+        convert_count_check = {
+            ns.call_function(torch.quantize_per_tensor): 0,
+            ns.call_method('dequantize'): 0,
+        }
+        self._test_quantized_multiple_inputs_outputs(
+            prepare_custom_config_dict, prepare_count_check, convert_count_check)
+
     @skipIfNoFBGEMM
     def test_convtranspose_per_channel_fails_early(self):
         r"""
