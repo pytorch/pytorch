@@ -3,6 +3,7 @@
 #include <c10/core/ScalarType.h>
 #include <c10/core/impl/DeviceGuardImplInterface.h>
 #include <c10/macros/Macros.h>
+#include <c10/util/irange.h>
 #include <torch/csrc/lazy/core/tensor_util.h>
 
 namespace torch {
@@ -144,7 +145,7 @@ void LTCTensorImpl::setup_size_properties() {
     // We can't call empty_tensor_restride(c10::MemoryFormat::Contiguous) given we override sizes() too.
     std::vector<int64_t> updated_strides;
     updated_strides = ComputeArrayStrides(shape.Get().sizes());
-    for (int i = 0; i < updated_strides.size(); i++) {
+    for (const auto i : c10::irange(updated_strides.size())) {
       sizes_and_strides_.stride_at_unchecked(i) = updated_strides[i];
     }
     generation_ = generation;
