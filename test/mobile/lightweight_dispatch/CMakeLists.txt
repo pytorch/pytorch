@@ -1,0 +1,24 @@
+set(TORCH_ROOT ${CMAKE_CURRENT_LIST_DIR}/../../..)
+set(TEST_ROOT ${TORCH_ROOT}/test/mobile/lightweight_dispatch)
+
+add_executable(test_codegen_unboxing
+  ${TORCH_ROOT}/test/cpp/common/main.cpp
+  ${TEST_ROOT}/test_lightweight_dispatch.cpp
+)
+
+target_include_directories(test_codegen_unboxing PUBLIC ${TORCH_INCLUDE_DIRS})
+target_include_directories(test_codegen_unboxing PRIVATE ${ATen_CPU_INCLUDE})
+
+target_compile_definitions(test_codegen_unboxing PRIVATE USE_GTEST)
+
+# set(TEST_UNBOXING_DEPENDENCIES ${TORCH_LIBRARIES})
+set(TEST_UNBOXING_DEPENDENCIES torch gtest ${TORCH_LIBRARIES})
+
+target_link_libraries(test_codegen_unboxing
+  ${LINKER_OPTIONS}
+  ${TEST_UNBOXING_DEPENDENCIES}
+)
+
+if(INSTALL_TEST)
+  install(TARGETS test_codegen_unboxing DESTINATION bin)
+endif()

@@ -177,9 +177,6 @@ option(BUILD_MOBILE_AUTOGRAD "Build autograd function in mobile build (in develo
 cmake_dependent_option(
     INSTALL_TEST "Install test binaries if BUILD_TEST is on" ON
     "BUILD_TEST" OFF)
-cmake_dependent_option(
-    INSTALL_MOBILE_TEST "Install test binaries for lite interpreter" ON
-    "BUILD_MOBILE_TEST" OFF)
 option(USE_CPP_CODE_COVERAGE "Compile C/C++ with code coverage flags" OFF)
 option(COLORIZE_OUTPUT "Colorize output during compilation" ON)
 option(USE_ASAN "Use Address Sanitizer" OFF)

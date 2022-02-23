@@ -1115,6 +1115,10 @@ endif()
         ${TORCH_ROOT}/test/cpp/lite_interpreter_runtime
         ${CMAKE_BINARY_DIR}/test_lite_interpreter_runtime
       )
+      add_subdirectory(
+        ${TORCH_ROOT}/test/mobile/lightweight_dispatch
+        ${CMAKE_BINARY_DIR}/test_codegen_unboxing
+      )
     else()
       add_subdirectory(${TORCH_ROOT}/test/cpp/jit ${CMAKE_BINARY_DIR}/test_jit)
       add_subdirectory(
