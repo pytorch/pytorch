@@ -68,5 +68,4 @@ if is_available():
 
     from .remote_device import _remote_device
 
-
-torch._C._distributed_c10d.set_debug_level_from_env()
+    set_debug_level_from_env()
