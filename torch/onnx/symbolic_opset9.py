@@ -1,3 +1,5 @@
+# -*- coding: utf-8 -*-
+
 import torch
 from torch._C import ListType, OptionalType
 from torch.nn.modules.utils import _single, _pair, _triple
@@ -111,6 +113,12 @@ def div(g, self, other, *args):
         return true_divide(g, self, other)
     else:
         return _div_rounding_mode(g, self, other, *args)
+
+
+@parse_args("v", "v", "v", "f")
+def addcmul(g, self, tensor1, tensor2, value=1.0):
+    value_tens = g.op("Constant", value_t=torch.tensor([value]))
+    return add(g, self, mul(g, mul(g, tensor1, tensor2), value_tens))
 
 
 @parse_args("v", "v", "s")
@@ -2155,20 +2163,69 @@ def pixel_shuffle(g, self, upscale_factor):
     dims = sym_help._get_tensor_sizes(self)
     if len(dims) != 4:
         return _unimplemented("pixel_shuffle", "only support 4d input")
-    if any([i is None for i in dims[1:]]):
-        return _unimplemented("pixel_shuffle", "only support static input shape, except for batch size")
-    output_channel = dims[1] // upscale_factor // upscale_factor
-    after_view = sym_help._reshape_helper(g, self,
-                                          g.op("Constant", value_t=torch.tensor([-1, output_channel,
-                                                                                upscale_factor, upscale_factor,
-                                                                                dims[2], dims[3]])),
-                                          allowzero=0)
-    after_transpose = g.op("Transpose", after_view, perm_i=[0, 1, 4, 2, 5, 3])
-    return sym_help._reshape_helper(g, after_transpose,
-                                    g.op("Constant", value_t=torch.tensor([-1, output_channel,
-                                                                          dims[2] * upscale_factor,
-                                                                          dims[3] * upscale_factor])),
-                                    allowzero=0)
+    if any(i is None for i in dims[1:]):
+        after_view = sym_help._reshape_helper(g, sym_help._unsqueeze_helper(g, self, [2, 3]),
+                                              g.op("Constant", value_t=torch.tensor([0, -1,
+                                                                                     upscale_factor, upscale_factor,
+                                                                                     0, 0])),
+                                              allowzero=0)
+        after_transpose = g.op("Transpose", after_view, perm_i=[0, 1, 4, 2, 5, 3])
+        # For dynamic input shapes, two reshapes are performed
+        reshape_h = sym_help._reshape_helper(g, after_transpose,
+                                             g.op("Constant", value_t=torch.tensor([0, 0, -1, 1, 0, 0])),
+                                             allowzero=0)
+        reshape_w = sym_help._reshape_helper(g, reshape_h,
+                                             g.op("Constant", value_t=torch.tensor([0, 0, 0, 0, -1, 1])),
+                                             allowzero=0)
+        return sym_help._squeeze_helper(g, reshape_w, [3, 5])
+    else:
+        output_channel = dims[1] // upscale_factor // upscale_factor
+        after_view = sym_help._reshape_helper(g, self,
+                                              g.op("Constant", value_t=torch.tensor([-1, output_channel,
+                                                                                     upscale_factor, upscale_factor,
+                                                                                     dims[2], dims[3]])),
+                                              allowzero=0)
+        after_transpose = g.op("Transpose", after_view, perm_i=[0, 1, 4, 2, 5, 3])
+        return sym_help._reshape_helper(g, after_transpose,
+                                        g.op("Constant", value_t=torch.tensor([-1, output_channel,
+                                                                               dims[2] * upscale_factor,
+                                                                               dims[3] * upscale_factor])),
+                                        allowzero=0)
+
+
+@parse_args("v", "i")
+def pixel_unshuffle(g, self, downscale_factor):
+    dims = sym_help._get_tensor_sizes(self)
+    if len(dims) != 4:
+        return _unimplemented("pixel_shuffle", "only support 4d input")
+    if any(i is None for i in dims[1:]):
+        # For dynamic input shapes, two reshapes are performed
+        reshape_h = sym_help._reshape_helper(g, sym_help._unsqueeze_helper(g, self, [3]),
+                                             g.op("Constant", value_t=torch.tensor([0, 0, -1, downscale_factor, 0])),
+                                             allowzero=0)
+        reshape_w = sym_help._reshape_helper(g, reshape_h,
+                                             g.op("Constant", value_t=torch.tensor([0, 0, 0, 0, -1, downscale_factor])),
+                                             allowzero=0)
+        after_transpose = g.op("Transpose", reshape_w, perm_i=[0, 1, 3, 5, 2, 4])
+        final_reshape = sym_help._reshape_helper(g, after_transpose,
+                                                 g.op("Constant", value_t=torch.tensor([0, -1, 1, 1, 0, 0])),
+                                                 allowzero=0)
+        return sym_help._squeeze_helper(g, final_reshape, [2, 3])
+    else:
+        output_channel = dims[1] * downscale_factor * downscale_factor
+        after_view = sym_help._reshape_helper(g, self,
+                                              g.op("Constant", value_t=torch.tensor([-1, dims[1],
+                                                                                     dims[2] // downscale_factor,
+                                                                                     downscale_factor,
+                                                                                     dims[3] // downscale_factor,
+                                                                                     downscale_factor])),
+                                              allowzero=0)
+        after_transpose = g.op("Transpose", after_view, perm_i=[0, 1, 3, 5, 2, 4])
+        return sym_help._reshape_helper(g, after_transpose,
+                                        g.op("Constant", value_t=torch.tensor([-1, output_channel,
+                                                                               dims[2] // downscale_factor,
+                                                                               dims[3] // downscale_factor])),
+                                        allowzero=0)
 
 
 def _generic_rnn(g, variant, input, initial_states, all_weights, has_biases,
@@ -2909,6 +2966,93 @@ def index(g, self, index):
             return sym_help._reshape_helper(g, self, final_shape)
 
 
+@parse_args("v", "v", "is", "i", "v")
+def linalg_norm(g, self, ord, dim, keepdim, dtype):
+    # Conditions based on https://pytorch.org/docs/stable/generated/torch.linalg.norm.html
+    ord_value = None
+    if dim is None:
+        if sym_help._is_none(ord):
+            self = sym_help._reshape_helper(g, self, [-1])
+            ord = g.op("Constant", value_t=torch.LongTensor([2]))
+        self_dim = sym_help._get_tensor_rank(self)
+        if self_dim is None:
+            return _unimplemented("dim",
+                                  "Input rank must be known at export time.")
+        if self_dim == 1:
+            ord_value = sym_help._parse_arg(ord, "f")
+        else:
+            dim = [0, 1]
+    else:
+        if len(dim) == 1:
+            if sym_help._is_none(ord):
+                ord = g.op("Constant", value_t=torch.LongTensor([2]))
+            ord_value = sym_help._parse_arg(ord, "f")
+    if ord_value:
+        return linalg_vector_norm(g, self, ord_value, dim, keepdim, dtype)
+    return linalg_matrix_norm(g, self, ord, dim, keepdim, dtype)
+
+
+@parse_args("v", "f", "is", "i", "v")
+def linalg_vector_norm(g, self, ord, dim, keepdim, dtype):
+    # Conditions based on https://pytorch.org/docs/stable/generated/torch.linalg.vector_norm.html
+    if dim is None:
+        self = sym_help._reshape_helper(g, self, [-1])
+        keepdim = None
+
+    if ord == math.inf:
+        result = g.op("ReduceMax", g.op("Abs", self), axes_i=dim, keepdims_i=keepdim)
+    elif ord == -math.inf:
+        result = g.op("ReduceMin", g.op("Abs", self), axes_i=dim, keepdims_i=keepdim)
+    elif ord == 0:
+        return sym_help._onnx_opset_unsupported_detailed("linalg_vector_norm", 9, 11, "ord=0 not supported")
+    else:
+        ord_op = g.op("Constant", value_t=torch.FloatTensor([ord]))
+        result = sym_help._reducesum_helper(g, g.op("Pow", g.op("Abs", self), ord_op),
+                                            axes_i=dim, keepdims_i=keepdim)
+        result = g.op("Pow", result, g.op("Div", g.op("Constant", value_t=torch.FloatTensor([1])), ord_op))
+    return result
+
+
+@parse_args("v", "v", "is", "i", "v")
+def linalg_matrix_norm(g, self, ord, dim, keepdim, dtype):
+    # Conditions based on https://pytorch.org/docs/stable/generated/torch.linalg.matrix_norm.html
+    ord_value = sym_help._parse_arg(ord, "s")
+    if ord_value == 'fro':
+        return frobenius_norm(g, self, dim, keepdim)
+    elif ord_value == 'nuc':
+        return _unimplemented("linalg.matrix_norm", "ord==nuc")
+    else:
+        ord_value = sym_help._parse_arg(ord, "f")
+        if ord_value is None:
+            return frobenius_norm(g, self, dim, keepdim)
+        if ord_value == 2 or ord_value == -2:
+            # ord = 2/-2 unimplemented due to lack of operators
+            # used to calculate singular values
+            return _unimplemented("linalg.matrix_norm", "ord==2")
+        # Wrap the dim vector to handle neagtive dim values
+        self_dim = sym_help._get_tensor_rank(self)
+        if self_dim is None:
+            return _unimplemented("linalg.matrix_norm",
+                                  "Input rank must be known at export time.")
+        # Common implementation for cases with
+        # ord = 1/-1 and ord = inf/-inf
+        if dim[0] < 0:
+            dim[0] += self_dim
+        if dim[1] < 0:
+            dim[1] += self_dim
+
+        if ord_value == math.inf or ord_value == -math.inf:
+            dim[0], dim[1] = dim[1], dim[0]
+        if dim[1] > dim[0] and not keepdim:
+            dim[1] -= 1
+        sum = sym_help._reducesum_helper(g, g.op("Abs", self), axes_i=[dim[0]], keepdims_i=keepdim)
+        if ord_value > 0:
+            result, indices = max(g, sum, dim_or_y=g.op("Constant", value_t=torch.LongTensor([dim[1]])), keepdim=keepdim)
+        else:
+            result, indices = min(g, sum, dim_or_y=g.op("Constant", value_t=torch.LongTensor([dim[1]])), keepdim=keepdim)
+        return result
+
+
 @parse_args("v", "is", "i")
 def frobenius_norm(g, self, dim=None, keepdim=False):
     sqr = g.op("Mul", self, self)
@@ -3364,6 +3508,10 @@ class Prim:
 
     @staticmethod
     def ListUnpack(g, *inputs, **kwargs):
+        return None
+
+    @staticmethod
+    def TupleConstruct(g, *inputs, **kwargs):
         return None
 
     @staticmethod

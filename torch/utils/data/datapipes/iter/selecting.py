@@ -28,6 +28,15 @@ class FilterIterDataPipe(IterDataPipe[T_co]):
         datapipe: Iterable DataPipe being filtered
         filter_fn: Customized function mapping an element to a boolean.
         drop_empty_batches: By default, drops a batch if it is empty after filtering instead of keeping an empty list
+
+    Example:
+        >>> from torchdata.datapipes.iter import IterableWrapper
+        >>> def is_even(n):
+        ...     return n % 2 == 0
+        >>> dp = IterableWrapper(range(5))
+        >>> filter_dp = dp.filter(filter_fn=is_even)
+        >>> list(filter_dp)
+        [0, 2, 4]
     """
     datapipe: IterDataPipe
     filter_fn: Callable
