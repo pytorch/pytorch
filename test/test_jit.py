@@ -1011,9 +1011,9 @@ class TestJit(JitTestCase):
                 return F.pad(x, self.pad, mode='constant', value=3.5)
 
         inputs = [
-            (Mod(1, 2), torch.randn(1, 3, 4)), # 1D
-            (Mod(1, 2, 3, 4), torch.randn(1, 3, 4)), # 2D
-            (Mod(1, 2, 3, 4, 5, 6), torch.randn(1, 3, 4)), # 3D
+            (Mod(1, 2), torch.randn(1, 3, 4)),  # 1D
+            (Mod(1, 2, 3, 4), torch.randn(1, 3, 4)),  # 2D
+            (Mod(1, 2, 3, 4, 5, 6), torch.randn(1, 3, 4)),  # 3D
         ]
 
         for m, inp in inputs:
