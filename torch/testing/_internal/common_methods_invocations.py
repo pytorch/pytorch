@@ -1939,6 +1939,7 @@ def sample_inputs_binary_pwise(
     op_kwargs=None,
     lhs_make_tensor_kwargs=None,
     rhs_make_tensor_kwargs=None,
+    lhs_scalars=False,
     **kwargs,
 ):
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
@@ -1963,15 +1964,24 @@ def sample_inputs_binary_pwise(
         ((S, M, S), (S, M, S)),
         ((M, 1, S), (M, S)),
         ((M, 1, S), (1, M, S)),
-        ((0, 1, 3), (0, 10, 3))
+        ((0, 1, 3), (0, 10, 3)),
+        (scalar, (S,))
     ]
 
-    for shape_lhs, shape_rhs_or_scalar in shapes:
-        lhs = make_arg(shape_lhs, **lhs_make_tensor_kwargs)
-        if isinstance(shape_rhs_or_scalar, tuple):
+    for shape_lhs_or_scalar, shape_rhs_or_scalar in shapes:
+        lhs_is_shape = isinstance(shape_lhs_or_scalar, tuple)
+        rhs_is_shape = isinstance(shape_rhs_or_scalar, tuple)
+        if lhs_is_shape
+            lhs = make_arg(shape_lhs_or_scalar, **lhs_make_tensor_kwargs)
+        else:
+            if not lhs_scalars:
+                continue
+            lhs = shape_lhs_or_scalar
+
+        if rhs_is_shape:
             # shape
             rhs = make_arg(shape_rhs_or_scalar, **rhs_make_tensor_kwargs)
-            broadcasts_input = torch.broadcast_shapes(shape_lhs, shape_rhs_or_scalar) != shape_lhs
+            broadcasts_input = lhs_is_shape and torch.broadcast_shapes(shape_lhs_or_scalar, shape_rhs_or_scalar) != shape_lhs_or_scalar
         else:
             # scalar
             rhs = shape_rhs_or_scalar  # type: ignore[assignment]
@@ -1990,6 +2000,7 @@ def sample_inputs_add_sub(
     op_kwargs=None,
     lhs_make_tensor_kwargs=None,
     rhs_make_tensor_kwargs=None,
+    lhs_scalars=False,
     **kwargs,
 ):
     op_kwargs, lhs_make_tensor_kwargs, rhs_make_tensor_kwargs = _resolve_binary_pwise_kwargs(
@@ -2008,6 +2019,7 @@ def sample_inputs_add_sub(
         op_kwargs=op_kwargs,
         lhs_make_tensor_kwargs=lhs_make_tensor_kwargs,
         rhs_make_tensor_kwargs=rhs_make_tensor_kwargs,
+        lhs_scalars=lhs_scalars,
         **kwargs,
     )
 
@@ -8332,7 +8344,7 @@ op_db: List[OpInfo] = [
                     else np.add(input, np.multiply(alpha, other)),
                     dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
                     assert_autodiffed=True,
-                    sample_inputs_func=partial(sample_inputs_add_sub, alpha=2),
+                    sample_inputs_func=partial(sample_inputs_add_sub, alpha=2, python_scalars=True, lhs_scalars=True),
                     supports_inplace_autograd=False,
                     supports_fwgrad_bwgrad=True,
                     supports_forward_ad=True,
@@ -8348,7 +8360,7 @@ op_db: List[OpInfo] = [
                     assert_autodiffed=True,
                     supports_forward_ad=True,
                     supports_fwgrad_bwgrad=True,
-                    sample_inputs_func=partial(sample_inputs_binary_pwise, python_scalars=True)),
+                    sample_inputs_func=partial(sample_inputs_binary_pwise, python_scalars=True, lhs_scalars=True)),
     BinaryUfuncInfo('sub',
                     # NumPy has no builtin reference for the alpha kwarg, but it is easy enough to emulate
                     ref=lambda input, other, *, alpha=1: np.subtract(input, np.multiply(alpha, other)),
@@ -8357,7 +8369,7 @@ op_db: List[OpInfo] = [
                     assert_autodiffed=True,
                     supports_forward_ad=True,
                     supports_fwgrad_bwgrad=True,
-                    sample_inputs_func=partial(sample_inputs_add_sub, alpha=2, python_scalars=True),
+                    sample_inputs_func=partial(sample_inputs_add_sub, alpha=2, python_scalars=True, lhs_scalars=True),
                     supports_inplace_autograd=False,
                     decorators=(
                         DecorateInfo(
@@ -9104,7 +9116,7 @@ op_db: List[OpInfo] = [
                     aliases=('divide',),
                     variant_test_name='no_rounding_mode',
                     dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
-                    sample_inputs_func=partial(sample_inputs_binary_pwise, python_scalars=True),
+                    sample_inputs_func=partial(sample_inputs_binary_pwise, python_scalars=True, lhs_scalars=True),
                     supports_forward_ad=True,
                     promotes_int_to_float=True,
                     supports_fwgrad_bwgrad=True,
@@ -9114,7 +9126,7 @@ op_db: List[OpInfo] = [
                     aliases=('divide',),
                     variant_test_name='trunc_rounding',
                     dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
-                    sample_inputs_func=partial(sample_inputs_binary_pwise, rounding_mode="trunc", python_scalars=True),
+                    sample_inputs_func=partial(sample_inputs_binary_pwise, rounding_mode="trunc", python_scalars=True, lhs_scalars=True),
                     supports_forward_ad=True,
                     promotes_int_to_float=True,
                     supports_fwgrad_bwgrad=True,
@@ -9124,7 +9136,7 @@ op_db: List[OpInfo] = [
                     aliases=('divide',),
                     variant_test_name='floor_rounding',
                     dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
-                    sample_inputs_func=partial(sample_inputs_binary_pwise, rounding_mode="floor", python_scalars=True),
+                    sample_inputs_func=partial(sample_inputs_binary_pwise, rounding_mode="floor", python_scalars=True, lhs_scalars=True),
                     supports_forward_ad=True,
                     promotes_int_to_float=True,
                     supports_fwgrad_bwgrad=True,
