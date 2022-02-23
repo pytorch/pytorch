@@ -8,7 +8,7 @@ pytorch_params: &pytorch_params
       default: ""
     resource_class:
       type: string
-      default: "xlarge"
+      default: "large"
     use_cuda_docker_runtime:
       type: string
       default: ""
