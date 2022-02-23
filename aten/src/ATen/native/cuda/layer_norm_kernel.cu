@@ -265,7 +265,7 @@ __device__ __inline__ void vectorized_layer_norm_kernel_impl(
   T_ACC* /*mean*/,
   T_ACC* /*rstd*/,
   T* /*Y*/){
-    CUDA_KERNEL_ASSERT("doesn't work with double");
+    CUDA_KERNEL_ASSERT(false && "doesn't work with double");
   }
 
 //to avoid windows SFINAE errors
