@@ -3429,6 +3429,7 @@ class TestVmapOperatorsOpInfo(TestCase):
             lambda _, shape: torch.randint(100, shape, **kwargs),
             lambda _, shape: torch.randint(5, 100, shape, **kwargs),
             lambda t, _: t.random_(**only_gen_kwarg),
+            lambda _, shape: torch.normal(0., 1., shape, **kwargs),
         ]
 
         B0 = 4
