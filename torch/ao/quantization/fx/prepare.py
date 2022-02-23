@@ -60,7 +60,7 @@ from .utils import (
     get_custom_module_class_keys,
     all_node_args_have_no_tensors,
     assert_and_get_unique_device,
-    node_bool_tensor_arg_indexes,
+    get_non_observable_arg_indexes_and_types,
     get_new_attr_name_with_prefix,
     NON_QUANTIZABLE_WEIGHT_OPS,
     WEIGHT_INDEX_DICT,
@@ -93,6 +93,9 @@ from .backend_config.utils import (
 
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union, Set
 from collections import defaultdict
+
+# list of dtypes to not add observers to
+DO_NOT_OBS_DTYPE_LIST = [int, float, torch.bool, None]
 
 def is_activation_post_process_node(node: Node, modules: Dict[str, torch.nn.Module]) -> bool:
     return isinstance(node, torch.fx.Node) and node.op == "call_module" and \
@@ -457,8 +460,8 @@ def maybe_insert_input_observer_for_arg_or_kwarg(
             # TODO(future PR): change this so a placeholder is inserted for
             # future dequants, to make the logic easier to understand
             (arg_as_input_target_dtype != torch.float) and
-            # if arg is a bool tensor or not a tensor, do not insert observer
-            (arg_as_output_target_dtype not in (torch.bool, None)) and
+            # if arg output dtype is in DO_NOT_OBS_DTYPE_LIST do not insert observer
+            (arg_as_output_target_dtype not in DO_NOT_OBS_DTYPE_LIST) and
             # if qconfig is reuse_input qconfig, we won't insert extra observer for input
             not is_reuse_input_qconfig_
         )
@@ -657,7 +660,7 @@ def maybe_insert_output_observer_for_node(
     dtype = node_name_to_target_dtype[node.name]["output_activation_dtype"]
     should_insert_observer = \
         qhandler.should_insert_observer_for_output(
-            qconfig, is_qat) and dtype not in (torch.bool, None, torch.float)
+            qconfig, is_qat) and dtype not in DO_NOT_OBS_DTYPE_LIST + [torch.float]
     # TODO(future PR): move the following logic to
     # should_insert_observer_for_output
     should_insert_observer = should_insert_observer and \
@@ -784,8 +787,8 @@ def maybe_insert_observers_before_graph_output(
 
 def maybe_propagate_dtype_for_node(
     node: Node,
-    target_dtype: torch.dtype,
-    node_name_to_target_dtype: Dict[str, Dict[str, Optional[torch.dtype]]],
+    target_dtype: Union[torch.dtype, type],
+    node_name_to_target_dtype: Dict[str, Dict[str, Optional[Union[torch.dtype, type]]]],
     matches: Dict[str, MatchResult],
 ) -> None:
     """
@@ -807,7 +810,7 @@ def maybe_propagate_dtype_for_node(
 
 def propagate_dtypes_for_known_nodes(
     graph: Graph,
-    node_name_to_target_dtype: Dict[str, Dict[str, Optional[torch.dtype]]],
+    node_name_to_target_dtype: Dict[str, Dict[str, Optional[Union[torch.dtype, type]]]],
     matches: Dict[str, MatchResult],
 ) -> None:
     """
@@ -821,11 +824,26 @@ def propagate_dtypes_for_known_nodes(
     replace this with a better way to reason about dtypes of tensors.
     """
     for node in graph.nodes:
-        bool_arg_idxs = node_bool_tensor_arg_indexes(node)
-        for bool_arg_idx in bool_arg_idxs:
-            cur_node = node.args[bool_arg_idx]
-            maybe_propagate_dtype_for_node(
-                cur_node, torch.bool, node_name_to_target_dtype, matches)
+        non_observable_arg_dict = get_non_observable_arg_indexes_and_types(node)
+
+        for arg_type in non_observable_arg_dict:
+            non_observable_indices = non_observable_arg_dict[arg_type](node)
+
+            for index in non_observable_indices:
+                arg = node.args[index]
+
+                # when an argument is a tuple, it does not show up as another node so we need to go through
+                # all elements of the tuple manually
+                if isinstance(arg, tuple):
+                    arg_list = list(arg)
+                else:
+                    arg_list = [arg]
+
+                for cur_arg in arg_list:
+                    # hard coded arguments show up but aren't `Node` typed and do not need dtype propgated
+                    if isinstance(cur_arg, torch.fx.node.Node):
+                        maybe_propagate_dtype_for_node(
+                            cur_arg, arg_type, node_name_to_target_dtype, matches)
 
 def maybe_make_input_output_share_observers(
     node: Node,
