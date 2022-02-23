@@ -128,7 +128,7 @@ jobs:
           brew install libomp
       - name: Parse ref
         id: parse-ref
-        run: echo $GITHUB_REF && .github/scripts/parse_ref.py
+        run: .github/scripts/parse_ref.py
       - name: Test
         run: |
           python3 -mpip install dist/*.whl
@@ -240,7 +240,7 @@ jobs:
           brew install libomp
       - name: Parse ref
         id: parse-ref
-        run: echo $GITHUB_REF && .github/scripts/parse_ref.py
+        run: .github/scripts/parse_ref.py
       - name: Test
         run: |
           python3 -mpip install dist/*.whl

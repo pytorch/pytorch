@@ -161,7 +161,7 @@ jobs:
           retry docker pull "${DOCKER_IMAGE}"
       - name: Parse ref
         id: parse-ref
-        run: echo $GITHUB_REF && .github/scripts/parse_ref.py
+        run: .github/scripts/parse_ref.py
       - name: Build
         env:
           BRANCH: ${{ steps.parse-ref.outputs.branch }}
