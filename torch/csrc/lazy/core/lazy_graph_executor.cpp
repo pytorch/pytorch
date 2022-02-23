@@ -10,8 +10,7 @@
 #include <torch/csrc/lazy/core/tensor_util.h>
 #include <torch/csrc/lazy/core/unique.h>
 
-// TODO: DebugUtil will be upstreamed after LazyTensor is in.
-// #include <">lazy_tensor_core/csrc/debug_util.h>
+#include <torch/csrc/lazy/core/debug_util.h>
 #include <torch/csrc/lazy/core/metrics.h>
 #include <torch/csrc/lazy/core/thread_pool.h>
 #include <torch/csrc/lazy/ts_backend/ops/arithmetic_ir_ops.h>
@@ -463,7 +462,7 @@ void LazyGraphExecutor::SyncTensorsGraph(
   config.sync_ltc_data = sync_ltc_data;
 
   auto async = SyncTensorsGraphInternal(tensors, devices, config);
-  if (wait && async != nullptr) {
+  if (FLAGS_torch_lazy_use_thread_pool && wait && async != nullptr) {
     async->mwait.Wait();
   }
 }
@@ -892,8 +891,8 @@ std::shared_ptr<LazyGraphExecutor::Async> LazyGraphExecutor::
   if (coll.indices.empty()) {
     return nullptr;
   }
-  // DebugUtil::SaveTensorsGraphInfo("ScheduleSyncTensorsGraph", *tensors,
-  //                                &coll.indices);
+  DebugUtil::SaveTensorsGraphInfo("ScheduleSyncTensorsGraph", *tensors,
+                                 &coll.indices);
 
   PostOrderData po_data = RunPostOrder(*tensors, coll.indices);
   coll.hash = HashCombine(coll.hash, Hash(po_data.parameter_sequence));
@@ -947,6 +946,10 @@ std::shared_ptr<LazyGraphExecutor::Async> LazyGraphExecutor::
       VLOG(3) << "Executing IR graph hash " << HashToString(hash)
               << " on device " << async->device << " done!";
 
+      TORCH_CHECK(async->tensors_data.size() == results.size(),
+        "Expected number of outputs does not match TorchScript Stack size: ",
+        async->tensors_data.size(), " != ", results.size());
+
       for (const auto i : c10::irange(results.size())) {
         if (async->tensors_data[i] != nullptr) {
           async->tensors_data[i]->Assign(*results[i]);
@@ -973,7 +976,11 @@ std::shared_ptr<LazyGraphExecutor::Async> LazyGraphExecutor::
     }
   };
 
-  ScheduleIoClosure(async->mwait.Completer(std::move(syncfn)));
+  if (FLAGS_torch_lazy_use_thread_pool) {
+    ScheduleIoClosure(async->mwait.Completer(std::move(syncfn)));
+  } else {
+    syncfn();
+  }
   return async;
 }
 
@@ -996,7 +1003,7 @@ std::vector<at::Tensor> LazyGraphExecutor::GetTensorsFused(
   SyncTensorsConfig config;
   config.force_ltc_data = false;
   auto async = SyncTensorsGraphInternal(tensors, {}, config);
-  if (async != nullptr) {
+  if (FLAGS_torch_lazy_use_thread_pool && async != nullptr) {
     async->mwait.Wait();
   }
   std::vector<BackendDataPtr> tensors_data = GatherTensorsData(

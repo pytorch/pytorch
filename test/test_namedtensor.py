@@ -1744,7 +1744,7 @@ class TestNamedTensor(TestCase):
         for device in get_all_device_types():
             self._test_name_inference(
                 Tensor.expand, device=device,
-                args=(create('D:1'), [3]), expected_names=('D'))
+                args=(create('D:1'), [3]), expected_names=('D',))
 
             self._test_name_inference(
                 Tensor.expand, device=device,
