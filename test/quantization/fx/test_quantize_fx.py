@@ -2423,7 +2423,7 @@ class TestQuantizeFx(QuantizationTestCase):
             mp(torch.rand(4, 4, 4, 4))
             mc = convert_fx(mp)
 
-    def _check_not_observed(self, model: nn.Module, node_name_list: list[str]):
+    def _check_not_observed(self, model: nn.Module, node_name_list: List[str]):
         # check that no obsersvers have the named nodes as an input
         for node in model.graph.nodes:
             if hasattr(model, node.name) and isinstance(
