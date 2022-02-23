@@ -28,7 +28,8 @@ void mayConvertScalarInputToTensor(Node* node) {
         aten::as_tensor, {scalar}, {{"dtype", at::ScalarType::Float}});
     // add dim & stride info to IR
     c10::optional<size_t> t_dim = 1;
-    auto target_type = TensorTypePtr(TensorType::create(at::ScalarType::Float, at::kCPU, t_dim, false));
+    auto target_type =
+        TensorTypePtr(TensorType::create(at::ScalarType::Float, at::kCPU, t_dim, false));
     target_type = target_type->withSizes({1});
     t->setType(target_type);
 
@@ -52,17 +53,17 @@ static void ConvertScalarToTensor(Block* block) {
 }
 
 void mayDecomposeAdd(Node* node) {
-  if (node->inputs().size() < 3)
-    return; // aten::add(int, int) may have only two inputs
-
-  auto alphaEqualsOne = compareConstValue(node->input(2), 1.0);
-  if (!alphaEqualsOne) {
-    WithInsertPoint guard(node);
-    auto g = node->owningGraph();
-    auto mul = g->insert(aten::mul, {node->input(1), node->input(2)});
-    node->replaceInput(1, mul);
-    auto one = g->insertConstant(1.0);
-    node->replaceInput(2, one);
+  if (toIValue(node->namedInput("alpha")).has_value()) {
+    auto alphaEqualsOne = compareConstValue(node->namedInput("alpha"), 1.0);
+    if (!alphaEqualsOne) {
+      WithInsertPoint guard(node);
+      auto g = node->owningGraph();
+      auto mul = g->insert(aten::mul, {node->namedInput("other"),
+                                       node->namedInput("alpha")});
+      node->replaceInput(1, mul);
+      auto one = g->insertConstant(1.0);
+      node->replaceInput(2, one);
+    }
   }
 }
 
@@ -86,14 +87,14 @@ static void EliminateIdentityMulAdd(Block* block) {
 
     if ((node->kind() == aten::add && compareConstValue(node->input(1), 0.0)) ||
         (node->kind() == aten::mul && compareConstValue(node->input(1), 1.0))) {
-      node->output()->replaceAllUsesWith(node->input(0));
+      node->output()->replaceAllUsesWith(node->namedInput("self"));
     }
   }
 }
 
 void PrepareBinaryForLLGA(const std::shared_ptr<Graph>& graph) {
   DecomposeFusedAdd(graph->block());
-  EliminateIdentityMulAdd(graph->block());
+  //EliminateIdentityMulAdd(graph->block());
   EliminateDeadCode(graph);
   // ConvertScalarToTensor must be placed after EliminateIdentityMulAdd
   ConvertScalarToTensor(graph->block());

@@ -311,25 +311,28 @@ void mayAddListConstructIntoConcatPartition(
 // Verify that input tensors are compatible with oneDNN Graph.
 // Scalars would be converted to 1-D tensors later anyway,
 // but they shouldn't be complex-double
-void checkInputs(Node* node) {
+// If this check fails, convert op to wildcard
+bool checkInputCompatibility(Node* node) {
   auto allInputs = node->inputs();
-  for(auto input : allInputs) {
+  for (auto input : allInputs) {
     c10::IValue inputIValue = toIValue(input);
     if (inputIValue.isTensor()) {
       const at::Tensor& tensor = inputIValue.toTensor();
-      TORCH_CHECK(tensor.device() == at::kCPU,
-          "oneDNN Graph currently only supports CPU device, but encountered",
-          " a non-CPU tensor");
+      if (tensor.device() != at::kCPU) {
+        return false;
+      }
       auto dtype = tensor.scalar_type();
-      TORCH_CHECK(((dtype == at::ScalarType::Float) ||
-          (dtype == at::ScalarType::Long)),
-          "oneDNN Graph currently only supports Float dtype",
-          ", but encountered ", toString(dtype));
+      if ((dtype != at::ScalarType::Float) &&
+          (dtype != at::ScalarType::Long)) {
+        return false;
+      }
     } else if (inputIValue.isScalar()) {
-      TORCH_CHECK(!inputIValue.isComplexDouble(),
-          "complex dtype is unsupported by oneDNN Graph");
+      if (inputIValue.isComplexDouble()) {
+        return false;
+      }
     }
   }
+  return true;
 }
 
 LlgaGraphHelper::LlgaGraphHelper(
@@ -342,10 +345,15 @@ LlgaGraphHelper::LlgaGraphHelper(
   GRAPH_DEBUG("Constructing LLGA graph");
   // TODO: select nodes in top-level block for now
   for (auto* node : graph->block()->nodes()) {
-    checkInputs(node);
     auto op = createLlgaOp(node);
-    g.add_op(op);
-    GRAPH_DEBUG("  Added node ", node->kind().toQualString());
+    auto kindOfNode = node->kind();
+    if (checkInputCompatibility(node)) {
+      g.add_op(op);
+      GRAPH_DEBUG("  Added node ", kindOfNode.toQualString());
+    } else {
+      GRAPH_DEBUG("The backend failed to add node ", kindOfNode.toQualString());
+      g.add_op(makeWildcardOp(node).llgaOp());
+    }
 
     for (Value* input : node->inputs()) {
       tensorIdToValue_.emplace(input->unique(), input);
