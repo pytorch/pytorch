@@ -202,33 +202,6 @@ Tensor& zero_inplace_batching_rule(Tensor &self) {
   return self;
 }
 
-Tensor trace_batching_rule(const Tensor& self) {
-  if (!participatesInCurrentLevel(self)) {
-    c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
-    return self.trace();
-  }
-  auto self_physical = MultiBatchVmapTransform::logicalToPhysical(self);
-  // Batched Diagonal View
-  auto self_diag = at::diagonal(self_physical.tensor(), /*offset*/0, /*dim1*/-2, /*dim2*/-1);
-  auto result =  at::sum(self_diag, -1);
-  return self_physical.getPhysicalToLogicalMap().apply(result);
-}
-
-Tensor trace_backward_batching_rule(const Tensor& grad, IntArrayRef input_sizes) {
-  if (!participatesInCurrentLevel(grad)) {
-    c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
-    return at::trace_backward(grad, input_sizes);
-  }
-  auto grad_physical = MultiBatchVmapTransform::logicalToPhysical(grad);
-  auto grad_input = at::zeros(grad_physical.getPhysicalShape(input_sizes), grad.options());
-  // Batched Diagonal View
-  auto grad_input_diag = at::diagonal(grad_input, /*offset*/0, /*dim1*/-2, /*dim2*/-1);
-  // Append a dimension of size one to the grad output
-  auto grad_physical_tensor = grad_physical.tensor().unsqueeze(-1);
-  grad_input_diag.copy_(grad_physical_tensor);
-  return grad_physical.getPhysicalToLogicalMap().apply(grad_input);
-}
-
 Tensor transpose_int_batching_rule(const Tensor& self, int64_t dim0, int64_t dim1) {
   if (!participatesInCurrentLevel(self)) {
     c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
