@@ -322,7 +322,7 @@ void SegmentedFusion::draw() {
 
   for (auto group : groups()) {
     for (auto expr : group->exprs()) {
-      if (ir_utils::isTVOp(expr)) {
+      if (ir_utils::isTvOp(expr)) {
         expr_color_map[expr] = group_index;
       }
     }
@@ -659,8 +659,8 @@ TensorView* castIntermediateValueInCompleteFusion(
     }
 
     // Create the actual domain and tv.
-    return new TensorView(
-        new TensorDomain(
+    return IrBuilder::create<TensorView>(
+        IrBuilder::create<TensorDomain>(
             new_root_domain, std::vector<bool>(new_root_domain.size(), true)),
         data_type);
   };
@@ -680,8 +680,8 @@ TensorView* castIntermediateValueInCompleteFusion(
   }
 
   // Insert the cast ops.
-  new UnaryOp(UnaryOpType::Cast, half_precision_tv, original_tv);
-  new UnaryOp(UnaryOpType::Cast, fp32_tv, half_precision_tv);
+  IrBuilder::create<UnaryOp>(UnaryOpType::Cast, half_precision_tv, original_tv);
+  IrBuilder::create<UnaryOp>(UnaryOpType::Cast, fp32_tv, half_precision_tv);
 
   // Return the new tv to replace original tv with
   //  on the segmented edges.
@@ -1740,9 +1740,10 @@ TranslateApplicableWelford::TranslateApplicableWelford(
     Fusion* fusion,
     const at::ArrayRef<IValue>& runtime_inputs)
     : runtime_inputs_(runtime_inputs) {
+  auto exprs = fusion->exprs();
   std::vector<WelfordOp*> orignal_welfords(
-      ir_utils::filterByType<WelfordOp>(fusion->unordered_exprs()).begin(),
-      ir_utils::filterByType<WelfordOp>(fusion->unordered_exprs()).end());
+      ir_utils::filterByType<WelfordOp>(exprs).begin(),
+      ir_utils::filterByType<WelfordOp>(exprs).end());
 
   if (wouldTranslateToPersistent(orignal_welfords)) {
     for (auto welford : orignal_welfords) {
@@ -1829,6 +1830,14 @@ bool TranslateApplicableWelford::wouldTranslateToPersistent(
       [&original_to_test_map](auto welford) {
         return original_to_test_map.clone(welford);
       });
+  // Copied welfords will be invalidated on translation, but Vals will be
+  // reused, keep a reference to them.
+  std::vector<Val*> welford_avgs;
+  std::vector<Val*> welford_vars;
+  for (auto welford : copied_welfords) {
+    welford_avgs.push_back(welford->outAvg());
+    welford_vars.push_back(welford->outVar());
+  }
 
   // Translate the welford ops
   for (auto welford_to_translate : copied_welfords) {
@@ -1859,6 +1868,21 @@ bool TranslateApplicableWelford::wouldTranslateToPersistent(
         [&original_to_test_map](Val* out) {
           return original_to_test_map.clone(out);
         });
+
+    // If only average is used from welford, we should still translate, but we
+    // might not detect persistence if variance isn't actually used/marked as an
+    // output in the test.
+    for (auto outs_i : c10::irange(welford_avgs.size())) {
+      auto avg = welford_avgs[outs_i];
+      auto var = welford_vars[outs_i];
+      if (avg->uses().empty()) {
+        test_group_outputs_.push_back(avg);
+      }
+
+      if (var->uses().empty()) {
+        test_group_outputs_.push_back(var);
+      }
+    }
 
     // Temporarily localize test copy around
     //  the group boundary
@@ -1900,7 +1924,7 @@ void TranslateApplicableWelford::translateSingleWelford(WelfordOp* welford) {
 
   // Create scalar version of the feature element
   //  counting.
-  Val* num_features = new Double(1);
+  Val* num_features = IrBuilder::create<Double>(1);
   std::vector<bool> broadcast_mask(in_root.size(), false);
   for (const auto i : c10::irange(in_root.size())) {
     if (out_root[i]->isReduction()) {
@@ -1913,7 +1937,7 @@ void TranslateApplicableWelford::translateSingleWelford(WelfordOp* welford) {
   // Build a normalization expression group that is
   //  equivalent to a welford operation.
   auto x_sum = sum(in_val, red_axes);
-  new BinaryOp(BinaryOpType::Div, out_avg, x_sum, num_features);
+  IrBuilder::create<BinaryOp>(BinaryOpType::Div, out_avg, x_sum, num_features);
   // welford.avg may be broadcast. Reuse it if found.
   TensorView* x_avg_bcast = nullptr;
   for (auto& use_expr : out_avg->uses()) {
@@ -1949,8 +1973,12 @@ void TranslateApplicableWelford::translateSingleWelford(WelfordOp* welford) {
   }
 
   auto x_mean_sub_pow = mul(x_mean_sub, x_mean_sub);
-  new ReductionOp(BinaryOpType::Add, new Double(0.0), out_var, x_mean_sub_pow);
-  new UnaryOp(UnaryOpType::Set, out_N, num_features);
+  IrBuilder::create<ReductionOp>(
+      BinaryOpType::Add,
+      IrBuilder::create<Double>(0.0),
+      out_var,
+      x_mean_sub_pow);
+  IrBuilder::create<UnaryOp>(UnaryOpType::Set, out_N, num_features);
 
   // out_avg, out_N are now outputs of a pointwise ops and we
   //  need to clear out its reduction domains.
@@ -2687,14 +2715,20 @@ void SegmentCandidateFinder::findSegments() {
     }
   }
 
+  auto reduction_ops =
+      ir_utils::getReductionOps(segmented_fusion_->completeFusion());
+  auto welford_ops = ir_utils::filterByType<WelfordOp>(reduction_ops);
+
   if (options_.run_translate_welford &&
-      segmented_fusion_->completeFusion()->hasWelford()) {
+      (welford_ops.begin() != welford_ops.end())) {
     TranslateApplicableWelford::run(segmented_fusion_.get(), runtime_inputs_);
   }
 
   for (auto group : groups()) {
-    // Set heuristics in case single reduction kernels were left out
-    group->setHeuristic(deriveHeuristic(group));
+    if (!group->outputs().empty()) {
+      // Set heuristics in case single reduction kernels were left out
+      group->setHeuristic(deriveHeuristic(group));
+    }
   }
 
   // Remove all scalar edges since they do not represent actual
@@ -2913,7 +2947,7 @@ void SegmentCandidateFinder::resolveInputsInGroup(SegmentedGroup* group) {
   group->input_vals = IterVisitor::getInputsTo(group->inputs());
 
   // Grab all expressions needed to produce to_visit
-  auto input_exprs = ExprSort::getExprs(completeFusion(), to_visit);
+  auto input_exprs = StmtSort::getExprs(completeFusion(), to_visit);
 
   // Insert those expressions at the beginning of the group
   group->exprs_.insert(
@@ -3102,8 +3136,7 @@ void SegmentedFusion::annotateFP16IntermediateTensors() {
   }
 }
 
-TORCH_CUDA_CU_API std::string toString(
-    const SegmentCandidateFinderOptions& segment_options) {
+std::string toString(const SegmentCandidateFinderOptions& segment_options) {
   std::stringstream ss;
   ss << "segmentation phases {\n";
   if (segment_options.run_combine_reductions) {
