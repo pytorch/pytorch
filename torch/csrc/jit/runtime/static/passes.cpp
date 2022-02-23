@@ -738,6 +738,13 @@ bool shouldNotFuseListUnpackSpecialCase(Node* node) {
   // determine the types of the outputs. Rationale: it is a huge pain to write
   // fused sigrid transforms without static type information, and these two
   // arguments are indeed statically known in every model we've seen.
+  // The reason why trying to fuse the outputs is annoying without static type
+  // information is that, if one of the outputs is not managed, you need to
+  // reset to an empty tensor of the correct type each iteration. So, if we
+  // can't collect types ahead of time, we would have to do it lazily on the
+  // first iteration, which would could be wasteful in terms of time/memory
+  // - either each thread would have its own set of output types, or we would
+  // need a lock to prevent data races.
   const auto num_inputs = node->inputs().size();
   return !toIValue(node->input(0)).has_value() ||
       !toIValue(node->input(num_inputs - 1)).has_value();
@@ -769,9 +776,6 @@ void FuseListUnpack(std::shared_ptr<torch::jit::Graph>& graph) {
           "fb::gather_ranges_to_dense_v2",
           "static_runtime::fused_gather_ranges_to_dense_v2")};
 
-  AliasDb alias_db(
-      graph,
-      /*isFrozen=*/false);
   // replacement contains (old_node, new_node, list_unpack_node)
   std::vector<std::tuple<Node*, Node*, Node*>> replacement;
   DepthFirstGraphNodeIterator graph_it(graph);
@@ -824,12 +828,6 @@ void FuseListUnpack(std::shared_ptr<torch::jit::Graph>& graph) {
     list_unpack_node->destroy();
     old_node->destroy();
   }
-
-#ifndef NDEBUG
-  graph->lint();
-  AliasDb db2(graph);
-  torch::jit::Lint(&db2);
-#endif
 } // namespace jit
 
 void EnableStaticRuntimeLayerNorm(std::shared_ptr<torch::jit::Graph>& graph) {
