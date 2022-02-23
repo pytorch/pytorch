@@ -94,7 +94,7 @@ static void EliminateIdentityMulAdd(Block* block) {
 
 void PrepareBinaryForLLGA(const std::shared_ptr<Graph>& graph) {
   DecomposeFusedAdd(graph->block());
-  //EliminateIdentityMulAdd(graph->block());
+  EliminateIdentityMulAdd(graph->block());
   EliminateDeadCode(graph);
   // ConvertScalarToTensor must be placed after EliminateIdentityMulAdd
   ConvertScalarToTensor(graph->block());
