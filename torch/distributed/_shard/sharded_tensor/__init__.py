@@ -14,6 +14,7 @@ from .api import (
     TensorProperties,
     _PartialTensor,
 )
+from .metadata import ShardMetadata  # noqa: F401
 from .utils import load_with_process_group
 import torch.distributed as dist
 from torch.distributed import distributed_c10d
