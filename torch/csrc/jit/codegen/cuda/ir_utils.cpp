@@ -254,6 +254,21 @@ struct SubstituteInExpr : public OptInDispatch {
         gather_expr->padWidth());
   }
 
+  void handle(ViewDtypeOp* view_expr) final {
+    TORCH_INTERNAL_ASSERT(
+        substitute_->isA<TensorView>(),
+        "All args to view must be TensorView, but received a non-TensorView for replacement: ",
+        substitute_);
+    auto in = reference_->sameAs(view_expr->in())
+        ? substitute_->as<TensorView>()
+        : view_expr->in();
+    auto out = reference_->sameAs(view_expr->out())
+        ? substitute_->as<TensorView>()
+        : view_expr->out();
+    expr_ = IrBuilder::create<ViewDtypeOp>(
+        view_expr->container(), out, in, view_expr->dtype());
+  }
+
   void handle(ViewOp* view_expr) final {
     TORCH_INTERNAL_ASSERT(
         substitute_->isA<TensorView>(),

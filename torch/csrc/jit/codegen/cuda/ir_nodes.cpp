@@ -727,6 +727,22 @@ int GatherOp::gatherAxis(int axis) const {
   return int(windowShape().size()) + axis;
 }
 
+ViewDtypeOp::ViewDtypeOp(
+    IrBuilderPasskey passkey,
+    TensorView* out,
+    TensorView* in,
+    DataType dtype)
+    : Expr(passkey, ExprType::ViewDtypeOp), out_(out), in_(in), dtype_(dtype) {
+  addOutput(out);
+  addInput(in);
+}
+
+ViewDtypeOp::ViewDtypeOp(const ViewDtypeOp* src, IrCloner* ir_cloner)
+    : Expr(src, ir_cloner),
+      out_(ir_cloner->clone(src->out_)),
+      in_(ir_cloner->clone(src->in_)),
+      dtype_(src->dtype()) {}
+
 ViewOp::ViewOp(IrBuilderPasskey passkey, TensorView* out, TensorView* in)
     : Expr(passkey, ExprType::ViewOp), out_(out), in_(in) {
   addOutput(out);

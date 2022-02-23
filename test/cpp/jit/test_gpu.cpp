@@ -14417,6 +14417,53 @@ TEST_F(NVFuserTest, FusionVectorizeMisalignedStrideFail_CUDA) {
   ASSERT_ANY_THROW(fe.runFusion(aten_inputs));
 }
 
+TEST_F(NVFuserTest, FusionViewDtypeSameSizeOutput_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  std::vector<int64_t> input_shape{2, 10, 40};
+
+  TensorView* x = makeSymbolicTensor(input_shape.size(), DataType::Float);
+  TensorView* bias = makeSymbolicTensor(input_shape.size());
+  fusion.addInput(x);
+  fusion.addInput(bias);
+
+  auto x_add_bias = add(x, bias);
+  auto x_view = view(x_add_bias, DataType::Int32);
+  fusion.addOutput(x_view);
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::Tensor at_x = at::randn(input_shape, options);
+  at::Tensor at_bias = at::randn(input_shape, options);
+  std::vector<IValue> aten_inputs = {at_x, at_bias};
+
+  auto lparams = schedulePointwise(&fusion, aten_inputs);
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion, aten_inputs, lparams);
+  auto outputs = fe.runFusion(aten_inputs, lparams);
+
+  auto at_x_add_bias = at_x + at_bias;
+  auto at_x_view = at_x_add_bias.view(at::ScalarType::Int);
+
+  testValidate(&fusion, outputs, aten_inputs, {at_x_view}, __LINE__, __FILE__);
+}
+
+TEST_F(NVFuserTest, FusionViewDtypeFailMismatchSize_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  std::vector<int64_t> input_shape{2, 10, 40};
+
+  TensorView* x = makeSymbolicTensor(input_shape.size(), DataType::Float);
+  TensorView* bias = makeSymbolicTensor(input_shape.size());
+  fusion.addInput(x);
+  fusion.addInput(bias);
+
+  auto x_add_bias = add(x, bias);
+  ASSERT_ANY_THROW(view(x_add_bias, DataType::Int));
+}
+
 TEST_F(NVFuserTest, FusionViewOutput_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);

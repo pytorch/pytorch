@@ -77,15 +77,12 @@ class BroadcastOp;
 class TransposeOp;
 class ShiftOp;
 class GatherOp;
+class ViewDtypeOp;
 class ViewOp;
 
 // Exprs
 class Split;
 class Merge;
-class TransposeOp;
-class ShiftOp;
-class GatherOp;
-class ViewOp;
 
 namespace kir {
 class Predicate;
@@ -140,6 +137,7 @@ class TORCH_CUDA_CU_API OptOutConstDispatch : public PolymorphicBase {
   virtual void handle(const TransposeOp* stmt);
   virtual void handle(const ShiftOp* stmt);
   virtual void handle(const GatherOp* stmt);
+  virtual void handle(const ViewDtypeOp* stmt);
   virtual void handle(const ViewOp* stmt);
 
   virtual void handle(const kir::Allocate*);
@@ -189,6 +187,7 @@ class TORCH_CUDA_CU_API OptOutDispatch : public PolymorphicBase {
   virtual void handle(TransposeOp* stmt);
   virtual void handle(ShiftOp* stmt);
   virtual void handle(GatherOp* stmt);
+  virtual void handle(ViewDtypeOp* stmt);
   virtual void handle(ViewOp* stmt);
 
   virtual void handle(kir::Allocate* stmt);
@@ -279,6 +278,7 @@ class TORCH_CUDA_CU_API OptOutMutator : public PolymorphicBase {
   virtual void mutate(TransposeOp*);
   virtual void mutate(ShiftOp*);
   virtual void mutate(GatherOp*);
+  virtual void mutate(ViewDtypeOp*);
   virtual void mutate(ViewOp*);
 
   virtual void mutate(kir::Allocate*);

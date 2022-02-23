@@ -52,6 +52,32 @@ TensorView* applyViewTransforms(
 
 } // namespace
 
+TensorView* view(TensorView* x, DataType dtype) {
+  if (x->getDataType() == dtype) {
+    return x;
+  }
+
+  // TODO: support view(dtype) for dtypes of different size.
+  TORCH_INTERNAL_ASSERT(
+      dataTypeSize(x->getDataType().value()) == dataTypeSize(dtype),
+      "Currently, aten::view only supports viewing the data as a type with the same size.");
+
+  std::vector<IterDomain*> out_domain;
+  auto inp_domain = TensorDomain::noReductions(x->getMaybeRFactorDomain());
+  out_domain.reserve(inp_domain.size());
+  for (auto d : inp_domain) {
+    out_domain.push_back(d->clone());
+  }
+  auto out = IrBuilder::create<TensorView>(
+      x->container(),
+      IrBuilder::create<TensorDomain>(
+          out_domain, std::vector<bool>(out_domain.size(), true)),
+      dtype);
+
+  IrBuilder::create<ViewDtypeOp>(x->container(), out, x, dtype);
+  return out;
+}
+
 TensorView* view(
     TensorView* x,
     const std::vector<int64_t>& original_sizes,

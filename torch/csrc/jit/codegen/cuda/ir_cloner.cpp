@@ -124,6 +124,10 @@ void IrCloner::handle(const GatherOp* op) {
   clone_ = IrBuilder::clone(op, this);
 }
 
+void IrCloner::handle(const ViewDtypeOp* op) {
+  clone_ = IrBuilder::clone(op, this);
+}
+
 void IrCloner::handle(const ViewOp* op) {
   clone_ = IrBuilder::clone(op, this);
 }

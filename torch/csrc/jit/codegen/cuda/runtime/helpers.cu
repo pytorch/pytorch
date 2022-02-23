@@ -331,3 +331,23 @@ int64_t pow(int64_t a, int b) {
 int64_t pow(int a, int64_t b) {
   return pow((int64_t)a, b);
 }
+
+template <int size, int align = size>
+struct alignas(align) TypelessData {
+  int8_t data[size];
+
+  template <typename T, std::enable_if_t<sizeof(T) == size, int> _ = 0>
+  TypelessData(T x) {
+    *reinterpret_cast<T*>(data) = x;
+  }
+
+  template <typename T, std::enable_if_t<sizeof(T) == size, int> _ = 0>
+  operator T() {
+    return *reinterpret_cast<T*>(data);
+  }
+};
+
+template <typename T>
+TypelessData<sizeof(T), alignof(T)> erase_type(T x) {
+  return x;
+}

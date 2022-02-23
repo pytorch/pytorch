@@ -429,6 +429,34 @@ class TORCH_CUDA_CU_API GatherOp : public Expr {
   std::vector<std::vector<int>> pad_width_;
 };
 
+class TORCH_CUDA_CU_API ViewDtypeOp : public Expr {
+ public:
+  ViewDtypeOp(
+      IrBuilderPasskey,
+      TensorView* out,
+      TensorView* in,
+      DataType dtype);
+
+  ViewDtypeOp(const ViewDtypeOp* src, IrCloner* ir_cloner);
+
+  TensorView* out() const {
+    return out_;
+  }
+
+  TensorView* in() const {
+    return in_;
+  }
+
+  DataType dtype() const {
+    return dtype_;
+  }
+
+ private:
+  TensorView* const out_ = nullptr;
+  TensorView* const in_ = nullptr;
+  DataType dtype_;
+};
+
 class TORCH_CUDA_CU_API ViewOp : public Expr {
  public:
   ViewOp(IrBuilderPasskey, TensorView* out, TensorView* in);

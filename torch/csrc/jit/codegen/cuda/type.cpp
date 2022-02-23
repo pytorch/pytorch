@@ -214,6 +214,8 @@ static const char* expr_type2string(ExprType t) {
       return "ShiftOp";
     case ExprType::GatherOp:
       return "GatherOp";
+    case ExprType::ViewDtypeOp:
+      return "ViewDtypeOp";
     case ExprType::ViewOp:
       return "ViewOp";
     case ExprType::Split:
@@ -250,6 +252,7 @@ bool needFloatSuffix(UnaryOpType t) {
     case UnaryOpType::Frac:
     case UnaryOpType::Gelu:
     case UnaryOpType::Silu:
+    case UnaryOpType::EraseType:
     case UnaryOpType::Neg:
     case UnaryOpType::Relu:
     case UnaryOpType::Reciprocal:
@@ -307,6 +310,8 @@ static const char* unary_op_type2string(UnaryOpType t) {
       return "log1p";
     case UnaryOpType::Log2:
       return "log2";
+    case UnaryOpType::EraseType:
+      return "erase_type";
     case UnaryOpType::Neg:
       return "neg";
     case UnaryOpType::Not:

@@ -123,6 +123,9 @@ void Expr::dispatch(T handler, Expr* expr) {
     case ExprType::GatherOp:
       ptr(handler)->handle(expr->as<GatherOp>());
       return;
+    case ExprType::ViewDtypeOp:
+      ptr(handler)->handle(expr->as<ViewDtypeOp>());
+      return;
     case ExprType::ViewOp:
       ptr(handler)->handle(expr->as<ViewOp>());
       return;
@@ -251,6 +254,9 @@ void Expr::constDispatch(T handler, const Expr* expr) {
       return;
     case ExprType::GatherOp:
       ptr(handler)->handle(expr->as<GatherOp>());
+      return;
+    case ExprType::ViewDtypeOp:
+      ptr(handler)->handle(expr->as<ViewDtypeOp>());
       return;
     case ExprType::ViewOp:
       ptr(handler)->handle(expr->as<ViewOp>());
@@ -391,6 +397,9 @@ void Expr::mutatorDispatch(T mutator, Expr* expr) {
       return;
     case ExprType::GatherOp:
       ptr(mutator)->mutate(expr->as<GatherOp>());
+      return;
+    case ExprType::ViewDtypeOp:
+      ptr(mutator)->mutate(expr->as<ViewDtypeOp>());
       return;
     case ExprType::ViewOp:
       ptr(mutator)->mutate(expr->as<ViewOp>());
@@ -597,6 +606,9 @@ void OptOutConstDispatch::handle(const ShiftOp* stmt) {
 void OptOutConstDispatch::handle(const GatherOp* stmt) {
   unhandled(stmt);
 }
+void OptOutConstDispatch::handle(const ViewDtypeOp* stmt) {
+  unhandled(stmt);
+}
 void OptOutConstDispatch::handle(const ViewOp* stmt) {
   unhandled(stmt);
 }
@@ -697,6 +709,9 @@ void OptOutDispatch::handle(ShiftOp* stmt) {
   unhandled(stmt);
 }
 void OptOutDispatch::handle(GatherOp* stmt) {
+  unhandled(stmt);
+}
+void OptOutDispatch::handle(ViewDtypeOp* stmt) {
   unhandled(stmt);
 }
 void OptOutDispatch::handle(ViewOp* stmt) {
