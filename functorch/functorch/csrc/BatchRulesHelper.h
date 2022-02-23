@@ -17,7 +17,7 @@
 #include <functorch/csrc/PlumbingHelper.h>
 #include <ATen/core/dispatch/Dispatcher.h>
 #include <functorch/csrc/Constants.h>
-#include <functorch/csrc/OutOfPlacePlumbing.h>
+#include <functorch/csrc/VmapGeneratedPlumbing.h>
 
 namespace at { namespace functorch {
 Tensor reshape_dim_into(int64_t src, int64_t dst, const Tensor& x);
