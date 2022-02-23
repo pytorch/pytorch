@@ -1146,7 +1146,7 @@ void ONNXTrackScopeAttributes(
       scope_attr_map_.find(scope_node->scope()) == scope_attr_map_.end());
   scope_attr_map_[scope_node->scope()] = attr_node;
 
-  for (auto it : attributes) {
+  for (const auto& it : attributes) {
     auto k = Symbol::attr(it.first);
     auto v = it.second;
     if (v.isTensor()) {
