@@ -1108,9 +1108,10 @@ endif()
       DESTINATION ${TORCH_INSTALL_INCLUDE_DIR}/torch)
   endif()
 
-
+  message("DEBUG: caffe2/CMakeLists.txt, BUILD_TEST=${BUILD_TEST}, BUILD_LITE_INTERPRETER=${BUILD_LITE_INTERPRETER}")
   if(BUILD_TEST)
     if(BUILD_LITE_INTERPRETER)
+      message("DEBUG: caffe2/CMakeLists.txt, inside if")
       add_subdirectory(
         ${TORCH_ROOT}/test/cpp/lite_interpreter_runtime
         ${CMAKE_BINARY_DIR}/test_lite_interpreter_runtime

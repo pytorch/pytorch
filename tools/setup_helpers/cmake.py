@@ -286,7 +286,6 @@ class CMake:
             'CMAKE_CUDA_COMPILER': 'CUDA_NVCC_EXECUTABLE',
             'CUDACXX': 'CUDA_NVCC_EXECUTABLE'
         }
-
         for var, val in my_env.items():
             # We currently pass over all environment variables that start with "BUILD_", "USE_", and "CMAKE_". This is
             # because we currently have no reliable way to get the list of all build options we have specified in
@@ -303,6 +302,7 @@ class CMake:
                 key = low_priority_aliases[var]
                 if key not in build_options:
                     build_options[key] = val
+        print(f"DEBUG, cmake.py env: {my_env.get('BUILD_LITE_INTERPRETER')}, {build_options.get('BUILD_LITE_INPTERPRETER')}")
 
         # The default value cannot be easily obtained in CMakeLists.txt. We set it here.
         py_lib_path = sysconfig.get_path('purelib')

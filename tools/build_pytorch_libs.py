@@ -55,6 +55,7 @@ def build_caffe2(
 ) -> None:
     my_env = _create_build_env()
     build_test = not check_negative_env_flag('BUILD_TEST')
+    print(f"DEBUG: build_test = {build_test}")
     cmake.generate(version,
                    cmake_python_library,
                    build_python,

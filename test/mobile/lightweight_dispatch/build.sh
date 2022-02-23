@@ -7,7 +7,9 @@
 # shellcheck disable=SC2034
 COMPACT_JOB_NAME="${BUILD_ENVIRONMENT}"
 echo "Build lite interpreter with lightweight dispatch."
+MACOSX_DEPLOYMENT_TARGET=10.9 CC=clang CXX=clang++ \
 USE_DISTRIBUTED=0 \
+  USE_CUDA=0 \
   USE_MKLDNN=0 \
   USE_FBGEMM=0 \
   USE_NNPACK=0 \
