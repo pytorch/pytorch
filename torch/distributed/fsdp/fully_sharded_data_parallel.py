@@ -318,7 +318,7 @@ class FullyShardedDataParallel(nn.Module):
         """
         uninitialized = self._is_root is None
         self._assert_state(TrainingState_.IDLE)
-        with self._summon_full_params(recurse=False):
+        with self.summon_full_params(recurse=False):
             ret = super().apply(fn)
 
         # Reset lazy init that might be called by summon_full_params, since
@@ -741,16 +741,15 @@ class FullyShardedDataParallel(nn.Module):
     def summon_full_params(
         self, recurse: bool = True, writeback: bool = False
     ) -> Generator:
-        """
-        A context manager to expose full params for the current FSDP instance.
-        Can be useful *after* forward/backward for a model to get the params for
-        additional processing or checking.
+        r""" A context manager to expose full params for the current FSDP
+        instance. Can be useful *after* forward/backward for a model to get
+        the params for additional processing or checking.
 
         .. note:: This can be used on inner FSDPs.
         .. note:: This can *not* be used within a forward or backward pass. Nor
             can forward and backward be started from within this context.
-        .. note:: Parameters will revert to their local shards after the context manager
-            exits, storage behavior is the same as forward.
+        .. note:: Parameters will revert to their local shards after the context
+            manager exits, storage behavior is the same as forward.
         .. note:: The full parameters can be modified, but only the portion
             corresponding to the local param shard will persist after the
             context manager exits (unless ``writeback=False``, in which case
