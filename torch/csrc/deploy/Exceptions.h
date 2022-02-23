@@ -21,7 +21,7 @@ namespace c10 {
 /// The primary ATen error class.
 /// Provides a complete error message with source location information via
 /// `what()`, and a more concise message via `what_without_backtrace()`.
-/// Don't throw this directly; use TORCH_CHECK/DEPLOY_INTERNAL_ASSERT instead.
+/// Don't throw this directly; use TORCH_CHECK/MULTIPY_INTERNAL_ASSERT instead.
 ///
 /// NB: c10::Error is handled specially by the default torch to suppress the
 /// backtrace, see torch/csrc/Exceptions.h
@@ -222,7 +222,7 @@ C10_API std::string GetExceptionString(const std::exception& e);
 
 } // namespace c10
 
-// Private helper macro for implementing DEPLOY_INTERNAL_ASSERT and TORCH_CHECK
+// Private helper macro for implementing MULTIPY_INTERNAL_ASSERT and TORCH_CHECK
 //
 // Note: In the debug build With MSVC, __LINE__ might be of long type (a.k.a
 // int32_t), which is different from the definition of `SourceLocation` that
@@ -282,8 +282,8 @@ C10_API std::string GetExceptionString(const std::exception& e);
 // which may be useful for debugging.)
 //
 // Usage:
-//    DEPLOY_INTERNAL_ASSERT(should_be_true);
-//    DEPLOY_INTERNAL_ASSERT(x == 0, "x = ", x);
+//    MULTIPY_INTERNAL_ASSERT(should_be_true);
+//    MULTIPY_INTERNAL_ASSERT(x == 0, "x = ", x);
 //
 // Assuming no bugs in PyTorch, the conditions tested by this macro should
 // always be true; e.g., it should be possible to disable all of these
@@ -295,7 +295,7 @@ C10_API std::string GetExceptionString(const std::exception& e);
 // (unlike assert()).
 //
 #ifdef STRIP_ERROR_MESSAGES
-#define DEPLOY_INTERNAL_ASSERT(cond, ...)                            \
+#define MULTIPY_INTERNAL_ASSERT(cond, ...)                            \
   if (DEPLOY_UNLIKELY_OR_CONST(!(cond))) {                             \
     ::c10::detail::torchCheckFail(                                  \
         __func__,                                                   \
@@ -305,11 +305,11 @@ C10_API std::string GetExceptionString(const std::exception& e);
   }
 #else
 // It would be nice if we could build a combined string literal out of
-// the DEPLOY_INTERNAL_ASSERT prefix and a user-provided string literal
+// the MULTIPY_INTERNAL_ASSERT prefix and a user-provided string literal
 // as the first argument, but there doesn't seem to be any good way to
 // do that while still supporting having a first argument that isn't a
 // string literal.
-#define DEPLOY_INTERNAL_ASSERT(cond, ...)                                        \
+#define MULTIPY_INTERNAL_ASSERT(cond, ...)                                        \
   if (DEPLOY_UNLIKELY_OR_CONST(!(cond))) {                                         \
     ::c10::detail::torchInternalAssertFail(                                     \
         __func__,                                                               \
@@ -323,7 +323,7 @@ C10_API std::string GetExceptionString(const std::exception& e);
 #endif
 
 // A utility macro to make it easier to test for error conditions from user
-// input.  Like DEPLOY_INTERNAL_ASSERT, it supports an arbitrary number of extra
+// input.  Like MULTIPY_INTERNAL_ASSERT, it supports an arbitrary number of extra
 // arguments (evaluated only on failure), which will be printed in the error
 // message using operator<< (e.g., you can pass any object which has
 // operator<< defined.  Most objects in PyTorch have these definitions!)
@@ -400,7 +400,7 @@ namespace detail {
 
 // The c10::str() call that creates userMsg can have 1 of 3 return
 // types depending on the number and types of arguments passed to
-// DEPLOY_INTERNAL_ASSERT.  0 arguments will get a
+// MULTIPY_INTERNAL_ASSERT.  0 arguments will get a
 // CompileTimeEmptyString, 1 const char * will be passed straight
 // through, and anything else will get converted to std::string.
 [[noreturn]] C10_API void torchInternalAssertFail(
@@ -456,18 +456,18 @@ namespace detail {
 #define TORCH_CHECK_IF_NOT_ON_CUDA(cond, ...) TORCH_CHECK(cond, ##__VA_ARGS__)
 #endif
 
-// Debug only version of DEPLOY_INTERNAL_ASSERT. This macro only checks in debug
+// Debug only version of MULTIPY_INTERNAL_ASSERT. This macro only checks in debug
 // build, and does nothing in release build.  It is appropriate to use
 // in situations where you want to add an assert to a hotpath, but it is
 // too expensive to run this assert on production builds.
 #ifdef NDEBUG
 // Optimized version - generates no code.
-#define DEPLOY_INTERNAL_ASSERT_DEBUG_ONLY(...) \
+#define MULTIPY_INTERNAL_ASSERT_DEBUG_ONLY(...) \
   while (false)                               \
-  C10_EXPAND_MSVC_WORKAROUND(DEPLOY_INTERNAL_ASSERT(__VA_ARGS__))
+  C10_EXPAND_MSVC_WORKAROUND(MULTIPY_INTERNAL_ASSERT(__VA_ARGS__))
 #else
-#define DEPLOY_INTERNAL_ASSERT_DEBUG_ONLY(...) \
-  C10_EXPAND_MSVC_WORKAROUND(DEPLOY_INTERNAL_ASSERT(__VA_ARGS__))
+#define MULTIPY_INTERNAL_ASSERT_DEBUG_ONLY(...) \
+  C10_EXPAND_MSVC_WORKAROUND(MULTIPY_INTERNAL_ASSERT(__VA_ARGS__))
 #endif
 
 // TODO: We're going to get a lot of similar looking string literals
@@ -556,7 +556,7 @@ inline void deprecated_AT_ERROR() {}
 // Deprecation disabled until we fix sites in our codebase
 C10_DEPRECATED_MESSAGE("AT_ASSERT is deprecated, if you mean to indicate an
 internal invariant failure, use " \
-                       "DEPLOY_INTERNAL_ASSERT instead; if you mean to do user
+                       "MULTIPY_INTERNAL_ASSERT instead; if you mean to do user
 error checking, use " \ "TORCH_CHECK.  See
 https://github.com/pytorch/pytorch/issues/20287 for more details.")
 */
@@ -566,7 +566,7 @@ inline void deprecated_AT_ASSERT() {}
 // Deprecation disabled until we fix sites in our codebase
 C10_DEPRECATED_MESSAGE("AT_ASSERTM is deprecated, if you mean to indicate an
 internal invariant failure, use " \
-                       "DEPLOY_INTERNAL_ASSERT instead; if you mean to do user
+                       "MULTIPY_INTERNAL_ASSERT instead; if you mean to do user
 error checking, use " \ "TORCH_CHECK.  See
 https://github.com/pytorch/pytorch/issues/20287 for more details.")
 */
@@ -576,16 +576,16 @@ inline void deprecated_AT_ASSERTM() {}
 } // namespace c10
 
 // Deprecated alias; this alias was deprecated because people kept mistakenly
-// using it for user error checking.  Use DEPLOY_INTERNAL_ASSERT or TORCH_CHECK
+// using it for user error checking.  Use MULTIPY_INTERNAL_ASSERT or TORCH_CHECK
 // instead. See https://github.com/pytorch/pytorch/issues/20287 for more
 // details.
 #define AT_ASSERT(...)                                              \
   do {                                                              \
     ::c10::detail::deprecated_AT_ASSERT();                          \
-    C10_EXPAND_MSVC_WORKAROUND(DEPLOY_INTERNAL_ASSERT(__VA_ARGS__)); \
+    C10_EXPAND_MSVC_WORKAROUND(MULTIPY_INTERNAL_ASSERT(__VA_ARGS__)); \
   } while (false)
 
-// Deprecated alias, like AT_ASSERT.  The new DEPLOY_INTERNAL_ASSERT macro
+// Deprecated alias, like AT_ASSERT.  The new MULTIPY_INTERNAL_ASSERT macro
 // supports both 0-ary and variadic calls, so having a separate
 // message-accepting macro is not necessary.
 //
@@ -596,12 +596,12 @@ inline void deprecated_AT_ASSERTM() {}
 #define AT_ASSERTM(cond, ...)                                             \
   do {                                                                    \
     ::c10::detail::deprecated_AT_ASSERTM();                               \
-    C10_EXPAND_MSVC_WORKAROUND(DEPLOY_INTERNAL_ASSERT(cond, __VA_ARGS__)); \
+    C10_EXPAND_MSVC_WORKAROUND(MULTIPY_INTERNAL_ASSERT(cond, __VA_ARGS__)); \
   } while (false)
 
 // Deprecated alias; this alias was deprecated because it represents extra API
 // surface that makes it hard for people to understand what macro to use.
-// Use TORCH_CHECK(false, ...) or DEPLOY_INTERNAL_ASSERT(false, ...) to
+// Use TORCH_CHECK(false, ...) or MULTIPY_INTERNAL_ASSERT(false, ...) to
 // unconditionally fail at a line of code.
 #define AT_ERROR(...)                                                        \
   do {                                                                       \
