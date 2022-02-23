@@ -1036,9 +1036,10 @@ class TestDecompositionOpInfo(TestCase):
         def op_assert_equal(op, a, b):
             assert a.dtype == b.dtype
             # Before adding an entry to this table, make sure your decomposition is right :)
+            print(a, b)
             tol_table = {
                 # Due to strange epsilon behaviors, see https://github.com/pytorch/pytorch/issues/73161
-                aten.native_layer_norm: (1.3e-6, 1e-4),
+                (torch.float32, aten.native_layer_norm): (1e-3, 1e-3),
             }
             if (b.dtype, op) in tol_table:
                 rtol, atol = tol_table[(b.dtype, op)]
