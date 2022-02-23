@@ -6,7 +6,7 @@ import random
 import sys
 import tempfile
 import time
-from collections import namedtuple
+from collections import namedtuple, OrderedDict
 from contextlib import contextmanager, suppress
 from datetime import timedelta
 from functools import reduce
@@ -16,6 +16,7 @@ import torch
 import torch.cuda
 import torch.distributed as dist
 import torch.distributed.algorithms.model_averaging.averagers as averagers
+import torch.distributed.algorithms.model_averaging.hierarchical_model_averager as hierarchicalSGD
 import torch.distributed.algorithms.model_averaging.utils as model_averaging_utils
 import torch.nn as nn
 import torch.nn.functional as F
@@ -1028,6 +1029,90 @@ class DistributedTest:
                     else:
                         # No model averaging, so the parameters are not updated.
                         self.assertEqual(param.data, tensor)
+
+        @sandcastle_skip_if(
+            BACKEND not in DistTestCases.backend_feature["subgroup"],
+            f"The {BACKEND} backend does not support creating subgroups on CUDA devices"
+        )
+        @skip_if_lt_x_gpu(2)
+        def test_1_level_hierarchical_model_averager_equivalent_to_periodic_model_averager(self):
+            rank = dist.get_rank()
+            world_size = dist.get_world_size()
+            rank_to_GPU = init_multigpu_helper(world_size, BACKEND)
+            device_id = rank_to_GPU[rank][0]
+
+            model = nn.Linear(1, 5, bias=False).cuda(device_id)
+            param = next(model.parameters())
+            tensor = torch.ones_like(param.data) * rank
+            expected_avg_tensor = (
+                torch.ones_like(param.data) * sum(range(world_size)) / world_size
+            )
+            period = 4
+            for warmup_steps in [12, 13, 14, 15]:
+                averager = hierarchicalSGD.HierarchicalModelAverager(
+                    # Run the global averaging at a period of 4,
+                    # which is equivalent to the above periodic model averaging test case.
+                    period_group_size_dict=OrderedDict([(period, world_size)]), warmup_steps=warmup_steps
+                )
+
+                averager = averagers.PeriodicModelAverager(period=period, warmup_steps=warmup_steps)
+                for step in range(0, 20):
+                    # Reset the parameters at every step.
+                    param.data = copy.deepcopy(tensor)
+                    averager.average_parameters(model.parameters())
+                    if step >= warmup_steps and (step - warmup_steps) % period == 0:
+                        self.assertEqual(param.data, expected_avg_tensor)
+                    else:
+                        # No model averaging, so the parameters are not updated.
+                        self.assertEqual(param.data, tensor)
+
+        @sandcastle_skip_if(
+            BACKEND not in DistTestCases.backend_feature["subgroup"],
+            f"The {BACKEND} backend does not support creating subgroups on CUDA devices"
+        )
+        @require_world_size(4)
+        @skip_if_lt_x_gpu(4)
+        def test_2_level_hierarchical_model_averager(self):
+            rank = dist.get_rank()
+            world_size = dist.get_world_size()
+            rank_to_GPU = init_multigpu_helper(world_size, BACKEND)
+            device_id = rank_to_GPU[rank][0]
+
+            model = nn.Linear(1, 5, bias=False).cuda(device_id)
+            param = next(model.parameters())
+            tensor = torch.ones_like(param.data) * rank
+            # Set up such a hierarchical model averaging as follows:
+            # after the first 10 warmup steps,
+            # run model averaging every 2 steps within each subgroup of size 2,
+            # and run the global model averaging every 4 steps.
+            # The former model averaging will be skipped every 4 steps.
+            warmup_steps = 10
+            subgroup_size = 2
+            subgroup_avg_period = 2
+            global_avg_period = 4
+            period_group_size_dict = OrderedDict([(subgroup_avg_period, subgroup_size), (global_avg_period, world_size)])
+            averager = hierarchicalSGD.HierarchicalModelAverager(
+                period_group_size_dict=period_group_size_dict, warmup_steps=warmup_steps
+            )
+            expected_avg_tensor_within_subgroup = (
+                torch.ones_like(param.data) * sum(range(subgroup_size)) / subgroup_size
+            )
+            expected_global_avg_tensor = (
+                torch.ones_like(param.data) * sum(range(world_size)) / world_size
+            )
+            for step in range(0, 20):
+                # Reset the parameters at every step.
+                param.data = copy.deepcopy(tensor)
+                averager.average_parameters(model.parameters())
+                if step == 12 or step == 16:
+                    # Run global model averaging when `step` can be divided by 4.
+                    self.assertEqual(param.data, expected_global_avg_tensor)
+                elif step == 10 or step == 14 or step == 18:
+                    # Run model averaging within subgroup when `step` can be divided by 2 but not by 4.
+                    self.assertEqual(param.data, expected_avg_tensor_within_subgroup)
+                else:
+                    # No model averaging, so the parameters are not updated.
+                    self.assertEqual(param.data, tensor)
 
         # NCCL Batch SEND RECV
         @skip_if_no_gpu
