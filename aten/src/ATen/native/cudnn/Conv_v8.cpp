@@ -167,7 +167,7 @@ cudnn_frontend::ExecutionPlan* find(const KeyType& key) {
   std::lock_guard<std::mutex> guard(mutex);
   auto it = engine_cache.find(key);
   if (it == engine_cache.end()) {
-    return NULL;
+    return nullptr;
   }
   // TODO: probably want ExecutionPlan copy constructor or better way to return
   return &(it->second);
@@ -206,11 +206,11 @@ void get_cachekey_fused(CacheKeyFused& key, const Tensor& y, const Tensor& x, co
 
 void run_conv_plan(cudnnHandle_t handle, const Tensor& x, const Tensor& y, const Tensor& w, const cudnn_frontend::ExecutionPlan& plan) {
   auto workspace_size = plan.getWorkspaceSize();
-  Tensor workspace = at::empty({workspace_size}, x.options().dtype(kByte));
+  auto workspace_ptr = c10::cuda::CUDACachingAllocator::get()->allocate(workspace_size);
   void *data_ptrs[] = {x.data_ptr(), y.data_ptr(), w.data_ptr()};
   int64_t uids[] = {'x', 'y', 'w'};
   auto variantPack = cudnn_frontend::VariantPackBuilder()
-      .setWorkspacePointer(workspace.has_storage() ? workspace.data_ptr() : NULL)
+      .setWorkspacePointer(workspace_size ? workspace_ptr.get() : nullptr)
       .setDataPointers(3, data_ptrs)
       .setUids(3, uids)
       .build();
@@ -219,11 +219,11 @@ void run_conv_plan(cudnnHandle_t handle, const Tensor& x, const Tensor& y, const
 
 void run_conv_plan_fused(cudnnHandle_t handle, const Tensor& x, const Tensor& y, const Tensor& w, const Tensor& z, const Tensor& b, const cudnn_frontend::ExecutionPlan& plan) {
   auto workspace_size = plan.getWorkspaceSize();
-  Tensor workspace = at::empty({workspace_size}, x.options().dtype(kByte));
+  auto workspace_ptr = c10::cuda::CUDACachingAllocator::get()->allocate(workspace_size);
   void *data_ptrs[] = {x.data_ptr(), y.data_ptr(), w.data_ptr(), z.data_ptr(), b.data_ptr()};
   int64_t uids[] = {'x', 'y', 'w', 'z', 'b'};
   auto variantPack = cudnn_frontend::VariantPackBuilder()
-      .setWorkspacePointer(workspace.has_storage() ? workspace.data_ptr() : NULL)
+      .setWorkspacePointer(workspace_size ? workspace_ptr.get() : nullptr)
       .setDataPointers(5, data_ptrs)
       .setUids(5, uids)
       .build();
@@ -337,7 +337,7 @@ size_t get_available_workspace() {
   return max_block_size;
 }
 
-void generate_and_filter_plans(const cudnnHandle_t handle, cudnn_frontend::OperationGraph& opGraph, cudnn_frontend::EngineConfigGenerator& generator, const Tensor& x, cudnn_frontend::executionPlans_t& valid_plans, Tensor& workspace) {
+void generate_and_filter_plans(const cudnnHandle_t handle, cudnn_frontend::OperationGraph& opGraph, cudnn_frontend::EngineConfigGenerator& generator, const Tensor& x, cudnn_frontend::executionPlans_t& valid_plans, at::DataPtr& workspace_ptr) {
   auto initial_predicate_function = [&](cudnn_frontend::ExecutionPlan const& plan) -> bool {
     return false;
   };
@@ -357,7 +357,7 @@ void generate_and_filter_plans(const cudnnHandle_t handle, cudnn_frontend::Opera
   bool remove_invalid = false;
   while (max_workspace_size) {
     try {
-      workspace = at::empty({max_workspace_size}, x.options().dtype(kByte));
+      workspace_ptr = c10::cuda::CUDACachingAllocator::get()->allocate(max_workspace_size);
       break;
     } catch (c10::CUDAOutOfMemoryError &e) {
       max_workspace_size /= 2;
@@ -384,12 +384,12 @@ auto get_plans_from_find(const cudnnHandle_t handle, const cudnnBackendDescripto
   auto sources = get_generator_sources(desc, x, deterministic, allow_tf32, CUDNN_HEUR_MODE_INSTANT);
   cudnn_frontend::EngineConfigGenerator generator(sources.size(), sources.data());
   cudnn_frontend::executionPlans_t valid_plans;
-  Tensor workspace;
-  generate_and_filter_plans(handle, opGraph, generator, x, valid_plans, workspace);
+  at::DataPtr workspace_ptr;
+  generate_and_filter_plans(handle, opGraph, generator, x, valid_plans, workspace_ptr);
   auto variantPack = cudnn_frontend::VariantPackBuilder()
       .setDataPointers(3, data_ptrs)
       .setUids(3, uids)
-      .setWorkspacePointer(workspace.has_storage() ? workspace.data_ptr() : NULL)
+      .setWorkspacePointer(workspace_ptr ? workspace_ptr.get() : nullptr)
       .build();
 
   auto plans = cudnn_frontend::time_sorted_plan<cudnn_frontend::CudnnFindSamplingTechnique::CUDNN_FIND_SAMPLE_TILL_STABLE>(handle, std::move(valid_plans), variantPack);
@@ -413,12 +413,12 @@ auto get_plans_from_find_fused(const cudnnHandle_t handle,
   auto sources = get_generator_sources(CUDNN_BACKEND_OPERATION_CONVOLUTION_FORWARD_DESCRIPTOR, x, deterministic, allow_tf32, CUDNN_HEUR_MODE_INSTANT);
   cudnn_frontend::EngineConfigGenerator generator(sources.size(), sources.data());
   cudnn_frontend::executionPlans_t valid_plans;
-  Tensor workspace;
-  generate_and_filter_plans(handle, opGraph, generator, x, valid_plans, workspace);
+  at::DataPtr workspace_ptr;
+  generate_and_filter_plans(handle, opGraph, generator, x, valid_plans, workspace_ptr);
   auto variantPack = cudnn_frontend::VariantPackBuilder()
       .setDataPointers(5, data_ptrs)
       .setUids(5, uids)
-      .setWorkspacePointer(workspace.has_storage() ? workspace.data_ptr() : NULL)
+      .setWorkspacePointer(workspace_ptr ? workspace_ptr.get() : nullptr)
       .build();
 
   auto plans = cudnn_frontend::time_sorted_plan<cudnn_frontend::CudnnFindSamplingTechnique::CUDNN_FIND_SAMPLE_TILL_STABLE>(handle, std::move(valid_plans), variantPack);
@@ -434,7 +434,7 @@ auto get_plans_from_find_fused(const cudnnHandle_t handle,
 // We only get configs from this stage to avoid building unnecessary plans that are never executed
 auto get_configs_from_heuristics(const cudnnHandle_t handle, const cudnnBackendDescriptorType_t desc, const Tensor& x, const Tensor& y, const Tensor& w, const CacheKey& key, const IntArrayRef padding, const IntArrayRef stride, const IntArrayRef dilation, const bool deterministic, const bool allow_tf32) {
   auto opGraph = build_opgraph(handle, desc, x, y, w, key, padding, stride, dilation);
-  auto heuristic_mode = at::native::cudnnv8_b() ? CUDNN_HEUR_MODE_B : CUDNN_HEUR_MODE_INSTANT;
+  auto heuristic_mode = at::native::cudnnv8_use_heur_mode_b() ? CUDNN_HEUR_MODE_B : CUDNN_HEUR_MODE_INSTANT;
   auto sources = get_generator_sources(desc, x, deterministic, allow_tf32, heuristic_mode);
 
   cudnn_frontend::EngineConfigGenerator generator(sources.size(), sources.data());
@@ -444,7 +444,7 @@ auto get_configs_from_heuristics(const cudnnHandle_t handle, const cudnnBackendD
 
 auto get_configs_from_heuristics_fused(const cudnnHandle_t handle, const Tensor& x, const Tensor& y, const Tensor& w, const Tensor& z, const Tensor& b, const float alpha, const CacheKeyFused& key, const IntArrayRef padding, const IntArrayRef stride, const IntArrayRef dilation, const bool deterministic, const bool allow_tf32) {
   auto opGraph = build_opgraph_fused(handle, x, y, w, z, b, alpha, key, padding, stride, dilation);
-  auto heuristic_mode = at::native::cudnnv8_b() ? CUDNN_HEUR_MODE_B : CUDNN_HEUR_MODE_INSTANT;
+  auto heuristic_mode = at::native::cudnnv8_use_heur_mode_b() ? CUDNN_HEUR_MODE_B : CUDNN_HEUR_MODE_INSTANT;
   auto sources = get_generator_sources(CUDNN_BACKEND_OPERATION_CONVOLUTION_FORWARD_DESCRIPTOR, x, deterministic, allow_tf32, heuristic_mode);
 
   cudnn_frontend::EngineConfigGenerator generator(sources.size(), sources.data());
@@ -591,7 +591,7 @@ void raw_cudnn_convolution_forward_out(
     const bool benchmark, const bool deterministic, const bool allow_tf32)
 {
   if (output.numel() == 0) { return; }
-  if (at::native::cudnnv8_enabled()) {
+  if (at::native::cudnnv8_enabled_check_debug()) {
     run_single_conv(CUDNN_BACKEND_OPERATION_CONVOLUTION_FORWARD_DESCRIPTOR,
       input, output, weight, padding, stride, dilation, groups,
       benchmark, deterministic, allow_tf32);
@@ -610,7 +610,7 @@ void raw_cudnn_convolution_backward_input_out(
     const IntArrayRef padding, const IntArrayRef stride, const IntArrayRef dilation, const int64_t groups,
     const bool benchmark, const bool deterministic, const bool allow_tf32) {
   if (grad_input.numel() == 0) { return; }
-  if (at::native::cudnnv8_enabled()) {
+  if (at::native::cudnnv8_enabled_check_debug()) {
     run_single_conv(CUDNN_BACKEND_OPERATION_CONVOLUTION_BACKWARD_DATA_DESCRIPTOR,
       grad_input, grad_output, weight, padding, stride, dilation, groups,
       benchmark, deterministic, allow_tf32);
@@ -629,7 +629,7 @@ void raw_cudnn_convolution_backward_weight_out(
     const IntArrayRef padding, const IntArrayRef stride, const IntArrayRef dilation, const int64_t groups,
     const bool benchmark, const bool deterministic, const bool allow_tf32) {
   if (grad_weight.numel() == 0) { return; }
-  if (at::native::cudnnv8_enabled()) {
+  if (at::native::cudnnv8_enabled_check_debug()) {
     run_single_conv(CUDNN_BACKEND_OPERATION_CONVOLUTION_BACKWARD_FILTER_DESCRIPTOR,
       input, grad_output, grad_weight, padding, stride, dilation, groups,
       benchmark, deterministic, allow_tf32);
@@ -656,7 +656,7 @@ void raw_cudnn_convolution_add_relu_out(
     bool deterministic,
     bool allow_tf32) {
   if (output.numel() == 0) { return; }
-  if (at::native::cudnnv8_enabled()) {
+  if (at::native::cudnnv8_enabled_check_debug()) {
     auto bias_ = bias.view({1, bias.numel(), 1, 1});
     run_fused_conv(input, output, weight, z, bias_,
       alpha, stride, padding, dilation,
