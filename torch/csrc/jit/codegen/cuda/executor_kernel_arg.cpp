@@ -197,6 +197,10 @@ void KernelArgumentHolder::push(const IValue& val) {
   auto scalar_val = val.toScalar();
   switch (scalar_val.type()) {
     // NOLINTNEXTLINE(bugprone-branch-clone)
+    case c10::ScalarType::ComplexDouble:
+      arguments_.push_back(
+          std::make_unique<ComplexDoubleArg>(scalar_val.toComplexDouble()));
+      return;
     case c10::ScalarType::Double:
       arguments_.push_back(std::make_unique<DoubleArg>(scalar_val.toDouble()));
       return;

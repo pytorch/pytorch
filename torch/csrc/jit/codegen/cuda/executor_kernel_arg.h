@@ -95,6 +95,15 @@ struct DoubleArg : public ArgAbstract {
   }
 };
 
+struct ComplexDoubleArg : public ArgAbstract {
+  c10::complex<double> val_;
+  explicit ComplexDoubleArg(c10::complex<double> _val) : val_(_val) {}
+  // NOLINTNEXTLINE(modernize-use-override,cppcoreguidelines-explicit-virtual-functions)
+  void* arg() {
+    return &val_;
+  }
+};
+
 struct BoolArg : public ArgAbstract {
   bool val_;
   explicit BoolArg(bool _val) : val_(_val) {}

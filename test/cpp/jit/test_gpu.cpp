@@ -3798,6 +3798,10 @@ Val* gen_jit_operand(std::pair<ValType, DataType> desc) {
       return IrBuilder::create<Double>();
     } else if (desc.second == DataType::Double) {
       return IrBuilder::create<Double>();
+    } else if (desc.second == DataType::ComplexFloat) {
+      return IrBuilder::create<ComplexDouble>();
+    } else if (desc.second == DataType::ComplexDouble) {
+      return IrBuilder::create<ComplexDouble>();
     } else if (desc.second == DataType::Int) {
       return IrBuilder::create<Int>();
     } else {
@@ -3820,6 +3824,8 @@ IValue gen_aten_operand(
     bool rand) {
   if (desc.first == ValType::TensorView) {
     if (desc.second == DataType::Double || desc.second == DataType::Float ||
+        desc.second == DataType::ComplexDouble ||
+        desc.second == DataType::ComplexFloat ||
         desc.second == DataType::Half || desc.second == DataType::BFloat16) {
       auto options = at::TensorOptions()
                          .dtype(data_type_to_aten(desc.second))
@@ -3855,9 +3861,13 @@ IValue gen_aten_operand(
     }
   } else if (desc.first == ValType::Scalar) {
     // IValue scalars can only be double int64 or bool
-    if (desc.second == DataType::Double || desc.second == DataType::Float ||
+    if (desc.second == DataType::ComplexDouble ||
+        desc.second == DataType::ComplexFloat) {
+      return IValue(at::Scalar(c10::complex<double>(1.0, 0.0)));
+    } else if (
+        desc.second == DataType::Double || desc.second == DataType::Float ||
         desc.second == DataType::Half || desc.second == DataType::BFloat16) {
-      return IValue(at::Scalar(1.f));
+      return IValue(at::Scalar(1.0));
     } else if (desc.second == DataType::Int) {
       return IValue(at::Scalar(1));
     } else {
@@ -3977,43 +3987,73 @@ TEST_F(NVFuserTest, FusionUnaryOps_CUDA) {
   // list within the vector to make this code compatible with some old env
   // which we still need to support. eg. gcc 5.4 + cuda 9.2.
   std::vector<OpTuple> ops{
-      OpTuple{at::abs, UnaryOpType::Abs, "abs"},
       OpTuple{at::acos, UnaryOpType::Acos, "acos"},
       OpTuple{at::asin, UnaryOpType::Asin, "asin"},
       OpTuple{at::atan, UnaryOpType::Atan, "atan"},
       // There does not appear to be an appropriate ATen function for atanh
       // OpTuple{at::atanh,      UnaryOpType::Atanh,      "atanh"      },
-      OpTuple{at::ceil, UnaryOpType::Ceil, "ceil"},
       OpTuple{at::cos, UnaryOpType::Cos, "cos"},
       OpTuple{at::cosh, UnaryOpType::Cosh, "cosh"},
-      OpTuple{at::erf, UnaryOpType::Erf, "erf"},
-      OpTuple{at::erfc, UnaryOpType::Erfc, "erfc"},
       OpTuple{at::exp, UnaryOpType::Exp, "exp"},
-      OpTuple{at::expm1, UnaryOpType::Expm1, "expm1"},
-      OpTuple{at::floor, UnaryOpType::Floor, "floor"},
-      OpTuple{at::frac, UnaryOpType::Frac, "frac"},
       // OpTuple{at::gelu, UnaryOpType::Gelu, "gelu"},
-      OpTuple{at::lgamma, UnaryOpType::Lgamma, "lgamma"},
       OpTuple{at::log, UnaryOpType::Log, "log"},
       OpTuple{at::log10, UnaryOpType::Log10, "log10"},
-      OpTuple{at::log1p, UnaryOpType::Log1p, "log1p"},
-      OpTuple{at::log2, UnaryOpType::Log2, "log2"},
       OpTuple{at::neg, UnaryOpType::Neg, "neg"},
       OpTuple{at::reciprocal, UnaryOpType::Reciprocal, "reciprocal"},
-      OpTuple{at::relu, UnaryOpType::Relu, "relu"},
-      OpTuple{at::round, UnaryOpType::Round, "round"},
-      OpTuple{at::rsqrt, UnaryOpType::Rsqrt, "rsqrt"},
       OpTuple{at::sigmoid, UnaryOpType::Sigmoid, "sigmoid"},
       OpTuple{at::sin, UnaryOpType::Sin, "sin"},
       OpTuple{at::sinh, UnaryOpType::Sinh, "sinh"},
       OpTuple{at::sqrt, UnaryOpType::Sqrt, "sqrt"},
       OpTuple{at::tan, UnaryOpType::Tan, "tan"},
       OpTuple{at::tanh, UnaryOpType::Tanh, "tanh"},
-      OpTuple{at::trunc, UnaryOpType::Trunc, "trunc"}};
+  };
 
-  std::vector<DataType> dtypes = {DataType::Float, DataType::Double};
+  // The following ops has no complex support in eager mode
+  std::vector<OpTuple> ops_without_complex{
+      OpTuple{at::ceil, UnaryOpType::Ceil, "ceil"},
+      OpTuple{at::floor, UnaryOpType::Floor, "floor"},
+      OpTuple{at::frac, UnaryOpType::Frac, "frac"},
+      OpTuple{at::trunc, UnaryOpType::Trunc, "trunc"},
+      OpTuple{at::round, UnaryOpType::Round, "round"},
+      OpTuple{at::relu, UnaryOpType::Relu, "relu"},
+      OpTuple{at::expm1, UnaryOpType::Expm1, "expm1"},
+      OpTuple{at::log1p, UnaryOpType::Log1p, "log1p"},
+      OpTuple{at::lgamma, UnaryOpType::Lgamma, "lgamma"},
+      OpTuple{at::erf, UnaryOpType::Erf, "erf"},
+      OpTuple{at::erfc, UnaryOpType::Erfc, "erfc"}};
+
+  // Complex support for the following op is not working in nvFuser yet
+  std::vector<OpTuple> ops_skip_complex{
+      // TODO: abs is actually supported in nvFuser, but it has bug!!!
+      // In eager mode, abs(complex_tensor) returns floating point tensor
+      // but in nvFuser, it wrongly returns complex tensor!
+      // We need to:
+      //  1. change our type promotion logic to make a special case for abs
+      //  2. why this bug is not detected here? we should bump up test coverage
+      OpTuple{at::abs, UnaryOpType::Abs, "abs"},
+      // TODO: the following two ops fails with compilation error like
+      // "undefined function rsqrt(complex)", we could implement them in
+      // helpers.cu, but I think it is better to check with Jiterator first,
+      // because Jiterator uses the same string for complex support.
+      OpTuple{at::rsqrt, UnaryOpType::Rsqrt, "rsqrt"},
+      OpTuple{at::log2, UnaryOpType::Log2, "log2"}};
+
+  std::vector<DataType> dtypes = {
+      DataType::Float,
+      DataType::Double,
+      DataType::ComplexFloat,
+      DataType::ComplexDouble};
 
   for (auto dtype : dtypes) {
+    auto ops_to_test = ops;
+    if (dtype != DataType::ComplexFloat && dtype != DataType::ComplexDouble) {
+      ops_to_test.insert(
+          ops_to_test.end(),
+          ops_without_complex.begin(),
+          ops_without_complex.end());
+      ops_to_test.insert(
+          ops_to_test.end(), ops_skip_complex.begin(), ops_skip_complex.end());
+    }
     std::for_each(ops.begin(), ops.end(), [&](OpTuple& op) {
       test_op(
           /*blocks*/ 640,
@@ -4030,19 +4070,24 @@ TEST_F(NVFuserTest, FusionUnaryOps_CUDA) {
           std::make_tuple(std::make_pair(ValType::TensorView, dtype)));
     });
 
-    test_op(
-        /*blocks*/ 128,
-        /*threads*/ 64,
-        /*name*/ "rand_like",
-        /*Aten Func   */
-        [](std::array<IValue, 1>& vals) {
-          return at::rand_like(vals[0].toTensor());
-        },
-        /*JIT  Func   */
-        [](Val* in1) -> Val* { return unaryOp(UnaryOpType::RandLike, in1); },
-        /*Output      */ std::make_pair(ValType::TensorView, dtype),
-        /*Inputs Tuple*/
-        std::make_tuple(std::make_pair(ValType::TensorView, dtype)));
+    // TODO: why the rand_like test is failing for complex? Is it because each
+    // complex needs to draw 2 random numbers from the RNG? We need to enable
+    // this
+    if (dtype != DataType::ComplexFloat && dtype != DataType::ComplexDouble) {
+      test_op(
+          /*blocks*/ 128,
+          /*threads*/ 64,
+          /*name*/ "rand_like",
+          /*Aten Func   */
+          [](std::array<IValue, 1>& vals) {
+            return at::rand_like(vals[0].toTensor());
+          },
+          /*JIT  Func   */
+          [](Val* in1) -> Val* { return unaryOp(UnaryOpType::RandLike, in1); },
+          /*Output      */ std::make_pair(ValType::TensorView, dtype),
+          /*Inputs Tuple*/
+          std::make_tuple(std::make_pair(ValType::TensorView, dtype)));
+    }
   }
 
   dtypes = {DataType::Int, DataType::Int32, DataType::Bool};
@@ -4067,17 +4112,45 @@ TEST_F(NVFuserTest, FusionBinaryOps_CUDA) {
   using AtenFuncSig = at::Tensor (*)(const at::Tensor&, const at::Tensor&);
   using OpTuple = std::tuple<AtenFuncSig, BinaryOpType, std::string>;
 
+  std::vector<DataType> dtypes = {
+      DataType::Double,
+      DataType::Float,
+      DataType::ComplexFloat,
+      DataType::ComplexDouble};
+
   // see [Note: explicit tuple type for uniform initialization list]
-  std::vector<OpTuple> logic_ops{
+  std::vector<OpTuple> equal_ops{
       OpTuple{at::eq, BinaryOpType::Eq, "eq"},
+      OpTuple{at::ne, BinaryOpType::NE, "ne"}};
+
+  // Complex numbers are not ordered
+  std::vector<OpTuple> order_ops{
       OpTuple{at::ge, BinaryOpType::GE, "ge"},
       OpTuple{at::gt, BinaryOpType::GT, "gt"},
       OpTuple{at::le, BinaryOpType::LE, "le"},
-      OpTuple{at::lt, BinaryOpType::LT, "lt"},
-      OpTuple{at::ne, BinaryOpType::NE, "ne"}};
-  std::vector<DataType> dtypes = {DataType::Double, DataType::Float};
+      OpTuple{at::lt, BinaryOpType::LT, "lt"}};
+
+  // see [Note: explicit tuple type for uniform initialization list]
+  std::vector<OpTuple> math_ops{
+      OpTuple{at::div, BinaryOpType::Div, "div"},
+      OpTuple{at::mul, BinaryOpType::Mul, "mul"},
+      OpTuple{at::pow, BinaryOpType::Pow, "pow"}};
+
+  // The following ops has no complex support in eager mode
+  std::vector<OpTuple> math_ops_without_complex{
+      OpTuple{at::atan2, BinaryOpType::Atan2, "atan2"},
+      OpTuple{at::max, BinaryOpType::Max, "max"},
+      OpTuple{at::min, BinaryOpType::Min, "min"},
+      OpTuple{at::fmod, BinaryOpType::Fmod, "fmod"},
+      // NOTE: Remainder does not match the Aten impl exactly
+      // despite using an identical function.
+      OpTuple{at::remainder, BinaryOpType::Remainder, "remainder"}};
 
   for (auto dtype : dtypes) {
+    auto logic_ops = equal_ops;
+    if (dtype != DataType::ComplexFloat && dtype != DataType::ComplexDouble) {
+      logic_ops.insert(logic_ops.end(), order_ops.begin(), order_ops.end());
+    }
     std::for_each(logic_ops.begin(), logic_ops.end(), [&](OpTuple& op) {
       test_op(
           /*blocks*/ 640,
@@ -4098,39 +4171,33 @@ TEST_F(NVFuserTest, FusionBinaryOps_CUDA) {
               std::make_pair(ValType::TensorView, dtype)));
     });
 
-    // see [Note: explicit tuple type for uniform initialization list]
-    std::vector<OpTuple> math_ops{
-        OpTuple{at::atan2, BinaryOpType::Atan2, "atan2"},
-        OpTuple{at::div, BinaryOpType::Div, "div"},
-        OpTuple{at::fmod, BinaryOpType::Fmod, "fmod"},
-        OpTuple{at::max, BinaryOpType::Max, "max"},
-        OpTuple{at::min, BinaryOpType::Min, "min"},
-        OpTuple{at::mul, BinaryOpType::Mul, "mul"},
-        OpTuple{at::pow, BinaryOpType::Pow, "pow"},
-        // NOTE: Remainder does not match the Aten impl exactly
-        // despite using an identical function.
-        OpTuple{at::remainder, BinaryOpType::Remainder, "remainder"},
-    };
-
-    std::for_each(math_ops.begin(), math_ops.end(), [&](OpTuple& op) {
-      test_op(
-          /*blocks*/ 640,
-          /*threads*/ 64,
-          /*name*/ std::get<2>(op),
-          /*Aten Func   */
-          [&op](std::array<IValue, 2>& vals) {
-            return std::get<0>(op)(vals[0].toTensor(), vals[1].toTensor());
-          },
-          /*JIT  Func   */
-          [&op](Val* in1, Val* in2) -> Val* {
-            return binaryOp(std::get<1>(op), in1, in2);
-          },
-          /*Output      */ std::make_pair(ValType::TensorView, dtype),
-          /*Inputs Tuple*/
-          std::make_tuple(
-              std::make_pair(ValType::TensorView, dtype),
-              std::make_pair(ValType::TensorView, dtype)));
-    });
+    auto enabled_math_ops = math_ops;
+    if (dtype != DataType::ComplexFloat && dtype != DataType::ComplexDouble) {
+      enabled_math_ops.insert(
+          enabled_math_ops.end(),
+          math_ops_without_complex.begin(),
+          math_ops_without_complex.end());
+    }
+    std::for_each(
+        enabled_math_ops.begin(), enabled_math_ops.end(), [&](OpTuple& op) {
+          test_op(
+              /*blocks*/ 640,
+              /*threads*/ 64,
+              /*name*/ std::get<2>(op),
+              /*Aten Func   */
+              [&op](std::array<IValue, 2>& vals) {
+                return std::get<0>(op)(vals[0].toTensor(), vals[1].toTensor());
+              },
+              /*JIT  Func   */
+              [&op](Val* in1, Val* in2) -> Val* {
+                return binaryOp(std::get<1>(op), in1, in2);
+              },
+              /*Output      */ std::make_pair(ValType::TensorView, dtype),
+              /*Inputs Tuple*/
+              std::make_tuple(
+                  std::make_pair(ValType::TensorView, dtype),
+                  std::make_pair(ValType::TensorView, dtype)));
+        });
 
     test_op(
         /*blocks*/ 640,
@@ -4169,59 +4236,66 @@ TEST_F(NVFuserTest, FusionBinaryOps_CUDA) {
 }
 
 TEST_F(NVFuserTest, FusionTernaryOps_CUDA) {
-  std::vector<DataType> dtypes = {DataType::Double, DataType::Float};
+  std::vector<DataType> dtypes = {
+      DataType::Double,
+      DataType::Float,
+      DataType::ComplexFloat,
+      DataType::ComplexDouble};
 
   for (auto dtype : dtypes) {
-    test_op(
-        /*blocks*/ 640,
-        /*threads*/ 64,
-        /*name*/ "clamp",
-        /*Aten Func   */
-        [](std::array<IValue, 1>& vals) {
-          return at::clamp(vals[0].toTensor(), 0.f, 1.f);
-        },
-        /*JIT  Func   */
-        [&](Val* in1) -> Val* {
-          if (dtype == DataType::Float) {
-            return clamp(
-                in1,
-                IrBuilder::create<Double>(0.f),
-                IrBuilder::create<Double>(1.f));
-          } else {
-            return clamp(
-                in1,
-                IrBuilder::create<Double>(0.f),
-                IrBuilder::create<Double>(1.f));
-          }
-        },
-        /*Output      */ std::make_pair(ValType::TensorView, dtype),
-        /*Inputs Tuple*/
-        std::make_tuple(std::make_pair(ValType::TensorView, dtype)));
-    test_op(
-        /*blocks*/ 640,
-        /*threads*/ 64,
-        /*name*/ "threshold",
-        /*Aten Func   */
-        [](std::array<IValue, 1>& vals) {
-          return at::threshold(vals[0].toTensor(), 0.f, 1.f);
-        },
-        /*JIT  Func   */
-        [&](Val* in1) -> Val* {
-          if (dtype == DataType::Float) {
-            return threshold(
-                in1,
-                IrBuilder::create<Double>(0.f),
-                IrBuilder::create<Double>(1.f));
-          } else {
-            return threshold(
-                in1,
-                IrBuilder::create<Double>(0.f),
-                IrBuilder::create<Double>(1.f));
-          }
-        },
-        /*Output      */ std::make_pair(ValType::TensorView, dtype),
-        /*Inputs Tuple*/
-        std::make_tuple(std::make_pair(ValType::TensorView, dtype)));
+    // clamp and threshold are not supported for complex on eager mode
+    if (dtype != DataType::ComplexFloat && dtype != DataType::ComplexDouble) {
+      test_op(
+          /*blocks*/ 640,
+          /*threads*/ 64,
+          /*name*/ "clamp",
+          /*Aten Func   */
+          [](std::array<IValue, 1>& vals) {
+            return at::clamp(vals[0].toTensor(), 0.f, 1.f);
+          },
+          /*JIT  Func   */
+          [&](Val* in1) -> Val* {
+            if (dtype == DataType::Float) {
+              return clamp(
+                  in1,
+                  IrBuilder::create<Double>(0.f),
+                  IrBuilder::create<Double>(1.f));
+            } else {
+              return clamp(
+                  in1,
+                  IrBuilder::create<Double>(0.f),
+                  IrBuilder::create<Double>(1.f));
+            }
+          },
+          /*Output      */ std::make_pair(ValType::TensorView, dtype),
+          /*Inputs Tuple*/
+          std::make_tuple(std::make_pair(ValType::TensorView, dtype)));
+      test_op(
+          /*blocks*/ 640,
+          /*threads*/ 64,
+          /*name*/ "threshold",
+          /*Aten Func   */
+          [](std::array<IValue, 1>& vals) {
+            return at::threshold(vals[0].toTensor(), 0.f, 1.f);
+          },
+          /*JIT  Func   */
+          [&](Val* in1) -> Val* {
+            if (dtype == DataType::Float) {
+              return threshold(
+                  in1,
+                  IrBuilder::create<Double>(0.f),
+                  IrBuilder::create<Double>(1.f));
+            } else {
+              return threshold(
+                  in1,
+                  IrBuilder::create<Double>(0.f),
+                  IrBuilder::create<Double>(1.f));
+            }
+          },
+          /*Output      */ std::make_pair(ValType::TensorView, dtype),
+          /*Inputs Tuple*/
+          std::make_tuple(std::make_pair(ValType::TensorView, dtype)));
+    }
     test_op(
         /*blocks*/ 640,
         /*threads*/ 64,
@@ -4242,7 +4316,11 @@ TEST_F(NVFuserTest, FusionTernaryOps_CUDA) {
 }
 
 TEST_F(NVFuserTest, FusionCompoundOps_CUDA) {
-  std::vector<DataType> dtypes = {DataType::Double, DataType::Float};
+  std::vector<DataType> dtypes = {
+      DataType::Double,
+      DataType::Float,
+      DataType::ComplexFloat,
+      DataType::ComplexDouble};
 
   for (auto dtype : dtypes) {
     test_op(
@@ -7805,6 +7883,11 @@ TEST_F(NVFuserTest, FusionReductionSchedulerMultiDimFastest_CUDA) {
 TEST_F(NVFuserTest, FusionReductionSchedulerNoODimShmoo_CUDA) {
   std::vector<DataType> dtypes = {
       DataType::Double, DataType::Float, DataType::Half};
+  // TODO: add test for complex. Currently complex fails with the following
+  // NVRTC compilation error message:
+  //   error: no suitable user-defined conversion from
+  //   "CudaCodeGen::std::complex<double>" to "CudaCodeGen::std::complex<float>"
+  //   exists
 #if defined(CUDA_VERSION) && CUDA_VERSION >= 11000
   if (at::cuda::getDeviceProperties(0)->major >= 8) {
     dtypes.insert(dtypes.end(), DataType::BFloat16);
@@ -7878,6 +7961,10 @@ TEST_F(NVFuserTest, FusionReductionSchedulerNoODimShmoo_CUDA) {
 TEST_F(NVFuserTest, FusionReductionSchedulerDimShmoo_CUDA) {
   std::vector<DataType> dtypes = {
       DataType::Double, DataType::Float, DataType::Half};
+  // TODO: add complex support. Currently, complex fails with the following
+  // NVRTC compilation error:
+  //   error: no instance of overloaded function "__shfl_xor_sync" matches the
+  //   argument list
 #if defined(CUDA_VERSION) && CUDA_VERSION >= 11000
   if (at::cuda::getDeviceProperties(0)->major >= 8) {
     dtypes.insert(dtypes.end(), DataType::BFloat16);
@@ -12669,6 +12756,11 @@ void testWelford(DataType dtype, int red_axis, int odim, int rdim) {
 TEST_F(NVFuserTest, FusionWelfordShmoo_CUDA) {
   std::vector<DataType> dtypes = {
       DataType::Double, DataType::Float, DataType::Half};
+  // TODO: enable this for complex. Currently, complex yields
+  // silent wrong results:
+  //   Detected abs error of: 3.8062
+  //     absolute tolerance was set to 2.23704e-06
+  //     and relative tolerance set to 2.23704e-08
 #if defined(CUDA_VERSION) && CUDA_VERSION >= 11000
   if (at::cuda::getDeviceProperties(0)->major >= 8) {
     dtypes.insert(dtypes.end(), DataType::BFloat16);

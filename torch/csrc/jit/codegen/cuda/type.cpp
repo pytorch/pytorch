@@ -861,6 +861,10 @@ size_t dataTypeSize(DataType type) {
   switch (type) {
     case DataType::Bool:
       return sizeof(bool);
+    case DataType::ComplexDouble:
+      return sizeof(std::complex<double>);
+    case DataType::ComplexFloat:
+      return sizeof(std::complex<float>);
     case DataType::Double:
       return sizeof(double);
     case DataType::Float:

@@ -202,6 +202,10 @@ bool validateKernelArgScalar(
     case c10::ScalarType::Long:
       match = param_type == DataType::Int || param_type == DataType::Int32;
       break;
+    case c10::ScalarType::ComplexDouble:
+      match = param_type == DataType::ComplexDouble ||
+          param_type == DataType::ComplexFloat;
+      break;
     case c10::ScalarType::Double:
       match = param_type == DataType::Double || param_type == DataType::Float ||
           param_type == DataType::Half || param_type == DataType::BFloat16;
@@ -209,7 +213,6 @@ bool validateKernelArgScalar(
     case c10::ScalarType::Bool:
       match = param_type == DataType::Bool;
       break;
-    // TODO: support complex double scalar
     default:
       match = false;
   }

@@ -68,6 +68,8 @@ std::pair<double, double> getTolerance(
     int64_t reduction_size,
     const ValidationConstants& tolerances) {
   switch (dtype) {
+    case DataType::ComplexFloat:
+    case DataType::ComplexDouble:
     case DataType::Float:
     // TODO: Pull new tolerances for Double, for now we will just use float
     // tolerances as it should be no worse.
@@ -394,7 +396,8 @@ inline void testValidate(
     auto tolerance_values = getTolerance(
         fusion_output_tv->getDataType().value(), reduction_size, tolerances);
 
-    if (aten_output_tensor.is_floating_point()) {
+    if (aten_output_tensor.is_floating_point() ||
+        aten_output_tensor.is_complex()) {
       TORCH_INTERNAL_ASSERT(
           aten_output_tensor.allclose(
               fusion_output_tensor.to(aten_output_tensor.dtype()),

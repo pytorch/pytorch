@@ -147,6 +147,14 @@ __device__ float reciprocal(float x) {
   return 1 / x;
 }
 
+__device__ std::complex<double> reciprocal(std::complex<double> x) {
+  return 1.0 / x;
+}
+
+__device__ std::complex<float> reciprocal(std::complex<float> x) {
+  return 1.0f / x;
+}
+
 __device__ double relu(double x) {
   return x <= 0 ? 0 : x;
 }
@@ -178,11 +186,19 @@ __device__ float remainder(float a, float b) {
 }
 
 __device__ double sigmoid(double x) {
-  return 1 / (1 + exp(-x));
+  return 1.0 / (1.0 + exp(-x));
 }
 
 __device__ float sigmoid(float x) {
-  return 1 / (1 + exp(-x));
+  return 1.0f / (1.0f + exp(-x));
+}
+
+__device__ std::complex<double> sigmoid(std::complex<double> x) {
+  return 1.0 / (1.0 + exp(-x));
+}
+
+__device__ std::complex<float> sigmoid(std::complex<float> x) {
+  return 1.0f / (1.0f + exp(-x));
 }
 
 __device__ double silu(double x) {
@@ -199,6 +215,20 @@ __device__ double threshold(double x, double t, double v) {
 
 __device__ float threshold(float x, double t, double v) {
   return x <= t ? v : x;
+}
+
+__device__ std::complex<double> where(
+    bool c,
+    std::complex<double> a,
+    std::complex<double> b) {
+  return c ? a : b;
+}
+
+__device__ std::complex<float> where(
+    bool c,
+    std::complex<float> a,
+    std::complex<float> b) {
+  return c ? a : b;
 }
 
 __device__ int threshold(int x, int64_t t, int64_t v) {

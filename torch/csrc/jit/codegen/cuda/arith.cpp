@@ -673,6 +673,7 @@ TensorView* reductionOp(
   const auto init_type = init->getDataType().value();
   TORCH_CHECK(
       (isFloatingPointType(out_type) && isFloatingPointType(init_type)) ||
+          (isComplexType(out_type) && isComplexType(init_type)) ||
           (isIntegralType(out_type) && isIntegralType(init_type)) ||
           (isBooleanType(out_type) && isBooleanType(init_type)),
       "Types should match for reduction ops but received: ",
@@ -701,6 +702,8 @@ TensorView* sum(
   auto dtype = v1->getDataType().value();
   if (isFloatingPointType(dtype)) {
     init = IrBuilder::create<Double>(0.0);
+  } else if (isComplexType(dtype)) {
+    init = IrBuilder::create<ComplexDouble>(c10::complex<double>(0.0, 0.0));
   } else if (isIntegralType(dtype)) {
     init = FusionGuard::getCurFusion()->zeroVal();
   } else if (isBooleanType(dtype)) {
