@@ -589,11 +589,10 @@ PyObject *THPModule_supportedQEngines(PyObject *_unused, PyObject *noargs)
 {
   auto qengines = at::globalContext().supportedQEngines();
   auto list = THPObjectPtr(PyList_New(qengines.size()));
+  if (!list) return nullptr;
   for (const auto i : c10::irange(qengines.size())) {
     PyObject *i64 = THPUtils_packInt64(static_cast<int>(qengines[i]));
-    if (!i64) {
-      throw python_error();
-    }
+    if (!i64) return nullptr;
     PyList_SET_ITEM(list.get(), i, i64);
   }
   return list.release();
@@ -607,22 +606,18 @@ PyObject *THPModule_isEnabledXNNPACK(PyObject *_unused, PyObject *noargs)
 
 PyObject *THPModule_setDefaultMobileCPUAllocator(PyObject *_unused, PyObject *noargs)
 {
-  try {
-    at::globalContext().setDefaultMobileCPUAllocator();
-  } catch (c10::Error& e) {
-    THPUtils_setError(e.what());
-  }
+  HANDLE_TH_ERRORS
+  at::globalContext().setDefaultMobileCPUAllocator();
   Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
 }
 
 PyObject *THPModule_unsetDefaultMobileCPUAllocator(PyObject *_unused, PyObject *noargs)
 {
-  try {
-    at::globalContext().unsetDefaultMobileCPUAllocator();
-  } catch (c10::Error& e) {
-    THPUtils_setError(e.what());
-  }
+  HANDLE_TH_ERRORS
+  at::globalContext().unsetDefaultMobileCPUAllocator();
   Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
 }
 
 static PyObject * THPModule_vmapmode_increment_nesting(PyObject* _unused, PyObject *arg) {
