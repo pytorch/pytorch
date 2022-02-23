@@ -28,6 +28,7 @@ class Fuser:
     def fuse(
         self,
         model: GraphModule,
+        is_qat: bool,
         fuse_custom_config_dict: Optional[Dict[str, Any]] = None,
         backend_config_dict: Optional[Dict[str, Any]] = None,
     ) -> GraphModule:
@@ -72,7 +73,7 @@ class Fuser:
                 root_node = get_root_node(matched_node_pattern)  # type: ignore[index]
                 env[node.name] = obj.fuse(
                     self, load_arg, root_node, matched_node_pattern,  # type: ignore[arg-type]
-                    fuse_custom_config_dict, fuser_method_mapping)
+                    fuse_custom_config_dict, fuser_method_mapping, is_qat)
             elif maybe_last_node is None:
                 env[node.name] = self.fused_graph.node_copy(node, load_arg)
             # node matched in patterns and is not root is removed here

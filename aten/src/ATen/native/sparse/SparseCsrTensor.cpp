@@ -1,14 +1,34 @@
 // Basic functions on sparse tensors
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 
-#include <ATen/ATen.h>
+#include <ATen/core/Tensor.h>
+#include <ATen/Dispatch.h>
 #include <ATen/InitialTensorOptions.h>
 #include <ATen/Layout.h>
-#include <ATen/NativeFunctions.h>
 #include <ATen/Parallel.h>
 #include <ATen/SparseCsrTensorImpl.h>
 #include <ATen/SparseCsrTensorUtils.h>
 #include <ATen/SparseTensorImpl.h>
-#include <ATen/InitialTensorOptions.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/_nnz_native.h>
+#include <ATen/ops/_sparse_csr_tensor_unsafe_native.h>
+#include <ATen/ops/_validate_sparse_csr_tensor_args_native.h>
+#include <ATen/ops/clone_native.h>
+#include <ATen/ops/col_indices_native.h>
+#include <ATen/ops/copy_native.h>
+#include <ATen/ops/crow_indices_native.h>
+#include <ATen/ops/empty.h>
+#include <ATen/ops/empty_like_native.h>
+#include <ATen/ops/empty_native.h>
+#include <ATen/ops/resize_as_sparse_native.h>
+#include <ATen/ops/resize_native.h>
+#include <ATen/ops/sparse_csr_tensor_native.h>
+#include <ATen/ops/values_native.h>
+#endif
 
 namespace at {
 namespace native {
