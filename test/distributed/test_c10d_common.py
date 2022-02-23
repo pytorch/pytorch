@@ -699,7 +699,11 @@ class CommTest(AbstractCommTest, MultiProcessTestCase):
             pass
 
     def test_debug_level(self):
-        del os.environ["TORCH_DISTRIBUTED_DEBUG"]
+        try:
+            del os.environ["TORCH_DISTRIBUTED_DEBUG"]
+        except KeyError:
+            pass
+
         dist.set_debug_level_from_env()
         # Default should be off
         default_debug_mode = dist.get_debug_level()
