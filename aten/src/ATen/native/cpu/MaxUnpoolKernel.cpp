@@ -150,7 +150,7 @@ void cpu_max_unpool_channels_last(
   if (optional_error_index) {
     AT_ERROR("Found an invalid max index: ", optional_error_index.value(),
         " (output volumes are of size ", output_height,
-        "x", output_width);
+        "x", output_width, ")");
   }
 
   if (!output_.is_contiguous(memory_format)) {

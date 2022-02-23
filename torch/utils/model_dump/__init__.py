@@ -120,7 +120,11 @@ def hierarchical_pickle(data):
         }
     if isinstance(data, torch.utils.show_pickle.FakeObject):
         typename = f"{data.module}.{data.name}"
-        if typename.startswith("__torch__.") or typename.startswith("torch.jit.LoweredModule."):
+        if (
+            typename.startswith("__torch__.") or
+            typename.startswith("torch.jit.LoweredWrapper.") or
+            typename.startswith("torch.jit.LoweredModule.")
+        ):
             assert data.args == ()
             return {
                 "__module_type__": typename,
