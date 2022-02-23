@@ -467,7 +467,8 @@ c10::optional<::c10::SymbolicShape> ComputeShapeFromReshape(
     allowzero = n->i(attr::allowzero);
   }
 
-  TORCH_CHECK(!(shape_has_zero && allowzero==1 && minus_one_pos != -1),
+  TORCH_CHECK(
+      !(shape_has_zero && allowzero == 1 && minus_one_pos != -1),
       "0 and -1 cannot both be present in `Shape` input of `Reshape` node, when `allowzero=1`.");
 
   if (minus_one_pos == -1 && (!shape_has_zero || allowzero)) {
