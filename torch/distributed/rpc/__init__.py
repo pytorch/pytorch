@@ -164,7 +164,7 @@ if is_available():
         # keep it alive.
         global rendezvous_iterator
         rendezvous_iterator = dist.rendezvous(
-            rpc_backend_options.init_method, rank=rank, world_size=world_size
+            rpc_backend_options.init_method, rank=rank, world_size=world_size, init_rpc=True
         )
         store, _, _ = next(rendezvous_iterator)
 

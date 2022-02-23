@@ -232,9 +232,13 @@ def _env_rendezvous_handler(
     if "world_size" in query:
         world_size = int(query["world_size"])
     else:
-        world_size = _get_env("WORLD_SIZE")
-        if world_size:
-            world_size = int(world_size)
+        using_init_rpc = kwargs.get("init_rpc", False)
+        if not using_init_rpc:
+            world_size = int(_get_env_or_raise("WORLD_SIZE"))
+        else:
+            world_size = _get_env("WORLD_SIZE")
+            if world_size:
+                world_size = int(world_size)
 
     master_addr = _get_env_or_raise("MASTER_ADDR")
     master_port = int(_get_env_or_raise("MASTER_PORT"))
