@@ -514,6 +514,7 @@ class TestOperators(TestCase):
             generator = get_fallback_and_vmap_exhaustive(vjp_of_vjp, args_and_cotangents, {}, opinfo=op)
             for loop_out, batched_out in generator:
                 self.assertEqual(loop_out, batched_out, atol=1e-4, rtol=1e-4)
+
     vmapvjp_fail = vjp_fail.union({
         # The following are not bugs and are expected behavior
         xfail('fill_'),  # Not possible, wontfix
@@ -830,7 +831,6 @@ class TestOperators(TestCase):
         xfail('take'),
         xfail('tensor_split'),
         xfail('to_sparse'),
-        xfail('trace'),
         xfail('unfold'),
         xfail('vdot'),
         xfail('block_diag'),
