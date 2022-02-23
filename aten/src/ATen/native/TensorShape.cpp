@@ -1431,15 +1431,6 @@ Tensor index_select_sparse_cpu(const Tensor& self, int64_t dim, const Tensor& in
   auto res_sizes = self.sizes().vec();
   res_sizes[dim] = index_len;
 
-  // TODO: decide on optimal grain size for sparse tensors.
-  const auto grain_size = at::internal::GRAIN_SIZE;
-
-  // 1 <= n_threads_nnz <= min(ceil(nnz / grain_size), get_num_threads())
-  const auto n_threads_nnz = std::max<int64_t>(
-      1,
-      std::min<int64_t>((nnz + grain_size - 1) / grain_size, at::get_num_threads())
-  );
-
   // If indexing into sparse dimensions
   if (dim < sparse_dim) {
     auto nneg_index = at::empty_like(index);
