@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# coding=utf-8
 from trymerge import GitHubPR, GH_GET_PR_INFO_QUERY
 from unittest import TestCase, main, mock
 from typing import Any
