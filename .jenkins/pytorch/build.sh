@@ -191,6 +191,11 @@ if [[ "${BUILD_ENVIRONMENT}" == pytorch-linux-xenial-py3* ]]; then
   fi
 fi
 
+echo $PATH
+echo "env ---------------------------"
+env
+which g++
+
 if [[ "$BUILD_ENVIRONMENT" == *-bazel-* ]]; then
   set -e
 
