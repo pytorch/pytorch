@@ -111,13 +111,21 @@ TEST(CpuFusion, ParallelRuntimes) {
     }
   };
 
-  constexpr size_t kNumThreads = 4;
+  constexpr size_t kNumThreads = 2;
   std::vector<std::thread> threads;
   for (size_t id = 0; id < kNumThreads; ++id) {
     std::vector<std::pair<int, int>> inputs = {
-        {id + 10, id + 11}, {id + 20, id + 21}, {id + 30, id + 31}};
+        {id, id + 1},
+        {id + 10, id + 11},
+        {id + 20, id + 21},
+        {id + 30, id + 31},
+        {id + 40, id + 41},
+        {id + 50, id + 51},
+        {id + 60, id + 61},
+        {id + 70, id + 71}};
     threads.emplace_back(exec_runtime, inputs);
   }
+
   for (auto& t : threads) {
     t.join();
   }
