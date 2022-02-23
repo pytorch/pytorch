@@ -6,7 +6,6 @@
 
 #include <functorch/csrc/BatchRulesHelper.h>
 #include <functorch/csrc/PlumbingHelper.h>
-#include <functorch/csrc/InPlacePlumbing.h>
 #include <ATen/Operators.h>
 #include <ATen/core/dispatch/Dispatcher.h>
 
@@ -349,35 +348,17 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   using CopyT = Tensor& (Tensor::*)(const Tensor&, bool) const;
 
   POINTWISE_BOXED(add_.Tensor); // just testing
-  m.impl("add_.Scalar", inplacePlumbing1<
-     DECLTYPE_AUTO(&unary_inplace_batch_rule<ScalarScalarInplaceT, &Tensor::add_, const Scalar&, const Scalar&>),
-     const Scalar&, const Scalar&>);
-  m.impl("sub_.Tensor", inplacePlumbing2<
-     DECLTYPE_AUTO(&binary_pointwise_inplace_batch_rule<TensorScalarInplaceT, &Tensor::sub_, const Scalar&>),
-     const Scalar&>);
-  m.impl("sub_.Scalar", inplacePlumbing1<
-     DECLTYPE_AUTO(&unary_inplace_batch_rule<ScalarScalarInplaceT, &Tensor::sub_, const Scalar&, const Scalar&>),
-     const Scalar&, const Scalar&>);
-  m.impl("mul_.Tensor", inplacePlumbing2<
-     DECLTYPE_AUTO(&binary_pointwise_inplace_batch_rule<TensorInplaceT, &Tensor::mul_>)>);
-  m.impl("mul_.Scalar", inplacePlumbing1<
-     DECLTYPE_AUTO(&unary_inplace_batch_rule<ScalarInplaceT, &Tensor::mul_, const Scalar&>),
-     const Scalar&>);
-  m.impl("div_.Tensor", inplacePlumbing2<
-     DECLTYPE_AUTO(&binary_pointwise_inplace_batch_rule<TensorInplaceT, &Tensor::div_>)>);
-  m.impl("div_.Scalar", inplacePlumbing1<
-     DECLTYPE_AUTO(&unary_inplace_batch_rule<ScalarInplaceT, &Tensor::div_, const Scalar&>),
-     const Scalar&>);
-  m.impl("clamp_min_.Tensor", inplacePlumbing2<
-     DECLTYPE_AUTO(&binary_pointwise_inplace_batch_rule<TensorInplaceT, &Tensor::clamp_min_>)>);
-  m.impl("clamp_max_.Tensor", inplacePlumbing2<
-     DECLTYPE_AUTO(&binary_pointwise_inplace_batch_rule<TensorInplaceT, &Tensor::clamp_max_>)>);
-
-  m.impl("masked_fill_.Scalar", inplacePlumbing2<
-     DECLTYPE_AUTO(&binary_pointwise_inplace_batch_rule<TensorScalarInplaceT, &Tensor::masked_fill_, const Scalar&>), const Scalar&>);
-
-  m.impl("copy_", inplacePlumbing2<
-     DECLTYPE_AUTO(&binary_pointwise_inplace_batch_rule<CopyT, &Tensor::copy_, bool>), bool>);
+  VMAP_SUPPORT2(add_, Scalar, SINGLE_ARG(unary_inplace_batch_rule<ScalarScalarInplaceT, &Tensor::add_, const Scalar&, const Scalar&>));
+  VMAP_SUPPORT2(sub_, Tensor, SINGLE_ARG(binary_pointwise_inplace_batch_rule<TensorScalarInplaceT, &Tensor::sub_, const Scalar&>));
+  VMAP_SUPPORT2(sub_, Scalar, SINGLE_ARG(unary_inplace_batch_rule<ScalarScalarInplaceT, &Tensor::sub_, const Scalar&, const Scalar&>));
+  VMAP_SUPPORT2(mul_, Tensor, SINGLE_ARG(binary_pointwise_inplace_batch_rule<TensorInplaceT, &Tensor::mul_>));
+  VMAP_SUPPORT2(mul_, Scalar, SINGLE_ARG(unary_inplace_batch_rule<ScalarInplaceT, &Tensor::mul_, const Scalar&>));
+  VMAP_SUPPORT2(div_, Tensor, SINGLE_ARG(binary_pointwise_inplace_batch_rule<TensorInplaceT, &Tensor::div_>));
+  VMAP_SUPPORT2(div_, Scalar, SINGLE_ARG(unary_inplace_batch_rule<ScalarInplaceT, &Tensor::div_, const Scalar&>));
+  VMAP_SUPPORT2(clamp_min_, Tensor, SINGLE_ARG(binary_pointwise_inplace_batch_rule<TensorInplaceT, &Tensor::clamp_min_>));
+  VMAP_SUPPORT2(clamp_max_, Tensor, SINGLE_ARG(binary_pointwise_inplace_batch_rule<TensorInplaceT, &Tensor::clamp_max_>));
+  VMAP_SUPPORT2(masked_fill_, Scalar, SINGLE_ARG(binary_pointwise_inplace_batch_rule<TensorScalarInplaceT, &Tensor::masked_fill_, const Scalar&>));
+  VMAP_SUPPORT(copy_, SINGLE_ARG(binary_pointwise_inplace_batch_rule<CopyT, &Tensor::copy_, bool>));
 
 #define COMPARISON_POINTWISE(op) \
   VMAP_SUPPORT2(op, Tensor, \
@@ -402,8 +383,8 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
 #define LOGICAL_COMPARISON_POINTWISE(op) \
   VMAP_SUPPORT(op, \
       SINGLE_ARG(comparison_pointwise_batch_rule<decltype(&ATEN_FN(op)), &ATEN_FN(op)>)); \
-  m.impl(#op "_", inplacePlumbing2< \
-     DECLTYPE_AUTO(&binary_pointwise_inplace_batch_rule<TensorInplaceT, &Tensor:: op ## _ >)>);
+  VMAP_SUPPORT(op ## _, \
+      SINGLE_ARG(binary_pointwise_inplace_batch_rule<TensorInplaceT, &Tensor:: op ## _ >));
 
   LOGICAL_COMPARISON_POINTWISE(logical_and);
   LOGICAL_COMPARISON_POINTWISE(logical_or);
