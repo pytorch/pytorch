@@ -477,40 +477,50 @@ class TestFuseFx(QuantizationTestCase):
 
     def test_fuse_custom_pattern(self):
         class M(torch.nn.Module):
-            def __init__(self):
+            def __init__(self, use_torch_add=True):
                 super().__init__()
                 self.conv = torch.nn.Conv2d(3, 3, 3)
                 self.bn = torch.nn.BatchNorm2d(3)
                 self.relu = torch.nn.ReLU()
+                if use_torch_add:
+                    self.add = torch.add
+                else:
+                    self.add = operator.add
 
             def forward(self, x):
                 y = x
                 x = self.conv(x)
                 x = self.bn(x)
-                x = torch.add(y, x)
+                x = self.add(y, x)
                 x = self.relu(x)
                 return x
 
-        m = M().eval()
+        for use_torch_add in [True, False]:
+            m = M(use_torch_add).eval()
 
-        def fuse_conv_bn_relu(is_qat, relu, add_pattern):
-            _, _, bn_pattern = add_pattern
-            bn, conv = bn_pattern
-            return conv
+            def fuse_conv_bn_relu(is_qat, relu, add_pattern):
+                _, _, bn_pattern = add_pattern
+                bn, conv = bn_pattern
+                return conv
 
-        conv_bn_res_relu_config = {
-            "pattern": (nn.ReLU, (torch.add, MatchAllNode, (nn.BatchNorm2d, nn.Conv2d))),
-            "fuser_method": fuse_conv_bn_relu,
-        }
+            conv_bn_res_relu_config1 = {
+                "pattern": (nn.ReLU, (torch.add, MatchAllNode, (nn.BatchNorm2d, nn.Conv2d))),
+                "fuser_method": fuse_conv_bn_relu,
+            }
 
-        backend_config_dict = {
-            "configs": [conv_bn_res_relu_config]
-        }
-        m = fuse_fx(m, backend_config_dict=backend_config_dict)
-        self.assertEqual(type(m.conv), torch.nn.Conv2d)
-        # check bn and relu are gone since we replaced the whole pattern to conv
-        self.assertFalse(hasattr(m, "bn"))
-        self.assertFalse(hasattr(m, "relu"))
+            conv_bn_res_relu_config2 = {
+                "pattern": (nn.ReLU, (operator.add, MatchAllNode, (nn.BatchNorm2d, nn.Conv2d))),
+                "fuser_method": fuse_conv_bn_relu,
+            }
+
+            backend_config_dict = {
+                "configs": [conv_bn_res_relu_config1, conv_bn_res_relu_config2]
+            }
+            m = fuse_fx(m, backend_config_dict=backend_config_dict)
+            self.assertEqual(type(m.conv), torch.nn.Conv2d)
+            # check bn and relu are gone since we replaced the whole pattern to conv
+            self.assertFalse(hasattr(m, "bn"))
+            self.assertFalse(hasattr(m, "relu"))
 
 @skipIfNoFBGEMM
 class TestQuantizeFx(QuantizationTestCase):
