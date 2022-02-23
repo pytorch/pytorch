@@ -41,6 +41,75 @@ std::unordered_map<std::string, worker_id_t> collectNames(
   return nameToId;
 }
 
+std::vector<std::string> splitString(
+    const std::string& s,
+    const std::string& delim) {
+  std::vector<std::string> tokens;
+  size_t start = 0;
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
+  size_t end;
+  while ((end = s.find(delim, start)) != std::string::npos) {
+    tokens.push_back(s.substr(start, end - start));
+    start = end + delim.length();
+  }
+  tokens.push_back(s.substr(start));
+  return tokens;
+}
+
+std::unordered_map<std::string, worker_id_t> collectCurrentNames(
+    ::c10d::PrefixStore store,
+    const worker_id_t selfId,
+    const std::string& selfName) {
+  std::vector<uint8_t> selfNameVector(
+      (uint8_t*)selfName.c_str(),
+      (uint8_t*)selfName.c_str() + selfName.length());
+  store.set(c10::to_string(selfId), selfNameVector);
+
+  std::unordered_map<std::string, worker_id_t> nameToId;
+  nameToId.emplace(selfName, selfId);
+
+  // Check to see if there is list of worker names in the store
+  std::string allWorkerInfosKey("AllWorkerInfos");
+  bool worker_names_available =
+      store.check(std::vector<std::string>{allWorkerInfosKey});
+  std::string allWorkerInfos;
+  if (worker_names_available) {
+    // Get the current list of workers
+    std::vector<uint8_t> allWorkerInfosKeyVector = store.get(allWorkerInfosKey);
+    allWorkerInfos = std::string(
+        (char*)allWorkerInfosKeyVector.data(), allWorkerInfosKeyVector.size());
+    // workerInfos are comma separated, (e.g.
+    // "Name1-Rank1,Name2-Rank2,Name3-Rank2") parse list of workers
+    for (std::string workerInfo : splitString(allWorkerInfos, ",")) {
+      auto workerInfoVec = splitString(workerInfo, "-");
+      std::string workerName = workerInfoVec.at(0);
+      int workerId = std::stoi(workerInfoVec.at(1));
+
+      TORCH_CHECK(
+          nameToId.find(workerName) == nameToId.end(),
+          "RPC worker name ",
+          workerName,
+          " is not unique. Workers ",
+          nameToId.find(workerName)->second,
+          " and ",
+          workerId,
+          " share the same name.");
+
+      nameToId.emplace(workerName, workerId);
+    }
+    allWorkerInfos = fmt::format("{},{}-{}", allWorkerInfos, selfName, selfId);
+  } else {
+    // Add own name to worker list
+    allWorkerInfos = fmt::format("{}-{}", selfName, selfId);
+  }
+  std::vector<uint8_t> allWorkerInfosVector(
+      (uint8_t*)allWorkerInfos.c_str(),
+      (uint8_t*)allWorkerInfos.c_str() + allWorkerInfos.length());
+  store.set(allWorkerInfosKey, allWorkerInfosVector);
+
+  return nameToId;
+}
+
 const string storeKeyBarrierId = "_ID_";
 const string storeKeyProcessCount = "PROCESS_COUNT";
 const string storeKeyActiveCallCount = "ACTIVE_CALLS";
