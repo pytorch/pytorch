@@ -2,7 +2,6 @@ import argparse
 import datetime
 import re
 import sys
-import warnings
 from collections import defaultdict
 
 import torch
@@ -12,10 +11,10 @@ from torch._C import parse_schema
 # breaking change into operators.
 MAX_ALLOWED_PERIOD = datetime.timedelta(days=30)
 
+# [Bypassing BC/FC tests]
 # The date specifies how long the allowlist exclusion should apply to.
-# You should pick a date that is far enough in the future that you
-# believe you can land your diff before then. But note that this date
-# should be less than a month of when you are including this BC
+# You should pick a date in the future that you believe you can land your diff before then.
+# But note that this date should be less than a month of when you are including this BC
 # breaking change. In general, we don't recommend adding entry to this list.
 # Please review following docs:
 #
@@ -40,8 +39,8 @@ TEMPORARY_FC_ALLOW_LIST = [
     ("aten::_svd_helper", datetime.date(2022, 3, 1)),
 ]
 
-# WARNING: Operators included in this list indefinitely bypass all BC and FC schema checks.
-# This is almost certainly NOT what you want to do. See note above.
+# WARNING: Operators included in this list indefinitely bypass all BC schema checks.
+# This is almost certainly NOT what you want to do. See note above. ([Bypassing BC/FC tests])
 INDEFINITE_BC_ALLOW_LIST = [
     "c10_experimental",
     # Internal
@@ -79,10 +78,16 @@ INDEFINITE_BC_ALLOW_LIST = [
     "prepacked::unpack_prepacked_sizes_linear",
     "aten::native_multi_head_self_attention",
     "aten::_native_multi_head_self_attention",
+    "aten::_transform_bias_rescale_qkv",
+    "aten::_scatter_reduce.two",
 ]
 
-# Same thing as INDEFINITE_BC_ALLOW_LIST
-# but for FC changes.
+# Same thing as INDEFINITE_BC_ALLOW_LIST but for FC changes.
+# In general, we don't recommend adding entry to this list.
+# Please review following docs:
+#
+# 1. https://github.com/pytorch/pytorch/wiki/%5BDraft%5D-PyTorch's-Python-Frontend-Backward-and-Forward-Compatibility-Policy
+# 2. torch/csrc/jit/operator_upgraders/README.md
 INDEFINITE_FC_ALLOW_LIST = [
     "c10_experimental",
     # Internal
@@ -120,6 +125,8 @@ INDEFINITE_FC_ALLOW_LIST = [
     "prepacked::unpack_prepacked_sizes_linear",
     "aten::native_multi_head_self_attention",
     "aten::_native_multi_head_self_attention",
+    "aten::_transform_bias_rescale_qkv",
+    "aten::_scatter_reduce.two",
 ]
 
 def compile_temp_allow_list(temp_allow_list):
