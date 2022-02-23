@@ -9202,48 +9202,6 @@ class TestNN(NNTestCase):
         y.mean().backward()
         self.assertEqual(x.grad, None)
 
-    @unittest.skipIf(
-        not TEST_NUMPY or not TEST_SCIPY, "Numpy or Scipy not found")
-    def test_gelu(self):
-        def _test_gelu(n, m, dtype, contiguous, atol=None, rtol=None):
-            numpy_dtype = {
-                torch.bfloat16: torch.float, torch.float: torch.float, torch.double: torch.double
-            }[dtype]
-            devices = ['cpu']
-            devices += ['cuda'] if TEST_CUDA else []
-
-            def _gelu_ref(X):
-                return X * stats.norm.cdf(X)
-
-            for d in devices:
-                if contiguous:
-                    X = torch.rand(n, m, dtype=dtype, requires_grad=True, device=d)
-                else:
-                    X = torch.rand(n, m, dtype=dtype, requires_grad=True, device=d)[:, ::2]
-                res = F.gelu(X)
-                ref = _gelu_ref(X.to(numpy_dtype).cpu().detach().numpy())
-                self.assertEqual(res, ref, rtol=rtol, atol=atol, exact_dtype=False)
-                if dtype == torch.float64:
-                    gradcheck(F.gelu, [X], eps=1e-4)
-
-        for n in range(1, 10):
-            for m in range(1, 10):
-                _test_gelu(n, m, torch.bfloat16, True, 1e-2, 0)
-                _test_gelu(n, m, torch.bfloat16, False, 1e-2, 0)
-                _test_gelu(n, m, torch.float32, True)
-                _test_gelu(n, m, torch.float32, False)
-                _test_gelu(n, m, torch.float64, True)
-                _test_gelu(n, m, torch.float64, False)
-
-        # Test multi threaded
-        num_threads = torch.get_num_threads()
-        torch.set_num_threads(4)
-        try:
-            _test_gelu(32, 32, torch.float32, False)
-        finally:
-            torch.set_num_threads(num_threads)
-
-
     def test_bce_loss_always_nonnegative(self):
         target = torch.ones(5)
         input = torch.ones(5)
@@ -14749,6 +14707,21 @@ class TestNNDeviceType(NNTestCase):
         with self.assertRaises(RuntimeError):
             torch.nn.functional.one_hot(torch.tensor([3, 4, 1, 0], device=device), -2)
 
+    def test_nn_empty(self, device):
+        # One off tests to ensure scalars from nn.yaml are properly applied
+        def verify_scalars(input, output):
+            self.assertEqual(input.shape, output.shape)
+            self.assertEqual(0, output.numel())
+
+        for input_shape in [(0), (0, 2)]:
+            for module in [torch.nn.ELU, torch.nn.Hardtanh, torch.nn.LeakyReLU, torch.nn.LogSigmoid,
+                           torch.nn.RReLU, torch.nn.Softshrink, torch.nn.Softplus, torch.nn.Sigmoid,
+                           torch.nn.Tanh]:
+                input = torch.randn(input_shape, device=device, requires_grad=True)
+                m = module()
+                output = m(input)
+                verify_scalars(input, output)
+
     def test_nn_scalars(self, device):
         # One off tests to ensure scalars from nn.yaml are properly applied
         def verify_scalars(input, output):
@@ -16469,7 +16442,6 @@ class TestNNDeviceType(NNTestCase):
     def test_conv_large(self, device):
         dtype = torch.half if self.device_type == 'cuda' else torch.float
         conv = nn.Conv2d(2, 2, 8, 8, bias=False).to(device).to(dtype)
-        conv.weight = torch.nn.Parameter(torch.randn(2, 2, 8, 8, device=device, dtype=dtype) / 64)
         input_large = torch.randn(4097, 2, 512, 512, dtype=dtype, device=device)
         # forward
         ret = conv(input_large)
@@ -17561,13 +17533,11 @@ class TestNNDeviceType(NNTestCase):
             )
         self.assertEqual(output_non_contig, output_contig)
 
-
     @onlyCUDA
     @dtypes(*itertools.product((torch.int, torch.long), (torch.int, torch.long)))
     def test_embedding_bag_bfloat16(self, device, dtypes):
         self._test_EmbeddingBag(device, 'sum', True, wdtype=torch.bfloat16, dtype=dtypes[0], odtype=dtypes[1], test_backward=True)
         self._test_EmbeddingBag(device, 'mean', True, wdtype=torch.bfloat16, dtype=dtypes[0], odtype=dtypes[1], test_backward=True)
-
 
     @onlyCUDA
     @dtypes(torch.half, torch.float, torch.double)
