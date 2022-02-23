@@ -1,5 +1,6 @@
 
 #pragma once
+#include <ATen/Operators.h>
 #include <functorch/csrc/PlumbingHelper.h>
 #include <functorch/csrc/Constants.h>
 
@@ -114,6 +115,18 @@ at::Tensor data_generated_plumbing(const at::Tensor & self) {
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 template <typename batch_rule_t, batch_rule_t batch_rule>
+at::Tensor & requires_grad__generated_plumbing(at::Tensor & self, bool requires_grad) {
+  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  batch_rule(self_value, self_bdim, requires_grad);
+  return self;
+}
+template <typename batch_rule_t, batch_rule_t batch_rule>
 at::Tensor _fw_primal_generated_plumbing(const at::Tensor & self, int64_t level) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
   auto maybe_layer = maybeCurrentDynamicLayer();
@@ -166,6 +179,18 @@ at::Tensor _new_zeros_with_same_feature_meta_generated_plumbing(const at::Tensor
   std::tie(other_value, other_bdim) = unwrapTensorAtLevel(other, cur_level);
   auto results = batch_rule(self_value, self_bdim, other_value, other_bdim, self_num_batch_dims);
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
+}
+template <typename batch_rule_t, batch_rule_t batch_rule>
+at::Tensor & rename__generated_plumbing(at::Tensor & self, c10::optional<at::DimnameList> names) {
+  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  batch_rule(self_value, self_bdim, names);
+  return self;
 }
 template <typename batch_rule_t, batch_rule_t batch_rule>
 at::Tensor rename_generated_plumbing(const at::Tensor & self, c10::optional<at::DimnameList> names) {
@@ -345,16 +370,6 @@ template <typename batch_rule_t, batch_rule_t batch_rule>
   return std::make_tuple(makeBatched(std::get<0>(results), std::get<1>(results), cur_level), makeBatched(std::get<2>(results), std::get<3>(results), cur_level), makeBatched(std::get<4>(results), std::get<5>(results), cur_level), makeBatchedVector(std::get<6>(results), std::get<7>(results), cur_level));
 }
 template <typename batch_rule_t, batch_rule_t batch_rule>
-at::Tensor _cudnn_init_dropout_state_generated_plumbing(double dropout, bool train, int64_t dropout_seed, c10::optional<at::ScalarType> dtype, c10::optional<at::Layout> layout, c10::optional<at::Device> device, c10::optional<bool> pin_memory) {
-  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
-  auto maybe_layer = maybeCurrentDynamicLayer();
-  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
-  int64_t cur_level = maybe_layer->layerId();
-
-  auto results = batch_rule(dropout, train, dropout_seed, dtype, layout, device, pin_memory);
-  return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
-}
-template <typename batch_rule_t, batch_rule_t batch_rule>
 ::std::tuple<at::Tensor,at::Tensor> _fused_dropout_generated_plumbing(const at::Tensor & self, double p, c10::optional<at::Generator> generator) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
   auto maybe_layer = maybeCurrentDynamicLayer();
@@ -424,6 +439,48 @@ template <typename batch_rule_t, batch_rule_t batch_rule>
   return std::make_tuple(makeBatched(std::get<0>(results), std::get<1>(results), cur_level), makeBatched(std::get<2>(results), std::get<3>(results), cur_level));
 }
 template <typename batch_rule_t, batch_rule_t batch_rule>
+at::Tensor & _sobol_engine_ff__generated_plumbing(at::Tensor & self, int64_t n, const at::Tensor & sobolstate, int64_t dimension, int64_t num_generated) {
+  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  Tensor sobolstate_value;
+  optional<int64_t> sobolstate_bdim;
+  std::tie(sobolstate_value, sobolstate_bdim) = unwrapTensorAtLevel(sobolstate, cur_level);
+  batch_rule(self_value, self_bdim, n, sobolstate_value, sobolstate_bdim, dimension, num_generated);
+  return self;
+}
+template <typename batch_rule_t, batch_rule_t batch_rule>
+at::Tensor & _sobol_engine_scramble__generated_plumbing(at::Tensor & self, const at::Tensor & ltm, int64_t dimension) {
+  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  Tensor ltm_value;
+  optional<int64_t> ltm_bdim;
+  std::tie(ltm_value, ltm_bdim) = unwrapTensorAtLevel(ltm, cur_level);
+  batch_rule(self_value, self_bdim, ltm_value, ltm_bdim, dimension);
+  return self;
+}
+template <typename batch_rule_t, batch_rule_t batch_rule>
+at::Tensor & _sobol_engine_initialize_state__generated_plumbing(at::Tensor & self, int64_t dimension) {
+  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  batch_rule(self_value, self_bdim, dimension);
+  return self;
+}
+template <typename batch_rule_t, batch_rule_t batch_rule>
 at::Tensor _reshape_from_tensor_generated_plumbing(const at::Tensor & self, const at::Tensor & shape) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
   auto maybe_layer = maybeCurrentDynamicLayer();
@@ -463,6 +520,18 @@ at::Tensor dropout_generated_plumbing(const at::Tensor & input, double p, bool t
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 template <typename batch_rule_t, batch_rule_t batch_rule>
+at::Tensor & dropout__generated_plumbing(at::Tensor & self, double p, bool train) {
+  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  batch_rule(self_value, self_bdim, p, train);
+  return self;
+}
+template <typename batch_rule_t, batch_rule_t batch_rule>
 at::Tensor feature_dropout_generated_plumbing(const at::Tensor & input, double p, bool train) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
   auto maybe_layer = maybeCurrentDynamicLayer();
@@ -473,6 +542,18 @@ at::Tensor feature_dropout_generated_plumbing(const at::Tensor & input, double p
   std::tie(input_value, input_bdim) = unwrapTensorAtLevel(input, cur_level);
   auto results = batch_rule(input_value, input_bdim, p, train);
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
+}
+template <typename batch_rule_t, batch_rule_t batch_rule>
+at::Tensor & feature_dropout__generated_plumbing(at::Tensor & self, double p, bool train) {
+  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  batch_rule(self_value, self_bdim, p, train);
+  return self;
 }
 template <typename batch_rule_t, batch_rule_t batch_rule>
 at::Tensor alpha_dropout_generated_plumbing(const at::Tensor & input, double p, bool train) {
@@ -487,6 +568,18 @@ at::Tensor alpha_dropout_generated_plumbing(const at::Tensor & input, double p, 
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 template <typename batch_rule_t, batch_rule_t batch_rule>
+at::Tensor & alpha_dropout__generated_plumbing(at::Tensor & self, double p, bool train) {
+  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  batch_rule(self_value, self_bdim, p, train);
+  return self;
+}
+template <typename batch_rule_t, batch_rule_t batch_rule>
 at::Tensor feature_alpha_dropout_generated_plumbing(const at::Tensor & input, double p, bool train) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
   auto maybe_layer = maybeCurrentDynamicLayer();
@@ -497,6 +590,18 @@ at::Tensor feature_alpha_dropout_generated_plumbing(const at::Tensor & input, do
   std::tie(input_value, input_bdim) = unwrapTensorAtLevel(input, cur_level);
   auto results = batch_rule(input_value, input_bdim, p, train);
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
+}
+template <typename batch_rule_t, batch_rule_t batch_rule>
+at::Tensor & feature_alpha_dropout__generated_plumbing(at::Tensor & self, double p, bool train) {
+  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  batch_rule(self_value, self_bdim, p, train);
+  return self;
 }
 template <typename batch_rule_t, batch_rule_t batch_rule>
 at::Tensor abs_generated_plumbing(const at::Tensor & self) {
@@ -511,6 +616,18 @@ at::Tensor abs_generated_plumbing(const at::Tensor & self) {
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 template <typename batch_rule_t, batch_rule_t batch_rule>
+at::Tensor & abs__generated_plumbing(at::Tensor & self) {
+  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  batch_rule(self_value, self_bdim);
+  return self;
+}
+template <typename batch_rule_t, batch_rule_t batch_rule>
 at::Tensor absolute_generated_plumbing(const at::Tensor & self) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
   auto maybe_layer = maybeCurrentDynamicLayer();
@@ -521,6 +638,18 @@ at::Tensor absolute_generated_plumbing(const at::Tensor & self) {
   std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
   auto results = batch_rule(self_value, self_bdim);
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
+}
+template <typename batch_rule_t, batch_rule_t batch_rule>
+at::Tensor & absolute__generated_plumbing(at::Tensor & self) {
+  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  batch_rule(self_value, self_bdim);
+  return self;
 }
 template <typename batch_rule_t, batch_rule_t batch_rule>
 at::Tensor angle_generated_plumbing(const at::Tensor & self) {
@@ -569,6 +698,18 @@ at::Tensor sgn_generated_plumbing(const at::Tensor & self) {
   std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
   auto results = batch_rule(self_value, self_bdim);
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
+}
+template <typename batch_rule_t, batch_rule_t batch_rule>
+at::Tensor & sgn__generated_plumbing(at::Tensor & self) {
+  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  batch_rule(self_value, self_bdim);
+  return self;
 }
 template <typename batch_rule_t, batch_rule_t batch_rule>
 at::Tensor real_generated_plumbing(const at::Tensor & self) {
@@ -643,6 +784,18 @@ at::Tensor conj_physical_generated_plumbing(const at::Tensor & self) {
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 template <typename batch_rule_t, batch_rule_t batch_rule>
+at::Tensor & conj_physical__generated_plumbing(at::Tensor & self) {
+  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  batch_rule(self_value, self_bdim);
+  return self;
+}
+template <typename batch_rule_t, batch_rule_t batch_rule>
 at::Tensor resolve_conj_generated_plumbing(const at::Tensor & self) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
   auto maybe_layer = maybeCurrentDynamicLayer();
@@ -691,6 +844,18 @@ at::Tensor acos_generated_plumbing(const at::Tensor & self) {
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 template <typename batch_rule_t, batch_rule_t batch_rule>
+at::Tensor & acos__generated_plumbing(at::Tensor & self) {
+  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  batch_rule(self_value, self_bdim);
+  return self;
+}
+template <typename batch_rule_t, batch_rule_t batch_rule>
 at::Tensor arccos_generated_plumbing(const at::Tensor & self) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
   auto maybe_layer = maybeCurrentDynamicLayer();
@@ -701,6 +866,18 @@ at::Tensor arccos_generated_plumbing(const at::Tensor & self) {
   std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
   auto results = batch_rule(self_value, self_bdim);
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
+}
+template <typename batch_rule_t, batch_rule_t batch_rule>
+at::Tensor & arccos__generated_plumbing(at::Tensor & self) {
+  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  batch_rule(self_value, self_bdim);
+  return self;
 }
 template <typename batch_rule_t, batch_rule_t batch_rule>
 at::Tensor avg_pool1d_generated_plumbing(const at::Tensor & self, at::IntArrayRef kernel_size, at::IntArrayRef stride, at::IntArrayRef padding, bool ceil_mode, bool count_include_pad) {
@@ -754,6 +931,21 @@ at::Tensor add_Tensor_generated_plumbing(const at::Tensor & self, const at::Tens
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 template <typename batch_rule_t, batch_rule_t batch_rule>
+at::Tensor & add__Tensor_generated_plumbing(at::Tensor & self, const at::Tensor & other, const at::Scalar & alpha) {
+  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  Tensor other_value;
+  optional<int64_t> other_bdim;
+  std::tie(other_value, other_bdim) = unwrapTensorAtLevel(other, cur_level);
+  batch_rule(self_value, self_bdim, other_value, other_bdim, alpha);
+  return self;
+}
+template <typename batch_rule_t, batch_rule_t batch_rule>
 at::Tensor _add_relu_Tensor_generated_plumbing(const at::Tensor & self, const at::Tensor & other, const at::Scalar & alpha) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
   auto maybe_layer = maybeCurrentDynamicLayer();
@@ -769,6 +961,21 @@ at::Tensor _add_relu_Tensor_generated_plumbing(const at::Tensor & self, const at
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 template <typename batch_rule_t, batch_rule_t batch_rule>
+at::Tensor & _add_relu__Tensor_generated_plumbing(at::Tensor & self, const at::Tensor & other, const at::Scalar & alpha) {
+  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  Tensor other_value;
+  optional<int64_t> other_bdim;
+  std::tie(other_value, other_bdim) = unwrapTensorAtLevel(other, cur_level);
+  batch_rule(self_value, self_bdim, other_value, other_bdim, alpha);
+  return self;
+}
+template <typename batch_rule_t, batch_rule_t batch_rule>
 at::Tensor _add_relu_Scalar_generated_plumbing(const at::Tensor & self, const at::Scalar & other, const at::Scalar & alpha) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
   auto maybe_layer = maybeCurrentDynamicLayer();
@@ -781,6 +988,18 @@ at::Tensor _add_relu_Scalar_generated_plumbing(const at::Tensor & self, const at
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 template <typename batch_rule_t, batch_rule_t batch_rule>
+at::Tensor & _add_relu__Scalar_generated_plumbing(at::Tensor & self, const at::Scalar & other, const at::Scalar & alpha) {
+  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  batch_rule(self_value, self_bdim, other, alpha);
+  return self;
+}
+template <typename batch_rule_t, batch_rule_t batch_rule>
 at::Tensor add_Scalar_generated_plumbing(const at::Tensor & self, const at::Scalar & other, const at::Scalar & alpha) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
   auto maybe_layer = maybeCurrentDynamicLayer();
@@ -791,6 +1010,18 @@ at::Tensor add_Scalar_generated_plumbing(const at::Tensor & self, const at::Scal
   std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
   auto results = batch_rule(self_value, self_bdim, other, alpha);
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
+}
+template <typename batch_rule_t, batch_rule_t batch_rule>
+at::Tensor & add__Scalar_generated_plumbing(at::Tensor & self, const at::Scalar & other, const at::Scalar & alpha) {
+  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  batch_rule(self_value, self_bdim, other, alpha);
+  return self;
 }
 template <typename batch_rule_t, batch_rule_t batch_rule>
 at::Tensor addmv_generated_plumbing(const at::Tensor & self, const at::Tensor & mat, const at::Tensor & vec, const at::Scalar & beta, const at::Scalar & alpha) {
@@ -811,6 +1042,24 @@ at::Tensor addmv_generated_plumbing(const at::Tensor & self, const at::Tensor & 
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 template <typename batch_rule_t, batch_rule_t batch_rule>
+at::Tensor & addmv__generated_plumbing(at::Tensor & self, const at::Tensor & mat, const at::Tensor & vec, const at::Scalar & beta, const at::Scalar & alpha) {
+  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  Tensor mat_value;
+  optional<int64_t> mat_bdim;
+  std::tie(mat_value, mat_bdim) = unwrapTensorAtLevel(mat, cur_level);
+  Tensor vec_value;
+  optional<int64_t> vec_bdim;
+  std::tie(vec_value, vec_bdim) = unwrapTensorAtLevel(vec, cur_level);
+  batch_rule(self_value, self_bdim, mat_value, mat_bdim, vec_value, vec_bdim, beta, alpha);
+  return self;
+}
+template <typename batch_rule_t, batch_rule_t batch_rule>
 at::Tensor addr_generated_plumbing(const at::Tensor & self, const at::Tensor & vec1, const at::Tensor & vec2, const at::Scalar & beta, const at::Scalar & alpha) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
   auto maybe_layer = maybeCurrentDynamicLayer();
@@ -827,6 +1076,24 @@ at::Tensor addr_generated_plumbing(const at::Tensor & self, const at::Tensor & v
   std::tie(vec2_value, vec2_bdim) = unwrapTensorAtLevel(vec2, cur_level);
   auto results = batch_rule(self_value, self_bdim, vec1_value, vec1_bdim, vec2_value, vec2_bdim, beta, alpha);
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
+}
+template <typename batch_rule_t, batch_rule_t batch_rule>
+at::Tensor & addr__generated_plumbing(at::Tensor & self, const at::Tensor & vec1, const at::Tensor & vec2, const at::Scalar & beta, const at::Scalar & alpha) {
+  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  Tensor vec1_value;
+  optional<int64_t> vec1_bdim;
+  std::tie(vec1_value, vec1_bdim) = unwrapTensorAtLevel(vec1, cur_level);
+  Tensor vec2_value;
+  optional<int64_t> vec2_bdim;
+  std::tie(vec2_value, vec2_bdim) = unwrapTensorAtLevel(vec2, cur_level);
+  batch_rule(self_value, self_bdim, vec1_value, vec1_bdim, vec2_value, vec2_bdim, beta, alpha);
+  return self;
 }
 template <typename batch_rule_t, batch_rule_t batch_rule>
 at::Tensor affine_grid_generator_generated_plumbing(const at::Tensor & theta, at::IntArrayRef size, bool align_corners) {
@@ -901,36 +1168,6 @@ at::Tensor any_dimname_generated_plumbing(const at::Tensor & self, at::Dimname d
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 template <typename batch_rule_t, batch_rule_t batch_rule>
-at::Tensor arange_generated_plumbing(const at::Scalar & end, c10::optional<at::ScalarType> dtype, c10::optional<at::Layout> layout, c10::optional<at::Device> device, c10::optional<bool> pin_memory) {
-  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
-  auto maybe_layer = maybeCurrentDynamicLayer();
-  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
-  int64_t cur_level = maybe_layer->layerId();
-
-  auto results = batch_rule(end, dtype, layout, device, pin_memory);
-  return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
-}
-template <typename batch_rule_t, batch_rule_t batch_rule>
-at::Tensor arange_start_generated_plumbing(const at::Scalar & start, const at::Scalar & end, c10::optional<at::ScalarType> dtype, c10::optional<at::Layout> layout, c10::optional<at::Device> device, c10::optional<bool> pin_memory) {
-  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
-  auto maybe_layer = maybeCurrentDynamicLayer();
-  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
-  int64_t cur_level = maybe_layer->layerId();
-
-  auto results = batch_rule(start, end, dtype, layout, device, pin_memory);
-  return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
-}
-template <typename batch_rule_t, batch_rule_t batch_rule>
-at::Tensor arange_start_step_generated_plumbing(const at::Scalar & start, const at::Scalar & end, const at::Scalar & step, c10::optional<at::ScalarType> dtype, c10::optional<at::Layout> layout, c10::optional<at::Device> device, c10::optional<bool> pin_memory) {
-  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
-  auto maybe_layer = maybeCurrentDynamicLayer();
-  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
-  int64_t cur_level = maybe_layer->layerId();
-
-  auto results = batch_rule(start, end, step, dtype, layout, device, pin_memory);
-  return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
-}
-template <typename batch_rule_t, batch_rule_t batch_rule>
 at::Tensor _dim_arange_generated_plumbing(const at::Tensor & like, int64_t dim) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
   auto maybe_layer = maybeCurrentDynamicLayer();
@@ -979,6 +1216,18 @@ at::Tensor acosh_generated_plumbing(const at::Tensor & self) {
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 template <typename batch_rule_t, batch_rule_t batch_rule>
+at::Tensor & acosh__generated_plumbing(at::Tensor & self) {
+  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  batch_rule(self_value, self_bdim);
+  return self;
+}
+template <typename batch_rule_t, batch_rule_t batch_rule>
 at::Tensor arccosh_generated_plumbing(const at::Tensor & self) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
   auto maybe_layer = maybeCurrentDynamicLayer();
@@ -989,6 +1238,18 @@ at::Tensor arccosh_generated_plumbing(const at::Tensor & self) {
   std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
   auto results = batch_rule(self_value, self_bdim);
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
+}
+template <typename batch_rule_t, batch_rule_t batch_rule>
+at::Tensor & arccosh__generated_plumbing(at::Tensor & self) {
+  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  batch_rule(self_value, self_bdim);
+  return self;
 }
 template <typename batch_rule_t, batch_rule_t batch_rule>
 at::Tensor asinh_generated_plumbing(const at::Tensor & self) {
@@ -1003,6 +1264,18 @@ at::Tensor asinh_generated_plumbing(const at::Tensor & self) {
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 template <typename batch_rule_t, batch_rule_t batch_rule>
+at::Tensor & asinh__generated_plumbing(at::Tensor & self) {
+  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  batch_rule(self_value, self_bdim);
+  return self;
+}
+template <typename batch_rule_t, batch_rule_t batch_rule>
 at::Tensor arcsinh_generated_plumbing(const at::Tensor & self) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
   auto maybe_layer = maybeCurrentDynamicLayer();
@@ -1013,6 +1286,18 @@ at::Tensor arcsinh_generated_plumbing(const at::Tensor & self) {
   std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
   auto results = batch_rule(self_value, self_bdim);
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
+}
+template <typename batch_rule_t, batch_rule_t batch_rule>
+at::Tensor & arcsinh__generated_plumbing(at::Tensor & self) {
+  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  batch_rule(self_value, self_bdim);
+  return self;
 }
 template <typename batch_rule_t, batch_rule_t batch_rule>
 at::Tensor atanh_generated_plumbing(const at::Tensor & self) {
@@ -1027,6 +1312,18 @@ at::Tensor atanh_generated_plumbing(const at::Tensor & self) {
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 template <typename batch_rule_t, batch_rule_t batch_rule>
+at::Tensor & atanh__generated_plumbing(at::Tensor & self) {
+  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  batch_rule(self_value, self_bdim);
+  return self;
+}
+template <typename batch_rule_t, batch_rule_t batch_rule>
 at::Tensor arctanh_generated_plumbing(const at::Tensor & self) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
   auto maybe_layer = maybeCurrentDynamicLayer();
@@ -1037,6 +1334,18 @@ at::Tensor arctanh_generated_plumbing(const at::Tensor & self) {
   std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
   auto results = batch_rule(self_value, self_bdim);
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
+}
+template <typename batch_rule_t, batch_rule_t batch_rule>
+at::Tensor & arctanh__generated_plumbing(at::Tensor & self) {
+  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  batch_rule(self_value, self_bdim);
+  return self;
 }
 template <typename batch_rule_t, batch_rule_t batch_rule>
 at::Tensor as_strided_generated_plumbing(const at::Tensor & self, at::IntArrayRef size, at::IntArrayRef stride, c10::optional<int64_t> storage_offset) {
@@ -1063,6 +1372,18 @@ at::Tensor asin_generated_plumbing(const at::Tensor & self) {
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 template <typename batch_rule_t, batch_rule_t batch_rule>
+at::Tensor & asin__generated_plumbing(at::Tensor & self) {
+  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  batch_rule(self_value, self_bdim);
+  return self;
+}
+template <typename batch_rule_t, batch_rule_t batch_rule>
 at::Tensor arcsin_generated_plumbing(const at::Tensor & self) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
   auto maybe_layer = maybeCurrentDynamicLayer();
@@ -1073,6 +1394,18 @@ at::Tensor arcsin_generated_plumbing(const at::Tensor & self) {
   std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
   auto results = batch_rule(self_value, self_bdim);
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
+}
+template <typename batch_rule_t, batch_rule_t batch_rule>
+at::Tensor & arcsin__generated_plumbing(at::Tensor & self) {
+  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  batch_rule(self_value, self_bdim);
+  return self;
 }
 template <typename batch_rule_t, batch_rule_t batch_rule>
 at::Tensor atan_generated_plumbing(const at::Tensor & self) {
@@ -1087,6 +1420,18 @@ at::Tensor atan_generated_plumbing(const at::Tensor & self) {
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 template <typename batch_rule_t, batch_rule_t batch_rule>
+at::Tensor & atan__generated_plumbing(at::Tensor & self) {
+  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  batch_rule(self_value, self_bdim);
+  return self;
+}
+template <typename batch_rule_t, batch_rule_t batch_rule>
 at::Tensor arctan_generated_plumbing(const at::Tensor & self) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
   auto maybe_layer = maybeCurrentDynamicLayer();
@@ -1097,6 +1442,18 @@ at::Tensor arctan_generated_plumbing(const at::Tensor & self) {
   std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
   auto results = batch_rule(self_value, self_bdim);
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
+}
+template <typename batch_rule_t, batch_rule_t batch_rule>
+at::Tensor & arctan__generated_plumbing(at::Tensor & self) {
+  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  batch_rule(self_value, self_bdim);
+  return self;
 }
 template <typename batch_rule_t, batch_rule_t batch_rule>
 at::Tensor atleast_1d_generated_plumbing(const at::Tensor & self) {
@@ -1183,24 +1540,22 @@ at::Tensor baddbmm_generated_plumbing(const at::Tensor & self, const at::Tensor 
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 template <typename batch_rule_t, batch_rule_t batch_rule>
-at::Tensor bartlett_window_generated_plumbing(int64_t window_length, c10::optional<at::ScalarType> dtype, c10::optional<at::Layout> layout, c10::optional<at::Device> device, c10::optional<bool> pin_memory) {
+at::Tensor & baddbmm__generated_plumbing(at::Tensor & self, const at::Tensor & batch1, const at::Tensor & batch2, const at::Scalar & beta, const at::Scalar & alpha) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
   auto maybe_layer = maybeCurrentDynamicLayer();
   TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
   int64_t cur_level = maybe_layer->layerId();
-
-  auto results = batch_rule(window_length, dtype, layout, device, pin_memory);
-  return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
-}
-template <typename batch_rule_t, batch_rule_t batch_rule>
-at::Tensor bartlett_window_periodic_generated_plumbing(int64_t window_length, bool periodic, c10::optional<at::ScalarType> dtype, c10::optional<at::Layout> layout, c10::optional<at::Device> device, c10::optional<bool> pin_memory) {
-  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
-  auto maybe_layer = maybeCurrentDynamicLayer();
-  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
-  int64_t cur_level = maybe_layer->layerId();
-
-  auto results = batch_rule(window_length, periodic, dtype, layout, device, pin_memory);
-  return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  Tensor batch1_value;
+  optional<int64_t> batch1_bdim;
+  std::tie(batch1_value, batch1_bdim) = unwrapTensorAtLevel(batch1, cur_level);
+  Tensor batch2_value;
+  optional<int64_t> batch2_bdim;
+  std::tie(batch2_value, batch2_bdim) = unwrapTensorAtLevel(batch2, cur_level);
+  batch_rule(self_value, self_bdim, batch1_value, batch1_bdim, batch2_value, batch2_bdim, beta, alpha);
+  return self;
 }
 template <typename batch_rule_t, batch_rule_t batch_rule>
 at::Tensor batch_norm_generated_plumbing(const at::Tensor & input, const c10::optional<at::Tensor> & weight, const c10::optional<at::Tensor> & bias, const c10::optional<at::Tensor> & running_mean, const c10::optional<at::Tensor> & running_var, bool training, double momentum, double eps, bool cudnn_enabled) {
@@ -1316,6 +1671,33 @@ at::Tensor bernoulli_generated_plumbing(const at::Tensor & self, c10::optional<a
   std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
   auto results = batch_rule(self_value, self_bdim, generator);
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
+}
+template <typename batch_rule_t, batch_rule_t batch_rule>
+at::Tensor & bernoulli__Tensor_generated_plumbing(at::Tensor & self, const at::Tensor & p, c10::optional<at::Generator> generator) {
+  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  Tensor p_value;
+  optional<int64_t> p_bdim;
+  std::tie(p_value, p_bdim) = unwrapTensorAtLevel(p, cur_level);
+  batch_rule(self_value, self_bdim, p_value, p_bdim, generator);
+  return self;
+}
+template <typename batch_rule_t, batch_rule_t batch_rule>
+at::Tensor & bernoulli__float_generated_plumbing(at::Tensor & self, double p, c10::optional<at::Generator> generator) {
+  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  batch_rule(self_value, self_bdim, p, generator);
+  return self;
 }
 template <typename batch_rule_t, batch_rule_t batch_rule>
 at::Tensor bernoulli_p_generated_plumbing(const at::Tensor & self, double p, c10::optional<at::Generator> generator) {
@@ -1478,6 +1860,18 @@ at::Tensor bitwise_not_generated_plumbing(const at::Tensor & self) {
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 template <typename batch_rule_t, batch_rule_t batch_rule>
+at::Tensor & bitwise_not__generated_plumbing(at::Tensor & self) {
+  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  batch_rule(self_value, self_bdim);
+  return self;
+}
+template <typename batch_rule_t, batch_rule_t batch_rule>
 at::Tensor copysign_Tensor_generated_plumbing(const at::Tensor & self, const at::Tensor & other) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
   auto maybe_layer = maybeCurrentDynamicLayer();
@@ -1493,6 +1887,21 @@ at::Tensor copysign_Tensor_generated_plumbing(const at::Tensor & self, const at:
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 template <typename batch_rule_t, batch_rule_t batch_rule>
+at::Tensor & copysign__Tensor_generated_plumbing(at::Tensor & self, const at::Tensor & other) {
+  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  Tensor other_value;
+  optional<int64_t> other_bdim;
+  std::tie(other_value, other_bdim) = unwrapTensorAtLevel(other, cur_level);
+  batch_rule(self_value, self_bdim, other_value, other_bdim);
+  return self;
+}
+template <typename batch_rule_t, batch_rule_t batch_rule>
 at::Tensor copysign_Scalar_generated_plumbing(const at::Tensor & self, const at::Scalar & other) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
   auto maybe_layer = maybeCurrentDynamicLayer();
@@ -1505,6 +1914,18 @@ at::Tensor copysign_Scalar_generated_plumbing(const at::Tensor & self, const at:
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 template <typename batch_rule_t, batch_rule_t batch_rule>
+at::Tensor & copysign__Scalar_generated_plumbing(at::Tensor & self, const at::Scalar & other) {
+  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  batch_rule(self_value, self_bdim, other);
+  return self;
+}
+template <typename batch_rule_t, batch_rule_t batch_rule>
 at::Tensor logical_not_generated_plumbing(const at::Tensor & self) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
   auto maybe_layer = maybeCurrentDynamicLayer();
@@ -1515,6 +1936,18 @@ at::Tensor logical_not_generated_plumbing(const at::Tensor & self) {
   std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
   auto results = batch_rule(self_value, self_bdim);
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
+}
+template <typename batch_rule_t, batch_rule_t batch_rule>
+at::Tensor & logical_not__generated_plumbing(at::Tensor & self) {
+  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  batch_rule(self_value, self_bdim);
+  return self;
 }
 template <typename batch_rule_t, batch_rule_t batch_rule>
 at::Tensor logical_xor_generated_plumbing(const at::Tensor & self, const at::Tensor & other) {
@@ -1532,6 +1965,21 @@ at::Tensor logical_xor_generated_plumbing(const at::Tensor & self, const at::Ten
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 template <typename batch_rule_t, batch_rule_t batch_rule>
+at::Tensor & logical_xor__generated_plumbing(at::Tensor & self, const at::Tensor & other) {
+  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  Tensor other_value;
+  optional<int64_t> other_bdim;
+  std::tie(other_value, other_bdim) = unwrapTensorAtLevel(other, cur_level);
+  batch_rule(self_value, self_bdim, other_value, other_bdim);
+  return self;
+}
+template <typename batch_rule_t, batch_rule_t batch_rule>
 at::Tensor logical_and_generated_plumbing(const at::Tensor & self, const at::Tensor & other) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
   auto maybe_layer = maybeCurrentDynamicLayer();
@@ -1545,6 +1993,21 @@ at::Tensor logical_and_generated_plumbing(const at::Tensor & self, const at::Ten
   std::tie(other_value, other_bdim) = unwrapTensorAtLevel(other, cur_level);
   auto results = batch_rule(self_value, self_bdim, other_value, other_bdim);
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
+}
+template <typename batch_rule_t, batch_rule_t batch_rule>
+at::Tensor & logical_and__generated_plumbing(at::Tensor & self, const at::Tensor & other) {
+  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  Tensor other_value;
+  optional<int64_t> other_bdim;
+  std::tie(other_value, other_bdim) = unwrapTensorAtLevel(other, cur_level);
+  batch_rule(self_value, self_bdim, other_value, other_bdim);
+  return self;
 }
 template <typename batch_rule_t, batch_rule_t batch_rule>
 at::Tensor logical_or_generated_plumbing(const at::Tensor & self, const at::Tensor & other) {
@@ -1562,24 +2025,19 @@ at::Tensor logical_or_generated_plumbing(const at::Tensor & self, const at::Tens
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 template <typename batch_rule_t, batch_rule_t batch_rule>
-at::Tensor blackman_window_generated_plumbing(int64_t window_length, c10::optional<at::ScalarType> dtype, c10::optional<at::Layout> layout, c10::optional<at::Device> device, c10::optional<bool> pin_memory) {
+at::Tensor & logical_or__generated_plumbing(at::Tensor & self, const at::Tensor & other) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
   auto maybe_layer = maybeCurrentDynamicLayer();
   TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
   int64_t cur_level = maybe_layer->layerId();
-
-  auto results = batch_rule(window_length, dtype, layout, device, pin_memory);
-  return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
-}
-template <typename batch_rule_t, batch_rule_t batch_rule>
-at::Tensor blackman_window_periodic_generated_plumbing(int64_t window_length, bool periodic, c10::optional<at::ScalarType> dtype, c10::optional<at::Layout> layout, c10::optional<at::Device> device, c10::optional<bool> pin_memory) {
-  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
-  auto maybe_layer = maybeCurrentDynamicLayer();
-  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
-  int64_t cur_level = maybe_layer->layerId();
-
-  auto results = batch_rule(window_length, periodic, dtype, layout, device, pin_memory);
-  return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  Tensor other_value;
+  optional<int64_t> other_bdim;
+  std::tie(other_value, other_bdim) = unwrapTensorAtLevel(other, cur_level);
+  batch_rule(self_value, self_bdim, other_value, other_bdim);
+  return self;
 }
 template <typename batch_rule_t, batch_rule_t batch_rule>
 at::Tensor bmm_generated_plumbing(const at::Tensor & self, const at::Tensor & mat2) {
@@ -1693,6 +2151,18 @@ at::Tensor ceil_generated_plumbing(const at::Tensor & self) {
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 template <typename batch_rule_t, batch_rule_t batch_rule>
+at::Tensor & ceil__generated_plumbing(at::Tensor & self) {
+  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  batch_rule(self_value, self_bdim);
+  return self;
+}
+template <typename batch_rule_t, batch_rule_t batch_rule>
 at::Tensor chain_matmul_generated_plumbing(at::TensorList matrices) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
   auto maybe_layer = maybeCurrentDynamicLayer();
@@ -1800,6 +2270,40 @@ at::Tensor clamp_Tensor_generated_plumbing(const at::Tensor & self, const c10::o
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 template <typename batch_rule_t, batch_rule_t batch_rule>
+at::Tensor & clamp__generated_plumbing(at::Tensor & self, const c10::optional<at::Scalar> & min, const c10::optional<at::Scalar> & max) {
+  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  batch_rule(self_value, self_bdim, min, max);
+  return self;
+}
+template <typename batch_rule_t, batch_rule_t batch_rule>
+at::Tensor & clamp__Tensor_generated_plumbing(at::Tensor & self, const c10::optional<at::Tensor> & min, const c10::optional<at::Tensor> & max) {
+  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  optional<Tensor> min_value;
+  optional<int64_t> min_bdim;
+  if (min) {
+      std::tie(min_value, min_bdim) = unwrapTensorAtLevel(min.value(), cur_level);
+  }
+  optional<Tensor> max_value;
+  optional<int64_t> max_bdim;
+  if (max) {
+      std::tie(max_value, max_bdim) = unwrapTensorAtLevel(max.value(), cur_level);
+  }
+  batch_rule(self_value, self_bdim, min_value, min_bdim, max_value, max_bdim);
+  return self;
+}
+template <typename batch_rule_t, batch_rule_t batch_rule>
 at::Tensor clamp_max_generated_plumbing(const at::Tensor & self, const at::Scalar & max) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
   auto maybe_layer = maybeCurrentDynamicLayer();
@@ -1827,6 +2331,33 @@ at::Tensor clamp_max_Tensor_generated_plumbing(const at::Tensor & self, const at
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 template <typename batch_rule_t, batch_rule_t batch_rule>
+at::Tensor & clamp_max__generated_plumbing(at::Tensor & self, const at::Scalar & max) {
+  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  batch_rule(self_value, self_bdim, max);
+  return self;
+}
+template <typename batch_rule_t, batch_rule_t batch_rule>
+at::Tensor & clamp_max__Tensor_generated_plumbing(at::Tensor & self, const at::Tensor & max) {
+  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  Tensor max_value;
+  optional<int64_t> max_bdim;
+  std::tie(max_value, max_bdim) = unwrapTensorAtLevel(max, cur_level);
+  batch_rule(self_value, self_bdim, max_value, max_bdim);
+  return self;
+}
+template <typename batch_rule_t, batch_rule_t batch_rule>
 at::Tensor clamp_min_generated_plumbing(const at::Tensor & self, const at::Scalar & min) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
   auto maybe_layer = maybeCurrentDynamicLayer();
@@ -1852,6 +2383,33 @@ at::Tensor clamp_min_Tensor_generated_plumbing(const at::Tensor & self, const at
   std::tie(min_value, min_bdim) = unwrapTensorAtLevel(min, cur_level);
   auto results = batch_rule(self_value, self_bdim, min_value, min_bdim);
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
+}
+template <typename batch_rule_t, batch_rule_t batch_rule>
+at::Tensor & clamp_min__generated_plumbing(at::Tensor & self, const at::Scalar & min) {
+  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  batch_rule(self_value, self_bdim, min);
+  return self;
+}
+template <typename batch_rule_t, batch_rule_t batch_rule>
+at::Tensor & clamp_min__Tensor_generated_plumbing(at::Tensor & self, const at::Tensor & min) {
+  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  Tensor min_value;
+  optional<int64_t> min_bdim;
+  std::tie(min_value, min_bdim) = unwrapTensorAtLevel(min, cur_level);
+  batch_rule(self_value, self_bdim, min_value, min_bdim);
+  return self;
 }
 template <typename batch_rule_t, batch_rule_t batch_rule>
 at::Tensor clip_generated_plumbing(const at::Tensor & self, const c10::optional<at::Scalar> & min, const c10::optional<at::Scalar> & max) {
@@ -1886,6 +2444,40 @@ at::Tensor clip_Tensor_generated_plumbing(const at::Tensor & self, const c10::op
   }
   auto results = batch_rule(self_value, self_bdim, min_value, min_bdim, max_value, max_bdim);
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
+}
+template <typename batch_rule_t, batch_rule_t batch_rule>
+at::Tensor & clip__generated_plumbing(at::Tensor & self, const c10::optional<at::Scalar> & min, const c10::optional<at::Scalar> & max) {
+  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  batch_rule(self_value, self_bdim, min, max);
+  return self;
+}
+template <typename batch_rule_t, batch_rule_t batch_rule>
+at::Tensor & clip__Tensor_generated_plumbing(at::Tensor & self, const c10::optional<at::Tensor> & min, const c10::optional<at::Tensor> & max) {
+  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  optional<Tensor> min_value;
+  optional<int64_t> min_bdim;
+  if (min) {
+      std::tie(min_value, min_bdim) = unwrapTensorAtLevel(min.value(), cur_level);
+  }
+  optional<Tensor> max_value;
+  optional<int64_t> max_bdim;
+  if (max) {
+      std::tie(max_value, max_bdim) = unwrapTensorAtLevel(max.value(), cur_level);
+  }
+  batch_rule(self_value, self_bdim, min_value, min_bdim, max_value, max_bdim);
+  return self;
 }
 template <typename batch_rule_t, batch_rule_t batch_rule>
 at::Tensor complex_generated_plumbing(const at::Tensor & real, const at::Tensor & imag) {
@@ -2330,6 +2922,21 @@ at::Tensor conv_transpose3d_input_generated_plumbing(const at::Tensor & input, c
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 template <typename batch_rule_t, batch_rule_t batch_rule>
+at::Tensor & copy__generated_plumbing(at::Tensor & self, const at::Tensor & src, bool non_blocking) {
+  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  Tensor src_value;
+  optional<int64_t> src_bdim;
+  std::tie(src_value, src_bdim) = unwrapTensorAtLevel(src, cur_level);
+  batch_rule(self_value, self_bdim, src_value, src_bdim, non_blocking);
+  return self;
+}
+template <typename batch_rule_t, batch_rule_t batch_rule>
 at::Tensor _copy_from_generated_plumbing(const at::Tensor & self, const at::Tensor & dst, bool non_blocking) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
   auto maybe_layer = maybeCurrentDynamicLayer();
@@ -2372,6 +2979,18 @@ at::Tensor cos_generated_plumbing(const at::Tensor & self) {
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 template <typename batch_rule_t, batch_rule_t batch_rule>
+at::Tensor & cos__generated_plumbing(at::Tensor & self) {
+  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  batch_rule(self_value, self_bdim);
+  return self;
+}
+template <typename batch_rule_t, batch_rule_t batch_rule>
 at::Tensor cosh_generated_plumbing(const at::Tensor & self) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
   auto maybe_layer = maybeCurrentDynamicLayer();
@@ -2382,6 +3001,18 @@ at::Tensor cosh_generated_plumbing(const at::Tensor & self) {
   std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
   auto results = batch_rule(self_value, self_bdim);
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
+}
+template <typename batch_rule_t, batch_rule_t batch_rule>
+at::Tensor & cosh__generated_plumbing(at::Tensor & self) {
+  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  batch_rule(self_value, self_bdim);
+  return self;
 }
 template <typename batch_rule_t, batch_rule_t batch_rule>
 at::Tensor cosine_embedding_loss_generated_plumbing(const at::Tensor & input1, const at::Tensor & input2, const at::Tensor & target, double margin, int64_t reduction) {
@@ -2739,6 +3370,18 @@ at::Tensor cumprod_generated_plumbing(const at::Tensor & self, int64_t dim, c10:
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 template <typename batch_rule_t, batch_rule_t batch_rule>
+at::Tensor & cumprod__generated_plumbing(at::Tensor & self, int64_t dim, c10::optional<at::ScalarType> dtype) {
+  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  batch_rule(self_value, self_bdim, dim, dtype);
+  return self;
+}
+template <typename batch_rule_t, batch_rule_t batch_rule>
 at::Tensor cumprod_dimname_generated_plumbing(const at::Tensor & self, at::Dimname dim, c10::optional<at::ScalarType> dtype) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
   auto maybe_layer = maybeCurrentDynamicLayer();
@@ -2749,6 +3392,18 @@ at::Tensor cumprod_dimname_generated_plumbing(const at::Tensor & self, at::Dimna
   std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
   auto results = batch_rule(self_value, self_bdim, dim, dtype);
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
+}
+template <typename batch_rule_t, batch_rule_t batch_rule>
+at::Tensor & cumprod__dimname_generated_plumbing(at::Tensor & self, at::Dimname dim, c10::optional<at::ScalarType> dtype) {
+  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  batch_rule(self_value, self_bdim, dim, dtype);
+  return self;
 }
 template <typename batch_rule_t, batch_rule_t batch_rule>
 at::Tensor cumprod_backward_generated_plumbing(const at::Tensor & grad, const at::Tensor & input, int64_t dim, const at::Tensor & output) {
@@ -2781,6 +3436,18 @@ at::Tensor cumsum_generated_plumbing(const at::Tensor & self, int64_t dim, c10::
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 template <typename batch_rule_t, batch_rule_t batch_rule>
+at::Tensor & cumsum__generated_plumbing(at::Tensor & self, int64_t dim, c10::optional<at::ScalarType> dtype) {
+  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  batch_rule(self_value, self_bdim, dim, dtype);
+  return self;
+}
+template <typename batch_rule_t, batch_rule_t batch_rule>
 at::Tensor cumsum_dimname_generated_plumbing(const at::Tensor & self, at::Dimname dim, c10::optional<at::ScalarType> dtype) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
   auto maybe_layer = maybeCurrentDynamicLayer();
@@ -2791,6 +3458,18 @@ at::Tensor cumsum_dimname_generated_plumbing(const at::Tensor & self, at::Dimnam
   std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
   auto results = batch_rule(self_value, self_bdim, dim, dtype);
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
+}
+template <typename batch_rule_t, batch_rule_t batch_rule>
+at::Tensor & cumsum__dimname_generated_plumbing(at::Tensor & self, at::Dimname dim, c10::optional<at::ScalarType> dtype) {
+  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  batch_rule(self_value, self_bdim, dim, dtype);
+  return self;
 }
 template <typename batch_rule_t, batch_rule_t batch_rule>
 at::Tensor cumulative_trapezoid_x_generated_plumbing(const at::Tensor & y, const at::Tensor & x, int64_t dim) {
@@ -2967,6 +3646,18 @@ at::Tensor diagonal_backward_generated_plumbing(const at::Tensor & grad_output, 
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 template <typename batch_rule_t, batch_rule_t batch_rule>
+at::Tensor & fill_diagonal__generated_plumbing(at::Tensor & self, const at::Scalar & fill_value, bool wrap) {
+  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  batch_rule(self_value, self_bdim, fill_value, wrap);
+  return self;
+}
+template <typename batch_rule_t, batch_rule_t batch_rule>
 at::Tensor diff_generated_plumbing(const at::Tensor & self, int64_t n, int64_t dim, const c10::optional<at::Tensor> & prepend, const c10::optional<at::Tensor> & append) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
   auto maybe_layer = maybeCurrentDynamicLayer();
@@ -3088,6 +3779,21 @@ at::Tensor div_Tensor_generated_plumbing(const at::Tensor & self, const at::Tens
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 template <typename batch_rule_t, batch_rule_t batch_rule>
+at::Tensor & div__Tensor_generated_plumbing(at::Tensor & self, const at::Tensor & other) {
+  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  Tensor other_value;
+  optional<int64_t> other_bdim;
+  std::tie(other_value, other_bdim) = unwrapTensorAtLevel(other, cur_level);
+  batch_rule(self_value, self_bdim, other_value, other_bdim);
+  return self;
+}
+template <typename batch_rule_t, batch_rule_t batch_rule>
 at::Tensor div_Tensor_mode_generated_plumbing(const at::Tensor & self, const at::Tensor & other, c10::optional<c10::string_view> rounding_mode) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
   auto maybe_layer = maybeCurrentDynamicLayer();
@@ -3103,6 +3809,21 @@ at::Tensor div_Tensor_mode_generated_plumbing(const at::Tensor & self, const at:
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 template <typename batch_rule_t, batch_rule_t batch_rule>
+at::Tensor & div__Tensor_mode_generated_plumbing(at::Tensor & self, const at::Tensor & other, c10::optional<c10::string_view> rounding_mode) {
+  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  Tensor other_value;
+  optional<int64_t> other_bdim;
+  std::tie(other_value, other_bdim) = unwrapTensorAtLevel(other, cur_level);
+  batch_rule(self_value, self_bdim, other_value, other_bdim, rounding_mode);
+  return self;
+}
+template <typename batch_rule_t, batch_rule_t batch_rule>
 at::Tensor div_Scalar_generated_plumbing(const at::Tensor & self, const at::Scalar & other) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
   auto maybe_layer = maybeCurrentDynamicLayer();
@@ -3115,6 +3836,18 @@ at::Tensor div_Scalar_generated_plumbing(const at::Tensor & self, const at::Scal
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 template <typename batch_rule_t, batch_rule_t batch_rule>
+at::Tensor & div__Scalar_generated_plumbing(at::Tensor & self, const at::Scalar & other) {
+  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  batch_rule(self_value, self_bdim, other);
+  return self;
+}
+template <typename batch_rule_t, batch_rule_t batch_rule>
 at::Tensor div_Scalar_mode_generated_plumbing(const at::Tensor & self, const at::Scalar & other, c10::optional<c10::string_view> rounding_mode) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
   auto maybe_layer = maybeCurrentDynamicLayer();
@@ -3125,6 +3858,18 @@ at::Tensor div_Scalar_mode_generated_plumbing(const at::Tensor & self, const at:
   std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
   auto results = batch_rule(self_value, self_bdim, other, rounding_mode);
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
+}
+template <typename batch_rule_t, batch_rule_t batch_rule>
+at::Tensor & div__Scalar_mode_generated_plumbing(at::Tensor & self, const at::Scalar & other, c10::optional<c10::string_view> rounding_mode) {
+  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  batch_rule(self_value, self_bdim, other, rounding_mode);
+  return self;
 }
 template <typename batch_rule_t, batch_rule_t batch_rule>
 at::Tensor divide_Tensor_generated_plumbing(const at::Tensor & self, const at::Tensor & other) {
@@ -3142,6 +3887,21 @@ at::Tensor divide_Tensor_generated_plumbing(const at::Tensor & self, const at::T
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 template <typename batch_rule_t, batch_rule_t batch_rule>
+at::Tensor & divide__Tensor_generated_plumbing(at::Tensor & self, const at::Tensor & other) {
+  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  Tensor other_value;
+  optional<int64_t> other_bdim;
+  std::tie(other_value, other_bdim) = unwrapTensorAtLevel(other, cur_level);
+  batch_rule(self_value, self_bdim, other_value, other_bdim);
+  return self;
+}
+template <typename batch_rule_t, batch_rule_t batch_rule>
 at::Tensor divide_Scalar_generated_plumbing(const at::Tensor & self, const at::Scalar & other) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
   auto maybe_layer = maybeCurrentDynamicLayer();
@@ -3152,6 +3912,18 @@ at::Tensor divide_Scalar_generated_plumbing(const at::Tensor & self, const at::S
   std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
   auto results = batch_rule(self_value, self_bdim, other);
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
+}
+template <typename batch_rule_t, batch_rule_t batch_rule>
+at::Tensor & divide__Scalar_generated_plumbing(at::Tensor & self, const at::Scalar & other) {
+  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  batch_rule(self_value, self_bdim, other);
+  return self;
 }
 template <typename batch_rule_t, batch_rule_t batch_rule>
 at::Tensor divide_Tensor_mode_generated_plumbing(const at::Tensor & self, const at::Tensor & other, c10::optional<c10::string_view> rounding_mode) {
@@ -3169,6 +3941,21 @@ at::Tensor divide_Tensor_mode_generated_plumbing(const at::Tensor & self, const 
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 template <typename batch_rule_t, batch_rule_t batch_rule>
+at::Tensor & divide__Tensor_mode_generated_plumbing(at::Tensor & self, const at::Tensor & other, c10::optional<c10::string_view> rounding_mode) {
+  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  Tensor other_value;
+  optional<int64_t> other_bdim;
+  std::tie(other_value, other_bdim) = unwrapTensorAtLevel(other, cur_level);
+  batch_rule(self_value, self_bdim, other_value, other_bdim, rounding_mode);
+  return self;
+}
+template <typename batch_rule_t, batch_rule_t batch_rule>
 at::Tensor divide_Scalar_mode_generated_plumbing(const at::Tensor & self, const at::Scalar & other, c10::optional<c10::string_view> rounding_mode) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
   auto maybe_layer = maybeCurrentDynamicLayer();
@@ -3179,6 +3966,18 @@ at::Tensor divide_Scalar_mode_generated_plumbing(const at::Tensor & self, const 
   std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
   auto results = batch_rule(self_value, self_bdim, other, rounding_mode);
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
+}
+template <typename batch_rule_t, batch_rule_t batch_rule>
+at::Tensor & divide__Scalar_mode_generated_plumbing(at::Tensor & self, const at::Scalar & other, c10::optional<c10::string_view> rounding_mode) {
+  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  batch_rule(self_value, self_bdim, other, rounding_mode);
+  return self;
 }
 template <typename batch_rule_t, batch_rule_t batch_rule>
 at::Tensor true_divide_Tensor_generated_plumbing(const at::Tensor & self, const at::Tensor & other) {
@@ -3196,6 +3995,21 @@ at::Tensor true_divide_Tensor_generated_plumbing(const at::Tensor & self, const 
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 template <typename batch_rule_t, batch_rule_t batch_rule>
+at::Tensor & true_divide__Tensor_generated_plumbing(at::Tensor & self, const at::Tensor & other) {
+  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  Tensor other_value;
+  optional<int64_t> other_bdim;
+  std::tie(other_value, other_bdim) = unwrapTensorAtLevel(other, cur_level);
+  batch_rule(self_value, self_bdim, other_value, other_bdim);
+  return self;
+}
+template <typename batch_rule_t, batch_rule_t batch_rule>
 at::Tensor true_divide_Scalar_generated_plumbing(const at::Tensor & self, const at::Scalar & other) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
   auto maybe_layer = maybeCurrentDynamicLayer();
@@ -3206,6 +4020,18 @@ at::Tensor true_divide_Scalar_generated_plumbing(const at::Tensor & self, const 
   std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
   auto results = batch_rule(self_value, self_bdim, other);
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
+}
+template <typename batch_rule_t, batch_rule_t batch_rule>
+at::Tensor & true_divide__Scalar_generated_plumbing(at::Tensor & self, const at::Scalar & other) {
+  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  batch_rule(self_value, self_bdim, other);
+  return self;
 }
 template <typename batch_rule_t, batch_rule_t batch_rule>
 at::Tensor dot_generated_plumbing(const at::Tensor & self, const at::Tensor & tensor) {
@@ -3291,6 +4117,21 @@ at::Tensor embedding_dense_backward_generated_plumbing(const at::Tensor & grad_o
   std::tie(indices_value, indices_bdim) = unwrapTensorAtLevel(indices, cur_level);
   auto results = batch_rule(grad_output_value, grad_output_bdim, indices_value, indices_bdim, num_weights, padding_idx, scale_grad_by_freq);
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
+}
+template <typename batch_rule_t, batch_rule_t batch_rule>
+at::Tensor & embedding_renorm__generated_plumbing(at::Tensor & self, const at::Tensor & indices, double max_norm, double norm_type) {
+  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  Tensor indices_value;
+  optional<int64_t> indices_bdim;
+  std::tie(indices_value, indices_bdim) = unwrapTensorAtLevel(indices, cur_level);
+  batch_rule(self_value, self_bdim, indices_value, indices_bdim, max_norm, norm_type);
+  return self;
 }
 template <typename batch_rule_t, batch_rule_t batch_rule>
 at::Tensor embedding_sparse_backward_generated_plumbing(const at::Tensor & grad, const at::Tensor & indices, int64_t num_weights, int64_t padding_idx, bool scale_grad_by_freq) {
@@ -3539,26 +4380,6 @@ at::Tensor _embedding_bag_per_sample_weights_backward_generated_plumbing(const a
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 template <typename batch_rule_t, batch_rule_t batch_rule>
-at::Tensor empty_names_generated_plumbing(at::IntArrayRef size, c10::optional<at::DimnameList> names, c10::optional<at::ScalarType> dtype, c10::optional<at::Layout> layout, c10::optional<at::Device> device, c10::optional<bool> pin_memory, c10::optional<at::MemoryFormat> memory_format) {
-  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
-  auto maybe_layer = maybeCurrentDynamicLayer();
-  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
-  int64_t cur_level = maybe_layer->layerId();
-
-  auto results = batch_rule(size, names, dtype, layout, device, pin_memory, memory_format);
-  return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
-}
-template <typename batch_rule_t, batch_rule_t batch_rule>
-at::Tensor empty_memory_format_generated_plumbing(at::IntArrayRef size, c10::optional<at::ScalarType> dtype, c10::optional<at::Layout> layout, c10::optional<at::Device> device, c10::optional<bool> pin_memory, c10::optional<at::MemoryFormat> memory_format) {
-  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
-  auto maybe_layer = maybeCurrentDynamicLayer();
-  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
-  int64_t cur_level = maybe_layer->layerId();
-
-  auto results = batch_rule(size, dtype, layout, device, pin_memory, memory_format);
-  return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
-}
-template <typename batch_rule_t, batch_rule_t batch_rule>
 at::Tensor new_empty_generated_plumbing(const at::Tensor & self, at::IntArrayRef size, c10::optional<at::ScalarType> dtype, c10::optional<at::Layout> layout, c10::optional<at::Device> device, c10::optional<bool> pin_memory) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
   auto maybe_layer = maybeCurrentDynamicLayer();
@@ -3619,16 +4440,6 @@ at::Tensor new_ones_generated_plumbing(const at::Tensor & self, at::IntArrayRef 
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 template <typename batch_rule_t, batch_rule_t batch_rule>
-at::Tensor _empty_affine_quantized_generated_plumbing(at::IntArrayRef size, c10::optional<at::ScalarType> dtype, c10::optional<at::Layout> layout, c10::optional<at::Device> device, c10::optional<bool> pin_memory, double scale, int64_t zero_point, c10::optional<at::MemoryFormat> memory_format) {
-  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
-  auto maybe_layer = maybeCurrentDynamicLayer();
-  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
-  int64_t cur_level = maybe_layer->layerId();
-
-  auto results = batch_rule(size, dtype, layout, device, pin_memory, scale, zero_point, memory_format);
-  return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
-}
-template <typename batch_rule_t, batch_rule_t batch_rule>
 at::Tensor _empty_per_channel_affine_quantized_generated_plumbing(at::IntArrayRef size, const at::Tensor & scales, const at::Tensor & zero_points, int64_t axis, c10::optional<at::ScalarType> dtype, c10::optional<at::Layout> layout, c10::optional<at::Device> device, c10::optional<bool> pin_memory, c10::optional<at::MemoryFormat> memory_format) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
   auto maybe_layer = maybeCurrentDynamicLayer();
@@ -3642,6 +4453,18 @@ at::Tensor _empty_per_channel_affine_quantized_generated_plumbing(at::IntArrayRe
   std::tie(zero_points_value, zero_points_bdim) = unwrapTensorAtLevel(zero_points, cur_level);
   auto results = batch_rule(size, scales_value, scales_bdim, zero_points_value, zero_points_bdim, axis, dtype, layout, device, pin_memory, memory_format);
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
+}
+template <typename batch_rule_t, batch_rule_t batch_rule>
+const at::Tensor & resize__generated_plumbing(const at::Tensor & self, at::IntArrayRef size, c10::optional<at::MemoryFormat> memory_format) {
+  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  batch_rule(self_value, self_bdim, size, memory_format);
+  return self;
 }
 template <typename batch_rule_t, batch_rule_t batch_rule>
 at::Tensor empty_quantized_generated_plumbing(at::IntArrayRef size, const at::Tensor & qtensor, c10::optional<at::ScalarType> dtype, c10::optional<at::Layout> layout, c10::optional<at::Device> device, c10::optional<bool> pin_memory, c10::optional<at::MemoryFormat> memory_format) {
@@ -3668,16 +4491,6 @@ at::Tensor empty_like_generated_plumbing(const at::Tensor & self, c10::optional<
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 template <typename batch_rule_t, batch_rule_t batch_rule>
-at::Tensor empty_strided_generated_plumbing(at::IntArrayRef size, at::IntArrayRef stride, c10::optional<at::ScalarType> dtype, c10::optional<at::Layout> layout, c10::optional<at::Device> device, c10::optional<bool> pin_memory) {
-  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
-  auto maybe_layer = maybeCurrentDynamicLayer();
-  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
-  int64_t cur_level = maybe_layer->layerId();
-
-  auto results = batch_rule(size, stride, dtype, layout, device, pin_memory);
-  return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
-}
-template <typename batch_rule_t, batch_rule_t batch_rule>
 at::Tensor erf_generated_plumbing(const at::Tensor & self) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
   auto maybe_layer = maybeCurrentDynamicLayer();
@@ -3688,6 +4501,18 @@ at::Tensor erf_generated_plumbing(const at::Tensor & self) {
   std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
   auto results = batch_rule(self_value, self_bdim);
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
+}
+template <typename batch_rule_t, batch_rule_t batch_rule>
+at::Tensor & erf__generated_plumbing(at::Tensor & self) {
+  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  batch_rule(self_value, self_bdim);
+  return self;
 }
 template <typename batch_rule_t, batch_rule_t batch_rule>
 at::Tensor erfc_generated_plumbing(const at::Tensor & self) {
@@ -3702,6 +4527,18 @@ at::Tensor erfc_generated_plumbing(const at::Tensor & self) {
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 template <typename batch_rule_t, batch_rule_t batch_rule>
+at::Tensor & erfc__generated_plumbing(at::Tensor & self) {
+  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  batch_rule(self_value, self_bdim);
+  return self;
+}
+template <typename batch_rule_t, batch_rule_t batch_rule>
 at::Tensor exp_generated_plumbing(const at::Tensor & self) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
   auto maybe_layer = maybeCurrentDynamicLayer();
@@ -3712,6 +4549,18 @@ at::Tensor exp_generated_plumbing(const at::Tensor & self) {
   std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
   auto results = batch_rule(self_value, self_bdim);
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
+}
+template <typename batch_rule_t, batch_rule_t batch_rule>
+at::Tensor & exp__generated_plumbing(at::Tensor & self) {
+  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  batch_rule(self_value, self_bdim);
+  return self;
 }
 template <typename batch_rule_t, batch_rule_t batch_rule>
 at::Tensor exp2_generated_plumbing(const at::Tensor & self) {
@@ -3726,6 +4575,18 @@ at::Tensor exp2_generated_plumbing(const at::Tensor & self) {
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 template <typename batch_rule_t, batch_rule_t batch_rule>
+at::Tensor & exp2__generated_plumbing(at::Tensor & self) {
+  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  batch_rule(self_value, self_bdim);
+  return self;
+}
+template <typename batch_rule_t, batch_rule_t batch_rule>
 at::Tensor expm1_generated_plumbing(const at::Tensor & self) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
   auto maybe_layer = maybeCurrentDynamicLayer();
@@ -3736,6 +4597,18 @@ at::Tensor expm1_generated_plumbing(const at::Tensor & self) {
   std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
   auto results = batch_rule(self_value, self_bdim);
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
+}
+template <typename batch_rule_t, batch_rule_t batch_rule>
+at::Tensor & expm1__generated_plumbing(at::Tensor & self) {
+  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  batch_rule(self_value, self_bdim);
+  return self;
 }
 template <typename batch_rule_t, batch_rule_t batch_rule>
 at::Tensor expand_generated_plumbing(const at::Tensor & self, at::IntArrayRef size, bool implicit) {
@@ -3762,26 +4635,6 @@ at::Tensor expand_as_generated_plumbing(const at::Tensor & self, const at::Tenso
   optional<int64_t> other_bdim;
   std::tie(other_value, other_bdim) = unwrapTensorAtLevel(other, cur_level);
   auto results = batch_rule(self_value, self_bdim, other_value, other_bdim);
-  return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
-}
-template <typename batch_rule_t, batch_rule_t batch_rule>
-at::Tensor eye_generated_plumbing(int64_t n, c10::optional<at::ScalarType> dtype, c10::optional<at::Layout> layout, c10::optional<at::Device> device, c10::optional<bool> pin_memory) {
-  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
-  auto maybe_layer = maybeCurrentDynamicLayer();
-  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
-  int64_t cur_level = maybe_layer->layerId();
-
-  auto results = batch_rule(n, dtype, layout, device, pin_memory);
-  return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
-}
-template <typename batch_rule_t, batch_rule_t batch_rule>
-at::Tensor eye_m_generated_plumbing(int64_t n, int64_t m, c10::optional<at::ScalarType> dtype, c10::optional<at::Layout> layout, c10::optional<at::Device> device, c10::optional<bool> pin_memory) {
-  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
-  auto maybe_layer = maybeCurrentDynamicLayer();
-  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
-  int64_t cur_level = maybe_layer->layerId();
-
-  auto results = batch_rule(n, m, dtype, layout, device, pin_memory);
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 template <typename batch_rule_t, batch_rule_t batch_rule>
@@ -3857,6 +4710,33 @@ at::Tensor unflatten_Dimname_generated_plumbing(const at::Tensor & self, at::Dim
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 template <typename batch_rule_t, batch_rule_t batch_rule>
+at::Tensor & fill__Scalar_generated_plumbing(at::Tensor & self, const at::Scalar & value) {
+  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  batch_rule(self_value, self_bdim, value);
+  return self;
+}
+template <typename batch_rule_t, batch_rule_t batch_rule>
+at::Tensor & fill__Tensor_generated_plumbing(at::Tensor & self, const at::Tensor & value) {
+  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  Tensor value_value;
+  optional<int64_t> value_bdim;
+  std::tie(value_value, value_bdim) = unwrapTensorAtLevel(value, cur_level);
+  batch_rule(self_value, self_bdim, value_value, value_bdim);
+  return self;
+}
+template <typename batch_rule_t, batch_rule_t batch_rule>
 at::Tensor floor_generated_plumbing(const at::Tensor & self) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
   auto maybe_layer = maybeCurrentDynamicLayer();
@@ -3867,6 +4747,18 @@ at::Tensor floor_generated_plumbing(const at::Tensor & self) {
   std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
   auto results = batch_rule(self_value, self_bdim);
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
+}
+template <typename batch_rule_t, batch_rule_t batch_rule>
+at::Tensor & floor__generated_plumbing(at::Tensor & self) {
+  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  batch_rule(self_value, self_bdim);
+  return self;
 }
 template <typename batch_rule_t, batch_rule_t batch_rule>
 at::Tensor floor_divide_generated_plumbing(const at::Tensor & self, const at::Tensor & other) {
@@ -3884,6 +4776,21 @@ at::Tensor floor_divide_generated_plumbing(const at::Tensor & self, const at::Te
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 template <typename batch_rule_t, batch_rule_t batch_rule>
+at::Tensor & floor_divide__Tensor_generated_plumbing(at::Tensor & self, const at::Tensor & other) {
+  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  Tensor other_value;
+  optional<int64_t> other_bdim;
+  std::tie(other_value, other_bdim) = unwrapTensorAtLevel(other, cur_level);
+  batch_rule(self_value, self_bdim, other_value, other_bdim);
+  return self;
+}
+template <typename batch_rule_t, batch_rule_t batch_rule>
 at::Tensor floor_divide_Scalar_generated_plumbing(const at::Tensor & self, const at::Scalar & other) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
   auto maybe_layer = maybeCurrentDynamicLayer();
@@ -3894,6 +4801,18 @@ at::Tensor floor_divide_Scalar_generated_plumbing(const at::Tensor & self, const
   std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
   auto results = batch_rule(self_value, self_bdim, other);
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
+}
+template <typename batch_rule_t, batch_rule_t batch_rule>
+at::Tensor & floor_divide__Scalar_generated_plumbing(at::Tensor & self, const at::Scalar & other) {
+  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  batch_rule(self_value, self_bdim, other);
+  return self;
 }
 template <typename batch_rule_t, batch_rule_t batch_rule>
 at::Tensor frac_generated_plumbing(const at::Tensor & self) {
@@ -3908,24 +4827,16 @@ at::Tensor frac_generated_plumbing(const at::Tensor & self) {
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 template <typename batch_rule_t, batch_rule_t batch_rule>
-at::Tensor full_names_generated_plumbing(at::IntArrayRef size, const at::Scalar & fill_value, c10::optional<at::DimnameList> names, c10::optional<at::ScalarType> dtype, c10::optional<at::Layout> layout, c10::optional<at::Device> device, c10::optional<bool> pin_memory) {
+at::Tensor & frac__generated_plumbing(at::Tensor & self) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
   auto maybe_layer = maybeCurrentDynamicLayer();
   TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
   int64_t cur_level = maybe_layer->layerId();
-
-  auto results = batch_rule(size, fill_value, names, dtype, layout, device, pin_memory);
-  return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
-}
-template <typename batch_rule_t, batch_rule_t batch_rule>
-at::Tensor full_generated_plumbing(at::IntArrayRef size, const at::Scalar & fill_value, c10::optional<at::ScalarType> dtype, c10::optional<at::Layout> layout, c10::optional<at::Device> device, c10::optional<bool> pin_memory) {
-  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
-  auto maybe_layer = maybeCurrentDynamicLayer();
-  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
-  int64_t cur_level = maybe_layer->layerId();
-
-  auto results = batch_rule(size, fill_value, dtype, layout, device, pin_memory);
-  return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  batch_rule(self_value, self_bdim);
+  return self;
 }
 template <typename batch_rule_t, batch_rule_t batch_rule>
 at::Tensor full_like_generated_plumbing(const at::Tensor & self, const at::Scalar & fill_value, c10::optional<at::ScalarType> dtype, c10::optional<at::Layout> layout, c10::optional<at::Device> device, c10::optional<bool> pin_memory, c10::optional<at::MemoryFormat> memory_format) {
@@ -3937,16 +4848,6 @@ at::Tensor full_like_generated_plumbing(const at::Tensor & self, const at::Scala
   optional<int64_t> self_bdim;
   std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
   auto results = batch_rule(self_value, self_bdim, fill_value, dtype, layout, device, pin_memory, memory_format);
-  return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
-}
-template <typename batch_rule_t, batch_rule_t batch_rule>
-at::Tensor from_file_generated_plumbing(c10::string_view filename, c10::optional<bool> shared, c10::optional<int64_t> size, c10::optional<at::ScalarType> dtype, c10::optional<at::Layout> layout, c10::optional<at::Device> device, c10::optional<bool> pin_memory) {
-  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
-  auto maybe_layer = maybeCurrentDynamicLayer();
-  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
-  int64_t cur_level = maybe_layer->layerId();
-
-  auto results = batch_rule(filename, shared, size, dtype, layout, device, pin_memory);
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 template <typename batch_rule_t, batch_rule_t batch_rule>
@@ -3965,6 +4866,21 @@ at::Tensor gcd_generated_plumbing(const at::Tensor & self, const at::Tensor & ot
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 template <typename batch_rule_t, batch_rule_t batch_rule>
+at::Tensor & gcd__generated_plumbing(at::Tensor & self, const at::Tensor & other) {
+  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  Tensor other_value;
+  optional<int64_t> other_bdim;
+  std::tie(other_value, other_bdim) = unwrapTensorAtLevel(other, cur_level);
+  batch_rule(self_value, self_bdim, other_value, other_bdim);
+  return self;
+}
+template <typename batch_rule_t, batch_rule_t batch_rule>
 at::Tensor lcm_generated_plumbing(const at::Tensor & self, const at::Tensor & other) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
   auto maybe_layer = maybeCurrentDynamicLayer();
@@ -3978,6 +4894,21 @@ at::Tensor lcm_generated_plumbing(const at::Tensor & self, const at::Tensor & ot
   std::tie(other_value, other_bdim) = unwrapTensorAtLevel(other, cur_level);
   auto results = batch_rule(self_value, self_bdim, other_value, other_bdim);
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
+}
+template <typename batch_rule_t, batch_rule_t batch_rule>
+at::Tensor & lcm__generated_plumbing(at::Tensor & self, const at::Tensor & other) {
+  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  Tensor other_value;
+  optional<int64_t> other_bdim;
+  std::tie(other_value, other_bdim) = unwrapTensorAtLevel(other, cur_level);
+  batch_rule(self_value, self_bdim, other_value, other_bdim);
+  return self;
 }
 template <typename batch_rule_t, batch_rule_t batch_rule>
 at::Tensor grid_sampler_generated_plumbing(const at::Tensor & input, const at::Tensor & grid, int64_t interpolation_mode, int64_t padding_mode, bool align_corners) {
@@ -4092,96 +5023,6 @@ template <typename batch_rule_t, batch_rule_t batch_rule>
   std::tie(grid_value, grid_bdim) = unwrapTensorAtLevel(grid, cur_level);
   auto results = batch_rule(grad_output_value, grad_output_bdim, input_value, input_bdim, grid_value, grid_bdim, interpolation_mode, padding_mode, align_corners);
   return std::make_tuple(makeBatched(std::get<0>(results), std::get<1>(results), cur_level), makeBatched(std::get<2>(results), std::get<3>(results), cur_level));
-}
-template <typename batch_rule_t, batch_rule_t batch_rule>
-at::Tensor hann_window_generated_plumbing(int64_t window_length, c10::optional<at::ScalarType> dtype, c10::optional<at::Layout> layout, c10::optional<at::Device> device, c10::optional<bool> pin_memory) {
-  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
-  auto maybe_layer = maybeCurrentDynamicLayer();
-  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
-  int64_t cur_level = maybe_layer->layerId();
-
-  auto results = batch_rule(window_length, dtype, layout, device, pin_memory);
-  return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
-}
-template <typename batch_rule_t, batch_rule_t batch_rule>
-at::Tensor hann_window_periodic_generated_plumbing(int64_t window_length, bool periodic, c10::optional<at::ScalarType> dtype, c10::optional<at::Layout> layout, c10::optional<at::Device> device, c10::optional<bool> pin_memory) {
-  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
-  auto maybe_layer = maybeCurrentDynamicLayer();
-  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
-  int64_t cur_level = maybe_layer->layerId();
-
-  auto results = batch_rule(window_length, periodic, dtype, layout, device, pin_memory);
-  return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
-}
-template <typename batch_rule_t, batch_rule_t batch_rule>
-at::Tensor hamming_window_generated_plumbing(int64_t window_length, c10::optional<at::ScalarType> dtype, c10::optional<at::Layout> layout, c10::optional<at::Device> device, c10::optional<bool> pin_memory) {
-  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
-  auto maybe_layer = maybeCurrentDynamicLayer();
-  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
-  int64_t cur_level = maybe_layer->layerId();
-
-  auto results = batch_rule(window_length, dtype, layout, device, pin_memory);
-  return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
-}
-template <typename batch_rule_t, batch_rule_t batch_rule>
-at::Tensor hamming_window_periodic_generated_plumbing(int64_t window_length, bool periodic, c10::optional<at::ScalarType> dtype, c10::optional<at::Layout> layout, c10::optional<at::Device> device, c10::optional<bool> pin_memory) {
-  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
-  auto maybe_layer = maybeCurrentDynamicLayer();
-  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
-  int64_t cur_level = maybe_layer->layerId();
-
-  auto results = batch_rule(window_length, periodic, dtype, layout, device, pin_memory);
-  return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
-}
-template <typename batch_rule_t, batch_rule_t batch_rule>
-at::Tensor hamming_window_periodic_alpha_generated_plumbing(int64_t window_length, bool periodic, double alpha, c10::optional<at::ScalarType> dtype, c10::optional<at::Layout> layout, c10::optional<at::Device> device, c10::optional<bool> pin_memory) {
-  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
-  auto maybe_layer = maybeCurrentDynamicLayer();
-  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
-  int64_t cur_level = maybe_layer->layerId();
-
-  auto results = batch_rule(window_length, periodic, alpha, dtype, layout, device, pin_memory);
-  return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
-}
-template <typename batch_rule_t, batch_rule_t batch_rule>
-at::Tensor hamming_window_periodic_alpha_beta_generated_plumbing(int64_t window_length, bool periodic, double alpha, double beta, c10::optional<at::ScalarType> dtype, c10::optional<at::Layout> layout, c10::optional<at::Device> device, c10::optional<bool> pin_memory) {
-  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
-  auto maybe_layer = maybeCurrentDynamicLayer();
-  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
-  int64_t cur_level = maybe_layer->layerId();
-
-  auto results = batch_rule(window_length, periodic, alpha, beta, dtype, layout, device, pin_memory);
-  return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
-}
-template <typename batch_rule_t, batch_rule_t batch_rule>
-at::Tensor kaiser_window_generated_plumbing(int64_t window_length, c10::optional<at::ScalarType> dtype, c10::optional<at::Layout> layout, c10::optional<at::Device> device, c10::optional<bool> pin_memory) {
-  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
-  auto maybe_layer = maybeCurrentDynamicLayer();
-  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
-  int64_t cur_level = maybe_layer->layerId();
-
-  auto results = batch_rule(window_length, dtype, layout, device, pin_memory);
-  return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
-}
-template <typename batch_rule_t, batch_rule_t batch_rule>
-at::Tensor kaiser_window_periodic_generated_plumbing(int64_t window_length, bool periodic, c10::optional<at::ScalarType> dtype, c10::optional<at::Layout> layout, c10::optional<at::Device> device, c10::optional<bool> pin_memory) {
-  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
-  auto maybe_layer = maybeCurrentDynamicLayer();
-  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
-  int64_t cur_level = maybe_layer->layerId();
-
-  auto results = batch_rule(window_length, periodic, dtype, layout, device, pin_memory);
-  return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
-}
-template <typename batch_rule_t, batch_rule_t batch_rule>
-at::Tensor kaiser_window_beta_generated_plumbing(int64_t window_length, bool periodic, double beta, c10::optional<at::ScalarType> dtype, c10::optional<at::Layout> layout, c10::optional<at::Device> device, c10::optional<bool> pin_memory) {
-  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
-  auto maybe_layer = maybeCurrentDynamicLayer();
-  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
-  int64_t cur_level = maybe_layer->layerId();
-
-  auto results = batch_rule(window_length, periodic, beta, dtype, layout, device, pin_memory);
-  return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 template <typename batch_rule_t, batch_rule_t batch_rule>
 at::Tensor hinge_embedding_loss_generated_plumbing(const at::Tensor & self, const at::Tensor & target, double margin, int64_t reduction) {
@@ -4317,6 +5158,24 @@ at::Tensor index_Tensor_generated_plumbing(const at::Tensor & self, const c10::L
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 template <typename batch_rule_t, batch_rule_t batch_rule>
+at::Tensor & index_copy__generated_plumbing(at::Tensor & self, int64_t dim, const at::Tensor & index, const at::Tensor & source) {
+  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  Tensor index_value;
+  optional<int64_t> index_bdim;
+  std::tie(index_value, index_bdim) = unwrapTensorAtLevel(index, cur_level);
+  Tensor source_value;
+  optional<int64_t> source_bdim;
+  std::tie(source_value, source_bdim) = unwrapTensorAtLevel(source, cur_level);
+  batch_rule(self_value, self_bdim, dim, index_value, index_bdim, source_value, source_bdim);
+  return self;
+}
+template <typename batch_rule_t, batch_rule_t batch_rule>
 at::Tensor index_copy_generated_plumbing(const at::Tensor & self, int64_t dim, const at::Tensor & index, const at::Tensor & source) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
   auto maybe_layer = maybeCurrentDynamicLayer();
@@ -4333,6 +5192,24 @@ at::Tensor index_copy_generated_plumbing(const at::Tensor & self, int64_t dim, c
   std::tie(source_value, source_bdim) = unwrapTensorAtLevel(source, cur_level);
   auto results = batch_rule(self_value, self_bdim, dim, index_value, index_bdim, source_value, source_bdim);
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
+}
+template <typename batch_rule_t, batch_rule_t batch_rule>
+at::Tensor & index_copy__dimname_generated_plumbing(at::Tensor & self, at::Dimname dim, const at::Tensor & index, const at::Tensor & source) {
+  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  Tensor index_value;
+  optional<int64_t> index_bdim;
+  std::tie(index_value, index_bdim) = unwrapTensorAtLevel(index, cur_level);
+  Tensor source_value;
+  optional<int64_t> source_bdim;
+  std::tie(source_value, source_bdim) = unwrapTensorAtLevel(source, cur_level);
+  batch_rule(self_value, self_bdim, dim, index_value, index_bdim, source_value, source_bdim);
+  return self;
 }
 template <typename batch_rule_t, batch_rule_t batch_rule>
 at::Tensor index_copy_dimname_generated_plumbing(const at::Tensor & self, at::Dimname dim, const at::Tensor & index, const at::Tensor & source) {
@@ -4353,6 +5230,21 @@ at::Tensor index_copy_dimname_generated_plumbing(const at::Tensor & self, at::Di
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 template <typename batch_rule_t, batch_rule_t batch_rule>
+at::Tensor & index_put__generated_plumbing(at::Tensor & self, const c10::List<c10::optional<at::Tensor>> & indices, const at::Tensor & values, bool accumulate) {
+  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  Tensor values_value;
+  optional<int64_t> values_bdim;
+  std::tie(values_value, values_bdim) = unwrapTensorAtLevel(values, cur_level);
+  batch_rule(self_value, self_bdim, indices, values_value, values_bdim, accumulate);
+  return self;
+}
+template <typename batch_rule_t, batch_rule_t batch_rule>
 at::Tensor index_put_generated_plumbing(const at::Tensor & self, const c10::List<c10::optional<at::Tensor>> & indices, const at::Tensor & values, bool accumulate) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
   auto maybe_layer = maybeCurrentDynamicLayer();
@@ -4366,6 +5258,21 @@ at::Tensor index_put_generated_plumbing(const at::Tensor & self, const c10::List
   std::tie(values_value, values_bdim) = unwrapTensorAtLevel(values, cur_level);
   auto results = batch_rule(self_value, self_bdim, indices, values_value, values_bdim, accumulate);
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
+}
+template <typename batch_rule_t, batch_rule_t batch_rule>
+at::Tensor & _index_put_impl__generated_plumbing(at::Tensor & self, const c10::List<c10::optional<at::Tensor>> & indices, const at::Tensor & values, bool accumulate, bool unsafe) {
+  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  Tensor values_value;
+  optional<int64_t> values_bdim;
+  std::tie(values_value, values_bdim) = unwrapTensorAtLevel(values, cur_level);
+  batch_rule(self_value, self_bdim, indices, values_value, values_bdim, accumulate, unsafe);
+  return self;
 }
 template <typename batch_rule_t, batch_rule_t batch_rule>
 at::Tensor instance_norm_generated_plumbing(const at::Tensor & input, const c10::optional<at::Tensor> & weight, const c10::optional<at::Tensor> & bias, const c10::optional<at::Tensor> & running_mean, const c10::optional<at::Tensor> & running_var, bool use_input_stats, double momentum, double eps, bool cudnn_enabled) {
@@ -4606,50 +5513,6 @@ template <typename batch_rule_t, batch_rule_t batch_rule>
   return std::make_tuple(makeBatched(std::get<0>(results), std::get<1>(results), cur_level), makeBatched(std::get<2>(results), std::get<3>(results), cur_level), makeBatched(std::get<4>(results), std::get<5>(results), cur_level));
 }
 template <typename batch_rule_t, batch_rule_t batch_rule>
-at::Tensor _native_multi_head_self_attention_generated_plumbing(const at::Tensor & query, const at::Tensor & qkv_weight, const at::Tensor & qkv_bias, const at::Tensor & proj_weight, const at::Tensor & proj_bias, int64_t num_head, const c10::optional<at::Tensor> & mask) {
-  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
-  auto maybe_layer = maybeCurrentDynamicLayer();
-  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
-  int64_t cur_level = maybe_layer->layerId();
-  Tensor query_value;
-  optional<int64_t> query_bdim;
-  std::tie(query_value, query_bdim) = unwrapTensorAtLevel(query, cur_level);
-  Tensor qkv_weight_value;
-  optional<int64_t> qkv_weight_bdim;
-  std::tie(qkv_weight_value, qkv_weight_bdim) = unwrapTensorAtLevel(qkv_weight, cur_level);
-  Tensor qkv_bias_value;
-  optional<int64_t> qkv_bias_bdim;
-  std::tie(qkv_bias_value, qkv_bias_bdim) = unwrapTensorAtLevel(qkv_bias, cur_level);
-  Tensor proj_weight_value;
-  optional<int64_t> proj_weight_bdim;
-  std::tie(proj_weight_value, proj_weight_bdim) = unwrapTensorAtLevel(proj_weight, cur_level);
-  Tensor proj_bias_value;
-  optional<int64_t> proj_bias_bdim;
-  std::tie(proj_bias_value, proj_bias_bdim) = unwrapTensorAtLevel(proj_bias, cur_level);
-  optional<Tensor> mask_value;
-  optional<int64_t> mask_bdim;
-  if (mask) {
-      std::tie(mask_value, mask_bdim) = unwrapTensorAtLevel(mask.value(), cur_level);
-  }
-  auto results = batch_rule(query_value, query_bdim, qkv_weight_value, qkv_weight_bdim, qkv_bias_value, qkv_bias_bdim, proj_weight_value, proj_weight_bdim, proj_bias_value, proj_bias_bdim, num_head, mask_value, mask_bdim);
-  return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
-}
-template <typename batch_rule_t, batch_rule_t batch_rule>
-::std::tuple<at::Tensor,at::Tensor,at::Tensor> _transform_bias_rescale_qkv_generated_plumbing(const at::Tensor & qkv, const at::Tensor & qkv_bias, int64_t num_head) {
-  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
-  auto maybe_layer = maybeCurrentDynamicLayer();
-  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
-  int64_t cur_level = maybe_layer->layerId();
-  Tensor qkv_value;
-  optional<int64_t> qkv_bdim;
-  std::tie(qkv_value, qkv_bdim) = unwrapTensorAtLevel(qkv, cur_level);
-  Tensor qkv_bias_value;
-  optional<int64_t> qkv_bias_bdim;
-  std::tie(qkv_bias_value, qkv_bias_bdim) = unwrapTensorAtLevel(qkv_bias, cur_level);
-  auto results = batch_rule(qkv_value, qkv_bdim, qkv_bias_value, qkv_bias_bdim, num_head);
-  return std::make_tuple(makeBatched(std::get<0>(results), std::get<1>(results), cur_level), makeBatched(std::get<2>(results), std::get<3>(results), cur_level), makeBatched(std::get<4>(results), std::get<5>(results), cur_level));
-}
-template <typename batch_rule_t, batch_rule_t batch_rule>
 ::std::tuple<at::Tensor,at::Tensor,at::Tensor> native_layer_norm_backward_generated_plumbing(const at::Tensor & grad_out, const at::Tensor & input, at::IntArrayRef normalized_shape, const at::Tensor & mean, const at::Tensor & rstd, const c10::optional<at::Tensor> & weight, const c10::optional<at::Tensor> & bias, ::std::array<bool,3> output_mask) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
   auto maybe_layer = maybeCurrentDynamicLayer();
@@ -4691,6 +5554,18 @@ at::Tensor nan_to_num_generated_plumbing(const at::Tensor & self, c10::optional<
   std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
   auto results = batch_rule(self_value, self_bdim, nan, posinf, neginf);
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
+}
+template <typename batch_rule_t, batch_rule_t batch_rule>
+at::Tensor & nan_to_num__generated_plumbing(at::Tensor & self, c10::optional<double> nan, c10::optional<double> posinf, c10::optional<double> neginf) {
+  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  batch_rule(self_value, self_bdim, nan, posinf, neginf);
+  return self;
 }
 template <typename batch_rule_t, batch_rule_t batch_rule>
 at::Tensor linear_generated_plumbing(const at::Tensor & input, const at::Tensor & weight, const c10::optional<at::Tensor> & bias) {
@@ -4919,14 +5794,19 @@ at::Tensor ldexp_Tensor_generated_plumbing(const at::Tensor & self, const at::Te
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 template <typename batch_rule_t, batch_rule_t batch_rule>
-at::Tensor linspace_generated_plumbing(const at::Scalar & start, const at::Scalar & end, int64_t steps, c10::optional<at::ScalarType> dtype, c10::optional<at::Layout> layout, c10::optional<at::Device> device, c10::optional<bool> pin_memory) {
+at::Tensor & ldexp__generated_plumbing(at::Tensor & self, const at::Tensor & other) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
   auto maybe_layer = maybeCurrentDynamicLayer();
   TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
   int64_t cur_level = maybe_layer->layerId();
-
-  auto results = batch_rule(start, end, steps, dtype, layout, device, pin_memory);
-  return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  Tensor other_value;
+  optional<int64_t> other_bdim;
+  std::tie(other_value, other_bdim) = unwrapTensorAtLevel(other, cur_level);
+  batch_rule(self_value, self_bdim, other_value, other_bdim);
+  return self;
 }
 template <typename batch_rule_t, batch_rule_t batch_rule>
 at::Tensor log_generated_plumbing(const at::Tensor & self) {
@@ -4941,6 +5821,18 @@ at::Tensor log_generated_plumbing(const at::Tensor & self) {
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 template <typename batch_rule_t, batch_rule_t batch_rule>
+at::Tensor & log__generated_plumbing(at::Tensor & self) {
+  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  batch_rule(self_value, self_bdim);
+  return self;
+}
+template <typename batch_rule_t, batch_rule_t batch_rule>
 at::Tensor log10_generated_plumbing(const at::Tensor & self) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
   auto maybe_layer = maybeCurrentDynamicLayer();
@@ -4951,6 +5843,18 @@ at::Tensor log10_generated_plumbing(const at::Tensor & self) {
   std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
   auto results = batch_rule(self_value, self_bdim);
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
+}
+template <typename batch_rule_t, batch_rule_t batch_rule>
+at::Tensor & log10__generated_plumbing(at::Tensor & self) {
+  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  batch_rule(self_value, self_bdim);
+  return self;
 }
 template <typename batch_rule_t, batch_rule_t batch_rule>
 at::Tensor log1p_generated_plumbing(const at::Tensor & self) {
@@ -4965,6 +5869,18 @@ at::Tensor log1p_generated_plumbing(const at::Tensor & self) {
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 template <typename batch_rule_t, batch_rule_t batch_rule>
+at::Tensor & log1p__generated_plumbing(at::Tensor & self) {
+  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  batch_rule(self_value, self_bdim);
+  return self;
+}
+template <typename batch_rule_t, batch_rule_t batch_rule>
 at::Tensor log2_generated_plumbing(const at::Tensor & self) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
   auto maybe_layer = maybeCurrentDynamicLayer();
@@ -4975,6 +5891,18 @@ at::Tensor log2_generated_plumbing(const at::Tensor & self) {
   std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
   auto results = batch_rule(self_value, self_bdim);
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
+}
+template <typename batch_rule_t, batch_rule_t batch_rule>
+at::Tensor & log2__generated_plumbing(at::Tensor & self) {
+  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  batch_rule(self_value, self_bdim);
+  return self;
 }
 template <typename batch_rule_t, batch_rule_t batch_rule>
 at::Tensor logaddexp_generated_plumbing(const at::Tensor & self, const at::Tensor & other) {
@@ -5046,6 +5974,33 @@ at::Tensor xlogy_Scalar_Other_generated_plumbing(const at::Tensor & self, const 
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 template <typename batch_rule_t, batch_rule_t batch_rule>
+at::Tensor & xlogy__Tensor_generated_plumbing(at::Tensor & self, const at::Tensor & other) {
+  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  Tensor other_value;
+  optional<int64_t> other_bdim;
+  std::tie(other_value, other_bdim) = unwrapTensorAtLevel(other, cur_level);
+  batch_rule(self_value, self_bdim, other_value, other_bdim);
+  return self;
+}
+template <typename batch_rule_t, batch_rule_t batch_rule>
+at::Tensor & xlogy__Scalar_Other_generated_plumbing(at::Tensor & self, const at::Scalar & other) {
+  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  batch_rule(self_value, self_bdim, other);
+  return self;
+}
+template <typename batch_rule_t, batch_rule_t batch_rule>
 at::Tensor logdet_generated_plumbing(const at::Tensor & self) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
   auto maybe_layer = maybeCurrentDynamicLayer();
@@ -5055,16 +6010,6 @@ at::Tensor logdet_generated_plumbing(const at::Tensor & self) {
   optional<int64_t> self_bdim;
   std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
   auto results = batch_rule(self_value, self_bdim);
-  return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
-}
-template <typename batch_rule_t, batch_rule_t batch_rule>
-at::Tensor logspace_generated_plumbing(const at::Scalar & start, const at::Scalar & end, int64_t steps, double base, c10::optional<at::ScalarType> dtype, c10::optional<at::Layout> layout, c10::optional<at::Device> device, c10::optional<bool> pin_memory) {
-  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
-  auto maybe_layer = maybeCurrentDynamicLayer();
-  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
-  int64_t cur_level = maybe_layer->layerId();
-
-  auto results = batch_rule(start, end, steps, base, dtype, layout, device, pin_memory);
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 template <typename batch_rule_t, batch_rule_t batch_rule>
@@ -5986,6 +6931,21 @@ at::Tensor mul_Tensor_generated_plumbing(const at::Tensor & self, const at::Tens
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 template <typename batch_rule_t, batch_rule_t batch_rule>
+at::Tensor & mul__Tensor_generated_plumbing(at::Tensor & self, const at::Tensor & other) {
+  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  Tensor other_value;
+  optional<int64_t> other_bdim;
+  std::tie(other_value, other_bdim) = unwrapTensorAtLevel(other, cur_level);
+  batch_rule(self_value, self_bdim, other_value, other_bdim);
+  return self;
+}
+template <typename batch_rule_t, batch_rule_t batch_rule>
 at::Tensor mul_Scalar_generated_plumbing(const at::Tensor & self, const at::Scalar & other) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
   auto maybe_layer = maybeCurrentDynamicLayer();
@@ -5996,6 +6956,18 @@ at::Tensor mul_Scalar_generated_plumbing(const at::Tensor & self, const at::Scal
   std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
   auto results = batch_rule(self_value, self_bdim, other);
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
+}
+template <typename batch_rule_t, batch_rule_t batch_rule>
+at::Tensor & mul__Scalar_generated_plumbing(at::Tensor & self, const at::Scalar & other) {
+  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  batch_rule(self_value, self_bdim, other);
+  return self;
 }
 template <typename batch_rule_t, batch_rule_t batch_rule>
 at::Tensor multiply_Tensor_generated_plumbing(const at::Tensor & self, const at::Tensor & other) {
@@ -6013,6 +6985,21 @@ at::Tensor multiply_Tensor_generated_plumbing(const at::Tensor & self, const at:
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 template <typename batch_rule_t, batch_rule_t batch_rule>
+at::Tensor & multiply__Tensor_generated_plumbing(at::Tensor & self, const at::Tensor & other) {
+  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  Tensor other_value;
+  optional<int64_t> other_bdim;
+  std::tie(other_value, other_bdim) = unwrapTensorAtLevel(other, cur_level);
+  batch_rule(self_value, self_bdim, other_value, other_bdim);
+  return self;
+}
+template <typename batch_rule_t, batch_rule_t batch_rule>
 at::Tensor multiply_Scalar_generated_plumbing(const at::Tensor & self, const at::Scalar & other) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
   auto maybe_layer = maybeCurrentDynamicLayer();
@@ -6023,6 +7010,18 @@ at::Tensor multiply_Scalar_generated_plumbing(const at::Tensor & self, const at:
   std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
   auto results = batch_rule(self_value, self_bdim, other);
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
+}
+template <typename batch_rule_t, batch_rule_t batch_rule>
+at::Tensor & multiply__Scalar_generated_plumbing(at::Tensor & self, const at::Scalar & other) {
+  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  batch_rule(self_value, self_bdim, other);
+  return self;
 }
 template <typename batch_rule_t, batch_rule_t batch_rule>
 at::Tensor mv_generated_plumbing(const at::Tensor & self, const at::Tensor & vec) {
@@ -6050,6 +7049,18 @@ at::Tensor mvlgamma_generated_plumbing(const at::Tensor & self, int64_t p) {
   std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
   auto results = batch_rule(self_value, self_bdim, p);
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
+}
+template <typename batch_rule_t, batch_rule_t batch_rule>
+at::Tensor & mvlgamma__generated_plumbing(at::Tensor & self, int64_t p) {
+  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  batch_rule(self_value, self_bdim, p);
+  return self;
 }
 template <typename batch_rule_t, batch_rule_t batch_rule>
 at::Tensor narrow_copy_generated_plumbing(const at::Tensor & self, int64_t dim, int64_t start, int64_t length) {
@@ -6362,26 +7373,6 @@ at::Tensor _nnpack_spatial_convolution_generated_plumbing(const at::Tensor & inp
       std::tie(bias_value, bias_bdim) = unwrapTensorAtLevel(bias.value(), cur_level);
   }
   auto results = batch_rule(input_value, input_bdim, weight_value, weight_bdim, bias_value, bias_bdim, padding, stride);
-  return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
-}
-template <typename batch_rule_t, batch_rule_t batch_rule>
-at::Tensor ones_names_generated_plumbing(at::IntArrayRef size, c10::optional<at::DimnameList> names, c10::optional<at::ScalarType> dtype, c10::optional<at::Layout> layout, c10::optional<at::Device> device, c10::optional<bool> pin_memory) {
-  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
-  auto maybe_layer = maybeCurrentDynamicLayer();
-  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
-  int64_t cur_level = maybe_layer->layerId();
-
-  auto results = batch_rule(size, names, dtype, layout, device, pin_memory);
-  return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
-}
-template <typename batch_rule_t, batch_rule_t batch_rule>
-at::Tensor ones_generated_plumbing(at::IntArrayRef size, c10::optional<at::ScalarType> dtype, c10::optional<at::Layout> layout, c10::optional<at::Device> device, c10::optional<bool> pin_memory) {
-  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
-  auto maybe_layer = maybeCurrentDynamicLayer();
-  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
-  int64_t cur_level = maybe_layer->layerId();
-
-  auto results = batch_rule(size, dtype, layout, device, pin_memory);
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 template <typename batch_rule_t, batch_rule_t batch_rule>
@@ -6766,6 +7757,18 @@ at::Tensor rad2deg_generated_plumbing(const at::Tensor & self) {
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 template <typename batch_rule_t, batch_rule_t batch_rule>
+at::Tensor & rad2deg__generated_plumbing(at::Tensor & self) {
+  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  batch_rule(self_value, self_bdim);
+  return self;
+}
+template <typename batch_rule_t, batch_rule_t batch_rule>
 at::Tensor deg2rad_generated_plumbing(const at::Tensor & self) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
   auto maybe_layer = maybeCurrentDynamicLayer();
@@ -6778,54 +7781,16 @@ at::Tensor deg2rad_generated_plumbing(const at::Tensor & self) {
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 template <typename batch_rule_t, batch_rule_t batch_rule>
-at::Tensor scalar_tensor_generated_plumbing(const at::Scalar & s, c10::optional<at::ScalarType> dtype, c10::optional<at::Layout> layout, c10::optional<at::Device> device, c10::optional<bool> pin_memory) {
+at::Tensor & deg2rad__generated_plumbing(at::Tensor & self) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
   auto maybe_layer = maybeCurrentDynamicLayer();
   TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
   int64_t cur_level = maybe_layer->layerId();
-
-  auto results = batch_rule(s, dtype, layout, device, pin_memory);
-  return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
-}
-template <typename batch_rule_t, batch_rule_t batch_rule>
-at::Tensor rand_names_generated_plumbing(at::IntArrayRef size, c10::optional<at::DimnameList> names, c10::optional<at::ScalarType> dtype, c10::optional<at::Layout> layout, c10::optional<at::Device> device, c10::optional<bool> pin_memory) {
-  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
-  auto maybe_layer = maybeCurrentDynamicLayer();
-  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
-  int64_t cur_level = maybe_layer->layerId();
-
-  auto results = batch_rule(size, names, dtype, layout, device, pin_memory);
-  return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
-}
-template <typename batch_rule_t, batch_rule_t batch_rule>
-at::Tensor rand_generator_with_names_generated_plumbing(at::IntArrayRef size, c10::optional<at::Generator> generator, c10::optional<at::DimnameList> names, c10::optional<at::ScalarType> dtype, c10::optional<at::Layout> layout, c10::optional<at::Device> device, c10::optional<bool> pin_memory) {
-  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
-  auto maybe_layer = maybeCurrentDynamicLayer();
-  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
-  int64_t cur_level = maybe_layer->layerId();
-
-  auto results = batch_rule(size, generator, names, dtype, layout, device, pin_memory);
-  return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
-}
-template <typename batch_rule_t, batch_rule_t batch_rule>
-at::Tensor rand_generated_plumbing(at::IntArrayRef size, c10::optional<at::ScalarType> dtype, c10::optional<at::Layout> layout, c10::optional<at::Device> device, c10::optional<bool> pin_memory) {
-  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
-  auto maybe_layer = maybeCurrentDynamicLayer();
-  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
-  int64_t cur_level = maybe_layer->layerId();
-
-  auto results = batch_rule(size, dtype, layout, device, pin_memory);
-  return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
-}
-template <typename batch_rule_t, batch_rule_t batch_rule>
-at::Tensor rand_generator_generated_plumbing(at::IntArrayRef size, c10::optional<at::Generator> generator, c10::optional<at::ScalarType> dtype, c10::optional<at::Layout> layout, c10::optional<at::Device> device, c10::optional<bool> pin_memory) {
-  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
-  auto maybe_layer = maybeCurrentDynamicLayer();
-  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
-  int64_t cur_level = maybe_layer->layerId();
-
-  auto results = batch_rule(size, generator, dtype, layout, device, pin_memory);
-  return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  batch_rule(self_value, self_bdim);
+  return self;
 }
 template <typename batch_rule_t, batch_rule_t batch_rule>
 at::Tensor rand_like_generated_plumbing(const at::Tensor & self, c10::optional<at::ScalarType> dtype, c10::optional<at::Layout> layout, c10::optional<at::Device> device, c10::optional<bool> pin_memory, c10::optional<at::MemoryFormat> memory_format) {
@@ -6837,46 +7802,6 @@ at::Tensor rand_like_generated_plumbing(const at::Tensor & self, c10::optional<a
   optional<int64_t> self_bdim;
   std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
   auto results = batch_rule(self_value, self_bdim, dtype, layout, device, pin_memory, memory_format);
-  return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
-}
-template <typename batch_rule_t, batch_rule_t batch_rule>
-at::Tensor randint_generated_plumbing(int64_t high, at::IntArrayRef size, c10::optional<at::ScalarType> dtype, c10::optional<at::Layout> layout, c10::optional<at::Device> device, c10::optional<bool> pin_memory) {
-  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
-  auto maybe_layer = maybeCurrentDynamicLayer();
-  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
-  int64_t cur_level = maybe_layer->layerId();
-
-  auto results = batch_rule(high, size, dtype, layout, device, pin_memory);
-  return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
-}
-template <typename batch_rule_t, batch_rule_t batch_rule>
-at::Tensor randint_generator_generated_plumbing(int64_t high, at::IntArrayRef size, c10::optional<at::Generator> generator, c10::optional<at::ScalarType> dtype, c10::optional<at::Layout> layout, c10::optional<at::Device> device, c10::optional<bool> pin_memory) {
-  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
-  auto maybe_layer = maybeCurrentDynamicLayer();
-  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
-  int64_t cur_level = maybe_layer->layerId();
-
-  auto results = batch_rule(high, size, generator, dtype, layout, device, pin_memory);
-  return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
-}
-template <typename batch_rule_t, batch_rule_t batch_rule>
-at::Tensor randint_low_generated_plumbing(int64_t low, int64_t high, at::IntArrayRef size, c10::optional<at::ScalarType> dtype, c10::optional<at::Layout> layout, c10::optional<at::Device> device, c10::optional<bool> pin_memory) {
-  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
-  auto maybe_layer = maybeCurrentDynamicLayer();
-  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
-  int64_t cur_level = maybe_layer->layerId();
-
-  auto results = batch_rule(low, high, size, dtype, layout, device, pin_memory);
-  return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
-}
-template <typename batch_rule_t, batch_rule_t batch_rule>
-at::Tensor randint_low_generator_generated_plumbing(int64_t low, int64_t high, at::IntArrayRef size, c10::optional<at::Generator> generator, c10::optional<at::ScalarType> dtype, c10::optional<at::Layout> layout, c10::optional<at::Device> device, c10::optional<bool> pin_memory) {
-  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
-  auto maybe_layer = maybeCurrentDynamicLayer();
-  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
-  int64_t cur_level = maybe_layer->layerId();
-
-  auto results = batch_rule(low, high, size, generator, dtype, layout, device, pin_memory);
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 template <typename batch_rule_t, batch_rule_t batch_rule>
@@ -6904,46 +7829,6 @@ at::Tensor randint_like_low_dtype_generated_plumbing(const at::Tensor & self, in
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 template <typename batch_rule_t, batch_rule_t batch_rule>
-at::Tensor randn_generated_plumbing(at::IntArrayRef size, c10::optional<at::ScalarType> dtype, c10::optional<at::Layout> layout, c10::optional<at::Device> device, c10::optional<bool> pin_memory) {
-  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
-  auto maybe_layer = maybeCurrentDynamicLayer();
-  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
-  int64_t cur_level = maybe_layer->layerId();
-
-  auto results = batch_rule(size, dtype, layout, device, pin_memory);
-  return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
-}
-template <typename batch_rule_t, batch_rule_t batch_rule>
-at::Tensor randn_generator_generated_plumbing(at::IntArrayRef size, c10::optional<at::Generator> generator, c10::optional<at::ScalarType> dtype, c10::optional<at::Layout> layout, c10::optional<at::Device> device, c10::optional<bool> pin_memory) {
-  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
-  auto maybe_layer = maybeCurrentDynamicLayer();
-  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
-  int64_t cur_level = maybe_layer->layerId();
-
-  auto results = batch_rule(size, generator, dtype, layout, device, pin_memory);
-  return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
-}
-template <typename batch_rule_t, batch_rule_t batch_rule>
-at::Tensor randn_names_generated_plumbing(at::IntArrayRef size, c10::optional<at::DimnameList> names, c10::optional<at::ScalarType> dtype, c10::optional<at::Layout> layout, c10::optional<at::Device> device, c10::optional<bool> pin_memory) {
-  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
-  auto maybe_layer = maybeCurrentDynamicLayer();
-  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
-  int64_t cur_level = maybe_layer->layerId();
-
-  auto results = batch_rule(size, names, dtype, layout, device, pin_memory);
-  return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
-}
-template <typename batch_rule_t, batch_rule_t batch_rule>
-at::Tensor randn_generator_with_names_generated_plumbing(at::IntArrayRef size, c10::optional<at::Generator> generator, c10::optional<at::DimnameList> names, c10::optional<at::ScalarType> dtype, c10::optional<at::Layout> layout, c10::optional<at::Device> device, c10::optional<bool> pin_memory) {
-  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
-  auto maybe_layer = maybeCurrentDynamicLayer();
-  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
-  int64_t cur_level = maybe_layer->layerId();
-
-  auto results = batch_rule(size, generator, names, dtype, layout, device, pin_memory);
-  return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
-}
-template <typename batch_rule_t, batch_rule_t batch_rule>
 at::Tensor randn_like_generated_plumbing(const at::Tensor & self, c10::optional<at::ScalarType> dtype, c10::optional<at::Layout> layout, c10::optional<at::Device> device, c10::optional<bool> pin_memory, c10::optional<at::MemoryFormat> memory_format) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
   auto maybe_layer = maybeCurrentDynamicLayer();
@@ -6953,46 +7838,6 @@ at::Tensor randn_like_generated_plumbing(const at::Tensor & self, c10::optional<
   optional<int64_t> self_bdim;
   std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
   auto results = batch_rule(self_value, self_bdim, dtype, layout, device, pin_memory, memory_format);
-  return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
-}
-template <typename batch_rule_t, batch_rule_t batch_rule>
-at::Tensor randperm_generated_plumbing(int64_t n, c10::optional<at::ScalarType> dtype, c10::optional<at::Layout> layout, c10::optional<at::Device> device, c10::optional<bool> pin_memory) {
-  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
-  auto maybe_layer = maybeCurrentDynamicLayer();
-  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
-  int64_t cur_level = maybe_layer->layerId();
-
-  auto results = batch_rule(n, dtype, layout, device, pin_memory);
-  return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
-}
-template <typename batch_rule_t, batch_rule_t batch_rule>
-at::Tensor randperm_generator_generated_plumbing(int64_t n, c10::optional<at::Generator> generator, c10::optional<at::ScalarType> dtype, c10::optional<at::Layout> layout, c10::optional<at::Device> device, c10::optional<bool> pin_memory) {
-  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
-  auto maybe_layer = maybeCurrentDynamicLayer();
-  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
-  int64_t cur_level = maybe_layer->layerId();
-
-  auto results = batch_rule(n, generator, dtype, layout, device, pin_memory);
-  return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
-}
-template <typename batch_rule_t, batch_rule_t batch_rule>
-at::Tensor range_step_generated_plumbing(const at::Scalar & start, const at::Scalar & end, const at::Scalar & step, c10::optional<at::ScalarType> dtype, c10::optional<at::Layout> layout, c10::optional<at::Device> device, c10::optional<bool> pin_memory) {
-  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
-  auto maybe_layer = maybeCurrentDynamicLayer();
-  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
-  int64_t cur_level = maybe_layer->layerId();
-
-  auto results = batch_rule(start, end, step, dtype, layout, device, pin_memory);
-  return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
-}
-template <typename batch_rule_t, batch_rule_t batch_rule>
-at::Tensor range_generated_plumbing(const at::Scalar & start, const at::Scalar & end, c10::optional<at::ScalarType> dtype, c10::optional<at::Layout> layout, c10::optional<at::Device> device, c10::optional<bool> pin_memory) {
-  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
-  auto maybe_layer = maybeCurrentDynamicLayer();
-  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
-  int64_t cur_level = maybe_layer->layerId();
-
-  auto results = batch_rule(start, end, dtype, layout, device, pin_memory);
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 template <typename batch_rule_t, batch_rule_t batch_rule>
@@ -7020,6 +7865,18 @@ at::Tensor reciprocal_generated_plumbing(const at::Tensor & self) {
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 template <typename batch_rule_t, batch_rule_t batch_rule>
+at::Tensor & reciprocal__generated_plumbing(at::Tensor & self) {
+  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  batch_rule(self_value, self_bdim);
+  return self;
+}
+template <typename batch_rule_t, batch_rule_t batch_rule>
 at::Tensor neg_generated_plumbing(const at::Tensor & self) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
   auto maybe_layer = maybeCurrentDynamicLayer();
@@ -7032,6 +7889,18 @@ at::Tensor neg_generated_plumbing(const at::Tensor & self) {
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 template <typename batch_rule_t, batch_rule_t batch_rule>
+at::Tensor & neg__generated_plumbing(at::Tensor & self) {
+  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  batch_rule(self_value, self_bdim);
+  return self;
+}
+template <typename batch_rule_t, batch_rule_t batch_rule>
 at::Tensor negative_generated_plumbing(const at::Tensor & self) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
   auto maybe_layer = maybeCurrentDynamicLayer();
@@ -7042,6 +7911,18 @@ at::Tensor negative_generated_plumbing(const at::Tensor & self) {
   std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
   auto results = batch_rule(self_value, self_bdim);
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
+}
+template <typename batch_rule_t, batch_rule_t batch_rule>
+at::Tensor & negative__generated_plumbing(at::Tensor & self) {
+  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  batch_rule(self_value, self_bdim);
+  return self;
 }
 template <typename batch_rule_t, batch_rule_t batch_rule>
 at::Tensor repeat_generated_plumbing(const at::Tensor & self, at::IntArrayRef repeats) {
@@ -7158,6 +8039,18 @@ at::Tensor round_generated_plumbing(const at::Tensor & self) {
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 template <typename batch_rule_t, batch_rule_t batch_rule>
+at::Tensor & round__generated_plumbing(at::Tensor & self) {
+  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  batch_rule(self_value, self_bdim);
+  return self;
+}
+template <typename batch_rule_t, batch_rule_t batch_rule>
 at::Tensor round_decimals_generated_plumbing(const at::Tensor & self, int64_t decimals) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
   auto maybe_layer = maybeCurrentDynamicLayer();
@@ -7168,6 +8061,18 @@ at::Tensor round_decimals_generated_plumbing(const at::Tensor & self, int64_t de
   std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
   auto results = batch_rule(self_value, self_bdim, decimals);
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
+}
+template <typename batch_rule_t, batch_rule_t batch_rule>
+at::Tensor & round__decimals_generated_plumbing(at::Tensor & self, int64_t decimals) {
+  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  batch_rule(self_value, self_bdim, decimals);
+  return self;
 }
 template <typename batch_rule_t, batch_rule_t batch_rule>
 at::Tensor rrelu_generated_plumbing(const at::Tensor & self, const at::Scalar & lower, const at::Scalar & upper, bool training, c10::optional<at::Generator> generator) {
@@ -7182,6 +8087,18 @@ at::Tensor rrelu_generated_plumbing(const at::Tensor & self, const at::Scalar & 
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 template <typename batch_rule_t, batch_rule_t batch_rule>
+at::Tensor & rrelu__generated_plumbing(at::Tensor & self, const at::Scalar & lower, const at::Scalar & upper, bool training, c10::optional<at::Generator> generator) {
+  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  batch_rule(self_value, self_bdim, lower, upper, training, generator);
+  return self;
+}
+template <typename batch_rule_t, batch_rule_t batch_rule>
 at::Tensor relu_generated_plumbing(const at::Tensor & self) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
   auto maybe_layer = maybeCurrentDynamicLayer();
@@ -7194,6 +8111,18 @@ at::Tensor relu_generated_plumbing(const at::Tensor & self) {
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 template <typename batch_rule_t, batch_rule_t batch_rule>
+at::Tensor & relu__generated_plumbing(at::Tensor & self) {
+  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  batch_rule(self_value, self_bdim);
+  return self;
+}
+template <typename batch_rule_t, batch_rule_t batch_rule>
 at::Tensor relu6_generated_plumbing(const at::Tensor & self) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
   auto maybe_layer = maybeCurrentDynamicLayer();
@@ -7204,6 +8133,18 @@ at::Tensor relu6_generated_plumbing(const at::Tensor & self) {
   std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
   auto results = batch_rule(self_value, self_bdim);
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
+}
+template <typename batch_rule_t, batch_rule_t batch_rule>
+at::Tensor & relu6__generated_plumbing(at::Tensor & self) {
+  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  batch_rule(self_value, self_bdim);
+  return self;
 }
 template <typename batch_rule_t, batch_rule_t batch_rule>
 at::Tensor prelu_generated_plumbing(const at::Tensor & self, const at::Tensor & weight) {
@@ -7320,6 +8261,18 @@ at::Tensor rsqrt_generated_plumbing(const at::Tensor & self) {
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 template <typename batch_rule_t, batch_rule_t batch_rule>
+at::Tensor & rsqrt__generated_plumbing(at::Tensor & self) {
+  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  batch_rule(self_value, self_bdim);
+  return self;
+}
+template <typename batch_rule_t, batch_rule_t batch_rule>
 at::Tensor select_Dimname_generated_plumbing(const at::Tensor & self, at::Dimname dim, int64_t index) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
   auto maybe_layer = maybeCurrentDynamicLayer();
@@ -7368,6 +8321,18 @@ at::Tensor selu_generated_plumbing(const at::Tensor & self) {
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 template <typename batch_rule_t, batch_rule_t batch_rule>
+at::Tensor & selu__generated_plumbing(at::Tensor & self) {
+  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  batch_rule(self_value, self_bdim);
+  return self;
+}
+template <typename batch_rule_t, batch_rule_t batch_rule>
 at::Tensor celu_generated_plumbing(const at::Tensor & self, const at::Scalar & alpha) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
   auto maybe_layer = maybeCurrentDynamicLayer();
@@ -7380,6 +8345,18 @@ at::Tensor celu_generated_plumbing(const at::Tensor & self, const at::Scalar & a
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 template <typename batch_rule_t, batch_rule_t batch_rule>
+at::Tensor & celu__generated_plumbing(at::Tensor & self, const at::Scalar & alpha) {
+  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  batch_rule(self_value, self_bdim, alpha);
+  return self;
+}
+template <typename batch_rule_t, batch_rule_t batch_rule>
 at::Tensor silu_generated_plumbing(const at::Tensor & self) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
   auto maybe_layer = maybeCurrentDynamicLayer();
@@ -7390,6 +8367,18 @@ at::Tensor silu_generated_plumbing(const at::Tensor & self) {
   std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
   auto results = batch_rule(self_value, self_bdim);
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
+}
+template <typename batch_rule_t, batch_rule_t batch_rule>
+at::Tensor & silu__generated_plumbing(at::Tensor & self) {
+  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  batch_rule(self_value, self_bdim);
+  return self;
 }
 template <typename batch_rule_t, batch_rule_t batch_rule>
 at::Tensor silu_backward_generated_plumbing(const at::Tensor & grad_output, const at::Tensor & self) {
@@ -7419,6 +8408,18 @@ at::Tensor mish_generated_plumbing(const at::Tensor & self) {
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 template <typename batch_rule_t, batch_rule_t batch_rule>
+at::Tensor & mish__generated_plumbing(at::Tensor & self) {
+  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  batch_rule(self_value, self_bdim);
+  return self;
+}
+template <typename batch_rule_t, batch_rule_t batch_rule>
 at::Tensor mish_backward_generated_plumbing(const at::Tensor & grad_output, const at::Tensor & self) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
   auto maybe_layer = maybeCurrentDynamicLayer();
@@ -7446,6 +8447,18 @@ at::Tensor sigmoid_generated_plumbing(const at::Tensor & self) {
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 template <typename batch_rule_t, batch_rule_t batch_rule>
+at::Tensor & sigmoid__generated_plumbing(at::Tensor & self) {
+  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  batch_rule(self_value, self_bdim);
+  return self;
+}
+template <typename batch_rule_t, batch_rule_t batch_rule>
 at::Tensor logit_generated_plumbing(const at::Tensor & self, c10::optional<double> eps) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
   auto maybe_layer = maybeCurrentDynamicLayer();
@@ -7456,6 +8469,18 @@ at::Tensor logit_generated_plumbing(const at::Tensor & self, c10::optional<doubl
   std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
   auto results = batch_rule(self_value, self_bdim, eps);
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
+}
+template <typename batch_rule_t, batch_rule_t batch_rule>
+at::Tensor & logit__generated_plumbing(at::Tensor & self, c10::optional<double> eps) {
+  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  batch_rule(self_value, self_bdim, eps);
+  return self;
 }
 template <typename batch_rule_t, batch_rule_t batch_rule>
 at::Tensor sin_generated_plumbing(const at::Tensor & self) {
@@ -7470,6 +8495,18 @@ at::Tensor sin_generated_plumbing(const at::Tensor & self) {
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 template <typename batch_rule_t, batch_rule_t batch_rule>
+at::Tensor & sin__generated_plumbing(at::Tensor & self) {
+  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  batch_rule(self_value, self_bdim);
+  return self;
+}
+template <typename batch_rule_t, batch_rule_t batch_rule>
 at::Tensor sinc_generated_plumbing(const at::Tensor & self) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
   auto maybe_layer = maybeCurrentDynamicLayer();
@@ -7482,6 +8519,18 @@ at::Tensor sinc_generated_plumbing(const at::Tensor & self) {
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 template <typename batch_rule_t, batch_rule_t batch_rule>
+at::Tensor & sinc__generated_plumbing(at::Tensor & self) {
+  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  batch_rule(self_value, self_bdim);
+  return self;
+}
+template <typename batch_rule_t, batch_rule_t batch_rule>
 at::Tensor sinh_generated_plumbing(const at::Tensor & self) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
   auto maybe_layer = maybeCurrentDynamicLayer();
@@ -7492,6 +8541,18 @@ at::Tensor sinh_generated_plumbing(const at::Tensor & self) {
   std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
   auto results = batch_rule(self_value, self_bdim);
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
+}
+template <typename batch_rule_t, batch_rule_t batch_rule>
+at::Tensor & sinh__generated_plumbing(at::Tensor & self) {
+  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  batch_rule(self_value, self_bdim);
+  return self;
 }
 template <typename batch_rule_t, batch_rule_t batch_rule>
 at::Tensor detach_generated_plumbing(const at::Tensor & self) {
@@ -7995,6 +9056,18 @@ at::Tensor sqrt_generated_plumbing(const at::Tensor & self) {
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 template <typename batch_rule_t, batch_rule_t batch_rule>
+at::Tensor & sqrt__generated_plumbing(at::Tensor & self) {
+  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  batch_rule(self_value, self_bdim);
+  return self;
+}
+template <typename batch_rule_t, batch_rule_t batch_rule>
 at::Tensor square_generated_plumbing(const at::Tensor & self) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
   auto maybe_layer = maybeCurrentDynamicLayer();
@@ -8005,6 +9078,18 @@ at::Tensor square_generated_plumbing(const at::Tensor & self) {
   std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
   auto results = batch_rule(self_value, self_bdim);
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
+}
+template <typename batch_rule_t, batch_rule_t batch_rule>
+at::Tensor & square__generated_plumbing(at::Tensor & self) {
+  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  batch_rule(self_value, self_bdim);
+  return self;
 }
 template <typename batch_rule_t, batch_rule_t batch_rule>
 at::Tensor std_generated_plumbing(const at::Tensor & self, bool unbiased) {
@@ -8187,6 +9272,18 @@ at::Tensor tan_generated_plumbing(const at::Tensor & self) {
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 template <typename batch_rule_t, batch_rule_t batch_rule>
+at::Tensor & tan__generated_plumbing(at::Tensor & self) {
+  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  batch_rule(self_value, self_bdim);
+  return self;
+}
+template <typename batch_rule_t, batch_rule_t batch_rule>
 at::Tensor tanh_generated_plumbing(const at::Tensor & self) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
   auto maybe_layer = maybeCurrentDynamicLayer();
@@ -8197,6 +9294,18 @@ at::Tensor tanh_generated_plumbing(const at::Tensor & self) {
   std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
   auto results = batch_rule(self_value, self_bdim);
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
+}
+template <typename batch_rule_t, batch_rule_t batch_rule>
+at::Tensor & tanh__generated_plumbing(at::Tensor & self) {
+  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  batch_rule(self_value, self_bdim);
+  return self;
 }
 template <typename batch_rule_t, batch_rule_t batch_rule>
 at::Tensor tensordot_generated_plumbing(const at::Tensor & self, const at::Tensor & other, at::IntArrayRef dims_self, at::IntArrayRef dims_other) {
@@ -8224,6 +9333,18 @@ at::Tensor threshold_generated_plumbing(const at::Tensor & self, const at::Scala
   std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
   auto results = batch_rule(self_value, self_bdim, threshold, value);
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
+}
+template <typename batch_rule_t, batch_rule_t batch_rule>
+at::Tensor & threshold__generated_plumbing(at::Tensor & self, const at::Scalar & threshold, const at::Scalar & value) {
+  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  batch_rule(self_value, self_bdim, threshold, value);
+  return self;
 }
 template <typename batch_rule_t, batch_rule_t batch_rule>
 at::Tensor threshold_backward_generated_plumbing(const at::Tensor & grad_output, const at::Tensor & self, const at::Scalar & threshold) {
@@ -8287,6 +9408,18 @@ at::Tensor _mkldnn_transpose_generated_plumbing(const at::Tensor & self, int64_t
   std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
   auto results = batch_rule(self_value, self_bdim, dim0, dim1);
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
+}
+template <typename batch_rule_t, batch_rule_t batch_rule>
+at::Tensor & _mkldnn_transpose__generated_plumbing(at::Tensor & self, int64_t dim0, int64_t dim1) {
+  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  batch_rule(self_value, self_bdim, dim0, dim1);
+  return self;
 }
 template <typename batch_rule_t, batch_rule_t batch_rule>
 at::Tensor one_hot_generated_plumbing(const at::Tensor & self, int64_t num_classes) {
@@ -8463,6 +9596,18 @@ at::Tensor trunc_generated_plumbing(const at::Tensor & self) {
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 template <typename batch_rule_t, batch_rule_t batch_rule>
+at::Tensor & trunc__generated_plumbing(at::Tensor & self) {
+  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  batch_rule(self_value, self_bdim);
+  return self;
+}
+template <typename batch_rule_t, batch_rule_t batch_rule>
 at::Tensor fix_generated_plumbing(const at::Tensor & self) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
   auto maybe_layer = maybeCurrentDynamicLayer();
@@ -8473,6 +9618,18 @@ at::Tensor fix_generated_plumbing(const at::Tensor & self) {
   std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
   auto results = batch_rule(self_value, self_bdim);
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
+}
+template <typename batch_rule_t, batch_rule_t batch_rule>
+at::Tensor & fix__generated_plumbing(at::Tensor & self) {
+  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  batch_rule(self_value, self_bdim);
+  return self;
 }
 template <typename batch_rule_t, batch_rule_t batch_rule>
 at::Tensor type_as_generated_plumbing(const at::Tensor & self, const at::Tensor & other) {
@@ -8893,36 +10050,6 @@ template <typename batch_rule_t, batch_rule_t batch_rule>
   std::tie(saved_norms_value, saved_norms_bdim) = unwrapTensorAtLevel(saved_norms, cur_level);
   auto results = batch_rule(grad_w_value, grad_w_bdim, saved_v_value, saved_v_bdim, saved_g_value, saved_g_bdim, saved_norms_value, saved_norms_bdim, dim);
   return std::make_tuple(makeBatched(std::get<0>(results), std::get<1>(results), cur_level), makeBatched(std::get<2>(results), std::get<3>(results), cur_level));
-}
-template <typename batch_rule_t, batch_rule_t batch_rule>
-at::Tensor zeros_names_generated_plumbing(at::IntArrayRef size, c10::optional<at::DimnameList> names, c10::optional<at::ScalarType> dtype, c10::optional<at::Layout> layout, c10::optional<at::Device> device, c10::optional<bool> pin_memory) {
-  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
-  auto maybe_layer = maybeCurrentDynamicLayer();
-  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
-  int64_t cur_level = maybe_layer->layerId();
-
-  auto results = batch_rule(size, names, dtype, layout, device, pin_memory);
-  return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
-}
-template <typename batch_rule_t, batch_rule_t batch_rule>
-at::Tensor _efficientzerotensor_generated_plumbing(at::IntArrayRef size, c10::optional<at::ScalarType> dtype, c10::optional<at::Layout> layout, c10::optional<at::Device> device, c10::optional<bool> pin_memory) {
-  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
-  auto maybe_layer = maybeCurrentDynamicLayer();
-  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
-  int64_t cur_level = maybe_layer->layerId();
-
-  auto results = batch_rule(size, dtype, layout, device, pin_memory);
-  return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
-}
-template <typename batch_rule_t, batch_rule_t batch_rule>
-at::Tensor zeros_generated_plumbing(at::IntArrayRef size, c10::optional<at::ScalarType> dtype, c10::optional<at::Layout> layout, c10::optional<at::Device> device, c10::optional<bool> pin_memory) {
-  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
-  auto maybe_layer = maybeCurrentDynamicLayer();
-  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
-  int64_t cur_level = maybe_layer->layerId();
-
-  auto results = batch_rule(size, dtype, layout, device, pin_memory);
-  return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 template <typename batch_rule_t, batch_rule_t batch_rule>
 at::Tensor zeros_like_generated_plumbing(const at::Tensor & self, c10::optional<at::ScalarType> dtype, c10::optional<at::Layout> layout, c10::optional<at::Device> device, c10::optional<bool> pin_memory, c10::optional<at::MemoryFormat> memory_format) {
@@ -9372,6 +10499,48 @@ at::Tensor positive_generated_plumbing(const at::Tensor & self) {
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 template <typename batch_rule_t, batch_rule_t batch_rule>
+const at::Tensor & resize_as__generated_plumbing(const at::Tensor & self, const at::Tensor & the_template, c10::optional<at::MemoryFormat> memory_format) {
+  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  Tensor the_template_value;
+  optional<int64_t> the_template_bdim;
+  std::tie(the_template_value, the_template_bdim) = unwrapTensorAtLevel(the_template, cur_level);
+  batch_rule(self_value, self_bdim, the_template_value, the_template_bdim, memory_format);
+  return self;
+}
+template <typename batch_rule_t, batch_rule_t batch_rule>
+const at::Tensor & resize_as_sparse__generated_plumbing(const at::Tensor & self, const at::Tensor & the_template) {
+  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  Tensor the_template_value;
+  optional<int64_t> the_template_bdim;
+  std::tie(the_template_value, the_template_bdim) = unwrapTensorAtLevel(the_template, cur_level);
+  batch_rule(self_value, self_bdim, the_template_value, the_template_bdim);
+  return self;
+}
+template <typename batch_rule_t, batch_rule_t batch_rule>
+at::Tensor & zero__generated_plumbing(at::Tensor & self) {
+  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  batch_rule(self_value, self_bdim);
+  return self;
+}
+template <typename batch_rule_t, batch_rule_t batch_rule>
 at::Tensor sub_Tensor_generated_plumbing(const at::Tensor & self, const at::Tensor & other, const at::Scalar & alpha) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
   auto maybe_layer = maybeCurrentDynamicLayer();
@@ -9387,6 +10556,21 @@ at::Tensor sub_Tensor_generated_plumbing(const at::Tensor & self, const at::Tens
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 template <typename batch_rule_t, batch_rule_t batch_rule>
+at::Tensor & sub__Tensor_generated_plumbing(at::Tensor & self, const at::Tensor & other, const at::Scalar & alpha) {
+  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  Tensor other_value;
+  optional<int64_t> other_bdim;
+  std::tie(other_value, other_bdim) = unwrapTensorAtLevel(other, cur_level);
+  batch_rule(self_value, self_bdim, other_value, other_bdim, alpha);
+  return self;
+}
+template <typename batch_rule_t, batch_rule_t batch_rule>
 at::Tensor sub_Scalar_generated_plumbing(const at::Tensor & self, const at::Scalar & other, const at::Scalar & alpha) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
   auto maybe_layer = maybeCurrentDynamicLayer();
@@ -9397,6 +10581,18 @@ at::Tensor sub_Scalar_generated_plumbing(const at::Tensor & self, const at::Scal
   std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
   auto results = batch_rule(self_value, self_bdim, other, alpha);
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
+}
+template <typename batch_rule_t, batch_rule_t batch_rule>
+at::Tensor & sub__Scalar_generated_plumbing(at::Tensor & self, const at::Scalar & other, const at::Scalar & alpha) {
+  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  batch_rule(self_value, self_bdim, other, alpha);
+  return self;
 }
 template <typename batch_rule_t, batch_rule_t batch_rule>
 at::Tensor subtract_Tensor_generated_plumbing(const at::Tensor & self, const at::Tensor & other, const at::Scalar & alpha) {
@@ -9414,6 +10610,21 @@ at::Tensor subtract_Tensor_generated_plumbing(const at::Tensor & self, const at:
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 template <typename batch_rule_t, batch_rule_t batch_rule>
+at::Tensor & subtract__Tensor_generated_plumbing(at::Tensor & self, const at::Tensor & other, const at::Scalar & alpha) {
+  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  Tensor other_value;
+  optional<int64_t> other_bdim;
+  std::tie(other_value, other_bdim) = unwrapTensorAtLevel(other, cur_level);
+  batch_rule(self_value, self_bdim, other_value, other_bdim, alpha);
+  return self;
+}
+template <typename batch_rule_t, batch_rule_t batch_rule>
 at::Tensor subtract_Scalar_generated_plumbing(const at::Tensor & self, const at::Scalar & other, const at::Scalar & alpha) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
   auto maybe_layer = maybeCurrentDynamicLayer();
@@ -9424,6 +10635,18 @@ at::Tensor subtract_Scalar_generated_plumbing(const at::Tensor & self, const at:
   std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
   auto results = batch_rule(self_value, self_bdim, other, alpha);
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
+}
+template <typename batch_rule_t, batch_rule_t batch_rule>
+at::Tensor & subtract__Scalar_generated_plumbing(at::Tensor & self, const at::Scalar & other, const at::Scalar & alpha) {
+  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  batch_rule(self_value, self_bdim, other, alpha);
+  return self;
 }
 template <typename batch_rule_t, batch_rule_t batch_rule>
 at::Tensor rsub_Tensor_generated_plumbing(const at::Tensor & self, const at::Tensor & other, const at::Scalar & alpha) {
@@ -9454,6 +10677,21 @@ at::Tensor heaviside_generated_plumbing(const at::Tensor & self, const at::Tenso
   std::tie(values_value, values_bdim) = unwrapTensorAtLevel(values, cur_level);
   auto results = batch_rule(self_value, self_bdim, values_value, values_bdim);
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
+}
+template <typename batch_rule_t, batch_rule_t batch_rule>
+at::Tensor & heaviside__generated_plumbing(at::Tensor & self, const at::Tensor & values) {
+  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  Tensor values_value;
+  optional<int64_t> values_bdim;
+  std::tie(values_value, values_bdim) = unwrapTensorAtLevel(values, cur_level);
+  batch_rule(self_value, self_bdim, values_value, values_bdim);
+  return self;
 }
 template <typename batch_rule_t, batch_rule_t batch_rule>
 at::Tensor rsub_Scalar_generated_plumbing(const at::Tensor & self, const at::Scalar & other, const at::Scalar & alpha) {
@@ -9522,6 +10760,24 @@ at::Tensor addmm_generated_plumbing(const at::Tensor & self, const at::Tensor & 
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 template <typename batch_rule_t, batch_rule_t batch_rule>
+at::Tensor & addmm__generated_plumbing(at::Tensor & self, const at::Tensor & mat1, const at::Tensor & mat2, const at::Scalar & beta, const at::Scalar & alpha) {
+  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  Tensor mat1_value;
+  optional<int64_t> mat1_bdim;
+  std::tie(mat1_value, mat1_bdim) = unwrapTensorAtLevel(mat1, cur_level);
+  Tensor mat2_value;
+  optional<int64_t> mat2_bdim;
+  std::tie(mat2_value, mat2_bdim) = unwrapTensorAtLevel(mat2, cur_level);
+  batch_rule(self_value, self_bdim, mat1_value, mat1_bdim, mat2_value, mat2_bdim, beta, alpha);
+  return self;
+}
+template <typename batch_rule_t, batch_rule_t batch_rule>
 at::Tensor sparse_csr_tensor_crow_col_value_size_generated_plumbing(const at::Tensor & crow_indices, const at::Tensor & col_indices, const at::Tensor & values, at::IntArrayRef size, c10::optional<at::ScalarType> dtype, c10::optional<at::Layout> layout, c10::optional<at::Device> device, c10::optional<bool> pin_memory) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
   auto maybe_layer = maybeCurrentDynamicLayer();
@@ -9576,16 +10832,6 @@ at::Tensor _sparse_csr_tensor_unsafe_generated_plumbing(const at::Tensor & crow_
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 template <typename batch_rule_t, batch_rule_t batch_rule>
-at::Tensor sparse_coo_tensor_size_generated_plumbing(at::IntArrayRef size, c10::optional<at::ScalarType> dtype, c10::optional<at::Layout> layout, c10::optional<at::Device> device, c10::optional<bool> pin_memory) {
-  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
-  auto maybe_layer = maybeCurrentDynamicLayer();
-  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
-  int64_t cur_level = maybe_layer->layerId();
-
-  auto results = batch_rule(size, dtype, layout, device, pin_memory);
-  return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
-}
-template <typename batch_rule_t, batch_rule_t batch_rule>
 at::Tensor sparse_coo_tensor_indices_generated_plumbing(const at::Tensor & indices, const at::Tensor & values, c10::optional<at::ScalarType> dtype, c10::optional<at::Layout> layout, c10::optional<at::Device> device, c10::optional<bool> pin_memory) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
   auto maybe_layer = maybeCurrentDynamicLayer();
@@ -9631,16 +10877,6 @@ at::Tensor _sparse_coo_tensor_unsafe_generated_plumbing(const at::Tensor & indic
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 template <typename batch_rule_t, batch_rule_t batch_rule>
-at::Tensor _sparse_coo_tensor_with_dims_generated_plumbing(int64_t sparse_dim, int64_t dense_dim, at::IntArrayRef size, c10::optional<at::ScalarType> dtype, c10::optional<at::Layout> layout, c10::optional<at::Device> device, c10::optional<bool> pin_memory) {
-  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
-  auto maybe_layer = maybeCurrentDynamicLayer();
-  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
-  int64_t cur_level = maybe_layer->layerId();
-
-  auto results = batch_rule(sparse_dim, dense_dim, size, dtype, layout, device, pin_memory);
-  return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
-}
-template <typename batch_rule_t, batch_rule_t batch_rule>
 at::Tensor _sparse_coo_tensor_with_dims_and_tensors_generated_plumbing(int64_t sparse_dim, int64_t dense_dim, at::IntArrayRef size, const at::Tensor & indices, const at::Tensor & values, c10::optional<at::ScalarType> dtype, c10::optional<at::Layout> layout, c10::optional<at::Device> device, c10::optional<bool> pin_memory) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
   auto maybe_layer = maybeCurrentDynamicLayer();
@@ -9654,6 +10890,30 @@ at::Tensor _sparse_coo_tensor_with_dims_and_tensors_generated_plumbing(int64_t s
   std::tie(values_value, values_bdim) = unwrapTensorAtLevel(values, cur_level);
   auto results = batch_rule(sparse_dim, dense_dim, size, indices_value, indices_bdim, values_value, values_bdim, dtype, layout, device, pin_memory);
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
+}
+template <typename batch_rule_t, batch_rule_t batch_rule>
+const at::Tensor & sparse_resize__generated_plumbing(const at::Tensor & self, at::IntArrayRef size, int64_t sparse_dim, int64_t dense_dim) {
+  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  batch_rule(self_value, self_bdim, size, sparse_dim, dense_dim);
+  return self;
+}
+template <typename batch_rule_t, batch_rule_t batch_rule>
+const at::Tensor & sparse_resize_and_clear__generated_plumbing(const at::Tensor & self, at::IntArrayRef size, int64_t sparse_dim, int64_t dense_dim) {
+  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  batch_rule(self_value, self_bdim, size, sparse_dim, dense_dim);
+  return self;
 }
 template <typename batch_rule_t, batch_rule_t batch_rule>
 at::Tensor sparse_mask_generated_plumbing(const at::Tensor & self, const at::Tensor & mask) {
@@ -9756,6 +11016,18 @@ at::Tensor _values_generated_plumbing(const at::Tensor & self) {
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 template <typename batch_rule_t, batch_rule_t batch_rule>
+at::Tensor & _coalesced__generated_plumbing(at::Tensor & self, bool coalesced) {
+  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  batch_rule(self_value, self_bdim, coalesced);
+  return self;
+}
+template <typename batch_rule_t, batch_rule_t batch_rule>
 at::Tensor indices_generated_plumbing(const at::Tensor & self) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
   auto maybe_layer = maybeCurrentDynamicLayer();
@@ -9817,6 +11089,21 @@ at::Tensor hspmm_generated_plumbing(const at::Tensor & mat1, const at::Tensor & 
   std::tie(mat2_value, mat2_bdim) = unwrapTensorAtLevel(mat2, cur_level);
   auto results = batch_rule(mat1_value, mat1_bdim, mat2_value, mat2_bdim);
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
+}
+template <typename batch_rule_t, batch_rule_t batch_rule>
+at::Tensor & copy_sparse_to_sparse__generated_plumbing(at::Tensor & self, const at::Tensor & src, bool non_blocking) {
+  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  Tensor src_value;
+  optional<int64_t> src_bdim;
+  std::tie(src_value, src_bdim) = unwrapTensorAtLevel(src, cur_level);
+  batch_rule(self_value, self_bdim, src_value, src_bdim, non_blocking);
+  return self;
 }
 template <typename batch_rule_t, batch_rule_t batch_rule>
 ::std::vector<at::Tensor> unbind_int_generated_plumbing(const at::Tensor & self, int64_t dim) {
@@ -11117,6 +12404,72 @@ template <typename batch_rule_t, batch_rule_t batch_rule>
   return std::make_tuple(makeBatched(std::get<0>(results), std::get<1>(results), cur_level), makeBatched(std::get<2>(results), std::get<3>(results), cur_level));
 }
 template <typename batch_rule_t, batch_rule_t batch_rule>
+at::Tensor & set__source_Storage_generated_plumbing(at::Tensor & self, at::Storage source) {
+  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  batch_rule(self_value, self_bdim, source);
+  return self;
+}
+template <typename batch_rule_t, batch_rule_t batch_rule>
+at::Tensor & set__source_Storage_storage_offset_generated_plumbing(at::Tensor & self, at::Storage source, int64_t storage_offset, at::IntArrayRef size, at::IntArrayRef stride) {
+  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  batch_rule(self_value, self_bdim, source, storage_offset, size, stride);
+  return self;
+}
+template <typename batch_rule_t, batch_rule_t batch_rule>
+at::Tensor & set__source_Tensor_generated_plumbing(at::Tensor & self, const at::Tensor & source) {
+  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  Tensor source_value;
+  optional<int64_t> source_bdim;
+  std::tie(source_value, source_bdim) = unwrapTensorAtLevel(source, cur_level);
+  batch_rule(self_value, self_bdim, source_value, source_bdim);
+  return self;
+}
+template <typename batch_rule_t, batch_rule_t batch_rule>
+at::Tensor & set__generated_plumbing(at::Tensor & self) {
+  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  batch_rule(self_value, self_bdim);
+  return self;
+}
+template <typename batch_rule_t, batch_rule_t batch_rule>
+at::Tensor & masked_fill__Scalar_generated_plumbing(at::Tensor & self, const at::Tensor & mask, const at::Scalar & value) {
+  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  Tensor mask_value;
+  optional<int64_t> mask_bdim;
+  std::tie(mask_value, mask_bdim) = unwrapTensorAtLevel(mask, cur_level);
+  batch_rule(self_value, self_bdim, mask_value, mask_bdim, value);
+  return self;
+}
+template <typename batch_rule_t, batch_rule_t batch_rule>
 at::Tensor masked_fill_Scalar_generated_plumbing(const at::Tensor & self, const at::Tensor & mask, const at::Scalar & value) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
   auto maybe_layer = maybeCurrentDynamicLayer();
@@ -11130,6 +12483,24 @@ at::Tensor masked_fill_Scalar_generated_plumbing(const at::Tensor & self, const 
   std::tie(mask_value, mask_bdim) = unwrapTensorAtLevel(mask, cur_level);
   auto results = batch_rule(self_value, self_bdim, mask_value, mask_bdim, value);
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
+}
+template <typename batch_rule_t, batch_rule_t batch_rule>
+at::Tensor & masked_fill__Tensor_generated_plumbing(at::Tensor & self, const at::Tensor & mask, const at::Tensor & value) {
+  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  Tensor mask_value;
+  optional<int64_t> mask_bdim;
+  std::tie(mask_value, mask_bdim) = unwrapTensorAtLevel(mask, cur_level);
+  Tensor value_value;
+  optional<int64_t> value_bdim;
+  std::tie(value_value, value_bdim) = unwrapTensorAtLevel(value, cur_level);
+  batch_rule(self_value, self_bdim, mask_value, mask_bdim, value_value, value_bdim);
+  return self;
 }
 template <typename batch_rule_t, batch_rule_t batch_rule>
 at::Tensor masked_fill_Tensor_generated_plumbing(const at::Tensor & self, const at::Tensor & mask, const at::Tensor & value) {
@@ -11148,6 +12519,24 @@ at::Tensor masked_fill_Tensor_generated_plumbing(const at::Tensor & self, const 
   std::tie(value_value, value_bdim) = unwrapTensorAtLevel(value, cur_level);
   auto results = batch_rule(self_value, self_bdim, mask_value, mask_bdim, value_value, value_bdim);
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
+}
+template <typename batch_rule_t, batch_rule_t batch_rule>
+at::Tensor & masked_scatter__generated_plumbing(at::Tensor & self, const at::Tensor & mask, const at::Tensor & source) {
+  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  Tensor mask_value;
+  optional<int64_t> mask_bdim;
+  std::tie(mask_value, mask_bdim) = unwrapTensorAtLevel(mask, cur_level);
+  Tensor source_value;
+  optional<int64_t> source_bdim;
+  std::tie(source_value, source_bdim) = unwrapTensorAtLevel(source, cur_level);
+  batch_rule(self_value, self_bdim, mask_value, mask_bdim, source_value, source_bdim);
+  return self;
 }
 template <typename batch_rule_t, batch_rule_t batch_rule>
 at::Tensor masked_scatter_generated_plumbing(const at::Tensor & self, const at::Tensor & mask, const at::Tensor & source) {
@@ -11207,6 +12596,24 @@ at::Tensor view_dtype_generated_plumbing(const at::Tensor & self, at::ScalarType
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 template <typename batch_rule_t, batch_rule_t batch_rule>
+at::Tensor & put__generated_plumbing(at::Tensor & self, const at::Tensor & index, const at::Tensor & source, bool accumulate) {
+  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  Tensor index_value;
+  optional<int64_t> index_bdim;
+  std::tie(index_value, index_bdim) = unwrapTensorAtLevel(index, cur_level);
+  Tensor source_value;
+  optional<int64_t> source_bdim;
+  std::tie(source_value, source_bdim) = unwrapTensorAtLevel(source, cur_level);
+  batch_rule(self_value, self_bdim, index_value, index_bdim, source_value, source_bdim, accumulate);
+  return self;
+}
+template <typename batch_rule_t, batch_rule_t batch_rule>
 at::Tensor put_generated_plumbing(const at::Tensor & self, const at::Tensor & index, const at::Tensor & source, bool accumulate) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
   auto maybe_layer = maybeCurrentDynamicLayer();
@@ -11223,6 +12630,24 @@ at::Tensor put_generated_plumbing(const at::Tensor & self, const at::Tensor & in
   std::tie(source_value, source_bdim) = unwrapTensorAtLevel(source, cur_level);
   auto results = batch_rule(self_value, self_bdim, index_value, index_bdim, source_value, source_bdim, accumulate);
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
+}
+template <typename batch_rule_t, batch_rule_t batch_rule>
+at::Tensor & index_add__generated_plumbing(at::Tensor & self, int64_t dim, const at::Tensor & index, const at::Tensor & source, const at::Scalar & alpha) {
+  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  Tensor index_value;
+  optional<int64_t> index_bdim;
+  std::tie(index_value, index_bdim) = unwrapTensorAtLevel(index, cur_level);
+  Tensor source_value;
+  optional<int64_t> source_bdim;
+  std::tie(source_value, source_bdim) = unwrapTensorAtLevel(source, cur_level);
+  batch_rule(self_value, self_bdim, dim, index_value, index_bdim, source_value, source_bdim, alpha);
+  return self;
 }
 template <typename batch_rule_t, batch_rule_t batch_rule>
 at::Tensor index_add_generated_plumbing(const at::Tensor & self, int64_t dim, const at::Tensor & index, const at::Tensor & source, const at::Scalar & alpha) {
@@ -11261,6 +12686,21 @@ at::Tensor index_add_dimname_generated_plumbing(const at::Tensor & self, at::Dim
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 template <typename batch_rule_t, batch_rule_t batch_rule>
+at::Tensor & index_fill__int_Scalar_generated_plumbing(at::Tensor & self, int64_t dim, const at::Tensor & index, const at::Scalar & value) {
+  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  Tensor index_value;
+  optional<int64_t> index_bdim;
+  std::tie(index_value, index_bdim) = unwrapTensorAtLevel(index, cur_level);
+  batch_rule(self_value, self_bdim, dim, index_value, index_bdim, value);
+  return self;
+}
+template <typename batch_rule_t, batch_rule_t batch_rule>
 at::Tensor index_fill_int_Scalar_generated_plumbing(const at::Tensor & self, int64_t dim, const at::Tensor & index, const at::Scalar & value) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
   auto maybe_layer = maybeCurrentDynamicLayer();
@@ -11274,6 +12714,24 @@ at::Tensor index_fill_int_Scalar_generated_plumbing(const at::Tensor & self, int
   std::tie(index_value, index_bdim) = unwrapTensorAtLevel(index, cur_level);
   auto results = batch_rule(self_value, self_bdim, dim, index_value, index_bdim, value);
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
+}
+template <typename batch_rule_t, batch_rule_t batch_rule>
+at::Tensor & index_fill__int_Tensor_generated_plumbing(at::Tensor & self, int64_t dim, const at::Tensor & index, const at::Tensor & value) {
+  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  Tensor index_value;
+  optional<int64_t> index_bdim;
+  std::tie(index_value, index_bdim) = unwrapTensorAtLevel(index, cur_level);
+  Tensor value_value;
+  optional<int64_t> value_bdim;
+  std::tie(value_value, value_bdim) = unwrapTensorAtLevel(value, cur_level);
+  batch_rule(self_value, self_bdim, dim, index_value, index_bdim, value_value, value_bdim);
+  return self;
 }
 template <typename batch_rule_t, batch_rule_t batch_rule>
 at::Tensor index_fill_int_Tensor_generated_plumbing(const at::Tensor & self, int64_t dim, const at::Tensor & index, const at::Tensor & value) {
@@ -11292,6 +12750,39 @@ at::Tensor index_fill_int_Tensor_generated_plumbing(const at::Tensor & self, int
   std::tie(value_value, value_bdim) = unwrapTensorAtLevel(value, cur_level);
   auto results = batch_rule(self_value, self_bdim, dim, index_value, index_bdim, value_value, value_bdim);
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
+}
+template <typename batch_rule_t, batch_rule_t batch_rule>
+at::Tensor & index_fill__Dimname_Scalar_generated_plumbing(at::Tensor & self, at::Dimname dim, const at::Tensor & index, const at::Scalar & value) {
+  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  Tensor index_value;
+  optional<int64_t> index_bdim;
+  std::tie(index_value, index_bdim) = unwrapTensorAtLevel(index, cur_level);
+  batch_rule(self_value, self_bdim, dim, index_value, index_bdim, value);
+  return self;
+}
+template <typename batch_rule_t, batch_rule_t batch_rule>
+at::Tensor & index_fill__Dimname_Tensor_generated_plumbing(at::Tensor & self, at::Dimname dim, const at::Tensor & index, const at::Tensor & value) {
+  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  Tensor index_value;
+  optional<int64_t> index_bdim;
+  std::tie(index_value, index_bdim) = unwrapTensorAtLevel(index, cur_level);
+  Tensor value_value;
+  optional<int64_t> value_bdim;
+  std::tie(value_value, value_bdim) = unwrapTensorAtLevel(value, cur_level);
+  batch_rule(self_value, self_bdim, dim, index_value, index_bdim, value_value, value_bdim);
+  return self;
 }
 template <typename batch_rule_t, batch_rule_t batch_rule>
 at::Tensor index_fill_Dimname_Scalar_generated_plumbing(const at::Tensor & self, at::Dimname dim, const at::Tensor & index, const at::Scalar & value) {
@@ -11345,6 +12836,24 @@ at::Tensor scatter_src_generated_plumbing(const at::Tensor & self, int64_t dim, 
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 template <typename batch_rule_t, batch_rule_t batch_rule>
+at::Tensor & scatter__src_generated_plumbing(at::Tensor & self, int64_t dim, const at::Tensor & index, const at::Tensor & src) {
+  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  Tensor index_value;
+  optional<int64_t> index_bdim;
+  std::tie(index_value, index_bdim) = unwrapTensorAtLevel(index, cur_level);
+  Tensor src_value;
+  optional<int64_t> src_bdim;
+  std::tie(src_value, src_bdim) = unwrapTensorAtLevel(src, cur_level);
+  batch_rule(self_value, self_bdim, dim, index_value, index_bdim, src_value, src_bdim);
+  return self;
+}
+template <typename batch_rule_t, batch_rule_t batch_rule>
 at::Tensor scatter_value_generated_plumbing(const at::Tensor & self, int64_t dim, const at::Tensor & index, const at::Scalar & value) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
   auto maybe_layer = maybeCurrentDynamicLayer();
@@ -11358,6 +12867,21 @@ at::Tensor scatter_value_generated_plumbing(const at::Tensor & self, int64_t dim
   std::tie(index_value, index_bdim) = unwrapTensorAtLevel(index, cur_level);
   auto results = batch_rule(self_value, self_bdim, dim, index_value, index_bdim, value);
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
+}
+template <typename batch_rule_t, batch_rule_t batch_rule>
+at::Tensor & scatter__value_generated_plumbing(at::Tensor & self, int64_t dim, const at::Tensor & index, const at::Scalar & value) {
+  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  Tensor index_value;
+  optional<int64_t> index_bdim;
+  std::tie(index_value, index_bdim) = unwrapTensorAtLevel(index, cur_level);
+  batch_rule(self_value, self_bdim, dim, index_value, index_bdim, value);
+  return self;
 }
 template <typename batch_rule_t, batch_rule_t batch_rule>
 at::Tensor scatter_reduce_generated_plumbing(const at::Tensor & self, int64_t dim, const at::Tensor & index, const at::Tensor & src, c10::string_view reduce) {
@@ -11378,6 +12902,24 @@ at::Tensor scatter_reduce_generated_plumbing(const at::Tensor & self, int64_t di
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 template <typename batch_rule_t, batch_rule_t batch_rule>
+at::Tensor & scatter__reduce_generated_plumbing(at::Tensor & self, int64_t dim, const at::Tensor & index, const at::Tensor & src, c10::string_view reduce) {
+  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  Tensor index_value;
+  optional<int64_t> index_bdim;
+  std::tie(index_value, index_bdim) = unwrapTensorAtLevel(index, cur_level);
+  Tensor src_value;
+  optional<int64_t> src_bdim;
+  std::tie(src_value, src_bdim) = unwrapTensorAtLevel(src, cur_level);
+  batch_rule(self_value, self_bdim, dim, index_value, index_bdim, src_value, src_bdim, reduce);
+  return self;
+}
+template <typename batch_rule_t, batch_rule_t batch_rule>
 at::Tensor scatter_value_reduce_generated_plumbing(const at::Tensor & self, int64_t dim, const at::Tensor & index, const at::Scalar & value, c10::string_view reduce) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
   auto maybe_layer = maybeCurrentDynamicLayer();
@@ -11391,6 +12933,21 @@ at::Tensor scatter_value_reduce_generated_plumbing(const at::Tensor & self, int6
   std::tie(index_value, index_bdim) = unwrapTensorAtLevel(index, cur_level);
   auto results = batch_rule(self_value, self_bdim, dim, index_value, index_bdim, value, reduce);
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
+}
+template <typename batch_rule_t, batch_rule_t batch_rule>
+at::Tensor & scatter__value_reduce_generated_plumbing(at::Tensor & self, int64_t dim, const at::Tensor & index, const at::Scalar & value, c10::string_view reduce) {
+  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  Tensor index_value;
+  optional<int64_t> index_bdim;
+  std::tie(index_value, index_bdim) = unwrapTensorAtLevel(index, cur_level);
+  batch_rule(self_value, self_bdim, dim, index_value, index_bdim, value, reduce);
+  return self;
 }
 template <typename batch_rule_t, batch_rule_t batch_rule>
 at::Tensor scatter_dimname_src_generated_plumbing(const at::Tensor & self, at::Dimname dim, const at::Tensor & index, const at::Tensor & src) {
@@ -11444,6 +13001,24 @@ at::Tensor scatter_add_generated_plumbing(const at::Tensor & self, int64_t dim, 
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 template <typename batch_rule_t, batch_rule_t batch_rule>
+at::Tensor & scatter_add__generated_plumbing(at::Tensor & self, int64_t dim, const at::Tensor & index, const at::Tensor & src) {
+  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  Tensor index_value;
+  optional<int64_t> index_bdim;
+  std::tie(index_value, index_bdim) = unwrapTensorAtLevel(index, cur_level);
+  Tensor src_value;
+  optional<int64_t> src_bdim;
+  std::tie(src_value, src_bdim) = unwrapTensorAtLevel(src, cur_level);
+  batch_rule(self_value, self_bdim, dim, index_value, index_bdim, src_value, src_bdim);
+  return self;
+}
+template <typename batch_rule_t, batch_rule_t batch_rule>
 at::Tensor scatter_add_dimname_generated_plumbing(const at::Tensor & self, at::Dimname dim, const at::Tensor & index, const at::Tensor & src) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
   auto maybe_layer = maybeCurrentDynamicLayer();
@@ -11462,7 +13037,7 @@ at::Tensor scatter_add_dimname_generated_plumbing(const at::Tensor & self, at::D
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 template <typename batch_rule_t, batch_rule_t batch_rule>
-at::Tensor _scatter_reduce_two_generated_plumbing(const at::Tensor & self, int64_t dim, const at::Tensor & index, c10::string_view reduce, c10::optional<int64_t> output_size) {
+at::Tensor scatter_reduce_two_generated_plumbing(const at::Tensor & self, int64_t dim, const at::Tensor & index, c10::string_view reduce, c10::optional<int64_t> output_size) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
   auto maybe_layer = maybeCurrentDynamicLayer();
   TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
@@ -11475,6 +13050,33 @@ at::Tensor _scatter_reduce_two_generated_plumbing(const at::Tensor & self, int64
   std::tie(index_value, index_bdim) = unwrapTensorAtLevel(index, cur_level);
   auto results = batch_rule(self_value, self_bdim, dim, index_value, index_bdim, reduce, output_size);
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
+}
+template <typename batch_rule_t, batch_rule_t batch_rule>
+at::Tensor & eq__Scalar_generated_plumbing(at::Tensor & self, const at::Scalar & other) {
+  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  batch_rule(self_value, self_bdim, other);
+  return self;
+}
+template <typename batch_rule_t, batch_rule_t batch_rule>
+at::Tensor & eq__Tensor_generated_plumbing(at::Tensor & self, const at::Tensor & other) {
+  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  Tensor other_value;
+  optional<int64_t> other_bdim;
+  std::tie(other_value, other_bdim) = unwrapTensorAtLevel(other, cur_level);
+  batch_rule(self_value, self_bdim, other_value, other_bdim);
+  return self;
 }
 template <typename batch_rule_t, batch_rule_t batch_rule>
 at::Tensor bitwise_and_Scalar_generated_plumbing(const at::Tensor & self, const at::Scalar & other) {
@@ -11504,6 +13106,33 @@ at::Tensor bitwise_and_Tensor_generated_plumbing(const at::Tensor & self, const 
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 template <typename batch_rule_t, batch_rule_t batch_rule>
+at::Tensor & bitwise_and__Scalar_generated_plumbing(at::Tensor & self, const at::Scalar & other) {
+  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  batch_rule(self_value, self_bdim, other);
+  return self;
+}
+template <typename batch_rule_t, batch_rule_t batch_rule>
+at::Tensor & bitwise_and__Tensor_generated_plumbing(at::Tensor & self, const at::Tensor & other) {
+  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  Tensor other_value;
+  optional<int64_t> other_bdim;
+  std::tie(other_value, other_bdim) = unwrapTensorAtLevel(other, cur_level);
+  batch_rule(self_value, self_bdim, other_value, other_bdim);
+  return self;
+}
+template <typename batch_rule_t, batch_rule_t batch_rule>
 at::Tensor __and___Scalar_generated_plumbing(const at::Tensor & self, const at::Scalar & other) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
   auto maybe_layer = maybeCurrentDynamicLayer();
@@ -11529,6 +13158,33 @@ at::Tensor __and___Tensor_generated_plumbing(const at::Tensor & self, const at::
   std::tie(other_value, other_bdim) = unwrapTensorAtLevel(other, cur_level);
   auto results = batch_rule(self_value, self_bdim, other_value, other_bdim);
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
+}
+template <typename batch_rule_t, batch_rule_t batch_rule>
+at::Tensor & __iand___Scalar_generated_plumbing(at::Tensor & self, const at::Scalar & other) {
+  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  batch_rule(self_value, self_bdim, other);
+  return self;
+}
+template <typename batch_rule_t, batch_rule_t batch_rule>
+at::Tensor & __iand___Tensor_generated_plumbing(at::Tensor & self, const at::Tensor & other) {
+  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  Tensor other_value;
+  optional<int64_t> other_bdim;
+  std::tie(other_value, other_bdim) = unwrapTensorAtLevel(other, cur_level);
+  batch_rule(self_value, self_bdim, other_value, other_bdim);
+  return self;
 }
 template <typename batch_rule_t, batch_rule_t batch_rule>
 at::Tensor bitwise_or_Scalar_generated_plumbing(const at::Tensor & self, const at::Scalar & other) {
@@ -11558,6 +13214,33 @@ at::Tensor bitwise_or_Tensor_generated_plumbing(const at::Tensor & self, const a
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 template <typename batch_rule_t, batch_rule_t batch_rule>
+at::Tensor & bitwise_or__Scalar_generated_plumbing(at::Tensor & self, const at::Scalar & other) {
+  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  batch_rule(self_value, self_bdim, other);
+  return self;
+}
+template <typename batch_rule_t, batch_rule_t batch_rule>
+at::Tensor & bitwise_or__Tensor_generated_plumbing(at::Tensor & self, const at::Tensor & other) {
+  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  Tensor other_value;
+  optional<int64_t> other_bdim;
+  std::tie(other_value, other_bdim) = unwrapTensorAtLevel(other, cur_level);
+  batch_rule(self_value, self_bdim, other_value, other_bdim);
+  return self;
+}
+template <typename batch_rule_t, batch_rule_t batch_rule>
 at::Tensor __or___Scalar_generated_plumbing(const at::Tensor & self, const at::Scalar & other) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
   auto maybe_layer = maybeCurrentDynamicLayer();
@@ -11583,6 +13266,33 @@ at::Tensor __or___Tensor_generated_plumbing(const at::Tensor & self, const at::T
   std::tie(other_value, other_bdim) = unwrapTensorAtLevel(other, cur_level);
   auto results = batch_rule(self_value, self_bdim, other_value, other_bdim);
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
+}
+template <typename batch_rule_t, batch_rule_t batch_rule>
+at::Tensor & __ior___Scalar_generated_plumbing(at::Tensor & self, const at::Scalar & other) {
+  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  batch_rule(self_value, self_bdim, other);
+  return self;
+}
+template <typename batch_rule_t, batch_rule_t batch_rule>
+at::Tensor & __ior___Tensor_generated_plumbing(at::Tensor & self, const at::Tensor & other) {
+  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  Tensor other_value;
+  optional<int64_t> other_bdim;
+  std::tie(other_value, other_bdim) = unwrapTensorAtLevel(other, cur_level);
+  batch_rule(self_value, self_bdim, other_value, other_bdim);
+  return self;
 }
 template <typename batch_rule_t, batch_rule_t batch_rule>
 at::Tensor bitwise_xor_Scalar_generated_plumbing(const at::Tensor & self, const at::Scalar & other) {
@@ -11612,6 +13322,33 @@ at::Tensor bitwise_xor_Tensor_generated_plumbing(const at::Tensor & self, const 
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 template <typename batch_rule_t, batch_rule_t batch_rule>
+at::Tensor & bitwise_xor__Scalar_generated_plumbing(at::Tensor & self, const at::Scalar & other) {
+  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  batch_rule(self_value, self_bdim, other);
+  return self;
+}
+template <typename batch_rule_t, batch_rule_t batch_rule>
+at::Tensor & bitwise_xor__Tensor_generated_plumbing(at::Tensor & self, const at::Tensor & other) {
+  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  Tensor other_value;
+  optional<int64_t> other_bdim;
+  std::tie(other_value, other_bdim) = unwrapTensorAtLevel(other, cur_level);
+  batch_rule(self_value, self_bdim, other_value, other_bdim);
+  return self;
+}
+template <typename batch_rule_t, batch_rule_t batch_rule>
 at::Tensor __xor___Scalar_generated_plumbing(const at::Tensor & self, const at::Scalar & other) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
   auto maybe_layer = maybeCurrentDynamicLayer();
@@ -11637,6 +13374,33 @@ at::Tensor __xor___Tensor_generated_plumbing(const at::Tensor & self, const at::
   std::tie(other_value, other_bdim) = unwrapTensorAtLevel(other, cur_level);
   auto results = batch_rule(self_value, self_bdim, other_value, other_bdim);
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
+}
+template <typename batch_rule_t, batch_rule_t batch_rule>
+at::Tensor & __ixor___Scalar_generated_plumbing(at::Tensor & self, const at::Scalar & other) {
+  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  batch_rule(self_value, self_bdim, other);
+  return self;
+}
+template <typename batch_rule_t, batch_rule_t batch_rule>
+at::Tensor & __ixor___Tensor_generated_plumbing(at::Tensor & self, const at::Tensor & other) {
+  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  Tensor other_value;
+  optional<int64_t> other_bdim;
+  std::tie(other_value, other_bdim) = unwrapTensorAtLevel(other, cur_level);
+  batch_rule(self_value, self_bdim, other_value, other_bdim);
+  return self;
 }
 template <typename batch_rule_t, batch_rule_t batch_rule>
 at::Tensor __lshift___Scalar_generated_plumbing(const at::Tensor & self, const at::Scalar & other) {
@@ -11666,6 +13430,33 @@ at::Tensor __lshift___Tensor_generated_plumbing(const at::Tensor & self, const a
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 template <typename batch_rule_t, batch_rule_t batch_rule>
+at::Tensor & __ilshift___Scalar_generated_plumbing(at::Tensor & self, const at::Scalar & other) {
+  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  batch_rule(self_value, self_bdim, other);
+  return self;
+}
+template <typename batch_rule_t, batch_rule_t batch_rule>
+at::Tensor & __ilshift___Tensor_generated_plumbing(at::Tensor & self, const at::Tensor & other) {
+  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  Tensor other_value;
+  optional<int64_t> other_bdim;
+  std::tie(other_value, other_bdim) = unwrapTensorAtLevel(other, cur_level);
+  batch_rule(self_value, self_bdim, other_value, other_bdim);
+  return self;
+}
+template <typename batch_rule_t, batch_rule_t batch_rule>
 at::Tensor bitwise_left_shift_Tensor_generated_plumbing(const at::Tensor & self, const at::Tensor & other) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
   auto maybe_layer = maybeCurrentDynamicLayer();
@@ -11681,6 +13472,21 @@ at::Tensor bitwise_left_shift_Tensor_generated_plumbing(const at::Tensor & self,
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 template <typename batch_rule_t, batch_rule_t batch_rule>
+at::Tensor & bitwise_left_shift__Tensor_generated_plumbing(at::Tensor & self, const at::Tensor & other) {
+  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  Tensor other_value;
+  optional<int64_t> other_bdim;
+  std::tie(other_value, other_bdim) = unwrapTensorAtLevel(other, cur_level);
+  batch_rule(self_value, self_bdim, other_value, other_bdim);
+  return self;
+}
+template <typename batch_rule_t, batch_rule_t batch_rule>
 at::Tensor bitwise_left_shift_Tensor_Scalar_generated_plumbing(const at::Tensor & self, const at::Scalar & other) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
   auto maybe_layer = maybeCurrentDynamicLayer();
@@ -11691,6 +13497,18 @@ at::Tensor bitwise_left_shift_Tensor_Scalar_generated_plumbing(const at::Tensor 
   std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
   auto results = batch_rule(self_value, self_bdim, other);
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
+}
+template <typename batch_rule_t, batch_rule_t batch_rule>
+at::Tensor & bitwise_left_shift__Tensor_Scalar_generated_plumbing(at::Tensor & self, const at::Scalar & other) {
+  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  batch_rule(self_value, self_bdim, other);
+  return self;
 }
 template <typename batch_rule_t, batch_rule_t batch_rule>
 at::Tensor bitwise_left_shift_Scalar_Tensor_generated_plumbing(const at::Scalar & self, const at::Tensor & other) {
@@ -11732,6 +13550,33 @@ at::Tensor __rshift___Tensor_generated_plumbing(const at::Tensor & self, const a
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 template <typename batch_rule_t, batch_rule_t batch_rule>
+at::Tensor & __irshift___Scalar_generated_plumbing(at::Tensor & self, const at::Scalar & other) {
+  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  batch_rule(self_value, self_bdim, other);
+  return self;
+}
+template <typename batch_rule_t, batch_rule_t batch_rule>
+at::Tensor & __irshift___Tensor_generated_plumbing(at::Tensor & self, const at::Tensor & other) {
+  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  Tensor other_value;
+  optional<int64_t> other_bdim;
+  std::tie(other_value, other_bdim) = unwrapTensorAtLevel(other, cur_level);
+  batch_rule(self_value, self_bdim, other_value, other_bdim);
+  return self;
+}
+template <typename batch_rule_t, batch_rule_t batch_rule>
 at::Tensor bitwise_right_shift_Tensor_generated_plumbing(const at::Tensor & self, const at::Tensor & other) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
   auto maybe_layer = maybeCurrentDynamicLayer();
@@ -11747,6 +13592,21 @@ at::Tensor bitwise_right_shift_Tensor_generated_plumbing(const at::Tensor & self
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 template <typename batch_rule_t, batch_rule_t batch_rule>
+at::Tensor & bitwise_right_shift__Tensor_generated_plumbing(at::Tensor & self, const at::Tensor & other) {
+  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  Tensor other_value;
+  optional<int64_t> other_bdim;
+  std::tie(other_value, other_bdim) = unwrapTensorAtLevel(other, cur_level);
+  batch_rule(self_value, self_bdim, other_value, other_bdim);
+  return self;
+}
+template <typename batch_rule_t, batch_rule_t batch_rule>
 at::Tensor bitwise_right_shift_Tensor_Scalar_generated_plumbing(const at::Tensor & self, const at::Scalar & other) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
   auto maybe_layer = maybeCurrentDynamicLayer();
@@ -11759,6 +13619,18 @@ at::Tensor bitwise_right_shift_Tensor_Scalar_generated_plumbing(const at::Tensor
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 template <typename batch_rule_t, batch_rule_t batch_rule>
+at::Tensor & bitwise_right_shift__Tensor_Scalar_generated_plumbing(at::Tensor & self, const at::Scalar & other) {
+  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  batch_rule(self_value, self_bdim, other);
+  return self;
+}
+template <typename batch_rule_t, batch_rule_t batch_rule>
 at::Tensor bitwise_right_shift_Scalar_Tensor_generated_plumbing(const at::Scalar & self, const at::Tensor & other) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
   auto maybe_layer = maybeCurrentDynamicLayer();
@@ -11769,6 +13641,93 @@ at::Tensor bitwise_right_shift_Scalar_Tensor_generated_plumbing(const at::Scalar
   std::tie(other_value, other_bdim) = unwrapTensorAtLevel(other, cur_level);
   auto results = batch_rule(self, other_value, other_bdim);
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
+}
+template <typename batch_rule_t, batch_rule_t batch_rule>
+at::Tensor & tril__generated_plumbing(at::Tensor & self, int64_t diagonal) {
+  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  batch_rule(self_value, self_bdim, diagonal);
+  return self;
+}
+template <typename batch_rule_t, batch_rule_t batch_rule>
+at::Tensor & triu__generated_plumbing(at::Tensor & self, int64_t diagonal) {
+  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  batch_rule(self_value, self_bdim, diagonal);
+  return self;
+}
+template <typename batch_rule_t, batch_rule_t batch_rule>
+at::Tensor & digamma__generated_plumbing(at::Tensor & self) {
+  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  batch_rule(self_value, self_bdim);
+  return self;
+}
+template <typename batch_rule_t, batch_rule_t batch_rule>
+at::Tensor & lerp__Scalar_generated_plumbing(at::Tensor & self, const at::Tensor & end, const at::Scalar & weight) {
+  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  Tensor end_value;
+  optional<int64_t> end_bdim;
+  std::tie(end_value, end_bdim) = unwrapTensorAtLevel(end, cur_level);
+  batch_rule(self_value, self_bdim, end_value, end_bdim, weight);
+  return self;
+}
+template <typename batch_rule_t, batch_rule_t batch_rule>
+at::Tensor & lerp__Tensor_generated_plumbing(at::Tensor & self, const at::Tensor & end, const at::Tensor & weight) {
+  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  Tensor end_value;
+  optional<int64_t> end_bdim;
+  std::tie(end_value, end_bdim) = unwrapTensorAtLevel(end, cur_level);
+  Tensor weight_value;
+  optional<int64_t> weight_bdim;
+  std::tie(weight_value, weight_bdim) = unwrapTensorAtLevel(weight, cur_level);
+  batch_rule(self_value, self_bdim, end_value, end_bdim, weight_value, weight_bdim);
+  return self;
+}
+template <typename batch_rule_t, batch_rule_t batch_rule>
+at::Tensor & addbmm__generated_plumbing(at::Tensor & self, const at::Tensor & batch1, const at::Tensor & batch2, const at::Scalar & beta, const at::Scalar & alpha) {
+  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  Tensor batch1_value;
+  optional<int64_t> batch1_bdim;
+  std::tie(batch1_value, batch1_bdim) = unwrapTensorAtLevel(batch1, cur_level);
+  Tensor batch2_value;
+  optional<int64_t> batch2_bdim;
+  std::tie(batch2_value, batch2_bdim) = unwrapTensorAtLevel(batch2, cur_level);
+  batch_rule(self_value, self_bdim, batch1_value, batch1_bdim, batch2_value, batch2_bdim, beta, alpha);
+  return self;
 }
 template <typename batch_rule_t, batch_rule_t batch_rule>
 at::Tensor addbmm_generated_plumbing(const at::Tensor & self, const at::Tensor & batch1, const at::Tensor & batch2, const at::Scalar & beta, const at::Scalar & alpha) {
@@ -11787,6 +13746,102 @@ at::Tensor addbmm_generated_plumbing(const at::Tensor & self, const at::Tensor &
   std::tie(batch2_value, batch2_bdim) = unwrapTensorAtLevel(batch2, cur_level);
   auto results = batch_rule(self_value, self_bdim, batch1_value, batch1_bdim, batch2_value, batch2_bdim, beta, alpha);
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
+}
+template <typename batch_rule_t, batch_rule_t batch_rule>
+at::Tensor & random__from_generated_plumbing(at::Tensor & self, int64_t from, c10::optional<int64_t> to, c10::optional<at::Generator> generator) {
+  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  batch_rule(self_value, self_bdim, from, to, generator);
+  return self;
+}
+template <typename batch_rule_t, batch_rule_t batch_rule>
+at::Tensor & random__to_generated_plumbing(at::Tensor & self, int64_t to, c10::optional<at::Generator> generator) {
+  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  batch_rule(self_value, self_bdim, to, generator);
+  return self;
+}
+template <typename batch_rule_t, batch_rule_t batch_rule>
+at::Tensor & random__generated_plumbing(at::Tensor & self, c10::optional<at::Generator> generator) {
+  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  batch_rule(self_value, self_bdim, generator);
+  return self;
+}
+template <typename batch_rule_t, batch_rule_t batch_rule>
+at::Tensor & uniform__generated_plumbing(at::Tensor & self, double from, double to, c10::optional<at::Generator> generator) {
+  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  batch_rule(self_value, self_bdim, from, to, generator);
+  return self;
+}
+template <typename batch_rule_t, batch_rule_t batch_rule>
+at::Tensor & cauchy__generated_plumbing(at::Tensor & self, double median, double sigma, c10::optional<at::Generator> generator) {
+  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  batch_rule(self_value, self_bdim, median, sigma, generator);
+  return self;
+}
+template <typename batch_rule_t, batch_rule_t batch_rule>
+at::Tensor & log_normal__generated_plumbing(at::Tensor & self, double mean, double std, c10::optional<at::Generator> generator) {
+  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  batch_rule(self_value, self_bdim, mean, std, generator);
+  return self;
+}
+template <typename batch_rule_t, batch_rule_t batch_rule>
+at::Tensor & exponential__generated_plumbing(at::Tensor & self, double lambd, c10::optional<at::Generator> generator) {
+  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  batch_rule(self_value, self_bdim, lambd, generator);
+  return self;
+}
+template <typename batch_rule_t, batch_rule_t batch_rule>
+at::Tensor & geometric__generated_plumbing(at::Tensor & self, double p, c10::optional<at::Generator> generator) {
+  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  batch_rule(self_value, self_bdim, p, generator);
+  return self;
 }
 template <typename batch_rule_t, batch_rule_t batch_rule>
 at::Tensor diag_generated_plumbing(const at::Tensor & self, int64_t diagonal) {
@@ -11852,26 +13907,6 @@ at::Tensor tril_generated_plumbing(const at::Tensor & self, int64_t diagonal) {
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 template <typename batch_rule_t, batch_rule_t batch_rule>
-at::Tensor tril_indices_generated_plumbing(int64_t row, int64_t col, int64_t offset, c10::optional<at::ScalarType> dtype, c10::optional<at::Layout> layout, c10::optional<at::Device> device, c10::optional<bool> pin_memory) {
-  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
-  auto maybe_layer = maybeCurrentDynamicLayer();
-  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
-  int64_t cur_level = maybe_layer->layerId();
-
-  auto results = batch_rule(row, col, offset, dtype, layout, device, pin_memory);
-  return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
-}
-template <typename batch_rule_t, batch_rule_t batch_rule>
-at::Tensor triu_indices_generated_plumbing(int64_t row, int64_t col, int64_t offset, c10::optional<at::ScalarType> dtype, c10::optional<at::Layout> layout, c10::optional<at::Device> device, c10::optional<bool> pin_memory) {
-  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
-  auto maybe_layer = maybeCurrentDynamicLayer();
-  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
-  int64_t cur_level = maybe_layer->layerId();
-
-  auto results = batch_rule(row, col, offset, dtype, layout, device, pin_memory);
-  return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
-}
-template <typename batch_rule_t, batch_rule_t batch_rule>
 at::Tensor trace_generated_plumbing(const at::Tensor & self) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
   auto maybe_layer = maybeCurrentDynamicLayer();
@@ -11923,6 +13958,33 @@ at::Tensor ne_Tensor_generated_plumbing(const at::Tensor & self, const at::Tenso
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 template <typename batch_rule_t, batch_rule_t batch_rule>
+at::Tensor & ne__Scalar_generated_plumbing(at::Tensor & self, const at::Scalar & other) {
+  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  batch_rule(self_value, self_bdim, other);
+  return self;
+}
+template <typename batch_rule_t, batch_rule_t batch_rule>
+at::Tensor & ne__Tensor_generated_plumbing(at::Tensor & self, const at::Tensor & other) {
+  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  Tensor other_value;
+  optional<int64_t> other_bdim;
+  std::tie(other_value, other_bdim) = unwrapTensorAtLevel(other, cur_level);
+  batch_rule(self_value, self_bdim, other_value, other_bdim);
+  return self;
+}
+template <typename batch_rule_t, batch_rule_t batch_rule>
 at::Tensor not_equal_Scalar_generated_plumbing(const at::Tensor & self, const at::Scalar & other) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
   auto maybe_layer = maybeCurrentDynamicLayer();
@@ -11948,6 +14010,33 @@ at::Tensor not_equal_Tensor_generated_plumbing(const at::Tensor & self, const at
   std::tie(other_value, other_bdim) = unwrapTensorAtLevel(other, cur_level);
   auto results = batch_rule(self_value, self_bdim, other_value, other_bdim);
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
+}
+template <typename batch_rule_t, batch_rule_t batch_rule>
+at::Tensor & not_equal__Scalar_generated_plumbing(at::Tensor & self, const at::Scalar & other) {
+  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  batch_rule(self_value, self_bdim, other);
+  return self;
+}
+template <typename batch_rule_t, batch_rule_t batch_rule>
+at::Tensor & not_equal__Tensor_generated_plumbing(at::Tensor & self, const at::Tensor & other) {
+  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  Tensor other_value;
+  optional<int64_t> other_bdim;
+  std::tie(other_value, other_bdim) = unwrapTensorAtLevel(other, cur_level);
+  batch_rule(self_value, self_bdim, other_value, other_bdim);
+  return self;
 }
 template <typename batch_rule_t, batch_rule_t batch_rule>
 at::Tensor eq_Scalar_generated_plumbing(const at::Tensor & self, const at::Scalar & other) {
@@ -12004,6 +14093,33 @@ at::Tensor ge_Tensor_generated_plumbing(const at::Tensor & self, const at::Tenso
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 template <typename batch_rule_t, batch_rule_t batch_rule>
+at::Tensor & ge__Scalar_generated_plumbing(at::Tensor & self, const at::Scalar & other) {
+  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  batch_rule(self_value, self_bdim, other);
+  return self;
+}
+template <typename batch_rule_t, batch_rule_t batch_rule>
+at::Tensor & ge__Tensor_generated_plumbing(at::Tensor & self, const at::Tensor & other) {
+  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  Tensor other_value;
+  optional<int64_t> other_bdim;
+  std::tie(other_value, other_bdim) = unwrapTensorAtLevel(other, cur_level);
+  batch_rule(self_value, self_bdim, other_value, other_bdim);
+  return self;
+}
+template <typename batch_rule_t, batch_rule_t batch_rule>
 at::Tensor greater_equal_Scalar_generated_plumbing(const at::Tensor & self, const at::Scalar & other) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
   auto maybe_layer = maybeCurrentDynamicLayer();
@@ -12029,6 +14145,33 @@ at::Tensor greater_equal_Tensor_generated_plumbing(const at::Tensor & self, cons
   std::tie(other_value, other_bdim) = unwrapTensorAtLevel(other, cur_level);
   auto results = batch_rule(self_value, self_bdim, other_value, other_bdim);
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
+}
+template <typename batch_rule_t, batch_rule_t batch_rule>
+at::Tensor & greater_equal__Scalar_generated_plumbing(at::Tensor & self, const at::Scalar & other) {
+  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  batch_rule(self_value, self_bdim, other);
+  return self;
+}
+template <typename batch_rule_t, batch_rule_t batch_rule>
+at::Tensor & greater_equal__Tensor_generated_plumbing(at::Tensor & self, const at::Tensor & other) {
+  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  Tensor other_value;
+  optional<int64_t> other_bdim;
+  std::tie(other_value, other_bdim) = unwrapTensorAtLevel(other, cur_level);
+  batch_rule(self_value, self_bdim, other_value, other_bdim);
+  return self;
 }
 template <typename batch_rule_t, batch_rule_t batch_rule>
 at::Tensor le_Scalar_generated_plumbing(const at::Tensor & self, const at::Scalar & other) {
@@ -12058,6 +14201,33 @@ at::Tensor le_Tensor_generated_plumbing(const at::Tensor & self, const at::Tenso
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 template <typename batch_rule_t, batch_rule_t batch_rule>
+at::Tensor & le__Scalar_generated_plumbing(at::Tensor & self, const at::Scalar & other) {
+  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  batch_rule(self_value, self_bdim, other);
+  return self;
+}
+template <typename batch_rule_t, batch_rule_t batch_rule>
+at::Tensor & le__Tensor_generated_plumbing(at::Tensor & self, const at::Tensor & other) {
+  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  Tensor other_value;
+  optional<int64_t> other_bdim;
+  std::tie(other_value, other_bdim) = unwrapTensorAtLevel(other, cur_level);
+  batch_rule(self_value, self_bdim, other_value, other_bdim);
+  return self;
+}
+template <typename batch_rule_t, batch_rule_t batch_rule>
 at::Tensor less_equal_Scalar_generated_plumbing(const at::Tensor & self, const at::Scalar & other) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
   auto maybe_layer = maybeCurrentDynamicLayer();
@@ -12083,6 +14253,33 @@ at::Tensor less_equal_Tensor_generated_plumbing(const at::Tensor & self, const a
   std::tie(other_value, other_bdim) = unwrapTensorAtLevel(other, cur_level);
   auto results = batch_rule(self_value, self_bdim, other_value, other_bdim);
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
+}
+template <typename batch_rule_t, batch_rule_t batch_rule>
+at::Tensor & less_equal__Scalar_generated_plumbing(at::Tensor & self, const at::Scalar & other) {
+  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  batch_rule(self_value, self_bdim, other);
+  return self;
+}
+template <typename batch_rule_t, batch_rule_t batch_rule>
+at::Tensor & less_equal__Tensor_generated_plumbing(at::Tensor & self, const at::Tensor & other) {
+  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  Tensor other_value;
+  optional<int64_t> other_bdim;
+  std::tie(other_value, other_bdim) = unwrapTensorAtLevel(other, cur_level);
+  batch_rule(self_value, self_bdim, other_value, other_bdim);
+  return self;
 }
 template <typename batch_rule_t, batch_rule_t batch_rule>
 at::Tensor gt_Scalar_generated_plumbing(const at::Tensor & self, const at::Scalar & other) {
@@ -12112,6 +14309,33 @@ at::Tensor gt_Tensor_generated_plumbing(const at::Tensor & self, const at::Tenso
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 template <typename batch_rule_t, batch_rule_t batch_rule>
+at::Tensor & gt__Scalar_generated_plumbing(at::Tensor & self, const at::Scalar & other) {
+  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  batch_rule(self_value, self_bdim, other);
+  return self;
+}
+template <typename batch_rule_t, batch_rule_t batch_rule>
+at::Tensor & gt__Tensor_generated_plumbing(at::Tensor & self, const at::Tensor & other) {
+  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  Tensor other_value;
+  optional<int64_t> other_bdim;
+  std::tie(other_value, other_bdim) = unwrapTensorAtLevel(other, cur_level);
+  batch_rule(self_value, self_bdim, other_value, other_bdim);
+  return self;
+}
+template <typename batch_rule_t, batch_rule_t batch_rule>
 at::Tensor greater_Scalar_generated_plumbing(const at::Tensor & self, const at::Scalar & other) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
   auto maybe_layer = maybeCurrentDynamicLayer();
@@ -12137,6 +14361,33 @@ at::Tensor greater_Tensor_generated_plumbing(const at::Tensor & self, const at::
   std::tie(other_value, other_bdim) = unwrapTensorAtLevel(other, cur_level);
   auto results = batch_rule(self_value, self_bdim, other_value, other_bdim);
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
+}
+template <typename batch_rule_t, batch_rule_t batch_rule>
+at::Tensor & greater__Scalar_generated_plumbing(at::Tensor & self, const at::Scalar & other) {
+  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  batch_rule(self_value, self_bdim, other);
+  return self;
+}
+template <typename batch_rule_t, batch_rule_t batch_rule>
+at::Tensor & greater__Tensor_generated_plumbing(at::Tensor & self, const at::Tensor & other) {
+  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  Tensor other_value;
+  optional<int64_t> other_bdim;
+  std::tie(other_value, other_bdim) = unwrapTensorAtLevel(other, cur_level);
+  batch_rule(self_value, self_bdim, other_value, other_bdim);
+  return self;
 }
 template <typename batch_rule_t, batch_rule_t batch_rule>
 at::Tensor lt_Scalar_generated_plumbing(const at::Tensor & self, const at::Scalar & other) {
@@ -12166,6 +14417,33 @@ at::Tensor lt_Tensor_generated_plumbing(const at::Tensor & self, const at::Tenso
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 template <typename batch_rule_t, batch_rule_t batch_rule>
+at::Tensor & lt__Scalar_generated_plumbing(at::Tensor & self, const at::Scalar & other) {
+  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  batch_rule(self_value, self_bdim, other);
+  return self;
+}
+template <typename batch_rule_t, batch_rule_t batch_rule>
+at::Tensor & lt__Tensor_generated_plumbing(at::Tensor & self, const at::Tensor & other) {
+  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  Tensor other_value;
+  optional<int64_t> other_bdim;
+  std::tie(other_value, other_bdim) = unwrapTensorAtLevel(other, cur_level);
+  batch_rule(self_value, self_bdim, other_value, other_bdim);
+  return self;
+}
+template <typename batch_rule_t, batch_rule_t batch_rule>
 at::Tensor less_Scalar_generated_plumbing(const at::Tensor & self, const at::Scalar & other) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
   auto maybe_layer = maybeCurrentDynamicLayer();
@@ -12191,6 +14469,33 @@ at::Tensor less_Tensor_generated_plumbing(const at::Tensor & self, const at::Ten
   std::tie(other_value, other_bdim) = unwrapTensorAtLevel(other, cur_level);
   auto results = batch_rule(self_value, self_bdim, other_value, other_bdim);
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
+}
+template <typename batch_rule_t, batch_rule_t batch_rule>
+at::Tensor & less__Scalar_generated_plumbing(at::Tensor & self, const at::Scalar & other) {
+  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  batch_rule(self_value, self_bdim, other);
+  return self;
+}
+template <typename batch_rule_t, batch_rule_t batch_rule>
+at::Tensor & less__Tensor_generated_plumbing(at::Tensor & self, const at::Tensor & other) {
+  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  Tensor other_value;
+  optional<int64_t> other_bdim;
+  std::tie(other_value, other_bdim) = unwrapTensorAtLevel(other, cur_level);
+  batch_rule(self_value, self_bdim, other_value, other_bdim);
+  return self;
 }
 template <typename batch_rule_t, batch_rule_t batch_rule>
 at::Tensor take_generated_plumbing(const at::Tensor & self, const at::Tensor & index) {
@@ -12421,6 +14726,24 @@ at::Tensor addcmul_generated_plumbing(const at::Tensor & self, const at::Tensor 
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 template <typename batch_rule_t, batch_rule_t batch_rule>
+at::Tensor & addcmul__generated_plumbing(at::Tensor & self, const at::Tensor & tensor1, const at::Tensor & tensor2, const at::Scalar & value) {
+  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  Tensor tensor1_value;
+  optional<int64_t> tensor1_bdim;
+  std::tie(tensor1_value, tensor1_bdim) = unwrapTensorAtLevel(tensor1, cur_level);
+  Tensor tensor2_value;
+  optional<int64_t> tensor2_bdim;
+  std::tie(tensor2_value, tensor2_bdim) = unwrapTensorAtLevel(tensor2, cur_level);
+  batch_rule(self_value, self_bdim, tensor1_value, tensor1_bdim, tensor2_value, tensor2_bdim, value);
+  return self;
+}
+template <typename batch_rule_t, batch_rule_t batch_rule>
 at::Tensor addcdiv_generated_plumbing(const at::Tensor & self, const at::Tensor & tensor1, const at::Tensor & tensor2, const at::Scalar & value) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
   auto maybe_layer = maybeCurrentDynamicLayer();
@@ -12437,6 +14760,24 @@ at::Tensor addcdiv_generated_plumbing(const at::Tensor & self, const at::Tensor 
   std::tie(tensor2_value, tensor2_bdim) = unwrapTensorAtLevel(tensor2, cur_level);
   auto results = batch_rule(self_value, self_bdim, tensor1_value, tensor1_bdim, tensor2_value, tensor2_bdim, value);
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
+}
+template <typename batch_rule_t, batch_rule_t batch_rule>
+at::Tensor & addcdiv__generated_plumbing(at::Tensor & self, const at::Tensor & tensor1, const at::Tensor & tensor2, const at::Scalar & value) {
+  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  Tensor tensor1_value;
+  optional<int64_t> tensor1_bdim;
+  std::tie(tensor1_value, tensor1_bdim) = unwrapTensorAtLevel(tensor1, cur_level);
+  Tensor tensor2_value;
+  optional<int64_t> tensor2_bdim;
+  std::tie(tensor2_value, tensor2_bdim) = unwrapTensorAtLevel(tensor2, cur_level);
+  batch_rule(self_value, self_bdim, tensor1_value, tensor1_bdim, tensor2_value, tensor2_bdim, value);
+  return self;
 }
 template <typename batch_rule_t, batch_rule_t batch_rule>
 at::Tensor cross_entropy_loss_generated_plumbing(const at::Tensor & self, const at::Tensor & target, const c10::optional<at::Tensor> & weight, int64_t reduction, int64_t ignore_index, double label_smoothing) {
@@ -12774,6 +15115,18 @@ at::Tensor multinomial_generated_plumbing(const at::Tensor & self, int64_t num_s
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 template <typename batch_rule_t, batch_rule_t batch_rule>
+at::Tensor & lgamma__generated_plumbing(at::Tensor & self) {
+  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  batch_rule(self_value, self_bdim);
+  return self;
+}
+template <typename batch_rule_t, batch_rule_t batch_rule>
 at::Tensor lgamma_generated_plumbing(const at::Tensor & self) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
   auto maybe_layer = maybeCurrentDynamicLayer();
@@ -12810,6 +15163,18 @@ at::Tensor polygamma_generated_plumbing(int64_t n, const at::Tensor & self) {
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 template <typename batch_rule_t, batch_rule_t batch_rule>
+at::Tensor & polygamma__generated_plumbing(at::Tensor & self, int64_t n) {
+  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  batch_rule(self_value, self_bdim, n);
+  return self;
+}
+template <typename batch_rule_t, batch_rule_t batch_rule>
 at::Tensor erfinv_generated_plumbing(const at::Tensor & self) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
   auto maybe_layer = maybeCurrentDynamicLayer();
@@ -12820,6 +15185,18 @@ at::Tensor erfinv_generated_plumbing(const at::Tensor & self) {
   std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
   auto results = batch_rule(self_value, self_bdim);
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
+}
+template <typename batch_rule_t, batch_rule_t batch_rule>
+at::Tensor & erfinv__generated_plumbing(at::Tensor & self) {
+  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  batch_rule(self_value, self_bdim);
+  return self;
 }
 template <typename batch_rule_t, batch_rule_t batch_rule>
 at::Tensor i0_generated_plumbing(const at::Tensor & self) {
@@ -12834,6 +15211,18 @@ at::Tensor i0_generated_plumbing(const at::Tensor & self) {
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 template <typename batch_rule_t, batch_rule_t batch_rule>
+at::Tensor & i0__generated_plumbing(at::Tensor & self) {
+  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  batch_rule(self_value, self_bdim);
+  return self;
+}
+template <typename batch_rule_t, batch_rule_t batch_rule>
 at::Tensor sign_generated_plumbing(const at::Tensor & self) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
   auto maybe_layer = maybeCurrentDynamicLayer();
@@ -12844,6 +15233,18 @@ at::Tensor sign_generated_plumbing(const at::Tensor & self) {
   std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
   auto results = batch_rule(self_value, self_bdim);
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
+}
+template <typename batch_rule_t, batch_rule_t batch_rule>
+at::Tensor & sign__generated_plumbing(at::Tensor & self) {
+  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  batch_rule(self_value, self_bdim);
+  return self;
 }
 template <typename batch_rule_t, batch_rule_t batch_rule>
 at::Tensor signbit_generated_plumbing(const at::Tensor & self) {
@@ -12871,6 +15272,21 @@ at::Tensor dist_generated_plumbing(const at::Tensor & self, const at::Tensor & o
   std::tie(other_value, other_bdim) = unwrapTensorAtLevel(other, cur_level);
   auto results = batch_rule(self_value, self_bdim, other_value, other_bdim, p);
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
+}
+template <typename batch_rule_t, batch_rule_t batch_rule>
+at::Tensor & atan2__generated_plumbing(at::Tensor & self, const at::Tensor & other) {
+  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  Tensor other_value;
+  optional<int64_t> other_bdim;
+  std::tie(other_value, other_bdim) = unwrapTensorAtLevel(other, cur_level);
+  batch_rule(self_value, self_bdim, other_value, other_bdim);
+  return self;
 }
 template <typename batch_rule_t, batch_rule_t batch_rule>
 at::Tensor atan2_generated_plumbing(const at::Tensor & self, const at::Tensor & other) {
@@ -12901,6 +15317,21 @@ at::Tensor arctan2_generated_plumbing(const at::Tensor & self, const at::Tensor 
   std::tie(other_value, other_bdim) = unwrapTensorAtLevel(other, cur_level);
   auto results = batch_rule(self_value, self_bdim, other_value, other_bdim);
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
+}
+template <typename batch_rule_t, batch_rule_t batch_rule>
+at::Tensor & arctan2__generated_plumbing(at::Tensor & self, const at::Tensor & other) {
+  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  Tensor other_value;
+  optional<int64_t> other_bdim;
+  std::tie(other_value, other_bdim) = unwrapTensorAtLevel(other, cur_level);
+  batch_rule(self_value, self_bdim, other_value, other_bdim);
+  return self;
 }
 template <typename batch_rule_t, batch_rule_t batch_rule>
 at::Tensor lerp_Scalar_generated_plumbing(const at::Tensor & self, const at::Tensor & end, const at::Scalar & weight) {
@@ -13048,6 +15479,18 @@ at::Tensor fmod_Scalar_generated_plumbing(const at::Tensor & self, const at::Sca
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 template <typename batch_rule_t, batch_rule_t batch_rule>
+at::Tensor & fmod__Scalar_generated_plumbing(at::Tensor & self, const at::Scalar & other) {
+  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  batch_rule(self_value, self_bdim, other);
+  return self;
+}
+template <typename batch_rule_t, batch_rule_t batch_rule>
 at::Tensor fmod_Tensor_generated_plumbing(const at::Tensor & self, const at::Tensor & other) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
   auto maybe_layer = maybeCurrentDynamicLayer();
@@ -13061,6 +15504,21 @@ at::Tensor fmod_Tensor_generated_plumbing(const at::Tensor & self, const at::Ten
   std::tie(other_value, other_bdim) = unwrapTensorAtLevel(other, cur_level);
   auto results = batch_rule(self_value, self_bdim, other_value, other_bdim);
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
+}
+template <typename batch_rule_t, batch_rule_t batch_rule>
+at::Tensor & fmod__Tensor_generated_plumbing(at::Tensor & self, const at::Tensor & other) {
+  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  Tensor other_value;
+  optional<int64_t> other_bdim;
+  std::tie(other_value, other_bdim) = unwrapTensorAtLevel(other, cur_level);
+  batch_rule(self_value, self_bdim, other_value, other_bdim);
+  return self;
 }
 template <typename batch_rule_t, batch_rule_t batch_rule>
 at::Tensor hypot_generated_plumbing(const at::Tensor & self, const at::Tensor & other) {
@@ -13078,6 +15536,21 @@ at::Tensor hypot_generated_plumbing(const at::Tensor & self, const at::Tensor & 
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 template <typename batch_rule_t, batch_rule_t batch_rule>
+at::Tensor & hypot__generated_plumbing(at::Tensor & self, const at::Tensor & other) {
+  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  Tensor other_value;
+  optional<int64_t> other_bdim;
+  std::tie(other_value, other_bdim) = unwrapTensorAtLevel(other, cur_level);
+  batch_rule(self_value, self_bdim, other_value, other_bdim);
+  return self;
+}
+template <typename batch_rule_t, batch_rule_t batch_rule>
 at::Tensor igamma_generated_plumbing(const at::Tensor & self, const at::Tensor & other) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
   auto maybe_layer = maybeCurrentDynamicLayer();
@@ -13091,6 +15564,21 @@ at::Tensor igamma_generated_plumbing(const at::Tensor & self, const at::Tensor &
   std::tie(other_value, other_bdim) = unwrapTensorAtLevel(other, cur_level);
   auto results = batch_rule(self_value, self_bdim, other_value, other_bdim);
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
+}
+template <typename batch_rule_t, batch_rule_t batch_rule>
+at::Tensor & igamma__generated_plumbing(at::Tensor & self, const at::Tensor & other) {
+  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  Tensor other_value;
+  optional<int64_t> other_bdim;
+  std::tie(other_value, other_bdim) = unwrapTensorAtLevel(other, cur_level);
+  batch_rule(self_value, self_bdim, other_value, other_bdim);
+  return self;
 }
 template <typename batch_rule_t, batch_rule_t batch_rule>
 at::Tensor igammac_generated_plumbing(const at::Tensor & self, const at::Tensor & other) {
@@ -13108,6 +15596,21 @@ at::Tensor igammac_generated_plumbing(const at::Tensor & self, const at::Tensor 
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 template <typename batch_rule_t, batch_rule_t batch_rule>
+at::Tensor & igammac__generated_plumbing(at::Tensor & self, const at::Tensor & other) {
+  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  Tensor other_value;
+  optional<int64_t> other_bdim;
+  std::tie(other_value, other_bdim) = unwrapTensorAtLevel(other, cur_level);
+  batch_rule(self_value, self_bdim, other_value, other_bdim);
+  return self;
+}
+template <typename batch_rule_t, batch_rule_t batch_rule>
 at::Tensor nextafter_generated_plumbing(const at::Tensor & self, const at::Tensor & other) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
   auto maybe_layer = maybeCurrentDynamicLayer();
@@ -13123,6 +15626,21 @@ at::Tensor nextafter_generated_plumbing(const at::Tensor & self, const at::Tenso
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 template <typename batch_rule_t, batch_rule_t batch_rule>
+at::Tensor & nextafter__generated_plumbing(at::Tensor & self, const at::Tensor & other) {
+  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  Tensor other_value;
+  optional<int64_t> other_bdim;
+  std::tie(other_value, other_bdim) = unwrapTensorAtLevel(other, cur_level);
+  batch_rule(self_value, self_bdim, other_value, other_bdim);
+  return self;
+}
+template <typename batch_rule_t, batch_rule_t batch_rule>
 at::Tensor remainder_Scalar_generated_plumbing(const at::Tensor & self, const at::Scalar & other) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
   auto maybe_layer = maybeCurrentDynamicLayer();
@@ -13133,6 +15651,18 @@ at::Tensor remainder_Scalar_generated_plumbing(const at::Tensor & self, const at
   std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
   auto results = batch_rule(self_value, self_bdim, other);
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
+}
+template <typename batch_rule_t, batch_rule_t batch_rule>
+at::Tensor & remainder__Scalar_generated_plumbing(at::Tensor & self, const at::Scalar & other) {
+  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  batch_rule(self_value, self_bdim, other);
+  return self;
 }
 template <typename batch_rule_t, batch_rule_t batch_rule>
 at::Tensor remainder_Tensor_generated_plumbing(const at::Tensor & self, const at::Tensor & other) {
@@ -13148,6 +15678,21 @@ at::Tensor remainder_Tensor_generated_plumbing(const at::Tensor & self, const at
   std::tie(other_value, other_bdim) = unwrapTensorAtLevel(other, cur_level);
   auto results = batch_rule(self_value, self_bdim, other_value, other_bdim);
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
+}
+template <typename batch_rule_t, batch_rule_t batch_rule>
+at::Tensor & remainder__Tensor_generated_plumbing(at::Tensor & self, const at::Tensor & other) {
+  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  Tensor other_value;
+  optional<int64_t> other_bdim;
+  std::tie(other_value, other_bdim) = unwrapTensorAtLevel(other, cur_level);
+  batch_rule(self_value, self_bdim, other_value, other_bdim);
+  return self;
 }
 template <typename batch_rule_t, batch_rule_t batch_rule>
 at::Tensor remainder_Scalar_Tensor_generated_plumbing(const at::Scalar & self, const at::Tensor & other) {
@@ -13462,6 +16007,18 @@ at::Tensor renorm_generated_plumbing(const at::Tensor & self, const at::Scalar &
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 template <typename batch_rule_t, batch_rule_t batch_rule>
+at::Tensor & renorm__generated_plumbing(at::Tensor & self, const at::Scalar & p, int64_t dim, const at::Scalar & maxnorm) {
+  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  batch_rule(self_value, self_bdim, p, dim, maxnorm);
+  return self;
+}
+template <typename batch_rule_t, batch_rule_t batch_rule>
 at::Tensor unfold_generated_plumbing(const at::Tensor & self, int64_t dimension, int64_t size, int64_t step) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
   auto maybe_layer = maybeCurrentDynamicLayer();
@@ -13525,6 +16082,33 @@ at::Tensor pow_Tensor_Scalar_generated_plumbing(const at::Tensor & self, const a
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 template <typename batch_rule_t, batch_rule_t batch_rule>
+at::Tensor & pow__Scalar_generated_plumbing(at::Tensor & self, const at::Scalar & exponent) {
+  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  batch_rule(self_value, self_bdim, exponent);
+  return self;
+}
+template <typename batch_rule_t, batch_rule_t batch_rule>
+at::Tensor & pow__Tensor_generated_plumbing(at::Tensor & self, const at::Tensor & exponent) {
+  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  Tensor exponent_value;
+  optional<int64_t> exponent_bdim;
+  std::tie(exponent_value, exponent_bdim) = unwrapTensorAtLevel(exponent, cur_level);
+  batch_rule(self_value, self_bdim, exponent_value, exponent_bdim);
+  return self;
+}
+template <typename batch_rule_t, batch_rule_t batch_rule>
 at::Tensor float_power_Tensor_Tensor_generated_plumbing(const at::Tensor & self, const at::Tensor & exponent) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
   auto maybe_layer = maybeCurrentDynamicLayer();
@@ -13562,6 +16146,45 @@ at::Tensor float_power_Tensor_Scalar_generated_plumbing(const at::Tensor & self,
   std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
   auto results = batch_rule(self_value, self_bdim, exponent);
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
+}
+template <typename batch_rule_t, batch_rule_t batch_rule>
+at::Tensor & float_power__Scalar_generated_plumbing(at::Tensor & self, const at::Scalar & exponent) {
+  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  batch_rule(self_value, self_bdim, exponent);
+  return self;
+}
+template <typename batch_rule_t, batch_rule_t batch_rule>
+at::Tensor & float_power__Tensor_generated_plumbing(at::Tensor & self, const at::Tensor & exponent) {
+  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  Tensor exponent_value;
+  optional<int64_t> exponent_bdim;
+  std::tie(exponent_value, exponent_bdim) = unwrapTensorAtLevel(exponent, cur_level);
+  batch_rule(self_value, self_bdim, exponent_value, exponent_bdim);
+  return self;
+}
+template <typename batch_rule_t, batch_rule_t batch_rule>
+at::Tensor & normal__generated_plumbing(at::Tensor & self, double mean, double std, c10::optional<at::Generator> generator) {
+  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  batch_rule(self_value, self_bdim, mean, std, generator);
+  return self;
 }
 template <typename batch_rule_t, batch_rule_t batch_rule>
 at::Tensor normal_Tensor_float_generated_plumbing(const at::Tensor & mean, double std, c10::optional<at::Generator> generator) {
@@ -13603,16 +16226,6 @@ at::Tensor normal_Tensor_Tensor_generated_plumbing(const at::Tensor & mean, cons
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 template <typename batch_rule_t, batch_rule_t batch_rule>
-at::Tensor normal_float_float_generated_plumbing(double mean, double std, at::IntArrayRef size, c10::optional<at::Generator> generator, c10::optional<at::ScalarType> dtype, c10::optional<at::Layout> layout, c10::optional<at::Device> device, c10::optional<bool> pin_memory) {
-  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
-  auto maybe_layer = maybeCurrentDynamicLayer();
-  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
-  int64_t cur_level = maybe_layer->layerId();
-
-  auto results = batch_rule(mean, std, size, generator, dtype, layout, device, pin_memory);
-  return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
-}
-template <typename batch_rule_t, batch_rule_t batch_rule>
 at::Tensor alias_generated_plumbing(const at::Tensor & self) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
   auto maybe_layer = maybeCurrentDynamicLayer();
@@ -13623,6 +16236,24 @@ at::Tensor alias_generated_plumbing(const at::Tensor & self) {
   std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
   auto results = batch_rule(self_value, self_bdim);
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
+}
+template <typename batch_rule_t, batch_rule_t batch_rule>
+at::Tensor & _amp_update_scale__generated_plumbing(at::Tensor & self, at::Tensor & growth_tracker, const at::Tensor & found_inf, double scale_growth_factor, double scale_backoff_factor, int64_t growth_interval) {
+  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  Tensor growth_tracker_value;
+  optional<int64_t> growth_tracker_bdim;
+  std::tie(growth_tracker_value, growth_tracker_bdim) = unwrapTensorAtLevel(growth_tracker, cur_level);
+  Tensor found_inf_value;
+  optional<int64_t> found_inf_bdim;
+  std::tie(found_inf_value, found_inf_bdim) = unwrapTensorAtLevel(found_inf, cur_level);
+  batch_rule(self_value, self_bdim, growth_tracker_value, growth_tracker_bdim, found_inf_value, found_inf_bdim, scale_growth_factor, scale_backoff_factor, growth_interval);
+  return self;
 }
 template <typename batch_rule_t, batch_rule_t batch_rule>
 at::Tensor _cat_generated_plumbing(at::TensorList tensors, int64_t dim) {
@@ -14646,6 +17277,18 @@ at::Tensor elu_backward_generated_plumbing(const at::Tensor & grad_output, const
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 template <typename batch_rule_t, batch_rule_t batch_rule>
+at::Tensor & elu__generated_plumbing(at::Tensor & self, const at::Scalar & alpha, const at::Scalar & scale, const at::Scalar & input_scale) {
+  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  batch_rule(self_value, self_bdim, alpha, scale, input_scale);
+  return self;
+}
+template <typename batch_rule_t, batch_rule_t batch_rule>
 at::Tensor glu_generated_plumbing(const at::Tensor & self, int64_t dim) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
   auto maybe_layer = maybeCurrentDynamicLayer();
@@ -14683,6 +17326,18 @@ at::Tensor hardsigmoid_generated_plumbing(const at::Tensor & self) {
   std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
   auto results = batch_rule(self_value, self_bdim);
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
+}
+template <typename batch_rule_t, batch_rule_t batch_rule>
+at::Tensor & hardsigmoid__generated_plumbing(at::Tensor & self) {
+  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  batch_rule(self_value, self_bdim);
+  return self;
 }
 template <typename batch_rule_t, batch_rule_t batch_rule>
 at::Tensor hardsigmoid_backward_generated_plumbing(const at::Tensor & grad_output, const at::Tensor & self) {
@@ -14727,6 +17382,18 @@ at::Tensor hardtanh_backward_generated_plumbing(const at::Tensor & grad_output, 
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 template <typename batch_rule_t, batch_rule_t batch_rule>
+at::Tensor & hardtanh__generated_plumbing(at::Tensor & self, const at::Scalar & min_val, const at::Scalar & max_val) {
+  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  batch_rule(self_value, self_bdim, min_val, max_val);
+  return self;
+}
+template <typename batch_rule_t, batch_rule_t batch_rule>
 at::Tensor hardswish_generated_plumbing(const at::Tensor & self) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
   auto maybe_layer = maybeCurrentDynamicLayer();
@@ -14737,6 +17404,18 @@ at::Tensor hardswish_generated_plumbing(const at::Tensor & self) {
   std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
   auto results = batch_rule(self_value, self_bdim);
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
+}
+template <typename batch_rule_t, batch_rule_t batch_rule>
+at::Tensor & hardswish__generated_plumbing(at::Tensor & self) {
+  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  batch_rule(self_value, self_bdim);
+  return self;
 }
 template <typename batch_rule_t, batch_rule_t batch_rule>
 at::Tensor hardswish_backward_generated_plumbing(const at::Tensor & grad_output, const at::Tensor & self) {
@@ -14779,6 +17458,18 @@ at::Tensor leaky_relu_backward_generated_plumbing(const at::Tensor & grad_output
   std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
   auto results = batch_rule(grad_output_value, grad_output_bdim, self_value, self_bdim, negative_slope, self_is_result);
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
+}
+template <typename batch_rule_t, batch_rule_t batch_rule>
+at::Tensor & leaky_relu__generated_plumbing(at::Tensor & self, const at::Scalar & negative_slope) {
+  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  batch_rule(self_value, self_bdim, negative_slope);
+  return self;
 }
 template <typename batch_rule_t, batch_rule_t batch_rule>
 at::Tensor log_sigmoid_generated_plumbing(const at::Tensor & self) {
@@ -14854,6 +17545,21 @@ at::Tensor rrelu_with_noise_backward_generated_plumbing(const at::Tensor & grad_
   std::tie(noise_value, noise_bdim) = unwrapTensorAtLevel(noise, cur_level);
   auto results = batch_rule(grad_output_value, grad_output_bdim, self_value, self_bdim, noise_value, noise_bdim, lower, upper, training, self_is_result);
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
+}
+template <typename batch_rule_t, batch_rule_t batch_rule>
+at::Tensor & rrelu_with_noise__generated_plumbing(at::Tensor & self, const at::Tensor & noise, const at::Scalar & lower, const at::Scalar & upper, bool training, c10::optional<at::Generator> generator) {
+  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  Tensor noise_value;
+  optional<int64_t> noise_bdim;
+  std::tie(noise_value, noise_bdim) = unwrapTensorAtLevel(noise, cur_level);
+  batch_rule(self_value, self_bdim, noise_value, noise_bdim, lower, upper, training, generator);
+  return self;
 }
 template <typename batch_rule_t, batch_rule_t batch_rule>
 at::Tensor softplus_generated_plumbing(const at::Tensor & self, const at::Scalar & beta, const at::Scalar & threshold) {
@@ -17127,26 +19833,6 @@ at::Tensor fft_ihfftn_generated_plumbing(const at::Tensor & self, c10::optional<
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 template <typename batch_rule_t, batch_rule_t batch_rule>
-at::Tensor fft_fftfreq_generated_plumbing(int64_t n, double d, c10::optional<at::ScalarType> dtype, c10::optional<at::Layout> layout, c10::optional<at::Device> device, c10::optional<bool> pin_memory) {
-  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
-  auto maybe_layer = maybeCurrentDynamicLayer();
-  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
-  int64_t cur_level = maybe_layer->layerId();
-
-  auto results = batch_rule(n, d, dtype, layout, device, pin_memory);
-  return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
-}
-template <typename batch_rule_t, batch_rule_t batch_rule>
-at::Tensor fft_rfftfreq_generated_plumbing(int64_t n, double d, c10::optional<at::ScalarType> dtype, c10::optional<at::Layout> layout, c10::optional<at::Device> device, c10::optional<bool> pin_memory) {
-  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
-  auto maybe_layer = maybeCurrentDynamicLayer();
-  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
-  int64_t cur_level = maybe_layer->layerId();
-
-  auto results = batch_rule(n, d, dtype, layout, device, pin_memory);
-  return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
-}
-template <typename batch_rule_t, batch_rule_t batch_rule>
 at::Tensor fft_fftshift_generated_plumbing(const at::Tensor & self, c10::optional<at::IntArrayRef> dim) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
   auto maybe_layer = maybeCurrentDynamicLayer();
@@ -17409,6 +20095,24 @@ at::Tensor linalg_householder_product_generated_plumbing(const at::Tensor & inpu
   std::tie(tau_value, tau_bdim) = unwrapTensorAtLevel(tau, cur_level);
   auto results = batch_rule(input_value, input_bdim, tau_value, tau_bdim);
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
+}
+template <typename batch_rule_t, batch_rule_t batch_rule>
+at::Tensor & _linalg_inv_out_helper__generated_plumbing(at::Tensor & self, at::Tensor & infos_lu, at::Tensor & infos_getri) {
+  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  Tensor infos_lu_value;
+  optional<int64_t> infos_lu_bdim;
+  std::tie(infos_lu_value, infos_lu_bdim) = unwrapTensorAtLevel(infos_lu, cur_level);
+  Tensor infos_getri_value;
+  optional<int64_t> infos_getri_bdim;
+  std::tie(infos_getri_value, infos_getri_bdim) = unwrapTensorAtLevel(infos_getri, cur_level);
+  batch_rule(self_value, self_bdim, infos_lu_value, infos_lu_bdim, infos_getri_value, infos_getri_bdim);
+  return self;
 }
 template <typename batch_rule_t, batch_rule_t batch_rule>
 ::std::tuple<at::Tensor,at::Tensor> linalg_inv_ex_generated_plumbing(const at::Tensor & self, bool check_errors) {

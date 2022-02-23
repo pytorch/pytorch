@@ -208,7 +208,7 @@ def main() -> None:
         return FileManager(install_dir=install_dir, template_dir=template_dir, dry_run=options.dry_run)
 
     cpu_fm = make_file_manager(options.install_dir)
-    cpu_fm.write('OutOfPlacePlumbing.h', lambda: gen_all_vmap_plumbing(native_functions))
+    cpu_fm.write('VmapGeneratedPlumbing.h', lambda: gen_all_vmap_plumbing(native_functions))
 
     if options.output_dependencies:
         depfile_path = pathlib.Path(options.output_dependencies).resolve()
