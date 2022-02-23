@@ -6,6 +6,7 @@ import re
 
 def main() -> None:
     ref = os.environ['GITHUB_REF']
+    print(f"ref is: {ref}")
     m = re.match(r'^refs/(\w+)/(.*)$', ref)
     if m:
         category, stripped = m.groups()
