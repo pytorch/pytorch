@@ -442,6 +442,7 @@ void initPythonIRBindings(PyObject* module_) {
       })
       .def("insert", [](Graph&g, Symbol opname, std::vector<Value*> args) {
         std::vector<NamedValue> args_named;
+        args_named.reserve(args.size());
         for (Value *v : args) {
           args_named.emplace_back(v);
         }
