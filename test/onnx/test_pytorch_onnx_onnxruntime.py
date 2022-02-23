@@ -2678,8 +2678,6 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.empty(2, 3, 3, dtype=torch.double).uniform_(0, 1)
         self.run_test(Bernoulli(), x)
 
-    # Enable test when fix for allowzero is in ORT
-    @skipForAllOpsetVersions()
     @skipIfUnsupportedMinOpsetVersion(14)
     def test_reshape_allowzero(self):
         class ReshapeModel(torch.nn.Module):

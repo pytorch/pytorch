@@ -34,7 +34,7 @@ def triu(g, self, diagonal, out=None):
 
 @parse_args("v", "v")
 def reshape(g, self, shape):
-    return sym_help._reshape_helper(g, self, shape)
+    return sym_help._reshape_helper(g, self, shape, allowzero=1)
 
 @parse_args("v", "v", "v", "v", "v", "i", "f", "f", "i")
 def batch_norm(g, input, weight, bias, running_mean, running_var, training, momentum, eps, cudnn_enabled):
