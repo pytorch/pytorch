@@ -166,7 +166,7 @@ void elu_backward_kernel(TensorIteratorBase& it, const Scalar& alpha, const Scal
 // TODO(yangxm): Add another fast kernel using formula
 // y = 0.5x * (1 + tanh(sqrt(2/Pi) * (x + 0.044715x^3)))
 // and the fast tanh impl from Eigen.
-void GeluKernelImpl(TensorIteratorBase& it) {
+void GeluKernelImpl(TensorIteratorBase& it, GeluType approximate) {
   auto grain_size = at::internal::GRAIN_SIZE;
   // Numbers based on benchmarking.
   // Benchmark: benchmarks/operator_benchmarks/pt/gelu_test.py
@@ -187,53 +187,134 @@ void GeluKernelImpl(TensorIteratorBase& it) {
   if (it.numel() > GELU_MIN_ELEMENTS_FOR_MULTI_THREADING) {
     grain_size = it.numel() / at::get_num_threads();
   }
-  AT_DISPATCH_FLOATING_TYPES_AND(
-      ScalarType::BFloat16, it.dtype(), "GeluKernelImpl", [&]() {
-    using Vec = vec::Vectorized<scalar_t>;
-    const Vec kAlphaVec(scalar_t(M_SQRT1_2));
-    const Vec kOneVec(scalar_t(1));
-    const Vec kPointFiveVec(scalar_t(0.5));
-    cpu_kernel_vec(
-        it,
-        [](scalar_t x) {
-          const scalar_t kAlpha = scalar_t(M_SQRT1_2);
-          return x * scalar_t(0.5) * (scalar_t(1) + std::erf(x * kAlpha));
-        },
-        [&](Vec x_vec) {
-          return x_vec * kPointFiveVec *
-              (kOneVec + (x_vec * kAlphaVec).erf());
-        },
-        grain_size);
-  });
+  if (approximate == GeluType::Tanh) {
+    AT_DISPATCH_FLOATING_TYPES_AND(
+        ScalarType::BFloat16, it.dtype(), "GeluKernelImpl", [&]() {
+      using Vec = vec::Vectorized<scalar_t>;
+      const Vec kBetaVec(scalar_t(M_SQRT2 * M_2_SQRTPI * 0.5));
+      const Vec kKappaVec(scalar_t(0.044715));
+      const Vec kOneVec(scalar_t(1));
+      const Vec kPointFiveVec(scalar_t(0.5));
+      cpu_kernel_vec(
+          it,
+          [](scalar_t x) {
+            const scalar_t kBeta = M_SQRT2 * M_2_SQRTPI * 0.5;
+            const scalar_t kKappa = 0.044715;
+            auto x_cube = x * x * x;
+            auto inner = kBeta * (x + kKappa * x_cube);
+            return scalar_t(0.5) * x * (scalar_t(1) + std::tanh(inner));
+          },
+          [&](Vec x_vec) {
+            auto x_cube = x_vec * x_vec * x_vec;
+            auto inner_vec = kBetaVec * (x_vec + kKappaVec * x_cube);
+            return kPointFiveVec * x_vec * (kOneVec + inner_vec.tanh());
+          },
+          grain_size);
+    });
+  } else {
+    AT_DISPATCH_FLOATING_TYPES_AND(
+        ScalarType::BFloat16, it.dtype(), "GeluKernelImpl", [&]() {
+      using Vec = vec::Vectorized<scalar_t>;
+      const Vec kAlphaVec(scalar_t(M_SQRT1_2));
+      const Vec kOneVec(scalar_t(1));
+      const Vec kPointFiveVec(scalar_t(0.5));
+      cpu_kernel_vec(
+          it,
+          [](scalar_t x) {
+            const scalar_t kAlpha = scalar_t(M_SQRT1_2);
+            return x * scalar_t(0.5) * (scalar_t(1) + std::erf(x * kAlpha));
+          },
+          [&](Vec x_vec) {
+            return x_vec * kPointFiveVec *
+                (kOneVec + (x_vec * kAlphaVec).erf());
+          },
+          grain_size);
+    });
+  }
 }
 
-void GeluBackwardKernelImpl(TensorIteratorBase& it) {
-  AT_DISPATCH_FLOATING_TYPES_AND(
-      ScalarType::BFloat16, it.dtype(), "GeluBackwardKernelImpl", [&]() {
-    using Vec = vec::Vectorized<scalar_t>;
-    const Vec kAlphaVec(scalar_t(M_SQRT1_2));
-    const Vec kBetaVec(scalar_t(M_2_SQRTPI * M_SQRT1_2 * 0.5));
-    const Vec kOneVec(scalar_t(1));
-    const Vec kPointFiveVec(scalar_t(0.5));
-    const Vec kMinusPointFiveVec(scalar_t(-0.5));
-    cpu_kernel_vec(
-        it,
-        [](scalar_t dy, scalar_t x) {
-          const scalar_t kAlpha = scalar_t(M_SQRT1_2);
-          const scalar_t kBeta = M_2_SQRTPI * M_SQRT1_2 * scalar_t(0.5);
-          const scalar_t cdf =
-              scalar_t(0.5) * (scalar_t(1) + std::erf(x * kAlpha));
-          const scalar_t pdf = kBeta * std::exp(x * x * scalar_t(-0.5));
-          return dy * (cdf + x * pdf);
-        },
-        [&](Vec dy_vec, Vec x_vec) {
-          const Vec cdf_vec =
-              kPointFiveVec * (kOneVec + (x_vec * kAlphaVec).erf());
-          const Vec pdf_vec =
-              kBetaVec * (x_vec * x_vec * kMinusPointFiveVec).exp();
-          return dy_vec * (cdf_vec + x_vec * pdf_vec);
-        });
-  });
+void GeluBackwardKernelImpl(TensorIteratorBase& it, GeluType approximate) {
+  if (approximate == GeluType::Tanh) {
+    AT_DISPATCH_FLOATING_TYPES_AND(
+        ScalarType::BFloat16, it.dtype(), "GeluBackwardKernelImpl", [&]() {
+      using Vec = vec::Vectorized<scalar_t>;
+      const Vec kBetaVec(scalar_t(M_SQRT2 * M_2_SQRTPI * 0.5));
+      const Vec kKappaVec(scalar_t(0.044715));
+      const Vec kOneVec(scalar_t(1));
+      const Vec kThreeVec(scalar_t(3));
+      const Vec kPointFiveVec(scalar_t(0.5));
+      cpu_kernel_vec(
+          it,
+          [](scalar_t dy, scalar_t x) {
+            const scalar_t kBeta = M_SQRT2 * M_2_SQRTPI * 0.5;
+            const scalar_t kKappa = 0.044715;
+            auto x_sq = x * x;
+            auto x_cube = x_sq * x;
+            auto inner = kBeta * (x + kKappa * x_cube);
+            auto tanh_inner = std::tanh(inner);
+
+            auto left = scalar_t(0.5) * x;
+            auto right = scalar_t(1) + tanh_inner;
+
+            auto left_derivative = scalar_t(0.5) * right;
+
+            auto tanh_derivative = scalar_t(1) - tanh_inner * tanh_inner;
+            auto inner_derivative =
+              kBeta * (scalar_t(1) + scalar_t(3) * kKappa * x_sq);
+            auto right_derivative = left * tanh_derivative * inner_derivative;
+
+            return dy * (left_derivative + right_derivative);
+          },
+          [&](Vec dy_vec, Vec x_vec) {
+            auto x_sq = x_vec * x_vec;
+            auto x_cube = x_vec * x_vec * x_vec;
+            auto inner_vec =
+                kBetaVec * (x_vec + kKappaVec * x_cube);
+            auto tanh_inner_vec = inner_vec.tanh();
+
+            auto left_vec = kPointFiveVec * x_vec;
+            auto right_vec = kOneVec + tanh_inner_vec;
+
+            auto left_derivative_vec = kPointFiveVec * right_vec;
+
+            auto tanh_derivative_vec =
+                kOneVec - tanh_inner_vec * tanh_inner_vec;
+            auto inner_derivative_vec =
+                kBetaVec * (kOneVec + kThreeVec * kKappaVec * x_sq);
+            auto right_derivative_vec =
+                left_vec * tanh_derivative_vec * inner_derivative_vec;
+
+            return dy_vec * (left_derivative_vec + right_derivative_vec);
+          });
+    });
+  } else {
+    AT_DISPATCH_FLOATING_TYPES_AND(
+        ScalarType::BFloat16, it.dtype(), "GeluBackwardKernelImpl", [&]() {
+      using Vec = vec::Vectorized<scalar_t>;
+      const Vec kAlphaVec(scalar_t(M_SQRT1_2));
+      const Vec kBetaVec(scalar_t(M_2_SQRTPI * M_SQRT1_2 * 0.5));
+      const Vec kOneVec(scalar_t(1));
+      const Vec kPointFiveVec(scalar_t(0.5));
+      const Vec kMinusPointFiveVec(scalar_t(-0.5));
+      cpu_kernel_vec(
+          it,
+          [](scalar_t dy, scalar_t x) {
+            const scalar_t kAlpha = scalar_t(M_SQRT1_2);
+            const scalar_t kBeta = M_2_SQRTPI * M_SQRT1_2 * scalar_t(0.5);
+            const scalar_t cdf =
+                scalar_t(0.5) * (scalar_t(1) + std::erf(x * kAlpha));
+            const scalar_t pdf = kBeta * std::exp(x * x * scalar_t(-0.5));
+            return dy * (cdf + x * pdf);
+          },
+          [&](Vec dy_vec, Vec x_vec) {
+            const Vec cdf_vec =
+                kPointFiveVec * (kOneVec + (x_vec * kAlphaVec).erf());
+            const Vec pdf_vec =
+                kBetaVec * (x_vec * x_vec * kMinusPointFiveVec).exp();
+            return dy_vec * (cdf_vec + x_vec * pdf_vec);
+          });
+    });
+  }
 }
 
 void hardsigmoid_kernel(TensorIteratorBase& iter) {
