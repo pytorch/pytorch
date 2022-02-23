@@ -227,8 +227,6 @@ void initLogging() {
   // Unlike caffe2 torch always writes to stderr.
   FLAGS_logtostderr = 1;
 
-  initGoogleLogging("torch-cpp");
-
   detail::setLogLevelFlagFromEnv();
 
   UpdateLoggingLevelsFromFlags();
@@ -405,7 +403,7 @@ void setLogLevelFlagFromEnv() {
 
   std::transform(level.begin(), level.end(), level.begin(),
     [](unsigned char c) {
-      return std::toupper(c);
+      return toupper(c);
     });
 
   if (level == "0" || level == "INFO") {
