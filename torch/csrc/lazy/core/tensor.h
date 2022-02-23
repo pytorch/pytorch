@@ -68,8 +68,8 @@ class TORCH_API LazyTensor : public c10::intrusive_ptr_target {
     return data()->generation;
   }
 
-  LazyTensor alias() const {
-    return LazyTensor(data_ptr());
+  LazyTensorPtr alias() const {
+    return c10::make_intrusive<LazyTensor>(data_ptr());
   }
 
   int64_t size(int64_t dim) const;
@@ -83,7 +83,7 @@ class TORCH_API LazyTensor : public c10::intrusive_ptr_target {
 
   void UpdateFromTensor(at::Tensor tensor, bool sync);
   void UpdateFromTensorOut(at::Tensor tensor);
-  void UpdateFromTensorOut(const LazyTensor& tensor);
+  void UpdateFromTensorOut(const LazyTensorPtr& tensor);
 
   Data* data() const;
 
@@ -203,16 +203,16 @@ TORCH_API LazyTensorPtr GetLtcTensorOrCreateForWrappedNumber(const at::Tensor& t
 
 // Section 2: LazyTensor => at::Tensor.
 // Creates an ATen tensor from an LazyTensor.
-TORCH_API at::Tensor CreateAtenFromLtcTensor(const LazyTensor& ltc_tensor);
+TORCH_API at::Tensor CreateAtenFromLtcTensor(const LazyTensorPtr& ltc_tensor);
 TORCH_API at::Tensor CreateAtenFromLtcTensor(LazyTensor&& ltc_tensor);
 
 template <size_t... Indices>
-auto TupleAtenFromLtcTensorsImpl(const std::vector<LazyTensor>& tensors, std::index_sequence<Indices...>) {
+auto TupleAtenFromLtcTensorsImpl(const std::vector<LazyTensorPtr>& tensors, std::index_sequence<Indices...>) {
     return std::make_tuple(CreateAtenFromLtcTensor(tensors[Indices])...);
 }
 
 template <size_t N>
-auto TupleAtenFromLtcTensors(const std::vector<LazyTensor>& tensors) {
+auto TupleAtenFromLtcTensors(const std::vector<LazyTensorPtr>& tensors) {
     return TupleAtenFromLtcTensorsImpl(tensors, std::make_index_sequence<N>{});
 }
 

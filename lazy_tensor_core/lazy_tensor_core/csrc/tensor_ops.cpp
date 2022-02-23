@@ -12,10 +12,10 @@
 namespace torch_lazy_tensors {
 namespace tensor_ops {
 
-torch::lazy::LazyTensor Select(const torch::lazy::LazyTensor& input, int64_t dim, int64_t index) {
-  auto shape = input.shape();
+torch::lazy::LazyTensorPtr Select(const torch::lazy::LazyTensorPtr& input, int64_t dim, int64_t index) {
+  auto shape = input->shape();
   dim = torch::lazy::GetCanonicalDimensionIndex(dim, shape.Get().dim());
-  torch::lazy::LazyTensor result = lazy_tensor_aten_ops::narrow(input, dim, index, 1);
+  torch::lazy::LazyTensorPtr result = lazy_tensor_aten_ops::narrow(input, dim, index, 1);
   auto new_dims = torch::lazy::DropDimensions(shape.Get().sizes(), {dim});
   return lazy_tensor_aten_ops::view(result, new_dims);
 }

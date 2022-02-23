@@ -9,7 +9,7 @@
 namespace torch_lazy_tensors {
 namespace tensor_ops {
 
-torch::lazy::LazyTensor Select(const torch::lazy::LazyTensor& input, int64_t dim, int64_t index);
+torch::lazy::LazyTensorPtr Select(const torch::lazy::LazyTensorPtr& input, int64_t dim, int64_t index);
 
 }  // namespace tensor_ops
 }  // namespace torch_lazy_tensors

@@ -19,7 +19,7 @@ class TORCH_API LTCTensorImpl final : public c10::TensorImpl {
 
   LazyTensorPtr tensor() { return tensor_; }
 
-  void set_tensor(const LazyTensor& lazy_tensor);
+  void set_tensor(const LazyTensorPtr& lazy_tensor);
 
   void force_refresh_sizes() { generation_ = 0; }
 

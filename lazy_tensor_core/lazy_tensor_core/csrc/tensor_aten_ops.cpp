@@ -62,21 +62,22 @@ std::vector<int64_t> GetExpandDimensions(const torch::lazy::Shape& shape,
 }
 
 // Returns a 1-D shape for batch norm weight or bias based on the input shape.
-torch::lazy::Shape BatchNormFeaturesShape(const torch::lazy::LazyTensor& input) {
-  auto input_shape = input.shape().Get();
+torch::lazy::Shape BatchNormFeaturesShape(const torch::lazy::LazyTensorPtr& input) {
+  CHECK(input);
+  auto input_shape = input->shape().Get();
   return torch::lazy::Shape(input_shape.scalar_type(),
                              input_shape.sizes()[1]);
 }
 
 // Returns the IR for the given input or the provided default value broadcasted
 // to the default shape, if the input is undefined.
-torch::lazy::Value GetIrValueOrDefault(const torch::lazy::LazyTensor& input,
+torch::lazy::Value GetIrValueOrDefault(const torch::lazy::LazyTensorPtr& input,
                                        const at::Scalar& default_value,
                                        const torch::lazy::Shape& default_shape,
                                        const torch::lazy::BackendDevice& device) {
-  return input.is_null() ? torch::lazy::LazyGraphExecutor::Get()->GetIrValueForExpandedScalar(
-                               default_value, default_shape, device)
-                         : input.GetIrValue();
+  return (input && *input) ? input->GetIrValue() :
+                             torch::lazy::LazyGraphExecutor::Get()->GetIrValueForExpandedScalar(
+                              default_value, default_shape, device);
 }
 
 torch::lazy::ViewInfo CreateAsStridedViewInfo(
@@ -99,77 +100,77 @@ torch::lazy::ViewInfo CreateAsStridedViewInfo(
 //////////////////////////////////////////////////////////////////////////////
 // ATEN operators follows here, listed in alphabetical order.
 //////////////////////////////////////////////////////////////////////////////
-torch::lazy::LazyTensor as_strided(const torch::lazy::LazyTensor& input, std::vector<int64_t> size,
+torch::lazy::LazyTensorPtr as_strided(const torch::lazy::LazyTensorPtr& input, std::vector<int64_t> size,
                       std::vector<int64_t> stride,
                       c10::optional<int64_t> storage_offset) {
-  auto input_shape = input.shape();
-  return input.CreateViewTensor(CreateAsStridedViewInfo(
+  auto input_shape = input->shape();
+  return input->CreateViewTensor(CreateAsStridedViewInfo(
       input_shape, std::move(size), std::move(stride), storage_offset));
 }
 
-void as_strided_(torch::lazy::LazyTensor& input, std::vector<int64_t> size,
+void as_strided_(torch::lazy::LazyTensorPtr& input, std::vector<int64_t> size,
                  std::vector<int64_t> stride,
                  c10::optional<int64_t> storage_offset) {
-  if (input.data()->view == nullptr) {
-    input.SetIrValue(torch::lazy::MakeNode<torch::lazy::AsStrided>(
-        input.GetIrValue(), std::move(size), std::move(stride),
+  if (input->data()->view == nullptr) {
+    input->SetIrValue(torch::lazy::MakeNode<torch::lazy::AsStrided>(
+        input->GetIrValue(), std::move(size), std::move(stride),
         storage_offset.value_or(0)));
   } else {
-    auto input_shape = input.shape();
-    input.SetSubView(CreateAsStridedViewInfo(
+    auto input_shape = input->shape();
+    input->SetSubView(CreateAsStridedViewInfo(
         input_shape, std::move(size), std::move(stride), storage_offset));
   }
 }
 
-torch::lazy::LazyTensor bernoulli(const torch::lazy::LazyTensor& input, double probability) {
-  auto input_shape = input.shape();
+torch::lazy::LazyTensorPtr bernoulli(const torch::lazy::LazyTensorPtr& input, double probability) {
+  auto input_shape = input->shape();
   return torch::lazy::LazyTensor::Create(torch::lazy::MakeNode<ir::ops::Bernoulli>(
       torch::lazy::LazyGraphExecutor::Get()->GetIrValueForExpandedScalar(probability, input_shape,
-                                                    input.GetDevice()),
-      torch::lazy::LazyGraphExecutor::Get()->GetRngSeed(input.GetDevice()),
-      input_shape.Get()), input.GetDevice());
+                                                    input->GetDevice()),
+      torch::lazy::LazyGraphExecutor::Get()->GetRngSeed(input->GetDevice()),
+      input_shape.Get()), input->GetDevice());
 }
 
-torch::lazy::LazyTensor bernoulli(const torch::lazy::LazyTensor& input) {
+torch::lazy::LazyTensorPtr bernoulli(const torch::lazy::LazyTensorPtr& input) {
   return torch::lazy::LazyTensor::Create(torch::lazy::MakeNode<ir::ops::Bernoulli>(
-      input.GetIrValue(),
-      torch::lazy::LazyGraphExecutor::Get()->GetRngSeed(input.GetDevice()),
-      input.shape().Get()), input.GetDevice());
+      input->GetIrValue(),
+      torch::lazy::LazyGraphExecutor::Get()->GetRngSeed(input->GetDevice()),
+      input->shape().Get()), input->GetDevice());
 }
 
-void bernoulli_(torch::lazy::LazyTensor& input, double probability) {
-  auto input_shape = input.shape();
-  input.SetInPlaceIrValue(torch::lazy::MakeNode<ir::ops::Bernoulli>(
+void bernoulli_(torch::lazy::LazyTensorPtr& input, double probability) {
+  auto input_shape = input->shape();
+  input->SetInPlaceIrValue(torch::lazy::MakeNode<ir::ops::Bernoulli>(
       torch::lazy::LazyGraphExecutor::Get()->GetIrValueForExpandedScalar(probability, input_shape,
-                                                    input.GetDevice()),
-      torch::lazy::LazyGraphExecutor::Get()->GetRngSeed(input.GetDevice()),
+                                                    input->GetDevice()),
+      torch::lazy::LazyGraphExecutor::Get()->GetRngSeed(input->GetDevice()),
       input_shape.Get()));
 }
 
-void bernoulli_(torch::lazy::LazyTensor& input, const torch::lazy::LazyTensor& probability) {
-  input.SetInPlaceIrValue(torch::lazy::MakeNode<ir::ops::Bernoulli>(
-      probability.GetIrValue(),
-      torch::lazy::LazyGraphExecutor::Get()->GetRngSeed(input.GetDevice()),
-      input.shape().Get()));
+void bernoulli_(torch::lazy::LazyTensorPtr& input, const torch::lazy::LazyTensorPtr& probability) {
+  input->SetInPlaceIrValue(torch::lazy::MakeNode<ir::ops::Bernoulli>(
+      probability->GetIrValue(),
+      torch::lazy::LazyGraphExecutor::Get()->GetRngSeed(input->GetDevice()),
+      input->shape().Get()));
 }
 
-torch::lazy::LazyTensor expand(const torch::lazy::LazyTensor& input, std::vector<int64_t> size) {
-  auto input_shape = input.shape();
+torch::lazy::LazyTensorPtr expand(const torch::lazy::LazyTensorPtr& input, std::vector<int64_t> size) {
+  auto input_shape = input->shape();
   return torch::lazy::LazyTensor::Create(torch::lazy::MakeNode<torch::lazy::Expand>(
-      input.GetIrValue(),
+      input->GetIrValue(),
       GetExpandDimensions(input_shape.Get(), std::move(size)),
-      /*is_scalar_expand=*/false), input.GetDevice());
+      /*is_scalar_expand=*/false), input->GetDevice());
 }
 
-void fill_(torch::lazy::LazyTensor& input, const at::Scalar& value) {
+void fill_(torch::lazy::LazyTensorPtr& input, const at::Scalar& value) {
   torch::lazy::Value constant = torch::lazy::LazyGraphExecutor::Get()->GetIrValueForExpandedScalar(
-      value, input.shape(), input.GetDevice());
-  input.SetInPlaceIrValue(std::move(constant));
+      value, input->shape(), input->GetDevice());
+  input->SetInPlaceIrValue(std::move(constant));
 }
 
-torch::lazy::LazyTensor narrow(const torch::lazy::LazyTensor& input, int64_t dim, int64_t start,
+torch::lazy::LazyTensorPtr narrow(const torch::lazy::LazyTensorPtr& input, int64_t dim, int64_t start,
                   int64_t length) {
-  auto input_shape = input.shape();
+  auto input_shape = input->shape();
   dim = torch::lazy::GetCanonicalDimensionIndex(dim, input_shape.Get().dim());
   torch::lazy::Shape narrow_shape = input_shape;
   narrow_shape.set_size(dim, length);
@@ -182,126 +183,127 @@ torch::lazy::LazyTensor narrow(const torch::lazy::LazyTensor& input, int64_t dim
                                   input_shape);
   view_info.indices[dim] =
       torch::lazy::GetCanonicalPosition(input_shape.Get().sizes(), dim, start);
-  return input.CreateViewTensor(std::move(view_info));
+  return input->CreateViewTensor(std::move(view_info));
 }
 
-std::tuple<torch::lazy::LazyTensor, torch::lazy::LazyTensor, torch::lazy::LazyTensor> ts_native_batch_norm(
-    const torch::lazy::LazyTensor& input, const torch::lazy::LazyTensor& weight, const torch::lazy::LazyTensor& bias,
-    torch::lazy::LazyTensor& running_mean, torch::lazy::LazyTensor& running_var, bool training,
+std::tuple<torch::lazy::LazyTensorPtr, torch::lazy::LazyTensorPtr, torch::lazy::LazyTensorPtr> ts_native_batch_norm(
+    const torch::lazy::LazyTensorPtr& input, const torch::lazy::LazyTensorPtr& weight, const torch::lazy::LazyTensorPtr& bias,
+    torch::lazy::LazyTensorPtr& running_mean, torch::lazy::LazyTensorPtr& running_var, bool training,
     double momentum, double eps) {
   torch::lazy::Shape features_shape = BatchNormFeaturesShape(input);
   torch::lazy::Value weight_value =
-      GetIrValueOrDefault(weight, 1, features_shape, input.GetDevice());
+      GetIrValueOrDefault(weight, 1, features_shape, input->GetDevice());
   torch::lazy::Value bias_value =
-      GetIrValueOrDefault(bias, 0, features_shape, input.GetDevice());
+      GetIrValueOrDefault(bias, 0, features_shape, input->GetDevice());
   torch::lazy::Value running_mean_value =
-      GetIrValueOrDefault(running_mean, 0, features_shape, input.GetDevice());
+      GetIrValueOrDefault(running_mean, 0, features_shape, input->GetDevice());
   torch::lazy::Value running_var_value =
-      GetIrValueOrDefault(running_var, 0, features_shape, input.GetDevice());
+      GetIrValueOrDefault(running_var, 0, features_shape, input->GetDevice());
   torch::lazy::NodePtr node =
       torch::lazy::MakeNode<ir::ops::TSNativeBatchNormForward>(
-          input.GetIrValue(), weight_value, bias_value, running_mean_value,
+          input->GetIrValue(), weight_value, bias_value, running_mean_value,
           running_var_value, training, momentum, eps);
-  torch::lazy::LazyTensor output = torch::lazy::LazyTensor::Create(torch::lazy::Value(node, 0), input.GetDevice());
-  torch::lazy::LazyTensor running_mean_output =
-      torch::lazy::LazyTensor::Create(torch::lazy::Value(node, 1), input.GetDevice());
-  torch::lazy::LazyTensor running_var_output = torch::lazy::LazyTensor::Create(torch::lazy::Value(node, 2), input.GetDevice());
+  torch::lazy::LazyTensorPtr output = torch::lazy::LazyTensor::Create(torch::lazy::Value(node, 0), input->GetDevice());
+  torch::lazy::LazyTensorPtr running_mean_output =
+      torch::lazy::LazyTensor::Create(torch::lazy::Value(node, 1), input->GetDevice());
+  torch::lazy::LazyTensorPtr running_var_output = torch::lazy::LazyTensor::Create(torch::lazy::Value(node, 2), input->GetDevice());
   return std::make_tuple(std::move(output), std::move(running_mean_output),
                          std::move(running_var_output));
 }
 
-std::tuple<torch::lazy::LazyTensor, torch::lazy::LazyTensor, torch::lazy::LazyTensor> ts_native_batch_norm_backward(
-    const torch::lazy::LazyTensor& grad_out, const torch::lazy::LazyTensor& input,
-    const torch::lazy::LazyTensor& weight, const torch::lazy::LazyTensor& running_mean,
-    const torch::lazy::LazyTensor& running_var, const torch::lazy::LazyTensor& save_mean,
-    const torch::lazy::LazyTensor& save_invstd, bool training, double eps,
+std::tuple<torch::lazy::LazyTensorPtr, torch::lazy::LazyTensorPtr, torch::lazy::LazyTensorPtr> ts_native_batch_norm_backward(
+    const torch::lazy::LazyTensorPtr& grad_out, const torch::lazy::LazyTensorPtr& input,
+    const torch::lazy::LazyTensorPtr& weight, const torch::lazy::LazyTensorPtr& running_mean,
+    const torch::lazy::LazyTensorPtr& running_var, const torch::lazy::LazyTensorPtr& save_mean,
+    const torch::lazy::LazyTensorPtr& save_invstd, bool training, double eps,
     c10::ArrayRef<bool> output_mask) {
   torch::lazy::Shape features_shape = BatchNormFeaturesShape(input);
   torch::lazy::Value weight_value =
-      GetIrValueOrDefault(weight, 1, features_shape, input.GetDevice());
+      GetIrValueOrDefault(weight, 1, features_shape, input->GetDevice());
   torch::lazy::NodePtr node;
-  CHECK_EQ(running_mean.is_null(), running_var.is_null());
-  if (running_mean.is_null()) {
+  if (!running_mean && !running_var) {
     node = torch::lazy::MakeNode<ir::ops::TSNativeBatchNormBackward>(
-        grad_out.GetIrValue(), input.GetIrValue(), weight_value,
-        save_mean.GetIrValue(), save_invstd.GetIrValue(), training, eps,
+        grad_out->GetIrValue(), input->GetIrValue(), weight_value,
+        save_mean->GetIrValue(), save_invstd->GetIrValue(), training, eps,
         std::array<bool, 3>{output_mask[0], output_mask[1], output_mask[2]});
   } else {
+    CHECK(*running_mean);
+    CHECK(*running_var);
     node = torch::lazy::MakeNode<ir::ops::TSNativeBatchNormBackward>(
-        grad_out.GetIrValue(), input.GetIrValue(), weight_value,
-        running_mean.GetIrValue(), running_var.GetIrValue(),
-        save_mean.GetIrValue(), save_invstd.GetIrValue(), training, eps,
+        grad_out->GetIrValue(), input->GetIrValue(), weight_value,
+        running_mean->GetIrValue(), running_var->GetIrValue(),
+        save_mean->GetIrValue(), save_invstd->GetIrValue(), training, eps,
         std::array<bool, 3>{output_mask[0], output_mask[1], output_mask[2]});
   }
-  torch::lazy::LazyTensor grad_input = torch::lazy::LazyTensor::Create(torch::lazy::Value(node, 0), input.GetDevice());
-  torch::lazy::LazyTensor grad_weight = torch::lazy::LazyTensor::Create(torch::lazy::Value(node, 1), input.GetDevice());
-  torch::lazy::LazyTensor grad_bias = torch::lazy::LazyTensor::Create(torch::lazy::Value(node, 2), input.GetDevice());
+  torch::lazy::LazyTensorPtr grad_input = torch::lazy::LazyTensor::Create(torch::lazy::Value(node, 0), input->GetDevice());
+  torch::lazy::LazyTensorPtr grad_weight = torch::lazy::LazyTensor::Create(torch::lazy::Value(node, 1), input->GetDevice());
+  torch::lazy::LazyTensorPtr grad_bias = torch::lazy::LazyTensor::Create(torch::lazy::Value(node, 2), input->GetDevice());
   return std::make_tuple(std::move(grad_input), std::move(grad_weight),
                          std::move(grad_bias));
 }
 
-std::pair<torch::lazy::LazyTensor, torch::lazy::LazyTensor> nms(const torch::lazy::LazyTensor& boxes,
-                                      const torch::lazy::LazyTensor& scores,
-                                      const torch::lazy::LazyTensor& score_threshold,
-                                      const torch::lazy::LazyTensor& iou_threshold,
+std::pair<torch::lazy::LazyTensorPtr, torch::lazy::LazyTensorPtr> nms(const torch::lazy::LazyTensorPtr& boxes,
+                                      const torch::lazy::LazyTensorPtr& scores,
+                                      const torch::lazy::LazyTensorPtr& score_threshold,
+                                      const torch::lazy::LazyTensorPtr& iou_threshold,
                                       int64_t output_size) {
   torch::lazy::NodePtr node = torch::lazy::MakeNode<ir::ops::Nms>(
-      boxes.GetIrValue(), scores.GetIrValue(), score_threshold.GetIrValue(),
-      iou_threshold.GetIrValue(), output_size);
-  return std::pair<torch::lazy::LazyTensor, torch::lazy::LazyTensor>(
-      torch::lazy::LazyTensor::Create(torch::lazy::Value(node, 0), boxes.GetDevice()),
-      torch::lazy::LazyTensor::Create(torch::lazy::Value(node, 1), boxes.GetDevice()));
+      boxes->GetIrValue(), scores->GetIrValue(), score_threshold->GetIrValue(),
+      iou_threshold->GetIrValue(), output_size);
+  return std::pair<torch::lazy::LazyTensorPtr, torch::lazy::LazyTensorPtr>(
+      torch::lazy::LazyTensor::Create(torch::lazy::Value(node, 0), boxes->GetDevice()),
+      torch::lazy::LazyTensor::Create(torch::lazy::Value(node, 1), boxes->GetDevice()));
 }
 
-torch::lazy::LazyTensor permute(const torch::lazy::LazyTensor& input, c10::ArrayRef<int64_t> dims) {
-  auto input_shape = input.shape();
+torch::lazy::LazyTensorPtr permute(const torch::lazy::LazyTensorPtr& input, c10::ArrayRef<int64_t> dims) {
+  auto input_shape = input->shape();
   torch::lazy::ViewInfo view_info(
       torch::lazy::ViewInfo::Type::kPermute, input_shape,
       torch::lazy::GetCanonicalDimensionIndices(dims, input_shape.Get().dim()));
-  return input.CreateViewTensor(std::move(view_info));
+  return input->CreateViewTensor(std::move(view_info));
 }
 
-torch::lazy::LazyTensor repeat(const torch::lazy::LazyTensor& input, std::vector<int64_t> repeats) {
+torch::lazy::LazyTensorPtr repeat(const torch::lazy::LazyTensorPtr& input, std::vector<int64_t> repeats) {
   return torch::lazy::LazyTensor::Create(torch::lazy::MakeNode<ir::ops::Repeat>(
-      input.GetIrValue(), std::move(repeats)), input.GetDevice());
+      input->GetIrValue(), std::move(repeats)), input->GetDevice());
 }
 
-torch::lazy::LazyTensor rsub(const torch::lazy::LazyTensor& input, const at::Scalar& other,
+torch::lazy::LazyTensorPtr rsub(const torch::lazy::LazyTensorPtr& input, const at::Scalar& other,
                 const at::Scalar& alpha) {
   torch::lazy::Value alpha_ir = torch::lazy::LazyGraphExecutor::Get()->GetIrValueForExpandedScalar(
-      alpha, input.shape(), input.GetDevice());
+      alpha, input->shape(), input->GetDevice());
   torch::lazy::Value other_ir = torch::lazy::LazyGraphExecutor::Get()->GetIrValueForExpandedScalar(
-      other, input.shape(), input.GetDevice());
-  return torch::lazy::LazyTensor::Create(other_ir - alpha_ir * input.GetIrValue(), input.GetDevice());
+      other, input->shape(), input->GetDevice());
+  return torch::lazy::LazyTensor::Create(other_ir - alpha_ir * input->GetIrValue(), input->GetDevice());
 }
 
-void copy_(torch::lazy::LazyTensor& input, torch::lazy::LazyTensor& src) {
-  if (input.GetDevice() == src.GetDevice()) {
+void copy_(torch::lazy::LazyTensorPtr& input, torch::lazy::LazyTensorPtr& src) {
+  if (input->GetDevice() == src->GetDevice()) {
     torch::lazy::Value copy_value;
-    if (input.dtype() == src.dtype()) {
-      copy_value = src.GetIrValue();
+    if (input->dtype() == src->dtype()) {
+      copy_value = src->GetIrValue();
     } else {
       copy_value = torch::lazy::MakeNode<torch::lazy::Cast>(
-          src.GetIrValue(), input.dtype(), src.dtype());
+          src->GetIrValue(), input->dtype(), src->dtype());
     }
-    input.SetIrValue(MaybeExpand(copy_value, input.shape()));
+    input->SetIrValue(MaybeExpand(copy_value, input->shape()));
   } else {
-    auto input_shape = input.shape();
-    at::Tensor src_tensor = src.ToTensor(/*detached=*/true);
+    auto input_shape = input->shape();
+    at::Tensor src_tensor = src->ToTensor(/*detached=*/true);
     if (src_tensor.sizes() != input_shape.Get().sizes()) {
       src_tensor = src_tensor.expand(input_shape.Get().sizes().vec());
     }
-    input.UpdateFromTensor(std::move(src_tensor), /*sync=*/false);
+    input->UpdateFromTensor(std::move(src_tensor), /*sync=*/false);
   }
 }
 
-torch::lazy::LazyTensor select(const torch::lazy::LazyTensor& input, int64_t dim, int64_t index) {
+torch::lazy::LazyTensorPtr select(const torch::lazy::LazyTensorPtr& input, int64_t dim, int64_t index) {
   return tensor_ops::Select(input, dim, index);
 }
 
-torch::lazy::LazyTensor slice(const torch::lazy::LazyTensor& input, int64_t dim, int64_t start,
+torch::lazy::LazyTensorPtr slice(const torch::lazy::LazyTensorPtr& input, int64_t dim, int64_t start,
                  int64_t end, int64_t step) {
-  auto input_shape = input.shape();
+  auto input_shape = input->shape();
   dim = torch::lazy::GetCanonicalDimensionIndex(dim, input_shape.Get().dim());
   start =
       torch::lazy::GetCanonicalPosition(input_shape.Get().sizes(), dim, start);
@@ -315,95 +317,95 @@ torch::lazy::LazyTensor slice(const torch::lazy::LazyTensor& input, int64_t dim,
   torch::lazy::SelectInfo select = {dim, start, end, step};
   torch::lazy::ViewInfo view_info(torch::lazy::ViewInfo::Type::kSelect,
                                   input_shape, std::move(select));
-  return input.CreateViewTensor(std::move(view_info));
+  return input->CreateViewTensor(std::move(view_info));
 }
 
-torch::lazy::LazyTensor squeeze(const torch::lazy::LazyTensor& input) {
-  auto input_shape = input.shape();
+torch::lazy::LazyTensorPtr squeeze(const torch::lazy::LazyTensorPtr& input) {
+  auto input_shape = input->shape();
   auto output_dimensions = ir::ops::BuildSqueezedDimensions(
       input_shape.Get().sizes(), /*squeeze_dim=*/-1);
   return view(input, output_dimensions);
 }
 
-torch::lazy::LazyTensor squeeze(const torch::lazy::LazyTensor& input, int64_t dim) {
-  auto input_shape = input.shape();
+torch::lazy::LazyTensorPtr squeeze(const torch::lazy::LazyTensorPtr& input, int64_t dim) {
+  auto input_shape = input->shape();
   int64_t squeeze_dim =
-      torch::lazy::GetCanonicalDimensionIndex(dim, input.shape().Get().dim());
+      torch::lazy::GetCanonicalDimensionIndex(dim, input->shape().Get().dim());
   auto output_dimensions =
       ir::ops::BuildSqueezedDimensions(input_shape.Get().sizes(), squeeze_dim);
   return view(input, output_dimensions);
 }
 
-void squeeze_(torch::lazy::LazyTensor& input) {
-  input.SetIrValue(
-      torch::lazy::MakeNode<ir::ops::Squeeze>(input.GetIrValue(), -1));
+void squeeze_(torch::lazy::LazyTensorPtr& input) {
+  input->SetIrValue(
+      torch::lazy::MakeNode<ir::ops::Squeeze>(input->GetIrValue(), -1));
 }
 
-void squeeze_(torch::lazy::LazyTensor& input, int64_t dim) {
-  input.SetIrValue(torch::lazy::MakeNode<ir::ops::Squeeze>(
-      input.GetIrValue(),
-      torch::lazy::GetCanonicalDimensionIndex(dim, input.shape().Get().dim())));
+void squeeze_(torch::lazy::LazyTensorPtr& input, int64_t dim) {
+  input->SetIrValue(torch::lazy::MakeNode<ir::ops::Squeeze>(
+      input->GetIrValue(),
+      torch::lazy::GetCanonicalDimensionIndex(dim, input->shape().Get().dim())));
 }
 
-torch::lazy::LazyTensor stack(c10::ArrayRef<torch::lazy::LazyTensor> tensors, int64_t dim) {
+torch::lazy::LazyTensorPtr stack(c10::ArrayRef<torch::lazy::LazyTensorPtr> tensors, int64_t dim) {
   CHECK_GT(tensors.size(), 0);
   std::vector<torch::lazy::Value> values;
   for (auto& tensor : tensors) {
-    values.push_back(tensor.GetIrValue());
+    values.push_back(tensor->GetIrValue());
   }
   int64_t canonical_dim = torch::lazy::GetCanonicalDimensionIndex(
-      dim, tensors.front().shape().Get().dim() + 1);
+      dim, tensors.front()->shape().Get().dim() + 1);
   return torch::lazy::LazyTensor::Create(
-      torch::lazy::MakeNode<ir::ops::Stack>(values, canonical_dim), tensors[0].GetDevice());
+      torch::lazy::MakeNode<ir::ops::Stack>(values, canonical_dim), tensors[0]->GetDevice());
 }
 
-torch::lazy::LazyTensor sub(const torch::lazy::LazyTensor& input, const torch::lazy::LazyTensor& other,
+torch::lazy::LazyTensorPtr sub(const torch::lazy::LazyTensorPtr& input, const torch::lazy::LazyTensorPtr& other,
                const at::Scalar& alpha) {
   torch::lazy::Value constant = torch::lazy::LazyGraphExecutor::Get()->GetIrValueForExpandedScalar(
-      alpha, other.shape(), other.GetDevice());
-  return torch::lazy::LazyTensor::Create(input.GetIrValue() - other.GetIrValue() * constant, input.GetDevice());
+      alpha, other->shape(), other->GetDevice());
+  return torch::lazy::LazyTensor::Create(input->GetIrValue() - other->GetIrValue() * constant, input->GetDevice());
 }
 
-torch::lazy::LazyTensor sub(const torch::lazy::LazyTensor& input, const at::Scalar& other,
+torch::lazy::LazyTensorPtr sub(const torch::lazy::LazyTensorPtr& input, const at::Scalar& other,
                const at::Scalar& alpha) {
   torch::lazy::Value other_constant =
-      torch::lazy::LazyGraphExecutor::Get()->GetIrValueForExpandedScalar(other, input.shape(),
-                                                    input.GetDevice());
+      torch::lazy::LazyGraphExecutor::Get()->GetIrValueForExpandedScalar(other, input->shape(),
+                                                    input->GetDevice());
   torch::lazy::Value alpha_constant =
-      torch::lazy::LazyGraphExecutor::Get()->GetIrValueForExpandedScalar(alpha, input.shape(),
-                                                    input.GetDevice());
-  return torch::lazy::LazyTensor::Create(input.GetIrValue() - other_constant * alpha_constant, input.GetDevice());
+      torch::lazy::LazyGraphExecutor::Get()->GetIrValueForExpandedScalar(alpha, input->shape(),
+                                                    input->GetDevice());
+  return torch::lazy::LazyTensor::Create(input->GetIrValue() - other_constant * alpha_constant, input->GetDevice());
 }
 
-std::tuple<torch::lazy::LazyTensor, torch::lazy::LazyTensor, torch::lazy::LazyTensor> svd(const torch::lazy::LazyTensor& input,
+std::tuple<torch::lazy::LazyTensorPtr, torch::lazy::LazyTensorPtr, torch::lazy::LazyTensorPtr> svd(const torch::lazy::LazyTensorPtr& input,
                                                    bool some, bool compute_uv) {
   torch::lazy::NodePtr node =
-      torch::lazy::MakeNode<ir::ops::SVD>(input.GetIrValue(), some, compute_uv);
-  return std::make_tuple(torch::lazy::LazyTensor::Create(torch::lazy::Value(node, 0), input.GetDevice()),
-                         torch::lazy::LazyTensor::Create(torch::lazy::Value(node, 1), input.GetDevice()),
-                         torch::lazy::LazyTensor::Create(torch::lazy::Value(node, 2), input.GetDevice()));
+      torch::lazy::MakeNode<ir::ops::SVD>(input->GetIrValue(), some, compute_uv);
+  return std::make_tuple(torch::lazy::LazyTensor::Create(torch::lazy::Value(node, 0), input->GetDevice()),
+                         torch::lazy::LazyTensor::Create(torch::lazy::Value(node, 1), input->GetDevice()),
+                         torch::lazy::LazyTensor::Create(torch::lazy::Value(node, 2), input->GetDevice()));
 }
 
-torch::lazy::LazyTensor transpose(const torch::lazy::LazyTensor& input, int64_t dim0, int64_t dim1) {
-  auto input_shape = input.shape();
+torch::lazy::LazyTensorPtr transpose(const torch::lazy::LazyTensorPtr& input, int64_t dim0, int64_t dim1) {
+  auto input_shape = input->shape();
   auto permute_dims = torch::lazy::MakeTransposePermutation(
       /*dim0=*/dim0, /*dim1=*/dim1, /*rank=*/input_shape.Get().dim());
   torch::lazy::ViewInfo view_info(torch::lazy::ViewInfo::Type::kPermute,
                                   input_shape, permute_dims);
-  return input.CreateViewTensor(std::move(view_info));
+  return input->CreateViewTensor(std::move(view_info));
 }
 
-void transpose_(torch::lazy::LazyTensor& input, int64_t dim0, int64_t dim1) {
-  auto input_shape = input.shape();
+void transpose_(torch::lazy::LazyTensorPtr& input, int64_t dim0, int64_t dim1) {
+  auto input_shape = input->shape();
   auto permute_dims = torch::lazy::MakeTransposePermutation(
       /*dim0=*/dim0, /*dim1=*/dim1, /*rank=*/input_shape.Get().dim());
   torch::lazy::ViewInfo view_info(torch::lazy::ViewInfo::Type::kPermute,
                                   input_shape, permute_dims);
-  return input.ModifyCurrentView(std::move(view_info));
+  return input->ModifyCurrentView(std::move(view_info));
 }
 
-torch::lazy::LazyTensor unsqueeze(const torch::lazy::LazyTensor& input, int64_t dim) {
-  auto input_shape = input.shape();
+torch::lazy::LazyTensorPtr unsqueeze(const torch::lazy::LazyTensorPtr& input, int64_t dim) {
+  auto input_shape = input->shape();
   int64_t squeeze_dim =
       torch::lazy::GetCanonicalDimensionIndex(dim, input_shape.Get().dim() + 1);
   auto dimensions =
@@ -411,20 +413,20 @@ torch::lazy::LazyTensor unsqueeze(const torch::lazy::LazyTensor& input, int64_t 
   return view(input, dimensions);
 }
 
-void unsqueeze_(torch::lazy::LazyTensor& input, int64_t dim) {
+void unsqueeze_(torch::lazy::LazyTensorPtr& input, int64_t dim) {
   int squeeze_dim = torch::lazy::GetCanonicalDimensionIndex(
-      dim, input.shape().Get().dim() + 1);
-  input.SetIrValue(torch::lazy::MakeNode<ir::ops::Unsqueeze>(input.GetIrValue(),
+      dim, input->shape().Get().dim() + 1);
+  input->SetIrValue(torch::lazy::MakeNode<ir::ops::Unsqueeze>(input->GetIrValue(),
                                                              squeeze_dim));
 }
 
-torch::lazy::LazyTensor view(const torch::lazy::LazyTensor& input, c10::ArrayRef<int64_t> output_size) {
-  auto input_shape = input.shape().Get();
+torch::lazy::LazyTensorPtr view(const torch::lazy::LazyTensorPtr& input, c10::ArrayRef<int64_t> output_size) {
+  auto input_shape = input->shape().Get();
   torch::lazy::Shape shape = torch::lazy::Shape(
       input_shape.scalar_type(), at::infer_size(output_size, input_shape.numel()));
   torch::lazy::ViewInfo view_info(torch::lazy::ViewInfo::Type::kReshape,
                                   std::move(shape), input_shape);
-  return input.CreateViewTensor(std::move(view_info));
+  return input->CreateViewTensor(std::move(view_info));
 }
 
 }  // namespace lazy_tensor_aten_ops

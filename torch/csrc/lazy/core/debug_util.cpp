@@ -86,7 +86,7 @@ std::string GetFirstUserFrameInPython() {
   return empty;
 }
 
-std::string DebugUtil::GetTensorsGraphInfo(c10::ArrayRef<torch::lazy::LazyTensor> tensors,
+std::string DebugUtil::GetTensorsGraphInfo(c10::ArrayRef<torch::lazy::LazyTensorPtr> tensors,
                                            const std::vector<size_t>* indices,
                                            GraphFormat format) {
   std::vector<torch::lazy::Node*> root_nodes;
@@ -95,23 +95,23 @@ std::string DebugUtil::GetTensorsGraphInfo(c10::ArrayRef<torch::lazy::LazyTensor
   torch::lazy::Unique<torch::lazy::BackendDevice> unique_device;
   if (indices != nullptr) {
     for (auto index : *indices) {
-      const torch::lazy::LazyTensor& tensor = tensors[index];
-      torch::lazy::Value ir_value = tensor.CurrentIrValue();
+      const torch::lazy::LazyTensorPtr& tensor = tensors[index];
+      torch::lazy::Value ir_value = tensor->CurrentIrValue();
       if (ir_value) {
         root_nodes.push_back(ir_value.node.get());
         root_hashes.push_back(ir_value.hash());
         root_values.push_back(std::move(ir_value));
-        unique_device.set(tensor.GetDevice());
+        unique_device.set(tensor->GetDevice());
       }
     }
   } else {
     for (auto& tensor : tensors) {
-      torch::lazy::Value ir_value = tensor.CurrentIrValue();
+      torch::lazy::Value ir_value = tensor->CurrentIrValue();
       if (ir_value) {
         root_nodes.push_back(ir_value.node.get());
         root_hashes.push_back(ir_value.hash());
         root_values.push_back(std::move(ir_value));
-        unique_device.set(tensor.GetDevice());
+        unique_device.set(tensor->GetDevice());
       }
     }
   }
@@ -149,7 +149,7 @@ std::string DebugUtil::GetTensorsGraphInfo(c10::ArrayRef<torch::lazy::LazyTensor
 }
 
 void DebugUtil::SaveTensorsGraphInfo(const char* name,
-                                     c10::ArrayRef<torch::lazy::LazyTensor> tensors,
+                                     c10::ArrayRef<torch::lazy::LazyTensorPtr> tensors,
                                      const std::vector<size_t>* indices,
                                      GraphFormat format) {
   static const std::string save_file = GetEnvString("LTC_SAVE_TENSORS_FILE", "");
