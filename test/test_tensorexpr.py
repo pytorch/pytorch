@@ -1283,6 +1283,7 @@ class TestTensorExprFuser(BaseTestClass):
         self._test_softmax('cuda')
         assert cuda.elapsed_value() == 1
 
+    @unittest.skip("float16 is not supported yet.")
     def test_half_gelu(self):
         devices = ["cuda"] if torch.cuda.is_available() else []
 
@@ -1296,6 +1297,24 @@ class TestTensorExprFuser(BaseTestClass):
             b = torch.rand(1024, dtype=torch.half, device=device)
             traced = torch.jit.trace(bias_gelu, (a, b))
             x = warmup_and_run_forward(traced, a, b)
+            self.assertLastGraphAllFused()
+
+    @unittest.skip("float16 is not supported yet.")
+    def test_half_bn_relu(self):
+        devices = ["cuda"] if torch.cuda.is_available() else []
+
+        def foo(a, b, c):
+            y = torch.nn.functional.batch_norm(a, b, c)
+            z = y.relu()
+            return z
+
+        for device in devices:
+            a = torch.rand(16, 16, dtype=torch.half, device=device)
+            b = torch.rand(16, dtype=torch.half, device=device)
+            c = torch.rand(16, dtype=torch.half, device=device)
+            traced = torch.jit.trace(foo, (a, b, c))
+            print(traced.graph)
+            x = warmup_and_run_forward(traced, a, b, c)
             self.assertLastGraphAllFused()
 
     def test_exp_pow(self):
