@@ -159,7 +159,14 @@ void recordCustomClassesFromOpSchemas(
     if (type_name.find("__torch__") != std::string::npos) {
       // The name of a customClassType here is its fully qualified name, but
       // in registration only the class name is used so only record that
-      loaded_classes.insert(type_name.substr(type_name.find_last_of('.') + 1));
+      auto class_name = type_name.substr(type_name.find_last_of('.') + 1);
+      // Function schemas can include other type indicators such as [] so we
+      // need to trim to just alphanumeric + '_' characters as well
+      class_name = class_name.substr(
+          0,
+          class_name.find_first_not_of(
+              "aAbBcCdDeEfFgGhHiIjJkKlLmMnNoOpPqQrRsStTuUvVwWxXyYzZ_1234567890"));
+      loaded_classes.insert(class_name);
     }
   };
 

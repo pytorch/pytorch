@@ -6,7 +6,7 @@ from typing import Callable, Any, Tuple, Dict
 
 import torch
 import torch.fx
-import torch.nn.functional as F
+from .mappings import conv_ops
 from .quantization_state import AutoQuantizationState
 from .utils import get_packable_arg_idxs
 
@@ -147,12 +147,13 @@ class AllModuleTracer(torch.fx.Tracer):
 
                 # TODO move op-specific logic out of here
                 if target is torch.ops.quantized.linear:
-                    new_args = [*args]
-                    new_args.append(additional_kwargs['scale'])
-                    new_args.append(additional_kwargs['zero_point'])
-                    args = tuple(new_args)
-                    del kwargs['bias']
-                elif old_target != F.conv2d or target is F.conv2d:
+                    def linear_rewrite_args(input, weight, bias=None):
+                        return (input, weight,
+                                additional_kwargs['scale'],
+                                additional_kwargs['zero_point'])
+                    args = linear_rewrite_args(*args, **kwargs)
+                    kwargs = {}
+                elif old_target not in conv_ops or target in conv_ops:
                     kwargs.update(**additional_kwargs)
                 else:
                     new_args = [*args]
@@ -230,7 +231,7 @@ def rewrite_for_scripting(mod: torch.nn.Module) -> torch.nn.Module:
             setattr(copied, name, rewrite_helper(child))
 
         if hasattr(mod, '_auto_quant_state') and (
-            mod._auto_quant_state.has_at_least_one_seen_op_info() or  # type: ignore[union-attr, operator]
+            mod._auto_quant_state.has_at_least_one_seen_q_op_info() or  # type: ignore[union-attr, operator]
             (mod._auto_quant_state.get_output_dtypes() is not None)  # type: ignore[union-attr, operator]
         ):
             copied._auto_quant_state.reset_to_new_call()  # type: ignore[union-attr, operator]
