@@ -255,6 +255,9 @@ jobs:
         if: always()
         run: |
           .github\scripts\kill_active_ssh_sessions.ps1
+      - name: Parse ref
+        id: parse-ref
+        run: .github/scripts/parse_ref.py
       - name: Upload test statistics
         if: always()
         env:
@@ -408,6 +411,9 @@ jobs:
         if: always()
         run: |
           .github\scripts\kill_active_ssh_sessions.ps1
+      - name: Parse ref
+        id: parse-ref
+        run: .github/scripts/parse_ref.py
       - name: Upload test statistics
         if: always()
         env:
@@ -561,6 +567,9 @@ jobs:
         if: always()
         run: |
           .github\scripts\kill_active_ssh_sessions.ps1
+      - name: Parse ref
+        id: parse-ref
+        run: .github/scripts/parse_ref.py
       - name: Upload test statistics
         if: always()
         env:

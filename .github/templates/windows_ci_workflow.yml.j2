@@ -192,6 +192,7 @@ jobs:
       !{{ common.upload_test_reports(name='windows', config=test_job.config, shard=test_job.shard, num_shards=test_job.num_shards, runner=test_job.runner) }}
       !{{ common.render_test_results() }}
       !{{ common.wait_and_kill_ssh_windows() }}
+      !{{ common.parse_ref() }}
       !{{ common.upload_test_statistics(build_environment) }}
       - name: Cleanup workspace
         if: always()
