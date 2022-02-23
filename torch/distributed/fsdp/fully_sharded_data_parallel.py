@@ -739,7 +739,7 @@ class FullyShardedDataParallel(nn.Module):
 
     @contextlib.contextmanager
     def summon_full_params(
-        self, recurse: bool = True, writeback: bool = True
+        self, recurse: bool = True, writeback: bool = False
     ) -> Generator:
         """
         A context manager to expose full params for the current FSDP instance.
