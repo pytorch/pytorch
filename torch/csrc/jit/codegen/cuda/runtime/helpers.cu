@@ -115,6 +115,14 @@ __device__ float clamp(float x, double minv, double maxv) {
   return x < minv ? minv : (x > maxv ? maxv : x);
 }
 
+__device__ int clamp(int x, int64_t minv, int64_t maxv) {
+  return x < minv ? minv : (x > maxv ? maxv : x);
+}
+
+__device__ int64_t clamp(int64_t x, int64_t minv, int64_t maxv) {
+  return x < minv ? minv : (x > maxv ? maxv : x);
+}
+
 __device__ double frac(double x) {
   return x - trunc(x);
 }
@@ -190,6 +198,14 @@ __device__ double threshold(double x, double t, double v) {
 }
 
 __device__ float threshold(float x, double t, double v) {
+  return x <= t ? v : x;
+}
+
+__device__ int threshold(int x, int64_t t, int64_t v) {
+  return x <= t ? v : x;
+}
+
+__device__ int64_t threshold(int64_t x, int64_t t, int64_t v) {
   return x <= t ? v : x;
 }
 
@@ -306,4 +322,12 @@ float pow(float a, int64_t b) {
 
 double pow(double a, int64_t b) {
   return pow(a, (double)b);
+}
+
+int64_t pow(int64_t a, int b) {
+  return pow(a, (int64_t)b);
+}
+
+int64_t pow(int a, int64_t b) {
+  return pow((int64_t)a, b);
 }

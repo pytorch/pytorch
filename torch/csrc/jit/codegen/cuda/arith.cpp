@@ -674,7 +674,7 @@ TensorView* reductionOp(
   TORCH_CHECK(
       (isFloatingPointType(out_type) && isFloatingPointType(init_type)) ||
           (isIntegralType(out_type) && isIntegralType(init_type)) ||
-          (out_type == DataType::Bool && init_type == DataType::Bool),
+          (isBooleanType(out_type) && isBooleanType(init_type)),
       "Types should match for reduction ops but received: ",
       out_type,
       " and ",
@@ -702,6 +702,9 @@ TensorView* sum(
   if (isFloatingPointType(dtype)) {
     init = IrBuilder::create<Double>(0.0);
   } else if (isIntegralType(dtype)) {
+    init = FusionGuard::getCurFusion()->zeroVal();
+  } else if (isBooleanType(dtype)) {
+    v1 = castOp(DataType::Int, v1);
     init = FusionGuard::getCurFusion()->zeroVal();
   } else {
     TORCH_CHECK(
@@ -731,6 +734,9 @@ TensorView* max(
     case (DataType::Int32):
       init = IrBuilder::create<Int>(std::numeric_limits<int32_t>::lowest());
       break;
+    case (DataType::Bool):
+      init = IrBuilder::create<Bool>(false);
+      break;
     default:
       TORCH_CHECK(
           false,
@@ -758,6 +764,9 @@ TensorView* min(
       break;
     case (DataType::Int32):
       init = IrBuilder::create<Int>(std::numeric_limits<int32_t>::max());
+      break;
+    case (DataType::Bool):
+      init = IrBuilder::create<Bool>(true);
       break;
     default:
       TORCH_CHECK(

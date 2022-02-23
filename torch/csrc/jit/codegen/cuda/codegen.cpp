@@ -523,6 +523,9 @@ class CudaKernelGenerator : private OptOutConstDispatch {
       if (integer_op_str(op_type) && isIntegralType(out->dtype())) {
         auto int_op = integer_op_str(op_type);
         expr << *int_op;
+      } else if (bool_op_str(op_type) && isBooleanType(out->dtype())) {
+        auto bool_op = bool_op_str(op_type);
+        expr << *bool_op;
       } else {
         expr << op_type;
         if (needFloatSuffix(op_type) && out->dtype() == DataType::Float) {
@@ -674,6 +677,10 @@ class CudaKernelGenerator : private OptOutConstDispatch {
           if (integer_op_str(op_type) && isIntegralType(bop->out()->dtype())) {
             auto int_op = integer_op_str(op_type);
             code_ << " = " << *int_op << "(\n";
+          } else if (
+              bool_op_str(op_type) && isBooleanType(bop->out()->dtype())) {
+            auto bool_op = bool_op_str(op_type);
+            code_ << " = " << *bool_op << "(\n";
           } else {
             std::stringstream op_str;
             op_str << op_type;

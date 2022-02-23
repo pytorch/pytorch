@@ -25,9 +25,30 @@ bool isFloatingPointType(DataType dtype) {
       return false;
     case DataType::Null:
       TORCH_CHECK(
-          false, "Null type is not a valid argument to isFloatingPoint");
+          false, "Null type is not a valid argument to isFloatingPointType");
     default:
-      TORCH_CHECK(false, "Type not supported in isFloatingPoint");
+      TORCH_CHECK(false, "Type not supported in isFloatingPointType");
+  }
+}
+
+bool isBooleanType(DataType dtype) {
+  switch (dtype) {
+    case DataType::Bool:
+      return true;
+    case DataType::Double:
+    case DataType::Float:
+    case DataType::Half:
+    case DataType::BFloat16:
+    case DataType::ComplexFloat:
+    case DataType::ComplexDouble:
+    case DataType::Index:
+    case DataType::Int:
+    case DataType::Int32:
+      return false;
+    case DataType::Null:
+      TORCH_CHECK(false, "Null type is not a valid argument to isBooleanType");
+    default:
+      TORCH_CHECK(false, "Type not supported in isBooleanType");
   }
 }
 
@@ -421,6 +442,18 @@ static const char* binary_op_integer_op2string(BinaryOpType t) {
   return nullptr;
 }
 
+static const char* binary_op_bool_op2string(BinaryOpType t) {
+  switch (t) {
+    case BinaryOpType::Max:
+      return "max";
+    case BinaryOpType::Min:
+      return "min";
+    default:
+      break;
+  }
+  return nullptr;
+}
+
 static const char* binary_op_type_inline_op2string(BinaryOpType t) {
   switch (t) {
     case BinaryOpType::Add:
@@ -753,6 +786,12 @@ c10::optional<std::string> inline_op_str(const BinaryOpType botype) {
 
 c10::optional<std::string> integer_op_str(const BinaryOpType botype) {
   const char* str = binary_op_integer_op2string(botype);
+  return str != nullptr ? c10::optional<std::string>(std::string(str))
+                        : c10::nullopt;
+}
+
+c10::optional<std::string> bool_op_str(const BinaryOpType botype) {
+  const char* str = binary_op_bool_op2string(botype);
   return str != nullptr ? c10::optional<std::string>(std::string(str))
                         : c10::nullopt;
 }

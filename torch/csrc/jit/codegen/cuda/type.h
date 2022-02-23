@@ -75,8 +75,10 @@ enum class DataType {
 
 // Returns if the datatype is a floating point type
 bool isFloatingPointType(DataType dtype);
-// Returns if the datatype is an integer type
+// Returns if the datatype is an boolean type
 bool isIntegralType(DataType dtype);
+// Returns if the datatype is an integer type
+bool isBooleanType(DataType dtype);
 // Returns if the datatype is a complex type
 bool isComplexType(DataType dtype);
 
@@ -299,6 +301,7 @@ TORCH_CUDA_CU_API bool isParallelTypeVectorize(ParallelType);
 TORCH_CUDA_CU_API c10::optional<std::string> inline_op_str(const UnaryOpType);
 TORCH_CUDA_CU_API c10::optional<std::string> inline_op_str(const BinaryOpType);
 TORCH_CUDA_CU_API c10::optional<std::string> integer_op_str(const BinaryOpType);
+TORCH_CUDA_CU_API c10::optional<std::string> bool_op_str(const BinaryOpType);
 
 TORCH_CUDA_CU_API c10::optional<std::string> cast_func_str(
     const std::pair<DataType, DataType>&);
