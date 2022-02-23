@@ -318,7 +318,7 @@ class FullyShardedDataParallel(nn.Module):
         """
         uninitialized = self._is_root is None
         self._assert_state(TrainingState_.IDLE)
-        with self.summon_full_params(recurse=False):
+        with self.summon_full_params(recurse=False, writeback=True):
             ret = super().apply(fn)
 
         # Reset lazy init that might be called by summon_full_params, since
