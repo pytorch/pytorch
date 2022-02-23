@@ -2,13 +2,13 @@
 
 #include <c10/util/flat_hash_map.h>
 #include <c10/util/irange.h>
+#include <torch/csrc/jit/api/function_impl.h>
 #include <torch/csrc/jit/jit_log.h>
+#include <torch/csrc/jit/passes/inliner.h>
 #include <torch/csrc/jit/passes/utils/subgraph_utils.h>
 #include <torch/csrc/jit/runtime/operator.h>
 #include <torch/csrc/utils/memory.h>
-#include <torch/csrc/jit/passes/inliner.h>
 #include <fstream>
-#include <torch/csrc/jit/api/function_impl.h>
 
 namespace torch {
 namespace jit {
@@ -209,7 +209,10 @@ struct AliasDb::WriteRegistry {
   std::unordered_set<Node*> writesToAllWildcards_;
 };
 
-AliasDb::AliasDb(std::shared_ptr<Graph> graph, bool isFrozen, bool descendFunctionCalls)
+AliasDb::AliasDb(
+    std::shared_ptr<Graph> graph,
+    bool isFrozen,
+    bool descendFunctionCalls)
     : graph_(std::move(graph)),
       isFrozen_(isFrozen),
       descend_function_calls_(descendFunctionCalls),
@@ -717,15 +720,17 @@ void AliasDb::analyzeImpl(Node* node) {
       if (!g) {
         return analyzeConservative(node);
       }
-      // this is an unoptimized path - we copy the subgraph for each function call
-      // past the first - so we do not generally enable the recursive analysis.
-      // use cases for fine-grained alias analysis without inlining are very uncommon
+      // this is an unoptimized path - we copy the subgraph for each function
+      // call past the first - so we do not generally enable the recursive
+      // analysis. use cases for fine-grained alias analysis without inlining
+      // are very uncommon
       auto graph = g->optimized_graph();
       // alias analysis will use Value* as mappings for information,
       // so for each analysis of a particular function call we need a new graph
       // for all copies made, store them for duration of analysis so we do not
       // run into lifetime issues with the graph
-      std::vector<std::shared_ptr<Graph>>& graphs = function_call_copies_[graph.get()];
+      std::vector<std::shared_ptr<Graph>>& graphs =
+          function_call_copies_[graph.get()];
       if (graphs.size() == 0) {
         graphs.push_back(graph);
         analyzeSubgraph(node, graph);

@@ -41,13 +41,13 @@ namespace jit {
  * hand, you can't modify a Tuple once you create it, making `Tuple` an
  * immutable container.)
  *
- * `isFrozen` - if the Module is frozen then consider attributes as freshly created
- * objects. Freezing API invokes alias analysis to check if they are mutated
- * internally.
+ * `isFrozen` - if the Module is frozen then consider attributes as freshly
+ * created objects. Freezing API invokes alias analysis to check if they are
+ * mutated internally.
  *
- * `descendFunctionCalls` - recursively analyze function and method calls instead
- * of conservative analysis. Generally analysis should be done after inlining
- * so the implmentation for recursive analysis is unoptimized.
+ * `descendFunctionCalls` - recursively analyze function and method calls
+ * instead of conservative analysis. Generally analysis should be done after
+ * inlining so the implmentation for recursive analysis is unoptimized.
  */
 class AliasDb {
  public:
@@ -260,7 +260,8 @@ class AliasDb {
   bool isFrozen_;
 
   bool descend_function_calls_;
-  std::unordered_map<Graph*, std::vector<std::shared_ptr<Graph>>> function_call_copies_;
+  std::unordered_map<Graph*, std::vector<std::shared_ptr<Graph>>>
+      function_call_copies_;
 
   // The points-to graph that stores aliasing relationships
   std::unique_ptr<MemoryDAGBuilder> memoryDAGBuilder_;

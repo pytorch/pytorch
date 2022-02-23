@@ -201,10 +201,8 @@ void initPythonIRBindings(PyObject* module_) {
             return db.mayContainAlias(v1, v2);
           })
       .def(
-        "has_writers",
-        [&](AliasDb& db, Value* v1) {
-          return db.hasWriters(v1);
-        })
+          "has_writers",
+          [&](AliasDb& db, Value* v1) { return db.hasWriters(v1); })
       .def("__str__", &AliasDb::toString);
 
 #define GS(name) def(#name, &Graph ::name)
@@ -222,8 +220,11 @@ void initPythonIRBindings(PyObject* module_) {
           py::arg("enabled") = true)
       .def(
           "alias_db",
-          [](std::shared_ptr<Graph> g, bool isFrozen = false, bool descend_function_calls = false) {
-            return std::make_shared<AliasDb>(std::move(g), isFrozen, descend_function_calls);
+          [](std::shared_ptr<Graph> g,
+             bool isFrozen = false,
+             bool descend_function_calls = false) {
+            return std::make_shared<AliasDb>(
+                std::move(g), isFrozen, descend_function_calls);
           })
       .def(
           "dump_alias_db",
@@ -424,35 +425,44 @@ void initPythonIRBindings(PyObject* module_) {
       .GS(appendNode)
       .GS(prependNode)
       // NB: insert_point_guard defined over direct modification of insert point
-      .def("insert_point_guard", [](Graph& g, Node *n) {
-       return py::module::import("torch.jit._ir_utils")
-            .attr("insert_point_guard")(g, n);
-      })
-      .def("insert_point_guard", [](Graph& g, Block *b) {
-       return py::module::import("torch.jit._ir_utils")
-            .attr("insert_point_guard")(g, b);
-      })
+      .def(
+          "insert_point_guard",
+          [](Graph& g, Node* n) {
+            return py::module::import("torch.jit._ir_utils")
+                .attr("insert_point_guard")(g, n);
+          })
+      .def(
+          "insert_point_guard",
+          [](Graph& g, Block* b) {
+            return py::module::import("torch.jit._ir_utils")
+                .attr("insert_point_guard")(g, b);
+          })
       .GS(insertPoint)
-      .def("setInsertPoint", [](Graph& g, Node* n) {
-        g.setInsertPoint(n);
-      })
-      .def("setInsertPoint", [](Graph& g, Block* n) {
-        g.setInsertPoint(n);
-      })
-      .def("insertGraph", [](Graph &g, Graph& callee, std::vector<Value*> inputs) {
-        return insertGraph(g, callee, inputs);
-      })
-      .def("insertGraph", [](Graph &g, Graph& callee, std::vector<Value*> inputs, std::unordered_map<Value*, Value*> value_map) {
-        return insertGraph(g, callee, inputs, value_map);
-      })
-      .def("insert", [](Graph&g, Symbol opname, std::vector<Value*> args) {
-        std::vector<NamedValue> args_named;
-        args_named.reserve(args.size());
-        for (Value *v : args) {
-          args_named.emplace_back(v);
-        }
-        return g.insert(opname, args_named);
-      })
+      .def("setInsertPoint", [](Graph& g, Node* n) { g.setInsertPoint(n); })
+      .def("setInsertPoint", [](Graph& g, Block* n) { g.setInsertPoint(n); })
+      .def(
+          "insertGraph",
+          [](Graph& g, Graph& callee, std::vector<Value*> inputs) {
+            return insertGraph(g, callee, inputs);
+          })
+      .def(
+          "insertGraph",
+          [](Graph& g,
+             Graph& callee,
+             std::vector<Value*> inputs,
+             std::unordered_map<Value*, Value*> value_map) {
+            return insertGraph(g, callee, inputs, value_map);
+          })
+      .def(
+          "insert",
+          [](Graph& g, Symbol opname, std::vector<Value*> args) {
+            std::vector<NamedValue> args_named;
+            args_named.reserve(args.size());
+            for (Value* v : args) {
+              args_named.emplace_back(v);
+            }
+            return g.insert(opname, args_named);
+          })
       .def(
           "makeMultiOutputIntoTuple",
           [](Graph& g) {
@@ -577,9 +587,7 @@ void initPythonIRBindings(PyObject* module_) {
       .def("outputsSize", [](Node& n) { return n.outputs().size(); })
       .NS(kind)
       .def("prev", [](Node& n) { return n.prev(); })
-      .def("matches", [](Node& n, const char * s) {
-        return n.matches(s);
-      })
+      .def("matches", [](Node& n, const char* s) { return n.matches(s); })
       .def("owningBlock", [](Node& n) { return n.owningBlock(); })
       .def("inputsAt", [](Node& n, size_t i) { return n.inputs().at(i); })
       .def(
