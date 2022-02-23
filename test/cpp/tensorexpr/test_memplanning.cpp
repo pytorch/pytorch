@@ -116,7 +116,8 @@ TEST(MemPlanning, MemReuseWithTypeCast) {
       Compute("F", {M, N}, [&](const ExprHandle& m, const ExprHandle& n) {
         return ET.load(m, n);
       });
-  StmtPtr stmt = tensorexpr::Block::make({CT.stmt(), DT.stmt(), ET.stmt(), FT.stmt()});
+  StmtPtr stmt =
+      tensorexpr::Block::make({CT.stmt(), DT.stmt(), ET.stmt(), FT.stmt()});
 
   // Constructed stmt:
   // Intermediate buffers and their liveness ranges: gemm [0, 1], relu [1, 2],
@@ -128,7 +129,8 @@ TEST(MemPlanning, MemReuseWithTypeCast) {
   //    for (int i_1 = 0; i_1 < 4; i_1++) {
   //      gemm[i, i_1] = float(0);
   //      for (int i_2 = 0; i_2 < 4; i_2++) {
-  //        gemm[i, i_1] = ReduceOp((gemm[i, i_1]) + (A[i, i_2]) * (B[i_2, i_1]), reduce_args={i_2});
+  //        gemm[i, i_1] = ReduceOp((gemm[i, i_1]) + (A[i, i_2]) * (B[i_2,
+  //        i_1]), reduce_args={i_2});
   //      }
   //    }
   //  }
@@ -226,24 +228,28 @@ TEST(MemPlanning, NoMemReuseForLargerType) {
       Compute("F", {M, N}, [&](const ExprHandle& m, const ExprHandle& n) {
         return ET.load(m, n);
       });
-  StmtPtr stmt = tensorexpr::Block::make({CT.stmt(), DT.stmt(), ET.stmt(), FT.stmt()});
+  StmtPtr stmt =
+      tensorexpr::Block::make({CT.stmt(), DT.stmt(), ET.stmt(), FT.stmt()});
 
   // Constructed stmt:
   // Intermediate buffers and their liveness ranges: gemm [0, 1], relu [1, 2],
   // E [2, 3]. The dimensions of 'gemm' and 'E' are the same but their types are
-  // different: 'E' type float > 'gemm' type int16. We won't reuse 'gemm' for 'E'.
+  // different: 'E' type float > 'gemm' type int16. We won't reuse 'gemm' for
+  // 'E'.
   //{
   //  for (int i = 0; i < 4; i++) {
   //    for (int i_1 = 0; i_1 < 4; i_1++) {
   //      gemm[i, i_1] = int16_t(0);
   //      for (int i_2 = 0; i_2 < 4; i_2++) {
-  //        gemm[i, i_1] = ReduceOp((gemm[i, i_1]) + (A[i, i_2]) * (B[i_2, i_1]), reduce_args={i_2});
+  //        gemm[i, i_1] = ReduceOp((gemm[i, i_1]) + (A[i, i_2]) * (B[i_2,
+  //        i_1]), reduce_args={i_2});
   //      }
   //    }
   //  }
   //  for (int i_3 = 0; i_3 < 4; i_3++) {
   //    for (int i_4 = 0; i_4 < 4; i_4++) {
-  //      relu[i_3, i_4] = (gemm[i_3, i_4])<int16_t(0) ? int16_t(0) : (gemm[i_3, i_4]);
+  //      relu[i_3, i_4] = (gemm[i_3, i_4])<int16_t(0) ? int16_t(0) : (gemm[i_3,
+  //      i_4]);
   //    }
   //  }
   //  for (int i_5 = 0; i_5 < 4; i_5++) {
