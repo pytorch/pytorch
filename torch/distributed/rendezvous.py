@@ -74,7 +74,7 @@ def rendezvous(url: str, rank: int = -1, world_size: Optional[int] = None, **kwa
         )
         if rank != -1:
             query_dict["rank"] = rank
-        if world_size:
+        if world_size and world_size != -1:
             query_dict["world_size"] = world_size
 
         result = result._replace(
