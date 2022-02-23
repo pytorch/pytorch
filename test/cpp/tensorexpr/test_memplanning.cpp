@@ -88,91 +88,77 @@ TEST(BufLiveRange, MulRangeLine) {
 }
 
 TEST(MemPlanning, MemReuseWithTypeCast) {
-  int M = 32;
-  int N = 32;
-  int K = 32;
+  int M = 4;
+  int N = 4;
+  int K = 4;
 
   BufHandle AP("A", {M, K}, kFloat);
   BufHandle BP("B", {K, N}, kFloat);
-  BufHandle CP("C", {M, N}, kFloat);
-  BufHandle DP("D", {M, N}, kFloat);
-  BufHandle EP("E", {M, N}, kQUInt8);
-  BufHandle FP("F", {M, N}, kQUInt8);
 
-  VarHandle i("i", kInt);
-  VarHandle j("j", kInt);
-  VarHandle k("k", kInt);
+  Tensor CT = Reduce(
+      "gemm",
+      {M, N},
+      Sum(),
+      [&](const ExprHandle& m, const ExprHandle& n, const ExprHandle& k) {
+        return AP.load(m, k) * BP.load(k, n);
+      },
+      {K});
+  Tensor DT =
+      Compute("relu", {M, N}, [&](const ExprHandle& m, const ExprHandle& n) {
+        return CompareSelect::make(
+            CT.load(m, n), 0.0f, 0.0f, CT.load(m, n), kLT);
+      });
+  Tensor ET =
+      Compute("E", {M, N}, [&](const ExprHandle& m, const ExprHandle& n) {
+        return Cast::make(kQUInt8, DT.load(m, n) + DT.load(m, n));
+      });
+  Tensor FT =
+      Compute("F", {M, N}, [&](const ExprHandle& m, const ExprHandle& n) {
+        return ET.load(m, n);
+      });
+  StmtPtr stmt = tensorexpr::Block::make({CT.stmt(), DT.stmt(), ET.stmt(), FT.stmt()});
 
-  auto zero = Cast::make(CP.node()->dtype(), 0);
-  auto store_c_init = Store::make(CP, {i, j}, zero);
-  auto store_c = Store::make(
-      CP,
-      {i, j},
-      ReduceOp::make(
-          CP.load(i, j) + AP.load(i, k) * BP.load(k, j), {k}, Sum()));
-  auto loop_c = For::make(
-      i,
-      0,
-      M,
-      For::make(
-          j, 0, N, Block::make({store_c_init, For::make(k, 0, K, store_c)})));
-
-  auto store_d = Store::make(
-      DP,
-      {i, j},
-      CompareSelect::make(CP.load(i, j), zero, zero, CP.load(i, j), kLT));
-  auto loop_d = For::make(i, 0, M, For::make(j, 0, N, store_d));
-
-  auto store_e = Store::make(
-      EP, {i, j}, Cast::make(kQUInt8, DP.load(i, j) + DP.load(i, j)));
-  auto loop_e = For::make(i, 0, M, For::make(j, 0, N, store_e));
-
-  auto store_f = Store::make(FP, {i, j}, Load::make(EP, {i, j}));
-  auto loop_f = For::make(i, 0, M, For::make(j, 0, N, store_f));
-
-  auto stmt = Block::make({loop_c, loop_d, loop_e, loop_f});
   // Constructed stmt:
-  // Intermediate buffers and their liveness ranges: C [0, 1], D [1, 2],
-  // E [2, 3]. The dimensions of 'C' and 'E' are the same but their types are
-  // different: 'E' type quint8 < 'C' type float. We'll reuse 'C' for 'E'
+  // Intermediate buffers and their liveness ranges: gemm [0, 1], relu [1, 2],
+  // E [2, 3]. The dimensions of 'gemm' and 'E' are the same but their types are
+  // different: 'E' type quint8 < 'gemm' type float. We'll reuse 'gemm' for 'E'
   // with typecasting.
-  // {
-  //   for (int i = 0; i < 32; i++) {
-  //     for (int j = 0; j < 32; j++) {
-  //       C[i, j] = float(0);
-  //       for (int k = 0; k < 32; k++) {
-  //         C[i, j] = ReduceOp((C[i, j]) + (A[i, k]) * (B[k, j]),
-  //         reduce_args={k});
-  //       }
-  //     }
-  //   }
-  //   for (int i = 0; i < 32; i++) {
-  //     for (int j = 0; j < 32; j++) {
-  //       D[i, j] = (C[i, j])<float(0) ? float(0) : (C[i, j]);
-  //     }
-  //   }
-  //   for (int i = 0; i < 32; i++) {
-  //     for (int j = 0; j < 32; j++) {
-  //       E[i, j] = quint8((D[i, j]) + (D[i, j]));
-  //     }
-  //   }
-  //   for (int i = 0; i < 32; i++) {
-  //     for (int j = 0; j < 32; j++) {
-  //       F[i, j] = E[i, j];
-  //     }
-  //   }
-  // }
+  //{
+  //  for (int i = 0; i < 4; i++) {
+  //    for (int i_1 = 0; i_1 < 4; i_1++) {
+  //      gemm[i, i_1] = float(0);
+  //      for (int i_2 = 0; i_2 < 4; i_2++) {
+  //        gemm[i, i_1] = ReduceOp((gemm[i, i_1]) + (A[i, i_2]) * (B[i_2, i_1]), reduce_args={i_2});
+  //      }
+  //    }
+  //  }
+  //  for (int i_3 = 0; i_3 < 4; i_3++) {
+  //    for (int i_4 = 0; i_4 < 4; i_4++) {
+  //      relu[i_3, i_4] = (gemm[i_3, i_4])<0.f ? 0.f : (gemm[i_3, i_4]);
+  //    }
+  //  }
+  //  for (int i_5 = 0; i_5 < 4; i_5++) {
+  //    for (int i_6 = 0; i_6 < 4; i_6++) {
+  //      E[i_5, i_6] = quint8((relu[i_5, i_6]) + (relu[i_5, i_6]));
+  //    }
+  //  }
+  //  for (int i_7 = 0; i_7 < 4; i_7++) {
+  //    for (int i_8 = 0; i_8 < 4; i_8++) {
+  //      F[i_7, i_8] = E[i_7, i_8];
+  //    }
+  //  }
+  //}
 
-  LoopNest l(stmt, {FP.node()});
+  LoopNest l(stmt, {FT.buf()});
   l.prepareForCodegen();
-  SimpleIREvaluator cg(Stmt::clone(l.root_stmt()), {AP, BP, FP});
+  SimpleIREvaluator cg(Stmt::clone(l.root_stmt()), {AP, BP, FT});
 
   checkIR(cg.stmt(), R"IR(
-# CHECK: Allocate(C); // dtype=float, dims=[32, 32]
-# CHECK: Allocate(D); // dtype=float, dims=[32, 32]
-# CHECK: Alias(E,C);
-# CHECK: Free(D);
-# CHECK: Free(C))IR");
+# CHECK: Allocate(gemm); // dtype=float, dims=[4, 4]
+# CHECK: Allocate(relu); // dtype=float, dims=[4, 4]
+# CHECK: Alias(E,gemm);
+# CHECK: Free(relu);
+# CHECK: Free(gemm))IR");
 
   PaddedBuffer<float> a_v(M, K, "a");
   PaddedBuffer<float> b_v(K, N, "b");
@@ -194,14 +180,14 @@ TEST(MemPlanning, MemReuseWithTypeCast) {
   cg.call({a_v, b_v, o1});
 
 #ifdef TORCH_ENABLE_LLVM
-  LLVMCodeGen cg_llvm(Stmt::clone(l.root_stmt()), {AP, BP, FP});
+  LLVMCodeGen cg_llvm(Stmt::clone(l.root_stmt()), {AP, BP, FT});
 
   checkIR(cg_llvm.stmt(), R"IR(
-# CHECK: Allocate(C); // dtype=float, dims=[32, 32]
-# CHECK: Allocate(D); // dtype=float, dims=[32, 32]
-# CHECK: Alias(E,C);
-# CHECK: Free(D);
-# CHECK: Free(C))IR");
+# CHECK: Allocate(gemm); // dtype=float, dims=[4, 4]
+# CHECK: Allocate(relu); // dtype=float, dims=[4, 4]
+# CHECK: Alias(E,gemm);
+# CHECK: Free(relu);
+# CHECK: Free(gemm))IR");
 
   cg_llvm.call({a_v, b_v, o2});
 
@@ -211,91 +197,78 @@ TEST(MemPlanning, MemReuseWithTypeCast) {
 }
 
 TEST(MemPlanning, NoMemReuseForLargerType) {
-  int M = 32;
-  int N = 32;
-  int K = 32;
+  int M = 4;
+  int N = 4;
+  int K = 4;
 
   BufHandle AP("A", {M, K}, kShort);
   BufHandle BP("B", {K, N}, kShort);
-  BufHandle CP("C", {M, N}, kShort);
-  BufHandle DP("D", {M, N}, kShort);
-  BufHandle EP("E", {M, N}, kFloat);
-  BufHandle FP("F", {M, N}, kFloat);
 
-  VarHandle i("i", kInt);
-  VarHandle j("j", kInt);
-  VarHandle k("k", kInt);
+  Tensor CT = Reduce(
+      "gemm",
+      {M, N},
+      Sum(),
+      [&](const ExprHandle& m, const ExprHandle& n, const ExprHandle& k) {
+        return AP.load(m, k) * BP.load(k, n);
+      },
+      {K});
+  auto zero = Cast::make(CT.buf()->dtype(), 0);
+  Tensor DT =
+      Compute("relu", {M, N}, [&](const ExprHandle& m, const ExprHandle& n) {
+        return CompareSelect::make(
+            CT.load(m, n), zero, zero, CT.load(m, n), kLT);
+      });
+  Tensor ET =
+      Compute("E", {M, N}, [&](const ExprHandle& m, const ExprHandle& n) {
+        return Cast::make(kFloat, DT.load(m, n) + DT.load(m, n));
+      });
+  Tensor FT =
+      Compute("F", {M, N}, [&](const ExprHandle& m, const ExprHandle& n) {
+        return ET.load(m, n);
+      });
+  StmtPtr stmt = tensorexpr::Block::make({CT.stmt(), DT.stmt(), ET.stmt(), FT.stmt()});
 
-  auto zero = Cast::make(CP.node()->dtype(), 0);
-  auto store_c_init = Store::make(CP, {i, j}, zero);
-  auto store_c = Store::make(
-      CP,
-      {i, j},
-      ReduceOp::make(
-          CP.load(i, j) + AP.load(i, k) * BP.load(k, j), {k}, Sum()));
-  auto loop_c = For::make(
-      i,
-      0,
-      M,
-      For::make(
-          j, 0, N, Block::make({store_c_init, For::make(k, 0, K, store_c)})));
-
-  auto store_d = Store::make(
-      DP,
-      {i, j},
-      CompareSelect::make(CP.load(i, j), zero, zero, CP.load(i, j), kLT));
-  auto loop_d = For::make(i, 0, M, For::make(j, 0, N, store_d));
-
-  StorePtr store_e = Store::make(
-      EP, {i, j}, Cast::make(kFloat, DP.load(i, j) + DP.load(i, j)));
-  StmtPtr loop_e = For::make(i, 0, 32, For::make(j, 0, 32, store_e));
-
-  StorePtr store_f = Store::make(FP, {i, j}, Load::make(EP, {i, j}));
-  StmtPtr loop_f = For::make(i, 0, 32, For::make(j, 0, 32, store_f));
-
-  auto stmt = Block::make({loop_c, loop_d, loop_e, loop_f});
   // Constructed stmt:
-  // Intermediate buffers and their liveness ranges: C [0, 1], D [1, 2],
-  // E [2, 3]. The dimensions of 'C' and 'E' are the same but their types are
-  // different: 'E' type float > 'C' type int16. We won't reuse 'C' for 'E'.
-  // {
-  //   for (int i = 0; i < 32; i++) {
-  //     for (int j = 0; j < 32; j++) {
-  //       C[i, j] = int16_t(0);
-  //       for (int k = 0; k < 32; k++) {
-  //         C[i, j] = ReduceOp((C[i, j]) + (A[i, k]) * (B[k, j]),
-  //         reduce_args={k});
-  //       }
-  //     }
-  //   }
-  //   for (int i = 0; i < 32; i++) {
-  //     for (int j = 0; j < 32; j++) {
-  //       D[i, j] = (C[i, j])<int16_t(0) ? int16_t(0) : (C[i, j]);
-  //     }
-  //   }
-  //   for (int i = 0; i < 32; i++) {
-  //     for (int j = 0; j < 32; j++) {
-  //       E[i, j] = float((D[i, j]) + (D[i, j]));
-  //     }
-  //   }
-  //   for (int i = 0; i < 32; i++) {
-  //     for (int j = 0; j < 32; j++) {
-  //       F[i, j] = E[i, j];
-  //     }
-  //   }
-  // }
+  // Intermediate buffers and their liveness ranges: gemm [0, 1], relu [1, 2],
+  // E [2, 3]. The dimensions of 'gemm' and 'E' are the same but their types are
+  // different: 'E' type float > 'gemm' type int16. We won't reuse 'gemm' for 'E'.
+  //{
+  //  for (int i = 0; i < 4; i++) {
+  //    for (int i_1 = 0; i_1 < 4; i_1++) {
+  //      gemm[i, i_1] = int16_t(0);
+  //      for (int i_2 = 0; i_2 < 4; i_2++) {
+  //        gemm[i, i_1] = ReduceOp((gemm[i, i_1]) + (A[i, i_2]) * (B[i_2, i_1]), reduce_args={i_2});
+  //      }
+  //    }
+  //  }
+  //  for (int i_3 = 0; i_3 < 4; i_3++) {
+  //    for (int i_4 = 0; i_4 < 4; i_4++) {
+  //      relu[i_3, i_4] = (gemm[i_3, i_4])<int16_t(0) ? int16_t(0) : (gemm[i_3, i_4]);
+  //    }
+  //  }
+  //  for (int i_5 = 0; i_5 < 4; i_5++) {
+  //    for (int i_6 = 0; i_6 < 4; i_6++) {
+  //      E[i_5, i_6] = float((relu[i_5, i_6]) + (relu[i_5, i_6]));
+  //    }
+  //  }
+  //  for (int i_7 = 0; i_7 < 4; i_7++) {
+  //    for (int i_8 = 0; i_8 < 4; i_8++) {
+  //      F[i_7, i_8] = E[i_7, i_8];
+  //    }
+  //  }
+  //}
 
-  LoopNest l(stmt, {FP.node()});
+  LoopNest l(stmt, {FT.buf()});
   l.prepareForCodegen();
-  SimpleIREvaluator cg(Stmt::clone(l.root_stmt()), {AP, BP, FP});
+  SimpleIREvaluator cg(Stmt::clone(l.root_stmt()), {AP, BP, FT.buf()});
 
   checkIR(cg.stmt(), R"IR(
-# CHECK: Allocate(C); // dtype=int16_t, dims=[32, 32]
-# CHECK: Allocate(D); // dtype=int16_t, dims=[32, 32]
-# CHECK: Allocate(E); // dtype=float, dims=[32, 32]
+# CHECK: Allocate(gemm); // dtype=int16_t, dims=[4, 4]
+# CHECK: Allocate(relu); // dtype=int16_t, dims=[4, 4]
+# CHECK: Allocate(E); // dtype=float, dims=[4, 4]
 # CHECK: Free(E);
-# CHECK: Free(D);
-# CHECK: Free(C))IR");
+# CHECK: Free(relu);
+# CHECK: Free(gemm))IR");
 
   PaddedBuffer<short> a_v(M, K, "a");
   PaddedBuffer<short> b_v(K, N, "b");
@@ -317,15 +290,15 @@ TEST(MemPlanning, NoMemReuseForLargerType) {
   cg.call({a_v, b_v, o1});
 
 #ifdef TORCH_ENABLE_LLVM
-  LLVMCodeGen cg_llvm(Stmt::clone(l.root_stmt()), {AP, BP, FP});
+  LLVMCodeGen cg_llvm(Stmt::clone(l.root_stmt()), {AP, BP, FT});
 
   checkIR(cg_llvm.stmt(), R"IR(
-# CHECK: Allocate(C); // dtype=int16_t, dims=[32, 32]
-# CHECK: Allocate(D); // dtype=int16_t, dims=[32, 32]
-# CHECK: Allocate(E); // dtype=float, dims=[32, 32]
+# CHECK: Allocate(gemm); // dtype=int16_t, dims=[4, 4]
+# CHECK: Allocate(relu); // dtype=int16_t, dims=[4, 4]
+# CHECK: Allocate(E); // dtype=float, dims=[4, 4]
 # CHECK: Free(E);
-# CHECK: Free(D);
-# CHECK: Free(C))IR");
+# CHECK: Free(relu);
+# CHECK: Free(gemm))IR");
 
   cg_llvm.call({a_v, b_v, o2});
 
