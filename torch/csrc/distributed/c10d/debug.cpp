@@ -31,7 +31,7 @@ DebugLevel loadDebugLevelFromEnvironment() {
 
   std::transform(level_str.begin(), level_str.end(), level_str.begin(),
     [](unsigned char c) {
-      return std::toupper(c);
+      return toupper(c);
     });
 
   if (level_str == "OFF") {
