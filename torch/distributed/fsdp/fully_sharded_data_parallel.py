@@ -290,6 +290,45 @@ class FullyShardedDataParallel(nn.Module):
         assert isinstance(self._fsdp_wrapped_module, FlattenParamsWrapper)
         return self._fsdp_wrapped_module
 
+    def fsdp_modules(self) -> List["FullyShardedDataParallel"]:
+        """
+        Helper function to return all nested FSDP instances, including self.
+        """
+        fsdp_modules = []
+        for module in self.modules():
+            if isinstance(module, FullyShardedDataParallel):
+                fsdp_modules.append(module)
+
+        return fsdp_modules
+
+    def apply(self, fn: Callable[[nn.Module], None]) -> "FullyShardedDataParallel":
+        r"""Applies ``fn`` recursively to every submodule (as returned by ``.children()``)
+        as well as self. Typical use includes initializing the parameters of a model
+        (see also :ref:`nn-init-doc`).
+
+        Compared to ``torch.nn.Module.apply``, this version additionally gathers
+        the full parameters before applying ``fn``. It should not be called from
+        within another ``summon_full_params`` context.
+
+        Args:
+            fn (:class:`Module` -> None): function to be applied to each submodule
+
+        Returns:
+            Module: self
+        """
+        uninitialized = self._is_root is None
+        self._assert_state(TrainingState_.IDLE)
+        with self._summon_full_params(recurse=False):
+            ret = super().apply(fn)
+
+        # Reset lazy init that might be called by summon_full_params, since
+        # it could have set is_root incorrectly for non-root FSDP instances.
+        if uninitialized and self._is_root:
+            for module in self.fsdp_modules():
+                module._reset_lazy_init()
+
+        return ret
+
     # setting two factors 'self.gradient_predivide_factor'
     # and 'self.gradient_postdivide_factor' to avoid underflow and overflow
     def _get_gradient_predivide_factor(self, world_size: int) -> float:
@@ -686,7 +725,7 @@ class FullyShardedDataParallel(nn.Module):
     def _write_back_current_shard(self):
         for p in self.params:
             if not p._is_sharded:  # type: ignore[attr-defined]
-                pass
+                continue  # Already copied because no sharding.
             chunks = p._full_param_padded.chunk(self.world_size)  # type: ignore[attr-defined]
             assert len(chunks) > self.rank
             chunk = chunks[self.rank]
@@ -698,9 +737,10 @@ class FullyShardedDataParallel(nn.Module):
 
         return [p for p in self.params if not _is_full_param_in_use(p)]
 
-
     @contextlib.contextmanager
-    def _summon_full_params(self, recurse: bool = True, writeback: bool = True) -> Generator:
+    def _summon_full_params(
+        self, recurse: bool = True, writeback: bool = True
+    ) -> Generator:
         """
         A context manager to expose full params for the current FSDP instance.
         Can be useful *after* forward/backward for a model to get the params for
@@ -713,7 +753,9 @@ class FullyShardedDataParallel(nn.Module):
         .. note:: The full parameters can be modified, but only the portion
             corresponding to the local param shard will persist after the
             context manager exits (unless ``writeback=False``, in which case
-            changes will be discarded).
+            changes will be discarded). In the case where FSDP does not shard
+            the parameters, currently only when world_size == 1, the
+            modification is persisted regardless of ``writeback``.
         Args:
             recurse (bool, Optional): recursively summon all params for nested
                 FSDP instances (default: True)
@@ -726,7 +768,11 @@ class FullyShardedDataParallel(nn.Module):
                 # Summon all params for any nested FSDP instances.
                 for module in self.modules():
                     if isinstance(module, FullyShardedDataParallel):
-                        stack.enter_context(module._summon_full_params(recurse=False, writeback=writeback))
+                        stack.enter_context(
+                            module._summon_full_params(
+                                recurse=False, writeback=writeback
+                            )
+                        )
                 # Yield to the caller, with full params in all nested instances.
                 yield
             # Exiting from the ExitStack will re-shard params.
@@ -741,16 +787,20 @@ class FullyShardedDataParallel(nn.Module):
 
             currently_local_params = self._collect_local_params()
             self._rebuild_full_params()
-            self._fsdp_wrapped_module._unflatten_params_if_needed()
 
-            try:
-                yield
-            finally:
-                if writeback:
-                    self._write_back_current_shard()
-                self._free_full_params(currently_local_params)
-                self._use_param_local_shard()
-                self.training_state = TrainingState_.IDLE
+            # FSDP now has the full flattened parameter. Unflatten it to get the
+            # full parameters.
+            with contextlib.ExitStack() as stack:
+                stack.enter_context(self.module.unflatten_params())
+                try:
+                    yield
+                finally:
+                    if writeback:
+                        self._write_back_current_shard()
+                    stack.close()
+                    self._free_full_params(currently_local_params)
+                    self._use_param_local_shard()
+                    self.training_state = TrainingState_.IDLE
 
     def _register_pre_backward_hooks(self, outputs: Any) -> Any:
         """Register pre-backward hook to run before the wrapped module's
