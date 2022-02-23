@@ -22,6 +22,9 @@ class SequenceWrapperMapDataPipe(MapDataPipe):
         >>> dp = SequenceWrapper(range(10))
         >>> list(dp)
         [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+        >>> dp = SequenceWrapper({'a': 100, 'b': 200, 'c': 300, 'd': 400})
+        >>> dp['a']
+        100
     """
     def __init__(self, sequence, deepcopy=True):
         if deepcopy:
