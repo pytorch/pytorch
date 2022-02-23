@@ -261,7 +261,6 @@ TensorView* unaryOp(
 
 NVFUSER_DEFINE_UNARY_OP(set, Set)
 NVFUSER_DEFINE_UNARY_OP(randlike, RandLike)
-NVFUSER_DEFINE_UNARY_OP(abs, Abs)
 NVFUSER_DEFINE_UNARY_OP(notOp, Not)
 NVFUSER_DEFINE_UNARY_OP(ceil, Ceil)
 NVFUSER_DEFINE_UNARY_OP(floor, Floor)
@@ -273,6 +272,25 @@ NVFUSER_DEFINE_UNARY_OP(round, Round)
 NVFUSER_DEFINE_UNARY_OP(silu, Silu)
 NVFUSER_DEFINE_UNARY_OP(trunc, Trunc)
 #undef NVFUSER_DEFINE_UNARY_OP
+
+// The output of abs(complex_tensor) are real numbers
+Val* abs(Val* v) {
+  if (v->getDataType() == DataType::ComplexDouble) {
+    Val* out = newValLike(v, DataType::Double);
+    IrBuilder::create<UnaryOp>(UnaryOpType::Abs, out, v);
+    return out;
+  }
+  if (v->getDataType() == DataType::ComplexFloat) {
+    Val* out = newValLike(v, DataType::Float);
+    IrBuilder::create<UnaryOp>(UnaryOpType::Abs, out, v);
+    return out;
+  }
+  return unaryOp(UnaryOpType::Abs, v);
+}
+
+TensorView* abs(TensorView* tv) {
+  return abs(tv->as<Val>())->as<TensorView>();
+}
 
 // UNARY FLOAT CAST OPERATIONS
 

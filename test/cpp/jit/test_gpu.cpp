@@ -833,6 +833,27 @@ TEST_F(NVFuserTest, FusionScalarTypePromote_CUDA) {
   TORCH_CHECK(add(c, c)->getDataType() == DataType::ComplexDouble);
 }
 
+TEST_F(NVFuserTest, FusionComplexAbsTypes_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto options = at::TensorOptions().device(at::kCUDA, 0);
+  auto tensor_cf = at::randn({4, 4, 4}, options.dtype(at::kComplexFloat));
+  auto tensor_cd = at::randn({4, 4, 4}, options.dtype(at::kComplexDouble));
+
+  auto type_cf = TensorType::create(tensor_cf);
+  auto tv_cf = IrBuilder::create<TensorView>(type_cf);
+  auto type_cd = TensorType::create(tensor_cd);
+  auto tv_cd = IrBuilder::create<TensorView>(type_cd);
+
+  TORCH_CHECK(
+      tensor_cf.abs().scalar_type() ==
+      data_type_to_aten(abs(tv_cf)->getDataType().value()));
+  TORCH_CHECK(
+      tensor_cd.abs().scalar_type() ==
+      data_type_to_aten(abs(tv_cd)->getDataType().value()));
+}
+
 TEST_F(NVFuserTest, FusionRegister_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
