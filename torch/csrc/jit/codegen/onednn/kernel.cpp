@@ -1,7 +1,6 @@
 #include <torch/csrc/jit/codegen/onednn/graph_helper.h>
 #include <torch/csrc/jit/codegen/onednn/kernel.h>
 
-
 #include <ATen/core/functional.h>
 #include <torch/csrc/jit/jit_log.h>
 
@@ -11,7 +10,6 @@ namespace fuser {
 namespace onednn {
 
 using namespace dnnl::graph;
-
 
 LlgaKernel::LlgaKernel(const Node* fusionNode)
     : fusionNode_(fusionNode),
@@ -125,16 +123,18 @@ ArgSpecs LlgaKernel::initializeOutputSpecs() const {
   return outputSpecs;
 }
 
-std::tuple<RunArgs, RunArgs>
-LlgaKernel::prepareRunArgs(const TensorArgs &inputs,
-                           TensorArgs &outputs) const {
+std::tuple<RunArgs, RunArgs> LlgaKernel::prepareRunArgs(
+    const TensorArgs &inputs,
+    TensorArgs &outputs) const {
   RunArgs runInputs, runOutputs;
   auto numInputs = runArgsIdx_.size();
   for (size_t i = 0; i < numInputs; i++) {
     auto spec = inputSpecs_[i];
     auto input = inputs[runArgsIdx_[i]];
     runInputs.push_back(
-        {spec.logical_tensor(), Engine::getEngine(), input.data_ptr()});
+        {spec.logical_tensor(),
+         Engine::getEngine(),
+         input.data_ptr()});
   }
   auto numConstantInputs = constantInputs_.size();
   for (size_t i = 0; i < numConstantInputs; i++) {
@@ -160,9 +160,9 @@ LlgaKernel::prepareRunArgs(const TensorArgs &inputs,
       runOutputs.push_back(
           {spec.logical_tensor(), Engine::getEngine(), inputTensor.data_ptr()});
     } else if (spec.is_opaque()) {
-        auto tensor = empty_llga(spec, opt);
-        outputs.push_back(tensor);
-        runOutputs.push_back(llga_from_aten_tensor(tensor));
+      auto tensor = empty_llga(spec, opt);
+      outputs.push_back(tensor);
+      runOutputs.push_back(llga_from_aten_tensor(tensor));
     } else {
       auto tensor = at::empty_strided(spec.sizes(), spec.strides(), opt);
       outputs.push_back(tensor);
@@ -218,23 +218,24 @@ void LlgaKernel::run(Stack& stack) {
 
   // Even in case of concurrent threads, the kernel would be initialized once.
   // TODO: Try not using an atomic lock
-  std::call_once(initialized_flag,
-                 [&](const TensorArgs& inputs) {
+  std::call_once(
+      initialized_flag,
+      [&](const TensorArgs& inputs) {
 #ifdef GRAPH_DEBUG_ENABLED
-                   GRAPH_DEBUG("Initializing input logical tensors");
+        GRAPH_DEBUG("Initializing input logical tensors");
 #endif
-                   inputSpecs_ = initializeInputSpecs(inputs);
+        inputSpecs_ = initializeInputSpecs(inputs);
 #ifdef GRAPH_DEBUG_ENABLED
-                   GRAPH_DEBUG("Initializing output logical tensors");
+        GRAPH_DEBUG("Initializing output logical tensors");
 #endif
-                   outputSpecs_ = initializeOutputSpecs();
+        outputSpecs_ = initializeOutputSpecs();
 #ifdef GRAPH_DEBUG_ENABLED
-                   GRAPH_DEBUG("Compiling partition");
+        GRAPH_DEBUG("Compiling partition");
 #endif
-                   compilation_ = compile(partition_);
-                   is_initialized_ = true;
-                 },
-                inputs);
+        compilation_ = compile(partition_);
+        is_initialized_ = true;
+      },
+      inputs);
 #ifdef GRAPH_DEBUG_ENABLED
   GRAPH_DEBUG("Preparing runtime tensors");
 #endif
@@ -251,7 +252,7 @@ void LlgaKernel::run(Stack& stack) {
 
   // Update the stack.
   drop(stack, nGraphInputs_);
-  for (auto &o : outputs)
+  for (auto& o : outputs)
     push_one(stack, std::move(o));
 #ifdef GRAPH_DEBUG_ENABLED
   GRAPH_DEBUG("Stack updated");

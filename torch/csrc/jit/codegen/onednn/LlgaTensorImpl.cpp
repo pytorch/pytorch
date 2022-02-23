@@ -1,8 +1,8 @@
 #include <ATen/Config.h>
 
 #if AT_MKLDNN_ENABLED()
-#include <torch/csrc/jit/codegen/onednn/LlgaTensorImpl.h>
 #include <c10/core/CPUAllocator.h>
+#include <torch/csrc/jit/codegen/onednn/LlgaTensorImpl.h>
 
 namespace torch {
 namespace jit {
@@ -29,9 +29,9 @@ LlgaTensorImpl::LlgaTensorImpl(
           c10::DispatchKeySet(c10::DispatchKey::MkldnnCPU),
           data_type),
       desc_(desc) {
-        sizes_and_strides_.set_sizes(desc.sizes());
-        refresh_numel();
-      }
+  sizes_and_strides_.set_sizes(desc.sizes());
+  refresh_numel();
+}
 
 // The following are publically exposed as methods of Tensor
 c10::IntArrayRef LlgaTensorImpl::strides() const {
@@ -65,7 +65,9 @@ bool LlgaTensorImpl::has_storage() const {
   return true;
 }
 
-at::Tensor empty_llga(const LlgaTensorDesc& desc, const c10::TensorOptions& options) {
+at::Tensor empty_llga(
+    const LlgaTensorDesc& desc,
+    const c10::TensorOptions& options) {
   const auto& sizes = desc.sizes();
   auto nbytes = desc.storage_size();
 
@@ -89,9 +91,10 @@ const LlgaTensorDesc& get_llga_desc(const at::Tensor& tensor) {
 
 
 dnnl::graph::tensor llga_from_aten_tensor(const at::Tensor& tensor) {
-  return {get_llga_desc(tensor).logical_tensor(),
-          torch::jit::fuser::onednn::Engine::getEngine(),
-          tensor.data_ptr()};
+  return {
+      get_llga_desc(tensor).logical_tensor(),
+      torch::jit::fuser::onednn::Engine::getEngine(),
+      tensor.data_ptr()};
 }
 
 using data_type = dnnl::graph::logical_tensor::data_type;

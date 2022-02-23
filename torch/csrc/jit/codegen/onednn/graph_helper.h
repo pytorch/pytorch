@@ -69,7 +69,8 @@ class LlgaGraphHelper {
 
   OpPartitionMap opToOwningPartition_;
   std::vector<dnnl::graph::partition> partitions_;
-  std::map<size_t, Value*> tensorIdToValue_; // map from tensorId to torch::jit::Value
+  std::map<size_t, Value*>
+      tensorIdToValue_; // map from tensorId to torch::jit::Value
 };
 
 class LlgaNodeWrapper {

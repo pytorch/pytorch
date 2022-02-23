@@ -93,12 +93,12 @@ std::vector<WorkBlock> GraphRewriter::buildWorkBlocks() {
 }
 
 std::pair<graph_node_list::iterator, bool> GraphRewriter::scanNode(
-      Node* consumer,
-      graph_node_list::iterator workblock_begin) {
+    Node* consumer,
+    graph_node_list::iterator workblock_begin) {
   GRAPH_DEBUG("Scanning ", consumer->kind().toQualString());
   if (llgaHelper_.shouldConsiderForMerge(consumer)) {
     if (!llgaHelper_.isLlgaSubgraph(consumer)) {
-        consumer = llgaHelper_.createSingletonSubgraph(consumer, aliasDb_);
+      consumer = llgaHelper_.createSingletonSubgraph(consumer, aliasDb_);
     }
     // Iterate through the workblock to merge nodes of the
     // same partition determined by LLGA graph helper.

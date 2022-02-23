@@ -16,7 +16,7 @@ namespace onednn {
 // object to be expected. The device id ensures that there is a unique engine
 // being created for each device. The device handle passed from PyTorch allows
 // oneDNN Graph implementation to work on the device specified by PyTorch, which
-// is currently CPU, so we only have one engine. 
+// is currently CPU, so we only have one engine.
 // Ref: https://spec.oneapi.io/onednn-graph/latest/programming_model.html#engine
 struct Engine {
   // CPU engine singleton
@@ -184,14 +184,14 @@ struct LlgaTensorDesc {
     return tid_ == desc.tid_ && sizes_ == desc.sizes_ &&
         dtype_ == desc.dtype_ && layout_type_ == desc.layout_type_ &&
         ((is_opaque() && layout_id_ == desc.layout_id_) ||
-         strides_ == desc.strides_);
+        strides_ == desc.strides_);
   }
 
   bool operator!=(const LlgaTensorDesc& desc) const {
     return (tid_ != desc.tid_) || (sizes_ != desc.sizes_) ||
         (dtype_ != desc.dtype_) || (layout_type_ != desc.layout_type_) ||
         !((is_opaque() && (layout_id_ == desc.layout_id_)) ||
-         (strides_ == desc.strides_));
+          (strides_ == desc.strides_));
   }
 
   static size_t hash(const LlgaTensorDesc& desc) {
@@ -245,7 +245,9 @@ struct TORCH_API LlgaTensorImpl : public c10::TensorImpl {
   LlgaTensorDesc desc_;
 };
 
-at::Tensor empty_llga(const LlgaTensorDesc& desc, const c10::TensorOptions& options);
+at::Tensor empty_llga(
+    const LlgaTensorDesc& desc,
+    const c10::TensorOptions& options);
 
 dnnl::graph::tensor llga_from_aten_tensor(const at::Tensor& tensor);
 

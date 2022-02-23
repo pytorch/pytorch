@@ -28,8 +28,8 @@ void mayConvertScalarInputToTensor(Node* node) {
         aten::as_tensor, {scalar}, {{"dtype", at::ScalarType::Float}});
     // add dim & stride info to IR
     c10::optional<size_t> t_dim = 1;
-    auto target_type =
-        TensorTypePtr(TensorType::create(at::ScalarType::Float, at::kCPU, t_dim, false));
+    auto target_type = TensorTypePtr(
+        TensorType::create(at::ScalarType::Float, at::kCPU, t_dim, false));
     target_type = target_type->withSizes({1});
     t->setType(target_type);
 
@@ -58,8 +58,8 @@ void mayDecomposeAdd(Node* node) {
     if (!alphaEqualsOne) {
       WithInsertPoint guard(node);
       auto g = node->owningGraph();
-      auto mul = g->insert(aten::mul, {node->namedInput("other"),
-                                       node->namedInput("alpha")});
+      auto mul = g->insert(
+          aten::mul, {node->namedInput("other"), node->namedInput("alpha")});
       node->replaceInput(1, mul);
       auto one = g->insertConstant(1.0);
       node->replaceInput(2, one);

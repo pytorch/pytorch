@@ -33,8 +33,9 @@ c10::optional<size_t> getDimensions(Value* v) {
 // PyTorch ops that can't otherwise be mapped to oneDNN Graph ops are mapped as
 // Wildcards instead. They make the integration code with PyTorch simpler by
 // passing every op to the oneDNN Graph library in the add_op call -
-// no need to check beforehand whether the op is supported by oneDNN Graph or not.
-// oneDNN Graph ops separated by wildcards don't end up in the same partition.
+// no need to check beforehand whether the op is supported by oneDNN Graph or
+// not oneDNN Graph ops separated by wildcards don't end up in the same
+// partition.
 Operator makeWildcardOp(Node* node) {
   auto o = Operator(node, opkind::Wildcard);
   // wildcard op contains only topology info
@@ -47,8 +48,8 @@ Operator makeWildcardOp(Node* node) {
   return o;
 }
 
-// If we don't meet a certain condition to map a PyTorch op to a oneDNN Graph op,
-// then we create a wildcard op corresponding to that PyTorch op instead.
+// If we don't meet a certain condition to map a PyTorch op to a oneDNN Graph
+// op, then we create a wildcard op corresponding to that PyTorch op instead.
 #define REQUIRE(cond)                                 \
   if (!(cond)) {                                      \
     GRAPH_DEBUG("Unsupported condition " #cond "\n"); \
@@ -60,7 +61,8 @@ Operator makeEltwiseOp(Node* node, opkind kind) {
 }
 
 Operator makeBinaryOp(Node* node, opkind kind) {
-  REQUIRE(node->input(0)->type()->isSubtypeOf(TensorType::get()) &&
+  REQUIRE(
+      node->input(0)->type()->isSubtypeOf(TensorType::get()) &&
       node->input(1)->type()->isSubtypeOf(TensorType::get()))
   return Operator(node, kind).setInput(0, 1).setOutput(0);
 }
@@ -101,7 +103,8 @@ Operator createOperator(Node* node) {
 
     case aten::batch_norm: {
       auto training = toIValue(node->namedInput("training"));
-      REQUIRE(training.has_value()); // cannot get training status in script mode
+      REQUIRE(
+          training.has_value()); // cannot get training status in script mode
       REQUIRE(!training->toBool()); // TODO: support bn training
       return Operator(node, opkind::BatchNormInference)
           .setInput(0, 1, 2, 3, 4)
@@ -120,11 +123,12 @@ Operator createOperator(Node* node) {
     }
 
     case aten::addmm: {
-       auto alpha = toIValue(node->namedInput("alpha"));
-       auto beta = toIValue(node->namedInput("beta"));
-       REQUIRE(alpha.has_value() && beta.has_value() &&
-              (alpha->toDouble() == 1.0) && (beta->toDouble() == 1.0));
-       return Operator(node, opkind::MatMul).setInput(1, 2, 0).setOutput(0);
+      auto alpha = toIValue(node->namedInput("alpha"));
+      auto beta = toIValue(node->namedInput("beta"));
+      REQUIRE(
+          alpha.has_value() && beta.has_value() && (alpha->toDouble() == 1.0)
+          && (beta->toDouble() == 1.0));
+      return Operator(node, opkind::MatMul).setInput(1, 2, 0).setOutput(0);
     }
 
     case aten::add:
@@ -177,7 +181,8 @@ Operator createOperator(Node* node) {
 
     case aten::cat: {
       auto o = Operator(node, opkind::Concat);
-      REQUIRE(node->namedInput("tensors")->node()->kind() == prim::ListConstruct);
+      REQUIRE(
+          node->namedInput("tensors")->node()->kind() == prim::ListConstruct);
       REQUIRE(node->namedInput("tensors")->uses().size() == 1);
       REQUIRE(node->namedInput("dim")->node()->kind() == prim::Constant);
       // aten::cat needs a special handling since it takes a Tensor[] as input.
@@ -196,9 +201,11 @@ Operator createOperator(Node* node) {
     }
 
     case aten::max_pool2d: {
-      REQUIRE(node->namedInput("kernel_size")->node()->kind() == prim::Constant);
+      REQUIRE(
+          node->namedInput("kernel_size")->node()->kind() == prim::Constant);
 
-      auto rounding_type = toIValue(node->namedInput("ceil_mode"))->toBool() ? "ceil" : "floor";
+      auto rounding_type =
+          toIValue(node->namedInput("ceil_mode"))->toBool() ? "ceil" : "floor";
       return Operator(node, opkind::MaxPool)
           .setInput(0)
           .setOutput(0)
@@ -211,8 +218,9 @@ Operator createOperator(Node* node) {
     }
 
     case aten::avg_pool2d: {
-      // TODO: do we need add checks for all Constant?
-      REQUIRE(node->namedInput("kernel_size")->node()->kind() == prim::Constant);
+      // TODO: do we need add checks for all Constants?
+      REQUIRE(
+          node->namedInput("kernel_size")->node()->kind() == prim::Constant);
 
       auto rounding_type = toIValue(node->namedInput("ceil_mode"))->toBool() ? "ceil" : "floor";
       auto divisor_override = toIValue(node->namedInput("divisor_override"));
@@ -232,7 +240,8 @@ Operator createOperator(Node* node) {
       auto dim0 = getDimensions(node->namedInput("self")).value_or(-1);
       auto dim1 = getDimensions(node->namedInput("other")).value_or(-1);
       // TODO: support all shape combinations
-      REQUIRE((dim0 == 2 && dim1 == 2) || (dim0 == 4 && dim1 == 4) ||
+      REQUIRE(
+          (dim0 == 2 && dim1 == 2) || (dim0 == 4 && dim1 == 4) ||
           (dim0 == 3 && dim1 == 2));
     } // fall through
     case aten::mm: {
@@ -322,8 +331,7 @@ bool checkInputCompatibility(Node* node) {
         return false;
       }
       auto dtype = tensor.scalar_type();
-      if ((dtype != at::ScalarType::Float) &&
-          (dtype != at::ScalarType::Long)) {
+      if ((dtype != at::ScalarType::Float) && (dtype != at::ScalarType::Long)) {
         return false;
       }
     } else if (inputIValue.isScalar()) {
@@ -403,16 +411,11 @@ bool LlgaGraphHelper::shouldMerge(Node* toMerge, Node* subgraph) {
 // that oneDNN executes faster. prim::ListConstruct is an exception, since
 // we simply want to fuse it with cat.
 bool isBetterSuitedForLLGA(NodeKind kindOfOp) {
-  if ((kindOfOp == aten::layer_norm) ||
-      (kindOfOp == aten::avg_pool2d) ||
-      (kindOfOp == aten::matmul) ||
-      (kindOfOp == aten::max_pool2d) ||
-      (kindOfOp == aten::conv2d) ||
-      (kindOfOp == aten::_convolution) ||
-      (kindOfOp == aten::mm) ||
-      (kindOfOp == aten::linear) ||
-      (kindOfOp == aten::cat) ||
-      (kindOfOp == prim::ListConstruct)) {
+  if ((kindOfOp == aten::layer_norm) || (kindOfOp == aten::avg_pool2d) ||
+      (kindOfOp == aten::matmul) || (kindOfOp == aten::max_pool2d) ||
+      (kindOfOp == aten::conv2d) || (kindOfOp == aten::_convolution) ||
+      (kindOfOp == aten::mm) || (kindOfOp == aten::linear) ||
+      (kindOfOp == aten::cat) || (kindOfOp == prim::ListConstruct)) {
     return true;
   } else {
     return false;

@@ -1,7 +1,7 @@
 #pragma once
 
-#include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/codegen/onednn/graph_helper.h>
+#include <torch/csrc/jit/ir/ir.h>
 
 namespace torch {
 namespace jit {

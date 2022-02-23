@@ -2,9 +2,9 @@
 
 #include <unordered_map>
 
+#include <oneapi/dnnl/dnnl_graph.hpp>
 #include <torch/csrc/jit/codegen/onednn/LlgaTensorImpl.h>
 #include <torch/csrc/jit/codegen/onednn/graph_helper.h>
-#include <oneapi/dnnl/dnnl_graph.hpp>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/runtime/interpreter.h>
 
