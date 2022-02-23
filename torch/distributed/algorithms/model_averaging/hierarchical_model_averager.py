@@ -1,3 +1,4 @@
+from typing import Optional
 import warnings
 from collections import OrderedDict
 import logging
@@ -36,7 +37,8 @@ class HierarchicalModelAverager:
                                 process proup redundantly.
                                 On the other hand, the third process group can only be triggered
                                 every 8 iterations, so it will not be triggered at the 4th iteration.
-                                If ``None``, the default process group, which is created by :func:`torch.distributed.init_process_group`
+                                If ``None``, the default process group,
+                                which is created by :func:`torch.distributed.init_process_group`
                                 will be used, and it will run averaging every iteration, which is
                                 normally equivalent to the vanilla gradient averaging just like
                                 :class:`~torch.nn.DistributedDataParallel` (DDP). (default: ``None``)
@@ -108,18 +110,21 @@ class HierarchicalModelAverager:
                 "by DistributedDataParall in the backward pass. Therefore, only "
                 "DistributedDataParallel should be used for this case."
             )
-        ovall_group = (
+        ovall_group : Optional[dist.ProcessGroup] = (
             process_group if process_group is not None else dist.group.WORLD
         )
         overall_group_size = dist.get_world_size(group=ovall_group)
         if list(period_group_size_dict.values())[-1] != overall_group_size:
             raise ValueError(
-                "The last value in arg ``period_process_group_dict`` must be equal to the size of arg ``process_group``.")
+                "The last value in arg ``period_process_group_dict`` "
+                "must be equal to the size of arg ``process_group``.")
 
         self.period_process_group_dict = OrderedDict()
         logger.info("Model averaging hierarchy:")
         for period, group_size in period_group_size_dict.items():
-            logger.info(f"\tEach group that has {group_size} processes average parameters every {period} iterations, if no higher-level averaging.")
+            logger.info(
+                f"\tEach group that has {group_size} processes average parameters every {period} iterations, "
+                "if no higher-level averaging.")
             if group_size != overall_group_size:
                 self.period_process_group_dict[period], subgroups = dist.new_subgroups(
                     group_size=group_size, group=ovall_group)
@@ -130,7 +135,7 @@ class HierarchicalModelAverager:
             raise ValueError("Arg ``warmup_steps`` must be a non-negative number.")
         self.warmup_steps = warmup_steps
         self.step = 0
-        self.group = None  # The process group used for averaging parameters.
+        self.group: Optional[dist.ProcessGroup] = None  # The process group used for averaging parameters.
 
     def _is_process_group_found(self):
         """
