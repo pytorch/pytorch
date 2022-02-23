@@ -4,7 +4,7 @@ So you want to write a new operator or a new kernel for an existing operator. Ho
 
 ## native_functions.yaml vs custom operators
 
-All operators that are part of the public API of PyTorch are defined in `native_functions.yaml`. Just add an entry there and write the corresponding C++ kernel function. It’s very easy and there is a good introduction at https://github.com/pytorch/pytorch/blob/master/aten/src/ATen/native/README.md.
+All operators that are part of the public API of PyTorch are defined in `native_functions.yaml`. Just add an entry there and write the corresponding C++ kernel function. It’s very easy and there is a good introduction at https://github.com/pytorch/pytorch/blob/main/aten/src/ATen/native/README.md.
 
 ### So when should you **not** use `native_functions.yaml`?
 

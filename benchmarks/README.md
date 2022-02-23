@@ -10,7 +10,7 @@ Make sure you're on a machine with CUDA, torchvision, and pytorch installed. Ins
 # Install torchvision. It comes with the pytorch stable release binary
 conda install pytorch torchvision -c pytorch
 
-# Install the latest pytorch master from source.
+# Install the latest pytorch main from source.
 # It should supersede the installation from the release binary.
 cd $PYTORCH_HOME
 python setup.py build develop

@@ -98,7 +98,7 @@ chmod u+x "$onnx_init_file"
 cd "$onnx_root"
 if [ ! -f "$ccache_script" ]; then
   ccache_script="$onnx_root/ccache_install.sh"
-  with_proxy wget https://raw.githubusercontent.com/pytorch/pytorch/master/scripts/fbcode-dev-setup/ccache_setup.sh -O "$ccache_script"
+  with_proxy wget https://raw.githubusercontent.com/pytorch/pytorch/main/scripts/fbcode-dev-setup/ccache_setup.sh -O "$ccache_script"
 fi
 chmod u+x "$ccache_script"
 "$ccache_script" --path "$ccache_root"
@@ -144,7 +144,7 @@ with_proxy python setup.py develop
 
 # Sanity checks and useful info
 cd "$onnx_root"
-with_proxy wget https://raw.githubusercontent.com/pytorch/pytorch/master/scripts/fbcode-dev-setup/onnx_c2_sanity_check.sh -O "$sanity_script"
+with_proxy wget https://raw.githubusercontent.com/pytorch/pytorch/main/scripts/fbcode-dev-setup/onnx_c2_sanity_check.sh -O "$sanity_script"
 chmod u+x "$sanity_script"
 $sanity_script
 

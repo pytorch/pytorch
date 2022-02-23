@@ -63,7 +63,7 @@ class TestAutodiffSubgraphSlicing(JitTestCase):
                 def foo(x):
 
                     #  two nodes should be fused
-                    #  see https://github.com/pytorch/pytorch/blob/master/torch/csrc/jit/runtime/graph_executor_impl.h#L49
+                    #  see https://github.com/pytorch/pytorch/blob/main/torch/csrc/jit/runtime/graph_executor_impl.h#L49
                     return torch.sigmoid(torch.sigmoid(x))
 
                 @torch.jit.script

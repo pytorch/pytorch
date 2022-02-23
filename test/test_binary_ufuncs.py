@@ -269,7 +269,7 @@ class TestBinaryUfuncs(TestCase):
                 exact_dtype = False
 
             if dtype is torch.bfloat16 and expected.dtype == np.float32:
-                # Ref: https://github.com/pytorch/pytorch/blob/master/torch/testing/_internal/common_utils.py#L1149
+                # Ref: https://github.com/pytorch/pytorch/blob/main/torch/testing/_internal/common_utils.py#L1149
                 self.assertEqualHelper(actual, expected, msg, dtype=dtype,
                                        exact_dtype=exact_dtype, rtol=16e-3, atol=1e-5)
             else:

@@ -88,7 +88,7 @@ def get_transformer(device: torch.device) -> GetterReturnType:
     return forward, params
 
 def get_multiheadattn(device: torch.device) -> GetterReturnType:
-    # From https://github.com/pytorch/text/blob/master/test/data/test_modules.py#L10
+    # From https://github.com/pytorch/text/blob/main/test/data/test_modules.py#L10
     embed_dim, nhead, tgt_len, src_len, bsz = 10, 5, 6, 10, 64
     # Build torchtext MultiheadAttention module
     in_proj = models.InProjContainer(torch.nn.Linear(embed_dim, embed_dim, bias=False),
