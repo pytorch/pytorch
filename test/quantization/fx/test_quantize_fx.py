@@ -130,7 +130,7 @@ import itertools
 import operator
 import unittest
 import io
-from typing import Callable, Optional
+from typing import Callable, Optional, List
 
 TEST_WITH_ROCM = os.getenv('PYTORCH_TEST_WITH_ROCM', '0') == '1'
 
@@ -3147,7 +3147,6 @@ class TestQuantizeFx(QuantizationTestCase):
     def test_preserve_tuple(self):
         """ Test tuple input type is preserved
         """
-        from typing import List
 
         class LSTM(nn.Module):
             def __init__(self):
