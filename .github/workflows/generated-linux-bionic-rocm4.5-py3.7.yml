@@ -159,6 +159,7 @@ jobs:
           }
           retry docker pull "${DOCKER_IMAGE}"
       - name: Parse ref
+        shell: bash
         id: parse-ref
         run: .github/scripts/parse_ref.py
       - name: Build
@@ -341,6 +342,7 @@ jobs:
         run: |
           df -H
       - name: Parse ref
+        shell: bash
         id: parse-ref
         run: .github/scripts/parse_ref.py
       - name: Test
@@ -563,6 +565,7 @@ jobs:
         run: |
           df -H
       - name: Parse ref
+        shell: bash
         id: parse-ref
         run: .github/scripts/parse_ref.py
       - name: Test
@@ -785,6 +788,7 @@ jobs:
         run: |
           df -H
       - name: Parse ref
+        shell: bash
         id: parse-ref
         run: .github/scripts/parse_ref.py
       - name: Test
