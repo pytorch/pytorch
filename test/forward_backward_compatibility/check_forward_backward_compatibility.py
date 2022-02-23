@@ -13,9 +13,8 @@ from torch._C import parse_schema
 MAX_ALLOWED_PERIOD = datetime.timedelta(days=30)
 
 # The date specifies how long the allowlist exclusion should apply to.
-# You should pick a date that is far enough in the future that you
-# believe you can land your diff before then. But note that this date
-# should be less than a month of when you are including this BC
+# You should pick a date in the future that you believe you can land your diff before then.
+# But note that this date should be less than a month of when you are including this BC
 # breaking change. In general, we don't recommend adding entry to this list.
 # Please review following docs:
 #
@@ -74,6 +73,8 @@ INDEFINITE_ALLOW_LIST = [
     "prepacked::unpack_prepacked_sizes_linear",
     "aten::native_multi_head_self_attention",
     "aten::_native_multi_head_self_attention",
+    "aten::_transform_bias_rescale_qkv",
+    "aten::_scatter_reduce.two",
 ]
 
 def compile_temp_allow_list():
