@@ -2154,6 +2154,69 @@ REGISTER_OPERATOR_FUNCTOR(
       };
     });
 
+namespace {
+
+template <bool has_relu>
+void apply_dynamic_out_functor(
+    c10::intrusive_ptr<LinearPackedParamsBase> packed_weight,
+    const at::Tensor& input,
+    at::Tensor& out,
+    bool reduce_range);
+
+template <>
+void apply_dynamic_out_functor<false>(
+    c10::intrusive_ptr<LinearPackedParamsBase> packed_weight,
+    const at::Tensor& input,
+    at::Tensor& out,
+    bool reduce_range) {
+  packed_weight->apply_dynamic_out(input, out, reduce_range);
+}
+
+template <>
+void apply_dynamic_out_functor<true>(
+    c10::intrusive_ptr<LinearPackedParamsBase> packed_weight,
+    const at::Tensor& input,
+    at::Tensor& out,
+    bool reduce_range) {
+  packed_weight->apply_dynamic_relu_out(input, out, reduce_range);
+}
+
+template <bool has_relu>
+SROperator quantized_linear_dynamic_fp16_impl(Node* n) {
+  const auto weight = toIValue(n->inputs()[1]);
+  c10::intrusive_ptr<LinearPackedParamsBase> packed_weight;
+  if (weight) {
+    packed_weight = weight->toCustomClass<LinearPackedParamsBase>();
+  }
+  if (packed_weight) {
+    return [packed_weight](ProcessedNode* p_node) {
+      const auto& input = p_node->Input(0).toTensor();
+      if (p_node->Output(0).isNone()) {
+        p_node->Output(0) = create_empty_from(input, at::kFloat);
+      }
+      auto& out_t = p_node->Output(0).toTensor();
+      fastResizeToZero(out_t);
+      apply_dynamic_out_functor<has_relu>(packed_weight, input, out_t, false);
+    };
+  } else {
+    return [](ProcessedNode* p_node) {
+      const auto& input = p_node->Input(0).toTensor();
+      if (p_node->Output(0).isNone()) {
+        p_node->Output(0) = create_empty_from(input, at::kFloat);
+      }
+      auto& out_t = p_node->Output(0).toTensor();
+      fastResizeToZero(out_t);
+      // Weights could be quantized on the fly
+      auto packed_weight_tmp =
+          p_node->Input(1).toCustomClass<LinearPackedParamsBase>();
+      apply_dynamic_out_functor<has_relu>(
+          packed_weight_tmp, input, out_t, false);
+    };
+  }
+}
+
+} // namespace
+
 REGISTER_OPERATOR_FUNCTOR(
     quantized::linear_dynamic_fp16,
     quantized_linear_dynamic_fp16,
@@ -2164,35 +2227,20 @@ REGISTER_OPERATOR_FUNCTOR(
         LogAndDumpSchema(n);
         return nullptr;
       }
-      const auto weight = toIValue(n->inputs()[1]);
-      c10::intrusive_ptr<LinearPackedParamsBase> packed_weight;
-      if (weight) {
-        packed_weight = weight->toCustomClass<LinearPackedParamsBase>();
+      return quantized_linear_dynamic_fp16_impl<false>(n);
+    });
+
+REGISTER_OPERATOR_FUNCTOR(
+    quantized::linear_relu_dynamic_fp16,
+    quantized_linear_relu_dynamic_fp16,
+    [](Node* n) -> SROperator {
+      if (!n->matches(torch::schema(
+              "quantized::linear_relu_dynamic_fp16(Tensor X, __torch__.torch.classes."
+              "quantized.LinearPackedParamsBase W_prepack) -> Tensor Y"))) {
+        LogAndDumpSchema(n);
+        return nullptr;
       }
-      if (packed_weight) {
-        return [packed_weight](ProcessedNode* p_node) {
-          const auto& input = p_node->Input(0).toTensor();
-          if (p_node->Output(0).isNone()) {
-            p_node->Output(0) = create_empty_from(input, at::kFloat);
-          }
-          auto& out_t = p_node->Output(0).toTensor();
-          fastResizeToZero(out_t);
-          packed_weight->apply_dynamic_out(input, out_t, false);
-        };
-      } else {
-        return [](ProcessedNode* p_node) {
-          const auto& input = p_node->Input(0).toTensor();
-          if (p_node->Output(0).isNone()) {
-            p_node->Output(0) = create_empty_from(input, at::kFloat);
-          }
-          auto& out_t = p_node->Output(0).toTensor();
-          fastResizeToZero(out_t);
-          // Weights could be quantized on the fly
-          auto packed_weight_tmp =
-              p_node->Input(1).toCustomClass<LinearPackedParamsBase>();
-          packed_weight_tmp->apply_dynamic_out(input, out_t, false);
-        };
-      }
+      return quantized_linear_dynamic_fp16_impl<true>(n);
     });
 
 REGISTER_OPERATOR_FUNCTOR(aten::full, aten_full, [](Node* n) -> SROperator {

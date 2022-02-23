@@ -562,6 +562,46 @@ $6 = torch._ops.aten.add_($1, $5)''')
         self.assertIsNone(t.grad)
         self.assertIsNotNone(t.elem.grad)
 
+    def test_multiple_ops_subclass(self):
+        # This is a Direct Subclass, don't do that!
+        class MySubclass(torch.Tensor):
+            @staticmethod
+            def __new__(cls, elem):
+                r = torch.Tensor._make_subclass(cls, elem)
+                return r
+
+            __torch_function__ = torch._C._disabled_torch_function_impl
+
+            @classmethod
+            def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
+                with no_dispatch():
+                    return func(*args, **kwargs)
+
+        x = MySubclass(torch.rand(2, 2, dtype=torch.complex64))
+        y = x.conj()
+        # Details of the bug that this tests for:
+        # Here, y dispatch keys are: {PythonTLSSnapshot, AutogradCPU, Conjugate, Python, CPU}
+        # There are a few calls to the dispatcher that are going to happen here:
+        #  - call_exp: User calling exp on y
+        #    - PythonTLSSnapshot: records the TLS on entry and redispatch
+        #    - AutogradCPU: no input requires grad, so does nothing and redispatch
+        #    - Conjugate: no special implementation for exp: use the fallback that
+        #                 first clone the Tensor (to materialize the conj) then redispatch
+        #      - call_clone: conjugate fallback calling clone on y
+        #        - PythonTLSSnapshot: records the TLS on entry and redispatch
+        #        - (AutogradCPU: skipped as autograd added itself to the exclude set above)
+        #        - Conjugate: special implementation for clone: just skip this key
+        #        - Python: Reset the TLS based on the snapshot above and call the user implementation (this
+        #                  actually calls into the dispatcher again but since we disable both our keys
+        #                  before, not detailed here)
+        #        - exit Python: restore the TLS and exit
+        #        - exit Conjugate: nothing was inplace so just exit
+        #        - exit PythonTLSSnapshot: done with this call, reset the saved TLS to empty
+        #    - Python: Reset the TLS again based on the snapshot. <- this used to fail
+        #    - More steps....
+        y.exp()
+
+
 
 if __name__ == '__main__':
     run_tests()
