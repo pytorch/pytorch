@@ -185,6 +185,14 @@ class TORCH_API Reducer {
 
   // Returns true if we should rebuild buckets, else false. We only rebuild
   // buckets once after the first iteration.
+  // There are two major cases when find_unused_parameters=True:
+  // 1. grad ready order does not change over iterations, in this case,
+  // enable rebuilt bucket after first iteration can potentially improve performance.
+  // 2. grad ready order changes over iterations, in this case,
+  // use static bucket order or dynamic bucket order in the first iteration
+  // does not matter much, as order changes per iteration. It will be expensive
+  // to rebuilt bucket every iteration for this case as well, as rebuilt bucket
+  // requires a broadcast collective call.
   inline bool should_rebuild_buckets() const {
     return !has_rebuilt_bucket_;
   }
