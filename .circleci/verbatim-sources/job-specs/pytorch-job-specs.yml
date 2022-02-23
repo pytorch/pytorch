@@ -1,7 +1,6 @@
 jobs:
   pytorch_linux_build:
     <<: *pytorch_params
-    resource_class: "xlarge"
     machine:
       image: ubuntu-2004:202104-01
     steps:
