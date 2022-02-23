@@ -3,7 +3,7 @@ from tools.codegen.api.types import (
 )
 from tools.codegen.model import (
     BaseTy, Variant, OptionalType, BaseType, ListType, NativeFunction, Type,
-    Argument, Return, SchemaKind,
+    Argument, Return, SchemaKind, Tag
 )
 from tools.codegen.context import method_with_native_function
 from tools.codegen.utils import mapMaybe
@@ -66,6 +66,27 @@ def gen_unwraps(flat_arguments: List[Argument]) -> Tuple[List[str], List[str]]:
     return unwraps, unwrapped_arg_list
 
 
+def get_aten_op_call(schema) -> str:
+    if schema.name.overload_name:
+        return f'ATEN_FN2({schema.name.name}, {schema.name.overload_name})'
+    return f'ATEN_FN({schema.name.name})'
+
+
+def gen_case_where_all_bdims_are_none(flat_args: List[Argument], schema) -> str:
+    conditions = []
+    for arg in flat_args:
+        if not arg.type.is_tensor_like():
+            continue
+        conditions.append(f'!isBatchedAtLevel({arg.name}, cur_level)')
+    aten_op = get_aten_op_call(schema)
+    arg_names = [a.name for a in flat_args]
+
+    return f"""\
+if ({' && '.join(conditions)}) {{
+  return {aten_op}({', '.join(arg_names)});
+}}"""
+
+
 def gen_returns(returns: List[Return]) -> str:
     idx = 0
     wrapped_returns = []
@@ -88,15 +109,47 @@ def gen_returns(returns: List[Return]) -> str:
     return wrapped_returns
 
 
-def gen_vmap_plumbing(native_function: NativeFunction) -> str:
-    schema = native_function.func
+def accepts_at_least_one_tensor_input(schema):
+    for arg in schema.arguments.flat_all:
+        if arg.type.is_tensor_like():
+            return True
+    return False
 
-    # Don't support these yet
-    if schema.kind() == SchemaKind.inplace or schema.kind() == SchemaKind.out:
+
+def gen_vmap_inplace_plumbing(native_function):
+    schema = native_function.func
+    sig = DispatcherSignature.from_schema(schema)
+    returns = schema.returns
+
+    assert schema.kind() == SchemaKind.inplace
+
+    # Only support cases where all returns are Tensors or vector<Tensor>
+    if len(returns) == 0:
+        return None
+    if not all(is_tensor(ret.type) or is_vector_tensor(ret.type) for ret in returns):
+        return None
+    if not accepts_at_least_one_tensor_input(schema):
         return None
 
-    sig = DispatcherSignature.from_schema(schema)
     unwraps, unwrapped_arg_list = gen_unwraps(schema.arguments.flat_all)
+    # bdims_all_none_case = gen_case_where_all_bdims_are_none(schema.arguments.flat_all, schema)
+
+    return f"""\
+template <typename batch_rule_t, batch_rule_t batch_rule>
+{sig.decl(name=schema.name.unambiguous_name() + '_generated_plumbing')} {{
+  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t cur_level = maybe_layer->layerId();
+{textwrap.indent(unwraps, "  ")}
+  batch_rule({', '.join(unwrapped_arg_list)});
+  return {schema.arguments.flat_all[0].name};
+}}"""
+
+
+def gen_vmap_plumbing(native_function: NativeFunction) -> str:
+    schema = native_function.func
+    sig = DispatcherSignature.from_schema(schema)
     returns = schema.returns
 
     # Only support cases where all returns are Tensors or vector<Tensor>
@@ -104,6 +157,21 @@ def gen_vmap_plumbing(native_function: NativeFunction) -> str:
         return None
     if not all(is_tensor(ret.type) or is_vector_tensor(ret.type) for ret in returns):
         return None
+    if not accepts_at_least_one_tensor_input(schema):
+        return None
+    # in-place views need special handling
+    if native_function.tag == Tag.inplace_view:
+        return None
+
+    if schema.kind() == SchemaKind.inplace:
+        return gen_vmap_inplace_plumbing(native_function)
+
+    # Don't support these
+    if schema.kind() == SchemaKind.out:
+        return None
+
+    unwraps, unwrapped_arg_list = gen_unwraps(schema.arguments.flat_all)
+    # bdims_all_none_case = gen_case_where_all_bdims_are_none(schema.arguments.flat_all, schema)
 
     wrapped_returns = gen_returns(returns)
     return f"""\
@@ -131,6 +199,7 @@ def gen_all_vmap_plumbing(native_functions):
     body = '\n'.join(list(mapMaybe(ComputeBatchRulePlumbing(), native_functions)))
     return f"""
 #pragma once
+#include <ATen/Operators.h>
 #include <functorch/csrc/PlumbingHelper.h>
 #include <functorch/csrc/Constants.h>
 
