@@ -126,6 +126,25 @@ class DispatchKey(Enum):
 
 STRUCTURED_DISPATCH_KEYS = {DispatchKey.CUDA, DispatchKey.CPU}
 
+# Set of supported dispatch keys
+dispatch_keys = [
+    DispatchKey.CPU,
+    DispatchKey.SparseCPU,
+    DispatchKey.SparseCsrCPU,
+    DispatchKey.MkldnnCPU,
+    DispatchKey.CUDA,
+    DispatchKey.SparseCUDA,
+    DispatchKey.SparseCsrCUDA,
+    DispatchKey.QuantizedCPU,
+    DispatchKey.QuantizedCUDA,
+    DispatchKey.CompositeImplicitAutograd,
+    DispatchKey.CompositeExplicitAutograd,
+    # Meta is a magic key: it is automatically generated for structured
+    # kernels
+    DispatchKey.Meta,
+    DispatchKey.ZeroTensor,
+]
+
 # Dispatch keys that "support all backends".  These codegen slightly differently
 # then backend specific keys.
 def is_generic_dispatch_key(dk: DispatchKey) -> bool:
@@ -367,6 +386,8 @@ class NativeFunction:
                 assert isinstance(ks, str), e
                 for k in ks.split(","):
                     dispatch_key = DispatchKey.parse(k.strip())
+                    assert dispatch_key in dispatch_keys, f"Dispatch key {dispatch_key} of kernel {v} " \
+                        "is not a supported dispatch key."
                     # Why is 'structured' included? External backends (e.g.
                     # XLA) opt into which ops are structured independently
                     # of which in-tree ops are structured

@@ -481,19 +481,23 @@ An enum-like class for built-in communication hooks: ``ALLREDUCE`` and ``FP16_CO
           py::call_guard<py::gil_scoped_release>());
 
   py::enum_<::c10d::DebugLevel>(module, "DebugLevel", R"(
-      An enum whose values correspond to different debug settings of the
-      torch.distributed package. Currently supporting settings are OFF, INFO,
-      and DETAIL, which can be set via the TORCH_DISTRIBUTED_DEBUG environment
-      variable.
+      An enum whose values correspond to different debug levels of the
+      torch.distributed package. Currently supporting OFF, INFO, and DETAIL,
+      which can be set via the TORCH_DISTRIBUTED_DEBUG environment variable
+      or via ``set_debug_level()`` function.
   )")
       .value("OFF", ::c10d::DebugLevel::Off)
       .value("INFO", ::c10d::DebugLevel::Info)
       .value("DETAIL", ::c10d::DebugLevel::Detail);
 
   module
-      .def("get_debug_level", ::c10d::debug_level)
-      .def("set_debug_level", ::c10d::setDebugLevel)
-      .def("set_debug_level_from_env", ::c10d::setDebugLevelFromEnvironment);
+      .def("get_debug_level", ::c10d::debug_level,
+          R"(Gets the debug level of the torch.distributed package.)")
+      .def("set_debug_level", ::c10d::setDebugLevel,
+          R"(Sets the debug level of the torch.distributed package.)")
+      .def("set_debug_level_from_env", ::c10d::setDebugLevelFromEnvironment,
+          R"(Sets the debug level of the torch.distributed package from the
+          ``TORCH_DISTRIBUTED_DEBUG`` environment variable.)");
 
   py::enum_<::c10d::ReduceOp>(module, "ReduceOp", R"(
 An enum-like class for available reduction operations: ``SUM``, ``AVG``,

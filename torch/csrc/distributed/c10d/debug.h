@@ -18,6 +18,8 @@ enum class DebugLevel {
 
 TORCH_API void setDebugLevel(DebugLevel level);
 
+// Sets the debug level based on the value of the `TORCH_DISTRIBUTED_DEBUG`
+// environment variable.
 TORCH_API void setDebugLevelFromEnvironment();
 
 TORCH_API DebugLevel debug_level() noexcept;
