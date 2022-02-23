@@ -154,6 +154,31 @@ class _ForkerIterDataPipe(IterDataPipe):
         self.leading_ptr = 0
         self.end_ptr = None
 
+    def __getstate__(self):
+        if IterDataPipe.getstate_hook is not None:
+            return IterDataPipe.getstate_hook(self)
+
+        state = (
+            self.main_datapipe,
+            self.num_instances,
+            self.buffer_size,
+        )
+        return state
+
+    def __setstate__(self, state):
+        (
+            self.main_datapipe,
+            self.num_instances,
+            self.buffer_size,
+        ) = state
+        self._datapipe_iterator = None
+        self.buffer = deque()
+        self.child_pointers = [0] * self.num_instances
+        self.slowest_ptr = 0
+        self.leading_ptr = 0
+        self.end_ptr = None
+
+
 class _ChildDataPipe(IterDataPipe):
     r"""
     Iterable Datapipe that is a child of a main DataPipe. The instance of this class
