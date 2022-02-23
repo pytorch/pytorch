@@ -68,6 +68,19 @@ class DummyProcessGroup:
     def size(self) -> int:
         return self._size
 
+class DeterministicModel(torch.nn.Module):
+    def __init__(self, wrap_fsdp, cpu_offload=CPUOffload(offload_params=False)):
+        super().__init__()
+        # keep everything deterministic for model initialization
+        torch.manual_seed(0)
+        self.inner = torch.nn.Linear(2, 2).cuda()
+        if wrap_fsdp:
+            self.inner = FullyShardedDataParallel(self.inner, cpu_offload=cpu_offload)
+        self.outer = torch.nn.Linear(2, 2).cuda()
+
+    def forward(self, x):
+        y = self.inner(x)
+        return self.outer(y)
 
 class TransformerWithSharedParams(nn.Module):
     def __init__(
