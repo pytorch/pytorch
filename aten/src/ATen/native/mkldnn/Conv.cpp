@@ -64,7 +64,7 @@ REGISTER_NO_CPU_DISPATCH(mkldnn_convolution_transpose_backward_stub);
 
 }}
 
-#else // AT_MKLDNN_EBABLED
+#else // AT_MKLDNN_ENABLED
 
 #include <ATen/native/mkldnn/MKLDNNCommon.h>
 #include <ATen/native/mkldnn/Utils.h>
