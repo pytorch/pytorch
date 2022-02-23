@@ -189,6 +189,17 @@ Tensor binary_cross_entropy_with_logits_hack(
   return apply_loss_reduction(loss, reduction);
 }
 
+Tensor trace_backward_decomp(const Tensor& grad, IntArrayRef sizes) {
+  if (sizes.size() != 2) {
+    throw std::runtime_error("expected matrix input");
+  }
+  auto grad_input = at::zeros(sizes[0] * sizes[1], grad.options());
+  auto indices = at::arange(0, grad_input.numel(), sizes[1] + 1, grad.options().dtype(at::kLong));
+  // Workaround using index_put instead of yet unsupported index_fill_
+  grad_input = grad_input.index_put({indices}, grad);
+  return grad_input.view(sizes);
+}
+
 TORCH_LIBRARY_IMPL(aten, FT_DYNAMIC_LAYER_FRONT_MODE_KEY, m) {
   m.impl("value_selecting_reduction_backward", value_selecting_reduction_backward_hack);
   m.impl("index_select_backward", index_select_backward_hack);
@@ -196,6 +207,7 @@ TORCH_LIBRARY_IMPL(aten, FT_DYNAMIC_LAYER_FRONT_MODE_KEY, m) {
   m.impl("linear", linear_hack);
   m.impl("binary_cross_entropy_with_logits_backward", binary_cross_entropy_with_logits_backward_hack);
   m.impl("binary_cross_entropy_with_logits", binary_cross_entropy_with_logits_hack);
+  m.impl("trace_backward", trace_backward_decomp);
 }
 
 }}
