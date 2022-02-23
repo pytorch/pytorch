@@ -1,4 +1,3 @@
-from typing import Optional
 import warnings
 from collections import OrderedDict
 import logging
@@ -110,7 +109,7 @@ class HierarchicalModelAverager:
                 "by DistributedDataParall in the backward pass. Therefore, only "
                 "DistributedDataParallel should be used for this case."
             )
-        ovall_group : Optional[dist.ProcessGroup] = (
+        ovall_group : dist.ProcessGroup = (
             process_group if process_group is not None else dist.group.WORLD
         )
         overall_group_size = dist.get_world_size(group=ovall_group)
@@ -135,7 +134,7 @@ class HierarchicalModelAverager:
             raise ValueError("Arg ``warmup_steps`` must be a non-negative number.")
         self.warmup_steps = warmup_steps
         self.step = 0
-        self.group: Optional[dist.ProcessGroup] = None  # The process group used for averaging parameters.
+        self.group = ovall_group  # The process group used for averaging parameters.
 
     def _is_process_group_found(self):
         """
