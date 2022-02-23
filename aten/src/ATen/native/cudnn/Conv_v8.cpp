@@ -205,6 +205,7 @@ void get_cachekey_fused(CacheKeyFused& key, const Tensor& y, const Tensor& x, co
 }
 
 void run_conv_plan(cudnnHandle_t handle, const Tensor& x, const Tensor& y, const Tensor& w, const cudnn_frontend::ExecutionPlan& plan) {
+  c10::DeviceGuard g(x.options().device());
   auto workspace_size = plan.getWorkspaceSize();
   auto workspace_ptr = c10::cuda::CUDACachingAllocator::get()->allocate(workspace_size);
   void *data_ptrs[] = {x.data_ptr(), y.data_ptr(), w.data_ptr()};
@@ -218,6 +219,7 @@ void run_conv_plan(cudnnHandle_t handle, const Tensor& x, const Tensor& y, const
 }
 
 void run_conv_plan_fused(cudnnHandle_t handle, const Tensor& x, const Tensor& y, const Tensor& w, const Tensor& z, const Tensor& b, const cudnn_frontend::ExecutionPlan& plan) {
+  c10::DeviceGuard g(x.options().device());
   auto workspace_size = plan.getWorkspaceSize();
   auto workspace_ptr = c10::cuda::CUDACachingAllocator::get()->allocate(workspace_size);
   void *data_ptrs[] = {x.data_ptr(), y.data_ptr(), w.data_ptr(), z.data_ptr(), b.data_ptr()};
@@ -384,6 +386,7 @@ auto get_plans_from_find(const cudnnHandle_t handle, const cudnnBackendDescripto
   auto sources = get_generator_sources(desc, x, deterministic, allow_tf32, CUDNN_HEUR_MODE_INSTANT);
   cudnn_frontend::EngineConfigGenerator generator(sources.size(), sources.data());
   cudnn_frontend::executionPlans_t valid_plans;
+  c10::DeviceGuard g(x.options().device());
   at::DataPtr workspace_ptr;
   generate_and_filter_plans(handle, opGraph, generator, x, valid_plans, workspace_ptr);
   auto variantPack = cudnn_frontend::VariantPackBuilder()
@@ -413,6 +416,7 @@ auto get_plans_from_find_fused(const cudnnHandle_t handle,
   auto sources = get_generator_sources(CUDNN_BACKEND_OPERATION_CONVOLUTION_FORWARD_DESCRIPTOR, x, deterministic, allow_tf32, CUDNN_HEUR_MODE_INSTANT);
   cudnn_frontend::EngineConfigGenerator generator(sources.size(), sources.data());
   cudnn_frontend::executionPlans_t valid_plans;
+  c10::DeviceGuard g(x.options().device());
   at::DataPtr workspace_ptr;
   generate_and_filter_plans(handle, opGraph, generator, x, valid_plans, workspace_ptr);
   auto variantPack = cudnn_frontend::VariantPackBuilder()
