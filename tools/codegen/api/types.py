@@ -241,7 +241,10 @@ class TupleCType:
 
 @dataclass(frozen=True)
 class VectorizedCType:
-    # Limited set of allowed specializations
+    # This template is explicitly specialized, so the only valid
+    # elems are those we have specializations for (e.g., float, double, ...)
+    # scalar_t is also a common argument here (when we are codegen in
+    # a templated context)
     elem: BaseCType
 
     def cpp_type(self, *, strip_ref: bool = False) -> str:

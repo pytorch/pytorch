@@ -1,14 +1,14 @@
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Union, Optional, List, Tuple, Dict, Sequence
 from tools.codegen.api.translate import translate
-from tools.codegen.utils import Target
 from tools.codegen.model import NativeFunctionsGroup, ScalarType, UfuncKey, DispatchKey, BaseType, BaseTy, Argument
 import tools.codegen.api.ufunc as ufunc
 from tools.codegen.api.ufunc import UfunctorBindings
-import tools.codegen.api.structured as structured
-from tools.codegen.api.types import StructuredImplSignature, scalar_t, opmath_t, Binding, CType, BaseCType, Expr, NamedCType, ScalarTypeToCppMapping, scalarT, VectorizedCType
+from tools.codegen.api.types import (
+    StructuredImplSignature, scalar_t, opmath_t, Binding, CType,
+    BaseCType, Expr, NamedCType, ScalarTypeToCppMapping, VectorizedCType
+)
 from tools.codegen.context import with_native_function
-from copy import copy
 
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
 #
@@ -27,15 +27,26 @@ from copy import copy
 # Functors are templated by scalar_t because when USERS instantiate functors
 # they are templated.  A functor looks something like this:
 #
+#   template <typename scalar_t>
+#   struct CUDAFunctorOnSelf_add {
+#     using opmath_t = at::opmath_type<scalar_t>;
+#     opmath_t other_;
+#     opmath_t alpha_;
+#     CUDAFunctorOnSelf_add(opmath_t other, opmath_t alpha)
+#         : other_(other), alpha_(alpha) {}
+#     __device__ scalar_t operator()(scalar_t self) {
+#       return ufunc::add(static_cast<opmath_t>(self), other_, alpha_);
+#     }
+#   };
 #
 @dataclass(frozen=True)
 class UfunctorSignature:
     g: NativeFunctionsGroup
-    scalar_tensor: Optional[int]
+    scalar_tensor_idx: Optional[int]
     name: str
 
     def arguments(self) -> UfunctorBindings:
-        return ufunc.ufunctor_arguments(self.g, scalar_tensor=self.scalar_tensor, scalar_t=scalar_t)
+        return ufunc.ufunctor_arguments(self.g, scalar_tensor_idx=self.scalar_tensor_idx, scalar_t=scalar_t)
 
     def fields(self) -> List[Binding]:
         # fields are renamed to have a trailing underscore, as is conventional
@@ -54,7 +65,7 @@ class UfunctorSignature:
         # NB: hypothetically could do this with translate but the
         # transition here is very regular
         init_str = ', '.join(f"{a.name}_({a.name})" for a in self.arguments().ctor)
-        return f"{self.name}({args_str}) : {init_str} {{}}";
+        return f"{self.name}({args_str}) : {init_str} {{}}"
 
     def decl_apply(self) -> str:
         args_str = ', '.join(a.decl() for a in self.arguments().apply)
@@ -90,7 +101,6 @@ class UfuncSignature:
 # Functor apply context (functor fields + functor apply sig)
 #   ~> template sig
 #
-# IDEA: don't use precanned templates at all, do it all by hand here
 
 def eligible_for_binary_scalar_specialization(g: NativeFunctionsGroup) -> bool:
     num_tensors = sum(1 for a in g.functional.func.arguments.flat_non_out if a.type.is_tensor_like())
@@ -101,24 +111,28 @@ def compute_ufunc_cuda_functors(g: NativeFunctionsGroup) -> Tuple[Dict[ScalarTyp
     ufunctor_sigs: Dict[ScalarType, Dict[UfuncKey, UfunctorSignature]] = {}
     ufunctors: List[str] = []
     loops = g.out.ufunc_inner_loop
-    scalar_tensor_lookup = {
-      UfuncKey.CUDAFunctorOnSelf: 1,
-      UfuncKey.CUDAFunctorOnOther: 0,
-      UfuncKey.CUDAFunctor: None
+    scalar_tensor_idx_lookup = {
+        UfuncKey.CUDAFunctorOnSelf: 1,
+        UfuncKey.CUDAFunctorOnOther: 0,
+        UfuncKey.CUDAFunctor: None
     }
     if eligible_for_binary_scalar_specialization(g):
         keys = [UfuncKey.CUDAFunctorOnSelf, UfuncKey.CUDAFunctorOnOther, UfuncKey.CUDAFunctor]
     else:
         keys = [UfuncKey.CUDAFunctor]
+        for k in [UfuncKey.CUDAFunctorOnSelf, UfuncKey.CUDAFunctorOnOther]:
+            assert k not in loops, f"cannot use {k} on non-binary function"
     for k in keys:
         # If the key was directly defined, skip functor codegen; we assume the
         # user already done it for us
         if k in loops:
-            ufunctor_sig = UfunctorSignature(g, scalar_tensor=scalar_tensor_lookup[k], name=loops[k].name)
+            ufunctor_sig = UfunctorSignature(g, scalar_tensor_idx=scalar_tensor_idx_lookup[k], name=loops[k].name)
             for dtype in loops[k].supported_dtypes:
                 ufunctor_sigs.setdefault(dtype, {})[k] = ufunctor_sig
             continue
 
+        # Note [ScalarOnly and Generic must match names for CUDA]
+        # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
         # Otherwise, look in ANY of the generic entries.  For simplicity of
         # codegen, both ScalarOnly and Generic are defined, the ufunc name
         # must match  (if they didn't match, we'd have to generate distinct
@@ -127,15 +141,18 @@ def compute_ufunc_cuda_functors(g: NativeFunctionsGroup) -> Tuple[Dict[ScalarTyp
         ufunc_name = None
         supported_dtypes = set()
         for lk in [UfuncKey.ScalarOnly, UfuncKey.Generic]:
+            if lk not in loops:
+                continue
             if ufunc_name is None:
                 ufunc_name = loops[lk].name
             else:
+                # See Note [ScalarOnly and Generic must match names for CUDA]
                 assert ufunc_name == loops[lk].name, "ScalarOnly and Generic must have same ufunc name"
             supported_dtypes |= loops[lk].supported_dtypes
         assert ufunc_name is not None
 
         name = f"{k}_{ufunc_name}"
-        ufunctor_sig = UfunctorSignature(g, scalar_tensor=scalar_tensor_lookup[k], name=name)
+        ufunctor_sig = UfunctorSignature(g, scalar_tensor_idx=scalar_tensor_idx_lookup[k], name=name)
         for dtype in supported_dtypes:
             ufunctor_sigs.setdefault(dtype, {})[k] = ufunctor_sig
 
@@ -163,20 +180,23 @@ class BinaryScalarSpecializationConfig:
 
 BinaryScalarSpecializationConfigs = [
     BinaryScalarSpecializationConfig(
-        scalar_idx = 0,
-        ctor_tensor = 'self',
-        ufunc_key = UfuncKey.CUDAFunctorOnOther,
+        scalar_idx=0,
+        ctor_tensor='self',
+        ufunc_key=UfuncKey.CUDAFunctorOnOther,
     ),
     BinaryScalarSpecializationConfig(
-        scalar_idx = 1,
-        ctor_tensor = 'other',
-        ufunc_key = UfuncKey.CUDAFunctorOnSelf,
+        scalar_idx=1,
+        ctor_tensor='other',
+        ufunc_key=UfuncKey.CUDAFunctorOnSelf,
     ),
 ]
 
-def compute_ufunc_cuda_dtype_body(g: NativeFunctionsGroup, dtype: ScalarType, inner_loops: Dict[UfuncKey, UfunctorSignature], parent_ctx: Sequence[Binding]) -> str:
+def compute_ufunc_cuda_dtype_body(
+    g: NativeFunctionsGroup, dtype: ScalarType,
+    inner_loops: Dict[UfuncKey, UfunctorSignature], parent_ctx: Sequence[Binding]
+) -> str:
     body = "using opmath_t = at::opmath_type<scalar_t>;"
-    body += "if (false) {}\n";
+    body += "if (false) {}\n"  # for ease of codegen
     for config in BinaryScalarSpecializationConfigs:
         if config.ufunc_key not in inner_loops:
             continue
@@ -184,7 +204,7 @@ def compute_ufunc_cuda_dtype_body(g: NativeFunctionsGroup, dtype: ScalarType, in
         scalar_idx = config.scalar_idx + 1
         # Make a copy and at the same time widen the type (not permissible
         # without copy; we don't want to mutate the input argument anyway)
-        ctx: List[Union[Expr, Binding]] = [b for b in parent_ctx]
+        ctx: List[Union[Expr, Binding]] = list(parent_ctx)
         ctx.append(Expr(
             expr=f"iter.scalar_value<opmath_t>({scalar_idx})",
             type=NamedCType(config.ctor_tensor, BaseCType(opmath_t)),
@@ -201,7 +221,7 @@ else if (iter.is_cpu_scalar({scalar_idx})) {{
 }}"""
 
     ufunctor_sig = inner_loops[UfuncKey.CUDAFunctor]
-    ufunctor_ctor_exprs_str = ', '.join(a.expr for a in translate(ctx, ufunctor_sig.arguments().ctor))
+    ufunctor_ctor_exprs_str = ', '.join(a.expr for a in translate(parent_ctx, ufunctor_sig.arguments().ctor))
     body += f"""
 else {{
   gpu_kernel(iter, {ufunctor_sig.name}<scalar_t>({ufunctor_ctor_exprs_str}));
@@ -282,7 +302,7 @@ class StubSignature:
         return f"void {self.kernel_name}(TensorIteratorBase& iter, {', '.join(a.defn() for a in self.arguments())})"
 
     def type_defn(self) -> str:
-        return f"using {self.type_name} = {self.type()}";
+        return f"using {self.type_name} = {self.type()}"
 
     # must be called from context where this is TensorIteratorBase*
     def call(self, ctx: Sequence[Binding]) -> str:
@@ -303,8 +323,12 @@ def compute_ufunc_cpu(g: NativeFunctionsGroup) -> str:
 }}
 """
 
-def compute_ufunc_cpu_dtype_body(g: NativeFunctionsGroup, dtype: ScalarType, inner_loops: Dict[UfuncKey, UfuncSignature], parent_ctx: Sequence[Binding]) -> str:
+def compute_ufunc_cpu_dtype_body(
+    g: NativeFunctionsGroup, dtype: ScalarType, inner_loops: Dict[UfuncKey, UfuncSignature],
+    parent_ctx: Sequence[Binding]
+) -> str:
     assert UfuncKey.CPUScalar in inner_loops, f"{dtype}, {inner_loops.keys()}"
+    assert inner_loops.keys() <= {UfuncKey.CPUScalar, UfuncKey.CPUVector}
     scalar_loop = inner_loops[UfuncKey.CPUScalar]
     vec_loop = None
     if UfuncKey.CPUVector in inner_loops:
@@ -399,7 +423,7 @@ def compute_ufunc_cpu_kernel(g: NativeFunctionsGroup) -> str:
                 elif k is UfuncKey.CPUVector:
                     compute_t = VectorizedCType(BaseCType(scalar_t))
                 else:
-                    assert False
+                    raise AssertionError()
                 inner_ufunc_sigs = ufunc_sigs.setdefault(dtype, {})
                 if k not in inner_ufunc_sigs:
                     inner_ufunc_sigs[k] = UfuncSignature(

@@ -1,23 +1,22 @@
-from tools.codegen.model import (Argument, BaseTy, BaseType, ListType,
-                                 NativeFunctionsGroup, OptionalType,
-                                 SelfArgument, TensorOptionsArguments, Type,
-                                 DispatchKey)
+from tools.codegen.model import (Argument, BaseTy, BaseType, FunctionSchema,
+                                 NativeFunctionsGroup, Type, DispatchKey)
 
 import tools.codegen.api.types as api_types
-from tools.codegen.api.types import (ArgName, BaseCType, Binding, ArrayRefCType,
-                                     ConstRefCType, OptionalCType, NamedCType,
-                                     tensorT, scalarT, intArrayRefT, dimnameListT,
-                                     optionalTensorRefT, optionalScalarRefT, CType,
-                                     BaseCppType, CType)
+from tools.codegen.api.types import (ArgName, BaseCType, Binding,
+                                     ConstRefCType, NamedCType,
+                                     scalarT, CType, BaseCppType)
 
 from tools.codegen.api import cpp, structured
-from tools.codegen.utils import (mapMaybe, assert_never)
 
 from dataclasses import dataclass
-from typing import Union, List, Optional, cast, Iterable
+from typing import List, Optional
+
+def schema_kernel_name(func: FunctionSchema, dispatch_key: DispatchKey) -> str:
+    assert func.is_out_fn(), "ufunc.kernel_name should only be invoked on out schemas"
+    return f"ufunc_{func.name.name}_{dispatch_key}"
 
 def kernel_name(g: NativeFunctionsGroup, dispatch_key: DispatchKey) -> str:
-    return f"ufunc_{g.functional.func.name.name}_{dispatch_key}"
+    return schema_kernel_name(g.out.func, dispatch_key)
 
 # Tensors are omitted (as they are stored in TensorIterator), everything else is
 # passed along  (technically, we can pass tensors along too, it just wastes
@@ -129,22 +128,24 @@ class UfunctorBindings:
 #
 # The ctor refers to the constructor CUDAFunctorOnSelf_add, while apply refers
 # to the operator() definition
-def ufunctor_arguments(g: NativeFunctionsGroup, *, scalar_tensor: Optional[int], scalar_t: BaseCppType) -> UfunctorBindings:
+def ufunctor_arguments(
+    g: NativeFunctionsGroup, *, scalar_tensor_idx: Optional[int], scalar_t: BaseCppType
+) -> UfunctorBindings:
     ctor = []
     apply = []
     for a in g.functional.func.arguments.flat_non_out:
         if a.type.is_tensor_like():
-            if scalar_tensor == 0:
+            if scalar_tensor_idx == 0:
                 # put it in the ctor anyway
                 ctor.append(ufunctor_ctor_argument(a, scalar_t=scalar_t))
-                scalar_tensor = None
+                scalar_tensor_idx = None
             else:
-                if scalar_tensor is not None:
-                    scalar_tensor -= 1
+                if scalar_tensor_idx is not None:
+                    scalar_tensor_idx -= 1
                 apply.append(ufunctor_apply_argument(a, scalar_t=scalar_t))
         else:
             ctor.append(ufunctor_ctor_argument(a, scalar_t=scalar_t))
-    assert scalar_tensor is None
+    assert scalar_tensor_idx is None
     return UfunctorBindings(ctor=ctor, apply=apply)
 
 # ufuncs are the inner loop template functions that you wrote in ufunc/add.h

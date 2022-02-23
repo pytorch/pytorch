@@ -1,3 +1,5 @@
+#define TORCH_ASSERT_NO_OPERATORS
+
 #include <ATen/native/DispatchStub.h>
 #include <ATen/TensorIterator.h>
 #include <ATen/TensorMeta.h>

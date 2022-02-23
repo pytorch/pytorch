@@ -1,3 +1,5 @@
+#define TORCH_ASSERT_NO_OPERATORS
+
 #include <ATen/native/ufunc/${name}.h>
 #include <ATen/Dispatch.h>
 #include <c10/core/Scalar.h>
