@@ -175,15 +175,7 @@ class TORCH_API Reducer {
 
   // Rebuild buckets based on rebuilt_params_ and rebuilt_param_indices_
   // according to when tensors received grads in the backward pass.
-  // TODO this function makes broadcast communication call and
-  // could be overlapped with next forward() call, thus
-  // it could be async. Will make it async when rebuilding buckets for
-  // find_unused_parameters = true case, as we could rebuild buckets more than
-  // once for find_unused_parameters = true case, where subgraphs are trained
-  // and parameter indices order may change more frequently.
-  // For find_unused_parameters = false case, buckets are only rebuilt once,
-  // the performance cost is negligible. Returns true if the buckets were
-  // rebuilt.
+  // Returns true if the buckets were rebuilt.
   bool rebuild_buckets();
 
   // Install futures that should be awaited at end of backwards. Currently these
@@ -192,10 +184,9 @@ class TORCH_API Reducer {
   void install_futures(c10::List<c10::intrusive_ptr<c10::ivalue::Future>> futs);
 
   // Returns true if we should rebuild buckets, else false. We only rebuild
-  // buckets once after the first iteration and never rebuild them if
-  // find_unused_parameters_.
+  // buckets once after the first iteration.
   inline bool should_rebuild_buckets() const {
-    return (static_graph_ || !find_unused_parameters_) && !has_rebuilt_bucket_;
+    return !has_rebuilt_bucket_;
   }
 
   // Pushes all parameters to be rebuilt.
