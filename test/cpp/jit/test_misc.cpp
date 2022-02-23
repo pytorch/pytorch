@@ -36,6 +36,7 @@
 #include <torch/csrc/jit/passes/insert_guards.h>
 #include <torch/csrc/jit/passes/liveness.h>
 #include <torch/csrc/jit/passes/loop_unrolling.h>
+#include <torch/csrc/jit/runtime/symbolic_shape_registry.h>
 #include <torch/csrc/jit/passes/lower_grad_of.h>
 #include <torch/csrc/jit/passes/lower_tuples.h>
 #include <torch/csrc/jit/passes/pass_manager.h>
@@ -55,6 +56,8 @@
 #include <torch/csrc/jit/testing/file_check.h>
 #include <torch/jit.h>
 #include <torch/script.h>
+#include <torch/csrc/jit/runtime/symbolic_shape_registry.h>
+#include <torch/csrc/jit/passes/symbolic_shape_analysis.h>
 
 #include <onnx/onnx_pb.h>
 
@@ -2866,6 +2869,35 @@ graph(%x.1 : Tensor):
   testing::FileCheck().check("aten::relu")->run(*graph);
   testing::FileCheck().check_not("aten::relu_")->run(*graph);
 }
+
+TEST(TestRegisterShapeOp, Basic) {
+  auto graph = std::make_shared<Graph>();
+  std::unordered_map<std::string, Value*> vmap;
+  parseIR(
+      R"IR(
+graph():
+  %2 : int = prim::Constant[value=5]()
+  %3: int[] = prim::ListConstruct(%2, %2)
+  return (%3))IR",
+      &*graph,
+      vmap);
+
+
+  auto g2 = std::make_shared<Graph>();
+  parseIR(
+      R"IR(
+graph():
+  %2 : Tensor = prim::MakeTestTensor()
+  return (%2))IR",
+      &*g2,
+      vmap);
+
+  const FunctionSchema& schema = g2->nodes().begin()->schema();
+  torch::jit::RegisterShapeComputeGraphForSchema(schema, graph);
+  PropagateShapesOnGraph(g2);
+  testing::FileCheck().check("5, 5")->run(*g2);
+}
+
 
 TEST(TestFunctionalToInplaceActivation, Basic) {
   auto graph = std::make_shared<Graph>();
