@@ -7,7 +7,6 @@ mkdir -p "$PYTORCH_FINAL_PACKAGE_DIR"
 export CUDA_VERSION="${DESIRED_CUDA/cu/}"
 export USE_SCCACHE=1
 export SCCACHE_BUCKET=ossci-compiler-cache-windows
-export NIGHTLIES_PYTORCH_ROOT="$PYTORCH_ROOT"
 export VC_YEAR=2019
 
 if [[ "${DESIRED_CUDA}" == *"cu11"* ]]; then
@@ -16,6 +15,7 @@ fi
 
 echo "Free Space for CUDA DEBUG BUILD"
 if [[ "${CIRCLECI:-}" == 'true' ]]; then
+    export NIGHTLIES_PYTORCH_ROOT="$PYTORCH_ROOT"
     if [[ -d "C:\\Program Files (x86)\\Microsoft Visual Studio\\2019\\Community" ]]; then
         rm -rf "C:\\Program Files (x86)\\Microsoft Visual Studio\\2019\\Community"
     fi
