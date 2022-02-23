@@ -1,6 +1,18 @@
 #include <torch/csrc/lazy/ts_backend/ts_node.h>
 #include <torch/csrc/lazy/ts_backend/config.h>
 #include <torch/csrc/lazy/core/cache.h>
+#include <torch/csrc/lazy/core/debug_util.h>
+
+namespace {
+  std::string GetFirstUserFrameInPythonIfEnabled() {
+    static const auto LTC_ENABLE_SOURCE_INFO = std::getenv("LTC_ENABLE_SOURCE_INFO");
+    if (!LTC_ENABLE_SOURCE_INFO) {
+      return {};
+    }
+
+    return torch::lazy::GetFirstUserFrameInPython();
+  }
+}
 
 namespace torch {
 namespace lazy {
@@ -50,7 +62,8 @@ TsNode::TsNode(OpKind op, OpList operands, std::vector<Shape>&& shapes,
            /* node_hash */ HashCombine(op.hash(), hash_seed),
            /* dag_hash */
            [&](bool bakeInSizes) { return OperandHashes(operands, HashCombine(op.hash(), hash_seed), bakeInSizes); }),
-      shapes_(shapes) {
+      shapes_(shapes),
+      python_stacktrace_(GetFirstUserFrameInPythonIfEnabled()) {
   for (auto& operand : operands) {
     // Ideally, optional operands should be filtered by the leaf node classes,
     // but it's just much easier to do it here.
@@ -81,7 +94,8 @@ void TsNode::SetShapeDeferred(
 }
 
 TsNode::TsNode(OpKind op, Shape shape, size_t num_outputs, hash_t hash_seed)
-    : Node(op, num_outputs, [&](bool bakeInSizes) -> hash_t { return GetOpHash(op, shape, hash_seed, bakeInSizes); })
+    : Node(op, num_outputs, [&](bool bakeInSizes) -> hash_t { return GetOpHash(op, shape, hash_seed, bakeInSizes); }),
+    python_stacktrace_(GetFirstUserFrameInPythonIfEnabled())
 {
   shapes_.push_back(std::move(shape));
 }
