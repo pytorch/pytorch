@@ -30,11 +30,13 @@ struct TensorOptions;
 
 namespace at {
 
+class OptionalTensorRef;
 class Tensor;
 struct Dimname;
 struct Generator;
 using TensorList = c10::ArrayRef<Tensor>;
 using ITensorList = c10::IList<Tensor>;
+using IOptTensorRefList = IList<OptionalTensorRef>;
 using DimnameList = c10::ArrayRef<Dimname>;
 using c10::Stream;
 using c10::Storage;

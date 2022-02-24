@@ -285,7 +285,7 @@ static void build_index_op(
 }
 
 TORCH_PRECOMPUTE_META_FUNC2(index, Tensor)
-(const Tensor& self, at::IOptTensorRefList indices) {
+(const Tensor& self, const at::IOptTensorRefList& indices) {
   TORCH_CHECK_INDEX(
       indices.size() <= (size_t)self.dim(),
       "too many indices for tensor of dimension ",
@@ -296,7 +296,6 @@ TORCH_PRECOMPUTE_META_FUNC2(index, Tensor)
   if (result.defined()) {
     at::assert_no_internal_overlap(result);
     at::assert_no_overlap(result, self);
-    // NOLINTNEXTLINE(performance-implicit-conversion-in-loop)
     for (const auto& index: indices) {
       if (index.has_value()) {
         at::assert_no_overlap(result, *index);
@@ -488,7 +487,7 @@ TORCH_IMPL_FUNC(index_out)
   index_stub(device_type(), *this, sizes, strides);
 }
 
-Tensor quantized_index(const Tensor & self, const torch::List<c10::optional<Tensor>>& indices) {
+Tensor quantized_index(const Tensor & self, const at::IOptTensorRefList& indices) {
   TORCH_INTERNAL_ASSERT(
       self.qscheme() == c10::kPerTensorAffine ||
       self.qscheme() == c10::kPerTensorSymmetric,

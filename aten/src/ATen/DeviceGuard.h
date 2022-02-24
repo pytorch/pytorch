@@ -27,12 +27,12 @@ inline optional<Device> device_of(const optional<Tensor>& t) {
   return t.has_value() ? device_of(t.value()) : nullopt;
 }
 
-/// Return the Device of an ITensorList, if the list is non-empty and
+/// Return the Device of a list of tensors, if the list is non-empty and
 /// the first Tensor is defined.  (This function implicitly assumes
 /// that all tensors in the list have the same device.)
 inline c10::optional<Device> device_of(ITensorList t) {
   if (!t.empty()) {
-    return device_of(t[0]);
+    return device_of(t.front());
   } else {
     return c10::nullopt;
   }

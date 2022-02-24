@@ -1812,6 +1812,13 @@ struct getTypePtr_<at::optional<T>> final {
     return type;
   }
 };
+template <>
+struct getTypePtr_<at::OptionalTensorRef> final {
+  static const auto& call() {
+    static auto type = OptionalType::create(TensorType::get());
+    return type;
+  }
+};
 template <class... Contained>
 struct getTypePtr_<std::tuple<Contained...>> final {
   static const auto& call() {

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <ATen/BatchedTensorImpl.h>
+#include <ATen/core/IList.h>
 
 namespace at {
 
