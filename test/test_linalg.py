@@ -7776,7 +7776,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         for args in inputs:
             shape = args['shape']
             size = np.prod(shape)
-            x = torch.arange(size, device=device).reshape(*shape)
+            x = torch.arange(size, device=device).reshape(shape)
             y = torch.linalg.trace(x)
             yn = np.trace(x.cpu(), axis1=-2, axis2=-1)
             self.assertEqual(y, yn)
@@ -7785,6 +7785,24 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
                 y = torch.linalg.trace(x, offset=offset)
                 yn = np.trace(x.cpu(), offset, axis1=-2, axis2=-1)
                 self.assertEqual(y, yn)
+
+    def test_linalg_trace_error(self, device):
+        inputs = [
+            # Less than 2-dim
+            {'shape': (), 'offsets': [0]},
+            {'shape': (10), 'offsets': [0]},
+            # offset out of range
+            {'shape': (0, 0), 'offsets': [0]},
+            {'shape': (10, 20, 30), 'offsets': [-20, 30]},
+        ]
+
+        for args in inputs:
+            shape = args['shape']
+            size = np.prod(shape)
+            x = torch.arange(size, device=device).reshape(shape)
+            for offset in args['offsets']:
+                with self.assertRaises(RuntimeError):
+                    torch.linalg.trace(x, offset=offset)
 
     @onlyCUDA
     @skipCUDAIfNoMagma

@@ -2575,10 +2575,14 @@ def sample_inputs_trace(self, device, dtype, requires_grad, **kwargs):
                                      requires_grad=requires_grad))),)
 
 def sample_inputs_linalg_trace(self, device, dtype, requires_grad, **kwargs):
+    # input.shape, offset
     inputs = (
         ((S, S), 0),
         ((S, M), 0),
         ((S, S), 1),
+        ((S, S), -1),
+        ((S, S, S), 0),
+        ((S, M, L), -2),
     )
     samples = []
 
@@ -9994,7 +9998,7 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_linalg_slogdet,
            decorators=[skipCUDAIfNoMagma, skipCPUIfNoLapack],),
     OpInfo('linalg.trace',
-           ref=np.trace,
+           ref=lambda x, offset=0: np.trace(x, offset, -2, -1),
            aten_name='linalg_trace',
            op=torch.linalg.trace,
            dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
