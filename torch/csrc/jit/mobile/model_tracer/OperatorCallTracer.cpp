@@ -5,8 +5,8 @@ namespace jit {
 namespace mobile {
 OperatorCallTracer::OperatorCallTracer() {
   called_operators_.clear();
-  auto recorder_cb = [](const at::RecordFunction& fn)
-      -> std::unique_ptr<at::ObserverContext> {
+  auto recorder_cb =
+      [](const at::RecordFunction& fn) -> std::unique_ptr<at::ObserverContext> {
     c10::optional<c10::OperatorName> op_name = fn.operator_name();
     if (op_name.has_value()) {
       called_operators_.insert(c10::toString(*op_name));

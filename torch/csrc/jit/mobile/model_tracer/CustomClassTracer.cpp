@@ -4,16 +4,15 @@ namespace torch {
 namespace jit {
 namespace mobile {
 CustomClassTracer::CustomClassTracer() {
-  auto recorder_cb = [](const at::RecordFunction& fn)
-      -> std::unique_ptr<at::ObserverContext> {
+  auto recorder_cb =
+      [](const at::RecordFunction& fn) -> std::unique_ptr<at::ObserverContext> {
     std::string name = fn.name();
     getLoadedClasses().insert(name);
     return nullptr;
   };
 
-  handle_ =
-      at::addGlobalCallback(at::RecordFunctionCallback(recorder_cb)
-                                .scopes({at::RecordScope::CUSTOM_CLASS}));
+  handle_ = at::addGlobalCallback(at::RecordFunctionCallback(recorder_cb)
+                                      .scopes({at::RecordScope::CUSTOM_CLASS}));
 }
 
 CustomClassTracer::custom_classes_type& CustomClassTracer::getLoadedClasses() {

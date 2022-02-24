@@ -4,8 +4,8 @@ namespace torch {
 namespace jit {
 namespace mobile {
 BuildFeatureTracer::BuildFeatureTracer() {
-  auto recorder_cb = [](const at::RecordFunction& fn)
-      -> std::unique_ptr<at::ObserverContext> {
+  auto recorder_cb =
+      [](const at::RecordFunction& fn) -> std::unique_ptr<at::ObserverContext> {
     std::string name = fn.name();
     getBuildFeatures().insert(name);
     return nullptr;
