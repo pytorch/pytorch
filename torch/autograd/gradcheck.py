@@ -1531,10 +1531,9 @@ def gradgradcheck(
             return torch.testing.make_tensor(
                 x.shape,
                 dtype=x.dtype if x.is_floating_point() or x.is_complex() else torch.double,
-                layout=x.layout,
                 device=x.device,
                 requires_grad=True,
-                non_contiguous=gen_non_contig_grad_outputs,
+                noncontiguous=gen_non_contig_grad_outputs,
             ).clone(memory_format=torch.legacy_contiguous_format)
 
         outputs = _as_tuple(func(*tupled_inputs))

@@ -636,8 +636,8 @@ class TestSparseCSR(TestCase):
                 a_batched = torch._sparse_csr_tensor_unsafe(
                     a.crow_indices(), a.col_indices(), a.values(), (batch_size, m, k))
 
-                b = make_tensor((batch_size, k, n), dtype=dtype, device=device, non_contiguous=noncontiguous)
-                c = make_tensor((batch_size, m, n), dtype=dtype, device=device, non_contiguous=noncontiguous)
+                b = make_tensor((batch_size, k, n), dtype=dtype, device=device, noncontiguous=noncontiguous)
+                c = make_tensor((batch_size, m, n), dtype=dtype, device=device, noncontiguous=noncontiguous)
                 for op_b, op_out in itertools.product([True, False], repeat=2):
                     run_test(c, a, a_batched, b, op_b, op_out, dtype=dtype, device=device)
 
@@ -669,7 +669,7 @@ class TestSparseCSR(TestCase):
                 a_batched = torch._sparse_csr_tensor_unsafe(
                     a.crow_indices(), a.col_indices(), a.values(), (batch_size, m, k))
 
-                b = make_tensor((batch_size, k, n), dtype=dtype, device=device, non_contiguous=noncontiguous)
+                b = make_tensor((batch_size, k, n), dtype=dtype, device=device, noncontiguous=noncontiguous)
                 for op_b, op_out in itertools.product([True, False], repeat=2):
                     run_test(a, a_batched, b, op_b, op_out, dtype=dtype, device=device)
 
@@ -706,8 +706,8 @@ class TestSparseCSR(TestCase):
                 a_data = make_tensor((nnz, block_size, block_size), dtype=dtype, device=device)
                 a_data = a_data.mT if noncontiguous else a_data   # Test column-major blocks
                 a = torch._sparse_csr_tensor_unsafe(a.crow_indices(), a.col_indices(), a_data, (m * block_size, k * block_size))
-                b = make_tensor((k * block_size, n * block_size), dtype=dtype, device=device, non_contiguous=noncontiguous)
-                c = make_tensor((m * block_size, n * block_size), dtype=dtype, device=device, non_contiguous=noncontiguous)
+                b = make_tensor((k * block_size, n * block_size), dtype=dtype, device=device, noncontiguous=noncontiguous)
+                c = make_tensor((m * block_size, n * block_size), dtype=dtype, device=device, noncontiguous=noncontiguous)
                 for op_b, op_out in itertools.product([True, False], repeat=2):
                     self.run_test_block_addmm_addmv(torch.addmm, c, a, b, op_b, op_out, dtype=dtype, device=device)
 
@@ -725,8 +725,8 @@ class TestSparseCSR(TestCase):
                 a_data = make_tensor((nnz, block_size, block_size), dtype=dtype, device=device)
                 a_data = a_data.mT if noncontiguous else a_data  # Test column-major blocks
                 a = torch._sparse_csr_tensor_unsafe(a.crow_indices(), a.col_indices(), a_data, (m * block_size, k * block_size))
-                b = make_tensor((k * block_size,), dtype=dtype, device=device, non_contiguous=noncontiguous)
-                c = make_tensor((m * block_size,), dtype=dtype, device=device, non_contiguous=noncontiguous)
+                b = make_tensor((k * block_size,), dtype=dtype, device=device, noncontiguous=noncontiguous)
+                c = make_tensor((m * block_size,), dtype=dtype, device=device, noncontiguous=noncontiguous)
                 self.run_test_block_addmm_addmv(torch.addmv, c, a, b, dtype=dtype, device=device)
 
     @skipCPUIfNoMklSparse
@@ -775,7 +775,7 @@ class TestSparseCSR(TestCase):
                 a_data = make_tensor((nnz, block_size, block_size), dtype=dtype, device=device)
                 a_data = a_data.mT if noncontiguous else a_data  # Test column-major blocks
                 a = torch._sparse_csr_tensor_unsafe(a.crow_indices(), a.col_indices(), a_data, (m * block_size, m * block_size))
-                b = make_tensor((m * block_size, k), dtype=dtype, device=device, non_contiguous=noncontiguous)
+                b = make_tensor((m * block_size, k), dtype=dtype, device=device, noncontiguous=noncontiguous)
 
                 for (upper, unitriangular, transpose, op_out) in itertools.product([True, False], repeat=4):
                     run_test(a, b, upper, unitriangular, transpose, op_out)
@@ -1179,8 +1179,8 @@ class TestSparseCSR(TestCase):
             for (m, n, k), noncontiguous in zip(itertools.product([1, 5], repeat=3), [True, False]):
                 nnz = random.randint(0, m * n)
                 c = self.genSparseCSRTensor((m, n), nnz, dtype=dtype, device=device, index_dtype=index_dtype)
-                a = make_tensor((m, k), dtype=dtype, device=device, non_contiguous=noncontiguous)
-                b = make_tensor((k, n), dtype=dtype, device=device, non_contiguous=noncontiguous)
+                a = make_tensor((m, k), dtype=dtype, device=device, noncontiguous=noncontiguous)
+                b = make_tensor((k, n), dtype=dtype, device=device, noncontiguous=noncontiguous)
                 for op_a, op_b in itertools.product([True, False], repeat=2):
                     run_test(c, a, b, op_a, op_b)
 
@@ -1370,7 +1370,6 @@ class TestSparseCSR(TestCase):
             self.assertEqual(actual.col_indices(), expect.col_indices())
             self.assertEqual(actual._nnz(), expect._nnz())
 
-
     @unittest.expectedFailure
     @ops(sparse_csr_unary_ufuncs, dtypes=OpDTypes.supported, allowed_dtypes=[torch.double, torch.cdouble])
     def test_autograd_sparse_csr_unary(self, device, dtype, op):
@@ -1413,18 +1412,20 @@ class TestSparseCSR(TestCase):
         for sample in samples:
             a = sample.args[0].to_sparse_csr()
 
-            def fn(c, b):
-                output = torch.addmm(c, a, b, **sample.kwargs)
-                if sample.output_process_fn_grad is not None:
-                    return sample.output_process_fn_grad(output)
-                return output
+            for addmm in [torch.addmm, torch.sparse.addmm]:
 
-            self.assertTrue(torch.autograd.gradcheck(fn, [sample.input, sample.args[1]], fast_mode=True))
+                def fn(c, b):
+                    output = addmm(c, a, b, **sample.kwargs)
+                    if sample.output_process_fn_grad is not None:
+                        return sample.output_process_fn_grad(output)
+                    return output
 
-            # noncontiguous
-            c = make_tensor(sample.input.shape, device=device, dtype=dtype, non_contiguous=True, requires_grad=True)
-            b = make_tensor(sample.args[1].shape, device=device, dtype=dtype, non_contiguous=True, requires_grad=True)
-            self.assertTrue(torch.autograd.gradcheck(fn, [c, b], fast_mode=True))
+                self.assertTrue(torch.autograd.gradcheck(fn, [sample.input, sample.args[1]], fast_mode=True))
+
+                # noncontiguous
+                c = make_tensor(sample.input.shape, device=device, dtype=dtype, noncontiguous=True, requires_grad=True)
+                b = make_tensor(sample.args[1].shape, device=device, dtype=dtype, noncontiguous=True, requires_grad=True)
+                self.assertTrue(torch.autograd.gradcheck(fn, [c, b], fast_mode=True))
 
     @skipCUDAIfRocm
     @skipCPUIfNoMklSparse
@@ -1451,8 +1452,8 @@ class TestSparseCSR(TestCase):
             self.assertTrue(torch.autograd.gradcheck(fn, [sample.input, sample.args[1]], fast_mode=True))
 
             # noncontiguous
-            c = make_tensor(sample.input.shape, device=device, dtype=dtype, non_contiguous=True, requires_grad=True)
-            b = make_tensor(sample.args[1].shape, device=device, dtype=dtype, non_contiguous=True, requires_grad=True)
+            c = make_tensor(sample.input.shape, device=device, dtype=dtype, noncontiguous=True, requires_grad=True)
+            b = make_tensor(sample.args[1].shape, device=device, dtype=dtype, noncontiguous=True, requires_grad=True)
             self.assertTrue(torch.autograd.gradcheck(fn, [c, b], fast_mode=True))
 
     @ops(binary_ops_with_dense_output, dtypes=OpDTypes.supported, allowed_dtypes=[torch.double, ])
@@ -1486,7 +1487,7 @@ class TestSparseCSR(TestCase):
             args = [make_tensor(a.shape, device=device, dtype=dtype, noncontiguous=True, requires_grad=True) for a in sample.args]
             self.assertTrue(torch.autograd.gradcheck(fn, args, fast_mode=True))
 
-    @dtypes(*get_all_dtypes(include_bool=False, include_half=False, include_bfloat16=False))
+    @dtypes(*get_all_dtypes(include_bool=False))
     def test_direct_coo_csr_conversion(self, device, dtype):
         for m, n in itertools.product([5, 2, 0], [5, 2, 0]):
             size = (m, n)

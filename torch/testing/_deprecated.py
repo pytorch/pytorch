@@ -107,10 +107,10 @@ get_all_device_types = warn_deprecated(instructions)(_legacy.get_all_device_type
 
 @warn_deprecated(
     "Depending on the use case there a different replacement options:\n\n"
-    "- If you are using `make_non_contiguous` in combination with a creation function to create a non-contiguous tensor "
+    "- If you are using `make_non_contiguous` in combination with a creation function to create a noncontiguous tensor "
     "with random values, use `torch.testing.make_tensor(..., non_contiguous=True)` instead.\n"
-    "- If you are using `make_non_contiguous` with a specific `tensor`, you can replace this call with "
-    "`tensor.repeat_interleave(2, dim=-1)[..., ::2]`."
+    "- If you are using `make_non_contiguous` with a specific tensor, you can replace this call with "
+    "`torch.repeat_interleave(input, 2, dim=-1)[..., ::2]`."
 )
 def make_non_contiguous(tensor: torch.Tensor) -> torch.Tensor:
     if tensor.numel() <= 1:  # can't make non-contiguous
