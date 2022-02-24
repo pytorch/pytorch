@@ -377,8 +377,9 @@ class Quantized:
 
     @staticmethod
     def linear(g, q_input, q_weight, bias, op_scale, op_zero_point):
-        input, _, _ = sym_help.dequantize_helper(g, q_input)
-        weight, _, _ = sym_help.dequantize_helper(g, q_weight)
+        input, input_scale, _ = sym_help.dequantize_helper(g, q_input)
+        weight, weight_scale, _ = sym_help.dequantize_helper(g, q_weight)
+        bias = sym_help.requantize_bias_helper(g, bias, input_scale, weight_scale)
 
         output = linear(g, input, weight, bias)
 
@@ -412,8 +413,9 @@ class Quantized:
 
     @staticmethod
     def conv2d_relu(g, q_input, q_weight, bias, stride, padding, dilation, groups, op_scale, op_zero_point):
-        input, _, _ = sym_help.dequantize_helper(g, q_input)
-        weight, _, _ = sym_help.dequantize_helper(g, q_weight)
+        input, input_scale, _ = sym_help.dequantize_helper(g, q_input)
+        weight, weight_scale, _ = sym_help.dequantize_helper(g, q_weight)
+        bias = sym_help.requantize_bias_helper(g, bias, input_scale, weight_scale)
 
         output = conv2d(g, input, weight, bias, stride, padding, dilation, groups)
         output = relu(g, output)
@@ -422,8 +424,9 @@ class Quantized:
 
     @staticmethod
     def conv2d(g, q_input, q_weight, bias, stride, padding, dilation, groups, op_scale, op_zero_point):
-        input, _, _ = sym_help.dequantize_helper(g, q_input)
-        weight, _, _ = sym_help.dequantize_helper(g, q_weight)
+        input, input_scale, _ = sym_help.dequantize_helper(g, q_input)
+        weight, weight_scale, _ = sym_help.dequantize_helper(g, q_weight)
+        bias = sym_help.requantize_bias_helper(g, bias, input_scale, weight_scale)
 
         output = conv2d(g, input, weight, bias, stride, padding, dilation, groups)
 
