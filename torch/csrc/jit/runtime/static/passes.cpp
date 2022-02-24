@@ -720,7 +720,7 @@ void EliminateTrivialEquallySplit(std::shared_ptr<torch::jit::Graph>& graph) {
 
 namespace {
 
-bool shouldNotFuseListUnpackSpecialCase(Node* node) {
+bool shouldNotFuseListUnpackSpecialCase(const Node* node) {
   const static std::array<c10::Symbol, 3> sigrid_transforms_symbols{
       c10::Symbol::fromQualString("fb::variadic_sigrid_transforms_torch_bind"),
       c10::Symbol::fromQualString("fb::sigrid_transforms_torch_bind"),

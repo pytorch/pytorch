@@ -1,5 +1,6 @@
 #include <c10/util/StringUtil.h>
 #include <c10d/Utils.hpp>
+#include <c10d/debug.h>
 #include <c10d/logger.hpp>
 #include <fmt/format.h>
 #include <string>
@@ -207,7 +208,7 @@ void Logger::set_construction_data_and_log(
   ddp_logging_data_->strs_map["backend_name"] =
       reducer_->process_group_->getBackendName();
 
-  if (parseDistDebugLevel() != DistributedDebugLevel::OFF) {
+  if (debug_level() != DebugLevel::Off) {
     std::string initInfo = fmt::format(
         "[Rank {}]: DDP Initialized with: \n",
         ddp_logging_data_->ints_map["rank"]);
@@ -381,7 +382,7 @@ void Logger::set_runtime_stats_and_log() {
   );
 
   // Log runtime stats to stderr if TORCH_DISTRIBUTED_DEBUG=DETAIL is enabled.
-  if (parseDistDebugLevel() == DistributedDebugLevel::DETAIL) {
+  if (debug_level() == DebugLevel::Detail) {
     LOG(INFO) << *this;
   }
 

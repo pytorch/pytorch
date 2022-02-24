@@ -575,6 +575,9 @@ Debugging ``torch.distributed`` applications
 Debugging distributed applications can be challenging due to hard to understand hangs, crashes, or inconsistent behavior across ranks. ``torch.distributed`` provides
 a suite of tools to help debug training applications in a self-serve fashion:
 
+Monitored Barrier
+^^^^^^^^^^^^^^^^^
+
 As of v1.10, :func:`torch.distributed.monitored_barrier` exists as an alternative to :func:`torch.distributed.barrier` which fails with helpful information about which rank may be faulty
 when crashing, i.e. not all ranks calling into :func:`torch.distributed.monitored_barrier` within the provided timeout. :func:`torch.distributed.monitored_barrier` implements a host-side
 barrier using ``send``/``recv`` communication primitives in a process similar to acknowledgements, allowing rank 0 to report which rank(s) failed to acknowledge
@@ -612,6 +615,9 @@ The following error message is produced on rank 0, allowing the user to determin
    Original exception:
   [gloo/transport/tcp/pair.cc:598] Connection closed by peer [2401:db00:eef0:1100:3560:0:1c05:25d]:8594
 
+
+``TORCH_DISTRIBUTED_DEBUG``
+^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 Next, the environment variable ``TORCH_DISTRIBUTED_DEBUG``  can be used to trigger additional useful logging and collective synchronization checks to ensure all ranks
 are synchronized appropriately. ``TORCH_DISTRIBUTED_DEBUG`` can be set to either ``OFF`` (default), ``INFO``, or ``DETAIL`` depending on the debugging level
@@ -773,6 +779,10 @@ With the ``NCCL`` backend, such an application would likely result in a hang whi
     work = default_pg.allreduce([tensor], opts)
     RuntimeError: Error when verifying shape tensors for collective ALLREDUCE on rank 0. This likely indicates that input shapes into the collective are mismatched across ranks. Got shapes:  10
     [ torch.LongTensor{1} ]
+
+.. note::
+    For fine-grained control of the debug level during runtime the functions :func:`torch.distributed.set_debug_level`, :func:`torch.distributed.set_debug_level_from_env`, and
+    :func:`torch.distributed.get_debug_level` can also be used.
 
 In addition, `TORCH_DISTRIBUTED_DEBUG=DETAIL` can be used in conjunction with `TORCH_SHOW_CPP_STACKTRACES=1` to log the entire callstack when a collective desynchronization is detected. These
 collective desynchronization checks will work for all applications that use ``c10d`` collective calls backed by process groups created with the
