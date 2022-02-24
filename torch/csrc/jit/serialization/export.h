@@ -3,6 +3,7 @@
 #include <caffe2/serialize/inline_container.h>
 #include <torch/csrc/jit/api/module.h>
 #include <torch/csrc/jit/ir/ir.h>
+#include <torch/csrc/jit/serialization/flatbuffer_serializer.h>
 #include <torch/csrc/jit/serialization/pickler.h>
 #include <torch/csrc/jit/serialization/python_print.h>
 #include <torch/csrc/jit/serialization/storage_context.h>
@@ -156,21 +157,24 @@ TORCH_API void ExportModule(
     std::ostream& out,
     const ExtraFilesMap& metadata = ExtraFilesMap(),
     bool bytecode_format = false,
-    bool save_mobile_debug_info = false);
+    bool save_mobile_debug_info = false,
+    bool use_flatbuffer = false);
 
 TORCH_API void ExportModule(
     const Module& module,
     const std::string& filename,
     const ExtraFilesMap& metadata = ExtraFilesMap(),
     bool bytecode_format = false,
-    bool save_mobile_debug_info = false);
+    bool save_mobile_debug_info = false,
+    bool use_flatbuffer = false);
 
 TORCH_API void ExportModule(
     const Module& module,
     const std::function<size_t(const void*, size_t)>& writer_func,
     const ExtraFilesMap& metadata = ExtraFilesMap(),
     bool bytecode_format = false,
-    bool save_mobile_debug_info = false);
+    bool save_mobile_debug_info = false,
+    bool use_flatbuffer = false);
 
 // Write the bytes of a pickle archive and the tensors referenced inside that
 // archive
