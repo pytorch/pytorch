@@ -577,9 +577,12 @@ def test_distributed(test_module, test_directory, options):
             if options.verbose:
                 init_str = "with {} init_method"
                 with_init = init_str.format("file" if with_init_file else "env")
+                backend_config = config[backend]
+                world_size = backend_config["WORLD_SIZE"]
+                cuda_device_count = 0 if not torch.cuda.is_available() else torch.cuda.device_count()
                 print_to_stderr(
-                    "Running distributed tests for the {} backend {}".format(
-                        backend, with_init
+                    "Running distributed tests for the {} backend {} with world_size {} (runner has {cuda_device_count} GPUs)".format(
+                        backend, with_init, world_size, cuda_device_count
                     )
                 )
             os.environ["TEMP_DIR"] = tmp_dir
