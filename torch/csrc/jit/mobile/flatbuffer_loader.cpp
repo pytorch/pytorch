@@ -591,5 +591,20 @@ mobile::Module load_mobile_module_from_file(
   return parse_and_initialize_mobile_module(std::move(data), size, device);
 }
 
+mobile::Module load_mobile_module_from_stream(
+    std::istream& in,
+    c10::optional<c10::Device> device) {
+  // get size of the stream and reset to beg
+  in.seekg(0, std::ios::end);
+  const long size = in.tellg();
+  in.seekg(0, std::ios::beg);
+
+  // read stream
+  std::shared_ptr<char> data(static_cast<char*>(malloc(size)), free); // NOLINT
+  in.read(data.get(), size);
+
+  return parse_and_initialize_mobile_module(std::move(data), size, device);
+}
+
 } // namespace jit
 } // namespace torch
