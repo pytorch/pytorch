@@ -13,7 +13,7 @@ from functools import partial
 from functools import wraps
 
 import torch.onnx.symbolic_helper as sym_help
-from torch.onnx.symbolic_helper import parse_args, _parse_arg, _unimplemented, ScalarType
+from torch.onnx.symbolic_helper import parse_args, _parse_arg, _unimplemented, ScalarType, quantized_args
 
 from typing import Optional
 from sys import maxsize as maxsize
@@ -949,6 +949,7 @@ avg_pool3d = _avg_pool("avg_pool3d", _triple)
 
 
 def _adaptive_pool(name, type, tuple_fn, fn=None):
+    @quantized_args(True, False)
     def symbolic_fn(g, input, output_size):
         # _adaptive_pool is supported for cases where output_size is 1 for all dimensions,
         # by executing a GlobalPool.
@@ -1640,6 +1641,10 @@ def max(g, self, dim_or_y=None, keepdim=None):
         return max, indices
 
 
+def maximum(g, input, other):
+    return max(g, input, dim_or_y=other)
+
+
 def min(g, self, dim_or_y=None, keepdim=None):
     # torch.min(input)
     if dim_or_y is None and keepdim is None:
@@ -1654,6 +1659,10 @@ def min(g, self, dim_or_y=None, keepdim=None):
         min = g.op("ReduceMin", self, axes_i=[dim], keepdims_i=keepdim)
         indices = g.op("ArgMin", self, axis_i=dim, keepdims_i=keepdim)
         return min, indices
+
+
+def minimum(g, input, other):
+    return min(g, input, dim_or_y=other)
 
 
 def exp(g, self):
@@ -1957,6 +1966,8 @@ def hardswish(g, self):
     return g.op("Mul", self, hs)
 
 
+# Fixed scale and zero_point, discovered from aten/src/ATen/native/quantized/cpu/qhardsigmoid.cpp
+@quantized_args(True, scale=1.0 / 256.0, zero_point=0)
 @parse_args("v")
 def hardsigmoid(g, self):
     # Set alpha_f to 1 / 6 to make op equivalent to PyTorch's definition of Hardsigmoid.
@@ -2570,6 +2581,7 @@ def erf(g, input):
     return g.op("Erf", input)
 
 
+@quantized_args(True, False, False)
 @parse_args("v", "i", "i")
 def flatten(g, input, start_dim, end_dim):
     dim = sym_help._get_tensor_rank(input)

@@ -32,6 +32,7 @@ MAX_ALLOWED_PERIOD = datetime.timedelta(days=30)
 # NB: function name DOES NOT include overload name!
 TEMPORARY_ALLOW_LIST = [
     ("aten::_svd_helper", datetime.date(2022, 3, 1)),
+    ("aten::scatter_reduce.two", datetime.date(2022, 3, 15)),
 ]
 
 # WARNING: Operators included in this list indefinitely bypass all BC and FC schema checks.
@@ -73,6 +74,7 @@ INDEFINITE_ALLOW_LIST = [
     "prepacked::unpack_prepacked_sizes_linear",
     "aten::native_multi_head_self_attention",
     "aten::_native_multi_head_self_attention",
+    "aten::grid_sampler_3d_backward",
     "aten::_transform_bias_rescale_qkv",
     "aten::_scatter_reduce.two",
 ]

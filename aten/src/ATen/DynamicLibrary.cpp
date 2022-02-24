@@ -25,7 +25,7 @@ static void* checkDL(void* x) {
 
   return x;
 }
-DynamicLibrary::DynamicLibrary(const char* name, const char* alt_name) {
+DynamicLibrary::DynamicLibrary(const char* name, const char* alt_name, bool leak_handle_): leak_handle(leak_handle_) {
   // NOLINTNEXTLINE(hicpp-signed-bitwise)
   handle = dlopen(name, RTLD_LOCAL | RTLD_NOW);
   if (!handle) {
@@ -46,8 +46,9 @@ void* DynamicLibrary::sym(const char* name) {
 }
 
 DynamicLibrary::~DynamicLibrary() {
-  if (!handle)
+  if (!handle || leak_handle) {
     return;
+  }
   dlclose(handle);
 }
 
@@ -55,7 +56,7 @@ DynamicLibrary::~DynamicLibrary() {
 
 // Windows
 
-DynamicLibrary::DynamicLibrary(const char* name, const char* alt_name) {
+DynamicLibrary::DynamicLibrary(const char* name, const char* alt_name, bool leak_handle_): leak_handle(leak_handle_) {
   // NOLINTNEXTLINE(hicpp-signed-bitwise)
   HMODULE theModule;
   bool reload = true;
@@ -97,7 +98,7 @@ void* DynamicLibrary::sym(const char* name) {
 }
 
 DynamicLibrary::~DynamicLibrary() {
-  if (!handle) {
+  if (!handle || leak_handle) {
     return;
   }
   FreeLibrary((HMODULE)handle);

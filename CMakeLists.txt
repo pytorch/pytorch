@@ -189,6 +189,8 @@ option(USE_CUDA "Use CUDA" ON)
 cmake_dependent_option(
     BUILD_SPLIT_CUDA "Split torch_cuda library into torch_cuda_cu and torch_cuda_cpp" OFF
     "USE_CUDA AND NOT CUDA_SEPARABLE_COMPILATION" OFF)
+cmake_dependent_option(
+     BUILD_LAZY_CUDA_LINALG "Build cuda linalg ops as separate library" ON "USE_CUDA AND LINUX AND BUILD_PYTHON" OFF)
 option(USE_FAST_NVCC "Use parallel NVCC build" OFF)
 option(USE_ROCM "Use ROCm" ON)
 option(CAFFE2_STATIC_LINK_CUDA "Statically link CUDA libraries" OFF)
