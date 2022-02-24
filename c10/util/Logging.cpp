@@ -224,9 +224,6 @@ void initGoogleLogging(char const* name) {
 } // namespace
 
 void initLogging() {
-  // Unlike caffe2 torch always writes to stderr.
-  FLAGS_logtostderr = 1;
-
   detail::setLogLevelFlagFromEnv();
 
   UpdateLoggingLevelsFromFlags();
