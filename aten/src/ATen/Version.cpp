@@ -6,7 +6,7 @@
 #endif
 
 #if AT_MKLDNN_ENABLED()
-#include <mkldnn.hpp>
+#include <dnnl.hpp>
 #include <ideep.hpp>
 #endif
 
@@ -42,7 +42,7 @@ std::string get_mkldnn_version() {
     // Apparently no way to get ideep version?
     // https://github.com/intel/ideep/issues/29
     {
-      const mkldnn_version_t* ver = mkldnn_version();
+      const dnnl_version_t* ver = dnnl_version();
       ss << "Intel(R) MKL-DNN v" << ver->major << "." << ver->minor << "." << ver->patch
          << " (Git Hash " << ver->hash << ")";
     }

@@ -189,6 +189,8 @@ option(USE_CUDA "Use CUDA" ON)
 cmake_dependent_option(
     BUILD_SPLIT_CUDA "Split torch_cuda library into torch_cuda_cu and torch_cuda_cpp" OFF
     "USE_CUDA AND NOT CUDA_SEPARABLE_COMPILATION" OFF)
+cmake_dependent_option(
+     BUILD_LAZY_CUDA_LINALG "Build cuda linalg ops as separate library" ON "USE_CUDA AND LINUX AND BUILD_PYTHON" OFF)
 option(USE_FAST_NVCC "Use parallel NVCC build" OFF)
 option(USE_ROCM "Use ROCm" ON)
 option(CAFFE2_STATIC_LINK_CUDA "Statically link CUDA libraries" OFF)
@@ -277,6 +279,7 @@ if(IOS)
   set(USE_BREAKPAD OFF)
 endif()
 
+option(USE_SLEEF_FOR_ARM_VEC256 "Use sleef for arm" OFF)
 option(USE_SOURCE_DEBUG_ON_MOBILE "Enable " ON)
 option(USE_LITE_INTERPRETER_PROFILER "Enable " ON)
 option(USE_VULKAN_FP16_INFERENCE "Vulkan - Use fp16 inference" OFF)
@@ -688,6 +691,10 @@ endif()
 
 if(USE_PYTORCH_QNNPACK)
   string(APPEND CMAKE_CXX_FLAGS " -DUSE_PYTORCH_QNNPACK")
+endif()
+
+if(USE_SLEEF_FOR_ARM_VEC256)
+  string(APPEND CMAKE_CXX_FLAGS " -DAT_BUILD_ARM_VEC256_WITH_SLEEF")
 endif()
 
 if(USE_XNNPACK)
