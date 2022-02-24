@@ -2116,7 +2116,7 @@ calc_erfcx(T x)
 C10_CLANG_DIAGNOSTIC_POP()
 
 template <typename T>
-static inline typename std::enable_if<std::is_floating_point<T>::value, T>::type
+C10_HOST_DEVICE static inline typename std::enable_if<std::is_floating_point<T>::value, T>::type
 calc_logerfcx(T x)
 {
   if (x < 0.0) {
