@@ -1,3 +1,0 @@
-# Python dependencies required for unit tests
-numpy
-expecttest
