@@ -446,6 +446,7 @@ ShapeAndDims canonicalize_fft_c2r_shape_and_dim_args(
   auto desc = canonicalize_fft_shape_and_dim_args(self, s, dims);
   TORCH_CHECK(desc.shape.size() > 0, fname, " must transform at least one axis");
 
+  // Expected output size of the hermitian-symmetric dimension
   last_dim_size = [&] {
     // Fixup default shape handling in the last dimension,
     if (!s.has_value() || (s->back() == -1)) {
@@ -454,9 +455,10 @@ ShapeAndDims canonicalize_fft_c2r_shape_and_dim_args(
     }
     return desc.shape.back();
   }();
-  auto ld = last_dim_size / 2 + 1;
-  desc.shape.back() = ld;
-  TORCH_CHECK(ld >= 1, "Invalid number of data points (", last_dim_size, ") specified");
+  TORCH_CHECK(last_dim_size >= 1, "Invalid number of data points (", last_dim_size, ") specified");
+
+  // Expected input size of the complex-hermitian data
+  desc.shape.back() = last_dim_size / 2 + 1;
   return desc;
 }
 

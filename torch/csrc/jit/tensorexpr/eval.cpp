@@ -983,7 +983,7 @@ class SimpleIREvaluatorImpl : public IRVisitor {
   }
 
   void visit(PlacementAllocatePtr v) override {
-    buffer_mapping_[v->buf()] = buffer_mapping_[v->buf_to_reuse()];
+    buffer_mapping_[v->buf()] = buffer_mapping_.at(v->buf_to_reuse());
   }
 
   void visit(FreePtr v) override {
