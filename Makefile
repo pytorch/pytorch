@@ -47,6 +47,7 @@ shellcheck:
 		--step 'Extract scripts from GitHub Actions workflows'
 	@$(PYTHON) tools/actions_local_runner.py \
 		$(CHANGED_ONLY) \
+		$(REF_BRANCH) \
 		--job 'shellcheck'
 
 setup_lint:
@@ -94,11 +95,13 @@ quick_checks:
 flake8:
 	@$(PYTHON) tools/actions_local_runner.py \
 		$(CHANGED_ONLY) \
+		$(REF_BRANCH) \
 		--job 'flake8-py3'
 
 mypy:
 	@$(PYTHON) tools/actions_local_runner.py \
 		$(CHANGED_ONLY) \
+		$(REF_BRANCH) \
 		--job 'mypy'
 
 cmakelint:
@@ -110,6 +113,7 @@ cmakelint:
 clang-tidy:
 	@$(PYTHON) tools/actions_local_runner.py \
 		$(CHANGED_ONLY) \
+		$(REF_BRANCH) \
 		--job 'clang-tidy'
 
 toc:
