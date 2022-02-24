@@ -482,6 +482,7 @@ class TestFuseFx(QuantizationTestCase):
                 self.conv = torch.nn.Conv2d(3, 3, 3)
                 self.bn = torch.nn.BatchNorm2d(3)
                 self.relu = torch.nn.ReLU()
+                self.maxpool = torch.nn.MaxPool2d(3)
                 if use_torch_add:
                     self.add = torch.add
                 else:
@@ -489,6 +490,7 @@ class TestFuseFx(QuantizationTestCase):
 
             def forward(self, x):
                 y = x
+                y = self.maxpool(x)
                 x = self.conv(x)
                 x = self.bn(x)
                 x = self.add(y, x)
@@ -1817,7 +1819,7 @@ class TestQuantizeFx(QuantizationTestCase):
 
         def assertAttrPreserved(m):
             self.assertTrue(hasattr(m, "preserved_attr"))
-            self.assertTrue(m.preserved_attr, 3)
+            self.assertEqual(m.preserved_attr, 3)
 
         assertAttrPreserved(m)
         convert_custom_config_dict = {
@@ -5026,7 +5028,7 @@ class TestQuantizeFxOps(QuantizationTestCase):
         # observers and also successfully fused two quantized::conv2d
         # patterns
         # one quantize_per_tensor for input
-        # check exact counts of quantize and dequantiz
+        # check exact counts of quantize and dequantize
         count_check = {
             # input of conv and two outputs of getitem
             ns.call_function(torch.quantize_per_tensor) : 2,
