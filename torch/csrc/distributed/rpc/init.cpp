@@ -110,11 +110,26 @@ PyObject* rpc_init(PyObject* _unused, PyObject* noargs) {
           // c10::hash, so  we need to use the qualified name
           // py::detail::hash, which unfortunately is in a detail namespace.
           .def(py::detail::hash(py::self)) // NOLINT
-          .def("__repr__", [](const WorkerInfo& workerInfo) {
-            std::ostringstream os;
-            os << workerInfo;
-            return os.str();
-          });
+          .def(
+              "__repr__",
+              [](const WorkerInfo& workerInfo) {
+                std::ostringstream os;
+                os << workerInfo;
+                return os.str();
+              })
+          .def(py::pickle(
+              [](const WorkerInfo& workerInfo) { //__getstate__
+                return py::make_tuple(workerInfo.name_, workerInfo.id_);
+              },
+              [](py::tuple t) { // __setstate__
+                if (t.size() != 2) {
+                  throw std::runtime_error("Invalid state");
+                }
+
+                WorkerInfo workerInfo(
+                    t[0].cast<std::string>(), t[1].cast<worker_id_t>());
+                return workerInfo;
+              }));
 
   auto rpcAgent =
       shared_ptr_class_<RpcAgent>(module, "RpcAgent")
