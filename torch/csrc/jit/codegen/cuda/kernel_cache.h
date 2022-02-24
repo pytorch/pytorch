@@ -431,9 +431,6 @@ class GraphCache {
       const at::ArrayRef<IValue>& inputs);
 
  private:
-  //! Computation graph;
-  std::shared_ptr<Graph> graph_;
-
   //! construct FusionExecutorCache
   void createFusion(const std::shared_ptr<Graph>& graph);
 

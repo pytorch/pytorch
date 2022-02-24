@@ -4,6 +4,7 @@
 #include <torch/csrc/jit/codegen/cuda/ir_utils.h>
 #include <torch/csrc/jit/codegen/cuda/parser.h>
 #include <torch/csrc/jit/codegen/cuda/scheduler/registry.h>
+#include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/runtime/graph_executor.h>
 
 #include <c10/util/irange.h>
@@ -654,6 +655,8 @@ GraphCache::GraphCache(const std::shared_ptr<Graph>& graph) {
   TORCH_INTERNAL_ASSERT(
       IsNewExecutorEnabled(), "legacy executor is not supported by nvfuser");
 
+  GRAPH_DEBUG("GraphCache constructor: ", this);
+  GRAPH_DUMP("GraphCache created for graph", graph);
   createFusion(graph);
 }
 
@@ -661,6 +664,7 @@ std::vector<at::Tensor> GraphCache::runGraphWithInputs(
     const at::ArrayRef<IValue>& inputs) {
   FUSER_PERF_SCOPE("GraphCache::runGraphWithInputs");
 
+  GRAPH_DEBUG("running GraphCache: ", this);
   auto outputs = fusion_executor_cache_->runFusionWithInputs(inputs);
   TORCH_INTERNAL_ASSERT(
       outputs.size() == num_of_outputs_,
