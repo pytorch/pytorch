@@ -373,7 +373,7 @@ class TestShapeOps(TestCase):
         def gen_data():
             # Basic tests
             data = make_from_data([1, 2, 3, 4, 5, 6, 7, 8]).view(2, 2, 2)
-            nonctg = make_from_size((2, 2, 2), non_contiguous=True).copy_(data)
+            nonctg = make_from_size((2, 2, 2), noncontiguous=True).copy_(data)
 
             dims_result = ((0, make_from_data([5, 6, 7, 8, 1, 2, 3, 4]).view(2, 2, 2)),
                            (1, make_from_data([3, 4, 1, 2, 7, 8, 5, 6]).view(2, 2, 2)),

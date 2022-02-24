@@ -15,7 +15,6 @@ from torch.onnx.symbolic_helper import (_set_opset_version,
 import torch.utils.cpp_extension
 from test_pytorch_common import (skipIfUnsupportedMinOpsetVersion,
                                  skipIfUnsupportedMaxOpsetVersion)
-import caffe2.python.onnx.backend as backend
 from verify import verify
 
 import torchvision
@@ -601,6 +600,39 @@ class TestUtilityFuns_opset9(_BaseTestCase):
                                     "unwrap model from torch.nn.DataParallel. Try "):
             torch.onnx.export(model, x, f, opset_version=self.opset_version)
 
+    @skipIfUnsupportedMinOpsetVersion(11)
+    def test_sequence_dim(self):
+        class Module(torch.nn.Module):
+            def forward(self, x, y):
+                return [x, y]
+
+        model = Module()
+        # Export with scripting to keep output as Sequence type.
+        # Tracing unpacks the list.
+        script_model = torch.jit.script(model)
+        x = torch.randn(2, 3)
+
+        # Case 1: dynamic axis
+        f = io.BytesIO()
+        y = torch.randn(2, 3)
+        torch.onnx.export(script_model, (x, y), f, opset_version=self.opset_version,
+                          input_names=['x', 'y'], dynamic_axes={'y': [1]})
+        onnx_model = onnx.load(io.BytesIO(f.getvalue()))
+        loop_output_value_info_proto = onnx_model.graph.output[0]
+        ref_value_info_proto = onnx.helper.make_tensor_sequence_value_info(loop_output_value_info_proto.name,
+                                                                           1, [2, None])
+        self.assertEqual(loop_output_value_info_proto, ref_value_info_proto)
+
+        # Case 2: no dynamic axes.
+        f = io.BytesIO()
+        y = torch.randn(2, 3)
+        torch.onnx.export(script_model, (x, y), f, opset_version=self.opset_version)
+        onnx_model = onnx.load(io.BytesIO(f.getvalue()))
+        loop_output_value_info_proto = onnx_model.graph.output[0]
+        ref_value_info_proto = onnx.helper.make_tensor_sequence_value_info(loop_output_value_info_proto.name,
+                                                                           1, [2, 3])
+        self.assertEqual(loop_output_value_info_proto, ref_value_info_proto)
+
     def test_export_mode(self):
         class MyModule(torch.nn.Module):
             def forward(self, x):
@@ -891,39 +923,6 @@ class TestUtilityFuns_opset9(_BaseTestCase):
         self.assertEqual(next(iter).kind(), "onnx::Constant")
         self.assertEqual(next(iter).kind(), "aten::cosine_similarity")
 
-    def test_quantized_fallthrough(self):
-        # Test Quantized op
-        class QModule(torch.nn.Module):
-            def __init__(self):
-                super(QModule, self).__init__()
-                self.quant1 = torch.ao.quantization.QuantStub()
-                self.dequant = torch.ao.quantization.DeQuantStub()
-
-            def forward(self, x):
-                res = self.quant1(x)
-                return self.dequant(res)
-
-        model = QModule()
-        torch.backends.quantized.engine = "qnnpack"
-        pt_inputs = (torch.randn(1, 2, 3, 4))
-        model.qconfig = torch.ao.quantization.default_qconfig
-        q_model = torch.ao.quantization.prepare(model, inplace=False)
-        q_model = torch.ao.quantization.convert(q_model, inplace=False)
-
-        q_model.eval()
-
-        graph, _, __ = self._model_to_graph(q_model, pt_inputs,
-                                            operator_export_type=OperatorExportTypes.ONNX_FALLTHROUGH,
-                                            input_names=["pt_inputs"],
-                                            dynamic_axes={"pt_inputs": [0, 1, 2, 3]})
-
-        iter = graph.nodes()
-        self.assertEqual(next(iter).kind(), "onnx::Constant")
-        self.assertEqual(next(iter).kind(), "onnx::Constant")
-        self.assertEqual(next(iter).kind(), "onnx::Constant")
-        self.assertEqual(next(iter).kind(), "aten::quantize_per_tensor")
-        self.assertEqual(next(iter).kind(), "aten::dequantize")
-
     # prim::ListConstruct is exported as onnx::SequenceConstruct for opset >= 11
     @skipIfUnsupportedMaxOpsetVersion(10)
     def test_prim_fallthrough(self):
@@ -1055,6 +1054,9 @@ class TestUtilityFuns_opset9(_BaseTestCase):
                 return y
 
         x = torch.tensor([1, 2])
+        # Move import to local as caffe2 backend requires additional build flag,
+        # and is only used in this test case.
+        import caffe2.python.onnx.backend as backend
         verify(MyModel(), x, backend, do_constant_folding=False)
 
     def test_fuse_conv_bn(self):
