@@ -75,6 +75,7 @@ import unittest
 import numpy as np
 
 class TestQuantizeEagerOps(QuantizationTestCase):
+    @override_qengines
     def _test_reference_module_impl(self,
                                     float_module_class,
                                     quantized_module_class,
@@ -110,46 +111,48 @@ class TestQuantizeEagerOps(QuantizationTestCase):
                 x = self.dequant2(x)
                 return x
 
-        qengine = 'fbgemm'
-        with override_quantized_engine(qengine):
-            data = torch.randn(*input_size, dtype=torch.float)
-            original_m = M()
-            original_ref_m = RefM()
+        qengine = torch.backends.quantized.engine
+        if qengine not in supported_qengines or qengine == 'qnnpack':
+            return   # qnnpack does not support nnq.ConvTranspose3d
 
-            original_ref_m.conv.weight = torch.nn.Parameter(original_m.conv.weight.detach())
-            original_ref_m.conv.bias = torch.nn.Parameter(original_m.conv.bias.detach())
+        data = torch.randn(*input_size, dtype=torch.float)
+        original_m = M()
+        original_ref_m = RefM()
 
-            original_m.qconfig = torch.quantization.default_qconfig
+        original_ref_m.conv.weight = torch.nn.Parameter(original_m.conv.weight.detach())
+        original_ref_m.conv.bias = torch.nn.Parameter(original_m.conv.bias.detach())
 
-            m = prepare(original_m)
-            # calibration
-            m(data)
-            m = convert(m)
-            # check if the module is properly quantized
-            self.assertEqual(type(m.quant), nnq.Quantize)
-            self.assertEqual(type(m.conv), quantized_module_class)
-            self.assertEqual(type(m.dequant), nnq.DeQuantize)
-            res = m(data)
+        original_m.qconfig = torch.quantization.default_qconfig
 
-            # quantize the reference model
-            original_ref_m.eval()
-            original_ref_m.qconfig = torch.quantization.default_qconfig
+        m = prepare(original_m)
+        # calibration
+        m(data)
+        m = convert(m)
+        # check if the module is properly quantized
+        self.assertEqual(type(m.quant), nnq.Quantize)
+        self.assertEqual(type(m.conv), quantized_module_class)
+        self.assertEqual(type(m.dequant), nnq.DeQuantize)
+        res = m(data)
 
-            ref_m = prepare(original_ref_m)
-            ref_m(data)
-            reference_module_mapping = {
-                QuantStub: nnq.Quantize,
-                DeQuantStub: nnq.DeQuantize,
-                nn.Conv1d: nnqr.Conv1d,
-                nn.Conv2d: nnqr.Conv2d,
-                nn.Conv3d: nnqr.Conv3d,
-                nn.ConvTranspose1d: nnqr.ConvTranspose1d,
-                nn.ConvTranspose2d: nnqr.ConvTranspose2d,
-                nn.ConvTranspose3d: nnqr.ConvTranspose3d,
-            }
-            ref_m = convert(ref_m, mapping=reference_module_mapping)
-            ref_res = ref_m(data)
-            self.assertEqual(res, ref_res)
+        # quantize the reference model
+        original_ref_m.eval()
+        original_ref_m.qconfig = torch.quantization.default_qconfig
+
+        ref_m = prepare(original_ref_m)
+        ref_m(data)
+        reference_module_mapping = {
+            QuantStub: nnq.Quantize,
+            DeQuantStub: nnq.DeQuantize,
+            nn.Conv1d: nnqr.Conv1d,
+            nn.Conv2d: nnqr.Conv2d,
+            nn.Conv3d: nnqr.Conv3d,
+            nn.ConvTranspose1d: nnqr.ConvTranspose1d,
+            nn.ConvTranspose2d: nnqr.ConvTranspose2d,
+            nn.ConvTranspose3d: nnqr.ConvTranspose3d,
+        }
+        ref_m = convert(ref_m, mapping=reference_module_mapping)
+        ref_res = ref_m(data)
+        self.assertEqual(res, ref_res)
 
     def test_conv_1d(self):
         self._test_reference_module_impl(
