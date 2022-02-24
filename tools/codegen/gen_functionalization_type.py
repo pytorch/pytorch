@@ -21,7 +21,8 @@ def return_str(f: NativeFunction) -> str:
     if len(f.func.arguments.out) != 0:
         if len(f.func.arguments.out) > 1:
             return_names = ', '.join(a.name for a in f.func.arguments.out)
-            return f'return {DispatcherSignature.from_schema(f.func, structured_type_override=f.part_of_structured_group).returns_type().cpp_type()}({return_names});'
+            sig = DispatcherSignature.from_schema(f.func, structured_type_override=f.part_of_structured_group)
+            return f'return {sig.returns_type().cpp_type()}({return_names});'
         else:
             return f'return {f.func.arguments.out[0].name}'
     if f.func.arguments.self_arg is not None:
@@ -120,7 +121,8 @@ def emit_view_functionalization_body(
         # Requirement: Every inplace_view op needs to have a corresponding functional view op, which we paired together beforehand.
         assert functional_op is not None
         api_name = functional_op.func.name.unambiguous_name()
-        call_sig = DispatcherSignature.from_schema(functional_op.func, structured_type_override=functional_op.part_of_structured_group)
+        call_sig = DispatcherSignature.from_schema(
+            functional_op.func, structured_type_override=functional_op.part_of_structured_group)
     else:
         api_name = f.func.name.unambiguous_name()
         call_sig = DispatcherSignature.from_schema(f.func, structured_type_override=f.part_of_structured_group)
@@ -249,7 +251,8 @@ If this causes problems in your program, consider upstreaming the out-of-place o
 """
     else:
         # call the out-of-place variant of the op
-        functional_sig = DispatcherSignature.from_schema(functional_op.func, structured_type_override=functional_op.part_of_structured_group)
+        functional_sig = DispatcherSignature.from_schema(
+            functional_op.func, structured_type_override=functional_op.part_of_structured_group)
         functional_exprs = [keyset] + [e.expr for e in translate(unwrapped_args_ctx, functional_sig.arguments(), method=False)]
         functional_call_str = \
             f"tmp_output = at::_ops::{functional_op.func.name.unambiguous_name()}::redispatch({', '.join(functional_exprs)});"

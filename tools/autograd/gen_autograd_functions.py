@@ -12,7 +12,7 @@ from tools.codegen.api.autograd import (Derivative, DifferentiabilityInfo,
                                         SavedAttribute, uses_retain_variables,
                                         uses_single_grad)
 from tools.codegen.api.types import (Binding, BaseCType, OptionalCType, TENSOR_LIST_LIKE_CTYPES, tensorT, longT,
-                                     doubleT, scalarT, stringT, boolT, intArrayRefT, tensorListT, ListCType,
+                                     doubleT, scalarT, stringT, boolT, intArrayRefT, ListCType,
                                      iTensorListT, MutRefCType, iOptTensorRefListT, ArrayRefCType)
 from tools.codegen.code_template import CodeTemplate
 from tools.codegen.utils import FileManager
