@@ -3,27 +3,29 @@
 
 namespace torch {
 namespace jit {
+namespace onnx {
 
-static bool onnx_log_enabled = false;
-static std::ostream* out = &std::cout;
+namespace {
+bool log_enabled = false;
+std::shared_ptr<std::ostream> out;
+} // namespace
 
-bool is_onnx_log_enabled() {
-  return onnx_log_enabled;
+bool is_log_enabled() {
+  return log_enabled;
 }
 
-void set_onnx_log_enabled(bool enabled) {
-  onnx_log_enabled = enabled;
+void set_log_enabled(bool enabled) {
+  log_enabled = enabled;
 }
 
-void set_onnx_log_output_stream(std::ostream* out_stream) {
-  if (nullptr != out_stream) {
-    out = out_stream;
-  }
+void set_log_output_stream(std::shared_ptr<std::ostream> out_stream) {
+  out = std::move(out_stream);
 }
 
-std::ostream& _get_onnx_log_output_stream() {
-  return *out;
+std::ostream& _get_log_output_stream() {
+  return out ? *out : std::cout;
 }
 
+} // namespace onnx
 } // namespace jit
 } // namespace torch
