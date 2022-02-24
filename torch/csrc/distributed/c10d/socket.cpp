@@ -1,4 +1,4 @@
-// Copyright (c) Facebook, Inc. and its affiliates.
+// Copyright (c) Meta Platforms, Inc. and its affiliates.
 // All rights reserved.
 //
 // This source code is licensed under the BSD-style license found in the
@@ -534,8 +534,7 @@ class SocketConnectOp {
   enum class ConnectResult {
     Success,
     Error,
-    Retry,
-    TimeOut
+    Retry
   };
 
  public:
@@ -549,6 +548,8 @@ class SocketConnectOp {
   ConnectResult tryConnect(const ::addrinfo& addr);
 
   ConnectResult tryConnectCore(const ::addrinfo& addr);
+
+  [[noreturn]] void throwTimeoutError() const;
 
   template <typename... Args>
   void recordError(fmt::string_view format, Args&&... args) {
@@ -636,6 +637,8 @@ bool SocketConnectOp::tryConnect(int family) {
 
   deadline_ = Clock::now() + opts_->connect_timeout();
 
+  std::size_t retry_attempt = 1;
+
   bool retry; // NOLINT(cppcoreguidelines-init-variables)
   do {
     retry = false;
@@ -650,20 +653,26 @@ bool SocketConnectOp::tryConnect(int family) {
         return true;
       }
 
-      if (cr == ConnectResult::TimeOut) {
-        auto msg = fmt::format(
-            "The client socket has timed out after {} while trying to connect to ({}, {}).",
-            opts_->connect_timeout(),
-            host_,
-            port_);
-
-        C10D_ERROR(msg);
-
-        throw TimeoutError{msg};
-      }
-
       if (cr == ConnectResult::Retry) {
         retry = true;
+      }
+    }
+
+    if (retry) {
+      if (Clock::now() < deadline_ - delay_duration_) {
+        // Prevent our log output to be too noisy, warn only every 30 seconds.
+        if (retry_attempt == 30) {
+          C10D_INFO("No socket on ({}, {}) is listening yet, will retry.", host_, port_);
+
+          retry_attempt = 0;
+        }
+
+        // Wait one second to avoid choking the server.
+        delay(delay_duration_);
+
+        retry_attempt++;
+      } else {
+        throwTimeoutError();
       }
     }
   } while (retry);
@@ -673,7 +682,7 @@ bool SocketConnectOp::tryConnect(int family) {
 
 SocketConnectOp::ConnectResult SocketConnectOp::tryConnect(const ::addrinfo& addr) {
   if (Clock::now() >= deadline_) {
-    return ConnectResult::TimeOut;
+    throwTimeoutError();
   }
 
   SocketImpl::Handle hnd = ::socket(addr.ai_family, addr.ai_socktype, addr.ai_protocol);
@@ -700,23 +709,12 @@ SocketConnectOp::ConnectResult SocketConnectOp::tryConnect(const ::addrinfo& add
     if (err == std::errc::connection_refused || err == std::errc::connection_reset) {
       C10D_TRACE("The server socket on {} is not yet listening {}, will retry.", addr, err);
 
-      if (Clock::now() < deadline_ - delay_duration_) {
-        // Wait a little to avoid choking the server.
-        delay(delay_duration_);
-
-        return ConnectResult::Retry;
-      } else {
-        return ConnectResult::TimeOut;
-      }
+      return ConnectResult::Retry;
     } else {
       recordError("The client socket has failed to connect to {} {}.", addr, err);
 
       return ConnectResult::Error;
     }
-  }
-
-  if (cr == ConnectResult::TimeOut) {
-    return cr;
   }
 
   socket_->closeOnExec();
@@ -750,7 +748,7 @@ SocketConnectOp::ConnectResult SocketConnectOp::tryConnectCore(const ::addrinfo&
 
   Duration remaining = deadline_ - Clock::now();
   if (remaining <= Duration::zero()) {
-    return ConnectResult::TimeOut;
+    throwTimeoutError();
   }
 
   ::pollfd pfd{};
@@ -761,7 +759,7 @@ SocketConnectOp::ConnectResult SocketConnectOp::tryConnectCore(const ::addrinfo&
 
   r = pollFd(&pfd, 1, static_cast<int>(ms.count()));
   if (r == 0) {
-    return ConnectResult::TimeOut;
+    throwTimeoutError();
   }
   if (r == -1) {
     return ConnectResult::Error;
@@ -783,6 +781,18 @@ SocketConnectOp::ConnectResult SocketConnectOp::tryConnectCore(const ::addrinfo&
   } else {
     return ConnectResult::Success;
   }
+}
+
+void SocketConnectOp::throwTimeoutError() const {
+  auto msg = fmt::format(
+      "The client socket has timed out after {} while trying to connect to ({}, {}).",
+      opts_->connect_timeout(),
+      host_,
+      port_);
+
+  C10D_ERROR(msg);
+
+  throw TimeoutError{msg};
 }
 
 } // namespace
