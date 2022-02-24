@@ -4,7 +4,7 @@ from tools.codegen.model import (
 from tools.codegen.api.types import (
     Binding, NamedCType, ConstRefCType, BaseCType, CType, tensorT, longT
 )
-from tools.codegen.api import dispatcher, structured
+from tools.codegen.api import dispatcher
 from typing import List, Optional
 
 
