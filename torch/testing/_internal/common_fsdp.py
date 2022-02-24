@@ -1,5 +1,6 @@
 # Owner(s): ["oncall: distributed"]
 
+from copy import deepcopy
 from contextlib import suppress
 from enum import Enum
 import os
@@ -36,17 +37,8 @@ class FSDPInitMode(Enum):
 # also automatically move the parameters to GPU, due to _rebuild_full_params
 # call.
 def get_full_params(model, recurse=True):
-    if recurse:
-        # get all params for any nested FSDP instances.
-        for module in model.modules():
-            if isinstance(module, FullyShardedDataParallel):
-                get_full_params(module, recurse=False)
-    else:
-        torch.cuda.synchronize()
-        model._rebuild_full_params()
-        torch.cuda.synchronize()
-        if model.module.flat_param is not None:
-            model.module._unflatten_params()
+    with model._summon_full_params(recurse=recurse):
+        return deepcopy(list(model.parameters()))
 
 def _maybe_cuda(model, move_to_cuda):
     return model.cuda() if move_to_cuda else model
@@ -507,8 +499,7 @@ class FSDPTest(MultiProcessTestCase):
                 device_set,
                 f"Got device set {device_set}"
             )
-        get_full_params(model)
-        shard_full_params = list(model.parameters())
+        shard_full_params = get_full_params(model)
 
         if cpu_offload.offload_params:
             shard_loss = shard_loss.cuda()
