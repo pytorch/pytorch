@@ -8,8 +8,8 @@ namespace torch {
 namespace jit {
 namespace mobile {
 KernelDTypeTracer::KernelDTypeTracer() {
-  auto recorder_cb = [](const at::RecordFunction& fn)
-      -> std::unique_ptr<at::ObserverContext> {
+  auto recorder_cb =
+      [](const at::RecordFunction& fn) -> std::unique_ptr<at::ObserverContext> {
     std::string name = fn.name();
     size_t dollar_pos = name.find_first_of('$');
     std::string kernel_tag = name.substr(0, dollar_pos);
