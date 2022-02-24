@@ -256,7 +256,7 @@ class TestTesting(TestCase):
             if dtype not in [torch.float, torch.cfloat]:
                 requires_grad = False
             t = make_tensor(size, dtype=dtype, device=device, low=low, high=high,
-                            requires_grad=requires_grad, non_contiguous=noncontiguous)
+                            requires_grad=requires_grad, noncontiguous=noncontiguous)
 
             self.assertEqual(t.shape, size)
             self.assertEqual(t.device, torch.device(device))
@@ -574,11 +574,10 @@ class TestAssertClose(TestCase):
 
     def test_meta(self):
         actual = torch.empty((2, 2), device="meta")
-        expected = actual.clone()
+        expected = torch.empty((2, 2), device="meta")
 
         for fn in assert_close_with_inputs(actual, expected):
-            with self.assertRaisesRegex(NotImplementedError, "meta"):
-                fn()
+            fn()
 
     def test_mismatching_layout(self):
         strided = torch.empty((2, 2))

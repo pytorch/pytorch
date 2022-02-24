@@ -20,7 +20,7 @@ from torch.testing._internal.common_utils import (
 from torch.testing._internal.common_device_type import (
     expectedFailureMeta, instantiate_device_type_tests, onlyCUDA, onlyCPU, dtypes, dtypesIfCUDA,
     dtypesIfCPU, deviceCountAtLeast, precisionOverride, onlyNativeDeviceTypes,
-    skipCUDAIfRocm, skipIf, ops, OpDTypes)
+    skipCUDAIfRocm, skipIf, ops, OpDTypes, skipMeta)
 from torch.testing import make_tensor
 from torch.testing._internal.common_dtype import (
     all_types_and_complex_and, integral_types_and, get_all_dtypes, get_all_int_dtypes, get_all_math_dtypes,
@@ -367,9 +367,9 @@ class TestBinaryUfuncs(TestCase):
         for shape, noncontiguous in product(shapes, [True, False]):
             shape_lhs, shape_rhs = shape
             lhs = make_tensor(shape_lhs, device=device, dtype=dtype,
-                              non_contiguous=noncontiguous, **op.lhs_make_tensor_kwargs)
+                              noncontiguous=noncontiguous, **op.lhs_make_tensor_kwargs)
             rhs = make_tensor(shape_rhs, device=device, dtype=dtype,
-                              non_contiguous=noncontiguous, **op.rhs_make_tensor_kwargs)
+                              noncontiguous=noncontiguous, **op.rhs_make_tensor_kwargs)
 
             actual = op(lhs, rhs)
             expected = op.ref(lhs.cpu().numpy(), rhs.cpu().numpy())
@@ -1382,13 +1382,13 @@ class TestBinaryUfuncs(TestCase):
                 self._test_pow(base_tensor, exp_tensor)
                 # test non-contiguous tensors as well
                 base_tensor = make_tensor(base_shape, dtype=dt, device=dev, low=low, high=high,
-                                          non_contiguous=True)
+                                          noncontiguous=True)
                 if dt in [torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64]:
                     exp_tensor = make_tensor(exp_shape, dtype=dt, device=dev, low=0, high=high,
-                                             non_contiguous=True)
+                                             noncontiguous=True)
                 else:
                     exp_tensor = make_tensor(exp_shape, dtype=dt, device=dev, low=low, high=high,
-                                             non_contiguous=True)
+                                             noncontiguous=True)
                 self._test_pow(base_tensor, exp_scalar)
                 self._test_pow(base_tensor, exp_tensor)
 
@@ -1489,7 +1489,7 @@ class TestBinaryUfuncs(TestCase):
     def test_complex_scalar_pow_tensor(self, device, dtype):
         complexes = [0.5j, 1. + 1.j, -1.5j, 2.2 - 1.6j, 1 + 0j]
         first_exp = make_tensor((100,), dtype=dtype, device=device, low=-2, high=2)
-        second_exp = make_tensor((100,), dtype=dtype, device=device, low=-2, high=2, non_contiguous=True)
+        second_exp = make_tensor((100,), dtype=dtype, device=device, low=-2, high=2, noncontiguous=True)
         first_exp[0] = first_exp[10] = first_exp[20] = 0
         second_exp[0] = second_exp[10] = second_exp[20] = 0
         for base in complexes:
@@ -1497,6 +1497,7 @@ class TestBinaryUfuncs(TestCase):
             self._test_pow(base, second_exp)
 
     @onlyNativeDeviceTypes
+    @skipMeta
     def test_pow_scalar_type_promotion(self, device):
         # Test against a scalar and non-scalar input
         inputs = [17, [17]]
@@ -3393,6 +3394,7 @@ class TestBinaryUfuncs(TestCase):
                 TypeError, 'received an invalid combination of arguments'):
             actual = torch.cumulative_trapezoid(torch.randn((3, 3)), x=torch.randn((3, 3)), dx=3)
 
+    @skipMeta
     @dtypes(torch.double)
     def test_pow_scalar_overloads_mem_overlap(self, device, dtype):
         sz = 3
