@@ -806,16 +806,6 @@ void initJITBindings(PyObject* module) {
       .def(
           "_jit_pass_fuse_tensorexprs",
           [](std::shared_ptr<Graph>& g) { return FuseTensorExprs(g); })
-      .def("_representative_tensor", [](TensorType& type) {
-        auto tt = type.expect<TensorType>();
-        at::DeviceGuard device_guard(*type.device());
-        return at::empty_strided(
-                   *type.sizes().concrete_sizes(),
-                   *type.strides().concrete_sizes(),
-                   at::TensorOptions(*type.device())
-                       .dtype(*type.scalarType()))
-            .zero_().requires_grad_(*tt->requiresGrad());
-      })
       .def(
           "_jit_fuser_get_fused_kernel_code",
           [](Graph& g, const std::vector<at::Tensor>& inps) {
