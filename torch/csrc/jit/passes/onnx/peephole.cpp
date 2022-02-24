@@ -775,8 +775,10 @@ static void eraseTupleConstruct(Block* block) {
       for (auto* input : output_node->inputs()) {
         block->insertOutput(index + (input_index++), input);
       }
+      index += input_index;
+    } else {
+      index++;
     }
-    index++;
   }
 }
 
