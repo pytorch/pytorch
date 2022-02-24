@@ -5,8 +5,8 @@
 // function will pop out IValues from the stack then convert them into the correct C++ types based on given schema. This
 // unboxing logic is an alternative to template-based metaprogramming unboxing.
 
-#ifndef PYTORCH_UNBOXINGFUNCTIONS_H
-#define PYTORCH_UNBOXINGFUNCTIONS_H
+#pragma once
+
 #include <ATen/ATen.h>
 namespace at {
 namespace unboxing {
@@ -30,6 +30,3 @@ ${declarations}
 
 } // namespace unboxing
 } // namespace at
-
-
-#endif //PYTORCH_UNBOXINGFUNCTIONS_H
