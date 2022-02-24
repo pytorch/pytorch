@@ -38,6 +38,7 @@ TEMPORARY_BC_ALLOW_LIST = [
 # Same things as TEMPORARY__BC_ALLOW_LIST but for FC changes
 TEMPORARY_FC_ALLOW_LIST = [
     ("aten::_svd_helper", datetime.date(2022, 3, 1)),
+    ("aten::scatter_reduce.two", datetime.date(2022, 3, 15)),
 ]
 
 # WARNING: Operators included in this list indefinitely bypass all BC schema checks.
@@ -127,6 +128,7 @@ INDEFINITE_FC_ALLOW_LIST = [
     "prepacked::unpack_prepacked_sizes_linear",
     "aten::native_multi_head_self_attention",
     "aten::_native_multi_head_self_attention",
+    "aten::grid_sampler_3d_backward",
     "aten::_transform_bias_rescale_qkv",
     "aten::_scatter_reduce.two",
 ]
