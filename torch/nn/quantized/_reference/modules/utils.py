@@ -137,3 +137,8 @@ def _get_weight_qparam_keys(
         if weight_qscheme == torch.quantize_per_channel:
             keys.append("weight_axis")
     return keys
+
+def _extract_qparams(weight_qparams):
+    return weight_qparams["qscheme"], weight_qparams["dtype"], \
+        weight_qparams["scale"], weight_qparams["zero_point"], \
+        weight_qparams["axis"]

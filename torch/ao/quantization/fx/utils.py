@@ -117,6 +117,7 @@ def get_quantize_node_info(activation_post_process: Callable) -> Tuple[str, Unio
     of extracted qparams from the module
     '''
     dtype = activation_post_process.dtype  # type: ignore[attr-defined]
+    compute_dtype = activation_post_process.compute_dtype if hasattr(activation_post_process, "compute_dtype") else None
     quantize_op : Optional[Union[Callable, str]] = None
     if dtype in [torch.quint8, torch.qint8]:
         node_type = "call_function"
@@ -134,6 +135,11 @@ def get_quantize_node_info(activation_post_process: Callable) -> Tuple[str, Unio
         node_type = "call_method"
         quantize_op = "to"
         qparams = {"_dtype_": dtype}
+    elif dtype == torch.float32 and compute_dtype in [torch.quint8, torch.qint8]:
+        node_type = "call_function"
+        quantize_op = torch.quantize_per_tensor_dynamic
+        reduce_range = torch.backends.quantized.engine == "fbgemm"
+        qparams = {"_dtype_": compute_dtype, "_reduce_range_": reduce_range}
     else:
         raise Exception("Unsupported dtype in get_quantize_node_info:" + str(dtype))
     assert quantize_op is not None
