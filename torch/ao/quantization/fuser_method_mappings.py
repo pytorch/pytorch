@@ -253,7 +253,7 @@ def get_valid_patterns(op_pattern):
         sub_combs = []
         for sub_pattern in op_pattern:
             sub_combs.append(get_valid_patterns(sub_pattern))
-        result = [p for p in itertools.product(*sub_combs)]
+        result = list(itertools.product(*sub_combs))
     else:
         result = [op_pattern, MatchAllNode]
     return result
