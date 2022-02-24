@@ -11,12 +11,22 @@
 namespace at {
 namespace functorch {
 
-void check_randomness(RandomnessType randomness) {
+void check_randomness(RandomnessType randomness, bool any_tensor_batched) {
   TORCH_CHECK(
     randomness != RandomnessType::Error,
     "vmap: called random operation while in randomness error mode. Please either use the "
     "'same' or 'different' randomness flags on vmap or perform the randomness operation out of vmap"
   );
+
+  TORCH_CHECK(
+    !(randomness == RandomnessType::Same && any_tensor_batched),
+    "Vmap does not currently support same randomness with a batched tensor input. ",
+    "Please file an issue with functorch"
+  )
+}
+
+void check_randomness(RandomnessType randomness) {
+  check_randomness(randomness, false); // for ops that don't take in any tensors, don't hit same error
 }
 
 template <typename F, F Func, typename... ExtraArgs>
@@ -79,6 +89,33 @@ Tensor randperm_batching_rule(int64_t n, ExtraArgs... extra_args) {
   } else {
     return Func(n, std::forward<ExtraArgs>(extra_args)...);
   }
+}
+
+template <typename F, F Func, typename... ExtraArgs>
+Tensor normal_batching_rule(const Tensor& tensor, double scalar, ExtraArgs... extra_args) {
+  c10::impl::ExcludeDispatchKeyGuard guard(kVmapModeKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  const auto cur_level = maybe_layer->layerId();
+
+  Tensor tensor_value;
+  optional<int64_t> tensor_bdim;
+  std::tie(tensor_value, tensor_bdim) = unwrapTensorAtLevel(tensor, cur_level);
+  tensor_value = moveBatchDimToFront(tensor_value, tensor_bdim);
+
+  RandomnessType randomness = maybe_layer->randomness();
+  check_randomness(randomness, tensor_bdim.has_value());
+  auto shape = tensor_value.sizes();
+  VmapDimVector shapeVec(shape.begin(), shape.end());
+  shapeVec.insert(shapeVec.begin(), maybe_layer->batchSize());
+
+  if (randomness == RandomnessType::Different && !tensor_bdim) {
+    tensor_value = tensor_value.unsqueeze(0).expand(shapeVec);
+  }
+  auto out = Func(tensor_value, scalar, std::forward<ExtraArgs>(extra_args)...);
+  if (randomness == RandomnessType::Same && !tensor_bdim) {
+    return out;
+  }
+  return makeBatched(out, 0, cur_level);
 }
 
 template <typename A, A a, typename C>
@@ -145,6 +182,33 @@ struct RandpermBatchRuleHelper<F, Func, typelist<T1, T...>> {
   }
 };
 
+template <typename A, A a, typename C>
+struct UnaryPointwiseRandomBatchRule;
+
+template <typename F, F Func, typename A0, typename A1, typename... T>
+struct UnaryPointwiseRandomBatchRule<F, Func, typelist<A0, A1, T...>> {
+  static Tensor apply(const Tensor& tensor, double scalar, T... extra_args) {
+    return normal_batching_rule<F, Func, T...>(tensor, scalar, std::forward<T>(extra_args)...);
+  }
+};
+
+template<typename F, F Func, typename... T>
+Tensor normal_wrapper(const Tensor& tensor, double scalar, T... extra_args) {
+  return Func(scalar, tensor, extra_args...);
+}
+
+template <typename A, A a, typename C>
+struct UnaryPointwiseRandomLeadingFloatBatchRule;
+
+template <typename F, F Func, typename A0, typename A1, typename... T>
+struct UnaryPointwiseRandomLeadingFloatBatchRule<F, Func, typelist<A0, A1, T...>> {
+  static Tensor apply(double scalar, const Tensor& tensor, T... extra_args) {
+    return normal_batching_rule<decltype(&normal_wrapper<F, Func, T...>),
+                                         &normal_wrapper<F, Func, T...>,
+                                         T...>(tensor, scalar, std::forward<T>(extra_args)...);
+  }
+};
+
 TORCH_LIBRARY_IMPL(aten, FuncTorchVmapMode, m) {
   #define RANDOM_BATCH_RULE(op) \
     m.impl(#op, SINGLE_ARG(\
@@ -190,6 +254,16 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchVmapMode, m) {
       RandpermBatchRuleHelper<decltype(&ATEN_FN2(op, overload)), &ATEN_FN2(op, overload), \
                             c10::guts::function_traits<decltype(ATEN_FN2(op, overload))>::parameter_types>::apply))
 
+  #define UNARY_POINTWISE_RANDOM(op, overload) \
+    m.impl(#op"."#overload, SINGLE_ARG(\
+      UnaryPointwiseRandomBatchRule<decltype(&ATEN_FN2(op, overload)), &ATEN_FN2(op, overload), \
+                                    c10::guts::function_traits<decltype(ATEN_FN2(op, overload))>::parameter_types>::apply))
+  
+  #define UNARY_POINTWISE_RANDOM_LEADING_FLOAT(op, overload) \
+    m.impl(#op"."#overload, SINGLE_ARG(\
+      UnaryPointwiseRandomLeadingFloatBatchRule<decltype(&ATEN_FN2(op, overload)), &ATEN_FN2(op, overload), \
+                                                c10::guts::function_traits<decltype(ATEN_FN2(op, overload))>::parameter_types>::apply))
+
   RANDOM_BATCH_RULE(randn);
   RANDOM_BATCH_RULE2(randn, generator);
   RANDOM_BATCH_RULE2(randn, generator_with_names);
@@ -215,6 +289,8 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchVmapMode, m) {
   RANDPERM_BATCH_RULE2(randperm, generator);
 
   RAND_TWO_LEADING_SCALARS_BATCH_RULE(normal, float_float);
+  UNARY_POINTWISE_RANDOM(normal, Tensor_float);
+  UNARY_POINTWISE_RANDOM_LEADING_FLOAT(normal, float_Tensor);
 
   #undef RANDOM_BATCH_RULE
   #undef RANDOM_BATCH_RULE2
@@ -225,5 +301,7 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchVmapMode, m) {
   #undef RAND_TWO_LEADING_SCALARS_BATCH_RULE
   #undef RANDPERM_BATCH_RULE
   #undef RANDPERM_BATCH_RULE2
+  #undef UNARY_POINTWISE_RANDOM
+  #undef UNARY_POINTWISE_RANDOM_LEADING_FLOAT
 }
 }} // namespace at::functorch
