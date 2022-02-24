@@ -160,7 +160,7 @@ jobs:
       - name: Parse ref
         shell: bash
         id: parse-ref
-        run: python .github/scripts/parse_ref.py
+        run: ./.github/scripts/parse_ref.py
       - name: Build
         env:
           BRANCH: ${{ steps.parse-ref.outputs.branch }}

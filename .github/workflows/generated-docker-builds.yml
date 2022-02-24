@@ -146,7 +146,7 @@ jobs:
       - name: Parse ref
         shell: bash
         id: parse-ref
-        run: python .github/scripts/parse_ref.py
+        run: ./.github/scripts/parse_ref.py
       - name: Hold runner for 2 hours or until ssh sessions have drained
         # Always hold for active ssh sessions
         if: always()

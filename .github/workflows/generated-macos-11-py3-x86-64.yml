@@ -129,7 +129,7 @@ jobs:
       - name: Parse ref
         shell: bash
         id: parse-ref
-        run: python .github/scripts/parse_ref.py
+        run: ./.github/scripts/parse_ref.py
       - name: Test
         run: |
           python3 -mpip install dist/*.whl
@@ -242,7 +242,7 @@ jobs:
       - name: Parse ref
         shell: bash
         id: parse-ref
-        run: python .github/scripts/parse_ref.py
+        run: ./.github/scripts/parse_ref.py
       - name: Test
         run: |
           python3 -mpip install dist/*.whl
