@@ -73,9 +73,25 @@ def is_pre_volta():
 TEST_BF16 = RUN_CUDA and torch.cuda.is_bf16_supported()
 
 class TestCudaFuser(JitTestCase):
+    def _getSubgraphInFusion(self, graph):
+        num_node = 0
+        subgraph = None
+
+        def count(block, ret):
+            for n in block.nodes():
+                if n.kind() == FUSION_GROUP:
+                    ret[0] = ret[0] + 1
+                    self.assertTrue(n.hasAttribute('Subgraph'))
+                    ret[1] = n.g('Subgraph')
+                for block in n.blocks():
+                    count(block, ret)
+        ret = [num_node, subgraph]
+        count(graph, ret)
+        self.assertEqual(ret[0], 1)
+        return ret[1]
 
     def setUp(self):
-        super().setUp()
+        super(TestCudaFuser, self).setUp()
 
         # cpu backup to avoid errors in case this is run on a CPU-only machine
         dev = 'cuda' if RUN_CUDA else 'cpu'
@@ -104,25 +120,6 @@ class TestCudaFuser(JitTestCase):
         if TEST_BF16:
             self.support_tensor_dtypes.append(torch.bfloat16)
 
-    def _getSubgraphInFusion(self, graph):
-        num_node = 0
-        subgraph = None
-
-        def count(block, ret):
-            for n in block.nodes():
-                if n.kind() == FUSION_GROUP:
-                    ret[0] = ret[0] + 1
-                    self.assertTrue(n.hasAttribute('Subgraph'))
-                    ret[1] = n.g('Subgraph')
-                for block in n.blocks():
-                    count(block, ret)
-        ret = [num_node, subgraph]
-        count(graph, ret)
-        self.assertEqual(ret[0], 1)
-        return ret[1]
-
-    def setUp(self):
-        super(TestCudaFuser, self).setUp()
         self.old_cpu_fuse = torch._C._jit_can_fuse_on_cpu()
         self.old_gpu_fuse = torch._C._jit_can_fuse_on_gpu()
         torch._C._jit_override_can_fuse_on_cpu(False)
