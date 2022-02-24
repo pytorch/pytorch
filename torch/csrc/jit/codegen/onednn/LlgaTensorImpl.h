@@ -203,6 +203,22 @@ struct LlgaTensorDesc {
         desc.layout_id_);
   }
 
+  void set_compute_inplace() {
+    compute_inplace = true;
+  }
+
+  void set_input_tensor_index(size_t index) {
+    input_tensor_index = index;
+  }
+
+  bool reuses_input_tensor() {
+    return compute_inplace;
+  }
+
+  size_t get_input_tensor_index() {
+    return input_tensor_index;
+  }
+
  private:
   bool is_dimensionality_unknown() const {
     return sizes_.size() == 0;
@@ -215,6 +231,12 @@ struct LlgaTensorDesc {
   desc::property_type property_type_;
   desc::layout_type layout_type_;
   size_t layout_id_;
+  // If this is an output tensor, and querying the compiled partition would
+  // determine that this tensor would reuse its input tensor, then
+  // compute_inplace would be true, and input_tensor_index would be the index of
+  // the corresponding input tensor in inputSpecs_ of the LlgaKernel object.
+  bool compute_inplace = false;
+  size_t input_tensor_index;
 };
 
 struct TORCH_API LlgaTensorImpl : public c10::TensorImpl {

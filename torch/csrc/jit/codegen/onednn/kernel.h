@@ -81,7 +81,7 @@ class LlgaKernel {
   TensorArgs constantInputs_;
   ArgSpecs inputSpecs_;
   ArgSpecs outputSpecs_;
-  std::unordered_map<size_t, size_t> inplacePairs_; // output id -> input offset
+  std::vector<dnnl::graph::logical_tensor> constantLogicalTensors_;
   std::string debugName_;
   std::once_flag initialized_flag;
   bool is_initialized_ = false;

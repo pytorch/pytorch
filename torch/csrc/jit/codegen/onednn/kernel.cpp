@@ -80,9 +80,7 @@ std::map<size_t, int64_t> LlgaKernel::initializeTensorIdToOccurence() const {
 ArgSpecs LlgaKernel::initializeInputSpecs(const TensorArgs& inputs) {
   ArgSpecs inputSpecs;
   inputSpecs.reserve(nPartitionInputs_);
-#ifdef GRAPH_DEBUG_ENABLED
   GRAPH_DEBUG("Initializing graph input logical tensors");
-#endif
   std::map<size_t, int64_t> tensorIdToOccurence =
       initializeTensorIdToOccurence();
   for (size_t i = 0; i < nGraphInputs_; i++) {
@@ -92,21 +90,19 @@ ArgSpecs LlgaKernel::initializeInputSpecs(const TensorArgs& inputs) {
     inputSpecs.insert(inputSpecs.end(), occurence, spec);
     runArgsIdx_.insert(runArgsIdx_.end(), occurence, i);
   }
-#ifdef GRAPH_DEBUG_ENABLED
   GRAPH_DEBUG("Initializing constant input tensors");
-#endif
   initializeConstantInputs();
 
   TORCH_CHECK(
       inputSpecs.size() + constantValues_.size() == nPartitionInputs_,
       "Partition inputs are missing");
-#ifdef GRAPH_DEBUG_ENABLED
   GRAPH_DEBUG(
       "Concatenating constant input logical tensors to graph input "
       "logical tensors");
-#endif
   for (Value* constant_value : constantValues_) {
-    inputSpecs.emplace_back(ArgSpec(constant_value));
+    ArgSpec constantInputSpec(constant_value);
+    inputSpecs.emplace_back(constantInputSpec);
+    constantLogicalTensors_.emplace_back(constantInputSpec.logical_tensor());
   }
   return inputSpecs;
 }
@@ -116,8 +112,9 @@ ArgSpecs LlgaKernel::initializeOutputSpecs() const {
   outputSpecs.reserve(nOutputs_);
   for (size_t i = 0; i < nOutputs_; i++) {
     auto spec = ArgSpec(graph_->outputs()[i]);
-    if (useOpaqueLayout(i))
+    if (useOpaqueLayout(i)) {
       spec = spec.any();
+    }
     outputSpecs.emplace_back(spec);
   }
   return outputSpecs;
@@ -140,7 +137,7 @@ std::tuple<RunArgs, RunArgs> LlgaKernel::prepareRunArgs(
     auto constantInputSpecIdx = nGraphInputs_ + i;
     auto constantInputSpec = inputSpecs_[constantInputSpecIdx];
     runInputs.push_back(
-        {constantInputSpec.logical_tensor(),
+        {constantLogicalTensors_[i],
          Engine::getEngine(),
          constantInputs_[i].data_ptr()});
   }
@@ -149,12 +146,8 @@ std::tuple<RunArgs, RunArgs> LlgaKernel::prepareRunArgs(
     auto spec = outputSpecs_[i];
     auto opt = c10::TensorOptions(spec.aten_scalar_type()).device(device_);
 
-    auto outputId = spec.tid();
-    auto iter = inplacePairs_.find(outputId);
-    if (iter != inplacePairs_.end()) {
-      // output reuses one of input tensors
-      auto inputOffset = iter->second;
-      auto inputTensor = inputs[inputOffset];
+    if (spec.reuses_input_tensor()) {
+      auto inputTensor = inputs[spec.get_input_tensor_index()];
       outputs.push_back(inputTensor);
       runOutputs.push_back(
           {spec.logical_tensor(), Engine::getEngine(), inputTensor.data_ptr()});
@@ -196,7 +189,13 @@ compiled_partition LlgaKernel::compile(const partition& partition) {
         });
     TORCH_CHECK(inputSpecIter != inputSpecs_.end(), "In-place input not found");
     auto inputOffset = inputSpecIter - inputSpecs_.begin();
-    inplacePairs_[outputId] = inputOffset;
+    auto outputSpecIter =
+        std::find_if(outputSpecs_.begin(), outputSpecs_.end(), [&](auto& spec) {
+          return spec.tid() == outputId;
+        });
+    auto outputOffset = outputSpecIter - outputSpecs_.begin();
+    outputSpecs_[outputOffset].set_compute_inplace();
+    outputSpecs_[outputOffset].set_input_tensor_index(inputOffset);
   }
 
   return compilation;
@@ -220,17 +219,11 @@ void LlgaKernel::run(Stack& stack) {
   std::call_once(
       initialized_flag,
       [&](const TensorArgs& inputs) {
-#ifdef GRAPH_DEBUG_ENABLED
         GRAPH_DEBUG("Initializing input logical tensors");
-#endif
         inputSpecs_ = initializeInputSpecs(inputs);
-#ifdef GRAPH_DEBUG_ENABLED
         GRAPH_DEBUG("Initializing output logical tensors");
-#endif
         outputSpecs_ = initializeOutputSpecs();
-#ifdef GRAPH_DEBUG_ENABLED
         GRAPH_DEBUG("Compiling partition");
-#endif
         compilation_ = compile(partition_);
         is_initialized_ = true;
       },
