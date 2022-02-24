@@ -27,6 +27,7 @@
 #include <ATen/ops/_sparse_sum.h>
 #include <ATen/ops/_sparse_sum_backward_native.h>
 #include <ATen/ops/_sparse_sum_native.h>
+#include <ATen/ops/_sparse_sparse_matmul.h>
 #include <ATen/ops/add.h>
 #include <ATen/ops/add_native.h>
 #include <ATen/ops/addmm.h>
@@ -969,11 +970,14 @@ Tensor _sparse_addmm(
 }
 
 Tensor _sparse_mm(
-  const SparseTensor& sparse,
-  const Tensor& dense
+  const Tensor& mat1,
+  const Tensor& mat2
 ) {
-  Tensor t = at::zeros({}, dense.options());
-  return at::_sparse_addmm(t, sparse, dense, 0, 1);  // redispatch!
+  if (mat1.is_sparse() && mat2.is_sparse()) {
+    return at::_sparse_sparse_matmul(mat1, mat2);
+  }
+  Tensor t = at::zeros({mat1.size(-2), mat2.size(-1)}, mat2.options());
+  return at::_sparse_addmm(t, mat1, mat2, 0, 1);
 }
 
 // NB: Despite its suggestive name, this actually only exists so that
