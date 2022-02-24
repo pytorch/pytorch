@@ -74,6 +74,12 @@ namespace detail {
         }
       }
     }
+    // Structured Tensor[] translates to this case
+    void operator()(at::ITensorList xs) {
+      for (const auto& x : xs) {
+        ts = ts | x.key_set();
+      }
+    }
     void operator()(at::ArrayRef<c10::optional<at::Tensor>> xs) {
       // Just checking that the handling of Tensor?[] didn't change.
       TORCH_INTERNAL_ASSERT(false);

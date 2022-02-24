@@ -28,7 +28,7 @@ def name(func: FunctionSchema) -> str:
         name += f'_{func.name.overload_name}'
     return name
 
-def argumenttype_type(t: Type, *, mutable: bool, binds: ArgName) -> NamedCType:
+def argumenttype_type(t: Type, *, mutable: bool, binds: ArgName, structured_type_override: bool) -> NamedCType:
     if str(t) == 'Tensor?':
         tensor_type: OptionalCType = OptionalCType(BaseCType(tensorT))
         if mutable and not local.use_const_ref_for_mutable_tensors():
@@ -41,15 +41,19 @@ def argumenttype_type(t: Type, *, mutable: bool, binds: ArgName) -> NamedCType:
         return NamedCType(binds, ConstRefCType(BaseCType(scalarT)))
     elif str(t) == 'Scalar?':
         return NamedCType(binds, ConstRefCType(OptionalCType(BaseCType(scalarT))))
-    return cpp.argumenttype_type(t, mutable=mutable, binds=binds)
+    return cpp.argumenttype_type(t, mutable=mutable, binds=binds, structured_type_override=structured_type_override)
 
 def returns_type(rs: Sequence[Return]) -> CType:
     return cpp.returns_type(rs)
 
-def argument_type(a: Argument, *, binds: ArgName) -> NamedCType:
-    return argumenttype_type(a.type, mutable=a.is_write, binds=binds)
+def argument_type(a: Argument, *, binds: ArgName, structured_type_override: bool) -> NamedCType:
+    return argumenttype_type(a.type, mutable=a.is_write, binds=binds, structured_type_override=structured_type_override)
 
-def argument(a: Union[Argument, SelfArgument, TensorOptionsArguments], *, is_out: bool) -> List[Binding]:
+def argument(
+        a: Union[Argument, SelfArgument, TensorOptionsArguments],
+        *,
+        is_out: bool,
+        structured_type_override: bool) -> List[Binding]:
     # Ideally, we NEVER default native functions.  However, there are a number
     # of functions that call native:: directly and rely on the defaulting
     # existing.  So for BC, we generate defaults for non-out variants (but not
@@ -61,14 +65,14 @@ def argument(a: Union[Argument, SelfArgument, TensorOptionsArguments], *, is_out
         if should_default and a.default is not None:
             default = cpp.default_expr(a.default, a.type)
         return [Binding(
-            nctype=argument_type(a, binds=a.name),
+            nctype=argument_type(a, binds=a.name, structured_type_override=structured_type_override),
             name=a.name,
             default=default,
             argument=a,
         )]
     elif isinstance(a, SelfArgument):
         # Erase SelfArgument from the distinction
-        return argument(a.argument, is_out=is_out)
+        return argument(a.argument, is_out=is_out, structured_type_override=structured_type_override)
     elif isinstance(a, TensorOptionsArguments):
         default = None
         if should_default:
@@ -104,8 +108,8 @@ def argument(a: Union[Argument, SelfArgument, TensorOptionsArguments], *, is_out
     else:
         assert_never(a)
 
-def arguments(func: FunctionSchema) -> List[Binding]:
+def arguments(func: FunctionSchema, *, structured_type_override: bool) -> List[Binding]:
     args: List[Union[Argument, TensorOptionsArguments, SelfArgument]] = []
     args.extend(func.arguments.non_out)
     args.extend(func.arguments.out)
-    return [r for arg in args for r in argument(arg, is_out=func.is_out_fn())]
+    return [r for arg in args for r in argument(arg, is_out=func.is_out_fn(), structured_type_override=structured_type_override)]

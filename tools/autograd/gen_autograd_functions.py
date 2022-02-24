@@ -11,9 +11,9 @@ from typing import List, Sequence, Tuple
 from tools.codegen.api.autograd import (Derivative, DifferentiabilityInfo,
                                         SavedAttribute, uses_retain_variables,
                                         uses_single_grad)
-from tools.codegen.api.types import (Binding, BaseCType, OptionalCType, tensorT, longT,
-                                     doubleT, scalarT, stringT, boolT, intArrayRefT,
-                                     tensorListT, MutRefCType, ListCType, ArrayRefCType)
+from tools.codegen.api.types import (Binding, BaseCType, OptionalCType, TENSOR_LIST_LIKE_CTYPES, tensorT, longT,
+                                     doubleT, scalarT, stringT, boolT, intArrayRefT, tensorListT, ListCType,
+                                     iTensorListT, MutRefCType, ArrayRefCType)
 from tools.codegen.code_template import CodeTemplate
 from tools.codegen.utils import FileManager
 from tools.codegen.model import Argument
@@ -365,7 +365,7 @@ def process_function(info: DifferentiabilityInfo, template: CodeTemplate) -> str
     py_getsetdef_structs: List[str] = []
 
     for arg in info.args_with_derivatives:
-        if arg.type == 'at::TensorList' or arg.type == 'const c10::List<c10::optional<at::Tensor>> &':
+        if arg.type in TENSOR_LIST_LIKE_CTYPES:
             size = f'{arg.name}_size_'
             saved_list_sizes.append(f'size_t {arg.name}_size_;')
         else:
@@ -390,7 +390,7 @@ def process_function(info: DifferentiabilityInfo, template: CodeTemplate) -> str
             getter_definitions.append(GETTER_DEFINITION_RAW_SAVEDVAR.substitute(
                 op=info.op, name=name, body=GETTER_BODY_RAW_SAVEDVAR))
             should_append_raw_getsetdef = True
-        elif type == BaseCType(tensorListT):
+        elif type == BaseCType(tensorListT) or type == BaseCType(iTensorListT):
             saved_variables.append(f'std::vector<SavedVariable> {name}_;')
             saved_variables.append(f'bool {name}_released_ = false;')
             # Just clear() is sufficient, we don't need to loop and clear each variable.

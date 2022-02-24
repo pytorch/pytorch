@@ -4,7 +4,7 @@ from tools.codegen.model import (
 from tools.codegen.api.types import (
     Binding, NamedCType, ConstRefCType, BaseCType, CType, tensorT, longT
 )
-from tools.codegen.api import dispatcher
+from tools.codegen.api import dispatcher, structured
 from typing import List, Optional
 
 
@@ -57,14 +57,17 @@ def name(f: NativeFunction, *, functional_op: NativeFunction, is_reverse: bool, 
     return f'at::_ops::{name}::call'
 
 
-def capture_arguments(func: FunctionSchema, *, is_reverse: bool) -> List[Binding]:
+def capture_arguments(f: NativeFunction, *, is_reverse: bool) -> List[Binding]:
     # capture arguments include all arguments except `self`.
     # Importantly, they don't include any C++ reference types (or else we'll get a dangling reference in the capture),
     # So any reference types (IntArrayRef) need to be converted to value types (vector<int64_t>)
-    args = func.arguments.flat_all
+    args = f.func.arguments.flat_all
     assert args[0].type == BaseType(BaseTy.Tensor)
     non_self_args = args[1:]
-    non_self_value_bindings = [dispatcher.argument(a, remove_non_owning_ref_types=True) for a in non_self_args]
+    non_self_value_bindings = [
+        dispatcher.argument(a, remove_non_owning_ref_types=True, structured_type_override=f.part_of_structured_group)
+        for a in non_self_args
+    ]
     return non_self_value_bindings
 
 
@@ -93,13 +96,13 @@ def inner_call_index(func: FunctionSchema) -> Optional[Binding]:
     return None
 
 
-def inner_arguments(func: FunctionSchema, is_reverse: bool) -> List[Binding]:
-    args = func.arguments.flat_all
+def inner_arguments(f: NativeFunction, is_reverse: bool) -> List[Binding]:
+    args = f.func.arguments.flat_all
     assert args[0].type == BaseType(BaseTy.Tensor)
     non_self_args = args[1:]
     # The forward lambda calls the at::_ops API, while the reverse lambda calls the view inverse API.
     # Both of these follow the dispatcher API.
-    non_self_bindings = [dispatcher.argument(a) for a in non_self_args]
+    non_self_bindings = [dispatcher.argument(a, structured_type_override=f.part_of_structured_group) for a in non_self_args]
     if not is_reverse:
         # the forward lambda swaps out the original tensor argument with the lambd arg "base"
         return [base_binding] + non_self_bindings
@@ -107,7 +110,7 @@ def inner_arguments(func: FunctionSchema, is_reverse: bool) -> List[Binding]:
         # the reverse lambda does the same, but with an additional "mutated_view" arg
         # additionally, we have a calling convention: for view ops that return multiple tensor outputs
         # their corresponding view_inverse function takes in an additional index argument.
-        index_binding = inner_call_index(func)
+        index_binding = inner_call_index(f.func)
         if index_binding is not None:
             return [base_binding, mutated_view_binding, index_binding] + non_self_bindings
         else:

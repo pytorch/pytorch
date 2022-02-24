@@ -7,6 +7,12 @@ from enum import Enum
 
 _T = TypeVar('_T')
 
+TENSOR_LIST_LIKE_CTYPES = [
+    'at::TensorList',
+    'const c10::List<c10::optional<at::Tensor>> &',
+    'const at::ITensorList &',
+]
+
 # An ArgName is just the str name of the argument in schema;
 # but in some special circumstances, we may add a little extra
 # context.  The Enum SpecialArgName covers all of these cases;
@@ -344,6 +350,15 @@ class CppSignature:
     # The set of C++ arguments which should not have defaults applied to them
     cpp_no_default_args: Set[str]
 
+    # [Note: Structured Type Override]
+    # We override Tensor[] for structured kernels in both the dispatcher
+    # and in the C++ API.
+    # This is a step towards enabling the new API: ITensorList.
+    # See [Note: ITensorList]
+
+    # Should the arguments be overriden with structured types?
+    structured_type_override: bool
+
     # Is this a fallback C++ binding?  Fallback bindings are enabled by
     # manual_cpp_binding: True and are alternate, non-public API that
     # lets manual C++ binding implementors access the binding that would
@@ -356,7 +371,8 @@ class CppSignature:
     def arguments(self) -> Sequence[Binding]:
         return cpp.arguments(
             self.func.arguments, faithful=self.faithful,
-            method=self.method, cpp_no_default_args=self.cpp_no_default_args)
+            method=self.method, cpp_no_default_args=self.cpp_no_default_args,
+            structured_type_override=self.structured_type_override)
 
     def name(self) -> str:
         n = cpp.name(self.func, faithful_name_for_out_overloads=self.faithful)
@@ -423,7 +439,8 @@ class CppSignatureGroup:
                 faithful=True,
                 method=method,
                 fallback_binding=fallback_binding,
-                cpp_no_default_args=f.cpp_no_default_args
+                cpp_no_default_args=f.cpp_no_default_args,
+                structured_type_override=f.part_of_structured_group
             )
         else:
             faithful_signature = None
@@ -432,7 +449,8 @@ class CppSignatureGroup:
             faithful=False,
             method=method,
             fallback_binding=fallback_binding,
-            cpp_no_default_args=f.cpp_no_default_args
+            cpp_no_default_args=f.cpp_no_default_args,
+            structured_type_override=f.part_of_structured_group
         )
         return CppSignatureGroup(
             func=func,
@@ -445,13 +463,17 @@ class DispatcherSignature:
     # The schema this signature is derived from
     func: FunctionSchema
 
+    # See [Note: Structured Type Override]
+    # Should the arguments be overriden with structured types?
+    structured_type_override: bool
+
     # Allows you to prepend an arbitrary prefix to the signature name.
     # This is useful for parts of the codegen that generate wrappers around kernels,
     # and need to avoid naming collisions.
     prefix: str = ""
 
     def arguments(self) -> List[Binding]:
-        return dispatcher.arguments(self.func)
+        return dispatcher.arguments(self.func, structured_type_override=self.structured_type_override)
 
     def name(self) -> str:
         return self.prefix + dispatcher.name(self.func)
@@ -487,13 +509,17 @@ class DispatcherSignature:
         return f'{self.returns_type().cpp_type()} ({dispatcher_args_types_str})'
 
     @staticmethod
-    def from_schema(func: FunctionSchema, *, prefix: str = '') -> 'DispatcherSignature':
-        return DispatcherSignature(func, prefix)
+    def from_schema(func: FunctionSchema, *, structured_type_override: bool, prefix: str = '') -> 'DispatcherSignature':
+        return DispatcherSignature(func, structured_type_override, prefix)
 
 @dataclass(frozen=True)
 class NativeSignature:
     # The schema this signature is derived from
     func: FunctionSchema
+
+    # See [Note: Structured Type Override]
+    # Should the arguments be overriden with structured types?
+    structured_type_override: bool
 
     prefix: str = ""
 
@@ -518,13 +544,13 @@ class NativeSignature:
         return f'{native.returns_type(self.func.returns).cpp_type()} (*)({args_str})'
 
     def arguments(self) -> List[Binding]:
-        return native.arguments(self.func)
+        return native.arguments(self.func, structured_type_override=self.structured_type_override)
 
     def returns_type(self) -> CType:
         return native.returns_type(self.func.returns)
 
     def dispatcher_exprs(self) -> List[Expr]:
-        return translate.translate(self.arguments(), dispatcher.arguments(self.func), method=False)
+        return translate.translate(self.arguments(), dispatcher.arguments(self.func, structured_type_override=self.structured_type_override), method=False)
 
 @dataclass(frozen=True)
 class ViewInverseSignature:
@@ -536,7 +562,7 @@ class ViewInverseSignature:
 
     def decl(self) -> str:
         return_type = functionalization.returns_type(self.f.func)
-        decls = [a.decl() for a in functionalization.inner_arguments(self.f.func, is_reverse=True)]
+        decls = [a.decl() for a in functionalization.inner_arguments(self.f, is_reverse=True)]
         return f"static {return_type.cpp_type()} {self.name()}({', '.join(decls)});"
 
     @staticmethod
@@ -561,8 +587,8 @@ class FunctionalizationLambda:
 
     def captures(self) -> List[Expr]:
         # The lambda lives inside of a kernel following the dispatcher API, so its outer context is the dispatcher arguments
-        outer_ctx = dispatcher.arguments(self.f.func)
-        capture_bindings = functionalization.capture_arguments(self.f.func, is_reverse=self.is_reverse)
+        outer_ctx = dispatcher.arguments(self.f.func, structured_type_override=self.f.part_of_structured_group)
+        capture_bindings = functionalization.capture_arguments(self.f, is_reverse=self.is_reverse)
         # allow_expensive_conversions is set because we want to convert
         # some reference types (IntArrayRef) to value types (vector<int64_t>).
         capture_exprs = translate.translate(outer_ctx, capture_bindings, method=False, allow_expensive_conversions=True)
@@ -579,10 +605,10 @@ class FunctionalizationLambda:
             self.f, functional_op=self.functional_op, is_reverse=self.is_reverse, include_namespace=True)
 
         arg_ctx = functionalization.outer_arguments(is_reverse=self.is_reverse)
-        capture_ctx = functionalization.capture_arguments(self.f.func, is_reverse=self.is_reverse)
+        capture_ctx = functionalization.capture_arguments(self.f, is_reverse=self.is_reverse)
         full_ctx = arg_ctx + capture_ctx
 
-        call_bindings = functionalization.inner_arguments(self.f.func, is_reverse=self.is_reverse)
+        call_bindings = functionalization.inner_arguments(self.f, is_reverse=self.is_reverse)
         maybe_index = functionalization.inner_call_index(self.f.func)
         call_exprs = [e.expr for e in translate.translate(full_ctx, call_bindings, method=False)]
         if not self.is_reverse and maybe_index is not None:
@@ -614,9 +640,9 @@ def kernel_signature(
     # With external backends, we'd like to enforce that they write their kernels with schemas
     # that match the Dispatcher API directly, if they can.
     if backend_index.external:
-        return DispatcherSignature.from_schema(f.func, prefix=prefix)
+        return DispatcherSignature.from_schema(f.func, structured_type_override=f.part_of_structured_group, prefix=prefix)
     else:
-        return NativeSignature(f.func, prefix)
+        return NativeSignature(f.func, structured_type_override=f.part_of_structured_group, prefix=prefix)
 
 # Functions only, no types
 from tools.codegen.api import cpp, dispatcher, native, translate, functionalization

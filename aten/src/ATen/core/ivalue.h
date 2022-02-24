@@ -27,6 +27,8 @@ template <class Key, class Value>
 class Dict;
 template <class T>
 class List;
+template <class T>
+class IList;
 struct IValue;
 struct ClassType;
 struct Type;
@@ -644,6 +646,15 @@ public:
   IValue(const std::vector<T>& v);
   template <class T, size_t N>
   IValue(std::array<T, N> v);
+
+  template <class T>
+  using enable_if_ilist_is_ivalue_constructible = std::enable_if_t<
+      std::is_constructible<IValue, T>::value ||
+          std::is_constructible<IValue, typename IList<T>::boxed_type>::value,
+      std::nullptr_t>;
+
+  template <class T, enable_if_ilist_is_ivalue_constructible<T> = nullptr>
+  IValue(c10::IList<T> v);
 
   // GenericDict
   IValue(c10::Dict<IValue, IValue> v);

@@ -7,6 +7,7 @@
 
 #include <ATen/core/Dict.h>
 #include <ATen/core/List.h>
+#include <ATen/core/IList.h>
 #include <ATen/core/functional.h>
 #include <ATen/core/jit_type.h>
 #include <ATen/core/qualified_name.h>
@@ -1987,6 +1988,25 @@ inline IValue::IValue(std::array<T, N> v) : IValue(c10::List<T>()) {
   list.reserve(v.size());
   for (auto& e : v) {
     list.push_back(std::move(e));
+  }
+}
+
+template <class T, IValue::enable_if_ilist_is_ivalue_constructible<T>>
+inline IValue::IValue(c10::IList<T> v) : IValue() {
+  constexpr bool boxed_type_constructs_ivalue =
+      std::is_constructible<IValue, typename c10::IList<T>::boxed_type>::value;
+  // First, we try to use the boxed value.
+  // If we fail (either it's not in the boxed state, or its boxed type
+  // can not construct an IValue), we fallback to copying the list.
+  if (boxed_type_constructs_ivalue && v.isBoxed()) {
+    *this = IValue(impl::toList(v.toBoxed()));
+  } else {
+    c10::List<T> list;
+    list.reserve(v.size());
+    for (const auto& t : v) {
+      list.push_back(t);
+    }
+    *this = IValue(impl::toList(std::move(list)));
   }
 }
 

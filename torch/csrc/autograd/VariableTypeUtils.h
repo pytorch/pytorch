@@ -57,7 +57,7 @@ inline void check_inplace(const at::Tensor& tensor, bool requires_grad) {
   }
 }
 
-inline void check_inplace(const at::TensorList tensors, bool requires_grad) {
+inline void check_inplace(at::ITensorList tensors, bool requires_grad) {
   for (const auto& tensor : tensors) {
     check_inplace(tensor, requires_grad);
   }
@@ -76,7 +76,7 @@ inline void throw_error_for_complex_autograd(const at::Tensor& tensor, const cha
   }
 }
 
-inline void throw_error_for_complex_autograd(const at::TensorList& tensorlist, const char* name) {
+inline void throw_error_for_complex_autograd(at::ITensorList tensorlist, const char* name) {
   for (const auto& tensor: tensorlist) {
     throw_error_for_complex_autograd(tensor, name);
   }
@@ -297,7 +297,7 @@ inline void check_no_requires_grad(const c10::optional<at::Tensor>& tensor, cons
   }
 }
 
-inline void check_no_requires_grad(at::TensorList tensors, const char* name, const char* fn_name="") {
+inline void check_no_requires_grad(at::ITensorList tensors, const char* name, const char* fn_name="") {
   // GradMode check is expensive, so check it only once for TensorLists
   if (!GradMode::is_enabled()) {
     return;
@@ -312,7 +312,7 @@ inline void check_no_requires_grad(const c10::List<c10::optional<at::Tensor>>& t
   if (!GradMode::is_enabled()) {
     return;
   }
-  for (c10::optional<at::Tensor> tensor : tensors) {
+  for (const auto& tensor : tensors) {
     if (tensor.has_value()) {
       check_no_requires_grad(*tensor, name, fn_name, /*check_grad_mode*/ false);
     }
@@ -320,7 +320,7 @@ inline void check_no_requires_grad(const c10::List<c10::optional<at::Tensor>>& t
 }
 
 // Assumed that saved tensor lists are never inplace outputs
-inline std::vector<SavedVariable> make_saved_variable_list(at::TensorList tensors) {
+inline std::vector<SavedVariable> make_saved_variable_list(at::ITensorList tensors) {
   return fmap(tensors, [](const at::Tensor& tensor) -> SavedVariable {
       return SavedVariable{tensor, false /* is output */}; });
 }
@@ -336,7 +336,7 @@ inline std::vector<SavedVariable> make_saved_variable_list(const c10::List<c10::
   });
 }
 
-inline std::vector<std::vector<int64_t>> to_args_sizes(at::TensorList tensors) {
+inline std::vector<std::vector<int64_t>> to_args_sizes(at::ITensorList tensors) {
   std::vector<std::vector<int64_t>> args_sizes(tensors.size());
   for (const auto i : c10::irange(tensors.size())) {
     args_sizes[i] = tensors[i].sizes().vec();
@@ -344,7 +344,7 @@ inline std::vector<std::vector<int64_t>> to_args_sizes(at::TensorList tensors) {
   return args_sizes;
 }
 
-inline std::vector<c10::ScalarType> to_args_scalartypes(at::TensorList tensors) {
+inline std::vector<c10::ScalarType> to_args_scalartypes(at::ITensorList tensors) {
   std::vector<c10::ScalarType> args_scalartypes(tensors.size());
   for (const auto i : c10::irange(tensors.size())) {
     args_scalartypes[i] = tensors[i].scalar_type();

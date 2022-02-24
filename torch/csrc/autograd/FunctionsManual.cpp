@@ -4627,7 +4627,7 @@ Tensor lu_unpack_backward(
   return res;
 }
 
-Tensor cat_jvp(at::TensorList tensors, int64_t dim) {
+Tensor cat_jvp(at::ITensorList tensors, int64_t dim) {
   Tensor out_fw_grad;
 
   auto any_defined = false;
@@ -4638,7 +4638,7 @@ Tensor cat_jvp(at::TensorList tensors, int64_t dim) {
   if (any_defined) {
     std::vector<Tensor> fw_grads;
 
-    for (auto& t: tensors) {
+    for (const auto& t: tensors) {
       fw_grads.push_back(isFwGradDefined(t)? t._fw_grad(/*level*/ 0): at::zeros_like(t));
     }
 

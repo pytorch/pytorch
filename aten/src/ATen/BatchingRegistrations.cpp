@@ -4,6 +4,7 @@
 #include <ATen/BatchedFallback.h>
 #include <ATen/native/ResizeCommon.h>
 #include <ATen/ATen.h>
+#include <ATen/core/IList.h>
 #include <c10/util/irange.h>
 
 namespace at {
@@ -912,7 +913,7 @@ Tensor mm_batching_rule(const Tensor& self, const Tensor& other) {
   TORCH_INTERNAL_ASSERT(false, "either self or other must be a BatchedTensor");
 }
 
-Tensor cat_batching_rule(TensorList tensors, int64_t dim) {
+Tensor cat_batching_rule(const ITensorList& tensors, int64_t dim) {
   auto physical_views = MultiBatchVmapTransform::logicalToPhysical(tensors);
   auto physical_tensors = fmap(
       physical_views, [](const VmapPhysicalView& view) -> Tensor { return view.tensor(); });

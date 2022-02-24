@@ -42,7 +42,7 @@ def argumenttype_type(t: Type, *, mutable: bool, binds: ArgName) -> NamedCType:
         return NamedCType(binds, OptionalCType(elem.type))
     elif isinstance(t, ListType):
         if t.elem == BaseType(BaseTy.Tensor):
-            return NamedCType(binds, BaseCType(iTensorListT))
+            return NamedCType(binds, ConstRefCType(BaseCType(iTensorListT)))
         elif t.elem == OptionalType(BaseType(BaseTy.Tensor)):
             return NamedCType(binds, BaseCType(iOptTensorRefListT))
         # TODO: delete these special cases; see tools.codegen.api.cpp--these

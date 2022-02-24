@@ -222,25 +222,11 @@ Tensor to_functional_tensor(const Tensor& tensor) {
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(!isFunctionalTensor(tensor));
   return at::detail::make_tensor<FunctionalTensorWrapper>(tensor);
 }
-c10::List<Tensor> to_functional_tensor(const c10::List<Tensor>& t_list) {
-  c10::List<Tensor> outputs;
+std::vector<Tensor> to_functional_tensor(ITensorList t_list) {
+  std::vector<Tensor> outputs;
   outputs.reserve(t_list.size());
   for (const auto i : c10::irange(t_list.size())) {
     outputs.push_back(to_functional_tensor(t_list[i]));
-  }
-  return outputs;
-}
-std::vector<Tensor> to_functional_tensor(const std::vector<Tensor>& t_list) {
-  std::vector<Tensor> outputs(t_list.size());
-  for (const auto i : c10::irange(t_list.size())) {
-    outputs[i] = to_functional_tensor(t_list[i]);
-  }
-  return outputs;
-}
-TensorList to_functional_tensor(const TensorList& t_list) {
-  std::vector<Tensor> outputs(t_list.size());
-  for (const auto i : c10::irange(t_list.size())) {
-    outputs[i] = to_functional_tensor(t_list[i]);
   }
   return outputs;
 }
@@ -260,8 +246,8 @@ c10::optional<Tensor> from_functional_tensor(const c10::optional<Tensor>& t) {
   }
   return c10::nullopt;
 }
-c10::List<Tensor> from_functional_tensor(const c10::List<Tensor>& t_list) {
-  c10::List<Tensor> outputs;
+std::vector<Tensor> from_functional_tensor(ITensorList t_list) {
+  std::vector<Tensor> outputs;
   outputs.reserve(t_list.size());
   for (const auto i : c10::irange(t_list.size())) {
     outputs.push_back(from_functional_tensor(t_list[i]));
@@ -271,13 +257,6 @@ c10::List<Tensor> from_functional_tensor(const c10::List<Tensor>& t_list) {
 c10::List<c10::optional<Tensor>> from_functional_tensor(const c10::List<c10::optional<Tensor>>& t_list) {
   c10::List<c10::optional<Tensor>> outputs;
   outputs.reserve(t_list.size());
-  for (const auto i : c10::irange(t_list.size())) {
-    outputs.push_back(from_functional_tensor(t_list[i]));
-  }
-  return outputs;
-}
-TensorList from_functional_tensor(const TensorList& t_list) {
-  std::vector<Tensor> outputs(t_list.size());
   for (const auto i : c10::irange(t_list.size())) {
     outputs.push_back(from_functional_tensor(t_list[i]));
   }
@@ -306,13 +285,8 @@ void sync(const c10::optional<Tensor>& t) {
     sync(*t);
   }
 }
-void sync(const c10::List<Tensor> t_list) {
-  for (const auto i : c10::irange(t_list.size())) {
-    sync(t_list[i]);
-  }
-}
-void sync(const at::TensorList t_list) {
-  for (auto t: t_list) {
+void sync(ITensorList t_list) {
+  for (const auto& t : t_list) {
     sync(t);
   }
 }
@@ -335,15 +309,7 @@ Tensor create_functional_tensor_with_view_meta(const at::Tensor& view_to_wrap, c
   return at::detail::make_tensor<FunctionalTensorWrapper>(view_to_wrap, functional_base_impl, meta);
 }
 
-std::vector<Tensor> create_functional_tensor_with_view_meta(const c10::List<at::Tensor>& view_to_wrap, const at::Tensor& base, functionalization::ViewMeta meta) {
-  std::vector<Tensor> outputs(view_to_wrap.size());
-  for (const auto i : c10::irange(view_to_wrap.size())) {
-    outputs[i] = create_functional_tensor_with_view_meta(view_to_wrap[i], base, meta, i);
-  }
-  return outputs;
-}
-
-std::vector<Tensor> create_functional_tensor_with_view_meta(const std::vector<at::Tensor>& view_to_wrap, const at::Tensor& base, functionalization::ViewMeta meta) {
+std::vector<Tensor> create_functional_tensor_with_view_meta(ITensorList view_to_wrap, const at::Tensor& base, functionalization::ViewMeta meta) {
   std::vector<Tensor> outputs(view_to_wrap.size());
   for (const auto i : c10::irange(view_to_wrap.size())) {
     outputs[i] = create_functional_tensor_with_view_meta(view_to_wrap[i], base, meta, i);

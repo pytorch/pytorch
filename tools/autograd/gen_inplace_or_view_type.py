@@ -183,7 +183,8 @@ def unpack_args(f: NativeFunction) -> Tuple[List[str], List[Binding]]:
                                       method=False,
                                       cpp_no_default_args=set(),
                                       faithful=False,
-                                      has_tensor_options=False)]
+                                      has_tensor_options=False,
+                                      structured_type_override=f.part_of_structured_group)]
 
     for i, binding in enumerate(bindings):
         assert not isinstance(binding.argument, SelfArgument)
@@ -336,7 +337,7 @@ def emit_inplace_or_view_body(fn: NativeFunctionWithDifferentiabilityInfo) -> Li
     f = fn.func
     inplace_view_body: List[str] = []
 
-    dispatcher_sig = DispatcherSignature.from_schema(f.func)
+    dispatcher_sig = DispatcherSignature.from_schema(f.func, structured_type_override=f.part_of_structured_group)
     dispatcher_exprs = dispatcher_sig.exprs()
 
     # code-generated ADInplaceOrView kernels plumb and recompute dispatch keys directly through the kernel for performance.
@@ -375,7 +376,7 @@ def gen_formals(f: NativeFunction) -> str:
         # code-generated autograd kernels plumb and recompute dispatch keys directly through the kernel for performance.
         # See Note [Plumbing Keys Through The Dispatcher] for details.
         ['c10::DispatchKeySet ks'] +
-        [f'{cpp.argument_type(a, binds="__placeholder__").cpp_type()} {a.name}'
+        [f'{cpp.argument_type(a, binds="__placeholder__", structured_type_override=f.part_of_structured_group).cpp_type()} {a.name}'
          for a in f.func.schema_order_arguments()]
     )
 
