@@ -9075,9 +9075,7 @@ TEST_F(NVFuserTest, FusionMagicSchedulerBatchNormalization_CUDA) {
       executor_cache.fusion(),
       cg_outputs,
       aten_inputs,
-      {at_run_mean,
-       at_run_var,
-       std::get<0>(aten_outputs),
+      {std::get<0>(aten_outputs),
        std::get<1>(aten_outputs),
        std::get<2>(aten_outputs)},
       __LINE__,
@@ -16131,8 +16129,7 @@ TEST_F(NVFuserTest, FusionBNRepro_CUDA) {
   auto at_mean = std::get<1>(at_results);
   auto at_invstd = std::get<2>(at_results);
 
-  std::vector<at::Tensor> aten_outputs = {
-      input4_ref, input5_ref, at_output, at_mean, at_invstd};
+  std::vector<at::Tensor> aten_outputs = {at_output, at_mean, at_invstd};
 
   testValidate(
       &fusion, cg_outputs, aten_inputs, aten_outputs, __LINE__, __FILE__);
@@ -16354,8 +16351,11 @@ TEST_F(NVFuserTest, FusionSegmentIoAlias_CUDA) {
 
   // Note: test alias;
   fusion->aliasOutputToInput(tv6, tv0);
-  // we need to add this back after we merge #1471
+  // TODO: support output on aliased fusion #1488
+  // remove tv7 after #1488
   // fusion->addOutput(tv6);
+  TensorView* tv7 = add(tv6, IrBuilder::create<Double>(1)); // Group 0
+  fusion->addOutput(tv7);
 
   auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
   at::Tensor t0 = at::randn({128, 65}, options);
@@ -16366,13 +16366,15 @@ TEST_F(NVFuserTest, FusionSegmentIoAlias_CUDA) {
   auto t4 = std::get<0>(at::max(t3, 0));
   auto t5 = t4.add(t1);
   auto t6 = t5.add(t2);
+  auto t7 = t6.add(1.0);
 
   FusionExecutorCache executor_cache(std::move(fusion));
 
   auto outputs = executor_cache.runFusionWithInputs({t0, t1, t2});
 
+  // TODO: support output on aliased fusion #1488
   // validating aliasing
-  TORCH_INTERNAL_ASSERT(outputs[0].data_ptr() == t0.data_ptr());
+  // TORCH_INTERNAL_ASSERT(outputs[0].data_ptr() == t0.data_ptr());
 
   TORCH_CHECK(
       executor_cache.getMostRecentKernelRuntime()->isSegmented(),
@@ -16385,7 +16387,7 @@ TEST_F(NVFuserTest, FusionSegmentIoAlias_CUDA) {
       "segmentation didn't happen as expected");
 
   testValidate(
-      executor_cache.fusion(), outputs, {t0, t1, t2}, {t6}, __LINE__, __FILE__);
+      executor_cache.fusion(), outputs, {t0, t1, t2}, {t7}, __LINE__, __FILE__);
 }
 
 TEST_F(NVFuserTest, FusionWelford1Output_CUDA) {

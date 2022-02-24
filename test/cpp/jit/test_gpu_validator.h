@@ -344,9 +344,12 @@ inline void testValidate(
   auto reduction_sizes =
       ReductionSizeMapper::computeReductionSizes(fusion, expr_eval);
 
+  auto output_alias_indices = fusion->getOutputAliasIndices();
+
   TORCH_INTERNAL_ASSERT(
       fusion_outputs.size() == aten_outputs.size() &&
-          aten_outputs.size() == fusion->outputs().size(),
+          aten_outputs.size() ==
+              fusion->outputs().size() - output_alias_indices.size(),
       "Number of outputs don't match.");
 
   TORCH_INTERNAL_ASSERT(
@@ -370,13 +373,17 @@ inline void testValidate(
     }
   }
 
-  for (size_t i = 0; i < fusion->outputs().size(); i++) {
+  for (size_t i = 0, j = 0; i < fusion->outputs().size(); i++) {
     TORCH_INTERNAL_ASSERT(
         fusion->outputs()[i]->isA<TensorView>(), "Mismatch of tensor outputs.");
+    if (output_alias_indices.count(i) != 0) {
+      // this is an aliased output, let's not check this;
+      continue;
+    }
 
-    auto fusion_output_tensor = fusion_outputs[i];
+    auto fusion_output_tensor = fusion_outputs[j];
     auto fusion_output_tv = fusion->outputs()[i]->as<TensorView>();
-    auto aten_output_tensor = aten_outputs[i];
+    auto aten_output_tensor = aten_outputs[j];
 
     TORCH_INTERNAL_ASSERT(
         reduction_sizes.count(fusion_output_tv),
@@ -387,7 +394,7 @@ inline void testValidate(
 
     TORCH_INTERNAL_ASSERT(
         aten_output_tensor.dim() == fusion_output_tensor.dim() &&
-            fusion_outputs[i].dim() ==
+            fusion_outputs[j].dim() ==
                 TensorDomain::noReductions(
                     fusion_output_tv->getMaybeRFactorDomain())
                     .size(),
@@ -406,7 +413,7 @@ inline void testValidate(
           "\n",
           err_msg,
           "\nValidation error in output ",
-          i,
+          j,
           " on line ",
           line_number,
           " in file ",
@@ -428,13 +435,14 @@ inline void testValidate(
           "\n",
           err_msg,
           ".\n  Validation error in output ",
-          i,
+          j,
           " on line ",
           line_number,
           " in file ",
           file_name,
           ".\n Values are not equal and are not a floating type.");
     }
+    j++;
   }
 }
 

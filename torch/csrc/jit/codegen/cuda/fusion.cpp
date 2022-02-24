@@ -192,6 +192,19 @@ void Fusion::addInput(Val* input) {
 }
 
 void Fusion::addOutput(Val* output) {
+  // We currently don't support explicitly outputing aliased inputs. This is
+  // because they are already marked as output for in-place update. It's tricky
+  // to allow marking them explicitly as real output, since that requires us to
+  // register/identify output not only by `Val*` pointer, but also by indices;
+  // it also requires us to magically arrange `outputs_` entries in proper order
+  // ^^^ this doesn't look intuitive on `outputs_` in fusion.
+  // I think we can solve this by marking addOutput on io_alias_ keys after
+  // fusion is fully defined. Tracking this in #1488
+  // Apparently we can't do this neither at the time. I think segmentation
+  // unfortunately would call addOutput after we marked io_alias_ map.
+  // TORCH_CHECK(io_alias_.count(output) == 0,
+  //     "can't register aliased output as real output");
+
   assertInContainer(output, "Cannot register output ");
   if (output->getValType().value() == ValType::TensorView) {
     auto tv = output->as<TensorView>();
@@ -595,6 +608,7 @@ void Fusion::aliasOutputToInput(Val* output, Val* input) {
   if (input->getDataType().value() != output->getDataType().value()) {
     output = castOp(input->getDataType().value(), output);
   }
+  // TODO: output should be marked at the end of fusion definition #1488
   addOutput(output);
 
   TORCH_INTERNAL_ASSERT(
