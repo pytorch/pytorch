@@ -295,7 +295,7 @@ filegroup(
             "aten/src/ATen/native/miopen/*.cpp",
             "aten/src/ATen/native/sparse/cuda/*.cpp",
             "aten/src/THC/*.cpp",
-        ] + [":{}".format(f) for f in ufunc_cuda_outputs],
+        ],
     ),
 )
 
@@ -307,7 +307,7 @@ filegroup(
         "aten/src/ATen/native/cuda/*.cu",
         "aten/src/ATen/native/quantized/cuda/*.cu",
         "aten/src/ATen/native/sparse/cuda/*.cu",
-    ]),
+    ]) + [":{}".format(f) for f in ufunc_cuda_outputs],
 )
 
 header_template_rule(
