@@ -15771,6 +15771,13 @@ dedent """
 
         torch.jit.script(M(2, 3))
 
+    def test_input_keyword_in_schema(self):
+        def f(x):
+            return torch.ceil(input=x)
+
+        inp = torch.randn(10)
+        self.checkScript(f, (inp, ))
+
     def test_module_method_reassignment(self):
         class Foo(torch.nn.Module):
             def __init__(self):
