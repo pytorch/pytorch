@@ -184,7 +184,10 @@ BenchmarkCache<cudnn_frontend::ExecutionPlan, CacheKey> benchmark_cache;
 BenchmarkCache<cudnn_frontend::ExecutionPlan, CacheKeyFused> benchmark_cache_fused;
 
 } // namespace
-void get_cachekey(CacheKey& key, const cudnnBackendDescriptorType_t operation, const Tensor& y, const Tensor& x, const Tensor& w, const IntArrayRef padding, const IntArrayRef stride, const IntArrayRef dilation, int64_t groups, bool deterministic, bool allow_tf32) {
+
+// NB: This (and the fused version) can't be a constructor, because then CacheKey
+// would not be a POD anymore.
+void setCacheKey(CacheKey& key, const cudnnBackendDescriptorType_t operation, const Tensor& y, const Tensor& x, const Tensor& w, const IntArrayRef padding, const IntArrayRef stride, const IntArrayRef dilation, int64_t groups, bool deterministic, bool allow_tf32) {
   memset(&key, 0, sizeof(key));
   setConvolutionParams(&key.params, x, w, padding, stride, dilation, groups, deterministic, allow_tf32);
   key.operation = operation;
@@ -193,7 +196,7 @@ void get_cachekey(CacheKey& key, const cudnnBackendDescriptorType_t operation, c
   key.w_alignment = getAlignment(w);
 }
 
-void get_cachekey_fused(CacheKeyFused& key, const Tensor& y, const Tensor& x, const Tensor& w, const Tensor& z, const Tensor& b, const float alpha, const IntArrayRef padding, const IntArrayRef stride, const IntArrayRef dilation, int64_t groups, bool deterministic, bool allow_tf32) {
+void setCacheKeyFused(CacheKeyFused& key, const Tensor& y, const Tensor& x, const Tensor& w, const Tensor& z, const Tensor& b, const float alpha, const IntArrayRef padding, const IntArrayRef stride, const IntArrayRef dilation, int64_t groups, bool deterministic, bool allow_tf32) {
   memset(&key, 0, sizeof(key));
   setConvolutionParams(&key.params, x, w, padding, stride, dilation, groups, deterministic, allow_tf32);
   key.x_alignment = getAlignment(x);
@@ -527,7 +530,7 @@ void run_single_conv(const cudnnBackendDescriptorType_t operation,
   cudnnHandle_t handle = getCudnnHandle();
 
   CacheKey key;
-  get_cachekey(key, operation, y, x, w, padding, stride, dilation, groups, deterministic, allow_tf32);
+  setCacheKey(key, operation, y, x, w, padding, stride, dilation, groups, deterministic, allow_tf32);
   // TODO: is this thread safe if cache is updated? is pointer stale?
   auto search = benchmark_cache.find(key);
   if (search) {
@@ -563,7 +566,7 @@ void run_fused_conv(const Tensor& x, const Tensor& y, const Tensor& w, const Ten
   cudnnHandle_t handle = getCudnnHandle();
 
   CacheKeyFused key;
-  get_cachekey_fused(key, y, x, w, z, b, alpha, padding, stride, dilation, groups, deterministic, allow_tf32);
+  setCacheKeyFused(key, y, x, w, z, b, alpha, padding, stride, dilation, groups, deterministic, allow_tf32);
   auto search = benchmark_cache_fused.find(key);
   if (search) {
     try {
