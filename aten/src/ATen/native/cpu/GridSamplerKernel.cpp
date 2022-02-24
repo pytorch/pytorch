@@ -665,6 +665,7 @@ struct ApplyGridSample<scalar_t, 2, GridSamplerInterpolation::Bilinear,
       auto gOut = Vec::loadu(gOut_slice[c].data() + offset, len);
 
       if (input_requires_grad) {
+        TORCH_INTERNAL_ASSERT(gInp_slice_ptr);
         auto gInp_slice_C_ptr = (*gInp_slice_ptr)[c].data();
 
         (nw * gOut).store(gInp_corner_arr);
