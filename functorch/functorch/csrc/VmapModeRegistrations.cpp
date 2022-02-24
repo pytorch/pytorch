@@ -47,10 +47,6 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchVmapMode, m) {
   UNSUPPORTED_RANDOM(multinomial);
   UNSUPPORTED_RANDOM2(multinomial, out);
 
-  UNSUPPORTED_RANDOM2(normal, Tensor_float);
-  UNSUPPORTED_RANDOM2(normal, Tensor_float_out);
-  UNSUPPORTED_RANDOM2(normal, float_Tensor_out);
-  UNSUPPORTED_RANDOM2(normal, float_Tensor);
   UNSUPPORTED_RANDOM2(normal, Tensor_Tensor);
   UNSUPPORTED_RANDOM2(normal, Tensor_Tensor_out);
 
