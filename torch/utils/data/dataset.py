@@ -18,6 +18,7 @@ from typing import (
 from torch import default_generator, randperm
 from torch._utils import _accumulate
 from torch.utils.data._typing import _DataPipeMeta
+from torch.utils.data._utils.serialization import serialize_fn, deserialize_fn, SerializationType
 
 from ... import Generator, Tensor
 
@@ -131,6 +132,22 @@ class MapDataPipe(Dataset[T_co], metaclass=_DataPipeMeta):
 
         function = functools.partial(class_function, cls_to_register)
         cls.functions[function_name] = function
+
+    def __getstate__(self):
+        state_dict = {}
+        for k, v in self.__dict__.items():
+            if callable(v):
+                state_dict[k] = serialize_fn(v)
+            else:
+                state_dict[k] = v
+        return state_dict
+
+    def __setstate__(self, state_dict):
+        for k, v in state_dict.items():
+            if isinstance(v, tuple) and len(v) == 2 and isinstance(v[1], SerializationType):
+                self.__dict__[k] = deserialize_fn(v)
+            else:
+                self.__dict__[k] = v
 
 
 class IterableDataset(Dataset[T_co]):
@@ -323,7 +340,20 @@ class IterDataPipe(IterableDataset[T_co], metaclass=_DataPipeMeta):
     def __getstate__(self):
         if IterDataPipe.getstate_hook is not None:
             return IterDataPipe.getstate_hook(self)
-        return self.__dict__
+        state_dict = {}
+        for k, v in self.__dict__.items():
+            if callable(v):
+                state_dict[k] = serialize_fn(v)
+            else:
+                state_dict[k] = v
+        return state_dict
+
+    def __setstate__(self, state_dict):
+        for k, v in state_dict.items():
+            if isinstance(v, tuple) and len(v) == 2 and isinstance(v[1], SerializationType):
+                self.__dict__[k] = deserialize_fn(v)
+            else:
+                self.__dict__[k] = v
 
     def __reduce_ex__(self, *args, **kwargs):
         if IterDataPipe.reduce_ex_hook is not None:
