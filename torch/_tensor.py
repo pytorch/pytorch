@@ -154,7 +154,9 @@ class Tensor(torch._C._TensorBase):
                 new_tensor.grad = self.grad.__deepcopy__(memo)
 
             if not type(self) is Tensor:
-                assert type(new_tensor) is type(self)
+                if type(new_tensor) is not type(self):
+                    raise RuntimeError("Type of deepcopy result does not match the type of the source tensor. "
+                                       "If you encounter this, please open an issue on PyTorch's GitHub.")
 
                 # Plain Tensors don't have slots
                 slots_to_save = copyreg._slotnames(self.__class__)  # type: ignore[attr-defined]

@@ -381,6 +381,10 @@ $6 = torch._ops.aten.add_($1, $5)''')
                     return args[0].elem.clone()
                 raise RuntimeError("NYI")
 
+            # NB: The default Tensor.__torch_function__ implementation called for deepcopy
+            # disables __torch_function__ by the time we get to clone(), so there is no need to
+            # explicitly disable __torch_function__ for this subclass.
+
         x = MyWrapperTensor(torch.randn(3))
         with self.assertRaisesRegex(RuntimeError,
                                     "for which cloning returns another instance of the same subclass"):
