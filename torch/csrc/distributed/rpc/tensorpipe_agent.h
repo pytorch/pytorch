@@ -233,7 +233,7 @@ class TORCH_API TensorPipeAgent : public RpcAgent {
   void removeFromTimeoutMap(uint64_t messageId);
 
   // Populates workerIdToInfo_ and workerNameToInfo_ using addressStore_
-  void prepareNames();
+  void prepareNames(bool isStaticGroup);
 
   const std::string& findWorkerURL(const WorkerInfo& worker) const;
 
