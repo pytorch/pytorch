@@ -733,7 +733,6 @@ if(BUILD_TEST OR BUILD_MOBILE_BENCHMARK OR BUILD_MOBILE_TEST)
   # this shouldn't be necessary anymore.
   get_property(INC_DIR_temp DIRECTORY PROPERTY INCLUDE_DIRECTORIES)
   set_property(DIRECTORY PROPERTY INCLUDE_DIRECTORIES "")
-  message("DEBUG, dependencies.cmake, add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/../third_party/googletest)")
   add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/../third_party/googletest)
   set_property(DIRECTORY PROPERTY INCLUDE_DIRECTORIES ${INC_DIR_temp})
 

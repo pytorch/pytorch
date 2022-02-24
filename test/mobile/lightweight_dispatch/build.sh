@@ -5,37 +5,25 @@
 # need to set it yourself.
 
 # shellcheck disable=SC2034
-COMPACT_JOB_NAME="${BUILD_ENVIRONMENT}"
 echo "Build lite interpreter with lightweight dispatch."
-MACOSX_DEPLOYMENT_TARGET=10.9 CC=clang CXX=clang++ \
-USE_DISTRIBUTED=0 \
-  USE_CUDA=0 \
-  USE_MKLDNN=0 \
-  USE_FBGEMM=0 \
-  USE_NNPACK=0 \
-  USE_QNNPACK=0 \
-  USE_XNNPACK=0 \
-  USE_LIGHTWEIGHT_DISPATCH=1 \
-  STATIC_DISPATCH_BACKEND="CPU" \
-  BUILD_LITE_INTERPRETER=1 \
-  BUILD_TEST=1 \
-  INSTALL_TEST=1 \
-  BUILD_MOBILE_TEST=1 \
-  python setup.py bdist_wheel
-  python -mpip install dist/*.whl
+
+# prepare test
+TEST_SRC_ROOT="$PWD/test/mobile/lightweight_dispatch"
+python $TEST_SRC_ROOT/tests_setup.py setup
 
 CUSTOM_TEST_ARTIFACT_BUILD_DIR=${CUSTOM_TEST_ARTIFACT_BUILD_DIR:-${PWD}/../}
 mkdir -pv "${CUSTOM_TEST_ARTIFACT_BUILD_DIR}"
 
 LIGHTWEIGHT_DISPATCH_BUILD="${CUSTOM_TEST_ARTIFACT_BUILD_DIR}/lightweight-dispatch-build"
-TEST_SRC_ROOT="$PWD/test/mobile/lightweight_dispatch"
-SITE_PACKAGES="$(python -c 'from distutils.sysconfig import get_python_lib; print(get_python_lib())')"
+BUILD_LIBTORCH_PY=$PWD/tools/build_libtorch.py
 
 mkdir -p "$LIGHTWEIGHT_DISPATCH_BUILD"
 pushd "$LIGHTWEIGHT_DISPATCH_BUILD"
-cmake "$TEST_SRC_ROOT" -DCMAKE_PREFIX_PATH="${SITE_PACKAGES}/torch" -DCMAKE_BUILD_TYPE=Release
-cmake --build . --target test_codegen_unboxing
-make VERBOSE=1
-popd
 
-assert_git_not_dirty
+export USE_LIGHTWEIGHT_DISPATCH=1
+export STATIC_DISPATCH_BACKEND="CPU"
+export BUILD_LITE_INTERPRETER=1
+
+VERBOSE=1 DEBUG=1 python "${BUILD_LIBTORCH_PY}"
+
+popd

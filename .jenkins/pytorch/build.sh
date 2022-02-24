@@ -61,11 +61,6 @@ elif [[ ${BUILD_ENVIRONMENT} == *"parallelnative"* ]]; then
   export ATEN_THREADING=NATIVE
 fi
 
-if [[ ${BUILD_ENVIRONMENT} == *"lightweight-dispatch"* ]]; then
-  export USE_LIGHTWEIGHT_DISPATCH=ON
-  export BUILD_LITE_INTERPRETER=ON
-  export STATIC_DISPATCH_BACKEND="CPU"
-fi
 # TODO: Don't run this...
 pip_install -r requirements.txt || true
 
@@ -294,18 +289,6 @@ else
     mkdir -p "$CUSTOM_BACKEND_BUILD"
     pushd "$CUSTOM_BACKEND_BUILD"
     cmake "$CUSTOM_BACKEND_TEST" -DCMAKE_PREFIX_PATH="$SITE_PACKAGES/torch" -DPYTHON_EXECUTABLE="$(which python)"
-    make VERBOSE=1
-    popd
-    assert_git_not_dirty
-
-    # Build lightweight dispatch tests.
-    LIGHTWEIGHT_DISPATCH_BUILD="${CUSTOM_TEST_ARTIFACT_BUILD_DIR}/lightweight-dispatch-build"
-    LIGHTWEIGHT_DISPATCH_TEST="$PWD/test/mobile/lightweight_dispatch"
-
-    mkdir -p "$LIGHTWEIGHT_DISPATCH_BUILD"
-    pushd "$LIGHTWEIGHT_DISPATCH_BUILD"
-    cmake "$LIGHTWEIGHT_DISPATCH_TEST" -DCMAKE_PREFIX_PATH="${SITE_PACKAGES}/torch" -DPYTHON_EXECUTABLE="$(which python)" -DCMAKE_BUILD_TYPE=Release
-    cmake --build . --target test_codegen_unboxing
     make VERBOSE=1
     popd
     assert_git_not_dirty
