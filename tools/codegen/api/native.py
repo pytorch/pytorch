@@ -2,7 +2,7 @@ from tools.codegen.model import (Argument, FunctionSchema, Return,
                                  SelfArgument, TensorOptionsArguments, Type)
 
 from tools.codegen.api.types import (ArgName, BaseCType, Binding,
-                                     ConstRefCType, NamedCType, CType, MutRefCType, ListCType,
+                                     ConstRefCType, NamedCType, CType, MutRefCType,
                                      OptionalCType, tensorT, scalarT, layoutT,
                                      deviceT, boolT, scalarTypeT)
 from tools.codegen.api import cpp
