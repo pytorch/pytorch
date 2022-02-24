@@ -164,7 +164,7 @@ if is_available():
         # keep it alive.
         global rendezvous_iterator
         rendezvous_iterator = dist.rendezvous(
-            rpc_backend_options.init_method, rank=rank, world_size=world_size, init_rpc=True
+            rpc_backend_options.init_method, rank=rank, world_size=world_size
         )
         store, _, _ = next(rendezvous_iterator)
 
@@ -195,12 +195,11 @@ if is_available():
             store: dist.Store,
             name: str,
             rank: numbers.Integral,
-            # world_size can be None for a dynamic group
-            world_size: (numbers.Integral, type(None)),
+            world_size: numbers.Integral,
             rpc_backend_options: RpcBackendOptions,
         }
         for arg, arg_type in type_mapping.items():
-            if not isinstance(arg, arg_type):  # type: ignore[arg-type]
+            if not isinstance(arg, arg_type):
                 raise RuntimeError(
                     "Argument {} must be of type {} but got type {}".format(
                         arg, arg_type, type(arg)
@@ -212,7 +211,7 @@ if is_available():
         store=None,
         name=None,
         rank=-1,
-        world_size=None,
+        world_size=-1,
         rpc_backend_options=None,
     ):
 

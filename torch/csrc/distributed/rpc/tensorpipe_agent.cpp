@@ -342,15 +342,9 @@ void TensorPipeAgent::removeFromTimeoutMap(uint64_t messageId) {
   }
 }
 
-void TensorPipeAgent::prepareNames(bool isStaticGroup) {
-  std::unordered_map<std::string, worker_id_t> nameToId;
-  if (isStaticGroup) {
-    nameToId = collectNames(
-        rankToNameStore_, workerInfo_.id_, workerInfo_.name_, worldSize_);
-  } else {
-    nameToId = collectCurrentNames(
-        rankToNameStore_, workerInfo_.id_, workerInfo_.name_);
-  }
+void TensorPipeAgent::prepareNames() {
+  auto nameToId = collectNames(
+      rankToNameStore_, workerInfo_.id_, workerInfo_.name_, worldSize_);
 
   for (const auto& entry : nameToId) {
     const auto& workerName = entry.first;
@@ -364,7 +358,7 @@ TensorPipeAgent::TensorPipeAgent(
     const c10::intrusive_ptr<::c10d::Store>& store,
     std::string selfName,
     worker_id_t selfId,
-    optional<int> worldSize,
+    int worldSize,
     TensorPipeRpcBackendOptions opts,
     std::unordered_map<std::string, DeviceMap> reverseDeviceMaps,
     std::vector<c10::Device> devices,
@@ -382,17 +376,10 @@ TensorPipeAgent::TensorPipeAgent(
           tensorpipe::ContextOptions().name(workerInfo_.name_))),
       rankToNameStore_("names", store),
       nameToAddressStore_("addrs", store),
-      shutdownStore_("shutdown", store) {
-  if (worldSize.has_value()) {
-    worldSize_ = worldSize.value();
-    isStaticGroup_ = true;
-  } else {
-    // TODO: get current world size from store
-    isStaticGroup_ = false;
-  }
-
+      shutdownStore_("shutdown", store),
+      worldSize_(worldSize) {
   // collect worker names
-  prepareNames(isStaticGroup_);
+  prepareNames();
 
   // Initialize the time-series metrics tracking map
   timeSeriesMetrics_.emplace(kGilAverageWaitTime, TimeSeriesMetricsTracker());
