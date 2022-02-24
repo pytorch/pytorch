@@ -1072,7 +1072,7 @@ class DistributedTest:
         )
         @require_world_size(4)
         @skip_if_lt_x_gpu(4)
-        def test_2_level_hierarchical_model_averager(self):
+        def test_3_level_hierarchical_model_averager(self):
             rank = dist.get_rank()
             world_size = dist.get_world_size()
             rank_to_GPU = init_multigpu_helper(world_size, BACKEND)
@@ -1084,32 +1084,44 @@ class DistributedTest:
             # Set up such a hierarchical model averaging as follows:
             # after the first 10 warmup steps,
             # run model averaging every 2 steps within each subgroup of size 2,
-            # and run the global model averaging every 4 steps.
-            # The former model averaging will be skipped every 4 steps.
+            # run model averaging every 4 steps within each subgroup of size 3,
+            # and run the global model averaging every 8 steps.
+            # If there is a conflict in model averaging at a step, only run the highest-level model averaging.
             warmup_steps = 10
-            subgroup_size = 2
-            subgroup_avg_period = 2
-            global_avg_period = 4
-            period_group_size_dict = OrderedDict([(subgroup_avg_period, subgroup_size), (global_avg_period, world_size)])
+            subgroup_size1 = 2
+            subgroup_avg_period1 = 2
+            subgroup_size2 = 4
+            subgroup_avg_period2 = 4
+            global_avg_period = 8
+            period_group_size_dict = OrderedDict(
+                [(subgroup_avg_period1, subgroup_size1),
+                 (subgroup_avg_period2, subgroup_size2),
+                 (global_avg_period, world_size)])
             averager = hierarchicalSGD.HierarchicalModelAverager(
                 period_group_size_dict=period_group_size_dict, warmup_steps=warmup_steps
             )
-            expected_avg_tensor_within_subgroup = (
-                torch.ones_like(param.data) * sum(range(subgroup_size)) / subgroup_size
+            expected_avg_tensor_within_subgroup1 = (
+                torch.ones_like(param.data) * sum(range(subgroup_size1)) / subgroup_size1
+            )
+            expected_avg_tensor_within_subgroup2 = (
+                torch.ones_like(param.data) * sum(range(subgroup_size2)) / subgroup_size2
             )
             expected_global_avg_tensor = (
                 torch.ones_like(param.data) * sum(range(world_size)) / world_size
             )
-            for step in range(0, 20):
+            for step in range(0, 25):
                 # Reset the parameters at every step.
                 param.data = copy.deepcopy(tensor)
                 averager.average_parameters(model.parameters())
-                if step == 12 or step == 16:
-                    # Run global model averaging when `step` can be divided by 4.
+                if step == 16 or step == 24:
+                    # Run global model averaging when `step` can be divided by 8.
                     self.assertEqual(param.data, expected_global_avg_tensor)
-                elif step == 10 or step == 14 or step == 18:
-                    # Run model averaging within subgroup when `step` can be divided by 2 but not by 4.
-                    self.assertEqual(param.data, expected_avg_tensor_within_subgroup)
+                elif step == 12 or step == 20:
+                    # Run model averaging within subgroup when `step` can be divided by 4 but not by 8.
+                    self.assertEqual(param.data, expected_avg_tensor_within_subgroup1)
+                elif step == 10 or step == 14 or step == 18 or step == 22:
+                    # Run model averaging within subgroup when `step` can be divided by 2 but not by 4 or 8.
+                    self.assertEqual(param.data, expected_avg_tensor_within_subgroup1)
                 else:
                     # No model averaging, so the parameters are not updated.
                     self.assertEqual(param.data, tensor)
