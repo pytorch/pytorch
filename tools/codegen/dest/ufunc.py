@@ -268,7 +268,7 @@ AT_PRIVATE_CASE_TYPE("{sig.name}", at::ScalarType::{dtype}, {ScalarTypeToCppMapp
 REGISTER_DISPATCH({stub_sig.name}, &{stub_sig.kernel_name});
 
 {sig.defn()} {{
-  {stub_sig.call(sig.arguments())};
+  {stub_sig.direct_call(sig.arguments())};
 }}
 """
 
@@ -316,6 +316,10 @@ class StubSignature:
     # must be called from context where this is TensorIteratorBase*
     def call(self, ctx: Sequence[Binding]) -> str:
         return f"{self.name}(device_type(), *this, {', '.join(a.expr for a in translate(ctx, self.arguments()))})"
+
+    # used in CUDA to skip the unnecessary dynamic dispatch
+    def direct_call(self, ctx: Sequence[Binding]) -> str:
+        return f"{self.kernel_name}(*this, {', '.join(a.expr for a in translate(ctx, self.arguments()))})"
 
 @with_native_function
 def compute_ufunc_cpu(g: NativeFunctionsGroup) -> str:
