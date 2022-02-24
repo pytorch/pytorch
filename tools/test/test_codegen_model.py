@@ -11,7 +11,7 @@ import tools.codegen.gen as gen
 from tools.codegen.gen import LineLoader, parse_native_yaml_struct
 
 class TestCodegenModel(expecttest.TestCase):
-    def assertParseErrorInline(self, yaml_str, expect):
+    def assertParseErrorInline(self, yaml_str: str, expect: str) -> None:
         es = yaml.load(yaml_str, Loader=LineLoader)
         try:
             parse_native_yaml_struct(es)
@@ -22,7 +22,7 @@ class TestCodegenModel(expecttest.TestCase):
             return
         self.fail(msg="Did not raise when expected to")
 
-    def assertUfuncErrorInline(self, yaml_str, expect):
+    def assertUfuncErrorInline(self, yaml_str: str, expect: str) -> None:
         # parse a single structured group out of the yaml to g
         es = yaml.load(yaml_str, Loader=LineLoader)
         parsed_yaml = parse_native_yaml_struct(es)
@@ -54,18 +54,18 @@ class TestCodegenModel(expecttest.TestCase):
     ti_binop_out = f'''{binop_out}
   structured: True
   structured_inherits: TensorIteratorBase'''
-    ti_binop = f'''func: binop(Tensor self, Tensor other) -> Tensor
+    ti_binop = '''func: binop(Tensor self, Tensor other) -> Tensor
   structured_delegate: binop.out
 '''
 
-    ti_unop_out = f'''func: unop.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+    ti_unop_out = '''func: unop.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   structured: True
   structured_inherits: TensorIteratorBase'''
-    ti_unop = f'''func: unop(Tensor self) -> Tensor
+    ti_unop = '''func: unop(Tensor self) -> Tensor
   structured_delegate: unop.out
 '''
 
-    def test_nonstructured_ufunc(self):
+    def test_nonstructured_ufunc(self) -> None:
         yaml_str = f'''\
 - {self.binop_out}
   ufunc_inner_loop:
@@ -74,7 +74,7 @@ class TestCodegenModel(expecttest.TestCase):
         self.assertParseErrorInline(yaml_str, '''\
 ufunc must be structured''')
 
-    def test_overlapping_ufunc_and_dispatch(self):
+    def test_overlapping_ufunc_and_dispatch(self) -> None:
         yaml_str = f'''\
 - {self.ti_binop_out}
   ufunc_inner_loop:
@@ -87,7 +87,7 @@ ufunc should not have explicit dispatch entry for CPU''')
 
     # See https://github.com/pytorch/pytorch/pull/65851#discussion_r810238456
     @unittest.expectedFailure
-    def test_scalaronly_shadowed(self):
+    def test_scalaronly_shadowed(self) -> None:
         yaml_str = f'''\
 - {self.ti_binop_out}
   ufunc_inner_loop:
@@ -97,7 +97,7 @@ ufunc should not have explicit dispatch entry for CPU''')
         self.assertParseErrorInline(yaml_str, '''\
 ''')
 
-    def test_conflicting_ufunc(self):
+    def test_conflicting_ufunc(self) -> None:
         yaml_str = f'''\
 - {self.ti_binop_out}
   ufunc_inner_loop:
@@ -108,7 +108,7 @@ ufunc should not have explicit dispatch entry for CPU''')
         self.assertUfuncErrorInline(yaml_str, '''\
 ScalarOnly and Generic must have same ufunc name''')
 
-    def test_invalid_cudafunctoronself_for_binary_op(self):
+    def test_invalid_cudafunctoronself_for_binary_op(self) -> None:
         yaml_str = f'''\
 - {self.ti_unop_out}
   ufunc_inner_loop:
