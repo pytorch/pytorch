@@ -28,23 +28,7 @@ struct KernelDTypeTracer final {
    */
   typedef std::map<std::string, std::set<std::string>> kernel_tags_type;
 
-  KernelDTypeTracer() {
-    auto recorder_cb = [](const at::RecordFunction& fn)
-        -> std::unique_ptr<at::ObserverContext> {
-      std::string name = fn.name();
-      size_t dollar_pos = name.find_first_of('$');
-      std::string kernel_tag = name.substr(0, dollar_pos);
-      std::string dtype = name.substr(dollar_pos + 1);
-
-      getCalledKernelTags()[kernel_tag].insert(dtype);
-      return nullptr;
-    };
-
-    handle_ = at::addGlobalCallback(
-        at::RecordFunctionCallback(recorder_cb)
-            .scopes({at::RecordScope::KERNEL_FUNCTION_DTYPE}));
-  }
-
+  KernelDTypeTracer();
   static kernel_tags_type& getCalledKernelTags();
 
   ~KernelDTypeTracer() {
