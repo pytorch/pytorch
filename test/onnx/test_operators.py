@@ -953,7 +953,7 @@ class TestOperators(TestCase):
                 f'"sparse":{str(sparse).lower()}'
                 '}'
             )
-            output = g.op("com.microsoft::ATenOp", weight, indices, name_s='aten::embedding',
+            output = g.op("org.pytorch.aten::ATen", weight, indices, name_s='aten::embedding',
                           custom_attributes_json_s=custom_attributes_json)
             return output
 
@@ -989,7 +989,7 @@ class TestOperators(TestCase):
                 f'"sparse":{str(sparse).lower()}'
                 '}'
             )
-            output = g.op("com.microsoft::ATenOp", weight, indices, name_s='aten::embedding',
+            output = g.op("org.pytorch.aten::ATen", weight, indices, name_s='aten::embedding',
                           custom_attributes_json_s=custom_attributes_json)
 
             # do shape inference and set it via setType
