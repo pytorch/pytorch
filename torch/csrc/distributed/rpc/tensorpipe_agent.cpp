@@ -358,7 +358,7 @@ TensorPipeAgent::TensorPipeAgent(
     const c10::intrusive_ptr<::c10d::Store>& store,
     std::string selfName,
     worker_id_t selfId,
-    int worldSize,
+    optional<int> worldSize,
     TensorPipeRpcBackendOptions opts,
     std::unordered_map<std::string, DeviceMap> reverseDeviceMaps,
     std::vector<c10::Device> devices,
@@ -376,8 +376,15 @@ TensorPipeAgent::TensorPipeAgent(
           tensorpipe::ContextOptions().name(workerInfo_.name_))),
       rankToNameStore_("names", store),
       nameToAddressStore_("addrs", store),
-      shutdownStore_("shutdown", store),
-      worldSize_(worldSize) {
+      shutdownStore_("shutdown", store) {
+  if (worldSize.has_value()) {
+    worldSize_ = worldSize.value();
+    isStaticGroup_ = true;
+  } else {
+    // TODO: get current world size from store
+    isStaticGroup_ = false;
+  }
+
   // collect worker names
   prepareNames();
 

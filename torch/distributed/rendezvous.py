@@ -51,19 +51,19 @@ def register_rendezvous_handler(scheme, handler):
     _rendezvous_handlers[scheme] = handler
 
 
-def rendezvous(url: str, rank: int = -1, world_size: int = -1, **kwargs):
+def rendezvous(url: str, rank: int = -1, world_size: Optional[int] = None, **kwargs):
     if not isinstance(url, six.string_classes):
         raise RuntimeError("`url` must be a string. {}: {}".format(type(url), url))
 
     if not isinstance(rank, numbers.Integral):
         raise RuntimeError("`rank` must be an integer. {}".format(rank))
 
-    if not isinstance(world_size, numbers.Integral):
-        raise RuntimeError("`world_size` must be an integer. {}".format(world_size))
+    if not isinstance(world_size, (numbers.Integral, type(None))):
+        raise RuntimeError("`world_size` must be an integer or None. {}".format(world_size))
 
     # Append node-specific arguments.
     result = urlparse(url)
-    if rank != -1 or world_size != -1:
+    if rank != -1 or (world_size and world_size != -1):
         query_dict: Dict[str, Union[int, str]] = dict(
             pair.split("=") for pair in filter(None, result.query.split("&"))
         )
@@ -74,7 +74,7 @@ def rendezvous(url: str, rank: int = -1, world_size: int = -1, **kwargs):
         )
         if rank != -1:
             query_dict["rank"] = rank
-        if world_size != -1:
+        if world_size and world_size != -1:
             query_dict["world_size"] = world_size
 
         result = result._replace(
@@ -151,6 +151,10 @@ def _create_c10d_store(hostname, port, rank, world_size, timeout) -> Store:
     if not 0 <= port < 2**16:
         raise ValueError(f"port must have value from 0 to 65535 but was {port}.")
 
+    # if world_size is None, then there is a non-fixed number of stores
+    if not world_size:
+        world_size = -1
+
     if _torchelastic_use_agent_store():
         attempt = os.environ["TORCHELASTIC_RESTART_COUNT"]
         tcp_store = TCPStore(hostname, port, world_size, False, timeout)
@@ -200,6 +204,10 @@ def _env_rendezvous_handler(
     def _env_error(var):
         return _error("environment variable %s expected, but not set" % var)
 
+    def _get_env(env_var: str) -> Optional[str]:
+        env_val = os.environ.get(env_var, None)
+        return env_val
+
     def _get_env_or_raise(env_var: str) -> str:
         env_val = os.environ.get(env_var, None)
         if not env_val:
@@ -224,7 +232,13 @@ def _env_rendezvous_handler(
     if "world_size" in query:
         world_size = int(query["world_size"])
     else:
-        world_size = int(_get_env_or_raise("WORLD_SIZE"))
+        using_init_rpc = kwargs.get("init_rpc", False)
+        if not using_init_rpc:
+            world_size = int(_get_env_or_raise("WORLD_SIZE"))
+        else:
+            world_size = _get_env("WORLD_SIZE")
+            if world_size:
+                world_size = int(world_size)
 
     master_addr = _get_env_or_raise("MASTER_ADDR")
     master_port = int(_get_env_or_raise("MASTER_PORT"))

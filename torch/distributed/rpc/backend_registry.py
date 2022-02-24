@@ -243,6 +243,80 @@ def _tensorpipe_exchange_and_check_all_device_maps(
 
     return reverse_device_maps, my_devices
 
+def _tensorpipe_check_local_device_maps(name, options):
+    # Check local devices in device_maps and devices are all valid.
+    local_devices = set(options.devices) if options.devices else set()
+    device_maps = options.device_maps
+    for worker_name in device_maps:
+        device_map = device_maps[worker_name]
+        key_set = set(device_map.keys())
+        val_set = set(device_map.values())
+        if not all([
+            len(key_set) == len(device_map),
+            len(val_set) == len(device_map),
+        ]):
+            raise ValueError(
+                f"Invalid device_map configuration for {worker_name}, "
+                f"not 1-to-1 mapping:\ndevice_maps = {device_map}"
+            )
+        local_devices.update(key_set)
+
+    if not all(
+        (0 <= d.index < torch.cuda.device_count() if d.type == "cuda" else True)
+        for d in local_devices
+    ):
+        raise ValueError(
+            f"Invalid device in TensorPipe options on {name}:\n"
+            f"device_maps = {options.device_maps},\n"
+            f"devices = {options.devices}"
+        )
+
+# detect if any worker has invalid device_map configurations, and return
+# names of failed workers
+def _tensorpipe_check_remote_device_maps(agent, options):
+    device_maps = options.device_maps
+    if device_maps is None:
+        device_maps = {}
+
+    def check_one_worker(name, device_maps, all_device_counts):
+        device_count = all_device_counts[name]
+        wrong_worker_names = set(device_maps) - set(all_device_counts)
+        if wrong_worker_names:
+            raise ValueError(f"Wrong worker names: {wrong_worker_names}")
+        for remote_name in all_device_counts:
+            remote_device_count = all_device_counts[remote_name]
+            if remote_name in device_maps:
+                device_map = device_maps[remote_name]
+                val_set = set(device_map.values())
+                if not all(
+                    (0 <= d.index < remote_device_count if d.type == "cuda" else True)
+                    for d in val_set
+                ):
+                    raise ValueError(
+                        f"Invalid device_map configuration on {name} "
+                        f"for {remote_name}, remote device out of range:\n"
+                        f"device_maps = {device_maps}"
+                    )
+
+    gathered = api._all_gather([torch.cuda.device_count(), device_maps])
+    all_device_counts = {name: gathered[name][0] for name in gathered}
+    all_device_maps = {name: gathered[name][1] for name in gathered}
+    for worker_name in all_device_maps:
+        worker_device_maps = all_device_maps[worker_name]
+        check_one_worker(worker_name, worker_device_maps, all_device_counts)
+
+    # passed all checked, construct reverse mapping for return values
+    reverse_device_maps = {}
+    local_name = api.get_worker_info().name
+    for worker_name in all_device_maps:
+        remote_device_maps = all_device_maps[worker_name]
+        if local_name in remote_device_maps:
+            remote_device_map = remote_device_maps[local_name]
+            reverse_device_maps[worker_name] = {
+                remote_device_map[k]: k for k in remote_device_map
+            }
+
+    agent._set_reverse_device_maps(reverse_device_maps)
 
 def _tensorpipe_init_backend_handler(store, name, rank, world_size, rpc_backend_options):
     from . import TensorPipeRpcBackendOptions
@@ -260,55 +334,118 @@ def _tensorpipe_init_backend_handler(store, name, rank, world_size, rpc_backend_
             )
         )
 
-    # The agent's join method is required to behave like a barrier and perform
-    # collective operations, for which it relies on a process group, instead of
-    # re-implementing this on top of RPCs.
-
-    group = _init_process_group(store, rank, world_size)
-
-    if torch.cuda.is_available():
-        # It's necessary to initialize PyTorch CUDA states here (e.g.,
-        # CUDACachingAllocator). If this is missing, we could hit errors like
-        # "allocator not initialized", because other processes might send
-        # CUDA-related RPC request to this process before user code in this
-        # process initializes its PyTorch CUDA states.
-        torch.cuda.init()
-        device_count = torch.cuda.device_count()
+    if world_size:
+        is_static_group = True
     else:
-        device_count = 0
+        is_static_group = False
 
-    reverse_device_maps, devices = _tensorpipe_exchange_and_check_all_device_maps(
-        name,
-        device_count,
-        rpc_backend_options.device_maps,
-        rpc_backend_options.devices,
-        group,
-    )
+    # world_size is specified so this is a static group (ranks cannot join and leave)
+    if is_static_group:
+        # The agent's join method is required to behave like a barrier and perform
+        # collective operations, for which it relies on a process group, instead of
+        # re-implementing this on top of RPCs.
 
-    # TODO: add try-except and destroy _agent in all processes if any fails.
-    agent = TensorPipeAgent(
-        store,
-        name,
-        rank,
-        world_size,
-        rpc_backend_options,
-        reverse_device_maps,
-        devices,
-    )
+        group = _init_process_group(store, rank, world_size)
 
-    api._init_rpc_states(agent)
+        if torch.cuda.is_available():
+            # It's necessary to initialize PyTorch CUDA states here (e.g.,
+            # CUDACachingAllocator). If this is missing, we could hit errors like
+            # "allocator not initialized", because other processes might send
+            # CUDA-related RPC request to this process before user code in this
+            # process initializes its PyTorch CUDA states.
+            torch.cuda.init()
+            device_count = torch.cuda.device_count()
+        else:
+            device_count = 0
 
-    # Run one dummy round of RPC to initialize channels/transports. Without
-    # this, it's easy to hit timeout in rpc.shutdown() if there is no other RPC
-    # on that process before rpc.shutdown(), as the agent initialization can
-    # take longer than 5s.
-    api._all_gather(None, timeout=rpc_backend_options.rpc_timeout)
-    # Need a barrier here to make sure no peers leave before the rank0 finishes
-    # _all_gather
-    group.barrier().wait()
+        reverse_device_maps, devices = _tensorpipe_exchange_and_check_all_device_maps(
+            name,
+            device_count,
+            rpc_backend_options.device_maps,
+            rpc_backend_options.devices,
+            group,
+        )
 
-    return agent
+        # TODO: add try-except and destroy _agent in all processes if any fails.
+        agent = TensorPipeAgent(
+            store,
+            name,
+            rank,
+            world_size,
+            rpc_backend_options,
+            reverse_device_maps,
+            devices,
+        )
 
+        api._init_rpc_states(agent)
+
+        # Run one dummy round of RPC to initialize channels/transports. Without
+        # this, it's easy to hit timeout in rpc.shutdown() if there is no other RPC
+        # on that process before rpc.shutdown(), as the agent initialization can
+        # take longer than 5s.
+        api._all_gather(None, timeout=rpc_backend_options.rpc_timeout)
+        # Need a barrier here to make sure no peers leave before the rank0 finishes
+        # _all_gather
+        group.barrier().wait()
+
+        return agent
+    # initialization for dynamic rpc (ranks can join and leave)
+    else:
+        # TODO: retrieve token from store to signal start of rank join/leave critical section
+        token = f"TokenOnWorker{rank}"
+
+        while True:
+            returned = store.compare_set("init_rpc_token", "", token).decode()
+            if returned == token:
+                print(f"{rank} got token")
+                if torch.cuda.is_available():
+                    # It's necessary to initialize PyTorch CUDA states here (e.g.,
+                    # CUDACachingAllocator). If this is missing, we could hit errors like
+                    # "allocator not initialized", because other processes might send
+                    # CUDA-related RPC request to this process before user code in this
+                    # process initializes its PyTorch CUDA states.
+                    torch.cuda.init()
+                    device_count = torch.cuda.device_count()
+                else:
+                    device_count = 0
+
+                # Validate devices and device_maps locally for current rank
+                _tensorpipe_check_local_device_maps(name, rpc_backend_options)
+
+                # Construct TPAgent with empty reverse_device_map and devices
+                # these two properties will be updated after construction
+                print(f"{rank}: begin construct TPAgent")
+                agent = TensorPipeAgent(
+                    store,
+                    name,
+                    rank,
+                    world_size,
+                    rpc_backend_options,
+                    {},
+                    [],
+                )
+                print(f"{rank}: finish construct TPAgent")
+
+                try:
+                    # TODO: Notify all workers in group this rank has joined and set devices and reverse_device_map
+                    # This is a synchronous operation that completes once all existing ranks are updated
+                    # _tensorpipe_check_remote_device_maps(agent, rpc_backend_options)
+                    pass
+                except Exception:
+                    api.shutdown()
+                    raise
+
+                # finish initialization
+                break
+            else:
+                from datetime import timedelta
+                store.wait([returned], timedelta(seconds=15))
+
+        # TODO: update from store to signal end of rank join/leave critical section
+        store.set("init_rpc_token", "")
+        store.set(token, "1")
+
+        return agent
 
 register_backend(
     "TENSORPIPE",

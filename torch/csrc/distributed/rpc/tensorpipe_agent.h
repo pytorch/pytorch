@@ -165,7 +165,7 @@ class TORCH_API TensorPipeAgent : public RpcAgent {
       const c10::intrusive_ptr<::c10d::Store>& store,
       std::string selfName,
       worker_id_t selfId,
-      int worldSize,
+      optional<int> worldSize,
       TensorPipeRpcBackendOptions opts,
       std::unordered_map<std::string, DeviceMap> reverseDeviceMaps,
       std::vector<c10::Device> devices,
@@ -331,7 +331,8 @@ class TORCH_API TensorPipeAgent : public RpcAgent {
   // Store keys that will used to count joined processes and active calls during
   // the shutdown process
   ::c10d::PrefixStore shutdownStore_;
-  const int worldSize_;
+  int worldSize_ = 0;
+  bool isStaticGroup_;
 
   std::atomic<uint64_t> nextMessageID_{0};
 
