@@ -44,6 +44,14 @@ class TestGitHubPR(TestCase):
         self.assertTrue(author is not None)
         self.assertTrue("@" in author)
 
+    @mock.patch('trymerge.gh_graphql', side_effect=mocked_gh_graphql)
+    def test_large_diff(self, mocked_gql: Any) -> None:
+        "Tests that PR with 100+ files can be fetched"
+        pr = GitHubPR("pytorch", "pytorch", 73099)
+        self.assertTrue(pr.get_changed_files_count() > 100)
+        flist = pr.get_changed_files()
+        self.assertEqual(len(flist), pr.get_changed_files_count())
+
 
 if __name__ == "__main__":
     main()
