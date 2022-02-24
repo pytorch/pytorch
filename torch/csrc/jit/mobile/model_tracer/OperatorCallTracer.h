@@ -26,6 +26,9 @@ struct OperatorCallTracer final {
     return called_operators_;
   }
 
+  /* Protect concurrent writes into the set. */
+  static std::mutex& getMutex();
+
   ~OperatorCallTracer() {
     at::removeCallback(handle_);
   }
