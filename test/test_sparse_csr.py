@@ -1370,7 +1370,6 @@ class TestSparseCSR(TestCase):
             self.assertEqual(actual.col_indices(), expect.col_indices())
             self.assertEqual(actual._nnz(), expect._nnz())
 
-
     @unittest.expectedFailure
     @ops(sparse_csr_unary_ufuncs, dtypes=OpDTypes.supported, allowed_dtypes=[torch.double, torch.cdouble])
     def test_autograd_sparse_csr_unary(self, device, dtype, op):
@@ -1413,18 +1412,20 @@ class TestSparseCSR(TestCase):
         for sample in samples:
             a = sample.args[0].to_sparse_csr()
 
-            def fn(c, b):
-                output = torch.addmm(c, a, b, **sample.kwargs)
-                if sample.output_process_fn_grad is not None:
-                    return sample.output_process_fn_grad(output)
-                return output
+            for addmm in [torch.addmm, torch.sparse.addmm]:
 
-            self.assertTrue(torch.autograd.gradcheck(fn, [sample.input, sample.args[1]], fast_mode=True))
+                def fn(c, b):
+                    output = addmm(c, a, b, **sample.kwargs)
+                    if sample.output_process_fn_grad is not None:
+                        return sample.output_process_fn_grad(output)
+                    return output
 
-            # noncontiguous
-            c = make_tensor(sample.input.shape, device=device, dtype=dtype, noncontiguous=True, requires_grad=True)
-            b = make_tensor(sample.args[1].shape, device=device, dtype=dtype, noncontiguous=True, requires_grad=True)
-            self.assertTrue(torch.autograd.gradcheck(fn, [c, b], fast_mode=True))
+                self.assertTrue(torch.autograd.gradcheck(fn, [sample.input, sample.args[1]], fast_mode=True))
+
+                # noncontiguous
+                c = make_tensor(sample.input.shape, device=device, dtype=dtype, noncontiguous=True, requires_grad=True)
+                b = make_tensor(sample.args[1].shape, device=device, dtype=dtype, noncontiguous=True, requires_grad=True)
+                self.assertTrue(torch.autograd.gradcheck(fn, [c, b], fast_mode=True))
 
     @skipCUDAIfRocm
     @skipCPUIfNoMklSparse
@@ -1486,7 +1487,7 @@ class TestSparseCSR(TestCase):
             args = [make_tensor(a.shape, device=device, dtype=dtype, noncontiguous=True, requires_grad=True) for a in sample.args]
             self.assertTrue(torch.autograd.gradcheck(fn, args, fast_mode=True))
 
-    @dtypes(*get_all_dtypes(include_bool=False, include_half=False, include_bfloat16=False))
+    @dtypes(*get_all_dtypes(include_bool=False))
     def test_direct_coo_csr_conversion(self, device, dtype):
         for m, n in itertools.product([5, 2, 0], [5, 2, 0]):
             size = (m, n)
