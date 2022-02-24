@@ -248,11 +248,16 @@ AT_PRIVATE_CASE_TYPE("{sig.name}", at::ScalarType::{dtype}, {ScalarTypeToCppMapp
 
     dtype_cases_str = "\n".join(dtype_cases)
 
+    stub_sig = StubSignature(g)
+
     return f"""
 {ufunctors}
 
-{sig.defn()} {{
-  TensorIteratorBase& iter = *this;
+{stub_sig.type_defn()};
+{stub_sig.dispatch_decl()};
+{stub_sig.dispatch_defn()};
+
+{stub_sig.kernel_defn()} {{
   at::ScalarType st = iter.common_dtype();
   RECORD_KERNEL_FUNCTION_DTYPE("{sig.name}", st);
   switch (st) {{
@@ -260,6 +265,11 @@ AT_PRIVATE_CASE_TYPE("{sig.name}", at::ScalarType::{dtype}, {ScalarTypeToCppMapp
     default:
       TORCH_CHECK(false, "{sig.name}", " not implemented for '", toString(st), "'");
   }}
+}}
+REGISTER_DISPATCH({stub_sig.name}, &{stub_sig.kernel_name});
+
+{sig.defn()} {{
+  {stub_sig.call(sig.arguments())};
 }}
 """
 

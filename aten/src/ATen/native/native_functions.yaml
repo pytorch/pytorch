@@ -5055,10 +5055,8 @@
   device_check: NoCheck   # TensorIterator
   structured: True
   structured_inherits: TensorIteratorBase
-  ufunc_inner_loop:
-    Generic: sub (AllAndComplex, BFloat16, Half)
-    ScalarOnly: sub (Bool)
   dispatch:
+    CPU, CUDA: sub_out
     SparseCPU, SparseCUDA: sub_out_sparse
 
 - func: sub.Tensor(Tensor self, Tensor other, *, Scalar alpha=1) -> Tensor
