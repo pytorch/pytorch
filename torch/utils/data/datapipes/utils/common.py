@@ -2,16 +2,10 @@ import os
 import fnmatch
 import warnings
 
-from enum import Enum
 from io import IOBase
 from typing import Iterable, List, Tuple, Union, Optional
 
 from torch.utils.data._utils.serialization import DILL_AVAILABLE
-
-
-class SerializationType(Enum):
-    PICKLE = "pickle"
-    DILL = "dill"
 
 
 def check_lambda_fn(fn):

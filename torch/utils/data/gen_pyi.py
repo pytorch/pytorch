@@ -184,7 +184,7 @@ mapDP_method_to_special_output_type: Dict[str, str] = {}
 
 def main() -> None:
     """
-    # Inject file into template dataset.pyi.in
+    # Inject file into template datapipe.pyi.in
     TODO: The current implementation of this script only generates interfaces for built-in methods. To generate
           interface for user-defined DataPipes, consider changing `IterDataPipe.register_datapipe_as_function`.
     """
@@ -195,8 +195,8 @@ def main() -> None:
                                                     "MapDataPipe", mapDP_method_to_special_output_type)
 
     fm = FileManager(install_dir='.', template_dir='.', dry_run=False)
-    fm.write_with_template(filename="dataset.pyi",
-                           template_fn="dataset.pyi.in",
+    fm.write_with_template(filename="datapipe.pyi",
+                           template_fn="datapipe.pyi.in",
                            env_callable=lambda: {'IterDataPipeMethods': iter_method_definitions,
                                                  'MapDataPipeMethods': map_method_definitions})
 
