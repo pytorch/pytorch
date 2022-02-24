@@ -58,10 +58,11 @@ TORCH_API inline bool doesNotHeapAllocateWhenStoredInIValue(const Type& type) {
 }
 
 TORCH_API inline bool borrowsOutputs(c10::Symbol kind) {
-  static const std::array<c10::Symbol, 3> symbols_with_borrowed_outputs = {
+  static const std::array<c10::Symbol, 4> symbols_with_borrowed_outputs = {
       c10::Symbol::fromQualString("static_runtime::select_tensor"),
       c10::Symbol::fromQualString("static_runtime::dict_unpack"),
       c10::Symbol::fromQualString("static_runtime::VarTupleUnpack"),
+      c10::Symbol::fromQualString("prim::IfThenElse"),
   };
   return std::find(
              symbols_with_borrowed_outputs.begin(),
@@ -165,11 +166,18 @@ struct TORCH_API StaticModuleOptions {
   bool manage_output_tensors{false};
   // Gates the ReplaceWithCopy pass, which replaces ops that
   // sometimes alias their outputs with out variants that
-  // always copy (so the output may participate in memory planning)
+  // always copy (so the output may participate in memory planning).
+  // Since replacing with copies is done after TensorExpr fusion, the
+  // resulting graph does not conform to the assumptions made in the fuser.
+  // So, even if this flag is turned on, the ReplaceWithCopy pass will not
+  // be executed if TensorExpr fusion is enabled.
   bool use_copy_variants{true};
   // Gates the ReplaceWithMaybeCopy pass, which replaces ops that
   // sometimes alias their outputs with subgraphs that include an out
   // variant.
+  // For the same reason as `use_copy_variants`, the ReplaceWithMaybeCopy pass
+  // will not be executed if TensorExpr fusion is enabled, even if this flag
+  // is turned on.
   bool use_maybe_copy_variants{true};
   // enable TensorExpr fusion of ops at model loading time
   bool enable_tensorexpr_fusion{false};
