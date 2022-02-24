@@ -2,6 +2,7 @@
 
 #include <ATen/record_function.h>
 #include <map>
+#include <mutex>
 #include <set>
 #include <string>
 
@@ -30,6 +31,8 @@ struct KernelDTypeTracer final {
 
   KernelDTypeTracer();
   static kernel_tags_type& getCalledKernelTags();
+  /* Protect concurrent writes into the map. */
+  static std::mutex& getMutex();
 
   ~KernelDTypeTracer() {
     at::removeCallback(handle_);

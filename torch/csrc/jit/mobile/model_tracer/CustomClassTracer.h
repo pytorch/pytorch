@@ -2,6 +2,7 @@
 
 #include <ATen/record_function.h>
 #include <map>
+#include <mutex>
 #include <set>
 #include <string>
 
@@ -29,6 +30,8 @@ struct CustomClassTracer final {
 
   CustomClassTracer();
   static custom_classes_type& getLoadedClasses();
+  /* Protect concurrent writes into the set. */
+  static std::mutex& getMutex();
 
   ~CustomClassTracer() {
     at::removeCallback(handle_);

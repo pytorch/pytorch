@@ -9,6 +9,7 @@ OperatorCallTracer::OperatorCallTracer() {
       [](const at::RecordFunction& fn) -> std::unique_ptr<at::ObserverContext> {
     c10::optional<c10::OperatorName> op_name = fn.operator_name();
     if (op_name.has_value()) {
+      std::lock_guard<std::mutex> guard(getMutex());
       called_operators_.insert(c10::toString(*op_name));
     }
     return nullptr;
@@ -16,6 +17,11 @@ OperatorCallTracer::OperatorCallTracer() {
 
   handle_ = at::addGlobalCallback(at::RecordFunctionCallback(recorder_cb)
                                       .scopes({at::RecordScope::FUNCTION}));
+}
+
+std::mutex& OperatorCallTracer::getMutex() {
+  static std::mutex m;
+  return m;
 }
 
 std::set<std::string> OperatorCallTracer::called_operators_;
