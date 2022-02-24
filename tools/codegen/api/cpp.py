@@ -120,7 +120,6 @@ def argumenttype_type(
             return NamedCType(binds, BaseCType(dimnameListT))
         elif str(t.elem) == 'Tensor?':
             return NamedCType(binds, ConstRefCType(ListCType(OptionalCType(BaseCType(tensorT)))))
-        elem = argumenttype_type(t.elem, mutable=mutable, binds=binds)
         elem = argumenttype_type(t.elem, mutable=mutable, binds=binds, structured_type_override=structured_type_override)
         return NamedCType(binds, ArrayRefCType(elem.type))
     else:
