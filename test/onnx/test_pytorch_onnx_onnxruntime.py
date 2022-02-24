@@ -740,6 +740,7 @@ class TestONNXRuntime(unittest.TestCase):
         dummy_input = torch.randn(1, 3, 224, 224)
         self.run_test(model, (dummy_input,))
 
+    @skipIfUnsupportedMinOpsetVersion(10)
     @disableScriptTest()
     def test_mobilenet_v3_quant(self):
         model = torchvision.models.quantization.mobilenet_v3_large(pretrained=True, quantize=True)
