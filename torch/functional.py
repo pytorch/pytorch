@@ -586,7 +586,8 @@ def stft(input: Tensor, n_fft: int, hop_length: Optional[int] = None,
 
     The STFT computes the Fourier transform of short overlapping windows of the
     input. This giving frequency components of the signal as they change over
-    time. The interface of this function is modeled after the librosa_ stft function.
+    time. The interface of this function is modeled after (but *not* a drop-in
+    replacement for) librosa_ stft function.
 
     .. _librosa: https://librosa.org/doc/latest/generated/librosa.stft.html
 
@@ -1648,9 +1649,10 @@ def _lu_impl(A, pivot=True, get_infos=False, out=None):
     ``True``.
 
     .. note::
-        * The pivots returned by the function are 1-indexed. If :attr:`pivot`
-          is ``False``, then the returned pivots is a tensor filled with
-          zeros of the appropriate size.
+        * The returned permutation matrix for every matrix in the batch is
+          represented by a 1-indexed vector of size ``min(A.shape[-2], A.shape[-1])``.
+          ``pivots[i] == j`` represents that in the ``i``-th step of the algorithm,
+          the ``i``-th row was permuted with the ``j-1``-th row.
         * LU factorization with :attr:`pivot` = ``False`` is not available
           for CPU, and attempting to do so will throw an error. However,
           LU factorization with :attr:`pivot` = ``False`` is available for

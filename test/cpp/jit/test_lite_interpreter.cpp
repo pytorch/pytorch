@@ -6,15 +6,15 @@
 #include <torch/csrc/autograd/generated/variable_factories.h>
 #include <torch/csrc/jit/api/module.h>
 #include <torch/csrc/jit/frontend/resolver.h>
-#include <torch/csrc/jit/mobile/backport.h>
-#include <torch/csrc/jit/mobile/backport_manager.h>
+#include <torch/csrc/jit/mobile/compatibility/backport.h>
+#include <torch/csrc/jit/mobile/compatibility/backport_manager.h>
+#include <torch/csrc/jit/mobile/compatibility/model_compatibility.h>
+#include <torch/csrc/jit/mobile/compatibility/runtime_compatibility.h>
 #include <torch/csrc/jit/mobile/import.h>
 #include <torch/csrc/jit/mobile/interpreter.h>
-#include <torch/csrc/jit/mobile/model_compatibility.h>
 #include <torch/csrc/jit/mobile/module.h>
 #include <torch/csrc/jit/mobile/parse_bytecode.h>
 #include <torch/csrc/jit/mobile/parse_operators.h>
-#include <torch/csrc/jit/mobile/runtime_compatibility.h>
 #include <torch/csrc/jit/mobile/upgrader_mobile.h>
 #include <torch/csrc/jit/serialization/export.h>
 #include <torch/csrc/jit/serialization/import.h>
@@ -186,6 +186,42 @@ TEST(LiteInterpreterTest, Tuple) {
   AT_ASSERT(output.toTupleRef().elements()[1].toInt() == 2);
 }
 
+TEST(LiteInterpreterTest, AtenFormat) {
+  Module m("m");
+  m.define(R"""(
+  def forward(self, fmt:str="first {} {}", num:str="abc"):
+    x = 2
+    x = x * x
+    return fmt.format(num, x)
+  )""");
+  std::stringstream ss;
+  m._save_for_mobile(ss);
+  mobile::Module bc = _load_for_mobile(ss);
+  std::vector<torch::jit::IValue> inputs;
+  auto output_bc = bc.get_method("forward")(inputs);
+  auto output_m = m.get_method("forward")(inputs);
+  // std::cout << output_m.toStringRef() << "\n"
+  //           << output_bc.toStringRef() << std::endl;
+  AT_ASSERT(output_m.toStringRef() == output_bc.toStringRef());
+}
+
+TEST(LiteInterpreterTest, PrimDevice) {
+  Module m("m");
+  m.define(R"""(
+  def forward(self, x:torch.Tensor):
+    return x.device
+  )""");
+  std::stringstream ss;
+  m._save_for_mobile(ss);
+  mobile::Module bc = _load_for_mobile(ss);
+  std::vector<torch::jit::IValue> inputs;
+  auto minput = 3.5 * torch::ones({});
+  inputs.emplace_back(minput);
+  auto output_bc = bc.get_method("forward")(inputs);
+  auto output_m = m.get_method("forward")(inputs);
+  AT_ASSERT(output_bc.toDevice().str() == output_m.toDevice().str());
+}
+
 TEST(LiteInterpreterTest, Dict) {
   Module m("m");
   m.define(R"JIT(
@@ -202,6 +238,26 @@ TEST(LiteInterpreterTest, Dict) {
   std::vector<torch::jit::IValue> inputs({torch::ones({})});
   auto output = bc.get_method("forward")(inputs);
   AT_ASSERT(output.toGenericDict().at("result").toTensor().item().toInt() == 2);
+}
+
+TEST(LiteInterpreterTest, List) {
+  Module m("m");
+  m.define(R"JIT(
+  def foo(self, x):
+      return [x + 2]
+
+  def forward(self, x):
+      d = self.foo(x)
+      return d
+  )JIT");
+  std::stringstream ss;
+  m._save_for_mobile(ss);
+  mobile::Module bc = _load_for_mobile(ss);
+  std::vector<torch::jit::IValue> inputs({torch::ones({})});
+  auto output = bc.get_method("forward")(inputs);
+  auto server_output = m.forward(inputs);
+  EXPECT_EQ(output.toList().get(0).toTensor().item().toInt(), 3);
+  EXPECT_EQ(output, server_output);
 }
 
 TEST(LiteInterpreterTest, PrimOverload) {
@@ -515,19 +571,34 @@ namespace {
 
 void compareModelOutput(
     c10::ArrayRef<IValue> actual_result_list,
-    const std::vector<Tensor>& expect_result_list) {
+    const std::vector<IValue>& expect_result_list) {
   AT_ASSERT(actual_result_list.size() == expect_result_list.size());
-  AT_ASSERT(actual_result_list[0].toTensor().equal(expect_result_list[0]));
   AT_ASSERT(
-      actual_result_list[1].toTensor().dim() == expect_result_list[1].dim());
-  AT_ASSERT(actual_result_list[2].toTensor().equal(expect_result_list[2]));
-  AT_ASSERT(actual_result_list[3].toTensor().equal(expect_result_list[3]));
+      actual_result_list[0].toTensor().equal(expect_result_list[0].toTensor()));
+  AT_ASSERT(
+      actual_result_list[1].toTensor().dim() ==
+      expect_result_list[1].toTensor().dim());
+  AT_ASSERT(
+      actual_result_list[2].toTensor().equal(expect_result_list[2].toTensor()));
+  AT_ASSERT(
+      actual_result_list[3].toTensor().equal(expect_result_list[3].toTensor()));
+  ASSERT_EQ(
+      actual_result_list[4].toStringRef(), expect_result_list[4].toStringRef());
+  ASSERT_EQ(actual_result_list[5].toBool(), expect_result_list[5].toBool());
+  ASSERT_EQ(actual_result_list[6].toBool(), expect_result_list[6].toBool());
+  ASSERT_EQ(actual_result_list[7].toBool(), expect_result_list[7].toBool());
+  AT_ASSERT(
+      actual_result_list[8].toTensor().equal(expect_result_list[8].toTensor()));
+  ASSERT_EQ(
+      actual_result_list[9].toStringRef(), expect_result_list[9].toStringRef());
+  ASSERT_EQ(actual_result_list[10].toInt(), expect_result_list[10].toInt());
+  ASSERT_EQ(actual_result_list[11].toBool(), expect_result_list[11].toBool());
 }
 
 void runAndCheckTorchScriptModel(
     std::stringstream& input_model_stream,
     const std::vector<IValue>& input_data,
-    const std::vector<Tensor>& expect_result_list,
+    const std::vector<IValue>& expect_result_list,
     const int64_t expect_version) {
   auto actual_version = _get_model_bytecode_version(input_model_stream);
   AT_ASSERT(actual_version == expect_version);
@@ -544,7 +615,7 @@ void runAndCheckTorchScriptModel(
 void runAndCheckBytecodeModel(
     std::stringstream& input_model_stream,
     const std::vector<IValue>& input_data,
-    const std::vector<Tensor>& expect_result_list,
+    const std::vector<IValue>& expect_result_list,
     const int64_t expect_version) {
   auto actual_version = _get_model_bytecode_version(input_model_stream);
   AT_ASSERT(actual_version == expect_version);
@@ -562,7 +633,7 @@ void runAndCheckBytecodeModel(
 void backportAllVersionCheck(
     std::stringstream& test_model_file_stream,
     std::vector<IValue>& input_data,
-    std::vector<Tensor>& expect_result_list,
+    std::vector<IValue>& expect_result_list,
     const int64_t expect_from_version) {
   auto from_version = _get_model_bytecode_version(test_model_file_stream);
   AT_ASSERT(from_version == expect_from_version);
@@ -612,6 +683,9 @@ TEST(LiteInterpreterTest, BackPortByteCodeModelAllVersions) {
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   module.register_parameter("bias", torch::ones({20}), false);
   module.define(R"(
+    def fn(self, x:float=1.0):
+      return x
+
     def forward(self, input):
       x1 = torch.zeros(2, 2)
       x2 = torch.empty_like(torch.empty(2, 2))
@@ -621,8 +695,22 @@ TEST(LiteInterpreterTest, BackPortByteCodeModelAllVersions) {
       x = 2 * torch.ones(1)
       h = torch.ones(1)
       torch.add(x, h, out=x)
-      return (x1, x2, x3, x)
-  )");
+      device = torch.ones(1, 1).cpu().device.type
+      is_cuda = x1.is_cuda
+      bool_val = True
+      check_is = [] is None
+      check_is_not = [1] is not None
+      check_not = not bool_val
+      num_to_tensor = torch.tensor([self.fn()])
+      d = {"a": "abc"}
+      check_dict_index = d["a"]
+      check_dim = x1.dim()
+      return (
+        x1, x2, x3, x, device, is_cuda, check_is,
+        check_is_not, num_to_tensor, check_dict_index,
+        check_dim, check_not
+        )
+      )");
 
   torch::jit::Module module_freeze = freeze(module);
 
@@ -630,12 +718,21 @@ TEST(LiteInterpreterTest, BackPortByteCodeModelAllVersions) {
   module_freeze._save_for_mobile(input_model_stream);
   std::vector<IValue> input_data =
       std::vector<IValue>({torch::ones({1, 1, 28, 28})});
-  std::vector<Tensor> expect_result_list;
+  std::vector<IValue> expect_result_list;
   expect_result_list.emplace_back(at::ones({2, 2}, ScalarType::Float) * 0);
   expect_result_list.emplace_back(at::ones({2, 2}, ScalarType::Float));
   expect_result_list.emplace_back(
       at::ones({1, 20, 24, 24}, ScalarType::Float) * 26);
   expect_result_list.emplace_back(3 * at::ones({1}));
+  // "cpu" False, False, True, tensor(1), "abc", 2, False)
+  expect_result_list.emplace_back(c10::IValue("cpu"));
+  expect_result_list.emplace_back(c10::IValue(false));
+  expect_result_list.emplace_back(c10::IValue(false));
+  expect_result_list.emplace_back(c10::IValue(true));
+  expect_result_list.emplace_back(c10::IValue(at::ones({1})));
+  expect_result_list.emplace_back(c10::IValue("abc"));
+  expect_result_list.emplace_back(c10::IValue(2));
+  expect_result_list.emplace_back(c10::IValue(false));
 
   backportAllVersionCheck(
       input_model_stream,
@@ -1517,8 +1614,8 @@ TEST(LiteInterpreterTest, OperatorSize1) {
   mobile::Module bc = _load_for_mobile(ss);
   const auto& func = bc.get_method("forward").function();
   ASSERT_EQ(
-      func.get_code()->operator_input_sizes_.size(),
-      func.get_code()->operators_.size());
+      func.get_code().operator_input_sizes_.size(),
+      func.get_code().operators_.size());
 }
 
 TEST(LiteInterpreterTest, OperatorTest2) { // NOLINT (use =delete in gtest)
@@ -1552,8 +1649,8 @@ TEST(LiteInterpreterTest, OperatorTest2) { // NOLINT (use =delete in gtest)
     mobile::Module bc = _load_for_mobile(ss);
     const auto& func = bc.get_method("test_func").function();
     ASSERT_EQ(
-        func.get_code()->operator_input_sizes_.size(),
-        func.get_code()->operators_.size());
+        func.get_code().operator_input_sizes_.size(),
+        func.get_code().operators_.size());
   }
 }
 
@@ -1590,7 +1687,7 @@ TEST(LiteInterpreterUpgraderTest, DivTensorV2) {
   */
   mobile::Module m_module = _load_for_mobile(test_model_file);
   auto intrsuction_list =
-      m_module.get_method("forward").function().get_code()->instructions_;
+      m_module.get_method("forward").function().get_code().instructions_;
   uint64_t number_of_call_instruction = 0;
   for (auto& instruction : intrsuction_list) {
     number_of_call_instruction += (instruction.op == OpCode::CALL);
@@ -1629,7 +1726,7 @@ TEST(LiteInterpreterUpgraderTest, DivTensorOutV2) {
   mobile::Module m_module = _load_for_mobile(test_model_file);
 
   auto intrsuction_list =
-      m_module.get_method("forward").function().get_code()->instructions_;
+      m_module.get_method("forward").function().get_code().instructions_;
   uint64_t number_of_call_instruction = 0;
   for (auto& instruction : intrsuction_list) {
     number_of_call_instruction += (instruction.op == OpCode::CALL);
@@ -1670,7 +1767,7 @@ TEST(LiteInterpreterUpgraderTest, DivTensorInplaceV2) {
   mobile::Module m_module = _load_for_mobile(test_model_file);
 
   auto intrsuction_list =
-      m_module.get_method("forward").function().get_code()->instructions_;
+      m_module.get_method("forward").function().get_code().instructions_;
   uint64_t number_of_call_instruction = 0;
   for (auto& instruction : intrsuction_list) {
     number_of_call_instruction += (instruction.op == OpCode::CALL);
@@ -1710,7 +1807,7 @@ TEST(LiteInterpreterUpgraderTest, DivScalarFloatV2) {
   mobile::Module m_module = _load_for_mobile(test_model_file);
 
   auto intrsuction_list =
-      m_module.get_method("forward").function().get_code()->instructions_;
+      m_module.get_method("forward").function().get_code().instructions_;
   uint64_t number_of_call_instruction = 0;
   for (auto& instruction : intrsuction_list) {
     number_of_call_instruction += (instruction.op == OpCode::CALL);
@@ -1750,7 +1847,7 @@ TEST(LiteInterpreterUpgraderTest, DivScalarReciprocalFloatV2) {
   mobile::Module m_module = _load_for_mobile(test_model_file);
 
   auto intrsuction_list =
-      m_module.get_method("forward").function().get_code()->instructions_;
+      m_module.get_method("forward").function().get_code().instructions_;
   uint64_t number_of_call_instruction = 0;
   for (auto& instruction : intrsuction_list) {
     number_of_call_instruction += (instruction.op == OpCode::CALL);
@@ -1791,7 +1888,7 @@ TEST(LiteInterpreterUpgraderTest, DivScalarReciprocalIntV2) {
   mobile::Module m_module = _load_for_mobile(test_model_file);
 
   auto intrsuction_list =
-      m_module.get_method("forward").function().get_code()->instructions_;
+      m_module.get_method("forward").function().get_code().instructions_;
   uint64_t number_of_call_instruction = 0;
   for (auto& instruction : intrsuction_list) {
     number_of_call_instruction += (instruction.op == OpCode::CALL);
@@ -1843,7 +1940,7 @@ TEST(LiteInterpreterUpgraderTest, DivScalarScalarV2) {
   */
   mobile::Module m_module = _load_for_mobile(test_model_file);
   auto intrsuction_list =
-      m_module.get_method("forward").function().get_code()->instructions_;
+      m_module.get_method("forward").function().get_code().instructions_;
   uint64_t number_of_call_instruction = 0;
   for (auto& instruction : intrsuction_list) {
     number_of_call_instruction += (instruction.op == OpCode::CALL);
@@ -1884,7 +1981,7 @@ TEST(LiteInterpreterUpgraderTest, DivScalarIntV2) {
   mobile::Module m_module = _load_for_mobile(test_model_file);
 
   auto intrsuction_list =
-      m_module.get_method("forward").function().get_code()->instructions_;
+      m_module.get_method("forward").function().get_code().instructions_;
   uint64_t number_of_call_instruction = 0;
   for (auto& instruction : intrsuction_list) {
     number_of_call_instruction += (instruction.op == OpCode::CALL);
@@ -1924,7 +2021,7 @@ TEST(LiteInterpreterUpgraderTest, DivScalarInplaceFloatV2) {
   mobile::Module m_module = _load_for_mobile(test_model_file);
 
   auto intrsuction_list =
-      m_module.get_method("forward").function().get_code()->instructions_;
+      m_module.get_method("forward").function().get_code().instructions_;
   uint64_t number_of_call_instruction = 0;
   for (auto& instruction : intrsuction_list) {
     number_of_call_instruction += (instruction.op == OpCode::CALL);
@@ -1964,7 +2061,7 @@ TEST(LiteInterpreterUpgraderTest, DivScalarInplaceIntV2) {
   mobile::Module m_module = _load_for_mobile(test_model_file);
 
   auto intrsuction_list =
-      m_module.get_method("forward").function().get_code()->instructions_;
+      m_module.get_method("forward").function().get_code().instructions_;
   uint64_t number_of_call_instruction = 0;
   for (auto& instruction : intrsuction_list) {
     number_of_call_instruction += (instruction.op == OpCode::CALL);
@@ -1988,9 +2085,9 @@ TEST(LiteInterpreterUpgraderTest, Upgrader) {
 
   for (auto& byteCodeFunctionWithOperator : getUpgraderBytecodeList()) {
     ASSERT_EQ(
-        byteCodeFunctionWithOperator.function.get_code()->operators_.size(),
-        byteCodeFunctionWithOperator.function.get_code()->op_names_.size());
-    if (byteCodeFunctionWithOperator.function.get_code()->operators_.empty()) {
+        byteCodeFunctionWithOperator.function.get_code().operators_.size(),
+        byteCodeFunctionWithOperator.function.get_code().op_names_.size());
+    if (byteCodeFunctionWithOperator.function.get_code().operators_.empty()) {
       for (const auto& op : byteCodeFunctionWithOperator.operators) {
         byteCodeFunctionWithOperator.function.append_operator(
             op.name,
@@ -2004,6 +2101,130 @@ TEST(LiteInterpreterUpgraderTest, Upgrader) {
 
   ASSERT_EQ(getUpgraderBytecodeList().size(), upgrader_functions.size());
 }
+
+void enumerateTupleType(
+    size_t depth,
+    std::vector<TypePtr>& current,
+    const std::vector<TypePtr>& candidates,
+    std::vector<TypePtr>& out) {
+  static std::vector<std::string> fieldNames;
+  if (depth > fieldNames.size()) {
+    fieldNames.reserve(depth);
+    for (size_t i = fieldNames.size(); i < depth; i++) {
+      fieldNames.push_back("field" + std::to_string(i));
+    }
+  }
+  if (depth == 0) {
+    out.push_back(TupleType::create(current));
+    while (fieldNames.size() > current.size()) {
+      fieldNames.pop_back();
+    }
+    out.push_back(TupleType::createNamed("NamedTuple", fieldNames, current));
+    return;
+  }
+  for (const auto& type : candidates) {
+    if (containsAnyType(type)) {
+      continue;
+    }
+    current.push_back(type);
+    enumerateTupleType(depth - 1, current, candidates, out);
+    current.pop_back();
+  }
+}
+
+class LiteInterpreterDynamicTypeTestFixture
+    : public ::testing::TestWithParam<size_t> {
+ protected:
+  void SetUp() override {
+    cu = std::make_shared<CompilationUnit>();
+    std::vector<TypePtr> keyTypes = {
+        AnyType::get(),
+        IntType::get(),
+        BoolType::get(),
+        FloatType::get(),
+        ComplexType::get(),
+        StringType::get(),
+        TensorType::get(),
+        DeviceObjType::get(),
+    };
+    types = {
+        NoneType::get(),
+        NumberType::get(),
+        ClassType::create("__torch__.TestClass1", cu),
+        ClassType::create("__torch__.TestClass2", cu),
+        AnyListType::get(),
+        AnyTupleType::get(),
+        StreamObjType::get(),
+        CapsuleType::get(),
+        GeneratorType::get(),
+        StorageType::get(),
+        VarType::create("t"),
+        VarType::create("v"),
+        AnyClassType::get()};
+    std::copy(keyTypes.begin(), keyTypes.end(), back_inserter(types));
+    auto expandTypes = [&](size_t tupleSize) {
+      std::vector<TypePtr> nested;
+      for (const auto& type : types) {
+        if (!(type == AnyType::get())) {
+          nested.emplace_back(ListType::create(type));
+          if (!(type == NoneType::get() ||
+                type->kind() == OptionalType::Kind)) {
+            nested.emplace_back(OptionalType::create(type));
+          }
+        }
+        for (const auto& keyType : keyTypes) {
+          nested.emplace_back(DictType::create(keyType, type));
+        }
+      }
+      std::vector<TypePtr> tmp;
+      enumerateTupleType(tupleSize, tmp, types, nested);
+      std::move(
+          std::begin(nested), std::end(nested), std::back_inserter(types));
+    };
+    expandTypes(1);
+    expandTypes(1);
+  }
+  std::shared_ptr<CompilationUnit> cu;
+  std::vector<TypePtr> types;
+
+ public:
+  static constexpr size_t kNumSplits = 10;
+};
+
+constexpr size_t LiteInterpreterDynamicTypeTestFixture::kNumSplits;
+
+/**
+ * Enumerate all possible JIT types appearing in mobile runtime, and test
+ * whether subtyping relation is preserved after one of the JIT types is
+ * converted to DynamicType.
+ *
+ * We firstly enumerate all "base" types in a vector, and implement
+ * expandTypes() to enumerate container types one "level" up for a given set
+ * of types. We call expandTypes() twice to test types nested less or equal
+ * to two levels. e.g. List[Optional[Tensor]], Optional[Dict[Int, Bool]], etc.
+ */
+TEST_P(LiteInterpreterDynamicTypeTestFixture, Conformance) {
+  size_t num = types.size() / LiteInterpreterDynamicTypeTestFixture::kNumSplits;
+  size_t begin = num * GetParam();
+  size_t end = std::min(types.size(), begin + num);
+  for (const auto& a : types) {
+    auto da = DynamicType::create(*a);
+    for (size_t i = begin; i < end; i++) {
+      const auto& b = types[i];
+      bool result = a->isSubtypeOf(*b);
+      EXPECT_EQ(result, da->isSubtypeOf(*b));
+      result = b->isSubtypeOf(*a);
+      EXPECT_EQ(result, b->isSubtypeOf(*da));
+    }
+  }
+}
+
+INSTANTIATE_TEST_CASE_P(
+    PyTorch,
+    LiteInterpreterDynamicTypeTestFixture,
+    ::testing::Range(
+        static_cast<size_t>(0),
+        LiteInterpreterDynamicTypeTestFixture::kNumSplits));
 
 } // namespace jit
 } // namespace torch

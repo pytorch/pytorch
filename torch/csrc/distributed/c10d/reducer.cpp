@@ -8,6 +8,7 @@
 #include <c10/core/DeviceGuard.h>
 #include <c10/core/StreamGuard.h>
 #include <c10/util/Exception.h>
+#include <c10/util/Logging.h>
 #include <c10/util/hash.h>
 #include <c10/util/irange.h>
 #include <c10d/comm.hpp>
@@ -98,14 +99,14 @@ Reducer::Reducer(
       div_factor_(kUnsetDivFactor),
       static_graph_(false),
       comm_hook_(nullptr),
-      ddp_debug_level_(parseDistDebugLevel()),
+      ddp_debug_level_(debug_level()),
       param_names_(std::move(paramNames)),
       first_bucket_bytes_cap_(first_bucket_bytes_cap) {
   C10_LOG_API_USAGE_ONCE("torch.distributed.ddp.reducer");
   TORCH_INTERNAL_ASSERT(
       params_.size() >= 1, "Expected at least one parameter.");
 
-  if (ddp_debug_level_ != c10d::DistributedDebugLevel::OFF) {
+  if (ddp_debug_level_ != c10d::DebugLevel::Off) {
     LOG(INFO) << "Reducer initialized with bucket_bytes_cap: "
               << bucket_bytes_cap_
               << " first_bucket_bytes_cap: " << first_bucket_bytes_cap;
@@ -365,7 +366,7 @@ void Reducer::mark_variable_ready_dense(size_t variable_index) {
             // themselves in order to compute higher order derivatives. However,
             // DDP will not sync up these gradients currently (see
             // https://github.com/pytorch/pytorch/issues/63812).
-            LOG(WARNING)
+            C10_LOG_EVERY_N(WARNING, 1000)
                 << "Using DistributedDataParallel with create_graph=True "
                 << " is not well-supported. The higher-order gradient will "
                 << " not be synchronized across ranks, and backpropagation "
@@ -400,7 +401,10 @@ void Reducer::mark_variable_ready_dense(size_t variable_index) {
         REDUCER_CHECK(
             local_used_map_[variable_index].item<int>() == 0,
             logger_,
-            "Encountered gradient which is undefined, but still allreduced by DDP reducer. This indicates a bug in DDP implementation, please report a bug with a repro to PyTorch.");
+            "Encountered gradient which is undefined, but still allreduced by "
+            "DDP reducer. This indicates a bug in DDP implementation, please "
+            "report a bug with a repro to PyTorch."
+        );
       }
       bucket_view.zero_();
     }
@@ -526,9 +530,7 @@ void Reducer::delay_all_reduce() {
   unused_parameters_.clear();
 
   // copy all gradients to buckets
-  for (size_t variable_index = 0;
-       variable_index < params_.size();
-       variable_index++) {
+  for (const auto variable_index : c10::irange(params_.size())) {
     // set unused_parameters_
     if (numGradHooksTriggeredMap_[variable_index] == 0) {
       unused_parameters_.push_back(variable_index);
@@ -712,7 +714,7 @@ void Reducer::checkAndRaiseMarkedTwiceError(size_t index) {
     auto param_name = param_names_.find(index);
     const bool found_param_name = param_name != param_names_.end();
     TORCH_INTERNAL_ASSERT(
-        ddp_debug_level_ == c10d::DistributedDebugLevel::OFF ||
+        ddp_debug_level_ == c10d::DebugLevel::Off ||
             found_param_name,
         "Expected to find parameter name in debug mode.");
     std::string paramInfo = c10::str(
@@ -1258,7 +1260,7 @@ void Reducer::search_unused_parameters(
     // If the accumulator function is present in the graph, we know
     // a gradient will be computed for the corresponding parameter.
     if (seen.count(it.first) == 0) {
-      if (ddp_debug_level_ == c10d::DistributedDebugLevel::DETAIL) {
+      if (ddp_debug_level_ == c10d::DebugLevel::Detail) {
         const auto param_info = param_names_.find(it.second);
         TORCH_INTERNAL_ASSERT(
             param_info != param_names_.end(),
@@ -1706,7 +1708,7 @@ bool Reducer::rebuild_buckets() {
     std::reverse(per_bucket_size_limits.begin(), per_bucket_size_limits.end());
   }
 
-  if (ddp_debug_level_ != c10d::DistributedDebugLevel::OFF) {
+  if (ddp_debug_level_ != c10d::DebugLevel::Off) {
     TORCH_INTERNAL_ASSERT(
         rebuilt_bucket_indices.size() == per_bucket_size_limits.size())
     LOG(INFO) << rebuilt_bucket_indices.size()
@@ -1831,7 +1833,7 @@ void Reducer::ensure_prior_reduction_finished() {
         ": ",
         unmarked_param_indices);
 
-    if (ddp_debug_level_ == DistributedDebugLevel::OFF) {
+    if (ddp_debug_level_ == DebugLevel::Off) {
       // Without debug mode, log unmarked_param_indices, as well as
       // recommendation to use debug mode to print parameter names.
       kBaseErrorMsg += unmarked_param_indices_info;

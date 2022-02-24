@@ -3,12 +3,13 @@ from typing import Callable, List, Tuple
 
 import torch
 import torch.fx
-import torch.fx.experimental.fx_acc.acc_tracer as acc_tracer
-from torch.fx.experimental.fx2trt import (
+import fx2trt_oss.tracer.acc_tracer.acc_tracer as acc_tracer
+from fx2trt_oss.fx import (
     TRTInterpreter,
     InputTensorSpec,
     TRTModule,
 )
+from torch.testing._internal.common_utils import TestCase
 from torch.fx.experimental.normalize import NormalizeArgs
 from torch.fx.passes import shape_prop
 
@@ -35,8 +36,9 @@ def fetch_attr(mod, target):
 
 
 @unittest.skipIf(not torch.cuda.is_available(), "Skip because CUDA is not available")
-class TRTTestCase(unittest.TestCase):
+class TRTTestCase(TestCase):
     def setUp(self):
+        super().setUp()
         torch.manual_seed(3)
 
     def run_test(self, mod, inputs, expected_ops, unexpected_ops, interpreter, rtol, atol):

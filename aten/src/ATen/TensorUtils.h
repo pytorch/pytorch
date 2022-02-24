@@ -1,6 +1,7 @@
 #pragma once
 
 #include <ATen/DimVector.h>
+#include <ATen/EmptyTensor.h>
 #include <ATen/Tensor.h>
 #include <ATen/TensorGeometry.h>
 #include <ATen/Utils.h>
@@ -137,13 +138,6 @@ TORCH_API void checkLayout(CheckedFrom c, at::ArrayRef<Tensor> tensors, at::Layo
 TORCH_API void* maybe_data_ptr(const Tensor& tensor);
 TORCH_API void* maybe_data_ptr(const TensorArg& tensor);
 
-// Return if the tensor geometry represented by `sizes` and `strides` is contiguous
-// Although we cache is_contiguous in tensor now, this is till useful because it
-// allows checking if a particular geometry is contiguous without explicitly
-// constructing a tensor, e.g., when you want to choose a kernel strategy based
-// on whether a subgeometry is contiguous.
-TORCH_API bool geometry_is_contiguous(IntArrayRef sizes, IntArrayRef strides);
-
 TORCH_API void check_dim_size(
     const Tensor& tensor,
     int64_t dim,
@@ -152,8 +146,6 @@ TORCH_API void check_dim_size(
 
 namespace detail {
 TORCH_API std::vector<int64_t> defaultStrides(IntArrayRef sizes);
-TORCH_API size_t
-computeStorageNbytes(IntArrayRef sizes, IntArrayRef strides, size_t itemsize);
 
 TORCH_API c10::optional<std::vector<int64_t>> computeStride(
     IntArrayRef oldshape,

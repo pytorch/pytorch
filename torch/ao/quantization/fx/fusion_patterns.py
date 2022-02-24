@@ -3,11 +3,11 @@ from torch.fx.graph import Node
 from .pattern_utils import (
     register_fusion_pattern,
 )
-from .utils import _parent_name
+from ..utils import _parent_name
 from .quantization_types import QuantizerCls, NodePattern, Pattern
 from ..fuser_method_mappings import get_fuser_method_new
 from abc import ABC, abstractmethod
-from typing import Any, Callable, Dict, Optional, Union
+from typing import Any, Callable, Dict, Optional, Union, List
 from .match_utils import MatchAllNode
 
 # ----------------------------
@@ -28,7 +28,8 @@ class FuseHandler(ABC):
              root_node: Node,
              matched_node_pattern: NodePattern,
              fuse_custom_config_dict: Dict[str, Any],
-             fuser_method_mapping: Optional[Dict[Pattern, Union[torch.nn.Sequential, Callable]]]) -> Node:
+             fuser_method_mapping: Optional[Dict[Pattern, Union[torch.nn.Sequential, Callable]]],
+             is_qat: bool) -> Node:
         pass
 
 @register_fusion_pattern((torch.nn.ReLU, torch.nn.Conv1d))
@@ -53,6 +54,9 @@ class FuseHandler(ABC):
 @register_fusion_pattern((torch.nn.functional.relu, (torch.nn.BatchNorm1d, torch.nn.Conv1d)))
 @register_fusion_pattern((torch.nn.functional.relu, (torch.nn.BatchNorm2d, torch.nn.Conv2d)))
 @register_fusion_pattern((torch.nn.functional.relu, (torch.nn.BatchNorm3d, torch.nn.Conv3d)))
+@register_fusion_pattern((torch.nn.BatchNorm1d, torch.nn.ConvTranspose1d))
+@register_fusion_pattern((torch.nn.BatchNorm2d, torch.nn.ConvTranspose2d))
+@register_fusion_pattern((torch.nn.BatchNorm3d, torch.nn.ConvTranspose3d))
 class DefaultFuseHandler(FuseHandler):
     def __init__(
             self,
@@ -66,7 +70,8 @@ class DefaultFuseHandler(FuseHandler):
              root_node: Node,
              matched_node_pattern: NodePattern,
              fuse_custom_config_dict: Dict[str, Any],
-             fuser_method_mapping: Optional[Dict[Pattern, Union[torch.nn.Sequential, Callable]]]) -> Node:
+             fuser_method_mapping: Optional[Dict[Pattern, Union[torch.nn.Sequential, Callable]]],
+             is_qat: bool) -> Node:
         additional_fuser_method_mapping = fuse_custom_config_dict.get("additional_fuser_method_mapping", {})
         assert root_node.op == "call_module", "Expecting module node to be a call_module Node"
         root_module = quantizer.modules[root_node.target]
@@ -80,10 +85,10 @@ class DefaultFuseHandler(FuseHandler):
             if isinstance(pattern, (tuple, list)):
                 n, *args = pattern
                 get_modules(n, modules)
-                arg_modules = []
+                arg_modules: List[torch.nn.Module] = []
                 for a in args:
                     get_modules(a, arg_modules)
-                arg_modules = tuple(arg_modules) if len(arg_modules) > 1 else arg_modules[0]
+                arg_modules = tuple(arg_modules) if len(arg_modules) > 1 else arg_modules[0]  # type: ignore[assignment]
                 modules.append(arg_modules)
             else:
                 n = pattern
@@ -110,7 +115,7 @@ class DefaultFuseHandler(FuseHandler):
         fuser_method = get_fuser_method_new(matched_module_types, fuser_method_mapping)
         # TODO: change the signature for fuser_method to take matched module patterns
         # as input
-        fused_module = fuser_method(*matched_modules)
+        fused_module = fuser_method(is_qat, *matched_modules)
         # TODO: maybe add a pass to cleanup bn modules?
         setattr(quantizer.modules[module_parent_name], module_name, fused_module)
         return quantizer.fused_graph.node_copy(root_node, load_arg)

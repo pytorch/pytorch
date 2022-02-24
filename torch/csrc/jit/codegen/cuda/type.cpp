@@ -87,6 +87,9 @@ ValType promote_type(const ValType& t1, const ValType& t2) {
       (t1 == ValType::Scalar || t1 == ValType::NamedScalar)) {
     return ValType::Scalar;
   }
+  if (t1 == ValType::NamedScalar && t2 == ValType::NamedScalar) {
+    return ValType::Scalar;
+  }
   TORCH_CHECK(false, "Expected promotable ValTypes but got: ", t1, " and ", t2);
 }
 
@@ -107,7 +110,7 @@ static const char* data_type2string(DataType t) {
     case DataType::Int32:
       return "int";
     case DataType::Null:
-      return "nullptr";
+      return "null_type";
     default:
       break;
   }
@@ -127,6 +130,10 @@ static const char* val_type2string(ValType t) {
       return "Scalar";
     case ValType::NamedScalar:
       return "NamedScalar";
+    case ValType::Predicate:
+      return "Predicate";
+    case ValType::TensorIndex:
+      return "TensorIndex";
     default:
       TORCH_INTERNAL_ASSERT(false, "No string found for val type.");
   }
@@ -144,12 +151,38 @@ static const char* expr_type2string(ExprType t) {
       return "ReductionOp";
     case ExprType::BroadcastOp:
       return "BroadcastOp";
+    case ExprType::WelfordOp:
+      return "WelfordOp";
+    case ExprType::TransposeOp:
+      return "TransposeOp";
     case ExprType::ShiftOp:
       return "ShiftOp";
+    case ExprType::GatherOp:
+      return "GatherOp";
+    case ExprType::ViewOp:
+      return "ViewOp";
     case ExprType::Split:
       return "Split";
     case ExprType::Merge:
       return "Merge";
+    case ExprType::Allocate:
+      return "Allocate";
+    case ExprType::Sync:
+      return "Sync";
+    case ExprType::InitMagicZero:
+      return "InitMagicZero";
+    case ExprType::UpdateMagicZero:
+      return "UpdateMagicZero";
+    case ExprType::ForLoop:
+      return "ForLoop";
+    case ExprType::IfThenElse:
+      return "IfThenElse";
+    case ExprType::GridReduction:
+      return "GridReduction";
+    case ExprType::GridBroadcast:
+      return "GridBroadcast";
+    case ExprType::GridWelford:
+      return "GridWelford";
     default:
       TORCH_INTERNAL_ASSERT(false, "No string found for expr type.");
   }
@@ -281,7 +314,6 @@ bool needFloatSuffix(BinaryOpType t) {
     case BinaryOpType::Atan2:
     case BinaryOpType::Div:
     case BinaryOpType::Fmod:
-    case BinaryOpType::Pow:
       return true;
     default:
       return false;
@@ -479,6 +511,8 @@ static const char* iter_type2string(IterType t) {
       return "b";
     case IterType::Gather:
       return "g";
+    case IterType::Stride:
+      return "s";
     default:
       // Don't try to print t as it would recursively call this function
       TORCH_INTERNAL_ASSERT(false, "Unexpected IterType");
@@ -520,6 +554,7 @@ static const char* supported_casts2string(
     case supported_switch_pair(DataType::Float, DataType::Int):
     case supported_switch_pair(DataType::Double, DataType::Int):
       return "(int64_t)";
+    case supported_switch_pair(DataType::Int, DataType::Int32):
     case supported_switch_pair(DataType::Float, DataType::Int32):
     case supported_switch_pair(DataType::Double, DataType::Int32):
       return "(int32_t)";

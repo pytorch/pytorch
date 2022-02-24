@@ -4,6 +4,7 @@ from collections.abc import Sequence
 from functools import partial, wraps
 import warnings
 import unittest
+import itertools
 
 import torch
 
@@ -17,11 +18,11 @@ from torch.testing._internal.common_methods_invocations import \
     (op_db, _NOTHING, UnaryUfuncInfo, ReductionOpInfo, SpectralFuncInfo)
 from torch.testing._internal.common_device_type import \
     (deviceCountAtLeast, instantiate_device_type_tests, ops, onlyCPU,
-     onlyCUDA, onlyNativeDeviceTypes, skipCUDAIfRocm, OpDTypes, skipMeta)
+     onlyCUDA, onlyNativeDeviceTypes, OpDTypes, skipMeta)
 from torch.testing._internal.common_jit import JitCommonTestCase, check_against_reference
 from torch.testing._internal.jit_metaprogramming_utils import create_script_fn, create_traced_fn, \
     check_alias_annotation
-from torch.testing._internal.jit_utils import disable_autodiff_subgraph_inlining
+from torch.testing._internal.jit_utils import disable_autodiff_subgraph_inlining, is_lambda
 import torch.testing._internal.opinfo_helper as opinfo_helper
 from torch.testing._internal.composite_compliance import _check_composite_compliance
 
@@ -64,7 +65,6 @@ class TestCommon(TestCase):
     # Validates that each OpInfo specifies its forward and backward dtypes
     #   correctly for CPU and CUDA devices
     @skipMeta
-    @skipCUDAIfRocm
     @onlyNativeDeviceTypes
     @ops(op_db, dtypes=OpDTypes.none)
     def test_dtypes(self, device, op):
@@ -148,7 +148,6 @@ class TestCommon(TestCase):
         device_type = torch.device(device).type
         claimed_supported = set(op.supported_dtypes(device_type))
         supported_dtypes = set(supported_dtypes)
-
         supported_but_unclaimed = supported_dtypes - claimed_supported
         claimed_but_unsupported = claimed_supported - supported_dtypes
         msg = """The supported dtypes for {0} on {1} according to its OpInfo are
@@ -182,7 +181,6 @@ class TestCommon(TestCase):
         self.assertEqual(supported_backward_dtypes, claimed_backward_supported, msg=msg)
 
     # Validates that each OpInfo works correctly on different CUDA devices
-    @skipCUDAIfRocm
     @onlyCUDA
     @deviceCountAtLeast(2)
     @ops(op_db, allowed_dtypes=(torch.float32, torch.long))
@@ -257,34 +255,47 @@ class TestCommon(TestCase):
 
             self.assertEqual(actual, expected)
 
-            # validates backward
-            # NOTE: only handles single tensor outputs and the first tensor
-            #   of ops that output a sequence
-
+            # Validate backward
             # Short-circuits if the op doesn't support grad in this device x dtype
             if not test_grad:
                 continue
 
+            expected = sample_input.output_process_fn_grad(expected)
+            actual = sample_input.output_process_fn_grad(actual)
+
             if isinstance(expected, torch.Tensor):
-                expected_backward_tensor = expected
-                actual_backward_tensor = actual
-            elif isinstance(expected, Sequence) and isinstance(expected[0], torch.Tensor):
-                expected_backward_tensor = expected[0]
-                actual_backward_tensor = actual[0]
+                grad_for_expected = torch.randn_like(expected)
+                grad_for_actual = noncontiguous_like(grad_for_expected)
+            elif isinstance(expected, Sequence):
+                # Filter output elements that do not require grad
+                expected = [t for t in expected
+                            if isinstance(t, torch.Tensor) and t.requires_grad]
+                actual = [n for n in actual
+                          if isinstance(n, torch.Tensor) and n.requires_grad]
+                grad_for_expected = [torch.randn_like(t) for t in expected]
+                grad_for_actual = [noncontiguous_like(n) for n in grad_for_expected]
             else:
+                # Nothing to do if it returns a scalar or things like that
                 continue
 
-            grad_for_expected = torch.randn_like(expected_backward_tensor)
-            grad_for_actual = noncontiguous_like(grad_for_expected)
-            expected_backward_tensor.backward(grad_for_expected)
-            actual_backward_tensor.backward(grad_for_actual)
+            # Concatenate inputs into a tuple
+            t_inputs = (t_inp,) + t_args if isinstance(t_inp, torch.Tensor) else tuple(t_inp) + t_args
+            n_inputs = (n_inp,) + n_args if isinstance(n_inp, torch.Tensor) else tuple(n_inp) + n_args
 
-            # Acquires grad (which may be on the first element in a list)
-            expected_grad = t_inp.grad if isinstance(t_inp, torch.Tensor) else t_inp[0].grad
-            actual_grad = n_inp.grad if isinstance(n_inp, torch.Tensor) else n_inp[0].grad
+            # Filter the elemnts that are tensors that require grad
+            t_input_tensors = [t for t in t_inputs if isinstance(t, torch.Tensor) and t.requires_grad]
+            n_input_tensors = [n for n in n_inputs if isinstance(n, torch.Tensor) and n.requires_grad]
 
-            # TODO: FIXME: only validates grad on first tensor input
-            self.assertEqual(actual_grad, expected_grad)
+            self.assertEqual(len(t_input_tensors), len(n_input_tensors))
+
+            # Some functions may not use all the inputs to generate gradients. One of the
+            # few examples of this "odd" behaviour is F.hinge_embedding_loss
+            t_grads = torch.autograd.grad(expected, t_input_tensors, grad_for_expected, allow_unused=True)
+            n_grads = torch.autograd.grad(actual, n_input_tensors, grad_for_actual, allow_unused=True)
+
+            msg = "Got different gradients for contiguous / non-contiguous inputs wrt input {}."
+            for i, (t, n) in enumerate(zip(t_grads, n_grads)):
+                self.assertEqual(t, n, msg=msg.format(i))
 
     # Separates one case from the following test_out because many ops don't properly implement the
     #   incorrectly sized out parameter warning properly yet
@@ -687,6 +698,30 @@ class TestCommon(TestCase):
             kwargs = sample.kwargs
             _check_composite_compliance(op, args, kwargs)
 
+    @onlyCPU
+    @ops(op_db, allowed_dtypes=(torch.float,))
+    def test_floating_inputs_are_differentiable(self, device, dtype, op):
+        # Nothing to check if the operation it's not differentiable
+        if not op.supports_autograd:
+            return
+
+        floating_dtypes = list(floating_and_complex_types_and(torch.bfloat16, torch.float16))
+
+        def check_tensor_floating_is_differentiable(t):
+            if isinstance(t, torch.Tensor) and t.dtype in floating_dtypes:
+                msg = (f"Found a sampled tensor of floating-point dtype {t.dtype} sampled with "
+                       "requires_grad=False. If this is intended, please skip/xfail this test. "
+                       "Remember that sampling operations are executed under a torch.no_grad contextmanager.")
+                self.assertTrue(t.requires_grad, msg)
+
+        samples = op.sample_inputs(device, dtype, requires_grad=True)
+        for sample in samples:
+            check_tensor_floating_is_differentiable(sample.input)
+            for arg in sample.args:
+                check_tensor_floating_is_differentiable(arg)
+            for arg in sample.kwargs.values():
+                check_tensor_floating_is_differentiable(arg)
+
 
 # gradcheck requires double precision
 _gradcheck_ops = partial(ops, dtypes=OpDTypes.supported,
@@ -706,7 +741,7 @@ class TestGradients(TestCase):
         return _fn
 
     def _check_helper(self, device, dtype, op, variant, check, *, check_forward_ad=False, check_backward_ad=True,
-                      check_undefined_grad=True, check_batched_grad=None, check_batched_forward_grad=False):
+                      check_batched_grad=None, check_batched_forward_grad=False):
         assert check in ('gradcheck', 'bwgrad_bwgrad', 'fwgrad_bwgrad')
         # NB: check_backward_ad does not affect gradgradcheck (always True)
         if variant is None:
@@ -755,7 +790,7 @@ class TestGradients(TestCase):
                                           fast_mode=op.gradcheck_fast_mode,
                                           check_forward_ad=check_forward_ad,
                                           check_backward_ad=check_backward_ad,
-                                          check_undefined_grad=check_undefined_grad,
+                                          check_undefined_grad=True,
                                           check_batched_forward_grad=check_batched_forward_grad))
             elif check in ('bwgrad_bwgrad', 'fwgrad_bwgrad'):  # gradgrad check
                 self.assertFalse(check_forward_ad, msg="Cannot run forward AD check for gradgradcheck")
@@ -778,10 +813,9 @@ class TestGradients(TestCase):
                 self.assertTrue(False, msg="Unknown check requested!")
 
     def _grad_test_helper(self, device, dtype, op, variant, *, check_forward_ad=False, check_backward_ad=True,
-                          check_undefined_grad=True, check_batched_grad=None, check_batched_forward_grad=False):
+                          check_batched_grad=None, check_batched_forward_grad=False):
         return self._check_helper(device, dtype, op, variant, 'gradcheck', check_forward_ad=check_forward_ad,
-                                  check_backward_ad=check_backward_ad, check_undefined_grad=check_undefined_grad,
-                                  check_batched_grad=check_batched_grad,
+                                  check_backward_ad=check_backward_ad, check_batched_grad=check_batched_grad,
                                   check_batched_forward_grad=check_batched_forward_grad)
 
     def _skip_helper(self, op, device, dtype):
@@ -863,8 +897,7 @@ class TestGradients(TestCase):
             check_batched_forward_grad = ((op.check_batched_forward_grad and not is_inplace) or
                                           (op.check_inplace_batched_forward_grad and is_inplace))
             self._grad_test_helper(device, dtype, op, variant, check_forward_ad=True, check_backward_ad=False,
-                                   check_undefined_grad=False, check_batched_grad=False,
-                                   check_batched_forward_grad=check_batched_forward_grad)
+                                   check_batched_grad=False, check_batched_forward_grad=check_batched_forward_grad)
         if op.supports_forward_ad:
             call_grad_test_helper()
         else:
@@ -898,11 +931,6 @@ class TestGradients(TestCase):
         samples = op.sample_inputs(device, dtype, requires_grad=True)
         sample = first_sample(self, samples)
         result = op(sample.input, *sample.args, **sample.kwargs)
-
-# types.LambdaType gave false positives
-def is_lambda(lamb):
-    LAMBDA = lambda: 0  # noqa: E731
-    return isinstance(lamb, type(LAMBDA)) and lamb.__name__ == LAMBDA.__name__
 
 
 # Tests operators for consistency between JIT and eager, also checks
@@ -1165,8 +1193,7 @@ class TestMathBits(TestCase):
     # This test only runs for C -> R and C -> C functions
     # TODO: add tests for `R->C` functions
     # Note: This test runs for functions that take both tensors and tensorlists as input.
-    def _test_math_view(self, device, dtype, op, _requires_grad, math_op_physical, math_op_view, is_bit_set, out_type):
-        samples = op.sample_inputs(device, dtype, requires_grad=_requires_grad)
+    def _test_math_view(self, device, dtype, op, samples, math_op_physical, math_op_view, is_bit_set, out_type):
         inplace_variant = op.inplace_variant
 
         # helper function to clone and conjugate/negate the input if its a tensor
@@ -1218,6 +1245,10 @@ class TestMathBits(TestCase):
             # TODO: update to handle checking grads of all tensor inputs as
             #   derived from each tensor output
             if isinstance(expected_forward, torch.Tensor) and expected_forward.requires_grad:
+                output_process_fn_grad = sample.output_process_fn_grad or (lambda x: x)
+                expected_forward = output_process_fn_grad(expected_forward)
+                forward_with_mathview = output_process_fn_grad(forward_with_mathview)
+
                 tensor = sample.input if isinstance(sample.input, torch.Tensor) else sample.input[0]
                 expected_forward.sum().backward(retain_graph=True)
                 forward_with_mathview.sum().backward(retain_graph=True)
@@ -1243,20 +1274,42 @@ class TestMathBits(TestCase):
         math_op_view = torch.conj
         _requires_grad = (op.supports_autograd and op.supports_complex_autograd(torch.device(device).type))
         is_bit_set = torch.is_conj
-        self._test_math_view(device, dtype, op, _requires_grad, math_op_physical, math_op_view, is_bit_set, torch.is_complex)
+        samples = op.sample_inputs(device, dtype, requires_grad=_requires_grad)
+        self._test_math_view(device, dtype, op, samples, math_op_physical, math_op_view, is_bit_set, torch.is_complex)
 
     @ops(op_db, allowed_dtypes=(torch.double,))
     def test_neg_view(self, device, dtype, op):
         if not op.test_neg_view:
             self.skipTest("Operation not tested with tensors with negative bit.")
         math_op_physical = torch.neg
+        math_op_view = torch._neg_view
+        is_bit_set = torch.is_neg
+        samples = op.sample_inputs(device, dtype, requires_grad=op.supports_autograd)
+        self._test_math_view(device, dtype, op, samples, math_op_physical, math_op_view, is_bit_set,
+                             lambda x: True)
+
+    @ops(op_db, allowed_dtypes=(torch.cdouble,))
+    def test_neg_conj_view(self, device, dtype, op):
+        if not op.test_neg_view:
+            self.skipTest("Operation not tested with tensors with negative bit.")
+        if not op.test_conjugated_samples:
+            self.skipTest("Operation doesn't support conjugated inputs.")
+
+        def math_op_physical(x):
+            return -x.conj_physical()
 
         def math_op_view(x):
-            return torch.conj(x * 1j).imag
+            return torch._neg_view(x).conj()
+
+        def is_bit_set(x):
+            return torch.is_neg(x) and torch.is_conj(x)
+
         _requires_grad = (op.supports_autograd and op.supports_complex_autograd(torch.device(device).type))
-        is_bit_set = torch.is_neg
-        self._test_math_view(device, dtype, op, _requires_grad, math_op_physical, math_op_view, is_bit_set,
-                             lambda x: not torch.is_complex(x))
+        samples = op.sample_inputs(device, dtype, requires_grad=_requires_grad)
+        # Only test one sample
+        samples = itertools.islice(samples, 1)
+        self._test_math_view(device, dtype, op, samples, math_op_physical, math_op_view, is_bit_set,
+                             torch.is_complex)
 
 
 instantiate_device_type_tests(TestCommon, globals())

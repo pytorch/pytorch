@@ -1,14 +1,12 @@
 ARG UBUNTU_VERSION
 ARG CUDA_VERSION
 ARG CUDNN_VERSION
-ARG IMAGE_NAME
 
-FROM ${IMAGE_NAME}
+FROM nvidia/cuda:${CUDA_VERSION}-cudnn${CUDNN_VERSION}-devel-ubuntu${UBUNTU_VERSION}
 
 ARG UBUNTU_VERSION
 ARG CUDA_VERSION
 ARG CUDNN_VERSION
-
 
 ENV DEBIAN_FRONTEND noninteractive
 
@@ -100,13 +98,6 @@ ENV CUDA_PATH /usr/local/cuda
 
 # Install LLVM dev version (Defined in the pytorch/builder github repository)
 COPY --from=pytorch/llvm:9.0.1 /opt/llvm /opt/llvm
-
-# Hack for CUDA 11.5.0 image to install cudnn8 since cudnn8 is not included with CUDA 11.5 image
-# Also note cudnn 8.2.0.53 is labeled for cuda 11.3
-ARG INSTALL_CUDNN
-ADD ./common/install_cudnn8.sh install_cudnn8.sh
-RUN if [ -n "${INSTALL_CUDNN}" ]; then bash install_cudnn8.sh; fi
-RUN rm install_cudnn8.sh
 
 USER jenkins
 CMD ["bash"]

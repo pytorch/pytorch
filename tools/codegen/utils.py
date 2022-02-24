@@ -1,11 +1,11 @@
-import re
+import contextlib
+import functools
+import hashlib
 import os
+import re
+import textwrap
 from typing import Tuple, List, Iterable, Iterator, Callable, Sequence, TypeVar, Optional, Dict, Any, Union, Set, NoReturn
 from enum import Enum
-import contextlib
-import textwrap
-import hashlib
-import functools
 
 from tools.codegen.code_template import CodeTemplate
 
@@ -139,6 +139,8 @@ class FileManager:
         except IOError:
             old_contents = None
         if contents != old_contents:
+            # Create output directory if it doesn't exist
+            os.makedirs(os.path.dirname(filename), exist_ok=True)
             with open(filename, 'w') as f:
                 f.write(contents)
 
@@ -194,11 +196,14 @@ class FileManager:
                 else:
                     shard[key] = []
 
-
         def merge_env(into: Dict[str, List[str]], from_: Dict[str, List[str]]) -> None:
             for k, v in from_.items():
                 assert k in sharded_keys, f"undeclared sharded key {k}"
                 into[k] += v
+
+        if self.dry_run:
+            # Dry runs don't write any templates, so incomplete environments are fine
+            items = ()
 
         for item in items:
             key = key_fn(item)

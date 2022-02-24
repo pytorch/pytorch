@@ -15,7 +15,6 @@ from torch.onnx.symbolic_helper import (_set_opset_version,
 import torch.utils.cpp_extension
 from test_pytorch_common import (skipIfUnsupportedMinOpsetVersion,
                                  skipIfUnsupportedMaxOpsetVersion)
-import caffe2.python.onnx.backend as backend
 from verify import verify
 
 import torchvision
@@ -601,6 +600,39 @@ class TestUtilityFuns_opset9(_BaseTestCase):
                                     "unwrap model from torch.nn.DataParallel. Try "):
             torch.onnx.export(model, x, f, opset_version=self.opset_version)
 
+    @skipIfUnsupportedMinOpsetVersion(11)
+    def test_sequence_dim(self):
+        class Module(torch.nn.Module):
+            def forward(self, x, y):
+                return [x, y]
+
+        model = Module()
+        # Export with scripting to keep output as Sequence type.
+        # Tracing unpacks the list.
+        script_model = torch.jit.script(model)
+        x = torch.randn(2, 3)
+
+        # Case 1: dynamic axis
+        f = io.BytesIO()
+        y = torch.randn(2, 3)
+        torch.onnx.export(script_model, (x, y), f, opset_version=self.opset_version,
+                          input_names=['x', 'y'], dynamic_axes={'y': [1]})
+        onnx_model = onnx.load(io.BytesIO(f.getvalue()))
+        loop_output_value_info_proto = onnx_model.graph.output[0]
+        ref_value_info_proto = onnx.helper.make_tensor_sequence_value_info(loop_output_value_info_proto.name,
+                                                                           1, [2, None])
+        self.assertEqual(loop_output_value_info_proto, ref_value_info_proto)
+
+        # Case 2: no dynamic axes.
+        f = io.BytesIO()
+        y = torch.randn(2, 3)
+        torch.onnx.export(script_model, (x, y), f, opset_version=self.opset_version)
+        onnx_model = onnx.load(io.BytesIO(f.getvalue()))
+        loop_output_value_info_proto = onnx_model.graph.output[0]
+        ref_value_info_proto = onnx.helper.make_tensor_sequence_value_info(loop_output_value_info_proto.name,
+                                                                           1, [2, 3])
+        self.assertEqual(loop_output_value_info_proto, ref_value_info_proto)
+
     def test_export_mode(self):
         class MyModule(torch.nn.Module):
             def forward(self, x):
@@ -627,7 +659,7 @@ class TestUtilityFuns_opset9(_BaseTestCase):
         # verify that the model state is preserved
         self.assertEqual(model.training, old_state)
 
-    @skipIfUnsupportedMinOpsetVersion(12)
+    @skipIfUnsupportedMinOpsetVersion(15)
     def test_local_function(self):
         class N(torch.nn.Module):
             def __init__(self, prob):
@@ -717,6 +749,7 @@ class TestUtilityFuns_opset9(_BaseTestCase):
         funcs = onnx_model.functions
         self.assertEqual(len(funcs), 3)
 
+    @skipIfUnsupportedMinOpsetVersion(15)
     def test_local_function_overloads(self):
         class NWithOverloads(torch.nn.Module):
             def forward(self, x, y=None, z=None):
@@ -750,6 +783,24 @@ class TestUtilityFuns_opset9(_BaseTestCase):
         self.assertIn("NWithOverloads", func_names)
         self.assertIn("NWithOverloads.1", func_names)
         self.assertIn("NWithOverloads.2", func_names)
+
+    @skipIfUnsupportedMinOpsetVersion(15)
+    def test_local_function_infer_scopes(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                # Concatenation of scalars inserts unscoped tensors in IR graph.
+                new_tensor_shape = x.size()[:-1] + (1, 1, -1)
+                tensor = x.view(*new_tensor_shape)
+                return tensor
+
+        x = torch.randn(4, 5)
+        f = io.BytesIO()
+        torch.onnx.export(M(), (x,), f, export_modules_as_functions=True,
+                          opset_version=self.opset_version, do_constant_folding=False)
+
+        onnx_model = onnx.load(io.BytesIO(f.getvalue()))
+        funcs = onnx_model.functions
+        self.assertIn("M", [f.name for f in funcs])
 
     def test_aten_fallthrough(self):
         # Test aten export of op with no symbolic
@@ -803,11 +854,11 @@ class TestUtilityFuns_opset9(_BaseTestCase):
     def test_custom_opsets_gelu(self):
         self.addCleanup(unregister_custom_op_symbolic, "::gelu", 1)
 
-        def gelu(g, self):
+        def gelu(g, self, approximate):
             return g.op("com.microsoft::Gelu", self).setType(self.type())
 
         register_custom_op_symbolic("::gelu", gelu, 1)
-        model = torch.nn.GELU()
+        model = torch.nn.GELU(approximate='none')
         x = torch.randn(3, 3)
         f = io.BytesIO()
         torch.onnx.export(model, (x, ), f,
@@ -823,11 +874,11 @@ class TestUtilityFuns_opset9(_BaseTestCase):
     def test_register_aten_custom_op_symbolic(self):
         self.addCleanup(unregister_custom_op_symbolic, "aten::gelu", 1)
 
-        def gelu(g, self):
+        def gelu(g, self, approximate):
             return g.op("com.microsoft::Gelu", self).setType(self.type())
 
         register_custom_op_symbolic("aten::gelu", gelu, 1)
-        model = torch.nn.GELU()
+        model = torch.nn.GELU(approximate='none')
         x = torch.randn(3, 3)
         f = io.BytesIO()
         torch.onnx.export(model, (x, ), f, opset_version=self.opset_version)
@@ -871,39 +922,6 @@ class TestUtilityFuns_opset9(_BaseTestCase):
         self.assertEqual(next(iter).kind(), "onnx::Constant")
         self.assertEqual(next(iter).kind(), "onnx::Constant")
         self.assertEqual(next(iter).kind(), "aten::cosine_similarity")
-
-    def test_quantized_fallthrough(self):
-        # Test Quantized op
-        class QModule(torch.nn.Module):
-            def __init__(self):
-                super(QModule, self).__init__()
-                self.quant1 = torch.ao.quantization.QuantStub()
-                self.dequant = torch.ao.quantization.DeQuantStub()
-
-            def forward(self, x):
-                res = self.quant1(x)
-                return self.dequant(res)
-
-        model = QModule()
-        torch.backends.quantized.engine = "qnnpack"
-        pt_inputs = (torch.randn(1, 2, 3, 4))
-        model.qconfig = torch.ao.quantization.default_qconfig
-        q_model = torch.ao.quantization.prepare(model, inplace=False)
-        q_model = torch.ao.quantization.convert(q_model, inplace=False)
-
-        q_model.eval()
-
-        graph, _, __ = self._model_to_graph(q_model, pt_inputs,
-                                            operator_export_type=OperatorExportTypes.ONNX_FALLTHROUGH,
-                                            input_names=["pt_inputs"],
-                                            dynamic_axes={"pt_inputs": [0, 1, 2, 3]})
-
-        iter = graph.nodes()
-        self.assertEqual(next(iter).kind(), "onnx::Constant")
-        self.assertEqual(next(iter).kind(), "onnx::Constant")
-        self.assertEqual(next(iter).kind(), "onnx::Constant")
-        self.assertEqual(next(iter).kind(), "aten::quantize_per_tensor")
-        self.assertEqual(next(iter).kind(), "aten::dequantize")
 
     # prim::ListConstruct is exported as onnx::SequenceConstruct for opset >= 11
     @skipIfUnsupportedMaxOpsetVersion(10)
@@ -1036,6 +1054,9 @@ class TestUtilityFuns_opset9(_BaseTestCase):
                 return y
 
         x = torch.tensor([1, 2])
+        # Move import to local as caffe2 backend requires additional build flag,
+        # and is only used in this test case.
+        import caffe2.python.onnx.backend as backend
         verify(MyModel(), x, backend, do_constant_folding=False)
 
     def test_fuse_conv_bn(self):
@@ -1127,6 +1148,81 @@ class TestUtilityFuns_opset9(_BaseTestCase):
         self.assertEqual(graph.graph.input[1].name, "in_weight")
         self.assertEqual(graph.graph.input[2].name, "in_bias")
 
+    def test_onnx_intermediate_renaming(self):
+        class RenamedIntermediateModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self._module_1 = torch.nn.Linear(10, 10)
+                self._module_2 = torch.nn.Linear(10, 10)
+                self._module_3 = torch.nn.Linear(10, 10)
+                self._module_4 = torch.nn.Linear(10, 10)
+
+            def forward(self, x):
+                y = self._module_1(x)
+                z = self._module_2(y)
+                z = self._module_3(y * z)
+                z = self._module_4(y * z)
+                return z
+
+        module = RenamedIntermediateModule()
+
+        g, p, o = utils._model_to_graph(module, torch.ones(1, 10), output_names=['y'])
+        renamed_intermediate = 0
+        for n in g.nodes():
+            for v in n.inputs():
+                if v.debugName().startswith("onnx::Mul_"):
+                    renamed_intermediate += 1
+        self.assertEqual(renamed_intermediate, 2)
+
+    def _test_deduplicate_initializers(self, torchscript=False):
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.layer1 = torch.nn.Linear(3, 3)
+                self.layer2 = torch.nn.Linear(3, 3)
+
+                # Reusing layers.
+                self.layer3 = self.layer1
+
+                # Reusing parameters.
+                self.layer2.weight = self.layer1.weight
+                self.layer1.bias = self.layer2.bias
+
+                # Parameter with different tensors equal in value.
+                self.param1 = torch.nn.Parameter(torch.tensor([1., 2., 3.]))
+                self.param2 = torch.nn.Parameter(torch.tensor([1., 2., 3.]))
+
+            def forward(self, x):
+                return self.layer3(self.layer2(self.layer1(x))) + self.param1 + self.param2
+
+        model = torch.jit.script(MyModule()) if torchscript else MyModule()
+
+        x = torch.randn(3, 3)
+        param_name_set = set([k for k, _ in model.named_parameters()])
+
+        # Test training mode.
+        model.train()
+        f = io.BytesIO()
+        torch.onnx.export(model, (x,), f, training=TrainingMode.TRAINING,
+                          opset_version=self.opset_version)
+        graph = onnx.load(io.BytesIO(f.getvalue()))
+        self.assertSetEqual(set([i.name for i in graph.graph.initializer]), param_name_set)
+
+        # Test eval mode.
+        model.eval()
+        f = io.BytesIO()
+        torch.onnx.export(model, (x,), f,
+                          opset_version=self.opset_version)
+        graph = onnx.load(io.BytesIO(f.getvalue()))
+        param_name_set.remove("param2")
+        self.assertSetEqual(set([i.name for i in graph.graph.initializer]), param_name_set)
+
+    def test_deduplicate_initializers(self):
+        self._test_deduplicate_initializers(torchscript=False)
+
+    def test_deduplicate_initializers_torchscript(self):
+        self._test_deduplicate_initializers(torchscript=True)
+
     def test_duplicated_output_node(self):
         class DuplicatedOutputNet(torch.nn.Module):
             def __init__(self, input_size, num_classes):
@@ -1193,6 +1289,10 @@ class TestUtilityFuns_opset13(TestUtilityFuns_opset9):
 
 class TestUtilityFuns_opset14(TestUtilityFuns_opset9):
     opset_version = 14
+
+
+class TestUtilityFuns_opset15(TestUtilityFuns_opset9):
+    opset_version = 15
 
 
 if __name__ == "__main__":

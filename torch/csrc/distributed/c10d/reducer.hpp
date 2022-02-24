@@ -13,8 +13,10 @@
 #include <c10d/ProcessGroup.hpp>
 #include <c10d/Utils.hpp>
 #include <c10d/comm.hpp>
+#include <c10d/debug.h>
 #include <c10d/default_comm_hooks.hpp>
 #include <torch/csrc/autograd/function.h>
+#include <torch/csrc/autograd/profiler.h>
 #include <torch/csrc/autograd/variable.h>
 #ifndef _WIN32
 #include <torch/csrc/distributed/autograd/context/context.h>
@@ -29,7 +31,7 @@ constexpr int kDDPRuntimeLoggingSampleRate = 100;
 constexpr int kUnsetTime = -1;
 
 inline int64_t current_time_in_nanos() {
-  return torch::autograd::profiler::getTime();
+  return torch::profiler::impl::getTime();
 }
 
 // Forward declaration
@@ -567,7 +569,7 @@ class TORCH_API Reducer {
   std::unique_ptr<CommHookInterface> comm_hook_;
   // Debug level setting. It is parsed once when Reducer is constructed, and
   // remains the same across a single invocation of DDP training.
-  DistributedDebugLevel ddp_debug_level_;
+  DebugLevel ddp_debug_level_;
   // Mapping of variable index to fully qualified name of model to notify users
   // about errors when certain parameters do not get gradient.
   std::unordered_map<size_t, std::string> param_names_;

@@ -1,6 +1,6 @@
 #pragma once
 
-#include <torch/csrc/Export.h>
+#include <c10/macros/Export.h>
 
 #include <torch/csrc/jit/codegen/cuda/fusion.h>
 #include <torch/csrc/jit/codegen/cuda/ir_base_nodes.h>
@@ -17,6 +17,10 @@ namespace fuser {
 namespace cuda {
 
 class WelfordResult;
+class ViewTransform;
+
+class IrCloner;
+class IrBuilderPasskey;
 
 //! A Bool value
 //!
@@ -25,17 +29,18 @@ class WelfordResult;
 //!
 class TORCH_CUDA_CU_API Bool : public Val {
  public:
-  Bool() : Val(ValType::Scalar, DataType::Bool), maybe_value_{c10::nullopt} {}
+  Bool(IrBuilderPasskey passkey);
 
-  explicit Bool(bool value)
-      : Val(ValType::Scalar, DataType::Bool), maybe_value_{value} {}
+  explicit Bool(IrBuilderPasskey passkey, bool value);
+
+  explicit Bool(IrBuilderPasskey passkey, c10::optional<bool> value);
 
   Bool(const Bool* src, IrCloner* ir_cloner);
 
   bool isSymbolic() const {
     return !(maybe_value_.has_value());
   }
-  bool isConst() const {
+  bool isConst() const final {
     return maybe_value_.has_value();
   }
   c10::optional<bool> value() const {
@@ -55,18 +60,18 @@ class TORCH_CUDA_CU_API Double : public Val {
  public:
   using ScalarType = double;
 
-  Double()
-      : Val(ValType::Scalar, DataType::Double), maybe_value_{c10::nullopt} {}
+  Double(IrBuilderPasskey passkey);
 
-  explicit Double(ScalarType value)
-      : Val(ValType::Scalar, DataType::Double), maybe_value_{value} {}
+  explicit Double(IrBuilderPasskey passkey, ScalarType value);
+
+  explicit Double(IrBuilderPasskey passkey, c10::optional<ScalarType> value);
 
   Double(const Double* src, IrCloner* ir_cloner);
 
   bool isSymbolic() const {
     return !(maybe_value_.has_value());
   }
-  bool isConst() const {
+  bool isConst() const final {
     return maybe_value_.has_value();
   }
   c10::optional<ScalarType> value() const {
@@ -85,17 +90,18 @@ class TORCH_CUDA_CU_API Int : public Val {
  public:
   using ScalarType = int64_t;
 
-  Int() : Val(ValType::Scalar, DataType::Int), maybe_value_{c10::nullopt} {}
+  Int(IrBuilderPasskey passkey);
 
-  explicit Int(ScalarType value)
-      : Val(ValType::Scalar, DataType::Int), maybe_value_{value} {}
+  explicit Int(IrBuilderPasskey passkey, ScalarType value);
+
+  explicit Int(IrBuilderPasskey passkey, c10::optional<ScalarType> value);
 
   Int(const Int* src, IrCloner* ir_cloner);
 
   bool isSymbolic() const {
     return !(maybe_value_.has_value());
   }
-  bool isConst() const {
+  bool isConst() const final {
     return maybe_value_.has_value();
   }
   c10::optional<ScalarType> value() const {
@@ -151,14 +157,18 @@ class TVDomainGuard;
 class TORCH_CUDA_CU_API TensorView : public Val {
  public:
   TensorView(
+      IrBuilderPasskey passkey,
       TensorDomain* domain,
       DataType dtype,
       MemoryType mtype = MemoryType::Local);
 
-  explicit TensorView(const std::shared_ptr<c10::TensorType>& tensor_type);
+  explicit TensorView(
+      IrBuilderPasskey passkey,
+      const std::shared_ptr<c10::TensorType>& tensor_type);
 
-  explicit TensorView(const std::shared_ptr<Value>& jit_value)
-      : TensorView(jit_value->type()->cast<c10::TensorType>()) {}
+  explicit TensorView(
+      IrBuilderPasskey passkey,
+      const std::shared_ptr<Value>& jit_value);
 
   TensorView(const TensorView* src, IrCloner* ir_cloner);
 
@@ -186,6 +196,16 @@ class TORCH_CUDA_CU_API TensorView : public Val {
   //! trivial reductions
   bool hasAnyReduction() const;
 
+  //! Returns true if this tensor is zero dimensional,
+  //!  i.e. a wrapped scalar or an empty placeholder.
+  bool isZeroDim() const {
+    return nDims() == 0;
+  }
+
+  //! Returns true if this tensor does not contain
+  //!  any value.
+  bool isEmptyTensor() const;
+
   c10::optional<unsigned int> getReductionAxis() const;
 
   const std::vector<IterDomain*>& getRootDomain() const;
@@ -208,6 +228,24 @@ class TORCH_CUDA_CU_API TensorView : public Val {
   }
 
   size_t nDims() const;
+
+  // sets cpu_scalar_ value, which is special handling for CPU based zero-dim
+  // tensors (i.e. CPU Tensors that only have one value). This is only used if
+  // on an input value, otherwise ignored. This is important as special handling
+  // because these "scalars" should be type promoted as a tensor, but we want to
+  // avoid explicit copying of the data, so we want to pass the data value as a
+  // standard kernel argument value.
+  void setCpuScalar(bool is_cpu_scalar);
+
+  // returns cpu_scalar_ value, which is special handling for CPU based zero-dim
+  // tensors (i.e. CPU Tensors that only have one value). This is only used if
+  // on an input value, otherwise ignored. This is important as special handling
+  // because these "scalars" should be type promoted as a tensor, but we want to
+  // avoid explicit copying of the data, so we want to pass the data value as a
+  // standard kernel argument value.
+  bool isCpuScalar() const {
+    return cpu_scalar_;
+  }
 
   // Returns the position that this tensor is produced at relative to its axes.
   unsigned int getComputeAtPosition() const {
@@ -355,6 +393,13 @@ class TORCH_CUDA_CU_API TensorView : public Val {
     return axes_to_swizzle_;
   }
 
+  // Apply double buffering transformation
+  void doubleBuffer();
+
+  bool isDoubleBuffered() const {
+    return is_double_buffered_;
+  }
+
   friend TORCH_CUDA_CU_API TransformPropagator;
   friend TORCH_CUDA_CU_API TransformReplay;
   friend TORCH_CUDA_CU_API OptOutMutator;
@@ -392,6 +437,14 @@ class TORCH_CUDA_CU_API TensorView : public Val {
   MemoryType memory_type_ = MemoryType::Local;
   SwizzleType swizzle_type_ = SwizzleType::NoSwizzle;
   std::vector<IterDomain*> axes_to_swizzle_;
+  bool is_double_buffered_ = false;
+  // special handling for CPU based zero-dim tensors (i.e. CPU Tensors that only
+  // have one value). This is only used if on an input value, otherwise ignored.
+  // This is important as special handling because these "scalars" should be
+  // type promoted as a tensor, but we want to avoid explicit copying of the
+  // data, so we want to pass the data value as a standard kernel argument
+  // value.
+  bool cpu_scalar_ = false;
 };
 
 //! A simple TensorView builder

@@ -1,4 +1,4 @@
-#include <caffe2/serialize/inline_container.h>
+#include <ATen/core/dynamic_type.h>
 #include <torch/csrc/jit/mobile/function.h>
 #include <torch/csrc/jit/mobile/interpreter.h>
 #include <torch/csrc/jit/mobile/parse_bytecode.h>
@@ -6,19 +6,17 @@
 #include <torch/csrc/jit/mobile/prim_ops_registery.h>
 #include <torch/csrc/jit/runtime/instruction.h>
 #include <torch/csrc/jit/runtime/operator.h>
-#include <torch/csrc/jit/serialization/import_export_constants.h>
 
 namespace torch {
 namespace jit {
 
 char const* toString(OpCode op);
 namespace mobile {
-Function::Function(c10::QualifiedName name)
-    : name_(std::move(name)), code_(std::make_shared<Code>()) {}
+Function::Function(c10::QualifiedName name) : name_(std::move(name)) {}
 
 Function::Function(
     c10::QualifiedName name,
-    std::shared_ptr<Code> code,
+    Code code,
     at::optional<c10::FunctionSchema> schema)
     : name_(std::move(name)),
       code_(std::move(code)),
@@ -33,8 +31,8 @@ void Function::append_instruction(OpCode op, int X, int N, int64_t dbg_handle) {
       isOpSupportedInMobile(op),
       toString(op),
       " is not supported in mobile module.");
-  code_->instructions_.emplace_back(op, X, N);
-  code_->debug_handles_.emplace_back(dbg_handle);
+  code_.instructions_.emplace_back(op, X, N);
+  code_.debug_handles_.emplace_back(dbg_handle);
 }
 
 void Function::append_instruction(OpCode op, int X, int N) {
@@ -42,7 +40,7 @@ void Function::append_instruction(OpCode op, int X, int N) {
       isOpSupportedInMobile(op),
       toString(op),
       " is not supported in mobile module.");
-  code_->instructions_.emplace_back(op, X, N);
+  code_.instructions_.emplace_back(op, X, N);
 }
 
 bool Function::append_operator(
@@ -52,39 +50,38 @@ bool Function::append_operator(
     int64_t model_version) { /* TODO: T90339189 deprecate all v3 when v3 models
                                 are removed */
   // Keep the original opname in code_
-  code_->op_names_.emplace_back(name, overload_name);
-  const auto& opname = code_->op_names_.back();
-  code_->operator_input_sizes_.emplace_back(num_specified_args.value_or(-1));
+  code_.op_names_.emplace_back(name, overload_name);
+  const auto& opname = code_.op_names_.back();
+  code_.operator_input_sizes_.emplace_back(num_specified_args.value_or(-1));
   auto func = makeOperatorFunction(opname, num_specified_args, model_version);
   if (!func.has_value()) {
     return false;
   }
-  code_->operators_.emplace_back(*func);
+  code_.operators_.emplace_back(*func);
   return true;
 }
 
 void Function::append_constant(const c10::IValue& constant) {
-  code_->constants_.push_back(constant);
+  code_.constants_.push_back(constant);
 }
 
 void Function::append_type(const at::TypePtr& type) {
-  code_->types_.push_back(type);
+  code_.types_.push_back(type);
 }
 
 void Function::append_function(mobile::Function& function) {
-  code_->functions_.push_back(&function);
+  code_.functions_.push_back(&function);
 }
 
 void Function::set_register_size(size_t size) {
-  code_->register_size_ = size;
+  code_.register_size_ = size;
 }
 
 int64_t Function::get_debug_handle(size_t pc) const {
-  TORCH_CHECK(code_, "Valid code must exist.");
   TORCH_CHECK(
-      pc < code_->debug_handles_.size(),
+      pc < code_.debug_handles_.size(),
       "Module debug info index out of boundary.");
-  return code_->debug_handles_[pc];
+  return code_.debug_handles_[pc];
 }
 
 torch::jit::Function& Function::setSchema(c10::FunctionSchema schema) {
@@ -102,10 +99,10 @@ const c10::FunctionSchema& Function::getSchema() const {
 
 void Function::run(Stack& stack) {
   if (hasSchema()) { // if we have a schema then resolve optional args if any
-    getSchema().checkAndNormalizeInputs(
+    getSchema().checkAndNormalizeInputs<c10::DynamicType>(
         stack, std::unordered_map<std::string, IValue>{} /*kwargs*/);
   }
-  InterpreterState interp_state(*code_);
+  InterpreterState interp_state(code_);
   interp_state.run(stack);
 }
 
@@ -119,11 +116,15 @@ size_t Function::num_inputs() const {
 }
 
 bool Function::call(Stack&, c10::function_ref<void(const mobile::Code&)> f) {
-  f(*code_);
+  f(code_);
   return true;
 }
 
-const std::shared_ptr<Code> Function::get_code() const {
+const Code& Function::get_code() const {
+  return code_;
+}
+
+Code& Function::get_code() {
   return code_;
 }
 

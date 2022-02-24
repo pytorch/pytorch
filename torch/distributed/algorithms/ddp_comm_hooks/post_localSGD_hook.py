@@ -5,6 +5,8 @@ import torch.distributed as dist
 
 from . import default_hooks as default
 
+logger = logging.getLogger(__name__)
+
 
 class PostLocalSGDState(object):
     r"""
@@ -28,7 +30,7 @@ class PostLocalSGDState(object):
         subgroup,
         start_localSGD_iter,
     ):
-        logging.info(
+        logger.info(
             "Local SGD will be started after {} iterations".format(start_localSGD_iter)
         )
 
@@ -47,7 +49,7 @@ class PostLocalSGDState(object):
             self.iter += 1
 
         if self.iter == self.start_localSGD_iter:
-            logging.info(
+            logger.info(
                 "Start to apply local SGD after {} iterations.".format(self.iter)
             )
 
@@ -92,6 +94,8 @@ def post_localSGD_hook(
         return default._allreduce_fut(global_group_to_use, input_tensor)
 
     # Run allreduce using `subgroup` after the first `start_localSGD_iter` iterations.
+    # Note that by default, a separate subgroup for each node is created which
+    # causes an intra-node allreduce to be done at each training step.
     # From this moment, model averaging should run after the optimizer step,
     # to globally allreduce all the parameters.
     if state.subgroup is None:

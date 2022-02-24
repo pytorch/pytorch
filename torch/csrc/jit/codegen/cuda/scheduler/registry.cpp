@@ -1,10 +1,12 @@
 #include <c10/util/irange.h>
+#include <torch/csrc/jit/codegen/cuda/disjoint_set.h>
 #include <torch/csrc/jit/codegen/cuda/executor_utils.h>
 #include <torch/csrc/jit/codegen/cuda/expr_evaluator.h>
 #include <torch/csrc/jit/codegen/cuda/instrumentation.h>
 #include <torch/csrc/jit/codegen/cuda/ir_iostream.h>
 #include <torch/csrc/jit/codegen/cuda/ir_utils.h>
 #include <torch/csrc/jit/codegen/cuda/root_domain_map.h>
+#include <torch/csrc/jit/codegen/cuda/scheduler/pointwise.h>
 #include <torch/csrc/jit/codegen/cuda/scheduler/registry.h>
 #include <torch/csrc/jit/codegen/cuda/scheduler/utils.h>
 
@@ -38,7 +40,8 @@ class SchedulerTopologyChecker {
     auto all_vals = fusion->usedMathVals();
     std::vector<TensorView*> reduction_tvs;
     for (auto tv : ir_utils::filterByType<TensorView>(all_vals)) {
-      if (tv->hasReduction() && !fusion->hasInput(tv)) {
+      if (tv->hasReduction() &&
+          !(fusion == tv->fusion() && tv->isFusionInput())) {
         reduction_tvs.push_back(tv);
       }
     }
@@ -355,6 +358,50 @@ class SchedulerTopologyChecker {
     return true;
   }
 };
+
+bool isConnectedFusionGraph(Fusion* fusion) {
+  if (fusion->outputs().empty()) {
+    // Trivial case interpreted as connected
+    return true;
+  }
+
+  // A set of connected components on the fusion graph
+  DisjointSet<Val*> component_sets;
+
+  // Iterate through all used exprs
+  for (auto expr : fusion->exprs()) {
+    TORCH_INTERNAL_ASSERT(
+        !expr->inputs().empty(), "unknown expr with zero input");
+
+    // Each expr joins all its inputs and
+    //  outputs to the same component
+    auto input0 = expr->inputs()[0];
+    for (auto input : expr->inputs()) {
+      component_sets.join(input0, input);
+    }
+    for (auto output : expr->outputs()) {
+      component_sets.join(input0, output);
+    }
+  }
+
+  // Join aliased outputs
+  for (auto alias_it : fusion->ioAlias()) {
+    component_sets.join(alias_it.first, alias_it.second);
+  }
+
+  // Check connected-ness:
+  //  If there is no independent compute flow
+  // on this fusion graph, all outputs will be
+  // equivalent/connected to the first output.
+  auto output0 = fusion->outputs()[0];
+  for (auto output : fusion->outputs()) {
+    if (!component_sets.areEquivalent(output0, output)) {
+      return false;
+    }
+  }
+  return true;
+}
+
 } // namespace
 
 SchedulerRuntimeInfo::SchedulerRuntimeInfo(
@@ -634,39 +681,10 @@ bool SchedulerEntry::sameAs(const SchedulerEntry* other) {
 }
 
 namespace {
-template <typename REDUCTION_OP = ReductionOp>
-inline bool isTrivialReduction(REDUCTION_OP* red) {
-  auto o_tv = red->out()->template as<TensorView>();
-  // Assuming graph unscheduled at this point.
-  for (auto id : o_tv->getRootDomain()) {
-    if (id->isReduction() && !id->extent()->isOneInt()) {
-      return false;
-    }
-  }
-  return true;
-}
-
-template <typename REDUCTION_OP = ReductionOp>
-std::vector<REDUCTION_OP*> findReductionOps(Fusion* fusion) {
-  std::vector<REDUCTION_OP*> red_ops;
-  for (auto expr : fusion->exprs()) {
-    if (auto red = dynamic_cast<REDUCTION_OP*>(expr)) {
-      if (!isTrivialReduction(red)) {
-        red_ops.push_back(red);
-      }
-    }
-  }
-  return red_ops;
-}
-
 std::vector<TransposeOp*> findTransposeOps(Fusion* fusion) {
-  std::vector<TransposeOp*> transpose_ops;
-  for (auto expr : fusion->exprs()) {
-    if (auto transpose_op = dynamic_cast<TransposeOp*>(expr)) {
-      transpose_ops.push_back(transpose_op);
-    }
-  }
-  return transpose_ops;
+  auto exprs = fusion->exprs();
+  auto transpose_ops = ir_utils::filterByType<TransposeOp>(exprs);
+  return std::vector<TransposeOp*>(transpose_ops.begin(), transpose_ops.end());
 }
 
 static bool checkPatternEquivalence(
@@ -747,6 +765,11 @@ class ReductionScheduler : public SchedulerEntry {
 
   //! Check if the reduction heuristics apply in given fusion
   static bool canScheduleCompileTime(Fusion* fusion) {
+    auto view_tvs = scheduler_utils::getViewTVs(fusion);
+    if (view_tvs.size() > 0) {
+      return false;
+    }
+
     auto reduction_tvs = scheduler_utils::getReductionTvs(fusion);
 
     if (reduction_tvs.size() == 0) {
@@ -760,9 +783,8 @@ class ReductionScheduler : public SchedulerEntry {
     }
 
     // Make sure reduction axes are consistent through the fusion
-    if (findReductionOps(fusion).size() +
-            findReductionOps<WelfordOp>(fusion).size() >
-        1) {
+    auto reduction_ops = ir_utils::getReductionOps(fusion);
+    if (reduction_ops.size() > 1) {
       // Before examining the reduction axes want to quickly
       //   check the reductions have the same axis width
       //   to avoid building root domain map in easier cases
@@ -852,9 +874,16 @@ class PointWiseScheduler : public SchedulerEntry {
   }
 
   static bool canScheduleCompileTime(Fusion* fusion) {
-    auto red_ops = findReductionOps(fusion);
-    auto welford_ops = findReductionOps<WelfordOp>(fusion);
-    return red_ops.empty() && welford_ops.empty();
+    //   Currently using the same path as the scheduler
+    // to eliminate mismatch between canSchedule and
+    // schedule pointwise.
+    if (!hasReferenceTensorView(fusion)) {
+      return false;
+    }
+
+    auto reduction_ops = ir_utils::getReductionOps(fusion);
+    auto welford_ops = ir_utils::filterByType<WelfordOp>(reduction_ops);
+    return reduction_ops.empty() && welford_ops.empty();
   }
 
   static bool canScheduleRunTime(
@@ -895,6 +924,19 @@ class PersistentKernelScheduler : public SchedulerEntry {
   }
 
   static bool canScheduleCompileTime(Fusion* fusion) {
+    auto reduction_ops = ir_utils::getReductionOps(fusion);
+    auto welford_ops = ir_utils::filterByType<WelfordOp>(reduction_ops);
+    // For persistent schedule we want welford translated to average and
+    // standard deviation reductions.
+    if (welford_ops.begin() != welford_ops.end()) {
+      return false;
+    }
+
+    auto view_tvs = scheduler_utils::getViewTVs(fusion);
+    if (view_tvs.size() > 0) {
+      return false;
+    }
+
     auto reduction_tvs = scheduler_utils::getReductionTvs(fusion);
 
     if (reduction_tvs.size() == 0) {
@@ -1069,8 +1111,13 @@ bool checkCanSchedule(
   // since for all current use cases
   //  it has to pass all the compile time checks to create a data cache for this
   //  fusion.
-  if (!data_cache && !SchedulerType::canScheduleCompileTime(fusion)) {
-    return false;
+  if (!data_cache) {
+    if (!isConnectedFusionGraph(fusion)) {
+      return false;
+    }
+    if (!SchedulerType::canScheduleCompileTime(fusion)) {
+      return false;
+    }
   }
 
   return SchedulerType::canScheduleRunTime(fusion, runtime_info, data_cache);
