@@ -194,7 +194,7 @@ class GitHubPR:
         self.project = project
         self.pr_num = pr_num
         self.info = gh_get_pr_info(org, project, pr_num)
-        self.changed_files:Optional[List[str]] = None
+        self.changed_files: Optional[List[str]] = None
 
     def is_closed(self) -> bool:
         return bool(self.info["closed"])
@@ -229,7 +229,11 @@ class GitHubPR:
                 self.changed_files += [x["path"] for x in info["files"]["nodes"]]
                 if not info["files"]["pageInfo"]["hasNextPage"]:
                     break
-                rc = gh_graphql(GH_GET_PR_NEXT_FILES_QUERY, name=self.project, owner=self.org, number=self.pr_num, cursor=info["files"]["pageInfo"]["endCursor"])
+                rc = gh_graphql(GH_GET_PR_NEXT_FILES_QUERY,
+                                name=self.project,
+                                owner=self.org,
+                                number=self.pr_num,
+                                cursor=info["files"]["pageInfo"]["endCursor"])
                 info = rc["data"]["repository"]["pullRequest"]
 
         if len(self.changed_files) != self.get_changed_files_count():
