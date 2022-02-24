@@ -745,7 +745,7 @@ def _export(model, args, f, export_params=True, verbose=False, training=None,
 
             torch._C._jit_pass_dce_allow_deleting_nodes_with_side_effects(graph)
             node_attr_to_name = {}  # type: ignore[var-annotated]
-            if export_modules_as_functions is not None:
+            if export_modules_as_functions:
                 # NOTE: cannot call DCE after this pass. DCE will remove function definition nodes.
                 node_attr_to_name = torch._C._jit_pass_onnx_function_extraction(
                     graph, export_modules_as_functions, list(params_dict.keys()))
