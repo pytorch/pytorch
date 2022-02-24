@@ -45,7 +45,13 @@ def argumenttype_type(
         remove_non_owning_ref_types=remove_non_owning_ref_types,
         structured_type_override=structured_type_override)
 
-def argument_type(a: Argument, *, binds: ArgName, remove_non_owning_ref_types: bool = False, structured_type_override: bool) -> NamedCType:
+def argument_type(
+        a: Argument,
+        *,
+        binds: ArgName,
+        remove_non_owning_ref_types: bool = False,
+        structured_type_override: bool
+) -> NamedCType:
     return argumenttype_type(
         a.type,
         mutable=a.is_write,
