@@ -2,6 +2,7 @@
 
 #include <ATen/record_function.h>
 #include <map>
+#include <mutex>
 #include <set>
 #include <string>
 
@@ -29,6 +30,8 @@ struct BuildFeatureTracer final {
 
   BuildFeatureTracer();
   static build_feature_type& getBuildFeatures();
+  /* Protect concurrent writes into the set. */
+  static std::mutex& getMutex();
 
   ~BuildFeatureTracer() {
     at::removeCallback(handle_);
