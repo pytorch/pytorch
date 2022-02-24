@@ -622,7 +622,7 @@ class _ConvTransposeNd(_ConvNd):
             qconv.zero_point = int(act_zp)
             return qconv
 
-    @classmethod
+    @staticmethod
     def from_reference(cls, ref_qconvt, output_scale, output_zero_point):
         r"""Create a (fbgemm/qnnpack) quantized module from a reference quantized module
         Args:
@@ -735,6 +735,10 @@ class ConvTranspose1d(_ConvTransposeNd):
         return torch.ops.quantized.conv_transpose1d(
             input, self._packed_params, self.scale, self.zero_point)
 
+    @classmethod
+    def from_reference(cls, ref_qconvt, output_scale, output_zero_point):
+        _ConvTransposeNd.from_reference(cls, ref_qconvt, output_scale, output_zero_point)
+
 
 class ConvTranspose2d(_ConvTransposeNd):
     r"""Applies a 2D transposed convolution operator over an input image
@@ -818,6 +822,10 @@ class ConvTranspose2d(_ConvTransposeNd):
             raise ValueError("Input shape must be `(N, C, H, W)`!")
         return ops.quantized.conv_transpose2d(
             input, self._packed_params, self.scale, self.zero_point)
+
+    @classmethod
+    def from_reference(cls, ref_qconvt, output_scale, output_zero_point):
+        _ConvTransposeNd.from_reference(cls, ref_qconvt, output_scale, output_zero_point)
 
 class ConvTranspose3d(_ConvTransposeNd):
     r"""Applies a 3D transposed convolution operator over an input image
@@ -903,3 +911,7 @@ class ConvTranspose3d(_ConvTransposeNd):
             raise ValueError("Input shape must be `(N, C, T, H, W)`!")
         return ops.quantized.conv_transpose3d(
             input, self._packed_params, self.scale, self.zero_point)
+
+    @classmethod
+    def from_reference(cls, ref_qconvt, output_scale, output_zero_point):
+        _ConvTransposeNd.from_reference(cls, ref_qconvt, output_scale, output_zero_point)
