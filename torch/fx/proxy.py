@@ -12,7 +12,6 @@ from .operator_schemas import check_for_mutable_operation
 
 @compatibility(is_backward_compatible=True)
 class TracerBase:
-    graph: Graph
     record_stack_traces : bool = False
     # Feature flag for mutable schema checking
     # Enableby default in 1.12
