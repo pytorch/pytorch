@@ -226,8 +226,9 @@ jobs:
           # Skip docker push as this job is purely for size analysis purpose.
           # Result binaries are already in `/home/circleci/project/` as it's mounted instead of copied.
       - name: Parse ref
+        shell: bash
         id: parse-ref
-        run: .github/scripts/parse_ref.py
+        run: ./.github/scripts/parse_ref.py
       - name: Display and upload binary build size statistics (Click Me)
         # temporary hack: set CIRCLE_* vars, until we update
         # tools/stats/print_test_stats.py to natively support GitHub Actions
