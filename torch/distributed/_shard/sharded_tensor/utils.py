@@ -1,4 +1,5 @@
 import collections.abc
+import copy
 from contextlib import contextmanager
 from typing import Optional, List, Sequence
 
@@ -197,7 +198,7 @@ def build_global_metadata(gathered_metadatas: Sequence[Optional[ShardedTensorMet
             continue
 
         if global_sharded_tensor_metadata is None:
-            global_sharded_tensor_metadata = rank_metadata
+            global_sharded_tensor_metadata = copy.deepcopy(rank_metadata)
             global_metadata_rank = rank
         else:
             _raise_if_mismatch(global_sharded_tensor_metadata.size,
