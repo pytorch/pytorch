@@ -174,7 +174,7 @@ def error_on_missing_kernels(
         if expected_overload_count != actual_overload_count:
             def create_decl(f: NativeFunction) -> str:
                 with native_function_manager(f):
-                    return DispatcherSignature.from_schema(f.func).decl()
+                    return DispatcherSignature.from_schema(f.func, structured_type_override=f.part_of_structured_group).decl()
             expected_schemas_str = '\n'.join([create_decl(f) for f in funcs])
             missing_kernels_err_msg += f"""
 {class_name} is missing a kernel definition for {expected_name}. We found {actual_overload_count} kernel(s) with that name,

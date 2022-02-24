@@ -108,6 +108,10 @@ Value* getValueTrace(const IValue& var) {
 Value* getOptTensorValueTrace(const c10::optional<at::Tensor>& var) {
   return getValueTrace(IValue(var));
 }
+Value* getUnboxedOptTensorValueTrace(const at::OptionalTensorRef& var) {
+  auto ivalue = (var.has_value()) ? IValue(*var) : IValue();
+  return getValueTrace(ivalue);
+}
 Value* TracingState::getValue(const IValue& var) {
   // allow tracing of tuples passed to List[Tensor] or Tuple[Tensor...]
   // arguments
@@ -713,11 +717,24 @@ void addInputs(
     const c10::optional<at::ScalarType>& value) {
   detail::genericAddOptionalInput(n, name, value);
 }
-
 void addInputs(
     Node* n,
     const char* name,
-    at::TensorList value,
+    std::vector<at::Tensor> value,
+    bool allow_undefined) {
+  addInputs(n, name, at::ITensorList(value), allow_undefined);
+}
+void addInputs(
+    Node* n,
+    const char* name,
+    at::ArrayRef<at::Tensor> value,
+    bool allow_undefined) {
+  addInputs(n, name, at::ITensorList(value), allow_undefined);
+}
+void addInputs(
+    Node* n,
+    const char* name,
+    at::ITensorList value,
     bool allow_undefined) {
   Graph* g = n->owningGraph();
   Node* list_node = nullptr;
@@ -734,14 +751,13 @@ void addInputs(
 TORCH_API void addInputs(
     Node* n,
     const char* name,
-    const List<c10::optional<at::Tensor>>& value) {
+    at::IOptTensorRefList value) {
   Graph* g = n->owningGraph();
   Node* list_node = nullptr;
   list_node = g->insertNode(g->createList(
-      OptionalType::ofTensor(), fmap(value, getOptTensorValueTrace)));
+      OptionalType::ofTensor(), fmap(value, getUnboxedOptTensorValueTrace)));
   n->addInput(list_node->output());
 }
-
 void addInputs(
     Node* n,
     const char* name,

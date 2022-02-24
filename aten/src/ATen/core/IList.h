@@ -180,28 +180,12 @@ using IListConstRef = typename ivalue_to_const_ref_overload_return<T>::type;
  * What does it do?
  * ================
  * 1. defines static methods to be used as dispatch targets by both
- *    `IList<T>` and `IListIterator<T>`.
+ *    `IList<T>` and `IListIterator<T>` (see the implementation of
+ *    `IListTagImplBase`).
  *
  * 2. defines the `elem_type` and `list_type` aliases that will be
  *    used in the definition of `IList<T>`. In general, we should do
  *    so by inheriting from `IListTagImplBase<TAG, T, ListElemT>`.
- *
- * Here's a list of the required members (note that most of them might
- * be already inherited from `IListTagImplBase`):
- *
- * - a type `elem_type`.
- *
- * - a type `list_type`.
- *
- * - a function `unwrap` that returns a const reference to the actual
- *   container that corresponds to the given `TAG`.
- *
- * - a function `unwrap` (const and non-const overloads) that returns
- *   a (const) reference to the actual iterator that corresponds to the
- *   given `TAG`.
- *
- * - a function `iterator_get` that returns a reference to `T`, given
- *   the unwrapped iterator.
  *
  * Existing Specializations
  * ========================
@@ -472,6 +456,10 @@ class IList {
 
   iterator end() const {
     TORCH_ILIST_UNWRAP(tag_, { return this_.end(); });
+  }
+
+  detail::IListConstRef<T> front() const {
+    TORCH_ILIST_UNWRAP(tag_, { return ImplT::front(this_); });
   }
 
   detail::IListConstRef<T> operator[](size_t i) const {
