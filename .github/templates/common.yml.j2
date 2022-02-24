@@ -6,6 +6,10 @@
 {%- set squid_no_proxy = "localhost,127.0.0.1,github.com,amazonaws.com,s3.amazonaws.com,169.254.169.254,169.254.170.2,/var/run/docker.sock" -%}
 {%- set timeout_minutes = 240 -%}
 
+# NOTE: If testing pytorch/builder changes you can change this variable to change what pytorch/builder reference
+#       the binary builds will check out
+{%- set builder_branch = "main" -%}
+
 {%- macro concurrency(build_environment) -%}
 concurrency:
   group: !{{ build_environment }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
@@ -191,7 +195,9 @@ concurrency:
       - name: Checkout !{{ 'PyTorch' if repository == "pytorch/pytorch" else repository }}
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
-      {%- if checkout_pr_head %}
+      {%- if branch %}
+          ref: !{{ branch }}
+      {%- elif checkout_pr_head %}
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
       {%- endif %}
       {%- if deep_clone %}
@@ -201,9 +207,6 @@ concurrency:
           submodules: !{{ submodules }}
       {%- if repository != "pytorch/pytorch" %}
           repository: !{{ repository }}
-      {%- endif %}
-      {%- if branch %}
-          ref: !{{ branch }}
       {%- endif %}
       {%- if directory %}
           path: !{{ directory }}
