@@ -61,16 +61,25 @@ namespace detail {
         ts = ts | x->key_set();
       }
     }
-    void operator()(at::ITensorList xs) {
-      for (const auto& x : xs) {
-        ts = ts | x.key_set();
-      }
-    }
     // Tensor?[] translates to this case.
     void operator()(const c10::List<c10::optional<at::Tensor>>& xs) {
       for (c10::optional<at::Tensor> x : xs) {
         if (x.has_value()) {
           ts = ts | x.value().key_set();
+        }
+      }
+    }
+    // Tensor[] translates to this case
+    void operator()(at::ITensorList xs) {
+      for (const auto& x : xs) {
+        ts = ts | x.key_set();
+      }
+    }
+    // Structured Tensor?[] translates to this case.
+    void operator()(at::IOptTensorRefList xs) {
+      for (at::OptionalTensorRef x : xs) {
+        if (x.has_value()) {
+          ts = ts | x->key_set();
         }
       }
     }

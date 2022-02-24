@@ -1,4 +1,5 @@
 #include <ATen/ATen.h>
+#include <ATen/core/IList.h>
 #include <ATen/native/cpu/Loops.h>
 #include <ATen/native/quantized/cpu/quantized_ops.h>
 #include <ATen/native/TensorIterator.h>
@@ -60,7 +61,7 @@ bool all_inputs_sharing_qparams(ITensorList qxs) {
  */
 template <bool ReLUFused>
 Tensor quantized_cat_impl(
-    const ITensorList& qxs,
+    ITensorList qxs,
     int64_t dim,
     double scale,
     int64_t zero_point) {

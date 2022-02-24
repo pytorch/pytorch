@@ -21,7 +21,7 @@ def return_str(f: NativeFunction) -> str:
     if len(f.func.arguments.out) != 0:
         if len(f.func.arguments.out) > 1:
             return_names = ', '.join(a.name for a in f.func.arguments.out)
-            return f'return {DispatcherSignature.from_schema(f.func).returns_type().cpp_type()}({return_names});'
+            return f'return {DispatcherSignature.from_schema(f.func, structured_type_override=f.part_of_structured_group).returns_type().cpp_type()}({return_names});'
         else:
             return f'return {f.func.arguments.out[0].name}'
     if f.func.arguments.self_arg is not None:
@@ -120,12 +120,12 @@ def emit_view_functionalization_body(
         # Requirement: Every inplace_view op needs to have a corresponding functional view op, which we paired together beforehand.
         assert functional_op is not None
         api_name = functional_op.func.name.unambiguous_name()
-        call_sig = DispatcherSignature.from_schema(functional_op.func)
+        call_sig = DispatcherSignature.from_schema(functional_op.func, structured_type_override=functional_op.part_of_structured_group)
     else:
         api_name = f.func.name.unambiguous_name()
-        call_sig = DispatcherSignature.from_schema(f.func)
+        call_sig = DispatcherSignature.from_schema(f.func, structured_type_override=f.part_of_structured_group)
 
-    dispatcher_sig = DispatcherSignature.from_schema(f.func)
+    dispatcher_sig = DispatcherSignature.from_schema(f.func, structured_type_override=f.part_of_structured_group)
     assert_view_op_properties(f.func)
     view_tensor_name = dispatcher_sig.arguments()[0].name
 
@@ -201,7 +201,7 @@ def emit_inplace_functionalization_body(
     # mutation case
     assert(modifies_arguments(f))
 
-    dispatcher_sig = DispatcherSignature.from_schema(f.func)
+    dispatcher_sig = DispatcherSignature.from_schema(f.func, structured_type_override=f.part_of_structured_group)
 
     keyset = 'dispatchKeySet & c10::after_func_keyset'
     return_type = dispatcher_sig.returns_type().remove_const_ref().cpp_type()
@@ -249,7 +249,7 @@ If this causes problems in your program, consider upstreaming the out-of-place o
 """
     else:
         # call the out-of-place variant of the op
-        functional_sig = DispatcherSignature.from_schema(functional_op.func)
+        functional_sig = DispatcherSignature.from_schema(functional_op.func, structured_type_override=functional_op.part_of_structured_group)
         functional_exprs = [keyset] + [e.expr for e in translate(unwrapped_args_ctx, functional_sig.arguments(), method=False)]
         functional_call_str = \
             f"tmp_output = at::_ops::{functional_op.func.name.unambiguous_name()}::redispatch({', '.join(functional_exprs)});"
@@ -309,7 +309,7 @@ def gen_functionalization_registration(
             metadata = composite_implicit_autograd_index.get_kernel(f)
             assert metadata is not None
             native_api_name = metadata.kernel
-            sig = DispatcherSignature.from_schema(f.func)
+            sig = DispatcherSignature.from_schema(f.func, structured_type_override=f.part_of_structured_group)
             # Note [Composite view ops in the functionalization pass]
             # We don't need to worry about implemententing functionalization kernels for views with
             # CompositeImplicitAutograd kernels, because we can just decompose them into their base operators.
@@ -344,7 +344,7 @@ def gen_functionalization_definition(
             # inplace op
             assert modifies_arguments(f)
             body_str = emit_inplace_functionalization_body(f, functional_op)
-        sig = DispatcherSignature.from_schema(f.func)
+        sig = DispatcherSignature.from_schema(f.func, structured_type_override=f.part_of_structured_group)
         return f"""
     {sig.defn(name=wrapper_name(f.func), is_redispatching_fn=True)} {{
     {body_str}

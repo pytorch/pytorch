@@ -64,6 +64,7 @@ class OptionalTensorRef;
 class Tensor;
 using TensorList = ArrayRef<Tensor>;
 using ITensorList = c10::IList<Tensor>;
+using IOptTensorRefList = c10::IList<OptionalTensorRef>;
 
 using Stream = c10::Stream;
 
