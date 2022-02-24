@@ -27,3 +27,10 @@ export BUILD_LITE_INTERPRETER=1
 VERBOSE=1 DEBUG=1 python "${BUILD_LIBTORCH_PY}"
 
 popd
+
+# run test
+
+"$LIGHTWEIGHT_DISPATCH_BUILD/build/bin/test_codegen_unboxing"
+
+# shutdown test
+python $TEST_SRC_ROOT/tests_setup.py shutdown

@@ -542,7 +542,8 @@ LINUX_WORKFLOWS = [
         build_environment="linux-xenial-py3-clang5-mobile-lightweight-dispatch-build",
         docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-xenial-py3-clang5-android-ndk-r19c",
         test_runner_type=LINUX_CPU_TEST_RUNNER,
-        enable_distributed_test=False,
+        build_generates_artifacts=False,
+        exclude_test=True,
         ciflow_config=CIFlowConfig(
             labels={LABEL_CIFLOW_LINUX, LABEL_CIFLOW_MOBILE, LABEL_CIFLOW_DEFAULT, LABEL_CIFLOW_LIBTORCH, LABEL_CIFLOW_CPU},
         ),
