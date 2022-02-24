@@ -1534,7 +1534,7 @@ def gradgradcheck(
                 device=x.device,
                 requires_grad=True,
                 noncontiguous=gen_non_contig_grad_outputs,
-            ).clone(memory_format=torch.legacy_contiguous_format)
+            )
 
         outputs = _as_tuple(func(*tupled_inputs))
         tupled_grad_outputs = tuple(make_tensor_like(x) for x in outputs)
