@@ -281,4 +281,4 @@ class Wishart(ExponentialFamily):
 
     def _log_normalizer(self, x, y):
         p = self._event_shape[-1]
-        return 0.5 * y * (- torch.linalg.slogdet(x).logabsdet + _log_2 * p) + torch.mvlgamma(y, p=p)
+        return 0.5 * y * (- torch.linalg.slogdet(x).logabsdet + _log_2 * p) + torch.mvlgamma(0.5 * y, p=p)
