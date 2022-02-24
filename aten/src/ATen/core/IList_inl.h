@@ -21,6 +21,11 @@ class IListTagImplBase<IListTag::Unboxed, T, ListElemT> {
   using elem_type = ListElemT;
   using list_type = ArrayRef<elem_type>;
 
+  /*
+   * These `unwrap` static methods unwraps the inner containers out
+   * of `IList<T>` (and `IListIterator<T>`). They are required when
+   * the macro `TORCH_ILIST_UNWRAP` is called.
+   */
   static const list_type& unwrap(const IList<T>& ilist) {
     return ilist.payload_.unboxed;
   }
@@ -40,8 +45,12 @@ class IListTagImplBase<IListTag::Unboxed, T, ListElemT> {
    * weren't syntatically equal for the existing tags at the time
    * (`Unboxed` and `Boxed`).
    */
-  static IListConstRef<T> get(const list_type& it, size_t i) {
-    return it[i];
+  static IListConstRef<T> front(const list_type& lst) {
+    return lst.front();
+  }
+
+  static IListConstRef<T> get(const list_type& lst, size_t i) {
+    return lst[i];
   }
 
   static IListConstRef<T> iterator_get(
@@ -71,6 +80,10 @@ class IListTagImplBase<IListTag::Boxed, T, ListElemT> {
   static const typename list_type::const_iterator& unwrap(
       const IListIterator<T>& it) {
     return it.payload_.boxed_iterator;
+  }
+
+  static IListConstRef<T> front(const list_type& lst) {
+    return lst[0];
   }
 
   static IListConstRef<T> get(const list_type& it, size_t i) {
