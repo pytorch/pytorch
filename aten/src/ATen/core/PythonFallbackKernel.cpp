@@ -10,7 +10,7 @@ namespace {
 // This is set in the pythonTLSSnapshot fallback and used by the Python fallback.
 thread_local std::stack<c10::impl::LocalDispatchKeySet> tls_on_entry;
 
-struct C10_API StashTLSStateGuard {
+struct StashTLSStateGuard {
  public:
   StashTLSStateGuard(const c10::impl::LocalDispatchKeySet& key_set) {
     tls_on_entry.push(key_set);

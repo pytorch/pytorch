@@ -7,7 +7,7 @@ import torch
 import torch.onnx.symbolic_helper as sym_help
 import warnings
 
-from torch.onnx.symbolic_helper import parse_args, _unimplemented, _is_tensor_list, ScalarType
+from torch.onnx.symbolic_helper import parse_args, _unimplemented, _is_tensor_list, ScalarType, quantized_args
 from torch.onnx.symbolic_opset9 import expand, unused, mul
 from torch.onnx.symbolic_opset9 import linalg_vector_norm as lvn
 from torch.nn.modules.utils import _single, _pair, _triple
@@ -569,6 +569,10 @@ def squeeze(g, self, dim=None):
     if dim is None:
         return g.op("Squeeze", self)
 
+    # dim as a tensor
+    if not sym_help._is_constant(dim):
+        return sym_help._squeeze_helper(g, self, [dim])
+
     dim = sym_help._get_const(dim, "i", "dim")
 
     input_rank = sym_help._get_tensor_rank(self)
@@ -606,8 +610,10 @@ def squeeze(g, self, dim=None):
     return sym_help._squeeze_helper(g, self, [dim])
 
 
-@parse_args("v", "i")
 def unsqueeze(g, self, dim):
+    if sym_help._is_constant(dim):
+        dim = sym_help._get_const(dim, "i", "dim")
+
     return sym_help._unsqueeze_helper(g, self, [dim])
 
 def mm(g, self, other):
@@ -791,7 +797,7 @@ def narrow(g, input, dim, start, length):
     end = g.op("Add", start, length)
     return _slice_helper(g, input, axes=dim, starts=start, ends=end, dynamic_slice=True)
 
-
+@quantized_args(True, False, False)
 @parse_args("v", "i", "i")
 def flatten(g, input, start_dim, end_dim):
     dim = sym_help._get_tensor_rank(input)
