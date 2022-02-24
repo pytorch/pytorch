@@ -496,7 +496,7 @@ class TestCommon(TestCase):
             return make_tensor(t.shape,
                                dtype=t.dtype,
                                device=t.device,
-                               non_contiguous=True)
+                               noncontiguous=True)
 
         _compare_out(_case_one_transform)
 

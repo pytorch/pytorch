@@ -44,7 +44,7 @@ class BisectPercentileOp final : public Operator<Context> {
         pct_upper_.size(),
         "Feature (raw) data and upper bound dimension should match.");
     n_features = pct_lens_.size();
-    index.reserve(n_features + 1);
+    index.resize(n_features + 1);
     index[0] = 0;
     for (int i = 1; i <= n_features; ++i) {
       index[i] = index[i - 1] + pct_lens_[i - 1];
@@ -115,13 +115,10 @@ class BisectPercentileOp final : public Operator<Context> {
       int lo,
       int hi,
       float val) {
-    int mid;
-    bool low_cond, high_cond;
-
     while (lo < hi) {
-      mid = (lo + hi) >> 1;
-      low_cond = (data[mid] <= val);
-      high_cond = (val < data[mid + 1]);
+      const auto mid = lo + (hi - lo) / 2;
+      const bool low_cond = (data[mid] <= val);
+      const bool high_cond = (val < data[mid + 1]);
       if (low_cond && high_cond) {
         return mid;
       } else if (!low_cond) {
