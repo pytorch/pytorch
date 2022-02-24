@@ -89,8 +89,6 @@ TEST(ITensorListTest, CtorTemp_IsUnboxed) {
 
 TEST(ITensorListTest, Boxed_GetConstRefTensor) {
   auto vec = get_tensor_vector();
-  // Using 'const' here, so that 'operator[]' returns
-  // a 'Tensor' reference (plus, we don't need to mutate it here).
   List<at::Tensor> boxed(vec);
   at::ITensorList list(boxed);
   static_assert(
