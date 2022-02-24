@@ -74,6 +74,7 @@ TENSORLIST_TYPE = [
     'at::TensorList',
     'const at::ITensorList &',
     'const c10::List<c10::optional<at::Tensor>> &',
+    'const at::IOptTensorRefList &',
 ]
 
 # for each aten type, how do we handle a return value of that type?
@@ -298,7 +299,7 @@ if __name__ == '__main__':
                 env['statements'].append(
                     'auto {} = peekSlice({}, InputSize() - {}, InputSize());'
                     .format(arg['name'], real_inputs, static_tensor_inputs))
-            elif arg['type'] == 'const c10::List<c10::optional<at::Tensor>> &':
+            elif arg['type'] == 'const c10::List<c10::optional<at::Tensor>> &' or arg['type'] == 'const at::IOptTensorRefList &':
                 # NOTE: do not advance real_inputs here. After this we will
                 # switch to indexing the "stack" from the end
                 env['statements'].append(

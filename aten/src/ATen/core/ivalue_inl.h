@@ -8,6 +8,7 @@
 #include <ATen/core/Dict.h>
 #include <ATen/core/List.h>
 #include <ATen/core/IList.h>
+#include <ATen/core/Tensor.h>
 #include <ATen/core/functional.h>
 #include <ATen/core/jit_type.h>
 #include <ATen/core/qualified_name.h>
@@ -1988,6 +1989,12 @@ inline IValue::IValue(std::array<T, N> v) : IValue(c10::List<T>()) {
   list.reserve(v.size());
   for (auto& e : v) {
     list.push_back(std::move(e));
+  }
+}
+
+inline IValue::IValue(at::OptionalTensorRef v) : IValue() {
+  if (v.has_value()) {
+    *this = IValue(std::move(*v));
   }
 }
 

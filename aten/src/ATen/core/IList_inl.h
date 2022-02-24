@@ -6,7 +6,7 @@
 namespace at {
 class Tensor;
 class OptionalTensorRef;
-}
+} // namespace at
 
 namespace c10 {
 namespace detail {
@@ -157,5 +157,46 @@ using ITensorListIterator = c10::IListIterator<at::Tensor>;
 // [Note: IOptTensorRefList]
 using IOptTensorRefList = c10::IList<at::OptionalTensorRef>;
 using IOptTensorRefListIterator = c10::IListIterator<at::OptionalTensorRef>;
+
+/*
+ * Helper class for converting an `IOptTensorRefList` into its boxed container.
+ *
+ * What is this for?
+ * =================
+ * There are some situations where we need the boxed container of
+ * `IOptTensorRefList`. If it already is in its boxed form, we can just return
+ * that by calling `IOptTensorRefList::toBoxed()`. Otherwise, we have to
+ * create a new boxed container, and copy the elements to it.
+ *
+ * What does it do?
+ * ================
+ * It optionally creates and owns a new boxed container. A reference
+ * to it can be accessed by calling `IListMaybeIntoBoxed::get`.
+ */
+class IOptTensorRefListMaybeOwnBoxed {
+ private:
+  using IntoT = typename IOptTensorRefList::boxed_type;
+
+ public:
+  IOptTensorRefListMaybeOwnBoxed(IOptTensorRefList ref) : ref_(ref) {
+    if (!ref.isBoxed()) {
+      own_ = IntoT();
+      own_->reserve(ref.size());
+      for (const auto& t : ref) {
+          own_->push_back(t.has_value() ? optional<at::Tensor>(*t) : nullopt);
+      }
+    } else {
+      own_ = nullopt;
+    }
+  }
+
+  const IntoT& get() const {
+    return ref_.isBoxed() ? ref_.toBoxed() : own_.value();
+  }
+
+ private:
+  IOptTensorRefList ref_;
+  optional<IntoT> own_;
+};
 
 } // namespace at

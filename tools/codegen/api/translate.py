@@ -1,11 +1,10 @@
 from typing import Dict, Sequence, List, NoReturn, Union
-from tools.codegen.api.types import (ListCType, BaseCType, Binding, ConstRefCType,
+from tools.codegen.api.types import (BaseCType, Binding, ConstRefCType,
                                      Expr, MutRefCType, OptionalCType,
                                      NamedCType, SpecialArgName, tensorT,
                                      memoryFormatT, tensorOptionsT, scalarTypeT,
                                      boolT, deviceT, layoutT, optionalTensorRefT,
-                                     iOptTensorRefListT, scalarT,
-                                     optionalScalarRefT, VectorCType, longT,
+                                     scalarT, optionalScalarRefT, VectorCType, longT,
                                      intArrayRefT)
 
 # This file implements a small program synthesis engine that implements
@@ -109,10 +108,6 @@ def translate(
         if t.type == ConstRefCType(OptionalCType(BaseCType(scalarT))):
             ctx[NamedCType(t.name, BaseCType(optionalScalarRefT))] = \
                 f'({b.expr}.has_value() ? at::OptionalScalarRef(&({b.expr}.value())) : at::OptionalScalarRef())'
-
-        # [Note: IOptTensorRefList]
-        if t.type == ConstRefCType(ListCType(OptionalCType(BaseCType(tensorT)))):
-            ctx[NamedCType(t.name, BaseCType(iOptTensorRefListT))] = f"{b.expr}"
 
     # Add implicit bindings if the generated code is inside a Tensor method
     if method:

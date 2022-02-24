@@ -80,6 +80,14 @@ namespace detail {
         ts = ts | x.key_set();
       }
     }
+    // Structured Tensor?[] translates to this case.
+    void operator()(at::IOptTensorRefList xs) {
+      for (at::OptionalTensorRef x : xs) {
+        if (x.has_value()) {
+          ts = ts | x->key_set();
+        }
+      }
+    }
     void operator()(at::ArrayRef<c10::optional<at::Tensor>> xs) {
       // Just checking that the handling of Tensor?[] didn't change.
       TORCH_INTERNAL_ASSERT(false);

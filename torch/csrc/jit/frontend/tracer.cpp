@@ -108,6 +108,10 @@ Value* getValueTrace(const IValue& var) {
 Value* getOptTensorValueTrace(const c10::optional<at::Tensor>& var) {
   return getValueTrace(IValue(var));
 }
+Value* getUnboxedOptTensorValueTrace(const at::OptionalTensorRef& var) {
+  auto ivalue = (var.has_value()) ? IValue(*var) : IValue();
+  return getValueTrace(ivalue);
+}
 Value* TracingState::getValue(const IValue& var) {
   // allow tracing of tuples passed to List[Tensor] or Tuple[Tensor...]
   // arguments
@@ -747,11 +751,11 @@ void addInputs(
 TORCH_API void addInputs(
     Node* n,
     const char* name,
-    const List<c10::optional<at::Tensor>>& value) {
+    at::IOptTensorRefList value) {
   Graph* g = n->owningGraph();
   Node* list_node = nullptr;
   list_node = g->insertNode(g->createList(
-      OptionalType::ofTensor(), fmap(value, getOptTensorValueTrace)));
+      OptionalType::ofTensor(), fmap(value, getUnboxedOptTensorValueTrace)));
   n->addInput(list_node->output());
 }
 void addInputs(

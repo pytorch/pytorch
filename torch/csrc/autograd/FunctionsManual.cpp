@@ -4100,11 +4100,12 @@ Tensor embedding_dense_double_backward(const Tensor & grad, const Tensor & indic
   return gg_weight.view(size);
 }
 
-Tensor index_backward(Tensor zeros_like_self, const torch::List<c10::optional<Tensor>>& indices, const Tensor& grad) {
+Tensor index_backward(Tensor zeros_like_self, at::IOptTensorRefList indices, const Tensor& grad) {
+  auto boxed_indices = at::IOptTensorRefListMaybeOwnBoxed(indices);
   return (areAnyTensorSubclassLike({zeros_like_self, grad}) ||
           areAnyOptionalTensorSubclassLike(indices))
-      ? zeros_like_self.index_put(indices, grad, true)
-      : at::_index_put_impl_(zeros_like_self, indices, grad, true, true);
+      ? zeros_like_self.index_put(boxed_indices.get(), grad, true)
+      : at::_index_put_impl_(zeros_like_self, boxed_indices.get(), grad, true, true);
 }
 
 Tensor _cudnn_ctc_loss_backward(const Tensor& grad_out, const Tensor& loss, const Tensor& raw_grad, bool zero_infinity) {
