@@ -1412,18 +1412,20 @@ class TestSparseCSR(TestCase):
         for sample in samples:
             a = sample.args[0].to_sparse_csr()
 
-            def fn(c, b):
-                output = torch.addmm(c, a, b, **sample.kwargs)
-                if sample.output_process_fn_grad is not None:
-                    return sample.output_process_fn_grad(output)
-                return output
+            for addmm in [torch.addmm, torch.sparse.addmm]:
 
-            self.assertTrue(torch.autograd.gradcheck(fn, [sample.input, sample.args[1]], fast_mode=True))
+                def fn(c, b):
+                    output = addmm(c, a, b, **sample.kwargs)
+                    if sample.output_process_fn_grad is not None:
+                        return sample.output_process_fn_grad(output)
+                    return output
 
-            # noncontiguous
-            c = make_tensor(sample.input.shape, device=device, dtype=dtype, noncontiguous=True, requires_grad=True)
-            b = make_tensor(sample.args[1].shape, device=device, dtype=dtype, noncontiguous=True, requires_grad=True)
-            self.assertTrue(torch.autograd.gradcheck(fn, [c, b], fast_mode=True))
+                self.assertTrue(torch.autograd.gradcheck(fn, [sample.input, sample.args[1]], fast_mode=True))
+
+                # noncontiguous
+                c = make_tensor(sample.input.shape, device=device, dtype=dtype, noncontiguous=True, requires_grad=True)
+                b = make_tensor(sample.args[1].shape, device=device, dtype=dtype, noncontiguous=True, requires_grad=True)
+                self.assertTrue(torch.autograd.gradcheck(fn, [c, b], fast_mode=True))
 
     @skipCUDAIfRocm
     @skipCPUIfNoMklSparse
