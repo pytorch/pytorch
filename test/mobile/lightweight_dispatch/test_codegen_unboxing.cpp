@@ -17,7 +17,7 @@ TEST(LiteInterpreterTest, Ones) {
 
   //  class Model(torch.nn.Module):
   //    def forward(self):
-  //        a = torch.ones(3, 4, dtype=torch.int64, layout=torch.strided, device="cpu", requires_grad=False)
+  //        a = torch.ones([3, 4], dtype=torch.int64, layout=torch.strided, device="cpu")
   //        return a
   Module bc = _load_for_mobile(testModelFile);
   auto forward_method = bc.find_method("forward");

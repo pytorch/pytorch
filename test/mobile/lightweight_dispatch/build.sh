@@ -9,7 +9,7 @@ echo "Build lite interpreter with lightweight dispatch."
 
 # prepare test
 TEST_SRC_ROOT="$PWD/test/mobile/lightweight_dispatch"
-python $TEST_SRC_ROOT/tests_setup.py setup
+python "$TEST_SRC_ROOT/tests_setup.py" setup
 
 CUSTOM_TEST_ARTIFACT_BUILD_DIR=${CUSTOM_TEST_ARTIFACT_BUILD_DIR:-${PWD}/../}
 mkdir -pv "${CUSTOM_TEST_ARTIFACT_BUILD_DIR}"
@@ -24,7 +24,7 @@ export USE_LIGHTWEIGHT_DISPATCH=1
 export STATIC_DISPATCH_BACKEND="CPU"
 export BUILD_LITE_INTERPRETER=1
 
-VERBOSE=1 DEBUG=1 python "${BUILD_LIBTORCH_PY}"
+python "${BUILD_LIBTORCH_PY}"
 
 popd
 
@@ -33,4 +33,4 @@ popd
 "$LIGHTWEIGHT_DISPATCH_BUILD/build/bin/test_codegen_unboxing"
 
 # shutdown test
-python $TEST_SRC_ROOT/tests_setup.py shutdown
+python "$TEST_SRC_ROOT/tests_setup.py" shutdown

@@ -1,9 +1,4 @@
 #include <gtest/gtest.h>
-#include <iostream>
-#include <string>
-#include <torch/csrc/jit/mobile/import.h>
-#include <ATen/core/ivalue.h>
-#include <torch/csrc/autograd/generated/variable_factories.h>
 
 std::string add_negative_flag(const std::string& flag) {
   std::string filter = ::testing::GTEST_FLAG(filter);

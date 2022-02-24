@@ -27,14 +27,14 @@ class ModelWithDTypeDeviceLayoutPinMemory(FileSetup):
 
         class Model(torch.nn.Module):
             def forward(self):
-                a = torch.ones(3, 4, dtype=torch.int64, layout=torch.strided, device="cpu", requires_grad=False)
+                a = torch.ones([3, 4], dtype=torch.int64, layout=torch.strided, device="cpu")
                 return a
 
         model = Model()
 
         # Script the model and save
         script_model = torch.jit.script(model)
-        script_model._save_for_lite_interpreter(script_model, self.path)
+        script_model._save_for_lite_interpreter(self.path)
 
 
 tests = [
