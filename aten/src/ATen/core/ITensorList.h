@@ -115,7 +115,7 @@ class ITensorListIterator
     : public std::iterator<std::bidirectional_iterator_tag, at::Tensor> {
  private:
 #define DEFINE_FRIEND_CLASS(TAG, ...) friend class TORCH_ITENSORLIST_IMPL(TAG);
-  TORCH_ITENSORLIST_FORALL_TAGS(DEFINE_FRIEND_CLASS);
+  TORCH_ITENSORLIST_FORALL_TAGS(DEFINE_FRIEND_CLASS)
 #undef DEFINE_FRIEND_CLASS
 
   using unboxed_iterator_type =
@@ -204,7 +204,7 @@ class ITensorListIterator
 class ITensorList {
  private:
 #define DEFINE_FRIEND_CLASS(TAG, ...) friend class TORCH_ITENSORLIST_IMPL(TAG);
-  TORCH_ITENSORLIST_FORALL_TAGS(DEFINE_FRIEND_CLASS);
+  TORCH_ITENSORLIST_FORALL_TAGS(DEFINE_FRIEND_CLASS)
 #undef DEFINE_FRIEND_CLASS
 
   using unboxed_type = TORCH_ITENSORLIST_IMPL(Unboxed)::list_type;
