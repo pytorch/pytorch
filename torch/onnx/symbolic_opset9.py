@@ -13,7 +13,7 @@ from functools import partial
 from functools import wraps
 
 import torch.onnx.symbolic_helper as sym_help
-from torch.onnx.symbolic_helper import parse_args, _parse_arg, _unimplemented, ScalarType
+from torch.onnx.symbolic_helper import parse_args, _parse_arg, _unimplemented, ScalarType, quantized_args
 
 from typing import Optional
 from sys import maxsize as maxsize
@@ -113,6 +113,12 @@ def div(g, self, other, *args):
         return true_divide(g, self, other)
     else:
         return _div_rounding_mode(g, self, other, *args)
+
+
+@parse_args("v", "v", "v", "f")
+def addcmul(g, self, tensor1, tensor2, value=1.0):
+    value_tens = g.op("Constant", value_t=torch.tensor([value]))
+    return add(g, self, mul(g, mul(g, tensor1, tensor2), value_tens))
 
 
 @parse_args("v", "v", "s")
@@ -943,6 +949,7 @@ avg_pool3d = _avg_pool("avg_pool3d", _triple)
 
 
 def _adaptive_pool(name, type, tuple_fn, fn=None):
+    @quantized_args(True, False)
     def symbolic_fn(g, input, output_size):
         # _adaptive_pool is supported for cases where output_size is 1 for all dimensions,
         # by executing a GlobalPool.
@@ -1634,6 +1641,10 @@ def max(g, self, dim_or_y=None, keepdim=None):
         return max, indices
 
 
+def maximum(g, input, other):
+    return max(g, input, dim_or_y=other)
+
+
 def min(g, self, dim_or_y=None, keepdim=None):
     # torch.min(input)
     if dim_or_y is None and keepdim is None:
@@ -1648,6 +1659,10 @@ def min(g, self, dim_or_y=None, keepdim=None):
         min = g.op("ReduceMin", self, axes_i=[dim], keepdims_i=keepdim)
         indices = g.op("ArgMin", self, axis_i=dim, keepdims_i=keepdim)
         return min, indices
+
+
+def minimum(g, input, other):
+    return min(g, input, dim_or_y=other)
 
 
 def exp(g, self):
@@ -1951,6 +1966,8 @@ def hardswish(g, self):
     return g.op("Mul", self, hs)
 
 
+# Fixed scale and zero_point, discovered from aten/src/ATen/native/quantized/cpu/qhardsigmoid.cpp
+@quantized_args(True, scale=1.0 / 256.0, zero_point=0)
 @parse_args("v")
 def hardsigmoid(g, self):
     # Set alpha_f to 1 / 6 to make op equivalent to PyTorch's definition of Hardsigmoid.
@@ -2157,20 +2174,69 @@ def pixel_shuffle(g, self, upscale_factor):
     dims = sym_help._get_tensor_sizes(self)
     if len(dims) != 4:
         return _unimplemented("pixel_shuffle", "only support 4d input")
-    if any([i is None for i in dims[1:]]):
-        return _unimplemented("pixel_shuffle", "only support static input shape, except for batch size")
-    output_channel = dims[1] // upscale_factor // upscale_factor
-    after_view = sym_help._reshape_helper(g, self,
-                                          g.op("Constant", value_t=torch.tensor([-1, output_channel,
-                                                                                upscale_factor, upscale_factor,
-                                                                                dims[2], dims[3]])),
-                                          allowzero=0)
-    after_transpose = g.op("Transpose", after_view, perm_i=[0, 1, 4, 2, 5, 3])
-    return sym_help._reshape_helper(g, after_transpose,
-                                    g.op("Constant", value_t=torch.tensor([-1, output_channel,
-                                                                          dims[2] * upscale_factor,
-                                                                          dims[3] * upscale_factor])),
-                                    allowzero=0)
+    if any(i is None for i in dims[1:]):
+        after_view = sym_help._reshape_helper(g, sym_help._unsqueeze_helper(g, self, [2, 3]),
+                                              g.op("Constant", value_t=torch.tensor([0, -1,
+                                                                                     upscale_factor, upscale_factor,
+                                                                                     0, 0])),
+                                              allowzero=0)
+        after_transpose = g.op("Transpose", after_view, perm_i=[0, 1, 4, 2, 5, 3])
+        # For dynamic input shapes, two reshapes are performed
+        reshape_h = sym_help._reshape_helper(g, after_transpose,
+                                             g.op("Constant", value_t=torch.tensor([0, 0, -1, 1, 0, 0])),
+                                             allowzero=0)
+        reshape_w = sym_help._reshape_helper(g, reshape_h,
+                                             g.op("Constant", value_t=torch.tensor([0, 0, 0, 0, -1, 1])),
+                                             allowzero=0)
+        return sym_help._squeeze_helper(g, reshape_w, [3, 5])
+    else:
+        output_channel = dims[1] // upscale_factor // upscale_factor
+        after_view = sym_help._reshape_helper(g, self,
+                                              g.op("Constant", value_t=torch.tensor([-1, output_channel,
+                                                                                     upscale_factor, upscale_factor,
+                                                                                     dims[2], dims[3]])),
+                                              allowzero=0)
+        after_transpose = g.op("Transpose", after_view, perm_i=[0, 1, 4, 2, 5, 3])
+        return sym_help._reshape_helper(g, after_transpose,
+                                        g.op("Constant", value_t=torch.tensor([-1, output_channel,
+                                                                               dims[2] * upscale_factor,
+                                                                               dims[3] * upscale_factor])),
+                                        allowzero=0)
+
+
+@parse_args("v", "i")
+def pixel_unshuffle(g, self, downscale_factor):
+    dims = sym_help._get_tensor_sizes(self)
+    if len(dims) != 4:
+        return _unimplemented("pixel_shuffle", "only support 4d input")
+    if any(i is None for i in dims[1:]):
+        # For dynamic input shapes, two reshapes are performed
+        reshape_h = sym_help._reshape_helper(g, sym_help._unsqueeze_helper(g, self, [3]),
+                                             g.op("Constant", value_t=torch.tensor([0, 0, -1, downscale_factor, 0])),
+                                             allowzero=0)
+        reshape_w = sym_help._reshape_helper(g, reshape_h,
+                                             g.op("Constant", value_t=torch.tensor([0, 0, 0, 0, -1, downscale_factor])),
+                                             allowzero=0)
+        after_transpose = g.op("Transpose", reshape_w, perm_i=[0, 1, 3, 5, 2, 4])
+        final_reshape = sym_help._reshape_helper(g, after_transpose,
+                                                 g.op("Constant", value_t=torch.tensor([0, -1, 1, 1, 0, 0])),
+                                                 allowzero=0)
+        return sym_help._squeeze_helper(g, final_reshape, [2, 3])
+    else:
+        output_channel = dims[1] * downscale_factor * downscale_factor
+        after_view = sym_help._reshape_helper(g, self,
+                                              g.op("Constant", value_t=torch.tensor([-1, dims[1],
+                                                                                     dims[2] // downscale_factor,
+                                                                                     downscale_factor,
+                                                                                     dims[3] // downscale_factor,
+                                                                                     downscale_factor])),
+                                              allowzero=0)
+        after_transpose = g.op("Transpose", after_view, perm_i=[0, 1, 3, 5, 2, 4])
+        return sym_help._reshape_helper(g, after_transpose,
+                                        g.op("Constant", value_t=torch.tensor([-1, output_channel,
+                                                                               dims[2] // downscale_factor,
+                                                                               dims[3] // downscale_factor])),
+                                        allowzero=0)
 
 
 def _generic_rnn(g, variant, input, initial_states, all_weights, has_biases,
@@ -2515,6 +2581,7 @@ def erf(g, input):
     return g.op("Erf", input)
 
 
+@quantized_args(True, False, False)
 @parse_args("v", "i", "i")
 def flatten(g, input, start_dim, end_dim):
     dim = sym_help._get_tensor_rank(input)
