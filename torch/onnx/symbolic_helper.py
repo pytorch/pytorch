@@ -134,7 +134,8 @@ def _unpack_list(list_value):
 
 def _unpack_tuple(tuple_value):
     tuple_node = tuple_value.node()
-    assert tuple_node.kind() == "prim::TupleConstruct"
+    if tuple_node.kind() != "prim::TupleConstruct":
+        raise RuntimeError("ONNX symbolic expected node type `prim::TupleConstruct`, got `{}`".format(tuple_node))
     return list(tuple_node.inputs())
 
 # Check if list_value is output from prim::ListConstruct
@@ -192,6 +193,74 @@ def parse_args(*arg_descriptors):
         return wrapper
     return decorator
 
+def quantized_args(*arg_q_descriptors, scale=None, zero_point=None):
+    """A decorator which extends support for quantized version of the base operator.
+    Quantization is detected by examining the arguments that are annotated by
+    `arg_q_descriptors`.
+    If quantization is detected, the base operator symbolic function will be wrapped with
+    argument dequantization and output quantization.
+    Otherwise, only base symbolic function will be invoked.
+
+    For example:
+    @quantized_args(True, False)
+    def foo(g, x, y):
+        return x + y
+
+    is equivalent to
+
+    def q_foo(g, x, y):
+        if is_quantized_tensor(x):
+            x = dequantize(x)
+            out = foo(g, x, y)
+            return quantize(out)
+        else:
+            return foo(g, x, y)
+
+    Args:
+        arg_q_descriptors: list of bool, where each element represents if the
+          argument is QTensor for quantized version of this operator.
+        scale: float default None, quantized output scale. If None, derive from
+          the first quantized input scale.
+        zero_point: int default None, quantized output zero point. If None,
+          derive from the first quantized input zero point.
+    """
+    def decorator(fn):
+        fn._scale = scale
+        fn._zero_point = zero_point
+
+        @wraps(fn)
+        def wrapper(g, *args, **kwargs):
+            _scale = fn._scale
+            if _scale is not None:
+                _scale = g.op("Constant", value_t=torch.tensor(_scale))
+            _zero_point = fn._zero_point
+            if _zero_point is not None:
+                _zero_point = g.op("Constant", value_t=torch.tensor(_zero_point))
+
+            # some args may be optional, so the length may be smaller
+            assert len(arg_q_descriptors) >= len(args)
+            desc_args = tuple(zip(arg_q_descriptors[:len(args)], args))
+            # Run regular symbolic function if none of the argument is QTensor.
+            if not any((desc and arg.node().kind() == "prim::TupleConstruct") for desc, arg in desc_args):
+                return fn(g, *args, **kwargs)
+
+            dequantized_args = []
+            for desc, arg in desc_args:
+                if desc:
+                    dequantized_arg, scale, zero_point = dequantize_helper(g, arg)
+                    dequantized_args.append(dequantized_arg)
+                    if _scale is None:
+                        _scale = scale
+                    if _zero_point is None:
+                        _zero_point = zero_point
+                else:
+                    dequantized_args.append(arg)
+            # TODO: only support single output
+            output = fn(g, *dequantized_args, **kwargs)
+
+            return quantize_helper(g, output, _scale, _zero_point)
+        return wrapper
+    return decorator
 
 def _scalar(x):
     """Convert a scalar tensor into a Python value."""
@@ -407,19 +476,38 @@ def _interpolate_warning(interpolate_mode):
                   "to support Pytorch's behavior (like coordinate_transformation_mode and nearest_mode).\n"
                   "We recommend using opset 11 and above for models using this operator.")
 
+
 def _unsqueeze_helper(g, input, axes_i):
-    if _export_onnx_opset_version >= 13:
-        axes = g.op("Constant", value_t=torch.tensor(axes_i, dtype=torch.long))
-        return g.op("Unsqueeze", input, axes)
-    else:
+    if _is_constant(axes_i[0]):
+        if _export_onnx_opset_version >= 13:
+            axes = g.op("Constant", value_t=torch.tensor(axes_i, dtype=torch.long))
+            return g.op("Unsqueeze", input, axes)
         return g.op("Unsqueeze", input, axes_i=axes_i)
+    # Tensor type
+    if _export_onnx_opset_version < 13:
+        raise ValueError(f"Opset version must be >= 13 for Unsqueeze with dynamic axes. {input.node().sourceRange()}")
+    return g.op("Unsqueeze", input, axes_i[0])
+
 
 def _squeeze_helper(g, input, axes_i):
-    if _export_onnx_opset_version >= 13:
-        axes = g.op("Constant", value_t=torch.tensor(axes_i, dtype=torch.long))
-        return g.op("Squeeze", input, axes)
-    else:
+    if _is_constant(axes_i[0]):
+        if _export_onnx_opset_version >= 13:
+            axes = g.op("Constant", value_t=torch.tensor(axes_i, dtype=torch.long))
+            return g.op("Squeeze", input, axes)
         return g.op("Squeeze", input, axes_i=axes_i)
+    # Tensor type
+    if _export_onnx_opset_version < 13:
+        raise ValueError(f"Opset version must be >= 13 for Squeeze with dynamic axes. {input.node().sourceRange()}")
+    axes_t = axes_i[0]
+    axes_rank = _get_tensor_rank(axes_t)
+    if axes_rank > 1:
+        raise ValueError("For Squeeze axses as input, the axes rank must be one in ONNX spec.")
+    elif axes_rank == 0:
+        # The axes is a scalar. Unsqueeze it to a rank 1 tensor.
+        axes_t = _unsqueeze_helper(g, axes_t, [0])
+        return g.op("Squeeze", input, axes_t)
+    return g.op("Squeeze", input, axes_t)
+
 
 def _reducesum_helper(g, input, axes_i=None, keepdims_i=1, noop_with_empty_axes_i=0):
     keepdims_i = _maybe_get_const(keepdims_i, "i")
@@ -431,6 +519,7 @@ def _reducesum_helper(g, input, axes_i=None, keepdims_i=1, noop_with_empty_axes_
         return g.op("ReduceSum", input, keepdims_i=keepdims_i, noop_with_empty_axes_i=noop_with_empty_axes_i)
     else:
         return g.op("ReduceSum", input, axes_i=axes_i, keepdims_i=keepdims_i)
+
 
 def _interpolate_size_to_scales(g, input, output_size, dim):
     output_size = _maybe_get_const(output_size, "is")
@@ -826,6 +915,30 @@ def _handle_reduce_dim_none(g, self, op_name):
         return g.op(op_name, self, keepdims_i=1)
     return g.op(op_name, self, keepdims_i=0)
 
+def dequantize_helper(g, qtensor, qdtype=None):
+    tensor, scale, zero_point = _unpack_tuple(qtensor)
+    input_qdtype = cast_pytorch_to_onnx[tensor.type().scalarType()]
+    if qdtype is None:
+        if input_qdtype is not None:
+            qdtype = input_qdtype
+        else:
+            qdtype = torch.onnx.TensorProtoDataType.UINT8
+    value = g.op("Cast", tensor, to_i=qdtype)
+    scale = g.op("Cast", scale, to_i=torch.onnx.TensorProtoDataType.FLOAT)
+    zero_point = g.op("Cast", zero_point, to_i=qdtype)
+    return g.op("DequantizeLinear", value, scale, zero_point), scale, zero_point
+
+def quantize_helper(g, tensor, scale, zero_point):
+    assert scale is not None
+    if scale.type().scalarType() != "Float":
+        scale = g.op("Cast", scale, to_i=torch.onnx.TensorProtoDataType.FLOAT)
+
+    assert zero_point is not None
+    if zero_point.type().scalarType() not in ("Byte", "Char"):
+        zero_point = g.op("Cast", zero_point, to_i=torch.onnx.TensorProtoDataType.UINT8)
+    output = g.op("QuantizeLinear", tensor, scale, zero_point)
+    return g.op("prim::TupleConstruct", output, scale, zero_point)
+
 # ---------------------------------------------------------------------
 # ONNX operator version
 # ---------------------------------------------------------------------
@@ -971,6 +1084,26 @@ scalar_type_to_pytorch_type = [
     torch.qint32,       # 14
     torch.bfloat16,     # 15
 ]
+
+# source of truth is
+# https://github.com/pytorch/pytorch/blob/master/torch/csrc/utils/tensor_dtypes.cpp
+pytorch_name_to_type = {
+    "Byte": torch.uint8,
+    "Char": torch.int8,
+    "Double": torch.double,
+    "Float": torch.float,
+    "Half": torch.half,
+    "Int": torch.int,
+    "Long": torch.int64,
+    "Short": torch.short,
+    "Bool": torch.bool,
+    "ComplexFloat": torch.complex64,
+    "ComplexDouble": torch.complex128,
+    "QInt8": torch.qint8,
+    "QUInt8": torch.quint8,
+    "QInt32": torch.qint32,
+    "BFloat16": torch.bfloat16,
+}
 
 def _cast_func_template(to_i, g, input, non_blocking):
     return g.op("Cast", input, to_i=to_i)
