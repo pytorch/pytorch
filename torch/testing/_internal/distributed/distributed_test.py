@@ -742,7 +742,7 @@ class DistributedTest:
                 expected_time = time.time() + timeout.total_seconds()
                 # In debug mode, we execute a monitored_barrier before the
                 # collective, so assert on that.
-                if dist._get_debug_mode() == dist._DistributedDebugLevel.DETAIL:
+                if dist.get_debug_level() == dist.DebugLevel.DETAIL:
                     exception_ctx = self.assertRaisesRegex(
                         Exception, "failed to pass monitoredBarrier"
                     )
@@ -2083,7 +2083,7 @@ class DistributedTest:
                 )
                 # DETAIL debug mode can use a pg wrapper that issues more collectives
                 # under the hood
-                if dist._get_debug_mode() != dist._DistributedDebugLevel.DETAIL:
+                if dist.get_debug_level() != dist.DebugLevel.DETAIL:
                     self.assertEqual(len(events), len(op_calls))
                 for e in events:
                     self.assertTrue(e.is_async)
@@ -2094,7 +2094,7 @@ class DistributedTest:
                     # under the hood
                     if (
                         tensor_shapes is not None
-                        and dist._get_debug_mode() != dist._DistributedDebugLevel.DETAIL
+                        and dist.get_debug_level() != dist.DebugLevel.DETAIL
                     ):
                         self.assertEqual(
                             e.input_shapes,
@@ -5092,7 +5092,7 @@ class DistributedTest:
             def parse_env(var):
                 return os.environ[var] if var in os.environ else "N/A"
 
-            os.environ["TORCH_DISTRIBUTED_DEBUG"] = "INFO"
+            dist.set_debug_level(dist.DebugLevel.INFO)
             group, group_id, rank = self._init_global_test()
             model_DDP = self._test_ddp_logging_data(is_gpu=False)
 
@@ -6515,7 +6515,7 @@ class DistributedTest:
                         ]
                         # In debug mode, should show parameters that weren't reduced.
                         # Without debug mode, should show suggestion to use debug mode.
-                        if dist._get_debug_mode() == dist._DistributedDebugLevel.OFF:
+                        if dist.get_debug_level() == dist.DebugLevel.OFF:
                             expected_strs.append(ddp_suggest_debug_mode_str)
                         else:
                             unreduced_params = ", ".join(["net2.weight"])
@@ -6781,7 +6781,7 @@ class DistributedTest:
                         ]
                         # In debug mode, should show parameters that weren't reduced.
                         # Without debug mode, should show suggestion to use debug mode.
-                        if dist._get_debug_mode() == dist._DistributedDebugLevel.OFF:
+                        if dist.get_debug_level() == dist.DebugLevel.OFF:
                             expected_strs.append(ddp_suggest_debug_mode_str)
                         else:
                             unreduced_params = ", ".join(["lin2.weight"])
@@ -6935,7 +6935,7 @@ class DistributedTest:
                         ]
                         # In debug mode, should show parameters that weren't reduced.
                         # Without debug mode, should show suggestion to use debug mode.
-                        if dist._get_debug_mode() == dist._DistributedDebugLevel.OFF:
+                        if dist.get_debug_level() == dist.DebugLevel.OFF:
                             expected_strs.append(ddp_suggest_debug_mode_str)
                         else:
                             unreduced_params = ", ".join(["lin2.weight"])
@@ -7052,7 +7052,7 @@ class DistributedTest:
             # running with Gloo or with debug mode wrapper, we expect the error
             # to be caught inline.
             is_detail_dbg_mode = (
-                dist._get_debug_mode() == dist._DistributedDebugLevel.DETAIL
+                dist.get_debug_level() == dist.DebugLevel.DETAIL
             )
             if self.rank == 0:
                 if dist.get_backend(group_to_use) == dist.Backend.NCCL and not is_detail_dbg_mode:
@@ -7450,7 +7450,7 @@ class DistributedTest:
                 # wrapper PG is enabled or not, since with wrapper pg, it will
                 # fail in a collective synchronization check and not actually
                 # call into the nccl pg.
-                if dist._get_debug_mode() == dist._DistributedDebugLevel.DETAIL:
+                if dist.get_debug_level() == dist.DebugLevel.DETAIL:
                     err_regex = "Timed out waiting"
                 else:
                     err_regex = "Caught collective operation timeout"
@@ -7644,7 +7644,7 @@ class DistributedTest:
             self.assertEqual(param_to_name_mapping, expected_mapping)
 
         def _test_ddp_multiple_nested_unused_params_error(self, ignore_sparse):
-            debug_mode_off = dist._get_debug_mode() == dist._DistributedDebugLevel.OFF
+            debug_mode_off = dist.get_debug_level() == dist.DebugLevel.OFF
 
             class SubModule(nn.Module):
                 def __init__(self):
