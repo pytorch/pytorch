@@ -276,31 +276,31 @@ def normalize_function(
         new_args_and_kwargs = _args_kwargs_to_normalized_args_kwargs(sig, args, kwargs, normalize_to_only_use_kwargs)
     else:
         assert callable(target)
-        torch_op_schemas = get_signature_for_torch_op(target)
-        matched_schemas = []
-        if torch_op_schemas:
-            # Iterate through all of the schema until we find one that matches
+        torch_op_signatures = get_signature_for_torch_op(target)
+        matched_signatures = []
+        if torch_op_signatures:
+            # Iterate through all of the signatures until we find one that matches
             # If one matches, populate `new_args_and_kwargs` with the new args/kwargs
             # values. If none matches, `new_args_and_kwargs` will be None
-            for candidate_signature in torch_op_schemas:
+            for candidate_signature in torch_op_signatures:
                 try:
                     candidate_signature.bind(*args, **kwargs)
-                    matched_schemas.append(candidate_signature)
+                    matched_signatures.append(candidate_signature)
                 except TypeError as e:
                     continue
 
-            if len(matched_schemas) == 0:
-                # Did not match any schema. Cannot normalize
+            if len(matched_signatures) == 0:
+                # Did not match any signature. Cannot normalize
                 pass
-            elif len(matched_schemas) == 1:
-                # Matched exactly one schema, unambiguous
-                new_args_and_kwargs = _args_kwargs_to_normalized_args_kwargs(matched_schemas[0], args, kwargs,
+            elif len(matched_signatures) == 1:
+                # Matched exactly one signature, unambiguous
+                new_args_and_kwargs = _args_kwargs_to_normalized_args_kwargs(matched_signatures[0], args, kwargs,
                                                                              normalize_to_only_use_kwargs)
             else:
                 if arg_types is not None or kwarg_types is not None:
                     arg_types = arg_types if arg_types else cast(Tuple[Any], ())
                     kwarg_types = kwarg_types if kwarg_types else {}
-                    for candidate_signature in torch_op_schemas:
+                    for candidate_signature in torch_op_signatures:
                         sig_matches = True
                         try:
                             bound_types = candidate_signature.bind(*arg_types, **kwarg_types)
@@ -314,12 +314,12 @@ def normalize_function(
                                                                                          normalize_to_only_use_kwargs)
                             break
                 else:
-                    # Matched more than one schema. In this situation, the caller must provide the types of
+                    # Matched more than one signature. In this situation, the caller must provide the types of
                     # the arguments of the overload they expect.
-                    schema_printouts = '\n'.join(str(schema) for schema in matched_schemas)
+                    signature_printouts = '\n'.join(str(signature) for signature in matched_signatures)
                     raise RuntimeError(f'Tried to normalize arguments to {torch.typename(target)} but '
-                                       f'the schema match was ambiguous! Please provide argument types to '
-                                       f'the normalize_arguments() call. Available schemas:\n{schema_printouts}')
+                                       f'the signature match was ambiguous! Please provide argument types to '
+                                       f'the normalize_arguments() call. Available signatures:\n{signature_printouts}')
 
     return new_args_and_kwargs
 
