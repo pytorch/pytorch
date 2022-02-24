@@ -6,11 +6,16 @@
 #include <c10/util/Exception.h>
 #include <c10/macros/Macros.h>
 
-#include <ATen/cuda/cub.h>
+#include <ATen/cuda/cub.cuh>
 
 #include <ATen/native/cuda/EmbeddingBackwardKernel.cuh>
 #include <ATen/native/cuda/SortingCommon.cuh>
 #include <ATen/native/cuda/block_reduce.cuh>
+#include <ATen/native/cuda/thread_constants.h>
+
+#if CUB_SUPPORTS_SCAN_BY_KEY()
+#include <thrust/iterator/reverse_iterator.h>
+#endif
 
 namespace at { namespace native {
 
@@ -222,8 +227,10 @@ __global__ void renorm_kernel(
 
 } // anonymous namespace
 
+#if !CUB_SUPPORTS_SCAN_BY_KEY()
 template<typename index_t>
 void embedding_dense_backward_cuda_scan(Tensor &sorted_indices, Tensor &count);
+#endif
 
 Tensor embedding_dense_backward_cuda(const Tensor & grad_, const Tensor & indices_,
                                int64_t num_weights, int64_t padding_idx,
@@ -243,8 +250,9 @@ Tensor embedding_dense_backward_cuda(const Tensor & grad_, const Tensor & indice
     auto indices_contig = indices.contiguous();
     auto grad_weight = at::zeros({num_weights, grad_.size(-1)}, grad_.options());
     int64_t stride = grad_weight.stride(0);
-    dim3 grid(ceil_div(stride, (int64_t)C10_WARP_SIZE));
-    dim3 block(C10_WARP_SIZE, BLOCKDIMY);
+    int warp_size = at::cuda::warp_size();
+    dim3 grid(ceil_div(stride, (int64_t)warp_size));
+    dim3 block(warp_size, BLOCKDIMY);
 
     AT_DISPATCH_FLOATING_TYPES_AND2(
       at::ScalarType::Half, at::ScalarType::BFloat16,
@@ -257,7 +265,7 @@ Tensor embedding_dense_backward_cuda(const Tensor & grad_, const Tensor & indice
           embedding_backward_feature_kernel<scalar_t, accscalar_t, index_t>
             <<<grid,
                 block,
-                sizeof(accscalar_t)*C10_WARP_SIZE*BLOCKDIMY + sizeof(int)*C10_WARP_SIZE*BLOCKDIMY,
+                sizeof(accscalar_t)*warp_size*BLOCKDIMY + sizeof(int)*warp_size*BLOCKDIMY,
                 stream>>>
             (indices_contig.data_ptr<index_t>(),
               grad.data_ptr<scalar_t>(),
@@ -281,12 +289,43 @@ Tensor embedding_dense_backward_cuda(const Tensor & grad_, const Tensor & indice
       indices.data_ptr<index_t>(), sorted_indices.data_ptr<index_t>(),
       range.data_ptr<index_t>(), orig_indices.data_ptr<index_t>(),
       num_indices, false/*, 0, nbits*/);
-
-    if (scale_grad_by_freq) {
-      count = at::empty_like(indices, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
-      embedding_dense_backward_cuda_scan<index_t>(sorted_indices, count);
-    }
   });
+
+  if (scale_grad_by_freq) {
+    count = at::empty_like(indices, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+#if CUB_SUPPORTS_SCAN_BY_KEY()
+    AT_DISPATCH_INDEX_TYPES(indices.scalar_type(), "embedding_dense_backward_cuda", [&] () {
+      cudaStream_t stream = at::cuda::getCurrentCUDAStream();
+
+      // Compute an increasing sequence per unique item in sortedIndices:
+      // sorted: 2 5 5 5 7 7 8 9 9
+      //  count: 1 1 2 3 1 2 1 1 2
+      auto sorted_data = sorted_indices.data_ptr<index_t>();
+      auto count_data = count.data_ptr<index_t>();
+      cuda::cub::inclusive_sum_by_key(
+        sorted_data,
+        at_cuda_detail::cub::ConstantInputIterator<index_t>(1),
+        count_data,
+        num_indices
+      );
+
+      // Take the maximum of each count per unique key in reverse:
+      // sorted: 2 5 5 5 7 7 8 9 9
+      //  count: 1 3 3 3 2 2 1 2 2
+      cuda::cub::inclusive_scan_by_key(
+        thrust::make_reverse_iterator(sorted_data + num_indices),
+        thrust::make_reverse_iterator(count_data + num_indices),
+        thrust::make_reverse_iterator(count_data + num_indices),
+        at_cuda_detail::cub::Max(),
+        num_indices
+      );
+    });
+#else
+    AT_DISPATCH_INDEX_TYPES(indices.scalar_type(), "embedding_dense_backward_cuda", [&] () {
+      embedding_dense_backward_cuda_scan<index_t>(sorted_indices, count);
+    });
+#endif
+  }
 
   return embedding_backward_cuda_kernel(grad, orig_indices,
       sorted_indices, count, num_weights, padding_idx);
@@ -315,18 +354,18 @@ Tensor & embedding_renorm_cuda_(Tensor & self, const Tensor & indices,
       num_indices
     );
 
-    constexpr int num_threads = 128;
-    static_assert(num_threads % C10_WARP_SIZE == 0 &&
-                  num_threads <= cuda_utils::kCUDABlockReduceMaxThreads,
+    int warp_size = at::cuda::warp_size();
+    TORCH_INTERNAL_ASSERT(num_threads() % warp_size == 0 &&
+                  num_threads() <= cuda_utils::kCUDABlockReduceMaxThreads,
                   "BlockReduceSum requires all warps be active");
     int64_t *num_unique_indices_ptr = num_unique_indices.data_ptr<int64_t>();
     dim3 grid = unique_indices.numel();
-    dim3 block = num_threads;
+    dim3 block = num_threads();
     int dim = self.stride(0);
 
     AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, self.scalar_type(), "embedding_renorm_cuda_", [&] {
       using accscalar_t = acc_type<scalar_t, true>;
-      renorm_kernel<<<grid, block, (block.x / C10_WARP_SIZE) * sizeof(accscalar_t), stream>>>(
+      renorm_kernel<<<grid, block, (block.x / warp_size) * sizeof(accscalar_t), stream>>>(
         self.data_ptr<scalar_t>(),
         unique_indices.data_ptr<index_t>(),
         static_cast<accscalar_t>(max_norm),

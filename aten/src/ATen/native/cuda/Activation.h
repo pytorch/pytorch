@@ -1,4 +1,5 @@
-
+#pragma once
+#include <ATen/native/Activation.h>
 #include <cstdint>
 
 namespace at {
@@ -24,7 +25,7 @@ void launch_prelu_cuda_backward_kernel_multi_weights(
     const TensorBase &input, const TensorBase &weight, const TensorBase &grad_out,
     const TensorBase &input_grad, const TensorBase &weight_grad_collector);
 
-void GeluCUDAKernelImpl(TensorIteratorBase& it);
-void GeluBackwardCUDAKernelImpl(TensorIteratorBase& it);
+void GeluCUDAKernelImpl(TensorIteratorBase& it, GeluType approximate);
+void GeluBackwardCUDAKernelImpl(TensorIteratorBase& it, GeluType approximate);
 
 }}  // namespace at::native
