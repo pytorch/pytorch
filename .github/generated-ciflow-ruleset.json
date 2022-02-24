@@ -137,6 +137,7 @@
       "linux-xenial-cuda11.3-py3.7-gcc7-bazel-test",
       "linux-xenial-py3-clang5-mobile-build",
       "linux-xenial-py3-clang5-mobile-custom-build-static",
+      "linux-xenial-py3-clang5-mobile-lightweight-dispatch-build",
       "linux-xenial-py3.7-clang7-asan",
       "linux-xenial-py3.7-clang7-onnx",
       "linux-xenial-py3.7-gcc5.4",

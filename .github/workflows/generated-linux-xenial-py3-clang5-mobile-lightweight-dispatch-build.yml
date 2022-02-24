@@ -4,6 +4,7 @@
 name: linux-xenial-py3-clang5-mobile-lightweight-dispatch-build
 
 on:
+  pull_request:
   push:
     tags:
       - 'ciflow/all/*'
