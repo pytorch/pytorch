@@ -2099,6 +2099,9 @@ class TestTensorCreation(TestCase):
         self.assertIs(torch.float32, torch.get_default_dtype())
         self.assertIs(torch.FloatStorage, torch.Storage)
 
+        # only floating-point types are supported as the default type
+        self.assertRaises(TypeError, lambda: torch.set_default_tensor_type('torch.IntTensor'))
+
         torch.set_default_dtype(torch.float64)
         self.assertIs(torch.float64, torch.get_default_dtype())
         self.assertIs(torch.DoubleStorage, torch.Storage)
@@ -2117,12 +2120,34 @@ class TestTensorCreation(TestCase):
             self.assertIs(torch.float64, torch.get_default_dtype())
             self.assertIs(torch.cuda.DoubleStorage, torch.Storage)
 
-        # don't support integral or sparse default types.
-        self.assertRaises(TypeError, lambda: torch.set_default_tensor_type('torch.IntTensor'))
-        self.assertRaises(TypeError, lambda: torch.set_default_dtype(torch.int64))
-
         # don't allow passing dtype to set_default_tensor_type
         self.assertRaises(TypeError, lambda: torch.set_default_tensor_type(torch.float32))
+
+        # don't allow passing dtype to set_default_dtype
+        for t in get_all_dtypes(
+                include_half=True,
+                include_bfloat16=True,
+                include_bool=True,
+                include_complex=True,
+                include_complex32=True,
+                include_qint=True):
+            # only floating-point types are supported as the default type
+            if t in (
+                    torch.half,
+                    torch.float,
+                    torch.double,
+                    torch.bfloat16):
+                torch.set_default_dtype(t)
+            elif t in (
+                    torch.complex32,
+                    torch.qint8,
+                    torch.quint8,
+                    torch.qint32,
+                    torch.quint4x2,
+                    torch.quint2x4):
+                self.assertRaises(RuntimeError, lambda: torch.set_default_dtype(t))
+            else:
+                self.assertRaises(TypeError, lambda: torch.set_default_dtype(t))
 
         torch.set_default_tensor_type(default_type)
 
