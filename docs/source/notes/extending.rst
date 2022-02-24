@@ -355,7 +355,7 @@ Extending :mod:`torch` with a :class:`Tensor`-like type
 
 .. note:: This functionality is inspired by the NumPy ``__array_function__``
           protocol. See `the NumPy documentation
-          <https://docs.scipy.org/doc/numpy/user/basics.dispatch.html#basics-dispatch>`_
+          <https://numpy.org/doc/stable/user/basics.dispatch.html#basics-dispatch>`_
           and `NEP-0018
           <https://numpy.org/neps/nep-0018-array-function-protocol.html>`_ for
           more details.

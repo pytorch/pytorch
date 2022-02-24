@@ -271,7 +271,10 @@ def calculate_qmin_qmax(quant_min: int, quant_max: int, has_customized_qrange: b
         # This initialization here is to be resolve TorchScript compilation issues and allow
         # using of refinement to decouple initial_qmin and initial_qmax from quantization range.
         # The actual values of initial_qmin and initial_qmax will be reset below.
-        initial_quant_min, initial_quant_max = 0, 255
+        if dtype == torch.qint32:
+            initial_quant_min, initial_quant_max = 0, 2**31 - 1
+        else:
+            initial_quant_min, initial_quant_max = 0, 255
         # The following assignment of self.qmin and self.qmax to the local variables and the if check refine the
         # attribute from Optional valid integers for use, based on TorchScript's requirements.
         custom_quant_min, custom_quant_max = quant_min, quant_max
@@ -282,9 +285,14 @@ def calculate_qmin_qmax(quant_min: int, quant_max: int, has_customized_qrange: b
             )
 
         qrange_len = initial_quant_max - initial_quant_min + 1
-        assert (
-            0 < qrange_len <= 256
-        ), "quantization range should be positive and not exceed the maximum bit range (=256)."
+        if dtype == torch.qint8:
+            assert (
+                0 < qrange_len <= 256
+            ), "quantization range should be positive and not exceed the maximum bit range (=256)."
+        elif dtype == torch.qint32:
+            assert (
+                0 < qrange_len <= 2**31
+            ), "quantization range should be positive and not exceed the maximum bit range (=4294967296)."
         if dtype == torch.qint8:
             quant_min, quant_max = -qrange_len // 2, qrange_len // 2 - 1
         else:
@@ -303,6 +311,8 @@ def calculate_qmin_qmax(quant_min: int, quant_max: int, has_customized_qrange: b
                 quant_min, quant_max = 0, 127
             else:
                 quant_min, quant_max = 0, 255
+        elif dtype == torch.qint32:
+            quant_min, quant_max = -1 * (2 ** 31), (2 ** 31) - 1
         else:
             quant_min, quant_max = 0, 15
     return quant_min, quant_max
