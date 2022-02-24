@@ -234,6 +234,7 @@ namespace native {
 
 DEFINE_DISPATCH(add_clamp_stub);
 DEFINE_DISPATCH(mul_stub);
+DEFINE_DISPATCH(sub_stub);
 DEFINE_DISPATCH(div_true_stub);
 DEFINE_DISPATCH(div_floor_stub);
 DEFINE_DISPATCH(div_trunc_stub);
@@ -274,6 +275,23 @@ DEFINE_DISPATCH(copysign_stub);
 DEFINE_DISPATCH(xlogy_stub);
 DEFINE_DISPATCH(xlog1py_stub);
 DEFINE_DISPATCH(zeta_stub);
+
+// NB: this a hack to route sub_out to add_stub (which is code generated
+// using codegen), to avoid duplicating the kernel for addition and
+// subtraction.  We don't currently publish the stubs in code generated
+// headers, so we have to redeclare the definition here (and pray that
+// we've lined it up correctly).  If you get a linker error, that's probably
+// because the symbol got renamed; check the generated file UfuncCPU_add.cpp
+// for what it should be
+using add_fn = void(*)(TensorIteratorBase&, const at::Scalar &);
+DECLARE_DISPATCH(add_fn, add_stub);
+
+TORCH_IMPL_FUNC(sub_out) (
+  const Tensor& self, const Tensor& other, const Scalar& alpha, const Tensor& result
+) {
+  add_stub(device_type(), *this, -alpha);
+  TORCH_INTERNAL_ASSERT(result.scalar_type() == output().dtype());
+}
 
 TORCH_IMPL_FUNC(mul_out) (
   const Tensor& self, const Tensor& other, const Tensor& result
