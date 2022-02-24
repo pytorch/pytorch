@@ -86,6 +86,10 @@ jobs:
         shell: powershell
         run: |
           .\.circleci\scripts\vs_install.ps1
+      - uses: actions/setup-python@v2
+        name: Setup Python3
+        with:
+          python-version: '3.x'
       - name: Parse ref
         shell: python
         id: parse-ref
