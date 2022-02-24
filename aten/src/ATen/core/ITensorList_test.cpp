@@ -66,7 +66,7 @@ TEST(ITensorListTest, Boxed_GetConstRefTensor) {
   auto vec = get_tensor_vector();
   // Using 'const' here, so that 'operator[]' returns
   // a 'Tensor' reference (plus, we don't need to mutate it here).
-  const List<at::Tensor> boxed(vec);
+  List<at::Tensor> boxed(vec);
   ITensorList list(boxed);
   static_assert(
       std::is_same<decltype(list[0]), const at::Tensor&>::value,
@@ -87,7 +87,7 @@ TEST(ITensorListTest, Unboxed_GetConstRefTensor) {
 
 TEST(ITensorListTest, Boxed_Equal) {
   auto vec = get_tensor_vector();
-  const List<at::Tensor> boxed(vec);
+  List<at::Tensor> boxed(vec);
   check_elements_same(boxed, vec);
 }
 
@@ -112,7 +112,7 @@ TEST(ITensorListIteratorTest, CtorEmpty_ThrowsError) {
 
 TEST(ITensorListIteratorTest, Boxed_GetFirstElement) {
   auto vec = get_tensor_vector();
-  const List<at::Tensor> boxed(vec);
+  List<at::Tensor> boxed(vec);
   ITensorList list(boxed);
   EXPECT_TRUE(boxed[0].is_same(*list.begin()));
 }
@@ -144,7 +144,7 @@ TEST(ITensorListIteratorTest, Unboxed_Equality) {
 
 TEST(ITensorListIteratorTest, Boxed_Iterate) {
   auto vec = get_tensor_vector();
-  const List<at::Tensor> boxed(vec);
+  List<at::Tensor> boxed(vec);
   ITensorList list(boxed);
   size_t i = 0;
   for (auto it = list.begin(); it != list.end(); ++it) {
