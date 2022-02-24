@@ -4,7 +4,7 @@
 #include <torch/csrc/jit/api/module.h>
 #include <torch/csrc/jit/frontend/error_report.h>
 #include <torch/csrc/jit/jit_log.h>
-#include "ATen/core/interned_strings.h"
+#include <ATen/core/interned_strings.h>
 
 namespace torch {
 namespace jit {
