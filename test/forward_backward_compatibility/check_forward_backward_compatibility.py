@@ -32,6 +32,7 @@ MAX_ALLOWED_PERIOD = datetime.timedelta(days=30)
 # NB: function name DOES NOT include overload name!
 TEMPORARY_BC_ALLOW_LIST = [
     ("aten::_svd_helper", datetime.date(2022, 3, 1)),
+    ("aten::scatter_reduce.two", datetime.date(2022, 3, 15)),
 ]
 
 # Same things as TEMPORARY__BC_ALLOW_LIST but for FC changes
@@ -78,6 +79,7 @@ INDEFINITE_BC_ALLOW_LIST = [
     "prepacked::unpack_prepacked_sizes_linear",
     "aten::native_multi_head_self_attention",
     "aten::_native_multi_head_self_attention",
+    "aten::grid_sampler_3d_backward",
     "aten::_transform_bias_rescale_qkv",
     "aten::_scatter_reduce.two",
 ]
@@ -324,7 +326,7 @@ def check_fc(existing_schemas):
             "whether this change is wanted or not. \n\nBroken ops: "
             "[\n\t{}\n]".format("\n\t".join(broken_ops))
         )
-
+    return is_fc
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Process some integers.")
