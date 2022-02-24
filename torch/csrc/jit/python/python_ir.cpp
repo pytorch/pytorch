@@ -225,7 +225,9 @@ void initPythonIRBindings(PyObject* module_) {
              bool descend_function_calls = false) {
             return std::make_shared<AliasDb>(
                 std::move(g), isFrozen, descend_function_calls);
-          })
+          },
+          py::arg("isFrozen") = false,
+          py::arg("descend_function_calls") = false)
       .def(
           "dump_alias_db",
           [](std::shared_ptr<Graph> g) {
