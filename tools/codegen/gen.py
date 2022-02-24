@@ -1612,23 +1612,8 @@ def main() -> None:
 #include <ATen/hip/HIPDevice.h>
 #include <ATen/hip/HIPContext.h>'''
 
-    dispatch_keys = [
-        DispatchKey.CPU,
-        DispatchKey.SparseCPU,
-        DispatchKey.SparseCsrCPU,
-        DispatchKey.MkldnnCPU,
-        DispatchKey.CUDA,
-        DispatchKey.SparseCUDA,
-        DispatchKey.SparseCsrCUDA,
-        DispatchKey.QuantizedCPU,
-        DispatchKey.QuantizedCUDA,
-        DispatchKey.CompositeImplicitAutograd,
-        DispatchKey.CompositeExplicitAutograd,
-        # Meta is a magic key: it is automatically generated for structured
-        # kernels
-        DispatchKey.Meta,
-        DispatchKey.ZeroTensor,
-    ]
+    from tools.codegen.model import dispatch_keys
+
     # Only a limited set of dispatch keys get CPUFunctions.h headers generated
     # for them; this is the set
     functions_keys = {
