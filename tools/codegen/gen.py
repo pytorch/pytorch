@@ -720,7 +720,9 @@ def dynamic_type(t: Type, structured_type_override: bool) -> str:
     # also include Tensor[]
     if str(t) == 'Tensor':
         return 'at::Tensor'
-    return cpp.argumenttype_type(t, mutable=False, binds='__placeholder__', structured_type_override=structured_type_override).cpp_type()
+    return cpp.argumenttype_type(
+        t, mutable=False, binds='__placeholder__',
+        structured_type_override=structured_type_override).cpp_type()
 
 def compute_method_of_yaml(variants: Set[Variant]) -> List[str]:
     # This is written out explicitly to ensure that Tensor and
@@ -878,12 +880,8 @@ def compute_declaration_yaml(f: NativeFunction) -> object:
         # NB: method here doesn't matter
         r.type for a in schema_order_jit_arguments
         for r in cpp.argument(
-                a,
-                method=False,
-                cpp_no_default_args=set(),
-                faithful=False,
-                has_tensor_options=False,
-                structured_type_override=f.part_of_structured_group)
+                a, method=False, cpp_no_default_args=set(), faithful=False,
+                has_tensor_options=False, structured_type_override=f.part_of_structured_group)
     ]
 
     cpp_returns = cpp.returns_type(f.func.returns).cpp_type()
