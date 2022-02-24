@@ -165,7 +165,7 @@ for (size_t i=0; i<${tensorlist_name}.size(); i++) {
 
 SAVE_OPTIONALTENSORLIST_STORAGE = CodeTemplate("""\
 std::vector<c10::optional<Storage>> ${tensorlist_name}_storage_saved(${tensorlist_name}.size());
-for (const OptionalTensorRef& tensor : ${tensorlist_name})
+for (const auto& tensor : ${tensorlist_name})
   ${tensorlist_name}_storage_saved.push_back(
     tensor.has_value() && tensor->has_storage() ? c10::optional<Storage>(tensor->storage()) : c10::nullopt);
 """)
@@ -211,7 +211,7 @@ for (size_t i=0; i<${tensorlist_name}.size(); i++) {
 SAVE_OPTIONALTENSORLIST_IMPL = CodeTemplate("""\
 std::vector<c10::intrusive_ptr<TensorImpl>> ${tensorlist_name}_impl_saved(${tensorlist_name}.size());
 for (size_t i=0; i<${tensorlist_name}.size(); i++) {
-  OptionalTensorRef t = ${tensorlist_name}[i];
+  auto& t = ${tensorlist_name}[i];
   if (t.has_value()) ${tensorlist_name}_impl_saved[i] = t->getIntrusivePtr();
 }
 """)
@@ -492,7 +492,7 @@ def emit_body(fn: NativeFunctionWithDifferentiabilityInfo) -> List[str]:
         # TODO: `cpp_type` is only to keep it byte-for-byte compatible with the old codegen, should remove.
         # NB: This is not a clone of cpp.argument() - TensorOptionsArguments / faithful / binds are
         # not handled properly as they are irrelevant for this codegen.
-        cpp_type = cpp.argument_type(a, binds=a.name).cpp_type()
+        cpp_type = cpp.argument_type(a, binds=a.name, structured_type_override=f.part_of_structured_group).cpp_type()
 
         if not is_differentiable(a.name, a.type, info):
             return None
@@ -717,7 +717,7 @@ def emit_body(fn: NativeFunctionWithDifferentiabilityInfo) -> List[str]:
     #    we entered this autograd kernel.
     def emit_dispatch_call(f: NativeFunction, input_base: str, unpacked_args: Sequence[str]) -> str:
         """ Dispatch call via function in a namespace or method on Tensor."""
-        dispatcher_sig = DispatcherSignature.from_schema(f.func)
+        dispatcher_sig = DispatcherSignature.from_schema(f.func, structured_type_override=f.part_of_structured_group)
         dispatcher_exprs = dispatcher_sig.exprs()
 
         # code-generated autograd kernels plumb and recompute dispatch keys directly through the kernel for performance.

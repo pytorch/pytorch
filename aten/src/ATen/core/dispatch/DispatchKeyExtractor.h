@@ -61,6 +61,7 @@ namespace detail {
         ts = ts | x->key_set();
       }
     }
+    // Tensor[] translates to this case
     void operator()(at::ITensorList xs) {
       for (const auto& x : xs) {
         ts = ts | x.key_set();

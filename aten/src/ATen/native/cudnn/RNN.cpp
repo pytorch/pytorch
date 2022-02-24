@@ -836,7 +836,7 @@ copy_weights_to_flat_buf_views(
 
   // Slice off views into weight_buf
   std::vector<Tensor> params_arr;
-  TempArrayRef<Tensor> weight_arr(weight_list);
+  MaybeOwnUnboxed<Tensor> weight_arr(weight_list);
   size_t params_stride0;
   std::tie(params_arr, params_stride0) = get_parameters(
       handle, rnn, rnn_desc, x_desc, w_desc, weight_buf, include_bias);
@@ -981,7 +981,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> _cudnn_rnn(
     weight_buf = at::empty(num_weights, x.options());
     w_desc.set(weight_buf, 3);
     weight_buf.zero_();
-    TempArrayRef<Tensor> weight_arr(weight_list);
+    MaybeOwnUnboxed<Tensor> weight_arr(weight_list);
     std::vector<Tensor> params;
     size_t params_stride0;
     std::tie(params, params_stride0) = get_parameters(handle, fn.rnn, descs.rnn_desc, descs.x_descs[0], w_desc, weight_buf);
@@ -1190,7 +1190,7 @@ std::vector<Tensor> _cudnn_rnn_backward_weight(
     const Tensor& fn_dropout_state, const Tensor& fn_reserve
     ) {
 
-  TempArrayRef<Tensor> weight_arr(weight_list);
+  MaybeOwnUnboxed<Tensor> weight_arr(weight_list);
   MatrixRef<Tensor> weight{ *weight_arr, static_cast<size_t>(weight_stride0) };
   auto input = input_r;
   auto output = output_r;

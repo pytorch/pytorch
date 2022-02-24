@@ -717,7 +717,20 @@ void addInputs(
     const c10::optional<at::ScalarType>& value) {
   detail::genericAddOptionalInput(n, name, value);
 }
-
+void addInputs(
+    Node* n,
+    const char* name,
+    std::vector<at::Tensor> value,
+    bool allow_undefined) {
+  addInputs(n, name, at::ITensorList(value), allow_undefined);
+}
+void addInputs(
+    Node* n,
+    const char* name,
+    at::ArrayRef<at::Tensor> value,
+    bool allow_undefined) {
+  addInputs(n, name, at::ITensorList(value), allow_undefined);
+}
 void addInputs(
     Node* n,
     const char* name,
@@ -745,7 +758,6 @@ TORCH_API void addInputs(
       OptionalType::ofTensor(), fmap(value, getUnboxedOptTensorValueTrace)));
   n->addInput(list_node->output());
 }
-
 void addInputs(
     Node* n,
     const char* name,

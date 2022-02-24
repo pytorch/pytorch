@@ -320,7 +320,7 @@ def emit_trace_body(f: NativeFunction) -> List[str]:
     trace_body.append(format_prerecord_trace(f))
     trace_body.append(declare_returned_variables(f))
 
-    dispatcher_sig = DispatcherSignature.from_schema(f.func)
+    dispatcher_sig = DispatcherSignature.from_schema(f.func, structured_type_override=f.part_of_structured_group)
     dispatcher_exprs = dispatcher_sig.exprs()
 
     # code-generated tracing kernels plumb and recompute dispatch keys directly through the kernel for performance.
@@ -364,7 +364,7 @@ def method_definition(f: NativeFunction) -> str:
         # code-generated tracing kernels plumb and recompute dispatch keys directly through the kernel for performance.
         # See Note [Plumbing Keys Through The Dispatcher] for details.
         ['c10::DispatchKeySet ks'] +
-        [f'{cpp.argument_type(a, binds="__placeholder__").cpp_type()} {a.name}'
+        [f'{cpp.argument_type(a, binds="__placeholder__", structured_type_override=f.part_of_structured_group).cpp_type()} {a.name}'
             for a in f.func.schema_order_arguments()]
     )
 
