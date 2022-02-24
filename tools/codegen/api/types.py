@@ -551,7 +551,9 @@ class NativeSignature:
         return native.returns_type(self.func.returns)
 
     def dispatcher_exprs(self) -> List[Expr]:
-        return translate.translate(self.arguments(), dispatcher.arguments(self.func, structured_type_override=self.structured_type_override), method=False)
+        args = self.arguments()
+        dispatcher_args = dispatcher.arguments(self.func, structured_type_override=self.structured_type_override)
+        return translate.translate(args, dispatcher_args, method=False)
 
 @dataclass(frozen=True)
 class ViewInverseSignature:

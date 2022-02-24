@@ -689,8 +689,8 @@ def emit_body(fn: NativeFunctionWithDifferentiabilityInfo) -> List[str]:
                     expr = f'SavedVariable({var}, {str(is_output).lower()}, {is_inplace_view})'
                 else:
                     expr = f'SavedVariable({var}, {str(is_output).lower()})'
-            elif type == ListCType(OptionalCType(BaseCType(tensorT))) \
-                 or type == BaseCType(iTensorListT) or type == BaseCType(iOptTensorRefListT):
+            elif type == ListCType(OptionalCType(BaseCType(tensorT))) or \
+                 type == BaseCType(iTensorListT) or type == BaseCType(iOptTensorRefListT):
                 expr = f'make_saved_variable_list({name})'
                 name += '_'
             elif type == BaseCType(intArrayRefT):

@@ -222,7 +222,10 @@ class ComputeShapeSignature:
     @method_with_native_function
     def __init__(self, f: NativeFunction):
         self.__schema = LazyIrSchema(f.func)
-        self.__dispatch_args = ', '.join([a.decl() for a in dispatcher.arguments(f.func, structured_type_override=f.part_of_structured_group)])
+        self.__dispatch_args = ', '.join([
+            a.decl()
+            for a in dispatcher.arguments(f.func, structured_type_override=f.part_of_structured_group)
+        ])
         self.__call_args = ", ".join([f"{t.name}" for t in self.__schema.filtered_types()])
 
     def __decl_suffix(self) -> str:

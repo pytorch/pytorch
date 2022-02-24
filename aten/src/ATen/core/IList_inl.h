@@ -3,7 +3,6 @@
 #include <ATen/core/List.h>
 #include <ATen/core/Tensor.h>
 #include <type_traits>
-#include "ATen/core/IList.h"
 
 namespace at {
 class Tensor;
