@@ -124,13 +124,10 @@ class TestOperators(TestCase):
 
     def test_bad_symbolic_registration(self):
         _onnx_opset_version = 9
-
         import torch.onnx.symbolic_helper as sym_help
-        # import torch.onnx.symbolic_registry as sym_registry
 
         @parse_args("v")
         def cat(g, tensor_list, dim):
-            print('#' * 1024)
             tensors = sym_help._unpack_list(tensor_list)
             return g.op("Concat", *tensors, axis_i=dim)
 
@@ -143,9 +140,13 @@ class TestOperators(TestCase):
         model = CatModel()
         x = torch.randn(2, 3)
         f = io.BytesIO()
-        self.assertExpectedRaisesInline(AssertionError,
-                                        lambda: torch.onnx.export(model, (x,), f, opset_version=_onnx_opset_version),
-                                        """A mismatch between the number of arguments (2) and their descriptors (1) was found at function 'cat'""")
+        self.assertExpectedRaisesInline(
+            AssertionError,
+            lambda: torch.onnx.export(model, (x,), f, opset_version=_onnx_opset_version),
+            ("A mismatch between the number of arguments (2) and their descriptors (1) was found at symbolic function "
+             "'cat'. If you believe this is not due to custom symbolic implementation within your code oran external "
+             "library, please file an issue at https://github.com/pytorch/pytorch/issues/new?template=bug-report.md to "
+             "report this bug."))
         unregister_custom_op_symbolic('::cat', _onnx_opset_version)
 
     def test_basic(self):

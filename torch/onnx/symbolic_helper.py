@@ -173,11 +173,13 @@ def parse_args(*arg_descriptors):
         @wraps(fn)
         def wrapper(g, *args, **kwargs):
             # some args may be optional, so the length may be smaller
-            # if fn.__name__ == 'cat':
-            #     import pdb; pdb.set_trace()
+            FILE_BUG_MSG = "If you believe this is not due to custom symbolic implementation within your code or"\
+                "an external library, please file an issue at "\
+                "https://github.com/pytorch/pytorch/issues/new?template=bug-report.md to report this bug."
             assert len(arg_descriptors) >= len(args),\
                 f"A mismatch between the number of arguments ({len(args)}) and"\
-                f" their descriptors ({len(arg_descriptors)}) was found at function '{fn.__name__}'"
+                f" their descriptors ({len(arg_descriptors)}) was found at symbolic function '{fn.__name__}'. "\
+                f"{FILE_BUG_MSG}"
 
             try:
                 sig = inspect.signature(fn)
@@ -190,11 +192,13 @@ def parse_args(*arg_descriptors):
                     for arg, arg_desc, arg_name in zip(args, arg_descriptors, arg_names)]
             # only support _outputs in kwargs
             assert len(kwargs) <= 1,\
-                f"Function {fn.__name__}'s '**kwargs' can contain a single key/value entry."
+                f"Symbolic function {fn.__name__}'s '**kwargs' can contain a single key/value entry. "\
+                f"{FILE_BUG_MSG}"
 
             if len(kwargs) == 1:
                 assert "_outputs" in kwargs,\
-                    f"Function {fn.__name__}'s '**kwargs' can only contain '_outputs' key at '**kwargs'."
+                    f"Symbolic function {fn.__name__}'s '**kwargs' can only contain '_outputs' key at '**kwargs'. "\
+                    f"{FILE_BUG_MSG}"
             return fn(g, *args, **kwargs)
 
         return wrapper
