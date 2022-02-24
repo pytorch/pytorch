@@ -99,14 +99,14 @@ Reducer::Reducer(
       div_factor_(kUnsetDivFactor),
       static_graph_(false),
       comm_hook_(nullptr),
-      ddp_debug_level_(parseDistDebugLevel()),
+      ddp_debug_level_(debug_level()),
       param_names_(std::move(param_names)),
       first_bucket_bytes_cap_(first_bucket_bytes_cap) {
   C10_LOG_API_USAGE_ONCE("torch.distributed.ddp.reducer");
   TORCH_INTERNAL_ASSERT(
       params_.size() >= 1, "Expected at least one parameter.");
 
-  if (ddp_debug_level_ != c10d::DistributedDebugLevel::OFF) {
+  if (ddp_debug_level_ != c10d::DebugLevel::Off) {
     LOG(INFO) << "Reducer initialized with bucket_bytes_cap: "
               << bucket_bytes_cap_
               << " first_bucket_bytes_cap: " << first_bucket_bytes_cap;
@@ -709,7 +709,7 @@ void Reducer::checkAndRaiseMarkedTwiceError(size_t index) {
     auto param_name = param_names_.find(index);
     const bool found_param_name = param_name != param_names_.end();
     TORCH_INTERNAL_ASSERT(
-        ddp_debug_level_ == c10d::DistributedDebugLevel::OFF ||
+        ddp_debug_level_ == c10d::DebugLevel::Off ||
             found_param_name,
         "Expected to find parameter name in debug mode.");
     std::string paramInfo = c10::str(
@@ -1097,7 +1097,7 @@ void Reducer::initialize_buckets(
 
 // (see Note:  "Gradient Layout Contract" in initialize_buckets).
 void Reducer::initialize_bucket_views(Reducer::Bucket& bucket) {
-  const auto &gradients = bucket.gradients;
+  const auto& gradients = bucket.gradients;
   for (const auto i : c10::irange(bucket.variables.size())) {
     auto& v = bucket.variables[i];
     const auto offset = bucket.offsets[i];
@@ -1234,7 +1234,7 @@ void Reducer::search_unused_parameters(
     // If the accumulator function is present in the graph, we know
     // a gradient will be computed for the corresponding parameter.
     if (seen.count(it.first) == 0) {
-      if (ddp_debug_level_ == c10d::DistributedDebugLevel::DETAIL) {
+      if (ddp_debug_level_ == c10d::DebugLevel::Detail) {
         const auto param_info = param_names_.find(it.second);
         TORCH_INTERNAL_ASSERT(
             param_info != param_names_.end(),
@@ -1679,7 +1679,7 @@ bool Reducer::rebuild_buckets() {
     std::reverse(per_bucket_size_limits.begin(), per_bucket_size_limits.end());
   }
 
-  if (ddp_debug_level_ != c10d::DistributedDebugLevel::OFF) {
+  if (ddp_debug_level_ != c10d::DebugLevel::Off) {
     TORCH_INTERNAL_ASSERT(
         rebuilt_bucket_indices.size() == per_bucket_size_limits.size())
     LOG(INFO) << rebuilt_bucket_indices.size()
@@ -1804,7 +1804,7 @@ void Reducer::ensure_prior_reduction_finished() {
         ": ",
         unmarked_param_indices);
 
-    if (ddp_debug_level_ == DistributedDebugLevel::OFF) {
+    if (ddp_debug_level_ == DebugLevel::Off) {
       // Without debug mode, log unmarked_param_indices, as well as
       // recommendation to use debug mode to print parameter names.
       kBaseErrorMsg += unmarked_param_indices_info;
