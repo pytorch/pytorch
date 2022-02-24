@@ -10237,7 +10237,8 @@ op_db: List[OpInfo] = [
            aliases=('linalg.matmul',),
            dtypes=all_types_and_complex_and(torch.bfloat16),
            dtypesIfCUDA=floating_and_complex_types_and(torch.float16,
-                                                       *[torch.bfloat16] if (CUDA11OrLater or TEST_WITH_ROCM) else []),
+                                                       *[torch.bfloat16] if ((SM53OrLater and CUDA11OrLater)
+                                                                             or TEST_WITH_ROCM) else []),
            backward_dtypesIfCUDA=floating_and_complex_types_and(torch.float16,
                                                                 *[torch.bfloat16] if ((SM60OrLater and CUDA11OrLater)
                                                                                       or TEST_WITH_ROCM) else []),
@@ -12252,7 +12253,8 @@ op_db: List[OpInfo] = [
            op=torch.Tensor.__rmatmul__,
            dtypes=all_types_and_complex_and(torch.bfloat16),
            dtypesIfCUDA=floating_types_and(torch.float16,
-                                           *[torch.bfloat16] if (CUDA11OrLater or TEST_WITH_ROCM) else [],
+                                           *[torch.bfloat16] if ((SM53OrLater and CUDA11OrLater)
+                                                                 or TEST_WITH_ROCM) else [],
                                            torch.complex64, torch.complex128),
            backward_dtypesIfCUDA=floating_types_and(torch.float16, *[torch.bfloat16]
                                                     if ((SM60OrLater and CUDA11OrLater) or TEST_WITH_ROCM) else [],

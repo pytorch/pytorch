@@ -288,19 +288,37 @@ TracerResult trace_run(const std::string& input_module_path) {
   at::globalContext().setQEngine(at::QEngine::FBGEMM);
   run_model(input_module_path, root_ops, enabled_backends, called_kernel_tags);
 
-  traced_operators = op_tracer.getCalledOperators();
+  {
+    std::lock_guard<std::mutex> guard(OperatorCallTracer::getMutex());
+    traced_operators = op_tracer.getCalledOperators();
+  }
+
   recordCustomClassesFromOpSchemas(root_ops, traced_operators, loaded_classes);
-  called_kernel_tags.insert(
-      kdtype_tracer.getCalledKernelTags().begin(),
-      kdtype_tracer.getCalledKernelTags().end());
+
+  {
+    std::lock_guard<std::mutex> guard(KernelDTypeTracer::getMutex());
+    called_kernel_tags.insert(
+        kdtype_tracer.getCalledKernelTags().begin(),
+        kdtype_tracer.getCalledKernelTags().end());
+  }
+
   traced_operators.insert(
       always_included_traced_ops.begin(), always_included_traced_ops.end());
-  loaded_classes.insert(
-      custom_class_tracer.getLoadedClasses().begin(),
-      custom_class_tracer.getLoadedClasses().end());
-  build_features.insert(
-      build_feature_tracer.getBuildFeatures().begin(),
-      build_feature_tracer.getBuildFeatures().end());
+
+  {
+    std::lock_guard<std::mutex> guard(CustomClassTracer::getMutex());
+    loaded_classes.insert(
+        custom_class_tracer.getLoadedClasses().begin(),
+        custom_class_tracer.getLoadedClasses().end());
+  }
+
+  {
+    std::lock_guard<std::mutex> guard(BuildFeatureTracer::getMutex());
+    build_features.insert(
+        build_feature_tracer.getBuildFeatures().begin(),
+        build_feature_tracer.getBuildFeatures().end());
+  }
+
   TracerResult tracer_result = {
       root_ops,
       traced_operators,
