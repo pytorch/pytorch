@@ -113,15 +113,15 @@ def broadcast_shapes(*shapes):
     try:
         result = [1] * max(map(len, shapes))
     except Exception:
-        result = max(shapes)
+        result = [max(shapes)]
         for shape in shapes:
-            if shape == 1 or shape == result:
+            if shape == 1 or [shape] == result:
                 continue
             else:
                 raise RuntimeError("The size of shape a ({}) must match the "
                                    "size of shape b ({}) at non-singleton dimension"
                                    .format(shape, result))
-        return torch.Size([result])
+        return torch.Size(result)
 
     for shape in shapes:
         for i in range(-1, -1 - len(shape), -1):
