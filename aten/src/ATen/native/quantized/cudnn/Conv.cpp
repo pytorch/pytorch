@@ -320,10 +320,12 @@ void raw_cudnn_convolution_forward_out(
     .build();
   // std::cout << "operator:" << requant_op.describe() << std::endl;
 
-  std::vector<cudnn_frontend::Operation const *> ops{bias.has_value() ?
-                                                  std::vector<cudnn_frontend::Operation const *>{&conv_op,
-                                                    &(bias_mult_op.value()), &(sum_conv_bias_op.value()), &requant_op}
-                                                  : std::vector<cudnn_frontend::Operation const *>{&conv_op, &requant_op}};
+  std::vector<cudnn_frontend::Operation const *> ops{bias.has_value()};
+  if (bias.has_value()) {
+    ops.emplace_back(&(bias_mult_op.value()));
+    ops.emplace_back(&(sum_conv_bias_op.value()));
+  }
+  ops.emplace_back(&requant_op);
 
   auto opGraph = cudnn_frontend::OperationGraphBuilder()
       .setHandle(handle)
