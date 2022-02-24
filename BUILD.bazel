@@ -3,7 +3,7 @@ load("@pybind11_bazel//:build_defs.bzl", "pybind_extension")
 load("@rules_proto//proto:defs.bzl", "proto_library")
 load("@rules_cc//cc:defs.bzl", "cc_binary", "cc_library", "cc_proto_library", "cc_test")
 load("//third_party:substitution.bzl", "header_template_rule")
-load("//:tools/build_variables.bzl", "jit_core_sources", "libtorch_core_sources", "libtorch_cuda_sources", "libtorch_distributed_sources", "libtorch_extra_sources", "libtorch_nvfuser_generated_headers", "libtorch_nvfuser_runtime_sources", "libtorch_python_core_sources", "torch_cpp_srcs")
+load("//:tools/build_variables.bzl", "jit_core_sources", "libtorch_core_sources", "libtorch_cuda_sources", "libtorch_distributed_sources", "libtorch_extra_sources", "libtorch_nvfuser_generated_headers", "libtorch_nvfuser_runtime_sources", "libtorch_python_core_sources", "torch_cpp_srcs", "aten_ufunc_headers", "aten_ufunc_generated_cpu_sources", "aten_ufunc_generated_cpu_kernel_sources", "aten_ufunc_generated_cuda_sources")
 load("//tools/rules:cu.bzl", "cu_library")
 load("//tools/config:defs.bzl", "if_cuda")
 load("//:aten.bzl", "intern_build_aten_ops", "generate_aten")
@@ -34,12 +34,6 @@ py_binary(
         ":tools_codegen"
     ],
 )
-
-ufunc_headers = glob(["aten/src/ATen/native/ufunc/*.h"])
-ufunc_names = [paths.split_extension(paths.basename(ufunc_header))[0] for ufunc_header in ufunc_headers]
-ufunc_cpu_outputs = ["aten/src/ATen/UfuncCPU_{}.cpp".format(n) for n in ufunc_names]
-ufunc_cpu_kernel_outputs = ["aten/src/ATen/UfuncCPUKernel_{}.cpp".format(n) for n in ufunc_names]
-ufunc_cuda_outputs = ["aten/src/ATen/UfuncCUDA_{}.cu".format(n) for n in ufunc_names]
 
 aten_generation_srcs = ["aten/src/ATen/native/native_functions.yaml"] + glob(["aten/src/ATen/templates/**"])
 
@@ -100,9 +94,14 @@ generated_cuda_cpp = [
 generate_aten(
     name = "generated_aten_cpp",
     srcs = aten_generation_srcs,
-    outs = generated_cpu_cpp + generated_cuda_cpp + ufunc_cpu_outputs + ufunc_cpu_kernel_outputs + ufunc_cuda_outputs + [
-         "aten/src/ATen/Declarations.yaml",
-    ],
+    outs = (
+        generated_cpu_cpp +
+        generated_cuda_cpp +
+        aten_ufunc_generated_cpu_sources("aten/src/ATen/{}") +
+        aten_ufunc_generated_cpu_kernel_sources("aten/src/ATen/{}") +
+        aten_ufunc_generated_cuda_sources("aten/src/ATen/{}") +
+        ["aten/src/ATen/Declarations.yaml"]
+    ),
     generator=":gen",
 )
 
@@ -307,7 +306,9 @@ filegroup(
         "aten/src/ATen/native/cuda/*.cu",
         "aten/src/ATen/native/quantized/cuda/*.cu",
         "aten/src/ATen/native/sparse/cuda/*.cu",
-    ]) + [":{}".format(f) for f in ufunc_cuda_outputs],
+    ]) + aten_ufunc_generated_cuda_sources("aten/src/ATen/{}"),
+    # It's a bit puzzling to me why it's not necessary to declare the
+    # target that generates these sources...
 )
 
 header_template_rule(
@@ -389,7 +390,7 @@ intern_build_aten_ops(
         "@fbgemm",
         "@mkl",
     ],
-    extra_impls = ufunc_cpu_kernel_outputs,
+    extra_impls = aten_ufunc_generated_cpu_kernel_sources("aten/src/ATen/{}"),
 )
 
 cc_library(
@@ -407,7 +408,7 @@ cc_library(
         ":aten_native_sparse_cpp",
         ":aten_native_xnnpack",
         ":aten_src_ATen_config",
-    ] + generated_cpu_cpp + ufunc_cpu_outputs,
+    ] + generated_cpu_cpp + aten_ufunc_generated_cpu_sources("aten/src/ATen/{}"),
     copts = ATEN_COPTS,
     data = if_cuda(
         [":libcaffe2_nvrtc.so"],

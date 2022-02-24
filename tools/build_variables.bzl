@@ -1,3 +1,5 @@
+load("@bazel_skylib//lib:paths.bzl", "paths")
+
 # In both open-source and fbcode builds, these are generated into
 # torch/csrc/{autgrad,jit}/generated.i
 GENERATED_CPP = [
@@ -1063,6 +1065,29 @@ aten_cpu_source_codegen_list = [
     "aten/src/ATen/native/cpu/AdaptiveAvgPoolKernel.cpp",
     "aten/src/ATen/native/cpu/AdaptiveMaxPoolKernel.cpp",
 ]
+
+aten_ufunc_headers = [
+    "aten/src/ATen/native/ufunc/add.h",
+]
+
+aten_ufunc_names = [
+    paths.split_extension(paths.basename(h))[0] for h in aten_ufunc_headers
+]
+
+def aten_ufunc_generated_cpu_sources(gencode_pattern='{}'):
+    return [gencode_pattern.format(name) for name in [
+        "UfuncCPU_{}.cpp".format(n) for n in aten_ufunc_names
+    ]]
+
+def aten_ufunc_generated_cpu_kernel_sources(gencode_pattern='{}'):
+    return [gencode_pattern.format(name) for name in [
+        "UfuncCPUKernel_{}.cpp".format(n) for n in aten_ufunc_names
+    ]]
+
+def aten_ufunc_generated_cuda_sources(gencode_pattern='{}'):
+    return [gencode_pattern.format(name) for name in [
+        "UfuncCUDA_{}.cu".format(n) for n in aten_ufunc_names
+    ]]
 
 # When building lite interpreter in OSS, "aten/src/ATen/native/cpu/AdaptiveAvgPoolKernel.cpp" will go through
 # codegen process. The codegen version of this file, like Activation.cpp.DEFAULT.cpp, will be included

@@ -255,7 +255,6 @@ AT_PRIVATE_CASE_TYPE("{sig.name}", at::ScalarType::{dtype}, {ScalarTypeToCppMapp
 
 {stub_sig.type_defn()};
 {stub_sig.dispatch_decl()};
-{stub_sig.dispatch_defn()};
 
 {stub_sig.kernel_defn()} {{
   at::ScalarType st = iter.common_dtype();
