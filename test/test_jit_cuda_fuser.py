@@ -3624,6 +3624,30 @@ class TestCudaFuser(JitTestCase):
         self._bias_squeeze_relu_helper([1, 6, 1, 2, 2, 5, 1], torch.float, 'cuda', 1e-6)
         self._alias_bias_squeeze_relu_helper([1, 6, 1, 2, 2, 5, 1], torch.float, 'cuda', 1e-6)
 
+    # remove this after opinfo tests are enabled
+    @unittest.skipIf(not RUN_CUDA, "requires CUDA")
+    @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
+                     "Requires fusion optimization pass to be effective")
+    def test_squeeze_zero(self):
+        x = torch.tensor(1.0, dtype=torch.float, device="cuda")
+
+        def squeeze_0(x: torch.Tensor):
+            o = x + 1.
+            o = torch.squeeze(o, 0)
+            o = o * 2.
+            return o
+
+        def squeeze_1(x: torch.Tensor):
+            o = x + 1.
+            o = torch.squeeze(o, -1)
+            o = o + .5
+            return o
+
+        squeeze_0_jit = torch.jit.script(squeeze_0)
+        self._run_helper(squeeze_0_jit, squeeze_0, x)
+        squeeze_1_jit = torch.jit.script(squeeze_1)
+        self._run_helper(squeeze_1_jit, squeeze_1, x)
+
     def _bias_unsqueeze_relu_helper(self, shape, dtype, device, error):
         class BiasUnsqueezeRelu(torch.nn.Module):
             def __init__(self):
