@@ -12,11 +12,16 @@ def extract_ir(filename: str) -> List[str]:
     graphs = []
     with open(filename, "r") as f:
         split_strs = f.read().split(BEGIN)
-        for split_str in split_strs:
+        for i, split_str in enumerate(split_strs):
+            if i == 0:
+                continue
             end_loc = split_str.find(END)
             if end_loc == -1:
                 continue
-            graphs.append(split_str[:end_loc])
+            s = split_str[:end_loc]
+            pfx = split_strs[i-1].splitlines()[-1]
+            lines = [x[len(pfx):] for x in s.splitlines(keepends=True)]
+            graphs.append(''.join(lines))
 
     return graphs
 
@@ -28,11 +33,8 @@ def load_graph_and_inputs(ir: str) -> Tuple[Any, List[Any]]:
     for inp in graph.inputs():
         if isinstance(inp.type(), torch._C.FloatType):
             inputs.append(.5)
-        else if isinstance(inp.type(), torch._C.IntType):
+        elif isinstance(inp.type(), torch._C.IntType):
             inputs.append(2)
-        else if isinstance(inp.type(), torch._C.TensorType):
-            assert(inp.requires_grad == 0)
-            inputs.append(torch._C._representative_tensor(inp.type()))
         else:
             raise NotImplementederror(f"A default value is not implemented for type {inp.type()}")
 
@@ -97,7 +99,7 @@ def run_nvfuser(ir, inputs) -> float:
 
 
 def test_nvfuser(graphs: List[str], baseline_fn, nvfuser_fn):
-    for i, ir in enumerate(graphs):
+    for ir in graphs:
         _, inputs = load_graph_and_inputs(ir)
         baseline = baseline_fn(ir, inputs)
         nvfuser = nvfuser_fn(ir, inputs)
