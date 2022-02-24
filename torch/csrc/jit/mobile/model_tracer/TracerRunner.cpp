@@ -1,6 +1,3 @@
-#include "torch/csrc/jit/mobile/model_tracer/BuildFeatureTracer.h"
-#include "torch/csrc/jit/mobile/model_tracer/CustomClassTracer.h"
-#include "torch/csrc/jit/mobile/model_tracer/KernelDTypeTracer.h"
 #include <ATen/Functions.h>
 #include <ATen/core/dispatch/Dispatcher.h>
 #include <ATen/core/dispatch/ObservedOperators.h>
