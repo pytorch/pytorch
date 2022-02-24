@@ -19,7 +19,7 @@ from typing import Dict, Tuple, Type, List, Callable, Any, Union
 from torch.fx import Node
 import operator
 
-ARGS_TO_SKIP = {
+qop_to_arg_names_to_skip = {
     torch._ops.ops.quantized.hardswish: ['inplace'],
     torch._ops.ops.quantized.elu: ['inplace'],
     torch._ops.ops.quantized.dropout: ['inplace'],
@@ -27,7 +27,7 @@ ARGS_TO_SKIP = {
     ['running_mean', 'running_var', 'use_input_stats', 'momentum'],
 }
 
-def _is_node(node, modules, func_list, method_list, module_type_list):
+def _is_node_in_list(node, modules, func_list, method_list, module_type_list):
     is_call_function = node.op == "call_function" and node.target in func_list
     is_call_method = node.op == "call_method" and node.target in method_list
     is_call_module = node.op == "call_module" and type(modules[str(node.target)]) in module_type_list
@@ -53,7 +53,7 @@ def is_fixed_qparams_node(node, modules):
         torch.nn.Sigmoid,
         torch.nn.Tanh,
     ]
-    return _is_node(node, modules, func_list, method_list, module_type_list)
+    return _is_node_in_list(node, modules, func_list, method_list, module_type_list)
 
 def is_default_node(node, modules):
     func_list = [
@@ -77,7 +77,7 @@ def is_default_node(node, modules):
         torch.nn.LayerNorm,
         torch.nn.Dropout,
     ]
-    return _is_node(node, modules, func_list, method_list, module_type_list)
+    return _is_node_in_list(node, modules, func_list, method_list, module_type_list)
 
 def is_copy_node(node, modules):
     func_list = [
@@ -120,7 +120,7 @@ def is_copy_node(node, modules):
         torch.nn.ReLU,
         torch.nn.ReLU6,
     ]
-    return _is_node(node, modules, func_list, method_list, module_type_list)
+    return _is_node_in_list(node, modules, func_list, method_list, module_type_list)
 
 def is_general_tensor_shape_node(node, modules):
     func_list = [
@@ -151,7 +151,7 @@ def is_general_tensor_shape_node(node, modules):
     module_type_list = [
         torch.nn.Identity,
     ]
-    return _is_node(node, modules, func_list, method_list, module_type_list)
+    return _is_node_in_list(node, modules, func_list, method_list, module_type_list)
 
 def is_other_node(node, modules):
     func_list = [
@@ -159,7 +159,7 @@ def is_other_node(node, modules):
     ]
     method_list: List[Any] = []
     module_type_list: List[Any] = []
-    return _is_node(node, modules, func_list, method_list, module_type_list)
+    return _is_node_in_list(node, modules, func_list, method_list, module_type_list)
 
 def is_special_pattern_node(node, modules):
     res_function, res_method, res_module = False, False, False
@@ -489,8 +489,8 @@ def special_pattern_replacement(model: QuantizedGraphModule) -> QuantizedGraphMo
             qop = get_quantized_operator(ref_node.target)
             args = list(ref_node.args)
             kwargs = dict(ref_node.kwargs)
-            if qop in ARGS_TO_SKIP:
-                args_to_skip = ARGS_TO_SKIP[qop]
+            if qop in qop_to_arg_names_to_skip:
+                args_to_skip = qop_to_arg_names_to_skip[qop]
                 for arg in args_to_skip:
                     if arg in kwargs:
                         kwargs.pop(arg)
