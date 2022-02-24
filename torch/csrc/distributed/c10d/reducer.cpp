@@ -69,6 +69,17 @@ class CpuTimer : public Timer {
 
 C10_REGISTER_TYPED_CLASS(TimerRegistry, c10::kCPU, CpuTimer);
 
+bool is_lazy_or_alias(const at::Tensor& tensor, const at::Tensor& view) {
+  if (tensor.device().type() == at::kLazy) {
+    // TODO(alanwaketan): Currently we can't assert this as bucket_view_out (L1457) is on cuda given
+    // it's set by ProcessGroupNCCL::collective (L1480) which is before the copyLazy hack.
+    // TORCH_INTERNAL_ASSERT(view.device().type() == at::kLazy);
+    return true;
+  }
+
+  return tensor.is_alias_of(view);
+}
+
 } // namespace
 
 Reducer::Reducer(
@@ -327,7 +338,7 @@ void Reducer::check_grad_layout(
         bucket_view.strides());
   }
   if (!gradient_as_bucket_view_) {
-    // TORCH_INTERNAL_ASSERT(!grad.is_alias_of(bucket_view));
+    TORCH_INTERNAL_ASSERT(!is_lazy_or_alias(grad, bucket_view));
   }
 }
 
@@ -353,7 +364,7 @@ void Reducer::mark_variable_ready_dense(size_t variable_index) {
       // bucket_view. If gradient_as_bucket_view_ is set as true, let grad point
       // to bucket_view. If grad has already been set as views of buckets in
       // previous iterations, no copy is needed.
-      if (!grad.is_alias_of(bucket_view)) {
+      if (!is_lazy_or_alias(grad, bucket_view)) {
         if (comm_hook_ == nullptr) {
           auto wrapped =
               at::native::wrapped_scalar_tensor(double(1.) / div_factor_);
@@ -1154,7 +1165,7 @@ void Reducer::initialize_bucket_views(
     if (gradient_as_bucket_view_) {
       auto& bucket_view = replica.bucket_views_in.back();
       runGradCallbackForVariable(v, [&](auto& grad) {
-        if (grad.defined() && !grad.is_alias_of(bucket_view)) {
+        if (grad.defined() && !is_lazy_or_alias(grad, bucket_view)) {
           bucket_view.copy_(grad);
           grad = bucket_view;
           // The grad is modefied and needs to be written back.
@@ -1443,7 +1454,7 @@ void Reducer::finalize_bucket_dense(Bucket& bucket) {
       // allreduced results in a newly allocated tensor, copy bucket_view_out
       // back to bucket_view_in that referring to replica.content tensor and
       // grad.
-      if (!bucket_view_in.is_alias_of(bucket_view_out)) {
+      if (!is_lazy_or_alias(bucket_view_in, bucket_view_out)) {
         bucket_view_in.copy_(bucket_view_out);
       }
       runGradCallbackForVariable(variable, [&](auto& grad) {
@@ -1454,7 +1465,7 @@ void Reducer::finalize_bucket_dense(Bucket& bucket) {
           if (!grad.defined()) {
             grad = bucket_view_in;
           } else {
-            if (!grad.is_alias_of(bucket_view_in)) {
+            if (!is_lazy_or_alias(grad, bucket_view_in)) {
               REDUCER_CHECK(
                   false,
                   logger_,

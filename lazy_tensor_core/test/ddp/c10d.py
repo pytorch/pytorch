@@ -1,13 +1,7 @@
 import os
-import sys
-import tempfile
 import torch
 import torch.distributed as dist
-import torch.nn as nn
-import torch.optim as optim
 import torch.multiprocessing as mp
-
-from torch.nn.parallel import DistributedDataParallel as DDP
 
 import lazy_tensor_core
 lazy_tensor_core._LAZYC._ltc_init_ts_backend()
@@ -34,7 +28,7 @@ def broadcast(device):
 def all_reduce(device):
     x = torch.full((20, 5), device.index + 1).to(device)
     dist.all_reduce(x, op=dist.ReduceOp.SUM)
-    print(f"{os.getpid()} broadcast: {x.cpu()}")
+    print(f"{os.getpid()} all_reduce: {x.cpu()}")
 
 
 def demo_basic(rank, world_size):

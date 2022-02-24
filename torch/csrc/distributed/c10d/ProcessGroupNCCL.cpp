@@ -1200,8 +1200,8 @@ namespace {
 
 // Check validity of tensor
 void check_gpu_single_tensor(const at::Tensor& tensor) {
-  if (!tensor.is_cuda() || tensor.is_sparse()) {
-    // TORCH_CHECK(false, "Tensors must be CUDA and dense");
+  if (((tensor.device().type() != at::kLazy) && !tensor.is_cuda()) || tensor.is_sparse()) {
+    TORCH_CHECK(false, "Tensors must be CUDA/Lazy and dense");
   }
   if (!tensor.is_contiguous()) {
     TORCH_CHECK(false, "Tensors must be contiguous");
@@ -1227,8 +1227,8 @@ void check_gpu_tensors_different_devices(const std::vector<at::Tensor>& tensors)
   usedDevices.reserve(tensors.size());
 
   for (const auto& t : tensors) {
-    if (!t.is_cuda() || t.is_sparse()) {
-      // TORCH_CHECK(false, "Tensors must be CUDA and dense");
+    if (((t.device().type() != at::kLazy) && !t.is_cuda()) || t.is_sparse()) {
+      TORCH_CHECK(false, "Tensors must be CUDA/Lazy and dense");
     }
     if (t.scalar_type() != first.scalar_type()) {
       TORCH_CHECK(false, "Tensors must have identical type");
@@ -1239,8 +1239,8 @@ void check_gpu_tensors_different_devices(const std::vector<at::Tensor>& tensors)
     if (t.strides() != first.strides()) {
       TORCH_CHECK(false, "Tensors must have identical strides");
     }
-    if (!t.is_non_overlapping_and_dense()) {
-      // TORCH_CHECK(false, "Tensors must be non-overlapping and dense");
+    if ((t.device().type() != at::kLazy) && !t.is_non_overlapping_and_dense()) {
+      TORCH_CHECK(false, "Tensors must be non-overlapping and dense");
     }
     const auto inserted = usedDevices.insert(t.get_device()).second;
     if (!inserted) {

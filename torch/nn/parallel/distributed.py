@@ -964,15 +964,8 @@ class DistributedDataParallel(Module, Joinable):
                 self._check_global_requires_backward_grad_sync(is_joined_rank=False)
 
             if self.device_ids:
-                isLazy = inputs[0].device.type == 'lazy'
                 inputs, kwargs = self.to_kwargs(inputs, kwargs, self.device_ids[0])
-                if isLazy:
-                    lazy_input = []
-                    for input in inputs[0]:
-                        lazy_input.append(input.to(f'lazy:{input.device.index}'))
-                    output = self.module(*lazy_input, **kwargs[0])
-                else:
-                    output = self.module(*inputs[0], **kwargs[0])
+                output = self.module(*inputs[0], **kwargs[0])
             else:
                 output = self.module(*inputs, **kwargs)
 
@@ -1046,6 +1039,11 @@ class DistributedDataParallel(Module, Joinable):
 
         def to_map(obj):
             if isinstance(obj, torch.Tensor):
+                if obj.device.type == 'lazy':
+                    assert obj.device.index == target_gpu, (
+                        f"Tensor should be on rank: {target_gpu} instead of rank: {obj.device.index}"
+                    )
+                    return (obj,)
                 if obj.device == torch.device("cuda", target_gpu):
                     return (obj,)
                 if not self.use_side_stream_for_tensor_copies:

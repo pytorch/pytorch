@@ -10,7 +10,6 @@ from torch.nn.parallel import DistributedDataParallel as DDP
 
 import lazy_tensor_core
 lazy_tensor_core._LAZYC._ltc_init_ts_backend()
-import lazy_tensor_core.core.lazy_model as ltm
 
 # from caffe2.python import workspace
 # workspace.GlobalInit(['caffe2', '--caffe2_log_level=-4'])
@@ -53,8 +52,10 @@ def step(model, input, labels, device, loss_fn, optimizer):
 
 def all_close(parameters_a, parameters_b):
     for param_a, param_b in zip(parameters_a, parameters_b):
-        # The precision is quite low.
-        if not torch.allclose(param_a.cpu(), param_b.cpu(), atol=1e-02):
+        # The precision is quite low, which makes me consider this might not
+        # be a good idea. We probably should just use the old fashion of observing
+        # the learning curve of the two to determine if they converge at the same rate.
+        if not torch.allclose(param_a.cpu(), param_b.cpu(), atol=1e-01):
             print_param(param_a, param_b)
             return False
     return True
@@ -68,7 +69,7 @@ def print_param(param_a, param_b):
 
 def init(model, device, rank):
     model = copy.deepcopy(model).to(device)
-    model = DDP(model, device_ids=[rank])
+    model = DDP(model, device_ids=[rank], gradient_as_bucket_view=True)
 
     loss_fn = nn.MSELoss()
     optimizer = optim.SGD(model.parameters(), lr=0.001)
@@ -92,7 +93,7 @@ def demo_basic(rank, world_size):
     model_cuda, loss_fn_cuda, optimizer_cuda = init(model, device_cuda, rank)
 
     assert all_close(model_lazy.parameters(), model_cuda.parameters())
-    for i in range(10):
+    for i in range(101):
         input = torch.randn(20, 10)
         labels = torch.randn(20, 5)
 
@@ -101,7 +102,9 @@ def demo_basic(rank, world_size):
 
         if not all_close(model_lazy.parameters(), model_cuda.parameters()):
             break
-        print(f"{os.getpid()}: iteration {i} lazy_parameters ~= cuda_parameters, loss_lazy={loss_lazy}, loss_cuda={loss_cuda}")
+
+        if i % 10 == 0:
+            print(f"{os.getpid()}: iteration {i} lazy_parameters ~= cuda_parameters, loss_lazy={loss_lazy}, loss_cuda={loss_cuda}")
 
     cleanup()
 
