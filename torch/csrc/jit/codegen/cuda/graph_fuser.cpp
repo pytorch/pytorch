@@ -2241,6 +2241,7 @@ bool removeInplaceOperations(const std::shared_ptr<Graph>& graph) {
   return RemoveTensorMutation(
       graph, [&](Node* node) { return inplace_ops.count(node->kind()) != 0; });
 }
+
 } // anonymous namespace
 
 void CudaFuseGraph(std::shared_ptr<Graph>& graph) {
