@@ -100,9 +100,9 @@ jobs:
         with:
           python-version: '3.x'
       - name: Parse ref
-        shell: python
+        shell: bash
         id: parse-ref
-        run: exec(open(".github/scripts/parse_ref.py").read())
+        run: python .github/scripts/parse_ref.py
       - name: Build
         shell: bash
         env:
@@ -263,9 +263,9 @@ jobs:
         run: |
           .github\scripts\kill_active_ssh_sessions.ps1
       - name: Parse ref
-        shell: python
+        shell: bash
         id: parse-ref
-        run: exec(open(".github/scripts/parse_ref.py").read())
+        run: python .github/scripts/parse_ref.py
       - name: Upload test statistics
         if: always()
         env:
@@ -420,9 +420,9 @@ jobs:
         run: |
           .github\scripts\kill_active_ssh_sessions.ps1
       - name: Parse ref
-        shell: python
+        shell: bash
         id: parse-ref
-        run: exec(open(".github/scripts/parse_ref.py").read())
+        run: python .github/scripts/parse_ref.py
       - name: Upload test statistics
         if: always()
         env:
@@ -577,9 +577,9 @@ jobs:
         run: |
           .github\scripts\kill_active_ssh_sessions.ps1
       - name: Parse ref
-        shell: python
+        shell: bash
         id: parse-ref
-        run: exec(open(".github/scripts/parse_ref.py").read())
+        run: python .github/scripts/parse_ref.py
       - name: Upload test statistics
         if: always()
         env:

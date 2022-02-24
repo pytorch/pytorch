@@ -160,9 +160,9 @@ jobs:
           }
           retry docker pull "${DOCKER_IMAGE}"
       - name: Parse ref
-        shell: python
+        shell: bash
         id: parse-ref
-        run: exec(open(".github/scripts/parse_ref.py").read())
+        run: python .github/scripts/parse_ref.py
       - name: Build
         env:
           BRANCH: ${{ steps.parse-ref.outputs.branch }}

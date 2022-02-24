@@ -157,9 +157,9 @@ jobs:
           }
           retry docker pull "${DOCKER_IMAGE}"
       - name: Parse ref
-        shell: python
+        shell: bash
         id: parse-ref
-        run: exec(open(".github/scripts/parse_ref.py").read())
+        run: python .github/scripts/parse_ref.py
       - name: Build
         env:
           BRANCH: ${{ steps.parse-ref.outputs.branch }}
@@ -348,9 +348,9 @@ jobs:
         run: |
           sudo df -H
       - name: Parse ref
-        shell: python
+        shell: bash
         id: parse-ref
-        run: exec(open(".github/scripts/parse_ref.py").read())
+        run: python .github/scripts/parse_ref.py
       - name: Test
         env:
           PR_NUMBER: ${{ github.event.pull_request.number }}
@@ -599,9 +599,9 @@ jobs:
         run: |
           sudo df -H
       - name: Parse ref
-        shell: python
+        shell: bash
         id: parse-ref
-        run: exec(open(".github/scripts/parse_ref.py").read())
+        run: python .github/scripts/parse_ref.py
       - name: Test
         env:
           PR_NUMBER: ${{ github.event.pull_request.number }}
@@ -850,9 +850,9 @@ jobs:
         run: |
           sudo df -H
       - name: Parse ref
-        shell: python
+        shell: bash
         id: parse-ref
-        run: exec(open(".github/scripts/parse_ref.py").read())
+        run: python .github/scripts/parse_ref.py
       - name: Test
         env:
           PR_NUMBER: ${{ github.event.pull_request.number }}

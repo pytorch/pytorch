@@ -127,9 +127,9 @@ jobs:
           # Install dependencies
           brew install libomp
       - name: Parse ref
-        shell: python
+        shell: bash
         id: parse-ref
-        run: exec(open(".github/scripts/parse_ref.py").read())
+        run: python .github/scripts/parse_ref.py
       - name: Test
         run: |
           python3 -mpip install dist/*.whl
@@ -240,9 +240,9 @@ jobs:
           # Install dependencies
           brew install libomp
       - name: Parse ref
-        shell: python
+        shell: bash
         id: parse-ref
-        run: exec(open(".github/scripts/parse_ref.py").read())
+        run: python .github/scripts/parse_ref.py
       - name: Test
         run: |
           python3 -mpip install dist/*.whl
