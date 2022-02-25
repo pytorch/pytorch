@@ -17,10 +17,10 @@ class Synchronized final {
   mutable std::mutex mutex_;
   T data_;
 
-public:
+ public:
   Synchronized() = default;
-  Synchronized(T const& data): data_(data) {}
-  Synchronized(T&& data): data_(data) {}
+  Synchronized(T const& data) : data_(data) {}
+  Synchronized(T&& data) : data_(data) {}
 
   Synchronized(Synchronized const&) = delete;
   Synchronized(Synchronized&&) = delete;
