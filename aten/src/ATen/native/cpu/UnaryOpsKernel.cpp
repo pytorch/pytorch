@@ -412,7 +412,7 @@ static void polygamma_kernel(TensorIteratorBase& iter, int64_t n) {
   } else {
     AT_DISPATCH_FLOATING_TYPES_AND(kBFloat16, iter.dtype(), "polygamma", [&]() {
       cpu_kernel(
-          iter, [=](scalar_t a) -> scalar_t { return calc_polygamma(n, a); });
+          iter, [=](scalar_t a) -> scalar_t { return calc_polygamma(a, n); });
     });
   }
 }

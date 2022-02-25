@@ -7,6 +7,7 @@ from typing import (
     Optional,
     Union
 )
+import weakref
 
 import threading
 import torch
@@ -40,7 +41,7 @@ from .utils import (
 # Tracking for sharded tensor objects.
 _sharded_tensor_lock = threading.Lock()
 _sharded_tensor_current_id = 0
-_sharded_tensor_map: Dict[int, 'ShardedTensor'] = {}
+_sharded_tensor_map: Dict[int, 'weakref.ReferenceType[ShardedTensor]'] = {}
 
 # Custom sharded ops
 _SHARDED_OPS: Dict[str, Callable] = {}
@@ -61,7 +62,11 @@ def _register_remote_shards(sharded_tensor_id: int, rrefs: List[rpc.RRef[Shard]]
             raise RuntimeError(
                 f'Could not find sharded_tensor_id: {sharded_tensor_id} in map: {_sharded_tensor_map.keys()}')
 
-        _sharded_tensor_map[sharded_tensor_id]._register_remote_shards(rrefs, rpc_rank)
+        sharded_tensor = _sharded_tensor_map[sharded_tensor_id]()
+        if sharded_tensor is None:
+            raise RuntimeError('ShardedTensor weakref has been deallocated')
+        else:
+            sharded_tensor._register_remote_shards(rrefs, rpc_rank)
 
 
 class CreateOp(Enum):
@@ -188,14 +193,14 @@ class ShardedTensor(object):
         self._remote_shards: Dict[int, List[rpc.RRef[Shard]]] = {}
 
     def _post_init(self):
-        with _sharded_tensor_lock:
-            global _sharded_tensor_current_id, _sharded_tensor_map
-            self._sharded_tensor_id = _sharded_tensor_current_id
-            _sharded_tensor_map[self._sharded_tensor_id] = self
-            _sharded_tensor_current_id += 1
-
         # Initialize RPC if available.
         if self._init_rrefs:
+            with _sharded_tensor_lock:
+                global _sharded_tensor_current_id, _sharded_tensor_map
+                self._sharded_tensor_id = _sharded_tensor_current_id
+                _sharded_tensor_map[self._sharded_tensor_id] = weakref.ref(self)
+                _sharded_tensor_current_id += 1
+
             if not rpc._is_current_rpc_agent_set():
                 raise RuntimeError(
                     'RPC Framework needs to be initialized using'

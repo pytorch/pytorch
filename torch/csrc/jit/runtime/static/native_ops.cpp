@@ -611,6 +611,9 @@ REGISTER_NATIVE_OPERATOR_FUNCTOR(
         // MemoryPlanner::deallocate. MemoryPlanner knows about this
         // and will safely clean it up by using the corresponding
         // destroyBorrow method.
+        DCHECK_NE(&assignFrom, &p_node->Output(0));
+        // MemoryPlanner should have cleaned this up!
+        DCHECK(p_node->Output(0).isNone());
         p_node->Output(0) =
             IValue(c10::MaybeOwnedTraits<at::TensorBase>::createBorrow(
                 assignFrom.toTensor()));

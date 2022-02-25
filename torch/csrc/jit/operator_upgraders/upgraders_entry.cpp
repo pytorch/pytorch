@@ -7,6 +7,7 @@
 #include <torch/csrc/jit/frontend/ir_emitter.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/operator_upgraders/upgraders.h>
+#include <torch/csrc/jit/serialization/export_bytecode.h>
 #include <string>
 #include <unordered_map>
 
@@ -57,21 +58,40 @@ def full_out_0_4(size:List[int], fill_value:number, *, out:Tensor) -> Tensor:
   return torch.full(size, fill_value, out=out)
 )SCRIPT"}});
 
+std::shared_ptr<Graph> create_upgrader_graph(
+    const std::string& upgrader_name,
+    const std::string& upgrader_body) {
+  auto cu = std::make_shared<CompilationUnit>();
+  cu->define(c10::nullopt, upgrader_body, nativeResolver(), nullptr);
+  Function& jitFunc = cu->get_function(upgrader_name);
+  GraphFunction& graphFunction = toGraphFunction(jitFunc);
+  return graphFunction.graph();
+}
 using UpgraderMap = std::unordered_map<std::string, std::shared_ptr<Graph>>;
 void populate_upgraders_graph_map() {
   if (!is_upgraders_map_populated()) {
     UpgraderMap populate_content;
     for (const auto& entry : kUpgradersEntryMap) {
-      auto cu = std::make_shared<CompilationUnit>();
-      cu->define(c10::nullopt, entry.second, nativeResolver(), nullptr);
-      Function& jitFunc = cu->get_function(entry.first);
-      GraphFunction& graphFunction = toGraphFunction(jitFunc);
-      populate_content.insert(
-          std::make_pair(entry.first, graphFunction.graph()));
+      auto upgrader_graph = create_upgrader_graph(entry.first, entry.second);
+      populate_content.insert(std::make_pair(entry.first, upgrader_graph));
     }
-
     populate_upgraders_map(std::forward<UpgraderMap>(populate_content));
   }
+}
+
+std::vector<ByteCodeEntry> generate_bytecode_list() {
+  std::vector<ByteCodeEntry> upgraders_bytecode_list;
+  upgraders_bytecode_list.reserve(kUpgradersEntryMap.size());
+  for (const auto& entry : kUpgradersEntryMap) {
+    auto upgrader_graph = create_upgrader_graph(entry.first, entry.second);
+    CompilationOptions options;
+    GraphFunction jitFunc(entry.first, upgrader_graph, nullptr);
+    auto mobileFunc = convertJitFunctionToMobileFunction(jitFunc, options);
+    auto codeTable = convertMobileFunctionToCodeTable(*mobileFunc, options);
+    upgraders_bytecode_list.emplace_back(
+        std::make_tuple(entry.first, codeTable));
+  }
+  return upgraders_bytecode_list;
 }
 
 } // namespace jit

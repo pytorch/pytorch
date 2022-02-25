@@ -10,7 +10,7 @@ jobs:
     if: ${{ github.repository == 'pytorch/pytorch' }}
     runs-on: ubuntu-18.04
     steps:
-      - uses: actions/stale@v3
+      - uses: actions/stale@v4.1.0
         with:
           stale-pr-message: >
             Looks like this PR hasn't been updated in a while so we're going to go ahead and mark this as `Stale`. <br>
@@ -23,7 +23,7 @@ jobs:
     if: ${{ github.repository == 'pytorch/pytorch' }}
     runs-on: ubuntu-18.04
     steps:
-      - uses: actions/stale@v3
+      - uses: actions/stale@v4.1.0
         with:
           stale-pr-message: >
             Looks like this PR hasn't been updated in a while so we're going to go ahead and mark this as `Stale`. <br>

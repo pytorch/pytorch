@@ -1868,6 +1868,9 @@ class TestLinalg(TestCase):
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
     def test_norm_extreme_values(self, device):
+        if torch.device(device).type == 'cpu':
+            self.skipTest("Test broken on cpu (see gh-71645)")
+
         vector_ords = [0, 1, 2, 3, inf, -1, -2, -3, -inf]
         matrix_ords = ['fro', 'nuc', 1, 2, inf, -1, -2, -inf]
         vectors = []
@@ -2883,6 +2886,9 @@ class TestLinalg(TestCase):
     @skipCPUIfNoLapack
     @dtypes(*floating_and_complex_types())
     def test_svd_errors_and_warnings(self, device, dtype):
+        if torch.device(device).type == 'cpu':
+            self.skipTest("Test broken on cpu (see gh-71645)")
+
         for svd in [torch.svd, torch.linalg.svd]:
             # if non-empty out tensor with wrong shape is passed a warning is given
             a = torch.randn(3, 3, dtype=dtype, device=device)

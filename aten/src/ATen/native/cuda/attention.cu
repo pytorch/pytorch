@@ -39,7 +39,6 @@ __global__ void transform_bias_rescale_qkv_kernel(
     PackedTensorAccessor64<scalar_t, 5, RestrictPtrTraits> q_k_v) {
   // warp per DH.
   // so launch B * NH * T warps.
-  auto B = q_k_v.size(1);
   auto NH = q_k_v.size(2);
   auto T = q_k_v.size(3);
   auto DH = q_k_v.size(4);

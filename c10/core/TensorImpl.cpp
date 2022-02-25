@@ -497,14 +497,15 @@ c10::AutogradMetaInterface* TensorImpl::autograd_meta() const {
   return autograd_meta_.get();
 }
 
-c10::intrusive_ptr<TensorImpl> TensorImpl::shallow_copy_and_detach(
-    const c10::VariableVersion& version_counter,
+template <typename VariableVersion>
+c10::intrusive_ptr<TensorImpl> TensorImpl::shallow_copy_and_detach_core(
+    VariableVersion&& version_counter,
     bool allow_tensor_metadata_change) const {
   if (key_set_.has(DispatchKey::Python) &&
       !c10::impl::tls_is_dispatch_key_excluded(DispatchKey::Python)) {
     auto r = pyobj_interpreter_.load(std::memory_order_acquire)->detach(this);
     if (r) {
-      r->set_version_counter(version_counter);
+      r->set_version_counter(std::forward<VariableVersion>(version_counter));
       r->set_allow_tensor_metadata_change(allow_tensor_metadata_change);
       return r;
     }
@@ -519,7 +520,7 @@ c10::intrusive_ptr<TensorImpl> TensorImpl::shallow_copy_and_detach(
   copy_tensor_metadata(
       /*src_impl=*/this,
       /*dest_impl=*/impl.get(),
-      /*version_counter=*/version_counter,
+      /*version_counter=*/std::forward<VariableVersion>(version_counter),
       /*allow_tensor_metadata_change=*/allow_tensor_metadata_change);
   impl->refresh_numel();
   impl->refresh_contiguous();
@@ -527,32 +528,17 @@ c10::intrusive_ptr<TensorImpl> TensorImpl::shallow_copy_and_detach(
 }
 
 c10::intrusive_ptr<TensorImpl> TensorImpl::shallow_copy_and_detach(
+    const c10::VariableVersion& version_counter,
+    bool allow_tensor_metadata_change) const {
+  return shallow_copy_and_detach_core(
+      version_counter, allow_tensor_metadata_change);
+}
+
+c10::intrusive_ptr<TensorImpl> TensorImpl::shallow_copy_and_detach(
     c10::VariableVersion&& version_counter,
     bool allow_tensor_metadata_change) const {
-  if (key_set_.has(DispatchKey::Python) &&
-      !c10::impl::tls_is_dispatch_key_excluded(DispatchKey::Python)) {
-    auto r = pyobj_interpreter_.load(std::memory_order_acquire)->detach(this);
-    if (r) {
-      r->set_version_counter(std::move(version_counter));
-      r->set_allow_tensor_metadata_change(allow_tensor_metadata_change);
-      return r;
-    }
-    // otherwise just copy the TensorImpl and not the PyObject.  Since
-    // the interpreter is dead no one can call us out on it
-  }
-  auto impl = c10::make_intrusive<TensorImpl>(
-      // No need to populate Storage; copy_tensor_metadata will do it for us.
-      key_set_,
-      data_type_,
-      device_opt_);
-  copy_tensor_metadata(
-      /*src_impl=*/this,
-      /*dest_impl=*/impl.get(),
-      /*version_counter=*/std::move(version_counter),
-      /*allow_tensor_metadata_change=*/allow_tensor_metadata_change);
-  impl->refresh_numel();
-  impl->refresh_contiguous();
-  return impl;
+  return shallow_copy_and_detach_core(
+      std::move(version_counter), allow_tensor_metadata_change);
 }
 
 void TensorImpl::copy_tensor_metadata_except_version_counter(
