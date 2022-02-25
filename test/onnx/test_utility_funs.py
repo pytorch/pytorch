@@ -15,7 +15,6 @@ from torch.onnx.symbolic_helper import (_set_opset_version,
 import torch.utils.cpp_extension
 from test_pytorch_common import (skipIfUnsupportedMinOpsetVersion,
                                  skipIfUnsupportedMaxOpsetVersion)
-import caffe2.python.onnx.backend as backend
 from verify import verify
 
 import torchvision
@@ -601,6 +600,39 @@ class TestUtilityFuns_opset9(_BaseTestCase):
                                     "unwrap model from torch.nn.DataParallel. Try "):
             torch.onnx.export(model, x, f, opset_version=self.opset_version)
 
+    @skipIfUnsupportedMinOpsetVersion(11)
+    def test_sequence_dim(self):
+        class Module(torch.nn.Module):
+            def forward(self, x, y):
+                return [x, y]
+
+        model = Module()
+        # Export with scripting to keep output as Sequence type.
+        # Tracing unpacks the list.
+        script_model = torch.jit.script(model)
+        x = torch.randn(2, 3)
+
+        # Case 1: dynamic axis
+        f = io.BytesIO()
+        y = torch.randn(2, 3)
+        torch.onnx.export(script_model, (x, y), f, opset_version=self.opset_version,
+                          input_names=['x', 'y'], dynamic_axes={'y': [1]})
+        onnx_model = onnx.load(io.BytesIO(f.getvalue()))
+        loop_output_value_info_proto = onnx_model.graph.output[0]
+        ref_value_info_proto = onnx.helper.make_tensor_sequence_value_info(loop_output_value_info_proto.name,
+                                                                           1, [2, None])
+        self.assertEqual(loop_output_value_info_proto, ref_value_info_proto)
+
+        # Case 2: no dynamic axes.
+        f = io.BytesIO()
+        y = torch.randn(2, 3)
+        torch.onnx.export(script_model, (x, y), f, opset_version=self.opset_version)
+        onnx_model = onnx.load(io.BytesIO(f.getvalue()))
+        loop_output_value_info_proto = onnx_model.graph.output[0]
+        ref_value_info_proto = onnx.helper.make_tensor_sequence_value_info(loop_output_value_info_proto.name,
+                                                                           1, [2, 3])
+        self.assertEqual(loop_output_value_info_proto, ref_value_info_proto)
+
     def test_export_mode(self):
         class MyModule(torch.nn.Module):
             def forward(self, x):
@@ -1022,6 +1054,9 @@ class TestUtilityFuns_opset9(_BaseTestCase):
                 return y
 
         x = torch.tensor([1, 2])
+        # Move import to local as caffe2 backend requires additional build flag,
+        # and is only used in this test case.
+        import caffe2.python.onnx.backend as backend
         verify(MyModel(), x, backend, do_constant_folding=False)
 
     def test_fuse_conv_bn(self):
@@ -1234,6 +1269,33 @@ class TestUtilityFuns_opset9(_BaseTestCase):
         self.assertEqual(graph.graph.node[2].op_type, "Identity")
         self.assertEqual(graph.graph.node[3].op_type, "Gemm")
         self.assertEqual(graph.graph.node[4].op_type, "Identity")
+
+    def test_bad_symbolic_registration(self):
+        _onnx_opset_version = 9
+        import torch.onnx.symbolic_helper as sym_help
+
+        @parse_args("v")
+        def cat(g, tensor_list, dim):
+            tensors = sym_help._unpack_list(tensor_list)
+            return g.op("Concat", *tensors, axis_i=dim)
+
+        register_custom_op_symbolic('::cat', cat, _onnx_opset_version)
+
+        class CatModel(torch.nn.Module):
+            def forward(self, x):
+                return torch.cat((x, x, x), 0)
+
+        model = CatModel()
+        x = torch.randn(2, 3)
+        f = io.BytesIO()
+        self.assertExpectedRaisesInline(
+            AssertionError,
+            lambda: torch.onnx.export(model, (x,), f, opset_version=_onnx_opset_version),
+            ("A mismatch between the number of arguments (2) and their descriptors (1) was found at symbolic function "
+             "'cat'. If you believe this is not due to custom symbolic implementation within your code or an external "
+             "library, please file an issue at https://github.com/pytorch/pytorch/issues/new?template=bug-report.yml to "
+             "report this bug."))
+        unregister_custom_op_symbolic('::cat', _onnx_opset_version)
 
 
 class TestUtilityFuns_opset10(TestUtilityFuns_opset9):
