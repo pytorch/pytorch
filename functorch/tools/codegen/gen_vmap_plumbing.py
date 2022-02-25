@@ -132,7 +132,7 @@ def gen_vmap_inplace_plumbing(native_function):
         return None
 
     unwraps, unwrapped_arg_list = gen_unwraps(schema.arguments.flat_all)
-    # bdims_all_none_case = gen_case_where_all_bdims_are_none(schema.arguments.flat_all, schema)
+    bdims_all_none_case = gen_case_where_all_bdims_are_none(schema.arguments.flat_all, schema)
 
     return f"""\
 template <typename batch_rule_t, batch_rule_t batch_rule>
@@ -141,6 +141,7 @@ template <typename batch_rule_t, batch_rule_t batch_rule>
   auto maybe_layer = maybeCurrentDynamicLayer();
   TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
   int64_t cur_level = maybe_layer->layerId();
+{textwrap.indent(bdims_all_none_case, "  ")}
 {textwrap.indent(unwraps, "  ")}
   batch_rule({', '.join(unwrapped_arg_list)});
   return {schema.arguments.flat_all[0].name};
@@ -171,7 +172,7 @@ def gen_vmap_plumbing(native_function: NativeFunction) -> str:
         return None
 
     unwraps, unwrapped_arg_list = gen_unwraps(schema.arguments.flat_all)
-    # bdims_all_none_case = gen_case_where_all_bdims_are_none(schema.arguments.flat_all, schema)
+    bdims_all_none_case = gen_case_where_all_bdims_are_none(schema.arguments.flat_all, schema)
 
     wrapped_returns = gen_returns(returns)
     return f"""\
@@ -181,6 +182,7 @@ template <typename batch_rule_t, batch_rule_t batch_rule>
   auto maybe_layer = maybeCurrentDynamicLayer();
   TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
   int64_t cur_level = maybe_layer->layerId();
+{textwrap.indent(bdims_all_none_case, "  ")}
 {textwrap.indent(unwraps, "  ")}
   auto results = batch_rule({', '.join(unwrapped_arg_list)});
   {wrapped_returns}
