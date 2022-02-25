@@ -1,6 +1,5 @@
 # Generates RegisterCodegenUnboxedKernels.cpp, UnboxingFunctions.h and UnboxingFunctions.cpp.
 import argparse
-import json
 import os
 import pathlib
 from dataclasses import dataclass

@@ -1,5 +1,7 @@
 import sys
 import os
+from typing import List
+
 import torch
 
 
@@ -26,8 +28,8 @@ class ModelWithDTypeDeviceLayoutPinMemory(FileSetup):
     def setup(self):
 
         class Model(torch.nn.Module):
-            def forward(self):
-                a = torch.ones([3, 4], dtype=torch.int64, layout=torch.strided, device="cpu")
+            def forward(self, x: int):
+                a = torch.ones(size=[3, x], dtype=torch.int64, layout=torch.strided, device="cpu", pin_memory=False)
                 return a
 
         model = Model()
@@ -37,9 +39,31 @@ class ModelWithDTypeDeviceLayoutPinMemory(FileSetup):
         script_model._save_for_lite_interpreter(self.path)
 
 
+class ModelWithTensorOptional(FileSetup):
+    path = 'index.ptl'
+
+    def setup(self):
+
+        class Model(torch.nn.Module):
+            def forward(self, index):
+                a = torch.zeros(2, 2)
+                a[0][1] = 1
+                a[1][0] = 2
+                a[1][1] = 3
+                return a[index]
+
+        model = Model()
+
+        # Script the model and save
+        script_model = torch.jit.script(model)
+        script_model._save_for_lite_interpreter(self.path)
+
+
 tests = [
-    ModelWithDTypeDeviceLayoutPinMemory()
+    ModelWithDTypeDeviceLayoutPinMemory(),
+    ModelWithTensorOptional()
 ]
+
 
 def setup():
     for test in tests:
