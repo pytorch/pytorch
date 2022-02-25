@@ -25,7 +25,7 @@ __all__ = [
 def warn_deprecated(instructions: Union[str, Callable[[str, Tuple[Any, ...], Dict[str, Any], Any], str]]) -> Callable:
     def outer_wrapper(fn: Callable) -> Callable:
         name = fn.__name__
-        head = f"torch.testing.{name}() is deprecated and will be removed in a future release. "
+        head = f"torch.testing.{name}() is deprecated since 1.12 and will be removed in 1.14. "
 
         @functools.wraps(fn)
         def inner_wrapper(*args: Any, **kwargs: Any) -> Any:
@@ -40,8 +40,8 @@ def warn_deprecated(instructions: Union[str, Callable[[str, Tuple[Any, ...], Dic
     return outer_wrapper
 
 
-rand = warn_deprecated("Use torch.rand instead.")(torch.rand)
-randn = warn_deprecated("Use torch.randn instead.")(torch.randn)
+rand = warn_deprecated("Use torch.rand() instead.")(torch.rand)
+randn = warn_deprecated("Use torch.randn() instead.")(torch.randn)
 
 
 _DTYPE_PRECISIONS = {
@@ -57,11 +57,10 @@ def _get_default_rtol_and_atol(actual: torch.Tensor, expected: torch.Tensor) -> 
     return max(actual_rtol, expected_rtol), max(actual_atol, expected_atol)
 
 
-# TODO: include the deprecation as soon as torch.testing.assert_close is stable
-# @warn_deprecated(
-#     "Use torch.testing.assert_close instead. "
-#     "For detailed upgrade instructions see https://github.com/pytorch/pytorch/issues/61844."
-# )
+@warn_deprecated(
+    "Use torch.testing.assert_close() instead. "
+    "For detailed upgrade instructions see https://github.com/pytorch/pytorch/issues/61844."
+)
 def assert_allclose(
     actual: Any,
     expected: Any,
@@ -91,18 +90,17 @@ def assert_allclose(
     )
 
 
-# We iterate over all dtype getters and expose them here with an added deprecation warning
+getter_instructions = (
+    lambda name, args, kwargs, return_value: f"This call can be replaced with {return_value}."  # noqa: E731
+)
+
+# Deprecate and expose all dtype getters
 for name in _legacy.__all_dtype_getters__:
     fn = getattr(_legacy, name)
-    instructions = (
-        lambda name, args, kwargs, return_value: f"This call to {name}(...) can be replaced with {return_value}."
-    )
-    globals()[name] = warn_deprecated(instructions)(fn)
+    globals()[name] = warn_deprecated(getter_instructions)(fn)
     __all__.append(name)
 
-
-instructions = lambda name, args, kwargs, return_value: f"This call can be replaced with {return_value}."  # noqa: E731
-get_all_device_types = warn_deprecated(instructions)(_legacy.get_all_device_types)
+get_all_device_types = warn_deprecated(getter_instructions)(_legacy.get_all_device_types)
 
 
 @warn_deprecated(
