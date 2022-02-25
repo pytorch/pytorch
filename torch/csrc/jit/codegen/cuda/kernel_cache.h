@@ -410,6 +410,11 @@ class TORCH_CUDA_CU_API FusionExecutorCache {
   //! TODO: this can be largely expanded to look at complete
   //!   caching profiles. Currently it just makes it easier to test
   FusionKernelRuntime* most_recent_runtime_ = nullptr;
+
+  //! indices of fusion outputs that are aliased to inputs. These are used only
+  //! to support in-place update and should have been dropped before pushing
+  //! outputs to stack.
+  std::set<int> aliased_output_indices_;
 };
 
 class GraphCache {
@@ -435,6 +440,9 @@ class GraphCache {
  private:
   //! FusionExecutorCache that performs schedule and kernel execution;
   std::unique_ptr<FusionExecutorCache> fusion_executor_cache_;
+
+  //! num of outputs
+  size_t num_of_outputs_ = 0;
 };
 
 } // namespace cuda
