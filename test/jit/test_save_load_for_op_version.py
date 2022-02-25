@@ -543,8 +543,6 @@ class TestSaveLoadForOpVersion(JitTestCase):
 
     def test_versioned_stft_v10(self):
         model_path = pytorch_test_dir + "/jit/fixtures/test_versioned_stft_v10.ptl"
-        loaded_mode
-                model_path = pytorch_test_dir + "/jit/fixtures/test_versioned_stft_v10.ptl"
         loaded_model = torch.jit.load(model_path)
         buffer = io.BytesIO(loaded_model._save_to_buffer_for_lite_interpreter())
         buffer.seek(0)
@@ -557,3 +555,4 @@ class TestSaveLoadForOpVersion(JitTestCase):
             output = v10_mobile_module(input, n_fft=10, window=window)
             output_expected = torch.stft(input, n_fft=10, window=window,
                                          center=False, return_complex=True)
+            self.assertEqual(output, output_expected)
