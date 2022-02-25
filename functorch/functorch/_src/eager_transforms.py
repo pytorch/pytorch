@@ -325,6 +325,23 @@ def jacrev(func: Callable, argnums: Union[int, Tuple[int]] = 0, *, has_aux=False
         >>> expected = torch.diag(torch.cos(x))
         >>> assert torch.allclose(jacobian, expected)
 
+    If you would like to compute the output of the function as well as the
+    jacobian of the function, use the ``has_aux`` flag to return the output
+    as an auxiliary object:
+
+        >>> from functorch import jacrev
+        >>> x = torch.randn(5)
+        >>>
+        >>> def f(x):
+        >>>   return x.sin()
+        >>>
+        >>> def g(x):
+        >>>   result = f(x)
+        >>>   return result, result
+        >>>
+        >>> jacobian_f, f_x = jacrev(g, has_aux=True)(x)
+        >>> assert torch.allclose(f_x, f(x))
+
     :func:`jacrev` can be composed with vmap to produce batched
     Jacobians:
 
@@ -834,6 +851,23 @@ def jacfwd(func: Callable, argnums: argnums_t = 0, has_aux: bool = False):
         >>> x = torch.randn(64, 5)
         >>> jacobian = vmap(jacfwd(torch.sin))(x)
         >>> assert jacobian.shape == (64, 5, 5)
+
+    If you would like to compute the output of the function as well as the
+    jacobian of the function, use the ``has_aux`` flag to return the output
+    as an auxiliary object:
+
+        >>> from functorch import jacfwd
+        >>> x = torch.randn(5)
+        >>>
+        >>> def f(x):
+        >>>   return x.sin()
+        >>>
+        >>> def g(x):
+        >>>   result = f(x)
+        >>>   return result, result
+        >>>
+        >>> jacobian_f, f_x = jacfwd(g, has_aux=True)(x)
+        >>> assert torch.allclose(f_x, f(x))
 
     Additionally, :func:`jacrev` can be composed with itself or :func:`jacrev`
     to produce Hessians
