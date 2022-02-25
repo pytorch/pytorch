@@ -15,6 +15,8 @@
 namespace torch {
 namespace jit {
 
+using ExtraFilesMap = std::unordered_map<std::string, std::string>;
+
 // On high level, to produce a Module from a file on disk, we need to go
 // through the follow steps:
 // 1. Read: Read the file from disk -> memory
@@ -49,6 +51,10 @@ TORCH_API mobile::Module parse_and_initialize_mobile_module(
 TORCH_API mobile::Module load_mobile_module_from_file(
     const std::string& filename,
     c10::optional<at::Device> device = c10::nullopt);
+
+TORCH_API void parseExtraFiles(
+    mobile::serialization::Module* module,
+    ExtraFilesMap& extra_files);
 
 class FlatbufferLoader {
  public:
