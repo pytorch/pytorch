@@ -782,13 +782,14 @@ class FullyShardedDataParallel(nn.Module):
         back to sharded version after summon_full_params ends, and also remove
         "_fsdp_wrapped_module" prefix.
         """
+        self._assert_state([TrainingState_.SUMMON_FULL_PARAMS])
         for key in state_dict.keys():
-            # Due to recursive call of summon_full_params, avoid unnecessary reclone of
+            # Due to recursive call of summon_full_params, avoid unnecessasry
+            # reclone of tensors in case they have already been cloned.
             if (
-                self.training_state == TrainingState_.SUMMON_FULL_PARAMS and
                 not getattr(state_dict[key], "_has_been_cloned", False)
             ):
-                state_dict[key] = state_dict[key].clone()
+                state_dict[key] = state_dict[key].clone().detach()
                 state_dict[key]._has_been_cloned = True
 
         _replace_by_prefix(state_dict, prefix + f"{FSDP_WRAPPED_MODULE}.", prefix)
@@ -861,9 +862,9 @@ class FullyShardedDataParallel(nn.Module):
         """
         if torch.cuda.is_available():
             torch.cuda.synchronize()
-        if self._state_dict_type == StateDictType.FULL_STATE_DICT:
-            self._lazy_init()
 
+        self._lazy_init()
+        if self._state_dict_type == StateDictType.FULL_STATE_DICT:
             if self.training_state != TrainingState_.SUMMON_FULL_PARAMS:
                 with self._summon_full_params(recurse=False, writeback=False):
                     state_dict = super().state_dict(*args, **kwargs)
@@ -1121,6 +1122,8 @@ class FullyShardedDataParallel(nn.Module):
 
             currently_local_params = self._collect_local_params()
             self._rebuild_full_params()
+            # Wait for all_gather to finish before computation
+            torch.cuda.current_stream().wait_stream(self._streams["all_gather"])
 
             # FSDP now has the full flattened parameter. Unflatten it to get the
             # full parameters.
