@@ -15,6 +15,17 @@ namespace torch {
 namespace jit {
 
 static std::unordered_map<std::string, std::string> kUpgradersEntryMap({
+    {"stft_0_10", R"SCRIPT(
+def stft_0_10(
+    self: Tensor, n_fft: int, hop_length: Optional[int] = None,
+    win_length: Optional[int] = None, window: Optional[Tensor] = None,
+    normalized: bool = False, onesided: Optional[bool] = None,
+    return_complex: Optional[bool] = None) -> Tensor:
+    return torch.stft(
+        self, n_fft=n_fft, hop_length=hop_length, win_length=win_length,
+        window=window, center=False, normalized=normalized, onesided=onesided,
+        return_complex=return_complex)
+)SCRIPT"},
     {"logspace_0_8", R"SCRIPT(
 def logspace_0_8(start: Union[int, float, complex], end: Union[int, float, complex], steps: Optional[int], base: float, *, dtype: Optional[int], layout: Optional[int],
                  device: Optional[Device], pin_memory: Optional[bool]):
