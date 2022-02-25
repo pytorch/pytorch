@@ -18,7 +18,6 @@ namespace mobile {
  *
  */
 struct OperatorCallTracer final {
-
   at::CallbackHandle handle_;
 
   OperatorCallTracer();
