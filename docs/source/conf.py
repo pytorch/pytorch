@@ -182,6 +182,7 @@ coverage_ignore_classes = [
     "ReshapeTransform",
     "SigmoidTransform",
     "SoftmaxTransform",
+    "SoftplusTransform",
     "StackTransform",
     "StickBreakingTransform",
     "TanhTransform",
