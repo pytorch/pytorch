@@ -1236,9 +1236,9 @@ class RNNDynamicQuantizeHandler(QuantizeHandler):
 
         act_dtype, weight_dtype, compute_dtype = dtypes
         activation = load_arg(quantized=act_dtype)(node.args[0])
-        # module = modules[str(node.target)]
-        # qmodule_cls = get_dynamic_quant_module_class(type(module))
-        # qmodule = qmodule_cls.from_float(module)
+        module = modules[str(node.target)]
+        qmodule_cls = get_dynamic_quant_module_class(type(module))
+        qmodule = qmodule_cls.from_float(module)
         parent_name, name = _parent_name(node.target)
         setattr(modules[parent_name], name, qmodule)
         return create_node_from_old_node_preserve_meta(
