@@ -212,13 +212,6 @@ def _get_cache_or_reload(github, force_reload, trust_repo, calling_fn, verbose=T
 
     return repo_dir
 
-def _get_trusted_input(repo):
-    # separate function for testing
-    response = input(
-        f"The repository {repo} does not belong to the list of trusted repositories and as such cannot be downloaded. "
-        "Do you trust this repository and wish to add it to the trusted list of repositories (y/N)?")
-    return response
-
 def _check_repo(repo_owner, repo_name, repo_branch, trust_repo, calling_fn="load"):
     hub_dir = get_dir()
     filepath = os.path.join(hub_dir, "trusted_list")
@@ -235,15 +228,16 @@ def _check_repo(repo_owner, repo_name, repo_branch, trust_repo, calling_fn="load
                 if _repo != "checkpoints":
                     file.write(_repo + "\n")
 
+    # load list
     with open(filepath, 'r') as file:
-        trusted_repos = tuple(line.strip() for line in file if len(line.strip()))
+        trusted_repos = tuple(line.strip() for line in file)
     with open(filepath_legacy, 'r') as file:
-        trusted_repos_legacy = tuple(line.strip() for line in file if len(line.strip()))
-    repo = '_'.join([repo_owner, repo_name])
-    repo_branch = '_'.join([repo_owner, repo_name, repo_branch])
+        trusted_repos_legacy = tuple(line.strip() for line in file)
+    owner_name = '_'.join([repo_owner, repo_name])
+    owner_name_branch = '_'.join([repo_owner, repo_name, repo_branch])
 
-    is_trusted = any(repo == trusted_repo for trusted_repo in trusted_repos)
-    is_trusted = is_trusted or any(repo_branch == trusted_repo for trusted_repo in trusted_repos_legacy)
+    is_trusted = any(owner_name == trusted_repo for trusted_repo in trusted_repos)
+    is_trusted = is_trusted or any(owner_name_branch == trusted_repo for trusted_repo in trusted_repos_legacy)
     is_trusted = is_trusted or repo_owner in _TRUSTED_REPO_OWNERS
 
     # TODO: Remove `None` option in future version and change the default to "check"
@@ -259,7 +253,9 @@ def _check_repo(repo_owner, repo_name, repo_branch, trust_repo, calling_fn="load
         return
 
     if (trust_repo is False) or (trust_repo == "check" and not is_trusted):
-        response = _get_trusted_input(repo)
+        response = input(
+            f"The repository {owner_name} does not belong to the list of trusted repositories and as such cannot be downloaded. "
+            "Do you trust this repository and wish to add it to the trusted list of repositories (y/N)?")
         if response.lower() in ("y", "yes"):
             if is_trusted:
                 print("The repository is already trusted.")
@@ -271,7 +267,7 @@ def _check_repo(repo_owner, repo_name, repo_branch, trust_repo, calling_fn="load
     # At this point we're sure that the user trusts the repo
     if not is_trusted:
         with open(filepath, "a") as file:
-            file.write(repo + "\n")
+            file.write(owner_name + "\n")
 
 
 def _check_module_exists(name):
@@ -352,13 +348,19 @@ def list(github, force_reload=False, skip_validation=False, trust_repo=None):
             requests to the GitHub API; you can specify a non-default GitHub token by setting the
             ``GITHUB_TOKEN`` environment variable. Default is ``False``.
         trust_repo (bool, string or None): ``"check"``, ``True``, ``False`` or ``None``.
-             This parameter helps ensuring that users only run code from repos that they trust.
+            This parameter helps ensuring that users only run code from repos that they trust.
 
-            - If ``False``, a prompt will ask the user whether the repo should be trusted.
-            - If ``True``, the repo will be added to the trusted list and loaded without requiring explicit confirmation.
-            - If ``"check"``, the repo will be checked against the list of trusted repos in the cache. If it is
-               not present in that list, the behaviour will fall back onto the ``trust_repo=False`` option.
-            - If ``None``: this will raise a warning, inviting the user to set ``trust_repo`` to either ``False``, ``True`` or ``"check"``. This is only present for backward compatibility and will be removed in the future.
+            - If ``False``, a prompt will ask the user whether the repo should
+              be trusted.
+            - If ``True``, the repo will be added to the trusted list and loaded
+              without requiring explicit confirmation.
+            - If ``"check"``, the repo will be checked against the list of
+              trusted repos in the cache. If it is not present in that list, the
+              behaviour will fall back onto the ``trust_repo=False`` option.
+            - If ``None``: this will raise a warning, inviting the user to set
+              ``trust_repo`` to either ``False``, ``True`` or ``"check"``. This
+              is only present for backward compatibility and will be removed in
+              the future.
 
             Default is ``None`` and will eventually change to ``"check"`` in a future version.
 
@@ -401,15 +403,21 @@ def help(github, model, force_reload=False, skip_validation=False, trust_repo=No
             requests to the GitHub API; you can specify a non-default GitHub token by setting the
             ``GITHUB_TOKEN`` environment variable. Default is ``False``.
         trust_repo (bool, string or None): ``"check"``, ``True``, ``False`` or ``None``.
-            If ``False``, a prompt will appear and ask the user whether that repo should be trusted from now on.
-            If ``"check"``, the repo address will be checked in against the list of trusted repos in the cache. If it is
-            not present in that list, the behaviour will fall back onto the ``trust_repo=False`` option.
-            If ``True``, the repo will be added to the trusted list and loaded without requiring explicit confirmation.
-            of trust.
-            If ``None``, the presence of the repo in the trusted will be checked. If that check fails, the user will be
-            notified through a warning that the repo has not been formally added to the trusted list. In a future
-            release, that this behaviour will be deprecated in favour of ``"check"``.
-            Default is ``None``.
+            This parameter helps ensuring that users only run code from repos that they trust.
+
+            - If ``False``, a prompt will ask the user whether the repo should
+              be trusted.
+            - If ``True``, the repo will be added to the trusted list and loaded
+              without requiring explicit confirmation.
+            - If ``"check"``, the repo will be checked against the list of
+              trusted repos in the cache. If it is not present in that list, the
+              behaviour will fall back onto the ``trust_repo=False`` option.
+            - If ``None``: this will raise a warning, inviting the user to set
+              ``trust_repo`` to either ``False``, ``True`` or ``"check"``. This
+              is only present for backward compatibility and will be removed in
+              the future.
+
+            Default is ``None`` and will eventually change to ``"check"`` in a future version.
     Example:
         >>> print(torch.hub.help('pytorch/vision', 'resnet18', force_reload=True))
     """
@@ -456,15 +464,21 @@ def load(repo_or_dir, model, *args, source='github', trust_repo=None, force_relo
         source (string, optional): 'github' or 'local'. Specifies how
             ``repo_or_dir`` is to be interpreted. Default is 'github'.
         trust_repo (bool, string or None): ``"check"``, ``True``, ``False`` or ``None``.
-            If ``False``, a prompt will appear and ask the user whether that repo should be trusted from now on.
-            If ``"check"``, the repo address will be checked in against the list of trusted repos in the cache. If it is
-            not present in that list, the behaviour will fall back onto the ``trust_repo=False`` option.
-            If ``True``, the repo will be added to the trusted list and loaded without requiring explicit confirmation.
-            of trust.
-            If ``None``, the presence of the repo in the trusted will be checked. If that check fails, the user will be
-            notified through a warning that the repo has not been formally added to the trusted list. In a future
-            release, that this behaviour will be deprecated in favour of ``"check"``.
-            Default is ``None``.
+            This parameter helps ensuring that users only run code from repos that they trust.
+
+            - If ``False``, a prompt will ask the user whether the repo should
+              be trusted.
+            - If ``True``, the repo will be added to the trusted list and loaded
+              without requiring explicit confirmation.
+            - If ``"check"``, the repo will be checked against the list of
+              trusted repos in the cache. If it is not present in that list, the
+              behaviour will fall back onto the ``trust_repo=False`` option.
+            - If ``None``: this will raise a warning, inviting the user to set
+              ``trust_repo`` to either ``False``, ``True`` or ``"check"``. This
+              is only present for backward compatibility and will be removed in
+              the future.
+
+            Default is ``None`` and will eventually change to ``"check"`` in a future version.
         force_reload (bool, optional): whether to force a fresh download of
             the github repo unconditionally. Does not have any effect if
             ``source = 'local'``. Default is ``False``.

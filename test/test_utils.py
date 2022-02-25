@@ -733,7 +733,7 @@ class TestHub(TestCase):
                 'If it\'s a commit from a forked repo'):
             model = torch.hub.load('pytorch/vision:4e2c216', 'resnet18', force_reload=True, trust_repo=True)
 
-    def _cleanup(self):
+    def tearDown(self):
         # cleanup
         folder_path = os.path.join(torch.hub.get_dir(), 'ailzhang_torchhub_example_master')
         if os.path.exists(folder_path):
@@ -758,8 +758,8 @@ class TestHub(TestCase):
                         f.write(line)
 
     @retry(Exception, tries=3)
-    @patch('torch.hub._get_trusted_input', return_value='')
-    def test_untrusted_repo(self, input):
+    @patch('builtins.input', return_value='')
+    def test_untrusted_repo(self):
         with self.assertRaisesRegex(
                 Exception,
                 'Untrusted repository.'):
@@ -770,9 +770,20 @@ class TestHub(TestCase):
                 trust_repo=False)
 
     @retry(Exception, tries=3)
-    @patch('torch.hub._get_trusted_input', return_value='y')
-    def test_trusted_repo(self, input):
-        self._cleanup()
+    @patch('builtins.input', return_value='no')
+    def test_untrusted_repo_prompt(self):
+        with self.assertRaisesRegex(
+                Exception,
+                'Untrusted repository.'):
+            model = torch.hub.load(
+                'ailzhang/torchhub_example',
+                'mnist_zip_1_6',
+                force_reload=True,
+                trust_repo="check")
+
+    @retry(Exception, tries=3)
+    @patch('builtins.input', return_value='y')
+    def test_trusted_repo(self):
         model = torch.hub.load(
             'ailzhang/torchhub_example',
             'mnist_zip_1_6',
@@ -780,9 +791,8 @@ class TestHub(TestCase):
             trust_repo=False)
 
     @retry(Exception, tries=3)
-    @patch('torch.hub._get_trusted_input', return_value='y')
-    def test_check_repo(self, input):
-        self._cleanup()
+    @patch('builtins.input', return_value='y')
+    def test_check_repo(self):
         model = torch.hub.load(
             'ailzhang/torchhub_example',
             'mnist_zip_1_6',
@@ -790,8 +800,16 @@ class TestHub(TestCase):
             trust_repo="check")
 
     @retry(Exception, tries=3)
+    @patch('builtins.input', return_value='')
+    def test_check_repo(self):
+        model = torch.hub.load(
+            'ailzhang/torchhub_example',
+            'mnist_zip_1_6',
+            force_reload=True,
+            trust_repo=True)
+
+    @retry(Exception, tries=3)
     def test_none_repo(self):
-        self._cleanup()
         with warnings.catch_warnings(record=True) as w:
             warnings.simplefilter("always")
             model = torch.hub.load(
@@ -804,17 +822,16 @@ class TestHub(TestCase):
             assert "You are about to download and run code from an untrusted repository" in str(w[-1].message)
 
     @retry(Exception, tries=3)
-    @patch('torch.hub._get_trusted_input', return_value='n')
-    def test_check_repo_legacy(self, input):
-        self._cleanup()
+    @patch('builtins.input', return_value='n')
+    def test_check_repo_legacy(self):
         # add repo to legacy
         file_path_legacy = os.path.join(torch.hub.get_dir(), 'trusted_list_legacy')
         if not os.path.exists(file_path_legacy):
             pathlib.Path(file_path_legacy).touch()
         with open(file_path_legacy, "a") as f:
             f.write('ailzhang_torchhub_example_master')
-        # even though we choose to check and answer no to the prompt, we should pass through as the repo is in the
-        # trusted list (legacy)
+        # the repo + branch is in the legacy list so it is considered a trusted repo, and the user isn't prompted 
+        # anything
         model = torch.hub.load(
             'ailzhang/torchhub_example',
             'mnist_zip_1_6',
