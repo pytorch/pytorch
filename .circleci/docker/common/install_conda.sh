@@ -110,6 +110,8 @@ if [ -n "$ANACONDA_PYTHON_VERSION" ]; then
     tb-nightly \
     librosa>=0.6.2
 
+  as_jenkins pip install --progress-bar off -r requirements-ci.txt
+
   # Install numba only on python-3.8 or below
   # For numba issue see https://github.com/pytorch/pytorch/issues/51511
   if [[ $(python -c "import sys; print(int(sys.version_info < (3, 9)))") == "1" ]]; then

@@ -106,7 +106,6 @@ on:
         run: |
           set -x
           python3 -m pip install -r requirements.txt
-          python3 -m pip install -r requirements-ci.txt
           python3 -m pip install boto3==1.19.12
           GHA_WORKFLOW_JOB_ID=$(python3 .github/scripts/get_workflow_job_id.py "${GITHUB_RUN_ID}" "${RUNNER_NAME}")
           export GHA_WORKFLOW_JOB_ID
