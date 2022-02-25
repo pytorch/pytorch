@@ -122,11 +122,14 @@ jobs:
       !{{ common.checkout(deep_clone=False, directory="pytorch") }}
       !{{ common.checkout(deep_clone=False, directory="builder", repository="pytorch/builder", branch=common.builder_branch) }}
 {%- if config["gpu_arch_type"] == "cuda" %}
-      - name: Install nvidia driver, nvidia-docker runtime, set GPU_FLAG
-        working-directory: pytorch/
-        run: |
-          bash .github/scripts/install_nvidia_utils_linux.sh
-          echo "GPU_FLAG=--gpus all" >> "${GITHUB_ENV}"
+      - uses: nick-fields/retry@71062288b76e2b6214ebde0e673ce0de1755740a
+        name: Install nvidia driver, nvidia-docker runtime, set GPU_FLAG
+        with:
+          timeout_minutes: 10
+          max_attempts: 3
+          command: >-
+            pushd pytorch && bash .github/scripts/install_nvidia_utils_linux.sh && \
+            echo "GPU_FLAG=--gpus all" >> "${GITHUB_ENV}" && popd
 {%- endif %}
       - name: Pull Docker image
         run: |
