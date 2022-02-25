@@ -28,6 +28,9 @@ from torch.distributed._shard.sharding_spec import (
     EnumerableShardingSpec,
     ShardMetadata,
 )
+from torch.distributed._shard.sharded_tensor.utils import (
+    _parse_and_validate_remote_device
+)
 from torch.distributed._shard.sharded_tensor.api import (
     TensorProperties,
     _create_tensor_from_params,
@@ -224,9 +227,7 @@ class TestShardParameter(ShardedTensorTestBase):
                 placement="rank:1/cuda:1",
             ),
         ])
-        with self.assertRaisesRegex(
-            NotImplementedError, 'Only ChunkShardingspec is supported.'
-        ):
+        with self.assertRaisesRegex(NotImplementedError, 'not implemented yet!'):
             shard_parameter(fc, 'weight', spec)
 
 
@@ -301,7 +302,7 @@ class TestShardTensor(ShardedTensorTestBase):
             ),
         ])
         with self.assertRaisesRegex(
-            NotImplementedError, 'Only ChunkShardingspec is supported.'
+            NotImplementedError, 'not implemented yet!'
         ):
             _shard_tensor(tensor, spec)
 
@@ -885,8 +886,8 @@ class TestShardedTensorChunked(ShardedTensorTestBase):
     def test_invalid_sharding(self):
         self.init_pg()
 
-        spec = ChunkShardingSpec(dim='H', placements=["rank:1/cuda:1"])
-        with self.assertRaisesRegex(ValueError, 'needs to be an integer'):
+        with self.assertRaisesRegex(NotImplementedError, 'does not support named dimension'):
+            spec = ChunkShardingSpec(dim='H', placements=["rank:1/cuda:1"])
             sharded_tensor.empty(spec, 10, 20)
 
         for dim in [2, 3, 4, -3, -4, -5]:
@@ -1779,6 +1780,116 @@ class TestShardedTensorEnumerable(ShardedTensorTestBase):
                 self.assertEqual(rpc_rank, remote_shard.owner().id)
                 shard = remote_shard.to_here()
                 self.assertEqual((5, 5), shard.tensor.size())
+
+
+class TestShardedTensorFromLocalTensor(ShardedTensorTestBase):
+    def _generate_st_from_chunk_local_tensor(self, st_size, sharding_spec):
+        tensor_meta = sharding_spec.build_metadata(st_size, TensorProperties())
+        pg = dist.distributed_c10d._get_default_group()
+
+        local_tensor = None
+        local_shard_metadata = None
+        rank_to_metadata = {}
+        for shard_metadata in tensor_meta.shards_metadata:
+            rank, device = _parse_and_validate_remote_device(pg, shard_metadata.placement)
+            rank_to_metadata[rank] = shard_metadata
+            if rank == self.rank:
+                local_tensor = torch.rand(shard_metadata.shard_sizes).cuda(device)
+                local_shard_metadata = shard_metadata
+
+        # TODO: figure out what the API should behave when some rank have no shard
+        # see https://github.com/pytorch/pytorch/issues/73133
+        assert local_tensor is not None
+        st = ShardedTensor._init_from_local_tensor(
+            local_tensor,
+            sharding_spec,
+            st_size,
+            init_rrefs=True,
+        )
+        self.assertEqual(tuple(st_size), st.size())
+        self.assertEqual(1, len(st.local_shards()))
+
+        # Verify local shard.
+        local_shard = st.local_shards()[0]
+        self.assertEqual(st.local_tensor(), local_tensor)
+        self.assertEqual(torch.device(f"cuda:{self.rank}"), local_shard.tensor.device)
+
+        # Verify local shard metadata.
+        self.assertEqual(
+            local_shard_metadata.shard_offsets, local_shard.metadata.shard_offsets
+        )
+        self.assertEqual(
+            local_shard_metadata.shard_sizes, local_shard.metadata.shard_sizes
+        )
+        self.assertEqual(local_shard_metadata.placement, local_shard.metadata.placement)
+
+        # Verify global metadata.
+        st_shards_metadata = st.metadata().shards_metadata
+        self.assertEqual(self.world_size, len(st_shards_metadata))
+        self.assertEqual(tensor_meta.shards_metadata, st_shards_metadata)
+
+        # Validate remote shards.
+        remote_shards = st.remote_shards()
+        self.assertEqual(self.world_size - 1, len(remote_shards))
+        for rpc_rank, shards in remote_shards.items():
+            self.assertEqual(1, len(shards))
+            for remote_shard in shards:
+                self.assertEqual(rpc_rank, remote_shard.owner().id)
+                # If remote shard does not exist, to_here() will throw exception.
+                if tensor_meta.shards_metadata[rpc_rank]:
+                    shard = remote_shard.to_here()
+                    self.assertEqual(
+                        rank_to_metadata[rpc_rank].shard_sizes, shard.tensor.size()
+                    )
+
+    @with_comms
+    @skip_if_lt_x_gpu(4)
+    @requires_nccl()
+    def test_init_from_local_tensor(self):
+        chunk_specs = _chunk_sharding_specs_list_for_test([0, 1, 1, 0], seed=31)
+        for spec in chunk_specs:
+            self._generate_st_from_chunk_local_tensor([20, 10], spec)
+            self._generate_st_from_chunk_local_tensor([21, 11], spec)
+            self._generate_st_from_chunk_local_tensor([23, 16], spec)
+            self._generate_st_from_chunk_local_tensor([44, 16, 8], spec)
+
+    @with_comms
+    @skip_if_lt_x_gpu(4)
+    @requires_nccl()
+    def test_init_from_local_tensor_errors(self):
+        enumerable_sharding_spec = EnumerableShardingSpec(
+            [
+                ShardMetadata(
+                    shard_offsets=[0, 0],
+                    shard_sizes=[5, 5],
+                    placement="rank:0/cuda:0",
+                ),
+                ShardMetadata(
+                    shard_offsets=[5, 0],
+                    shard_sizes=[5, 5],
+                    placement="rank:1/cuda:1",
+                ),
+            ]
+        )
+        st_size = [24, 12]
+        local_tensor = torch.rand(*st_size).cuda(self.rank)
+        with self.assertRaisesRegex(
+            ValueError, "do not cover the entire tensor"
+        ):
+            ShardedTensor._init_from_local_tensor(
+                local_tensor,
+                enumerable_sharding_spec,
+                st_size,
+            )
+        chunk_specs = _chunk_sharding_specs_list_for_test([0], seed=31)
+        with self.assertRaisesRegex(
+            ValueError, "local_tensor is not a contiguous Tensor."
+        ):
+            ShardedTensor._init_from_local_tensor(
+                local_tensor.t(),
+                chunk_specs[0],
+                st_size,
+            )
 
 
 class TestShardedTensorFromLocalShards(ShardedTensorTestBase):

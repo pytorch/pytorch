@@ -135,10 +135,7 @@ using OpList = c10::ArrayRef<Value>;
 // client data handle in it.
 class TORCH_API Node {
  public:
-  static bool enableDynamicShape() {
-    static bool enabled = std::getenv("LTC_ENABLE_DYNAMIC_SHAPES") != nullptr;
-    return enabled || FLAGS_ltc_enable_dynamic_shapes;
-  }
+  static bool enableDynamicShape();
 
   // Creates a new node with the given op name. The op is a unique identifier
   // for the operation. The num_outputs tells how many outputs a given operation
