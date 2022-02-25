@@ -9,10 +9,10 @@
 
 #include <ATen/native/LinearAlgebraUtils.h>
 #include <ATen/native/cuda/MiscUtils.h>
-#include <ATen/native/Resize.h>
 #include <ATen/native/LinearAlgebra.h>
 #include <ATen/native/BatchLinearAlgebra.h>
 #include <ATen/native/cuda/linalg/BatchLinearAlgebraLib.h>
+#include <ATen/native/cuda/linalg/MagmaUtils.h>
 #include <ATen/native/cpu/zmath.h>
 
 #if AT_MAGMA_ENABLED()
@@ -25,8 +25,12 @@ const bool use_magma_ = true;
 namespace {
 struct MagmaInitializer {
   MagmaInitializer() {
+#if defined(BUILD_LAZY_CUDA_LINALG)
+    magma_init();
+#else
     ::at::cuda::detail::set_magma_init_fn([]{ magma_init(); });
-  };
+#endif
+  }
 } initializer;
 }  // namespace (anonymous)
 
@@ -2417,7 +2421,7 @@ std::tuple<Tensor, Tensor> _symeig_helper_cuda(const Tensor& self, bool eigenvec
   Tensor infos = at::zeros({std::max<int64_t>(1, batchCount(self))}, self.options().dtype(kInt).device(at::kCPU));
 
   auto eigvals_shape = IntArrayRef(self.sizes().data(), self.dim()-1);  // self.shape[:-1]
-  ScalarType real_dtype = toValueType(self.scalar_type());
+  ScalarType real_dtype = toRealValueType(self.scalar_type());
 
   // magmaSyevd uses a hybrid CPU-GPU algorithm to compute the eigenvalues and eigenvectors.
   // The driver routine magma_(d/s)syev_gpu accepts a tensor on the CPU for eigvalenvalues.
@@ -2635,7 +2639,7 @@ TORCH_CHECK(false, "Calling torch.linalg.eig on a CUDA tensor requires compiling
   Tensor rwork;
   value_t* rwork_data = nullptr;
   if (input.is_complex()) {
-    ScalarType real_dtype = toValueType(input.scalar_type());
+    ScalarType real_dtype = toRealValueType(input.scalar_type());
     rwork = at::empty({lda * 2}, input.options().dtype(real_dtype));
     rwork_data = rwork.data_ptr<value_t>();
   }
@@ -3244,25 +3248,22 @@ std::tuple<Tensor, Tensor> legacy_lstsq_cuda(const Tensor &B, const Tensor &A) {
 #endif  // AT_MAGMA_ENABLED()
 }
 
-std::tuple<Tensor&, Tensor&> legacy_lstsq_out_cuda(
-    const Tensor& B, const Tensor& A, Tensor& B_out, Tensor& A_out) {
-  const auto dtype = A.scalar_type();
-  TORCH_CHECK(B.scalar_type() == dtype, "exepected A and B dtypes to match but found ",
-              A.scalar_type(), " and ", B.scalar_type());
-  TORCH_CHECK(A_out.scalar_type() == dtype, "A_out to have scalar type ", dtype,
-              " but found", A_out.scalar_type());
-  TORCH_CHECK(B_out.scalar_type() == dtype, "A_out to have scalar type ", dtype,
-              " but found", B_out.scalar_type());
-  Tensor A_tmp, B_tmp;
-  std::tie(B_tmp, A_tmp) = native::legacy_lstsq_cuda(B, A);
-  resize_output(A_out, A_tmp.sizes());
-  A_out.copy_(A_tmp);
-  resize_output(B_out, B_tmp.sizes());
-  B_out.copy_(B_tmp);
-  return std::tuple<Tensor&, Tensor&>(B_out, A_out);
-}
 
-
+#if defined(BUILD_LAZY_CUDA_LINALG)
+namespace {
+struct DispatchInitializer {
+  DispatchInitializer() {
+    cuda::detail::LinalgDispatch disp{ _solve_helper_cuda,
+                                       _symeig_helper_cuda,
+                                       _linalg_qr_helper_cuda,
+                                       _cholesky_solve_helper_cuda,
+                                       legacy_lstsq_cuda,
+                                       _linalg_inv_out_helper_cuda};
+    cuda::detail::registerLinalgDispatch(disp);
+  };
+} initializer;
+}  // namespace (anonymous)
+#endif
 }}  // namespace at::native
 
 #undef ALLOCATE_ARRAY
