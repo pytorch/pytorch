@@ -13,6 +13,7 @@
 #include <c10d/ProcessGroup.hpp>
 #include <c10d/Utils.hpp>
 #include <c10d/comm.hpp>
+#include <c10d/debug.h>
 #include <c10d/default_comm_hooks.hpp>
 #include <torch/csrc/autograd/function.h>
 #include <torch/csrc/autograd/profiler.h>
@@ -568,7 +569,7 @@ class TORCH_API Reducer {
   std::unique_ptr<CommHookInterface> comm_hook_;
   // Debug level setting. It is parsed once when Reducer is constructed, and
   // remains the same across a single invocation of DDP training.
-  DistributedDebugLevel ddp_debug_level_;
+  DebugLevel ddp_debug_level_;
   // Mapping of variable index to fully qualified name of model to notify users
   // about errors when certain parameters do not get gradient.
   std::unordered_map<size_t, std::string> param_names_;
