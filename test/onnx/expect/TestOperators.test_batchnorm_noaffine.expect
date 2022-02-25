@@ -50,7 +50,7 @@ graph {
       type: FLOAT
     }
   }
-  name: "torch_jit"
+  name: "torch-jit-export"
   initializer {
     dims: 128
     data_type: 1

@@ -14,7 +14,6 @@ on:
       - 'ciflow/vulkan/*'
     branches:
       - master
-      - main
       - release/*
   workflow_dispatch:
 
@@ -161,9 +160,8 @@ jobs:
           }
           retry docker pull "${DOCKER_IMAGE}"
       - name: Parse ref
-        shell: bash
         id: parse-ref
-        run: ./.github/scripts/parse_ref.py
+        run: .github/scripts/parse_ref.py
       - name: Build
         env:
           BRANCH: ${{ steps.parse-ref.outputs.branch }}
@@ -348,9 +346,8 @@ jobs:
         run: |
           sudo df -H
       - name: Parse ref
-        shell: bash
         id: parse-ref
-        run: ./.github/scripts/parse_ref.py
+        run: .github/scripts/parse_ref.py
       - name: Test
         env:
           PR_NUMBER: ${{ github.event.pull_request.number }}

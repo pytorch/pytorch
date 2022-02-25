@@ -66,7 +66,7 @@ class TestMultiForward(FSDPTest):
             optim.zero_grad()
 
         if wrap_fsdp:
-            return get_full_params(model)
+            get_full_params(model)
 
         return list(model.parameters())
 

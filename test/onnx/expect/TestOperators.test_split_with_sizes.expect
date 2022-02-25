@@ -22,7 +22,7 @@ graph {
       type: INTS
     }
   }
-  name: "torch_jit"
+  name: "torch-jit-export"
   input {
     name: "tensor"
     type {
