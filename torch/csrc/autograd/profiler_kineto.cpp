@@ -295,6 +295,7 @@ struct KinetoThreadLocalState : public ProfilerThreadLocalStateBase {
 
       cpu_trace_.addCPUActivity(
           e.name_,
+          e.record_function_scope_,
           e.kineto_info_,
           e.correlation_id_,
           e.start_us_,
@@ -627,7 +628,11 @@ void pushProfilingCallbacks(const std::unordered_set<at::RecordScope>& scopes) {
             }
             const auto& config = state_ptr->config();
             auto corr_id = next_correlation_id();
-            torch::profiler::impl::kineto::pushCorrelationId(corr_id);
+            if (fn.scope() == at::RecordScope::USER_SCOPE) {
+              torch::profiler::impl::kineto::pushUserCorrelationId(corr_id);
+            } else {
+              torch::profiler::impl::kineto::pushCorrelationId(corr_id);
+            }
 
             auto ctx_ptr = state_ptr->newOpEvent();
             auto data_ptr = ctx_ptr->data_;
@@ -695,8 +700,11 @@ void pushProfilingCallbacks(const std::unordered_set<at::RecordScope>& scopes) {
                 LOG(WARNING) << "Failed to record CUDA event. " << e.what();
               }
             }
-
-            torch::profiler::impl::kineto::popCorrelationId();
+            if (fn.scope() == at::RecordScope::USER_SCOPE) {
+              torch::profiler::impl::kineto::popUserCorrelationId();
+            } else {
+              torch::profiler::impl::kineto::popCorrelationId();
+            }
             torch::profiler::impl::kineto::recordThreadInfo();
           })
           .needsInputs(registration_state_ptr->config().report_input_shapes)
