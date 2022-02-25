@@ -2,7 +2,6 @@
 #include <torch/library.h>
 
 #ifdef USE_RUY_QMATMUL
-#include <ruy/test.h>
 #include <ruy/ruy.h>
 #endif
 
@@ -27,6 +26,23 @@ inline void check_inputs(const Tensor& qa, const Tensor& qb) {
 }
 
 #ifdef USE_RUY_QMATMUL
+
+// Adopted from Ruy:
+// https://github.com/google/ruy/blob/2d950b3bfa7ebfbe7a97ecb44b1cc4da5ac1d6f0/ruy/test.h#L1602
+void QuantizeMultiplier(double scale,
+                        int* multiplier_fixedpoint,
+                        int* multiplier_exponent) {
+  TORCH_CHECK(scale > 0, "Quantization scale (", scale, ") must be positive.");
+  const double q = std::frexp(scale, multiplier_exponent);
+  auto q_fixed = static_cast<std::int64_t>(std::round(q * (1ll << 31)));
+  TORCH_CHECK(q_fixed <= (1ll << 31));
+  if (q_fixed == (1ll << 31)) {
+    q_fixed /= 2;
+    ++*multiplier_exponent;
+  }
+  TORCH_CHECK(q_fixed <= std::numeric_limits<std::int32_t>::max());
+  *multiplier_fixedpoint = static_cast<std::int32_t>(q_fixed);
+}
 
 Tensor qmatmul(
     const Tensor& qa,
@@ -100,8 +116,8 @@ Tensor qmatmul(
     out_matrix.set_data(out_data);
     out_matrix.set_zero_point(output_zero_point);
 
-    /* Requantization explanation: */
-    /* https://github.com/google/gemmlowp/blob/e844ffd17118c1e17d94e1ba4354c075a4577b88/doc/quantization.md */
+    // Requantization explanation:
+    // https://github.com/google/gemmlowp/blob/e844ffd17118c1e17d94e1ba4354c075a4577b88/doc/quantization.md
     const double requantization_scale_inv =
         (qa.q_scale() * qb.q_scale()) / output_scale;
 
@@ -109,9 +125,9 @@ Tensor qmatmul(
 
     int multiplier_fixedpoint;
     int multiplier_exponent;
-    ruy::QuantizeMultiplier(requantization_scale_inv,
-                            &multiplier_fixedpoint,
-                            &multiplier_exponent);
+    QuantizeMultiplier(requantization_scale_inv,
+                       &multiplier_fixedpoint,
+                       &multiplier_exponent);
     mul_params.set_multiplier_fixedpoint(multiplier_fixedpoint);
     mul_params.set_multiplier_exponent(multiplier_exponent);
 
