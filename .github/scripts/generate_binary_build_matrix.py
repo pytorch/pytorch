@@ -57,6 +57,14 @@ LIBTORCH_CONTAINER_IMAGES: Dict[Tuple[str, str], str] = {
         (gpu_arch, CXX11_ABI): f"pytorch/libtorch-cxx11-builder:cuda{gpu_arch}"
         for gpu_arch in CUDA_ARCHES
     },
+    **{
+        (gpu_arch, PRE_CXX11_ABI): f"pytorch/manylinux-builder:rocm{gpu_arch}"
+        for gpu_arch in ROCM_ARCHES
+    },
+    **{
+        (gpu_arch, CXX11_ABI): f"pytorch/libtorch-cxx11-builder:rocm{gpu_arch}"
+        for gpu_arch in ROCM_ARCHES
+    },
     ("cpu", PRE_CXX11_ABI): "pytorch/manylinux-builder:cpu",
     ("cpu", CXX11_ABI): "pytorch/libtorch-cxx11-builder:cpu",
 }
@@ -121,12 +129,12 @@ def generate_libtorch_matrix(os: str, abi_version: str) -> List[Dict[str, str]]:
     arches = ["cpu"]
     if os == "linux":
         arches += CUDA_ARCHES
+        arches += ROCM_ARCHES
     elif os == "windows":
         # We don't build CUDA 10.2 for window see https://github.com/pytorch/pytorch/issues/65648
         arches += list_without(CUDA_ARCHES, ["10.2"])
     for arch_version in arches:
         for libtorch_variant in libtorch_variants:
-            # We don't currently build libtorch for rocm
             # one of the values in the following list must be exactly
             # CXX11_ABI, but the precise value of the other one doesn't
             # matter
