@@ -93,7 +93,7 @@ class TestFSDPStateDict(FSDPTest):
     def test_basic_save_and_load_full_state_dict(self, cpu_offload, fp16):
         """
         Tests that we can save a full_state_dict and load it into a blank model
-        with various configs such as fp17 and cpu offload and parameters
+        with various configs such as fp16 and cpu offload and parameters
         match as expected.
         """
         for model_call in [
@@ -103,7 +103,7 @@ class TestFSDPStateDict(FSDPTest):
             model = model_call()
             fsdp_state_dict = _get_state_dict(model, cpu_offload.offload_params, fp16)
             if fp16:
-                # Verify fp17 is the type
+                # Verify fp16 is the type
                 for tensor in fsdp_state_dict.values():
                     self.assertEqual(tensor.dtype, torch.float16)
 
@@ -132,6 +132,7 @@ class TestFSDPStateDict(FSDPTest):
                         for tensor in model_new.parameters():
                             self.assertEqual(tensor.dtype, torch.float16)
 
+    @skip_if_lt_x_gpu(2)
     def test_save_and_load_after_forward_full_state_dict(self):
         """
         Test that saving after some training results in params being updated as
@@ -154,12 +155,8 @@ class TestFSDPStateDict(FSDPTest):
         # Save a copy of the state_dict
         state_dict = {k: v.clone() for k, v in model.state_dict().items()}
         _zero_model(model)
-        zerod_params = _get_full_detached_param(model)
-        torch.cuda.synchronize()  # not needed after D34430602
-        for param in zerod_params:
-            self.assertEqual(0, param.sum().item())
 
-        # Load state_dict into zeroed mode
+        # Load state_dict into zeroed model
         model.load_state_dict(state_dict)
         loaded_params = _get_full_detached_param(model)
         self.assertEqual(loaded_params, trained_params)
@@ -200,7 +197,8 @@ class TestFSDPStateDict(FSDPTest):
             optim.zero_grad()
 
         if wrap_fsdp:
-            blank_model = _zero_model(FSDP(Model(True).cuda()))
+            blank_model = FSDP(Model(True).cuda())
+            _zero_model(blank_model)
             if with_context:
                 state_dict_type = {
                     "full_state_dict": StateDictType.FULL_STATE_DICT,
@@ -214,10 +212,9 @@ class TestFSDPStateDict(FSDPTest):
             else:
                 state_dict = self._state_dict(model, state_dict_type)
                 self._load_state_dict(blank_model, state_dict_type, state_dict)
-            get_full_params(blank_model)
-            model = blank_model
-
-        return list(model.parameters())
+            return get_full_params(blank_model)
+        else:
+            return list(model.parameters())
 
     @skip_if_lt_x_gpu(2)
     @parametrize("state_dict_type", _SUPPORTED_STATE_DICT_IMPLS)
