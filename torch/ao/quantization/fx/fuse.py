@@ -43,15 +43,19 @@ class Fuser:
         input_graph = model.graph
         self.modules = dict(input_root.named_modules())
 
+        # TODO: remove this branch after we define the configurations for the
+        # default/native backend
         if backend_config_dict is None:
             additional_fusion_patterns = \
                 fuse_custom_config_dict.get("additional_fusion_pattern", {})
             fusion_pattern_to_fuse_handler_cls = get_combined_dict(
                 get_default_fusion_patterns(), additional_fusion_patterns)
             fuser_method_mapping = None
+            fusion_pattern_to_root_node_getter = {}
         else:
             fusion_pattern_to_fuse_handler_cls = get_fusion_pattern_to_fuse_handler_cls(backend_config_dict)
             fuser_method_mapping = get_fuser_method_mapping(backend_config_dict)
+            fusion_pattern_to_root_node_getter = get_fusion_pattern_to_root_node_getter(backend_config_dict)
         # find fusion
         fusion_pairs = self._find_matches(
             input_root, input_graph, fusion_pattern_to_fuse_handler_cls)
@@ -65,8 +69,6 @@ class Fuser:
             while not isinstance(node_pattern[-1], Node):
                 node_pattern = node_pattern[-1]
             return node_pattern[-1]
-
-        fusion_pattern_to_root_node_getter = get_fusion_pattern_to_root_node_getter(backend_config_dict)
 
         for node in input_graph.nodes:
             maybe_last_node, pattern, matched_node_pattern, obj, node_to_subpattern = \
