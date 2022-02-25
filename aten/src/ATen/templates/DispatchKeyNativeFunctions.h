@@ -3,11 +3,11 @@
 
 #include <ATen/Tensor.h>
 
-namespace ${cpp_namespace} {
+${namespace_prologue}
 
 struct ${class_name} {
 
 ${dispatch_declarations}
 
 };
-}  // namespace ${cpp_namespace}
+${namespace_epilogue}

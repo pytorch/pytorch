@@ -137,6 +137,37 @@ TEST(FlatbufferTest, MethodInvocation) { // NOLINT (use =delete in gtest)
   }
 }
 
+TEST(FlatbufferTest, ExtraFiles) {
+  const auto script = R"JIT(
+    def forward(self):
+        x = torch.rand(5, 5)
+        x = x.mm(x)
+        return x
+  )JIT";
+
+  auto module =
+      std::make_shared<Module>("Module", std::make_shared<CompilationUnit>());
+  module->define(script);
+  std::ostringstream oss;
+  std::unordered_map<std::string, std::string> extra_files;
+  extra_files["metadata.json"] = "abc";
+  extra_files["mobile_info.json"] = "{\"key\": 23}";
+
+  CompilationOptions options;
+  mobile::Module bc = jitModuleToMobile(*module, options);
+  auto buff = save_mobile_module_to_bytes(bc, extra_files);
+
+  std::unordered_map<std::string, std::string> loaded_extra_files;
+  loaded_extra_files["metadata.json"] = "";
+  auto* flatbuffer_module =
+      mobile::serialization::GetMutableModule(buff.data());
+
+  parseExtraFiles(flatbuffer_module, loaded_extra_files);
+
+  ASSERT_EQ(loaded_extra_files["metadata.json"], "abc");
+  ASSERT_EQ(loaded_extra_files["mobile_info.json"], "{\"key\": 23}");
+}
+
 TEST(FlatbufferTest, Conv) {
   auto s = std::getenv("PYTORCH_TEST_WITH_TSAN");
   if (s && strcmp(s, "1") == 0)
