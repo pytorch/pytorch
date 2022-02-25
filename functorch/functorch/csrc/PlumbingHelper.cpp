@@ -38,4 +38,45 @@ std::tuple<Tensor, optional<int64_t>> unwrapTensorAtLevel(const Tensor& tensor, 
   return std::make_tuple(tensor, nullopt);
 }
 
+bool isBatchedAtLevel(const Tensor& tensor, int64_t level) {
+  auto result = unwrapTensorAtLevel(tensor, level);
+  return std::get<1>(result).has_value();
+}
+
+bool isBatchedAtLevel(const c10::optional<Tensor>& maybe_tensor, int64_t level) {
+  if (!maybe_tensor.has_value()) {
+    return false;
+  }
+  return isBatchedAtLevel(*maybe_tensor, level);
+}
+
+bool isBatchedAtLevel(TensorList tensors, int64_t level) {
+  for (const auto& tensor : tensors) {
+    if (isBatchedAtLevel(tensor, level)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+bool isBatchedAtLevel(const c10::List<c10::optional<Tensor>> maybe_tensors, int64_t level) {
+  for (const auto idx : c10::irange(0, maybe_tensors.size())) {
+    const auto& maybe_tensor = maybe_tensors.get(idx);
+    if (isBatchedAtLevel(maybe_tensor, level)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+bool areAnyBatchedAtLevel(ArrayRef<optional<Tensor>> maybe_tensors, int64_t level) {
+  for (const auto& maybe_tensor : maybe_tensors) {
+    if (isBatchedAtLevel(maybe_tensor, level)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+
 }}
