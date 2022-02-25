@@ -220,7 +220,7 @@ void raw_cudnn_convolution_forward_out(
   }
 
   Tensor conv_output = at::empty(quantized_output.sizes(), at::device(at::kCUDA).dtype(at::kFloat), at::MemoryFormat::ChannelsLast);
-  // TODO: compile empty & fill_ using full_like or full
+  // TODO: combine empty & fill_ using full_like or full
   Tensor requantize_multiplier_tensor = at::empty(quantized_output.sizes(), at::device(at::kCUDA).dtype(at::kFloat), at::MemoryFormat::ChannelsLast);
   requantize_multiplier_tensor.fill_(requantize_multiplier);
   c10::optional<at::Tensor> bias_multiplier_tensor;
@@ -229,7 +229,11 @@ void raw_cudnn_convolution_forward_out(
   c10::optional<at::Tensor> broadcasted_bias;
   c10::optional<at::Tensor> after_relu;
   if (bias.has_value()) {
-    std::vector<int64_t> new_size(quantized_output.sizes().size() - 1, 1);
+    // the input bias is a 1-D tensor whose size is the same as the size of the second dimension of quantized_output.
+    // we need to add trailing dimensions in order to properly broadcast bias, otherwise broadcast_to will fail.
+    // the number of trailling dimensions is quantized_output.dim() - 2, so the new size of the broadcast_bias
+    // becomes quantized_output.dim() - 2 + 1. nothing needs to be done for the leading dimensions
+    std::vector<int64_t> new_size(quantized_output.dim() - 1, 1);
     new_size[0] = bias.value().size(0);
     broadcasted_bias = bias.value().reshape(new_size);
     broadcasted_bias.value() = broadcasted_bias.value().broadcast_to(quantized_output.sizes());
@@ -252,14 +256,24 @@ void raw_cudnn_convolution_forward_out(
   key.input_alignment = getAlignment(input);
   key.output_alignment = getAlignment(conv_output);
   key.weight_alignment = getAlignment(weight);
-  if (bias.has_value()) key.bias_alignment = getAlignment(broadcasted_bias.value());
-  else key.bias_alignment = -1;
+  if (bias.has_value()) {
+    key.bias_alignment = getAlignment(broadcasted_bias.value());
+  } else {
+    key.bias_alignment = -1;
+  }
 
   auto run = [&](cudnn_frontend::ManagedOpaqueDescriptor plan_desc) {
     auto workspace_size = 0;
     auto workspace = at::empty({workspace_size}, input.options().dtype(kByte));
     std::vector<void *> data_ptrs;
     std::vector<int64_t> uids;
+    data_ptrs.reserve(9);
+    uids.reserve(9);
+    data_ptrs = {reinterpret_cast<int8_t*>(input.data_ptr()), conv_output.data_ptr(),
+                                           reinterpret_cast<int8_t*>(weight.data_ptr()),
+                                           requantize_multiplier_tensor.data_ptr(),
+                                           reinterpret_cast<int8_t*>(quantized_output.data_ptr())};
+    uids = {'x', 'y', 'w', 's', 'r'};
     if (bias.has_value()) {
       if (kReluFused) {
         data_ptrs = std::vector<void *>{reinterpret_cast<int8_t*>(input.data_ptr()), conv_output.data_ptr(),
