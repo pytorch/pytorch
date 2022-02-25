@@ -759,7 +759,8 @@ class TestHub(TestCase):
 
     @retry(Exception, tries=3)
     @patch('builtins.input', return_value='')
-    def test_untrusted_repo(self):
+    def test_untrusted_repo(self, unused_patch_input):
+        # patch sends the patched function as input, hence the extra arg
         with self.assertRaisesRegex(
                 Exception,
                 'Untrusted repository.'):
@@ -771,7 +772,7 @@ class TestHub(TestCase):
 
     @retry(Exception, tries=3)
     @patch('builtins.input', return_value='no')
-    def test_untrusted_repo_prompt(self):
+    def test_untrusted_repo_prompt(self, unused_patch_input):
         with self.assertRaisesRegex(
                 Exception,
                 'Untrusted repository.'):
@@ -783,7 +784,7 @@ class TestHub(TestCase):
 
     @retry(Exception, tries=3)
     @patch('builtins.input', return_value='y')
-    def test_trusted_repo(self):
+    def test_trusted_repo(self, unused_patch_input):
         model = torch.hub.load(
             'ailzhang/torchhub_example',
             'mnist_zip_1_6',
@@ -792,7 +793,7 @@ class TestHub(TestCase):
 
     @retry(Exception, tries=3)
     @patch('builtins.input', return_value='y')
-    def test_check_repo(self):
+    def test_check_repo(self, unused_patch_input):
         model = torch.hub.load(
             'ailzhang/torchhub_example',
             'mnist_zip_1_6',
@@ -801,7 +802,7 @@ class TestHub(TestCase):
 
     @retry(Exception, tries=3)
     @patch('builtins.input', return_value='')
-    def test_check_repo(self):
+    def test_check_repo(self, unused_patch_input):
         model = torch.hub.load(
             'ailzhang/torchhub_example',
             'mnist_zip_1_6',
@@ -823,7 +824,7 @@ class TestHub(TestCase):
 
     @retry(Exception, tries=3)
     @patch('builtins.input', return_value='n')
-    def test_check_repo_legacy(self):
+    def test_check_repo_legacy(self, unused_patch_input):
         # add repo to legacy
         file_path_legacy = os.path.join(torch.hub.get_dir(), 'trusted_list_legacy')
         if not os.path.exists(file_path_legacy):
