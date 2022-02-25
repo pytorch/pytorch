@@ -41,45 +41,37 @@ bool DequantizeDNNLowPOp<T>::RunOnDevice() {
   return true;
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(Dequantize)
     .NumInputs(1)
     .NumOutputs(1)
     .IdenticalTypeAndShapeOfInput(0);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR_WITH_ENGINE(
     Dequantize,
     DNNLOWP,
     DequantizeDNNLowPOp<std::uint8_t>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR_WITH_ENGINE(
     Dequantize,
     DNNLOWP_ROWWISE,
     DequantizeDNNLowPOp<std::uint8_t>);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR_WITH_ENGINE(
     Dequantize,
     DNNLOWP_16,
     DequantizeDNNLowPOp<std::uint16_t>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR_WITH_ENGINE(
     Dequantize,
     DNNLOWP_ROWWISE_16,
     DequantizeDNNLowPOp<std::uint16_t>);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR_WITH_ENGINE(
     Int8Dequantize,
     DNNLOWP,
     DequantizeDNNLowPOp<std::uint8_t>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR_WITH_ENGINE(
     Int8Dequantize,
     DNNLOWP_ROWWISE,
     DequantizeDNNLowPOp<std::uint8_t>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR_WITH_ENGINE(
     Int8DequantizeRowWise,
     DNNLOWP,

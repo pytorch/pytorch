@@ -1,5 +1,8 @@
 #include <ATen/miopen/Descriptors.h>
 #include <ATen/ATen.h>
+#include <c10/util/irange.h>
+
+#include <iostream>
 
 namespace at { namespace native {
 
@@ -25,7 +28,7 @@ void TensorDescriptor::set(const at::Tensor &t, size_t pad) {
   set(getDataType(t), t.sizes(), t.strides(), pad);
 }
 
-static int MIOPEN_DIM_MAX = 5;
+constexpr size_t MIOPEN_DIM_MAX = 5;
 
 void TensorDescriptor::set(miopenDataType_t datatype, IntArrayRef t_sizes, IntArrayRef t_strides, size_t pad) {
   size_t dim = t_sizes.size();
@@ -37,11 +40,11 @@ void TensorDescriptor::set(miopenDataType_t datatype, IntArrayRef t_sizes, IntAr
 #undef STR
   int size[MIOPEN_DIM_MAX];
   int stride[MIOPEN_DIM_MAX];
-  for (size_t i = 0; i < dim; ++i) {
+  for (const auto i : c10::irange(dim)) {
     size[i] = static_cast<int>(t_sizes[i]);
     stride[i] = static_cast<int>(t_strides[i]);
   }
-  for (size_t i = dim; i < pad; ++i) {
+  for (const auto i : c10::irange(dim, pad)) {
     size[i] = 1;
     stride[i] = 1;
   }
@@ -88,29 +91,36 @@ std::ostream& operator<<(std::ostream & out, const TensorDescriptor& d) {
 
 void TensorDescriptor::print() { std::cout << *this; }
 
-void FilterDescriptor::set(const at::Tensor &t, int64_t pad) {
+void FilterDescriptor::set(const at::Tensor &t, const at::MemoryFormat memory_format, int64_t pad) {
   auto dim = t.ndimension();
-  if (dim > MIOPEN_DIM_MAX || pad > MIOPEN_DIM_MAX)
+  if (dim > static_cast<int64_t>(MIOPEN_DIM_MAX) || pad > static_cast<int64_t>(MIOPEN_DIM_MAX)) {
 #define _STR(X) #X
 #define STR(X) _STR(X)
     throw std::runtime_error("MIOpen supports only up to " STR(MIOPEN_DIM_MAX) " dimensions");
 #undef _STR
 #undef STR
-  if (!t.is_contiguous()) {
-    throw std::runtime_error("MIOpen filters (a.k.a. weights) must be contiguous");
   }
+  TORCH_CHECK(t.is_contiguous(memory_format),
+      "MIOpen filters (a.k.a. weights) must be contiguous");
+
   int size[MIOPEN_DIM_MAX];
   int stride[MIOPEN_DIM_MAX];
-  for (int i = 0; i < dim; ++i) {
+  for (const auto i : c10::irange(dim)) {
     size[i] = (int) t.size(i);
   }
-  for (int i = dim; i < pad; ++i) {
+  for (const auto i : c10::irange(dim, pad)) {
     size[i] = (int) 1;
   }
-  for (int i = dim - 1; i >=0; --i) {
-    stride[i] = (i == dim - 1) ? 1 : stride[i+1] * size[i+1];
+
+  for (int i = pad; i >= dim; --i ) {
+      stride[i] = 1;
   }
-  dim = std::max(dim, pad);
+  for (int i = dim-1 ; i >=0; --i ) {
+      // Pass-through
+      stride[i] = t.stride(i);
+  }
+
+  dim = std::max<int64_t>(dim, pad);
   set(getDataType(t), (int) dim, size, stride);
 }
 

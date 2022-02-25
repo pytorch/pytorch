@@ -3,12 +3,18 @@
 
 #include <c10/macros/Macros.h>
 #include <c10/util/string_utils.h>
+#include <c10/util/string_view.h>
 
 #include <cstddef>
 #include <ostream>
 #include <sstream>
 #include <string>
 #include <vector>
+
+C10_CLANG_DIAGNOSTIC_PUSH()
+#if C10_CLANG_HAS_WARNING("-Wshorten-64-to-32")
+C10_CLANG_DIAGNOSTIC_IGNORE("-Wshorten-64-to-32")
+#endif
 
 namespace c10 {
 
@@ -134,7 +140,7 @@ inline static bool isPrint(char s) {
   return s > 0x1f && s < 0x7f;
 }
 
-inline void printQuotedString(std::ostream& stmt, const std::string& str) {
+inline void printQuotedString(std::ostream& stmt, const string_view str) {
   stmt << "\"";
   for (auto s : str) {
     switch (s) {
@@ -189,5 +195,7 @@ inline void printQuotedString(std::ostream& stmt, const std::string& str) {
 }
 
 } // namespace c10
+
+C10_CLANG_DIAGNOSTIC_POP()
 
 #endif // C10_UTIL_STRINGUTIL_H_

@@ -18,24 +18,18 @@ namespace torch {
 namespace optim {
 
 struct TORCH_API AdamWOptions : public OptimizerCloneableOptions<AdamWOptions> {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   AdamWOptions(double lr = 1e-3);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   TORCH_ARG(double, lr) = 1e-3;
   typedef std::tuple<double, double> betas_t;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   TORCH_ARG(betas_t, betas) = std::make_tuple(0.9, 0.999);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   TORCH_ARG(double, eps) = 1e-8;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   TORCH_ARG(double, weight_decay) = 1e-2;
   TORCH_ARG(bool, amsgrad) = false;
 public:
   void serialize(torch::serialize::InputArchive& archive) override;
   void serialize(torch::serialize::OutputArchive& archive) const override;
   TORCH_API friend bool operator==(const AdamWOptions& lhs, const AdamWOptions& rhs);
-  // NOLINTNEXTLINE(modernize-use-override)
-  ~AdamWOptions() = default;
+  ~AdamWOptions() override = default;
   double get_lr() const override;
   void set_lr(const double lr) override;
 };
@@ -50,8 +44,7 @@ public:
   void serialize(torch::serialize::InputArchive& archive) override;
   void serialize(torch::serialize::OutputArchive& archive) const override;
   TORCH_API friend bool operator==(const AdamWParamState& lhs, const AdamWParamState& rhs);
-  // NOLINTNEXTLINE(modernize-use-override)
-  ~AdamWParamState() = default;
+  ~AdamWParamState() override = default;
 };
 
 class TORCH_API AdamW : public Optimizer {

@@ -36,8 +36,7 @@ size_t ComputeEditDistance(
 
     unsigned previous = y - 1;
     for (size_t x = 1; x <= n; ++x) {
-      // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
-      int old_row = row[x];
+      const auto old_row = row[x];
       row[x] = std::min(
           previous + (word1[y - 1] == word2[x - 1] ? 0u : 1u),
           std::min(row[x - 1], row[x]) + 1);

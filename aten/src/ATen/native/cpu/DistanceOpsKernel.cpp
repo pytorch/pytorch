@@ -7,12 +7,13 @@
 #include <ATen/Dispatch.h>
 #include <ATen/Parallel.h>
 #include <ATen/cpu/vml.h>
+#include <c10/util/irange.h>
 
 namespace at { namespace native { namespace {
 
 template<typename scalar_t>
 struct Dist {
-  using Vec = vec256::Vec256<scalar_t>;
+  using Vec = vec::Vectorized<scalar_t>;
 
   // Depending on the value of the pnorm, there are specific implementations
   // that are much faster than std::pow(std::abs(a - b), p), but have the same
@@ -39,10 +40,10 @@ struct Dist {
   // there's a struct with only a backward pass for this case.
 
   // TODO This is an inefficient way to compite sign, and can be much faster
-  // using native SSE instructions that should be added to Vec256.
+  // using native SSE instructions that should be added to Vectorized.
   static inline Vec sign(Vec val) {
-    return vec256::minimum(vec256::maximum(Vec(0), val.ceil()), Vec(1)) +
-      vec256::minimum(vec256::maximum(Vec(-1), val.floor()), Vec(0));
+    return vec::minimum(vec::maximum(Vec(0), val.ceil()), Vec(1)) +
+      vec::minimum(vec::maximum(Vec(-1), val.floor()), Vec(0));
   }
 
   static inline Vec abs(Vec val) {
@@ -62,7 +63,7 @@ struct Dist {
   }
 
   static inline Vec min(Vec val, scalar_t other) {
-    return vec256::minimum(val, Vec(other));
+    return vec::minimum(val, Vec(other));
   }
 
   static inline scalar_t min(scalar_t val, scalar_t other) {
@@ -70,7 +71,7 @@ struct Dist {
   }
 
   static inline Vec max(Vec val, Vec other) {
-    return vec256::maximum(val, other);
+    return vec::maximum(val, other);
   }
 
   static inline scalar_t max(scalar_t val, scalar_t other) {
@@ -138,7 +139,7 @@ struct Dist {
     static inline scalar_t finish(const scalar_t agg, const scalar_t p) { return agg; }
     // TODO This backward pass uses a very complext expression to compute (diff
     // == dist) that could be much faster if using SSE instructions.
-    static inline Vec backward(const Vec& diff, const scalar_t grad, const scalar_t dist, const Vec& p) { return Vec(grad) * sign(diff) * (Vec(1) - vec256::minimum(Vec(1), (diff.abs() - Vec(dist)).abs().ceil())); }
+    static inline Vec backward(const Vec& diff, const scalar_t grad, const scalar_t dist, const Vec& p) { return Vec(grad) * sign(diff) * (Vec(1) - vec::minimum(Vec(1), (diff.abs() - Vec(dist)).abs().ceil())); }
   };
 
   template <typename F>
@@ -155,10 +156,8 @@ struct Dist {
     // vector from the input, j is the second, and k is the result index. This
     // parallelizes over the range of k and infers what i and j are from the
     // value of k.
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     parallel_for(0, combs, internal::GRAIN_SIZE / (16 * m), [p, self_start, self_end, n, m, res_start](int64_t k, int64_t end) {
       const Vec pvec(p);
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       double n2 = n - .5;
       // The -1 accounts for floating point truncation issues
       // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
@@ -171,7 +170,7 @@ struct Dist {
       const scalar_t * const res_end = res_start + end;
 
       while (res != res_end) {
-        *res = F::finish(vec256::map2_reduce_all<scalar_t>(
+        *res = F::finish(vec::map2_reduce_all<scalar_t>(
           [&pvec](Vec a, Vec b) { return F::map((a - b).abs(), pvec); },
           F::red, self_i, self_j, m), p);
 
@@ -191,7 +190,6 @@ struct Dist {
       run_parallel_pdist<zdist_calc<Vec>>(result, self, p);
     } else if (p == 1.0) {
       run_parallel_pdist<odist_calc<Vec>>(result, self, p);
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     } else if (p == 2.0) {
       run_parallel_pdist<tdist_calc<Vec>>(result, self, p);
     } else if (std::isinf(p)) {
@@ -215,7 +213,6 @@ struct Dist {
     int64_t size1 = r1 * m;
     int64_t size2 = r2 * m;
 
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     parallel_for(0, combs * d, internal::GRAIN_SIZE / (16 * m), [=](int64_t start, int64_t end) {
       scalar_t * res = res_start + start;
       const scalar_t * const res_end = res_start + end;
@@ -231,7 +228,7 @@ struct Dist {
         const scalar_t * self_j = t2_start + size2 * l + j;
 
         scalar_t agg = 0;
-        for (int x = 0; x < m; x++) {
+        for (const auto x : c10::irange(m)) {
           scalar_t a = *(self_i + x);
           scalar_t b = *(self_j + x);
           agg = F::red(agg, F::map(std::abs(a-b), p));
@@ -257,7 +254,6 @@ struct Dist {
       run_parallel_cdist<zdist_calc<scalar_t>>(result, x1, x2, p);
     } else if (p == 1.0) {
       run_parallel_cdist<odist_calc<scalar_t>>(result, x1, x2, p);
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     } else if (p == 2.0) {
       run_parallel_cdist<tdist_calc<scalar_t>>(result, x1, x2, p);
     } else if (std::isinf(p)) {
@@ -306,7 +302,6 @@ struct Dist {
     // The only way to parallelize and avoid locking requires parallelizing
     // over the columns of the input, i.e. we compute the gradient for the
     // first section of each vector independentaly of the second section, etc.
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     at::parallel_for(0, m / Vec::size(), internal::GRAIN_SIZE / (8 * n * n), [p, n, m, gs, grad_start, dist_start, self_start, res_start](int64_t l, int64_t end) {
       const Vec pvec(p);
 
@@ -329,10 +324,8 @@ struct Dist {
     if (p == 0.0) {
     } else if (p == 1.0) {
       run_backward_parallel_pdist<odist_calc<Vec>>(result, grad, self, p, dist);
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     } else if (p < 2.0) {
       run_backward_parallel_pdist<lttdist_calc>(result, grad, self, p, dist);
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     } else if (p == 2.0) {
       run_backward_parallel_pdist<tdist_calc<Vec>>(result, grad, self, p, dist);
     } else if (std::isinf(p)) {
@@ -347,10 +340,8 @@ struct Dist {
     if (p == 0.0) {
     } else if (p == 1.0) {
       run_backward_parallel_cdist<odist_calc<Vec>>(result, grad, x1, x2, p, dist);
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     } else if (p < 2.0) {
       run_backward_parallel_cdist<lttdist_calc>(result, grad, x1, x2, p, dist);
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     } else if (p == 2.0) {
       run_backward_parallel_cdist<tdist_calc<Vec>>(result, grad, x1, x2, p, dist);
     } else if (std::isinf(p)) {
@@ -380,7 +371,6 @@ struct Dist {
     const scalar_t * const t2_start = t2.data_ptr<scalar_t>();
     scalar_t * const res_start = result.data_ptr<scalar_t>();
 
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     at::parallel_for(0, m / Vec::size(), internal::GRAIN_SIZE / (16 * r1), [=](int64_t l, int64_t end) {
       const Vec pvec(p);
 
@@ -403,7 +393,8 @@ struct Dist {
     const scalar_t * t1_end = t1 + l1_size;
     const scalar_t * t2_end = t2 + l2_size;
 
-    for (int64_t l = 0; l < d; l++) {
+    for (const auto l : c10::irange(d)) {
+      (void)l; //Suppress unused variable warning
       for (; t1 != t1_end; t1 += m, res += m) {
         const Vec vec_t1 = Vec::loadu(t1, count);
         Vec res_vec = Vec::loadu(res, count);
@@ -451,13 +442,9 @@ static void cdist_backward_kernel_impl(Tensor& result, const Tensor& grad, const
 
 }  // anonymous namespace
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(pdist_forward_stub, &pdist_forward_kernel_impl);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(pdist_backward_stub, &pdist_backward_kernel_impl);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(cdist_stub, &cdist_kernel_impl);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(cdist_backward_stub, &cdist_backward_kernel_impl);
 
 }}  // namespace at::native

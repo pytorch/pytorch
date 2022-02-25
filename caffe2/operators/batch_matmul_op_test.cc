@@ -57,32 +57,24 @@ class BatchMatMulOpTest : public testing::Test {
   OperatorDef def_;
 };
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(BatchMatMulOpTest, BatchMatMulOpNormalTest) {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   AddConstInput(std::vector<int64_t>{3, 5, 10}, 1.0f, "A");
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   AddConstInput(std::vector<int64_t>{3, 10, 6}, 1.0f, "B");
   std::unique_ptr<OperatorBase> op(CreateOperator(def_, &ws_));
   ASSERT_NE(nullptr, op);
   ASSERT_TRUE(op->Run());
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   VerifyOutput(std::vector<int64_t>{3, 5, 6}, 10.0f);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(BatchMatMulOpTest, BatchMatMulOpBroadcastTest) {
   auto* arg = def_.add_arg();
   arg->set_name("broadcast");
   arg->set_i(1);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   AddConstInput(std::vector<int64_t>{3, 5, 10}, 1.0f, "A");
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   AddConstInput(std::vector<int64_t>{2, 3, 10, 6}, 1.0f, "B");
   std::unique_ptr<OperatorBase> op(CreateOperator(def_, &ws_));
   ASSERT_NE(nullptr, op);
   ASSERT_TRUE(op->Run());
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   VerifyOutput(std::vector<int64_t>{2, 3, 5, 6}, 10.0f);
 }
 

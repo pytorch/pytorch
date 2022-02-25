@@ -18,10 +18,11 @@ class TestScatterOps(serial.SerializedTestCase):
            index_dim=st.integers(1, 10),
            extra_dims=st.lists(st.integers(1, 4), min_size=0, max_size=3),
            ind_type=st.sampled_from([np.int32, np.int64]),
+           data_type=st.sampled_from([np.float32, np.float64]),
            **hu.gcs)
     @settings(deadline=10000)
     def testScatterWeightedSum(
-        self, num_args, first_dim, index_dim, extra_dims, ind_type, gc, dc):
+            self, num_args, first_dim, index_dim, extra_dims, ind_type, data_type, gc, dc):
         ins = ['data', 'w0', 'indices']
         for i in range(1, num_args + 1):
             ins.extend(['x' + str(i), 'w' + str(i)])
@@ -44,13 +45,16 @@ class TestScatterOps(serial.SerializedTestCase):
         d = rand_array(first_dim, *extra_dims)
         ind = np.random.randint(0, first_dim, index_dim).astype(ind_type)
         # ScatterWeightedSumOp only supports w0=1.0 in CUDAContext
+        # And it only support float32 data in CUDAContext
         if(gc == hu.gpu_do or gc == hu.hip_do):
             w0 = np.array(1.0).astype(np.float32)
+            data_type = np.float32
         else:
             w0 = rand_array()
+        d = d.astype(data_type)
         inputs = [d, w0, ind]
         for _ in range(1, num_args + 1):
-            x = rand_array(index_dim, *extra_dims)
+            x = rand_array(index_dim, *extra_dims).astype(data_type)
             w = rand_array()
             inputs.extend([x,w])
         self.assertReferenceChecks(gc, op, inputs, ref, threshold=1e-3)

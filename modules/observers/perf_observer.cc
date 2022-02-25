@@ -32,31 +32,26 @@ defined(TARGET_IPHONE_SIMULATOR)
 #endif
 
 #ifndef C10_MOBILE
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DEFINE_int64(
     aiBench_netInitSampleRate,
     0,
     "One in N sampling rate for net delay");
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DEFINE_int64(
     aiBench_netFollowupSampleRate,
     0,
     "One in N sampling rate for net delay");
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DEFINE_int64(
     aiBench_netFollowupSampleCount,
     0,
     "control the following c logs");
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DEFINE_int64(
     aiBench_operatorNetSampleRatio,
     0,
     "One in N sampling rate for operator delay");
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DEFINE_int64(
     aiBench_skipIters,
     0,
@@ -132,7 +127,6 @@ double getWallClockTimeMilliseconds() {
 
   uint64_t now = mach_absolute_time();
   now = now * info.numer / info.denom; // convert to nanoseconds
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   return now / 1000000.0;
 #else
   return getClockTimeMilliseconds(CLOCK_MONOTONIC);
@@ -169,20 +163,15 @@ double getCpuTimeMilliseconds() {
     return 0.0;
   }
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   return ru.ru_utime.tv_sec * 1000.0
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       + ru.ru_utime.tv_usec / 1000.0
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       + ru.ru_stime.tv_sec * 1000.0
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       + ru.ru_stime.tv_usec / 1000.0;
 #else
   return getClockTimeMilliseconds(CLOCK_PROCESS_CPUTIME_ID);
 #endif
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CAFFE2_EARLY_INIT_FUNCTION(
     registerGlobalPerfNetObserverCreator,
     &registerGlobalPerfNetObserverCreator,

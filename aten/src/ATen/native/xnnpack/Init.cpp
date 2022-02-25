@@ -8,7 +8,6 @@ namespace xnnpack {
 namespace internal {
 namespace {
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 bool is_initialized_ = false;
 
 bool initialize() {
@@ -33,8 +32,7 @@ bool initialize() {
   return is_initialized_;
 }
 
-// NOLINTNEXTLINE(clang-diagnostic-unused-function)
-bool deinitialize() {
+bool C10_UNUSED deinitialize() {
   using namespace internal;
 
   // This implementation allows for retries.

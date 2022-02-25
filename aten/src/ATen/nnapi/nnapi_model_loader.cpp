@@ -4,6 +4,7 @@
 #include <ATen/nnapi/NeuralNetworks.h>
 #include <ATen/nnapi/nnapi_wrapper.h>
 #include <ATen/nnapi/nnapi_model_loader.h>
+#include <c10/util/irange.h>
 
 
 #ifndef NNAPI_LOADER_STANDALONE
@@ -17,7 +18,7 @@
 #endif
 
 
-#define NNAPI_CHECK(res) CAFFE_ENFORCE(res == ANEURALNETWORKS_NO_ERROR)
+#define NNAPI_CHECK(res) CAFFE_ENFORCE(res == ANEURALNETWORKS_NO_ERROR, "NNAPI returned error: ", res)
 
 
 namespace caffe2 {
@@ -138,15 +139,15 @@ int load_nnapi_model(
   next_pointer = (uint8_t*)serialized_model + required_size;
   CAFFE_ENFORCE(next_pointer <= end_of_buf);
 
-  for (int i = 0; i < ser_model->operand_count; i++) {
+  for (const auto i : c10::irange(ser_model->operand_count)) {
     required_size += 4 * operands[i].dimension_count;
   }
 
-  for (int i = 0; i < ser_model->value_count; i++) {
+  for (const auto i : c10::irange(ser_model->value_count)) {
     required_size += value_physical_size(values[i].source_length);
   }
 
-  for (int i = 0; i < ser_model->operation_count; i++) {
+  for (const auto i : c10::irange(ser_model->operation_count)) {
     required_size += 4 * (operations[i].input_count + operations[i].output_count);
   }
 
@@ -155,7 +156,7 @@ int load_nnapi_model(
   CAFFE_ENFORCE(model_length >= required_size, "Model is too small.  Size = ", model_length);
   CAFFE_ENFORCE(next_pointer <= end_of_buf);
 
-  for (int i = 0; i < ser_model->operand_count; i++) {
+  for (const auto i : c10::irange(ser_model->operand_count)) {
     ANeuralNetworksOperandType operand;
     operand.type = operands[i].type;
     operand.scale = operands[i].scale;
@@ -171,7 +172,7 @@ int load_nnapi_model(
     NNAPI_CHECK(result);
   }
 
-  for (int i = 0; i < ser_model->value_count; i++) {
+  for (const auto i : c10::irange(ser_model->value_count)) {
     uint32_t len = values[i].source_length;
     const uint8_t* stored_pointer = next_pointer;
     // NOLINTNEXTLINE(modernize-use-nullptr)
@@ -191,7 +192,6 @@ int load_nnapi_model(
           CAFFE_ENFORCE(len == 12);
           uint32_t buffer_number = *(uint32_t*)stored_pointer;
           uint32_t buffer_offset = *(uint32_t*)(stored_pointer + 4);
-          // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
           uint32_t operand_length = *(uint32_t*)(stored_pointer + 8);
           CAFFE_ENFORCE(buffer_number < num_buffers);
           CAFFE_ENFORCE(buffer_offset + operand_length >= buffer_offset);  // No integer overflow
@@ -221,7 +221,7 @@ int load_nnapi_model(
     NNAPI_CHECK(result);
   }
 
-  for (int i = 0; i < ser_model->operation_count; i++) {
+  for (const auto i : c10::irange(ser_model->operation_count)) {
     const uint32_t* inputs = (const uint32_t*)next_pointer;
     next_pointer += 4 * operations[i].input_count;
     CAFFE_ENFORCE(next_pointer <= end_of_buf);

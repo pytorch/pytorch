@@ -1,6 +1,8 @@
 #include "caffe2/core/operator_schema.h"
 #include "caffe2/core/logging.h"
 
+#include <iostream>
+
 #include <c10/util/irange.h>
 
 namespace caffe2 {
@@ -316,7 +318,6 @@ OpSchema::Arg(const char* name, const char* description, bool required) {
     return Arg(#str, description, true);                              \
   }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_STANDARG_ARG(IsTest, is_test)
 
 #undef DEFINE_STANDARG_ARG
@@ -519,6 +520,22 @@ C10_EXPORT std::ostream& operator<<(std::ostream& out, const OpSchema& schema) {
     out << "Defined at " << schema.file_ << ":" << schema.line_ << std::endl;
   }
   return out;
+}
+
+OpSchema& OpSchemaRegistry::NewSchema(const string& key, const string& file, const int line) {
+  auto& m = map();
+  auto it = m.find(key);
+  if (it != m.end()) {
+    const auto& schema = it->second;
+    std::ios_base::Init init;
+    std::cerr << "Trying to register schema with name " << key
+              << " from file " << file << " line " << line
+              << ", but it is already registered from file " << schema.file()
+              << " line " << schema.line();
+    abort();
+  }
+  m.emplace(key, OpSchema(key, file, line));
+  return m[key];
 }
 
 CaffeMap<string, OpSchema>& OpSchemaRegistry::map() {

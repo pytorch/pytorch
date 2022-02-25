@@ -29,9 +29,7 @@ void NormalizeL1Op<T, Context>::DoNormalize(
   }
 };
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(NormalizeL1, NormalizeL1Op<float, CPUContext>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(NormalizeL1)
     .NumInputs(1)
     .NumOutputs(1)

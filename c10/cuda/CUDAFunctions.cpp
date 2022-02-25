@@ -1,4 +1,5 @@
 #include <c10/cuda/CUDAFunctions.h>
+#include <c10/macros/Macros.h>
 
 #include <limits>
 
@@ -135,6 +136,16 @@ void set_device(DeviceIndex device) {
 
 void device_synchronize() {
   C10_CUDA_CHECK(cudaDeviceSynchronize());
+}
+
+// this function has to be called from callers performing cuda synchronizing
+// operations, to raise proper error or warning
+void warn_or_error_on_sync() {
+  if (warning_state().get_sync_debug_mode() == SyncDebugMode::L_ERROR) {
+    TORCH_CHECK(false, "called a synchronizing CUDA operation");
+  } else if (warning_state().get_sync_debug_mode() == SyncDebugMode::L_WARN) {
+    TORCH_WARN("called a synchronizing CUDA operation");
+  }
 }
 
 } // namespace cuda

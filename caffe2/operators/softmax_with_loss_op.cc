@@ -6,15 +6,12 @@
 
 namespace caffe2 {
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(SoftmaxWithLoss, SoftmaxWithLossOp<float, CPUContext>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     SoftmaxWithLossGradient,
     SoftmaxWithLossGradientOp<float, CPUContext>);
 
 // Input: X (logits), T (labels); Output: P (probs), Y
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(SoftmaxWithLoss)
     .NumInputs(2, 3)
     .NumOutputs({2, 3})
@@ -160,7 +157,6 @@ avgloss: 10.667433
     .Output(1, "loss", "*(type: float)* Averaged cross-entropy loss output.");
 
 // Input: X, T, P, dY; Output: dX
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(SoftmaxWithLossGradient).NumOutputs(1);
 
 #define DONT_CARE (-1)
@@ -244,14 +240,12 @@ bool SoftmaxWithLossOp<float, CPUContext>::RunOnDevice() {
             "Label prob seems incorrect: label prob value must be nonnegative:",
             " ",
             label_data[i * D + j]);
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         l += -log(std::max(Pdata[i * D + j], 1e-20f)) * label_data[i * D + j] *
             weight;
         total_prob += label_data[i * D + j];
       }
       loss_sum += l;
       CAFFE_ENFORCE(
-          // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
           std::abs(total_prob - 1.) < 1e-5f,
           "Label prob seems incorrect: label prob values do not sum to 1.0: ",
           total_prob,
@@ -401,7 +395,6 @@ class GetSoftmaxWithLossGradient : public GradientMakerBase {
   }
 };
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_GRADIENT(SoftmaxWithLoss, GetSoftmaxWithLossGradient);
 } // namespace
 } // namespace caffe2

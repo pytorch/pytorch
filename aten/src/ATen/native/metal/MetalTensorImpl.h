@@ -40,13 +40,6 @@ struct TORCH_API MetalTensorImpl : public OpaqueTensorImpl<OpaqueHandle> {
     return strides_[d];
   }
 
-  void release_resources() override {
-    using MetalTensorImplStorage = at::native::metal::MetalTensorImplStorage;
-    auto&& handle = (MetalTensorImplStorage)this->opaque_handle();
-    handle.texture()->release();
-    OpaqueTensorImpl<OpaqueHandle>::release_resources();
-  }
-
  private:
   const char* tensorimpl_type_name() const override {
     return "MetalTensorImpl";

@@ -5,16 +5,14 @@
 
 namespace caffe2 {
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     Reciprocal,
     UnaryElementwiseOp<
-        TensorTypes<float>,
+        TensorTypes<float, double>,
         CPUContext,
         ReciprocalFunctor<CPUContext>>);
 
 // Input: X, output: Y
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(Reciprocal)
     .NumInputs(1)
     .NumOutputs(1)
@@ -66,10 +64,9 @@ Y:
 
 </details>
 )DOC")
-.Input(0, "X", "*(type: Tensor`<float>`)* Input data tensor.")
-.Output(0, "Y", "*(type: Tensor`<float>`)* Output tensor.");
+.Input(0, "X", "*(type: Tensor`<float, double>`)* Input data tensor.")
+.Output(0, "Y", "*(type: Tensor`<float, double>`)* Output tensor.");
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(ReciprocalGradient).NumInputs(2).NumOutputs(1).AllowInplace({{1, 0}});
 
 } // namespace caffe2

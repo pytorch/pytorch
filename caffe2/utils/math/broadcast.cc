@@ -6,6 +6,19 @@
 namespace caffe2 {
 namespace math {
 
+bool can_use_broadcast_fastpath(int ndim, const int* dims) {
+  int index_of_last_singleton = -1;
+  int index_of_first_non_singleton = ndim;
+  for (int i = 0; i < ndim; i++) {
+    if (dims[i] == 1) {
+      index_of_last_singleton = i;
+    } else if (index_of_first_non_singleton == ndim) {
+      index_of_first_non_singleton = i;
+    }
+  }
+  return index_of_last_singleton < index_of_first_non_singleton;
+}
+
 #define CAFFE2_SPECIALIZED_AFFINE_CHANNEL(T)                        \
   template <>                                                       \
   C10_EXPORT void AffineChannel<T, CPUContext, StorageOrder::NCHW>( \

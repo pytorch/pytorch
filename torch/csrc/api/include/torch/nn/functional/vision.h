@@ -25,7 +25,6 @@ inline Tensor affine_grid(
         size,
         ". Got ",
         theta.sizes(), ".");
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   } else if (size.size() == 5) {
     TORCH_CHECK(
         theta.dim() == 3 && theta.size(-2) == 3 && theta.size(-1) == 4,

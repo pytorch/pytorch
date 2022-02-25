@@ -11,6 +11,7 @@
 #include <torch/csrc/jit/codegen/fuser/kernel_cache.h>
 #include <torch/csrc/jit/codegen/fuser/kernel_spec.h>
 #include <torch/csrc/jit/codegen/fuser/tensor_info.h>
+#include <torch/csrc/jit/passes/graph_fuser.h>
 
 #include <algorithm>
 #include <iostream> // TODO: remove, debugging only
@@ -35,7 +36,6 @@ static c10::optional<std::vector<int64_t>> getMapSize(
   // should be straightforward.
   // Note: left unitialized since empty shape is broadcastable to any shape
   std::vector<int64_t> map_size;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   map_size.reserve(8);
   for (const auto arg_idx : arg_subset) {
     auto& arg = args.at(arg_idx);
@@ -328,7 +328,7 @@ void launchFusion(
 
 bool runFusion(const int64_t key, Stack& stack, std::string* code_out) {
   // Short-circuits if fusion isn't enabled
-  if (!canFuseOnCPU() && !canFuseOnGPU())
+  if (!canFuseOnCPULegacy() && !canFuseOnGPU())
     return false;
 
   // Acquires the FusionSpec
@@ -363,7 +363,7 @@ bool runFusion(const int64_t key, Stack& stack, std::string* code_out) {
   // Attempts to run fallback if device fusion is disabled
   if (device.is_cuda() && !canFuseOnGPU())
     return false;
-  if (device.is_cpu() && !canFuseOnCPU())
+  if (device.is_cpu() && !canFuseOnCPULegacy())
     return false;
   if (device.is_xpu())
     return false;

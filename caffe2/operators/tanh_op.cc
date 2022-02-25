@@ -17,7 +17,6 @@ bool TanhFunctor<CPUContext>::operator()<float>(
 }
 #endif // CAFFE2_USE_ACCELERATE
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     Tanh,
     UnaryElementwiseOp<
@@ -25,7 +24,6 @@ REGISTER_CPU_OPERATOR(
         CPUContext,
         TanhFunctor<CPUContext>>);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(Tanh)
     .NumInputs(1)
     .NumOutputs(1)
@@ -92,7 +90,6 @@ X:
         "element-wise")
     .InheritOnnxSchema();
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(TanhGradient)
     .NumInputs(2)
     .NumOutputs(1)

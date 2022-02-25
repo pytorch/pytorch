@@ -37,6 +37,7 @@ torch::nn::AdaptiveAvgPool2d|Yes|No
 torch::nn::AdaptiveAvgPool3d|Yes|No
 torch::nn::ReflectionPad1d|Yes|No
 torch::nn::ReflectionPad2d|Yes|No
+torch::nn::ReflectionPad3d|Yes|No
 torch::nn::ReplicationPad1d|Yes|No
 torch::nn::ReplicationPad2d|Yes|No
 torch::nn::ReplicationPad3d|Yes|No
@@ -49,6 +50,7 @@ torch::nn::Hardshrink|Yes|No
 torch::nn::Hardtanh|Yes|No
 torch::nn::LeakyReLU|Yes|No
 torch::nn::LogSigmoid|Yes|No
+torch::nn::Mish|Yes|No
 torch::nn::MultiheadAttention|No|No
 torch::nn::PReLU|Yes|No
 torch::nn::ReLU|Yes|No
@@ -97,6 +99,7 @@ torch::nn::Identity|Yes|No
 torch::nn::Linear|Yes|No
 torch::nn::Bilinear|Yes|No
 torch::nn::Flatten|Yes|No
+torch::nn::Unflatten|Yes|No
 torch::nn::Dropout|Yes|No
 torch::nn::Dropout2d|Yes|No
 torch::nn::Dropout3d|Yes|No
@@ -187,6 +190,7 @@ F::rrelu|Yes|No
 F::glu|Yes|No
 F::gelu|Yes|No
 F::silu|Yes|No
+F::mish|Yes|No
 F::logsigmoid|Yes|No
 F::hardshrink|Yes|No
 F::tanhshrink|Yes|No

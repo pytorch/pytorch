@@ -1,15 +1,18 @@
 #include <torch/csrc/jit/passes/erase_number_types.h>
 
 #include <torch/csrc/jit/ir/constants.h>
+#include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
+
+#include <ATen/ScalarOps.h>
 
 namespace torch {
 namespace jit {
 
 void SetNumTypeToTensorType(Value* v) {
-  if (v->type()->isSubtypeOf(NumberType::get())) {
-    v->setType(TensorType::fromNumberType(v->type()));
-  } else if (v->type()->isSubtypeOf(BoolType::get())) {
+  if (v->type()->isSubtypeOf(*NumberType::get())) {
+    v->setType(TensorType::fromNumberType(*v->type()));
+  } else if (v->type()->isSubtypeOf(*BoolType::get())) {
     v->setType(TensorType::fromBoolType());
   }
 }
@@ -27,10 +30,10 @@ void EraseNumberTypesOnBlock(Block* block) {
       case prim::Constant: {
         // remove primitive constants, replacing with tensor equivalent
         // ONNX does not support non-tensor constants
-        if (it->output()->type()->isSubtypeOf(NumberType::get()) ||
-            it->output()->type()->isSubtypeOf(BoolType::get())) {
+        if (it->output()->type()->isSubtypeOf(*NumberType::get()) ||
+            it->output()->type()->isSubtypeOf(*BoolType::get())) {
           at::Scalar s;
-          if (it->output()->type()->isSubtypeOf(BoolType::get())) {
+          if (it->output()->type()->isSubtypeOf(*BoolType::get())) {
             s = *constant_as<bool>(it->output());
           } else {
             s = *constant_as<at::Scalar>(it->output());
@@ -39,6 +42,7 @@ void EraseNumberTypesOnBlock(Block* block) {
           WithInsertPoint guard(*it);
           Value* r = block->owningGraph()->insertConstant(
               scalar_to_tensor(s), c10::nullopt, it->scope());
+          r->copyMetadata(it->output());
           it->output()->replaceAllUsesWith(r);
           it.destroyCurrent();
         }
@@ -67,6 +71,7 @@ void EraseNumberTypes(const std::shared_ptr<Graph>& graph) {
     SetNumTypeToTensorType(inp);
   }
   EraseNumberTypesOnBlock(graph->block());
+  GRAPH_DUMP("After EraseNumberTypes: ", graph);
 }
 } // namespace jit
 } // namespace torch

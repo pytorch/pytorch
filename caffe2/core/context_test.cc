@@ -6,9 +6,7 @@
 
 namespace caffe2 {
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(CPUContextTest, TestAllocAlignment) {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   for (int i = 1; i < 10; ++i) {
     auto data = CPUContext::New(i);
     EXPECT_EQ((reinterpret_cast<size_t>(data.get()) % gAlignment), 0);
@@ -16,26 +14,20 @@ TEST(CPUContextTest, TestAllocAlignment) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(CPUContextTest, TestAllocDealloc) {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto data_ptr = CPUContext::New(10 * sizeof(float));
   float* data = static_cast<float*>(data_ptr.get());
   EXPECT_NE(data, nullptr);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto dst_data_ptr = CPUContext::New(10 * sizeof(float));
   float* dst_data = static_cast<float*>(dst_data_ptr.get());
   EXPECT_NE(dst_data, nullptr);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   for (int i = 0; i < 10; ++i) {
     // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
     data[i] = i;
   }
   DeviceOption option;
   CPUContext context(option);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   context.CopyToCPU<float>(10, data, dst_data);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   for (int i = 0; i < 10; ++i) {
     EXPECT_FLOAT_EQ(dst_data[i], i);
   }

@@ -85,7 +85,6 @@ C10_EXPORT int stringToKind(const std::string& str) {
 }
 
 C10_EXPORT std::string kindToString(int kind) {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   if (kind < 256)
     return std::string(1, kind);
   switch (kind) {

@@ -5,6 +5,8 @@
 #include <map>
 #include <unordered_set>
 
+
+#include <c10/util/irange.h>
 #include <c10/util/string_view.h>
 #include "caffe2/core/blob_serialization.h"
 #include "caffe2/core/context.h"
@@ -66,6 +68,7 @@ class LoadOp final : public Operator<Context> {
         db_name_(this->template GetSingleArgument<string>("db", "")),
         db_names_(this->template GetRepeatedArgument<string>("dbs")),
         db_type_(this->template GetSingleArgument<string>("db_type", "")),
+        db_options_(this->template GetSingleArgument<string>("db_options", "")),
         keep_device_(this->template GetSingleArgument<int>("keep_device", 0)),
         load_all_(this->template GetSingleArgument<int>("load_all", 0)),
         allow_incomplete_(
@@ -128,18 +131,21 @@ class LoadOp final : public Operator<Context> {
     int total_loaded_blobs = 0;
     std::unordered_map<string, load_save_op_util::BlobState> blob_states;
     if (InputSize() > 0) {
-      for (int i = 0; i < InputSize(); ++i) {
+      for (const auto i : c10::irange(InputSize())) {
         const db::DBReader& reader = this->template Input<db::DBReader>(i);
         extract(i, reader.cursor(), &blob_states, &total_loaded_blobs);
       }
     } else {
       // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
-      for (int i = 0; i < db_names_.size(); ++i) {
+      for (const auto i : c10::irange(db_names_.size())) {
         string full_db_name = absolute_path_
             ? db_names_[i]
             : (ws_->RootFolder() + "/" + db_names_[i]);
         std::unique_ptr<DB> in_db(
             caffe2::db::CreateDB(db_type_, full_db_name, caffe2::db::READ));
+        if (!db_options_.empty()) {
+          in_db->SetOptions(db_options_);
+        }
         CAFFE_ENFORCE(
             in_db.get(),
             "Cannot find db implementation of type ",
@@ -302,6 +308,7 @@ class LoadOp final : public Operator<Context> {
   string db_name_;
   std::vector<std::string> db_names_;
   string db_type_;
+  std::string db_options_;
   bool keep_device_;
   bool load_all_;
   bool allow_incomplete_;

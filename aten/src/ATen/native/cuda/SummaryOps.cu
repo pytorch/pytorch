@@ -1,9 +1,9 @@
 #include <ATen/ATen.h>
+#include <ATen/NumericUtils.h>
+#include <ATen/native/Resize.h>
+#include <ATen/cuda/Atomic.cuh>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/CUDAApplyUtils.cuh>
-
-#include <THC/THCAtomics.cuh>
-#include <THC/THCNumerics.cuh>
 
 namespace at {
 namespace cuda {
@@ -73,7 +73,7 @@ __global__ void kernelHistogram1D(
       if (bVal >= minvalue && bVal <= maxvalue) {
         // Use value at `b` as an offset of `smem`
         const IndexType bin = getBin<input_t, IndexType>(bVal, minvalue, maxvalue, nbins);
-        gpuAtomicAdd(&smem[bin], getOp(linearIndex));
+        gpuAtomicAddNoReturn(&smem[bin], getOp(linearIndex));
       }
     }
     __syncthreads();
@@ -83,7 +83,7 @@ __global__ void kernelHistogram1D(
     for (IndexType i = threadIdx.x; i < a.sizes[0]; i += blockDim.x) {
       const IndexType aOffset =
           detail::IndexToOffset<output_t, IndexType, ADims>::get(i, a);
-      gpuAtomicAdd(&a.data[aOffset], smem[i]);
+      gpuAtomicAddNoReturn(&a.data[aOffset], smem[i]);
     }
 
   } else if (MemoryType == CUDAHistogramMemoryType::MULTI_BLOCK) {
@@ -102,7 +102,7 @@ __global__ void kernelHistogram1D(
         const IndexType pIdx = p.strides[0] * blockIdx.x + bin;
         const IndexType pOffset =
             detail::IndexToOffset<output_t, IndexType, PDims>::get(pIdx, p);
-        gpuAtomicAdd(&p.data[pOffset], getOp(linearIndex));
+        gpuAtomicAddNoReturn(&p.data[pOffset], getOp(linearIndex));
       }
     }
     __syncthreads();
@@ -115,7 +115,7 @@ __global__ void kernelHistogram1D(
     for (IndexType i = threadIdx.x; i < a.sizes[0]; i += blockDim.x) {
       const IndexType aOffset =
           detail::IndexToOffset<output_t, IndexType, ADims>::get(i, a);
-      gpuAtomicAdd(&a.data[aOffset], p.data[pOffset + i]);
+      gpuAtomicAddNoReturn(&a.data[aOffset], p.data[pOffset + i]);
     }
 
   } else {
@@ -132,7 +132,7 @@ __global__ void kernelHistogram1D(
         const IndexType bin = getBin<input_t, IndexType>(bVal, minvalue, maxvalue, nbins);
         const IndexType aOffset =
             detail::IndexToOffset<output_t, IndexType, ADims>::get(bin, a);
-        gpuAtomicAdd(&a.data[aOffset], getOp(linearIndex));
+        gpuAtomicAddNoReturn(&a.data[aOffset], getOp(linearIndex));
       }
     }
   }
@@ -311,7 +311,7 @@ Tensor _bincount_cuda_template(
         weights.options().layout_opt(),
         weights.options().device_opt(),
         weights.options().pinned_memory_opt());
-    auto ret = cuda::CUDA_tensor_histogram<weights_t, input_t, true>(
+    cuda::CUDA_tensor_histogram<weights_t, input_t, true>(
         output, self, weights, nbins, minvalue, maxvalue);
   } else {
     output = native::zeros(
@@ -320,7 +320,7 @@ Tensor _bincount_cuda_template(
         c10::nullopt /* layout */,
         DeviceType::CUDA,
         c10::nullopt /* pin_memory */);
-    auto ret = cuda::CUDA_tensor_histogram<int64_t, input_t, false>(
+    cuda::CUDA_tensor_histogram<int64_t, input_t, false>(
         output, self, weights, nbins, minvalue, maxvalue);
   }
   return output;
@@ -344,7 +344,7 @@ Tensor _histc_cuda_template(
       c10::nullopt /* pin_memory */);
   input_t minvalue = min;
   input_t maxvalue = max;
-  if (min == max) {
+  if (min == max && self.numel() > 0) {
     minvalue = *self.min().cpu().data_ptr<input_t>();
     maxvalue = *self.max().cpu().data_ptr<input_t>();
   }
@@ -353,12 +353,10 @@ Tensor _histc_cuda_template(
     maxvalue = maxvalue + 1;
   }
 
-#ifndef __HIP_PLATFORM_HCC__
+#if !defined(USE_ROCM)
   TORCH_CHECK(
-      !(THCNumerics<input_t>::isinf(minvalue) ||
-        THCNumerics<input_t>::isinf(maxvalue) ||
-        THCNumerics<input_t>::isnan(minvalue) ||
-        THCNumerics<input_t>::isnan(maxvalue)),
+      !(at::_isinf(minvalue) || at::_isinf(maxvalue) ||
+        at::_isnan(minvalue) || at::_isnan(maxvalue)),
       "range of [",
       minvalue,
       ", ",
@@ -376,7 +374,7 @@ Tensor _histc_cuda_template(
 #endif
   TORCH_CHECK(minvalue < maxvalue, "max must be larger than min");
 
-  auto ret = cuda::CUDA_tensor_histogram<input_t, input_t, false>(
+  cuda::CUDA_tensor_histogram<input_t, input_t, false>(
     output, self, Tensor(), nbins, minvalue, maxvalue);
   return output;
 }
@@ -420,7 +418,7 @@ Tensor _histc_cuda(
 
 Tensor& _histc_out_cuda(const Tensor& self, int64_t bins, const Scalar& min, const Scalar& max, Tensor& result) {
   auto ret = _histc_cuda(self, bins, min, max);
-  result.resize_as_(ret);
+  resize_output(result, ret.sizes());
   result.copy_(ret);
   return result;
 }

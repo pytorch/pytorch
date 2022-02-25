@@ -1,7 +1,8 @@
 from typing import Optional, List
 
 import torch
-from torch.backends._nnapi.serializer import serialize_model
+from torch.backends._nnapi.serializer import _NnapiSerializer
+
 
 class NnapiModule(torch.nn.Module):
     """Torch Module that wraps an NNAPI Compilation.
@@ -67,7 +68,7 @@ class NnapiModule(torch.nn.Module):
             fmt = self.out_mem_fmts[idx]
             # These constants match the values in DimOrder in serializer.py
             # TODO: See if it's possible to use those directly.
-            if fmt == 0:
+            if fmt in (0, 2):
                 pass
             elif fmt == 1:
                 outs[idx] = outs[idx].permute(0, 3, 1, 2)
@@ -75,32 +76,9 @@ class NnapiModule(torch.nn.Module):
                 raise Exception("Invalid mem_fmt")
         return outs
 
-
-def convert_model_to_nnapi(model, inputs):
-    model = torch.jit.freeze(model)
-
-    if isinstance(inputs, torch.Tensor):
-        inputs = [inputs]
-
-    ser_model, used_weights, inp_mem_fmts, out_mem_fmts, shape_compute_lines, retval_count = serialize_model(model, inputs)
-    ser_model_tensor = torch.tensor(ser_model, dtype=torch.int32)
-
-    # We have to create a new class here every time this function is called
-    # because module.define adds a method to the *class*, not the instance.
-    class ShapeComputeModule(torch.nn.Module):
-        """Code-gen-ed module for tensor shape computation
-
-        module.prepare will mutate ser_model according to the computed operand
-        shapes, based on the shapes of args.  Returns a list of output templates.
-        """
-        pass
-    shape_compute_module = torch.jit.script(ShapeComputeModule())
-    real_shape_compute_lines = [
-        "def prepare(self, ser_model: torch.Tensor, args: List[torch.Tensor]) -> List[torch.Tensor]:\n",
-    ] + [
-        f"    {line}\n" for line in shape_compute_lines
-    ]
-    shape_compute_module.define("".join(real_shape_compute_lines))
+def convert_model_to_nnapi(model, inputs, serializer=None, return_shapes=None, use_int16_for_qint16=False):
+    (shape_compute_module, ser_model_tensor, used_weights, inp_mem_fmts, out_mem_fmts,
+     retval_count) = process_for_nnapi(model, inputs, serializer, return_shapes, use_int16_for_qint16)
 
     nnapi_model = NnapiModule(
         shape_compute_module,
@@ -135,3 +113,40 @@ def convert_model_to_nnapi(model, inputs):
         f"    return {ret_expr}\n"
     )
     return wrapper_model
+
+def process_for_nnapi(model, inputs, serializer=None, return_shapes=None, use_int16_for_qint16=False):
+    model = torch.jit.freeze(model)
+
+    if isinstance(inputs, torch.Tensor):
+        inputs = [inputs]
+
+    serializer = serializer or _NnapiSerializer(config=None, use_int16_for_qint16=use_int16_for_qint16)
+    (ser_model, used_weights, inp_mem_fmts, out_mem_fmts, shape_compute_lines,
+     retval_count) = serializer.serialize_model(model, inputs, return_shapes)
+    ser_model_tensor = torch.tensor(ser_model, dtype=torch.int32)
+
+    # We have to create a new class here every time this function is called
+    # because module.define adds a method to the *class*, not the instance.
+    class ShapeComputeModule(torch.nn.Module):
+        """Code-gen-ed module for tensor shape computation
+
+        module.prepare will mutate ser_model according to the computed operand
+        shapes, based on the shapes of args.  Returns a list of output templates.
+        """
+        pass
+    shape_compute_module = torch.jit.script(ShapeComputeModule())
+    real_shape_compute_lines = [
+        "def prepare(self, ser_model: torch.Tensor, args: List[torch.Tensor]) -> List[torch.Tensor]:\n",
+    ] + [
+        f"    {line}\n" for line in shape_compute_lines
+    ]
+    shape_compute_module.define("".join(real_shape_compute_lines))
+
+    return (
+        shape_compute_module,
+        ser_model_tensor,
+        used_weights,
+        inp_mem_fmts,
+        out_mem_fmts,
+        retval_count,
+    )

@@ -211,11 +211,9 @@ struct map_to_size {
   }
 };
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TypeListTest, MapTypesToValues_sametype) {
   auto sizes =
       map_types_to_values<typelist<int64_t, bool, uint32_t>>(map_to_size());
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   std::tuple<size_t, size_t, size_t> expected(8, 1, 4);
   static_assert(std::is_same<decltype(expected), decltype(sizes)>::value, "");
   EXPECT_EQ(expected, sizes);
@@ -228,7 +226,6 @@ struct map_make_shared {
   }
 };
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TypeListTest, MapTypesToValues_differenttypes) {
   auto shared_ptrs =
       map_types_to_values<typelist<int, double>>(map_make_shared());
@@ -244,7 +241,6 @@ struct Class1 {
     return 3;
   }
 };
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
 struct Class2 {
   static double func() {
     return 2.0;
@@ -258,11 +254,9 @@ struct mapper_call_func {
   }
 };
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TypeListTest, MapTypesToValues_members) {
   auto result =
       map_types_to_values<typelist<Class1, Class2>>(mapper_call_func());
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   std::tuple<int, double> expected(3, 2.0);
   static_assert(std::is_same<decltype(expected), decltype(result)>::value, "");
   EXPECT_EQ(expected, result);
@@ -275,7 +269,6 @@ struct mapper_call_nonexistent_function {
   }
 };
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TypeListTest, MapTypesToValues_empty) {
   auto result =
       map_types_to_values<typelist<>>(mapper_call_nonexistent_function());

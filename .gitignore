@@ -15,8 +15,10 @@ coverage.xml
 .hypothesis
 .mypy_cache
 /.extracted_scripts/
-**/.pytorch-test-times
-**/.pytorch-slow-tests
+**/.pytorch_specified_test_cases.csv
+**/.pytorch-disabled-tests.json
+**/.pytorch-slow-tests.json
+**/.pytorch-test-times.json
 */*.pyc
 */*.so*
 */**/__pycache__
@@ -49,7 +51,7 @@ test/custom_operator/model.pt
 test/jit_hooks/*.pt
 test/data/legacy_modules.t7
 test/data/*.pt
-test/backward_compatibility/nightly_schemas.txt
+test/forward_backward_compatibility/nightly_schemas.txt
 dropout_model.pt
 test/generated_type_hints_smoketest.py
 test/htmlcov
@@ -194,9 +196,6 @@ docs/source/scripts/activation_images/
 # PyCharm files
 .idea
 
-# OSX dir files
-.DS_Store
-
 # GDB history
 .gdb_history
 
@@ -256,9 +255,14 @@ cmake-build-debug
 #
 # Below files are not deleted by "setup.py clean".
 
+# Downloaded bazel
+tools/bazel
+
 # Visual Studio Code files
-.vscode
 .vs
+/.vscode/*
+!/.vscode/extensions.json
+!/.vscode/settings_recommended.json
 
 # YouCompleteMe config file
 .ycm_extra_conf.py
@@ -280,8 +284,10 @@ TAGS
 # ccls file
 .ccls-cache/
 
-# clang-format storage location used by apply_clang_format.py
+# clang tooling storage location
 .clang-format-bin
+.clang-tidy-bin
+.lintbin
 
 # clangd background index
 .clangd/
@@ -302,3 +308,9 @@ bazel-*
 
 # core dump files
 core.*
+
+# Generated if you use the pre-commit script for clang-tidy
+pr.diff
+
+# coverage files
+*/**/.coverage.*

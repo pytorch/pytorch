@@ -73,16 +73,13 @@ bool ElementwiseLinearGradientOp<float, CPUContext>::RunOnDevice(){
   return true;
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
   ElementwiseLinear,
   ElementwiseLinearOp<float, CPUContext>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
   ElementwiseLinearGradient,
   ElementwiseLinearGradientOp<float, CPUContext>);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(ElementwiseLinear)
     .NumInputs(3)
     .NumOutputs(1)
@@ -178,7 +175,6 @@ Y:
         "*(type: int; default: 1)* Describes the axis of the inputs; defaults to one because the 0th axis most likely describes the batch size.")
     .InheritOnnxSchema();
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(ElementwiseLinearGradient)
   .NumInputs(3)
   .NumOutputs(3);
@@ -194,7 +190,6 @@ struct GetElementwiseLinearGradient : public GradientMakerBase {
     }
 };
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_GRADIENT(
   ElementwiseLinear,
   GetElementwiseLinearGradient

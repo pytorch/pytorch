@@ -18,8 +18,8 @@ RpcWithAutograd::RpcWithAutograd(
     worker_id_t fromWorkerId,
     MessageType messageType,
     const AutogradMetadata& autogradMetadata,
-    rpc::Message&& wrappedMessage,
-    std::unordered_map<c10::Device, c10::Device> deviceMap)
+    c10::intrusive_ptr<rpc::Message> wrappedMessage,
+    rpc::DeviceMap deviceMap)
     : fromWorkerId_(fromWorkerId),
       messageType_(messageType),
       autogradMetadata_(autogradMetadata),
@@ -28,8 +28,8 @@ RpcWithAutograd::RpcWithAutograd(
   TORCH_INTERNAL_ASSERT(
       messageType_ == MessageType::FORWARD_AUTOGRAD_REQ ||
       messageType_ == MessageType::FORWARD_AUTOGRAD_RESP);
-  tensors_ = wrappedMessage_.tensors();
-  wrappedMessageType_ = wrappedMessage_.type();
+  tensors_ = wrappedMessage_->tensors();
+  wrappedMessageType_ = wrappedMessage_->type();
 }
 
 RpcWithAutograd::RpcWithAutograd(
@@ -39,7 +39,7 @@ RpcWithAutograd::RpcWithAutograd(
     std::unique_ptr<RpcCommandBase> wrappedRpc,
     MessageType wrappedMessageType,
     std::vector<torch::Tensor> tensors,
-    std::unordered_map<c10::Device, c10::Device> deviceMap)
+    rpc::DeviceMap deviceMap)
     : fromWorkerId_(fromWorkerId),
       messageType_(messageType),
       autogradMetadata_(autogradMetadata),
@@ -53,11 +53,11 @@ RpcWithAutograd::RpcWithAutograd(
       messageType_ == MessageType::FORWARD_AUTOGRAD_RESP);
 }
 
-Message RpcWithAutograd::toMessageImpl() && {
-  auto messageId = wrappedMessage_.id();
-  auto wrappedMessageType = wrappedMessage_.type();
+c10::intrusive_ptr<Message> RpcWithAutograd::toMessageImpl() && {
+  auto messageId = wrappedMessage_->id();
+  auto wrappedMessageType = wrappedMessage_->type();
 
-  auto payload = std::move(wrappedMessage_).movePayload();
+  auto payload = std::move(*wrappedMessage_).movePayload();
   TORCH_INTERNAL_ASSERT(!payload.empty());
 
   // Convert deviceMap to c10::Dict for serialization.
@@ -84,7 +84,7 @@ Message RpcWithAutograd::toMessageImpl() && {
   // encoding.
   rpc::writeWrappedPayload(payload, additionalPayload);
 
-  return Message(
+  return c10::make_intrusive<Message>(
       std::move(payload), std::move(tensors_), messageType_, messageId);
 }
 
@@ -112,20 +112,20 @@ std::unique_ptr<RpcWithAutograd> RpcWithAutograd::fromMessage(
   auto c10DeviceMap = tupleElements[4].to<c10::Dict<std::string, std::string>>();
 
   // Convert to regular map.
-  std::unordered_map<c10::Device, c10::Device> deviceMap;
+  rpc::DeviceMap deviceMap;
   for (const auto& mapEntry : c10DeviceMap) {
     deviceMap.insert({mapEntry.key(), mapEntry.value()});
   }
 
   // Create new message type and build wrapped RPC.
-  Message wrappedMessage(
+  auto wrappedMessage = c10::make_intrusive<Message>(
       std::move(payload), std::move(tensors), wrappedMessageType, messageId);
 
   std::unique_ptr<RpcCommandBase> wrappedRpc;
   if (originalMessageType == MessageType::FORWARD_AUTOGRAD_REQ) {
-    wrappedRpc = deserializeRequest(wrappedMessage);
+    wrappedRpc = deserializeRequest(*wrappedMessage);
   } else {
-    wrappedRpc = deserializeResponse(wrappedMessage, wrappedMessageType);
+    wrappedRpc = deserializeResponse(*wrappedMessage, wrappedMessageType);
   }
 
   return std::make_unique<RpcWithAutograd>(
@@ -134,7 +134,7 @@ std::unique_ptr<RpcWithAutograd> RpcWithAutograd::fromMessage(
       autogradMetadata,
       std::move(wrappedRpc),
       wrappedMessageType,
-      wrappedMessage.tensors(),
+      wrappedMessage->tensors(),
       deviceMap);
 }
 
@@ -169,7 +169,7 @@ rpc::worker_id_t RpcWithAutograd::fromWorkerId() const {
   return fromWorkerId_;
 }
 
-const std::unordered_map<c10::Device, c10::Device>& RpcWithAutograd::
+const rpc::DeviceMap& RpcWithAutograd::
     deviceMap() {
   return deviceMap_;
 }

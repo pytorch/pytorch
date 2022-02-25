@@ -48,26 +48,21 @@ bool MishGradientOp<CPUContext>::DoRunWithType() {
   math::Tanh<T, CPUContext>(N, dX_data, dX_data, &context_);
   dX_arr = dY_arr *
       (dX_arr +
-       // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
        X_arr * (T(1) - dX_arr.square()) * T(0.5) *
-           // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
            ((X_arr * T(0.5)).tanh() + T(1)));
 
   return true;
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     Mish,
     UnaryElementwiseOp<
         TensorTypes<float, double>,
         CPUContext,
         MishFunctor<CPUContext>>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(MishGradient, MishGradientOp<CPUContext>);
 
 // Input: X, output: Y
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(Mish)
     .NumInputs(1)
     .NumOutputs(1)
@@ -80,7 +75,6 @@ tensor elementwise.
     .Input(0, "X", "1D input tensor")
     .Output(0, "Y", "1D output tensor");
 // Input: X, Y, dY, output: dX
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(MishGradient).NumInputs(3).NumOutputs(1).SetDoc(R"DOC(
 MishGradient takes X, Y and dY and uses this to update dX according to the
 chain rule and derivatives of the Mish function.
@@ -101,7 +95,6 @@ class GetMishGradient : public GradientMakerBase {
 
 } // namespace
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_GRADIENT(Mish, GetMishGradient);
 
 } // namespace caffe2

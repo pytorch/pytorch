@@ -43,6 +43,10 @@
 #   USE_MKLDNN=0
 #     disables use of MKLDNN
 #
+#   USE_MKLDNN_ACL
+#     enables use of Compute Library backend for MKLDNN on Arm;
+#     USE_MKLDNN must be explicitly enabled.
+#
 #   MKLDNN_CPU_RUNTIME
 #     MKL-DNN threading mode: TBB or OMP (default)
 #
@@ -95,6 +99,12 @@
 #   BUILD_BINARY
 #     enables the additional binaries/ build
 #
+#   ATEN_AVX512_256=TRUE
+#     ATen AVX2 kernels can use 32 ymm registers, instead of the default 16.
+#     This option can be used if AVX512 doesn't perform well on a machine.
+#     The FBGEMM library also uses AVX512_256 kernels on Xeon D processors,
+#     but it also has some (optimized) assembly code.
+#
 #   PYTORCH_BUILD_VERSION
 #   PYTORCH_BUILD_NUMBER
 #     specify the version of PyTorch, rather than the hard-coded version
@@ -106,12 +116,16 @@
 #     These are not CUDA versions, instead, they specify what
 #     classes of NVIDIA hardware we should generate PTX for.
 #
+#   PYTORCH_ROCM_ARCH
+#     specify which AMD GPU targets to build for.
+#     ie `PYTORCH_ROCM_ARCH="gfx900;gfx906"`
+#
 #   ONNX_NAMESPACE
 #     specify a namespace for ONNX built here rather than the hard-coded
 #     one in this file; needed to build with other frameworks that share ONNX.
 #
 #   BLAS
-#     BLAS to be used by Caffe2. Can be MKL, Eigen, ATLAS, or OpenBLAS. If set
+#     BLAS to be used by Caffe2. Can be MKL, Eigen, ATLAS, FlexiBLAS, or OpenBLAS. If set
 #     then the build will fail if the requested BLAS is not found, otherwise
 #     the BLAS will be chosen based on what is found on your system.
 #
@@ -156,6 +170,9 @@
 #   NVTOOLSEXT_PATH (Windows only)
 #     specify where nvtoolsext is installed
 #
+#   ACL_ROOT_DIR
+#     specify where Compute Library is installed
+#
 #   LIBRARY_PATH
 #   LD_LIBRARY_PATH
 #     we will search for libraries in these paths
@@ -169,6 +186,9 @@
 #
 #   USE_TBB
 #      enable TBB support
+#
+#   USE_SYSTEM_TBB
+#      Use system-provided Intel TBB.
 #
 #   USE_SYSTEM_LIBS (work in progress)
 #      Use system-provided libraries to satisfy the build dependencies.
@@ -186,7 +206,7 @@ if sys.platform == 'win32' and sys.maxsize.bit_length() == 31:
     sys.exit(-1)
 
 import platform
-python_min_version = (3, 6, 2)
+python_min_version = (3, 7, 0)
 python_min_version_str = '.'.join(map(str, python_min_version))
 if sys.version_info < python_min_version:
     print("You are using Python {}. Python >={} is required.".format(platform.python_version(),
@@ -310,7 +330,7 @@ def check_submodules():
     def check_for_files(folder, files):
         if not any(os.path.exists(os.path.join(folder, f)) for f in files):
             report("Could not find any of {} in {}".format(", ".join(files), folder))
-            report("Did you run 'git submodule update --init --recursive'?")
+            report("Did you run 'git submodule update --init --recursive --jobs 0'?")
             sys.exit(1)
 
     def not_exists_or_empty(folder):
@@ -329,10 +349,10 @@ def check_submodules():
             print(' --- Submodule initialization took {:.2f} sec'.format(end - start))
         except Exception:
             print(' --- Submodule initalization failed')
-            print('Please run:\n\tgit submodule update --init --recursive')
+            print('Please run:\n\tgit submodule update --init --recursive --jobs 0')
             sys.exit(1)
     for folder in folders:
-        check_for_files(folder, ["CMakeLists.txt", "Makefile", "setup.py", "LICENSE"])
+        check_for_files(folder, ["CMakeLists.txt", "Makefile", "setup.py", "LICENSE", "LICENSE.md", "LICENSE.txt"])
     check_for_files(os.path.join(third_party_path, 'fbgemm', 'third_party',
                                  'asmjit'), ['CMakeLists.txt'])
     check_for_files(os.path.join(third_party_path, 'onnx', 'third_party',
@@ -388,7 +408,6 @@ def build_deps():
 # the list of runtime dependencies required by this built package
 install_requires = [
     'typing_extensions',
-    'dataclasses; python_version < "3.7"'
 ]
 
 missing_pydep = '''
@@ -460,6 +479,10 @@ class build_ext(setuptools.command.build_ext.build_ext):
             report('-- Not using CUDA')
         if cmake_cache_vars['USE_MKLDNN']:
             report('-- Using MKLDNN')
+            if cmake_cache_vars['USE_MKLDNN_ACL']:
+                report('-- Using Compute Library for the Arm architecture with MKLDNN')
+            else:
+                report('-- Not using Compute Library for the Arm architecture with MKLDNN')
             if cmake_cache_vars['USE_MKLDNN_CBLAS']:
                 report('-- Using CBLAS in MKLDNN')
             else:
@@ -804,23 +827,24 @@ def configure_extension_build():
 
     # These extensions are built by cmake and copied manually in build_extensions()
     # inside the build_ext implementation
-    extensions.append(
-        Extension(
-            name=str('caffe2.python.caffe2_pybind11_state'),
-            sources=[]),
-    )
-    if cmake_cache_vars['USE_CUDA']:
+    if cmake_cache_vars['BUILD_CAFFE2']:
         extensions.append(
             Extension(
-                name=str('caffe2.python.caffe2_pybind11_state_gpu'),
+                name=str('caffe2.python.caffe2_pybind11_state'),
                 sources=[]),
         )
-    if cmake_cache_vars['USE_ROCM']:
-        extensions.append(
-            Extension(
-                name=str('caffe2.python.caffe2_pybind11_state_hip'),
-                sources=[]),
-        )
+        if cmake_cache_vars['USE_CUDA']:
+            extensions.append(
+                Extension(
+                    name=str('caffe2.python.caffe2_pybind11_state_gpu'),
+                    sources=[]),
+            )
+        if cmake_cache_vars['USE_ROCM']:
+            extensions.append(
+                Extension(
+                    name=str('caffe2.python.caffe2_pybind11_state_hip'),
+                    sources=[]),
+            )
 
     cmdclass = {
         'bdist_wheel': wheel_concatenate,
@@ -834,6 +858,7 @@ def configure_extension_build():
         'console_scripts': [
             'convert-caffe2-to-onnx = caffe2.python.onnx.bin.conversion:caffe2_to_onnx',
             'convert-onnx-to-caffe2 = caffe2.python.onnx.bin.conversion:onnx_to_caffe2',
+            'torchrun = torch.distributed.run:main',
         ]
     }
 
@@ -916,13 +941,16 @@ if __name__ == '__main__':
                 'lib/*.h',
                 'include/ATen/*.h',
                 'include/ATen/cpu/*.h',
-                'include/ATen/cpu/vec256/*.h',
+                'include/ATen/cpu/vec/vec256/*.h',
+                'include/ATen/cpu/vec/vec512/*.h',
+                'include/ATen/cpu/vec/*.h',
                 'include/ATen/core/*.h',
                 'include/ATen/cuda/*.cuh',
                 'include/ATen/cuda/*.h',
                 'include/ATen/cuda/detail/*.cuh',
                 'include/ATen/cuda/detail/*.h',
                 'include/ATen/cudnn/*.h',
+                'include/ATen/ops/*.h',
                 'include/ATen/hip/*.cuh',
                 'include/ATen/hip/*.h',
                 'include/ATen/hip/detail/*.cuh',
@@ -981,6 +1009,9 @@ if __name__ == '__main__':
                 'include/torch/csrc/autograd/generated/*.h',
                 'include/torch/csrc/autograd/utils/*.h',
                 'include/torch/csrc/cuda/*.h',
+                'include/torch/csrc/deploy/*.h',
+                'include/torch/csrc/deploy/interpreter/interpreter_impl.h',
+                'include/torch/csrc/distributed/c10d/exception.h',
                 'include/torch/csrc/jit/*.h',
                 'include/torch/csrc/jit/backends/*.h',
                 'include/torch/csrc/jit/generated/*.h',
@@ -997,8 +1028,10 @@ if __name__ == '__main__':
                 'include/torch/csrc/jit/tensorexpr/*.h',
                 'include/torch/csrc/jit/tensorexpr/operators/*.h',
                 'include/torch/csrc/onnx/*.h',
+                'include/torch/csrc/profiler/*.h',
                 'include/torch/csrc/utils/*.h',
                 'include/torch/csrc/tensor/*.h',
+                'include/torch/csrc/lazy/core/*.h',
                 'include/pybind11/*.h',
                 'include/pybind11/detail/*.h',
                 'include/TH/*.h*',
@@ -1006,8 +1039,6 @@ if __name__ == '__main__':
                 'include/THC/*.cuh',
                 'include/THC/*.h*',
                 'include/THC/generic/*.h',
-                'include/THCUNN/*.cuh',
-                'include/THCUNN/generic/*.h',
                 'include/THH/*.cuh',
                 'include/THH/*.h*',
                 'include/THH/generic/*.h',

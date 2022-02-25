@@ -112,26 +112,19 @@ using StringElementwiseOp = UnaryElementwiseWithArgsOp<
     ForEach<ScalarFunctor>,
     TypeMap>;
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(StringPrefix, StringElementwiseOp<Prefix>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(StringSuffix, StringElementwiseOp<Suffix>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     StringStartsWith,
     StringElementwiseOp<StartsWith, FixedType<bool>>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     StringEndsWith,
     StringElementwiseOp<EndsWith, FixedType<bool>>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     StringEquals,
     StringElementwiseOp<StrEquals, FixedType<bool>>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(StringJoin, StringJoinOp<CPUContext>);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(StringPrefix)
     .NumInputs(1)
     .NumOutputs(1)
@@ -148,7 +141,6 @@ and potentially invalid strings for variable-length encodings such as utf-8.
         "prefixes",
         "Tensor of std::string containing prefixes for each input.");
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(StringSuffix)
     .NumInputs(1)
     .NumOutputs(1)
@@ -165,7 +157,6 @@ and potentially invalid strings for variable-length encodings such as utf-8.
         "Tensor of std::string containing suffixes for each output.")
     .Arg("length", "Maximum size of the suffix, in bytes.");
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(StringStartsWith)
     .NumInputs(1)
     .NumOutputs(1)
@@ -177,7 +168,6 @@ Returns tensor of boolean of the same dimension of input.
     .Input(0, "strings", "Tensor of std::string.")
     .Output(0, "bools", "Tensor of bools of same shape as input.");
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(StringEndsWith)
     .NumInputs(1)
     .NumOutputs(1)
@@ -189,7 +179,6 @@ Returns tensor of boolean of the same dimension of input.
     .Input(0, "strings", "Tensor of std::string.")
     .Output(0, "bools", "Tensor of bools of same shape as input.");
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(StringEquals)
     .NumInputs(1)
     .NumOutputs(1)
@@ -201,7 +190,6 @@ Returns tensor of booleans of the same dimension as input.
     .Input(0, "strings", "Tensor of std::string.")
     .Output(0, "bools", "Tensor of bools of same shape as input.");
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(StringJoin)
     .NumInputs(1)
     .NumOutputs(1)
@@ -221,17 +209,11 @@ element is treated as a row.
         "1-D tensor of strings created by joining row elements from the "
         "input tensor.");
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 SHOULD_NOT_DO_GRADIENT(StringPrefix);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 SHOULD_NOT_DO_GRADIENT(StringSuffix);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 SHOULD_NOT_DO_GRADIENT(StringStartsWith);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 SHOULD_NOT_DO_GRADIENT(StringEndsWith);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 SHOULD_NOT_DO_GRADIENT(StringEquals);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 SHOULD_NOT_DO_GRADIENT(StringJoin);
 }
 } // namespace caffe2

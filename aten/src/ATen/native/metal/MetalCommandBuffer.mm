@@ -1,5 +1,5 @@
 #import <ATen/native/metal/MetalCommandBuffer.h>
-#import <ATen/native/metal/mpscnn/MPSCNNContext.h>
+#import <ATen/native/metal/MetalContext.h>
 #import <ATen/native/metal/mpscnn/MPSImage+Tensor.h>
 
 NSString* thread_local_storage_key = @"PTMetalCommandBuffer";
@@ -10,7 +10,7 @@ NSString* thread_local_storage_key = @"PTMetalCommandBuffer";
 
 + (MetalCommandBuffer*)newBuffer {
   MetalCommandBuffer* cb = [MetalCommandBuffer new];
-  cb->_buffer = [[MPSCNNContext sharedInstance].commandQueue commandBuffer];
+  cb->_buffer = [[MetalContext sharedInstance].commandQueue commandBuffer];
   cb->_images = [NSMutableArray new];
   cb->_delegates = [NSMutableSet new];
   return cb;

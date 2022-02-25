@@ -10,7 +10,6 @@
 namespace caffe2 {
 
 uint32_t wipe_cache() {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
   static uint32_t* wipe_buffer = nullptr;
   static size_t wipe_size = 0;
 
@@ -82,7 +81,6 @@ uint32_t wipe_cache() {
     CAFFE_ENFORCE(wipe_buffer != nullptr);
   }
   uint32_t hash = 0;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   for (uint32_t i = 0; i * sizeof(uint32_t) < wipe_size; i += 8) {
     // NOLINTNEXTLINE(clang-analyzer-core.uninitialized.Assign)
     hash ^= wipe_buffer[i];

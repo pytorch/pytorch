@@ -1,7 +1,8 @@
 # This makefile does nothing but delegating the actual building to cmake.
+PYTHON = python3
 
 all:
-	@mkdir -p build && cd build && cmake .. $(shell python ./scripts/get_python_cmake_flags.py) && $(MAKE)
+	@mkdir -p build && cd build && cmake .. $(shell $(PYTHON) ./scripts/get_python_cmake_flags.py) && $(MAKE)
 
 local:
 	@./scripts/build_local.sh
@@ -25,90 +26,99 @@ SHELLCHECK_GHA_GENERATED_FOLDER=.shellcheck_generated_gha
 shellcheck-gha:
 	@$(RM) -r $(SHELLCHECK_GHA_GENERATED_FOLDER)
 	tools/extract_scripts.py --out=$(SHELLCHECK_GHA_GENERATED_FOLDER)
-	tools/run_shellcheck.sh $(SHELLCHECK_GHA_GENERATED_FOLDER)
+	tools/linter/run_shellcheck.sh $(SHELLCHECK_GHA_GENERATED_FOLDER)
 
 generate-gha-workflows:
-	./.github/scripts/generate_linux_ci_workflows.py
+	.github/scripts/generate_ci_workflows.py
 	$(MAKE) shellcheck-gha
 
-setup_lint:
-	python tools/actions_local_runner.py --file .github/workflows/lint.yml \
-	 	--job 'flake8-py3' --step 'Install dependencies' --no-quiet
-	python tools/actions_local_runner.py --file .github/workflows/lint.yml \
-	 	--job 'cmakelint' --step 'Install dependencies' --no-quiet
-	python tools/actions_local_runner.py --file .github/workflows/lint.yml \
-	 	--job 'mypy' --step 'Install dependencies' --no-quiet
+shellcheck:
+	@$(PYTHON) tools/actions_local_runner.py \
+		--file .github/workflows/lint.yml \
+		--job 'shellcheck' \
+		--step "Regenerate workflows"
+	@$(PYTHON) tools/actions_local_runner.py \
+		--file .github/workflows/lint.yml \
+		--job 'shellcheck' \
+		--step "Assert that regenerating the workflows didn't change them"
+	@$(PYTHON) tools/actions_local_runner.py \
+		--file .github/workflows/lint.yml \
+		--job 'shellcheck' \
+		--step 'Extract scripts from GitHub Actions workflows'
+	@$(PYTHON) tools/actions_local_runner.py \
+		$(CHANGED_ONLY) \
+		--job 'shellcheck'
 
-# TODO: This is broken on MacOS (it downloads a Linux binary)
-	python tools/actions_local_runner.py --file .github/workflows/lint.yml \
-	 	--job 'quick-checks' --step 'Install ShellCheck' --no-quiet
-	pip install jinja2
+setup_lint:
+	$(PYTHON) tools/actions_local_runner.py --file .github/workflows/lint.yml \
+		--job 'flake8-py3' --step 'Install dependencies' --no-quiet
+	$(PYTHON) tools/actions_local_runner.py --file .github/workflows/lint.yml \
+		--job 'cmakelint' --step 'Install dependencies' --no-quiet
+	$(PYTHON) tools/actions_local_runner.py --file .github/workflows/lint.yml \
+		--job 'mypy' --step 'Install dependencies' --no-quiet
+	$(PYTHON) tools/actions_local_runner.py --file .github/workflows/lint.yml \
+		--job 'shellcheck' --step 'Install Jinja2' --no-quiet
+
+	@if [ "$$(uname)" = "Darwin" ]; then \
+		if [ -z "$$(which brew)" ]; then \
+			echo "'brew' is required to install ShellCheck, get it here: https://brew.sh "; \
+			exit 1; \
+		fi; \
+		brew install shellcheck; \
+	else \
+		$(PYTHON) tools/actions_local_runner.py --file .github/workflows/lint.yml \
+		--job 'shellcheck' --step 'Install ShellCheck' --no-quiet; \
+	fi
+	$(PYTHON) -mpip install jinja2 --user
+	$(PYTHON) -mpip install -r tools/linter/clang_tidy/requirements.txt --user
+	$(PYTHON) -m tools.linter.install.clang_tidy
 
 quick_checks:
-	@python tools/actions_local_runner.py \
-		--file .github/workflows/lint.yml \
-		--job 'quick-checks' \
-		--step 'Extract scripts from GitHub Actions workflows'
-
 # TODO: This is broken when 'git config submodule.recurse' is 'true' since the
 # lints will descend into third_party submodules
-	@python tools/actions_local_runner.py \
+	@$(PYTHON) tools/actions_local_runner.py \
 		--file .github/workflows/lint.yml \
 		--job 'quick-checks' \
 		--step 'Ensure no trailing spaces' \
 		--step 'Ensure no tabs' \
 		--step 'Ensure no non-breaking spaces' \
 		--step 'Ensure canonical include' \
+		--step 'Ensure no versionless Python shebangs' \
 		--step 'Ensure no unqualified noqa' \
+		--step 'Ensure GitHub PyPi dependencies are pinned' \
 		--step 'Ensure no unqualified type ignore' \
 		--step 'Ensure no direct cub include' \
-		--step 'Run ShellCheck' \
-		--step 'Ensure correct trailing newlines'
+		--step 'Ensure correct trailing newlines' \
+		--step 'Ensure no raw cuda api calls'
 
 flake8:
-	@python tools/actions_local_runner.py \
-		--file .github/workflows/lint.yml \
-		--file-filter '.py' \
+	@$(PYTHON) tools/actions_local_runner.py \
 		$(CHANGED_ONLY) \
-		--job 'flake8-py3' \
-		--step 'Run flake8'
-	@python tools/actions_local_runner.py \
-		--file .github/workflows/lint.yml \
-		--file-filter '.py' \
-		$(CHANGED_ONLY) \
-		--job 'flake8-py3' \
-		--step 'Fail if there were any warnings'
+		--job 'flake8-py3'
 
 mypy:
-	@if [ -z "$(CHANGED_ONLY)" ]; then \
-		python tools/actions_local_runner.py --file .github/workflows/lint.yml --job 'mypy' --step 'Run autogen'; \
-    else \
-        echo "mypy: Skipping typestub generation"; \
-    fi
-	@python tools/actions_local_runner.py \
-		--file .github/workflows/lint.yml \
-		--file-filter '.py' \
+	@$(PYTHON) tools/actions_local_runner.py \
 		$(CHANGED_ONLY) \
-		--job 'mypy' \
-		--step 'Run mypy'
+		--job 'mypy'
 
 cmakelint:
-	@python tools/actions_local_runner.py \
+	@$(PYTHON) tools/actions_local_runner.py \
 		--file .github/workflows/lint.yml \
 		--job 'cmakelint' \
 		--step 'Run cmakelint'
 
-clang_tidy:
-	echo "clang-tidy local lint is not yet implemented"
-	exit 1
+clang-tidy:
+	@$(PYTHON) tools/actions_local_runner.py \
+		$(CHANGED_ONLY) \
+		--job 'clang-tidy'
 
 toc:
-	@python tools/actions_local_runner.py \
+	@$(PYTHON) tools/actions_local_runner.py \
 		--file .github/workflows/lint.yml \
 		--job 'toc' \
 		--step "Regenerate ToCs and check that they didn't change"
 
-lint: flake8 mypy quick_checks cmakelint generate-gha-workflows
+lint: flake8 mypy quick_checks cmakelint shellcheck
 
 quicklint: CHANGED_ONLY=--changed-only
-quicklint: mypy flake8 mypy quick_checks cmakelint generate-gha-workflows
+quicklint: mypy flake8 quick_checks cmakelint shellcheck clang-tidy

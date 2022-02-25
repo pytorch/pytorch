@@ -8,7 +8,6 @@
 namespace torch {
 namespace jit {
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(CleanupPassTest, Basic) {
   // Tests stability of clean up passes when dealing with constant pooling
   // and constant propagation.

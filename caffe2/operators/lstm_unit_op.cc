@@ -1,11 +1,8 @@
 #include "lstm_unit_op.h"
 
 namespace caffe2 {
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(LSTMUnit, LSTMUnitOp<CPUContext>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(LSTMUnit)
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     .NumInputs(4, 5)
     .NumOutputs(2)
     .SetDoc(R"DOC(
@@ -23,11 +20,8 @@ value at X{t][n] >= seqLengths[n].
         "sequence_lengths",
         "When false, the sequence lengths input is left out, "
         "and all following inputs are shifted left by one.");
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(LSTMUnitGradient, LSTMUnitGradientOp<CPUContext>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(LSTMUnitGradient)
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     .NumInputs(8, 9)
     .NumOutputs(3)
     .Arg(
@@ -54,6 +48,5 @@ class GetLSTMUnitGradient : public GradientMakerBase {
     }
   }
 };
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_GRADIENT(LSTMUnit, GetLSTMUnitGradient);
 }

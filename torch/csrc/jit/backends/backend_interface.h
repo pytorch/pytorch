@@ -8,9 +8,8 @@ namespace jit {
 // Interface for a JIT backend.
 class TORCH_API PyTorchBackendInterface : public torch::CustomClassHolder {
  public:
-  PyTorchBackendInterface();
-  // NOLINTNEXTLINE(modernize-use-override)
-  virtual ~PyTorchBackendInterface();
+  PyTorchBackendInterface() noexcept;
+  ~PyTorchBackendInterface() override;
 
   // Returns true if the backend is available to process delegation calls.
   virtual bool is_available() = 0;

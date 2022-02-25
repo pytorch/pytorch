@@ -4,6 +4,7 @@
 #include "caffe2/operators/conv_op.h"
 #include "caffe2/operators/conv_op_cache_cudnn.h"
 #include "caffe2/operators/conv_pool_op_base.h"
+#include "caffe2/utils/GpuAtomics.cuh"
 
 // Adopted from caffe2 depthwise conv at
 // pytorch/caffe2/caffe2/operators/depthwise_3x3_conv_op_cudnn.cu
@@ -220,7 +221,7 @@ __global__ void DepthwiseConv3dBackpropFilterGPUKernelNCHW(
             T* addr = filter_backprop +
                 (in_d * filter_rows * filter_cols * filter_length) +
                 (f_l * filter_rows * filter_cols) + (f_c + filter_cols * f_r);
-            atomicAdd(addr, partial_sum);
+            gpu_atomic_add(addr, partial_sum);
           }
         }
       }
@@ -251,7 +252,7 @@ __global__ void DepthwiseConv3dBackpropFilterGPUKernelNCHW(
               T* addr = filter_backprop +
                   (in_d * filter_rows * filter_cols * filter_length) +
                   (f_l * filter_rows * filter_cols) + (f_c + filter_cols * f_r);
-              atomicAdd(addr, partial_sum);
+              gpu_atomic_add(addr, partial_sum);
             }
           }
         }

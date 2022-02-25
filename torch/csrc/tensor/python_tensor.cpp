@@ -55,7 +55,6 @@ struct PyTensorType {
 static_assert(std::is_standard_layout<PyTensorType>::value, "PyTensorType must be standard layout");
 
 // This is always an instance of VariableType
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static PyTensorType* default_tensor_type;
 
 static void py_bind_tensor_types(const std::vector<PyTensorType*>& tensor_types);
@@ -151,7 +150,6 @@ static struct PyGetSetDef metaclass_properties[] = {
   {nullptr}
 };
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static PyTypeObject metaclass = {
   PyVarObject_HEAD_INIT(nullptr, 0)
   "torch.tensortype",                          /* tp_name */
@@ -168,7 +166,6 @@ static void py_initialize_metaclass(PyTypeObject& metaclass) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static PyTypeObject tensor_type_prototype = {
   PyVarObject_HEAD_INIT(&metaclass, 0)
   nullptr,                                     /* tp_name */
@@ -277,10 +274,12 @@ static THPObjectPtr get_tensor_dict() {
 // an use-after-free error. This happens for example if we embed CPython and
 // call Py_Finalize inside an atexit() function which was registered before
 // importing torch.
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static std::vector<PyTensorType*> tensor_types;
 
 void set_default_tensor_type(PyTensorType* type) {
+  // Make sure this is not a null pointer before accessing it.
+  TORCH_INTERNAL_ASSERT(type, "Invalid type object");
+
   if (!at::isFloatingType(type->get_scalar_type())) {
     throw TypeError("only floating-point types are supported as the default type");
   }
@@ -407,8 +406,16 @@ void py_set_default_dtype(PyObject* obj) {
     auto backend = default_tensor_type->get_backend();
     auto it = std::find_if(tensor_types.begin(), tensor_types.end(),
       [backend, scalar_type](PyTensorType *x) {
+        TORCH_CHECK(
+          !isQIntType(scalar_type),
+          "Only floating-point types are supported as the default type, got ",
+          scalar_type);
         return x->get_backend() == backend && x->get_scalar_type() == scalar_type;
       });
+    // Make sure the iterator is valid before dereferencing it.
+    TORCH_INTERNAL_ASSERT(
+      it != tensor_types.end(),
+      "Tensor dtype not found for scalar type ", scalar_type);
     set_default_tensor_type(*it);
   } else {
     throw TypeError("invalid dtype object");

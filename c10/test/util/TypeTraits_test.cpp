@@ -47,7 +47,6 @@ class MyClass {};
 struct Functor {
   void operator()() {}
 };
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 auto lambda = []() {};
 // func() and func__ just exists to silence a compiler warning about lambda
 // being unused
@@ -55,7 +54,6 @@ bool func() {
   lambda();
   return true;
 }
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 bool func__ = func();
 
 static_assert(is_function_type<void()>::value, "");

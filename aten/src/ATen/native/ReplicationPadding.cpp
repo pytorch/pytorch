@@ -1,6 +1,7 @@
 #include <ATen/ATen.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/Parallel.h>
+#include <c10/util/irange.h>
 #include <algorithm>
 
 namespace at {
@@ -64,13 +65,12 @@ TORCH_META_FUNC(replication_pad1d_backward) (
   {
     // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores)
     nbatch = input.size(0);
+    (void)nbatch;
     dimw++;
     dimslices++;
   }
 
   /* sizes */
-  // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores,clang-diagnostic-unused-variable)
-  int64_t nslices = input.size(dimslices);
   int64_t iwidth = input.size(dimw);
   int64_t owidth  = iwidth + pad_l + pad_r;
 
@@ -149,7 +149,6 @@ static inline void shapeCheck3d(
       "Expected 4D or 5D (batch mode) tensor with possibly 0 batch size and other non-zero dimensions for input, but got: ",
       input.sizes());
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   if (input.dim() == 5)
   {
     dimw++;
@@ -185,7 +184,6 @@ TORCH_META_FUNC(replication_pad3d) (
   int64_t ptop = paddingSize[2];
   int64_t pbottom = paddingSize[3];
   int64_t pfront = paddingSize[4];
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   int64_t pback = paddingSize[5];
   int64_t dimw = 3;
   int64_t dimh = 2;
@@ -195,7 +193,6 @@ TORCH_META_FUNC(replication_pad3d) (
 
   shapeCheck3d(input, pleft, pright, ptop, pbottom, pfront, pback);
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   if (input.dim() == 5)
   {
     nbatch = input.size(0);
@@ -241,8 +238,7 @@ static void replication_pad1d_out_frame(
   at::parallel_for(0, nslices, 0, [&](int64_t start, int64_t end) {
     // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     long ip_x;
-    for (auto k = start; k < end; k++)
-    {
+    for (const auto k : c10::irange(start, end)) {
       for (long j = 0; j < owidth; j++) {
         if (j < pad_l) {
           ip_x = pad_l;
@@ -271,8 +267,7 @@ static void replication_pad1d_out_batch(
     int nbatch)
 {
   at::parallel_for(0, nbatch, 0, [&](int64_t start, int64_t end) {
-    for (auto p = start; p < end; p++)
-    {
+    for (const auto p : c10::irange(start, end)) {
       scalar_t *input_p = input_data+p*nslices*iwidth;
       scalar_t *output_p = output_data+p*nslices*owidth;
       replication_pad1d_out_frame(input_p, output_p, nslices, iwidth, owidth, pad_l, pad_r);
@@ -294,8 +289,7 @@ static void replication_pad1d_backward_out_frame(
   at::parallel_for(0, nslices, 0, [&](int64_t start, int64_t end) {
     // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     long ip_x;
-    for (auto k = start; k < end; k++)
-    {
+    for (const auto k : c10::irange(start, end)) {
       for (long j = 0; j < owidth; j++) {
         if (j < pad_l) {
           ip_x = pad_l;
@@ -324,8 +318,7 @@ static void replication_pad1d_backward_out_batch(
     int nbatch)
 {
   at::parallel_for(0, nbatch, 0, [&](int64_t start, int64_t end) {
-    for (auto p = start; p < end; p++)
-    {
+    for (const auto p : c10::irange(start, end)) {
       scalar_t *ginput_p = ginput_data + p * nslices * iwidth;
       scalar_t *goutput_p = goutput_data + p * nslices * owidth;
       replication_pad1d_backward_out_frame(ginput_p, goutput_p,
@@ -351,10 +344,9 @@ static void replication_pad2d_out_frame(
   at::parallel_for(0, nslices, 0, [&](int64_t start, int64_t end) {
     // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     int64_t ip_x, ip_y;
-    for (auto k = start; k < end; k++)
-    {
-      for (int64_t i = 0; i < oheight; i++) {
-        for (int64_t j = 0; j < owidth; j++) {
+    for (const auto k : c10::irange(start, end)) {
+      for (const auto i : c10::irange(oheight)) {
+        for (const auto j : c10::irange(owidth)) {
           if (j < pad_l) {
             ip_x = pad_l;
           } else if (j >= pad_l && j < iwidth + pad_l) {
@@ -393,8 +385,7 @@ static void replication_pad2d_out_batch(
     int nbatch)
 {
   at::parallel_for(0, nbatch, 0, [&](int64_t start, int64_t end) {
-    for (auto p = start; p < end; p++)
-    {
+    for (const auto p : c10::irange(start, end)) {
       scalar_t *input_p = input_data+p*nslices*iwidth*iheight;
       scalar_t *output_p = output_data+p*nslices*owidth*oheight;
       replication_pad2d_out_frame(input_p, output_p, nslices,
@@ -420,10 +411,9 @@ static void replication_pad2d_backward_out_frame(
   at::parallel_for(0, nslices, 0, [&](int64_t start, int64_t end) {
     // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     int64_t ip_x, ip_y;
-    for (auto k = start; k < end; k++)
-    {
-      for (int64_t i = 0; i < oheight; i++) {
-        for (int64_t j = 0; j < owidth; j++) {
+    for (const auto k : c10::irange(start, end)) {
+      for (const auto i : c10::irange(oheight)) {
+        for (const auto j : c10::irange(owidth)) {
           if (j < pad_l) {
             ip_x = pad_l;
           } else if (j >= pad_l && j < iwidth + pad_l) {
@@ -462,8 +452,7 @@ static void replication_pad2d_backward_out_batch(
     int nbatch)
 {
   at::parallel_for(0, nbatch, 0, [&](int64_t start, int64_t end) {
-    for (auto p = start; p < end; p++)
-    {
+    for (const auto p : c10::irange(start, end)) {
       scalar_t *ginput_p = ginput_data + p * nslices * iheight * iwidth;
       scalar_t *goutput_p = goutput_data + p * nslices * oheight * owidth;
       replication_pad2d_backward_out_frame(ginput_p, goutput_p, nslices,
@@ -576,10 +565,10 @@ static void replication_pad3d_out_frame(
   at::parallel_for(0, nslices, 0, [&](int64_t start, int64_t end) {
     // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     int64_t ip_x, ip_y, ip_z;
-    for (auto k = start; k < end; k++) {
-      for (int64_t z = 0; z < odepth; z++) {
-        for (int64_t i = 0; i < oheight; i++) {
-          for (int64_t j = 0; j < owidth; j++) {
+    for (const auto k : c10::irange(start, end)) {
+      for (const auto z : c10::irange(odepth)) {
+        for (const auto i : c10::irange(oheight)) {
+          for (const auto j : c10::irange(owidth)) {
             if (j < pleft) {
               ip_x = pleft;
             } else if (j >= pleft && j < iwidth + pleft) {
@@ -631,8 +620,7 @@ static void replication_pad3d_out_batch(
     int nbatch)
 {
   at::parallel_for(0, nbatch, 0, [&](int64_t start, int64_t end) {
-    for (auto p = start; p < end; p++)
-    {
+    for (const auto p : c10::irange(start, end)) {
       scalar_t *input_p = input_data + p * nslices * iwidth * iheight * idepth;
       scalar_t *output_p = output_data + p * nslices * owidth * oheight * odepth;
       replication_pad3d_out_frame(input_p, output_p, nslices,
@@ -662,10 +650,10 @@ static void replication_pad3d_backward_out_frame(
   at::parallel_for(0, nslices, 0, [&](int64_t start, int64_t end) {
     // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     int64_t ip_x, ip_y, ip_z;
-    for (auto k = start; k < end; k++) {
-      for (int64_t z = 0; z < odepth; z++) {
-        for (int64_t i = 0; i < oheight; i++) {
-          for (int64_t j = 0; j < owidth; j++) {
+    for (const auto k : c10::irange(start, end)) {
+      for (const auto z : c10::irange(odepth)) {
+        for (const auto i : c10::irange(oheight)) {
+          for (const auto j : c10::irange(owidth)) {
             if (j < pleft) {
               ip_x = pleft;
             } else if (j >= pleft && j < iwidth + pleft) {
@@ -717,8 +705,7 @@ static void replication_pad3d_backward_out_batch(
     int nbatch)
 {
   at::parallel_for(0, nbatch, 0, [&](int64_t start, int64_t end) {
-    for (auto p = start; p < end; p++)
-    {
+    for (const auto p : c10::irange(start, end)) {
       scalar_t *ginput_p = ginput_data + p * nslices * idepth * iheight * iwidth;
       scalar_t *goutput_p = goutput_data + p * nslices * odepth * oheight * owidth;
       replication_pad3d_backward_out_frame(ginput_p, goutput_p, nslices,
@@ -740,7 +727,6 @@ Tensor& replication_pad3d_backward_out_cpu_template(
   int ptop = paddingSize[2];
   int pbottom = paddingSize[3];
   int pfront = paddingSize[4];
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   int pback = paddingSize[5];
   int dimw = 3;
   int dimh = 2;
@@ -748,7 +734,6 @@ Tensor& replication_pad3d_backward_out_cpu_template(
   int dimslices = 0;
   int64_t nbatch = 1;
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   if (input.dim() == 5)
   {
     nbatch = input.size(0);
@@ -1034,7 +1019,6 @@ TORCH_IMPL_FUNC(replication_pad3d_out_cpu) (
   int64_t ptop = paddingSize[2];
   int64_t pbottom = paddingSize[3];
   int64_t pfront = paddingSize[4];
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   int64_t pback = paddingSize[5];
   int64_t dimw = 3;
   int64_t dimh = 2;
@@ -1045,7 +1029,6 @@ TORCH_IMPL_FUNC(replication_pad3d_out_cpu) (
   /* get contiguous input */
   auto input = input_.contiguous();
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   if (input.dim() == 5) {
     nbatch = input.size(0);
     dimw++;

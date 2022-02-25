@@ -6,7 +6,7 @@
 #include <torch/nn/modules/common.h>
 #include <torch/nn/modules/linear.h>
 
-#include <torch/csrc/WindowsTorchApiMacro.h>
+#include <torch/csrc/Export.h>
 
 namespace torch {
 namespace nn {
@@ -570,12 +570,17 @@ TORCH_MODULE(GLU);
 // NOLINTNEXTLINE(bugprone-exception-escape)
 class TORCH_API GELUImpl : public torch::nn::Cloneable<GELUImpl> {
  public:
+  explicit GELUImpl(GELUOptions options_ = {});
+
   Tensor forward(const Tensor& input);
 
   void reset() override;
 
   /// Pretty prints the `GELU` module into the given `stream`.
   void pretty_print(std::ostream& stream) const override;
+
+  /// The options with which this `Module` was constructed.
+  GELUOptions options;
 };
 
 /// A `ModuleHolder` subclass for `GELUImpl`.
@@ -605,6 +610,28 @@ class TORCH_API SiLUImpl : public torch::nn::Cloneable<SiLUImpl> {
 /// provides, or the documentation for `ModuleHolder` to learn about PyTorch's
 /// module storage semantics.
 TORCH_MODULE(SiLU);
+
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Mish ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+/// Applies mish over a given input.
+/// See https://pytorch.org/docs/master/nn.html#torch.nn.Mish to learn
+/// about the exact behavior of this module.
+// NOLINTNEXTLINE(bugprone-exception-escape)
+class TORCH_API MishImpl : public torch::nn::Cloneable<MishImpl> {
+ public:
+  Tensor forward(const Tensor& input);
+
+  void reset() override;
+
+  /// Pretty prints the `Mish` module into the given `stream`.
+  void pretty_print(std::ostream& stream) const override;
+};
+
+/// A `ModuleHolder` subclass for `MishImpl`.
+/// See the documentation for `MishImpl` class to learn what methods it
+/// provides, or the documentation for `ModuleHolder` to learn about PyTorch's
+/// module storage semantics.
+TORCH_MODULE(Mish);
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Sigmoid ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -827,9 +854,10 @@ class TORCH_API MultiheadAttentionImpl
 
   std::tuple<Tensor, Tensor> forward(const Tensor& query, const Tensor& key,
                  const Tensor& value, const Tensor& key_padding_mask = {},
-                 bool need_weights = true, const Tensor& attn_mask = {});
+                 bool need_weights = true, const Tensor& attn_mask = {},
+                 bool average_attn_weights = true);
  protected:
-  FORWARD_HAS_DEFAULT_ARGS({3, AnyValue(Tensor())}, {4, AnyValue(true)}, {5, AnyValue(Tensor())})
+  FORWARD_HAS_DEFAULT_ARGS({3, AnyValue(Tensor())}, {4, AnyValue(true)}, {5, AnyValue(Tensor())}, {6, AnyValue(true)})
 
  public:
   void reset() override;

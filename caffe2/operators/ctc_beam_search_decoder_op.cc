@@ -147,9 +147,7 @@ bool CTCBeamSearchDecoderOp<CPUContext>::RunOnDevice() {
   return true;
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(CTCBeamSearchDecoder, CTCBeamSearchDecoderOp<CPUContext>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(CTCBeamSearchDecoder)
     .NumInputs(1, 2)
     .NumOutputs(2, 3)
@@ -188,7 +186,6 @@ OPERATOR_SCHEMA(CTCBeamSearchDecoder)
         "Probability vector, size (total_decoded_outputs). "
         "Each index stores final output probability of its corresponding batch item.")
     .InheritOnnxSchema();
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 SHOULD_NOT_DO_GRADIENT(CTCBeamSearchDecoder);
 
 } // namespace caffe2

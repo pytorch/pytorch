@@ -1,14 +1,16 @@
 #include <climits>
 
+#include <c10/core/impl/alloc_cpu.h>
 #include <c10/mobile/CPUProfilingAllocator.h>
 #include <c10/util/irange.h>
+
+#include <map>
+#include <set>
 
 namespace c10 {
 
 namespace {
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 thread_local AllocationPlanner* allocation_planner{nullptr};
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 thread_local CPUProfilingAllocator* profiling_allocator{nullptr};
 
 struct MemBlock {

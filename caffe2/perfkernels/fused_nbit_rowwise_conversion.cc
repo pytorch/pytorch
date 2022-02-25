@@ -14,14 +14,13 @@ namespace caffe2 {
 
 void FloatToFused8BitRowwiseQuantized__base(
     const float* input,
-    int input_rows,
+    size_t input_rows,
     int input_columns,
     std::uint8_t* output) {
   constexpr float kEpsilon = 1e-8f;
 
   // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
   int output_columns = input_columns + 2 * sizeof(float);
-  // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
   for (std::size_t row = 0; row < input_rows; ++row) {
     const float* input_row = input + row * input_columns;
     std::uint8_t* output_row = output + row * output_columns;
@@ -34,7 +33,6 @@ void FloatToFused8BitRowwiseQuantized__base(
         *std::max_element(input_row, input_row + input_columns);
     float range = maximum_element - minimum_element;
 
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     output_row_scale_bias[0] = range / 255.0f;
     output_row_scale_bias[1] = minimum_element;
     const auto inverse_scale = 255.0f / (range + kEpsilon);
@@ -48,13 +46,12 @@ void FloatToFused8BitRowwiseQuantized__base(
 
 void Fused8BitRowwiseQuantizedToFloat__base(
     const std::uint8_t* input,
-    int input_rows,
+    size_t input_rows,
     int input_columns,
     float* output) {
   // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
   int output_columns = input_columns - 2 * sizeof(float);
 
-  // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
   for (std::size_t row = 0; row < input_rows; ++row) {
     const std::uint8_t* input_row = input + row * input_columns;
     const float* input_row_scale_bias =
@@ -72,11 +69,11 @@ void Fused8BitRowwiseQuantizedToFloat__base(
 
 void FloatToFused8BitRowwiseQuantized(
     const float* input,
-    int input_rows,
+    size_t input_rows,
     int input_columns,
     std::uint8_t* output) {
 #ifdef USE_FBGEMM
-  fbgemm::FloatToFused8BitRowwiseQuantizedSBFloat(
+  fbgemm::FloatOrHalfToFused8BitRowwiseQuantizedSBFloat<float>(
       input, input_rows, input_columns, output);
 #else
   FloatToFused8BitRowwiseQuantized__base(
@@ -86,11 +83,11 @@ void FloatToFused8BitRowwiseQuantized(
 
 void Fused8BitRowwiseQuantizedToFloat(
     const std::uint8_t* input,
-    int input_rows,
+    size_t input_rows,
     int input_columns,
     float* output) {
 #ifdef USE_FBGEMM
-  fbgemm::Fused8BitRowwiseQuantizedSBFloatToFloat(
+  fbgemm::Fused8BitRowwiseQuantizedSBFloatToFloatOrHalf<float>(
       input, input_rows, input_columns, output);
 #else
   Fused8BitRowwiseQuantizedToFloat__base(
@@ -101,16 +98,14 @@ void Fused8BitRowwiseQuantizedToFloat(
 void FloatToFusedNBitRowwiseQuantizedSBHalf__base(
     int bit_rate,
     const float* input,
-    int input_rows,
+    size_t input_rows,
     int input_columns,
     std::uint8_t* output) {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   int num_elem_per_byte = 8 / bit_rate;
   int output_columns =
       // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
       (input_columns + num_elem_per_byte - 1) / num_elem_per_byte +
       2 * sizeof(at::Half);
-  // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
   for (std::size_t row = 0; row < input_rows; ++row) {
     const float* input_row = input + row * input_columns;
     std::uint8_t* output_row = output + row * output_columns;
@@ -162,16 +157,14 @@ void FloatToFusedNBitRowwiseQuantizedSBHalf__base(
 void FusedNBitRowwiseQuantizedSBHalfToFloat__base(
     int bit_rate,
     const std::uint8_t* input,
-    int input_rows,
+    size_t input_rows,
     int input_columns,
     float* output) {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   int num_elem_per_byte = 8 / bit_rate;
   int output_columns =
       // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
       (input_columns - 2 * sizeof(at::Half)) * num_elem_per_byte;
 
-  // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
   for (std::size_t row = 0; row < input_rows; ++row) {
     const std::uint8_t* input_row = input + row * input_columns;
     const at::Half* input_row_scale_bias = reinterpret_cast<const at::Half*>(
@@ -195,11 +188,11 @@ void FusedNBitRowwiseQuantizedSBHalfToFloat__base(
 void FloatToFusedNBitRowwiseQuantizedSBHalf(
     int bit_rate,
     const float* input,
-    int input_rows,
+    size_t input_rows,
     int input_columns,
     std::uint8_t* output) {
 #ifdef USE_FBGEMM
-  fbgemm::FloatToFusedNBitRowwiseQuantizedSBHalf(
+  fbgemm::FloatOrHalfToFusedNBitRowwiseQuantizedSBHalf<float>(
       bit_rate, input, input_rows, input_columns, output);
 #else
   FloatToFusedNBitRowwiseQuantizedSBHalf__base(
@@ -210,11 +203,11 @@ void FloatToFusedNBitRowwiseQuantizedSBHalf(
 void FusedNBitRowwiseQuantizedSBHalfToFloat(
     int bit_rate,
     const std::uint8_t* input,
-    int input_rows,
+    size_t input_rows,
     int input_columns,
     float* output) {
 #ifdef USE_FBGEMM
-  fbgemm::FusedNBitRowwiseQuantizedSBHalfToFloat(
+  fbgemm::FusedNBitRowwiseQuantizedSBHalfToFloatOrHalf<float>(
       bit_rate, input, input_rows, input_columns, output);
 #else
   FusedNBitRowwiseQuantizedSBHalfToFloat__base(

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <c10/util/irange.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/ir/subgraph_matcher.h>
 #include <torch/csrc/jit/jit_log.h>
@@ -37,15 +38,17 @@ std::string getAtenOpPattern(
   std::string aten_op_pattern = graph_header;
   if (scalar_args) {
     for (const auto& extra_arg : _extra_op_args) {
-      aten_op_pattern += R"(
-          )" +
-          // NOLINTNEXTLINE(performance-inefficient-string-concatenation)
-          extra_arg + "_scalar = aten::item(" + extra_arg + ")";
+      aten_op_pattern
+          .append(R"(
+          )")
+          .append(extra_arg)
+          .append("_scalar = aten::item(")
+          .append(extra_arg)
+          .append(")");
     }
 
     for (auto& _extra_op_arg : _extra_op_args) {
-      // NOLINTNEXTLINE(performance-inefficient-string-concatenation)
-      _extra_op_arg = _extra_op_arg + "_scalar";
+      _extra_op_arg.append("_scalar");
     }
   }
   const auto& extra_op_arg_list = getExtraArgList(_extra_op_args);
@@ -71,7 +74,8 @@ std::string getQuantizeForScalar(const std::string& value) {
           )" +
       value + "_tensor : Tensor = aten::scalar_tensor(" + value + ", " + value +
       "_float_scalar_type";
-  for (auto i = 0; i < 3; ++i) {
+  for (const auto i : c10::irange(3)) {
+    (void)i; // Suppress unused variable warning
     quantize_pattern += ", " + value + "_none";
   }
   quantize_pattern += ")";
@@ -171,8 +175,8 @@ QuantFusionInfo getClampOpFusionInfo(
   op_pattern += R"(
           %r = )";
   std::vector<std::string> scalar_extra_args;
+  scalar_extra_args.reserve(extra_op_args.size());
   for (const auto& arg : extra_op_args) {
-    // NOLINTNEXTLINE(performance-inefficient-vector-operation)
     scalar_extra_args.push_back(arg + "_scalar");
   }
   op_pattern +=

@@ -50,7 +50,7 @@ std::unique_ptr<ScriptRemoteCall> ScriptRemoteCall::fromIValues(
   }
 }
 
-Message ScriptRemoteCall::toMessageImpl() && {
+c10::intrusive_ptr<Message> ScriptRemoteCall::toMessageImpl() && {
   std::vector<IValue> ivalues;
   ScriptCall::toIValues(ivalues);
   ivalues.emplace_back(retRRefId_.toIValue());
@@ -60,7 +60,7 @@ Message ScriptRemoteCall::toMessageImpl() && {
   auto payload = jit::pickle(
       c10::ivalue::Tuple::create(std::move(ivalues)), &tensor_table);
 
-  return Message(
+  return c10::make_intrusive<Message>(
       std::move(payload),
       std::move(tensor_table),
       MessageType::SCRIPT_REMOTE_CALL);
@@ -76,7 +76,7 @@ std::unique_ptr<ScriptRemoteCall> ScriptRemoteCall::fromMessage(
       payload_size,
       *RpcAgent::getCurrentRpcAgent()->getTypeResolver(),
       message.tensors());
-  auto values = value.toTuple()->elements();
+  auto values = value.toTupleRef().elements().vec();
   return fromIValues(values);
 }
 

@@ -5,6 +5,7 @@
 #include <ATen/core/jit_type.h>
 #include <c10/util/Bitset.h>
 #include <c10/core/DispatchKeySet.h>
+#include <c10/util/irange.h>
 #include <ATen/core/Variadic.h>
 #include <ATen/core/stack.h>
 
@@ -55,17 +56,34 @@ namespace detail {
     void operator()(const at::Tensor& x) {
       ts = ts | x.key_set();
     }
+    void operator()(const c10::optional<at::Tensor>& x) {
+      if (x.has_value()) {
+        ts = ts | x->key_set();
+      }
+    }
     void operator()(at::ArrayRef<at::Tensor> xs) {
       for (const auto& x : xs) {
         ts = ts | x.key_set();
       }
     }
-    void operator()(at::Generator gen) {
+    // Tensor?[] translates to this case.
+    void operator()(const c10::List<c10::optional<at::Tensor>>& xs) {
+      for (c10::optional<at::Tensor> x : xs) {
+        if (x.has_value()) {
+          ts = ts | x.value().key_set();
+        }
+      }
+    }
+    void operator()(at::ArrayRef<c10::optional<at::Tensor>> xs) {
+      // Just checking that the handling of Tensor?[] didn't change.
+      TORCH_INTERNAL_ASSERT(false);
+    }
+    void operator()(const at::Generator& gen) {
       if (gen.defined()) {
         ts = ts | gen.key_set();
       }
     }
-    void operator()(c10::optional<at::Generator> gen) {
+    void operator()(const c10::optional<at::Generator>& gen) {
       if (gen.has_value() && gen->defined()) {
         ts = ts | gen->key_set();
       }
@@ -128,16 +146,24 @@ public:
           ks = ks | tensor.key_set();
         }
       }
+      // Tensor?[] translates to a c10::List<IValue> so we need to peek inside
+      else if (C10_UNLIKELY(ivalue.isList())) {
+        for (const auto& elt : ivalue.toListRef()) {
+          if (elt.isTensor()) {
+            ks = ks | elt.toTensor().key_set();
+          }
+        }
+      }
     });
     // Keys that are fallthrough should be skipped
     return impl::computeDispatchKeySet(ks, nonFallthroughKeys_);
   }
 
   template<class... Args>
-  DispatchKeySet getDispatchKeySetUnboxed(DispatchKeySet eligibleKeys, const Args&... args) const {
+  DispatchKeySet getDispatchKeySetUnboxed(const Args&... args) const {
     auto ks = detail::multi_dispatch_key_set(args...);
     // Keys that are fallthrough should be skipped
-    return impl::computeDispatchKeySet(ks, nonFallthroughKeys_ & eligibleKeys);
+    return impl::computeDispatchKeySet(ks, nonFallthroughKeys_);
   }
 
   void setOperatorHasFallthroughForKey(DispatchKey k, bool has_fallthrough);
@@ -151,8 +177,14 @@ private:
         "The function schema has ", schema.arguments().size(),
         " arguments but this PyTorch build only supports ", c10::utils::bitset::NUM_BITS());
     c10::utils::bitset dispatch_arg_indices_reverse;
-    for (size_t index = 0; index < schema.arguments().size(); ++index) {
-      if (schema.arguments()[index].type()->isSubtypeOf(TensorType::get()) || schema.arguments()[index].type()->isSubtypeOf(ListType::ofTensors())) {
+    for (const auto index : c10::irange(schema.arguments().size())) {
+      if (schema.arguments()[index].type()->isSubtypeOf(*TensorType::get()) ||
+          schema.arguments()[index].type()->isSubtypeOf(
+              *ListType::ofTensors()) ||
+          schema.arguments()[index].type()->isSubtypeOf(
+              *ListType::ofOptionalTensors()) ||
+          schema.arguments()[index].type()->isSubtypeOf(
+              *OptionalType::ofTensor())) {
         dispatch_arg_indices_reverse.set(schema.arguments().size() - 1 - index);
       }
     }

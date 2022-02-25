@@ -3,7 +3,6 @@
 namespace caffe2 {
 namespace {
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(GatherRangesToDense)
     .NumInputs(2, 3)
     .NumOutputs(1, INT_MAX)
@@ -101,9 +100,7 @@ are sorted by the corresponding KEY.
       return out;
     });
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(GatherRangesToDense, GatherRangesToDenseOp<CPUContext>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 NO_GRADIENT(GatherRangesToDense);
 
 } // namespace

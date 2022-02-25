@@ -1,10 +1,14 @@
+# Owner(s): ["oncall: fx"]
+
 import os
 import sys
 
 import torch
 from torch.fx import symbolic_trace, subgraph_rewriter
-
+from torch.fx.annotate import annotate
 # Make the helper files in test/ importable
+from torch.fx.experimental.rewriter import RewritingTracer
+
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.append(pytorch_test_dir)
 from torch.testing._internal.jit_utils import JitTestCase
@@ -434,3 +438,56 @@ class TestSubgraphRewriter(JitTestCase):
 
         submod = traced.get_submodule("submod")
         self.assertEqual(type(submod), torch.nn.ReLU)
+
+    def test_subgraph_rewriter_annotations_int(self):
+
+        class M1(torch.nn.Module):
+            def forward(self, x):
+                y: int = x
+                return torch.add(x, y)
+
+        class M2(torch.nn.Module):
+            def forward(self, x):
+                y = annotate(x, int)
+                return torch.add(x, y)
+
+        ast_rewriter = RewritingTracer()
+        graph = ast_rewriter.trace(M1())
+
+        module = M2()
+        symbolic_traced: torch.fx.GraphModule = symbolic_trace(module)
+        for n, m in zip(symbolic_traced.graph.nodes, graph.nodes):
+            if n.op == 'placeholder':
+                assert n.type == int
+                assert m.type == int
+
+    def test_subgraph_writer_replace_consecutive_submodules(self):
+
+        def f(x):
+            x = torch.sigmoid(x)
+            x = torch.sigmoid(x)
+            return torch.sigmoid(x)
+
+        def pattern(x):
+            return torch.sigmoid(x)
+
+        def replacement(x):
+            return torch.exp(x)
+
+        def comparison(x):
+            x = torch.exp(x)
+            x = torch.exp(x)
+            return torch.exp(x)
+
+        traced = symbolic_trace(f)
+        comparison_fn = symbolic_trace(comparison)
+
+        x = torch.randn(3, 4)
+
+        subgraph_rewriter.replace_pattern(traced, pattern, replacement)
+
+        traced.graph.lint()
+
+        ref_outs = comparison_fn(x)
+        test_outs = traced.forward(x)
+        self.assertEqual(ref_outs, test_outs)

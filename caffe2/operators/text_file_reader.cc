@@ -141,8 +141,6 @@ class TextFileReaderReadOp : public Operator<CPUContext> {
                   (field > 0 && token.startDelimId == 1),
               "Invalid number of columns at row ",
               instance->rowsRead + rowsRead + 1);
-          // NOLINTNEXTLINE(clang-diagnostic-unused-variable)
-          const auto& meta = instance->fieldMetas[field];
           char*& data = datas[field];
           convert(
               (TensorProto_DataType)instance->fieldTypes[field],
@@ -170,12 +168,9 @@ class TextFileReaderReadOp : public Operator<CPUContext> {
 
 CAFFE_KNOWN_TYPE(std::unique_ptr<TextFileReaderInstance>);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(CreateTextFileReader, CreateTextFileReaderOp);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(TextFileReaderRead, TextFileReaderReadOp);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(CreateTextFileReader)
     .NumInputs(0)
     .NumOutputs(1)
@@ -188,7 +183,6 @@ OPERATOR_SCHEMA(CreateTextFileReader)
         "List with type of each field. Type enum is found at core.DataType.")
     .Output(0, "handler", "Pointer to the created TextFileReaderInstance.");
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(TextFileReaderRead)
     .NumInputs(1)
     .NumOutputs(1, INT_MAX)
@@ -200,9 +194,7 @@ OPERATOR_SCHEMA(TextFileReaderRead)
     .Input(0, "handler", "Pointer to an existing TextFileReaderInstance.")
     .Arg("batch_size", "Maximum number of rows to read.");
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 NO_GRADIENT(CreateTextFileReader);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 NO_GRADIENT(TextFileReaderRead);
 
 } // namespace caffe2

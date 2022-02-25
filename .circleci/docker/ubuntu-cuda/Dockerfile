@@ -24,7 +24,7 @@ ARG KATEX
 ADD ./common/install_katex.sh install_katex.sh
 RUN bash ./install_katex.sh && rm install_katex.sh
 
-# Install conda and other packages (e.g., numpy, coverage, pytest)
+# Install conda and other packages (e.g., numpy, pytest)
 ENV PATH /opt/conda/bin:$PATH
 ARG ANACONDA_PYTHON_VERSION
 ADD ./common/install_conda.sh install_conda.sh
@@ -61,21 +61,26 @@ RUN if [ -n "${VISION}" ]; then bash ./install_vision.sh; fi
 RUN rm install_vision.sh
 ENV INSTALLED_VISION ${VISION}
 
+ADD ./common/install_openssl.sh install_openssl.sh
+ENV OPENSSL_ROOT_DIR /opt/openssl
+RUN bash ./install_openssl.sh
+
+# (optional) Install non-default CMake version
+ARG CMAKE_VERSION
+ADD ./common/install_cmake.sh install_cmake.sh
+RUN if [ -n "${CMAKE_VERSION}" ]; then bash ./install_cmake.sh; fi
+RUN rm install_cmake.sh
+
 # Install ccache/sccache (do this last, so we get priority in PATH)
 ADD ./common/install_cache.sh install_cache.sh
 ENV PATH /opt/cache/bin:$PATH
 RUN bash ./install_cache.sh && rm install_cache.sh
-ENV CUDA_NVCC_EXECUTABLE=/opt/cache/lib/nvcc
+ENV CMAKE_CUDA_COMPILER_LAUNCHER=/opt/cache/bin/sccache
 
 # Add jni.h for java host build
 ADD ./common/install_jni.sh install_jni.sh
 ADD ./java/jni.h jni.h
 RUN bash ./install_jni.sh && rm install_jni.sh
-
-# Install NCCL for when CUDA is version 10.1
-ADD ./common/install_nccl.sh install_nccl.sh
-RUN if [ "${CUDA_VERSION}" = 10.1 ]; then bash ./install_nccl.sh; fi
-RUN rm install_nccl.sh
 
 # Install Open MPI for CUDA
 ADD ./common/install_openmpi.sh install_openmpi.sh
@@ -89,13 +94,10 @@ ENV BUILD_ENVIRONMENT ${BUILD_ENVIRONMENT}
 # AWS specific CUDA build guidance
 ENV TORCH_CUDA_ARCH_LIST Maxwell
 ENV TORCH_NVCC_FLAGS "-Xfatbin -compress-all"
+ENV CUDA_PATH /usr/local/cuda
 
 # Install LLVM dev version (Defined in the pytorch/builder github repository)
 COPY --from=pytorch/llvm:9.0.1 /opt/llvm /opt/llvm
-
-ADD ./common/install_openssl.sh install_openssl.sh
-ENV OPENSSL_ROOT_DIR /opt/openssl
-RUN bash ./install_openssl.sh
 
 USER jenkins
 CMD ["bash"]

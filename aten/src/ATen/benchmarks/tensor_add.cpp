@@ -17,9 +17,7 @@ static void tensor_add(benchmark::State& state) {
 static void GenerateSizes(benchmark::internal::Benchmark* b) {
   b->ArgNames({"N", "C"});
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   for (size_t n = 8; n < 1024;) {
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     for (size_t c = 8; c < 1024;) {
       b->Args({n, c});
       c *= 2;
@@ -28,6 +26,5 @@ static void GenerateSizes(benchmark::internal::Benchmark* b) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 BENCHMARK(tensor_add)->Apply(GenerateSizes);
 BENCHMARK_MAIN();

@@ -59,7 +59,7 @@ void LBFGSOptions::set_lr(const double lr) {
 template <typename T>
 bool if_container_equal(T lhs, T rhs) {
   if (!(lhs.size() == rhs.size())) return false;
-  for (size_t i = 0; i < lhs.size(); i++) {
+  for(const auto i : c10::irange(lhs.size())) {
     if (!torch::equal(lhs.at(i), rhs.at(i))) return false;
   }
   return true;
@@ -154,7 +154,7 @@ void LBFGS::_add_grad(const double step_size, const Tensor& update) {
 void LBFGS::_set_param(const std::vector<Tensor>& params_data) {
   auto& _params = param_groups_.at(0).params();
   TORCH_INTERNAL_ASSERT(params_data.size() == _params.size());
-  for (size_t i = 0; i < _params.size(); i++) {
+  for(const auto i : c10::irange(_params.size())) {
     _params.at(i).copy_(params_data.at(i));
   }
 }
@@ -232,7 +232,6 @@ std::tuple<double, Tensor, double, int64_t> _strong_wolfe(const Function& obj_fu
     auto d_norm = val(d.abs().max());
     g = g.clone(at::MemoryFormat::Contiguous);
     // evaluate objective and gradient using initial step
-    auto obj_func_res = obj_func(x, t, d);
     // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     double f_new;
     Tensor g_new;
@@ -285,7 +284,6 @@ std::tuple<double, Tensor, double, int64_t> _strong_wolfe(const Function& obj_fu
       f_prev = f_new;
       g_prev = g_new.clone(at::MemoryFormat::Contiguous);
       gtd_prev = gtd_new;
-      obj_func_res = obj_func(x, t, d);
       std::tie(f_new, g_new) = obj_func(x, t, d);
       ls_func_evals += 1;
       gtd_new = g_new.dot(d);
@@ -335,9 +333,7 @@ std::tuple<double, Tensor, double, int64_t> _strong_wolfe(const Function& obj_fu
       }
 
       // Evaluate new point
-      obj_func_res = obj_func(x, t, d);
-      f_new = std::get<0>(obj_func_res);
-      g_new = std::get<1>(obj_func_res);
+      std::tie(f_new, g_new) = obj_func(x, t, d);
       ls_func_evals += 1;
       gtd_new = g_new.dot(d);
       ls_iter += 1;

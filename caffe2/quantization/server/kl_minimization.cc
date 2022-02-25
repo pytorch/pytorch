@@ -164,7 +164,6 @@ TensorQuantizationParams KLDivergenceMinimization::ChooseQuantizationParams(
     selected_sum += bins[i];
   }
   VLOG(2) << "best quantization range covers "
-          // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
           << (double)selected_sum / total_sum * 100 << " %%";
 
   VLOG(2) << "best start_bin " << best_start_bin << " nbins_selected "

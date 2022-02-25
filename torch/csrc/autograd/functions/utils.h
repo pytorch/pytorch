@@ -1,13 +1,13 @@
 #pragma once
 
-#include <torch/csrc/WindowsTorchApiMacro.h>
+#include <torch/csrc/Export.h>
 #include <torch/csrc/autograd/autograd.h>
 #include <torch/csrc/autograd/function.h>
 #include <torch/csrc/autograd/variable.h>
 #include <torch/csrc/autograd/InferenceMode.h>
 #include <torch/csrc/utils/variadic.h>
 
-#include <ATen/ATen.h>
+#include <ATen/core/Tensor.h>
 
 #include <functional>
 #include <memory>
@@ -86,4 +86,9 @@ inline void set_history(
     set_history(variable, grad_fn);
   }
 }
+
+inline bool isFwGradDefined(const c10::optional<at::Tensor>& t) {
+  return t.has_value() && t->defined() && t->_fw_grad(/*level */ 0).defined();
+}
+
 }}

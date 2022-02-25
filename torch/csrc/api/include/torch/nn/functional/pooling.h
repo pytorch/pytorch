@@ -1,5 +1,6 @@
 #pragma once
 
+#include <c10/util/irange.h>
 #include <torch/nn/functional/activation.h>
 #include <torch/nn/options/pooling.h>
 #include <torch/nn/modules/utils.h>
@@ -599,7 +600,7 @@ inline std::vector<int64_t> _unpool_output_size(const Tensor& input,
   const IntArrayRef& padding, const c10::optional<std::vector<int64_t>>& output_size) {
   auto input_size = input.sizes();
   std::vector<int64_t> default_size;
-  for (size_t d = 0; d < kernel_size.size(); d++) {
+  for (const auto d : c10::irange(kernel_size.size())) {
     default_size.push_back((input_size[d + 2] - 1) * stride[d] +
                             kernel_size[d] - 2 * padding[d]);
   }
@@ -616,7 +617,7 @@ inline std::vector<int64_t> _unpool_output_size(const Tensor& input,
                   " elements, but it has a length of '",
                   output_size_.size(), "'");
     }
-    for (size_t d = 0; d < kernel_size.size(); d++) {
+    for (const auto d : c10::irange(kernel_size.size())) {
       const auto min_size = default_size[d] - stride[d];
       const auto max_size = default_size[d] + stride[d];
       if (!(min_size <= output_size_[d] && output_size_[d] <= max_size)) {
@@ -766,17 +767,17 @@ inline std::tuple<Tensor, Tensor> fractional_max_pool2d_with_indices(
       "fractional_max_pool2d requires specifying either ",
       "an output_size or an output_ratio");
   }
-
   c10::optional<ExpandingArray<2>> output_size_ = output_size;
   if (output_size_ == c10::nullopt) {
     TORCH_INTERNAL_ASSERT(output_ratio != c10::nullopt);
-    output_size_ = {(int64_t)(input.sizes()[2] * (*output_ratio.value())[0]),
-                    (int64_t)(input.sizes()[3] * (*output_ratio.value())[1])};
+    output_size_ = {(int64_t)(input.size(-2) * (*output_ratio.value())[0]),
+                    (int64_t)(input.size(-1) * (*output_ratio.value())[1])};
   }
 
   Tensor _random_samples_ = _random_samples;
   if (!_random_samples_.defined()) {
-    _random_samples_ = torch::rand({input.sizes()[0], input.sizes()[1], 2}, torch::TensorOptions().dtype(input.dtype()).device(input.device()));
+    auto n_batch = input.dim() == 3 ? 1 : input.size(0);
+    _random_samples_ = torch::rand({n_batch, input.size(-3), 2}, torch::TensorOptions().dtype(input.dtype()).device(input.device()));
   }
   return torch::fractional_max_pool2d(input, kernel_size, *output_size_, _random_samples_);
 }
@@ -848,14 +849,15 @@ inline std::tuple<Tensor, Tensor> fractional_max_pool3d_with_indices(
   c10::optional<ExpandingArray<3>> output_size_ = output_size;
   if (output_size_ == c10::nullopt) {
     TORCH_INTERNAL_ASSERT(output_ratio != c10::nullopt);
-    output_size_ = {(int64_t)(input.sizes()[2] * (*output_ratio.value())[0]),
-                    (int64_t)(input.sizes()[3] * (*output_ratio.value())[1]),
-                    (int64_t)(input.sizes()[4] * (*output_ratio.value())[2])};
+    output_size_ = {(int64_t)(input.size(-3) * (*output_ratio.value())[0]),
+                    (int64_t)(input.size(-2) * (*output_ratio.value())[1]),
+                    (int64_t)(input.size(-1) * (*output_ratio.value())[2])};
   }
 
   Tensor _random_samples_ = _random_samples;
   if (!_random_samples_.defined()) {
-    _random_samples_ = torch::rand({input.size(0), input.size(1), 3}, torch::TensorOptions().dtype(input.dtype()).device(input.device()));
+    auto n_batch = input.dim() == 4 ? 1 : input.size(0);
+    _random_samples_ = torch::rand({n_batch, input.size(-4), 3}, torch::TensorOptions().dtype(input.dtype()).device(input.device()));
   }
   return torch::fractional_max_pool3d(input, kernel_size, *output_size_, _random_samples_);
 }

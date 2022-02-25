@@ -7,7 +7,6 @@
 using GraphT = nom::Graph<TestClass>;
 using TopoSortT = nom::algorithm::TopoSort<GraphT>;
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TopoSort, Simple) {
   GraphT g;
   auto n1 = createTestNode(g);
@@ -20,7 +19,6 @@ TEST(TopoSort, Simple) {
   EXPECT_EQ(res.nodes[1], n2);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TopoSort, DAG) {
   GraphT g;
   auto n1 = createTestNode(g);
@@ -48,7 +46,6 @@ TEST(TopoSort, DAG) {
   ASSERT_LT(i3, i4);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TopoSort, Cycle1) {
   GraphT g;
   auto n1 = createTestNode(g);
@@ -60,7 +57,6 @@ TEST(TopoSort, Cycle1) {
   EXPECT_EQ(res.nodes.size(), 0);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TopoSort, Cycle2) {
   GraphT g;
   auto n1 = createTestNode(g);

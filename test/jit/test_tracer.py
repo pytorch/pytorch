@@ -1,3 +1,5 @@
+# Owner(s): ["oncall: jit"]
+
 import unittest
 import io
 import os
@@ -163,13 +165,13 @@ class TestTracer(JitTestCase):
         eager_out = mod(*test_inputs)
         traced_out = traced_func(*test_inputs)
         self.assertNotWarn(lambda: traced_func(*test_inputs), "Shouldn't throw slicing related warn here")
-        self.assertTrue(torch.allclose(eager_out, traced_out))
+        self.assertEqual(eager_out, traced_out)
 
         test_inputs = (torch.randint(0, 50, (50, 50)), torch.tensor(12))
         eager_out = mod(*test_inputs)
         traced_out = traced_func(*test_inputs)
         self.assertNotWarn(lambda: traced_func(*test_inputs), "Shouldn't throw slicing related warn here")
-        self.assertTrue(torch.allclose(eager_out, traced_out))
+        self.assertEqual(eager_out, traced_out)
 
 
     def test_typeas_trace_check(self):
@@ -1115,9 +1117,8 @@ class TestTracer(JitTestCase):
             def forward(self, x, w):
                 return torch.matmul(x, w).detach()
 
-        f = io.BytesIO()
         torch.onnx.export_to_pretty_string(
-            Mod(), (torch.rand(3, 4), torch.rand(4, 5)), f)
+            Mod(), (torch.rand(3, 4), torch.rand(4, 5)))
 
     def test_trace_slice_full_dim(self):
         def foo(x):
@@ -1391,7 +1392,6 @@ class TestTracer(JitTestCase):
                 return torch.neg(grad_output)
 
 
-
         class TracedModule(torch.nn.Module):
             def forward(self, x):
                 return torch.relu(TestFunc.apply(x))
@@ -1406,6 +1406,47 @@ class TestTracer(JitTestCase):
                 return self.tm(x)
 
         traced = torch.jit.trace(Wrapper(), (torch.rand(3, 4),))
+
+    def test_trace_multi_output_function(self):
+        # An autograd.Function with two outputs.
+        # It swaps inputs so we can check if shape
+        # handling is correct in TorchScript.
+        class Foo(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x, y):
+                return y, x
+
+            @staticmethod
+            def backward(ctx, du, dv):
+                return dv, du
+
+        class Bar(torch.nn.Module):
+            def forward(self, x, y):
+                x = x.relu()
+                y = y.relu()
+                z = Foo.apply(x, y)
+                return z
+
+        x = torch.rand(3, 2, dtype=torch.double)
+        y = torch.rand(1, 2, dtype=torch.double)
+
+        # Generate JIT IR.
+        traced = torch.jit.trace(Bar(), (x, y))
+        print(traced.graph)
+
+        # Expected output schema of the custom autograd.Function.
+        schema = '(Double(1, 2, strides=[2, 1], requires_grad=0, device=cpu), '\
+            'Double(3, 2, strides=[2, 1], requires_grad=0, device=cpu)) '\
+            '= ^Foo'
+
+        # See if expected schema exists.
+        FileCheck().check(schema).run(traced.graph)
+
+        # Also examine if the graph is runnable and produces
+        # the right result.
+        u, v = traced(x, y)
+        self.assertEqual(u, y)
+        self.assertEqual(v, x)
 
     def test_interpolate_trace(self):
         class test(nn.Module):

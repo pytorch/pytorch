@@ -2,6 +2,8 @@
 
 #include <ATen/ATen.h>
 #include <ATen/core/alias_info.h>
+#include <ATen/core/interned_strings.h>
+#include <c10/util/irange.h>
 #include <torch/csrc/jit/frontend/edit_distance.h>
 
 #include <queue>
@@ -240,9 +242,11 @@ bool printerHasSpecialCaseFor(Symbol sym) {
       prim::CudaFusionGroup, // optimization pass adds it
       prim::CudaFusionGuard, // optimization pass adds it
       prim::TensorExprGroup, // optimization pass adds it
+      prim::TensorExprDynamicGroup, // optimization pass adds it
       prim::StaticSubgraph, // optimization pass adds it
       prim::ConstantMKLDNNTensor, // optimization pass adds it
       prim::BroadcastMKLDNNTensors, // optimization pass adds it
+      prim::StaticRuntimeCopyOuts, // used in SR only
       prim::Load, // used in interpreter only
       prim::MMTreeReduce, // used as an optimization
       prim::MMBatchSide, // used as an optimization
@@ -280,6 +284,7 @@ bool aliasAnalysisHasSpecialCaseFor(Symbol symbol) {
       prim::CudaFusionGroup,
       prim::DifferentiableGraph,
       prim::TensorExprGroup,
+      prim::TensorExprDynamicGroup,
       prim::StaticSubgraph,
       prim::FunctionalGraph,
       prim::Constant,
@@ -352,10 +357,10 @@ void registerOperator(Operator&& op) {
           op.schema().name(),
           ". File a bug to add a case for this operator.\n");
     }
-    if (!aliasAnalysisHasSpecialCaseFor(s) &&
+    if (aliasAnalysisHasSpecialCaseFor(s) &&
         op.aliasAnalysisKind() == AliasAnalysisKind::CONSERVATIVE) {
       AT_ERROR(
-          "Missing special case in alias analysis for non-schematized"
+          "Conflict in special casing in alias analysis for non-schematized"
           " operator ",
           op.schema().name(),
           ". File a bug to add a case for this operator.\n");
@@ -406,7 +411,7 @@ std::string canonicalSchemaString(const FunctionSchema& schema) {
   out.push_back('(');
 
   bool seen_kwarg_only = false;
-  for (size_t i = 0; i < schema.arguments().size(); ++i) {
+  for (const auto i : c10::irange(schema.arguments().size())) {
     if (i > 0) {
       out += ", ";
     }
@@ -425,7 +430,7 @@ std::string canonicalSchemaString(const FunctionSchema& schema) {
     out += schema.returns().at(0).type()->str();
   } else if (schema.returns().size() > 1) {
     out.push_back('(');
-    for (size_t i = 0; i < schema.returns().size(); ++i) {
+    for (const auto i : c10::irange(schema.returns().size())) {
       if (i > 0) {
         out += ", ";
       }

@@ -18,14 +18,9 @@ class TORCH_API RRefMessageBase : public RpcCommandBase {
   RRefMessageBase(const RRefId& rrefId, MessageType type)
       : rrefId_(rrefId), type_(type) {}
 
-  // NOLINTNEXTLINE(modernize-use-override)
-  virtual ~RRefMessageBase() override = default;
+  ~RRefMessageBase() override = default;
 
   const RRefId& rrefId();
-
-  // NOLINTNEXTLINE(modernize-use-override,cppcoreguidelines-explicit-virtual-functions)
-  virtual Message toMessageImpl() && override;
-  static at::IValue fromMessage(const Message& message, MessageType type);
 
  protected:
   // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
@@ -39,13 +34,9 @@ class TORCH_API ForkMessageBase : public RRefMessageBase {
   ForkMessageBase(const RRefId& rrefId, const ForkId& forkId, MessageType type)
       : RRefMessageBase(rrefId, type), forkId_(forkId) {}
 
-  // NOLINTNEXTLINE(modernize-use-override)
-  virtual ~ForkMessageBase() override = default;
-
   const ForkId& forkId();
 
-  // NOLINTNEXTLINE(modernize-use-override,cppcoreguidelines-explicit-virtual-functions)
-  virtual Message toMessageImpl() && override;
+  c10::intrusive_ptr<Message> toMessageImpl() && override;
   static std::pair<RRefId, ForkId> fromMessage(
       const Message& message,
       MessageType type);
@@ -66,7 +57,7 @@ class TORCH_API ScriptRRefFetchCall final : public RRefMessageBase {
     return fromWorkerId_;
   }
 
-  Message toMessageImpl() && override;
+  c10::intrusive_ptr<Message> toMessageImpl() && override;
   static std::unique_ptr<ScriptRRefFetchCall> fromMessage(
       const Message& message);
 
@@ -80,7 +71,7 @@ class TORCH_API PythonRRefFetchCall final : public RRefMessageBase {
       : RRefMessageBase(rrefId, MessageType::PYTHON_RREF_FETCH_CALL),
         fromWorkerId_(fromWorkerId) {}
 
-  Message toMessageImpl() && override;
+  c10::intrusive_ptr<Message> toMessageImpl() && override;
   static std::unique_ptr<PythonRRefFetchCall> fromMessage(
       const Message& message);
 
@@ -95,7 +86,7 @@ class TORCH_API RRefFetchRet : public RpcCommandBase {
       : values_(std::move(values)), type_(type) {}
 
   const std::vector<at::IValue>& values();
-  Message toMessageImpl() && override;
+  c10::intrusive_ptr<Message> toMessageImpl() && override;
 
  private:
   std::vector<at::IValue> values_;
@@ -146,7 +137,7 @@ class TORCH_API RRefChildAccept final : public RpcCommandBase {
 
   const ForkId& forkId() const;
 
-  Message toMessageImpl() && override;
+  c10::intrusive_ptr<Message> toMessageImpl() && override;
   static std::unique_ptr<RRefChildAccept> fromMessage(const Message& message);
 
  private:
@@ -164,10 +155,9 @@ class TORCH_API RRefForkRequest final : public ForkMessageBase {
 
 class TORCH_API RRefAck final : public RpcCommandBase {
  public:
-  // NOLINTNEXTLINE(modernize-use-equals-default)
-  RRefAck() {}
+  RRefAck() = default;
 
-  Message toMessageImpl() && override;
+  c10::intrusive_ptr<Message> toMessageImpl() && override;
   static std::unique_ptr<RRefAck> fromMessage(const Message& message);
 };
 

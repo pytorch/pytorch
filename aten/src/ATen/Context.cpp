@@ -14,17 +14,13 @@
 #include <ATen/Tensor.h>
 #include <ATen/cpu/FlushDenormal.h>
 
-#include <TH/TH.h> // for USE_LAPACK
-
 #ifdef USE_FBGEMM
 #include <fbgemm/Fbgemm.h>
 #endif // USE_FBGEMM
 
 namespace at {
 
-Context::Context()
-    : thc_state(nullptr, [](THCState* p) { /* no-op */ }),
-      thh_state(nullptr, [](THHState* p) { /* no-op */ }) {}
+Context::Context() = default;
 
 // TODO: This could be bad juju if someone calls globalContext() in the
 // destructor of an object with static lifetime.
@@ -64,23 +60,32 @@ bool Context::deterministicAlgorithms() const {
   return _deterministic_algorithms;
 }
 
-void Context::setDeterministicAlgorithms(bool b) {
-  if (b) {
-    TORCH_WARN_ONCE("torch.use_deterministic_algorithms is in beta, and its design and"
-      " functionality may change in the future.");
-  }
+bool Context::deterministicAlgorithmsWarnOnly() const {
+  return _deterministic_algorithms_warn_only;
+}
 
+void Context::setDeterministicAlgorithms(bool b, bool warn_only=false) {
   _deterministic_algorithms = b;
+  _deterministic_algorithms_warn_only = warn_only;
 }
 
 void Context::alertNotDeterministic(c10::string_view const& caller) {
   if (globalContext().deterministicAlgorithms()) {
-    TORCH_CHECK(false,
-      caller, " does not have a deterministic implementation, but you set "
-      "'torch.use_deterministic_algorithms(True)'. You can turn off determinism ",
-      "just for this operation if that's acceptable for your application. You "
-      "can also file an issue at https://github.com/pytorch/pytorch/issues "
-      "to help us prioritize adding deterministic support for this operation.");
+    if (globalContext().deterministicAlgorithmsWarnOnly()) {
+      TORCH_WARN(
+        caller, " does not have a deterministic implementation, but you set "
+        "'torch.use_deterministic_algorithms(True, warn_only=True)'. "
+        "You can file an issue at https://github.com/pytorch/pytorch/issues "
+        "to help us prioritize adding deterministic support for this operation.");
+    } else {
+      TORCH_CHECK(false,
+        caller, " does not have a deterministic implementation, but you set "
+        "'torch.use_deterministic_algorithms(True)'. You can turn off "
+        "determinism just for this operation, or you can use the "
+        "'warn_only=True' option, if that's acceptable for your application. "
+        "You can also file an issue at https://github.com/pytorch/pytorch/issues "
+        "to help us prioritize adding deterministic support for this operation.");
+    }
   }
 }
 
@@ -101,7 +106,6 @@ bool Context::checkCuBLASConfigDeterministic() {
   bool cublas_config_deterministic = true;
   // If using CUDA 10.2 or greater, need to make sure CuBLAS workspace config
   // is set to deterministic setting
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   if (hasCUDART() && (versionCUDART() >= 10020)) {
     char* workspace_config = std::getenv(cublas_config_var_name);
     cublas_config_deterministic = (workspace_config != nullptr) && (
@@ -141,6 +145,33 @@ void Context::setAllowTF32CuBLAS(bool b) {
   allow_tf32_cublas = b;
 }
 
+at::LinalgBackend Context::linalgPreferredBackend() const {
+  return linalg_preferred_backend;
+}
+
+void Context::setLinalgPreferredBackend(at::LinalgBackend b) {
+  linalg_preferred_backend = b;
+  TORCH_CHECK((b != at::LinalgBackend::Cusolver) || hasCuSOLVER(),
+      "Cannot set preferred backend to cuSOLVER if PyTorch has not been compiled with cuSOLVER.");
+  TORCH_CHECK((b != at::LinalgBackend::Magma) || hasMAGMA(),
+      "Cannot set preferred backend to MAGMA if PyTorch has not been compiled with MAGMA.");
+  if (b != at::LinalgBackend::Default) {
+    TORCH_WARN_ONCE(
+      "torch.backends.cuda.preferred_linalg_library is an experimental feature. "
+      "If you see any error or unexpected behavior when this flag is set "
+      "please file an issue on GitHub."
+    );
+  }
+}
+
+bool Context::allowFP16ReductionCuBLAS() const {
+  return allow_fp16_reduction_cublas;
+}
+
+void Context::setAllowFP16ReductionCuBLAS(bool b) {
+  allow_fp16_reduction_cublas = b;
+}
+
 bool Context::hasMKL() {
 #if AT_MKL_ENABLED()
   return true;
@@ -166,7 +197,7 @@ bool Context::hasOpenMP() {
 }
 
 bool Context::hasLAPACK() {
-#ifdef USE_LAPACK
+#if AT_BUILD_WITH_LAPACK()
   return true;
 #else
   return false;
@@ -243,7 +274,6 @@ Allocator* getCPUAllocator() {
 //    means the allow_tf32 flags are overrided and tf32 is force disabled
 // override_allow_tf32_flag = false
 //    means the original allow_tf32 flags are followed
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 thread_local bool override_allow_tf32_flag = false;
 
 NoTF32Guard::NoTF32Guard() {
@@ -277,7 +307,6 @@ void Context::setDefaultMobileCPUAllocator() {
       "Cannot set another allocator.");
   // Setting the priority high to make sure no other allocator gets used instead of this.
   prev_allocator_ptr_ = c10::GetCPUAllocator();
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   c10::SetCPUAllocator(c10::GetDefaultMobileCPUAllocator(), /*priority*/ 100);
 }
 
@@ -286,7 +315,6 @@ void Context::unsetDefaultMobileCPUAllocator() {
       "setDefaultMobileCPUAllocator must have been called "
       "before unsetDefaultMobileCPUAllocator.");
   // Setting the priority high to make sure no other allocator gets used instead of this.
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   c10::SetCPUAllocator(prev_allocator_ptr_ , /*priority*/ 100);
   prev_allocator_ptr_ = nullptr;
 }

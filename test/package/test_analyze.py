@@ -1,6 +1,7 @@
+# Owner(s): ["oncall: package/deploy"]
+
 import torch
 from torch.package import analyze
-
 from torch.testing._internal.common_utils import run_tests
 
 try:
@@ -22,6 +23,7 @@ class TestAnalyze(PackageTestCase):
 
         self.assertNotIn("yaml", used_modules)
         self.assertIn("test_trace_dep", used_modules)
+
 
 if __name__ == "__main__":
     run_tests()

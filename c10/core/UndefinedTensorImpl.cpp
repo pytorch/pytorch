@@ -37,7 +37,6 @@ const char* UndefinedTensorImpl::tensorimpl_type_name() const {
   return "UndefinedTensorImpl";
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 UndefinedTensorImpl UndefinedTensorImpl::_singleton;
 
 } // namespace c10

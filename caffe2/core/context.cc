@@ -14,9 +14,7 @@ uint32_t RandomNumberSeed() {
   auto tv = std::chrono::system_clock::now().time_since_epoch();
   uint64_t usec = static_cast<uint64_t>(
       std::chrono::duration_cast<std::chrono::microseconds>(tv).count());
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   uint32_t tv_sec = usec / 1000000;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   uint32_t tv_usec = usec % 1000000;
   const uint32_t kPrime0 = 51551;
   const uint32_t kPrime1 = 61631;
@@ -57,10 +55,8 @@ void CPUContext::CopyBytesSameDevice(
 
 namespace at {
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CONTEXT(DeviceType::CPU, caffe2::CPUContext);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_COPY_BYTES_FUNCTION(
     DeviceType::CPU,
     DeviceType::CPU,

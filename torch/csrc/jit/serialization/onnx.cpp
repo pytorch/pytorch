@@ -1,3 +1,4 @@
+#include <c10/util/irange.h>
 #include <torch/csrc/jit/serialization/onnx.h>
 #include <torch/csrc/onnx/onnx.h>
 
@@ -24,14 +25,14 @@ std::string nlidt(size_t indent) {
 
 void dump(const onnx::TensorProto& tensor, std::ostream& stream) {
   stream << "TensorProto shape: [";
-  for (int i = 0; i < tensor.dims_size(); ++i) {
+  for (const auto i : c10::irange(tensor.dims_size())) {
     stream << tensor.dims(i) << (i == tensor.dims_size() - 1 ? "" : " ");
   }
   stream << "]";
 }
 
 void dump(const onnx::TensorShapeProto& shape, std::ostream& stream) {
-  for (int i = 0; i < shape.dim_size(); ++i) {
+  for (const auto i : c10::irange(shape.dim_size())) {
     auto& dim = shape.dim(i);
     if (dim.has_dim_value()) {
       stream << dim.dim_value();
@@ -108,19 +109,19 @@ void dump(
     dump(attr.t(), stream);
   } else if (attr.floats_size()) {
     stream << "floats, values: [";
-    for (int i = 0; i < attr.floats_size(); ++i) {
+    for (const auto i : c10::irange(attr.floats_size())) {
       stream << attr.floats(i) << (i == attr.floats_size() - 1 ? "" : " ");
     }
     stream << "]";
   } else if (attr.ints_size()) {
     stream << "ints, values: [";
-    for (int i = 0; i < attr.ints_size(); ++i) {
+    for (const auto i : c10::irange(attr.ints_size())) {
       stream << attr.ints(i) << (i == attr.ints_size() - 1 ? "" : " ");
     }
     stream << "]";
   } else if (attr.strings_size()) {
     stream << "strings, values: [";
-    for (int i = 0; i < attr.strings_size(); ++i) {
+    for (const auto i : c10::irange(attr.strings_size())) {
       stream << "'" << attr.strings(i) << "'"
              << (i == attr.strings_size() - 1 ? "" : " ");
     }
@@ -145,15 +146,15 @@ void dump(
 
 void dump(const onnx::NodeProto& node, std::ostream& stream, size_t indent) {
   stream << "Node {type: \"" << node.op_type() << "\", inputs: [";
-  for (int i = 0; i < node.input_size(); ++i) {
+  for (const auto i : c10::irange(node.input_size())) {
     stream << node.input(i) << (i == node.input_size() - 1 ? "" : ",");
   }
   stream << "], outputs: [";
-  for (int i = 0; i < node.output_size(); ++i) {
+  for (const auto i : c10::irange(node.output_size())) {
     stream << node.output(i) << (i == node.output_size() - 1 ? "" : ",");
   }
   stream << "], attributes: [";
-  for (int i = 0; i < node.attribute_size(); ++i) {
+  for (const auto i : c10::irange(node.attribute_size())) {
     dump(node.attribute(i), stream, indent + 1);
     stream << (i == node.attribute_size() - 1 ? "" : ",");
   }
@@ -163,27 +164,27 @@ void dump(const onnx::NodeProto& node, std::ostream& stream, size_t indent) {
 void dump(const onnx::GraphProto& graph, std::ostream& stream, size_t indent) {
   stream << idt(indent) << "GraphProto {" << nlidt(indent + 1) << "name: \""
          << graph.name() << "\"" << nlidt(indent + 1) << "inputs: [";
-  for (int i = 0; i < graph.input_size(); ++i) {
+  for (const auto i : c10::irange(graph.input_size())) {
     dump(graph.input(i), stream);
     stream << (i == graph.input_size() - 1 ? "" : ",");
   }
   stream << "]" << nlidt(indent + 1) << "outputs: [";
-  for (int i = 0; i < graph.output_size(); ++i) {
+  for (const auto i : c10::irange(graph.output_size())) {
     dump(graph.output(i), stream);
     stream << (i == graph.output_size() - 1 ? "" : ",");
   }
   stream << "]" << nlidt(indent + 1) << "value_infos: [";
-  for (int i = 0; i < graph.value_info_size(); ++i) {
+  for (const auto i : c10::irange(graph.value_info_size())) {
     dump(graph.value_info(i), stream);
     stream << (i == graph.value_info_size() - 1 ? "" : ",");
   }
   stream << "]" << nlidt(indent + 1) << "initializers: [";
-  for (int i = 0; i < graph.initializer_size(); ++i) {
+  for (const auto i : c10::irange(graph.initializer_size())) {
     dump(graph.initializer(i), stream);
     stream << (i == graph.initializer_size() - 1 ? "" : ",");
   }
   stream << "]" << nlidt(indent + 1) << "nodes: [" << nlidt(indent + 2);
-  for (int i = 0; i < graph.node_size(); ++i) {
+  for (const auto i : c10::irange(graph.node_size())) {
     dump(graph.node(i), stream, indent + 2);
     if (i != graph.node_size() - 1) {
       stream << "," << nlidt(indent + 2);

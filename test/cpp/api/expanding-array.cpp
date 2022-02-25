@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 
+#include <c10/util/irange.h>
 #include <torch/torch.h>
 
 #include <test/cpp/api/support.h>
@@ -10,47 +11,38 @@
 
 struct ExpandingArrayTest : torch::test::SeedingFixture {};
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ExpandingArrayTest, CanConstructFromInitializerList) {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   torch::ExpandingArray<5> e({1, 2, 3, 4, 5});
   ASSERT_EQ(e.size(), 5);
-  for (size_t i = 0; i < e.size(); ++i) {
+  for (const auto i : c10::irange(e.size())) {
     ASSERT_EQ((*e)[i], i + 1);
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ExpandingArrayTest, CanConstructFromVector) {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   torch::ExpandingArray<5> e(std::vector<int64_t>{1, 2, 3, 4, 5});
   ASSERT_EQ(e.size(), 5);
-  for (size_t i = 0; i < e.size(); ++i) {
+  for (const auto i : c10::irange(e.size())) {
     ASSERT_EQ((*e)[i], i + 1);
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ExpandingArrayTest, CanConstructFromArray) {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   torch::ExpandingArray<5> e(std::array<int64_t, 5>({1, 2, 3, 4, 5}));
   ASSERT_EQ(e.size(), 5);
-  for (size_t i = 0; i < e.size(); ++i) {
+  for (const auto i : c10::irange(e.size())) {
     ASSERT_EQ((*e)[i], i + 1);
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ExpandingArrayTest, CanConstructFromSingleValue) {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   torch::ExpandingArray<5> e(5);
   ASSERT_EQ(e.size(), 5);
-  for (size_t i = 0; i < e.size(); ++i) {
+  for (const auto i : c10::irange(e.size())) {
     ASSERT_EQ((*e)[i], 5);
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(
     ExpandingArrayTest,
     ThrowsWhenConstructedWithIncorrectNumberOfArgumentsInInitializerList) {
@@ -59,7 +51,6 @@ TEST_F(
       "Expected 5 values, but instead got 7");
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(
     ExpandingArrayTest,
     ThrowsWhenConstructedWithIncorrectNumberOfArgumentsInVector) {

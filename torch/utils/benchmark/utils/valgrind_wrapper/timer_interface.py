@@ -9,7 +9,6 @@ import re
 import shutil
 import subprocess
 import sys
-import tempfile
 import textwrap
 from typing import (
     cast, Any, Callable, DefaultDict, Dict, Generator, List, NamedTuple,
@@ -59,7 +58,7 @@ class FunctionCounts(object):
     def __len__(self) -> int:
         return len(self._data)
 
-    def __getitem__(self, item: Any) -> "Union[FunctionCount, FunctionCounts]":
+    def __getitem__(self, item: Any) -> Union[FunctionCount, "FunctionCounts"]:
         data: Union[FunctionCount, Tuple[FunctionCount, ...]] = self._data[item]
         return (
             FunctionCounts(cast(Tuple[FunctionCount, ...], data), self.inclusive, truncate_rows=False)
@@ -91,13 +90,13 @@ class FunctionCounts(object):
 
     def __add__(
         self,
-        other,  # type: FunctionCounts
+        other: "FunctionCounts",
     ) -> "FunctionCounts":
         return self._merge(other, lambda c: c)
 
     def __sub__(
         self,
-        other,  # type: FunctionCounts
+        other: "FunctionCounts",
     ) -> "FunctionCounts":
         return self._merge(other, lambda c: -c)
 
@@ -138,7 +137,7 @@ class FunctionCounts(object):
 
     def _merge(
         self,
-        second,   # type: FunctionCounts
+        second: "FunctionCounts",
         merge_fn: Callable[[int], int]
     ) -> "FunctionCounts":
         assert self.inclusive == second.inclusive, "Cannot merge inclusive and exclusive counts."
@@ -218,7 +217,7 @@ class CallgrindStats(object):
     # FIXME: Once 3.7 is the minimum version, type annotate `other` per PEP 563
     def delta(
         self,
-        other,  # type: CallgrindStats
+        other: "CallgrindStats",
         inclusive: bool = False,
     ) -> FunctionCounts:
         """Diff two sets of counts.
@@ -583,7 +582,7 @@ class _ValgrindWrapper(object):
         3) Parse the run results.
         4) Cleanup the scratch directory.
         """
-        working_dir = tempfile.mkdtemp()
+        working_dir = common._make_temp_dir(prefix="callgrind")
         data_dir = os.path.join(working_dir, "data")
         script_file = os.path.join(working_dir, "timer_callgrind.py")
         callgrind_out = os.path.join(working_dir, "callgrind.out")

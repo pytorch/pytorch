@@ -1,7 +1,7 @@
 import torch.fx as fx
 from torch.fx.node import Argument, Target
 from torch.nn.utils.fusion import fuse_conv_bn_eval
-from typing import Type, Dict, Any, Tuple, Iterable, Optional, List, cast, Callable
+from typing import Type, Dict, Any, Tuple, Iterable, Optional, List, cast
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -68,6 +68,8 @@ def fuse(model: torch.nn.Module, inplace=False) -> torch.nn.Module:
                     continue
                 conv = modules[node.args[0].target]
                 bn = modules[node.target]
+                if not bn.track_running_stats:
+                    continue
                 fused_conv = fuse_conv_bn_eval(conv, bn)
                 replace_node_module(node.args[0], modules, fused_conv)
                 node.replace_all_uses_with(node.args[0])
@@ -161,12 +163,12 @@ class MklSubgraph:
 
 def gen_mkl_autotuner(example_inputs, iters=10, warmup=1):
     """
-    This generates a heuristic that can be passed into `prepare_for_inference` that
+    This generates a heuristic that can be passed into `optimize_for_inference` that
     determines whether a subgraph should be run in MKL by running it with the example_inputs.
 
     Example usage:
         heuristic = gen_mkl_autotuner(example_inputs, iters=10)
-        fast_model = optimization.prepare_for_inference(model, heuristic)
+        fast_model = optimization.optimize_for_inference(model, heuristic)
     """
     fx_model = None
     old_modules = None
@@ -199,7 +201,7 @@ def gen_mkl_autotuner(example_inputs, iters=10, warmup=1):
 
 def use_mkl_length(graph: MklSubgraph) -> bool:
     """
-    This is a heuristic that can be passed into `prepare_for_inference` that
+    This is a heuristic that can be passed into `optimize_for_inference` that
     determines whether a subgraph should be run in MKL by checking if there
     are more than 2 nodes in it
     """
@@ -231,9 +233,9 @@ class UnionFind:
         self.parent[b] = a
         self.size[a] += self.size[b]
 
-def prepare_for_inference(
+def optimize_for_inference(
     model: torch.nn.Module,
-    use_mkl_heuristic: Callable[[MklSubgraph], bool] = use_mkl_length,
+    pass_config: Optional[Dict[str, Any]] = None,
     tracer: Type[fx.Tracer] = fx.Tracer
 ) -> torch.nn.Module:
     """
@@ -249,8 +251,27 @@ def prepare_for_inference(
     Note: As FX does not currently handle aliasing, this pass currently
     assumes nothing aliases. If that isn't true, use at your own risk.
     """
-    model = fuse(model)
-    model = remove_dropout(model)
+    default_pass_config = {
+        "conv_bn_fuse": True,
+        "remove_dropout": True,
+        "mkldnn_layout_optimize": {'heuristic': use_mkl_length},
+    }
+    if pass_config is None:
+        pass_config = {}
+    default_pass_config.update(pass_config)
+
+    if default_pass_config["conv_bn_fuse"]:
+        model = fuse(model)
+    if default_pass_config["remove_dropout"]:
+        model = remove_dropout(model)
+    if default_pass_config["mkldnn_layout_optimize"] is False:
+        return model
+    if not isinstance(default_pass_config["mkldnn_layout_optimize"], dict):
+        raise RuntimeError("mkldnn_layout_optimize config is not a dict")
+    if "heuristic" not in default_pass_config["mkldnn_layout_optimize"]:
+        raise RuntimeError("Heuristic not found in mkldnn_layout_optimize config")
+    use_mkl_heuristic = default_pass_config["mkldnn_layout_optimize"]["heuristic"]
+
     cur_tracer = tracer()
     fx_graph = cur_tracer.trace(copy.deepcopy(model))
     fx_model = fx.GraphModule(cur_tracer.root, fx_graph)
@@ -378,7 +399,7 @@ def prepare_for_inference(
         if node.target == 'to_mkldnn' or node.target == 'to_dense':
             mkldnn_conversions += 1
 
-    logging.info(f"mkldnn conversions: {mkldnn_conversions}")
+    logging.getLogger(__name__).info(f"mkldnn conversions: {mkldnn_conversions}")
     fx_graph.lint()
     result = fx.GraphModule(model, fx_graph)
     return result

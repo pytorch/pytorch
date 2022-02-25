@@ -1,5 +1,9 @@
 set(MKLDNN_USE_NATIVE_ARCH ${USE_NATIVE_ARCH})
 
+if(CPU_AARCH64)
+  include(${CMAKE_CURRENT_LIST_DIR}/ComputeLibrary.cmake)
+endif()
+
 find_package(MKLDNN QUIET)
 
 if(NOT TARGET caffe2::mkldnn)

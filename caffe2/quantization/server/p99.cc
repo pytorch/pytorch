@@ -21,11 +21,7 @@ TensorQuantizationParams P99::ChooseQuantizationParams(
   float org_min = min;
   // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
   float bin_width = (max - min) / nbins;
-  // NOLINTNEXTLINE(clang-diagnostic-unused-variable,bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions,clang-analyzer-deadcode.DeadStores)
-  int zero_bin = round(-min / bin_width);
 
-  // NOLINTNEXTLINE(clang-diagnostic-unused-variable)
-  int best_width = 0;
   double total_sum = 0;
   for (int i = 0; i < nbins; ++i) {
     total_sum += bins_f[i];
@@ -36,9 +32,7 @@ TensorQuantizationParams P99::ChooseQuantizationParams(
     sum += bins_f[i];
     CDF[i] = (double)sum / total_sum;
   }
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   CAFFE_ENFORCE(threshold_ > 0.5 && threshold_ < 1);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   double left_quantile = (1.0f - threshold_) / 2.0f;
   double right_quantile = 1.0f - left_quantile;
   int i_begin = 0;

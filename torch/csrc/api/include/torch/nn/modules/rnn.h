@@ -16,8 +16,6 @@
 #include <memory>
 #include <vector>
 
-using namespace torch::nn::utils::rnn;
-
 namespace torch {
 namespace nn {
 
@@ -91,7 +89,7 @@ class TORCH_API RNNImplBase : public torch::nn::Cloneable<Derived> {
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ RNN ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 /// A multi-layer Elman RNN module with Tanh or ReLU activation.
-/// See https://pytorch.org/docs/master/nn.html#torch.nn.RNN to learn
+/// See https://pytorch.org/docs/master/generated/torch.nn.RNN.html to learn
 /// about the exact behavior of this module.
 ///
 /// See the documentation for `torch::nn::RNNOptions` class to learn what
@@ -113,7 +111,7 @@ class TORCH_API RNNImpl : public detail::RNNImplBase<RNNImpl> {
   FORWARD_HAS_DEFAULT_ARGS({1, AnyValue(Tensor())})
 
  public:
-  std::tuple<PackedSequence, Tensor> forward_with_packed_input(const PackedSequence& packed_input, Tensor hx = {});
+  std::tuple<torch::nn::utils::rnn::PackedSequence, Tensor> forward_with_packed_input(const torch::nn::utils::rnn::PackedSequence& packed_input, Tensor hx = {});
 
   RNNOptions options;
 
@@ -136,7 +134,7 @@ TORCH_MODULE(RNN);
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ LSTM ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 /// A multi-layer long-short-term-memory (LSTM) module.
-/// See https://pytorch.org/docs/master/nn.html#torch.nn.LSTM to learn
+/// See https://pytorch.org/docs/master/generated/torch.nn.LSTM.html to learn
 /// about the exact behavior of this module.
 ///
 /// See the documentation for `torch::nn::LSTMOptions` class to learn what
@@ -159,8 +157,8 @@ class TORCH_API LSTMImpl : public detail::RNNImplBase<LSTMImpl> {
   FORWARD_HAS_DEFAULT_ARGS({1, AnyValue(torch::optional<std::tuple<Tensor, Tensor>>())})
 
  public:
-  std::tuple<PackedSequence, std::tuple<Tensor, Tensor>> forward_with_packed_input(
-    const PackedSequence& packed_input, torch::optional<std::tuple<Tensor, Tensor>> hx_opt = {});
+  std::tuple<torch::nn::utils::rnn::PackedSequence, std::tuple<Tensor, Tensor>> forward_with_packed_input(
+    const torch::nn::utils::rnn::PackedSequence& packed_input, torch::optional<std::tuple<Tensor, Tensor>> hx_opt = {});
 
   LSTMOptions options;
 
@@ -189,7 +187,7 @@ TORCH_MODULE(LSTM);
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ GRU ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 /// A multi-layer gated recurrent unit (GRU) module.
-/// See https://pytorch.org/docs/master/nn.html#torch.nn.GRU to learn
+/// See https://pytorch.org/docs/master/generated/torch.nn.GRU.html to learn
 /// about the exact behavior of this module.
 ///
 /// See the documentation for `torch::nn::GRUOptions` class to learn what
@@ -211,7 +209,7 @@ class TORCH_API GRUImpl : public detail::RNNImplBase<GRUImpl> {
   FORWARD_HAS_DEFAULT_ARGS({1, AnyValue(torch::Tensor())})
 
  public:
-  std::tuple<PackedSequence, Tensor> forward_with_packed_input(const PackedSequence& packed_input, Tensor hx = {});
+  std::tuple<torch::nn::utils::rnn::PackedSequence, Tensor> forward_with_packed_input(const torch::nn::utils::rnn::PackedSequence& packed_input, Tensor hx = {});
 
   GRUOptions options;
 

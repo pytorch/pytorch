@@ -164,7 +164,6 @@ static constexpr auto MAGIC_NUMBER = 424242424242424242ULL;
 
 // ==================================================== Random ========================================================
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(RNGTest, RandomFromTo) {
   const at::Device device("cpu");
   test_random_from_to<TestCPUGenerator, torch::kBool, bool>(device);
@@ -177,7 +176,6 @@ TEST_F(RNGTest, RandomFromTo) {
   test_random_from_to<TestCPUGenerator, torch::kFloat64, double>(device);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(RNGTest, Random) {
   const at::Device device("cpu");
   test_random<TestCPUGenerator, torch::kBool, bool>(device);
@@ -192,7 +190,6 @@ TEST_F(RNGTest, Random) {
 
 // This test proves that Tensor.random_() distribution is able to generate unsigned 64 bit max value(64 ones)
 // https://github.com/pytorch/pytorch/issues/33299
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(RNGTest, Random64bits) {
   auto gen = at::make_generator<TestCPUGenerator>(std::numeric_limits<uint64_t>::max());
   auto actual = torch::empty({1}, torch::kInt64);
@@ -202,13 +199,11 @@ TEST_F(RNGTest, Random64bits) {
 
 // ==================================================== Normal ========================================================
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(RNGTest, Normal) {
   const auto mean = 123.45;
   const auto std = 67.89;
   auto gen = at::make_generator<TestCPUGenerator>(MAGIC_NUMBER);
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto actual = torch::empty({10});
   actual.normal_(mean, std, gen);
 
@@ -218,15 +213,12 @@ TEST_F(RNGTest, Normal) {
   ASSERT_TRUE(torch::allclose(actual, expected));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(RNGTest, Normal_float_Tensor_out) {
   const auto mean = 123.45;
   const auto std = 67.89;
   auto gen = at::make_generator<TestCPUGenerator>(MAGIC_NUMBER);
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto actual = torch::empty({10});
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   at::normal_out(actual, mean, torch::full({10}, std), gen);
 
   auto expected = torch::empty_like(actual);
@@ -235,15 +227,12 @@ TEST_F(RNGTest, Normal_float_Tensor_out) {
   ASSERT_TRUE(torch::allclose(actual, expected));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(RNGTest, Normal_Tensor_float_out) {
   const auto mean = 123.45;
   const auto std = 67.89;
   auto gen = at::make_generator<TestCPUGenerator>(MAGIC_NUMBER);
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto actual = torch::empty({10});
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   at::normal_out(actual, torch::full({10}, mean), std, gen);
 
   auto expected = torch::empty_like(actual);
@@ -252,15 +241,12 @@ TEST_F(RNGTest, Normal_Tensor_float_out) {
   ASSERT_TRUE(torch::allclose(actual, expected));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(RNGTest, Normal_Tensor_Tensor_out) {
   const auto mean = 123.45;
   const auto std = 67.89;
   auto gen = at::make_generator<TestCPUGenerator>(MAGIC_NUMBER);
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto actual = torch::empty({10});
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   at::normal_out(actual, torch::full({10}, mean), torch::full({10}, std), gen);
 
   auto expected = torch::empty_like(actual);
@@ -269,13 +255,11 @@ TEST_F(RNGTest, Normal_Tensor_Tensor_out) {
   ASSERT_TRUE(torch::allclose(actual, expected));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(RNGTest, Normal_float_Tensor) {
   const auto mean = 123.45;
   const auto std = 67.89;
   auto gen = at::make_generator<TestCPUGenerator>(MAGIC_NUMBER);
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto actual = at::normal(mean, torch::full({10}, std), gen);
 
   auto expected = torch::empty_like(actual);
@@ -284,13 +268,11 @@ TEST_F(RNGTest, Normal_float_Tensor) {
   ASSERT_TRUE(torch::allclose(actual, expected));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(RNGTest, Normal_Tensor_float) {
   const auto mean = 123.45;
   const auto std = 67.89;
   auto gen = at::make_generator<TestCPUGenerator>(MAGIC_NUMBER);
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto actual = at::normal(torch::full({10}, mean), std, gen);
 
   auto expected = torch::empty_like(actual);
@@ -299,13 +281,11 @@ TEST_F(RNGTest, Normal_Tensor_float) {
   ASSERT_TRUE(torch::allclose(actual, expected));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(RNGTest, Normal_Tensor_Tensor) {
   const auto mean = 123.45;
   const auto std = 67.89;
   auto gen = at::make_generator<TestCPUGenerator>(MAGIC_NUMBER);
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto actual = at::normal(torch::full({10}, mean), torch::full({10}, std), gen);
 
   auto expected = torch::empty_like(actual);
@@ -316,7 +296,6 @@ TEST_F(RNGTest, Normal_Tensor_Tensor) {
 
 // ==================================================== Uniform =======================================================
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(RNGTest, Uniform) {
   const auto from = -24.24;
   const auto to = 42.42;
@@ -334,7 +313,6 @@ TEST_F(RNGTest, Uniform) {
 
 // ==================================================== Cauchy ========================================================
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(RNGTest, Cauchy) {
   const auto median = 123.45;
   const auto sigma = 67.89;
@@ -352,13 +330,11 @@ TEST_F(RNGTest, Cauchy) {
 
 // ================================================== LogNormal =======================================================
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(RNGTest, LogNormal) {
   const auto mean = 12.345;
   const auto std = 6.789;
   auto gen = at::make_generator<TestCPUGenerator>(MAGIC_NUMBER);
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto actual = torch::empty({10});
   actual.log_normal_(mean, std, gen);
 
@@ -371,7 +347,6 @@ TEST_F(RNGTest, LogNormal) {
 
 // ================================================== Geometric =======================================================
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(RNGTest, Geometric) {
   const auto p = 0.42;
   auto gen = at::make_generator<TestCPUGenerator>(MAGIC_NUMBER);
@@ -388,7 +363,6 @@ TEST_F(RNGTest, Geometric) {
 
 // ================================================== Exponential =====================================================
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(RNGTest, Exponential) {
   const auto lambda = 42;
   auto gen = at::make_generator<TestCPUGenerator>(MAGIC_NUMBER);
@@ -405,7 +379,6 @@ TEST_F(RNGTest, Exponential) {
 
 // ==================================================== Bernoulli =====================================================
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(RNGTest, Bernoulli_Tensor) {
   const auto p = 0.42;
   auto gen = at::make_generator<TestCPUGenerator>(MAGIC_NUMBER);
@@ -419,7 +392,6 @@ TEST_F(RNGTest, Bernoulli_Tensor) {
   ASSERT_TRUE(torch::allclose(actual, expected));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(RNGTest, Bernoulli_scalar) {
   const auto p = 0.42;
   auto gen = at::make_generator<TestCPUGenerator>(MAGIC_NUMBER);
@@ -433,7 +405,6 @@ TEST_F(RNGTest, Bernoulli_scalar) {
   ASSERT_TRUE(torch::allclose(actual, expected));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(RNGTest, Bernoulli) {
   const auto p = 0.42;
   auto gen = at::make_generator<TestCPUGenerator>(MAGIC_NUMBER);
@@ -446,7 +417,6 @@ TEST_F(RNGTest, Bernoulli) {
   ASSERT_TRUE(torch::allclose(actual, expected));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(RNGTest, Bernoulli_2) {
   const auto p = 0.42;
   auto gen = at::make_generator<TestCPUGenerator>(MAGIC_NUMBER);
@@ -459,7 +429,6 @@ TEST_F(RNGTest, Bernoulli_2) {
   ASSERT_TRUE(torch::allclose(actual, expected));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(RNGTest, Bernoulli_p) {
   const auto p = 0.42;
   auto gen = at::make_generator<TestCPUGenerator>(MAGIC_NUMBER);
@@ -472,7 +441,6 @@ TEST_F(RNGTest, Bernoulli_p) {
   ASSERT_TRUE(torch::allclose(actual, expected));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(RNGTest, Bernoulli_p_2) {
   const auto p = 0.42;
   auto gen = at::make_generator<TestCPUGenerator>(MAGIC_NUMBER);
@@ -485,7 +453,6 @@ TEST_F(RNGTest, Bernoulli_p_2) {
   ASSERT_TRUE(torch::allclose(actual, expected));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(RNGTest, Bernoulli_out) {
   const auto p = 0.42;
   auto gen = at::make_generator<TestCPUGenerator>(MAGIC_NUMBER);

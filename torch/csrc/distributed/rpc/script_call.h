@@ -31,7 +31,7 @@ class TORCH_API ScriptCall : public RpcCommandBase {
   bool hasOp() const;
   std::shared_ptr<Operator> op() const;
   bool hasQualifiedName() const;
-  const c10::QualifiedName qualifiedName() const;
+  const c10::QualifiedName& qualifiedName() const;
   // return the argument stack of this builtin operator
   const std::vector<at::IValue>& stack() const;
   std::vector<at::IValue>& stackRef();
@@ -39,11 +39,10 @@ class TORCH_API ScriptCall : public RpcCommandBase {
     return isAsyncExecution_;
   }
 
-  Message toMessageImpl() && override;
+  c10::intrusive_ptr<Message> toMessageImpl() && override;
   static std::unique_ptr<ScriptCall> fromMessage(const Message& message);
 
-  // NOLINTNEXTLINE(modernize-use-override)
-  virtual ~ScriptCall() = default;
+  ~ScriptCall() override = default;
 
  protected:
   virtual void toIValues(std::vector<at::IValue>& ivalues) const;

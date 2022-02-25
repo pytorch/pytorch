@@ -44,10 +44,8 @@ bool ConditionalOp<CPUContext>::RunOnDevice() {
   return true;
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(Conditional, ConditionalOp<CPUContext>);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(Conditional)
     .NumInputs(3)
     .NumOutputs(1)
@@ -62,7 +60,6 @@ have the exact same shape and type.
     .Output(0, "DataO", "Output data after applying ConditionalOp")
     .IdenticalTypeAndShapeOfInput(1);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 NO_GRADIENT(Conditional);
 
 } // caffe2

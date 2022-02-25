@@ -24,14 +24,12 @@ bool ErfGradientFunctor<CPUContext>::Forward(
   return true;
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     Erf,
     UnaryElementwiseOp<
         TensorTypes<float>,
         CPUContext,
         ErfFunctor<CPUContext>>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     ErfGradient,
     BinaryElementwiseOp<
@@ -39,7 +37,6 @@ REGISTER_CPU_OPERATOR(
         CPUContext,
         ErfGradientFunctor<CPUContext>>);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(Erf)
     .NumInputs(1)
     .NumOutputs(1)
@@ -53,7 +50,6 @@ Calculates the arcsine of the given input tensor, element-wise.
         "output",
         "The arcsine of the input tensor computed element-wise");
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(ErfGradient)
     .NumInputs(2)
     .NumOutputs(1)
@@ -74,7 +70,6 @@ class GetErfGradient : public GradientMakerBase {
 
 } // namespace
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_GRADIENT(Erf, GetErfGradient);
 
 } // namespace caffe2

@@ -1,6 +1,7 @@
 #include <ATen/TensorIndexing.h>
 
 #include <c10/util/Exception.h>
+#include <c10/util/irange.h>
 
 namespace at {
 namespace indexing {
@@ -31,7 +32,7 @@ std::ostream& operator<<(std::ostream& stream, const TensorIndex& tensor_index) 
 
 std::ostream& operator<<(std::ostream& stream, const std::vector<TensorIndex>& tensor_indices) {
   stream << "(";
-  for (size_t i = 0; i < tensor_indices.size(); i++) {
+  for (const auto i : c10::irange(tensor_indices.size())) {
     stream << tensor_indices[i];
     if (i < tensor_indices.size() - 1) stream << ", ";
   }
@@ -46,11 +47,15 @@ static inline void set_item(const Tensor& self, ArrayRef<TensorIndex> indices, c
 
   {
     at::AutoDispatchBelowADInplaceOrView guard;
+    at::Device self_device = self.device();
+
     // TODO: This qint special case looks very suspicious...
     if (isQIntType(self.scalar_type())) {
       value = at::indexing::scalarToTensor(v, device(kCPU).dtype(kFloat), at::Device(kCPU));
+    } else if (self_device.is_cuda()) {
+      value = at::indexing::scalarToTensor(v, self.options(), at::Device(kCPU));
     } else {
-      value = at::indexing::scalarToTensor(v, self.options(), self.device());
+      value = at::indexing::scalarToTensor(v, self.options(), self_device);
     }
   }
 

@@ -1,8 +1,8 @@
 #pragma once
 
-#include <ATen/ATen.h>
+#include <c10/core/ScalarType.h>
 #include <torch/csrc/python_headers.h>
-#include <torch/csrc/WindowsTorchApiMacro.h>
+#include <torch/csrc/Export.h>
 
 const int DTYPE_NAME_LEN = 64;
 
@@ -13,7 +13,6 @@ struct TORCH_API THPDtype {
   char name[DTYPE_NAME_LEN + 1];
 };
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TORCH_API extern PyTypeObject THPDtypeType;
 
 inline bool THPDtype_Check(PyObject *obj) {

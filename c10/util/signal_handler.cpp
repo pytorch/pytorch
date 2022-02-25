@@ -7,6 +7,7 @@
 #include <cxxabi.h>
 #include <dirent.h>
 #include <dlfcn.h>
+#include <fmt/format.h>
 #include <sys/syscall.h>
 #include <sys/types.h>
 #include <unistd.h>
@@ -162,10 +163,14 @@ void FatalSignalHandler::stacktraceSignalHandler(bool needsLock) {
     pthread_mutex_lock(&writingMutex);
   }
   pid_t tid = syscall(SYS_gettid);
-  std::cerr << fatalSignalName << "(" << fatalSignum << "), PID: " << ::getpid()
-            << ", Thread " << tid << ": " << std::endl;
-  std::cerr << c10::get_backtrace();
-  std::cerr << std::endl;
+  std::string backtrace = fmt::format(
+      "{}({}), PID: {}, Thread {}: \n {}",
+      fatalSignalName,
+      fatalSignum,
+      ::getpid(),
+      tid,
+      c10::get_backtrace());
+  std::cerr << backtrace << std::endl;
   if (needsLock) {
     pthread_mutex_unlock(&writingMutex);
     pthread_cond_signal(&writingCond);

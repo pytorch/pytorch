@@ -1,10 +1,11 @@
 #pragma once
+#include <torch/csrc/jit/api/module.h>
 #include <torch/csrc/jit/runtime/graph_executor_impl.h>
 
 namespace torch {
 namespace jit {
 
-struct ProfilingGraphExecutorImpl : public GraphExecutorImplBase {
+struct TORCH_API ProfilingGraphExecutorImpl : public GraphExecutorImplBase {
   ProfilingGraphExecutorImpl(
       const std::shared_ptr<Graph>& graph,
       std::string function_name);
@@ -25,13 +26,20 @@ struct ProfilingGraphExecutorImpl : public GraphExecutorImplBase {
     remaining_bailout_depth_.reset();
   }
 
+  bool isOptimized() const override {
+    return optimized_plan_.has_value();
+  }
+
  private:
   const ExecutionPlan& getOptimizedPlanFor(
       Stack& stack,
       size_t remaining_bailout_depth);
   void runProfilingInsensitiveOptimizations(std::shared_ptr<Graph>& graph);
-  void runProfilingOptimizations(std::shared_ptr<Graph>& graph);
+  void runProfilingOptimizations(
+      std::shared_ptr<Graph>& graph,
+      size_t remaining_depth);
   void replaceFallbackGraphWithFallbackFunction(Block* b);
+  void runFinalOptimizations(std::shared_ptr<Graph>& graph);
   std::unique_ptr<ProfilingRecord> pr_;
   c10::optional<ExecutionPlan>
       profiling_plan_; // plan to run in order to profiling the code

@@ -1,3 +1,5 @@
+# Owner(s): ["oncall: jit"]
+
 import io
 import os
 import sys
@@ -22,6 +24,40 @@ if __name__ == '__main__':
                        "instead.")
 
 class TestClassType(JitTestCase):
+    def test_reference_semantics(self):
+        """
+        Test that modifications made to a class instance in TorchScript
+        are visible in eager.
+        """
+        class Foo(object):
+            def __init__(self, a: int):
+                self.a = a
+
+            def set_a(self, value: int):
+                self.a = value
+
+            def get_a(self) -> int:
+                return self.a
+
+            @property
+            def attr(self):
+                return self.a
+
+        make_global(Foo)  # see [local resolution in python]
+
+        def test_fn(obj: Foo):
+            obj.set_a(2)
+
+        scripted_fn = torch.jit.script(test_fn)
+        obj = torch.jit.script(Foo(1))
+        self.assertEqual(obj.get_a(), 1)
+        self.assertEqual(obj.attr, 1)
+
+        scripted_fn(obj)
+
+        self.assertEqual(obj.get_a(), 2)
+        self.assertEqual(obj.attr, 2)
+
     def test_get_with_method(self):
         class FooTest(object):
             def __init__(self, x):
@@ -1386,7 +1422,7 @@ class TestClassType(JitTestCase):
         Test that the error message displayed when convering a class type
         to an IValue that has an attribute of the wrong type.
         """
-        @torch.jit.script
+        @torch.jit.script  # noqa: B903
         class ValHolder(object):  # noqa: B903
             def __init__(self, val):
                 self.val = val

@@ -31,10 +31,37 @@ caffe2::NetDef fakeNet() {
   return net;
 }
 
+caffe2::NetDef fakeNetWithDuplicateKeyInExInputAndOutput() {
+  caffe2::NetDef net;
+
+  {
+    caffe2::OperatorDef* def = net.add_op();
+    def->set_type("Fake");
+    def->add_input("X");
+    def->add_output("Y");
+  }
+  {
+    caffe2::OperatorDef* def = net.add_op();
+    def->set_type("Fake");
+    def->add_input("Y");
+    def->add_output("X");
+  }
+  {
+    caffe2::OperatorDef* def = net.add_op();
+    def->set_type("Fake");
+    def->add_input("Y");
+    def->add_output("W");
+  }
+  net.add_external_input("X");
+  net.add_external_output("X");
+  net.add_external_output("Y");
+  net.add_external_output("W");
+
+  return net;
+}
 // Common usage
 using namespace nom::repr;
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Converter, DeclareExport) {
   auto net = fakeNet();
   caffe2::injectDataEdgeIndicators(&net);
@@ -75,13 +102,11 @@ TEST(Converter, DeclareExport) {
   EXPECT_EQ(count, 2);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Distributed, InsertDeviceOptions) {
   auto net = fakeNet();
   caffe2::injectDataEdgeIndicators(&net);
   auto nn = caffe2::convertToNNModule(net);
   caffe2::DeviceOption d;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   d.set_device_type(1337);
   caffe2::addBlobDeviceOptions({{"X", d}, {"Y", d}, {"W", d}}, &nn);
 
@@ -96,13 +121,11 @@ TEST(Distributed, InsertDeviceOptions) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Distributed, InsertDeviceOptionsFailureCase) {
   auto net = fakeNet();
   caffe2::injectDataEdgeIndicators(&net);
   auto nn = caffe2::convertToNNModule(net);
   caffe2::DeviceOption d;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   d.set_device_type(1337);
   // We can only use correct blob names, expect failure otherwise
   // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
@@ -114,7 +137,54 @@ TEST(Distributed, InsertDeviceOptionsFailureCase) {
       std::exception);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST(Distributed, InsertDeviceOptionsDuplicateKeyAcrossExternalInputAndOutput) {
+  auto net = fakeNetWithDuplicateKeyInExInputAndOutput();
+  caffe2::injectDataEdgeIndicators(&net);
+  auto nn = caffe2::convertToNNModule(net);
+  caffe2::DeviceOption d;
+  d.set_device_type(1337);
+  caffe2::addBlobDeviceOptions({{"X", d}, {"Y", d}, {"W", d}}, &nn);
+  for (auto& ns : {nn::filter<Declare>(nn), nn::filter<Export>(nn)}) {
+    for (auto& node : ns) {
+      auto op = nn::get<NeuralNetOperator>(node);
+      auto annot = dyn_cast<caffe2::Caffe2Annotation>(op->getAnnotation());
+      // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
+      auto d_annot = annot->getDeviceOption();
+      EXPECT_EQ(d_annot.device_type(), 1337);
+    }
+  }
+}
+
+TEST(Distributed, InsertDeviceOptionsDuplicateKeyInExternalInput) {
+  auto net = fakeNetWithDuplicateKeyInExInputAndOutput();
+  net.add_external_input("X");
+  caffe2::injectDataEdgeIndicators(&net);
+  auto nn = caffe2::convertToNNModule(net);
+  caffe2::DeviceOption d;
+  d.set_device_type(1337);
+  EXPECT_THROW(
+      {
+        caffe2::addBlobDeviceOptions(
+            {{"X", d}, {"Y", d}, {"W", d}}, &nn);
+      },
+      std::exception);
+}
+
+TEST(Distributed, InsertDeviceOptionsDuplicateKeyInExternalOutput) {
+  auto net = fakeNetWithDuplicateKeyInExInputAndOutput();
+  net.add_external_output("X");
+  caffe2::injectDataEdgeIndicators(&net);
+  auto nn = caffe2::convertToNNModule(net);
+  caffe2::DeviceOption d;
+  d.set_device_type(1337);
+  EXPECT_THROW(
+      {
+        caffe2::addBlobDeviceOptions(
+            {{"X", d}, {"Y", d}, {"W", d}}, &nn);
+      },
+      std::exception);
+}
+
 TEST(Converter, InjectDataEdgeIndicators) {
   auto net = fakeNet();
 
@@ -151,11 +221,9 @@ TEST(Converter, InjectDataEdgeIndicators) {
 }
 
 // Main usage
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Converter, OverloadedConvertToNNModule) {
   auto net = fakeNet();
   caffe2::DeviceOption d;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   d.set_device_type(1337);
   auto nn = caffe2::convertToNNModule(net, {{"X", d}, {"Y", d}, {"W", d}});
 
@@ -170,11 +238,9 @@ TEST(Converter, OverloadedConvertToNNModule) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Converter, OverloadedConvertToNNModuleFailure) {
   auto net = fakeNet();
   caffe2::DeviceOption d;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   d.set_device_type(1337);
   // We can only use correct blob names, expect failure otherwise
   // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)

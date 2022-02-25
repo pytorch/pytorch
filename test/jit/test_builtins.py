@@ -1,3 +1,5 @@
+# Owner(s): ["oncall: jit"]
+
 import os
 import sys
 import inspect
@@ -122,7 +124,7 @@ class TestBuiltins(JitTestCase):
 
         py_out = del_list_multiple_operands([0, 1, 2])
         jit_out = torch.jit.script(del_list_multiple_operands)([0, 1, 2])
-        self.assertEquals(py_out, jit_out)
+        self.assertEqual(py_out, jit_out)
 
         def del_dict_multiple_operands(x: Dict[str, int]) -> Dict[str, int]:
             del x['hi'], x['there']
@@ -130,7 +132,7 @@ class TestBuiltins(JitTestCase):
 
         py_out = del_dict_multiple_operands({"hi": 5, "there": 6})
         jit_out = torch.jit.script(del_dict_multiple_operands)({"hi": 5, "there": 6})
-        self.assertEquals(py_out, jit_out)
+        self.assertEqual(py_out, jit_out)
 
 
 class TestTensorBuiltins(JitTestCase):
@@ -148,8 +150,6 @@ class TestTensorBuiltins(JitTestCase):
         # real and imag are only implemented for complex tensors.
         self.assertRaises(RuntimeError, lambda: should_keep(tensor, 'imag'))
         keys.remove('imag')
-        self.assertRaises(RuntimeError, lambda: should_keep(tensor, 'real'))
-        keys.remove('real')
 
         properties = [p for p in keys if should_keep(tensor, p)]
 

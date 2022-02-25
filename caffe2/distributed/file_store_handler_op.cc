@@ -2,12 +2,10 @@
 
 namespace caffe2 {
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     FileStoreHandlerCreate,
     FileStoreHandlerCreateOp<CPUContext>);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(FileStoreHandlerCreate)
     .NumInputs(0)
     .NumOutputs(1)
@@ -23,7 +21,6 @@ don't interfere.
     .Arg("prefix", "prefix for all keys used by this store")
     .Output(0, "handler", "unique_ptr<StoreHandler>");
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 NO_GRADIENT(FileStoreHandlerCreateOp);
 
 } // namespace caffe2

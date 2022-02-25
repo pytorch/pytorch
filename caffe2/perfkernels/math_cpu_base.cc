@@ -28,7 +28,6 @@ void quantize_and_compress__base(
     uint64_t bitwidth,
     bool random,
     const float* random_buffer) {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   uint64_t data_per_byte = 8 / bitwidth;
   uint64_t tail = input_size % data_per_byte;
   tail = tail ? data_per_byte - tail : 0;
@@ -68,9 +67,7 @@ void quantize_and_compress__base(
         rounded = rounded > 0.0f ? rounded : 0.0f;
         uint8_t qval = rounded;
 
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         uint8_t orval = output_data[10 + i];
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         output_data[10 + i] = orval | static_cast<uint8_t>(qval << bit_start);
       }
       bit_start += bitwidth;
@@ -89,9 +86,7 @@ void quantize_and_compress__base(
         thetimes = thetimes > 0.0f ? thetimes : 0.0f;
         uint8_t qval = nearbyint(thetimes);
 
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         uint8_t orval = output_data[10 + i];
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         output_data[10 + i] = orval | static_cast<uint8_t>(qval << bit_start);
       }
       bit_start += bitwidth;

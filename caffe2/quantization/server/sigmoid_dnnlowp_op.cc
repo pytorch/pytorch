@@ -24,7 +24,6 @@ class SigmoidFunctor {
   Sigmoid<T> sigmoid_;
 };
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR_WITH_ENGINE(
     Sigmoid,
     DNNLOWP,
@@ -32,7 +31,6 @@ REGISTER_CPU_OPERATOR_WITH_ENGINE(
         std::uint8_t,
         SigmoidFunctor<std::uint8_t>>);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR_WITH_ENGINE(
     Int8Sigmoid,
     DNNLOWP,

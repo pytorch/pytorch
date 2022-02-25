@@ -13,7 +13,6 @@ using c10::IValue;
 
 // Weak pointer tests
 // gets invalidated
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TestWeakPointer, WeakPointerGetsInvalidated) {
   IValue a = at::ones({2, 2});
   WeakIValue b = a;
@@ -22,7 +21,6 @@ TEST(TestWeakPointer, WeakPointerGetsInvalidated) {
 }
 
 // can successfully lock
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TestWeakPointer, WeakPointerLock) {
   IValue a = at::ones({2, 2});
   WeakIValue b = a;
@@ -36,7 +34,6 @@ TEST(TestWeakPointer, WeakPointerLock) {
 }
 
 // updates refcounts correctly
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TestWeakPointer, WeakUpdatesRefcountsTest) {
   at::Tensor a = at::ones({2, 2});
   ASSERT_EQ(a.use_count(), 1);

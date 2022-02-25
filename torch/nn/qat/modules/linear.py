@@ -1,3 +1,4 @@
+import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.nn.intrinsic import LinearReLU
@@ -34,7 +35,7 @@ class Linear(nn.Linear):
     def from_float(cls, mod):
         r"""Create a qat module from a float module or qparams_dict
 
-            Args: `mod` a float module, either produced by torch.quantization utilities
+            Args: `mod` a float module, either produced by torch.ao.quantization utilities
             or directly from user
         """
         assert type(mod) == cls._FLOAT_MODULE, ' qat.' + cls.__name__ + '.from_float only works for ' + \
@@ -49,3 +50,11 @@ class Linear(nn.Linear):
         qat_linear.weight = mod.weight
         qat_linear.bias = mod.bias
         return qat_linear
+
+    def to_float(self):
+        linear = torch.nn.Linear(self.in_features, self.out_features, self.bias is not None)
+        linear.weight = torch.nn.Parameter(self.weight.detach())
+        if self.bias is not None:
+            linear.bias = torch.nn.Parameter(self.bias.detach())
+        linear.train(self.training)
+        return linear

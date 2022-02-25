@@ -9,7 +9,6 @@ class WorkspaceTestFoo {};
 
 CAFFE_KNOWN_TYPE(WorkspaceTestFoo);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(WorkspaceTest, BlobAccess) {
   Workspace ws;
 
@@ -54,14 +53,12 @@ TEST(WorkspaceTest, BlobAccess) {
   EXPECT_FALSE(ws.HasBlob("newblob"));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(WorkspaceTest, RunEmptyPlan) {
   PlanDef plan_def;
   Workspace ws;
   EXPECT_TRUE(ws.RunPlan(plan_def));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(WorkspaceTest, Sharing) {
   Workspace parent;
   EXPECT_FALSE(parent.HasBlob("a"));
@@ -94,7 +91,6 @@ TEST(WorkspaceTest, Sharing) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(WorkspaceTest, BlobMapping) {
   Workspace parent;
   EXPECT_FALSE(parent.HasBlob("a"));
@@ -132,7 +128,6 @@ static void forEachCheck(std::initializer_list<Workspace*> workspaces) {
   EXPECT_EQ(actual, expected);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(WorkspaceTest, ForEach) {
   forEachCheck({});
 

@@ -1,9 +1,9 @@
-ir_version: 6
+ir_version: 4
 producer_name: "pytorch"
 producer_version: "CURRENT_VERSION"
 graph {
   node {
-    input: "0"
+    input: "onnx::Split_0"
     output: "1"
     output: "2"
     name: "Split_0"
@@ -20,9 +20,9 @@ graph {
       type: INTS
     }
   }
-  name: "torch-jit-export"
+  name: "torch_jit"
   input {
-    name: "0"
+    name: "onnx::Split_0"
     type {
       tensor_type {
         elem_type: 1

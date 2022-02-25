@@ -3,14 +3,11 @@
 namespace caffe2 {
 namespace {
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(PackRNNSequence, PackRNNSequenceOpBase<CPUContext, true>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     UnpackRNNSequence,
     PackRNNSequenceOpBase<CPUContext, false>);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(PackRNNSequence)
     .NumInputs(2)
     .NumOutputs(1)
@@ -45,7 +42,6 @@ UnpackRNNSequence.
     .Input(1, "lengths", "lengths with each number representing the pack size.")
     .Output(0, "output", "Output tensor after packing");
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(UnpackRNNSequence)
     .NumInputs(2)
     .NumOutputs(1)
@@ -105,9 +101,7 @@ class GetUnpackRNNSequenceGradient : public GradientMakerBase {
   }
 };
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_GRADIENT(PackRNNSequence, GetPackRNNSequenceGradient);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_GRADIENT(UnpackRNNSequence, GetUnpackRNNSequenceGradient);
 } // namespace
 } // namespace caffe2

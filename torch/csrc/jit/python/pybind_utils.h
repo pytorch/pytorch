@@ -9,10 +9,10 @@
 #include <pybind11/pytypes.h>
 #include <torch/csrc/Device.h>
 #include <torch/csrc/Dtype.h>
+#include <torch/csrc/Export.h>
 #include <torch/csrc/Layout.h>
 #include <torch/csrc/QScheme.h>
 #include <torch/csrc/Stream.h>
-#include <torch/csrc/WindowsTorchApiMacro.h>
 #include <torch/csrc/jit/api/module.h>
 #include <torch/csrc/jit/frontend/schema_matching.h>
 #include <torch/csrc/jit/frontend/tracer.h>
@@ -38,6 +38,7 @@
 #endif
 #include <c10/util/Exception.h>
 #include <c10/util/Optional.h>
+#include <c10/util/irange.h>
 
 #include <algorithm>
 #include <cstddef>
@@ -153,7 +154,8 @@ struct VISIBILITY_HIDDEN PythonFutureWrapper
         // callback functions. Hence, if user code does not hold a reference to
         // this PythonFutureWrapper object, there is no guarantee that the
         // PythonFutureWrapper is still valid when running the callback.
-        [pyFut(this->getPtr()), pf(std::move(pf))]() -> IValue {
+        [pyFut(this->getPtr()),
+         pf(std::move(pf))](c10::ivalue::Future& /* unused */) -> IValue {
           try {
             pybind11::gil_scoped_acquire ag;
             return toIValue(pf->func_(pyFut), PyObjectType::get());
@@ -277,7 +279,6 @@ InferredType tryToInferContainerType(py::handle input);
 
 // Try to infer the type of a Python object
 // The type cannot be inferred if:
-//   input is a None
 //   input is an empty container (list, dict)
 //   input is an list with element types that cannot be unified
 //   input is an dict with key or value types that cannot be unified
@@ -509,7 +510,7 @@ inline InferredType tryToInferContainerType(py::handle input) {
 }
 
 inline bool isTraceableType(const TypePtr& type) {
-  if (type->isSubtypeOf(TensorType::get())) {
+  if (type->isSubtypeOf(*TensorType::get())) {
     return true;
   }
 
@@ -550,7 +551,7 @@ inline Stack toTraceableStack(const py::tuple& inputs) {
       info.type()->repr_str(),
       "' cannot be traced. Only Tensors and (possibly nested) Lists, Dicts, and"
       " Tuples of Tensors can be traced");
-  return info.toTuple()->elements();
+  return info.toTupleRef().elements().vec();
 }
 
 inline IValue createGenericList(py::handle obj, const TypePtr& elem_type) {
@@ -567,7 +568,7 @@ inline IValue createGenericDict(
     const TypePtr& value_type) {
   c10::impl::GenericDict elems(key_type, value_type);
   elems.reserve(py::len(obj));
-  for (auto entry : obj) {
+  for (auto& entry : obj) {
     elems.insert(
         toIValue(entry.first, key_type), toIValue(entry.second, value_type));
   }
@@ -691,6 +692,8 @@ inline py::object toPyObject(IValue ivalue) {
     }
     guardAgainstNamedTensor<at::Tensor>(tensor);
     return py::cast(autograd::Variable(std::move(tensor)));
+  } else if (ivalue.isStorage()) {
+    return py::cast(ivalue.toStorage());
   } else if (ivalue.isDouble()) {
     return py::cast(std::move(ivalue).toDouble());
   } else if (ivalue.isComplexDouble()) {
@@ -705,25 +708,44 @@ inline py::object toPyObject(IValue ivalue) {
   } else if (ivalue.isList()) {
     auto list = std::move(ivalue).toList();
     py::list t{list.size()};
-    for (size_t i = 0; i < list.size(); ++i) {
+    for (const auto i : c10::irange(list.size())) {
       t[i] = toPyObject(IValue{list.get(i)});
     }
     return std::move(t);
   } else if (ivalue.isTuple()) {
     auto tuple = std::move(ivalue).toTuple();
     const auto& elements = tuple->elements();
+
     py::tuple t{elements.size()};
-    for (size_t i = 0; i < elements.size(); ++i) {
+    for (const auto i : c10::irange(elements.size())) {
       t[i] = toPyObject(IValue{elements.at(i)});
     }
+
+    // If we have a NamedTuple
     if (tuple->type() && tuple->type()->schema() &&
         tuple->type()->schema()->name() != "") {
       auto unqualName = tuple->type()->name()->name();
-      auto fieldNames = fmap(
-          tuple->type()->schema()->arguments(),
-          [](const Argument& arg) { return arg.name(); });
+
+      const std::vector<Argument>& tuple_args =
+          tuple->type()->schema()->arguments();
+
+      std::vector<pybind11::object> defaults;
+      auto it = std::find_if(
+          tuple_args.begin(), tuple_args.end(), [](const Argument& arg) {
+            return arg.default_value().has_value();
+          });
+      std::transform(
+          it,
+          tuple_args.end(),
+          std::back_inserter(defaults),
+          [](const Argument& arg) { return toPyObject(*arg.default_value()); });
+
+      std::vector<std::string> fieldNames =
+          fmap(tuple_args, [](const Argument& arg) { return arg.name(); });
+
       return py::module::import("torch._jit_internal")
-          .attr("_create_named_tuple")(t, unqualName, fieldNames);
+          .attr("_create_named_tuple")(
+              t, unqualName, fieldNames, py::make_tuple(defaults));
     } else {
       return std::move(t);
     }
@@ -763,7 +785,7 @@ inline py::object toPyObject(IValue ivalue) {
 
     const auto numAttrs = classType->numAttributes();
 
-    for (size_t slot = 0; slot < numAttrs; slot++) {
+    for (const auto slot : c10::irange(numAttrs)) {
       const auto& attrName = classType->getAttributeName(slot);
       IValue v = obj->getSlot(slot);
       py::setattr(pyObj, attrName.c_str(), toPyObject(std::move(v)));
@@ -842,13 +864,28 @@ inline Stack createStackForSchema(
   Stack stack;
   stack.reserve(schema.arguments().size());
 
+  int64_t arg_idx = 0;
   if (self) {
     push(stack, std::move(*self));
+    arg_idx++;
   }
   // First push all positional args.
   for (const auto& arg : args) {
+    // ...but refuse to do it if the schema says that this was supposed
+    // to be keyword only
+    if (schema.arguments()[arg_idx].kwarg_only()) {
+      throw schema_match_error(c10::str(
+          schema.name(),
+          "() takes ",
+          arg_idx,
+          " positional argument(s) but ",
+          self ? 1 + args.size() : args.size(),
+          " was/were given.  Declaration: ",
+          schema));
+    }
     // Use the type information from the schema to convert the PyObject.
     push(stack, argumentToIValue(schema, stack.size(), arg));
+    arg_idx++;
   }
 
   // Now for every remaining non-positional argument in the schema, look for it
@@ -896,7 +933,7 @@ inline py::object createPyObjectForStack(Stack&& stack) {
 
   // If there is more than one return value, pop them into a py::tuple.
   py::tuple return_values(stack.size());
-  for (size_t ret = 0; ret < return_values.size(); ++ret) {
+  for (const auto ret : c10::irange(return_values.size())) {
     return_values[ret] = toPyObject(std::move(stack[ret]));
   }
 
@@ -915,7 +952,7 @@ inline Stack evilDeprecatedBadCreateStackDoNotUse(
   }
   Stack result;
   result.reserve(tuple.size() + reserve_extra_space);
-  for (size_t i = 0; i < inputs.size(); ++i) {
+  for (const auto i : c10::irange(inputs.size())) {
     result.push_back(toIValue(std::move(tuple[i]), inputs[i]->type()));
   }
   return result;
@@ -944,15 +981,15 @@ inline py::object runAndInsertCall(
     // and then run the callee with tracing disabled.
 
     // Get the graph `Value`s that represent the input IValues
-    auto inputs = last(stack, callee.graph()->inputs().size());
+    auto inputs = last(stack, callee.num_inputs());
     auto input_values =
         fmap(inputs, [](const IValue& v) { return tracer::getValueTrace(v); });
     TORCH_INTERNAL_ASSERT(callee.getSchema().returns().size() == 1)
     auto return_type = callee.getSchema().returns().at(0).type();
     auto graph = tracing_state->graph;
     std::vector<NamedValue> named_values;
+    named_values.reserve(input_values.size());
     for (Value* v : input_values) {
-      // NOLINTNEXTLINE(performance-inefficient-vector-operation)
       named_values.emplace_back(v);
     }
 
@@ -1116,7 +1153,7 @@ inline py::object invokeOperatorFromPython(
   Stack stack = std::get<1>(opWithStack);
   {
     pybind11::gil_scoped_release no_gil_guard;
-    found_op->getOperation()(&stack);
+    found_op->getOperation()(stack);
   }
 
   return createPyObjectForStack(std::move(stack));

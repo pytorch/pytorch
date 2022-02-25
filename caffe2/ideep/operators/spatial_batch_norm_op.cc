@@ -12,9 +12,7 @@ class IDEEPSpatialBNOp final : public IDEEPOperator {
   IDEEPSpatialBNOp(const OperatorDef& operator_def, Workspace* ws)
       : IDEEPOperator(operator_def, ws),
         is_test_(OperatorBase::GetSingleArgument<int>(OpSchema::Arg_IsTest, 0)),
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         epsilon_(OperatorBase::GetSingleArgument<float>("epsilon", 1e-5)),
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         momentum_(OperatorBase::GetSingleArgument<float>("momentum", 0.9)) {
     CAFFE_ENFORCE(
         (is_test_ && OutputSize() > OUTPUT)
@@ -74,7 +72,6 @@ class IDEEPSpatialBNGradientOp final : public IDEEPOperator {
 
   IDEEPSpatialBNGradientOp(const OperatorDef& operator_def, Workspace* ws)
       : IDEEPOperator(operator_def, ws),
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         epsilon_(OperatorBase::GetSingleArgument<float>("epsilon", 1e-5)) {
     CAFFE_ENFORCE(InputSize() > SAVED_VAR);
     CAFFE_ENFORCE(OutputSize() > BIAS_GRAD);
@@ -107,9 +104,7 @@ class IDEEPSpatialBNGradientOp final : public IDEEPOperator {
   OUTPUT_TAGS(INPUT_GRAD, SCALE_GRAD, BIAS_GRAD);
 };
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_IDEEP_OPERATOR(SpatialBN, IDEEPSpatialBNOp);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_IDEEP_OPERATOR(SpatialBNGradient, IDEEPSpatialBNGradientOp)
 
 }  // namespace
