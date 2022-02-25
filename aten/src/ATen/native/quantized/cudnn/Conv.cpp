@@ -89,14 +89,7 @@ cudnn_frontend::PointWiseDesc_v8 getPointWiseAddDescriptor(cudnnDataType_t dataT
     .build();
 }
 
-// TODO: there is a table from input dtype to operator dtype, we can derive
-// the operator dtype based on input dtype
-cudnn_frontend::PointWiseDesc_v8 getPointWiseReluDescriptor(cudnnDataType_t dataType) {
-  return cudnn_frontend::PointWiseDescBuilder()
-    .setMode(cudnnPointwiseMode_t::CUDNN_POINTWISE_RELU_FWD)
-    .setMathPrecision(dataType)
-    .build();
-}
+
 
 void filterEngineConfigs(
   cudnn_frontend::EngineConfigList &from,
@@ -198,7 +191,6 @@ at::SmallVector<int64_t, 4> MakeConvOutputShape<2>(
 }
 
 // the parameter quantized_output is a quantized tensor
-template <bool kReluFused>
 void raw_cudnn_convolution_forward_out(
     const Tensor& quantized_output,
     const Tensor& input,
@@ -227,7 +219,6 @@ void raw_cudnn_convolution_forward_out(
   c10::optional<at::Tensor> after_scales_bias;
   c10::optional<at::Tensor> after_add;
   c10::optional<at::Tensor> broadcasted_bias;
-  c10::optional<at::Tensor> after_relu;
   if (bias.has_value()) {
     // the input bias is a 1-D tensor whose size is the same as the size of the second dimension of quantized_output.
     // we need to add trailing dimensions in order to properly broadcast bias, otherwise broadcast_to will fail.
@@ -242,9 +233,6 @@ void raw_cudnn_convolution_forward_out(
     bias_multiplier_tensor.value().fill_(bias_multiplier);
     after_scales_bias = at::empty(quantized_output.sizes(), at::device(at::kCUDA).dtype(at::kFloat), at::MemoryFormat::ChannelsLast);
     after_add = at::empty(quantized_output.sizes(), at::device(at::kCUDA).dtype(at::kFloat), at::MemoryFormat::ChannelsLast);
-  }
-  if (kReluFused) {
-    after_relu = at::empty(quantized_output.sizes(), at::device(at::kCUDA).dtype(at::kFloat), at::MemoryFormat::ChannelsLast);
   }
 
   cudnnHandle_t handle = getCudnnHandle();
@@ -267,47 +255,21 @@ void raw_cudnn_convolution_forward_out(
     auto workspace = at::empty({workspace_size}, input.options().dtype(kByte));
     std::vector<void *> data_ptrs;
     std::vector<int64_t> uids;
+    data_ptrs.reserve(9);
+    uids.reserve(9);
+    data_ptrs = {reinterpret_cast<int8_t*>(input.data_ptr()), conv_output.data_ptr(),
+                                           reinterpret_cast<int8_t*>(weight.data_ptr()),
+                                           requantize_multiplier_tensor.data_ptr(),
+                                           reinterpret_cast<int8_t*>(quantized_output.data_ptr())};
+    uids = {'x', 'y', 'w', 's', 'r'};
     if (bias.has_value()) {
-      if (kReluFused) {
-        data_ptrs = std::vector<void *>{reinterpret_cast<int8_t*>(input.data_ptr()), conv_output.data_ptr(),
-                                    reinterpret_cast<int8_t*>(weight.data_ptr()),
-                                    requantize_multiplier_tensor.data_ptr(),
-                                    reinterpret_cast<int8_t*>(quantized_output.data_ptr()),
-                                    broadcasted_bias.value().data_ptr(),
-                                    bias_multiplier_tensor.value().data_ptr(),
-                                    after_scales_bias.value().data_ptr(),
-                                    after_add.value().data_ptr(),
-                                    after_relu.value().data_ptr(),
-                                    };
-        uids = std::vector<int64_t>{'x', 'y', 'w', 's', 'r', 'b', 'c', 'd', 'e', 'f'};
-      } else {
-        data_ptrs = std::vector<void *>{reinterpret_cast<int8_t*>(input.data_ptr()), conv_output.data_ptr(),
-                                    reinterpret_cast<int8_t*>(weight.data_ptr()),
-                                    requantize_multiplier_tensor.data_ptr(),
-                                    reinterpret_cast<int8_t*>(quantized_output.data_ptr()),
-                                    broadcasted_bias.value().data_ptr(),
-                                    bias_multiplier_tensor.value().data_ptr(),
-                                    after_scales_bias.value().data_ptr(),
-                                    after_add.value().data_ptr(),
-                                    };
-        uids = std::vector<int64_t>{'x', 'y', 'w', 's', 'r', 'b', 'c', 'd', 'e'};
-      }
-    } else {
-      if (kReluFused) {
-        uids = std::vector<int64_t>{'x', 'y', 'w', 's', 'r', 'f'};
-        data_ptrs = std::vector<void *>{reinterpret_cast<int8_t*>(input.data_ptr()), conv_output.data_ptr(),
-                                    reinterpret_cast<int8_t*>(weight.data_ptr()),
-                                    requantize_multiplier_tensor.data_ptr(),
-                                    reinterpret_cast<int8_t*>(quantized_output.data_ptr()),
-                                    after_relu.value().data_ptr()
-                                    };
-      } else {
-        uids = std::vector<int64_t>{'x', 'y', 'w', 's', 'r'};
-        data_ptrs = std::vector<void *>{reinterpret_cast<int8_t*>(input.data_ptr()), conv_output.data_ptr(),
-                                    reinterpret_cast<int8_t*>(weight.data_ptr()),
-                                    requantize_multiplier_tensor.data_ptr(),
-                                    reinterpret_cast<int8_t*>(quantized_output.data_ptr())};
-      }
+      void *ptrs2append[] = {broadcasted_bias.value().data_ptr(),
+                             bias_multiplier_tensor.value().data_ptr(),
+                             after_scales_bias.value().data_ptr(),
+                             after_add.value().data_ptr()};
+      int64_t ids2append[] = {'b', 'c', 'd', 'e'};
+      data_ptrs.insert(data_ptrs.end(), std::begin(ptrs2append), std::end(ptrs2append));
+      uids.insert(uids.end(), std::begin(ids2append), std::end(ids2append));
     }
     auto variantPack = cudnn_frontend::VariantPackBuilder()
       .setWorkspacePointer(workspace.data_ptr())
@@ -355,19 +317,8 @@ void raw_cudnn_convolution_forward_out(
       .build());
   }
 
-  c10::optional<cudnn_frontend::Operation> relu_op;
-  if (kReluFused) {
-    // TODO: can we assign the result back into conv_output and get rid of after_relu?
-    relu_op.emplace(cudnn_frontend::OperationBuilder(CUDNN_BACKEND_OPERATION_POINTWISE_DESCRIPTOR)
-      .setxDesc(bias.has_value() ? sum_conv_bias_op.value().getOutputTensor() : conv_op.getOutputTensor())
-      .setyDesc(getTensorDescriptor(after_relu.value(), 'f', getAlignment(after_relu.value())))
-      .setpwDesc(getPointWiseReluDescriptor(getCudnnDataType(after_relu.value())))
-      .build());
-  }
-
   auto requant_op = cudnn_frontend::OperationBuilder(CUDNN_BACKEND_OPERATION_POINTWISE_DESCRIPTOR)
-    .setxDesc(bias.has_value() ? (kReluFused ? relu_op.value().getOutputTensor() : sum_conv_bias_op.value().getOutputTensor())
-                               : (kReluFused ? relu_op.value().getOutputTensor() : conv_op.getOutputTensor()))
+    .setxDesc(bias.has_value() ? sum_conv_bias_op.value().getOutputTensor() : conv_op.getOutputTensor())
     .setbDesc(getTensorDescriptor(requantize_multiplier_tensor, 's', getAlignment(requantize_multiplier_tensor)))
     .setyDesc(getTensorDescriptor(quantized_output.sizes(), quantized_output.strides(), CUDNN_DATA_INT8, 'r', getAlignment(quantized_output)))
     .setpwDesc(getPointWiseMulDescriptor(getCudnnDataType(requantize_multiplier_tensor)))
@@ -378,9 +329,6 @@ void raw_cudnn_convolution_forward_out(
   if (bias.has_value()) {
     ops.emplace_back(&(bias_mult_op.value()));
     ops.emplace_back(&(sum_conv_bias_op.value()));
-  }
-  if (kReluFused) {
-    ops.emplace_back(&(relu_op.value()));
   }
   ops.emplace_back(&requant_op);
 
@@ -430,11 +378,8 @@ Numerics:
 Operation:
 out_fp32 = conv_fp32(act_fp32, w_fp32, …)
                     = act_fp32 * w_fp32 + bias_fp32
-
 act_int8 = act_fp32 / act_scale + act_zero_point
 w_int8 = w_fp32 / w_scale + w_zero_point
-
-
 out_int8 = out_fp32 / out_scale + out_zero_point
 out_int8 = (act_fp32 * w_fp32 + [bias_fp32]) / out_scale + out_zero_point
               = (act_int8 - act_zero_point) * act_scale * (w_int8 - w_zero_point) * w_scale / out_scale + out_zero_point + [bias_fp32 / out_scale]
@@ -444,7 +389,7 @@ out_int8 = (act_fp32 * w_fp32 + [bias_fp32]) / out_scale + out_zero_point
              = (act_int8 * w_int8 + [bias_fp32/(act_scale * w_scale)]) / (out_scale / (act_scale * w_scale))
              = requantize((act_int8 * w_int8 + [bias_fp32/(act_scale * w_scale)]), out_scale / (act_scale * w_scale))
 */
-template <int kSpatialDim, bool kReluFused>
+template <int kSpatialDim>
 Tensor raw_cudnn_convolution_forward(
     const Tensor& act,
     const Tensor& weight,
@@ -475,7 +420,7 @@ Tensor raw_cudnn_convolution_forward(
       output_scale,
       output_zero_point,
       at::MemoryFormat::ChannelsLast);
-  raw_cudnn_convolution_forward_out<kReluFused>(
+  raw_cudnn_convolution_forward_out(
       quantized_output, act, weight, bias,
       padding, stride, dilation, groups,
       benchmark,
@@ -501,6 +446,7 @@ class QConvInt8 final {
       int64_t groups,
       double output_scale,
       int64_t output_zero_point) {
+    TORCH_CHECK(!kReluFused, "conv relu not supported yet");
     act = act.contiguous(c10::MemoryFormat::ChannelsLast);
     weight = weight.contiguous(c10::MemoryFormat::ChannelsLast);
     // requantization
@@ -511,7 +457,7 @@ class QConvInt8 final {
     auto bias_multiplier = 1.0 / (act_scale * weight_scale);
 
     // TODO: check all zero_points are zero/all tensors are symmetrically quantized
-    return raw_cudnn_convolution_forward<kSpatialDim, kReluFused>(
+    return raw_cudnn_convolution_forward<kSpatialDim>(
         act.int_repr(), weight.int_repr(), bias,
         IntArrayRef(padding.vec()), IntArrayRef(stride.vec()), IntArrayRef(dilation.vec()), groups,
         false /* benchmark */,
@@ -527,7 +473,6 @@ class QConvInt8 final {
 
 TORCH_LIBRARY_IMPL(quantized, QuantizedCUDA, m) {
   m.impl(TORCH_SELECTIVE_NAME("quantized::conv2d_cudnn"), QConvInt8<2, false>::run);
-  m.impl(TORCH_SELECTIVE_NAME("quantized::conv2d_relu_cudnn"), QConvInt8<2, true>::run);
 }
 
 } // namespace
