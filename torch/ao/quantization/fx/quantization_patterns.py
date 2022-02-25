@@ -21,7 +21,6 @@ from ..utils import (
     get_qconfig_dtypes,
     activation_dtype,
     get_qparam_dict,
-    check_node,
 )
 
 from torch.ao.quantization.quantize import (

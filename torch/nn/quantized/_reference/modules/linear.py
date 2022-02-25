@@ -2,10 +2,6 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from typing import Optional, Dict, Any
-from .utils import _quantize_and_dequantize_weight
-from .utils import _quantize_weight
-from .utils import _save_weight_qparams
-from .utils import _get_weight_qparam_keys
 from .utils import ReferenceQuantizedModule
 
 class Linear(nn.Linear, ReferenceQuantizedModule):
