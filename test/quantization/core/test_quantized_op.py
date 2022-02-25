@@ -1002,8 +1002,8 @@ class TestQuantizedOps(TestCase):
     def test_qmatmul(self, num_dims, outer_dims, m, k, n, dtypes):
         (torch_dtype, np_dtype) = dtypes
 
-        size_a = outer_dims[:num_dims-2] + [m, k]
-        size_b = outer_dims[:num_dims-2] + [k, n]
+        size_a = outer_dims[:num_dims - 2] + [m, k]
+        size_b = outer_dims[:num_dims - 2] + [k, n]
         A = torch.randn(size=size_a, dtype=torch.float32) * 3
         B = torch.randn(size=size_b, dtype=torch.float32) * 3
 
