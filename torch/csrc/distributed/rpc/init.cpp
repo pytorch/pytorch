@@ -118,13 +118,13 @@ PyObject* rpc_init(PyObject* _unused, PyObject* noargs) {
                 return os.str();
               })
           .def(py::pickle(
-              [](const WorkerInfo& workerInfo) { //__getstate__
+              /* __getstate__ */
+              [](const WorkerInfo& workerInfo) {
                 return py::make_tuple(workerInfo.name_, workerInfo.id_);
               },
-              [](py::tuple t) { // __setstate__
-                if (t.size() != 2) {
-                  throw std::runtime_error("Invalid state");
-                }
+              /* __setstate__ */
+              [](py::tuple t) {
+                TORCH_CHECK(t.size() == 2, "Invalid WorkerInfo state.");
 
                 WorkerInfo workerInfo(
                     t[0].cast<std::string>(), t[1].cast<worker_id_t>());
