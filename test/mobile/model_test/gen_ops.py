@@ -1,6 +1,5 @@
 """
-This is a script to aggregate production ops from
-fbsource/xplat/pytorch_models/build/all_mobile_model_configs.yaml.
+This is a script to aggregate production ops from xplat/pytorch_models/build/all_mobile_model_configs.yaml.
 Specify the file path in the first argument. The results will be dump to model_ops.yaml
 """
 
@@ -30,4 +29,3 @@ traced_operators = sorted(list([x for x in traced_operators if x.split("::")[0] 
 out_path = "test/mobile/model_test/model_ops.yaml"
 with open(out_path, "w") as f:
     yaml.safe_dump({"root_operators": root_operators, "traced_operators": traced_operators, "kernel_metadata": kernel_metadata}, f)
-    f.close()
