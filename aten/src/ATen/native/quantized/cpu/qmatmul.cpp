@@ -97,8 +97,8 @@ Tensor qmatmul(
     ruy::Mul(qa_matrix, qb_matrix, mul_params, &context, &out_matrix);
   });
 
-  /* Requantization explanation: */
-  /* https://github.com/google/gemmlowp/blob/e844ffd17118c1e17d94e1ba4354c075a4577b88/doc/quantization.md */
+  // Requantization explanation:
+  // https://github.com/google/gemmlowp/blob/e844ffd17118c1e17d94e1ba4354c075a4577b88/doc/quantization.md
   const double requantization_scale =
       output_scale / (qa.q_scale() * qb.q_scale());
 
