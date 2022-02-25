@@ -790,7 +790,7 @@ class FullyShardedDataParallel(nn.Module):
                 not getattr(state_dict[key], "_has_been_cloned", False)
             ):
                 state_dict[key] = state_dict[key].clone().detach()
-                state_dict[key]._has_been_cloned = True
+                state_dict[key]._has_been_cloned = True  # type: ignore[attr-defined]
 
         _replace_by_prefix(state_dict, prefix + f"{FSDP_WRAPPED_MODULE}.", prefix)
         return state_dict
