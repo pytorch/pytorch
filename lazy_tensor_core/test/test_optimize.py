@@ -33,11 +33,33 @@ class ModuleAddcmul(nn.Module):
     def forward(self, a, b, c):
         return torch.addcmul(a, b, c, value=5)
 
+class ModuleReturnMulti(nn.Module):
+    def __init__(self):
+        super(ModuleReturnMulti, self).__init__()
+
+    def forward(self, a, b):
+        return (b + 1, a - 1)
+
 def gen_rand_args(mod):
     args = []
     for _ in range(len(inspect.signature(mod.forward).parameters)):
         args.append(torch.randn(2, 3))
     return args
+
+def allclose(expected, actual):
+    def unwrap(cont):
+        if isinstance(cont, (list, tuple)) and len(cont) == 1:
+            return cont[0]
+        return cont
+    expected = unwrap(expected)
+    actual = unwrap(actual)
+
+    if isinstance(expected, torch.Tensor) and isinstance(actual, torch.Tensor):
+        return torch.allclose(expected, actual)
+    elif isinstance(expected, (tuple, list)) and isinstance(actual, (tuple, list)):
+        return len(expected) == len(actual) and all(torch.allclose(a, b) for a, b in zip(expected, actual))
+    else:
+        raise RuntimeError("Unexpected types")
 
 def verify_reusing_compiled_graph(mod, ncase=10):
     args = gen_rand_args(mod)
@@ -53,9 +75,9 @@ def verify_reusing_compiled_graph(mod, ncase=10):
     for i in range(ncase):
         rand_args = gen_rand_args(mod)
         expected = mod(*rand_args)
-        actual = optimized_mod(*rand_args)[0]
-        # print(f"Check {i}, allclose? {torch.allclose(expected, actual)}, expected {expected}, actual {actual}")
-        if not torch.allclose(expected, actual):
+        actual = optimized_mod(*rand_args)
+
+        if not allclose(expected, actual):
             failed_index.append(i)
 
     if len(failed_index) > 0:
@@ -66,8 +88,10 @@ def maketest(module_cls):
         verify_reusing_compiled_graph(module_cls())
 
     return wrapper
+
 # import pdb; pdb.set_trace()
 class OptimizeTest(unittest.TestCase):
     test_sub = maketest(ModuleSub)
     test_const_scale = maketest(ModuleConstScale)
     test_addcmul = maketest(ModuleAddcmul)
+    test_return_multi = maketest(ModuleReturnMulti)

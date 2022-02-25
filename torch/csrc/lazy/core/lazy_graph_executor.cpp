@@ -921,7 +921,7 @@ std::shared_ptr<LazyGraphExecutor::Async> LazyGraphExecutor::
       std::move(compile_result.computation));
   GetComputationCache()->Add(coll.hash, cached_computation);
 
-  LOG(ERROR) << "Add a catched computation with hash " << coll.hash << std::endl;
+  LOG(ERROR) << "Add a cached computation with hash " << coll.hash << std::endl;
 
   return ScheduleSyncTensorsGraph(
       tensors,
@@ -1092,12 +1092,10 @@ std::vector<BackendDataPtr> LazyGraphExecutor::GatherTensorsData(
   return result_tensors_data;
 }
 
-hash_t LazyGraphExecutor::GetGraphHash(const LazyTensor& tensor) {
+hash_t LazyGraphExecutor::GetGraphHash(const std::vector<LazyTensor>& tensors) {
   SyncTensorsConfig config;
   config.sync_ltc_data = false;
 
-  std::vector<LazyTensor> tensors;
-  tensors.push_back(tensor);
   auto coll = CollectSyncTensors(tensors, config);
   auto po_data = RunPostOrder(tensors, coll.indices);
   coll.hash = HashCombine(coll.hash, Hash(po_data.parameter_sequence));

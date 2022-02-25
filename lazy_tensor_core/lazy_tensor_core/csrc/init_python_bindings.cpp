@@ -493,10 +493,10 @@ void InitLtcModuleBindings(py::module m) {
     #if 0
     auto computationPtr = (TSComputation*) LazyGraphExecutor::Get()->GetComputationCache()->GetLatest()->computation.get();
     #endif
-    auto computationPtr = (TSComputation*) LazyGraphExecutor::Get()->GetComputationCache()->Get(hash)->computation.get();
-    TORCH_CHECK(computationPtr, "Failed to get computation by hash. Maybe the entry get kicked out of the LRU cache"); // TODO implement a fallback mechanism, or make sure those entries never get kicked out
+    auto cachedComputation = LazyGraphExecutor::Get()->GetComputationCache()->Get(hash);
+    TORCH_CHECK(cachedComputation, "Failed to get computation by hash. Maybe the entry get kicked out of the LRU cache"); // TODO implement a fallback mechanism, or make sure those entries never get kicked out
+    auto computationPtr = (TSComputation*) cachedComputation->computation.get();
 
-    TORCH_CHECK(computationPtr);
     std::vector<torch::jit::IValue> stack;
     for (auto arg : graph_inputs) {
       stack.emplace_back(arg);
@@ -754,9 +754,12 @@ void InitLtcModuleBindings(py::module m) {
     shunting_explore();
     return c10::IValue(5);
   });
-  m.def("_get_graph_hash", [](const at::Tensor& tensor) {
-    auto xtensor = TryGetLtcTensor(tensor);
-    auto hash = LazyGraphExecutor::Get()->GetGraphHash(xtensor);
+  m.def("_get_graph_hash", [](const std::vector<at::Tensor>& tensors) {
+    std::vector<LazyTensor> xtensors;
+    for (auto& tensor : tensors) {
+      xtensors.push_back(TryGetLtcTensor(tensor));
+    }
+    auto hash = LazyGraphExecutor::Get()->GetGraphHash(xtensors);
     std::string bin((const char*) &hash, sizeof(hash));
     return py::bytes(bin);
   });
