@@ -972,7 +972,7 @@ void AliasDb::analyzeGradOf(Node* node) {
 
 void AliasDb::analyzeSubgraph(Node* node, std::shared_ptr<Graph> subgraph) {
   const auto subgraphBlock = subgraph->block();
-  // CallFunction nodes have an extra first parameter
+  // CallFunction nodes have an extra first parameter of the name of the function
   if (node->kind() == prim::CallFunction) {
     mapAliases(subgraphBlock->inputs(), node->inputs().slice(1));
   } else {
@@ -986,7 +986,7 @@ void AliasDb::analyzeSubgraph(Node* node, std::shared_ptr<Graph> subgraph) {
   // subgraph block.
   TORCH_INTERNAL_ASSERT(
       subgraphBlock->outputs().size() >= node->outputs().size());
-  for (size_t i = 0; i < node->outputs().size(); i++) {
+  for (const auto i : c10::irange(node->outputs().size())) {
     makePointerTo(node->outputs()[i], subgraphBlock->outputs()[i]);
   }
 }
