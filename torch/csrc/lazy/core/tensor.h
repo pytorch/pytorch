@@ -69,7 +69,7 @@ class TORCH_API LazyTensor : public c10::intrusive_ptr_target {
   }
 
   LazyTensorPtr alias() const {
-    return c10::make_intrusive<LazyTensor>(data_ptr());
+    return c10::make_intrusive<LazyTensor>(LazyTensor(data_ptr()));
   }
 
   int64_t size(int64_t dim) const;

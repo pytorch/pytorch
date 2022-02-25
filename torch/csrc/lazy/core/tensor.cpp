@@ -33,13 +33,13 @@ LazyTensorPtr LazyTensor::Create(
     const at::Tensor& tensor,
     const BackendDevice& device) {
   TORCH_CHECK(tensor.device().type() != at::kLazy);
-  LazyTensorPtr lazy_tensor = c10::make_intrusive<LazyTensor>(std::move(LazyTensor(tensor, device)));
+  LazyTensorPtr lazy_tensor = c10::make_intrusive<LazyTensor>(LazyTensor(tensor, device));
   LazyGraphExecutor::Get()->RegisterTensor(lazy_tensor->data_ptr());
   return lazy_tensor;
 }
 
 LazyTensorPtr LazyTensor::Create(Value ir_value, const BackendDevice& device) {
-  LazyTensorPtr lazy_tensor = c10::make_intrusive<LazyTensor>(std::move(LazyTensor(std::move(ir_value), device)));
+  LazyTensorPtr lazy_tensor = c10::make_intrusive<LazyTensor>(LazyTensor(std::move(ir_value), device));
   LazyGraphExecutor::Get()->RegisterTensor(lazy_tensor->data_ptr());
   return lazy_tensor;
 }
@@ -47,19 +47,19 @@ LazyTensorPtr LazyTensor::Create(Value ir_value, const BackendDevice& device) {
 LazyTensorPtr LazyTensor::Create(
     std::shared_ptr<LazyView> view,
     const BackendDevice& device) {
-  LazyTensorPtr lazy_tensor = c10::make_intrusive<LazyTensor>(std::move(LazyTensor(std::move(view), device)));
+  LazyTensorPtr lazy_tensor = c10::make_intrusive<LazyTensor>(LazyTensor(std::move(view), device));
   LazyGraphExecutor::Get()->RegisterTensor(lazy_tensor->data_ptr());
   return lazy_tensor;
 }
 
 LazyTensorPtr LazyTensor::Create(BackendDataPtr handle) {
-  LazyTensorPtr lazy_tensor = c10::make_intrusive<LazyTensor>(std::move(LazyTensor(std::move(handle))));
+  LazyTensorPtr lazy_tensor = c10::make_intrusive<LazyTensor>(LazyTensor(std::move(handle)));
   LazyGraphExecutor::Get()->RegisterTensor(lazy_tensor->data_ptr());
   return lazy_tensor;
 }
 
 LazyTensorPtr LazyTensor::Create(std::shared_ptr<Data> data) {
-  return c10::make_intrusive<LazyTensor>(std::move(LazyTensor(std::move(data))));
+  return c10::make_intrusive<LazyTensor>(LazyTensor(std::move(data)));
 }
 
 LazyTensor::LazyTensor(const at::Tensor& tensor, const BackendDevice& device)
@@ -445,7 +445,7 @@ void LazyTensor::ApplyPendingGraph() {
   // This method is called to ensure that the tensor data is available on
   // device, so that a call to CurrentDataHandle() returns a valid pointer.
   if (CurrentDataHandle() == nullptr) {
-    std::vector<LazyTensorPtr> tensors({c10::make_intrusive<LazyTensor>(std::move(LazyTensor(*this)))});
+    std::vector<LazyTensorPtr> tensors({c10::make_intrusive<LazyTensor>(LazyTensor(*this))});
     LazyGraphExecutor::Get()->SyncTensorsGraph(
         &tensors,
         {},
