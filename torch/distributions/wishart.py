@@ -278,8 +278,11 @@ class Wishart(ExponentialFamily):
 
     @property
     def _natural_params(self):
-        return self.precision_matrix, self.df
+        return (
+            0.5 * self.df,
+            - 0.5 * self.precision_matrix,
+        )
 
     def _log_normalizer(self, x, y):
-        p = self._event_shape[-1]
-        return 0.5 * y * (- torch.linalg.slogdet(x).logabsdet + _log_2 * p) + torch.mvlgamma(0.5 * y, p=p)
+        p = y.shape[-1]
+        return x * (- torch.linalg.slogdet(-2 * y).logabsdet + _log_2 * p) + _mvdigamma(x, p=p)
