@@ -13,7 +13,7 @@ namespace lazy {
 class CacheNode : public Node {
  public:
   explicit CacheNode(const std::string& str)
-      : Node(OpKind(), /* num_outputs */ 1, [&](bool /*unused*/) { return Hash(str); }),
+      : Node(OpKind(), /* num_outputs */ 1, /* hash_func */ [&](bool /*bakeInSizes*/) -> hash_t { return Hash(str); }),
         str_(str) {}
   ~CacheNode() override = default;
 

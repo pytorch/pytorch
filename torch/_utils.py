@@ -128,7 +128,7 @@ def _get_async_or_non_blocking(function_name, non_blocking, kwargs):
 
 
 # TODO: Once we decide to break serialization FC, `storage` no longer needs to
-# be a TypedStorage
+# be a _TypedStorage
 def _rebuild_tensor(storage, storage_offset, size, stride):
     # first construct a tensor with the correct dtype/device
     t = torch.tensor([], dtype=storage.dtype, device=storage._untyped().device)
@@ -209,8 +209,14 @@ def _rebuild_meta_tensor_no_storage(dtype, size, stride, requires_grad):
     return torch.empty_strided(size, stride, dtype=dtype, device='meta', requires_grad=requires_grad)
 
 
+def _rebuild_wrapper_subclass(cls, dtype, size, stride, storage_offset, layout, device, requires_grad):
+    return torch.Tensor._make_wrapper_subclass(  # type: ignore[attr-defined]
+        cls, size, strides=stride, storage_offset=storage_offset, layout=layout,
+        device=device, requires_grad=requires_grad)
+
+
 # TODO: Once we decide to break serialization FC, `storage` no longer needs to
-# be a TypedStorage
+# be a _TypedStorage
 def _rebuild_qtensor(storage, storage_offset, size, stride, quantizer_params, requires_grad, backward_hooks):
     qscheme = quantizer_params[0]
     if qscheme == torch.per_tensor_affine:

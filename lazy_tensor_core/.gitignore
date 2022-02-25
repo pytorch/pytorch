@@ -16,7 +16,6 @@ CMakeFiles/
 lazy_tensor_core/csrc/ts_backend/LazyLazyIr.h
 lazy_tensor_core/csrc/ts_backend/LazyNativeFunctions.cpp
 lazy_tensor_core/csrc/ts_backend/LazyNativeFunctions.h
-lazy_tensor_core/csrc/ts_backend/LazyShapeInference.h
 lazy_tensor_core/csrc/ts_backend/RegisterAutogradLazy.cpp
 lazy_tensor_core/csrc/ts_backend/RegisterLazy.cpp
 lazy_tensor_core/csrc/ts_backend/LazyTsLowering.cpp
