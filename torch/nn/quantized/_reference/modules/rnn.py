@@ -1,59 +1,75 @@
 import torch
 import torch.nn as nn
 from .utils import _quantize_and_dequantize_weight
-from .utils import _extract_qparams
 
 class RNNCellBase(nn.RNNCellBase):
     def __init__(self, input_size: int, hidden_size: int, bias: bool, num_chunks: int,
-                 device=None, dtype=None, weight_qparams_list=None) -> None:
-        if weight_qparams_list is None:
+                 device=None, dtype=None, weight_qparams_dict=None) -> None:
+        if weight_qparams_dict is None:
             weight_qparams = {
                 "qscheme": torch.per_tensor_affine,
                 "dtype": torch.quint8,
                 "scale": 1.0,
                 "zero_point": 0
             }
-            weight_qparams_list = [
-                weight_qparams,
-                weight_qparams,
-            ]
-        assert len(weight_qparams_list) == 2, "Expected length for weight_qparams_list to be 2 for QuantizedRNNCellBase(Reference)"
+            weight_qparams_dict = {
+                "weight_ih": weight_qparams,
+                "weight_hh": weight_qparams
+            }
+        assert len(weight_qparams_dict) == 2, "Expected length for weight_qparams_dict to be 2 for QuantizedRNNCellBase(Reference)"
         super().__init__(input_size, hidden_size, bias, num_chunks, device=device, dtype=dtype)
-        self._init_weight_qparams_list(weight_qparams_list)
+        self._init_weight_qparams_dict(weight_qparams_dict)
 
-    def _init_weight_qparams_list(self, weight_qparams_list):
-        if weight_qparams_list is None:
-            weight_qparams_list = []
-        for weight_qparams in weight_qparams_list:
+    def _init_weight_qparams_dict(self, weight_qparams_dict):
+        assert weight_qparams_dict is not None
+        for key, weight_qparams in weight_qparams_dict:
+            # TODO: refactor the duplicated code to utils.py
             weight_qscheme = weight_qparams["qscheme"]
             assert weight_qscheme in [None, torch.per_tensor_affine, torch.per_channel_affine], \
                 Exception(f"qscheme: {weight_qscheme} is not support in {self._get_name()}")
-        # TODO: check TorchScriptability?
-        self.weight_qparams_list = weight_qparams_list
+            if self.weight_qscheme is not None:
+                self.register_buffer(
+                    key + "_scale",
+                    torch.tensor(weight_qparams["scale"], dtype=torch.float, device=device))
+                self.register_buffer(
+                    key + "_zero_point",
+                    torch.tensor(weight_qparams["zero_point"], dtype=torch.int, device=device))
+                if self.weight_qscheme == torch.per_channel_affine:
+                    self.register_buffer(
+                        key + "_axis",
+                        torch.tensor(weight_qparams["axis"], dtype=torch.int, device=device))
+                else:
+                    # added for TorchScriptability, not used
+                    self.register_buffer(
+                        key + "_axis", torch.tensor(0, dtype=torch.int, device=device))
 
     def _get_name(self):
         return "QuantizedRNNCellBase(Reference)"
 
     def get_weight_ih(self):
-        weight_qparams = self.weight_qparams_list[0]
-        weight_qscheme, weight_dtype, weight_scale, weight_zero_point, weight_axis = \
-            _extract_qparams(weight_qparams)
-        return _quantize_and_dequantize_weight(
-            self.weight_ih, weight_qscheme, weight_dtype, weight_scale,
-            weight_zero_point, weight_axis)
+        wn = "weight_ih"
+        weight = self.weight_ih
+        weight_qscheme = getattr(self, wn + "_qscheme")
+        weight_scale = getattr(self, wn + "_scale")
+        weight_zero_point = getattr(self, wn + "_zero_point")
+        weight_axis = getattr(self, wn + "_axis")
+        weight = _quantize_and_dequantize_weight(weight, weight_qscheme, weight_scale, weight_zero_point, weight_axis)
+        return weight
 
     def get_weight_hh(self):
-        weight_qparams = self.weight_qparams_list[1]
-        weight_qscheme, weight_dtype, weight_scale, weight_zero_point, weight_axis = \
-            _extract_qparams(weight_qparams)
-        return _quantize_and_dequantize_weight(
-            self.weight_hh, weight_qscheme, weight_dtype, weight_scale,
-            weight_zero_point, weight_axis)
+        wn = "weight_hh"
+        weight = self.weight_hh
+        weight_qscheme = getattr(self, wn + "_qscheme")
+        weight_scale = getattr(self, wn + "_scale")
+        weight_zero_point = getattr(self, wn + "_zero_point")
+        weight_axis = getattr(self, wn + "_axis")
+        weight = _quantize_and_dequantize_weight(weight, weight_qscheme, weight_scale, weight_zero_point, weight_axis)
+        return weight
 
 class RNNCell(RNNCellBase):
     def __init__(self, input_size: int, hidden_size: int, bias: bool = True, nonlinearity: str = "tanh",
-                 device=None, dtype=None, weight_qparams_lis: Optional[List[Dict[str, Any]]] = None) -> None:
-        factory_kwargs = {'device': device, 'dtype': dtype, 'weight_qparams_list': weight_qparams_list}
+                 device=None, dtype=None, weight_qparams_lis: Optional[Dict[Dict[str, Any]]] = None) -> None:
+        factory_kwargs = {'device': device, 'dtype': dtype, 'weight_qparams_dict': weight_qparams_dict}
         super().__init__(input_size, hidden_size, bias, nonlinearity=nonlinearity, num_chunks=1, **factory_kwargs)
 
     def _get_name(self):
@@ -98,8 +114,8 @@ assert input.dim() in (1, 2), \
 
 class LSTMCell(RNNCellBase):
     def __init__(self, input_size: int, hidden_size: int, bias: bool = True, nonlinearity: str = "tanh",
-                 device=None, dtype=None, weight_qparams_lis: Optional[List[Dict[str, Any]]] = None) -> None:
-        factory_kwargs = {'device': device, 'dtype': dtype, 'weight_qparams_list': weight_qparams_list}
+                 device=None, dtype=None, weight_qparams_lis: Optional[Dict[Dict[str, Any]]] = None) -> None:
+        factory_kwargs = {'device': device, 'dtype': dtype, 'weight_qparams_dict': weight_qparams_dict}
         super().__init__(input_size, hidden_size, bias, nonlinearity=nonlinearity, num_chunks=4, **factory_kwargs)
 
     def _get_name(self):
@@ -132,8 +148,8 @@ class LSTMCell(RNNCellBase):
 
 class GRUCell(RNNCellBase):
     def __init__(self, input_size: int, hidden_size: int, bias: bool = True, nonlinearity: str = "tanh",
-                 device=None, dtype=None, weight_qparams_lis: Optional[List[Dict[str, Any]]] = None) -> None:
-        factory_kwargs = {'device': device, 'dtype': dtype, 'weight_qparams_list': weight_qparams_list}
+                 device=None, dtype=None, weight_qparams_lis: Optional[Dict[Dict[str, Any]]] = None) -> None:
+        factory_kwargs = {'device': device, 'dtype': dtype, 'weight_qparams_dict': weight_qparams_dict}
         super().__init__(input_size, hidden_size, bias, nonlinearity=nonlinearity, num_chunks=3, **factory_kwargs)
 
     def _get_name(self):
@@ -209,9 +225,6 @@ class LSTM(RNNBase):
         super(LSTM, self).__init__('LSTM', *args, **kwargs)
 
     def get_flat_weights(self):
-        for layer in self.num_layers:
-            for direcion in self.num_directions:
-                suffix = '_reverse' if direction == 1 else ''
         flat_weights = []
         flat_weights_params = []
         for wn in self._flat_weights_names:
