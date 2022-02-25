@@ -3139,6 +3139,7 @@
     SparseCsrCPU, SparseCsrCUDA: _sparse_csr_mm_out
 
 - func: _sparse_mm(Tensor sparse, Tensor dense) -> Tensor
+  python_module: sparse
 
 - func: _sparse_sparse_matmul(Tensor self, Tensor other) -> Tensor
   dispatch:
@@ -5045,6 +5046,7 @@
     CPU, CUDA: zero_
     Meta: zero_meta_
     SparseCPU, SparseCUDA: zero_sparse_
+    SparseCsrCPU, SparseCsrCUDA: zero_sparse_csr_
     MkldnnCPU: mkldnn_zero_
 
 - func: sub.out(Tensor self, Tensor other, *, Scalar alpha=1, Tensor(a!) out) -> Tensor(a!)
