@@ -253,6 +253,7 @@ void mm<c10::complex<double>>(MKL_SPARSE_MM_ARGTYPES(c10::complex<double>)) {
       ldc));
 }
 
+#if !defined(_WIN32)
 template <>
 void spmmd<float>(MKL_SPARSE_SPMMD_ARGTYPES(float)) {
   TORCH_MKLSPARSE_CHECK(mkl_sparse_s_spmmd(
@@ -283,6 +284,7 @@ void spmmd<c10::complex<double>>(MKL_SPARSE_SPMMD_ARGTYPES(c10::complex<double>)
       reinterpret_cast<MKL_Complex16*>(C),
       ldc));
 }
+#endif
 
 template <>
 void trsv<float>(MKL_SPARSE_TRSV_ARGTYPES(float)) {
