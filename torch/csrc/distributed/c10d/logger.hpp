@@ -41,7 +41,7 @@ class TORCH_API Logger {
   // Set parameters stats.
   void set_parameter_stats();
   // Get size of each bucket (Bytes).
-  std::vector<int> get_bucket_sizes();
+  std::vector<int64_t> get_bucket_sizes();
   // Get bucket size limits specified during DDP construction.
   std::vector<int> get_bucket_size_limits();
   // Get variable indices for each bucket.
