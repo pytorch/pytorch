@@ -25,7 +25,7 @@ add_custom_command(
   VERBATIM
 )
 
-add_library(torch_deploy_internal STATIC libtorch_deployinterpreter.o ${DEPLOY_DIR}/deploy.cpp ${DEPLOY_DIR}/loader.cpp ${DEPLOY_DIR}/path_environment.cpp ${DEPLOY_DIR}/elf_file.cpp ${DEPLOY_DIR}/Exceptions.h)
+add_library(torch_deploy_internal STATIC libtorch_deployinterpreter.o ${DEPLOY_DIR}/deploy.cpp ${DEPLOY_DIR}/loader.cpp ${DEPLOY_DIR}/path_environment.cpp ${DEPLOY_DIR}/elf_file.cpp ${DEPLOY_DIR}/Exceptions.cpp)
 target_link_libraries(torch_deploy_internal PRIVATE crypt pthread dl util m z ffi lzma readline nsl ncursesw panelw) # for python builtins
 target_link_libraries(torch_deploy_internal PUBLIC  shm torch fmt::fmt-header-only protobuf::libprotobuf-lite)
 caffe2_interface_library(torch_deploy_internal torch_deploy)
