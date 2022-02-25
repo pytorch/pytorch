@@ -1906,7 +1906,7 @@ namespace {
 // composite key of a tensor's type identifier and its device.
 struct BucketKey {
   BucketKey(c10::ScalarType type, c10::Device device)
-      : type(std::move(type)), device(std::move(device)) {}
+      : type(type), device(device) {}
 
   const c10::ScalarType type;
   const c10::Device device;
