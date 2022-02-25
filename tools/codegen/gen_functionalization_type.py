@@ -1,16 +1,55 @@
 from tools.codegen.api import cpp
 from tools.codegen.api.types import (
-    DispatcherSignature, Binding, FunctionalizationLambda, ViewInverseSignature
+    DispatcherSignature, Binding, FunctionalizationLambda, ViewInverseSignature,
+    NativeSignature, Expr
 )
 from tools.codegen.api.translate import translate
-from tools.codegen.context import with_native_function
+from tools.codegen.context import (
+    with_native_function, with_native_function_and_selector_and_index,
+    with_native_function_and
+)
 from tools.codegen.model import (
     Argument, NativeFunction, SchemaKind, BackendIndex,
-    Tag, FunctionSchema, SelfArgument, TensorOptionsArguments, BaseType, BaseTy
+    Tag, FunctionSchema, SelfArgument, TensorOptionsArguments, BaseType, BaseTy,
+    NativeFunctionsViewGroup,
 )
 from tools.codegen.selective_build.selector import SelectiveBuilder
-from typing import List, Optional, Union, Tuple
 from tools.codegen.utils import mapMaybe
+from typing import List, Optional, Union, Tuple
+
+
+# Generates the body of the default composite C++ kernel for a {view}_copy NativeFunction
+# See Note [Codegen'd {view}_copy Operators]
+@with_native_function
+def gen_composite_view_copy_kernel(g: NativeFunctionsViewGroup) -> Optional[str]:
+    if g.view_copy is None:
+        return None
+    view_copy_sig = NativeSignature(g.view_copy.func)
+    view_sig = NativeSignature(g.view.func)
+
+    view_tensor_name = view_copy_sig.arguments()[0].name
+    view_clone_name = 'self_clone'
+    view_api_name = g.view.func.name.unambiguous_name()
+
+    # Set up the context for a translate() call. We don't want to include the first tensor argument
+    # in the context, since we'll clone it and pass in the clone instead.
+    context: List[Union[Binding, Expr]] = []
+    view_copy_args = list(view_copy_sig.arguments())
+    for b in view_copy_args[1:]:
+        context.append(b)
+    context.append(Expr(
+        expr=view_clone_name,
+        type=view_copy_args[0].nctype
+    ))
+
+    # The default generated composite kernel for {view}_copy() operators just clones
+    # the input tensor, and runs the underlying view on the clone.
+    return f"""
+{view_copy_sig.defn()} {{
+auto {view_clone_name} = {view_tensor_name}.clone();
+return at::_ops::{view_api_name}::call({', '.join([e.expr for e in translate(context, view_sig.arguments())])});
+}}
+"""
 
 def modifies_arguments(f: NativeFunction) -> bool:
     return f.func.kind() in [SchemaKind.inplace, SchemaKind.out]
@@ -107,6 +146,7 @@ View operators with multiple aliasing inputs aren't supported yet. Found an oper
 # Generates the Functionalization kernel for:
 # - ops that create aliases (e.g. transpose())
 # - ops that are views AND mutations (e.g. transpose_())
+@with_native_function_and
 def emit_view_functionalization_body(
         f: NativeFunction,
         functional_op: NativeFunction
@@ -152,6 +192,7 @@ def emit_view_functionalization_body(
     if f.tag is Tag.inplace_view:
         # See Note [Functionalization Pass - Inplace View Ops] for more details
         return f"""
+    {dispatcher_sig.defn(name=wrapper_name(f.func), is_redispatching_fn=True)} {{
       at::functionalization::ViewMeta view_meta = at::functionalization::ViewMeta(
         {forward_lambda.decl()} {{
           return {forward_lambda.inner_call()}
@@ -171,10 +212,12 @@ def emit_view_functionalization_body(
       // See  Note [Propagating strides in the functionalization pass]
       at::functionalization::impl::set_sizes_strides_offset({view_tensor_name}, reference_tensor_output);
       return {view_tensor_name};
+    }}
 """
 
     else:
         return f"""
+    {dispatcher_sig.defn(name=wrapper_name(f.func), is_redispatching_fn=True)} {{
       {unwrap_tensor_args_str}
       {return_type} tmp_output;
       {return_type} reference_tensor_output;
@@ -198,9 +241,11 @@ def emit_view_functionalization_body(
       // See  Note [Propagating strides in the functionalization pass]
       at::functionalization::impl::set_sizes_strides_offset(out, reference_tensor_output);
       return out;
+    }}
 """
 
 # Generates the Functionalization kernel for inplace ops
+@with_native_function_and
 def emit_inplace_functionalization_body(
         f: NativeFunction,
         functional_op: Optional[NativeFunction]
@@ -240,6 +285,7 @@ Instead, it's calling the inplace/view operator directly. \
 If this causes problems in your program, consider upstreaming the out-of-place op to PyTorch."
 
         return f"""
+    {dispatcher_sig.defn(name=wrapper_name(f.func), is_redispatching_fn=True)} {{
       if (c10::impl::tls_local_dispatch_key_set().included_.has(c10::DispatchKey::Functionalize)) {{
           TORCH_WARN("{warn_str}");
       }}
@@ -247,6 +293,7 @@ If this causes problems in your program, consider upstreaming the out-of-place o
       at::AutoDispatchSkipFunctionalize guard;
       // Redispatch as normally otherwise, since XLA has its own lowerings for special inplace ops.
       {maybe_return}at::_ops::{f.func.name.unambiguous_name()}::call({', '.join(inplace_exprs)});
+    }}
 """
     else:
         # call the out-of-place variant of the op
@@ -265,6 +312,7 @@ If this causes problems in your program, consider upstreaming the out-of-place o
         if a.annotation and a.annotation.is_write and a.type.is_tensor_like()])
 
     return f"""
+    {dispatcher_sig.defn(name=wrapper_name(f.func), is_redispatching_fn=True)} {{
       {unwrap_tensor_args_str}
       {return_type} tmp_output;
       {{
@@ -273,40 +321,56 @@ If this causes problems in your program, consider upstreaming the out-of-place o
           {functional_call_str}
       }}
       {mutable_input_post_processing}
-      {return_str(f)};"""
-
-
-def emit_declaration_for_noncomposite_views(f: NativeFunction) -> str:
-    # For every view op, we need a corresponding "inverse view" function.
-    # This generates the declarations so we get a good compiler error when someone adds a new view.
-    view_inverse_sig = ViewInverseSignature(f)
-    return view_inverse_sig.decl()
+      {return_str(f)};
+    }}
+"""
 
 
 # The below functions generate RegisterFunctionalization.cpp
 # These files provide the kernels that run the functionalization pass, which can be opted into
 # per backend (e.g. XLA or Vulkan), or as a composable transform (functionalize() in functorch).
 
+# TODO: later, I'll generate separate kernels for "Functionalize", and "AddBackViews"
+# That will probably be an enum, that this function will take in to know which ops get kernels.
 def needs_functionalization(
     selector: SelectiveBuilder,
-    f: NativeFunction,
+    g: Union[NativeFunction, NativeFunctionsViewGroup],
 ) -> bool:
-    return (selector.include_all_operators and
-            (f.is_view_op or modifies_arguments(f)))
+    # Don't generate kernels in mobile build
+    if not selector.include_all_operators:
+        return False
+    # Every view op needs *some* handling in functionalization:
+    # - non-composite view ops get a generated kernel
+    # - composite view ops get a generated registration (that directly registers the composite kernel)
+    if isinstance(g, NativeFunctionsViewGroup):
+        return True
+    # For non-view ops, only inplace operators get functionalized
+    assert isinstance(g, NativeFunction)
+    return modifies_arguments(g)
 
 
+# See Note [Functionalization Pass: View Inverses].
+def gen_functionalization_view_inverse_declaration(selector: SelectiveBuilder, g: NativeFunctionsViewGroup) -> Optional[str]:
+    # For every (non-composite) view op, we need a corresponding "inverse view" function.
+    # This generates the declarations so we get a good compiler error when someone adds a new view.
+    @with_native_function
+    def emit_decl_helper(g: NativeFunctionsViewGroup) -> Optional[str]:
+        if g.view.has_composite_implicit_autograd_kernel:
+            return None
+        view_inverse_sig = ViewInverseSignature(g.view)
+        return view_inverse_sig.decl()
+
+    return emit_decl_helper(g)
+
+
+@with_native_function_and_selector_and_index
 def gen_functionalization_registration(
     selector: SelectiveBuilder,
-    f: NativeFunction,
+    g: Union[NativeFunction, NativeFunctionsViewGroup],
     composite_implicit_autograd_index: BackendIndex
-) -> Optional[str]:
-    @with_native_function
-    def emit_registration_helper(f: NativeFunction) -> Optional[str]:
-        # Note: for now, this logic is meant to avoid registering functionalization kernels for mobile.
-        # At some point, Vulkan we'll want to use functionalization and we'll need to change this.
-        if not needs_functionalization(selector, f):
-            return None
-        if f.is_view_op and f.has_composite_implicit_autograd_kernel:
+) -> List[str]:
+    def emit_registration_helper(f: NativeFunction, *, is_view: bool) -> str:
+        if is_view and f.has_composite_implicit_autograd_kernel:
             metadata = composite_implicit_autograd_index.get_kernel(f)
             assert metadata is not None
             native_api_name = metadata.kernel
@@ -318,49 +382,42 @@ def gen_functionalization_registration(
             # because we don't want to decompose non-view ops that are composite, like `at::ones`.
             registration_str = f'static_cast<{sig.ptr_type()}>(at::native::{native_api_name})'
         else:
+            # non-composite view ops (and inplace ops) get a normal registration.
             registration_str = f'TORCH_FN(functionalization::{wrapper_name(f.func)})'
-
         return f'm.impl("{f.func.name}", {registration_str});'
 
-    return emit_registration_helper(f)
+    # Note: for now, this logic is meant to avoid registering functionalization kernels for mobile.
+    # At some point, Vulkan we'll want to use functionalization and we'll need to change this.
+    if not needs_functionalization(selector, g):
+        return []
+
+    if isinstance(g, NativeFunctionsViewGroup):
+        view_str = [emit_registration_helper(g.view, is_view=True)]
+        if g.view_inplace is not None:
+            view_str.append(emit_registration_helper(g.view_inplace, is_view=True))
+        return view_str
+    else:
+        f = g
+        return [emit_registration_helper(f, is_view=False)]
 
 def gen_functionalization_definition(
     selector: SelectiveBuilder,
-    f: NativeFunction,
+    g: Union[NativeFunction, NativeFunctionsViewGroup],
     functional_op: Optional[NativeFunction]
-) -> Optional[str]:
-    @with_native_function
-    def emit_definition_helper(f: NativeFunction) -> Optional[str]:
-        if not needs_functionalization(selector, f):
-            return None
-        if f.is_view_op and f.has_composite_implicit_autograd_kernel:
-            # See Note [Composite view ops in the functionalization pass]
-            return None
-        # order is important here, ops that are both views and mutations should hit the view path.
-        if f.is_view_op:
-            # Every view op is expected to have a functional counterpart (e.g. transpose_() -> transpose())
-            assert functional_op is not None
-            body_str = emit_view_functionalization_body(f, functional_op)
-        else:
-            # inplace op
-            assert modifies_arguments(f)
-            body_str = emit_inplace_functionalization_body(f, functional_op)
-        sig = DispatcherSignature.from_schema(f.func)
-        return f"""
-    {sig.defn(name=wrapper_name(f.func), is_redispatching_fn=True)} {{
-    {body_str}
-    }}
-    """
-
-    return emit_definition_helper(f)
-
-# See Note [Functionalization Pass: View Inverses].
-@with_native_function
-def gen_functionalization_view_inverse_declaration(f: NativeFunction) -> Optional[str]:
-    # We only need to generate view_inverse declarations for view ops that:
-    # - aren't composite (since they'll decompose and we'll get them for free).
-    # - aren't inplace (since they should have a corresponding functional version, which we call instead).
-    if f.is_view_op and not f.has_composite_implicit_autograd_kernel and not modifies_arguments(f):
-        output = emit_declaration_for_noncomposite_views(f)
-        return output
-    return None
+) -> List[str]:
+    if not needs_functionalization(selector, g):
+        return []
+    if isinstance(g, NativeFunctionsViewGroup):
+        view_defs = []
+        if not g.view.has_composite_implicit_autograd_kernel:
+            # For now I'm just asserting this - later, the view functionalization kernels
+            # should be updated to redispatch to view_copy().
+            assert g.view_copy is not None
+            view_defs.append(emit_view_functionalization_body(g.view, g.view))
+        if g.view_inplace is not None and not g.view_inplace.has_composite_implicit_autograd_kernel:
+            view_defs.append(emit_view_functionalization_body(g.view_inplace, g.view))
+        return view_defs
+    else:
+        f = g
+        assert modifies_arguments(f)
+        return [emit_inplace_functionalization_body(f, functional_op)]

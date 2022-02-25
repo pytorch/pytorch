@@ -946,6 +946,8 @@ def emit_single_dispatch(
     """
     Emit dispatch code for a single native function.
     """
+    if 'permute_copy' in str(f.func.name):
+        import pdb; pdb.set_trace()
     @with_native_function
     def go(f: NativeFunction) -> str:
         # header comments

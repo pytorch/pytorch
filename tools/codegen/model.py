@@ -183,6 +183,8 @@ class Tag(Enum):
                 return v
         raise AssertionError(f'unknown tag {value}')
 
+ViewSchemaKind = Enum('ViewSchemaKind', ('aliasing', 'inplace', 'out', 'non_aliasing'))
+
 # The basic input to the code generation is native_functions.yaml.
 # The name "native", BTW, comes from the distinction between native
 # functions and legacy TH functions.  The legacy TH functions are gone,
@@ -519,6 +521,18 @@ class NativeFunction:
         is_wildcard_view = any(inp.annotation is not None and
                                inp.annotation.alias_set_after != "" for inp in self.func.schema_order_arguments())
         return is_non_mutating_view or is_inplace_view or is_wildcard_view
+
+    @property
+    def view_schema_kind(self) -> ViewSchemaKind:
+        # This covers both "ordinary" inplace ops, and inplace_views
+        if self.func.name.name.inplace:
+            return ViewSchemaKind.inplace
+        elif self.func.is_out_fn():
+            return ViewSchemaKind.out
+        elif self.is_view_op:
+            return ViewSchemaKind.aliasing
+        else:
+            return ViewSchemaKind.non_aliasing
 
     @property
     def root_name(self) -> str:
@@ -893,7 +907,7 @@ class FunctionSchema:
         else:
             return SchemaKind.functional
 
-    def signature(self, *, strip_default: bool = False) -> 'FunctionSchema':
+    def signature(self, *, strip_default: bool = False, strip_view_copy_name: bool = False) -> 'FunctionSchema':
         """
         Certain schemas are 'related', in that they are simply
         inplace/out/functional versions of the same function.  This method
@@ -910,6 +924,10 @@ class FunctionSchema:
           because you cannot overload on mutability annotation)
         - Return names are stripped since they are not overloadable and
           some variants have return names but some not
+
+        Finally, we want to be able to pair up related "view" and their
+        corresponding "view_copy" operators. We do this by optionally
+        stripping the trailing "_copy" from the base name.
         """
 
         def strip_ret_annotation(r: Return) -> Return:
@@ -919,10 +937,14 @@ class FunctionSchema:
                 annotation=None,
             )
 
+        base_name = self.name.name.base
+        if strip_view_copy_name and base_name.endswith('copy'):
+            base_name = base_name.replace('_copy', '')
+
         return FunctionSchema(
             name=OperatorName(
                 name=BaseOperatorName(
-                    base=self.name.name.base,
+                    base=base_name,
                     inplace=False,
                     dunder_method=self.name.name.dunder_method,
                 ),
@@ -931,6 +953,27 @@ class FunctionSchema:
             arguments=self.arguments.signature(strip_default=strip_default),
             returns=tuple(map(strip_ret_annotation, self.returns)),
         )
+
+    def remove_aliases(self) -> 'FunctionSchema':
+        return FunctionSchema(
+            name=self.name,
+            # remove all alias annotations from arguments and returns
+            # (signature() does this)
+            arguments=self.arguments.signature(),
+            returns=tuple(r.remove_alias() for r in self.returns)
+        )
+
+    def with_name(self, name: 'OperatorName') -> 'FunctionSchema':
+        return FunctionSchema(
+            name=name,
+            arguments=self.arguments,
+            returns=self.returns
+        )
+
+    @property
+    def modifies_arguments(self) -> bool:
+        return self.kind() in [SchemaKind.inplace, SchemaKind.out]
+
 
     def __str__(self) -> str:
         all_arguments_str = str(self.arguments)
@@ -1228,6 +1271,13 @@ class Return:
             return type
         else:
             return f"{type} {self.name}"
+
+    def remove_alias(self) -> 'Return':
+        return Return(
+            name=self.name,
+            type=self.type,
+            annotation=None
+        )
 
 
 # Represents the self argument for functions that may be methods
@@ -1571,6 +1621,16 @@ class OperatorName:
         assert str(r) == op_name, f'{str(r)} != {op_name}'
         return r
 
+    def with_base_name(self, base: str) -> 'OperatorName':
+        return OperatorName(
+            name=BaseOperatorName(
+                base=base,
+                inplace=self.name.inplace,
+                dunder_method=self.name.dunder_method,
+            ),
+            overload_name=self.overload_name
+        )
+
     def __str__(self) -> str:
         if self.overload_name:
             return f"{self.name}.{self.overload_name}"
@@ -1583,6 +1643,7 @@ class OperatorName:
     # If there is no overload name, this returns f"{op}"
     # If there is an overload name, this returns f"{op}_{overload}"
     def unambiguous_name(self) -> str:
+
         if self.overload_name:
             return f"{self.name}_{self.overload_name}"
         else:
@@ -1599,6 +1660,163 @@ def gets_generated_out_inplace_wrapper(f: NativeFunction, g: NativeFunctionsGrou
     return f.func.kind() is not SchemaKind.functional and \
         not b.has_kernel(f) and \
         b.has_kernel(g.functional)
+
+# NativeFunction objects that are views (f.is_view_op returns True)
+# are added into a `NativeFunctionsViewGroup`.
+# Which we can use to easily access the generated (optional) view_copy NativeFunction.
+# It's convenient to view them together, so we pair them up in NativeFunctionsViewGroup.
+# See Note [Codegen'd {view}_copy Operators]
+#
+# One property of this representation is that in order for a view-like op to be part of
+# a NativeFunctionsViewGroup, the "aliasing" version of that view op must exist.
+# There's one case where that doesn't happen: we have a non-aliasing `narrow_copy.out` op,
+# but don't have coresponding aliasing `narrow.out` op.
+# This means that `narrow_copy.out` won't appear as a NativeFunctionsViewGroup.
+@dataclass(frozen=True)
+class NativeFunctionsViewGroup:
+    view: NativeFunction
+    # Note: the {view}_copy operator is optional because we currently don't generate copy variants
+    # for all view ops. Notably, we don't generate them for:
+    # - CompositeImplicitAutograd views (we could but we already get them "for free" through decomposition)
+    view_copy: Optional[NativeFunction]
+    # view_inplace ops are also optional, but every view_inplace op should have out-of-place variant.
+    view_inplace: Optional[NativeFunction]
+
+    def __post_init__(self) -> None:
+        assert self.view.is_view_op
+        if self.view_copy is None:
+            assert not gets_generated_view_copy(self.view)
+        else:
+            assert self.view_copy.func.name.name.base.endswith('_copy')
+            assert self.view.func.signature() == self.view_copy.func.signature(strip_view_copy_name=True)
+        if self.view_inplace is not None:
+            assert self.view.func.signature() == self.view_inplace.func.signature()
+
+    def functions(self, *, include_copy: bool = True) -> Iterator[NativeFunction]:
+        yield self.view
+        if self.view_inplace is not None:
+            yield self.view_inplace
+        if self.view_copy is not None and include_copy:
+            yield self.view_copy
+
+    @property
+    def root_name(self) -> str:
+        return self.view.root_name
+
+def gets_generated_view_copy(f: NativeFunction) -> bool:
+    # Only aliasing operators get a copy variant.
+    if not f.is_view_op:
+        return False
+    # We don't need to bother generating copy variants for composite ops.
+    if f.has_composite_implicit_autograd_kernel:
+        return False
+    # We also don't need to generate copy variants for inplace views.
+    if f.tag is Tag.inplace_view:
+        return False
+    return True
+
+# Given a NativeFunction that corresponds to a view op,
+# returns the name of the corresponding "copy" variant of the op.
+def get_view_copy_name(f: NativeFunction) -> 'OperatorName':
+    # Right now, hen asking for a view op's corresponding "view_copy" name
+    # we assert for sanity that the op is allowed to have a generated view_copy variant.
+    # (We can do this because "gets_generated_view_copy()" tell us which ops get a generated view_copy op).
+    # However, narrow_copy() already exists as an op directly in native_functions.yaml.
+    # I'm hardcoding narrow_copy here for now to maintain the assert,
+    # But we could also just get rid of the assert.
+    list_of_ops_with_explicit_view_copy_operators = [
+        'narrow'
+    ]
+    if str(f.func.name) not in list_of_ops_with_explicit_view_copy_operators:
+        assert gets_generated_view_copy(f)
+
+    base_name = f'{f.func.name.name.base}_copy'
+    view_copy_name = OperatorName(
+        name=BaseOperatorName(
+            base=base_name,
+            inplace=False,
+            dunder_method=f.func.name.name.dunder_method),
+        overload_name=f.func.name.overload_name
+    )
+    return view_copy_name
+
+# Given a NativeFunction: if that function is an aliasing operator,
+# we return a "copy" variant of the function, as well as its BackendMetadata info.
+def gen_copy_variant_of_view_op(f: NativeFunction) -> Optional[Tuple[
+    NativeFunction,
+    Dict[DispatchKey, Dict[OperatorName, BackendMetadata]]
+]]:
+    # Note [Codegen'd {view}_copy Operators]
+    # For every non-composite, non-mutating aliasing op, we also want to generate
+    # a non-aliasing variant of it.
+    # Programatically generating them here in the codegen saves us
+    # from having to manually add them to native_functions.yaml
+    #
+    # Given a NativeFunction object corresponding to an aliasing operation,
+    # We want to generate a new NativeFunction object that:
+    # (1) Has the same schema, but with no aliasing annotations.
+    # (2) If old NativeFunction name == {view}, new NativeFunction name == {view}_copy.
+    # (3) Uses the same derivative formula as the original operator.
+    #     The original operator's derivative formula might involve aliasing,
+    #     But this is okay because the autograd engine doesn't ever mutate gradients.
+    # (4) Gets a default "CompositeExplicitAutograd" implementation.
+    #     This kernel should just make a clone and call the underlying view operator.
+    #     It can then be overridden by backends that can't handle aliasing, like XLA/Vulkan.
+    # (5) Doesn't get exposed to python (since these aren't very useful functions for users).
+
+    if not gets_generated_view_copy(f):
+        return None
+
+    # append '_copy' to the op name
+    functional_name = get_view_copy_name(f)
+
+    functional_schema = f.func.remove_aliases().with_name(functional_name)
+
+    copy_variant_of_view_native_function = NativeFunction(
+        func=functional_schema,
+        use_const_ref_for_mutable_tensors=f.use_const_ref_for_mutable_tensors,
+        variants=f.variants,
+        # generated {view}_copy ops will get a generated composite implementation,
+        # so we don't need to worry about making them structured or doing device checks.
+        structured=False,
+        structured_delegate=None,
+        structured_inherits=None,
+        precomputed=None,
+        manual_kernel_registration=f.manual_kernel_registration,
+        manual_cpp_binding=False,
+        # generated {view}_copy ops should only be available in C++
+        python_module=None,
+        category_override=None,
+        device_guard=False,
+        device_check=DeviceCheckType.NoCheck,
+        loc=f.loc,
+        cpp_no_default_args=f.cpp_no_default_args,
+        is_abstract=f.is_abstract,
+        has_composite_implicit_autograd_kernel=False,
+        # generated {view}_copy ops will get a generated CompositeExplicitAutograd kernel
+        has_composite_explicit_autograd_kernel=True,
+        # Don't assume any tags for now. We can always add them later.
+        tag=None,
+    )
+
+    view_copy_metadata = {
+        DispatchKey.CompositeExplicitAutograd: {
+            functional_name: BackendMetadata(kernel=native.name(functional_schema), structured=False)
+        }
+    }
+    return copy_variant_of_view_native_function, view_copy_metadata
+
+# This function generates every {view}_copy NativeFunction, and pairs them up to
+# by mapping each view operator's name to its corresponding {view}_copy NativeFunction object
+def generate_view_copy_funcs(funcs: List[NativeFunction]) -> Dict[OperatorName, NativeFunction]:
+    view_copy_map = {}
+    for f in funcs:
+        maybe_view_copy_info = gen_copy_variant_of_view_op(f)
+        if maybe_view_copy_info is not None:
+            view_copy_f, _ = maybe_view_copy_info
+            view_copy_map[f.func.name] = view_copy_f
+    return view_copy_map
+
 
 # Helper functions for parsing argument lists (both inputs and returns)
 
@@ -1664,3 +1882,5 @@ class Precompute:
             replace_list.append(f'{kernel_param} -> {replacements}')
 
         return replace_list
+
+import tools.codegen.api.native as native

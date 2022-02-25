@@ -145,6 +145,7 @@
 
 - func: rename_(Tensor(a!) self, Dimname[]? names) -> Tensor(a!)
   variants: method
+  tags: inplace_view
 
 - func: rename(Tensor(a) self, Dimname[]? names) -> Tensor(a)
   variants: method

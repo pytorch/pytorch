@@ -47,6 +47,10 @@ def gen_registration_headers(
     else:
         headers.append("#include <ATen/Functions.h>")
 
+    if backend_index.dispatch_key == DispatchKey.CompositeExplicitAutograd:
+        # See Note [Codegen'd {view}_copy Operators]
+        headers += [
+            "#include <ATen/CompositeViewCopyKernels.h>"]
     return headers
 
 def gen_create_out_helper(backend_index: BackendIndex) -> List[str]:
