@@ -802,7 +802,7 @@ class TestHub(TestCase):
 
     @retry(Exception, tries=3)
     @patch('builtins.input', return_value='')
-    def test_check_repo(self, unused_patch_input):
+    def test_trust_repo_skippromt(self, unused_patch_input):
         model = torch.hub.load(
             'ailzhang/torchhub_example',
             'mnist_zip_1_6',
