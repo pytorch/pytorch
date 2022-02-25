@@ -42,7 +42,6 @@ SystemEnv = namedtuple('SystemEnv', [
     'hip_runtime_version',
     'miopen_runtime_version',
     'caching_allocator_config',
-    'is_xnnpack_available',
 ])
 
 
@@ -293,9 +292,6 @@ def get_cachingallocator_config():
     ca_config = os.environ.get('PYTORCH_CUDA_ALLOC_CONF', '')
     return ca_config
 
-def is_xnnpack_available():
-    import torch.backends.xnnpack
-    return str(torch.backends.xnnpack.enabled)  # type: ignore[attr-defined]
 
 def get_env_info():
     run_lambda = run
@@ -343,7 +339,6 @@ def get_env_info():
         clang_version=get_clang_version(run_lambda),
         cmake_version=get_cmake_version(run_lambda),
         caching_allocator_config=get_cachingallocator_config(),
-        is_xnnpack_available=is_xnnpack_available(),
     )
 
 env_info_fmt = """
@@ -367,7 +362,6 @@ Nvidia driver version: {nvidia_driver_version}
 cuDNN version: {cudnn_version}
 HIP runtime version: {hip_runtime_version}
 MIOpen runtime version: {miopen_runtime_version}
-Is XNNPACK available: {is_xnnpack_available}
 
 Versions of relevant libraries:
 {pip_packages}

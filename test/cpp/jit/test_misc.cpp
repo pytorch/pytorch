@@ -36,13 +36,13 @@
 #include <torch/csrc/jit/passes/insert_guards.h>
 #include <torch/csrc/jit/passes/liveness.h>
 #include <torch/csrc/jit/passes/loop_unrolling.h>
+#include <torch/csrc/jit/runtime/symbolic_shape_registry.h>
 #include <torch/csrc/jit/passes/lower_grad_of.h>
 #include <torch/csrc/jit/passes/lower_tuples.h>
 #include <torch/csrc/jit/passes/pass_manager.h>
 #include <torch/csrc/jit/passes/requires_grad_analysis.h>
 #include <torch/csrc/jit/passes/restore_mutation.h>
 #include <torch/csrc/jit/passes/shape_analysis.h>
-#include <torch/csrc/jit/passes/symbolic_shape_analysis.h>
 #include <torch/csrc/jit/passes/utils/subgraph_utils.h>
 #include <torch/csrc/jit/runtime/argument_spec.h>
 #include <torch/csrc/jit/runtime/autodiff.h>
@@ -52,11 +52,12 @@
 #include <torch/csrc/jit/runtime/jit_trace.h>
 #include <torch/csrc/jit/runtime/profiling_record.h>
 #include <torch/csrc/jit/runtime/symbolic_script.h>
-#include <torch/csrc/jit/runtime/symbolic_shape_registry.h>
 #include <torch/csrc/jit/serialization/import.h>
 #include <torch/csrc/jit/testing/file_check.h>
 #include <torch/jit.h>
 #include <torch/script.h>
+#include <torch/csrc/jit/runtime/symbolic_shape_registry.h>
+#include <torch/csrc/jit/passes/symbolic_shape_analysis.h>
 
 #include <onnx/onnx_pb.h>
 
@@ -2881,6 +2882,7 @@ graph():
       &*graph,
       vmap);
 
+
   auto g2 = std::make_shared<Graph>();
   parseIR(
       R"IR(
@@ -2895,6 +2897,7 @@ graph():
   PropagateShapesOnGraph(g2);
   testing::FileCheck().check("5, 5")->run(*g2);
 }
+
 
 TEST(TestFunctionalToInplaceActivation, Basic) {
   auto graph = std::make_shared<Graph>();

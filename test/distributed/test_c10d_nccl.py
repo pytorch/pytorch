@@ -1350,7 +1350,7 @@ class DistributedDataParallelTest(
                         # Only one such parameter in model.fc3, since bias=False
                         break
 
-            if dist.get_debug_level() != dist.DebugLevel.OFF:
+            if dist._get_debug_mode() != dist._DistributedDebugLevel.OFF:
                 unused_index_str += f" with name {unused_fqn}"
 
             self.assertTrue(unused_index_str in str(ex))

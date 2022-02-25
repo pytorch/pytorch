@@ -544,8 +544,7 @@ void GraphEncoder::EncodeValueInfoType(
         std::unordered_map<int64_t, std::string>>& dynamic_axes) {
   auto tensorTypeToONNXType = [&dynamic_axes, n, this](
                                   const TensorTypePtr& t,
-                                  onnx::TypeProto_Tensor* onnx_tensor_type,
-                                  bool assign_dim_param) {
+                                  onnx::TypeProto_Tensor* onnx_tensor_type) {
     std::string name = n->debugName();
     if (t->dim()) {
       onnx::TensorShapeProto* shape = onnx_tensor_type->mutable_shape();
@@ -560,7 +559,7 @@ void GraphEncoder::EncodeValueInfoType(
           }
         } else if (sizes[i].is_static()) {
           shape->mutable_dim(i)->set_dim_value(sizes[i].static_size());
-        } else if (assign_dim_param) {
+        } else {
           if (symbol_dim_map_.find(sizes[i]) == symbol_dim_map_.end()) {
             if (n->node()->kind() == prim::Param) {
               symbol_dim_map_[sizes[i]] = name + "_dim_" + std::to_string(i);
@@ -585,13 +584,7 @@ void GraphEncoder::EncodeValueInfoType(
       // Encode type if either shape or dtype exists.
       onnx::TypeProto_Tensor* onnx_tensor_type =
           onnx_type->mutable_tensor_type();
-      // Do not assign dim_param for sequence tensor type.
-      // Sequence of tensors could differ in dimension size.
-      // Use a dimension with neither dim_value nor dim_param set
-      // to denote an unknown dimension.
-      // Create and assign dim_param for normal tensor type.
-      auto is_sequence_tensor = static_cast<bool>(n->type()->cast<ListType>());
-      tensorTypeToONNXType(tensor_type, onnx_tensor_type, !is_sequence_tensor);
+      tensorTypeToONNXType(tensor_type, onnx_tensor_type);
     }
   } else if (BoolTypePtr bool_type = node_type->cast<BoolType>()) {
     onnx::TypeProto_Tensor* onnx_tensor_type = onnx_type->mutable_tensor_type();
@@ -657,7 +650,7 @@ void GraphEncoder::EncodeBlock(
     bool use_external_data_format,
     const std::string& onnx_file_path) {
   AT_ASSERT(graph_proto != nullptr);
-  std::string block_name = "torch_jit";
+  std::string block_name = "torch-jit-export";
   if (num_blocks_) {
     block_name += std::to_string(num_blocks_);
   }

@@ -40,10 +40,8 @@ if is_available():
         _compute_bucket_assignment_by_size,
         _verify_params_across_processes,
         _test_python_store,
-        DebugLevel,
-        get_debug_level,
-        set_debug_level,
-        set_debug_level_from_env,
+        _DistributedDebugLevel,
+        _get_debug_mode,
     )
 
     if sys.platform != "win32":
@@ -67,5 +65,3 @@ if is_available():
     )
 
     from .remote_device import _remote_device
-
-    set_debug_level_from_env()

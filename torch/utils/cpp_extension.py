@@ -17,8 +17,7 @@ from .file_baton import FileBaton
 from ._cpp_extension_versioner import ExtensionVersioner
 from .hipify import hipify_python
 from .hipify.hipify_python import get_hip_file_path, GeneratedFileCleaner
-from typing import List, Optional, Union, Tuple
-from torch.torch_version import TorchVersion
+from typing import List, Optional, Union
 
 from setuptools.command.build_ext import build_ext
 from pkg_resources import packaging  # type: ignore[attr-defined]
@@ -41,28 +40,6 @@ BUILD_SPLIT_CUDA = os.getenv('BUILD_SPLIT_CUDA') or (os.path.exists(os.path.join
     TORCH_LIB_PATH, f'{CLIB_PREFIX}torch_cuda_cu{CLIB_EXT}')) and os.path.exists(os.path.join(TORCH_LIB_PATH, f'{CLIB_PREFIX}torch_cuda_cpp{CLIB_EXT}')))
 
 SUBPROCESS_DECODE_ARGS = ('oem',) if IS_WINDOWS else ()
-MINIMUM_GCC_VERSION = (5, 0, 0)
-MINIMUM_MSVC_VERSION = (19, 0, 24215)
-
-# The following values were taken from the following GitHub gist that
-# summarizes the minimum valid major versions of g++/clang++ for each supported
-# CUDA version: https://gist.github.com/ax3l/9489132
-CUDA_GCC_VERSIONS = {
-    '10.2': (MINIMUM_GCC_VERSION, (8, 0, 0)),
-    '11.1': (MINIMUM_GCC_VERSION, (10, 0, 0)),
-    '11.2': (MINIMUM_GCC_VERSION, (10, 0, 0)),
-    '11.3': (MINIMUM_GCC_VERSION, (10, 0, 0)),
-    '11.4': ((6, 0, 0), (10, 0, 0))
-}
-
-CUDA_CLANG_VERSIONS = {
-    '10.2': ((3, 3, 0), (8, 0, 0)),
-    '11.1': ((6, 0, 0), (10, 0, 0)),
-    '11.2': ((6, 0, 0), (10, 0, 0)),
-    '11.3': ((6, 0, 0), (10, 0, 0)),
-    '11.4': ((6, 0, 0), (10, 0, 0))
-}
-
 
 # Taken directly from python stdlib < 3.9
 # See https://github.com/pytorch/pytorch/issues/48617
@@ -146,6 +123,8 @@ def _join_rocm_home(*paths) -> str:
     return os.path.join(ROCM_HOME, *paths)
 
 
+MINIMUM_GCC_VERSION = (5, 0, 0)
+MINIMUM_MSVC_VERSION = (19, 0, 24215)
 ABI_INCOMPATIBILITY_WARNING = '''
 
                                !! WARNING !!
@@ -300,23 +279,22 @@ def check_compiler_ok_for_platform(compiler: str) -> bool:
     return False
 
 
-def get_compiler_abi_compatibility_and_version(compiler) -> Tuple[bool, TorchVersion]:
+def check_compiler_abi_compatibility(compiler) -> bool:
     r'''
-    Determine if the given compiler is ABI-compatible with PyTorch alongside
-    its version.
+    Verifies that the given compiler is ABI-compatible with PyTorch.
 
     Args:
         compiler (str): The compiler executable name to check (e.g. ``g++``).
             Must be executable in a shell process.
 
     Returns:
-        A tuple that contains a boolean that defines if the compiler is (likely) ABI-incompatible with PyTorch,
-        followed by a `TorchVersion` string that contains the compiler version separated by dots.
+        False if the compiler is (likely) ABI-incompatible with PyTorch,
+        else True.
     '''
     if not _is_binary_build():
-        return (True, TorchVersion('0.0.0'))
+        return True
     if os.environ.get('TORCH_DONT_CHECK_COMPILER_ABI') in ['ON', '1', 'YES', 'TRUE', 'Y']:
-        return (True, TorchVersion('0.0.0'))
+        return True
 
     # First check if the compiler is one of the expected ones for the particular platform.
     if not check_compiler_ok_for_platform(compiler):
@@ -324,11 +302,11 @@ def get_compiler_abi_compatibility_and_version(compiler) -> Tuple[bool, TorchVer
             user_compiler=compiler,
             pytorch_compiler=_accepted_compilers_for_platform()[0],
             platform=sys.platform))
-        return (False, TorchVersion('0.0.0'))
+        return False
 
     if IS_MACOS:
         # There is no particular minimum version we need for clang, so we're good here.
-        return (True, TorchVersion('0.0.0'))
+        return True
     try:
         if IS_LINUX:
             minimum_required_version = MINIMUM_GCC_VERSION
@@ -342,15 +320,15 @@ def get_compiler_abi_compatibility_and_version(compiler) -> Tuple[bool, TorchVer
     except Exception:
         _, error, _ = sys.exc_info()
         warnings.warn(f'Error checking compiler version for {compiler}: {error}')
-        return (False, TorchVersion('0.0.0'))
+        return False
 
     if tuple(map(int, version)) >= minimum_required_version:
-        return (True, TorchVersion('.'.join(version)))
+        return True
 
     compiler = f'{compiler} {".".join(version)}'
     warnings.warn(ABI_INCOMPATIBILITY_WARNING.format(compiler))
 
-    return (False, TorchVersion('.'.join(version)))
+    return False
 
 
 # See below for why we inherit BuildExtension from object.
@@ -415,7 +393,7 @@ class BuildExtension(build_ext, object):
             self.force = True
 
     def build_extensions(self) -> None:
-        compiler_name, compiler_version = self._check_abi()
+        self._check_abi()
 
         cuda_ext = False
         extension_iter = iter(self.extensions)
@@ -429,7 +407,7 @@ class BuildExtension(build_ext, object):
             extension = next(extension_iter, None)
 
         if cuda_ext and not IS_HIP_EXTENSION:
-            self._check_cuda_version(compiler_name, compiler_version)
+            self._check_cuda_version()
 
         for extension in self.extensions:
             # Ensure at least an empty list of flags for 'cxx' and 'nvcc' when
@@ -778,7 +756,7 @@ class BuildExtension(build_ext, object):
             ext_filename = '.'.join(without_abi)
         return ext_filename
 
-    def _check_abi(self) -> Tuple[str, TorchVersion]:
+    def _check_abi(self):
         # On some platforms, like Windows, compiler_cxx is not available.
         if hasattr(self.compiler, 'compiler_cxx'):
             compiler = self.compiler.compiler_cxx[0]
@@ -786,16 +764,15 @@ class BuildExtension(build_ext, object):
             compiler = os.environ.get('CXX', 'cl')
         else:
             compiler = os.environ.get('CXX', 'c++')
-        _, version = get_compiler_abi_compatibility_and_version(compiler)
+        check_compiler_abi_compatibility(compiler)
         # Warn user if VC env is activated but `DISTUILS_USE_SDK` is not set.
         if IS_WINDOWS and 'VSCMD_ARG_TGT_ARCH' in os.environ and 'DISTUTILS_USE_SDK' not in os.environ:
             msg = ('It seems that the VC environment is activated but DISTUTILS_USE_SDK is not set.'
                    'This may lead to multiple activations of the VC env.'
                    'Please set `DISTUTILS_USE_SDK=1` and try again.')
             raise UserWarning(msg)
-        return compiler, version
 
-    def _check_cuda_version(self, compiler_name: str, compiler_version: TorchVersion):
+    def _check_cuda_version(self):
         if CUDA_HOME:
             nvcc = os.path.join(CUDA_HOME, 'bin', 'nvcc')
             cuda_version_str = subprocess.check_output([nvcc, '--version']).strip().decode(*SUBPROCESS_DECODE_ARGS)
@@ -809,33 +786,7 @@ class BuildExtension(build_ext, object):
                     if getattr(cuda_ver, "major", float("nan")) != getattr(torch_cuda_version, "major", float("nan")):
                         raise RuntimeError(CUDA_MISMATCH_MESSAGE.format(cuda_str_version, torch.version.cuda))
                     warnings.warn(CUDA_MISMATCH_WARN.format(cuda_str_version, torch.version.cuda))
-                if (sys.platform.startswith('linux') and
-                        os.environ.get('TORCH_DONT_CHECK_COMPILER_ABI') not in ['ON', '1', 'YES', 'TRUE', 'Y'] and
-                        _is_binary_build()):
-                    cuda_compiler_bounds = CUDA_CLANG_VERSIONS if compiler_name.startswith('clang') else CUDA_GCC_VERSIONS
 
-                    if cuda_str_version not in cuda_compiler_bounds:
-                        warnings.warn(f'There are no {compiler_name} version bounds defined for CUDA version {cuda_str_version}')
-                    else:
-                        min_compiler_version, max_compiler_version = cuda_compiler_bounds[cuda_str_version]
-                        min_compiler_version_str = '.'.join(map(str, min_compiler_version))
-                        max_compiler_version_str = '.'.join(map(str, max_compiler_version))
-
-                        version_bound_str = f'>={min_compiler_version_str}'
-                        version_bound_str = f'{version_bound_str}, <={max_compiler_version_str}'
-
-                        if compiler_version < TorchVersion(min_compiler_version_str):
-                            raise RuntimeError(
-                                f'The current installed version of {compiler_name} ({compiler_version}) is less '
-                                f'than the minimum required version by CUDA {cuda_str_version} ({min_compiler_version_str}). '
-                                f'Please make sure to use an adequate version of {compiler_name} ({version_bound_str}).'
-                            )
-                        elif compiler_version > TorchVersion(max_compiler_version_str):
-                            raise RuntimeError(
-                                f'The current installed version of {compiler_name} ({compiler_version}) is greater '
-                                f'than the maximum required version by CUDA {cuda_str_version} ({max_compiler_version_str}). '
-                                f'Please make sure to use an adequate version of {compiler_name} ({version_bound_str}).'
-                            )
         else:
             raise RuntimeError(CUDA_NOT_FOUND_MESSAGE)
 
@@ -1446,7 +1397,7 @@ def _write_ninja_file_and_compile_objects(
         compiler = os.environ.get('CXX', 'cl')
     else:
         compiler = os.environ.get('CXX', 'c++')
-    get_compiler_abi_compatibility_and_version(compiler)
+    check_compiler_abi_compatibility(compiler)
     if with_cuda is None:
         with_cuda = any(map(_is_cuda_file, sources))
     build_file_path = os.path.join(build_directory, 'build.ninja')
@@ -1489,7 +1440,7 @@ def _write_ninja_file_and_build_library(
         compiler = os.environ.get('CXX', 'cl')
     else:
         compiler = os.environ.get('CXX', 'c++')
-    get_compiler_abi_compatibility_and_version(compiler)
+    check_compiler_abi_compatibility(compiler)
     if with_cuda is None:
         with_cuda = any(map(_is_cuda_file, sources))
     extra_ldflags = _prepare_ldflags(

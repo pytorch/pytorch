@@ -6,6 +6,8 @@ from typing import NoReturn, Callable, Sequence, List, Union, Optional, Type, Tu
 
 import torch
 
+from ._core import _unravel_index
+
 try:
     import numpy as np
 
@@ -215,18 +217,6 @@ def make_tensor_mismatch_msg(
             as callable in which case it will be called by the default value to create the description at runtime.
             Defaults to "Tensor-likes".
     """
-    def unravel_flat_index(flat_index: int) -> Tuple[int, ...]:
-        if not mismatches.shape:
-            return ()
-
-        inverse_index = []
-        for size in mismatches.shape[::-1]:
-            div, mod = divmod(flat_index, size)
-            flat_index = div
-            inverse_index.append(mod)
-
-        return tuple(inverse_index[::-1])
-
     number_of_elements = mismatches.numel()
     total_mismatches = torch.sum(mismatches).item()
     extra = (
@@ -252,10 +242,10 @@ def make_tensor_mismatch_msg(
         identifier=identifier,
         extra=extra,
         abs_diff=max_abs_diff.item(),
-        abs_diff_idx=unravel_flat_index(int(max_abs_diff_flat_idx)),
+        abs_diff_idx=_unravel_index(max_abs_diff_flat_idx.item(), mismatches.shape),
         atol=atol,
         rel_diff=max_rel_diff.item(),
-        rel_diff_idx=unravel_flat_index(int(max_rel_diff_flat_idx)),
+        rel_diff_idx=_unravel_index(max_rel_diff_flat_idx.item(), mismatches.shape),
         rtol=rtol,
     )
 
