@@ -59,7 +59,6 @@ try:
 except ImportError:
     _GLOO_AVAILABLE = False
 
-
 logger = logging.getLogger(__name__)
 
 PG_WRAPPER_STORE_PREFIX = "pg_wrapper"

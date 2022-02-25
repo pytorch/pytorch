@@ -1200,8 +1200,8 @@ namespace {
 
 // Check validity of tensor
 void check_gpu_single_tensor(const at::Tensor& tensor) {
-  if (!tensor.is_cuda() || tensor.is_sparse()) {
-    TORCH_CHECK(false, "Tensors must be CUDA and dense");
+  if (((tensor.device().type() != at::kLazy) && !tensor.is_cuda()) || tensor.is_sparse()) {
+    TORCH_CHECK(false, "Tensors must be CUDA/Lazy and dense");
   }
   if (!tensor.is_contiguous()) {
     TORCH_CHECK(false, "Tensors must be contiguous");
@@ -1227,8 +1227,8 @@ void check_gpu_tensors_different_devices(const std::vector<at::Tensor>& tensors)
   usedDevices.reserve(tensors.size());
 
   for (const auto& t : tensors) {
-    if (!t.is_cuda() || t.is_sparse()) {
-      TORCH_CHECK(false, "Tensors must be CUDA and dense");
+    if (((t.device().type() != at::kLazy) && !t.is_cuda()) || t.is_sparse()) {
+      TORCH_CHECK(false, "Tensors must be CUDA/Lazy and dense");
     }
     if (t.scalar_type() != first.scalar_type()) {
       TORCH_CHECK(false, "Tensors must have identical type");
@@ -1239,7 +1239,7 @@ void check_gpu_tensors_different_devices(const std::vector<at::Tensor>& tensors)
     if (t.strides() != first.strides()) {
       TORCH_CHECK(false, "Tensors must have identical strides");
     }
-    if (!t.is_non_overlapping_and_dense()) {
+    if ((t.device().type() != at::kLazy) && !t.is_non_overlapping_and_dense()) {
       TORCH_CHECK(false, "Tensors must be non-overlapping and dense");
     }
     const auto inserted = usedDevices.insert(t.get_device()).second;
@@ -1378,7 +1378,6 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::collective(
     PostProcess post,
     OpType opType,
     const char* profilingTitle) {
-
   errorIfCapturingNonCapturableNCCL();
 
   // Bump collective counter
@@ -1599,6 +1598,22 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::pointToPoint(
   return work;
 }
 
+std::vector<at::Tensor> copyCuda(const std::vector<at::Tensor>& inputs) {
+  std::vector<at::Tensor> cudaInputs;
+  cudaInputs.reserve(inputs.size());
+  for (auto& input : inputs) {
+    cudaInputs.push_back(input.to(c10::Device(c10::kCUDA, input.device().index())));
+  }
+
+  return cudaInputs;
+}
+
+void copyLazy(const std::vector<at::Tensor>& lazyInputs, const std::vector<at::Tensor>& cudaInputs) {
+  for (ssize_t i = 0; i < lazyInputs.size(); i++) {
+    lazyInputs[i].copy_(cudaInputs[i]);
+  }
+}
+
 template <typename Fn>
 c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::collective(
     std::vector<at::Tensor>& inputs,
@@ -1606,6 +1621,34 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::collective(
     Fn fn,
     OpType opType,
     const char* profilingTitle) {
+  // A hack to copy lazy to cuda to bypass following checks.
+  if (inputs.front().device().type() == at::kLazy) {
+    // We currently oly support broadcast and allReduce, where
+    // the python API is unary.
+    TORCH_INTERNAL_ASSERT(inputs.data() == outputs.data());
+
+    auto cudaInputs = copyCuda(inputs);
+
+    auto work = collective(
+        cudaInputs,
+        cudaInputs,
+        fn,
+        [](std::vector<at::cuda::CUDAStream>&) {},
+        [](std::vector<at::cuda::CUDAStream>&) {},
+        opType,
+        profilingTitle);
+    // FIXME: No async works or whatever.
+    work->wait();
+
+    // Ops like broadcast is unary in NCCL, and output doesn't matter.
+    // Since inputs == outputs, we just copy back to inputs.
+    copyLazy(inputs, cudaInputs);
+
+    // Right now, we never use async features so work doesn't matter.
+    // Otherwise we might want to update work as well.
+    return work;
+  }
+
   return collective(
       inputs,
       outputs,
