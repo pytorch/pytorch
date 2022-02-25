@@ -4371,7 +4371,7 @@ def _pad(input: Tensor, pad: List[int], mode: str = "constant", value: float = 0
             elif mode == "replicate":
                 return torch._C._nn.replication_pad1d(input, pad)
             elif mode == "circular":
-                return _pad_circular(input, pad)
+                return torch._C._nn._pad_circular(input, pad)
             else:
                 raise NotImplementedError
 
@@ -4381,7 +4381,7 @@ def _pad(input: Tensor, pad: List[int], mode: str = "constant", value: float = 0
             elif mode == "replicate":
                 return torch._C._nn.replication_pad2d(input, pad)
             elif mode == "circular":
-                return _pad_circular(input, pad)
+                return torch._C._nn._pad_circular(input, pad)
             else:
                 raise NotImplementedError
 
@@ -4391,7 +4391,7 @@ def _pad(input: Tensor, pad: List[int], mode: str = "constant", value: float = 0
             elif mode == "replicate":
                 return torch._C._nn.replication_pad3d(input, pad)
             elif mode == "circular":
-                return _pad_circular(input, pad)
+                return torch._C._nn._pad_circular(input, pad)
             else:
                 raise NotImplementedError
         else:
