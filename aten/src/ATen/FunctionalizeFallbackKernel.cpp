@@ -16,19 +16,23 @@ namespace {
       const auto& ivalue = arguments[idx];
       if (ivalue.isTensor()) {
         auto t = ivalue.toTensor();
-        at::functionalization::impl::sync(t);
-        auto t_new = c10::IValue(at::functionalization::impl::from_functional_tensor(t));
-        (*stack)[arguments_begin + idx] = t_new;
+        if (at::functionalization::impl::isFunctionalTensor(t)) {
+          at::functionalization::impl::sync(t);
+          auto t_new = c10::IValue(at::functionalization::impl::from_functional_tensor(t));
+          (*stack)[arguments_begin + idx] = t_new;
+        }
       } else if (ivalue.isTensorList()) {
         auto tensors = ivalue.toTensorList();
-        at::functionalization::impl::sync(tensors);
-        auto t_new = c10::IValue(at::functionalization::impl::from_functional_tensor(tensors));
-        (*stack)[arguments_begin + idx] = t_new;
+        if (at::functionalization::impl::isFunctionalTensor(tensors)) {
+          at::functionalization::impl::sync(tensors);
+          auto t_new = c10::IValue(at::functionalization::impl::from_functional_tensor(tensors));
+          (*stack)[arguments_begin + idx] = t_new;
+        }
       }
     }
     {
       at::AutoDispatchSkipFunctionalize guard;
-      op.redispatchBoxed(dispatchKeySet & c10::after_func_keyset, stack);
+      op.callBoxed(stack);
     }
     const auto num_returns = schema.returns().size();
     const auto returns_begin = stack->size() - num_returns;
