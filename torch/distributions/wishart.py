@@ -282,10 +282,13 @@ class Wishart(ExponentialFamily):
         p = self._event_shape[-1]  # has singleton shape
 
         return (
-            self.precision_matrix,
-            nu,
+            - 0.5 * self.precision_matrix,
+            0.5 * (nu - p - 1),
         )
 
     def _log_normalizer(self, x, y):
         p = self._event_shape[-1]
-        return 0.5 * y * (- torch.linalg.slogdet(x).logabsdet + _log_2 * p) + torch.mvlgamma(0.5 * y, p=p)
+        return (
+            (y + 0.5 * (p + 1)) * (- torch.linalg.slogdet(-2 * x).logabsdet + _log_2 * p)
+            + torch.mvlgamma(y + 0.5 * (p + 1), p=p)
+        )
