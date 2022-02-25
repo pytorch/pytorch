@@ -29,7 +29,7 @@ from typing import List
 
 CUDA_MAJOR, CUDA_MINOR = 0, 0
 
-if RUN_CUDA:
+if RUN_CUDA and torch.version.cuda is not None:
     CUDA_MAJOR, CUDA_MINOR = (int(x) for x in torch.version.cuda.split('.'))
 
 os.environ['PYTORCH_NVFUSER_DISABLE_FALLBACK'] = '1'
