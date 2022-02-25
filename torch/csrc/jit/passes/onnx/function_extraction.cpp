@@ -11,7 +11,7 @@ using scope_list = std::vector<ScopePtr>;
 
 // Annotated attributes retrieved from module by inspecting module annotations.
 // These attributes are not used inside the subgraph of ONNX local function
-// because they are not created by PyTorch JIT tracking, but they may be used by
+// because they are not created by PyTorch JIT tracing, but they may be used by
 // consumers to determine whether or not to replace the function with a
 // particular fused kernel.
 static std::unordered_map<ScopePtr, Node*> scope_attr_map_;

@@ -307,9 +307,11 @@ def export(model, args, f, export_params=True, verbose=False, training=TrainingM
             Module variables will be exported as function attributes. There are two categories of function
             attributes.
 
-            1. Annotated attributes: class variables that are annotated will be exported as attributes.
+            1. Annotated attributes: class variables that have type annotations via
+            `PEP 526-style <https://www.python.org/dev/peps/pep-0526/#class-and-instance-variable-annotations>`_
+            will be exported as attributes.
             Annotated attributes are not used inside the subgraph of ONNX local function because
-            they are not created by PyTorch JIT tracking, but they may be used by consumers
+            they are not created by PyTorch JIT tracing, but they may be used by consumers
             to determine whether or not to replace the function with a particular fused kernel.
 
             2. Inferred attributes: variables that are used by operators inside the module. Attribute names
