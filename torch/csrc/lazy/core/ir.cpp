@@ -41,6 +41,11 @@ hash_t OpKind::hash() const {
   return StringHash(op.toQualString());
 }
 
+bool Node::enableDynamicShape() {
+  static bool enabled = std::getenv("LTC_ENABLE_DYNAMIC_SHAPES") != nullptr;
+  return enabled || FLAGS_ltc_enable_dynamic_shapes;
+}
+
 Node::Node(OpKind op, size_t num_outputs, hash_t node_hash, std::function<hash_t(bool)> dag_hash_fn)
     : op_(op),
       num_outputs_(num_outputs),

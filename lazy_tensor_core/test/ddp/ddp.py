@@ -10,12 +10,12 @@ from torch.nn.parallel import DistributedDataParallel as DDP
 import lazy_tensor_core
 lazy_tensor_core._LAZYC._ltc_init_ts_backend()
 import lazy_tensor_core.core.lazy_model as ltm
-import lazy_tensor_core.debug.metrics as metrics
+# import lazy_tensor_core.debug.metrics as metrics
 
 # from caffe2.python import workspace
 # workspace.GlobalInit(['caffe2', '--caffe2_log_level=-4'])
 
-from torch.distributed.algorithms.ddp_comm_hooks.debugging_hooks import noop_hook
+# from torch.distributed.algorithms.ddp_comm_hooks.debugging_hooks import noop_hook
 
 def setup(rank, world_size):
     os.environ['MASTER_ADDR'] = 'localhost'
