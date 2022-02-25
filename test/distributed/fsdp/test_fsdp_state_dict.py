@@ -108,10 +108,9 @@ class TestFSDPStateDict(FSDPTest):
             else:
                 state_dict = self._state_dict(model, state_dict_type)
                 self._load_state_dict(blank_model, state_dict_type, state_dict)
-            get_full_params(blank_model)
-            model = blank_model
-
-        return list(model.parameters())
+            return get_full_params(blank_model)
+        else:
+            return list(model.parameters())
 
     @skip_if_lt_x_gpu(2)
     @parametrize("state_dict_type", ["local_state_dict"])
