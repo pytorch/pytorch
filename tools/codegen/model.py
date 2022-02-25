@@ -48,66 +48,58 @@ class DispatchKey(Enum):
     Undefined = 0
     CatchAll = Undefined
 
-    Dense = auto()
+    CPU = auto()
+    CUDA = auto()
+    HIP = auto()
     FPGA = auto()
     ORT = auto()
+    XLA = auto()
+    Lazy = auto()
     Vulkan = auto()
     Metal = auto()
+    XPU = auto()
     MKLDNN = auto()
     OpenGL = auto()
     OpenCL = auto()
     IDEEP = auto()
-    Quantized = auto()
+    QuantizedCPU = auto()
+    QuantizedCUDA = auto()
+    QuantizedXPU = auto()
     CustomRNGKeyId = auto()
     MkldnnCPU = auto()
-    Sparse = auto()
+    SparseCPU = auto()
+    SparseCUDA = auto()
     SparseCsrCPU = auto()
     SparseCsrCUDA = auto()
+    SparseHIP = auto()
+    SparseXPU = auto()
+    NestedTensor = auto()
+    PrivateUse1 = auto()
+    PrivateUse2 = auto()
+    PrivateUse3 = auto()
+    EndOfBackendKeys = PrivateUse3
 
     ZeroTensor = auto()
     Meta = auto()
     BackendSelect = auto()
     Named = auto()
     AutogradOther = auto()
-    AutogradFunctionality = auto()
+    AutogradCPU = auto()
+    AutogradCUDA = auto()
+    AutogradXLA = auto()
+    AutogradLazy = auto()
     AutogradNestedTensor = auto()
+    AutogradXPU = auto()
+    AutogradPrivateUse1 = auto()
+    AutogradPrivateUse2 = auto()
+    AutogradPrivateUse3 = auto()
     Tracer = auto()
     Autocast = auto()
     Batched = auto()
     VmapMode = auto()
     TESTING_ONLY_GenericWrapper = auto()
     TESTING_ONLY_GenericMode = auto()
-    EndOfFunctionalityKeys = TESTING_ONLY_GenericMode
-
-    CPU = auto()
-    CUDA = auto()
-    HIP = auto()
-    XLA = auto()
-    Lazy = auto()
-    XPU = auto()
-    NestedTensor = auto()
-    PrivateUse1 = auto()
-    PrivateUse2 = auto()
-    PrivateUse3 = auto()
-
-    QuantizedCPU = auto()
-    QuantizedCUDA = auto()
-    QuantizedXPU = auto()
-
-    SparseCPU = auto()
-    SparseCUDA = auto()
-    SparseHIP = auto()
-    SparseXPU = auto()
-
-    AutogradCPU = auto()
-    AutogradCUDA = auto()
-    AutogradXLA = auto()
-    AutogradLazy = auto()
-    AutogradXPU = auto()
-    AutogradPrivateUse1 = auto()
-    AutogradPrivateUse2 = auto()
-    AutogradPrivateUse3 = auto()
-
+    NumDispatchKeys = auto()
     Autograd = auto()
     CompositeImplicitAutograd = auto()
     CompositeExplicitAutograd = auto()
@@ -133,6 +125,25 @@ class DispatchKey(Enum):
         raise AssertionError(f'unknown dispatch key {value}')
 
 STRUCTURED_DISPATCH_KEYS = {DispatchKey.CUDA, DispatchKey.CPU}
+
+# Set of supported dispatch keys
+dispatch_keys = [
+    DispatchKey.CPU,
+    DispatchKey.SparseCPU,
+    DispatchKey.SparseCsrCPU,
+    DispatchKey.MkldnnCPU,
+    DispatchKey.CUDA,
+    DispatchKey.SparseCUDA,
+    DispatchKey.SparseCsrCUDA,
+    DispatchKey.QuantizedCPU,
+    DispatchKey.QuantizedCUDA,
+    DispatchKey.CompositeImplicitAutograd,
+    DispatchKey.CompositeExplicitAutograd,
+    # Meta is a magic key: it is automatically generated for structured
+    # kernels
+    DispatchKey.Meta,
+    DispatchKey.ZeroTensor,
+]
 
 # Dispatch keys that "support all backends".  These codegen slightly differently
 # then backend specific keys.
@@ -363,20 +374,29 @@ class NativeFunction:
 
         raw_dispatch = e.pop('dispatch', None)
         assert raw_dispatch is None or isinstance(raw_dispatch, dict), e
-        dispatch: Dict[DispatchKey, str] = {}
+        dispatch: Dict[DispatchKey, BackendMetadata] = {}
         if raw_dispatch is not None:
             assert not manual_kernel_registration, \
                 "cannot specify both manual_kernel_registration and dispatch; with " \
                 "manual registration, dispatch has no effect!"
+            redundant_composite_implicit_autograd = False
             for ks, v in raw_dispatch.items():
                 if ks == '__line__':
                     continue  # not worth tracking line numbers for dispatch entries
                 assert isinstance(ks, str), e
-                assert isinstance(v, str), e
                 for k in ks.split(","):
                     dispatch_key = DispatchKey.parse(k.strip())
-                    dispatch[dispatch_key] = v
-            assert dispatch != {DispatchKey.CompositeImplicitAutograd: cpp.name(func)}, \
+                    assert dispatch_key in dispatch_keys, f"Dispatch key {dispatch_key} of kernel {v} " \
+                        "is not a supported dispatch key."
+                    # Why is 'structured' included? External backends (e.g.
+                    # XLA) opt into which ops are structured independently
+                    # of which in-tree ops are structured
+                    dispatch[dispatch_key] = BackendMetadata(
+                        v, structured=structured and is_structured_dispatch_key(dispatch_key))
+                    if dispatch_key is DispatchKey.CompositeImplicitAutograd and v == cpp.name(func):
+                        redundant_composite_implicit_autograd = True
+
+            assert not (len(dispatch) == 1 and redundant_composite_implicit_autograd), \
                 "unnecessary dispatch table for this function; just delete the dispatch " \
                 "key entirely"
             # if a function is a structured delegate, deleting the dispatch
@@ -386,7 +406,7 @@ class NativeFunction:
                 f"but got {dispatch[DispatchKey.CompositeImplicitAutograd]}.  Rename your implementation to the expected " \
                 "name, then delete the dispatch table"
         elif not structured and structured_delegate is None:
-            dispatch[DispatchKey.CompositeImplicitAutograd] = cpp.name(func)
+            dispatch[DispatchKey.CompositeImplicitAutograd] = BackendMetadata(cpp.name(func), structured=False)
 
         assert not (DispatchKey.CompositeExplicitAutograd in dispatch and DispatchKey.CompositeImplicitAutograd in dispatch), \
             "cannot specify both CompositeExplicitAutograd and CompositeImplicitAutograd on a single kernel; each " \
@@ -402,12 +422,11 @@ class NativeFunction:
         has_composite_implicit_autograd_kernel = DispatchKey.CompositeImplicitAutograd in dispatch.keys()
         has_composite_explicit_autograd_kernel = DispatchKey.CompositeExplicitAutograd in dispatch.keys()
 
-        # BackendMetadata is used to store any information about a NativeFunction that is backend dependent.
-        # The most obvious information is the kernel name, which usually contains the name of the backend in it for cpu/cuda.
-        # Why is 'structured' included? External backends (e.g. XLA) opt into which ops are structured
-        # independently of which in-tree ops are structured
-        backend_metadata = {k: {func.name: BackendMetadata(
-            kernel=v, structured=structured and is_structured_dispatch_key(k))} for k, v in dispatch.items()}
+        # We aren't going to store dispatch metadata inline in NativeFunctions;
+        # instead it is separately indexed by backend (so other backends can
+        # add more dispatch entries after the fact).  Reindex the individual
+        # metadata by OperatorName!
+        backend_metadata = {k: {func.name: v} for k, v in dispatch.items()}
 
         # don't care if it exists or not; make it easier to use this function
         # with other yaml parsers that aren't setting __line__ in the dict
