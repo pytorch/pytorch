@@ -273,7 +273,7 @@ class TestSummonFullParams(FSDPTest):
         )
         local_model = DeterministicModel(wrap_fsdp=False)
 
-        with model._summon_full_params(recurse=True):
+        with model.summon_full_params(recurse=True):
             # Below sleep causes failures without stream synchronization in
             # summon_full_params fix.
             torch.cuda._sleep(1000000)
