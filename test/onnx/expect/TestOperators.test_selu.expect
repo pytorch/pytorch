@@ -8,7 +8,7 @@ graph {
     name: "Selu_0"
     op_type: "Selu"
   }
-  name: "torch_jit"
+  name: "torch-jit-export"
   input {
     name: "input"
     type {

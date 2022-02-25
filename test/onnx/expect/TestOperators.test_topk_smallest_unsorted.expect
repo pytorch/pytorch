@@ -46,7 +46,7 @@ graph {
       type: INT
     }
   }
-  name: "torch_jit"
+  name: "torch-jit-export"
   input {
     name: "onnx::TopK_0"
     type {

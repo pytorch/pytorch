@@ -27,7 +27,6 @@
 #include <ATen/ops/_sparse_sum.h>
 #include <ATen/ops/_sparse_sum_backward_native.h>
 #include <ATen/ops/_sparse_sum_native.h>
-#include <ATen/ops/_sparse_sparse_matmul.h>
 #include <ATen/ops/add.h>
 #include <ATen/ops/add_native.h>
 #include <ATen/ops/addmm.h>
@@ -970,14 +969,11 @@ Tensor _sparse_addmm(
 }
 
 Tensor _sparse_mm(
-  const Tensor& mat1,
-  const Tensor& mat2
+  const SparseTensor& sparse,
+  const Tensor& dense
 ) {
-  if (mat1.is_sparse() && mat2.is_sparse()) {
-    return at::_sparse_sparse_matmul(mat1, mat2);
-  }
-  Tensor t = at::zeros({mat1.size(-2), mat2.size(-1)}, mat2.options());
-  return at::_sparse_addmm(t, mat1, mat2, 0, 1);
+  Tensor t = at::zeros({}, dense.options());
+  return at::_sparse_addmm(t, sparse, dense, 0, 1);  // redispatch!
 }
 
 // NB: Despite its suggestive name, this actually only exists so that
@@ -1496,14 +1492,11 @@ scalar_t binary_search_strided_rightmost(scalar_t search_val, TensorAccessor<sca
 
   int64_t left_ind = 0;
   int64_t right_ind = length - 1;
-  // This value should be overwritten in the loop so we use
-  // a destructive initial value to ensure disaster if that
-  // turns out not to be the case.
-  int64_t mid_ind = std::numeric_limits<int64_t>::max();
+  int64_t mid_ind; // NOLINT(cppcoreguidelines-init-variables)
   bool done_searching = false;
 
   while (!done_searching) {
-    mid_ind = left_ind + (right_ind - left_ind) / 2;
+    mid_ind = (left_ind+right_ind) >> 1;
     scalar_t mid_val = sorted_arr_accessor[sorted_arr_begin_idx + mid_ind];
 
     if (mid_val > search_val) {

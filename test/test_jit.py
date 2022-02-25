@@ -1917,8 +1917,8 @@ graph(%Ra, %Rb):
         def sublist_format(x, y):
             return torch.einsum(x, [0], y, [1], [0, 1])
 
-        x = make_tensor((5,), dtype=torch.float32, device="cpu")
-        y = make_tensor((10,), dtype=torch.float32, device="cpu")
+        x = make_tensor((5,), 'cpu', torch.float32)
+        y = make_tensor((10,), 'cpu', torch.float32)
 
         for fn in [equation_format, equation_format_varargs, sublist_format]:
             check(fn, torch.jit.script(fn), x, y)
@@ -15819,13 +15819,6 @@ dedent """
                 self.b = b  # type: int
 
         torch.jit.script(M(2, 3))
-
-    def test_input_keyword_in_schema(self):
-        def f(x):
-            return torch.ceil(input=x)
-
-        inp = torch.randn(10)
-        self.checkScript(f, (inp, ))
 
     def test_module_method_reassignment(self):
         class Foo(torch.nn.Module):

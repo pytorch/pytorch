@@ -12,7 +12,6 @@
 
 #include <c10d/Types.hpp>
 #include <c10d/Utils.hpp>
-#include <c10d/debug.h>
 #include <c10d/sequence_num.hpp>
 
 // *************************************************************************
@@ -433,7 +432,7 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
   c10::optional<c10d::SequenceNum> sequenceNum_ = c10::nullopt;
   // Debug level setting. It is parsed once when ProcessGroup is constructed and
   // remains the same across use of this process group.
-  DebugLevel dist_debug_level_;
+  DistributedDebugLevel dist_debug_level_;
 };
 
 } // namespace c10d

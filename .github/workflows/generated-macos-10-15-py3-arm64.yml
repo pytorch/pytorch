@@ -7,7 +7,6 @@ on:
   push:
     branches:
       - master
-      - main
       - release/*
     tags:
       - 'ciflow/all/*'
