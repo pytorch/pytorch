@@ -970,7 +970,7 @@ run_ops = set()
 
 class TestDecompositionOpInfo(TestCase):
 
-    @unittest.skip("dispatcher bug")
+    # @unittest.skip("dispatcher bug")
     # @unittest.skipIf(IS_FBCODE, "__torch_dispatch__ is buggy")
     @ops(
         functorch_lagging_op_db + additional_op_db,
@@ -1022,21 +1022,22 @@ class TestDecompositionOpInfo(TestCase):
                        dtype_precisions.get(dtype1, (0, 0))[1])
             return rtol, atol
 
-        def op_assert_ref(op, orig, decomp, ref):
-            if orig.numel() == 0:
+        def op_assert_ref(op, orig, decomp, ref, arg_string):
+            if orig.numel() == 0 or decomp.numel() == 0:
+                assert(orig.numel() == decomp.numel())
                 return
             orig_diff = (orig - ref).abs().max()
             decomp_diff = (decomp - ref).abs().max()
             atol = 1e-10
             if decomp_diff > orig_diff + atol:
                 msg = (f"Difference from float64 is larger with decomposition {op.__name__}" +
-                       f" than original. Original max diff: {orig_diff}, Decomp max diff: {decomp_diff}")
+                       f" than original. Original max diff: {orig_diff}, Decomp max diff: {decomp_diff}\n")
+                msg += arg_string
                 raise RuntimeError(msg)
 
-        def op_assert_equal(op, a, b):
+        def op_assert_equal(op, a, b, arg_string):
             assert a.dtype == b.dtype
             # Before adding an entry to this table, make sure your decomposition is right :)
-            print(a, b)
             tol_table = {
                 # Due to strange epsilon behaviors, see https://github.com/pytorch/pytorch/issues/73161
                 (torch.float32, aten.native_layer_norm): (1e-3, 1e-3),
@@ -1048,7 +1049,8 @@ class TestDecompositionOpInfo(TestCase):
             if not torch.allclose(a, b, rtol=rtol, atol=atol):
                 atol_diff = (a - b).abs().max()
                 rtol_diff = ((a - b).abs()/b.abs()).nan_to_num(0).max()
-                msg = f"{op.__name__} decomposition failed, max rel: {rtol_diff}, max abs: {atol_diff}"
+                msg = f"{op.__name__} decomposition failed, max rel: {rtol_diff}, max abs: {atol_diff}\n"
+                msg += arg_string
                 raise RuntimeError(msg)
 
         # We check the correctness of each decomposition right after running it.
@@ -1104,12 +1106,17 @@ class TestDecompositionOpInfo(TestCase):
                         aten._softmax_backward_data,
                         aten._log_softmax_backward_data,
                     ])
+                    arg_string = f"args = {tree_map(unwrap_tensor, args)}\n"
+                    arg_string += f"kwargs = {tree_map(unwrap_tensor, kwargs)}"
+
                     decomposition = decomposition_table[func]
                     global run_decompositions
                     run_decompositions.add(func)
 
+                    DO_RELATIVE_CHECK = (TEST_DTYPE in [torch.float16, torch.bfloat16])
+
                     def upcast_tensor(x, dtype=torch.float32):
-                        if isinstance(x, Tensor) and (x.dtype == torch.bfloat16 or x.dtype == torch.float16):
+                        if isinstance(x, Tensor) and x.dtype.is_floating_point:
                             x = x.to(dtype=dtype)
                         FLOAT16_DTYPE = 5
                         BFLOAT16_DTYPE = 15
@@ -1119,26 +1126,27 @@ class TestDecompositionOpInfo(TestCase):
                         return x
 
                     def call_op(func, map_fn, *args, **kwargs):
-                        return tree_flatten(func(*tree_map(map_fn, args), **tree_map(map_fn, kwargs)))[0]
+                        args = tree_map(map_fn, args)
+                        kwargs = tree_map(map_fn, kwargs)
+                        return tree_flatten(func(*args, **kwargs))[0]
 
-                    # Theoretically, most PyTorch ops compute intermediates as fp32. But this breaks some ops...
-                    if TEST_DTYPE in [torch.float16, torch.bfloat16]:
+                    if DO_RELATIVE_CHECK:
                         decomp_out = call_op(decomposition, upcast_tensor, *args, **kwargs)
+                        real_out_double = call_op(func, lambda x: upcast_tensor(unwrap_tensor(x), dtype=torch.float64),
+                                                  *args, **kwargs)
                     else:
                         decomp_out = call_op(decomposition, lambda x: x, *args, **kwargs)
-
-                    real_out_double = call_op(func, lambda x: upcast_tensor(unwrap_tensor(x), dtype=torch.float64),
-                                              *args, **kwargs)
+                        real_out_double = decomp_out
 
                     real_out = call_op(func, unwrap_tensor, *args, **kwargs)
                     assert(len(real_out) == len(decomp_out))
                     for orig, decomp, ref in zip(real_out, decomp_out, real_out_double):
                         orig = orig.to(dtype=TEST_DTYPE)
                         decomp = decomp.to(dtype=TEST_DTYPE)
-                        if TEST_DTYPE in [torch.float16, torch.bfloat16]:
-                            op_assert_ref(func, orig, decomp, ref)
+                        if DO_RELATIVE_CHECK:
+                            op_assert_ref(func, orig, decomp, ref, arg_string)
                         else:
-                            op_assert_equal(func, orig, decomp)
+                            op_assert_equal(func, orig, decomp, arg_string)
 
                 real_out = func(*tree_map(unwrap_tensor, args), **tree_map(unwrap_tensor, kwargs))
 
