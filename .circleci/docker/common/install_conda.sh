@@ -21,7 +21,7 @@ if [ -n "$ANACONDA_PYTHON_VERSION" ]; then
       ;;
   esac
 
-  mkdir /opt/conda
+  mkdir -p /opt/conda
   chown jenkins:jenkins /opt/conda
 
   # Work around bug where devtoolset replaces sudo and breaks it.
