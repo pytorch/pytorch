@@ -491,61 +491,90 @@ bool isOptimizableContainerType(
   return is_supported_type && inputsCanRunOutOfPlace(n, node_has_out_variant);
 }
 
+static inline void listConstructSlowPath(
+    const ListType& list_type,
+    const size_t size,
+    ProcessedNode* p_node) {
+  c10::List<IValue> vals(list_type.getElementType());
+  vals.reserve(size);
+  for (const auto i : c10::irange(size)) {
+    vals.push_back(p_node->Input(i));
+  }
+  p_node->Output(0) = vals;
+}
+
 REGISTER_OPERATOR_FUNCTOR(
     prim::ListConstruct,
     prim_ListConstruct,
     [](Node* n) -> SROperator {
+      const bool can_optimize =
+          isOptimizableContainerType(n, FastMap<Node*, bool>());
       const auto& type = n->output()->type()->expectRef<ListType>();
-      bool can_optimize = isOptimizableContainerType(n, FastMap<Node*, bool>());
-      return [can_optimize, &type](ProcessedNode* p_node) {
+      const size_t size = n->inputs().size();
+      if (!can_optimize) {
+        return [&type, size](ProcessedNode* p_node) {
+          DCHECK(p_node->num_inputs() == size);
+          listConstructSlowPath(type, size, p_node);
+        };
+      }
+      return [&type, size](ProcessedNode* p_node) {
+        DCHECK(p_node->num_inputs() == size);
         const auto& out_l = p_node->Output(0);
-        if (!out_l.isNone() && can_optimize) {
+        if (!out_l.isNone()) {
           return;
         }
-        const size_t size = p_node->num_inputs();
-        c10::List<IValue> vals(type.getElementType());
-        vals.reserve(size);
-        for (const auto i : c10::irange(size)) {
-          vals.push_back(p_node->Input(i));
-        }
-        p_node->Output(0) = std::move(vals);
+        listConstructSlowPath(type, size, p_node);
       };
     });
+
+static inline void tupleConstructSlowPath(
+    const size_t size,
+    ProcessedNode* p_node) {
+  // prepare inputs
+  switch (size) {
+    case 1:
+      p_node->Output(0) = c10::ivalue::Tuple::create(p_node->Input(0));
+      break;
+    case 2:
+      p_node->Output(0) =
+          c10::ivalue::Tuple::create(p_node->Input(0), p_node->Input(1));
+      break;
+    case 3:
+      p_node->Output(0) = c10::ivalue::Tuple::create(
+          p_node->Input(0), p_node->Input(1), p_node->Input(2));
+      break;
+    default: {
+      std::vector<IValue> vals;
+      vals.reserve(size);
+      for (const auto i : c10::irange(size)) {
+        vals.push_back(p_node->Input(i));
+      }
+      p_node->Output(0) = c10::ivalue::Tuple::create(std::move(vals));
+      break;
+    }
+  }
+}
 
 REGISTER_OPERATOR_FUNCTOR(
     prim::TupleConstruct,
     prim_TupleConstruct,
     [](Node* n) -> SROperator {
-      bool can_optimize = isOptimizableContainerType(n, FastMap<Node*, bool>());
-      return [can_optimize](ProcessedNode* p_node) {
+      const bool can_optimize =
+          isOptimizableContainerType(n, FastMap<Node*, bool>());
+      const size_t size = n->inputs().size();
+      if (!can_optimize) {
+        return [size](ProcessedNode* p_node) {
+          DCHECK(p_node->num_inputs() == size);
+          tupleConstructSlowPath(size, p_node);
+        };
+      }
+      return [size](ProcessedNode* p_node) {
+        DCHECK(p_node->num_inputs() == size);
         const auto& out_l = p_node->Output(0);
-        if (!out_l.isNone() && can_optimize) {
+        if (!out_l.isNone()) {
           return;
         }
-        // prepare inputs
-        const size_t size = p_node->num_inputs();
-        switch (size) {
-          case 1:
-            p_node->Output(0) = c10::ivalue::Tuple::create(p_node->Input(0));
-            break;
-          case 2:
-            p_node->Output(0) =
-                c10::ivalue::Tuple::create(p_node->Input(0), p_node->Input(1));
-            break;
-          case 3:
-            p_node->Output(0) = c10::ivalue::Tuple::create(
-                p_node->Input(0), p_node->Input(1), p_node->Input(2));
-            break;
-          default: {
-            std::vector<IValue> vals;
-            vals.reserve(size);
-            for (const auto i : c10::irange(size)) {
-              vals.push_back(p_node->Input(i));
-            }
-            p_node->Output(0) = c10::ivalue::Tuple::create(std::move(vals));
-            break;
-          }
-        }
+        tupleConstructSlowPath(size, p_node);
       };
     });
 
