@@ -69,11 +69,11 @@ struct CollectiveFingerPrint {
     // Create output tensor data structure to pass into allgather.
     std::vector<std::vector<at::Tensor>> output_tensors;
     output_tensors.reserve(tensors_to_verify.size());
-    for (auto& tensor_shape : tensors_to_verify) {
+    for (const auto& tensor_shape : tensors_to_verify) {
       std::vector<at::Tensor> outputs;
       outputs.reserve(pg->getSize());
       for (const auto i : c10::irange(pg->getSize())) {
-        (void)i; //Suppress unused variable warning
+        (void)i;  // Suppress unused variable warning
         outputs.emplace_back(at::zeros_like(tensor_shape));
       }
       output_tensors.emplace_back(outputs);
@@ -143,12 +143,12 @@ std::ostream& operator<<(
     std::vector<std::string> dtype_strs;
     std::vector<std::string> device_type_strs;
     for (const auto& tensor_dtype : collective_fingerprint.tensor_dtypes_) {
-      dtype_strs.push_back(
+      dtype_strs.emplace_back(
           c10::toString(static_cast<at::ScalarType>(tensor_dtype)));
     }
     for (const auto& tensor_device_type :
          collective_fingerprint.tensor_device_types_) {
-      device_type_strs.push_back(
+      device_type_strs.emplace_back(
           c10::toString(static_cast<at::DeviceType>(tensor_device_type)));
     }
 
