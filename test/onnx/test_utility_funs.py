@@ -819,7 +819,8 @@ class TestUtilityFuns_opset9(_BaseTestCase):
 
         x = torch.randn(2, 3)
         f = io.BytesIO()
-        torch.onnx.export(M(3), (x, ), f, export_modules_as_functions=True,
+        model = M(3)
+        torch.onnx.export(model, (x, ), f, export_modules_as_functions=True,
                           opset_version=self.opset_version)
 
         onnx_model = onnx.load(io.BytesIO(f.getvalue()))
@@ -831,12 +832,13 @@ class TestUtilityFuns_opset9(_BaseTestCase):
 
         from onnx import helper
         m_node = [n for n in onnx_model.graph.node if n.op_type == "M"]
-        self.assertEqual(m_node[0].attribute[0], helper.make_attribute("num_layers", 3))
+        self.assertEqual(m_node[0].attribute[0],
+                         helper.make_attribute("num_layers", model.num_layers))
 
         ln_nodes = [n for n in m_funcs[0].node if n.op_type == "LayerNorm"]
         expected_ln_attrs = [
-            helper.make_attribute("elementwise_affine", 1),
-            helper.make_attribute("eps", 1e-4)
+            helper.make_attribute("elementwise_affine", model.lns[0].elementwise_affine),
+            helper.make_attribute("eps", model.lns[0].eps)
         ]
         for ln_node in ln_nodes:
             self.assertIn(ln_node.attribute[0], expected_ln_attrs)

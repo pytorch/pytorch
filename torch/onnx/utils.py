@@ -650,8 +650,27 @@ def _setup_trace_module_map(model, export_modules_as_functions):
         return trace_module_map
 
     def __register_attribute_hook():
-        _register_module_forward_hook(model, _track_module_attributes_forward_hook)
-        _register_module_forward_pre_hook(model, _track_module_attributes_forward_pre_hook)
+        attr_name = "_onnx_attrs"
+
+        def _track_module_attributes_forward_pre_hook(module, input):
+            setattr(module, attr_name, _get_module_attributes(module))
+
+        def _track_module_attributes_forward_hook(module, input, output):
+            tracing_state = torch._C._get_tracing_state()
+            if not tracing_state:
+                return
+
+            graph = tracing_state.graph()
+            onnx_attrs = {}
+            if hasattr(module, attr_name):
+                onnx_attrs = getattr(module, attr_name)
+                delattr(module, attr_name)
+
+            torch._C._jit_pass_onnx_track_scope_attributes(graph, onnx_attrs)
+
+        for m in model.modules():
+            m.register_forward_hook(_track_module_attributes_forward_hook)
+            m.register_forward_pre_hook(_track_module_attributes_forward_pre_hook)
 
     if isinstance(export_modules_as_functions, bool) and export_modules_as_functions:
         trace_module_map = __setup_trace_module_map()
@@ -683,38 +702,8 @@ def _get_module_attributes(module):
     from typing import get_type_hints
     annotations = get_type_hints(type(module))
     base_m_annotations = get_type_hints(torch.nn.Module)
-    if annotations and base_m_annotations:
-        [annotations.pop(k, None) for k in base_m_annotations.keys()]
-    else:
-        annotations = {}
-    return {k : getattr(module, k) for k in annotations.keys()}
-
-def _register_module_forward_hook(module, hook):
-    for child in module.children():
-        _register_module_forward_hook(child, hook)
-    module.register_forward_hook(hook)
-
-def _register_module_forward_pre_hook(module, hook):
-    for child in module.children():
-        _register_module_forward_pre_hook(child, hook)
-    module.register_forward_pre_hook(hook)
-
-def _track_module_attributes_forward_pre_hook(module, input):
-    module._onnx_attrs = _get_module_attributes(module)
-
-def _track_module_attributes_forward_hook(module, input, output):
-    tracing_state = torch._C._get_tracing_state()
-    if not tracing_state:
-        return
-
-    graph = tracing_state.graph()
-    attr_name = "_onnx_attrs"
-    onnx_attrs = {}
-    if hasattr(module, attr_name):
-        onnx_attrs = getattr(module, attr_name)
-        delattr(module, attr_name)
-
-    torch._C._jit_pass_onnx_track_scope_attributes(graph, onnx_attrs)
+    [annotations.pop(k, None) for k in base_m_annotations]
+    return {k : getattr(module, k) for k in annotations}
 
 def _export(model, args, f, export_params=True, verbose=False, training=None,
             input_names=None, output_names=None, operator_export_type=OperatorExportTypes.ONNX,
