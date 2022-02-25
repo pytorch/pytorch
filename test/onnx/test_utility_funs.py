@@ -11,7 +11,9 @@ from torch.onnx import (utils,
                         unregister_custom_op_symbolic)
 from torch.onnx.symbolic_helper import (_set_opset_version,
                                         _set_operator_export_type,
-                                        _set_onnx_shape_inference)
+                                        _set_onnx_shape_inference,
+                                        _unpack_list,
+                                        parse_args)
 import torch.utils.cpp_extension
 from test_pytorch_common import (skipIfUnsupportedMinOpsetVersion,
                                  skipIfUnsupportedMaxOpsetVersion)
@@ -1270,11 +1272,10 @@ class TestUtilityFuns_opset9(_BaseTestCase):
 
     def test_bad_symbolic_registration(self):
         _onnx_opset_version = 9
-        import torch.onnx.symbolic_helper as sym_help
 
         @parse_args("v")
         def cat(g, tensor_list, dim):
-            tensors = sym_help._unpack_list(tensor_list)
+            tensors = _unpack_list(tensor_list)
             return g.op("Concat", *tensors, axis_i=dim)
 
         register_custom_op_symbolic('::cat', cat, _onnx_opset_version)
